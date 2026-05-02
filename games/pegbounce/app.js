@@ -806,10 +806,9 @@
             const msg = 'Level ' + (S.levelIdx + 1) + ' — ' + lv.name + '\n' +
                         'Score: ' + S.score + '\n' +
                         'Balls used: ' + (S.ballsStart - S.balls);
-            document.getElementById('clear-stats').textContent = msg;
-            document.getElementById('clear-stars').textContent =
-                ['★','★','★'].slice(0, stars).join('') +
-                ['☆','☆','☆'].slice(0, 3 - stars).join('');
+            Hud.text('#clear-stats', msg);
+            Hud.text('#clear-stars', ['★','★','★'].slice(0, stars).join('') +
+                ['☆','☆','☆'].slice(0, 3 - stars).join(''));
             screens.showOverlay('clear');
             screens.updateSelection('clear');
         },
@@ -830,10 +829,9 @@
     screens.define('fail', {
         enter() {
             setScreenVisible(false);
-            document.getElementById('fail-stats').textContent =
-                'Cleared ' + (S.totalOrangeStart - Physics.countRemainingOrange(S.world)) +
+            Hud.text('#fail-stats', 'Cleared ' + (S.totalOrangeStart - Physics.countRemainingOrange(S.world)) +
                 ' of ' + S.totalOrangeStart + ' orange pegs.\n' +
-                'Score: ' + S.score;
+                'Score: ' + S.score);
             screens.showOverlay('fail');
             screens.updateSelection('fail');
         },

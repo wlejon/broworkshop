@@ -90,11 +90,11 @@ T.Screens = (function () {
     function updateHud() {
         var s = T.Game.getState();
         if (!s) return;
-        document.getElementById('hud-score').textContent  = String(s.score);
-        document.getElementById('hud-hi').textContent     = String(T.Storage.highScore);
-        document.getElementById('hud-level').textContent  = String(s.level);
-        document.getElementById('hud-landed').textContent = String(s.landings);
-        document.getElementById('hud-fuel').textContent   = String(Math.max(0, Math.round(s.lander.fuel)));
+        Hud.text('#hud-score', s.score);
+        Hud.text('#hud-hi', T.Storage.highScore);
+        Hud.text('#hud-level', s.level);
+        Hud.text('#hud-landed', s.landings);
+        Hud.text('#hud-fuel', Math.max(0, Math.round(s.lander.fuel)));
 
         var L = s.lander;
         var groundY = s.H * 0.78;
@@ -111,9 +111,9 @@ T.Screens = (function () {
             }
         }
         var alt = Math.max(0, Math.round(groundY - L.y));
-        document.getElementById('tel-alt').textContent  = String(alt);
-        document.getElementById('tel-hvel').textContent = L.vx.toFixed(2);
-        document.getElementById('tel-vvel').textContent = L.vy.toFixed(2);
+        Hud.text('#tel-alt', alt);
+        Hud.text('#tel-hvel', L.vx.toFixed(2));
+        Hud.text('#tel-vvel', L.vy.toFixed(2));
     }
 
     // ----- Lib screen manager -----
@@ -202,7 +202,7 @@ T.Screens = (function () {
                 'SCORE        ' + s.score,
                 'FUEL LEFT    ' + Math.round(s.lander.fuel),
             ];
-            document.getElementById('landed-stats').textContent = lines.join('\n');
+            Hud.text('#landed-stats', lines.join('\n'));
             S.showOverlay('landed'); S.updateSelection('landed');
         },
         keydown: function (key) {
@@ -230,8 +230,8 @@ T.Screens = (function () {
                 'HI        ' + T.Storage.highScore,
             ];
             if (isHi) { lines.push(''); lines.push('NEW HIGH SCORE!'); }
-            document.getElementById('gameover-stats').textContent = lines.join('\n');
-            document.getElementById('gameover-title').textContent = 'CRASHED';
+            Hud.text('#gameover-stats', lines.join('\n'));
+            Hud.text('#gameover-title', 'CRASHED');
             S.showOverlay('gameover'); S.updateSelection('gameover');
         },
         keydown: function (key) {

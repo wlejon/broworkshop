@@ -76,10 +76,10 @@ A.Screens = (function () {
     function updateHud() {
         var s = A.Game.getState();
         if (!s) return;
-        document.getElementById("hud-score").textContent = String(s.score);
-        document.getElementById("hud-hi").textContent    = String(A.Storage.highScore);
-        document.getElementById("hud-wave").textContent  = String(s.wave);
-        document.getElementById("hud-lives").textContent = String(s.lives);
+        Hud.text("#hud-score", s.score);
+        Hud.text("#hud-hi", A.Storage.highScore);
+        Hud.text("#hud-wave", s.wave);
+        Hud.text("#hud-lives", s.lives);
     }
 
     // ----- Lib screen manager -----
@@ -168,7 +168,7 @@ A.Screens = (function () {
                 "HI      " + A.Storage.highScore,
             ];
             if (isHi) { lines.push(""); lines.push("NEW HIGH SCORE!"); }
-            document.getElementById("gameover-stats").textContent = lines.join("\n");
+            Hud.text("#gameover-stats", lines.join("\n"));
             S.showOverlay('gameover'); S.updateSelection('gameover');
         },
         keydown: function (key) {

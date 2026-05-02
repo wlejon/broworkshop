@@ -222,8 +222,8 @@ E.setStatus = function(text) {
 };
 
 E.updateHud = function() {
-    document.getElementById("hud-round").textContent = String(this.round);
-    document.getElementById("hud-best").textContent = String(this.best);
+    Hud.text("#hud-round", this.round);
+    Hud.text("#hud-best", this.best);
 };
 
 E.startGame = function() {

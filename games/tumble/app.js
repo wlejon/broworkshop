@@ -904,14 +904,13 @@ function onLevelCompleted() {
                        : medal === 'silver' ? 'Silver — '
                        : medal === 'bronze' ? 'Bronze — '
                        : 'Complete — ') + level.name;
-    document.getElementById('complete-time').textContent = fmt(t);
+    Hud.text('#complete-time', fmt(t));
     const medalEl = document.getElementById('complete-medal');
     medalEl.textContent = medal === 'none' ? 'Complete' : medal.toUpperCase();
     medalEl.className = 'medal ' + (medal === 'none' ? '' : medal);
     const best = bestMap[level.id];
-    document.getElementById('complete-detail').textContent =
-        `Par: gold ${fmt(level.par.gold)} · silver ${fmt(level.par.silver)} · bronze ${fmt(level.par.bronze)}` +
-        `  —  Best ${fmt(best)}`;
+    Hud.text('#complete-detail', `Par: gold ${fmt(level.par.gold)} · silver ${fmt(level.par.silver)} · bronze ${fmt(level.par.bronze)}` +
+        `  —  Best ${fmt(best)}`);
     screens.switchTo('complete');
 }
 

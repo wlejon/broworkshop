@@ -61,10 +61,10 @@ function showHUD(on) {
 }
 
 function updateHUD() {
-    document.getElementById("hud-score").textContent = String(score);
-    document.getElementById("hud-high").textContent = String(P.Storage.highScore);
-    document.getElementById("hud-lives").textContent = String(lives);
-    document.getElementById("hud-level").textContent = String(level);
+    Hud.text("#hud-score", score);
+    Hud.text("#hud-high", P.Storage.highScore);
+    Hud.text("#hud-lives", lives);
+    Hud.text("#hud-level", level);
 }
 
 function showCenter(text, duration) {
@@ -140,7 +140,7 @@ function resumeGame() {
 function gameOver() {
     STATE = "gameover";
     showHUD(false);
-    var isNew = P.Storage.maybeSetHigh(score);
+    var isNew = P.Storage.maybeUpdate(score);
     P.Screens.setGameOverTitle("GAME OVER");
     P.Screens.setGameOverStats(score, isNew);
     P.Screens.switchTo("gameover");

@@ -1,27 +1,9 @@
 // audio.js — SFX layer over lib/audio (SFX). Original cues only — no samples.
 var N = N || {};
 
-function _noise(dur, vol, freq) {
-    var ctx = SFX.ctx();
-    if (!ctx) return;
-    try {
-        var id = ctx.createVoice();
-        ctx.setVoiceWaveform(id, "noise");
-        ctx.setVoiceFrequency(id, freq || 200);
-        ctx.setVoiceGain(id, (vol || 1.0) * 12.0);
-        ctx.setVoiceAttack(id, 0.003);
-        ctx.setVoiceDecay(id, dur * 0.7);
-        ctx.setVoiceSustain(id, 0);
-        ctx.setVoiceRelease(id, 0.05);
-        var bus = SFX.sfxBus();
-        if (bus !== -1) ctx.setVoiceBus(id, bus);
-        var t = ctx.currentTime;
-        ctx.startVoice(id, t);
-        ctx.stopVoice(id, t + dur);
-    } catch (e) {}
-}
-
 // Pitched sweep — rising or falling glide used for lock tone and enemy sweep.
+// Approximates a frequency slide via two crossfaded tones since SFX has no
+// per-voice automation; kept local because it's only used here.
 function _sweep(f0, f1, dur, wave, vol) {
     var ctx = SFX.ctx();
     if (!ctx) return;
@@ -38,8 +20,6 @@ function _sweep(f0, f1, dur, wave, vol) {
         if (bus !== -1) ctx.setVoiceBus(id, bus);
         var t = ctx.currentTime;
         ctx.startVoice(id, t);
-        // Linear frequency slide emulated via two stops (we lack automation hooks
-        // on SFX; approximate with a second tone crossfaded in).
         ctx.stopVoice(id, t + dur);
         var id2 = ctx.createVoice();
         ctx.setVoiceWaveform(id2, wave || "square");
@@ -63,17 +43,17 @@ N.Audio = {
     sfxEnemyLaser:  function() { _sweep(700, 350, 0.16, "square", 0.25); },
 
     // --- Hits ---
-    sfxEnemyHit:    function() { _noise(0.22, 0.7, 260); },
-    sfxEnemyBoom:   function() { _noise(0.45, 1.0, 140); },
-    sfxTowerBoom:   function() { _noise(0.55, 1.0, 100); },
+    sfxEnemyHit:    function() { SFX.noise(0.22, 0.7, 260); },
+    sfxEnemyBoom:   function() { SFX.noise(0.45, 1.0, 140); },
+    sfxTowerBoom:   function() { SFX.noise(0.55, 1.0, 100); },
     sfxShieldHit:   function() {
-        _noise(0.32, 1.0, 80);
+        SFX.noise(0.32, 1.0, 80);
         SFX.tone(180, 0.22, "sawtooth", 0.5);
     },
     sfxShipExplode: function() {
-        _noise(0.9, 1.0, 70);
-        setTimeout(function() { _noise(0.5, 0.8, 130); }, 140);
-        setTimeout(function() { _noise(0.3, 0.6, 200); }, 320);
+        SFX.noise(0.9, 1.0, 70);
+        setTimeout(function() { SFX.noise(0.5, 0.8, 130); }, 140);
+        setTimeout(function() { SFX.noise(0.3, 0.6, 200); }, 320);
     },
 
     // --- Pacing / UI ---

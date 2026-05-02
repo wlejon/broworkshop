@@ -555,11 +555,9 @@ function onGameOver(msg) {
     match.winner = msg;
     const winPlayer = msg.winnerId != null ? match.players.find(p => p.id === msg.winnerId) : null;
     if (winPlayer && winPlayer.id === net.myId) sfx.win();
-    document.getElementById('go-title').textContent =
-        msg.winnerId == null ? 'Draw' :
-        (msg.winnerId === net.myId ? 'Victory!' : 'Defeated');
-    document.getElementById('go-subtitle').textContent =
-        winPlayer ? (winPlayer.name + ' wins the match.') : 'All tanks destroyed.';
+    Hud.text('#go-title', msg.winnerId == null ? 'Draw' :
+        (msg.winnerId === net.myId ? 'Victory!' : 'Defeated'));
+    Hud.text('#go-subtitle', winPlayer ? (winPlayer.name + ' wins the match.') : 'All tanks destroyed.');
     screens.switchTo('gameover');
     Hud.hide('#hud');
 }

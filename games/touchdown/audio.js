@@ -13,7 +13,7 @@ T.Audio = {
         if (!ctx || this.thrustOn) return;
         try {
             var id = ctx.createVoice();
-            ctx.setVoiceWaveform(id, "noise");
+            ctx.setVoiceWaveform(id, "whitenoise");
             ctx.setVoiceFrequency(id, 300);
             ctx.setVoiceGain(id, 4.0);
             ctx.setVoiceAttack(id, 0.02);
@@ -36,29 +36,8 @@ T.Audio = {
     },
 
     sfxCrash: function() {
-        var ctx = SFX.ctx();
-        if (!ctx) return;
-        // Two-stage noise burst via SFX.tone won't work (tone is oscillator);
-        // emit noise directly since SFX doesn't expose a noise helper.
-        function noise(dur, vol, freq) {
-            try {
-                var id = ctx.createVoice();
-                ctx.setVoiceWaveform(id, "noise");
-                ctx.setVoiceFrequency(id, freq);
-                ctx.setVoiceGain(id, vol * 12);
-                ctx.setVoiceAttack(id, 0.003);
-                ctx.setVoiceDecay(id, dur * 0.7);
-                ctx.setVoiceSustain(id, 0);
-                ctx.setVoiceRelease(id, 0.05);
-                var bus = SFX.sfxBus();
-                if (bus !== -1) ctx.setVoiceBus(id, bus);
-                var t = ctx.currentTime;
-                ctx.startVoice(id, t);
-                ctx.stopVoice(id, t + dur);
-            } catch (e) {}
-        }
-        noise(0.7, 1.0, 70);
-        setTimeout(function() { noise(0.35, 0.7, 130); }, 110);
+        SFX.noise(0.7, 1.0, 70);
+        setTimeout(function() { SFX.noise(0.35, 0.7, 130); }, 110);
     },
     sfxLanded: function() {
         SFX.sequence([

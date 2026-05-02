@@ -67,10 +67,10 @@ N.Screens = (function () {
     function updateHud() {
         var s = N.Game.getState();
         if (!s) return;
-        document.getElementById('hud-score').textContent   = String(s.score);
-        document.getElementById('hud-hi').textContent      = String(N.Storage.highScore);
-        document.getElementById('hud-wave').textContent    = s.waveLabel;
-        document.getElementById('hud-shields').textContent = s.shieldBar;
+        Hud.text('#hud-score', s.score);
+        Hud.text('#hud-hi', N.Storage.highScore);
+        Hud.text('#hud-wave', s.waveLabel);
+        Hud.text('#hud-shields', s.shieldBar);
         var lock = document.getElementById('hud-lock');
         if (s.lockActive) { lock.textContent = '— LOCK —'; lock.classList.add('active'); }
         else lock.classList.remove('active');
@@ -163,7 +163,7 @@ N.Screens = (function () {
                 'HI       ' + N.Storage.highScore,
             ];
             if (isHi) { lines.push(''); lines.push('NEW HIGH SCORE!'); }
-            document.getElementById('gameover-stats').textContent = lines.join('\n');
+            Hud.text('#gameover-stats', lines.join('\n'));
             S.showOverlay('gameover'); S.updateSelection('gameover');
         },
         keydown: function (key) {
@@ -181,7 +181,7 @@ N.Screens = (function () {
             var s = N.Game.getState();
             var stats = 'CITADEL CAMPAIGN ' + (s ? s.loop : 1) + ' COMPLETE\n\n' +
                         'SCORE   ' + (s ? s.score : 0);
-            document.getElementById('victory-stats').textContent = stats;
+            Hud.text('#victory-stats', stats);
             S.showOverlay('victory'); S.updateSelection('victory');
         },
         keydown: function (key) {
