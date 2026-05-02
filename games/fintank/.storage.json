@@ -1,5 +1,0 @@
-{
-  "fintank:days:highscores": "[{\"day\":1,\"slot\":1,\"totalCoins\":5642}]",
-  "fintank:settings": "{\"sfxVol\":80,\"musicVol\":60,\"difficulty\":1,\"activeSlot\":1}",
-  "fintank:slot1": "{\"slot\":1,\"day\":2,\"coins\":4542,\"fish\":[],\"pets\":[\"bubbler\"],\"activePet\":\"bubbler\",\"pelletTier\":2,\"upgrades\":{\"cap\":1,\"filter\":1,\"light\":1},\"bestDay\":1,\"totalCoins\":5642}"
-}
