@@ -1,6 +1,6 @@
 # broworkshop
 
-apps for bro. 
+apps for [bro](https://github.com/wlejon/bro). 
 
 ## Adding an app
 
