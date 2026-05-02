@@ -27,7 +27,7 @@
         { "dir": "tools/mesh-viewer" },
         { "dir": "tools/scene-editor" },
         { "dir": "tools/artstation" },
-        { "dir": "ai/ai-arena" },
+        { "dir": "demos/ai-arena" },
         { "dir": "demos/terrain" },
         { "dir": "demos/spatial-audio" },
         { "dir": "demos/lighting-demo" },

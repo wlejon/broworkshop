@@ -1,0 +1,8 @@
+{
+    "title": "Bro Workshop",
+    "default_app": "launcher",
+    "lib": "lib",
+    "system": "system",
+    "width": 1100,
+    "height": 720
+}
