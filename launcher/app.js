@@ -195,7 +195,9 @@ function render() {
         const thumb = document.createElement('div');
         thumb.className = 'thumb';
         thumb.setAttribute('data-app', app.dir);
-        if (!fs.existsSync(app.thumbnailRel)) {
+        if (fs.existsSync(app.thumbnailRel)) {
+            thumb.style.backgroundImage = 'url(' + app.thumbnailRel + ')';
+        } else {
             thumb.textContent = 'no preview';
         }
 
