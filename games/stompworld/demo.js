@@ -84,7 +84,7 @@
         function loadCheckpoint() {
             try {
                 const fs = require('fs');
-                const bytes = fs.readFileSync('apps/stompworld/ckpt/best.bin');
+                const bytes = fs.readFileSync('ckpt/best.bin');
                 net.load(new Uint8Array(bytes));
                 weightsLoaded = true;
             } catch (_) {
@@ -287,7 +287,7 @@
             ctx.fillText('No checkpoint found', VIEW_W / 2, VIEW_H / 2 - 18);
             ctx.font = '14px monospace';
             ctx.fillStyle = '#cde';
-            ctx.fillText('Train the AI first (apps/stompworld/ckpt/best.bin)',
+            ctx.fillText('Train the AI first (ckpt/best.bin)',
                 VIEW_W / 2, VIEW_H / 2 + 10);
             ctx.fillText('Esc to return to the title screen',
                 VIEW_W / 2, VIEW_H / 2 + 36);

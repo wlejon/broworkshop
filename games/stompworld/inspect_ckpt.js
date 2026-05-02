@@ -1,6 +1,6 @@
 // inspect_ckpt.js — load a saved PolicyValueNet snapshot and dump what it
 // thinks at a few interesting positions. Run via:
-//   bro-headless apps/stompworld inspect_ckpt.js
+//   bro-headless ../broworkshop/games/stompworld inspect_ckpt.js
 //
 // The app's index.html has already loaded sim/agent/level/etc. by the time
 // this script executes, so we reuse the same globals. We don't need the
@@ -13,8 +13,8 @@
     const TILE = 32;
     const NN = bro.ai.game.nn;
 
-    const path = 'apps/stompworld/ckpt/best.bin';
-    const meta = JSON.parse(fs.readFileSync('apps/stompworld/ckpt/best.json', 'utf-8'));
+    const path = 'ckpt/best.bin';
+    const meta = JSON.parse(fs.readFileSync('ckpt/best.json', 'utf-8'));
     const bytes = new Uint8Array(fs.readFileSync(path));
 
     console.log('='.repeat(72));

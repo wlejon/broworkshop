@@ -36,7 +36,7 @@ for (const p of SHARED) {
 const TILE = 32;
 
 // ── Checkpoints ─────────────────────────────────────────────────────────────
-const CKPT_DIR = 'apps/stompworld/ckpt';
+const CKPT_DIR = 'ckpt';
 const CKPT_RING_SIZE = 10;
 const CKPT_BEST_WINDOW = 20;
 let ckptRingIdx = 0;

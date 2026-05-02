@@ -55,7 +55,7 @@ tiles are listed in `SOLID_IDS` (passed to `Tilemap.create`).
 ## Smoke test (headless)
 
 ```bash
-bro-headless apps/stompworld -e "
+bro-headless ../broworkshop/games/stompworld -e "
   advanceTime(50);
   document.querySelector('.menu-item.selected').click();
   advanceTime(50);
