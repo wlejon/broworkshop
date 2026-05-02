@@ -6,7 +6,7 @@ server + thin rendering client over `bro.net`.
 ## What this app demonstrates
 
 Crater is the **reference implementation** of the shared
-[`apps/lib/`](../lib/README.md) game kernel. Every reusable module is
+[`apps/lib/`](/lib/README.md) game kernel. Every reusable module is
 exercised here:
 
 | Module        | Used for                                                       |

@@ -30,8 +30,8 @@ self.Art = { drawTile() {} };
 const fs = require('fs');
 
 const SHARED = [
-    '../lib/tilemap.js',
-    '../lib/platformer.js',
+    '/lib/tilemap.js',
+    '/lib/platformer.js',
     'level.js',
     'sim.js',
     'agent_obs.js',

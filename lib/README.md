@@ -10,17 +10,17 @@ global (e.g. `screens.js` after the SFX wrapper, `storage.js` before
 any per-app `storage.js` that wraps it).
 
 ```html
-<script src="../lib/loop.js"></script>
-<script src="../lib/canvas.js"></script>
-<script src="../lib/math.js"></script>
-<script src="../lib/input.js"></script>
-<script src="../lib/audio.js"></script>
-<script src="../lib/storage.js"></script>
-<script src="../lib/fx.js"></script>
-<script src="../lib/particles.js"></script>
-<script src="../lib/hud.js"></script>
-<script src="../lib/screens.js"></script>
-<script src="../lib/netroom.js"></script>
+<script src="/lib/loop.js"></script>
+<script src="/lib/canvas.js"></script>
+<script src="/lib/math.js"></script>
+<script src="/lib/input.js"></script>
+<script src="/lib/audio.js"></script>
+<script src="/lib/storage.js"></script>
+<script src="/lib/fx.js"></script>
+<script src="/lib/particles.js"></script>
+<script src="/lib/hud.js"></script>
+<script src="/lib/screens.js"></script>
+<script src="/lib/netroom.js"></script>
 ```
 
 | Module         | Global      | Purpose                                                          |
