@@ -1,0 +1,17 @@
+# Headless screenshots, scratch
+*/screenshot*.png
+**/screenshot*.png
+
+# Per-app settings written by the engine
+.bro_settings.json
+**/.bro_settings.json
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# Node / package caches if any app uses npm
+node_modules/
+.cache/
