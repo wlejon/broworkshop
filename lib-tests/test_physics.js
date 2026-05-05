@@ -477,5 +477,152 @@ t('default maxLinearVelocity remains Jolt 500', function() {
     Physics.setGravity(0, -9.81, 0);
 });
 
+// --- ShapeChain: 2D one-sided ground primitive ---
+
+t('chain: ball from above lands on the strip', function() {
+    Physics.destroyAll();
+    Physics.setGravity(0, -9.81, 0);
+    // Horizontal chain at y=0 spanning x=[-10,10].
+    var ground = Physics.createBody({
+        shape: 'chain',
+        points: [-10, 0, 10, 0],
+        depth: 4,
+    });
+    truthy(ground > 0, 'ground tag valid');
+    var ball = Physics.createBody({
+        shape: 'sphere', radius: 0.4,
+        position: { x: 0, y: 5, z: 0 },
+        dofs: '2d',
+    });
+    for (var i = 0; i < 180; i++) advanceTime(16);
+    var y = Physics.getTransform(ball).position.y;
+    truthy(y > -0.5 && y < 1.0, 'ball comes to rest on chain (y=' + y.toFixed(3) + ')');
+    Physics.destroyAll();
+});
+
+t('chain: ball from below passes through (one-sided)', function() {
+    Physics.destroyAll();
+    Physics.setGravity(0, 0, 0);  // no gravity — pure ballistic test
+    var ground = Physics.createBody({
+        shape: 'chain',
+        points: [-10, 0, 10, 0],
+        depth: 4,
+    });
+    var ball = Physics.createBody({
+        shape: 'sphere', radius: 0.4,
+        position: { x: 0, y: -3, z: 0 },
+        dofs: '2d',
+        linearDamping: 0,
+    });
+    Physics.setLinearVelocity(ball, 0, 12, 0);  // upward
+    for (var i = 0; i < 60; i++) advanceTime(16);
+    var y = Physics.getTransform(ball).position.y;
+    truthy(y > 3, 'ball passed through chain from below (y=' + y.toFixed(3) + ')');
+    Physics.destroyAll();
+    Physics.setGravity(0, -9.81, 0);
+});
+
+t('chain: corner does not snag a sliding body', function() {
+    Physics.destroyAll();
+    Physics.setGravity(0, -9.81, 0);
+    // L-shape: horizontal then up. Ball slides along horizontal toward corner.
+    var ground = Physics.createBody({
+        shape: 'chain',
+        points: [-10, 0, 0, 0, 0, 10],
+        depth: 4,
+    });
+    var ball = Physics.createBody({
+        shape: 'sphere', radius: 0.3,
+        position: { x: -5, y: 1, z: 0 },
+        dofs: '2d',
+        friction: 0.0,
+    });
+    Physics.setLinearVelocity(ball, 6, 0, 0);
+    var sawHang = false;
+    for (var i = 0; i < 90; i++) {
+        advanceTime(16);
+        var v = Physics.getVelocity(ball);
+        if (i > 30 && Math.abs(v.linear.x) < 0.1 && Math.abs(v.linear.y) < 0.1) {
+            sawHang = true;
+            break;
+        }
+    }
+    truthy(!sawHang, 'ball did not stall at the corner');
+    Physics.destroyAll();
+});
+
+// --- Wheel constraint: composite slider+hinge ---
+
+t('wheel: suspension oscillation decays', function() {
+    Physics.destroyAll();
+    Physics.setGravity(0, -9.81, 0);
+    var ground = Physics.createBody({
+        shape: 'chain', points: [-20, 0, 20, 0], depth: 4,
+    });
+    var chassis = Physics.createBody({
+        shape: 'box',
+        position: { x: 0, y: 5, z: 0 },
+        halfExtents: { x: 1.0, y: 0.3, z: 1.0 },
+        dofs: '2d',
+    });
+    var wheel = Physics.createBody({
+        shape: 'sphere', radius: 0.5,
+        position: { x: 0, y: 4, z: 0 },
+        dofs: '2d',
+    });
+    var w = Physics.createConstraint({
+        type: 'wheel',
+        body1: chassis, body2: wheel,
+        point1: { x: 0, y: 4, z: 0 },
+        suspensionAxis: { x: 0, y: 1, z: 0 },
+        hingeAxis:      { x: 0, y: 0, z: 1 },
+        hertz: 2.0, dampingRatio: 0.7,
+    });
+    truthy(w > 0, 'wheel constraint created');
+    // Settle.
+    for (var i = 0; i < 240; i++) advanceTime(16);
+    var v1 = Math.abs(Physics.getVelocity(chassis).linear.y);
+    truthy(v1 < 0.5, 'chassis vertical velocity damped (|vy|=' + v1.toFixed(3) + ')');
+    Physics.destroyConstraint(w);
+    Physics.destroyAll();
+});
+
+t('wheel: motor drives chassis along the chain', function() {
+    Physics.destroyAll();
+    Physics.setGravity(0, -9.81, 0);
+    var ground = Physics.createBody({
+        shape: 'chain', points: [-30, 0, 30, 0], depth: 4,
+        friction: 1.0,
+    });
+    var chassis = Physics.createBody({
+        shape: 'box',
+        position: { x: 0, y: 5, z: 0 },
+        halfExtents: { x: 1.0, y: 0.3, z: 1.0 },
+        dofs: '2d',
+        friction: 1.0,
+    });
+    var wheel = Physics.createBody({
+        shape: 'sphere', radius: 0.5,
+        position: { x: 0, y: 4, z: 0 },
+        dofs: '2d',
+        friction: 1.0,
+    });
+    var w = Physics.createConstraint({
+        type: 'wheel',
+        body1: chassis, body2: wheel,
+        point1: { x: 0, y: 4, z: 0 },
+        suspensionAxis: { x: 0, y: 1, z: 0 },
+        hingeAxis:      { x: 0, y: 0, z: 1 },
+        hertz: 4.0, dampingRatio: 0.9,
+        enableMotor: true, motorSpeed: -10.0, maxMotorTorque: 50.0,
+    });
+    var x0 = Physics.getTransform(chassis).position.x;
+    for (var i = 0; i < 240; i++) advanceTime(16);
+    var x1 = Physics.getTransform(chassis).position.x;
+    truthy(Math.abs(x1 - x0) > 1.0, 'chassis moved under motor (Δx=' + (x1-x0).toFixed(3) + ')');
+    Physics.destroyConstraint(w);
+    Physics.destroyAll();
+});
+
 console.log('=== Done: ' + tests + ' tests, ' + failed + ' failures ===');
 if (failed > 0) throw new Error(failed + ' physics tests failed');
