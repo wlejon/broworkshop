@@ -428,6 +428,12 @@ function tree(opts) {
     const canopyShape = opts.canopyShape || 'round';
     const canopyShift = opts.canopyShift || [0, 0, 0];
     const canopyAsymmetry = opts.canopyAsymmetry ?? 0;
+    // 'blobs' (default): noise-displaced spheres for canopy.
+    // 'leaves': real instanced leaf cards via Mesh.scatterLeaves on the
+    //           branch tree. Branches still reach the canopy anchor points,
+    //           so foliage is dense in the same envelope.
+    const foliageStyle = opts.foliageStyle || 'blobs';
+    const leafShape = opts.leafShape || 'oval';
     // Per-shape biases on the canopy envelope position within the tree.
     const shapeBias = {
         round:     { yPlace: 0.65, vSpan: 0.55 },
@@ -609,7 +615,45 @@ function tree(opts) {
     }
 
     // ── Canopy parts ─────────────────────────────────────────────────────
-    for (const p of canopy.parts) parts.push(p);
+    if (foliageStyle === 'leaves' && segs.length > 0) {
+        // Card foliage: scatter leaf cards along the thin branches. Leaf
+        // size is tied to canopy radius so a sequoia gets bigger leaves
+        // than a sapling. maxRadius sits well above the recursion's tip
+        // radii so every twig is eligible, and minDepth=2 keeps the trunk
+        // bare. perUnitLength scales mildly with canopy size to keep big
+        // trees from drowning in millions of cards.
+        const leafLen = Math.max(0.08, Math.min(0.32, CReff * 0.06));
+        const leafW   = leafLen * 0.45;
+        const leafMesh = Mesh.leafCard(leafShape, {
+            width: leafW,
+            length: leafLen,
+            bend: 0.3,
+            fullUV: true,
+        });
+        const perUnit = Math.max(20, Math.min(80, 60 - CReff * 1.5));
+        const foliage = Mesh.scatterLeaves(segs, leafMesh, {
+            maxRadius:     trunkRadius * 0.45,
+            minDepth:      2,
+            perUnitLength: perUnit,
+            upBias:        0.4,
+            tiltJitter:    0.4,
+            rollJitter:    0.6,
+            baseScale:     1.0,
+            scaleJitter:   0.25,
+            scaleByRadius: 0.3,
+            seed:          (seed * 257 + 1) >>> 0,
+        });
+        if (foliage) parts.push({
+            mesh: foliage,
+            color: canopyColor,
+            metallic: 0,
+            roughness: 0.85,
+        });
+        // Use the canopy AABB envelope even though the actual leaves trace
+        // the branch tips — the silhouette ends up in the same region.
+    } else {
+        for (const p of canopy.parts) parts.push(p);
+    }
     aabb.min[0] = Math.min(aabb.min[0], canopy.aabb.min[0]);
     aabb.min[1] = Math.min(aabb.min[1], canopy.aabb.min[1]);
     aabb.min[2] = Math.min(aabb.min[2], canopy.aabb.min[2]);
@@ -996,10 +1040,109 @@ function succulent(opts) {
     };
 }
 
+// ─── Recipe: flower ───────────────────────────────────────────────────────
+// A single flower on a curved bezier stem with a couple of leaf cards. Built
+// entirely from new bromesh primitives — bezierSweep, leafCard, flower —
+// to exercise the procedural-plant API end to end.
+
+function flower(opts) {
+    opts = opts || {};
+    const seed = (opts.seed | 0) || 1;
+    const age01 = Math.max(0.05, Math.min(1, opts.age01 ?? 1));
+    const stemLength = (opts.stemLength ?? 0.9) * age01;
+    const stemRadius = opts.stemRadius ?? 0.012;
+    const headSize   = (opts.headSize ?? 0.18) * Math.max(0.4, age01);
+    const petalCount = Math.max(3, opts.petalCount ?? 8);
+    const layers     = Math.max(1, opts.layers ?? 2);
+    const petalShape = opts.petalShape || 'petal';
+    const petalColor = opts.petalColor || [0.92, 0.32, 0.45];
+    const centerColor = opts.centerColor || [1.0, 0.82, 0.20];
+    const stemColor   = opts.stemColor || [0.30, 0.50, 0.22];
+
+    const rng = mulberry32(seed);
+    const parts = [];
+    const aabb = emptyAabb();
+
+    // Curved stem: vertical-ish cubic bezier with a small lateral bend so
+    // the head doesn't sit straight up like a pencil.
+    const lean = (rng() - 0.5) * stemLength * 0.12;
+    const stemCtrl = [
+        [0,         0,                       0],
+        [lean*0.3,  stemLength * 0.35,       lean*0.4],
+        [lean*0.7,  stemLength * 0.70,       lean*0.7],
+        [lean,      stemLength,              lean],
+    ];
+    const stemProfile = circleProfile(6, 1);
+    const stemTip = stemCtrl[3];
+    const stem = Mesh.bezierSweep(stemCtrl, stemProfile, {
+        samples: 24,
+        capStart: true,
+        capEnd: true,
+        closeProfile: true,
+        miterJoints: true,
+        profileScale: [stemRadius, stemRadius * 0.7],  // slight taper
+    });
+    if (stem) parts.push({
+        mesh: stem, color: stemColor, metallic: 0, roughness: 0.9,
+    });
+    aabbInclude(aabb, [-stemRadius, 0, -stemRadius]);
+    aabbInclude(aabb, [stemRadius, stemLength, stemRadius]);
+
+    // A pair of leaves clipped to the stem at ~40% height, on opposite
+    // sides. leafCard emits in local space (XZ plane, +Z = tip) so we
+    // lay it flat then rotate via the mesh transform helpers.
+    if (stemLength > 0.25) {
+        const leafY = stemLength * 0.4;
+        const leafLen = Math.min(0.25, stemLength * 0.4);
+        const leafW   = leafLen * 0.5;
+        for (let i = 0; i < 2; i++) {
+            const leaf = Mesh.leafCard('oval', {
+                width: leafW,
+                length: leafLen,
+                bend: 0.5,
+                fullUV: true,
+            });
+            // leafCard lies in XZ with stem at origin; rotate 90° around X
+            // so it stands roughly horizontal, then orient around Y per side.
+            leaf.rotate(1, 0, 0, -Math.PI * 0.45);
+            leaf.rotate(0, 1, 0, i === 0 ? 0 : Math.PI);
+            leaf.translate(0, leafY, 0);
+            parts.push({
+                mesh: leaf, color: stemColor, metallic: 0, roughness: 0.85,
+            });
+        }
+    }
+
+    // Flower head — Mesh.flower returns a single mesh with vertex colors
+    // baked for the center; we only set a uniform petal color here.
+    const head = Mesh.flower({
+        petalCount,
+        petalShape,
+        petalLength: headSize,
+        petalWidth:  headSize * 0.55,
+        petalCurl:   0.2,
+        petalBend:   0.7,
+        layers,
+        layerTwist:  0.45,
+        centerRadius: headSize * 0.25,
+        centerHeight: headSize * 0.15,
+        centerColor,
+    });
+    if (head) {
+        head.translate(stemTip[0], stemTip[1], stemTip[2]);
+        parts.push({
+            mesh: head, color: petalColor, metallic: 0, roughness: 0.7,
+        });
+        aabbInclude(aabb, stemTip, headSize * 1.2);
+    }
+
+    return { parts, aabbMin: aabb.min, aabbMax: aabb.max };
+}
+
 // ─── Export ───────────────────────────────────────────────────────────────
 
 root.Recipes = {
-    tree, conifer, shrub, vine, fern, grassTuft, succulent,
+    tree, conifer, shrub, vine, fern, grassTuft, succulent, flower,
     CANOPY_SHAPES,
 };
 

@@ -138,6 +138,8 @@ const archetypeSchema = {
         { key: 'canopyShape',    label: 'canopy shape',   type: 'select', options: Recipes.CANOPY_SHAPES, default: 'round' },
         { key: 'blobCount',      label: 'blob count',     type: 'int',   min: 1, max: 7, default: 3 },
         { key: 'canopyColor',    label: 'canopy color',   type: 'color', default: '#4f8c39' },
+        { key: 'foliageStyle',   label: 'foliage style',  type: 'select', options: ['blobs', 'leaves'], default: 'blobs' },
+        { key: 'leafShape',      label: 'leaf shape',     type: 'select', options: ['oval', 'pointed', 'lobed', 'frond'], default: 'oval' },
     ],
     conifer: [
         { key: 'height',           label: 'height',          type: 'range', min: 2, max: 110, step: 0.5, default: 8, fmt: fmt2 },
@@ -178,6 +180,16 @@ const archetypeSchema = {
         { key: 'leafWidth',     label: 'leaf width',    type: 'range', min: 0.02, max: 0.18, step: 0.005, default: 0.06, fmt: fmt3 },
         { key: 'leafThickness', label: 'leaf thickness',type: 'range', min: 0.005, max: 0.06, step: 0.002, default: 0.02, fmt: fmt3 },
         { key: 'tilt',          label: 'tilt',          type: 'range', min: 0, max: 1.4, step: 0.05, default: 0.6, fmt: fmt2 },
+    ],
+    flower: [
+        { key: 'stemLength',  label: 'stem length',  type: 'range', min: 0.2, max: 1.6, step: 0.05, default: 0.9, fmt: fmt2 },
+        { key: 'stemRadius',  label: 'stem radius',  type: 'range', min: 0.005, max: 0.05, step: 0.001, default: 0.012, fmt: fmt3 },
+        { key: 'headSize',    label: 'head size',    type: 'range', min: 0.05, max: 0.4, step: 0.01, default: 0.18, fmt: fmt2 },
+        { key: 'petalCount',  label: 'petal count',  type: 'int',   min: 3, max: 24, default: 8 },
+        { key: 'layers',      label: 'petal layers', type: 'int',   min: 1, max: 5, default: 2 },
+        { key: 'petalShape',  label: 'petal shape',  type: 'select', options: ['petal', 'oval', 'pointed', 'lobed'], default: 'petal' },
+        { key: 'petalColor',  label: 'petal color',  type: 'color', default: '#ea527a' },
+        { key: 'centerColor', label: 'center color', type: 'color', default: '#ffd233' },
     ],
 };
 
