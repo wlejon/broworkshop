@@ -787,12 +787,7 @@ function vine(opts) {
             Math.sin(a) * helixRadius + (rng() - 0.5) * 0.04,
         ]);
     }
-    const profile = circleProfile(6, 1);
-    const profileScale = new Array(path.length).fill(radius);
-    const stem = Mesh.sweep(profile, path, {
-        closeProfile: true, capStart: true, capEnd: true,
-        miterJoints: true, profileScale,
-    });
+    const stem = Mesh.tube(path, radius, 6);
 
     const parts = [];
     if (stem) parts.push({
@@ -843,15 +838,11 @@ function fern(opts) {
     }
 
     const sub = [];
-    const stemProfile = circleProfile(6, 1);
     const stemScale = rachis.map((_, i) => {
         const t = i / (rachis.length - 1);
         return stemRadius * Math.max(0.15, 1 - t);
     });
-    const rachisMesh = Mesh.sweep(stemProfile, rachis, {
-        closeProfile: true, capStart: true, capEnd: true,
-        miterJoints: true, profileScale: stemScale,
-    });
+    const rachisMesh = Mesh.tube(rachis, stemScale, 6);
     if (rachisMesh) sub.push(rachisMesh);
 
     for (let i = 1; i < rachis.length; i++) {
