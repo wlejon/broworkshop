@@ -391,6 +391,11 @@ function spawnPart(part, tx, ty, tz) {
         color: part.color || [0.6, 0.6, 0.6],
         metallic: part.metallic ?? 0.0,
         roughness: part.roughness ?? 0.9,
+        // Plant geometry — leaf cards, petals, blade strips — is thin and
+        // visible from both sides. Default to twoSided so foliage doesn't
+        // disappear when viewed from behind. Solid parts (trunks, stems)
+        // can opt out by setting `twoSided: false` on the part.
+        twoSided: part.twoSided ?? true,
         castsShadow: true,
         receivesShadow: true,
     });
