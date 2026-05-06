@@ -1076,9 +1076,12 @@ function flower(opts) {
                 bend: 0.5,
                 fullUV: true,
             });
-            // leafCard lies in XZ with stem at origin; rotate 90° around X
-            // so it stands roughly horizontal, then orient around Y per side.
-            leaf.rotate(1, 0, 0, -Math.PI * 0.45);
+            // leafCard lies in XZ with length along +Z and normal +Y. Yaw
+            // 90° around Y so the tip extends along +X (outward from the
+            // stem), then tilt up around Z so the leaf angles upward like
+            // a real stem leaf, then mirror to the opposite side for i=1.
+            leaf.rotate(0, 1, 0, Math.PI * 0.5);
+            leaf.rotate(0, 0, 1, Math.PI * 0.15);
             leaf.rotate(0, 1, 0, i === 0 ? 0 : Math.PI);
             leaf.translate(0, leafY, 0);
             parts.push({
