@@ -94,41 +94,23 @@ function circleProfile(n, r) {
     return out;
 }
 
-// Build an apex-up cone by sweeping a unit circle profile from base radius
-// down to zero along a vertical path. Mesh.cone's bromesh wrapper has a
-// non-canonical Y range; this primitive is deterministic.
+// Apex-up cone: base disc at Y=0 (radius `baseRadius`), apex at Y=`height`.
+// Direct passthrough to Mesh.cone now that its Y-range is canonical.
 function buildCone(baseRadius, height, slices, stacks) {
-    slices = slices || 12;
-    stacks = stacks || 2;
-    const profile = circleProfile(slices, 1);
-    const path = [];
-    const profileScale = [];
-    for (let i = 0; i <= stacks; i++) {
-        const t = i / stacks;
-        path.push([0, t * height, 0]);
-        profileScale.push(baseRadius * (1 - t));
-    }
-    return Mesh.sweep(profile, path, {
-        closeProfile: true,
-        capStart: true,
-        capEnd: false,
-        miterJoints: false,
-        profileScale,
-    });
+    return Mesh.cone(baseRadius, height, slices || 12, stacks || 2);
 }
 
 // Build a noise-displaced sphere translated to `center` and scaled. Returns
 // a Mesh handle. `nsub` = subdivision level (2 → ~80 tris, 3 → ~320).
 function buildBlob(center, radius, seed, opts) {
     opts = opts || {};
-    const nsub = opts.nsub ?? 2;
-    const sx = opts.sx ?? 1;
-    const sy = opts.sy ?? 1;
-    const sz = opts.sz ?? 1;
-    const m = Mesh.rock(radius, seed | 0, nsub);
-    if (sx !== 1 || sy !== 1 || sz !== 1) m.scale(sx, sy, sz);
-    m.translate(center[0], center[1], center[2]);
-    return m;
+    return Mesh.blob({
+        radius,
+        seed: seed | 0,
+        nsub: opts.nsub ?? 2,
+        scale: [opts.sx ?? 1, opts.sy ?? 1, opts.sz ?? 1],
+        center,
+    });
 }
 
 // ─── Canopy shape catalogue ───────────────────────────────────────────────
