@@ -868,17 +868,14 @@ function fern(opts) {
                                           vScale(tangent, u * ll * 0.1)));
             }
             const leafW = 0.025 * Math.max(0.2, taper);
-            const leafProfile = [
-                [leafW, 0], [0, leafW * 0.2],
-                [-leafW, 0], [0, -leafW * 0.2],
-            ];
             const leafScale = leafPath.map((_, k) => {
                 const u = k / (leafPath.length - 1);
                 return Math.max(0.1, 1 - u);
             });
-            const lm = Mesh.sweep(leafProfile, leafPath, {
-                closeProfile: true, capStart: false, capEnd: true,
-                miterJoints: false, profileScale: leafScale,
+            const lm = Mesh.bladeStrip(leafPath, {
+                width: leafW, thickness: leafW * 0.2,
+                capStart: false, capEnd: true, miterJoints: false,
+                profileScale: leafScale,
             });
             if (lm) sub.push(lm);
         }
@@ -928,18 +925,15 @@ function grassTuft(opts) {
                 base[2] + outDir[2] * lateral,
             ]);
         }
-        const profile = [
-            [bladeWidth, 0], [0, bladeWidth * 0.15],
-            [-bladeWidth, 0], [0, -bladeWidth * 0.15],
-        ];
         const profileScale = path.map((_, s) => {
             const t = s / (path.length - 1);
             return Math.max(0.05, 1 - t);
         });
         const twist = path.map(() => -ang);
-        const blade = Mesh.sweep(profile, path, {
-            closeProfile: true, capStart: false, capEnd: true,
-            miterJoints: true, profileScale, twist,
+        const blade = Mesh.bladeStrip(path, {
+            width: bladeWidth, thickness: bladeWidth * 0.15,
+            capStart: false, capEnd: true, miterJoints: true,
+            profileScale, twist,
         });
         if (blade) sub.push(blade);
     }
@@ -988,18 +982,15 @@ function succulent(opts) {
             p[1] += u * u * len * 0.25;
             path.push(p);
         }
-        const profile = [
-            [leafWidth, 0], [0, leafThickness],
-            [-leafWidth, 0], [0, -leafThickness],
-        ];
         const profileScale = path.map((_, s) => {
             const u = s / (path.length - 1);
             const bulge = Math.sin(Math.PI * u);
             return Math.max(0.05, 0.4 + 0.6 * bulge - 0.5 * u);
         });
-        const leaf = Mesh.sweep(profile, path, {
-            closeProfile: true, capStart: true, capEnd: true,
-            miterJoints: true, profileScale,
+        const leaf = Mesh.bladeStrip(path, {
+            width: leafWidth, thickness: leafThickness,
+            capStart: true, capEnd: true, miterJoints: true,
+            profileScale,
         });
         if (leaf) sub.push(leaf);
     }
