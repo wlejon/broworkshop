@@ -95,9 +95,11 @@ function circleProfile(n, r) {
 }
 
 // Apex-up cone: base disc at Y=0 (radius `baseRadius`), apex at Y=`height`.
-// Direct passthrough to Mesh.cone now that its Y-range is canonical.
+// capBase: true closes the bottom — the conifer's lowest layer is visible
+// from beneath when the camera tilts up, and stacked cones look thicker
+// from below when each one is solid.
 function buildCone(baseRadius, height, slices, stacks) {
-    return Mesh.cone(baseRadius, height, slices || 12, stacks || 2);
+    return Mesh.cone(baseRadius, height, slices || 12, stacks || 2, true);
 }
 
 // Build a noise-displaced sphere translated to `center` and scaled. Returns
