@@ -1040,13 +1040,21 @@ function flower(opts) {
     ];
     const stemProfile = circleProfile(6, 1);
     const stemTip = stemCtrl[3];
+    // bezierSweep contract: profileScale length must be 0, 1, or `samples`.
+    // Build the per-sample taper here (base → 70% at tip, linear).
+    const stemSamples = 24;
+    const stemScale = new Array(stemSamples);
+    for (let i = 0; i < stemSamples; i++) {
+        const t = stemSamples === 1 ? 0 : i / (stemSamples - 1);
+        stemScale[i] = stemRadius * (1 - 0.3 * t);
+    }
     const stem = Mesh.bezierSweep(stemCtrl, stemProfile, {
-        samples: 24,
+        samples: stemSamples,
         capStart: true,
         capEnd: true,
         closeProfile: true,
         miterJoints: true,
-        profileScale: [stemRadius, stemRadius * 0.7],  // slight taper
+        profileScale: stemScale,
     });
     if (stem) parts.push({
         mesh: stem, color: stemColor, metallic: 0, roughness: 0.9,
