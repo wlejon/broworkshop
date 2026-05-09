@@ -1,6 +1,5 @@
-// Flora - procedural plant viewer with full per-archetype customization.
-// Mode "single" shows one plant; mode "forest" places many with optional
-// canopy sharing (forest controls land in a follow-up commit).
+// Flora — procedural plant viewer with comprehensive control over
+// archetypes, species, life-cycle stages, and forest mixes.
 
 const canvas = document.getElementById('stage');
 const scene = canvas.getContext('scene');
@@ -8,12 +7,13 @@ const scene = canvas.getContext('scene');
 scene.setAmbient([0.05, 0.06, 0.07]);
 scene.setToneMap({ mode: 'aces', exposure: 1.0 });
 
-// --- Orbit camera ----------------------------------------------------------
+// ─── Orbit camera ─────────────────────────────────────────────────────────
+
 const cam = {
-    target: [0, 3, 0],
+    target: [0, 1, 0],
     theta:  Math.PI * 0.25,
     phi:    Math.PI * 0.30,
-    radius: 14,
+    radius: 6,
     fov:    50,
     near:   0.1,
     far:    2000,
@@ -28,9 +28,7 @@ function applyCamera() {
         cam.target[2] + cam.radius * sp * st,
     ];
     scene.setCamera({
-        position: eye,
-        target:   cam.target,
-        up:       [0, 1, 0],
+        position: eye, target: cam.target, up: [0, 1, 0],
         fov: cam.fov, near: cam.near, far: cam.far,
     });
 }
@@ -76,13 +74,14 @@ canvas.addEventListener('mousemove', (e) => {
 canvas.addEventListener('wheel', (e) => {
     const f = Math.exp(e.deltaY * 0.001);
     cam.radius *= f;
-    if (cam.radius < 0.5) cam.radius = 0.5;
+    if (cam.radius < 0.3) cam.radius = 0.3;
     if (cam.radius > 500) cam.radius = 500;
     applyCamera();
     e.preventDefault();
 }, { passive: false });
 
-// --- Lights & ground -------------------------------------------------------
+// ─── Lights & ground ──────────────────────────────────────────────────────
+
 scene.createLight({
     type: 'directional',
     direction: [-0.4, -0.8, -0.3],
@@ -91,139 +90,207 @@ scene.createLight({
     castsShadow: true,
 });
 
-const groundPlane = scene.createMesh({
-    mesh: 'plane',
-    halfW: 10, halfD: 10,
-    y: 0,
-    color: '#9aa18f',
-    metallic: 0.0,
-    roughness: 0.95,
-    receivesShadow: true,
-});
-
-function resizeGround(half) {
-    if (groundPlane && groundPlane.destroy) groundPlane.destroy();
-    return scene.createMesh({
+let groundNode = null;
+function resizeGroundFor(half) {
+    if (groundNode && groundNode.destroy) groundNode.destroy();
+    groundNode = scene.createMesh({
         mesh: 'plane',
-        halfW: half, halfD: half,
-        y: 0,
-        color: '#9aa18f',
-        metallic: 0.0,
-        roughness: 0.95,
+        halfW: half, halfD: half, y: 0,
+        color: '#9aa18f', metallic: 0, roughness: 0.95,
         receivesShadow: true,
     });
 }
+resizeGroundFor(10);
 
-// --- Parameter schema ------------------------------------------------------
-//
-// Drives the dynamic per-archetype UI. Each entry is one of:
-//   { key, label, type: 'range', min, max, step, default, fmt? }
-//   { key, label, type: 'select', options: [...], default }
-//   { key, label, type: 'color', default }   (hex string)
-//   { key, label, type: 'int', min, max, default }
-// `fmt` formats the value readout (default: 2 decimals).
+// ─── Stage definitions ────────────────────────────────────────────────────
+
+const STAGES = Recipes.STAGES;
+
+// Map archetype → which stages it actually supports (for the stage bar).
+function stagesForArchetype(archetype, opts) {
+    switch (archetype) {
+        case 'tree':
+            return (opts && opts.bloomColor)
+                ? Recipes._TreeStages.FLOWERING_TREE_STAGES
+                : Recipes._TreeStages.DEFAULT_TREE_STAGES;
+        case 'conifer':   return ['seed','sprout','seedling','juvenile','mature','flowering','fruiting'];
+        case 'shrub':     return (opts && (opts.bloomColor || opts.fruitColor))
+                                ? ['seed','sprout','seedling','juvenile','mature','flowering','fruiting','senescent']
+                                : ['seed','sprout','seedling','juvenile','mature','senescent'];
+        case 'flower':    return ['seed','sprout','seedling','juvenile','mature','flowering','fruiting','senescent'];
+        case 'grassTuft': return ['seed','sprout','seedling','juvenile','mature','flowering','senescent'];
+        case 'fern':      return ['seed','sprout','seedling','juvenile','mature','senescent'];
+        case 'succulent': return ['seed','sprout','seedling','juvenile','mature','flowering'];
+        case 'vine':      return (opts && (opts.bloomColor || opts.fruitColor))
+                                ? ['seed','sprout','seedling','juvenile','mature','flowering','fruiting']
+                                : ['seed','sprout','seedling','juvenile','mature'];
+        case 'rosebush':  return STAGES;
+        case 'cactus':    return ['seed','sprout','seedling','juvenile','mature','flowering','fruiting'];
+        case 'palm':      return ['seed','sprout','seedling','juvenile','mature','flowering','fruiting'];
+    }
+    return STAGES;
+}
+
+// ─── Parameter schema ─────────────────────────────────────────────────────
 
 const fmtInt = (v) => `${v | 0}`;
 const fmt2 = (v) => v.toFixed(2);
 const fmt3 = (v) => v.toFixed(3);
 
+// `group` field routes the row into a collapsible <details> section.
 const archetypeSchema = {
-    // Ranges span sapling → mature redwood. Defaults stay sapling-friendly
-    // so the single-plant view loads at a useful framing; sliders go all
-    // the way out for sequoia-class trees (height 80m, trunk 4m, canopy 25m).
     tree: [
-        { key: 'height',         label: 'height',         type: 'range', min: 1.5, max: 80, step: 0.5,  default: 6,    fmt: fmt2 },
-        { key: 'trunkRadius',    label: 'trunk radius',   type: 'range', min: 0.05, max: 4, step: 0.05, default: 0.18, fmt: fmt2 },
-        { key: 'canopyRadius',   label: 'canopy radius',  type: 'range', min: 0.5, max: 25, step: 0.2, default: 3,    fmt: fmt2 },
-        { key: 'canopyShape',    label: 'canopy shape',   type: 'select', options: Recipes.CANOPY_SHAPES, default: 'round' },
-        { key: 'blobCount',      label: 'blob count',     type: 'int',   min: 1, max: 7, default: 3 },
-        { key: 'canopyColor',    label: 'canopy color',   type: 'color', default: '#4f8c39' },
-        { key: 'foliageStyle',   label: 'foliage style',  type: 'select', options: ['blobs', 'leaves'], default: 'blobs' },
-        { key: 'leafShape',      label: 'leaf shape',     type: 'select', options: ['oval', 'pointed', 'lobed', 'frond'], default: 'oval' },
+        { key: 'height',         label: 'height',         type: 'range', min: 1.5, max: 80, step: 0.5,  default: 6,    fmt: fmt2, group: 'general' },
+        { key: 'trunkRadius',    label: 'trunk radius',   type: 'range', min: 0.05, max: 4, step: 0.05, default: 0.18, fmt: fmt2, group: 'general' },
+        { key: 'canopyRadius',   label: 'canopy radius',  type: 'range', min: 0.5, max: 25, step: 0.2, default: 3,    fmt: fmt2, group: 'general' },
+        { key: 'canopyShape',    label: 'canopy shape',   type: 'select', options: Recipes.CANOPY_SHAPES, default: 'round', group: 'general' },
+        { key: 'blobCount',      label: 'blob count',     type: 'int',   min: 1, max: 7, default: 3, group: 'advanced' },
+        { key: 'canopyColor',    label: 'canopy color',   type: 'color', default: '#4f8c39', group: 'appearance' },
+        { key: 'trunkColor',     label: 'trunk color',    type: 'color', default: '#6b4828', group: 'appearance' },
+        { key: 'leafShape',      label: 'leaf shape',     type: 'select', options: ['oval','pointed','lobed','frond','needle'], default: 'oval', group: 'appearance' },
+        { key: 'foliageStyle',   label: 'foliage style',  type: 'select', options: ['blobs','leaves'], default: 'blobs', group: 'appearance' },
+        { key: 'bloomColor',     label: 'bloom color',    type: 'color', default: '#f7c8d8', group: 'lifecycle' },
+        { key: 'fruitColor',     label: 'fruit color',    type: 'color', default: '#a01030', group: 'lifecycle' },
     ],
     conifer: [
-        { key: 'height',           label: 'height',          type: 'range', min: 2, max: 110, step: 0.5, default: 8, fmt: fmt2 },
-        { key: 'trunkRadius',      label: 'trunk radius',    type: 'range', min: 0.04, max: 4, step: 0.05, default: 0.15, fmt: fmt2 },
-        { key: 'layers',           label: 'cone layers',     type: 'int',   min: 3, max: 16, default: 7 },
-        { key: 'baseCanopyRadius', label: 'base radius',     type: 'range', min: 0.5, max: 18, step: 0.2, default: 2.5, fmt: fmt2 },
-        { key: 'canopyColor',      label: 'needle color',    type: 'color', default: '#2e6633' },
+        { key: 'height',           label: 'height',          type: 'range', min: 2, max: 110, step: 0.5, default: 8, fmt: fmt2, group: 'general' },
+        { key: 'trunkRadius',      label: 'trunk radius',    type: 'range', min: 0.04, max: 4, step: 0.05, default: 0.15, fmt: fmt2, group: 'general' },
+        { key: 'layers',           label: 'cone layers',     type: 'int',   min: 3, max: 16, default: 7, group: 'general' },
+        { key: 'baseCanopyRadius', label: 'base radius',     type: 'range', min: 0.5, max: 18, step: 0.2, default: 2.5, fmt: fmt2, group: 'general' },
+        { key: 'coneShape',        label: 'cone shape',      type: 'select', options: ['soft','sharp','tight','spreading','columnar'], default: 'soft', group: 'general' },
+        { key: 'canopyColor',      label: 'needle color',    type: 'color', default: '#2e6633', group: 'appearance' },
+        { key: 'trunkColor',       label: 'trunk color',     type: 'color', default: '#5a3e22', group: 'appearance' },
     ],
     shrub: [
-        { key: 'height',     label: 'height',      type: 'range', min: 0.4, max: 3, step: 0.05, default: 1.5, fmt: fmt2 },
-        { key: 'radius',     label: 'radius',      type: 'range', min: 0.3, max: 2.5, step: 0.05, default: 1.2, fmt: fmt2 },
-        { key: 'blobCount',  label: 'blob count',  type: 'int',   min: 2, max: 9, default: 5 },
-        { key: 'canopyColor',label: 'canopy color',type: 'color', default: '#52943d' },
+        { key: 'height',     label: 'height',      type: 'range', min: 0.4, max: 3, step: 0.05, default: 1.5, fmt: fmt2, group: 'general' },
+        { key: 'radius',     label: 'radius',      type: 'range', min: 0.3, max: 2.5, step: 0.05, default: 1.2, fmt: fmt2, group: 'general' },
+        { key: 'blobCount',  label: 'blob count',  type: 'int',   min: 2, max: 9, default: 5, group: 'general' },
+        { key: 'canopyColor',label: 'canopy color',type: 'color', default: '#52943d', group: 'appearance' },
+        { key: 'bloomColor', label: 'bloom color', type: 'color', default: '#df3a51', group: 'lifecycle' },
+        { key: 'fruitColor', label: 'fruit color', type: 'color', default: '#cc1418', group: 'lifecycle' },
     ],
     grassTuft: [
-        { key: 'bladeCount', label: 'blades',      type: 'int', min: 3, max: 30, default: 12 },
-        { key: 'height',     label: 'height',      type: 'range', min: 0.1, max: 1, step: 0.02, default: 0.4, fmt: fmt2 },
-        { key: 'baseRadius', label: 'base radius', type: 'range', min: 0.02, max: 0.3, step: 0.01, default: 0.08, fmt: fmt2 },
-        { key: 'bladeWidth', label: 'blade width', type: 'range', min: 0.005, max: 0.04, step: 0.001, default: 0.012, fmt: fmt3 },
-        { key: 'bend',       label: 'bend',        type: 'range', min: 0, max: 1.5, step: 0.05, default: 0.6, fmt: fmt2 },
+        { key: 'bladeCount', label: 'blades',      type: 'int',   min: 3, max: 30, default: 12, group: 'general' },
+        { key: 'height',     label: 'height',      type: 'range', min: 0.1, max: 2, step: 0.02, default: 0.4, fmt: fmt2, group: 'general' },
+        { key: 'baseRadius', label: 'base radius', type: 'range', min: 0.02, max: 0.4, step: 0.01, default: 0.08, fmt: fmt2, group: 'general' },
+        { key: 'bladeWidth', label: 'blade width', type: 'range', min: 0.005, max: 0.04, step: 0.001, default: 0.012, fmt: fmt3, group: 'general' },
+        { key: 'bend',       label: 'bend',        type: 'range', min: 0, max: 1.5, step: 0.05, default: 0.6, fmt: fmt2, group: 'general' },
+        { key: 'color',      label: 'color',       type: 'color', default: '#5e9e36', group: 'appearance' },
+        { key: 'plumeColor', label: 'plume color', type: 'color', default: '#d8c89f', group: 'lifecycle' },
     ],
     vine: [
-        { key: 'length',      label: 'length',       type: 'range', min: 1, max: 12, step: 0.2, default: 6, fmt: fmt2 },
-        { key: 'radius',      label: 'stem radius',  type: 'range', min: 0.01, max: 0.15, step: 0.005, default: 0.04, fmt: fmt3 },
-        { key: 'helixRadius', label: 'helix radius', type: 'range', min: 0.1, max: 1.5, step: 0.05, default: 0.5, fmt: fmt2 },
-        { key: 'turns',       label: 'turns',        type: 'range', min: 0.5, max: 8, step: 0.25, default: 3, fmt: fmt2 },
+        { key: 'length',      label: 'length',       type: 'range', min: 1, max: 12, step: 0.2, default: 6, fmt: fmt2, group: 'general' },
+        { key: 'radius',      label: 'stem radius',  type: 'range', min: 0.01, max: 0.15, step: 0.005, default: 0.04, fmt: fmt3, group: 'general' },
+        { key: 'helixRadius', label: 'helix radius', type: 'range', min: 0.1, max: 1.5, step: 0.05, default: 0.5, fmt: fmt2, group: 'general' },
+        { key: 'turns',       label: 'turns',        type: 'range', min: 0.5, max: 8, step: 0.25, default: 3, fmt: fmt2, group: 'general' },
+        { key: 'leafColor',   label: 'leaf color',   type: 'color', default: '#56822a', group: 'appearance' },
+        { key: 'bloomColor',  label: 'bloom color',  type: 'color', default: '#c4a8e6', group: 'lifecycle' },
+        { key: 'fruitColor',  label: 'fruit color',  type: 'color', default: '#3a1a4a', group: 'lifecycle' },
     ],
     fern: [
-        { key: 'leafletPairs',  label: 'leaflet pairs', type: 'int',   min: 4, max: 30, default: 14 },
-        { key: 'length',        label: 'length',        type: 'range', min: 0.5, max: 3, step: 0.1, default: 1.5, fmt: fmt2 },
-        { key: 'stemRadius',    label: 'stem radius',   type: 'range', min: 0.005, max: 0.04, step: 0.001, default: 0.012, fmt: fmt3 },
-        { key: 'leafletLength', label: 'leaflet length',type: 'range', min: 0.1, max: 0.7, step: 0.02, default: 0.32, fmt: fmt2 },
-        { key: 'curvature',     label: 'curvature',     type: 'range', min: 0.2, max: 3, step: 0.1, default: 1.4, fmt: fmt2 },
+        { key: 'leafletPairs',  label: 'leaflet pairs', type: 'int',   min: 4, max: 30, default: 14, group: 'general' },
+        { key: 'length',        label: 'length',        type: 'range', min: 0.5, max: 3, step: 0.1, default: 1.5, fmt: fmt2, group: 'general' },
+        { key: 'stemRadius',    label: 'stem radius',   type: 'range', min: 0.005, max: 0.04, step: 0.001, default: 0.012, fmt: fmt3, group: 'general' },
+        { key: 'leafletLength', label: 'leaflet len',   type: 'range', min: 0.1, max: 0.7, step: 0.02, default: 0.32, fmt: fmt2, group: 'general' },
+        { key: 'curvature',     label: 'curvature',     type: 'range', min: 0.2, max: 3, step: 0.1, default: 1.4, fmt: fmt2, group: 'general' },
+        { key: 'leafColor',     label: 'leaf color',    type: 'color', default: '#3e6a2c', group: 'appearance' },
     ],
     succulent: [
-        { key: 'leafCount',     label: 'leaf count',    type: 'int',   min: 5, max: 60, default: 24 },
-        { key: 'leafLength',    label: 'leaf length',   type: 'range', min: 0.1, max: 0.7, step: 0.02, default: 0.35, fmt: fmt2 },
-        { key: 'leafWidth',     label: 'leaf width',    type: 'range', min: 0.02, max: 0.18, step: 0.005, default: 0.06, fmt: fmt3 },
-        { key: 'leafThickness', label: 'leaf thickness',type: 'range', min: 0.005, max: 0.06, step: 0.002, default: 0.02, fmt: fmt3 },
-        { key: 'tilt',          label: 'tilt',          type: 'range', min: 0, max: 1.4, step: 0.05, default: 0.6, fmt: fmt2 },
+        { key: 'leafCount',     label: 'leaf count',    type: 'int',   min: 5, max: 80, default: 24, group: 'general' },
+        { key: 'leafLength',    label: 'leaf length',   type: 'range', min: 0.1, max: 1.0, step: 0.02, default: 0.35, fmt: fmt2, group: 'general' },
+        { key: 'leafWidth',     label: 'leaf width',    type: 'range', min: 0.02, max: 0.18, step: 0.005, default: 0.06, fmt: fmt3, group: 'general' },
+        { key: 'leafThickness', label: 'leaf thick',    type: 'range', min: 0.005, max: 0.06, step: 0.002, default: 0.02, fmt: fmt3, group: 'general' },
+        { key: 'tilt',          label: 'tilt',          type: 'range', min: 0, max: 1.4, step: 0.05, default: 0.6, fmt: fmt2, group: 'general' },
+        { key: 'color',         label: 'leaf color',    type: 'color', default: '#5a8e6a', group: 'appearance' },
+        { key: 'flowerColor',   label: 'flower color',  type: 'color', default: '#fbcd5a', group: 'lifecycle' },
     ],
     flower: [
-        { key: 'stemLength',  label: 'stem length',  type: 'range', min: 0.2, max: 1.6, step: 0.05, default: 0.9, fmt: fmt2 },
-        { key: 'stemRadius',  label: 'stem radius',  type: 'range', min: 0.005, max: 0.05, step: 0.001, default: 0.012, fmt: fmt3 },
-        { key: 'headSize',    label: 'head size',    type: 'range', min: 0.05, max: 0.4, step: 0.01, default: 0.18, fmt: fmt2 },
-        { key: 'petalCount',  label: 'petal count',  type: 'int',   min: 3, max: 24, default: 8 },
-        { key: 'layers',      label: 'petal layers', type: 'int',   min: 1, max: 5, default: 2 },
-        { key: 'petalShape',  label: 'petal shape',  type: 'select', options: ['petal', 'oval', 'pointed', 'lobed'], default: 'petal' },
-        { key: 'petalColor',  label: 'petal color',  type: 'color', default: '#ea527a' },
-        { key: 'centerColor', label: 'center color', type: 'color', default: '#ffd233' },
+        { key: 'stemLength',  label: 'stem length',  type: 'range', min: 0.2, max: 1.6, step: 0.05, default: 0.9, fmt: fmt2, group: 'general' },
+        { key: 'stemRadius',  label: 'stem radius',  type: 'range', min: 0.005, max: 0.05, step: 0.001, default: 0.012, fmt: fmt3, group: 'general' },
+        { key: 'headSize',    label: 'head size',    type: 'range', min: 0.05, max: 0.6, step: 0.01, default: 0.18, fmt: fmt2, group: 'general' },
+        { key: 'petalCount',  label: 'petal count',  type: 'int',   min: 3, max: 24, default: 8, group: 'general' },
+        { key: 'layers',      label: 'petal layers', type: 'int',   min: 1, max: 5, default: 1, group: 'general' },
+        { key: 'petalShape',  label: 'petal shape',  type: 'select', options: ['petal','oval','pointed','lobed'], default: 'petal', group: 'general' },
+        { key: 'petalBend',   label: 'petal bend',   type: 'range', min: -1, max: 1, step: 0.05, default: 0.5, fmt: fmt2, group: 'advanced' },
+        { key: 'petalCurl',   label: 'petal curl',   type: 'range', min: 0, max: 0.6, step: 0.02, default: 0.10, fmt: fmt2, group: 'advanced' },
+        { key: 'petalColor',  label: 'petal color',  type: 'color', default: '#ea527a', group: 'appearance' },
+        { key: 'centerColor', label: 'center color', type: 'color', default: '#ffd233', group: 'appearance' },
+        { key: 'stemColor',   label: 'stem color',   type: 'color', default: '#3d6e22', group: 'appearance' },
+    ],
+    rosebush: [
+        { key: 'bushHeight',  label: 'bush height',  type: 'range', min: 0.3, max: 3.0, step: 0.05, default: 1.0, fmt: fmt2, group: 'general' },
+        { key: 'bushRadius',  label: 'bush radius',  type: 'range', min: 0.2, max: 2.0, step: 0.05, default: 0.8, fmt: fmt2, group: 'general' },
+        { key: 'canes',       label: 'canes',        type: 'int',   min: 1, max: 8, default: 4, group: 'general' },
+        { key: 'attractorCount', label: 'branch density', type: 'int', min: 30, max: 240, default: 90, group: 'advanced' },
+        { key: 'petalCount',  label: 'petal count',  type: 'int',   min: 5, max: 24, default: 12, group: 'general' },
+        { key: 'bloomLayers', label: 'bloom layers', type: 'int',   min: 1, max: 6, default: 4, group: 'general' },
+        { key: 'petalColor',  label: 'petal color',  type: 'color', default: '#d11f3a', group: 'appearance' },
+        { key: 'leafColor',   label: 'leaf color',   type: 'color', default: '#2c5328', group: 'appearance' },
+        { key: 'stemColor',   label: 'stem color',   type: 'color', default: '#5a3e22', group: 'appearance' },
+        { key: 'thornColor',  label: 'thorn color',  type: 'color', default: '#5a3820', group: 'appearance' },
+        { key: 'petalBend',   label: 'petal bend',   type: 'range', min: 0, max: 1, step: 0.05, default: 0.55, fmt: fmt2, group: 'advanced' },
+        { key: 'petalCurl',   label: 'petal curl',   type: 'range', min: 0, max: 0.6, step: 0.02, default: 0.30, fmt: fmt2, group: 'advanced' },
+        { key: 'hipColor',    label: 'hip color',    type: 'color', default: '#b81818', group: 'lifecycle' },
+    ],
+    cactus: [
+        { key: 'shape',       label: 'shape',        type: 'select', options: ['barrel','pricklyPear','saguaro','hedgehog'], default: 'barrel', group: 'general' },
+        { key: 'height',      label: 'height',       type: 'range', min: 0.2, max: 8, step: 0.05, default: 1.2, fmt: fmt2, group: 'general' },
+        { key: 'radius',      label: 'radius',       type: 'range', min: 0.1, max: 1.0, step: 0.02, default: 0.45, fmt: fmt2, group: 'general' },
+        { key: 'ribs',        label: 'ribs (barrel)',type: 'int',   min: 6, max: 24, default: 14, group: 'advanced' },
+        { key: 'pads',        label: 'pads (pear)',  type: 'int',   min: 1, max: 12, default: 4, group: 'advanced' },
+        { key: 'arms',        label: 'arms (saguaro)', type: 'int', min: 0, max: 6, default: 2, group: 'advanced' },
+        { key: 'color',       label: 'body color',   type: 'color', default: '#4a7d3a', group: 'appearance' },
+        { key: 'flowerColor', label: 'flower color', type: 'color', default: '#fbcd3a', group: 'lifecycle' },
+        { key: 'fruitColor',  label: 'fruit color',  type: 'color', default: '#c45a4e', group: 'lifecycle' },
+    ],
+    palm: [
+        { key: 'height',      label: 'height',       type: 'range', min: 1.5, max: 16, step: 0.2, default: 7, fmt: fmt2, group: 'general' },
+        { key: 'trunkRadius', label: 'trunk radius', type: 'range', min: 0.05, max: 0.5, step: 0.01, default: 0.18, fmt: fmt2, group: 'general' },
+        { key: 'fronds',      label: 'fronds',       type: 'int',   min: 4, max: 24, default: 12, group: 'general' },
+        { key: 'frondLength', label: 'frond length', type: 'range', min: 0.5, max: 3.5, step: 0.1, default: 2.2, fmt: fmt2, group: 'general' },
+        { key: 'trunkColor',  label: 'trunk color',  type: 'color', default: '#7a5a3c', group: 'appearance' },
+        { key: 'frondColor',  label: 'frond color',  type: 'color', default: '#3a6a2a', group: 'appearance' },
+        { key: 'fruitColor',  label: 'fruit color',  type: 'color', default: '#5e3a18', group: 'lifecycle' },
     ],
 };
 
-// Common controls always shown above per-archetype controls.
+const ARCHETYPES = Object.keys(archetypeSchema);
+
 const commonSchema = [
-    { key: 'archetype', label: 'type',  type: 'select',
-      options: Object.keys(archetypeSchema), default: 'tree' },
-    { key: 'age',       label: 'age',   type: 'range', min: 0, max: 1, step: 0.01, default: 1, fmt: fmt2 },
-    { key: 'seed',      label: 'seed',  type: 'int',   min: 0, max: 99999, default: 1 },
+    { key: 'archetype', label: 'type',    type: 'select', options: ARCHETYPES, default: 'tree', group: '_' },
+    { key: 'species',   label: 'species', type: 'select', options: [], default: '', group: '_' },
+    { key: 'age',       label: 'age',     type: 'range', min: 0, max: 1, step: 0.005, default: 1, fmt: fmt2, group: '_' },
+    { key: 'seed',      label: 'seed',    type: 'int',   min: 0, max: 99999, default: 1, group: '_' },
 ];
 
 const forestSchema = [
-    { key: 'archetype',    label: 'type',  type: 'select',
-      options: Object.keys(archetypeSchema), default: 'tree' },
-    { key: 'count',        label: 'count', type: 'int', min: 1, max: 250, default: 32 },
-    { key: 'patchSize',    label: 'patch size', type: 'range', min: 6, max: 300, step: 1, default: 60, fmt: fmt2 },
-    { key: 'jitter',       label: 'packing', type: 'range', min: 0, max: 1, step: 0.02, default: 0.55, fmt: fmt2 },
-    { key: 'sharing',      label: 'canopy sharing', type: 'range', min: 0, max: 1, step: 0.02, default: 0.85, fmt: fmt2 },
-    { key: 'canopyGap',    label: 'canopy gap', type: 'range', min: 0, max: 2, step: 0.05, default: 0.4, fmt: fmt2 },
-    { key: 'maxCanopyR',   label: 'max canopy R', type: 'range', min: 1, max: 25, step: 0.2, default: 9, fmt: fmt2 },
-    { key: 'baseHeight',   label: 'tree height', type: 'range', min: 2, max: 60, step: 0.5, default: 14, fmt: fmt2 },
-    { key: 'baseTrunkR',   label: 'trunk radius', type: 'range', min: 0.05, max: 3, step: 0.05, default: 0.45, fmt: fmt2 },
-    { key: 'sizeJitter',   label: 'size jitter', type: 'range', min: 0, max: 1, step: 0.02, default: 0.45, fmt: fmt2 },
+    { key: 'archetype',    label: 'type',    type: 'select', options: ARCHETYPES, default: 'tree', group: '_' },
+    { key: 'species',      label: 'species', type: 'select', options: [], default: '', group: '_' },
+    { key: 'speciesMix',   label: 'mix',     type: 'select', options: ['single','mixed-genus','random'], default: 'mixed-genus', group: '_' },
+    { key: 'count',        label: 'count', type: 'int', min: 1, max: 250, default: 32, group: 'forest' },
+    { key: 'patchSize',    label: 'patch size', type: 'range', min: 6, max: 300, step: 1, default: 60, fmt: fmt2, group: 'forest' },
+    { key: 'jitter',       label: 'packing', type: 'range', min: 0, max: 1, step: 0.02, default: 0.55, fmt: fmt2, group: 'forest' },
+    { key: 'sharing',      label: 'canopy sharing', type: 'range', min: 0, max: 1, step: 0.02, default: 0.85, fmt: fmt2, group: 'forest' },
+    { key: 'canopyGap',    label: 'canopy gap', type: 'range', min: 0, max: 2, step: 0.05, default: 0.4, fmt: fmt2, group: 'forest' },
+    { key: 'maxCanopyR',   label: 'max canopy R', type: 'range', min: 1, max: 25, step: 0.2, default: 9, fmt: fmt2, group: 'forest' },
+    { key: 'baseHeight',   label: 'tree height', type: 'range', min: 2, max: 60, step: 0.5, default: 14, fmt: fmt2, group: 'forest' },
+    { key: 'baseTrunkR',   label: 'trunk radius', type: 'range', min: 0.05, max: 3, step: 0.05, default: 0.45, fmt: fmt2, group: 'forest' },
+    { key: 'sizeJitter',   label: 'size jitter', type: 'range', min: 0, max: 1, step: 0.02, default: 0.45, fmt: fmt2, group: 'forest' },
     { key: 'shapeMix',     label: 'shape mix', type: 'select',
-      options: ['round-only', 'broadleaf-mix', 'all-shapes'], default: 'broadleaf-mix' },
-    { key: 'age',          label: 'age',   type: 'range', min: 0, max: 1, step: 0.01, default: 1, fmt: fmt2 },
-    { key: 'seed',         label: 'seed',  type: 'int',   min: 0, max: 99999, default: 1 },
+      options: ['round-only','broadleaf-mix','all-shapes'], default: 'broadleaf-mix', group: 'forest' },
+    { key: 'ageJitter',    label: 'age jitter', type: 'range', min: 0, max: 0.6, step: 0.02, default: 0.15, fmt: fmt2, group: 'forest' },
+    { key: 'age',          label: 'age',   type: 'range', min: 0, max: 1, step: 0.005, default: 1, fmt: fmt2, group: '_' },
+    { key: 'seed',         label: 'seed',  type: 'int',   min: 0, max: 99999, default: 1, group: '_' },
 ];
 
-// --- Mode + parameter state -----------------------------------------------
+const GROUP_ORDER = ['_', 'general', 'lifecycle', 'appearance', 'advanced', 'forest'];
+const GROUP_LABELS = { '_': '', general: 'General', lifecycle: 'Life cycle', appearance: 'Appearance', advanced: 'Advanced', forest: 'Forest' };
+
+// ─── Mode + parameter state ───────────────────────────────────────────────
 
 let mode = 'single';
-const state = {};      // current parameter values
-const inputs = {};     // DOM input refs by key
+const state = {};
+const inputs = {};
 
 function mulberry32(seed) {
     let s = (seed >>> 0) || 1;
@@ -237,67 +304,127 @@ function mulberry32(seed) {
 }
 
 function hexToRgb(hex) {
-    const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(String(hex || ''));
     if (!m) return [0.4, 0.6, 0.3];
     return [parseInt(m[1], 16) / 255, parseInt(m[2], 16) / 255, parseInt(m[3], 16) / 255];
 }
 
 function setDefaults() {
     const archSchema = archetypeSchema[state.archetype || 'tree'] || [];
-    const schema = mode === 'single'
-        ? commonSchema.concat(archSchema)
-        : forestSchema;
+    const schema = mode === 'single' ? commonSchema.concat(archSchema) : forestSchema;
     for (const f of schema) {
         if (state[f.key] === undefined) state[f.key] = f.default;
+    }
+    // Default species: first one from the table.
+    const list = Recipes.speciesList(state.archetype) || [];
+    if (state.species === undefined || state.species === '') {
+        state.species = list[0] || '';
     }
 }
 
 function clearStateForArchetypeSwitch() {
-    // When user switches archetype/mode, drop archetype-specific keys so
-    // their defaults reload. Keep common keys (age, seed).
-    const keep = new Set(['archetype', 'age', 'seed', 'count', 'patchSize',
-        'jitter', 'sharing', 'sizeJitter', 'shapeMix']);
+    const keep = new Set(['archetype','age','seed','count','patchSize','jitter','sharing',
+        'canopyGap','maxCanopyR','baseHeight','baseTrunkR','sizeJitter','shapeMix','speciesMix','ageJitter']);
     for (const k of Object.keys(state)) {
         if (!keep.has(k)) delete state[k];
     }
 }
 
+// Build the species options for the current archetype.
+function speciesOptions() {
+    const list = Recipes.speciesList(state.archetype || 'tree') || [];
+    return [''].concat(list);   // '' = no species (use raw archetype defaults)
+}
+
+// ─── Stage indicator bar ──────────────────────────────────────────────────
+
+function buildStageBar() {
+    const bar = document.getElementById('stage-bar');
+    bar.innerHTML = '';
+    const arch = state.archetype || 'tree';
+    const supported = stagesForArchetype(arch, currentBuildOpts());
+    const supportedSet = new Set(supported);
+
+    // Map age01 → which stage of `supported`
+    const r = Recipes.resolveStage(supported, state.age ?? 1);
+    const activeStage = r.stage;
+
+    for (const s of STAGES) {
+        const pill = document.createElement('div');
+        pill.className = 'stagepill';
+        pill.textContent = s;
+        if (supportedSet.has(s)) {
+            pill.classList.add('supported');
+            if (s === activeStage) pill.classList.add('active');
+            pill.addEventListener('click', () => {
+                // Jump age to centre of this stage in the supported list.
+                const idx = supported.indexOf(s);
+                if (idx < 0) return;
+                state.age = (idx + 0.5) / supported.length;
+                if (inputs.age) inputs.age.value = state.age;
+                regenerate(false);
+            });
+        } else {
+            pill.classList.add('disabled');
+        }
+        bar.appendChild(pill);
+    }
+}
+
+function currentBuildOpts() {
+    // Snapshot of state with species applied (for determining which stages
+    // are supported — e.g. trees only have flowering+fruiting if the
+    // species defines bloom/fruit colors). Returns a *plain* options
+    // object the dispatchers will receive.
+    const opts = { archetype: state.archetype, species: state.species };
+    const archSchema = archetypeSchema[state.archetype] || [];
+    for (const f of archSchema) {
+        if (state[f.key] !== undefined) opts[f.key] = state[f.key];
+    }
+    const SP = (typeof Recipes !== 'undefined' ? Recipes.Species : null);
+    if (opts.species && SP && SP[opts.archetype] && SP[opts.archetype][opts.species]) {
+        Object.assign(opts, SP[opts.archetype][opts.species], opts);
+    }
+    return opts;
+}
+
+// ─── Panel build ──────────────────────────────────────────────────────────
+
 function buildPanel() {
     const params = document.getElementById('params');
     params.innerHTML = '';
-    inputs.clear && inputs.clear();
     for (const k of Object.keys(inputs)) delete inputs[k];
 
     const archSchema = archetypeSchema[state.archetype || 'tree'] || [];
-    const schema = mode === 'single'
-        ? commonSchema.concat(archSchema)
-        : forestSchema;
+    const schema = mode === 'single' ? commonSchema.concat(archSchema) : forestSchema;
 
-    let currentSection = null;
+    // Group rows by their `group` field; render each non-underscore group
+    // inside a <details>. Underscore = always-shown common controls.
+    const groupedRows = {};
     for (const f of schema) {
-        if (f.key === 'archetype' && currentSection === null) {
-            const h = document.createElement('h2');
-            h.textContent = mode === 'single' ? 'plant' : 'forest';
-            params.appendChild(h);
-            currentSection = 'plant';
-        }
-        if (f.key === 'count' && currentSection !== 'forest') {
-            currentSection = 'forest';
-        }
-        if (f.key === 'age' && currentSection !== 'common') {
-            const h = document.createElement('h2');
-            h.textContent = 'common';
-            params.appendChild(h);
-            currentSection = 'common';
-        }
-        if (mode === 'single' && f === archSchema[0]) {
-            const h = document.createElement('h2');
-            h.textContent = state.archetype;
-            params.appendChild(h);
-            currentSection = 'arch';
-        }
-        params.appendChild(buildRow(f));
+        const g = f.group || 'general';
+        if (!groupedRows[g]) groupedRows[g] = [];
+        groupedRows[g].push(f);
     }
+
+    for (const g of GROUP_ORDER) {
+        const rows = groupedRows[g];
+        if (!rows || rows.length === 0) continue;
+        if (g === '_') {
+            for (const f of rows) params.appendChild(buildRow(f));
+        } else {
+            const det = document.createElement('details');
+            det.className = 'group';
+            det.open = (g === 'general' || g === 'lifecycle' || g === 'forest');
+            const sum = document.createElement('summary');
+            sum.textContent = GROUP_LABELS[g];
+            det.appendChild(sum);
+            for (const f of rows) det.appendChild(buildRow(f));
+            params.appendChild(det);
+        }
+    }
+
+    buildStageBar();
 }
 
 function buildRow(f) {
@@ -307,7 +434,26 @@ function buildRow(f) {
     lab.textContent = f.label;
     row.appendChild(lab);
 
-    const val = state[f.key];
+    let val = state[f.key];
+    if (f.key === 'species') {
+        // Species select uses dynamic options based on archetype.
+        const sel = document.createElement('select');
+        for (const opt of speciesOptions()) {
+            const o = document.createElement('option');
+            o.value = opt; o.textContent = opt || '(none)';
+            if (opt === val) o.selected = true;
+            sel.appendChild(o);
+        }
+        sel.addEventListener('change', () => {
+            state.species = sel.value;
+            buildStageBar();
+            regenerate(false);
+        });
+        row.appendChild(sel);
+        inputs[f.key] = sel;
+        return row;
+    }
+
     if (f.type === 'range') {
         const inp = document.createElement('input');
         inp.type = 'range';
@@ -321,10 +467,10 @@ function buildRow(f) {
             const v = parseFloat(inp.value);
             state[f.key] = v;
             out.textContent = fmt(v);
+            if (f.key === 'age') buildStageBar();
             scheduleRegen();
         });
-        row.appendChild(inp);
-        row.appendChild(out);
+        row.appendChild(inp); row.appendChild(out);
         inputs[f.key] = inp;
     } else if (f.type === 'int') {
         const inp = document.createElement('input');
@@ -351,10 +497,14 @@ function buildRow(f) {
             if (f.key === 'archetype') {
                 clearStateForArchetypeSwitch();
                 state.archetype = sel.value;
+                state.species = ''; // reset; setDefaults picks first
                 setDefaults();
                 buildPanel();
                 regenerate(true);
+            } else if (f.key === 'shape') {
+                regenerate(false);
             } else {
+                buildStageBar();
                 regenerate(false);
             }
         });
@@ -374,7 +524,7 @@ function buildRow(f) {
     return row;
 }
 
-// --- Plant generation ------------------------------------------------------
+// ─── Plant generation ─────────────────────────────────────────────────────
 
 let plantNodes = [];
 
@@ -391,22 +541,17 @@ function spawnPart(part, tx, ty, tz) {
         color: part.color || [0.6, 0.6, 0.6],
         metallic: part.metallic ?? 0.0,
         roughness: part.roughness ?? 0.9,
-        // Plant geometry — leaf cards, petals, blade strips — is thin and
-        // visible from both sides. Default to twoSided so foliage doesn't
-        // disappear when viewed from behind. Solid parts (trunks, stems)
-        // can opt out by setting `twoSided: false` on the part.
         twoSided: part.twoSided ?? true,
-        castsShadow: true,
-        receivesShadow: true,
+        castsShadow: true, receivesShadow: true,
     });
 }
 
 function buildSinglePlantOpts() {
     const archSchema = archetypeSchema[state.archetype] || [];
-    const opts = { seed: state.seed | 0, age01: state.age };
+    const opts = { seed: state.seed | 0, age01: state.age, species: state.species || undefined };
     for (const f of archSchema) {
         let v = state[f.key];
-        if (f.type === 'color') v = hexToRgb(v);
+        if (v === undefined) continue;
         opts[f.key] = v;
     }
     return opts;
@@ -416,26 +561,36 @@ function regenerateSingle() {
     destroyNodes();
     const t0 = performance.now();
     const opts = buildSinglePlantOpts();
-    const result = Recipes[state.archetype](opts);
-    // Resize ground to fit the plant footprint so big trees don't float
-    // off a tiny tile.
+    let result;
+    try {
+        result = Recipes[state.archetype](opts);
+    } catch (e) {
+        console.error('flora: recipe error', e);
+        document.getElementById('stats').textContent = 'error: ' + e.message;
+        return null;
+    }
+    if (!result) return null;
     if (result.aabbMin && result.aabbMax) {
         const footprint = Math.max(
             Math.abs(result.aabbMin[0]), Math.abs(result.aabbMax[0]),
             Math.abs(result.aabbMin[2]), Math.abs(result.aabbMax[2]),
         );
-        resizeGroundFor(Math.max(10, footprint * 3));
+        resizeGroundFor(Math.max(2, footprint * 3));
     }
     const ms = performance.now() - t0;
-    let partCount = 0;
+    let partCount = 0, triCount = 0;
     if (result.parts) {
         for (const p of result.parts) {
             const node = spawnPart(p, 0, 0, 0);
-            if (node) { plantNodes.push(node); partCount++; }
+            if (node) {
+                plantNodes.push(node);
+                partCount++;
+                if (p.mesh && p.mesh.triangleCount !== undefined) triCount += p.mesh.triangleCount;
+            }
         }
     }
     document.getElementById('stats').textContent =
-        `${state.archetype} · ${ms.toFixed(1)} ms · ${partCount} parts`;
+        `${state.archetype}${state.species ? ' · ' + state.species : ''} · ${ms.toFixed(1)} ms · ${partCount} parts · ${triCount} tris`;
     return result;
 }
 
@@ -446,41 +601,25 @@ function fitCameraToBounds(min, max) {
     const sx = max[0] - min[0], sy = max[1] - min[1], sz = max[2] - min[2];
     const ext = Math.max(sx, sy, sz);
     cam.target = [cx, cy, cz];
-    cam.radius = Math.max(1.0, ext * 2.0);
+    cam.radius = Math.max(0.4, ext * 2.0);
     applyCamera();
 }
 
-// --- Forest mode -----------------------------------------------------------
-//
-// Places `count` plants on a jittered grid of side `patchSize`. For tree-
-// like archetypes (tree, conifer) each instance gets per-tree variation in
-// height, trunk radius, canopy radius, shape, and a "canopy lean" computed
-// from neighbor positions: each tree's canopy shifts away from the
-// weighted-mean direction of its neighbors and the side facing into the
-// crowd is squashed (canopyAsymmetry) — readable phototropism / crown
-// shyness without a physical simulation.
+// ─── Forest mode ──────────────────────────────────────────────────────────
 
-const TREE_LIKE = new Set(['tree', 'conifer', 'shrub']);
-const BROADLEAF_SHAPES = ['round', 'oval', 'umbrella', 'vase', 'spreading', 'irregular', 'weeping'];
-
-let groundNode = groundPlane;
-function resizeGroundFor(patch) {
-    const half = Math.max(10, patch * 0.7);
-    if (groundNode && groundNode.destroy) groundNode.destroy();
-    groundNode = scene.createMesh({
-        mesh: 'plane',
-        halfW: half, halfD: half,
-        y: 0,
-        color: '#9aa18f',
-        metallic: 0.0,
-        roughness: 0.95,
-        receivesShadow: true,
-    });
-}
+const TREE_LIKE = new Set(['tree','conifer','shrub','rosebush']);
+const BROADLEAF_SHAPES = ['round','oval','umbrella','vase','spreading','irregular','weeping'];
 
 function pickShape(rng, mix) {
     if (mix === 'round-only') return 'round';
     const list = mix === 'all-shapes' ? Recipes.CANOPY_SHAPES : BROADLEAF_SHAPES;
+    return list[(rng() * list.length) | 0];
+}
+
+function pickSpecies(archetype, mix, rng, pinned) {
+    const list = Recipes.speciesList(archetype) || [];
+    if (list.length === 0) return '';
+    if (mix === 'single') return pinned || list[0];
     return list[(rng() * list.length) | 0];
 }
 
@@ -495,45 +634,31 @@ function regenerateForest() {
     const maxCanopyR = state.maxCanopyR;
     const sizeJitter = state.sizeJitter;
     const shapeMix = state.shapeMix;
+    const speciesMix = state.speciesMix || 'mixed-genus';
+    const ageJitter = state.ageJitter ?? 0;
     const baseSeed = state.seed | 0;
     const age = state.age;
 
-    resizeGroundFor(patch);
+    resizeGroundFor(Math.max(10, patch * 0.7));
 
-    // ── Per-archetype base parameters ────────────────────────────────────
     const useForestSize = TREE_LIKE.has(archetype);
     const baseHeight = useForestSize ? state.baseHeight :
         archetype === 'shrub' ? 1.5 : 4;
     const baseTrunk = useForestSize ? state.baseTrunkR :
         archetype === 'shrub' ? 0.06 : 0.18;
-    // Desired canopy is the forest-wide ceiling; per-tree desired radii
-    // are sampled from a size distribution biased toward smaller (most
-    // trees in a forest are not the biggest).
-    const maxR = useForestSize ? maxCanopyR :
-        archetype === 'shrub' ? 1.2 : 1.5;
+    const maxR = useForestSize ? maxCanopyR : (archetype === 'shrub' ? 1.2 : 1.5);
 
-    // ── Poisson-style placement ──────────────────────────────────────────
-    // Each candidate gets a desired canopy radius up-front; placement
-    // requires the candidate to be at least (r_i + r_j) * 0.85 + gap from
-    // every previously-placed tree, so big trees claim more space and the
-    // small ones fill the gaps. Trees never spawn inside another tree's
-    // canopy footprint — that's the "no growth in shade" rule. The later
-    // Voronoi tessellation only does fine adjustments to crown radii.
     const placeRng = mulberry32(baseSeed * 7919);
     const placeGap = gapWidth + maxR * 0.05;
-    const minDesired = useForestSize ? 0.45 : 0.7;  // fraction of maxR
-    // Sort desired radii biggest-first so the layout is dominated by big
-    // trees and small ones backfill — matches how a real forest is read.
+    const minDesired = useForestSize ? 0.45 : 0.7;
     const desired = [];
     for (let i = 0; i < count; i++) {
-        const sizeT = Math.pow(placeRng(), 1.4);            // bias toward smaller
-        const sizeFrac = 1 - sizeT * (1 - minDesired);      // [minDesired, 1] of maxR
+        const sizeT = Math.pow(placeRng(), 1.4);
+        const sizeFrac = 1 - sizeT * (1 - minDesired);
         const sjit = 1 + (placeRng() - 0.5) * sizeJitter * 0.5;
         desired.push(Math.max(0.4, maxR * sizeFrac * sjit));
     }
-    // jitter slider now controls how willing big trees are to share space:
-    // jitter=0 → strictly Poisson (big gaps), jitter=1 → tighter packing.
-    const overlapAllow = 0.7 + jitter * 0.25; // 0.70..0.95 of (r_i + r_j)
+    const overlapAllow = 0.7 + jitter * 0.25;
     desired.sort((a, b) => b - a);
 
     const positions = [];
@@ -541,8 +666,6 @@ function regenerateForest() {
     for (const r of desired) {
         if (positions.length >= count) break;
         let placed = false;
-        // Number of attempts per size grows for smaller trees so they
-        // can hunt for gaps. Bigger trees give up sooner and we move on.
         const maxAttempts = 40;
         for (let attempt = 0; attempt < maxAttempts; attempt++) {
             const x = (placeRng() - 0.5) * patch;
@@ -552,29 +675,19 @@ function regenerateForest() {
                 const dx = x - positions[i][0];
                 const dz = z - positions[i][1];
                 const d = Math.sqrt(dx * dx + dz * dz);
-                if (d < (r + placedR[i]) * overlapAllow + placeGap) {
-                    ok = false; break;
-                }
+                if (d < (r + placedR[i]) * overlapAllow + placeGap) { ok = false; break; }
             }
-            if (ok) {
-                positions.push([x, z]);
-                placedR.push(r);
-                placed = true;
-                break;
-            }
+            if (ok) { positions.push([x, z]); placedR.push(r); placed = true; break; }
         }
-        // If we couldn't place this radius the patch is full at this size
-        // — silently skip; smaller radii later in the list will still fit.
     }
 
     const trees = positions.map((pos, i) => {
         const r = mulberry32(baseSeed * 31 + i * 1009 + 17);
-        // Height correlates loosely with canopy size (bigger trees tend to
-        // be taller in a real forest), then per-tree jitter on top.
         const sizeFrac = placedR[i] / Math.max(0.001, maxR);
-        const corrH = 0.55 + 0.45 * sizeFrac;       // 0.55..1.0 of base
+        const corrH = 0.55 + 0.45 * sizeFrac;
         const heightK = corrH * (1 + (r() - 0.5) * sizeJitter * 0.4);
         const trunkK  = corrH * (1 + (r() - 0.5) * sizeJitter * 0.3);
+        const species = pickSpecies(archetype, speciesMix, r, state.species);
         return {
             x: pos[0], z: pos[1],
             height: Math.max(0.5, baseHeight * heightK),
@@ -586,19 +699,11 @@ function regenerateForest() {
             seed: (baseSeed * 17 + i * 113 + 1) | 0,
             colorJ: (r() - 0.5) * 0.08,
             shiftX: 0, shiftZ: 0, asym: 0,
+            species,
+            age01: Math.max(0, Math.min(1, age + (r() - 0.5) * ageJitter * 2)),
         };
     });
 
-    // ── Canopy tessellation (Voronoi-style packing) ────────────────────────
-    // Each tree's effective horizontal canopy radius is bounded by the
-    // distance to the nearest neighbor's canopy edge minus a small gap
-    // (crown shyness). We iterate because the bound is mutual: tree i's
-    // allowed radius depends on j's, and vice versa. After ~6 sweeps the
-    // values converge to a non-overlapping packing — canopies grow toward
-    // open sky and stop just shy of touching.
-    //
-    // The `sharing` slider blends between unconstrained desired radii
-    // (sharing=0) and the fully-packed solution (sharing=1).
     if (TREE_LIKE.has(archetype) && trees.length > 1) {
         const minR = 0.3;
         const cur = trees.map((t) => t.desiredR);
@@ -610,33 +715,22 @@ function regenerateForest() {
                     if (i === j) continue;
                     const dx = trees[i].x - trees[j].x;
                     const dz = trees[i].z - trees[j].z;
-                    const d = Math.sqrt(dx * dx + dz * dz);
+                    const d = Math.sqrt(dx*dx + dz*dz);
                     const a = d - cur[j] - gapWidth;
                     if (a < avail) avail = a;
                 }
                 if (!isFinite(avail)) avail = trees[i].desiredR;
-                // The packed value is min(desired, avail) — never grow
-                // beyond the user-supplied ceiling, but always shrink to
-                // fit a closer neighbor.
                 next[i] = Math.max(minR, Math.min(trees[i].desiredR, avail));
             }
-            // Damped update to avoid oscillation when neighbors swap roles.
             for (let i = 0; i < trees.length; i++) {
                 cur[i] = cur[i] + (next[i] - cur[i]) * 0.7;
             }
         }
         for (let i = 0; i < trees.length; i++) {
             const desired = trees[i].desiredR;
-            // Lerp from desired toward packed by sharing strength.
             trees[i].canopyRadius = Math.max(minR, desired + (cur[i] - desired) * sharing);
         }
 
-        // ── Secondary lean: shift canopy toward open sky ──────────────────
-        // After packing, compute each tree's "open direction" — the
-        // weighted-mean direction AWAY from close neighbors. The recipe
-        // applies this as a centre offset plus a gentle squash on the
-        // crowded side. Magnitude is small (≤ 25% of canopy radius) so it
-        // never breaks the packing.
         for (let i = 0; i < trees.length; i++) {
             const t = trees[i];
             let lx = 0, lz = 0, w = 0;
@@ -648,9 +742,7 @@ function regenerateForest() {
                 const reach = (t.canopyRadius + o.canopyRadius) * 1.4;
                 if (d <= 1e-3 || d >= reach) continue;
                 const wt = 1 - d / reach;
-                lx += (dx / d) * wt;
-                lz += (dz / d) * wt;
-                w += wt;
+                lx += (dx / d) * wt; lz += (dz / d) * wt; w += wt;
             }
             const llen = Math.sqrt(lx * lx + lz * lz);
             if (llen > 1e-6 && w > 0) {
@@ -662,14 +754,14 @@ function regenerateForest() {
         }
     }
 
-    // ── Build + place ─────────────────────────────────────────────────────
     const aabb = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
     const t0 = performance.now();
-    let totalParts = 0;
-    const baseColor = state.canopyColor ? hexToRgb(state.canopyColor) : null;
+    let totalParts = 0, totalTris = 0;
     for (const t of trees) {
         const opts = {
-            seed: t.seed, age01: age,
+            seed: t.seed,
+            age01: t.age01,
+            species: t.species,
             height: t.height,
             trunkRadius: t.trunkRadius,
             canopyRadius: t.canopyRadius,
@@ -677,22 +769,20 @@ function regenerateForest() {
             blobCount: t.blobCount,
             canopyShift: [t.shiftX, 0, t.shiftZ],
             canopyAsymmetry: t.asym,
-            radius: t.canopyRadius,  // shrub uses .radius
+            radius: t.canopyRadius,
+            bushHeight: t.height * 0.5,
+            bushRadius: t.canopyRadius,
         };
-        // Slight per-tree color drift on green channel.
-        if (TREE_LIKE.has(archetype)) {
-            const c = baseColor || [0.30, 0.55, 0.22];
-            opts.canopyColor = [
-                Math.max(0, Math.min(1, c[0] + t.colorJ * 0.4)),
-                Math.max(0, Math.min(1, c[1] + t.colorJ)),
-                Math.max(0, Math.min(1, c[2] + t.colorJ * 0.5)),
-            ];
-        }
-        const result = Recipes[archetype](opts);
-        if (!result.parts) continue;
+        let result;
+        try { result = Recipes[archetype](opts); }
+        catch (e) { console.error('flora: forest recipe error', e); continue; }
+        if (!result || !result.parts) continue;
         for (const p of result.parts) {
             const node = spawnPart(p, t.x, 0, t.z);
-            if (node) { plantNodes.push(node); totalParts++; }
+            if (node) {
+                plantNodes.push(node); totalParts++;
+                if (p.mesh && p.mesh.triangleCount !== undefined) totalTris += p.mesh.triangleCount;
+            }
         }
         const mn = result.aabbMin, mx = result.aabbMax;
         if (mn && mx) {
@@ -706,7 +796,7 @@ function regenerateForest() {
     }
     const ms = performance.now() - t0;
     document.getElementById('stats').textContent =
-        `forest · ${count} ${archetype}${count === 1 ? '' : 's'} · ${ms.toFixed(0)} ms · ${totalParts} parts`;
+        `forest · ${trees.length} ${archetype}${trees.length === 1 ? '' : 's'} · ${ms.toFixed(0)} ms · ${totalParts} parts · ${totalTris} tris`;
 
     if (!isFinite(aabb.min[0])) {
         aabb.min = [-patch * 0.5, 0, -patch * 0.5];
@@ -714,6 +804,36 @@ function regenerateForest() {
     }
     return { aabbMin: aabb.min, aabbMax: aabb.max };
 }
+
+// ─── Lifecycle preview animation ──────────────────────────────────────────
+
+let animActive = false;
+let animStart = 0;
+const ANIM_PERIOD_MS = 12000;
+
+function animTick(t) {
+    if (!animActive) return;
+    const elapsed = (t - animStart) % ANIM_PERIOD_MS;
+    const p = elapsed / ANIM_PERIOD_MS;        // 0..1
+    state.age = p;
+    if (inputs.age) inputs.age.value = p;
+    buildStageBar();
+    regenerate(false);
+    requestAnimationFrame(animTick);
+}
+
+function setAnimActive(on) {
+    animActive = on;
+    const btn = document.getElementById('anim');
+    btn.classList.toggle('on', !!on);
+    btn.textContent = on ? '■ Cycle' : '▶ Cycle';
+    if (on) {
+        animStart = performance.now();
+        requestAnimationFrame(animTick);
+    }
+}
+
+// ─── Regenerate + scheduling ──────────────────────────────────────────────
 
 let regenTimer = null;
 function scheduleRegen() {
@@ -730,7 +850,7 @@ function regenerate(refit) {
     }
 }
 
-// --- Tabs + actions --------------------------------------------------------
+// ─── Tabs + actions ───────────────────────────────────────────────────────
 
 document.querySelectorAll('.tab').forEach((t) => {
     t.addEventListener('click', () => {
@@ -739,7 +859,6 @@ document.querySelectorAll('.tab').forEach((t) => {
         document.querySelectorAll('.tab').forEach((x) => x.classList.remove('active'));
         t.classList.add('active');
         mode = next;
-        // Reset state so each mode picks up its own defaults.
         for (const k of Object.keys(state)) delete state[k];
         setDefaults();
         buildPanel();
@@ -765,9 +884,38 @@ document.getElementById('reset').addEventListener('click', () => {
     needFitCamera = true;
     regenerate(true);
 });
+document.getElementById('anim').addEventListener('click', () => setAnimActive(!animActive));
 
-// --- Boot ------------------------------------------------------------------
+// ─── Boot ─────────────────────────────────────────────────────────────────
 
 setDefaults();
 buildPanel();
 regenerate(true);
+
+// Expose for headless test scripts.
+globalThis.__floraState = state;
+globalThis.__floraSetMode = (m) => {
+    if (m === mode) return;
+    document.querySelectorAll('.tab').forEach((x) => x.classList.remove('active'));
+    document.querySelector(`.tab[data-mode="${m}"]`).classList.add('active');
+    mode = m;
+    for (const k of Object.keys(state)) delete state[k];
+    setDefaults(); buildPanel(); needFitCamera = true; regenerate(true);
+};
+globalThis.__floraSetState = (patch) => {
+    if (patch.archetype && patch.archetype !== state.archetype) {
+        for (const k of Object.keys(state)) delete state[k];
+        Object.assign(state, patch);
+        setDefaults();
+    } else {
+        Object.assign(state, patch);
+    }
+    needFitCamera = true;
+    buildPanel();
+    regenerate(true);
+};
+globalThis.__floraRegenerate = () => regenerate(false);
+globalThis.__floraStats = () => ({
+    parts: plantNodes.length,
+    text: document.getElementById('stats').textContent,
+});
