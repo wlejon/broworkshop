@@ -285,14 +285,14 @@ function applyEnvironment() {
         rotation:  parseFloat(iblRotationIn.value),
     };
     for (const res of HDRI_RES_ORDER) {
-        const path = `apps/lighting-demo/hdri/${slug}_${res}.hdr`;
+        const path = `hdri/${slug}_${res}.hdr`;
         if (scene.setEnvironment({ ...opts, hdr: path })) {
             envStatus.textContent = `loaded ${res}`;
             envStatus.style.color = '#7bed9f';
             return;
         }
     }
-    envStatus.textContent = 'HDRI missing — run apps/lighting-demo/hdri/download.sh';
+    envStatus.textContent = 'HDRI missing — run demos/lighting-demo/hdri/download.sh';
     envStatus.style.color = '#fd9';
 }
 function applyIBLIntensity() {
