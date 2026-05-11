@@ -117,7 +117,7 @@ window.views.mesh = {
                         var fx=(x/gs-0.5)*4, fy=(y/gs-0.5)*4, fz=(z/gs-0.5)*4;
                         var d = Math.sqrt(fx*fx+fy*fy+fz*fz) - 1.5;
                         d += Math.sin(fx*3)*0.15 + Math.sin(fy*4)*0.1;
-                        field[z*gs*gs+y*gs+x] = -d;
+                        field[z*gs*gs+y*gs+x] = d;
                     }
             var cs = 4.0/gs;
             var mc = Mesh.marchingCubes(field,gs,gs,gs,0,cs); mc.center(); mc.computeNormals();
