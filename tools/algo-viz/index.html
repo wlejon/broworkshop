@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Algorithm Visualizer</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <aside id="sidebar">
+        <div id="brand">algo-viz</div>
+        <div id="viz-list"></div>
+        <div id="footer">All algorithms run in C++ via bro bindings.</div>
+    </aside>
+
+    <main id="main">
+        <header id="header">
+            <div id="title">—</div>
+            <div id="subtitle"></div>
+        </header>
+        <section id="params"></section>
+        <section id="stage"></section>
+    </main>
+
+    <script src="/lib/camera.js"></script>
+    <script src="viz/_registry.js"></script>
+    <script src="viz/pathfinding.js"></script>
+    <script src="viz/noise.js"></script>
+    <script src="viz/isosurface.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
