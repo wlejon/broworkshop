@@ -85,11 +85,21 @@
                 animFrame: null,
 
                 // Main tile state for the pre-render-wide + slide pattern.
-                tileOx: 0,           // grid origin of the current tile
+                tileOx: 0,           // grid origin of the current tile (Simplex GPU path)
                 tileRegenT: 0,       // ms of last full regen (rAF clock)
                 tileW: 0, tileH: 0,  // last allocated tile dims
                 tileDirty: true,     // structural params changed → force regen
-                tileBuf: null,       // Float32Array (CPU-path only)
+
+                // CPU/worker path: the heavy FastNoise2 gen runs off-thread, so
+                // the main loop never spikes on regen. cpuTileReady flips true
+                // once the first worker tile has been uploaded; until then we
+                // skip rendering rather than block.
+                cpuWorker: null,
+                cpuWorkerBusy: false,
+                cpuTileReady: false,
+                cpuTileOx: 0, cpuOy: 0,
+                cpuTileW: 0, cpuTileH: 0,
+                cpuSpareBuf: null,   // owned by main while worker is idle
 
                 // Thumbnails refresh at 1Hz; track last regen and whether
                 // any structural param changed.
@@ -121,21 +131,13 @@
                 [1.00, 240, 240, 240],
             ], 256);
 
-            // FastNoise nodes drive (a) the thumbnails always, and (b) the
-            // main tile when type !== 'Simplex' (Simplex goes through the
-            // GPU FBm shader). Rebuilt when structural params change.
-            let baseNode = null, fbmNode = null;
+            // Thumbnails sample the BASE noise on the main thread (small
+            // 96×96 reads, refreshes at 1Hz — negligible cost). The main
+            // tile's FBm sum is generated off-thread inside the Worker,
+            // which keeps its own pair of FastNoise nodes.
+            let baseNode = null;
             function rebuildNodes() {
                 baseNode = FastNoise.create(state.type);
-                if (state.octaves > 1) {
-                    fbmNode = FastNoise.FractalFBm();
-                    fbmNode.set('Source', baseNode);
-                    fbmNode.set('Octaves', state.octaves | 0);
-                    fbmNode.set('Gain', state.gain);
-                    fbmNode.set('Lacunarity', state.lacunarity);
-                } else {
-                    fbmNode = baseNode;
-                }
             }
             rebuildNodes();
 
@@ -175,12 +177,56 @@
                 state.thumbsDirty = true;
             }
 
-            // --- frame -----------------------------------------------------------
+            // --- CPU tile worker -------------------------------------------------
+            // The non-Simplex path generates a tile-wide field via FastNoise2 on
+            // the CPU; at the screen dimensions used here that's ~1–2M samples
+            // per regen and was producing a once-per-second main-thread spike.
+            // We push the gen onto a Worker and keep rendering the previously
+            // uploaded tile through the cheap viewRect-slide colormap path
+            // until the next tile lands.
 
-            function ensureTileBuf(w, h) {
-                if (!state.tileBuf || state.tileBuf.length < w * h) {
-                    state.tileBuf = bro.image.alloc(w, h, 1);
+            state.cpuWorker = new Worker('viz/noise-worker.js');
+            state.cpuWorker.onmessage = (e) => {
+                const r = e.data;
+                state.cpuWorkerBusy = false;
+                const buf = new Float32Array(r.buffer);
+                // Upload the new field. The viewRect points the cheap path
+                // back to wherever state.ox has drifted to during the gen.
+                const cw = mainCanvas.width | 0;
+                const ch = mainCanvas.height | 0;
+                bro.image.gpu.colormap(mainCanvas, buf, colorLut, {
+                    srcW: r.tileW, srcH: r.tileH,
+                    autoRange: true,
+                    viewRect: { x: state.ox - r.tileOx, y: 0, w: cw, h: ch },
+                });
+                state.cpuTileReady = true;
+                state.cpuTileOx = r.tileOx;
+                state.cpuOy = r.oy;
+                state.cpuTileW = r.tileW;
+                state.cpuTileH = r.tileH;
+                state.cpuSpareBuf = buf;  // recycle for the next request
+            };
+
+            function dispatchCpuTile(tileW, tileH) {
+                // Resize the reusable buffer if dims grew (or first call).
+                if (!state.cpuSpareBuf || state.cpuSpareBuf.length < tileW * tileH) {
+                    state.cpuSpareBuf = new Float32Array(tileW * tileH);
                 }
+                const buf = state.cpuSpareBuf;
+                state.cpuSpareBuf = null;  // ownership transferred to worker
+                state.cpuWorkerBusy = true;
+                state.cpuWorker.postMessage({
+                    type: state.type,
+                    octaves: state.octaves,
+                    gain: state.gain,
+                    lacunarity: state.lacunarity,
+                    frequency: state.frequency,
+                    seed: state.seed,
+                    tileOx: state.ox,
+                    oy: state.oy,
+                    tileW, tileH,
+                    buffer: buf.buffer,
+                }, [buf.buffer]);
             }
 
             function renderMain(now) {
@@ -197,24 +243,24 @@
 
                 const tileW = cw + EXTRA_BUFFER_PX;
                 const tileH = ch;
-                const scrollPx = state.ox - state.tileOx;
 
-                // Regen the tile when the buffer is exhausted, params changed,
-                // canvas size changed, or the regen timer has fired.
-                const needRegen = sized || state.tileDirty
-                    || scrollPx < 0
-                    || scrollPx > tileW - cw
-                    || tileW !== state.tileW || tileH !== state.tileH
-                    || (now - state.tileRegenT) >= TILE_REGEN_MS;
-
-                if (needRegen) {
-                    state.tileOx = state.ox;
-                    state.tileRegenT = now;
-                    state.tileDirty = false;
-                    state.tileW = tileW;
-                    state.tileH = tileH;
-
-                    if (state.type === 'Simplex') {
+                if (state.type === 'Simplex') {
+                    // GPU FBm: gen + colormap both happen on-thread but the
+                    // shader is fast enough to regen every frame would be fine
+                    // — we still tile-cache it because autoRange's EMA likes
+                    // a stable input.
+                    const scrollPx = state.ox - state.tileOx;
+                    const needRegen = sized || state.tileDirty
+                        || scrollPx < 0
+                        || scrollPx > tileW - cw
+                        || tileW !== state.tileW || tileH !== state.tileH
+                        || (now - state.tileRegenT) >= TILE_REGEN_MS;
+                    if (needRegen) {
+                        state.tileOx = state.ox;
+                        state.tileRegenT = now;
+                        state.tileDirty = false;
+                        state.tileW = tileW;
+                        state.tileH = tileH;
                         bro.image.gpu.fbm2D(mainCanvas, colorLut, {
                             type: 'Simplex',
                             frequency: state.frequency,
@@ -228,30 +274,35 @@
                             viewRect: { x: 0, y: 0, w: cw, h: ch },
                         });
                     } else {
-                        ensureTileBuf(tileW, tileH);
-                        fbmNode.genUniformGrid2DInto(
-                            state.tileBuf, state.tileOx, state.oy,
-                            tileW, tileH, state.frequency, state.seed);
-                        bro.image.gpu.colormap(mainCanvas, state.tileBuf, colorLut, {
-                            srcW: tileW, srcH: tileH,
-                            autoRange: true,
-                            viewRect: { x: 0, y: 0, w: cw, h: ch },
-                        });
-                    }
-                } else {
-                    // Cheap path: one colormap quad with a translated viewRect.
-                    const view = { x: scrollPx, y: 0, w: cw, h: ch };
-                    if (state.type === 'Simplex') {
                         bro.image.gpu.fbm2D(mainCanvas, colorLut, {
                             regenerate: false,
                             autoRange: true,
-                            viewRect: view,
+                            viewRect: { x: scrollPx, y: 0, w: cw, h: ch },
                         });
-                    } else {
+                    }
+                } else {
+                    // CPU/worker path. Dispatch a fresh tile when needed, then
+                    // always cheap-render the previously-uploaded one — the
+                    // worker thread does the FastNoise2 gen in the background.
+                    const cpuScroll = state.cpuTileReady
+                        ? state.ox - state.cpuTileOx : 0;
+                    const needNew = !state.cpuTileReady || state.tileDirty
+                        || sized
+                        || cpuScroll < 0
+                        || cpuScroll > tileW - cw
+                        || tileW !== state.cpuTileW || tileH !== state.cpuTileH
+                        || (now - state.tileRegenT) >= TILE_REGEN_MS;
+                    if (needNew && !state.cpuWorkerBusy) {
+                        state.tileDirty = false;
+                        state.tileRegenT = now;
+                        dispatchCpuTile(tileW, tileH);
+                    }
+                    if (state.cpuTileReady) {
                         bro.image.gpu.colormap(mainCanvas, null, colorLut, {
                             regenerate: false,
                             autoRange: true,
-                            viewRect: view,
+                            viewRect: { x: state.ox - state.cpuTileOx,
+                                        y: 0, w: cw, h: ch },
                         });
                     }
                 }
@@ -366,6 +417,10 @@
 
         destroy(handle) {
             if (handle.state.animFrame) cancelAnimationFrame(handle.state.animFrame);
+            if (handle.state.cpuWorker) {
+                handle.state.cpuWorker.terminate();
+                handle.state.cpuWorker = null;
+            }
             if (handle.wrap) handle.wrap.remove();
         },
     });
