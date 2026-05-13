@@ -88,7 +88,12 @@ body { display: flex; }
     background: #050505;
     min-height: 0;
 }
-#stage canvas {
+/* Auto-fullscreen rule for the legacy pattern of one canvas attached
+   directly to #stage (e.g. pathfinding.js does stage.appendChild(canvas)).
+   Use `>` so nested canvases — viz files that build their own layout
+   with multiple canvases inside intermediate wrappers — keep normal
+   flow and only get the position they explicitly opt into inline. */
+#stage > canvas {
     display: block;
     position: absolute;
     inset: 0;

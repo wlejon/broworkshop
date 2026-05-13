@@ -1,38 +1,40 @@
-// Isosurface extraction — marching cubes / dual contour / surface nets.
-// All three turn a scalar 3D field into a polygon mesh by finding where
-// the field crosses the iso level. The viz makes both halves of that
-// pipeline visible:
-//   - LEFT  3D scene view of the extracted mesh (the result)
-//   - RIGHT 2D slice through the field with the iso contour drawn via
-//           marching squares, and "active" cells (cells the algorithm
-//           would emit a polygon for) highlighted
-// Scrub the slice slider to move through Z. As you change `iso`, you can
-// watch the contour move on the slice AND the surface deform on the mesh.
+// Isosurface extraction — visualized as the algorithm RUNNING.
+//
+// LEFT  3D mesh from the selected algorithm. Unchanged.
+// RIGHT One big slice panel that animates the algorithm working cell by
+//       cell. A cursor sweeps through active cells in scan order. At each
+//       cell, the algorithm's micro-steps unfold over time and you watch
+//       the result accumulate behind the cursor:
+//
+//   marchingCubes
+//     highlight cell → classify corners (sign dots fade in) → pulse the
+//     matching entry in the 16-case table strip above the slice → draw
+//     the segment(s) the table emitted.
+//
+//   surfaceNets
+//     highlight cell → classify corners → edge crossings appear as dots →
+//     construction lines from each crossing converge on the cell centroid
+//     → dual vertex appears → threads extend to existing neighbor
+//     vertices.
+//
+//   dualContour
+//     highlight cell → classify corners → crossings appear → gradient
+//     normals extend as arrows from each crossing → tangent constraint
+//     lines extend perpendicular through each crossing → vertex appears
+//     at the constraints' intersection (QEF solution) → threads to
+//     neighbors.
+//
+// Controls: Play / Pause / Step / Reset, plus a speed slider. Switching
+// algo, field, iso, grid, seed, or slice z resets the sweep.
 
 (function () {
     const ALGOS = ['marchingCubes', 'dualContour', 'surfaceNets'];
     const FIELDS = ['sphere', 'torus', 'noise', 'gyroid'];
 
-    // Per-algorithm one-liner shown in the description panel.
-    const ALGO_BLURB = {
-        marchingCubes: 'Marching Cubes: each cell tests 8 corners against the iso level; '
-            + 'the 256-case table emits up to 5 triangles whose vertices are linearly '
-            + 'interpolated along each crossing edge. Always produces a topologically '
-            + 'consistent surface; sharp features get rounded.',
-        dualContour: 'Dual Contour: emits one vertex per active cell, placed by '
-            + 'minimizing a QEF over edge crossings + normals — this preserves sharp '
-            + 'features (corners, creases). Edges connect dual vertices of cells '
-            + 'sharing an active edge.',
-        surfaceNets: 'Surface Nets: emit one vertex per active cell at the centroid of '
-            + 'its edge crossings (no normals — no QEF). Cheap, smooth, and topologically '
-            + 'sound; sharp features are rounded off but less aggressively than MC.',
-    };
-
     function buildField(kind, n, seed) {
         const field = new Float32Array(n * n * n);
         const half = (n - 1) * 0.5;
         const r = half * 0.7;
-
         if (kind === 'noise') {
             const base = FastNoise.Simplex();
             const fbm = FastNoise.FractalFBm();
@@ -48,7 +50,6 @@
             }
             return field;
         }
-
         for (let z = 0; z < n; z++) {
             for (let y = 0; y < n; y++) {
                 for (let x = 0; x < n; x++) {
@@ -75,34 +76,68 @@
         return field;
     }
 
-    // Marching-squares case table.  Each entry is a list of edges to draw,
-    // where edge 0..3 means: 0=bottom (00→10), 1=right (10→11), 2=top (11→01),
-    // 3=left (01→00). Each pair of values [a,b] is one line segment.
-    // Built from the standard 16-case table (cases 5 and 10 are the saddle cases).
+    // edges: 0=bottom (00→10), 1=right (10→11), 2=top (11→01), 3=left (01→00)
     const MSQ_TABLE = [
-        [],           // 0
-        [3, 0],       // 1
-        [0, 1],       // 2
-        [3, 1],       // 3
-        [1, 2],       // 4
-        [3, 2, 1, 0], // 5 saddle (split toward outside)
-        [0, 2],       // 6
-        [3, 2],       // 7
-        [2, 3],       // 8
-        [2, 0],       // 9
-        [1, 0, 3, 2], // 10 saddle
-        [2, 1],       // 11
-        [1, 3],       // 12
-        [1, 0],       // 13
-        [0, 3],       // 14
-        [],           // 15
+        [], [3,0], [0,1], [3,1], [1,2], [3,2,1,0], [0,2], [3,2],
+        [2,3], [2,0], [1,0,3,2], [2,1], [1,3], [1,0], [0,3], [],
     ];
+
+    function lerpT(a, b) {
+        const denom = a - b;
+        if (Math.abs(denom) < 1e-9) return 0.5;
+        return a / denom;
+    }
+
+    // Per-case color used by the table strip + matching segments below.
+    const CASE_COLOR = (() => {
+        const out = new Array(16);
+        out[0] = '#1c1c22'; out[15] = '#22221c';
+        for (let i = 1; i < 15; i++) {
+            const h = ((i - 1) / 14) * 360;
+            out[i] = 'hsl(' + h.toFixed(0) + ', 80%, 62%)';
+        }
+        return out;
+    })();
+
+    // Smooth easing in [0,1] for phase progress.
+    function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
+    function easeInOutCubic(t) {
+        return t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2;
+    }
+
+    // Phase definitions per algorithm. Each entry: {id, ms}.
+    // Phase durations are milliseconds at speed = 1.0.
+    const PHASES = {
+        marchingCubes: [
+            { id: 'highlight', ms: 120 },
+            { id: 'classify',  ms: 180 },
+            { id: 'lookup',    ms: 220 },
+            { id: 'emit',      ms: 260 },
+        ],
+        surfaceNets: [
+            { id: 'highlight', ms: 100 },
+            { id: 'classify',  ms: 140 },
+            { id: 'crossings', ms: 180 },
+            { id: 'average',   ms: 260 },
+            { id: 'place',     ms: 160 },
+            { id: 'thread',    ms: 180 },
+        ],
+        dualContour: [
+            { id: 'highlight',   ms: 100 },
+            { id: 'classify',    ms: 140 },
+            { id: 'crossings',   ms: 160 },
+            { id: 'normals',     ms: 200 },
+            { id: 'constraints', ms: 240 },
+            { id: 'solve',       ms: 240 },
+            { id: 'thread',      ms: 180 },
+        ],
+    };
 
     VIZ.push({
         id: 'isosurface',
         name: 'Isosurface extraction',
         category: 'Voxels & Geometry',
-        subtitle: 'Same scalar field through marching cubes / dual contour / surface nets — and a 2D slice through that field with the iso contour drawn.',
+        subtitle: 'Watch the chosen algorithm run cell by cell on a 2D slice — micro-steps animate, the contour/net assembles behind the cursor. MC: lookup-table emit. SN: centroid + threading. DC: QEF from normal constraints.',
 
         init({ stage, params }) {
             // --- layout -----------------------------------------------------------
@@ -126,31 +161,102 @@
             leftCol.appendChild(meshLabel);
 
             const rightCol = document.createElement('div');
-            rightCol.style.cssText = 'flex:0 0 320px;display:flex;flex-direction:column;gap:6px;min-height:0';
+            rightCol.style.cssText = 'flex:0 0 460px;display:flex;flex-direction:column;gap:6px;min-height:0';
             wrap.appendChild(rightCol);
 
-            const sliceBox = document.createElement('div');
-            sliceBox.style.cssText = 'position:relative;background:#080808;border:1px solid #222;width:100%;height:320px;flex:0 0 auto';
-            rightCol.appendChild(sliceBox);
-            const sliceCanvas = document.createElement('canvas');
-            sliceCanvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;image-rendering:pixelated';
-            sliceBox.appendChild(sliceCanvas);
+            // Animation controls bar.
+            const bar = document.createElement('div');
+            bar.style.cssText = 'display:flex;gap:6px;align-items:center;flex:0 0 auto;'
+                + 'padding:6px;background:#0c0c0c;border:1px solid #1c1c1c;font:11px monospace;color:#bbb';
+            rightCol.appendChild(bar);
 
-            const sliceLabel = document.createElement('div');
-            sliceLabel.style.cssText = 'position:absolute;left:6px;top:6px;'
-                + 'padding:3px 6px;background:rgba(0,0,0,0.6);color:#ddd;'
-                + 'font:10px monospace;white-space:pre;pointer-events:none';
-            sliceBox.appendChild(sliceLabel);
+            function mkBtn(label, onClick) {
+                const b = document.createElement('button');
+                b.className = 'opbtn';
+                b.textContent = label;
+                b.onclick = onClick;
+                bar.appendChild(b);
+                return b;
+            }
+            const playBtn = mkBtn('Play', () => {
+                state.playing = !state.playing;
+                playBtn.textContent = state.playing ? 'Pause' : 'Play';
+                playBtn.classList.toggle('toggled', state.playing);
+            });
+            mkBtn('Step', () => {
+                state.playing = false;
+                playBtn.textContent = 'Play';
+                playBtn.classList.remove('toggled');
+                advancePhase(1);   // one micro-step
+            });
+            mkBtn('Skip cell', () => {
+                state.playing = false;
+                playBtn.textContent = 'Play';
+                playBtn.classList.remove('toggled');
+                completeCurrentCell();
+            });
+            mkBtn('Finish slice', () => {
+                state.playing = false;
+                playBtn.textContent = 'Play';
+                playBtn.classList.remove('toggled');
+                finishSlice();
+            });
+            mkBtn('Reset', () => {
+                resetAnim();
+            });
+            const sweepBtn = mkBtn('Sweep volume', () => {
+                state.sweepVolume = !state.sweepVolume;
+                sweepBtn.classList.toggle('toggled', state.sweepVolume);
+            });
+            // sweepBtn starts toggled (state.sweepVolume defaults to true). The
+            // classList toggle below runs after state is created in init().
+            // Speed slider.
+            const sp = document.createElement('div');
+            sp.style.cssText = 'display:flex;gap:4px;align-items:center;margin-left:auto';
+            sp.innerHTML = '<span style="color:#888">speed</span>';
+            const speedSlider = document.createElement('input');
+            speedSlider.type = 'range'; speedSlider.min = '0'; speedSlider.max = '4';
+            speedSlider.step = '0.01'; speedSlider.value = '1';
+            speedSlider.style.cssText = 'width:90px';
+            const speedNum = document.createElement('span');
+            speedNum.style.cssText = 'color:#ddd;min-width:36px;text-align:right';
+            speedNum.textContent = '1.0x';
+            speedSlider.oninput = () => {
+                state.speedExp = parseFloat(speedSlider.value);
+                state.speed = Math.pow(2, state.speedExp);
+                speedNum.textContent = state.speed.toFixed(state.speed >= 4 ? 0 : 1) + 'x';
+            };
+            sp.appendChild(speedSlider); sp.appendChild(speedNum);
+            bar.appendChild(sp);
 
+            // Slice slider row.
+            const sliceRow = document.createElement('div');
+            sliceRow.style.cssText = 'display:flex;flex-direction:column;gap:3px;flex:0 0 auto';
+            rightCol.appendChild(sliceRow);
             const sliceSlider = document.createElement('input');
             sliceSlider.type = 'range';
             sliceSlider.style.cssText = 'width:100%';
-            rightCol.appendChild(sliceSlider);
+            sliceRow.appendChild(sliceSlider);
+            const sliceLabel = document.createElement('div');
+            sliceLabel.style.cssText = 'padding:3px 6px;background:#0c0c0c;border:1px solid #1c1c1c;'
+                + 'font:10px monospace;color:#bbb;line-height:1.35;white-space:pre';
+            sliceRow.appendChild(sliceLabel);
 
-            const algoBlurb = document.createElement('div');
-            algoBlurb.style.cssText = 'padding:8px;background:#0c0c0c;border:1px solid #1c1c1c;'
-                + 'font:11px monospace;color:#bbb;line-height:1.5;flex:1 1 auto;overflow:auto';
-            rightCol.appendChild(algoBlurb);
+            // The big animation panel.
+            const panel = document.createElement('div');
+            panel.style.cssText = 'flex:1 1 auto;position:relative;background:#080808;border:1px solid #222;min-height:0';
+            rightCol.appendChild(panel);
+            const animCanvas = document.createElement('canvas');
+            animCanvas.style.cssText = 'display:block;position:absolute;inset:0;width:100%;height:100%';
+            panel.appendChild(animCanvas);
+            const animCtx = animCanvas.getContext('2d');
+
+            // Status text in the panel corner.
+            const status = document.createElement('div');
+            status.style.cssText = 'position:absolute;left:8px;top:8px;'
+                + 'padding:4px 8px;background:rgba(0,0,0,0.65);color:#ddd;'
+                + 'font:11px monospace;white-space:pre;pointer-events:none';
+            panel.appendChild(status);
 
             // --- scene setup ------------------------------------------------------
             scene.setToneMap({ mode: 'aces', exposure: 1.0 });
@@ -163,33 +269,68 @@
                 type: 'directional', direction: [0.6, -0.4, 0.5],
                 color: [0.7, 0.82, 1.0], intensity: 1.0,
             });
-
             const cam = Camera.createOrbit({ target: [0, 0, 0], dist: 28 });
             scene.setCamera(Camera.orbitViewOpts(cam, canvas));
 
             const state = {
                 algo: 'marchingCubes',
                 field: 'sphere',
-                gridN: 48,
+                gridN: 32,
                 isoLevel: 0,
-                cellSize: 0.5,
+                cellSize: 0.7,
                 seed: 1,
-                showActive: true,
-                sliceZ: 24,
+                sliceZ: 16,
                 autoRotate: true,
                 mesh: null,
                 fieldData: null,
                 triCount: 0,
                 animFrame: null,
+
+                // Slice cache.
+                cached: {
+                    n: 0, z: -1, iso: NaN, fieldKey: '',
+                    signed: null, cases: null, gradX: null, gradY: null,
+                    mn: 0, mx: 0,
+                },
+                cellPts: [],            // per-cell crossings + normals
+                cellOrder: [],          // scan-order indices of ACTIVE cells
+
+                // Animation cursor.
+                playing: true,
+                speed: 1.0, speedExp: 0,
+                cellStep: 0,            // index into cellOrder
+                phaseIdx: 0,            // index into PHASES[algo]
+                phaseT: 0,              // 0..1 progress through current phase
+                lastT: 0,               // last rAF timestamp
+
+                // Accumulated emitted geometry (drawn behind the cursor).
+                emittedMC: [],          // [{x,y,segs:[a,b,...], code}]
+                vertices: {},           // cellIdx → {u,v} (SN: centroid; DC: QEF)
+                threads: [],            // [{a:cellIdx, b:cellIdx}] dual edges
+
+                // 3D wireframe build: every committed cell contributes line
+                // segments at its slice's Z. They accumulate across slices so
+                // the volume gets wrapped in algorithm-output ribbons.
+                segments3D: [],         // {x0,y0,z0,x1,y1,z1,r,g,b}
+                wireMesh: null,
+                wireDirty: false,
+                sweepVolume: true,      // auto-advance Z when slice completes
             };
+
+            const fieldOff = document.createElement('canvas');
+            fieldOff.width = 1; fieldOff.height = 1;
+            const fieldOffCtx = fieldOff.getContext('2d');
 
             function rebuildField() {
                 state.fieldData = buildField(state.field, state.gridN, state.seed);
                 state.sliceZ = Math.min(state.sliceZ, state.gridN - 1);
                 sliceSlider.min = 0; sliceSlider.max = state.gridN - 1;
                 sliceSlider.value = state.sliceZ;
+                invalidateSlice();
                 rebuildMesh();
-                redrawSlice();
+                recomputeSliceCache();
+                paintFieldOff();
+                resetAnim();
             }
 
             function rebuildMesh() {
@@ -202,165 +343,1007 @@
                 if (built.indices) state.triCount = built.indices.length / 3;
                 else if (built.positions) state.triCount = built.positions.length / 9;
                 const offset = -(n - 1) * 0.5 * state.cellSize;
+                // Ghost: the final mesh from bromesh, semi-transparent. This is
+                // the "thing we're building from" — visible as a faded shape
+                // that the wireframe accumulates around as the algorithm runs.
                 state.mesh = scene.createMesh({
                     data: built,
-                    color: [0.55, 0.75, 0.95],
-                    metallic: 0.05,
-                    roughness: 0.55,
+                    color: [0.55, 0.75, 0.95, 0.18],
+                    metallic: 0.0, roughness: 0.85,
+                    twoSided: true,
+                    castsShadow: false,
                     x: offset, y: offset, z: offset,
                 });
                 meshLabel.textContent =
-                    `algo:    ${state.algo}\n` +
-                    `field:   ${state.field}\n` +
-                    `grid:    ${n}³ = ${n*n*n} samples\n` +
-                    `iso:     ${state.isoLevel.toFixed(2)}\n` +
-                    `tris:    ${state.triCount | 0}`;
-                algoBlurb.textContent = ALGO_BLURB[state.algo];
+                    'algo:    ' + state.algo + '\n' +
+                    'field:   ' + state.field + '\n' +
+                    'grid:    ' + n + '³ = ' + (n*n*n) + ' samples\n' +
+                    'iso:     ' + state.isoLevel.toFixed(2) + '\n' +
+                    'tris:    ' + (state.triCount | 0);
             }
 
-            // --- slice rendering (marching squares for the iso contour) ----------
-            //
-            // Two-pass: first build the colored pixel field at n×n on an offscreen
-            // canvas, then draw it scaled onto the visible canvas (at display res)
-            // and overlay crisp marching-squares contour lines on top.
+            function invalidateSlice() { state.cached.z = -1; }
 
-            const fieldOff = document.createElement('canvas');
-            fieldOff.width = 1; fieldOff.height = 1;
-            const fieldCtx = fieldOff.getContext('2d');
-
-            function redrawSlice() {
+            function recomputeSliceCache() {
                 const n = state.gridN;
                 const z = Math.max(0, Math.min(n - 1, state.sliceZ | 0));
                 const iso = state.isoLevel;
+                const fieldKey = state.field + '|' + state.seed + '|' + n;
+                const c = state.cached;
+                if (c.n === n && c.z === z && c.iso === iso && c.fieldKey === fieldKey) return c;
+
+                if (c.n !== n) {
+                    c.signed = new Float32Array(n * n);
+                    c.gradX = new Float32Array(n * n);
+                    c.gradY = new Float32Array(n * n);
+                    c.cases = new Uint8Array((n - 1) * (n - 1));
+                }
                 const sliceStart = z * n * n;
-
-                // Pass 1: build n×n pixel image on offscreen.
-                if (fieldOff.width !== n) { fieldOff.width = n; fieldOff.height = n; }
-                const img = fieldCtx.createImageData(n, n);
-
                 let mn = Infinity, mx = -Infinity;
                 for (let i = 0; i < n * n; i++) {
                     const v = state.fieldData[sliceStart + i];
+                    c.signed[i] = v - iso;
                     if (v < mn) mn = v;
                     if (v > mx) mx = v;
                 }
-
-                let activeCells = 0;
-                // Track which cells are "active" (sign change) so we can tint them
-                // in the pixel pass. A cell (x,y) is the quad with corners
-                // (x,y), (x+1,y), (x+1,y+1), (x,y+1).
-                const active = state.showActive
-                    ? new Uint8Array((n - 1) * (n - 1)) : null;
-
                 for (let y = 0; y < n; y++) {
                     for (let x = 0; x < n; x++) {
-                        const v = state.fieldData[sliceStart + y * n + x];
-                        const d = v - iso;
-                        const lo = mn - iso, hi = mx - iso;
-                        const t = d < 0 ? -d / Math.max(1e-6, -lo)
-                                        :  d / Math.max(1e-6,  hi);
-                        let r, g, b;
-                        if (d < 0) {
-                            r = 20 + (1 - t) * 50;
-                            g = 60 + (1 - t) * 80;
-                            b = 140 + (1 - t) * 50;
-                        } else {
-                            r = 130 + (1 - t) * 80;
-                            g = 90  + (1 - t) * 60;
-                            b = 40  + (1 - t) * 30;
-                        }
-                        const p = (y * n + x) * 4;
-                        img.data[p  ] = r | 0;
-                        img.data[p+1] = g | 0;
-                        img.data[p+2] = b | 0;
-                        img.data[p+3] = 255;
+                        const i = y * n + x;
+                        const xl = x > 0 ? c.signed[i - 1] : c.signed[i];
+                        const xr = x < n - 1 ? c.signed[i + 1] : c.signed[i];
+                        c.gradX[i] = (xr - xl) / ((x > 0 && x < n - 1) ? 2 : 1);
+                        const yu = y > 0 ? c.signed[i - n] : c.signed[i];
+                        const yd = y < n - 1 ? c.signed[i + n] : c.signed[i];
+                        c.gradY[i] = (yd - yu) / ((y > 0 && y < n - 1) ? 2 : 1);
                     }
                 }
-
-                // Count active cells + (optionally) tint them.
+                state.cellOrder.length = 0;
                 for (let y = 0; y < n - 1; y++) {
                     for (let x = 0; x < n - 1; x++) {
-                        const v00 = state.fieldData[sliceStart + y * n + x] - iso;
-                        const v10 = state.fieldData[sliceStart + y * n + (x + 1)] - iso;
-                        const v11 = state.fieldData[sliceStart + (y + 1) * n + (x + 1)] - iso;
-                        const v01 = state.fieldData[sliceStart + (y + 1) * n + x] - iso;
+                        const v00 = c.signed[y * n + x];
+                        const v10 = c.signed[y * n + x + 1];
+                        const v11 = c.signed[(y + 1) * n + x + 1];
+                        const v01 = c.signed[(y + 1) * n + x];
                         let code = 0;
                         if (v00 < 0) code |= 1;
                         if (v10 < 0) code |= 2;
                         if (v11 < 0) code |= 4;
                         if (v01 < 0) code |= 8;
-                        if (code === 0 || code === 15) continue;
-                        activeCells++;
-                        if (active) {
-                            active[y * (n - 1) + x] = code;
-                            const p = (y * n + x) * 4;
-                            img.data[p  ] = Math.min(255, img.data[p  ] + 50);
-                            img.data[p+1] = Math.min(255, img.data[p+1] + 50);
-                            img.data[p+2] = Math.min(255, img.data[p+2] + 10);
+                        c.cases[y * (n - 1) + x] = code;
+                        if (code !== 0 && code !== 15) state.cellOrder.push(y * (n - 1) + x);
+                    }
+                }
+                c.n = n; c.z = z; c.iso = iso; c.fieldKey = fieldKey;
+                c.mn = mn; c.mx = mx;
+
+                state.cellPts.length = (n - 1) * (n - 1);
+                for (let y = 0; y < n - 1; y++) {
+                    for (let x = 0; x < n - 1; x++) {
+                        const code = c.cases[y * (n - 1) + x];
+                        if (code === 0 || code === 15) {
+                            state.cellPts[y * (n - 1) + x] = null;
+                            continue;
+                        }
+                        const v00 = c.signed[y * n + x];
+                        const v10 = c.signed[y * n + x + 1];
+                        const v11 = c.signed[(y + 1) * n + x + 1];
+                        const v01 = c.signed[(y + 1) * n + x];
+                        const gx00 = c.gradX[y * n + x],     gx10 = c.gradX[y * n + x + 1];
+                        const gx01 = c.gradX[(y+1)*n + x],   gx11 = c.gradX[(y+1)*n + x + 1];
+                        const gy00 = c.gradY[y * n + x],     gy10 = c.gradY[y * n + x + 1];
+                        const gy01 = c.gradY[(y+1)*n + x],   gy11 = c.gradY[(y+1)*n + x + 1];
+                        const pts = [];
+                        const pushPt = (u, vv, edge) => {
+                            const gx = (gx00*(1-u) + gx10*u) * (1-vv) + (gx01*(1-u) + gx11*u) * vv;
+                            const gy = (gy00*(1-u) + gy10*u) * (1-vv) + (gy01*(1-u) + gy11*u) * vv;
+                            const m = Math.hypot(gx, gy) || 1;
+                            pts.push(u, vv, gx / m, gy / m, edge);
+                        };
+                        if ((v00 < 0) !== (v10 < 0)) pushPt(lerpT(v00, v10), 0, 0);
+                        if ((v10 < 0) !== (v11 < 0)) pushPt(1, lerpT(v10, v11), 1);
+                        if ((v01 < 0) !== (v11 < 0)) pushPt(lerpT(v01, v11), 1, 2);
+                        if ((v00 < 0) !== (v01 < 0)) pushPt(0, lerpT(v00, v01), 3);
+                        state.cellPts[y * (n - 1) + x] = pts;
+                    }
+                }
+                return c;
+            }
+
+            // Paint the field colormap once per cache change. Used as the
+            // animated panel's static background.
+            function paintFieldOff() {
+                const c = state.cached;
+                const n = c.n;
+                if (fieldOff.width !== n) { fieldOff.width = n; fieldOff.height = n; }
+                const img = fieldOffCtx.createImageData(n, n);
+                const lo = c.mn - c.iso, hi = c.mx - c.iso;
+                for (let i = 0; i < n * n; i++) {
+                    const d = c.signed[i];
+                    let r, g, b;
+                    if (d < 0) {
+                        const t = -d / Math.max(1e-6, -lo);
+                        r = 18 + (1 - t) * 30;
+                        g = 40 + (1 - t) * 50;
+                        b = 90 + (1 - t) * 30;
+                    } else {
+                        const t = d / Math.max(1e-6, hi);
+                        r = 90 + (1 - t) * 50;
+                        g = 55 + (1 - t) * 35;
+                        b = 24 + (1 - t) * 18;
+                    }
+                    const p = i * 4;
+                    img.data[p  ] = r | 0;
+                    img.data[p+1] = g | 0;
+                    img.data[p+2] = b | 0;
+                    img.data[p+3] = 255;
+                }
+                fieldOffCtx.putImageData(img, 0, 0);
+            }
+
+            // ----- animation state machine --------------------------------------
+            function resetAnim() {
+                state.cellStep = 0;
+                state.phaseIdx = 0;
+                state.phaseT = 0;
+                state.emittedMC.length = 0;
+                state.vertices = {};
+                state.threads.length = 0;
+                clearWireframe();
+                state.sliceZ = 0;
+                sliceSlider.value = 0;
+                invalidateSlice();
+                recomputeSliceCache();
+                paintFieldOff();
+                state.playing = true;
+                playBtn.textContent = 'Pause';
+                playBtn.classList.add('toggled');
+            }
+
+            // Restart sweep on the current slice without clearing 3D wire.
+            function restartSlice() {
+                state.cellStep = 0;
+                state.phaseIdx = 0;
+                state.phaseT = 0;
+                state.emittedMC.length = 0;
+                state.vertices = {};
+                state.threads.length = 0;
+            }
+
+            // Advance to the next slice (auto-sweep) or finish if past end.
+            function advanceSlice() {
+                if (state.sliceZ < state.gridN - 1) {
+                    state.sliceZ++;
+                    sliceSlider.value = state.sliceZ;
+                    invalidateSlice();
+                    recomputeSliceCache();
+                    paintFieldOff();
+                    restartSlice();
+                    return true;
+                }
+                return false;
+            }
+
+            // Compute SN centroid or DC QEF vertex for a cell, in cell-local (u,v).
+            function solveVertex(algo, pts) {
+                if (!pts || pts.length === 0) return null;
+                const k = pts.length / 5;
+                let su = 0, sv = 0;
+                for (let i = 0; i < pts.length; i += 5) { su += pts[i]; sv += pts[i + 1]; }
+                if (algo === 'surfaceNets') return { u: su / k, v: sv / k };
+                // dualContour QEF
+                let a = 0, b = 0, d = 0, bx = 0, by = 0;
+                for (let i = 0; i < pts.length; i += 5) {
+                    const u = pts[i], v = pts[i + 1];
+                    const nx = pts[i + 2], ny = pts[i + 3];
+                    const rhs = nx * u + ny * v;
+                    a += nx*nx; b += nx*ny; d += ny*ny;
+                    bx += nx*rhs; by += ny*rhs;
+                }
+                const det = a*d - b*b;
+                if (Math.abs(det) < 1e-6) return { u: su / k, v: sv / k };
+                let u = (d*bx - b*by) / det;
+                let v = (a*by - b*bx) / det;
+                u = Math.max(0, Math.min(1, u));
+                v = Math.max(0, Math.min(1, v));
+                return { u, v };
+            }
+
+            // Connections (dual edges) emitted when committing a cell.
+            function activeNeighborEdges(cellIdx) {
+                const c = state.cached;
+                const n = c.n;
+                const cx = cellIdx % (n - 1), cy = (cellIdx / (n - 1)) | 0;
+                const out = [];
+                // east neighbor: shared grid edge is ((cx+1,cy),(cx+1,cy+1))
+                if (cx < n - 2) {
+                    const a = c.signed[cy * n + (cx + 1)];
+                    const b = c.signed[(cy + 1) * n + (cx + 1)];
+                    if ((a < 0) !== (b < 0)) {
+                        const other = cy * (n - 1) + (cx + 1);
+                        if (state.vertices[other]) out.push(other);
+                    }
+                }
+                // south neighbor: shared grid edge is ((cx,cy+1),(cx+1,cy+1))
+                if (cy < n - 2) {
+                    const a = c.signed[(cy + 1) * n + cx];
+                    const b = c.signed[(cy + 1) * n + (cx + 1)];
+                    if ((a < 0) !== (b < 0)) {
+                        const other = (cy + 1) * (n - 1) + cx;
+                        if (state.vertices[other]) out.push(other);
+                    }
+                }
+                // also check west and north (previously-emitted neighbors)
+                if (cx > 0) {
+                    const a = c.signed[cy * n + cx];
+                    const b = c.signed[(cy + 1) * n + cx];
+                    if ((a < 0) !== (b < 0)) {
+                        const other = cy * (n - 1) + (cx - 1);
+                        if (state.vertices[other]) out.push(other);
+                    }
+                }
+                if (cy > 0) {
+                    const a = c.signed[cy * n + cx];
+                    const b = c.signed[cy * n + (cx + 1)];
+                    if ((a < 0) !== (b < 0)) {
+                        const other = (cy - 1) * (n - 1) + cx;
+                        if (state.vertices[other]) out.push(other);
+                    }
+                }
+                return out;
+            }
+
+            // Commit a cell's final result to the "emitted" accumulators so it
+            // stays drawn after the cursor moves on. Also pushes 3D segments
+            // for the wireframe build at the current slice's Z.
+            function commitCell(cellIdx) {
+                const c = state.cached;
+                const n = c.n;
+                const pts = state.cellPts[cellIdx];
+                if (!pts) return;
+                if (state.algo === 'marchingCubes') {
+                    const cx = cellIdx % (n - 1), cy = (cellIdx / (n - 1)) | 0;
+                    const code = c.cases[cellIdx];
+                    state.emittedMC.push({ cellIdx, cx, cy, code });
+                } else {
+                    const v = solveVertex(state.algo, pts);
+                    if (v) {
+                        state.vertices[cellIdx] = v;
+                        const neighbors = activeNeighborEdges(cellIdx);
+                        for (const other of neighbors) {
+                            state.threads.push({ a: cellIdx, b: other });
                         }
                     }
                 }
-                fieldCtx.putImageData(img, 0, 0);
+                appendCellTo3D(cellIdx);
+                state.wireDirty = true;
+            }
 
-                // Pass 2: draw scaled to the visible canvas + contour overlay.
-                const rect = sliceCanvas.getBoundingClientRect();
-                const W = Math.max(1, (rect.width  | 0));
-                const H = Math.max(1, (rect.height | 0));
-                if (sliceCanvas.width !== W || sliceCanvas.height !== H) {
-                    sliceCanvas.width = W; sliceCanvas.height = H;
+            // Parse a CSS color expression to linear [r,g,b] in 0..1. Used to
+            // colorize 3D wireframe segments to match the 2D output.
+            function parseColor(str) {
+                if (str.startsWith('hsl')) {
+                    const m = str.match(/hsl\((-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)%?,\s*(-?\d+(?:\.\d+)?)%?\)/);
+                    if (!m) return [1, 1, 1];
+                    let h = parseFloat(m[1]) / 360;
+                    const s = parseFloat(m[2]) / 100;
+                    const l = parseFloat(m[3]) / 100;
+                    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+                    const p = 2 * l - q;
+                    const h2rgb = (t) => {
+                        if (t < 0) t += 1; if (t > 1) t -= 1;
+                        if (t < 1/6) return p + (q - p) * 6 * t;
+                        if (t < 1/2) return q;
+                        if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+                        return p;
+                    };
+                    return [h2rgb(h + 1/3), h2rgb(h), h2rgb(h - 1/3)];
                 }
-                const ctx = sliceCanvas.getContext('2d');
-                ctx.imageSmoothingEnabled = false;
-                ctx.clearRect(0, 0, W, H);
-                ctx.drawImage(fieldOff, 0, 0, W, H);
+                if (str.startsWith('#')) {
+                    const v = parseInt(str.slice(1), 16);
+                    return [((v >> 16) & 255) / 255, ((v >> 8) & 255) / 255, (v & 255) / 255];
+                }
+                return [1, 1, 1];
+            }
 
-                // Marching-squares contour, in pixel space.
-                const sx = W / n, sy = H / n;
-                ctx.strokeStyle = '#ffe066';
-                ctx.lineWidth = 1.5;
-                ctx.lineCap = 'round';
-                ctx.beginPath();
-                for (let y = 0; y < n - 1; y++) {
-                    for (let x = 0; x < n - 1; x++) {
-                        const v00 = state.fieldData[sliceStart + y * n + x] - iso;
-                        const v10 = state.fieldData[sliceStart + y * n + (x + 1)] - iso;
-                        const v11 = state.fieldData[sliceStart + (y + 1) * n + (x + 1)] - iso;
-                        const v01 = state.fieldData[sliceStart + (y + 1) * n + x] - iso;
-                        let code = 0;
-                        if (v00 < 0) code |= 1;
-                        if (v10 < 0) code |= 2;
-                        if (v11 < 0) code |= 4;
-                        if (v01 < 0) code |= 8;
-                        if (code === 0 || code === 15) continue;
-                        const ex = [
-                            x + lerpT(v00, v10), y,
-                            x + 1, y + lerpT(v10, v11),
-                            x + lerpT(v01, v11), y + 1,
-                            x, y + lerpT(v00, v01),
-                        ];
-                        const segs = MSQ_TABLE[code];
+            // Push 3D wire segments for a committed cell at the current slice.
+            //   MC: one segment per emitted edge, colored by case.
+            //   SN/DC: one segment per thread to each already-emitted neighbor.
+            // All segments lie in the slice's XY plane at world Z = z*cellSize.
+            function appendCellTo3D(cellIdx) {
+                const c = state.cached;
+                const n = c.n, cs = state.cellSize;
+                const cx = cellIdx % (n - 1), cy = (cellIdx / (n - 1)) | 0;
+                const zW = c.z * cs;
+                const pts = state.cellPts[cellIdx];
+                if (!pts) return;
+                if (state.algo === 'marchingCubes') {
+                    const code = c.cases[cellIdx];
+                    const segs = MSQ_TABLE[code];
+                    if (!segs.length) return;
+                    const v00 = c.signed[cy * n + cx];
+                    const v10 = c.signed[cy * n + cx + 1];
+                    const v11 = c.signed[(cy + 1) * n + cx + 1];
+                    const v01 = c.signed[(cy + 1) * n + cx];
+                    const ex = [
+                        (cx + lerpT(v00, v10)) * cs, cy * cs,
+                        (cx + 1) * cs, (cy + lerpT(v10, v11)) * cs,
+                        (cx + lerpT(v01, v11)) * cs, (cy + 1) * cs,
+                        cx * cs, (cy + lerpT(v00, v01)) * cs,
+                    ];
+                    const col = parseColor(CASE_COLOR[code]);
+                    for (let s = 0; s < segs.length; s += 2) {
+                        const a = segs[s], b = segs[s + 1];
+                        state.segments3D.push({
+                            x0: ex[a*2], y0: ex[a*2 + 1], z0: zW,
+                            x1: ex[b*2], y1: ex[b*2 + 1], z1: zW,
+                            r: col[0], g: col[1], b: col[2],
+                        });
+                    }
+                } else {
+                    const v = solveVertex(state.algo, pts);
+                    if (!v) return;
+                    const x0 = (cx + v.u) * cs, y0 = (cy + v.v) * cs;
+                    const neighbors = activeNeighborEdges(cellIdx);
+                    const col = state.algo === 'dualContour' ? [1.0, 0.62, 0.83]
+                                                             : [0.65, 0.88, 1.0];
+                    for (const other of neighbors) {
+                        const ov = state.vertices[other];
+                        if (!ov) continue;
+                        const ocx = other % (n - 1), ocy = (other / (n - 1)) | 0;
+                        const x1 = (ocx + ov.u) * cs, y1 = (ocy + ov.v) * cs;
+                        state.segments3D.push({
+                            x0, y0, z0: zW, x1, y1, z1: zW,
+                            r: col[0], g: col[1], b: col[2],
+                        });
+                    }
+                }
+            }
+
+            // Build a positions+indices mesh from the accumulated segments.
+            // Each segment becomes a thin extruded box so it's visible from any
+            // angle (a flat ribbon would disappear edge-on). The box runs
+            // along the segment, with small thickness in the two perpendicular
+            // axes. Per-vertex colors carry the segment color.
+            function buildWireGeometry() {
+                const segs = state.segments3D;
+                const segCount = segs.length;
+                if (segCount === 0) return null;
+                const thick = state.cellSize * 0.06;
+                const h = thick * 0.5;
+                // 8 verts per segment, 36 indices (12 tris × 3) per segment.
+                const positions = new Float32Array(segCount * 8 * 3);
+                const normals = new Float32Array(segCount * 8 * 3);
+                const colors = new Float32Array(segCount * 8 * 4);
+                const indices = new Uint32Array(segCount * 12 * 3);
+                let pi = 0, ni = 0, ci = 0, ii = 0;
+                for (let s = 0; s < segCount; s++) {
+                    const g = segs[s];
+                    const dx = g.x1 - g.x0, dy = g.y1 - g.y0, dz = g.z1 - g.z0;
+                    const L = Math.hypot(dx, dy, dz) || 1;
+                    const ux = dx / L, uy = dy / L, uz = dz / L;
+                    // perp1: u × world-up (0,0,1) when not collinear, else world-X.
+                    let n1x, n1y, n1z;
+                    if (Math.abs(uz) < 0.95) {
+                        n1x = uy; n1y = -ux; n1z = 0;
+                    } else {
+                        n1x = 1; n1y = 0; n1z = 0;
+                    }
+                    const m1 = Math.hypot(n1x, n1y, n1z) || 1;
+                    n1x /= m1; n1y /= m1; n1z /= m1;
+                    // perp2 = u × perp1
+                    const n2x = uy * n1z - uz * n1y;
+                    const n2y = uz * n1x - ux * n1z;
+                    const n2z = ux * n1y - uy * n1x;
+                    // 8 corners: indices [0..3] at p0, [4..7] at p1.
+                    // signs in (perp1, perp2): (-,-), (+,-), (+,+), (-,+)
+                    const ss = [[-1,-1],[1,-1],[1,1],[-1,1]];
+                    const base = s * 8;
+                    for (let i = 0; i < 8; i++) {
+                        const endP = i < 4 ? [g.x0, g.y0, g.z0] : [g.x1, g.y1, g.z1];
+                        const sgn = ss[i & 3];
+                        const x = endP[0] + sgn[0]*h*n1x + sgn[1]*h*n2x;
+                        const y = endP[1] + sgn[0]*h*n1y + sgn[1]*h*n2y;
+                        const z = endP[2] + sgn[0]*h*n1z + sgn[1]*h*n2z;
+                        positions[pi++] = x;
+                        positions[pi++] = y;
+                        positions[pi++] = z;
+                        // Crude normal: outward from box axis. Just sgn1*n1 + sgn2*n2.
+                        let nx = sgn[0]*n1x + sgn[1]*n2x;
+                        let ny = sgn[0]*n1y + sgn[1]*n2y;
+                        let nz = sgn[0]*n1z + sgn[1]*n2z;
+                        const nm = Math.hypot(nx, ny, nz) || 1;
+                        normals[ni++] = nx / nm;
+                        normals[ni++] = ny / nm;
+                        normals[ni++] = nz / nm;
+                        colors[ci++] = g.r;
+                        colors[ci++] = g.g;
+                        colors[ci++] = g.b;
+                        colors[ci++] = 1;
+                    }
+                    // Faces (CCW from outside). p0 face = (0,1,2,3) viewed from -u;
+                    // p1 face = (4,5,6,7) viewed from +u; side faces wrap around.
+                    const faces = [
+                        // p0 cap (facing -u)
+                        [0, 2, 1], [0, 3, 2],
+                        // p1 cap (facing +u)
+                        [4, 5, 6], [4, 6, 7],
+                        // sides
+                        [0, 1, 5], [0, 5, 4],
+                        [1, 2, 6], [1, 6, 5],
+                        [2, 3, 7], [2, 7, 6],
+                        [3, 0, 4], [3, 4, 7],
+                    ];
+                    for (const f of faces) {
+                        indices[ii++] = base + f[0];
+                        indices[ii++] = base + f[1];
+                        indices[ii++] = base + f[2];
+                    }
+                }
+                return { positions, normals, indices, colors };
+            }
+
+            function refreshWireMesh() {
+                if (!state.wireDirty) return;
+                state.wireDirty = false;
+                const geom = buildWireGeometry();
+                const n = state.gridN;
+                const offset = -(n - 1) * 0.5 * state.cellSize;
+                if (!geom) {
+                    if (state.wireMesh) { state.wireMesh.destroy(); state.wireMesh = null; }
+                    return;
+                }
+                if (state.wireMesh) {
+                    state.wireMesh.updateMesh({
+                        positions: geom.positions,
+                        indices: geom.indices,
+                        normals: geom.normals,
+                    });
+                } else {
+                    state.wireMesh = scene.createMesh({
+                        positions: geom.positions,
+                        indices: geom.indices,
+                        normals: geom.normals,
+                        color: [1.0, 1.0, 1.0],
+                        emissive: 0.85,
+                        emissiveColor: [1.0, 0.95, 0.8],
+                        roughness: 0.5,
+                        castsShadow: false,
+                        twoSided: true,
+                        x: offset, y: offset, z: offset,
+                    });
+                }
+            }
+
+            function clearWireframe() {
+                state.segments3D.length = 0;
+                if (state.wireMesh) {
+                    state.wireMesh.destroy();
+                    state.wireMesh = null;
+                }
+            }
+
+            // Move the cursor forward by one or more phases.
+            function advancePhase(count) {
+                for (let k = 0; k < count; k++) {
+                    if (state.cellStep >= state.cellOrder.length) return;
+                    const phases = PHASES[state.algo];
+                    state.phaseIdx++;
+                    if (state.phaseIdx >= phases.length) {
+                        // Finished this cell. Commit it.
+                        commitCell(state.cellOrder[state.cellStep]);
+                        state.cellStep++;
+                        state.phaseIdx = 0;
+                    }
+                    state.phaseT = 0;
+                }
+            }
+
+            function completeCurrentCell() {
+                if (state.cellStep >= state.cellOrder.length) return;
+                commitCell(state.cellOrder[state.cellStep]);
+                state.cellStep++;
+                state.phaseIdx = 0;
+                state.phaseT = 0;
+            }
+
+            function finishSlice() {
+                while (state.cellStep < state.cellOrder.length) {
+                    commitCell(state.cellOrder[state.cellStep]);
+                    state.cellStep++;
+                }
+                state.phaseIdx = 0;
+                state.phaseT = 0;
+            }
+
+            // ----- rendering ----------------------------------------------------
+            function fitSlice(W, H, padTop) {
+                padTop = padTop || 0;
+                const usableH = H - padTop;
+                const side = Math.min(W - 8, usableH - 8);
+                const ox = ((W - side) / 2) | 0;
+                const oy = padTop + (((usableH - side) / 2) | 0);
+                return { ox, oy, side };
+            }
+
+            function drawCaseStrip(ctx, W, n) {
+                const stripH = 30;
+                const padY = 4;
+                const cellW = Math.max(10, ((W - 8) / 16) | 0);
+                const stripY = padY;
+                for (let i = 0; i < 16; i++) {
+                    const x0 = 4 + i * cellW;
+                    // pulse the current cell's matching case during 'lookup'
+                    const c = state.cached;
+                    const cellIdx = state.cellOrder[state.cellStep];
+                    const phases = PHASES[state.algo];
+                    const phase = phases[state.phaseIdx];
+                    let highlightCase = -1;
+                    if (state.cellStep < state.cellOrder.length &&
+                        state.algo === 'marchingCubes' &&
+                        phase && (phase.id === 'lookup' || phase.id === 'emit')) {
+                        highlightCase = c.cases[cellIdx];
+                    }
+                    const isHi = i === highlightCase;
+                    ctx.fillStyle = CASE_COLOR[i];
+                    ctx.globalAlpha = isHi ? (0.55 + 0.35 * Math.sin(Date.now() / 80)) : 0.16;
+                    ctx.fillRect(x0, stripY, cellW - 1, stripH - padY);
+                    ctx.globalAlpha = 1;
+                    const cx = x0 + 3, cy = stripY + 3;
+                    const cw = cellW - 7, ch = stripH - padY - 6;
+                    const corners = [
+                        [0, 0, (i & 1) ? 1 : 0],
+                        [1, 0, (i & 2) ? 1 : 0],
+                        [1, 1, (i & 4) ? 1 : 0],
+                        [0, 1, (i & 8) ? 1 : 0],
+                    ];
+                    for (const [u, v, inside] of corners) {
+                        ctx.fillStyle = inside ? '#7ab0ff' : '#ffb37a';
+                        ctx.beginPath();
+                        ctx.arc(cx + u * cw, cy + v * ch, 1.4, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                    const ex = [0.5, 0, 1, 0.5, 0.5, 1, 0, 0.5];
+                    const segs = MSQ_TABLE[i];
+                    if (segs.length) {
+                        ctx.strokeStyle = isHi ? '#ffffff' : CASE_COLOR[i];
+                        ctx.lineWidth = isHi ? 2 : 1.2;
+                        ctx.beginPath();
                         for (let s = 0; s < segs.length; s += 2) {
                             const a = segs[s], b = segs[s + 1];
-                            ctx.moveTo(ex[a*2] * sx, ex[a*2 + 1] * sy);
-                            ctx.lineTo(ex[b*2] * sx, ex[b*2 + 1] * sy);
+                            ctx.moveTo(cx + ex[a*2] * cw, cy + ex[a*2 + 1] * ch);
+                            ctx.lineTo(cx + ex[b*2] * cw, cy + ex[b*2 + 1] * ch);
+                        }
+                        ctx.stroke();
+                    }
+                }
+                ctx.strokeStyle = '#1c1c22';
+                ctx.beginPath();
+                ctx.moveTo(0, stripY + stripH + 2);
+                ctx.lineTo(W, stripY + stripH + 2);
+                ctx.stroke();
+                return stripY + stripH + 6;
+            }
+
+            // Sized in cell-grid coordinates (0..n) → pixels.
+            function makeMap(ox, oy, side, n) {
+                const sx = side / n, sy = side / n;
+                return (x, y) => [ox + x * sx, oy + y * sy];
+            }
+
+            // Render the already-emitted history (everything behind the cursor).
+            function drawEmitted(ctx, map, c) {
+                const n = c.n;
+                if (state.algo === 'marchingCubes') {
+                    ctx.lineWidth = 1.8;
+                    ctx.lineCap = 'round';
+                    for (const e of state.emittedMC) {
+                        const segs = MSQ_TABLE[e.code];
+                        if (!segs.length) continue;
+                        const v00 = c.signed[e.cy * n + e.cx];
+                        const v10 = c.signed[e.cy * n + e.cx + 1];
+                        const v11 = c.signed[(e.cy + 1) * n + e.cx + 1];
+                        const v01 = c.signed[(e.cy + 1) * n + e.cx];
+                        const ex = [
+                            e.cx + lerpT(v00, v10), e.cy,
+                            e.cx + 1, e.cy + lerpT(v10, v11),
+                            e.cx + lerpT(v01, v11), e.cy + 1,
+                            e.cx, e.cy + lerpT(v00, v01),
+                        ];
+                        ctx.strokeStyle = CASE_COLOR[e.code];
+                        ctx.beginPath();
+                        for (let s = 0; s < segs.length; s += 2) {
+                            const a = segs[s], b = segs[s + 1];
+                            const p0 = map(ex[a*2], ex[a*2 + 1]);
+                            const p1 = map(ex[b*2], ex[b*2 + 1]);
+                            ctx.moveTo(p0[0], p0[1]); ctx.lineTo(p1[0], p1[1]);
+                        }
+                        ctx.stroke();
+                    }
+                } else {
+                    // threads
+                    ctx.strokeStyle = state.algo === 'dualContour' ? '#ff9ed2' : '#a7e1ff';
+                    ctx.lineWidth = 1.8;
+                    ctx.lineCap = 'round';
+                    ctx.beginPath();
+                    for (const t of state.threads) {
+                        const va = state.vertices[t.a], vb = state.vertices[t.b];
+                        if (!va || !vb) continue;
+                        const ax = t.a % (n - 1), ay = (t.a / (n - 1)) | 0;
+                        const bx = t.b % (n - 1), by = (t.b / (n - 1)) | 0;
+                        const p0 = map(ax + va.u, ay + va.v);
+                        const p1 = map(bx + vb.u, by + vb.v);
+                        ctx.moveTo(p0[0], p0[1]); ctx.lineTo(p1[0], p1[1]);
+                    }
+                    ctx.stroke();
+                    // vertices
+                    ctx.fillStyle = state.algo === 'dualContour' ? '#ffd9ee' : '#dffaff';
+                    for (const k in state.vertices) {
+                        const cellIdx = +k;
+                        const v = state.vertices[cellIdx];
+                        const cx = cellIdx % (n - 1), cy = (cellIdx / (n - 1)) | 0;
+                        const p = map(cx + v.u, cy + v.v);
+                        ctx.beginPath();
+                        ctx.arc(p[0], p[1], 2.2, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                }
+            }
+
+            // Render the currently-active cell's in-flight phase animation.
+            function drawCurrentCell(ctx, map, c, sxPx, syPx) {
+                if (state.cellStep >= state.cellOrder.length) return;
+                const cellIdx = state.cellOrder[state.cellStep];
+                const n = c.n;
+                const cx = cellIdx % (n - 1), cy = (cellIdx / (n - 1)) | 0;
+                const pts = state.cellPts[cellIdx];
+                const code = c.cases[cellIdx];
+                const phases = PHASES[state.algo];
+                const phase = phases[state.phaseIdx];
+                const phaseT = state.phaseT;
+
+                // ----- common pre-phase visuals: cell highlight + corners -----
+                // Cell highlight (always while a cell is active).
+                const p00 = map(cx, cy), p11 = map(cx + 1, cy + 1);
+                const cellW = p11[0] - p00[0], cellH = p11[1] - p00[1];
+                const pulse = 0.4 + 0.35 * Math.sin(Date.now() / 120);
+                ctx.strokeStyle = 'rgba(255,255,255,' + pulse.toFixed(2) + ')';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(p00[0] - 1, p00[1] - 1, cellW + 2, cellH + 2);
+                ctx.fillStyle = 'rgba(255,255,255,0.04)';
+                ctx.fillRect(p00[0], p00[1], cellW, cellH);
+
+                // For phases past 'classify', corner sign dots are visible.
+                const phaseRank = state.phaseIdx;
+                const rankOf = (id) => phases.findIndex(p => p.id === id);
+                const showCorners = phaseRank >= rankOf('classify');
+                if (showCorners) {
+                    const cornerVis = phase.id === 'classify' ? easeOutCubic(phaseT) : 1;
+                    const corners = [
+                        [cx,     cy,     c.signed[cy * n + cx]],
+                        [cx + 1, cy,     c.signed[cy * n + cx + 1]],
+                        [cx + 1, cy + 1, c.signed[(cy + 1) * n + cx + 1]],
+                        [cx,     cy + 1, c.signed[(cy + 1) * n + cx]],
+                    ];
+                    for (const [px, py, sv] of corners) {
+                        const p = map(px, py);
+                        ctx.fillStyle = sv < 0 ? '#7ab0ff' : '#ffb37a';
+                        ctx.globalAlpha = cornerVis;
+                        ctx.beginPath();
+                        ctx.arc(p[0], p[1], 3.6, 0, Math.PI * 2);
+                        ctx.fill();
+                        ctx.globalAlpha = 1;
+                    }
+                }
+
+                // ----- per-algo phase drawing -----
+                if (state.algo === 'marchingCubes') {
+                    if (phase.id === 'emit' && code !== 0 && code !== 15) {
+                        // Animate segment growing in.
+                        const v00 = c.signed[cy * n + cx];
+                        const v10 = c.signed[cy * n + cx + 1];
+                        const v11 = c.signed[(cy + 1) * n + cx + 1];
+                        const v01 = c.signed[(cy + 1) * n + cx];
+                        const ex = [
+                            cx + lerpT(v00, v10), cy,
+                            cx + 1, cy + lerpT(v10, v11),
+                            cx + lerpT(v01, v11), cy + 1,
+                            cx, cy + lerpT(v00, v01),
+                        ];
+                        const segs = MSQ_TABLE[code];
+                        const tt = easeInOutCubic(phaseT);
+                        ctx.strokeStyle = CASE_COLOR[code];
+                        ctx.lineWidth = 2.4;
+                        ctx.lineCap = 'round';
+                        ctx.beginPath();
+                        for (let s = 0; s < segs.length; s += 2) {
+                            const a = segs[s], b = segs[s + 1];
+                            const a0 = map(ex[a*2], ex[a*2 + 1]);
+                            const a1 = map(ex[b*2], ex[b*2 + 1]);
+                            const mx = a0[0] + (a1[0] - a0[0]) * tt;
+                            const my = a0[1] + (a1[1] - a0[1]) * tt;
+                            ctx.moveTo(a0[0], a0[1]);
+                            ctx.lineTo(mx, my);
+                        }
+                        ctx.stroke();
+                    }
+                } else if (state.algo === 'surfaceNets' || state.algo === 'dualContour') {
+                    if (!pts) return;
+                    // crossings dots (visible from 'crossings' onward)
+                    const showCrossings = phaseRank >= rankOf('crossings');
+                    if (showCrossings) {
+                        const t = phase.id === 'crossings' ? easeOutCubic(phaseT) : 1;
+                        ctx.fillStyle = '#7ec8e3';
+                        ctx.globalAlpha = t;
+                        for (let j = 0; j < pts.length; j += 5) {
+                            const p = map(cx + pts[j], cy + pts[j + 1]);
+                            ctx.beginPath();
+                            ctx.arc(p[0], p[1], 3.0 * t + 1, 0, Math.PI * 2);
+                            ctx.fill();
+                        }
+                        ctx.globalAlpha = 1;
+                    }
+
+                    if (state.algo === 'surfaceNets') {
+                        // Average phase: construction lines + dot that travels
+                        // from each crossing toward the centroid.
+                        if (phase.id === 'average' || phaseRank > rankOf('average')) {
+                            const v = solveVertex('surfaceNets', pts);
+                            const t = phase.id === 'average' ? easeInOutCubic(phaseT) : 1;
+                            const cp = map(cx + v.u, cy + v.v);
+                            ctx.strokeStyle = 'rgba(167,225,255,' + (0.3 + 0.4*t).toFixed(2) + ')';
+                            ctx.lineWidth = 1;
+                            ctx.beginPath();
+                            for (let j = 0; j < pts.length; j += 5) {
+                                const u = pts[j], vv = pts[j + 1];
+                                const p0 = map(cx + u, cy + vv);
+                                // Endpoint moves from crossing toward centroid.
+                                const ex2 = p0[0] + (cp[0] - p0[0]) * t;
+                                const ey2 = p0[1] + (cp[1] - p0[1]) * t;
+                                ctx.moveTo(p0[0], p0[1]);
+                                ctx.lineTo(ex2, ey2);
+                            }
+                            ctx.stroke();
+                        }
+                        // Place phase: dual vertex pops in.
+                        if (phase.id === 'place' || phaseRank > rankOf('place')) {
+                            const v = solveVertex('surfaceNets', pts);
+                            const t = phase.id === 'place' ? easeOutCubic(phaseT) : 1;
+                            const cp = map(cx + v.u, cy + v.v);
+                            ctx.fillStyle = '#dffaff';
+                            ctx.beginPath();
+                            ctx.arc(cp[0], cp[1], 1.5 + 2.5 * t, 0, Math.PI * 2);
+                            ctx.fill();
+                        }
+                        // Thread phase: lines extend from new vertex to existing
+                        // neighbor vertices.
+                        if (phase.id === 'thread') {
+                            const v = solveVertex('surfaceNets', pts);
+                            const cp = map(cx + v.u, cy + v.v);
+                            const neighbors = activeNeighborEdges(cellIdx);
+                            const t = easeInOutCubic(phaseT);
+                            ctx.strokeStyle = '#a7e1ff';
+                            ctx.lineWidth = 2;
+                            ctx.lineCap = 'round';
+                            ctx.beginPath();
+                            for (const other of neighbors) {
+                                const ov = state.vertices[other];
+                                if (!ov) continue;
+                                const ox2 = other % (n - 1), oy2 = (other / (n - 1)) | 0;
+                                const op = map(ox2 + ov.u, oy2 + ov.v);
+                                const ex2 = cp[0] + (op[0] - cp[0]) * t;
+                                const ey2 = cp[1] + (op[1] - cp[1]) * t;
+                                ctx.moveTo(cp[0], cp[1]);
+                                ctx.lineTo(ex2, ey2);
+                            }
+                            ctx.stroke();
+                        }
+                    } else {
+                        // dualContour
+                        // Normals: animate arrows growing from each crossing.
+                        const showNormals = phaseRank >= rankOf('normals');
+                        if (showNormals) {
+                            const t = phase.id === 'normals' ? easeOutCubic(phaseT) : 1;
+                            ctx.strokeStyle = '#ff9ed2';
+                            ctx.lineWidth = 1.6;
+                            ctx.beginPath();
+                            for (let j = 0; j < pts.length; j += 5) {
+                                const u = pts[j], vv = pts[j + 1];
+                                const nx = pts[j + 2], ny = pts[j + 3];
+                                const L = 0.32 * t;
+                                const a = map(cx + u, cy + vv);
+                                const b = map(cx + u + nx * L, cy + vv + ny * L);
+                                ctx.moveTo(a[0], a[1]);
+                                ctx.lineTo(b[0], b[1]);
+                            }
+                            ctx.stroke();
+                        }
+                        // Constraint lines: tangent through each crossing.
+                        const showConstraints = phaseRank >= rankOf('constraints');
+                        if (showConstraints) {
+                            const t = phase.id === 'constraints' ? easeOutCubic(phaseT) : 1;
+                            ctx.strokeStyle = 'rgba(255,158,210,' + (0.35 * (0.4 + 0.6*t)).toFixed(2) + ')';
+                            ctx.lineWidth = 1;
+                            ctx.beginPath();
+                            for (let j = 0; j < pts.length; j += 5) {
+                                const u = pts[j], vv = pts[j + 1];
+                                const nx = pts[j + 2], ny = pts[j + 3];
+                                const tx = -ny, ty = nx;
+                                const L = 0.55 * t;
+                                const a = map(cx + u - tx*L, cy + vv - ty*L);
+                                const b = map(cx + u + tx*L, cy + vv + ty*L);
+                                ctx.moveTo(a[0], a[1]);
+                                ctx.lineTo(b[0], b[1]);
+                            }
+                            ctx.stroke();
+                        }
+                        // Solve: vertex appears at QEF intersection (and phantom
+                        // centroid is shown faded for contrast).
+                        if (phase.id === 'solve' || phaseRank > rankOf('solve')) {
+                            const v = solveVertex('dualContour', pts);
+                            const vsn = solveVertex('surfaceNets', pts);
+                            const t = phase.id === 'solve' ? easeOutCubic(phaseT) : 1;
+                            const cp = map(cx + v.u, cy + v.v);
+                            const sp2 = map(cx + vsn.u, cy + vsn.v);
+                            // phantom centroid
+                            ctx.fillStyle = 'rgba(180,200,220,0.6)';
+                            ctx.beginPath();
+                            ctx.arc(sp2[0], sp2[1], 1.8, 0, Math.PI * 2);
+                            ctx.fill();
+                            // displacement connector
+                            ctx.strokeStyle = 'rgba(255,158,210,' + (0.6*t).toFixed(2) + ')';
+                            ctx.lineWidth = 1;
+                            ctx.beginPath();
+                            ctx.moveTo(sp2[0], sp2[1]);
+                            ctx.lineTo(cp[0], cp[1]);
+                            ctx.stroke();
+                            // vertex
+                            ctx.fillStyle = '#ffd9ee';
+                            ctx.beginPath();
+                            ctx.arc(cp[0], cp[1], 1.5 + 2.5 * t, 0, Math.PI * 2);
+                            ctx.fill();
+                        }
+                        // Thread phase
+                        if (phase.id === 'thread') {
+                            const v = solveVertex('dualContour', pts);
+                            const cp = map(cx + v.u, cy + v.v);
+                            const neighbors = activeNeighborEdges(cellIdx);
+                            const t = easeInOutCubic(phaseT);
+                            ctx.strokeStyle = '#ff9ed2';
+                            ctx.lineWidth = 2;
+                            ctx.lineCap = 'round';
+                            ctx.beginPath();
+                            for (const other of neighbors) {
+                                const ov = state.vertices[other];
+                                if (!ov) continue;
+                                const ox2 = other % (n - 1), oy2 = (other / (n - 1)) | 0;
+                                const op = map(ox2 + ov.u, oy2 + ov.v);
+                                const ex2 = cp[0] + (op[0] - cp[0]) * t;
+                                const ey2 = cp[1] + (op[1] - cp[1]) * t;
+                                ctx.moveTo(cp[0], cp[1]);
+                                ctx.lineTo(ex2, ey2);
+                            }
+                            ctx.stroke();
                         }
                     }
                 }
-                ctx.stroke();
+            }
 
+            function renderAnimation() {
+                const r = animCanvas.getBoundingClientRect();
+                const W = Math.max(1, r.width | 0), H = Math.max(1, r.height | 0);
+                if (animCanvas.width !== W || animCanvas.height !== H) {
+                    animCanvas.width = W; animCanvas.height = H;
+                }
+                const ctx = animCtx;
+                ctx.clearRect(0, 0, W, H);
+                const c = state.cached;
+                if (!c.signed) return;
+                const n = c.n;
+
+                // MC reserves the top strip for the case table.
+                let padTop = 0;
+                if (state.algo === 'marchingCubes') {
+                    padTop = drawCaseStrip(ctx, W, n);
+                }
+                const fit = fitSlice(W, H, padTop);
+                const { ox, oy, side } = fit;
+
+                // Dim field background.
+                ctx.imageSmoothingEnabled = true;
+                ctx.drawImage(fieldOff, ox, oy, side, side);
+                ctx.fillStyle = 'rgba(0,0,0,0.5)';
+                ctx.fillRect(ox, oy, side, side);
+
+                const map = makeMap(ox, oy, side, n);
+                drawEmitted(ctx, map, c);
+                drawCurrentCell(ctx, map, c, side / n, side / n);
+
+                // Status line.
+                const phases = PHASES[state.algo];
+                const phase = phases[state.phaseIdx];
+                const total = state.cellOrder.length;
+                const done = state.cellStep >= total;
+                status.textContent =
+                    state.algo + (done ? ' · COMPLETE' : '') + '\n' +
+                    'cell ' + Math.min(state.cellStep, total) + ' / ' + total +
+                    (done ? '' : '   phase: ' + (phase ? phase.id : '-')) + '\n' +
+                    'speed ' + state.speed.toFixed(state.speed >= 4 ? 0 : 1) + 'x';
+            }
+
+            // ----- main loop ----------------------------------------------------
+            function tick(now) {
+                if (state.autoRotate) {
+                    Camera.orbitLook(cam, 0.4, 0);
+                    scene.setCamera(Camera.orbitViewOpts(cam, canvas));
+                }
+                if (state.lastT === 0) state.lastT = now;
+                const dt = Math.min(100, now - state.lastT);   // clamp ms
+                state.lastT = now;
+
+                // Skip past empty slices instantly when sweep-volume is on
+                // (these are slices entirely above/below the iso surface).
+                while (state.playing && state.sweepVolume &&
+                       state.cellOrder.length === 0 &&
+                       state.sliceZ < state.gridN - 1) {
+                    if (!advanceSlice()) break;
+                }
+                if (state.playing && state.cellStep < state.cellOrder.length) {
+                    const phases = PHASES[state.algo];
+                    const phase = phases[state.phaseIdx];
+                    const dur = phase.ms / state.speed;
+                    state.phaseT += dt / Math.max(1, dur);
+                    while (state.phaseT >= 1) {
+                        state.phaseT -= 1;
+                        state.phaseIdx++;
+                        if (state.phaseIdx >= phases.length) {
+                            commitCell(state.cellOrder[state.cellStep]);
+                            state.cellStep++;
+                            state.phaseIdx = 0;
+                            if (state.cellStep >= state.cellOrder.length) {
+                                state.phaseT = 0;
+                                if (state.sweepVolume) {
+                                    // Skip empty slices in this hop too.
+                                    let advanced = false;
+                                    while (state.sliceZ < state.gridN - 1) {
+                                        if (!advanceSlice()) break;
+                                        advanced = true;
+                                        if (state.cellOrder.length > 0) break;
+                                    }
+                                    if (!advanced || state.cellOrder.length === 0) {
+                                        state.playing = false;
+                                        playBtn.textContent = 'Play';
+                                        playBtn.classList.remove('toggled');
+                                    }
+                                } else {
+                                    state.playing = false;
+                                    playBtn.textContent = 'Play';
+                                    playBtn.classList.remove('toggled');
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                // Throttled wireframe rebuild — only after at least one new
+                // commit, and never more than ~10Hz to keep updateMesh cost
+                // bounded when the speed slider is cranked up.
+                if (state.wireDirty && now - (state.lastWireRebuild || 0) > 90) {
+                    refreshWireMesh();
+                    state.lastWireRebuild = now;
+                }
+                renderAnimation();
+
+                // Slice label.
                 sliceLabel.textContent =
-                    `slice z = ${z} / ${n - 1}\n` +
-                    `range  ${mn.toFixed(2)} .. ${mx.toFixed(2)}\n` +
-                    `active cells: ${activeCells}`;
+                    'slice z = ' + state.cached.z + ' / ' + (state.cached.n - 1) +
+                    '   range ' + state.cached.mn.toFixed(2) + ' .. ' + state.cached.mx.toFixed(2) +
+                    '   active cells: ' + state.cellOrder.length;
+
+                state.animFrame = requestAnimationFrame(tick);
             }
 
-            function lerpT(a, b) {
-                const denom = a - b;
-                if (Math.abs(denom) < 1e-9) return 0.5;
-                return a / denom;
-            }
-
-            // --- camera input ----------------------------------------------------
+            // ----- input --------------------------------------------------------
             let dragging = null;
             canvas.addEventListener('mousedown', e => {
                 state.autoRotate = false;
@@ -384,55 +1367,62 @@
 
             sliceSlider.oninput = () => {
                 state.sliceZ = parseInt(sliceSlider.value, 10);
-                redrawSlice();
+                invalidateSlice();
+                recomputeSliceCache();
+                paintFieldOff();
+                // Don't blow away the 3D wireframe just because the user scrubbed
+                // to inspect a different slice. Only restart the per-slice sweep.
+                restartSlice();
             };
 
-            function tick() {
-                if (state.autoRotate && !dragging) {
-                    Camera.orbitLook(cam, 0.4, 0);
-                    scene.setCamera(Camera.orbitViewOpts(cam, canvas));
-                }
-                // Slice canvas adapts to layout size on first paint and on resize.
-                // Cheap re-render — 48² scalars on the hot path.
-                const rect = sliceCanvas.getBoundingClientRect();
-                const W = Math.max(1, rect.width | 0), H = Math.max(1, rect.height | 0);
-                if (W > 4 && (sliceCanvas.width !== W || sliceCanvas.height !== H)) {
-                    redrawSlice();
-                }
-                state.animFrame = requestAnimationFrame(tick);
-            }
-
             // --- params ----------------------------------------------------------
-            AVUI.mkSelect(params, 'algo', ALGOS, state.algo, v => { state.algo = v; rebuildMesh(); });
-            AVUI.mkSelect(params, 'field', FIELDS, state.field, v => { state.field = v; rebuildField(); });
-            AVUI.mkRange(params, 'iso', state.isoLevel, -3.0, 3.0, 0.05,
-                v => { state.isoLevel = v; rebuildMesh(); redrawSlice(); }, v => v.toFixed(2));
-            AVUI.mkRange(params, 'grid', state.gridN, 16, 80, 4,
-                v => { state.gridN = v | 0; rebuildField(); }, v => `${v|0}`);
-            AVUI.mkRange(params, 'cell', state.cellSize, 0.2, 1.0, 0.05,
-                v => { state.cellSize = v; rebuildMesh(); }, v => v.toFixed(2));
-            AVUI.mkNumber(params, 'seed', state.seed, 1,
-                v => { state.seed = v | 0; if (state.field === 'noise') rebuildField(); });
-            const activeBtn = AVUI.mkButton(params, 'active cells', () => {
-                state.showActive = !state.showActive;
-                activeBtn.classList.toggle('toggled', state.showActive);
-                redrawSlice();
+            AVUI.mkSelect(params, 'algo', ALGOS, state.algo, v => {
+                state.algo = v;
+                rebuildMesh();
+                resetAnim();
             });
-            activeBtn.classList.toggle('toggled', state.showActive);
+            AVUI.mkSelect(params, 'field', FIELDS, state.field, v => {
+                state.field = v;
+                rebuildField();
+            });
+            AVUI.mkRange(params, 'iso', state.isoLevel, -3.0, 3.0, 0.05, v => {
+                state.isoLevel = v;
+                invalidateSlice();
+                rebuildMesh();
+                recomputeSliceCache();
+                paintFieldOff();
+                resetAnim();
+            }, v => v.toFixed(2));
+            AVUI.mkRange(params, 'grid', state.gridN, 16, 64, 4, v => {
+                state.gridN = v | 0;
+                rebuildField();
+            }, v => `${v|0}`);
+            AVUI.mkRange(params, 'cell', state.cellSize, 0.2, 1.0, 0.05, v => {
+                state.cellSize = v;
+                rebuildMesh();
+            }, v => v.toFixed(2));
+            AVUI.mkNumber(params, 'seed', state.seed, 1, v => {
+                state.seed = v | 0;
+                if (state.field === 'noise') rebuildField();
+            });
             const rotBtn = AVUI.mkButton(params, 'auto-rotate', () => {
                 state.autoRotate = !state.autoRotate;
                 rotBtn.classList.toggle('toggled', state.autoRotate);
             });
             rotBtn.classList.toggle('toggled', state.autoRotate);
 
+            sweepBtn.classList.add('toggled');
+            playBtn.classList.add('toggled');
+            playBtn.textContent = 'Pause';
             rebuildField();
-            tick();
+            state.animFrame = requestAnimationFrame(tick);
             return { scene, state, wrap };
         },
 
         destroy(handle) {
             if (handle.state.animFrame) cancelAnimationFrame(handle.state.animFrame);
             if (handle.state.mesh) handle.state.mesh.destroy();
+            if (handle.state.wireMesh) handle.state.wireMesh.destroy();
             if (handle.wrap) handle.wrap.remove();
         },
     });
