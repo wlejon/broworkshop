@@ -160,103 +160,161 @@
                 + 'font:11px monospace;white-space:pre;pointer-events:none';
             leftCol.appendChild(meshLabel);
 
+            // The right column hosts the animation panel + its controls. Two
+            // compact rows of controls (action buttons, then mode + speed),
+            // then a slice slider row, then the panel which flex-fills the
+            // remaining vertical space.
             const rightCol = document.createElement('div');
-            rightCol.style.cssText = 'flex:0 0 460px;display:flex;flex-direction:column;gap:6px;min-height:0';
+            rightCol.style.cssText = 'flex:0 0 500px;display:flex;flex-direction:column;'
+                + 'gap:6px;min-height:0;min-width:0';
             wrap.appendChild(rightCol);
 
-            // Animation controls bar.
-            const bar = document.createElement('div');
-            bar.style.cssText = 'display:flex;gap:6px;align-items:center;flex:0 0 auto;'
-                + 'padding:6px;background:#0c0c0c;border:1px solid #1c1c1c;font:11px monospace;color:#bbb';
-            rightCol.appendChild(bar);
+            // Small helper for a labeled section header (used at top of panel).
+            function mkSectionHeader(text) {
+                const h = document.createElement('div');
+                h.style.cssText = 'font:10px monospace;color:#666;letter-spacing:1px;'
+                    + 'text-transform:uppercase;padding:0 2px;flex:0 0 auto';
+                h.textContent = text;
+                return h;
+            }
 
-            function mkBtn(label, onClick) {
+            // ---- Row 1: action buttons -----------------------------------------
+            const bar1 = document.createElement('div');
+            bar1.style.cssText = 'display:flex;gap:5px;align-items:center;flex:0 0 auto;'
+                + 'padding:6px 7px;background:#0c0c0c;border:1px solid #1c1c1c;'
+                + 'font:11px monospace;color:#bbb';
+            rightCol.appendChild(bar1);
+
+            function mkBtn(parent, label, onClick) {
                 const b = document.createElement('button');
                 b.className = 'opbtn';
                 b.textContent = label;
+                b.style.cssText = 'white-space:nowrap;flex:0 0 auto';
                 b.onclick = onClick;
-                bar.appendChild(b);
+                parent.appendChild(b);
                 return b;
             }
-            const playBtn = mkBtn('Play', () => {
+            const playBtn = mkBtn(bar1, 'Play', () => {
                 state.playing = !state.playing;
                 playBtn.textContent = state.playing ? 'Pause' : 'Play';
                 playBtn.classList.toggle('toggled', state.playing);
             });
-            mkBtn('Step', () => {
+            mkBtn(bar1, 'Step', () => {
                 state.playing = false;
                 playBtn.textContent = 'Play';
                 playBtn.classList.remove('toggled');
-                advancePhase(1);   // one micro-step
+                advancePhase(1);
             });
-            mkBtn('Skip cell', () => {
+            mkBtn(bar1, 'Skip', () => {
                 state.playing = false;
                 playBtn.textContent = 'Play';
                 playBtn.classList.remove('toggled');
                 completeCurrentCell();
             });
-            mkBtn('Finish slice', () => {
+            mkBtn(bar1, 'Finish', () => {
                 state.playing = false;
                 playBtn.textContent = 'Play';
                 playBtn.classList.remove('toggled');
                 finishSlice();
             });
-            mkBtn('Reset', () => {
-                resetAnim();
-            });
-            const sweepBtn = mkBtn('Sweep volume', () => {
+            mkBtn(bar1, 'Reset', () => { resetAnim(); });
+
+            // ---- Row 2: mode toggle + speed -----------------------------------
+            const bar2 = document.createElement('div');
+            bar2.style.cssText = 'display:flex;gap:8px;align-items:center;flex:0 0 auto;'
+                + 'padding:6px 7px;background:#0c0c0c;border:1px solid #1c1c1c;'
+                + 'font:11px monospace;color:#bbb';
+            rightCol.appendChild(bar2);
+            const sweepBtn = mkBtn(bar2, 'Sweep volume', () => {
                 state.sweepVolume = !state.sweepVolume;
                 sweepBtn.classList.toggle('toggled', state.sweepVolume);
             });
-            // sweepBtn starts toggled (state.sweepVolume defaults to true). The
-            // classList toggle below runs after state is created in init().
-            // Speed slider.
-            const sp = document.createElement('div');
-            sp.style.cssText = 'display:flex;gap:4px;align-items:center;margin-left:auto';
-            sp.innerHTML = '<span style="color:#888">speed</span>';
+            const speedWrap = document.createElement('div');
+            speedWrap.style.cssText = 'display:flex;gap:6px;align-items:center;flex:1 1 auto;min-width:0';
+            const speedLbl = document.createElement('span');
+            speedLbl.style.cssText = 'color:#888;flex:0 0 auto';
+            speedLbl.textContent = 'speed';
             const speedSlider = document.createElement('input');
             speedSlider.type = 'range'; speedSlider.min = '0'; speedSlider.max = '4';
             speedSlider.step = '0.01'; speedSlider.value = '1';
-            speedSlider.style.cssText = 'width:90px';
+            speedSlider.style.cssText = 'flex:1 1 auto;min-width:0';
             const speedNum = document.createElement('span');
-            speedNum.style.cssText = 'color:#ddd;min-width:36px;text-align:right';
+            speedNum.style.cssText = 'color:#ddd;flex:0 0 auto;min-width:40px;text-align:right';
             speedNum.textContent = '1.0x';
             speedSlider.oninput = () => {
                 state.speedExp = parseFloat(speedSlider.value);
                 state.speed = Math.pow(2, state.speedExp);
                 speedNum.textContent = state.speed.toFixed(state.speed >= 4 ? 0 : 1) + 'x';
             };
-            sp.appendChild(speedSlider); sp.appendChild(speedNum);
-            bar.appendChild(sp);
+            speedWrap.appendChild(speedLbl);
+            speedWrap.appendChild(speedSlider);
+            speedWrap.appendChild(speedNum);
+            bar2.appendChild(speedWrap);
 
-            // Slice slider row.
+            // ---- Row 3: slice slider with inline label/stats ------------------
             const sliceRow = document.createElement('div');
-            sliceRow.style.cssText = 'display:flex;flex-direction:column;gap:3px;flex:0 0 auto';
+            sliceRow.style.cssText = 'display:flex;gap:8px;align-items:center;flex:0 0 auto;'
+                + 'padding:6px 7px;background:#0c0c0c;border:1px solid #1c1c1c;'
+                + 'font:11px monospace;color:#bbb';
             rightCol.appendChild(sliceRow);
+            const sliceLbl = document.createElement('span');
+            sliceLbl.style.cssText = 'color:#888;flex:0 0 auto';
+            sliceLbl.textContent = 'slice';
             const sliceSlider = document.createElement('input');
             sliceSlider.type = 'range';
-            sliceSlider.style.cssText = 'width:100%';
+            sliceSlider.style.cssText = 'flex:1 1 auto;min-width:0';
+            const sliceZNum = document.createElement('span');
+            sliceZNum.style.cssText = 'color:#ddd;flex:0 0 auto;font-variant-numeric:tabular-nums';
+            sliceZNum.textContent = '0 / 0';
+            sliceRow.appendChild(sliceLbl);
             sliceRow.appendChild(sliceSlider);
-            const sliceLabel = document.createElement('div');
-            sliceLabel.style.cssText = 'padding:3px 6px;background:#0c0c0c;border:1px solid #1c1c1c;'
-                + 'font:10px monospace;color:#bbb;line-height:1.35;white-space:pre';
-            sliceRow.appendChild(sliceLabel);
+            sliceRow.appendChild(sliceZNum);
 
-            // The big animation panel.
+            // ---- Slice stats line (range + active cells), thin and quiet ------
+            const sliceLabel = document.createElement('div');
+            sliceLabel.style.cssText = 'padding:3px 8px;color:#777;font:10px monospace;'
+                + 'flex:0 0 auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+            rightCol.appendChild(sliceLabel);
+
+            // ---- Animation panel ----------------------------------------------
+            // Box with explicit header (algo + phase + speed) above the canvas,
+            // so the live status reads cleanly without overlapping the slice
+            // render. The case-table strip (MC only) is drawn at the top of the
+            // canvas itself; this header sits above it.
             const panel = document.createElement('div');
-            panel.style.cssText = 'flex:1 1 auto;position:relative;background:#080808;border:1px solid #222;min-height:0';
+            panel.style.cssText = 'flex:1 1 auto;display:flex;flex-direction:column;'
+                + 'position:relative;background:#080808;border:1px solid #222;min-height:0';
             rightCol.appendChild(panel);
+
+            const panelHdr = document.createElement('div');
+            panelHdr.style.cssText = 'padding:5px 9px;background:#101015;border-bottom:1px solid #1c1c1c;'
+                + 'font:11px monospace;color:#bbb;flex:0 0 auto;display:flex;gap:12px;align-items:center';
+            panel.appendChild(panelHdr);
+            const hdrAlgo = document.createElement('span');
+            hdrAlgo.style.cssText = 'color:#9ad1ff;font-weight:bold;flex:0 0 auto';
+            const hdrPhase = document.createElement('span');
+            hdrPhase.style.cssText = 'color:#ddd;flex:1 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+            const hdrCell = document.createElement('span');
+            hdrCell.style.cssText = 'color:#888;flex:0 0 auto;font-variant-numeric:tabular-nums';
+            panelHdr.appendChild(hdrAlgo);
+            panelHdr.appendChild(hdrPhase);
+            panelHdr.appendChild(hdrCell);
+
+            const panelCvWrap = document.createElement('div');
+            panelCvWrap.style.cssText = 'position:relative;flex:1 1 auto;min-height:0';
+            panel.appendChild(panelCvWrap);
             const animCanvas = document.createElement('canvas');
             animCanvas.style.cssText = 'display:block;position:absolute;inset:0;width:100%;height:100%';
-            panel.appendChild(animCanvas);
+            panelCvWrap.appendChild(animCanvas);
             const animCtx = animCanvas.getContext('2d');
 
-            // Status text in the panel corner.
+            // Tiny status footer (e.g. "COMPLETE" indicator) — empty most of the time.
             const status = document.createElement('div');
-            status.style.cssText = 'position:absolute;left:8px;top:8px;'
-                + 'padding:4px 8px;background:rgba(0,0,0,0.65);color:#ddd;'
-                + 'font:11px monospace;white-space:pre;pointer-events:none';
-            panel.appendChild(status);
+            status.style.cssText = 'position:absolute;left:8px;bottom:6px;'
+                + 'padding:2px 8px;background:rgba(0,0,0,0.65);color:#9ad1ff;'
+                + 'font:10px monospace;border-radius:2px;pointer-events:none';
+            panelCvWrap.appendChild(status);
+            status.style.display = 'none';
 
             // --- scene setup ------------------------------------------------------
             scene.setToneMap({ mode: 'aces', exposure: 1.0 });
@@ -866,30 +924,34 @@
             }
 
             function drawCaseStrip(ctx, W, n) {
-                const stripH = 30;
+                const stripH = 42;
                 const padY = 4;
-                const cellW = Math.max(10, ((W - 8) / 16) | 0);
+                const cellW = Math.max(14, ((W - 8) / 16) | 0);
                 const stripY = padY;
+                const phases = PHASES[state.algo];
+                const phase = phases[state.phaseIdx];
+                const c = state.cached;
+                let highlightCase = -1;
+                if (state.cellStep < state.cellOrder.length &&
+                    state.algo === 'marchingCubes' && phase &&
+                    (phase.id === 'lookup' || phase.id === 'emit')) {
+                    highlightCase = c.cases[state.cellOrder[state.cellStep]];
+                }
                 for (let i = 0; i < 16; i++) {
                     const x0 = 4 + i * cellW;
-                    // pulse the current cell's matching case during 'lookup'
-                    const c = state.cached;
-                    const cellIdx = state.cellOrder[state.cellStep];
-                    const phases = PHASES[state.algo];
-                    const phase = phases[state.phaseIdx];
-                    let highlightCase = -1;
-                    if (state.cellStep < state.cellOrder.length &&
-                        state.algo === 'marchingCubes' &&
-                        phase && (phase.id === 'lookup' || phase.id === 'emit')) {
-                        highlightCase = c.cases[cellIdx];
-                    }
                     const isHi = i === highlightCase;
                     ctx.fillStyle = CASE_COLOR[i];
-                    ctx.globalAlpha = isHi ? (0.55 + 0.35 * Math.sin(Date.now() / 80)) : 0.16;
+                    ctx.globalAlpha = isHi ? (0.6 + 0.35 * Math.sin(Date.now() / 90)) : 0.18;
                     ctx.fillRect(x0, stripY, cellW - 1, stripH - padY);
                     ctx.globalAlpha = 1;
-                    const cx = x0 + 3, cy = stripY + 3;
-                    const cw = cellW - 7, ch = stripH - padY - 6;
+                    // Slightly thicker border for the highlighted entry.
+                    if (isHi) {
+                        ctx.strokeStyle = '#ffffff';
+                        ctx.lineWidth = 1.5;
+                        ctx.strokeRect(x0 + 0.5, stripY + 0.5, cellW - 2, stripH - padY - 1);
+                    }
+                    const cx = x0 + 4, cy = stripY + 4;
+                    const cw = cellW - 9, ch = stripH - padY - 14;
                     const corners = [
                         [0, 0, (i & 1) ? 1 : 0],
                         [1, 0, (i & 2) ? 1 : 0],
@@ -899,14 +961,14 @@
                     for (const [u, v, inside] of corners) {
                         ctx.fillStyle = inside ? '#7ab0ff' : '#ffb37a';
                         ctx.beginPath();
-                        ctx.arc(cx + u * cw, cy + v * ch, 1.4, 0, Math.PI * 2);
+                        ctx.arc(cx + u * cw, cy + v * ch, 1.6, 0, Math.PI * 2);
                         ctx.fill();
                     }
                     const ex = [0.5, 0, 1, 0.5, 0.5, 1, 0, 0.5];
                     const segs = MSQ_TABLE[i];
                     if (segs.length) {
                         ctx.strokeStyle = isHi ? '#ffffff' : CASE_COLOR[i];
-                        ctx.lineWidth = isHi ? 2 : 1.2;
+                        ctx.lineWidth = isHi ? 2.2 : 1.4;
                         ctx.beginPath();
                         for (let s = 0; s < segs.length; s += 2) {
                             const a = segs[s], b = segs[s + 1];
@@ -915,6 +977,12 @@
                         }
                         ctx.stroke();
                     }
+                    // Case number label, bottom-centered.
+                    ctx.fillStyle = isHi ? '#fff' : '#777';
+                    ctx.font = '9px monospace';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(String(i), x0 + cellW / 2, stripY + stripH - 3);
+                    ctx.textAlign = 'start';
                 }
                 ctx.strokeStyle = '#1c1c22';
                 ctx.beginPath();
@@ -1263,11 +1331,18 @@
                 const phase = phases[state.phaseIdx];
                 const total = state.cellOrder.length;
                 const done = state.cellStep >= total;
-                status.textContent =
-                    state.algo + (done ? ' · COMPLETE' : '') + '\n' +
-                    'cell ' + Math.min(state.cellStep, total) + ' / ' + total +
-                    (done ? '' : '   phase: ' + (phase ? phase.id : '-')) + '\n' +
-                    'speed ' + state.speed.toFixed(state.speed >= 4 ? 0 : 1) + 'x';
+                // Panel header is structured (algo · phase · cell counter).
+                hdrAlgo.textContent = state.algo;
+                hdrPhase.textContent = done ? 'complete'
+                    : (phase ? 'phase: ' + phase.id : '');
+                hdrCell.textContent = 'cell ' + Math.min(state.cellStep, total) +
+                    ' / ' + total;
+                if (done && total > 0) {
+                    status.textContent = 'slice complete';
+                    status.style.display = '';
+                } else {
+                    status.style.display = 'none';
+                }
             }
 
             // ----- main loop ----------------------------------------------------
@@ -1335,10 +1410,12 @@
                 renderAnimation();
 
                 // Slice label.
+                // Slice header & stats.
+                sliceZNum.textContent = state.cached.z + ' / ' + (state.cached.n - 1);
                 sliceLabel.textContent =
-                    'slice z = ' + state.cached.z + ' / ' + (state.cached.n - 1) +
-                    '   range ' + state.cached.mn.toFixed(2) + ' .. ' + state.cached.mx.toFixed(2) +
-                    '   active cells: ' + state.cellOrder.length;
+                    'range ' + state.cached.mn.toFixed(2) +
+                    ' .. ' + state.cached.mx.toFixed(2) +
+                    '    active cells: ' + state.cellOrder.length;
 
                 state.animFrame = requestAnimationFrame(tick);
             }
