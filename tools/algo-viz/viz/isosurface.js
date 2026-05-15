@@ -160,6 +160,7 @@
                 + 'font:11px monospace;white-space:pre;pointer-events:none';
             leftCol.appendChild(meshLabel);
 
+
             // The right column hosts the animation panel + its controls. Two
             // compact rows of controls (action buttons, then mode + speed),
             // then a slice slider row, then the panel which flex-fills the
@@ -209,13 +210,35 @@
                 state.playing = false;
                 playBtn.textContent = 'Play';
                 playBtn.classList.remove('toggled');
-                completeCurrentCell();
+                // Skip flushes whichever phase is in flight: fill → done,
+                // stitch → commit all connectors, sweep → finish current cell.
+                if (state.filling) {
+                    state.ghostAlpha = state.filling.toA;
+                    createGhostMesh(state.filling.toA);
+                    state.filling = null;
+                } else if (state.stitching) {
+                    flushStitchRemaining();
+                    state.stitching = null;
+                    snapshotCurrentSlice();
+                } else {
+                    completeCurrentCell();
+                }
             });
             mkBtn(bar1, 'Finish', () => {
                 state.playing = false;
                 playBtn.textContent = 'Play';
                 playBtn.classList.remove('toggled');
-                finishSlice();
+                if (state.filling) {
+                    state.ghostAlpha = state.filling.toA;
+                    createGhostMesh(state.filling.toA);
+                    state.filling = null;
+                } else if (state.stitching) {
+                    flushStitchRemaining();
+                    state.stitching = null;
+                    snapshotCurrentSlice();
+                } else {
+                    finishSlice();
+                }
             });
             mkBtn(bar1, 'Reset', () => { resetAnim(); });
 
@@ -235,16 +258,27 @@
             speedLbl.style.cssText = 'color:#888;flex:0 0 auto';
             speedLbl.textContent = 'speed';
             const speedSlider = document.createElement('input');
-            speedSlider.type = 'range'; speedSlider.min = '0'; speedSlider.max = '4';
-            speedSlider.step = '0.01'; speedSlider.value = '1';
+            // Slider position t ∈ [0,1] maps exponentially to speed ∈ [1,50]x,
+            // so small movements near the low end yield small bumps (you can
+            // really watch the algorithm), and dragging to the top scrubs
+            // through entire slices in a frame.
+            speedSlider.type = 'range';
+            speedSlider.min = '0'; speedSlider.max = '1';
+            speedSlider.step = '0.001'; speedSlider.value = '0';
             speedSlider.style.cssText = 'flex:1 1 auto;min-width:0';
             const speedNum = document.createElement('span');
-            speedNum.style.cssText = 'color:#ddd;flex:0 0 auto;min-width:40px;text-align:right';
+            speedNum.style.cssText = 'color:#ddd;flex:0 0 auto;min-width:44px;text-align:right';
             speedNum.textContent = '1.0x';
+            const SPEED_MAX = 50;
+            // Update the readout to show effective ramped speed; called from
+            // both the slider and the tick loop.
+            function refreshSpeedLabel() {
+                speedNum.textContent =
+                    state.speed.toFixed(state.speed >= 10 ? 0 : 1) + 'x';
+            }
             speedSlider.oninput = () => {
                 state.speedExp = parseFloat(speedSlider.value);
-                state.speed = Math.pow(2, state.speedExp);
-                speedNum.textContent = state.speed.toFixed(state.speed >= 4 ? 0 : 1) + 'x';
+                refreshSpeedLabel();
             };
             speedWrap.appendChild(speedLbl);
             speedWrap.appendChild(speedSlider);
@@ -332,13 +366,13 @@
 
             const state = {
                 algo: 'marchingCubes',
-                field: 'sphere',
+                field: 'gyroid',
                 gridN: 32,
                 isoLevel: 0,
                 cellSize: 0.7,
                 seed: 1,
                 sliceZ: 16,
-                autoRotate: true,
+                autoRotate: false,
                 mesh: null,
                 fieldData: null,
                 triCount: 0,
@@ -356,6 +390,12 @@
                 // Animation cursor.
                 playing: true,
                 speed: 1.0, speedExp: 0,
+                // Auto-ramp: effective speed grows from 1x toward target
+                // (Math.pow(50, speedExp)) over rampMs of accumulated play
+                // time. Lets the first cells crawl so the user actually
+                // reads them, then accelerates through the bulk.
+                playTimeMs: 0,
+                rampMs: 6000,
                 cellStep: 0,            // index into cellOrder
                 phaseIdx: 0,            // index into PHASES[algo]
                 phaseT: 0,              // 0..1 progress through current phase
@@ -373,6 +413,26 @@
                 wireMesh: null,
                 wireDirty: false,
                 sweepVolume: true,      // auto-advance Z when slice completes
+
+                // Multi-slice construction.
+                //   prevSlice: snapshot of the slice we just finished sweeping,
+                //     kept so the next slice's commit can stitch features that
+                //     share an in-plane cell column across z.
+                //   stitching: in-flight inter-slice connect animation between
+                //     prevSlice.z and cached.z. Holds a precomputed segment
+                //     list; segments fold into segments3D as t advances.
+                //   filling:   after the final slice's stitch, ramp the ghost
+                //     mesh from translucent to nearly-solid in discrete steps
+                //     so the wireframe visibly "fills in" to the real surface.
+                //   builtCached: bromesh output cached during rebuildMesh so
+                //     the fill pass can recreate the mesh with new opacity
+                //     without recomputing the algorithm.
+                prevSlice: null,
+                stitching: null,
+                filling: null,
+                builtCached: null,
+                ghostAlpha: 0.18,
+                finished: false,
             };
 
             const fieldOff = document.createElement('canvas');
@@ -396,28 +456,38 @@
                 const n = state.gridN;
                 const built = Mesh[state.algo](state.fieldData, n, n, n,
                                                state.isoLevel, state.cellSize);
+                state.builtCached = built;
                 state.triCount = 0;
                 if (!built) return;
                 if (built.indices) state.triCount = built.indices.length / 3;
                 else if (built.positions) state.triCount = built.positions.length / 9;
-                const offset = -(n - 1) * 0.5 * state.cellSize;
-                // Ghost: the final mesh from bromesh, semi-transparent. This is
-                // the "thing we're building from" — visible as a faded shape
-                // that the wireframe accumulates around as the algorithm runs.
-                state.mesh = scene.createMesh({
-                    data: built,
-                    color: [0.55, 0.75, 0.95, 0.18],
-                    metallic: 0.0, roughness: 0.85,
-                    twoSided: true,
-                    castsShadow: false,
-                    x: offset, y: offset, z: offset,
-                });
+                state.ghostAlpha = 0.18;
+                createGhostMesh(state.ghostAlpha);
                 meshLabel.textContent =
                     'algo:    ' + state.algo + '\n' +
                     'field:   ' + state.field + '\n' +
                     'grid:    ' + n + '³ = ' + (n*n*n) + ' samples\n' +
                     'iso:     ' + state.isoLevel.toFixed(2) + '\n' +
                     'tris:    ' + (state.triCount | 0);
+            }
+
+            // (Re)create the translucent ghost mesh at a target alpha. Used
+            // both at rebuild time (low alpha = "we're going to build this")
+            // and during the final fill pass (alpha ramps up to ~0.85 so the
+            // wireframe visibly resolves into solid geometry).
+            function createGhostMesh(alpha) {
+                if (state.mesh) { state.mesh.destroy(); state.mesh = null; }
+                if (!state.builtCached) return;
+                const n = state.gridN;
+                const offset = -(n - 1) * 0.5 * state.cellSize;
+                state.mesh = scene.createMesh({
+                    data: state.builtCached,
+                    color: [0.55, 0.75, 0.95, alpha],
+                    metallic: 0.0, roughness: 0.85,
+                    twoSided: true,
+                    castsShadow: false,
+                    x: offset, y: offset, z: offset,
+                });
             }
 
             function invalidateSlice() { state.cached.z = -1; }
@@ -547,6 +617,14 @@
                 state.vertices = {};
                 state.threads.length = 0;
                 clearWireframe();
+                state.prevSlice = null;
+                state.stitching = null;
+                state.filling = null;
+                state.finished = false;
+                state.ghostAlpha = 0.18;
+                if (state.builtCached) createGhostMesh(state.ghostAlpha);
+                state.playTimeMs = 0;
+                state.speed = 1.0;
                 state.sliceZ = 0;
                 sliceSlider.value = 0;
                 invalidateSlice();
@@ -558,6 +636,8 @@
             }
 
             // Restart sweep on the current slice without clearing 3D wire.
+            // Also cancels any in-flight stitch (its segments will be
+            // recomputed when this slice completes again).
             function restartSlice() {
                 state.cellStep = 0;
                 state.phaseIdx = 0;
@@ -565,6 +645,7 @@
                 state.emittedMC.length = 0;
                 state.vertices = {};
                 state.threads.length = 0;
+                state.stitching = null;
             }
 
             // Advance to the next slice (auto-sweep) or finish if past end.
@@ -755,6 +836,131 @@
                         });
                     }
                 }
+            }
+
+            // ----- multi-slice stitching ----------------------------------------
+            // Snapshot just enough of the just-finished slice that the next
+            // slice's stitch pass can reach back and connect features. We copy
+            // only the small arrays we need; the field grid itself is not
+            // duplicated.
+            function snapshotCurrentSlice() {
+                const c = state.cached;
+                const n = c.n;
+                const cellCount = (n - 1) * (n - 1);
+                const signed = c.signed ? c.signed.slice() : null;
+                const cases = c.cases ? c.cases.slice() : null;
+                const cellPts = new Array(cellCount);
+                for (let i = 0; i < cellCount; i++) {
+                    const p = state.cellPts[i];
+                    cellPts[i] = p ? p.slice() : null;
+                }
+                const vertices = {};
+                for (const k in state.vertices) vertices[k] = state.vertices[k];
+                state.prevSlice = {
+                    z: c.z, n, signed, cases, cellPts, vertices,
+                };
+            }
+
+            // Build the inter-slice connector segments between prevSlice and
+            // the just-committed current slice. For MC we connect crossings
+            // that exist on the SAME in-plane edge of the SAME cell column in
+            // both slices (these are the four vertical "side faces" of the
+            // 3D marching cube — the missing geometry that turns stacked 2D
+            // contours into a closed surface). For SN/DC we connect dual
+            // vertices in shared cell columns.
+            function computeStitchSegments() {
+                const prev = state.prevSlice;
+                const c = state.cached;
+                if (!prev || prev.n !== c.n) return [];
+                const n = c.n, cs = state.cellSize;
+                const zPrev = prev.z * cs, zCur = c.z * cs;
+                const segs = [];
+                if (state.algo === 'marchingCubes') {
+                    for (let y = 0; y < n - 1; y++) {
+                        for (let x = 0; x < n - 1; x++) {
+                            const idx = y * (n - 1) + x;
+                            const cp = prev.cases[idx], cc = c.cases[idx];
+                            if (cp === 0 || cp === 15) continue;
+                            if (cc === 0 || cc === 15) continue;
+                            const ptsP = prev.cellPts[idx];
+                            const ptsC = state.cellPts[idx];
+                            if (!ptsP || !ptsC) continue;
+                            // Index crossings by edge (5th tuple element).
+                            const byEdgeP = [-1, -1, -1, -1];
+                            for (let i = 0; i < ptsP.length; i += 5) {
+                                byEdgeP[ptsP[i + 4]] = i;
+                            }
+                            const colVec = parseColor(CASE_COLOR[cc]);
+                            for (let i = 0; i < ptsC.length; i += 5) {
+                                const edge = ptsC[i + 4];
+                                const j = byEdgeP[edge];
+                                if (j < 0) continue;
+                                segs.push({
+                                    x0: (x + ptsP[j])     * cs,
+                                    y0: (y + ptsP[j + 1]) * cs,
+                                    z0: zPrev,
+                                    x1: (x + ptsC[i])     * cs,
+                                    y1: (y + ptsC[i + 1]) * cs,
+                                    z1: zCur,
+                                    r: colVec[0], g: colVec[1], b: colVec[2],
+                                });
+                            }
+                        }
+                    }
+                } else {
+                    const colVec = state.algo === 'dualContour'
+                        ? [1.0, 0.62, 0.83] : [0.65, 0.88, 1.0];
+                    for (let y = 0; y < n - 1; y++) {
+                        for (let x = 0; x < n - 1; x++) {
+                            const idx = y * (n - 1) + x;
+                            const vp = prev.vertices[idx];
+                            const vc = state.vertices[idx];
+                            if (!vp || !vc) continue;
+                            segs.push({
+                                x0: (x + vp.u) * cs, y0: (y + vp.v) * cs, z0: zPrev,
+                                x1: (x + vc.u) * cs, y1: (y + vc.v) * cs, z1: zCur,
+                                r: colVec[0], g: colVec[1], b: colVec[2],
+                            });
+                        }
+                    }
+                }
+                return segs;
+            }
+
+            // Begin a stitch animation. Returns true if segments are pending
+            // (caller should keep playing); false if nothing to stitch (caller
+            // can immediately advance to the next slice).
+            function startStitch() {
+                const segs = computeStitchSegments();
+                if (segs.length === 0) return false;
+                state.stitching = {
+                    t: 0, ms: 600,
+                    segs, added: 0,
+                };
+                return true;
+            }
+
+            function flushStitchRemaining() {
+                const st = state.stitching;
+                if (!st) return;
+                while (st.added < st.segs.length) {
+                    state.segments3D.push(st.segs[st.added++]);
+                }
+                state.wireDirty = true;
+            }
+
+            // Begin the final fill pass: ramp ghost mesh opacity in N discrete
+            // steps so the wireframe-wrapped volume visibly resolves into a
+            // solid mesh. Steps are spaced so the user actually sees the
+            // fade rather than the GPU upload thrash blurring through it.
+            function startFill() {
+                state.filling = {
+                    t: 0, ms: 1500,
+                    steps: 6,
+                    lastStep: -1,
+                    fromA: state.ghostAlpha,
+                    toA: 0.85,
+                };
             }
 
             // Build a positions+indices mesh from the accumulated segments.
@@ -1330,14 +1536,37 @@
                 const phases = PHASES[state.algo];
                 const phase = phases[state.phaseIdx];
                 const total = state.cellOrder.length;
-                const done = state.cellStep >= total;
+                const sweepDone = state.cellStep >= total;
                 // Panel header is structured (algo · phase · cell counter).
                 hdrAlgo.textContent = state.algo;
-                hdrPhase.textContent = done ? 'complete'
-                    : (phase ? 'phase: ' + phase.id : '');
-                hdrCell.textContent = 'cell ' + Math.min(state.cellStep, total) +
-                    ' / ' + total;
-                if (done && total > 0) {
+                if (state.filling) {
+                    hdrPhase.textContent = 'phase: fill (' +
+                        (state.filling.t * 100 | 0) + '%)';
+                    hdrCell.textContent = 'slices ' + state.gridN +
+                        ' · α ' + state.ghostAlpha.toFixed(2);
+                } else if (state.stitching) {
+                    const st = state.stitching;
+                    hdrPhase.textContent = 'phase: stitch ' +
+                        (state.prevSlice ? state.prevSlice.z : '?') +
+                        '→' + state.cached.z;
+                    hdrCell.textContent = st.added + ' / ' + st.segs.length +
+                        ' connectors';
+                } else {
+                    hdrPhase.textContent = sweepDone ? 'slice swept'
+                        : (phase ? 'phase: ' + phase.id : '');
+                    hdrCell.textContent = 'cell ' + Math.min(state.cellStep, total) +
+                        ' / ' + total;
+                }
+                if (state.filling) {
+                    status.textContent = 'filling surface';
+                    status.style.display = '';
+                } else if (state.stitching) {
+                    status.textContent = 'stitching slices';
+                    status.style.display = '';
+                } else if (state.finished && !state.playing) {
+                    status.textContent = 'mesh complete';
+                    status.style.display = '';
+                } else if (sweepDone && total > 0) {
                     status.textContent = 'slice complete';
                     status.style.display = '';
                 } else {
@@ -1346,6 +1575,125 @@
             }
 
             // ----- main loop ----------------------------------------------------
+            // Animation modes layered on top of the per-slice cell sweep:
+            //   1. cell sweep    — phase-by-phase per active cell (original).
+            //   2. stitch        — between slice Z and Z-1, fold in inter-slice
+            //                      connector segments (the missing geometry
+            //                      that turns stacked 2D contours into a
+            //                      closed surface).
+            //   3. fill          — after the last stitched slice, ramp the
+            //                      ghost mesh opacity up in steps so the
+            //                      wireframe resolves into solid geometry.
+            function pauseAnimation() {
+                state.playing = false;
+                playBtn.textContent = 'Play';
+                playBtn.classList.remove('toggled');
+            }
+
+            function triggerFillOrEnd() {
+                if (!state.finished && state.prevSlice) {
+                    state.finished = true;
+                    startFill();
+                } else {
+                    pauseAnimation();
+                }
+            }
+
+            // Called once the current slice's per-cell sweep is exhausted.
+            // Decides whether to stitch, advance, fill, or stop.
+            function onSliceComplete() {
+                const hasFeatures = state.cellOrder.length > 0;
+                const hasPrev = state.prevSlice != null;
+
+                if (hasFeatures && hasPrev) {
+                    // Try to start a stitch to the previously snapshotted slice.
+                    if (startStitch()) return;
+                    // If no shared columns produced segments, fall through.
+                }
+                if (hasFeatures) snapshotCurrentSlice();
+
+                if (!state.sweepVolume) { pauseAnimation(); return; }
+
+                // We've finished a (possibly empty) slice. If we just left a
+                // non-empty run and entered emptiness, that's the cue to fill.
+                if (!hasFeatures && hasPrev) { triggerFillOrEnd(); return; }
+
+                // Walk forward through any empty slices. If we left a non-empty
+                // run we'd already have returned above; here we only iterate
+                // leading-empty or interior-empty (rare) gaps.
+                while (state.sliceZ < state.gridN - 1) {
+                    if (!advanceSlice()) break;
+                    if (state.cellOrder.length > 0) return; // resume cell sweep
+                    if (hasPrev) { triggerFillOrEnd(); return; }
+                }
+                triggerFillOrEnd();
+            }
+
+            function stepCellSweep(dt) {
+                const phases = PHASES[state.algo];
+                const phase = phases[state.phaseIdx];
+                const dur = phase.ms / state.speed;
+                state.phaseT += dt / Math.max(1, dur);
+                while (state.phaseT >= 1) {
+                    state.phaseT -= 1;
+                    state.phaseIdx++;
+                    if (state.phaseIdx >= phases.length) {
+                        commitCell(state.cellOrder[state.cellStep]);
+                        state.cellStep++;
+                        state.phaseIdx = 0;
+                        if (state.cellStep >= state.cellOrder.length) {
+                            state.phaseT = 0;
+                            return;
+                        }
+                    }
+                }
+            }
+
+            function stepStitch(dt) {
+                const st = state.stitching;
+                st.t += dt / Math.max(1, st.ms / state.speed);
+                if (st.t > 1) st.t = 1;
+                const target = Math.floor(st.t * st.segs.length);
+                while (st.added < target) {
+                    state.segments3D.push(st.segs[st.added++]);
+                }
+                state.wireDirty = state.wireDirty || (st.added > 0);
+                if (st.t >= 1) {
+                    flushStitchRemaining();
+                    state.stitching = null;
+                    // Snapshot what we just stitched-from so the next non-empty
+                    // slice can chain to it.
+                    snapshotCurrentSlice();
+                    if (state.sweepVolume) {
+                        if (!advanceSlice()) triggerFillOrEnd();
+                    } else {
+                        pauseAnimation();
+                    }
+                }
+            }
+
+            function stepFill(dt) {
+                const f = state.filling;
+                f.t += dt / Math.max(1, f.ms / state.speed);
+                if (f.t > 1) f.t = 1;
+                const step = Math.min(f.steps, Math.floor(f.t * (f.steps + 1)));
+                if (step !== f.lastStep) {
+                    f.lastStep = step;
+                    const k = f.steps > 0 ? step / f.steps : 1;
+                    const a = f.fromA + (f.toA - f.fromA) * k;
+                    state.ghostAlpha = a;
+                    createGhostMesh(a);
+                }
+                if (f.t >= 1) {
+                    if (state.ghostAlpha !== f.toA) {
+                        state.ghostAlpha = f.toA;
+                        createGhostMesh(f.toA);
+                    }
+                    state.filling = null;
+                    pauseAnimation();
+                }
+            }
+
             function tick(now) {
                 if (state.autoRotate) {
                     Camera.orbitLook(cam, 0.4, 0);
@@ -1355,48 +1703,20 @@
                 const dt = Math.min(100, now - state.lastT);   // clamp ms
                 state.lastT = now;
 
-                // Skip past empty slices instantly when sweep-volume is on
-                // (these are slices entirely above/below the iso surface).
-                while (state.playing && state.sweepVolume &&
-                       state.cellOrder.length === 0 &&
-                       state.sliceZ < state.gridN - 1) {
-                    if (!advanceSlice()) break;
-                }
-                if (state.playing && state.cellStep < state.cellOrder.length) {
-                    const phases = PHASES[state.algo];
-                    const phase = phases[state.phaseIdx];
-                    const dur = phase.ms / state.speed;
-                    state.phaseT += dt / Math.max(1, dur);
-                    while (state.phaseT >= 1) {
-                        state.phaseT -= 1;
-                        state.phaseIdx++;
-                        if (state.phaseIdx >= phases.length) {
-                            commitCell(state.cellOrder[state.cellStep]);
-                            state.cellStep++;
-                            state.phaseIdx = 0;
-                            if (state.cellStep >= state.cellOrder.length) {
-                                state.phaseT = 0;
-                                if (state.sweepVolume) {
-                                    // Skip empty slices in this hop too.
-                                    let advanced = false;
-                                    while (state.sliceZ < state.gridN - 1) {
-                                        if (!advanceSlice()) break;
-                                        advanced = true;
-                                        if (state.cellOrder.length > 0) break;
-                                    }
-                                    if (!advanced || state.cellOrder.length === 0) {
-                                        state.playing = false;
-                                        playBtn.textContent = 'Play';
-                                        playBtn.classList.remove('toggled');
-                                    }
-                                } else {
-                                    state.playing = false;
-                                    playBtn.textContent = 'Play';
-                                    playBtn.classList.remove('toggled');
-                                }
-                                break;
-                            }
-                        }
+                if (state.playing) {
+                    state.playTimeMs += dt;
+                    const target = Math.pow(SPEED_MAX, state.speedExp);
+                    const rt = Math.min(1, state.playTimeMs / state.rampMs);
+                    state.speed = 1 + (target - 1) * rt;
+                    refreshSpeedLabel();
+                    if (state.filling) {
+                        stepFill(dt);
+                    } else if (state.stitching) {
+                        stepStitch(dt);
+                    } else if (state.cellStep < state.cellOrder.length) {
+                        stepCellSweep(dt);
+                    } else {
+                        onSliceComplete();
                     }
                 }
 
@@ -1421,26 +1741,55 @@
             }
 
             // ----- input --------------------------------------------------------
-            let dragging = null;
+            // Main canvas: wheel zoom + middle-button pan only. Rotation is
+            // delegated to the engine gizmo (bro.gizmo in rotate mode) so a
+            // stray drag on the scene doesn't tear the shape out of view.
+            let panDrag = null;
             canvas.addEventListener('mousedown', e => {
+                if (e.button !== 1) return;
                 state.autoRotate = false;
-                dragging = { btn: e.button, x: e.clientX, y: e.clientY };
+                panDrag = { x: e.clientX, y: e.clientY };
+                e.preventDefault();
             });
-            window.addEventListener('mousemove', e => {
-                if (!dragging) return;
-                const dx = e.clientX - dragging.x, dy = e.clientY - dragging.y;
-                dragging.x = e.clientX; dragging.y = e.clientY;
-                if (dragging.btn === 2 || dragging.btn === 0) Camera.orbitLook(cam, dx, dy);
-                else if (dragging.btn === 1) Camera.orbitPan(cam, dx, dy);
-                scene.setCamera(Camera.orbitViewOpts(cam, canvas));
-            });
-            window.addEventListener('mouseup', () => { dragging = null; });
             canvas.addEventListener('contextmenu', e => e.preventDefault());
             canvas.addEventListener('wheel', e => {
                 cam.dist = Math.max(2, Math.min(80, cam.dist + e.deltaY * 0.02));
                 scene.setCamera(Camera.orbitViewOpts(cam, canvas));
                 e.preventDefault();
             });
+            window.addEventListener('mousemove', e => {
+                if (!panDrag) return;
+                const dx = e.clientX - panDrag.x, dy = e.clientY - panDrag.y;
+                panDrag.x = e.clientX; panDrag.y = e.clientY;
+                Camera.orbitPan(cam, dx, dy);
+                scene.setCamera(Camera.orbitViewOpts(cam, canvas));
+            });
+            window.addEventListener('mouseup', () => { panDrag = null; });
+
+            // ----- view gizmo (engine) -----------------------------------------
+            // bro.gizmo in rotate mode at the scene origin (which is the
+            // center of the iso volume). User grabs a ring → we orbit the
+            // camera around its pivot by the same world-space quaternion.
+            function applyOrbitDelta(qx, qy, qz, qw) {
+                const q = [qx, qy, qz, qw];
+                cam.rot = Camera.quatNorm(Camera.quatMul(q, cam.rot));
+                const ox = cam.pos[0] - cam.pivot[0];
+                const oy = cam.pos[1] - cam.pivot[1];
+                const oz = cam.pos[2] - cam.pivot[2];
+                const off = Camera.quatRotVec(q, [ox, oy, oz]);
+                cam.pos = [cam.pivot[0]+off[0], cam.pivot[1]+off[1], cam.pivot[2]+off[2]];
+                scene.setCamera(Camera.orbitViewOpts(cam, canvas));
+            }
+            if (typeof bro !== 'undefined' && bro.gizmo) {
+                bro.gizmo.setMode('rotate');
+                bro.gizmo.setSpace('world');
+                bro.gizmo.setPosition(0, 0, 0);
+                bro.gizmo.configure({ size: 80, alwaysOnTop: true });
+                bro.gizmo.attach({
+                    beginDrag: () => { state.autoRotate = false; },
+                    rotate: applyOrbitDelta,
+                });
+            }
 
             sliceSlider.oninput = () => {
                 state.sliceZ = parseInt(sliceSlider.value, 10);
@@ -1500,6 +1849,10 @@
             if (handle.state.animFrame) cancelAnimationFrame(handle.state.animFrame);
             if (handle.state.mesh) handle.state.mesh.destroy();
             if (handle.state.wireMesh) handle.state.wireMesh.destroy();
+            if (typeof bro !== 'undefined' && bro.gizmo) {
+                bro.gizmo.detach();
+                bro.gizmo.hide();
+            }
             if (handle.wrap) handle.wrap.remove();
         },
     });
