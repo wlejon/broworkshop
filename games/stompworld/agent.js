@@ -32,7 +32,7 @@
         // publishes downloaded weights through the WeightsHandle, so consumers
         // are unaffected by where training runs.
         const wantGpu = opts.device !== 'cpu'
-                     && bro.ai.game.nn.gpu && bro.ai.game.nn.gpu.available;
+                     && bro.tensor && bro.tensor.available;
         if (wantGpu) net.to('gpu');
 
         const handle = NN.createWeightsHandle();
