@@ -29,6 +29,7 @@
         { "dir": "tools/artstation" },
         { "dir": "tools/algo-viz" },
         { "dir": "demos/ai-arena" },
+        { "dir": "demos/tensor-lab" },
         { "dir": "demos/terrain" },
         { "dir": "demos/spatial-audio" },
         { "dir": "demos/lighting-demo" },

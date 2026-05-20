@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Tensor Lab</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <header id="toolbar">
+      <span id="brand">⬡ Tensor&nbsp;Lab</span>
+      <span class="tagline">a graphing calculator for neural networks</span>
+      <span class="grow"></span>
+      <select id="preset" title="Load a preset architecture">
+        <option value="">Load preset…</option>
+      </select>
+      <button id="btn-run" title="Run the whole forward pass">▶ Run</button>
+      <button id="btn-step" title="Execute the next op">⏭ Step</button>
+      <button id="btn-reset" title="Clear computed values">↺ Reset</button>
+      <button id="btn-clear" title="Remove every node">✕ Clear</button>
+      <span id="backend" class="badge">…</span>
+    </header>
+    <main>
+      <aside id="palette"></aside>
+      <section id="stage">
+        <canvas id="graph"></canvas>
+        <div id="toast"></div>
+      </section>
+      <aside id="inspector"></aside>
+    </main>
+    <footer id="status">
+      <span id="stat-nodes">0 nodes</span>
+      <span class="dot">·</span>
+      <span id="stat-params">0 params</span>
+      <span class="dot">·</span>
+      <span id="stat-flops">0 FLOPs</span>
+      <span class="grow"></span>
+      <span id="stat-time">not run</span>
+    </footer>
+  </div>
+
+  <script src="lab/ops.js"></script>
+  <script src="lab/graph.js"></script>
+  <script src="lab/presets.js"></script>
+  <script src="lab/editor.js"></script>
+  <script src="lab/runner.js"></script>
+  <script src="lab/inspector.js"></script>
+  <script src="lab/palette.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
