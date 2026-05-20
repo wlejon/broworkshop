@@ -96,6 +96,7 @@
 
     // --- mouse handlers ---------------------------------------------------
     canvas.addEventListener('mousedown', (e) => {
+      e.preventDefault();   // don't let the press start a text selection
       const m = mousePos(e), w = toWorld(m.x, m.y);
       const hit = pick(w);
       if (hit.kind === 'outport') {
