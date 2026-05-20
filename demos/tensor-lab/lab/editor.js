@@ -313,9 +313,10 @@
         ctx.font = '10px sans-serif';
         ctx.fillText(clip(n.error, 30), g.x + g.w / 2, fy + 6);
       } else if (n.shapes && n.shapes[0]) {
+        const lbl = Lab.Shape.label(n.shapes[0]);
         ctx.fillStyle = '#e8edf6';
-        ctx.font = 'bold 14px monospace';
-        ctx.fillText(n.shapes[0].rows + ' x ' + n.shapes[0].cols, g.x + g.w / 2, fy);
+        ctx.font = (lbl.length > 11 ? 'bold 11px monospace' : 'bold 14px monospace');
+        ctx.fillText(lbl, g.x + g.w / 2, fy);
         if (n._ran) {
           ctx.fillStyle = '#7dd3fc';
           ctx.font = '10px sans-serif';

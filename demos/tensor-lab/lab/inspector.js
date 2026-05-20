@@ -322,7 +322,7 @@
       cost.appendChild(el('div', 'insp-sec-title', 'Cost'));
       const box = el('div', 'kv');
       box.appendChild(kv('output', n.shapes && n.shapes[0]
-        ? n.shapes[0].rows + ' × ' + n.shapes[0].cols
+        ? Lab.Shape.label(n.shapes[0])
         : (n.error ? 'invalid' : '—')));
       let st = null;
       if (!n.error && n.inShapes && n.inShapes.length >= def.ins.length) {

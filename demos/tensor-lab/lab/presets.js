@@ -129,10 +129,10 @@
       desc: 'Two 3×3 convolutions with ReLU — the front end of a vision backbone.',
       build(g) {
         const b = builder(g);
-        const x = b.add('input', { rows: 1, cols: 3 * 32 * 32, fill: 'gauss' });
-        const c1 = b.add('conv2d', { cin: 3, h: 32, w: 32, cout: 16, k: 3, stride: 1, pad: 1 });
+        const x = b.add('image', { n: 1, c: 3, h: 32, w: 32, fill: 'gauss' });
+        const c1 = b.add('conv2d', { cout: 16, k: 3, stride: 1, pad: 1 });
         const r1 = b.add('relu');
-        const c2 = b.add('conv2d', { cin: 16, h: 32, w: 32, cout: 32, k: 3, stride: 1, pad: 1 });
+        const c2 = b.add('conv2d', { cout: 32, k: 3, stride: 1, pad: 1 });
         const r2 = b.add('relu');
         b.link(x, c1); b.link(c1, r1); b.link(r1, c2); b.link(c2, r2);
       },

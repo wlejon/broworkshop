@@ -1,18 +1,24 @@
 // Tensor Lab — operation registry.
 //
 // Every op carries four things:
-//   shape(ins,p)  pure-JS shape inference  -> [{rows,cols}] or an error string
-//   stats(ins,p)  parameter + FLOP estimate
+//   shape(ins,p)        pure-JS shape inference -> [Shape] or an error string
+//   stats(ins,p)        parameter + FLOP estimate
 //   exec(T,ins,p,node)  the real bro.tensor GPU call -> [GpuTensor]
-//   params[]      config fields surfaced in the inspector
+//   params[]            config fields surfaced in the inspector
 //
-// Source ops (input, embedding) take zero inputs. Learnable weights are
-// created lazily and cached on the node, rebuilt only when their signature
-// (the dims they depend on) changes — so re-running keeps a stable network
-// and only the activations move.
+// `ins` passed to shape()/stats() is an array of Lab.Shape — the logical ND
+// shapes flowing in. `ins` passed to exec() is an array of GpuTensor — the 2D
+// device buffers. exec() reads storage dims (rows/cols) straight off the
+// GpuTensor, and the logical N/C/H/W off `node.inShapes` when it needs them.
+//
+// Source ops (input, image, embedding) take zero inputs. Learnable weights
+// are created lazily and cached on the node, rebuilt only when their
+// signature (the dims they depend on) changes — so re-running keeps a stable
+// network and only the activations move.
 (function () {
   'use strict';
   const Lab = (window.Lab = window.Lab || {});
+  const Shape = Lab.Shape;
 
   // ---- number formatting (shared across modules) -----------------------
   Lab.fmtNum = function (n) {
@@ -66,7 +72,10 @@
     return node._w;
   }
 
-  const S = (rows, cols) => ({ rows: rows, cols: cols });
+  // shared layout-guard message
+  function needMatrix(label, s) {
+    return label + ' needs a matrix input, got ' + s.layout + ' ' + Shape.label(s);
+  }
 
   // ---- the registry ----------------------------------------------------
   const DEFS = {};
@@ -83,9 +92,26 @@
       { key: 'fill', label: 'Fill', type: 'select', def: 'gauss',
         options: ['gauss', 'uniform', 'ramp', 'zeros'] },
     ],
-    shape: (ins, p) => [S(p.rows, p.cols)],
+    shape: (ins, p) => [Shape.matrix(p.rows, p.cols)],
     stats: () => ({ params: 0, flops: 0 }),
     exec: (T, ins, p) => [dataFill(T, p.rows, p.cols, p.fill)],
+  });
+
+  def({
+    type: 'image', label: 'Image', cat: 'Source', color: '#f59e0b',
+    desc: 'A source image tensor in N×C×H×W layout — the input to a convolution stack.',
+    ins: [], outs: ['out'],
+    params: [
+      { key: 'n', label: 'Batch (N)', type: 'int', def: 1, min: 1, max: 64 },
+      { key: 'c', label: 'Channels (C)', type: 'int', def: 3, min: 1, max: 1024 },
+      { key: 'h', label: 'Height (H)', type: 'int', def: 32, min: 1, max: 512 },
+      { key: 'w', label: 'Width (W)', type: 'int', def: 32, min: 1, max: 512 },
+      { key: 'fill', label: 'Fill', type: 'select', def: 'gauss',
+        options: ['gauss', 'uniform', 'ramp', 'zeros'] },
+    ],
+    shape: (ins, p) => [Shape.image(p.n, p.c, p.h, p.w)],
+    stats: () => ({ params: 0, flops: 0 }),
+    exec: (T, ins, p) => [dataFill(T, p.n, p.c * p.h * p.w, p.fill)],
   });
 
   def({
@@ -97,7 +123,7 @@
       { key: 'dim', label: 'Embed dim', type: 'int', def: 128, min: 1, max: 4096 },
       { key: 'batch', label: 'Tokens (B)', type: 'int', def: 32, min: 1, max: 512 },
     ],
-    shape: (ins, p) => [S(p.batch, p.dim)],
+    shape: (ins, p) => [Shape.matrix(p.batch, p.dim)],
     stats: (ins, p) => ({ params: p.vocab * p.dim, flops: 0 }),
     exec: (T, ins, p, node) => {
       const table = cached(node, 'e' + p.vocab + 'x' + p.dim,
@@ -121,10 +147,13 @@
       { key: 'out', label: 'Out features', type: 'int', def: 256, min: 1, max: 8192 },
       { key: 'bias', label: 'Bias', type: 'bool', def: true },
     ],
-    shape: (ins, p) => [S(ins[0].rows, p.out)],
+    shape: (ins, p) => Shape.isMatrix(ins[0])
+      ? [Shape.matrix(ins[0].dims[0], p.out)]
+      : needMatrix('Linear', ins[0]),
     stats: (ins, p) => {
-      const inF = ins[0].cols;
-      return { params: inF * p.out + (p.bias ? p.out : 0), flops: 2 * ins[0].rows * inF * p.out };
+      const inF = ins[0].dims[1];
+      return { params: inF * p.out + (p.bias ? p.out : 0),
+        flops: 2 * ins[0].dims[0] * inF * p.out };
     },
     exec: (T, ins, p, node) => {
       const x = ins[0], inF = x.cols;
@@ -143,11 +172,16 @@
     desc: 'Raw matrix product  C = A·B.  A is (M×K), B is (K×N).',
     ins: ['A', 'B'], outs: ['C'],
     params: [],
-    shape: (ins) => ins[0].cols !== ins[1].rows
-      ? 'inner dims differ: A is ' + ins[0].rows + '×' + ins[0].cols +
-        ', B is ' + ins[1].rows + '×' + ins[1].cols
-      : [S(ins[0].rows, ins[1].cols)],
-    stats: (ins) => ({ params: 0, flops: 2 * ins[0].rows * ins[0].cols * ins[1].cols }),
+    shape: (ins) => {
+      if (!Shape.isMatrix(ins[0]) || !Shape.isMatrix(ins[1]))
+        return 'MatMul needs two matrix inputs';
+      if (ins[0].dims[1] !== ins[1].dims[0])
+        return 'inner dims differ: A is ' + Shape.label(ins[0]) +
+          ', B is ' + Shape.label(ins[1]);
+      return [Shape.matrix(ins[0].dims[0], ins[1].dims[1])];
+    },
+    stats: (ins) => ({ params: 0,
+      flops: 2 * ins[0].dims[0] * ins[0].dims[1] * ins[1].dims[1] }),
     exec: (T, ins) => {
       const c = T.createTensor(ins[0].rows, ins[1].cols);
       T.matmul(ins[0], ins[1], c);
@@ -156,12 +190,14 @@
   });
 
   // === Activations ======================================================
+  // Pure elementwise — valid on either layout; the Shape passes straight
+  // through.
   function activation(type, label, desc, opName, flopK) {
     def({
       type: type, label: label, cat: 'Activation', color: '#a78bfa', desc: desc,
       ins: ['x'], outs: ['y'], params: [],
-      shape: (ins) => [S(ins[0].rows, ins[0].cols)],
-      stats: (ins) => ({ params: 0, flops: flopK * ins[0].rows * ins[0].cols }),
+      shape: (ins) => [ins[0]],
+      stats: (ins) => ({ params: 0, flops: flopK * Shape.elems(ins[0]) }),
       exec: (T, ins) => {
         const y = T.createTensor(ins[0].rows, ins[0].cols);
         T[opName](ins[0], y);
@@ -178,10 +214,13 @@
     type: 'swiglu', label: 'SwiGLU', cat: 'Activation', color: '#a78bfa',
     desc: 'Gated FFN activation: input (B×2D) splits to A,B; output silu(A)·B  (B×D).',
     ins: ['x'], outs: ['y'], params: [],
-    shape: (ins) => ins[0].cols % 2 !== 0
-      ? 'SwiGLU needs an even feature count, got ' + ins[0].cols
-      : [S(ins[0].rows, ins[0].cols / 2)],
-    stats: (ins) => ({ params: 0, flops: 6 * ins[0].rows * ins[0].cols }),
+    shape: (ins) => {
+      if (!Shape.isMatrix(ins[0])) return needMatrix('SwiGLU', ins[0]);
+      if (ins[0].dims[1] % 2 !== 0)
+        return 'SwiGLU needs an even feature count, got ' + ins[0].dims[1];
+      return [Shape.matrix(ins[0].dims[0], ins[0].dims[1] / 2)];
+    },
+    stats: (ins) => ({ params: 0, flops: 6 * Shape.elems(ins[0]) }),
     exec: (T, ins) => {
       const y = T.createTensor(ins[0].rows, ins[0].cols / 2);
       T.swigluForward(ins[0], y);
@@ -193,8 +232,8 @@
     type: 'softmax', label: 'Softmax', cat: 'Activation', color: '#a78bfa',
     desc: 'Row-wise softmax — each row becomes a probability distribution.',
     ins: ['x'], outs: ['p'], params: [],
-    shape: (ins) => [S(ins[0].rows, ins[0].cols)],
-    stats: (ins) => ({ params: 0, flops: 5 * ins[0].rows * ins[0].cols }),
+    shape: (ins) => Shape.isMatrix(ins[0]) ? [ins[0]] : needMatrix('Softmax', ins[0]),
+    stats: (ins) => ({ params: 0, flops: 5 * Shape.elems(ins[0]) }),
     exec: (T, ins) => {
       const y = T.createTensor(ins[0].rows, ins[0].cols);
       T.softmaxForward(ins[0], y, null);
@@ -208,8 +247,8 @@
     desc: 'Per-row normalise to zero mean / unit variance, then scale+shift.',
     ins: ['x'], outs: ['y'],
     params: [{ key: 'eps', label: 'Epsilon', type: 'float', def: 1e-5, min: 1e-8, max: 1e-2, step: 1e-6 }],
-    shape: (ins) => [S(ins[0].rows, ins[0].cols)],
-    stats: (ins) => ({ params: 2 * ins[0].cols, flops: 8 * ins[0].rows * ins[0].cols }),
+    shape: (ins) => Shape.isMatrix(ins[0]) ? [ins[0]] : needMatrix('LayerNorm', ins[0]),
+    stats: (ins) => ({ params: 2 * ins[0].dims[1], flops: 8 * Shape.elems(ins[0]) }),
     exec: (T, ins, p, node) => {
       const x = ins[0], D = x.cols;
       const w = cached(node, 'ln' + D, () => ({
@@ -226,8 +265,8 @@
     desc: 'Root-mean-square norm (no mean subtraction) — the Llama-style norm.',
     ins: ['x'], outs: ['y'],
     params: [{ key: 'eps', label: 'Epsilon', type: 'float', def: 1e-5, min: 1e-8, max: 1e-2, step: 1e-6 }],
-    shape: (ins) => [S(ins[0].rows, ins[0].cols)],
-    stats: (ins) => ({ params: ins[0].cols, flops: 6 * ins[0].rows * ins[0].cols }),
+    shape: (ins) => Shape.isMatrix(ins[0]) ? [ins[0]] : needMatrix('RMSNorm', ins[0]),
+    stats: (ins) => ({ params: ins[0].dims[1], flops: 6 * Shape.elems(ins[0]) }),
     exec: (T, ins, p, node) => {
       const x = ins[0], D = x.cols;
       const g = cached(node, 'rms' + D, () => constant(T, D, 1, 1));
@@ -245,12 +284,14 @@
     ins: ['x'], outs: ['out'],
     params: [{ key: 'heads', label: 'Heads', type: 'int', def: 4, min: 1, max: 32 }],
     shape: (ins, p) => {
-      const D = ins[0].cols;
-      if (D % p.heads !== 0) return 'feature dim ' + D + ' is not divisible by ' + p.heads + ' heads';
-      return [S(ins[0].rows, D)];
+      if (!Shape.isMatrix(ins[0])) return needMatrix('Multi-Head Attn', ins[0]);
+      const D = ins[0].dims[1];
+      if (D % p.heads !== 0)
+        return 'feature dim ' + D + ' is not divisible by ' + p.heads + ' heads';
+      return [ins[0]];
     },
     stats: (ins, p) => {
-      const Sq = ins[0].rows, D = ins[0].cols;
+      const Sq = ins[0].dims[0], D = ins[0].dims[1];
       return { params: 4 * D * D, flops: 4 * 2 * Sq * D * D + 2 * 2 * Sq * Sq * D };
     },
     exec: (T, ins, p, node) => {
@@ -277,12 +318,14 @@
       { key: 'theta', label: 'Theta base', type: 'float', def: 10000, min: 100, max: 1e6, step: 100 },
     ],
     shape: (ins, p) => {
-      const D = ins[0].cols;
-      if (D % p.heads !== 0) return 'feature dim ' + D + ' is not divisible by ' + p.heads + ' heads';
+      if (!Shape.isMatrix(ins[0])) return needMatrix('RoPE', ins[0]);
+      const D = ins[0].dims[1];
+      if (D % p.heads !== 0)
+        return 'feature dim ' + D + ' is not divisible by ' + p.heads + ' heads';
       if ((D / p.heads) % 2 !== 0) return 'head dim ' + (D / p.heads) + ' must be even';
-      return [S(ins[0].rows, D)];
+      return [ins[0]];
     },
-    stats: (ins) => ({ params: 0, flops: 6 * ins[0].rows * ins[0].cols }),
+    stats: (ins) => ({ params: 0, flops: 6 * Shape.elems(ins[0]) }),
     exec: (T, ins, p) => {
       const x = ins[0], hd = x.cols / p.heads;
       const y = T.createTensor(x.rows, x.cols);
@@ -294,44 +337,44 @@
   // === Convolution ======================================================
   def({
     type: 'conv2d', label: 'Conv2D', cat: 'Conv', color: '#f472b6',
-    desc: 'NCHW 2-D convolution. The input row is a flattened (C·H·W) image.',
+    desc: 'NCHW 2-D convolution. Channels and spatial size are read from the ' +
+          'input image tensor; only the output shape is configured here.',
     ins: ['x'], outs: ['y'],
     params: [
-      { key: 'cin', label: 'In channels', type: 'int', def: 3, min: 1, max: 1024 },
-      { key: 'h', label: 'In height', type: 'int', def: 32, min: 1, max: 256 },
-      { key: 'w', label: 'In width', type: 'int', def: 32, min: 1, max: 256 },
       { key: 'cout', label: 'Out channels', type: 'int', def: 16, min: 1, max: 1024 },
       { key: 'k', label: 'Kernel', type: 'int', def: 3, min: 1, max: 11 },
       { key: 'stride', label: 'Stride', type: 'int', def: 1, min: 1, max: 8 },
       { key: 'pad', label: 'Padding', type: 'int', def: 1, min: 0, max: 16 },
     ],
     shape: (ins, p) => {
-      const need = p.cin * p.h * p.w;
-      if (ins[0].cols !== need)
-        return 'input has ' + ins[0].cols + ' cols, expected C·H·W = ' + need;
-      const ho = ((p.h + 2 * p.pad - p.k) / p.stride | 0) + 1;
-      const wo = ((p.w + 2 * p.pad - p.k) / p.stride | 0) + 1;
+      if (!Shape.isImage(ins[0]))
+        return 'Conv2D needs an image (N×C×H×W) input, got ' + ins[0].layout;
+      const H = ins[0].dims[2], W = ins[0].dims[3];
+      const ho = ((H + 2 * p.pad - p.k) / p.stride | 0) + 1;
+      const wo = ((W + 2 * p.pad - p.k) / p.stride | 0) + 1;
       if (ho < 1 || wo < 1) return 'kernel/stride/pad yield a non-positive output size';
-      return [S(ins[0].rows, p.cout * ho * wo)];
+      return [Shape.image(ins[0].dims[0], p.cout, ho, wo)];
     },
     stats: (ins, p) => {
-      const ho = ((p.h + 2 * p.pad - p.k) / p.stride | 0) + 1;
-      const wo = ((p.w + 2 * p.pad - p.k) / p.stride | 0) + 1;
+      const C = ins[0].dims[1], H = ins[0].dims[2], W = ins[0].dims[3];
+      const ho = ((H + 2 * p.pad - p.k) / p.stride | 0) + 1;
+      const wo = ((W + 2 * p.pad - p.k) / p.stride | 0) + 1;
       return {
-        params: p.cout * p.cin * p.k * p.k + p.cout,
-        flops: 2 * ins[0].rows * p.cout * ho * wo * p.cin * p.k * p.k,
+        params: p.cout * C * p.k * p.k + p.cout,
+        flops: 2 * ins[0].dims[0] * p.cout * ho * wo * C * p.k * p.k,
       };
     },
     exec: (T, ins, p, node) => {
-      const x = ins[0], N = x.rows;
-      const ho = ((p.h + 2 * p.pad - p.k) / p.stride | 0) + 1;
-      const wo = ((p.w + 2 * p.pad - p.k) / p.stride | 0) + 1;
-      const w = cached(node, 'cv' + p.cin + '_' + p.cout + '_' + p.k, () => ({
-        W: weight(T, p.cout, p.cin * p.k * p.k, p.cin * p.k * p.k),
+      const x = ins[0], sh = node.inShapes[0];
+      const N = sh.dims[0], C = sh.dims[1], H = sh.dims[2], W = sh.dims[3];
+      const ho = ((H + 2 * p.pad - p.k) / p.stride | 0) + 1;
+      const wo = ((W + 2 * p.pad - p.k) / p.stride | 0) + 1;
+      const w = cached(node, 'cv' + C + '_' + p.cout + '_' + p.k, () => ({
+        W: weight(T, p.cout, C * p.k * p.k, C * p.k * p.k),
         b: constant(T, p.cout, 1, 0),
       }));
       const y = T.createTensor(N, p.cout * ho * wo);
-      T.conv2dForward(x, w.W, w.b, N, p.cin, p.h, p.w, p.cout, p.k, p.k,
+      T.conv2dForward(x, w.W, w.b, N, C, H, W, p.cout, p.k, p.k,
         p.stride, p.stride, p.pad, p.pad, 1, 1, 1, y);
       return [y];
     },
@@ -343,11 +386,10 @@
     desc: 'Element-wise sum — the residual / skip connection.',
     ins: ['a', 'b'], outs: ['sum'],
     params: [],
-    shape: (ins) => (ins[0].rows !== ins[1].rows || ins[0].cols !== ins[1].cols)
-      ? 'shapes differ: ' + ins[0].rows + '×' + ins[0].cols +
-        ' vs ' + ins[1].rows + '×' + ins[1].cols
-      : [S(ins[0].rows, ins[0].cols)],
-    stats: (ins) => ({ params: 0, flops: ins[0].rows * ins[0].cols }),
+    shape: (ins) => Shape.eq(ins[0], ins[1])
+      ? [ins[0]]
+      : 'shapes differ: ' + Shape.label(ins[0]) + ' vs ' + Shape.label(ins[1]),
+    stats: (ins) => ({ params: 0, flops: Shape.elems(ins[0]) }),
     exec: (T, ins) => {
       const y = ins[0].clone();
       T.addInplace(y, ins[1]);
@@ -357,14 +399,34 @@
 
   def({
     type: 'concat', label: 'Concat', cat: 'Tensor', color: '#94a3b8',
-    desc: 'Concatenate two tensors along the feature axis (same row count).',
+    desc: 'Concatenate two tensors along the feature axis — column-wise for ' +
+          'matrices, channel-wise (N,H,W matched) for images.',
     ins: ['a', 'b'], outs: ['out'],
     params: [],
-    shape: (ins) => ins[0].rows !== ins[1].rows
-      ? 'row counts differ: ' + ins[0].rows + ' vs ' + ins[1].rows
-      : [S(ins[0].rows, ins[0].cols + ins[1].cols)],
+    shape: (ins) => {
+      const a = ins[0], b = ins[1];
+      if (a.layout !== b.layout)
+        return 'cannot concat a ' + a.layout + ' with an ' + b.layout;
+      if (Shape.isImage(a)) {
+        if (a.dims[0] !== b.dims[0] || a.dims[2] !== b.dims[2] || a.dims[3] !== b.dims[3])
+          return 'image concat needs matching N,H,W: ' +
+            Shape.label(a) + ' vs ' + Shape.label(b);
+        return [Shape.image(a.dims[0], a.dims[1] + b.dims[1], a.dims[2], a.dims[3])];
+      }
+      if (a.dims[0] !== b.dims[0])
+        return 'row counts differ: ' + a.dims[0] + ' vs ' + b.dims[0];
+      return [Shape.matrix(a.dims[0], a.dims[1] + b.dims[1])];
+    },
     stats: () => ({ params: 0, flops: 0 }),
-    exec: (T, ins) => {
+    exec: (T, ins, p, node) => {
+      const a = node.inShapes[0];
+      if (Shape.isImage(a)) {
+        const N = a.dims[0], H = a.dims[2], W = a.dims[3];
+        const C0 = a.dims[1], C1 = node.inShapes[1].dims[1];
+        const out = T.createTensor(N, (C0 + C1) * H * W);
+        T.concatNchwChannels([ins[0], ins[1]], N, H, W, [C0, C1], out);
+        return [out];
+      }
       const out = T.createTensor(ins[0].rows, ins[0].cols + ins[1].cols);
       T.concatBatchedRows([ins[0], ins[1]], out);
       return [out];
