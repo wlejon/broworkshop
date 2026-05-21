@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Diffusion Lab</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+
+    <header id="modelbar">
+      <span id="brand">◆ Diffusion&nbsp;Lab</span>
+      <span class="tagline">watch a diffusion model think</span>
+      <span class="grow"></span>
+      <span id="model-name" class="muted">no model</span>
+      <select id="scheduler" title="Sampler — choose before loading weights">
+        <option value="auto">sampler: auto</option>
+        <option value="ddim">DDIM</option>
+        <option value="lcm">LCM</option>
+      </select>
+      <button id="btn-open" title="Pick a diffusers model directory">Open model…</button>
+      <button id="btn-load" disabled title="Load weights into the pipeline">Load weights</button>
+      <span id="backend" class="badge">…</span>
+    </header>
+
+    <main>
+      <!-- ── left: generation controls ─────────────────────────────── -->
+      <aside id="controls">
+        <label class="hdr">Prompt</label>
+        <textarea id="prompt" rows="3" placeholder="a fox in autumn leaves, oil painting"></textarea>
+
+        <label class="hdr">Negative prompt</label>
+        <textarea id="neg" rows="2" placeholder="blurry, low quality"></textarea>
+
+        <div class="row">
+          <div class="field"><label>Steps</label>
+            <input id="steps" type="number" min="1" max="150" value="25"></div>
+          <div class="field"><label>Guidance</label>
+            <input id="cfg" type="number" min="1" max="30" step="0.5" value="7.5"></div>
+        </div>
+        <div class="row">
+          <div class="field"><label>Width</label>
+            <input id="width" type="number" min="64" max="1024" step="64" value="512"></div>
+          <div class="field"><label>Height</label>
+            <input id="height" type="number" min="64" max="1024" step="64" value="512"></div>
+        </div>
+        <div class="row">
+          <div class="field grow"><label>Seed</label>
+            <input id="seed" type="number" min="0" value="0"></div>
+          <button id="btn-rand" class="icon" title="Random seed">⤮</button>
+        </div>
+
+        <label class="check">
+          <input type="checkbox" id="trace" checked> Capture cross-attention
+        </label>
+
+        <div class="actions">
+          <button id="btn-generate" class="primary" disabled>Generate</button>
+          <button id="btn-cancel" disabled>Cancel</button>
+        </div>
+      </aside>
+
+      <!-- ── center: the denoising viewport ────────────────────────── -->
+      <section id="stage">
+        <div id="canvas-wrap">
+          <canvas id="view"></canvas>
+          <div id="view-hint">Open a diffusers model directory to begin.</div>
+        </div>
+        <div id="transport">
+          <div id="progress"><div id="progress-bar"></div></div>
+          <input id="scrub" type="range" min="0" max="0" value="0" disabled
+                 title="Scrub the denoising trajectory">
+          <span id="step-label" class="muted">idle</span>
+        </div>
+      </section>
+
+      <!-- ── right: cross-attention inspector ──────────────────────── -->
+      <aside id="attn">
+        <label class="hdr">Cross-attention</label>
+        <p class="muted small">Generate with capture on, then click a prompt
+           token to see which pixels it drives.</p>
+        <div id="tokens" class="tokens"></div>
+        <div class="field">
+          <label>Layer</label>
+          <select id="block"></select>
+        </div>
+        <label class="check">
+          <input type="checkbox" id="overlay-on"> Show overlay
+        </label>
+        <div class="field">
+          <label>Opacity <span id="op-val" class="muted">70%</span></label>
+          <input id="opacity" type="range" min="0" max="100" value="70">
+        </div>
+      </aside>
+    </main>
+
+    <footer id="status">
+      <span id="status-text">Ready — open a model to start.</span>
+      <span class="grow"></span>
+      <span id="diff-version" class="muted"></span>
+    </footer>
+  </div>
+
+  <script src="lab/tokenizer.js"></script>
+  <script src="lab/profiles.js"></script>
+  <script src="lab/client.js"></script>
+  <script src="lab/viewport.js"></script>
+  <script src="lab/attention.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
