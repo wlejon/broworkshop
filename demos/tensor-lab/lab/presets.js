@@ -105,6 +105,28 @@
       },
     },
     {
+      name: 'T5 Encoder Layer',
+      desc: 'A T5 v1.1 encoder block: RMSNorm → relative-position-bias ' +
+            'self-attention → residual → RMSNorm → gated-GELU FFN → residual.',
+      build(g) {
+        const b = builder(g);
+        const emb = b.add('embedding', { vocab: 256, dim: 128, batch: 32 });
+        const rb = b.add('t5-relbias', { heads: 8 });
+        const ln1 = b.add('rmsnorm');
+        const attn = b.add('t5-attention', { heads: 8 });
+        const add1 = b.add('add');
+        const ln2 = b.add('rmsnorm');
+        const ffn = b.add('t5-ffn', { dff: 512 });
+        const add2 = b.add('add');
+        b.link(emb, rb);
+        b.link(emb, ln1);
+        b.link(ln1, attn, 0); b.link(rb, attn, 1);
+        b.link(attn, add1, 0); b.link(emb, add1, 1);
+        b.link(add1, ln2); b.link(ln2, ffn);
+        b.link(ffn, add2, 0); b.link(add1, add2, 1);
+      },
+    },
+    {
       name: 'Vision Transformer Block',
       desc: 'ViT/CLIP encoder layer — same shape as a transformer block but with the QuickGELU FFN.',
       build(g) {

@@ -334,6 +334,134 @@
     },
   });
 
+  // === T5 encoder =======================================================
+  // T5 LayerNorm is exactly RMSNorm — reuse the `rmsnorm` op. These three
+  // ops plus rmsnorm + add express a full T5 v1.1 encoder layer.
+
+  // T5 relative-position bucketing — maps a (key - query) offset onto one of
+  // `numBuckets` learned-bias slots. Mirrors HF transformers'
+  // _relative_position_bucket: exact for small offsets, log-spaced for large.
+  function t5Bucket(relPos, bidirectional, numBuckets, maxDistance) {
+    let ret = 0, n = relPos;
+    if (bidirectional) {
+      numBuckets = numBuckets >> 1;
+      if (n > 0) ret += numBuckets;
+      n = Math.abs(n);
+    } else {
+      n = Math.max(0, -n);
+    }
+    const maxExact = numBuckets >> 1;
+    if (n < maxExact) {
+      ret += n;
+    } else {
+      const v = maxExact + Math.floor(
+        Math.log(n / maxExact) / Math.log(maxDistance / maxExact) * (numBuckets - maxExact));
+      ret += Math.min(v, numBuckets - 1);
+    }
+    return ret;
+  }
+
+  def({
+    type: 't5-relbias', label: 'T5 Rel-Bias', cat: 'T5', color: '#818cf8',
+    desc: 'T5 relative-position bias: a learned (buckets × heads) table ' +
+          'gathered per query/key offset into the additive attention bias.',
+    ins: ['x'], outs: ['bias'],
+    params: [
+      { key: 'heads', label: 'Heads', type: 'int', def: 8, min: 1, max: 64 },
+      { key: 'buckets', label: 'Buckets', type: 'int', def: 32, min: 2, max: 256 },
+      { key: 'maxDist', label: 'Max distance', type: 'int', def: 128, min: 8, max: 4096 },
+      { key: 'bidir', label: 'Bidirectional', type: 'bool', def: true },
+    ],
+    shape: (ins, p) => {
+      if (!Shape.isMatrix(ins[0])) return needMatrix('T5 Rel-Bias', ins[0]);
+      const L = ins[0].dims[0];
+      return [Shape.matrix(p.heads * L, L)];
+    },
+    stats: (ins, p) => ({ params: p.buckets * p.heads, flops: 0 }),
+    exec: (T, ins, p, node) => {
+      const L = ins[0].rows, H = p.heads, NB = p.buckets;
+      const table = cached(node, 'rb' + NB + 'x' + H, () => weight(T, NB, H, NB));
+      const tbl = table.download();                  // (NB, H) row-major
+      const bias = new Float32Array(H * L * L);
+      for (let q = 0; q < L; q++) {
+        for (let k = 0; k < L; k++) {
+          const b = t5Bucket(k - q, p.bidir, NB, p.maxDist);
+          for (let h = 0; h < H; h++) bias[h * L * L + q * L + k] = tbl[b * H + h];
+        }
+      }
+      const out = T.createTensor(H * L, L);
+      out.upload(bias);
+      return [out];
+    },
+  });
+
+  def({
+    type: 't5-attention', label: 'T5 Attention', cat: 'T5', color: '#818cf8',
+    desc: 'T5 self-attention — scaled dot-product with an additive ' +
+          'relative-position bias on the scores. Wire a T5 Rel-Bias into ' +
+          'the bias port.',
+    ins: ['x', 'bias'], outs: ['out'],
+    params: [
+      { key: 'heads', label: 'Heads', type: 'int', def: 8, min: 1, max: 64 },
+      { key: 'scale', label: 'QK scale', type: 'float', def: 1, min: 0.001, max: 8, step: 0.001 },
+    ],
+    shape: (ins, p) => {
+      if (!Shape.isMatrix(ins[0])) return needMatrix('T5 Attention', ins[0]);
+      if (!Shape.isMatrix(ins[1])) return 'T5 Attention: bias must be a matrix';
+      const L = ins[0].dims[0], D = ins[0].dims[1];
+      if (D % p.heads !== 0)
+        return 'feature dim ' + D + ' is not divisible by ' + p.heads + ' heads';
+      if (ins[1].dims[0] !== p.heads * L || ins[1].dims[1] !== L)
+        return 'bias must be (heads*L, L) = ' + (p.heads * L) + '×' + L +
+          ', got ' + Shape.label(ins[1]);
+      return [ins[0]];
+    },
+    stats: (ins, p) => {
+      const L = ins[0].dims[0], D = ins[0].dims[1];
+      return { params: 4 * D * D, flops: 4 * 2 * L * D * D + 2 * 2 * L * L * D };
+    },
+    exec: (T, ins, p, node) => {
+      const x = ins[0], bias = ins[1], L = x.rows, D = x.cols;
+      const w = cached(node, 't5a' + D, () => ({
+        Wq: weight(T, D, D, D), Wk: weight(T, D, D, D),
+        Wv: weight(T, D, D, D), Wo: weight(T, D, D, D),
+      }));
+      const O = T.createTensor(L, D);
+      T.selfAttentionBiasForward(x, w.Wq, w.Wk, w.Wv, w.Wo, null, bias, p.heads, p.scale, O);
+      return [O];
+    },
+  });
+
+  def({
+    type: 't5-ffn', label: 'T5 FFN', cat: 'T5', color: '#818cf8',
+    desc: 'T5 v1.1 gated-GELU feed-forward: gelu(x·Wi0ᵀ) ⊙ (x·Wi1ᵀ), then ·Woᵀ.',
+    ins: ['x'], outs: ['y'],
+    params: [
+      { key: 'dff', label: 'FFN dim', type: 'int', def: 512, min: 1, max: 32768 },
+    ],
+    shape: (ins) => Shape.isMatrix(ins[0]) ? [ins[0]] : needMatrix('T5 FFN', ins[0]),
+    stats: (ins, p) => {
+      const L = ins[0].dims[0], D = ins[0].dims[1];
+      return { params: 3 * D * p.dff, flops: 6 * L * D * p.dff };
+    },
+    exec: (T, ins, p, node) => {
+      const x = ins[0], L = x.rows, D = x.cols, F = p.dff;
+      const w = cached(node, 't5f' + D + 'x' + F, () => ({
+        wi0: weight(T, F, D, D), wi1: weight(T, F, D, D), wo: weight(T, D, F, F),
+        zF: constant(T, F, 1, 0), zD: constant(T, D, 1, 0),
+      }));
+      const h0 = T.createTensor(L, F), h1 = T.createTensor(L, F);
+      T.linearForwardBatched(w.wi0, w.zF, x, h0);
+      T.linearForwardBatched(w.wi1, w.zF, x, h1);
+      const g = T.createTensor(L, F);
+      T.geluForward(h0, g);
+      T.mulInplace(g, h1);
+      const y = T.createTensor(L, D);
+      T.linearForwardBatched(w.wo, w.zD, g, y);
+      return [y];
+    },
+  });
+
   // === Convolution ======================================================
   def({
     type: 'conv2d', label: 'Conv2D', cat: 'Conv', color: '#f472b6',
@@ -434,7 +562,7 @@
   });
 
   // ---- public API ------------------------------------------------------
-  const ORDER = ['Source', 'Dense', 'Activation', 'Norm', 'Attention', 'Conv', 'Tensor'];
+  const ORDER = ['Source', 'Dense', 'Activation', 'Norm', 'Attention', 'T5', 'Conv', 'Tensor'];
   Lab.Ops = {
     defs: DEFS,
     get: (type) => DEFS[type],
