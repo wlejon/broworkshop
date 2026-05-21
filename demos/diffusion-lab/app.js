@@ -192,7 +192,11 @@
       prefs.scheduler = $('scheduler').value;
       savePrefs(prefs);
 
-      // reset run state
+      // reset run state — release the previous run's frame bitmaps eagerly
+      // rather than waiting on GC.
+      for (var fi = 0; fi < frames.length; fi++) {
+        if (frames[fi].bitmap) frames[fi].bitmap.close();
+      }
       frames = [];
       finalTrace = null;
       attention.clear();
@@ -226,9 +230,9 @@
           finishRun();
           return;
         }
-        if (msg.image) {
-          frames.push({ stepIndex: msg.stepIndex, image: msg.image });
-          viewport.setImage(msg.image);
+        if (msg.bitmap) {
+          frames.push({ stepIndex: msg.stepIndex, bitmap: msg.bitmap });
+          viewport.setImage(msg.bitmap);
         }
         if (msg.trace) finalTrace = msg.trace;
 
@@ -335,7 +339,7 @@
     $('scrub').addEventListener('input', function () {
       var i = +$('scrub').value;
       if (frames[i]) {
-        viewport.setImage(frames[i].image);
+        viewport.setImage(frames[i].bitmap);
         $('step-label').textContent =
           'step ' + frames[i].stepIndex + ' / ' + frames.length;
       }

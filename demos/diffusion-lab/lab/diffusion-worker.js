@@ -9,7 +9,7 @@
 //
 //   main -> load   {spec}            ->  loaded {config, numXAttnBlocks}
 //   main -> prime  {prompt,opts,trace}-> primed {numSteps, latentW, latentH}
-//   main -> step   {}                ->  stepped {stepIndex, done, image, trace?}
+//   main -> step   {}                ->  stepped {stepIndex, done, bitmap, trace?}
 //   main -> reset  {}                ->  (drops the active state)
 //   errors come back as              ->  error {stage, message}
 
@@ -85,25 +85,35 @@ function handleStep() {
     var ctrl = traceOn ? { trace: true } : undefined;
     var res = state.stepOnce(ctrl);
     var image = state.decode();
+    var stepIndex = state.stepIndex;
+    var numSteps = state.numSteps;
+    var done = state.done;
 
-    var out = {
-      type: 'stepped',
-      stepIndex: state.stepIndex,
-      numSteps: state.numSteps,
-      done: state.done,
-      image: image,
-    };
-    var transfer = [image.data.buffer];
+    // Hand the decoded frame to the engine as an ImageBitmap and transfer it
+    // zero-copy. createImageBitmap is async per the web standard; the RGBA→
+    // bitmap work is synchronous, so it resolves on the next microtask.
+    createImageBitmap(image).then(function (bitmap) {
+      var out = {
+        type: 'stepped',
+        stepIndex: stepIndex,
+        numSteps: numSteps,
+        done: done,
+        bitmap: bitmap,
+      };
+      var transfer = [bitmap];
 
-    if (res && res.trace) {
-      out.trace = res.trace;
-      for (var i = 0; i < res.trace.length; i++) {
-        if (res.trace[i] && res.trace[i].data) {
-          transfer.push(res.trace[i].data.buffer);
+      if (res && res.trace) {
+        out.trace = res.trace;
+        for (var i = 0; i < res.trace.length; i++) {
+          if (res.trace[i] && res.trace[i].data) {
+            transfer.push(res.trace[i].data.buffer);
+          }
         }
       }
-    }
-    self.postMessage(out, transfer);
+      self.postMessage(out, transfer);
+    }).catch(function (e) {
+      fail('step', e);
+    });
   } catch (e) {
     fail('step', e);
   }
