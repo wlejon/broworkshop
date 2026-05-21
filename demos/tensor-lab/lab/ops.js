@@ -72,6 +72,22 @@
     return node._w;
   }
 
+  // Load a bound weight through the node's safetensors file when the node
+  // carries node.bind (set by the T5 importer), otherwise synthesise one via
+  // `fallback`. Checkpoint tensors are FP16; cast to FP32 so the whole
+  // imported graph runs at a single dtype, exactly like the freeform editor.
+  function boundW(node, T, slot, rows, cols, fallback) {
+    const b = node.bind;
+    if (b && b.keys && b.keys[slot]) {
+      const raw = b.file.get(b.keys[slot], rows, cols, 'native');
+      if (raw.dtype() === 'fp32') return raw;
+      const f32 = T.createTensor(rows, cols);
+      T.cast(raw, f32, 'fp32');
+      return f32;
+    }
+    return fallback();
+  }
+
   // shared layout-guard message
   function needMatrix(label, s) {
     return label + ' needs a matrix input, got ' + s.layout + ' ' + Shape.label(s);
@@ -127,7 +143,8 @@
     stats: (ins, p) => ({ params: p.vocab * p.dim, flops: 0 }),
     exec: (T, ins, p, node) => {
       const table = cached(node, 'e' + p.vocab + 'x' + p.dim,
-        () => weight(T, p.vocab, p.dim, p.dim));
+        () => boundW(node, T, 'table', p.vocab, p.dim,
+          () => weight(T, p.vocab, p.dim, p.dim)));
       const idxI = new Int32Array(p.batch);
       for (let i = 0; i < p.batch; i++) idxI[i] = (Math.random() * p.vocab) | 0;
       const idx = T.createTensor(p.batch, 1);
@@ -269,7 +286,8 @@
     stats: (ins) => ({ params: ins[0].dims[1], flops: 6 * Shape.elems(ins[0]) }),
     exec: (T, ins, p, node) => {
       const x = ins[0], D = x.cols;
-      const g = cached(node, 'rms' + D, () => constant(T, D, 1, 1));
+      const g = cached(node, 'rms' + D,
+        () => boundW(node, T, 'g', D, 1, () => constant(T, D, 1, 1)));
       const y = T.createTensor(x.rows, D);
       T.rmsNormForward(x, g, p.eps, y);
       return [y];
@@ -380,7 +398,8 @@
     stats: (ins, p) => ({ params: p.buckets * p.heads, flops: 0 }),
     exec: (T, ins, p, node) => {
       const L = ins[0].rows, H = p.heads, NB = p.buckets;
-      const table = cached(node, 'rb' + NB + 'x' + H, () => weight(T, NB, H, NB));
+      const table = cached(node, 'rb' + NB + 'x' + H,
+        () => boundW(node, T, 'table', NB, H, () => weight(T, NB, H, NB)));
       const tbl = table.download();                  // (NB, H) row-major
       const bias = new Float32Array(H * L * L);
       for (let q = 0; q < L; q++) {
@@ -423,8 +442,10 @@
     exec: (T, ins, p, node) => {
       const x = ins[0], bias = ins[1], L = x.rows, D = x.cols;
       const w = cached(node, 't5a' + D, () => ({
-        Wq: weight(T, D, D, D), Wk: weight(T, D, D, D),
-        Wv: weight(T, D, D, D), Wo: weight(T, D, D, D),
+        Wq: boundW(node, T, 'Wq', D, D, () => weight(T, D, D, D)),
+        Wk: boundW(node, T, 'Wk', D, D, () => weight(T, D, D, D)),
+        Wv: boundW(node, T, 'Wv', D, D, () => weight(T, D, D, D)),
+        Wo: boundW(node, T, 'Wo', D, D, () => weight(T, D, D, D)),
       }));
       const O = T.createTensor(L, D);
       T.selfAttentionBiasForward(x, w.Wq, w.Wk, w.Wv, w.Wo, null, bias, p.heads, p.scale, O);
@@ -447,7 +468,9 @@
     exec: (T, ins, p, node) => {
       const x = ins[0], L = x.rows, D = x.cols, F = p.dff;
       const w = cached(node, 't5f' + D + 'x' + F, () => ({
-        wi0: weight(T, F, D, D), wi1: weight(T, F, D, D), wo: weight(T, D, F, F),
+        wi0: boundW(node, T, 'wi0', F, D, () => weight(T, F, D, D)),
+        wi1: boundW(node, T, 'wi1', F, D, () => weight(T, F, D, D)),
+        wo:  boundW(node, T, 'wo',  D, F, () => weight(T, D, F, F)),
         zF: constant(T, F, 1, 0), zD: constant(T, D, 1, 0),
       }));
       const h0 = T.createTensor(L, F), h1 = T.createTensor(L, F);

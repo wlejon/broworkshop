@@ -177,6 +177,33 @@
     }
     presetSel.addEventListener('change', () => loadPreset(presetSel.value));
 
+    // --- T5 importer ----------------------------------------------------
+    function openT5() {
+      if (running) return;
+      if (!bro.tensor || !bro.tensor.available) { toast('GPU backend unavailable.'); return; }
+      let paths;
+      try { paths = showOpenFileDialog('T5 checkpoint|safetensors'); }
+      catch (e) { toast('file dialog unavailable'); return; }
+      if (!paths || !paths.length) return;
+      let cfg;
+      try {
+        const file = Lab.T5.open(paths[0]);
+        cfg = Lab.T5.importEncoder(file, graph, { layers: 2, seqLen: 16 });
+      } catch (e) {
+        toast('T5 import failed: ' + (e && e.message || e));
+        return;
+      }
+      runner.reset();
+      editor.activeNode = null;
+      editor.select(null, null);
+      editor.resize();
+      editor.frameAll();
+      updateStatus();
+      toast('T5 loaded — ' + cfg.builtLayers + ' of ' + cfg.layers +
+        ' encoder layers · d_model ' + cfg.dModel + ' · ' + cfg.heads + ' heads');
+    }
+    $('btn-open-t5').addEventListener('click', openT5);
+
     // --- backend badge --------------------------------------------------
     const badge = $('backend');
     if (bro.tensor && bro.tensor.available) {
