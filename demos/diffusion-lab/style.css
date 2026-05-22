@@ -142,10 +142,12 @@ button {
   border-radius: 4px;
   color: #cdd5e2;
   font-size: 12px;
+  white-space: nowrap;
   cursor: pointer;
 }
 button:hover:not(:disabled) { background: #2c3548; border-color: #3f4a63; }
 button:disabled { opacity: 0.4; cursor: default; }
+select:disabled, input:disabled { opacity: 0.4; cursor: default; }
 button.icon { padding: 7px 10px; flex-shrink: 0; }
 button.primary {
   background: #2f53d8;
@@ -158,7 +160,11 @@ button.primary:hover:not(:disabled) { background: #3a61ee; }
 .actions { display: flex; gap: 8px; margin-top: 16px; }
 .actions button { flex: 1; }
 
-#modelbar button, #modelbar select { padding: 6px 10px; }
+/* The model bar is a single non-wrapping row — its select must not inherit
+   the full-width sizing the form controls in the side panels use. */
+#modelbar button,
+#modelbar select { padding: 6px 10px; width: auto; flex-shrink: 0; }
+#brand, .tagline, .badge { flex-shrink: 0; white-space: nowrap; }
 
 /* ── viewport ────────────────────────────────────────────────────── */
 
@@ -178,10 +184,15 @@ button.primary:hover:not(:disabled) { background: #3a61ee; }
   bottom: 18px;
   display: block;
   background: #0a0b0f;
+  border: 1px solid #1b2030;
+  border-radius: 6px;
 }
 
 #view-hint {
   position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
   color: #4d5667;
   font-size: 13px;
   pointer-events: none;
