@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>flora-lab — broflora inspector</title>
+    <style>
+        html, body { margin: 0; padding: 0; height: 100%; background: #0a0c10; overflow: hidden; }
+        canvas#stage { display: block; width: 100vw; height: 100vh; }
+
+        #panel {
+            position: absolute;
+            left: 12px; top: 12px; bottom: 12px;
+            width: 280px;
+            background: rgba(0,0,0,0.78);
+            color: #d8e0e8;
+            font: 12px system-ui, sans-serif;
+            padding: 12px 14px;
+            border-radius: 6px;
+            box-sizing: border-box;
+            display: flex; flex-direction: column;
+        }
+        #panel h1 { margin: 0 0 2px 0; font-size: 14px; color: #fff; }
+        #panel .sub { color: #6a7785; font-size: 10px; margin-bottom: 10px; }
+        #panel h2 { margin: 10px 0 4px 0; font-size: 10px; color: #8aa0b0;
+                    text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; }
+
+        .row { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+        .row label { flex: 0 0 86px; color: #b8c4d0; font-size: 11px; }
+        .row input[type=range] { flex: 1; min-width: 0; }
+        .row .v { flex: 0 0 44px; color: #7bed9f; font-size: 10px; text-align: right;
+                  font-variant-numeric: tabular-nums; }
+
+        .actions { display: flex; gap: 6px; margin: 6px 0; flex-wrap: wrap; }
+        .actions button {
+            background: #1c2229; color: #d8e0e8; border: 1px solid #3a4452;
+            padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 11px;
+        }
+        .actions button:hover { background: #28303a; }
+        .actions button.primary { background: #2a4d6e; border-color: #4a7099; }
+        .actions button.on { background: #4a3d2a; border-color: #806a44; }
+
+        .toggles { display: flex; flex-direction: column; gap: 3px; }
+        .toggles label {
+            display: flex; align-items: center; gap: 6px;
+            color: #b8c4d0; font-size: 11px; cursor: pointer;
+            padding: 2px 4px; border-radius: 3px;
+        }
+        .toggles label:hover { background: rgba(255,255,255,0.04); }
+        .toggles .swatch { width: 10px; height: 10px; border-radius: 2px;
+                           border: 1px solid rgba(255,255,255,0.2); flex: 0 0 10px; }
+
+        #stats { color: #7d8794; font-size: 10px; margin-top: auto;
+                 padding-top: 8px; border-top: 1px solid #1c2229;
+                 font-variant-numeric: tabular-nums; }
+        #stats .row { margin: 1px 0; }
+        #stats .row label { color: #5a6878; flex: 0 0 90px; }
+        #stats .row .v { color: #c8d4e0; text-align: left; flex: 1; }
+        #help { color: #4a525c; font-size: 9px; margin-top: 6px; }
+    </style>
+</head>
+<body>
+    <canvas id="stage"></canvas>
+    <div id="panel">
+        <h1>flora-lab</h1>
+        <div class="sub">broflora inspector — sim primitives made visible</div>
+
+        <h2>Simulation</h2>
+        <div class="actions">
+            <button id="play" class="primary on">⏸ Pause</button>
+            <button id="step1">Step</button>
+            <button id="seed">+ Seedling</button>
+            <button id="reset">Reset</button>
+        </div>
+        <div class="row">
+            <label>time scale</label>
+            <input id="timeScale" type="range" min="0.1" max="5" step="0.1" value="1">
+            <span id="timeScaleV" class="v">1.0×</span>
+        </div>
+        <div class="row">
+            <label>temperature</label>
+            <input id="temp" type="range" min="-5" max="30" step="0.5" value="15">
+            <span id="tempV" class="v">15 °C</span>
+        </div>
+
+        <h2>Overlays</h2>
+        <div class="toggles" id="overlayToggles"></div>
+
+        <div id="stats">
+            <div class="row"><label>sim time</label><span class="v" id="simTime">0</span></div>
+            <div class="row"><label>plants</label><span class="v" id="plantCt">0</span></div>
+            <div class="row"><label>modules</label><span class="v" id="moduleCt">0</span></div>
+            <div class="row"><label>flowering</label><span class="v" id="floweringCt">0</span></div>
+            <div class="row"><label>tri / frame</label><span class="v" id="triCt">0</span></div>
+        </div>
+        <div id="help">drag = orbit · shift+drag = pan · wheel = zoom</div>
+    </div>
+
+    <script src="wire.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

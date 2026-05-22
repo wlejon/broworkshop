@@ -5,7 +5,7 @@
 # Per-app settings written by the engine
 .bro_settings.json
 **/.bro_settings.json
-
+_*.png
 # OS / editor
 .DS_Store
 Thumbs.db
