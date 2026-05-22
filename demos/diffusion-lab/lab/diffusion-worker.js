@@ -42,6 +42,14 @@ function handleLoad(spec) {
     pipeline = bro.diffusion.createPipeline(spec.pipeline);
     var w = spec.weights;
     pipeline.loadWeights(w.text, w.unet, w.vae);
+
+    // Merge any LoRA adapters into the freshly loaded weights. applyLora is
+    // stackable and one-way — there is no un-apply — so changing the adapter
+    // set always means a full reload from the base weights.
+    var loras = spec.loras || [];
+    for (var i = 0; i < loras.length; i++) {
+      pipeline.applyLora(loras[i].path, loras[i].scale);
+    }
     state = null;
 
     var tensor = (typeof bro !== 'undefined' && bro.tensor) ? bro.tensor : null;
@@ -49,6 +57,7 @@ function handleLoad(spec) {
       type: 'loaded',
       config: pipeline.config(),
       numXAttnBlocks: pipeline.numXAttnBlocks(),
+      lorasApplied: loras.length,
       backend: tensor && tensor.available ? (tensor.backend || 'gpu') : 'cpu',
     });
   } catch (e) {

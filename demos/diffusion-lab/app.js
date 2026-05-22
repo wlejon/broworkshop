@@ -51,6 +51,7 @@
     var runTrace = false;    // capture cross-attention for the active run
     var runBias = false;     // the active run has steering applied
     var runBiasMap = {};     // biasMap snapshot taken at generate() time
+    var loras = [];          // [{path, scale}] LoRA adapters to merge at load
 
     // ── status helpers ─────────────────────────────────────────────────
     function status(msg, kind) {
@@ -118,6 +119,9 @@
     if (prefs.height) $('height').value = prefs.height;
     if (prefs.seed != null) $('seed').value = prefs.seed;
     if (prefs.scheduler) $('scheduler').value = prefs.scheduler;
+    if (prefs.loras && prefs.loras.length) {
+      loras = prefs.loras.filter(function (l) { return l && l.path; });
+    }
 
     // ── backend badge ──────────────────────────────────────────────────
     var badge = $('backend');
@@ -176,9 +180,12 @@
       var sel = $('scheduler').value;
       var scheduler = sel === 'auto' ? detected.suggestedScheduler : sel;
       var spec = detected.profile.buildSpec(detected, scheduler);
+      spec.loras = loras;
 
       setBusy(true);
-      status('loading weights — this reads multi-GB files, please wait…', '');
+      status(loras.length
+        ? 'loading weights + ' + loras.length + ' LoRA — please wait…'
+        : 'loading weights — this reads multi-GB files, please wait…', '');
       $('btn-load').disabled = true;
 
       client.load(spec, function (err, info) {
@@ -201,10 +208,100 @@
         status('ready — ' + (cfg.modelClass || 'model') + ' · ' +
           (cfg.scheduler || scheduler) + ' · ' +
           (info.backend || '?') + ' · ' +
-          info.numXAttnBlocks + ' cross-attention blocks', 'ok');
+          info.numXAttnBlocks + ' cross-attention blocks' +
+          (info.lorasApplied ? ' · ' + info.lorasApplied + ' LoRA' : ''), 'ok');
         $('btn-generate').disabled = false;
         $('btn-load').disabled = false;
       });
+    }
+
+    // ── LoRA adapters ──────────────────────────────────────────────────
+    function loraName(p) {
+      var parts = String(p).split(/[\\/]/);
+      return parts[parts.length - 1] || p;
+    }
+
+    function persistLoras() {
+      prefs.loras = loras;
+      savePrefs(prefs);
+    }
+
+    // A LoRA change only takes effect at load time (applyLora merges into the
+    // base weights and cannot be undone). If weights are already resident,
+    // mark them stale and point the user back at Load weights.
+    function markLoraStale() {
+      if (!loaded || running) return;
+      loaded = false;
+      $('btn-generate').disabled = true;
+      $('btn-load').disabled = !detected;
+      status('LoRA set changed — click Load weights to apply.', '');
+    }
+
+    function renderLoraList() {
+      var list = $('lora-list');
+      list.textContent = '';
+      if (!loras.length) {
+        var hint = document.createElement('p');
+        hint.className = 'muted small';
+        hint.textContent = 'None — the base model runs unmodified.';
+        list.appendChild(hint);
+        return;
+      }
+      loras.forEach(function (lora, i) {
+        var row = document.createElement('div');
+        row.className = 'lora-row';
+
+        var name = document.createElement('div');
+        name.className = 'lora-name';
+        name.textContent = loraName(lora.path);
+        name.title = lora.path;
+
+        var scale = document.createElement('input');
+        scale.className = 'lora-scale';
+        scale.type = 'number';
+        scale.step = '0.05';
+        scale.value = lora.scale;
+        scale.title = 'Adapter strength';
+        scale.addEventListener('change', function () {
+          var v = parseFloat(scale.value);
+          loras[i].scale = isFinite(v) ? v : 1;
+          scale.value = loras[i].scale;
+          persistLoras();
+          markLoraStale();
+        });
+
+        var del = document.createElement('button');
+        del.className = 'lora-del';
+        del.textContent = '✕';
+        del.title = 'Remove adapter';
+        del.addEventListener('click', function () {
+          loras.splice(i, 1);
+          renderLoraList();
+          persistLoras();
+          markLoraStale();
+        });
+
+        row.appendChild(name);
+        row.appendChild(scale);
+        row.appendChild(del);
+        list.appendChild(row);
+      });
+    }
+
+    function addLora() {
+      if (running) return;
+      if (typeof showOpenFileDialog !== 'function') {
+        status('file dialog unavailable in this build', 'err');
+        return;
+      }
+      var files = showOpenFileDialog('LoRA weights|safetensors', true);
+      if (!files || !files.length) return;
+      for (var i = 0; i < files.length; i++) {
+        loras.push({ path: files[i], scale: 1 });
+      }
+      renderLoraList();
+      persistLoras();
+      markLoraStale();
     }
 
     // ── generation ─────────────────────────────────────────────────────
@@ -417,6 +514,7 @@
       $('btn-cancel').disabled = !on;
       $('btn-open').disabled = on;
       $('btn-load').disabled = on || !detected;
+      $('btn-lora-add').disabled = on;
       $('prompt').disabled = on;
       $('neg').disabled = on;
       $('view-hint').style.display =
@@ -431,6 +529,7 @@
     $('btn-rand').addEventListener('click', function () {
       $('seed').value = Math.floor(Math.random() * 1e9);
     });
+    $('btn-lora-add').addEventListener('click', addLora);
 
     // Live re-tokenization — debounced so chips track the prompt as you type.
     // A prompt edit invalidates the steering map (token indices shift) and
@@ -489,6 +588,7 @@
 
     // ── initial state ──────────────────────────────────────────────────
     $('view-hint').style.display = 'block';
+    renderLoraList();
     if (prefs.modelDir) {
       status('last model: ' + prefs.modelDir +
         ' — click Open model to re-select, or Load if unchanged.', '');
@@ -500,9 +600,17 @@
       loadWeights: loadWeights,
       generate: generate,
       viewport: viewport,
+      // Add a LoRA by path — the dialog-free equivalent of the Add LoRA
+      // button, for headless scripting.
+      addLoraPath: function (path, scale) {
+        loras.push({ path: path, scale: scale == null ? 1 : scale });
+        renderLoraList();
+        persistLoras();
+        markLoraStale();
+      },
       state: function () {
         return { loaded: loaded, running: running, frames: frames.length,
-                 hasTrace: !!finalTrace };
+                 hasTrace: !!finalTrace, loras: loras.length };
       },
     };
   }

@@ -160,6 +160,27 @@ button.primary:hover:not(:disabled) { background: #3a61ee; }
 .actions { display: flex; gap: 8px; margin-top: 16px; }
 .actions button { flex: 1; }
 
+/* ── LoRA adapter list ────────────────────────────────────────────── */
+
+.lora-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 5px;
+}
+.lora-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  color: #b6c0d0;
+}
+.lora-scale { flex: 0 0 62px; padding: 5px 6px; }
+.lora-del { flex: 0 0 auto; padding: 5px 8px; }
+#btn-lora-add { width: 100%; }
+
 /* The model bar is a single non-wrapping row — its select must not inherit
    the full-width sizing the form controls in the side panels use. */
 #modelbar button,
