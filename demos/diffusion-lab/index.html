@@ -18,6 +18,10 @@
         <option value="ddim">DDIM</option>
         <option value="lcm">LCM</option>
       </select>
+      <label class="mb-check"
+             title="Quantize U-Net weights to INT8 — smaller and faster, GPU only">
+        <input type="checkbox" id="int8"> INT8
+      </label>
       <button id="btn-open" title="Pick a diffusers model directory">Open model…</button>
       <button id="btn-load" disabled title="Load weights into the pipeline">Load weights</button>
       <span id="backend" class="badge">…</span>

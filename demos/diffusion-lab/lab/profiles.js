@@ -82,8 +82,9 @@
       };
     },
 
-    // Build the worker-side spec. `scheduler` is 'ddim' or 'lcm'.
-    buildSpec: function (resolved, scheduler) {
+    // Build the worker-side spec. `scheduler` is 'ddim' or 'lcm'; `quantize`
+    // requests INT8 U-Net weights (GPU only — ignored on the CPU backend).
+    buildSpec: function (resolved, scheduler, quantize) {
       var sched = scheduler === 'lcm' ? 'lcm' : 'ddim';
       return {
         kind: 'createPipeline',
@@ -92,7 +93,7 @@
           mergesPath: resolved.mergesPath,
           scheduler: sched,
           lcmDistilled: sched === 'lcm',
-          quantizeWeights: false,
+          quantizeWeights: !!quantize,
         },
         weights: resolved.weights,
       };

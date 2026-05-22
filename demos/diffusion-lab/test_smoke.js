@@ -57,6 +57,11 @@
     ok('resolved vae weight', /vae/.test(det.weights.vae));
     var spec = det.profile.buildSpec(det, 'ddim');
     ok('spec scheduler ddim', spec.pipeline.scheduler === 'ddim');
+    ok('spec quantize defaults off', spec.pipeline.quantizeWeights === false);
+    var qspec = det.profile.buildSpec(det, 'lcm', true);
+    ok('spec quantize flag honoured',
+       qspec.pipeline.quantizeWeights === true &&
+       qspec.pipeline.scheduler === 'lcm');
   } catch (e) {
     ok('profile detect', false, e.message);
   }

@@ -52,6 +52,7 @@
     var runBias = false;     // the active run has steering applied
     var runBiasMap = {};     // biasMap snapshot taken at generate() time
     var loras = [];          // [{path, scale}] LoRA adapters to merge at load
+    var traceCapable = true; // false once an INT8-quantized model is loaded
 
     // ── status helpers ─────────────────────────────────────────────────
     function status(msg, kind) {
@@ -107,7 +108,8 @@
       var v = biasMap[idx] || 0;
       $('steer-tok').textContent = labelFor(idx);
       $('steer-bias').value = v;
-      $('steer-val').textContent = fmtBias(v);
+      $('steer-val').textContent = $('steer-bias').disabled
+        ? 'unavailable · INT8' : fmtBias(v);
     }
 
     // ── prefill from saved preferences ─────────────────────────────────
@@ -119,6 +121,7 @@
     if (prefs.height) $('height').value = prefs.height;
     if (prefs.seed != null) $('seed').value = prefs.seed;
     if (prefs.scheduler) $('scheduler').value = prefs.scheduler;
+    if (prefs.int8) $('int8').checked = true;
     if (prefs.loras && prefs.loras.length) {
       loras = prefs.loras.filter(function (l) { return l && l.path; });
     }
@@ -133,6 +136,9 @@
     }
     if (!gpu) {
       status('CPU backend — generation will be slow; an LCM model helps.', '');
+      // INT8 quantization is a GPU-only path — it has no effect on CPU.
+      $('int8').checked = false;
+      $('int8').disabled = true;
     }
 
     // ── open a model directory ─────────────────────────────────────────
@@ -179,7 +185,8 @@
       if (running || !detected) return;
       var sel = $('scheduler').value;
       var scheduler = sel === 'auto' ? detected.suggestedScheduler : sel;
-      var spec = detected.profile.buildSpec(detected, scheduler);
+      var spec = detected.profile.buildSpec(
+        detected, scheduler, $('int8').checked);
       spec.loras = loras;
 
       setBusy(true);
@@ -205,11 +212,22 @@
         } else if (scheduler === 'ddim' && (!(steps > 0) || steps < 15)) {
           $('steps').value = 25;
         }
-        status('ready — ' + (cfg.modelClass || 'model') + ' · ' +
-          (cfg.scheduler || scheduler) + ' · ' +
-          (info.backend || '?') + ' · ' +
-          info.numXAttnBlocks + ' cross-attention blocks' +
-          (info.lorasApplied ? ' · ' + info.lorasApplied + ' LoRA' : ''), 'ok');
+
+        // An INT8-quantized U-Net can't run trace mode — brodiffusion's
+        // traced cross-attention is FP16-only — so capture and steering go
+        // dark for this model. cfg.quantizeWeights reflects what actually
+        // happened (it's a no-op on the CPU backend).
+        traceCapable = !cfg.quantizeWeights;
+        $('trace').disabled = !traceCapable;
+        $('steer-bias').disabled = !traceCapable;
+        if (!traceCapable) $('trace').checked = false;
+
+        var ready = 'ready — ' + (cfg.modelClass || 'model') + ' · ' +
+          (cfg.scheduler || scheduler) + ' · ' + (info.backend || '?') +
+          ' · ' + info.numXAttnBlocks + ' cross-attention blocks' +
+          (info.lorasApplied ? ' · ' + info.lorasApplied + ' LoRA' : '');
+        if (!traceCapable) ready += ' — INT8: capture & steering off';
+        status(ready, 'ok');
         $('btn-generate').disabled = false;
         $('btn-load').disabled = false;
       });
@@ -332,14 +350,17 @@
       // Snapshot the steering map so mid-run prompt edits can't change it.
       // Steering needs the per-layer trace to apply, so a steered run always
       // captures cross-attention even if the capture box is unchecked.
+      // An INT8 model can't trace at all, so both go off there.
       runBias = false;
       runBiasMap = {};
-      for (var bk in biasMap) {
-        if (!biasMap.hasOwnProperty(bk)) continue;
-        runBiasMap[bk] = biasMap[bk];
-        runBias = true;
+      if (traceCapable) {
+        for (var bk in biasMap) {
+          if (!biasMap.hasOwnProperty(bk)) continue;
+          runBiasMap[bk] = biasMap[bk];
+          runBias = true;
+        }
       }
-      runTrace = $('trace').checked || runBias;
+      runTrace = traceCapable && ($('trace').checked || runBias);
 
       // persist inputs
       prefs.prompt = prompt;
@@ -350,6 +371,7 @@
       prefs.height = opts.height;
       prefs.seed = opts.seed;
       prefs.scheduler = $('scheduler').value;
+      prefs.int8 = $('int8').checked;
       savePrefs(prefs);
 
       // reset run state — release the previous run's frame bitmaps eagerly
