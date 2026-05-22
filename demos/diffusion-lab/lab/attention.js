@@ -105,6 +105,25 @@
     return arr;
   }
 
+  // ── steering ────────────────────────────────────────────────────────
+  //
+  // Turn a token→bias map into the per-layer attnBias structure stepOnce()
+  // expects. `shapes` is one { Lq, Lk } per cross-attention layer, learned
+  // from a trace; each biased token gets its logit bias written into every
+  // spatial query of every layer (column k of the (Lq, Lk) score matrix).
+  function buildAttnBias(biasMap, shapes) {
+    var keys = Object.keys(biasMap || {});
+    return shapes.map(function (s) {
+      var data = new Float32Array(s.Lq * s.Lk);
+      for (var ki = 0; ki < keys.length; ki++) {
+        var k = +keys[ki], v = +biasMap[keys[ki]];
+        if (!v || k < 0 || k >= s.Lk) continue;
+        for (var q = 0; q < s.Lq; q++) data[q * s.Lk + k] = v;
+      }
+      return { Lq: s.Lq, Lk: s.Lk, data: data };
+    });
+  }
+
   // ── token-chip UI ──────────────────────────────────────────────────
   function create(tokensEl, hooks) {
     hooks = hooks || {};
@@ -120,13 +139,42 @@
     function addChip(label, contextIndex, frame) {
       var el = document.createElement('span');
       el.className = 'tok' + (frame ? ' frame' : '');
-      el.textContent = label;
+      var txt = document.createElement('span');
+      txt.textContent = label;
+      el.appendChild(txt);
       el.addEventListener('click', function () {
         setActive(contextIndex);
         if (hooks.onSelect) hooks.onSelect(contextIndex, label);
       });
       tokensEl.appendChild(el);
-      chips.push({ el: el, contextIndex: contextIndex });
+      chips.push({ el: el, contextIndex: contextIndex, badge: null });
+    }
+
+    function chipFor(contextIndex) {
+      for (var i = 0; i < chips.length; i++) {
+        if (chips[i].contextIndex === contextIndex) return chips[i];
+      }
+      return null;
+    }
+
+    // Reflect a token's steering bias on its chip — a +N / −N badge and a
+    // boost/suppress tint. value 0 clears it.
+    function setBias(contextIndex, value) {
+      var c = chipFor(contextIndex);
+      if (!c) return;
+      c.el.classList.remove('boosted', 'suppressed');
+      if (value) {
+        if (!c.badge) {
+          c.badge = document.createElement('span');
+          c.badge.className = 'bias';
+          c.el.appendChild(c.badge);
+        }
+        c.badge.textContent = (value > 0 ? '+' : '−') + Math.abs(value);
+        c.el.classList.add(value > 0 ? 'boosted' : 'suppressed');
+      } else if (c.badge) {
+        c.el.removeChild(c.badge);
+        c.badge = null;
+      }
     }
 
     // enc — the result of Tokenizer.encodeContext()
@@ -151,6 +199,7 @@
     return {
       setTokens: setTokens,
       setActive: setActive,
+      setBias: setBias,
       clear: clear,
       activeIndex: function () { return activeIdx; },
       hasTokens: function () { return chips.length > 0; },
@@ -162,6 +211,7 @@
     create: create,
     blockOptions: blockOptions,
     computeHeatmap: computeHeatmap,
+    buildAttnBias: buildAttnBias,
     blockDims: blockDims,
   };
 })();

@@ -2,8 +2,8 @@
 //
 // Drives bro.diffusion through the step-wise prime()/stepOnce()/decode()
 // API the binding was built for: a worker owns the pipeline, the main
-// thread paces one denoising step per animation frame, stores every frame
-// for scrubbing, and renders captured cross-attention as a heatmap.
+// thread paces one denoising step per worker round-trip, stores every
+// frame for scrubbing, and renders — or steers — cross-attention.
 (function () {
   'use strict';
 
@@ -42,8 +42,15 @@
 
     var frames = [];         // { stepIndex, image } per denoising step
     var finalTrace = null;   // trace of the finished image
+    var traceShapes = null;  // [{Lq,Lk}] per layer — learned from step 0
     var latentW = 0, latentH = 0;
-    var lastPrompt = '';
+
+    var biasMap = {};        // contextIndex -> steering bias (logit offset)
+    var currentEnc = null;   // last tokenization of the prompt textarea
+    var promptTimer = 0;     // debounce handle for live re-tokenization
+    var runTrace = false;    // capture cross-attention for the active run
+    var runBias = false;     // the active run has steering applied
+    var runBiasMap = {};     // biasMap snapshot taken at generate() time
 
     // ── status helpers ─────────────────────────────────────────────────
     function status(msg, kind) {
@@ -54,10 +61,53 @@
 
     var attention = DLab.Attention.create($('tokens'), {
       onSelect: function () {
-        $('overlay-on').checked = true;
+        syncSteerPanel();
+        if (finalTrace) $('overlay-on').checked = true;
         refreshOverlay();
       },
     });
+
+    // ── live prompt tokenization ───────────────────────────────────────
+    // Token chips exist as soon as a model is adopted, so the prompt can be
+    // inspected and steered before the first generation — not only after.
+    function buildTokenChips() {
+      if (!tokenizer) { attention.clear(); currentEnc = null; return; }
+      currentEnc = tokenizer.encodeContext($('prompt').value);
+      attention.setTokens(currentEnc);
+      for (var k in biasMap) {
+        if (biasMap.hasOwnProperty(k)) attention.setBias(+k, biasMap[k]);
+      }
+      syncSteerPanel();
+    }
+
+    function labelFor(contextIndex) {
+      if (!currentEnc) return '?';
+      if (contextIndex === currentEnc.bosIndex) return '[start]';
+      if (contextIndex === currentEnc.eosIndex) return '[end]';
+      var t = currentEnc.tokens;
+      for (var i = 0; i < t.length; i++) {
+        if (t[i].contextIndex === contextIndex) return t[i].text || '·';
+      }
+      return '?';
+    }
+
+    function fmtBias(v) {
+      if (!v) return 'neutral';
+      return (v > 0 ? '+' + v + ' · boost' : v + ' · suppress');
+    }
+
+    // Reflect the active token's steering state in the steering panel.
+    function syncSteerPanel() {
+      var idx = attention.activeIndex();
+      var has = idx >= 0 && currentEnc != null;
+      $('steer-empty').classList.toggle('hidden', has);
+      $('steer-ctl').classList.toggle('hidden', !has);
+      if (!has) return;
+      var v = biasMap[idx] || 0;
+      $('steer-tok').textContent = labelFor(idx);
+      $('steer-bias').value = v;
+      $('steer-val').textContent = fmtBias(v);
+    }
 
     // ── prefill from saved preferences ─────────────────────────────────
     if (prefs.prompt) $('prompt').value = prefs.prompt;
@@ -107,6 +157,9 @@
       }
       loaded = false;
       caps = detected.caps;
+      biasMap = {};
+      attention.setActive(-1);
+      buildTokenChips();
       $('model-name').textContent = detected.name;
       $('model-name').classList.remove('muted');
       $('btn-load').disabled = false;
@@ -177,9 +230,19 @@
       if (!prompt) { status('enter a prompt first', 'err'); return; }
 
       var opts = readOpts();
-      lastPrompt = prompt;
-      var trace = $('trace').checked;
       var token = ++runToken;
+
+      // Snapshot the steering map so mid-run prompt edits can't change it.
+      // Steering needs the per-layer trace to apply, so a steered run always
+      // captures cross-attention even if the capture box is unchecked.
+      runBias = false;
+      runBiasMap = {};
+      for (var bk in biasMap) {
+        if (!biasMap.hasOwnProperty(bk)) continue;
+        runBiasMap[bk] = biasMap[bk];
+        runBias = true;
+      }
+      runTrace = $('trace').checked || runBias;
 
       // persist inputs
       prefs.prompt = prompt;
@@ -199,16 +262,23 @@
       }
       frames = [];
       finalTrace = null;
-      attention.clear();
+      traceShapes = null;
+      // Token chips stay (they track the prompt, not the run); only the
+      // trace-derived overlay controls reset.
       $('block').textContent = '';
+      $('block').disabled = true;
+      $('overlay-on').disabled = true;
+      $('overlay-on').checked = false;
+      $('opacity').disabled = true;
       $('scrub').disabled = true;
       $('scrub').max = 0;
       $('scrub').value = 0;
       viewport.setOverlay(null);
       setBusy(true);
-      status('encoding prompt…', '');
+      status(runBias ? 'encoding prompt — steering ' +
+        Object.keys(runBiasMap).length + ' token(s)…' : 'encoding prompt…', '');
 
-      client.prime(prompt, opts, trace, function (err, info) {
+      client.prime(prompt, opts, function (err, info) {
         if (err || token !== runToken) {
           if (err) status('prime failed: ' + err.message, 'err');
           if (token === runToken) setBusy(false);
@@ -223,7 +293,23 @@
 
     function stepLoop(token, numSteps) {
       if (token !== runToken) return;       // cancelled
-      client.step(function (err, msg) {
+
+      // Choose this step's control object. Step 0 can only trace — the U-Net's
+      // per-layer query counts aren't known until a trace comes back; from
+      // step 1 on, a steered run sends the attnBias built from those shapes.
+      var ctrl, transfer = null;
+      if (runBias && traceShapes) {
+        var bias = DLab.Attention.buildAttnBias(runBiasMap, traceShapes);
+        ctrl = { attnBias: bias };
+        transfer = [];
+        for (var bi = 0; bi < bias.length; bi++) {
+          transfer.push(bias[bi].data.buffer);
+        }
+      } else if (runTrace) {
+        ctrl = { trace: true };
+      }
+
+      client.step(ctrl, transfer, function (err, msg) {
         if (token !== runToken) return;     // cancelled mid-step
         if (err) {
           status('step failed: ' + err.message, 'err');
@@ -234,7 +320,14 @@
           frames.push({ stepIndex: msg.stepIndex, bitmap: msg.bitmap });
           viewport.setImage(msg.bitmap);
         }
-        if (msg.trace) finalTrace = msg.trace;
+        if (msg.trace) {
+          finalTrace = msg.trace;
+          if (!traceShapes) {
+            traceShapes = msg.trace.map(function (t) {
+              return { Lq: t.Lq, Lk: t.Lk };
+            });
+          }
+        }
 
         var done = msg.done;
         var idx = msg.stepIndex || frames.length;
@@ -265,6 +358,7 @@
       }
       // build the attention inspector
       buildAttention();
+      refreshOverlay();
     }
 
     function finishRun() {
@@ -282,16 +376,13 @@
     }
 
     // ── attention inspector ────────────────────────────────────────────
+    // After a run: populate the layer dropdown and enable the overlay
+    // controls. Token chips already track the prompt (buildTokenChips) and
+    // carry their steering badges, so they are left untouched here.
     function buildAttention() {
       var blockSel = $('block');
       blockSel.textContent = '';
-      if (!finalTrace || !tokenizer) {
-        attention.clear();
-        return;
-      }
-      var enc = tokenizer.encodeContext(lastPrompt);
-      attention.setTokens(enc);
-
+      if (!finalTrace) return;
       var opts = DLab.Attention.blockOptions(finalTrace, latentW, latentH);
       for (var i = 0; i < opts.length; i++) {
         var o = document.createElement('option');
@@ -299,6 +390,9 @@
         o.textContent = opts[i].label;
         blockSel.appendChild(o);
       }
+      blockSel.disabled = false;
+      $('overlay-on').disabled = false;
+      $('opacity').disabled = false;
     }
 
     function refreshOverlay() {
@@ -323,6 +417,8 @@
       $('btn-cancel').disabled = !on;
       $('btn-open').disabled = on;
       $('btn-load').disabled = on || !detected;
+      $('prompt').disabled = on;
+      $('neg').disabled = on;
       $('view-hint').style.display =
         viewport.hasImage() || on ? 'none' : 'block';
     }
@@ -334,6 +430,43 @@
     $('btn-cancel').addEventListener('click', cancel);
     $('btn-rand').addEventListener('click', function () {
       $('seed').value = Math.floor(Math.random() * 1e9);
+    });
+
+    // Live re-tokenization — debounced so chips track the prompt as you type.
+    // A prompt edit invalidates the steering map (token indices shift) and
+    // any captured trace (its K columns no longer line up).
+    $('prompt').addEventListener('input', function () {
+      if (promptTimer) clearTimeout(promptTimer);
+      promptTimer = setTimeout(function () {
+        promptTimer = 0;
+        biasMap = {};
+        attention.setActive(-1);
+        finalTrace = null;
+        $('block').textContent = '';
+        $('block').disabled = true;
+        $('overlay-on').disabled = true;
+        $('overlay-on').checked = false;
+        $('opacity').disabled = true;
+        viewport.setOverlay(null);
+        buildTokenChips();
+      }, 300);
+    });
+
+    $('steer-bias').addEventListener('input', function () {
+      var idx = attention.activeIndex();
+      if (idx < 0) return;
+      var v = parseFloat($('steer-bias').value) || 0;
+      if (v) biasMap[idx] = v; else delete biasMap[idx];
+      $('steer-val').textContent = fmtBias(v);
+      attention.setBias(idx, v);
+    });
+
+    $('steer-clear').addEventListener('click', function () {
+      for (var k in biasMap) {
+        if (biasMap.hasOwnProperty(k)) attention.setBias(+k, 0);
+      }
+      biasMap = {};
+      syncSteerPanel();
     });
 
     $('scrub').addEventListener('input', function () {

@@ -8,14 +8,17 @@
 // requests.
 //
 //   main -> load   {spec}            ->  loaded {config, numXAttnBlocks}
-//   main -> prime  {prompt,opts,trace}-> primed {numSteps, latentW, latentH}
-//   main -> step   {}                ->  stepped {stepIndex, done, bitmap, trace?}
+//   main -> prime  {prompt,opts}     ->  primed {numSteps, latentW, latentH}
+//   main -> step   {ctrl}            ->  stepped {stepIndex, done, bitmap, trace?}
 //   main -> reset  {}                ->  (drops the active state)
 //   errors come back as              ->  error {stage, message}
+//
+// `ctrl` is whatever the main thread wants passed to PipelineState.stepOnce()
+// — { trace:true } to capture cross-attention, or { attnBias:[...] } to steer
+// it. The worker stays policy-free: the main thread owns trace/steer decisions.
 
 var pipeline = null;     // native Pipeline handle
 var state = null;        // native PipelineState handle (mid-generation)
-var traceOn = false;     // capture cross-attention for the active generation
 
 function fail(stage, err) {
   self.postMessage({
@@ -58,7 +61,6 @@ function handleLoad(spec) {
 function handlePrime(msg) {
   try {
     if (!pipeline) throw new Error('no model loaded');
-    traceOn = !!msg.trace;
     state = pipeline.prime(msg.prompt, msg.opts || {});
     self.postMessage({
       type: 'primed',
@@ -73,7 +75,7 @@ function handlePrime(msg) {
 }
 
 // ── step: advance one denoising step, decode a preview ─────────────────
-function handleStep() {
+function handleStep(msg) {
   try {
     if (!state) throw new Error('no active generation');
     if (state.done) {
@@ -82,8 +84,7 @@ function handleStep() {
       return;
     }
 
-    var ctrl = traceOn ? { trace: true } : undefined;
-    var res = state.stepOnce(ctrl);
+    var res = state.stepOnce(msg.ctrl);
     var image = state.decode();
     var stepIndex = state.stepIndex;
     var numSteps = state.numSteps;
@@ -124,7 +125,7 @@ self.onmessage = function (e) {
   switch (msg.type) {
     case 'load':  handleLoad(msg.spec); break;
     case 'prime': handlePrime(msg); break;
-    case 'step':  handleStep(); break;
+    case 'step':  handleStep(msg); break;
     case 'reset': state = null; break;
     default: fail('dispatch', new Error('unknown message: ' + msg.type));
   }

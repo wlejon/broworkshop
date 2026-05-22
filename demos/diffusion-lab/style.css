@@ -229,14 +229,13 @@ input[type=range] { accent-color: #4a6cf0; }
 /* ── attention panel ─────────────────────────────────────────────── */
 
 .tokens {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
   margin: 8px 0 12px;
   min-height: 24px;
 }
 
 .tok {
+  display: inline-block;
+  margin: 0 4px 4px 0;
   padding: 3px 7px;
   background: #1b1f2a;
   border: 1px solid #2c3344;
@@ -252,6 +251,31 @@ input[type=range] { accent-color: #4a6cf0; }
   color: #fff;
 }
 .tok.frame { color: #6b7686; font-style: italic; }
+.tok.boosted    { border-color: #4f8a5f; }
+.tok.suppressed { border-color: #9a5560; }
+.tok .bias {
+  margin-left: 5px;
+  font-size: 10px;
+  font-weight: bold;
+  color: #9aa6bc;
+}
+.tok.boosted    .bias { color: #6fd99a; }
+.tok.suppressed .bias { color: #e89aa6; }
+.tok.active     .bias { color: #fff; }
+
+/* ── grouped panel blocks (steering, overlay) ─────────────────────── */
+
+.panel-block {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid #232838;
+}
+.panel-block .hdr { margin-top: 0; }
+.hidden { display: none; }
+.accent { color: #8aa6ff; font-weight: bold; }
+
+#steer-bias { width: 100%; margin-top: 2px; }
+#steer-clear { width: 100%; margin-top: 10px; }
 
 /* ── footer ──────────────────────────────────────────────────────── */
 

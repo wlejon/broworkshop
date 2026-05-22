@@ -48,13 +48,14 @@
         send({ type: 'load', spec: spec }, null, cb);
       },
 
-      prime: function (prompt, opts, trace, cb) {
-        send({ type: 'prime', prompt: prompt, opts: opts, trace: trace },
-             null, cb);
+      prime: function (prompt, opts, cb) {
+        send({ type: 'prime', prompt: prompt, opts: opts }, null, cb);
       },
 
-      step: function (cb) {
-        send({ type: 'step' }, null, cb);
+      // ctrl is forwarded verbatim to PipelineState.stepOnce() in the worker
+      // ({trace:true} or {attnBias:[...]}); transfer carries the bias buffers.
+      step: function (ctrl, transfer, cb) {
+        send({ type: 'step', ctrl: ctrl }, transfer, cb);
       },
 
       // Abandon the active generation. The worker keeps the loaded model;

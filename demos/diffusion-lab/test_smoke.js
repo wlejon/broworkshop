@@ -75,6 +75,27 @@
     ok('heatmap test', false, e.message);
   }
 
+  // ── attention steering: attnBias construction ─────────────────────────
+  try {
+    var shapes = [{ Lq: 4, Lk: 77 }, { Lq: 256, Lk: 77 }];
+    var bias = DLab.Attention.buildAttnBias({ 3: 2, 10: -1.5 }, shapes);
+    ok('attnBias layer count', bias.length === 2);
+    ok('attnBias layer shape', bias[0].Lq === 4 && bias[0].Lk === 77);
+    ok('attnBias boosts token 3 in every query',
+       bias[0].data[0 * 77 + 3] === 2 && bias[0].data[3 * 77 + 3] === 2);
+    ok('attnBias suppresses token 10', bias[1].data[5 * 77 + 10] === -1.5);
+    ok('attnBias leaves other columns zero',
+       bias[0].data[0] === 0 && bias[0].data[1 * 77 + 4] === 0);
+    var empty = DLab.Attention.buildAttnBias({}, shapes);
+    ok('attnBias empty map is all zero',
+       empty[0].data[3] === 0 && empty[1].data[10] === 0);
+    var oob = DLab.Attention.buildAttnBias({ 99: 3 }, shapes);
+    ok('attnBias ignores out-of-range token',
+       oob[0].data[3] === 0 && oob[1].data[40] === 0);
+  } catch (e) {
+    ok('attnBias test', false, e.message);
+  }
+
   console.log(fails === 0
     ? '\nALL SMOKE TESTS PASSED'
     : '\n' + fails + ' FAILURE(S)');

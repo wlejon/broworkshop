@@ -77,19 +77,40 @@
       <!-- ── right: cross-attention inspector ──────────────────────── -->
       <aside id="attn">
         <label class="hdr">Cross-attention</label>
-        <p class="muted small">Generate with capture on, then click a prompt
-           token to see which pixels it drives.</p>
-        <div id="tokens" class="tokens"></div>
-        <div class="field">
-          <label>Layer</label>
-          <select id="block"></select>
+        <p class="muted small">Click a prompt token to see where it attends —
+           or steer how strongly it pulls.</p>
+        <div id="tokens" class="tokens">
+          <span class="muted small">Load a model to tokenize the prompt.</span>
         </div>
-        <label class="check">
-          <input type="checkbox" id="overlay-on"> Show overlay
-        </label>
-        <div class="field">
-          <label>Opacity <span id="op-val" class="muted">70%</span></label>
-          <input id="opacity" type="range" min="0" max="100" value="70">
+
+        <div class="panel-block">
+          <label class="hdr">Steering</label>
+          <p id="steer-empty" class="muted small">Select a token, then bias its
+             attention. Applies on the next Generate.</p>
+          <div id="steer-ctl" class="hidden">
+            <div class="field">
+              <label>Influence on <span id="steer-tok" class="accent">—</span>
+                <span id="steer-val" class="muted">neutral</span></label>
+              <input id="steer-bias" type="range"
+                     min="-4" max="4" step="0.5" value="0">
+            </div>
+            <button id="steer-clear">Clear all steering</button>
+          </div>
+        </div>
+
+        <div class="panel-block">
+          <label class="hdr">Attention overlay</label>
+          <div class="field">
+            <label>Layer</label>
+            <select id="block" disabled></select>
+          </div>
+          <label class="check">
+            <input type="checkbox" id="overlay-on" disabled> Show overlay
+          </label>
+          <div class="field">
+            <label>Opacity <span id="op-val" class="muted">70%</span></label>
+            <input id="opacity" type="range" min="0" max="100" value="70" disabled>
+          </div>
         </div>
       </aside>
     </main>
