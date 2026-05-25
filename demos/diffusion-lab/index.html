@@ -58,6 +58,41 @@
           <input type="checkbox" id="trace" checked> Capture cross-attention
         </label>
 
+        <details id="init-section" class="accordion">
+          <summary>Init image (img2img / inpaint)</summary>
+          <div class="field acc-row">
+            <label>Image</label>
+            <div class="pick-row">
+              <button id="init-pick" type="button">Pick…</button>
+              <span id="init-path" class="muted small">none</span>
+              <button id="init-clear" type="button" class="icon"
+                      title="Clear init image">✕</button>
+            </div>
+          </div>
+          <div class="field">
+            <label>Strength <span id="strength-val" class="muted">0.80</span></label>
+            <input id="strength" type="range" min="0" max="1" step="0.05" value="0.8">
+          </div>
+          <label class="check">
+            <input id="vae-sample" type="checkbox"> Sample VAE encoding
+          </label>
+          <div class="field acc-row">
+            <label>Mask (white = inpaint)</label>
+            <div class="pick-row">
+              <button id="mask-pick" type="button">Pick…</button>
+              <span id="mask-path" class="muted small">none</span>
+              <button id="mask-clear" type="button" class="icon"
+                      title="Clear mask">✕</button>
+            </div>
+          </div>
+        </details>
+
+        <details id="cn-section" class="accordion">
+          <summary>ControlNets <span id="cn-stale" class="muted small hidden">· stale</span></summary>
+          <div id="cn-list"></div>
+          <button id="cn-add" type="button">Add ControlNet…</button>
+        </details>
+
         <label class="hdr">LoRA adapters</label>
         <div id="lora-list"></div>
         <button id="btn-lora-add">Add LoRA…</button>

@@ -41,7 +41,8 @@
     var running = false;
 
     var frames = [];         // { stepIndex, image } per denoising step
-    var finalTrace = null;   // trace of the finished image
+    var aggTrace = null;     // per-step cross-attention, meaned over the run
+    var traceSteps = 0;      // number of steps folded into aggTrace
     var traceShapes = null;  // [{Lq,Lk}] per layer — learned from step 0
     var latentW = 0, latentH = 0;
 
@@ -54,6 +55,18 @@
     var loras = [];          // [{path, scale}] LoRA adapters to merge at load
     var traceCapable = true; // false once an INT8-quantized model is loaded
 
+    // img2img / inpaint + ControlNet — see plan in dfa38f0 binding commit.
+    // The CN list is sticky on the pipeline (registered at load time); its
+    // length must match cfg.numControlNets at prime time. Per-row image /
+    // scale / window are runtime knobs (no reload needed). Init/mask images
+    // are runtime too.
+    var controlnets = [];    // [{path, image, scale, startStep, endStep}]
+    var cnLoadedCount = 0;   // controlnets registered on the live pipeline
+    var initImage = '';
+    var initStrength = 0.8;
+    var vaeSample = false;
+    var maskImage = '';
+
     // ── status helpers ─────────────────────────────────────────────────
     function status(msg, kind) {
       var el = $('status-text');
@@ -64,7 +77,7 @@
     var attention = DLab.Attention.create($('tokens'), {
       onSelect: function () {
         syncSteerPanel();
-        if (finalTrace) $('overlay-on').checked = true;
+        if (aggTrace) $('overlay-on').checked = true;
         refreshOverlay();
       },
     });
@@ -125,6 +138,23 @@
     if (prefs.loras && prefs.loras.length) {
       loras = prefs.loras.filter(function (l) { return l && l.path; });
     }
+    if (prefs.controlnets && prefs.controlnets.length) {
+      controlnets = prefs.controlnets
+        .filter(function (c) { return c && c.path; })
+        .map(function (c) {
+          return {
+            path: c.path,
+            image: c.image || '',
+            scale: isFinite(c.scale) ? c.scale : 1,
+            startStep: isFinite(c.startStep) ? c.startStep : 0,
+            endStep: isFinite(c.endStep) ? c.endStep : 1,
+          };
+        });
+    }
+    if (typeof prefs.initImage === 'string') initImage = prefs.initImage;
+    if (isFinite(prefs.initStrength)) initStrength = prefs.initStrength;
+    if (prefs.vaeSample) vaeSample = true;
+    if (typeof prefs.maskImage === 'string') maskImage = prefs.maskImage;
 
     // ── backend badge ──────────────────────────────────────────────────
     var badge = $('backend');
@@ -188,10 +218,14 @@
       var spec = detected.profile.buildSpec(
         detected, scheduler, $('int8').checked);
       spec.loras = loras;
+      spec.controlnets = controlnets.map(function (c) { return { path: c.path }; });
 
       setBusy(true);
-      status(loras.length
-        ? 'loading weights + ' + loras.length + ' LoRA — please wait…'
+      var extras = [];
+      if (loras.length) extras.push(loras.length + ' LoRA');
+      if (controlnets.length) extras.push(controlnets.length + ' ControlNet');
+      status(extras.length
+        ? 'loading weights + ' + extras.join(' + ') + ' — please wait…'
         : 'loading weights — this reads multi-GB files, please wait…', '');
       $('btn-load').disabled = true;
 
@@ -204,6 +238,8 @@
         }
         loaded = true;
         var cfg = info.config || {};
+        cnLoadedCount = cfg.numControlNets || 0;
+        clearCnStale();
         // Nudge the step count if it's clearly wrong for the sampler —
         // LCM resolves in a handful of steps, DDIM needs a couple dozen.
         var steps = parseFloat($('steps').value);
@@ -225,7 +261,8 @@
         var ready = 'ready — ' + (cfg.modelClass || 'model') + ' · ' +
           (cfg.scheduler || scheduler) + ' · ' + (info.backend || '?') +
           ' · ' + info.numXAttnBlocks + ' cross-attention blocks' +
-          (info.lorasApplied ? ' · ' + info.lorasApplied + ' LoRA' : '');
+          (info.lorasApplied ? ' · ' + info.lorasApplied + ' LoRA' : '') +
+          (cnLoadedCount ? ' · ' + cnLoadedCount + ' ControlNet' : '');
         if (!traceCapable) ready += ' — INT8: capture & steering off';
         status(ready, 'ok');
         $('btn-generate').disabled = false;
@@ -322,6 +359,231 @@
       markLoraStale();
     }
 
+    // ── ControlNets + init / mask images ───────────────────────────────
+    function baseName(p) {
+      var parts = String(p).split(/[\\/]/);
+      return parts[parts.length - 1] || p;
+    }
+
+    function persistInitMask() {
+      prefs.initImage = initImage;
+      prefs.initStrength = initStrength;
+      prefs.vaeSample = vaeSample;
+      prefs.maskImage = maskImage;
+      savePrefs(prefs);
+    }
+
+    function persistControlnets() {
+      prefs.controlnets = controlnets;
+      savePrefs(prefs);
+    }
+
+    // A ControlNet add/remove only takes effect at load time (add_controlnet
+    // ingests model weights, like applyLora). Per-row image/scale/window are
+    // runtime — they don't touch the pipeline until prime time.
+    function markCnStale() {
+      if (running) return;
+      $('cn-stale').classList.toggle('hidden',
+        controlnets.length === cnLoadedCount);
+      if (!loaded) return;
+      if (controlnets.length === cnLoadedCount) return;
+      loaded = false;
+      $('btn-generate').disabled = true;
+      $('btn-load').disabled = !detected;
+      status('ControlNet set changed — click Load weights to apply.', '');
+    }
+    function clearCnStale() { $('cn-stale').classList.add('hidden'); }
+
+    function refreshInitSummary() {
+      $('init-path').textContent = initImage ? baseName(initImage) : 'none';
+      $('init-path').title = initImage || '';
+      $('mask-path').textContent = maskImage ? baseName(maskImage) : 'none';
+      $('mask-path').title = maskImage || '';
+      $('strength-val').textContent = initStrength.toFixed(2);
+      $('strength').value = initStrength;
+      $('vae-sample').checked = vaeSample;
+    }
+
+    function renderCnList() {
+      var list = $('cn-list');
+      list.textContent = '';
+      if (!controlnets.length) {
+        var hint = document.createElement('p');
+        hint.className = 'muted small';
+        hint.textContent = 'None — add one to condition generation on a ' +
+          'pose / depth / canny image.';
+        list.appendChild(hint);
+        return;
+      }
+      controlnets.forEach(function (cn, i) {
+        var row = document.createElement('div');
+        row.className = 'cn-row';
+
+        var head = document.createElement('div');
+        head.className = 'cn-row-head';
+        var name = document.createElement('div');
+        name.className = 'cn-name';
+        name.textContent = baseName(cn.path);
+        name.title = cn.path;
+        var del = document.createElement('button');
+        del.className = 'cn-del icon';
+        del.type = 'button';
+        del.textContent = '✕';
+        del.title = 'Remove ControlNet';
+        del.addEventListener('click', function () {
+          if (running) return;
+          controlnets.splice(i, 1);
+          renderCnList();
+          persistControlnets();
+          markCnStale();
+        });
+        head.appendChild(name);
+        head.appendChild(del);
+        row.appendChild(head);
+
+        // Control image
+        var imgField = document.createElement('div');
+        imgField.className = 'cn-field';
+        var imgLabel = document.createElement('label');
+        imgLabel.textContent = 'Control image';
+        imgField.appendChild(imgLabel);
+        var pickRow = document.createElement('div');
+        pickRow.className = 'pick-row';
+        var pickBtn = document.createElement('button');
+        pickBtn.type = 'button';
+        pickBtn.textContent = 'Pick…';
+        var pickPath = document.createElement('span');
+        pickPath.className = 'cn-image-path muted small';
+        pickPath.textContent = cn.image ? baseName(cn.image) : 'none';
+        pickPath.title = cn.image || '';
+        pickBtn.addEventListener('click', function () {
+          if (running) return;
+          if (typeof showOpenFileDialog !== 'function') {
+            status('file dialog unavailable in this build', 'err');
+            return;
+          }
+          var files = showOpenFileDialog('Control image|png;jpg;jpeg');
+          if (!files || !files.length) return;
+          cn.image = files[0];
+          pickPath.textContent = baseName(cn.image);
+          pickPath.title = cn.image;
+          persistControlnets();
+        });
+        pickRow.appendChild(pickBtn);
+        pickRow.appendChild(pickPath);
+        imgField.appendChild(pickRow);
+        row.appendChild(imgField);
+
+        // Scale slider
+        var scaleField = document.createElement('div');
+        scaleField.className = 'cn-field';
+        var scaleLabel = document.createElement('label');
+        var scaleVal = document.createElement('span');
+        scaleVal.className = 'muted';
+        scaleVal.textContent = cn.scale.toFixed(2);
+        scaleLabel.textContent = 'Scale ';
+        scaleLabel.appendChild(scaleVal);
+        var scaleIn = document.createElement('input');
+        scaleIn.type = 'range';
+        scaleIn.min = '0';
+        scaleIn.max = '2';
+        scaleIn.step = '0.05';
+        scaleIn.value = cn.scale;
+        scaleIn.addEventListener('input', function () {
+          var v = parseFloat(scaleIn.value);
+          cn.scale = isFinite(v) ? v : 1;
+          scaleVal.textContent = cn.scale.toFixed(2);
+          persistControlnets();
+        });
+        scaleField.appendChild(scaleLabel);
+        scaleField.appendChild(scaleIn);
+        row.appendChild(scaleField);
+
+        // Step window
+        var winField = document.createElement('div');
+        winField.className = 'cn-field cn-window';
+        var winLabel = document.createElement('label');
+        winLabel.textContent = 'Window';
+        var startIn = document.createElement('input');
+        startIn.type = 'number';
+        startIn.min = '0'; startIn.max = '1'; startIn.step = '0.05';
+        startIn.value = cn.startStep;
+        var dash = document.createElement('span');
+        dash.textContent = '—';
+        var endIn = document.createElement('input');
+        endIn.type = 'number';
+        endIn.min = '0'; endIn.max = '1'; endIn.step = '0.05';
+        endIn.value = cn.endStep;
+        function commitWindow() {
+          var s = parseFloat(startIn.value);
+          var e = parseFloat(endIn.value);
+          cn.startStep = isFinite(s) ? Math.max(0, Math.min(1, s)) : 0;
+          cn.endStep   = isFinite(e) ? Math.max(0, Math.min(1, e)) : 1;
+          startIn.value = cn.startStep;
+          endIn.value = cn.endStep;
+          persistControlnets();
+        }
+        startIn.addEventListener('change', commitWindow);
+        endIn.addEventListener('change', commitWindow);
+        winField.appendChild(winLabel);
+        winField.appendChild(startIn);
+        winField.appendChild(dash);
+        winField.appendChild(endIn);
+        row.appendChild(winField);
+
+        list.appendChild(row);
+      });
+    }
+
+    function addControlNet() {
+      if (running) return;
+      if (typeof showOpenFileDialog !== 'function') {
+        status('file dialog unavailable in this build', 'err');
+        return;
+      }
+      var files = showOpenFileDialog('ControlNet weights|safetensors', true);
+      if (!files || !files.length) return;
+      for (var i = 0; i < files.length; i++) {
+        controlnets.push({
+          path: files[i], image: '', scale: 1, startStep: 0, endStep: 1,
+        });
+      }
+      renderCnList();
+      persistControlnets();
+      markCnStale();
+      $('cn-section').open = true;
+    }
+
+    function pickInitImage() {
+      if (running) return;
+      if (typeof showOpenFileDialog !== 'function') {
+        status('file dialog unavailable in this build', 'err');
+        return;
+      }
+      var files = showOpenFileDialog('Image|png;jpg;jpeg');
+      if (!files || !files.length) return;
+      initImage = files[0];
+      refreshInitSummary();
+      persistInitMask();
+    }
+
+    function pickMaskImage() {
+      if (running) return;
+      if (!initImage) {
+        status('mask requires an init image — pick one first', 'err');
+        return;
+      }
+      if (typeof showOpenFileDialog !== 'function') {
+        status('file dialog unavailable in this build', 'err');
+        return;
+      }
+      var files = showOpenFileDialog('Mask image|png;jpg;jpeg');
+      if (!files || !files.length) return;
+      maskImage = files[0];
+      refreshInitSummary();
+      persistInitMask();
+    }
+
     // ── generation ─────────────────────────────────────────────────────
     function readOpts() {
       function num(id, dflt) {
@@ -329,7 +591,7 @@
         return isFinite(v) ? v : dflt;
       }
       function mult8(v) { return Math.max(64, Math.round(v / 8) * 8); }
-      return {
+      var opts = {
         width: mult8(num('width', 512)),
         height: mult8(num('height', 512)),
         steps: Math.max(1, Math.round(num('steps', 6))),
@@ -337,12 +599,47 @@
         negativePrompt: $('neg').value || '',
         seed: Math.max(0, Math.round(num('seed', 0))),
       };
+      if (initImage) {
+        opts.initImagePath = initImage;
+        opts.strength = initStrength;
+        opts.vaeEncodeSample = vaeSample;
+        if (maskImage) opts.maskImagePath = maskImage;
+      }
+      // Only attach controls when the registered count matches the UI list —
+      // otherwise the lab is mid-reconfiguration and prime() would throw a
+      // count-mismatch from brodiffusion. markCnStale already surfaces this.
+      if (controlnets.length && controlnets.length === cnLoadedCount) {
+        opts.controls = controlnets.map(function (c) {
+          return {
+            imagePath: c.image,
+            scale: c.scale,
+            startStep: c.startStep,
+            endStep: c.endStep,
+          };
+        });
+      }
+      return opts;
     }
 
     function generate() {
       if (running || !loaded) return;
       var prompt = $('prompt').value.trim();
       if (!prompt) { status('enter a prompt first', 'err'); return; }
+
+      // Mask without an init image is unsupported by brodiffusion.
+      if (maskImage && !initImage) {
+        status('mask requires an init image', 'err'); return;
+      }
+      if (controlnets.length !== cnLoadedCount) {
+        status('ControlNet set changed — click Load weights to apply.', 'err');
+        return;
+      }
+      for (var ci = 0; ci < controlnets.length; ci++) {
+        if (!controlnets[ci].image) {
+          status('ControlNet ' + (ci + 1) + ' has no control image', 'err');
+          return;
+        }
+      }
 
       var opts = readOpts();
       var token = ++runToken;
@@ -380,7 +677,8 @@
         if (frames[fi].bitmap) frames[fi].bitmap.close();
       }
       frames = [];
-      finalTrace = null;
+      aggTrace = null;
+      traceSteps = 0;
       traceShapes = null;
       // Token chips stay (they track the prompt, not the run); only the
       // trace-derived overlay controls reset.
@@ -440,7 +738,7 @@
           viewport.setImage(msg.bitmap);
         }
         if (msg.trace) {
-          finalTrace = msg.trace;
+          accumulateTrace(msg.trace);
           if (!traceShapes) {
             traceShapes = msg.trace.map(function (t) {
               return { Lq: t.Lq, Lk: t.Lk };
@@ -464,6 +762,29 @@
       });
     }
 
+    // Fold one step's cross-attention trace into the running aggregate.
+    // brodiffusion traces a single step at a time; the overlay should show
+    // where a token shaped the image across the *whole* trajectory. Diffuse,
+    // composition-scale concepts (sky, ocean, ambient light) are placed in
+    // the first few steps, so a final-step-only trace misses them. Each
+    // step's per-layer maps are summed in; completeRun() divides by the step
+    // count to recover the mean.
+    function accumulateTrace(trace) {
+      if (!aggTrace) {
+        aggTrace = trace.map(function (t) {
+          return { Lq: t.Lq, Lk: t.Lk, data: Float32Array.from(t.data) };
+        });
+        traceSteps = 1;
+        return;
+      }
+      for (var bi = 0; bi < trace.length && bi < aggTrace.length; bi++) {
+        var src = trace[bi].data, dst = aggTrace[bi].data;
+        var n = Math.min(src.length, dst.length);
+        for (var di = 0; di < n; di++) dst[di] += src[di];
+      }
+      traceSteps++;
+    }
+
     function completeRun(numSteps) {
       finishRun();
       status('generated ' + numSteps + ' steps · seed ' +
@@ -474,6 +795,14 @@
         $('scrub').disabled = false;
         $('scrub').max = frames.length - 1;
         $('scrub').value = frames.length - 1;
+      }
+      // Recover the per-step mean from the summed trace, so aggTrace holds a
+      // genuine averaged attention map rather than a step-count-scaled sum.
+      if (aggTrace && traceSteps > 1) {
+        for (var bi = 0; bi < aggTrace.length; bi++) {
+          var d = aggTrace[bi].data;
+          for (var di = 0; di < d.length; di++) d[di] /= traceSteps;
+        }
       }
       // build the attention inspector
       buildAttention();
@@ -501,8 +830,8 @@
     function buildAttention() {
       var blockSel = $('block');
       blockSel.textContent = '';
-      if (!finalTrace) return;
-      var opts = DLab.Attention.blockOptions(finalTrace, latentW, latentH);
+      if (!aggTrace) return;
+      var opts = DLab.Attention.blockOptions(aggTrace, latentW, latentH);
       for (var i = 0; i < opts.length; i++) {
         var o = document.createElement('option');
         o.value = String(opts[i].value);
@@ -518,14 +847,20 @@
       var onLastFrame =
         $('scrub').disabled || +$('scrub').value === frames.length - 1;
       var idx = attention.activeIndex();
-      if (!$('overlay-on').checked || !finalTrace || idx < 0 || !onLastFrame) {
+      if (!$('overlay-on').checked || !aggTrace || idx < 0 || !onLastFrame) {
         viewport.setOverlay(null);
         return;
       }
       var sel = $('block').value;
       var blockSel = sel === 'avg' ? 'avg' : (parseInt(sel, 10) || 0);
+      // Content-token columns drive blockColumn's contrastive baseline — the
+      // real prompt words, excluding BOS/EOS/padding. currentEnc tracks the
+      // prompt that produced the live trace (a prompt edit clears the trace).
+      var contentCols = currentEnc
+        ? currentEnc.tokens.map(function (t) { return t.contextIndex; })
+        : null;
       var grid = DLab.Attention.computeHeatmap(
-        finalTrace, idx, blockSel, latentW, latentH);
+        aggTrace, idx, blockSel, latentW, latentH, contentCols);
       viewport.setOverlay(grid, +$('opacity').value / 100);
     }
 
@@ -537,6 +872,13 @@
       $('btn-open').disabled = on;
       $('btn-load').disabled = on || !detected;
       $('btn-lora-add').disabled = on;
+      $('cn-add').disabled = on;
+      $('init-pick').disabled = on;
+      $('init-clear').disabled = on;
+      $('mask-pick').disabled = on;
+      $('mask-clear').disabled = on;
+      $('strength').disabled = on;
+      $('vae-sample').disabled = on;
       $('prompt').disabled = on;
       $('neg').disabled = on;
       $('view-hint').style.display =
@@ -553,6 +895,34 @@
     });
     $('btn-lora-add').addEventListener('click', addLora);
 
+    // ── ControlNet + init/mask wiring ──────────────────────────────────
+    $('cn-add').addEventListener('click', addControlNet);
+    $('init-pick').addEventListener('click', pickInitImage);
+    $('init-clear').addEventListener('click', function () {
+      if (running) return;
+      initImage = '';
+      maskImage = '';        // mask without init is invalid; clear together
+      refreshInitSummary();
+      persistInitMask();
+    });
+    $('mask-pick').addEventListener('click', pickMaskImage);
+    $('mask-clear').addEventListener('click', function () {
+      if (running) return;
+      maskImage = '';
+      refreshInitSummary();
+      persistInitMask();
+    });
+    $('strength').addEventListener('input', function () {
+      initStrength = parseFloat($('strength').value);
+      if (!isFinite(initStrength)) initStrength = 0.8;
+      $('strength-val').textContent = initStrength.toFixed(2);
+      persistInitMask();
+    });
+    $('vae-sample').addEventListener('change', function () {
+      vaeSample = $('vae-sample').checked;
+      persistInitMask();
+    });
+
     // Live re-tokenization — debounced so chips track the prompt as you type.
     // A prompt edit invalidates the steering map (token indices shift) and
     // any captured trace (its K columns no longer line up).
@@ -562,7 +932,8 @@
         promptTimer = 0;
         biasMap = {};
         attention.setActive(-1);
-        finalTrace = null;
+        aggTrace = null;
+        traceSteps = 0;
         $('block').textContent = '';
         $('block').disabled = true;
         $('overlay-on').disabled = true;
@@ -611,6 +982,12 @@
     // ── initial state ──────────────────────────────────────────────────
     $('view-hint').style.display = 'block';
     renderLoraList();
+    renderCnList();
+    refreshInitSummary();
+    // Auto-expand sections that already have content, so a returning user
+    // sees their previous setup at a glance.
+    if (initImage || maskImage) $('init-section').open = true;
+    if (controlnets.length) $('cn-section').open = true;
     if (prefs.modelDir) {
       status('last model: ' + prefs.modelDir +
         ' — click Open model to re-select, or Load if unchanged.', '');
@@ -630,9 +1007,49 @@
         persistLoras();
         markLoraStale();
       },
+      // Headless-equivalent of the file-picker wiring — drive the new options
+      // by path without a dialog. Returns nothing; readOpts() reflects state.
+      setInitImage: function (path) {
+        initImage = path || '';
+        if (!initImage) maskImage = '';
+        refreshInitSummary();
+        persistInitMask();
+      },
+      setMaskImage: function (path) {
+        maskImage = path || '';
+        refreshInitSummary();
+        persistInitMask();
+      },
+      setStrength: function (v) {
+        initStrength = isFinite(v) ? v : 0.8;
+        refreshInitSummary();
+        persistInitMask();
+      },
+      setVaeSample: function (on) {
+        vaeSample = !!on;
+        refreshInitSummary();
+        persistInitMask();
+      },
+      addControlNetPath: function (path, opts) {
+        opts = opts || {};
+        controlnets.push({
+          path: path,
+          image: opts.image || '',
+          scale: isFinite(opts.scale) ? opts.scale : 1,
+          startStep: isFinite(opts.startStep) ? opts.startStep : 0,
+          endStep: isFinite(opts.endStep) ? opts.endStep : 1,
+        });
+        renderCnList();
+        persistControlnets();
+        markCnStale();
+      },
+      readOpts: readOpts,
       state: function () {
         return { loaded: loaded, running: running, frames: frames.length,
-                 hasTrace: !!finalTrace, loras: loras.length };
+                 hasTrace: !!aggTrace, loras: loras.length,
+                 controlnets: controlnets.length,
+                 cnLoaded: cnLoadedCount,
+                 initImage: initImage, maskImage: maskImage };
       },
     };
   }

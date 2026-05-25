@@ -78,12 +78,24 @@
         caps: {
           crossAttention: true,      // SD1.5 U-Net has Transformer2D blocks
           negativePrompt: true,
+          controlNets:    true,      // residuals sum across N registered nets
+          img2img:        true,
+          inpaint:        true,
         },
       };
     },
 
     // Build the worker-side spec. `scheduler` is 'ddim' or 'lcm'; `quantize`
     // requests INT8 U-Net weights (GPU only — ignored on the CPU backend).
+    //
+    // The sampler and the U-Net architecture are independent. The LCM
+    // scheduler is valid on a vanilla SD1.5 checkpoint — that is exactly the
+    // LCM-LoRA workflow (a consistency LoRA over a vanilla U-Net). So
+    // `lcmDistilled` (which would add the cond_proj guidance path) must NOT be
+    // inferred from the scheduler. It is a property of the checkpoint:
+    // brodiffusion's load_weights() auto-detects time_embedding.cond_proj.weight
+    // and configures the U-Net accordingly, so we leave it false here and let
+    // the checkpoint decide.
     buildSpec: function (resolved, scheduler, quantize) {
       var sched = scheduler === 'lcm' ? 'lcm' : 'ddim';
       return {
@@ -92,7 +104,7 @@
           vocabPath: resolved.vocabPath,
           mergesPath: resolved.mergesPath,
           scheduler: sched,
-          lcmDistilled: sched === 'lcm',
+          lcmDistilled: false,
           quantizeWeights: !!quantize,
         },
         weights: resolved.weights,

@@ -181,6 +181,105 @@ button.primary:hover:not(:disabled) { background: #3a61ee; }
 .lora-del { flex: 0 0 auto; padding: 5px 8px; }
 #btn-lora-add { width: 100%; }
 
+/* ── accordion sections (Init image, ControlNets) ─────────────────── */
+
+details.accordion {
+  margin-top: 14px;
+  border-top: 1px solid #232838;
+  padding-top: 10px;
+}
+details.accordion > summary {
+  cursor: pointer;
+  list-style: none;
+  font-size: 11px;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  color: #7d8798;
+  user-select: none;
+  padding: 2px 0;
+}
+details.accordion > summary::-webkit-details-marker { display: none; }
+details.accordion > summary::before {
+  content: '▸';
+  display: inline-block;
+  width: 12px;
+  color: #5a6473;
+}
+details.accordion[open] > summary::before { content: '▾'; }
+details.accordion > summary:hover { color: #b6c0d0; }
+details.accordion[open] > summary { color: #b6c0d0; margin-bottom: 6px; }
+
+.acc-row .pick-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pick-row button:not(.icon) { flex-shrink: 0; }
+.pick-row .icon { padding: 4px 7px; flex-shrink: 0; }
+#init-path, #mask-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+#strength, #opacity { width: 100%; margin-top: 2px; }
+#cn-add { width: 100%; margin-top: 6px; }
+
+/* ── ControlNet rows ─────────────────────────────────────────────── */
+
+.cn-row {
+  margin-bottom: 10px;
+  padding: 7px 8px;
+  border: 1px solid #2c3344;
+  border-radius: 4px;
+  background: #161a23;
+}
+.cn-row-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.cn-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  color: #b6c0d0;
+}
+.cn-del { flex: 0 0 auto; padding: 4px 7px; }
+
+.cn-field { margin-top: 6px; }
+.cn-field label {
+  display: block;
+  margin-bottom: 3px;
+  font-size: 11px;
+  color: #7d8798;
+}
+.cn-field .pick-row { display: flex; align-items: center; gap: 6px; }
+.cn-image-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.cn-field.cn-window { display: flex; align-items: flex-end; gap: 6px; }
+.cn-field.cn-window > label {
+  flex: 0 0 60px;
+  margin-bottom: 0;
+  align-self: center;
+}
+.cn-field.cn-window input { flex: 1; min-width: 0; }
+.cn-field.cn-window span { color: #5a6473; }
+
+#cn-stale { margin-left: 8px; color: #e0b06a; font-style: italic; }
+
 /* The model bar is a single non-wrapping row — its select must not inherit
    the full-width sizing the form controls in the side panels use. */
 #modelbar button,

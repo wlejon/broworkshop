@@ -50,6 +50,13 @@ function handleLoad(spec) {
     for (var i = 0; i < loras.length; i++) {
       pipeline.applyLora(loras[i].path, loras[i].scale);
     }
+
+    // Register ControlNets in declared order — index matches the position the
+    // main thread will use in GenerateOptions.controls at prime time.
+    var cns = spec.controlnets || [];
+    for (var ci = 0; ci < cns.length; ci++) {
+      pipeline.addControlNet(cns[ci].path);
+    }
     state = null;
 
     var tensor = (typeof bro !== 'undefined' && bro.tensor) ? bro.tensor : null;

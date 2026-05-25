@@ -62,6 +62,13 @@
     ok('spec quantize flag honoured',
        qspec.pipeline.quantizeWeights === true &&
        qspec.pipeline.scheduler === 'lcm');
+    // The sampler and the U-Net architecture are independent: picking the LCM
+    // scheduler must NOT flip lcmDistilled (that would force the cond_proj
+    // path onto a vanilla checkpoint). LCM scheduler on vanilla SD1.5 is the
+    // LCM-LoRA workflow; brodiffusion's load_weights auto-detects cond_proj.
+    ok('lcmDistilled decoupled from scheduler',
+       qspec.pipeline.lcmDistilled === false &&
+       spec.pipeline.lcmDistilled === false);
   } catch (e) {
     ok('profile detect', false, e.message);
   }
@@ -76,6 +83,23 @@
        hm ? hm.values[5] : 'null');
     var opts = DLab.Attention.blockOptions(trace, 16, 16);
     ok('block options', opts.length === 2 && opts[0].value === 'avg');
+
+    // contrastive normalisation: a "work" signal shared across content tokens
+    // is cancelled, leaving the token-specific bump. tokens 3 and 5 both spike
+    // on queries 0,1 (the detailed region) — the token-agnostic signal; token
+    // 3 alone also rises on query 2.
+    var ct = [{ Lq: 4, Lk: 77, data: new Float32Array(4 * 77) }];
+    function setw(q, kk, v) { ct[0].data[q * 77 + kk] = v; }
+    setw(0, 3, 0.8); setw(1, 3, 0.8); setw(2, 3, 0.5); setw(3, 3, 0.1);
+    setw(0, 5, 0.8); setw(1, 5, 0.8); setw(2, 5, 0.1); setw(3, 5, 0.1);
+    var raw = DLab.Attention.computeHeatmap(ct, 3, 0, 2, 2);
+    ok('raw column peaks on the shared work signal',
+       raw && raw.values[0] === 1 && raw.values[2] < 1,
+       raw ? raw.values[2] : 'null');
+    var con = DLab.Attention.computeHeatmap(ct, 3, 0, 2, 2, [3, 5]);
+    ok('contrastive column peaks on the token-specific query',
+       con && con.values[2] === 1 && con.values[0] === 0,
+       con ? con.values[0] + '/' + con.values[2] : 'null');
   } catch (e) {
     ok('heatmap test', false, e.message);
   }
@@ -99,6 +123,61 @@
        oob[0].data[3] === 0 && oob[1].data[40] === 0);
   } catch (e) {
     ok('attnBias test', false, e.message);
+  }
+
+  // ── img2img + ControlNet opts plumbing ────────────────────────────────
+  try {
+    var app = window.DLabApp;
+    ok('app exposes readOpts', typeof app.readOpts === 'function');
+    ok('app exposes setInitImage', typeof app.setInitImage === 'function');
+    ok('app exposes addControlNetPath',
+       typeof app.addControlNetPath === 'function');
+
+    // Baseline — clean opts have no init/mask/controls fields.
+    app.setInitImage('');
+    var baseOpts = app.readOpts();
+    ok('baseline opts have no initImagePath',
+       baseOpts.initImagePath === undefined);
+    ok('baseline opts have no controls', baseOpts.controls === undefined);
+
+    // img2img path
+    app.setInitImage('/tmp/seed.png');
+    app.setStrength(0.55);
+    app.setVaeSample(true);
+    var i2i = app.readOpts();
+    ok('initImagePath set', i2i.initImagePath === '/tmp/seed.png');
+    ok('strength forwarded', Math.abs(i2i.strength - 0.55) < 1e-6,
+       i2i.strength);
+    ok('vaeEncodeSample forwarded', i2i.vaeEncodeSample === true);
+    ok('mask absent when not picked', i2i.maskImagePath === undefined);
+
+    // Inpaint path
+    app.setMaskImage('/tmp/mask.png');
+    var ip = app.readOpts();
+    ok('maskImagePath set when init present',
+       ip.maskImagePath === '/tmp/mask.png');
+
+    // Clearing init must also clear mask (the binding rejects mask-only).
+    app.setInitImage('');
+    var cleared = app.readOpts();
+    ok('clearing init drops mask too',
+       cleared.initImagePath === undefined &&
+       cleared.maskImagePath === undefined);
+
+    // ControlNets — opts.controls only attached once registered count
+    // matches the UI list, so a fresh add (no Load) suppresses it.
+    app.addControlNetPath('/tmp/cn1.safetensors',
+      { image: '/tmp/pose.png', scale: 0.8, startStep: 0, endStep: 0.5 });
+    app.addControlNetPath('/tmp/cn2.safetensors',
+      { image: '/tmp/depth.png', scale: 1.2, startStep: 0.5, endStep: 1 });
+    var staleOpts = app.readOpts();
+    ok('controls suppressed while stale (not loaded)',
+       staleOpts.controls === undefined);
+    var st = app.state();
+    ok('controlnets tracked in state',
+       st.controlnets === 2 && st.cnLoaded === 0);
+  } catch (e) {
+    ok('opts plumbing test', false, e.message);
   }
 
   console.log(fails === 0
