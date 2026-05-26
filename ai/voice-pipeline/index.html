@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Voice Pipeline</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <h1>Voice Pipeline</h1>
+        <div id="status" class="status loading">starting…</div>
+    </header>
+    <main>
+        <div id="transcript" class="transcript">
+            <div class="hint">Hold the button (or press &amp; hold Space) and speak. Release to send.</div>
+        </div>
+        <div class="meter-wrap">
+            <div id="meter" class="meter"></div>
+        </div>
+        <button id="talk" class="talk" disabled>loading models…</button>
+    </main>
+    <script src="main.js"></script>
+</body>
+</html>
