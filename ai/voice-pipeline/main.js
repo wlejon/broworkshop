@@ -4,6 +4,12 @@
 //   ../brosoundml/weights/whisper
 //   ../brolm/weights/Qwen3-8B-GGUF/Qwen3-8B-Q8_0.gguf
 //   ../brosoundml/weights/kokoro
+//   ../brosoundml/weights/wake/computer.bw
+//
+// Activation modes:
+//   - Wake word: say "computer". Detected by bro.wake (streaming BC-ResNet).
+//     Capture auto-stops on end-of-utterance (rolling-peak VAD).
+//   - Hold-to-talk: button or Space key. Manual override.
 //
 // Mic capture path: navigator.mediaDevices.getUserMedia -> AudioContext ->
 // MediaStreamAudioSourceNode -> AnalyserNode. The engine exposes only the
@@ -54,6 +60,32 @@ let prevWindow = null;
 let captured = [];               // array of Float32Array chunks at engine rate
 let engineRate = 44100;
 
+// Wake / VAD state.
+let wakeReady = false;
+let wakeActive = false;          // listen() has been called and not stopped
+let triggeredByWake = false;     // current recording was started by onWake
+let recStartMs = 0;
+let lastLoudMs = 0;              // last time peak was above SPEECH_THRESH
+let speechMs = 0;                // total ms with peak above SPEECH_THRESH
+let toneClipId = -1;
+let wakeMeterTimer = 0;
+
+// EoU / VAD params.
+const SPEECH_THRESH      = 0.01;   // peak amplitude threshold for "speech present"
+const EOU_SILENCE_MS     = 700;    // trailing silence to auto-stop
+const MIN_SPEECH_MS      = 300;    // require this much speech before EoU can fire
+const NO_SPEECH_ABORT_MS = 1500;   // abort if no speech in this window
+const MAX_CAPTURE_MS     = 10000;  // hard cap
+
+// Cue tone params.
+const CUE_FREQ_HZ  = 880;
+const CUE_DUR_MS   = 80;
+const CUE_ATTACK_MS = 5;
+const CUE_RELEASE_MS = 20;
+
+// Wake-tail suspension (extra time after TTS finishes).
+const WAKE_TAIL_MS = 250;
+
 // ─── UI helpers ────────────────────────────────────────────────────────────
 function setStatus(kind, msg) {
     $status.className = 'status ' + kind;
@@ -70,6 +102,56 @@ function appendTurn(who, text) {
     row.appendChild(w); row.appendChild(t);
     $transcript.appendChild(row);
     $transcript.scrollTop = $transcript.scrollHeight;
+}
+
+// Centralized wake suspend/resume. Safe to call when wake never initialized.
+function wakeSuspend() {
+    if (!wakeActive) return;
+    try { if (!bro.wake.isSuspended()) bro.wake.suspend(); } catch (_) {}
+}
+function wakeResume() {
+    if (!wakeActive) return;
+    try { if (bro.wake.isSuspended()) bro.wake.resume(); } catch (_) {}
+}
+
+// Idle UI = wake listening + score meter (if available).
+function goIdle() {
+    if (wakeActive) {
+        setStatus('idle', 'listening for "computer"…');
+    } else {
+        setStatus('idle', 'idle');
+    }
+    $meter.style.width = '0%';
+    wakeResume();
+}
+
+// ─── cue tone ─────────────────────────────────────────────────────────────
+function buildCueTone(sampleRate) {
+    const total = Math.floor(sampleRate * CUE_DUR_MS / 1000);
+    const attack = Math.floor(sampleRate * CUE_ATTACK_MS / 1000);
+    const release = Math.floor(sampleRate * CUE_RELEASE_MS / 1000);
+    const buf = new Float32Array(total);
+    const w = 2 * Math.PI * CUE_FREQ_HZ / sampleRate;
+    for (let i = 0; i < total; i++) {
+        let env;
+        if (i < attack) {
+            // Cosine attack: 0 -> 1
+            env = 0.5 - 0.5 * Math.cos(Math.PI * i / attack);
+        } else if (i > total - release) {
+            // Cosine release: 1 -> 0
+            const r = (i - (total - release)) / release;
+            env = 0.5 + 0.5 * Math.cos(Math.PI * r);
+        } else {
+            env = 1.0;
+        }
+        buf[i] = env * Math.sin(w * i);
+    }
+    return buf;
+}
+
+function playCueTone() {
+    if (toneClipId < 0 || !audioCtx) return;
+    try { audioCtx.playClip(toneClipId, 0.5, false); } catch (_) {}
 }
 
 // ─── model loading ────────────────────────────────────────────────────────
@@ -113,9 +195,46 @@ async function loadAll() {
     audioCtx = new AudioContext();
     engineRate = audioCtx.sampleRate || 44100;
 
-    setStatus('idle', 'idle');
+    // Build + cache cue tone once.
+    try {
+        const samples = buildCueTone(engineRate);
+        toneClipId = audioCtx.createClip(samples, 1);
+    } catch (e) {
+        console.warn('cue tone init failed:', e.message);
+    }
+
     $talk.disabled = false;
-    $talk.textContent = 'hold to talk';
+    $talk.textContent = 'say "computer" or hold to talk';
+    $talk.title = 'Say "computer" to activate, or hold (Space) to talk manually.';
+
+    // Start wake detector. Failure is non-fatal — manual mode still works.
+    try {
+        bro.wake.listen({
+            weights: '../brosoundml/weights/wake/computer.bw',
+            threshold: 0.85,
+            onFire: onWake,
+        });
+        wakeActive = true;
+        wakeReady = true;
+        startWakeMeter();
+        setStatus('idle', 'listening for "computer"…');
+    } catch (e) {
+        console.warn('wake init failed:', e.message);
+        setStatus('idle', 'idle (wake unavailable — hold to talk)');
+    }
+}
+
+// ─── wake-score meter (when idle) ─────────────────────────────────────────
+function startWakeMeter() {
+    if (wakeMeterTimer) return;
+    wakeMeterTimer = setInterval(() => {
+        if (recording || !wakeActive) return;
+        let score = 0;
+        try { score = bro.wake.lastScore() || 0; } catch (_) {}
+        // Show a dim bar that brightens as score approaches threshold.
+        $meter.style.width = Math.min(100, score * 100) + '%';
+        $meter.style.opacity = (0.25 + 0.75 * Math.min(1, score / 0.85)).toFixed(2);
+    }, 100);
 }
 
 // ─── mic capture ──────────────────────────────────────────────────────────
@@ -135,8 +254,6 @@ async function ensureMic() {
 function findOverlap(prev, next) {
     if (!prev || prev.length < NEEDLE) return -1;
     const start = prev.length - NEEDLE;
-    // Scan from beginning of next; require an exact float match (engine
-    // doesn't mutate ring-buffer samples between reads).
     outer:
     for (let i = 0; i + NEEDLE <= next.length; i++) {
         for (let j = 0; j < NEEDLE; j++) {
@@ -149,7 +266,6 @@ function findOverlap(prev, next) {
 
 function pollMic() {
     analyser.getFloatTimeDomainData(analyserBuf);
-    // Copy — analyserBuf is reused next tick.
     const snap = new Float32Array(analyserBuf);
 
     // Update meter (peak amplitude).
@@ -158,6 +274,7 @@ function pollMic() {
         const a = Math.abs(snap[i]);
         if (a > peak) peak = a;
     }
+    $meter.style.opacity = '1';
     $meter.style.width = Math.min(100, peak * 200) + '%';
 
     if (!prevWindow) {
@@ -167,23 +284,70 @@ function pollMic() {
         if (newStart >= 0 && newStart < snap.length) {
             captured.push(snap.subarray(newStart));
         } else if (newStart < 0) {
-            // No overlap found — likely dropped frames. Append whole window.
             captured.push(snap);
         }
-        // newStart === snap.length means no new audio this tick.
     }
     prevWindow = snap;
+
+    // VAD bookkeeping (only meaningful when wake-triggered, but harmless otherwise).
+    const now = Date.now();
+    if (peak >= SPEECH_THRESH) {
+        lastLoudMs = now;
+        speechMs += POLL_INTERVAL_MS;
+    }
+
+    if (triggeredByWake) {
+        const elapsed = now - recStartMs;
+        // Hard cap.
+        if (elapsed >= MAX_CAPTURE_MS) {
+            stopRecordingAndRun();
+            return;
+        }
+        // No speech at all within the abort window -> bail cleanly.
+        if (speechMs === 0 && elapsed >= NO_SPEECH_ABORT_MS) {
+            abortRecording('no speech — idle');
+            return;
+        }
+        // EoU: enough speech captured AND trailing silence long enough.
+        if (speechMs >= MIN_SPEECH_MS && lastLoudMs > 0 &&
+            (now - lastLoudMs) >= EOU_SILENCE_MS) {
+            stopRecordingAndRun();
+            return;
+        }
+    }
 }
 
-function startRecording() {
+function startRecording(fromWake) {
     if (recording) return;
     captured = [];
     prevWindow = null;
     recording = true;
-    setStatus('listening', 'listening…');
+    triggeredByWake = !!fromWake;
+    recStartMs = Date.now();
+    lastLoudMs = 0;
+    speechMs = 0;
+
+    // Suspend wake while we record either way (predictable behavior).
+    wakeSuspend();
+
+    setStatus('listening', fromWake ? 'recording…' : 'listening…');
     $talk.classList.add('recording');
-    $talk.textContent = 'release to send';
+    $talk.textContent = fromWake ? 'recording (wake)…' : 'release to send';
     pollTimer = setInterval(pollMic, POLL_INTERVAL_MS);
+}
+
+function abortRecording(msg) {
+    if (!recording) return;
+    recording = false;
+    triggeredByWake = false;
+    clearInterval(pollTimer);
+    pollTimer = 0;
+    $talk.classList.remove('recording');
+    $talk.textContent = 'say "computer" or hold to talk';
+    captured = [];
+    setStatus('idle', msg || 'idle');
+    // Brief delay before resuming wake to let mic settle.
+    setTimeout(() => goIdle(), 50);
 }
 
 function concatChunks(chunks) {
@@ -214,105 +378,144 @@ function resampleLinear(samples, fromRate, toRate) {
 async function stopRecordingAndRun() {
     if (!recording) return;
     recording = false;
+    const wasWakeTriggered = triggeredByWake;
+    triggeredByWake = false;
     clearInterval(pollTimer);
     pollTimer = 0;
     $talk.classList.remove('recording');
-    $talk.textContent = 'hold to talk';
+    $talk.textContent = 'say "computer" or hold to talk';
     $meter.style.width = '0%';
 
-    const raw = concatChunks(captured);
-    captured = [];
-    if (raw.length < engineRate * 0.25) {
-        setStatus('idle', 'too short — idle');
-        return;
-    }
+    // Make sure wake stays suspended through the heavy pipeline; we only
+    // resume after TTS playback + tail.
+    wakeSuspend();
 
-    // Resample to 16 kHz for Whisper.
-    const samples16k = resampleLinear(raw, engineRate, 16000);
+    let resumed = false;
+    const resumeOnce = (delay) => {
+        if (resumed) return;
+        resumed = true;
+        setTimeout(() => goIdle(), delay || 0);
+    };
 
-    // ─── STT ──────────────────────────────────────────────────────────
-    setStatus('transcribing', 'transcribing…');
-    await new Promise(r => setTimeout(r, 0));   // let UI paint
-    let userText = '';
     try {
-        const ids = whisper.transcribe(
-            { samples: samples16k, sampleRate: 16000 },
-            sttPrompt,
-            { maxNewTokens: 128 }
-        );
-        userText = sttTok.decode(ids, true).trim();
-    } catch (e) {
-        setStatus('error', 'stt: ' + e.message);
-        return;
-    }
-    if (!userText) {
-        setStatus('idle', 'no speech detected — idle');
-        return;
-    }
-    appendTurn('you', userText);
-    history.push({ role: 'user', content: userText });
-
-    // ─── LLM ──────────────────────────────────────────────────────────
-    setStatus('thinking', 'thinking…');
-    await new Promise(r => setTimeout(r, 0));
-    let reply = '';
-    try {
-        const prompt = lmTok.applyChatTemplate(history, true);
-        const promptIds = lmTok.encode(prompt);
-        lm.allocateCache(promptIds.length + 96);
-        const newIds = lm.generate(promptIds, {
-            maxNewTokens: 80,
-            eosId: lmTok.imEndId,
-            sampling: { temperature: 0.7, topK: 40, topP: 0.95, seed: Date.now() & 0x7fffffff },
-        });
-        reply = lmTok.decode(newIds);
-        // Strip Qwen3 thinking blocks and any stray special tokens.
-        reply = reply.replace(/<think>[\s\S]*?<\/think>/g, '')
-                     .replace(/<think>[\s\S]*$/g, '')
-                     .replace(/<\|.*?\|>/g, '')
-                     .trim();
-    } catch (e) {
-        setStatus('error', 'llm: ' + e.message);
-        return;
-    }
-    if (!reply) {
-        setStatus('idle', 'no reply — idle');
-        return;
-    }
-    appendTurn('bro', reply);
-    history.push({ role: 'assistant', content: reply });
-
-    // ─── TTS ──────────────────────────────────────────────────────────
-    setStatus('speaking', 'speaking…');
-    await new Promise(r => setTimeout(r, 0));
-    try {
-        const phonemeIds = bro.tts.phonemize(reply);
-        if (!phonemeIds || phonemeIds.length === 0) {
-            setStatus('idle', 'idle');
+        const raw = concatChunks(captured);
+        captured = [];
+        if (raw.length < engineRate * 0.25) {
+            setStatus('idle', 'too short — idle');
+            resumeOnce(0);
             return;
         }
-        const out = kokoro.synthesize(phonemeIds, voice, { speed: 1.0 });
-        // Resample 24 kHz -> engine rate so createClip plays at correct pitch.
-        const playSamples = resampleLinear(out.samples, out.sampleRate, engineRate);
-        const clipId = audioCtx.createClip(playSamples, 1);
-        audioCtx.playClip(clipId, 1.0, false);
-        // Best-effort: leave clip resident; engine cleans up on shutdown.
-        const durMs = (playSamples.length / engineRate) * 1000;
-        setTimeout(() => setStatus('idle', 'idle'), durMs + 100);
+
+        const samples16k = resampleLinear(raw, engineRate, 16000);
+
+        // ─── STT ──────────────────────────────────────────────────────────
+        setStatus('transcribing', 'transcribing…');
+        await new Promise(r => setTimeout(r, 0));
+        let userText = '';
+        try {
+            const ids = whisper.transcribe(
+                { samples: samples16k, sampleRate: 16000 },
+                sttPrompt,
+                { maxNewTokens: 128 }
+            );
+            userText = sttTok.decode(ids, true).trim();
+        } catch (e) {
+            setStatus('error', 'stt: ' + e.message);
+            resumeOnce(0);
+            return;
+        }
+        if (!userText) {
+            setStatus('idle', 'no speech detected — idle');
+            resumeOnce(0);
+            return;
+        }
+        appendTurn('you', userText);
+        history.push({ role: 'user', content: userText });
+
+        // ─── LLM ──────────────────────────────────────────────────────────
+        setStatus('thinking', 'thinking…');
+        await new Promise(r => setTimeout(r, 0));
+        let reply = '';
+        try {
+            const prompt = lmTok.applyChatTemplate(history, true);
+            const promptIds = lmTok.encode(prompt);
+            lm.allocateCache(promptIds.length + 96);
+            const newIds = lm.generate(promptIds, {
+                maxNewTokens: 80,
+                eosId: lmTok.imEndId,
+                sampling: { temperature: 0.7, topK: 40, topP: 0.95, seed: Date.now() & 0x7fffffff },
+            });
+            reply = lmTok.decode(newIds);
+            reply = reply.replace(/<think>[\s\S]*?<\/think>/g, '')
+                         .replace(/<think>[\s\S]*$/g, '')
+                         .replace(/<\|.*?\|>/g, '')
+                         .trim();
+        } catch (e) {
+            setStatus('error', 'llm: ' + e.message);
+            resumeOnce(0);
+            return;
+        }
+        if (!reply) {
+            setStatus('idle', 'no reply — idle');
+            resumeOnce(0);
+            return;
+        }
+        appendTurn('bro', reply);
+        history.push({ role: 'assistant', content: reply });
+
+        // ─── TTS ──────────────────────────────────────────────────────────
+        setStatus('speaking', 'speaking…');
+        await new Promise(r => setTimeout(r, 0));
+        try {
+            const phonemeIds = bro.tts.phonemize(reply);
+            if (!phonemeIds || phonemeIds.length === 0) {
+                setStatus('idle', 'idle');
+                resumeOnce(0);
+                return;
+            }
+            const out = kokoro.synthesize(phonemeIds, voice, { speed: 1.0 });
+            const playSamples = resampleLinear(out.samples, out.sampleRate, engineRate);
+            const clipId = audioCtx.createClip(playSamples, 1);
+            audioCtx.playClip(clipId, 1.0, false);
+            const durMs = (playSamples.length / engineRate) * 1000;
+            // Resume wake AFTER playback + tail (covers speaker→mic bleed).
+            resumeOnce(durMs + WAKE_TAIL_MS);
+        } catch (e) {
+            setStatus('error', 'tts: ' + e.message);
+            resumeOnce(0);
+            return;
+        }
     } catch (e) {
-        setStatus('error', 'tts: ' + e.message);
-        return;
+        setStatus('error', 'pipeline: ' + e.message);
+        resumeOnce(0);
+    } finally {
+        // Belt-and-suspenders: if nothing scheduled a resume, do it now.
+        if (!resumed) resumeOnce(0);
     }
 }
 
-// ─── input wiring ─────────────────────────────────────────────────────────
+// ─── wake handler ─────────────────────────────────────────────────────────
+function onWake() {
+    if (recording || $talk.disabled) return;
+    playCueTone();
+    (async () => {
+        try { await ensureMic(); }
+        catch (e) { setStatus('error', 'mic: ' + e.message); goIdle(); return; }
+        startRecording(true);
+    })();
+}
+
+// ─── input wiring (manual hold-to-talk) ───────────────────────────────────
 async function onTalkDown() {
-    if ($talk.disabled) return;
+    if ($talk.disabled || recording) return;
     try { await ensureMic(); }
     catch (e) { setStatus('error', 'mic: ' + e.message); return; }
-    startRecording();
+    startRecording(false);
 }
-function onTalkUp() { if (recording) stopRecordingAndRun(); }
+function onTalkUp() {
+    // Only manual recordings stop on release; wake-triggered uses VAD.
+    if (recording && !triggeredByWake) stopRecordingAndRun();
+}
 
 $talk.addEventListener('mousedown', onTalkDown);
 $talk.addEventListener('mouseup', onTalkUp);
