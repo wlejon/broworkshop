@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Mic Chunks</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; height: 100vh; display: flex; flex-direction: column;
+    background: #0c0e12; color: #d7dde6;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  header {
+    padding: 14px 18px; border-bottom: 1px solid #1d2330;
+    display: flex; align-items: baseline; gap: 14px;
+  }
+  header h1 { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: .3px; }
+  header .sub { color: #6b7686; font-size: 12px; }
+  .controls { padding: 10px 18px; display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
+  .controls label { font-size: 12px; color: #97a1b2; display: flex; gap: 6px; align-items: center; }
+  button {
+    background: #1b2638; color: #cfe0ff; border: 1px solid #2c3c57;
+    border-radius: 6px; padding: 7px 14px; font: inherit; font-size: 12px; cursor: pointer;
+  }
+  button:hover { background: #233248; }
+  button.active { background: #2f6f4f; border-color: #3c8c63; color: #eafff2; }
+  canvas { flex: 1; width: 100%; display: block; }
+  .stats {
+    padding: 8px 18px; border-top: 1px solid #1d2330; font-size: 12px;
+    color: #8a94a6; display: flex; gap: 24px; flex-wrap: wrap;
+  }
+  .stats b { color: #d7dde6; font-weight: 600; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Mic Chunks</h1>
+    <span class="sub">bro.mic — fixed-size frames (chunkFrames) from broaudio's mic tap</span>
+  </header>
+  <div class="controls">
+    <button id="toggle">Start</button>
+    <label><input type="checkbox" id="agc"> AGC</label>
+    <span class="sub" id="cfg">16 kHz · 160 frames/chunk · 10 ms cadence</span>
+  </div>
+  <canvas id="meter"></canvas>
+  <div class="stats">
+    <span>chunks: <b id="chunkCount">0</b></span>
+    <span>frames/chunk: <b id="chunkFrames">—</b></span>
+    <span>rolling peak: <b id="rollingPeak">0.00</b></span>
+    <span>dropped: <b id="dropped">0</b></span>
+  </div>
+  <script src="main.js"></script>
+</body>
+</html>
