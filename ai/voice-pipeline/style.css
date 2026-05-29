@@ -108,6 +108,21 @@ main {
     transition: width 60ms linear;
 }
 
+/* Indeterminate "working" bar shown between end-of-capture and the first reply
+   token (set by startLoadingIndicator). A fixed-width chunk scans back and
+   forth inside the overflow-hidden track. */
+.meter.thinking {
+    width: 34%;
+    transition: none;
+    background: linear-gradient(90deg, #1f2a3a, #6fb0ff, #1f2a3a);
+    animation: meter-scan 1.15s ease-in-out infinite;
+}
+@keyframes meter-scan {
+    0%   { transform: translateX(-105%); }
+    50%  { transform: translateX(296%); }
+    100% { transform: translateX(-105%); }
+}
+
 .talk {
     padding: 18px;
     font-size: 16px;

@@ -52,8 +52,11 @@ let triggeredByWake = false;     // current recording was started by onWake
 let recStartMs = 0;
 let lastLoudMs = 0;              // last time peak was above SPEECH_THRESH
 let speechMs = 0;                // total ms with peak above SPEECH_THRESH
-let toneClipId = -1;
+let toneClipId = -1;             // wake cue (rising note)
+let receiptClipId = -1;          // "heard you" cue (descending double-blip)
+let presynthClipId = -1;         // "about to speak" cue (soft ascending triad)
 let wakeMeterTimer = 0;
+let loadingAnim = false;         // indeterminate meter while transcribing/thinking
 
 // EoU / VAD params.
 const SPEECH_THRESH      = 0.01;   // peak amplitude threshold for "speech present"
@@ -62,11 +65,15 @@ const MIN_SPEECH_MS      = 300;    // require this much speech before EoU can fi
 const NO_SPEECH_ABORT_MS = 1500;   // abort if no speech in this window
 const MAX_CAPTURE_MS     = 10000;  // hard cap
 
-// Cue tone params.
-const CUE_FREQ_HZ  = 880;
-const CUE_DUR_MS   = 80;
-const CUE_ATTACK_MS = 5;
-const CUE_RELEASE_MS = 20;
+// Earcon definitions — three distinct UI cues, each a short note sequence:
+//   wake     — single rising note  (you said "computer"; capture is opening)
+//   receipt  — descending double-blip (your words were captured; "got it")
+//   presynth — soft ascending triad (a reply is on its way; voice incoming)
+const WAKE_NOTES     = [{ freq: 880, durMs: 80 }];
+const RECEIPT_NOTES  = [{ freq: 660, durMs: 55 }, { freq: 440, durMs: 75 }];
+const PRESYNTH_NOTES = [{ freq: 523.25, durMs: 70, gain: 0.7 },
+                        { freq: 659.25, durMs: 70, gain: 0.7 },
+                        { freq: 783.99, durMs: 95, gain: 0.8 }];
 
 // Wake-tail suspension (extra time after TTS finishes).
 const WAKE_TAIL_MS = 250;
@@ -150,32 +157,71 @@ function goIdle() {
     wakeResume();
 }
 
-// ─── cue tone ─────────────────────────────────────────────────────────────
-function buildCueTone(sampleRate) {
-    const total = Math.floor(sampleRate * CUE_DUR_MS / 1000);
-    const attack = Math.floor(sampleRate * CUE_ATTACK_MS / 1000);
-    const release = Math.floor(sampleRate * CUE_RELEASE_MS / 1000);
+// Indeterminate meter for the silent stretch between end-of-capture and the
+// first reply token (STT + LLM prefill). Clearing the inline width/opacity lets
+// the .thinking CSS rule drive the bar; stopLoadingIndicator restores manual
+// control. The wake-score meter loop skips while this is active (see below).
+function startLoadingIndicator() {
+    loadingAnim = true;
+    $meter.style.width = '';
+    $meter.style.opacity = '';
+    $meter.classList.add('thinking');
+}
+function stopLoadingIndicator() {
+    if (!loadingAnim) return;
+    loadingAnim = false;
+    $meter.classList.remove('thinking');
+    $meter.style.opacity = '1';
+    $meter.style.width = '0%';
+}
+
+// ─── earcons ────────────────────────────────────────────────────────────────
+// Build a short PCM clip from a sequence of notes. Each note is { freq, durMs,
+// gain? }, separated by gapMs of silence. A raised-cosine attack and release on
+// every note keeps them click-free.
+function buildEarcon(notes, sampleRate, opts) {
+    opts = opts || {};
+    const gapMs     = opts.gapMs     != null ? opts.gapMs     : 18;
+    const attackMs  = opts.attackMs  != null ? opts.attackMs  : 5;
+    const releaseMs = opts.releaseMs != null ? opts.releaseMs : 20;
+    const gap     = Math.floor(sampleRate * gapMs / 1000);
+    const attack  = Math.floor(sampleRate * attackMs / 1000);
+    const release = Math.floor(sampleRate * releaseMs / 1000);
+
+    const lens = notes.map(n => Math.floor(sampleRate * n.durMs / 1000));
+    let total = 0;
+    for (let i = 0; i < notes.length; i++) total += lens[i] + (i < notes.length - 1 ? gap : 0);
+
     const buf = new Float32Array(total);
-    const w = 2 * Math.PI * CUE_FREQ_HZ / sampleRate;
-    for (let i = 0; i < total; i++) {
-        let env;
-        if (i < attack) {
-            env = 0.5 - 0.5 * Math.cos(Math.PI * i / attack);
-        } else if (i > total - release) {
-            const r = (i - (total - release)) / release;
-            env = 0.5 + 0.5 * Math.cos(Math.PI * r);
-        } else {
-            env = 1.0;
+    let off = 0;
+    for (let k = 0; k < notes.length; k++) {
+        const len = lens[k];
+        const gain = notes[k].gain != null ? notes[k].gain : 1.0;
+        const w = 2 * Math.PI * notes[k].freq / sampleRate;
+        for (let i = 0; i < len; i++) {
+            let env;
+            if (i < attack) {
+                env = 0.5 - 0.5 * Math.cos(Math.PI * i / attack);
+            } else if (i > len - release) {
+                const r = (i - (len - release)) / release;
+                env = 0.5 + 0.5 * Math.cos(Math.PI * r);
+            } else {
+                env = 1.0;
+            }
+            buf[off + i] = gain * env * Math.sin(w * i);
         }
-        buf[i] = env * Math.sin(w * i);
+        off += len + gap;
     }
     return buf;
 }
 
-function playCueTone() {
-    if (toneClipId < 0 || !audioCtx) return;
-    try { audioCtx.playClip(toneClipId, 0.5, false); } catch (_) {}
+function playEarcon(id, gain) {
+    if (id < 0 || !audioCtx) return;
+    try { audioCtx.playClip(id, gain, false); } catch (_) {}
 }
+function playCueTone()     { playEarcon(toneClipId, 0.5); }
+function playReceiptCue()  { playEarcon(receiptClipId, 0.5); }
+function playPresynthCue() { playEarcon(presynthClipId, 0.35); }
 
 // ─── boot ────────────────────────────────────────────────────────────────────
 // Bring up the lightweight, this-thread pieces (audio context, cue tone), then
@@ -185,7 +231,12 @@ function boot() {
     try {
         audioCtx = new AudioContext();
         engineRate = audioCtx.sampleRate || 44100;
-        try { toneClipId = audioCtx.createClip(buildCueTone(engineRate), 1); }
+        try {
+            toneClipId     = audioCtx.createClip(buildEarcon(WAKE_NOTES, engineRate), 1);
+            receiptClipId  = audioCtx.createClip(buildEarcon(RECEIPT_NOTES, engineRate), 1);
+            presynthClipId = audioCtx.createClip(
+                buildEarcon(PRESYNTH_NOTES, engineRate, { attackMs: 8, releaseMs: 35 }), 1);
+        }
         catch (e) { console.warn('cue tone init failed:', e.message); }
     } catch (e) {
         setStatus('error', 'audio init failed: ' + e.message);
@@ -233,13 +284,24 @@ function onWorkerMessage(e) {
                 startBroTurn();
                 setStatus('thinking', 'thinking…');
             } else {
+                stopLoadingIndicator();
                 setStatus('idle', 'no speech detected — idle');
             }
             break;
 
         case 'token':
+            // First visible text — the LLM is responding, so drop the loader.
+            stopLoadingIndicator();
             fullText += msg.delta;
             updatePending();
+            break;
+
+        case 'presynth':
+            // The worker is about to synthesize the first sentence. Play the
+            // soft "about to speak" cue now so it overlaps the synthesis
+            // latency instead of delaying the audio that follows.
+            playPresynthCue();
+            setStatus('thinking', 'responding…');
             break;
 
         case 'speech':
@@ -255,6 +317,7 @@ function onWorkerMessage(e) {
             break;
 
         case 'error':
+            stopLoadingIndicator();
             setStatus('error', (msg.stage || 'pipeline') + ': ' + msg.message);
             resetReplyState();
             pipelineDone = true;
@@ -304,9 +367,15 @@ function pumpQueue() {
     activeClipId = clipId;
 
     let lastWord = -1;
+    // getPlaybackPosition() returns a normalized [0,1) fraction of the clip, not
+    // seconds. Word timings (startSec/endSec) are in seconds, so scale by the
+    // clip's duration to compare in the same units — otherwise every clip longer
+    // than one second highlights the wrong word and lags behind the audio.
+    const clipDurSec = item.samples.length / engineRate;
     const tick = () => {
-        let pos = 0;
-        try { pos = audioCtx.getPlaybackPosition(playbackId) || 0; } catch (_) {}
+        let frac = 0;
+        try { frac = audioCtx.getPlaybackPosition(playbackId) || 0; } catch (_) {}
+        const pos = frac * clipDurSec;
         let active = -1;
         for (let i = 0; i < item.words.length; i++) {
             if (pos >= item.words[i].startSec && pos < item.words[i].endSec) { active = i; break; }
@@ -365,7 +434,7 @@ function startWake() {
 function startWakeMeter() {
     if (wakeMeterTimer) return;
     wakeMeterTimer = setInterval(() => {
-        if (recording || !wakeActive || playing) return;
+        if (recording || !wakeActive || playing || loadingAnim) return;
         let score = 0;
         try { score = bro.wake.lastScore() || 0; } catch (_) {}
         $meter.style.width = Math.min(100, score * 100) + '%';
@@ -523,8 +592,12 @@ function stopRecordingAndRun() {
         return;
     }
 
+    // Confirm we captured the utterance ("got it"), then show the loader for the
+    // silent STT + LLM-prefill stretch until the first reply token lands.
+    playReceiptCue();
     const samples16k = resampleLinear(raw, engineRate, 16000);
     setStatus('transcribing', 'transcribing…');
+    startLoadingIndicator();
     pipelineDone = false;
     producedSpeech = false;
 

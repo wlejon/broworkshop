@@ -9,6 +9,8 @@
 //   main -> load                         -> progress {stage} ... -> ready
 //   main -> transcribe {samples,         -> user {text}
 //           sampleRate}                     token {delta}            (per LM token)
+//                                           presynth                 (once, before
+//                                                                     first TTS synth)
 //                                           speech {text, samples,   (per sentence)
 //                                                   sampleRate, words}
 //                                           done
@@ -153,9 +155,17 @@ function computeWords(sentence, phonemeIds, durations, sampleCount, sampleRate) 
 // thread. `consumed` is the offset into the cleaned reply text up to and
 // including this sentence, so the main thread can split finalized (spoken)
 // text from the still-streaming tail.
+//
+// `presynthSent` gates a one-shot `presynth` message emitted immediately before
+// the very first (blocking) synthesize() of a reply. The main thread plays its
+// "about to speak" cue on that message, so the cue overlaps the synthesis
+// latency — dead time that existed anyway — instead of delaying the audio that
+// follows it.
+let presynthSent = false;
 function speak(sentence, consumed) {
     const phonemeIds = bro.tts.phonemize(sentence);
     if (!phonemeIds || phonemeIds.length === 0) return;
+    if (!presynthSent) { presynthSent = true; self.postMessage({ type: 'presynth' }); }
     const out = kokoro.synthesize(phonemeIds, voice, { speed: 1.0 });
     const words = computeWords(sentence, phonemeIds, out.durations,
                                out.samples.length, out.sampleRate);
@@ -171,6 +181,8 @@ function speak(sentence, consumed) {
 
 // ── full pipeline: STT -> streaming LLM -> per-sentence TTS ───────────────────
 function runPipeline(samples16k, sampleRate) {
+    presynthSent = false;   // re-arm the one-shot "about to speak" cue for this turn
+
     // STT.
     let userText = '';
     try {
