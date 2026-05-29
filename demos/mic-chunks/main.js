@@ -63,7 +63,6 @@ function resize() {
   canvas.height = canvas.clientHeight;
 }
 window.addEventListener('resize', resize);
-resize();
 
 function draw() {
   const w = canvas.width, h = canvas.height;
@@ -98,8 +97,18 @@ function draw() {
   }
   requestAnimationFrame(draw);
 }
-requestAnimationFrame(draw);
-
-// Autostart so the meter is live on launch (windowed). Comment out to require
-// a click.
-start();
+// Measure the canvas and start only after layout is complete. Reading
+// clientWidth inline (during readyState "loading", before the engine's initial
+// layout pass) returns the 300x150 replaced-element default, leaving a
+// stretched/zoomed bitmap until the first window resize. The load event fires
+// after layout, so the backing store matches the box on first paint.
+function init() {
+  resize();
+  requestAnimationFrame(draw);
+  start();   // autostart so the meter is live on launch (windowed)
+}
+if (document.readyState === 'complete' || document.readyState === 'interactive') {
+  init();
+} else {
+  window.addEventListener('load', init);
+}
