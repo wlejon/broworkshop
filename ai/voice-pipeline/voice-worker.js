@@ -7,14 +7,18 @@
 //
 // Protocol:
 //   main -> load                         -> progress {stage} ... -> ready
-//   main -> transcribe {samples,         -> user {text}
-//           sampleRate}                     token {delta}            (per LM token)
+//   main -> transcribe {samples,         -> user {text[, stopword]}
+//           sampleRate, turn}               token {delta}            (per LM token)
 //                                           presynth                 (once, before
 //                                                                     first TTS synth)
 //                                           speech {text, samples,   (per sentence)
 //                                                   sampleRate, words}
 //                                           done
 //   errors come back as                  -> error {stage, message}
+//
+// Every reply message echoes the originating `turn` id so the main thread can
+// discard output from a turn the user barged in on. A bare stop/cancel
+// utterance comes back as user {stopword:true} + done, with no LLM reply.
 //
 // samples in `speech` are transferred zero-copy. Word timings are derived from
 // Kokoro's per-phoneme durations (bro.tts synthesize().durations) split on the
@@ -36,13 +40,28 @@ const history = [
         'friend, not a chatbot. /no_think' },
 ];
 
+// Every pipeline message carries the turn id of the utterance it belongs to, so
+// the main thread can drop output from a turn the user barged in on (the worker
+// can't be interrupted mid-generation — no SharedArrayBuffer — so a superseded
+// turn finishes in the background and its messages are simply ignored).
+let currentTurn = -1;
+
 function fail(stage, err) {
     self.postMessage({
         type: 'error',
         stage,
         message: (err && err.message) ? err.message : String(err),
+        turn: currentTurn,
     });
 }
+
+// Utterances that mean "stop / cancel" short-circuit before the LLM: they exist
+// to halt the previous reply (via barge-in), not to start a new one.
+const STOP_WORDS = new Set([
+    'stop', 'stop it', 'stop talking', 'stop please', 'please stop',
+    'cancel', 'never mind', 'nevermind', 'forget it', 'be quiet', 'quiet',
+    'shut up', 'shush', 'enough', "that's enough", 'thats enough',
+]);
 
 // ── load: bring up all three models, reporting progress ──────────────────────
 function doLoad() {
@@ -165,7 +184,7 @@ let presynthSent = false;
 function speak(sentence, consumed) {
     const phonemeIds = bro.tts.phonemize(sentence);
     if (!phonemeIds || phonemeIds.length === 0) return;
-    if (!presynthSent) { presynthSent = true; self.postMessage({ type: 'presynth' }); }
+    if (!presynthSent) { presynthSent = true; self.postMessage({ type: 'presynth', turn: currentTurn }); }
     const out = kokoro.synthesize(phonemeIds, voice, { speed: 1.0 });
     const words = computeWords(sentence, phonemeIds, out.durations,
                                out.samples.length, out.sampleRate);
@@ -176,11 +195,13 @@ function speak(sentence, consumed) {
         sampleRate: out.sampleRate,
         words,
         consumed,
+        turn: currentTurn,
     }, [out.samples.buffer]);
 }
 
 // ── full pipeline: STT -> streaming LLM -> per-sentence TTS ───────────────────
-function runPipeline(samples16k, sampleRate) {
+function runPipeline(samples16k, sampleRate, turn) {
+    currentTurn = (turn === undefined) ? -1 : turn;
     presynthSent = false;   // re-arm the one-shot "about to speak" cue for this turn
 
     // STT.
@@ -192,8 +213,18 @@ function runPipeline(samples16k, sampleRate) {
         userText = sttTok.decode(ids, true).trim();
     } catch (e) { fail('stt', e); return; }
 
-    self.postMessage({ type: 'user', text: userText });
-    if (!userText) { self.postMessage({ type: 'done' }); return; }
+    // A bare stop/cancel utterance just halts the previous reply — don't
+    // generate a new one. (The barge-in already stopped playback on the main
+    // thread; this keeps the assistant from answering "stop" as a question.)
+    const norm = userText.toLowerCase().replace(/[^a-z' ]+/g, '').replace(/\s+/g, ' ').trim();
+    if (STOP_WORDS.has(norm)) {
+        self.postMessage({ type: 'user', text: userText, stopword: true, turn: currentTurn });
+        self.postMessage({ type: 'done', turn: currentTurn });
+        return;
+    }
+
+    self.postMessage({ type: 'user', text: userText, turn: currentTurn });
+    if (!userText) { self.postMessage({ type: 'done', turn: currentTurn }); return; }
     history.push({ role: 'user', content: userText });
 
     // LLM (streaming) + TTS (per sentence). The onToken callback runs inside
@@ -222,7 +253,7 @@ function runPipeline(samples16k, sampleRate) {
 
             const delta = cleaned.slice(emittedLen);
             if (delta) {
-                self.postMessage({ type: 'token', delta });
+                self.postMessage({ type: 'token', delta, turn: currentTurn });
                 emittedLen = cleaned.length;
             }
 
@@ -245,14 +276,14 @@ function runPipeline(samples16k, sampleRate) {
         }
     } catch (e) { fail('llm', e); return; }
 
-    self.postMessage({ type: 'done' });
+    self.postMessage({ type: 'done', turn: currentTurn });
 }
 
 self.onmessage = (e) => {
     const msg = e.data || {};
     switch (msg.type) {
         case 'load':       doLoad(); break;
-        case 'transcribe': runPipeline(msg.samples, msg.sampleRate); break;
+        case 'transcribe': runPipeline(msg.samples, msg.sampleRate, msg.turn); break;
         default: fail('dispatch', new Error('unknown message: ' + msg.type));
     }
 };

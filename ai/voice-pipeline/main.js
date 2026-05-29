@@ -11,6 +11,13 @@
 //     Capture auto-stops on end-of-utterance (rolling-peak VAD).
 //   - Hold-to-talk: button or Space key. Manual override.
 //
+// Barge-in: the wake word stays live while a reply is being thought up or
+// spoken, so saying "computer" again interrupts — playback is cut immediately
+// and a fresh capture opens. The in-flight worker generation can't be stopped
+// mid-loop (no SharedArrayBuffer), so it drains in the background and its output
+// is dropped via a per-utterance turn id. A bare "stop"/"cancel" follow-up just
+// returns to idle (recognized worker-side) instead of starting a new reply.
+//
 // Mic capture (this thread): getUserMedia -> AudioContext -> AnalyserNode.
 // We poll the analyser, stitch chunks via a needle-match for overlap, resample
 // to 16 kHz mono Float32, and hand the utterance to the worker. The worker
@@ -91,6 +98,17 @@ let pipelineDone = false;
 let producedSpeech = false;
 let highlightTimer = 0;
 let activeClipId = -1;
+let activePlaybackId = -1; // handle to stop the in-progress speech clip (barge-in)
+let clipEndTimer = 0;      // setTimeout that advances the queue on clip end
+
+// ─── turn tracking (barge-in) ────────────────────────────────────────────────
+// Each utterance sent to the worker gets a monotonic turn id. The worker echoes
+// it on every reply message; we only act on messages whose turn === acceptTurn.
+// On barge-in we drop acceptTurn so the (uninterruptible) in-flight generation
+// drains into the void while the new turn takes over.
+let turnSeq = 0;
+let acceptTurn = -1;
+let turnBusy = false;     // a turn is in flight (transcribing / thinking / speaking)
 
 // ─── UI helpers ────────────────────────────────────────────────────────────
 function setStatus(kind, msg) {
@@ -261,6 +279,11 @@ const LOAD_PROGRESS = { whisper: '25%', qwen: '55%', kokoro: '85%' };
 
 function onWorkerMessage(e) {
     const msg = e.data || {};
+
+    // Drop messages from a superseded turn (barge-in, or stale background
+    // generation). Load-phase messages (progress/ready) carry no turn id.
+    if (msg.turn !== undefined && msg.turn !== acceptTurn) return;
+
     switch (msg.type) {
         case 'progress':
             setStatus('loading', LOAD_LABELS[msg.stage] || 'loading…');
@@ -279,12 +302,17 @@ function onWorkerMessage(e) {
             break;
 
         case 'user':
-            if (msg.text) {
+            stopLoadingIndicator();
+            if (msg.stopword) {
+                // A bare "stop/cancel" — acknowledge and fall back to idle; no
+                // reply is coming (worker sends `done` next).
+                appendTurn('you', msg.text);
+                setStatus('idle', 'stopped');
+            } else if (msg.text) {
                 appendTurn('you', msg.text);
                 startBroTurn();
                 setStatus('thinking', 'thinking…');
             } else {
-                stopLoadingIndicator();
                 setStatus('idle', 'no speech detected — idle');
             }
             break;
@@ -365,6 +393,7 @@ function pumpQueue() {
     }
     playing = true;
     activeClipId = clipId;
+    activePlaybackId = playbackId;
 
     let lastWord = -1;
     // getPlaybackPosition() returns a normalized [0,1) fraction of the clip, not
@@ -389,30 +418,55 @@ function pumpQueue() {
     highlightTimer = setInterval(tick, 30);
 
     const durMs = (item.samples.length / engineRate) * 1000;
-    setTimeout(() => {
+    clipEndTimer = setTimeout(() => {
+        clipEndTimer = 0;
         clearInterval(highlightTimer); highlightTimer = 0;
         if (lastWord >= 0 && item.els[lastWord]) item.els[lastWord].classList.remove('speaking');
         try { audioCtx.deleteClip(clipId); } catch (_) {}
         activeClipId = -1;
+        activePlaybackId = -1;
         playing = false;
         if (audioQueue.length > 0) pumpQueue();
         else maybeFinishSpeaking();
     }, durMs + 40);
 }
 
-// Resume wake once the LLM is done AND all queued audio has played out.
+// Return to idle once the LLM is done AND all queued audio has played out.
 function maybeFinishSpeaking() {
     if (!pipelineDone || playing || audioQueue.length > 0) return;
     pipelineDone = false;
+    turnBusy = false;
     const wasSpeaking = producedSpeech;
     producedSpeech = false;
     setTimeout(() => goIdle(), wasSpeaking ? WAKE_TAIL_MS : 0);
 }
 
-function resetReplyState() {
+// Stop and tear down all in-progress playback (shared by reset + barge-in).
+function stopPlayback() {
+    if (clipEndTimer) { clearTimeout(clipEndTimer); clipEndTimer = 0; }
     if (highlightTimer) { clearInterval(highlightTimer); highlightTimer = 0; }
+    if (activePlaybackId >= 0) { try { audioCtx.stopPlayback(activePlaybackId); } catch (_) {} activePlaybackId = -1; }
+    if (activeClipId >= 0) { try { audioCtx.deleteClip(activeClipId); } catch (_) {} activeClipId = -1; }
     audioQueue.length = 0;
     playing = false;
+}
+
+function resetReplyState() {
+    stopPlayback();
+}
+
+// Barge-in: the user said "computer" while a turn was in flight. Cut the audio
+// immediately and abandon the current turn. The worker can't be stopped
+// mid-generation (no SharedArrayBuffer), so we drop acceptTurn and let its
+// remaining messages fall on the floor; the caller then opens a fresh capture.
+function interruptTurn() {
+    acceptTurn = -1;
+    turnBusy = false;
+    pipelineDone = false;
+    producedSpeech = false;
+    stopLoadingIndicator();
+    stopPlayback();
+    if (broPendingEl) broPendingEl.textContent = '';
 }
 
 // ─── wake-score meter (when idle) ─────────────────────────────────────────
@@ -581,9 +635,6 @@ function stopRecordingAndRun() {
     $talk.textContent = 'say "computer" or hold to talk';
     $meter.style.width = '0%';
 
-    // Wake stays suspended until the reply finishes playing (maybeFinishSpeaking).
-    wakeSuspend();
-
     const raw = concatChunks(captured);
     captured = [];
     if (raw.length < engineRate * 0.25) {
@@ -601,14 +652,23 @@ function stopRecordingAndRun() {
     pipelineDone = false;
     producedSpeech = false;
 
+    // Claim a turn id and arm barge-in: keep the wake word live through the
+    // think + speak phases so the user can say "computer" to interrupt.
+    turnSeq += 1;
+    acceptTurn = turnSeq;
+    turnBusy = true;
+    wakeResume();
+
     // Transfer the 16 kHz buffer to the worker zero-copy.
     const buf = samples16k.buffer;
-    worker.postMessage({ type: 'transcribe', samples: samples16k, sampleRate: 16000 }, [buf]);
+    worker.postMessage({ type: 'transcribe', samples: samples16k, sampleRate: 16000, turn: turnSeq }, [buf]);
 }
 
 // ─── wake handler ─────────────────────────────────────────────────────────
 function onWake() {
-    if (recording || $talk.disabled || playing) return;
+    if (recording || $talk.disabled) return;
+    // Barge-in: if a reply is being thought up or spoken, cut it off first.
+    if (turnBusy) interruptTurn();
     playCueTone();
     (async () => {
         try { await ensureMic(); }
@@ -620,6 +680,7 @@ function onWake() {
 // ─── input wiring (manual hold-to-talk) ───────────────────────────────────
 async function onTalkDown() {
     if ($talk.disabled || recording || !workerReady) return;
+    if (turnBusy) interruptTurn();   // hold-to-talk also barges in
     try { await ensureMic(); }
     catch (e) { setStatus('error', 'mic: ' + e.message); return; }
     startRecording(false);
