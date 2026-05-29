@@ -81,6 +81,20 @@ main {
 .turn.bro  { background: #1e252e; }
 .turn.bro  .who { color: #6fb0ff; }
 
+/* The still-streaming, not-yet-spoken tail of a reply. */
+.turn.bro .pending { color: #aeb4bd; }
+
+/* Each spoken word; the one currently being voiced is highlighted. */
+.turn.bro .word {
+    border-radius: 4px;
+    padding: 0 2px;
+    transition: background-color 80ms linear, color 80ms linear;
+}
+.turn.bro .word.speaking {
+    background: #6fb0ff;
+    color: #10151b;
+}
+
 .meter-wrap {
     height: 6px;
     background: #1c1f24;

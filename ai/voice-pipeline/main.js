@@ -1,27 +1,23 @@
 // Voice pipeline: mic -> Whisper -> Qwen3 -> Kokoro -> speaker.
 //
-// All inference is local. Models are loaded from sibling repos:
-//   ../brosoundml/weights/whisper
-//   ../brolm/weights/Qwen3-8B-GGUF/Qwen3-8B-Q8_0.gguf
-//   ../brosoundml/weights/kokoro
-//   ../brosoundml/weights/wake/computer.bw
+// All heavy inference runs in voice-worker.js on a background thread, so this
+// thread stays free to render, capture the mic, run the wake word, and play
+// audio. The UI is responsive at all times: model loading shows live progress,
+// the reply text streams in token-by-token, and the word being spoken is
+// highlighted in sync with playback.
 //
 // Activation modes:
 //   - Wake word: say "computer". Detected by bro.wake (streaming BC-ResNet).
 //     Capture auto-stops on end-of-utterance (rolling-peak VAD).
 //   - Hold-to-talk: button or Space key. Manual override.
 //
-// Mic capture path: navigator.mediaDevices.getUserMedia -> AudioContext ->
-// MediaStreamAudioSourceNode -> AnalyserNode. The engine exposes only the
-// latest fftSize samples of the mic ring buffer, so we poll the analyser on
-// a fast interval and stitch chunks together using a small needle-match for
-// overlap detection. Sample rate is whatever the engine runs at (44.1 kHz on
-// Windows by default); we resample to 16 kHz mono Float32 before Whisper.
+// Mic capture (this thread): getUserMedia -> AudioContext -> AnalyserNode.
+// We poll the analyser, stitch chunks via a needle-match for overlap, resample
+// to 16 kHz mono Float32, and hand the utterance to the worker. The worker
+// streams back transcript, reply tokens, and per-sentence audio + word timings.
 
 (function () {
 'use strict';
-
-const FS = require('node:fs');
 
 // ─── element refs ──────────────────────────────────────────────────────────
 const $status     = document.getElementById('status');
@@ -29,12 +25,11 @@ const $transcript = document.getElementById('transcript');
 const $talk       = document.getElementById('talk');
 const $meter      = document.getElementById('meter');
 
-// ─── model handles (filled by loadAll) ─────────────────────────────────────
-let whisper = null, sttTok = null, sttPrompt = null;
-let lm = null, lmTok = null;
-let kokoro = null, voice = null;
+// ─── worker ──────────────────────────────────────────────────────────────────
+let worker = null;
+let workerReady = false;
 
-// Engine + audio.
+// Engine + audio (this thread owns playback + mic).
 let audioCtx = null;
 let micStream = null;
 let micSource = null;
@@ -44,15 +39,6 @@ const ANALYSER_FFT = 8192;          // ~186 ms @ 44.1 kHz; max useful tail
 const POLL_INTERVAL_MS = 60;        // poll well under the window length
 const NEEDLE = 256;                 // samples used to detect overlap
 
-// Conversation memory.
-const history = [
-    { role: 'system', content:
-        'You are speaking out loud through a text-to-speech system. Reply in 1-2 short ' +
-        'conversational sentences. Use contractions. Never use markdown, bullet lists, ' +
-        'code blocks, or symbols that do not sound natural when read aloud. Sound like a ' +
-        'friend, not a chatbot. /no_think' },
-];
-
 // Recording state.
 let recording = false;
 let pollTimer = 0;
@@ -61,7 +47,6 @@ let captured = [];               // array of Float32Array chunks at engine rate
 let engineRate = 44100;
 
 // Wake / VAD state.
-let wakeReady = false;
 let wakeActive = false;          // listen() has been called and not stopped
 let triggeredByWake = false;     // current recording was started by onWake
 let recStartMs = 0;
@@ -86,6 +71,20 @@ const CUE_RELEASE_MS = 20;
 // Wake-tail suspension (extra time after TTS finishes).
 const WAKE_TAIL_MS = 250;
 
+// ─── reply rendering state (streaming text + word highlight) ─────────────────
+let broSpokenEl = null;   // holds finalized sentences as highlightable word spans
+let broPendingEl = null;  // holds the still-streaming, not-yet-spoken tail
+let fullText = '';        // full cleaned reply text accumulated from token deltas
+let finalizedLen = 0;     // chars of fullText already turned into word spans
+
+// ─── playback queue (sequential, gapless-ish) ────────────────────────────────
+const audioQueue = [];    // { samples: Float32Array@engineRate, els: span[], words }
+let playing = false;
+let pipelineDone = false;
+let producedSpeech = false;
+let highlightTimer = 0;
+let activeClipId = -1;
+
 // ─── UI helpers ────────────────────────────────────────────────────────────
 function setStatus(kind, msg) {
     $status.className = 'status ' + kind;
@@ -101,6 +100,32 @@ function appendTurn(who, text) {
     const t = document.createElement('span'); t.textContent = ' ' + text;
     row.appendChild(w); row.appendChild(t);
     $transcript.appendChild(row);
+    $transcript.scrollTop = $transcript.scrollHeight;
+}
+
+// Start a fresh streaming "bro" turn. Spoken (finalized) words live in
+// broSpokenEl; the streaming tail lives in broPendingEl.
+function startBroTurn() {
+    const hint = $transcript.querySelector('.hint');
+    if (hint) hint.remove();
+    const row = document.createElement('div');
+    row.className = 'turn bro';
+    const w = document.createElement('span'); w.className = 'who'; w.textContent = 'bro:';
+    broSpokenEl = document.createElement('span');
+    broPendingEl = document.createElement('span');
+    broPendingEl.className = 'pending';
+    row.appendChild(w);
+    row.appendChild(document.createTextNode(' '));
+    row.appendChild(broSpokenEl);
+    row.appendChild(broPendingEl);
+    $transcript.appendChild(row);
+    $transcript.scrollTop = $transcript.scrollHeight;
+    fullText = '';
+    finalizedLen = 0;
+}
+
+function updatePending() {
+    if (broPendingEl) broPendingEl.textContent = fullText.slice(finalizedLen);
     $transcript.scrollTop = $transcript.scrollHeight;
 }
 
@@ -135,10 +160,8 @@ function buildCueTone(sampleRate) {
     for (let i = 0; i < total; i++) {
         let env;
         if (i < attack) {
-            // Cosine attack: 0 -> 1
             env = 0.5 - 0.5 * Math.cos(Math.PI * i / attack);
         } else if (i > total - release) {
-            // Cosine release: 1 -> 0
             const r = (i - (total - release)) / release;
             env = 0.5 + 0.5 * Math.cos(Math.PI * r);
         } else {
@@ -154,60 +177,177 @@ function playCueTone() {
     try { audioCtx.playClip(toneClipId, 0.5, false); } catch (_) {}
 }
 
-// ─── model loading ────────────────────────────────────────────────────────
-async function loadAll() {
+// ─── boot ────────────────────────────────────────────────────────────────────
+// Bring up the lightweight, this-thread pieces (audio context, cue tone), then
+// spawn the worker to load the heavy models. Runs AFTER the first paint so the
+// splash UI shows immediately instead of a black screen during model load.
+function boot() {
+    try {
+        audioCtx = new AudioContext();
+        engineRate = audioCtx.sampleRate || 44100;
+        try { toneClipId = audioCtx.createClip(buildCueTone(engineRate), 1); }
+        catch (e) { console.warn('cue tone init failed:', e.message); }
+    } catch (e) {
+        setStatus('error', 'audio init failed: ' + e.message);
+        return;
+    }
+
     setStatus('loading', 'loading models…');
+    $meter.style.width = '15%';
+    $meter.style.opacity = '0.6';
 
-    // STT
-    try {
-        whisper = bro.stt.loadWhisper('../brosoundml/weights/whisper');
-        sttTok = bro.stt.loadTokenizer({
-            vocabPath:  '../brosoundml/weights/whisper/vocab.json',
-            mergesPath: '../brosoundml/weights/whisper/merges.txt',
-        });
-        sttPrompt = sttTok.buildPrompt('en', 'transcribe', false);
-    } catch (e) {
-        setStatus('error', 'whisper load failed: ' + e.message);
-        throw e;
+    worker = new Worker('voice-worker.js');
+    worker.onmessage = onWorkerMessage;
+    worker.postMessage({ type: 'load' });
+}
+
+const LOAD_LABELS = {
+    whisper: 'loading speech recognition…',
+    qwen:    'loading language model…',
+    kokoro:  'loading voice…',
+};
+const LOAD_PROGRESS = { whisper: '25%', qwen: '55%', kokoro: '85%' };
+
+function onWorkerMessage(e) {
+    const msg = e.data || {};
+    switch (msg.type) {
+        case 'progress':
+            setStatus('loading', LOAD_LABELS[msg.stage] || 'loading…');
+            $meter.style.width = LOAD_PROGRESS[msg.stage] || '50%';
+            break;
+
+        case 'ready':
+            workerReady = true;
+            $meter.style.width = '0%';
+            $meter.style.opacity = '1';
+            $talk.disabled = false;
+            $talk.textContent = 'say "computer" or hold to talk';
+            $talk.title = 'Say "computer" to activate, or hold (Space) to talk manually.';
+            startWake();
+            goIdle();
+            break;
+
+        case 'user':
+            if (msg.text) {
+                appendTurn('you', msg.text);
+                startBroTurn();
+                setStatus('thinking', 'thinking…');
+            } else {
+                setStatus('idle', 'no speech detected — idle');
+            }
+            break;
+
+        case 'token':
+            fullText += msg.delta;
+            updatePending();
+            break;
+
+        case 'speech':
+            producedSpeech = true;
+            finalizeSentence(msg);
+            enqueueAudio(msg);
+            setStatus('speaking', 'speaking…');
+            break;
+
+        case 'done':
+            pipelineDone = true;
+            maybeFinishSpeaking();
+            break;
+
+        case 'error':
+            setStatus('error', (msg.stage || 'pipeline') + ': ' + msg.message);
+            resetReplyState();
+            pipelineDone = true;
+            maybeFinishSpeaking();
+            break;
     }
+}
 
-    // LM
-    try {
-        const r = bro.lm.loadQwen('../brolm/weights/Qwen3-8B-GGUF/Qwen3-8B-Q8_0.gguf');
-        lm = r.model;
-        lmTok = r.tokenizer;
-    } catch (e) {
-        setStatus('error', 'qwen load failed: ' + e.message);
-        throw e;
+// Replace the streaming tail for this sentence with highlightable word spans.
+function finalizeSentence(msg) {
+    if (!broSpokenEl) startBroTurn();
+    const els = [];
+    for (let i = 0; i < msg.words.length; i++) {
+        const span = document.createElement('span');
+        span.className = 'word';
+        span.textContent = msg.words[i].text;
+        broSpokenEl.appendChild(span);
+        broSpokenEl.appendChild(document.createTextNode(' '));
+        els.push(span);
     }
+    msg._els = els;
+    finalizedLen = msg.consumed;
+    updatePending();
+}
 
-    // TTS
+function enqueueAudio(msg) {
+    const samples = resampleLinear(msg.samples, msg.sampleRate, engineRate);
+    audioQueue.push({ samples, els: msg._els || [], words: msg.words });
+    pumpQueue();
+}
+
+// Play the next queued clip; drive word highlighting from real playback
+// position; advance on clip end.
+function pumpQueue() {
+    if (playing || audioQueue.length === 0) return;
+    const item = audioQueue.shift();
+    let clipId, playbackId;
     try {
-        bro.tts.setAssetRoot('../brosoundml');
-        kokoro = bro.tts.loadKokoro('../brosoundml/weights/kokoro');
-        voice  = kokoro.loadVoice('../brosoundml/weights/kokoro/voices/af_heart.bin');
+        clipId = audioCtx.createClip(item.samples, 1);
+        playbackId = audioCtx.playClip(clipId, 1.0, false);
     } catch (e) {
-        setStatus('error', 'kokoro load failed: ' + e.message);
-        throw e;
+        console.warn('playback failed:', e.message);
+        pumpQueue();
+        return;
     }
+    playing = true;
+    activeClipId = clipId;
 
-    // Audio context for playback + mic.
-    audioCtx = new AudioContext();
-    engineRate = audioCtx.sampleRate || 44100;
+    let lastWord = -1;
+    const tick = () => {
+        let pos = 0;
+        try { pos = audioCtx.getPlaybackPosition(playbackId) || 0; } catch (_) {}
+        let active = -1;
+        for (let i = 0; i < item.words.length; i++) {
+            if (pos >= item.words[i].startSec && pos < item.words[i].endSec) { active = i; break; }
+        }
+        if (active !== lastWord) {
+            if (lastWord >= 0 && item.els[lastWord]) item.els[lastWord].classList.remove('speaking');
+            if (active  >= 0 && item.els[active])  item.els[active].classList.add('speaking');
+            lastWord = active;
+        }
+    };
+    highlightTimer = setInterval(tick, 30);
 
-    // Build + cache cue tone once.
-    try {
-        const samples = buildCueTone(engineRate);
-        toneClipId = audioCtx.createClip(samples, 1);
-    } catch (e) {
-        console.warn('cue tone init failed:', e.message);
-    }
+    const durMs = (item.samples.length / engineRate) * 1000;
+    setTimeout(() => {
+        clearInterval(highlightTimer); highlightTimer = 0;
+        if (lastWord >= 0 && item.els[lastWord]) item.els[lastWord].classList.remove('speaking');
+        try { audioCtx.deleteClip(clipId); } catch (_) {}
+        activeClipId = -1;
+        playing = false;
+        if (audioQueue.length > 0) pumpQueue();
+        else maybeFinishSpeaking();
+    }, durMs + 40);
+}
 
-    $talk.disabled = false;
-    $talk.textContent = 'say "computer" or hold to talk';
-    $talk.title = 'Say "computer" to activate, or hold (Space) to talk manually.';
+// Resume wake once the LLM is done AND all queued audio has played out.
+function maybeFinishSpeaking() {
+    if (!pipelineDone || playing || audioQueue.length > 0) return;
+    pipelineDone = false;
+    const wasSpeaking = producedSpeech;
+    producedSpeech = false;
+    setTimeout(() => goIdle(), wasSpeaking ? WAKE_TAIL_MS : 0);
+}
 
-    // Start wake detector. Failure is non-fatal — manual mode still works.
+function resetReplyState() {
+    if (highlightTimer) { clearInterval(highlightTimer); highlightTimer = 0; }
+    audioQueue.length = 0;
+    playing = false;
+}
+
+// ─── wake-score meter (when idle) ─────────────────────────────────────────
+function startWake() {
     try {
         bro.wake.listen({
             weights: '../brosoundml/weights/wake/computer.bw',
@@ -215,23 +355,19 @@ async function loadAll() {
             onFire: onWake,
         });
         wakeActive = true;
-        wakeReady = true;
         startWakeMeter();
-        setStatus('idle', 'listening for "computer"…');
     } catch (e) {
         console.warn('wake init failed:', e.message);
         setStatus('idle', 'idle (wake unavailable — hold to talk)');
     }
 }
 
-// ─── wake-score meter (when idle) ─────────────────────────────────────────
 function startWakeMeter() {
     if (wakeMeterTimer) return;
     wakeMeterTimer = setInterval(() => {
-        if (recording || !wakeActive) return;
+        if (recording || !wakeActive || playing) return;
         let score = 0;
         try { score = bro.wake.lastScore() || 0; } catch (_) {}
-        // Show a dim bar that brightens as score approaches threshold.
         $meter.style.width = Math.min(100, score * 100) + '%';
         $meter.style.opacity = (0.25 + 0.75 * Math.min(1, score / 0.85)).toFixed(2);
     }, 100);
@@ -268,7 +404,6 @@ function pollMic() {
     analyser.getFloatTimeDomainData(analyserBuf);
     const snap = new Float32Array(analyserBuf);
 
-    // Update meter (peak amplitude).
     let peak = 0;
     for (let i = 0; i < snap.length; i++) {
         const a = Math.abs(snap[i]);
@@ -289,7 +424,6 @@ function pollMic() {
     }
     prevWindow = snap;
 
-    // VAD bookkeeping (only meaningful when wake-triggered, but harmless otherwise).
     const now = Date.now();
     if (peak >= SPEECH_THRESH) {
         lastLoudMs = now;
@@ -298,21 +432,13 @@ function pollMic() {
 
     if (triggeredByWake) {
         const elapsed = now - recStartMs;
-        // Hard cap.
-        if (elapsed >= MAX_CAPTURE_MS) {
-            stopRecordingAndRun();
-            return;
-        }
-        // No speech at all within the abort window -> bail cleanly.
+        if (elapsed >= MAX_CAPTURE_MS) { stopRecordingAndRun(); return; }
         if (speechMs === 0 && elapsed >= NO_SPEECH_ABORT_MS) {
-            abortRecording('no speech — idle');
-            return;
+            abortRecording('no speech — idle'); return;
         }
-        // EoU: enough speech captured AND trailing silence long enough.
         if (speechMs >= MIN_SPEECH_MS && lastLoudMs > 0 &&
             (now - lastLoudMs) >= EOU_SILENCE_MS) {
-            stopRecordingAndRun();
-            return;
+            stopRecordingAndRun(); return;
         }
     }
 }
@@ -327,7 +453,6 @@ function startRecording(fromWake) {
     lastLoudMs = 0;
     speechMs = 0;
 
-    // Suspend wake while we record either way (predictable behavior).
     wakeSuspend();
 
     setStatus('listening', fromWake ? 'recording…' : 'listening…');
@@ -346,7 +471,6 @@ function abortRecording(msg) {
     $talk.textContent = 'say "computer" or hold to talk';
     captured = [];
     setStatus('idle', msg || 'idle');
-    // Brief delay before resuming wake to let mic settle.
     setTimeout(() => goIdle(), 50);
 }
 
@@ -375,10 +499,12 @@ function resampleLinear(samples, fromRate, toRate) {
     return out;
 }
 
-async function stopRecordingAndRun() {
+// Hand the captured utterance to the worker. The heavy pipeline (STT, LLM,
+// TTS) runs there; this thread keeps rendering and will receive the transcript,
+// streamed reply tokens, and per-sentence audio back as messages.
+function stopRecordingAndRun() {
     if (!recording) return;
     recording = false;
-    const wasWakeTriggered = triggeredByWake;
     triggeredByWake = false;
     clearInterval(pollTimer);
     pollTimer = 0;
@@ -386,117 +512,30 @@ async function stopRecordingAndRun() {
     $talk.textContent = 'say "computer" or hold to talk';
     $meter.style.width = '0%';
 
-    // Make sure wake stays suspended through the heavy pipeline; we only
-    // resume after TTS playback + tail.
+    // Wake stays suspended until the reply finishes playing (maybeFinishSpeaking).
     wakeSuspend();
 
-    let resumed = false;
-    const resumeOnce = (delay) => {
-        if (resumed) return;
-        resumed = true;
-        setTimeout(() => goIdle(), delay || 0);
-    };
-
-    try {
-        const raw = concatChunks(captured);
-        captured = [];
-        if (raw.length < engineRate * 0.25) {
-            setStatus('idle', 'too short — idle');
-            resumeOnce(0);
-            return;
-        }
-
-        const samples16k = resampleLinear(raw, engineRate, 16000);
-
-        // ─── STT ──────────────────────────────────────────────────────────
-        setStatus('transcribing', 'transcribing…');
-        await new Promise(r => setTimeout(r, 0));
-        let userText = '';
-        try {
-            const ids = whisper.transcribe(
-                { samples: samples16k, sampleRate: 16000 },
-                sttPrompt,
-                { maxNewTokens: 128 }
-            );
-            userText = sttTok.decode(ids, true).trim();
-        } catch (e) {
-            setStatus('error', 'stt: ' + e.message);
-            resumeOnce(0);
-            return;
-        }
-        if (!userText) {
-            setStatus('idle', 'no speech detected — idle');
-            resumeOnce(0);
-            return;
-        }
-        appendTurn('you', userText);
-        history.push({ role: 'user', content: userText });
-
-        // ─── LLM ──────────────────────────────────────────────────────────
-        setStatus('thinking', 'thinking…');
-        await new Promise(r => setTimeout(r, 0));
-        let reply = '';
-        try {
-            const prompt = lmTok.applyChatTemplate(history, true);
-            const promptIds = lmTok.encode(prompt);
-            lm.allocateCache(promptIds.length + 96);
-            const newIds = lm.generate(promptIds, {
-                maxNewTokens: 80,
-                eosId: lmTok.imEndId,
-                sampling: { temperature: 0.7, topK: 40, topP: 0.95, seed: Date.now() & 0x7fffffff },
-            });
-            reply = lmTok.decode(newIds);
-            reply = reply.replace(/<think>[\s\S]*?<\/think>/g, '')
-                         .replace(/<think>[\s\S]*$/g, '')
-                         .replace(/<\|.*?\|>/g, '')
-                         .trim();
-        } catch (e) {
-            setStatus('error', 'llm: ' + e.message);
-            resumeOnce(0);
-            return;
-        }
-        if (!reply) {
-            setStatus('idle', 'no reply — idle');
-            resumeOnce(0);
-            return;
-        }
-        appendTurn('bro', reply);
-        history.push({ role: 'assistant', content: reply });
-
-        // ─── TTS ──────────────────────────────────────────────────────────
-        setStatus('speaking', 'speaking…');
-        await new Promise(r => setTimeout(r, 0));
-        try {
-            const phonemeIds = bro.tts.phonemize(reply);
-            if (!phonemeIds || phonemeIds.length === 0) {
-                setStatus('idle', 'idle');
-                resumeOnce(0);
-                return;
-            }
-            const out = kokoro.synthesize(phonemeIds, voice, { speed: 1.0 });
-            const playSamples = resampleLinear(out.samples, out.sampleRate, engineRate);
-            const clipId = audioCtx.createClip(playSamples, 1);
-            audioCtx.playClip(clipId, 1.0, false);
-            const durMs = (playSamples.length / engineRate) * 1000;
-            // Resume wake AFTER playback + tail (covers speaker→mic bleed).
-            resumeOnce(durMs + WAKE_TAIL_MS);
-        } catch (e) {
-            setStatus('error', 'tts: ' + e.message);
-            resumeOnce(0);
-            return;
-        }
-    } catch (e) {
-        setStatus('error', 'pipeline: ' + e.message);
-        resumeOnce(0);
-    } finally {
-        // Belt-and-suspenders: if nothing scheduled a resume, do it now.
-        if (!resumed) resumeOnce(0);
+    const raw = concatChunks(captured);
+    captured = [];
+    if (raw.length < engineRate * 0.25) {
+        setStatus('idle', 'too short — idle');
+        setTimeout(() => goIdle(), 0);
+        return;
     }
+
+    const samples16k = resampleLinear(raw, engineRate, 16000);
+    setStatus('transcribing', 'transcribing…');
+    pipelineDone = false;
+    producedSpeech = false;
+
+    // Transfer the 16 kHz buffer to the worker zero-copy.
+    const buf = samples16k.buffer;
+    worker.postMessage({ type: 'transcribe', samples: samples16k, sampleRate: 16000 }, [buf]);
 }
 
 // ─── wake handler ─────────────────────────────────────────────────────────
 function onWake() {
-    if (recording || $talk.disabled) return;
+    if (recording || $talk.disabled || playing) return;
     playCueTone();
     (async () => {
         try { await ensureMic(); }
@@ -507,13 +546,12 @@ function onWake() {
 
 // ─── input wiring (manual hold-to-talk) ───────────────────────────────────
 async function onTalkDown() {
-    if ($talk.disabled || recording) return;
+    if ($talk.disabled || recording || !workerReady) return;
     try { await ensureMic(); }
     catch (e) { setStatus('error', 'mic: ' + e.message); return; }
     startRecording(false);
 }
 function onTalkUp() {
-    // Only manual recordings stop on release; wake-triggered uses VAD.
     if (recording && !triggeredByWake) stopRecordingAndRun();
 }
 
@@ -528,9 +566,9 @@ window.addEventListener('keyup', (e) => {
     if (e.key === ' ') { e.preventDefault(); onTalkUp(); }
 });
 
-// ─── boot ─────────────────────────────────────────────────────────────────
-loadAll().catch(e => {
-    console.error('load failed:', e);
-});
+// ─── boot after first paint ──────────────────────────────────────────────────
+// Two rAFs guarantee the splash UI has painted before we create the worker and
+// kick off the (worker-side, but still CPU-heavy) model loads.
+requestAnimationFrame(() => requestAnimationFrame(boot));
 
 })();
