@@ -1,27 +1,25 @@
 // Voice pipeline: mic -> Whisper -> Qwen3 -> Kokoro -> speaker.
 //
-// All heavy inference runs in voice-worker.js on a background thread, so this
-// thread stays free to render, capture the mic, run the wake word, and play
-// audio. The UI is responsive at all times: model loading shows live progress,
-// the reply text streams in token-by-token, and the word being spoken is
-// highlighted in sync with playback.
+// Everything runs on the MAIN thread. The three heavy models load and run via
+// the engine's async inference API (bro.lm/bro.stt/bro.tts), which dispatches
+// every blocking forward onto a background native thread and streams results
+// back on the event-loop tick — so this thread stays free to render, capture the
+// mic, run the wake word, and play audio. No JS Worker is involved.
+//
+// Because generation is genuinely async + cancellable, barge-in is a true
+// cancel: saying "computer" mid-reply calls .cancel() on the in-flight handles,
+// which stops the LLM decode within ~1 token and drops any pending STT/TTS — no
+// background drain. A per-turn id is kept as a backstop so a late callback from a
+// superseded turn is ignored.
 //
 // Activation modes:
-//   - Wake word: say "computer". Detected by bro.wake (streaming BC-ResNet).
-//     Capture auto-stops on end-of-utterance (rolling-peak VAD).
-//   - Hold-to-talk: button or Space key. Manual override.
+//   - Wake word: say "computer" (bro.wake, streaming BC-ResNet). Capture
+//     auto-stops on end-of-utterance (rolling-peak VAD).
+//   - Hold-to-talk: button or Space key.
 //
-// Barge-in: the wake word stays live while a reply is being thought up or
-// spoken, so saying "computer" again interrupts — playback is cut immediately
-// and a fresh capture opens. The in-flight worker generation can't be stopped
-// mid-loop (no SharedArrayBuffer), so it drains in the background and its output
-// is dropped via a per-utterance turn id. A bare "stop"/"cancel" follow-up just
-// returns to idle (recognized worker-side) instead of starting a new reply.
-//
-// Mic capture (this thread): getUserMedia -> AudioContext -> AnalyserNode.
-// We poll the analyser, stitch chunks via a needle-match for overlap, resample
-// to 16 kHz mono Float32, and hand the utterance to the worker. The worker
-// streams back transcript, reply tokens, and per-sentence audio + word timings.
+// Mic capture: getUserMedia -> AudioContext -> AnalyserNode. We poll the
+// analyser, stitch chunks via a needle-match for overlap, resample to 16 kHz
+// mono Float32, and feed the utterance to bro.stt.transcribe.
 
 (function () {
 'use strict';
@@ -32,9 +30,37 @@ const $transcript = document.getElementById('transcript');
 const $talk       = document.getElementById('talk');
 const $meter      = document.getElementById('meter');
 
-// ─── worker ──────────────────────────────────────────────────────────────────
-let worker = null;
-let workerReady = false;
+// ─── models (loaded on the main context via the async inference API) ──────────
+let whisper = null, sttTok = null, sttPrompt = null;
+let lm = null, lmTok = null;
+let kokoro = null, voice = null, spaceId = 16;
+let modelsReady = false;
+
+// Asset paths (mirror the previous worker).
+const QWEN_GGUF   = '../brolm/weights/Qwen3-8B-GGUF/Qwen3-8B-Q8_0.gguf';
+const WHISPER_DIR = '../brosoundml/weights/whisper';
+const WHISPER_VOCAB  = '../brosoundml/weights/whisper/vocab.json';
+const WHISPER_MERGES = '../brosoundml/weights/whisper/merges.txt';
+const SOUNDML_ROOT = '../brosoundml';
+const KOKORO_DIR   = '../brosoundml/weights/kokoro';
+const KOKORO_VOICE = '../brosoundml/weights/kokoro/voices/af_heart.bin';
+
+// Conversation memory (system prompt + rolling turns).
+const history = [
+    { role: 'system', content:
+        'You are speaking out loud through a text-to-speech system. Reply in 1-2 short ' +
+        'conversational sentences. Use contractions. Never use markdown, bullet lists, ' +
+        'code blocks, or symbols that do not sound natural when read aloud. Sound like a ' +
+        'friend, not a chatbot. /no_think' },
+];
+
+// Utterances that mean "stop / cancel" short-circuit before the LLM: they exist
+// to halt the previous reply (via barge-in), not to start a new one.
+const STOP_WORDS = new Set([
+    'stop', 'stop it', 'stop talking', 'stop please', 'please stop',
+    'cancel', 'never mind', 'nevermind', 'forget it', 'be quiet', 'quiet',
+    'shut up', 'shush', 'enough', "that's enough", 'thats enough',
+]);
 
 // Engine + audio (this thread owns playback + mic).
 let audioCtx = null;
@@ -94,21 +120,33 @@ let finalizedLen = 0;     // chars of fullText already turned into word spans
 // ─── playback queue (sequential, gapless-ish) ────────────────────────────────
 const audioQueue = [];    // { samples: Float32Array@engineRate, els: span[], words }
 let playing = false;
-let pipelineDone = false;
 let producedSpeech = false;
 let highlightTimer = 0;
 let activeClipId = -1;
 let activePlaybackId = -1; // handle to stop the in-progress speech clip (barge-in)
 let clipEndTimer = 0;      // setTimeout that advances the queue on clip end
 
-// ─── turn tracking (barge-in) ────────────────────────────────────────────────
-// Each utterance sent to the worker gets a monotonic turn id. The worker echoes
-// it on every reply message; we only act on messages whose turn === acceptTurn.
-// On barge-in we drop acceptTurn so the (uninterruptible) in-flight generation
-// drains into the void while the new turn takes over.
+// ─── pipeline / turn state (barge-in) ────────────────────────────────────────
+// Each utterance claims a monotonic turn id. Every async callback captures the
+// turn it belongs to and ignores its result if the turn has been superseded —
+// a backstop behind the real cancel (sttHandle/lmHandle/ttsHandle.cancel()).
 let turnSeq = 0;
 let acceptTurn = -1;
 let turnBusy = false;     // a turn is in flight (transcribing / thinking / speaking)
+let sttHandle = null;     // in-flight bro.stt.transcribe handle
+let lmHandle = null;      // in-flight bro.lm.generate handle
+let ttsHandle = null;     // in-flight bro.tts.synthesize handle
+
+// LLM streaming bookkeeping (mirrors the old worker).
+let streamed = [];        // raw token ids accumulated this turn
+let queuedLen = 0;        // chars of cleaned text already handed to the TTS queue
+let llmDone = false;      // the LLM finished producing tokens this turn
+let presynthSent = false; // one-shot "about to speak" cue per turn
+
+// Serial TTS queue — one synthesize() in flight at a time per the model's
+// single-owner guard. Items: { sentence, consumed, turn }.
+const synthQueue = [];
+let synthBusy = false;
 
 // ─── UI helpers ────────────────────────────────────────────────────────────
 function setStatus(kind, msg) {
@@ -193,6 +231,77 @@ function stopLoadingIndicator() {
     $meter.style.width = '0%';
 }
 
+// ─── text cleanup + sentence splitting (was worker-side) ─────────────────────
+// Strip <think> blocks and control tokens. Not trimmed (keeps offsets stable);
+// callers left-trim once content begins.
+function clean(raw) {
+    return raw
+        .replace(/<think>[\s\S]*?<\/think>/g, '')
+        .replace(/<think>[\s\S]*$/g, '')
+        .replace(/<\|.*?\|>/g, '')
+        .replace(/^\s+/, '');
+}
+
+// Extract the next complete sentence from `text` starting at `fromLen`. Ends at
+// . ! ? or a newline. Returns null when only a partial sentence remains.
+function nextSentence(text, fromLen) {
+    const m = text.slice(fromLen).match(/^[\s\S]*?[.!?\n]+/);
+    if (!m) return null;
+    return { sentence: m[0].trim(), length: m[0].length };
+}
+
+// Per-word timings from Kokoro's per-phoneme durations. durations[0] is the BOS
+// frame count, durations[i+1] corresponds to phonemeIds[i], the last is EOS.
+// Words are separated by the space token (spaceId); its frames belong to the
+// inter-word gap, not to either word.
+function computeWords(sentence, phonemeIds, durations, sampleCount, sampleRate) {
+    let frameSum = 0;
+    for (let i = 0; i < durations.length; i++) frameSum += durations[i];
+    const secPerFrame = frameSum > 0 ? (sampleCount / frameSum) / sampleRate : 0;
+
+    const groups = [];            // { startFrame, endFrame } per spoken word
+    let cursor = durations.length > 0 ? durations[0] : 0;   // skip BOS
+    let curStart = cursor, hasPhon = false;
+    for (let i = 0; i < phonemeIds.length; i++) {
+        const d = durations[i + 1] || 0;
+        if (phonemeIds[i] === spaceId) {
+            if (hasPhon) { groups.push({ startFrame: curStart, endFrame: cursor }); hasPhon = false; }
+            cursor += d;          // pause between words
+            curStart = cursor;
+        } else {
+            if (!hasPhon) { curStart = cursor; hasPhon = true; }
+            cursor += d;
+        }
+    }
+    if (hasPhon) groups.push({ startFrame: curStart, endFrame: cursor });
+
+    const textWords = sentence.split(/\s+/).filter(Boolean);
+    const words = [];
+    if (groups.length === textWords.length && groups.length > 0) {
+        for (let i = 0; i < groups.length; i++) {
+            words.push({
+                text: textWords[i],
+                startSec: groups[i].startFrame * secPerFrame,
+                endSec:   groups[i].endFrame   * secPerFrame,
+            });
+        }
+    } else {
+        // Counts diverged (punctuation tokenised oddly) — fall back to a
+        // proportional split by character length over the clip duration.
+        const totalSec = frameSum * secPerFrame;
+        let totalChars = 0;
+        for (const w of textWords) totalChars += w.length;
+        if (totalChars === 0) totalChars = 1;
+        let acc = 0;
+        for (const w of textWords) {
+            const dur = totalSec * (w.length / totalChars);
+            words.push({ text: w, startSec: acc, endSec: acc + dur });
+            acc += dur;
+        }
+    }
+    return words;
+}
+
 // ─── earcons ────────────────────────────────────────────────────────────────
 // Build a short PCM clip from a sequence of notes. Each note is { freq, durMs,
 // gain? }, separated by gapMs of silence. A raised-cosine attack and release on
@@ -242,9 +351,9 @@ function playReceiptCue()  { playEarcon(receiptClipId, 0.5); }
 function playPresynthCue() { playEarcon(presynthClipId, 0.35); }
 
 // ─── boot ────────────────────────────────────────────────────────────────────
-// Bring up the lightweight, this-thread pieces (audio context, cue tone), then
-// spawn the worker to load the heavy models. Runs AFTER the first paint so the
-// splash UI shows immediately instead of a black screen during model load.
+// Bring up the lightweight, this-thread pieces (audio context, cue tones), then
+// kick off the (background-thread) model loads. Runs AFTER the first paint so
+// the splash UI shows immediately instead of a black screen during model load.
 function boot() {
     try {
         audioCtx = new AudioContext();
@@ -262,118 +371,249 @@ function boot() {
     }
 
     setStatus('loading', 'loading models…');
-    $meter.style.width = '15%';
     $meter.style.opacity = '0.6';
-
-    worker = new Worker('voice-worker.js');
-    worker.onmessage = onWorkerMessage;
-    worker.postMessage({ type: 'load' });
+    loadModels();
 }
 
-const LOAD_LABELS = {
-    whisper: 'loading speech recognition…',
-    qwen:    'loading language model…',
-    kokoro:  'loading voice…',
-};
-const LOAD_PROGRESS = { whisper: '25%', qwen: '55%', kokoro: '85%' };
+// ─── model loading (parallel, async, non-blocking) ───────────────────────────
+// All four load units run concurrently on their own background threads; the
+// main thread stays responsive and the meter ticks up as each lands. bro.stt /
+// bro.lm / bro.tts loaders take an { onReady, onError } callback to run async.
+function loadModels() {
+    let pending = 4;            // lm, whisper, sttTok, voice(=kokoro chain)
+    let failed = false;
+    const bump = () => {
+        const done = 4 - pending;
+        $meter.style.width = Math.round((done / 4) * 100) + '%';
+    };
+    const fail = (stage, msg) => {
+        if (failed) return;
+        failed = true;
+        setStatus('error', stage + ': ' + msg);
+    };
+    const ready = () => {
+        bump();
+        if (--pending === 0 && !failed) onModelsReady();
+    };
 
-function onWorkerMessage(e) {
-    const msg = e.data || {};
+    try {
+        bro.lm.loadQwen(QWEN_GGUF, {
+            onReady: (r) => { lm = r.model; lmTok = r.tokenizer; ready(); },
+            onError: (m) => fail('language model', m),
+        });
 
-    // Drop messages from a superseded turn (barge-in, or stale background
-    // generation). Load-phase messages (progress/ready) carry no turn id.
-    if (msg.turn !== undefined && msg.turn !== acceptTurn) return;
+        bro.stt.loadWhisper(WHISPER_DIR, {
+            onReady: (w) => { whisper = w; ready(); },
+            onError: (m) => fail('speech recognition', m),
+        });
+        bro.stt.loadTokenizer({
+            vocabPath: WHISPER_VOCAB,
+            mergesPath: WHISPER_MERGES,
+            onReady: (t) => {
+                sttTok = t;
+                try { sttPrompt = sttTok.buildPrompt('en', 'transcribe', false); } catch (_) {}
+                ready();
+            },
+            onError: (m) => fail('speech tokenizer', m),
+        });
 
-    switch (msg.type) {
-        case 'progress':
-            setStatus('loading', LOAD_LABELS[msg.stage] || 'loading…');
-            $meter.style.width = LOAD_PROGRESS[msg.stage] || '50%';
-            break;
-
-        case 'ready':
-            workerReady = true;
-            $meter.style.width = '0%';
-            $meter.style.opacity = '1';
-            $talk.disabled = false;
-            $talk.textContent = 'say "computer" or hold to talk';
-            $talk.title = 'Say "computer" to activate, or hold (Space) to talk manually.';
-            startWake();
-            goIdle();
-            break;
-
-        case 'user':
-            stopLoadingIndicator();
-            if (msg.stopword) {
-                // A bare "stop/cancel" — acknowledge and fall back to idle; no
-                // reply is coming (worker sends `done` next).
-                appendTurn('you', msg.text);
-                setStatus('idle', 'stopped');
-            } else if (msg.text) {
-                appendTurn('you', msg.text);
-                startBroTurn();
-                setStatus('thinking', 'thinking…');
-            } else {
-                setStatus('idle', 'no speech detected — idle');
-            }
-            break;
-
-        case 'token':
-            // First visible text — the LLM is responding, so drop the loader.
-            stopLoadingIndicator();
-            fullText += msg.delta;
-            updatePending();
-            break;
-
-        case 'presynth':
-            // The worker is about to synthesize the first sentence. Play the
-            // soft "about to speak" cue now so it overlaps the synthesis
-            // latency instead of delaying the audio that follows.
-            playPresynthCue();
-            setStatus('thinking', 'responding…');
-            break;
-
-        case 'speech':
-            producedSpeech = true;
-            finalizeSentence(msg);
-            enqueueAudio(msg);
-            setStatus('speaking', 'speaking…');
-            break;
-
-        case 'done':
-            pipelineDone = true;
-            maybeFinishSpeaking();
-            break;
-
-        case 'error':
-            stopLoadingIndicator();
-            setStatus('error', (msg.stage || 'pipeline') + ': ' + msg.message);
-            resetReplyState();
-            pipelineDone = true;
-            maybeFinishSpeaking();
-            break;
+        bro.tts.setAssetRoot(SOUNDML_ROOT);
+        bro.tts.loadKokoro(KOKORO_DIR, {
+            onReady: (k) => {
+                kokoro = k;
+                try {
+                    const v = k.vocab();
+                    if (typeof v[' '] === 'number') spaceId = v[' '];
+                } catch (_) {}
+                k.loadVoice(KOKORO_VOICE, {
+                    onReady: (vc) => { voice = vc; ready(); },
+                    onError: (m) => fail('voice', m),
+                });
+            },
+            onError: (m) => fail('voice model', m),
+        });
+    } catch (e) {
+        fail('load', e.message);
     }
 }
 
+function onModelsReady() {
+    modelsReady = true;
+    $meter.style.width = '0%';
+    $meter.style.opacity = '1';
+    $talk.disabled = false;
+    $talk.textContent = 'say "computer" or hold to talk';
+    $talk.title = 'Say "computer" to activate, or hold (Space) to talk manually.';
+    // Warm the phonemizer's lexicon off the critical path so the first reply
+    // doesn't pay the one-time load cost mid-turn. (phonemize() is synchronous;
+    // making it async is a future improvement.)
+    setTimeout(() => { try { bro.tts.phonemize('warming up the lexicon'); } catch (_) {} }, 0);
+    startWake();
+    goIdle();
+}
+
+// ─── pipeline: STT -> streaming LLM -> per-sentence TTS ───────────────────────
+// Kicks off transcription of the captured utterance. Each stage chains into the
+// next inside its onDone, all on the main thread, all cancellable.
+function runPipeline(samples16k) {
+    const myTurn = acceptTurn;
+    sttHandle = bro.stt.transcribe(
+        whisper, { samples: samples16k, sampleRate: 16000 }, sttPrompt,
+        { maxNewTokens: 128, onDone: (ids, info) => onTranscribed(myTurn, ids, info) });
+}
+
+function onTranscribed(myTurn, ids, info) {
+    sttHandle = null;
+    if (myTurn !== acceptTurn) return;          // superseded by a barge-in
+    if (info && info.error) { pipelineError('stt', info.error); return; }
+
+    let userText = '';
+    try { userText = sttTok.decode(ids, true).trim(); } catch (_) {}
+    stopLoadingIndicator();
+
+    // A bare stop/cancel utterance just returns to idle — the barge-in already
+    // halted the previous reply; don't answer "stop" as a question.
+    const norm = userText.toLowerCase().replace(/[^a-z' ]+/g, '').replace(/\s+/g, ' ').trim();
+    if (STOP_WORDS.has(norm)) {
+        appendTurn('you', userText);
+        setStatus('idle', 'stopped');
+        finishTurn();
+        return;
+    }
+    if (!userText) {
+        setStatus('idle', 'no speech detected — idle');
+        finishTurn();
+        return;
+    }
+
+    appendTurn('you', userText);
+    startBroTurn();
+    setStatus('thinking', 'thinking…');
+    startLLM(myTurn, userText);
+}
+
+function startLLM(myTurn, userText) {
+    history.push({ role: 'user', content: userText });
+
+    streamed = [];
+    queuedLen = 0;
+    llmDone = false;
+    presynthSent = false;
+
+    let promptIds;
+    try {
+        const prompt = lmTok.applyChatTemplate(history, true);
+        promptIds = lmTok.encode(prompt);
+    } catch (e) { pipelineError('llm', e.message); return; }
+
+    lmHandle = bro.lm.generate(lm, promptIds, {
+        maxNewTokens: 80,
+        eosId: lmTok.imEndId,
+        sampling: { temperature: 0.7, topK: 40, topP: 0.95,
+                    seed: (promptIds.length * 2654435761) & 0x7fffffff },
+        onToken: (id) => onLLMToken(myTurn, id),
+        onDone:  (ids, info) => onLLMDone(myTurn, info),
+    });
+}
+
+function onLLMToken(myTurn, id) {
+    if (myTurn !== acceptTurn) return;
+    streamed.push(id);
+    let cleaned;
+    try { cleaned = clean(lmTok.decode(streamed)); } catch (_) { return; }
+    fullText = cleaned;
+    updatePending();
+
+    // Queue each newly completed sentence for synthesis.
+    let s;
+    while ((s = nextSentence(fullText, queuedLen)) !== null) {
+        queuedLen += s.length;
+        if (s.sentence) enqueueSynth(myTurn, s.sentence, queuedLen);
+    }
+}
+
+function onLLMDone(myTurn, info) {
+    lmHandle = null;
+    if (myTurn !== acceptTurn) return;
+    if (info && info.error) { pipelineError('llm', info.error); return; }
+
+    // Flush any trailing partial sentence.
+    const tail = fullText.slice(queuedLen).trim();
+    if (tail) { enqueueSynth(myTurn, tail, fullText.length); queuedLen = fullText.length; }
+
+    if (fullText.trim()) history.push({ role: 'assistant', content: fullText.trim() });
+    llmDone = true;
+    maybeFinishSpeaking();
+}
+
+function pipelineError(stage, msg) {
+    setStatus('error', stage + ': ' + msg);
+    resetReplyState();
+    llmDone = true;
+    finishTurn();
+}
+
+// ─── serial TTS queue ────────────────────────────────────────────────────────
+function enqueueSynth(myTurn, sentence, consumed) {
+    synthQueue.push({ sentence, consumed, turn: myTurn });
+    pumpSynth();
+}
+
+function pumpSynth() {
+    if (synthBusy || synthQueue.length === 0) return;
+    const item = synthQueue.shift();
+    if (item.turn !== acceptTurn) { pumpSynth(); return; }  // stale
+
+    let phonemeIds;
+    try { phonemeIds = bro.tts.phonemize(item.sentence); } catch (_) { phonemeIds = null; }
+    if (!phonemeIds || phonemeIds.length === 0) { pumpSynth(); return; }
+
+    // Play the soft "about to speak" cue once, just before the first synth of
+    // the turn, so it overlaps the synthesis latency.
+    if (!presynthSent) { presynthSent = true; playPresynthCue(); setStatus('thinking', 'responding…'); }
+
+    synthBusy = true;
+    ttsHandle = bro.tts.synthesize(kokoro, phonemeIds, voice, {
+        speed: 1.0,
+        onDone: (res, info) => {
+            synthBusy = false;
+            ttsHandle = null;
+            if (item.turn === acceptTurn && !(info && info.cancelled) && res &&
+                res.samples && res.samples.length > 0) {
+                const words = computeWords(item.sentence, phonemeIds, res.durations,
+                                           res.samples.length, res.sampleRate);
+                const els = finalizeSentence(words, item.consumed);
+                enqueueAudio(res.samples, res.sampleRate, els, words);
+                producedSpeech = true;
+                setStatus('speaking', 'speaking…');
+            }
+            pumpSynth();
+            maybeFinishSpeaking();
+        },
+    });
+}
+
 // Replace the streaming tail for this sentence with highlightable word spans.
-function finalizeSentence(msg) {
+// Returns the span elements (for the playback highlighter).
+function finalizeSentence(words, consumed) {
     if (!broSpokenEl) startBroTurn();
     const els = [];
-    for (let i = 0; i < msg.words.length; i++) {
+    for (let i = 0; i < words.length; i++) {
         const span = document.createElement('span');
         span.className = 'word';
-        span.textContent = msg.words[i].text;
+        span.textContent = words[i].text;
         broSpokenEl.appendChild(span);
         broSpokenEl.appendChild(document.createTextNode(' '));
         els.push(span);
     }
-    msg._els = els;
-    finalizedLen = msg.consumed;
+    finalizedLen = consumed;
     updatePending();
+    return els;
 }
 
-function enqueueAudio(msg) {
-    const samples = resampleLinear(msg.samples, msg.sampleRate, engineRate);
-    audioQueue.push({ samples, els: msg._els || [], words: msg.words });
+function enqueueAudio(samples, sampleRate, els, words) {
+    const resampled = resampleLinear(samples, sampleRate, engineRate);
+    audioQueue.push({ samples: resampled, els: els || [], words });
     pumpQueue();
 }
 
@@ -431,12 +671,19 @@ function pumpQueue() {
     }, durMs + 40);
 }
 
-// Return to idle once the LLM is done AND all queued audio has played out.
+// Return to idle once the LLM is done AND all synthesis + queued audio is out.
 function maybeFinishSpeaking() {
-    if (!pipelineDone || playing || audioQueue.length > 0) return;
-    pipelineDone = false;
-    turnBusy = false;
+    if (!llmDone || synthBusy || synthQueue.length > 0 || playing ||
+        audioQueue.length > 0) return;
+    finishTurn();
+}
+
+// End the current turn: clear in-flight state, suspend back to idle (with a wake
+// tail after real speech so a trailing word isn't clipped by an immediate wake).
+function finishTurn() {
     const wasSpeaking = producedSpeech;
+    turnBusy = false;
+    llmDone = false;
     producedSpeech = false;
     setTimeout(() => goIdle(), wasSpeaking ? WAKE_TAIL_MS : 0);
 }
@@ -463,19 +710,26 @@ function stopPlayback() {
 
 function resetReplyState() {
     stopPlayback();
+    synthQueue.length = 0;
 }
 
-// Barge-in: the user said "computer" while a turn was in flight. Cut the audio
-// immediately and abandon the current turn. The worker can't be stopped
-// mid-generation (no SharedArrayBuffer), so we drop acceptTurn and let its
-// remaining messages fall on the floor; the caller then opens a fresh capture.
+// Barge-in: the user said "computer" (or held to talk) while a turn was in
+// flight. Cancel every in-flight stage — this is a true cancel: the LLM decode
+// stops within ~1 token and any pending STT/TTS result is dropped. Bumping
+// acceptTurn makes any late callback a no-op as a backstop.
 function interruptTurn() {
     acceptTurn = -1;
     turnBusy = false;
-    pipelineDone = false;
+    llmDone = false;
     producedSpeech = false;
+    synthBusy = false;
+    try { if (sttHandle) sttHandle.cancel(); } catch (_) {}
+    try { if (lmHandle)  lmHandle.cancel(); } catch (_) {}
+    try { if (ttsHandle) ttsHandle.cancel(); } catch (_) {}
+    sttHandle = lmHandle = ttsHandle = null;
     stopLoadingIndicator();
     stopPlayback();
+    synthQueue.length = 0;
     if (broPendingEl) broPendingEl.textContent = '';
 }
 
@@ -632,9 +886,9 @@ function resampleLinear(samples, fromRate, toRate) {
     return out;
 }
 
-// Hand the captured utterance to the worker. The heavy pipeline (STT, LLM,
-// TTS) runs there; this thread keeps rendering and will receive the transcript,
-// streamed reply tokens, and per-sentence audio back as messages.
+// Hand the captured utterance to the pipeline. STT, LLM, and TTS all run on
+// background native threads; this thread keeps rendering and receives the
+// transcript, streamed tokens, and per-sentence audio via async callbacks.
 function stopRecordingAndRun() {
     if (!recording) return;
     recording = false;
@@ -659,8 +913,6 @@ function stopRecordingAndRun() {
     const samples16k = resampleLinear(raw, engineRate, 16000);
     setStatus('transcribing', 'transcribing…');
     startLoadingIndicator();
-    pipelineDone = false;
-    producedSpeech = false;
 
     // Claim a turn id and arm barge-in: keep the wake word live through the
     // think + speak phases so the user can say "computer" to interrupt.
@@ -669,9 +921,7 @@ function stopRecordingAndRun() {
     turnBusy = true;
     wakeResume();
 
-    // Transfer the 16 kHz buffer to the worker zero-copy.
-    const buf = samples16k.buffer;
-    worker.postMessage({ type: 'transcribe', samples: samples16k, sampleRate: 16000, turn: turnSeq }, [buf]);
+    runPipeline(samples16k);
 }
 
 // ─── wake handler ─────────────────────────────────────────────────────────
@@ -689,7 +939,7 @@ function onWake() {
 
 // ─── input wiring (manual hold-to-talk) ───────────────────────────────────
 async function onTalkDown() {
-    if ($talk.disabled || recording || !workerReady) return;
+    if ($talk.disabled || recording || !modelsReady) return;
     if (turnBusy) interruptTurn();   // hold-to-talk also barges in
     try { await ensureMic(); }
     catch (e) { setStatus('error', 'mic: ' + e.message); return; }
@@ -711,8 +961,8 @@ window.addEventListener('keyup', (e) => {
 });
 
 // ─── boot after first paint ──────────────────────────────────────────────────
-// Two rAFs guarantee the splash UI has painted before we create the worker and
-// kick off the (worker-side, but still CPU-heavy) model loads.
+// Two rAFs guarantee the splash UI has painted before we kick off the
+// (background-thread, but still CPU/GPU-heavy) model loads.
 requestAnimationFrame(() => requestAnimationFrame(boot));
 
 })();
