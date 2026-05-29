@@ -22,23 +22,35 @@
     return { w: w, h: h };
   }
 
-  // One block's column for context token k, min-max normalised to 0..1.
-  function blockColumn(block, k) {
+  // One block's contrastive column for context token k: the raw attention
+  // weight data[q,k] minus, at each query q, the mean attention across the
+  // prompt's content tokens (contentCols — the real words, not BOS/EOS/pad).
+  //
+  // That baseline is the token-agnostic signal: cross-attention concentrates
+  // on whichever content token wherever the image has structural detail, so
+  // every token's raw column lights up over detailed regions regardless of
+  // meaning. Subtracting it leaves the token-specific part — where token k
+  // drew attention beyond the field. Values come back raw (signed, un-scaled);
+  // callers normalise once, after any cross-block aggregation, so a block's
+  // weight in an average stays proportional to its real token-specific signal.
+  //
+  // contentCols null or shorter than 2 → no baseline (plain attention column).
+  function blockColumn(block, k, contentCols) {
     var Lq = block.Lq, Lk = block.Lk, data = block.data;
     var col = new Float32Array(Lq);
     if (k < 0 || k >= Lk) return col;
-    var lo = Infinity, hi = -Infinity;
+    var M = contentCols ? contentCols.length : 0;
     for (var q = 0; q < Lq; q++) {
-      var v = data[q * Lk + k];
-      col[q] = v;
-      if (v < lo) lo = v;
-      if (v > hi) hi = v;
-    }
-    var span = hi - lo;
-    if (span > 1e-9) {
-      for (var i = 0; i < Lq; i++) col[i] = (col[i] - lo) / span;
-    } else {
-      col.fill(0);
+      var row = q * Lk, base = 0;
+      if (M >= 2) {
+        var s = 0;
+        for (var m = 0; m < M; m++) {
+          var c = contentCols[m];
+          if (c >= 0 && c < Lk) s += data[row + c];
+        }
+        base = s / M;
+      }
+      col[q] = data[row + k] - base;
     }
     return col;
   }
@@ -68,8 +80,15 @@
   }
 
   // Build a heatmap grid for context token `k`. blockSel is 'avg' or an
-  // integer block index. Returns { w, h, values:Float32Array } or null.
-  function computeHeatmap(trace, k, blockSel, lw, lh) {
+  // integer block index. contentCols is the prompt's content-token columns,
+  // used by blockColumn for contrastive normalisation. Returns
+  // { w, h, values:Float32Array } or null.
+  //
+  // 'avg' sums each block's *raw* contrastive column and normalises once at
+  // the end — a magnitude-weighted mean, so a block contributes in proportion
+  // to its actual token-specific signal rather than being stretched to full
+  // range first (which would let near-flat blocks inject equal-weight noise).
+  function computeHeatmap(trace, k, blockSel, lw, lh, contentCols) {
     if (!trace || !trace.length) return null;
     var gw = Math.max(1, lw), gh = Math.max(1, lh);
 
@@ -77,7 +96,7 @@
       var b = trace[blockSel | 0];
       if (!b) return null;
       var d = blockDims(b.Lq, lw, lh);
-      var g = resample(blockColumn(b, k), d.w, d.h, gw, gh);
+      var g = resample(blockColumn(b, k, contentCols), d.w, d.h, gw, gh);
       return { w: gw, h: gh, values: normalize(g) };
     }
 
@@ -85,13 +104,16 @@
     for (var i = 0; i < trace.length; i++) {
       var blk = trace[i];
       var dd = blockDims(blk.Lq, lw, lh);
-      var rs = resample(blockColumn(blk, k), dd.w, dd.h, gw, gh);
+      var rs = resample(blockColumn(blk, k, contentCols), dd.w, dd.h, gw, gh);
       for (var j = 0; j < acc.length; j++) acc[j] += rs[j];
     }
     for (var n = 0; n < acc.length; n++) acc[n] /= trace.length;
     return { w: gw, h: gh, values: normalize(acc) };
   }
 
+  // Min-max stretch to 0..1 in place. A flat array (no spread) carries no
+  // spatial information — zero it so the overlay reads as empty rather than
+  // amplifying float noise into a full-range pattern.
   function normalize(arr) {
     var lo = Infinity, hi = -Infinity;
     for (var i = 0; i < arr.length; i++) {
@@ -101,6 +123,8 @@
     var span = hi - lo;
     if (span > 1e-9) {
       for (var j = 0; j < arr.length; j++) arr[j] = (arr[j] - lo) / span;
+    } else {
+      arr.fill(0);
     }
     return arr;
   }
