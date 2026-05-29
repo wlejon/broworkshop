@@ -441,12 +441,22 @@ function maybeFinishSpeaking() {
     setTimeout(() => goIdle(), wasSpeaking ? WAKE_TAIL_MS : 0);
 }
 
+// Clear any lit word highlight. The highlight tick removes the `speaking` class
+// in its own cleanup, but stopPlayback cancels that tick before it can run, so
+// the currently-lit word would otherwise linger into the next turn. Querying the
+// DOM catches it no matter which clip's closure lit it.
+function clearWordHighlight() {
+    const lit = $transcript.querySelectorAll('.word.speaking');
+    for (let i = 0; i < lit.length; i++) lit[i].classList.remove('speaking');
+}
+
 // Stop and tear down all in-progress playback (shared by reset + barge-in).
 function stopPlayback() {
     if (clipEndTimer) { clearTimeout(clipEndTimer); clipEndTimer = 0; }
     if (highlightTimer) { clearInterval(highlightTimer); highlightTimer = 0; }
     if (activePlaybackId >= 0) { try { audioCtx.stopPlayback(activePlaybackId); } catch (_) {} activePlaybackId = -1; }
     if (activeClipId >= 0) { try { audioCtx.deleteClip(activeClipId); } catch (_) {} activeClipId = -1; }
+    clearWordHighlight();
     audioQueue.length = 0;
     playing = false;
 }
