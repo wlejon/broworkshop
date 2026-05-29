@@ -446,10 +446,28 @@ function onModelsReady() {
     $talk.title = 'Say "computer" to activate, or hold (Space) to talk manually.';
     // Warm the phonemizer's lexicon off the critical path so the first reply
     // doesn't pay the one-time load cost mid-turn. (phonemize() is synchronous;
-    // making it async is a future improvement.)
-    setTimeout(() => { try { bro.tts.phonemize('warming up the lexicon'); } catch (_) {} }, 0);
-    startWake();
-    goIdle();
+    // making it async is a future improvement.) A throw here means its g2p data
+    // (lexicon / POS tagger) is missing or unreadable — fatal for speech-out, so
+    // surface it like a failed model load and don't start listening, rather than
+    // letting every reply come out mute. Wake + idle only arm on success.
+    setTimeout(() => {
+        try { bro.tts.phonemize('warming up the lexicon'); }
+        catch (e) { phonemizerFailed(e.message); return; }
+        startWake();
+        goIdle();
+    }, 0);
+}
+
+// The phonemizer's g2p data couldn't be loaded. Without it the pipeline can
+// transcribe and think but never speak, so treat it as a hard load failure:
+// show the reason and keep the talk button disabled (mirrors the model
+// loaders' onError). Run scripts/download-brosoundml-data.sh to fetch it.
+function phonemizerFailed(msg) {
+    modelsReady = false;
+    setStatus('error', 'voice data: ' + msg);
+    $talk.disabled = true;
+    $talk.textContent = 'voice data missing';
+    $talk.title = msg;
 }
 
 // ─── pipeline: STT -> streaming LLM -> per-sentence TTS ───────────────────────
@@ -565,7 +583,15 @@ function pumpSynth() {
     if (item.turn !== acceptTurn) { pumpSynth(); return; }  // stale
 
     let phonemeIds;
-    try { phonemeIds = bro.tts.phonemize(item.sentence); } catch (_) { phonemeIds = null; }
+    try {
+        phonemeIds = bro.tts.phonemize(item.sentence);
+    } catch (e) {
+        // A throw (vs. an empty result) means the phonemizer itself failed —
+        // its g2p data went missing after boot. That's fatal for the whole
+        // reply, not a per-sentence quirk, so surface it instead of muting.
+        pipelineError('voice', e.message);
+        return;
+    }
     if (!phonemeIds || phonemeIds.length === 0) { pumpSynth(); return; }
 
     // Play the soft "about to speak" cue once, just before the first synth of
@@ -737,7 +763,7 @@ function interruptTurn() {
 function startWake() {
     try {
         bro.wake.listen({
-            weights: '../brosoundml/weights/wake/computer.bw',
+            weights: '../brosoundml-data/wake/computer.bw',
             threshold: 0.85,
             onFire: onWake,
         });
