@@ -1,23 +1,29 @@
-// flora-lab — make broflora's sim primitives visible.
+// flora-lab — grow a lush flowering landscape with broflora.
+//
+// The branch skeleton broflora simulates drives the rendered plant directly:
+// real leaf cards are scattered along its twigs (Mesh.scatterLeaves) and a
+// flower is stamped at every bloom anchor. The wireframe layers below are
+// diagnostic overlays, off by default — toggle them on to inspect the sim.
 //
 // Visual language:
-//   branches      solid mesh (the real plant)                         brown
-//   foliage       wire sphere cage per sample, scaled by mass         green
-//   blooms        wire cross + normal stub per anchor                  magenta
-//   shadow grid   wire box per cell whose Q_G < threshold              blue
-//   seed ring     wire circle on ground at each plant's seedingRadius  white
+//   branches      solid tapered tubes (the real stems)                 bark
+//   foliage       leaf cards scattered along the twigs                 green
+//   blooms        radial flowers at each bloom anchor                  blossom
+//   shadow grid   wire box per cell whose Q_G < threshold   (diag)     blue
+//   seed ring     wire circle at each plant's seedingRadius (diag)     white
+//   plant origins cross + stem marker per plant origin     (diag)      amber
 
 const canvas = document.getElementById('stage');
 const scene = canvas.getContext('scene');
 
-scene.setAmbient([0.06, 0.07, 0.08]);
-scene.setToneMap({ mode: 'aces', exposure: 1.0 });
+scene.setAmbient([0.11, 0.13, 0.13]);   // soft sky-tinted fill
+scene.setToneMap({ mode: 'aces', exposure: 1.05 });
 
 scene.createLight({
     type: 'directional',
-    direction: [-0.4, -0.85, -0.25],
-    color: [1.0, 0.96, 0.9],
-    intensity: 2.2,
+    direction: [-0.4, -0.82, -0.30],
+    color: [1.0, 0.95, 0.85],           // warm sun
+    intensity: 2.8,
     castsShadow: true,
 });
 
@@ -98,7 +104,7 @@ const GRID_HEIGHT = 16;    // metres tall
 scene.createMesh({
     mesh: 'plane',
     halfW: WORLD_SIZE * 0.5, halfD: WORLD_SIZE * 0.5,
-    y: 0, color: '#3a4238', metallic: 0, roughness: 0.95,
+    y: 0, color: '#36421f', metallic: 0, roughness: 1.0,   // mossy meadow floor
     receivesShadow: true,
 });
 
@@ -185,13 +191,32 @@ buildWorld();
 // ─── Overlay state ────────────────────────────────────────────────────────
 
 const overlays = {
-    branches:    { label: 'branches',   color: [0.46, 0.30, 0.20], on: true, node: null },
-    foliage:     { label: 'foliage',    color: [0.45, 0.85, 0.30, 0.55], on: true, node: null },
-    blooms:      { label: 'blooms',     color: [1.00, 0.45, 0.75, 0.85], on: true, node: null },
+    branches:    { label: 'branches',   color: [0.33, 0.23, 0.14], on: true,  node: null },
+    foliage:     { label: 'foliage',    color: [0.34, 0.55, 0.24], on: true,  node: null },
+    blooms:      { label: 'blooms',     color: [0.97, 0.62, 0.76], on: true,  node: null },
     shadowGrid:  { label: 'shadow grid', color: [0.45, 0.60, 1.00, 0.30], on: false, node: null },
-    seedRings:   { label: 'seeding radius', color: [1.00, 1.00, 1.00, 0.35], on: true, node: null },
-    plantOrigins:{ label: 'plant origins', color: [1.00, 0.85, 0.30, 0.80], on: true, node: null },
+    seedRings:   { label: 'seeding radius', color: [1.00, 1.00, 1.00, 0.35], on: false, node: null },
+    plantOrigins:{ label: 'plant origins', color: [1.00, 0.85, 0.30, 0.80], on: false, node: null },
 };
+
+// Leaf cards / flowers bake a per-vertex windBend value into vertex colors;
+// clearing the color buffer lets the flat material color show instead.
+function stripVertexColors(mesh) {
+    if (!mesh) return mesh;
+    try { mesh.colors = new Float32Array(0); } catch (e) {}
+    return mesh;
+}
+
+// Rotate a mesh so its local +Y points along unit vector n.
+function orientYTo(mesh, n) {
+    const ny = Math.max(-1, Math.min(1, n[1]));
+    const ang = Math.acos(ny);
+    if (ang < 1e-4) return;
+    if (ang > Math.PI - 1e-4) { mesh.rotate(1, 0, 0, Math.PI); return; }
+    let ax = n[2], az = -n[0];                 // cross([0,1,0], n)
+    const L = Math.hypot(ax, 0, az) || 1;
+    mesh.rotate(ax / L, 0, az / L, ang);
+}
 
 function destroyOverlay(key) {
     const o = overlays[key];
@@ -212,53 +237,79 @@ function rebuildBranches() {
     });
 }
 
+// Real foliage: scatter low-poly leaf cards along the branch twigs broflora
+// emits, then merge into one mesh. broflora's segments (from/to/radius/depth)
+// are exactly the BranchSegment shape Mesh.scatterLeaves expects, so the
+// simulated skeleton drives the rendered canopy directly.
 function rebuildFoliage() {
     destroyOverlay('foliage');
     if (!overlays.foliage.on) return;
     const segs = world.emitSegments();
-    const fol  = world.emitFoliage();
     if (!segs || segs.length === 0) return;
 
-    const parts = [];
-    for (let i = 0; i < segs.length; i++) {
-        const s = segs[i], f = fol[i];
-        if (!f || f.mass < 0.02) continue;
-        // Place sphere cage at midpoint of segment, sized by mass.
-        const mx = (s.from[0] + s.to[0]) * 0.5;
-        const my = (s.from[1] + s.to[1]) * 0.5;
-        const mz = (s.from[2] + s.to[2]) * 0.5;
-        const r = Math.min(0.45, 0.08 + f.mass * 0.20);
-        parts.push(wire.translate(wire.sphereCage(r, 10), mx, my, mz));
-    }
-    if (parts.length === 0) return;
-    const merged = wire.merge(parts);
-    if (!merged) return;
+    const leaf = Mesh.leafCard('oval', { width: 0.085, length: 0.19, bend: 0.4, fullUV: true });
+    stripVertexColors(leaf);
+    const foliage = Mesh.scatterLeaves(segs, leaf, {
+        maxRadius:     0.16,   // leaves on twigs, not the thick stems
+        minDepth:      1,
+        perUnitLength: 46,
+        upBias:        0.5,    // leaves tip toward the light
+        tiltJitter:    0.55,
+        rollJitter:    0.9,
+        baseScale:     1.0,
+        scaleJitter:   0.3,
+        scaleByRadius: 0.25,
+        seed:          0x1eaf,
+    });
+    if (!foliage || foliage.triangleCount === 0) return;
+    stripVertexColors(foliage);
     overlays.foliage.node = scene.createMesh({
-        positions: merged.positions, indices: merged.indices,
-        drawMode: 'lines', lineWidth: 1,
+        data: foliage,
         color: overlays.foliage.color,
+        metallic: 0.0, roughness: 0.7,
+        twoSided: true, subsurface: 0.5,
+        castsShadow: true, receivesShadow: true,
     });
 }
 
+// Real blooms: stamp a small radial flower at each bloom anchor broflora
+// emits (flowering plants only), oriented to face along the twig's outward
+// normal. Capped so a dense canopy stays interactive.
+const BLOOM_CAP = 500;
 function rebuildBlooms() {
     destroyOverlay('blooms');
     if (!overlays.blooms.on) return;
     const anchors = world.emitBloomAnchors();
     if (!anchors || anchors.length === 0) return;
 
+    const base = Mesh.flower({
+        petalCount: 5, petalShape: 'petal',
+        petalLength: 0.11, petalWidth: 0.07, petalBend: 0.8,
+        centerRadius: 0.025, centerHeight: 0.02,
+    });
+    stripVertexColors(base);
+
+    const stride = anchors.length > BLOOM_CAP ? Math.ceil(anchors.length / BLOOM_CAP) : 1;
     const parts = [];
-    const stub = 0.18;
-    for (const a of anchors) {
-        const p = a.position, n = a.normal;
-        parts.push(wire.translate(wire.cross(0.07), p[0], p[1], p[2]));
-        parts.push(wire.line(p, [p[0] + n[0] * stub, p[1] + n[1] * stub, p[2] + n[2] * stub]));
+    for (let i = 0; i < anchors.length; i += stride) {
+        const a = anchors[i];
+        const f = base.clone();
+        orientYTo(f, a.normal);
+        // Slight per-bloom scale variation keyed off life-state.
+        const s = 0.8 + 0.5 * Math.min(1, a.age01 || 0.5);
+        f.scale(s, s, s);
+        f.translate(a.position[0], a.position[1], a.position[2]);
+        parts.push(f);
     }
-    const merged = wire.merge(parts);
-    if (!merged) return;
+    if (parts.length === 0) return;
+    const merged = Mesh.merge(parts);
+    if (!merged || merged.triangleCount === 0) return;
     overlays.blooms.node = scene.createMesh({
-        positions: merged.positions, indices: merged.indices,
-        drawMode: 'lines', lineWidth: 2,
+        data: merged,
         color: overlays.blooms.color,
+        metallic: 0.0, roughness: 0.55,
+        twoSided: true, subsurface: 0.4,
+        castsShadow: false, receivesShadow: true,
     });
 }
 
