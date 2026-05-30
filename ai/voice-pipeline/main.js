@@ -29,21 +29,24 @@ const $status     = document.getElementById('status');
 const $transcript = document.getElementById('transcript');
 const $talk       = document.getElementById('talk');
 const $meter      = document.getElementById('meter');
+const $gate       = document.getElementById('gate');
 
 // ─── models (loaded on the main context via the async inference API) ──────────
 let whisper = null, sttTok = null, sttPrompt = null;
 let lm = null, lmTok = null;
 let kokoro = null, voice = null, spaceId = 16;
 let modelsReady = false;
+let speechOn = false;   // true once Kokoro + voice load; otherwise text-only
 
-// Asset paths (mirror the previous worker).
-const QWEN_GGUF   = '../brolm/weights/Qwen3-8B-GGUF/Qwen3-8B-Q8_0.gguf';
-const WHISPER_DIR = '../brosoundml/weights/whisper';
-const WHISPER_VOCAB  = '../brosoundml/weights/whisper/vocab.json';
-const WHISPER_MERGES = '../brosoundml/weights/whisper/merges.txt';
+// Model file paths, resolved at boot by VoiceModels (models.js) — they point at
+// the shared model cache on a downloaded build, or at the dev sibling repos in a
+// source checkout. Filled in by startLoad().
+let QWEN_GGUF = null;
+let WHISPER_DIR = null, WHISPER_VOCAB = null, WHISPER_MERGES = null, WHISPER_ADDED = null;
+let WAKE_WEIGHTS = null, KOKORO_DIR = null, KOKORO_VOICE = null;
+// The phonemizer's g2p + Kokoro-vocab root. Speech runs from this dev layout
+// for now (its data isn't part of the on-demand download set yet).
 const SOUNDML_ROOT = '../brosoundml';
-const KOKORO_DIR   = '../brosoundml/weights/kokoro';
-const KOKORO_VOICE = '../brosoundml/weights/kokoro/voices/af_heart.bin';
 
 // Conversation memory (system prompt + rolling turns).
 const history = [
@@ -204,10 +207,11 @@ function wakeResume() {
 
 // Idle UI = wake listening + score meter (if available).
 function goIdle() {
+    const suffix = speechOn ? '' : ' (text-only)';
     if (wakeActive) {
-        setStatus('idle', 'listening for "computer"…');
+        setStatus('idle', 'listening for "computer"…' + suffix);
     } else {
-        setStatus('idle', 'idle');
+        setStatus('idle', 'idle' + suffix);
     }
     $meter.style.width = '0%';
     wakeResume();
@@ -370,6 +374,110 @@ function boot() {
         return;
     }
 
+    // Gate: only the heavy, downloadable weights (wake, LLM, Whisper) block
+    // boot. If any are missing, show a download panel instead of pulling
+    // gigabytes automatically; otherwise load straight away.
+    const missing = VoiceModels.missingDownloadable();
+    if (missing.length) { showGate(missing); return; }
+    startLoad();
+}
+
+// ─── download gate ────────────────────────────────────────────────────────────
+function humanBytes(n) {
+    if (!n || n <= 0) return '';
+    const u = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let i = 0, v = n;
+    while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+    return v.toFixed(v < 10 && i > 0 ? 1 : 0) + ' ' + u[i];
+}
+
+// Show the gate: a per-model list with sizes and one button that downloads
+// everything missing, then loads. Nothing downloads until the user clicks.
+function showGate(missing) {
+    let total = 0;
+    for (const g of missing) total += g.bytes || 0;
+
+    const rows = VoiceModels.status()
+        .filter(s => s.downloadable)
+        .map(s => '<div class="row ' + (s.present ? 'have' : 'need') + '">' +
+                    '<span class="name">' + s.label + '</span>' +
+                    '<span class="size">' +
+                      (s.present ? 'ready' : (humanBytes(s.bytes) || 'download')) +
+                    '</span></div>')
+        .join('');
+
+    const speech = VoiceModels.status().find(s => s.key === 'tts');
+    const speechNote = speech && !speech.present
+        ? '<p class="note">Speech output runs from local Kokoro + voice data, which isn\'t ' +
+          'part of this download yet — replies will be text-only until it\'s provided.</p>'
+        : '';
+
+    $gate.innerHTML =
+        '<h2>Download models</h2>' +
+        '<p class="blurb">This app needs the model weights below. They aren\'t bundled — ' +
+        'download them once (about ' + humanBytes(total) + ') into a shared cache.</p>' +
+        '<div class="rows">' + rows + '</div>' +
+        speechNote +
+        '<div class="actions"><button id="gate-go">Download (' + humanBytes(total) + ')</button></div>';
+    $gate.hidden = false;
+    setStatus('idle', 'models needed');
+    $talk.textContent = 'download models to begin';
+
+    document.getElementById('gate-go').addEventListener('click', () => runDownload(missing));
+}
+
+// Button handler: download every missing required file, streaming progress to
+// the meter + status, then load.
+async function runDownload(missing) {
+    const btn = document.getElementById('gate-go');
+    if (btn) { btn.disabled = true; btn.textContent = 'downloading…'; }
+
+    let grandTotal = 0;
+    for (const g of missing) grandTotal += g.bytes || 0;
+
+    // Aggregate per-file progress into one bar: completed files contribute their
+    // full size; the in-flight file contributes its running received count.
+    let curFile = null, completedBytes = 0, curReceived = 0;
+    const onProgress = (p) => {
+        if (p.file !== curFile) {
+            if (curFile !== null) completedBytes += curReceived;
+            curFile = p.file; curReceived = 0;
+        }
+        curReceived = p.received;
+        const done = completedBytes + curReceived;
+        const frac = grandTotal > 0 ? Math.min(1, done / grandTotal) : 0;
+        $meter.style.opacity = '1';
+        $meter.style.width = Math.round(frac * 100) + '%';
+        setStatus('loading', 'downloading ' + p.label + ' — ' + humanBytes(curReceived) +
+                  (p.total ? ' / ' + humanBytes(p.total) : ''));
+    };
+
+    try {
+        await VoiceModels.download(missing, onProgress);
+    } catch (e) {
+        setStatus('error', 'download failed: ' + ((e && e.message) || e));
+        if (btn) { btn.disabled = false; btn.textContent = 'retry download'; }
+        return;
+    }
+    $gate.hidden = true;
+    $gate.innerHTML = '';
+    $meter.style.width = '0%';
+    startLoad();
+}
+
+// Resolve every model path and start the loads.
+function startLoad() {
+    const p = VoiceModels.resolved();
+    QWEN_GGUF      = p.qwen;
+    WHISPER_DIR    = p.whisperDir;
+    WHISPER_VOCAB  = p.whisperVocab;
+    WHISPER_MERGES = p.whisperMerges;
+    WHISPER_ADDED  = p.whisperAdded;
+    WAKE_WEIGHTS   = p.wake;
+    KOKORO_DIR     = p.kokoroDir;
+    KOKORO_VOICE   = p.kokoroVoice;
+    speechOn       = p.speechReady;
+
     setStatus('loading', 'loading models…');
     $meter.style.opacity = '0.6';
     loadModels();
@@ -380,11 +488,12 @@ function boot() {
 // main thread stays responsive and the meter ticks up as each lands. bro.stt /
 // bro.lm / bro.tts loaders take an { onReady, onError } callback to run async.
 function loadModels() {
-    let pending = 4;            // lm, whisper, sttTok, voice(=kokoro chain)
+    const units = speechOn ? 4 : 3;   // lm, whisper, sttTok (+ voice when speech is on)
+    let pending = units;
     let failed = false;
     const bump = () => {
-        const done = 4 - pending;
-        $meter.style.width = Math.round((done / 4) * 100) + '%';
+        const done = units - pending;
+        $meter.style.width = Math.round((done / units) * 100) + '%';
     };
     const fail = (stage, msg) => {
         if (failed) return;
@@ -406,7 +515,7 @@ function loadModels() {
             onReady: (w) => { whisper = w; ready(); },
             onError: (m) => fail('speech recognition', m),
         });
-        bro.stt.loadTokenizer({
+        const tokOpts = {
             vocabPath: WHISPER_VOCAB,
             mergesPath: WHISPER_MERGES,
             onReady: (t) => {
@@ -415,23 +524,29 @@ function loadModels() {
                 ready();
             },
             onError: (m) => fail('speech tokenizer', m),
-        });
+        };
+        // Upstream Whisper keeps the "<|...|>" specials in a separate
+        // added_tokens.json; pass it when resolved so the tokenizer merges them.
+        if (WHISPER_ADDED) tokOpts.addedTokensPath = WHISPER_ADDED;
+        bro.stt.loadTokenizer(tokOpts);
 
-        bro.tts.setAssetRoot(SOUNDML_ROOT);
-        bro.tts.loadKokoro(KOKORO_DIR, {
-            onReady: (k) => {
-                kokoro = k;
-                try {
-                    const v = k.vocab();
-                    if (typeof v[' '] === 'number') spaceId = v[' '];
-                } catch (_) {}
-                k.loadVoice(KOKORO_VOICE, {
-                    onReady: (vc) => { voice = vc; ready(); },
-                    onError: (m) => fail('voice', m),
-                });
-            },
-            onError: (m) => fail('voice model', m),
-        });
+        if (speechOn) {
+            bro.tts.setAssetRoot(SOUNDML_ROOT);
+            bro.tts.loadKokoro(KOKORO_DIR, {
+                onReady: (k) => {
+                    kokoro = k;
+                    try {
+                        const v = k.vocab();
+                        if (typeof v[' '] === 'number') spaceId = v[' '];
+                    } catch (_) {}
+                    k.loadVoice(KOKORO_VOICE, {
+                        onReady: (vc) => { voice = vc; ready(); },
+                        onError: (m) => fail('voice', m),
+                    });
+                },
+                onError: (m) => fail('voice model', m),
+            });
+        }
     } catch (e) {
         fail('load', e.message);
     }
@@ -445,29 +560,18 @@ function onModelsReady() {
     $talk.textContent = 'say "computer" or hold to talk';
     $talk.title = 'Say "computer" to activate, or hold (Space) to talk manually.';
     // Warm the phonemizer's lexicon off the critical path so the first reply
-    // doesn't pay the one-time load cost mid-turn. (phonemize() is synchronous;
-    // making it async is a future improvement.) A throw here means its g2p data
-    // (lexicon / POS tagger) is missing or unreadable — fatal for speech-out, so
-    // surface it like a failed model load and don't start listening, rather than
-    // letting every reply come out mute. Wake + idle only arm on success.
+    // doesn't pay the one-time load cost mid-turn. A throw means its g2p data
+    // (lexicon / POS tagger) is missing or unreadable — but speech is optional,
+    // so drop to text-only instead of disabling the app; STT + LLM + wake still
+    // work. (Run scripts/download-brosoundml-data.sh to fetch the g2p data.)
     setTimeout(() => {
-        try { bro.tts.phonemize('warming up the lexicon'); }
-        catch (e) { phonemizerFailed(e.message); return; }
+        if (speechOn) {
+            try { bro.tts.phonemize('warming up the lexicon'); }
+            catch (e) { speechOn = false; console.warn('phonemizer unavailable:', e.message); }
+        }
         startWake();
         goIdle();
     }, 0);
-}
-
-// The phonemizer's g2p data couldn't be loaded. Without it the pipeline can
-// transcribe and think but never speak, so treat it as a hard load failure:
-// show the reason and keep the talk button disabled (mirrors the model
-// loaders' onError). Run scripts/download-brosoundml-data.sh to fetch it.
-function phonemizerFailed(msg) {
-    modelsReady = false;
-    setStatus('error', 'voice data: ' + msg);
-    $talk.disabled = true;
-    $talk.textContent = 'voice data missing';
-    $talk.title = msg;
 }
 
 // ─── pipeline: STT -> streaming LLM -> per-sentence TTS ───────────────────────
@@ -573,6 +677,7 @@ function pipelineError(stage, msg) {
 
 // ─── serial TTS queue ────────────────────────────────────────────────────────
 function enqueueSynth(myTurn, sentence, consumed) {
+    if (!speechOn) return;   // text-only: the reply renders as text; no synthesis
     synthQueue.push({ sentence, consumed, turn: myTurn });
     pumpSynth();
 }
@@ -763,7 +868,7 @@ function interruptTurn() {
 function startWake() {
     try {
         bro.wake.listen({
-            weights: '../brosoundml-data/wake/computer.bw',
+            weights: WAKE_WEIGHTS,
             threshold: 0.85,
             onFire: onWake,
         });
