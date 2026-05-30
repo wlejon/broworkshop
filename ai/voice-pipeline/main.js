@@ -44,9 +44,12 @@ let speechOn = false;   // true once Kokoro + voice load; otherwise text-only
 let QWEN_GGUF = null;
 let WHISPER_DIR = null, WHISPER_VOCAB = null, WHISPER_MERGES = null, WHISPER_ADDED = null;
 let WAKE_WEIGHTS = null, KOKORO_DIR = null, KOKORO_VOICE = null;
-// The phonemizer's g2p + Kokoro-vocab root. Speech runs from this dev layout
-// for now (its data isn't part of the on-demand download set yet).
-const SOUNDML_ROOT = '../brosoundml';
+// The phonemizer's explicit asset paths: the g2p lexicon + POS tagger, and the
+// Kokoro config.json it reads the phoneme vocab from. Resolved by VoiceModels
+// to the shared cache on a downloaded build or the dev siblings in a source
+// checkout, then handed to bro.tts.setAssets() so the phonemizer loads from
+// wherever the files actually live — no fixed sibling layout assumed.
+let LEXICON_BIN = null, POS_TAGGER_BIN = null, KOKORO_CONFIG = null;
 
 // Conversation memory (system prompt + rolling turns).
 const history = [
@@ -476,6 +479,9 @@ function startLoad() {
     WAKE_WEIGHTS   = p.wake;
     KOKORO_DIR     = p.kokoroDir;
     KOKORO_VOICE   = p.kokoroVoice;
+    KOKORO_CONFIG  = p.kokoroConfig;
+    LEXICON_BIN    = p.lexicon;
+    POS_TAGGER_BIN = p.posTagger;
     speechOn       = p.speechReady;
 
     setStatus('loading', 'loading models…');
@@ -531,7 +537,11 @@ function loadModels() {
         bro.stt.loadTokenizer(tokOpts);
 
         if (speechOn) {
-            bro.tts.setAssetRoot(SOUNDML_ROOT);
+            bro.tts.setAssets({
+                lexicon:      LEXICON_BIN,
+                posTagger:    POS_TAGGER_BIN,
+                kokoroConfig: KOKORO_CONFIG,
+            });
             bro.tts.loadKokoro(KOKORO_DIR, {
                 onReady: (k) => {
                     kokoro = k;

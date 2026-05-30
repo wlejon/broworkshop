@@ -15,13 +15,19 @@
 //   wake  — wake-word weights        (our wlejon/brosoundml-data dataset)
 //   llm   — Qwen3-8B GGUF            (Qwen/Qwen3-8B-GGUF)            ~8.7 GB
 //   stt   — Whisper tiny + tokenizer (openai/whisper-tiny)          ~150 MB
-//   tts   — Kokoro + voice + g2p     (local/dev only for now; see note)
+//   tts   — Kokoro + voice + g2p     (partly downloadable; see note)
 //
-// The tts group is resolve-only here: Kokoro's voice packs are a raw-f32 format
-// the upstream .safetensors isn't, and the phonemizer resolves its g2p data and
-// vocab from the brosoundml sibling root — so download-and-run for speech needs
-// a brosoundml-side change. Until then speech loads from the dev siblings when
-// present, and the pipeline runs text-only when it isn't.
+// The tts group is still resolve-only, but only one blocker remains. The
+// phonemizer's asset layout is no longer an issue: the engine now takes
+// explicit paths via bro.tts.setAssets({lexicon, posTagger, kokoroConfig}),
+// and the g2p lexicon + POS tagger are hosted (wlejon/brosoundml-data), so
+// those resolve from the cache or the dev sibling either way. What's NOT
+// hosted is the *converted* Kokoro synth weights: model.safetensors and the
+// raw-f32 voice packs (voices/af_heart.bin) are produced from the upstream
+// pickled checkpoint by brosoundml's convert-kokoro.py and have no download
+// URL. Until those two are published (e.g. a kokoro/ tree under
+// wlejon/brosoundml-data), speech loads from the dev siblings when present and
+// the pipeline runs text-only when it isn't.
 (function () {
 'use strict';
 
@@ -147,7 +153,10 @@ function resolved() {
     const merges  = stt.find(f => f.file === 'merges.txt');
     const added   = stt.find(f => f.file === 'added_tokens.json');
     const tts = groupBy('tts').files;
-    const kmodel = tts[1], kvoice = tts[2];
+    // tts files, in catalog order: [0] Kokoro config.json, [1] model.safetensors,
+    // [2] voices/af_heart.bin, [3] g2p lexicon, [4] POS tagger.
+    const kconfig = tts[0], kmodel = tts[1], kvoice = tts[2];
+    const lexicon = tts[3], posTagger = tts[4];
 
     const speechReady = groupPresent(groupBy('tts'));
     const addedPath = resolveFile(added);
@@ -160,6 +169,11 @@ function resolved() {
         whisperAdded: exists(addedPath) ? addedPath : null,
         kokoroDir:    dirOf(resolveFile(kmodel)),
         kokoroVoice:  resolveFile(kvoice),
+        // Explicit phonemizer asset paths for bro.tts.setAssets(): the Kokoro
+        // config.json (phoneme vocab) plus the g2p lexicon + POS tagger.
+        kokoroConfig: resolveFile(kconfig),
+        lexicon:      resolveFile(lexicon),
+        posTagger:    resolveFile(posTagger),
         speechReady,
     };
 }
