@@ -105,20 +105,22 @@ scene.createMesh({
 // ─── broflora world ───────────────────────────────────────────────────────
 
 let world = null;
-let protoY = -1;
+let rootProto = -1;
 let plants = [];   // { idx, species, color }
 
 const SPECIES = {
     sun:   {
-        // Sun-loving pioneer: shade-intolerant, strong upward tropism.
+        // Sun-loving pioneer: shade-intolerant, spreads into a wide crown.
         species:  { shadeTolerance: 0.2, moduleMatureAge: 0.5,
-                    tropismG2: 0.8, growthScale: 1.1 },
+                    tropismG2: 0.8, growthScale: 1.1,
+                    tropismCosTarget: 0.45, apicalControl: 0.45 },
         color: [0.85, 0.55, 0.30],
     },
     shade: {
-        // Shade-tolerant: handles low light, slower.
+        // Shade-tolerant: handles low light, slower, rounder crown.
         species:  { shadeTolerance: 0.85, moduleMatureAge: 0.7,
-                    tropismG2: 0.3, growthScale: 0.85 },
+                    tropismG2: 0.3, growthScale: 0.85,
+                    tropismCosTarget: 0.45, apicalControl: 0.40 },
         color: [0.40, 0.65, 0.85],
     },
 };
@@ -135,21 +137,14 @@ function buildWorld() {
         },
     });
 
-    // One symmetric Y branch-module prototype. Two Voronoi sites give the
-    // module-selection a non-degenerate choice in (D, λ) space.
-    protoY = world.addPrototype({
-        name: 'Y',
-        nodes: [
-            { position: [ 0.00, 0.00, 0.00] },
-            { position: [ 0.35, 1.00, 0.00], ageAtBirth: 0.25 },
-            { position: [-0.35, 1.00, 0.00], ageAtBirth: 0.25 },
-        ],
-        edges: [[0, 1], [0, 2]],
-        rootNode: 0,
-        terminalNodes: [1, 2],
-    });
-    world.addVoronoiSite(protoY, 0.2, 0.85);
-    world.addVoronoiSite(protoY, 0.6, 0.45);
+    // Built-in whorl prototype: a short trunk topped by 4 arms spread in
+    // 3D, so every spawn fills the crown volumetrically instead of stacking
+    // into a vertical whip. A straight module is the juvenile / shade-
+    // suppressed pole so module selection has somewhere to drift in (D, λ).
+    rootProto = world.addPrototype(bro.flora.prototypes.whorl(4, 0.7));
+    const protoStraight = world.addPrototype(bro.flora.prototypes.straight());
+    world.addVoronoiSite(rootProto, 0.2, 0.85);
+    world.addVoronoiSite(protoStraight, 0.8, 0.40);
 
     plants = [];
     // Initial planting: 2 sun + 2 shade in a row across the patch.
@@ -167,7 +162,7 @@ function plant(x, z, speciesKey) {
     const idx = world.addPlant({
         origin: [x, 0, z],
         species: def.species,
-        prototypeIndex: protoY,
+        prototypeIndex: rootProto,
     });
     if (idx >= 0) {
         plants.push({ origin: [x, 0, z], species: speciesKey, color: def.color });
