@@ -36,25 +36,14 @@ let lm = null, lmTok = null;
 let kokoro = null, voice = null, spaceId = 16;
 let modelsReady = false;
 
-// Model file paths. The LLM, Whisper, and wake-word paths are resolved at boot
-// by bro.models.ensure() (declared in bro.json "models") — they point into the
-// shared model cache on a downloaded build, or at the dev sibling repos in a
-// source checkout. Assigned in fetchModels() below.
-let QWEN_GGUF    = null;
-let WHISPER_DIR  = null;
-let WHISPER_VOCAB = null, WHISPER_MERGES = null, WHISPER_ADDED = null;
-let WAKE_WEIGHTS = null;
-
-// Kokoro TTS still loads from the brosoundml sibling: its upstream is pickled
-// torch we can't fetch-and-run yet, so it isn't in bro.json "models". On a
-// downloaded build without the sibling, speech-out is unavailable until that's
-// resolved; STT + LLM + wake run from the cache regardless.
+// Asset paths (mirror the previous worker).
+const QWEN_GGUF   = '../brolm/weights/Qwen3-8B-GGUF/Qwen3-8B-Q8_0.gguf';
+const WHISPER_DIR = '../brosoundml/weights/whisper';
+const WHISPER_VOCAB  = '../brosoundml/weights/whisper/vocab.json';
+const WHISPER_MERGES = '../brosoundml/weights/whisper/merges.txt';
 const SOUNDML_ROOT = '../brosoundml';
 const KOKORO_DIR   = '../brosoundml/weights/kokoro';
 const KOKORO_VOICE = '../brosoundml/weights/kokoro/voices/af_heart.bin';
-
-// dirname helper (no node 'path' dependency in the page context).
-function dirOf(p) { return p.replace(/[\/\\][^\/\\]*$/, ''); }
 
 // Conversation memory (system prompt + rolling turns).
 const history = [
@@ -381,44 +370,8 @@ function boot() {
         return;
     }
 
-    setStatus('loading', 'preparing models…');
-    $meter.style.opacity = '0.6';
-    fetchModels();
-}
-
-// Resolve (downloading if missing) the model files declared in bro.json
-// "models" via bro.models, then hand off to loadModels(). On a source checkout
-// these resolve to the dev sibling repos and nothing downloads; on a packaged
-// build they stream from their upstream Hugging Face homes into the shared
-// cache. (Run `bro --fetch ai/voice-pipeline` to pre-warm the cache offline.)
-async function fetchModels() {
-    let specs;
-    try {
-        const manifest = await (await fetch('bro.json')).json();
-        specs = (manifest && manifest.models) || [];
-    } catch (e) {
-        setStatus('error', 'manifest: ' + ((e && e.message) || e));
-        return;
-    }
-    try {
-        const paths = await bro.models.ensure(specs, {
-            onProgress: (p) => {
-                if (p.total > 0) $meter.style.width = Math.round((p.received / p.total) * 100) + '%';
-                setStatus('loading', (p.cached ? 'have ' : 'downloading ') + p.id + '…');
-            },
-        });
-        QWEN_GGUF      = paths['qwen.gguf'];
-        WHISPER_DIR    = dirOf(paths['whisper.model']);
-        WHISPER_VOCAB  = paths['whisper.vocab'];
-        WHISPER_MERGES = paths['whisper.merges'];
-        WHISPER_ADDED  = paths['whisper.added'];
-        WAKE_WEIGHTS   = paths['wake'];
-    } catch (e) {
-        setStatus('error', 'model download: ' + ((e && e.message) || e));
-        return;
-    }
     setStatus('loading', 'loading models…');
-    $meter.style.width = '0%';
+    $meter.style.opacity = '0.6';
     loadModels();
 }
 
@@ -456,7 +409,6 @@ function loadModels() {
         bro.stt.loadTokenizer({
             vocabPath: WHISPER_VOCAB,
             mergesPath: WHISPER_MERGES,
-            addedTokensPath: WHISPER_ADDED,   // upstream specials live here; merged in
             onReady: (t) => {
                 sttTok = t;
                 try { sttPrompt = sttTok.buildPrompt('en', 'transcribe', false); } catch (_) {}
@@ -811,7 +763,7 @@ function interruptTurn() {
 function startWake() {
     try {
         bro.wake.listen({
-            weights: WAKE_WEIGHTS,
+            weights: '../brosoundml-data/wake/computer.bw',
             threshold: 0.85,
             onFire: onWake,
         });
