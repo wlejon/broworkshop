@@ -15,19 +15,19 @@
 //   wake  — wake-word weights        (our wlejon/brosoundml-data dataset)
 //   llm   — Qwen3-8B GGUF            (Qwen/Qwen3-8B-GGUF)            ~8.7 GB
 //   stt   — Whisper tiny + tokenizer (openai/whisper-tiny)          ~150 MB
-//   tts   — Kokoro + voice + g2p     (partly downloadable; see note)
+//   tts   — Kokoro + voice + g2p     (downloadable, optional — see note)
 //
-// The tts group is still resolve-only, but only one blocker remains. The
-// phonemizer's asset layout is no longer an issue: the engine now takes
-// explicit paths via bro.tts.setAssets({lexicon, posTagger, kokoroConfig}),
-// and the g2p lexicon + POS tagger are hosted (wlejon/brosoundml-data), so
-// those resolve from the cache or the dev sibling either way. What's NOT
-// hosted is the *converted* Kokoro synth weights: model.safetensors and the
-// raw-f32 voice packs (voices/af_heart.bin) are produced from the upstream
-// pickled checkpoint by brosoundml's convert-kokoro.py and have no download
-// URL. Until those two are published (e.g. a kokoro/ tree under
-// wlejon/brosoundml-data), speech loads from the dev siblings when present and
-// the pipeline runs text-only when it isn't.
+// The tts group is downloadable but OPTIONAL: speech is a nicety, so the
+// pipeline runs text-only when it's absent and a missing/unpublished file must
+// never break the required (wake/llm/stt) gate. Its files come from a kokoro/
+// tree in wlejon/brosoundml-data: the *converted* Kokoro synth weights
+// (model.safetensors + raw-f32 voices/af_heart.bin) — produced from upstream's
+// pickled checkpoint + .pt voices by brosoundml's convert-kokoro.py — plus the
+// Kokoro config.json and the same g2p lexicon + POS tagger the wake group
+// already pulls. Those converted artifacts have no upstream URL, so a
+// maintainer publishes them once with brosoundml's scripts/publish-kokoro-data.sh
+// (needs HF write access to the dataset). Until then the tts files 404 and the
+// app stays text-only; a source checkout speaks straight from the dev siblings.
 (function () {
 'use strict';
 
@@ -120,16 +120,24 @@ const GROUPS = [
               dev: WHISPER_DEV + '/added_tokens.json', bytes: 34604, optional: true },
         ],
     },
-    // Speech: resolve-only for now (see file header). Dev paths let a source
-    // checkout load + speak; a build without them runs text-only.
+    // Speech: downloadable but optional (see file header). The Kokoro synth
+    // weights live under kokoro/ in wlejon/brosoundml-data, published from the
+    // converted dev artifacts via brosoundml's scripts/publish-kokoro-data.sh;
+    // the g2p lexicon + POS tagger are the same files the wake group pulls. Dev
+    // paths let a source checkout load + speak without any download.
     {
-        key: 'tts', label: 'Speech synthesis (Kokoro)', downloadable: false,
+        key: 'tts', label: 'Speech synthesis (Kokoro)', downloadable: true, optional: true,
         files: [
-            { dev: KOKORO_DEV + '/config.json' },
-            { dev: KOKORO_DEV + '/model.safetensors' },
-            { dev: KOKORO_DEV + '/voices/af_heart.bin' },
-            { dev: '../brosoundml-data/g2p/lexicon_en_us.bin' },
-            { dev: '../brosoundml-data/pos_tagger/model.bin' },
+            { repo: 'wlejon/brosoundml-data', kind: 'dataset', file: 'kokoro/config.json',
+              dev: KOKORO_DEV + '/config.json', bytes: 2351 },
+            { repo: 'wlejon/brosoundml-data', kind: 'dataset', file: 'kokoro/model.safetensors',
+              dev: KOKORO_DEV + '/model.safetensors', bytes: 326979520 },
+            { repo: 'wlejon/brosoundml-data', kind: 'dataset', file: 'kokoro/voices/af_heart.bin',
+              dev: KOKORO_DEV + '/voices/af_heart.bin', bytes: 522240 },
+            { repo: 'wlejon/brosoundml-data', kind: 'dataset', file: 'g2p/lexicon_en_us.bin',
+              dev: '../brosoundml-data/g2p/lexicon_en_us.bin', bytes: 7175830 },
+            { repo: 'wlejon/brosoundml-data', kind: 'dataset', file: 'pos_tagger/model.bin',
+              dev: '../brosoundml-data/pos_tagger/model.bin', bytes: 7653373 },
         ],
     },
 ];
@@ -178,15 +186,20 @@ function resolved() {
     };
 }
 
-// Downloadable groups still missing one or more required files.
+// Downloadable groups still missing one or more required files. Each entry
+// keeps its .files (for download) and carries .bytes (download size) + the
+// group's .optional flag (true = speech; not required for the app to run, so
+// the caller best-efforts it and a 404 just leaves the pipeline text-only).
 function missingDownloadable() {
-    return GROUPS.filter(g => g.downloadable && !groupPresent(g));
+    return GROUPS.filter(g => g.downloadable && !groupPresent(g))
+                 .map(g => Object.assign({}, g, { bytes: groupBytes(g) }));
 }
 
 // Status for the gate UI.
 function status() {
     return GROUPS.map(g => ({
         key: g.key, label: g.label, downloadable: g.downloadable,
+        optional: !!g.optional,
         present: groupPresent(g), bytes: groupBytes(g),
     }));
 }

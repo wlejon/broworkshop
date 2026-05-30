@@ -411,8 +411,8 @@ function showGate(missing) {
 
     const speech = VoiceModels.status().find(s => s.key === 'tts');
     const speechNote = speech && !speech.present
-        ? '<p class="note">Speech output runs from local Kokoro + voice data, which isn\'t ' +
-          'part of this download yet — replies will be text-only until it\'s provided.</p>'
+        ? '<p class="note">Speech (Kokoro) is optional — it downloads best-effort. If its ' +
+          'weights aren\'t available yet, replies stay text-only and everything else still works.</p>'
         : '';
 
     $gate.innerHTML =
@@ -455,12 +455,25 @@ async function runDownload(missing) {
                   (p.total ? ' / ' + humanBytes(p.total) : ''));
     };
 
+    // Required models (wake/llm/stt) fail hard — the app can't run without them.
+    // The optional speech group (Kokoro + g2p) is best-effort: a failure (e.g.
+    // its weights aren't published yet) leaves the pipeline text-only rather
+    // than blocking boot.
+    const required = missing.filter(g => !g.optional);
+    const optional = missing.filter(g => g.optional);
     try {
-        await VoiceModels.download(missing, onProgress);
+        await VoiceModels.download(required, onProgress);
     } catch (e) {
         setStatus('error', 'download failed: ' + ((e && e.message) || e));
         if (btn) { btn.disabled = false; btn.textContent = 'retry download'; }
         return;
+    }
+    if (optional.length) {
+        try {
+            await VoiceModels.download(optional, onProgress);
+        } catch (e) {
+            console.warn('speech download skipped (text-only): ' + ((e && e.message) || e));
+        }
     }
     $gate.hidden = true;
     $gate.innerHTML = '';
