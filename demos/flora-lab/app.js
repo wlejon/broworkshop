@@ -16,7 +16,14 @@
 const canvas = document.getElementById('stage');
 const scene = canvas.getContext('scene');
 
-scene.setAmbient([0.11, 0.13, 0.13]);   // soft sky-tinted fill
+// Strong hemispheric-style sky fill. Thin leaf cards are scattered at random
+// orientations, so a leaf facing away from the sun gets only ambient — with a
+// near-black ambient those leaves crushed to black right beside sunlit
+// neighbours, and on dense sub-pixel foliage that black-to-white per-leaf
+// contrast read as random noise rather than shading. Outdoor foliage receives
+// substantial skylight; flooring the shaded leaves here keeps the canopy
+// reading as a coherent surface while the directional sun still gives it form.
+scene.setAmbient([0.27, 0.30, 0.27]);
 scene.setToneMap({ mode: 'aces', exposure: 1.05 });
 
 scene.createLight({
