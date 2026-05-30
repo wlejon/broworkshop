@@ -2,5 +2,58 @@
     "app": ".",
     "title": "Voice Pipeline",
     "width": 900,
-    "height": 700
+    "height": 700,
+
+    "//models": "Weights this app needs, fetched on demand by bro.models from their upstream HF homes into the shared model cache (or `bro --fetch ai/voice-pipeline`). `dev` points at the sibling-repo copy a source checkout already has, so dev never re-downloads. Kokoro TTS is not listed yet — its upstream is pickled torch brosoundml can't load, so it stays on the dev sibling for now.",
+    "models": [
+        {
+            "id": "qwen.gguf",
+            "repo": "Qwen/Qwen3-8B-GGUF",
+            "kind": "model",
+            "file": "Qwen3-8B-Q8_0.gguf",
+            "dev": "../brolm/weights/Qwen3-8B-GGUF/Qwen3-8B-Q8_0.gguf"
+        },
+        {
+            "id": "whisper.config",
+            "repo": "openai/whisper-tiny",
+            "kind": "model",
+            "file": "config.json",
+            "dev": "../brosoundml/weights/whisper/config.json"
+        },
+        {
+            "id": "whisper.model",
+            "repo": "openai/whisper-tiny",
+            "kind": "model",
+            "file": "model.safetensors",
+            "dev": "../brosoundml/weights/whisper/model.safetensors"
+        },
+        {
+            "id": "whisper.vocab",
+            "repo": "openai/whisper-tiny",
+            "kind": "model",
+            "file": "vocab.json",
+            "dev": "../brosoundml/weights/whisper/vocab.json"
+        },
+        {
+            "id": "whisper.merges",
+            "repo": "openai/whisper-tiny",
+            "kind": "model",
+            "file": "merges.txt",
+            "dev": "../brosoundml/weights/whisper/merges.txt"
+        },
+        {
+            "id": "whisper.added",
+            "repo": "openai/whisper-tiny",
+            "kind": "model",
+            "file": "added_tokens.json",
+            "dev": "../brosoundml/weights/whisper/added_tokens.json"
+        },
+        {
+            "id": "wake",
+            "repo": "wlejon/brosoundml-data",
+            "kind": "dataset",
+            "file": "wake/computer.bw",
+            "dev": "../brosoundml-data/wake/computer.bw"
+        }
+    ]
 }
