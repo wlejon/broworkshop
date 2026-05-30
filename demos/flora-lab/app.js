@@ -247,7 +247,15 @@ function rebuildFoliage() {
     const segs = world.emitSegments();
     if (!segs || segs.length === 0) return;
 
-    const leaf = Mesh.leafCard('oval', { width: 0.085, length: 0.19, bend: 0.4, fullUV: true });
+    // Shaped silhouette + bilateral cup turns the flat card into a dished,
+    // leaf-shaped blade (the proven plant-recipes recipe). The oval profile
+    // peaks at mid-length and tapers to both ends; `cup` dishes the cross-
+    // section so it catches light like a real leaf instead of a flat sheet.
+    const leaf = Mesh.leafCard('oval', {
+        width: 0.11, length: 0.2, bend: 0.45,
+        fullUV: true, shapedSilhouette: true, cup: 0.3,
+        widthSegments: 3, lengthSegments: 6,
+    });
     stripVertexColors(leaf);
     const foliage = Mesh.scatterLeaves(segs, leaf, {
         maxRadius:     0.16,   // leaves on twigs, not the thick stems
@@ -282,10 +290,14 @@ function rebuildBlooms() {
     const anchors = world.emitBloomAnchors();
     if (!anchors || anchors.length === 0) return;
 
+    // shapedPetals carves each petal's almond/ogive outline and petalCup
+    // dishes it inward, so five overlapping petals read as a cupped blossom
+    // instead of the smooth dome a flat-card flower collapses into.
     const base = Mesh.flower({
         petalCount: 5, petalShape: 'petal',
-        petalLength: 0.11, petalWidth: 0.07, petalBend: 0.8,
-        centerRadius: 0.025, centerHeight: 0.02,
+        petalLength: 0.13, petalWidth: 0.08, petalBend: 0.7,
+        petalCup: 0.5, shapedPetals: true,
+        centerRadius: 0.03, centerHeight: 0.02,
     });
     stripVertexColors(base);
 
