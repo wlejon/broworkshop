@@ -110,18 +110,26 @@ let plants = [];   // { idx, species, color }
 
 const SPECIES = {
     sun:   {
-        // Sun-loving pioneer: shade-intolerant, spreads into a wide crown.
-        species:  { shadeTolerance: 0.2, moduleMatureAge: 0.5,
-                    tropismG2: 0.8, growthScale: 1.1,
-                    tropismCosTarget: 0.45, apicalControl: 0.45 },
-        color: [0.85, 0.55, 0.30],
+        // Sun-loving pioneer: taller, more upright, open crown. Low apical
+        // dominance lets vigor reach all four whorl arms so the crown
+        // branches volumetrically; `orthotropy` lifts the arms enough to
+        // gain height while still spreading.
+        species:  { shadeTolerance: 0.35, moduleMatureAge: 0.6,
+                    tropismG2: 0.12, growthScale: 1.0,
+                    orthotropy: 0.4, rootVigorMax: 3.0,
+                    apicalControl: 0.35, apicalControlMature: 0.3,
+                    maxAge: 60 },
+        color: [0.55, 0.78, 0.32],
     },
     shade: {
-        // Shade-tolerant: handles low light, slower, rounder crown.
-        species:  { shadeTolerance: 0.85, moduleMatureAge: 0.7,
-                    tropismG2: 0.3, growthScale: 0.85,
-                    tropismCosTarget: 0.45, apicalControl: 0.40 },
-        color: [0.40, 0.65, 0.85],
+        // Shade-tolerant understory: slower, rounder, denser dome. Lower
+        // orthotropy keeps it spreading wide and low.
+        species:  { shadeTolerance: 0.8, moduleMatureAge: 0.7,
+                    tropismG2: 0.12, growthScale: 0.8,
+                    orthotropy: 0.48, rootVigorMax: 2.5,
+                    apicalControl: 0.30, apicalControlMature: 0.3,
+                    maxAge: 70 },
+        color: [0.30, 0.62, 0.45],
     },
 };
 
@@ -137,14 +145,17 @@ function buildWorld() {
         },
     });
 
-    // Built-in whorl prototype: a short trunk topped by 4 arms spread in
-    // 3D, so every spawn fills the crown volumetrically instead of stacking
-    // into a vertical whip. A straight module is the juvenile / shade-
-    // suppressed pole so module selection has somewhere to drift in (D, λ).
-    rootProto = world.addPrototype(bro.flora.prototypes.whorl(4, 0.7));
-    const protoStraight = world.addPrototype(bro.flora.prototypes.straight());
-    world.addVoronoiSite(rootProto, 0.2, 0.85);
-    world.addVoronoiSite(protoStraight, 0.8, 0.40);
+    // Two whorl variants — both fill the crown volumetrically (a short
+    // trunk topped by arms fanned in 3D) so growth never collapses into a
+    // vertical whip. Module selection drifts between them in (determinacy,
+    // apicalControl) space: vigorous shoots open a broad 5-arm crown, while
+    // suppressed / low-vigor shoots make a smaller, denser 3-arm tuft. Both
+    // sites sit at the plants' apicalControl (~0.3); only determinacy
+    // (which tracks vigor) separates them.
+    rootProto = world.addPrototype(bro.flora.prototypes.whorl(5, 0.8));
+    const protoTuft = world.addPrototype(bro.flora.prototypes.whorl(3, 0.55));
+    world.addVoronoiSite(rootProto, 0.5,  0.3);   // vigorous → broad crown
+    world.addVoronoiSite(protoTuft, 0.12, 0.3);   // suppressed → dense tuft
 
     plants = [];
     // Initial planting: 2 sun + 2 shade in a row across the patch.
