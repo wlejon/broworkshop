@@ -220,7 +220,12 @@ function orientYTo(mesh, n) {
 
 function destroyOverlay(key) {
     const o = overlays[key];
-    if (o.node) { o.node.destroy && o.node.destroy(); o.node = null; }
+    if (!o.node) return;
+    // node may be a single SceneNode or an array (multi-part overlays like
+    // the two-tone foliage and the petals + centers of the blooms).
+    const nodes = Array.isArray(o.node) ? o.node : [o.node];
+    for (const n of nodes) { if (n && n.destroy) n.destroy(); }
+    o.node = null;
 }
 function destroyAllOverlays() { for (const k in overlays) destroyOverlay(k); }
 
@@ -244,8 +249,6 @@ function rebuildBranches() {
 function rebuildFoliage() {
     destroyOverlay('foliage');
     if (!overlays.foliage.on) return;
-    const segs = world.emitSegments();
-    if (!segs || segs.length === 0) return;
 
     // Shaped silhouette + bilateral cup turns the flat card into a dished,
     // leaf-shaped blade (the proven plant-recipes recipe). The oval profile
@@ -257,27 +260,50 @@ function rebuildFoliage() {
         widthSegments: 3, lengthSegments: 6,
     });
     stripVertexColors(leaf);
-    const foliage = Mesh.scatterLeaves(segs, leaf, {
-        maxRadius:     0.16,   // leaves on twigs, not the thick stems
-        minDepth:      1,
-        perUnitLength: 46,
-        upBias:        0.5,    // leaves tip toward the light
-        tiltJitter:    0.55,
-        rollJitter:    0.9,
-        baseScale:     1.0,
-        scaleJitter:   0.3,
-        scaleByRadius: 0.25,
-        seed:          0x1eaf,
-    });
-    if (!foliage || foliage.triangleCount === 0) return;
-    stripVertexColors(foliage);
-    overlays.foliage.node = scene.createMesh({
-        data: foliage,
-        color: overlays.foliage.color,
-        metallic: 0.0, roughness: 0.7,
-        twoSided: true, subsurface: 0.5,
-        castsShadow: true, receivesShadow: true,
-    });
+
+    // Tint each canopy by species so the patch isn't one flat green. Plant
+    // indices reorder every step (senescence swap-pop + new seedlings), so
+    // classify live from plantInfo's shadeTolerance rather than trusting the
+    // planting-order `plants` array, and gather each plant's own segments.
+    const groups = { sun: [], shade: [] };
+    for (let i = 0; i < world.plantCount; i++) {
+        const info = world.plantInfo(i);
+        if (!info) continue;
+        const segs = world.emitPlantSegments(i);
+        if (!segs || segs.length === 0) continue;
+        const g = (info.species.shadeTolerance >= 0.6) ? groups.shade : groups.sun;
+        for (let k = 0; k < segs.length; k++) g.push(segs[k]);
+    }
+
+    const nodes = [];
+    let seed = 0x1eaf;
+    for (const key of ['sun', 'shade']) {
+        const segs = groups[key];
+        if (segs.length === 0) continue;
+        const foliage = Mesh.scatterLeaves(segs, leaf, {
+            maxRadius:     0.16,   // leaves on twigs, not the thick stems
+            minDepth:      1,
+            perUnitLength: 46,
+            upBias:        0.5,    // leaves tip toward the light
+            tiltJitter:    0.55,
+            rollJitter:    0.9,
+            baseScale:     1.0,
+            scaleJitter:   0.3,
+            scaleByRadius: 0.25,
+            seed:          seed,
+        });
+        seed = (seed * 2654435761) >>> 0;   // decorrelate the two passes
+        if (!foliage || foliage.triangleCount === 0) continue;
+        stripVertexColors(foliage);
+        nodes.push(scene.createMesh({
+            data: foliage,
+            color: SPECIES[key].color,
+            metallic: 0.0, roughness: 0.7,
+            twoSided: true, subsurface: 0.5,
+            castsShadow: true, receivesShadow: true,
+        }));
+    }
+    overlays.foliage.node = nodes.length ? nodes : null;
 }
 
 // Real blooms: stamp a small radial flower at each bloom anchor broflora
@@ -293,36 +319,73 @@ function rebuildBlooms() {
     // shapedPetals carves each petal's almond/ogive outline and petalCup
     // dishes it inward, so five overlapping petals read as a cupped blossom
     // instead of the smooth dome a flat-card flower collapses into.
+    // Open, near-flat wildflower: flat petal tilt + light cup/bend splays the
+    // five petals outward so the golden center is visible and the upturned
+    // faces catch the sun, rather than the closed tulip a strong cup makes.
     const base = Mesh.flower({
         petalCount: 5, petalShape: 'petal',
-        petalLength: 0.13, petalWidth: 0.08, petalBend: 0.7,
-        petalCup: 0.5, shapedPetals: true,
+        petalLength: 0.13, petalWidth: 0.085, petalBend: 0.4,
+        petalCup: 0.22, shapedPetals: true,
+        outerTilt: -0.15, innerTilt: -0.12,
         centerRadius: 0.03, centerHeight: 0.02,
     });
     stripVertexColors(base);
 
+    // A small squashed-sphere boss stamped over each bloom's center. Rendered
+    // as its own golden node so the blossom reads as petals-around-an-eye
+    // instead of a flat pink mass (the flower's own center dome is flat-shaded
+    // the same pink as the petals, so it can't carry a contrasting color).
+    const centerBase = Mesh.sphere(0.03, 8, 6);
+    centerBase.scale(1, 0.5, 1);
+    stripVertexColors(centerBase);
+
     const stride = anchors.length > BLOOM_CAP ? Math.ceil(anchors.length / BLOOM_CAP) : 1;
-    const parts = [];
+    const petalParts = [];
+    const centerParts = [];
     for (let i = 0; i < anchors.length; i += stride) {
         const a = anchors[i];
-        const f = base.clone();
-        orientYTo(f, a.normal);
         // Slight per-bloom scale variation keyed off life-state.
         const s = 0.8 + 0.5 * Math.min(1, a.age01 || 0.5);
+
+        const f = base.clone();
+        orientYTo(f, a.normal);
         f.scale(s, s, s);
         f.translate(a.position[0], a.position[1], a.position[2]);
-        parts.push(f);
+        petalParts.push(f);
+
+        const c = centerBase.clone();
+        orientYTo(c, a.normal);
+        c.scale(s, s, s);
+        // Lift the eye a hair along the normal so it sits proud of the petals.
+        const lift = 0.012 * s;
+        c.translate(a.position[0] + a.normal[0] * lift,
+                    a.position[1] + a.normal[1] * lift,
+                    a.position[2] + a.normal[2] * lift);
+        centerParts.push(c);
     }
-    if (parts.length === 0) return;
-    const merged = Mesh.merge(parts);
-    if (!merged || merged.triangleCount === 0) return;
-    overlays.blooms.node = scene.createMesh({
-        data: merged,
-        color: overlays.blooms.color,
-        metallic: 0.0, roughness: 0.55,
-        twoSided: true, subsurface: 0.4,
-        castsShadow: false, receivesShadow: true,
-    });
+    if (petalParts.length === 0) return;
+
+    const nodes = [];
+    const mergedPetals = Mesh.merge(petalParts);
+    if (mergedPetals && mergedPetals.triangleCount > 0) {
+        nodes.push(scene.createMesh({
+            data: mergedPetals,
+            color: overlays.blooms.color,
+            metallic: 0.0, roughness: 0.55,
+            twoSided: true, subsurface: 0.4,
+            castsShadow: false, receivesShadow: true,
+        }));
+    }
+    const mergedCenters = Mesh.merge(centerParts);
+    if (mergedCenters && mergedCenters.triangleCount > 0) {
+        nodes.push(scene.createMesh({
+            data: mergedCenters,
+            color: [0.98, 0.80, 0.25],   // golden eye
+            metallic: 0.0, roughness: 0.6, emissive: 0.15,
+            castsShadow: false, receivesShadow: true,
+        }));
+    }
+    overlays.blooms.node = nodes.length ? nodes : null;
 }
 
 function rebuildShadowGrid() {
