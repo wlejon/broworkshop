@@ -272,25 +272,41 @@ function rebuildFoliage() {
     // indices reorder every step (senescence swap-pop + new seedlings), so
     // classify live from plantInfo's shadeTolerance rather than trusting the
     // planting-order `plants` array, and gather each plant's own segments.
-    const groups = { sun: [], shade: [] };
+    //
+    // Light-gated density: broflora hands us a per-segment FoliageSample whose
+    // `mass` folds in the module's light (Q_eff), vigor, maturity and
+    // senescence — exactly "how many leaves belong here." We carry that array
+    // in lockstep with the segments and feed it to scatterLeaves as a
+    // per-segment density weight, so a shaded interior twig goes bare while a
+    // sunlit crown stays lush. The canopy then breathes with the light instead
+    // of being a uniform opaque ball, and the sun/moonbeam reach the interior.
+    const groups = { sun: { segs: [], w: [] }, shade: { segs: [], w: [] } };
     for (let i = 0; i < world.plantCount; i++) {
         const info = world.plantInfo(i);
         if (!info) continue;
         const segs = world.emitPlantSegments(i);
         if (!segs || segs.length === 0) continue;
+        const fol = world.emitPlantFoliage(i);   // lockstep with segs
         const g = (info.species.shadeTolerance >= 0.6) ? groups.shade : groups.sun;
-        for (let k = 0; k < segs.length; k++) g.push(segs[k]);
+        for (let k = 0; k < segs.length; k++) {
+            g.segs.push(segs[k]);
+            g.w.push(fol && fol[k] ? fol[k].mass : 1.0);
+        }
     }
 
     const nodes = [];
     let seed = 0x1eaf;
     for (const key of ['sun', 'shade']) {
-        const segs = groups[key];
+        const segs = groups[key].segs;
         if (segs.length === 0) continue;
         const foliage = Mesh.scatterLeaves(segs, leaf, {
             maxRadius:     0.16,   // leaves on twigs, not the thick stems
             minDepth:      1,
-            perUnitLength: 46,
+            // perUnitLength is the *full-light* rate; the per-segment mass
+            // weight (mostly < 1) scales it down in shade, so this runs higher
+            // than the old uniform 46 to keep lit crowns dense.
+            perUnitLength: 130,
+            densityWeight: groups[key].w,
             upBias:        0.5,    // leaves tip toward the light
             tiltJitter:    0.55,
             rollJitter:    0.9,
