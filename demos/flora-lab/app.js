@@ -5,6 +5,10 @@
 // flower is stamped at every bloom anchor. The wireframe layers below are
 // diagnostic overlays, off by default — toggle them on to inspect the sim.
 //
+// The meadow is lit by a full time-of-day rig (lighting.js): an HDR sky drives
+// IBL + skybox, a CSM-shadowed sun rakes the canopy, and the Night preset adds
+// drifting firefly point lights, a cool moonbeam spot, glowing blooms, and fog.
+//
 // Visual language:
 //   branches      solid tapered tubes (the real stems)                 bark
 //   foliage       leaf cards scattered along the twigs                 green
@@ -16,23 +20,19 @@
 const canvas = document.getElementById('stage');
 const scene = canvas.getContext('scene');
 
-// Strong hemispheric-style sky fill. Thin leaf cards are scattered at random
-// orientations, so a leaf facing away from the sun gets only ambient — with a
-// near-black ambient those leaves crushed to black right beside sunlit
-// neighbours, and on dense sub-pixel foliage that black-to-white per-leaf
-// contrast read as random noise rather than shading. Outdoor foliage receives
-// substantial skylight; flooring the shaded leaves here keeps the canopy
-// reading as a coherent surface while the directional sun still gives it form.
-scene.setAmbient([0.27, 0.30, 0.27]);
-scene.setToneMap({ mode: 'aces', exposure: 1.05 });
-
-scene.createLight({
-    type: 'directional',
-    direction: [-0.4, -0.82, -0.30],
-    color: [1.0, 0.95, 0.85],           // warm sun
-    intensity: 2.8,
-    castsShadow: true,
+// ─── Lighting rig ───────────────────────────────────────────────────────────
+// The full time-of-day rig — IBL sky + skybox, a CSM-shadowed sun aligned to
+// the HDR, distance fog, night fireflies (point lights), and ACES tonemapping
+// — lives in lighting.js. Instead of a flat ambient term the foliage now takes
+// orientation-dependent skylight from the environment map, so a leaf facing the
+// sky reads cool and one facing the ground reads warm, and the canopy keeps its
+// form in shade. The blooms' golden eyes read their emissive gain from the
+// active preset so they glow after dark.
+let bloomEmissiveGain = 0.5;
+const lighting = createLighting(scene, {
+    onEmissiveGain: (g) => { bloomEmissiveGain = g; },
 });
+const START_PRESET = 'golden';
 
 // ─── Orbit camera ─────────────────────────────────────────────────────────
 
@@ -305,7 +305,11 @@ function rebuildFoliage() {
         nodes.push(scene.createMesh({
             data: foliage,
             color: SPECIES[key].color,
-            metallic: 0.0, roughness: 0.7,
+            // Matte: thin leaves under a bright HDR sky pick up a broad white
+            // specular veil at lower roughness, washing the canopy grey. Near-
+            // diffuse keeps the green saturated; the wrap-light subsurface term
+            // carries the sheen instead.
+            metallic: 0.0, roughness: 0.92,
             twoSided: true, subsurface: 0.5,
             castsShadow: true, receivesShadow: true,
         }));
@@ -388,7 +392,7 @@ function rebuildBlooms() {
         nodes.push(scene.createMesh({
             data: mergedCenters,
             color: [0.98, 0.80, 0.25],   // golden eye
-            metallic: 0.0, roughness: 0.6, emissive: 0.15,
+            metallic: 0.0, roughness: 0.6, emissive: 0.3 * bloomEmissiveGain,
             castsShadow: false, receivesShadow: true,
         }));
     }
@@ -575,6 +579,24 @@ tempInp.addEventListener('input', () => {
     world.setClimate({ annualTempBase: t });
 });
 
+// Time-of-day selector — one button per lighting preset. Switching re-tints
+// the blooms (their emissive gain rides the preset) so the rebuild picks up
+// the new glow.
+const todRoot = document.getElementById('todButtons');
+const todBtns = {};
+function selectTod(key) {
+    lighting.apply(key);
+    for (const k in todBtns) todBtns[k].classList.toggle('on', k === key);
+    rebuildBlooms();
+}
+for (const key of lighting.order) {
+    const b = document.createElement('button');
+    b.textContent = lighting.presets[key].label;
+    b.addEventListener('click', () => selectTod(key));
+    todRoot.appendChild(b);
+    todBtns[key] = b;
+}
+
 // ─── Main loop ────────────────────────────────────────────────────────────
 
 function tick() {
@@ -586,11 +608,13 @@ function tick() {
         if (frameCt % REBUILD_EVERY === 0) rebuildAll();
         else updateStats();
     }
+    lighting.update(0.016);   // drift the fireflies even while the sim is paused
     requestAnimationFrame(tick);
 }
 
+selectTod(START_PRESET);   // light the scene before the first frame
 rebuildAll();
 requestAnimationFrame(tick);
 
 // ─── Debug surface for headless ───────────────────────────────────────────
-globalThis.__lab = { world, plants, overlays, rebuildAll };
+globalThis.__lab = { world, plants, overlays, rebuildAll, lighting, selectTod };
