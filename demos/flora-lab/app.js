@@ -293,13 +293,14 @@ function rebuildFoliage() {
         for (let k = 0; k < segs.length; k++) {
             g.segs.push(segs[k]);
             const f = fol && fol[k];
-            // Carve by raw exposure, but keep a small floor so deep shade thins
-            // to a sparse inner haze rather than bare sticks — lush shell, open
-            // (not skeletal) interior. Fall back to full density when the field
-            // is absent (older engine without lightExposure01) so leaves still
-            // scatter instead of NaN-ing the weight to zero.
+            // Carve by raw exposure. The lush look is carried entirely by the
+            // high-exposure outer shell, so we use the raw value with only a
+            // whisper of a floor — deep interior (exposure→0) clears to bare
+            // structure rather than staying a leafy fog you see through from
+            // inside. Fall back to full density when the field is absent (older
+            // engine without lightExposure01) so leaves still scatter.
             const raw      = f && f.lightExposure01 !== undefined ? f.lightExposure01 : 1.0;
-            const exposure = 0.12 + 0.88 * raw;
+            const exposure = 0.03 + 0.97 * raw;
             const maturity = f ? Math.min(1, f.age01) : 1.0;
             const alive    = f ? (1.0 - f.senescence01) : 1.0;
             g.w.push(exposure * maturity * alive);
