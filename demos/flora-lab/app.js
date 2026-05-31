@@ -273,13 +273,15 @@ function rebuildFoliage() {
     // classify live from plantInfo's shadeTolerance rather than trusting the
     // planting-order `plants` array, and gather each plant's own segments.
     //
-    // Light-gated density: broflora hands us a per-segment FoliageSample whose
-    // `mass` folds in the module's light (Q_eff), vigor, maturity and
-    // senescence — exactly "how many leaves belong here." We carry that array
-    // in lockstep with the segments and feed it to scatterLeaves as a
-    // per-segment density weight, so a shaded interior twig goes bare while a
-    // sunlit crown stays lush. The canopy then breathes with the light instead
-    // of being a uniform opaque ball, and the sun/moonbeam reach the interior.
+    // Shadow-carved density: broflora hands us a per-segment FoliageSample. We
+    // weight the leaf scatter by `lightExposure01` — the RAW illumination Q·Q_G
+    // before the shade-tolerance lerp — so the canopy thins by *actual* shade,
+    // not by vigor. (The plain `light01` is shade-tolerance-floored near 1.0,
+    // so it carries no shadow gradient and the old `mass` weight tracked vigor
+    // instead.) A twig buried in the closed interior reads near-zero exposure
+    // and goes bare; the sunlit outer shell and crown stay lush — so the dome
+    // opens up to its branch structure and the sun/moonbeam reach inside.
+    // Folded with maturity (no leaves on brand-new shoots) and senescence.
     const groups = { sun: { segs: [], w: [] }, shade: { segs: [], w: [] } };
     for (let i = 0; i < world.plantCount; i++) {
         const info = world.plantInfo(i);
@@ -290,7 +292,14 @@ function rebuildFoliage() {
         const g = (info.species.shadeTolerance >= 0.6) ? groups.shade : groups.sun;
         for (let k = 0; k < segs.length; k++) {
             g.segs.push(segs[k]);
-            g.w.push(fol && fol[k] ? fol[k].mass : 1.0);
+            const f = fol && fol[k];
+            // Carve by raw exposure, but keep a small floor so deep shade thins
+            // to a sparse inner haze rather than bare sticks — lush shell, open
+            // (not skeletal) interior.
+            const exposure = f ? (0.12 + 0.88 * f.lightExposure01) : 1.0;
+            const maturity = f ? Math.min(1, f.age01) : 1.0;
+            const alive    = f ? (1.0 - f.senescence01) : 1.0;
+            g.w.push(exposure * maturity * alive);
         }
     }
 
@@ -302,10 +311,10 @@ function rebuildFoliage() {
         const foliage = Mesh.scatterLeaves(segs, leaf, {
             maxRadius:     0.16,   // leaves on twigs, not the thick stems
             minDepth:      1,
-            // perUnitLength is the *full-light* rate; the per-segment mass
-            // weight (mostly < 1) scales it down in shade, so this runs higher
-            // than the old uniform 46 to keep lit crowns dense.
-            perUnitLength: 130,
+            // perUnitLength is the *full-sun* rate; the per-segment exposure
+            // weight scales it down in shade, so this runs higher than the old
+            // uniform 46 to keep the sunlit shell dense.
+            perUnitLength: 95,
             densityWeight: groups[key].w,
             upBias:        0.5,    // leaves tip toward the light
             tiltJitter:    0.55,
@@ -369,8 +378,13 @@ function rebuildBlooms() {
     const stride = anchors.length > BLOOM_CAP ? Math.ceil(anchors.length / BLOOM_CAP) : 1;
     const petalParts = [];
     const centerParts = [];
+    // Flowers open to the light — drop anchors buried in deep canopy shade so
+    // blooms cluster on the sunlit surface instead of speckling the dark
+    // interior. Same raw-exposure signal that carves the foliage.
+    const BLOOM_LIGHT_MIN = 0.18;
     for (let i = 0; i < anchors.length; i += stride) {
         const a = anchors[i];
+        if (a.lightExposure01 !== undefined && a.lightExposure01 < BLOOM_LIGHT_MIN) continue;
         // Slight per-bloom scale variation keyed off life-state.
         const s = 0.8 + 0.5 * Math.min(1, a.age01 || 0.5);
 
