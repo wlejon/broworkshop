@@ -35,15 +35,18 @@ const $gate       = document.getElementById('gate');
 let whisper = null, sttTok = null, sttPrompt = null;
 let lm = null, lmTok = null;
 let kokoro = null, voice = null, spaceId = 16;
+let qwen = null;        // Qwen3-TTS model (preferred speech backend when present)
+let useQwen = false;    // true when Qwen3-TTS is the active speech backend
+const QWEN_SPEAKER = 'serena';   // preset CustomVoice voice
 let modelsReady = false;
-let speechOn = false;   // true once Kokoro + voice load; otherwise text-only
+let speechOn = false;   // true once a speech backend (Qwen or Kokoro) loads; else text-only
 
 // Model file paths, resolved at boot by VoiceModels (models.js) — they point at
 // the shared model cache on a downloaded build, or at the dev sibling repos in a
 // source checkout. Filled in by startLoad().
 let QWEN_GGUF = null;
 let WHISPER_DIR = null, WHISPER_VOCAB = null, WHISPER_MERGES = null, WHISPER_ADDED = null;
-let WAKE_WEIGHTS = null, KOKORO_DIR = null, KOKORO_VOICE = null;
+let WAKE_WEIGHTS = null, KOKORO_DIR = null, KOKORO_VOICE = null, QWEN_TTS_DIR = null;
 // The phonemizer's explicit asset paths: the g2p lexicon + POS tagger, and the
 // Kokoro config.json it reads the phoneme vocab from. Resolved by VoiceModels
 // to the shared cache on a downloaded build or the dev siblings in a source
@@ -257,11 +260,34 @@ function nextSentence(text, fromLen) {
     return { sentence: m[0].trim(), length: m[0].length };
 }
 
+// Split a clip's duration across words proportionally to character length —
+// the timing model when there are no per-phoneme durations (Qwen3-TTS) or the
+// phoneme/word counts diverge.
+function splitWordsByChars(textWords, totalSec) {
+    let totalChars = 0;
+    for (const w of textWords) totalChars += w.length;
+    if (totalChars === 0) totalChars = 1;
+    const words = [];
+    let acc = 0;
+    for (const w of textWords) {
+        const dur = totalSec * (w.length / totalChars);
+        words.push({ text: w, startSec: acc, endSec: acc + dur });
+        acc += dur;
+    }
+    return words;
+}
+
 // Per-word timings from Kokoro's per-phoneme durations. durations[0] is the BOS
 // frame count, durations[i+1] corresponds to phonemeIds[i], the last is EOS.
 // Words are separated by the space token (spaceId); its frames belong to the
 // inter-word gap, not to either word.
 function computeWords(sentence, phonemeIds, durations, sampleCount, sampleRate) {
+    const textWords = sentence.split(/\s+/).filter(Boolean);
+    // No per-phoneme durations (Qwen3-TTS is autoregressive over codec frames,
+    // not phonemes) — fall straight back to a proportional split.
+    if (!durations || durations.length === 0)
+        return splitWordsByChars(textWords, sampleCount / sampleRate);
+
     let frameSum = 0;
     for (let i = 0; i < durations.length; i++) frameSum += durations[i];
     const secPerFrame = frameSum > 0 ? (sampleCount / frameSum) / sampleRate : 0;
@@ -282,7 +308,6 @@ function computeWords(sentence, phonemeIds, durations, sampleCount, sampleRate) 
     }
     if (hasPhon) groups.push({ startFrame: curStart, endFrame: cursor });
 
-    const textWords = sentence.split(/\s+/).filter(Boolean);
     const words = [];
     if (groups.length === textWords.length && groups.length > 0) {
         for (let i = 0; i < groups.length; i++) {
@@ -295,16 +320,7 @@ function computeWords(sentence, phonemeIds, durations, sampleCount, sampleRate) 
     } else {
         // Counts diverged (punctuation tokenised oddly) — fall back to a
         // proportional split by character length over the clip duration.
-        const totalSec = frameSum * secPerFrame;
-        let totalChars = 0;
-        for (const w of textWords) totalChars += w.length;
-        if (totalChars === 0) totalChars = 1;
-        let acc = 0;
-        for (const w of textWords) {
-            const dur = totalSec * (w.length / totalChars);
-            words.push({ text: w, startSec: acc, endSec: acc + dur });
-            acc += dur;
-        }
+        return splitWordsByChars(textWords, frameSum * secPerFrame);
     }
     return words;
 }
@@ -495,7 +511,11 @@ function startLoad() {
     KOKORO_CONFIG  = p.kokoroConfig;
     LEXICON_BIN    = p.lexicon;
     POS_TAGGER_BIN = p.posTagger;
-    speechOn       = p.speechReady;
+    QWEN_TTS_DIR   = p.qwenTtsDir;
+    // Prefer Qwen3-TTS when its weights are present (text-driven — no phonemizer
+    // or voice pack); otherwise fall back to Kokoro. Speech is on if either is.
+    useQwen        = p.qwenTtsReady;
+    speechOn       = p.qwenTtsReady || p.speechReady;
 
     setStatus('loading', 'loading models…');
     $meter.style.opacity = '0.6';
@@ -549,7 +569,13 @@ function loadModels() {
         if (WHISPER_ADDED) tokOpts.addedTokensPath = WHISPER_ADDED;
         bro.stt.loadTokenizer(tokOpts);
 
-        if (speechOn) {
+        if (speechOn && useQwen) {
+            // Qwen3-TTS: a single load (text-driven — no voice pack, no g2p).
+            bro.tts.loadQwen(QWEN_TTS_DIR, {
+                onReady: (q) => { qwen = q; ready(); },
+                onError: (m) => fail('speech model', m),
+            });
+        } else if (speechOn) {
             bro.tts.setAssets({
                 lexicon:      LEXICON_BIN,
                 posTagger:    POS_TAGGER_BIN,
@@ -588,7 +614,8 @@ function onModelsReady() {
     // so drop to text-only instead of disabling the app; STT + LLM + wake still
     // work. (Run scripts/download-brosoundml-data.sh to fetch the g2p data.)
     setTimeout(() => {
-        if (speechOn) {
+        if (speechOn && !useQwen) {
+            // Kokoro only: warm the phonemizer's lexicon off the critical path.
             try { bro.tts.phonemize('warming up the lexicon'); }
             catch (e) { speechOn = false; console.warn('phonemizer unavailable:', e.message); }
         }
@@ -710,41 +737,47 @@ function pumpSynth() {
     const item = synthQueue.shift();
     if (item.turn !== acceptTurn) { pumpSynth(); return; }  // stale
 
-    let phonemeIds;
-    try {
-        phonemeIds = bro.tts.phonemize(item.sentence);
-    } catch (e) {
-        // A throw (vs. an empty result) means the phonemizer itself failed —
-        // its g2p data went missing after boot. That's fatal for the whole
-        // reply, not a per-sentence quirk, so surface it instead of muting.
-        pipelineError('voice', e.message);
-        return;
+    // Kokoro needs phoneme ids up front; Qwen3-TTS takes the raw sentence.
+    let phonemeIds = null;
+    if (!useQwen) {
+        try {
+            phonemeIds = bro.tts.phonemize(item.sentence);
+        } catch (e) {
+            // A throw (vs. an empty result) means the phonemizer itself failed —
+            // its g2p data went missing after boot. That's fatal for the whole
+            // reply, not a per-sentence quirk, so surface it instead of muting.
+            pipelineError('voice', e.message);
+            return;
+        }
+        if (!phonemeIds || phonemeIds.length === 0) { pumpSynth(); return; }
     }
-    if (!phonemeIds || phonemeIds.length === 0) { pumpSynth(); return; }
 
     // Play the soft "about to speak" cue once, just before the first synth of
     // the turn, so it overlaps the synthesis latency.
     if (!presynthSent) { presynthSent = true; playPresynthCue(); setStatus('thinking', 'responding…'); }
 
+    // onDone is identical for both backends: Qwen returns no durations, and
+    // computeWords falls back to a proportional split when they're absent.
+    const onDone = (res, info) => {
+        synthBusy = false;
+        ttsHandle = null;
+        if (item.turn === acceptTurn && !(info && info.cancelled) && res &&
+            res.samples && res.samples.length > 0) {
+            const words = computeWords(item.sentence, phonemeIds, res.durations,
+                                       res.samples.length, res.sampleRate);
+            const els = finalizeSentence(words, item.consumed);
+            enqueueAudio(res.samples, res.sampleRate, els, words);
+            producedSpeech = true;
+            setStatus('speaking', 'speaking…');
+        }
+        pumpSynth();
+        maybeFinishSpeaking();
+    };
+
     synthBusy = true;
-    ttsHandle = bro.tts.synthesize(kokoro, phonemeIds, voice, {
-        speed: 1.0,
-        onDone: (res, info) => {
-            synthBusy = false;
-            ttsHandle = null;
-            if (item.turn === acceptTurn && !(info && info.cancelled) && res &&
-                res.samples && res.samples.length > 0) {
-                const words = computeWords(item.sentence, phonemeIds, res.durations,
-                                           res.samples.length, res.sampleRate);
-                const els = finalizeSentence(words, item.consumed);
-                enqueueAudio(res.samples, res.sampleRate, els, words);
-                producedSpeech = true;
-                setStatus('speaking', 'speaking…');
-            }
-            pumpSynth();
-            maybeFinishSpeaking();
-        },
-    });
+    ttsHandle = useQwen
+        ? bro.tts.synthesize(qwen, item.sentence, { speaker: QWEN_SPEAKER, onDone })
+        : bro.tts.synthesize(kokoro, phonemeIds, voice, { speed: 1.0, onDone });
 }
 
 // Replace the streaming tail for this sentence with highlightable word spans.

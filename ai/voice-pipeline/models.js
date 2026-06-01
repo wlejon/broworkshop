@@ -87,6 +87,8 @@ function filePresent(f) { return exists(resolveFile(f)); }
 // ─── the catalog ──────────────────────────────────────────────────────────
 const WHISPER_DEV = '../brosoundml/weights/whisper';
 const KOKORO_DEV  = '../brosoundml/weights/kokoro';
+const QWEN_TTS_DEV = '../brosoundml/weights/qwen-tts/0.6B-customvoice';
+const QWEN_TTS_REPO = 'Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice';
 
 const GROUPS = [
     {
@@ -140,6 +142,31 @@ const GROUPS = [
               dev: '../brosoundml-data/pos_tagger/model.bin', bytes: 7653373 },
         ],
     },
+    // Qwen3-TTS (12 Hz multi-codebook) — an alternative, higher-quality speech
+    // backend. Text-driven end-to-end (no phonemizer, no voice pack), so it needs
+    // only its own model dir + the bundled codec. Preferred over Kokoro when its
+    // weights are present, but NOT auto-downloaded: at ~2.5 GB it would double the
+    // speech download for no gain over Kokoro, so it stays a "use it if you have
+    // it" backend — a source checkout loads from the dev sibling, and a packaged
+    // build can drop the weights into the model cache (fetch via brosoundml's
+    // scripts/download-qwen-tts.sh from the public Apache-2.0 repo below).
+    {
+        key: 'ttsq', label: 'Speech synthesis (Qwen3-TTS)', downloadable: false, optional: true,
+        files: [
+            { repo: QWEN_TTS_REPO, kind: 'model', file: 'config.json',
+              dev: QWEN_TTS_DEV + '/config.json', bytes: 4908 },
+            { repo: QWEN_TTS_REPO, kind: 'model', file: 'model.safetensors',
+              dev: QWEN_TTS_DEV + '/model.safetensors', bytes: 1811626576 },
+            { repo: QWEN_TTS_REPO, kind: 'model', file: 'vocab.json',
+              dev: QWEN_TTS_DEV + '/vocab.json', bytes: 2776833 },
+            { repo: QWEN_TTS_REPO, kind: 'model', file: 'merges.txt',
+              dev: QWEN_TTS_DEV + '/merges.txt', bytes: 1671839 },
+            { repo: QWEN_TTS_REPO, kind: 'model', file: 'speech_tokenizer/config.json',
+              dev: QWEN_TTS_DEV + '/speech_tokenizer/config.json', bytes: 2336 },
+            { repo: QWEN_TTS_REPO, kind: 'model', file: 'speech_tokenizer/model.safetensors',
+              dev: QWEN_TTS_DEV + '/speech_tokenizer/model.safetensors', bytes: 682293092 },
+        ],
+    },
 ];
 
 function groupBy(key) { return GROUPS.find(g => g.key === key); }
@@ -167,6 +194,11 @@ function resolved() {
     const lexicon = tts[3], posTagger = tts[4];
 
     const speechReady = groupPresent(groupBy('tts'));
+    // Qwen3-TTS: text-driven, so the only resolved path the loader needs is its
+    // model dir (backed out from model.safetensors).
+    const qwenTts = groupBy('ttsq').files;
+    const qwenTtsModel = qwenTts.find(f => f.file === 'model.safetensors');
+    const qwenTtsReady = groupPresent(groupBy('ttsq'));
     const addedPath = resolveFile(added);
     return {
         qwen:         resolveFile(groupBy('llm').files[0]),
@@ -183,6 +215,9 @@ function resolved() {
         lexicon:      resolveFile(lexicon),
         posTagger:    resolveFile(posTagger),
         speechReady,
+        // Qwen3-TTS model dir + readiness (preferred speech backend when ready).
+        qwenTtsDir:   dirOf(resolveFile(qwenTtsModel)),
+        qwenTtsReady,
     };
 }
 
