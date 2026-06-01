@@ -123,46 +123,212 @@ main {
     100% { transform: translateX(-105%); }
 }
 
-/* ─── model gate (shown when required weights aren't on disk) ─────────────── */
-.gate {
-    background: #1c1f24;
-    border: 1px solid #2a2d33;
-    border-radius: 8px;
-    padding: 16px 18px;
+/* ─── conversation view ──────────────────────────────────────────────────── */
+/* [hidden] must win over the display:flex below (attribute selectors don't, on
+   their own, beat a class rule), so spell it out for both swappable sections. */
+.setup[hidden], .convo[hidden] { display: none; }
+
+.convo {
+    flex: 1;
     display: flex;
     flex-direction: column;
     gap: 12px;
+    min-height: 0;
 }
-.gate h2 { margin: 0; font-size: 15px; font-weight: 600; }
-.gate .blurb { margin: 0; font-size: 13px; color: #a8adb5; line-height: 1.5; }
-.gate .rows { display: flex; flex-direction: column; gap: 6px; }
-.gate .row {
+
+/* ─── setup screen (model selection) ─────────────────────────────────────── */
+/* Block flow (not flex-column) for vertical stacks: htmlayout doesn't grow a
+   flex-column item to its multi-line content height, so siblings overlap. Block
+   flow sizes to content. `gap` doesn't apply to block, so space with margins. */
+.setup {
+    flex: 1;
+    overflow-y: auto;
+    display: block;
+    min-height: 0;
+    padding-right: 4px;
+}
+.setup > * { margin-bottom: 14px; }
+.setup > *:last-child { margin-bottom: 0; }
+.setup .intro { margin: 0 0 14px; font-size: 13px; color: #a8adb5; line-height: 1.55; }
+.section-label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    color: #7a8089;
+    margin-top: 2px;
+}
+
+/* voice cards — explicit rows of 2 (.card-line); see .spk-grid note on heights */
+.voice-cards { display: flex; flex-direction: column; gap: 10px; }
+/* inline-block cells, not flex: htmlayout doesn't grow a flex item's cross-axis
+   (height) to multi-line content, so stacked children overflow. inline-block
+   sizes to content. Gutters come from margin-right (zeroed on the last cell of a
+   row, so N cells of calc(100/N% - g) + (N-1)·margin fill the row exactly). */
+.card-line { display: block; margin-bottom: 10px; }
+.card-line:last-child { margin-bottom: 0; }
+.voice-card {
+    display: inline-block;
+    vertical-align: top;
+    box-sizing: border-box;
+    width: calc(50% - 5px);
+    margin-right: 10px;
+    text-align: left;
+    padding: 13px 14px;
+    background: #1c1f24;
+    border: 1.5px solid #2a2d33;
+    border-radius: 9px;
+    cursor: pointer;
+    color: #e6e8eb;
+    transition: border-color 90ms, background 90ms;
+}
+.voice-card:last-child { margin-right: 0; }
+.voice-card:hover { border-color: #3a4150; }
+.voice-card.on { border-color: #c08bff; background: #221b2e; }
+.voice-card.disabled { opacity: 0.5; cursor: not-allowed; }
+.vc-title { display: block; font-size: 14px; font-weight: 600; }
+.vc-sub { display: block; font-size: 12px; color: #9097a0; margin-top: 2px; }
+.tag {
+    display: inline-block;
+    margin-top: 7px;
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-variant-numeric: tabular-nums;
+}
+.tag.ready { background: #1f2a1f; color: #7bc47f; }
+.tag.dl    { background: #3a3320; color: #e6c66b; }
+.tag.need  { background: #3a1f1f; color: #ff8b8b; }
+.tag.none  { background: #2a2d33; color: #8a9099; }
+
+/* per-backend options */
+.voice-opts {
+    background: #191c21;
+    border: 1px solid #24272d;
+    border-radius: 9px;
+    padding: 13px 14px;
+    display: block;
+}
+.voice-opts > * { margin-bottom: 11px; }
+.voice-opts > *:last-child { margin-bottom: 0; }
+.opt-label { font-size: 12px; font-weight: 600; color: #c5cad2; }
+.opt-note  { margin: 0; font-size: 12.5px; color: #9097a0; line-height: 1.5; }
+
+.spk-grid { display: block; }
+.spk-line { display: block; margin-bottom: 8px; }
+.spk-line:last-child { margin-bottom: 0; }
+.spk {
+    display: inline-block;
+    vertical-align: top;
+    box-sizing: border-box;
+    width: calc(33.333% - 6px);
+    margin-right: 9px;
+    text-align: left;
+    padding: 8px 10px;
+    background: #232730;
+    border: 1.5px solid transparent;
+    border-radius: 7px;
+    cursor: pointer;
+    color: #e6e8eb;
+}
+.spk:last-child { margin-right: 0; }
+.spk:hover { background: #272c36; }
+.spk[aria-selected="true"] { border-color: #c08bff; background: #2a2236; }
+.spk-name { display: block; font-size: 13px; font-weight: 600; }
+.spk-note { display: block; font-size: 11px; color: #8a9099; text-transform: capitalize; }
+
+.lang-grid { display: block; }
+.lang-line { display: block; margin-bottom: 6px; }
+.lang-line:last-child { margin-bottom: 0; }
+.lang {
+    display: inline-block;
+    vertical-align: top;
+    box-sizing: border-box;
+    width: calc(20% - 5px);
+    margin-right: 6px;
+    text-align: center;
+    font-size: 12px;
+    padding: 6px 8px;
+    background: #232730;
+    color: #aeb4bd;
+    border: 1.5px solid transparent;
+    border-radius: 8px;
+    cursor: pointer;
+}
+.lang:last-child { margin-right: 0; }
+.lang:hover { background: #2a2f39; color: #e6e8eb; }
+.lang[aria-selected="true"] { border-color: #c08bff; background: #2a2236; color: #e6e8eb; }
+.vd-desc {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 10px 11px;
+    background: #232730;
+    color: #e6e8eb;
+    border: 1px solid #2f343c;
+    border-radius: 7px;
+    font-size: 13px;
+    font-family: inherit;
+}
+.opt-sub { font-size: 12px; color: #8a9099; }
+.ex-list { display: block; }
+.ex {
+    display: block;
+    margin-bottom: 6px;
+    text-align: left;
+    font-size: 12px;
+    padding: 7px 11px;
+    background: #232730;
+    color: #aeb4bd;
+    border: 1px solid #2f343c;
+    border-radius: 7px;
+    cursor: pointer;
+}
+.ex:hover { background: #2a2f39; color: #e6e8eb; border-color: #c08bff; }
+
+/* pipeline / core rows */
+.core-rows { display: flex; flex-direction: column; gap: 7px; }
+.core-row, .wake-toggle {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    gap: 8px;
     font-size: 13px;
-    padding: 7px 10px;
-    background: #232730;
-    border-radius: 6px;
+    padding: 9px 11px;
+    background: #1c1f24;
+    border: 1px solid #24272d;
+    border-radius: 7px;
+    color: #d4d8de;
 }
-.gate .row .name { color: #e6e8eb; }
-.gate .row .size { color: #8a9099; font-variant-numeric: tabular-nums; }
-.gate .row.have .size { color: #7bc47f; }
-.gate .row.need .size { color: #e6c66b; }
-.gate .note { margin: 0; font-size: 12px; color: #6a6f78; font-style: italic; }
-.gate .actions { display: flex; gap: 10px; align-items: center; }
-.gate button {
-    padding: 11px 18px;
-    font-size: 14px;
+.core-row { justify-content: space-between; }
+.core-row > span:first-child { color: #c5cad2; }
+.wake-toggle { cursor: pointer; }
+.wake-toggle input { width: 15px; height: 15px; accent-color: #c08bff; }
+
+/* start bar */
+.start-bar { display: flex; flex-direction: column; gap: 8px; margin-top: 2px; }
+.start {
+    padding: 14px 18px;
+    font-size: 15px;
     font-weight: 600;
     background: #c08bff;
     color: #1a1224;
     border: none;
-    border-radius: 7px;
+    border-radius: 8px;
     cursor: pointer;
 }
-.gate button:disabled { background: #3a3d44; color: #6a6f78; cursor: not-allowed; }
-.gate button.secondary { background: #2a2d33; color: #c5cad2; }
+.start:disabled { background: #3a3d44; color: #6a6f78; cursor: not-allowed; }
+.start-prog {
+    height: 6px;
+    background: #1c1f24;
+    border-radius: 3px;
+    overflow: hidden;
+}
+.start-bar-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #7bc47f, #c08bff);
+    transition: width 120ms linear;
+}
+.start-note { font-size: 12px; color: #8a9099; min-height: 15px; }
 
 .talk {
     padding: 18px;

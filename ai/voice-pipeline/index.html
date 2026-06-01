@@ -8,17 +8,22 @@
 <body>
     <header>
         <h1>Voice Pipeline</h1>
-        <div id="status" class="status loading">starting…</div>
+        <div id="status" class="status">choose a voice</div>
     </header>
     <main>
-        <div id="transcript" class="transcript">
-            <div class="hint">Say &ldquo;computer&rdquo; to activate, or hold the button (Space) to talk manually.</div>
-        </div>
-        <div id="gate" class="gate" hidden></div>
-        <div class="meter-wrap">
-            <div id="meter" class="meter"></div>
-        </div>
-        <button id="talk" class="talk" disabled>loading models…</button>
+        <!-- Setup: choose what to load. Nothing is loaded until "Start". -->
+        <section id="setup" class="setup"></section>
+
+        <!-- Conversation: shown once models are loaded. -->
+        <section id="convo" class="convo" hidden>
+            <div id="transcript" class="transcript">
+                <div class="hint">Say &ldquo;computer&rdquo; to activate, or hold the button (Space) to talk manually.</div>
+            </div>
+            <div class="meter-wrap">
+                <div id="meter" class="meter"></div>
+            </div>
+            <button id="talk" class="talk" disabled>loading models…</button>
+        </section>
     </main>
     <script src="models.js"></script>
     <script src="main.js"></script>

@@ -89,6 +89,8 @@ const WHISPER_DEV = '../brosoundml/weights/whisper';
 const KOKORO_DEV  = '../brosoundml/weights/kokoro';
 const QWEN_TTS_DEV = '../brosoundml/weights/qwen-tts/0.6B-customvoice';
 const QWEN_TTS_REPO = 'Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice';
+const QWEN_VD_DEV  = '../brosoundml/weights/qwen-tts/1.7B-voicedesign';
+const QWEN_VD_REPO = 'Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign';
 
 const GROUPS = [
     {
@@ -151,7 +153,7 @@ const GROUPS = [
     // build can drop the weights into the model cache (fetch via brosoundml's
     // scripts/download-qwen-tts.sh from the public Apache-2.0 repo below).
     {
-        key: 'ttsq', label: 'Speech synthesis (Qwen3-TTS)', downloadable: false, optional: true,
+        key: 'ttsq', label: 'Qwen3-TTS · CustomVoice (0.6B)', downloadable: false, optional: true,
         files: [
             { repo: QWEN_TTS_REPO, kind: 'model', file: 'config.json',
               dev: QWEN_TTS_DEV + '/config.json', bytes: 4908 },
@@ -167,6 +169,65 @@ const GROUPS = [
               dev: QWEN_TTS_DEV + '/speech_tokenizer/model.safetensors', bytes: 682293092 },
         ],
     },
+    // Qwen3-TTS VoiceDesign (1.7B) — natural-language voice control: describe a
+    // voice in words and the model synthesizes it (no preset speaker, no
+    // reference audio). ~4.5 GB, so not auto-downloaded; a source checkout loads
+    // from the dev sibling, a packaged build fetches via
+    // brosoundml's scripts/download-qwen-tts.sh --size 1.7B --variant voicedesign.
+    {
+        key: 'ttsvd', label: 'Qwen3-TTS · VoiceDesign (1.7B)', downloadable: false, optional: true,
+        files: [
+            { repo: QWEN_VD_REPO, kind: 'model', file: 'config.json',
+              dev: QWEN_VD_DEV + '/config.json', bytes: 4421 },
+            { repo: QWEN_VD_REPO, kind: 'model', file: 'model.safetensors',
+              dev: QWEN_VD_DEV + '/model.safetensors', bytes: 3833402552 },
+            { repo: QWEN_VD_REPO, kind: 'model', file: 'vocab.json',
+              dev: QWEN_VD_DEV + '/vocab.json', bytes: 2776833 },
+            { repo: QWEN_VD_REPO, kind: 'model', file: 'merges.txt',
+              dev: QWEN_VD_DEV + '/merges.txt', bytes: 1671839 },
+            { repo: QWEN_VD_REPO, kind: 'model', file: 'speech_tokenizer/config.json',
+              dev: QWEN_VD_DEV + '/speech_tokenizer/config.json', bytes: 2336 },
+            { repo: QWEN_VD_REPO, kind: 'model', file: 'speech_tokenizer/model.safetensors',
+              dev: QWEN_VD_DEV + '/speech_tokenizer/model.safetensors', bytes: 682293092 },
+        ],
+    },
+];
+
+// ─── speech-backend showcase catalog ────────────────────────────────────────
+// What the setup screen offers. The Qwen3-TTS speaker names + dialect tags are
+// the authoritative ids from the CustomVoice config.json (talker_config.spk_id /
+// spk_is_dialect); a source checkout can confirm them via qwen.speakers(). The
+// languages are the model's codec_language_id keys (dialects excluded). Short
+// labels are ours, for presentation.
+const QWEN_LANGUAGES = [
+    'english', 'chinese', 'german', 'italian', 'portuguese',
+    'spanish', 'japanese', 'korean', 'french', 'russian',
+];
+
+// CustomVoice preset speakers (timbres). Language is selected separately — any
+// speaker can voice any supported language. `dialect` mirrors the config's
+// spk_is_dialect (a Chinese regional accent) and is shown as a badge.
+const QWEN_SPEAKERS = [
+    { id: 'serena',   name: 'Serena',   note: 'female' },
+    { id: 'vivian',   name: 'Vivian',   note: 'female' },
+    { id: 'ryan',     name: 'Ryan',     note: 'male'   },
+    { id: 'aiden',    name: 'Aiden',    note: 'male'   },
+    { id: 'uncle_fu', name: 'Uncle Fu', note: 'male'   },
+    { id: 'ono_anna', name: 'Ono Anna', note: 'female' },
+    { id: 'sohee',    name: 'Sohee',    note: 'female' },
+    { id: 'eric',     name: 'Eric',     note: 'male', dialect: 'Sichuan' },
+    { id: 'dylan',    name: 'Dylan',    note: 'male', dialect: 'Beijing' },
+];
+
+// VoiceDesign starter prompts — one-tap examples of natural-language voice
+// control, to seed the description box. The model accepts any free-form text.
+const QWEN_VD_EXAMPLES = [
+    'A warm, low-pitched elderly storyteller, calm and unhurried.',
+    'An energetic young sports announcer, fast and excited.',
+    'A soft, soothing meditation guide speaking slowly and gently.',
+    'A crisp, authoritative news anchor with a neutral accent.',
+    'A cheerful cartoon character with a bright, bouncy voice.',
+    'A mysterious narrator with a deep, gravelly whisper.',
 ];
 
 function groupBy(key) { return GROUPS.find(g => g.key === key); }
@@ -194,11 +255,15 @@ function resolved() {
     const lexicon = tts[3], posTagger = tts[4];
 
     const speechReady = groupPresent(groupBy('tts'));
-    // Qwen3-TTS: text-driven, so the only resolved path the loader needs is its
-    // model dir (backed out from model.safetensors).
+    // Qwen3-TTS: text-driven, so the only resolved path each loader needs is its
+    // model dir (backed out from model.safetensors). Two variants: CustomVoice
+    // (preset speakers) and VoiceDesign (natural-language voice control).
     const qwenTts = groupBy('ttsq').files;
     const qwenTtsModel = qwenTts.find(f => f.file === 'model.safetensors');
     const qwenTtsReady = groupPresent(groupBy('ttsq'));
+    const qwenVd = groupBy('ttsvd').files;
+    const qwenVdModel = qwenVd.find(f => f.file === 'model.safetensors');
+    const qwenVdReady = groupPresent(groupBy('ttsvd'));
     const addedPath = resolveFile(added);
     return {
         qwen:         resolveFile(groupBy('llm').files[0]),
@@ -215,9 +280,11 @@ function resolved() {
         lexicon:      resolveFile(lexicon),
         posTagger:    resolveFile(posTagger),
         speechReady,
-        // Qwen3-TTS model dir + readiness (preferred speech backend when ready).
+        // Qwen3-TTS model dirs + readiness (CustomVoice + VoiceDesign variants).
         qwenTtsDir:   dirOf(resolveFile(qwenTtsModel)),
         qwenTtsReady,
+        qwenVdDir:    dirOf(resolveFile(qwenVdModel)),
+        qwenVdReady,
     };
 }
 
@@ -309,8 +376,27 @@ async function download(groups, onProgress) {
     }
 }
 
+// Look up one group's status (present + download bytes) by key.
+function groupStatus(key) {
+    const g = groupBy(key);
+    if (!g) return null;
+    return { key: g.key, label: g.label, downloadable: g.downloadable,
+             optional: !!g.optional, present: groupPresent(g), bytes: groupBytes(g) };
+}
+
+// Download a set of groups by key (only those missing + downloadable are fetched).
+function downloadKeys(keys, onProgress) {
+    const set = new Set(keys);
+    const groups = GROUPS.filter(g => set.has(g.key) && g.downloadable && !groupPresent(g))
+                         .map(g => Object.assign({}, g, { bytes: groupBytes(g) }));
+    return download(groups, onProgress);
+}
+
 window.VoiceModels = {
     cacheDir, status, resolved, missingDownloadable, download,
+    groupStatus, downloadKeys,
+    // Showcase catalog for the setup screen.
+    QWEN_SPEAKERS, QWEN_LANGUAGES, QWEN_VD_EXAMPLES,
 };
 
 })();

@@ -29,21 +29,29 @@ const $status     = document.getElementById('status');
 const $transcript = document.getElementById('transcript');
 const $talk       = document.getElementById('talk');
 const $meter      = document.getElementById('meter');
-const $gate       = document.getElementById('gate');
+const $setup      = document.getElementById('setup');
+const $convo      = document.getElementById('convo');
 
 // ─── models (loaded on the main context via the async inference API) ──────────
 let whisper = null, sttTok = null, sttPrompt = null;
 let lm = null, lmTok = null;
 let kokoro = null, voice = null, spaceId = 16;
-let qwen = null;        // Qwen3-TTS model (preferred speech backend when present)
-let useQwen = false;    // true when Qwen3-TTS is the active speech backend
-const QWEN_SPEAKER = 'serena';   // preset CustomVoice voice
+let qwen = null;        // Qwen3-TTS model (active speech backend when present)
+let useQwen = false;    // true when a Qwen3-TTS backend is active
+let useVoiceDesign = false;   // true when the active Qwen backend is VoiceDesign
+// Qwen3-TTS voice selection, set from the setup screen. For CustomVoice
+// `qwenSpeaker` picks a preset timbre; for VoiceDesign `qwenInstruct` is a
+// natural-language description of the voice. `qwenLanguage` applies to both.
+let qwenSpeaker  = 'serena';
+let qwenLanguage = 'english';
+let qwenInstruct = '';
+let wakeEnabled  = true;       // wake word ("computer") loaded + listening
 let modelsReady = false;
 let speechOn = false;   // true once a speech backend (Qwen or Kokoro) loads; else text-only
 
 // Model file paths, resolved at boot by VoiceModels (models.js) — they point at
 // the shared model cache on a downloaded build, or at the dev sibling repos in a
-// source checkout. Filled in by startLoad().
+// source checkout. Filled in by startSelected().
 let QWEN_GGUF = null;
 let WHISPER_DIR = null, WHISPER_VOCAB = null, WHISPER_MERGES = null, WHISPER_ADDED = null;
 let WAKE_WEIGHTS = null, KOKORO_DIR = null, KOKORO_VOICE = null, QWEN_TTS_DIR = null;
@@ -375,8 +383,9 @@ function playPresynthCue() { playEarcon(presynthClipId, 0.35); }
 
 // ─── boot ────────────────────────────────────────────────────────────────────
 // Bring up the lightweight, this-thread pieces (audio context, cue tones), then
-// kick off the (background-thread) model loads. Runs AFTER the first paint so
-// the splash UI shows immediately instead of a black screen during model load.
+// show the setup screen. NOTHING heavy loads here: the LLM, Whisper, wake word,
+// and the chosen speech backend are megabytes-to-gigabytes each, so the app
+// stays inert until the user picks a voice and clicks Start.
 function boot() {
     try {
         audioCtx = new AudioContext();
@@ -393,15 +402,10 @@ function boot() {
         return;
     }
 
-    // Gate: only the heavy, downloadable weights (wake, LLM, Whisper) block
-    // boot. If any are missing, show a download panel instead of pulling
-    // gigabytes automatically; otherwise load straight away.
-    const missing = VoiceModels.missingDownloadable();
-    if (missing.length) { showGate(missing); return; }
-    startLoad();
+    showSetup();
 }
 
-// ─── download gate ────────────────────────────────────────────────────────────
+// ─── setup screen (model selection) ─────────────────────────────────────────
 function humanBytes(n) {
     if (!n || n <= 0) return '';
     const u = ['B', 'KB', 'MB', 'GB', 'TB'];
@@ -410,95 +414,246 @@ function humanBytes(n) {
     return v.toFixed(v < 10 && i > 0 ? 1 : 0) + ' ' + u[i];
 }
 
-// Show the gate: a per-model list with sizes and one button that downloads
-// everything missing, then loads. Nothing downloads until the user clicks.
-function showGate(missing) {
-    let total = 0;
-    for (const g of missing) total += g.bytes || 0;
+const esc = (s) => String(s).replace(/[&<>"]/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-    const rows = VoiceModels.status()
-        .filter(s => s.downloadable)
-        .map(s => '<div class="row ' + (s.present ? 'have' : 'need') + '">' +
-                    '<span class="name">' + s.label + '</span>' +
-                    '<span class="size">' +
-                      (s.present ? 'ready' : (humanBytes(s.bytes) || 'download')) +
-                    '</span></div>')
-        .join('');
-
-    const speech = VoiceModels.status().find(s => s.key === 'tts');
-    const speechNote = speech && !speech.present
-        ? '<p class="note">Speech (Kokoro) is optional — it downloads best-effort. If its ' +
-          'weights aren\'t available yet, replies stay text-only and everything else still works.</p>'
-        : '';
-
-    $gate.innerHTML =
-        '<h2>Download models</h2>' +
-        '<p class="blurb">This app needs the model weights below. They aren\'t bundled — ' +
-        'download them once (about ' + humanBytes(total) + ') into a shared cache.</p>' +
-        '<div class="rows">' + rows + '</div>' +
-        speechNote +
-        '<div class="actions"><button id="gate-go">Download (' + humanBytes(total) + ')</button></div>';
-    $gate.hidden = false;
-    setStatus('idle', 'models needed');
-    $talk.textContent = 'download models to begin';
-
-    document.getElementById('gate-go').addEventListener('click', () => runDownload(missing));
+// Chunk pre-rendered item HTML into fixed-width row divs. We lay grids out as
+// explicit single-line flex rows rather than flex-wrap / CSS grid: htmlayout
+// under-reserves the cross-axis height of a multi-line wrapped container, so a
+// wrapped grid paints over whatever follows it. Stacked single-line rows size
+// correctly.
+function rowsOf(items, per, lineClass) {
+    let html = '';
+    for (let i = 0; i < items.length; i += per)
+        html += '<div class="' + lineClass + '">' + items.slice(i, i + per).join('') + '</div>';
+    return html;
 }
 
-// Button handler: download every missing required file, streaming progress to
-// the meter + status, then load.
-async function runDownload(missing) {
-    const btn = document.getElementById('gate-go');
-    if (btn) { btn.disabled = true; btn.textContent = 'downloading…'; }
+// Selection state, applied when the user clicks Start.
+const sel = {
+    backend: 'qwen',     // 'text' | 'kokoro' | 'qwen' | 'voicedesign'
+    speaker: 'serena',
+    language: 'english',
+    description: VoiceModels.QWEN_VD_EXAMPLES[0],
+    wake: true,
+};
 
-    let grandTotal = 0;
-    for (const g of missing) grandTotal += g.bytes || 0;
+// Speech backend -> model group key (null for text-only).
+function backendKey(b) {
+    return b === 'kokoro'      ? 'tts'
+         : b === 'qwen'        ? 'ttsq'
+         : b === 'voicedesign' ? 'ttsvd'
+         : null;
+}
+function groupReady(key) { const s = VoiceModels.groupStatus(key); return !!(s && s.present); }
+// Is a backend choice currently available (its weights are present, or can be
+// downloaded)? Non-downloadable Qwen weights that aren't on disk → unavailable.
+function backendAvailable(b) {
+    if (b === 'text') return true;
+    const s = VoiceModels.groupStatus(backendKey(b));
+    return !!(s && (s.present || s.downloadable));
+}
 
-    // Aggregate per-file progress into one bar: completed files contribute their
-    // full size; the in-flight file contributes its running received count.
-    let curFile = null, completedBytes = 0, curReceived = 0;
-    const onProgress = (p) => {
-        if (p.file !== curFile) {
-            if (curFile !== null) completedBytes += curReceived;
-            curFile = p.file; curReceived = 0;
-        }
-        curReceived = p.received;
-        const done = completedBytes + curReceived;
-        const frac = grandTotal > 0 ? Math.min(1, done / grandTotal) : 0;
-        $meter.style.opacity = '1';
-        $meter.style.width = Math.round(frac * 100) + '%';
-        setStatus('loading', 'downloading ' + p.label + ' — ' + humanBytes(curReceived) +
-                  (p.total ? ' / ' + humanBytes(p.total) : ''));
+// The set of model group keys a selection needs (core + wake + speech).
+function requiredKeys() {
+    const keys = ['llm', 'stt'];
+    if (sel.wake) keys.push('wake');
+    const bk = backendKey(sel.backend);
+    if (bk) keys.push(bk);
+    return keys;
+}
+
+// Render the whole setup panel, then wire it up.
+function showSetup() {
+    // Pick a sensible default backend: the richest one whose weights are ready.
+    sel.backend = backendAvailable('qwen') && groupReady('ttsq') ? 'qwen'
+                : backendAvailable('voicedesign') && groupReady('ttsvd') ? 'voicedesign'
+                : groupReady('tts') ? 'kokoro'
+                : backendAvailable('qwen') ? 'qwen' : 'text';
+
+    const tag = (key) => {
+        const s = VoiceModels.groupStatus(key);
+        if (!s) return '';
+        if (s.present) return '<span class="tag ready">ready</span>';
+        if (s.downloadable) return '<span class="tag dl">download ' + humanBytes(s.bytes) + '</span>';
+        return '<span class="tag need">needs weights</span>';
     };
 
-    // Required models (wake/llm/stt) fail hard — the app can't run without them.
-    // The optional speech group (Kokoro + g2p) is best-effort: a failure (e.g.
-    // its weights aren't published yet) leaves the pipeline text-only rather
-    // than blocking boot.
-    const required = missing.filter(g => !g.optional);
-    const optional = missing.filter(g => g.optional);
-    try {
-        await VoiceModels.download(required, onProgress);
-    } catch (e) {
-        setStatus('error', 'download failed: ' + ((e && e.message) || e));
-        if (btn) { btn.disabled = false; btn.textContent = 'retry download'; }
-        return;
-    }
-    if (optional.length) {
-        try {
-            await VoiceModels.download(optional, onProgress);
-        } catch (e) {
-            console.warn('speech download skipped (text-only): ' + ((e && e.message) || e));
-        }
-    }
-    $gate.hidden = true;
-    $gate.innerHTML = '';
-    $meter.style.width = '0%';
-    startLoad();
+    // Cards/chips are <div>s, not <button>s: htmlayout doesn't grow a button's
+    // height to its block children, so a second line (the tag) overflows the
+    // border. Divs size to content. Unavailable cards carry a `disabled` class.
+    const card = (b, title, sub, key) => {
+        const avail = backendAvailable(b);
+        const t = key ? tag(key) : '<span class="tag none">no model</span>';
+        return '<div class="voice-card' + (avail ? '' : ' disabled') + '" data-backend="' + b + '">' +
+               '<span class="vc-title">' + title + '</span>' +
+               '<span class="vc-sub">' + sub + '</span>' + t + '</div>';
+    };
+
+    $setup.innerHTML =
+        '<p class="intro">Pick a voice for the assistant, then start. Only what you ' +
+        'choose is loaded — speech recognition (Whisper) and the language model ' +
+        '(Qwen3-8B) load alongside it.</p>' +
+
+        '<div class="section-label">Voice</div>' +
+        '<div class="voice-cards">' + rowsOf([
+            card('text',        'Text only',  'No speech — replies appear as text', null),
+            card('kokoro',      'Kokoro',     'Fast 82M, one warm voice', 'tts'),
+            card('qwen',        'Qwen3-TTS · CustomVoice', '9 preset speakers, 10 languages', 'ttsq'),
+            card('voicedesign', 'Qwen3-TTS · VoiceDesign', 'Describe any voice in words', 'ttsvd'),
+        ], 2, 'card-line') + '</div>' +
+
+        '<div id="voiceOpts" class="voice-opts"></div>' +
+
+        '<div class="section-label">Pipeline</div>' +
+        '<div class="core-rows">' +
+            '<label class="wake-toggle"><input type="checkbox" id="wakeChk"' +
+                (sel.wake ? ' checked' : '') + '> Wake word — say &ldquo;computer&rdquo; ' +
+                'to talk hands-free ' + tag('wake') + '</label>' +
+            '<div class="core-row"><span>Speech recognition · Whisper</span>' + tag('stt') + '</div>' +
+            '<div class="core-row"><span>Language model · Qwen3-8B</span>' + tag('llm') + '</div>' +
+        '</div>' +
+
+        '<div class="start-bar">' +
+            '<button id="startBtn" class="start">Start</button>' +
+            '<div class="start-prog" id="startProg" hidden><div class="start-bar-fill" id="startFill"></div></div>' +
+            '<div class="start-note" id="startNote"></div>' +
+        '</div>';
+
+    $setup.hidden = false;
+    $convo.hidden = true;
+    setStatus('idle', 'choose a voice');
+    renderVoiceOpts();
+    wireSetup();
+    refreshStart();
 }
 
-// Resolve every model path and start the loads.
-function startLoad() {
+// The per-backend options sub-panel (speakers / description / language).
+function renderVoiceOpts() {
+    const el = document.getElementById('voiceOpts');
+    // Language as chips (the engine's native <select> popup overlaps surrounding
+    // content), laid out in explicit rows of 5 — see rowsOf().
+    const langChips = () => {
+        const chips = VoiceModels.QWEN_LANGUAGES.map(l =>
+            '<div class="lang" data-lang="' + l + '"' +
+            (l === sel.language ? ' aria-selected="true"' : '') + '>' +
+            l.charAt(0).toUpperCase() + l.slice(1) + '</div>');
+        return '<div class="opt-label">Language</div>' +
+               '<div class="lang-grid">' + rowsOf(chips, 5, 'lang-line') + '</div>';
+    };
+
+    if (sel.backend === 'qwen') {
+        const chips = VoiceModels.QWEN_SPEAKERS.map(s =>
+            '<div class="spk" data-speaker="' + s.id + '"' +
+            (s.id === sel.speaker ? ' aria-selected="true"' : '') + '>' +
+            '<span class="spk-name">' + esc(s.name) + '</span>' +
+            '<span class="spk-note">' + esc(s.note) +
+            (s.dialect ? ' · ' + esc(s.dialect) : '') + '</span></div>');
+        el.innerHTML = '<div class="opt-label">Speaker</div>' +
+            '<div class="spk-grid">' + rowsOf(chips, 3, 'spk-line') + '</div>' + langChips();
+    } else if (sel.backend === 'voicedesign') {
+        const examples = VoiceModels.QWEN_VD_EXAMPLES.map(x =>
+            '<div class="ex" data-ex="' + esc(x) + '">' + esc(x) + '</div>').join('');
+        // A single-line <input> (htmlayout renders <textarea> as 0×0).
+        el.innerHTML =
+            '<div class="opt-label">Describe the voice</div>' +
+            '<input type="text" id="vdDesc" class="vd-desc" value="' + esc(sel.description) + '" ' +
+            'placeholder="e.g. a warm, low-pitched elderly storyteller">' +
+            '<div class="opt-sub">Or start from an example:</div>' +
+            '<div class="ex-list">' + examples + '</div>' + langChips();
+    } else if (sel.backend === 'kokoro') {
+        el.innerHTML = '<p class="opt-note">Kokoro speaks with a single warm English voice ' +
+            '(af_heart). No options to pick — fast and lightweight.</p>';
+    } else {
+        el.innerHTML = '<p class="opt-note">Replies are shown as text only. You can still ' +
+            'talk to the assistant; it just won\'t speak back.</p>';
+    }
+    wireVoiceOpts();
+}
+
+function wireSetup() {
+    $setup.querySelectorAll('.voice-card').forEach(c => {
+        c.addEventListener('click', () => {
+            if (c.classList.contains('disabled')) return;
+            sel.backend = c.dataset.backend;
+            $setup.querySelectorAll('.voice-card').forEach(x =>
+                x.classList.toggle('on', x === c));
+            renderVoiceOpts();
+            refreshStart();
+        });
+        c.classList.toggle('on', c.dataset.backend === sel.backend);
+    });
+    const wk = document.getElementById('wakeChk');
+    if (wk) wk.addEventListener('change', () => { sel.wake = wk.checked; refreshStart(); });
+    document.getElementById('startBtn').addEventListener('click', startSelected);
+}
+
+function wireVoiceOpts() {
+    const el = document.getElementById('voiceOpts');
+    el.querySelectorAll('.spk').forEach(b => b.addEventListener('click', () => {
+        sel.speaker = b.dataset.speaker;
+        el.querySelectorAll('.spk').forEach(x =>
+            x.setAttribute('aria-selected', x === b ? 'true' : 'false'));
+    }));
+    el.querySelectorAll('.ex').forEach(b => b.addEventListener('click', () => {
+        sel.description = b.dataset.ex;
+        const ta = document.getElementById('vdDesc');
+        if (ta) ta.value = sel.description;
+    }));
+    const ta = document.getElementById('vdDesc');
+    if (ta) ta.addEventListener('input', () => { sel.description = ta.value; });
+    el.querySelectorAll('.lang').forEach(b => b.addEventListener('click', () => {
+        sel.language = b.dataset.lang;
+        el.querySelectorAll('.lang').forEach(x =>
+            x.setAttribute('aria-selected', x === b ? 'true' : 'false'));
+    }));
+}
+
+// Update the Start button label / enabled state from the current selection.
+function refreshStart() {
+    const btn = document.getElementById('startBtn');
+    const note = document.getElementById('startNote');
+    if (!btn) return;
+    let dlBytes = 0, blocked = null;
+    for (const k of requiredKeys()) {
+        const s = VoiceModels.groupStatus(k);
+        if (!s || s.present) continue;
+        if (s.downloadable) dlBytes += s.bytes || 0;
+        else blocked = s.label;
+    }
+    if (blocked) {
+        btn.disabled = true;
+        btn.textContent = 'Start';
+        note.textContent = blocked + ' isn\'t on disk and isn\'t auto-downloaded — fetch it ' +
+            'with brosoundml\'s download-qwen-tts.sh, or pick another voice.';
+    } else {
+        btn.disabled = false;
+        btn.textContent = dlBytes > 0 ? 'Download & start · ' + humanBytes(dlBytes) : 'Start';
+        note.textContent = dlBytes > 0
+            ? 'First run downloads ' + humanBytes(dlBytes) + ' into a shared cache.'
+            : '';
+    }
+}
+
+// Apply the selection: download anything missing, then load only what's chosen.
+async function startSelected() {
+    const btn = document.getElementById('startBtn');
+    const prog = document.getElementById('startProg');
+    const fill = document.getElementById('startFill');
+    const note = document.getElementById('startNote');
+    btn.disabled = true;
+
+    // Apply selection to the backend flags + Qwen voice parameters.
+    sel.wake = !!sel.wake;
+    wakeEnabled = sel.wake;
+    qwenSpeaker  = sel.speaker;
+    qwenLanguage = sel.language;
+    qwenInstruct = (sel.description || '').trim();
+    useVoiceDesign = (sel.backend === 'voicedesign');
+    useQwen        = (sel.backend === 'qwen' || sel.backend === 'voicedesign');
+    speechOn       = (sel.backend !== 'text');
+
+    // Resolve every path once; pick the active Qwen dir by variant.
     const p = VoiceModels.resolved();
     QWEN_GGUF      = p.qwen;
     WHISPER_DIR    = p.whisperDir;
@@ -511,12 +666,38 @@ function startLoad() {
     KOKORO_CONFIG  = p.kokoroConfig;
     LEXICON_BIN    = p.lexicon;
     POS_TAGGER_BIN = p.posTagger;
-    QWEN_TTS_DIR   = p.qwenTtsDir;
-    // Prefer Qwen3-TTS when its weights are present (text-driven — no phonemizer
-    // or voice pack); otherwise fall back to Kokoro. Speech is on if either is.
-    useQwen        = p.qwenTtsReady;
-    speechOn       = p.qwenTtsReady || p.speechReady;
+    QWEN_TTS_DIR   = useVoiceDesign ? p.qwenVdDir : p.qwenTtsDir;
 
+    // Download any missing (downloadable) weights for the selection.
+    const keys = requiredKeys();
+    let grandTotal = 0;
+    for (const k of keys) {
+        const s = VoiceModels.groupStatus(k);
+        if (s && !s.present && s.downloadable) grandTotal += s.bytes || 0;
+    }
+    if (grandTotal > 0) {
+        prog.hidden = false;
+        let curFile = null, completed = 0, received = 0;
+        const onProgress = (q) => {
+            if (q.file !== curFile) { if (curFile !== null) completed += received; curFile = q.file; received = 0; }
+            received = q.received;
+            const frac = Math.min(1, (completed + received) / grandTotal);
+            fill.style.width = Math.round(frac * 100) + '%';
+            note.textContent = 'downloading ' + q.label + ' — ' + humanBytes(completed + received) +
+                ' / ' + humanBytes(grandTotal);
+        };
+        try {
+            await VoiceModels.downloadKeys(keys, onProgress);
+        } catch (e) {
+            note.textContent = 'download failed: ' + ((e && e.message) || e);
+            btn.disabled = false; btn.textContent = 'Retry';
+            return;
+        }
+    }
+
+    // Switch to the conversation view and load the selected models.
+    $setup.hidden = true;
+    $convo.hidden = false;
     setStatus('loading', 'loading models…');
     $meter.style.opacity = '0.6';
     loadModels();
@@ -619,7 +800,7 @@ function onModelsReady() {
             try { bro.tts.phonemize('warming up the lexicon'); }
             catch (e) { speechOn = false; console.warn('phonemizer unavailable:', e.message); }
         }
-        startWake();
+        if (wakeEnabled) startWake();   // skipped when the user opted out of wake
         goIdle();
     }, 0);
 }
@@ -775,9 +956,16 @@ function pumpSynth() {
     };
 
     synthBusy = true;
-    ttsHandle = useQwen
-        ? bro.tts.synthesize(qwen, item.sentence, { speaker: QWEN_SPEAKER, onDone })
-        : bro.tts.synthesize(kokoro, phonemeIds, voice, { speed: 1.0, onDone });
+    if (useQwen) {
+        // CustomVoice picks a preset speaker; VoiceDesign takes a free-form
+        // voice description. Both honour the selected language.
+        const opts = useVoiceDesign
+            ? { instruct: qwenInstruct, language: qwenLanguage, onDone }
+            : { speaker: qwenSpeaker, language: qwenLanguage, onDone };
+        ttsHandle = bro.tts.synthesize(qwen, item.sentence, opts);
+    } else {
+        ttsHandle = bro.tts.synthesize(kokoro, phonemeIds, voice, { speed: 1.0, onDone });
+    }
 }
 
 // Replace the streaming tail for this sentence with highlightable word spans.
