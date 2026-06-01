@@ -46,6 +46,12 @@ if (!bro.tensor || !bro.tensor.available) {
     ['spatial-merge', {}, [IMAGE]],
     ['convex-upsample', { scale: 4 }, [IMAGE_C8]],
     ['nchw-to-seq', {}, [IMAGE]],
+    ['gelu-exact', {}, [MATRIX]],
+    ['geglu-exact', {}, [MATRIX_EVEN]],
+    ['batchnorm', {}, [IMAGE]],
+    ['clamp', { lo: -0.5, hi: 0.5 }, [MATRIX]],
+    ['meanpool', {}, [MATRIX]],
+    ['timestep', { batch: 8, dim: 128, maxT: 1000 }, []],
   ];
 
   let pass = 0, fail = 0;

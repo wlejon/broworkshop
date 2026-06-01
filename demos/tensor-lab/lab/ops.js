@@ -155,6 +155,29 @@
     },
   });
 
+  def({
+    type: 'timestep', label: 'Timestep Embed', cat: 'Source', color: '#f59e0b',
+    desc: 'Sinusoidal timestep embedding (SD/SDXL) — maps B diffusion timesteps onto a ' +
+          'dim-wide frequency basis. The conditioning input to a U-Net.',
+    ins: [], outs: ['out'],
+    params: [
+      { key: 'batch', label: 'Timesteps (B)', type: 'int', def: 8, min: 1, max: 256 },
+      { key: 'dim', label: 'Embed dim', type: 'int', def: 128, min: 2, max: 4096 },
+      { key: 'maxT', label: 'Max timestep', type: 'int', def: 1000, min: 1, max: 100000 },
+    ],
+    shape: (ins, p) => [Shape.matrix(p.batch, p.dim)],
+    stats: () => ({ params: 0, flops: 0 }),
+    exec: (T, ins, p) => {
+      const ts = T.createTensor(p.batch, 1);
+      const a = new Float32Array(p.batch);
+      for (let i = 0; i < p.batch; i++) a[i] = (i / Math.max(1, p.batch - 1)) * p.maxT;
+      ts.upload(a);
+      const out = T.createTensor(p.batch, p.dim);
+      T.timestepEmbedding(ts, p.dim, 10000.0, out);
+      return [out];
+    },
+  });
+
   // === Dense ============================================================
   def({
     type: 'linear', label: 'Linear', cat: 'Dense', color: '#38bdf8',
@@ -228,6 +251,7 @@
   activation('quickgelu', 'QuickGELU', 'x·σ(1.702·x) — the CLIP/ViT activation.', 'quickGeluForward', 5);
   activation('sigmoid', 'Sigmoid', 'Logistic squash σ(x) into (0, 1).', 'sigmoidForward', 4);
   activation('tanh', 'Tanh', 'Hyperbolic tangent squash into (−1, 1).', 'tanhForward', 4);
+  activation('gelu-exact', 'GELU (exact)', 'Exact erf-based GELU — the BERT/GPT-2 reference activation.', 'geluExactForward', 10);
 
   // Parameterised elementwise activations — one scalar config each.
   def({
@@ -272,6 +296,24 @@
     exec: (T, ins) => {
       const y = T.createTensor(ins[0].rows, ins[0].cols / 2);
       T.gegluForward(ins[0], y);
+      return [y];
+    },
+  });
+
+  def({
+    type: 'geglu-exact', label: 'GEGLU (exact)', cat: 'Activation', color: '#a78bfa',
+    desc: 'Gated FFN with the exact erf GELU gate: input (B×2D) → gelu(A)·B  (B×D).',
+    ins: ['x'], outs: ['y'], params: [],
+    shape: (ins) => {
+      if (!Shape.isMatrix(ins[0])) return needMatrix('GEGLU (exact)', ins[0]);
+      if (ins[0].dims[1] % 2 !== 0)
+        return 'GEGLU needs an even feature count, got ' + ins[0].dims[1];
+      return [Shape.matrix(ins[0].dims[0], ins[0].dims[1] / 2)];
+    },
+    stats: (ins) => ({ params: 0, flops: 11 * Shape.elems(ins[0]) }),
+    exec: (T, ins) => {
+      const y = T.createTensor(ins[0].rows, ins[0].cols / 2);
+      T.gegluExactForward(ins[0], y);
       return [y];
     },
   });
@@ -384,6 +426,29 @@
       const sh = node.inShapes[0];
       const y = T.createTensor(ins[0].rows, ins[0].cols);
       T.l2NormalizeNchwForward(ins[0], sh.dims[0], sh.dims[1], sh.dims[2], sh.dims[3], p.eps, y);
+      return [y];
+    },
+  });
+
+  def({
+    type: 'batchnorm', label: 'BatchNorm', cat: 'Norm', color: '#34d399',
+    desc: 'NCHW batch normalisation (inference) — normalises each channel by its frozen ' +
+          'running mean/variance, then scale+shift. The classic CNN norm.',
+    ins: ['x'], outs: ['y'],
+    params: [{ key: 'eps', label: 'Epsilon', type: 'float', def: 1e-5, min: 1e-8, max: 1e-2, step: 1e-6 }],
+    shape: (ins) => Shape.isImage(ins[0]) ? [ins[0]]
+      : 'BatchNorm needs an image (N×C×H×W) input, got ' + ins[0].layout,
+    stats: (ins) => ({ params: 2 * ins[0].dims[1], flops: 4 * Shape.elems(ins[0]) }),
+    exec: (T, ins, p, node) => {
+      const sh = node.inShapes[0];
+      const N = sh.dims[0], C = sh.dims[1], H = sh.dims[2], W = sh.dims[3];
+      // Frozen running stats (mean 0 / var 1) + identity affine, like a freshly-init layer.
+      const w = cached(node, 'bn' + C, () => ({
+        g: constant(T, C, 1, 1), b: constant(T, C, 1, 0),
+        mean: constant(T, C, 1, 0), var: constant(T, C, 1, 1),
+      }));
+      const y = T.createTensor(ins[0].rows, ins[0].cols);
+      T.batchNormInference(ins[0], w.g, w.b, w.mean, w.var, N, C, H, W, p.eps, y);
       return [y];
     },
   });
@@ -1108,6 +1173,39 @@
       const out = T.createTensor(ins[0].rows, ins[0].cols + ins[1].cols);
       T.concatBatchedRows([ins[0], ins[1]], out);
       return [out];
+    },
+  });
+
+  def({
+    type: 'clamp', label: 'Clamp', cat: 'Tensor', color: '#94a3b8',
+    desc: 'Element-wise clip into [lo, hi] — the saturating activation (e.g. ReLU6 with 0..6).',
+    ins: ['x'], outs: ['y'],
+    params: [
+      { key: 'lo', label: 'Min', type: 'float', def: -1, min: -1e6, max: 1e6, step: 0.1 },
+      { key: 'hi', label: 'Max', type: 'float', def: 1, min: -1e6, max: 1e6, step: 0.1 },
+    ],
+    shape: (ins, p) => p.hi < p.lo ? 'Max must be ≥ Min' : [ins[0]],
+    stats: (ins) => ({ params: 0, flops: 2 * Shape.elems(ins[0]) }),
+    exec: (T, ins, p) => {
+      const y = ins[0].clone();
+      T.clamp(y, p.lo, p.hi);
+      return [y];
+    },
+  });
+
+  def({
+    type: 'meanpool', label: 'Mean Pool', cat: 'Tensor', color: '#94a3b8',
+    desc: 'Average over the token/row axis — collapses a sequence (L×D) into one pooled ' +
+          'feature vector (D×1). The sentence-embedding / global-pool readout.',
+    ins: ['x'], outs: ['y'], params: [],
+    shape: (ins) => Shape.isMatrix(ins[0])
+      ? [Shape.matrix(ins[0].dims[1], 1)]
+      : needMatrix('Mean Pool', ins[0]),
+    stats: (ins) => ({ params: 0, flops: Shape.elems(ins[0]) }),
+    exec: (T, ins) => {
+      const y = T.createTensor(ins[0].cols, 1);
+      T.maskedMeanPoolForward(ins[0], null, y);
+      return [y];
     },
   });
 
