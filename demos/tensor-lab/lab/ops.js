@@ -226,6 +226,55 @@
   activation('gelu', 'GELU', 'Gaussian Error Linear Unit (tanh approx) — transformer FFNs.', 'geluForward', 8);
   activation('silu', 'SiLU', 'x·σ(x), aka Swish — used across modern nets.', 'siluForward', 5);
   activation('quickgelu', 'QuickGELU', 'x·σ(1.702·x) — the CLIP/ViT activation.', 'quickGeluForward', 5);
+  activation('sigmoid', 'Sigmoid', 'Logistic squash σ(x) into (0, 1).', 'sigmoidForward', 4);
+  activation('tanh', 'Tanh', 'Hyperbolic tangent squash into (−1, 1).', 'tanhForward', 4);
+
+  // Parameterised elementwise activations — one scalar config each.
+  def({
+    type: 'elu', label: 'ELU', cat: 'Activation', color: '#a78bfa',
+    desc: 'Exponential Linear Unit: x if x>0 else α·(eˣ−1). The EnCodec activation.',
+    ins: ['x'], outs: ['y'],
+    params: [{ key: 'alpha', label: 'Alpha', type: 'float', def: 1, min: 0.01, max: 4, step: 0.01 }],
+    shape: (ins) => [ins[0]],
+    stats: (ins) => ({ params: 0, flops: 6 * Shape.elems(ins[0]) }),
+    exec: (T, ins, p) => {
+      const y = T.createTensor(ins[0].rows, ins[0].cols);
+      T.eluForward(ins[0], p.alpha, y);
+      return [y];
+    },
+  });
+
+  def({
+    type: 'leakyrelu', label: 'Leaky ReLU', cat: 'Activation', color: '#a78bfa',
+    desc: 'max(x, slope·x) — keeps a small gradient for negatives. The HiFi-GAN activation.',
+    ins: ['x'], outs: ['y'],
+    params: [{ key: 'slope', label: 'Negative slope', type: 'float', def: 0.1, min: 0, max: 1, step: 0.01 }],
+    shape: (ins) => [ins[0]],
+    stats: (ins) => ({ params: 0, flops: 2 * Shape.elems(ins[0]) }),
+    exec: (T, ins, p) => {
+      const y = T.createTensor(ins[0].rows, ins[0].cols);
+      T.leakyReluForward(ins[0], p.slope, y);
+      return [y];
+    },
+  });
+
+  def({
+    type: 'geglu', label: 'GEGLU', cat: 'Activation', color: '#a78bfa',
+    desc: 'Gated-GELU FFN activation: input (B×2D) splits to A,B; output gelu(A)·B  (B×D).',
+    ins: ['x'], outs: ['y'], params: [],
+    shape: (ins) => {
+      if (!Shape.isMatrix(ins[0])) return needMatrix('GEGLU', ins[0]);
+      if (ins[0].dims[1] % 2 !== 0)
+        return 'GEGLU needs an even feature count, got ' + ins[0].dims[1];
+      return [Shape.matrix(ins[0].dims[0], ins[0].dims[1] / 2)];
+    },
+    stats: (ins) => ({ params: 0, flops: 9 * Shape.elems(ins[0]) }),
+    exec: (T, ins) => {
+      const y = T.createTensor(ins[0].rows, ins[0].cols / 2);
+      T.gegluForward(ins[0], y);
+      return [y];
+    },
+  });
 
   def({
     type: 'swiglu', label: 'SwiGLU', cat: 'Activation', color: '#a78bfa',
@@ -294,6 +343,51 @@
     },
   });
 
+  def({
+    type: 'groupnorm', label: 'GroupNorm', cat: 'Norm', color: '#34d399',
+    desc: 'NCHW group normalisation — splits channels into groups and normalises each ' +
+          'per (n, group) tile. The diffusion-U-Net / ConvNeXt norm.',
+    ins: ['x'], outs: ['y'],
+    params: [
+      { key: 'groups', label: 'Groups', type: 'int', def: 8, min: 1, max: 128 },
+      { key: 'eps', label: 'Epsilon', type: 'float', def: 1e-5, min: 1e-8, max: 1e-2, step: 1e-6 },
+    ],
+    shape: (ins, p) => {
+      if (!Shape.isImage(ins[0]))
+        return 'GroupNorm needs an image (N×C×H×W) input, got ' + ins[0].layout;
+      if (ins[0].dims[1] % p.groups !== 0)
+        return 'channels ' + ins[0].dims[1] + ' not divisible by ' + p.groups + ' groups';
+      return [ins[0]];
+    },
+    stats: (ins) => ({ params: 2 * ins[0].dims[1], flops: 8 * Shape.elems(ins[0]) }),
+    exec: (T, ins, p, node) => {
+      const sh = node.inShapes[0];
+      const N = sh.dims[0], C = sh.dims[1], H = sh.dims[2], W = sh.dims[3];
+      const w = cached(node, 'gn' + C,
+        () => ({ g: constant(T, C, 1, 1), b: constant(T, C, 1, 0) }));
+      const y = T.createTensor(ins[0].rows, ins[0].cols);
+      T.groupNormForward(ins[0], w.g, w.b, N, C, H, W, p.groups, p.eps, y);
+      return [y];
+    },
+  });
+
+  def({
+    type: 'l2norm-pixel', label: 'L2 Normalize', cat: 'Norm', color: '#34d399',
+    desc: 'Per-pixel L2 normalise over the channel axis — turns each pixel into a ' +
+          'unit-length direction. The DSINE surface-normal / RAFT flow-field norm.',
+    ins: ['x'], outs: ['y'],
+    params: [{ key: 'eps', label: 'Epsilon', type: 'float', def: 1e-12, min: 1e-12, max: 1e-3, step: 1e-9 }],
+    shape: (ins) => Shape.isImage(ins[0]) ? [ins[0]]
+      : 'L2 Normalize needs an image (N×C×H×W) input, got ' + ins[0].layout,
+    stats: (ins) => ({ params: 0, flops: 3 * Shape.elems(ins[0]) }),
+    exec: (T, ins, p, node) => {
+      const sh = node.inShapes[0];
+      const y = T.createTensor(ins[0].rows, ins[0].cols);
+      T.l2NormalizeNchwForward(ins[0], sh.dims[0], sh.dims[1], sh.dims[2], sh.dims[3], p.eps, y);
+      return [y];
+    },
+  });
+
   // === Attention ========================================================
   def({
     type: 'mha', label: 'Multi-Head Attn', cat: 'Attention', color: '#fb7185',
@@ -349,6 +443,140 @@
       const y = T.createTensor(x.rows, x.cols);
       T.ropeForward(x, hd, p.heads, 0, p.theta, y);
       return [y];
+    },
+  });
+
+  def({
+    type: 'flash-attn', label: 'Flash Attention', cat: 'Attention', color: '#fb7185',
+    desc: 'Memory-efficient tiled self-attention (online softmax). Projects Q/K/V, then runs ' +
+          'the flash kernel. Causal runs the sliding-window kernel — a positive window ' +
+          'restricts each query to the last N keys (streaming-codec attention); 0 = full ' +
+          'causal. Non-causal is bidirectional full attention.',
+    ins: ['x'], outs: ['out'],
+    params: [
+      { key: 'heads', label: 'Heads', type: 'int', def: 4, min: 1, max: 32 },
+      { key: 'causal', label: 'Causal', type: 'bool', def: true },
+      { key: 'window', label: 'Window (0=full)', type: 'int', def: 0, min: 0, max: 4096 },
+    ],
+    shape: (ins, p) => {
+      if (!Shape.isMatrix(ins[0])) return needMatrix('Flash Attention', ins[0]);
+      if (ins[0].dims[1] % p.heads !== 0)
+        return 'feature dim ' + ins[0].dims[1] + ' is not divisible by ' + p.heads + ' heads';
+      return [ins[0]];
+    },
+    stats: (ins, p) => {
+      const L = ins[0].dims[0], D = ins[0].dims[1];
+      return { params: 3 * D * D, flops: 3 * 2 * L * D * D + 2 * 2 * L * L * D };
+    },
+    exec: (T, ins, p, node) => {
+      const x = ins[0], L = x.rows, D = x.cols, H = p.heads;
+      const w = cached(node, 'fa' + D, () => ({
+        Wq: weight(T, D, D, D), Wk: weight(T, D, D, D), Wv: weight(T, D, D, D),
+        z: constant(T, D, 1, 0),
+      }));
+      const Q = T.createTensor(L, D), K = T.createTensor(L, D), V = T.createTensor(L, D);
+      T.linearForwardBatched(w.Wq, w.z, x, Q);
+      T.linearForwardBatched(w.Wk, w.z, x, K);
+      T.linearForwardBatched(w.Wv, w.z, x, V);
+      const O = T.createTensor(L, D);
+      if (p.causal) {
+        // The windowed kernel is always causal and runs FP32; window<=0 is full causal.
+        T.flashAttentionWindowedForward(Q, K, V, null, H, p.window > 0 ? p.window : 0, O);
+      } else {
+        // Bidirectional full attention — the bare flash kernel is FP16-only on GPU,
+        // so cast Q/K/V to FP16, run, and cast the result back to FP32.
+        const Qh = T.createTensor(L, D, 'fp16'), Kh = T.createTensor(L, D, 'fp16');
+        const Vh = T.createTensor(L, D, 'fp16'), Oh = T.createTensor(L, D, 'fp16');
+        T.cast(Q, Qh, 'fp16'); T.cast(K, Kh, 'fp16'); T.cast(V, Vh, 'fp16');
+        T.flashAttentionForward(Qh, Kh, Vh, null, H, false, Oh);
+        T.cast(Oh, O, 'fp32');
+      }
+      return [O];
+    },
+  });
+
+  def({
+    type: 'sam-attn', label: 'SAM Window Attn', cat: 'Attention', color: '#fb7185',
+    desc: 'SAM / ViTDet decomposed 2D relative-position self-attention. Tokens map to a ' +
+          'gridH×gridW patch grid; the position bias factors into height + width tables ' +
+          '(never an L×L matrix). A positive window runs it per window×window tile.',
+    ins: ['x'], outs: ['out'],
+    params: [
+      { key: 'heads', label: 'Heads', type: 'int', def: 4, min: 1, max: 32 },
+      { key: 'gridH', label: 'Grid H', type: 'int', def: 8, min: 1, max: 64 },
+      { key: 'gridW', label: 'Grid W', type: 'int', def: 8, min: 1, max: 64 },
+      { key: 'window', label: 'Window (0=full)', type: 'int', def: 0, min: 0, max: 64 },
+    ],
+    shape: (ins, p) => {
+      if (!Shape.isMatrix(ins[0])) return needMatrix('SAM Window Attn', ins[0]);
+      const L = ins[0].dims[0], D = ins[0].dims[1];
+      if (L !== p.gridH * p.gridW)
+        return 'rows ' + L + ' must equal gridH×gridW = ' + (p.gridH * p.gridW);
+      if (D % p.heads !== 0)
+        return 'feature dim ' + D + ' is not divisible by ' + p.heads + ' heads';
+      if (p.window > 0 && (p.gridH % p.window !== 0 || p.gridW % p.window !== 0))
+        return 'window ' + p.window + ' must divide both grid dims';
+      return [ins[0]];
+    },
+    stats: (ins, p) => {
+      const L = ins[0].dims[0], D = ins[0].dims[1];
+      return { params: 4 * D * D, flops: 4 * 2 * L * D * D + 2 * 2 * L * L * D };
+    },
+    exec: (T, ins, p, node) => {
+      const x = ins[0], L = x.rows, D = x.cols, H = p.heads, hd = D / H;
+      // The rel-pos tables span the attended extent: the full grid for global
+      // attention, but just one window×window tile in the windowed variant.
+      const spanH = p.window > 0 ? p.window : p.gridH;
+      const spanW = p.window > 0 ? p.window : p.gridW;
+      const w = cached(node, 'sam' + D + '_' + p.gridH + 'x' + p.gridW + '_w' + p.window + '_' + H, () => ({
+        Wq: weight(T, D, D, D), Wk: weight(T, D, D, D),
+        Wv: weight(T, D, D, D), Wo: weight(T, D, D, D),
+        rH: weight(T, 2 * spanH - 1, hd, hd),
+        rW: weight(T, 2 * spanW - 1, hd, hd),
+      }));
+      const O = T.createTensor(L, D);
+      const scale = 1 / Math.sqrt(hd);
+      if (p.window > 0)
+        T.selfAttentionDecomposedRelPosWindowedForward(
+          x, w.Wq, null, w.Wk, null, w.Wv, null, w.Wo, null, w.rH, w.rW,
+          H, p.gridH, p.gridW, p.window, scale, O);
+      else
+        T.selfAttentionDecomposedRelPosForward(
+          x, w.Wq, null, w.Wk, null, w.Wv, null, w.Wo, null, w.rH, w.rW,
+          H, p.gridH, p.gridW, scale, O);
+      return [O];
+    },
+  });
+
+  def({
+    type: 'cross-attn', label: 'Cross Attention', cat: 'Attention', color: '#fb7185',
+    desc: 'Cross-attention: queries from x attend to keys/values from a separate context ' +
+          'tensor. The decoder↔encoder / diffusion text-conditioning bridge.',
+    ins: ['x', 'ctx'], outs: ['out'],
+    params: [{ key: 'heads', label: 'Heads', type: 'int', def: 4, min: 1, max: 32 }],
+    shape: (ins, p) => {
+      if (!Shape.isMatrix(ins[0])) return needMatrix('Cross Attention', ins[0]);
+      if (!Shape.isMatrix(ins[1])) return 'Cross Attention: context must be a matrix';
+      const D = ins[0].dims[1];
+      if (ins[1].dims[1] !== D)
+        return 'context feature dim ' + ins[1].dims[1] + ' must match query dim ' + D;
+      if (D % p.heads !== 0)
+        return 'feature dim ' + D + ' is not divisible by ' + p.heads + ' heads';
+      return [ins[0]];
+    },
+    stats: (ins, p) => {
+      const Lq = ins[0].dims[0], Lk = ins[1].dims[0], D = ins[0].dims[1];
+      return { params: 4 * D * D, flops: 4 * 2 * Lq * D * D + 2 * 2 * Lq * Lk * D };
+    },
+    exec: (T, ins, p, node) => {
+      const x = ins[0], ctx = ins[1], Lq = x.rows, D = x.cols, H = p.heads;
+      const w = cached(node, 'xa' + D, () => ({
+        Wq: weight(T, D, D, D), Wk: weight(T, D, D, D),
+        Wv: weight(T, D, D, D), Wo: weight(T, D, D, D),
+      }));
+      const O = T.createTensor(Lq, D);
+      T.crossAttentionForward(x, ctx, w.Wq, w.Wk, w.Wv, w.Wo, null, H, O);
+      return [O];
     },
   });
 
@@ -531,6 +759,305 @@
     },
   });
 
+  def({
+    type: 'conv-transpose2d', label: 'ConvTranspose2D', cat: 'Conv', color: '#f472b6',
+    desc: 'Fractionally-strided (transposed) convolution — the learnable upsampler in ' +
+          'GAN / VAE decoders and segmentation heads.',
+    ins: ['x'], outs: ['y'],
+    params: [
+      { key: 'cout', label: 'Out channels', type: 'int', def: 8, min: 1, max: 1024 },
+      { key: 'k', label: 'Kernel', type: 'int', def: 4, min: 1, max: 11 },
+      { key: 'stride', label: 'Stride', type: 'int', def: 2, min: 1, max: 8 },
+      { key: 'pad', label: 'Padding', type: 'int', def: 1, min: 0, max: 16 },
+      { key: 'outpad', label: 'Output padding', type: 'int', def: 0, min: 0, max: 7 },
+    ],
+    shape: (ins, p) => {
+      if (!Shape.isImage(ins[0]))
+        return 'ConvTranspose2D needs an image (N×C×H×W) input, got ' + ins[0].layout;
+      if (p.outpad >= p.stride) return 'output padding must be < stride';
+      const H = ins[0].dims[2], W = ins[0].dims[3];
+      const ho = (H - 1) * p.stride - 2 * p.pad + (p.k - 1) + p.outpad + 1;
+      const wo = (W - 1) * p.stride - 2 * p.pad + (p.k - 1) + p.outpad + 1;
+      if (ho < 1 || wo < 1) return 'kernel/stride/pad yield a non-positive output size';
+      return [Shape.image(ins[0].dims[0], p.cout, ho, wo)];
+    },
+    stats: (ins, p) => {
+      const C = ins[0].dims[1], H = ins[0].dims[2], W = ins[0].dims[3];
+      return {
+        params: C * p.cout * p.k * p.k + p.cout,
+        flops: 2 * ins[0].dims[0] * C * H * W * p.cout * p.k * p.k,
+      };
+    },
+    exec: (T, ins, p, node) => {
+      const x = ins[0], sh = node.inShapes[0];
+      const N = sh.dims[0], C = sh.dims[1], H = sh.dims[2], W = sh.dims[3];
+      const ho = (H - 1) * p.stride - 2 * p.pad + (p.k - 1) + p.outpad + 1;
+      const wo = (W - 1) * p.stride - 2 * p.pad + (p.k - 1) + p.outpad + 1;
+      // Transposed-conv weight is (C_in, C_out·kH·kW).
+      const w = cached(node, 'ct' + C + '_' + p.cout + '_' + p.k, () => ({
+        W: weight(T, C, p.cout * p.k * p.k, C * p.k * p.k),
+        b: constant(T, p.cout, 1, 0),
+      }));
+      const y = T.createTensor(N, p.cout * ho * wo);
+      T.convTranspose2dForward(x, w.W, w.b, N, C, H, W, p.cout, p.k, p.k,
+        p.stride, p.stride, p.pad, p.pad, p.outpad, p.outpad, 1, 1, 1, y);
+      return [y];
+    },
+  });
+
+  // === Spatial (NCHW pooling / resample / unfold) =======================
+  def({
+    type: 'maxpool2d', label: 'MaxPool2D', cat: 'Spatial', color: '#22d3ee',
+    desc: 'NCHW max pooling — downsamples each channel by taking the window maximum.',
+    ins: ['x'], outs: ['y'],
+    params: [
+      { key: 'k', label: 'Kernel', type: 'int', def: 2, min: 1, max: 8 },
+      { key: 'stride', label: 'Stride', type: 'int', def: 2, min: 1, max: 8 },
+      { key: 'pad', label: 'Padding', type: 'int', def: 0, min: 0, max: 4 },
+    ],
+    shape: (ins, p) => {
+      if (!Shape.isImage(ins[0]))
+        return 'MaxPool2D needs an image (N×C×H×W) input, got ' + ins[0].layout;
+      const H = ins[0].dims[2], W = ins[0].dims[3];
+      const ho = ((H + 2 * p.pad - p.k) / p.stride | 0) + 1;
+      const wo = ((W + 2 * p.pad - p.k) / p.stride | 0) + 1;
+      if (ho < 1 || wo < 1) return 'kernel/stride/pad yield a non-positive output size';
+      return [Shape.image(ins[0].dims[0], ins[0].dims[1], ho, wo)];
+    },
+    stats: (ins, p) => {
+      const C = ins[0].dims[1], H = ins[0].dims[2], W = ins[0].dims[3];
+      const ho = ((H + 2 * p.pad - p.k) / p.stride | 0) + 1;
+      const wo = ((W + 2 * p.pad - p.k) / p.stride | 0) + 1;
+      return { params: 0, flops: ins[0].dims[0] * C * ho * wo * p.k * p.k };
+    },
+    exec: (T, ins, p, node) => {
+      const sh = node.inShapes[0];
+      const N = sh.dims[0], C = sh.dims[1], H = sh.dims[2], W = sh.dims[3];
+      const ho = ((H + 2 * p.pad - p.k) / p.stride | 0) + 1;
+      const wo = ((W + 2 * p.pad - p.k) / p.stride | 0) + 1;
+      const y = T.createTensor(N, C * ho * wo);
+      const idx = T.createTensor(N, C * ho * wo);     // argmax positions (kernel sets dtype)
+      T.maxPool2dForward(ins[0], N, C, H, W, p.k, p.k, p.stride, p.stride, p.pad, p.pad, y, idx);
+      return [y];
+    },
+  });
+
+  def({
+    type: 'avgpool', label: 'Adaptive AvgPool', cat: 'Spatial', color: '#22d3ee',
+    desc: 'Adaptive average pool to a fixed output grid — the global-context pool before a ' +
+          'classifier head (1×1 output = global average pool).',
+    ins: ['x'], outs: ['y'],
+    params: [
+      { key: 'hout', label: 'Out H', type: 'int', def: 1, min: 1, max: 64 },
+      { key: 'wout', label: 'Out W', type: 'int', def: 1, min: 1, max: 64 },
+    ],
+    shape: (ins, p) => Shape.isImage(ins[0])
+      ? [Shape.image(ins[0].dims[0], ins[0].dims[1], p.hout, p.wout)]
+      : 'Adaptive AvgPool needs an image (N×C×H×W) input, got ' + ins[0].layout,
+    stats: (ins) => ({ params: 0, flops: Shape.elems(ins[0]) }),
+    exec: (T, ins, p, node) => {
+      const sh = node.inShapes[0];
+      const N = sh.dims[0], C = sh.dims[1], H = sh.dims[2], W = sh.dims[3];
+      const y = T.createTensor(N, C * p.hout * p.wout);
+      T.adaptiveAvgPool2dForward(ins[0], N, C, H, W, p.hout, p.wout, y);
+      return [y];
+    },
+  });
+
+  def({
+    type: 'upsample2x', label: 'Upsample 2×', cat: 'Spatial', color: '#22d3ee',
+    desc: 'Doubles spatial size (NCHW) — nearest-neighbour or bilinear. The decoder upsample step.',
+    ins: ['x'], outs: ['y'],
+    params: [{ key: 'mode', label: 'Mode', type: 'select', def: 'bilinear', options: ['nearest', 'bilinear'] }],
+    shape: (ins) => Shape.isImage(ins[0])
+      ? [Shape.image(ins[0].dims[0], ins[0].dims[1], ins[0].dims[2] * 2, ins[0].dims[3] * 2)]
+      : 'Upsample 2× needs an image (N×C×H×W) input, got ' + ins[0].layout,
+    stats: (ins) => ({ params: 0, flops: 4 * Shape.elems(ins[0]) }),
+    exec: (T, ins, p, node) => {
+      const sh = node.inShapes[0];
+      const N = sh.dims[0], C = sh.dims[1], H = sh.dims[2], W = sh.dims[3];
+      const y = T.createTensor(N, C * (2 * H) * (2 * W));
+      if (p.mode === 'nearest') T.upsampleNearest2xForward(ins[0], N, C, H, W, y);
+      else T.upsampleBilinear2xForward(ins[0], N, C, H, W, y);
+      return [y];
+    },
+  });
+
+  def({
+    type: 'downsample2x', label: 'Downsample 2×', cat: 'Spatial', color: '#22d3ee',
+    desc: 'Halves spatial size with a 2×2 average pool (NCHW).',
+    ins: ['x'], outs: ['y'], params: [],
+    shape: (ins) => {
+      if (!Shape.isImage(ins[0]))
+        return 'Downsample 2× needs an image (N×C×H×W) input, got ' + ins[0].layout;
+      const H = ins[0].dims[2], W = ins[0].dims[3];
+      if (H % 2 || W % 2) return 'H and W must be even, got ' + H + '×' + W;
+      return [Shape.image(ins[0].dims[0], ins[0].dims[1], H / 2, W / 2)];
+    },
+    stats: (ins) => ({ params: 0, flops: Shape.elems(ins[0]) }),
+    exec: (T, ins, p, node) => {
+      const sh = node.inShapes[0];
+      const N = sh.dims[0], C = sh.dims[1], H = sh.dims[2], W = sh.dims[3];
+      const y = T.createTensor(N, C * (H / 2) * (W / 2));
+      T.downsampleAvg2xForward(ins[0], N, C, H, W, y);
+      return [y];
+    },
+  });
+
+  def({
+    type: 'interp2d', label: 'Resize (Interp2D)', cat: 'Spatial', color: '#22d3ee',
+    desc: 'Resample NCHW to an arbitrary H×W — nearest / bilinear / bicubic, half-pixel or ' +
+          'corner-aligned. The DPT / Depth-Anything resize head.',
+    ins: ['x'], outs: ['y'],
+    params: [
+      { key: 'hout', label: 'Out H', type: 'int', def: 32, min: 1, max: 1024 },
+      { key: 'wout', label: 'Out W', type: 'int', def: 32, min: 1, max: 1024 },
+      { key: 'mode', label: 'Mode', type: 'select', def: 'bilinear',
+        options: ['nearest', 'bilinear', 'bicubic-pil', 'bicubic-torch'] },
+      { key: 'align', label: 'Align corners', type: 'bool', def: false },
+    ],
+    shape: (ins, p) => Shape.isImage(ins[0])
+      ? [Shape.image(ins[0].dims[0], ins[0].dims[1], p.hout, p.wout)]
+      : 'Resize needs an image (N×C×H×W) input, got ' + ins[0].layout,
+    stats: (ins, p) => ({ params: 0,
+      flops: 4 * ins[0].dims[0] * ins[0].dims[1] * p.hout * p.wout }),
+    exec: (T, ins, p, node) => {
+      const sh = node.inShapes[0];
+      const N = sh.dims[0], C = sh.dims[1], H = sh.dims[2], W = sh.dims[3];
+      const MODES = { nearest: 0, bilinear: 1, 'bicubic-pil': 2, 'bicubic-torch': 3 };
+      let mode = MODES[p.mode] != null ? MODES[p.mode] : 1;
+      const y = T.createTensor(N, C * p.hout * p.wout);
+      if (p.align) {
+        if (mode === 3) mode = 2;   // corner-aligned variant supports modes 0/1/2 only
+        T.interp2dAlignCornersForward(ins[0], N, C, H, W, p.hout, p.wout, mode, y);
+      } else {
+        T.interp2dForward(ins[0], N, C, H, W, p.hout, p.wout, mode, y);
+      }
+      return [y];
+    },
+  });
+
+  def({
+    type: 'unfold2d', label: 'Unfold 2D', cat: 'Spatial', color: '#22d3ee',
+    desc: 'Spatial-preserving neighborhood im2col — each pixel gathers its k×k window into a ' +
+          'channel block (C → C·k²) on a stride-1 grid. The cost-volume / local-attention prep.',
+    ins: ['x'], outs: ['y'],
+    params: [
+      { key: 'k', label: 'Kernel', type: 'int', def: 3, min: 1, max: 9 },
+      { key: 'mode', label: 'Pad mode', type: 'select', def: 'zero', options: ['zero', 'reflect', 'replicate'] },
+    ],
+    shape: (ins, p) => {
+      if (!Shape.isImage(ins[0]))
+        return 'Unfold 2D needs an image (N×C×H×W) input, got ' + ins[0].layout;
+      const pad = (p.k - 1) >> 1;
+      const ho = ins[0].dims[2] + 2 * pad - p.k + 1;
+      const wo = ins[0].dims[3] + 2 * pad - p.k + 1;
+      if (ho < 1 || wo < 1) return 'kernel too large for this input';
+      return [Shape.image(ins[0].dims[0], ins[0].dims[1] * p.k * p.k, ho, wo)];
+    },
+    stats: (ins, p) => ({ params: 0, flops: Shape.elems(ins[0]) * p.k * p.k }),
+    exec: (T, ins, p, node) => {
+      const sh = node.inShapes[0];
+      const N = sh.dims[0], C = sh.dims[1], H = sh.dims[2], W = sh.dims[3];
+      const pad = (p.k - 1) >> 1;
+      const ho = H + 2 * pad - p.k + 1, wo = W + 2 * pad - p.k + 1;
+      const MODES = { zero: 0, reflect: 1, replicate: 2 };
+      const mode = MODES[p.mode] || 0;
+      const y = T.createTensor(N, C * p.k * p.k * ho * wo);
+      T.unfold2dForward(ins[0], N, C, H, W, p.k, p.k, 1, 1, pad, pad, pad, pad, mode, y);
+      return [y];
+    },
+  });
+
+  def({
+    type: 'pad2d', label: 'Pad 2D', cat: 'Spatial', color: '#22d3ee',
+    desc: 'Spatial padding (NCHW) — zero, reflect, or replicate border.',
+    ins: ['x'], outs: ['y'],
+    params: [
+      { key: 'pad', label: 'Padding', type: 'int', def: 1, min: 0, max: 32 },
+      { key: 'mode', label: 'Mode', type: 'select', def: 'zero', options: ['zero', 'reflect', 'replicate'] },
+    ],
+    shape: (ins, p) => Shape.isImage(ins[0])
+      ? [Shape.image(ins[0].dims[0], ins[0].dims[1], ins[0].dims[2] + 2 * p.pad, ins[0].dims[3] + 2 * p.pad)]
+      : 'Pad 2D needs an image (N×C×H×W) input, got ' + ins[0].layout,
+    stats: () => ({ params: 0, flops: 0 }),
+    exec: (T, ins, p, node) => {
+      const sh = node.inShapes[0];
+      const N = sh.dims[0], C = sh.dims[1], H = sh.dims[2], W = sh.dims[3];
+      const MODES = { zero: 0, reflect: 1, replicate: 2 };
+      const mode = MODES[p.mode] || 0;
+      const y = T.createTensor(N, C * (H + 2 * p.pad) * (W + 2 * p.pad));
+      T.pad2dForward(ins[0], N, C, H, W, p.pad, p.pad, p.pad, p.pad, mode, y);
+      return [y];
+    },
+  });
+
+  def({
+    type: 'spatial-merge', label: 'Spatial Merge 2×2', cat: 'Spatial', color: '#22d3ee',
+    desc: 'Qwen-VL 2×2 token merge — folds each 2×2 spatial block into the channel axis: ' +
+          '(N,C,H,W) → (N,4C,H/2,W/2).',
+    ins: ['x'], outs: ['y'], params: [],
+    shape: (ins) => {
+      if (!Shape.isImage(ins[0]))
+        return 'Spatial Merge needs an image (N×C×H×W) input, got ' + ins[0].layout;
+      const H = ins[0].dims[2], W = ins[0].dims[3];
+      if (H % 2 || W % 2) return 'H and W must be even, got ' + H + '×' + W;
+      return [Shape.image(ins[0].dims[0], ins[0].dims[1] * 4, H / 2, W / 2)];
+    },
+    stats: () => ({ params: 0, flops: 0 }),
+    exec: (T, ins, p, node) => {
+      const sh = node.inShapes[0];
+      const N = sh.dims[0], C = sh.dims[1], H = sh.dims[2], W = sh.dims[3];
+      const y = T.createTensor(N, 4 * C * (H / 2) * (W / 2));
+      T.spatialMerge2x2Forward(ins[0], N, C, H, W, y);
+      return [y];
+    },
+  });
+
+  def({
+    type: 'convex-upsample', label: 'Convex Upsample', cat: 'Spatial', color: '#22d3ee',
+    desc: 'RAFT-style learned-mask upsample: each fine pixel is a softmax-weighted blend of ' +
+          'its 3×3 low-res neighborhood. The mask is synthesised here; (N,C,H,W) → (N,C,sH,sW).',
+    ins: ['x'], outs: ['y'],
+    params: [{ key: 'scale', label: 'Scale', type: 'int', def: 4, min: 2, max: 8 }],
+    shape: (ins, p) => Shape.isImage(ins[0])
+      ? [Shape.image(ins[0].dims[0], ins[0].dims[1], ins[0].dims[2] * p.scale, ins[0].dims[3] * p.scale)]
+      : 'Convex Upsample needs an image (N×C×H×W) input, got ' + ins[0].layout,
+    stats: (ins, p) => ({ params: 0,
+      flops: 9 * Shape.elems(ins[0]) * p.scale * p.scale }),
+    exec: (T, ins, p, node) => {
+      const sh = node.inShapes[0];
+      const N = sh.dims[0], C = sh.dims[1], H = sh.dims[2], W = sh.dims[3], s = p.scale;
+      // Mask: (N, 9·s²·H·W) raw logits — the kernel softmaxes over the 9 neighbours.
+      const mask = dataFill(T, N, 9 * s * s * H * W, 'gauss');
+      const y = T.createTensor(N, C * (s * H) * (s * W));
+      T.convexUpsampleForward(ins[0], mask, N, C, H, W, s, y);
+      return [y];
+    },
+  });
+
+  // === Layout (NCHW ↔ sequence bridge) ==================================
+  def({
+    type: 'nchw-to-seq', label: 'NCHW → Sequence', cat: 'Layout', color: '#cbd5e1',
+    desc: 'Flatten a conv feature map into a token sequence — (N,C,H,W) → (N·H·W, C) — so ' +
+          'transformer ops can consume it.',
+    ins: ['x'], outs: ['y'], params: [],
+    shape: (ins) => {
+      if (!Shape.isImage(ins[0]))
+        return 'NCHW → Sequence needs an image (N×C×H×W) input, got ' + ins[0].layout;
+      const N = ins[0].dims[0], C = ins[0].dims[1], H = ins[0].dims[2], W = ins[0].dims[3];
+      return [Shape.matrix(N * H * W, C)];
+    },
+    stats: () => ({ params: 0, flops: 0 }),
+    exec: (T, ins, p, node) => {
+      const sh = node.inShapes[0];
+      const N = sh.dims[0], C = sh.dims[1], H = sh.dims[2], W = sh.dims[3];
+      const y = T.createTensor(N * H * W, C);
+      T.nchwToSequence(ins[0], N, C, H, W, y);
+      return [y];
+    },
+  });
+
   // === Tensor ops =======================================================
   def({
     type: 'add', label: 'Add', cat: 'Tensor', color: '#94a3b8',
@@ -585,7 +1112,8 @@
   });
 
   // ---- public API ------------------------------------------------------
-  const ORDER = ['Source', 'Dense', 'Activation', 'Norm', 'Attention', 'T5', 'Conv', 'Tensor'];
+  const ORDER = ['Source', 'Dense', 'Activation', 'Norm', 'Attention', 'T5',
+    'Conv', 'Spatial', 'Layout', 'Tensor'];
   Lab.Ops = {
     defs: DEFS,
     get: (type) => DEFS[type],

@@ -171,6 +171,74 @@
         b.link(emb, rms); b.link(rms, attn); b.link(attn, proj);
       },
     },
+    {
+      name: 'SAM Window Encoder Block',
+      desc: 'A SAM / ViTDet encoder layer — decomposed relative-position attention on an ' +
+            '8×8 patch grid, then a GELU MLP. Both residual.',
+      build(g) {
+        const b = builder(g);
+        const x = b.add('input', { rows: 64, cols: 128, fill: 'gauss' });   // 8×8 grid · D=128
+        const ln1 = b.add('layernorm');
+        const attn = b.add('sam-attn', { heads: 4, gridH: 8, gridW: 8, window: 0 });
+        const add1 = b.add('add');
+        const ln2 = b.add('layernorm');
+        const ff1 = b.add('linear', { out: 512 });
+        const act = b.add('gelu');
+        const ff2 = b.add('linear', { out: 128 });
+        const add2 = b.add('add');
+        b.link(x, ln1); b.link(ln1, attn);
+        b.link(attn, add1, 0); b.link(x, add1, 1);
+        b.link(add1, ln2); b.link(ln2, ff1); b.link(ff1, act); b.link(act, ff2);
+        b.link(ff2, add2, 0); b.link(add1, add2, 1);
+      },
+    },
+    {
+      name: 'Conv → Transformer Bridge',
+      desc: 'A conv stem flattened into tokens — Conv2D → GroupNorm → GELU → NCHW→Sequence → ' +
+            'LayerNorm → attention. The hybrid-backbone pattern.',
+      build(g) {
+        const b = builder(g);
+        const x = b.add('image', { n: 1, c: 3, h: 16, w: 16, fill: 'gauss' });
+        const c1 = b.add('conv2d', { cout: 32, k: 3, stride: 1, pad: 1 });
+        const gn = b.add('groupnorm', { groups: 8 });
+        const act = b.add('gelu');
+        const seq = b.add('nchw-to-seq');
+        const ln = b.add('layernorm');
+        const attn = b.add('mha', { heads: 4 });
+        b.link(x, c1); b.link(c1, gn); b.link(gn, act); b.link(act, seq);
+        b.link(seq, ln); b.link(ln, attn);
+      },
+    },
+    {
+      name: 'Dense-Prediction Upsample Head',
+      desc: 'A depth/normal decoder — ConvTranspose2D learnable upsample, bilinear 2×, an ' +
+            'arbitrary corner-aligned resize, a 3×3 conv, then per-pixel L2 normalize ' +
+            '(DPT / DSINE direction field).',
+      build(g) {
+        const b = builder(g);
+        const x = b.add('image', { n: 1, c: 16, h: 8, w: 8, fill: 'gauss' });
+        const ct = b.add('conv-transpose2d', { cout: 8, k: 4, stride: 2, pad: 1, outpad: 0 });
+        const r = b.add('relu');
+        const up = b.add('upsample2x', { mode: 'bilinear' });
+        const rz = b.add('interp2d', { hout: 48, wout: 48, mode: 'bilinear', align: true });
+        const c = b.add('conv2d', { cout: 3, k: 3, stride: 1, pad: 1 });
+        const n = b.add('l2norm-pixel');
+        b.link(x, ct); b.link(ct, r); b.link(r, up); b.link(up, rz); b.link(rz, c); b.link(c, n);
+      },
+    },
+    {
+      name: 'Sliding-Window Attention',
+      desc: 'Streaming-codec attention — token embeddings through a causal flash-attention with ' +
+            'a sliding key window. Edit the Window field (0 = full) to compare local vs. global.',
+      build(g) {
+        const b = builder(g);
+        const emb = b.add('embedding', { vocab: 256, dim: 128, batch: 48 });
+        const ln = b.add('rmsnorm');
+        const attn = b.add('flash-attn', { heads: 4, causal: true, window: 8 });
+        const proj = b.add('linear', { out: 128 });
+        b.link(emb, ln); b.link(ln, attn); b.link(attn, proj);
+      },
+    },
   ];
 
   Lab.Presets = {
