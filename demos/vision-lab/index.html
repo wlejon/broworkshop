@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Vision Lab</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+
+    <header id="topbar">
+      <span id="brand">◉ Vision&nbsp;Lab</span>
+      <span class="tagline">every bro.vision model on one image</span>
+      <span class="grow"></span>
+      <span id="image-name" class="muted">no image</span>
+      <button id="btn-image" title="Open an input image">Open image…</button>
+      <span id="weights-name" class="muted small" title="Weights root directory">weights: …</span>
+      <button id="btn-weights" title="Pick the brovisionml weights root directory">Weights…</button>
+      <span id="backend" class="badge">…</span>
+    </header>
+
+    <main>
+      <!-- ── left: model picker + params + actions ──────────────────── -->
+      <aside id="controls">
+        <label class="hdr">Model</label>
+        <div id="model-list" class="model-list"></div>
+
+        <div id="param-block" class="panel-block">
+          <label class="hdr"><span id="param-title">Parameters</span></label>
+          <p id="model-tagline" class="muted small"></p>
+          <div id="params"></div>
+        </div>
+
+        <div class="actions" id="load-actions">
+          <button id="btn-load" class="primary" disabled>Load model</button>
+        </div>
+        <p id="load-status" class="muted small">Pick a model and load it.</p>
+
+        <!-- annotator actions -->
+        <div id="annot-actions" class="actions hidden">
+          <button id="btn-run" class="primary" disabled>Run</button>
+          <button id="btn-cancel" disabled>Cancel</button>
+        </div>
+        <div id="runall-actions" class="hidden">
+          <button id="btn-runall" disabled>Run all annotators →contact sheet</button>
+        </div>
+
+        <!-- SAM actions -->
+        <div id="sam-actions" class="hidden">
+          <div class="actions">
+            <button id="btn-setimage" class="primary" disabled>Set image (encode)</button>
+          </div>
+          <p id="sam-hint" class="muted small">
+            After encoding: click to add a <b>foreground</b> point,
+            Shift-click for <b>background</b>, drag for a <b>box</b>.
+          </p>
+          <label class="check">
+            <input type="checkbox" id="sam-multimask" checked> Multimask (3 ranked proposals)
+          </label>
+          <div class="actions">
+            <button id="btn-segment" disabled>Segment</button>
+            <button id="btn-sam-clear" disabled>Clear prompts</button>
+          </div>
+          <details id="amg-section" class="accordion">
+            <summary>Segment everything (automatic)</summary>
+            <div id="amg-params"></div>
+            <button id="btn-everything" class="primary" disabled>Segment everything</button>
+          </details>
+        </div>
+      </aside>
+
+      <!-- ── center: image stage ────────────────────────────────────── -->
+      <section id="stage">
+        <div id="canvas-wrap">
+          <canvas id="view"></canvas>
+          <div id="view-hint">Open an image, pick a model, and Load.</div>
+        </div>
+        <div id="transport">
+          <div id="progress"><div id="progress-bar"></div></div>
+          <span id="view-mode-wrap" class="seg-toggle hidden">
+            <button data-mode="input" class="seg active">Input</button>
+            <button data-mode="output" class="seg">Output</button>
+            <button data-mode="overlay" class="seg">Overlay</button>
+          </span>
+          <span id="opacity-wrap" class="hidden">
+            <input id="opacity" type="range" min="0" max="100" value="70"
+                   title="Overlay opacity">
+          </span>
+          <span class="grow"></span>
+          <span id="stage-label" class="muted">idle</span>
+        </div>
+      </section>
+
+      <!-- ── right: result inspector ────────────────────────────────── -->
+      <aside id="inspect">
+        <label class="hdr">Result</label>
+        <div id="out-wrap">
+          <canvas id="out-thumb"></canvas>
+          <div id="out-hint" class="muted small">No result yet.</div>
+        </div>
+        <table id="meta"><tbody></tbody></table>
+
+        <div id="mask-block" class="panel-block hidden">
+          <label class="hdr">Masks <span id="mask-count" class="muted small"></span></label>
+          <div id="mask-list"></div>
+        </div>
+
+        <div id="contact-block" class="panel-block hidden">
+          <label class="hdr">Contact sheet</label>
+          <div id="contact-grid"></div>
+        </div>
+      </aside>
+    </main>
+
+    <footer id="status">
+      <span id="status-text">Ready.</span>
+      <span class="grow"></span>
+      <span id="vision-version" class="muted"></span>
+    </footer>
+  </div>
+
+  <script src="lab/util.js"></script>
+  <script src="lab/models.js"></script>
+  <script src="lab/stage.js"></script>
+  <script src="lab/sam.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
