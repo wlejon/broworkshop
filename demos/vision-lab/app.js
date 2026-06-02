@@ -71,6 +71,20 @@
       });
     }
 
+    // Runtime GPU probe. bro.gpu is always present (CPU-only builds included)
+    // and reports the device the vision loaders default to.
+    function gpuAvailable() { return !!(window.bro && bro.gpu && bro.gpu.available); }
+    function gpuLabel() {
+      var b = (window.bro && bro.gpu && bro.gpu.backend) || 'cpu';
+      return String(b).toUpperCase();
+    }
+
+    // Set the backend badge. `ok` = green (a GPU/CUDA device), else amber.
+    function setBackend(label, ok) {
+      $('backend').textContent = label;
+      $('backend').className = 'badge ' + (ok ? 'ok' : 'bad');
+    }
+
     function shortPath(p) {
       if (!p) return '…';
       var parts = p.replace(/\\/g, '/').split('/');
@@ -236,6 +250,10 @@
     function loadModel() {
       if (busy) return;
       var m = model();
+      // Warn on heavy CPU loads — vision models run without a GPU, just slowly.
+      if (!gpuAvailable()) {
+        status(m.label + ' has no GPU backend — running on CPU will be slow.', 'warn');
+      }
       setBusy(true, 'loading ' + m.id + '…');
       status('loading ' + m.label + ' weights…', '');
       var p = currentParams();
@@ -245,6 +263,12 @@
           if (isSam()) samCtl.setModel(inst);
           setBusy(false, 'idle');
           buildModelList();
+          // Refresh the badge to the model's ground-truth device — a GPU build
+          // still loads on CPU when no CUDA device is present at runtime.
+          if (inst && inst.device) {
+            setBackend(String(inst.device).toUpperCase(),
+                       /cuda|gpu/i.test(inst.device));
+          }
           status(m.label + ' ready on ' + inst.device + '.', 'ok');
           refreshActions();
         },
@@ -568,8 +592,11 @@
     // ── boot ─────────────────────────────────────────────────────────────
     var version = (window.bro && bro.vision && bro.vision.version) || '';
     $('vision-version').textContent = version ? 'brovisionml ' + version : 'bro.vision';
-    $('backend').textContent = 'CUDA';
-    $('backend').className = 'badge ok';
+    // Backend badge from bro.gpu — the runtime device the vision loaders default
+    // to (honest even on a GPU build with no CUDA device present). setBackend()
+    // in loadModel() refreshes it to a loaded model's ground-truth device.
+    // Without a GPU, bro.vision still runs, just slowly on CPU.
+    setBackend(gpuLabel(), gpuAvailable());
     $('weights-name').textContent = 'weights: ' + shortPath(weightsRoot);
     if (window.bro && bro.vision) { try { bro.vision.init(); } catch (e) {} }
 

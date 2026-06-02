@@ -222,5 +222,6 @@ details.accordion[open] > summary { color: #b6c0d0; margin-bottom: 6px; }
   display: flex; align-items: center; gap: 10px; padding: 6px 14px;
   background: #14171f; border-top: 1px solid #232838; font-size: 11px;
 }
-#status-text.err { color: #e08a8a; }
-#status-text.ok  { color: #5fd99a; }
+#status-text.err  { color: #e08a8a; }
+#status-text.ok   { color: #5fd99a; }
+#status-text.warn { color: #e0c08a; }
