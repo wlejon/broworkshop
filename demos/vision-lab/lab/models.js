@@ -90,10 +90,17 @@
     params: [
       { key: 'fov', label: 'Field of view (deg)', type: 'number',
         min: 20, max: 120, step: 1, default: 60 },
+      // DSINE runs at native resolution with no internal cap — the OOM guard for
+      // large images. Conditioned on global intrinsics, so it caps (downscales)
+      // rather than tiles; only bites when the longer side exceeds the cap.
+      { key: 'maxResolution', label: 'Max resolution (0 = native)', type: 'number',
+        min: 0, max: 4096, step: 128, default: 1536 },
     ],
     load: function (root, p, opts) {
       return V().loadNormal(path(root, this.subdir),
-        loaderOpts({ fov: p.fov || 60, device: p.device }, opts));
+        loaderOpts({ fov: p.fov || 60,
+                     maxResolution: p.maxResolution || 0,
+                     device: p.device }, opts));
     },
     run: function (m, image, p, opts) {
       // fov was baked at load; estimate accepts explicit intrinsics — left to
@@ -112,12 +119,21 @@
     id: 'hed', label: 'Soft edges · HED', group: 'annotator',
     subdir: 'hed', tagline: 'holistically-nested edge detection',
     params: [
-      { key: 'resolution', label: 'Detect resolution (0 = native)', type: 'number',
-        min: 0, max: 2048, step: 64, default: 0 },
+      { key: 'resolution', label: 'Detect resolution (0 = native; ignored when tiling)',
+        type: 'number', min: 0, max: 2048, step: 64, default: 0 },
+      // Tile large images and feather-blend the per-tile edge maps (HED is a
+      // local FCN, so the blend is seamless). Auto-skips for images that fit one
+      // tile, so small inputs run whole-image exactly as before.
+      { key: 'tile', label: 'Tile size (0 = off; auto for large)', type: 'number',
+        min: 0, max: 2048, step: 64, default: 768 },
+      { key: 'overlap', label: 'Tile overlap (px)', type: 'number',
+        min: 0, max: 512, step: 16, default: 96 },
     ],
     load: function (root, p, opts) {
       return V().loadHed(path(root, this.subdir),
-        loaderOpts({ resolution: p.resolution || 0, device: p.device }, opts));
+        loaderOpts({ resolution: p.resolution || 0,
+                     tile: p.tile || 0, overlap: p.overlap || 0,
+                     device: p.device }, opts));
     },
     run: function (m, image, p, opts) { return m.detect(image, runOpts({}, opts)); },
     metadata: function (r) {
@@ -133,12 +149,19 @@
     subdir: 'lineart', tagline: 'clean line drawing (ControlNet convention)',
     params: [
       { key: 'invert', label: 'Invert (bright lines on dark)', type: 'check', default: true },
-      { key: 'resolution', label: 'Detect resolution (0 = native)', type: 'number',
-        min: 0, max: 2048, step: 64, default: 0 },
+      { key: 'resolution', label: 'Detect resolution (0 = native; ignored when tiling)',
+        type: 'number', min: 0, max: 2048, step: 64, default: 0 },
+      // Tile large images and feather-blend the per-tile line maps (the generator
+      // is a local FCN; invert commutes with the blend). Auto-skips for small inputs.
+      { key: 'tile', label: 'Tile size (0 = off; auto for large)', type: 'number',
+        min: 0, max: 2048, step: 64, default: 768 },
+      { key: 'overlap', label: 'Tile overlap (px)', type: 'number',
+        min: 0, max: 512, step: 16, default: 96 },
     ],
     load: function (root, p, opts) {
       return V().loadLineart(path(root, this.subdir),
         loaderOpts({ invert: p.invert !== false, resolution: p.resolution || 0,
+                     tile: p.tile || 0, overlap: p.overlap || 0,
                      device: p.device }, opts));
     },
     run: function (m, image, p, opts) { return m.detect(image, runOpts({}, opts)); },
