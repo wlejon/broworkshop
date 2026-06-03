@@ -34,6 +34,7 @@
         { "dir": "demos/vision-lab" },
         { "dir": "demos/terrain" },
         { "dir": "demos/spatial-audio" },
+        { "dir": "demos/spatial-hash" },
         { "dir": "demos/lighting-demo" },
         { "dir": "demos/flora" },
         { "dir": "demos/video_demo" },
