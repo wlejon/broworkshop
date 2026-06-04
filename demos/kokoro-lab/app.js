@@ -56,10 +56,7 @@ let basis = null;          // voicebasis.json
 let coords = null;         // Float64Array(K) — current position, in σ units
 let bridge = null;         // { D, M, xm, ym, B } — lazy (clone only)
 let qwen = null;           // Qwen Base model — lazy (clone only, for embedSpeaker)
-let auditionBusy = false;  // an async (non-blocking) audio synth is in flight
-let auditionPending = false; // a newer voice arrived mid-synth → render it after
-let auditionTimer = 0;     // debounce slider drags before re-synthesizing
-let pendingRun = false;    // a Run (sync trace) requested while audition in flight
+let renderTimer = 0;       // debounce slider drags before the (sync) re-render
 
 const ATTR_WORD = { f0_mean: 'pitch', rms: 'volume', energy: 'energy', rate: 'pace', zcr: 'brightness' };
 
@@ -94,9 +91,9 @@ function buildSliders() {
     r.type = 'range';
     const [lo, hi] = basis.range[k];
     r.min = (lo * 1.15).toFixed(3); r.max = (hi * 1.15).toFixed(3); r.step = '0.01'; r.value = '0';
-    // dragging updates the readout instantly; the audio re-synth is debounced
-    // and async, so the UI never locks while you drag
-    r.addEventListener('input', () => { coords[k] = +r.value; val.textContent = coords[k].toFixed(2); scheduleAudition(); });
+    // dragging updates the readout instantly; the see+hear re-render is
+    // debounced so it fires once you pause, never mid-drag
+    r.addEventListener('input', () => { coords[k] = +r.value; val.textContent = coords[k].toFixed(2); scheduleRender(); });
     cell.appendChild(r);
     cell._range = r; cell._val = val;
     root.appendChild(cell);
@@ -137,41 +134,17 @@ function rebuildVoice() {
   } catch (e) { setBadge('createVoice: ' + e.message, true); return false; }
 }
 
-// Audition the current voice: synthesize the audio on a BACKGROUND thread and
-// play it — no trace, no #stages rebuild, so the UI never locks or scrolls.
-// Only one synth runs at a time on the model; if the voice changes mid-synth we
-// remember it and render the latest once the current one finishes (latest-wins).
-function auditionVoice() {
-  if (!kokoro || !voice) return;
-  if (auditionBusy) { auditionPending = true; return; }
-  let ids;
-  try { ids = bro.tts.phonemize($('#text').value); }
-  catch (e) { setBadge('phonemize: ' + e.message, true); return; }
-  if (!ids || !ids.length) return;
-  auditionBusy = true;
-  $('#voice-meta').classList.add('busy');
-  bro.tts.synthesize(kokoro, ids, voice, {
-    onDone: (res, info) => {
-      auditionBusy = false;
-      $('#voice-meta').classList.remove('busy');
-      if (info.error) setBadge('synthesize: ' + info.error, true);
-      else if (!info.cancelled) { setClip(res.samples, res.sampleRate); $('#btn-play').disabled = false; setTimeout(play, 50); }
-      // an explicit Run wins over a queued audition; otherwise render the latest
-      if (pendingRun) { pendingRun = false; run(); }
-      else if (auditionPending) { auditionPending = false; auditionVoice(); }
-    },
-  });
+// Coalesce a fast slider drag into a single render shortly after it settles, so
+// dragging stays smooth and the (synchronous) see+hear trace only runs once you
+// pause — never on every tick, never mid-drag.
+function scheduleRender() {
+  if (renderTimer) clearTimeout(renderTimer);
+  renderTimer = setTimeout(() => { renderTimer = 0; run(); }, 200);
 }
 
-// coalesce a fast slider drag into a single audition shortly after it settles
-function scheduleAudition() {
-  if (auditionTimer) clearTimeout(auditionTimer);
-  auditionTimer = setTimeout(() => { auditionTimer = 0; if (rebuildVoice()) auditionVoice(); }, 180);
-}
-
-// seed the sliders from a named anchor (or the neutral centroid). `audition`
-// false on initial load (don't speak until the user asks), true on user picks.
-function seedFrom(name, audition) {
+// seed the sliders from a named anchor (or the neutral centroid). `render`
+// false on initial load (don't speak/draw until the user asks), true on picks.
+function seedFrom(name, render) {
   if (!basis) return;
   if (name === '__neutral__') coords.fill(0);
   else {
@@ -181,7 +154,7 @@ function seedFrom(name, audition) {
   }
   syncSliders();
   $('#voice-meta').textContent = 'seed: ' + (name === '__neutral__' ? 'neutral centroid' : name);
-  if (rebuildVoice() && audition) auditionVoice();
+  if (render) run(); else rebuildVoice();
 }
 
 // randomize within the realizable range, weighted toward the dominant axes so
@@ -196,7 +169,7 @@ function randomVoice() {
   syncSliders();
   $('#source').value = '__neutral__';
   $('#voice-meta').textContent = 'random draw';
-  if (rebuildVoice()) auditionVoice();
+  run();
 }
 
 function gauss() { let u = 0, v = 0; while (!u) u = Math.random(); while (!v) v = Math.random(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); }
@@ -270,7 +243,7 @@ function clone() {
       const nm = wav.split(/[\\\/]/).pop();
       setBadge('ready · cloned ' + nm);
       $('#voice-meta').textContent = 'clone: ' + nm;
-      if (rebuildVoice()) auditionVoice();
+      run();
     } catch (e) { setBadge('clone: ' + e.message, true); }
   };
 
@@ -311,7 +284,7 @@ function reload() {
   try {
     bro.tts.setAssetRoot($('#asset-root').value.trim());
     bro.tts.loadKokoro($('#model-dir').value.trim(), {
-      onReady: (k) => { kokoro = k; setBadge('ready · drag a slider to audition · ▶ Run to trace'); seedFrom($('#source').value, false); },
+      onReady: (k) => { kokoro = k; setBadge('ready · drag a slider to hear & watch it take shape'); seedFrom($('#source').value, false); },
       onError: (m) => setBadge('model error: ' + m, true),
     });
   } catch (e) {
@@ -322,10 +295,7 @@ function reload() {
 // ═══ run ═══════════════════════════════════════════════════════════════════
 function run() {
   if (!kokoro) return;
-  if (auditionTimer) { clearTimeout(auditionTimer); auditionTimer = 0; }
-  // the model runs one synth at a time — if an async audition is in flight,
-  // defer the (blocking) trace until it finishes rather than colliding
-  if (auditionBusy) { pendingRun = true; return; }
+  if (renderTimer) { clearTimeout(renderTimer); renderTimer = 0; }
   if (!rebuildVoice()) return;            // trace exactly what the sliders define now
   const text = $('#text').value;
   let ids;
@@ -346,7 +316,9 @@ function run() {
     ids.length + ' phonemes · ' + r.stages.length + ' stages · ' +
     (r.samples.length / r.sampleRate).toFixed(2) + 's audio · ' + ms + ' ms';
   $('#btn-play').disabled = false;
+  const sc = $('#stages').scrollTop;
   renderStages(r.stages);
+  $('#stages').scrollTop = sc;   // keep your place in the stage stream while exploring
   ensureClip();              // upload the audio now...
   setTimeout(play, 80);      // ...trigger playback a few frames later (let it land)
 }

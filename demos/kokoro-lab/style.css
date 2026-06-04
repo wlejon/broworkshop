@@ -74,8 +74,6 @@ button {
 button:hover:not(:disabled) { background: #243150; }
 button:disabled { opacity: 0.4; cursor: default; }
 .meta { color: #5b6470; font-size: 11px; }
-#voice-meta.busy { color: #7fd1a6; }
-#voice-meta.busy::after { content: ' ♪'; }
 
 /* stage stream */
 /* min-height:0 lets this flex child actually scroll instead of growing the page */
