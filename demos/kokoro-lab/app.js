@@ -57,8 +57,8 @@ let coords = null;         // Float64Array(K) — current position, in σ units
 let bridge = null;         // { D, M, xm, ym, B } — lazy (clone only)
 let qwen = null;           // Qwen Base model — lazy (clone only, for embedSpeaker)
 let renderTimer = 0;       // debounce slider drags before the re-render
-let synthBusy = false;     // an async traced synth is in flight on the model
-let synthPending = false;  // a newer voice was requested mid-synth (latest-wins)
+let synthBusy = false;     // a synth (audio or trace pass) is in flight
+let dirty = false;         // the voice changed; needs an audio-then-trace pass
 
 const ATTR_WORD = { f0_mean: 'pitch', rms: 'volume', energy: 'energy', rate: 'pace', zcr: 'brightness' };
 
@@ -295,43 +295,70 @@ function reload() {
 }
 
 // ═══ run ═══════════════════════════════════════════════════════════════════
-// Synthesize + trace the current voice on a BACKGROUND thread (bro.tts.synthesize
-// with trace:true), then draw the stages and play — so see+hear updates without
-// ever locking the UI. One synth runs at a time on the model; a change requested
-// mid-synth is remembered and rendered once the current one finishes (latest-wins).
+// (Re)render the current voice. We synthesize it TWICE on the background thread:
+// first audio-only so it plays as fast as possible (no trace host-copies, no
+// stage drawing in the way), then again WITH the trace to draw the pipeline a
+// beat later. The model runs one synth at a time, so the two passes are
+// sequential; if the voice changes mid-flight we drop back to audio-first for
+// the newest one (latest-wins) — hear it now, see it once it settles.
 function run() {
   if (!kokoro) return;
   if (renderTimer) { clearTimeout(renderTimer); renderTimer = 0; }
   if (!rebuildVoice()) return;            // render exactly what the sliders define now
-  if (synthBusy) { synthPending = true; return; }
+  dirty = true;
+  pump();
+}
+
+// Start the next pass if one isn't already running and the voice is dirty.
+function pump() {
+  if (synthBusy || !dirty || !kokoro || !voice) return;
   let ids;
   try { ids = bro.tts.phonemize($('#text').value); }
-  catch (e) { setBadge('phonemize: ' + e.message, true); return; }
-  if (!ids || !ids.length) { setBadge('no phonemes for that text', true); return; }
+  catch (e) { setBadge('phonemize: ' + e.message, true); dirty = false; return; }
+  if (!ids || !ids.length) { setBadge('no phonemes for that text', true); dirty = false; return; }
+  dirty = false;
+  synthAudio(ids);
+}
 
+// Pass 1 — fast: audio only, play it the moment it lands.
+function synthAudio(ids) {
   synthBusy = true;
   $('#run-meta').textContent = 'synthesizing…';
+  bro.tts.synthesize(kokoro, ids, voice, {
+    onDone: (r, info) => {
+      synthBusy = false;
+      if (info.error) { setBadge('synthesize: ' + info.error, true); return; }
+      if (!info.cancelled) {
+        setClip(r.samples, r.sampleRate);
+        $('#btn-play').disabled = false;
+        setTimeout(play, 40);
+      }
+      if (dirty) pump();              // a newer voice arrived — hear it next
+      else synthTrace(ids);           // audio is current → now gather the trace
+    },
+  });
+}
+
+// Pass 2 — gather + draw the pipeline trace for the (now playing) voice.
+function synthTrace(ids) {
+  synthBusy = true;
   const t0 = performance.now();
   bro.tts.synthesize(kokoro, ids, voice, {
     trace: true,
     onDone: (r, info) => {
       synthBusy = false;
-      if (info.error) setBadge('synthesize: ' + info.error, true);
-      else if (!info.cancelled) {
+      if (!info.error && !info.cancelled) {
         lastTrace = r;
-        const ms = (performance.now() - t0).toFixed(0);
         const stages = r.stages || [];
+        const ms = (performance.now() - t0).toFixed(0);
         $('#run-meta').textContent =
           ids.length + ' phonemes · ' + stages.length + ' stages · ' +
-          (r.samples.length / r.sampleRate).toFixed(2) + 's audio · ' + ms + ' ms';
-        $('#btn-play').disabled = false;
+          (r.samples.length / r.sampleRate).toFixed(2) + 's audio · +' + ms + ' ms trace';
         const sc = $('#stages').scrollTop;
         renderStages(stages);
         $('#stages').scrollTop = sc;   // keep your place while exploring
-        setClip(r.samples, r.sampleRate);
-        setTimeout(play, 60);
       }
-      if (synthPending) { synthPending = false; run(); }
+      if (dirty) pump();
     },
   });
 }
