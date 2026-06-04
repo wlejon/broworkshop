@@ -59,8 +59,19 @@
   .stage .toggle {
     font-size: 10px; padding: 3px 8px; border-radius: 5px;
   }
-  .stage label { font-size: 11px; color: #8a94a6; display: flex; align-items: center; gap: 6px; margin-top: 5px; }
-  .stage select { width: 100%; }
+  /* The card's content wrapper is also class="body"; without this it inherits
+     the global `.body { display:flex }` (the main split is a row) and lays the
+     stage's labels out horizontally so they overlap in the narrow column. */
+  .stage .body { display: flex; flex-direction: column; gap: 0; flex: none; min-height: 0; }
+  .stage label {
+    font-size: 11px; color: #8a94a6; display: flex; align-items: center;
+    gap: 8px; margin-top: 6px;
+  }
+  .stage label > span[data-v] {
+    min-width: 40px; text-align: right; color: #cfe0ff; flex: none;
+  }
+  .stage input[type=range] { flex: 1 1 auto; min-width: 0; }
+  .stage select { flex: 1 1 auto; min-width: 0; width: auto; }
   .stage .ms { font-size: 10px; color: #7fe6a8; margin-left: auto; }
   .kmat {
     margin-top: 6px; font-size: 10px; color: #8aa0c8; line-height: 1.4;

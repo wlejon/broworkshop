@@ -164,7 +164,7 @@ const pipeline = [
 // ---------------------------------------------------------------------------
 let fieldW = 0, fieldH = 0;
 let bufA = null, bufB = null;     // ping-pong for the pipeline
-let field = null;                  // the source field (== bufA after fill)
+let sourceBuf = null;              // persistent cached source; copied into bufA
 let src2 = null;                   // second source for combine
 let loBuf = null, hiBuf = null;    // resample scratch (low-res, full-res)
 let edgeBuf = null;                // edge-magnitude scratch (2nd sobel pass)
@@ -172,16 +172,30 @@ let resampLoW = 0, resampLoH = 0;
 let imgData = null;                // CPU lookup target
 let eqLut = null;                  // histogram-eq LUT (built each frame when active)
 
+// Source caching. QuickJS has no JIT, so a per-pixel JS loop (the radial /
+// gradient / checker patterns) costs ~14 ms at 256² and re-running it every
+// frame is what made the pipeline slow. We regenerate a source only when it's
+// actually dynamic AND animating — the noise sources go through bro.noise's
+// C++ genUniformGrid2DInto, which is cheap — otherwise we generate once and
+// reuse the cached buffer. So the per-frame path never enters a JS pixel loop,
+// matching this demo's whole thesis.
+const DYNAMIC_SRC = new Set(['fbm', 'simplex']);
+let sourceDirty = true;            // main source needs (re)generation
+let src2Dirty = true;              // combine's second source needs (re)generation
+let src2Kind = '';                 // last second-source kind generated
+
 function allocBuffers(w, h) {
   fieldW = w; fieldH = h;
   bufA = bro.image.alloc(w, h, 1);
   bufB = bro.image.alloc(w, h, 1);
+  sourceBuf = bro.image.alloc(w, h, 1);
   src2 = bro.image.alloc(w, h, 1);
   hiBuf = bro.image.alloc(w, h, 1);
   edgeBuf = null;   // re-alloc on first edgemag use at this size
   loBuf = null; resampLoW = 0; resampLoH = 0;
   eqLut = new Uint8Array(256 * 4);
   imgData = null;   // rebuilt on first CPU draw at the right canvas size
+  sourceDirty = true; src2Dirty = true; src2Kind = '';
 }
 
 // ---------------------------------------------------------------------------
@@ -237,8 +251,14 @@ function runMap(stage, src, dst) {
 
 function runCombine(stage, src, dst) {
   const c = stage.cfg;
-  // (Re)fill the second source each frame so it can animate too.
-  fillSource(src2, c.src2, fieldW, fieldH, animTime * 0.5 + 3.0);
+  // (Re)fill the second source only when it's a dynamic (C++ noise) kind being
+  // animated, or when it changed / the field was resized — never re-run a JS
+  // pattern loop per frame just to hold a static second source steady.
+  const dyn = DYNAMIC_SRC.has(c.src2);
+  if ((dyn && animate) || src2Dirty || c.src2 !== src2Kind) {
+    fillSource(src2, c.src2, fieldW, fieldH, dyn ? animTime * 0.5 + 3.0 : 0);
+    src2Kind = c.src2; src2Dirty = false;
+  }
   let spec;
   if (c.op === 'lerp') spec = { op: 'lerp', t: c.t };
   else if (c.op === 'wsum') spec = { op: 'wsum', wa: c.wa, wb: c.wb };
@@ -312,9 +332,17 @@ function buildEqLut(src, lo, hi) {
 // applyPipeline → returns { buf, eqActive }. eqActive routes colorize through
 // the eq LUT instead of the selected gradient.
 function applyPipeline() {
-  // Source fills bufA.
+  // Refresh the cached source only when needed (dynamic + animating, or dirty),
+  // then copy it into bufA — the pipeline ping-pongs bufA↔bufB and would
+  // otherwise clobber the source. The copy is a typed-array memcpy, not a JS
+  // pixel loop.
   let t0 = performance.now();
-  fillSource(bufA, elSource.value, fieldW, fieldH, animTime);
+  const kind = elSource.value, dyn = DYNAMIC_SRC.has(kind);
+  if ((dyn && animate) || sourceDirty) {
+    fillSource(sourceBuf, kind, fieldW, fieldH, dyn ? animTime : 0);
+    sourceDirty = false;
+  }
+  bufA.set(sourceBuf);
   const tSource = performance.now() - t0;
 
   let src = bufA, dst = bufB;
@@ -517,7 +545,7 @@ function refreshCardVisibility(card, stage) {
 // Controls wiring
 // ---------------------------------------------------------------------------
 elGradient.addEventListener('change', () => { curLut = buildGradient(elGradient.value); });
-elSource.addEventListener('change', () => {});
+elSource.addEventListener('change', () => { sourceDirty = true; });
 elFieldSize.addEventListener('change', () => { allocBuffers(+elFieldSize.value, +elFieldSize.value); });
 elRangeMode.addEventListener('change', () => {
   const manual = elRangeMode.value === 'manual';
