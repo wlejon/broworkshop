@@ -81,6 +81,12 @@ let vx = new Float32Array(0), vy = new Float32Array(0), vz = new Float32Array(0)
 
 const SPEED = 90;       // world units / sec target speed
 const SEP_R = 26;       // separation radius (per-boid radiusQuery)
+// Cap for the cursor's nearest() probe. nearest scans the whole maxRadius
+// footprint (no early-out), so its cost grows with maxRadius²: at WORLD_W it
+// measured ~29 ms/frame, at 250 it's ~0.05 ms. Boids are spaced ~57 units even
+// at the lowest population, so 250 always finds one; an empty-space miss just
+// draws no line that frame.
+const NEAR_CAP = 250;
 
 // A few large "blob" sphere entries — these get insertSphere'd with big radii.
 // Their ids live above the boid id range so they never collide with boids.
@@ -124,8 +130,17 @@ function resizeFlock(n) {
   px = npx; py = npy; pz = npz; vx = nvx; vy = nvy; vz = nvz;
 }
 
-// ----- the spatial hash ------------------------------------------------------
+// ----- the spatial hashes ----------------------------------------------------
+// Boids go in `hash` (points only). The big spheres go in a SEPARATE index.
+// SpatialHash3D dilates the cell footprint of *every* query by the largest
+// radius ever inserted, so mixing r~130 spheres into the boid grid makes each
+// tiny radius-26 separation query scan a ~130-unit-dilated region — measured at
+// 25 ms/frame vs 0.8 ms with the spheres kept apart (500 boids). Disparate-
+// scale entries belong in disparate grids; insertSphere's dilation reach is
+// still exercised, just within sphereHash where the cursor probe looks.
 let hash = new bro.math.SpatialHash3D(cellSize);
+const SPHERE_CELL = 128;                        // ~ the sphere radii
+let sphereHash = new bro.math.SpatialHash3D(SPHERE_CELL);
 
 // ----- mouse / interaction ---------------------------------------------------
 // Cursor in world coords (XZ); Y probe sits at slab center (0).
@@ -194,8 +209,7 @@ function flock(dt) {
     candidates += ids.length;
     let sxx = 0, syy = 0, szz = 0;
     for (let k = 0; k < ids.length; k++) {
-      const j = ids[k];
-      if (j >= count) continue;        // skip sphere ids
+      const j = ids[k];                // boid hash is points-only, so j < count
       if (j === i) continue;
       const ddx = x - px[j], ddy = y - py[j], ddz = z - pz[j];
       const d2 = ddx * ddx + ddy * ddy + ddz * ddz;
@@ -238,30 +252,27 @@ function integrate(dt) {
   }
 }
 
-// Rebuild the hash from scratch: clear + re-insert every boid and sphere.
+// Rebuild both indices from scratch: clear + re-insert. Boids into the points
+// grid; spheres into their own grid so their radii don't dilate boid queries.
 function rebuildHash() {
   hash.clear();
   for (let i = 0; i < count; i++) hash.insert(px[i], py[i], pz[i], i);
+  sphereHash.clear();
   for (let i = 0; i < spheres.length; i++) {
     const s = spheres[i];
-    hash.insertSphere(s.x, s.y, s.z, s.r, SPHERE_BASE + i);
+    sphereHash.insertSphere(s.x, s.y, s.z, s.r, SPHERE_BASE + i);
   }
 }
 
 // ----- brute-force reference (for the live comparison only) ------------------
-// Mirrors radiusQuery for points + the sphere reach rule, scanning all ids.
+// Mirrors the boid radiusQuery (points only) so the on-screen comparison is
+// apples-to-apples with the per-boid separation pass run against `hash`.
 function bruteRadius(qx, qy, qz, r) {
   const out = [];
   const r2 = r * r;
   for (let i = 0; i < count; i++) {
     const dx = px[i] - qx, dy = py[i] - qy, dz = pz[i] - qz;
     if (dx * dx + dy * dy + dz * dz <= r2) out.push(i);
-  }
-  for (let i = 0; i < spheres.length; i++) {
-    const s = spheres[i];
-    const dx = s.x - qx, dy = s.y - qy, dz = s.z - qz;
-    const reach = r + s.r;
-    if (dx * dx + dy * dy + dz * dz <= reach * reach) out.push(SPHERE_BASE + i);
   }
   return out;
 }
@@ -278,8 +289,14 @@ function runTools() {
   let q = count;          // one radiusQuery per boid in flock()
 
   if (mouseInside) {
-    probeIds = hash.radiusQuery(mouseX, 0, mouseZ, queryR);  q++;
-    nearestId = hash.nearest(mouseX, 0, mouseZ, WORLD_W);    q++;
+    // Boids from the points index; reached spheres from their own index. Both
+    // are radiusQuery — the sphere one shows insertSphere's dilation reach
+    // (a big sphere matched even when its center sits outside the probe radius).
+    const boidHits = hash.radiusQuery(mouseX, 0, mouseZ, queryR);
+    const sphereHits = sphereHash.radiusQuery(mouseX, 0, mouseZ, queryR);
+    probeIds = sphereHits.length ? boidHits.concat(sphereHits) : boidHits;
+    nearestId = hash.nearest(mouseX, 0, mouseZ, NEAR_CAP);
+    q += 3;
   }
   if (dragA && dragB) {
     const minX = Math.min(dragA.x, dragB.x), maxX = Math.max(dragA.x, dragB.x);
@@ -315,8 +332,12 @@ function simulate(dt) {
   // stays honest (the displayed ms is the true cost of a full brute pass) while
   // the demo's own per-frame work remains O(sample), not O(count²).
   if (bruteOn && mouseInside) {
-    const BRUTE_SAMPLE = 48;
-    const reps = Math.max(1, Math.min(count, BRUTE_SAMPLE));
+    // Each brute query scans all `count` boids, so a fixed rep count would make
+    // the sample itself O(count²) — ~26 ms at 4000 boids in JIT-less QuickJS.
+    // Hold the sample's total work roughly constant instead: reps × count ≈
+    // BRUTE_BUDGET. We still extrapolate per-query time × count for the display.
+    const BRUTE_BUDGET = 24000;
+    const reps = Math.max(1, Math.min(count, Math.round(BRUTE_BUDGET / count)));
     t0 = performance.now();
     for (let r = 0; r < reps; r++) bruteRadius(mouseX, 0, mouseZ, queryR);
     const per = (performance.now() - t0) / reps;
@@ -472,7 +493,7 @@ function frame() {
   hud.agents.textContent = count;
   hud.hsize.textContent  = hash.size;
   hud.hcell.textContent  = hash.cellSize;
-  hud.hmax.textContent   = hash.maxRadius.toFixed(0);
+  hud.hmax.textContent   = sphereHash.maxRadius.toFixed(0);
   hud.qpf.textContent    = qPerFrame;
   hud.tbuild.textContent = tBuild.toFixed(2);
   hud.thash.textContent  = tHash.toFixed(2);
@@ -509,6 +530,7 @@ if (document.readyState === 'complete' || document.readyState === 'interactive')
 // Expose a few internals for headless test.js (drive the same code paths).
 globalThis.__sh = {
   get hash() { return hash; },
+  get sphereHash() { return sphereHash; },
   rebuildHash, bruteRadius,
   get count() { return count; },
   setMouse(x, z) { mouseX = x; mouseZ = z; mouseInside = true; },

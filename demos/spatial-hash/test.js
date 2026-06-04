@@ -189,16 +189,21 @@ console.log("\n[4] Live demo pipeline + screenshot");
   check("__sh test hook exposed by main.js", sh && typeof sh === 'object');
   if (sh) {
     check("flock populated (count > 0)", sh.count > 0);
-    check("hash rebuilt to flock size", sh.hash.size >= sh.count);
-    check("hash tracks sphere maxRadius (> 0)", sh.hash.maxRadius > 0);
+    check("boid hash rebuilt to flock size", sh.hash.size >= sh.count);
+    // Boids and spheres live in separate indices so the sphere radii don't
+    // dilate (and slow) the boid queries. The boid hash is points-only...
+    check("boid hash is points-only (maxRadius == 0)", sh.hash.maxRadius === 0);
+    // ...and the separate sphere index carries the insertSphere reach.
+    check("sphere hash tracks sphere maxRadius (> 0)", sh.sphereHash.maxRadius > 0);
 
-    // Cross-check the running app's hash against its own brute reference at
-    // a cursor position, proving the on-screen comparison is honest.
+    // Cross-check the running app's boid hash against its own (points-only)
+    // brute reference at a cursor position — proving the on-screen comparison
+    // is honest now that both sides query points only.
     sh.setMouse(sh.WORLD_W * 0.5, sh.WORLD_D * 0.5);
     sh.rebuildHash();
     var hq = sh.hash.radiusQuery(sh.WORLD_W * 0.5, 0, sh.WORLD_D * 0.5, 55);
     var bq = sh.bruteRadius(sh.WORLD_W * 0.5, 0, sh.WORLD_D * 0.5, 55);
-    check("app hash radiusQuery == app brute reference (" + hq.length + " ids)",
+    check("app boid hash radiusQuery == app brute reference (" + hq.length + " ids)",
           eqArr(hq, bq));
   }
 
