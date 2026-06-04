@@ -320,11 +320,24 @@ function pump() {
   synthAudio(ids);
 }
 
+// Kick off a background synth, marking the model busy. A synchronous throw
+// (e.g. the model momentarily in flight) clears the flag and re-pumps instead
+// of wedging the state machine.
+function safeSynth(ids, opts) {
+  synthBusy = true;
+  try {
+    bro.tts.synthesize(kokoro, ids, voice, opts);
+  } catch (e) {
+    synthBusy = false;
+    setBadge('synthesize: ' + e.message, true);
+    if (dirty) setTimeout(pump, 0);
+  }
+}
+
 // Pass 1 — fast: audio only, play it the moment it lands.
 function synthAudio(ids) {
-  synthBusy = true;
   $('#run-meta').textContent = 'synthesizing…';
-  bro.tts.synthesize(kokoro, ids, voice, {
+  safeSynth(ids, {
     onDone: (r, info) => {
       synthBusy = false;
       if (info.error) { setBadge('synthesize: ' + info.error, true); return; }
@@ -341,9 +354,8 @@ function synthAudio(ids) {
 
 // Pass 2 — gather + draw the pipeline trace for the (now playing) voice.
 function synthTrace(ids) {
-  synthBusy = true;
   const t0 = performance.now();
-  bro.tts.synthesize(kokoro, ids, voice, {
+  safeSynth(ids, {
     trace: true,
     onDone: (r, info) => {
       synthBusy = false;
