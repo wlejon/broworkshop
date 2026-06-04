@@ -56,7 +56,10 @@ let basis = null;          // voicebasis.json
 let coords = null;         // Float64Array(K) — current position, in σ units
 let bridge = null;         // { D, M, xm, ym, B } — lazy (clone only)
 let qwen = null;           // Qwen Base model — lazy (clone only, for embedSpeaker)
-let designTimer = 0;       // debounce slider drags before re-synthesizing
+let auditionBusy = false;  // an async (non-blocking) audio synth is in flight
+let auditionPending = false; // a newer voice arrived mid-synth → render it after
+let auditionTimer = 0;     // debounce slider drags before re-synthesizing
+let pendingRun = false;    // a Run (sync trace) requested while audition in flight
 
 const ATTR_WORD = { f0_mean: 'pitch', rms: 'volume', energy: 'energy', rate: 'pace', zcr: 'brightness' };
 
@@ -91,9 +94,9 @@ function buildSliders() {
     r.type = 'range';
     const [lo, hi] = basis.range[k];
     r.min = (lo * 1.15).toFixed(3); r.max = (hi * 1.15).toFixed(3); r.step = '0.01'; r.value = '0';
-    r.addEventListener('input', () => {
-      coords[k] = +r.value; val.textContent = coords[k].toFixed(2); scheduleDesign();
-    });
+    // dragging updates the readout instantly; the audio re-synth is debounced
+    // and async, so the UI never locks while you drag
+    r.addEventListener('input', () => { coords[k] = +r.value; val.textContent = coords[k].toFixed(2); scheduleAudition(); });
     cell.appendChild(r);
     cell._range = r; cell._val = val;
     root.appendChild(cell);
@@ -122,26 +125,53 @@ function styleFromCoords() {
   return s;
 }
 
-// rebuild the Voice from the current coords and re-trace it (see + hear it)
-function applyVoice(meta) {
-  if (!kokoro || !basis) return;
+// rebuild the Voice object from the current coords. Cheap (a style-table pack),
+// no synthesis — so it's safe to call on every change. Returns success.
+function rebuildVoice() {
+  if (!kokoro || !basis) return false;
   try {
     voice = kokoro.createVoice(styleFromCoords(), 'designed');
     $('#btn-run').disabled = false;
     $('#btn-save').disabled = false;
-    if (meta) $('#voice-meta').textContent = meta;
-    run();
-  } catch (e) { setBadge('createVoice: ' + e.message, true); }
+    return true;
+  } catch (e) { setBadge('createVoice: ' + e.message, true); return false; }
 }
 
-// re-synthesize shortly after a slider settles, not on every pixel of a drag
-function scheduleDesign() {
-  if (designTimer) clearTimeout(designTimer);
-  designTimer = setTimeout(() => { designTimer = 0; applyVoice(); }, 140);
+// Audition the current voice: synthesize the audio on a BACKGROUND thread and
+// play it — no trace, no #stages rebuild, so the UI never locks or scrolls.
+// Only one synth runs at a time on the model; if the voice changes mid-synth we
+// remember it and render the latest once the current one finishes (latest-wins).
+function auditionVoice() {
+  if (!kokoro || !voice) return;
+  if (auditionBusy) { auditionPending = true; return; }
+  let ids;
+  try { ids = bro.tts.phonemize($('#text').value); }
+  catch (e) { setBadge('phonemize: ' + e.message, true); return; }
+  if (!ids || !ids.length) return;
+  auditionBusy = true;
+  $('#voice-meta').classList.add('busy');
+  bro.tts.synthesize(kokoro, ids, voice, {
+    onDone: (res, info) => {
+      auditionBusy = false;
+      $('#voice-meta').classList.remove('busy');
+      if (info.error) setBadge('synthesize: ' + info.error, true);
+      else if (!info.cancelled) { setClip(res.samples, res.sampleRate); $('#btn-play').disabled = false; setTimeout(play, 50); }
+      // an explicit Run wins over a queued audition; otherwise render the latest
+      if (pendingRun) { pendingRun = false; run(); }
+      else if (auditionPending) { auditionPending = false; auditionVoice(); }
+    },
+  });
 }
 
-// seed the sliders from a named anchor (or the neutral centroid)
-function seedFrom(name) {
+// coalesce a fast slider drag into a single audition shortly after it settles
+function scheduleAudition() {
+  if (auditionTimer) clearTimeout(auditionTimer);
+  auditionTimer = setTimeout(() => { auditionTimer = 0; if (rebuildVoice()) auditionVoice(); }, 180);
+}
+
+// seed the sliders from a named anchor (or the neutral centroid). `audition`
+// false on initial load (don't speak until the user asks), true on user picks.
+function seedFrom(name, audition) {
   if (!basis) return;
   if (name === '__neutral__') coords.fill(0);
   else {
@@ -150,7 +180,8 @@ function seedFrom(name) {
     for (let k = 0; k < basis.k; k++) coords[k] = a[k];
   }
   syncSliders();
-  applyVoice('seed: ' + (name === '__neutral__' ? 'neutral centroid' : name));
+  $('#voice-meta').textContent = 'seed: ' + (name === '__neutral__' ? 'neutral centroid' : name);
+  if (rebuildVoice() && audition) auditionVoice();
 }
 
 // randomize within the realizable range, weighted toward the dominant axes so
@@ -164,7 +195,8 @@ function randomVoice() {
   }
   syncSliders();
   $('#source').value = '__neutral__';
-  applyVoice('random draw');
+  $('#voice-meta').textContent = 'random draw';
+  if (rebuildVoice()) auditionVoice();
 }
 
 function gauss() { let u = 0, v = 0; while (!u) u = Math.random(); while (!v) v = Math.random(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); }
@@ -237,7 +269,8 @@ function clone() {
       $('#source').value = '__neutral__';
       const nm = wav.split(/[\\\/]/).pop();
       setBadge('ready · cloned ' + nm);
-      applyVoice('clone: ' + nm);
+      $('#voice-meta').textContent = 'clone: ' + nm;
+      if (rebuildVoice()) auditionVoice();
     } catch (e) { setBadge('clone: ' + e.message, true); }
   };
 
@@ -278,7 +311,7 @@ function reload() {
   try {
     bro.tts.setAssetRoot($('#asset-root').value.trim());
     bro.tts.loadKokoro($('#model-dir').value.trim(), {
-      onReady: (k) => { kokoro = k; setBadge('model ready'); seedFrom($('#source').value); },
+      onReady: (k) => { kokoro = k; setBadge('ready · drag a slider to audition · ▶ Run to trace'); seedFrom($('#source').value, false); },
       onError: (m) => setBadge('model error: ' + m, true),
     });
   } catch (e) {
@@ -288,7 +321,12 @@ function reload() {
 
 // ═══ run ═══════════════════════════════════════════════════════════════════
 function run() {
-  if (!kokoro || !voice) return;
+  if (!kokoro) return;
+  if (auditionTimer) { clearTimeout(auditionTimer); auditionTimer = 0; }
+  // the model runs one synth at a time — if an async audition is in flight,
+  // defer the (blocking) trace until it finishes rather than colliding
+  if (auditionBusy) { pendingRun = true; return; }
+  if (!rebuildVoice()) return;            // trace exactly what the sliders define now
   const text = $('#text').value;
   let ids;
   try {
@@ -606,21 +644,19 @@ function renderHeat(body, s) {
 // has cycled — and leaks a clip per press. So we upload ONCE per synthesis
 // (ensureClip, in run()) and let Play just re-trigger the already-published
 // clip; the auto-play after a run is deferred a few frames so the upload lands.
-function ensureClip() {
-  if (!lastTrace) return;
+function setClip(samples, inRate) {
   try {
     audioCtx = audioCtx || new AudioContext();
     const outRate = audioCtx.sampleRate || 48000;
-    const src = lastTrace.samples, inRate = lastTrace.sampleRate;
     let buf;
     if (Math.abs(outRate - inRate) < 1) {
-      buf = src;
+      buf = samples;
     } else {
-      const ratio = outRate / inRate, n = Math.floor(src.length * ratio);
+      const ratio = outRate / inRate, n = Math.floor(samples.length * ratio);
       buf = new Float32Array(n);
       for (let i = 0; i < n; i++) {
         const t = i / ratio, j = t | 0, f = t - j;
-        buf[i] = src[j] * (1 - f) + (src[j + 1] !== undefined ? src[j + 1] : src[j]) * f;
+        buf[i] = samples[j] * (1 - f) + (samples[j + 1] !== undefined ? samples[j + 1] : samples[j]) * f;
       }
     }
     if (clipId >= 0) { try { audioCtx.deleteClip(clipId); } catch (e) {} }
@@ -628,6 +664,7 @@ function ensureClip() {
     clipSamples = buf.length;
   } catch (e) { setBadge('audio: ' + e.message, true); clipId = -1; clipSamples = 0; }
 }
+function ensureClip() { if (lastTrace) setClip(lastTrace.samples, lastTrace.sampleRate); }
 
 function play() {
   if (clipId < 0 || !audioCtx) return;
@@ -671,9 +708,9 @@ function init() {
     }
     src.value = 'af_heart';
     buildSliders();
-    src.addEventListener('change', () => seedFrom(src.value));
+    src.addEventListener('change', () => seedFrom(src.value, true));
     $('#btn-random').addEventListener('click', randomVoice);
-    $('#btn-neutral').addEventListener('click', () => { $('#source').value = '__neutral__'; seedFrom('__neutral__'); });
+    $('#btn-neutral').addEventListener('click', () => { $('#source').value = '__neutral__'; seedFrom('__neutral__', true); });
     $('#btn-clone').addEventListener('click', clone);
     $('#btn-save').addEventListener('click', saveVoice);
   }
