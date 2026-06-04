@@ -488,11 +488,13 @@ function buildCards() {
 
     card.innerHTML = `
       <div class="row head">
-        <div><span class="name">${stage.name}</span> <span class="verb">${stage.verb}</span></div>
-        <button class="toggle ${stage.on ? 'active' : ''}" data-toggle>${stage.on ? 'on' : 'off'}</button>
+        <div class="stitle"><span class="name">${stage.name}</span> <span class="verb">${stage.verb}</span></div>
+        <div class="hright">
+          <span class="ms" data-ms>—</span>
+          <button class="toggle ${stage.on ? 'active' : ''}" data-toggle>${stage.on ? 'on' : 'off'}</button>
+        </div>
       </div>
-      <div class="body">${body}</div>
-      <div class="row"><span class="verb" data-ms>0.00 ms</span></div>`;
+      <div class="body">${body}</div>`;
 
     elPipeline.appendChild(card);
     wireCard(card, stage);

@@ -41,41 +41,47 @@
   /* main split: pipeline column + canvas stage */
   .body { flex: 1; display: flex; min-height: 0; }
   .pipeline {
-    width: 320px; flex: none; overflow-y: auto; padding: 12px;
-    border-right: 1px solid #1d2330; display: flex; flex-direction: column; gap: 10px;
+    width: 320px; flex: none; overflow-y: auto; padding: 10px;
+    border-right: 1px solid #1d2330; display: flex; flex-direction: column; gap: 8px;
   }
   .pipeline h2 {
     margin: 0 0 2px; font-size: 11px; letter-spacing: .6px; text-transform: uppercase;
     color: #6b7686; font-weight: 600;
   }
   .stage {
-    border: 1px solid #1d2330; border-radius: 8px; background: #10141c; padding: 9px 10px;
+    border: 1px solid #1d2330; border-radius: 8px; background: #10141c; padding: 7px 9px;
   }
-  .stage.off { opacity: 0.45; }
+  /* OFF stages collapse to just their header row, so the default view is five
+     compact one-liners. Toggling a stage on expands its controls. This is the
+     main fix for the column feeling crowded. */
+  .stage.off { opacity: 0.55; }
+  .stage.off .body { display: none; }
+  .stage.off .row.head { margin-bottom: 0; }
+  .stage.off .ms { display: none; }
   .stage .row { display: flex; align-items: center; gap: 8px; }
-  .stage .row.head { justify-content: space-between; margin-bottom: 6px; }
+  .stage .row.head { justify-content: space-between; margin-bottom: 7px; }
+  .stage .stitle { display: flex; align-items: baseline; gap: 7px; min-width: 0; }
+  .stage .hright { display: flex; align-items: center; gap: 8px; flex: none; }
   .stage .name { font-size: 12px; color: #cfe0ff; font-weight: 600; }
   .stage .verb { font-size: 10px; color: #5f6b7e; }
-  .stage .toggle {
-    font-size: 10px; padding: 3px 8px; border-radius: 5px;
-  }
-  /* The card's content wrapper is also class="body"; without this it inherits
-     the global `.body { display:flex }` (the main split is a row) and lays the
-     stage's labels out horizontally so they overlap in the narrow column. */
+  .stage .toggle { font-size: 10px; padding: 3px 9px; border-radius: 5px; }
+  .stage .ms { font-size: 10px; color: #7fe6a8; min-width: 40px; text-align: right; }
+  /* The card's content wrapper is also class="body"; scope a column layout so
+     it doesn't inherit the global `.body { display:flex }` main-split row (which
+     made the stage's labels lay out horizontally and overlap). */
   .stage .body { display: flex; flex-direction: column; gap: 0; flex: none; min-height: 0; }
   .stage label {
     font-size: 11px; color: #8a94a6; display: flex; align-items: center;
-    gap: 8px; margin-top: 6px;
+    gap: 8px; margin-top: 5px;
   }
   .stage label > span[data-v] {
-    min-width: 40px; text-align: right; color: #cfe0ff; flex: none;
+    min-width: 38px; text-align: right; color: #cfe0ff; flex: none;
   }
   .stage input[type=range] { flex: 1 1 auto; min-width: 0; }
   .stage select { flex: 1 1 auto; min-width: 0; width: auto; }
-  .stage .ms { font-size: 10px; color: #7fe6a8; margin-left: auto; }
   .kmat {
-    margin-top: 6px; font-size: 10px; color: #8aa0c8; line-height: 1.4;
-    background: #0b1019; border: 1px solid #1a2233; border-radius: 5px; padding: 5px 7px;
+    margin-top: 6px; font-size: 9px; color: #8aa0c8; line-height: 1.35;
+    background: #0b1019; border: 1px solid #1a2233; border-radius: 5px; padding: 4px 6px;
     white-space: pre; overflow-x: auto;
   }
 
