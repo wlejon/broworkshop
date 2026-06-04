@@ -213,39 +213,121 @@ function divColor(t) {
   ];
 }
 
-function renderHeat(body, s) {
-  const h = s.h, w = s.w, d = s.data;
-  const dispW = Math.min(w, 1100), dispH = Math.min(h, 360);
-  const cv = mkCanvas(body, dispW, dispH);
-  const ctx = cv.getContext('2d');
-  // symmetric scale around 0 by robust max-abs
-  let maxAbs = 1e-6;
-  for (let i = 0; i < d.length; i++) { const a = Math.abs(d[i]); if (a > maxAbs) maxAbs = a; }
-  const img = ctx.createImageData(dispW, dispH);
-  for (let y = 0; y < dispH; y++) {
-    const sy = Math.floor(y * h / dispH);
-    for (let x = 0; x < dispW; x++) {
-      const sx = Math.floor(x * w / dispW);
-      const c = divColor(d[sy * w + sx] / maxAbs);
-      const o = (y * dispW + x) * 4;
-      img.data[o] = c[0]; img.data[o + 1] = c[1]; img.data[o + 2] = c[2]; img.data[o + 3] = 255;
+// A reference signal (F0 / energy) from the current trace, resampled to width w.
+function getRef(name, w) {
+  if (!lastTrace) return null;
+  const s = lastTrace.stages.find((x) => x.name === name);
+  if (!s) return null;
+  const ref = s.data, R = ref.length, out = new Float32Array(w);
+  for (let x = 0; x < w; x++) out[x] = ref[Math.floor(x * R / w)];
+  return out;
+}
+
+// Channel (row) order for a heatmap. 'native' = as stored; 'variance' = most
+// active channels first; 'f0'/'energy' = sorted by correlation to that contour,
+// so channels that track pitch/energy cluster together. This is the first
+// "derived" view: a question-driven reordering of an opaque latent.
+function channelOrder(s, mode) {
+  const { h, w, data } = s;
+  const idx = Array.from({ length: h }, (_, i) => i);
+  if (mode === 'native') return idx;
+
+  const score = new Float64Array(h);
+  if (mode === 'variance') {
+    for (let c = 0; c < h; c++) {
+      const base = c * w; let m = 0;
+      for (let x = 0; x < w; x++) m += data[base + x]; m /= w;
+      let v = 0; for (let x = 0; x < w; x++) { const dd = data[base + x] - m; v += dd * dd; }
+      score[c] = v;
+    }
+  } else {
+    const ref = getRef(mode === 'f0' ? 'F0_pred' : 'N_pred', w);
+    if (!ref) return idx;
+    let rm = 0; for (let x = 0; x < w; x++) rm += ref[x]; rm /= w;
+    let rv = 0; for (let x = 0; x < w; x++) { const dd = ref[x] - rm; rv += dd * dd; }
+    rv = Math.sqrt(rv) || 1;
+    for (let c = 0; c < h; c++) {
+      const base = c * w; let m = 0;
+      for (let x = 0; x < w; x++) m += data[base + x]; m /= w;
+      let cov = 0, sv = 0;
+      for (let x = 0; x < w; x++) { const a = data[base + x] - m; cov += a * (ref[x] - rm); sv += a * a; }
+      score[c] = cov / ((Math.sqrt(sv) || 1) * rv);
     }
   }
-  ctx.putImageData(img, 0, 0);
-  body.appendChild(el('div', 'axis-note',
-    'rows = ' + h + ' (feature/channel)  ·  cols = ' + w +
-    ' (phoneme or frame)  ·  blue −  amber +  · |max| ' + maxAbs.toFixed(2)));
+  idx.sort((a, b) => score[b] - score[a]);
+  return idx;
+}
+
+function renderHeat(body, s) {
+  // robust z-score scale: subtract the mean, scale by 3σ, clip — so a few
+  // outliers no longer crush the bulk to black (the bert_dur / gen_in problem).
+  let m = 0; for (let i = 0; i < s.data.length; i++) m += s.data[i]; m /= s.data.length;
+  let v = 0; for (let i = 0; i < s.data.length; i++) { const dd = s.data[i] - m; v += dd * dd; }
+  const sd = Math.sqrt(v / s.data.length) || 1;
+
+  const dispW = Math.min(s.w, 1100);
+  const dispH = Math.max(120, Math.min(s.h, 420));   // give thin stages real height
+
+  // row-ordering control
+  const ctrl = el('div', 'heat-ctrl');
+  ctrl.appendChild(el('span', 'ctrl-label', 'rows:'));
+  const sel = document.createElement('select');
+  [['native', 'native'], ['variance', 'by variance'],
+   ['f0', 'by F0 corr'], ['energy', 'by energy corr']].forEach(([val, txt]) => {
+    const o = document.createElement('option'); o.value = val; o.textContent = txt; sel.appendChild(o);
+  });
+  ctrl.appendChild(sel);
+  body.appendChild(ctrl);
+
+  const cv = mkCanvas(body, dispW, dispH);
+  const ctx = cv.getContext('2d');
+  const note = el('div', 'axis-note', '');
+  body.appendChild(note);
+
+  function draw(mode) {
+    const order = channelOrder(s, mode);
+    const img = ctx.createImageData(dispW, dispH);
+    for (let y = 0; y < dispH; y++) {
+      const sc = order[Math.floor(y * s.h / dispH)], base = sc * s.w;
+      for (let x = 0; x < dispW; x++) {
+        const sx = Math.floor(x * s.w / dispW);
+        const c = divColor((s.data[base + sx] - m) / (3 * sd));
+        const o = (y * dispW + x) * 4;
+        img.data[o] = c[0]; img.data[o + 1] = c[1]; img.data[o + 2] = c[2]; img.data[o + 3] = 255;
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+    note.textContent = 'rows = ' + s.h + ' (channel' + (mode === 'native' ? '' : ', ' + mode + '-ordered') +
+      ')  ·  cols = ' + s.w + '  ·  z-scored: blue below-avg, amber above-avg (μ ' +
+      m.toFixed(2) + ' σ ' + sd.toFixed(2) + ')';
+  }
+  sel.addEventListener('change', () => draw(sel.value));
+  draw('native');
 }
 
 // ═══ audio ═════════════════════════════════════════════════════════════════
+// bro's AudioContext is clip-based (broaudio), not Web Audio createBuffer. Clips
+// play at the engine sample rate, so resample Kokoro's 24 kHz to ctx.sampleRate.
 function play() {
   if (!lastTrace) return;
   try {
     audioCtx = audioCtx || new AudioContext();
-    const b = audioCtx.createBuffer(1, lastTrace.samples.length, lastTrace.sampleRate);
-    b.getChannelData(0).set(lastTrace.samples);
-    const src = audioCtx.createBufferSource();
-    src.buffer = b; src.connect(audioCtx.destination); src.start();
+    const outRate = audioCtx.sampleRate || 48000;
+    const src = lastTrace.samples, inRate = lastTrace.sampleRate;
+    let buf;
+    if (Math.abs(outRate - inRate) < 1) {
+      buf = src;
+    } else {
+      const ratio = outRate / inRate;
+      const n = Math.floor(src.length * ratio);
+      buf = new Float32Array(n);
+      for (let i = 0; i < n; i++) {
+        const t = i / ratio, j = t | 0, f = t - j;
+        buf[i] = src[j] * (1 - f) + (src[j + 1] !== undefined ? src[j + 1] : src[j]) * f;
+      }
+    }
+    const clip = audioCtx.createClip(buf, 1);
+    audioCtx.playClip(clip, 1.0, false);
   } catch (e) { setBadge('audio: ' + e.message, true); }
 }
 

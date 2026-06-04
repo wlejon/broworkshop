@@ -66,3 +66,7 @@ button:disabled { opacity: 0.4; cursor: default; }
   border-radius: 4px; color: #aeb9c8; font-size: 11px;
 }
 .axis-note { color: #4f586a; font-size: 10px; margin-top: 6px; }
+
+.heat-ctrl { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.ctrl-label { color: #5b6470; font-size: 11px; }
+.heat-ctrl select { padding: 2px 6px; font-size: 11px; }
