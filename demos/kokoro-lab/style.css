@@ -63,7 +63,17 @@ button:disabled { opacity: 0.4; cursor: default; }
 .chips { display: flex; flex-wrap: wrap; gap: 4px; }
 .chip {
   padding: 2px 7px; background: #1a2230; border: 1px solid #28344a;
-  border-radius: 4px; color: #aeb9c8; font-size: 11px;
+  border-radius: 4px; color: #aeb9c8; font-size: 11px; cursor: pointer;
+}
+.chip:hover { border-color: #3a4a64; }
+.chip.sel { background: #2a4a6e; border-color: #8ad9ff; color: #fff; }
+
+/* data-flow highlight: one phoneme's territory across stages */
+.canvas-wrap { position: relative; line-height: 0; }
+.stage-body canvas { cursor: crosshair; }
+.flow-hl {
+  position: absolute; pointer-events: none; display: none; box-sizing: border-box;
+  background: rgba(138, 217, 255, 0.16); border: 1px solid rgba(138, 217, 255, 0.75);
 }
 .axis-note { color: #4f586a; font-size: 10px; margin-top: 6px; }
 

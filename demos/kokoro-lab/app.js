@@ -19,20 +19,30 @@ let voice = null;
 let lastTrace = null;     // { samples, sampleRate, durations, stages }
 let audioCtx = null;
 
-// ─── stage metadata: what each representation is, in plain words ───────────
+// ─── stage metadata ────────────────────────────────────────────────────────
+// kind  = how to draw it.  desc = plain words.
+// flow  = how a single phoneme maps onto this stage, so selecting one phoneme
+//         can highlight its territory at every stage (the data-flow view):
+//           axis 'x'|'y'|'chip' = which axis carries the unit
+//           time 'sym'          = phoneme time (unit = column/row index / L)
+//           time 'frame'        = frame time   (unit = its duration span / total)
 const STAGE_INFO = {
-  phonemes: { kind: 'chips',  desc: 'input phoneme ids — symbol time, length L' },
-  bert_dur: { kind: 'heat',   desc: 'plBERT contextual features — L phonemes x 768 dims' },
-  d_en:     { kind: 'heat',   desc: 'predictor conditioning (PROSODY branch) — 512 ch x L' },
-  t_en:     { kind: 'heat',   desc: 'text-encoder content (CONTENT branch) — 512 ch x L' },
-  pred_dur: { kind: 'align',  desc: 'predicted frames per phoneme — the alignment (symbol -> time)' },
-  F0_pred:  { kind: 'curve',  desc: 'pitch contour (Hz) at frame rate', color: '#ffcf6b' },
-  N_pred:   { kind: 'curve',  desc: 'energy contour at frame rate', color: '#7fd1a6' },
-  asr:      { kind: 'heat',   desc: 'duration-aligned content — 512 ch x T frames' },
-  gen_in:   { kind: 'heat',   desc: 'decoder-backbone output — 512 ch x 2T' },
-  har:      { kind: 'heat',   desc: 'harmonic-source excitation — (n_fft+2) x frames' },
-  audio:    { kind: 'wave',   desc: 'output waveform — 24 kHz' },
+  phonemes: { kind: 'chips', desc: 'input phoneme ids — symbol time, length L', flow: { axis: 'chip' } },
+  bert_dur: { kind: 'heat',  desc: 'plBERT contextual features — L phonemes x 768 dims', flow: { axis: 'y', time: 'sym' } },
+  d_en:     { kind: 'heat',  desc: 'predictor conditioning (PROSODY branch) — 512 ch x L', flow: { axis: 'x', time: 'sym' } },
+  t_en:     { kind: 'heat',  desc: 'text-encoder content (CONTENT branch) — 512 ch x L', flow: { axis: 'x', time: 'sym' } },
+  pred_dur: { kind: 'align', desc: 'predicted frames per phoneme — the alignment (symbol -> time)', flow: { axis: 'x', time: 'frame' } },
+  F0_pred:  { kind: 'curve', desc: 'pitch contour (Hz) at frame rate', color: '#ffcf6b', flow: { axis: 'x', time: 'frame' } },
+  N_pred:   { kind: 'curve', desc: 'energy contour at frame rate', color: '#7fd1a6', flow: { axis: 'x', time: 'frame' } },
+  asr:      { kind: 'heat',  desc: 'duration-aligned content — 512 ch x T frames', flow: { axis: 'x', time: 'frame' } },
+  gen_in:   { kind: 'heat',  desc: 'decoder-backbone output — 512 ch x 2T', flow: { axis: 'x', time: 'frame' } },
+  har:      { kind: 'heat',  desc: 'harmonic-source excitation — (n_fft+2) x frames', flow: { axis: 'x', time: 'frame' } },
+  audio:    { kind: 'wave',  desc: 'output waveform — 24 kHz', flow: { axis: 'x', time: 'frame' } },
 };
+
+// flow state: overlays/chips per stage, and the currently traced phoneme.
+let flowStages = [];
+let selPhoneme = -1;
 
 // ═══ load ══════════════════════════════════════════════════════════════════
 function setBadge(text, err) {
@@ -101,6 +111,10 @@ function run() {
 function renderStages(stages) {
   const root = $('#stages');
   root.textContent = '';
+  flowStages = [];
+  selPhoneme = -1;
+  $('#sel-label').textContent = '';
+
   for (const s of stages) {
     const info = STAGE_INFO[s.name] || { kind: 'heat', desc: '' };
     const card = el('div', 'stage');
@@ -126,7 +140,55 @@ function renderStages(stages) {
     } catch (e) {
       body.appendChild(el('div', 'axis-note', 'render error: ' + e.message));
     }
+
+    // register this stage for the data-flow highlight
+    if (info.flow) {
+      if (info.flow.axis === 'chip') {
+        const chips = [...body.querySelectorAll('.chip')];
+        chips.forEach((c, i) => c.addEventListener('click', () => selectPhoneme(i)));
+        flowStages.push({ flow: info.flow, chips });
+      } else {
+        const cv = body.querySelector('canvas');
+        if (cv && cv._overlay) flowStages.push({ flow: info.flow, overlay: cv._overlay });
+      }
+    }
   }
+}
+
+// Trace one phoneme through the whole pipeline: highlight its territory at
+// every stage. Symbol-time stages light the phoneme's column/row; frame-time
+// stages light its duration span. Click the same phoneme again to clear.
+function selectPhoneme(l) {
+  selPhoneme = (l === selPhoneme) ? -1 : l;
+  const dur = lastTrace ? lastTrace.durations : null;
+  const L = dur ? dur.length : 0;
+  let total = 0; for (let i = 0; i < L; i++) total += dur[i];
+
+  for (const fs of flowStages) {
+    if (fs.flow.axis === 'chip') {
+      fs.chips.forEach((c, i) => c.classList.toggle('sel', i === selPhoneme));
+      continue;
+    }
+    const ov = fs.overlay;
+    if (selPhoneme < 0 || !dur || !total) { ov.style.display = 'none'; continue; }
+    let p0, p1;
+    if (fs.flow.time === 'sym') { p0 = selPhoneme / L; p1 = (selPhoneme + 1) / L; }
+    else { let s = 0; for (let i = 0; i < selPhoneme; i++) s += dur[i]; p0 = s / total; p1 = (s + dur[selPhoneme]) / total; }
+    ov.style.display = 'block';
+    if (fs.flow.axis === 'y') {
+      ov.style.left = '0'; ov.style.right = '0'; ov.style.width = '';
+      ov.style.top = (p0 * 100) + '%'; ov.style.height = ((p1 - p0) * 100) + '%';
+    } else {
+      ov.style.top = '0'; ov.style.bottom = '0'; ov.style.height = '';
+      ov.style.left = (p0 * 100) + '%'; ov.style.width = ((p1 - p0) * 100) + '%';
+    }
+  }
+
+  const lab = $('#sel-label');
+  if (selPhoneme < 0 || !lastTrace) lab.textContent = '';
+  else lab.textContent = 'tracing phoneme #' + selPhoneme +
+    ' · id ' + (lastTrace.stages[0].data[selPhoneme] | 0) +
+    ' · ' + (dur ? dur[selPhoneme] : 0) + ' frames';
 }
 
 function renderChips(body, s) {
@@ -155,8 +217,15 @@ function renderAlign(body, s) {
     }
     x += w;
   }
+  // click a block to trace that phoneme through every stage
+  cv.addEventListener('click', (e) => {
+    const frac = e.offsetX / cv.clientWidth, target = frac * total;
+    let acc = 0;
+    for (let i = 0; i < s.data.length; i++) { acc += s.data[i]; if (target < acc) { selectPhoneme(i); break; } }
+  });
   body.appendChild(el('div', 'axis-note',
-    'left -> right = time · block width = frames for that phoneme · sum = ' + total + ' frames'));
+    'left -> right = time · block width = frames for that phoneme · sum = ' + total +
+    ' frames · click a block to trace it'));
 }
 
 function renderCurve(body, s, color) {
@@ -339,9 +408,13 @@ function el(tag, cls, text) {
   return e;
 }
 function mkCanvas(body, w, h) {
+  const wrap = el('div', 'canvas-wrap');
   const cv = document.createElement('canvas');
   cv.width = w; cv.height = h;
-  body.appendChild(cv);
+  const ov = el('div', 'flow-hl');
+  wrap.appendChild(cv); wrap.appendChild(ov);
+  body.appendChild(wrap);
+  cv._overlay = ov;   // retrieved by renderStages to drive the flow highlight
   return cv;
 }
 function stats(d) {
