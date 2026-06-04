@@ -306,12 +306,17 @@ function simulate(dt) {
   tHash = performance.now() - t0;
   avgCand = count > 0 ? cand / count : 0;
 
-  // Brute-force the SAME cursor radius query, repeated enough times to be a
-  // fair stopwatch read against the hash's per-frame query load. We scale the
-  // single brute query up to ~count queries so the comparison is apples to
-  // apples with the per-boid separation pass.
+  // The brute number we DISPLAY is "what a full per-boid brute pass would
+  // cost" = per-query time × count. But actually RUNNING `count` brute queries
+  // every frame is the very O(n²) blow-up we're showcasing against — it would
+  // tank the demo at high agent counts (a 500-boid flock alone was ~31 ms/frame
+  // of pure comparison overhead). So we time only a small fixed SAMPLE of brute
+  // queries to get a stable per-query cost, then extrapolate. The comparison
+  // stays honest (the displayed ms is the true cost of a full brute pass) while
+  // the demo's own per-frame work remains O(sample), not O(count²).
   if (bruteOn && mouseInside) {
-    const reps = Math.max(1, Math.min(count, 1200));   // cap so a huge flock stays responsive
+    const BRUTE_SAMPLE = 48;
+    const reps = Math.max(1, Math.min(count, BRUTE_SAMPLE));
     t0 = performance.now();
     for (let r = 0; r < reps; r++) bruteRadius(mouseX, 0, mouseZ, queryR);
     const per = (performance.now() - t0) / reps;
