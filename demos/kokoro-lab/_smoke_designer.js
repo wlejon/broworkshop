@@ -5,9 +5,10 @@
 // which the headless runtime auto-loads into the same global scope first.)
 //   bro-headless ../broworkshop/demos/kokoro-lab ../broworkshop/demos/kokoro-lab/_smoke_designer.js
 const fs = require('fs');
+const MODEL = 'D:/projects/brosoundml/weights/kokoro';
 bro.tts.setAssetRoot('D:/projects/brosoundml');
-const KK = bro.tts.loadKokoro('D:/projects/brosoundml/weights/kokoro');
-const BS = JSON.parse(fs.readFileSync('voicebasis.json', 'utf8'));
+const KK = bro.tts.loadKokoro(MODEL);
+const BS = JSON.parse(fs.readFileSync(MODEL + '/voice_basis.json', 'utf8'));
 assert(BS.k === 20 && BS.dim === 256, 'BS shape');
 const ids = bro.tts.phonemize('Hello there. This is a test of the pipeline.');
 
@@ -39,8 +40,8 @@ check('mid-range', rnd);
 const deep = z.slice(); deep[1] = BS.range[1][0];   // extreme on the f0 axis
 check('pitch-extreme', deep);
 
-// bridge.f32 loads and applies to a 256-D style of the right scale
-const buf = fs.readFileSync('bridge.f32').buffer;
+// voice_bridge.bin loads and applies to a 256-D style of the right scale
+const buf = fs.readFileSync(MODEL + '/voice_bridge.bin').buffer;
 const iv = new Int32Array(buf, 0, 2); const D = iv[0], M = iv[1];
 let off = 8; const xm = new Float32Array(buf, off, D); off += 4 * D; const ym = new Float32Array(buf, off, M); off += 4 * M; const B = new Float32Array(buf, off, D * M);
 assert(D === 1024 && M === 256, 'bridge dims');

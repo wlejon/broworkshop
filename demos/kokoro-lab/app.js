@@ -3,7 +3,8 @@
 //
 // "Selected voice" is no longer one of a few named packs — it's a point in
 // Kokoro's 256-D style space, steered by sliders aligned to the principal axes
-// of the 606 clean swept voices (voicebasis.json, built by tests/_voice_basis.js):
+// of the 606 clean swept voices (voice_basis.json, beside the model; built by
+// bro/tests/_voice_basis.js):
 //
 //   coords (σ units) ─► style = mean + Σ coordₖ·stdₖ·compₖ ─► kokoro.createVoice
 //      ─► synthesizeTraced(ids, voice) ─► { samples, durations, stages[] }
@@ -12,8 +13,8 @@
 // forward pass (brosoundml KokoroTrace), rendered in the form that reads best.
 // Seeds for the sliders: any of the 28 named anchors, the neutral centroid, a
 // random in-distribution draw, or a real clip cloned through the ECAPA→style
-// bridge (bridge.f32). Changing the voice re-traces it, so the stage stream and
-// the audio always reflect exactly what the sliders define.
+// bridge (voice_bridge.bin, beside the model). Changing the voice re-traces it,
+// so the stage stream and the audio always reflect what the sliders define.
 
 const $ = (s) => document.querySelector(s);
 
@@ -63,11 +64,14 @@ let dirty = false;         // the voice changed; needs an audio-then-trace pass
 const ATTR_WORD = { f0_mean: 'pitch', rms: 'volume', energy: 'energy', rate: 'pace', zcr: 'brightness' };
 
 function loadBasis() {
+  // The basis + adapter live next to the Kokoro model (kokoro/ in brosoundml-data,
+  // materialised into the model dir), so they travel with the voices they derive from.
   try {
-    basis = JSON.parse(require('fs').readFileSync('voicebasis.json', 'utf-8'));
+    const dir = $('#model-dir').value.trim();
+    basis = JSON.parse(require('fs').readFileSync(dir + '/voice_basis.json', 'utf-8'));
     coords = new Float64Array(basis.k);
   } catch (e) {
-    setBadge('voicebasis.json missing — run tests/_voice_basis.js', true);
+    setBadge('voice_basis.json missing from model dir — run tests/_voice_basis.js', true);
   }
 }
 
@@ -180,7 +184,7 @@ function gauss() { let u = 0, v = 0; while (!u) u = Math.random(); while (!v) v 
 function loadBridge() {
   if (bridge) return true;
   try {
-    const ab = require('fs').readFileSync('bridge.f32');
+    const ab = require('fs').readFileSync($('#model-dir').value.trim() + '/voice_bridge.bin');
     const buf = ab instanceof ArrayBuffer ? ab : ab.buffer;
     const iv = new Int32Array(buf, 0, 2); const D = iv[0], M = iv[1];
     let off = 8;
@@ -189,7 +193,7 @@ function loadBridge() {
     const B = new Float32Array(buf, off, D * M);
     bridge = { D, M, xm, ym, B };
     return true;
-  } catch (e) { setBadge('bridge.f32 missing — run tests/_voice_basis.js', true); return false; }
+  } catch (e) { setBadge('voice_bridge.bin missing from model dir — run tests/_voice_basis.js', true); return false; }
 }
 
 // x(1024) -> style(256): style = ym + (x - xm)·B   (B row-major D×M)
