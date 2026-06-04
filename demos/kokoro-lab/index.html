@@ -9,7 +9,7 @@
   <div id="app">
     <header id="toolbar">
       <span id="brand">⬡ Kokoro&nbsp;Lab</span>
-      <span class="tagline">watch speech take shape, stage by stage</span>
+      <span class="tagline">steer a voice through the space, watch it take shape</span>
       <span class="grow"></span>
       <span id="backend" class="badge">loading…</span>
     </header>
@@ -21,18 +21,34 @@
       <label class="cfg">assets
         <input id="asset-root" type="text" value="D:/projects/brosoundml">
       </label>
-      <label class="cfg">voice
-        <select id="voice"></select>
-      </label>
       <span class="grow"></span>
-      <button id="btn-reload" title="Reload model + voice">↺ Reload</button>
+      <button id="btn-reload" title="Reload model">↺ Reload</button>
     </section>
+
+    <!-- voice selection: the "selected voice" is now a point in style space -->
+    <section id="voicebar">
+      <label class="cfg">seed
+        <select id="source" title="Jump the sliders to a known voice"></select>
+      </label>
+      <button id="btn-random" title="Random voice (in-distribution)">🎲 random</button>
+      <button id="btn-neutral" title="Reset to the neutral centroid voice">○ neutral</button>
+      <span class="grow"></span>
+      <label class="cfg">clone
+        <input id="ref-wav" type="text" placeholder="path to a reference .wav"
+               value="D:/projects/brosoundml/weights/theraputic.wav" title="Clone a real clip into the slider space via the bridge">
+      </label>
+      <button id="btn-clone" title="ECAPA x-vector → bridge → style → sliders">⤓ clone</button>
+      <span id="voice-meta" class="meta"></span>
+    </section>
+
+    <section id="sliders"></section>
 
     <section id="prompt">
       <input id="text" type="text" value="Hello there. This is a test of the pipeline."
              placeholder="Type something to speak…">
       <button id="btn-run" disabled>▶ Run</button>
       <button id="btn-play" disabled title="Play the synthesized audio">♪ Play</button>
+      <button id="btn-save" disabled title="Save the current voice as a .bin pack">⤓ save voice</button>
       <span id="run-meta" class="meta"></span>
       <span class="grow"></span>
       <span id="sel-label" class="meta"></span>

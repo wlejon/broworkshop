@@ -1,24 +1,28 @@
-// Kokoro Lab — drive Kokoro and watch every pipeline stage transform the data.
+// Kokoro Lab — steer a voice through Kokoro's style space, then watch and hear
+// the selected voice take shape stage by stage.
 //
-// Flow: text -> bro.tts.phonemize -> kokoro.synthesizeTraced(ids, voice) which
-// returns { samples, sampleRate, durations, stages[] }. Each stage is a
-// row-major (h x w) Float32Array captured inside the real Kokoro forward pass
-// (see brosoundml KokoroTrace). We render each in the form that reads best.
+// "Selected voice" is no longer one of a few named packs — it's a point in
+// Kokoro's 256-D style space, steered by sliders aligned to the principal axes
+// of the 606 clean swept voices (voicebasis.json, built by tests/_voice_basis.js):
 //
-// EXTENSION SEAM: every rendered stage is an attach point. `lastTrace` holds
-// the full set of intermediates; a future "derived" panel can take any
-// stage's tensor as input to a JS-authored transform and render its output
-// alongside these — that's how this observatory grows into a workbench.
+//   coords (σ units) ─► style = mean + Σ coordₖ·stdₖ·compₖ ─► kokoro.createVoice
+//      ─► synthesizeTraced(ids, voice) ─► { samples, durations, stages[] }
+//
+// Each stage is a row-major (h×w) Float32Array captured inside the real Kokoro
+// forward pass (brosoundml KokoroTrace), rendered in the form that reads best.
+// Seeds for the sliders: any of the 28 named anchors, the neutral centroid, a
+// random in-distribution draw, or a real clip cloned through the ECAPA→style
+// bridge (bridge.f32). Changing the voice re-traces it, so the stage stream and
+// the audio always reflect exactly what the sliders define.
 
 const $ = (s) => document.querySelector(s);
-
-const VOICES = ['af_heart', 'af_bella', 'af_alloy', 'af_aoede', 'af_jessica'];
 
 let kokoro = null;
 let voice = null;
 let lastTrace = null;     // { samples, sampleRate, durations, stages }
 let audioCtx = null;
 let clipId = -1;          // the published audio clip for the current synthesis
+let clipSamples = 0;      // sample count of that clip (for phoneme-segment regions)
 
 // ─── stage metadata ────────────────────────────────────────────────────────
 // kind  = how to draw it.  desc = plain words.
@@ -45,6 +49,219 @@ const STAGE_INFO = {
 let flowStages = [];
 let selPhoneme = -1;
 
+// ═══ voice-space designer ════════════════════════════════════════════════════
+// The slider basis: principal axes of the clean swept voices, std-scaled so a
+// slider unit == 1σ of real voice variation. See tests/_voice_basis.js.
+let basis = null;          // voicebasis.json
+let coords = null;         // Float64Array(K) — current position, in σ units
+let bridge = null;         // { D, M, xm, ym, B } — lazy (clone only)
+let qwen = null;           // Qwen Base model — lazy (clone only, for embedSpeaker)
+let designTimer = 0;       // debounce slider drags before re-synthesizing
+
+const ATTR_WORD = { f0_mean: 'pitch', rms: 'volume', energy: 'energy', rate: 'pace', zcr: 'brightness' };
+
+function loadBasis() {
+  try {
+    basis = JSON.parse(require('fs').readFileSync('voicebasis.json', 'utf-8'));
+    coords = new Float64Array(basis.k);
+  } catch (e) {
+    setBadge('voicebasis.json missing — run tests/_voice_basis.js', true);
+  }
+}
+
+// a faint hint of which perceptual attribute this axis pushes, and which way.
+function hintFor(k) {
+  const h = basis.attrHint[k];
+  if (!h || !h.attr || Math.abs(h.r) < 0.3) return '';
+  return (h.r > 0 ? '↑' : '↓') + (ATTR_WORD[h.attr] || h.attr);
+}
+
+function buildSliders() {
+  const root = $('#sliders'); root.textContent = '';
+  for (let k = 0; k < basis.k; k++) {
+    const cell = el('div', 'pc' + (k < 6 ? ' lead' : ''));
+    const head = el('div', 'pc-head');
+    head.appendChild(el('span', 'pc-name', 'PC' + (k + 1)));
+    head.appendChild(el('span', 'pc-hint', hintFor(k)));
+    const val = el('span', 'pc-val', '0.00');
+    head.appendChild(val);
+    cell.appendChild(head);
+
+    const r = document.createElement('input');
+    r.type = 'range';
+    const [lo, hi] = basis.range[k];
+    r.min = (lo * 1.15).toFixed(3); r.max = (hi * 1.15).toFixed(3); r.step = '0.01'; r.value = '0';
+    r.addEventListener('input', () => {
+      coords[k] = +r.value; val.textContent = coords[k].toFixed(2); scheduleDesign();
+    });
+    cell.appendChild(r);
+    cell._range = r; cell._val = val;
+    root.appendChild(cell);
+  }
+}
+
+// push coords[] back onto the slider widgets (after a seed / clone / random)
+function syncSliders() {
+  const cells = $('#sliders').children;
+  for (let k = 0; k < basis.k; k++) {
+    cells[k]._range.value = String(coords[k]);
+    cells[k]._val.textContent = coords[k].toFixed(2);
+  }
+}
+
+// coords (σ units) -> 256-D style vector
+function styleFromCoords() {
+  const { dim, k, mean, comps, std } = basis;
+  const s = new Float32Array(dim);
+  for (let d = 0; d < dim; d++) s[d] = mean[d];
+  for (let i = 0; i < k; i++) {
+    const c = coords[i] * std[i]; if (!c) continue;
+    const v = comps[i];
+    for (let d = 0; d < dim; d++) s[d] += c * v[d];
+  }
+  return s;
+}
+
+// rebuild the Voice from the current coords and re-trace it (see + hear it)
+function applyVoice(meta) {
+  if (!kokoro || !basis) return;
+  try {
+    voice = kokoro.createVoice(styleFromCoords(), 'designed');
+    $('#btn-run').disabled = false;
+    $('#btn-save').disabled = false;
+    if (meta) $('#voice-meta').textContent = meta;
+    run();
+  } catch (e) { setBadge('createVoice: ' + e.message, true); }
+}
+
+// re-synthesize shortly after a slider settles, not on every pixel of a drag
+function scheduleDesign() {
+  if (designTimer) clearTimeout(designTimer);
+  designTimer = setTimeout(() => { designTimer = 0; applyVoice(); }, 140);
+}
+
+// seed the sliders from a named anchor (or the neutral centroid)
+function seedFrom(name) {
+  if (!basis) return;
+  if (name === '__neutral__') coords.fill(0);
+  else {
+    const i = basis.names.indexOf(name); if (i < 0) return;
+    const a = basis.anchors[i];
+    for (let k = 0; k < basis.k; k++) coords[k] = a[k];
+  }
+  syncSliders();
+  applyVoice('seed: ' + (name === '__neutral__' ? 'neutral centroid' : name));
+}
+
+// randomize within the realizable range, weighted toward the dominant axes so
+// draws stay plausible (tail axes get small kicks, not full-range noise)
+function randomVoice() {
+  if (!basis) return;
+  for (let k = 0; k < basis.k; k++) {
+    const g = gauss() * (0.5 + basis.varExplained[k] * 3);
+    const [lo, hi] = basis.range[k];
+    coords[k] = Math.max(lo, Math.min(hi, g));
+  }
+  syncSliders();
+  $('#source').value = '__neutral__';
+  applyVoice('random draw');
+}
+
+function gauss() { let u = 0, v = 0; while (!u) u = Math.random(); while (!v) v = Math.random(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); }
+
+// ── clone a real clip into the slider space, via the ECAPA->style bridge ─────
+function loadBridge() {
+  if (bridge) return true;
+  try {
+    const ab = require('fs').readFileSync('bridge.f32');
+    const buf = ab instanceof ArrayBuffer ? ab : ab.buffer;
+    const iv = new Int32Array(buf, 0, 2); const D = iv[0], M = iv[1];
+    let off = 8;
+    const xm = new Float32Array(buf, off, D); off += 4 * D;
+    const ym = new Float32Array(buf, off, M); off += 4 * M;
+    const B = new Float32Array(buf, off, D * M);
+    bridge = { D, M, xm, ym, B };
+    return true;
+  } catch (e) { setBadge('bridge.f32 missing — run tests/_voice_basis.js', true); return false; }
+}
+
+// x(1024) -> style(256): style = ym + (x - xm)·B   (B row-major D×M)
+function bridgeApply(x) {
+  const { D, M, xm, ym, B } = bridge;
+  const s = new Float64Array(M);
+  for (let m = 0; m < M; m++) s[m] = ym[m];
+  for (let j = 0; j < D; j++) {
+    const xc = x[j] - xm[j]; if (!xc) continue;
+    const bj = j * M;
+    for (let m = 0; m < M; m++) s[m] += xc * B[bj + m];
+  }
+  return s;
+}
+
+// project a 256-D style onto the slider axes (σ units)
+function coordsFromStyle(style) {
+  const { dim, k, mean, comps, std } = basis;
+  const c = new Float64Array(k);
+  for (let i = 0; i < k; i++) {
+    const v = comps[i]; let s = 0;
+    for (let d = 0; d < dim; d++) s += (style[d] - mean[d]) * v[d];
+    c[i] = s / (std[i] || 1);
+  }
+  return c;
+}
+
+function clone() {
+  if (!basis || !kokoro) return;
+  if (!loadBridge()) return;
+  const wav = $('#ref-wav').value.trim();
+  // the Qwen Base checkpoint sits beside the kokoro dir: …/weights/{kokoro,qwen-tts/…}
+  const qdir = $('#model-dir').value.trim().replace(/[\\\/]?kokoro[\\\/]?$/, '') + '/qwen-tts/0.6B-Base';
+
+  const proceed = () => {
+    try {
+      audioCtx = audioCtx || new AudioContext();
+      const dec = audioCtx.decodeAudioFile(wav);
+      if (!dec) { setBadge('clone: cannot decode ' + wav, true); return; }
+      let mono = dec.samples;
+      if (dec.channels === 2) {
+        mono = new Float32Array(dec.numFrames);
+        for (let i = 0; i < dec.numFrames; i++) mono[i] = 0.5 * (dec.samples[2 * i] + dec.samples[2 * i + 1]);
+      }
+      const x = qwen.embedSpeaker(mono, { sampleRate: dec.sampleRate });
+      coords = coordsFromStyle(bridgeApply(x));
+      for (let k = 0; k < basis.k; k++) {        // clamp into the widgets' range
+        const [lo, hi] = basis.range[k];
+        coords[k] = Math.max(lo * 1.15, Math.min(hi * 1.15, coords[k]));
+      }
+      syncSliders();
+      $('#source').value = '__neutral__';
+      const nm = wav.split(/[\\\/]/).pop();
+      setBadge('ready · cloned ' + nm);
+      applyVoice('clone: ' + nm);
+    } catch (e) { setBadge('clone: ' + e.message, true); }
+  };
+
+  if (qwen) { proceed(); return; }
+  setBadge('clone: loading speaker encoder…');
+  bro.tts.loadQwen(qdir, {
+    onReady: (q) => { qwen = q; proceed(); },
+    onError: (m) => setBadge('clone: qwen load failed: ' + m, true),
+  });
+}
+
+// save the current voice as a raw little-endian FP32 pack (loadVoice's format)
+function saveVoice() {
+  if (!voice) return;
+  try {
+    const data = voice.data;                 // Float32Array(rows*cols)
+    const u8 = new Uint8Array(data.length * 4);
+    new Float32Array(u8.buffer).set(data);
+    const p = $('#model-dir').value.trim() + '/voices/designed.bin';
+    require('fs').writeFileSync(p, u8);
+    $('#voice-meta').textContent = 'saved → ' + p;
+  } catch (e) { setBadge('save: ' + e.message, true); }
+}
+
 // ═══ load ══════════════════════════════════════════════════════════════════
 function setBadge(text, err) {
   const b = $('#backend');
@@ -56,30 +273,17 @@ function reload() {
   kokoro = null; voice = null;
   $('#btn-run').disabled = true;
   $('#btn-play').disabled = true;
+  $('#btn-save').disabled = true;
   setBadge('loading model…');
   try {
     bro.tts.setAssetRoot($('#asset-root').value.trim());
     bro.tts.loadKokoro($('#model-dir').value.trim(), {
-      onReady: (k) => { kokoro = k; setBadge('model ready · loading voice…'); loadVoice(); },
+      onReady: (k) => { kokoro = k; setBadge('model ready'); seedFrom($('#source').value); },
       onError: (m) => setBadge('model error: ' + m, true),
     });
   } catch (e) {
     setBadge('load failed: ' + e.message, true);
   }
-}
-
-function loadVoice() {
-  if (!kokoro) return;
-  const name = $('#voice').value;
-  const path = $('#model-dir').value.trim() + '/voices/' + name + '.bin';
-  kokoro.loadVoice(path, {
-    onReady: (v) => {
-      voice = v;
-      setBadge('ready · ' + name + ' (' + v.rows + 'x' + v.cols + ')');
-      $('#btn-run').disabled = false;
-    },
-    onError: (m) => setBadge('voice error: ' + m, true),
-  });
 }
 
 // ═══ run ═══════════════════════════════════════════════════════════════════
@@ -191,6 +395,23 @@ function selectPhoneme(l) {
   else lab.textContent = 'tracing phoneme #' + selPhoneme +
     ' · id ' + (lastTrace.stages[0].data[selPhoneme] | 0) +
     ' · ' + (dur ? dur[selPhoneme] : 0) + ' frames';
+
+  // hear what you just lit up: play this phoneme's slice of the waveform
+  if (selPhoneme >= 0 && dur && total) playPhonemeSegment(selPhoneme, dur, total);
+}
+
+// Play just one phoneme's audio. Its frame span maps proportionally onto the
+// published clip (same time axis, different sample rate), so we trigger the
+// existing clip and restrict playback to that sub-region — no re-upload.
+function playPhonemeSegment(l, dur, total) {
+  if (clipId < 0 || !audioCtx || !clipSamples) return;
+  let s = 0; for (let i = 0; i < l; i++) s += dur[i];
+  const a = Math.floor((s / total) * clipSamples);
+  const b = Math.max(a + 1, Math.floor(((s + dur[l]) / total) * clipSamples));
+  try {
+    const pb = audioCtx.playClip(clipId, 1.0, false);
+    audioCtx.setPlaybackRegion(pb, a, b);
+  } catch (e) { setBadge('audio: ' + e.message, true); }
 }
 
 function renderChips(body, s) {
@@ -404,7 +625,8 @@ function ensureClip() {
     }
     if (clipId >= 0) { try { audioCtx.deleteClip(clipId); } catch (e) {} }
     clipId = audioCtx.createClip(buf, 1);
-  } catch (e) { setBadge('audio: ' + e.message, true); clipId = -1; }
+    clipSamples = buf.length;
+  } catch (e) { setBadge('audio: ' + e.message, true); clipId = -1; clipSamples = 0; }
 }
 
 function play() {
@@ -438,16 +660,26 @@ function stats(d) {
 
 // ═══ wire up ═══════════════════════════════════════════════════════════════
 function init() {
-  const sel = $('#voice');
-  for (const v of VOICES) {
-    const o = document.createElement('option');
-    o.value = v; o.textContent = v;
-    sel.appendChild(o);
+  loadBasis();
+  if (basis) {
+    const src = $('#source');
+    const neu = document.createElement('option');
+    neu.value = '__neutral__'; neu.textContent = 'neutral (centroid)';
+    src.appendChild(neu);
+    for (const n of basis.names) {
+      const o = document.createElement('option'); o.value = n; o.textContent = n; src.appendChild(o);
+    }
+    src.value = 'af_heart';
+    buildSliders();
+    src.addEventListener('change', () => seedFrom(src.value));
+    $('#btn-random').addEventListener('click', randomVoice);
+    $('#btn-neutral').addEventListener('click', () => { $('#source').value = '__neutral__'; seedFrom('__neutral__'); });
+    $('#btn-clone').addEventListener('click', clone);
+    $('#btn-save').addEventListener('click', saveVoice);
   }
   $('#btn-run').addEventListener('click', run);
   $('#btn-play').addEventListener('click', play);
   $('#btn-reload').addEventListener('click', reload);
-  sel.addEventListener('change', loadVoice);
   $('#text').addEventListener('keydown', (e) => { if (e.key === 'Enter') run(); });
   reload();
 }
