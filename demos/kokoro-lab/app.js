@@ -56,7 +56,9 @@ let basis = null;          // voicebasis.json
 let coords = null;         // Float64Array(K) — current position, in σ units
 let bridge = null;         // { D, M, xm, ym, B } — lazy (clone only)
 let qwen = null;           // Qwen Base model — lazy (clone only, for embedSpeaker)
-let renderTimer = 0;       // debounce slider drags before the (sync) re-render
+let renderTimer = 0;       // debounce slider drags before the re-render
+let synthBusy = false;     // an async traced synth is in flight on the model
+let synthPending = false;  // a newer voice was requested mid-synth (latest-wins)
 
 const ATTR_WORD = { f0_mean: 'pitch', rms: 'volume', energy: 'energy', rate: 'pace', zcr: 'brightness' };
 
@@ -139,7 +141,7 @@ function rebuildVoice() {
 // pause — never on every tick, never mid-drag.
 function scheduleRender() {
   if (renderTimer) clearTimeout(renderTimer);
-  renderTimer = setTimeout(() => { renderTimer = 0; run(); }, 200);
+  renderTimer = setTimeout(() => { renderTimer = 0; run(); }, 120);
 }
 
 // seed the sliders from a named anchor (or the neutral centroid). `render`
@@ -293,34 +295,45 @@ function reload() {
 }
 
 // ═══ run ═══════════════════════════════════════════════════════════════════
+// Synthesize + trace the current voice on a BACKGROUND thread (bro.tts.synthesize
+// with trace:true), then draw the stages and play — so see+hear updates without
+// ever locking the UI. One synth runs at a time on the model; a change requested
+// mid-synth is remembered and rendered once the current one finishes (latest-wins).
 function run() {
   if (!kokoro) return;
   if (renderTimer) { clearTimeout(renderTimer); renderTimer = 0; }
-  if (!rebuildVoice()) return;            // trace exactly what the sliders define now
-  const text = $('#text').value;
+  if (!rebuildVoice()) return;            // render exactly what the sliders define now
+  if (synthBusy) { synthPending = true; return; }
   let ids;
-  try {
-    ids = bro.tts.phonemize(text);
-  } catch (e) { setBadge('phonemize: ' + e.message, true); return; }
+  try { ids = bro.tts.phonemize($('#text').value); }
+  catch (e) { setBadge('phonemize: ' + e.message, true); return; }
   if (!ids || !ids.length) { setBadge('no phonemes for that text', true); return; }
 
+  synthBusy = true;
+  $('#run-meta').textContent = 'synthesizing…';
   const t0 = performance.now();
-  let r;
-  try {
-    r = kokoro.synthesizeTraced(ids, voice);
-  } catch (e) { setBadge('synthesize: ' + e.message, true); return; }
-  const ms = (performance.now() - t0).toFixed(0);
-
-  lastTrace = r;
-  $('#run-meta').textContent =
-    ids.length + ' phonemes · ' + r.stages.length + ' stages · ' +
-    (r.samples.length / r.sampleRate).toFixed(2) + 's audio · ' + ms + ' ms';
-  $('#btn-play').disabled = false;
-  const sc = $('#stages').scrollTop;
-  renderStages(r.stages);
-  $('#stages').scrollTop = sc;   // keep your place in the stage stream while exploring
-  ensureClip();              // upload the audio now...
-  setTimeout(play, 80);      // ...trigger playback a few frames later (let it land)
+  bro.tts.synthesize(kokoro, ids, voice, {
+    trace: true,
+    onDone: (r, info) => {
+      synthBusy = false;
+      if (info.error) setBadge('synthesize: ' + info.error, true);
+      else if (!info.cancelled) {
+        lastTrace = r;
+        const ms = (performance.now() - t0).toFixed(0);
+        const stages = r.stages || [];
+        $('#run-meta').textContent =
+          ids.length + ' phonemes · ' + stages.length + ' stages · ' +
+          (r.samples.length / r.sampleRate).toFixed(2) + 's audio · ' + ms + ' ms';
+        $('#btn-play').disabled = false;
+        const sc = $('#stages').scrollTop;
+        renderStages(stages);
+        $('#stages').scrollTop = sc;   // keep your place while exploring
+        setClip(r.samples, r.sampleRate);
+        setTimeout(play, 60);
+      }
+      if (synthPending) { synthPending = false; run(); }
+    },
+  });
 }
 
 // ═══ render ════════════════════════════════════════════════════════════════
@@ -614,7 +627,7 @@ function renderHeat(body, s) {
 // lock-free RCU hand-off), playClip triggers playback. Doing both in the same
 // tick on every press re-uploads the buffer and fires it before the transfer
 // has cycled — and leaks a clip per press. So we upload ONCE per synthesis
-// (ensureClip, in run()) and let Play just re-trigger the already-published
+// (setClip, in run()'s onDone) and let Play just re-trigger the already-published
 // clip; the auto-play after a run is deferred a few frames so the upload lands.
 function setClip(samples, inRate) {
   try {
@@ -636,8 +649,6 @@ function setClip(samples, inRate) {
     clipSamples = buf.length;
   } catch (e) { setBadge('audio: ' + e.message, true); clipId = -1; clipSamples = 0; }
 }
-function ensureClip() { if (lastTrace) setClip(lastTrace.samples, lastTrace.sampleRate); }
-
 function play() {
   if (clipId < 0 || !audioCtx) return;
   try { audioCtx.playClip(clipId, 1.0, false); }
