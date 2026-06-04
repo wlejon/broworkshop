@@ -1,0 +1,68 @@
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: #0c0e12;
+  color: #d6dae0;
+  font: 13px/1.4 'CustomMono', ui-monospace, Menlo, Consolas, monospace;
+  -webkit-font-smoothing: antialiased;
+}
+#app { display: flex; flex-direction: column; height: 100vh; }
+
+/* toolbar */
+#toolbar {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 16px; background: #11141a; border-bottom: 1px solid #1e232c;
+}
+#brand { font-weight: 700; letter-spacing: 0.5px; color: #8ad9ff; }
+.tagline { color: #5b6470; font-size: 12px; }
+.grow { flex: 1; }
+.badge {
+  padding: 2px 8px; border-radius: 4px; background: #1a2030;
+  color: #7fd1a6; font-size: 11px; border: 1px solid #243046;
+}
+.badge.err { color: #ff8e8e; border-color: #50262a; }
+
+/* config + prompt rows */
+#controls, #prompt {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 16px; background: #0f1218; border-bottom: 1px solid #1a1f27;
+}
+.cfg { display: flex; align-items: center; gap: 6px; color: #6b7480; font-size: 11px; }
+.cfg input { width: 230px; }
+input[type=text], select {
+  background: #161b22; color: #d6dae0; border: 1px solid #283040;
+  border-radius: 5px; padding: 5px 8px; font: inherit;
+}
+#text { flex: 1; font-size: 14px; }
+button {
+  background: #1c2433; color: #cfe3ff; border: 1px solid #2c3a52;
+  border-radius: 5px; padding: 6px 12px; font: inherit; cursor: pointer;
+}
+button:hover:not(:disabled) { background: #243150; }
+button:disabled { opacity: 0.4; cursor: default; }
+.meta { color: #5b6470; font-size: 11px; }
+
+/* stage stream */
+#stages { flex: 1; overflow-y: auto; padding: 14px 16px 60px; }
+.stage {
+  background: #10141b; border: 1px solid #1c222c; border-radius: 8px;
+  margin-bottom: 14px; overflow: hidden;
+}
+.stage-head {
+  display: flex; align-items: baseline; gap: 10px;
+  padding: 8px 12px; background: #131922; border-bottom: 1px solid #1c222c;
+}
+.stage-name { font-weight: 700; color: #8ad9ff; }
+.stage-shape { color: #d39a5b; font-size: 11px; }
+.stage-desc { color: #5b6470; font-size: 11px; flex: 1; }
+.stage-stats { color: #4f586a; font-size: 10px; }
+.stage-body { padding: 10px 12px; }
+.stage-body canvas { display: block; width: 100%; image-rendering: pixelated; border-radius: 4px; }
+
+/* phoneme chips */
+.chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.chip {
+  padding: 2px 7px; background: #1a2230; border: 1px solid #28344a;
+  border-radius: 4px; color: #aeb9c8; font-size: 11px;
+}
+.axis-note { color: #4f586a; font-size: 10px; margin-top: 6px; }

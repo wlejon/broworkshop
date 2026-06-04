@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Kokoro Lab</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <header id="toolbar">
+      <span id="brand">⬡ Kokoro&nbsp;Lab</span>
+      <span class="tagline">watch speech take shape, stage by stage</span>
+      <span class="grow"></span>
+      <span id="backend" class="badge">loading…</span>
+    </header>
+
+    <section id="controls">
+      <label class="cfg">model
+        <input id="model-dir" type="text" value="D:/projects/brosoundml/weights/kokoro">
+      </label>
+      <label class="cfg">assets
+        <input id="asset-root" type="text" value="D:/projects/brosoundml">
+      </label>
+      <label class="cfg">voice
+        <select id="voice"></select>
+      </label>
+      <span class="grow"></span>
+      <button id="btn-reload" title="Reload model + voice">↺ Reload</button>
+    </section>
+
+    <section id="prompt">
+      <input id="text" type="text" value="Hello there. This is a test of the pipeline."
+             placeholder="Type something to speak…">
+      <button id="btn-run" disabled>▶ Run</button>
+      <button id="btn-play" disabled title="Play the synthesized audio">♪ Play</button>
+      <span id="run-meta" class="meta"></span>
+    </section>
+
+    <main id="stages"></main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
