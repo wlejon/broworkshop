@@ -18,6 +18,7 @@ let kokoro = null;
 let voice = null;
 let lastTrace = null;     // { samples, sampleRate, durations, stages }
 let audioCtx = null;
+let clipId = -1;          // the published audio clip for the current synthesis
 
 // ─── stage metadata ────────────────────────────────────────────────────────
 // kind  = how to draw it.  desc = plain words.
@@ -104,7 +105,8 @@ function run() {
     (r.samples.length / r.sampleRate).toFixed(2) + 's audio · ' + ms + ' ms';
   $('#btn-play').disabled = false;
   renderStages(r.stages);
-  play();   // auto-play once
+  ensureClip();              // upload the audio now...
+  setTimeout(play, 80);      // ...trigger playback a few frames later (let it land)
 }
 
 // ═══ render ════════════════════════════════════════════════════════════════
@@ -375,9 +377,15 @@ function renderHeat(body, s) {
 }
 
 // ═══ audio ═════════════════════════════════════════════════════════════════
-// bro's AudioContext is clip-based (broaudio), not Web Audio createBuffer. Clips
-// play at the engine sample rate, so resample Kokoro's 24 kHz to ctx.sampleRate.
-function play() {
+// bro's AudioContext is clip-based (broaudio), not Web Audio createBuffer.
+//
+// Threading note: createClip publishes the samples to the audio thread (a
+// lock-free RCU hand-off), playClip triggers playback. Doing both in the same
+// tick on every press re-uploads the buffer and fires it before the transfer
+// has cycled — and leaks a clip per press. So we upload ONCE per synthesis
+// (ensureClip, in run()) and let Play just re-trigger the already-published
+// clip; the auto-play after a run is deferred a few frames so the upload lands.
+function ensureClip() {
   if (!lastTrace) return;
   try {
     audioCtx = audioCtx || new AudioContext();
@@ -387,17 +395,22 @@ function play() {
     if (Math.abs(outRate - inRate) < 1) {
       buf = src;
     } else {
-      const ratio = outRate / inRate;
-      const n = Math.floor(src.length * ratio);
+      const ratio = outRate / inRate, n = Math.floor(src.length * ratio);
       buf = new Float32Array(n);
       for (let i = 0; i < n; i++) {
         const t = i / ratio, j = t | 0, f = t - j;
         buf[i] = src[j] * (1 - f) + (src[j + 1] !== undefined ? src[j + 1] : src[j]) * f;
       }
     }
-    const clip = audioCtx.createClip(buf, 1);
-    audioCtx.playClip(clip, 1.0, false);
-  } catch (e) { setBadge('audio: ' + e.message, true); }
+    if (clipId >= 0) { try { audioCtx.deleteClip(clipId); } catch (e) {} }
+    clipId = audioCtx.createClip(buf, 1);
+  } catch (e) { setBadge('audio: ' + e.message, true); clipId = -1; }
+}
+
+function play() {
+  if (clipId < 0 || !audioCtx) return;
+  try { audioCtx.playClip(clipId, 1.0, false); }
+  catch (e) { setBadge('audio: ' + e.message, true); }
 }
 
 // ═══ small helpers ═════════════════════════════════════════════════════════
