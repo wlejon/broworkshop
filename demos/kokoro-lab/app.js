@@ -138,6 +138,31 @@ function detectSource(root) {
   return null;
 }
 
+// Resolve a sensible starting data source for this machine. The HTML ships a
+// Windows dev default; on first run (or after a move) we probe the usual spots
+// and adopt the first that detectSource() recognises — so the app comes up
+// pointed at real data without the user editing a path. A browsed/typed path is
+// remembered in localStorage and wins on the next launch.
+const _os = require('os');
+function rememberedRoot() {
+  try { return localStorage.getItem('kokoro-lab.dataRoot') || ''; } catch (e) { return ''; }
+}
+function rememberRoot(root) {
+  try { localStorage.setItem('kokoro-lab.dataRoot', root); } catch (e) {}
+}
+function defaultRoot(htmlDefault) {
+  let home = '';
+  try { home = _os.homedir(); } catch (e) {}
+  const candidates = [
+    rememberedRoot(),                       // an earlier choice, if any
+    htmlDefault,                            // the value baked into index.html
+    home && home + '/projects/brosoundml-data',
+    home && home + '/projects/brosoundml',
+  ].filter(Boolean);
+  for (const c of candidates) if (detectSource(c)) return c;
+  return rememberedRoot() || htmlDefault;   // nothing detected — show best guess
+}
+
 // Adopt `root` as the data source: detect its layout, update the resolved paths
 // and the status label. Loads nothing — see switchSource() for that.
 function setSource(rootIn) {
@@ -415,6 +440,7 @@ function reload() {
 // first load all route through here.
 function switchSource(root) {
   setSource(root);
+  if (detectSource(root)) rememberRoot(paths.root);   // a real source — remember it
   bridge = null; qwen = null;            // clone adapters are per-source
   basis = null; coords = null;
   loadBasis();
@@ -1295,6 +1321,10 @@ function init() {
   window.addEventListener('mousemove', (e) => { if (activePaint) paintAt(e); else if (activeDrag) dragDurAt(e); });
   window.addEventListener('mouseup', () => { if (activePaint) onPaintUp(); else if (activeDrag) onDurUp(); });
 
-  switchSource($('#data-root').value.trim());
+  // Point at real data on this machine before the first load: the HTML default
+  // is a Windows dev path, so probe the usual spots (and any remembered choice).
+  const root = defaultRoot($('#data-root').value.trim());
+  $('#data-root').value = root;
+  switchSource(root);
 }
 init();
