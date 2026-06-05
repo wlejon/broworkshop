@@ -84,15 +84,84 @@ let stageSig = '';         // current stage-name signature, so we only full-rebu
 
 const ATTR_WORD = { f0_mean: 'pitch', rms: 'volume', energy: 'energy', rate: 'pace', zcr: 'brightness', f0_std: 'pitch var' };
 
+// ═══ data source ═════════════════════════════════════════════════════════════
+// One folder drives everything the lab needs: the Kokoro model dir (model +
+// voice_basis + voice_bridge + voices) and the phonemizer assets (g2p lexicon,
+// POS tagger, config vocab). Three layouts are recognised, auto-detected from
+// the folder you point at:
+//   · brosoundml-data — the published HF dataset:  <root>/{kokoro,g2p,pos_tagger}
+//   · brosoundml repo — the dev sibling:           <root>/weights/kokoro  (+ ../brosoundml-data)
+//   · a bare Kokoro dir — config.json sitting right inside it
+// The model dir, the Qwen clone dir, and how the phonemizer assets resolve all
+// follow from which layout it is, so the user only ever picks one folder.
+const _fs = require('fs');
+function pExists(p) { try { return _fs.existsSync(p); } catch (e) { return false; } }
+function pParent(p) { return p.replace(/[\\\/]+$/, '').replace(/[\\\/][^\\\/]*$/, ''); }
+
+const paths = {
+  root: '', kind: 'data', model: '', qwen: '',
+  // Point the phonemizer at this source's g2p/POS/config assets. The sibling
+  // layout has its own well-known shape (setAssetRoot); the flat data layouts
+  // need explicit per-file paths (setAssets).
+  configureAssets() {
+    if (this.kind === 'sibling') {
+      bro.tts.setAssetRoot(this.root);
+    } else if (this.kind === 'data') {
+      bro.tts.setAssets({
+        lexicon:      this.root + '/g2p/lexicon_en_us.bin',
+        posTagger:    this.root + '/pos_tagger/model.bin',
+        kokoroConfig: this.root + '/kokoro/config.json',
+      });
+    } else {                                  // a bare kokoro dir — config only
+      bro.tts.setAssets({ kokoroConfig: this.model + '/config.json' });
+    }
+  },
+};
+
+// Recognise which layout `root` is, and where its kokoro + qwen dirs live.
+// Returns null if nothing identifiable is found inside it.
+function detectSource(root) {
+  root = root.replace(/[\\\/]+$/, '');
+  if (pExists(root + '/kokoro/config.json'))
+    return { kind: 'data', root, model: root + '/kokoro', qwen: root + '/qwen-tts/0.6B-Base' };
+  if (pExists(root + '/weights/kokoro/config.json'))
+    return { kind: 'sibling', root, model: root + '/weights/kokoro', qwen: root + '/weights/qwen-tts/0.6B-Base' };
+  if (pExists(root + '/config.json')) {                   // root itself is a kokoro dir
+    const parent = pParent(root);
+    if (pExists(parent + '/g2p/lexicon_en_us.bin'))       // …/<brosoundml-data>/kokoro
+      return { kind: 'data', root: parent, model: root, qwen: parent + '/qwen-tts/0.6B-Base' };
+    const repo = pParent(parent);
+    if (pExists(repo + '/weights/kokoro/config.json'))    // …/<repo>/weights/kokoro
+      return { kind: 'sibling', root: repo, model: root, qwen: repo + '/weights/qwen-tts/0.6B-Base' };
+    return { kind: 'model', root, model: root, qwen: parent + '/qwen-tts/0.6B-Base' };
+  }
+  return null;
+}
+
+// Adopt `root` as the data source: detect its layout, update the resolved paths
+// and the status label. Loads nothing — see switchSource() for that.
+function setSource(rootIn) {
+  const root = (rootIn || '').replace(/[\\\/]+$/, '');
+  const det = detectSource(root);
+  const r = det || { kind: 'data', root, model: root + '/kokoro', qwen: root + '/qwen-tts/0.6B-Base' };
+  paths.root = r.root; paths.kind = r.kind; paths.model = r.model; paths.qwen = r.qwen;
+  const meta = $('#data-meta');
+  if (meta) {
+    const name = r.kind === 'sibling' ? 'brosoundml repo'
+               : r.kind === 'model'   ? 'Kokoro dir' : 'brosoundml-data';
+    meta.textContent = (det ? '✓ ' : '⚠ ') + name + ' · model ' + r.model;
+    meta.classList.toggle('err', !det);
+  }
+}
+
 function loadBasis() {
-  // The basis + adapter live next to the Kokoro model (kokoro/ in brosoundml-data,
-  // materialised into the model dir), so they travel with the voices they derive from.
+  // The basis + adapter live in the Kokoro model dir (kokoro/ in brosoundml-data,
+  // weights/kokoro/ in the dev repo), so they travel with the voices they derive from.
   try {
-    const dir = $('#model-dir').value.trim();
-    basis = JSON.parse(require('fs').readFileSync(dir + '/voice_basis.json', 'utf-8'));
+    basis = JSON.parse(_fs.readFileSync(paths.model + '/voice_basis.json', 'utf-8'));
     coords = new Float64Array(basis.k);
   } catch (e) {
-    setBadge('voice_basis.json missing from model dir — run tests/_voice_basis.js', true);
+    setBadge('voice_basis.json missing from ' + paths.model + ' — run tests/_voice_basis.js', true);
   }
 }
 
@@ -222,7 +291,7 @@ function gauss() { let u = 0, v = 0; while (!u) u = Math.random(); while (!v) v 
 function loadBridge() {
   if (bridge) return true;
   try {
-    const ab = require('fs').readFileSync($('#model-dir').value.trim() + '/voice_bridge.bin');
+    const ab = _fs.readFileSync(paths.model + '/voice_bridge.bin');
     const buf = ab instanceof ArrayBuffer ? ab : ab.buffer;
     const iv = new Int32Array(buf, 0, 2); const D = iv[0], M = iv[1];
     let off = 8;
@@ -231,7 +300,7 @@ function loadBridge() {
     const B = new Float32Array(buf, off, D * M);
     bridge = { D, M, xm, ym, B };
     return true;
-  } catch (e) { setBadge('voice_bridge.bin missing from model dir — run tests/_voice_basis.js', true); return false; }
+  } catch (e) { setBadge('voice_bridge.bin missing from ' + paths.model + ' — run tests/_voice_basis.js', true); return false; }
 }
 
 // x(1024) -> style(256): style = ym + (x - xm)·B   (B row-major D×M)
@@ -263,8 +332,12 @@ function clone() {
   if (!basis || !kokoro) return;
   if (!loadBridge()) return;
   const wav = $('#ref-wav').value.trim();
-  // the Qwen Base checkpoint sits beside the kokoro dir: …/weights/{kokoro,qwen-tts/…}
-  const qdir = $('#model-dir').value.trim().replace(/[\\\/]?kokoro[\\\/]?$/, '') + '/qwen-tts/0.6B-Base';
+  // Clone needs the Qwen3-TTS *Base* checkpoint (it bundles the ECAPA speaker
+  // encoder). That's a separate upstream HF model — Qwen/Qwen3-TTS-12Hz-0.6B-Base,
+  // Apache-2.0, fetched by brosoundml's download-qwen-tts.sh — NOT part of
+  // brosoundml-data. So it has its own path: an explicit override if given, else
+  // the spot beside the data source (the dev repo ships it under weights/qwen-tts).
+  const qdir = $('#qwen-dir').value.trim() || paths.qwen;
 
   const proceed = () => {
     try {
@@ -306,8 +379,8 @@ function saveVoice() {
     const data = voice.data;                 // Float32Array(rows*cols)
     const u8 = new Uint8Array(data.length * 4);
     new Float32Array(u8.buffer).set(data);
-    const p = $('#model-dir').value.trim() + '/voices/designed.bin';
-    require('fs').writeFileSync(p, u8);
+    const p = paths.model + '/voices/designed.bin';
+    _fs.writeFileSync(p, u8);
     $('#voice-meta').textContent = 'saved → ' + p;
   } catch (e) { setBadge('save: ' + e.message, true); }
 }
@@ -326,14 +399,54 @@ function reload() {
   $('#btn-save').disabled = true;
   setBadge('loading model…');
   try {
-    bro.tts.setAssetRoot($('#asset-root').value.trim());
-    bro.tts.loadKokoro($('#model-dir').value.trim(), {
+    paths.configureAssets();
+    bro.tts.loadKokoro(paths.model, {
       onReady: (k) => { kokoro = k; setBadge('ready · drag a slider to hear & watch it take shape'); seedFrom($('#source').value, false); },
       onError: (m) => setBadge('model error: ' + m, true),
     });
   } catch (e) {
     setBadge('load failed: ' + e.message, true);
   }
+}
+
+// (Re)adopt a data source end-to-end: detect its layout, reload the PCA basis +
+// sliders + clone adapters from it, then reload the Kokoro model. This is the
+// one entry point for "the source changed" — browse, a typed path + Reload, or
+// first load all route through here.
+function switchSource(root) {
+  setSource(root);
+  bridge = null; qwen = null;            // clone adapters are per-source
+  basis = null; coords = null;
+  loadBasis();
+  populateSources();
+  if (basis) buildSliders();
+  reload();                              // configures assets + loads the model, then seeds
+}
+
+// Fill the seed dropdown from the current basis' named anchors (+ neutral).
+function populateSources() {
+  const src = $('#source');
+  src.textContent = '';
+  if (!basis) return;
+  const neu = document.createElement('option');
+  neu.value = '__neutral__'; neu.textContent = 'neutral (centroid)';
+  src.appendChild(neu);
+  for (const n of basis.names) {
+    const o = document.createElement('option'); o.value = n; o.textContent = n; src.appendChild(o);
+  }
+  if (basis.names.indexOf('af_heart') >= 0) src.value = 'af_heart';
+}
+
+// Native dialogs, defensively gated (absent in headless / GPU-less builds).
+function browseFolder(start) {
+  if (typeof showOpenFolderDialog !== 'function') { setBadge('folder dialog unavailable in this build', true); return null; }
+  const r = showOpenFolderDialog(start || null);
+  return r && r.length ? r[0] : null;
+}
+function browseFile(filter) {
+  if (typeof showOpenFileDialog !== 'function') { setBadge('file dialog unavailable in this build', true); return null; }
+  const r = showOpenFileDialog(filter || '');
+  return r && r.length ? r[0] : null;
 }
 
 // ═══ run ═══════════════════════════════════════════════════════════════════
@@ -1153,30 +1266,35 @@ function stats(d) {
 
 // ═══ wire up ═══════════════════════════════════════════════════════════════
 function init() {
-  loadBasis();
-  if (basis) {
-    const src = $('#source');
-    const neu = document.createElement('option');
-    neu.value = '__neutral__'; neu.textContent = 'neutral (centroid)';
-    src.appendChild(neu);
-    for (const n of basis.names) {
-      const o = document.createElement('option'); o.value = n; o.textContent = n; src.appendChild(o);
-    }
-    src.value = 'af_heart';
-    buildSliders();
-    src.addEventListener('change', () => seedFrom(src.value, true));
-    $('#btn-random').addEventListener('click', randomVoice);
-    $('#btn-neutral').addEventListener('click', () => { $('#source').value = '__neutral__'; seedFrom('__neutral__', true); });
-    $('#btn-clone').addEventListener('click', clone);
-    $('#btn-save').addEventListener('click', saveVoice);
-  }
+  // data source: browse a folder, or edit the path + Reload. Both re-detect the
+  // layout and reload everything derived from it. (The seed dropdown, sliders and
+  // clone adapters all come from the source, so picking one rebuilds them.)
+  $('#btn-browse-data').addEventListener('click', () => {
+    const d = browseFolder(paths.root); if (!d) return;
+    $('#data-root').value = d; switchSource(d);
+  });
+  $('#data-root').addEventListener('change', () => setSource($('#data-root').value.trim()));
+  $('#btn-reload').addEventListener('click', () => switchSource($('#data-root').value.trim()));
+  $('#btn-browse-wav').addEventListener('click', () => {
+    const f = browseFile('Audio|wav;flac;mp3;ogg;opus'); if (f) $('#ref-wav').value = f;
+  });
+  $('#btn-browse-qwen').addEventListener('click', () => {
+    const d = browseFolder($('#qwen-dir').value.trim() || paths.qwen); if (d) $('#qwen-dir').value = d;
+  });
+
+  // voice designer — handlers no-op until a basis is loaded, so wire them once.
+  $('#source').addEventListener('change', () => seedFrom($('#source').value, true));
+  $('#btn-random').addEventListener('click', randomVoice);
+  $('#btn-neutral').addEventListener('click', () => { $('#source').value = '__neutral__'; seedFrom('__neutral__', true); });
+  $('#btn-clone').addEventListener('click', clone);
+  $('#btn-save').addEventListener('click', saveVoice);
   $('#btn-run').addEventListener('click', run);
   $('#btn-play').addEventListener('click', play);
-  $('#btn-reload').addEventListener('click', reload);
   $('#text').addEventListener('keydown', (e) => { if (e.key === 'Enter') run(); });
   // prosody-edit drag: one global pair so re-rendered cards never leak listeners
   window.addEventListener('mousemove', (e) => { if (activePaint) paintAt(e); else if (activeDrag) dragDurAt(e); });
   window.addEventListener('mouseup', () => { if (activePaint) onPaintUp(); else if (activeDrag) onDurUp(); });
-  reload();
+
+  switchSource($('#data-root').value.trim());
 }
 init();

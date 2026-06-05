@@ -30,9 +30,11 @@ body {
 }
 #voicebar { background: #0e1117; }
 /* size the path fields to their content so the text never crowds the next label */
-#model-dir { width: 300px; }
-#asset-root { width: 190px; }
-#ref-wav { width: 260px; }
+#data-root { width: 330px; }
+#ref-wav { width: 230px; }
+#qwen-dir { width: 200px; }
+/* compact browse button sitting right after a path field */
+.iconbtn { padding: 5px 9px; }
 
 /* ── voice-space sliders ─────────────────────────────────────────────────── */
 #sliders {
@@ -97,6 +99,7 @@ button {
 button:hover:not(:disabled) { background: #243150; }
 button:disabled { opacity: 0.4; cursor: default; }
 .meta { color: #5b6470; font-size: 11px; }
+.meta.err { color: #ff8e8e; }
 .pin { color: #ffcf6b; }
 .pin-clear { color: #8ad9ff; cursor: pointer; margin-left: 8px; }
 .pin-clear:hover { color: #b6e3ff; }
