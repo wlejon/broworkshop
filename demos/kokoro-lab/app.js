@@ -62,6 +62,11 @@ let renderTimer = 0;       // debounce slider drags before the re-render
 let synthBusy = false;     // a synth (audio or trace pass) is in flight
 let dirty = false;         // the voice changed; needs an audio-then-trace pass
 
+// ── prosody editing (drag the F0 / energy curves, re-decode just the back half)
+let predicted = null;      // { F0, N } snapshot of the model's prediction (reset)
+let edited = false;        // the user has reshaped a contour
+let activePaint = null;    // in-progress curve drag {cv,s,color,mn,mx,W,H,pad,lastI,lastV}
+
 const ATTR_WORD = { f0_mean: 'pitch', rms: 'volume', energy: 'energy', rate: 'pace', zcr: 'brightness', f0_std: 'pitch var' };
 
 function loadBasis() {
@@ -383,6 +388,7 @@ function synthTrace(ids) {
       synthBusy = false;
       if (!info.error && !info.cancelled) {
         lastTrace = r;
+        snapshotPredicted(r);          // baseline for the prosody-edit reset
         const stages = r.stages || [];
         const ms = (performance.now() - t0).toFixed(0);
         $('#run-meta').textContent =
@@ -535,16 +541,12 @@ function renderAlign(body, s) {
     ' frames · click a block to trace it'));
 }
 
-function renderCurve(body, s, color) {
-  const W = 1100, H = 130, pad = 6;
-  const cv = mkCanvas(body, W, H);
-  const ctx = cv.getContext('2d');
-  const d = s.data, n = d.length;
-  let mn = Infinity, mx = -Infinity;
-  for (let i = 0; i < n; i++) { if (d[i] < mn) mn = d[i]; if (d[i] > mx) mx = d[i]; }
-  const range = (mx - mn) || 1;
-  // zero baseline if it falls inside the range
-  if (mn < 0 && mx > 0) {
+// Draw a contour into its canvas from s.data, fixed [mn,mx] vertical range.
+function drawCurve(cv, s, color, mn, mx) {
+  const ctx = cv.getContext('2d'), W = cv.width, H = cv.height, pad = 6;
+  const d = s.data, n = d.length, range = (mx - mn) || 1;
+  ctx.clearRect(0, 0, W, H);
+  if (mn < 0 && mx > 0) {                       // zero baseline if it's in range
     const zy = H - pad - ((0 - mn) / range) * (H - 2 * pad);
     ctx.strokeStyle = '#222b38'; ctx.beginPath(); ctx.moveTo(0, zy); ctx.lineTo(W, zy); ctx.stroke();
   }
@@ -555,8 +557,98 @@ function renderCurve(body, s, color) {
     x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
   }
   ctx.stroke();
-  body.appendChild(el('div', 'axis-note',
-    'range ' + mn.toFixed(1) + ' … ' + mx.toFixed(1) + ' over ' + n + ' frames'));
+}
+
+// F0_pred / N_pred are editable: drag to reshape the pitch / energy contour,
+// then re-decode just the back half. Range is padded with upward headroom so a
+// drag has somewhere to go; the drawn span is frozen for the duration of a card.
+function renderCurve(body, s, color) {
+  const W = 1100, H = 130, pad = 6;
+  const cv = mkCanvas(body, W, H);
+  const editable = (s.name === 'F0_pred' || s.name === 'N_pred');
+  let mn = Infinity, mx = -Infinity;
+  for (let i = 0; i < s.data.length; i++) { const v = s.data[i]; if (v < mn) mn = v; if (v > mx) mx = v; }
+  if (editable) { mn = Math.min(0, mn); mx = mx * 1.35 + (mx <= 0 ? 1 : 0); }
+  if (mn === mx) { mn -= 1; mx += 1; }
+  drawCurve(cv, s, color, mn, mx);
+
+  const note = el('div', 'axis-note',
+    (editable ? 'drag to reshape · ' : '') +
+    'range ' + mn.toFixed(1) + ' … ' + mx.toFixed(1) + ' over ' + s.data.length + ' frames');
+  if (editable) {
+    const reset = el('span', 'curve-reset', '↺ reset');
+    reset.addEventListener('click', () => resetSignal(s.name));
+    note.appendChild(reset);
+    cv.addEventListener('mousedown', (e) => {
+      if (synthBusy || !lastTrace) return;
+      activePaint = { cv, s, color, mn, mx, W, H, pad, lastI: -1, lastV: 0 };
+      paintAt(e);
+    });
+  }
+  body.appendChild(note);
+}
+
+// Map a mouse position onto (frame index, value) and paint it, linearly filling
+// from the last painted column so a sweep draws a continuous contour.
+function paintAt(e) {
+  const p = activePaint; if (!p) return;
+  const rect = p.cv.getBoundingClientRect();
+  const xf = Math.max(0, Math.min(0.99999, (e.clientX - rect.left) / rect.width));
+  const yPix = ((e.clientY - rect.top) / rect.height) * p.H;
+  const n = p.s.data.length, i = Math.floor(xf * n);
+  let v = p.mn + ((p.H - p.pad - yPix) / (p.H - 2 * p.pad)) * ((p.mx - p.mn) || 1);
+  if (p.s.name === 'F0_pred') v = Math.max(0, v);     // pitch can't go negative
+  if (p.lastI >= 0 && p.lastI !== i) {
+    const a = Math.min(p.lastI, i), b = Math.max(p.lastI, i);
+    const va = (p.lastI < i) ? p.lastV : v, vb = (p.lastI < i) ? v : p.lastV;
+    for (let k = a; k <= b; k++) p.s.data[k] = va + (vb - va) * ((b === a) ? 0 : (k - a) / (b - a));
+  } else { p.s.data[i] = v; }
+  p.lastI = i; p.lastV = v;
+  drawCurve(p.cv, p.s, p.color, p.mn, p.mx);
+}
+
+// Finish a drag: re-decode from the edited contours. (Installed once in init.)
+function onPaintUp() { if (activePaint) { activePaint = null; commitEdit(); } }
+
+function snapshotPredicted(r) {
+  const f = r.stages.find((s) => s.name === 'F0_pred');
+  const n = r.stages.find((s) => s.name === 'N_pred');
+  predicted = { F0: f ? Float32Array.from(f.data) : null, N: n ? Float32Array.from(n.data) : null };
+  edited = false;
+}
+
+// Re-run only the decoder back half from the (possibly edited) asr/F0/N grids
+// the trace already holds — synchronous, so guard against a background synth.
+function commitEdit() {
+  if (synthBusy || !kokoro || !voice || !lastTrace) return;
+  const get = (nm) => lastTrace.stages.find((s) => s.name === nm);
+  const asr = get('asr'), F0 = get('F0_pred'), N = get('N_pred'), ph = get('phonemes');
+  if (!asr || !F0 || !N || !ph) { setBadge('edit: trace is missing stages', true); return; }
+  let r;
+  synthBusy = true;
+  try { r = kokoro.decodeFrom(voice, asr.data, F0.data, N.data, ph.w, { trace: true }); }
+  catch (e) { synthBusy = false; setBadge('decodeFrom: ' + e.message, true); return; }
+  synthBusy = false;
+  setClip(r.samples, r.sampleRate);
+  setTimeout(play, 30);
+  edited = true;
+  // swap the re-decoded back-half stages back into the trace, keep the edited
+  // contours, and redraw the whole pipeline so the change propagates visually
+  for (const st of r.stages) { const i = lastTrace.stages.findIndex((x) => x.name === st.name); if (i >= 0) lastTrace.stages[i] = st; }
+  const sc = $('#stages').scrollTop;
+  renderStages(lastTrace.stages);
+  $('#stages').scrollTop = sc;
+  $('#run-meta').textContent = 'prosody edited · ' +
+    (r.samples.length / r.sampleRate).toFixed(2) + 's · ↺ reset on the curve to restore';
+}
+
+// Restore one contour (F0 or N) to the model's prediction, then re-decode.
+function resetSignal(name) {
+  if (!predicted || !lastTrace) return;
+  const st = lastTrace.stages.find((s) => s.name === name);
+  const src = name === 'F0_pred' ? predicted.F0 : predicted.N;
+  if (st && src && st.data.length === src.length) st.data.set(src);
+  commitEdit();
 }
 
 function renderWave(body, s) {
@@ -762,6 +854,9 @@ function init() {
   $('#btn-play').addEventListener('click', play);
   $('#btn-reload').addEventListener('click', reload);
   $('#text').addEventListener('keydown', (e) => { if (e.key === 'Enter') run(); });
+  // prosody-edit drag: one global pair so re-rendered curves never leak listeners
+  window.addEventListener('mousemove', (e) => { if (activePaint) paintAt(e); });
+  window.addEventListener('mouseup', onPaintUp);
   reload();
 }
 init();
