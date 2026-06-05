@@ -10,6 +10,8 @@ bro.tts.setAssetRoot('D:/projects/brosoundml');
 const KK = bro.tts.loadKokoro(MODEL);
 const BS = JSON.parse(fs.readFileSync(MODEL + '/voice_basis.json', 'utf8'));
 assert(BS.k === 20 && BS.dim === 256, 'BS shape');
+assert(BS.axisKind && BS.axisKind.filter((x) => x === 'attr').length === 6, 'six attribute axes');
+assert(BS.axisName[0] === 'pitch', 'axis 0 is pitch');
 const ids = bro.tts.phonemize('Hello there. This is a test of the pipeline.');
 
 function sfc(coords) {
@@ -34,10 +36,10 @@ const z = new Float64Array(BS.k);
 check('neutral', z);                                   // centroid
 check('af_heart', BS.anchors[BS.names.indexOf('af_heart')]);
 check('bm_lewis', BS.anchors[BS.names.indexOf('bm_lewis')]);
-// a random in-distribution draw + a hard push on the pitch axis (PC2)
+// a random in-distribution draw + a hard push on the pitch axis (axis 0)
 const rnd = Float64Array.from(BS.range.map(([lo, hi]) => lo + 0.5 * (hi - lo)));
 check('mid-range', rnd);
-const deep = z.slice(); deep[1] = BS.range[1][0];   // extreme on the f0 axis
+const deep = z.slice(); deep[0] = BS.range[0][0];   // extreme on the pitch axis
 check('pitch-extreme', deep);
 
 // voice_bridge.bin loads and applies to a 256-D style of the right scale

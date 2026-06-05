@@ -55,13 +55,14 @@ let selPhoneme = -1;
 // slider unit == 1σ of real voice variation. See tests/_voice_basis.js.
 let basis = null;          // voicebasis.json
 let coords = null;         // Float64Array(K) — current position, in σ units
+let sliderCells = [];      // the K slider widgets (skips the group-label rows)
 let bridge = null;         // { D, M, xm, ym, B } — lazy (clone only)
 let qwen = null;           // Qwen Base model — lazy (clone only, for embedSpeaker)
 let renderTimer = 0;       // debounce slider drags before the re-render
 let synthBusy = false;     // a synth (audio or trace pass) is in flight
 let dirty = false;         // the voice changed; needs an audio-then-trace pass
 
-const ATTR_WORD = { f0_mean: 'pitch', rms: 'volume', energy: 'energy', rate: 'pace', zcr: 'brightness' };
+const ATTR_WORD = { f0_mean: 'pitch', rms: 'volume', energy: 'energy', rate: 'pace', zcr: 'brightness', f0_std: 'pitch var' };
 
 function loadBasis() {
   // The basis + adapter live next to the Kokoro model (kokoro/ in brosoundml-data,
@@ -76,18 +77,35 @@ function loadBasis() {
 }
 
 // a faint hint of which perceptual attribute this axis pushes, and which way.
+// attribute axes are already named (pitch/brightness/…), so their hint just
+// shows how cleanly the axis tracks that attribute; character axes show their
+// strongest incidental correlate, if any.
 function hintFor(k) {
   const h = basis.attrHint[k];
+  if (basis.axisKind && basis.axisKind[k] === 'attr')
+    return h && h.r ? 'r ' + Math.abs(h.r).toFixed(2) : '';
   if (!h || !h.attr || Math.abs(h.r) < 0.3) return '';
   return (h.r > 0 ? '↑' : '↓') + (ATTR_WORD[h.attr] || h.attr);
 }
 
 function buildSliders() {
   const root = $('#sliders'); root.textContent = '';
+  sliderCells = [];
+  let lastKind = null;
   for (let k = 0; k < basis.k; k++) {
-    const cell = el('div', 'pc' + (k < 6 ? ' lead' : ''));
+    const kind = basis.axisKind ? basis.axisKind[k] : 'char';
+    if (kind !== lastKind) {            // a full-width header before each bank
+      root.appendChild(el('div', 'slider-group',
+        kind === 'attr' ? 'perceptual — labeled, always audible' : 'character — timbre & identity'));
+      lastKind = kind;
+    }
+    const isAttr = kind === 'attr';
+    // emphasize the attribute axes and the first few character axes
+    const firstChar = basis.axisKind ? basis.axisKind.indexOf('char') : 6;
+    const lead = isAttr || k < firstChar + 4;
+    const cell = el('div', 'pc' + (isAttr ? ' attr' : '') + (lead ? ' lead' : ''));
     const head = el('div', 'pc-head');
-    head.appendChild(el('span', 'pc-name', 'PC' + (k + 1)));
+    head.appendChild(el('span', 'pc-name', basis.axisName ? basis.axisName[k] : ('PC' + (k + 1))));
     head.appendChild(el('span', 'pc-hint', hintFor(k)));
     const val = el('span', 'pc-val', '0.00');
     head.appendChild(val);
@@ -102,16 +120,16 @@ function buildSliders() {
     r.addEventListener('input', () => { coords[k] = +r.value; val.textContent = coords[k].toFixed(2); scheduleRender(); });
     cell.appendChild(r);
     cell._range = r; cell._val = val;
+    sliderCells.push(cell);
     root.appendChild(cell);
   }
 }
 
 // push coords[] back onto the slider widgets (after a seed / clone / random)
 function syncSliders() {
-  const cells = $('#sliders').children;
   for (let k = 0; k < basis.k; k++) {
-    cells[k]._range.value = String(coords[k]);
-    cells[k]._val.textContent = coords[k].toFixed(2);
+    sliderCells[k]._range.value = String(coords[k]);
+    sliderCells[k]._val.textContent = coords[k].toFixed(2);
   }
 }
 
