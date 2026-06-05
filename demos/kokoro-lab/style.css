@@ -73,9 +73,10 @@ body {
   background: #8ad9ff; border: 1px solid #0c0e12;
 }
 .pc input[type=range]:hover::-webkit-slider-thumb { background: #b6e3ff; }
-/* label + field on one line. Kept off flex on purpose: a fixed-width <input> as a
-   flex item is mis-sized by the layout engine (ignores box-sizing, overflows its
-   container); in a block/inline context it sizes correctly. */
+/* label + field on one line via block + inline children (not flex): a flex row
+   whose item is a fixed-width <input> plus a text label still under-counts the
+   label's width in the container's intrinsic size, so the field can overflow into
+   the next group. Block/inline flow sizes both cleanly. */
 .cfg { display: block; white-space: nowrap; color: #56606e; font-size: 10px;
        text-transform: uppercase; letter-spacing: 0.6px; }
 /* values keep normal casing + size despite the uppercase label styling above */
