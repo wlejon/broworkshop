@@ -84,6 +84,9 @@ button {
 button:hover:not(:disabled) { background: #243150; }
 button:disabled { opacity: 0.4; cursor: default; }
 .meta { color: #5b6470; font-size: 11px; }
+.pin { color: #ffcf6b; }
+.pin-clear { color: #8ad9ff; cursor: pointer; margin-left: 8px; }
+.pin-clear:hover { color: #b6e3ff; }
 
 /* stage stream */
 /* min-height:0 lets this flex child actually scroll instead of growing the page */
@@ -114,7 +117,8 @@ button:disabled { opacity: 0.4; cursor: default; }
 
 /* data-flow highlight: one phoneme's territory across stages */
 .canvas-wrap { position: relative; line-height: 0; }
-.stage-body canvas { cursor: crosshair; }
+/* the editor canvases are drag surfaces — never let a drag select text */
+.stage-body canvas { cursor: crosshair; user-select: none; -webkit-user-select: none; }
 .flow-hl {
   position: absolute; pointer-events: none; display: none; box-sizing: border-box;
   background: rgba(138, 217, 255, 0.16); border: 1px solid rgba(138, 217, 255, 0.75);

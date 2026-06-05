@@ -46,6 +46,13 @@ const STAGE_INFO = {
   audio:    { kind: 'wave',  desc: 'output waveform — 24 kHz', flow: { axis: 'x', time: 'frame' } },
 };
 
+// Display order, regardless of the order the trace emits stages in: phonemes,
+// then the editable prosody surfaces (pitch / energy / timing) hoisted to the
+// top so they're reachable without scrolling, then the waveform, then the rest
+// of the latent pipeline in forward order.
+const STAGE_ORDER = ['phonemes', 'F0_pred', 'N_pred', 'pred_dur', 'audio',
+                     'bert_dur', 'd_en', 't_en', 'asr', 'gen_in', 'har'];
+
 // flow state: overlays/chips per stage, and the currently traced phoneme.
 let flowStages = [];
 let selPhoneme = -1;
@@ -67,8 +74,13 @@ let dirty = false;         // the voice changed; needs an audio-then-trace pass
 let predicted = null;      // { F0, N, dur } snapshot of the model's prediction (reset)
 let curDur = null;         // the durations the current F0/N are aligned to (int[])
 let edited = false;        // the user has reshaped a contour or the timing
+let pinnedEdit = null;     // retained prosody delta, re-applied on every voice/slider change
+                           // { durRatio:Float64[L], dF0:Float32, dN:Float32, baseDur:int[L] }
 let activePaint = null;    // in-progress curve drag {cv,s,color,mn,mx,W,H,pad,lastI,lastV}
 let activeDrag = null;     // in-progress alignment drag {cv,s,total,work,x0,l,base,rectW,moved}
+let protectedStage = null; // stage name whose canvas to keep intact across a re-decode (the edit IS the truth)
+let stageCards = null;     // name -> { card, body, info, shapeEl, statsEl }; cards persist, bodies refresh in place
+let stageSig = '';         // current stage-name signature, so we only full-rebuild when the set changes
 
 const ATTR_WORD = { f0_mean: 'pitch', rms: 'volume', energy: 'energy', rate: 'pace', zcr: 'brightness', f0_std: 'pitch var' };
 
@@ -347,7 +359,9 @@ function pump() {
   catch (e) { setBadge('phonemize: ' + e.message, true); dirty = false; return; }
   if (!ids || !ids.length) { setBadge('no phonemes for that text', true); dirty = false; return; }
   dirty = false;
-  synthAudio(ids);
+  // with a pinned edit the unedited audio is never heard (the trace pass
+  // re-decodes & plays the edited version), so skip the fast audio-only pass.
+  if (pinnedEdit) synthTrace(ids); else synthAudio(ids);
 }
 
 // Kick off a background synth, marking the model busy. A synchronous throw
@@ -374,7 +388,7 @@ function synthAudio(ids) {
       if (!info.cancelled) {
         setClip(r.samples, r.sampleRate);
         $('#btn-play').disabled = false;
-        setTimeout(play, 40);
+        if (!pinnedEdit) setTimeout(play, 40);   // pinned: trace pass re-decodes & plays the edited audio
       }
       if (dirty) pump();              // a newer voice arrived — hear it next
       else synthTrace(ids);           // audio is current → now gather the trace
@@ -400,6 +414,11 @@ function synthTrace(ids) {
         const sc = $('#stages').scrollTop;
         renderStages(stages);
         $('#stages').scrollTop = sc;   // keep your place while exploring
+        // ride the retained prosody onto this fresh prediction; if the text no
+        // longer fits, the pin is dropped and we present the prediction as-is.
+        // (When pinned, this pass is the *only* one — see pump — so on a miss we
+        // publish this pass's own audio before playing it.)
+        if (pinnedEdit && !reapplyPinnedEdit()) { setClip(r.samples, r.sampleRate); play(); }
       }
       if (dirty) pump();
     },
@@ -407,50 +426,101 @@ function synthTrace(ids) {
 }
 
 // ═══ render ════════════════════════════════════════════════════════════════
+// hoist the editable prosody surfaces + waveform to the top (see STAGE_ORDER);
+// stable for any stage the order list doesn't name (keeps emit order).
+function orderStages(stages) {
+  const rank = (n) => { const i = STAGE_ORDER.indexOf(n); return i < 0 ? STAGE_ORDER.length : i; };
+  return stages
+    .map((s, i) => [s, i])
+    .sort((a, b) => (rank(a[0].name) - rank(b[0].name)) || (a[1] - b[1]))
+    .map((x) => x[0]);
+}
+
+// Stages render once into persistent cards, then refresh IN PLACE on every
+// re-decode — the stage tree is never torn down. The card the user is editing
+// (or just edited) holds the truth they drew, so its body is left exactly as-is
+// while every downstream stage regenerates from the new data.
 function renderStages(stages) {
+  const ordered = orderStages(stages);
+  const sig = ordered.map((s) => s.name).join('|');
+  if (!stageCards || sig !== stageSig) { buildStages(ordered, sig); return; }
+
+  const protect = (activePaint && activePaint.s && activePaint.s.name) ||
+                  (activeDrag && activeDrag.s && activeDrag.s.name) || protectedStage;
+  flowStages = [];
+  selPhoneme = -1;
+  $('#sel-label').textContent = '';
+  for (const s of ordered) {
+    const cell = stageCards[s.name];
+    if (!cell) { buildStages(ordered, sig); return; }   // unexpected stage set — full rebuild
+    if (s.name === protect) { registerFlow(cell.body, cell.info); continue; }   // leave the edited canvas alone
+    updateHead(cell, s);
+    cell.body.textContent = '';
+    paintBody(cell.body, s, cell.info);
+    registerFlow(cell.body, cell.info);
+  }
+}
+
+// First render (or whenever the stage set changes): build the cards fresh.
+function buildStages(ordered, sig) {
   const root = $('#stages');
   root.textContent = '';
   flowStages = [];
   selPhoneme = -1;
   $('#sel-label').textContent = '';
-
-  for (const s of stages) {
+  stageCards = {};
+  stageSig = sig;
+  for (const s of ordered) {
     const info = STAGE_INFO[s.name] || { kind: 'heat', desc: '' };
     const card = el('div', 'stage');
     const head = el('div', 'stage-head');
     head.appendChild(el('span', 'stage-name', s.name));
-    head.appendChild(el('span', 'stage-shape', s.h + ' x ' + s.w));
+    const shapeEl = el('span', 'stage-shape', '');
+    head.appendChild(shapeEl);
     head.appendChild(el('span', 'stage-desc', info.desc));
-    const st = stats(s.data);
-    head.appendChild(el('span', 'stage-stats',
-      'min ' + st.mn.toFixed(2) + '  max ' + st.mx.toFixed(2) + '  μ ' + st.mean.toFixed(2)));
+    const statsEl = el('span', 'stage-stats', '');
+    head.appendChild(statsEl);
     card.appendChild(head);
-
     const body = el('div', 'stage-body');
     card.appendChild(body);
     root.appendChild(card);
+    const cell = { card, body, info, shapeEl, statsEl };
+    stageCards[s.name] = cell;
+    updateHead(cell, s);
+    paintBody(body, s, info);
+    registerFlow(body, info);
+  }
+}
 
-    try {
-      if (info.kind === 'chips')      renderChips(body, s);
-      else if (info.kind === 'align') renderAlign(body, s);
-      else if (info.kind === 'curve') renderCurve(body, s, info.color || '#8ad9ff');
-      else if (info.kind === 'wave')  renderWave(body, s);
-      else                            renderHeat(body, s);
-    } catch (e) {
-      body.appendChild(el('div', 'axis-note', 'render error: ' + e.message));
-    }
+function updateHead(cell, s) {
+  cell.shapeEl.textContent = s.h + ' x ' + s.w;
+  const st = stats(s.data);
+  cell.statsEl.textContent =
+    'min ' + st.mn.toFixed(2) + '  max ' + st.mx.toFixed(2) + '  μ ' + st.mean.toFixed(2);
+}
 
-    // register this stage for the data-flow highlight
-    if (info.flow) {
-      if (info.flow.axis === 'chip') {
-        const chips = [...body.querySelectorAll('.chip')];
-        chips.forEach((c, i) => c.addEventListener('click', () => selectPhoneme(i)));
-        flowStages.push({ flow: info.flow, chips });
-      } else {
-        const cv = body.querySelector('canvas');
-        if (cv && cv._overlay) flowStages.push({ flow: info.flow, overlay: cv._overlay });
-      }
-    }
+function paintBody(body, s, info) {
+  try {
+    if (info.kind === 'chips')      renderChips(body, s);
+    else if (info.kind === 'align') renderAlign(body, s);
+    else if (info.kind === 'curve') renderCurve(body, s, info.color || '#8ad9ff');
+    else if (info.kind === 'wave')  renderWave(body, s);
+    else                            renderHeat(body, s);
+  } catch (e) {
+    body.appendChild(el('div', 'axis-note', 'render error: ' + e.message));
+  }
+}
+
+// (Re)register a stage for the data-flow highlight from its current DOM.
+function registerFlow(body, info) {
+  if (!info || !info.flow) return;
+  if (info.flow.axis === 'chip') {
+    const chips = [...body.querySelectorAll('.chip')];
+    chips.forEach((c, i) => c.addEventListener('click', () => selectPhoneme(i)));
+    flowStages.push({ flow: info.flow, chips });
+  } else {
+    const cv = body.querySelector('canvas');
+    if (cv && cv._overlay) flowStages.push({ flow: info.flow, overlay: cv._overlay });
   }
 }
 
@@ -544,13 +614,16 @@ function renderAlign(body, s) {
   const editable = (s.name === 'pred_dur');
   cv.addEventListener('mousedown', (e) => {
     if (synthBusy || !lastTrace) return;
+    e.preventDefault();                              // don't start a text selection
+    if (renderTimer) { clearTimeout(renderTimer); renderTimer = 0; }   // don't let a queued slider render fire mid-edit
+    const tot = s.data.reduce((a, b) => a + b, 0) || 1;   // current sum, not the value at paint time
     const rect = cv.getBoundingClientRect();
-    const tgt = ((e.clientX - rect.left) / rect.width) * total;
+    const tgt = ((e.clientX - rect.left) / rect.width) * tot;
     let acc = 0, l = 0;
     for (; l < s.data.length; l++) { acc += s.data[l]; if (tgt < acc) break; }
     if (l >= s.data.length) l = s.data.length - 1;
     if (!editable) { selectPhoneme(l); return; }     // non-editable: plain click
-    activeDrag = { cv, s, total, work: Array.from(s.data, (v) => Math.round(v)),
+    activeDrag = { cv, s, total: tot, work: Array.from(s.data, (v) => Math.round(v)),
                    x0: e.clientX, l, base: Math.round(s.data[l]), rectW: rect.width, moved: false };
   });
   const note = el('div', 'axis-note',
@@ -576,7 +649,11 @@ function dragDurAt(e) {
 }
 function onDurUp() {
   const d = activeDrag; activeDrag = null; if (!d) return;
-  if (d.moved) commitDuration(d.work); else selectPhoneme(d.l);
+  if (d.moved) {                    // keep the dragged blocks intact through the commit's re-render
+    protectedStage = d.s.name;
+    commitDuration(d.work);
+    protectedStage = null;
+  } else selectPhoneme(d.l);
 }
 
 // Draw a contour into its canvas from s.data, fixed [mn,mx] vertical range.
@@ -600,14 +677,28 @@ function drawCurve(cv, s, color, mn, mx) {
 // F0_pred / N_pred are editable: drag to reshape the pitch / energy contour,
 // then re-decode just the back half. Range is padded with upward headroom so a
 // drag has somewhere to go; the drawn span is frozen for the duration of a card.
+// Editable contour range: padded with upward headroom so a drag has somewhere to
+// go. Recomputed from the current data on every draw / grab, so it stays correct
+// even after the contour was reshaped in place.
+function curveRange(s) {
+  let mn = Infinity, mx = -Infinity;
+  for (let i = 0; i < s.data.length; i++) { const v = s.data[i]; if (v < mn) mn = v; if (v > mx) mx = v; }
+  mn = Math.min(0, mn); mx = mx * 1.35 + (mx <= 0 ? 1 : 0);
+  if (mn === mx) { mn -= 1; mx += 1; }
+  return [mn, mx];
+}
+
 function renderCurve(body, s, color) {
   const W = 1100, H = 130, pad = 6;
   const cv = mkCanvas(body, W, H);
   const editable = (s.name === 'F0_pred' || s.name === 'N_pred');
-  let mn = Infinity, mx = -Infinity;
-  for (let i = 0; i < s.data.length; i++) { const v = s.data[i]; if (v < mn) mn = v; if (v > mx) mx = v; }
-  if (editable) { mn = Math.min(0, mn); mx = mx * 1.35 + (mx <= 0 ? 1 : 0); }
-  if (mn === mx) { mn -= 1; mx += 1; }
+  let mn, mx;
+  if (editable) { [mn, mx] = curveRange(s); }
+  else {
+    mn = Infinity; mx = -Infinity;
+    for (let i = 0; i < s.data.length; i++) { const v = s.data[i]; if (v < mn) mn = v; if (v > mx) mx = v; }
+    if (mn === mx) { mn -= 1; mx += 1; }
+  }
   drawCurve(cv, s, color, mn, mx);
 
   const note = el('div', 'axis-note',
@@ -619,7 +710,10 @@ function renderCurve(body, s, color) {
     note.appendChild(reset);
     cv.addEventListener('mousedown', (e) => {
       if (synthBusy || !lastTrace) return;
-      activePaint = { cv, s, color, mn, mx, W, H, pad, lastI: -1, lastV: 0 };
+      e.preventDefault();                            // don't start a text selection
+      if (renderTimer) { clearTimeout(renderTimer); renderTimer = 0; }   // don't let a queued slider render fire mid-edit
+      const [cmn, cmx] = curveRange(s);              // fresh range for the current contour
+      activePaint = { cv, s, color, mn: cmn, mx: cmx, W, H, pad, lastI: -1, lastV: 0 };
       paintAt(e);
     });
   }
@@ -646,7 +740,14 @@ function paintAt(e) {
 }
 
 // Finish a drag: re-decode from the edited contours. (Installed once in init.)
-function onPaintUp() { if (activePaint) { activePaint = null; commitEdit(); } }
+function onPaintUp() {
+  if (!activePaint) return;
+  const name = activePaint.s.name;
+  activePaint = null;
+  protectedStage = name;  // keep the contour the user drew intact through the commit's re-render
+  commitEdit();
+  protectedStage = null;
+}
 
 function snapshotPredicted(r) {
   const f = r.stages.find((s) => s.name === 'F0_pred');
@@ -675,6 +776,7 @@ function applyBackHalf(r, label) {
   $('#stages').scrollTop = sc;
   $('#run-meta').textContent = label + ' · ' +
     (r.samples.length / r.sampleRate).toFixed(2) + 's · ↺ reset to restore';
+  capturePinnedEdit();    // remember this edit as a delta, to ride onto the next voice
 }
 
 // Re-run only the decoder back half from the (possibly edited) asr/F0/N grids
@@ -751,6 +853,106 @@ function commitDuration(newDur) {
   curDur = newDur.slice();
   lastTrace.durations = newDur.slice();    // selectPhoneme reads this
   applyBackHalf(r, 'timing edited');
+}
+
+// ── retained prosody ─────────────────────────────────────────────────────────
+// A prosody edit is the *difference* from the model's own prediction, not an
+// absolute contour — so it can ride along onto a different voice. We store it as
+//   · durRatio[l]  — per-phoneme timing multiplier (phoneme count L is fixed by
+//                    the text, so this maps cleanly across voices)
+//   · dF0 / dN     — additive contour deltas, anchored back onto the prediction's
+//                    timing (baseDur) so resampleByDur can restretch them later
+// Captured after every commit (manual or re-applied), so the pin always reflects
+// the current on-screen prosody relative to the current voice's prediction.
+function capturePinnedEdit() {
+  const F0 = lastTrace && lastTrace.stages.find((s) => s.name === 'F0_pred');
+  const N  = lastTrace && lastTrace.stages.find((s) => s.name === 'N_pred');
+  if (!predicted || !predicted.F0 || !predicted.N || !predicted.dur || !curDur || !F0 || !N) {
+    pinnedEdit = null; updatePinUI(); return;
+  }
+  const base = predicted.dur, L = base.length;
+  const durRatio = new Float64Array(L);
+  for (let l = 0; l < L; l++) durRatio[l] = curDur[l] / (base[l] || 1);
+  // map the current contours back onto the prediction's timing, then subtract
+  const f0AtPred = resampleByDur(F0.data, curDur, base);
+  const nAtPred  = resampleByDur(N.data,  curDur, base);
+  const dF0 = new Float32Array(predicted.F0.length);
+  for (let i = 0; i < dF0.length; i++) dF0[i] = f0AtPred[i] - predicted.F0[i];
+  const dN = new Float32Array(predicted.N.length);
+  for (let i = 0; i < dN.length; i++) dN[i] = nAtPred[i] - predicted.N[i];
+  pinnedEdit = { durRatio, dF0, dN, baseDur: base.slice() };
+  updatePinUI();
+}
+
+// Re-apply the retained edit onto the *fresh* prediction the trace just produced:
+// scale its durations by durRatio, add the contour deltas (restretched to this
+// voice's spans), and re-decode the back half. Returns false (and drops the pin)
+// if the text changed so the phoneme count no longer lines up.
+function reapplyPinnedEdit() {
+  if (!pinnedEdit || synthBusy || !kokoro || !voice || !lastTrace) return false;
+  const get = (nm) => lastTrace.stages.find((s) => s.name === nm);
+  const ten = get('t_en'), F0 = get('F0_pred'), N = get('N_pred'), ph = get('phonemes'), pd = get('pred_dur');
+  if (!ten || !F0 || !N || !ph || !pd) return false;
+  const predDur = Array.from(pd.data, (v) => Math.round(v));   // this voice's predicted timing
+  const L = predDur.length;
+  if (pinnedEdit.durRatio.length !== L) { pinnedEdit = null; updatePinUI(); return false; }
+
+  const targetDur = new Array(L);
+  for (let l = 0; l < L; l++) targetDur[l] = Math.max(1, Math.round(predDur[l] * pinnedEdit.durRatio[l]));
+  const totalP = targetDur.reduce((a, b) => a + b, 0);
+  if (totalP < 1) return false;
+
+  // contours: prediction + delta (delta restretched from baseDur onto predDur),
+  // then the whole thing retimed from predDur onto the edited targetDur
+  const dF0v = resampleByDur(pinnedEdit.dF0, pinnedEdit.baseDur, predDur);
+  const dNv  = resampleByDur(pinnedEdit.dN,  pinnedEdit.baseDur, predDur);
+  const f0Ed = new Float32Array(F0.data.length), nEd = new Float32Array(N.data.length);
+  for (let i = 0; i < f0Ed.length; i++) f0Ed[i] = Math.max(0, F0.data[i] + (dF0v[i] || 0));
+  for (let i = 0; i < nEd.length; i++)  nEd[i]  = N.data[i] + (dNv[i] || 0);
+  const F0f = resampleByDur(f0Ed, predDur, targetDur);
+  const Nf  = resampleByDur(nEd,  predDur, targetDur);
+
+  // length-regulate t_en (channel-major data[c*L + l]) onto the edited timing
+  const H = kokoro.hiddenDim, td = ten.data, asrP = new Float32Array(H * totalP);
+  let t = 0;
+  for (let l = 0; l < L; l++) {
+    const reps = targetDur[l] | 0;
+    for (let r = 0; r < reps; r++) { for (let c = 0; c < H; c++) asrP[c * totalP + t] = td[c * L + l]; t++; }
+  }
+
+  let r;
+  synthBusy = true;
+  try { r = kokoro.decodeFrom(voice, asrP, F0f, Nf, ph.w, { trace: true }); }
+  catch (e) { synthBusy = false; setBadge('reapply: ' + e.message, true); return false; }
+  synthBusy = false;
+
+  const set = (nm, data, w) => { const s = get(nm); if (s) { s.data = data; if (w != null) s.w = w; } };
+  set('asr', asrP, totalP);
+  set('F0_pred', F0f, F0f.length);
+  set('N_pred', Nf, Nf.length);
+  set('pred_dur', Float32Array.from(targetDur), L);
+  curDur = targetDur.slice();
+  lastTrace.durations = targetDur.slice();
+  applyBackHalf(r, 'prosody retained');
+  return true;
+}
+
+// Drop the retained edit and fall back to the model's own prosody.
+function clearProsody() {
+  pinnedEdit = null;
+  updatePinUI();
+  run();
+}
+
+function updatePinUI() {
+  const p = $('#pin'); if (!p) return;
+  p.textContent = '';
+  if (!pinnedEdit) { p.style.display = 'none'; return; }
+  p.style.display = '';
+  p.appendChild(el('span', null, '✎ prosody pinned'));
+  const x = el('span', 'pin-clear', '✕ clear');
+  x.addEventListener('click', clearProsody);
+  p.appendChild(x);
 }
 
 // Restore one contour (F0 or N) to the model's prediction, then re-decode.
@@ -917,6 +1119,7 @@ function setClip(samples, inRate) {
     if (clipId >= 0) { try { audioCtx.deleteClip(clipId); } catch (e) {} }
     clipId = audioCtx.createClip(buf, 1);
     clipSamples = buf.length;
+    $('#btn-play').disabled = false;
   } catch (e) { setBadge('audio: ' + e.message, true); clipId = -1; clipSamples = 0; }
 }
 function play() {
