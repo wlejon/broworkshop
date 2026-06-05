@@ -62,10 +62,13 @@ let renderTimer = 0;       // debounce slider drags before the re-render
 let synthBusy = false;     // a synth (audio or trace pass) is in flight
 let dirty = false;         // the voice changed; needs an audio-then-trace pass
 
-// ── prosody editing (drag the F0 / energy curves, re-decode just the back half)
-let predicted = null;      // { F0, N } snapshot of the model's prediction (reset)
-let edited = false;        // the user has reshaped a contour
+// ── prosody editing (drag the F0 / energy curves or the alignment, re-decode
+//    just the back half)
+let predicted = null;      // { F0, N, dur } snapshot of the model's prediction (reset)
+let curDur = null;         // the durations the current F0/N are aligned to (int[])
+let edited = false;        // the user has reshaped a contour or the timing
 let activePaint = null;    // in-progress curve drag {cv,s,color,mn,mx,W,H,pad,lastI,lastV}
+let activeDrag = null;     // in-progress alignment drag {cv,s,total,work,x0,l,base,rectW,moved}
 
 const ATTR_WORD = { f0_mean: 'pitch', rms: 'volume', energy: 'energy', rate: 'pace', zcr: 'brightness', f0_std: 'pitch var' };
 
@@ -513,32 +516,67 @@ function renderChips(body, s) {
 
 // Alignment: each phoneme gets horizontal width proportional to its frame
 // count — the literal symbol-time -> frame-time layout.
-function renderAlign(body, s) {
-  const W = 1100, H = 54;
-  const cv = mkCanvas(body, W, H);
-  const ctx = cv.getContext('2d');
-  const total = s.data.reduce((a, b) => a + b, 0) || 1;
+// Draw the alignment blocks from a duration array; returns the summed frames.
+function drawAlign(cv, durs) {
+  const ctx = cv.getContext('2d'), W = cv.width, H = cv.height;
+  const total = durs.reduce((a, b) => a + b, 0) || 1;
+  ctx.clearRect(0, 0, W, H);
   let x = 0;
-  for (let i = 0; i < s.data.length; i++) {
-    const w = (s.data[i] / total) * W;
+  for (let i = 0; i < durs.length; i++) {
+    const w = (durs[i] / total) * W;
     ctx.fillStyle = (i % 2) ? '#1f3350' : '#284873';
     ctx.fillRect(x, 0, Math.max(1, w - 1), H);
     if (w > 16) {
-      ctx.fillStyle = '#9fb6d4';
-      ctx.font = '10px monospace';
-      ctx.fillText(String(s.data[i] | 0), x + 3, 14);
+      ctx.fillStyle = '#9fb6d4'; ctx.font = '10px monospace';
+      ctx.fillText(String(durs[i] | 0), x + 3, 14);
     }
     x += w;
   }
-  // click a block to trace that phoneme through every stage
-  cv.addEventListener('click', (e) => {
-    const frac = e.offsetX / cv.clientWidth, target = frac * total;
-    let acc = 0;
-    for (let i = 0; i < s.data.length; i++) { acc += s.data[i]; if (target < acc) { selectPhoneme(i); break; } }
+  return total;
+}
+
+// pred_dur is editable: drag a block sideways to lengthen/shorten that phoneme
+// (emphasis / pacing). A click without a drag still traces the phoneme.
+function renderAlign(body, s) {
+  const W = 1100, H = 54;
+  const cv = mkCanvas(body, W, H);
+  const total = drawAlign(cv, s.data);
+  const editable = (s.name === 'pred_dur');
+  cv.addEventListener('mousedown', (e) => {
+    if (synthBusy || !lastTrace) return;
+    const rect = cv.getBoundingClientRect();
+    const tgt = ((e.clientX - rect.left) / rect.width) * total;
+    let acc = 0, l = 0;
+    for (; l < s.data.length; l++) { acc += s.data[l]; if (tgt < acc) break; }
+    if (l >= s.data.length) l = s.data.length - 1;
+    if (!editable) { selectPhoneme(l); return; }     // non-editable: plain click
+    activeDrag = { cv, s, total, work: Array.from(s.data, (v) => Math.round(v)),
+                   x0: e.clientX, l, base: Math.round(s.data[l]), rectW: rect.width, moved: false };
   });
-  body.appendChild(el('div', 'axis-note',
-    'left -> right = time · block width = frames for that phoneme · sum = ' + total +
-    ' frames · click a block to trace it'));
+  const note = el('div', 'axis-note',
+    (editable ? 'drag a block to re-time · ' : '') +
+    'left → right = time · block width = frames · sum = ' + (total | 0) + ' frames' +
+    (editable ? ' · ' : ' · click a block to trace it'));
+  if (editable) {
+    const reset = el('span', 'curve-reset', '↺ reset timing');
+    reset.addEventListener('click', resetDurations);
+    note.appendChild(reset);
+  }
+  body.appendChild(note);
+}
+
+// drag in progress: dx pixels -> ± frames on the grabbed block, live redraw
+function dragDurAt(e) {
+  const d = activeDrag; if (!d) return;
+  const dx = e.clientX - d.x0;
+  if (Math.abs(dx) > 3) d.moved = true;
+  const dframes = Math.round((dx / d.rectW) * d.total);
+  d.work[d.l] = Math.max(1, d.base + dframes);
+  drawAlign(d.cv, d.work);
+}
+function onDurUp() {
+  const d = activeDrag; activeDrag = null; if (!d) return;
+  if (d.moved) commitDuration(d.work); else selectPhoneme(d.l);
 }
 
 // Draw a contour into its canvas from s.data, fixed [mn,mx] vertical range.
@@ -613,8 +651,30 @@ function onPaintUp() { if (activePaint) { activePaint = null; commitEdit(); } }
 function snapshotPredicted(r) {
   const f = r.stages.find((s) => s.name === 'F0_pred');
   const n = r.stages.find((s) => s.name === 'N_pred');
-  predicted = { F0: f ? Float32Array.from(f.data) : null, N: n ? Float32Array.from(n.data) : null };
+  const d = r.stages.find((s) => s.name === 'pred_dur');
+  const dur = d ? Array.from(d.data, (v) => Math.round(v)) : null;
+  predicted = {
+    F0: f ? Float32Array.from(f.data) : null,
+    N:  n ? Float32Array.from(n.data) : null,
+    dur: dur ? dur.slice() : null,
+  };
+  curDur = dur ? dur.slice() : null;     // F0/N start aligned to the prediction
   edited = false;
+}
+
+// Shared tail: a decodeFrom result `r` carries the re-decoded back-half stages
+// (gen_in/har/audio). Swap them into the trace, play the new audio, and redraw
+// the whole pipeline so the edit propagates visually.
+function applyBackHalf(r, label) {
+  for (const st of r.stages) { const i = lastTrace.stages.findIndex((x) => x.name === st.name); if (i >= 0) lastTrace.stages[i] = st; }
+  setClip(r.samples, r.sampleRate);
+  setTimeout(play, 30);
+  edited = true;
+  const sc = $('#stages').scrollTop;
+  renderStages(lastTrace.stages);
+  $('#stages').scrollTop = sc;
+  $('#run-meta').textContent = label + ' · ' +
+    (r.samples.length / r.sampleRate).toFixed(2) + 's · ↺ reset to restore';
 }
 
 // Re-run only the decoder back half from the (possibly edited) asr/F0/N grids
@@ -629,17 +689,68 @@ function commitEdit() {
   try { r = kokoro.decodeFrom(voice, asr.data, F0.data, N.data, ph.w, { trace: true }); }
   catch (e) { synthBusy = false; setBadge('decodeFrom: ' + e.message, true); return; }
   synthBusy = false;
-  setClip(r.samples, r.sampleRate);
-  setTimeout(play, 30);
-  edited = true;
-  // swap the re-decoded back-half stages back into the trace, keep the edited
-  // contours, and redraw the whole pipeline so the change propagates visually
-  for (const st of r.stages) { const i = lastTrace.stages.findIndex((x) => x.name === st.name); if (i >= 0) lastTrace.stages[i] = st; }
-  const sc = $('#stages').scrollTop;
-  renderStages(lastTrace.stages);
-  $('#stages').scrollTop = sc;
-  $('#run-meta').textContent = 'prosody edited · ' +
-    (r.samples.length / r.sampleRate).toFixed(2) + 's · ↺ reset on the curve to restore';
+  applyBackHalf(r, 'pitch/energy edited');
+}
+
+// Resample a frame-rate contour from one per-phoneme duration set to another,
+// preserving each phoneme's contour SHAPE while restretching its time span.
+// src is at 2× frame rate (2*sum(srcDur)); returns 2*sum(dstDur).
+function resampleByDur(src, srcDur, dstDur) {
+  const L = srcDur.length;
+  let sumD = 0; for (let l = 0; l < L; l++) sumD += dstDur[l];
+  const dst = new Float32Array(2 * sumD);
+  let sOff = 0, dOff = 0;
+  for (let l = 0; l < L; l++) {
+    const sLen = 2 * srcDur[l], dLen = 2 * dstDur[l];
+    const sStart = 2 * sOff, dStart = 2 * dOff;
+    for (let k = 0; k < dLen; k++) {
+      if (sLen === 0) { dst[dStart + k] = 0; continue; }    // no source samples
+      const sp = dLen <= 1 ? 0 : (k / (dLen - 1)) * (sLen - 1);
+      const i0 = Math.floor(sp), i1 = Math.min(sLen - 1, i0 + 1), f = sp - i0;
+      dst[dStart + k] = src[sStart + i0] * (1 - f) + src[sStart + i1] * f;
+    }
+    sOff += srcDur[l]; dOff += dstDur[l];
+  }
+  return dst;
+}
+
+// Re-time: the per-phoneme frame counts changed. Rebuild asr by re-expanding the
+// text-encoder features (length regulate), resample the F0/N contours from the
+// old timing to the new, and re-decode. No predictor re-run.
+function commitDuration(newDur) {
+  if (synthBusy || !kokoro || !voice || !lastTrace || !curDur) return;
+  const get = (nm) => lastTrace.stages.find((s) => s.name === nm);
+  const ten = get('t_en'), F0 = get('F0_pred'), N = get('N_pred'), ph = get('phonemes');
+  if (!ten || !F0 || !N || !ph) { setBadge('re-time: trace is missing stages', true); return; }
+  const H = kokoro.hiddenDim, L = newDur.length;
+  const totalP = newDur.reduce((a, b) => a + b, 0);
+  if (totalP < 1) return;
+
+  // length-regulate t_en (channel-major data[c*L + l]) into asr[c*totalP + t]
+  const td = ten.data, asrP = new Float32Array(H * totalP);
+  let t = 0;
+  for (let l = 0; l < L; l++) {
+    const reps = newDur[l] | 0;
+    for (let r = 0; r < reps; r++) { for (let c = 0; c < H; c++) asrP[c * totalP + t] = td[c * L + l]; t++; }
+  }
+  const F0p = resampleByDur(F0.data, curDur, newDur);
+  const Np  = resampleByDur(N.data,  curDur, newDur);
+
+  let r;
+  synthBusy = true;
+  try { r = kokoro.decodeFrom(voice, asrP, F0p, Np, ph.w, { trace: true }); }
+  catch (e) { synthBusy = false; setBadge('decodeFrom: ' + e.message, true); return; }
+  synthBusy = false;
+
+  // commit the new front-stage grids so the next edit composes correctly
+  const set = (nm, data, w) => { const s = get(nm); if (s) { s.data = data; if (w != null) s.w = w; } };
+  set('asr', asrP, totalP);
+  set('F0_pred', F0p, F0p.length);
+  set('N_pred', Np, Np.length);
+  set('pred_dur', Float32Array.from(newDur), L);
+  curDur = newDur.slice();
+  lastTrace.durations = newDur.slice();    // selectPhoneme reads this
+  applyBackHalf(r, 'timing edited');
 }
 
 // Restore one contour (F0 or N) to the model's prediction, then re-decode.
@@ -649,6 +760,12 @@ function resetSignal(name) {
   const src = name === 'F0_pred' ? predicted.F0 : predicted.N;
   if (st && src && st.data.length === src.length) st.data.set(src);
   commitEdit();
+}
+
+// Restore the predicted timing (resamples the current contours back).
+function resetDurations() {
+  if (!predicted || !predicted.dur) return;
+  commitDuration(predicted.dur.slice());
 }
 
 function renderWave(body, s) {
@@ -854,9 +971,9 @@ function init() {
   $('#btn-play').addEventListener('click', play);
   $('#btn-reload').addEventListener('click', reload);
   $('#text').addEventListener('keydown', (e) => { if (e.key === 'Enter') run(); });
-  // prosody-edit drag: one global pair so re-rendered curves never leak listeners
-  window.addEventListener('mousemove', (e) => { if (activePaint) paintAt(e); });
-  window.addEventListener('mouseup', onPaintUp);
+  // prosody-edit drag: one global pair so re-rendered cards never leak listeners
+  window.addEventListener('mousemove', (e) => { if (activePaint) paintAt(e); else if (activeDrag) dragDurAt(e); });
+  window.addEventListener('mouseup', () => { if (activePaint) onPaintUp(); else if (activeDrag) onDurUp(); });
   reload();
 }
 init();

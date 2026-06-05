@@ -35,4 +35,25 @@ let restored = 0;
 for (let i = 0; i < F0.data.length; i++) if (Math.abs(F0.data[i] - base[i]) < 1e-6) restored++;
 assert(restored === F0.data.length, 'reset restored F0 to the prediction');
 console.log('reset ok ·', restored, '/', F0.data.length, 'frames restored');
+
+// ── duration editing ───────────────────────────────────────────────────────
+const origTotal = curDur.reduce((a, b) => a + b, 0);
+const nd = curDur.slice();
+let li = -1; for (let i = 0; i < nd.length; i++) if (nd[i] >= 4) { li = i; break; }
+assert(li >= 0, 'found a phoneme with enough frames to lengthen');
+const wasFrames = nd[li]; nd[li] = wasFrames * 2;          // double its duration
+const newTotal = nd.reduce((a, b) => a + b, 0);
+commitDuration(nd);
+const asr2 = lastTrace.stages.find((s) => s.name === 'asr');
+const F02 = lastTrace.stages.find((s) => s.name === 'F0_pred');
+assert(asr2.w === newTotal, 're-time: asr width = new total');
+assert(asr2.data.length === kokoro.hiddenDim * newTotal, 're-time: asr resized to hidden*total');
+assert(F02.data.length === 2 * newTotal, 're-time: F0 resized to 2*total');
+assert(curDur.reduce((a, b) => a + b, 0) === newTotal, 're-time: curDur updated');
+assert(lastTrace.durations[li] === wasFrames * 2, 're-time: durations reflect the edit');
+console.log('re-time: total', origTotal, '->', newTotal, '· clip', clipSamples, 'samples');
+
+resetDurations();
+assert(curDur.reduce((a, b) => a + b, 0) === predicted.dur.reduce((a, b) => a + b, 0), 'reset restored predicted timing');
+console.log('re-time reset ok · total back to', curDur.reduce((a, b) => a + b, 0));
 console.log('EDIT_SMOKE OK');
