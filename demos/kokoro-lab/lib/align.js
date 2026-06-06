@@ -5,14 +5,17 @@
 // text you can change directly.
 //
 // Edit a cell three ways — type a value, scroll the wheel (±1, shift ±5), or
-// drag it vertically (up = longer). Every edit updates the cells live and cheap;
-// the expensive part (re-decoding the back half + repainting the pipeline) is
-// COALESCED behind scheduleDuration, so a flurry of tweaks costs one decode once
-// you pause, instead of freezing on every change the way the drag-canvas did.
-// Click a cell (without dragging) still traces that phoneme through every stage.
+// drag it vertically (up = longer). Every edit updates the cells live and cheap,
+// then asks for a re-decode. There is NO debounce: the decode runs on a
+// background thread (bro.tts.decodeFrom), so editing never blocks. The pump is
+// latest-wins — while a decode is in flight, new edits just mark the target
+// dirty; when it lands it plays and immediately chases the newest durWork. You
+// hear each render as it finishes while you keep scrubbing. The expensive
+// pipeline repaint (heatmaps / curves) is held back until the edits settle, so
+// the hot loop stays cheap. Click a cell (without dragging) still traces it.
 
 let durWork = null;        // live working copy of the per-phoneme frame counts
-let durTimer = 0;          // debounce: coalesce edits into one re-decode
+let durPending = false;    // an edit is waiting to be (re-)decoded — latest wins
 
 // Reflect work[i] back onto cell i — number, proportional width, running sum.
 // Cheap (text + a style toggle); no synthesis, no pipeline repaint.
@@ -26,21 +29,90 @@ function updateAlignCell(cells, i) {
   }
 }
 
-// Commit the working durations, debounced. The model runs one job at a time, so
-// if a synth is mid-flight we retry shortly rather than dropping the edit. The
-// pred_dur card is protected across the commit's re-render so the cells the user
-// is touching are never torn out from under them.
-function scheduleDuration() {
-  if (durTimer) clearTimeout(durTimer);
-  durTimer = setTimeout(commitDurWork, 180);
+// An edit happened: mark the latest timing dirty and kick the async pump.
+function requestDuration() {
+  durPending = true;
+  pumpDuration();
 }
-function commitDurWork() {
-  durTimer = 0;
-  if (!durWork || !lastTrace) return;
-  if (synthBusy) { durTimer = setTimeout(commitDurWork, 60); return; }  // model busy — try again soon
+
+// Launch ONE background re-decode of the current durWork if the model is free.
+// Mirrors commitDuration's prep (length-regulate t_en → asr, resample F0/N onto
+// the new timing) but hands the decode to bro.tts.decodeFrom and applies the
+// result in onDone — so the JS thread is never blocked. On completion it chases
+// the newest edit if one arrived, else repaints the pipeline once (settle).
+function pumpDuration() {
+  if (synthBusy || !durPending) return;
+  if (!kokoro || !voice || !lastTrace || !curDur) return;
+  const get = (nm) => lastTrace.stages.find((s) => s.name === nm);
+  const ten = get('t_en'), F0 = get('F0_pred'), N = get('N_pred'), ph = get('phonemes');
+  if (!ten || !F0 || !N || !ph) { setBadge('re-time: trace is missing stages', true); durPending = false; return; }
+
+  durPending = false;
+  const newDur = durWork.slice();
+  const H = kokoro.hiddenDim, L = newDur.length;
+  const totalP = newDur.reduce((a, b) => a + b, 0);
+  if (totalP < 1) return;
+
+  // length-regulate t_en (channel-major data[c*L + l]) into asr[c*totalP + t]
+  const td = ten.data, asrP = new Float32Array(H * totalP);
+  let t = 0;
+  for (let l = 0; l < L; l++) {
+    const reps = newDur[l] | 0;
+    for (let rr = 0; rr < reps; rr++) { for (let c = 0; c < H; c++) asrP[c * totalP + t] = td[c * L + l]; t++; }
+  }
+  const F0p = resampleByDur(F0.data, curDur, newDur);
+  const Np  = resampleByDur(N.data,  curDur, newDur);
+
+  synthBusy = true;
+  try {
+    bro.tts.decodeFrom(kokoro, voice, asrP, F0p, Np, ph.w, {
+      trace: true,
+      onDone: (r, info) => {
+        synthBusy = false;
+        if (info.error) setBadge('decodeFrom: ' + info.error, true);
+        else if (!info.cancelled) applyDuration(r, newDur, asrP, F0p, Np, totalP, L);
+        if (durPending) pumpDuration();              // chase the latest edit
+        else { settleDuration(); if (dirty) pump(); } // settled — repaint once, then any pending voice change
+      },
+    });
+  } catch (e) {
+    synthBusy = false;
+    setBadge('decodeFrom: ' + e.message, true);
+    if (durPending) setTimeout(pumpDuration, 0);
+  }
+}
+
+// Publish a finished decode WITHOUT the heavy pipeline repaint: swap the new
+// back-half stages into the trace, commit the front grids so the next edit
+// composes correctly, and play the audio. The pred_dur cells were already
+// updated live by the edit; the heatmaps / curves wait for settleDuration.
+function applyDuration(r, newDur, asrP, F0p, Np, totalP, L) {
+  const set = (nm, data, w) => { const s = lastTrace.stages.find((x) => x.name === nm); if (s) { s.data = data; if (w != null) s.w = w; } };
+  for (const st of r.stages) { const i = lastTrace.stages.findIndex((x) => x.name === st.name); if (i >= 0) lastTrace.stages[i] = st; }
+  set('asr', asrP, totalP);
+  set('F0_pred', F0p, F0p.length);
+  set('N_pred', Np, Np.length);
+  set('pred_dur', Float32Array.from(newDur), L);
+  curDur = newDur.slice();
+  lastTrace.durations = newDur.slice();
+  setClip(r.samples, r.sampleRate);
+  play();
+  edited = true;
+  $('#run-meta').textContent = 'timing · ' + (r.samples.length / r.sampleRate).toFixed(2) + 's';
+}
+
+// Edits stopped: repaint the whole pipeline once (heatmaps / curves / waveform)
+// to reflect the final timing and capture the prosody pin. pred_dur is protected
+// so the live cells the user just left aren't torn out.
+function settleDuration() {
+  if (!lastTrace) return;
   protectedStage = 'pred_dur';
-  commitDuration(durWork.slice());
+  const sc = $('#stages').scrollTop;
+  renderStages(lastTrace.stages);
+  $('#stages').scrollTop = sc;
   protectedStage = null;
+  capturePinnedEdit();
+  $('#run-meta').textContent += ' · ↺ reset to restore';
 }
 
 // Build the editable cell row. Each cell carries its phoneme index and an input
@@ -49,6 +121,7 @@ function commitDurWork() {
 // for the highlight, so a protected re-render never double-binds or leaks.
 function renderAlign(body, s) {
   durWork = Array.from(s.data, (v) => Math.max(1, Math.round(v)));
+  durPending = false;                    // fresh trace/voice — drop any stale edit
   const wrap = el('div', 'align-cells');
   const cells = [];
   for (let i = 0; i < durWork.length; i++) {
@@ -78,9 +151,12 @@ function renderAlign(body, s) {
   body.appendChild(note);
 }
 
-// All the per-cell interaction. Editing writes to durWork and schedules a
-// (debounced) re-decode; a plain click traces the phoneme. The drag uses the one
-// global mousemove/mouseup pair (see init) via activeDrag, like the curve editor.
+// All the per-cell interaction. A discrete edit (type / wheel) writes to durWork
+// and immediately requests an async re-decode you hear right away; a drag updates
+// the cells live and decodes once on release (re-synthesizing the whole clip on
+// every drag pixel would just restart playback). A plain click traces the
+// phoneme. The drag uses the one global mousemove/mouseup pair (see init) via
+// activeDrag, like the curve editor.
 function wireAlignCell(cell, cells) {
   const i = cell._i, inp = cell._input;
 
@@ -88,7 +164,7 @@ function wireAlignCell(cell, cells) {
   inp.addEventListener('mousedown', (e) => e.stopPropagation());  // don't start a drag/trace
   inp.addEventListener('change', () => {
     const v = Math.max(1, Math.round(+inp.value || 1));
-    durWork[i] = v; updateAlignCell(cells, i); scheduleDuration();
+    durWork[i] = v; updateAlignCell(cells, i); requestDuration();
   });
   inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') inp.blur(); });
 
@@ -97,7 +173,7 @@ function wireAlignCell(cell, cells) {
     e.preventDefault();
     const step = e.shiftKey ? 5 : 1;
     durWork[i] = Math.max(1, durWork[i] + (e.deltaY < 0 ? step : -step));
-    updateAlignCell(cells, i); scheduleDuration();
+    updateAlignCell(cells, i); requestDuration();
   });
 
   // vertical drag: up = more frames. A click that never moves traces instead.
@@ -120,6 +196,6 @@ function dragDurAt(e) {
 }
 function onDurUp() {
   const d = activeDrag; activeDrag = null; if (!d) return;
-  if (d.moved) scheduleDuration();                  // re-decode the new timing (debounced)
-  else selectPhoneme(d.i);                           // a plain click traces the phoneme
+  if (d.moved) requestDuration();                   // re-decode the dragged timing (async)
+  else selectPhoneme(d.i);                            // a plain click traces the phoneme
 }

@@ -12,6 +12,7 @@ const _T = _frames.reduce((a, b) => a + b, 0);
 const _wav = { name: 'audio', h: 1, w: _T, data: new Float32Array(_T) };
 lastTrace = { samples: new Float32Array(_T), sampleRate: 24000,
               durations: _frames.slice(), stages: [_ph, _pd, _wav] };
+curDur = null;     // no real prediction here, so the async pump is a no-op (edits just queue)
 
 renderStages(lastTrace.stages);                       // first render = buildStages
 
@@ -59,10 +60,11 @@ assert(selPhoneme === 4, 'a plain click traces the phoneme');
 assert(cells[4].classList.contains('sel'), 'the traced cell is highlighted');
 console.log('click: traces + highlights the phoneme cell');
 
-// ── debounce: edits schedule a single commit, not one per change ─────────────
-assert(durTimer !== 0, 'an edit scheduled a (debounced) commit');
-clearTimeout(durTimer); durTimer = 0;                  // model-free: don't actually decode
-console.log('debounce: a commit is queued (coalesced)');
+// ── async pump: an edit requests a re-decode (no debounce, latest-wins) ───────
+assert(durPending === true, 'an edit marked the timing dirty for the async pump');
+assert(synthBusy === false, 'pump is a no-op without a real prediction (curDur null)');
+durPending = false;                                    // model-free: don't actually decode
+console.log('pump: an edit requested a re-decode (latest-wins, no debounce)');
 
 // ── the cells must survive the post-commit (protected) re-render ─────────────
 // (last, since the renders below reset durWork + rebuild the cell elements)
