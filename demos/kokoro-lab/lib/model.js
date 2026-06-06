@@ -32,8 +32,10 @@ function switchSource(root) {
   bridge = null; spkEnc = null;          // clone adapters are per-source
   basis = null; coords = null;
   loadBasis();
+  loadEmotionBasis();                    // Tier-1 timbre directions (optional)
   populateSources();
   if (basis) buildSliders();
+  buildTimbre();                         // (re)build / hide the timbre panel for this source
   reload();                              // configures assets + loads the model, then seeds
 }
 

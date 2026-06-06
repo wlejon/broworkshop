@@ -84,5 +84,11 @@ let stageSig = '';         // current stage-name signature, so we only full-rebu
 let emoTimer = 0;          // debounce for VAD emotion slider drags
 let emoCells = {};         // VAD axis widgets, keyed 'v' / 'a' / 'd'
 
+// ── Tier 1 emotion: learned timbre directions in style space (emotion_basis.json)
+let emotionBasis = null;   // { emotions, resid, full, sigmaResid, defaultAlpha, ... }
+let emoTimbre = {};        // per-emotion intensity α applied to resid[e]
+let timbreCells = {};      // emotion slider widgets, keyed by code (ANG/SAD/…)
+let timbreTimer = 0;       // debounce for timbre slider drags (full re-synth)
+
 const ATTR_WORD = { f0_mean: 'pitch', rms: 'volume', energy: 'energy', rate: 'pace', zcr: 'brightness', f0_std: 'pitch var' };
 

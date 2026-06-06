@@ -45,6 +45,8 @@ function init() {
   $('#btn-play').addEventListener('click', play);
   buildEmotion();
   $('#btn-emo-neutral').addEventListener('click', resetEmotion);
+  buildTimbre();
+  $('#btn-timbre-neutral').addEventListener('click', resetTimbre);
   $('#text').addEventListener('keydown', (e) => { if (e.key === 'Enter') run(); });
   // prosody-edit drag: one global pair so re-rendered cards never leak listeners
   window.addEventListener('mousemove', (e) => { if (activePaint) paintAt(e); else if (activeDrag) dragDurAt(e); });

@@ -57,6 +57,15 @@
       <button id="btn-emo-neutral" title="Drop the emotion, back to the model's own prosody">○ neutral</button>
     </section>
 
+    <!-- Tier 1 emotion: learned voice-quality (timbre) directions in style space
+         (emotion_basis.json). Moves the voice itself, so it re-synthesizes; the
+         section hides itself when the artifact is absent. -->
+    <section id="timbre">
+      <span class="emo-title">timbre <span class="emo-sub">— learned voice-quality · re-synthesizes · click a name for a default</span></span>
+      <div class="emo-axes"></div>
+      <button id="btn-timbre-neutral" title="Drop all timbre emotion">○ neutral</button>
+    </section>
+
     <section id="prompt">
       <input id="text" type="text" value="Hello there. This is a test of the pipeline."
              placeholder="Type something to speak…">
@@ -83,6 +92,7 @@
   <script src="lib/curves.js"></script>
   <script src="lib/edit.js"></script>
   <script src="lib/emotion.js"></script>
+  <script src="lib/timbre.js"></script>
   <script src="lib/heat.js"></script>
   <script src="lib/helpers.js"></script>
   <script src="app.js"></script>

@@ -73,7 +73,9 @@ function styleFromCoords() {
 function rebuildVoice() {
   if (!kokoro || !basis) return false;
   try {
-    voice = kokoro.createVoice(styleFromCoords(), 'designed');
+    const style = styleFromCoords();
+    if (typeof addTimbre === 'function') addTimbre(style);   // Tier-1 emotion offset (no-op if none dialed)
+    voice = kokoro.createVoice(style, 'designed');
     $('#btn-run').disabled = false;
     $('#btn-save').disabled = false;
     return true;

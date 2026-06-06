@@ -114,3 +114,14 @@ function loadBasis() {
   }
 }
 
+// The Tier-1 emotion (timbre) directions, beside the model like voice_basis.json
+// (built by bro/tests/_emotion_basis.js). Optional: if it's absent the timbre
+// panel simply stays hidden — the lab is fully usable without it.
+function loadEmotionBasis() {
+  emotionBasis = null; emoTimbre = {};
+  try {
+    emotionBasis = JSON.parse(_fs.readFileSync(paths.model + '/emotion_basis.json', 'utf-8'));
+    for (const e of emotionBasis.emotions) emoTimbre[e] = 0;
+  } catch (e) { /* no artifact → panel hidden, no error */ }
+}
+
