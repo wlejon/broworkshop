@@ -386,18 +386,28 @@ function clone() {
         mono = new Float32Array(dec.numFrames);
         for (let i = 0; i < dec.numFrames; i++) mono[i] = 0.5 * (dec.samples[2 * i] + dec.samples[2 * i + 1]);
       }
-      const x = spkEnc.embedSpeaker(mono, { sampleRate: dec.sampleRate });
-      coords = coordsFromStyle(bridgeApply(x));
-      for (let k = 0; k < basis.k; k++) {        // clamp into the widgets' range
-        const [lo, hi] = basis.range[k];
-        coords[k] = Math.max(lo * 1.15, Math.min(hi * 1.15, coords[k]));
-      }
-      syncSliders();
-      $('#source').value = '__neutral__';
       const nm = wav.split(/[\\\/]/).pop();
-      setBadge('ready · cloned ' + nm);
-      $('#voice-meta').textContent = 'clone: ' + nm;
-      run();
+      // The ECAPA forward is a multi-GFLOP conv stack — run it off-thread so the
+      // UI stays live, and apply the result when the embedding comes back.
+      setBadge('clone: enrolling ' + nm + '…');
+      spkEnc.embedSpeaker(mono, {
+        sampleRate: dec.sampleRate,
+        onDone: (x) => {
+          try {
+            coords = coordsFromStyle(bridgeApply(x));
+            for (let k = 0; k < basis.k; k++) {    // clamp into the widgets' range
+              const [lo, hi] = basis.range[k];
+              coords[k] = Math.max(lo * 1.15, Math.min(hi * 1.15, coords[k]));
+            }
+            syncSliders();
+            $('#source').value = '__neutral__';
+            setBadge('ready · cloned ' + nm);
+            $('#voice-meta').textContent = 'clone: ' + nm;
+            run();
+          } catch (e) { setBadge('clone: ' + e.message, true); }
+        },
+        onError: (m) => setBadge('clone: enroll failed: ' + m, true),
+      });
     } catch (e) { setBadge('clone: ' + e.message, true); }
   };
 
