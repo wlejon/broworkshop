@@ -38,11 +38,11 @@
                title="Clone a real clip into the slider space via the bridge">
       </label>
       <button id="btn-browse-wav" class="iconbtn" title="Choose a reference .wav">📁</button>
-      <label class="cfg">qwen
+      <label class="cfg">spk enc
         <input id="qwen-dir" type="text" placeholder="(auto from data source)"
-               title="Qwen3-TTS Base dir — the ECAPA speaker encoder clone needs. Defaults beside the data source; override to use a HuggingFace download (Qwen/Qwen3-TTS-12Hz-0.6B-Base).">
+               title="Speaker-encoder artifact dir — the standalone ~18 MB ECAPA encoder the clone enrolls with (brosoundml-data/qwen-tts/speaker-encoder). Defaults beside the data source; override to point elsewhere.">
       </label>
-      <button id="btn-browse-qwen" class="iconbtn" title="Choose a Qwen3-TTS Base dir">📁</button>
+      <button id="btn-browse-qwen" class="iconbtn" title="Choose a speaker-encoder artifact dir">📁</button>
       <button id="btn-clone" title="ECAPA x-vector → bridge → style → sliders">⤓ clone</button>
       <span id="voice-meta" class="meta"></span>
     </section>

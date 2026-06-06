@@ -64,7 +64,7 @@ let basis = null;          // voicebasis.json
 let coords = null;         // Float64Array(K) — current position, in σ units
 let sliderCells = [];      // the K slider widgets (skips the group-label rows)
 let bridge = null;         // { D, M, xm, ym, B } — lazy (clone only)
-let qwen = null;           // Qwen Base model — lazy (clone only, for embedSpeaker)
+let spkEnc = null;         // standalone ECAPA speaker encoder — lazy (clone only)
 let renderTimer = 0;       // debounce slider drags before the re-render
 let synthBusy = false;     // a synth (audio or trace pass) is in flight
 let dirty = false;         // the voice changed; needs an audio-then-trace pass
@@ -94,14 +94,14 @@ const ATTR_WORD = { f0_mean: 'pitch', rms: 'volume', energy: 'energy', rate: 'pa
 //   · brosoundml-data — the published HF dataset:  <root>/{kokoro,g2p,pos_tagger}
 //   · brosoundml repo — the dev sibling:           <root>/weights/kokoro  (+ ../brosoundml-data)
 //   · a bare Kokoro dir — config.json sitting right inside it
-// The model dir, the Qwen clone dir, and how the phonemizer assets resolve all
-// follow from which layout it is, so the user only ever picks one folder.
+// The model dir, the speaker-encoder clone dir, and how the phonemizer assets
+// resolve all follow from which layout it is, so the user only ever picks one folder.
 const _fs = require('fs');
 function pExists(p) { try { return _fs.existsSync(p); } catch (e) { return false; } }
 function pParent(p) { return p.replace(/[\\\/]+$/, '').replace(/[\\\/][^\\\/]*$/, ''); }
 
 const paths = {
-  root: '', kind: 'data', model: '', qwen: '',
+  root: '', kind: 'data', model: '', qwen: '', spkenc: '',
   // Point the phonemizer at this source's g2p/POS/config assets. The sibling
   // layout has its own well-known shape (setAssetRoot); the flat data layouts
   // need explicit per-file paths (setAssets).
@@ -124,18 +124,26 @@ const paths = {
 // Returns null if nothing identifiable is found inside it.
 function detectSource(root) {
   root = root.replace(/[\\\/]+$/, '');
+  // The clone enrolls via the standalone ~18 MB speaker-encoder artifact in
+  // brosoundml-data (qwen-tts/speaker-encoder), not the full ~2.5 GB Base
+  // checkpoint. `qwen` is kept (other flows may want Base) but clone uses spkenc.
   if (pExists(root + '/kokoro/config.json'))
-    return { kind: 'data', root, model: root + '/kokoro', qwen: root + '/qwen-tts/0.6B-Base' };
+    return { kind: 'data', root, model: root + '/kokoro', qwen: root + '/qwen-tts/0.6B-Base',
+             spkenc: root + '/qwen-tts/speaker-encoder' };
   if (pExists(root + '/weights/kokoro/config.json'))
-    return { kind: 'sibling', root, model: root + '/weights/kokoro', qwen: root + '/weights/qwen-tts/0.6B-Base' };
+    return { kind: 'sibling', root, model: root + '/weights/kokoro', qwen: root + '/weights/qwen-tts/0.6B-Base',
+             spkenc: pParent(root) + '/brosoundml-data/qwen-tts/speaker-encoder' };
   if (pExists(root + '/config.json')) {                   // root itself is a kokoro dir
     const parent = pParent(root);
     if (pExists(parent + '/g2p/lexicon_en_us.bin'))       // …/<brosoundml-data>/kokoro
-      return { kind: 'data', root: parent, model: root, qwen: parent + '/qwen-tts/0.6B-Base' };
+      return { kind: 'data', root: parent, model: root, qwen: parent + '/qwen-tts/0.6B-Base',
+               spkenc: parent + '/qwen-tts/speaker-encoder' };
     const repo = pParent(parent);
     if (pExists(repo + '/weights/kokoro/config.json'))    // …/<repo>/weights/kokoro
-      return { kind: 'sibling', root: repo, model: root, qwen: repo + '/weights/qwen-tts/0.6B-Base' };
-    return { kind: 'model', root, model: root, qwen: parent + '/qwen-tts/0.6B-Base' };
+      return { kind: 'sibling', root: repo, model: root, qwen: repo + '/weights/qwen-tts/0.6B-Base',
+               spkenc: pParent(repo) + '/brosoundml-data/qwen-tts/speaker-encoder' };
+    return { kind: 'model', root, model: root, qwen: parent + '/qwen-tts/0.6B-Base',
+             spkenc: parent + '/qwen-tts/speaker-encoder' };
   }
   return null;
 }
@@ -170,8 +178,10 @@ function defaultRoot(htmlDefault) {
 function setSource(rootIn) {
   const root = (rootIn || '').replace(/[\\\/]+$/, '');
   const det = detectSource(root);
-  const r = det || { kind: 'data', root, model: root + '/kokoro', qwen: root + '/qwen-tts/0.6B-Base' };
-  paths.root = r.root; paths.kind = r.kind; paths.model = r.model; paths.qwen = r.qwen;
+  const r = det || { kind: 'data', root, model: root + '/kokoro', qwen: root + '/qwen-tts/0.6B-Base',
+                     spkenc: root + '/qwen-tts/speaker-encoder' };
+  paths.root = r.root; paths.kind = r.kind; paths.model = r.model;
+  paths.qwen = r.qwen; paths.spkenc = r.spkenc;
   const meta = $('#data-meta');
   if (meta) {
     const name = r.kind === 'sibling' ? 'brosoundml repo'
@@ -359,12 +369,12 @@ function clone() {
   if (!basis || !kokoro) return;
   if (!loadBridge()) return;
   const wav = $('#ref-wav').value.trim();
-  // Clone needs the Qwen3-TTS *Base* checkpoint (it bundles the ECAPA speaker
-  // encoder). That's a separate upstream HF model — Qwen/Qwen3-TTS-12Hz-0.6B-Base,
-  // Apache-2.0, fetched by brosoundml's download-qwen-tts.sh — NOT part of
-  // brosoundml-data. So it has its own path: an explicit override if given, else
-  // the spot beside the data source (the dev repo ships it under weights/qwen-tts).
-  const qdir = $('#qwen-dir').value.trim() || paths.qwen;
+  // Clone enrolls the clip with the standalone ECAPA-TDNN speaker encoder — the
+  // ~18 MB artifact in brosoundml-data (qwen-tts/speaker-encoder), lifted out of
+  // the Qwen3-TTS Base checkpoint so we load 18 MB, not the whole ~2.5 GB model,
+  // just for the x-vector. Build it with brosoundml_build_speaker_encoder. An
+  // explicit override wins; else the spot beside the data source.
+  const sdir = $('#qwen-dir').value.trim() || paths.spkenc;
 
   const proceed = () => {
     try {
@@ -376,7 +386,7 @@ function clone() {
         mono = new Float32Array(dec.numFrames);
         for (let i = 0; i < dec.numFrames; i++) mono[i] = 0.5 * (dec.samples[2 * i] + dec.samples[2 * i + 1]);
       }
-      const x = qwen.embedSpeaker(mono, { sampleRate: dec.sampleRate });
+      const x = spkEnc.embedSpeaker(mono, { sampleRate: dec.sampleRate });
       coords = coordsFromStyle(bridgeApply(x));
       for (let k = 0; k < basis.k; k++) {        // clamp into the widgets' range
         const [lo, hi] = basis.range[k];
@@ -391,11 +401,11 @@ function clone() {
     } catch (e) { setBadge('clone: ' + e.message, true); }
   };
 
-  if (qwen) { proceed(); return; }
+  if (spkEnc) { proceed(); return; }
   setBadge('clone: loading speaker encoder…');
-  bro.tts.loadQwen(qdir, {
-    onReady: (q) => { qwen = q; proceed(); },
-    onError: (m) => setBadge('clone: qwen load failed: ' + m, true),
+  bro.tts.loadSpeakerEncoder(sdir, {
+    onReady: (enc) => { spkEnc = enc; proceed(); },
+    onError: (m) => setBadge('clone: speaker encoder load failed: ' + m, true),
   });
 }
 
@@ -443,7 +453,7 @@ function reload() {
 function switchSource(root) {
   setSource(root);
   if (detectSource(root)) rememberRoot(paths.root);   // a real source — remember it
-  bridge = null; qwen = null;            // clone adapters are per-source
+  bridge = null; spkEnc = null;          // clone adapters are per-source
   basis = null; coords = null;
   loadBasis();
   populateSources();
@@ -1440,7 +1450,7 @@ function init() {
     const f = browseFile('Audio|wav;flac;mp3;ogg;opus'); if (f) $('#ref-wav').value = f;
   });
   $('#btn-browse-qwen').addEventListener('click', () => {
-    const d = browseFolder($('#qwen-dir').value.trim() || paths.qwen); if (d) $('#qwen-dir').value = d;
+    const d = browseFolder($('#qwen-dir').value.trim() || paths.spkenc); if (d) $('#qwen-dir').value = d;
   });
 
   // voice designer — handlers no-op until a basis is loaded, so wire them once.
