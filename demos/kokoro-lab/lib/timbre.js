@@ -1,24 +1,25 @@
-// ── Tier 1 emotion: learned voice-quality (timbre) directions in style space ──
-// The companion to emotion.js (Tier 0). Where Tier 0 transforms the predicted
-// pitch/energy/rate contours (prosody), Tier 1 nudges the VOICE itself along
-// emotion directions learned in Kokoro's 256-D style space — the part of affect
-// that lives in the decoder's timbre, which prosody can't reach (you can hear a
-// smile on "happy"). Directions come from emotion_basis.json (beside the model,
-// built by bro/tests/_emotion_basis.js from CREMA-D embeddings):
+// ── Tier 1 emotion: learned emotion directions in style space ─────────────────
+// The data-driven companion to emotion.js (Tier 0's manual VAD prosody). Nudging
+// the voice along an emotion's `full` direction (the neutral→e style shift,
+// from ESD studio recordings) feeds Kokoro's own duration/F0/energy predictor,
+// so the model renders emotional PITCH / ENERGY / PACE *and* timbre in one move —
+// the "full affect" coupling, for free, through the model. Directions come from
+// emotion_basis.json (beside the model, built by bro/tests/_emotion_basis.js):
 //
-//   style += Σ alphaₑ · resid[e]      (resid = the neutral→e style shift with the
-//                                       prosody axes projected out — timbre only)
+//   style += Σ alphaₑ · full[e]
 //
-// Applied in rebuildVoice(), so a change re-runs the FULL pass (the predictor
-// must see the emotional voice too) — unlike Tier 0's back-half-only re-decode.
-// Tier 0 (if dialed) still rides on top, on the fresh prediction.
+// (We tried `resid` — the timbre-only residual, prosody projected out — but it
+// left the predicted prosody almost unchanged, so it didn't read as the emotion;
+// `full` is what carries it. resid stays in the artifact for experiments.)
+// Applied in rebuildVoice(), so a change re-runs the FULL pass. Tier 0 rides on
+// top if also dialed — leave it neutral to avoid stacking prosody twice.
 
-// add the current timbre offset to a style vector, in place
+// add the current emotion offset to a style vector, in place
 function addTimbre(style) {
-  if (!emotionBasis || !emotionBasis.resid) return;
+  if (!emotionBasis || !emotionBasis.full) return;
   for (const e of emotionBasis.emotions) {
     const a = emoTimbre[e] || 0; if (!a) continue;
-    const r = emotionBasis.resid[e]; if (!r) continue;
+    const r = emotionBasis.full[e]; if (!r) continue;
     for (let d = 0; d < style.length; d++) style[d] += a * r[d];
   }
 }
@@ -34,8 +35,8 @@ function scheduleTimbre() {
   timbreTimer = setTimeout(() => { timbreTimer = 0; run(); }, 140);
 }
 
-// One-click preset: set this emotion to its calibrated default amount (≈0.7σ of
-// timbre), zero the others — "just give me angry", then fine-tune with sliders.
+// One-click preset: set this emotion to its calibrated default amount (≈0.55σ of
+// the full shift), zero the others — "just give me angry", then fine-tune.
 function setTimbrePreset(e) {
   if (!emotionBasis) return;
   for (const k of emotionBasis.emotions) {
@@ -60,7 +61,7 @@ function buildTimbre() {
     nm.title = 'click for a default amount';
     nm.addEventListener('click', () => setTimbrePreset(e));
     head.appendChild(nm);
-    head.appendChild(el('span', 'emo-hint', 'σ ' + (emotionBasis.sigmaResid[e] || 0).toFixed(2)));
+    head.appendChild(el('span', 'emo-hint', 'σ ' + ((emotionBasis.sigmaFull && emotionBasis.sigmaFull[e]) || 0).toFixed(2)));
     const val = el('span', 'emo-val', '0.00');
     head.appendChild(val);
     cell.appendChild(head);
@@ -74,7 +75,7 @@ function buildTimbre() {
   }
 }
 
-// Drop all timbre emotion, back to the designed voice.
+// Drop all emotion, back to the designed voice.
 function resetTimbre() {
   if (emotionBasis) for (const e of emotionBasis.emotions) emoTimbre[e] = 0;
   for (const e in timbreCells) { timbreCells[e]._range.value = '0'; timbreCells[e]._val.textContent = '0.00'; }
