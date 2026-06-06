@@ -1,7 +1,8 @@
 // ── Tier 1 emotion: learned emotion directions in style space ─────────────────
 // The data-driven companion to emotion.js (Tier 0's manual VAD prosody). Nudging
 // the voice along an emotion's `full` direction (the neutral→e style shift,
-// from ESD studio recordings) feeds Kokoro's own duration/F0/energy predictor,
+// from CAMEO — multilingual, permissively licensed) feeds Kokoro's own
+// duration/F0/energy predictor,
 // so the model renders emotional PITCH / ENERGY / PACE *and* timbre in one move —
 // the "full affect" coupling, for free, through the model. Directions come from
 // emotion_basis.json (beside the model, built by bro/tests/_emotion_basis.js):
