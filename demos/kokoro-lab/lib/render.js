@@ -85,12 +85,18 @@ function paintBody(body, s, info) {
 }
 
 // (Re)register a stage for the data-flow highlight from its current DOM.
+// Three shapes: phoneme chips and the pred_dur cell row both highlight a single
+// per-phoneme element (the cells wire their own listeners in renderAlign, so we
+// only collect them here — re-collecting on a protected re-render never doubles
+// a binding); canvas stages carry a positioned overlay we resize to the span.
 function registerFlow(body, info) {
   if (!info || !info.flow) return;
   if (info.flow.axis === 'chip') {
     const chips = [...body.querySelectorAll('.chip')];
     chips.forEach((c, i) => c.addEventListener('click', () => selectPhoneme(i)));
-    flowStages.push({ flow: info.flow, chips });
+    flowStages.push({ flow: info.flow, items: chips });
+  } else if (body._alignCells) {
+    flowStages.push({ flow: info.flow, items: body._alignCells });
   } else {
     const cv = body.querySelector('canvas');
     if (cv && cv._overlay) flowStages.push({ flow: info.flow, overlay: cv._overlay });
@@ -107,8 +113,8 @@ function selectPhoneme(l) {
   let total = 0; for (let i = 0; i < L; i++) total += dur[i];
 
   for (const fs of flowStages) {
-    if (fs.flow.axis === 'chip') {
-      fs.chips.forEach((c, i) => c.classList.toggle('sel', i === selPhoneme));
+    if (fs.items) {                          // chips or pred_dur cells: light element l
+      fs.items.forEach((c, i) => c.classList.toggle('sel', i === selPhoneme));
       continue;
     }
     const ov = fs.overlay;
