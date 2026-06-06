@@ -33,14 +33,19 @@ const _sumEl = body.querySelector('.axis-note span');
 assert((+_sumEl.textContent) === _T - 5 + 42, 'running sum reflects the edit');
 console.log('type: durWork[2]=42, width + sum updated');
 
-// ── wheel: +1, and +5 with shift ─────────────────────────────────────────────
+// ── wheel only edits the FOCUSED cell; otherwise it scrolls the page ──────────
+const _w0 = durWork[0];
+cells[0].dispatchEvent({ type: 'wheel', deltaY: -1 });          // not focused
+assert(durWork[0] === _w0, 'wheel over an unfocused cell does NOT edit (page scrolls past)');
+cells[0]._input.focus();
 cells[0].dispatchEvent({ type: 'wheel', deltaY: -1 });
-assert(durWork[0] === 11, 'wheel up = +1 frame');
+assert(durWork[0] === _w0 + 1, 'wheel up on the focused cell = +1 frame');
 cells[0].dispatchEvent({ type: 'wheel', deltaY: 5 });
-assert(durWork[0] === 10, 'wheel down = -1 frame');
+assert(durWork[0] === _w0, 'wheel down = -1 frame');
 cells[0].dispatchEvent({ type: 'wheel', deltaY: -1, shiftKey: true });
-assert(durWork[0] === 15, 'shift+wheel = +5 frames');
-console.log('wheel: ±1 and shift ±5 work');
+assert(durWork[0] === _w0 + 5, 'shift+wheel = +5 frames');
+cells[0]._input.blur();
+console.log('wheel: edits only the focused cell (scroll-safe), ±1 / shift ±5');
 
 // ── drag: vertical, up = longer; floors at 1 ─────────────────────────────────
 cells[3].dispatchEvent({ type: 'mousedown', clientY: 100 });

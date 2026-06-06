@@ -101,16 +101,19 @@ function applyDuration(r, newDur, asrP, F0p, Np, totalP, L) {
   $('#run-meta').textContent = 'timing · ' + (r.samples.length / r.sampleRate).toFixed(2) + 's';
 }
 
-// Edits stopped: repaint the whole pipeline once (heatmaps / curves / waveform)
-// to reflect the final timing and capture the prosody pin. pred_dur is protected
-// so the live cells the user just left aren't torn out.
+// Edits stopped (no decode pending): refresh the CHEAP stages now (pitch / energy
+// curves + waveform) so they track the audio, but leave the expensive heatmaps on
+// their last image — repainting those per pause is the lock-up the user hit. The
+// heatmaps catch up once via scheduleHeatRefresh when editing truly settles.
+// pred_dur is protected so the live cells the user just left aren't torn out.
 function settleDuration() {
   if (!lastTrace) return;
   protectedStage = 'pred_dur';
   const sc = $('#stages').scrollTop;
-  renderStages(lastTrace.stages);
+  renderStagesLight(lastTrace.stages);   // cells / curves / waveform; heatmaps deferred
   $('#stages').scrollTop = sc;
   protectedStage = null;
+  scheduleHeatRefresh();                  // heatmaps repaint once, after editing fully stops
   capturePinnedEdit();
   $('#run-meta').textContent += ' · ↺ reset to restore';
 }
@@ -140,7 +143,7 @@ function renderAlign(body, s) {
   body._alignCells = cells;            // registerFlow picks these up for the highlight
 
   const note = el('div', 'axis-note',
-    'type · scroll · or drag a cell to re-time · sum = ');
+    'drag a cell, type a value, or click it then scroll to re-time · sum = ');
   const sum = el('span', null, String(durWork.reduce((a, b) => a + b, 0) | 0));
   note.appendChild(sum);
   note.appendChild(el('span', null, ' frames'));
@@ -168,8 +171,11 @@ function wireAlignCell(cell, cells) {
   });
   inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') inp.blur(); });
 
-  // wheel: ±1 frame, ±5 with shift
+  // wheel: ±1 frame, ±5 with shift — but ONLY when this cell's number is focused
+  // (you clicked into it). Otherwise let the wheel scroll the page, so scrolling
+  // past pred_dur never catches and changes a duration.
   cell.addEventListener('wheel', (e) => {
+    if (document.activeElement !== inp) return;   // not engaged — page scrolls normally
     e.preventDefault();
     const step = e.shiftKey ? 5 : 1;
     durWork[i] = Math.max(1, durWork[i] + (e.deltaY < 0 ? step : -step));

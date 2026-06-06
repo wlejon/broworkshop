@@ -13,6 +13,15 @@ function orderStages(stages) {
 // re-decode — the stage tree is never torn down. The card the user is editing
 // (or just edited) holds the truth they drew, so its body is left exactly as-is
 // while every downstream stage regenerates from the new data.
+//
+// The heatmap stages are by far the most expensive thing here — a per-pixel
+// ImageData build plus a full-array stats pass, for several large grids. The
+// timing editor doesn't need them live (it cares about the cells + audio), so it
+// renders with deferHeat = true (leave the heatmaps on their last image, cheap)
+// and repaints them once, coalesced, when the edits settle (scheduleHeatRefresh).
+let deferHeat = false;     // skip heatmap stages this pass (set by the timing editor)
+let heatTimer = 0;         // coalesce the deferred heatmap repaint
+
 function renderStages(stages) {
   const ordered = orderStages(stages);
   const sig = ordered.map((s) => s.name).join('|');
@@ -27,11 +36,38 @@ function renderStages(stages) {
     const cell = stageCards[s.name];
     if (!cell) { buildStages(ordered, sig); return; }   // unexpected stage set — full rebuild
     if (s.name === protect) { registerFlow(cell.body, cell.info); continue; }   // leave the edited canvas alone
+    // expensive heatmaps: keep the last image, just re-register its overlay so
+    // the data-flow highlight still works on the (stale) picture.
+    if (deferHeat && cell.info.kind === 'heat') { registerFlow(cell.body, cell.info); continue; }
     updateHead(cell, s);
     cell.body.textContent = '';
     paintBody(cell.body, s, cell.info);
     registerFlow(cell.body, cell.info);
   }
+}
+
+// Re-render the cheap stages now (cells / curves / waveform), leaving the
+// heatmaps untouched — for the timing editor's hot loop, so a pause between
+// edits never triggers a multi-hundred-millisecond per-pixel repaint.
+function renderStagesLight(stages) {
+  deferHeat = true;
+  try { renderStages(stages); } finally { deferHeat = false; }
+}
+
+// Once the edits stop, repaint the heatmaps a single time so they catch up with
+// the final timing. Coalesced: each new edit pushes it out, so it only fires
+// when the user actually pauses — never during active editing.
+function scheduleHeatRefresh() {
+  if (heatTimer) clearTimeout(heatTimer);
+  heatTimer = setTimeout(() => {
+    heatTimer = 0;
+    if (!lastTrace) return;
+    protectedStage = 'pred_dur';        // keep the live cells (and any focus) intact
+    const sc = $('#stages').scrollTop;
+    renderStages(lastTrace.stages);     // full repaint, heatmaps included
+    $('#stages').scrollTop = sc;
+    protectedStage = null;
+  }, 350);
 }
 
 // First render (or whenever the stage set changes): build the cards fresh.
