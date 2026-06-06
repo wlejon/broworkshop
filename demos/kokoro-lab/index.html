@@ -49,6 +49,14 @@
 
     <section id="sliders"></section>
 
+    <!-- Tier 0 emotion: closed-form prosody (pitch / energy / rate) from a
+         valence-arousal-dominance point, re-decoded through decodeFrom. -->
+    <section id="emotion">
+      <span class="emo-title">emotion <span class="emo-sub">— prosody only · rides the prediction</span></span>
+      <div class="emo-axes"></div>
+      <button id="btn-emo-neutral" title="Drop the emotion, back to the model's own prosody">○ neutral</button>
+    </section>
+
     <section id="prompt">
       <input id="text" type="text" value="Hello there. This is a test of the pipeline."
              placeholder="Type something to speak…">
