@@ -4,7 +4,7 @@
 // Show exactly one seam panel; refresh it for the loaded model.
 function showSeam(name) {
   seam = name;
-  ['sample', 'walk', 'mix', 'grid'].forEach(function (s) {
+  ['sample', 'walk', 'mix', 'invert', 'grid'].forEach(function (s) {
     $('#panel-' + s).style.display = (s === name) ? 'flex' : 'none';
     $('#seam-' + s).classList.toggle('active', s === name);
   });
@@ -14,10 +14,11 @@ function showSeam(name) {
 // Re-run the active seam (after a seam switch or a shared-param change).
 function refreshSeam() {
   if (!gan) return;
-  if (seam === 'sample')    renderSample();
-  else if (seam === 'walk') prepareWalk();
-  else if (seam === 'mix')  prepareMix();
-  else                      renderGrid();
+  if (seam === 'sample')      renderSample();
+  else if (seam === 'walk')   prepareWalk();
+  else if (seam === 'mix')    prepareMix();
+  else if (seam === 'invert') refreshInvert();   // never auto-runs the (slow) inversion
+  else                        renderGrid();
 }
 
 function syncCutoffLabel() {
@@ -48,7 +49,7 @@ function init() {
   });
 
   // ── seam chips ──────────────────────────────────────────────────────────────
-  ['sample', 'walk', 'mix', 'grid'].forEach(function (s) {
+  ['sample', 'walk', 'mix', 'invert', 'grid'].forEach(function (s) {
     $('#seam-' + s).addEventListener('click', function () { showSeam(s); });
   });
 
@@ -60,19 +61,27 @@ function init() {
   $('#btn-to-b').addEventListener('click', function () { sendSampleTo('b'); });
 
   // ── Walk ────────────────────────────────────────────────────────────────────
-  $('#walk-a').addEventListener('change', function () { walkWA = null; prepareWalk(); });
-  $('#walk-b').addEventListener('change', function () { walkWB = null; prepareWalk(); });
-  $('#btn-walk-rand-a').addEventListener('click', function () { $('#walk-a').value = randSeed(); walkWA = null; prepareWalk(); });
-  $('#btn-walk-rand-b').addEventListener('click', function () { $('#walk-b').value = randSeed(); walkWB = null; prepareWalk(); });
+  // Choosing a seed for an anchor drops any pinned (inverted) latent on it.
+  $('#walk-a').addEventListener('change', function () { pinnedA = null; walkWA = null; prepareWalk(); });
+  $('#walk-b').addEventListener('change', function () { pinnedB = null; walkWB = null; prepareWalk(); });
+  $('#btn-walk-rand-a').addEventListener('click', function () { $('#walk-a').value = randSeed(); pinnedA = null; walkWA = null; prepareWalk(); });
+  $('#btn-walk-rand-b').addEventListener('click', function () { $('#walk-b').value = randSeed(); pinnedB = null; walkWB = null; prepareWalk(); });
   $('#walk-t').addEventListener('input', renderWalkMid);
   $('#btn-walk-strip').addEventListener('click', renderWalkStrip);
 
   // ── Mix ───────────────────────────────────────────────────────────────────
-  $('#mix-a').addEventListener('change', function () { mixWA = null; prepareMix(); });
-  $('#mix-b').addEventListener('change', function () { mixWB = null; prepareMix(); });
-  $('#btn-mix-rand-a').addEventListener('click', function () { $('#mix-a').value = randSeed(); mixWA = null; prepareMix(); });
-  $('#btn-mix-rand-b').addEventListener('click', function () { $('#mix-b').value = randSeed(); mixWB = null; prepareMix(); });
+  $('#mix-a').addEventListener('change', function () { pinnedA = null; mixWA = null; prepareMix(); });
+  $('#mix-b').addEventListener('change', function () { pinnedB = null; mixWB = null; prepareMix(); });
+  $('#btn-mix-rand-a').addEventListener('click', function () { $('#mix-a').value = randSeed(); pinnedA = null; mixWA = null; prepareMix(); });
+  $('#btn-mix-rand-b').addEventListener('click', function () { $('#mix-b').value = randSeed(); pinnedB = null; mixWB = null; prepareMix(); });
   $('#mix-k').addEventListener('input', function () { syncMixLabel(); renderMix(); });
+
+  // ── Invert ──────────────────────────────────────────────────────────────────
+  $('#btn-inv-from-seed').addEventListener('click', invFromSeed);
+  $('#btn-inv-from-file').addEventListener('click', invFromFile);
+  $('#btn-invert').addEventListener('click', runInvert);
+  $('#btn-inv-to-a').addEventListener('click', function () { sendInvTo('a'); });
+  $('#btn-inv-to-b').addEventListener('click', function () { sendInvTo('b'); });
 
   // ── Grid ──────────────────────────────────────────────────────────────────
   $('#grid-size').addEventListener('change', renderGrid);

@@ -3,7 +3,7 @@
 const DIR = 'D:/projects/brovisionml/weights/stylegan3-r-ffhqu-256';
 const g = bro.vision.loadStyleGAN3(DIR, { resolution: 256 });
 const PSI = 0.7;
-function showOnly(n){ ['sample','walk','mix','grid'].forEach(function(s){ $('#panel-'+s).style.display = s===n?'flex':'none'; }); }
+function showOnly(n){ ['sample','walk','mix','invert','grid'].forEach(function(s){ $('#panel-'+s).style.display = s===n?'flex':'none'; }); }
 
 const wa = g.generate({ seed: 1, truncation: PSI, returnLatents: true });
 const wb = g.generate({ seed: 2, truncation: PSI, returnLatents: true });
@@ -23,6 +23,15 @@ drawBitmap($('#mix-b-canvas'), wb.image);
 drawBitmap($('#mix-result'), g.synthesize(mixW(wa.w, wb.w, 4, g.numWs, g.wDim)).image);
 $('#mix-meta').textContent = 'coarse 0–3 from A · fine 4–15 from B';
 showOnly('mix'); flush(); screenshot('_mix.png'); console.log('mix drawn');
+
+// invert — target (seed 1), a quick partial recovery, and the loss sparkline
+setInvTarget(wa.image);
+var inv = g.invert(invTargetData, { steps: 60, lr: 0.1 });
+drawBitmap($('#inv-recovered'), inv.image);
+invCurve = Array.prototype.slice.call(inv.lossCurve);
+drawLossCurve(invCurve);
+$('#inv-meta').textContent = 'mse ' + inv.loss.toExponential(2);
+showOnly('invert'); flush(); screenshot('_invert.png'); console.log('invert drawn');
 
 // grid 3x3
 var out=$('#grid-out'); out.style.gridTemplateColumns='repeat(3,1fr)'; out.textContent='';

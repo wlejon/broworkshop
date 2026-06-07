@@ -8,6 +8,7 @@ function seamHint() {
   return seam === 'sample' ? 'pick a seed · ψ truncates toward the mean face'
        : seam === 'walk'   ? 'two anchors → drag t, or render the strip'
        : seam === 'mix'    ? 'coarse rows from A, fine rows from B'
+       : seam === 'invert' ? 'image → latent · then → A/B to edit it'
        :                     'click a tile to send it to Sample';
 }
 
@@ -28,6 +29,7 @@ function loadModel(dir) {
   dir = (dir || '').replace(/[\\\/]+$/, '');
   cancelAll();
   gan = null; lastSample = null; walkWA = walkWB = mixWA = mixWB = null;
+  pinnedA = pinnedB = null; invTargetData = null; invW = null; invCurve = [];
   wCache.clear();
   if (!pExists(dir + '/model.safetensors')) { setBadge('no model.safetensors in ' + dir, true); return; }
   const res = parseInt($('#resolution').value, 10) || 256;

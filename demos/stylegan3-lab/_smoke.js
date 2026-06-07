@@ -11,8 +11,10 @@ assert(typeof renderSample === 'function', 'sample.js loaded');
 assert(typeof prepareWalk === 'function', 'walk.js loaded');
 assert(typeof renderMix === 'function', 'mix.js loaded');
 assert(typeof renderGrid === 'function', 'grid.js loaded');
+assert(typeof runInvert === 'function' && typeof setInvTarget === 'function', 'invert.js loaded');
 assert(typeof lerpW === 'function' && typeof mixW === 'function', 'W+ math loaded');
-['#sample-canvas', '#walk-mid', '#mix-result', '#grid-out', '#psi', '#mix-k'].forEach(function (s) {
+['#sample-canvas', '#walk-mid', '#mix-result', '#grid-out', '#psi', '#mix-k',
+ '#panel-invert', '#inv-target', '#inv-recovered', '#inv-loss', '#btn-invert'].forEach(function (s) {
   assert(document.querySelector(s), 'DOM present: ' + s);
 });
 
@@ -43,6 +45,18 @@ assert(s.image && s.width === 256, 'synthesize(edited w+) → image');
 const mixed = mixW(r.w, r2.w, Math.floor(g.numWs / 2), g.numWs, g.wDim);
 const sm = g.synthesize(mixed);
 assert(sm.image, 'synthesize(style-mixed w+) → image');
+
+// ── invert path: image → w+, resume (initW), then edit the recovered latent ───
+// Synchronous (no onDone) so it's deterministic under headless virtual time.
+const inv = g.invert(r.image, { steps: 30, lr: 0.1 });
+assert(inv.w && inv.w.length === g.numWs * g.wDim, 'invert → recovered w+');
+assert(inv.lossCurve && inv.lossCurve.length === 30, 'invert → loss curve');
+assert(inv.loss < inv.lossCurve[0], 'invert reduced loss: ' + inv.lossCurve[0].toExponential(2) + ' → ' + inv.loss.toExponential(2));
+const inv2 = g.invert(r.image, { steps: 30, lr: 0.1, initW: inv.w });   // resume
+assert(inv2.lossCurve[0] < inv.lossCurve[0] * 0.5, 'initW resume started low (progressive chunking)');
+// the recovered latent edits like any other (the "→ A/B then Walk/Mix" payoff)
+const recMix = mixW(inv2.w, r2.w, Math.floor(g.numWs / 2), g.numWs, g.wDim);
+assert(g.synthesize(recMix).image, 'edit recovered w+ (style-mix) → image');
 
 // draw the results onto the lab's own canvases and snapshot
 drawBitmap(document.querySelector('#sample-canvas'), r.image);

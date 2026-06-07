@@ -14,7 +14,7 @@ function prepareMix() {
   const a = parseInt($('#mix-a').value, 10) || 0, b = parseInt($('#mix-b').value, 10) || 0;
   const psi = curPsi(), cutoff = curCutoff();
   runSeq('mix sources',
-    [buildW(a, psi, cutoff), buildW(b, psi, cutoff)],
+    [anchorStep(pinnedA, a, psi, cutoff), anchorStep(pinnedB, b, psi, cutoff)],
     function (i, r) {
       if (i === 0) { mixWA = r.w; drawBitmap($('#mix-a-canvas'), r.image); }
       else         { mixWB = r.w; drawBitmap($('#mix-b-canvas'), r.image); }

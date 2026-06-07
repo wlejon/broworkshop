@@ -51,3 +51,8 @@ let lastSample = null;                            // { seed, w }
 // cached anchors for the live sliders (avoid refetching w+ on every drag).
 let walkWA = null, walkWB = null;
 let mixWA = null, mixWB = null;
+
+// pinned anchors: a recovered (inverted) w+ override for the A/B anchors. When
+// set, Walk/Mix use this latent directly instead of mapping the seed input —
+// the bridge from the Invert seam ("→ A/B") into the editing seams.
+let pinnedA = null, pinnedB = null;

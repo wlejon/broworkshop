@@ -2,13 +2,25 @@
 // Map both anchors to w+ once, then synthesize() the t-blend live as the slider
 // drags. The strip renders N evenly spaced points across t in one sequence.
 
+// An anchor step: a pinned (inverted) latent synthesizes directly; otherwise the
+// seed maps to a fresh w+ (cached). Either way onStep gets an { image, w }.
+function anchorStep(pin, seed, psi, cutoff) {
+  if (pin) return function (onDone) {
+    return gan.synthesize(pin, { onDone: function (r, info) {
+      if (r) r.w = pin;                    // carry the latent through like buildW does
+      onDone(r, info);
+    } });
+  };
+  return buildW(seed, psi, cutoff);
+}
+
 // Fetch (or reuse) both anchors' w+, draw the endpoint thumbs, then the midpoint.
 function prepareWalk() {
   if (!gan) return;
   const a = parseInt($('#walk-a').value, 10) || 0, b = parseInt($('#walk-b').value, 10) || 0;
   const psi = curPsi(), cutoff = curCutoff();
   runSeq('walk anchors',
-    [buildW(a, psi, cutoff), buildW(b, psi, cutoff)],
+    [anchorStep(pinnedA, a, psi, cutoff), anchorStep(pinnedB, b, psi, cutoff)],
     function (i, r) {
       if (i === 0) { walkWA = r.w; drawBitmap($('#walk-a-canvas'), r.image); }
       else         { walkWB = r.w; drawBitmap($('#walk-b-canvas'), r.image); }

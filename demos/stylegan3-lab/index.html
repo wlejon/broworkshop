@@ -55,6 +55,7 @@
         <button id="seam-sample" class="chip" title="z → image">sample</button>
         <button id="seam-walk"   class="chip" title="interpolate two latents">walk</button>
         <button id="seam-mix"    class="chip" title="style mixing">mix</button>
+        <button id="seam-invert" class="chip" title="image → latent (inversion)">invert</button>
         <button id="seam-grid"   class="chip" title="seed browser">grid</button>
       </nav>
     </section>
@@ -121,6 +122,32 @@
         </div>
       </section>
 
+      <!-- INVERT -->
+      <section id="panel-invert" class="panel">
+        <div class="controls">
+          <label class="cfg seed">seed <input id="inv-seed" type="number" value="42"></label>
+          <button id="btn-inv-from-seed" title="Generate this seed, then invert it back (round-trip)">from seed</button>
+          <button id="btn-inv-from-file" title="Load an image file to invert (resized to the model resolution)">load image…</button>
+          <span class="grow"></span>
+          <label class="cfg">steps <input id="inv-steps" type="number" value="200" min="25" max="1000" step="25"></label>
+          <label class="cfg">lr <input id="inv-lr" type="number" value="0.05" step="0.01" min="0.001"></label>
+          <label class="cfg" title="L2 pull toward the average face — higher = more editable, less exact">reg <input id="inv-reg" type="number" value="0" step="0.05" min="0"></label>
+          <button id="btn-invert" class="primary">invert</button>
+        </div>
+        <div class="stage">
+          <div class="shot"><div class="canvas-wrap"><canvas id="inv-target"></canvas></div><div class="cap">target</div></div>
+          <div class="shot big"><div class="canvas-wrap"><canvas id="inv-recovered"></canvas></div><div class="cap" id="inv-meta">recovered</div></div>
+          <div class="shot">
+            <div class="canvas-wrap"><canvas id="inv-loss"></canvas></div>
+            <div class="cap">loss (log)</div>
+            <div class="inv-actions">
+              <button id="btn-inv-to-a" title="Pin the recovered latent into the Walk/Mix A anchor">→ A</button>
+              <button id="btn-inv-to-b" title="Pin the recovered latent into the Walk/Mix B anchor">→ B</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <!-- GRID -->
       <section id="panel-grid" class="panel">
         <div class="controls">
@@ -149,6 +176,7 @@
   <script src="lib/sample.js"></script>
   <script src="lib/walk.js"></script>
   <script src="lib/mix.js"></script>
+  <script src="lib/invert.js"></script>
   <script src="lib/grid.js"></script>
   <script src="app.js"></script>
 </body>

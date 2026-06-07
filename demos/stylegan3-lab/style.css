@@ -90,6 +90,9 @@ canvas { display: block; }
   background: #0f141c; border: 1px solid #1b2330;
 }
 
+/* ── invert ── */
+.shot .inv-actions { display: flex; gap: 6px; margin-top: 4px; }
+
 /* ── grid ── */
 .grid {
   display: grid; gap: 8px; max-width: 900px; margin: 0 auto;
