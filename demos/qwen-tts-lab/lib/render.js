@@ -16,7 +16,11 @@ function confColor(t) {
   return 'rgb(' + (r | 0) + ',' + (g | 0) + ',90)';
 }
 
-// Persistent cards, keyed by name; bodies refresh in place.
+// Persistent cards, keyed by name. Each card owns ONE <canvas> that is reused
+// across every render — resized + redrawn in place, never destroyed and rebuilt.
+// Recreating canvas elements each render (or each stream chunk) thrashes the
+// engine's canvas-scene lifecycle for no benefit; a stable canvas per card keeps
+// a single backing scene alive for the life of the card.
 let cards = {};
 function card(name, title, desc) {
   let c = cards[name];
@@ -25,12 +29,26 @@ function card(name, title, desc) {
     wrap.appendChild(el('div', 'card-title', title));
     if (desc) wrap.appendChild(el('div', 'card-desc', desc));
     const body = el('div', 'card-body');
+    const cwrap = el('div', 'canvas-wrap');
+    const canvas = document.createElement('canvas');
+    cwrap.appendChild(canvas);
+    body.appendChild(cwrap);
+    const note = el('div', 'axis-note');
+    body.appendChild(note);
     wrap.appendChild(body);
     $('#stages').appendChild(wrap);
-    c = cards[name] = { wrap, body };
+    c = cards[name] = { wrap, body, canvas, ctx: canvas.getContext('2d'), note };
   }
-  c.body.textContent = '';
-  return c.body;
+  return c;
+}
+// Size a card's canvas (only touching width/height when they actually change —
+// each assignment reallocates the surface), wipe it, and hand back its 2D
+// context for a full redraw.
+function cardCanvas(c, W, H) {
+  if (c.canvas.width !== W) c.canvas.width = W;
+  if (c.canvas.height !== H) c.canvas.height = H;
+  c.ctx.clearRect(0, 0, W, H);
+  return c.ctx;
 }
 function clearCards(except) {
   for (const k of Object.keys(cards)) {
@@ -47,9 +65,9 @@ function renderStages(result) {
     if (!s) continue;
     present.push(name);
     const info = STAGE_INFO[name];
-    const body = card(name, name, info.desc);
-    if (info.kind === 'codes') renderCodes(body, s);
-    else if (info.kind === 'conf') renderConf(body, s);
+    const c = card(name, name, info.desc);
+    if (info.kind === 'codes') renderCodes(c, s);
+    else if (info.kind === 'conf') renderConf(c, s);
   }
   // the waveform always, from the returned samples
   present.push('audio');
@@ -60,9 +78,9 @@ function renderStages(result) {
 
 // 16 x F RVQ codes — one row per codebook, color = code id (per-row normalized so
 // the semantic row and the acoustic rows are each legible).
-function renderCodes(body, s) {
+function renderCodes(c, s) {
   const W = Math.min(1120, Math.max(360, s.w * 8)), rowH = 15, H = s.h * rowH;
-  const cv = mkCanvas(body, W, H), ctx = cv.getContext('2d');
+  const ctx = cardCanvas(c, W, H);
   // per-row min/max
   const lo = new Float32Array(s.h), hi = new Float32Array(s.h);
   for (let r = 0; r < s.h; r++) {
@@ -75,22 +93,22 @@ function renderCodes(body, s) {
     const r = Math.min(s.h - 1, (y / rowH) | 0), base = r * s.w, span = (hi[r] - lo[r]) || 1;
     for (let x = 0; x < W; x++) {
       const sx = Math.min(s.w - 1, (x * s.w / W) | 0);
-      const c = seqColor((s.data[base + sx] - lo[r]) / span);
+      const col = seqColor((s.data[base + sx] - lo[r]) / span);
       const o = (y * W + x) * 4;
-      img.data[o] = c[0]; img.data[o + 1] = c[1]; img.data[o + 2] = c[2]; img.data[o + 3] = 255;
+      img.data[o] = col[0]; img.data[o + 1] = col[1]; img.data[o + 2] = col[2]; img.data[o + 3] = 255;
     }
   }
   ctx.putImageData(img, 0, 0);
   // row separators + labels
   ctx.fillStyle = 'rgba(0,0,0,0.35)';
   for (let r = 1; r < s.h; r++) ctx.fillRect(0, r * rowH, W, 1);
-  body.appendChild(el('div', 'axis-note', s.h + ' codebooks × ' + s.w + ' frames · row 0 = semantic (Talker), 1–' + (s.h - 1) + ' = acoustic (Code Predictor)'));
+  c.note.textContent = s.h + ' codebooks × ' + s.w + ' frames · row 0 = semantic (Talker), 1–' + (s.h - 1) + ' = acoustic (Code Predictor)';
 }
 
 // 1 x F confidence — bars colored + heighted by the Talker's top-1 probability.
-function renderConf(body, s) {
+function renderConf(c, s) {
   const W = Math.min(1120, Math.max(360, s.w * 8)), H = 90;
-  const cv = mkCanvas(body, W, H), ctx = cv.getContext('2d');
+  const ctx = cardCanvas(c, W, H);
   ctx.fillStyle = '#0e1218'; ctx.fillRect(0, 0, W, H);
   const n = s.w, bw = W / n;
   let mn = 1, mx = 0, sum = 0;
@@ -100,14 +118,14 @@ function renderConf(body, s) {
     ctx.fillStyle = confColor(v);
     ctx.fillRect(i * bw, H - h, Math.max(1, bw - 0.5), h);
   }
-  body.appendChild(el('div', 'axis-note',
+  c.note.textContent =
     'top-1 prob per frame · min ' + mn.toFixed(2) + ' · mean ' + (sum / n).toFixed(2) + ' · max ' + mx.toFixed(2) +
-    ' — red dips are where the model hedged'));
+    ' — red dips are where the model hedged';
 }
 
-function renderWave(body, d) {
+function renderWave(c, d) {
   const W = 1120, H = 120, mid = H / 2;
-  const cv = mkCanvas(body, W, H), ctx = cv.getContext('2d');
+  const ctx = cardCanvas(c, W, H);
   ctx.fillStyle = '#0e1218'; ctx.fillRect(0, 0, W, H);
   const n = d.length, per = Math.max(1, Math.floor(n / W));
   let peak = 1e-6; for (let i = 0; i < n; i++) { const a = Math.abs(d[i]); if (a > peak) peak = a; }
@@ -123,12 +141,12 @@ function renderWave(body, d) {
 // ── live stream meter: chunks arriving + the growing waveform ───────────────
 function renderStreamMeter() {
   clearCards(['stream']);
-  const body = card('stream', 'streaming', CHUNK_FRAMES + ' frames/chunk · audio plays as it generates');
-  let total = 0; for (const c of streamAccum) total += c.length;
-  body.appendChild(el('div', 'axis-note',
-    streamFrames + ' chunks · ' + (total / (lastResult ? lastResult.sampleRate : 24000)).toFixed(2) + 's so far'));
-  if (!total) return;
+  const c = card('stream', 'streaming', CHUNK_FRAMES + ' frames/chunk · audio plays as it generates');
+  let total = 0; for (const ch of streamAccum) total += ch.length;
+  c.note.textContent =
+    streamFrames + ' chunks · ' + (total / (lastResult ? lastResult.sampleRate : 24000)).toFixed(2) + 's so far';
+  if (!total) { cardCanvas(c, 1120, 120); return; }
   const flat = new Float32Array(total);
-  let o = 0; for (const c of streamAccum) { flat.set(c, o); o += c.length; }
-  renderWave(body, flat);
+  let o = 0; for (const ch of streamAccum) { flat.set(ch, o); o += ch.length; }
+  renderWave(c, flat);
 }
