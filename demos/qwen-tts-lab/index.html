@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Qwen TTS Lab</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <header id="toolbar">
+      <span id="brand">◑ Qwen&nbsp;TTS&nbsp;Lab</span>
+      <span class="tagline">drive the voice through its real seams — design, deliver, stream, inspect</span>
+      <span class="grow"></span>
+      <span id="backend" class="badge">loading…</span>
+    </header>
+
+    <!-- which checkpoint: the variant decides which control surface appears -->
+    <section id="modelbar">
+      <label class="cfg">model
+        <input id="model-dir" type="text" value="D:/projects/brosoundml/weights/qwen-tts/0.6B-customvoice">
+      </label>
+      <button id="btn-browse-model" class="iconbtn" title="Choose a Qwen3-TTS checkpoint directory">📁</button>
+      <span class="quick">
+        <button id="btn-cv"   class="chip" title="CustomVoice — preset speakers">custom</button>
+        <button id="btn-vd"   class="chip" title="VoiceDesign — describe the voice">design</button>
+        <button id="btn-base" class="chip" title="Base — clone / x-vector designer">base</button>
+      </span>
+      <span class="grow"></span>
+      <span id="model-meta" class="meta"></span>
+      <button id="btn-reload" title="Reload this checkpoint">↺</button>
+    </section>
+
+    <!-- VOICE — the identity seam. One of three panels shows, per variant. -->
+    <section id="voice">
+      <!-- CustomVoice: a palette of preset speakers -->
+      <div id="voice-speaker" class="vpanel" style="display:none">
+        <span class="vlabel">speaker</span>
+        <select id="speaker" title="Preset speaker (CustomVoice)"></select>
+        <span id="dialect" class="tag"></span>
+        <label class="cfg lang">lang
+          <select id="language" title="Synthesis language"></select>
+        </label>
+      </div>
+
+      <!-- VoiceDesign: describe the voice in words -->
+      <div id="voice-instruct" class="vpanel" style="display:none">
+        <span class="vlabel">describe</span>
+        <input id="instruct" type="text" placeholder="a warm, low-pitched elderly storyteller…"
+               title="Natural-language voice description (VoiceDesign)">
+        <span class="presets" id="instruct-presets"></span>
+        <label class="cfg lang">lang
+          <select id="language2" title="Synthesis language"></select>
+        </label>
+      </div>
+
+      <!-- Base: the x-vector designer — enroll real voices, blend, render -->
+      <div id="voice-designer" class="vpanel col" style="display:none">
+        <div class="drow">
+          <span class="vlabel">designer</span>
+          <input id="ref-wav" type="text" placeholder="path to a reference .wav to enroll"
+                 title="A clip whose speaker identity becomes an x-vector anchor">
+          <button id="btn-browse-wav" class="iconbtn" title="Choose a reference clip">📁</button>
+          <button id="btn-enroll" title="Encode the clip to a speaker x-vector anchor">⤓ enroll</button>
+          <button id="btn-clone" title="Render directly from this clip (one-shot clone)">clone once</button>
+          <button id="btn-rand-xv" title="A random in-distribution voice">🎲 random</button>
+          <label class="cfg lang">lang
+            <select id="language3" title="Synthesis language"></select>
+          </label>
+        </div>
+        <div id="anchors" class="anchors" title="Blend the enrolled anchors — weights mix their x-vectors"></div>
+        <div id="designer-meta" class="meta"></div>
+      </div>
+    </section>
+
+    <!-- DELIVERY — the sampling seam: how varied / how safe the take is -->
+    <section id="delivery">
+      <span class="vlabel">delivery</span>
+      <div class="dial"><label>temp <span id="v-temp">0.00</span></label>
+        <input id="temp" type="range" min="0" max="1.5" step="0.05" value="0"></div>
+      <div class="dial"><label>top-k <span id="v-topk">0</span></label>
+        <input id="topk" type="range" min="0" max="200" step="1" value="0"></div>
+      <div class="dial"><label>top-p <span id="v-topp">1.00</span></label>
+        <input id="topp" type="range" min="0" max="1" step="0.01" value="1"></div>
+      <label class="cfg seed">seed
+        <input id="seed" type="number" value="0" min="0" step="1">
+      </label>
+      <label class="lock" title="Keep the seed fixed across runs (A/B the same draw)">
+        <input id="seed-lock" type="checkbox"> lock
+      </label>
+      <button id="btn-greedy" title="Back to greedy / deterministic (temp 0)">○ greedy</button>
+      <span id="delivery-meta" class="meta"></span>
+    </section>
+
+    <!-- TEXT + transport. Render = inspect (off-thread + trace). Stream = realtime. -->
+    <section id="prompt">
+      <input id="text" type="text" value="Hello there. This is a test of the pipeline."
+             placeholder="Type something to speak…">
+      <button id="btn-render" disabled title="Synthesize off-thread, play, and draw the trace">▶ Render</button>
+      <button id="btn-stream" disabled title="Stream audio as it generates (lowest latency)">⇶ Stream</button>
+      <button id="btn-stop" disabled title="Barge-in: stop generation/playback now">■ Stop</button>
+      <button id="btn-play" disabled title="Replay the last synthesized buffer">♪</button>
+      <span id="run-meta" class="meta"></span>
+      <span class="grow"></span>
+      <span id="latency" class="meta"></span>
+    </section>
+
+    <main id="stages"></main>
+  </div>
+
+  <script src="lib/state.js"></script>
+  <script src="lib/helpers.js"></script>
+  <script src="lib/model.js"></script>
+  <script src="lib/voice.js"></script>
+  <script src="lib/delivery.js"></script>
+  <script src="lib/audio.js"></script>
+  <script src="lib/synth.js"></script>
+  <script src="lib/render.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

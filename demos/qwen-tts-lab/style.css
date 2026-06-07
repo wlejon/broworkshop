@@ -1,0 +1,101 @@
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: #0b0e13; color: #d7dde6;
+  font: 13px/1.45 -apple-system, "Segoe UI", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+#app { display: flex; flex-direction: column; height: 100vh; }
+
+/* ── toolbar ── */
+#toolbar {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 16px; background: #11151d; border-bottom: 1px solid #1d2430;
+}
+#brand { font-size: 16px; font-weight: 700; color: #8fd0ff; letter-spacing: .3px; }
+.tagline { color: #6b7585; font-style: italic; }
+.grow { flex: 1; }
+.badge {
+  padding: 4px 10px; border-radius: 12px; background: #16306a; color: #bcd8ff;
+  font-size: 12px; white-space: nowrap;
+}
+.badge.err { background: #5a1f24; color: #ffc4c4; }
+
+/* ── bars ── */
+section { padding: 9px 16px; border-bottom: 1px solid #161c26; }
+#modelbar, #voice .vpanel, #delivery, #prompt, .drow {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+.cfg { display: inline-flex; align-items: center; gap: 6px; color: #8b94a3; }
+.cfg input[type=text], #text {
+  background: #0e131b; border: 1px solid #232c3a; color: #d7dde6;
+  border-radius: 6px; padding: 6px 9px; font: inherit;
+}
+#model-dir { width: 460px; }
+#ref-wav { width: 340px; }
+#text { flex: 1; min-width: 280px; }
+.meta { color: #6b7585; font-size: 12px; }
+.vlabel {
+  font-weight: 700; color: #9aa6b6; text-transform: uppercase;
+  font-size: 11px; letter-spacing: .6px; min-width: 64px;
+}
+
+button {
+  background: #1a2230; border: 1px solid #28323f; color: #cdd6e2;
+  border-radius: 6px; padding: 6px 11px; font: inherit; cursor: pointer;
+}
+button:hover:not(:disabled) { background: #222d3d; border-color: #3a4658; }
+button:disabled { opacity: .4; cursor: default; }
+.iconbtn { padding: 6px 8px; }
+.quick { display: inline-flex; gap: 5px; }
+.chip { padding: 4px 10px; border-radius: 12px; font-size: 12px; }
+.chip.active { background: #16306a; border-color: #2b5bb0; color: #bcd8ff; }
+
+/* ── voice ── */
+#voice .vpanel.col { flex-direction: column; align-items: stretch; }
+select {
+  background: #0e131b; border: 1px solid #232c3a; color: #d7dde6;
+  border-radius: 6px; padding: 6px 8px; font: inherit;
+}
+.tag { color: #c9a86a; font-size: 12px; }
+.lang select { padding: 4px 6px; }
+.presets { display: inline-flex; gap: 5px; flex-wrap: wrap; }
+#instruct { width: 360px; }
+.anchors { display: flex; flex-direction: column; gap: 5px; margin: 6px 0 2px 74px; }
+.anchor { display: flex; align-items: center; gap: 10px; }
+.aname { min-width: 130px; color: #b7c2d2; }
+.anchor input[type=range] { width: 240px; }
+.anchor .x {
+  padding: 1px 8px; color: #d99; background: #2a1c1f; border-color: #4a2a2e;
+}
+.hint { color: #5c6573; font-style: italic; margin-left: 74px; }
+#designer-meta { margin-left: 74px; }
+
+/* ── delivery ── */
+.dial { display: inline-flex; flex-direction: column; gap: 2px; }
+.dial label { font-size: 11px; color: #8b94a3; }
+.dial label span { color: #8fd0ff; }
+.dial input[type=range] { width: 130px; }
+.seed input { width: 110px; }
+.lock { display: inline-flex; align-items: center; gap: 4px; color: #8b94a3; font-size: 12px; }
+
+/* ── transport ── */
+#btn-render { background: #1c3a5e; border-color: #2b5bb0; color: #d6e8ff; font-weight: 600; }
+#btn-stream { background: #1c3a30; border-color: #2b8060; color: #d6ffe8; font-weight: 600; }
+#btn-stop   { background: #3a1c22; border-color: #803040; color: #ffd6dd; }
+
+/* ── trace stages ── */
+#stages { flex: 1; overflow: auto; padding: 14px 16px; }
+.card {
+  background: #0f141c; border: 1px solid #1b2330; border-radius: 8px;
+  padding: 11px 13px; margin-bottom: 13px;
+}
+.card-title {
+  font-weight: 700; color: #9fd4ff; font-size: 13px; letter-spacing: .3px;
+  text-transform: uppercase;
+}
+.card-desc { color: #6b7585; font-size: 12px; margin: 2px 0 8px; }
+.card-body { display: flex; flex-direction: column; gap: 4px; }
+.canvas-wrap { line-height: 0; border-radius: 5px; overflow: hidden; }
+canvas { display: block; max-width: 100%; }
+.axis-note { color: #5f6878; font-size: 11px; }
