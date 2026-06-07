@@ -81,6 +81,12 @@
         <input id="topk" type="range" min="0" max="200" step="1" value="0"></div>
       <div class="dial"><label>top-p <span id="v-topp">1.00</span></label>
         <input id="topp" type="range" min="0" max="1" step="0.01" value="1"></div>
+      <div class="dial" title="Repetition penalty on codebook 0 — &gt;1 discourages the Talker's droning/looping">
+        <label>rep <span id="v-rep">1.05</span></label>
+        <input id="rep" type="range" min="1" max="2" step="0.01" value="1.05"></div>
+      <div class="dial" title="Confidence-adaptive temperature — sample hotter only where the model hedged (needs temp &gt; 0)">
+        <label>adapt <span id="v-adapt">0.00</span></label>
+        <input id="adapt" type="range" min="0" max="2" step="0.05" value="0"></div>
       <label class="cfg seed">seed
         <input id="seed" type="number" value="0" min="0" step="1">
       </label>

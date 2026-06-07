@@ -38,6 +38,7 @@ function gatherOpts() {
   return Object.assign({}, voice, {
     language: currentLanguage(),
     temperature: s.temperature, topK: s.topK, topP: s.topP, seed: s.seed,
+    repetitionPenalty: s.repetitionPenalty, adaptive: s.adaptive,
   });
 }
 
