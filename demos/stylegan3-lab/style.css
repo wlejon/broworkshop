@@ -1,0 +1,102 @@
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: #0b0e13; color: #d7dde6;
+  font: 13px/1.45 -apple-system, "Segoe UI", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+#app { display: flex; flex-direction: column; height: 100vh; }
+
+/* ── toolbar ── */
+#toolbar {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 16px; background: #11151d; border-bottom: 1px solid #1d2430;
+}
+#brand { font-size: 16px; font-weight: 700; color: #c89bff; letter-spacing: .3px; }
+.tagline { color: #6b7585; font-style: italic; }
+.grow { flex: 1; }
+.badge {
+  padding: 4px 10px; border-radius: 12px; background: #2a1f5a; color: #d8caff;
+  font-size: 12px; white-space: nowrap;
+}
+.badge.err { background: #5a1f24; color: #ffc4c4; }
+
+/* ── bars ── */
+section { padding: 9px 16px; border-bottom: 1px solid #161c26; }
+#modelbar, #parambar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.cfg { display: inline-flex; align-items: center; gap: 6px; color: #8b94a3; }
+.cfg input[type=text] {
+  background: #0e131b; border: 1px solid #232c3a; color: #d7dde6;
+  border-radius: 6px; padding: 6px 9px; font: inherit;
+}
+#model-dir { width: 460px; }
+.cfg.seed input[type=number] {
+  width: 110px; background: #0e131b; border: 1px solid #232c3a; color: #d7dde6;
+  border-radius: 6px; padding: 6px 9px; font: inherit;
+}
+.cfg input[type=number] {
+  width: 64px; background: #0e131b; border: 1px solid #232c3a; color: #d7dde6;
+  border-radius: 6px; padding: 6px 9px; font: inherit;
+}
+.meta { color: #6b7585; font-size: 12px; }
+
+button {
+  background: #1a2230; border: 1px solid #28323f; color: #cdd6e2;
+  border-radius: 6px; padding: 6px 11px; font: inherit; cursor: pointer;
+}
+button:hover:not(:disabled) { background: #222d3d; border-color: #3a4658; }
+button:disabled { opacity: .4; cursor: default; }
+.iconbtn { padding: 6px 8px; }
+.primary { background: #34225e; border-color: #5b3bb0; color: #e8dbff; font-weight: 600; }
+
+select {
+  background: #0e131b; border: 1px solid #232c3a; color: #d7dde6;
+  border-radius: 6px; padding: 6px 8px; font: inherit;
+}
+
+/* ── dials ── */
+.dial { display: inline-flex; flex-direction: column; gap: 2px; }
+.dial label { font-size: 11px; color: #8b94a3; }
+.dial label span { color: #c89bff; }
+.dial input[type=range] { width: 150px; }
+.dial.wide input[type=range] { width: 260px; }
+
+/* ── seam chips ── */
+.quick { display: inline-flex; gap: 5px; }
+.chip { padding: 4px 12px; border-radius: 12px; font-size: 12px; }
+.chip.active { background: #2a1f5a; border-color: #5b3bb0; color: #d8caff; }
+
+/* ── workspace ── */
+#workspace { flex: 1; overflow: auto; }
+.panel { display: none; flex-direction: column; gap: 14px; padding: 16px; }
+.controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+/* ── output stage ── */
+.stage { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; justify-content: center; }
+.shot { display: flex; flex-direction: column; gap: 5px; align-items: center; }
+.canvas-wrap {
+  line-height: 0; border-radius: 6px; overflow: hidden;
+  background: #0f141c; border: 1px solid #1b2330;
+}
+canvas { display: block; }
+.shot canvas { width: 256px; height: 256px; }
+.shot.big canvas { width: 420px; height: 420px; }
+.cap { color: #8b94a3; font-size: 12px; text-align: center; }
+
+/* ── walk strip ── */
+.strip { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+.strip-cell {
+  width: 132px; height: 132px; border-radius: 5px;
+  background: #0f141c; border: 1px solid #1b2330;
+}
+
+/* ── grid ── */
+.grid {
+  display: grid; gap: 8px; max-width: 900px; margin: 0 auto;
+  grid-template-columns: repeat(4, 1fr);
+}
+.grid-cell {
+  width: 100%; aspect-ratio: 1 / 1; border-radius: 5px; cursor: pointer;
+  background: #0f141c; border: 1px solid #1b2330;
+}
+.grid-cell:hover { border-color: #5b3bb0; }

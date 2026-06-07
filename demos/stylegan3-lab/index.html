@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>StyleGAN3 Lab</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <header id="toolbar">
+      <span id="brand">◑ StyleGAN3&nbsp;Lab</span>
+      <span class="tagline">drive the latent space through its real seams — sample, walk, mix, browse</span>
+      <span class="grow"></span>
+      <span id="backend" class="badge">loading…</span>
+    </header>
+
+    <!-- which checkpoint -->
+    <section id="modelbar">
+      <label class="cfg">model
+        <input id="model-dir" type="text" value="D:/projects/brovisionml/weights/stylegan3-r-ffhqu-256">
+      </label>
+      <button id="btn-browse-model" class="iconbtn" title="Choose a converted StyleGAN3-R checkpoint directory">📁</button>
+      <label class="cfg">res
+        <select id="resolution" title="Must match the checkpoint">
+          <option value="256" selected>256</option>
+          <option value="512">512</option>
+          <option value="1024">1024</option>
+        </select>
+      </label>
+      <label class="cfg">device
+        <select id="device">
+          <option value="cuda" selected>cuda</option>
+          <option value="cpu">cpu</option>
+        </select>
+      </label>
+      <span class="grow"></span>
+      <span id="model-meta" class="meta"></span>
+      <button id="btn-reload" title="Reload this checkpoint">↺</button>
+    </section>
+
+    <!-- shared generation params -->
+    <section id="parambar">
+      <div class="dial">
+        <label>truncation ψ <span id="psi-val">0.70</span></label>
+        <input id="psi" type="range" min="0" max="1" step="0.01" value="0.7"
+               title="Pull W toward the average face — lower = tamer/more typical">
+      </div>
+      <div class="dial">
+        <label>cutoff <span id="cutoff-val">all</span></label>
+        <input id="cutoff" type="range" min="-1" max="16" step="1" value="-1"
+               title="Truncate only the first N rows (-1 = all). Coarse-only truncation keeps fine detail.">
+      </div>
+      <span class="grow"></span>
+      <nav class="quick">
+        <button id="seam-sample" class="chip" title="z → image">sample</button>
+        <button id="seam-walk"   class="chip" title="interpolate two latents">walk</button>
+        <button id="seam-mix"    class="chip" title="style mixing">mix</button>
+        <button id="seam-grid"   class="chip" title="seed browser">grid</button>
+      </nav>
+    </section>
+
+    <main id="workspace">
+      <!-- SAMPLE -->
+      <section id="panel-sample" class="panel">
+        <div class="controls">
+          <label class="cfg seed">seed <input id="seed" type="number" value="42"></label>
+          <button id="btn-rand-seed" title="Random seed">🎲</button>
+          <button id="btn-render" class="primary">render</button>
+          <span class="grow"></span>
+          <button id="btn-to-a" title="Send this seed to the A anchor (Walk + Mix)">→ A</button>
+          <button id="btn-to-b" title="Send this seed to the B anchor (Walk + Mix)">→ B</button>
+        </div>
+        <div class="stage">
+          <div class="shot big">
+            <div class="canvas-wrap"><canvas id="sample-canvas"></canvas></div>
+            <div class="cap" id="sample-meta"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- WALK -->
+      <section id="panel-walk" class="panel">
+        <div class="controls">
+          <label class="cfg seed">A <input id="walk-a" type="number" value="1"></label>
+          <button id="btn-walk-rand-a" title="Random A">🎲</button>
+          <label class="cfg seed">B <input id="walk-b" type="number" value="2"></label>
+          <button id="btn-walk-rand-b" title="Random B">🎲</button>
+          <div class="dial wide">
+            <label>t <span id="walk-meta">t = 0.50</span></label>
+            <input id="walk-t" type="range" min="0" max="1" step="0.01" value="0.5">
+          </div>
+          <span class="grow"></span>
+          <label class="cfg">steps <input id="walk-steps" type="number" value="7" min="2" max="12"></label>
+          <button id="btn-walk-strip">render strip</button>
+        </div>
+        <div class="stage">
+          <div class="shot"><div class="canvas-wrap"><canvas id="walk-a-canvas"></canvas></div><div class="cap">A</div></div>
+          <div class="shot big"><div class="canvas-wrap"><canvas id="walk-mid"></canvas></div><div class="cap">interpolated</div></div>
+          <div class="shot"><div class="canvas-wrap"><canvas id="walk-b-canvas"></canvas></div><div class="cap">B</div></div>
+        </div>
+        <div id="walk-strip" class="strip"></div>
+      </section>
+
+      <!-- MIX -->
+      <section id="panel-mix" class="panel">
+        <div class="controls">
+          <label class="cfg seed">A (coarse) <input id="mix-a" type="number" value="1"></label>
+          <button id="btn-mix-rand-a" title="Random A">🎲</button>
+          <label class="cfg seed">B (fine) <input id="mix-b" type="number" value="2"></label>
+          <button id="btn-mix-rand-b" title="Random B">🎲</button>
+          <div class="dial wide">
+            <label>crossover layer <span id="mix-k-val">8</span></label>
+            <input id="mix-k" type="range" min="0" max="16" step="1" value="8"
+                   title="Rows below this come from A (pose/shape); rows at/above from B (color/texture)">
+          </div>
+        </div>
+        <div class="stage">
+          <div class="shot"><div class="canvas-wrap"><canvas id="mix-a-canvas"></canvas></div><div class="cap">A · structure</div></div>
+          <div class="shot big"><div class="canvas-wrap"><canvas id="mix-result"></canvas></div><div class="cap" id="mix-meta"></div></div>
+          <div class="shot"><div class="canvas-wrap"><canvas id="mix-b-canvas"></canvas></div><div class="cap">B · style</div></div>
+        </div>
+      </section>
+
+      <!-- GRID -->
+      <section id="panel-grid" class="panel">
+        <div class="controls">
+          <label class="cfg seed">base seed <input id="grid-base" type="number" value="0"></label>
+          <label class="cfg">size
+            <select id="grid-size">
+              <option value="3">3×3</option>
+              <option value="4" selected>4×4</option>
+              <option value="5">5×5</option>
+            </select>
+          </label>
+          <button id="btn-grid-regen">↻ render</button>
+          <span class="grow"></span>
+          <button id="btn-grid-prev">‹ prev</button>
+          <button id="btn-grid-next">next ›</button>
+        </div>
+        <div id="grid-out" class="grid"></div>
+      </section>
+    </main>
+  </div>
+
+  <script src="lib/state.js"></script>
+  <script src="lib/helpers.js"></script>
+  <script src="lib/engine.js"></script>
+  <script src="lib/model.js"></script>
+  <script src="lib/sample.js"></script>
+  <script src="lib/walk.js"></script>
+  <script src="lib/mix.js"></script>
+  <script src="lib/grid.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
