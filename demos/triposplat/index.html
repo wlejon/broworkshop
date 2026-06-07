@@ -1,51 +1,102 @@
 <!DOCTYPE html>
 <html>
 <head>
-<meta charset="utf-8">
-<style>
-  html, body { margin: 0; height: 100%; background: #0d0f12; color: #e6e6e6;
-               font-family: system-ui, sans-serif; overflow: hidden; }
-  #wrap { display: flex; height: 100%; }
-  #side { width: 300px; padding: 18px; box-sizing: border-box; background: #16191e;
-          border-right: 1px solid #262b33; display: flex; flex-direction: column; gap: 14px; }
-  #side h1 { font-size: 16px; margin: 0 0 2px; font-weight: 650; }
-  #side .sub { font-size: 12px; color: #8a93a0; margin-top: -8px; line-height: 1.4; }
-  #thumb { width: 100%; aspect-ratio: 1; background: #0d0f12 center/contain no-repeat;
-           border: 1px solid #262b33; border-radius: 8px; }
-  label { font-size: 12px; color: #9aa3b0; display: flex; justify-content: space-between; }
-  input[type=range] { width: 100%; }
-  button { background: #2d6cdf; color: #fff; border: 0; border-radius: 7px; padding: 10px;
-           font-size: 14px; font-weight: 600; cursor: pointer; }
-  button:disabled { background: #2a3340; color: #6b7280; cursor: default; }
-  #status { font-size: 12px; color: #8a93a0; min-height: 16px; }
-  #stage { flex: 1; position: relative; }
-  canvas { width: 100%; height: 100%; display: block; }
-  #hint { position: absolute; left: 12px; bottom: 10px; font-size: 11px; color: #5b636e; }
-</style>
+  <meta charset="utf-8">
+  <title>TripoSplat Lab</title>
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<div id="wrap">
-  <div id="side">
-    <div>
-      <h1>TripoSplat</h1>
-      <div class="sub">Single image &rarr; 3D Gaussian Splat. DINOv3 + Flux.2 VAE &rarr;
-        flow DiT &rarr; octree decoder, all on-device.</div>
-    </div>
-    <div id="thumb"></div>
-    <label>Steps <span id="vSteps">12</span></label>
-    <input id="steps" type="range" min="4" max="30" value="12">
-    <label>Guidance <span id="vCfg">3.0</span></label>
-    <input id="cfg" type="range" min="10" max="70" value="30">
-    <label>Gaussians <span id="vNg">131072</span></label>
-    <input id="ng" type="range" min="32768" max="262144" step="32768" value="131072">
-    <button id="go">Generate</button>
-    <div id="status">Loading models&hellip;</div>
+  <div id="app">
+
+    <header id="topbar">
+      <span id="brand">◆ TripoSplat&nbsp;Lab</span>
+      <span class="tagline">one image → a 3D Gaussian splat, on-device</span>
+      <span class="grow"></span>
+      <span id="device" class="badge">…</span>
+    </header>
+
+    <main>
+      <!-- ── left: source + parameters ─────────────────────────────── -->
+      <aside id="controls">
+        <label class="hdr">Source image</label>
+        <div id="thumb" title="The image fed to the reconstructor"></div>
+        <div class="row">
+          <button id="btn-open" class="grow">Open image…</button>
+        </div>
+        <label class="sub">Samples</label>
+        <div id="samples" class="samples"></div>
+        <p class="muted small">…or drop an image onto the viewer.</p>
+
+        <label class="check" id="bg-row" title="Isolate the subject with BiRefNet before reconstruction">
+          <input type="checkbox" id="bg-remove"> Remove background
+        </label>
+
+        <label class="hdr">Parameters</label>
+        <div class="field">
+          <label>Steps <span id="vSteps" class="muted">12</span></label>
+          <input id="steps" type="range" min="4" max="30" value="12">
+        </div>
+        <div class="field">
+          <label>Guidance <span id="vCfg" class="muted">3.0</span></label>
+          <input id="cfg" type="range" min="10" max="70" value="30">
+        </div>
+        <div class="field">
+          <label>Gaussians <span id="vNg" class="muted">131,072</span></label>
+          <input id="ng" type="range" min="32768" max="262144" step="32768" value="131072">
+        </div>
+        <div class="row">
+          <div class="field grow"><label>Seed</label>
+            <input id="seed" type="number" min="0" value="42"></div>
+          <button id="btn-rand" class="icon" title="Random seed">⤮</button>
+        </div>
+
+        <details id="adv" class="accordion">
+          <summary>Advanced</summary>
+          <div class="field">
+            <label>Flow shift <span id="vShift" class="muted">3.0</span></label>
+            <input id="shift" type="range" min="10" max="60" value="30">
+          </div>
+        </details>
+
+        <div class="actions">
+          <button id="btn-go" class="primary" disabled>Generate</button>
+          <button id="btn-save" disabled title="Export the splat as a .ply">Save .ply…</button>
+        </div>
+      </aside>
+
+      <!-- ── center: the splat viewport ────────────────────────────── -->
+      <section id="stage">
+        <canvas id="view"></canvas>
+        <div id="overlay">
+          <div id="spinner" class="hidden">
+            <div class="ring"></div>
+            <span id="elapsed">0.0s</span>
+          </div>
+          <div id="view-hint">Loading models…</div>
+        </div>
+        <div id="viewer-bar">
+          <label class="vchk"><input type="checkbox" id="autorotate" checked> auto-rotate</label>
+          <button id="btn-reset" class="vbtn">reset view</button>
+          <span class="vsep"></span>
+          <label class="vfield">scale
+            <input id="vscale" type="range" min="20" max="300" value="100"></label>
+          <span class="vsep"></span>
+          <label class="vchk"><input type="checkbox" id="vlight"> light bg</label>
+          <span class="grow"></span>
+          <span class="muted small">drag · scroll</span>
+        </div>
+      </section>
+    </main>
+
+    <footer id="status">
+      <span id="status-text">Loading models…</span>
+      <span class="grow"></span>
+      <span id="stat-info" class="muted"></span>
+    </footer>
   </div>
-  <div id="stage">
-    <canvas id="view"></canvas>
-    <div id="hint">drag to orbit &middot; scroll to zoom</div>
-  </div>
-</div>
-<script src="app.js" type="module"></script>
+
+  <script src="lab/viewport.js"></script>
+  <script src="lab/client.js"></script>
+  <script src="app.js"></script>
 </body>
 </html>
