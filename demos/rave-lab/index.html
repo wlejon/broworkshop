@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>RAVE Lab</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <header id="toolbar">
+      <span id="brand">◈ RAVE&nbsp;Lab</span>
+      <span class="tagline">encode a sound to its latent curves · reshape them · hear it morph</span>
+      <span class="grow"></span>
+      <span id="backend" class="badge">loading…</span>
+    </header>
+
+    <!-- model directory: a converted RAVE v2 dir (config.json + model.safetensors) -->
+    <section id="controls">
+      <label class="cfg">model
+        <input id="model-dir" type="text" placeholder="dir with config.json + model.safetensors">
+      </label>
+      <button id="btn-browse-model" class="iconbtn" title="Choose a converted RAVE model directory">📁</button>
+      <button id="btn-load" title="Load the RAVE model">↻ Load</button>
+      <span id="model-meta" class="meta"></span>
+    </section>
+
+    <!-- source audio: a synthetic tone, or a real clip decoded off disk -->
+    <section id="srcbar">
+      <span class="grouplbl">source</span>
+      <label class="cfg">tone
+        <input id="tone-freq" type="number" value="220" min="20" max="8000" step="1">
+        Hz
+      </label>
+      <label class="cfg">secs
+        <input id="tone-secs" type="number" value="1.5" min="0.2" max="8" step="0.1">
+      </label>
+      <select id="tone-kind" title="Tone shape to encode">
+        <option value="harm">harmonic</option>
+        <option value="sine">sine</option>
+        <option value="saw">saw</option>
+        <option value="sweep">sweep</option>
+        <option value="noise">noise burst</option>
+      </select>
+      <button id="btn-tone" title="Generate this tone and encode it">⌁ tone</button>
+      <span class="sep">·</span>
+      <label class="cfg">file
+        <input id="src-file" type="text" placeholder="path to a .wav / .flac / .mp3 / .ogg">
+      </label>
+      <button id="btn-browse-file" class="iconbtn" title="Choose an audio file">📁</button>
+      <button id="btn-loadfile" title="Decode the file and encode it">⤓ load</button>
+      <span class="grow"></span>
+      <span id="src-meta" class="meta"></span>
+    </section>
+
+    <!-- transport: A/B the original vs the morphed resynthesis -->
+    <section id="transport">
+      <button id="btn-play-src" disabled title="Play the source audio">▷ source</button>
+      <button id="btn-play-out" disabled title="Play the morphed resynthesis">▶ morph</button>
+      <span class="sep">·</span>
+      <button id="btn-decode" disabled title="Re-decode the edited latent">↻ decode</button>
+      <button id="btn-reset" disabled title="Restore every curve to the encoded latent">↺ reset all</button>
+      <label class="chk"><input id="autoplay" type="checkbox" checked> autoplay</label>
+      <span class="grow"></span>
+      <span id="run-meta" class="meta"></span>
+    </section>
+
+    <main id="stages">
+      <div id="waves"></div>
+      <div id="curves-head" class="section-title" style="display:none">
+        latent — <span class="dim-hint">PCA-sorted axes · dim 0 ≈ loudness · dim 1 ≈ pitch · 2+ ≈ timbre · drag a curve to reshape</span>
+      </div>
+      <div id="curves"></div>
+      <div id="hint" class="hint">Load a RAVE model, then make a tone or open a file to begin.</div>
+    </main>
+  </div>
+
+  <script src="lib/state.js"></script>
+  <script src="lib/audio.js"></script>
+  <script src="lib/model.js"></script>
+  <script src="lib/render.js"></script>
+  <script src="lib/curves.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
