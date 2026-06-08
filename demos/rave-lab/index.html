@@ -60,6 +60,10 @@
       <button id="btn-decode" disabled title="Re-decode the edited latent">↻ decode</button>
       <button id="btn-reset" disabled title="Restore every curve to the encoded latent">↺ reset all</button>
       <label class="chk" title="Add RAVE's stochastic FFT noise-synth branch (breathy / unvoiced texture). Seeded, so the morph stays reproducible."><input id="noise" type="checkbox"> noise</label>
+      <label class="chk" title="Decode in stereo: the mono decoder runs once per channel; the channels decorrelate via an independent latent pad (RAVE 'stereo mode')."><input id="stereo" type="checkbox"> stereo</label>
+      <label class="cfg" title="Stereo width — std of the per-channel latent pad. RAVE-native = 1.0; larger is wider, 0 collapses to mono.">width
+        <input id="width" type="number" value="1.0" min="0" max="4" step="0.1">
+      </label>
       <label class="chk"><input id="autoplay" type="checkbox" checked> autoplay</label>
       <span class="grow"></span>
       <span id="run-meta" class="meta"></span>

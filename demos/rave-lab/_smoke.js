@@ -77,4 +77,22 @@ assert(dNoise > 0, 'addNoise changes the output vs deterministic');
 assert(dSeed === 0, 'same seed reproduces the same noisy output');
 console.log(`noise: Δvs-det=${dNoise.toFixed(2)}  seed-repro=${dSeed === 0}`);
 
+// ── 7. stereo: 2 interleaved channels, decorrelated, seed-reproducible ────────
+const st = rave.decode(enc.latent, enc.frames, { channels: 2, stereoWidth: 1.0, seed: 3 });
+assert(st.channels === 2, 'stereo decode reports 2 channels');
+assert(st.samples.length === det.samples.length * 2, 'stereo length = 2x mono');
+let lr = 0; for (let i = 0; i < st.samples.length; i += 2) lr += Math.abs(st.samples[i] - st.samples[i + 1]);
+assert(lr > 0, 'stereo channels are decorrelated (L != R), Σ|L-R|=' + lr.toFixed(2));
+const st2 = rave.decode(enc.latent, enc.frames, { channels: 2, stereoWidth: 1.0, seed: 3 });
+let dStereoSeed = 0; for (let i = 0; i < st.samples.length; i++) dStereoSeed += Math.abs(st.samples[i] - st2.samples[i]);
+assert(dStereoSeed === 0, 'same seed reproduces the same stereo decode');
+// width 0 collapses to identical channels (no decorrelation)
+const stNarrow = rave.decode(enc.latent, enc.frames, { channels: 2, stereoWidth: 0, seed: 3 });
+let lr0 = 0; for (let i = 0; i < stNarrow.samples.length; i += 2) lr0 += Math.abs(stNarrow.samples[i] - stNarrow.samples[i + 1]);
+assert(lr0 === 0, 'width 0 collapses stereo to identical channels');
+// publish + play the stereo morph through the 2-channel clip path
+const sid = publishClip(-1, st.samples, 2);
+assert(sid >= 0, 'stereo clip publishes to a 2-channel broaudio clip');
+console.log(`stereo: Σ|L-R|=${lr.toFixed(2)}  seed-repro=${dStereoSeed === 0}  width0-mono=${lr0 === 0}`);
+
 console.log('rave-lab smoke: PASS');

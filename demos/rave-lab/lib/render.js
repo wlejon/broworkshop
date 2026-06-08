@@ -46,10 +46,22 @@ function buildWaves() {
   outWaveCv = mk('morph', '#ffcf6b');
 }
 
+// Downmix an interleaved buffer to mono for the envelope draw (no-op if mono).
+function toMono(samples, channels) {
+  if (!samples || channels <= 1) return samples;
+  const nf = Math.floor(samples.length / channels);
+  const m = new Float32Array(nf);
+  for (let i = 0; i < nf; i++) {
+    let s = 0; for (let c = 0; c < channels; c++) s += samples[i * channels + c];
+    m[i] = s / channels;
+  }
+  return m;
+}
+
 function refreshWaves() {
   if (!srcWaveCv) buildWaves();
   drawWave(srcWaveCv, srcSamples, '#5aa0e0');
-  drawWave(outWaveCv, lastOut, '#ffcf6b');
+  drawWave(outWaveCv, toMono(lastOut, outChannels), '#ffcf6b');
 }
 
 // ── pipeline ─────────────────────────────────────────────────────────────────
@@ -89,15 +101,26 @@ function runDecode(autoplay) {
   busy = true; setBadge('decoding…');
   const t0 = Date.now();
   try {
-    // Fixed seed so the stochastic noise branch stays reproducible while editing
-    // curves — only the latent edits change the morph, not the noise draw.
-    const out = rave.decode(work, enc.frames, { addNoise: $('#noise').checked, seed: 1 });
+    // Fixed seed so the stochastic branches (noise + the per-channel stereo
+    // latent pad) stay reproducible while editing curves — only the latent edits
+    // change the morph, not the noise / width draw.
+    const stereo = $('#stereo').checked;
+    const width = parseFloat($('#width').value);
+    const out = rave.decode(work, enc.frames, {
+      addNoise: $('#noise').checked,
+      seed: 1,
+      channels: stereo ? 2 : 1,
+      stereoWidth: stereo ? (isFinite(width) ? width : 1.0) : 0,
+    });
     lastOut = out.samples;
-    outClipId = publishClip(outClipId, lastOut);
+    outChannels = out.channels || 1;
+    outClipId = publishClip(outClipId, lastOut, outChannels);
     $('#btn-play-out').disabled = (outClipId < 0);
     refreshWaves();
     let peak = 0; for (let i = 0; i < lastOut.length; i++) { const a = Math.abs(lastOut[i]); if (a > peak) peak = a; }
-    $('#run-meta').textContent = `decode ${Date.now() - t0}ms · ${lastOut.length} samp · peak ${peak.toFixed(3)}`;
+    const frames = lastOut.length / outChannels;
+    $('#run-meta').textContent = `decode ${Date.now() - t0}ms · ${frames} samp` +
+      `${outChannels > 1 ? ' ×' + outChannels : ''} · peak ${peak.toFixed(3)}`;
     setBadge('ready');
   } catch (e) { setBadge('decode failed: ' + e.message, true); }
   busy = false;

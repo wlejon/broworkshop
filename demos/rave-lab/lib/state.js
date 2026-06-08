@@ -27,7 +27,8 @@ let outClipId = -1;         // published audio clip for the morph   (B)
 
 let enc = null;             // { latent:Float32Array, nLatent, frames } — the ORIGINAL encode
 let work = null;            // Float32Array(nLatent*frames) — the editable latent (channel-major)
-let lastOut = null;         // Float32Array — most recent decoded waveform
+let lastOut = null;         // Float32Array — most recent decoded waveform (interleaved if stereo)
+let outChannels = 1;        // channel count of lastOut (2 when the stereo toggle is on)
 let dimRanges = [];         // [mn,mx] per dim — fixed vertical frame for each curve
 let curveCells = [];        // per-dim { cv, body, c, statsEl } — canvases persist, redraw in place
 
