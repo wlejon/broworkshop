@@ -19,12 +19,18 @@
       <label class="cfg">model
         <input id="model-dir" type="text" value="D:/projects/brovisionml/weights/stylegan3-r-ffhqu-256">
       </label>
-      <button id="btn-browse-model" class="iconbtn" title="Choose a converted StyleGAN3-R checkpoint directory">📁</button>
+      <button id="btn-browse-model" class="iconbtn" title="Choose a converted StyleGAN3 checkpoint directory (config-R or config-T)">📁</button>
       <label class="cfg">res
         <select id="resolution" title="Must match the checkpoint">
           <option value="256" selected>256</option>
           <option value="512">512</option>
           <option value="1024">1024</option>
+        </select>
+      </label>
+      <label class="cfg">cfg
+        <select id="variant" title="Config family — must match the checkpoint (R: rotation-equivariant, T: translation-equivariant)">
+          <option value="r" selected>R</option>
+          <option value="t">T</option>
         </select>
       </label>
       <label class="cfg">device

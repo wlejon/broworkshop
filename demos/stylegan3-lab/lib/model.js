@@ -33,17 +33,24 @@ function loadModel(dir) {
   wCache.clear();
   if (!pExists(dir + '/model.safetensors')) { setBadge('no model.safetensors in ' + dir, true); return; }
   const res = parseInt($('#resolution').value, 10) || 256;
+  // The config family is part of the released checkpoint name (stylegan3-{r,t}-…),
+  // so trust the directory when it says so; otherwise honor the dropdown.
+  const vSel = $('#variant');
+  if (/stylegan3-t-/i.test(dir)) vSel.value = 't';
+  else if (/stylegan3-r-/i.test(dir)) vSel.value = 'r';
+  const variant = vSel.value || 'r';
   const device = $('#device').value || 'cuda';
   $('#model-meta').textContent = '';
   setBadge('loading checkpoint…');
   try {
     bro.vision.loadStyleGAN3(dir, {
-      resolution: res, device: device,
+      resolution: res, variant: variant, device: device,
       onReady: function (g) {
         gan = g; remember('sg3.modelDir', dir);
-        META = { resolution: g.resolution, zDim: g.zDim, numWs: g.numWs, wDim: g.wDim, device: g.device };
+        META = { resolution: g.resolution, variant: g.variant, zDim: g.zDim, numWs: g.numWs, wDim: g.wDim, device: g.device };
         $('#model-meta').textContent =
-          g.resolution + '² · ' + g.device + ' · z' + g.zDim + ' · w ' + g.numWs + '×' + g.wDim;
+          g.resolution + '² · ' + (g.variant === 't' ? 'config-T' : 'config-R') + ' · ' +
+          g.device + ' · z' + g.zDim + ' · w ' + g.numWs + '×' + g.wDim;
         onModelReady();
         setBadge('ready · ' + seamHint());
       },
