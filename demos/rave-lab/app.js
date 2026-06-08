@@ -43,6 +43,7 @@ function init() {
   $('#btn-play-out').addEventListener('click', () => playClipId(outClipId));
   $('#btn-decode').addEventListener('click', () => runDecode($('#autoplay').checked));
   $('#btn-reset').addEventListener('click', resetAll);
+  $('#noise').addEventListener('change', () => { if (enc) runDecode($('#autoplay').checked); });
 
   // one global drag pair so re-rendered curves never leak listeners
   window.addEventListener('mousemove', (e) => { if (activePaint) paintAt(e); });

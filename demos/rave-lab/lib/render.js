@@ -89,7 +89,9 @@ function runDecode(autoplay) {
   busy = true; setBadge('decoding…');
   const t0 = Date.now();
   try {
-    const out = rave.decode(work, enc.frames);
+    // Fixed seed so the stochastic noise branch stays reproducible while editing
+    // curves — only the latent edits change the morph, not the noise draw.
+    const out = rave.decode(work, enc.frames, { addNoise: $('#noise').checked, seed: 1 });
     lastOut = out.samples;
     outClipId = publishClip(outClipId, lastOut);
     $('#btn-play-out').disabled = (outClipId < 0);

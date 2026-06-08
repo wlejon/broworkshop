@@ -64,4 +64,17 @@ let resErr = 0; for (let i = 0; i < work.length; i++) resErr += Math.abs(work[i]
 assert(resErr === 0, 'reset all restored the encoded latent exactly');
 console.log('reset: ok');
 
+// ── 6. noise branch: addNoise changes the output; seed makes it reproducible ──
+const det = rave.decode(enc.latent, enc.frames);
+const n1  = rave.decode(enc.latent, enc.frames, { addNoise: true, seed: 7 });
+const n2  = rave.decode(enc.latent, enc.frames, { addNoise: true, seed: 7 });
+let dNoise = 0, dSeed = 0;
+for (let i = 0; i < det.samples.length; i++) {
+  dNoise += Math.abs(n1.samples[i] - det.samples[i]);
+  dSeed  += Math.abs(n1.samples[i] - n2.samples[i]);
+}
+assert(dNoise > 0, 'addNoise changes the output vs deterministic');
+assert(dSeed === 0, 'same seed reproduces the same noisy output');
+console.log(`noise: Δvs-det=${dNoise.toFixed(2)}  seed-repro=${dSeed === 0}`);
+
 console.log('rave-lab smoke: PASS');
