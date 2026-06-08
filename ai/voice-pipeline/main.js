@@ -183,6 +183,34 @@ function appendTurn(who, text) {
     $transcript.scrollTop = $transcript.scrollHeight;
 }
 
+// Live partial transcript: Whisper streams each decoded token (opts.onToken),
+// so we can show the user's words filling in mid-decode instead of a blank wait.
+// A provisional "you" row in the .pending style; onTranscribed removes it and
+// appends the finalized turn.
+let sttPartialEl = null;
+function showSttPartial(text) {
+    if (!sttPartialEl) {
+        const hint = $transcript.querySelector('.hint');
+        if (hint) hint.remove();
+        const row = document.createElement('div');
+        row.className = 'turn you';
+        const w = document.createElement('span'); w.className = 'who'; w.textContent = 'you:';
+        sttPartialEl = document.createElement('span');
+        sttPartialEl.className = 'pending';
+        sttPartialEl._row = row;
+        row.appendChild(w);
+        row.appendChild(document.createTextNode(' '));
+        row.appendChild(sttPartialEl);
+        $transcript.appendChild(row);
+    }
+    sttPartialEl.textContent = text;
+    $transcript.scrollTop = $transcript.scrollHeight;
+}
+function clearSttPartial() {
+    if (sttPartialEl && sttPartialEl._row) sttPartialEl._row.remove();
+    sttPartialEl = null;
+}
+
 // Start a fresh streaming "bro" turn. Spoken (finalized) words live in
 // broSpokenEl; the streaming tail lives in broPendingEl.
 function startBroTurn() {
@@ -810,9 +838,21 @@ function onModelsReady() {
 // next inside its onDone, all on the main thread, all cancellable.
 function runPipeline(samples16k) {
     const myTurn = acceptTurn;
+    const partialIds = [];   // content tokens streamed so far (no prompt prefix)
     sttHandle = bro.stt.transcribe(
-        whisper, { samples: samples16k, sampleRate: 16000 }, sttPrompt,
-        { maxNewTokens: 128, onDone: (ids, info) => onTranscribed(myTurn, ids, info) });
+        whisper, { samples: samples16k, sampleRate: 16000 }, sttPrompt, {
+            maxNewTokens: 128,
+            // Each decoded token, as it lands — detokenize the running prefix and
+            // show it filling in. Cheap for an utterance-length transcript.
+            onToken: (id) => {
+                if (myTurn !== acceptTurn) return;
+                partialIds.push(id);
+                let t = '';
+                try { t = sttTok.decode(partialIds, true).trim(); } catch (_) {}
+                if (t) showSttPartial(t);
+            },
+            onDone: (ids, info) => { clearSttPartial(); onTranscribed(myTurn, ids, info); },
+        });
 }
 
 function onTranscribed(myTurn, ids, info) {
@@ -913,6 +953,46 @@ function enqueueSynth(myTurn, sentence, consumed) {
     pumpSynth();
 }
 
+// Kokoro streaming threshold: a sentence with at least this many spoken words is
+// synthesized in clause-sized chunks (bro.tts.synthesizeStream) so the opening
+// words are heard before the whole sentence finishes; shorter sentences keep the
+// single-pass synthesize() (precise per-phoneme word highlighting). 24 kHz is
+// Kokoro's fixed output rate — the streaming onChunk delivers raw samples only.
+const STREAM_MIN_WORDS = 6;
+const STREAM_CHUNK_WORDS = 4;
+const KOKORO_SR = 24000;
+
+// Split a sentence's phoneme ids into per-word groups at the space token, then
+// batch those words into clause-sized chunks. Returns { chunks: number[][],
+// ranges: [start,end][] } where each range indexes the sentence's spoken words,
+// or null when the phoneme word count doesn't match the text word count (odd
+// punctuation tokenisation) or the sentence is short — the caller then falls back
+// to a single non-streamed synthesis with precise highlighting.
+function buildKokoroChunks(phonemeIds, wordCount) {
+    if (wordCount < STREAM_MIN_WORDS) return null;
+    const phonWords = [];
+    let cur = [];
+    for (const id of phonemeIds) {
+        if (id === spaceId) { if (cur.length) { phonWords.push(cur); cur = []; } }
+        else cur.push(id);
+    }
+    if (cur.length) phonWords.push(cur);
+    if (phonWords.length !== wordCount) return null;   // counts diverged — no stream
+
+    const chunks = [], ranges = [];
+    for (let i = 0; i < phonWords.length; i += STREAM_CHUNK_WORDS) {
+        const end = Math.min(i + STREAM_CHUNK_WORDS, phonWords.length);
+        const ids = [];
+        for (let j = i; j < end; j++) {
+            if (ids.length) ids.push(spaceId);   // re-insert word-gap tokens
+            for (const id of phonWords[j]) ids.push(id);
+        }
+        chunks.push(ids);
+        ranges.push([i, end]);
+    }
+    return { chunks, ranges };
+}
+
 function pumpSynth() {
     if (synthBusy || synthQueue.length === 0) return;
     const item = synthQueue.shift();
@@ -963,9 +1043,41 @@ function pumpSynth() {
             ? { instruct: qwenInstruct, language: qwenLanguage, onDone }
             : { speaker: qwenSpeaker, language: qwenLanguage, onDone };
         ttsHandle = bro.tts.synthesize(qwen, item.sentence, opts);
-    } else {
-        ttsHandle = bro.tts.synthesize(kokoro, phonemeIds, voice, { speed: 1.0, onDone });
+        return;
     }
+
+    // Kokoro: stream long sentences so the first clause is heard sooner. Word
+    // spans are created up front (text bookkeeping identical to the single-pass
+    // path); each streamed chunk plays as its own clip and highlights its slice
+    // of those spans with proportional timing (each chunk is an independent
+    // forward pass, so per-phoneme durations aren't available — like Qwen).
+    const textWords = item.sentence.split(/\s+/).filter(Boolean);
+    const plan = buildKokoroChunks(phonemeIds, textWords.length);
+    if (plan) {
+        const els = finalizeSentence(textWords.map(t => ({ text: t })), item.consumed);
+        let ci = 0;
+        ttsHandle = bro.tts.synthesizeStream(kokoro, plan.chunks, voice, {
+            speed: 1.0,
+            onChunk: (samples) => {
+                if (item.turn !== acceptTurn || !samples || samples.length === 0) return;
+                const r = plan.ranges[ci++] || [0, 0];
+                const words = splitWordsByChars(textWords.slice(r[0], r[1]),
+                                                samples.length / KOKORO_SR);
+                if (!producedSpeech) { producedSpeech = true; setStatus('speaking', 'speaking…'); }
+                enqueueAudio(samples, KOKORO_SR, els.slice(r[0], r[1]), words);
+            },
+            onDone: (_res, _info) => {
+                synthBusy = false;
+                ttsHandle = null;
+                pumpSynth();              // chunks already enqueued during the stream
+                maybeFinishSpeaking();
+            },
+        });
+        return;
+    }
+
+    // Short / divergent sentence — single pass, precise per-phoneme highlighting.
+    ttsHandle = bro.tts.synthesize(kokoro, phonemeIds, voice, { speed: 1.0, onDone });
 }
 
 // Replace the streaming tail for this sentence with highlightable word spans.
