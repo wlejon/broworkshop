@@ -1049,8 +1049,8 @@ function pumpSynth() {
     // Kokoro: stream long sentences so the first clause is heard sooner. Word
     // spans are created up front (text bookkeeping identical to the single-pass
     // path); each streamed chunk plays as its own clip and highlights its slice
-    // of those spans with proportional timing (each chunk is an independent
-    // forward pass, so per-phoneme durations aren't available — like Qwen).
+    // of those spans. synthesizeStream hands each chunk its own per-phoneme
+    // durations, so the highlighting stays as precise as the single-pass path.
     const textWords = item.sentence.split(/\s+/).filter(Boolean);
     const plan = buildKokoroChunks(phonemeIds, textWords.length);
     if (plan) {
@@ -1058,11 +1058,13 @@ function pumpSynth() {
         let ci = 0;
         ttsHandle = bro.tts.synthesizeStream(kokoro, plan.chunks, voice, {
             speed: 1.0,
-            onChunk: (samples) => {
+            onChunk: (samples, durations) => {
                 if (item.turn !== acceptTurn || !samples || samples.length === 0) return;
-                const r = plan.ranges[ci++] || [0, 0];
-                const words = splitWordsByChars(textWords.slice(r[0], r[1]),
-                                                samples.length / KOKORO_SR);
+                const idx = ci++;
+                const r = plan.ranges[idx] || [0, 0];
+                const chunkText = textWords.slice(r[0], r[1]).join(' ');
+                const words = computeWords(chunkText, plan.chunks[idx], durations,
+                                           samples.length, KOKORO_SR);
                 if (!producedSpeech) { producedSpeech = true; setStatus('speaking', 'speaking…'); }
                 enqueueAudio(samples, KOKORO_SR, els.slice(r[0], r[1]), words);
             },

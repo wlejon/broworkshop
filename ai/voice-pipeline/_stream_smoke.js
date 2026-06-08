@@ -111,15 +111,21 @@ for (let i = 0; i < words.length; i++) {
     for (const id of words[i]) c.push(id);
 }
 
-let chunkCount = 0, chunkSamples = 0, ttsDone = false, fullLen = 0;
+let chunkCount = 0, chunkSamples = 0, ttsDone = false, fullLen = 0, durOk = true;
 bro.tts.synthesizeStream(kokoro, chunks, voice, {
     speed: 1.0,
-    onChunk: (samples) => { chunkCount++; chunkSamples += samples.length; },
+    onChunk: (samples, durations) => {
+        // durations = this chunk's per-phoneme frame counts, BOS/EOS-wrapped.
+        const expect = chunks[chunkCount].length + 2;
+        if (!durations || durations.length !== expect) durOk = false;
+        chunkCount++; chunkSamples += samples.length;
+    },
     onDone: (res, info) => { ttsDone = true; fullLen = res.samples.length; if (info.error) console.log('  tts err: ' + info.error); },
 });
 pump(() => ttsDone, 20000);
 check(ttsDone, 'synthesizeStream completed');
 check(chunkCount === chunks.length, 'onChunk fired once per chunk (' + chunkCount + '/' + chunks.length + ')');
+check(durOk, 'each chunk delivered per-phoneme durations (length = chunk + 2)');
 check(fullLen > 0 && fullLen === chunkSamples,
       'full buffer (' + fullLen + ') == concatenated chunks (' + chunkSamples + ')');
 
