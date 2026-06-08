@@ -53,6 +53,18 @@ assert(curDur.reduce((a, b) => a + b, 0) === newTotal, 're-time: curDur updated'
 assert(lastTrace.durations[li] === wasFrames * 2, 're-time: durations reflect the edit');
 console.log('re-time: total', origTotal, '->', newTotal, '· clip', clipSamples, 'samples');
 
+// reset a contour AFTER a retime: predicted.F0 is at predicted.dur's length, but
+// the live contour is now at curDur's length — reset must restretch, not no-op.
+const expected = resampleByDur(predicted.F0, predicted.dur, curDur);
+assert(F02.data.length === expected.length, 'retimed F0 length matches restretched prediction');
+for (let i = 0; i < F02.data.length; i++) F02.data[i] = F02.data[i] * 0.5 + 7;  // perturb
+resetSignal('F0_pred');
+const F03 = lastTrace.stages.find((s) => s.name === 'F0_pred');
+let rr = 0; for (let i = 0; i < F03.data.length; i++) if (Math.abs(F03.data[i] - expected[i]) < 1e-4) rr++;
+assert(F03.data.length === expected.length, 'reset kept the current (retimed) length');
+assert(rr === F03.data.length, 'reset restored the predicted contour at the current timing');
+console.log('retimed reset ok ·', rr, '/', F03.data.length, 'frames restored');
+
 resetDurations();
 assert(curDur.reduce((a, b) => a + b, 0) === predicted.dur.reduce((a, b) => a + b, 0), 'reset restored predicted timing');
 console.log('re-time reset ok · total back to', curDur.reduce((a, b) => a + b, 0));

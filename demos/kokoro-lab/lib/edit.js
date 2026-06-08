@@ -205,11 +205,18 @@ function updatePinUI() {
 }
 
 // Restore one contour (F0 or N) to the model's prediction, then re-decode.
+// The prediction was snapshotted at its own timing (predicted.dur); the live
+// contour may since have been retimed (emotion / timing edit), so restretch the
+// predicted shape from predicted.dur onto the current timing (curDur) before
+// restoring — an identity when the timing is unchanged.
 function resetSignal(name) {
-  if (!predicted || !lastTrace) return;
+  if (!predicted || !lastTrace || !curDur || !predicted.dur) return;
   const st = lastTrace.stages.find((s) => s.name === name);
   const src = name === 'F0_pred' ? predicted.F0 : predicted.N;
-  if (st && src && st.data.length === src.length) st.data.set(src);
+  if (!st || !src) return;
+  const restored = resampleByDur(src, predicted.dur, curDur);
+  st.data = restored;
+  st.w = restored.length;
   commitEdit();
 }
 
