@@ -18,6 +18,11 @@ function buildSpeakerPanel() {
 }
 
 // ── VoiceDesign: a natural-language voice description ────────────────────────
+// Two ways in: full-sentence quick presets, and composable tags. The tags are
+// grouped (one character noun, free-mix adjectives) and assemble grammatically
+// into the instruct string — "a warm, low-pitched, measured elderly storyteller".
+// Picking a tag rebuilds the field from the active set; the field stays editable
+// for free-hand tweaks (the next tag click reassembles, so fine-tune last).
 const INSTRUCT_PRESETS = [
   'a warm, low-pitched elderly storyteller',
   'a bright, energetic young woman, fast and upbeat',
@@ -26,15 +31,61 @@ const INSTRUCT_PRESETS = [
   'a breathy, soft-spoken whisper',
   'an excited sports announcer at full tilt',
 ];
+// kind 'noun' = a single character (mutually exclusive); 'adj' = free-mix modifiers.
+const INSTRUCT_GROUPS = [
+  { name: 'character', kind: 'noun', tags: ['young woman', 'young man', 'elderly storyteller', 'narrator', 'radio host', 'newsreader', 'sports announcer', 'child'] },
+  { name: 'tone',      kind: 'adj',  tags: ['warm', 'bright', 'dark', 'breathy', 'smooth', 'gravelly', 'nasal', 'husky'] },
+  { name: 'pitch',     kind: 'adj',  tags: ['low-pitched', 'high-pitched', 'deep'] },
+  { name: 'pace',      kind: 'adj',  tags: ['fast', 'measured', 'slow'] },
+  { name: 'mood',      kind: 'adj',  tags: ['cheerful', 'calm', 'excited', 'somber', 'gentle', 'tense'] },
+];
+const ADJ_ORDER = INSTRUCT_GROUPS.filter((g) => g.kind === 'adj').flatMap((g) => g.tags);
+const instructAdj = new Set();   // active adjective phrases
+let instructNoun = null;         // the single active character, or null
+
+// Assemble "a {adjs} {noun}" from the active tags (grammatical, group-ordered).
+function assembleInstruct() {
+  const adjs = ADJ_ORDER.filter((a) => instructAdj.has(a));
+  if (!adjs.length && !instructNoun) return '';
+  return 'a ' + (adjs.length ? adjs.join(', ') + ' ' : '') + (instructNoun || 'voice');
+}
+function syncInstructChips() {
+  const host = $('#instruct-tags');
+  for (const btn of host.querySelectorAll('button')) {
+    const active = btn._kind === 'noun' ? (instructNoun === btn._tag) : instructAdj.has(btn._tag);
+    btn.classList.toggle('active', active);
+  }
+}
+function toggleInstructTag(tag, kind) {
+  if (kind === 'noun') instructNoun = (instructNoun === tag) ? null : tag;
+  else if (instructAdj.has(tag)) instructAdj.delete(tag); else instructAdj.add(tag);
+  $('#instruct').value = assembleInstruct();
+  syncInstructChips();
+}
+
 function buildInstructPanel() {
-  const host = $('#instruct-presets'); host.textContent = '';
+  const presets = $('#instruct-presets'); presets.textContent = '';
   for (const p of INSTRUCT_PRESETS) {
     const c = el('button', 'chip', p.split(',')[0]);
     c.title = p;
-    c.onclick = () => { $('#instruct').value = p; };
-    host.appendChild(c);
+    // a preset is a full sentence — drop tag state so it isn't reassembled over.
+    c.onclick = () => { instructAdj.clear(); instructNoun = null; $('#instruct').value = p; syncInstructChips(); };
+    presets.appendChild(c);
+  }
+  const tags = $('#instruct-tags'); tags.textContent = '';
+  for (const g of INSTRUCT_GROUPS) {
+    const row = el('div', 'tag-group');
+    row.appendChild(el('span', 'tag-glabel', g.name));
+    for (const t of g.tags) {
+      const c = el('button', 'chip tagchip', t);
+      c._tag = t; c._kind = g.kind;
+      c.onclick = () => toggleInstructTag(t, g.kind);
+      row.appendChild(c);
+    }
+    tags.appendChild(row);
   }
   if (!$('#instruct').value) $('#instruct').value = INSTRUCT_PRESETS[0];
+  syncInstructChips();
   fillLanguages($('#language2'));
 }
 
@@ -127,16 +178,19 @@ function renderAnchors() {
 }
 
 function updateDesignerMeta() {
-  const norm = designedXvec ? Math.sqrt(designedXvec.reduce((s, v) => s + v * v, 0)) : 0;
+  // Report the norm of what actually gets synthesized — blend + emotion offset.
+  const x = applyEmotion(designedXvec);
+  const norm = x ? Math.sqrt(x.reduce((s, v) => s + v * v, 0)) : 0;
   $('#designer-meta').textContent = designedXvec
-    ? anchors.length + ' anchor(s) · designed x-vector ‖' + norm.toFixed(2) + '‖'
+    ? anchors.length + ' anchor(s) · designed x-vector ‖' + norm.toFixed(2) + '‖' + emotionSummary()
     : 'all weights zero — raise one to define a voice';
 }
 
-// The synthesis opts fragment for the active variant.
+// The synthesis opts fragment for the active variant. In Base, the emotion basis
+// (if any) nudges the designed x-vector along the dialed-in directions.
 function currentVoice() {
   if (variant === 'customvoice') return { speaker: $('#speaker').value };
   if (variant === 'voicedesign') return { instruct: $('#instruct').value.trim() };
-  if (designedXvec) return { xvector: designedXvec };
+  if (designedXvec) return { xvector: applyEmotion(designedXvec) };
   return null;   // base with no voice designed yet
 }

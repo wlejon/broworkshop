@@ -35,11 +35,14 @@ function gatherOpts() {
   const voice = currentVoice();
   if (variant === 'base' && !voice) { setBadge('design a voice first (enroll or 🎲 random)', true); return null; }
   const s = currentSampling();
-  return Object.assign({}, voice, {
+  const opts = Object.assign({}, voice, {
     language: currentLanguage(),
     temperature: s.temperature, topK: s.topK, topP: s.topP, seed: s.seed,
     repetitionPenalty: s.repetitionPenalty, adaptive: s.adaptive,
   });
+  const lb = steerOpts();
+  if (lb) opts.logitBias = lb;
+  return opts;
 }
 
 // ── Render: synthesize off-thread, draw the trace, play the buffer ──────────

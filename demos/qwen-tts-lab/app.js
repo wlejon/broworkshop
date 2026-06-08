@@ -17,9 +17,11 @@ function init() {
   $('#btn-enroll').addEventListener('click', enrollRef);
   $('#btn-rand-xv').addEventListener('click', randomVoice);
   $('#btn-clone').addEventListener('click', cloneOnce);
+  $('#btn-emo-reset').addEventListener('click', resetEmotion);
 
-  // ── delivery dials ────────────────────────────────────────────────────────
+  // ── delivery dials + logit-bias steering ──────────────────────────────────
   buildDelivery();
+  buildSteer();
 
   // ── transport ─────────────────────────────────────────────────────────────
   $('#btn-render').addEventListener('click', requestRender);

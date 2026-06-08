@@ -46,11 +46,13 @@
       <div id="voice-instruct" class="vpanel" style="display:none">
         <span class="vlabel">describe</span>
         <input id="instruct" type="text" placeholder="a warm, low-pitched elderly storyteller…"
-               title="Natural-language voice description (VoiceDesign)">
+               title="Natural-language voice description (VoiceDesign) — compose with the tags below or type freely">
         <span class="presets" id="instruct-presets"></span>
         <label class="cfg lang">lang
           <select id="language2" title="Synthesis language"></select>
         </label>
+        <!-- composable description tags — assemble the instruct string by group -->
+        <div id="instruct-tags" class="tag-groups"></div>
       </div>
 
       <!-- Base: the x-vector designer — enroll real voices, blend, render -->
@@ -69,6 +71,15 @@
         </div>
         <div id="anchors" class="anchors" title="Blend the enrolled anchors — weights mix their x-vectors"></div>
         <div id="designer-meta" class="meta"></div>
+        <!-- Emotion: learned contrastive directions in x-vector space (Base only).
+             Hidden unless emotion_basis.json sits beside the checkpoint. -->
+        <div id="emotion" style="display:none">
+          <div class="emo-row">
+            <span class="vlabel">emotion</span>
+            <div class="emo-axes" title="Nudge the designed x-vector along each emotion direction — press Render to hear it"></div>
+            <button id="btn-emo-reset" class="iconbtn" title="Drop all emotion, back to the plain designed voice">○ none</button>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -97,6 +108,19 @@
       <span id="delivery-meta" class="meta"></span>
     </section>
 
+    <!-- STEER — additive logit bias on codebook-0 (Talker) codes. Click row 0 of
+         the code raster to stage the code under the cursor, or add an id by hand. -->
+    <section id="steer">
+      <span class="vlabel">steer</span>
+      <div id="steer-list" class="steer-list"></div>
+      <label class="cfg">code
+        <input id="steer-id" type="number" min="0" step="1" placeholder="id">
+      </label>
+      <button id="btn-steer-add" title="Bias this codebook-0 code">+ bias</button>
+      <button id="btn-steer-clear" title="Clear all biases">clear</button>
+      <span id="steer-meta" class="meta"></span>
+    </section>
+
     <!-- TEXT + transport. Render = inspect (off-thread + trace). Stream = realtime. -->
     <section id="prompt">
       <input id="text" type="text" value="Hello there. This is a test of the pipeline."
@@ -117,7 +141,9 @@
   <script src="lib/helpers.js"></script>
   <script src="lib/model.js"></script>
   <script src="lib/voice.js"></script>
+  <script src="lib/emotion.js"></script>
   <script src="lib/delivery.js"></script>
+  <script src="lib/steer.js"></script>
   <script src="lib/audio.js"></script>
   <script src="lib/synth.js"></script>
   <script src="lib/render.js"></script>

@@ -61,6 +61,11 @@ select {
 .lang select { padding: 4px 6px; }
 .presets { display: inline-flex; gap: 5px; flex-wrap: wrap; }
 #instruct { width: 360px; }
+/* composable description tags */
+.tag-groups { flex-basis: 100%; display: flex; flex-direction: column; gap: 5px; margin: 6px 0 2px 74px; }
+.tag-group { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.tag-glabel { min-width: 70px; color: #6b7585; font-size: 11px; text-transform: uppercase; letter-spacing: .4px; }
+.tagchip { background: #141a24; }
 .anchors { display: flex; flex-direction: column; gap: 5px; margin: 6px 0 2px 74px; }
 .anchor { display: flex; align-items: center; gap: 10px; }
 .aname { min-width: 130px; color: #b7c2d2; }
@@ -71,6 +76,19 @@ select {
 .hint { color: #5c6573; font-style: italic; margin-left: 74px; }
 #designer-meta { margin-left: 74px; }
 
+/* ── emotion (Base only) ── */
+#emotion { flex-direction: column; margin-top: 4px; }
+.emo-row { display: flex; align-items: flex-start; gap: 10px; flex-wrap: wrap; }
+.emo-axes { display: flex; gap: 14px; flex-wrap: wrap; flex: 1; }
+.emo-axis { display: inline-flex; flex-direction: column; gap: 3px; }
+.emo-head { display: flex; align-items: baseline; gap: 6px; }
+.emo-name { color: #c9b06a; font-weight: 600; text-transform: capitalize; }
+.emo-name.preset { cursor: pointer; }
+.emo-name.preset:hover { color: #e6c97a; text-decoration: underline; }
+.emo-hint { color: #5f6878; font-size: 10px; }
+.emo-val { color: #8fd0ff; font-size: 11px; margin-left: auto; }
+.emo-axis input[type=range] { width: 120px; }
+
 /* ── delivery ── */
 .dial { display: inline-flex; flex-direction: column; gap: 2px; }
 .dial label { font-size: 11px; color: #8b94a3; }
@@ -78,6 +96,16 @@ select {
 .dial input[type=range] { width: 130px; }
 .seed input { width: 110px; }
 .lock { display: inline-flex; align-items: center; gap: 4px; color: #8b94a3; font-size: 12px; }
+
+/* ── steer (logit bias) ── */
+#steer { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.steer-list { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.steer-entry { display: inline-flex; align-items: center; gap: 6px; }
+.steer-id { color: #b7c2d2; font-size: 12px; }
+.steer-entry input[type=range] { width: 120px; }
+.steer-val { color: #8fd0ff; font-size: 11px; min-width: 30px; }
+.steer-entry .x { padding: 1px 8px; color: #d99; background: #2a1c1f; border-color: #4a2a2e; }
+#steer-id { width: 80px; }
 
 /* ── transport ── */
 #btn-render { background: #1c3a5e; border-color: #2b5bb0; color: #d6e8ff; font-weight: 600; }

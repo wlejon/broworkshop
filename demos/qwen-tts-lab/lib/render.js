@@ -102,7 +102,11 @@ function renderCodes(c, s) {
   // row separators + labels
   ctx.fillStyle = 'rgba(0,0,0,0.35)';
   for (let r = 1; r < s.h; r++) ctx.fillRect(0, r * rowH, W, 1);
-  c.note.textContent = s.h + ' codebooks × ' + s.w + ' frames · row 0 = semantic (Talker), 1–' + (s.h - 1) + ' = acoustic (Code Predictor)';
+  c.note.textContent = s.h + ' codebooks × ' + s.w + ' frames · row 0 = semantic (Talker), 1–' + (s.h - 1) + ' = acoustic (Code Predictor) · click row 0 to stage a code for steering';
+  // Trace-driven steering: clicking the semantic row stages that code for the
+  // logit-bias panel. Reattached each render so it closes over the current stage.
+  c.canvas.style.cursor = 'crosshair';
+  c.canvas.onclick = (ev) => steerPickFromCodes(ev, c.canvas, s, W);
 }
 
 // 1 x F confidence — bars colored + heighted by the Talker's top-1 probability.
