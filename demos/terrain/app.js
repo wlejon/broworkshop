@@ -30,7 +30,7 @@ bro.crosshair.show();
 
 scene.setToneMap({ mode: 'aces', exposure: 0.85, gamma: 2.2 });
 scene.setEnvironment({
-    hdr: 'apps/lighting-demo/hdri/kloofendal_43d_clear_puresky_2k.hdr',
+    hdr: '../lighting-demo/hdri/kloofendal_43d_clear_puresky_2k.hdr',
     intensity: 1.0,
 });
 
