@@ -52,8 +52,12 @@ function pump() {
   if (s.i >= s.steps.length) {                       // sequence complete
     curSeq = null;
     setBadge('ready · ' + seamHint());
-    if (s.onAll) s.onAll();
-    kick();
+    if (s.onAll) s.onAll();        // may itself start the next op (e.g. the walk
+                                   // midpoint / mix result) — which sets inflight.
+    // Only drain a leftover `pending` if the slot is actually free. An
+    // unconditional kick() here would treat the op onAll() just launched as
+    // something to supersede and cancel it (the midpoint/result never renders).
+    if (!inflight) kick();
     return;
   }
   const i = s.i;
