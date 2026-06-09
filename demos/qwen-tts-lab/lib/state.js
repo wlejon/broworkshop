@@ -58,7 +58,13 @@ const STAGE_ORDER = ['codes', 'c0_confidence'];
 // The Base designer is the PCA voice-slider sculptor (lib/designer.js owns the
 // basis + coords). designedXvec is the 1024-D point those sliders define, which
 // the emotion / masc-fem axes ride on top of (currentVoice composes them).
-let designedXvec = null;  // the current designed x-vector (Float32Array enc_dim) or null
+let designedXvec = null;  // the current identity x-vector (Float32Array enc_dim) or null
+// How designedXvec was set — the identity SOURCE, decoupled from the design axes:
+//   'clone'  — the FAITHFUL full x-vector of an enrolled/cloned clip (no projection)
+//   'design' — a point sculpted on the voice map / sliders (mean + Σ coord·comp)
+// Cloning keeps the full vector as the identity; the map/sliders only become the
+// identity when you actually sculpt. Emotion / masc-fem ride on top of either.
+let identitySource = 'design';
 let cvSource = 'preset';  // CustomVoice voice source: 'preset' (the 9) | 'designed' (the map)
 
 // ─── delivery state ──────────────────────────────────────────────────────────

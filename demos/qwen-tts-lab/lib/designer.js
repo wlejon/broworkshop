@@ -51,8 +51,11 @@ function coordsFromXvec(x) {
 }
 
 // recompute designedXvec from coords, redraw the map handle, refresh meta (no synth).
+// Reached only by an explicit manifold-sculpt (map / sliders / seed / random), so
+// this is where the identity becomes a designed point rather than a faithful clone.
 function rebuildDesigned() {
   designedXvec = xvecFromCoords();
+  identitySource = 'design';
   drawMap();
   if (variant === 'customvoice' && typeof markDesigned === 'function') markDesigned();
   updateDesignerMeta();
@@ -223,8 +226,12 @@ function randomDesigned() {
 }
 function gauss() { let u = 0, v = 0; while (!u) u = Math.random(); while (!v) v = Math.random(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); }
 
-// Decode a reference clip → x-vector and project it onto the sliders/map (so it
-// can be sculpted from there). Without a basis, fall back to the raw clip x-vector.
+// Decode a reference clip → its FAITHFUL full x-vector and make that the identity
+// (no render). The map/sliders are positioned at the clip's projection so you can
+// SEE where it lands and optionally sculpt from there — but the identity stays the
+// full vector until you actually move a control (which switches to 'design'). This
+// is the fix for "enroll loses my voice": it no longer overwrites the identity with
+// the lossy basis reconstruction. clone = the same, but renders immediately.
 function enrollRef() {
   const path = $('#ref-wav').value.trim();
   if (!path) { setBadge('enter or browse a reference .wav first', true); return; }
@@ -232,9 +239,11 @@ function enrollRef() {
     audioCtx = audioCtx || new AudioContext();
     const dec = audioCtx.decodeAudioFile(path);
     if (!dec || !dec.samples || !dec.samples.length) { setBadge('could not decode ' + path, true); return; }
-    const xv = qwen.embedSpeaker(toMono(dec.samples, dec.channels), { sampleRate: dec.sampleRate });
-    if (voiceBasis) { coords = coordsFromXvec(xv); syncSliders(); rebuildDesigned(); }
-    else { designedXvec = xv; updateDesignerMeta(); }
-    setBadge('enrolled "' + pName(path).replace(/\.[^.]+$/, '') + '" → ' + (voiceBasis ? 'voice map' : 'x-vector'));
+    designedXvec = qwen.embedSpeaker(toMono(dec.samples, dec.channels), { sampleRate: dec.sampleRate });
+    identitySource = 'clone';                       // faithful identity, not a projection
+    if (voiceBasis) { coords = coordsFromXvec(designedXvec); syncSliders(); drawMap(); }  // show where it lands (display only)
+    if (variant === 'customvoice') markDesigned();   // render via the slot override when used
+    updateDesignerMeta();
+    setBadge('enrolled "' + pName(path).replace(/\.[^.]+$/, '') + '" (faithful) · press Render, or sculpt the map');
   } catch (e) { setBadge('enroll: ' + e.message, true); }
 }

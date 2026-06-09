@@ -48,6 +48,7 @@ function cloneOnce() {
     const dec = audioCtx.decodeAudioFile(path);
     if (!dec || !dec.samples || !dec.samples.length) { setBadge('could not decode ' + path, true); return; }
     designedXvec = qwen.embedSpeaker(toMono(dec.samples, dec.channels), { sampleRate: dec.sampleRate });
+    identitySource = 'clone';
     // faithful clip identity (the full x-vector, not a basis projection); reflect
     // its projection onto the map/sliders so the panel shows where it landed.
     if (voiceBasis) { coords = coordsFromXvec(designedXvec); syncSliders(); drawMap(); }

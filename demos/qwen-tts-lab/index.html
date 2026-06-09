@@ -66,11 +66,11 @@
     <section id="designer" style="display:none">
       <div class="drow">
         <span class="vlabel">design</span>
-        <input id="ref-wav" type="text" placeholder="path to a reference .wav to clone onto the map"
-               title="A clip whose speaker identity is projected onto the voice map">
+        <input id="ref-wav" type="text" placeholder="path to a reference .wav to clone faithfully"
+               title="A reference clip; its full speaker x-vector becomes the identity (faithful — no projection)">
         <button id="btn-browse-wav" class="iconbtn" title="Choose a reference clip">📁</button>
-        <button id="btn-enroll" title="Project the clip's x-vector onto the voice map">⤓ enroll</button>
-        <button id="btn-clone" title="Render directly from this clip (faithful one-shot clone)">clone once</button>
+        <button id="btn-enroll" title="Load this clip's voice faithfully as the identity (full x-vector) — then sculpt or Render">⤓ enroll</button>
+        <button id="btn-clone" title="Clone this clip faithfully and Render now (full x-vector, no projection)">clone once</button>
         <button id="btn-rand-xv" title="A random in-distribution voice">🎲 random</button>
         <label class="cfg seedrow">seed
           <select id="seed-voice" title="Seed from a real voice, or the neutral centroid"></select>

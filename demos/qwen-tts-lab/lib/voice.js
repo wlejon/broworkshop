@@ -127,8 +127,14 @@ function updateDesignerMeta() {
     if (designedXvec && (variant === 'base' || variant === 'customvoice')) {
       const x = (variant === 'base') ? applyMascFem(applyEmotion(designedXvec)) : designedXvec;
       const norm = Math.sqrt(x.reduce((s, v) => s + v * v, 0));
-      dm.textContent = 'designed x-vector ‖' + norm.toFixed(2) + '‖' +
-        (variant === 'base' ? emotionSummary() + mascFemSummary() : '');
+      // Lead with the identity SOURCE so it's clear whether you're hearing the
+      // faithful clone or a point sculpted on the manifold.
+      const head = identitySource === 'clone'
+        ? '◉ cloned clip · faithful identity'
+        : 'designed x-vector ‖' + norm.toFixed(2) + '‖';
+      const tail = (variant === 'base' ? emotionSummary() + mascFemSummary() : '');
+      const hint = identitySource === 'clone' ? ' · sculpt the map/sliders to design from here' : '';
+      dm.textContent = head + tail + hint;
     } else {
       dm.textContent = voiceBasis ? 'drag the map or pick a seed to design a voice' : '';
     }
