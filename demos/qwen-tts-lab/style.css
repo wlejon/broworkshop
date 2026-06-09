@@ -76,7 +76,10 @@ select {
 .hint { color: #5c6573; font-style: italic; margin-left: 74px; }
 #designer-meta { margin-left: 74px; }
 
-/* ── emotion (Base only) ── */
+/* ── axes: x-vector-space steering (Base + CustomVoice) ── */
+#axes { display: flex; flex-direction: column; gap: 6px; }
+
+/* ── emotion ── */
 #emotion { flex-direction: column; margin-top: 4px; }
 .emo-row { display: flex; align-items: flex-start; gap: 10px; flex-wrap: wrap; }
 .emo-axes { display: flex; gap: 14px; flex-wrap: wrap; flex: 1; }

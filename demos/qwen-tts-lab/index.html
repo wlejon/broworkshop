@@ -71,29 +71,35 @@
         </div>
         <div id="anchors" class="anchors" title="Blend the enrolled anchors — weights mix their x-vectors"></div>
         <div id="designer-meta" class="meta"></div>
-        <!-- Emotion: learned contrastive directions in x-vector space (Base only).
-             Hidden unless emotion_basis.json sits beside the checkpoint. -->
-        <div id="emotion" style="display:none">
-          <div class="emo-row">
-            <span class="vlabel">emotion</span>
-            <div class="emo-axes" title="Nudge the designed x-vector along each emotion direction — press Render to hear it"></div>
-            <button id="btn-emo-reset" class="iconbtn" title="Drop all emotion, back to the plain designed voice">○ none</button>
-          </div>
-        </div>
-        <!-- Masculine↔feminine: a bipolar acoustic vocal-quality axis (Base only).
-             Hidden unless masc_fem_basis.json sits beside the checkpoint. -->
-        <div id="mascfem" style="display:none">
-          <div class="mf-row">
-            <span class="vlabel">masc · fem</span>
-            <span class="mf-pole mf-fem preset" title="set a default amount of feminine">← feminine</span>
-            <input class="mf-range" type="range" min="-3" max="3" step="0.05" value="0"
-                   title="Shift the designed voice toward feminine (left) or masculine (right) — press Render to hear it">
-            <span class="mf-pole mf-masc preset" title="set a default amount of masculine">masculine →</span>
-            <span class="mf-val">neutral</span>
-            <button id="btn-mf-reset" class="iconbtn" title="Back to the neutral designed voice">○ none</button>
-          </div>
+      </div>
+    </section>
+
+    <!-- AXES — x-vector-space steering (emotion + masc/fem). Shown for Base (rides
+         the designed x-vector) AND CustomVoice (nudges the preset's prefill speaker
+         slot — the same 1024-D direction, applied via opts.voiceSteer). Each inner
+         panel hides itself unless its basis json is found near the checkpoint. -->
+    <section id="axes" style="display:none">
+      <!-- Emotion: learned contrastive directions in x-vector space. -->
+      <div id="emotion" style="display:none">
+        <div class="emo-row">
+          <span class="vlabel">emotion</span>
+          <div class="emo-axes" title="Nudge the voice along each emotion direction — press Render to hear it"></div>
+          <button id="btn-emo-reset" class="iconbtn" title="Drop all emotion, back to the plain voice">○ none</button>
         </div>
       </div>
+      <!-- Masculine↔feminine: a bipolar acoustic vocal-quality axis. -->
+      <div id="mascfem" style="display:none">
+        <div class="mf-row">
+          <span class="vlabel">masc · fem</span>
+          <span class="mf-pole mf-fem preset" title="set a default amount of feminine">← feminine</span>
+          <input class="mf-range" type="range" min="-3" max="3" step="0.05" value="0"
+                 title="Shift the voice toward feminine (left) or masculine (right) — press Render to hear it">
+          <span class="mf-pole mf-masc preset" title="set a default amount of masculine">masculine →</span>
+          <span class="mf-val">neutral</span>
+          <button id="btn-mf-reset" class="iconbtn" title="Back to the neutral voice">○ none</button>
+        </div>
+      </div>
+      <div id="axes-meta" class="meta"></div>
     </section>
 
     <!-- DELIVERY — the sampling seam: how varied / how safe the take is -->

@@ -16,13 +16,12 @@ let mascFemBasis = null;     // parsed masc_fem_basis.json, or null (panel hides
 let mfAlpha = 0;             // signed intensity along full[M]: + masculine, − feminine
 let mfSlider = null, mfVal = null;
 
-// Load the basis sitting beside the Base checkpoint (graceful if absent).
+// Load the basis sitting beside the Base checkpoint (graceful if absent). For a
+// CustomVoice checkpoint readBasisJson resolves it from the sibling 0.6B-Base.
 function loadMascFemBasis(modelDir) {
   mascFemBasis = null; mfAlpha = 0;
-  try {
-    const b = JSON.parse(_fs.readFileSync(modelDir + '/masc_fem_basis.json', 'utf-8'));
-    if (b && b.full && b.full.M) mascFemBasis = b;
-  } catch (e) {}
+  const b = readBasisJson(modelDir, 'masc_fem_basis.json');
+  if (b && b.full && b.full.M) mascFemBasis = b;
 }
 
 // designedXvec + alpha·full[M] — a fresh array (the blend stays untouched).

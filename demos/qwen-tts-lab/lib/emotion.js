@@ -19,14 +19,13 @@ let emotionBasis = null;     // parsed emotion_basis.json, or null (panel hides)
 const emoAlpha = {};         // per-emotion intensity (alpha)
 let emoCells = {};           // emotion -> slider cell, for preset writes
 
-// Load the basis sitting beside the Base checkpoint (graceful if absent).
+// Load the basis sitting beside the Base checkpoint (graceful if absent). For a
+// CustomVoice checkpoint readBasisJson resolves it from the sibling 0.6B-Base.
 function loadEmotionBasis(modelDir) {
   emotionBasis = null;
   for (const k in emoAlpha) delete emoAlpha[k];
-  try {
-    const b = JSON.parse(_fs.readFileSync(modelDir + '/emotion_basis.json', 'utf-8'));
-    if (b && b.full && b.emotions && b.emotions.length) emotionBasis = b;
-  } catch (e) {}
+  const b = readBasisJson(modelDir, 'emotion_basis.json');
+  if (b && b.full && b.emotions && b.emotions.length) emotionBasis = b;
 }
 
 // designedXvec + Σ alphaₑ·full[e] — a fresh array (the blend stays untouched).

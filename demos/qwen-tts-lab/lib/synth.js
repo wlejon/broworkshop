@@ -31,6 +31,20 @@ function transport(busy) {
   $('#btn-stop').disabled   = !busy;
 }
 
+// The pure additive steering direction (Σ α·emotion + α·masc-fem) in x-vector
+// space, sized to the basis dim — for variants with no base x-vector to fold it
+// into. C++ adds it to the prefill speaker slot via opts.voiceSteer. Null when
+// nothing is dialed in (or no basis loaded). Base folds the same offsets into the
+// designed x-vector through currentVoice(), so this is the CustomVoice path.
+function voiceSteerVector() {
+  if (!emotionActive() && !mascFemActive()) return null;
+  let dim = (emotionBasis && emotionBasis.dim) || (mascFemBasis && mascFemBasis.dim) || 0;
+  if (!dim && emotionBasis) for (const e of emotionBasis.emotions) { if (emotionBasis.full[e]) { dim = emotionBasis.full[e].length; break; } }
+  if (!dim && mascFemBasis && mascFemBasis.full.M) dim = mascFemBasis.full.M.length;
+  if (!dim) return null;
+  return applyMascFem(applyEmotion(new Float32Array(dim)));
+}
+
 function gatherOpts() {
   const voice = currentVoice();
   if (variant === 'base' && !voice) { setBadge('design a voice first (enroll or 🎲 random)', true); return null; }
@@ -42,6 +56,13 @@ function gatherOpts() {
   });
   const lb = steerOpts();
   if (lb) opts.logitBias = lb;
+  // CustomVoice: the emotion / masc-fem axes can't fold into a base x-vector (there
+  // isn't one), so pass them as an additive prefill-slot steer that nudges the
+  // preset speaker's codec-embedding row. Base already folds them into the x-vector.
+  if (variant === 'customvoice') {
+    const vs = voiceSteerVector();
+    if (vs) opts.voiceSteer = vs;
+  }
   return opts;
 }
 

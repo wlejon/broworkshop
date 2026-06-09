@@ -46,6 +46,40 @@ for (let i = 0; i < n; i++) d12 += Math.abs(s1.samples[i] - s2.samples[i]);
 console.log('  sampling: greedy↔greedy', d0.toFixed(4), '· seed1↔seed2', d12.toFixed(1));
 assert(d12 > 1, 'different seeds → different takes');
 
+// ── voiceSteer: x-vector-space steering on a CustomVoice preset slot ─────────
+// The emotion / masc-fem axes (built from the sibling Base's basis) nudge the
+// preset's prefill speaker slot via opts.voiceSteer — the same control the Base
+// designer folds into its x-vector, now reaching CustomVoice.
+console.log('VOICESTEER · #axes', $('#axes').style.display,
+            '·', emotionBasis ? 'emotion' : '—', mascFemBasis ? 'mascfem' : '—');
+assert($('#axes').style.display !== 'none', 'axes panel shown for customvoice');
+assert(!!mascFemBasis || !!emotionBasis, 'a steering basis resolved from the sibling Base');
+if (mascFemBasis) {
+  assert($('#mascfem').style.display !== 'none', 'masc/fem panel visible on customvoice');
+  setMfAlpha(mascFemBasis.defaultAlpha.M);            // push masculine
+  const vs = voiceSteerVector();
+  assert(vs && vs.length === mascFemBasis.full.M.length, 'voiceSteer sized to the basis dim');
+  // the steer must REACH the model: same greedy decode, slot nudged → audio differs
+  const base    = qwen.synthesize(TEXT, { speaker: speakers[0], temperature: 0 });
+  const steered = qwen.synthesize(TEXT, { speaker: speakers[0], temperature: 0, voiceSteer: vs });
+  const fs = finite(steered);
+  const m = Math.min(base.samples.length, steered.samples.length, 24000);
+  let dd = 0; for (let i = 0; i < m; i++) dd += Math.abs(base.samples[i] - steered.samples[i]);
+  console.log('  steer Δ over', m, 'samples =', dd.toFixed(1), '· peak', fs.peak.toFixed(3));
+  assert(fs.bad === 0 && fs.peak > 0.01, 'steered audio finite + audible');
+  assert(dd > 1, 'voiceSteer reaches the model (audio changed)');
+  // a zero steer is a strict no-op (added to the slot, contributes nothing)
+  const noop = qwen.synthesize(TEXT, { speaker: speakers[0], temperature: 0, voiceSteer: new Float32Array(vs.length) });
+  let dz = 0; for (let i = 0; i < m; i++) dz += Math.abs(base.samples[i] - noop.samples[i]);
+  assert(dz < 1e-3, 'zero steer = no-op');
+  // a wrong-length steer is rejected, not silently misread
+  let threw = false;
+  try { qwen.synthesize(TEXT, { speaker: speakers[0], voiceSteer: new Float32Array(7) }); } catch (e) { threw = true; }
+  assert(threw, 'wrong-length voiceSteer rejected');
+  resetMascFem();
+  console.log('  voiceSteer verified · Δ', dd.toFixed(1), '· zero-noop', dz.toFixed(4));
+}
+
 // ── Base: the x-vector designer + designer trace ─────────────────────────────
 qwen = bro.tts.loadQwen(ROOT + '/0.6B-Base');
 variant = qwen.variant;

@@ -72,11 +72,18 @@ function adaptToVariant() {
   show('#voice-speaker',  variant === 'customvoice');
   show('#voice-instruct', variant === 'voicedesign');
   show('#voice-designer', variant === 'base');
+  const dir = $('#model-dir').value.trim();
   if (variant === 'customvoice') buildSpeakerPanel();
   else if (variant === 'voicedesign') buildInstructPanel();
-  else {
-    const dir = $('#model-dir').value.trim();
-    buildDesignerPanel();
+  else buildDesignerPanel();
+  // x-vector-space steering applies wherever there's a speaker slot: it rides the
+  // Base designed x-vector, and on CustomVoice it nudges the preset's prefill slot
+  // (via opts.voiceSteer — the same 1024-D directions). VoiceDesign has no slot,
+  // so no axes. The bases live beside the Base checkpoint; the loaders search the
+  // sibling 0.6B-Base / parent qwen-tts dir so CustomVoice resolves them too.
+  const steerable = (variant === 'base' || variant === 'customvoice');
+  show('#axes', steerable);
+  if (steerable) {
     loadEmotionBasis(dir); buildEmotion();
     loadMascFemBasis(dir); buildMascFem();
   }

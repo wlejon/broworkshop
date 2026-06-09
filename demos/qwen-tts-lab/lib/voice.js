@@ -177,13 +177,25 @@ function renderAnchors() {
   updateDesignerMeta();
 }
 
+// Reflect an axes change into the right meta line. On Base the emotion / masc-fem
+// offsets fold into the designed x-vector, so the designer line reports the final
+// norm; on CustomVoice they ride the preset's prefill slot, summarized in #axes.
+// (Shared by the designer, emotion and masc-fem panels.)
 function updateDesignerMeta() {
+  if (variant !== 'base') { updateAxesMeta(); return; }
   // Report the norm of what actually gets synthesized — blend + emotion + masc/fem offsets.
   const x = applyMascFem(applyEmotion(designedXvec));
   const norm = x ? Math.sqrt(x.reduce((s, v) => s + v * v, 0)) : 0;
   $('#designer-meta').textContent = designedXvec
     ? anchors.length + ' anchor(s) · designed x-vector ‖' + norm.toFixed(2) + '‖' + emotionSummary() + mascFemSummary()
     : 'all weights zero — raise one to define a voice';
+}
+
+// The CustomVoice axes readout: the active steering mix (or '' when none dialed).
+function updateAxesMeta() {
+  const m = $('#axes-meta'); if (!m) return;
+  const s = (emotionSummary() + mascFemSummary()).replace(/^ · /, '');
+  m.textContent = s ? 'steering ' + s + ' · press Render to hear it' : '';
 }
 
 // The synthesis opts fragment for the active variant. In Base, the emotion + masc/fem
