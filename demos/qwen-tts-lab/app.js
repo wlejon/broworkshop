@@ -15,7 +15,7 @@ function init() {
     const f = browseFile('Audio|wav;flac;mp3;ogg;opus'); if (f) $('#ref-wav').value = f;
   });
   $('#btn-enroll').addEventListener('click', enrollRef);
-  $('#btn-rand-xv').addEventListener('click', randomVoice);
+  $('#btn-rand-xv').addEventListener('click', randomDesigned);
   $('#btn-clone').addEventListener('click', cloneOnce);
   $('#btn-emo-reset').addEventListener('click', resetEmotion);
   $('#btn-mf-reset').addEventListener('click', resetMascFem);
@@ -48,6 +48,9 @@ function cloneOnce() {
     const dec = audioCtx.decodeAudioFile(path);
     if (!dec || !dec.samples || !dec.samples.length) { setBadge('could not decode ' + path, true); return; }
     designedXvec = qwen.embedSpeaker(toMono(dec.samples, dec.channels), { sampleRate: dec.sampleRate });
+    // faithful clip identity (the full x-vector, not a basis projection); reflect
+    // its projection onto the sliders so the panel shows where it landed.
+    if (voiceBasis) { coords = coordsFromXvec(designedXvec); syncSliders(); }
     updateDesignerMeta();
     setBadge('cloned ' + pName(path) + ' · rendering…');
     requestRender();

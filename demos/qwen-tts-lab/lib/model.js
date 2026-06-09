@@ -75,7 +75,7 @@ function adaptToVariant() {
   const dir = $('#model-dir').value.trim();
   if (variant === 'customvoice') buildSpeakerPanel();
   else if (variant === 'voicedesign') buildInstructPanel();
-  else buildDesignerPanel();
+  else { loadVoiceBasis(dir); buildDesignerPanel(); }   // PCA voice-slider sculptor
   // x-vector-space steering applies wherever there's a speaker slot: it rides the
   // Base designed x-vector, and on CustomVoice it nudges the preset's prefill slot
   // (via opts.voiceSteer — the same 1024-D directions). VoiceDesign has no slot,

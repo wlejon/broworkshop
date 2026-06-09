@@ -55,9 +55,10 @@ const STAGE_INFO = {
 const STAGE_ORDER = ['codes', 'c0_confidence'];
 
 // ─── voice (designer) state ──────────────────────────────────────────────────
-let anchors = [];         // [{ name, xvec: Float32Array }] enrolled in Base mode
-let anchorW = [];         // blend weight per anchor (parallel to anchors)
-let designedXvec = null;  // the current mixed x-vector (Float32Array enc_dim) or null
+// The Base designer is the PCA voice-slider sculptor (lib/designer.js owns the
+// basis + coords). designedXvec is the 1024-D point those sliders define, which
+// the emotion / masc-fem axes ride on top of (currentVoice composes them).
+let designedXvec = null;  // the current designed x-vector (Float32Array enc_dim) or null
 
 // ─── delivery state ──────────────────────────────────────────────────────────
 let seedLocked = false;   // keep the seed fixed across runs

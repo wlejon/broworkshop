@@ -3,7 +3,7 @@
 // for a static app (in the windowed runtime the main loop always pumps, so the
 // app's async Render/Stream path is fine; the underlying calls are exercised
 // here synchronously). We reuse the app's own functions (adaptToVariant,
-// renderStages, randomVoice, currentVoice, currentSampling) against live models.
+// renderStages, seedVoice, currentVoice, currentSampling) against live models.
 const ROOT = 'D:/projects/brosoundml/weights/qwen-tts';
 const TEXT = 'Hello there. This is a test of the pipeline.';
 
@@ -80,31 +80,58 @@ if (mascFemBasis) {
   console.log('  voiceSteer verified · Δ', dd.toFixed(1), '· zero-noop', dz.toFixed(4));
 }
 
-// ── Base: the x-vector designer + designer trace ─────────────────────────────
+// ── Base: the PCA voice-slider designer + designer trace ─────────────────────
 qwen = bro.tts.loadQwen(ROOT + '/0.6B-Base');
 variant = qwen.variant;
-adaptToVariant();                                   // builds the designer panel
-console.log('BASE', variant);
+adaptToVariant();                                   // loads the basis + builds sliders
+console.log('BASE', variant, '· voiceBasis', voiceBasis ? voiceBasis.k + ' axes / ' + voiceBasis.n + ' actors' : 'none');
 assert(variant === 'base', 'base variant');
-randomVoice();                                      // embeds a noise burst → anchor → blend
-assert(designedXvec && designedXvec.length > 0, 'random x-vector designed');
+assert(!!voiceBasis, 'qwen_voice_basis.json loaded');
+assert(sliderCells.length === voiceBasis.k && $('#voice-sliders').children.length === voiceBasis.k, 'sliders built per axis');
+assert($('#voice-sliders-wrap').style.display !== 'none', 'slider panel visible');
+
+// neutral seed → designedXvec == the basis mean (all coords 0)
+seedVoice('__mean__');
+let dmean = 0; for (let d = 0; d < voiceBasis.dim; d++) dmean += Math.abs(designedXvec[d] - voiceBasis.mean[d]);
+assert(dmean < 1e-3, 'neutral seed = basis mean');
+
+// slider reconstruction: coord k → mean + coord·std·comp along that axis
+coords[0] = 2.0; rebuildDesigned();
+let drec = 0; for (let d = 0; d < voiceBasis.dim; d++) drec += Math.abs(designedXvec[d] - (voiceBasis.mean[d] + 2.0 * voiceBasis.std[0] * voiceBasis.comps[0][d]));
+assert(drec < 1e-3, 'slider move = mean + coord·std·comp');
+
+// projection round-trip: orthonormal axes → coordsFromXvec ∘ xvecFromCoords = id
+for (let k = 0; k < voiceBasis.k; k++) coords[k] = (k % 3) - 1;   // some non-trivial point
+const xr = xvecFromCoords(), cr = coordsFromXvec(xr);
+let dproj = 0; for (let k = 0; k < voiceBasis.k; k++) dproj += Math.abs(cr[k] - coords[k]);
+assert(dproj < 1e-2, 'project(reconstruct(coords)) = coords');
+console.log('  reconstruction Δ', drec.toFixed(5), '· round-trip Δ', dproj.toFixed(5));
+
+// seed a named anchor → a distinct designed voice
+seedVoice('__mean__');
+const aname = voiceBasis.names[1];
+seedVoice(aname);
+let danchor = 0; for (let d = 0; d < voiceBasis.dim; d++) danchor += Math.abs(designedXvec[d] - voiceBasis.mean[d]);
+assert(danchor > 1, 'anchor seed ≠ neutral');
 const cv = currentVoice();
 assert(cv && cv.xvector && cv.xvector.length === designedXvec.length, 'currentVoice → xvector');
-console.log('  designed x-vector', designedXvec.length + '-D · anchors', anchors.length);
-
-// blend math: a second anchor at equal weight = the mean of the two
-addAnchor('b', Float32Array.from(anchors[0].xvec, (v) => v + 1));
-anchorW[0] = 1; anchorW[1] = 1; recomputeBlend();
-let okmix = true;
-for (let i = 0; i < designedXvec.length; i++) if (Math.abs(designedXvec[i] - (anchors[0].xvec[i] + anchors[1].xvec[i]) / 2) > 1e-4) okmix = false;
-assert(okmix, 'blend = weighted mean of anchors');
 
 const rx = qwen.synthesizeFromXvector(TEXT, designedXvec, { language: 'english', trace: true });
 f = finite(rx);
-console.log('  designer render', f.peak.toFixed(3), 'peak ·', (rx.samples.length / rx.sampleRate).toFixed(2) + 's ·', shapes(rx));
+console.log('  designer render (' + aname + ')', f.peak.toFixed(3), 'peak ·', (rx.samples.length / rx.sampleRate).toFixed(2) + 's ·', shapes(rx));
 assert(f.bad === 0 && f.peak > 0.001, 'designer audio finite');
 assert((rx.stages || []).some((s) => s.name === 'codes' && s.h === 16), 'designer codes trace');
 lastResult = rx; renderStages(rx);
+
+// two different seeds → audibly different voices (the finer-control payoff)
+seedVoice(voiceBasis.names[0]);
+const va = qwen.synthesizeFromXvector(TEXT, designedXvec, { language: 'english' });
+seedVoice(voiceBasis.names[2]);
+const vb = qwen.synthesizeFromXvector(TEXT, designedXvec, { language: 'english' });
+let dvoices = 0; const nv = Math.min(va.samples.length, vb.samples.length, 24000);
+for (let i = 0; i < nv; i++) dvoices += Math.abs(va.samples[i] - vb.samples[i]);
+console.log('  seed', voiceBasis.names[0], '↔', voiceBasis.names[2], 'Δ', dvoices.toFixed(1));
+assert(dvoices > 1, 'different seeds → different voices');
 
 // ── masculine↔feminine basis: bipolar x-vector offset ────────────────────────
 console.log('MASC↔FEM', mascFemBasis ? 'basis loaded' : 'no basis');

@@ -55,21 +55,28 @@
         <div id="instruct-tags" class="tag-groups"></div>
       </div>
 
-      <!-- Base: the x-vector designer — enroll real voices, blend, render -->
+      <!-- Base: the x-vector voice designer — PCA identity sliders over the Qwen
+           voice manifold (seed from an anchor / clone a clip, then sculpt) -->
       <div id="voice-designer" class="vpanel col" style="display:none">
         <div class="drow">
           <span class="vlabel">designer</span>
-          <input id="ref-wav" type="text" placeholder="path to a reference .wav to enroll"
-                 title="A clip whose speaker identity becomes an x-vector anchor">
+          <input id="ref-wav" type="text" placeholder="path to a reference .wav to clone into the sliders"
+                 title="A clip whose speaker identity is projected onto the voice sliders">
           <button id="btn-browse-wav" class="iconbtn" title="Choose a reference clip">📁</button>
-          <button id="btn-enroll" title="Encode the clip to a speaker x-vector anchor">⤓ enroll</button>
-          <button id="btn-clone" title="Render directly from this clip (one-shot clone)">clone once</button>
+          <button id="btn-enroll" title="Project the clip's x-vector onto the voice sliders">⤓ enroll</button>
+          <button id="btn-clone" title="Render directly from this clip (faithful one-shot clone)">clone once</button>
           <button id="btn-rand-xv" title="A random in-distribution voice">🎲 random</button>
           <label class="cfg lang">lang
             <select id="language3" title="Synthesis language"></select>
           </label>
         </div>
-        <div id="anchors" class="anchors" title="Blend the enrolled anchors — weights mix their x-vectors"></div>
+        <!-- the PCA voice-identity sliders + a named-anchor seed (hidden without a basis) -->
+        <div id="voice-sliders-wrap" class="sliders-wrap" style="display:none">
+          <label class="cfg seedrow">seed
+            <select id="seed-voice" title="Seed the sliders from a real voice, or the neutral centroid"></select>
+          </label>
+          <div id="voice-sliders" class="sliders" title="Continuous identity axes over ~hundreds of real speakers — press Render to hear a change"></div>
+        </div>
         <div id="designer-meta" class="meta"></div>
       </div>
     </section>
@@ -161,6 +168,7 @@
   <script src="lib/helpers.js"></script>
   <script src="lib/model.js"></script>
   <script src="lib/voice.js"></script>
+  <script src="lib/designer.js"></script>
   <script src="lib/emotion.js"></script>
   <script src="lib/mascfem.js"></script>
   <script src="lib/delivery.js"></script>
