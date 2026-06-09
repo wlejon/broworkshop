@@ -29,6 +29,7 @@ function init() {
   $('#btn-stream').addEventListener('click', requestStream);
   $('#btn-stop').addEventListener('click', bargeIn);
   $('#btn-play').addEventListener('click', play);
+  $('#btn-save-wav').addEventListener('click', saveWav);
   $('#text').addEventListener('keydown', (e) => { if (e.key === 'Enter') requestRender(); });
 
   // first load

@@ -24,6 +24,8 @@ let lastTrace = null;     // { samples, sampleRate, durations, stages }
 let audioCtx = null;
 let clipId = -1;          // the published audio clip for the current synthesis
 let clipSamples = 0;      // sample count of that clip (for phoneme-segment regions)
+let wavSamples = null;    // native-rate copy of the last-heard buffer (for WAV export)
+let wavRate = 24000;      // its sample rate
 
 // ─── stage metadata ────────────────────────────────────────────────────────
 // kind  = how to draw it.  desc = plain words.

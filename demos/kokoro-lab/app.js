@@ -43,6 +43,7 @@ function init() {
   $('#btn-save').addEventListener('click', saveVoice);
   $('#btn-run').addEventListener('click', run);
   $('#btn-play').addEventListener('click', play);
+  $('#btn-save-wav').addEventListener('click', saveWav);
   buildEmotion();
   $('#btn-emo-neutral').addEventListener('click', resetEmotion);
   buildTimbre();

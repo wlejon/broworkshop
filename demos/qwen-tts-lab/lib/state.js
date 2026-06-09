@@ -37,6 +37,8 @@ let lastResult = null;    // { samples, sampleRate, stages? } of the last synthe
 // audio
 let audioCtx = null;
 let clipId = -1;          // the published full-utterance clip (for ♪ replay)
+let wavSamples = null;    // native-rate copy of the last-published buffer (for WAV export)
+let wavRate = 24000;      // its sample rate
 
 // ─── trace stages ────────────────────────────────────────────────────────────
 // The Qwen AR trace (opts.trace) emits two grids, both row-major (h x w) over the
