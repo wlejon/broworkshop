@@ -1,11 +1,18 @@
 // ═══ EMOTION — learned emotion directions in x-vector space (Base only) ═══════
 // The Base-variant companion to the designer's anchor blend, and Qwen's analog of
 // Kokoro's Tier-1 emotion timbre. Each emotion is a CONTRASTIVE within-speaker
-// direction in the ECAPA speaker x-vector space, regressed from a Qwen-VoiceDesign
-// self-rendered emotion corpus (50 voices × 6 basic + 6 dyad-blend emotions) so the
-// directions live in Qwen's OWN region of x-vector space, built by
-// bro/tests/_qwen_emotion_basis_vd.js into emotion_basis.json beside the Base
-// checkpoint. Dialing emotion e nudges the
+// direction in the ECAPA speaker x-vector space (from CAMEO — real multilingual
+// actors, permissively licensed), built by bro/tests/_qwen_emotion_basis.js into
+// emotion_basis.json beside the Base checkpoint. Dialing emotion e nudges the
+//
+// NOTE: unlike the VOICE-identity basis, emotion stays CAMEO, not Qwen-self-rendered.
+// A synthetic rebuild (50 VoiceDesign voices × 12 emotions, _qwen_emotion_basis_vd.js)
+// was tried and REVERTED: emotion needs identity-CONSTANT contrast, which only real
+// recordings give. Instruct-rendered "happy" re-picks the voice, and ECAPA (a speaker
+// space, emotion-invariant) keeps that timbre drift while squashing the prosody — so
+// the synthetic "happy" was less expressive (Δf0-range +26 vs CAMEO's +81 at α=4 on a
+// cloned voice) AND tilted harder off-identity. Manifold coverage helped identity but
+// hurt emotion. See bro/tests/_qwen_emotion_clone_ab.js.
 // designed x-vector along full[e] before synthesize_with_xvector:
 //
 //   xvector += Σ alphaₑ · full[e]
