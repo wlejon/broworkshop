@@ -50,8 +50,9 @@ function loadModel(dir) {
         adaptToVariant();
         setBadge('ready · ' + variantHint());
         $('#btn-render').disabled = false;
-        // Streaming has no x-vector path, so it's speaker/instruct only.
-        $('#btn-stream').disabled = (variant === 'base');
+        // Every variant can stream now — Base streams its designed x-vector via
+        // opts.xvector (synthesizeStream's x-vector path), the same point Render uses.
+        $('#btn-stream').disabled = false;
       },
       onError: (m) => setBadge('load failed: ' + m, true),
     });

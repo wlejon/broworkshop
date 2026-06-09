@@ -27,7 +27,7 @@ function bargeIn() {
 // Toggle the transport buttons for the active/idle state.
 function transport(busy) {
   $('#btn-render').disabled = busy || !qwen;
-  $('#btn-stream').disabled = busy || !qwen || variant === 'base';
+  $('#btn-stream').disabled = busy || !qwen;
   $('#btn-stop').disabled   = !busy;
 }
 
