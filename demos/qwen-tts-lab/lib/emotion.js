@@ -1,9 +1,11 @@
 // ═══ EMOTION — learned emotion directions in x-vector space (Base only) ═══════
 // The Base-variant companion to the designer's anchor blend, and Qwen's analog of
 // Kokoro's Tier-1 emotion timbre. Each emotion is a CONTRASTIVE within-speaker
-// direction in the ECAPA speaker x-vector space (from CAMEO — multilingual,
-// permissively licensed), built by bro/tests/_qwen_emotion_basis.js into
-// emotion_basis.json beside the Base checkpoint. Dialing emotion e nudges the
+// direction in the ECAPA speaker x-vector space, regressed from a Qwen-VoiceDesign
+// self-rendered emotion corpus (50 voices × 6 basic + 6 dyad-blend emotions) so the
+// directions live in Qwen's OWN region of x-vector space, built by
+// bro/tests/_qwen_emotion_basis_vd.js into emotion_basis.json beside the Base
+// checkpoint. Dialing emotion e nudges the
 // designed x-vector along full[e] before synthesize_with_xvector:
 //
 //   xvector += Σ alphaₑ · full[e]
