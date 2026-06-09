@@ -71,11 +71,15 @@ function adaptToVariant() {
   const show = (sel, on) => { $(sel).style.display = on ? 'flex' : 'none'; };
   show('#voice-speaker',  variant === 'customvoice');
   show('#voice-instruct', variant === 'voicedesign');
-  show('#voice-designer', variant === 'base');
   const dir = $('#model-dir').value.trim();
   if (variant === 'customvoice') buildSpeakerPanel();
   else if (variant === 'voicedesign') buildInstructPanel();
-  else { loadVoiceBasis(dir); buildDesignerPanel(); }   // PCA voice-slider sculptor
+  // the shared voice-map designer: Base always (it IS the voice), CustomVoice as
+  // the "design any voice" alternative to its 9 presets (rendered via the slot
+  // override speakerVector). VoiceDesign has no x-vector slot, so no designer.
+  const designerOn = (variant === 'base' || variant === 'customvoice');
+  show('#designer', designerOn);
+  if (designerOn) { loadVoiceBasis(dir); buildDesigner(); }
   // x-vector-space steering applies wherever there's a speaker slot: it rides the
   // Base designed x-vector, and on CustomVoice it nudges the preset's prefill slot
   // (via opts.voiceSteer — the same 1024-D directions). VoiceDesign has no slot,

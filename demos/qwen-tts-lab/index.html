@@ -32,14 +32,15 @@
 
     <!-- VOICE — the identity seam. One of three panels shows, per variant. -->
     <section id="voice">
-      <!-- CustomVoice: a palette of preset speakers -->
+      <!-- CustomVoice: a palette of preset speakers (or a designed voice, below) -->
       <div id="voice-speaker" class="vpanel" style="display:none">
         <span class="vlabel">speaker</span>
-        <select id="speaker" title="Preset speaker (CustomVoice)"></select>
+        <select id="speaker" title="Preset speaker (CustomVoice) — or design any voice on the map below"></select>
         <span id="dialect" class="tag"></span>
         <label class="cfg lang">lang
           <select id="language" title="Synthesis language"></select>
         </label>
+        <span id="cv-source" class="cv-source"></span>
       </div>
 
       <!-- VoiceDesign: describe the voice in words -->
@@ -55,29 +56,39 @@
         <div id="instruct-tags" class="tag-groups"></div>
       </div>
 
-      <!-- Base: the x-vector voice designer — PCA identity sliders over the Qwen
-           voice manifold (seed from an anchor / clone a clip, then sculpt) -->
-      <div id="voice-designer" class="vpanel col" style="display:none">
-        <div class="drow">
-          <span class="vlabel">designer</span>
-          <input id="ref-wav" type="text" placeholder="path to a reference .wav to clone into the sliders"
-                 title="A clip whose speaker identity is projected onto the voice sliders">
-          <button id="btn-browse-wav" class="iconbtn" title="Choose a reference clip">📁</button>
-          <button id="btn-enroll" title="Project the clip's x-vector onto the voice sliders">⤓ enroll</button>
-          <button id="btn-clone" title="Render directly from this clip (faithful one-shot clone)">clone once</button>
-          <button id="btn-rand-xv" title="A random in-distribution voice">🎲 random</button>
-          <label class="cfg lang">lang
-            <select id="language3" title="Synthesis language"></select>
-          </label>
+    </section>
+
+    <!-- DESIGNER — the voice map: every CAMEO speaker plotted by its two dominant
+         identity axes. Drag the handle through voice space, click a dot to snap to
+         that real voice, seed a named anchor, clone a clip, or open the fine-tune
+         axes. Shared by Base (the voice) and CustomVoice (the designed-voice slot
+         override). Hidden for VoiceDesign and when no basis is present. -->
+    <section id="designer" style="display:none">
+      <div class="drow">
+        <span class="vlabel">design</span>
+        <input id="ref-wav" type="text" placeholder="path to a reference .wav to clone onto the map"
+               title="A clip whose speaker identity is projected onto the voice map">
+        <button id="btn-browse-wav" class="iconbtn" title="Choose a reference clip">📁</button>
+        <button id="btn-enroll" title="Project the clip's x-vector onto the voice map">⤓ enroll</button>
+        <button id="btn-clone" title="Render directly from this clip (faithful one-shot clone)">clone once</button>
+        <button id="btn-rand-xv" title="A random in-distribution voice">🎲 random</button>
+        <label class="cfg seedrow">seed
+          <select id="seed-voice" title="Seed from a real voice, or the neutral centroid"></select>
+        </label>
+        <label class="cfg lang">lang
+          <select id="language3" title="Synthesis language"></select>
+        </label>
+      </div>
+      <div id="designer-body" class="designer-body" style="display:none">
+        <canvas id="voice-map" class="voice-map" width="620" height="240"
+                title="Drag to move through voice space · click a speaker to snap to that voice"></canvas>
+        <div class="designer-side">
+          <div id="designer-meta" class="meta"></div>
+          <details class="fine-tune">
+            <summary>fine-tune axes</summary>
+            <div id="voice-sliders" class="sliders" title="Continuous identity axes — the map is axes 1–2"></div>
+          </details>
         </div>
-        <!-- the PCA voice-identity sliders + a named-anchor seed (hidden without a basis) -->
-        <div id="voice-sliders-wrap" class="sliders-wrap" style="display:none">
-          <label class="cfg seedrow">seed
-            <select id="seed-voice" title="Seed the sliders from a real voice, or the neutral centroid"></select>
-          </label>
-          <div id="voice-sliders" class="sliders" title="Continuous identity axes over ~hundreds of real speakers — press Render to hear a change"></div>
-        </div>
-        <div id="designer-meta" class="meta"></div>
       </div>
     </section>
 

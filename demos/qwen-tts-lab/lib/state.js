@@ -59,6 +59,7 @@ const STAGE_ORDER = ['codes', 'c0_confidence'];
 // basis + coords). designedXvec is the 1024-D point those sliders define, which
 // the emotion / masc-fem axes ride on top of (currentVoice composes them).
 let designedXvec = null;  // the current designed x-vector (Float32Array enc_dim) or null
+let cvSource = 'preset';  // CustomVoice voice source: 'preset' (the 9) | 'designed' (the map)
 
 // ─── delivery state ──────────────────────────────────────────────────────────
 let seedLocked = false;   // keep the seed fixed across runs

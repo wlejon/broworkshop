@@ -80,15 +80,41 @@ if (mascFemBasis) {
   console.log('  voiceSteer verified · Δ', dd.toFixed(1), '· zero-noop', dz.toFixed(4));
 }
 
-// ── Base: the PCA voice-slider designer + designer trace ─────────────────────
+// ── designed voice on CustomVoice: pick any map voice → speakerVector slot ────
+// The shared voice designer is available in CustomVoice too; choosing a designed
+// voice renders it through the slot (speakerVector) instead of a preset token.
+console.log('CV-DESIGNED · #designer', $('#designer').style.display,
+            '· basis', voiceBasis ? voiceBasis.points.length + ' map pts' : 'none');
+assert($('#designer').style.display !== 'none', 'designer shown for customvoice');
+assert(!!voiceBasis && voiceBasis.points && voiceBasis.points.length > 100, 'voice basis + map points on customvoice');
+assert(cvSource === 'preset' && !!currentVoice().speaker, 'default cv source = preset');
+snapToPoint(10);                                    // click a real map voice
+assert(cvSource === 'designed', 'designer use → cvSource designed');
+const dvoice = currentVoice();
+assert(dvoice && dvoice.speakerVector && dvoice.speakerVector.length === 1024, 'currentVoice → speakerVector');
+const presetR   = qwen.synthesize(TEXT, { speaker: speakers[0], temperature: 0 });
+const designedR = qwen.synthesize(TEXT, { speakerVector: dvoice.speakerVector, temperature: 0 });
+const fdz = finite(designedR);
+let dpd = 0; const mpd = Math.min(presetR.samples.length, designedR.samples.length, 24000);
+for (let i = 0; i < mpd; i++) dpd += Math.abs(presetR.samples[i] - designedR.samples[i]);
+console.log('  designed-voice render', fdz.peak.toFixed(3), 'peak · preset↔designed Δ', dpd.toFixed(1));
+assert(fdz.bad === 0 && fdz.peak > 0.01, 'designed-voice audio finite + audible');
+assert(dpd > 1, 'speakerVector renders a different voice than the preset');
+let threwSv = false;
+try { qwen.synthesize(TEXT, { speakerVector: new Float32Array(7) }); } catch (e) { threwSv = true; }
+assert(threwSv, 'wrong-length speakerVector rejected');
+usedPreset();
+console.log('  designed-voice verified · preset↔designed Δ', dpd.toFixed(1));
+
+// ── Base: the voice-map designer + designer trace ────────────────────────────
 qwen = bro.tts.loadQwen(ROOT + '/0.6B-Base');
 variant = qwen.variant;
-adaptToVariant();                                   // loads the basis + builds sliders
-console.log('BASE', variant, '· voiceBasis', voiceBasis ? voiceBasis.k + ' axes / ' + voiceBasis.n + ' actors' : 'none');
+adaptToVariant();                                   // loads the basis + builds the map
+console.log('BASE', variant, '· voiceBasis', voiceBasis ? voiceBasis.k + ' axes / ' + voiceBasis.n + ' actors / ' + voiceBasis.points.length + ' pts' : 'none');
 assert(variant === 'base', 'base variant');
 assert(!!voiceBasis, 'qwen_voice_basis.json loaded');
-assert(sliderCells.length === voiceBasis.k && $('#voice-sliders').children.length === voiceBasis.k, 'sliders built per axis');
-assert($('#voice-sliders-wrap').style.display !== 'none', 'slider panel visible');
+assert(sliderCells.length === voiceBasis.k && $('#voice-sliders').children.length === voiceBasis.k, 'fine-tune sliders built per axis');
+assert($('#designer').style.display !== 'none' && $('#designer-body').style.display !== 'none', 'designer + map visible');
 
 // neutral seed → designedXvec == the basis mean (all coords 0)
 seedVoice('__mean__');
@@ -106,6 +132,11 @@ const xr = xvecFromCoords(), cr = coordsFromXvec(xr);
 let dproj = 0; for (let k = 0; k < voiceBasis.k; k++) dproj += Math.abs(cr[k] - coords[k]);
 assert(dproj < 1e-2, 'project(reconstruct(coords)) = coords');
 console.log('  reconstruction Δ', drec.toFixed(5), '· round-trip Δ', dproj.toFixed(5));
+
+// the voice map: snapping to a speaker dot sets coords to that real, complete voice
+snapToPoint(5);
+let dsnap = 0; for (let k = 0; k < voiceBasis.k; k++) dsnap += Math.abs(coords[k] - voiceBasis.points[5][k + 1]);
+assert(dsnap < 1e-6, 'snapToPoint = that speaker\'s coords');
 
 // seed a named anchor → a distinct designed voice
 seedVoice('__mean__');

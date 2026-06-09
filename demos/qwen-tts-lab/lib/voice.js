@@ -1,6 +1,10 @@
 // ═══ VOICE — the identity seam (one panel per variant) ═══════════════════════
 
-// ── CustomVoice: preset speaker palette ─────────────────────────────────────
+// ── CustomVoice: preset speaker palette + the "designed voice" override ──────
+// Two voice sources: one of the 9 preset speakers, OR any voice designed on the
+// shared voice map (rendered through the slot via speakerVector). cvSource tracks
+// which is live; picking a preset selects 'preset', touching the designer selects
+// 'designed'. markDesigned()/updateCvSource() keep the status line in sync.
 function buildSpeakerPanel() {
   const sel = $('#speaker'); sel.textContent = '';
   let names = [];
@@ -14,7 +18,27 @@ function buildSpeakerPanel() {
     let d = ''; try { d = qwen.speakerDialect(sel.value) || ''; } catch (e) {}
     $('#dialect').textContent = d ? '· ' + d.replace('_', ' ') : '';
   };
-  sel.onchange = showDialect; showDialect();
+  sel.onchange = () => { cvSource = 'preset'; showDialect(); updateCvSource(); };
+  cvSource = 'preset'; showDialect(); updateCvSource();
+}
+
+// A designer interaction (map / seed / slider / random / enroll) switches a
+// CustomVoice render onto the designed voice; a "use preset" reset switches back.
+function markDesigned() { cvSource = 'designed'; updateCvSource(); }
+function usedPreset()   { cvSource = 'preset';  updateCvSource(); }
+function updateCvSource() {
+  const s = $('#cv-source'); if (!s) return;
+  if (variant !== 'customvoice') { s.style.display = 'none'; return; }
+  s.style.display = '';
+  s.textContent = '';
+  if (cvSource === 'designed') {
+    s.appendChild(el('span', null, '◆ rendering the designed voice (slot override)'));
+    const x = el('span', 'pin-clear', '↺ use preset ‘' + ($('#speaker').value || '') + '’');
+    x.addEventListener('click', usedPreset);
+    s.appendChild(x);
+  } else {
+    s.appendChild(el('span', 'hint', 'preset ‘' + ($('#speaker').value || '') + '’ · or design a voice on the map below'));
+  }
 }
 
 // ── VoiceDesign: a natural-language voice description ────────────────────────
@@ -89,61 +113,47 @@ function buildInstructPanel() {
   fillLanguages($('#language2'));
 }
 
-// ── Base: the x-vector voice designer ───────────────────────────────────────
-// The designed voice is the PCA-slider sculptor (lib/designer.js) over the Qwen
-// voice basis: continuous identity over ~hundreds of real speakers, seeded from
-// named anchors or a cloned clip. enroll projects a real clip INTO the sliders.
-function buildDesignerPanel() {
-  fillLanguages($('#language3'));
-  designedXvec = null;
-  buildVoiceSliders();             // hides itself if no qwen_voice_basis.json
-  if (voiceBasis) seedVoice('__mean__');   // a neutral designed voice, ready to render
-}
+// (The Base/CustomVoice voice designer — the map + sliders + enroll — lives in
+// lib/designer.js: buildDesigner / enrollRef / seedVoice / randomDesigned.)
 
-// Decode a reference clip → x-vector, and project it into the slider space so it
-// can be sculpted from there (the basis is the canonical designed point). Without
-// a basis, fall back to using the raw clip x-vector directly.
-function enrollRef() {
-  const path = $('#ref-wav').value.trim();
-  if (!path) { setBadge('enter or browse a reference .wav first', true); return; }
-  try {
-    audioCtx = audioCtx || new AudioContext();
-    const dec = audioCtx.decodeAudioFile(path);
-    if (!dec || !dec.samples || !dec.samples.length) { setBadge('could not decode ' + path, true); return; }
-    const xv = qwen.embedSpeaker(toMono(dec.samples, dec.channels), { sampleRate: dec.sampleRate });
-    if (voiceBasis) {
-      coords = coordsFromXvec(xv); syncSliders(); rebuildDesigned();
-    } else {
-      designedXvec = xv; updateDesignerMeta();
-    }
-    setBadge('enrolled "' + pName(path).replace(/\.[^.]+$/, '') + '" · ' + xv.length + '-D x-vector → sliders');
-  } catch (e) { setBadge('enroll: ' + e.message, true); }
-}
-
-// Reflect a change into the right meta line. On Base the emotion / masc-fem offsets
-// fold into the designed x-vector, so the designer line reports the final norm; on
-// CustomVoice they ride the preset's prefill slot, summarized in #axes. (Shared by
-// the designer, emotion and masc-fem panels.)
+// The designed-voice readout (the map / sliders). On Base the emotion / masc-fem
+// offsets fold INTO the x-vector, so its norm includes them; on CustomVoice the
+// designed voice fills the slot and emotion/masc-fem ride on top via voiceSteer
+// (summarized separately in #axes-meta). Shared by the designer, emotion and
+// masc-fem panels.
 function updateDesignerMeta() {
-  if (variant !== 'base') { updateAxesMeta(); return; }
-  const x = applyMascFem(applyEmotion(designedXvec));
-  const norm = x ? Math.sqrt(x.reduce((s, v) => s + v * v, 0)) : 0;
-  $('#designer-meta').textContent = designedXvec
-    ? 'designed x-vector ‖' + norm.toFixed(2) + '‖' + emotionSummary() + mascFemSummary()
-    : 'move a slider or pick a seed to design a voice';
+  const dm = $('#designer-meta');
+  if (dm) {
+    if (designedXvec && (variant === 'base' || variant === 'customvoice')) {
+      const x = (variant === 'base') ? applyMascFem(applyEmotion(designedXvec)) : designedXvec;
+      const norm = Math.sqrt(x.reduce((s, v) => s + v * v, 0));
+      dm.textContent = 'designed x-vector ‖' + norm.toFixed(2) + '‖' +
+        (variant === 'base' ? emotionSummary() + mascFemSummary() : '');
+    } else {
+      dm.textContent = voiceBasis ? 'drag the map or pick a seed to design a voice' : '';
+    }
+  }
+  if (variant === 'customvoice') updateAxesMeta();
 }
 
-// The CustomVoice axes readout: the active steering mix (or '' when none dialed).
+// The CustomVoice axes readout: the active emotion / masc-fem steering mix.
 function updateAxesMeta() {
   const m = $('#axes-meta'); if (!m) return;
   const s = (emotionSummary() + mascFemSummary()).replace(/^ · /, '');
   m.textContent = s ? 'steering ' + s + ' · press Render to hear it' : '';
 }
 
-// The synthesis opts fragment for the active variant. In Base, the emotion + masc/fem
-// bases (if any) nudge the designed x-vector along the dialed-in directions.
+// The synthesis opts fragment for the active variant.
+//   Base        — the designed x-vector (emotion + masc/fem folded in).
+//   CustomVoice — a preset speaker, OR (when the designer is in use) the designed
+//                 voice dropped into the slot via speakerVector; emotion/masc-fem
+//                 then ride on top as voiceSteer (added in gatherOpts).
+//   VoiceDesign — the natural-language instruction.
 function currentVoice() {
-  if (variant === 'customvoice') return { speaker: $('#speaker').value };
+  if (variant === 'customvoice') {
+    if (cvSource === 'designed' && designedXvec) return { speakerVector: designedXvec };
+    return { speaker: $('#speaker').value };
+  }
   if (variant === 'voicedesign') return { instruct: $('#instruct').value.trim() };
   if (designedXvec) return { xvector: applyMascFem(applyEmotion(designedXvec)) };
   return null;   // base with no voice designed yet

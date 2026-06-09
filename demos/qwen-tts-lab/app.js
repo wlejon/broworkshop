@@ -49,8 +49,9 @@ function cloneOnce() {
     if (!dec || !dec.samples || !dec.samples.length) { setBadge('could not decode ' + path, true); return; }
     designedXvec = qwen.embedSpeaker(toMono(dec.samples, dec.channels), { sampleRate: dec.sampleRate });
     // faithful clip identity (the full x-vector, not a basis projection); reflect
-    // its projection onto the sliders so the panel shows where it landed.
-    if (voiceBasis) { coords = coordsFromXvec(designedXvec); syncSliders(); }
+    // its projection onto the map/sliders so the panel shows where it landed.
+    if (voiceBasis) { coords = coordsFromXvec(designedXvec); syncSliders(); drawMap(); }
+    if (variant === 'customvoice') markDesigned();   // render this clone via the slot override
     updateDesignerMeta();
     setBadge('cloned ' + pName(path) + ' · rendering…');
     requestRender();

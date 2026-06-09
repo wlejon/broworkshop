@@ -66,12 +66,24 @@ select {
 .tag-group { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
 .tag-glabel { min-width: 70px; color: #6b7585; font-size: 11px; text-transform: uppercase; letter-spacing: .4px; }
 .tagchip { background: #141a24; }
-/* ── Base voice-identity sliders (the PCA sculptor) ── */
-.sliders-wrap { display: flex; flex-direction: column; gap: 6px; margin: 6px 0 2px 74px; }
+/* ── voice designer: the 2-D voice map + (collapsed) fine-tune sliders ── */
+#designer { flex-direction: column; align-items: stretch; gap: 8px; }
+.designer-body { display: flex; gap: 16px; align-items: flex-start; margin-left: 74px; }
+.voice-map {
+  border: 1px solid #1a2230; border-radius: 6px; background: #0b0e14;
+  cursor: crosshair; flex: none;
+}
+.designer-side { display: flex; flex-direction: column; gap: 8px; min-width: 0; flex: 1; }
+.cv-source { font-size: 11px; margin-left: 8px; }
+.fine-tune > summary {
+  cursor: pointer; color: #7f8aa0; font-size: 11px; letter-spacing: 0.3px;
+  user-select: none; padding: 2px 0;
+}
+.fine-tune > summary:hover { color: #b6e3ff; }
 .seedrow { align-self: flex-start; }
 .sliders {
-  display: flex; flex-wrap: wrap; gap: 6px 12px;
-  max-height: 30vh; overflow-y: auto;
+  display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 6px;
+  max-height: 34vh; overflow-y: auto;
 }
 .pc {
   width: 150px; display: flex; flex-direction: column; gap: 2px;
