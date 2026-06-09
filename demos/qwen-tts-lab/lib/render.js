@@ -57,29 +57,83 @@ function clearCards(except) {
   }
 }
 
+// ── hover cursor: one shared 12.5 Hz frame, cross-highlighted on the code raster,
+// the confidence strip, and the waveform — so a code lines up with the slice of
+// audio it produced (codebook frame f ↔ samples [f·n/F, (f+1)·n/F)). ────────────
+let overlayDrawers = [];   // fns(frame) — repaint each frame-card's highlight
+let traceFrames = 0;       // F: canonical frame count (the code-raster width)
+let readoutEl = null;
+// All three frame-aligned cards (codes · confidence · waveform) share this backing
+// width so a frame maps to the same x on each (x = f·TRACE_W/F) and the overlay
+// lines up. Full-width also makes each code cell ~25px — an easy hover/click target.
+const TRACE_W = 1120;
+
+// A transparent canvas stacked on a card's base canvas. Highlights paint here, so
+// the base raster/waveform is never re-rasterized on mousemove. Persistent per card
+// (created once, reused) to respect the no-canvas-churn rule.
+function cardOverlay(c, W, H) {
+  if (!c.overlay) {
+    const wrap = c.canvas.parentNode;          // .canvas-wrap
+    wrap.style.position = 'relative';
+    const o = document.createElement('canvas');
+    o.className = 'overlay';
+    wrap.appendChild(o);
+    c.overlay = o; c.octx = o.getContext('2d');
+  }
+  if (c.overlay.width !== W) c.overlay.width = W;
+  if (c.overlay.height !== H) c.overlay.height = H;
+  c.octx.clearRect(0, 0, W, H);
+  return c.octx;
+}
+
+// A sticky readout above the cards (not a tracked card, so clearCards leaves it).
+function ensureReadout() {
+  if (readoutEl && readoutEl.parentNode) return;
+  readoutEl = el('div', 'trace-readout', READOUT_IDLE);
+  const host = $('#stages');
+  host.insertBefore(readoutEl, host.firstChild);
+}
+const READOUT_IDLE = 'hover the code raster or waveform to line up codes with audio';
+function frameTime(f) { return f / 12.5; }   // 12.5 Hz frame axis
+
+// Set the shared cursor frame (< 0 clears) and repaint every frame-card overlay.
+function setCursor(frame, info) {
+  for (const d of overlayDrawers) d(frame);
+  if (readoutEl) readoutEl.textContent = frame < 0 ? READOUT_IDLE
+    : ('frame ' + frame + ' · t=' + frameTime(frame).toFixed(2) + 's' + (info || ''));
+}
+// Map a mouse event to backing-store coords on a canvas (handles CSS scaling).
+function canvasXY(ev, canvas) {
+  const r = canvas.getBoundingClientRect();
+  return [(ev.clientX - r.left) * (canvas.width / (r.width || canvas.width)),
+          (ev.clientY - r.top) * (canvas.height / (r.height || canvas.height))];
+}
+
 function renderStages(result) {
   const stages = result.stages || [];
   const present = [];
+  overlayDrawers = []; traceFrames = 0; ensureReadout();   // fresh cursor per render
   for (const name of STAGE_ORDER) {
     const s = stages.find((x) => x.name === name);
     if (!s) continue;
     present.push(name);
     const info = STAGE_INFO[name];
     const c = card(name, name, info.desc);
-    if (info.kind === 'codes') renderCodes(c, s);
+    if (info.kind === 'codes') renderCodes(c, s);   // sets traceFrames before the wave reads it
     else if (info.kind === 'conf') renderConf(c, s);
   }
-  // the waveform always, from the returned samples
+  // the waveform always, from the returned samples — frame-aligned to the codes
   present.push('audio');
   renderWave(card('audio', 'audio', 'output waveform — ' + (result.sampleRate / 1000) + ' kHz mono'),
-             result.samples);
+             result.samples, true, result.sampleRate);
+  setCursor(-1);
   clearCards(present);
 }
 
 // 16 x F RVQ codes — one row per codebook, color = code id (per-row normalized so
 // the semantic row and the acoustic rows are each legible).
 function renderCodes(c, s) {
-  const W = Math.min(1120, Math.max(360, s.w * 8)), rowH = 15, H = s.h * rowH;
+  const W = TRACE_W, rowH = 15, H = s.h * rowH;
   const ctx = cardCanvas(c, W, H);
   // per-row min/max
   const lo = new Float32Array(s.h), hi = new Float32Array(s.h);
@@ -102,16 +156,39 @@ function renderCodes(c, s) {
   // row separators + labels
   ctx.fillStyle = 'rgba(0,0,0,0.35)';
   for (let r = 1; r < s.h; r++) ctx.fillRect(0, r * rowH, W, 1);
-  c.note.textContent = s.h + ' codebooks × ' + s.w + ' frames · row 0 = semantic (Talker), 1–' + (s.h - 1) + ' = acoustic (Code Predictor) · click row 0 to stage a code for steering';
-  // Trace-driven steering: clicking the semantic row stages that code for the
-  // logit-bias panel. Reattached each render so it closes over the current stage.
+  c.note.textContent = s.h + ' codebooks × ' + s.w + ' frames · row 0 = semantic (Talker), 1–' + (s.h - 1) + ' = acoustic (Code Predictor) · hover to line up with audio · click row 0 to steer';
+
+  // frame-aligned overlay: a highlighted column at the cursor frame + the hovered cell.
+  traceFrames = s.w;
+  const octx = cardOverlay(c, W, H);
+  let hoverRow = 0;
+  overlayDrawers.push((f) => {
+    octx.clearRect(0, 0, W, H);
+    if (f < 0 || f >= s.w) return;
+    const x = f * W / s.w, bw = Math.max(2, W / s.w);
+    octx.fillStyle = 'rgba(255,255,255,0.10)'; octx.fillRect(x, 0, bw, H);
+    octx.strokeStyle = 'rgba(143,208,255,0.85)'; octx.strokeRect(x + 0.5, 0.5, bw - 1, H - 1);
+    octx.lineWidth = 2; octx.strokeStyle = '#ffd86a';                 // the precise cell
+    octx.strokeRect(x + 1, hoverRow * rowH + 1, bw - 2, rowH - 2); octx.lineWidth = 1;
+  });
+
+  // Trace-driven steering + cross-highlight. Reattached each render so it closes
+  // over the current stage.
   c.canvas.style.cursor = 'crosshair';
+  c.canvas.onmousemove = (ev) => {
+    const [cx, cy] = canvasXY(ev, c.canvas);
+    const f = Math.min(s.w - 1, Math.max(0, (cx * s.w / W) | 0));
+    hoverRow = Math.min(s.h - 1, Math.max(0, (cy / rowH) | 0));
+    const code = Math.round(s.data[hoverRow * s.w + f]);
+    setCursor(f, ' · codebook ' + hoverRow + ' = code ' + code + (hoverRow === 0 ? ' · click to steer' : ''));
+  };
+  c.canvas.onmouseout = () => setCursor(-1);
   c.canvas.onclick = (ev) => steerPickFromCodes(ev, c.canvas, s, W);
 }
 
 // 1 x F confidence — bars colored + heighted by the Talker's top-1 probability.
 function renderConf(c, s) {
-  const W = Math.min(1120, Math.max(360, s.w * 8)), H = 90;
+  const W = TRACE_W, H = 90;
   const ctx = cardCanvas(c, W, H);
   ctx.fillStyle = '#0e1218'; ctx.fillRect(0, 0, W, H);
   const n = s.w, bw = W / n;
@@ -125,10 +202,25 @@ function renderConf(c, s) {
   c.note.textContent =
     'top-1 prob per frame · min ' + mn.toFixed(2) + ' · mean ' + (sum / n).toFixed(2) + ' · max ' + mx.toFixed(2) +
     ' — red dips are where the model hedged';
+
+  const octx = cardOverlay(c, W, H);
+  overlayDrawers.push((f) => {
+    octx.clearRect(0, 0, W, H);
+    if (f < 0 || f >= n) return;
+    const x = f * W / n, bw = Math.max(2, W / n);
+    octx.fillStyle = 'rgba(255,255,255,0.10)'; octx.fillRect(x, 0, bw, H);
+    octx.strokeStyle = 'rgba(143,208,255,0.85)'; octx.strokeRect(x + 0.5, 0.5, bw - 1, H - 1);
+  });
+  c.canvas.onmousemove = (ev) => {
+    const [cx] = canvasXY(ev, c.canvas);
+    const f = Math.min(n - 1, Math.max(0, (cx * n / W) | 0));
+    setCursor(f, ' · confidence ' + s.data[f].toFixed(2));
+  };
+  c.canvas.onmouseout = () => setCursor(-1);
 }
 
-function renderWave(c, d) {
-  const W = 1120, H = 120, mid = H / 2;
+function renderWave(c, d, frameAligned, sr) {
+  const W = TRACE_W, H = 120, mid = H / 2;
   const ctx = cardCanvas(c, W, H);
   ctx.fillStyle = '#0e1218'; ctx.fillRect(0, 0, W, H);
   const n = d.length, per = Math.max(1, Math.floor(n / W));
@@ -140,10 +232,31 @@ function renderWave(c, d) {
     ctx.beginPath();
     ctx.moveTo(x, mid - (hi / peak) * mid); ctx.lineTo(x, mid - (lo / peak) * mid + 0.5); ctx.stroke();
   }
+
+  // The stream meter reuses this without a trace; only the trace waveform aligns.
+  if (!frameAligned || !traceFrames) { c.canvas.onmousemove = null; return; }
+  const F = traceFrames;
+  const x0 = (f) => Math.floor(f * n / F) * W / n;      // frame f → x of its audio span
+  const octx = cardOverlay(c, W, H);
+  overlayDrawers.push((f) => {
+    octx.clearRect(0, 0, W, H);
+    if (f < 0 || f >= F) return;
+    const a = x0(f), b = x0(f + 1), w = Math.max(2, b - a);
+    octx.fillStyle = 'rgba(143,208,255,0.16)'; octx.fillRect(a, 0, w, H);
+    octx.strokeStyle = 'rgba(143,208,255,0.8)'; octx.strokeRect(a + 0.5, 0.5, w - 1, H - 1);
+  });
+  c.canvas.style.cursor = 'crosshair';
+  c.canvas.onmousemove = (ev) => {
+    const [cx] = canvasXY(ev, c.canvas);
+    const f = Math.min(F - 1, Math.max(0, ((cx / W) * F) | 0));
+    setCursor(f, ' · ' + (n / (sr || 24000)).toFixed(2) + 's total');
+  };
+  c.canvas.onmouseout = () => setCursor(-1);
 }
 
 // ── live stream meter: chunks arriving + the growing waveform ───────────────
 function renderStreamMeter() {
+  overlayDrawers = []; traceFrames = 0;   // streaming has no frame-aligned trace
   clearCards(['stream']);
   const c = card('stream', 'streaming', CHUNK_FRAMES + ' frames/chunk · audio plays as it generates');
   let total = 0; for (const ch of streamAccum) total += ch.length;
