@@ -132,10 +132,19 @@ select {
 }
 .card-desc { color: #6b7585; font-size: 12px; margin: 2px 0 8px; }
 .card-body { display: flex; flex-direction: column; gap: 4px; }
-.canvas-wrap { line-height: 0; border-radius: 5px; overflow: hidden; }
+/* The wrap shrink-wraps to the base canvas so the absolutely-positioned overlay's
+   100%/100% resolves to the base canvas's *rendered* box at every container width.
+   Without this, the block-level base canvas caps at its intrinsic backing width
+   (TRACE_W) while the wrap fills the card, so on windows wider than TRACE_W the
+   overlay stretches past the raster and the hover highlight drifts right.
+   inline-block + align-self:flex-start defeats the flex-column stretch and makes
+   the wrap hug the canvas; max-width:100% lets the canvas scale down on narrower
+   windows (the wrap follows it). */
+.canvas-wrap { line-height: 0; border-radius: 5px; overflow: hidden;
+  display: inline-block; align-self: flex-start; max-width: 100%; }
 canvas { display: block; max-width: 100%; }
-/* Overlay stacks on the base canvas. Both share the same backing width (the trace
-   cards are all full-width — see TRACE_W in render.js) so 100%/100% lines up. */
+/* Overlay stacks on the base canvas — same rendered box (the wrap shrink-wraps to
+   the base canvas) so 100%/100% lines up at every resolution. */
 .canvas-wrap .overlay { position: absolute; left: 0; top: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
 .axis-note { color: #5f6878; font-size: 11px; }
 .trace-readout {
