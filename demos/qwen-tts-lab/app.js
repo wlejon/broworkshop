@@ -18,6 +18,7 @@ function init() {
   $('#btn-rand-xv').addEventListener('click', randomVoice);
   $('#btn-clone').addEventListener('click', cloneOnce);
   $('#btn-emo-reset').addEventListener('click', resetEmotion);
+  $('#btn-mf-reset').addEventListener('click', resetMascFem);
 
   // ── delivery dials + logit-bias steering ──────────────────────────────────
   buildDelivery();

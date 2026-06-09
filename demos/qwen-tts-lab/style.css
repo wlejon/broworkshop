@@ -89,6 +89,14 @@ select {
 .emo-val { color: #8fd0ff; font-size: 11px; margin-left: auto; }
 .emo-axis input[type=range] { width: 120px; }
 
+#mascfem { flex-direction: column; margin-top: 4px; }
+.mf-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.mf-pole { color: #c9b06a; font-weight: 600; }
+.mf-pole.preset { cursor: pointer; }
+.mf-pole.preset:hover { color: #e6c97a; text-decoration: underline; }
+.mf-range { width: 200px; }
+.mf-val { color: #8fd0ff; font-size: 11px; min-width: 64px; }
+
 /* ── delivery ── */
 .dial { display: inline-flex; flex-direction: column; gap: 2px; }
 .dial label { font-size: 11px; color: #8b94a3; }

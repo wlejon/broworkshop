@@ -72,6 +72,24 @@ assert(f.bad === 0 && f.peak > 0.001, 'designer audio finite');
 assert((rx.stages || []).some((s) => s.name === 'codes' && s.h === 16), 'designer codes trace');
 lastResult = rx; renderStages(rx);
 
+// ── masculine↔feminine basis: bipolar x-vector offset ────────────────────────
+console.log('MASC↔FEM', mascFemBasis ? 'basis loaded' : 'no basis');
+if (mascFemBasis) {
+  assert($('#mascfem').style.display !== 'none', 'masc/fem panel visible');
+  const dM = mascFemBasis.defaultAlpha.M, fm = mascFemBasis.full.M;
+  setMfAlpha(dM);                                    // push masculine
+  const xv = currentVoice().xvector;
+  let okM = true;
+  for (let i = 0; i < designedXvec.length; i++) if (Math.abs(xv[i] - (designedXvec[i] + dM * fm[i])) > 1e-4) okM = false;
+  assert(okM, 'applyMascFem = designed + α·full[M]');
+  assert(mascFemSummary().indexOf('masculine') >= 0, 'masc summary');
+  setMfAlpha(-mascFemBasis.defaultAlpha.F);          // push feminine (negative α)
+  assert(mascFemSummary().indexOf('feminine') >= 0, 'fem summary');
+  resetMascFem();
+  assert(mfAlpha === 0 && currentVoice().xvector === designedXvec, 'reset → neutral (no offset)');
+  console.log('  masc/fem verified · default masc', dM, '/ fem', mascFemBasis.defaultAlpha.F);
+}
+
 // ── codec round-trip seam ────────────────────────────────────────────────────
 const enc = qwen.encodeAudio(rx.samples.slice(0, 24000 * 2), { sampleRate: rx.sampleRate });
 const back = qwen.decodeCodes(enc.codes, enc.numQuantizers, enc.numFrames);

@@ -178,19 +178,19 @@ function renderAnchors() {
 }
 
 function updateDesignerMeta() {
-  // Report the norm of what actually gets synthesized — blend + emotion offset.
-  const x = applyEmotion(designedXvec);
+  // Report the norm of what actually gets synthesized — blend + emotion + masc/fem offsets.
+  const x = applyMascFem(applyEmotion(designedXvec));
   const norm = x ? Math.sqrt(x.reduce((s, v) => s + v * v, 0)) : 0;
   $('#designer-meta').textContent = designedXvec
-    ? anchors.length + ' anchor(s) · designed x-vector ‖' + norm.toFixed(2) + '‖' + emotionSummary()
+    ? anchors.length + ' anchor(s) · designed x-vector ‖' + norm.toFixed(2) + '‖' + emotionSummary() + mascFemSummary()
     : 'all weights zero — raise one to define a voice';
 }
 
-// The synthesis opts fragment for the active variant. In Base, the emotion basis
-// (if any) nudges the designed x-vector along the dialed-in directions.
+// The synthesis opts fragment for the active variant. In Base, the emotion + masc/fem
+// bases (if any) nudge the designed x-vector along the dialed-in directions.
 function currentVoice() {
   if (variant === 'customvoice') return { speaker: $('#speaker').value };
   if (variant === 'voicedesign') return { instruct: $('#instruct').value.trim() };
-  if (designedXvec) return { xvector: applyEmotion(designedXvec) };
+  if (designedXvec) return { xvector: applyMascFem(applyEmotion(designedXvec)) };
   return null;   // base with no voice designed yet
 }

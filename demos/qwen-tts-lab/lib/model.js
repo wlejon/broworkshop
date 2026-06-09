@@ -74,7 +74,12 @@ function adaptToVariant() {
   show('#voice-designer', variant === 'base');
   if (variant === 'customvoice') buildSpeakerPanel();
   else if (variant === 'voicedesign') buildInstructPanel();
-  else { buildDesignerPanel(); loadEmotionBasis($('#model-dir').value.trim()); buildEmotion(); }
+  else {
+    const dir = $('#model-dir').value.trim();
+    buildDesignerPanel();
+    loadEmotionBasis(dir); buildEmotion();
+    loadMascFemBasis(dir); buildMascFem();
+  }
 }
 
 // Fill a language <select> from the model (shared by all three panels).
