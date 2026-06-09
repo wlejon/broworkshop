@@ -151,6 +151,31 @@ button:disabled { opacity: 0.4; cursor: default; }
 #timbre input[type=range]::-webkit-slider-thumb { background: #ffb86b; }
 #timbre input[type=range]:hover::-webkit-slider-thumb { background: #ffd0a0; }
 
+/* ── masc↔fem (bipolar vocal-quality axis) — cool accent ─────────────────────── */
+#mascfem {
+  display: flex; align-items: center; gap: 16px;
+  padding: 9px 16px; background: #0e1117; border-bottom: 1px solid #1a1f27;
+}
+#mascfem .emo-title { color: #6bd0ff; }
+.mf-row { display: flex; align-items: center; justify-content: flex-end; gap: 12px; flex: 1; min-width: 0; }
+.mf-pole { color: #6bd0ff; font-size: 10px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.mf-pole:hover { color: #a8e4ff; text-decoration: underline; }
+.mf-val { color: #6b7480; font-size: 9px; font-variant-numeric: tabular-nums; min-width: 58px; }
+.mf-range {
+  -webkit-appearance: none; appearance: none; width: 180px; height: 14px;
+  background: transparent; margin: 0; cursor: pointer; flex-shrink: 0;
+}
+.mf-range::-webkit-slider-runnable-track {
+  height: 3px; border-radius: 2px;
+  background: linear-gradient(90deg, #a85a86, #2a3340 50%, #2f6aa8);
+}
+.mf-range::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; margin-top: -5px;
+  width: 11px; height: 11px; border-radius: 50%;
+  background: #6bd0ff; border: 1px solid #0c0e12;
+}
+.mf-range:hover::-webkit-slider-thumb { background: #a8e4ff; }
+
 /* stage stream */
 /* min-height:0 lets this flex child actually scroll instead of growing the page */
 #stages { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 16px 60px; }

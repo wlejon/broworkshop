@@ -125,3 +125,13 @@ function loadEmotionBasis() {
   } catch (e) { /* no artifact → panel hidden, no error */ }
 }
 
+// The masc↔fem direction, beside the model like emotion_basis.json (built by
+// bro/tests/_masc_fem_basis.js). Optional: absent → the panel stays hidden.
+function loadMascFemBasis() {
+  mascFemBasis = null; mfAlpha = 0;
+  try {
+    const b = JSON.parse(_fs.readFileSync(paths.model + '/masc_fem_basis.json', 'utf-8'));
+    if (b && b.full && b.full.M) mascFemBasis = b;
+  } catch (e) { /* no artifact → panel hidden, no error */ }
+}
+

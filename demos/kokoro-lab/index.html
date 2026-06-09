@@ -66,6 +66,20 @@
       <button id="btn-timbre-neutral" title="Drop all learned emotion">○ neutral</button>
     </section>
 
+    <!-- Masculine↔feminine: a bipolar acoustic vocal-quality axis in style space
+         (masc_fem_basis.json). Moves the voice itself, so it re-synthesizes; the
+         section hides itself when the artifact is absent. -->
+    <section id="mascfem">
+      <span class="emo-title">masc ✦ fem <span class="emo-sub">— data-driven · pitch + timbre · click a pole for a default</span></span>
+      <div class="mf-row">
+        <span class="mf-pole mf-fem" title="set a default amount of feminine">← feminine</span>
+        <input class="mf-range" type="range" min="-3" max="3" step="0.05" value="0">
+        <span class="mf-pole mf-masc" title="set a default amount of masculine">masculine →</span>
+        <span class="mf-val">neutral</span>
+      </div>
+      <button id="btn-mf-neutral" title="Drop the masc/fem shift, back to the designed voice">○ neutral</button>
+    </section>
+
     <section id="prompt">
       <input id="text" type="text" value="Hello there. This is a test of the pipeline."
              placeholder="Type something to speak…">
@@ -93,6 +107,7 @@
   <script src="lib/edit.js"></script>
   <script src="lib/emotion.js"></script>
   <script src="lib/timbre.js"></script>
+  <script src="lib/mascfem.js"></script>
   <script src="lib/heat.js"></script>
   <script src="lib/helpers.js"></script>
   <script src="app.js"></script>

@@ -90,5 +90,11 @@ let emoTimbre = {};        // per-emotion intensity α applied to resid[e]
 let timbreCells = {};      // emotion slider widgets, keyed by code (ANG/SAD/…)
 let timbreTimer = 0;       // debounce for timbre slider drags (full re-synth)
 
+// ── masculine↔feminine: a bipolar vocal-quality axis in style space (masc_fem_basis.json)
+let mascFemBasis = null;   // { poles:['F','M'], full:{M,F}, defaultAlpha, alphaMax, ... }
+let mfAlpha = 0;           // signed intensity along full[M]: + masculine, − feminine
+let mfSlider = null, mfVal = null;
+let mfTimer = 0;           // debounce for the masc/fem slider drag (full re-synth)
+
 const ATTR_WORD = { f0_mean: 'pitch', rms: 'volume', energy: 'energy', rate: 'pace', zcr: 'brightness', f0_std: 'pitch var' };
 

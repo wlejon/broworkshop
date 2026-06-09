@@ -75,6 +75,7 @@ function rebuildVoice() {
   try {
     const style = styleFromCoords();
     if (typeof addTimbre === 'function') addTimbre(style);   // Tier-1 emotion offset (no-op if none dialed)
+    if (typeof addMascFem === 'function') addMascFem(style); // masc↔fem offset (no-op if neutral)
     voice = kokoro.createVoice(style, 'designed');
     $('#btn-run').disabled = false;
     $('#btn-save').disabled = false;

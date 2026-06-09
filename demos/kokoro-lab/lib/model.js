@@ -33,9 +33,11 @@ function switchSource(root) {
   basis = null; coords = null;
   loadBasis();
   loadEmotionBasis();                    // Tier-1 timbre directions (optional)
+  loadMascFemBasis();                    // masc↔fem voice-design axis (optional)
   populateSources();
   if (basis) buildSliders();
   buildTimbre();                         // (re)build / hide the timbre panel for this source
+  buildMascFem();                        // (re)build / hide the masc↔fem panel
   reload();                              // configures assets + loads the model, then seeds
 }
 
