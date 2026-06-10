@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Parakeet Lab</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <header id="toolbar">
+      <span id="brand">◈ Parakeet&nbsp;Lab</span>
+      <span class="tagline">speech in, words out · FastConformer-TDT with per-token timestamps</span>
+      <span class="grow"></span>
+      <span id="backend" class="badge">loading…</span>
+    </header>
+
+    <!-- model directory: a HF Parakeet-TDT checkpoint (config.json +
+         model.safetensors + tokenizer.json — brosoundml/scripts/download-parakeet.sh) -->
+    <section id="controls">
+      <label class="cfg">model
+        <input id="model-dir" type="text" placeholder="dir with config.json + model.safetensors + tokenizer.json">
+      </label>
+      <button id="btn-browse-model" class="iconbtn" title="Choose a Parakeet checkpoint directory">📁</button>
+      <button id="btn-load" title="Load the Parakeet model + tokenizer">↻ Load</button>
+      <span id="model-meta" class="meta"></span>
+    </section>
+
+    <!-- source audio: the microphone, or a clip decoded off disk -->
+    <section id="srcbar">
+      <span class="grouplbl">source</span>
+      <button id="btn-record" title="Record from the microphone (16 kHz mono); stop to transcribe">● record</button>
+      <div id="miclevel" title="Live mic level"><div id="miclevel-fill"></div></div>
+      <span class="sep">·</span>
+      <label class="cfg">file
+        <input id="src-file" type="text" placeholder="path to a .wav / .flac / .mp3 / .ogg">
+      </label>
+      <button id="btn-browse-file" class="iconbtn" title="Choose an audio file">📁</button>
+      <button id="btn-loadfile" title="Decode the file as the source clip">⤓ load</button>
+      <span class="grow"></span>
+      <span id="src-meta" class="meta"></span>
+    </section>
+
+    <!-- transport -->
+    <section id="transport">
+      <button id="btn-play-src" disabled title="Play the source audio">▷ source</button>
+      <button id="btn-transcribe" disabled title="Run Parakeet over the source clip">⟶ transcribe</button>
+      <button id="btn-cancel" disabled title="Cancel the in-flight transcription">✕ cancel</button>
+      <label class="chk" title="Run transcription automatically when a recording stops or a file loads"><input id="autorun" type="checkbox" checked> auto</label>
+      <span class="grow"></span>
+      <span id="run-meta" class="meta"></span>
+    </section>
+
+    <main id="stages">
+      <div class="section-title">transcript</div>
+      <div id="transcript" class="transcript"><span class="placeholder">Load a model, then record or open a file.</span></div>
+
+      <div id="timeline-head" class="section-title" style="display:none">
+        timeline — <span class="dim-hint">each token pinned at the encoder frame it was emitted (frame × 0.08 s)</span>
+      </div>
+      <div id="timeline"></div>
+
+      <div id="tokens-head" class="section-title" style="display:none">
+        tokens — <span class="dim-hint">raw TDT emissions: start time · SentencePiece piece · id</span>
+      </div>
+      <div id="tokens"></div>
+    </main>
+  </div>
+
+  <script src="lib/state.js"></script>
+  <script src="lib/audio.js"></script>
+  <script src="lib/model.js"></script>
+  <script src="lib/transcribe.js"></script>
+  <script src="lib/render.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
