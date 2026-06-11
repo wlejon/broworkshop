@@ -60,9 +60,10 @@
   M.annotators.forEach(function (model) {
     section(model.label);
     var avail = false;
-    try { avail = fs.existsSync(ROOT + '/' + model.subdir + '/model.safetensors'); }
+    var probe = model.probe ? model.probe : model.subdir + '/model.safetensors';
+    try { avail = fs.existsSync(ROOT + '/' + probe); }
     catch (e) {}
-    if (!avail) { ok(model.id + ' weights present', false, ROOT + '/' + model.subdir); return; }
+    if (!avail) { ok(model.id + ' weights present', false, ROOT + '/' + probe); return; }
 
     var inst, r;
     try {

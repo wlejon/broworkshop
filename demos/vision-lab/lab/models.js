@@ -241,6 +241,33 @@
     },
   };
 
+  // ── BiRefNet background removal ─────────────────────────────────────────────
+  var rembg = {
+    id: 'rembg', label: 'Background removal · BiRefNet', group: 'annotator',
+    // A safetensors FILE, not a weights dir — the same checkpoint the
+    // triposplat demo consumes as its matting front-end.
+    subdir: 'triposplat/background_removal/birefnet.safetensors',
+    probe: 'triposplat/background_removal/birefnet.safetensors',
+    tagline: 'Swin-L matte → transparent cutout',
+    params: [
+      { key: 'modelSize', label: 'Model size', type: 'number',
+        min: 256, max: 1024, step: 64, default: 1024 },
+    ],
+    load: function (root, p, opts) {
+      return V().loadBirefnet(path(root, this.subdir),
+        loaderOpts({ modelSize: p.modelSize || 1024, device: p.device }, opts));
+    },
+    run: function (m, image, p, opts) {
+      return m.removeBackground(image, runOpts({}, opts));
+    },
+    metadata: function (r) {
+      var fg = 0;
+      for (var i = 0; i < r.alpha.length; i++) if (r.alpha[i] > 0.5) fg++;
+      return [['foreground', (100 * fg / r.alpha.length).toFixed(1) + '%'],
+              ['matte', r.width + '×' + r.height]];
+    },
+  };
+
   // ── SAM (loader + availability only; flow lives in lab/sam.js) ───────────────
   var sam = {
     id: 'sam', label: 'Segment · SAM', group: 'sam',
@@ -252,7 +279,7 @@
     },
   };
 
-  var ALL = [sam, depth, normal, hed, lineart, mlsd, openpose, segformer];
+  var ALL = [sam, depth, normal, hed, lineart, mlsd, openpose, segformer, rembg];
   var BY_ID = {};
   ALL.forEach(function (m) { BY_ID[m.id] = m; });
   // Annotators in contact-sheet / "run all" order.

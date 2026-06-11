@@ -65,7 +65,10 @@
       availability = {};
       Models.all.forEach(function (m) {
         var ok = false;
-        try { ok = fs && fs.existsSync(weightsRoot + '/' + m.subdir + '/model.safetensors'); }
+        // model.probe overrides the default <subdir>/model.safetensors check
+        // (e.g. BiRefNet's weights are a single safetensors FILE).
+        var probe = m.probe ? m.probe : m.subdir + '/model.safetensors';
+        try { ok = fs && fs.existsSync(weightsRoot + '/' + probe); }
         catch (e) { ok = false; }
         availability[m.id] = ok;
       });
