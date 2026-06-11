@@ -16,6 +16,10 @@
 //   STREAM     the audio delivered in chunks as the loop generates it, queued
 //              gaplessly for the lowest-latency path. Stop = real barge-in.
 //
+// Every panel STREAMS LIVE on change (synth.js scheduleLive): touch a seam and the
+// new audio plays as it generates, then a second pass draws the trace for exactly
+// what you heard. The Render / Stream buttons remain for explicit one-shot takes.
+//
 // Modules share one global scope, loaded in order by index.html:
 //   state.js     this file — shared state + stage metadata
 //   helpers.js   el / mkCanvas / small dom + math helpers, fs/os bridges
@@ -23,7 +27,7 @@
 //   voice.js     the three voice panels + currentVoice()
 //   delivery.js  the sampling dials + currentSampling()
 //   audio.js     clip publish/play + the gapless streaming queue
-//   synth.js     render() / stream() / barge-in, latest-wins busy guard
+//   synth.js     scheduleLive (stream-on-change) + render/stream/barge-in, latest-wins
 //   render.js    the trace cards: code raster, confidence strip, waveform
 //   app.js       wire the DOM up and kick off the first load
 

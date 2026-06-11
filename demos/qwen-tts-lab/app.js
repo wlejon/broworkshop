@@ -25,12 +25,17 @@ function init() {
   buildSteer();
 
   // ── transport ─────────────────────────────────────────────────────────────
+  // Controls stream live on change (scheduleLive, wired per panel); the buttons
+  // stay for explicit takes — Render draws the trace + plays, Stream restreams.
   $('#btn-render').addEventListener('click', requestRender);
-  $('#btn-stream').addEventListener('click', requestStream);
+  $('#btn-stream').addEventListener('click', () => requestStream(true));
   $('#btn-stop').addEventListener('click', bargeIn);
   $('#btn-play').addEventListener('click', play);
   $('#btn-save-wav').addEventListener('click', saveWav);
-  $('#text').addEventListener('keydown', (e) => { if (e.key === 'Enter') requestRender(); });
+  // Text streams when you commit it (Enter / blur), not on every keystroke.
+  $('#text').addEventListener('keydown', (e) => { if (e.key === 'Enter') requestStream(true); });
+  $('#text').addEventListener('change', scheduleLive);
+  $('#instruct').addEventListener('change', scheduleLive);   // free-typed VoiceDesign text
 
   // first load
   const dir = defaultModelDir($('#model-dir').value.trim());
@@ -54,8 +59,8 @@ function cloneOnce() {
     if (voiceBasis) { coords = coordsFromXvec(designedXvec); syncSliders(); drawMap(); }
     if (variant === 'customvoice') markDesigned();   // render this clone via the slot override
     updateDesignerMeta();
-    setBadge('cloned ' + pName(path) + ' · rendering…');
-    requestRender();
+    setBadge('cloned ' + pName(path) + ' · streaming…');
+    requestStream(true);
   } catch (e) { setBadge('clone: ' + e.message, true); }
 }
 

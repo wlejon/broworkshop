@@ -19,10 +19,8 @@
 //
 // x-vector-only: CustomVoice/VoiceDesign have no x-vector seam, so this panel only
 // shows in Base. ECAPA embeddings are speaker-verification features (emotion is
-// partly factored out), so this is an honest experiment — press Render to hear
-// whether a direction reads; the panel hides gracefully when no basis is present.
-// Like the anchor sliders, a change updates state + meta but does NOT auto-render
-// (Qwen's AR synth is too costly to re-run on every tick).
+// partly factored out), so this is an honest experiment — dial an axis and the new
+// voice streams (scheduleLive); the panel hides gracefully when no basis is present.
 
 let emotionBasis = null;     // parsed emotion_basis.json, or null (panel hides)
 const emoAlpha = {};         // per-emotion intensity (alpha)
@@ -73,7 +71,7 @@ function setEmotionPreset(e) {
     const c = emoCells[k];
     if (c) { c._range.value = String(emoAlpha[k]); c._val.textContent = emoAlpha[k].toFixed(2); }
   }
-  updateDesignerMeta();
+  updateDesignerMeta(); scheduleLive();
 }
 
 // Build the emotion sliders into the Base designer panel (hidden without a basis).
@@ -98,7 +96,7 @@ function buildEmotion() {
     cell.appendChild(head);
     const r = document.createElement('input');
     r.type = 'range'; r.min = '0'; r.max = String(emotionBasis.alphaMax || 5); r.step = '0.05'; r.value = '0';
-    r.addEventListener('input', () => { emoAlpha[e] = +r.value; val.textContent = emoAlpha[e].toFixed(2); updateDesignerMeta(); });
+    r.addEventListener('input', () => { emoAlpha[e] = +r.value; val.textContent = emoAlpha[e].toFixed(2); updateDesignerMeta(); scheduleLive(); });
     cell.appendChild(r);
     cell._range = r; cell._val = val;
     emoCells[e] = cell;
@@ -110,5 +108,5 @@ function buildEmotion() {
 function resetEmotion() {
   if (emotionBasis) for (const e of emotionBasis.emotions) emoAlpha[e] = 0;
   for (const e in emoCells) { emoCells[e]._range.value = '0'; emoCells[e]._val.textContent = '0.00'; }
-  updateDesignerMeta();
+  updateDesignerMeta(); scheduleLive();
 }

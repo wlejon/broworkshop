@@ -18,14 +18,14 @@ function buildSpeakerPanel() {
     let d = ''; try { d = qwen.speakerDialect(sel.value) || ''; } catch (e) {}
     $('#dialect').textContent = d ? '· ' + d.replace('_', ' ') : '';
   };
-  sel.onchange = () => { cvSource = 'preset'; showDialect(); updateCvSource(); };
+  sel.onchange = () => { cvSource = 'preset'; showDialect(); updateCvSource(); scheduleLive(); };
   cvSource = 'preset'; showDialect(); updateCvSource();
 }
 
 // A designer interaction (map / seed / slider / random / enroll) switches a
 // CustomVoice render onto the designed voice; a "use preset" reset switches back.
-function markDesigned() { cvSource = 'designed'; updateCvSource(); }
-function usedPreset()   { cvSource = 'preset';  updateCvSource(); }
+function markDesigned() { cvSource = 'designed'; updateCvSource(); }   // the designer handler restreams
+function usedPreset()   { cvSource = 'preset';  updateCvSource(); scheduleLive(); }
 function updateCvSource() {
   const s = $('#cv-source'); if (!s) return;
   if (variant !== 'customvoice') { s.style.display = 'none'; return; }
@@ -85,6 +85,7 @@ function toggleInstructTag(tag, kind) {
   else if (instructAdj.has(tag)) instructAdj.delete(tag); else instructAdj.add(tag);
   $('#instruct').value = assembleInstruct();
   syncInstructChips();
+  scheduleLive();
 }
 
 function buildInstructPanel() {
@@ -93,7 +94,7 @@ function buildInstructPanel() {
     const c = el('button', 'chip', p.split(',')[0]);
     c.title = p;
     // a preset is a full sentence — drop tag state so it isn't reassembled over.
-    c.onclick = () => { instructAdj.clear(); instructNoun = null; $('#instruct').value = p; syncInstructChips(); };
+    c.onclick = () => { instructAdj.clear(); instructNoun = null; $('#instruct').value = p; syncInstructChips(); scheduleLive(); };
     presets.appendChild(c);
   }
   const tags = $('#instruct-tags'); tags.textContent = '';
@@ -146,7 +147,7 @@ function updateDesignerMeta() {
 function updateAxesMeta() {
   const m = $('#axes-meta'); if (!m) return;
   const s = (emotionSummary() + mascFemSummary()).replace(/^ · /, '');
-  m.textContent = s ? 'steering ' + s + ' · press Render to hear it' : '';
+  m.textContent = s ? 'steering ' + s + ' · streams as you dial' : '';
 }
 
 // The synthesis opts fragment for the active variant.

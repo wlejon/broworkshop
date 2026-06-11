@@ -22,10 +22,10 @@ function steerOpts() {
 function steerAdd(id, delta) {
   id = id | 0;
   steerBias[id] = (delta == null ? STEER_DEFAULT : +delta);
-  renderSteer();
+  renderSteer(); scheduleLive();
 }
-function steerRemove(id) { delete steerBias[id]; renderSteer(); }
-function steerClear() { for (const k in steerBias) delete steerBias[k]; renderSteer(); }
+function steerRemove(id) { delete steerBias[id]; renderSteer(); scheduleLive(); }
+function steerClear() { for (const k in steerBias) delete steerBias[k]; renderSteer(); scheduleLive(); }
 
 // Pull the codebook-0 code under a click on the code raster (row 0 only) and stage
 // it for biasing. s/W are the stage + drawn width from renderCodes (recaptured each
@@ -69,7 +69,7 @@ function renderSteer() {
     const sl = document.createElement('input');
     sl.type = 'range'; sl.min = '-12'; sl.max = '12'; sl.step = '0.5'; sl.value = String(steerBias[id]);
     const val = el('span', 'steer-val', steerBias[id].toFixed(1));
-    sl.oninput = () => { steerBias[id] = +sl.value; val.textContent = steerBias[id].toFixed(1); updateSteerMeta(); };
+    sl.oninput = () => { steerBias[id] = +sl.value; val.textContent = steerBias[id].toFixed(1); updateSteerMeta(); scheduleLive(); };
     row.appendChild(sl); row.appendChild(val);
     const x = el('button', 'x', '×'); x.title = 'remove'; x.onclick = () => steerRemove(id);
     row.appendChild(x);

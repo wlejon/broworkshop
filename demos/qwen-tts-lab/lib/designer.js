@@ -7,8 +7,9 @@
 //   · σ-unit fine-tune sliders (all axes) — collapsed by default, for power users.
 // coords (σ units) → designedXvec = mean + Σ coordₖ·stdₖ·compₖ. On Base that x-vector
 // IS the voice; on CustomVoice it can REPLACE the preset slot (speakerVector). The
-// emotion / masc-fem axes ride on top via currentVoice. A change updates state +
-// meta but does NOT auto-render (Qwen's AR synth is costly — press Render).
+// emotion / masc-fem axes ride on top via currentVoice. Sculpting the map/sliders
+// streams the new voice on a short settle (scheduleLive, from the event handlers —
+// not rebuildDesigned, which also runs during the silent initial build).
 
 let voiceBasis = null;       // parsed qwen_voice_basis.json, or null (panel hidden)
 let coords = null;           // Float64Array(k) — current σ-unit position
@@ -147,10 +148,12 @@ function buildDesigner() {
       const i = nearestPoint(px, py);
       if (i >= 0) { snapToPoint(i); mapDragging = false; }
       else { mapDragging = true; const [c0, c1] = pxToMap(px, py); moveMapTo(c0, c1); }
+      scheduleLive();
     });
     document.addEventListener('mousemove', (ev) => {
       if (!mapDragging) return;
       const [px, py] = mapEventPx(ev); const [c0, c1] = pxToMap(px, py); moveMapTo(c0, c1);
+      scheduleLive();   // debounced — restreams once the drag pauses
     });
     document.addEventListener('mouseup', () => { mapDragging = false; });
   }
@@ -161,7 +164,7 @@ function buildDesigner() {
     seed.textContent = '';
     const neu = document.createElement('option'); neu.value = '__mean__'; neu.textContent = 'neutral (centroid)'; seed.appendChild(neu);
     for (const nm of voiceBasis.names) { const o = document.createElement('option'); o.value = nm; o.textContent = nm; seed.appendChild(o); }
-    seed.value = '__mean__'; seed.onchange = () => seedVoice(seed.value);
+    seed.value = '__mean__'; seed.onchange = () => { seedVoice(seed.value); scheduleLive(); };
   }
   buildSliders();
   seedVoice('__mean__');     // a neutral designed voice, ready to render
@@ -183,7 +186,7 @@ function buildSliders() {
     const r = document.createElement('input'); r.type = 'range';
     const [lo, hi] = voiceBasis.range[k];
     r.min = (lo * 1.15).toFixed(3); r.max = (hi * 1.15).toFixed(3); r.step = '0.01'; r.value = '0';
-    r.addEventListener('input', () => { coords[k] = +r.value; val.textContent = coords[k].toFixed(2); rebuildDesigned(); });
+    r.addEventListener('input', () => { coords[k] = +r.value; val.textContent = coords[k].toFixed(2); rebuildDesigned(); scheduleLive(); });
     cell.appendChild(r); cell._range = r; cell._val = val;
     sliderCells.push(cell); root.appendChild(cell);
   }
@@ -222,7 +225,7 @@ function randomDesigned() {
   }
   syncSliders(); rebuildDesigned();
   if ($('#seed-voice')) $('#seed-voice').value = '__mean__';
-  setBadge('random voice · press Render');
+  setBadge('random voice · streaming…'); scheduleLive();
 }
 function gauss() { let u = 0, v = 0; while (!u) u = Math.random(); while (!v) v = Math.random(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); }
 
@@ -244,6 +247,7 @@ function enrollRef() {
     if (voiceBasis) { coords = coordsFromXvec(designedXvec); syncSliders(); drawMap(); }  // show where it lands (display only)
     if (variant === 'customvoice') markDesigned();   // render via the slot override when used
     updateDesignerMeta();
-    setBadge('enrolled "' + pName(path).replace(/\.[^.]+$/, '') + '" (faithful) · press Render, or sculpt the map');
+    setBadge('enrolled "' + pName(path).replace(/\.[^.]+$/, '') + '" (faithful) · streaming · or sculpt the map');
+    scheduleLive();   // hear the faithful clone now; sculpting from here restreams
   } catch (e) { setBadge('enroll: ' + e.message, true); }
 }

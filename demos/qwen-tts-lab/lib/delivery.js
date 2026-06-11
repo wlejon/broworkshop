@@ -15,15 +15,16 @@ function buildDelivery() {
   const bind = (id, lab, fmt) => {
     const sl = $('#' + id), out = $('#v-' + lab);
     const upd = () => { out.textContent = fmt(parseFloat(sl.value)); updateDeliveryMeta(); };
-    sl.oninput = upd; upd();
+    sl.oninput = () => { upd(); scheduleLive(); };   // stream the new take on a settle
+    upd();                                           // initial readout only — no stream
   };
   bind('temp', 'temp', (v) => v.toFixed(2));
   bind('topk', 'topk', (v) => String(v | 0));
   bind('topp', 'topp', (v) => v.toFixed(2));
   bind('rep', 'rep', (v) => v.toFixed(2));
   bind('adapt', 'adapt', (v) => v.toFixed(2));
-  $('#seed').oninput = updateDeliveryMeta;
-  $('#seed-lock').onchange = () => { seedLocked = $('#seed-lock').checked; };
+  $('#seed').oninput = () => { updateDeliveryMeta(); scheduleLive(); };
+  $('#seed-lock').onchange = () => { seedLocked = $('#seed-lock').checked; };   // toggle only — no re-take
   $('#btn-greedy').onclick = () => {
     $('#temp').value = '0'; $('#topk').value = '0'; $('#topp').value = '1';
     $('#adapt').value = '0';

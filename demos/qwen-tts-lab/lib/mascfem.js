@@ -8,9 +8,9 @@
 //
 //   xvector += alpha · full[M]
 //
-// Base-only (CustomVoice/VoiceDesign have no x-vector seam). Like emotion, a change
-// updates state + meta but does NOT auto-render (Qwen's AR synth is costly). The
-// panel hides gracefully when no basis sits beside the checkpoint.
+// Base-only (CustomVoice/VoiceDesign have no x-vector seam). Like emotion, moving
+// the slider streams the new voice on a short settle (scheduleLive). The panel
+// hides gracefully when no basis sits beside the checkpoint.
 
 let mascFemBasis = null;     // parsed masc_fem_basis.json, or null (panel hides)
 let mfAlpha = 0;             // signed intensity along full[M]: + masculine, − feminine
@@ -54,7 +54,7 @@ function setMascFemPreset(pole) {
   if (!mascFemBasis) return;
   const d = (mascFemBasis.defaultAlpha && mascFemBasis.defaultAlpha[pole]) || 2;
   setMfAlpha(pole === 'M' ? d : -d);
-  updateDesignerMeta();
+  updateDesignerMeta(); scheduleLive();
 }
 
 // Build the single bipolar slider into the Base designer (hidden without a basis).
@@ -71,10 +71,10 @@ function buildMascFem() {
   mascL.onclick = () => setMascFemPreset('M');
   mfSlider = sec.querySelector('.mf-range');
   mfSlider.min = String(-max); mfSlider.max = String(max); mfSlider.step = '0.05'; mfSlider.value = '0';
-  mfSlider.oninput = () => { setMfAlpha(+mfSlider.value); updateDesignerMeta(); };
+  mfSlider.oninput = () => { setMfAlpha(+mfSlider.value); updateDesignerMeta(); scheduleLive(); };
   mfVal = sec.querySelector('.mf-val');
   setMfAlpha(0);
 }
 
 // Back to the neutral designed voice.
-function resetMascFem() { setMfAlpha(0); updateDesignerMeta(); }
+function resetMascFem() { setMfAlpha(0); updateDesignerMeta(); scheduleLive(); }

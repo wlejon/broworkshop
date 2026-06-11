@@ -60,9 +60,9 @@ function loadModel(dir) {
 }
 
 function variantHint() {
-  return variant === 'customvoice' ? 'pick a speaker, then Render or Stream'
-       : variant === 'voicedesign' ? 'describe the voice, then Render or Stream'
-       : 'enroll a clip or go random, then Render';
+  return variant === 'customvoice' ? 'pick a speaker — it streams as you change it'
+       : variant === 'voicedesign' ? 'describe the voice — it streams as you change it'
+       : 'enroll a clip or go 🎲 random — it streams as you sculpt';
 }
 
 // Show exactly one voice panel and (re)build it for the loaded model.
@@ -104,6 +104,7 @@ function fillLanguages(sel) {
     const o = document.createElement('option'); o.value = l; o.textContent = l; sel.appendChild(o);
   }
   if (langs.indexOf('english') >= 0) sel.value = 'english';
+  sel.onchange = scheduleLive;   // a language switch is an audible change → restream
 }
 // The active language, read from whichever panel is showing.
 function currentLanguage() {

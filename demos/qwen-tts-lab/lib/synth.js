@@ -1,23 +1,52 @@
-// ═══ synth — Render (off-thread + trace) / Stream (realtime) / barge-in ═══════
-// One synthesis runs at a time (the model is single-owner). Both buttons are
-// latest-wins: pressing either while one is in flight cancels it and runs the new
-// request from the previous run's completion — never tripping the in-flight guard.
+// ═══ synth — live streaming on change · Render (trace) · barge-in ═════════════
+// Now that Qwen3-TTS generates well above realtime, the lab STREAMS on every
+// change (like Kokoro re-renders on a slider drag): touch any seam — voice,
+// emotion, masc/fem, a sampling dial, a logit bias — and the new audio starts
+// playing as the loop generates it, no button press. scheduleLive() is the
+// change-driven entry; the panels call it.
+//
+// Two passes, the Kokoro pattern adapted for streaming:
+//   1. STREAM   audio plays as it generates (lowest first-audio latency).
+//   2. TRACE    once GENERATION finishes (not playback — streamed audio is still
+//               flowing out), re-run the SAME opts+seed off-thread WITH the trace
+//               to draw the 16×F code raster + confidence strip. Same seed ⇒ the
+//               trace matches the streamed audio sample-for-sample; no replay.
+//
+// One synthesis runs at a time (the model is single-owner). Everything is
+// latest-wins: a newer change cancels whatever's in flight (stream or trace) and
+// restreams from the previous run's completion — never tripping the busy guard.
+// The streaming path drives EVERY voice (speaker · instruct · designed x-vector ·
+// speakerVector slot · voiceSteer · logitBias) — they all ride opts/sampling,
+// which synthesizeStream reads, so there is no speaker-only restriction.
 
 const CHUNK_FRAMES = 8;        // ≈0.64 s per streamed chunk (low first-audio latency)
-let wantNext = null;           // a queued { mode } to run once the model frees
+const LIVE_DEBOUNCE = 160;     // ms — coalesce a slider drag into one stream, fire on pause
+let wantNext = null;           // a queued { mode, trace, opts, noPlay } to run once the model frees
+let liveTimer = 0;             // debounce timer for change-driven streaming
+
+// A control change streams the new audio after a short settle (so a drag fires
+// once you pause, never mid-drag), then draws the trace once it lands.
+function scheduleLive() {
+  if (!qwen) return;
+  if (liveTimer) clearTimeout(liveTimer);
+  liveTimer = setTimeout(() => { liveTimer = 0; requestStream(true); }, LIVE_DEBOUNCE);
+}
 
 function requestRender() { wantNext = { mode: 'render' }; kick(); }
-function requestStream() { wantNext = { mode: 'stream' }; kick(); }
+// trace !== false ⇒ chain a trace pass after the stream (the live + button default;
+// a bare requestStream() or a button-click event arg both keep it on).
+function requestStream(trace) { wantNext = { mode: 'stream', trace: trace !== false }; kick(); }
 
 function kick() {
   if (inflight) { try { inflight.cancel(); } catch (e) {} return; }   // onDone will re-kick
   if (!wantNext) return;
   const w = wantNext; wantNext = null;
-  if (w.mode === 'render') doRender(); else doStream();
+  if (w.mode === 'render') doRender(w); else doStream(w);
 }
 
-// Stop generation + playback now (barge-in). Drops any queued request too.
+// Stop generation + playback now (barge-in). Drops any queued / debounced request.
 function bargeIn() {
+  if (liveTimer) { clearTimeout(liveTimer); liveTimer = 0; }
   wantNext = null;
   if (inflight) { try { inflight.cancel(); } catch (e) {} }
   streamStop(); streaming = false;
@@ -66,29 +95,40 @@ function gatherOpts() {
   return opts;
 }
 
-// ── Render: synthesize off-thread, draw the trace, play the buffer ──────────
-function doRender() {
+// ── Render: synthesize off-thread, draw the trace ───────────────────────────
+// Two callers: the Render button (req.opts unset → fresh opts, plays the buffer)
+// and the live trace pass (req.opts = the stream's resolved opts, req.noPlay set →
+// same seed, draw the trace beside the still-playing streamed audio, no replay).
+function doRender(req) {
   const text = $('#text').value;
-  const opts = gatherOpts(); if (!opts) return;
+  const opts = req.opts || gatherOpts(); if (!opts) return;
   opts.trace = true;
+  const noPlay = !!req.noPlay;
   const t0 = performance.now();
   transport(true);
-  $('#run-meta').textContent = 'rendering…'; $('#latency').textContent = '';
+  if (!noPlay) { $('#run-meta').textContent = 'rendering…'; $('#latency').textContent = ''; }
   try {
     opts.onDone = (r, info) => {
       inflight = null; transport(false);
       if (info.error) { setBadge('render: ' + info.error, true); kick(); return; }
       if (!info.cancelled) {
         lastResult = r;
-        setClip(r.samples, r.sampleRate); play();
         renderStages(r);
-        const frames = Math.round(r.samples.length / 1920);
-        const ms = (performance.now() - t0).toFixed(0);
-        $('#run-meta').textContent =
-          frames + ' frames · ' + (r.samples.length / r.sampleRate).toFixed(2) + 's · ' +
-          (opts.temperature > 0 ? 'sampled (seed ' + opts.seed + ')' : 'greedy');
-        $('#latency').textContent = 'rendered in ' + ms + ' ms';
-        setBadge('ready · ' + variantHint());
+        if (noPlay) {
+          // the streamed audio already published its (identical) buffer & is
+          // still playing — just fill in the trace cards a beat later.
+          const ms = (performance.now() - t0).toFixed(0);
+          $('#latency').textContent += ' · trace +' + ms + ' ms';
+        } else {
+          setClip(r.samples, r.sampleRate); play();
+          const frames = Math.round(r.samples.length / 1920);
+          const ms = (performance.now() - t0).toFixed(0);
+          $('#run-meta').textContent =
+            frames + ' frames · ' + (r.samples.length / r.sampleRate).toFixed(2) + 's · ' +
+            (opts.temperature > 0 ? 'sampled (seed ' + opts.seed + ')' : 'greedy');
+          $('#latency').textContent = 'rendered in ' + ms + ' ms';
+          setBadge('ready · ' + variantHint());
+        }
       }
       kick();
     };
@@ -96,10 +136,14 @@ function doRender() {
   } catch (e) { inflight = null; transport(false); setBadge('render: ' + e.message, true); kick(); }
 }
 
-// ── Stream: gapless playback as the loop generates (speaker/instruct only) ──
-function doStream() {
+// ── Stream: gapless playback as the loop generates (every voice path) ────────
+// On completion, chain a trace pass (req.trace) that re-renders the SAME opts —
+// seed pinned by gatherOpts/currentSampling, captured before the stream-only
+// fields are added — so the drawn trace is exactly the audio you just heard.
+function doStream(req) {
   const text = $('#text').value;
   const opts = gatherOpts(); if (!opts) return;
+  const traceOpts = req.trace ? Object.assign({}, opts) : null;   // same seed ⇒ trace matches
   opts.chunkFrames = CHUNK_FRAMES;
   const t0 = performance.now();
   let firstAt = 0;
@@ -118,11 +162,15 @@ function doStream() {
       if (!info.cancelled) {
         lastResult = r;
         setClip(r.samples, r.sampleRate);          // publish full buffer for ♪ replay
-        renderStages(r);                           // waveform (streaming has no trace stages)
+        renderStages(r);                           // waveform now; the trace pass adds codes/conf
         const ms = (performance.now() - t0).toFixed(0);
         $('#run-meta').textContent = streamFrames + ' chunks · ' +
           (r.samples.length / r.sampleRate).toFixed(2) + 's · generated in ' + ms + ' ms';
         setBadge('ready · ' + variantHint());
+        // Pass 2 — draw the AR trace for exactly what we just streamed, without
+        // replaying. Skip it if a newer change is already queued (latest-wins:
+        // hear the new voice rather than trace the old one).
+        if (traceOpts && !wantNext) wantNext = { mode: 'render', opts: traceOpts, noPlay: true };
       } else {
         $('#run-meta').textContent = 'stopped';
       }
