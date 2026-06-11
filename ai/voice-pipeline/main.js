@@ -259,13 +259,18 @@ function wakeResume() {
     try { if (bro.wake.isSuspended()) bro.wake.resume(); } catch (_) {}
 }
 
-// Idle UI = wake listening + score meter (if available).
+// Idle UI = wake listening + score meter (if available). A pipeline error
+// stays on screen — wake/talk still re-arm, and the next interaction's own
+// setStatus clears it. (finishTurn used to stomp errors with the idle message
+// within 250 ms, which made every TTS/LLM failure look like silent success.)
 function goIdle() {
-    const suffix = speechOn ? '' : ' (text-only)';
-    if (wakeActive) {
-        setStatus('idle', 'listening for "computer"…' + suffix);
-    } else {
-        setStatus('idle', 'idle' + suffix);
+    if ($status.className.indexOf('error') < 0) {
+        const suffix = speechOn ? '' : ' (text-only)';
+        if (wakeActive) {
+            setStatus('idle', 'listening for "computer"…' + suffix);
+        } else {
+            setStatus('idle', 'idle' + suffix);
+        }
     }
     $meter.style.width = '0%';
     wakeResume();
