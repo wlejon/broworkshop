@@ -1,10 +1,12 @@
 // ═══ audio — clip publish/play + the gapless streaming queue ══════════════════
 // bro's AudioContext is clip-based (broaudio): createClip publishes samples to
-// the audio thread (lock-free RCU hand-off), playClip triggers a voice. There is
-// no sample-accurate clip scheduling, so the stream queue lines chunks up against
-// a currentTime accumulator with a small startup cushion — the standard Web-Audio
-// streaming pattern. Since Qwen's codec is causal, chunk samples are final, so
-// back-to-back clips join without discontinuity (only timing, not content, drifts).
+// the audio thread (lock-free RCU hand-off). The stream queue lines chunks up
+// against a currentTime accumulator with a small startup cushion (the standard
+// Web-Audio streaming pattern) and hands each chunk's start time to playClip's
+// 4th arg — broaudio schedules it sample-accurately on the AUDIO clock, so chunks
+// join exactly without main-thread setTimeout jitter or wall-vs-audio drift (the
+// stutter/speed-up that the old timer approach showed under render-pass load).
+// Since Qwen's codec is causal, chunk samples are final, so they join seamlessly.
 
 function ensureCtx() { audioCtx = audioCtx || new AudioContext(); return audioCtx; }
 
@@ -75,7 +77,6 @@ function saveWav() {
 
 // ── streaming queue ─────────────────────────────────────────────────────────
 let _streamNext = -1;        // engine time the next chunk should start at
-let _streamTimers = [];      // pending setTimeout ids
 let _streamClips = [];       // { clip, pid } for cleanup
 
 function streamReset() {
@@ -83,7 +84,9 @@ function streamReset() {
   _streamNext = -1;
 }
 
-// Queue one decoded chunk for gapless playback.
+// Queue one decoded chunk for gapless playback. Each chunk is scheduled at its
+// exact audio-clock start (playClip's 4th arg → broaudio playClipAt), so the
+// audio thread joins them sample-accurately regardless of main-thread load.
 function streamPush(samples) {
   try {
     const ctx = ensureCtx();
@@ -92,20 +95,15 @@ function streamPush(samples) {
     const dur = buf.length / (ctx.sampleRate || 48000);
     const now = ctx.currentTime;
     if (_streamNext < now + 0.02) _streamNext = now + 0.12;   // startup / underrun cushion
-    const at = _streamNext, delay = Math.max(0, (at - now) * 1000);
+    const at = _streamNext;
     const rec = { clip, pid: -1 };
     _streamClips.push(rec);
-    const tid = setTimeout(() => {
-      try { rec.pid = ctx.playClip(clip, 1.0, false); } catch (e) {}
-    }, delay);
-    _streamTimers.push(tid);
+    rec.pid = ctx.playClip(clip, 1.0, false, at);            // sample-accurate scheduled start
     _streamNext += dur;
   } catch (e) { setBadge('stream audio: ' + e.message, true); }
 }
 
 function streamStop() {
-  for (const t of _streamTimers) { try { clearTimeout(t); } catch (e) {} }
-  _streamTimers = [];
   for (const r of _streamClips) {
     try { if (r.pid >= 0) audioCtx.stopPlayback(r.pid); } catch (e) {}
     try { audioCtx.deleteClip(r.clip); } catch (e) {}
