@@ -1,4 +1,4 @@
-// Voice pipeline: mic -> Whisper -> Qwen3 -> Kokoro -> speaker.
+// Voice pipeline: mic -> Whisper -> Qwen3 -> Kokoro/Qwen3-TTS -> speaker.
 //
 // Everything runs on the MAIN thread. The three heavy models load and run via
 // the engine's async inference API (bro.lm/bro.stt/bro.tts), which dispatches
@@ -17,9 +17,19 @@
 //     auto-stops on end-of-utterance (rolling-peak VAD).
 //   - Hold-to-talk: button or Space key.
 //
-// Mic capture: getUserMedia -> AudioContext -> AnalyserNode. We poll the
-// analyser, stitch chunks via a needle-match for overlap, resample to 16 kHz
-// mono Float32, and feed the utterance to bro.stt.transcribe.
+// Mic capture: bro.mic (broaudio's multi-consumer mic tap) in samples mode —
+// fixed 10 ms chunks of raw PCM, already resampled to 16 kHz mono by broaudio's
+// polyphase resampler. Each chunk carries its own peak, which drives the level
+// meter and the end-of-utterance VAD; the chunk samples are concatenated into
+// the utterance and handed straight to bro.stt.transcribe (no JS-side
+// resampling or window stitching). Because the same tap can be driven offline
+// via bro.mic.feed(), the whole pipeline is testable headlessly.
+//
+// Speech synthesis is streamed for both backends: Qwen3-TTS streams the growing
+// codec tail (bro.tts.synthesizeStream with chunkFrames), Kokoro streams
+// clause-sized phoneme chunks. Audio chunks are scheduled on the audio clock
+// (playClip's sample-accurate `when` arg), so consecutive chunks join gaplessly
+// with no main-thread setTimeout jitter.
 
 (function () {
 'use strict';
@@ -79,29 +89,28 @@ const STOP_WORDS = new Set([
     'shut up', 'shush', 'enough', "that's enough", 'thats enough',
 ]);
 
-// Engine + audio (this thread owns playback + mic).
+// Engine + audio (this thread owns playback; broaudio owns capture).
 let audioCtx = null;
-let micStream = null;
-let micSource = null;
-let analyser  = null;
-let analyserBuf = null;
-const ANALYSER_FFT = 8192;          // ~186 ms @ 44.1 kHz; max useful tail
-const POLL_INTERVAL_MS = 60;        // poll well under the window length
-const NEEDLE = 256;                 // samples used to detect overlap
-
-// Recording state.
-let recording = false;
-let pollTimer = 0;
-let prevWindow = null;
-let captured = [];               // array of Float32Array chunks at engine rate
 let engineRate = 44100;
 
-// Wake / VAD state.
+// Mic capture: bro.mic samples mode. 160 frames @ 16 kHz = one 10 ms chunk per
+// onChunk, raw PCM included — concatenating the chunks IS the utterance, at the
+// rate Whisper wants.
+const MIC_RATE     = 16000;
+const CHUNK_FRAMES = 160;
+const CHUNK_MS     = 1000 * CHUNK_FRAMES / MIC_RATE;   // 10
+let micReady = false;
+
+// Recording state (all timing is chunk-counted: 1 chunk = CHUNK_MS).
+let recording = false;
+let captured = [];               // Float32Array chunks @ 16 kHz
+let recMs = 0;                   // total capture length so far
+let speechMs = 0;                // total ms with peak above SPEECH_THRESH
+let silenceMs = 0;               // ms since the last loud chunk
+
+// Wake state.
 let wakeActive = false;          // listen() has been called and not stopped
 let triggeredByWake = false;     // current recording was started by onWake
-let recStartMs = 0;
-let lastLoudMs = 0;              // last time peak was above SPEECH_THRESH
-let speechMs = 0;                // total ms with peak above SPEECH_THRESH
 let toneClipId = -1;             // wake cue (rising note)
 let receiptClipId = -1;          // "heard you" cue (descending double-blip)
 let presynthClipId = -1;         // "about to speak" cue (soft ascending triad)
@@ -134,14 +143,17 @@ let broPendingEl = null;  // holds the still-streaming, not-yet-spoken tail
 let fullText = '';        // full cleaned reply text accumulated from token deltas
 let finalizedLen = 0;     // chars of fullText already turned into word spans
 
-// ─── playback queue (sequential, gapless-ish) ────────────────────────────────
-const audioQueue = [];    // { samples: Float32Array@engineRate, els: span[], words }
-let playing = false;
+// ─── playback scheduler (sample-accurate, gapless) ───────────────────────────
+// Every TTS chunk is scheduled on the audio clock the moment it lands
+// (playClip's 4th arg), so consecutive chunks join gaplessly. A 30 ms timer
+// drives word highlighting from audioCtx.currentTime, retires finished clips,
+// and detects end-of-speech.
+const SCHED_LEAD = 0.06;   // lead time when starting from silence
+let scheduled = [];        // { clipId, playbackId, startSec, endSec, els?, words?, group?, offsetSec? }
+let nextStartSec = 0;      // audio-clock time the next clip should join at
+let schedTimer = 0;
 let producedSpeech = false;
-let highlightTimer = 0;
-let activeClipId = -1;
-let activePlaybackId = -1; // handle to stop the in-progress speech clip (barge-in)
-let clipEndTimer = 0;      // setTimeout that advances the queue on clip end
+let litWordEl = null;      // the currently highlighted word span
 
 // ─── pipeline / turn state (barge-in) ────────────────────────────────────────
 // Each utterance claims a monotonic turn id. Every async callback captures the
@@ -152,16 +164,16 @@ let acceptTurn = -1;
 let turnBusy = false;     // a turn is in flight (transcribing / thinking / speaking)
 let sttHandle = null;     // in-flight bro.stt.transcribe handle
 let lmHandle = null;      // in-flight bro.lm.generate handle
-let ttsHandle = null;     // in-flight bro.tts.synthesize handle
+let ttsHandle = null;     // in-flight bro.tts synthesize/synthesizeStream handle
 
-// LLM streaming bookkeeping (mirrors the old worker).
+// LLM streaming bookkeeping.
 let streamed = [];        // raw token ids accumulated this turn
 let queuedLen = 0;        // chars of cleaned text already handed to the TTS queue
 let llmDone = false;      // the LLM finished producing tokens this turn
 let presynthSent = false; // one-shot "about to speak" cue per turn
 
 // Serial TTS queue — one synthesize() in flight at a time per the model's
-// single-owner guard. Items: { sentence, consumed, turn }.
+// single-owner guard. Items: { sentence, consumed, turn, retries }.
 const synthQueue = [];
 let synthBusy = false;
 
@@ -277,7 +289,7 @@ function stopLoadingIndicator() {
     $meter.style.width = '0%';
 }
 
-// ─── text cleanup + sentence splitting (was worker-side) ─────────────────────
+// ─── text cleanup + sentence splitting ───────────────────────────────────────
 // Strip <think> blocks and control tokens. Not trimmed (keeps offsets stable);
 // callers left-trim once content begins.
 function clean(raw) {
@@ -297,8 +309,7 @@ function nextSentence(text, fromLen) {
 }
 
 // Split a clip's duration across words proportionally to character length —
-// the timing model when there are no per-phoneme durations (Qwen3-TTS) or the
-// phoneme/word counts diverge.
+// the timing model when phoneme/word counts diverge (Kokoro fallback).
 function splitWordsByChars(textWords, totalSec) {
     let totalChars = 0;
     for (const w of textWords) totalChars += w.length;
@@ -319,8 +330,6 @@ function splitWordsByChars(textWords, totalSec) {
 // inter-word gap, not to either word.
 function computeWords(sentence, phonemeIds, durations, sampleCount, sampleRate) {
     const textWords = sentence.split(/\s+/).filter(Boolean);
-    // No per-phoneme durations (Qwen3-TTS is autoregressive over codec frames,
-    // not phonemes) — fall straight back to a proportional split.
     if (!durations || durations.length === 0)
         return splitWordsByChars(textWords, sampleCount / sampleRate);
 
@@ -840,7 +849,7 @@ function runPipeline(samples16k) {
     const myTurn = acceptTurn;
     const partialIds = [];   // content tokens streamed so far (no prompt prefix)
     sttHandle = bro.stt.transcribe(
-        whisper, { samples: samples16k, sampleRate: 16000 }, sttPrompt, {
+        whisper, { samples: samples16k, sampleRate: MIC_RATE }, sttPrompt, {
             maxNewTokens: 128,
             // Each decoded token, as it lands — detokenize the running prefix and
             // show it filling in. Cheap for an utterance-length transcript.
@@ -940,6 +949,7 @@ function onLLMDone(myTurn, info) {
 }
 
 function pipelineError(stage, msg) {
+    console.error('[voice-pipeline] ' + stage + ': ' + msg);
     setStatus('error', stage + ': ' + msg);
     resetReplyState();
     llmDone = true;
@@ -949,7 +959,7 @@ function pipelineError(stage, msg) {
 // ─── serial TTS queue ────────────────────────────────────────────────────────
 function enqueueSynth(myTurn, sentence, consumed) {
     if (!speechOn) return;   // text-only: the reply renders as text; no synthesis
-    synthQueue.push({ sentence, consumed, turn: myTurn });
+    synthQueue.push({ sentence, consumed, turn: myTurn, retries: 0 });
     pumpSynth();
 }
 
@@ -961,6 +971,15 @@ function enqueueSynth(myTurn, sentence, consumed) {
 const STREAM_MIN_WORDS = 6;
 const STREAM_CHUNK_WORDS = 4;
 const KOKORO_SR = 24000;
+
+// Qwen3-TTS streaming: the codec emits 12.5 Hz frames of 1920 samples each.
+// QWEN_STREAM_FRAMES frames per onChunk; playback begins once PREBUFFER chunks
+// are in hand (or the stream ends), so ~realtime synthesis jitter doesn't open
+// gaps mid-sentence.
+const QWEN_SR = 24000;
+const QWEN_STREAM_FRAMES = 8;                                  // ~0.64 s per chunk
+const QWEN_CHUNK_SEC = QWEN_STREAM_FRAMES * 1920 / QWEN_SR;
+const QWEN_PREBUFFER = 2;
 
 // Split a sentence's phoneme ids into per-word groups at the space token, then
 // batch those words into clause-sized chunks. Returns { chunks: number[][],
@@ -993,23 +1012,38 @@ function buildKokoroChunks(phonemeIds, wordCount) {
     return { chunks, ranges };
 }
 
+// One synthesize/synthesizeStream in flight at a time (the model is
+// single-owner). A synchronous throw here usually means the model hasn't
+// finished releasing after a barge-in cancel — retry shortly instead of
+// wedging the queue (synthBusy must never be left true with nothing in
+// flight; that killed speech for the rest of the session).
 function pumpSynth() {
     if (synthBusy || synthQueue.length === 0) return;
     const item = synthQueue.shift();
     if (item.turn !== acceptTurn) { pumpSynth(); return; }  // stale
 
+    try {
+        startSentenceSynth(item);
+    } catch (e) {
+        synthBusy = false;
+        if (++item.retries <= 50) {
+            synthQueue.unshift(item);
+            setTimeout(pumpSynth, 40);
+        } else {
+            pipelineError('voice', e.message);
+        }
+    }
+}
+
+// Dispatch one sentence to the active backend. Sets synthBusy and ttsHandle on
+// success; throws if the model rejects the op (handled by pumpSynth).
+function startSentenceSynth(item) {
     // Kokoro needs phoneme ids up front; Qwen3-TTS takes the raw sentence.
     let phonemeIds = null;
     if (!useQwen) {
-        try {
-            phonemeIds = bro.tts.phonemize(item.sentence);
-        } catch (e) {
-            // A throw (vs. an empty result) means the phonemizer itself failed —
-            // its g2p data went missing after boot. That's fatal for the whole
-            // reply, not a per-sentence quirk, so surface it instead of muting.
-            pipelineError('voice', e.message);
-            return;
-        }
+        // A phonemizer throw (vs. an empty result) means its g2p data went
+        // missing after boot — fatal for the reply, so let it surface.
+        phonemeIds = bro.tts.phonemize(item.sentence);
         if (!phonemeIds || phonemeIds.length === 0) { pumpSynth(); return; }
     }
 
@@ -1017,40 +1051,71 @@ function pumpSynth() {
     // the turn, so it overlaps the synthesis latency.
     if (!presynthSent) { presynthSent = true; playPresynthCue(); setStatus('thinking', 'responding…'); }
 
-    // onDone is identical for both backends: Qwen returns no durations, and
-    // computeWords falls back to a proportional split when they're absent.
-    const onDone = (res, info) => {
+    synthBusy = true;
+    if (useQwen) { startQwenSynth(item); return; }
+    startKokoroSynth(item, phonemeIds);
+}
+
+// Qwen3-TTS: stream the growing codec tail so the first words are heard while
+// the rest of the sentence is still synthesizing. Word highlighting is
+// char-proportional (Qwen has no per-phoneme durations); the sentence's total
+// duration is only known at onDone, so the highlighter scales char fractions by
+// a running estimate (received + one chunk) until the final total lands.
+function startQwenSynth(item) {
+    const textWords = item.sentence.split(/\s+/).filter(Boolean);
+    const els = finalizeSentence(textWords.map(t => ({ text: t })), item.consumed);
+    let totalChars = 0;
+    for (const w of textWords) totalChars += w.length;
+    if (totalChars === 0) totalChars = 1;
+    const fracs = [];
+    let acc = 0;
+    for (const w of textWords) {
+        fracs.push({ start: acc / totalChars, end: (acc + w.length) / totalChars });
+        acc += w.length;
+    }
+    const group = { els, fracs, receivedSec: 0, totalSec: 0 };  // totalSec 0 = still streaming
+    const pending = [];   // prebuffer: hold the first chunks until enough is banked
+    let started = false;
+    const flush = () => {
+        started = true;
+        for (const p of pending) enqueueAudio(p.samples, QWEN_SR, p.meta);
+        pending.length = 0;
+    };
+
+    const opts = useVoiceDesign
+        ? { instruct: qwenInstruct, language: qwenLanguage }
+        : { speaker: qwenSpeaker, language: qwenLanguage };
+    opts.chunkFrames = QWEN_STREAM_FRAMES;
+    opts.onChunk = (samples) => {
+        if (item.turn !== acceptTurn || !samples || samples.length === 0) return;
+        const meta = { group, offsetSec: group.receivedSec };
+        group.receivedSec += samples.length / QWEN_SR;
+        if (!producedSpeech) { producedSpeech = true; setStatus('speaking', 'speaking…'); }
+        if (started) { enqueueAudio(samples, QWEN_SR, meta); return; }
+        pending.push({ samples, meta });
+        if (pending.length >= QWEN_PREBUFFER) flush();
+    };
+    opts.onDone = (res, info) => {
         synthBusy = false;
         ttsHandle = null;
-        if (item.turn === acceptTurn && !(info && info.cancelled) && res &&
-            res.samples && res.samples.length > 0) {
-            const words = computeWords(item.sentence, phonemeIds, res.durations,
-                                       res.samples.length, res.sampleRate);
-            const els = finalizeSentence(words, item.consumed);
-            enqueueAudio(res.samples, res.sampleRate, els, words);
-            producedSpeech = true;
-            setStatus('speaking', 'speaking…');
+        if (item.turn === acceptTurn && !(info && info.cancelled)) {
+            if (info && info.error) { pipelineError('voice', info.error); return; }
+            group.totalSec = res && res.samples && res.samples.length > 0
+                ? res.samples.length / QWEN_SR
+                : group.receivedSec;
+            if (!started) flush();   // short sentence: everything fit in the prebuffer
         }
         pumpSynth();
         maybeFinishSpeaking();
     };
+    ttsHandle = bro.tts.synthesizeStream(qwen, item.sentence, opts);
+}
 
-    synthBusy = true;
-    if (useQwen) {
-        // CustomVoice picks a preset speaker; VoiceDesign takes a free-form
-        // voice description. Both honour the selected language.
-        const opts = useVoiceDesign
-            ? { instruct: qwenInstruct, language: qwenLanguage, onDone }
-            : { speaker: qwenSpeaker, language: qwenLanguage, onDone };
-        ttsHandle = bro.tts.synthesize(qwen, item.sentence, opts);
-        return;
-    }
-
-    // Kokoro: stream long sentences so the first clause is heard sooner. Word
-    // spans are created up front (text bookkeeping identical to the single-pass
-    // path); each streamed chunk plays as its own clip and highlights its slice
-    // of those spans. synthesizeStream hands each chunk its own per-phoneme
-    // durations, so the highlighting stays as precise as the single-pass path.
+// Kokoro: stream long sentences in clause-sized phoneme chunks so the first
+// clause is heard sooner; short / divergent sentences use a single pass with
+// precise per-phoneme highlighting. synthesizeStream hands each chunk its own
+// per-phoneme durations, so streamed highlighting stays exact too.
+function startKokoroSynth(item, phonemeIds) {
     const textWords = item.sentence.split(/\s+/).filter(Boolean);
     const plan = buildKokoroChunks(phonemeIds, textWords.length);
     if (plan) {
@@ -1066,11 +1131,15 @@ function pumpSynth() {
                 const words = computeWords(chunkText, plan.chunks[idx], durations,
                                            samples.length, KOKORO_SR);
                 if (!producedSpeech) { producedSpeech = true; setStatus('speaking', 'speaking…'); }
-                enqueueAudio(samples, KOKORO_SR, els.slice(r[0], r[1]), words);
+                enqueueAudio(samples, KOKORO_SR, { els: els.slice(r[0], r[1]), words });
             },
-            onDone: (_res, _info) => {
+            onDone: (_res, info) => {
                 synthBusy = false;
                 ttsHandle = null;
+                if (item.turn === acceptTurn && info && info.error && !info.cancelled) {
+                    pipelineError('voice', info.error);
+                    return;
+                }
                 pumpSynth();              // chunks already enqueued during the stream
                 maybeFinishSpeaking();
             },
@@ -1079,7 +1148,25 @@ function pumpSynth() {
     }
 
     // Short / divergent sentence — single pass, precise per-phoneme highlighting.
-    ttsHandle = bro.tts.synthesize(kokoro, phonemeIds, voice, { speed: 1.0, onDone });
+    ttsHandle = bro.tts.synthesize(kokoro, phonemeIds, voice, {
+        speed: 1.0,
+        onDone: (res, info) => {
+            synthBusy = false;
+            ttsHandle = null;
+            if (item.turn === acceptTurn && !(info && info.cancelled)) {
+                if (info && info.error) { pipelineError('voice', info.error); return; }
+                if (res && res.samples && res.samples.length > 0) {
+                    const words = computeWords(item.sentence, phonemeIds, res.durations,
+                                               res.samples.length, res.sampleRate);
+                    const els = finalizeSentence(words, item.consumed);
+                    if (!producedSpeech) { producedSpeech = true; setStatus('speaking', 'speaking…'); }
+                    enqueueAudio(res.samples, res.sampleRate, { els, words });
+                }
+            }
+            pumpSynth();
+            maybeFinishSpeaking();
+        },
+    });
 }
 
 // Replace the streaming tail for this sentence with highlightable word spans.
@@ -1100,70 +1187,87 @@ function finalizeSentence(words, consumed) {
     return els;
 }
 
-function enqueueAudio(samples, sampleRate, els, words) {
+// ─── playback scheduler ──────────────────────────────────────────────────────
+// Resample to the engine rate, create a clip, and schedule it on the audio
+// clock immediately behind the previous one (playClip's `when` arg) — chunks
+// join sample-accurately with no main-thread timing in the loop. meta carries
+// the highlight info: { els, words } (Kokoro, per-clip timings) or
+// { group, offsetSec } (Qwen stream, char-proportional over the sentence).
+function enqueueAudio(samples, sampleRate, meta) {
     const resampled = resampleLinear(samples, sampleRate, engineRate);
-    audioQueue.push({ samples: resampled, els: els || [], words });
-    pumpQueue();
-}
-
-// Play the next queued clip; drive word highlighting from real playback
-// position; advance on clip end.
-function pumpQueue() {
-    if (playing || audioQueue.length === 0) return;
-    const item = audioQueue.shift();
+    const dur = resampled.length / engineRate;
+    const now = audioCtx.currentTime;
+    const when = Math.max(now + SCHED_LEAD, nextStartSec);
     let clipId, playbackId;
     try {
-        clipId = audioCtx.createClip(item.samples, 1);
-        playbackId = audioCtx.playClip(clipId, 1.0, false);
+        clipId = audioCtx.createClip(resampled, 1);
+        playbackId = audioCtx.playClip(clipId, 1.0, false, when);
     } catch (e) {
         console.warn('playback failed:', e.message);
-        pumpQueue();
         return;
     }
-    playing = true;
-    activeClipId = clipId;
-    activePlaybackId = playbackId;
-
-    let lastWord = -1;
-    // getPlaybackPosition() returns a normalized [0,1) fraction of the clip, not
-    // seconds. Word timings (startSec/endSec) are in seconds, so scale by the
-    // clip's duration to compare in the same units — otherwise every clip longer
-    // than one second highlights the wrong word and lags behind the audio.
-    const clipDurSec = item.samples.length / engineRate;
-    const tick = () => {
-        let frac = 0;
-        try { frac = audioCtx.getPlaybackPosition(playbackId) || 0; } catch (_) {}
-        const pos = frac * clipDurSec;
-        let active = -1;
-        for (let i = 0; i < item.words.length; i++) {
-            if (pos >= item.words[i].startSec && pos < item.words[i].endSec) { active = i; break; }
-        }
-        if (active !== lastWord) {
-            if (lastWord >= 0 && item.els[lastWord]) item.els[lastWord].classList.remove('speaking');
-            if (active  >= 0 && item.els[active])  item.els[active].classList.add('speaking');
-            lastWord = active;
-        }
-    };
-    highlightTimer = setInterval(tick, 30);
-
-    const durMs = (item.samples.length / engineRate) * 1000;
-    clipEndTimer = setTimeout(() => {
-        clipEndTimer = 0;
-        clearInterval(highlightTimer); highlightTimer = 0;
-        if (lastWord >= 0 && item.els[lastWord]) item.els[lastWord].classList.remove('speaking');
-        try { audioCtx.deleteClip(clipId); } catch (_) {}
-        activeClipId = -1;
-        activePlaybackId = -1;
-        playing = false;
-        if (audioQueue.length > 0) pumpQueue();
-        else maybeFinishSpeaking();
-    }, durMs + 40);
+    nextStartSec = when + dur;
+    const it = { clipId, playbackId, startSec: when, endSec: when + dur };
+    if (meta) Object.assign(it, meta);
+    scheduled.push(it);
+    if (!schedTimer) schedTimer = setInterval(schedTick, 30);
 }
 
-// Return to idle once the LLM is done AND all synthesis + queued audio is out.
+// Retire finished clips, drive the word highlight from the audio clock, and
+// detect end-of-speech.
+function schedTick() {
+    const now = audioCtx.currentTime;
+    while (scheduled.length && scheduled[0].endSec <= now) {
+        const it = scheduled.shift();
+        try { audioCtx.deleteClip(it.clipId); } catch (_) {}
+    }
+    if (scheduled.length === 0) {
+        clearInterval(schedTimer);
+        schedTimer = 0;
+        setWordHighlight(null);
+        maybeFinishSpeaking();
+        return;
+    }
+
+    const cur = scheduled[0];
+    if (cur.startSec > now) { setWordHighlight(null); return; }   // pre-roll / gap
+
+    let active = null;
+    if (cur.words) {
+        // Kokoro: exact per-clip word timings.
+        const pos = now - cur.startSec;
+        for (let i = 0; i < cur.words.length; i++) {
+            if (pos >= cur.words[i].startSec && pos < cur.words[i].endSec) {
+                active = cur.els[i];
+                break;
+            }
+        }
+    } else if (cur.group) {
+        // Qwen stream: char fractions × the sentence's evolving duration
+        // estimate (exact once the stream has finished).
+        const g = cur.group;
+        const pos = cur.offsetSec + (now - cur.startSec);
+        const est = g.totalSec || (g.receivedSec + QWEN_CHUNK_SEC);
+        for (let i = 0; i < g.fracs.length; i++) {
+            if (pos >= g.fracs[i].start * est && pos < g.fracs[i].end * est) {
+                active = g.els[i];
+                break;
+            }
+        }
+    }
+    setWordHighlight(active);
+}
+
+function setWordHighlight(el) {
+    if (el === litWordEl) return;
+    if (litWordEl) litWordEl.classList.remove('speaking');
+    if (el) el.classList.add('speaking');
+    litWordEl = el;
+}
+
+// Return to idle once the LLM is done AND all synthesis + scheduled audio is out.
 function maybeFinishSpeaking() {
-    if (!llmDone || synthBusy || synthQueue.length > 0 || playing ||
-        audioQueue.length > 0) return;
+    if (!llmDone || synthBusy || synthQueue.length > 0 || scheduled.length > 0) return;
     finishTurn();
 }
 
@@ -1177,24 +1281,25 @@ function finishTurn() {
     setTimeout(() => goIdle(), wasSpeaking ? WAKE_TAIL_MS : 0);
 }
 
-// Clear any lit word highlight. The highlight tick removes the `speaking` class
-// in its own cleanup, but stopPlayback cancels that tick before it can run, so
-// the currently-lit word would otherwise linger into the next turn. Querying the
-// DOM catches it no matter which clip's closure lit it.
+// Clear any lit word highlight, including one whose clip was torn down before
+// its tick could clean up. Querying the DOM catches strays no matter which
+// sentence lit them.
 function clearWordHighlight() {
+    litWordEl = null;
     const lit = $transcript.querySelectorAll('.word.speaking');
     for (let i = 0; i < lit.length; i++) lit[i].classList.remove('speaking');
 }
 
-// Stop and tear down all in-progress playback (shared by reset + barge-in).
+// Stop and tear down all scheduled playback (shared by reset + barge-in).
 function stopPlayback() {
-    if (clipEndTimer) { clearTimeout(clipEndTimer); clipEndTimer = 0; }
-    if (highlightTimer) { clearInterval(highlightTimer); highlightTimer = 0; }
-    if (activePlaybackId >= 0) { try { audioCtx.stopPlayback(activePlaybackId); } catch (_) {} activePlaybackId = -1; }
-    if (activeClipId >= 0) { try { audioCtx.deleteClip(activeClipId); } catch (_) {} activeClipId = -1; }
+    if (schedTimer) { clearInterval(schedTimer); schedTimer = 0; }
+    for (const it of scheduled) {
+        try { audioCtx.stopPlayback(it.playbackId); } catch (_) {}
+        try { audioCtx.deleteClip(it.clipId); } catch (_) {}
+    }
+    scheduled = [];
+    nextStartSec = 0;
     clearWordHighlight();
-    audioQueue.length = 0;
-    playing = false;
 }
 
 function resetReplyState() {
@@ -1241,7 +1346,7 @@ function startWake() {
 function startWakeMeter() {
     if (wakeMeterTimer) return;
     wakeMeterTimer = setInterval(() => {
-        if (recording || !wakeActive || playing || loadingAnim) return;
+        if (recording || !wakeActive || scheduled.length > 0 || loadingAnim) return;
         let score = 0;
         try { score = bro.wake.lastScore() || 0; } catch (_) {}
         $meter.style.width = Math.min(100, score * 100) + '%';
@@ -1249,71 +1354,45 @@ function startWakeMeter() {
     }, 100);
 }
 
-// ─── mic capture ──────────────────────────────────────────────────────────
-async function ensureMic() {
-    if (micSource) return;
-    micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    micSource = audioCtx.createMediaStreamSource(micStream);
-    analyser = audioCtx.createAnalyser();
-    analyser.fftSize = ANALYSER_FFT;
-    analyser.smoothingTimeConstant = 0;
-    analyserBuf = new Float32Array(ANALYSER_FFT);
-    micSource.connect(analyser);
+// ─── mic capture (bro.mic, samples mode) ──────────────────────────────────
+// One tap, registered on first use, kept for the app's lifetime. broaudio owns
+// the device, the resample to 16 kHz, and the 10 ms chunk slicing; onMicChunk
+// only accumulates samples and runs the EoU VAD while a recording is open.
+// Multiple consumers coexist (bro.wake taps the same capture), and the same
+// tap can be driven offline with bro.mic.feed() for headless tests.
+function ensureMic() {
+    if (micReady) return;
+    bro.mic.start({
+        chunkFrames: CHUNK_FRAMES,
+        targetRate:  MIC_RATE,
+        samples:     true,
+        agc:         false,
+        onChunk:     onMicChunk,
+    });
+    micReady = true;
 }
 
-// Locate where `needle` (last NEEDLE samples of previous window) appears in
-// the new window. Returns the index after the match, or -1.
-function findOverlap(prev, next) {
-    if (!prev || prev.length < NEEDLE) return -1;
-    const start = prev.length - NEEDLE;
-    outer:
-    for (let i = 0; i + NEEDLE <= next.length; i++) {
-        for (let j = 0; j < NEEDLE; j++) {
-            if (prev[start + j] !== next[i + j]) continue outer;
-        }
-        return i + NEEDLE;
-    }
-    return -1;
-}
+function onMicChunk(c) {
+    if (!recording) return;
+    captured.push(c.samples);
+    recMs += CHUNK_MS;
 
-function pollMic() {
-    analyser.getFloatTimeDomainData(analyserBuf);
-    const snap = new Float32Array(analyserBuf);
-
-    let peak = 0;
-    for (let i = 0; i < snap.length; i++) {
-        const a = Math.abs(snap[i]);
-        if (a > peak) peak = a;
-    }
     $meter.style.opacity = '1';
-    $meter.style.width = Math.min(100, peak * 200) + '%';
+    $meter.style.width = Math.min(100, c.peak * 200) + '%';
 
-    if (!prevWindow) {
-        captured.push(snap);
+    if (c.peak >= SPEECH_THRESH) {
+        speechMs += CHUNK_MS;
+        silenceMs = 0;
     } else {
-        const newStart = findOverlap(prevWindow, snap);
-        if (newStart >= 0 && newStart < snap.length) {
-            captured.push(snap.subarray(newStart));
-        } else if (newStart < 0) {
-            captured.push(snap);
-        }
-    }
-    prevWindow = snap;
-
-    const now = Date.now();
-    if (peak >= SPEECH_THRESH) {
-        lastLoudMs = now;
-        speechMs += POLL_INTERVAL_MS;
+        silenceMs += CHUNK_MS;
     }
 
     if (triggeredByWake) {
-        const elapsed = now - recStartMs;
-        if (elapsed >= MAX_CAPTURE_MS) { stopRecordingAndRun(); return; }
-        if (speechMs === 0 && elapsed >= NO_SPEECH_ABORT_MS) {
+        if (recMs >= MAX_CAPTURE_MS) { stopRecordingAndRun(); return; }
+        if (speechMs === 0 && recMs >= NO_SPEECH_ABORT_MS) {
             abortRecording('no speech — idle'); return;
         }
-        if (speechMs >= MIN_SPEECH_MS && lastLoudMs > 0 &&
-            (now - lastLoudMs) >= EOU_SILENCE_MS) {
+        if (speechMs >= MIN_SPEECH_MS && silenceMs >= EOU_SILENCE_MS) {
             stopRecordingAndRun(); return;
         }
     }
@@ -1322,27 +1401,23 @@ function pollMic() {
 function startRecording(fromWake) {
     if (recording) return;
     captured = [];
-    prevWindow = null;
+    recMs = 0;
+    speechMs = 0;
+    silenceMs = 0;
     recording = true;
     triggeredByWake = !!fromWake;
-    recStartMs = Date.now();
-    lastLoudMs = 0;
-    speechMs = 0;
 
     wakeSuspend();
 
     setStatus('listening', fromWake ? 'recording…' : 'listening…');
     $talk.classList.add('recording');
     $talk.textContent = fromWake ? 'recording (wake)…' : 'release to send';
-    pollTimer = setInterval(pollMic, POLL_INTERVAL_MS);
 }
 
 function abortRecording(msg) {
     if (!recording) return;
     recording = false;
     triggeredByWake = false;
-    clearInterval(pollTimer);
-    pollTimer = 0;
     $talk.classList.remove('recording');
     $talk.textContent = 'say "computer" or hold to talk';
     captured = [];
@@ -1359,7 +1434,7 @@ function concatChunks(chunks) {
     return out;
 }
 
-// Linear resample to target rate.
+// Linear resample to target rate (playback side: 24 kHz TTS -> engine rate).
 function resampleLinear(samples, fromRate, toRate) {
     if (fromRate === toRate) return samples;
     const ratio = fromRate / toRate;
@@ -1382,15 +1457,13 @@ function stopRecordingAndRun() {
     if (!recording) return;
     recording = false;
     triggeredByWake = false;
-    clearInterval(pollTimer);
-    pollTimer = 0;
     $talk.classList.remove('recording');
     $talk.textContent = 'say "computer" or hold to talk';
     $meter.style.width = '0%';
 
-    const raw = concatChunks(captured);
+    const samples16k = concatChunks(captured);
     captured = [];
-    if (raw.length < engineRate * 0.25) {
+    if (samples16k.length < MIC_RATE * 0.25) {
         setStatus('idle', 'too short — idle');
         setTimeout(() => goIdle(), 0);
         return;
@@ -1399,7 +1472,6 @@ function stopRecordingAndRun() {
     // Confirm we captured the utterance ("got it"), then show the loader for the
     // silent STT + LLM-prefill stretch until the first reply token lands.
     playReceiptCue();
-    const samples16k = resampleLinear(raw, engineRate, 16000);
     setStatus('transcribing', 'transcribing…');
     startLoadingIndicator();
 
@@ -1419,18 +1491,16 @@ function onWake() {
     // Barge-in: if a reply is being thought up or spoken, cut it off first.
     if (turnBusy) interruptTurn();
     playCueTone();
-    (async () => {
-        try { await ensureMic(); }
-        catch (e) { setStatus('error', 'mic: ' + e.message); goIdle(); return; }
-        startRecording(true);
-    })();
+    try { ensureMic(); }
+    catch (e) { setStatus('error', 'mic: ' + e.message); goIdle(); return; }
+    startRecording(true);
 }
 
 // ─── input wiring (manual hold-to-talk) ───────────────────────────────────
-async function onTalkDown() {
+function onTalkDown() {
     if ($talk.disabled || recording || !modelsReady) return;
     if (turnBusy) interruptTurn();   // hold-to-talk also barges in
-    try { await ensureMic(); }
+    try { ensureMic(); }
     catch (e) { setStatus('error', 'mic: ' + e.message); return; }
     startRecording(false);
 }
