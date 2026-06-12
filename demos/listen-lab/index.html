@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Listen Lab</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; height: 100vh; display: flex; flex-direction: column;
+    background: #0c0e12; color: #d7dde6;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  header {
+    padding: 14px 18px; border-bottom: 1px solid #1d2330;
+    display: flex; align-items: baseline; gap: 14px;
+  }
+  header h1 { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: .3px; }
+  header .sub { color: #6b7686; font-size: 12px; }
+  main { flex: 1; display: flex; min-height: 0; }
+
+  /* ── left column: tier-0 sensors + timeline + fusion feed ─────────────── */
+  .left { flex: 1.2; display: flex; flex-direction: column; min-width: 0; }
+  .sensors {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;
+    padding: 12px 14px;
+  }
+  .card {
+    background: #11141b; border: 1px solid #1d2330; border-radius: 8px;
+    padding: 10px 12px; display: flex; flex-direction: column; gap: 6px;
+  }
+  .card .title { font-size: 11px; color: #6b7686; text-transform: uppercase; letter-spacing: .8px; }
+  .card .big { font-size: 20px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  .card .small { font-size: 11px; color: #8a94a6; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: #2a3346; transition: background .08s; }
+  .dot.on { background: #54d68a; box-shadow: 0 0 8px #54d68a88; }
+  .dot.onset { background: #2a3346; }
+  .dot.onset.on { background: #ffb454; box-shadow: 0 0 8px #ffb45488; }
+  .dot.tonal.on { background: #6aa6ff; box-shadow: 0 0 8px #6aa6ff88; }
+  .meter {
+    height: 8px; background: #131720; border: 1px solid #1d2330;
+    border-radius: 4px; overflow: hidden; position: relative;
+  }
+  .meter .fill { height: 100%; width: 0%; background: #3c8c63; }
+  .meter .mark { position: absolute; top: -2px; bottom: -2px; width: 2px; background: #5a657a; }
+  #chart { display: block; margin: 0 14px; border: 1px solid #1d2330; border-radius: 8px; width: calc(100% - 28px); }
+  .feedhdr { padding: 10px 18px 4px; font-size: 11px; color: #6b7686; text-transform: uppercase; letter-spacing: .8px; }
+  .feed { flex: 1; overflow-y: auto; padding: 0 18px 8px; font-size: 12px; min-height: 0; }
+  .feed .row { padding: 3px 0; border-bottom: 1px solid #131720; display: flex; gap: 10px; }
+  .feed .row .t { color: #6b7686; }
+  .feed .row .kind { width: 50px; text-align: center; border-radius: 4px; font-size: 10px; padding: 1px 0; align-self: center; }
+  .kind.voice { background: #1e3a2c; color: #8be0ae; }
+  .kind.onset { background: #3a2d1e; color: #ffb454; }
+  .kind.tonal { background: #1e2a3a; color: #6aa6ff; }
+  .kind.arm   { background: #332a3e; color: #c9a6ff; }
+  .kind.spot  { background: #2f6f4f; color: #eafff2; }
+  .kind.info  { background: #1d2330; color: #8a94a6; }
+
+  /* ── right column: tier-2 templates ───────────────────────────────────── */
+  .right { width: 400px; border-left: 1px solid #1d2330; display: flex; flex-direction: column; min-height: 0; }
+  .controls { padding: 12px 14px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; border-bottom: 1px solid #1d2330; }
+  .controls label { font-size: 12px; color: #97a1b2; display: flex; gap: 6px; align-items: center; }
+  input[type="text"] {
+    background: #131720; color: #d7dde6; border: 1px solid #2c3c57;
+    border-radius: 6px; padding: 7px 10px; font: inherit; font-size: 12px; flex: 1; min-width: 140px;
+  }
+  input[type="number"] {
+    background: #131720; color: #d7dde6; border: 1px solid #2c3c57;
+    border-radius: 6px; padding: 5px 8px; font: inherit; font-size: 12px; width: 64px;
+  }
+  button {
+    background: #1b2638; color: #cfe0ff; border: 1px solid #2c3c57;
+    border-radius: 6px; padding: 7px 14px; font: inherit; font-size: 12px; cursor: pointer;
+  }
+  button:hover { background: #233248; }
+  button.active { background: #2f6f4f; border-color: #3c8c63; color: #eafff2; }
+  button.rec { background: #6f2f2f; border-color: #8c3c3c; color: #ffeaea; }
+  button:disabled { opacity: .45; cursor: default; }
+  .tmpls { flex: 1; overflow-y: auto; padding: 10px 14px; display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+  .tmpl {
+    background: #11141b; border: 1px solid #1d2330; border-radius: 8px;
+    padding: 8px 10px; display: flex; flex-direction: column; gap: 6px;
+    transition: border-color .12s, background .12s;
+  }
+  .tmpl.fired { background: #16301f; border-color: #54d68a; }
+  .tmpl .trow { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+  .tmpl .tname { font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tmpl .badge {
+    font-size: 10px; background: #1e2a3a; color: #6aa6ff; border-radius: 4px;
+    padding: 1px 6px;
+  }
+  .tmpl .rm { padding: 0 7px; border-radius: 10px; font-size: 11px; }
+  .tmpl .tmeta { font-size: 11px; color: #8a94a6; }
+  .tbar {
+    height: 10px; background: #131720; border: 1px solid #1d2330;
+    border-radius: 5px; overflow: hidden; position: relative;
+  }
+  .tbar .tfill { height: 100%; width: 0%; background: #3c8c63; transition: width .06s linear; }
+  .noTmpls { color: #6b7686; font-size: 12px; }
+
+  .statusbar {
+    padding: 8px 18px; border-top: 1px solid #1d2330; font-size: 12px;
+    color: #8a94a6; display: flex; gap: 24px; flex-wrap: wrap;
+  }
+  .statusbar b { color: #d7dde6; font-weight: 600; }
+  .statusbar .err { color: #ff8585; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Listen Lab</h1>
+    <span class="sub">the listening stack live — bro.sense tier-0 sensors + bro.kws template alignment, fused in one poll loop</span>
+  </header>
+  <main>
+    <div class="left">
+      <div class="sensors">
+        <div class="card">
+          <span class="title">level</span>
+          <span class="big" id="dbBig">−∞ dB</span>
+          <div class="meter"><div class="fill" id="levelFill"></div><div class="mark" id="floorMark" style="left:0%"></div></div>
+          <span class="small" id="levelSmall">floor — · snr —</span>
+        </div>
+        <div class="card">
+          <span class="title">voice</span>
+          <span class="big"><span class="dot" id="voiceDot"></span><span id="voiceTxt">quiet</span></span>
+          <span class="small" id="voiceSmall">events 0</span>
+        </div>
+        <div class="card">
+          <span class="title">onset</span>
+          <span class="big"><span class="dot onset" id="onsetDot"></span><span id="onsetTxt">0</span></span>
+          <span class="small">percussive transients (10 ms)</span>
+        </div>
+        <div class="card">
+          <span class="title">tonality</span>
+          <span class="big"><span class="dot tonal" id="tonalDot"></span><span id="tonalTxt">—</span></span>
+          <span class="small" id="tonalSmall">periodicity —</span>
+        </div>
+      </div>
+      <canvas id="chart" height="120"></canvas>
+      <div class="feedhdr">fusion feed — tier-0 counters + tier-2 partial alignment, one loop</div>
+      <div class="feed" id="feed"></div>
+    </div>
+    <div class="right">
+      <div class="controls">
+        <input type="text" id="phrase" placeholder="phrase or gesture name">
+        <button id="enroll">Enroll</button>
+        <button id="record" title="record a sound gesture from the mic, enroll its rhythm (enrollGaps)">● Record</button>
+        <label>threshold <input type="number" id="threshold" min="0.1" max="0.9" step="0.05" value="0.40"></label>
+        <button id="listen" disabled>Listen</button>
+      </div>
+      <div class="tmpls" id="tmpls"><span class="noTmpls" id="noTmpls">no templates enrolled</span></div>
+    </div>
+  </main>
+  <div class="statusbar">
+    <span id="status">loading…</span>
+    <span>stream <b id="streamT">0.0 s</b></span>
+    <span>spots <b id="spotCount">0</b></span>
+  </div>
+  <script src="main.js"></script>
+</body>
+</html>
