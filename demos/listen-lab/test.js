@@ -165,46 +165,45 @@ console.log('[listen-lab] phrase: arm="' + feedRows('arm')[feedRows('arm').lengt
                 bro.kws.inspect('hello there').states.length + ' tokens after edit');
 }
 
-// ── 4. rhythm template via the enrollGaps seam, self-fires on its clip ──────
-// enrollFromAudio runs a FRESH offline forward, while the live front-end has
-// adapted to everything this test already fed it. PCEN's smoother converges
-// back to ambient in well under a second in any real room, but this stream's
-// silence is digital zeros, which it decays toward for ~10 s (measured) — so
-// give the shared front-end a long quiet stretch first to put the live
-// context back where enrollment ran. (The matcher itself grants kMaxFloorRun
-// frames of onset-drift slack per transition; context convergence on real
-// mics is the Record button's natural state.)
+// ── 4. tier-0 gesture: a click rhythm enrolls (bro.gesture) and self-fires ───
+// The non-speech path. A click train is matched on SensorHub onsets, not the
+// speech model — feeding via bro.kws.feed advances the ONE shared stream, so
+// the gesture spotter (a host member once we listen) sees the same clicks.
 
-bro.kws.feed(silence(12));
-const pod = speak('open the pod bay doors');
-listenLab.enrollRhythm('pod-bay-rhythm', pod);
-assert(bro.kws.templates().indexOf('pod-bay-rhythm') >= 0, 'rhythm template enrolled');
-assert(pumpUntil(() => Array.from(document.querySelectorAll('.tmpl .badge'))
-                       .some((b) => b.textContent === 'rhythm'), 5000),
-       'rhythm badge rendered on the new template row');
-const fired = feedPumped(concat(silence(0.5), pod, silence(0.4)));
-assert(fired.some((e) => e.name === 'pod-bay-rhythm'),
-       'gap-enrolled rhythm template self-fired (' + JSON.stringify(fired) + ')');
-console.log('[listen-lab] rhythm: pod-bay-rhythm fired @ conf ' +
-            fired.find((e) => e.name === 'pod-bay-rhythm').confidence.toFixed(3));
+const clickTrain = concat(silence(0.3), clicks(3, 0.25, 0.6), silence(0.3));
+listenLab.enrollGesture('triple-tap', clickTrain);
+assert(bro.gesture.templates().indexOf('triple-tap') >= 0, 'gesture enrolled');
+const gv = bro.gesture.inspect('triple-tap');
+assert(gv && gv.kind === 'rhythm', 'gesture classified as a rhythm');
+assert(gv.intervalsMs.length === 2, 'rhythm has two inter-onset intervals');
+assert(pumpUntil(() => Array.from(document.querySelectorAll('.gest .gname'))
+                       .some((g) => g.textContent === 'triple-tap'), 5000),
+       'gesture row rendered');
+console.log('[listen-lab] gesture: enrolled ' + gv.kind + ' · ' +
+            gv.intervalsMs.map((m) => Math.round(m)).join('/') + ' ms');
 
-// ── 5. remove a template via its × button while live ────────────────────────
-// withMutableSpotter bounces the session (stop → remove → listen): afterwards
-// the row is gone, the seed template survives, and listening has resumed.
-// (Windowed, this same path crossed the inference worker mid-feed — the
-// AudioInference::removeTask barrier is what makes the bounce safe.)
+const spotsBefore = +document.querySelector('#spotCount').textContent;
+feedPumped(concat(silence(0.5), clickTrain, silence(0.4)));
+assert(pumpUntil(() => feedRows('spot').some((t) => t.indexOf('triple-tap') >= 0), 8000),
+       'gesture self-fired (onGesture → fusion spot row)');
+assert(pumpUntil(() => +document.querySelector('#spotCount').textContent > spotsBefore, 3000),
+       'spot count advanced on the gesture fire');
+console.log('[listen-lab] gesture: ' +
+            feedRows('spot').find((t) => t.indexOf('triple-tap') >= 0));
+
+// ── 5. remove the gesture via its × button while live ────────────────────────
+// withMutableGesture bounces the gesture session (stop → remove → listen);
+// afterwards the row is gone and kws listening is untouched (separate member).
 
 {
-    const rows = Array.from(document.querySelectorAll('.tmpl'));
-    const podRow = rows.find((r) => r.querySelector('.tname').textContent === 'pod-bay-rhythm');
-    assert(podRow, 'pod-bay-rhythm row present before remove');
-    podRow.querySelector('.rm').click();
-    assert(bro.kws.templates().indexOf('pod-bay-rhythm') < 0, 'rhythm template removed');
-    assert(bro.kws.templates().indexOf('hello there') >= 0, 'seed template survived the remove');
-    assert(bro.kws.isActive(), 'listening resumed after the remove bounce');
-    assert(pumpUntil(() => document.querySelectorAll('.tmpl').length === 1, 5000),
-           'template row rebuilt down to 1 after remove');
-    console.log('[listen-lab] remove: pod-bay-rhythm removed live, listening resumed');
+    const rows = Array.from(document.querySelectorAll('.gest'));
+    const row = rows.find((r) => r.querySelector('.gname').textContent === 'triple-tap');
+    assert(row, 'triple-tap gesture row present before remove');
+    row.querySelector('.rm').click();
+    assert(bro.gesture.templates().indexOf('triple-tap') < 0, 'gesture removed');
+    assert(bro.kws.templates().indexOf('hello there') >= 0, 'kws seed untouched by gesture remove');
+    assert(bro.kws.isActive(), 'kws still listening after the gesture remove');
+    console.log('[listen-lab] remove: triple-tap gesture removed live');
 }
 
 // ── 6. teardown: kws leaves, tier-0 keeps rolling ────────────────────────────

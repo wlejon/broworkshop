@@ -44,6 +44,7 @@ const $chart = $('#chart'), $feed = $('#feed');
 const $phrase = $('#phrase'), $enroll = $('#enroll'), $record = $('#record');
 const $threshold = $('#threshold'), $coverage = $('#coverage'), $listen = $('#listen');
 const $tmpls = $('#tmpls'), $noTmpls = $('#noTmpls');
+const $gestures = $('#gestures'), $noGest = $('#noGest');
 const $status = $('#status'), $streamT = $('#streamT'), $spotCount = $('#spotCount');
 
 let kwsReady = false;
@@ -379,18 +380,86 @@ function enrollPhrase() {
     });
 }
 
-// Rhythm enrollment: keep internal silence >= 50 ms as timed gap states.
-// Wrong-tempo re-performance becomes an illegal path, not a low score.
-function enrollRhythm(name, clip) {
-    if (!kwsReady) return;
-    withMutableSpotter(() => {
-        const len = bro.kws.enrollFromAudio(name, clip, {
-            enrollGaps: true, threshold: +$threshold.value,
-        });
-        rhythmNames[name] = true;
-        status('enrolled rhythm "' + name + '" (' + len + ' states incl. gaps)');
-        fusionRow('info', 'enrolled rhythm "' + name + '" (' + len +
-            ' states, ' + (clip.length / bro.kws.sampleRate()).toFixed(1) + ' s clip)');
+// Gesture enrollment (tier-0, non-speech): a recorded click rhythm or whistle
+// goes to bro.gesture, which matches on SensorHub onsets/pitch — NOT the speech
+// model, which only hears such sounds as garbage phonemes. The clip is
+// classified into a rhythm (onset intervals) or a tone (sustained pitch).
+const gestRows = {};            // name -> { root }
+let gesturesListening = false;
+
+function gestureSummary(v) {
+    if (!v) return '';
+    if (v.kind === 'tone')
+        return 'tone · ' + Math.round(v.toneHz) + ' Hz · ' + Math.round(v.toneMs) + ' ms';
+    const taps = v.intervalsMs.length + 1;
+    return 'rhythm · ' + taps + ' taps · ' +
+        v.intervalsMs.map((m) => Math.round(m)).join('/') + ' ms';
+}
+
+function renderGestureRows() {
+    Object.keys(gestRows).forEach((k) => { gestRows[k].root.remove(); delete gestRows[k]; });
+    const names = bro.gesture.templates();
+    $noGest.style.display = names.length ? 'none' : '';
+    for (const name of names) {
+        const v = bro.gesture.inspect(name);
+        const root = document.createElement('div');
+        root.className = 'gest';
+        root.innerHTML = '<span class="gname"></span>' +
+            '<span class="gkind ' + (v ? v.kind : '') + '">' + (v ? v.kind : '?') + '</span>' +
+            '<span class="gmeta"></span><button class="rm">×</button>';
+        root.querySelector('.gname').textContent = name;
+        root.querySelector('.gmeta').textContent = gestureSummary(v);
+        root.querySelector('.rm').addEventListener('click',
+            () => withMutableGesture(() => bro.gesture.remove(name)));
+        $gestures.appendChild(root);
+        gestRows[name] = { root };
+    }
+}
+
+function flashGesture(name) {
+    const row = gestRows[name];
+    if (!row) return;
+    row.root.classList.add('fired');
+    setTimeout(() => { if (gestRows[name] === row) row.root.classList.remove('fired'); }, 600);
+}
+
+function startGestureListening() {
+    if (gesturesListening) return;
+    bro.gesture.listen({
+        onGesture: (name, confidence, kind) => {
+            spots++;
+            $spotCount.textContent = String(spots);
+            fusionRow('spot', 'gesture "' + name + '" (' + kind + ') @ conf ' + confidence.toFixed(3));
+            flashGesture(name);
+        },
+    });
+    gesturesListening = true;
+}
+
+function stopGestureListening() {
+    bro.gesture.stop();
+    gesturesListening = false;
+}
+
+// Gesture mutators share the matcher's feed thread — bounce the session around
+// any change, mirroring withMutableSpotter.
+function withMutableGesture(fn) {
+    const was = gesturesListening;
+    if (was) stopGestureListening();
+    try { fn(); }
+    catch (e) { status(String(e.message || e), true); }
+    renderGestureRows();
+    if (bro.gesture.templates().length) startGestureListening();
+}
+
+function enrollGesture(name, clip) {
+    if (!kwsReady) return;   // boot also brings up bro.sense, which gestures need
+    withMutableGesture(() => {
+        bro.gesture.enrollFromAudio(name, clip, {});
+        const v = bro.gesture.inspect(name);
+        status('enrolled gesture "' + name + '" (' + gestureSummary(v) + ')');
+        fusionRow('info', 'enrolled gesture "' + name + '" — ' + gestureSummary(v) +
+            ' (' + (clip.length / bro.gesture.sampleRate()).toFixed(1) + ' s clip)');
     });
 }
 
@@ -424,7 +493,7 @@ function toggleRecord() {
         let o = 0;
         for (const c of recChunks) { clip.set(c, o); o += c.length; }
         recChunks = [];
-        enrollRhythm($phrase.value.trim() || ('gesture-' + (++gestureN)), clip);
+        enrollGesture($phrase.value.trim() || ('gesture-' + (++gestureN)), clip);
         $phrase.value = '';
     }
 }
@@ -502,6 +571,6 @@ $listen.addEventListener('click', () => (listening ? stopListening() : startList
     requestAnimationFrame(tick);
 })();
 
-// Headless test seam: drive the rhythm-enroll path with a synthesized clip
+// Headless test seam: drive the gesture-enroll path with a synthesized clip
 // (no live mic to record from).
-globalThis.listenLab = { enrollRhythm };
+globalThis.listenLab = { enrollGesture };

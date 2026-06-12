@@ -113,6 +113,21 @@
   .tokens .tokedit { display: flex; gap: 6px; align-items: center; }
   .tokens .tokedit button { padding: 4px 10px; font-size: 11px; }
   .tokens .tokhint { font-size: 10px; color: #6b7686; }
+  /* ── gestures (tier-0, non-speech) ─────────────────────────────────────── */
+  .ghdr { padding: 12px 14px 6px; font-size: 11px; color: #6b7686; text-transform: uppercase; letter-spacing: .8px; border-top: 1px solid #1d2330; }
+  .gestures { padding: 0 14px 12px; display: flex; flex-direction: column; gap: 8px; }
+  .gest {
+    background: #11141b; border: 1px solid #1d2330; border-radius: 8px;
+    padding: 8px 10px; display: flex; align-items: center; gap: 8px; font-size: 12px;
+    transition: border-color .12s, background .12s;
+  }
+  .gest.fired { background: #16301f; border-color: #54d68a; }
+  .gest .gname { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .gest .gkind { font-size: 10px; border-radius: 4px; padding: 1px 6px; }
+  .gkind.rhythm { background: #3a2d1e; color: #ffb454; }
+  .gkind.tone   { background: #1e2a3a; color: #6aa6ff; }
+  .gest .gmeta { font-size: 11px; color: #8a94a6; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .gest .rm { padding: 0 7px; border-radius: 10px; font-size: 11px; }
 
   .statusbar {
     padding: 8px 18px; border-top: 1px solid #1d2330; font-size: 12px;
@@ -166,6 +181,8 @@
         <button id="listen" disabled>Listen</button>
       </div>
       <div class="tmpls" id="tmpls"><span class="noTmpls" id="noTmpls">no templates enrolled</span></div>
+      <div class="ghdr">gestures — tier-0, non-speech (● Record a click rhythm or a whistle)</div>
+      <div class="gestures" id="gestures"><span class="noTmpls" id="noGest">no gestures — record clicks/taps or a sustained whistle</span></div>
     </div>
   </main>
   <div class="statusbar">
