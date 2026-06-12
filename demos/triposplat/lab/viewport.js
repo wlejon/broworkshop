@@ -1,19 +1,28 @@
 // TripoSplat Lab — the 3D viewport.
 //
-// Owns the scene's GaussianSplatNode and an orbit camera. The scene FBO clears
-// transparent, so the canvas's CSS background shows through (the light/dark bg
-// toggle is pure CSS, handled in app.js). Auto-rotate runs off rAF; the scene
-// re-renders every frame in windowed mode, so moving the camera is enough.
+// Owns the scene's GaussianSplatNode and a quaternion orbit camera (the shared
+// /lib/camera.js 6DOF rig, so dragging never gimbal-locks or pins the rotation
+// axis). The scene FBO clears transparent, so the canvas's CSS background shows
+// through (the light/dark bg toggle is pure CSS, handled in app.js). Auto-rotate
+// runs off rAF; the scene re-renders every frame in windowed mode, so moving the
+// camera is enough.
 (function () {
   'use strict';
+
+  var DEFAULT_DIST = 2.2;
 
   function create(canvas) {
     var scene = canvas.getContext('scene');
     var node = null;
 
-    // orbit state
-    var az = 0.6, el = 0.25, radius = 2.2;
-    var target = [0, 0, 0];
+    // Quaternion orbit camera (gimbal-lock-free). The default pose is a slight
+    // three-quarter swing with a small downward tilt — an upright, front-facing
+    // view of the y-up reconstructed cloud. Stored so "reset view" restores it.
+    var cam = Camera.createOrbit({ target: [0, 0, 0], dist: DEFAULT_DIST, fov: 45 });
+    var DEFAULT_ROT = Camera.quatNorm(Camera.quatMul(
+      Camera.quatFromAxis(0, 1, 0, 0.5),     // yaw: off straight-on, 3/4 view
+      Camera.quatFromAxis(1, 0, 0, -0.22)));  // pitch: look slightly down
+
     var autoRotate = true;
     var scale = 1.0;
 
@@ -21,26 +30,24 @@
     var bb = null;   // { cx, cy, cz, ext }
 
     function applyCamera() {
-      var cx = target[0] + radius * Math.cos(el) * Math.sin(az);
-      var cy = target[1] + radius * Math.sin(el);
-      var cz = target[2] + radius * Math.cos(el) * Math.cos(az);
-      scene.setCamera({ position: [cx, cy, cz], target: target, fov: 45 });
+      scene.setCamera(Camera.orbitViewOpts(cam, canvas));
     }
 
-    // Frame the camera so the whole cloud fits, keeping the current azimuth.
+    // Frame the camera so the whole cloud fits, keeping the current orientation.
     function reframe() {
-      if (!bb) { target = [0, 0, 0]; radius = 2.2; applyCamera(); return; }
-      target = [bb.cx * scale, bb.cy * scale, bb.cz * scale];
-      radius = Math.max(0.4, bb.ext * scale * 1.7);
+      var pivot = bb ? [bb.cx * scale, bb.cy * scale, bb.cz * scale] : [0, 0, 0];
+      var dist  = bb ? Math.max(0.4, bb.ext * scale * 1.7) : DEFAULT_DIST;
+      Camera.orbitReframe(cam, pivot, dist);
       applyCamera();
     }
 
     // ── auto-rotate ───────────────────────────────────────────────────────
     var last = 0;
     function tick(t) {
-      if (autoRotate && node) {
+      if (autoRotate && node && !dragging) {
         var dt = last ? (t - last) / 1000 : 0;
-        az -= dt * 0.45;          // rad/s
+        // ~0.45 rad/s yaw around world +Y. orbitLook yaw = -dx * yawSpeed.
+        Camera.orbitLook(cam, -(0.45 * dt) / cam.yawSpeed, 0);
         applyCamera();
       }
       last = t;
@@ -49,25 +56,30 @@
     requestAnimationFrame(tick);
 
     // ── orbit / zoom input ────────────────────────────────────────────────
-    var dragging = false, lx = 0, ly = 0;
+    var dragging = false;
     canvas.addEventListener('mousedown', function (e) {
-      dragging = true; lx = e.clientX; ly = e.clientY;
+      if (e.button !== 0) return;
+      dragging = true;
+      e.preventDefault();   // suppress text selection / focus while dragging
     });
     window.addEventListener('mouseup', function () { dragging = false; });
     window.addEventListener('mousemove', function (e) {
       if (!dragging) return;
-      az -= (e.clientX - lx) * 0.01;
-      el = Math.max(-1.4, Math.min(1.4, el + (e.clientY - ly) * 0.01));
-      lx = e.clientX; ly = e.clientY;
+      Camera.orbitLook(cam, e.movementX, e.movementY);
       applyCamera();
     });
     canvas.addEventListener('wheel', function (e) {
-      radius = Math.max(0.3, Math.min(10, radius * (1 + Math.sign(e.deltaY) * 0.08)));
+      cam.dist = Math.max(0.3, Math.min(10, cam.dist * Math.exp(e.deltaY * 0.001)));
       applyCamera();
       e.preventDefault();
     });
 
-    applyCamera();
+    setPose(DEFAULT_ROT);
+
+    function setPose(rot) {
+      cam.rot = rot.slice();
+      reframe();
+    }
 
     // ── public API ────────────────────────────────────────────────────────
     function computeBounds(cloud) {
@@ -113,8 +125,8 @@
         reframe();
       },
 
-      // Reset orbit to the default three-quarter view and re-frame.
-      reset: function () { az = 0.6; el = 0.25; reframe(); },
+      // Reset orbit to the default front three-quarter view and re-frame.
+      reset: function () { setPose(DEFAULT_ROT); },
     };
   }
 
