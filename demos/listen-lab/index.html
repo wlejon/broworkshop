@@ -97,6 +97,22 @@
   }
   .tbar .tfill { height: 100%; width: 0%; background: #3c8c63; transition: width .06s linear; }
   .noTmpls { color: #6b7686; font-size: 12px; }
+  .tmpl .tok { padding: 0 7px; border-radius: 10px; font-size: 11px; }
+  .tmpl .tok.open { background: #2c3c57; }
+  /* token panel: the decoded phoneme/gap sequence (bro.kws.inspect) */
+  .tokens { display: flex; flex-direction: column; gap: 6px; padding-top: 2px; }
+  .tokens .chips { display: flex; flex-wrap: wrap; gap: 4px; }
+  .tokens .chip {
+    display: inline-flex; align-items: center; gap: 4px; font-size: 11px;
+    background: #18202e; border: 1px solid #2c3c57; color: #cfe0ff;
+    border-radius: 5px; padding: 2px 6px;
+  }
+  .tokens .chip.gap { background: #2a2330; border-color: #4a3a55; color: #c9a6ff; font-variant-numeric: tabular-nums; }
+  .tokens .chip .x { background: none; border: none; color: #8a94a6; padding: 0; font-size: 12px; line-height: 1; cursor: pointer; }
+  .tokens .chip .x:hover { color: #ff8585; }
+  .tokens .tokedit { display: flex; gap: 6px; align-items: center; }
+  .tokens .tokedit button { padding: 4px 10px; font-size: 11px; }
+  .tokens .tokhint { font-size: 10px; color: #6b7686; }
 
   .statusbar {
     padding: 8px 18px; border-top: 1px solid #1d2330; font-size: 12px;
@@ -146,6 +162,7 @@
         <button id="enroll">Enroll</button>
         <button id="record" title="record a sound gesture from the mic, enroll its rhythm (enrollGaps)">● Record</button>
         <label>threshold <input type="number" id="threshold" min="0.1" max="0.9" step="0.05" value="0.40"></label>
+        <label title="proportional coverage: a phrase must have this fraction of its phonemes actually heard to fire — stops a long phrase firing on a short suffix">coverage <input type="number" id="coverage" min="0" max="1" step="0.05" value="0.40"></label>
         <button id="listen" disabled>Listen</button>
       </div>
       <div class="tmpls" id="tmpls"><span class="noTmpls" id="noTmpls">no templates enrolled</span></div>

@@ -42,7 +42,7 @@ const $onsetDot = $('#onsetDot'), $onsetTxt = $('#onsetTxt');
 const $tonalDot = $('#tonalDot'), $tonalTxt = $('#tonalTxt'), $tonalSmall = $('#tonalSmall');
 const $chart = $('#chart'), $feed = $('#feed');
 const $phrase = $('#phrase'), $enroll = $('#enroll'), $record = $('#record');
-const $threshold = $('#threshold'), $listen = $('#listen');
+const $threshold = $('#threshold'), $coverage = $('#coverage'), $listen = $('#listen');
 const $tmpls = $('#tmpls'), $noTmpls = $('#noTmpls');
 const $status = $('#status'), $streamT = $('#streamT'), $spotCount = $('#spotCount');
 
@@ -195,10 +195,12 @@ function rebuildTemplateRows(p) {
         root.innerHTML =
             '<div class="trow"><span class="tname"></span>' +
             (rhythmNames[t.name] ? '<span class="badge">rhythm</span>' : '') +
+            '<button class="tok" title="show the decoded token sequence">⋯</button>' +
             '<button class="rm">×</button></div>' +
             '<div class="tbar"><div class="tfill"></div></div>' +
             '<span class="tmeta"></span>';
         root.querySelector('.tname').textContent = t.name;
+        root.querySelector('.tok').addEventListener('click', (e) => toggleTokens(t.name, root, e.target));
         root.querySelector('.rm').addEventListener('click', () => withMutableSpotter(() => {
             bro.kws.remove(t.name);
             delete rhythmNames[t.name];
@@ -249,6 +251,83 @@ function flashRow(name) {
     setTimeout(() => { if (tmplRows[name] === row) row.root.classList.remove('fired'); }, 600);
 }
 
+// ── token panel — bro.kws.inspect: see (and edit) what a template became ──────
+// A phrase enrolled as "what is the first" is really the phoneme sequence
+// [W AH T · IH Z · DH AH · F ER S T]; a recorded click gesture is whatever
+// garbage phonemes the speech model decoded plus its timed gaps. Showing that
+// makes both the suffix-firing and the "sounds don't work" problems legible —
+// and for a plain phrase the user can drop tokens and re-enroll the trimmed
+// sequence (enrollFromClasses), the intuitive clip edit.
+
+function toggleTokens(name, root, btn) {
+    const existing = root.querySelector('.tokens');
+    if (existing) { existing.remove(); btn.classList.remove('open'); return; }
+    const view = bro.kws.inspect(name);
+    if (!view) { status('inspect: no template "' + name + '"', true); return; }
+    btn.classList.add('open');
+
+    const panel = document.createElement('div');
+    panel.className = 'tokens';
+    // A working copy of the editable token list (sound states only; gaps are
+    // shown but not editable — re-enroll goes through enrollFromClasses, which
+    // can't carry timed gaps).
+    let edited = view.states.map((s) => ({ ...s }));
+
+    function render() {
+        panel.innerHTML = '';
+        const chips = document.createElement('div');
+        chips.className = 'chips';
+        edited.forEach((s, i) => {
+            const chip = document.createElement('span');
+            chip.className = 'chip' + (s.gap ? ' gap' : '');
+            chip.textContent = s.gap
+                ? 'gap ' + Math.round(s.gapLo * view.frameMs) + '–' +
+                  Math.round(s.gapHi * view.frameMs) + ' ms'
+                : s.label;
+            // Editable only for plain (non-rhythm) phrases.
+            if (!s.gap && !view.hasGaps) {
+                const x = document.createElement('button');
+                x.className = 'x';
+                x.textContent = '×';
+                x.title = 'drop this token';
+                x.addEventListener('click', () => { edited.splice(i, 1); render(); });
+                chip.appendChild(x);
+            }
+            chips.appendChild(chip);
+        });
+        panel.appendChild(chips);
+
+        if (view.hasGaps) {
+            const hint = document.createElement('span');
+            hint.className = 'tokhint';
+            hint.textContent = 'rhythm template — speech tokens are approximate; ' +
+                'the timed gaps carry the gesture';
+            panel.appendChild(hint);
+        } else {
+            const acts = document.createElement('div');
+            acts.className = 'tokedit';
+            const apply = document.createElement('button');
+            apply.textContent = 'apply edit';
+            const changed = edited.length !== view.states.length;
+            apply.disabled = !changed || edited.length === 0;
+            apply.addEventListener('click', () => withMutableSpotter(() => {
+                const cls = edited.filter((s) => !s.gap).map((s) => s.cls);
+                bro.kws.enrollFromClasses(name, cls, phrasePolicy());
+                status('edited "' + name + '" → ' + cls.length + ' tokens');
+                fusionRow('info', 'edited "' + name + '" to ' + cls.length + ' tokens');
+            }));
+            const reset = document.createElement('button');
+            reset.textContent = 'reset';
+            reset.disabled = !changed;
+            reset.addEventListener('click', () => { edited = view.states.map((s) => ({ ...s })); render(); });
+            acts.append(apply, reset);
+            panel.appendChild(acts);
+        }
+    }
+    render();
+    root.appendChild(panel);
+}
+
 // ── the poll loop — ONE place fuses every tier ───────────────────────────────
 
 let lastS = null;
@@ -282,11 +361,18 @@ function withMutableSpotter(fn) {
     $listen.disabled = !kwsReady || bro.kws.templates().length === 0;
 }
 
+// A typed phrase carries minCoverage: a completion must have at least that
+// fraction of its phonemes ACTUALLY heard (not riding the emission floor), so
+// "what is the first" no longer fires on just "first" with the head floored.
+function phrasePolicy() {
+    return { threshold: +$threshold.value, minCoverage: +$coverage.value };
+}
+
 function enrollPhrase() {
     const text = $phrase.value.trim();
     if (!text || !kwsReady) return;
     withMutableSpotter(() => {
-        const len = bro.kws.enroll(text, bro.tts.phonemize(text), { threshold: +$threshold.value });
+        const len = bro.kws.enroll(text, bro.tts.phonemize(text), phrasePolicy());
         status('enrolled "' + text + '" (' + len + ' phoneme classes)');
         fusionRow('info', 'enrolled phrase "' + text + '" (' + len + ' classes)');
         $phrase.value = '';
@@ -407,8 +493,7 @@ $listen.addEventListener('click', () => (listening ? stopListening() : startList
 
     // Seed one phrase template and go live — the dashboard is the demo.
     withMutableSpotter(() => {
-        bro.kws.enroll('hello there', bro.tts.phonemize('hello there'),
-                       { threshold: +$threshold.value });
+        bro.kws.enroll('hello there', bro.tts.phonemize('hello there'), phrasePolicy());
     });
     startListening();
     fusionRow('info', 'tier-2 spotter live on the shared host (template "hello there")');

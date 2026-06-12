@@ -138,6 +138,33 @@ assert(pumpUntil(() => +document.querySelector('#spotCount').textContent >= 1, 5
 console.log('[listen-lab] phrase: arm="' + feedRows('arm')[feedRows('arm').length - 1] +
             '" spot="' + feedRows('spot')[0] + '"');
 
+// ── 3b. token panel: inspect + edit the seeded phrase ───────────────────────
+// The ⋯ button opens the decoded phoneme sequence (bro.kws.inspect); for a
+// plain phrase the chips are editable and "apply edit" re-enrolls the trimmed
+// class ids (enrollFromClasses).
+
+{
+    const seedRow = Array.from(document.querySelectorAll('.tmpl'))
+        .find((r) => r.querySelector('.tname').textContent === 'hello there');
+    assert(seedRow, 'seed row present for token inspect');
+    seedRow.querySelector('.tok').click();
+    const chips = seedRow.querySelectorAll('.tokens .chip');
+    assert(chips.length >= 3, 'token panel shows the decoded phonemes (' + chips.length + ')');
+    assert(Array.from(chips).every((c) => c.textContent.replace('×', '').trim().length),
+           'every chip carries a phoneme label');
+    const before = bro.kws.inspect('hello there').states.length;
+    // Drop the first token and apply the edit.
+    seedRow.querySelector('.tokens .chip .x').click();
+    seedRow.querySelector('.tokens .tokedit button').click();   // "apply edit"
+    assert(pumpUntil(() => {
+        const v = bro.kws.inspect('hello there');
+        return v && v.states.length === before - 1;
+    }, 5000), 'apply edit re-enrolled the trimmed token sequence');
+    assert(bro.kws.isActive(), 'listening resumed after the token edit');
+    console.log('[listen-lab] tokens: hello there ' + before + ' → ' +
+                bro.kws.inspect('hello there').states.length + ' tokens after edit');
+}
+
 // ── 4. rhythm template via the enrollGaps seam, self-fires on its clip ──────
 // enrollFromAudio runs a FRESH offline forward, while the live front-end has
 // adapted to everything this test already fed it. PCEN's smoother converges
