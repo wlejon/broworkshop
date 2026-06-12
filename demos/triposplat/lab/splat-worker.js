@@ -44,6 +44,9 @@ function handleGenerate(msg) {
     // msg.image is { data: Uint8ClampedArray, width, height } — generate()
     // reads it directly (the binding accepts the ImageData shape).
     var cloud = pipeline.generate(msg.image, msg.opts || {});
+    // generate() returns a small { cancelled: true } marker when the main
+    // thread asked it to abort (bro.triposplat.cancel) — relay, don't transfer.
+    if (cloud && cloud.cancelled) { self.postMessage({ type: 'cancelled' }); return; }
     // Transfer the SoA buffers back zero-copy.
     var transfer = [
       cloud.positions.buffer, cloud.scales.buffer, cloud.rotations.buffer,

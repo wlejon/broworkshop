@@ -48,6 +48,17 @@
         send({ type: 'generate', image: image, opts: opts }, [image.data.buffer], cb);
       },
 
+      // Ask an in-flight generate() to abort. generate() runs synchronously in
+      // the worker thread (its message loop is blocked), so we can't postMessage
+      // a cancel — instead flip the native cancel flag from THIS (main) thread.
+      // The worker's generate() polls it and returns a { type: 'cancelled' }
+      // reply, which lands in the pending generate callback like any other.
+      cancel: function () {
+        if (typeof bro !== 'undefined' && bro.triposplat && bro.triposplat.cancel) {
+          bro.triposplat.cancel();
+        }
+      },
+
       dispose: function () { try { worker.terminate(); } catch (e) { /* ignore */ } },
     };
   }

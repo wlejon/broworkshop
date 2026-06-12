@@ -80,6 +80,7 @@
 
     var loaded = false;        // weights resident in the worker
     var running = false;
+    var cancelling = false;    // cancel requested for the in-flight run
     var hasBgModel = false;    // pipeline carries a BiRefNet matte model
     var current = null;        // { data, width, height, label } source image
     var timerRAF = 0, t0 = 0;
@@ -243,8 +244,14 @@
       client.generate(copy, opts, function (err, msg) {
         stopTimer();
         $('spinner').classList.add('hidden');
+        cancelling = false;
         setBusy(false);
         if (err) { status('Generate failed: ' + err.message, 'err'); return; }
+        if (msg && msg.type === 'cancelled') {
+          status('Cancelled.', '');
+          $('view-hint').textContent = viewport.hasCloud() ? '' : 'Click Generate to reconstruct.';
+          return;
+        }
         var cloud = msg.cloud;
         viewport.setCloud(cloud);
         var dt = ((performance.now() - t0) / 1000).toFixed(1);
@@ -253,6 +260,18 @@
         $('stat-info').textContent = (current.label || 'image') + ' → ' +
           cloud.count.toLocaleString() + ' splats';
       });
+    }
+
+    // Ask the worker's in-flight reconstruction to abort. The native call is
+    // synchronous on the worker thread, so the cancel is honoured at the next
+    // stage boundary / sampler step; the generate callback then resolves with a
+    // 'cancelled' reply.
+    function cancelGenerate() {
+      if (!running || cancelling) return;
+      cancelling = true;
+      client.cancel();
+      status('Cancelling…');
+      refreshActions();
     }
 
     // ── export ──────────────────────────────────────────────────────────
@@ -285,7 +304,15 @@
       box.style.opacity = on ? '.5' : '1';
     }
     function refreshActions() {
-      $('btn-go').disabled = running || !loaded || !current;
+      // While a run is in flight the primary button doubles as a Cancel.
+      var go = $('btn-go');
+      if (running) {
+        go.textContent = cancelling ? 'Cancelling…' : 'Cancel';
+        go.disabled = cancelling;
+      } else {
+        go.textContent = 'Generate';
+        go.disabled = !loaded || !current;
+      }
       $('btn-save').disabled = running || !viewport.hasCloud();
     }
 
@@ -314,7 +341,9 @@
     // ── wiring ──────────────────────────────────────────────────────────
     $('steps').oninput = $('cfg').oninput = $('ng').oninput = $('shift').oninput = syncLabels;
     $('btn-open').addEventListener('click', openImage);
-    $('btn-go').addEventListener('click', generate);
+    $('btn-go').addEventListener('click', function () {
+      if (running) cancelGenerate(); else generate();
+    });
     $('btn-save').addEventListener('click', savePly);
     $('btn-rand').addEventListener('click', function () {
       $('seed').value = Math.floor(Math.random() * 1e9);
@@ -340,6 +369,7 @@
     window.TSLabApp = {
       selectImage: selectImage,
       generate: generate,
+      cancel: cancelGenerate,
       readOpts: readOpts,
       viewport: viewport,
       state: function () {
