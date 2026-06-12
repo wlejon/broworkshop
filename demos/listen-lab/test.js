@@ -161,7 +161,26 @@ assert(fired.some((e) => e.name === 'pod-bay-rhythm'),
 console.log('[listen-lab] rhythm: pod-bay-rhythm fired @ conf ' +
             fired.find((e) => e.name === 'pod-bay-rhythm').confidence.toFixed(3));
 
-// ── 5. teardown: kws leaves, tier-0 keeps rolling ────────────────────────────
+// ── 5. remove a template via its × button while live ────────────────────────
+// withMutableSpotter bounces the session (stop → remove → listen): afterwards
+// the row is gone, the seed template survives, and listening has resumed.
+// (Windowed, this same path crossed the inference worker mid-feed — the
+// AudioInference::removeTask barrier is what makes the bounce safe.)
+
+{
+    const rows = Array.from(document.querySelectorAll('.tmpl'));
+    const podRow = rows.find((r) => r.querySelector('.tname').textContent === 'pod-bay-rhythm');
+    assert(podRow, 'pod-bay-rhythm row present before remove');
+    podRow.querySelector('.rm').click();
+    assert(bro.kws.templates().indexOf('pod-bay-rhythm') < 0, 'rhythm template removed');
+    assert(bro.kws.templates().indexOf('hello there') >= 0, 'seed template survived the remove');
+    assert(bro.kws.isActive(), 'listening resumed after the remove bounce');
+    assert(pumpUntil(() => document.querySelectorAll('.tmpl').length === 1, 5000),
+           'template row rebuilt down to 1 after remove');
+    console.log('[listen-lab] remove: pod-bay-rhythm removed live, listening resumed');
+}
+
+// ── 6. teardown: kws leaves, tier-0 keeps rolling ────────────────────────────
 
 document.querySelector('#listen').click();
 assert(!bro.kws.isActive(), 'kws stopped via UI');
