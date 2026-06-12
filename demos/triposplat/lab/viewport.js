@@ -65,7 +65,10 @@
     window.addEventListener('mouseup', function () { dragging = false; });
     window.addEventListener('mousemove', function (e) {
       if (!dragging) return;
-      Camera.orbitLook(cam, e.movementX, e.movementY);
+      // Direct-manipulation feel: drag the model, not the camera — so the
+      // surface follows the cursor (drag right → the model turns right). That's
+      // the opposite horizontal sense from orbitLook's orbit-the-camera dx.
+      Camera.orbitLook(cam, -e.movementX, e.movementY);
       applyCamera();
     });
     canvas.addEventListener('wheel', function (e) {
