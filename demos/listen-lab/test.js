@@ -204,6 +204,20 @@ assert(gestEv.frame > 0 && gestEv.conf > 0.9, 'event carries its frame + confide
 const spotEv = listenLab.events.find((e) => e.type === 'spot' && e.name === 'hello there');
 assert(spotEv, 'phrase spot landed in the timeline event log');
 
+// Exact matched spans now flow from the matchers through the event callbacks.
+assert(gestEv.span && gestEv.span.b > gestEv.span.a && gestEv.span.b === gestEv.frame,
+       'gesture event carries an exact matched span ending at the fire frame');
+assert(spotEv.span && spotEv.span.b > spotEv.span.a && spotEv.span.b === spotEv.frame,
+       'spot event carries an exact matched span (' +
+       JSON.stringify(spotEv.span) + ')');
+// The decoded phonemes over the EXACT spot span spell the phrase.
+const heardExact = listenLab.decodedOver(spotEv.span.a, spotEv.span.b);
+assert(heardExact.length >= 2,
+       'decoded phonemes over the exact spot span (' + JSON.stringify(heardExact) + ')');
+console.log('[listen-lab] spans: gesture ' + (gestEv.span.b - gestEv.span.a) +
+            'f · spot ' + (spotEv.span.b - spotEv.span.a) + 'f heard ' +
+            JSON.stringify(heardExact));
+
 // tier-1: the phoneme ring captured what the model decoded during the phrase.
 let phFrames = 0;
 for (let i = 0; i < listenLab.Stream.count; i++) {

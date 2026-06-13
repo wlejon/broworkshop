@@ -164,13 +164,17 @@ const events = [];
 let evId = 0;
 const EV_CAP = 4000;
 
-function logEvent(type, name, conf, kind, detail) {
+function logEvent(type, name, conf, kind, detail, span) {
     const s = bro.sense.isActive() ? bro.sense.snapshot() : null;
+    // Prefer the matcher's exact reported span (frames axis) for the event's
+    // anchor + region; fall back to the current frame when none is given (arm).
+    const exact = span && span.startFrame >= 0;
     const ev = {
         id: ++evId, type, name: name || '',
         conf: (conf == null ? null : conf), kind: kind || '',
-        frame: s ? s.frames : Stream.newestFrame(),
-        t: s ? s.t : Stream.newestFrame() / FPS,
+        frame: exact ? span.endFrame : (s ? s.frames : Stream.newestFrame()),
+        t: (exact ? span.endFrame : (s ? s.frames : Stream.newestFrame())) / FPS,
+        span: exact ? { a: span.startFrame, b: span.endFrame } : null,
         detail: detail || null,
     };
     events.push(ev);
@@ -493,11 +497,12 @@ function chip(text, gap) {
     return c;
 }
 
-// Best-effort matched-region span (frames) for a fired event, used both to
-// highlight the wave and to label the detail. Gestures are exact (their tap
-// intervals / tone duration are the template); phrase spans are approximate
-// until the matcher reports them — fall back to the decoded length.
+// Matched-region span (frames) for a fired event, to highlight the wave and
+// label the detail. The matcher now reports the EXACT span (start..end frames)
+// on the events — use it. Older events / arms without a span fall back to an
+// estimate from the enrolled length.
 function eventRegion(ev) {
+    if (ev.span) return { a: ev.span.a, b: ev.span.b };   // exact, from the matcher
     const end = ev.frame;
     if (ev.type === 'gesture') {
         const v = bro.gesture.inspect(ev.name);
@@ -537,6 +542,17 @@ function selectEvent(ev) {
     when.innerHTML = 'at <b>' + mm + ':' + ss.padStart(4, '0') + '</b> · ' +
         sensorContextAt(ev.frame);
     $detail.appendChild(when);
+
+    // Matched span — exact from the matcher when available, else estimated.
+    if (View.selRegion) {
+        const dur = ((View.selRegion.b - View.selRegion.a) / FPS).toFixed(2);
+        const span = document.createElement('div');
+        span.className = 'drow';
+        span.innerHTML = 'matched span: <b>' + dur + ' s</b> · frames ' +
+            Math.round(View.selRegion.a) + '–' + Math.round(View.selRegion.b) +
+            (ev.span ? '' : ' <span style="color:#6b7686">(estimated)</span>');
+        $detail.appendChild(span);
+    }
 
     // The clip / template it matched.
     if (ev.type === 'gesture') {
@@ -881,11 +897,11 @@ function flashGesture(name) {
 function startGestureListening() {
     if (gesturesListening) return;
     bro.gesture.listen({
-        onGesture: (name, confidence, kind) => {
+        onGesture: (name, confidence, kind, span) => {
             spots++;
             $spotCount.textContent = String(spots);
             fusionRow('spot', 'gesture "' + name + '" (' + kind + ') @ conf ' + confidence.toFixed(3));
-            logEvent('gesture', name, confidence, kind);
+            logEvent('gesture', name, confidence, kind, null, span);
             flashGesture(name);
         },
     });
@@ -956,13 +972,13 @@ function toggleRecord() {
 
 function startListening() {
     bro.kws.listen({
-        onSpot: (name, confidence) => {
+        onSpot: (name, confidence, span) => {
             spots++;
             $spotCount.textContent = String(spots);
             const s = bro.sense.isActive() ? bro.sense.snapshot() : null;
             fusionRow('spot', '"' + name + '" completed @ conf ' + confidence.toFixed(3) +
                 (s && s.voice ? ' · voice run ' + (s.voiceFrames / 100).toFixed(1) + ' s' : ''));
-            logEvent('spot', name, confidence, '');
+            logEvent('spot', name, confidence, '', null, span);
             flashRow(name);
             armState[name] = false;
         },
