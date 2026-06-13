@@ -277,6 +277,7 @@ function drawTimeline() {
     const flags = new Uint8Array(W);
     const phCls = new Int16Array(W);
     const phP   = new Float32Array(W);
+    const has   = new Uint8Array(W);     // column received at least one frame
     let any = false;
     for (let i = 0; i < Stream.count; i++) {
         const sl = Stream.slot(i), f = Stream.frame[sl];
@@ -290,9 +291,24 @@ function drawTimeline() {
         if (Stream.phCls[sl] > 0 && Stream.phP[sl] > phP[c]) {
             phP[c] = Stream.phP[sl]; phCls[c] = Stream.phCls[sl];
         }
+        has[c] = 1;
         any = true;
     }
     if (!any) return;
+
+    // When zoomed in there are more pixel columns than frames, so the scatter
+    // above leaves empty columns between samples — the waveform would render as
+    // disconnected stripes. Forward-fill interior gaps from the previous column
+    // for the continuous layers (envelope, floor, voice/tonal bands, phoneme).
+    // Onset (flag bit 4) is momentary, so it is NOT carried — ticks stay sharp.
+    let last = -1;
+    for (let c = 0; c < W; c++) {
+        if (has[c]) { last = c; continue; }
+        if (last < 0) continue;          // before the first sample — genuine gap
+        minDb[c] = minDb[last]; maxDb[c] = maxDb[last]; floor[c] = floor[last];
+        flags[c] = flags[last] & 3;      // carry voice/tonal, drop onset
+        phCls[c] = phCls[last]; phP[c] = phP[last];
+    }
 
     // selection region highlight (where the selected event matched)
     if (View.selRegion) {
