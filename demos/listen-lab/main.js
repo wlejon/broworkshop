@@ -41,6 +41,8 @@ const $voiceDot = $('#voiceDot'), $voiceTxt = $('#voiceTxt'), $voiceSmall = $('#
 const $onsetDot = $('#onsetDot'), $onsetTxt = $('#onsetTxt');
 const $tonalDot = $('#tonalDot'), $tonalTxt = $('#tonalTxt'), $tonalSmall = $('#tonalSmall');
 const $chart = $('#chart'), $feed = $('#feed');
+const $overview = $('#overview'), $detail = $('#detail');
+const $tlLive = $('#tlLive'), $tlSpan = $('#tlSpan'), $tlHover = $('#tlHover');
 const $phrase = $('#phrase'), $enroll = $('#enroll'), $record = $('#record');
 const $threshold = $('#threshold'), $coverage = $('#coverage'), $listen = $('#listen');
 const $tmpls = $('#tmpls'), $noTmpls = $('#noTmpls');
@@ -105,58 +107,418 @@ function updateSensorCards(s) {
     $streamT.textContent = s.t.toFixed(1) + ' s';
 }
 
-// ── timeline chart ───────────────────────────────────────────────────────────
-// One column per mel frame observed by the poll loop: dB trace + adaptive
-// noise floor, voice/tonal shading, onset ticks.
+// ── stream history ring + scrollable timeline ─────────────────────────────────
+// Every sensor frame the poll loop observes is appended to a columnar ring
+// (~10 min). The timeline renders a pan/zoom window over it — level envelope +
+// adaptive floor, voice/tonal bands, onset ticks, and the discrete event
+// markers (spots, gestures, arm) — so the whole incoming stream stays legible
+// and scrollable, not just the last few seconds. Follow mode pins the live
+// edge; pan/zoom/overview-drag detaches into scrub.
 
-const hist = [];
-let histMax = 800;
+const FPS = 100;                          // sensor frame rate (10 ms hop)
+const CAP = 10 * 60 * FPS;                // ~10 min of frames
+const Stream = {
+    frame: new Float64Array(CAP),
+    db:    new Float32Array(CAP),
+    floor: new Float32Array(CAP),
+    peak:  new Float32Array(CAP),
+    domHz: new Float32Array(CAP),
+    flags: new Uint8Array(CAP),           // bit0 voice · bit1 tonal · bit2 onset
+    head: 0, count: 0,
+    push(prev, s) {
+        const i = this.head;
+        this.frame[i] = s.frames;
+        this.db[i] = s.db; this.floor[i] = s.noiseFloorDb;
+        this.peak[i] = s.peak; this.domHz[i] = s.tonal ? s.dominantHz : 0;
+        this.flags[i] = (s.voice ? 1 : 0) | (s.tonal ? 2 : 0) |
+            ((prev && s.onsets > prev.onsets) ? 4 : 0);
+        this.head = (i + 1) % CAP;
+        this.count = Math.min(this.count + 1, CAP);
+    },
+    slot(i) { return (this.head - this.count + i + CAP) % CAP; },   // logical→slot
+    newestFrame() { return this.count ? this.frame[this.slot(this.count - 1)] : 0; },
+    oldestFrame() { return this.count ? this.frame[this.slot(0)] : 0; },
+    // Nearest stored sample to an absolute frame (linear; the ring is small).
+    nearest(f) {
+        let bi = -1, bd = Infinity;
+        for (let i = 0; i < this.count; i++) {
+            const sl = this.slot(i), d = Math.abs(this.frame[sl] - f);
+            if (d < bd) { bd = d; bi = sl; }
+        }
+        return bi;
+    },
+};
 
-function pushHist(prev, s) {
-    hist.push({
-        db: s.db, floor: s.noiseFloorDb, voice: s.voice, tonal: s.tonal,
-        onset: prev ? s.onsets > prev.onsets : false,
-    });
-    while (hist.length > histMax) hist.shift();
+// ── event log (timeline markers + click-inspect targets) ──────────────────────
+// Distinct from the text fusion feed: the notable discrete events (a fired
+// spot, a fired gesture, an arm moment) tagged with the absolute frame they
+// occurred on, so each lands at the right x on the timeline and carries the
+// detail a click expands.
+
+const events = [];
+let evId = 0;
+const EV_CAP = 4000;
+
+function logEvent(type, name, conf, kind, detail) {
+    const s = bro.sense.isActive() ? bro.sense.snapshot() : null;
+    const ev = {
+        id: ++evId, type, name: name || '',
+        conf: (conf == null ? null : conf), kind: kind || '',
+        frame: s ? s.frames : Stream.newestFrame(),
+        t: s ? s.t : Stream.newestFrame() / FPS,
+        detail: detail || null,
+    };
+    events.push(ev);
+    while (events.length > EV_CAP) events.shift();
+    return ev;
 }
 
-function drawChart() {
+// ── view + interaction ────────────────────────────────────────────────────────
+
+const View = {
+    follow: true,
+    span: 10 * FPS,           // visible width, in frames (default 10 s)
+    endFrame: 0,              // right edge frame when scrubbing
+    hoverFrame: -1,
+    selId: -1,                // selected event (detail panel open)
+    selRegion: null,          // { a, b } frame span highlighted for the selection
+};
+const SPAN_MIN = 2 * FPS, SPAN_MAX = CAP;
+
+function viewWindow() {
+    const end = View.follow ? Stream.newestFrame() : View.endFrame;
+    const span = Math.max(SPAN_MIN, Math.min(SPAN_MAX, View.span));
+    return { start: end - span, end, span };
+}
+
+const MARK = { spot: '#54d68a', gesture: '#c9a6ff', arm: '#c9a6ff' };
+
+function drawTimeline() {
     const ctx = $chart.getContext('2d');
     const W = $chart.width, H = $chart.height;
     ctx.fillStyle = '#0d1016';
     ctx.fillRect(0, 0, W, H);
-    const y = (db) => (1 - Math.max(0, Math.min(1, (db + 80) / 80))) * (H - 10) + 5;
-    const x0 = W - hist.length;
-    for (let i = 0; i < hist.length; i++) {
-        const e = hist[i], x = x0 + i;
-        if (x < 0) continue;
-        if (e.voice) { ctx.fillStyle = 'rgba(84,214,138,.10)'; ctx.fillRect(x, 0, 1, H); }
-        if (e.tonal) { ctx.fillStyle = 'rgba(106,166,255,.14)'; ctx.fillRect(x, 0, 1, H); }
+    if (!Stream.count) return;
+    const { start, end, span } = viewWindow();
+    const xOf = (f) => (f - start) / span * W;
+    const yOf = (db) => (1 - Math.max(0, Math.min(1, (db + 80) / 80))) * (H - 16) + 6;
+
+    // Reduce visible samples into per-pixel columns: min/max dB envelope, the
+    // floor, OR'd flags, peak, dominant pitch.
+    const minDb = new Float32Array(W).fill(999);
+    const maxDb = new Float32Array(W).fill(-999);
+    const floor = new Float32Array(W).fill(-999);
+    const flags = new Uint8Array(W);
+    let any = false;
+    for (let i = 0; i < Stream.count; i++) {
+        const sl = Stream.slot(i), f = Stream.frame[sl];
+        if (f < start || f > end) continue;
+        const c = Math.max(0, Math.min(W - 1, Math.floor(xOf(f))));
+        const db = Stream.db[sl];
+        if (db < minDb[c]) minDb[c] = db;
+        if (db > maxDb[c]) maxDb[c] = db;
+        floor[c] = Stream.floor[sl];
+        flags[c] |= Stream.flags[sl];
+        any = true;
     }
-    ctx.strokeStyle = '#5a657a';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    for (let i = 0; i < hist.length; i++) {
-        const x = x0 + i;
-        if (x < 0) continue;
-        const yy = y(hist[i].floor);
-        i === 0 || x === 0 ? ctx.moveTo(x, yy) : ctx.lineTo(x, yy);
+    if (!any) return;
+
+    // selection region highlight (where the selected event matched)
+    if (View.selRegion) {
+        const xa = xOf(View.selRegion.a), xb = xOf(View.selRegion.b);
+        ctx.fillStyle = 'rgba(201,166,255,.12)';
+        ctx.fillRect(xa, 0, Math.max(2, xb - xa), H);
+    }
+    // voice / tonal background bands
+    for (let c = 0; c < W; c++) {
+        if (flags[c] & 1) { ctx.fillStyle = 'rgba(84,214,138,.10)'; ctx.fillRect(c, 0, 1, H); }
+        if (flags[c] & 2) { ctx.fillStyle = 'rgba(106,166,255,.14)'; ctx.fillRect(c, 0, 1, H); }
+    }
+    // adaptive noise floor
+    ctx.strokeStyle = '#5a657a'; ctx.lineWidth = 1; ctx.beginPath();
+    let pen = false;
+    for (let c = 0; c < W; c++) {
+        if (floor[c] < -998) { pen = false; continue; }
+        const y = yOf(floor[c]); pen ? ctx.lineTo(c, y) : ctx.moveTo(c, y); pen = true;
     }
     ctx.stroke();
-    ctx.strokeStyle = '#8be0ae';
-    ctx.beginPath();
-    for (let i = 0; i < hist.length; i++) {
-        const x = x0 + i;
-        if (x < 0) continue;
-        const yy = y(hist[i].db);
-        i === 0 || x === 0 ? ctx.moveTo(x, yy) : ctx.lineTo(x, yy);
+    // dB envelope: min..max fill + max trace
+    ctx.fillStyle = 'rgba(139,224,174,.16)';
+    for (let c = 0; c < W; c++) {
+        if (maxDb[c] < -998) continue;
+        const yhi = yOf(maxDb[c]), ylo = yOf(minDb[c]);
+        ctx.fillRect(c, yhi, 1, Math.max(1, ylo - yhi));
+    }
+    ctx.strokeStyle = '#8be0ae'; ctx.beginPath(); pen = false;
+    for (let c = 0; c < W; c++) {
+        if (maxDb[c] < -998) { pen = false; continue; }
+        const y = yOf(maxDb[c]); pen ? ctx.lineTo(c, y) : ctx.moveTo(c, y); pen = true;
     }
     ctx.stroke();
+    // onset ticks
     ctx.fillStyle = '#ffb454';
-    for (let i = 0; i < hist.length; i++) {
-        const x = x0 + i;
-        if (x >= 0 && hist[i].onset) ctx.fillRect(x - 1, 0, 2, 9);
+    for (let c = 0; c < W; c++) if (flags[c] & 4) ctx.fillRect(c - 1, 0, 2, 9);
+
+    // event markers
+    for (const ev of events) {
+        if (ev.frame < start || ev.frame > end) continue;
+        const x = xOf(ev.frame), sel = ev.id === View.selId;
+        ctx.fillStyle = MARK[ev.type] || '#888';
+        ctx.globalAlpha = sel ? 1 : 0.5;
+        ctx.fillRect(x - (sel ? 1 : 0), 0, sel ? 2 : 1, H);
+        ctx.globalAlpha = 1;
+        ctx.beginPath(); ctx.arc(x, 13, sel ? 5 : 4, 0, Math.PI * 2); ctx.fill();
     }
+
+    // hover cursor + time ticks
+    if (View.hoverFrame >= start && View.hoverFrame <= end) {
+        const x = xOf(View.hoverFrame);
+        ctx.strokeStyle = '#3a455c';
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+    }
+    drawTimeTicks(ctx, W, H, start, span);
+}
+
+function drawTimeTicks(ctx, W, H, start, span) {
+    // A handful of mm:ss labels across the window (stream time).
+    ctx.font = '9px ui-monospace, monospace';
+    const secs = span / FPS;
+    const step = secs > 240 ? 60 : secs > 60 ? 20 : secs > 20 ? 5 : 1;   // s between labels
+    const sStart = start / FPS;
+    const first = Math.ceil(sStart / step) * step;
+    for (let s = first; s <= (start + span) / FPS; s += step) {
+        const x = (s * FPS - start) / span * W;
+        ctx.fillStyle = '#1d2330'; ctx.fillRect(x, H - 11, 1, 6);
+        const mm = Math.floor(s / 60), ss = Math.floor(s % 60);
+        ctx.fillStyle = '#5a657a';
+        ctx.fillText(mm + ':' + String(ss).padStart(2, '0'), x + 2, H - 2);
+    }
+}
+
+function drawOverview() {
+    const ctx = $overview.getContext('2d');
+    const W = $overview.width, H = $overview.height;
+    ctx.fillStyle = '#0a0c11'; ctx.fillRect(0, 0, W, H);
+    if (!Stream.count) return;
+    const f0 = Stream.oldestFrame(), f1 = Stream.newestFrame();
+    const fspan = Math.max(1, f1 - f0);
+    const yOf = (db) => (1 - Math.max(0, Math.min(1, (db + 80) / 80))) * (H - 4) + 2;
+    ctx.strokeStyle = '#3c5a47'; ctx.lineWidth = 1; ctx.beginPath();
+    let pen = false;
+    for (let i = 0; i < Stream.count; i++) {
+        const sl = Stream.slot(i);
+        const x = (Stream.frame[sl] - f0) / fspan * W, y = yOf(Stream.db[sl]);
+        pen ? ctx.lineTo(x, y) : ctx.moveTo(x, y); pen = true;
+    }
+    ctx.stroke();
+    for (const ev of events) {
+        if (ev.type !== 'spot' && ev.type !== 'gesture') continue;
+        ctx.fillStyle = MARK[ev.type];
+        ctx.fillRect((ev.frame - f0) / fspan * W, 0, 1, H);
+    }
+    const { start, end } = viewWindow();
+    const xa = (start - f0) / fspan * W, xb = (end - f0) / fspan * W;
+    ctx.fillStyle = 'rgba(106,166,255,.10)';
+    ctx.fillRect(xa, 0, Math.max(2, xb - xa), H);
+    ctx.strokeStyle = '#6aa6ff';
+    ctx.strokeRect(Math.max(0.5, xa), 0.5, Math.max(2, xb - xa), H - 1);
+}
+
+function drawStream() { drawTimeline(); drawOverview(); }
+
+// ── timeline interaction ──────────────────────────────────────────────────────
+
+function frameAtX(canvas, clientX) {
+    const r = canvas.getBoundingClientRect();
+    const mx = (clientX - r.left) / r.width * canvas.width;
+    const { start, span } = viewWindow();
+    return { frame: start + mx / canvas.width * span, mx };
+}
+
+function setLive(on) {
+    View.follow = on;
+    $tlLive.classList.toggle('active', on);
+}
+
+function hitEvent(frame, span) {
+    // Nearest event within ~6 px of the cursor frame.
+    const tolFrames = span / $chart.width * 7;
+    let best = null, bd = tolFrames;
+    for (const ev of events) {
+        const d = Math.abs(ev.frame - frame);
+        if (d <= bd) { bd = d; best = ev; }
+    }
+    return best;
+}
+
+function onTimelineHover(e) {
+    const { frame } = frameAtX($chart, e.clientX);
+    View.hoverFrame = frame;
+    const sl = Stream.nearest(frame);
+    if (sl < 0) { $tlHover.textContent = '—'; return; }
+    const t = Stream.frame[sl] / FPS;
+    const mm = Math.floor(t / 60), ss = (t % 60).toFixed(1);
+    const fl = Stream.flags[sl];
+    $tlHover.textContent =
+        mm + ':' + ss.padStart(4, '0') + ' · ' + Stream.db[sl].toFixed(1) + ' dB' +
+        (fl & 1 ? ' · voice' : '') + (fl & 2 ? ' · ' + Math.round(Stream.domHz[sl]) + ' Hz' : '') +
+        (fl & 4 ? ' · onset' : '');
+}
+
+let drag = null;
+function onTimelineDown(e) {
+    drag = { x: e.clientX, end0: viewWindow().end, moved: false };
+}
+function onTimelineMove(e) {
+    onTimelineHover(e);
+    if (!drag) return;
+    const dx = e.clientX - drag.x;
+    if (Math.abs(dx) > 2) drag.moved = true;
+    const { span } = viewWindow();
+    const r = $chart.getBoundingClientRect();
+    setLive(false);
+    View.endFrame = drag.end0 - dx / r.width * span;
+    clampScrub();
+}
+function onTimelineUp(e) {
+    if (drag && !drag.moved) {                 // a click, not a drag → select
+        const { frame, } = frameAtX($chart, e.clientX);
+        const ev = hitEvent(frame, viewWindow().span);
+        if (ev) selectEvent(ev); else closeDetail();
+    }
+    drag = null;
+}
+function onTimelineWheel(e) {
+    e.preventDefault();
+    const { frame } = frameAtX($chart, e.clientX);
+    const factor = e.deltaY > 0 ? 1.25 : 0.8;
+    const oldSpan = viewWindow().span;
+    View.span = Math.max(SPAN_MIN, Math.min(SPAN_MAX, oldSpan * factor));
+    // Keep the frame under the cursor fixed: anchor the right edge.
+    setLive(false);
+    const { span } = viewWindow();
+    const fracFromRight = (viewWindow().end - frame) / oldSpan;
+    View.endFrame = frame + fracFromRight * span;
+    clampScrub();
+}
+function clampScrub() {
+    const newest = Stream.newestFrame(), oldest = Stream.oldestFrame();
+    const span = viewWindow().span;
+    if (View.endFrame >= newest) setLive(true);
+    else if (View.endFrame - span < oldest) View.endFrame = oldest + span;
+}
+
+function onOverviewNav(e) {
+    if (!Stream.count) return;
+    const r = $overview.getBoundingClientRect();
+    const frac = (e.clientX - r.left) / r.width;
+    const f0 = Stream.oldestFrame(), f1 = Stream.newestFrame();
+    const center = f0 + frac * (f1 - f0);
+    setLive(false);
+    View.endFrame = center + viewWindow().span / 2;
+    clampScrub();
+}
+
+// ── detail panel — click a marker to see what fired, where, and the clip ──────
+
+function sensorContextAt(frame) {
+    const sl = Stream.nearest(frame);
+    if (sl < 0) return '';
+    const fl = Stream.flags[sl];
+    return Stream.db[sl].toFixed(1) + ' dB · floor ' + Stream.floor[sl].toFixed(0) + ' dB' +
+        (fl & 1 ? ' · voice' : ' · quiet') +
+        (fl & 2 ? ' · tonal ' + Math.round(Stream.domHz[sl]) + ' Hz' : '') +
+        (fl & 4 ? ' · onset' : '');
+}
+
+function chip(text, gap) {
+    const c = document.createElement('span');
+    c.className = 'dchip' + (gap ? ' gap' : '');
+    c.textContent = text;
+    return c;
+}
+
+// Best-effort matched-region span (frames) for a fired event, used both to
+// highlight the wave and to label the detail. Gestures are exact (their tap
+// intervals / tone duration are the template); phrase spans are approximate
+// until the matcher reports them — fall back to the decoded length.
+function eventRegion(ev) {
+    const end = ev.frame;
+    if (ev.type === 'gesture') {
+        const v = bro.gesture.inspect(ev.name);
+        if (v) {
+            const ms = v.kind === 'tone'
+                ? v.toneMs
+                : v.intervalsMs.reduce((a, b) => a + b, 0);
+            return { a: end - ms / 10, b: end };
+        }
+    }
+    if ((ev.type === 'spot' || ev.type === 'arm') && bro.kws.isLoaded()) {
+        const v = bro.kws.inspect(ev.name);
+        if (v) return { a: end - v.states.length * 6, b: end };   // ~60 ms/phoneme est.
+    }
+    return { a: end - 60, b: end };
+}
+
+function selectEvent(ev) {
+    View.selId = ev.id;
+    View.selRegion = eventRegion(ev);
+    $detail.classList.remove('hidden');
+    $detail.innerHTML = '';
+
+    const hdr = document.createElement('div');
+    hdr.className = 'dhdr';
+    hdr.innerHTML = '<span class="dkind ' + ev.type + '">' + ev.type + '</span>' +
+        '<span class="dname"></span>' +
+        (ev.conf != null ? '<span class="dconf">conf ' + ev.conf.toFixed(3) + '</span>' : '') +
+        '<button class="dclose">×</button>';
+    hdr.querySelector('.dname').textContent = ev.name + (ev.kind ? ' (' + ev.kind + ')' : '');
+    hdr.querySelector('.dclose').addEventListener('click', closeDetail);
+    $detail.appendChild(hdr);
+
+    const when = document.createElement('div');
+    when.className = 'drow';
+    const tt = ev.t, mm = Math.floor(tt / 60), ss = (tt % 60).toFixed(1);
+    when.innerHTML = 'at <b>' + mm + ':' + ss.padStart(4, '0') + '</b> · ' +
+        sensorContextAt(ev.frame);
+    $detail.appendChild(when);
+
+    // The clip / template it matched.
+    if (ev.type === 'gesture') {
+        const v = bro.gesture.inspect(ev.name);
+        const row = document.createElement('div');
+        row.className = 'drow';
+        row.innerHTML = v
+            ? (v.kind === 'tone'
+                ? 'tone template · <b>' + Math.round(v.toneHz) + ' Hz</b> · ' + Math.round(v.toneMs) + ' ms'
+                : 'rhythm template · <b>' + (v.intervalsMs.length + 1) + ' taps</b> · ' +
+                  v.intervalsMs.map((m) => Math.round(m)).join('/') + ' ms')
+            : '(template removed)';
+        $detail.appendChild(row);
+    } else if ((ev.type === 'spot' || ev.type === 'arm') && bro.kws.isLoaded()) {
+        const v = bro.kws.inspect(ev.name);
+        if (v) {
+            const lbl = document.createElement('div');
+            lbl.className = 'drow';
+            lbl.innerHTML = 'decoded as <b>' + v.states.length + '</b> ' +
+                (v.hasGaps ? 'rhythm states' : 'phonemes') + ':';
+            $detail.appendChild(lbl);
+            const chips = document.createElement('div');
+            chips.className = 'dchips';
+            for (const st of v.states) {
+                chips.appendChild(st.gap
+                    ? chip('gap ' + Math.round(st.gapLo * v.frameMs) + '–' +
+                           Math.round(st.gapHi * v.frameMs) + ' ms', true)
+                    : chip(st.label, false));
+            }
+            $detail.appendChild(chips);
+        }
+    }
+}
+
+function closeDetail() {
+    View.selId = -1; View.selRegion = null;
+    $detail.classList.add('hidden');
 }
 
 // ── tier-0 event edges → fusion feed ─────────────────────────────────────────
@@ -237,6 +599,8 @@ function updateTemplateRows(p, s) {
                 ' aligned @ conf ' + t.confidence.toFixed(2) +
                 (s && s.voice ? ' · voice live' : '') +
                 ' — confirmation tier would arm here');
+            logEvent('arm', t.name, t.confidence, '',
+                { matched: t.matched, length: t.length });
         } else if (armState[t.name] && t.progress < 0.3) {
             armState[t.name] = false;
         }
@@ -337,7 +701,7 @@ function tick() {
     const s = bro.sense.isActive() ? bro.sense.snapshot() : null;
     if (s) {
         updateSensorCards(s);
-        if (!lastS || s.frames > lastS.frames) pushHist(lastS, s);
+        if (!lastS || s.frames > lastS.frames) Stream.push(lastS, s);
         if (lastS) emitTier0Events(lastS, s);
         lastS = s;
     }
@@ -345,7 +709,7 @@ function tick() {
         const p = bro.kws.progress();
         if (p) updateTemplateRows(p, s);
     }
-    drawChart();
+    drawStream();
     requestAnimationFrame(tick);
 }
 
@@ -430,6 +794,7 @@ function startGestureListening() {
             spots++;
             $spotCount.textContent = String(spots);
             fusionRow('spot', 'gesture "' + name + '" (' + kind + ') @ conf ' + confidence.toFixed(3));
+            logEvent('gesture', name, confidence, kind);
             flashGesture(name);
         },
     });
@@ -506,6 +871,7 @@ function startListening() {
             const s = bro.sense.isActive() ? bro.sense.snapshot() : null;
             fusionRow('spot', '"' + name + '" completed @ conf ' + confidence.toFixed(3) +
                 (s && s.voice ? ' · voice run ' + (s.voiceFrames / 100).toFixed(1) + ' s' : ''));
+            logEvent('spot', name, confidence, '');
             flashRow(name);
             armState[name] = false;
         },
@@ -530,8 +896,27 @@ $listen.addEventListener('click', () => (listening ? stopListening() : startList
 // ── boot ─────────────────────────────────────────────────────────────────────
 
 (function boot() {
-    $chart.width = Math.max(400, $chart.clientWidth || 800);
-    histMax = $chart.width;
+    $chart.width = $overview.width = Math.max(400, $chart.clientWidth || 800);
+
+    // Timeline interaction: drag to pan, wheel to zoom, click a marker to
+    // inspect, Live to re-pin the edge, overview to scrub the full history.
+    $chart.addEventListener('mousedown', onTimelineDown);
+    window.addEventListener('mousemove', onTimelineMove);
+    window.addEventListener('mouseup', onTimelineUp);
+    $chart.addEventListener('wheel', onTimelineWheel, { passive: false });
+    $chart.addEventListener('mouseleave', () => { View.hoverFrame = -1; });
+    $tlLive.addEventListener('click', () => { setLive(true); });
+    let ovDrag = false;
+    $overview.addEventListener('mousedown', (e) => { ovDrag = true; onOverviewNav(e); });
+    window.addEventListener('mousemove', (e) => { if (ovDrag) onOverviewNav(e); });
+    window.addEventListener('mouseup', () => { ovDrag = false; });
+
+    // Keep the visible span label in sync with the view each frame.
+    setInterval(() => {
+        const secs = viewWindow().span / FPS;
+        $tlSpan.textContent = (secs >= 60 ? (secs / 60).toFixed(1) + ' min' : secs.toFixed(1) + ' s') +
+            (View.follow ? '' : ' · scrubbing');
+    }, 100);
 
     // Tier-0 first: model-free, always available, no weights needed.
     bro.sense.start({});
@@ -571,6 +956,11 @@ $listen.addEventListener('click', () => (listening ? stopListening() : startList
     requestAnimationFrame(tick);
 })();
 
-// Headless test seam: drive the gesture-enroll path with a synthesized clip
-// (no live mic to record from).
-globalThis.listenLab = { enrollGesture };
+// Headless test seam: the gesture-enroll path (no live mic to record from)
+// plus the timeline internals (history ring, event log, click-to-inspect) so
+// the scrollback/marker/detail behaviour is testable without mouse events.
+globalThis.listenLab = {
+    enrollGesture,
+    Stream, events, View,
+    selectEvent, closeDetail,
+};

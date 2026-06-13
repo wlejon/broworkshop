@@ -191,6 +191,34 @@ assert(pumpUntil(() => +document.querySelector('#spotCount').textContent > spots
 console.log('[listen-lab] gesture: ' +
             feedRows('spot').find((t) => t.indexOf('triple-tap') >= 0));
 
+// ── 4b. timeline: history ring filled, events logged, click-to-inspect ───────
+// The scrollable stream history (Stream ring) accumulated frames across the
+// whole run, the notable fires landed in the event log as markers, and
+// selecting a marker opens the detail panel with the matched clip.
+
+assert(listenLab.Stream.count > 100,
+       'stream history ring accumulated frames (' + listenLab.Stream.count + ')');
+const gestEv = listenLab.events.find((e) => e.type === 'gesture' && e.name === 'triple-tap');
+assert(gestEv, 'gesture fire landed in the timeline event log');
+assert(gestEv.frame > 0 && gestEv.conf > 0.9, 'event carries its frame + confidence');
+const spotEv = listenLab.events.find((e) => e.type === 'spot' && e.name === 'hello there');
+assert(spotEv, 'phrase spot landed in the timeline event log');
+
+// Select the gesture marker → detail panel shows the rhythm template it matched.
+listenLab.selectEvent(gestEv);
+const detailEl = document.querySelector('#detail');
+assert(!detailEl.classList.contains('hidden'), 'detail panel opened on select');
+assert(detailEl.querySelector('.dkind').textContent === 'gesture', 'detail names the event kind');
+assert(/rhythm template/.test(detailEl.textContent) && /taps/.test(detailEl.textContent),
+       'detail shows the matched rhythm clip (' +
+       detailEl.querySelector('.drow').textContent + ')');
+assert(listenLab.View.selRegion && listenLab.View.selRegion.b === gestEv.frame,
+       'selection highlights the matched region ending at the fire frame');
+listenLab.closeDetail();
+assert(detailEl.classList.contains('hidden'), 'detail panel closes');
+console.log('[listen-lab] timeline: ' + listenLab.Stream.count + ' frames · ' +
+            listenLab.events.length + ' events · detail inspect ok');
+
 // ── 5. remove the gesture via its × button while live ────────────────────────
 // withMutableGesture bounces the gesture session (stop → remove → listen);
 // afterwards the row is gone and kws listening is untouched (separate member).
