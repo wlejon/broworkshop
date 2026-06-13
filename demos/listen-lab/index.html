@@ -55,6 +55,7 @@
      gesture-row (.gest) / fusion-kind (.spot) selectors elsewhere. */
   .sw-voice { background: #54d68a; } .sw-tonal { background: #6aa6ff; } .sw-onset { background: #ffb454; }
   .sw-spot { background: #54d68a; border-radius: 50%; } .sw-gest { background: #c9a6ff; border-radius: 50%; }
+  .sw-speech { background: #36c5d0; border-radius: 50%; }
   #chart { display: block; margin: 0 14px; border: 1px solid #1d2330; border-radius: 8px; width: calc(100% - 28px); cursor: crosshair; }
   #overview { display: block; margin: 6px 14px 0; border: 1px solid #1d2330; border-radius: 6px; width: calc(100% - 28px); cursor: pointer; }
   .tlbar .tlhint { color: #56617a; }
@@ -72,6 +73,35 @@
   .scratch button.smake { background: #2f6f4f; border-color: #3c8c63; color: #eafff2; }
   .scratch button.sx { padding: 0 8px; border-radius: 10px; }
 
+  /* ── tier-3 live transcript (bro.stt Parakeet, voice-gated) ───────────── */
+  .transcript {
+    margin: 8px 14px 0; background: #0b1416; border: 1px solid #1c3a40;
+    border-radius: 8px; padding: 8px 12px;
+  }
+  .transcript .txhdr {
+    display: flex; align-items: center; gap: 8px; font-size: 11px; color: #6b7686;
+    text-transform: uppercase; letter-spacing: .8px; margin-bottom: 6px;
+  }
+  .transcript .txstat { text-transform: none; letter-spacing: 0; color: #4f9aa6; font-size: 11px; }
+  .transcript .txstat.err { color: #ff8585; }
+  .transcript .txstat.live { color: #36c5d0; }
+  .transcript .txtoggle { margin-left: auto; padding: 1px 9px; border-radius: 10px; font-size: 11px; }
+  .transcript .txlive {
+    min-height: 21px; font-size: 14px; color: #9fe7ef; line-height: 1.4;
+    font-family: ui-monospace, monospace;
+  }
+  .transcript .txlive .cur { color: #36c5d0; animation: blink 1s step-start infinite; }
+  .transcript .txlive .ph { color: #46555c; font-size: 12px; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .transcript .txlines {
+    display: flex; flex-direction: column; gap: 1px; margin-top: 6px;
+    max-height: 96px; overflow-y: auto;
+  }
+  .transcript .txline { display: flex; gap: 8px; font-size: 12px; cursor: pointer; padding: 1px 2px; border-radius: 4px; }
+  .transcript .txline:hover { background: #10242a; }
+  .transcript .txline .tt { color: #4f6066; font-variant-numeric: tabular-nums; }
+  .transcript .txline .tx { color: #c8d2dc; }
+
   /* ── click-to-inspect detail panel ────────────────────────────────────── */
   .detail { margin: 10px 14px 0; background: #11141b; border: 1px solid #2c3c57; border-radius: 8px; padding: 10px 12px; font-size: 12px; }
   .detail.hidden { display: none; }
@@ -80,6 +110,7 @@
   .detail .dkind.spot { background: #2f6f4f; color: #eafff2; }
   .detail .dkind.gesture { background: #332a3e; color: #c9a6ff; }
   .detail .dkind.arm { background: #332a3e; color: #c9a6ff; }
+  .detail .dkind.speech { background: #10303a; color: #9fe7ef; }
   .detail .dname { font-weight: 600; flex: 1; }
   .detail .dconf { color: #cfe0ff; font-variant-numeric: tabular-nums; }
   .detail .dclose { padding: 0 8px; border-radius: 10px; }
@@ -99,6 +130,7 @@
   .kind.tonal { background: #1e2a3a; color: #6aa6ff; }
   .kind.arm   { background: #332a3e; color: #c9a6ff; }
   .kind.spot  { background: #2f6f4f; color: #eafff2; }
+  .kind.heard { background: #10303a; color: #9fe7ef; }
   .kind.info  { background: #1d2330; color: #8a94a6; }
 
   /* ── right column: tier-2 templates ───────────────────────────────────── */
@@ -233,7 +265,7 @@
         <span class="tlspan" id="tlSpan">10.0 s</span>
         <span class="tllegend">
           <i class="sw-voice"></i>voice<i class="sw-tonal"></i>tonal<i class="sw-onset"></i>onset
-          <i class="sw-spot"></i>spot<i class="sw-gest"></i>gesture
+          <i class="sw-spot"></i>spot<i class="sw-gest"></i>gesture<i class="sw-speech"></i>speech
         </span>
         <span class="tlhint">shift-drag → clip</span>
         <span class="tlhover" id="tlHover">—</span>
@@ -241,6 +273,14 @@
       <canvas id="chart" height="200"></canvas>
       <div class="scratch hidden" id="scratch"></div>
       <canvas id="overview" height="46" title="full ~10 min — drag to scrub"></canvas>
+      <div class="transcript" id="transcript">
+        <div class="txhdr">live transcript · Parakeet, voice-gated
+          <span class="txstat" id="txStat">…</span>
+          <button class="txtoggle" id="txToggle" disabled>⏸</button>
+        </div>
+        <div class="txlive" id="txLive"><span class="ph">— speak; words appear here while voice is active —</span></div>
+        <div class="txlines" id="txLines"></div>
+      </div>
       <div class="detail hidden" id="detail"></div>
       <div class="feedhdr">fusion feed — tier-0 counters + tier-2 partial alignment, one loop</div>
       <div class="feed" id="feed"></div>

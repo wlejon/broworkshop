@@ -468,6 +468,58 @@ console.log('[listen-lab] editor: opened whistle clip editor (' +
                 tv.onsets.map((o) => o.voiced.toFixed(2)).join('/') + ')');
 }
 
+// ── 4f. tier-3 transcript: voice-gated Parakeet, rolling realtime ────────────
+// bro.sense's voice VAD arms the transcriber; the utterance is pulled from the
+// retained shared stream (bro.listen.audio) and committed on voice-end. The
+// 2.4 GB model isn't loaded in headless — a synchronous stub runner stands in
+// for bro.stt so the VAD-gated LIFECYCLE (arm → pull PCM → commit) is what's
+// under test here; the real model path is exercised by the app + parakeet-lab.
+{
+    let txCalls = 0, lastPcmLen = 0;
+    listenLab.installTranscriber((pcm, cb) => {
+        txCalls++; lastPcmLen = pcm.length;
+        cb.onToken('hello');
+        cb.onToken('hello there');
+        cb.onDone('hello there', {});
+        return { cancel() {} };
+    });
+    assert(listenLab.Transcribe.ready, 'stub transcriber installed (tier-3 ready)');
+    assert(document.querySelector('#transcript'), 'transcript panel present');
+
+    const linesBefore = listenLab.Transcribe.lines.length;
+    const heardBefore = feedRows('heard').length;
+    // A voiced utterance: VAD rises then (over the trailing silence) falls — that
+    // edge arms the tier, rolls partial passes, and commits the final line.
+    feedPumped(concat(silence(0.4), speak('hello there'), silence(0.5)));
+    assert(pumpUntil(() => listenLab.Transcribe.lines.length > linesBefore, 8000),
+           'voice-gated transcript committed a line on voice-end');
+    assert(txCalls > 0 && lastPcmLen > 0,
+           'transcriber was handed real PCM from the retained stream (' + lastPcmLen + ' samples)');
+    const line = listenLab.Transcribe.lines[0];
+    assert(line.text === 'hello there', 'committed line carries the transcript ("' + line.text + '")');
+    assert(line.b > line.a, 'committed line spans the utterance frames (' + line.a + '–' + line.b + ')');
+    assert(feedRows('heard').length > heardBefore, '[heard] fusion row rendered for the utterance');
+
+    // The committed line shows in the transcript panel, timestamped.
+    assert(pumpUntil(() => document.querySelectorAll('#txLines .txline').length >= 1, 3000),
+           'transcript panel rendered the committed line');
+    assert(/hello there/.test(document.querySelector('#txLines .txline .tx').textContent),
+           'transcript row shows the words');
+
+    // It also dropped a speech marker on the timeline (clickable to inspect; the
+    // detail cross-checks what the phoneme model decoded over the SAME span).
+    const spEv = listenLab.events.find((e) => e.type === 'speech' && e.name === 'hello there');
+    assert(spEv && spEv.span && spEv.span.b > spEv.span.a,
+           'speech event landed on the timeline with a matched span');
+    listenLab.selectEvent(spEv);
+    assert(/model heard here/.test(document.querySelector('#detail').textContent),
+           'selecting the speech marker opens its detail panel');
+    listenLab.closeDetail();
+    console.log('[listen-lab] transcript: voice-gated commit "' + line.text + '" · ' +
+                txCalls + ' passes · ' + lastPcmLen + ' samples · span ' +
+                (spEv.span.b - spEv.span.a) + 'f');
+}
+
 // ── 5. remove the gesture via its × button while live ────────────────────────
 // withMutableGesture bounces the gesture session (stop → remove → listen);
 // afterwards the row is gone and kws listening is untouched (separate member).

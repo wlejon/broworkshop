@@ -48,6 +48,8 @@ const $threshold = $('#threshold'), $coverage = $('#coverage'), $listen = $('#li
 const $tmpls = $('#tmpls'), $noTmpls = $('#noTmpls');
 const $gestures = $('#gestures'), $noGest = $('#noGest');
 const $status = $('#status'), $streamT = $('#streamT'), $spotCount = $('#spotCount');
+const $transcript = $('#transcript'), $txStat = $('#txStat'),
+      $txLive = $('#txLive'), $txLines = $('#txLines'), $txToggle = $('#txToggle');
 
 let kwsReady = false;
 let listening = false;
@@ -238,7 +240,7 @@ function viewWindow() {
     return { start: end - span, end, span };
 }
 
-const MARK = { spot: '#54d68a', gesture: '#c9a6ff', arm: '#c9a6ff' };
+const MARK = { spot: '#54d68a', gesture: '#c9a6ff', arm: '#c9a6ff', speech: '#36c5d0' };
 
 // Size a canvas's backing store to physical pixels (CSS size × devicePixelRatio)
 // so lines/text render crisp on HiDPI displays. Display width stays responsive
@@ -427,7 +429,7 @@ function drawOverview() {
     }
     ctx.stroke();
     for (const ev of events) {
-        if (ev.type !== 'spot' && ev.type !== 'gesture') continue;
+        if (ev.type !== 'spot' && ev.type !== 'gesture' && ev.type !== 'speech') continue;
         ctx.fillStyle = MARK[ev.type];
         ctx.fillRect((ev.frame - f0) / fspan * W, 0, 1, H);
     }
@@ -986,11 +988,230 @@ function toggleTokens(name, root, btn) {
     root.appendChild(panel);
 }
 
+// ── tier-3 transcript — Parakeet STT, voice-gated, rolling realtime ───────────
+// The heaviest tier, armed by the cheapest one: bro.sense's energy VAD decides
+// WHEN to wake the model. On voice onset we pull the utterance straight from the
+// retained shared stream (bro.listen.audio — already 16 kHz, Parakeet's rate, no
+// extra tap or buffer), re-transcribe a rolling window every ~350 ms for live
+// partial words, and commit a final line when voice ends. Parakeet is a TDT
+// transducer — streaming-shaped and faster than realtime — so each pass is
+// cheap; VAD-gating keeps it dormant in silence and bounds every utterance, so
+// the rolling re-runs never grow without limit. One model call is in flight at a
+// time (busy-gated, no overlap), so we never trip bro.stt's single-op rule.
+
+const PARA_CANDIDATES = [
+    '../../../brosoundml/weights/parakeet/0.6b-v3',
+    'D:/projects/brosoundml/weights/parakeet/0.6b-v3',
+];
+const TX_PREROLL = 20;         // frames of pre-voice audio to include (~200 ms)
+const TX_ROLL    = 35;         // frames between rolling partial passes (~350 ms)
+
+const Transcribe = {
+    model: null, tok: null,
+    ready: false, enabled: true, busy: false,
+    active: false,             // inside a voiced utterance
+    startFrame: 0,             // utterance start, on the shared stream/sense axis
+    lastRunFrame: 0,           // frame the last rolling pass was kicked at
+    pendingFinal: null,        // an end frame queued behind an in-flight pass
+    partial: '',               // live partial text for the current utterance
+    lines: [],                 // committed { t, text, a, b }
+    // The model runner — (pcm, { onToken(partialText), onDone(text, info) }).
+    // Real path decodes Parakeet ids incrementally; the headless test swaps in a
+    // synchronous stub so the VAD-gated lifecycle is testable without the 2.4 GB
+    // model load (the real path is exercised by the app + parakeet-lab).
+    run: null,
+};
+
+// Wrap bro.stt's async Parakeet decode into the uniform runner interface:
+// accumulate emitted ids, decode the running prefix to text on each token, and
+// hand the committed transcript back on done.
+function realRun(pcm, cb) {
+    const acc = [];
+    return bro.stt.transcribe(Transcribe.model, pcm, {
+        onToken: (id) => {
+            acc.push(id);
+            if (cb.onToken) cb.onToken(Transcribe.tok.decode(acc).trim());
+        },
+        onDone: (res, info) => {
+            const text = (res && res.tokenIds && res.tokenIds.length)
+                ? Transcribe.tok.decode(res.tokenIds).trim() : '';
+            if (cb.onDone) cb.onDone(text, info || {});
+        },
+    });
+}
+
+function txSetStatus(text, err, live) {
+    $txStat.textContent = text;
+    $txStat.className = 'txstat' + (err ? ' err' : live ? ' live' : '');
+    $txToggle.disabled = !Transcribe.ready;
+    $txToggle.textContent = Transcribe.enabled ? '⏸' : '▶';
+}
+
+function renderPartial() {
+    if (Transcribe.partial) {
+        $txLive.textContent = Transcribe.partial + ' ';
+        const cur = document.createElement('span');
+        cur.className = 'cur'; cur.textContent = '▌';
+        $txLive.appendChild(cur);
+    } else if (Transcribe.active) {
+        $txLive.innerHTML = '<span class="cur">▌</span>';
+    } else {
+        $txLive.innerHTML = '<span class="ph">— speak; words appear here while voice is active —</span>';
+    }
+}
+
+function renderLines() {
+    $txLines.innerHTML = '';
+    for (const ln of Transcribe.lines) {
+        const row = document.createElement('div');
+        row.className = 'txline';
+        row.title = 'replay this utterance';
+        const mm = Math.floor(ln.t / 60), ss = Math.floor(ln.t % 60);
+        const t = document.createElement('span');
+        t.className = 'tt'; t.textContent = mm + ':' + String(ss).padStart(2, '0');
+        const tx = document.createElement('span');
+        tx.className = 'tx'; tx.textContent = ln.text;
+        row.append(t, tx);
+        row.addEventListener('click', () => playRegion({ a: ln.a, b: ln.b }));
+        $txLines.appendChild(row);
+    }
+}
+
+// Commit a finished utterance: a transcript line (replayable), a [heard] fusion
+// row, and a speech marker on the timeline (click it to inspect / replay, and to
+// see what the phoneme model decoded over the SAME span — a cross-check).
+function finishUtterance(text, a, b) {
+    Transcribe.active = false;
+    Transcribe.partial = '';
+    if (text) {
+        Transcribe.lines.unshift({ t: b / FPS, text, a, b });
+        while (Transcribe.lines.length > 80) Transcribe.lines.pop();
+        fusionRow('heard', '“' + text + '”');
+        logEvent('speech', text, null, '', null,
+                 { startFrame: a, endFrame: b, matchedFrames: b - a });
+        renderLines();
+    }
+    renderPartial();
+    txSetStatus('ready · voice-gated', false, false);
+}
+
+// Run one transcription pass over [startFrame, endFrame] of the retained stream.
+// Serialized on Transcribe.busy: a rolling pass that arrives while one is in
+// flight is dropped (partials are best-effort); a final commit is queued
+// (pendingFinal) and kicked the moment the current pass frees up, so the line is
+// never lost.
+function txKick(endFrame, isFinal) {
+    if (Transcribe.busy) { if (isFinal) Transcribe.pendingFinal = endFrame; return; }
+    const a = Math.max(Math.round(Transcribe.startFrame), Stream.oldestFrame());
+    const b = Math.min(Math.round(endFrame), bro.listen.frame());
+    if (b - a < 1) { if (isFinal) finishUtterance('', a, b); return; }
+    const pcm = bro.listen.audio(a, b);
+    if (!pcm || !pcm.length) { if (isFinal) finishUtterance('', a, b); return; }
+    Transcribe.busy = true;
+    let done = false;
+    const finish = (text, info) => {
+        if (done) return;
+        done = true;
+        Transcribe.busy = false;
+        if (Transcribe.pendingFinal != null) {
+            const pf = Transcribe.pendingFinal; Transcribe.pendingFinal = null;
+            txKick(pf, true);
+            return;                 // this (rolling/cancelled) result yields to the final
+        }
+        if (info && info.cancelled) return;
+        if (isFinal) finishUtterance(text, a, b);
+        else { Transcribe.partial = text; renderPartial(); }
+    };
+    try {
+        Transcribe.run(pcm, {
+            onToken: (p) => { Transcribe.partial = p; renderPartial(); },
+            onDone: finish,
+        });
+    } catch (e) {
+        // bro.stt rejects a second in-flight op — treat as a skip; queue the final.
+        Transcribe.busy = false;
+        if (isFinal) finishUtterance(Transcribe.partial || '', a, b);
+    }
+}
+
+// Edge-driven from the poll loop: voice onset arms an utterance, rolling passes
+// stream partial words while voice holds, voice offset commits the final line.
+function transcribeTick(prev, s) {
+    if (!Transcribe.ready || !Transcribe.enabled) return;
+    if (!bro.listen.info().active) return;        // needs the retained stream
+    const rising = s.voice && (!prev || !prev.voice);
+    const falling = prev && prev.voice && !s.voice;
+    if (rising) {
+        Transcribe.active = true;
+        Transcribe.startFrame = Math.max(Stream.oldestFrame(), s.frames - TX_PREROLL);
+        Transcribe.lastRunFrame = s.frames;
+        Transcribe.partial = '';
+        renderPartial();
+        txSetStatus('listening…', false, true);
+    }
+    if (Transcribe.active && s.voice && s.frames - Transcribe.lastRunFrame >= TX_ROLL) {
+        Transcribe.lastRunFrame = s.frames;
+        txKick(s.frames, false);
+    }
+    if (falling && Transcribe.active) txKick(s.frames, true);
+}
+
+function txMaybeReady() {
+    if (!Transcribe.model || !Transcribe.tok) return;
+    Transcribe.ready = true;
+    fusionRow('info', 'tier-3 transcript ready — Parakeet ' +
+        (Transcribe.model.sampleRate / 1000) + ' kHz, voice-gated');
+    txSetStatus('ready · voice-gated');
+    renderPartial();
+}
+
+// Load Parakeet + its tokenizer (both async, non-blocking — the dashboard stays
+// live during the weight upload). Independent of the PhonemeNet checkpoint: the
+// transcript tier needs only bro.sense (voice VAD) + the retained stream.
+function txLoad() {
+    if (Transcribe.run) return;     // a runner is already installed (e.g. a test stub)
+    let dir = null;
+    for (const p of PARA_CANDIDATES) {
+        try { if (fs.existsSync(p + '/config.json')) { dir = fs.realpathSync(p); break; } }
+        catch (e) { /* next candidate */ }
+    }
+    if (!dir) { txSetStatus('Parakeet weights not found — transcript off', true); return; }
+    Transcribe.run = realRun;
+    txSetStatus('loading Parakeet…');
+    try {
+        bro.stt.loadParakeet(dir, {
+            onReady: (m) => { Transcribe.model = m; txMaybeReady(); },
+            onError: (e) => txSetStatus('Parakeet load failed: ' + e, true),
+        });
+        bro.stt.loadParakeetTokenizer(dir + '/tokenizer.json', {
+            onReady: (t) => { Transcribe.tok = t; txMaybeReady(); },
+            onError: (e) => txSetStatus('Parakeet tokenizer failed: ' + e, true),
+        });
+    } catch (e) {
+        txSetStatus('Parakeet load failed: ' + (e.message || e), true);
+    }
+}
+
 // ── the poll loop — ONE place fuses every tier ───────────────────────────────
 
 let lastS = null;
+let txBooted = false;
+
+// Tier-3 transcript auto-load decision, deferred to the first frame: the
+// headless globals (advanceTime) are installed AFTER the app's top-level boot
+// runs, so the only reliable place to detect headless is from a frame callback.
+// The 2.4 GB Parakeet load is real — auto-load it for the live app; in headless
+// the test installs a stub runner through the seam instead, so the suite never
+// pulls the heavy model.
+function bootTranscript() {
+    if (txBooted) return;
+    txBooted = true;
+    if (typeof advanceTime === 'function') txSetStatus('headless — install a runner to test');
+    else txLoad();
+}
 
 function tick() {
+    bootTranscript();
     const s = bro.sense.isActive() ? bro.sense.snapshot() : null;
     // tier-1: the live top phoneme, cached and ring-stored alongside the sensors.
     let ph = null;
@@ -1006,6 +1227,7 @@ function tick() {
         updateSensorCards(s, ph);
         if (!lastS || s.frames > lastS.frames) Stream.push(lastS, s, ph);
         if (lastS) emitTier0Events(lastS, s);
+        transcribeTick(lastS, s);
         lastS = s;
     }
     if (kwsReady && bro.kws.isLoaded()) {
@@ -1521,6 +1743,11 @@ $enroll.addEventListener('click', enrollPhrase);
 $phrase.addEventListener('keydown', (e) => { if (e.key === 'Enter') enrollPhrase(); });
 $record.addEventListener('click', toggleRecord);
 $listen.addEventListener('click', () => (listening ? stopListening() : startListening()));
+$txToggle.addEventListener('click', () => {
+    Transcribe.enabled = !Transcribe.enabled;
+    if (!Transcribe.enabled) { Transcribe.active = false; Transcribe.partial = ''; renderPartial(); }
+    txSetStatus(Transcribe.enabled ? 'ready · voice-gated' : 'paused');
+});
 
 // ── boot ─────────────────────────────────────────────────────────────────────
 
@@ -1604,4 +1831,15 @@ globalThis.listenLab = {
     selectEvent, closeDetail, decodedOver,
     scratchToGesture, renderScratchBar, clearScratch, scratchSpan,
     buildEditor, gainedSlice, clipStore, gestRows,
+    // tier-3 transcript: real loader (manual e2e check) + a stub installer that
+    // makes the VAD-gated lifecycle testable without the 2.4 GB Parakeet load.
+    Transcribe, loadTranscriber: txLoad,
+    installTranscriber: (runFn) => {
+        Transcribe.run = runFn;
+        Transcribe.ready = true;
+        Transcribe.enabled = true;
+        if (!Transcribe.tok) Transcribe.tok = { decode: () => '' };
+        txSetStatus('ready · voice-gated (stub)');
+        renderPartial();
+    },
 };
