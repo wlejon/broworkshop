@@ -16,6 +16,13 @@
 // confirmation tier would arm HERE, seconds before onSpot", and finally the
 // completed spot itself, annotated with the tier-0 context it fired in.
 //
+// Second stream: the "system audio" panel opens bro.listen.open('system') — a
+// SECOND, unmixed pipeline (whole-system loopback) running concurrently with the
+// mic dashboard. It gets its own tier-0 sensors (sys.sense) and its own kws
+// session over the ONE loaded PhonemeNet (sys.kws, the mic's phrases mirrored on,
+// no weights copied), so the same vocabulary spots in whatever the machine plays
+// with no crosstalk between the streams. (Windows loopback; degrades elsewhere.)
+//
 // Rhythm gestures: ● Record captures raw mic PCM via bro.mic (its own tap —
 // independent of the listen host) and enrolls it with enrollGaps, so internal
 // silence becomes TIMED gap states: click·gap·click is the template, and a
@@ -50,6 +57,10 @@ const $gestures = $('#gestures'), $noGest = $('#noGest');
 const $status = $('#status'), $streamT = $('#streamT'), $spotCount = $('#spotCount');
 const $transcript = $('#transcript'), $txStat = $('#txStat'),
       $txLive = $('#txLive'), $txLines = $('#txLines'), $txToggle = $('#txToggle');
+const $sysMeta = $('#sysMeta'), $sysToggle = $('#sysToggle'), $sysBody = $('#sysBody');
+const $sysVoiceDot = $('#sysVoiceDot'), $sysVoiceTxt = $('#sysVoiceTxt'), $sysDb = $('#sysDb');
+const $sysOnsetDot = $('#sysOnsetDot'), $sysOnsets = $('#sysOnsets');
+const $sysTonalDot = $('#sysTonalDot'), $sysTonalTxt = $('#sysTonalTxt'), $sysSpot = $('#sysSpot');
 
 let kwsReady = false;
 let listening = false;
@@ -1306,6 +1317,7 @@ function tick() {
         const p = bro.kws.progress();
         if (p) updateTemplateRows(p, s);
     }
+    updateSystemMeters();
     updatePlayback();
     drawStream();
     requestAnimationFrame(tick);
@@ -1322,6 +1334,7 @@ function withMutableSpotter(fn) {
     catch (e) { status(String(e.message || e), true); }
     if (wasListening && bro.kws.templates().length) startListening();
     $listen.disabled = !kwsReady || bro.kws.templates().length === 0;
+    if (sysStream) mirrorToSystem();      // keep the system stream's vocabulary in sync
 }
 
 // A typed phrase carries minCoverage: a completion must have at least that
@@ -1780,6 +1793,105 @@ function stopRecord() {
 
 function toggleRecord() { startRecord(null, $record); }
 
+// ── second stream: system-audio loopback (bro.listen.open) ────────────────────
+// The payoff of the multi-stream host: a SECOND, unmixed pipeline running
+// concurrently with the mic dashboard above. We open the whole-system render
+// mix, give it its OWN tier-0 sensors (sys.sense) and its OWN kws session over
+// the ONE loaded PhonemeNet (sys.kws) — the mic's enrolled phrases are mirrored
+// onto it, so the same vocabulary spots in whatever the machine is playing, with
+// no weights copied and no crosstalk between the two streams. The two streams
+// keep independent frame axes, sensors, and matcher state.
+
+let sysStream = null;             // the open ListenStream handle, or null
+let sysListening = false;         // sys.kws.listen() active
+let sysFlashAt = 0;               // wall-clock of the last system spot (fade the label)
+
+// Mirror the mic's plain phrase templates onto the system stream's kws session.
+// enrollFromClasses replays the decoded class ids over the SHARED net — rhythm
+// (gap) templates can't round-trip through classes, so they're skipped. The sys
+// session is bounced around the mutation (single-producer rule, per stream).
+function mirrorToSystem() {
+    if (!sysStream || !sysStream.valid || !kwsReady) return;
+    if (sysListening) { sysStream.kws.stop(); sysListening = false; }
+    try {
+        sysStream.kws.clear();
+        for (const name of bro.kws.templates()) {
+            const v = bro.kws.inspect(name);
+            if (!v || v.hasGaps) continue;                 // rhythm/gap → skip
+            const cls = v.states.filter((st) => !st.gap).map((st) => st.cls);
+            if (cls.length) sysStream.kws.enrollFromClasses(name, cls, phrasePolicy());
+        }
+    } catch (e) { status('system mirror: ' + (e.message || e), true); }
+    if (sysStream.kws.templates().length) startSystemListening();
+}
+
+function startSystemListening() {
+    if (!sysStream || sysListening) return;
+    sysStream.kws.listen({
+        onSpot: (name, confidence) => {
+            $sysSpot.textContent = '“' + name + '” @ ' + confidence.toFixed(2);
+            $sysSpot.classList.add('fired');
+            sysFlashAt = Date.now();
+            fusionRow('sys', 'system audio: "' + name + '" @ conf ' + confidence.toFixed(3));
+        },
+    });
+    sysListening = true;
+}
+
+function openSystem() {
+    if (sysStream) return;
+    if (!bro.listen.supported()) { status('system loopback not available on this build', true); return; }
+    try {
+        sysStream = bro.listen.open('system');
+    } catch (e) {
+        status('system audio: ' + (e.message || e), true);
+        sysStream = null;
+        return;
+    }
+    sysStream.sense.start({});            // tier-0 sensors on the system stream
+    mirrorToSystem();                     // share the loaded net; spot the same phrases
+    $sysBody.classList.remove('hidden');
+    $sysToggle.textContent = '■ Stop';
+    $sysToggle.classList.add('active');
+    fusionRow('sys', 'opened system-audio stream #' + sysStream.id + ' — tier-0 + kws (' +
+        sysStream.kws.templates().length + ' mirrored phrase' +
+        (sysStream.kws.templates().length === 1 ? '' : 's') + ')');
+    status('listening to system audio on a second stream (#' + sysStream.id + ')');
+}
+
+function closeSystem() {
+    if (!sysStream) return;
+    const id = sysStream.id;
+    if (sysListening) { sysStream.kws.stop(); sysListening = false; }
+    sysStream.close();                    // detaches members, stops the loopback source
+    sysStream = null;
+    $sysBody.classList.add('hidden');
+    $sysToggle.textContent = '▶ Listen';
+    $sysToggle.classList.remove('active');
+    $sysSpot.textContent = '— no spot yet —';
+    $sysSpot.classList.remove('fired');
+    fusionRow('sys', 'closed system-audio stream #' + id);
+}
+
+function toggleSystem() { sysStream ? closeSystem() : openSystem(); }
+
+// Polled from the tick loop: the system stream's OWN tier-0 snapshot, fully
+// independent of the mic's bro.sense cards above (separate hub, separate axis).
+function updateSystemMeters() {
+    if (!sysStream || !sysStream.valid || !sysStream.sense.isActive()) return;
+    const s = sysStream.sense.snapshot();
+    if (!s) return;
+    $sysVoiceDot.className = 'dot' + (s.voice ? ' on' : '');
+    $sysVoiceTxt.textContent = s.voice ? 'voice' : 'quiet';
+    $sysDb.textContent = (s.db <= -90 ? '−∞' : s.db.toFixed(1)) + ' dB';
+    $sysOnsetDot.className = 'dot onset' + (s.frames - s.lastOnsetFrame < 15 ? ' on' : '');
+    $sysOnsets.textContent = String(s.onsets);
+    $sysTonalDot.className = 'dot tonal' + (s.tonal ? ' on' : '');
+    $sysTonalTxt.textContent = s.tonal ? Math.round(s.dominantHz) + ' Hz' : '—';
+    if ($sysSpot.classList.contains('fired') && Date.now() - sysFlashAt > 2500)
+        $sysSpot.classList.remove('fired');
+}
+
 function startListening() {
     bro.kws.listen({
         onSpot: (name, confidence, span) => {
@@ -1816,6 +1928,7 @@ $enroll.addEventListener('click', enrollPhrase);
 $phrase.addEventListener('keydown', (e) => { if (e.key === 'Enter') enrollPhrase(); });
 $record.addEventListener('click', toggleRecord);
 $listen.addEventListener('click', () => (listening ? stopListening() : startListening()));
+$sysToggle.addEventListener('click', toggleSystem);
 $txToggle.addEventListener('click', () => {
     Transcribe.enabled = !Transcribe.enabled;
     if (!Transcribe.enabled) { Transcribe.active = false; Transcribe.partial = ''; renderPartial(); }
@@ -1861,6 +1974,13 @@ $txToggle.addEventListener('click', () => {
     fusionRow('info', 'stream retention on — ' +
         (bro.listen.info().seconds / 60).toFixed(0) + ' min of raw audio kept');
 
+    // Second-stream panel: enabled only where render-side loopback is available
+    // (Windows here; the null backend reports unsupported on other platforms).
+    if (!bro.listen.supported()) {
+        $sysToggle.disabled = true;
+        $sysMeta.textContent = 'system loopback not available on this build';
+    }
+
     // require('fs') resolves relative paths against the app dir, but the C++
     // loader resolves against the process CWD — hand it an absolute path.
     let weights = null;
@@ -1905,6 +2025,8 @@ globalThis.listenLab = {
     scratchToGesture, renderScratchBar, clearScratch, scratchSpan,
     buildEditor, gainedSlice, clipStore, gestRows,
     Playback, focusRegion, playFrac,
+    // second stream: open/close the system-audio loopback + reach its handle.
+    openSystem, closeSystem, sysHandle: () => sysStream,
     // tier-3 transcript: real loader (manual e2e check) + a stub installer that
     // makes the VAD-gated lifecycle testable without the 2.4 GB Parakeet load.
     Transcribe, loadTranscriber: txLoad,

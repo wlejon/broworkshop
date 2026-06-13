@@ -43,6 +43,19 @@
   }
   .meter .fill { height: 100%; width: 0%; background: #3c8c63; }
   .meter .mark { position: absolute; top: -2px; bottom: -2px; width: 2px; background: #5a657a; }
+  /* ── system-audio second stream (bro.listen.open('system')) ───────────── */
+  .sysrow { margin: 0 14px 4px; border: 1px solid #2a2335; border-radius: 8px; background: #120f18; }
+  .syshdr { display: flex; align-items: center; gap: 10px; padding: 8px 12px; }
+  .syshdr .systitle { font-size: 11px; color: #c9a6ff; text-transform: uppercase; letter-spacing: .8px; font-weight: 600; }
+  .syshdr .sysmeta { flex: 1; font-size: 11px; color: #6b7686; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .syshdr .systoggle { padding: 4px 12px; font-size: 11px; border-color: #4a3a55; color: #c9a6ff; background: #1e1828; }
+  .syshdr .systoggle.active { background: #3a2f4f; border-color: #6a4f8c; color: #f0e6ff; }
+  .syshdr .systoggle:disabled { opacity: .45; cursor: default; }
+  .sysbody { display: flex; align-items: center; gap: 16px; padding: 4px 12px 9px; font-size: 12px; color: #b8a6d0; flex-wrap: wrap; }
+  .sysbody.hidden { display: none; }
+  .sysbody .sysm { display: flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; }
+  .sysbody .sysspot { color: #8a94a6; margin-left: auto; transition: color .12s; }
+  .sysbody .sysspot.fired { color: #f0e6ff; }
   /* ── timeline (scrollable ~10 min stream history) ─────────────────────── */
   .tlbar { display: flex; align-items: center; gap: 12px; padding: 6px 14px 4px; font-size: 11px; color: #8a94a6; }
   .tlbar button { padding: 3px 10px; font-size: 11px; }
@@ -138,6 +151,7 @@
   .kind.arm   { background: #332a3e; color: #c9a6ff; }
   .kind.spot  { background: #2f6f4f; color: #eafff2; }
   .kind.heard { background: #10303a; color: #9fe7ef; }
+  .kind.sys   { background: #2a2335; color: #c9a6ff; }
   .kind.info  { background: #1d2330; color: #8a94a6; }
 
   /* ── right column: tier-2 templates ───────────────────────────────────── */
@@ -265,6 +279,20 @@
           <span class="title">tonality</span>
           <span class="big"><span class="dot tonal" id="tonalDot"></span><span id="tonalTxt">—</span></span>
           <span class="small" id="tonalSmall">periodicity —</span>
+        </div>
+      </div>
+      <div class="sysrow" id="sysRow">
+        <div class="syshdr">
+          <span class="systitle">system audio</span>
+          <span class="sysmeta" id="sysMeta">a second, unmixed stream — loopback of everything the machine plays, spotting the same phrases on the one loaded PhonemeNet</span>
+          <button class="systoggle" id="sysToggle">▶ Listen</button>
+        </div>
+        <div class="sysbody hidden" id="sysBody">
+          <span class="sysm"><span class="dot" id="sysVoiceDot"></span><span id="sysVoiceTxt">quiet</span></span>
+          <span class="sysm" id="sysDb">−∞ dB</span>
+          <span class="sysm"><span class="dot onset" id="sysOnsetDot"></span><span id="sysOnsets">0</span> onsets</span>
+          <span class="sysm"><span class="dot tonal" id="sysTonalDot"></span><span id="sysTonalTxt">—</span></span>
+          <span class="sysm sysspot" id="sysSpot">— no spot yet —</span>
         </div>
       </div>
       <div class="tlbar">

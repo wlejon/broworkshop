@@ -532,6 +532,63 @@ console.log('[listen-lab] editor: opened whistle clip editor (' +
                 (spEv.span.b - spEv.span.a) + 'f · click→playhead @ ' + listenLab.Playback.key);
 }
 
+// ── 4g. second stream: system-audio loopback (bro.listen.open) ───────────────
+// The multi-stream payoff: a SECOND, unmixed pipeline opened concurrently with
+// the live mic dashboard. It gets its own tier-0 sensors and its own kws session
+// over the ONE loaded PhonemeNet — the mic's phrases are mirrored onto it (shared
+// weights, no copy) — and the mic side keeps running untouched the whole time.
+{
+    const supported = bro.listen.supported();
+    if (!supported) {
+        // Non-Windows / null backend: the panel degrades and the toggle is off.
+        assert(document.querySelector('#sysToggle').disabled,
+               'system toggle disabled when loopback is unsupported');
+        console.log('[listen-lab] system: loopback unsupported on this build — panel degraded (ok)');
+    } else {
+        // Mic side is live going in — capture its state to prove it survives.
+        const micKwsLive = bro.kws.isActive(), micSenseLive = bro.sense.isActive();
+        assert(micKwsLive && micSenseLive, 'mic dashboard live before opening the second stream');
+
+        listenLab.openSystem();
+        const h = listenLab.sysHandle();
+        if (!h) {
+            // supported() is true but the render endpoint couldn't open in this
+            // context (e.g. no default playback device) — a real, honest skip.
+            console.log('[listen-lab] system: loopback supported but no render endpoint here — skipped');
+        } else {
+            assert(h.valid && h.kind === 'system', 'system loopback stream opened (kind=system)');
+            assert(h.id > 0, 'system stream has its own id (#' + h.id + ')');
+            // Its OWN tier-0 sensors, independent of the mic's bro.sense.
+            assert(h.sense.isActive(), "system stream's own tier-0 sense is live");
+            assert(bro.sense.isActive() && bro.kws.isActive(),
+                   'mic dashboard still live alongside the second stream (two concurrent streams)');
+            // Shared net: the mic's plain phrase mirrored onto the system kws.
+            assert(h.kws.templates().indexOf('hello there') >= 0,
+                   'mic phrase mirrored onto the system stream over the shared PhonemeNet (' +
+                   JSON.stringify(h.kws.templates()) + ')');
+            // The panel reflects the open stream.
+            assert(!document.querySelector('#sysBody').classList.contains('hidden'),
+                   'system panel body shown while the stream is open');
+            assert(document.querySelector('#sysToggle').textContent.indexOf('Stop') >= 0,
+                   'system toggle reads Stop while open');
+            const sysFusion = feedRows('sys');
+            assert(sysFusion.some((t) => t.indexOf('opened system-audio stream') >= 0),
+                   'opening the system stream logged a [sys] fusion row');
+            console.log('[listen-lab] system: stream #' + h.id + ' open · sense live · ' +
+                        h.kws.templates().length + ' mirrored phrase(s) · mic untouched');
+
+            // Close it: the second stream tears down and the mic side is unaffected.
+            listenLab.closeSystem();
+            assert(!listenLab.sysHandle(), 'system stream closed');
+            assert(document.querySelector('#sysBody').classList.contains('hidden'),
+                   'system panel body hidden after close');
+            assert(bro.sense.isActive() && bro.kws.isActive(),
+                   'closing the second stream left the mic dashboard live (independent streams)');
+            console.log('[listen-lab] system: closed — mic dashboard still live');
+        }
+    }
+}
+
 // ── 5. remove the gesture via its × button while live ────────────────────────
 // withMutableGesture bounces the gesture session (stop → remove → listen);
 // afterwards the row is gone and kws listening is untouched (separate member).
