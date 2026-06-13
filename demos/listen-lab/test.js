@@ -218,6 +218,26 @@ console.log('[listen-lab] spans: gesture ' + (gestEv.span.b - gestEv.span.a) +
             'f · spot ' + (spotEv.span.b - spotEv.span.a) + 'f heard ' +
             JSON.stringify(heardExact));
 
+// Stream retention: the raw audio that drove a match is replayable by frame
+// range (bro.listen). Enabled at boot; the headless feed() path is captured too.
+const rInfo = bro.listen.info();
+assert(rInfo.active && rInfo.seconds === 600,
+       'retention enabled at boot (' + JSON.stringify(rInfo) + ')');
+assert(bro.listen.frame() > 100,
+       'stream frame advanced with the fed audio (' + bro.listen.frame() + ')');
+const clip = bro.listen.audio(spotEv.span.a, spotEv.span.b);
+assert(clip && clip.length > 0,
+       'bro.listen.audio returns the retained clip for the spot region');
+let clipEnergy = 0;
+for (let i = 0; i < clip.length; i++) clipEnergy += clip[i] * clip[i];
+assert(clipEnergy > 0,
+       'retained clip carries real audio, not silence (energy ' + clipEnergy.toFixed(3) + ')');
+// A region far in the future / before the held window returns null.
+assert(bro.listen.audio(bro.listen.frame() + 10000, bro.listen.frame() + 20000) === null,
+       'audio() returns null outside the retained window');
+console.log('[listen-lab] retention: held ' + rInfo.heldSeconds.toFixed(1) + ' s · spot clip ' +
+            clip.length + ' samples · energy ' + clipEnergy.toFixed(2));
+
 // tier-1: the phoneme ring captured what the model decoded during the phrase.
 let phFrames = 0;
 for (let i = 0; i < listenLab.Stream.count; i++) {

@@ -164,6 +164,16 @@ const events = [];
 let evId = 0;
 const EV_CAP = 4000;
 
+// Re-anchor a spotter-axis span onto the shared stream axis (bro.sense frames)
+// using the matched duration, so spot markers/regions line up with the
+// envelope and the retained audio. Returns a span on the stream axis (or the
+// original if we can't read the stream clock).
+function toStreamSpan(span, s) {
+    if (!span || !(span.matchedFrames > 0) || !s) return span;
+    return { startFrame: s.frames - span.matchedFrames + 1, endFrame: s.frames,
+             matchedFrames: span.matchedFrames };
+}
+
 function logEvent(type, name, conf, kind, detail, span) {
     const s = bro.sense.isActive() ? bro.sense.snapshot() : null;
     // Prefer the matcher's exact reported span (frames axis) for the event's
@@ -520,6 +530,25 @@ function eventRegion(ev) {
     return { a: end - 60, b: end };
 }
 
+// Replay retained stream audio for a frame range (bro.listen). Pads the clip a
+// little so a short match isn't a clipped blip.
+let audioCtx = null;
+function playRegion(region) {
+    const info = bro.listen.info();
+    if (!info.active) { status('audio retention is off', true); return; }
+    const pad = Math.round(0.25 * info.frameRate);
+    const pcm = bro.listen.audio(Math.round(region.a) - pad, Math.round(region.b) + pad);
+    if (!pcm || !pcm.length) { status('audio for that region is no longer retained', true); return; }
+    if (!audioCtx) audioCtx = new AudioContext();
+    const buf = audioCtx.createBuffer(1, pcm.length, info.rate);
+    buf.getChannelData(0).set(pcm);
+    const src = audioCtx.createBufferSource();
+    src.buffer = buf;
+    src.connect(audioCtx.destination);
+    src.start();
+    status('playing ' + (pcm.length / info.rate).toFixed(2) + ' s clip');
+}
+
 function selectEvent(ev) {
     View.selId = ev.id;
     View.selRegion = eventRegion(ev);
@@ -544,13 +573,23 @@ function selectEvent(ev) {
     $detail.appendChild(when);
 
     // Matched span — exact from the matcher when available, else estimated.
+    // With retention on, a ▶ button replays the exact audio the match fired on.
     if (View.selRegion) {
         const dur = ((View.selRegion.b - View.selRegion.a) / FPS).toFixed(2);
         const span = document.createElement('div');
         span.className = 'drow';
         span.innerHTML = 'matched span: <b>' + dur + ' s</b> · frames ' +
             Math.round(View.selRegion.a) + '–' + Math.round(View.selRegion.b) +
-            (ev.span ? '' : ' <span style="color:#6b7686">(estimated)</span>');
+            (ev.span ? '' : ' <span style="color:#6b7686">(estimated)</span>') + ' ';
+        const region = View.selRegion;
+        if (bro.listen.info().active) {
+            const play = document.createElement('button');
+            play.className = 'dplay';
+            play.textContent = '▶ play';
+            play.title = 'replay the retained audio for this region';
+            play.addEventListener('click', () => playRegion(region));
+            span.appendChild(play);
+        }
         $detail.appendChild(span);
     }
 
@@ -978,7 +1017,14 @@ function startListening() {
             const s = bro.sense.isActive() ? bro.sense.snapshot() : null;
             fusionRow('spot', '"' + name + '" completed @ conf ' + confidence.toFixed(3) +
                 (s && s.voice ? ' · voice run ' + (s.voiceFrames / 100).toFixed(1) + ' s' : ''));
-            logEvent('spot', name, confidence, '', null, span);
+            // The matcher reports the span on the SPOTTER's frame axis; the
+            // timeline + retention run on the shared STREAM axis (bro.sense /
+            // host frames), which diverges from the spotter's once the spotter
+            // joins after sense (live mic). Re-anchor on the stream axis using
+            // the axis-independent matched DURATION ending ~now (the fire just
+            // happened): start = now − matchedFrames. Gestures already report on
+            // the sense axis, so only spots need this.
+            logEvent('spot', name, confidence, '', null, toStreamSpan(span, s));
             flashRow(name);
             armState[name] = false;
         },
@@ -1028,6 +1074,13 @@ $listen.addEventListener('click', () => (listening ? stopListening() : startList
     // Tier-0 first: model-free, always available, no weights needed.
     bro.sense.start({});
     fusionRow('info', 'tier-0 sensors live (level / voice / onset / tonality)');
+
+    // Retain ~10 min of the raw shared stream so a matched region can be
+    // replayed from the detail panel (opt-in; ~38 MB). Source-agnostic — it
+    // captures whatever feeds the host, mic or otherwise.
+    bro.listen.retain(600);
+    fusionRow('info', 'stream retention on — ' +
+        (bro.listen.info().seconds / 60).toFixed(0) + ' min of raw audio kept');
 
     // require('fs') resolves relative paths against the app dir, but the C++
     // loader resolves against the process CWD — hand it an absolute path.
