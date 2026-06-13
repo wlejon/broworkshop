@@ -566,7 +566,14 @@ function eventRegion(ev) {
     }
     if ((ev.type === 'spot' || ev.type === 'arm') && bro.kws.isLoaded()) {
         const v = bro.kws.inspect(ev.name);
-        if (v) return { a: end - v.states.length * 6, b: end };   // ~60 ms/phoneme est.
+        // ~60 ms/phoneme estimate. An arm fires mid-phrase, so span only the
+        // states that actually aligned (ev.detail.matched) — spanning the whole
+        // template would reach back into pre-phrase silence and the replayed
+        // clip would be inaudible.
+        const states = ev.type === 'arm' && ev.detail && ev.detail.matched > 0
+            ? ev.detail.matched
+            : (v ? v.states.length : 10);
+        return { a: end - states * 6, b: end };
     }
     return { a: end - 60, b: end };
 }
