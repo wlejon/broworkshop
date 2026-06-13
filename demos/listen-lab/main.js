@@ -573,7 +573,7 @@ function eventRegion(ev) {
 
 // Replay retained stream audio for a frame range (bro.listen). Pads the clip a
 // little so a short match isn't a clipped blip.
-let audioCtx = null;
+let audioCtx = null, lastClip = -1;
 function playRegion(region) {
     const info = bro.listen.info();
     if (!info.active) { status('audio retention is off', true); return; }
@@ -581,12 +581,12 @@ function playRegion(region) {
     const pcm = bro.listen.audio(Math.round(region.a) - pad, Math.round(region.b) + pad);
     if (!pcm || !pcm.length) { status('audio for that region is no longer retained', true); return; }
     if (!audioCtx) audioCtx = new AudioContext();
-    const buf = audioCtx.createBuffer(1, pcm.length, info.rate);
-    buf.getChannelData(0).set(pcm);
-    const src = audioCtx.createBufferSource();
-    src.buffer = buf;
-    src.connect(audioCtx.destination);
-    src.start();
+    // bro's native clip API: hand it the retained PCM at its source rate (the
+    // listen host runs at 16 kHz; the engine resamples to its own rate) and
+    // play it. Free the previous clip so repeated plays don't accumulate.
+    if (lastClip >= 0) audioCtx.deleteClip(lastClip);
+    lastClip = audioCtx.createClip(pcm, 1, info.rate);
+    audioCtx.playClip(lastClip, 1.0, false);
     status('playing ' + (pcm.length / info.rate).toFixed(2) + ' s clip');
 }
 
