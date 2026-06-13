@@ -271,6 +271,81 @@ assert(detailEl.classList.contains('hidden'), 'detail panel closes');
 console.log('[listen-lab] timeline: ' + listenLab.Stream.count + ' frames · ' +
             listenLab.events.length + ' events · detail inspect ok');
 
+// ── 4c. clip editor: retained clip, offline analysis, tone stability gate ────
+// Each enrolled gesture keeps its raw clip and is editable. bro.sense.analyze
+// gives the per-frame tier-0 timeline the editor overlays; the tone stability
+// gate — a held whistle fires, a swept "cough" pitch does not — is the library
+// fix that motivated the editor.
+
+// (a) offline analysis of a clip mirrors what the matcher enrolls from.
+const whistleClip = concat(silence(0.3), tone(0.6, 1200, 0.2), silence(0.3));
+const an = bro.sense.analyze(whistleClip);
+assert(an.frames > 50 && an.flags.length === an.frames, 'analyze returns a per-frame timeline');
+let tonalFrames = 0, pitchSum = 0, pitchN = 0;
+for (let f = 0; f < an.frames; f++) {
+    if (an.flags[f] & 2) { tonalFrames++; pitchSum += an.dominantHz[f]; pitchN++; }
+}
+assert(tonalFrames > 30, 'analyze marks the sustained tone as tonal (' + tonalFrames + ' frames)');
+assert(pitchN > 0 && Math.abs(pitchSum / pitchN - 1200) < 80,
+       'analyze pitch tracks the 1200 Hz tone (' + (pitchSum / pitchN).toFixed(0) + ' Hz)');
+console.log('[listen-lab] analyze: ' + an.frames + ' frames · ' + tonalFrames +
+            ' tonal · ~' + (pitchSum / pitchN).toFixed(0) + ' Hz');
+
+// (b) enroll the whistle as a tone gesture; its row is editable (clip retained).
+listenLab.enrollGesture('whistle', whistleClip);
+const wv = bro.gesture.inspect('whistle');
+assert(wv && wv.kind === 'tone', 'whistle enrolled as a tone gesture');
+assert(typeof wv.toneSpread === 'number' && wv.toneSpread < 0.05,
+       'a clean whistle enrolls as a steady pitch (spread ' + wv.toneSpread.toFixed(3) + ')');
+assert(pumpUntil(() => Array.from(document.querySelectorAll('.gest')).some((r) =>
+    r.querySelector('.gname').textContent === 'whistle' &&
+    !r.querySelector('.edit').disabled), 5000),
+    'whistle row has an enabled edit button (clip retained)');
+
+// (c) open the editor → waveform canvas + the two tone sliders render.
+const wrow = Array.from(document.querySelectorAll('.gest')).find((r) =>
+    r.querySelector('.gname').textContent === 'whistle');
+wrow.querySelector('.edit').click();
+assert(pumpUntil(() => wrow.querySelector('.gwave'), 3000), 'editor waveform canvas rendered');
+assert(wrow.querySelectorAll('.gslider').length === 2,
+       'tone editor exposes pitch + steadiness sliders');
+console.log('[listen-lab] editor: opened whistle clip editor (' +
+            wrow.querySelectorAll('.gslider').length + ' sliders)');
+
+// (d) the stability gate end-to-end: the steady whistle self-fires…
+{
+    const before = +document.querySelector('#spotCount').textContent;
+    feedPumped(concat(silence(0.4), whistleClip, silence(0.4)));
+    assert(pumpUntil(() => +document.querySelector('#spotCount').textContent > before, 6000),
+           'steady whistle self-fires the tone gesture');
+}
+// …but a swept-pitch "cough" (same mean, wandering) does NOT — the failure the
+// user reported. Continuous-phase 1000→1500 Hz sweep: tonal every frame, mean
+// in-band, but never a held pitch.
+{
+    const n = Math.floor(0.6 * rate), sweep = new Float32Array(n), fade = Math.floor(0.01 * rate);
+    let ph = 0;
+    for (let i = 0; i < n; i++) {
+        const hz = 1000 + 500 * (i / (n - 1));
+        ph += 2 * Math.PI * hz / rate;
+        const g = i >= n - fade ? (n - i) / fade : 1;
+        sweep[i] = 0.2 * g * Math.sin(ph);
+    }
+    const before = +document.querySelector('#spotCount').textContent;
+    feedPumped(concat(silence(0.5), sweep, silence(0.4)));
+    for (let i = 0; i < 30; i++) sleep(20);   // give any (non-)fire time to deliver
+    assert(+document.querySelector('#spotCount').textContent === before,
+           'a swept-pitch cough does NOT fire the whistle (stability gate)');
+    console.log('[listen-lab] stability: steady whistle fires, swept cough rejected');
+}
+
+// clean up the whistle so the next section starts from the seeded state.
+{
+    const r = Array.from(document.querySelectorAll('.gest')).find((x) =>
+        x.querySelector('.gname').textContent === 'whistle');
+    if (r) r.querySelector('.rm').click();
+}
+
 // ── 5. remove the gesture via its × button while live ────────────────────────
 // withMutableGesture bounces the gesture session (stop → remove → listen);
 // afterwards the row is gone and kws listening is untouched (separate member).
