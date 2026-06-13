@@ -307,8 +307,10 @@ const wrow = Array.from(document.querySelectorAll('.gest')).find((r) =>
     r.querySelector('.gname').textContent === 'whistle');
 wrow.querySelector('.edit').click();
 assert(pumpUntil(() => wrow.querySelector('.gwave'), 3000), 'editor waveform canvas rendered');
-assert(wrow.querySelectorAll('.gslider').length === 2,
-       'tone editor exposes pitch + steadiness sliders');
+assert(wrow.querySelectorAll('.gslider').length === 3,
+       'tone editor exposes volume + pitch + steadiness sliders');
+assert(/peak .* dB/.test(wrow.querySelector('.ginfo').textContent),
+       'editor info surfaces the selection peak level (' + wrow.querySelector('.ginfo').textContent + ')');
 console.log('[listen-lab] editor: opened whistle clip editor (' +
             wrow.querySelectorAll('.gslider').length + ' sliders)');
 
@@ -344,6 +346,88 @@ console.log('[listen-lab] editor: opened whistle clip editor (' +
     const r = Array.from(document.querySelectorAll('.gest')).find((x) =>
         x.querySelector('.gname').textContent === 'whistle');
     if (r) r.querySelector('.rm').click();
+}
+
+// ── 4d. volume + scratch-pad (the new edits) ─────────────────────────────────
+// (1) The volume slider scales a clip and bakes the gain into the stored clip
+// on release (re-enroll). (2) A region grabbed off the live timeline (the
+// retained stream) can be promoted to a new gesture, which opens in the editor.
+
+// (1) volume: gainedSlice is the transform; the slider bakes it into clipStore.
+{
+    // gainedSlice scales amplitude exactly.
+    const src = concat(silence(0.2), tone(0.5, 900, 0.15), silence(0.2));
+    const louder = listenLab.gainedSlice(src, 3, 0, src.length);
+    let ps = 0, pl = 0;
+    for (let i = 0; i < src.length; i++) ps = Math.max(ps, Math.abs(src[i]));
+    for (let i = 0; i < louder.length; i++) pl = Math.max(pl, Math.abs(louder[i]));
+    assert(Math.abs(pl - ps * 3) < 1e-4, 'gainedSlice scales amplitude by the gain (' +
+           ps.toFixed(3) + '→' + pl.toFixed(3) + ')');
+
+    listenLab.enrollGesture('vol-test', src);
+    const vrow = Array.from(document.querySelectorAll('.gest')).find((r) =>
+        r.querySelector('.gname').textContent === 'vol-test');
+    vrow.querySelector('.edit').click();
+    assert(pumpUntil(() => vrow.querySelector('.gwave'), 3000), 'vol-test editor opened');
+    const volInput = vrow.querySelector('.gtol .gslider input[type="range"]');
+    assert(volInput && +volInput.max === 4, 'volume slider is the first editor slider (×0–4)');
+    const peak0 = listenLab.clipStore['vol-test'].reduce((m, v) => Math.max(m, Math.abs(v)), 0);
+    // Drive the slider: set value, fire input (live preview) then change (bake).
+    volInput.value = '2.5';
+    volInput.dispatchEvent({ type: 'input' });
+    volInput.dispatchEvent({ type: 'change' });
+    assert(pumpUntil(() => {
+        const c = listenLab.clipStore['vol-test'];
+        const pk = c.reduce((m, v) => Math.max(m, Math.abs(v)), 0);
+        return Math.abs(pk - peak0 * 2.5) < 1e-3;
+    }, 5000), 'volume change baked the 2.5× gain into the stored clip');
+    console.log('[listen-lab] volume: vol-test peak ' + peak0.toFixed(3) + ' → ' +
+                listenLab.clipStore['vol-test'].reduce((m, v) => Math.max(m, Math.abs(v)), 0).toFixed(3));
+    // tidy up
+    Array.from(document.querySelectorAll('.gest')).find((r) =>
+        r.querySelector('.gname').textContent === 'vol-test').querySelector('.rm').click();
+}
+
+// (2) scratch-pad: clip a retained region of the timeline into a new gesture.
+// Feed a fresh whistle so it sits at the live edge, then select that span on
+// the stream axis (the same frames bro.listen.audio + the timeline use) and
+// promote it. The new gesture must enroll from the retained audio and open in
+// the editor.
+{
+    const before = bro.listen.frame();
+    feedPumped(concat(silence(0.3), tone(0.7, 1400, 0.2), silence(0.3)));
+    const after = bro.listen.frame();
+    assert(after > before, 'stream advanced for the scratch source (' + before + '→' + after + ')');
+    // Select the whistle's span (skip the leading/trailing silence padding).
+    listenLab.View.scratchSel = { a: before + 35, b: after - 35 };
+    const sp = listenLab.scratchSpan();
+    assert(sp && sp.b > sp.a, 'scratchSpan clamps to the retained window (' + JSON.stringify(sp) + ')');
+    const gBefore = bro.gesture.templates().length;
+    document.querySelector('#phrase').value = 'from-timeline';
+    listenLab.scratchToGesture();
+    assert(bro.gesture.templates().indexOf('from-timeline') >= 0,
+           'scratch selection enrolled a new gesture');
+    assert(bro.gesture.templates().length === gBefore + 1, 'exactly one new gesture added');
+    assert(listenLab.clipStore['from-timeline'] &&
+           listenLab.clipStore['from-timeline'].length > 0,
+           'the new gesture retained its clip from the timeline audio');
+    let e = 0;
+    const c = listenLab.clipStore['from-timeline'];
+    for (let i = 0; i < c.length; i++) e += c[i] * c[i];
+    assert(e > 0, 'clipped timeline region carries real audio (energy ' + e.toFixed(2) + ')');
+    assert(listenLab.View.scratchSel === null, 'scratch selection cleared after promotion');
+    // It opened straight into the editor.
+    assert(pumpUntil(() => {
+        const r = Array.from(document.querySelectorAll('.gest')).find((x) =>
+            x.querySelector('.gname').textContent === 'from-timeline');
+        return r && r.querySelector('.gwave');
+    }, 3000), 'the new gesture opened in the clip editor');
+    const fv = bro.gesture.inspect('from-timeline');
+    console.log('[listen-lab] scratch: clipped ' + (c.length / rate).toFixed(2) +
+                ' s off the timeline → gesture (' + (fv ? fv.kind : '?') + ')');
+    // tidy up
+    Array.from(document.querySelectorAll('.gest')).find((r) =>
+        r.querySelector('.gname').textContent === 'from-timeline').querySelector('.rm').click();
 }
 
 // ── 5. remove the gesture via its × button while live ────────────────────────

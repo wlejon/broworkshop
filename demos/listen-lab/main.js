@@ -41,7 +41,7 @@ const $voiceDot = $('#voiceDot'), $voiceTxt = $('#voiceTxt'), $voiceSmall = $('#
 const $onsetDot = $('#onsetDot'), $onsetTxt = $('#onsetTxt');
 const $tonalDot = $('#tonalDot'), $tonalTxt = $('#tonalTxt'), $tonalSmall = $('#tonalSmall');
 const $chart = $('#chart'), $feed = $('#feed');
-const $overview = $('#overview'), $detail = $('#detail');
+const $overview = $('#overview'), $detail = $('#detail'), $scratch = $('#scratch');
 const $tlLive = $('#tlLive'), $tlSpan = $('#tlSpan'), $tlHover = $('#tlHover');
 const $phrase = $('#phrase'), $enroll = $('#enroll'), $record = $('#record');
 const $threshold = $('#threshold'), $coverage = $('#coverage'), $listen = $('#listen');
@@ -228,6 +228,7 @@ const View = {
     hoverFrame: -1,
     selId: -1,                // selected event (detail panel open)
     selRegion: null,          // { a, b } frame span highlighted for the selection
+    scratchSel: null,         // { a, b } stream-frame region grabbed for a new clip
 };
 const SPAN_MIN = 2 * FPS, SPAN_MAX = CAP;
 
@@ -315,6 +316,15 @@ function drawTimeline() {
         const xa = xOf(View.selRegion.a), xb = xOf(View.selRegion.b);
         ctx.fillStyle = 'rgba(201,166,255,.12)';
         ctx.fillRect(xa, 0, Math.max(2, xb - xa), H);
+    }
+    // scratch-pad selection: a region the user shift-dragged to clip out of the
+    // live stream (green, distinct from the purple event highlight) + edges.
+    if (View.scratchSel) {
+        const xa = xOf(View.scratchSel.a), xb = xOf(View.scratchSel.b);
+        ctx.fillStyle = 'rgba(84,214,138,.14)';
+        ctx.fillRect(xa, 0, Math.max(2, xb - xa), H);
+        ctx.fillStyle = '#54d68a';
+        ctx.fillRect(xa - 1, 0, 2, H); ctx.fillRect(xb - 1, 0, 2, H);
     }
     // voice / tonal background bands
     for (let c = 0; c < W; c++) {
@@ -476,11 +486,27 @@ function onTimelineHover(e) {
 }
 
 let drag = null;
+let scratchDrag = null;          // { a } anchor frame while shift-dragging a clip region
 function onTimelineDown(e) {
+    // Shift-drag carves a region out of the live stream (the "scratch pad")
+    // instead of panning — release turns it into a new clip.
+    if (e.shiftKey) {
+        const { frame } = frameAtX($chart, e.clientX);
+        scratchDrag = { a: frame };
+        View.scratchSel = { a: frame, b: frame };
+        renderScratchBar();
+        return;
+    }
     drag = { x: e.clientX, end0: viewWindow().end, moved: false };
 }
 function onTimelineMove(e) {
     onTimelineHover(e);
+    if (scratchDrag) {
+        const { frame } = frameAtX($chart, e.clientX);
+        View.scratchSel = { a: Math.min(scratchDrag.a, frame), b: Math.max(scratchDrag.a, frame) };
+        renderScratchBar();
+        return;
+    }
     if (!drag) return;
     const dx = e.clientX - drag.x;
     if (Math.abs(dx) > 2) drag.moved = true;
@@ -491,12 +517,83 @@ function onTimelineMove(e) {
     clampScrub();
 }
 function onTimelineUp(e) {
+    if (scratchDrag) {
+        scratchDrag = null;
+        // A bare shift-click (no real span) just clears any prior selection.
+        if (!View.scratchSel || View.scratchSel.b - View.scratchSel.a < FPS / 10) clearScratch();
+        else renderScratchBar();
+        return;
+    }
     if (drag && !drag.moved) {                 // a click, not a drag → select
         const { frame, } = frameAtX($chart, e.clientX);
         const ev = hitEvent(frame, viewWindow().span);
         if (ev) selectEvent(ev); else closeDetail();
     }
     drag = null;
+}
+
+// ── scratch pad — turn a grabbed timeline region into a clip ──────────────────
+// The timeline already retains ~10 min of raw audio (bro.listen). A shift-drag
+// marks a span on the stream axis; this bar lets you audition it and promote it
+// to a gesture, which opens straight into the clip editor (trim / volume / tune).
+
+function clearScratch() {
+    View.scratchSel = null;
+    $scratch.classList.add('hidden');
+    $scratch.innerHTML = '';
+}
+
+function scratchSpan() {
+    // Clamp the dragged region to what's actually retained on the stream axis.
+    if (!View.scratchSel) return null;
+    const a = Math.max(Stream.oldestFrame(), Math.round(View.scratchSel.a));
+    const b = Math.min(Stream.newestFrame(), Math.round(View.scratchSel.b));
+    return b > a ? { a, b } : null;
+}
+
+function renderScratchBar() {
+    const sel = View.scratchSel;
+    if (!sel) { clearScratch(); return; }
+    $scratch.classList.remove('hidden');
+    $scratch.innerHTML = '';
+    const dur = (sel.b - sel.a) / FPS;
+    const label = document.createElement('span');
+    label.className = 'slabel sgrow';
+    label.innerHTML = 'timeline selection <b>' + dur.toFixed(2) + ' s</b> · frames ' +
+        Math.round(sel.a) + '–' + Math.round(sel.b);
+    $scratch.appendChild(label);
+
+    const retained = bro.listen.info().active;
+    $scratch.appendChild(mkbtn('▶ Play', () => {
+        const sp = scratchSpan();
+        if (sp) playRegion(sp);
+    }));
+    const make = mkbtn('✚ Gesture from selection', scratchToGesture);
+    make.className = 'smake';
+    make.disabled = !retained || !kwsReady;
+    make.title = !retained ? 'stream retention is off'
+        : !kwsReady ? 'the listen host is still loading'
+        : 'enroll this slice of the timeline as a new gesture and open it for editing';
+    $scratch.appendChild(make);
+    const x = mkbtn('×', clearScratch);
+    x.className = 'sx'; x.title = 'clear selection';
+    $scratch.appendChild(x);
+}
+
+function scratchToGesture() {
+    const sp = scratchSpan();
+    if (!sp) { status('selection is no longer on the timeline', true); return; }
+    if (!kwsReady) { status('gestures need the listen host (still loading)', true); return; }
+    if (!bro.listen.info().active) { status('stream retention is off — nothing to capture', true); return; }
+    const pcm = bro.listen.audio(sp.a, sp.b);
+    if (!pcm || !pcm.length) { status('that region is no longer retained', true); return; }
+    const name = $phrase.value.trim() || ('clip-' + (++gestureN));
+    openEditor = name;                 // renderGestureRows opens the editor for it
+    enrollGesture(name, pcm);          // retains the clip + re-renders the rows
+    $phrase.value = '';
+    clearScratch();
+    status('made gesture "' + name + '" from ' + ((sp.b - sp.a) / FPS).toFixed(2) +
+        ' s of the timeline — trim / set volume / tune below');
 }
 function onTimelineWheel(e) {
     e.preventDefault();
@@ -1049,6 +1146,22 @@ function pitchColor(hz, alpha) {
     return 'hsla(' + (210 - t * 210).toFixed(0) + ',72%,56%,' + (alpha != null ? alpha : 0.34) + ')';
 }
 
+// Volume: the editor keeps a base clip and a gain multiplier; gain is baked
+// into the stored clip on re-enroll (so it survives, and the matcher sees the
+// louder/quieter signal — a too-quiet clip whose onsets/tone never crossed the
+// sensor thresholds can be rescued by turning it up). gain 1 = unchanged.
+function gainedSlice(clip, gain, a, b) {
+    const out = new Float32Array(b - a);
+    for (let i = a; i < b; i++) out[i - a] = clip[i] * gain;
+    return out;
+}
+
+function clipPeakDb(clip, gain, a, b) {
+    let pk = 0;
+    for (let i = a; i < b; i++) { const v = Math.abs(clip[i] * gain); if (v > pk) pk = v; }
+    return pk > 0 ? 20 * Math.log10(pk) : -Infinity;
+}
+
 function fitWave(canvas, w, h) {
     const dpr = window.devicePixelRatio || 1;
     canvas.style.width = w + 'px';
@@ -1084,11 +1197,12 @@ function drawWave(ed) {
 
     ctx.strokeStyle = '#9aa6bc'; ctx.lineWidth = 1;
     ctx.beginPath();
+    const g = ed.gain;
     for (let px = 0; px < w; px++) {
         const s0 = Math.floor(px / w * n);
         const s1 = Math.max(s0 + 1, Math.floor((px + 1) / w * n));
         let mn = 1, mx = -1;
-        for (let i = s0; i < s1 && i < n; i++) { const val = clip[i]; if (val < mn) mn = val; if (val > mx) mx = val; }
+        for (let i = s0; i < s1 && i < n; i++) { const val = clip[i] * g; if (val < mn) mn = val; if (val > mx) mx = val; }
         if (mn > mx) { mn = 0; mx = 0; }
         ctx.moveTo(px + 0.5, mid - mx * mid * 0.92);
         ctx.lineTo(px + 0.5, mid - mn * mid * 0.92);
@@ -1111,12 +1225,16 @@ function drawWave(ed) {
 }
 
 function updateInfo(ed) {
-    const dur = (ed.sel.b - ed.sel.a) / GEST_RATE;
+    const a = Math.round(ed.sel.a), b = Math.round(ed.sel.b);
+    const dur = (b - a) / GEST_RATE;
     const v = ed.v;
     const kindStr = v ? (v.kind === 'tone'
         ? 'tone · ' + Math.round(v.toneHz) + ' Hz · captured ±' + (v.toneSpread * 100).toFixed(1) + '% spread'
         : 'rhythm · ' + (v.intervalsMs.length + 1) + ' taps') : '';
-    ed.info.textContent = 'selection ' + dur.toFixed(2) + ' s · ' + kindStr;
+    const pk = clipPeakDb(ed.clip, ed.gain, a, b);
+    const pkStr = ' · peak ' + (pk === -Infinity ? '−∞' : pk.toFixed(1)) + ' dB' +
+        (pk > -0.1 ? ' ⚠ clipping' : '');
+    ed.info.textContent = 'selection ' + dur.toFixed(2) + ' s · ' + kindStr + pkStr;
 }
 
 function attachTrim(ed) {
@@ -1166,6 +1284,31 @@ function addSlider(parent, label, key, val, min, max, step, name) {
     parent.appendChild(wrap);
 }
 
+// Volume slider: live visual scaling while dragging, then bakes the gain into
+// the stored clip on release (re-enroll) so the matcher sees the new level and
+// the change persists. Distinct from addSlider — gain transforms the clip, not
+// a policy key, and reads as a ×multiplier rather than a percent.
+function addGainSlider(parent, ed, name) {
+    const wrap = document.createElement('label');
+    wrap.className = 'gslider';
+    const span = document.createElement('span'); span.textContent = 'volume';
+    const input = document.createElement('input');
+    input.type = 'range'; input.min = 0; input.max = 4; input.step = 0.05; input.value = ed.gain;
+    const out = document.createElement('b'); out.textContent = '×' + ed.gain.toFixed(2);
+    input.addEventListener('input', () => {
+        ed.gain = +input.value;
+        out.textContent = '×' + ed.gain.toFixed(2);
+        drawWave(ed); updateInfo(ed);          // live preview; hue re-analyses on bake
+    });
+    input.addEventListener('change', () => {
+        ed.gain = +input.value;
+        if (Math.abs(ed.gain - 1) < 1e-3) return;   // nothing to bake
+        reEnroll(name, gainedSlice(ed.clip, ed.gain, 0, ed.clip.length), policyStore[name]);
+    });
+    wrap.append(span, input, out);
+    parent.appendChild(wrap);
+}
+
 function buildEditor(name) {
     const row = gestRows[name];
     if (!row) return;
@@ -1174,7 +1317,7 @@ function buildEditor(name) {
     detachEditor();
     row.editBtn.classList.add('open');
     const v = bro.gesture.inspect(name);
-    const ed = { name, clip, analysis: bro.sense.analyze(clip), v,
+    const ed = { name, clip, analysis: bro.sense.analyze(clip), v, gain: 1,
                  sel: { a: 0, b: clip.length }, canvas: null, info: null };
     currentEd = ed;
 
@@ -1193,19 +1336,20 @@ function buildEditor(name) {
     const acts = document.createElement('div');
     acts.className = 'gacts';
     acts.appendChild(mkbtn('▶ Play', () =>
-        playSamples(clip.subarray(Math.round(ed.sel.a), Math.round(ed.sel.b)), GEST_RATE)));
+        playSamples(gainedSlice(clip, ed.gain, Math.round(ed.sel.a), Math.round(ed.sel.b)), GEST_RATE)));
     const rerec = mkbtn('● Re-record', () => startRecord(name, rerec));
     acts.appendChild(rerec);
     acts.appendChild(mkbtn('✂ Trim & re-enroll', () => {
         const a = Math.round(ed.sel.a), b = Math.round(ed.sel.b);
         if (b - a < GEST_RATE / 10) { status('selection too short (<0.1 s)', true); return; }
-        reEnroll(name, clip.slice(a, b), policyStore[name]);
+        reEnroll(name, gainedSlice(clip, ed.gain, a, b), policyStore[name]);
     }));
     body.appendChild(acts);
 
     const tol = document.createElement('div');
     tol.className = 'gtol';
     const pol = policyStore[name] || {};
+    addGainSlider(tol, ed, name);          // volume applies to both kinds
     if (v && v.kind === 'tone') {
         addSlider(tol, 'pitch ±', 'pitchTol', pol.pitchTol != null ? pol.pitchTol : 0.12, 0.02, 0.30, 0.01, name);
         addSlider(tol, 'steadiness', 'pitchStabilityTol', pol.pitchStabilityTol != null ? pol.pitchStabilityTol : 0.06, 0.01, 0.20, 0.005, name);
@@ -1441,4 +1585,6 @@ globalThis.listenLab = {
     enrollGesture,
     Stream, events, View, phLabels,
     selectEvent, closeDetail, decodedOver,
+    scratchToGesture, renderScratchBar, clearScratch, scratchSpan,
+    buildEditor, gainedSlice, clipStore, gestRows,
 };
