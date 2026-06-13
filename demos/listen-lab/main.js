@@ -239,9 +239,24 @@ function viewWindow() {
 
 const MARK = { spot: '#54d68a', gesture: '#c9a6ff', arm: '#c9a6ff' };
 
+// Size a canvas's backing store to physical pixels (CSS size × devicePixelRatio)
+// so lines/text render crisp on HiDPI displays. Display width stays responsive
+// via CSS (calc 100%); the design height is pinned inline. Draw code works in
+// logical CSS pixels (_cw/_ch) and each draw resets the DPR transform.
+function sizeCanvas(canvas) {
+    const dpr = window.devicePixelRatio || 1;
+    const cssH = canvas._ch || canvas.height;        // fixed design height (200/46)
+    canvas.style.height = cssH + 'px';               // pin display height; backing store scales
+    const cssW = Math.max(400, canvas.clientWidth || 800);
+    canvas.width = Math.round(cssW * dpr);
+    canvas.height = Math.round(cssH * dpr);
+    canvas._cw = cssW; canvas._ch = cssH; canvas._dpr = dpr;
+}
+
 function drawTimeline() {
     const ctx = $chart.getContext('2d');
-    const W = $chart.width, H = $chart.height;
+    const W = $chart._cw, H = $chart._ch;
+    ctx.setTransform($chart._dpr, 0, 0, $chart._dpr, 0, 0);
     ctx.fillStyle = '#0d1016';
     ctx.fillRect(0, 0, W, H);
     if (!Stream.count) return;
@@ -366,7 +381,8 @@ function drawTimeTicks(ctx, W, H, start, span) {
 
 function drawOverview() {
     const ctx = $overview.getContext('2d');
-    const W = $overview.width, H = $overview.height;
+    const W = $overview._cw, H = $overview._ch;
+    ctx.setTransform($overview._dpr, 0, 0, $overview._dpr, 0, 0);
     ctx.fillStyle = '#0a0c11'; ctx.fillRect(0, 0, W, H);
     if (!Stream.count) return;
     const f0 = Stream.oldestFrame(), f1 = Stream.newestFrame();
@@ -399,9 +415,9 @@ function drawStream() { drawTimeline(); drawOverview(); }
 
 function frameAtX(canvas, clientX) {
     const r = canvas.getBoundingClientRect();
-    const mx = (clientX - r.left) / r.width * canvas.width;
+    const mx = (clientX - r.left) / r.width * canvas._cw;
     const { start, span } = viewWindow();
-    return { frame: start + mx / canvas.width * span, mx };
+    return { frame: start + mx / canvas._cw * span, mx };
 }
 
 function setLive(on) {
@@ -411,7 +427,7 @@ function setLive(on) {
 
 function hitEvent(frame, span) {
     // Nearest event within ~6 px of the cursor frame.
-    const tolFrames = span / $chart.width * 7;
+    const tolFrames = span / $chart._cw * 7;
     let best = null, bd = tolFrames;
     for (const ev of events) {
         const d = Math.abs(ev.frame - frame);
@@ -1049,7 +1065,12 @@ $listen.addEventListener('click', () => (listening ? stopListening() : startList
 // ── boot ─────────────────────────────────────────────────────────────────────
 
 (function boot() {
-    $chart.width = $overview.width = Math.max(400, $chart.clientWidth || 800);
+    sizeCanvas($chart);
+    sizeCanvas($overview);
+    window.addEventListener('resize', () => {
+        sizeCanvas($chart); sizeCanvas($overview);
+        drawStream();
+    });
 
     // Timeline interaction: drag to pan, wheel to zoom, click a marker to
     // inspect, Live to re-pin the edge, overview to scrub the full history.
