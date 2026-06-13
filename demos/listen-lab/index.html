@@ -87,20 +87,26 @@
   .transcript .txstat.live { color: #36c5d0; }
   .transcript .txtoggle { margin-left: auto; padding: 1px 9px; border-radius: 10px; font-size: 11px; }
   .transcript .txlive {
-    min-height: 21px; font-size: 14px; color: #9fe7ef; line-height: 1.4;
+    height: 21px; font-size: 14px; color: #9fe7ef; line-height: 21px;
     font-family: ui-monospace, monospace;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   .transcript .txlive .cur { color: #36c5d0; animation: blink 1s step-start infinite; }
   .transcript .txlive .ph { color: #46555c; font-size: 12px; }
   @keyframes blink { 50% { opacity: 0; } }
   .transcript .txlines {
-    display: flex; flex-direction: column; gap: 1px; margin-top: 6px;
-    max-height: 96px; overflow-y: auto;
+    display: flex; flex-direction: column; margin-top: 6px;
+    max-height: 116px; overflow-y: auto;
   }
-  .transcript .txline { display: flex; gap: 8px; font-size: 12px; cursor: pointer; padding: 1px 2px; border-radius: 4px; }
+  .transcript .txline {
+    display: flex; gap: 8px; font-size: 12px; cursor: pointer; padding: 2px 4px;
+    border-radius: 4px; border-left: 2px solid transparent; align-items: baseline;
+  }
   .transcript .txline:hover { background: #10242a; }
-  .transcript .txline .tt { color: #4f6066; font-variant-numeric: tabular-nums; }
-  .transcript .txline .tx { color: #c8d2dc; }
+  .transcript .txline.playing { background: #10303a; border-left-color: #36c5d0; }
+  .transcript .txline .tt { color: #4f6066; font-variant-numeric: tabular-nums; flex: none; }
+  .transcript .txline .tx { color: #c8d2dc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .transcript .txline.playing .tx { color: #9fe7ef; }
 
   /* ── click-to-inspect detail panel ────────────────────────────────────── */
   .detail { margin: 10px 14px 0; background: #11141b; border: 1px solid #2c3c57; border-radius: 8px; padding: 10px 12px; font-size: 12px; }

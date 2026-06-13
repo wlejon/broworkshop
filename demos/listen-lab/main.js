@@ -386,6 +386,23 @@ function drawTimeline() {
         ctx.beginPath(); ctx.arc(x, 13, sel ? 5 : 4, 0, Math.PI * 2); ctx.fill();
     }
 
+    // playback: the region being auditioned (cyan band) + a swept playhead.
+    const frac = playFrac();
+    if (frac >= 0) {
+        const xa = xOf(Playback.a), xb = xOf(Playback.b);
+        ctx.fillStyle = 'rgba(54,197,208,.10)';
+        ctx.fillRect(xa, 0, Math.max(2, xb - xa), H);
+        const ph = Playback.a + frac * (Playback.b - Playback.a);
+        if (ph >= start && ph <= end) {
+            const x = xOf(ph);
+            ctx.strokeStyle = '#36c5d0'; ctx.lineWidth = 1.5;
+            ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+            ctx.fillStyle = '#36c5d0';
+            ctx.beginPath(); ctx.moveTo(x - 4, 0); ctx.lineTo(x + 4, 0); ctx.lineTo(x, 7); ctx.closePath(); ctx.fill();
+            ctx.lineWidth = 1;
+        }
+    }
+
     // hover cursor + time ticks
     if (View.hoverFrame >= start && View.hoverFrame <= end) {
         const x = xOf(View.hoverFrame);
@@ -677,14 +694,52 @@ function eventRegion(ev) {
     return { a: end - 60, b: end };
 }
 
+// ── playhead — sweep a marker across the region being auditioned ──────────────
+// The clip API has no position query, so we interpolate on wall-clock: playback
+// starts immediately, so a marker swept across the played span over the clip's
+// duration stays in sync. Drawn on the timeline so clicking a transcript line
+// (or a detail ▶) shows WHERE on the stream the audio you're hearing lives.
+const Playback = { active: false, a: 0, b: 0, startMs: 0, durMs: 0, key: '' };
+
+function startPlayhead(a, b, durSec, key) {
+    Playback.active = true; Playback.a = a; Playback.b = b;
+    Playback.startMs = Date.now(); Playback.durMs = Math.max(60, durSec * 1000);
+    Playback.key = key || '';
+}
+// Fraction played [0,1], or -1 when idle. Pure read — deactivation is handled by
+// updatePlayback() so drawTimeline can call this every frame without side effects.
+function playFrac() {
+    if (!Playback.active) return -1;
+    return Math.min(1, (Date.now() - Playback.startMs) / Playback.durMs);
+}
+function updatePlayback() {
+    if (Playback.active && Date.now() - Playback.startMs >= Playback.durMs) {
+        Playback.active = false;
+        renderLines();              // drop the "playing" row highlight when it ends
+    }
+}
+
+// Bring a stream region into view without snapping back to the live edge — used
+// when a transcript line is clicked, so the timeline scrubs to where it was said.
+function focusRegion(a, b) {
+    const margin = Math.max(FPS, (b - a) * 0.6);
+    View.span = Math.min(SPAN_MAX, Math.max(SPAN_MIN, (b - a) + 2 * margin));
+    setLive(false);
+    View.endFrame = Math.min(Stream.newestFrame(), b + margin);
+    const span = viewWindow().span;
+    if (View.endFrame - span < Stream.oldestFrame()) View.endFrame = Stream.oldestFrame() + span;
+}
+
 // Replay retained stream audio for a frame range (bro.listen). Pads the clip a
-// little so a short match isn't a clipped blip.
+// little so a short match isn't a clipped blip, and sweeps a playhead across the
+// padded span (`key` identifies the transcript row driving it, for highlighting).
 let audioCtx = null, lastClip = -1;
-function playRegion(region) {
+function playRegion(region, key) {
     const info = bro.listen.info();
     if (!info.active) { status('audio retention is off', true); return; }
     const pad = Math.round(0.25 * info.frameRate);
-    const pcm = bro.listen.audio(Math.round(region.a) - pad, Math.round(region.b) + pad);
+    const a = Math.round(region.a) - pad, b = Math.round(region.b) + pad;
+    const pcm = bro.listen.audio(a, b);
     if (!pcm || !pcm.length) { status('audio for that region is no longer retained', true); return; }
     if (!audioCtx) audioCtx = new AudioContext();
     // bro's native clip API: hand it the retained PCM at its source rate (the
@@ -693,6 +748,7 @@ function playRegion(region) {
     if (lastClip >= 0) audioCtx.deleteClip(lastClip);
     lastClip = audioCtx.createClip(pcm, 1, info.rate);
     audioCtx.playClip(lastClip, 1.0, false);
+    startPlayhead(a, b, pcm.length / info.rate, key);
     status('playing ' + (pcm.length / info.rate).toFixed(2) + ' s clip');
 }
 
@@ -1047,9 +1103,15 @@ function txSetStatus(text, err, live) {
     $txToggle.textContent = Transcribe.enabled ? '⏸' : '▶';
 }
 
+// The live partial is held to ONE line: keep the TAIL (newest words) so a long
+// in-progress utterance doesn't wrap and shove the panel around (that growth was
+// the "lines clobber each other" the list seemed to do).
+const TX_PARTIAL_MAX = 96;
 function renderPartial() {
     if (Transcribe.partial) {
-        $txLive.textContent = Transcribe.partial + ' ';
+        let p = Transcribe.partial;
+        if (p.length > TX_PARTIAL_MAX) p = '…' + p.slice(p.length - TX_PARTIAL_MAX);
+        $txLive.textContent = p + ' ';
         const cur = document.createElement('span');
         cur.className = 'cur'; cur.textContent = '▌';
         $txLive.appendChild(cur);
@@ -1060,19 +1122,29 @@ function renderPartial() {
     }
 }
 
+const lineKey = (ln) => ln.a + '-' + ln.b;
+
+// Each committed line is the INDEX into the timeline: a single ellipsized row
+// that, clicked, scrubs the timeline to where it was said and plays it with a
+// swept playhead. The row driving the current playback is highlighted.
 function renderLines() {
     $txLines.innerHTML = '';
     for (const ln of Transcribe.lines) {
         const row = document.createElement('div');
-        row.className = 'txline';
-        row.title = 'replay this utterance';
+        row.className = 'txline' +
+            (Playback.active && Playback.key === lineKey(ln) ? ' playing' : '');
+        row.title = 'jump to the timeline and play';
         const mm = Math.floor(ln.t / 60), ss = Math.floor(ln.t % 60);
         const t = document.createElement('span');
         t.className = 'tt'; t.textContent = mm + ':' + String(ss).padStart(2, '0');
         const tx = document.createElement('span');
         tx.className = 'tx'; tx.textContent = ln.text;
         row.append(t, tx);
-        row.addEventListener('click', () => playRegion({ a: ln.a, b: ln.b }));
+        row.addEventListener('click', () => {
+            focusRegion(ln.a, ln.b);
+            playRegion({ a: ln.a, b: ln.b }, lineKey(ln));
+            renderLines();          // reflect the new playing row immediately
+        });
         $txLines.appendChild(row);
     }
 }
@@ -1234,6 +1306,7 @@ function tick() {
         const p = bro.kws.progress();
         if (p) updateTemplateRows(p, s);
     }
+    updatePlayback();
     drawStream();
     requestAnimationFrame(tick);
 }
@@ -1831,6 +1904,7 @@ globalThis.listenLab = {
     selectEvent, closeDetail, decodedOver,
     scratchToGesture, renderScratchBar, clearScratch, scratchSpan,
     buildEditor, gainedSlice, clipStore, gestRows,
+    Playback, focusRegion, playFrac,
     // tier-3 transcript: real loader (manual e2e check) + a stub installer that
     // makes the VAD-gated lifecycle testable without the 2.4 GB Parakeet load.
     Transcribe, loadTranscriber: txLoad,

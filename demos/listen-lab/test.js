@@ -515,9 +515,21 @@ console.log('[listen-lab] editor: opened whistle clip editor (' +
     assert(/model heard here/.test(document.querySelector('#detail').textContent),
            'selecting the speech marker opens its detail panel');
     listenLab.closeDetail();
+
+    // Clicking the committed line binds it to the timeline: scrub there + play +
+    // a swept playhead, with the row highlighted as playing.
+    document.querySelector('#txLines .txline').click();
+    assert(listenLab.Playback.active, 'clicking a transcript line started playback (playhead)');
+    assert(listenLab.Playback.key === (line.a + '-' + line.b),
+           'playhead bound to the clicked utterance (' + listenLab.Playback.key + ')');
+    assert(listenLab.playFrac() >= 0, 'playhead fraction is live');
+    assert(!listenLab.View.follow, 'timeline left follow mode to focus the utterance');
+    assert(document.querySelector('#txLines .txline.playing'),
+           'the clicked line is highlighted as playing');
+    listenLab.View.follow = true;     // re-pin live for the remaining sections
     console.log('[listen-lab] transcript: voice-gated commit "' + line.text + '" · ' +
                 txCalls + ' passes · ' + lastPcmLen + ' samples · span ' +
-                (spEv.span.b - spEv.span.a) + 'f');
+                (spEv.span.b - spEv.span.a) + 'f · click→playhead @ ' + listenLab.Playback.key);
 }
 
 // ── 5. remove the gesture via its × button while live ────────────────────────
