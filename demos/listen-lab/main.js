@@ -246,8 +246,12 @@ const MARK = { spot: '#54d68a', gesture: '#c9a6ff', arm: '#c9a6ff' };
 function sizeCanvas(canvas) {
     const dpr = window.devicePixelRatio || 1;
     const cssH = canvas._ch || canvas.height;        // fixed design height (200/46)
-    canvas.style.height = cssH + 'px';               // pin display height; backing store scales
     const cssW = Math.max(400, canvas.clientWidth || 800);
+    // Only re-allocate when the display size or DPR actually changed — this runs
+    // every frame, so it self-corrects after boot layout settles or a resize,
+    // without leaning on the resize event firing at exactly the right moment.
+    if (canvas._cw === cssW && canvas._ch === cssH && canvas._dpr === dpr) return;
+    canvas.style.height = cssH + 'px';               // pin display height; backing store scales
     canvas.width = Math.round(cssW * dpr);
     canvas.height = Math.round(cssH * dpr);
     canvas._cw = cssW; canvas._ch = cssH; canvas._dpr = dpr;
@@ -409,7 +413,12 @@ function drawOverview() {
     ctx.strokeRect(Math.max(0.5, xa), 0.5, Math.max(2, xb - xa), H - 1);
 }
 
-function drawStream() { drawTimeline(); drawOverview(); }
+function drawStream() {
+    sizeCanvas($chart);
+    sizeCanvas($overview);
+    drawTimeline();
+    drawOverview();
+}
 
 // ── timeline interaction ──────────────────────────────────────────────────────
 
@@ -1067,10 +1076,8 @@ $listen.addEventListener('click', () => (listening ? stopListening() : startList
 (function boot() {
     sizeCanvas($chart);
     sizeCanvas($overview);
-    window.addEventListener('resize', () => {
-        sizeCanvas($chart); sizeCanvas($overview);
-        drawStream();
-    });
+    // drawStream() re-checks canvas size every frame (see sizeCanvas), so it
+    // self-corrects on resize / DPI change without a separate resize listener.
 
     // Timeline interaction: drag to pan, wheel to zoom, click a marker to
     // inspect, Live to re-pin the edge, overview to scrub the full history.
