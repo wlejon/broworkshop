@@ -81,7 +81,7 @@ function fusionRow(kind, text) {
 
 const dbPct = (db) => Math.max(0, Math.min(100, (db + 80) / 80 * 100));
 
-function updateSensorCards(s) {
+function updateSensorCards(s, ph) {
     $dbBig.textContent = (s.db <= -90 ? '−∞' : s.db.toFixed(1)) + ' dB';
     $levelFill.style.width = dbPct(s.db).toFixed(0) + '%';
     $floorMark.style.left = dbPct(s.noiseFloorDb).toFixed(0) + '%';
@@ -90,9 +90,10 @@ function updateSensorCards(s) {
 
     $voiceDot.className = 'dot' + (s.voice ? ' on' : '');
     $voiceTxt.textContent = s.voice ? 'voice' : 'quiet';
-    $voiceSmall.textContent = s.voice
+    $voiceSmall.textContent = (s.voice
         ? 'run ' + (s.voiceFrames / 100).toFixed(1) + ' s · events ' + s.voiceEvents
-        : 'events ' + s.voiceEvents;
+        : 'events ' + s.voiceEvents) +
+        (ph ? ' · /' + ph.label + '/' : '');
 
     // Onset is true only on its trigger frame; hold the dot lit briefly via
     // the last-event frame index instead of trying to catch that one frame.
@@ -124,14 +125,18 @@ const Stream = {
     peak:  new Float32Array(CAP),
     domHz: new Float32Array(CAP),
     flags: new Uint8Array(CAP),           // bit0 voice · bit1 tonal · bit2 onset
+    phCls: new Int16Array(CAP),           // tier-1: top phoneme class (0 = silence)
+    phP:   new Float32Array(CAP),         //         its posterior
     head: 0, count: 0,
-    push(prev, s) {
+    push(prev, s, ph) {
         const i = this.head;
         this.frame[i] = s.frames;
         this.db[i] = s.db; this.floor[i] = s.noiseFloorDb;
         this.peak[i] = s.peak; this.domHz[i] = s.tonal ? s.dominantHz : 0;
         this.flags[i] = (s.voice ? 1 : 0) | (s.tonal ? 2 : 0) |
             ((prev && s.onsets > prev.onsets) ? 4 : 0);
+        this.phCls[i] = ph ? ph.cls : 0;
+        this.phP[i] = ph ? ph.p : 0;
         this.head = (i + 1) % CAP;
         this.count = Math.min(this.count + 1, CAP);
     },
@@ -173,6 +178,33 @@ function logEvent(type, name, conf, kind, detail) {
     return ev;
 }
 
+// ── tier-1 phoneme stream (bro.kws.posterior) ─────────────────────────────────
+// The model's raw per-frame readout — which phoneme PhonemeNet is hearing,
+// independent of any template. Stored alongside the sensors in the ring so the
+// timeline and detail panel can show what was actually decoded where; class
+// labels are learned from the live stream (cls 0 == silence).
+
+const phLabels = { 0: 'sil' };
+const PH_CONF = 0.45;          // posterior above which a phoneme counts as heard
+
+// Collapse the ring's per-frame top phoneme over [a,b] into a legible run:
+// drop silence/low-confidence frames, merge adjacent duplicates — what the
+// model decoded across a span (e.g. the region a spot matched).
+function decodedOver(a, b) {
+    const out = [];
+    let last = -1;
+    for (let i = 0; i < Stream.count; i++) {
+        const sl = Stream.slot(i), f = Stream.frame[sl];
+        if (f < a || f > b) continue;
+        const cls = Stream.phCls[sl];
+        if (cls === 0 || Stream.phP[sl] < PH_CONF) { last = -1; continue; }
+        if (cls === last) continue;
+        out.push(phLabels[cls] || ('#' + cls));
+        last = cls;
+    }
+    return out;
+}
+
 // ── view + interaction ────────────────────────────────────────────────────────
 
 const View = {
@@ -201,14 +233,17 @@ function drawTimeline() {
     if (!Stream.count) return;
     const { start, end, span } = viewWindow();
     const xOf = (f) => (f - start) / span * W;
-    const yOf = (db) => (1 - Math.max(0, Math.min(1, (db + 80) / 80))) * (H - 16) + 6;
+    const yOf = (db) => (1 - Math.max(0, Math.min(1, (db + 80) / 80))) * (H - 26) + 6;
+    const phLaneY = H - 22;       // tier-1 phoneme lane sits below the envelope
 
     // Reduce visible samples into per-pixel columns: min/max dB envelope, the
-    // floor, OR'd flags, peak, dominant pitch.
+    // floor, OR'd flags, and the column's dominant (highest-posterior) phoneme.
     const minDb = new Float32Array(W).fill(999);
     const maxDb = new Float32Array(W).fill(-999);
     const floor = new Float32Array(W).fill(-999);
     const flags = new Uint8Array(W);
+    const phCls = new Int16Array(W);
+    const phP   = new Float32Array(W);
     let any = false;
     for (let i = 0; i < Stream.count; i++) {
         const sl = Stream.slot(i), f = Stream.frame[sl];
@@ -219,6 +254,9 @@ function drawTimeline() {
         if (db > maxDb[c]) maxDb[c] = db;
         floor[c] = Stream.floor[sl];
         flags[c] |= Stream.flags[sl];
+        if (Stream.phCls[sl] > 0 && Stream.phP[sl] > phP[c]) {
+            phP[c] = Stream.phP[sl]; phCls[c] = Stream.phCls[sl];
+        }
         any = true;
     }
     if (!any) return;
@@ -258,6 +296,23 @@ function drawTimeline() {
     // onset ticks
     ctx.fillStyle = '#ffb454';
     for (let c = 0; c < W; c++) if (flags[c] & 4) ctx.fillRect(c - 1, 0, 2, 9);
+
+    // tier-1 phoneme lane: cyan where the model decodes a phoneme (distinct
+    // from the green energy-VAD band — model evidence, not just energy), with
+    // labels once the window is zoomed in enough to read them.
+    const showPhLabels = span <= 18 * FPS;
+    if (showPhLabels) { ctx.font = '9px ui-monospace, monospace'; ctx.textAlign = 'left'; }
+    let prevPh = -1;
+    for (let c = 0; c < W; c++) {
+        if (phCls[c] <= 0 || phP[c] < PH_CONF) { prevPh = -1; continue; }
+        ctx.fillStyle = '#36c5d0';
+        ctx.fillRect(c, phLaneY, 1, 5);
+        if (showPhLabels && phCls[c] !== prevPh) {
+            ctx.fillStyle = '#9fe7ef';
+            ctx.fillText(phLabels[phCls[c]] || ('#' + phCls[c]), c + 1, phLaneY - 1);
+        }
+        prevPh = phCls[c];
+    }
 
     // event markers
     for (const ev of events) {
@@ -514,6 +569,32 @@ function selectEvent(ev) {
             $detail.appendChild(chips);
         }
     }
+
+    // What the MODEL actually decoded over the matched region (tier-1), from
+    // the ring — independent of the template. For a phrase this is the heard
+    // phonemes; for a gesture, this is the tell: real phonemes here mean the
+    // "non-speech" gesture actually fired on speech (a fuser would veto it).
+    if (View.selRegion) {
+        const heard = decodedOver(View.selRegion.a, View.selRegion.b);
+        const row = document.createElement('div');
+        row.className = 'drow';
+        if (heard.length) {
+            row.innerHTML = 'model heard here: ';
+            const seq = document.createElement('span');
+            seq.className = 'dchips';
+            seq.style.display = 'inline-flex';
+            for (const lbl of heard) seq.appendChild(chip(lbl, false));
+            row.appendChild(seq);
+            if (ev.type === 'gesture')
+                row.appendChild(Object.assign(document.createElement('div'), {
+                    className: 'drow',
+                    textContent: '⚠ phonemes present — this non-speech match overlaps speech',
+                }));
+        } else {
+            row.innerHTML = 'model heard here: <b>no phonemes</b> (non-speech)';
+        }
+        $detail.appendChild(row);
+    }
 }
 
 function closeDetail() {
@@ -699,9 +780,19 @@ let lastS = null;
 
 function tick() {
     const s = bro.sense.isActive() ? bro.sense.snapshot() : null;
+    // tier-1: the live top phoneme, cached and ring-stored alongside the sensors.
+    let ph = null;
+    if (kwsReady && bro.kws.isLoaded()) {
+        const post = bro.kws.posterior(1);
+        if (post && post.top.length) {
+            const top = post.top[0];
+            phLabels[top.cls] = top.label;
+            if (top.cls !== 0 && top.p >= PH_CONF) ph = top;
+        }
+    }
     if (s) {
-        updateSensorCards(s);
-        if (!lastS || s.frames > lastS.frames) Stream.push(lastS, s);
+        updateSensorCards(s, ph);
+        if (!lastS || s.frames > lastS.frames) Stream.push(lastS, s, ph);
         if (lastS) emitTier0Events(lastS, s);
         lastS = s;
     }
@@ -961,6 +1052,6 @@ $listen.addEventListener('click', () => (listening ? stopListening() : startList
 // the scrollback/marker/detail behaviour is testable without mouse events.
 globalThis.listenLab = {
     enrollGesture,
-    Stream, events, View,
-    selectEvent, closeDetail,
+    Stream, events, View, phLabels,
+    selectEvent, closeDetail, decodedOver,
 };

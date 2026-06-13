@@ -204,6 +204,24 @@ assert(gestEv.frame > 0 && gestEv.conf > 0.9, 'event carries its frame + confide
 const spotEv = listenLab.events.find((e) => e.type === 'spot' && e.name === 'hello there');
 assert(spotEv, 'phrase spot landed in the timeline event log');
 
+// tier-1: the phoneme ring captured what the model decoded during the phrase.
+let phFrames = 0;
+for (let i = 0; i < listenLab.Stream.count; i++) {
+    if (listenLab.Stream.phCls[listenLab.Stream.slot(i)] > 0) phFrames++;
+}
+assert(phFrames > 5, 'phoneme ring captured decoded frames (' + phFrames + ')');
+const heardSeq = listenLab.decodedOver(spotEv.frame - 80, spotEv.frame);
+assert(heardSeq.length >= 1,
+       'decodedOver yields the heard phonemes near the spot (' + JSON.stringify(heardSeq) + ')');
+// The detail panel surfaces that decoded sequence for the spot.
+listenLab.selectEvent(spotEv);
+const detailSpot = document.querySelector('#detail');
+assert(/model heard here/.test(detailSpot.textContent),
+       'detail shows what the model decoded over the matched region');
+listenLab.closeDetail();
+console.log('[listen-lab] phonemes: ' + phFrames + ' decoded frames · spot region heard ' +
+            JSON.stringify(heardSeq));
+
 // Select the gesture marker → detail panel shows the rhythm template it matched.
 listenLab.selectEvent(gestEv);
 const detailEl = document.querySelector('#detail');
