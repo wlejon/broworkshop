@@ -55,6 +55,16 @@ function clicks(n, gapSec, amp) {
     return concat(...parts);
 }
 
+// n voiced bursts (short pitched tones with a sharp attack), gapSec apart — a
+// "laugh" performed at a click rhythm's tempo: same onset timing, voiced timbre.
+function voicedBursts(n, gapSec, hz, amp) {
+    const parts = [];
+    for (let k = 0; k < n; k++) {
+        parts.push(tone(0.12, hz, amp), silence(Math.max(0, gapSec - 0.12)));
+    }
+    return concat(...parts);
+}
+
 function concat(...parts) {
     let n = 0;
     for (const p of parts) n += p.length;
@@ -428,6 +438,34 @@ console.log('[listen-lab] editor: opened whistle clip editor (' +
     // tidy up
     Array.from(document.querySelectorAll('.gest')).find((r) =>
         r.querySelector('.gname').textContent === 'from-timeline').querySelector('.rm').click();
+}
+
+// ── 4e. rhythm sound-shape gate (new): a voiced "laugh" at the click tempo
+// must NOT fire the click rhythm ─────────────────────────────────────────────
+// The reported failure: a tongue-click rhythm fired on any sound at that pace
+// (a laugh). Each beat now carries an acoustic signature; the click beats are
+// unvoiced, so voiced bursts at the same tempo are rejected on sound shape.
+{
+    const tv = bro.gesture.inspect('triple-tap');
+    assert(tv && tv.onsets && tv.onsets.length === 3,
+           'rhythm exposes a per-beat signature (onsets)');
+    assert(tv.onsets.every((o) => o.voiced < 0.5),
+           'click beats enrolled as unvoiced (' +
+           tv.onsets.map((o) => o.voiced.toFixed(2)).join(',') + ')');
+
+    const onsets0 = bro.sense.snapshot().onsets;
+    const spots0  = +document.querySelector('#spotCount').textContent;
+    feedPumped(concat(silence(0.4), voicedBursts(3, 0.25, 220, 0.4), silence(0.4)));
+    for (let i = 0; i < 25; i++) sleep(20);   // let any (non-)fire deliver
+    const onsetsDelta = bro.sense.snapshot().onsets - onsets0;
+    assert(onsetsDelta >= 3,
+           'the laugh really did produce beats at the tempo (' + onsetsDelta +
+           ' onsets) — so the rejection is from sound shape, not a timing miss');
+    assert(+document.querySelector('#spotCount').textContent === spots0,
+           'a voiced laugh at the click tempo does NOT fire the click rhythm');
+    console.log('[listen-lab] shape-gate: ' + onsetsDelta +
+                ' onsets at tempo, rhythm not fired (beats voiced ' +
+                tv.onsets.map((o) => o.voiced.toFixed(2)).join('/') + ')');
 }
 
 // ── 5. remove the gesture via its × button while live ────────────────────────

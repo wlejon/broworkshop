@@ -1059,6 +1059,22 @@ let openEditor = null;          // name of the gesture whose editor is expanded
 let currentEd = null;           // the live editor object (for listener teardown)
 const GEST_RATE = 16000;        // bro.gesture.sampleRate() — fixed host rate
 
+// Describe a rhythm's per-beat sound shape (bro.gesture.inspect().onsets): are
+// the beats broadband clicks or voiced/pitched, and at what pitch. This is the
+// signature the matcher now requires beats to reproduce — so a laugh no longer
+// fires a tongue-click rhythm.
+function rhythmShape(v) {
+    if (!v.onsets || !v.onsets.length) return '';
+    let voiced = 0, pitchSum = 0, pitchN = 0;
+    for (const o of v.onsets) {
+        if (o.voiced >= 0.5) { voiced++; if (o.pitchHz > 0) { pitchSum += o.pitchHz; pitchN++; } }
+    }
+    if (voiced === 0) return ' · clicks';
+    if (voiced === v.onsets.length)
+        return pitchN ? ' · voiced ~' + Math.round(pitchSum / pitchN) + ' Hz' : ' · voiced';
+    return ' · mixed';
+}
+
 function gestureSummary(v) {
     if (!v) return '';
     if (v.kind === 'tone')
@@ -1066,7 +1082,7 @@ function gestureSummary(v) {
             ' ms · ±' + (v.toneSpread * 100).toFixed(1) + '%';
     const taps = v.intervalsMs.length + 1;
     return 'rhythm · ' + taps + ' taps · ' +
-        v.intervalsMs.map((m) => Math.round(m)).join('/') + ' ms';
+        v.intervalsMs.map((m) => Math.round(m)).join('/') + ' ms' + rhythmShape(v);
 }
 
 function renderGestureRows() {
@@ -1230,7 +1246,7 @@ function updateInfo(ed) {
     const v = ed.v;
     const kindStr = v ? (v.kind === 'tone'
         ? 'tone · ' + Math.round(v.toneHz) + ' Hz · captured ±' + (v.toneSpread * 100).toFixed(1) + '% spread'
-        : 'rhythm · ' + (v.intervalsMs.length + 1) + ' taps') : '';
+        : 'rhythm · ' + (v.intervalsMs.length + 1) + ' taps' + rhythmShape(v)) : '';
     const pk = clipPeakDb(ed.clip, ed.gain, a, b);
     const pkStr = ' · peak ' + (pk === -Infinity ? '−∞' : pk.toFixed(1)) + ' dB' +
         (pk > -0.1 ? ' ⚠ clipping' : '');
@@ -1355,6 +1371,7 @@ function buildEditor(name) {
         addSlider(tol, 'steadiness', 'pitchStabilityTol', pol.pitchStabilityTol != null ? pol.pitchStabilityTol : 0.06, 0.01, 0.20, 0.005, name);
     } else {
         addSlider(tol, 'tempo ±', 'tempoTol', pol.tempoTol != null ? pol.tempoTol : 0.40, 0.05, 0.80, 0.05, name);
+        addSlider(tol, 'shape ±', 'shapeTol', pol.shapeTol != null ? pol.shapeTol : 0.30, 0.10, 0.60, 0.05, name);
     }
     body.appendChild(tol);
 
