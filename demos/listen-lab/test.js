@@ -595,23 +595,26 @@ console.log('[listen-lab] editor: opened whistle clip editor (' +
     console.log('[listen-lab] stream kws: ' +
                 feedRows('sys').find((t) => t.indexOf('hello there') >= 0));
 
-    // (e) transcript is single-op: turning it on for the stream TAKES the one
-    // transcriber from the primary (the stub installed in 4f still stands in).
+    // (e) transcript runs CONCURRENTLY: turning it on for the stream transcribes
+    // its OWN audio alongside the mic's — no stealing. The model is single-op, so
+    // calls are serialized through one queue, but BOTH commit (the stub from 4f
+    // stands in for the model). This is the bug the user hit: a second stream used
+    // to steal the transcriber and leave both unable to transcribe.
+    const primaryLinesBefore = listenLab.Transcribe.lines.length;
     listenLab.setPanelAction(p, 'transcript', true);
-    assert(listenLab.Transcribe.source === p.txSource,
-           'transcript handed to the stream (it owns the single transcriber)');
-    assert(document.querySelector('#txToggle').disabled,
-           'primary transcript toggle disabled while a stream owns it');
+    assert(p.actions.transcript, 'stream transcript action enabled');
+    assert(!document.querySelector('#txToggle').disabled,
+           'primary transcript stays enabled — the stream did not steal it');
     feedStream(concat(silence(0.4), speak('hello there'), silence(0.6)));
     assert(pumpUntil(() => feedRows('sys').some((t) => t.indexOf('transcript') >= 0), 8000),
-           'voice-gated transcript on the stream committed (tagged [sys] row)');
-    // Hand it back: the primary owns transcript again.
+           "the stream's own voice-gated transcript committed (tagged [sys] row)");
+    // The mic transcript STILL commits with a stream also transcribing.
+    feedPumped(concat(silence(0.4), speak('hello there'), silence(0.6)));
+    assert(pumpUntil(() => listenLab.Transcribe.lines.length > primaryLinesBefore, 8000),
+           'the mic transcript still commits while a stream also transcribes');
     listenLab.setPanelAction(p, 'transcript', false);
-    assert(listenLab.Transcribe.source === listenLab.PrimarySource,
-           'turning the stream transcript off returns the transcriber to the primary');
-    assert(!document.querySelector('#txToggle').disabled,
-           'primary transcript toggle re-enabled after hand-back');
-    console.log('[listen-lab] stream transcript: took + returned the single-op transcriber');
+    assert(!p.actions.transcript, 'stream transcript action disabled');
+    console.log('[listen-lab] stream transcript: mic + stream transcribe concurrently (no steal)');
 
     // (f) WAV export: the stream's retained buffer writes a real .wav. The
     // headless seam forces the output path (no native dialog).

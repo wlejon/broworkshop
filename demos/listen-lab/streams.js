@@ -4,7 +4,7 @@
     const LL = globalThis.LL;
     const { $streamCards, $srcSel, $streamsSub,
             status, fusionRow, mkbtn, phrasePolicy, ensureAudioCtx,
-            Transcribe, PrimarySource, setTranscriptOwner, clipStore, policyStore } = LL;
+            Transcribe, initTxCtx, transcribeTick, txReset, clipStore, policyStore } = LL;
 
 // ── streams rack: N independent sources, each configured live ──────────────────
 // The payoff of the multi-stream host: the mic dashboard above is stream #0, and
@@ -16,8 +16,8 @@
 //   tier-2  kws        — the mic's enrolled phrases mirrored onto this stream's
 //                        own session over the ONE shared PhonemeNet (no copy)
 //   tier-0  gestures   — non-speech rhythm/tone matching (its own GestureSpotter)
-//   tier-3  transcript — voice-gated Parakeet (single-op: this stream TAKES the
-//                        one transcriber from whoever held it)
+//   tier-3  transcript — voice-gated Parakeet, this stream's OWN transcript
+//                        (model calls serialized with every other stream's)
 //
 // Each stream keeps its own frame axis, sensors, and matcher state; toggling a
 // member on a stream is independent of every other stream and of the mic above.
@@ -129,7 +129,7 @@ function addStream(spec) {
         onPartial: (partial) => {
             if (!p.dom) return;
             p.dom.tx.textContent = partial || '';
-            if (!partial) p.dom.tx.innerHTML = Transcribe.active
+            if (!partial) p.dom.tx.innerHTML = (p.txSource.tx && p.txSource.tx.active)
                 ? '<span class="ph">…</span>'
                 : '<span class="ph">— voice-gated; speak on this stream —</span>';
         },
@@ -141,6 +141,7 @@ function addStream(spec) {
         },
         onStatus: () => {},
     };
+    initTxCtx(p.txSource);                           // its own voice-gated lifecycle + runner
 
     p.handle.sense.start({});                       // tier-0 on by default
     panels.push(p);
@@ -153,7 +154,7 @@ function addStream(spec) {
 function removeStream(p) {
     const i = panels.indexOf(p);
     if (i < 0) return;
-    if (Transcribe.source === p.txSource) setTranscriptOwner(PrimarySource);
+    txReset(p.txSource);                            // stop driving its transcript
     if (p.kwsListening) { try { p.handle.kws.stop(); } catch (e) {} }
     if (p.gestureListening) { try { p.handle.gesture.stop(); } catch (e) {} }
     const id = p.handle.id;
@@ -178,12 +179,14 @@ function setPanelAction(p, action, on) {
     } else if (action === 'transcript') {
         if (on) {
             // Transcript needs voice gating (sense) + retained audio to pull from.
+            // It runs CONCURRENTLY with the mic and every other stream — no
+            // stealing; the model calls are serialized by the shared TxQueue.
             if (!p.handle.sense.isActive()) { p.actions.sense = true; p.handle.sense.start({}); }
             if (!p.handle.info().active) p.handle.retain(30);
             if (!Transcribe.ready) status('transcript model not loaded — no Parakeet weights', true);
-            setTranscriptOwner(p.txSource);
-        } else if (Transcribe.source === p.txSource) {
-            setTranscriptOwner(PrimarySource);
+        } else {
+            txReset(p.txSource);                    // drop any in-progress utterance
+            if (p.dom) p.dom.tx.innerHTML = '';
         }
     }
     renderStreamCard(p);                            // reflect toggle + show/hide rows
@@ -299,8 +302,12 @@ function updateStreamPanels() {
             d.tonalDot.className = 'dot tonal' + (s.tonal ? ' on' : '');
             d.tonalTxt.textContent = s.tonal ? Math.round(s.dominantHz) + ' Hz' : '—';
         }
-        // Transcript source snapshots (only meaningful while this stream owns it).
-        p.txSource._prev = p.prevSnap; p.txSource._cur = s;
+        // Drive this stream's OWN voice-gated transcript when its action is on —
+        // each stream transcribes concurrently; model calls are serialized.
+        if (p.actions.transcript) {
+            p.txSource._prev = p.prevSnap; p.txSource._cur = s;
+            transcribeTick(p.txSource);
+        }
         p.prevSnap = s;
         if (p.dom && p.dom.spot.classList.contains('fired') && Date.now() - p.flashAt > 2500)
             p.dom.spot.classList.remove('fired');

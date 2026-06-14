@@ -20,7 +20,7 @@
         playFrac, Playback, View, events, updatePlayback,
         scratchToGesture, renderScratchBar, clearScratch, scratchSpan,
         Transcribe, PrimarySource, transcribeTick, txLoad, txSetStatus, renderPartial,
-        setTranscriptOwner, updateStreamPanels, mirrorToStreams,
+        updateStreamPanels, mirrorToStreams,
         buildSourceOptions, specFromSelect, addStream, removeStream, setPanelAction, panels,
         exportWav, saveStreamWav, setExportPath,
         enrollGesture, buildEditor, gainedSlice, clipStore, gestRows, toggleRecord,
@@ -282,9 +282,9 @@ function tick() {
         if (p) updateTemplateRows(p, s);
     }
     updateStreamPanels();
-    // Transcript is single-op: drive it once, for whichever source owns it.
-    const txo = Transcribe.source || PrimarySource;
-    transcribeTick(txo._prev, txo._cur, txo);
+    // Primary (mic) transcript — runs concurrently with any stream transcripts
+    // (updateStreamPanels drives those); all model calls share one queue.
+    transcribeTick(PrimarySource);
     updatePlayback();
     drawStream();
     requestAnimationFrame(tick);
@@ -352,9 +352,11 @@ $phrase.addEventListener('keydown', (e) => { if (e.key === 'Enter') enrollPhrase
 $record.addEventListener('click', toggleRecord);
 $listen.addEventListener('click', () => (listening ? stopListening() : startListening()));
 $txToggle.addEventListener('click', () => {
-    if (Transcribe.source !== PrimarySource) return;   // a stream owns it; toggle there
-    Transcribe.enabled = !Transcribe.enabled;
-    if (!Transcribe.enabled) { Transcribe.active = false; Transcribe.partial = ''; renderPartial(); }
+    Transcribe.enabled = !Transcribe.enabled;           // pauses every context's transcript
+    if (!Transcribe.enabled) {
+        PrimarySource.tx.active = false; PrimarySource.tx.partial = '';
+        renderPartial(PrimarySource);
+    }
     txSetStatus(Transcribe.enabled ? 'ready · voice-gated' : 'paused');
 });
 
@@ -456,7 +458,7 @@ globalThis.listenLab = {
     // streams rack: open/close/configure arbitrary-source streams + reach them.
     addStream, removeStream, setPanelAction, panels,
     buildSourceOptions, specFromSelect, mirrorToStreams,
-    PrimarySource, setTranscriptOwner,
+    PrimarySource,
     // WAV export: the dialog-driven path plus a headless seam that skips the
     // native dialog by forcing the output path (exportPathOverride).
     exportWav, saveStreamWav,
@@ -465,12 +467,12 @@ globalThis.listenLab = {
     // makes the VAD-gated lifecycle testable without the 2.4 GB Parakeet load.
     Transcribe, loadTranscriber: txLoad,
     installTranscriber: (runFn) => {
-        Transcribe.run = runFn;
+        Transcribe.stubRun = runFn;                     // used by every context's queue jobs
         Transcribe.ready = true;
         Transcribe.enabled = true;
         if (!Transcribe.tok) Transcribe.tok = { decode: () => '' };
         txSetStatus('ready · voice-gated (stub)');
-        renderPartial();
+        renderPartial(PrimarySource);
     },
 };
 })();
