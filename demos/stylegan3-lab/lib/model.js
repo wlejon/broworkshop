@@ -1,19 +1,25 @@
 // ═══ checkpoint load + adapting to the generator's shape ══════════════════════
 
-// Shared generation params (the param bar), read live by every seam.
-function curPsi()    { return parseFloat($('#psi').value); }
-function curCutoff() { return parseInt($('#cutoff').value, 10); }   // -1 = all rows
+import { $, S, wCache } from "/app/lib/state.js";
+import { _os, recall, pExists, remember } from "/app/lib/helpers.js";
+import { cancelAll, setBadge } from "/app/lib/engine.js";
+import { syncMixLabel } from "/app/lib/mix.js";
+import { syncCutoffLabel, refreshSeam } from "/app/app.js";
 
-function seamHint() {
-  return seam === 'sample' ? 'pick a seed · ψ truncates toward the mean face'
-       : seam === 'walk'   ? 'two anchors → drag t, or render the strip'
-       : seam === 'mix'    ? 'coarse rows from A, fine rows from B'
-       : seam === 'invert' ? 'image → latent · then → A/B to edit it'
-       :                     'click a tile to send it to Sample';
+// Shared generation params (the param bar), read live by every seam.
+export function curPsi()    { return parseFloat($('#psi').value); }
+export function curCutoff() { return parseInt($('#cutoff').value, 10); }   // -1 = all rows
+
+export function seamHint() {
+  return S.seam === 'sample' ? 'pick a seed · ψ truncates toward the mean face'
+       : S.seam === 'walk'   ? 'two anchors → drag t, or render the strip'
+       : S.seam === 'mix'    ? 'coarse rows from A, fine rows from B'
+       : S.seam === 'invert' ? 'image → latent · then → A/B to edit it'
+       :                       'click a tile to send it to Sample';
 }
 
 // Probe a sensible default checkpoint for this machine on first run.
-function defaultModelDir(htmlDefault) {
+export function defaultModelDir(htmlDefault) {
   let home = ''; try { home = _os.homedir(); } catch (e) {}
   const cands = [
     recall('sg3.modelDir'),
@@ -25,11 +31,11 @@ function defaultModelDir(htmlDefault) {
 }
 
 // Load a checkpoint asynchronously; adapt the UI to its shape once ready.
-function loadModel(dir) {
+export function loadModel(dir) {
   dir = (dir || '').replace(/[\\\/]+$/, '');
   cancelAll();
-  gan = null; lastSample = null; walkWA = walkWB = mixWA = mixWB = null;
-  pinnedA = pinnedB = null; invTargetData = null; invW = null; invCurve = [];
+  S.gan = null; S.lastSample = null; S.walkWA = S.walkWB = S.mixWA = S.mixWB = null;
+  S.pinnedA = S.pinnedB = null; S.invTargetData = null; S.invW = null; S.invCurve = [];
   wCache.clear();
   if (!pExists(dir + '/model.safetensors')) { setBadge('no model.safetensors in ' + dir, true); return; }
   const res = parseInt($('#resolution').value, 10) || 256;
@@ -46,8 +52,8 @@ function loadModel(dir) {
     bro.vision.loadStyleGAN3(dir, {
       resolution: res, variant: variant, device: device,
       onReady: function (g) {
-        gan = g; remember('sg3.modelDir', dir);
-        META = { resolution: g.resolution, variant: g.variant, zDim: g.zDim, numWs: g.numWs, wDim: g.wDim, device: g.device };
+        S.gan = g; remember('sg3.modelDir', dir);
+        S.META = { resolution: g.resolution, variant: g.variant, zDim: g.zDim, numWs: g.numWs, wDim: g.wDim, device: g.device };
         $('#model-meta').textContent =
           g.resolution + '² · ' + (g.variant === 't' ? 'config-T' : 'config-R') + ' · ' +
           g.device + ' · z' + g.zDim + ' · w ' + g.numWs + '×' + g.wDim;
@@ -61,8 +67,8 @@ function loadModel(dir) {
 
 // Once the generator's numWs is known, size the row-indexed controls (the
 // truncation cutoff and the style-mix crossover), then render the active seam.
-function onModelReady() {
-  const n = META.numWs;
+export function onModelReady() {
+  const n = S.META.numWs;
   const cut = $('#cutoff'); cut.max = n; if (curCutoff() > n) cut.value = -1; syncCutoffLabel();
   const k = $('#mix-k'); k.max = n; if (parseInt(k.value, 10) > n) k.value = Math.floor(n / 2); syncMixLabel();
   refreshSeam();

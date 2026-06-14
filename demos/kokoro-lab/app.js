@@ -1,3 +1,16 @@
+import { $, activeDrag, activePaint } from "/app/lib/state.js";
+import { defaultRoot, paths, setSource } from "/app/lib/source.js";
+import { randomVoice, seedFrom } from "/app/lib/designer.js";
+import { clone, saveVoice } from "/app/lib/clone.js";
+import { browseFile, browseFolder, switchSource } from "/app/lib/model.js";
+import { run } from "/app/lib/synth.js";
+import { dragDurAt, onDurUp } from "/app/lib/align.js";
+import { onPaintUp, paintAt } from "/app/lib/curves.js";
+import { buildEmotion, resetEmotion } from "/app/lib/emotion.js";
+import { buildTimbre, resetTimbre } from "/app/lib/timbre.js";
+import { buildMascFem, resetMascFem } from "/app/lib/mascfem.js";
+import { play, saveWav } from "/app/lib/helpers.js";
+
 // Kokoro Lab — entry point. Steer a voice through Kokoro's style space, then
 // watch and hear it take shape stage by stage. The app is split across lib/
 // modules (all sharing one global scope, loaded in order by index.html):

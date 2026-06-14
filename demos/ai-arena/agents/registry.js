@@ -17,7 +17,9 @@
 // Register at script-load time; main.js / controls.js / loop.js look up
 // by id each frame so hot-swapping via the UI selector works without
 // re-attaching bindings.
-var Agents = {};
+import { App } from "/app/main.js";
+
+export const Agents = {};
 (function () {
     "use strict";
 

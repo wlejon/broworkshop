@@ -12,20 +12,25 @@
 // the slider streams the new voice on a short settle (scheduleLive). The panel
 // hides gracefully when no basis sits beside the checkpoint.
 
-let mascFemBasis = null;     // parsed masc_fem_basis.json, or null (panel hides)
+import { $ } from "/app/lib/state.js";
+import { readBasisJson } from "/app/lib/helpers.js";
+import { updateDesignerMeta } from "/app/lib/voice.js";
+import { scheduleLive } from "/app/lib/synth.js";
+
+export let mascFemBasis = null;     // parsed masc_fem_basis.json, or null (panel hides)
 let mfAlpha = 0;             // signed intensity along full[M]: + masculine, − feminine
 let mfSlider = null, mfVal = null;
 
 // Load the basis sitting beside the Base checkpoint (graceful if absent). For a
 // CustomVoice checkpoint readBasisJson resolves it from the sibling 0.6B-Base.
-function loadMascFemBasis(modelDir) {
+export function loadMascFemBasis(modelDir) {
   mascFemBasis = null; mfAlpha = 0;
   const b = readBasisJson(modelDir, 'masc_fem_basis.json');
   if (b && b.full && b.full.M) mascFemBasis = b;
 }
 
 // designedXvec + alpha·full[M] — a fresh array (the blend stays untouched).
-function applyMascFem(x) {
+export function applyMascFem(x) {
   if (!x || !mascFemBasis || !mfAlpha) return x;
   const out = Float32Array.from(x);
   const f = mascFemBasis.full.M;
@@ -33,10 +38,10 @@ function applyMascFem(x) {
   for (let d = 0; d < n; d++) out[d] += mfAlpha * f[d];
   return out;
 }
-function mascFemActive() { return !!(mascFemBasis && mfAlpha); }
+export function mascFemActive() { return !!(mascFemBasis && mfAlpha); }
 
 // "· masculine 1.20" / "· feminine 0.80" / '' for the designer meta line.
-function mascFemSummary() {
+export function mascFemSummary() {
   if (!mascFemActive()) return '';
   const lab = mfAlpha > 0 ? (mascFemBasis.label.M || 'masculine') : (mascFemBasis.label.F || 'feminine');
   return ' · ' + lab + ' ' + Math.abs(mfAlpha).toFixed(2);
@@ -58,7 +63,7 @@ function setMascFemPreset(pole) {
 }
 
 // Build the single bipolar slider into the Base designer (hidden without a basis).
-function buildMascFem() {
+export function buildMascFem() {
   const sec = $('#mascfem'); if (!sec) return;
   mfAlpha = 0;
   if (!mascFemBasis) { sec.style.display = 'none'; mfSlider = mfVal = null; return; }
@@ -77,4 +82,4 @@ function buildMascFem() {
 }
 
 // Back to the neutral designed voice.
-function resetMascFem() { setMfAlpha(0); updateDesignerMeta(); scheduleLive(); }
+export function resetMascFem() { setMfAlpha(0); updateDesignerMeta(); scheduleLive(); }

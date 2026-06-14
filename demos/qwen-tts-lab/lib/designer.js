@@ -11,13 +11,27 @@
 // streams the new voice on a short settle (scheduleLive, from the event handlers —
 // not rebuildDesigned, which also runs during the silent initial build).
 
-let voiceBasis = null;       // parsed qwen_voice_basis.json, or null (panel hidden)
+import { $ } from "/app/lib/state.js";
+import { el, readBasisJson, pName, toMono } from "/app/lib/helpers.js";
+import { setBadge, variant, qwen, fillLanguages } from "/app/lib/model.js";
+import { markDesigned, updateCvSource, updateDesignerMeta, setCvSource } from "/app/lib/voice.js";
+import { scheduleLive } from "/app/lib/synth.js";
+import { audioCtx, setAudioCtx } from "/app/lib/audio.js";
+
+export let voiceBasis = null;       // parsed qwen_voice_basis.json, or null (panel hidden)
 let coords = null;           // Float64Array(k) — current σ-unit position
+export function setCoords(v) { coords = v; }
 let sliderCells = [];
 let mapCanvas = null, mapCtx = null, mapDragging = false, mapWired = false;
 const MAP_PAD = 16, SNAP_PX = 11;
 
-function loadVoiceBasis(modelDir) {
+// owned shared identity state (read by voice / app)
+export let designedXvec = null;      // the current identity x-vector (Float32Array enc_dim) or null
+export let identitySource = 'design';// 'clone' (faithful full x-vector) | 'design' (sculpted point)
+export function setDesignedXvec(v) { designedXvec = v; }
+export function setIdentitySource(v) { identitySource = v; }
+
+export function loadVoiceBasis(modelDir) {
   voiceBasis = null; coords = null;
   const b = readBasisJson(modelDir, 'qwen_voice_basis.json');
   if (b && b.comps && b.mean && b.std && b.k && b.points) { voiceBasis = b; coords = new Float64Array(b.k); }
@@ -39,7 +53,7 @@ function xvecFromCoords() {
 
 // project a raw x-vector onto the basis → σ-unit coords (exact on the subspace —
 // the axes are orthonormal): cₖ = (x−mean)·compₖ/stdₖ.
-function coordsFromXvec(x) {
+export function coordsFromXvec(x) {
   if (!voiceBasis) return null;
   const { dim, k, mean, comps, std } = voiceBasis;
   const c = new Float64Array(k);
@@ -79,7 +93,7 @@ function pxToMap(px, py) {
 }
 const GCOLOR = ['#ff7eb6', '#5ad1ff', '#ffd166'];   // F · M · C
 
-function drawMap() {
+export function drawMap() {
   if (!mapCtx || !voiceBasis) return;
   const W = mapCanvas.width, H = mapCanvas.height, ctx = mapCtx;
   ctx.clearRect(0, 0, W, H);
@@ -133,7 +147,7 @@ function mapEventPx(ev) {
 }
 
 // ── build the designer (map + seed + sliders) ────────────────────────────────
-function buildDesigner() {
+export function buildDesigner() {
   fillLanguages($('#language3'));
   const wrap = $('#designer-body');
   if (!voiceBasis) { if (wrap) wrap.style.display = 'none'; designedXvec = null; return; }
@@ -170,7 +184,7 @@ function buildDesigner() {
   seedVoice('__mean__');     // a neutral designed voice, ready to render
   // the initial seed is setup, not a user pick — keep CustomVoice on its preset
   // until the user actually touches the map / sliders.
-  if (variant === 'customvoice') { cvSource = 'preset'; if (typeof updateCvSource === 'function') updateCvSource(); }
+  if (variant === 'customvoice') { setCvSource('preset'); if (typeof updateCvSource === 'function') updateCvSource(); }
 }
 
 function buildSliders() {
@@ -197,7 +211,7 @@ function hintFor(k) {
   return 've ' + (((voiceBasis.varExplained[k] || 0) * 100)).toFixed(1) + '%';
 }
 
-function syncSliders() {
+export function syncSliders() {
   for (let k = 0; k < sliderCells.length; k++) {
     sliderCells[k]._range.value = String(coords[k]);
     sliderCells[k]._val.textContent = coords[k].toFixed(2);
@@ -216,7 +230,7 @@ function seedVoice(name) {
 }
 
 // a random in-distribution voice: gaussian coords weighted toward the dominant axes.
-function randomDesigned() {
+export function randomDesigned() {
   if (!voiceBasis) { setBadge('no voice basis — run tests/_qwen_voice_basis.js', true); return; }
   for (let k = 0; k < voiceBasis.k; k++) {
     const g = gauss() * (0.5 + voiceBasis.varExplained[k] * 3);
@@ -235,11 +249,11 @@ function gauss() { let u = 0, v = 0; while (!u) u = Math.random(); while (!v) v 
 // full vector until you actually move a control (which switches to 'design'). This
 // is the fix for "enroll loses my voice": it no longer overwrites the identity with
 // the lossy basis reconstruction. clone = the same, but renders immediately.
-function enrollRef() {
+export function enrollRef() {
   const path = $('#ref-wav').value.trim();
   if (!path) { setBadge('enter or browse a reference .wav first', true); return; }
   try {
-    audioCtx = audioCtx || new AudioContext();
+    setAudioCtx(audioCtx || new AudioContext());
     const dec = audioCtx.decodeAudioFile(path);
     if (!dec || !dec.samples || !dec.samples.length) { setBadge('could not decode ' + path, true); return; }
     designedXvec = qwen.embedSpeaker(toMono(dec.samples, dec.channels), { sampleRate: dec.sampleRate });

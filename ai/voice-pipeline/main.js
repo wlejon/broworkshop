@@ -31,8 +31,7 @@
 // (playClip's sample-accurate `when` arg), so consecutive chunks join gaplessly
 // with no main-thread setTimeout jitter.
 
-(function () {
-'use strict';
+import * as VoiceModels from "/app/models.js";
 
 // ─── element refs ──────────────────────────────────────────────────────────
 const $status     = document.getElementById('status');
@@ -1528,5 +1527,3 @@ window.addEventListener('keyup', (e) => {
 // Two rAFs guarantee the splash UI has painted before we kick off the
 // (background-thread, but still CPU/GPU-heavy) model loads.
 requestAnimationFrame(() => requestAnimationFrame(boot));
-
-})();

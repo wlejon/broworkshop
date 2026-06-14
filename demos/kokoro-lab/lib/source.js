@@ -1,3 +1,6 @@
+import { $, basis, emoTimbre, emotionBasis, putBasis, putCoords, putEmoTimbre, putEmotionBasis, putMascFemBasis, putMfAlpha } from "/app/lib/state.js";
+import { setBadge } from "/app/lib/model.js";
+
 // ═══ data source ═════════════════════════════════════════════════════════════
 // One folder drives everything the lab needs: the Kokoro model dir (model +
 // voice_basis + voice_bridge + voices) and the phonemizer assets (g2p lexicon,
@@ -8,11 +11,11 @@
 //   · a bare Kokoro dir — config.json sitting right inside it
 // The model dir, the speaker-encoder clone dir, and how the phonemizer assets
 // resolve all follow from which layout it is, so the user only ever picks one folder.
-const _fs = require('fs');
-function pExists(p) { try { return _fs.existsSync(p); } catch (e) { return false; } }
-function pParent(p) { return p.replace(/[\\\/]+$/, '').replace(/[\\\/][^\\\/]*$/, ''); }
+export const _fs = require('fs');
+export function pExists(p) { try { return _fs.existsSync(p); } catch (e) { return false; } }
+export function pParent(p) { return p.replace(/[\\\/]+$/, '').replace(/[\\\/][^\\\/]*$/, ''); }
 
-const paths = {
+export const paths = {
   root: '', kind: 'data', model: '', qwen: '', spkenc: '',
   // Point the phonemizer at this source's g2p/POS/config assets. The sibling
   // layout has its own well-known shape (setAssetRoot); the flat data layouts
@@ -34,7 +37,7 @@ const paths = {
 
 // Recognise which layout `root` is, and where its kokoro + qwen dirs live.
 // Returns null if nothing identifiable is found inside it.
-function detectSource(root) {
+export function detectSource(root) {
   root = root.replace(/[\\\/]+$/, '');
   // The clone enrolls via the standalone ~18 MB speaker-encoder artifact in
   // brosoundml-data (qwen-tts/speaker-encoder), not the full ~2.5 GB Base
@@ -65,14 +68,14 @@ function detectSource(root) {
 // and adopt the first that detectSource() recognises — so the app comes up
 // pointed at real data without the user editing a path. A browsed/typed path is
 // remembered in localStorage and wins on the next launch.
-const _os = require('os');
-function rememberedRoot() {
+export const _os = require('os');
+export function rememberedRoot() {
   try { return localStorage.getItem('kokoro-lab.dataRoot') || ''; } catch (e) { return ''; }
 }
-function rememberRoot(root) {
+export function rememberRoot(root) {
   try { localStorage.setItem('kokoro-lab.dataRoot', root); } catch (e) {}
 }
-function defaultRoot(htmlDefault) {
+export function defaultRoot(htmlDefault) {
   let home = '';
   try { home = _os.homedir(); } catch (e) {}
   const candidates = [
@@ -87,7 +90,7 @@ function defaultRoot(htmlDefault) {
 
 // Adopt `root` as the data source: detect its layout, update the resolved paths
 // and the status label. Loads nothing — see switchSource() for that.
-function setSource(rootIn) {
+export function setSource(rootIn) {
   const root = (rootIn || '').replace(/[\\\/]+$/, '');
   const det = detectSource(root);
   const r = det || { kind: 'data', root, model: root + '/kokoro', qwen: root + '/qwen-tts/0.6B-Base',
@@ -103,12 +106,12 @@ function setSource(rootIn) {
   }
 }
 
-function loadBasis() {
+export function loadBasis() {
   // The basis + adapter live in the Kokoro model dir (kokoro/ in brosoundml-data,
   // weights/kokoro/ in the dev repo), so they travel with the voices they derive from.
   try {
-    basis = JSON.parse(_fs.readFileSync(paths.model + '/voice_basis.json', 'utf-8'));
-    coords = new Float64Array(basis.k);
+    putBasis(JSON.parse(_fs.readFileSync(paths.model + '/voice_basis.json', 'utf-8')));
+    putCoords(new Float64Array(basis.k));
   } catch (e) {
     setBadge('voice_basis.json missing from ' + paths.model + ' — run tests/_voice_basis.js', true);
   }
@@ -117,21 +120,21 @@ function loadBasis() {
 // The Tier-1 emotion (timbre) directions, beside the model like voice_basis.json
 // (built by bro/tests/_emotion_basis.js). Optional: if it's absent the timbre
 // panel simply stays hidden — the lab is fully usable without it.
-function loadEmotionBasis() {
-  emotionBasis = null; emoTimbre = {};
+export function loadEmotionBasis() {
+  putEmotionBasis(null); putEmoTimbre({});
   try {
-    emotionBasis = JSON.parse(_fs.readFileSync(paths.model + '/emotion_basis.json', 'utf-8'));
+    putEmotionBasis(JSON.parse(_fs.readFileSync(paths.model + '/emotion_basis.json', 'utf-8')));
     for (const e of emotionBasis.emotions) emoTimbre[e] = 0;
   } catch (e) { /* no artifact → panel hidden, no error */ }
 }
 
 // The masc↔fem direction, beside the model like emotion_basis.json (built by
 // bro/tests/_masc_fem_basis.js). Optional: absent → the panel stays hidden.
-function loadMascFemBasis() {
-  mascFemBasis = null; mfAlpha = 0;
+export function loadMascFemBasis() {
+  putMascFemBasis(null); putMfAlpha(0);
   try {
     const b = JSON.parse(_fs.readFileSync(paths.model + '/masc_fem_basis.json', 'utf-8'));
-    if (b && b.full && b.full.M) mascFemBasis = b;
+    if (b && b.full && b.full.M) putMascFemBasis(b);
   } catch (e) { /* no artifact → panel hidden, no error */ }
 }
 

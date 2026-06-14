@@ -1,9 +1,17 @@
 // StyleGAN3 Lab — entry point: wire the DOM, switch seams, kick the first load.
-// (All lib/ modules share this global scope, loaded in order by index.html.)
+
+import { $, S } from "/app/lib/state.js";
+import { curPsi, curCutoff, loadModel, defaultModelDir } from "/app/lib/model.js";
+import { renderSample, sendSampleTo } from "/app/lib/sample.js";
+import { prepareWalk, renderWalkMid, renderWalkStrip } from "/app/lib/walk.js";
+import { prepareMix, renderMix, syncMixLabel } from "/app/lib/mix.js";
+import { refreshInvert, invFromSeed, invFromFile, runInvert, sendInvTo } from "/app/lib/invert.js";
+import { renderGrid, gridPage, onGridClick } from "/app/lib/grid.js";
+import { browseFolder, pParent, randSeed } from "/app/lib/helpers.js";
 
 // Show exactly one seam panel; refresh it for the loaded model.
-function showSeam(name) {
-  seam = name;
+export function showSeam(name) {
+  S.seam = name;
   ['sample', 'walk', 'mix', 'invert', 'grid'].forEach(function (s) {
     $('#panel-' + s).style.display = (s === name) ? 'flex' : 'none';
     $('#seam-' + s).classList.toggle('active', s === name);
@@ -12,16 +20,16 @@ function showSeam(name) {
 }
 
 // Re-run the active seam (after a seam switch or a shared-param change).
-function refreshSeam() {
-  if (!gan) return;
-  if (seam === 'sample')      renderSample();
-  else if (seam === 'walk')   prepareWalk();
-  else if (seam === 'mix')    prepareMix();
-  else if (seam === 'invert') refreshInvert();   // never auto-runs the (slow) inversion
-  else                        renderGrid();
+export function refreshSeam() {
+  if (!S.gan) return;
+  if (S.seam === 'sample')      renderSample();
+  else if (S.seam === 'walk')   prepareWalk();
+  else if (S.seam === 'mix')    prepareMix();
+  else if (S.seam === 'invert') refreshInvert();   // never auto-runs the (slow) inversion
+  else                          renderGrid();
 }
 
-function syncCutoffLabel() {
+export function syncCutoffLabel() {
   const v = curCutoff();
   $('#cutoff-val').textContent = v < 0 ? 'all' : v;
 }
@@ -41,11 +49,11 @@ function init() {
   //    anchors and re-renders the active seam ─────────────────────────────────
   $('#psi').addEventListener('input', function () { $('#psi-val').textContent = curPsi().toFixed(2); });
   $('#psi').addEventListener('change', function () {
-    walkWA = walkWB = mixWA = mixWB = null; refreshSeam();
+    S.walkWA = S.walkWB = S.mixWA = S.mixWB = null; refreshSeam();
   });
   $('#cutoff').addEventListener('input', syncCutoffLabel);
   $('#cutoff').addEventListener('change', function () {
-    walkWA = walkWB = mixWA = mixWB = null; refreshSeam();
+    S.walkWA = S.walkWB = S.mixWA = S.mixWB = null; refreshSeam();
   });
 
   // ── seam chips ──────────────────────────────────────────────────────────────
@@ -62,18 +70,18 @@ function init() {
 
   // ── Walk ────────────────────────────────────────────────────────────────────
   // Choosing a seed for an anchor drops any pinned (inverted) latent on it.
-  $('#walk-a').addEventListener('change', function () { pinnedA = null; walkWA = null; prepareWalk(); });
-  $('#walk-b').addEventListener('change', function () { pinnedB = null; walkWB = null; prepareWalk(); });
-  $('#btn-walk-rand-a').addEventListener('click', function () { $('#walk-a').value = randSeed(); pinnedA = null; walkWA = null; prepareWalk(); });
-  $('#btn-walk-rand-b').addEventListener('click', function () { $('#walk-b').value = randSeed(); pinnedB = null; walkWB = null; prepareWalk(); });
+  $('#walk-a').addEventListener('change', function () { S.pinnedA = null; S.walkWA = null; prepareWalk(); });
+  $('#walk-b').addEventListener('change', function () { S.pinnedB = null; S.walkWB = null; prepareWalk(); });
+  $('#btn-walk-rand-a').addEventListener('click', function () { $('#walk-a').value = randSeed(); S.pinnedA = null; S.walkWA = null; prepareWalk(); });
+  $('#btn-walk-rand-b').addEventListener('click', function () { $('#walk-b').value = randSeed(); S.pinnedB = null; S.walkWB = null; prepareWalk(); });
   $('#walk-t').addEventListener('input', renderWalkMid);
   $('#btn-walk-strip').addEventListener('click', renderWalkStrip);
 
   // ── Mix ───────────────────────────────────────────────────────────────────
-  $('#mix-a').addEventListener('change', function () { pinnedA = null; mixWA = null; prepareMix(); });
-  $('#mix-b').addEventListener('change', function () { pinnedB = null; mixWB = null; prepareMix(); });
-  $('#btn-mix-rand-a').addEventListener('click', function () { $('#mix-a').value = randSeed(); pinnedA = null; mixWA = null; prepareMix(); });
-  $('#btn-mix-rand-b').addEventListener('click', function () { $('#mix-b').value = randSeed(); pinnedB = null; mixWB = null; prepareMix(); });
+  $('#mix-a').addEventListener('change', function () { S.pinnedA = null; S.mixWA = null; prepareMix(); });
+  $('#mix-b').addEventListener('change', function () { S.pinnedB = null; S.mixWB = null; prepareMix(); });
+  $('#btn-mix-rand-a').addEventListener('click', function () { $('#mix-a').value = randSeed(); S.pinnedA = null; S.mixWA = null; prepareMix(); });
+  $('#btn-mix-rand-b').addEventListener('click', function () { $('#mix-b').value = randSeed(); S.pinnedB = null; S.mixWB = null; prepareMix(); });
   $('#mix-k').addEventListener('input', function () { syncMixLabel(); renderMix(); });
 
   // ── Invert ──────────────────────────────────────────────────────────────────

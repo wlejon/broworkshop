@@ -11,8 +11,7 @@
 // Pure-state module — camera, input, and snap resolution live in app.js.
 // =============================================================================
 
-(function (global) {
-    'use strict';
+'use strict';
 
     function createState() {
         return {
@@ -92,10 +91,9 @@
         ];
     }
 
-    global.MoveTool = {
+    export const MoveTool = {
         createState,
         begin, applyDelta, commit, cancel, clear,
         rayVsPlane,
     };
 
-})(typeof globalThis !== 'undefined' ? globalThis : this);

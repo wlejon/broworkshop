@@ -1,9 +1,12 @@
 // Shrub archetype — clusters of small blobs forming a low bushy form.
 
-(function (root) {
+import { FloraCore } from "/app/recipes/core.js";
+import { Lifecycle } from "/app/recipes/lifecycle.js";
+import { FloraSpecies } from "/app/recipes/species.js";
+import { Recipes } from "/app/recipes/index.js";
 
-const F = root.FloraCore;
-const L = root.Lifecycle;
+const F = FloraCore;
+const L = Lifecycle;
 const TAU = F.TAU;
 
 function buildShrubSeed(opts) {
@@ -119,14 +122,11 @@ const BUILDERS = {
 
 function shrub(opts) {
     opts = Object.assign({}, opts);
-    if (opts.species) opts = root.FloraSpecies.applySpecies('shrub', opts.species, opts);
+    if (opts.species) opts = FloraSpecies.applySpecies('shrub', opts.species, opts);
     const stages = opts.stagesOverride || ((opts.bloomColor || opts.fruitColor) ? STAGES_FULL : STAGES_NO_BLOOM);
     const r = L.resolveStage(stages, opts.age01 ?? 1);
     const b = BUILDERS[r.stage] || BUILDERS.mature;
     return b(opts, r.stageT);
 }
 
-root.Recipes = root.Recipes || {};
-root.Recipes.shrub = shrub;
-
-})(this);
+Recipes.shrub = shrub;

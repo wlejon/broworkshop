@@ -8,12 +8,17 @@
 // biasing. Threaded into synthesis by gatherOpts() as opts.logitBias; applies to
 // every voice path (speaker / instruct / x-vector).
 
+import { $ } from "/app/lib/state.js";
+import { el } from "/app/lib/helpers.js";
+import { setBadge } from "/app/lib/model.js";
+import { scheduleLive } from "/app/lib/synth.js";
+
 const steerBias = {};        // code id (int) -> additive logit delta
 const STEER_DEFAULT = -3;    // a click suppresses by default (the common "kill this droning code")
 
 function steerActive() { for (const k in steerBias) return true; return false; }
 // The opts.logitBias fragment (a plain {id: delta} object), or null when empty.
-function steerOpts() {
+export function steerOpts() {
   if (!steerActive()) return null;
   const o = {}; for (const k in steerBias) o[k] = steerBias[k];
   return o;
@@ -30,7 +35,7 @@ function steerClear() { for (const k in steerBias) delete steerBias[k]; renderSt
 // Pull the codebook-0 code under a click on the code raster (row 0 only) and stage
 // it for biasing. s/W are the stage + drawn width from renderCodes (recaptured each
 // render). Other rows are acoustic (Code Predictor) — bias doesn't reach them.
-function steerPickFromCodes(ev, canvas, s, W) {
+export function steerPickFromCodes(ev, canvas, s, W) {
   try {
     const rect = canvas.getBoundingClientRect();
     const cx = (ev.clientX - rect.left) * (canvas.width / (rect.width || canvas.width));
@@ -44,7 +49,7 @@ function steerPickFromCodes(ev, canvas, s, W) {
   } catch (e) { setBadge('pick: ' + e.message, true); }
 }
 
-function buildSteer() {
+export function buildSteer() {
   $('#btn-steer-add').addEventListener('click', () => {
     const v = parseInt($('#steer-id').value, 10);
     if (!isFinite(v) || v < 0) { setBadge('enter a non-negative code id', true); return; }

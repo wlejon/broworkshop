@@ -5,7 +5,13 @@
 //
 // HP bars, intent labels, and floating damage numbers are world-anchored
 // scene nodes (ShapeNode + HtmlNode) — no HTML overlay, no projectToScreen.
-var Scene3D = {};
+import { AI } from "/app/ai.js";
+import { Arena } from "/app/arena.js";
+import { Render } from "/app/render.js";
+import { App } from "/app/main.js";
+import "/lib/camera.js";
+
+export const Scene3D = {};
 (function () {
     "use strict";
 

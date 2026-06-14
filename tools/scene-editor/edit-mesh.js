@@ -15,8 +15,7 @@
 // every half-edge; boundaries are marked by twin = null.
 // =============================================================================
 
-(function (global) {
-    'use strict';
+'use strict';
 
     function EditMesh() {
         this.vertices  = [];
@@ -500,7 +499,7 @@
 
     // --- Export -------------------------------------------------------------
 
-    global.EditMesh = {
+    const EditMeshAPI = {
         fromMeshData,
         toMeshData,
         toMeshDataWithGroups,
@@ -516,5 +515,5 @@
         // positions the same way we do.
         _posKey: posKey,
     };
+    export { EditMeshAPI as EditMesh };
 
-})(typeof globalThis !== 'undefined' ? globalThis : this);

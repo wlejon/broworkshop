@@ -1,3 +1,4 @@
+import "/lib/sketch.js";
 // =============================================================================
 // Circle tool — click-center + click-radius drawing. Commit produces a
 // triangulated regular polygon (the approximation SketchUp uses for circles
@@ -12,8 +13,7 @@
 //   - segment count (default 32)
 // =============================================================================
 
-(function (global) {
-    'use strict';
+'use strict';
 
     const DEFAULT_SEGMENTS = 32;
 
@@ -81,9 +81,8 @@
         state.segments = DEFAULT_SEGMENTS;
     }
 
-    global.CircleTool = {
+    export const CircleTool = {
         createState, begin, update, radius, buildMesh, commit, cancel,
         DEFAULT_SEGMENTS,
     };
 
-})(typeof globalThis !== 'undefined' ? globalThis : this);

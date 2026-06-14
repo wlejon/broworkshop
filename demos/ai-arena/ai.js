@@ -13,7 +13,9 @@
 // AI.recordDamage is called from loop.js / fast_eval.js when a DamageEvent
 // fires so a target's mem.threat / mem.threatSourceId / mem.lastHitT latch
 // correctly — scripted's "seek cover under fire" branch reads those.
-var AI = {};
+import { Arena } from "/app/arena.js";
+
+export const AI = {};
 (function () {
     "use strict";
 

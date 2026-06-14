@@ -1,3 +1,13 @@
+import "/app/views/css.js";
+import "/app/views/events.js";
+import "/app/views/forms.js";
+import "/app/views/components.js";
+import "/app/views/workers.js";
+import "/app/views/network.js";
+import "/app/views/webgl.js";
+import "/app/views/mesh.js";
+import "/app/views/jquery.js";
+
 var fs = require('fs');
 var content = document.getElementById('content');
 var navLinks = document.querySelectorAll('.nav-link');

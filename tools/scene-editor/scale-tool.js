@@ -12,8 +12,7 @@
 // Pure-state module — gizmo plumbing lives in app.js.
 // =============================================================================
 
-(function (global) {
-    'use strict';
+'use strict';
 
     function createState() {
         return {
@@ -76,6 +75,5 @@
         state.accumScale[0] = state.accumScale[1] = state.accumScale[2] = 1;
     }
 
-    global.ScaleTool = { createState, begin, applyDelta, commit, cancel, clear };
+    export const ScaleTool = { createState, begin, applyDelta, commit, cancel, clear };
 
-})(typeof globalThis !== 'undefined' ? globalThis : this);

@@ -1,7 +1,10 @@
 // ui.js — HUD panel updates: roster, observation bars, action mask, reward
 // chart, log. Element creation is split between init() (static panels) and
 // rebuildRoster() (scenario-dependent roster rows + focus options).
-var UI = {};
+import { Config } from "/app/config.js";
+import { Arena } from "/app/arena.js";
+
+export const UI = {};
 (function () {
     "use strict";
 

@@ -1,3 +1,8 @@
+import { $, emoCells, emoTimer, kokoro, lastTrace, predicted, putCurDur, putEmoCells, putEmoTimer, putSynthBusy, synthBusy, voice } from "/app/lib/state.js";
+import { setBadge } from "/app/lib/model.js";
+import { applyBackHalf, clearProsody, resampleByDur } from "/app/lib/edit.js";
+import { el } from "/app/lib/helpers.js";
+
 // ── Tier 0 emotion: parametric prosody from a valence/arousal/dominance point ─
 // No model and no training — emotion here is the PROSODY slice only: pitch
 // register/range, energy, and speaking rate, as closed-form transforms of the
@@ -9,7 +14,7 @@
 // only a weak prosodic trace (their main signature is timbre), so their gains
 // are deliberately small — this panel is the prosodic component of affect, not
 // the whole of it.
-const EMO = {
+export const EMO = {
   v: 0, a: 0, d: 0,                                          // valence / arousal / dominance, [-1, 1]
   pitchSemis:  (v, a, d) => 2.5 * a + 1.0 * v - 1.5 * d,     // register shift, semitones
   rangeScale:  (v, a, d) => clampf(1 + 0.45 * a + 0.20 * v - 0.15 * d, 0.5, 1.8),  // pitch range about the mean
@@ -21,14 +26,14 @@ const EMO = {
     ['d', 'dominance', 'submissive ↔ assertive'],
   ],
 };
-function clampf(x, lo, hi) { return x < lo ? lo : x > hi ? hi : x; }
-function emotionActive() { return EMO.v !== 0 || EMO.a !== 0 || EMO.d !== 0; }
+export function clampf(x, lo, hi) { return x < lo ? lo : x > hi ? hi : x; }
+export function emotionActive() { return EMO.v !== 0 || EMO.a !== 0 || EMO.d !== 0; }
 
 // Shift register + expand/contract pitch range in the log (musical) domain,
 // anchored on the contour's own voiced geometric mean; unvoiced frames (F0≈0)
 // stay unvoiced. Energy scales multiplicatively. Returns fresh arrays the same
 // length / timing as the prediction.
-function emoTransformContours(F0src, Nsrc) {
+export function emoTransformContours(F0src, Nsrc) {
   const shift = Math.pow(2, EMO.pitchSemis(EMO.v, EMO.a, EMO.d) / 12);
   const rng = EMO.rangeScale(EMO.v, EMO.a, EMO.d);
   const eScale = EMO.energyScale(EMO.v, EMO.a, EMO.d);
@@ -50,7 +55,7 @@ function emoTransformContours(F0src, Nsrc) {
 // current VAD point and re-decode in one pass. Always anchored on `predicted`,
 // so dragging a slider never compounds. Routed through applyBackHalf, so the
 // result is pinned and rides onto other voices like any manual edit.
-function applyEmotion() {
+export function applyEmotion() {
   if (synthBusy || !kokoro || !voice || !lastTrace || !predicted ||
       !predicted.F0 || !predicted.N || !predicted.dur) return;
   if (!emotionActive()) { clearProsody(); return; }         // neutral → model's own prosody
@@ -78,30 +83,30 @@ function applyEmotion() {
   const Np  = resampleByDur(Nt,  baseDur, newDur);
 
   let r;
-  synthBusy = true;
+  putSynthBusy(true);
   try { r = kokoro.decodeFrom(voice, asrP, F0p, Np, ph.w, { trace: true }); }
-  catch (e) { synthBusy = false; setBadge('decodeFrom: ' + e.message, true); return; }
-  synthBusy = false;
+  catch (e) { putSynthBusy(false); setBadge('decodeFrom: ' + e.message, true); return; }
+  putSynthBusy(false);
 
   const set = (nm, data, w) => { const s = get(nm); if (s) { s.data = data; if (w != null) s.w = w; } };
   set('asr', asrP, totalP);
   set('F0_pred', F0p, F0p.length);
   set('N_pred', Np, Np.length);
   set('pred_dur', Float32Array.from(newDur), L);
-  curDur = newDur.slice();
+  putCurDur(newDur.slice());
   lastTrace.durations = newDur.slice();
   applyBackHalf(r, 'emotion v' + EMO.v.toFixed(2) + ' a' + EMO.a.toFixed(2) + ' d' + EMO.d.toFixed(2));
 }
 
 // Coalesce a VAD slider drag into a single re-decode once it settles.
-function scheduleEmotion() {
+export function scheduleEmotion() {
   if (emoTimer) clearTimeout(emoTimer);
-  emoTimer = setTimeout(() => { emoTimer = 0; applyEmotion(); }, 140);
+  putEmoTimer(setTimeout(() => { putEmoTimer(0); applyEmotion(); }, 140));
 }
 
-function buildEmotion() {
+export function buildEmotion() {
   const root = $('#emotion .emo-axes'); if (!root) return;
-  root.textContent = ''; emoCells = {};
+  root.textContent = ''; putEmoCells({});
   for (const [key, name, hint] of EMO.AXES) {
     const cell = el('div', 'emo-axis');
     const head = el('div', 'emo-head');
@@ -121,12 +126,12 @@ function buildEmotion() {
 }
 
 // Back to neutral: zero the axes and drop the pinned emotion (the prediction).
-function resetEmotion() {
+export function resetEmotion() {
   EMO.v = EMO.a = EMO.d = 0;
   for (const k of ['v', 'a', 'd']) {
     if (emoCells[k]) { emoCells[k]._range.value = '0'; emoCells[k]._val.textContent = '0.00'; }
   }
-  if (emoTimer) { clearTimeout(emoTimer); emoTimer = 0; }
+  if (emoTimer) { clearTimeout(emoTimer); putEmoTimer(0); }
   clearProsody();
 }
 

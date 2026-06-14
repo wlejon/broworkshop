@@ -37,7 +37,7 @@
 //       roles: [{ name: "lead", options: opts }, ...]
 //   });
 
-var TacticalOptions = (function () {
+export const TacticalOptions = (function () {
     "use strict";
 
     // MoveDir enum values (mcts.h). Using literals so this file is

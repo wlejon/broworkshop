@@ -1,7 +1,7 @@
 // scenarios.js — match presets (map + roster + ability tuning).
 // Each scenario is a pure data object; Arena.build(scenario) consumes it.
 // Add a new scenario → push it onto Scenarios.ALL. No engine changes needed.
-var Scenarios = {};
+export const Scenarios = {};
 (function () {
     "use strict";
 

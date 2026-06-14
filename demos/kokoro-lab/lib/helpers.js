@@ -1,3 +1,7 @@
+import { $, audioCtx, clipId, putAudioCtx, putClipId, putClipSamples, putWavRate, putWavSamples, wavRate, wavSamples } from "/app/lib/state.js";
+import { _fs } from "/app/lib/source.js";
+import { setBadge } from "/app/lib/model.js";
+
 // ═══ audio ═════════════════════════════════════════════════════════════════
 // bro's AudioContext is clip-based (broaudio), not Web Audio createBuffer.
 //
@@ -7,9 +11,9 @@
 // has cycled — and leaks a clip per press. So we upload ONCE per synthesis
 // (setClip, in run()'s onDone) and let Play just re-trigger the already-published
 // clip; the auto-play after a run is deferred a few frames so the upload lands.
-function setClip(samples, inRate) {
+export function setClip(samples, inRate) {
   try {
-    audioCtx = audioCtx || new AudioContext();
+    putAudioCtx(audioCtx || new AudioContext());
     const outRate = audioCtx.sampleRate || 48000;
     let buf;
     if (Math.abs(outRate - inRate) < 1) {
@@ -23,15 +27,15 @@ function setClip(samples, inRate) {
       }
     }
     if (clipId >= 0) { try { audioCtx.deleteClip(clipId); } catch (e) {} }
-    clipId = audioCtx.createClip(buf, 1);
-    clipSamples = buf.length;
-    wavSamples = samples;   // keep the native-rate buffer for WAV export (pre-resample)
-    wavRate = inRate;
+    putClipId(audioCtx.createClip(buf, 1));
+    putClipSamples(buf.length);
+    putWavSamples(samples);   // keep the native-rate buffer for WAV export (pre-resample)
+    putWavRate(inRate);
     $('#btn-play').disabled = false;
     $('#btn-save-wav').disabled = false;
-  } catch (e) { setBadge('audio: ' + e.message, true); clipId = -1; clipSamples = 0; }
+  } catch (e) { setBadge('audio: ' + e.message, true); putClipId(-1); putClipSamples(0); }
 }
-function play() {
+export function play() {
   if (clipId < 0 || !audioCtx) return;
   try { audioCtx.playClip(clipId, 1.0, false); }
   catch (e) { setBadge('audio: ' + e.message, true); }
@@ -40,7 +44,7 @@ function play() {
 // ═══ WAV export ════════════════════════════════════════════════════════════
 // Encode the last-heard buffer (the exact samples last published to setClip, so
 // prosody edits are captured too) to a mono 16-bit PCM WAV and write it out.
-function encodeWavPCM16(samples, rate) {
+export function encodeWavPCM16(samples, rate) {
   const n = samples.length, buf = new ArrayBuffer(44 + n * 2), dv = new DataView(buf);
   let p = 0;
   const w32 = (v) => { dv.setUint32(p, v, true); p += 4; };
@@ -55,12 +59,12 @@ function encodeWavPCM16(samples, rate) {
   }
   return new Uint8Array(buf);
 }
-function wavName(prefix) {
+export function wavName(prefix) {
   const t = ($('#text').value || '').trim().toLowerCase()
     .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 32);
   return prefix + (t ? '-' + t : '') + '.wav';
 }
-function saveWav() {
+export function saveWav() {
   if (!wavSamples || !wavSamples.length) { setBadge('nothing to save — run a synthesis first', true); return; }
   if (typeof showSaveFileDialog !== 'function') { setBadge('save dialog unavailable in this build', true); return; }
   try {
@@ -74,13 +78,13 @@ function saveWav() {
 }
 
 // ═══ small helpers ═════════════════════════════════════════════════════════
-function el(tag, cls, text) {
+export function el(tag, cls, text) {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
   if (text != null) e.textContent = text;
   return e;
 }
-function mkCanvas(body, w, h) {
+export function mkCanvas(body, w, h) {
   const wrap = el('div', 'canvas-wrap');
   const cv = document.createElement('canvas');
   cv.width = w; cv.height = h;
@@ -90,7 +94,7 @@ function mkCanvas(body, w, h) {
   cv._overlay = ov;   // retrieved by renderStages to drive the flow highlight
   return cv;
 }
-function stats(d) {
+export function stats(d) {
   let mn = Infinity, mx = -Infinity, sum = 0;
   for (let i = 0; i < d.length; i++) { const v = d[i]; if (v < mn) mn = v; if (v > mx) mx = v; sum += v; }
   return { mn, mx, mean: d.length ? sum / d.length : 0 };

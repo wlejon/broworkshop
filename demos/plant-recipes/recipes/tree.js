@@ -9,11 +9,13 @@
 //   fruiting   mature + small fruit at canopy anchors.
 //   senescent  mature with autumn-tinted canopy + thinned blobs.
 
-(function (root) {
+import { FloraCore } from "/app/recipes/core.js";
+import { Lifecycle } from "/app/recipes/lifecycle.js";
+import { FloraSpecies } from "/app/recipes/species.js";
+import { Recipes } from "/app/recipes/index.js";
 
-const F = root.FloraCore;
-const L = root.Lifecycle;
-const Species = root.Species;
+const F = FloraCore;
+const L = Lifecycle;
 const TAU = F.TAU;
 
 const CANOPY_SHAPES = ['round', 'oval', 'columnar', 'umbrella', 'weeping', 'vase', 'spreading', 'irregular'];
@@ -531,7 +533,7 @@ const FLOWERING_TREE_STAGES = ['seed', 'sprout', 'seedling', 'juvenile', 'mature
 function tree(opts) {
     opts = Object.assign({}, opts);
     if (opts.species) {
-        opts = root.FloraSpecies.applySpecies('tree', opts.species, opts);
+        opts = FloraSpecies.applySpecies('tree', opts.species, opts);
     }
     const hasFlowering = !!opts.bloomColor;
     const stages = opts.stagesOverride || (hasFlowering ? FLOWERING_TREE_STAGES : DEFAULT_TREE_STAGES);
@@ -540,9 +542,6 @@ function tree(opts) {
     return builder(opts, r.stageT);
 }
 
-root.Recipes = root.Recipes || {};
-root.Recipes.tree = tree;
-root.Recipes.CANOPY_SHAPES = CANOPY_SHAPES;
-root.Recipes._TreeStages = { DEFAULT_TREE_STAGES, FLOWERING_TREE_STAGES };
-
-})(this);
+Recipes.tree = tree;
+Recipes.CANOPY_SHAPES = CANOPY_SHAPES;
+Recipes._TreeStages = { DEFAULT_TREE_STAGES, FLOWERING_TREE_STAGES };

@@ -1,7 +1,7 @@
 // config.js — sim + presentation constants (hz, cadences, dims).
 // Central knob file so tuning a cadence doesn't require hunting through the
 // sim loop or render module.
-var Config = {};
+export const Config = {};
 (function () {
     "use strict";
 

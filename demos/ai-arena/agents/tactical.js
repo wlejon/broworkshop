@@ -34,6 +34,10 @@
 //     cell is simply "a cell where LOS to target is blocked", which is
 //     only true when an obstacle sits between them.
 //   - A* pathfinding (via agent.setTarget) handles the cover→fire hop.
+import { AI } from "/app/ai.js";
+import { Arena } from "/app/arena.js";
+import { Agents } from "/app/agents/registry.js";
+
 (function () {
     "use strict";
 

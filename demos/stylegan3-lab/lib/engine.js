@@ -12,27 +12,37 @@
 // single image is one step; a Walk strip is N). onStep(i, result) places each
 // result; onAll() fires when the whole sequence finishes.
 
-function setBadge(text, err) {
+import { $, S, wCache } from "/app/lib/state.js";
+import { seamHint } from "/app/lib/model.js";
+import { wKey } from "/app/lib/helpers.js";
+
+// engine: one model op in flight at a time (single-owner), latest-wins.
+let inflight = null;                              // current AsyncHandle
+let curSeq = null;                                // running job sequence
+let pending = null;                               // job to start once the slot frees
+let seqCounter = 0;                               // monotonic id, guards stale onDone
+
+export function setBadge(text, err) {
   const b = $('#backend');
   if (!b) return;
   b.textContent = text;
   b.classList.toggle('err', !!err);
 }
 
-function runSeq(label, steps, onStep, onAll) {
-  if (!gan) return;
+export function runSeq(label, steps, onStep, onAll) {
+  if (!S.gan) return;
   pending = { id: ++seqCounter, label: label, steps: steps, i: 0, onStep: onStep, onAll: onAll };
   kick();
 }
 
 // Convenience for the common one-image job.
-function runOne(label, build, done) {
+export function runOne(label, build, done) {
   runSeq(label, [build], function (i, r) { if (done) done(r); });
 }
 
 // Drop everything (in flight + queued). Used on load/teardown. The cancelled
 // op's onDone still fires, but its sequence id won't match, so it's ignored.
-function cancelAll() {
+export function cancelAll() {
   pending = null; curSeq = null;
   if (inflight) { try { inflight.cancel(); } catch (e) {} }
 }
@@ -87,9 +97,9 @@ function pump() {
 // ── step builders ─────────────────────────────────────────────────────────────
 
 // z(seed) → image + mapped w+ (cached). Used wherever a panel needs the latent.
-function buildW(seed, psi, cutoff) {
+export function buildW(seed, psi, cutoff) {
   return function (onDone) {
-    return gan.generate({
+    return S.gan.generate({
       seed: seed, truncation: psi, truncationCutoff: cutoff, returnLatents: true,
       onDone: function (r, info) {
         if (info && !info.error && !info.cancelled && r && r.w) {
@@ -102,13 +112,13 @@ function buildW(seed, psi, cutoff) {
 }
 
 // z(seed) → image only (no latents) — the Grid path, where we never reuse the w+.
-function buildImg(seed, psi, cutoff) {
+export function buildImg(seed, psi, cutoff) {
   return function (onDone) {
-    return gan.generate({ seed: seed, truncation: psi, truncationCutoff: cutoff, onDone: onDone });
+    return S.gan.generate({ seed: seed, truncation: psi, truncationCutoff: cutoff, onDone: onDone });
   };
 }
 
 // an explicit/edited w+ → image — the Walk/Mix render path.
-function buildSynth(w) {
-  return function (onDone) { return gan.synthesize(w, { onDone: onDone }); };
+export function buildSynth(w) {
+  return function (onDone) { return S.gan.synthesize(w, { onDone: onDone }); };
 }

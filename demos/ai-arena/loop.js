@@ -2,7 +2,15 @@
 // Scene3D.scene.attachAIWorld, and each unit's decision loop runs inside
 // its AgentBinding via the registered agent's think() (which routes
 // execution through Bot.tick). Everything here runs on the render frame.
-var Loop = {};
+import { Arena } from "/app/arena.js";
+import { AI } from "/app/ai.js";
+import { Render } from "/app/render.js";
+import { Scene3D } from "/app/scene_setup.js";
+import { UI } from "/app/ui.js";
+import { Config } from "/app/config.js";
+import { Agents } from "/app/agents/registry.js";
+
+export const Loop = {};
 (function () {
     "use strict";
 

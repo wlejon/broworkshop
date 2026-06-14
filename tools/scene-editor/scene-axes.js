@@ -13,8 +13,7 @@
 // in both directions along their axis.
 // =============================================================================
 
-(function (global) {
-    'use strict';
+'use strict';
 
     // Append a 24-vertex axis-aligned box (4 unique verts × 6 faces) with
     // per-face outward normals and a single per-vertex color. Per-face
@@ -123,6 +122,5 @@
         };
     }
 
-    global.SceneAxes = { buildSceneAxes, emitAABB };
+    export const SceneAxes = { buildSceneAxes, emitAABB };
 
-})(typeof globalThis !== 'undefined' ? globalThis : this);

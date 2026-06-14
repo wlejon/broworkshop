@@ -1,7 +1,11 @@
 // controls.js — Button handlers + event-driven selector state. Controls
 // read App.state each time a handler fires (not at bind time), so state
 // object swaps from App.rebuild() propagate without rebinding.
-var Controls = {};
+import { Agents } from "/app/agents/registry.js";
+import { Replay } from "/app/replay.js";
+import { App } from "/app/main.js";
+
+export const Controls = {};
 (function () {
     "use strict";
 

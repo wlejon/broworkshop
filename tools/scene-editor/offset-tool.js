@@ -1,3 +1,4 @@
+import "/lib/sketch.js";
 // =============================================================================
 // Offset tool — SketchUp-style face-boundary offset.
 //
@@ -16,8 +17,7 @@
 // positive = expand. Sign chosen by the caller.
 // =============================================================================
 
-(function (global) {
-    'use strict';
+'use strict';
 
     function createState() {
         return {
@@ -136,9 +136,8 @@
         return [cx / n, cy / n, cz / n];
     }
 
-    global.OffsetTool = {
+    export const OffsetTool = {
         createState, active, begin, setDistance, updateFromCursor,
         buildOffsetLoop, commit, cancel,
     };
 
-})(typeof globalThis !== 'undefined' ? globalThis : this);

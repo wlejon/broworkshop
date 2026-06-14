@@ -1,5 +1,19 @@
 // Qwen TTS Lab — entry point. Wire the DOM up and load the first checkpoint.
-// (All lib/ modules share this global scope, loaded in order by index.html.)
+// (ES module entry: imports the lib/ modules in the original index.html order.)
+import { $ } from "/app/lib/state.js";
+import { browseFolder, browseFile, pParent, pName, toMono } from "/app/lib/helpers.js";
+import { loadModel, defaultModelDir, setBadge, qwen, variant } from "/app/lib/model.js";
+import { markDesigned, updateDesignerMeta } from "/app/lib/voice.js";
+import {
+  enrollRef, randomDesigned, coordsFromXvec, syncSliders, drawMap,
+  voiceBasis, designedXvec, setDesignedXvec, setIdentitySource, setCoords,
+} from "/app/lib/designer.js";
+import { resetEmotion } from "/app/lib/emotion.js";
+import { resetMascFem } from "/app/lib/mascfem.js";
+import { buildDelivery } from "/app/lib/delivery.js";
+import { buildSteer } from "/app/lib/steer.js";
+import { play, saveWav, audioCtx, setAudioCtx } from "/app/lib/audio.js";
+import { requestRender, requestStream, scheduleLive, bargeIn } from "/app/lib/synth.js";
 
 function init() {
   // ── checkpoint bar ────────────────────────────────────────────────────────
@@ -49,14 +63,14 @@ function cloneOnce() {
   const path = $('#ref-wav').value.trim();
   if (!path) { setBadge('enter or browse a reference .wav first', true); return; }
   try {
-    audioCtx = audioCtx || new AudioContext();
+    setAudioCtx(audioCtx || new AudioContext());
     const dec = audioCtx.decodeAudioFile(path);
     if (!dec || !dec.samples || !dec.samples.length) { setBadge('could not decode ' + path, true); return; }
-    designedXvec = qwen.embedSpeaker(toMono(dec.samples, dec.channels), { sampleRate: dec.sampleRate });
-    identitySource = 'clone';
+    setDesignedXvec(qwen.embedSpeaker(toMono(dec.samples, dec.channels), { sampleRate: dec.sampleRate }));
+    setIdentitySource('clone');
     // faithful clip identity (the full x-vector, not a basis projection); reflect
     // its projection onto the map/sliders so the panel shows where it landed.
-    if (voiceBasis) { coords = coordsFromXvec(designedXvec); syncSliders(); drawMap(); }
+    if (voiceBasis) { setCoords(coordsFromXvec(designedXvec)); syncSliders(); drawMap(); }
     if (variant === 'customvoice') markDesigned();   // render this clone via the slot override
     updateDesignerMeta();
     setBadge('cloned ' + pName(path) + ' · streaming…');

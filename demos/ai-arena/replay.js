@@ -1,7 +1,10 @@
 // replay.js — Record + playback state machine. Owned by the Record/Play
 // buttons in controls.js; main.js consults state.replayPlaying each frame
 // and delegates to Replay.drawFrame when true.
-var Replay = {};
+import { UI } from "/app/ui.js";
+import { Config } from "/app/config.js";
+
+export const Replay = {};
 (function () {
     "use strict";
 

@@ -1,25 +1,31 @@
-function snapshotPredicted(r) {
+import { $, curDur, kokoro, lastTrace, pinnedEdit, predicted, putCurDur, putEdited, putPinnedEdit, putPredicted, putSynthBusy, synthBusy, voice } from "/app/lib/state.js";
+import { setBadge } from "/app/lib/model.js";
+import { run } from "/app/lib/synth.js";
+import { renderStages } from "/app/lib/render.js";
+import { el, play, setClip } from "/app/lib/helpers.js";
+
+export function snapshotPredicted(r) {
   const f = r.stages.find((s) => s.name === 'F0_pred');
   const n = r.stages.find((s) => s.name === 'N_pred');
   const d = r.stages.find((s) => s.name === 'pred_dur');
   const dur = d ? Array.from(d.data, (v) => Math.round(v)) : null;
-  predicted = {
+  putPredicted({
     F0: f ? Float32Array.from(f.data) : null,
     N:  n ? Float32Array.from(n.data) : null,
     dur: dur ? dur.slice() : null,
-  };
-  curDur = dur ? dur.slice() : null;     // F0/N start aligned to the prediction
-  edited = false;
+  });
+  putCurDur(dur ? dur.slice() : null);     // F0/N start aligned to the prediction
+  putEdited(false);
 }
 
 // Shared tail: a decodeFrom result `r` carries the re-decoded back-half stages
 // (gen_in/har/audio). Swap them into the trace, play the new audio, and redraw
 // the whole pipeline so the edit propagates visually.
-function applyBackHalf(r, label) {
+export function applyBackHalf(r, label) {
   for (const st of r.stages) { const i = lastTrace.stages.findIndex((x) => x.name === st.name); if (i >= 0) lastTrace.stages[i] = st; }
   setClip(r.samples, r.sampleRate);
   setTimeout(play, 30);
-  edited = true;
+  putEdited(true);
   const sc = $('#stages').scrollTop;
   renderStages(lastTrace.stages);
   $('#stages').scrollTop = sc;
@@ -30,23 +36,23 @@ function applyBackHalf(r, label) {
 
 // Re-run only the decoder back half from the (possibly edited) asr/F0/N grids
 // the trace already holds — synchronous, so guard against a background synth.
-function commitEdit() {
+export function commitEdit() {
   if (synthBusy || !kokoro || !voice || !lastTrace) return;
   const get = (nm) => lastTrace.stages.find((s) => s.name === nm);
   const asr = get('asr'), F0 = get('F0_pred'), N = get('N_pred'), ph = get('phonemes');
   if (!asr || !F0 || !N || !ph) { setBadge('edit: trace is missing stages', true); return; }
   let r;
-  synthBusy = true;
+  putSynthBusy(true);
   try { r = kokoro.decodeFrom(voice, asr.data, F0.data, N.data, ph.w, { trace: true }); }
-  catch (e) { synthBusy = false; setBadge('decodeFrom: ' + e.message, true); return; }
-  synthBusy = false;
+  catch (e) { putSynthBusy(false); setBadge('decodeFrom: ' + e.message, true); return; }
+  putSynthBusy(false);
   applyBackHalf(r, 'pitch/energy edited');
 }
 
 // Resample a frame-rate contour from one per-phoneme duration set to another,
 // preserving each phoneme's contour SHAPE while restretching its time span.
 // src is at 2× frame rate (2*sum(srcDur)); returns 2*sum(dstDur).
-function resampleByDur(src, srcDur, dstDur) {
+export function resampleByDur(src, srcDur, dstDur) {
   const L = srcDur.length;
   let sumD = 0; for (let l = 0; l < L; l++) sumD += dstDur[l];
   const dst = new Float32Array(2 * sumD);
@@ -68,7 +74,7 @@ function resampleByDur(src, srcDur, dstDur) {
 // Re-time: the per-phoneme frame counts changed. Rebuild asr by re-expanding the
 // text-encoder features (length regulate), resample the F0/N contours from the
 // old timing to the new, and re-decode. No predictor re-run.
-function commitDuration(newDur) {
+export function commitDuration(newDur) {
   if (synthBusy || !kokoro || !voice || !lastTrace || !curDur) return;
   const get = (nm) => lastTrace.stages.find((s) => s.name === nm);
   const ten = get('t_en'), F0 = get('F0_pred'), N = get('N_pred'), ph = get('phonemes');
@@ -88,10 +94,10 @@ function commitDuration(newDur) {
   const Np  = resampleByDur(N.data,  curDur, newDur);
 
   let r;
-  synthBusy = true;
+  putSynthBusy(true);
   try { r = kokoro.decodeFrom(voice, asrP, F0p, Np, ph.w, { trace: true }); }
-  catch (e) { synthBusy = false; setBadge('decodeFrom: ' + e.message, true); return; }
-  synthBusy = false;
+  catch (e) { putSynthBusy(false); setBadge('decodeFrom: ' + e.message, true); return; }
+  putSynthBusy(false);
 
   // commit the new front-stage grids so the next edit composes correctly
   const set = (nm, data, w) => { const s = get(nm); if (s) { s.data = data; if (w != null) s.w = w; } };
@@ -99,7 +105,7 @@ function commitDuration(newDur) {
   set('F0_pred', F0p, F0p.length);
   set('N_pred', Np, Np.length);
   set('pred_dur', Float32Array.from(newDur), L);
-  curDur = newDur.slice();
+  putCurDur(newDur.slice());
   lastTrace.durations = newDur.slice();    // selectPhoneme reads this
   applyBackHalf(r, 'timing edited');
 }
@@ -113,11 +119,11 @@ function commitDuration(newDur) {
 //                    timing (baseDur) so resampleByDur can restretch them later
 // Captured after every commit (manual or re-applied), so the pin always reflects
 // the current on-screen prosody relative to the current voice's prediction.
-function capturePinnedEdit() {
+export function capturePinnedEdit() {
   const F0 = lastTrace && lastTrace.stages.find((s) => s.name === 'F0_pred');
   const N  = lastTrace && lastTrace.stages.find((s) => s.name === 'N_pred');
   if (!predicted || !predicted.F0 || !predicted.N || !predicted.dur || !curDur || !F0 || !N) {
-    pinnedEdit = null; updatePinUI(); return;
+    putPinnedEdit(null); updatePinUI(); return;
   }
   const base = predicted.dur, L = base.length;
   const durRatio = new Float64Array(L);
@@ -129,7 +135,7 @@ function capturePinnedEdit() {
   for (let i = 0; i < dF0.length; i++) dF0[i] = f0AtPred[i] - predicted.F0[i];
   const dN = new Float32Array(predicted.N.length);
   for (let i = 0; i < dN.length; i++) dN[i] = nAtPred[i] - predicted.N[i];
-  pinnedEdit = { durRatio, dF0, dN, baseDur: base.slice() };
+  putPinnedEdit({ durRatio, dF0, dN, baseDur: base.slice() });
   updatePinUI();
 }
 
@@ -137,14 +143,14 @@ function capturePinnedEdit() {
 // scale its durations by durRatio, add the contour deltas (restretched to this
 // voice's spans), and re-decode the back half. Returns false (and drops the pin)
 // if the text changed so the phoneme count no longer lines up.
-function reapplyPinnedEdit() {
+export function reapplyPinnedEdit() {
   if (!pinnedEdit || synthBusy || !kokoro || !voice || !lastTrace) return false;
   const get = (nm) => lastTrace.stages.find((s) => s.name === nm);
   const ten = get('t_en'), F0 = get('F0_pred'), N = get('N_pred'), ph = get('phonemes'), pd = get('pred_dur');
   if (!ten || !F0 || !N || !ph || !pd) return false;
   const predDur = Array.from(pd.data, (v) => Math.round(v));   // this voice's predicted timing
   const L = predDur.length;
-  if (pinnedEdit.durRatio.length !== L) { pinnedEdit = null; updatePinUI(); return false; }
+  if (pinnedEdit.durRatio.length !== L) { putPinnedEdit(null); updatePinUI(); return false; }
 
   const targetDur = new Array(L);
   for (let l = 0; l < L; l++) targetDur[l] = Math.max(1, Math.round(predDur[l] * pinnedEdit.durRatio[l]));
@@ -170,30 +176,30 @@ function reapplyPinnedEdit() {
   }
 
   let r;
-  synthBusy = true;
+  putSynthBusy(true);
   try { r = kokoro.decodeFrom(voice, asrP, F0f, Nf, ph.w, { trace: true }); }
-  catch (e) { synthBusy = false; setBadge('reapply: ' + e.message, true); return false; }
-  synthBusy = false;
+  catch (e) { putSynthBusy(false); setBadge('reapply: ' + e.message, true); return false; }
+  putSynthBusy(false);
 
   const set = (nm, data, w) => { const s = get(nm); if (s) { s.data = data; if (w != null) s.w = w; } };
   set('asr', asrP, totalP);
   set('F0_pred', F0f, F0f.length);
   set('N_pred', Nf, Nf.length);
   set('pred_dur', Float32Array.from(targetDur), L);
-  curDur = targetDur.slice();
+  putCurDur(targetDur.slice());
   lastTrace.durations = targetDur.slice();
   applyBackHalf(r, 'prosody retained');
   return true;
 }
 
 // Drop the retained edit and fall back to the model's own prosody.
-function clearProsody() {
-  pinnedEdit = null;
+export function clearProsody() {
+  putPinnedEdit(null);
   updatePinUI();
   run();
 }
 
-function updatePinUI() {
+export function updatePinUI() {
   const p = $('#pin'); if (!p) return;
   p.textContent = '';
   if (!pinnedEdit) { p.style.display = 'none'; return; }
@@ -209,7 +215,7 @@ function updatePinUI() {
 // contour may since have been retimed (emotion / timing edit), so restretch the
 // predicted shape from predicted.dur onto the current timing (curDur) before
 // restoring — an identity when the timing is unchanged.
-function resetSignal(name) {
+export function resetSignal(name) {
   if (!predicted || !lastTrace || !curDur || !predicted.dur) return;
   const st = lastTrace.stages.find((s) => s.name === name);
   const src = name === 'F0_pred' ? predicted.F0 : predicted.N;
@@ -221,7 +227,7 @@ function resetSignal(name) {
 }
 
 // Restore the predicted timing (resamples the current contours back).
-function resetDurations() {
+export function resetDurations() {
   if (!predicted || !predicted.dur) return;
   commitDuration(predicted.dur.slice());
 }

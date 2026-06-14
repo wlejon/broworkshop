@@ -1,3 +1,8 @@
+import { Mat4Lib } from "/app/mat4.js";
+import { SceneObject } from "/app/scene-object.js";
+import { EditMesh } from "/app/edit-mesh.js";
+import { Inference } from "/app/inference.js";
+import { EdgeMesh } from "/app/edge-mesh.js";
 // =============================================================================
 // Primitive — one editable mesh object, living as a leaf SceneObject in the
 // scene-editor's hierarchy.
@@ -19,8 +24,7 @@
 // buffer mutation at all.
 // =============================================================================
 
-(function (global) {
-    'use strict';
+'use strict';
 
     const EDGE_THICKNESS = 0.01;
     const EDGE_COLOR     = [0.17, 0.24, 0.31, 1.0];
@@ -162,7 +166,7 @@
         // Back-compat: older callers use `opts.position` for the initial
         // translation. Accept either; translation wins if both supplied.
         if (!opts.translation && opts.position) opts.translation = opts.position;
-        global.SceneObject.call(this, opts);
+        SceneObject.call(this, opts);
 
         this.color         = opts.color || '#74b9ff';
         this.scene         = opts.scene;
@@ -195,7 +199,7 @@
 
         if (opts.mesh) this._install(opts.mesh);
     }
-    Primitive.prototype = Object.create(global.SceneObject.prototype);
+    Primitive.prototype = Object.create(SceneObject.prototype);
     Primitive.prototype.constructor = Primitive;
 
     // Any ancestor transform change invalidates our world-space inference
@@ -429,7 +433,7 @@
     };
 
     Primitive.prototype.setName = function (name) {
-        global.SceneObject.prototype.setName.call(this, name);
+        SceneObject.prototype.setName.call(this, name);
     };
 
     Primitive.prototype.destroy = function () {
@@ -634,10 +638,9 @@
         return p;
     };
 
-    global.Primitive = Primitive;
-    global.Primitive.computeFaceGroups = computeFaceGroups;
-    global.Primitive.faceGroupsFromTriToGroup = faceGroupsFromTriToGroup;
-    global.Primitive.EDGE_THICKNESS = EDGE_THICKNESS;
-    global.Primitive.EDGE_COLOR     = EDGE_COLOR;
+    Primitive.computeFaceGroups = computeFaceGroups;
+    Primitive.faceGroupsFromTriToGroup = faceGroupsFromTriToGroup;
+    Primitive.EDGE_THICKNESS = EDGE_THICKNESS;
+    Primitive.EDGE_COLOR     = EDGE_COLOR;
+    export { Primitive };
 
-})(typeof globalThis !== 'undefined' ? globalThis : this);

@@ -16,16 +16,16 @@
 // bridge (voice_bridge.bin, beside the model). Changing the voice re-traces it,
 // so the stage stream and the audio always reflect what the sliders define.
 
-const $ = (s) => document.querySelector(s);
+export const $ = (s) => document.querySelector(s);
 
-let kokoro = null;
-let voice = null;
-let lastTrace = null;     // { samples, sampleRate, durations, stages }
-let audioCtx = null;
-let clipId = -1;          // the published audio clip for the current synthesis
-let clipSamples = 0;      // sample count of that clip (for phoneme-segment regions)
-let wavSamples = null;    // native-rate copy of the last-heard buffer (for WAV export)
-let wavRate = 24000;      // its sample rate
+export let kokoro = null;
+export let voice = null;
+export let lastTrace = null;     // { samples, sampleRate, durations, stages }
+export let audioCtx = null;
+export let clipId = -1;          // the published audio clip for the current synthesis
+export let clipSamples = 0;      // sample count of that clip (for phoneme-segment regions)
+export let wavSamples = null;    // native-rate copy of the last-heard buffer (for WAV export)
+export let wavRate = 24000;      // its sample rate
 
 // ─── stage metadata ────────────────────────────────────────────────────────
 // kind  = how to draw it.  desc = plain words.
@@ -34,7 +34,7 @@ let wavRate = 24000;      // its sample rate
 //           axis 'x'|'y'|'chip' = which axis carries the unit
 //           time 'sym'          = phoneme time (unit = column/row index / L)
 //           time 'frame'        = frame time   (unit = its duration span / total)
-const STAGE_INFO = {
+export const STAGE_INFO = {
   phonemes: { kind: 'chips', desc: 'input phoneme ids — symbol time, length L', flow: { axis: 'chip' } },
   bert_dur: { kind: 'heat',  desc: 'plBERT contextual features — L phonemes x 768 dims', flow: { axis: 'y', time: 'sym' } },
   d_en:     { kind: 'heat',  desc: 'predictor conditioning (PROSODY branch) — 512 ch x L', flow: { axis: 'x', time: 'sym' } },
@@ -52,51 +52,94 @@ const STAGE_INFO = {
 // then the editable prosody surfaces (pitch / energy / timing) hoisted to the
 // top so they're reachable without scrolling, then the waveform, then the rest
 // of the latent pipeline in forward order.
-const STAGE_ORDER = ['phonemes', 'F0_pred', 'N_pred', 'pred_dur', 'audio',
+export const STAGE_ORDER = ['phonemes', 'F0_pred', 'N_pred', 'pred_dur', 'audio',
                      'bert_dur', 'd_en', 't_en', 'asr', 'gen_in', 'har'];
 
 // flow state: overlays/chips per stage, and the currently traced phoneme.
-let flowStages = [];
-let selPhoneme = -1;
+export let flowStages = [];
+export let selPhoneme = -1;
 
 // ═══ voice-space designer ════════════════════════════════════════════════════
 // The slider basis: principal axes of the clean swept voices, std-scaled so a
 // slider unit == 1σ of real voice variation. See tests/_voice_basis.js.
-let basis = null;          // voicebasis.json
-let coords = null;         // Float64Array(K) — current position, in σ units
-let sliderCells = [];      // the K slider widgets (skips the group-label rows)
-let bridge = null;         // { D, M, xm, ym, B } — lazy (clone only)
-let spkEnc = null;         // standalone ECAPA speaker encoder — lazy (clone only)
-let renderTimer = 0;       // debounce slider drags before the re-render
-let synthBusy = false;     // a synth (audio or trace pass) is in flight
-let dirty = false;         // the voice changed; needs an audio-then-trace pass
+export let basis = null;          // voicebasis.json
+export let coords = null;         // Float64Array(K) — current position, in σ units
+export let sliderCells = [];      // the K slider widgets (skips the group-label rows)
+export let bridge = null;         // { D, M, xm, ym, B } — lazy (clone only)
+export let spkEnc = null;         // standalone ECAPA speaker encoder — lazy (clone only)
+export let renderTimer = 0;       // debounce slider drags before the re-render
+export let synthBusy = false;     // a synth (audio or trace pass) is in flight
+export let dirty = false;         // the voice changed; needs an audio-then-trace pass
 
 // ── prosody editing (drag the F0 / energy curves or the alignment, re-decode
 //    just the back half)
-let predicted = null;      // { F0, N, dur } snapshot of the model's prediction (reset)
-let curDur = null;         // the durations the current F0/N are aligned to (int[])
-let edited = false;        // the user has reshaped a contour or the timing
-let pinnedEdit = null;     // retained prosody delta, re-applied on every voice/slider change
+export let predicted = null;      // { F0, N, dur } snapshot of the model's prediction (reset)
+export let curDur = null;         // the durations the current F0/N are aligned to (int[])
+export let edited = false;        // the user has reshaped a contour or the timing
+export let pinnedEdit = null;     // retained prosody delta, re-applied on every voice/slider change
                            // { durRatio:Float64[L], dF0:Float32, dN:Float32, baseDur:int[L] }
-let activePaint = null;    // in-progress curve drag {cv,s,color,mn,mx,W,H,pad,lastI,lastV}
-let activeDrag = null;     // in-progress alignment drag {cv,s,total,work,x0,l,base,rectW,moved}
-let protectedStage = null; // stage name whose canvas to keep intact across a re-decode (the edit IS the truth)
-let stageCards = null;     // name -> { card, body, info, shapeEl, statsEl }; cards persist, bodies refresh in place
-let stageSig = '';         // current stage-name signature, so we only full-rebuild when the set changes
-let emoTimer = 0;          // debounce for VAD emotion slider drags
-let emoCells = {};         // VAD axis widgets, keyed 'v' / 'a' / 'd'
+export let activePaint = null;    // in-progress curve drag {cv,s,color,mn,mx,W,H,pad,lastI,lastV}
+export let activeDrag = null;     // in-progress alignment drag {cv,s,total,work,x0,l,base,rectW,moved}
+export let protectedStage = null; // stage name whose canvas to keep intact across a re-decode (the edit IS the truth)
+export let stageCards = null;     // name -> { card, body, info, shapeEl, statsEl }; cards persist, bodies refresh in place
+export let stageSig = '';         // current stage-name signature, so we only full-rebuild when the set changes
+export let emoTimer = 0;          // debounce for VAD emotion slider drags
+export let emoCells = {};         // VAD axis widgets, keyed 'v' / 'a' / 'd'
 
 // ── Tier 1 emotion: learned timbre directions in style space (emotion_basis.json)
-let emotionBasis = null;   // { emotions, resid, full, sigmaResid, defaultAlpha, ... }
-let emoTimbre = {};        // per-emotion intensity α applied to resid[e]
-let timbreCells = {};      // emotion slider widgets, keyed by code (ANG/SAD/…)
-let timbreTimer = 0;       // debounce for timbre slider drags (full re-synth)
+export let emotionBasis = null;   // { emotions, resid, full, sigmaResid, defaultAlpha, ... }
+export let emoTimbre = {};        // per-emotion intensity α applied to resid[e]
+export let timbreCells = {};      // emotion slider widgets, keyed by code (ANG/SAD/…)
+export let timbreTimer = 0;       // debounce for timbre slider drags (full re-synth)
 
 // ── masculine↔feminine: a bipolar vocal-quality axis in style space (masc_fem_basis.json)
-let mascFemBasis = null;   // { poles:['F','M'], full:{M,F}, defaultAlpha, alphaMax, ... }
-let mfAlpha = 0;           // signed intensity along full[M]: + masculine, − feminine
-let mfSlider = null, mfVal = null;
-let mfTimer = 0;           // debounce for the masc/fem slider drag (full re-synth)
+export let mascFemBasis = null;   // { poles:['F','M'], full:{M,F}, defaultAlpha, alphaMax, ... }
+export let mfAlpha = 0;           // signed intensity along full[M]: + masculine, − feminine
+export let mfSlider = null, mfVal = null;
+export let mfTimer = 0;           // debounce for the masc/fem slider drag (full re-synth)
 
-const ATTR_WORD = { f0_mean: 'pitch', rms: 'volume', energy: 'energy', rate: 'pace', zcr: 'brightness', f0_std: 'pitch var' };
+export const ATTR_WORD = { f0_mean: 'pitch', rms: 'volume', energy: 'energy', rate: 'pace', zcr: 'brightness', f0_std: 'pitch var' };
+
+// ─── setters ─────────────────────────────────────────────────────────────────
+// ES-module bindings are read-only across module boundaries, so the files that
+// reassign the mutable state above (kept central here, the "shared state" hub)
+// go through these — reads still import the live `let` bindings directly.
+export function putKokoro(v)        { kokoro = v;        return v; }
+export function putVoice(v)         { voice = v;         return v; }
+export function putLastTrace(v)     { lastTrace = v;     return v; }
+export function putAudioCtx(v)      { audioCtx = v;      return v; }
+export function putClipId(v)        { clipId = v;        return v; }
+export function putClipSamples(v)   { clipSamples = v;   return v; }
+export function putWavSamples(v)    { wavSamples = v;    return v; }
+export function putWavRate(v)       { wavRate = v;       return v; }
+export function putFlowStages(v)    { flowStages = v;    return v; }
+export function putSelPhoneme(v)    { selPhoneme = v;    return v; }
+export function putBasis(v)         { basis = v;         return v; }
+export function putCoords(v)        { coords = v;        return v; }
+export function putSliderCells(v)   { sliderCells = v;   return v; }
+export function putBridge(v)        { bridge = v;        return v; }
+export function putSpkEnc(v)        { spkEnc = v;        return v; }
+export function putRenderTimer(v)   { renderTimer = v;   return v; }
+export function putSynthBusy(v)     { synthBusy = v;     return v; }
+export function putDirty(v)         { dirty = v;         return v; }
+export function putPredicted(v)     { predicted = v;     return v; }
+export function putCurDur(v)        { curDur = v;        return v; }
+export function putEdited(v)        { edited = v;        return v; }
+export function putPinnedEdit(v)    { pinnedEdit = v;    return v; }
+export function putActivePaint(v)   { activePaint = v;   return v; }
+export function putActiveDrag(v)    { activeDrag = v;    return v; }
+export function putProtectedStage(v){ protectedStage = v; return v; }
+export function putStageCards(v)    { stageCards = v;    return v; }
+export function putStageSig(v)      { stageSig = v;      return v; }
+export function putEmoTimer(v)      { emoTimer = v;      return v; }
+export function putEmoCells(v)      { emoCells = v;      return v; }
+export function putEmotionBasis(v)  { emotionBasis = v;  return v; }
+export function putEmoTimbre(v)     { emoTimbre = v;     return v; }
+export function putTimbreCells(v)   { timbreCells = v;   return v; }
+export function putTimbreTimer(v)   { timbreTimer = v;   return v; }
+export function putMascFemBasis(v)  { mascFemBasis = v;  return v; }
+export function putMfAlpha(v)       { mfAlpha = v;       return v; }
+export function putMfSlider(v)      { mfSlider = v;      return v; }
+export function putMfVal(v)         { mfVal = v;         return v; }
+export function putMfTimer(v)       { mfTimer = v;       return v; }
 

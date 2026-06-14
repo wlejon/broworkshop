@@ -8,6 +8,18 @@
 // stutter/speed-up that the old timer approach showed under render-pass load).
 // Since Qwen's codec is causal, chunk samples are final, so they join seamlessly.
 
+import { $ } from "/app/lib/state.js";
+import { _fs } from "/app/lib/helpers.js";
+import { setBadge } from "/app/lib/model.js";
+import { lastResult } from "/app/lib/synth.js";
+
+// owned shared state
+export let audioCtx = null;
+export function setAudioCtx(v) { audioCtx = v; }
+let clipId = -1;          // the published full-utterance clip (for ♪ replay)
+let wavSamples = null;    // native-rate copy of the last-published buffer (for WAV export)
+let wavRate = 24000;      // its sample rate
+
 function ensureCtx() { audioCtx = audioCtx || new AudioContext(); return audioCtx; }
 
 function resampleTo(samples, inRate, outRate) {
@@ -22,7 +34,7 @@ function resampleTo(samples, inRate, outRate) {
 }
 
 // Publish the full utterance as one clip (for ♪ replay), replacing the previous.
-function setClip(samples, inRate) {
+export function setClip(samples, inRate) {
   try {
     const ctx = ensureCtx();
     const buf = resampleTo(samples, inRate, ctx.sampleRate || 48000);
@@ -34,7 +46,7 @@ function setClip(samples, inRate) {
     $('#btn-save-wav').disabled = false;
   } catch (e) { setBadge('audio: ' + e.message, true); clipId = -1; }
 }
-function play() {
+export function play() {
   if (clipId < 0 || !audioCtx) return;
   try { audioCtx.playClip(clipId, 1.0, false); } catch (e) { setBadge('audio: ' + e.message, true); }
 }
@@ -62,7 +74,7 @@ function wavName(prefix) {
     .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 32);
   return prefix + (t ? '-' + t : '') + '.wav';
 }
-function saveWav() {
+export function saveWav() {
   if (!wavSamples || !wavSamples.length) { setBadge('nothing to save — render or stream first', true); return; }
   if (typeof showSaveFileDialog !== 'function') { setBadge('save dialog unavailable in this build', true); return; }
   try {
@@ -79,7 +91,7 @@ function saveWav() {
 let _streamNext = -1;        // engine time the next chunk should start at
 let _streamClips = [];       // { clip, pid } for cleanup
 
-function streamReset() {
+export function streamReset() {
   streamStop();
   _streamNext = -1;
 }
@@ -87,7 +99,7 @@ function streamReset() {
 // Queue one decoded chunk for gapless playback. Each chunk is scheduled at its
 // exact audio-clock start (playClip's 4th arg → broaudio playClipAt), so the
 // audio thread joins them sample-accurately regardless of main-thread load.
-function streamPush(samples) {
+export function streamPush(samples) {
   try {
     const ctx = ensureCtx();
     const buf = resampleTo(samples, lastResult ? lastResult.sampleRate : 24000, ctx.sampleRate || 48000);
@@ -103,7 +115,7 @@ function streamPush(samples) {
   } catch (e) { setBadge('stream audio: ' + e.message, true); }
 }
 
-function streamStop() {
+export function streamStop() {
   for (const r of _streamClips) {
     try { if (r.pid >= 0) audioCtx.stopPlayback(r.pid); } catch (e) {}
     try { audioCtx.deleteClip(r.clip); } catch (e) {}

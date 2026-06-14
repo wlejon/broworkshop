@@ -4,7 +4,7 @@
 // world.events. The actual visuals for projectiles, units, gizmos, and FX are
 // moving to scene_setup.js in Phases 5 and 6 — until then, FX are recorded
 // here and not yet visible in the 3D scene.
-var Render = {};
+export const Render = {};
 (function () {
     "use strict";
 

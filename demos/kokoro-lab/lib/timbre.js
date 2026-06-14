@@ -1,3 +1,7 @@
+import { $, emoTimbre, emotionBasis, putTimbreCells, putTimbreTimer, timbreCells, timbreTimer } from "/app/lib/state.js";
+import { run } from "/app/lib/synth.js";
+import { el } from "/app/lib/helpers.js";
+
 // ── Tier 1 emotion: learned emotion directions in style space ─────────────────
 // The data-driven companion to emotion.js (Tier 0's manual VAD prosody). Nudging
 // the voice along an emotion's `full` direction (the neutral→e style shift,
@@ -16,7 +20,7 @@
 // top if also dialed — leave it neutral to avoid stacking prosody twice.
 
 // add the current emotion offset to a style vector, in place
-function addTimbre(style) {
+export function addTimbre(style) {
   if (!emotionBasis || !emotionBasis.full) return;
   for (const e of emotionBasis.emotions) {
     const a = emoTimbre[e] || 0; if (!a) continue;
@@ -24,21 +28,21 @@ function addTimbre(style) {
     for (let d = 0; d < style.length; d++) style[d] += a * r[d];
   }
 }
-function timbreActive() {
+export function timbreActive() {
   if (!emotionBasis) return false;
   for (const e of emotionBasis.emotions) if (emoTimbre[e]) return true;
   return false;
 }
 
 // Coalesce a fast slider drag into a single full re-synth once it settles.
-function scheduleTimbre() {
+export function scheduleTimbre() {
   if (timbreTimer) clearTimeout(timbreTimer);
-  timbreTimer = setTimeout(() => { timbreTimer = 0; run(); }, 140);
+  putTimbreTimer(setTimeout(() => { putTimbreTimer(0); run(); }, 140));
 }
 
 // One-click preset: set this emotion to its calibrated default amount (≈0.55σ of
 // the full shift), zero the others — "just give me angry", then fine-tune.
-function setTimbrePreset(e) {
+export function setTimbrePreset(e) {
   if (!emotionBasis) return;
   for (const k of emotionBasis.emotions) {
     emoTimbre[k] = (k === e) ? (emotionBasis.defaultAlpha[e] || 2) : 0;
@@ -48,10 +52,10 @@ function setTimbrePreset(e) {
   scheduleTimbre();
 }
 
-function buildTimbre() {
+export function buildTimbre() {
   const sec = $('#timbre'); if (!sec) return;
   const root = sec.querySelector('.emo-axes'); if (!root) return;
-  root.textContent = ''; timbreCells = {};
+  root.textContent = ''; putTimbreCells({});
   if (!emotionBasis) { sec.style.display = 'none'; return; }   // graceful: no artifact → no panel
   sec.style.display = '';
   for (const e of emotionBasis.emotions) {
@@ -77,9 +81,9 @@ function buildTimbre() {
 }
 
 // Drop all emotion, back to the designed voice.
-function resetTimbre() {
+export function resetTimbre() {
   if (emotionBasis) for (const e of emotionBasis.emotions) emoTimbre[e] = 0;
   for (const e in timbreCells) { timbreCells[e]._range.value = '0'; timbreCells[e]._val.textContent = '0.00'; }
-  if (timbreTimer) { clearTimeout(timbreTimer); timbreTimer = 0; }
+  if (timbreTimer) { clearTimeout(timbreTimer); putTimbreTimer(0); }
   run();
 }

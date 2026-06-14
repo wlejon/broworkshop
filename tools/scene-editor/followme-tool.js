@@ -1,3 +1,4 @@
+import "/lib/sketch.js";
 // =============================================================================
 // Follow-me tool — sweep a profile face along a path.
 //
@@ -15,8 +16,7 @@
 // at interior path vertices to keep adjacent quads coplanar.
 // =============================================================================
 
-(function (global) {
-    'use strict';
+'use strict';
 
     function createState() {
         return {
@@ -65,8 +65,7 @@
         state.profileNormal = null;
     }
 
-    global.FollowMeTool = {
+    export const FollowMeTool = {
         createState, active, beginWithProfile, commitWithPath, cancel,
     };
 
-})(typeof globalThis !== 'undefined' ? globalThis : this);

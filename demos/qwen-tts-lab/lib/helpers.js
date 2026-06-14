@@ -1,8 +1,10 @@
 // ═══ small helpers ═══════════════════════════════════════════════════════════
-const _fs = require('fs');
-const _os = require('os');
+import { setBadge } from "/app/lib/model.js";
 
-function el(tag, cls, text) {
+export const _fs = require('fs');
+export const _os = require('os');
+
+export function el(tag, cls, text) {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
   if (text != null) e.textContent = text;
@@ -10,7 +12,7 @@ function el(tag, cls, text) {
 }
 
 // A canvas wrapped in a titled card body. Returns the canvas.
-function mkCanvas(body, w, h) {
+export function mkCanvas(body, w, h) {
   const wrap = el('div', 'canvas-wrap');
   const cv = document.createElement('canvas');
   cv.width = w; cv.height = h;
@@ -19,15 +21,15 @@ function mkCanvas(body, w, h) {
   return cv;
 }
 
-function pExists(p) { try { return _fs.existsSync(p); } catch (e) { return false; } }
-function pParent(p) { return p.replace(/[\\\/]+$/, '').replace(/[\\\/][^\\\/]*$/, ''); }
-function pName(p)   { return p.replace(/[\\\/]+$/, '').replace(/^.*[\\\/]/, ''); }
+export function pExists(p) { try { return _fs.existsSync(p); } catch (e) { return false; } }
+export function pParent(p) { return p.replace(/[\\\/]+$/, '').replace(/[\\\/][^\\\/]*$/, ''); }
+export function pName(p)   { return p.replace(/[\\\/]+$/, '').replace(/^.*[\\\/]/, ''); }
 
 // Find a steering-basis json near a checkpoint. The emotion / masc-fem bases are
 // written beside the Base checkpoint (and the shared qwen-tts data dir), so a
 // CustomVoice dir resolves them via its sibling 0.6B-Base or the parent qwen-tts
 // dir. Returns the parsed object, or null if none of the candidates parse.
-function readBasisJson(modelDir, name) {
+export function readBasisJson(modelDir, name) {
   const parent = pParent(modelDir);
   for (const d of [modelDir, parent + '/0.6B-Base', parent]) {
     try {
@@ -39,7 +41,7 @@ function readBasisJson(modelDir, name) {
 }
 
 // Downmix interleaved PCM to mono (embedSpeaker treats its input as mono).
-function toMono(samples, channels) {
+export function toMono(samples, channels) {
   if (!channels || channels === 1) return samples;
   const n = Math.floor(samples.length / channels), out = new Float32Array(n);
   for (let i = 0; i < n; i++) {
@@ -50,16 +52,16 @@ function toMono(samples, channels) {
 }
 
 // localStorage, defensively (absent in some headless builds).
-function remember(key, val) { try { localStorage.setItem(key, val); } catch (e) {} }
-function recall(key)        { try { return localStorage.getItem(key) || ''; } catch (e) { return ''; } }
+export function remember(key, val) { try { localStorage.setItem(key, val); } catch (e) {} }
+export function recall(key)        { try { return localStorage.getItem(key) || ''; } catch (e) { return ''; } }
 
 // Native dialogs, gated (absent in headless / GPU-less builds).
-function browseFolder(start) {
+export function browseFolder(start) {
   if (typeof showOpenFolderDialog !== 'function') { setBadge('folder dialog unavailable', true); return null; }
   const r = showOpenFolderDialog(start || null);
   return r && r.length ? r[0] : null;
 }
-function browseFile(filter) {
+export function browseFile(filter) {
   if (typeof showOpenFileDialog !== 'function') { setBadge('file dialog unavailable', true); return null; }
   const r = showOpenFileDialog(filter || '');
   return r && r.length ? r[0] : null;

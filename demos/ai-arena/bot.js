@@ -52,7 +52,10 @@
 //
 // Return value: nothing. The robot calls self.moveTo / self.hold directly.
 
-var Bot = (function () {
+import { AI } from "/app/ai.js";
+import { Arena } from "/app/arena.js";
+
+export const Bot = (function () {
     "use strict";
 
     function dist2(x1, z1, x2, z2) {

@@ -1,4 +1,7 @@
-function renderWave(body, s) {
+import { lastTrace } from "/app/lib/state.js";
+import { el, mkCanvas } from "/app/lib/helpers.js";
+
+export function renderWave(body, s) {
   const W = 1100, H = 120, mid = H / 2;
   const cv = mkCanvas(body, W, H);
   const ctx = cv.getContext('2d');
@@ -16,7 +19,7 @@ function renderWave(body, s) {
 }
 
 // Diverging colormap: blue (neg) -> dark (0) -> amber (pos).
-function divColor(t) {
+export function divColor(t) {
   t = t < -1 ? -1 : t > 1 ? 1 : t;
   const base = [14, 18, 24];
   const pos = [235, 150, 70], neg = [90, 175, 255];
@@ -29,7 +32,7 @@ function divColor(t) {
 }
 
 // A reference signal (F0 / energy) from the current trace, resampled to width w.
-function getRef(name, w) {
+export function getRef(name, w) {
   if (!lastTrace) return null;
   const s = lastTrace.stages.find((x) => x.name === name);
   if (!s) return null;
@@ -42,7 +45,7 @@ function getRef(name, w) {
 // active channels first; 'f0'/'energy' = sorted by correlation to that contour,
 // so channels that track pitch/energy cluster together. This is the first
 // "derived" view: a question-driven reordering of an opaque latent.
-function channelOrder(s, mode) {
+export function channelOrder(s, mode) {
   const { h, w, data } = s;
   const idx = Array.from({ length: h }, (_, i) => i);
   if (mode === 'native') return idx;
@@ -73,7 +76,7 @@ function channelOrder(s, mode) {
   return idx;
 }
 
-function renderHeat(body, s) {
+export function renderHeat(body, s) {
   // robust z-score scale: subtract the mean, scale by 3σ, clip — so a few
   // outliers no longer crush the bulk to black (the bert_dur / gen_in problem).
   let m = 0; for (let i = 0; i < s.data.length; i++) m += s.data[i]; m /= s.data.length;

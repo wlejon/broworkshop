@@ -7,8 +7,7 @@
 // input routing and HUD formatting live in app.js.
 // =============================================================================
 
-(function (global) {
-    'use strict';
+'use strict';
 
     function createState() {
         return {
@@ -53,8 +52,7 @@
         state.to     = null;
     }
 
-    global.TapeTool = {
+    export const TapeTool = {
         createState, begin, update, distance, commit, cancel,
     };
 
-})(typeof globalThis !== 'undefined' ? globalThis : this);

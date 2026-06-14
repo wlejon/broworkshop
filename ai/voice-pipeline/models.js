@@ -28,9 +28,6 @@
 // maintainer publishes them once with brosoundml's scripts/publish-kokoro-data.sh
 // (needs HF write access to the dataset). Until then the tts files 404 and the
 // app stays text-only; a source checkout speaks straight from the dev siblings.
-(function () {
-'use strict';
-
 const fs   = require('fs');
 const path = require('path');
 const os   = require('os');
@@ -392,11 +389,9 @@ function downloadKeys(keys, onProgress) {
     return download(groups, onProgress);
 }
 
-window.VoiceModels = {
+export {
     cacheDir, status, resolved, missingDownloadable, download,
     groupStatus, downloadKeys,
     // Showcase catalog for the setup screen.
     QWEN_SPEAKERS, QWEN_LANGUAGES, QWEN_VD_EXAMPLES,
 };
-
-})();

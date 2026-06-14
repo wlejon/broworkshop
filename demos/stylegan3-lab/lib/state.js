@@ -29,30 +29,34 @@
 //   grid.js     the Grid seam (seed browser)
 //   app.js      wire the DOM up, seam switching, kick off the first load
 
-const $  = (s) => document.querySelector(s);
-const $$ = (s) => Array.prototype.slice.call(document.querySelectorAll(s));
+export const $  = (s) => document.querySelector(s);
+export const $$ = (s) => Array.prototype.slice.call(document.querySelectorAll(s));
 
-let gan = null;                                   // the loaded StyleGAN3 handle
-let META = { resolution: 256, zDim: 512, numWs: 16, wDim: 512, device: 'cuda' };
-let seam = 'sample';                              // active panel
+// Shared mutable state in a single object. Every seam file reassigns these
+// (gan in model.js, walkWA in walk/mix/invert/app, …); ES-module imports are
+// read-only bindings, so cross-file writers mutate this live object instead.
+export const S = {
+  gan: null,                                      // the loaded StyleGAN3 handle
+  META: { resolution: 256, zDim: 512, numWs: 16, wDim: 512, device: 'cuda' },
+  seam: 'sample',                                 // active panel
 
-// engine: one model op in flight at a time (single-owner), latest-wins.
-let inflight = null;                              // current AsyncHandle
-let curSeq = null;                                // running job sequence
-let pending = null;                               // job to start once the slot frees
-let seqCounter = 0;                               // monotonic id, guards stale onDone
+  // last rendered Sample, so "→ A/B" can seed Walk/Mix from what's on screen.
+  lastSample: null,                               // { seed, w }
+
+  // cached anchors for the live sliders (avoid refetching w+ on every drag).
+  walkWA: null, walkWB: null,
+  mixWA: null, mixWB: null,
+
+  // pinned anchors: a recovered (inverted) w+ override for the A/B anchors. When
+  // set, Walk/Mix use this latent directly instead of mapping the seed input —
+  // the bridge from the Invert seam ("→ A/B") into the editing seams.
+  pinnedA: null, pinnedB: null,
+
+  // Invert seam state (declared here so model.js can reset it on load).
+  invTargetData: null,                            // { data, width, height } at model res
+  invW: null,                                     // recovered w+ (Float32Array)
+  invCurve: [],                                   // accumulated per-step MSE across chunks
+};
 
 // latent cache: `${seed}|${psi}|${cutoff}` → Float32Array(numWs*wDim) (the mapped w+).
-const wCache = new Map();
-
-// last rendered Sample, so "→ A/B" can seed Walk/Mix from what's on screen.
-let lastSample = null;                            // { seed, w }
-
-// cached anchors for the live sliders (avoid refetching w+ on every drag).
-let walkWA = null, walkWB = null;
-let mixWA = null, mixWB = null;
-
-// pinned anchors: a recovered (inverted) w+ override for the A/B anchors. When
-// set, Walk/Mix use this latent directly instead of mapping the seed input —
-// the bridge from the Invert seam ("→ A/B") into the editing seams.
-let pinnedA = null, pinnedB = null;
+export const wCache = new Map();

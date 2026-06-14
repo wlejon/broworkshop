@@ -1,6 +1,22 @@
 // Flora — procedural plant viewer with comprehensive control over
 // archetypes, species, life-cycle stages, and forest mixes.
 
+import "/app/recipes/lifecycle.js";
+import "/app/recipes/core.js";
+import "/app/recipes/species.js";
+import "/app/recipes/tree.js";
+import "/app/recipes/conifer.js";
+import "/app/recipes/shrub.js";
+import "/app/recipes/flower.js";
+import "/app/recipes/grass.js";
+import "/app/recipes/fern.js";
+import "/app/recipes/succulent.js";
+import "/app/recipes/vine.js";
+import "/app/recipes/rosebush.js";
+import "/app/recipes/cactus.js";
+import "/app/recipes/palm.js";
+import { Recipes } from "/app/recipes/index.js";
+
 const canvas = document.getElementById('stage');
 const scene = canvas.getContext('scene');
 

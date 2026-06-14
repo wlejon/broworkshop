@@ -1,11 +1,22 @@
 // ═══ VOICE — the identity seam (one panel per variant) ═══════════════════════
+import { $ } from "/app/lib/state.js";
+import { el } from "/app/lib/helpers.js";
+import { qwen, variant, fillLanguages } from "/app/lib/model.js";
+import { scheduleLive } from "/app/lib/synth.js";
+import { designedXvec, identitySource, voiceBasis } from "/app/lib/designer.js";
+import { applyEmotion, emotionSummary } from "/app/lib/emotion.js";
+import { applyMascFem, mascFemSummary } from "/app/lib/mascfem.js";
+
+// owned shared state (CustomVoice voice source: 'preset' (the 9) | 'designed' (the map))
+export let cvSource = 'preset';
+export function setCvSource(v) { cvSource = v; }
 
 // ── CustomVoice: preset speaker palette + the "designed voice" override ──────
 // Two voice sources: one of the 9 preset speakers, OR any voice designed on the
 // shared voice map (rendered through the slot via speakerVector). cvSource tracks
 // which is live; picking a preset selects 'preset', touching the designer selects
 // 'designed'. markDesigned()/updateCvSource() keep the status line in sync.
-function buildSpeakerPanel() {
+export function buildSpeakerPanel() {
   const sel = $('#speaker'); sel.textContent = '';
   let names = [];
   try { names = qwen.speakers() || []; } catch (e) {}
@@ -24,9 +35,9 @@ function buildSpeakerPanel() {
 
 // A designer interaction (map / seed / slider / random / enroll) switches a
 // CustomVoice render onto the designed voice; a "use preset" reset switches back.
-function markDesigned() { cvSource = 'designed'; updateCvSource(); }   // the designer handler restreams
+export function markDesigned() { cvSource = 'designed'; updateCvSource(); }   // the designer handler restreams
 function usedPreset()   { cvSource = 'preset';  updateCvSource(); scheduleLive(); }
-function updateCvSource() {
+export function updateCvSource() {
   const s = $('#cv-source'); if (!s) return;
   if (variant !== 'customvoice') { s.style.display = 'none'; return; }
   s.style.display = '';
@@ -88,7 +99,7 @@ function toggleInstructTag(tag, kind) {
   scheduleLive();
 }
 
-function buildInstructPanel() {
+export function buildInstructPanel() {
   const presets = $('#instruct-presets'); presets.textContent = '';
   for (const p of INSTRUCT_PRESETS) {
     const c = el('button', 'chip', p.split(',')[0]);
@@ -122,7 +133,7 @@ function buildInstructPanel() {
 // designed voice fills the slot and emotion/masc-fem ride on top via voiceSteer
 // (summarized separately in #axes-meta). Shared by the designer, emotion and
 // masc-fem panels.
-function updateDesignerMeta() {
+export function updateDesignerMeta() {
   const dm = $('#designer-meta');
   if (dm) {
     if (designedXvec && (variant === 'base' || variant === 'customvoice')) {
@@ -156,7 +167,7 @@ function updateAxesMeta() {
 //                 voice dropped into the slot via speakerVector; emotion/masc-fem
 //                 then ride on top as voiceSteer (added in gatherOpts).
 //   VoiceDesign — the natural-language instruction.
-function currentVoice() {
+export function currentVoice() {
   if (variant === 'customvoice') {
     if (cvSource === 'designed' && designedXvec) return { speakerVector: designedXvec };
     return { speaker: $('#speaker').value };

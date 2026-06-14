@@ -1,12 +1,18 @@
+import { $, basis, putBasis, putBridge, putCoords, putKokoro, putSpkEnc, putVoice } from "/app/lib/state.js";
+import { detectSource, loadBasis, loadEmotionBasis, loadMascFemBasis, paths, rememberRoot, setSource } from "/app/lib/source.js";
+import { buildSliders, seedFrom } from "/app/lib/designer.js";
+import { buildTimbre } from "/app/lib/timbre.js";
+import { buildMascFem } from "/app/lib/mascfem.js";
+
 // ═══ load ══════════════════════════════════════════════════════════════════
-function setBadge(text, err) {
+export function setBadge(text, err) {
   const b = $('#backend');
   b.textContent = text;
   b.classList.toggle('err', !!err);
 }
 
-function reload() {
-  kokoro = null; voice = null;
+export function reload() {
+  putKokoro(null); putVoice(null);
   $('#btn-run').disabled = true;
   $('#btn-play').disabled = true;
   $('#btn-save').disabled = true;
@@ -14,7 +20,7 @@ function reload() {
   try {
     paths.configureAssets();
     bro.tts.loadKokoro(paths.model, {
-      onReady: (k) => { kokoro = k; setBadge('ready · drag a slider to hear & watch it take shape'); seedFrom($('#source').value, false); },
+      onReady: (k) => { putKokoro(k); setBadge('ready · drag a slider to hear & watch it take shape'); seedFrom($('#source').value, false); },
       onError: (m) => setBadge('model error: ' + m, true),
     });
   } catch (e) {
@@ -26,11 +32,11 @@ function reload() {
 // sliders + clone adapters from it, then reload the Kokoro model. This is the
 // one entry point for "the source changed" — browse, a typed path + Reload, or
 // first load all route through here.
-function switchSource(root) {
+export function switchSource(root) {
   setSource(root);
   if (detectSource(root)) rememberRoot(paths.root);   // a real source — remember it
-  bridge = null; spkEnc = null;          // clone adapters are per-source
-  basis = null; coords = null;
+  putBridge(null); putSpkEnc(null);          // clone adapters are per-source
+  putBasis(null); putCoords(null);
   loadBasis();
   loadEmotionBasis();                    // Tier-1 timbre directions (optional)
   loadMascFemBasis();                    // masc↔fem voice-design axis (optional)
@@ -42,7 +48,7 @@ function switchSource(root) {
 }
 
 // Fill the seed dropdown from the current basis' named anchors (+ neutral).
-function populateSources() {
+export function populateSources() {
   const src = $('#source');
   src.textContent = '';
   if (!basis) return;
@@ -56,12 +62,12 @@ function populateSources() {
 }
 
 // Native dialogs, defensively gated (absent in headless / GPU-less builds).
-function browseFolder(start) {
+export function browseFolder(start) {
   if (typeof showOpenFolderDialog !== 'function') { setBadge('folder dialog unavailable in this build', true); return null; }
   const r = showOpenFolderDialog(start || null);
   return r && r.length ? r[0] : null;
 }
-function browseFile(filter) {
+export function browseFile(filter) {
   if (typeof showOpenFileDialog !== 'function') { setBadge('file dialog unavailable in this build', true); return null; }
   const r = showOpenFileDialog(filter || '');
   return r && r.length ? r[0] : null;

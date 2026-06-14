@@ -11,8 +11,7 @@
 //     src/scene/scene_node.h Mat4.
 // =============================================================================
 
-(function (global) {
-    'use strict';
+'use strict';
 
     const Q_ID = [0, 0, 0, 1];
 
@@ -256,12 +255,10 @@
         ];
     }
 
-    global.Mat4Lib = {
+    export const Mat4Lib = {
         identity, fromTRS, multiply, multiplyInto,
         transformPoint, transformDir, transformNormal,
         invertTRS, invert3x3, decomposeTRS, quatToEuler,
         quatMul, quatNorm, quatConj, quatRotVec,
         Q_ID,
     };
-
-})(typeof globalThis !== 'undefined' ? globalThis : this);

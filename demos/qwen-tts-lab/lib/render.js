@@ -1,4 +1,8 @@
 // ═══ render — the trace cards (code raster · confidence · waveform) ══════════
+import { $, STAGE_INFO, STAGE_ORDER } from "/app/lib/state.js";
+import { el } from "/app/lib/helpers.js";
+import { steerPickFromCodes } from "/app/lib/steer.js";
+import { CHUNK_FRAMES, streamFrames, streamAccum, lastResult } from "/app/lib/synth.js";
 
 // A sequential colormap (dark→blue→green→amber→white-ish) for code ids.
 function seqColor(t) {
@@ -109,7 +113,7 @@ function canvasXY(ev, canvas) {
           (ev.clientY - r.top) * (canvas.height / (r.height || canvas.height))];
 }
 
-function renderStages(result) {
+export function renderStages(result) {
   const stages = result.stages || [];
   const present = [];
   overlayDrawers = []; traceFrames = 0; ensureReadout();   // fresh cursor per render
@@ -255,7 +259,7 @@ function renderWave(c, d, frameAligned, sr) {
 }
 
 // ── live stream meter: chunks arriving + the growing waveform ───────────────
-function renderStreamMeter() {
+export function renderStreamMeter() {
   overlayDrawers = []; traceFrames = 0;   // streaming has no frame-aligned trace
   clearCards(['stream']);
   const c = card('stream', 'streaming', CHUNK_FRAMES + ' frames/chunk · audio plays as it generates');

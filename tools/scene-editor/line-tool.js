@@ -15,8 +15,7 @@
 // polyline to a drawable length.
 // =============================================================================
 
-(function (global) {
-    'use strict';
+'use strict';
 
     // Epsilon in world units for "this click landed on a previous vertex".
     // Tuned for ground-plane / cube-face scales; the scene editor's inference
@@ -128,9 +127,8 @@
         return (dx*dx + dy*dy + dz*dz) <= eps * eps;
     }
 
-    global.LineTool = {
+    export const LineTool = {
         createState, begin, update, addPoint, findClosureIndex,
         commit, cancel, CLOSE_EPS,
     };
 
-})(typeof globalThis !== 'undefined' ? globalThis : this);

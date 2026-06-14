@@ -22,13 +22,18 @@
 // partly factored out), so this is an honest experiment — dial an axis and the new
 // voice streams (scheduleLive); the panel hides gracefully when no basis is present.
 
-let emotionBasis = null;     // parsed emotion_basis.json, or null (panel hides)
+import { $ } from "/app/lib/state.js";
+import { el, readBasisJson } from "/app/lib/helpers.js";
+import { updateDesignerMeta } from "/app/lib/voice.js";
+import { scheduleLive } from "/app/lib/synth.js";
+
+export let emotionBasis = null;     // parsed emotion_basis.json, or null (panel hides)
 const emoAlpha = {};         // per-emotion intensity (alpha)
 let emoCells = {};           // emotion -> slider cell, for preset writes
 
 // Load the basis sitting beside the Base checkpoint (graceful if absent). For a
 // CustomVoice checkpoint readBasisJson resolves it from the sibling 0.6B-Base.
-function loadEmotionBasis(modelDir) {
+export function loadEmotionBasis(modelDir) {
   emotionBasis = null;
   for (const k in emoAlpha) delete emoAlpha[k];
   const b = readBasisJson(modelDir, 'emotion_basis.json');
@@ -36,7 +41,7 @@ function loadEmotionBasis(modelDir) {
 }
 
 // designedXvec + Σ alphaₑ·full[e] — a fresh array (the blend stays untouched).
-function applyEmotion(x) {
+export function applyEmotion(x) {
   if (!x || !emotionBasis || !emotionActive()) return x;
   const out = Float32Array.from(x);
   for (const e of emotionBasis.emotions) {
@@ -47,13 +52,13 @@ function applyEmotion(x) {
   }
   return out;
 }
-function emotionActive() {
+export function emotionActive() {
   if (!emotionBasis) return false;
   for (const e of emotionBasis.emotions) if (emoAlpha[e]) return true;
   return false;
 }
 // A short "· angry 1.20 + sad 0.30" summary of the active emotion mix (or '').
-function emotionSummary() {
+export function emotionSummary() {
   if (!emotionActive()) return '';
   const parts = [];
   for (const e of emotionBasis.emotions) {
@@ -75,7 +80,7 @@ function setEmotionPreset(e) {
 }
 
 // Build the emotion sliders into the Base designer panel (hidden without a basis).
-function buildEmotion() {
+export function buildEmotion() {
   const sec = $('#emotion'); if (!sec) return;
   const root = sec.querySelector('.emo-axes'); if (!root) return;
   root.textContent = ''; emoCells = {};
@@ -105,7 +110,7 @@ function buildEmotion() {
 }
 
 // Drop all emotion, back to the plain designed voice.
-function resetEmotion() {
+export function resetEmotion() {
   if (emotionBasis) for (const e of emotionBasis.emotions) emoAlpha[e] = 0;
   for (const e in emoCells) { emoCells[e]._range.value = '0'; emoCells[e]._val.textContent = '0.00'; }
   updateDesignerMeta(); scheduleLive();

@@ -8,8 +8,8 @@
 //
 // Weights live in the sibling repos' download dirs (scripts/download-triposplat.sh
 // in brodiffusion + brovisionml). Edit WEIGHTS if yours are elsewhere.
-(function () {
-  'use strict';
+import { Viewport } from "/app/lab/viewport.js";
+import { Client } from "/app/lab/client.js";
 
   var WEIGHTS = {
     dinov3:   'D:/projects/brovisionml/weights/triposplat/clip_vision/dino_v3_vit_h.safetensors',
@@ -75,8 +75,8 @@
 
   function init() {
     var prefs = loadPrefs();
-    var viewport = TSLab.Viewport.create($('view'));
-    var client = TSLab.Client.create();
+    var viewport = Viewport.create($('view'));
+    var client = Client.create();
 
     var loaded = false;        // weights resident in the worker
     var running = false;
@@ -382,4 +382,3 @@
 
   if (document.readyState === 'complete' || document.readyState === 'interactive') start();
   else window.addEventListener('load', start);
-})();

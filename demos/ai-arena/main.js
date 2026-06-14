@@ -7,7 +7,27 @@
 //
 // The Red AI / Blue AI selectors pick which registered agent runs for
 // each team's units — see agents/registry.js.
-var App = {};
+import { Config } from "/app/config.js";
+import { Scenarios } from "/app/scenarios.js";
+import { Arena } from "/app/arena.js";
+import { AI } from "/app/ai.js";
+import "/app/bot.js";
+import "/app/options/tactical_options.js";
+import { Agents } from "/app/agents/registry.js";
+import "/app/agents/random.js";
+import "/app/agents/scripted.js";
+import "/app/agents/tactical.js";
+import "/app/agents/options_shared.js";
+import "/app/agents/options_mcts.js";
+import "/app/agents/options_commander.js";
+import { Render } from "/app/render.js";
+import { Scene3D } from "/app/scene_setup.js";
+import { UI } from "/app/ui.js";
+import { Replay } from "/app/replay.js";
+import { Loop } from "/app/loop.js";
+import { Controls } from "/app/controls.js";
+
+export const App = {};
 (function () {
     "use strict";
 

@@ -1,3 +1,6 @@
+import { Mat4Lib } from "/app/mat4.js";
+import { SceneObject } from "/app/scene-object.js";
+import { EdgeMesh } from "/app/edge-mesh.js";
 // =============================================================================
 // EdgePrimitive — leaf SceneObject for orphan edges (Line tool exits without
 // closure, Arc tool's open-arc output, future skeletal sketches).
@@ -13,8 +16,7 @@
 // through buildInferenceGeo (which expects faceGroups/triangles).
 // =============================================================================
 
-(function (global) {
-    'use strict';
+'use strict';
 
     const M = Mat4Lib;
     const DEFAULT_THICKNESS = 0.012;
@@ -23,7 +25,7 @@
     function EdgePrimitive(opts) {
         opts = opts || {};
         opts.kind = 'edge-primitive';
-        global.SceneObject.call(this, opts);
+        SceneObject.call(this, opts);
 
         this.scene         = opts.scene;
         this.color         = opts.color || '#ffa502';
@@ -43,7 +45,7 @@
             this._install(opts.positions, opts.edges);
         }
     }
-    EdgePrimitive.prototype = Object.create(global.SceneObject.prototype);
+    EdgePrimitive.prototype = Object.create(SceneObject.prototype);
     EdgePrimitive.prototype.constructor = EdgePrimitive;
 
     EdgePrimitive.prototype._onWorldInvalidated = function () {
@@ -210,6 +212,5 @@
         ];
     }
 
-    global.EdgePrimitive = EdgePrimitive;
+    export { EdgePrimitive };
 
-})(typeof globalThis !== 'undefined' ? globalThis : this);

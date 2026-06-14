@@ -15,6 +15,10 @@
 // every few seconds — clearly random to the eye, and clearly NOT bundled
 // (you'll see the bot aim east while walking north while firing south).
 
+import { Bot } from "/app/bot.js";
+import { AI } from "/app/ai.js";
+import { Agents } from "/app/agents/registry.js";
+
 (function () {
     "use strict";
 

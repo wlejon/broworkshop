@@ -1,5 +1,11 @@
+import { $, audioCtx, basis, bridge, coords, kokoro, putAudioCtx, putBridge, putCoords, putSpkEnc, spkEnc, voice } from "/app/lib/state.js";
+import { _fs, paths } from "/app/lib/source.js";
+import { syncSliders } from "/app/lib/designer.js";
+import { setBadge } from "/app/lib/model.js";
+import { run } from "/app/lib/synth.js";
+
 // ── clone a real clip into the slider space, via the ECAPA->style bridge ─────
-function loadBridge() {
+export function loadBridge() {
   if (bridge) return true;
   try {
     const ab = _fs.readFileSync(paths.model + '/voice_bridge.bin');
@@ -9,13 +15,13 @@ function loadBridge() {
     const xm = new Float32Array(buf, off, D); off += 4 * D;
     const ym = new Float32Array(buf, off, M); off += 4 * M;
     const B = new Float32Array(buf, off, D * M);
-    bridge = { D, M, xm, ym, B };
+    putBridge({ D, M, xm, ym, B });
     return true;
   } catch (e) { setBadge('voice_bridge.bin missing from ' + paths.model + ' — run tests/_voice_basis.js', true); return false; }
 }
 
 // x(1024) -> style(256): style = ym + (x - xm)·B   (B row-major D×M)
-function bridgeApply(x) {
+export function bridgeApply(x) {
   const { D, M, xm, ym, B } = bridge;
   const s = new Float64Array(M);
   for (let m = 0; m < M; m++) s[m] = ym[m];
@@ -28,7 +34,7 @@ function bridgeApply(x) {
 }
 
 // project a 256-D style onto the slider axes (σ units)
-function coordsFromStyle(style) {
+export function coordsFromStyle(style) {
   const { dim, k, mean, comps, std } = basis;
   const c = new Float64Array(k);
   for (let i = 0; i < k; i++) {
@@ -39,7 +45,7 @@ function coordsFromStyle(style) {
   return c;
 }
 
-function clone() {
+export function clone() {
   if (!basis || !kokoro) return;
   if (!loadBridge()) return;
   const wav = $('#ref-wav').value.trim();
@@ -52,7 +58,7 @@ function clone() {
 
   const proceed = () => {
     try {
-      audioCtx = audioCtx || new AudioContext();
+      putAudioCtx(audioCtx || new AudioContext());
       const dec = audioCtx.decodeAudioFile(wav);
       if (!dec) { setBadge('clone: cannot decode ' + wav, true); return; }
       let mono = dec.samples;
@@ -68,7 +74,7 @@ function clone() {
         sampleRate: dec.sampleRate,
         onDone: (x) => {
           try {
-            coords = coordsFromStyle(bridgeApply(x));
+            putCoords(coordsFromStyle(bridgeApply(x)));
             for (let k = 0; k < basis.k; k++) {    // clamp into the widgets' range
               const [lo, hi] = basis.range[k];
               coords[k] = Math.max(lo * 1.15, Math.min(hi * 1.15, coords[k]));
@@ -88,13 +94,13 @@ function clone() {
   if (spkEnc) { proceed(); return; }
   setBadge('clone: loading speaker encoder…');
   bro.tts.loadSpeakerEncoder(sdir, {
-    onReady: (enc) => { spkEnc = enc; proceed(); },
+    onReady: (enc) => { putSpkEnc(enc); proceed(); },
     onError: (m) => setBadge('clone: speaker encoder load failed: ' + m, true),
   });
 }
 
 // save the current voice as a raw little-endian FP32 pack (loadVoice's format)
-function saveVoice() {
+export function saveVoice() {
   if (!voice) return;
   try {
     const data = voice.data;                 // Float32Array(rows*cols)

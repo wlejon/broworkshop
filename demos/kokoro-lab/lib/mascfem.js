@@ -1,3 +1,6 @@
+import { $, mascFemBasis, mfAlpha, mfSlider, mfTimer, mfVal, putMfAlpha, putMfSlider, putMfTimer, putMfVal } from "/app/lib/state.js";
+import { run } from "/app/lib/synth.js";
+
 // ── Masculine↔feminine: a bipolar vocal-quality axis in style space ───────────
 // The voice-design companion to timbre.js (learned emotion). Built the same way
 // (CAMEO — multilingual, permissive), but on gender labels via a between-speaker,
@@ -14,28 +17,28 @@
 // pass. The section hides itself when the artifact is absent.
 
 // add the current masc/fem offset to a style vector, in place
-function addMascFem(style) {
+export function addMascFem(style) {
   if (!mascFemBasis || !mfAlpha) return;
   const f = mascFemBasis.full.M;
   for (let d = 0; d < style.length; d++) style[d] += mfAlpha * f[d];
 }
-function mascFemActive() { return !!(mascFemBasis && mfAlpha); }
+export function mascFemActive() { return !!(mascFemBasis && mfAlpha); }
 
 // Coalesce a fast slider drag into a single full re-synth once it settles.
-function scheduleMascFem() {
+export function scheduleMascFem() {
   if (mfTimer) clearTimeout(mfTimer);
-  mfTimer = setTimeout(() => { mfTimer = 0; run(); }, 140);
+  putMfTimer(setTimeout(() => { putMfTimer(0); run(); }, 140));
 }
 
 // Reflect a signed alpha into the slider + readout (masc / fem / neutral).
-function setMfAlpha(a) {
-  mfAlpha = a;
+export function setMfAlpha(a) {
+  putMfAlpha(a);
   if (mfSlider) mfSlider.value = String(a);
   if (mfVal) mfVal.textContent = a === 0 ? 'neutral' : ((a > 0 ? 'masc ' : 'fem ') + Math.abs(a).toFixed(2));
 }
 
 // One-click pole preset: push to that pole's calibrated default amount.
-function setMascFemPreset(pole) {
+export function setMascFemPreset(pole) {
   if (!mascFemBasis) return;
   const d = (mascFemBasis.defaultAlpha && mascFemBasis.defaultAlpha[pole]) || 2;
   setMfAlpha(pole === 'M' ? d : -d);
@@ -43,10 +46,10 @@ function setMascFemPreset(pole) {
 }
 
 // Build the single bipolar slider (hidden without a basis).
-function buildMascFem() {
+export function buildMascFem() {
   const sec = $('#mascfem'); if (!sec) return;
-  mfAlpha = 0;
-  if (!mascFemBasis) { sec.style.display = 'none'; mfSlider = mfVal = null; return; }
+  putMfAlpha(0);
+  if (!mascFemBasis) { sec.style.display = 'none'; putMfSlider(putMfVal(null)); return; }
   sec.style.display = '';
   const max = mascFemBasis.alphaMax || 3;
   const femL = sec.querySelector('.mf-fem'), mascL = sec.querySelector('.mf-masc');
@@ -54,16 +57,16 @@ function buildMascFem() {
   mascL.textContent = (mascFemBasis.label.M || 'masculine') + ' →';
   femL.onclick = () => setMascFemPreset('F');
   mascL.onclick = () => setMascFemPreset('M');
-  mfSlider = sec.querySelector('.mf-range');
+  putMfSlider(sec.querySelector('.mf-range'));
   mfSlider.min = String(-max); mfSlider.max = String(max); mfSlider.step = '0.05'; mfSlider.value = '0';
   mfSlider.oninput = () => { setMfAlpha(+mfSlider.value); scheduleMascFem(); };
-  mfVal = sec.querySelector('.mf-val');
+  putMfVal(sec.querySelector('.mf-val'));
   setMfAlpha(0);
 }
 
 // Drop the masc/fem shift, back to the designed voice.
-function resetMascFem() {
+export function resetMascFem() {
   setMfAlpha(0);
-  if (mfTimer) { clearTimeout(mfTimer); mfTimer = 0; }
+  if (mfTimer) { clearTimeout(mfTimer); putMfTimer(0); }
   run();
 }

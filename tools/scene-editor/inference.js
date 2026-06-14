@@ -18,8 +18,7 @@
 // Match priority is broken first by category, then by screen-space distance.
 // =============================================================================
 
-(function (global) {
-    'use strict';
+'use strict';
 
     const POS_QUANT = 1e5;
     function posKey(x, y, z) {
@@ -321,7 +320,7 @@
         return best;
     }
 
-    global.Inference = {
+    export const Inference = {
         buildInferenceGeo,
         worldToScreen,
         closestPointOnSegmentToRay,
@@ -332,4 +331,3 @@
         _LABEL:    LABEL,
     };
 
-})(typeof globalThis !== 'undefined' ? globalThis : this);

@@ -31,18 +31,17 @@
 //   render.js    the trace cards: code raster, confidence strip, waveform
 //   app.js       wire the DOM up and kick off the first load
 
-const $ = (s) => document.querySelector(s);
+export const $ = (s) => document.querySelector(s);
 
-let qwen = null;          // the loaded QwenTtsModel
-let variant = '';         // 'customvoice' | 'voicedesign' | 'base'
-let inflight = null;      // the current AsyncHandle (render or stream), for barge-in
-let lastResult = null;    // { samples, sampleRate, stages? } of the last synthesis
-
-// audio
-let audioCtx = null;
-let clipId = -1;          // the published full-utterance clip (for ♪ replay)
-let wavSamples = null;    // native-rate copy of the last-published buffer (for WAV export)
-let wavRate = 24000;      // its sample rate
+// The shared mutable state that used to live here now lives with its writer:
+//   qwen / variant            → lib/model.js
+//   lastResult                → lib/synth.js   (model.js clears it via setLastResult)
+//   audioCtx                  → lib/audio.js   (designer/app set it via setAudioCtx)
+//   inflight / streaming / streamFrames / streamAccum → lib/synth.js
+//   clipId / wavSamples / wavRate → lib/audio.js
+//   designedXvec / identitySource / coords → lib/designer.js
+//   cvSource                  → lib/voice.js
+//   seedLocked                → lib/delivery.js
 
 // ─── trace stages ────────────────────────────────────────────────────────────
 // The Qwen AR trace (opts.trace) emits two grids, both row-major (h x w) over the
@@ -52,29 +51,8 @@ let wavRate = 24000;      // its sample rate
 //                          Predictor). Each row is one codebook; color = code id.
 //   c0_confidence  1 x F   the Talker's top-1 softmax prob per frame — low where
 //                          the model hedged (and where sampling has room to roam).
-const STAGE_INFO = {
+export const STAGE_INFO = {
   codes:         { kind: 'codes', desc: 'RVQ code stream — 16 codebooks x F frames (row 0 semantic, 1..15 acoustic)' },
   c0_confidence: { kind: 'conf',  desc: "Talker top-1 confidence per frame — low = the model hedged (sampling's playground)" },
 };
-const STAGE_ORDER = ['codes', 'c0_confidence'];
-
-// ─── voice (designer) state ──────────────────────────────────────────────────
-// The Base designer is the PCA voice-slider sculptor (lib/designer.js owns the
-// basis + coords). designedXvec is the 1024-D point those sliders define, which
-// the emotion / masc-fem axes ride on top of (currentVoice composes them).
-let designedXvec = null;  // the current identity x-vector (Float32Array enc_dim) or null
-// How designedXvec was set — the identity SOURCE, decoupled from the design axes:
-//   'clone'  — the FAITHFUL full x-vector of an enrolled/cloned clip (no projection)
-//   'design' — a point sculpted on the voice map / sliders (mean + Σ coord·comp)
-// Cloning keeps the full vector as the identity; the map/sliders only become the
-// identity when you actually sculpt. Emotion / masc-fem ride on top of either.
-let identitySource = 'design';
-let cvSource = 'preset';  // CustomVoice voice source: 'preset' (the 9) | 'designed' (the map)
-
-// ─── delivery state ──────────────────────────────────────────────────────────
-let seedLocked = false;   // keep the seed fixed across runs
-
-// ─── stream state ────────────────────────────────────────────────────────────
-let streaming = false;    // a stream is currently in flight
-let streamFrames = 0;     // frames (chunks) received so far this stream
-let streamAccum = [];     // accumulated streamed chunks (for the live waveform)
+export const STAGE_ORDER = ['codes', 'c0_confidence'];

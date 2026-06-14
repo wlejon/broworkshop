@@ -1,3 +1,4 @@
+import "/lib/sketch.js";
 // =============================================================================
 // Rectangle tool — click-click drawing of an axis-aligned rectangle on the
 // current sketch plane. Produces a triangulated face primitive on commit.
@@ -11,8 +12,7 @@
 // The app walks the tool through begin → update* → commit/cancel.
 // =============================================================================
 
-(function (global) {
-    'use strict';
+'use strict';
 
     function createState() {
         return {
@@ -89,8 +89,7 @@
         state.corner1 = null;
     }
 
-    global.RectangleTool = {
+    export const RectangleTool = {
         createState, begin, update, corners, buildMesh, size, commit, cancel,
     };
 
-})(typeof globalThis !== 'undefined' ? globalThis : this);

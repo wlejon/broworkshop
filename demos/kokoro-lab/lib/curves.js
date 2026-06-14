@@ -1,5 +1,9 @@
+import { activePaint, lastTrace, putActivePaint, putProtectedStage, putRenderTimer, renderTimer, synthBusy } from "/app/lib/state.js";
+import { commitEdit, resetSignal } from "/app/lib/edit.js";
+import { el, mkCanvas } from "/app/lib/helpers.js";
+
 // Draw a contour into its canvas from s.data, fixed [mn,mx] vertical range.
-function drawCurve(cv, s, color, mn, mx) {
+export function drawCurve(cv, s, color, mn, mx) {
   const ctx = cv.getContext('2d'), W = cv.width, H = cv.height, pad = 6;
   const d = s.data, n = d.length, range = (mx - mn) || 1;
   ctx.clearRect(0, 0, W, H);
@@ -22,7 +26,7 @@ function drawCurve(cv, s, color, mn, mx) {
 // Editable contour range: padded with upward headroom so a drag has somewhere to
 // go. Recomputed from the current data on every draw / grab, so it stays correct
 // even after the contour was reshaped in place.
-function curveRange(s) {
+export function curveRange(s) {
   let mn = Infinity, mx = -Infinity;
   for (let i = 0; i < s.data.length; i++) { const v = s.data[i]; if (v < mn) mn = v; if (v > mx) mx = v; }
   mn = Math.min(0, mn); mx = mx * 1.35 + (mx <= 0 ? 1 : 0);
@@ -30,7 +34,7 @@ function curveRange(s) {
   return [mn, mx];
 }
 
-function renderCurve(body, s, color) {
+export function renderCurve(body, s, color) {
   const W = 1100, H = 130, pad = 6;
   const cv = mkCanvas(body, W, H);
   const editable = (s.name === 'F0_pred' || s.name === 'N_pred');
@@ -53,9 +57,9 @@ function renderCurve(body, s, color) {
     cv.addEventListener('mousedown', (e) => {
       if (synthBusy || !lastTrace) return;
       e.preventDefault();                            // don't start a text selection
-      if (renderTimer) { clearTimeout(renderTimer); renderTimer = 0; }   // don't let a queued slider render fire mid-edit
+      if (renderTimer) { clearTimeout(renderTimer); putRenderTimer(0); }   // don't let a queued slider render fire mid-edit
       const [cmn, cmx] = curveRange(s);              // fresh range for the current contour
-      activePaint = { cv, s, color, mn: cmn, mx: cmx, W, H, pad, lastI: -1, lastV: 0 };
+      putActivePaint({ cv, s, color, mn: cmn, mx: cmx, W, H, pad, lastI: -1, lastV: 0 });
       paintAt(e);
     });
   }
@@ -64,7 +68,7 @@ function renderCurve(body, s, color) {
 
 // Map a mouse position onto (frame index, value) and paint it, linearly filling
 // from the last painted column so a sweep draws a continuous contour.
-function paintAt(e) {
+export function paintAt(e) {
   const p = activePaint; if (!p) return;
   const rect = p.cv.getBoundingClientRect();
   const xf = Math.max(0, Math.min(0.99999, (e.clientX - rect.left) / rect.width));
@@ -82,12 +86,12 @@ function paintAt(e) {
 }
 
 // Finish a drag: re-decode from the edited contours. (Installed once in init.)
-function onPaintUp() {
+export function onPaintUp() {
   if (!activePaint) return;
   const name = activePaint.s.name;
-  activePaint = null;
-  protectedStage = name;  // keep the contour the user drew intact through the commit's re-render
+  putActivePaint(null);
+  putProtectedStage(name);  // keep the contour the user drew intact through the commit's re-render
   commitEdit();
-  protectedStage = null;
+  putProtectedStage(null);
 }
 

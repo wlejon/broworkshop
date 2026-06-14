@@ -11,7 +11,12 @@
 //          hotter only where it hedged (the dips in the c0_confidence strip).
 //          Needs temp > 0 to bite.
 
-function buildDelivery() {
+import { $ } from "/app/lib/state.js";
+import { scheduleLive } from "/app/lib/synth.js";
+
+let seedLocked = false;   // keep the seed fixed across runs
+
+export function buildDelivery() {
   const bind = (id, lab, fmt) => {
     const sl = $('#' + id), out = $('#v-' + lab);
     const upd = () => { out.textContent = fmt(parseFloat(sl.value)); updateDeliveryMeta(); };
@@ -48,7 +53,7 @@ function updateDeliveryMeta() {
 
 // Read the sampling controls. When sampling and the seed isn't locked, roll a
 // fresh seed each run so repeated takes actually differ — and reflect it in the UI.
-function currentSampling() {
+export function currentSampling() {
   const temperature = parseFloat($('#temp').value) || 0;
   const topK = parseInt($('#topk').value, 10) || 0;
   const topP = parseFloat($('#topp').value);

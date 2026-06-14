@@ -1,3 +1,4 @@
+import "/lib/sketch.js";
 // =============================================================================
 // Arc tool — SketchUp-classic 2-point + bulge.
 //
@@ -16,8 +17,7 @@
 // EdgePrimitive creation all live in app.js.
 // =============================================================================
 
-(function (global) {
-    'use strict';
+'use strict';
 
     const DEFAULT_SEGMENTS = 16;
 
@@ -115,10 +115,9 @@
         return Math.sqrt(dx*dx + dy*dy + dz*dz);
     }
 
-    global.ArcTool = {
+    export const ArcTool = {
         createState, active, begin, update, setEnd,
         buildPolyline, commit, cancel,
         DEFAULT_SEGMENTS,
     };
 
-})(typeof globalThis !== 'undefined' ? globalThis : this);

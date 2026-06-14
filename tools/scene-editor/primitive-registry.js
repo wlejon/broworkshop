@@ -1,3 +1,6 @@
+import { Group, ComponentDefinition, ComponentInstance } from "/app/scene-object.js";
+import { Primitive } from "/app/primitive.js";
+import { EdgePrimitive } from "/app/edge-primitive.js";
 // =============================================================================
 // SceneRegistry — owns the scene-editor's SceneObject tree.
 //
@@ -12,8 +15,7 @@
 // and tests that iterate `registry.primitives` keep working.
 // =============================================================================
 
-(function (global) {
-    'use strict';
+'use strict';
 
     function SceneRegistry(opts) {
         this.scene  = opts.scene;
@@ -466,10 +468,8 @@
         throw new Error('SceneRegistry.create: unknown spec.type "' + type + '"');
     }
 
-    global.SceneRegistry     = SceneRegistry;
+    SceneRegistry.buildMeshFromSpec = buildMeshFromSpec;
+    export { SceneRegistry };
     // Back-compat alias.
-    global.PrimitiveRegistry = SceneRegistry;
-    global.SceneRegistry.buildMeshFromSpec = buildMeshFromSpec;
-    global.PrimitiveRegistry.buildMeshFromSpec = buildMeshFromSpec;
+    export const PrimitiveRegistry = SceneRegistry;
 
-})(typeof globalThis !== 'undefined' ? globalThis : this);

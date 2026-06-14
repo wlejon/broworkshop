@@ -1,3 +1,4 @@
+import { Mat4Lib } from "/app/mat4.js";
 // =============================================================================
 // Rotate tool — rotate a SceneObject around a world-space pivot by composing
 // quaternion rotations onto its local TRS. Mesh buffers are untouched: the
@@ -21,8 +22,7 @@
 // Pure-state module — gizmo plumbing lives in app.js.
 // =============================================================================
 
-(function (global) {
-    'use strict';
+'use strict';
 
     const M = Mat4Lib;
 
@@ -91,6 +91,5 @@
         state.accumQ = [0, 0, 0, 1];
     }
 
-    global.RotateTool = { createState, begin, applyDelta, commit, cancel, clear };
+    export const RotateTool = { createState, begin, applyDelta, commit, cancel, clear };
 
-})(typeof globalThis !== 'undefined' ? globalThis : this);

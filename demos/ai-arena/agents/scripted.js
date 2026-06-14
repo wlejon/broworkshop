@@ -20,6 +20,10 @@
 // is still called each frame from loop.js so the shared view of the world
 // is populated before any agent thinks.
 
+import { AI } from "/app/ai.js";
+import { Bot } from "/app/bot.js";
+import { Agents } from "/app/agents/registry.js";
+
 (function () {
     "use strict";
 

@@ -1,10 +1,13 @@
 // Flower archetype — single bloom on a curved stem with leaves.
 // Species presets give wildly different forms (daisy/sunflower/tulip/lily/poppy).
 
-(function (root) {
+import { FloraCore } from "/app/recipes/core.js";
+import { Lifecycle } from "/app/recipes/lifecycle.js";
+import { FloraSpecies } from "/app/recipes/species.js";
+import { Recipes } from "/app/recipes/index.js";
 
-const F = root.FloraCore;
-const L = root.Lifecycle;
+const F = FloraCore;
+const L = Lifecycle;
 
 function buildFlowerSeed(opts) {
     const r = 0.025;
@@ -177,14 +180,11 @@ const BUILDERS = {
 
 function flower(opts) {
     opts = Object.assign({}, opts);
-    if (opts.species) opts = root.FloraSpecies.applySpecies('flower', opts.species, opts);
+    if (opts.species) opts = FloraSpecies.applySpecies('flower', opts.species, opts);
     const stages = opts.stagesOverride || STAGES;
     const r = L.resolveStage(stages, opts.age01 ?? 1);
     const b = BUILDERS[r.stage] || BUILDERS.flowering;
     return b(opts, r.stageT);
 }
 
-root.Recipes = root.Recipes || {};
-root.Recipes.flower = flower;
-
-})(this);
+Recipes.flower = flower;

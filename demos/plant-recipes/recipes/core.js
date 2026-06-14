@@ -4,8 +4,6 @@
 // pieces — a seed shape, a cotyledon pair, a bloom cluster, an autumn-tint
 // helper, a thorn cluster — to construct each life-cycle stage.
 
-(function (root) {
-
 // ─── Math helpers ─────────────────────────────────────────────────────────
 
 const TAU = Math.PI * 2;
@@ -456,7 +454,7 @@ function stripVertexColors(mesh) {
     return mesh;
 }
 
-root.FloraCore = {
+export const FloraCore = {
     TAU,
     v3, vAdd, vSub, vScale, vDot, vCross, vLen, vNorm, vNormOr,
     clamp, lerp, lerp3,
@@ -469,5 +467,3 @@ root.FloraCore = {
     bloomCluster, fruitCluster, thornCluster, spineCluster,
     stripVertexColors,
 };
-
-})(this);

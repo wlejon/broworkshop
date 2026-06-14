@@ -1,9 +1,12 @@
 // Succulent archetype — radial fleshy leaves arranged spirally.
 
-(function (root) {
+import { FloraCore } from "/app/recipes/core.js";
+import { Lifecycle } from "/app/recipes/lifecycle.js";
+import { FloraSpecies } from "/app/recipes/species.js";
+import { Recipes } from "/app/recipes/index.js";
 
-const F = root.FloraCore;
-const L = root.Lifecycle;
+const F = FloraCore;
+const L = Lifecycle;
 const TAU = F.TAU;
 
 function buildSucculentSeed(opts) {
@@ -133,14 +136,11 @@ const BUILDERS = {
 
 function succulent(opts) {
     opts = Object.assign({}, opts);
-    if (opts.species) opts = root.FloraSpecies.applySpecies('succulent', opts.species, opts);
+    if (opts.species) opts = FloraSpecies.applySpecies('succulent', opts.species, opts);
     const stages = opts.stagesOverride || STAGES;
     const r = L.resolveStage(stages, opts.age01 ?? 1);
     const b = BUILDERS[r.stage] || BUILDERS.mature;
     return b(opts, r.stageT);
 }
 
-root.Recipes = root.Recipes || {};
-root.Recipes.succulent = succulent;
-
-})(this);
+Recipes.succulent = succulent;

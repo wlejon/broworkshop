@@ -1,3 +1,5 @@
+import { Mat4Lib } from "/app/mat4.js";
+import { Primitive } from "/app/primitive.js";
 // =============================================================================
 // SceneObject — base for the scene-editor's object hierarchy.
 //
@@ -15,8 +17,7 @@
 // The registry holds the root SceneObject; tools and UI walk the tree.
 // =============================================================================
 
-(function (global) {
-    'use strict';
+'use strict';
 
     const M = Mat4Lib;
 
@@ -329,7 +330,7 @@
         function mirror(defNode, parentMirror) {
             if (defNode.kind === 'primitive') {
                 // Build a shadow primitive sharing the mesh buffers.
-                const ShadowPrim = global.Primitive;
+                const ShadowPrim = Primitive;
                 const shadow = ShadowPrim.createShadow({
                     source: defNode,
                     scene:  self.scene,
@@ -360,9 +361,5 @@
         if (this.parent) this.parent.removeChild(this);
     };
 
-    global.SceneObject        = SceneObject;
-    global.Group              = Group;
-    global.ComponentDefinition = ComponentDefinition;
-    global.ComponentInstance  = ComponentInstance;
+    export { SceneObject, Group, ComponentDefinition, ComponentInstance };
 
-})(typeof globalThis !== 'undefined' ? globalThis : this);

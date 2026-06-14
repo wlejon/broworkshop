@@ -1,7 +1,14 @@
+import { $, activeDrag, activePaint, audioCtx, clipId, clipSamples, flowStages, lastTrace, protectedStage, putFlowStages, putProtectedStage, putSelPhoneme, putStageCards, putStageSig, selPhoneme, stageCards, STAGE_INFO, STAGE_ORDER, stageSig } from "/app/lib/state.js";
+import { setBadge } from "/app/lib/model.js";
+import { renderAlign } from "/app/lib/align.js";
+import { renderCurve } from "/app/lib/curves.js";
+import { renderHeat, renderWave } from "/app/lib/heat.js";
+import { el, stats } from "/app/lib/helpers.js";
+
 // ═══ render ════════════════════════════════════════════════════════════════
 // hoist the editable prosody surfaces + waveform to the top (see STAGE_ORDER);
 // stable for any stage the order list doesn't name (keeps emit order).
-function orderStages(stages) {
+export function orderStages(stages) {
   const rank = (n) => { const i = STAGE_ORDER.indexOf(n); return i < 0 ? STAGE_ORDER.length : i; };
   return stages
     .map((s, i) => [s, i])
@@ -19,18 +26,18 @@ function orderStages(stages) {
 // timing editor doesn't need them live (it cares about the cells + audio), so it
 // renders with deferHeat = true (leave the heatmaps on their last image, cheap)
 // and repaints them once, coalesced, when the edits settle (scheduleHeatRefresh).
-let deferHeat = false;     // skip heatmap stages this pass (set by the timing editor)
-let heatTimer = 0;         // coalesce the deferred heatmap repaint
+export let deferHeat = false;     // skip heatmap stages this pass (set by the timing editor)
+export let heatTimer = 0;         // coalesce the deferred heatmap repaint
 
-function renderStages(stages) {
+export function renderStages(stages) {
   const ordered = orderStages(stages);
   const sig = ordered.map((s) => s.name).join('|');
   if (!stageCards || sig !== stageSig) { buildStages(ordered, sig); return; }
 
   const protect = (activePaint && activePaint.s && activePaint.s.name) ||
                   (activeDrag && activeDrag.s && activeDrag.s.name) || protectedStage;
-  flowStages = [];
-  selPhoneme = -1;
+  putFlowStages([]);
+  putSelPhoneme(-1);
   $('#sel-label').textContent = '';
   for (const s of ordered) {
     const cell = stageCards[s.name];
@@ -49,7 +56,7 @@ function renderStages(stages) {
 // Re-render the cheap stages now (cells / curves / waveform), leaving the
 // heatmaps untouched — for the timing editor's hot loop, so a pause between
 // edits never triggers a multi-hundred-millisecond per-pixel repaint.
-function renderStagesLight(stages) {
+export function renderStagesLight(stages) {
   deferHeat = true;
   try { renderStages(stages); } finally { deferHeat = false; }
 }
@@ -57,28 +64,28 @@ function renderStagesLight(stages) {
 // Once the edits stop, repaint the heatmaps a single time so they catch up with
 // the final timing. Coalesced: each new edit pushes it out, so it only fires
 // when the user actually pauses — never during active editing.
-function scheduleHeatRefresh() {
+export function scheduleHeatRefresh() {
   if (heatTimer) clearTimeout(heatTimer);
   heatTimer = setTimeout(() => {
     heatTimer = 0;
     if (!lastTrace) return;
-    protectedStage = 'pred_dur';        // keep the live cells (and any focus) intact
+    putProtectedStage('pred_dur');        // keep the live cells (and any focus) intact
     const sc = $('#stages').scrollTop;
     renderStages(lastTrace.stages);     // full repaint, heatmaps included
     $('#stages').scrollTop = sc;
-    protectedStage = null;
+    putProtectedStage(null);
   }, 350);
 }
 
 // First render (or whenever the stage set changes): build the cards fresh.
-function buildStages(ordered, sig) {
+export function buildStages(ordered, sig) {
   const root = $('#stages');
   root.textContent = '';
-  flowStages = [];
-  selPhoneme = -1;
+  putFlowStages([]);
+  putSelPhoneme(-1);
   $('#sel-label').textContent = '';
-  stageCards = {};
-  stageSig = sig;
+  putStageCards({});
+  putStageSig(sig);
   for (const s of ordered) {
     const info = STAGE_INFO[s.name] || { kind: 'heat', desc: '' };
     const card = el('div', 'stage');
@@ -101,14 +108,14 @@ function buildStages(ordered, sig) {
   }
 }
 
-function updateHead(cell, s) {
+export function updateHead(cell, s) {
   cell.shapeEl.textContent = s.h + ' x ' + s.w;
   const st = stats(s.data);
   cell.statsEl.textContent =
     'min ' + st.mn.toFixed(2) + '  max ' + st.mx.toFixed(2) + '  μ ' + st.mean.toFixed(2);
 }
 
-function paintBody(body, s, info) {
+export function paintBody(body, s, info) {
   try {
     if (info.kind === 'chips')      renderChips(body, s);
     else if (info.kind === 'align') renderAlign(body, s);
@@ -125,7 +132,7 @@ function paintBody(body, s, info) {
 // per-phoneme element (the cells wire their own listeners in renderAlign, so we
 // only collect them here — re-collecting on a protected re-render never doubles
 // a binding); canvas stages carry a positioned overlay we resize to the span.
-function registerFlow(body, info) {
+export function registerFlow(body, info) {
   if (!info || !info.flow) return;
   if (info.flow.axis === 'chip') {
     const chips = [...body.querySelectorAll('.chip')];
@@ -142,8 +149,8 @@ function registerFlow(body, info) {
 // Trace one phoneme through the whole pipeline: highlight its territory at
 // every stage. Symbol-time stages light the phoneme's column/row; frame-time
 // stages light its duration span. Click the same phoneme again to clear.
-function selectPhoneme(l) {
-  selPhoneme = (l === selPhoneme) ? -1 : l;
+export function selectPhoneme(l) {
+  putSelPhoneme((l === selPhoneme) ? -1 : l);
   const dur = lastTrace ? lastTrace.durations : null;
   const L = dur ? dur.length : 0;
   let total = 0; for (let i = 0; i < L; i++) total += dur[i];
@@ -181,7 +188,7 @@ function selectPhoneme(l) {
 // Play just one phoneme's audio. Its frame span maps proportionally onto the
 // published clip (same time axis, different sample rate), so we trigger the
 // existing clip and restrict playback to that sub-region — no re-upload.
-function playPhonemeSegment(l, dur, total) {
+export function playPhonemeSegment(l, dur, total) {
   if (clipId < 0 || !audioCtx || !clipSamples) return;
   let s = 0; for (let i = 0; i < l; i++) s += dur[i];
   const a = Math.floor((s / total) * clipSamples);
@@ -192,7 +199,7 @@ function playPhonemeSegment(l, dur, total) {
   } catch (e) { setBadge('audio: ' + e.message, true); }
 }
 
-function renderChips(body, s) {
+export function renderChips(body, s) {
   const wrap = el('div', 'chips');
   for (let i = 0; i < s.data.length; i++)
     wrap.appendChild(el('span', 'chip', String(s.data[i] | 0)));

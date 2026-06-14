@@ -16,6 +16,12 @@
 // To tune: adjust iterations / budgetMs in the cfg below, or swap the
 // evaluator to "teamAdvantage" via Commander (see options_commander.js).
 
+import { TacticalOptions } from "/app/options/tactical_options.js";
+import { AI } from "/app/ai.js";
+import { Bot } from "/app/bot.js";
+import { OptionsShared } from "/app/agents/options_shared.js";
+import { Agents } from "/app/agents/registry.js";
+
 (function () {
     "use strict";
 

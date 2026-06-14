@@ -10,8 +10,6 @@
 // distinct stages, etc. The dispatcher in each recipe file looks up the
 // matching builder and falls back to the closest implemented stage.
 
-(function (root) {
-
 const STAGES = [
     'seed',        // dormant or just-planted
     'sprout',      // first emergence; cotyledons or initial shoot
@@ -88,7 +86,7 @@ function nearestImplemented(stage, builders) {
     return bestName;
 }
 
-root.Lifecycle = {
+export const Lifecycle = {
     STAGES,
     STAGE_INDEX,
     STAGE_DEFAULT_AGES,
@@ -96,5 +94,3 @@ root.Lifecycle = {
     smoothstep01,
     nearestImplemented,
 };
-
-})(this);

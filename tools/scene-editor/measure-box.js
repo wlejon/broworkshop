@@ -14,8 +14,7 @@
 // Enter, Escape. Anything else returns action='ignored' and doesn't mutate.
 // =============================================================================
 
-(function (global) {
-    'use strict';
+'use strict';
 
     // Is `s` a well-formed distance string? Rejects empty, orphan '-',
     // orphan '.', and multi-dot. A leading minus is only valid if followed
@@ -159,7 +158,7 @@
         state.tick++;
     }
 
-    global.MeasureBox = {
+    export const MeasureBox = {
         createState,
         feedKey,
         clear,
@@ -172,4 +171,3 @@
         isValidNumber,
     };
 
-})(typeof globalThis !== 'undefined' ? globalThis : this);

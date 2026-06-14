@@ -1,8 +1,15 @@
+import { $, ATTR_WORD, basis, coords, kokoro, putRenderTimer, putSliderCells, putVoice, renderTimer, sliderCells } from "/app/lib/state.js";
+import { setBadge } from "/app/lib/model.js";
+import { run } from "/app/lib/synth.js";
+import { addTimbre } from "/app/lib/timbre.js";
+import { addMascFem } from "/app/lib/mascfem.js";
+import { el } from "/app/lib/helpers.js";
+
 // a faint hint of which perceptual attribute this axis pushes, and which way.
 // attribute axes are already named (pitch/brightness/…), so their hint just
 // shows how cleanly the axis tracks that attribute; character axes show their
 // strongest incidental correlate, if any.
-function hintFor(k) {
+export function hintFor(k) {
   const h = basis.attrHint[k];
   if (basis.axisKind && basis.axisKind[k] === 'attr')
     return h && h.r ? 'r ' + Math.abs(h.r).toFixed(2) : '';
@@ -10,9 +17,9 @@ function hintFor(k) {
   return (h.r > 0 ? '↑' : '↓') + (ATTR_WORD[h.attr] || h.attr);
 }
 
-function buildSliders() {
+export function buildSliders() {
   const root = $('#sliders'); root.textContent = '';
-  sliderCells = [];
+  putSliderCells([]);
   let lastKind = null;
   for (let k = 0; k < basis.k; k++) {
     const kind = basis.axisKind ? basis.axisKind[k] : 'char';
@@ -48,7 +55,7 @@ function buildSliders() {
 }
 
 // push coords[] back onto the slider widgets (after a seed / clone / random)
-function syncSliders() {
+export function syncSliders() {
   for (let k = 0; k < basis.k; k++) {
     sliderCells[k]._range.value = String(coords[k]);
     sliderCells[k]._val.textContent = coords[k].toFixed(2);
@@ -56,7 +63,7 @@ function syncSliders() {
 }
 
 // coords (σ units) -> 256-D style vector
-function styleFromCoords() {
+export function styleFromCoords() {
   const { dim, k, mean, comps, std } = basis;
   const s = new Float32Array(dim);
   for (let d = 0; d < dim; d++) s[d] = mean[d];
@@ -70,13 +77,13 @@ function styleFromCoords() {
 
 // rebuild the Voice object from the current coords. Cheap (a style-table pack),
 // no synthesis — so it's safe to call on every change. Returns success.
-function rebuildVoice() {
+export function rebuildVoice() {
   if (!kokoro || !basis) return false;
   try {
     const style = styleFromCoords();
     if (typeof addTimbre === 'function') addTimbre(style);   // Tier-1 emotion offset (no-op if none dialed)
     if (typeof addMascFem === 'function') addMascFem(style); // masc↔fem offset (no-op if neutral)
-    voice = kokoro.createVoice(style, 'designed');
+    putVoice(kokoro.createVoice(style, 'designed'));
     $('#btn-run').disabled = false;
     $('#btn-save').disabled = false;
     return true;
@@ -86,14 +93,14 @@ function rebuildVoice() {
 // Coalesce a fast slider drag into a single render shortly after it settles, so
 // dragging stays smooth and the (synchronous) see+hear trace only runs once you
 // pause — never on every tick, never mid-drag.
-function scheduleRender() {
+export function scheduleRender() {
   if (renderTimer) clearTimeout(renderTimer);
-  renderTimer = setTimeout(() => { renderTimer = 0; run(); }, 120);
+  putRenderTimer(setTimeout(() => { putRenderTimer(0); run(); }, 120));
 }
 
 // seed the sliders from a named anchor (or the neutral centroid). `render`
 // false on initial load (don't speak/draw until the user asks), true on picks.
-function seedFrom(name, render) {
+export function seedFrom(name, render) {
   if (!basis) return;
   if (name === '__neutral__') coords.fill(0);
   else {
@@ -108,7 +115,7 @@ function seedFrom(name, render) {
 
 // randomize within the realizable range, weighted toward the dominant axes so
 // draws stay plausible (tail axes get small kicks, not full-range noise)
-function randomVoice() {
+export function randomVoice() {
   if (!basis) return;
   for (let k = 0; k < basis.k; k++) {
     const g = gauss() * (0.5 + basis.varExplained[k] * 3);
@@ -121,5 +128,5 @@ function randomVoice() {
   run();
 }
 
-function gauss() { let u = 0, v = 0; while (!u) u = Math.random(); while (!v) v = Math.random(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); }
+export function gauss() { let u = 0, v = 0; while (!u) u = Math.random(); while (!v) v = Math.random(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); }
 

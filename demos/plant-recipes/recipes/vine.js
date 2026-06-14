@@ -1,9 +1,12 @@
 // Vine archetype — helical climbing stem with leaf blobs along it.
 
-(function (root) {
+import { FloraCore } from "/app/recipes/core.js";
+import { Lifecycle } from "/app/recipes/lifecycle.js";
+import { FloraSpecies } from "/app/recipes/species.js";
+import { Recipes } from "/app/recipes/index.js";
 
-const F = root.FloraCore;
-const L = root.Lifecycle;
+const F = FloraCore;
+const L = Lifecycle;
 const TAU = F.TAU;
 
 function buildVineSeed(opts) {
@@ -112,14 +115,11 @@ const BUILDERS = {
 
 function vine(opts) {
     opts = Object.assign({}, opts);
-    if (opts.species) opts = root.FloraSpecies.applySpecies('vine', opts.species, opts);
+    if (opts.species) opts = FloraSpecies.applySpecies('vine', opts.species, opts);
     const stages = opts.stagesOverride || ((opts.bloomColor || opts.fruitColor) ? STAGES_BLOOM : STAGES_NO_BLOOM);
     const r = L.resolveStage(stages, opts.age01 ?? 1);
     const b = BUILDERS[r.stage] || BUILDERS.mature;
     return b(opts, r.stageT);
 }
 
-root.Recipes = root.Recipes || {};
-root.Recipes.vine = vine;
-
-})(this);
+Recipes.vine = vine;

@@ -3,7 +3,7 @@
 // resolvers against the world. Ability behavior is data-driven: each entry
 // in scenario.abilities has a `kind` (projectile | grenade | heal-ally)
 // and a parameter block.
-var Arena = {};
+export const Arena = {};
 (function () {
     "use strict";
 

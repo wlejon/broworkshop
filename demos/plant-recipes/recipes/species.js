@@ -4,11 +4,11 @@
 //
 // Keep these decorative-only — geometry shapes live in the recipes.
 
-(function (root) {
+import { FloraCore } from "/app/recipes/core.js";
 
-const C = root.FloraCore.PALETTE;
+const C = FloraCore.PALETTE;
 
-const Species = {
+export const Species = {
     tree: {
         oak:     { canopyShape: 'spreading', canopyColor: '#3d6e26', trunkRadius: 0.22, leafShape: 'lobed',
                    senescentTint: 0.7, senescentPhase: 0.55, bloomColor: null },
@@ -156,7 +156,4 @@ function speciesList(archetype) {
     return Object.keys(Species[archetype] || {});
 }
 
-root.Species = Species;
-root.FloraSpecies = { applySpecies, speciesList };
-
-})(this);
+export const FloraSpecies = { applySpecies, speciesList };

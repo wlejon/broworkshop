@@ -18,6 +18,12 @@
 // One OptionMcts per hero (per-role option set). Commander triggers
 // re-search only when a hero's committed option terminates.
 
+import { TacticalOptions } from "/app/options/tactical_options.js";
+import { AI } from "/app/ai.js";
+import { Bot } from "/app/bot.js";
+import { OptionsShared } from "/app/agents/options_shared.js";
+import { Agents } from "/app/agents/registry.js";
+
 (function () {
     "use strict";
 

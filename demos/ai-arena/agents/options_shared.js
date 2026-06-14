@@ -15,7 +15,9 @@
 //      projectile spawn runs every tick regardless of option), fixing the
 //      15× basic-fire deficit that options had vs scripted.
 
-var OptionsShared = (function () {
+import { AI } from "/app/ai.js";
+
+export const OptionsShared = (function () {
     "use strict";
 
     function viewAgent(a) {

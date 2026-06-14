@@ -20,8 +20,7 @@
 // half z-fights with the face. No explicit z-offset is applied.
 // =============================================================================
 
-(function (global) {
-    'use strict';
+'use strict';
 
     // Build an oriented basis {u, v, w} with w along `dir`. Chooses an
     // initial up vector that isn't parallel to `dir` to keep the cross
@@ -141,6 +140,5 @@
         };
     }
 
-    global.EdgeMesh = { buildEdgeMesh, orthoBasis };
+    export const EdgeMesh = { buildEdgeMesh, orthoBasis };
 
-})(typeof globalThis !== 'undefined' ? globalThis : this);

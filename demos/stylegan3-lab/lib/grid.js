@@ -3,8 +3,14 @@
 // glance. Click a tile to drop its seed into Sample. "Next" pages forward by a
 // whole block.
 
-function renderGrid() {
-  if (!gan) return;
+import { $, S } from "/app/lib/state.js";
+import { curPsi, curCutoff } from "/app/lib/model.js";
+import { buildImg, runSeq } from "/app/lib/engine.js";
+import { drawBitmap } from "/app/lib/helpers.js";
+import { showSeam } from "/app/app.js";
+
+export function renderGrid() {
+  if (!S.gan) return;
   const base = parseInt($('#grid-base').value, 10) || 0;
   const n = parseInt($('#grid-size').value, 10) || 4;
   const psi = curPsi(), cutoff = curCutoff();
@@ -24,7 +30,7 @@ function renderGrid() {
   runSeq('grid', steps, function (i, r) { drawBitmap(cells[i], r.image); });
 }
 
-function gridPage(dir) {
+export function gridPage(dir) {
   const n = parseInt($('#grid-size').value, 10) || 4;
   const base = parseInt($('#grid-base').value, 10) || 0;
   $('#grid-base').value = Math.max(0, base + dir * n * n);
@@ -32,7 +38,7 @@ function gridPage(dir) {
 }
 
 // Click a tile → load that seed into Sample and switch seams.
-function onGridClick(e) {
+export function onGridClick(e) {
   const cv = e.target.closest ? e.target.closest('.grid-cell') : null;
   if (!cv) return;
   $('#seed').value = cv.dataset.seed;

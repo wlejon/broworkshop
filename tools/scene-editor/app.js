@@ -1,3 +1,28 @@
+import "/lib/camera.js";
+import "/lib/history.js";
+import "/lib/project.js";
+import "/lib/sketch.js";
+import { Mat4Lib } from "/app/mat4.js";
+import { Primitive } from "/app/primitive.js";
+import { SceneObject, Group, ComponentDefinition, ComponentInstance } from "/app/scene-object.js";
+import { EditMesh } from "/app/edit-mesh.js";
+import { Inference } from "/app/inference.js";
+import { SceneAxes } from "/app/scene-axes.js";
+import { EdgeMesh } from "/app/edge-mesh.js";
+import { MeasureBox } from "/app/measure-box.js";
+import { EdgePrimitive } from "/app/edge-primitive.js";
+import { SceneRegistry, PrimitiveRegistry } from "/app/primitive-registry.js";
+import { MoveTool } from "/app/move-tool.js";
+import { RotateTool } from "/app/rotate-tool.js";
+import { ScaleTool } from "/app/scale-tool.js";
+import { RectangleTool } from "/app/rectangle-tool.js";
+import { CircleTool } from "/app/circle-tool.js";
+import { LineTool } from "/app/line-tool.js";
+import { ArcTool } from "/app/arc-tool.js";
+import { OffsetTool } from "/app/offset-tool.js";
+import { FollowMeTool } from "/app/followme-tool.js";
+import { TapeTool } from "/app/tape-tool.js";
+
 // =============================================================================
 // Scene editor — entrypoint.
 //

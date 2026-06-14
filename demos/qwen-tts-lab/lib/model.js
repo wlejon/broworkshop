@@ -1,5 +1,17 @@
 // ═══ checkpoint load + variant adaptation ════════════════════════════════════
-function setBadge(text, err) {
+import { $ } from "/app/lib/state.js";
+import { pParent, pExists, pName, recall, remember, _os } from "/app/lib/helpers.js";
+import { buildSpeakerPanel, buildInstructPanel } from "/app/lib/voice.js";
+import { loadVoiceBasis, buildDesigner } from "/app/lib/designer.js";
+import { loadEmotionBasis, buildEmotion } from "/app/lib/emotion.js";
+import { loadMascFemBasis, buildMascFem } from "/app/lib/mascfem.js";
+import { bargeIn, scheduleLive, setLastResult } from "/app/lib/synth.js";
+
+// owned shared state (read by voice / designer / synth / app)
+export let qwen = null;     // the loaded QwenTtsModel
+export let variant = '';    // 'customvoice' | 'voicedesign' | 'base'
+
+export function setBadge(text, err) {
   const b = $('#backend');
   b.textContent = text;
   b.classList.toggle('err', !!err);
@@ -19,7 +31,7 @@ function wireQuickChips(modelDir) {
 }
 
 // Probe a sensible default checkpoint for this machine on first run.
-function defaultModelDir(htmlDefault) {
+export function defaultModelDir(htmlDefault) {
   let home = ''; try { home = _os.homedir(); } catch (e) {}
   const cands = [
     recall('qwen-lab.modelDir'),
@@ -31,9 +43,9 @@ function defaultModelDir(htmlDefault) {
 }
 
 // Load a checkpoint asynchronously; adapt the UI to its variant once ready.
-function loadModel(dir) {
+export function loadModel(dir) {
   dir = (dir || '').replace(/[\\\/]+$/, '');
-  qwen = null; lastResult = null;
+  qwen = null; setLastResult(null);
   bargeIn();                                  // drop anything in flight
   $('#btn-render').disabled = true;
   $('#btn-stream').disabled = true;
@@ -59,7 +71,7 @@ function loadModel(dir) {
   } catch (e) { setBadge('load failed: ' + e.message, true); }
 }
 
-function variantHint() {
+export function variantHint() {
   return variant === 'customvoice' ? 'pick a speaker — it streams as you change it'
        : variant === 'voicedesign' ? 'describe the voice — it streams as you change it'
        : 'enroll a clip or go 🎲 random — it streams as you sculpt';
@@ -95,7 +107,7 @@ function adaptToVariant() {
 }
 
 // Fill a language <select> from the model (shared by all three panels).
-function fillLanguages(sel) {
+export function fillLanguages(sel) {
   sel.textContent = '';
   let langs = [];
   try { langs = qwen.languages() || []; } catch (e) {}
@@ -107,7 +119,7 @@ function fillLanguages(sel) {
   sel.onchange = scheduleLive;   // a language switch is an audible change → restream
 }
 // The active language, read from whichever panel is showing.
-function currentLanguage() {
+export function currentLanguage() {
   const id = variant === 'customvoice' ? '#language'
            : variant === 'voicedesign' ? '#language2' : '#language3';
   const sel = $(id);

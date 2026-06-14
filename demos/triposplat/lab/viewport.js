@@ -6,8 +6,7 @@
 // through (the light/dark bg toggle is pure CSS, handled in app.js). Auto-rotate
 // runs off rAF; the scene re-renders every frame in windowed mode, so moving the
 // camera is enough.
-(function () {
-  'use strict';
+import "/lib/camera.js";
 
   var DEFAULT_DIST = 2.2;
 
@@ -133,6 +132,4 @@
     };
   }
 
-  window.TSLab = window.TSLab || {};
-  window.TSLab.Viewport = { create: create };
-})();
+  export const Viewport = { create: create };

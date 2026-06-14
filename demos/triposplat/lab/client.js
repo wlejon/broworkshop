@@ -5,9 +5,6 @@
 // the spinner keep animating while a generation runs. Requests are serialized
 // (load, then a stream of generates), so one outstanding callback is enough.
 // Each call takes a node-style cb(err, data).
-(function () {
-  'use strict';
-
   function create() {
     var worker = new Worker('lab/splat-worker.js');
     var pending = null;      // cb for the in-flight request
@@ -63,6 +60,4 @@
     };
   }
 
-  window.TSLab = window.TSLab || {};
-  window.TSLab.Client = { create: create };
-})();
+  export const Client = { create: create };

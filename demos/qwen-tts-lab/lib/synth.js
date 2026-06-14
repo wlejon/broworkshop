@@ -19,23 +19,41 @@
 // speakerVector slot · voiceSteer · logitBias) — they all ride opts/sampling,
 // which synthesizeStream reads, so there is no speaker-only restriction.
 
-const CHUNK_FRAMES = 8;        // ≈0.64 s per streamed chunk (low first-audio latency)
+import { $ } from "/app/lib/state.js";
+import { setBadge, qwen, variant, variantHint, currentLanguage } from "/app/lib/model.js";
+import { currentVoice } from "/app/lib/voice.js";
+import { currentSampling } from "/app/lib/delivery.js";
+import { steerOpts } from "/app/lib/steer.js";
+import { emotionActive, emotionBasis, applyEmotion } from "/app/lib/emotion.js";
+import { mascFemActive, mascFemBasis, applyMascFem } from "/app/lib/mascfem.js";
+import { setClip, streamReset, streamPush, streamStop } from "/app/lib/audio.js";
+import { renderStages, renderStreamMeter } from "/app/lib/render.js";
+
+// owned shared state
+export let lastResult = null;  // { samples, sampleRate, stages? } of the last synthesis
+export function setLastResult(v) { lastResult = v; }
+let inflight = null;           // the current AsyncHandle (render or stream), for barge-in
+let streaming = false;         // a stream is currently in flight
+export let streamFrames = 0;   // frames (chunks) received so far this stream (read by render.js)
+export let streamAccum = [];   // accumulated streamed chunks (read by render.js)
+
+export const CHUNK_FRAMES = 8; // ≈0.64 s per streamed chunk (low first-audio latency)
 const LIVE_DEBOUNCE = 160;     // ms — coalesce a slider drag into one stream, fire on pause
 let wantNext = null;           // a queued { mode, trace, opts, noPlay } to run once the model frees
 let liveTimer = 0;             // debounce timer for change-driven streaming
 
 // A control change streams the new audio after a short settle (so a drag fires
 // once you pause, never mid-drag), then draws the trace once it lands.
-function scheduleLive() {
+export function scheduleLive() {
   if (!qwen) return;
   if (liveTimer) clearTimeout(liveTimer);
   liveTimer = setTimeout(() => { liveTimer = 0; requestStream(true); }, LIVE_DEBOUNCE);
 }
 
-function requestRender() { wantNext = { mode: 'render' }; kick(); }
+export function requestRender() { wantNext = { mode: 'render' }; kick(); }
 // trace !== false ⇒ chain a trace pass after the stream (the live + button default;
 // a bare requestStream() or a button-click event arg both keep it on).
-function requestStream(trace) { wantNext = { mode: 'stream', trace: trace !== false }; kick(); }
+export function requestStream(trace) { wantNext = { mode: 'stream', trace: trace !== false }; kick(); }
 
 function kick() {
   if (inflight) { try { inflight.cancel(); } catch (e) {} return; }   // onDone will re-kick
@@ -45,7 +63,7 @@ function kick() {
 }
 
 // Stop generation + playback now (barge-in). Drops any queued / debounced request.
-function bargeIn() {
+export function bargeIn() {
   if (liveTimer) { clearTimeout(liveTimer); liveTimer = 0; }
   wantNext = null;
   if (inflight) { try { inflight.cancel(); } catch (e) {} }
