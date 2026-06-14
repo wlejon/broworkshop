@@ -1,4 +1,9 @@
 // Headless GPU test — exercises every newly-added op end-to-end on the device.
+import { Shape } from "/app/lab/shape.js";
+import { Graph } from "/app/lab/graph.js";
+import { Runner } from "/app/lab/runner.js";
+const Lab = { Shape, Graph, Runner };  // app's former window.Lab namespace, rebuilt from modules
+
 flush();
 advanceTime(200);
 flush();

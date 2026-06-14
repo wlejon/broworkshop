@@ -1,4 +1,7 @@
 // Headless smoke test for Tensor Lab.
+import { Presets } from "/app/lab/presets.js";
+const Lab = { Presets };  // app's former window.Lab namespace, rebuilt from modules
+
 flush();
 advanceTime(300);
 flush();

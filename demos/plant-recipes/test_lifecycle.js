@@ -1,6 +1,10 @@
 // Headless validation — iterate every (archetype, species, stage), assert
 // the recipe runs without error and returns reasonable geometry. Used by:
 //
+// (ESM: the app's former Recipes/Lifecycle globals are now module exports.)
+import { Recipes } from "/app/recipes/index.js";
+import { Lifecycle } from "/app/recipes/lifecycle.js";
+//
 //   bro-headless ../broworkshop/demos/flora demos/flora/test_lifecycle.js
 //
 // On failure, prints offending combinations and exits nonzero.
