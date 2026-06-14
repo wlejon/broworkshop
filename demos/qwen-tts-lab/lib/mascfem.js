@@ -18,7 +18,7 @@ import { updateDesignerMeta } from "/app/lib/voice.js";
 import { scheduleLive } from "/app/lib/synth.js";
 
 export let mascFemBasis = null;     // parsed masc_fem_basis.json, or null (panel hides)
-let mfAlpha = 0;             // signed intensity along full[M]: + masculine, − feminine
+export let mfAlpha = 0;     // signed intensity along full[M]: + masculine, − feminine
 let mfSlider = null, mfVal = null;
 
 // Load the basis sitting beside the Base checkpoint (graceful if absent). For a
@@ -48,7 +48,7 @@ export function mascFemSummary() {
 }
 
 // Reflect a signed alpha into the slider + readout (masc / fem / neutral).
-function setMfAlpha(a) {
+export function setMfAlpha(a) {
   mfAlpha = a;
   if (mfSlider) mfSlider.value = String(a);
   if (mfVal) mfVal.textContent = a === 0 ? 'neutral' : ((a > 0 ? 'masc ' : 'fem ') + Math.abs(a).toFixed(2));

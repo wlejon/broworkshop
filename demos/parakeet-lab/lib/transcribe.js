@@ -16,7 +16,7 @@ export let srcClipId = -1;          // published audio clip for the source
 export let transcribing = false;    // an async transcribe is in flight
 let runHandle = null;               // AsyncHandle of the in-flight transcribe
 let streamIds = [];                 // token ids streamed so far (live partial)
-let lastResult = null;              // { tokenIds, tokenFrames } of the last finished run
+export let lastResult = null;       // { tokenIds, tokenFrames } of the last finished run
 
 // Install a new source clip and (optionally) kick off a run.
 export function setSource(samples, label) {

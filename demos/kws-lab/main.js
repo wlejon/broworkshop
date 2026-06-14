@@ -16,11 +16,12 @@
 
 const fs = require('fs');
 
+const WROOT = (typeof process !== 'undefined' && process.env && process.env.BRO_WEIGHTS) || 'D:/projects';
 const WEIGHT_CANDIDATES = [
     '../../../brosoundml/weights/phoneme/english.bpm',
     '../../../brosoundml/build-cuda/english.bpm',
-    'D:/projects/brosoundml/weights/phoneme/english.bpm',
-    'D:/projects/brosoundml/build-cuda/english.bpm',
+    WROOT + '/brosoundml/weights/phoneme/english.bpm',
+    WROOT + '/brosoundml/build-cuda/english.bpm',
 ];
 
 const $phrase    = document.querySelector('#phrase');
@@ -162,6 +163,13 @@ requestAnimationFrame(tick);
         status('load failed: ' + (e.message || e), true);
         return;
     }
+    // Point the phonemizer at the brosoundml sibling (portable: BRO_WEIGHTS
+    // overrides the default ../brosoundml search) so phonemize() resolves its
+    // g2p assets regardless of where the weights live.
+    try {
+        const sib = WROOT + '/brosoundml';
+        if (fs.existsSync(sib + '/weights/kokoro/config.json')) bro.tts.setAssetRoot(sib);
+    } catch (e) { /* fall back to the default sibling search */ }
     // Seed one template so Listen works out of the box.
     withMutableSpotter(() => {
         bro.kws.enroll('hello there', bro.tts.phonemize('hello there'),

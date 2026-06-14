@@ -36,7 +36,7 @@ export function buildSpeakerPanel() {
 // A designer interaction (map / seed / slider / random / enroll) switches a
 // CustomVoice render onto the designed voice; a "use preset" reset switches back.
 export function markDesigned() { cvSource = 'designed'; updateCvSource(); }   // the designer handler restreams
-function usedPreset()   { cvSource = 'preset';  updateCvSource(); scheduleLive(); }
+export function usedPreset()   { cvSource = 'preset';  updateCvSource(); scheduleLive(); }
 export function updateCvSource() {
   const s = $('#cv-source'); if (!s) return;
   if (variant !== 'customvoice') { s.style.display = 'none'; return; }

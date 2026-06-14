@@ -1388,3 +1388,11 @@ if (initialDir) {
 }
 
 requestAnimationFrame(frame);
+
+// Test hooks: expose app-module symbols so headless tests (loaded as ES
+// modules) can import the live instances via "/app/app.js".
+export {
+    state, worker, renderStats, runStatsChecks, applyColorMode,
+    setHullVisible, setSelfxVisible, setUVVisible, drawUVInset,
+    runModify, buildLODChain, exportMesh, setupMenu,
+};

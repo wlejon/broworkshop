@@ -19,9 +19,9 @@ import { scheduleLive } from "/app/lib/synth.js";
 import { audioCtx, setAudioCtx } from "/app/lib/audio.js";
 
 export let voiceBasis = null;       // parsed qwen_voice_basis.json, or null (panel hidden)
-let coords = null;           // Float64Array(k) — current σ-unit position
+export let coords = null;    // Float64Array(k) — current σ-unit position
 export function setCoords(v) { coords = v; }
-let sliderCells = [];
+export let sliderCells = [];
 let mapCanvas = null, mapCtx = null, mapDragging = false, mapWired = false;
 const MAP_PAD = 16, SNAP_PX = 11;
 
@@ -38,7 +38,7 @@ export function loadVoiceBasis(modelDir) {
 }
 
 // coords (σ units) → designed 1024-D x-vector: mean + Σ coordₖ·stdₖ·compₖ.
-function xvecFromCoords() {
+export function xvecFromCoords() {
   if (!voiceBasis) return null;
   const { dim, k, mean, comps, std } = voiceBasis;
   const x = new Float32Array(dim);
@@ -68,7 +68,7 @@ export function coordsFromXvec(x) {
 // recompute designedXvec from coords, redraw the map handle, refresh meta (no synth).
 // Reached only by an explicit manifold-sculpt (map / sliders / seed / random), so
 // this is where the identity becomes a designed point rather than a faithful clone.
-function rebuildDesigned() {
+export function rebuildDesigned() {
   designedXvec = xvecFromCoords();
   identitySource = 'design';
   drawMap();
@@ -133,7 +133,7 @@ function nearestPoint(px, py) {
 
 // snap ALL coords to a real speaker (its complete identity), or free-move the two
 // map axes from a clicked position (other coords kept).
-function snapToPoint(i) {
+export function snapToPoint(i) {
   const p = voiceBasis.points[i];
   for (let k = 0; k < voiceBasis.k; k++) coords[k] = p[k + 1];
   syncSliders(); rebuildDesigned();
@@ -219,7 +219,7 @@ export function syncSliders() {
 }
 
 // seed coords from a named anchor (or the neutral centroid).
-function seedVoice(name) {
+export function seedVoice(name) {
   if (!voiceBasis) return;
   if (name === '__mean__') coords.fill(0);
   else {

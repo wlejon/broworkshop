@@ -579,7 +579,7 @@ import "/app/brush.js";
             throw new Error('save() requires the screenshotCanvas global');
         }
         const entry = REGISTRY[name];
-        const outDir = 'apps/artstation/output';
+        const outDir = 'tools/artstation/output';
         const pngPath = `${outDir}/${name}.png`;
         const jsonPath = `${outDir}/${name}.json`;
 
@@ -711,7 +711,7 @@ import "/app/brush.js";
     function defaultExportPath(name, opts, ext) {
         opts = opts || {};
         const entry = REGISTRY[name];
-        const outDir = 'apps/artstation/output';
+        const outDir = 'tools/artstation/output';
         if (opts.path) return opts.path;
         if (entry.kind === 'sheet') {
             const anims = entry.spec.animations || {};

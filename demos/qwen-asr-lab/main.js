@@ -17,9 +17,10 @@ const $ = (s) => document.querySelector(s);
 
 const TARGET_RATE = 16000;   // Qwen3-ASR's fixed input rate
 
+const WROOT = (typeof process !== 'undefined' && process.env && process.env.BRO_WEIGHTS) || 'D:/projects';
 const MODEL_CANDIDATES = [
     '../../../brosoundml/weights/qwen-asr/0.6B',
-    'D:/projects/brosoundml/weights/qwen-asr/0.6B',
+    WROOT + '/brosoundml/weights/qwen-asr/0.6B',
 ];
 
 let model = null;            // bro.stt QwenAsr handle

@@ -25,7 +25,7 @@ function confColor(t) {
 // Recreating canvas elements each render (or each stream chunk) thrashes the
 // engine's canvas-scene lifecycle for no benefit; a stable canvas per card keeps
 // a single backing scene alive for the life of the card.
-let cards = {};
+export let cards = {};
 function card(name, title, desc) {
   let c = cards[name];
   if (!c) {

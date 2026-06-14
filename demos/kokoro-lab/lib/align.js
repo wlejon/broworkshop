@@ -23,6 +23,8 @@ import { el, play, setClip } from "/app/lib/helpers.js";
 
 export let durWork = null;        // live working copy of the per-phoneme frame counts
 export let durPending = false;    // an edit is waiting to be (re-)decoded — latest wins
+export function putDurWork(v)    { durWork = v;    return v; }
+export function putDurPending(v) { durPending = v; return v; }
 
 // Reflect work[i] back onto cell i — number, proportional width, running sum.
 // Cheap (text + a style toggle); no synthesis, no pipeline repaint.

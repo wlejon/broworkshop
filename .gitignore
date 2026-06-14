@@ -2,6 +2,13 @@
 */screenshot*.png
 **/screenshot*.png
 
+# Test-output artifacts: headless tests/*.js run with CWD = repo root and dump
+# screenshots / audio / meshes here (and a few next to their app). Not source.
+/*.png
+/*.wav
+/*.ply
+**/test_out.wav
+
 # Per-app settings written by the engine
 .bro_settings.json
 **/.bro_settings.json

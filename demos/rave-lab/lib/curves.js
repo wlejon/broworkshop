@@ -6,9 +6,11 @@
 import { $ } from "/app/lib/state.js";
 import { work, enc, busy, runDecode, el } from "/app/lib/render.js";
 
-let dimRanges = [];         // [mn,mx] per dim — fixed vertical frame for each curve
-let curveCells = [];        // per-dim { cv, body, c, statsEl } — canvases persist, redraw in place
+export let dimRanges = [];  // [mn,mx] per dim — fixed vertical frame for each curve
+export let curveCells = []; // per-dim { cv, body, c, statsEl } — canvases persist, redraw in place
 export let activePaint = null;     // in-progress curve drag {cv,c,mn,mx,W,H,pad,lastI,lastV}
+// Test seam: set the in-progress paint state (the test simulates a drag).
+export function setActivePaint(p) { activePaint = p; }
 
 const DIM_W = 1100, DIM_H = 96, DIM_PAD = 6;
 
@@ -74,7 +76,7 @@ function dimStats(c) {
   return `${mn.toFixed(2)} … ${mx.toFixed(2)}` + (delta > 1e-4 ? ` · Δ${delta.toFixed(1)}` : '');
 }
 
-function redrawDim(c) {
+export function redrawDim(c) {
   const cell = curveCells[c]; if (!cell) return;
   drawDim(cell.cv, c);
   cell.statsEl.textContent = dimStats(c);
@@ -91,7 +93,7 @@ function opSmooth(c)  {
     d[t] = (a + 2 * b + e) / 4;
   }
 }
-function opNudge(c, dv) { const d = row(c); for (let t = 0; t < d.length; t++) d[t] += dv; }
+export function opNudge(c, dv) { const d = row(c); for (let t = 0; t < d.length; t++) d[t] += dv; }
 
 function applyOp(c, fn) {
   if (!enc || busy) return;

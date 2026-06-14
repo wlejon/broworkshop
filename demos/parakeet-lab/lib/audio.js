@@ -23,7 +23,7 @@ function ensureCtx() {
 }
 
 // Linear-resample a mono buffer between rates (good enough for monitoring).
-function resample(samples, inRate, outRate) {
+export function resample(samples, inRate, outRate) {
   if (!samples || Math.abs(inRate - outRate) < 1) return samples;
   const ratio = outRate / inRate, n = Math.floor(samples.length * ratio);
   const out = new Float32Array(n);

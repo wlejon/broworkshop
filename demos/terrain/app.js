@@ -259,6 +259,10 @@ function pickAndEdit(action) {
     terrain.rebuild();
 }
 
+// Test hooks: expose live app-module symbols so headless tests (loaded as ES
+// modules) can drive the same camera + TerrainManager instances via "/app/app.js".
+export { cam, terrain, pickAndEdit };
+
 // ============================================================================
 // UI — Slider bindings
 // ============================================================================

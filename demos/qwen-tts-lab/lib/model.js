@@ -10,6 +10,10 @@ import { bargeIn, scheduleLive, setLastResult } from "/app/lib/synth.js";
 // owned shared state (read by voice / designer / synth / app)
 export let qwen = null;     // the loaded QwenTtsModel
 export let variant = '';    // 'customvoice' | 'voicedesign' | 'base'
+// Test seams: drive the shared qwen/variant state with a sync load (the windowed
+// app sets these from loadModel's async onReady; smokes load synchronously).
+export function setQwen(q) { qwen = q; }
+export function setVariant(v) { variant = v; }
 
 export function setBadge(text, err) {
   const b = $('#backend');
@@ -78,7 +82,7 @@ export function variantHint() {
 }
 
 // Show exactly one voice panel and (re)build it for the loaded model.
-function adaptToVariant() {
+export function adaptToVariant() {
   // Set an explicit display (not '') when showing: bro's CSS engine doesn't fall
   // back to the stylesheet's `display:flex` when an inline display is cleared.
   const show = (sel, on) => { $(sel).style.display = on ? 'flex' : 'none'; };

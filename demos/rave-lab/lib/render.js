@@ -12,7 +12,7 @@ export let work = null;          // Float32Array(nLatent*frames) — the editabl
 export let busy = false;         // an encode/decode is in flight (guards the UI)
 
 let srcSamples = null;           // Float32Array — source audio at rave.sampleRate
-let lastOut = null;              // Float32Array — most recent decoded waveform (interleaved if stereo)
+export let lastOut = null;       // Float32Array — most recent decoded waveform (interleaved if stereo)
 let outChannels = 1;             // channel count of lastOut (2 when the stereo toggle is on)
 
 let srcWaveCv = null, outWaveCv = null;

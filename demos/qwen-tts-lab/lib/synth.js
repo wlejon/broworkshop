@@ -83,7 +83,7 @@ function transport(busy) {
 // into. C++ adds it to the prefill speaker slot via opts.voiceSteer. Null when
 // nothing is dialed in (or no basis loaded). Base folds the same offsets into the
 // designed x-vector through currentVoice(), so this is the CustomVoice path.
-function voiceSteerVector() {
+export function voiceSteerVector() {
   if (!emotionActive() && !mascFemActive()) return null;
   let dim = (emotionBasis && emotionBasis.dim) || (mascFemBasis && mascFemBasis.dim) || 0;
   if (!dim && emotionBasis) for (const e of emotionBasis.emotions) { if (emotionBasis.full[e]) { dim = emotionBasis.full[e].length; break; } }

@@ -37,6 +37,9 @@ function env(k) {
     catch (_) { return ''; }
 }
 function exists(p) { try { return !!p && fs.existsSync(p); } catch (_) { return false; } }
+// Portable dev-sibling root: BRO_WEIGHTS overrides the default sibling layout
+// (so weights checked out elsewhere — e.g. a WSL D:/ mount — still resolve).
+const WROOT = env('BRO_WEIGHTS') || '..';
 function sizeOf(p) { try { return fs.statSync(p).size; } catch (_) { return -1; } }
 
 // Per-OS app-data root (mirrors system/projects/app.js userDataDir()).
@@ -82,11 +85,11 @@ function resolveFile(f) {
 function filePresent(f) { return exists(resolveFile(f)); }
 
 // ─── the catalog ──────────────────────────────────────────────────────────
-const WHISPER_DEV = '../brosoundml/weights/whisper';
-const KOKORO_DEV  = '../brosoundml/weights/kokoro';
-const QWEN_TTS_DEV = '../brosoundml/weights/qwen-tts/0.6B-customvoice';
+const WHISPER_DEV = WROOT + '/brosoundml/weights/whisper';
+const KOKORO_DEV  = WROOT + '/brosoundml/weights/kokoro';
+const QWEN_TTS_DEV = WROOT + '/brosoundml/weights/qwen-tts/0.6B-customvoice';
 const QWEN_TTS_REPO = 'Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice';
-const QWEN_VD_DEV  = '../brosoundml/weights/qwen-tts/1.7B-voicedesign';
+const QWEN_VD_DEV  = WROOT + '/brosoundml/weights/qwen-tts/1.7B-voicedesign';
 const QWEN_VD_REPO = 'Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign';
 
 const GROUPS = [
@@ -94,14 +97,14 @@ const GROUPS = [
         key: 'wake', label: 'Wake word ("computer")', downloadable: true,
         files: [
             { repo: 'wlejon/brosoundml-data', kind: 'dataset', file: 'wake/computer.bw',
-              dev: '../brosoundml-data/wake/computer.bw', bytes: 65713 },
+              dev: WROOT + '/brosoundml-data/wake/computer.bw', bytes: 65713 },
         ],
     },
     {
         key: 'llm', label: 'Language model (Qwen3-8B)', downloadable: true,
         files: [
             { repo: 'Qwen/Qwen3-8B-GGUF', kind: 'model', file: 'Qwen3-8B-Q8_0.gguf',
-              dev: '../brolm/weights/Qwen3-8B-GGUF/Qwen3-8B-Q8_0.gguf', bytes: 8709518112 },
+              dev: WROOT + '/brolm/weights/Qwen3-8B-GGUF/Qwen3-8B-Q8_0.gguf', bytes: 8709518112 },
         ],
     },
     {
@@ -136,9 +139,9 @@ const GROUPS = [
             { repo: 'wlejon/brosoundml-data', kind: 'dataset', file: 'kokoro/voices/af_heart.bin',
               dev: KOKORO_DEV + '/voices/af_heart.bin', bytes: 522240 },
             { repo: 'wlejon/brosoundml-data', kind: 'dataset', file: 'g2p/lexicon_en_us.bin',
-              dev: '../brosoundml-data/g2p/lexicon_en_us.bin', bytes: 7175830 },
+              dev: WROOT + '/brosoundml-data/g2p/lexicon_en_us.bin', bytes: 7175830 },
             { repo: 'wlejon/brosoundml-data', kind: 'dataset', file: 'pos_tagger/model.bin',
-              dev: '../brosoundml-data/pos_tagger/model.bin', bytes: 7653373 },
+              dev: WROOT + '/brosoundml-data/pos_tagger/model.bin', bytes: 7653373 },
         ],
     },
     // Qwen3-TTS (12 Hz multi-codebook) — an alternative, higher-quality speech
