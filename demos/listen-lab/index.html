@@ -110,6 +110,11 @@
   .transcript .txstat { text-transform: none; letter-spacing: 0; color: #4f9aa6; font-size: 11px; }
   .transcript .txstat.err { color: #ff8585; }
   .transcript .txstat.live { color: #36c5d0; }
+  /* translator status pill in the header (loading / ready / off) */
+  .transcript .txtl { text-transform: none; letter-spacing: 0; font-size: 10px; border-radius: 4px; padding: 0 6px; line-height: 15px; }
+  .transcript .txtl.load { color: #ffd479; background: #322a17; }
+  .transcript .txtl.ok   { color: #8be0ae; background: #16301f; }
+  .transcript .txtl.err  { color: #ff8585; background: #331a1a; }
   .transcript .txtoggle { margin-left: auto; padding: 1px 9px; border-radius: 10px; font-size: 11px; }
   .transcript .txlive {
     height: 21px; font-size: 14px; color: #9fe7ef; line-height: 21px;
@@ -118,6 +123,12 @@
   }
   .transcript .txlive .cur { color: #36c5d0; animation: blink 1s step-start infinite; }
   .transcript .txlive .ph { color: #46555c; font-size: 12px; }
+  /* live English translation under the streaming partial — updates as words arrive */
+  .transcript .txliveen {
+    min-height: 18px; font-size: 13px; color: #8be0ae; line-height: 18px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .transcript .txliveen .tlcur { color: #5aa97a; }
   @keyframes blink { 50% { opacity: 0; } }
   /* a normal block (NOT a flex column) so rows keep their height and the box
      scrolls — a flex column with max-height shrinks its children and they stack
@@ -142,7 +153,8 @@
   /* detected-language badge on a non-English line */
   .transcript .txline .lang { font-size: 10px; color: #ffd479; background: #322a17; border-radius: 4px; padding: 0 5px; flex: none; line-height: 16px; text-transform: lowercase; }
   /* the English translation, on its own full-width row under the original */
-  .transcript .txline .txen { flex-basis: 100%; color: #8be0ae; font-size: 12px; padding-left: 38px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .transcript .txline .txen { flex-basis: 100%; color: #8be0ae; font-size: 12px; padding-left: 38px; }
+  .transcript .txline .txen.pending { color: #5a7a66; font-style: italic; }
 
   /* ── click-to-inspect detail panel ────────────────────────────────────── */
   .detail { margin: 10px 14px 0; background: #11141b; border: 1px solid #2c3c57; border-radius: 8px; padding: 10px 12px; font-size: 12px; }
@@ -329,9 +341,11 @@
       <div class="transcript" id="transcript">
         <div class="txhdr">live transcript · Qwen3-ASR · diarized · translated
           <span class="txstat" id="txStat">…</span>
+          <span class="txtl" id="txTl"></span>
           <button class="txtoggle" id="txToggle" disabled>⏸</button>
         </div>
         <div class="txlive" id="txLive"><span class="ph">— speak; words appear here while voice is active —</span></div>
+        <div class="txliveen" id="txLiveEn"></div>
         <div class="txlines" id="txLines"></div>
       </div>
       <div class="detail hidden" id="detail"></div>

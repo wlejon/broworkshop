@@ -38,8 +38,9 @@
         $tmpls: $('#tmpls'), $noTmpls: $('#noTmpls'),
         $gestures: $('#gestures'), $noGest: $('#noGest'),
         $status: $('#status'), $streamT: $('#streamT'), $spotCount: $('#spotCount'),
-        $transcript: $('#transcript'), $txStat: $('#txStat'),
-        $txLive: $('#txLive'), $txLines: $('#txLines'), $txToggle: $('#txToggle'),
+        $transcript: $('#transcript'), $txStat: $('#txStat'), $txTl: $('#txTl'),
+        $txLive: $('#txLive'), $txLiveEn: $('#txLiveEn'),
+        $txLines: $('#txLines'), $txToggle: $('#txToggle'),
         $srcSel: $('#srcSel'), $addStream: $('#addStream'), $refreshApps: $('#refreshApps'),
         $tabStrip: $('#tabStrip'),
     });

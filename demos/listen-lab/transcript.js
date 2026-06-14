@@ -3,7 +3,7 @@
 ;(function () {
     const LL = globalThis.LL;
     const fs = require('fs');
-    const { $txStat, $txLive, $txToggle, $txLines,
+    const { $txStat, $txLive, $txLiveEn, $txToggle, $txLines,
             FPS, fusionRow, focusRegion, playRegion, logEvent } = LL;
 
 // ── tier-3 transcript — Qwen3-ASR, voice-gated, rolling realtime ──────────────
@@ -78,7 +78,7 @@ function txDrain() {
     const runner = Transcribe.stubRun || ctx.run;
     try {
         runner(job.pcm, {
-            onToken: (p) => { ctx.tx.partial = p; renderPartial(ctx); },
+            onToken: (p, lang) => { ctx.tx.partial = p; ctx.tx.lang = lang || ''; renderPartial(ctx); },
             onDone: finish,
         });
     } catch (e) {
@@ -96,12 +96,16 @@ function txDrain() {
 function realRun(pcm, cb) {
     const ids = [];
     let cut = -1;                                   // index just past asrTextId in `ids`
+    let liveLang = '';                              // detected language, known once the marker passes
     return bro.stt.transcribe(Transcribe.model, pcm, {
         onToken: (id) => {
             ids.push(id);
-            if (cut < 0 && id === Transcribe.asrTextId) cut = ids.length;
+            if (cut < 0 && id === Transcribe.asrTextId) {
+                cut = ids.length;                   // marker is ids[cut-1]; language is ids[0..cut-2]
+                liveLang = cut > 1 ? Transcribe.tok.decode(ids.slice(0, cut - 1)).trim() : '';
+            }
             if (cb.onToken && cut >= 0 && ids.length > cut)
-                cb.onToken(Transcribe.tok.decode(ids.slice(cut)).trim());
+                cb.onToken(Transcribe.tok.decode(ids.slice(cut)).trim(), liveLang);
         },
         onDone: (res, info) => {
             const arr = res ? Array.from(res) : ids;
@@ -115,7 +119,7 @@ function realRun(pcm, cb) {
 }
 
 function initTxCtx(ctx) {
-    ctx.tx = { active: false, startFrame: 0, lastRunFrame: 0, partial: '' };
+    ctx.tx = { active: false, startFrame: 0, lastRunFrame: 0, partial: '', lang: '' };
     if (!ctx.run) ctx.run = realRun;
     ctx._prev = ctx._prev || null;
     ctx._cur = ctx._cur || null;
@@ -132,7 +136,12 @@ function makeTxCtx(st) {
         frame: () => st.source.listen.frame(),
         oldest: () => st.ring.oldestFrame(),
         active: () => st.source.listen.info().active,
-        onPartial: (partial) => { if (st === LL.active) renderActivePartial(partial); },
+        onPartial: (partial, lang) => {
+            if (st === LL.active) renderActivePartial(partial);
+            // Live streaming translation: hand the growing partial + its detected
+            // language to the translator, which updates the live English line.
+            if (LL.onLivePartial) LL.onLivePartial(st, partial, lang);
+        },
         onCommit: (text, a, b, lang) => commitLine(st, text, a, b, lang),
         onStatus: (text, err, live) => { if (st === LL.active) txSetStatus(text, err, live); },
     };
@@ -150,7 +159,24 @@ function txSetStatus(text, err, live) {
 const TX_PARTIAL_MAX = 96;
 
 function renderPartial(ctx) {
-    ctx.onPartial(ctx.tx.partial);
+    ctx.onPartial(ctx.tx.partial, ctx.tx.lang);
+}
+
+// Render the ACTIVE tab's live English translation under the streaming partial.
+// translate.js calls this as coalesced partial translations land; cleared on
+// commit/voice-end. `pending` shows a faint cursor while the first pass runs.
+function renderActiveLiveEn(text, pending) {
+    if (!$txLiveEn) return;
+    if (text) {
+        $txLiveEn.textContent = '→ ' + text + ' ';
+        if (pending) {
+            const c = document.createElement('span');
+            c.className = 'tlcur'; c.textContent = '…';
+            $txLiveEn.appendChild(c);
+        }
+    } else {
+        $txLiveEn.textContent = '';
+    }
 }
 
 // Render the ACTIVE tab's live partial into the shared transcript panel.
@@ -168,6 +194,7 @@ function renderActivePartial(partial) {
     } else {
         $txLive.innerHTML = '<span class="ph">— speak; words appear here while voice is active —</span>';
     }
+    if (!partial) renderActiveLiveEn('');     // no live transcript → no live translation
 }
 
 const lineKey = (ln) => ln.a + '-' + ln.b;
@@ -205,6 +232,10 @@ function renderLines() {
             const en = document.createElement('span');
             en.className = 'txen'; en.textContent = '→ ' + ln.en;
             row.appendChild(en);
+        } else if (ln.enPending) {                          // queued for translation
+            const en = document.createElement('span');
+            en.className = 'txen pending'; en.textContent = '→ translating…';
+            row.appendChild(en);
         }
         row.addEventListener('click', () => {
             focusRegion(ln.a, ln.b);
@@ -230,7 +261,24 @@ function finishUtterance(ctx, text, a, b, lang) {
 // re-rendering when its result lands.
 function commitLine(st, text, a, b, lang) {
     if (!text) return;
-    const langN = normLang(lang);
+    // Strip whitespace + CJK/ASCII punctuation to gauge real content. Pure-symbol
+    // fragments ("。", "—") are ASR noise between turns — drop them entirely so
+    // they don't get a spurious line, language badge, or translation.
+    const core = text.replace(/[\s　-〿！-･ -⁯!-\/:-@]+/g, '');
+    if (!core) return;
+    const meaningful = core.length >= 2;
+    let langN = normLang(lang);
+    // Per-stream STICKY language: short/odd utterances otherwise flip-flop (a
+    // one-syllable grunt in a Japanese stream gets tagged Chinese). Vote with
+    // meaningful foreign utterances; once a dominant foreign language is
+    // established (≥2 votes), snap every foreign label on this stream to it.
+    if (!langIsEnglish(langN)) {
+        st.langVotes = st.langVotes || {};
+        if (meaningful) st.langVotes[langN] = (st.langVotes[langN] || 0) + 1;
+        let dom = '', best = 0;
+        for (const k in st.langVotes) if (st.langVotes[k] > best) { best = st.langVotes[k]; dom = k; }
+        if (dom && best >= 2) langN = dom;
+    }
     const line = { t: b / FPS, text, a, b, lang: langN, speaker: 0, en: null };
     st.txLines.unshift(line);
     while (st.txLines.length > 80) st.txLines.pop();
@@ -321,7 +369,7 @@ function txLoad() {
 
     Object.assign(LL, {
         Transcribe, makeTxCtx, initTxCtx, realRun, txReset,
-        txSetStatus, renderPartial, renderActivePartial, renderLines,
+        txSetStatus, renderPartial, renderActivePartial, renderActiveLiveEn, renderLines,
         finishUtterance, transcribeTick, txMaybeReady, txLoad,
         normLang, langIsEnglish,
     });
