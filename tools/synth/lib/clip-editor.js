@@ -1,11 +1,10 @@
 // ---------------------------------------------------------------------------
 // Clip Editor — comprehensive audio clip editing
 // ---------------------------------------------------------------------------
-(function() {
-    'use strict';
-    var Synth = window.Synth || (window.Synth = {});
+import { engine } from "/app/lib/synth-engine.js";
 
-    var Editor = Synth.ClipEditor = {};
+export const ClipEditor = {};
+const Editor = ClipEditor;
 
     // State
     var audioCtx = null;
@@ -58,7 +57,7 @@
 
     Editor.init = function(canvasEl) {
         canvas = canvasEl;
-        audioCtx = Synth.getAudioContext();
+        audioCtx = engine.getAudioContext();
         sampleRate = audioCtx ? audioCtx.sampleRate : 44100;
 
         canvas.addEventListener('mousedown', onMouseDown);
@@ -1002,16 +1001,16 @@
     Editor.useAsInstrument = function() {
         if (!samples || clipId < 0) return;
         // Store reference for synth keyboard to use
-        Synth.customClipId = clipId;
-        Synth.customClipSamples = samples;
-        Synth.useClipMode = true;
+        engine.customClipId = clipId;
+        engine.customClipSamples = samples;
+        engine.useClipMode = true;
         setStatus('Clip set as instrument — play keyboard to hear it!');
     };
 
     Editor.clearInstrument = function() {
-        Synth.useClipMode = false;
-        Synth.customClipId = -1;
-        Synth.customClipSamples = null;
+        engine.useClipMode = false;
+        engine.customClipId = -1;
+        engine.customClipSamples = null;
         setStatus('Instrument reset to oscillator');
     };
 
@@ -1179,4 +1178,3 @@
 
         return false;
     };
-})();
