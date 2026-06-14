@@ -364,6 +364,13 @@
     <span>stream <b id="streamT">0.0 s</b></span>
     <span>spots <b id="spotCount">0</b></span>
   </div>
+  <!-- Split across modules sharing the global `LL` namespace; load order matters
+       (core defines LL + helpers; main wires + boots and must load last). -->
+  <script src="core.js"></script>
+  <script src="timeline.js"></script>
+  <script src="transcript.js"></script>
+  <script src="gestures.js"></script>
+  <script src="streams.js"></script>
   <script src="main.js"></script>
 </body>
 </html>
