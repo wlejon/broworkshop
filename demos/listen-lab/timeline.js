@@ -10,8 +10,7 @@
 // the existing single-stream draw code renders the active tab unchanged. Per-
 // stream UPDATES (logEvent, ring.push) take an explicit `st` instead, so a
 // background stream keeps accumulating history while another tab is shown.
-;(function () {
-    const LL = globalThis.LL;
+import { LL } from "/app/core.js";
     const { $chart, $overview, $detail, $scratch, $tlLive, $tlHover, $phrase,
             status, fusionRow, mkbtn, FPS, playPcm } = LL;
 
@@ -739,4 +738,3 @@ function closeDetail() {
         activeView: () => View, activePlayback: () => Playback,
         activePhLabels: () => phLabels,
     });
-})();

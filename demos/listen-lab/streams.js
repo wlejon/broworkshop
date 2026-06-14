@@ -9,8 +9,7 @@
 // behaves exactly like the mic's. Each stream owns its own dashboard STATE
 // (history ring, events, view, playback, transcript, feed); the shared DOM
 // rebinds to whichever tab is active. Background streams keep accumulating.
-;(function () {
-    const LL = globalThis.LL;
+import { LL } from "/app/core.js";
     const { $srcSel, $addStream, $tabStrip,
             status, fusionRow, bindTimeline, closeDetail, drawStream } = LL;
 
@@ -227,4 +226,3 @@ function specFromSelect() {
         addStream, removeStream, buildSourceOptions, specFromSelect,
         exportWav, saveStreamWav, setExportPath,
     });
-})();

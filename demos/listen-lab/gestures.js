@@ -6,8 +6,7 @@
 // gesture session (the mic's master + each added stream's handle session) over
 // the shared SensorHub, so a click/whistle on any source fires on THAT stream's
 // dashboard. Enrolling adds to the master and mirrors onto every stream.
-;(function () {
-    const LL = globalThis.LL;
+import { LL } from "/app/core.js";
     const { $gestures, $noGest, $record, $phrase, $spotCount,
             status, fusionRow, mkbtn, playSamples, logEvent } = LL;
 
@@ -449,4 +448,3 @@ function toggleRecord() { startRecord(null, $record); }
         buildEditor, gainedSlice, clipStore, policyStore, gestRows, flashGesture,
         startRecord, stopRecord, toggleRecord,
     });
-})();

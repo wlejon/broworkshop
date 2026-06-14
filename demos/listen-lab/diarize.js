@@ -14,8 +14,7 @@
 // overlapping speech or a speaker change mid-utterance (that needs frame-level
 // diarization) — the right, well-trodden approach for a take-turns demo. Speakers
 // are PER STREAM (st.speakers), so each tab discovers its own cast independently.
-;(function () {
-    const LL = globalThis.LL;
+import { LL } from "/app/core.js";
     const fs = require('fs');
     const { fusionRow, status } = LL;
 
@@ -139,4 +138,3 @@
     }
 
     Object.assign(LL, { Diarize, assignSpeaker, dzLoad });
-})();

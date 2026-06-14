@@ -13,8 +13,7 @@
 //             these are persistent, so they take priority over the live partial.
 // Committed lines are SEEDED from the last live translation so they don't flash
 // empty, then refined by a full-text pass.
-;(function () {
-    const LL = globalThis.LL;
+import { LL } from "/app/core.js";
     const fs = require('fs');
     const { fusionRow, langIsEnglish, $txTl } = LL;
 
@@ -169,4 +168,3 @@
     }
 
     Object.assign(LL, { Translate, maybeTranslate, onLivePartial, tlLoad });
-})();

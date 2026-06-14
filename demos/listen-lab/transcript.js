@@ -1,7 +1,6 @@
 // Listen Lab — tier-3 transcript (Qwen3-ASR, voice-gated), one per stream.
 // (load after timeline.js)
-;(function () {
-    const LL = globalThis.LL;
+import { LL } from "/app/core.js";
     const fs = require('fs');
     const { $txStat, $txLive, $txLiveEn, $txToggle, $txLines,
             FPS, fusionRow, focusRegion, playRegion, logEvent } = LL;
@@ -373,4 +372,3 @@ function txLoad() {
         finishUtterance, transcribeTick, txMaybeReady, txLoad,
         normLang, langIsEnglish,
     });
-})();

@@ -5,8 +5,15 @@
 // (tier-3 Qwen3-ASR, one ctx per stream), diarize.js (speaker x-vector + online
 // clustering), translate.js (non-English → English via bro.lm), gestures.js
 // (non-speech + clip editor), streams.js (sources + tabs). This file loads LAST.
-;(function () {
-    const LL = globalThis.LL;
+import { LL } from "/app/core.js";
+// Load order (these publish onto LL; main wires them at the end — see core.js).
+import "/app/timeline.js";
+import "/app/transcript.js";
+import "/app/diarize.js";
+import "/app/translate.js";
+import "/app/gestures.js";
+import "/app/streams.js";
+{
     const fs = require('fs');
     const {
         $dbBig, $levelFill, $floorMark, $levelSmall, $voiceDot, $voiceTxt, $voiceSmall,
@@ -515,4 +522,4 @@ globalThis.listenLab = {
     installDiarizer: (embedFn) => { LL.Diarize.stub = embedFn; LL.Diarize.ready = true; },
     installTranslator: (xlateFn) => { LL.Translate.stub = xlateFn; LL.Translate.ready = true; },
 };
-})();
+}

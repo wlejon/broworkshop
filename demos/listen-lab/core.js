@@ -16,8 +16,8 @@
 // Load order (see index.html): core → timeline → transcript → gestures →
 // streams → main. Each later file may alias anything this one put on LL.
 
-;(function (global) {
-    const LL = (global.LL = global.LL || {});
+export const LL = {};
+{
 
     const $ = (sel) => document.querySelector(sel);
     LL.$ = $;
@@ -119,4 +119,4 @@
         lastClip = c.createClip(pcm, 1, rate || 16000);
         c.playClip(lastClip, 1.0, false);
     };
-})(globalThis);
+}
