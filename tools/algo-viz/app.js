@@ -2,6 +2,11 @@
 // descriptor onto window.VIZ; this file builds the sidebar, mounts the
 // active viz into #stage / #params, and tears it down on switch.
 
+import { VIZ } from "/app/viz/_registry.js";
+import "/app/viz/pathfinding.js";
+import "/app/viz/noise.js";
+import "/app/viz/isosurface.js";
+
 const sidebarEl = document.getElementById('viz-list');
 const stageEl   = document.getElementById('stage');
 const paramsEl  = document.getElementById('params');

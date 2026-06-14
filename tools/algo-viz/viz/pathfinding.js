@@ -6,6 +6,9 @@
 // in JS so each expansion is visible — one step pops the lowest-f cell
 // from the open set, adds it to the closed set, and relaxes its neighbors.
 
+import { VIZ } from "/app/viz/_registry.js";
+export let AVUI;
+
 (function () {
     const WORLD_HALF = 20;
 
@@ -774,5 +777,5 @@
         parent.appendChild(b); return b;
     }
 
-    window.AVUI = { mkRange, mkNumber, mkSelect, mkButton };
+    AVUI = { mkRange, mkNumber, mkSelect, mkButton };
 })();

@@ -12,6 +12,9 @@
 //       frequency (×lacunarityⁱ). Thumbnails are tiny (96×96) and refresh at
 //       1Hz; labels are diffed so we only touch innerHTML on actual changes.
 
+import { VIZ } from "/app/viz/_registry.js";
+import { AVUI } from "/app/viz/pathfinding.js";
+
 (function () {
     const TYPES = ['Simplex', 'SuperSimplex', 'Perlin', 'Value',
                    'CellularValue', 'CellularDistance'];

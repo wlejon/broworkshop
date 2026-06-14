@@ -13,4 +13,4 @@
 // them on switch. The viz owns its own canvas creation so it can choose 2D
 // vs scene context per algorithm.
 
-window.VIZ = window.VIZ || [];
+export const VIZ = [];

@@ -27,6 +27,10 @@
 // Controls: Play / Pause / Step / Reset, plus a speed slider. Switching
 // algo, field, iso, grid, seed, or slice z resets the sweep.
 
+import { VIZ } from "/app/viz/_registry.js";
+import { AVUI } from "/app/viz/pathfinding.js";
+import "/lib/camera.js";
+
 (function () {
     const ALGOS = ['marchingCubes', 'dualContour', 'surfaceNets'];
     const FIELDS = ['sphere', 'torus', 'noise', 'gyroid'];
