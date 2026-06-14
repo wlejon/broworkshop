@@ -2,11 +2,12 @@
 // Presets — save/load synth configurations (applies to active layer's bus)
 // ---------------------------------------------------------------------------
 
-(function() {
-    'use strict';
-    var Synth = window.Synth || (window.Synth = {});
+import { Layers } from "/app/lib/layers.js";
+import { engine } from "/app/lib/synth-engine.js";
+import { LFO } from "/app/lib/lfo.js";
+import { SignalChain } from "/app/lib/signal-chain.js";
 
-    var STORAGE_KEY = 'synth-presets';
+var STORAGE_KEY = 'synth-presets';
 
     var FACTORY = {
         'Init': {
@@ -139,11 +140,11 @@
     }
 
     function captureState() {
-        var layer = Synth.Layers.getActive();
+        var layer = Layers.getActive();
         if (!layer) return {};
         return {
             waveform: layer.waveform,
-            volume: Synth.getVolume(),
+            volume: engine.getVolume(),
             adsr: JSON.parse(JSON.stringify(layer.adsr)),
             filter: JSON.parse(JSON.stringify(layer.filter)),
             delay: JSON.parse(JSON.stringify(layer.delay)),
@@ -160,14 +161,14 @@
         state = normalizePreset(state);
         if (!state) return;
 
-        Synth.setVolume(state.volume !== undefined ? state.volume : 0.3);
+        engine.setVolume(state.volume !== undefined ? state.volume : 0.3);
         var adsr = state.adsr || {};
 
         // Apply LFO to modmatrix
-        Synth.LFO.loadState(state.lfo);
+        LFO.loadState(state.lfo);
 
         // Apply params to the active layer and update its allocator
-        var layer = Synth.Layers.getActive();
+        var layer = Layers.getActive();
         if (layer) {
             layer.waveform = state.waveform || 'sine';
             if (state.adsr) {
@@ -233,8 +234,8 @@
                 layer.lfo.sync = state.lfo.sync || false;
             }
 
-            Synth.SignalChain.applyParams(layer.busId, layer);
-            Synth.Layers.updateActiveAllocator();
+            SignalChain.applyParams(layer.busId, layer);
+            Layers.updateActiveAllocator();
         }
     }
 
@@ -247,7 +248,7 @@
         localStorage.setItem(STORAGE_KEY, JSON.stringify(presets));
     }
 
-    Synth.Presets = {
+export const Presets = {
         FACTORY: FACTORY,
 
         list: function() {
@@ -292,4 +293,3 @@
         apply: applyState,
         capture: captureState
     };
-})();

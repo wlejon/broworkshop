@@ -2,11 +2,11 @@
 // Layer Management — each layer owns a broaudio bus + voice allocator
 // ---------------------------------------------------------------------------
 
-(function() {
-    'use strict';
-    var Synth = window.Synth || (window.Synth = {});
+import { engine } from "/app/lib/synth-engine.js";
+import { SignalChain } from "/app/lib/signal-chain.js";
+import { LFO } from "/app/lib/lfo.js";
 
-    var NUM_STEPS = 16;
+var NUM_STEPS = 16;
     var MAX_LAYERS = 8;
 
     var COLORS = [
@@ -81,7 +81,7 @@
         if (layer.layerAlloc) {
             layer.layerAlloc.update(voiceParams);
         } else {
-            layer.layerAlloc = Synth.createLayerAllocator(voiceParams);
+            layer.layerAlloc = engine.createLayerAllocator(voiceParams);
         }
     }
 
@@ -93,7 +93,7 @@
         var p = params || createDefaultParams();
 
         // Create a dedicated bus for this layer
-        var busId = Synth.SignalChain.createBus();
+        var busId = SignalChain.createBus();
 
         var layer = {
             id: idx,
@@ -185,13 +185,13 @@
         ensureAllocator(layer);
 
         // Push effect params to the bus
-        Synth.SignalChain.applyParams(busId, layer);
+        SignalChain.applyParams(busId, layer);
 
         return layer;
     }
 
     function destroyLayer(layer) {
-        if (layer.busId > 0) Synth.SignalChain.destroyBus(layer.busId);
+        if (layer.busId > 0) SignalChain.destroyBus(layer.busId);
         // Allocator is GC'd when no longer referenced
         layer.layerAlloc = null;
     }
@@ -199,11 +199,11 @@
     // Apply LFO params to the mod matrix (global — LFO is shared)
     function applyLfoParams(layer) {
         if (!layer) return;
-        Synth.LFO.setRate(layer.lfo.rate);
-        Synth.LFO.setDepth(layer.lfo.depth);
-        Synth.LFO.setWaveform(layer.lfo.waveform);
-        Synth.LFO.setTarget(layer.lfo.target);
-        Synth.LFO.setEnabled(layer.lfo.enabled);
+        LFO.setRate(layer.lfo.rate);
+        LFO.setDepth(layer.lfo.depth);
+        LFO.setWaveform(layer.lfo.waveform);
+        LFO.setTarget(layer.lfo.target);
+        LFO.setEnabled(layer.lfo.enabled);
     }
 
     function fireSelectCallbacks() {
@@ -214,13 +214,13 @@
 
     function cloneObj(o) { return JSON.parse(JSON.stringify(o)); }
 
-    Synth.Layers = {
+export const Layers = {
         NUM_STEPS: NUM_STEPS,
         MAX_LAYERS: MAX_LAYERS,
         COLORS: COLORS,
 
         init: function() {
-            if (Synth.releaseAllNotes) Synth.releaseAllNotes();
+            if (engine.releaseAllNotes) engine.releaseAllNotes();
             for (var i = 0; i < layers.length; i++) destroyLayer(layers[i]);
             layers = [];
             editingMic = false;
@@ -313,8 +313,8 @@
 
         initMicBus: function() {
             if (micSignal) return micSignal;
-            var busId = Synth.SignalChain.createBus();
-            var ctx = Synth.getAudioContext();
+            var busId = SignalChain.createBus();
+            var ctx = engine.getAudioContext();
             if (ctx) ctx.micBus = busId;
             var defaults = createDefaultEffectParams();
             micSignal = {
@@ -331,7 +331,7 @@
                 distortion: defaults.distortion,
                 lfo: defaults.lfo
             };
-            Synth.SignalChain.applyParams(busId, micSignal);
+            SignalChain.applyParams(busId, micSignal);
             return micSignal;
         },
 
@@ -346,9 +346,9 @@
 
         destroyMicBus: function() {
             if (!micSignal) return;
-            var ctx = Synth.getAudioContext();
+            var ctx = engine.getAudioContext();
             if (ctx) ctx.micBus = -1;
-            Synth.SignalChain.destroyBus(micSignal.busId);
+            SignalChain.destroyBus(micSignal.busId);
             micSignal = null;
             if (editingMic) {
                 editingMic = false;
@@ -430,4 +430,3 @@
             fireSelectCallbacks();
         }
     };
-})();

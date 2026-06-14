@@ -2,13 +2,11 @@
 // SignalChain — per-bus effect management (replaces effects.js + filter.js)
 // ---------------------------------------------------------------------------
 
-(function() {
-    'use strict';
-    var Synth = window.Synth || (window.Synth = {});
+import { engine } from "/app/lib/synth-engine.js";
 
-    function ctx() { return Synth.getAudioContext(); }
+function ctx() { return engine.getAudioContext(); }
 
-    Synth.SignalChain = {
+export const SignalChain = {
         createBus: function() {
             var c = ctx();
             return c ? c.createBus() : -1;
@@ -24,7 +22,7 @@
             if (busId < 0) return;
             var c = ctx();
             if (!c) return;
-            var SC = Synth.SignalChain;
+            var SC = SignalChain;
 
             // Effect chain order
             if (params.effectOrder) {
@@ -246,4 +244,3 @@
             var c = ctx(); return c ? c.getBusRmsR(busId) : 0;
         }
     };
-})();

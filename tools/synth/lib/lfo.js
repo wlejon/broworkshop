@@ -2,11 +2,7 @@
 // LFO — delegates to native ModMatrix (sample-accurate, per-voice)
 // ---------------------------------------------------------------------------
 
-(function() {
-    'use strict';
-    var Synth = window.Synth || (window.Synth = {});
-
-    var modMatrix = null;
+var modMatrix = null;
     var enabled = false;
     var rate = 5.0;
     var depth = 0.5;
@@ -48,7 +44,7 @@
         }
     }
 
-    Synth.LFO = {
+export const LFO = {
         init: function(ctx) {
             modMatrix = ctx.getModMatrix();
         },
@@ -113,4 +109,3 @@
             applyRoute();
         }
     };
-})();
