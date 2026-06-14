@@ -305,7 +305,7 @@ function bootTranscript() {
     if (typeof advanceTime === 'function') { txSetStatus('headless — install a runner to test'); return; }
     txLoad();          // Qwen3-ASR transcription + language ID
     LL.dzLoad();       // ECAPA speaker encoder → diarization
-    LL.tlLoad();       // Qwen3 → English translation of non-English lines
+    LL.tlLoad();       // NLLB-200 → English translation of non-English lines
 }
 
 // Update one stream's state (no DOM): sensor snapshot → ring, tier-0 edges, the
@@ -521,5 +521,7 @@ globalThis.listenLab = {
     loadDiarizer: LL.dzLoad, loadTranslator: LL.tlLoad,
     installDiarizer: (embedFn) => { LL.Diarize.stub = embedFn; LL.Diarize.ready = true; },
     installTranslator: (xlateFn) => { LL.Translate.stub = xlateFn; LL.Translate.ready = true; },
+    // streaming sentence chunker — exposed so the test can drive a seal directly.
+    sealSentences: (ctx, text, a, b) => LL.maybeSealSentences(ctx, text, a, b),
 };
 }

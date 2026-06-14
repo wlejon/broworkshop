@@ -670,6 +670,54 @@ console.log('[listen-lab] editor: opened whistle clip editor (' +
                 micSt.speakers.length + ' voices on the stream');
 }
 
+// ── 4i. streaming sentence chunker: seal sentences mid-utterance ──────────────
+// Continuous speech never falls silent, so the transcript seals COMPLETE sentences
+// out of the rolling partial and advances the window past them (bounded re-decode)
+// instead of waiting for voice-end. Drive the chunker directly over a real retained
+// window so the seal logic is deterministic (no dependence on VAD timing): a
+// sentence seals only once it's stable across two passes and has trailing text.
+{
+    const micSt = listenLab.active();
+    assert(micSt.kind === 'mic', 'mic tab active for the chunker test');
+    listenLab.installTranslator((text, lang) => '[en] ' + text);   // deterministic English
+
+    const ctx = micSt.txCtx;
+    const b = bro.listen.frame(), a = Math.max(ctx.oldest() + 5, b - 400);
+    assert(b - a > 60, 'a real retained window to anchor sentence cuts in (' + (b - a) + ' frames)');
+
+    // Open an utterance window with no seals yet.
+    ctx.tx.active = true; ctx.tx.lang = 'Spanish';
+    ctx.tx.startFrame = a; ctx.tx.sealedFrame = a; ctx.tx.prevPartial = '';
+
+    const n0 = micSt.txLines.length;
+    listenLab.sealSentences(ctx, 'Uno dos tres. palabra', a, b);   // first sighting — not yet stable
+    assert(micSt.txLines.length === n0,
+           'a sentence seen for the first time does NOT seal (needs 2 stable passes)');
+    listenLab.sealSentences(ctx, 'Uno dos tres. palabra', a, b);   // stable + trailing text → seal
+    assert(micSt.txLines.length === n0 + 1, 'a stable complete sentence sealed mid-utterance');
+    const sealed = micSt.txLines[0];
+    assert(sealed.text === 'Uno dos tres.', 'sealed line carries the sentence ("' + sealed.text + '")');
+    assert(sealed.lang.toLowerCase() === 'spanish', 'sealed line carries the detected language');
+    assert(sealed.b > sealed.a && sealed.a === a, 'sealed line spans from the utterance start to the cut');
+    assert(ctx.tx.startFrame > a && ctx.tx.startFrame === ctx.tx.sealedFrame,
+           'the re-transcribe window advanced past the sealed audio (now bounded)');
+    assert(pumpUntil(() => sealed.en === '[en] Uno dos tres.', 3000),
+           'the sealed sentence got an English translation');
+
+    // A second sentence seals from the ADVANCED window — proving the stream keeps
+    // moving without a pause, each sentence its own line.
+    const aa = ctx.tx.startFrame, n1 = micSt.txLines.length;
+    listenLab.sealSentences(ctx, 'Cuatro cinco. palabra', aa, b);
+    listenLab.sealSentences(ctx, 'Cuatro cinco. palabra', aa, b);
+    assert(micSt.txLines.length === n1 + 1, 'a second sentence sealed from the advanced window');
+    assert(micSt.txLines[0].text === 'Cuatro cinco.', 'second sealed sentence committed');
+    assert(ctx.tx.startFrame > aa, 'the window advanced again past the second cut');
+    console.log('[listen-lab] chunker: sealed 2 sentences mid-utterance · window ' +
+                a + '→' + ctx.tx.startFrame + ' (bounded, never waited for voice-end)');
+
+    ctx.tx.active = false; ctx.tx.prevPartial = '';   // don't leak utterance state into teardown
+}
+
 // ── 5. remove the gesture via its × button while live ────────────────────────
 
 {

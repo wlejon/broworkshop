@@ -35,6 +35,20 @@ const ASR_CANDIDATES = [
 const TX_PREROLL = 20;         // frames of pre-voice audio to include (~200 ms)
 const TX_ROLL    = 35;         // frames between rolling partial passes (~350 ms)
 
+// ── streaming sentence chunker ────────────────────────────────────────────────
+// Continuous speech (a news monologue) never falls silent, so the old "commit on
+// voice-end" design let one utterance's rolling re-transcribe window grow without
+// bound until it blew past the ASR's ~30 s sweet spot and choked. Instead we SEAL
+// sentences mid-utterance: when the partial gains a sentence-final boundary with
+// more text after it (and the prefix is stable across two passes), we commit that
+// sentence as a line and advance the window start past it — so the window stays
+// bounded and a monologue becomes a steady stream of sentence lines.
+const TX_MAXWIN  = 2200;       // frames (~22 s) — hard window cap, force a soft seal
+const TX_SNAP    = 15;         // frames (~150 ms) — radius to snap a cut to a silence dip
+const TX_MINSEAL = 6;          // don't seal a "sentence" shorter than this many chars
+// A run of text ending in sentence-final punctuation (ASCII + CJK + ellipsis).
+const SENT_RE = /[^.!?。！？…]*[.!?。！？…]+/g;
+
 const Transcribe = {
     model: null, tok: null, asrTextId: -1,
     ready: false, enabled: true,
@@ -70,7 +84,12 @@ function txDrain() {
         TxQueue.busy = false;
         if (!(info && info.cancelled)) {
             if (job.isFinal) finishUtterance(ctx, text, job.a, job.b, info && info.lang);
-            else { ctx.tx.partial = text; renderPartial(ctx); }
+            else {
+                ctx.tx.partial = text;
+                if (info && info.lang) ctx.tx.lang = info.lang;
+                renderPartial(ctx);
+                maybeSealSentences(ctx, text, job.a, job.b);   // chunker: seal completed sentences
+            }
         }
         txDrain();
     };
@@ -84,6 +103,102 @@ function txDrain() {
         TxQueue.busy = false;
         if (job.isFinal) finishUtterance(ctx, ctx.tx.partial || '', job.a, job.b);
         txDrain();
+    }
+}
+
+// Split a partial into COMPLETE sentences (each ending in sentence punctuation)
+// plus the trailing in-progress fragment. `end` is the char offset just past each
+// sentence — used to anchor the sentence's audio cut proportionally.
+function splitComplete(text) {
+    const sentences = [];
+    let m;
+    SENT_RE.lastIndex = 0;
+    while ((m = SENT_RE.exec(text))) {
+        sentences.push({ text: m[0].trim(), end: SENT_RE.lastIndex });
+    }
+    const tailStart = sentences.length ? sentences[sentences.length - 1].end : 0;
+    return { sentences, tail: text.slice(tailStart).trim() };
+}
+
+// Snap a frame to the lowest-energy (quietest) frame within ±TX_SNAP — sentence
+// boundaries land in prosodic dips/breaths even in gapless speech, so cutting
+// there avoids slicing a word. Energy is read straight off the retained PCM.
+function snapToDip(ctx, a, b, f) {
+    const lo = Math.max(a + 1, f - TX_SNAP), hi = Math.min(b - 1, f + TX_SNAP);
+    if (hi <= lo) return Math.max(a + 1, Math.min(b, f));
+    const pcm = ctx.audio(lo, hi);
+    if (!pcm || !pcm.length) return f;
+    const spf = pcm.length / (hi - lo);              // samples per frame
+    let bestF = f, bestE = Infinity;
+    for (let fr = lo; fr < hi; fr++) {
+        const s0 = Math.floor((fr - lo) * spf), s1 = Math.floor((fr - lo + 1) * spf);
+        let e = 0;
+        for (let i = s0; i < s1; i++) e += pcm[i] * pcm[i];
+        e /= Math.max(1, s1 - s0);
+        if (e < bestE) { bestE = e; bestF = fr; }
+    }
+    return bestF;
+}
+
+// Proportional time anchor for a sentence ending at char `endChar` of `total`,
+// over the window [a, b], snapped to the nearest silence dip. Small errors
+// self-correct: the next window re-transcribes from the cut, recapturing overlap.
+function anchorFrame(ctx, a, b, endChar, total) {
+    let f = Math.round(a + (endChar / Math.max(1, total)) * (b - a));
+    f = Math.max(a + 1, Math.min(b, f));
+    return snapToDip(ctx, a, b, f);
+}
+
+// Force a soft seal when the window has run past TX_MAXWIN with no sentence
+// punctuation (a long unpunctuated run-on): cut at the quietest frame in the
+// latter half of the window and commit the text so far as one line.
+function forceSeal(ctx, text, a, b) {
+    const T = ctx.tx;
+    const mid = Math.round(a + 0.5 * (b - a));
+    const cutF = snapToDip(ctx, mid, b, Math.round(a + 0.75 * (b - a)));
+    if (cutF <= T.sealedFrame) { T.prevPartial = text; return; }
+    commitLine(ctx.st, text.trim(), T.sealedFrame, cutF, T.lang);
+    T.sealedFrame = cutF; T.startFrame = cutF;
+    ctx.tx.partial = ''; T.prevPartial = '';
+    renderPartial(ctx);
+}
+
+// The chunker, run after every rolling partial pass. Seal each COMPLETE sentence
+// that (a) is followed by more text (so the ASR has moved on past it) and (b) was
+// already present in the previous pass (stable across two passes, not a churning
+// tail). Each sealed sentence becomes its own committed line; the window start
+// advances past the last cut so it stays bounded.
+function maybeSealSentences(ctx, text, a, b) {
+    const T = ctx.tx;
+    if (!text || text.length < TX_MINSEAL) { T.prevPartial = text; return; }
+    const { sentences, tail } = splitComplete(text);
+    if (!sentences.length) {                          // no boundary yet
+        if (b - T.startFrame > TX_MAXWIN) forceSeal(ctx, text, a, b);
+        else T.prevPartial = text;
+        return;
+    }
+    // Sentences are "complete" only if there's trailing text after the last one;
+    // otherwise the final sentence is still the live fragment — leave it for the
+    // next pass (or the voice-end final flush).
+    const complete = tail ? sentences : sentences.slice(0, -1);
+    const prev = T.prevPartial || '';
+    let lastCutF = -1, sealedChars = 0;
+    for (const s of complete) {
+        if (s.text.length < TX_MINSEAL) { sealedChars = s.end; continue; }
+        if (prev.indexOf(s.text) < 0) break;          // not yet confirmed by a 2nd pass
+        const cutF = anchorFrame(ctx, a, b, s.end, text.length);
+        if (cutF <= T.sealedFrame) { sealedChars = s.end; continue; }
+        commitLine(ctx.st, s.text, T.sealedFrame, cutF, T.lang);
+        T.sealedFrame = cutF; lastCutF = cutF; sealedChars = s.end;
+    }
+    if (lastCutF >= 0) {
+        T.startFrame = lastCutF;                       // bound the window to post-cut audio
+        const remaining = text.slice(sealedChars);
+        ctx.tx.partial = remaining;
+        T.prevPartial = remaining;
+        renderPartial(ctx);
+    } else {
+        T.prevPartial = text;
     }
 }
 
@@ -118,7 +233,8 @@ function realRun(pcm, cb) {
 }
 
 function initTxCtx(ctx) {
-    ctx.tx = { active: false, startFrame: 0, lastRunFrame: 0, partial: '', lang: '' };
+    ctx.tx = { active: false, startFrame: 0, lastRunFrame: 0, partial: '', lang: '',
+               sealedFrame: 0, prevPartial: '' };
     if (!ctx.run) ctx.run = realRun;
     ctx._prev = ctx._prev || null;
     ctx._cur = ctx._cur || null;
@@ -229,7 +345,8 @@ function renderLines() {
         row.appendChild(tx);
         if (ln.en) {                                       // English translation line
             const en = document.createElement('span');
-            en.className = 'txen'; en.textContent = '→ ' + ln.en;
+            en.className = 'txen' + (ln.refined ? ' refined' : '');
+            en.textContent = '→ ' + ln.en;
             row.appendChild(en);
         } else if (ln.enPending) {                          // queued for translation
             const en = document.createElement('span');
@@ -312,6 +429,8 @@ function transcribeTick(ctx) {
     if (rising) {
         T.active = true;
         T.startFrame = Math.max(ctx.oldest(), s.frames - TX_PREROLL);
+        T.sealedFrame = T.startFrame;     // chunker: nothing sealed yet this utterance
+        T.prevPartial = '';
         T.lastRunFrame = s.frames;
         T.partial = '';
         renderPartial(ctx);
@@ -327,6 +446,7 @@ function transcribeTick(ctx) {
 function txReset(ctx) {
     ctx.tx.active = false;
     ctx.tx.partial = '';
+    ctx.tx.prevPartial = '';
     ctx._prev = null; ctx._cur = null;
 }
 
@@ -370,5 +490,5 @@ function txLoad() {
         Transcribe, makeTxCtx, initTxCtx, realRun, txReset,
         txSetStatus, renderPartial, renderActivePartial, renderActiveLiveEn, renderLines,
         finishUtterance, transcribeTick, txMaybeReady, txLoad,
-        normLang, langIsEnglish,
+        normLang, langIsEnglish, maybeSealSentences,
     });
