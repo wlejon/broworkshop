@@ -98,7 +98,7 @@
   .scratch button.smake { background: #2f6f4f; border-color: #3c8c63; color: #eafff2; }
   .scratch button.sx { padding: 0 8px; border-radius: 10px; }
 
-  /* ── tier-3 live transcript (bro.stt Parakeet, voice-gated) ───────────── */
+  /* ── tier-3 live transcript (bro.stt Qwen3-ASR, voice-gated) ──────────── */
   .transcript {
     margin: 8px 14px 0; background: #0b1416; border: 1px solid #1c3a40;
     border-radius: 8px; padding: 8px 12px;
@@ -130,9 +130,19 @@
   }
   .transcript .txline:hover { background: #10242a; }
   .transcript .txline.playing { background: #10303a; border-left-color: #36c5d0; }
+  .transcript .txline { flex-wrap: wrap; }
   .transcript .txline .tt { color: #4f6066; font-variant-numeric: tabular-nums; flex: none; }
-  .transcript .txline .tx { color: #c8d2dc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .transcript .txline .tx { color: #c8d2dc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
   .transcript .txline.playing .tx { color: #9fe7ef; }
+  /* diarized speaker chip — six rotating hues so turns are visually distinct */
+  .transcript .txline .spk { font-size: 10px; font-weight: 600; border-radius: 4px; padding: 0 5px; flex: none; line-height: 16px; }
+  .spk0 { background: #1e3a2c; color: #8be0ae; } .spk1 { background: #1e2a3a; color: #6aa6ff; }
+  .spk2 { background: #3a2d1e; color: #ffb454; } .spk3 { background: #332a3e; color: #c9a6ff; }
+  .spk4 { background: #10303a; color: #36c5d0; } .spk5 { background: #3a1e2e; color: #ff8fb0; }
+  /* detected-language badge on a non-English line */
+  .transcript .txline .lang { font-size: 10px; color: #ffd479; background: #322a17; border-radius: 4px; padding: 0 5px; flex: none; line-height: 16px; text-transform: lowercase; }
+  /* the English translation, on its own full-width row under the original */
+  .transcript .txline .txen { flex-basis: 100%; color: #8be0ae; font-size: 12px; padding-left: 38px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
   /* ── click-to-inspect detail panel ────────────────────────────────────── */
   .detail { margin: 10px 14px 0; background: #11141b; border: 1px solid #2c3c57; border-radius: 8px; padding: 10px 12px; font-size: 12px; }
@@ -163,6 +173,8 @@
   .kind.arm   { background: #332a3e; color: #c9a6ff; }
   .kind.spot  { background: #2f6f4f; color: #eafff2; }
   .kind.heard { background: #10303a; color: #9fe7ef; }
+  .kind.spk   { background: #1e3a2c; color: #8be0ae; }
+  .kind.xlate { background: #173225; color: #8be0ae; }
   .kind.sys   { background: #2a2335; color: #c9a6ff; }
   .kind.info  { background: #1d2330; color: #8a94a6; }
 
@@ -315,7 +327,7 @@
       <div class="scratch hidden" id="scratch"></div>
       <canvas id="overview" height="46" title="full ~10 min — drag to scrub"></canvas>
       <div class="transcript" id="transcript">
-        <div class="txhdr">live transcript · Parakeet, voice-gated
+        <div class="txhdr">live transcript · Qwen3-ASR · diarized · translated
           <span class="txstat" id="txStat">…</span>
           <button class="txtoggle" id="txToggle" disabled>⏸</button>
         </div>
@@ -350,6 +362,8 @@
   <script src="core.js"></script>
   <script src="timeline.js"></script>
   <script src="transcript.js"></script>
+  <script src="diarize.js"></script>
+  <script src="translate.js"></script>
   <script src="gestures.js"></script>
   <script src="streams.js"></script>
   <script src="main.js"></script>

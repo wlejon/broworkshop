@@ -5,7 +5,9 @@
 // train, [voice]/[arm]/[spot] for a spoken enrolled phrase, and a rhythm gesture
 // must self-fire on its own clip. Then the stream TABS: adding a source opens a
 // full, identical dashboard with its own history/kws/transcript, concurrent with
-// the mic.
+// the mic. Finally the i18n tier: a non-English transcript carries its detected
+// language, the speaker encoder + online clustering tag who spoke, and bro.lm
+// renders an English line — all stubbed so the WIRING is what's tested.
 //
 //   bro-headless ../broworkshop/demos/listen-lab ../broworkshop/demos/listen-lab/test.js
 
@@ -422,10 +424,10 @@ console.log('[listen-lab] editor: opened whistle clip editor (' +
                 tv.onsets.map((o) => o.voiced.toFixed(2)).join('/') + ')');
 }
 
-// ── 4f. tier-3 transcript: voice-gated Parakeet, rolling realtime (mic tab) ───
-// A synchronous stub stands in for the 2.4 GB model so the VAD-gated LIFECYCLE
+// ── 4f. tier-3 transcript: voice-gated Qwen3-ASR, rolling realtime (mic tab) ──
+// A synchronous stub stands in for the GPU model so the VAD-gated LIFECYCLE
 // (arm → pull PCM → commit) is what's under test; the real model path is
-// exercised by the app + parakeet-lab.
+// exercised by the app + _e2e_i18n.js.
 {
     let txCalls = 0, lastPcmLen = 0;
     listenLab.installTranscriber((pcm, cb) => {
@@ -585,6 +587,87 @@ console.log('[listen-lab] editor: opened whistle clip editor (' +
     assert(bro.sense.isActive() && bro.kws.isActive(),
            'closing the stream left the mic dashboard live (independent streams)');
     console.log('[listen-lab] tabs: add → own dashboard (tier-0/kws/transcript) → export → close · mic intact');
+}
+
+// ── 4h. non-English transcription + diarization + translation ─────────────────
+// Qwen3-ASR yields a SOURCE-language transcript + a detected language; the speaker
+// encoder + online cosine clustering tag who spoke; bro.lm renders an English line
+// for non-English speech. Stubs stand in for all three GPU models so the WIRING
+// (language badge, speaker chips, translation row, per-stream speaker sets) is
+// what's under test — the real model path is exercised by the app.
+{
+    const micSt = listenLab.active();
+    assert(micSt.kind === 'mic', 'mic tab active for the i18n test');
+
+    // (a) transcriber stub → a Spanish line carrying its detected language.
+    let asrText = 'hola mundo', asrLang = 'Spanish';
+    listenLab.installTranscriber((pcm, cb) => {
+        cb.onToken(asrText);
+        cb.onDone(asrText, { lang: asrLang });
+        return { cancel() {} };
+    });
+    // (b) diarizer stub → a controllable 1024-D x-vector per utterance.
+    const DIM = 1024;
+    const basis = (k) => { const v = new Float32Array(DIM); v[k] = 1; return v; };
+    let spkVec = basis(0);
+    listenLab.installDiarizer((pcm) => spkVec);
+    // (c) translator stub → deterministic English for the Spanish line.
+    listenLab.installTranslator((text, lang) => 'hello world');
+
+    // Utterance 1 — speaker A, Spanish.
+    spkVec = basis(0);
+    const n0 = micSt.txLines.length;
+    feedPumped(concat(silence(0.4), speak('hello there'), silence(0.6)));
+    assert(pumpUntil(() => micSt.txLines.length > n0, 8000), 'foreign line committed');
+    const l1 = micSt.txLines[0];
+    assert(l1.lang.toLowerCase() === 'spanish', 'line carries the detected language ("' + l1.lang + '")');
+    assert(l1.text === 'hola mundo', 'line carries the source-language transcript');
+    assert(pumpUntil(() => l1.speaker > 0, 3000), 'utterance assigned a speaker (' + l1.speaker + ')');
+    const spkA = l1.speaker;
+    assert(pumpUntil(() => l1.en === 'hello world', 3000), 'non-English line got an English translation');
+
+    // UI: language badge, speaker chip, and the English sub-line all render.
+    assert(pumpUntil(() => document.querySelector('#txLines .txline .lang'), 3000),
+           'transcript row shows the language badge');
+    assert(document.querySelector('#txLines .txline .lang').textContent.toLowerCase() === 'spanish',
+           'badge names the language');
+    assert(document.querySelector('#txLines .txline .spk'), 'transcript row shows a speaker chip');
+    assert(/hello world/.test(document.querySelector('#txLines .txline .txen').textContent),
+           'transcript row shows the English translation line');
+    assert(feedRows('xlate').some((t) => /hello world/.test(t)), '[xlate] fusion row rendered');
+    assert(feedRows('spk').length >= 1, '[spk] fusion row rendered');
+
+    // Utterance 2 — a DIFFERENT voice → a second speaker discovered.
+    spkVec = basis(7);
+    const n1 = micSt.txLines.length;
+    feedPumped(concat(silence(0.4), speak('hello there'), silence(0.6)));
+    assert(pumpUntil(() => micSt.txLines.length > n1, 8000), 'second foreign line committed');
+    const l2 = micSt.txLines[0];
+    assert(pumpUntil(() => l2.speaker > 0, 3000), 'second utterance assigned a speaker');
+    assert(l2.speaker !== spkA,
+           'a distinct voice clustered to a NEW speaker (' + spkA + ' vs ' + l2.speaker + ')');
+
+    // Utterance 3 — speaker A returns → SAME id (clustering, not a new speaker).
+    spkVec = basis(0);
+    const n2 = micSt.txLines.length;
+    feedPumped(concat(silence(0.4), speak('hello there'), silence(0.6)));
+    assert(pumpUntil(() => micSt.txLines.length > n2, 8000), 'third line committed');
+    const l3 = micSt.txLines[0];
+    assert(pumpUntil(() => l3.speaker > 0, 3000), 'third utterance assigned a speaker');
+    assert(l3.speaker === spkA, 'the returning voice re-used speaker ' + spkA + ' (online clustering)');
+    assert(micSt.speakers.length === 2,
+           'exactly two speakers discovered on this stream (' + micSt.speakers.length + ')');
+
+    // (d) an English line skips BOTH the language badge and translation.
+    asrText = 'hello there'; asrLang = 'English';
+    const n3 = micSt.txLines.length;
+    feedPumped(concat(silence(0.4), speak('hello there'), silence(0.6)));
+    assert(pumpUntil(() => micSt.txLines.length > n3, 8000), 'English line committed');
+    assert(micSt.txLines[0].en === null, 'an English line is not translated');
+
+    console.log('[listen-lab] i18n: "' + l1.text + '" [' + l1.lang + '] → "' + l1.en +
+                '" · speakers A=' + spkA + ' B=' + l2.speaker + ' (A reused) · ' +
+                micSt.speakers.length + ' voices on the stream');
 }
 
 // ── 5. remove the gesture via its × button while live ────────────────────────

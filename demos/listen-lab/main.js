@@ -2,8 +2,9 @@
 // for the active tab, enroll/listen controls, boot, and the headless test seam.
 // The heavy machinery lives in sibling modules sharing the `LL` namespace (see
 // core.js): timeline.js (per-stream ring + detail + playback), transcript.js
-// (tier-3 Parakeet, one ctx per stream), gestures.js (non-speech + clip editor),
-// streams.js (sources + tabs). This file loads LAST.
+// (tier-3 Qwen3-ASR, one ctx per stream), diarize.js (speaker x-vector + online
+// clustering), translate.js (non-English → English via bro.lm), gestures.js
+// (non-speech + clip editor), streams.js (sources + tabs). This file loads LAST.
 ;(function () {
     const LL = globalThis.LL;
     const fs = require('fs');
@@ -287,13 +288,17 @@ function toggleTokens(name, root, btn) {
 let txBooted = false;
 
 // Tier-3 transcript auto-load, deferred to the first frame (headless globals are
-// installed after the app's boot runs). The 2.4 GB Parakeet load is real — auto-
-// load it for the live app; in headless the test installs a stub through the seam.
+// installed after the app's boot runs). The Qwen3-ASR / speaker-encoder / Qwen3
+// loads are real — auto-load them for the live app; in headless the test installs
+// stubs through the seams (so the VAD-gated lifecycle is testable without the GPU
+// models).
 function bootTranscript() {
     if (txBooted) return;
     txBooted = true;
-    if (typeof advanceTime === 'function') txSetStatus('headless — install a runner to test');
-    else txLoad();
+    if (typeof advanceTime === 'function') { txSetStatus('headless — install a runner to test'); return; }
+    txLoad();          // Qwen3-ASR transcription + language ID
+    LL.dzLoad();       // ECAPA speaker encoder → diarization
+    LL.tlLoad();       // Qwen3 → English translation of non-English lines
 }
 
 // Update one stream's state (no DOM): sensor snapshot → ring, tier-0 edges, the
@@ -475,8 +480,8 @@ Object.assign(LL, {
 // ── headless test seam ────────────────────────────────────────────────────────
 // The gesture-enroll path (no live mic to record from), timeline internals
 // (history ring, event log, click-to-inspect), the tabs/streams API, WAV export,
-// and a transcript stub installer so the VAD-gated lifecycle is testable without
-// the 2.4 GB Parakeet load. Active-stream state is exposed via accessors (the
+// and transcript/diarizer/translator stub installers so the VAD-gated lifecycle
+// is testable without the GPU model loads. Active-stream state is exposed via accessors (the
 // dashboard is now per-stream; `active()` is whichever tab is shown).
 globalThis.listenLab = {
     enrollGesture, buildEditor, gainedSlice, clipStore, gestRows,
@@ -504,5 +509,10 @@ globalThis.listenLab = {
         txSetStatus('ready · voice-gated (stub)');
         renderActivePartial('');
     },
+    // tier-3.5 diarization + translation: real loaders + stubs for the test.
+    Diarize: LL.Diarize, Translate: LL.Translate,
+    loadDiarizer: LL.dzLoad, loadTranslator: LL.tlLoad,
+    installDiarizer: (embedFn) => { LL.Diarize.stub = embedFn; LL.Diarize.ready = true; },
+    installTranslator: (xlateFn) => { LL.Translate.stub = xlateFn; LL.Translate.ready = true; },
 };
 })();
