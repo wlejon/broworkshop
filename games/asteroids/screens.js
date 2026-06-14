@@ -3,9 +3,14 @@
 // The animated drifting-asteroid background runs on title and howtoplay
 // (lib handles the per-screen wiring via backgroundScreens). HUD visibility
 // is auto-toggled by lib (hudFor: ['playing']).
-var A = A || {};
+import { Screens as ScreensLib } from "/lib/screens.js";
+import { Hud } from "/lib/hud.js";
+import { Game } from "/app/game.js";
+import { Storage } from "/app/storage.js";
+import { Audio } from "/app/audio.js";
+import { FX } from "/app/particles.js";
 
-A.Screens = (function () {
+export const Screens = (function () {
     'use strict';
 
     // ----- Background asteroids -----
@@ -74,19 +79,19 @@ A.Screens = (function () {
 
     // ----- HUD -----
     function updateHud() {
-        var s = A.Game.getState();
+        var s = Game.getState();
         if (!s) return;
         Hud.text("#hud-score", s.score);
-        Hud.text("#hud-hi", A.Storage.highScore);
+        Hud.text("#hud-hi", Storage.highScore);
         Hud.text("#hud-wave", s.wave);
         Hud.text("#hud-lives", s.lives);
     }
 
     // ----- Lib screen manager -----
-    var S = Screens.create({
+    var S = ScreensLib.create({
         overlay:           '#overlay',
-        onMenuMove:        function () { A.Audio.sfxMenuMove(); },
-        onMenuSelect:      function () { A.Audio.sfxMenuSelect(); },
+        onMenuMove:        function () { Audio.sfxMenuMove(); },
+        onMenuSelect:      function () { Audio.sfxMenuSelect(); },
         backgroundScreens: ['title', 'howtoplay'],
         backgroundInit:    bgInit,
         backgroundUpdate:  bgUpdate,
@@ -121,26 +126,26 @@ A.Screens = (function () {
     S.define('playing', {
         enter: function (payload) {
             S.hideOverlay();
-            if (!payload || !payload.resume) A.Game.start(W(), H());
-            A.Game.setPaused(false);
+            if (!payload || !payload.resume) Game.start(W(), H());
+            Game.setPaused(false);
             updateHud();
         },
         keydown: function (key) { if (key === 'Escape' || key === 'p' || key === 'P') S.switchTo('pause'); },
         update: function (dt, w, h) {
-            A.Game.update(dt, w, h);
-            if (A.FX) A.FX.update(dt);
-            if (A.Game.isGameOver()) { S.switchTo('gameover'); return; }
+            Game.update(dt, w, h);
+            if (FX) FX.update(dt);
+            if (Game.isGameOver()) { S.switchTo('gameover'); return; }
             updateHud();
         },
         draw: function (ctx, w, h) {
             ctx.fillStyle = "#000000"; ctx.fillRect(0, 0, w, h);
-            A.Game.draw(ctx, w, h);
-            if (A.FX) A.FX.draw(ctx, w, h);
+            Game.draw(ctx, w, h);
+            if (FX) FX.draw(ctx, w, h);
         },
     });
 
     S.define('pause', {
-        enter: function () { S.showOverlay('pause'); S.updateSelection('pause'); A.Game.setPaused(true); },
+        enter: function () { S.showOverlay('pause'); S.updateSelection('pause'); Game.setPaused(true); },
         keydown: function (key) {
             if (key === 'Escape') { S.switchTo('playing', { resume: true }); return; }
             S.menuNav('pause', key, function (idx, item) {
@@ -153,19 +158,19 @@ A.Screens = (function () {
         // Keep last frame on screen while paused.
         draw: function (ctx, w, h) {
             ctx.fillStyle = "#000000"; ctx.fillRect(0, 0, w, h);
-            A.Game.draw(ctx, w, h);
-            if (A.FX) A.FX.draw(ctx, w, h);
+            Game.draw(ctx, w, h);
+            if (FX) FX.draw(ctx, w, h);
         },
     });
 
     S.define('gameover', {
         enter: function () {
-            var s = A.Game.getState();
-            var isHi = A.Storage.maybeUpdate(s ? s.score : 0);
+            var s = Game.getState();
+            var isHi = Storage.maybeUpdate(s ? s.score : 0);
             var lines = [
                 "SCORE   " + (s ? s.score : 0),
                 "WAVE    " + (s ? s.wave : 1),
-                "HI      " + A.Storage.highScore,
+                "HI      " + Storage.highScore,
             ];
             if (isHi) { lines.push(""); lines.push("NEW HIGH SCORE!"); }
             Hud.text("#gameover-stats", lines.join("\n"));
@@ -180,7 +185,7 @@ A.Screens = (function () {
         },
         draw: function (ctx, w, h) {
             ctx.fillStyle = "#000000"; ctx.fillRect(0, 0, w, h);
-            A.Game.draw(ctx, w, h);
+            Game.draw(ctx, w, h);
         },
     });
 

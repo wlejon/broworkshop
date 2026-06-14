@@ -1,3 +1,3 @@
 // storage.js — single high score via lib/storage.
-var T = T || {};
-T.Storage = Storage.highScoreOnly("touchdown");
+import { Storage as StorageLib } from "/lib/storage.js";
+export const Storage = StorageLib.highScoreOnly("touchdown");

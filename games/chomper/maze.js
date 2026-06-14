@@ -6,9 +6,8 @@
 //   ' ' = empty corridor (no pellet — ghost house area, tunnels)
 //   '-' = ghost house door
 //   'T' = tunnel opening (empty, wraps)
-var P = P || {};
 
-P.Maze = {
+export const Maze = {
     COLS: 28,
     ROWS: 31,
     // 28 columns wide. Classic-inspired layout.

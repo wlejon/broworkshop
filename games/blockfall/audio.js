@@ -1,7 +1,7 @@
 // audio.js — Audio engine, SFX, music system, song data
-var T = T || {};
+import { Storage } from "/app/storage.js";
 
-T.Audio = {
+export const Audio = {
     ctx: null,
     musicBus: -1,
     sfxBus: -1,
@@ -109,8 +109,8 @@ T.Audio = {
         try {
             this.musicBus = this.ctx.createBus();
             this.sfxBus = this.ctx.createBus();
-            this.ctx.setBusGain(this.musicBus, T.Storage.settings.musicVol / 100);
-            this.ctx.setBusGain(this.sfxBus, T.Storage.settings.sfxVol / 100);
+            this.ctx.setBusGain(this.musicBus, Storage.settings.musicVol / 100);
+            this.ctx.setBusGain(this.sfxBus, Storage.settings.sfxVol / 100);
             this.ctx.setBusReverbEnabled(this.musicBus, true);
             this.ctx.setBusReverbRoomSize(this.musicBus, 0.3);
             this.ctx.setBusReverbDamping(this.musicBus, 0.6);
@@ -132,7 +132,7 @@ T.Audio = {
 
     playTone: function(freq, duration, type, vol) {
         if (!this.ctx) return;
-        var v = (vol !== undefined ? vol : 1.0) * (T.Storage.settings.sfxVol / 100);
+        var v = (vol !== undefined ? vol : 1.0) * (Storage.settings.sfxVol / 100);
         if (v <= 0) return;
         try {
             var id = this.ctx.createVoice();
@@ -165,20 +165,20 @@ T.Audio = {
     sfxGo: function() { this.playTone(880, 0.2, "square", 0.8); },
 
     sfxTetris: function() {
-        T.Audio.playTone(523, 0.1, "square", 0.8);
-        setTimeout(function() { T.Audio.playTone(659, 0.1, "square", 0.8); }, 80);
-        setTimeout(function() { T.Audio.playTone(784, 0.12, "square", 0.9); }, 160);
-        setTimeout(function() { T.Audio.playTone(1047, 0.2, "square", 1.0); }, 240);
+        Audio.playTone(523, 0.1, "square", 0.8);
+        setTimeout(function() { Audio.playTone(659, 0.1, "square", 0.8); }, 80);
+        setTimeout(function() { Audio.playTone(784, 0.12, "square", 0.9); }, 160);
+        setTimeout(function() { Audio.playTone(1047, 0.2, "square", 1.0); }, 240);
     },
     sfxLevelUp: function() {
-        T.Audio.playTone(440, 0.08, "sine", 0.6);
-        setTimeout(function() { T.Audio.playTone(554, 0.08, "sine", 0.7); }, 80);
-        setTimeout(function() { T.Audio.playTone(659, 0.12, "sine", 0.8); }, 160);
+        Audio.playTone(440, 0.08, "sine", 0.6);
+        setTimeout(function() { Audio.playTone(554, 0.08, "sine", 0.7); }, 80);
+        setTimeout(function() { Audio.playTone(659, 0.12, "sine", 0.8); }, 160);
     },
     sfxGameOver: function() {
-        T.Audio.playTone(300, 0.2, "sawtooth", 0.5);
-        setTimeout(function() { T.Audio.playTone(250, 0.2, "sawtooth", 0.5); }, 200);
-        setTimeout(function() { T.Audio.playTone(200, 0.4, "sawtooth", 0.5); }, 400);
+        Audio.playTone(300, 0.2, "sawtooth", 0.5);
+        setTimeout(function() { Audio.playTone(250, 0.2, "sawtooth", 0.5); }, 200);
+        setTimeout(function() { Audio.playTone(200, 0.4, "sawtooth", 0.5); }, 400);
     },
     sfxCombo: function(n) {
         var f = 400 + n * 80;
@@ -332,12 +332,12 @@ T.Audio = {
 
     updateMusicVolume: function() {
         if (!this.ctx || this.musicBus === -1) return;
-        try { this.ctx.setBusGain(this.musicBus, T.Storage.settings.musicVol / 100); } catch(e) {}
+        try { this.ctx.setBusGain(this.musicBus, Storage.settings.musicVol / 100); } catch(e) {}
     },
 
     updateSfxVolume: function() {
         if (!this.ctx || this.sfxBus === -1) return;
-        try { this.ctx.setBusGain(this.sfxBus, T.Storage.settings.sfxVol / 100); } catch(e) {}
+        try { this.ctx.setBusGain(this.sfxBus, Storage.settings.sfxVol / 100); } catch(e) {}
     },
 
     checkSongChange: function(level) {

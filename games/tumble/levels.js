@@ -21,7 +21,8 @@
 //   remove — "level furniture"). Piece counts are per-type (so Level 1
 //   might hand out 5 blocks and 2 ramps and nothing else).
 
-(function (global) {
+import "/lib/camera.js";
+
     'use strict';
 
     // ── Piece types ──────────────────────────────────────────────────────────
@@ -446,9 +447,8 @@
         return t.toFixed(2) + 's';
     }
 
-    global.TumbleLevels = {
+    export const TumbleLevels = {
         PIECES, PIECE_ORDER, LEVELS,
         medalFor, fmt,
         rotY, quatY,
     };
-})(typeof window !== 'undefined' ? window : globalThis);

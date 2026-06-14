@@ -1,6 +1,9 @@
 // Missile Command — single-file game logic
-(function() {
-"use strict";
+import { GameLoop } from "/lib/loop.js";
+import { Canvas } from "/lib/canvas.js";
+import { Input } from "/lib/input.js";
+import { SFX } from "/lib/audio.js";
+import { Storage } from "/lib/storage.js";
 
 var canvas = document.getElementById("game");
 var ctx = canvas.getContext("2d");
@@ -777,4 +780,3 @@ setScreen("title");
 GameLoop.create({ tick: update, draw: draw }).start();
 
 console.log("Missile Command loaded");
-})();

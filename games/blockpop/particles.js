@@ -1,8 +1,8 @@
 // particles.js — shatter particles, flash overlays, screen shake, toast text.
 'use strict';
-var G = window.G = window.G || {};
+import { FX } from "/lib/fx.js";
 
-G.Particles = (function () {
+export const Particles = (function () {
     var parts = [];
     var flashes = []; // { x, y, w, h, color, timer, life }
 

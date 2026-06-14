@@ -1,7 +1,11 @@
 // screens.js — Screen manager and all game screens
-var T = T || {};
+import { Audio } from "/app/audio.js";
+import { Board, PIECES, COLORS } from "/app/board.js";
+import { Storage } from "/app/storage.js";
+import { Input } from "/app/input.js";
+import { FX } from "/app/particles.js";
 
-T.Screens = (function() {
+export const Screens = (function() {
     var current = null;
     var currentName = "";
     var overlay = null;
@@ -53,13 +57,13 @@ T.Screens = (function() {
         if (key === "ArrowUp") {
             menuIndex = (menuIndex - 1 + items.length) % items.length;
             updateSelection(screenId);
-            T.Audio.sfxMenuMove();
+            Audio.sfxMenuMove();
         } else if (key === "ArrowDown") {
             menuIndex = (menuIndex + 1) % items.length;
             updateSelection(screenId);
-            T.Audio.sfxMenuMove();
+            Audio.sfxMenuMove();
         } else if (key === "Enter") {
-            T.Audio.sfxMenuSelect();
+            Audio.sfxMenuSelect();
             if (onSelect) onSelect(menuIndex, items[menuIndex]);
         } else if (key === "ArrowLeft" && opts.onAdjust) {
             opts.onAdjust(-1);
@@ -106,9 +110,9 @@ T.Screens = (function() {
         var cellSize = 18;
         for (var i = 0; i < bgPieces.length; i++) {
             var p = bgPieces[i];
-            var cells = T.PIECES[p.type][p.rot & 3];
+            var cells = PIECES[p.type][p.rot & 3];
             ctx.globalAlpha = p.alpha;
-            ctx.fillStyle = T.COLORS[p.type];
+            ctx.fillStyle = COLORS[p.type];
             for (var j = 0; j < cells.length; j++) {
                 ctx.fillRect(p.x + cells[j][1] * cellSize, p.y + cells[j][0] * cellSize,
                              cellSize - 1, cellSize - 1);
@@ -165,7 +169,7 @@ T.Screens = (function() {
             menuNav("mode-select", key, function(idx) {
                 if (idx <= 2) {
                     var modes = ["marathon", "sprint", "ultra"];
-                    T.Board.startGame(modes[idx]);
+                    Board.startGame(modes[idx]);
                     switchTo("countdown");
                 } else if (idx === 3) {
                     backTarget = "modeSelect";
@@ -189,7 +193,7 @@ T.Screens = (function() {
         update: function(dt, W, H) { updateBgPieces(dt, W, H); },
         draw: function(ctx, W, H) { drawBgPieces(ctx, W, H); },
         refreshDisplay: function() {
-            var s = T.Storage.settings;
+            var s = Storage.settings;
             var el;
             el = document.getElementById("opt-startLevel");
             if (el) el.textContent = String(s.startLevel);
@@ -207,23 +211,23 @@ T.Screens = (function() {
             if (menuIndex >= items.length) return;
             var setting = items[menuIndex].getAttribute("data-setting");
             if (!setting) return;
-            var s = T.Storage.settings;
+            var s = Storage.settings;
             if (setting === "startLevel") {
                 s.startLevel = Math.max(1, Math.min(20, s.startLevel + dir));
             } else if (setting === "sfxVol") {
                 s.sfxVol = Math.max(0, Math.min(100, s.sfxVol + dir * 10));
-                T.Audio.updateSfxVolume();
+                Audio.updateSfxVolume();
             } else if (setting === "musicVol") {
                 s.musicVol = Math.max(0, Math.min(100, s.musicVol + dir * 10));
-                T.Audio.updateMusicVolume();
+                Audio.updateMusicVolume();
             } else if (setting === "ghostPiece") {
                 s.ghostPiece = !s.ghostPiece;
             } else if (setting === "gridLines") {
                 s.gridLines = !s.gridLines;
             }
-            T.Storage.save();
+            Storage.save();
             this.refreshDisplay();
-            T.Audio.sfxMenuMove();
+            Audio.sfxMenuMove();
         },
         keydown: function(key) {
             var self = this;
@@ -258,7 +262,7 @@ T.Screens = (function() {
             hideOverlay();
             countdownTimer = 0;
             countdownPhase = 3;
-            T.Audio.sfxCountdown();
+            Audio.sfxCountdown();
             var el = document.getElementById("countdown-text");
             if (el) { el.textContent = "3"; el.style.display = "block"; el.style.color = "#4fc3f7"; }
         },
@@ -273,26 +277,26 @@ T.Screens = (function() {
                 countdownPhase = newPhase;
                 var el = document.getElementById("countdown-text");
                 if (countdownPhase > 0) {
-                    T.Audio.sfxCountdown();
+                    Audio.sfxCountdown();
                     if (el) { el.textContent = String(countdownPhase); el.style.color = "#4fc3f7"; }
                 } else {
-                    T.Audio.sfxGo();
+                    Audio.sfxGo();
                     if (el) { el.textContent = "GO!"; el.style.color = "#00e676"; }
                 }
             }
             if (countdownTimer >= 3200) {
-                var songIdx = T.Audio.getSongForLevel(T.Board.level);
-                T.Audio.buildSequences(songIdx);
-                T.Audio.startMusic(T.Board.level);
+                var songIdx = Audio.getSongForLevel(Board.level);
+                Audio.buildSequences(songIdx);
+                Audio.startMusic(Board.level);
                 switchTo("playing");
             }
         },
         draw: function(ctx, W, H) {
             ctx.fillStyle = "#06060a";
             ctx.fillRect(0, 0, W, H);
-            T.Board.calcLayout(W, H);
-            T.Board.drawBoard(ctx);
-            T.Board.drawPreviews(ctx);
+            Board.calcLayout(W, H);
+            Board.drawBoard(ctx);
+            Board.drawPreviews(ctx);
         },
         keydown: function() {}
     };
@@ -302,15 +306,15 @@ T.Screens = (function() {
         enter: function() {
             hideOverlay();
             showHUD();
-            T.Input.resetDAS();
-            T.Board.updateHUD();
+            Input.resetDAS();
+            Board.updateHUD();
         },
         exit: function() {
             hideHUD();
         },
         update: function(dt, W, H) {
-            var B = T.Board;
-            var I = T.Input;
+            var B = Board;
+            var I = Input;
             B.gameTime += dt;
 
             // Ultra timer
@@ -369,24 +373,24 @@ T.Screens = (function() {
                 B.lockTimer = 0;
             }
 
-            T.FX.update(dt);
-            T.Board.updateHUD();
+            FX.update(dt);
+            Board.updateHUD();
         },
         draw: function(ctx, W, H) {
             ctx.fillStyle = "#06060a";
             ctx.fillRect(0, 0, W, H);
-            T.Board.calcLayout(W, H);
-            var shake = T.FX.getShakeOffset();
+            Board.calcLayout(W, H);
+            var shake = FX.getShakeOffset();
             ctx.save();
             ctx.translate(shake.x, shake.y);
-            T.Board.drawBoard(ctx);
-            T.Board.drawPreviews(ctx);
-            T.FX.drawParticles(ctx);
+            Board.drawBoard(ctx);
+            Board.drawPreviews(ctx);
+            FX.drawParticles(ctx);
             ctx.restore();
         },
         handleInput: function(action, phase) {
-            var B = T.Board;
-            var I = T.Input;
+            var B = Board;
+            var I = Input;
             if (phase === "down") {
                 if (action === "pause_game") { switchTo("paused"); return; }
                 if (!B.cur) return;
@@ -424,11 +428,11 @@ T.Screens = (function() {
             }
         },
         keydown: function(key) {
-            var action = T.Input.getActionForKey(key);
+            var action = Input.getActionForKey(key);
             if (action) this.handleInput(action, "down");
         },
         keyup: function(key) {
-            var action = T.Input.getActionForKey(key);
+            var action = Input.getActionForKey(key);
             if (action) this.handleInput(action, "up");
         }
     };
@@ -437,7 +441,7 @@ T.Screens = (function() {
     screens.paused = {
         enter: function() {
             menuIndex = 0;
-            T.Audio.pauseMusic();
+            Audio.pauseMusic();
             showHUD();
             showOverlay("pause");
             updateSelection("pause");
@@ -449,29 +453,29 @@ T.Screens = (function() {
         draw: function(ctx, W, H) {
             ctx.fillStyle = "#06060a";
             ctx.fillRect(0, 0, W, H);
-            T.Board.calcLayout(W, H);
-            T.Board.drawBoard(ctx);
-            T.Board.drawPreviews(ctx);
+            Board.calcLayout(W, H);
+            Board.drawBoard(ctx);
+            Board.drawPreviews(ctx);
         },
         keydown: function(key) {
             menuNav("pause", key, function(idx) {
                 if (idx === 0) { // Resume
-                    T.Audio.resumeMusic();
+                    Audio.resumeMusic();
                     switchTo("playing");
                 } else if (idx === 1) { // Settings
                     backTarget = "paused";
                     switchTo("settings");
                 } else if (idx === 2) { // Restart
-                    T.Audio.stopMusic();
-                    T.Board.startGame(T.Board.mode);
+                    Audio.stopMusic();
+                    Board.startGame(Board.mode);
                     switchTo("countdown");
                 } else if (idx === 3) { // Quit
-                    T.Audio.stopMusic();
+                    Audio.stopMusic();
                     switchTo("title");
                 }
             }, {
                 onBack: function() {
-                    T.Audio.resumeMusic();
+                    Audio.resumeMusic();
                     switchTo("playing");
                 }
             });
@@ -482,15 +486,15 @@ T.Screens = (function() {
     screens.gameOver = {
         enter: function() {
             menuIndex = 0;
-            T.Audio.stopMusic();
-            if (!T.Board.finished) T.Audio.sfxGameOver();
+            Audio.stopMusic();
+            if (!Board.finished) Audio.sfxGameOver();
 
-            var B = T.Board;
+            var B = Board;
             var isHS = false;
             if (B.mode === "sprint" && B.finished) {
-                isHS = T.Storage.isHighScore("sprint", B.gameTime);
+                isHS = Storage.isHighScore("sprint", B.gameTime);
             } else {
-                isHS = T.Storage.isHighScore(B.mode, B.score);
+                isHS = Storage.isHighScore(B.mode, B.score);
             }
 
             // Save high score
@@ -499,7 +503,7 @@ T.Screens = (function() {
                     score: B.score, level: B.level, lines: B.totalLines,
                     time: B.gameTime, date: new Date().toISOString().slice(0, 10)
                 };
-                T.Storage.addHighScore(B.mode, entry);
+                Storage.addHighScore(B.mode, entry);
             }
 
             // Build stats display
@@ -530,13 +534,13 @@ T.Screens = (function() {
         draw: function(ctx, W, H) {
             ctx.fillStyle = "#06060a";
             ctx.fillRect(0, 0, W, H);
-            T.Board.calcLayout(W, H);
-            T.Board.drawBoard(ctx);
+            Board.calcLayout(W, H);
+            Board.drawBoard(ctx);
         },
         keydown: function(key) {
             menuNav("gameover", key, function(idx) {
                 if (idx === 0) { // Play Again
-                    T.Board.startGame(T.Board.mode);
+                    Board.startGame(Board.mode);
                     switchTo("countdown");
                 } else if (idx === 1) { // High Scores
                     switchTo("highScores");
@@ -568,7 +572,7 @@ T.Screens = (function() {
                 if (el) el.className = (modes[i] === hsMode) ? "hs-tab active" : "hs-tab";
             }
 
-            var scores = T.Storage.loadHighScores();
+            var scores = Storage.loadHighScores();
             var list = scores[hsMode] || [];
             var el = document.getElementById("hs-list");
             if (!el) return;
@@ -584,7 +588,7 @@ T.Screens = (function() {
                 var rank = (i + 1) + ".";
                 if (i < 9) rank = " " + rank;
                 if (hsMode === "sprint") {
-                    lines.push(rank + " " + T.Board.formatTime(s.time) + "  Lv" + s.level);
+                    lines.push(rank + " " + Board.formatTime(s.time) + "  Lv" + s.level);
                 } else {
                     lines.push(rank + " " + s.score + "  Lv" + s.level + "  " + s.lines + "L");
                 }
@@ -600,7 +604,7 @@ T.Screens = (function() {
                 else idx = (idx + 1) % 3;
                 hsMode = modes[idx];
                 self.refreshDisplay();
-                T.Audio.sfxMenuMove();
+                Audio.sfxMenuMove();
                 return;
             }
             menuNav("highscores", key, function(idx) {
@@ -618,10 +622,10 @@ T.Screens = (function() {
             var el = document.getElementById("htp-controls");
             if (el) {
                 var lines = [];
-                for (var i = 0; i < T.Input.ACTIONS.length; i++) {
-                    var a = T.Input.ACTIONS[i];
-                    var keys = T.Input.getKeys(a.name);
-                    var display = keys.length > 0 ? T.Input.keyDisplayName(keys[0]) : "???";
+                for (var i = 0; i < Input.ACTIONS.length; i++) {
+                    var a = Input.ACTIONS[i];
+                    var keys = Input.getKeys(a.name);
+                    var display = keys.length > 0 ? Input.keyDisplayName(keys[0]) : "???";
                     var pad = "                    ";
                     var label = a.label + pad;
                     lines.push(label.substring(0, 16) + display);
@@ -659,14 +663,14 @@ T.Screens = (function() {
 
     // --- Internal helpers ---
     function gameOver() {
-        T.Board.cur = null;
-        T.Board.finished = false;
+        Board.cur = null;
+        Board.finished = false;
         switchTo("gameOver");
     }
 
     function finishGame() {
-        T.Board.cur = null;
-        T.Board.finished = true;
+        Board.cur = null;
+        Board.finished = true;
         switchTo("gameOver");
     }
 
@@ -698,7 +702,7 @@ T.Screens = (function() {
                         if (menuIndex !== i) {
                             menuIndex = i;
                             updateSelection(activeScreenId);
-                            T.Audio.sfxMenuMove();
+                            Audio.sfxMenuMove();
                         }
                         break;
                     }

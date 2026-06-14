@@ -3,9 +3,9 @@
 // Asteroids' callsites pass time and speed in milliseconds (life in ms,
 // speed in px/ms). The lib speaks seconds. This shim does the conversion
 // so game.js stays untouched.
-var A = A || {};
+import { Particles } from "/lib/particles.js";
 
-A.FX = (function () {
+export const FX = (function () {
     'use strict';
 
     const sys = Particles.createSystem({ wrap: true, cap: 600 });

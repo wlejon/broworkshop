@@ -1,8 +1,11 @@
 // board.js — Tetris game logic, piece data, layout, drawing helpers
-var T = T || {};
+import { FX } from "/app/particles.js";
+import { Audio } from "/app/audio.js";
+import { Storage } from "/app/storage.js";
+import { Input } from "/app/input.js";
 
 // Piece shapes: [type 1-7][4 rotations][cells as [row,col]]
-T.PIECES = [
+export const PIECES = [
     null,
     // I
     [[[1,0],[1,1],[1,2],[1,3]],[[0,2],[1,2],[2,2],[3,2]],
@@ -27,11 +30,11 @@ T.PIECES = [
      [[1,0],[1,1],[1,2],[2,0]],[[0,0],[0,1],[1,1],[2,1]]]
 ];
 
-T.COLORS = [null,"#00e5ff","#ffd600","#aa00ff","#00e676","#ff1744","#2979ff","#ff9100"];
-T.COLORS_LIGHT = [null,"#4df0ff","#ffeb3b","#d050ff","#69f0ae","#ff5252","#448aff","#ffab40"];
-T.COLORS_DARK = [null,"#006978","#7f6b00","#55007f","#007a3b","#7f0b22","#143f7f","#7f4800"];
+export const COLORS = [null,"#00e5ff","#ffd600","#aa00ff","#00e676","#ff1744","#2979ff","#ff9100"];
+export const COLORS_LIGHT = [null,"#4df0ff","#ffeb3b","#d050ff","#69f0ae","#ff5252","#448aff","#ffab40"];
+export const COLORS_DARK = [null,"#006978","#7f6b00","#55007f","#007a3b","#7f0b22","#143f7f","#7f4800"];
 
-T.KICKS = {
+export const KICKS = {
     normal: [
         [[0,0],[-1,0],[-1,1],[0,-2],[-1,-2]],
         [[0,0],[1,0],[1,-1],[0,2],[1,2]],
@@ -46,9 +49,9 @@ T.KICKS = {
     ]
 };
 
-T.SPEEDS = [800,717,633,550,467,383,300,217,133,100,83,83,83,67,67,67,50,50,50,33];
+export const SPEEDS = [800,717,633,550,467,383,300,217,133,100,83,83,83,67,67,67,50,50,50,33];
 
-T.Board = {
+export const Board = {
     COLS: 10, ROWS: 20,
     CELL: 0, BOARD_W: 0, BOARD_H: 0, BOARD_X: 0, BOARD_Y: 0,
 
@@ -119,7 +122,7 @@ T.Board = {
     },
 
     canPlace: function(type, x, y, rot) {
-        var cells = T.PIECES[type][rot & 3];
+        var cells = PIECES[type][rot & 3];
         for (var i = 0; i < cells.length; i++) {
             var r = y + cells[i][0], c = x + cells[i][1];
             if (c < 0 || c >= this.COLS || r >= this.ROWS) return false;
@@ -160,7 +163,7 @@ T.Board = {
 
     lockPiece: function() {
         if (!this.cur) return;
-        var cells = T.PIECES[this.cur.type][this.cur.rot & 3];
+        var cells = PIECES[this.cur.type][this.cur.rot & 3];
         var lockedOut = false;
         for (var i = 0; i < cells.length; i++) {
             var r = this.cur.y + cells[i][0], c = this.cur.x + cells[i][1];
@@ -168,11 +171,11 @@ T.Board = {
                 lockedOut = true;
             } else if (r < this.ROWS && c >= 0 && c < this.COLS) {
                 this.board[r][c] = this.cur.type;
-                T.FX.flash(r, c, 200, T.COLORS_LIGHT[this.cur.type]);
+                FX.flash(r, c, 200, COLORS_LIGHT[this.cur.type]);
             }
         }
         this.piecesPlaced++;
-        T.Audio.sfxLock();
+        Audio.sfxLock();
         if (lockedOut) return -1; // piece locked above the board — top out
         return this.clearLines();
     },
@@ -210,45 +213,45 @@ T.Board = {
         }
         if (this.combo > 0) {
             baseScore += 50 * this.combo * this.level;
-            T.Audio.sfxCombo(this.combo);
+            Audio.sfxCombo(this.combo);
         }
         this.score += baseScore;
         this.totalLines += cleared.length;
 
         // Level up
-        var newLevel = Math.floor(this.totalLines / 10) + T.Storage.settings.startLevel;
+        var newLevel = Math.floor(this.totalLines / 10) + Storage.settings.startLevel;
         if (newLevel !== this.level) {
             this.level = newLevel;
-            T.Audio.sfxLevelUp();
-            T.FX.showText("LEVEL " + this.level);
-            T.Audio.checkSongChange(this.level);
-            T.Audio.updateMusicBPM(this.level);
+            Audio.sfxLevelUp();
+            FX.showText("LEVEL " + this.level);
+            Audio.checkSongChange(this.level);
+            Audio.updateMusicBPM(this.level);
         }
 
         // SFX + effects
         if (cleared.length === 4) {
-            T.Audio.sfxTetris();
-            T.FX.showText("QUAD!");
-            T.FX.shake(300, 8);
+            Audio.sfxTetris();
+            FX.showText("QUAD!");
+            FX.shake(300, 8);
         } else if (cleared.length === 3) {
-            T.Audio.sfxClear3();
-            T.FX.showText("TRIPLE");
+            Audio.sfxClear3();
+            FX.showText("TRIPLE");
         } else if (cleared.length === 2) {
-            T.Audio.sfxClear2();
-            T.FX.showText("DOUBLE");
+            Audio.sfxClear2();
+            FX.showText("DOUBLE");
         } else {
-            T.Audio.sfxClear1();
+            Audio.sfxClear1();
         }
-        if (this.combo > 1) T.FX.showText(this.combo + "x COMBO!");
+        if (this.combo > 1) FX.showText(this.combo + "x COMBO!");
 
-        T.FX.startLineClear(cleared);
+        FX.startLineClear(cleared);
 
         // Particles
         for (var ri = 0; ri < cleared.length; ri++) {
             var row = cleared[ri];
             for (var c = 0; c < this.COLS; c++) {
-                var color = T.COLORS[this.board[row][c]] || "#fff";
-                T.FX.spawn(
+                var color = COLORS[this.board[row][c]] || "#fff";
+                FX.spawn(
                     this.BOARD_X + c * this.CELL + this.CELL / 2,
                     this.BOARD_Y + row * this.CELL + this.CELL / 2,
                     3, color
@@ -274,7 +277,7 @@ T.Board = {
     moveLeft: function() {
         if (!this.cur) return false;
         if (this.canPlace(this.cur.type, this.cur.x - 1, this.cur.y, this.cur.rot)) {
-            this.cur.x--; this.resetLockTimer(); T.Audio.sfxMove(); return true;
+            this.cur.x--; this.resetLockTimer(); Audio.sfxMove(); return true;
         }
         return false;
     },
@@ -282,7 +285,7 @@ T.Board = {
     moveRight: function() {
         if (!this.cur) return false;
         if (this.canPlace(this.cur.type, this.cur.x + 1, this.cur.y, this.cur.rot)) {
-            this.cur.x++; this.resetLockTimer(); T.Audio.sfxMove(); return true;
+            this.cur.x++; this.resetLockTimer(); Audio.sfxMove(); return true;
         }
         return false;
     },
@@ -305,7 +308,7 @@ T.Board = {
 
     tryRotate: function(newRot) {
         if (!this.cur) return;
-        var kickData = (this.cur.type === 1) ? T.KICKS.I : T.KICKS.normal;
+        var kickData = (this.cur.type === 1) ? KICKS.I : KICKS.normal;
         var kickSet = kickData[this.cur.rot];
         for (var i = 0; i < kickSet.length; i++) {
             var dx = kickSet[i][0], dy = -kickSet[i][1];
@@ -314,7 +317,7 @@ T.Board = {
                 this.cur.y += dy;
                 this.cur.rot = newRot;
                 this.resetLockTimer();
-                T.Audio.sfxRotate();
+                Audio.sfxRotate();
                 return;
             }
         }
@@ -327,28 +330,28 @@ T.Board = {
         this.score += dropDist * 2;
 
         // Trail particles
-        var cells = T.PIECES[this.cur.type][this.cur.rot & 3];
+        var cells = PIECES[this.cur.type][this.cur.rot & 3];
         for (var i = 0; i < cells.length; i++) {
             var c = this.cur.x + cells[i][1];
             for (var r = this.cur.y + cells[i][0]; r <= gy + cells[i][0]; r++) {
                 if (r >= 0 && r < this.ROWS) {
-                    T.FX.flash(r, c, 120, T.COLORS[this.cur.type]);
+                    FX.flash(r, c, 120, COLORS[this.cur.type]);
                 }
             }
         }
 
         // Impact particles at landing
         for (var i = 0; i < cells.length; i++) {
-            T.FX.spawn(
+            FX.spawn(
                 this.BOARD_X + (this.cur.x + cells[i][1]) * this.CELL + this.CELL / 2,
                 this.BOARD_Y + (gy + cells[i][0]) * this.CELL + this.CELL / 2,
-                2, T.COLORS[this.cur.type], { spread: 3, spreadY: 2, life: 200, lifeVar: 100 }
+                2, COLORS[this.cur.type], { spread: 3, spreadY: 2, life: 200, lifeVar: 100 }
             );
         }
-        if (dropDist > 4) T.FX.shake(120, 3);
+        if (dropDist > 4) FX.shake(120, 3);
 
         this.cur.y = gy;
-        T.Audio.sfxDrop();
+        Audio.sfxDrop();
         var lockResult = this.lockPiece();
         if (lockResult === -1) return false;
         if (!this.spawnPiece()) return false;
@@ -357,7 +360,7 @@ T.Board = {
 
     doHold: function() {
         if (!this.cur || this.holdUsed) return;
-        T.Audio.sfxHold();
+        Audio.sfxHold();
         var type = this.cur.type;
         if (this.holdType === 0) {
             this.holdType = type;
@@ -376,15 +379,15 @@ T.Board = {
     getDropInterval: function() {
         var idx = this.level - 1;
         if (idx < 0) idx = 0;
-        if (idx >= T.SPEEDS.length) idx = T.SPEEDS.length - 1;
-        return T.SPEEDS[idx];
+        if (idx >= SPEEDS.length) idx = SPEEDS.length - 1;
+        return SPEEDS[idx];
     },
 
     startGame: function(mode) {
         this.mode = mode || "marathon";
         this.resetBoard();
         this.score = 0;
-        this.level = T.Storage.settings.startLevel;
+        this.level = Storage.settings.startLevel;
         this.totalLines = 0;
         this.combo = -1;
         this.backToBack = false;
@@ -400,8 +403,8 @@ T.Board = {
         this.dropTimer = 0;
         this.lockTimer = 0;
         this.lockMoves = 0;
-        T.FX.clear();
-        T.Input.resetDAS();
+        FX.clear();
+        Input.resetDAS();
         this.refillBag();
         this.ensureNextTypes();
         this.spawnPiece();
@@ -439,16 +442,16 @@ T.Board = {
     },
 
     drawPiece: function(ctx, type, x, y, rot, alpha) {
-        var cells = T.PIECES[type][rot & 3];
+        var cells = PIECES[type][rot & 3];
         for (var i = 0; i < cells.length; i++) {
             var r = y + cells[i][0], c = x + cells[i][1];
-            if (r >= 0) this.drawCell(ctx, c, r, T.COLORS[type], alpha);
+            if (r >= 0) this.drawCell(ctx, c, r, COLORS[type], alpha);
         }
     },
 
     drawMiniPiece: function(ctx, type, px, py, cellSize) {
         if (type <= 0) return;
-        var cells = T.PIECES[type][0];
+        var cells = PIECES[type][0];
         var minC = 9, maxC = 0, minR = 9, maxR = 0;
         for (var i = 0; i < cells.length; i++) {
             if (cells[i][1] < minC) minC = cells[i][1];
@@ -460,7 +463,7 @@ T.Board = {
         var ph = (maxR - minR + 1) * cellSize;
         var ox = px + (cellSize * 4 - pw) / 2 - minC * cellSize;
         var oy = py + (cellSize * 3 - ph) / 2 - minR * cellSize;
-        ctx.fillStyle = T.COLORS[type];
+        ctx.fillStyle = COLORS[type];
         for (var i = 0; i < cells.length; i++) {
             var cx = ox + cells[i][1] * cellSize;
             var cy = oy + cells[i][0] * cellSize;
@@ -475,7 +478,7 @@ T.Board = {
         ctx.fillRect(B.BOARD_X, B.BOARD_Y, B.BOARD_W, B.BOARD_H);
 
         // Grid
-        if (T.Storage.settings.gridLines) {
+        if (Storage.settings.gridLines) {
             ctx.strokeStyle = "#181822";
             for (var c = 0; c <= B.COLS; c++) ctx.strokeRect(B.BOARD_X + c * B.CELL, B.BOARD_Y, 0, B.BOARD_H);
             for (var r = 0; r <= B.ROWS; r++) ctx.strokeRect(B.BOARD_X, B.BOARD_Y + r * B.CELL, B.BOARD_W, 0);
@@ -485,27 +488,27 @@ T.Board = {
         for (var r = 0; r < B.ROWS; r++) {
             if (!B.board[r]) continue;
             for (var c = 0; c < B.COLS; c++) {
-                if (B.board[r][c] !== 0) B.drawCell(ctx, c, r, T.COLORS[B.board[r][c]]);
+                if (B.board[r][c] !== 0) B.drawCell(ctx, c, r, COLORS[B.board[r][c]]);
             }
         }
 
         // FX layers
-        T.FX.drawFlashCells(ctx, B.BOARD_X, B.BOARD_Y, B.CELL);
-        T.FX.drawLineClearFlash(ctx, B.BOARD_X, B.BOARD_Y, B.BOARD_W, B.CELL);
+        FX.drawFlashCells(ctx, B.BOARD_X, B.BOARD_Y, B.CELL);
+        FX.drawLineClearFlash(ctx, B.BOARD_X, B.BOARD_Y, B.BOARD_W, B.CELL);
 
         // Ghost
-        if (B.cur && T.Storage.settings.ghostPiece) {
+        if (B.cur && Storage.settings.ghostPiece) {
             var gy = B.ghostY();
             if (gy !== B.cur.y) {
-                var cells = T.PIECES[B.cur.type][B.cur.rot & 3];
+                var cells = PIECES[B.cur.type][B.cur.rot & 3];
                 for (var i = 0; i < cells.length; i++) {
                     var r = gy + cells[i][0], c = B.cur.x + cells[i][1];
                     if (r >= 0) {
                         ctx.globalAlpha = 0.2;
-                        ctx.fillStyle = T.COLORS[B.cur.type];
+                        ctx.fillStyle = COLORS[B.cur.type];
                         ctx.fillRect(B.BOARD_X + c * B.CELL + 1, B.BOARD_Y + r * B.CELL + 1, B.CELL - 2, B.CELL - 2);
                         ctx.globalAlpha = 0.4;
-                        ctx.strokeStyle = T.COLORS[B.cur.type];
+                        ctx.strokeStyle = COLORS[B.cur.type];
                         ctx.strokeRect(B.BOARD_X + c * B.CELL + 1, B.BOARD_Y + r * B.CELL + 1, B.CELL - 2, B.CELL - 2);
                         ctx.globalAlpha = 1.0;
                     }

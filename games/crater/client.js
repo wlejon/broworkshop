@@ -11,6 +11,16 @@
 //   world units:    CraterShared.C.WORLD_W wide, y increases UP.
 //   canvas pixels:  worldToCanvas()/canvasToWorld() map between.
 
+import "/lib/camera.js";
+import { GameLoop } from "/lib/loop.js";
+import { Input } from "/lib/input.js";
+import { SFX } from "/lib/audio.js";
+import { Storage } from "/lib/storage.js";
+import { Hud } from "/lib/hud.js";
+import { Screens } from "/lib/screens.js";
+import { NetRoom } from "/lib/netroom.js";
+import { CraterShared } from "/app/shared.js";
+
 'use strict';
 
 const { C,

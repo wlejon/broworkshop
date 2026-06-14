@@ -1,9 +1,9 @@
-// storage.js — settings + per-mode high-score tables using apps/lib Storage.
+// storage.js — settings + per-mode high-score tables using apps/lib StorageLib.
 'use strict';
-var G = window.G = window.G || {};
+import { Storage as StorageLib } from "/lib/storage.js";
 
-G.Storage = (function () {
-    var settingsStore = Storage.create('blockpop');
+export const Storage = (function () {
+    var settingsStore = StorageLib.create('blockpop');
     var defaults = {
         sfxVol: 80,
         musicVol: 60,
@@ -12,9 +12,9 @@ G.Storage = (function () {
     };
     var settings = settingsStore.load(defaults);
 
-    var classicHS = Storage.highscores('blockpop:classic', 10);
-    var sprintHS  = Storage.highscores('blockpop:sprint', 10, { field: 'time', ascending: true });
-    var puzzleHS  = Storage.highscores('blockpop:puzzle', 10);
+    var classicHS = StorageLib.highscores('blockpop:classic', 10);
+    var sprintHS  = StorageLib.highscores('blockpop:sprint', 10, { field: 'time', ascending: true });
+    var puzzleHS  = StorageLib.highscores('blockpop:puzzle', 10);
 
     function save() { settingsStore.save(); }
 

@@ -1,10 +1,10 @@
 // input.js — direction queue backed by lib/input (bro.settings rebindable).
-var P = P || {};
+import { Input as InputLib } from "/lib/input.js";
 
-P.Input = (function() {
+export const Input = (function() {
     var pendingDir = -1;
 
-    Input.init([
+    InputLib.init([
         { name: "up",      label: "Up",      defaults: ["w", "ArrowUp"] },
         { name: "down",    label: "Down",    defaults: ["s", "ArrowDown"] },
         { name: "left",    label: "Left",    defaults: ["a", "ArrowLeft"] },
@@ -12,9 +12,9 @@ P.Input = (function() {
         { name: "confirm", label: "Confirm", defaults: ["Enter", " "] },
         { name: "pause",   label: "Pause",   defaults: ["Escape", "p"] },
     ]);
-    Input.attach(window);
+    InputLib.attach(window);
 
-    Input.onAction(function(action, phase) {
+    InputLib.onAction(function(action, phase) {
         if (phase !== "down") return;
         if (action === "right") pendingDir = 0;
         else if (action === "left")  pendingDir = 1;

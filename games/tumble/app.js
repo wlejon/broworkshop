@@ -26,6 +26,15 @@
 // Nothing here is networked — the game is fully offline. `Storage.create`
 // keeps best times per level, medals, and the current selected level.
 
+import "/lib/camera.js";
+import { GameLoop } from "/lib/loop.js";
+import { Input } from "/lib/input.js";
+import { SFX } from "/lib/audio.js";
+import { Storage } from "/lib/storage.js";
+import { Hud } from "/lib/hud.js";
+import { Screens } from "/lib/screens.js";
+import { TumbleLevels } from "/app/levels.js";
+
 'use strict';
 
 // ── External singletons exposed by the libs ─────────────────────────────────

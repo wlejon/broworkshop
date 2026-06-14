@@ -2,15 +2,17 @@
 //
 // Preserves the existing P.Screens API (menuUp/Down/Select/listItems/
 // updateMenu/menuIndex, plus DOM helpers) so app.js stays untouched.
-var P = P || {};
+import { Screens as ScreensLib } from "/lib/screens.js";
+import { Audio } from "/app/audio.js";
+import { Storage } from "/app/storage.js";
 
-P.Screens = (function () {
+export const Screens = (function () {
     'use strict';
 
-    var S = Screens.create({
+    var S = ScreensLib.create({
         overlay:      '#overlay',
-        onMenuMove:   function () { P.Audio.sfxMenu(); },
-        onMenuSelect: function () { P.Audio.sfxMenu(); },
+        onMenuMove:   function () { Audio.sfxMenu(); },
+        onMenuSelect: function () { Audio.sfxMenu(); },
     });
 
     // app.js sets this; lib invokes it on mouse-click (which sends keydown
@@ -61,14 +63,14 @@ P.Screens = (function () {
             if (!items.length) return;
             menuIdx = (menuIdx - 1 + items.length) % items.length;
             S.setMenuIndex(menuIdx);
-            P.Audio.sfxMenu();
+            Audio.sfxMenu();
         },
         menuDown: function () {
             var items = this.listItems();
             if (!items.length) return;
             menuIdx = (menuIdx + 1) % items.length;
             S.setMenuIndex(menuIdx);
-            P.Audio.sfxMenu();
+            Audio.sfxMenu();
         },
         menuSelect: function () {
             var items = this.listItems();
@@ -83,12 +85,12 @@ P.Screens = (function () {
             var he = document.getElementById('go-high');
             var ne = document.getElementById('go-new');
             if (se) se.textContent = String(score);
-            if (he) he.textContent = String(P.Storage.highScore);
+            if (he) he.textContent = String(Storage.highScore);
             if (ne) ne.style.display = isNew ? 'block' : 'none';
         },
         setTitleHigh: function () {
             var el = document.getElementById('title-high');
-            if (el) el.textContent = String(P.Storage.highScore);
+            if (el) el.textContent = String(Storage.highScore);
         },
         setGameOverTitle: function (text) {
             var el = document.getElementById('gameover-title');

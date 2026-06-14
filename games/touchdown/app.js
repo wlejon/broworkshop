@@ -1,5 +1,11 @@
 // app.js — Entry point: canvas, input wiring, main loop
-(function() {
+import { Canvas } from "/lib/canvas.js";
+import { Input } from "/lib/input.js";
+import { GameLoop } from "/lib/loop.js";
+import { Storage } from "/app/storage.js";
+import { Audio } from "/app/audio.js";
+import { Screens } from "/app/screens.js";
+import { Game } from "/app/game.js";
 "use strict";
 
 var canvas = document.getElementById("game");
@@ -8,8 +14,8 @@ var ctx = canvas.getContext("2d");
 function getW() { return Canvas.w(ctx, 900); }
 function getH() { return Canvas.h(ctx, 800); }
 
-T.Storage.load();
-T.Audio.init();
+Storage.load();
+Audio.init();
 
 Input.init([
     { name: "left",    label: "Rotate Left",  defaults: ["a", "ArrowLeft"] },
@@ -22,21 +28,21 @@ Input.init([
 ]);
 Input.attach(window);
 
-T.Screens.init(getW(), getH());
+Screens.init(getW(), getH());
 
 // Route rising-edge actions into the screen manager as DOM key strings
-// — T.Screens.menuNav uses "ArrowUp"/"ArrowDown"/"Enter"/"Escape".
+// — Screens.menuNav uses "ArrowUp"/"ArrowDown"/"Enter"/"Escape".
 Input.onAction(function(action, phase) {
     if (phase !== "down" || !action) return;
-    var name = T.Screens.getName();
+    var name = Screens.getName();
     if (name === "playing") {
-        if (action === "pause") T.Screens.keydown("Escape", getW(), getH());
+        if (action === "pause") Screens.keydown("Escape", getW(), getH());
         return;
     }
-    if (action === "up")        T.Screens.keydown("ArrowUp",   getW(), getH());
-    else if (action === "down") T.Screens.keydown("ArrowDown", getW(), getH());
-    else if (action === "confirm") T.Screens.keydown("Enter",  getW(), getH());
-    else if (action === "pause")   T.Screens.keydown("Escape", getW(), getH());
+    if (action === "up")        Screens.keydown("ArrowUp",   getW(), getH());
+    else if (action === "down") Screens.keydown("ArrowDown", getW(), getH());
+    else if (action === "confirm") Screens.keydown("Enter",  getW(), getH());
+    else if (action === "pause")   Screens.keydown("Escape", getW(), getH());
 });
 
 function toCanvasCoords(ev) {
@@ -47,26 +53,25 @@ function toCanvasCoords(ev) {
 }
 canvas.addEventListener("mousemove", function(ev) {
     var p = toCanvasCoords(ev);
-    T.Game.setMouse(p.x, p.y);
+    Game.setMouse(p.x, p.y);
 });
 canvas.addEventListener("mousedown", function(ev) {
     if (ev.button !== 2) return;
     var p = toCanvasCoords(ev);
-    T.Game.setMouse(p.x, p.y, true);
+    Game.setMouse(p.x, p.y, true);
 });
 window.addEventListener("mouseup", function(ev) {
     if (ev.button !== 2) return;
-    T.Game.setMouse(undefined, undefined, false);
+    Game.setMouse(undefined, undefined, false);
 });
 canvas.addEventListener("contextmenu", function(ev) { ev.preventDefault(); });
 
-T.Screens.switchTo("title");
+Screens.switchTo("title");
 GameLoop.create({
-    tick: function(dt) { T.Screens.update(dt, getW(), getH()); },
+    tick: function(dt) { Screens.update(dt, getW(), getH()); },
     draw: function() {
         var W = getW(), H = getH();
         ctx.clearRect(0, 0, W, H);
-        T.Screens.draw(ctx, W, H);
+        Screens.draw(ctx, W, H);
     },
 }).start();
-})();

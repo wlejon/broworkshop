@@ -1,6 +1,6 @@
 // 2048 — main game, DOM rendering, input
-(function() {
-"use strict";
+import { Input } from "/lib/input.js";
+import { Storage } from "/lib/storage.js";
 
 var SIZE = 4;
 
@@ -484,4 +484,3 @@ state.grid = emptyGrid();
 showScreen("title");
 
 console.log("2048 loaded!");
-})();

@@ -4,7 +4,6 @@
 // same prose (no dynamic load to keep the server's startup surface simple).
 // If you edit this file, also refresh the block at the top of server.js.
 
-(function (global) {
     'use strict';
 
     const C = {
@@ -155,8 +154,7 @@
         return Math.round(C.MAX_DAMAGE * falloff * falloff);
     }
 
-    global.CraterShared = {
+    export const CraterShared = {
         C, rng, generateHeightmap, heightAt,
         simulateShot, carveCrater, applyCraterDiff, blastDamage,
     };
-})(typeof window !== 'undefined' ? window : globalThis);

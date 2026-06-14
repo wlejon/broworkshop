@@ -4,9 +4,13 @@
 // per-screen wiring via backgroundScreens; HUD show/hide is auto-toggled
 // (#hud); the secondary #telemetry panel follows playing manually since
 // lib only takes one HUD selector.
-var T = T || {};
+import { Screens as ScreensLib } from "/lib/screens.js";
+import { Hud } from "/lib/hud.js";
+import { Game } from "/app/game.js";
+import { Storage } from "/app/storage.js";
+import { Audio } from "/app/audio.js";
 
-T.Screens = (function () {
+export const Screens = (function () {
     'use strict';
 
     // ----- Background -----
@@ -88,10 +92,10 @@ T.Screens = (function () {
     }
 
     function updateHud() {
-        var s = T.Game.getState();
+        var s = Game.getState();
         if (!s) return;
         Hud.text('#hud-score', s.score);
-        Hud.text('#hud-hi', T.Storage.highScore);
+        Hud.text('#hud-hi', Storage.highScore);
         Hud.text('#hud-level', s.level);
         Hud.text('#hud-landed', s.landings);
         Hud.text('#hud-fuel', Math.max(0, Math.round(s.lander.fuel)));
@@ -117,10 +121,10 @@ T.Screens = (function () {
     }
 
     // ----- Lib screen manager -----
-    var S = Screens.create({
+    var S = ScreensLib.create({
         overlay:           '#overlay',
-        onMenuMove:        function () { T.Audio.sfxMenuMove(); },
-        onMenuSelect:      function () { T.Audio.sfxMenuSelect(); },
+        onMenuMove:        function () { Audio.sfxMenuMove(); },
+        onMenuSelect:      function () { Audio.sfxMenuSelect(); },
         backgroundScreens: ['title', 'howtoplay'],
         backgroundInit:    bgInit,
         backgroundUpdate:  bgUpdate,
@@ -156,27 +160,27 @@ T.Screens = (function () {
         enter: function (payload) {
             S.hideOverlay();
             var skipStart = payload && (payload.resume || payload.advance);
-            if (!skipStart) T.Game.start(W(), H());
-            T.Game.setPaused(false);
+            if (!skipStart) Game.start(W(), H());
+            Game.setPaused(false);
             setTelemetryVisible(true);
             updateHud();
         },
         exit: function () { setTelemetryVisible(false); },
         keydown: function (key) { if (key === 'Escape' || key === 'p' || key === 'P') S.switchTo('pause'); },
         update: function (dt, w, h) {
-            T.Game.update(dt, w, h);
-            if (T.Game.isLanded())   { S.switchTo('landed');   return; }
-            if (T.Game.isGameOver()) { S.switchTo('gameover'); return; }
+            Game.update(dt, w, h);
+            if (Game.isLanded())   { S.switchTo('landed');   return; }
+            if (Game.isGameOver()) { S.switchTo('gameover'); return; }
             updateHud();
         },
         draw: function (ctx, w, h) {
             ctx.fillStyle = "#000000"; ctx.fillRect(0, 0, w, h);
-            T.Game.draw(ctx, w, h);
+            Game.draw(ctx, w, h);
         },
     });
 
     S.define('pause', {
-        enter: function () { S.showOverlay('pause'); S.updateSelection('pause'); T.Game.setPaused(true); },
+        enter: function () { S.showOverlay('pause'); S.updateSelection('pause'); Game.setPaused(true); },
         keydown: function (key) {
             if (key === 'Escape') { S.switchTo('playing', { resume: true }); return; }
             S.menuNav('pause', key, function (idx, item) {
@@ -188,13 +192,13 @@ T.Screens = (function () {
         },
         draw: function (ctx, w, h) {
             ctx.fillStyle = "#000000"; ctx.fillRect(0, 0, w, h);
-            T.Game.draw(ctx, w, h);
+            Game.draw(ctx, w, h);
         },
     });
 
     S.define('landed', {
         enter: function () {
-            var s = T.Game.getState();
+            var s = Game.getState();
             var lines = [
                 'LEVEL        ' + s.level,
                 'PAD WIDTH    ' + s.lastLandingPadWidth,
@@ -208,26 +212,26 @@ T.Screens = (function () {
         keydown: function (key) {
             S.menuNav('landed', key, function (idx, item) {
                 if (item.getAttribute('data-action') === 'next') {
-                    T.Game.advanceLevel();
+                    Game.advanceLevel();
                     S.switchTo('playing', { advance: true });
                 }
             });
         },
         draw: function (ctx, w, h) {
             ctx.fillStyle = "#000000"; ctx.fillRect(0, 0, w, h);
-            T.Game.draw(ctx, w, h);
+            Game.draw(ctx, w, h);
         },
     });
 
     S.define('gameover', {
         enter: function () {
-            var s = T.Game.getState();
-            var isHi = T.Storage.maybeUpdate(s ? s.score : 0);
+            var s = Game.getState();
+            var isHi = Storage.maybeUpdate(s ? s.score : 0);
             var lines = [
                 'SCORE     ' + (s ? s.score : 0),
                 'LEVEL     ' + (s ? s.level : 1),
                 'LANDED    ' + (s ? s.landings : 0),
-                'HI        ' + T.Storage.highScore,
+                'HI        ' + Storage.highScore,
             ];
             if (isHi) { lines.push(''); lines.push('NEW HIGH SCORE!'); }
             Hud.text('#gameover-stats', lines.join('\n'));
@@ -243,7 +247,7 @@ T.Screens = (function () {
         },
         draw: function (ctx, w, h) {
             ctx.fillStyle = "#000000"; ctx.fillRect(0, 0, w, h);
-            T.Game.draw(ctx, w, h);
+            Game.draw(ctx, w, h);
         },
     });
 

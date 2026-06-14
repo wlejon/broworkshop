@@ -5,6 +5,8 @@
 // Scene-graph 3D rendering, first-person camera with pointer lock,
 // local movement with server correction, entity interpolation, binary protocol.
 
+import { Input } from "/lib/input.js";
+
 // ─── DOM ─────────────────────────────────────────────────────────────────────
 
 const canvas      = document.querySelector('#game');

@@ -1,7 +1,7 @@
 // audio.js — SFX helpers wrapping lib/audio (SFX).
-var P = P || {};
+import { SFX } from "/lib/audio.js";
 
-P.Audio = {
+export const Audio = {
     chompToggle: false,
     init: function() { SFX.init(); },
     sfxChomp: function() {

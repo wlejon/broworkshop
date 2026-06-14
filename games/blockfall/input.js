@@ -1,7 +1,6 @@
 // input.js — Action binding (bro.settings integration) and DAS handling
-var T = T || {};
 
-T.Input = {
+export const Input = {
     hasBro: false,
 
     ACTIONS: [

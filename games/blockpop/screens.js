@@ -1,19 +1,25 @@
 // screens.js — screen state machine + per-screen input handling.
 'use strict';
-var G = window.G = window.G || {};
+import { Screens as ScreensLib } from "/lib/screens.js";
+import { Hud } from "/lib/hud.js";
+import { SFX } from "/lib/audio.js";
+import { Audio } from "/app/audio.js";
+import { Board } from "/app/board.js";
+import { Particles } from "/app/particles.js";
+import { Storage } from "/app/storage.js";
 
-G.Screens = (function () {
+export const Screens = (function () {
     var mgr = null;
     var hsMode = 'classic';
     var backTarget = 'title';
     var bgT = 0;
 
     function init() {
-        mgr = Screens.create({
+        mgr = ScreensLib.create({
             overlay: '#overlay',
             prefix: 'screen-',
-            onMenuMove: function () { G.Audio.menuMove(); },
-            onMenuSelect: function () { G.Audio.menuSelect(); }
+            onMenuMove: function () { Audio.menuMove(); },
+            onMenuSelect: function () { Audio.menuSelect(); }
         });
 
         mgr.define('title',      titleScreen);
@@ -52,8 +58,8 @@ G.Screens = (function () {
             var bx = ((j * 71 + bgT * 0.04) % (W + 40));
             var by = ((j * 193 + bgT * 0.025) % (H + 40));
             ctx.globalAlpha = 0.08;
-            var cidx = 1 + (j % G.Board.NUM_COLORS);
-            ctx.fillStyle = G.Board.COLORS[cidx];
+            var cidx = 1 + (j % Board.NUM_COLORS);
+            ctx.fillStyle = Board.COLORS[cidx];
             ctx.fillRect(bx - 16, by - 16, 32, 32);
         }
         ctx.globalAlpha = 1.0;
@@ -92,7 +98,7 @@ G.Screens = (function () {
                 var m = el && el.getAttribute('data-mode');
                 var act = el && el.getAttribute('data-action');
                 if (m) {
-                    G.Board.startGame(m);
+                    Board.startGame(m);
                     switchTo('playing');
                 } else if (act === 'back') switchTo('title');
             }, { onBack: function () { switchTo('title'); } });
@@ -109,7 +115,7 @@ G.Screens = (function () {
         update: function () {},
         draw: drawBg,
         refresh: function () {
-            var s = G.Storage.settings;
+            var s = Storage.settings;
             Hud.text('#opt-sfxVol', String(s.sfxVol));
             Hud.text('#opt-musicVol', String(s.musicVol));
             Hud.text('#opt-riseSpeed', (s.riseSpeed / 10).toFixed(1));
@@ -122,11 +128,11 @@ G.Screens = (function () {
             var item = items[idx];
             if (!item) return;
             var key = item.getAttribute('data-setting');
-            var s = G.Storage.settings;
+            var s = Storage.settings;
             if (!key) return;
             if (key === 'sfxVol') {
                 s.sfxVol = Math.max(0, Math.min(100, s.sfxVol + dir * 10));
-                G.Audio.setSfxVol(s.sfxVol / 100);
+                Audio.setSfxVol(s.sfxVol / 100);
             } else if (key === 'musicVol') {
                 s.musicVol = Math.max(0, Math.min(100, s.musicVol + dir * 10));
                 SFX.setMusicVol(s.musicVol / 100);
@@ -135,9 +141,9 @@ G.Screens = (function () {
             } else if (key === 'colorBlind') {
                 s.colorBlind = !s.colorBlind;
             }
-            G.Storage.save();
+            Storage.save();
             this.refresh();
-            G.Audio.menuMove();
+            Audio.menuMove();
         },
         keydown: function (key) {
             var self = this;
@@ -156,31 +162,31 @@ G.Screens = (function () {
         enter: function () {
             mgr.hideOverlay();
             showHUD();
-            G.Board.updateHUD();
+            Board.updateHUD();
         },
         exit: function () { hideHUD(); },
         update: function (dt, W, H) {
-            G.Board.tick(dt);
-            G.Particles.update(dt);
-            if (G.Board.isGameOver() || G.Board.isFinished()) {
+            Board.tick(dt);
+            Particles.update(dt);
+            if (Board.isGameOver() || Board.isFinished()) {
                 // Delay a beat so particles play.
                 switchTo('gameover');
             }
         },
         draw: function (ctx, W, H) {
-            var shake = G.Particles.shakeOffset();
+            var shake = Particles.shakeOffset();
             ctx.save();
             ctx.translate(shake.x, shake.y);
-            G.Board.draw(ctx, W, H, performance.now());
+            Board.draw(ctx, W, H, performance.now());
             ctx.restore();
         },
         keydown: function (key) {
             if (key === 'Escape' || key === 'p') { switchTo('paused'); return; }
-            if (key === 'ArrowLeft' || key === 'a') G.Board.moveLeft();
-            else if (key === 'ArrowRight' || key === 'd') G.Board.moveRight();
-            else if (key === 'ArrowDown' || key === 's') G.Board.interact();
-            else if (key === 'ArrowUp' || key === 'w') G.Board.shuffleHeld();
-            else if (key === ' ') G.Board.emergencyBrake();
+            if (key === 'ArrowLeft' || key === 'a') Board.moveLeft();
+            else if (key === 'ArrowRight' || key === 'd') Board.moveRight();
+            else if (key === 'ArrowDown' || key === 's') Board.interact();
+            else if (key === 'ArrowUp' || key === 'w') Board.shuffleHeld();
+            else if (key === ' ') Board.emergencyBrake();
         },
         keyup: function () {}
     };
@@ -191,14 +197,14 @@ G.Screens = (function () {
         exit: function () {},
         update: function () {},
         draw: function (ctx, W, H) {
-            G.Board.draw(ctx, W, H, performance.now());
+            Board.draw(ctx, W, H, performance.now());
         },
         keydown: function (key) {
             mgr.menuNav('pause', key, function (idx, el) {
                 var a = el && el.getAttribute('data-action');
                 if (a === 'resume') switchTo('playing');
                 else if (a === 'settings') { backTarget = 'paused'; switchTo('settings'); }
-                else if (a === 'restart') { G.Board.startGame(G.Board.getMode()); switchTo('playing'); }
+                else if (a === 'restart') { Board.startGame(Board.getMode()); switchTo('playing'); }
                 else if (a === 'quit') switchTo('title');
             }, { onBack: function () { switchTo('playing'); } });
         }
@@ -208,27 +214,27 @@ G.Screens = (function () {
     var gameover = {
         enter: function () {
             hideHUD();
-            var st = G.Board.getStats();
+            var st = Board.getStats();
             var fin = st.finished;
             // High scores
             var isHS = false;
             var entry;
             if (st.mode === 'sprint') {
                 if (fin) {
-                    isHS = G.Storage.qualifies('sprint', Math.floor(st.gameTime));
+                    isHS = Storage.qualifies('sprint', Math.floor(st.gameTime));
                     entry = { score: st.score, time: Math.floor(st.gameTime),
                               level: st.level, date: dateISO() };
-                    if (isHS) G.Storage.add('sprint', entry);
+                    if (isHS) Storage.add('sprint', entry);
                 }
             } else {
-                isHS = G.Storage.qualifies(st.mode, st.score);
+                isHS = Storage.qualifies(st.mode, st.score);
                 entry = { score: st.score, level: st.level, chain: st.bestChain,
                           time: Math.floor(st.gameTime), date: dateISO() };
-                if (isHS) G.Storage.add(st.mode, entry);
+                if (isHS) Storage.add(st.mode, entry);
             }
             var title = document.querySelector('#screen-gameover .overlay-title');
             if (title) title.textContent = fin ? (st.mode.toUpperCase() + ' COMPLETE!') : 'GAME OVER';
-            if (fin) G.Audio.win();
+            if (fin) Audio.win();
 
             var el = document.getElementById('gameover-stats');
             if (el) {
@@ -249,7 +255,7 @@ G.Screens = (function () {
         keydown: function (key) {
             mgr.menuNav('gameover', key, function (idx, el) {
                 var a = el && el.getAttribute('data-action');
-                if (a === 'restart') { G.Board.startGame(G.Board.getMode()); switchTo('playing'); }
+                if (a === 'restart') { Board.startGame(Board.getMode()); switchTo('playing'); }
                 else if (a === 'highscores') switchTo('highscores');
                 else if (a === 'quit') switchTo('title');
             });
@@ -272,7 +278,7 @@ G.Screens = (function () {
                 var el = document.getElementById('hs-tab-' + modes[i]);
                 if (el) el.className = modes[i] === hsMode ? 'hs-tab active' : 'hs-tab';
             }
-            var list = G.Storage.list(hsMode);
+            var list = Storage.list(hsMode);
             var out = document.getElementById('hs-list');
             if (!out) return;
             if (!list.length) { out.textContent = 'No scores yet'; return; }
@@ -299,7 +305,7 @@ G.Screens = (function () {
                 else idx = (idx + 1) % 3;
                 hsMode = modes[idx];
                 self.refresh();
-                G.Audio.menuMove();
+                Audio.menuMove();
                 return;
             }
             mgr.menuNav('highscores', key, function () { switchTo('title'); },

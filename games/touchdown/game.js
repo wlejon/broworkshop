@@ -1,7 +1,8 @@
 // game.js — Touchdown core simulation: terrain, lander, physics
-var T = T || {};
+import { Input } from "/lib/input.js";
+import { Audio } from "/app/audio.js";
 
-T.Game = (function() {
+export const Game = (function() {
     // Physics constants (units: pixels, frames at ~60fps, where "per frame" means per 16.67ms step)
     var GRAVITY = 0.06;          // px/frame^2 added to vy each frame
     var THRUST  = 0.14;          // px/frame^2 applied along lander facing
@@ -301,9 +302,9 @@ T.Game = (function() {
                 state.totalFuelUsed += FUEL_BURN * f;
                 // Spawn exhaust particles
                 if (Math.random() < 0.8) spawnThrust(L);
-                T.Audio.startThrust();
+                Audio.startThrust();
             } else {
-                T.Audio.stopThrust();
+                Audio.stopThrust();
             }
 
             // Gravity
@@ -354,8 +355,8 @@ T.Game = (function() {
                     state.status = "landed";
                     L.landed = true;
                     L.vx = 0; L.vy = 0;
-                    T.Audio.stopThrust();
-                    T.Audio.sfxLanded();
+                    Audio.stopThrust();
+                    Audio.sfxLanded();
                 } else {
                     L.alive = false;
                     state.status = "crashed";
@@ -368,8 +369,8 @@ T.Game = (function() {
                     state.statusMsg = reasons.join(" · ");
                     spawnCrash(L);
                     state.shake = 16;
-                    T.Audio.stopThrust();
-                    T.Audio.sfxCrash();
+                    Audio.stopThrust();
+                    Audio.sfxCrash();
                     state.gameOver = true;
                 }
             }

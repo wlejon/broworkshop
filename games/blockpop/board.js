@@ -4,9 +4,12 @@
 // or { color, special } where color is 1..NUM_COLORS and special is one
 // of SPECIAL_* constants.
 'use strict';
-var G = window.G = window.G || {};
+import { Hud } from "/lib/hud.js";
+import { Particles } from "/app/particles.js";
+import { Audio } from "/app/audio.js";
+import { Storage } from "/app/storage.js";
 
-G.Board = (function () {
+export const Board = (function () {
     var COLS = 8;
     var ROWS = 16;
     var NUM_COLORS = 7;
@@ -347,7 +350,7 @@ G.Board = (function () {
             board = seedBoard(5, gameRng);
         }
 
-        G.Particles.clear();
+        Particles.clear();
         updateHUD();
     }
 
@@ -393,7 +396,7 @@ G.Board = (function () {
         if (col >= COLS) col = COLS - 1;
         if (col === carrier.col) return;
         carrier.col = col;
-        G.Audio.move();
+        Audio.move();
     }
     function moveLeft()  { moveTo(carrier.col - 1); }
     function moveRight() { moveTo(carrier.col + 1); }
@@ -411,7 +414,7 @@ G.Board = (function () {
         if (!col.length) return false;
         var b = col.pop();
         carrier.heldStack.push(b);
-        G.Audio.pick();
+        Audio.pick();
         return true;
     }
 
@@ -421,7 +424,7 @@ G.Board = (function () {
         if (board[carrier.col].length >= ROWS) return false;
         var b = carrier.heldStack.pop();
         board[carrier.col].push(b);
-        G.Audio.drop();
+        Audio.drop();
         if (mode === 'puzzle') puzzleMovesLeft--;
         resolveChains();
         return true;
@@ -436,15 +439,15 @@ G.Board = (function () {
     function shuffleHeld() {
         if (carrier.heldStack.length < 2) return;
         carrier.heldStack.reverse();
-        G.Audio.shuffle();
+        Audio.shuffle();
     }
 
     function emergencyBrake() {
         if (brakeCooldown > 0) return;
         brakeActive = 3000;
         brakeCooldown = 10000;
-        G.Audio.brake();
-        G.Particles.showAction('BRAKE');
+        Audio.brake();
+        Particles.showAction('BRAKE');
     }
 
     // ---- Chain resolution ---------------------------------------------------
@@ -486,33 +489,33 @@ G.Board = (function () {
                     var px = layout.ox + c * layout.cell + layout.cell / 2;
                     var py = layout.oy + layout.h - (r + 0.5) * layout.cell;
                     var col = COLORS[ex.color] || '#fff';
-                    G.Particles.spawn(px, py, 6, col, {
+                    Particles.spawn(px, py, 6, col, {
                         spread: 5, spreadY: 4, life: 500, lifeVar: 400, size: 3, sizeVar: 2
                     });
-                    G.Particles.flash(
+                    Particles.flash(
                         layout.ox + c * layout.cell,
                         layout.oy + layout.h - (r + 1) * layout.cell,
                         layout.cell, layout.cell, '#ffffff', 200);
                 }
             }
-            G.Audio.pop(groups[0].color, depth - 1);
-            for (var sk = 0; sk < specialKinds.length; sk++) G.Audio.special(specialKinds[sk]);
+            Audio.pop(groups[0].color, depth - 1);
+            for (var sk = 0; sk < specialKinds.length; sk++) Audio.special(specialKinds[sk]);
 
             // Cascade bonus text
             if (depth >= 2) {
-                G.Particles.showCascade('x' + depth + ' CHAIN');
+                Particles.showCascade('x' + depth + ' CHAIN');
                 if (depth > maxChain) maxChain = depth;
             }
             if (popped >= 5) {
-                G.Particles.showAction(popped + ' POP!');
-                G.Audio.big(popped);
+                Particles.showAction(popped + ' POP!');
+                Audio.big(popped);
             }
             // Apply pop
             var res = popChains(board, groups);
             blocksPopped += res.removed;
 
             // Light shake on big pops
-            if (popped >= 4) G.Particles.shake(160, 3 + Math.min(5, popped / 2));
+            if (popped >= 4) Particles.shake(160, 3 + Math.min(5, popped / 2));
 
             // Sprint / puzzle completion checks
             if (mode === 'sprint' && blocksPopped >= sprintTarget) {
@@ -528,8 +531,8 @@ G.Board = (function () {
         var wantLevel = 1 + Math.floor(score / 5000);
         if (wantLevel > level) {
             level = wantLevel;
-            G.Audio.levelUp();
-            G.Particles.showAction('LEVEL ' + level);
+            Audio.levelUp();
+            Particles.showAction('LEVEL ' + level);
         }
         chainDepth = 0;
         if (mode === 'puzzle' && puzzleMovesLeft <= 0 && !finished) {
@@ -553,7 +556,7 @@ G.Board = (function () {
         // Top-out check runs every tick (columns at ROWS = game over).
         if (isToppedOut()) {
             gameOver = true;
-            G.Audio.gameover();
+            Audio.gameover();
             return;
         }
 
@@ -563,7 +566,7 @@ G.Board = (function () {
 
         // Rising speed: base px/sec * level acceleration * user rise multiplier.
         if (mode !== 'puzzle') {
-            var userMul = (G.Storage.settings.riseSpeed || 10) / 10;
+            var userMul = (Storage.settings.riseSpeed || 10) / 10;
             var levelMul = 1 + (level - 1) * 0.12;
             var speed = riseSpeedPx * levelMul * userMul;
             if (brakeActive > 0) speed *= 0.2;
@@ -576,14 +579,14 @@ G.Board = (function () {
                 // Check top-out.
                 if (isToppedOut()) {
                     gameOver = true;
-                    G.Audio.gameover();
+                    Audio.gameover();
                 }
                 // Low-buzz warn when nearly full
                 var nearTop = false;
                 for (var c = 0; c < COLS; c++) {
                     if (board[c].length >= ROWS - 2) { nearTop = true; break; }
                 }
-                if (nearTop) G.Audio.warn();
+                if (nearTop) Audio.warn();
             }
             // Compute time until next rise for HUD.
             var pxPerSec = speed;
@@ -739,7 +742,7 @@ G.Board = (function () {
 
         // Blocks. Each block r (bottom-first) draws at
         // y = oy + h - (r+1)*cell  shifted up by riseProgress.
-        var colorblind = !!G.Storage.settings.colorBlind;
+        var colorblind = !!Storage.settings.colorBlind;
         for (var cc = 0; cc < COLS; cc++) {
             var col = board[cc];
             for (var r = 0; r < col.length; r++) {
@@ -753,7 +756,7 @@ G.Board = (function () {
         }
 
         // Flash overlays (pop animation)
-        G.Particles.drawFlashes(ctx);
+        Particles.drawFlashes(ctx);
 
         // Carrier drawing
         drawCarrier(ctx);
@@ -775,7 +778,7 @@ G.Board = (function () {
         }
 
         // Particles over everything
-        G.Particles.drawParticles(ctx);
+        Particles.drawParticles(ctx);
     }
 
     function drawCarrier(ctx) {
@@ -799,7 +802,7 @@ G.Board = (function () {
             var hx = cx + (w / 2) + 8 + i * (layout.cell * 0.5);
             var hy = top - h / 2;
             drawBlockShape(ctx, hx, hy, layout.cell * 0.5, COLORS[hb.color], hb.special,
-                !!G.Storage.settings.colorBlind);
+                !!Storage.settings.colorBlind);
         }
     }
 

@@ -1,8 +1,8 @@
 // audio.js — SFX layer over lib/audio (SFX). Keeps a persistent thrust
 // voice across thrust toggles since SFX.tone is one-shot.
-var T = T || {};
+import { SFX } from "/lib/audio.js";
 
-T.Audio = {
+export const Audio = {
     thrustVoice: -1,
     thrustOn: false,
 

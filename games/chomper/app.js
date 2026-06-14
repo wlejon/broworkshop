@@ -1,6 +1,14 @@
 // app.js — main game loop, Pac-Man entity, collisions, state
-(function() {
-"use strict";
+import { GameLoop } from "/lib/loop.js";
+import { Canvas } from "/lib/canvas.js";
+import { Input as InputLib } from "/lib/input.js";
+import { Hud } from "/lib/hud.js";
+import { Maze } from "/app/maze.js";
+import { Ghosts, DIRS } from "/app/ghosts.js";
+import { Audio } from "/app/audio.js";
+import { Storage } from "/app/storage.js";
+import { Screens } from "/app/screens.js";
+import { Input } from "/app/input.js";
 
 var canvas = document.getElementById("game");
 var ctx = canvas.getContext("2d");
@@ -29,8 +37,8 @@ var pac = {
 };
 
 function resetPac() {
-    pac.c = P.Maze.pacmanSpawn.c;
-    pac.r = P.Maze.pacmanSpawn.r;
+    pac.c = Maze.pacmanSpawn.c;
+    pac.r = Maze.pacmanSpawn.r;
     pac.dir = 1;
     pac.nextDir = -1;
     pac.mouthAnim = 0;
@@ -45,15 +53,15 @@ function startNewGame() {
 }
 
 function startLevel() {
-    P.Maze.reset();
+    Maze.reset();
     resetPac();
-    P.Ghosts.init();
+    Ghosts.init();
     frightenBlinkTimer = 0;
     ghostChainBonus = 0;
     STATE = "playing";
     showHUD(true);
     updateHUD();
-    P.Screens.hideOverlay();
+    Screens.hideOverlay();
 }
 
 function showHUD(on) {
@@ -62,7 +70,7 @@ function showHUD(on) {
 
 function updateHUD() {
     Hud.text("#hud-score", score);
-    Hud.text("#hud-high", P.Storage.highScore);
+    Hud.text("#hud-high", Storage.highScore);
     Hud.text("#hud-lives", lives);
     Hud.text("#hud-level", level);
 }
@@ -81,14 +89,14 @@ function hideCenter() {
 }
 
 // --- Input routing ---
-Input.onAction(function(action, phase) {
+InputLib.onAction(function(action, phase) {
     if (phase !== "down" || !action) return;
     if (STATE === "title" || STATE === "gameover" || STATE === "paused") {
-        if (action === "up")   P.Screens.menuUp();
-        else if (action === "down") P.Screens.menuDown();
+        if (action === "up")   Screens.menuUp();
+        else if (action === "down") Screens.menuDown();
         else if (action === "confirm") {
-            var menuAction = P.Screens.menuSelect();
-            P.Audio.sfxMenu();
+            var menuAction = Screens.menuSelect();
+            Audio.sfxMenu();
             handleMenuAction(menuAction);
         } else if (action === "pause" && STATE === "paused") {
             resumeGame();
@@ -96,13 +104,13 @@ Input.onAction(function(action, phase) {
         return;
     }
     if (STATE === "playing" && action === "pause") pauseGame();
-    // Directional actions update the input queue inside P.Input itself.
+    // Directional actions update the input queue inside Input itself.
 });
 
 // Mouse hover/click on the overlay menus is handled by lib/screens; we
 // only need to forward "click confirmed" to the same dispatcher used by
 // keyboard confirms.
-P.Screens.onConfirm = handleMenuAction;
+Screens.onConfirm = handleMenuAction;
 
 function handleMenuAction(action) {
     if (!action) return;
@@ -121,33 +129,33 @@ function showTitle() {
     STATE = "title";
     showHUD(false);
     hideCenter();
-    P.Screens.setTitleHigh();
-    P.Screens.switchTo("title");
+    Screens.setTitleHigh();
+    Screens.switchTo("title");
 }
 
 function pauseGame() {
     if (STATE !== "playing") return;
     STATE = "paused";
-    P.Screens.switchTo("paused");
+    Screens.switchTo("paused");
 }
 
 function resumeGame() {
     if (STATE !== "paused") return;
     STATE = "playing";
-    P.Screens.hideOverlay();
+    Screens.hideOverlay();
 }
 
 function gameOver() {
     STATE = "gameover";
     showHUD(false);
-    var isNew = P.Storage.maybeUpdate(score);
-    P.Screens.setGameOverTitle("GAME OVER");
-    P.Screens.setGameOverStats(score, isNew);
-    P.Screens.switchTo("gameover");
+    var isNew = Storage.maybeUpdate(score);
+    Screens.setGameOverTitle("GAME OVER");
+    Screens.setGameOverStats(score, isNew);
+    Screens.switchTo("gameover");
 }
 
 function loseLife() {
-    P.Audio.sfxDeath();
+    Audio.sfxDeath();
     lives--;
     updateHUD();
     STATE = "dying";
@@ -161,13 +169,13 @@ function afterDeath() {
         return;
     }
     resetPac();
-    P.Ghosts.resetAll();
-    P.Input.reset();
+    Ghosts.resetAll();
+    Input.reset();
     STATE = "playing";
 }
 
 function levelClear() {
-    P.Audio.sfxWin();
+    Audio.sfxWin();
     STATE = "levelclear";
     stateTimer = 1800;
     showCenter("LEVEL " + level + " CLEAR!", 1800);
@@ -181,10 +189,10 @@ function afterLevelClear() {
 
 // --- Pac-Man movement ---
 function canMove(c, r, dir) {
-    var d = P.DIRS[dir];
-    var nc = P.Maze.wrapCol(Math.round(c) + d.dx);
+    var d = DIRS[dir];
+    var nc = Maze.wrapCol(Math.round(c) + d.dx);
     var nr = Math.round(r) + d.dy;
-    return P.Maze.isPassableForPac(nc, nr);
+    return Maze.isPassableForPac(nc, nr);
 }
 
 function updatePac(dt) {
@@ -193,7 +201,7 @@ function updatePac(dt) {
     var speed = 7.0; // tiles per second
 
     // Consume queued direction
-    var queued = P.Input.consume();
+    var queued = Input.consume();
     if (queued >= 0) pac.nextDir = queued;
 
     // Try to turn at tile center
@@ -212,7 +220,7 @@ function updatePac(dt) {
     }
 
     // Check forward
-    var d = P.DIRS[pac.dir];
+    var d = DIRS[pac.dir];
     var canGo = canMove(pac.c, pac.r, pac.dir);
     if (atCenter && !canGo) {
         pac.c = ci;
@@ -223,30 +231,30 @@ function updatePac(dt) {
 
     pac.c += d.dx * step;
     pac.r += d.dy * step;
-    pac.c = P.Maze.wrapCol(pac.c);
+    pac.c = Maze.wrapCol(pac.c);
     // handle tunnel wrap crossing
-    if (pac.c < -0.5) pac.c = P.Maze.COLS - 0.5;
-    if (pac.c > P.Maze.COLS - 0.5) pac.c = -0.5;
+    if (pac.c < -0.5) pac.c = Maze.COLS - 0.5;
+    if (pac.c > Maze.COLS - 0.5) pac.c = -0.5;
 
     pac.mouthAnim += dt * 0.012;
 
     // Eat pellet at current tile
     var ec = Math.round(pac.c);
     var er = Math.round(pac.r);
-    var eaten = P.Maze.eatPelletAt(ec, er);
+    var eaten = Maze.eatPelletAt(ec, er);
     if (eaten === '.') {
         score += 10;
-        P.Audio.sfxChomp();
+        Audio.sfxChomp();
         updateHUD();
     } else if (eaten === 'o') {
         score += 50;
-        P.Audio.sfxPower();
+        Audio.sfxPower();
         ghostChainBonus = 0;
-        P.Ghosts.frightenAll(Math.max(3000, 8000 - (level - 1) * 500));
+        Ghosts.frightenAll(Math.max(3000, 8000 - (level - 1) * 500));
         updateHUD();
     }
 
-    if (P.Maze.pelletCount <= 0) {
+    if (Maze.pelletCount <= 0) {
         levelClear();
     }
 }
@@ -254,8 +262,8 @@ function updatePac(dt) {
 // --- Collisions ---
 function checkCollisions() {
     if (!pac.alive) return;
-    for (var i = 0; i < P.Ghosts.list.length; i++) {
-        var g = P.Ghosts.list[i];
+    for (var i = 0; i < Ghosts.list.length; i++) {
+        var g = Ghosts.list[i];
         if (g.mode === "eaten" || g.mode === "house" || g.mode === "leaving") continue;
         var dc = g.c - pac.c;
         var dr = g.r - pac.r;
@@ -267,7 +275,7 @@ function checkCollisions() {
                 score += pts;
                 updateHUD();
                 g.mode = "eaten";
-                P.Audio.sfxEatGhost();
+                Audio.sfxEatGhost();
             } else {
                 loseLife();
                 return;
@@ -282,9 +290,9 @@ function computeLayout(W, H) {
     var hudH = 60;
     var availH = H - hudH - 20;
     var availW = W - 40;
-    var tile = Math.floor(Math.min(availW / P.Maze.COLS, availH / P.Maze.ROWS));
-    var ox = Math.floor((W - tile * P.Maze.COLS) / 2);
-    var oy = hudH + Math.floor((availH - tile * P.Maze.ROWS) / 2);
+    var tile = Math.floor(Math.min(availW / Maze.COLS, availH / Maze.ROWS));
+    var ox = Math.floor((W - tile * Maze.COLS) / 2);
+    var oy = hudH + Math.floor((availH - tile * Maze.ROWS) / 2);
     return { tile: tile, ox: ox, oy: oy };
 }
 
@@ -330,14 +338,14 @@ function frame(dt) {
     // Update
     if (STATE === "playing") {
         updatePac(dt);
-        P.Ghosts.update(dt, pac);
+        Ghosts.update(dt, pac);
         checkCollisions();
 
         // frightened blink near end
         var anyFright = false;
         var minTimer = Infinity;
-        for (var i = 0; i < P.Ghosts.list.length; i++) {
-            var g = P.Ghosts.list[i];
+        for (var i = 0; i < Ghosts.list.length; i++) {
+            var g = Ghosts.list[i];
             if (g.mode === "frightened") {
                 anyFright = true;
                 if (g.frightenedTimer < minTimer) minTimer = g.frightenedTimer;
@@ -374,7 +382,7 @@ function frame(dt) {
     }
 
     var layout = computeLayout(W, H);
-    P.Maze.draw(ctx, layout.ox, layout.oy, layout.tile);
+    Maze.draw(ctx, layout.ox, layout.oy, layout.tile);
 
     if (STATE === "dying") {
         var t = 1 - (stateTimer / 1400);
@@ -384,25 +392,24 @@ function frame(dt) {
         var phase = Math.floor(stateTimer / 200) % 2 === 0;
         if (phase) {
             ctx.fillStyle = "rgba(255,255,255,0.1)";
-            ctx.fillRect(layout.ox, layout.oy, P.Maze.COLS * layout.tile, P.Maze.ROWS * layout.tile);
+            ctx.fillRect(layout.ox, layout.oy, Maze.COLS * layout.tile, Maze.ROWS * layout.tile);
         }
         drawPac(ctx, layout.ox, layout.oy, layout.tile);
     } else {
         drawPac(ctx, layout.ox, layout.oy, layout.tile);
-        P.Ghosts.draw(ctx, layout.ox, layout.oy, layout.tile, frightBlinkOn);
+        Ghosts.draw(ctx, layout.ox, layout.oy, layout.tile, frightBlinkOn);
     }
 }
 
 // --- Init ---
-P.Storage.load();
-P.Audio.init();
-P.Ghosts.init();
-P.Maze.reset();
-P.Screens.setTitleHigh();
-P.Screens.switchTo("title");
+Storage.load();
+Audio.init();
+Ghosts.init();
+Maze.reset();
+Screens.setTitleHigh();
+Screens.switchTo("title");
 showHUD(false);
 
 GameLoop.create({ tick: frame, draw: function() {} }).start();
 
 console.log("Pac-Man loaded!");
-})();

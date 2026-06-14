@@ -3,9 +3,9 @@
 // Three high-score tables (marathon/sprint/ultra). Sprint is timed
 // (lower is better), so it uses ascending sort on `time`; the others
 // sort descending on `score`.
-var T = T || {};
+import { Storage as StorageLib } from "/lib/storage.js";
 
-T.Storage = (function () {
+export const Storage = (function () {
     'use strict';
 
     var DEFAULTS = {
@@ -16,12 +16,12 @@ T.Storage = (function () {
         gridLines:  true,
     };
 
-    var settingsStore = Storage.create('blockfall');
+    var settingsStore = StorageLib.create('blockfall');
 
     var hs = {
-        marathon: Storage.highscores('blockfall:marathon', 10),
-        sprint:   Storage.highscores('blockfall:sprint',   10, { field: 'time', ascending: true }),
-        ultra:    Storage.highscores('blockfall:ultra',    10),
+        marathon: StorageLib.highscores('blockfall:marathon', 10),
+        sprint:   StorageLib.highscores('blockfall:sprint',   10, { field: 'time', ascending: true }),
+        ultra:    StorageLib.highscores('blockfall:ultra',    10),
     };
 
     return {

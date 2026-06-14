@@ -1,4 +1,7 @@
 // app.js - Echo (Simon-style memory game)
+import { Input } from "/lib/input.js";
+import { Storage } from "/lib/storage.js";
+import { Hud } from "/lib/hud.js";
 
 var E = {
     // screen states

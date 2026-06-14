@@ -1,7 +1,7 @@
 // audio.js — SFX layer over lib/audio (SFX).
-var A = A || {};
+import { SFX } from "/lib/audio.js";
 
-A.Audio = {
+export const Audio = {
     init: function() { SFX.init(); },
     sfxFire:        function() { SFX.tone(880, 0.08, "square", 0.3); },
     sfxBangLarge:   function() { SFX.noise(0.4,  0.9, 120); },

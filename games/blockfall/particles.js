@@ -1,7 +1,7 @@
 // particles.js — Particle effects, flash cells, screen shake, action text
-var T = T || {};
+import { FX as FXLib } from "/lib/fx.js";
 
-T.FX = {
+export const FX = {
     particles: [],
     flashCells: [],
     lineClearAnim: null,
@@ -25,9 +25,9 @@ T.FX = {
         this.flashCells.push({ r: r, c: c, timer: duration, color: color });
     },
 
-    shake: function(duration, magnitude) { FX.shake(duration, magnitude); },
+    shake: function(duration, magnitude) { FXLib.shake(duration, magnitude); },
 
-    showText: function(text) { FX.toast(text); },
+    showText: function(text) { FXLib.toast(text); },
 
     startLineClear: function(rows) {
         this.lineClearAnim = { rows: rows, timer: 0, duration: 250 };
@@ -47,7 +47,7 @@ T.FX = {
             fc[i].timer -= dt;
             if (fc[i].timer <= 0) fc.splice(i, 1);
         }
-        FX.tick(dt);
+        FXLib.tick(dt);
         if (this.lineClearAnim) {
             this.lineClearAnim.timer += dt;
             if (this.lineClearAnim.timer >= this.lineClearAnim.duration)
@@ -55,13 +55,13 @@ T.FX = {
         }
     },
 
-    getShakeOffset: function() { return FX.shakeOffset(); },
+    getShakeOffset: function() { return FXLib.shakeOffset(); },
 
     clear: function() {
         this.particles.length = 0;
         this.flashCells.length = 0;
         this.lineClearAnim = null;
-        FX.reset();
+        FXLib.reset();
     },
 
     drawParticles: function(ctx) {
@@ -99,5 +99,5 @@ T.FX = {
         }
     },
 
-    hideActionText: function() { FX.reset(); }
+    hideActionText: function() { FXLib.reset(); }
 };

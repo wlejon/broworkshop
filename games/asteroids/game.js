@@ -1,7 +1,9 @@
 // game.js — Asteroids game world: ship, asteroids, bullets, physics, rendering
-var A = A || {};
+import { Input } from "/lib/input.js";
+import { Audio } from "/app/audio.js";
+import { FX } from "/app/particles.js";
 
-A.Game = (function() {
+export const Game = (function() {
     "use strict";
 
     // --- Constants ---
@@ -146,7 +148,7 @@ A.Game = (function() {
             } while (tries < 20 && distSq(x, y, cx, cy, W, H) < safe*safe);
             state.asteroids.push(createAsteroid(x, y, "large", W, H));
         }
-        if (A.Audio) A.Audio.sfxWave();
+        if (Audio) Audio.sfxWave();
     }
 
     function fireBullet() {
@@ -164,7 +166,7 @@ A.Game = (function() {
             life: BULLET_LIFE
         });
         state.cooldown = BULLET_COOLDOWN;
-        if (A.Audio) A.Audio.sfxFire();
+        if (Audio) Audio.sfxFire();
     }
 
     function explodeAsteroid(ast, bulletVx, bulletVy) {
@@ -173,11 +175,11 @@ A.Game = (function() {
         // particle burst
         var color = "#ffffff";
         var count = ast.size === "large" ? 22 : (ast.size === "medium" ? 14 : 8);
-        if (A.FX) A.FX.spawn(ast.x, ast.y, count, { speed: 0.2, life: 500, lifeVar: 400, color: color });
-        if (A.Audio) {
-            if (ast.size === "large") A.Audio.sfxBangLarge();
-            else if (ast.size === "medium") A.Audio.sfxBangMed();
-            else A.Audio.sfxBangSmall();
+        if (FX) FX.spawn(ast.x, ast.y, count, { speed: 0.2, life: 500, lifeVar: 400, color: color });
+        if (Audio) {
+            if (ast.size === "large") Audio.sfxBangLarge();
+            else if (ast.size === "medium") Audio.sfxBangMed();
+            else Audio.sfxBangSmall();
         }
         if (info.next) {
             for (var i = 0; i < 2; i++) {
@@ -194,7 +196,7 @@ A.Game = (function() {
         if (state.score >= state.nextExtraLife) {
             state.lives++;
             state.nextExtraLife += EXTRA_LIFE_AT;
-            if (A.Audio) A.Audio.sfxExtraLife();
+            if (Audio) Audio.sfxExtraLife();
         }
     }
 
@@ -202,8 +204,8 @@ A.Game = (function() {
         if (!state.ship || !state.ship.alive) return;
         var s = state.ship;
         s.alive = false;
-        if (A.FX) A.FX.spawn(s.x, s.y, 30, { speed: 0.25, life: 700, lifeVar: 500, color: "#ffffff" });
-        if (A.Audio) A.Audio.sfxShipExplode();
+        if (FX) FX.spawn(s.x, s.y, 30, { speed: 0.25, life: 700, lifeVar: 500, color: "#ffffff" });
+        if (Audio) Audio.sfxShipExplode();
         state.lives--;
         if (state.lives <= 0) {
             state.gameOver = true;
@@ -270,10 +272,10 @@ A.Game = (function() {
                     s.vy = s.vy / sp * SHIP_MAX_SPEED;
                 }
                 // thrust particles
-                if (A.FX && Math.random() < 0.6) {
+                if (FX && Math.random() < 0.6) {
                     var bx = s.x - Math.cos(s.angle) * 10;
                     var by = s.y - Math.sin(s.angle) * 10;
-                    A.FX.spawn(bx, by, 1, {
+                    FX.spawn(bx, by, 1, {
                         speed: 0.05,
                         vx: -Math.cos(s.angle) * 0.15,
                         vy: -Math.sin(s.angle) * 0.15,

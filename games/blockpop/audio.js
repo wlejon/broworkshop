@@ -1,12 +1,13 @@
 // audio.js — Blockpop SFX. Diatonic pitch ladder per color, pop chains.
 'use strict';
-var G = window.G = window.G || {};
+import { SFX } from "/lib/audio.js";
+import { Storage } from "/app/storage.js";
 
-G.Audio = (function () {
+export const Audio = (function () {
     function initAudio() {
         var ok = SFX.init({
-            sfxVol: G.Storage.settings.sfxVol / 100,
-            musicVol: G.Storage.settings.musicVol / 100
+            sfxVol: Storage.settings.sfxVol / 100,
+            musicVol: Storage.settings.musicVol / 100
         });
         return ok;
     }
