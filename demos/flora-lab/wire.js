@@ -5,7 +5,7 @@
 // Output shape: { positions: Float32Array, indices: Uint32Array }
 // Feed straight into scene.createMesh({ drawMode: 'lines', ... }).
 
-(function (root) {
+export const wire = (function () {
 
     function makeBuffers(vCount, iCount) {
         return {
@@ -131,6 +131,6 @@
         return buf;
     }
 
-    root.wire = { line, cross, box, circle, sphereCage, merge, translate };
+    return { line, cross, box, circle, sphereCage, merge, translate };
 
-})(globalThis);
+})();

@@ -2,7 +2,7 @@
 // All helpers operate on a CanvasRenderingContext2D whose
 // imageSmoothingEnabled is false (set by the caller in render()).
 
-const brush = (() => {
+export const brush = (() => {
 
     // ---- Palettes (small, hand-tuned, easy to extend) -------------------
 

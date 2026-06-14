@@ -5,9 +5,6 @@
 // component files, and (3) emit a build spec + capability descriptor. Today
 // there is one profile (Stable Diffusion 1.5 in diffusers layout); another
 // model family is a new entry in PROFILES, not a rewrite of the app.
-(function () {
-  'use strict';
-
   var fs = require('fs');
   var path = require('path');
 
@@ -127,9 +124,7 @@
       '(expected diffusers layout: unet/, vae/, tokenizer/)');
   }
 
-  window.DLab = window.DLab || {};
-  window.DLab.Profiles = {
+  export const Profiles = {
     detect: detect,
     readText: function (p) { return fs.readFileSync(p, 'utf-8'); },
   };
-})();

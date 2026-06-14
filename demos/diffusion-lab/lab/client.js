@@ -4,9 +4,6 @@
 // steps), so a single outstanding callback is enough. Each call takes a
 // node-style cb(err, data); the worker's matching reply or any 'error'
 // message resolves it.
-(function () {
-  'use strict';
-
   function create() {
     var worker = new Worker('lab/diffusion-worker.js');
     var pending = null;     // cb for the in-flight request
@@ -71,6 +68,4 @@
     };
   }
 
-  window.DLab = window.DLab || {};
-  window.DLab.Client = { create: create };
-})();
+  export const Client = { create: create };

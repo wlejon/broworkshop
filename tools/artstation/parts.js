@@ -20,8 +20,7 @@
 //
 // See README.md for the docs version of this.
 
-(function () {
-    'use strict';
+import "/app/app.js";
 
     const PARTS = {};
     const ASSEMBLIES = {};
@@ -491,4 +490,3 @@
         math: { vadd, vsub, vmul, vnorm, vcross, vdot,
                 qmul, qrot, qFromAxisAngle, qFromTo, qnorm },
     };
-})();

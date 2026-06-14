@@ -8,9 +8,6 @@
 // Pre-tokenization is ASCII-focused (lowercase, contraction split, letter
 // runs, single digits, punctuation runs) — same approximation the C++ uses,
 // exact for English prompts.
-(function () {
-  'use strict';
-
   var BOS = 49406, EOS = 49407, MAX_LEN = 77;
 
   // ── byte ↔ GPT-2/CLIP unicode mapping ────────────────────────────────
@@ -269,6 +266,4 @@
     };
   }
 
-  window.DLab = window.DLab || {};
-  window.DLab.Tokenizer = { create: create, MAX_LEN: MAX_LEN, BOS: BOS, EOS: EOS };
-})();
+  export const Tokenizer = { create: create, MAX_LEN: MAX_LEN, BOS: BOS, EOS: EOS };

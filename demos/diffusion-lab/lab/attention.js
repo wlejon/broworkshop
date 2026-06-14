@@ -5,9 +5,6 @@
 // each { Lq, Lk, data } where data[q*Lk + k] is the head-averaged weight
 // from spatial query q to context token k. Fixing k and walking q gives a
 // spatial map of where that token's influence lands.
-(function () {
-  'use strict';
-
   // Recover a block's spatial dimensions from its query count, assuming the
   // latent aspect ratio is preserved at every U-Net scale.
   function blockDims(Lq, lw, lh) {
@@ -230,12 +227,10 @@
     };
   }
 
-  window.DLab = window.DLab || {};
-  window.DLab.Attention = {
+  export const Attention = {
     create: create,
     blockOptions: blockOptions,
     computeHeatmap: computeHeatmap,
     buildAttnBias: buildAttnBias,
     blockDims: blockDims,
   };
-})();

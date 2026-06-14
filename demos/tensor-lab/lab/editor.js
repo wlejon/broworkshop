@@ -4,9 +4,8 @@
 // freeform-edit gesture: add (from the palette), drag nodes, wire ports,
 // select, delete. World space is in graph coordinates; the view transform
 // maps it to the canvas.
-(function () {
-  'use strict';
-  const Lab = (window.Lab = window.Lab || {});
+import { Ops, fmtMs } from "/app/lab/ops.js";
+import { Shape } from "/app/lab/shape.js";
 
   const NW = 188;          // node width
   const HEAD = 30;         // header height
@@ -28,7 +27,7 @@
 
     // --- geometry ---------------------------------------------------------
     function geom(n) {
-      const def = Lab.Ops.get(n.type);
+      const def = Ops.get(n.type);
       const rows = Math.max(def.ins.length, def.outs.length, 1);
       const h = HEAD + 14 + rows * PROW + 26;
       const g = { x: n.x, y: n.y, w: NW, h: h, ins: [], outs: [] };
@@ -237,7 +236,7 @@
     }
 
     function drawNode(n, now) {
-      const def = Lab.Ops.get(n.type), g = geom(n);
+      const def = Ops.get(n.type), g = geom(n);
       const selected = sel.node === n;
       const active = ed.activeNode === n;
       // shadow
@@ -314,14 +313,14 @@
         ctx.font = '10px sans-serif';
         ctx.fillText(clip(n.error, 30), g.x + g.w / 2, fy + 6);
       } else if (n.shapes && n.shapes[0]) {
-        const lbl = Lab.Shape.label(n.shapes[0]);
+        const lbl = Shape.label(n.shapes[0]);
         ctx.fillStyle = '#e8edf6';
         ctx.font = (lbl.length > 11 ? 'bold 11px monospace' : 'bold 14px monospace');
         ctx.fillText(lbl, g.x + g.w / 2, fy);
         if (n._ran) {
           ctx.fillStyle = '#7dd3fc';
           ctx.font = '10px sans-serif';
-          ctx.fillText(Lab.fmtMs(n._time), g.x + g.w / 2, fy + 15);
+          ctx.fillText(fmtMs(n._time), g.x + g.w / 2, fy + 15);
         } else {
           ctx.fillStyle = '#5b6577';
           ctx.font = '10px sans-serif';
@@ -393,5 +392,4 @@
     return ed;
   }
 
-  Lab.Editor = { create: create };
-})();
+  export const Editor = { create: create };

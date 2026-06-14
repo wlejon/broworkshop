@@ -4,9 +4,8 @@
 // and the cost estimate; for a selected node *or* wire that already carries
 // a value it visualises the tensor four ways — value heatmap, histogram,
 // summary stats, and (for attention ops) the per-head attention matrix.
-(function () {
-  'use strict';
-  const Lab = (window.Lab = window.Lab || {});
+import { Ops, fmtNum, fmtMs } from "/app/lab/ops.js";
+import { Shape } from "/app/lab/shape.js";
 
   // ---- colour maps -----------------------------------------------------
   function lerp(a, b, t) { return a + (b - a) * t; }
@@ -209,7 +208,7 @@
         const s = statsOf(d);
         const box = el('div', 'kv');
         box.appendChild(kv('shape', rows + ' × ' + cols));
-        box.appendChild(kv('count', Lab.fmtNum(s.count)));
+        box.appendChild(kv('count', fmtNum(s.count)));
         box.appendChild(kv('mean', s.mean.toFixed(5)));
         box.appendChild(kv('std', s.std.toFixed(5)));
         box.appendChild(kv('min', s.min.toFixed(5)));
@@ -226,7 +225,7 @@
             (mode === 'prob' ? '  ·  bright = high probability' : '  ·  amber + / blue −')));
         } else {
           drawHistogram(cv, d);
-          sec.appendChild(el('div', 'viz-note', 'value distribution · ' + Lab.fmtNum(d.length) + ' elements'));
+          sec.appendChild(el('div', 'viz-note', 'value distribution · ' + fmtNum(d.length) + ' elements'));
         }
       }
       return sec;
@@ -290,7 +289,7 @@
         head.appendChild(el('div', 'insp-cat', 'WIRE'));
         head.appendChild(el('h2', null, 'Tensor'));
         head.appendChild(el('p', 'insp-desc',
-          Lab.Ops.get(src.type).label + ' → ' + Lab.Ops.get(e.to.node.type).label));
+          Ops.get(src.type).label + ' → ' + Ops.get(e.to.node.type).label));
         panel.appendChild(head);
         if (src._out && src._out[e.from.port]) {
           panel.appendChild(buildTensorView(() => {
@@ -304,7 +303,7 @@
       }
 
       // --- node selected ------------------------------------------------
-      const n = sel.node, def = Lab.Ops.get(n.type);
+      const n = sel.node, def = Ops.get(n.type);
       const head = el('div', 'insp-head');
       head.style.borderColor = def.color;
       head.appendChild(el('div', 'insp-cat', def.cat.toUpperCase()));
@@ -322,15 +321,15 @@
       cost.appendChild(el('div', 'insp-sec-title', 'Cost'));
       const box = el('div', 'kv');
       box.appendChild(kv('output', n.shapes && n.shapes[0]
-        ? Lab.Shape.label(n.shapes[0])
+        ? Shape.label(n.shapes[0])
         : (n.error ? 'invalid' : '—')));
       let st = null;
       if (!n.error && n.inShapes && n.inShapes.length >= def.ins.length) {
         try { st = def.stats(n.inShapes, n.params); } catch (e) { st = null; }
       }
-      box.appendChild(kv('params', st ? Lab.fmtNum(st.params) : '—'));
-      box.appendChild(kv('FLOPs', st ? Lab.fmtNum(st.flops) : '—'));
-      box.appendChild(kv('GPU time', n._ran ? Lab.fmtMs(n._time) : 'not run'));
+      box.appendChild(kv('params', st ? fmtNum(st.params) : '—'));
+      box.appendChild(kv('FLOPs', st ? fmtNum(st.flops) : '—'));
+      box.appendChild(kv('GPU time', n._ran ? fmtMs(n._time) : 'not run'));
       cost.appendChild(box);
       if (n.error) cost.appendChild(el('div', 'insp-err', '⚠ ' + n.error));
       panel.appendChild(cost);
@@ -365,5 +364,4 @@
     };
   }
 
-  Lab.Inspector = { create: create };
-})();
+  export const Inspector = { create: create };

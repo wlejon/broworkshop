@@ -5,8 +5,21 @@
 // full { tokenIds, tokenFrames } pair for the timeline. handle.cancel() is
 // real — the decode loop polls the flag once per encoder frame.
 
+import { $, TARGET_RATE } from "/app/lib/state.js";
+import { model, tok, setBadge } from "/app/lib/model.js";
+import { publishClip } from "/app/lib/audio.js";
+import { drawTimeline, renderTokenTable } from "/app/lib/render.js";
+
+export let srcSamples = null;       // Float32Array — source audio @ 16 kHz mono
+let srcLabel = '';                  // short description for the src meta line
+export let srcClipId = -1;          // published audio clip for the source
+export let transcribing = false;    // an async transcribe is in flight
+let runHandle = null;               // AsyncHandle of the in-flight transcribe
+let streamIds = [];                 // token ids streamed so far (live partial)
+let lastResult = null;              // { tokenIds, tokenFrames } of the last finished run
+
 // Install a new source clip and (optionally) kick off a run.
-function setSource(samples, label) {
+export function setSource(samples, label) {
   srcSamples = samples;
   srcLabel = label;
   srcClipId = publishClip(srcClipId, samples);
@@ -34,7 +47,7 @@ function setTranscript(text, streaming) {
   }
 }
 
-function runTranscribe() {
+export function runTranscribe() {
   if (!model || !tok) { setBadge('load a model first', true); return; }
   if (!srcSamples)    { setBadge('record or load audio first', true); return; }
   if (transcribing) return;
@@ -77,6 +90,6 @@ function runTranscribe() {
   });
 }
 
-function cancelTranscribe() {
+export function cancelTranscribe() {
   if (runHandle) { try { runHandle.cancel(); } catch (e) {} }
 }

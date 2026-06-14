@@ -6,9 +6,6 @@
 // scales them on the GPU; the heatmap is colour-mapped into an ImageBitmap
 // once per change. An immutable ImageBitmap uploads to a GPU texture exactly
 // once, so scrubbing back and forth re-draws with no re-upload.
-(function () {
-  'use strict';
-
   // turbo-lite ramp for the attention heatmap LUT: low → cool, high → hot.
   var HEAT_STOPS = [
     [0.00, 30, 40, 90],
@@ -119,6 +116,4 @@
     };
   }
 
-  window.DLab = window.DLab || {};
-  window.DLab.Viewport = { create: create };
-})();
+  export const Viewport = { create: create };

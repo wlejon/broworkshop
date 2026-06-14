@@ -6,9 +6,6 @@
 // segment() decode (synchronous against the cached embedding), plus the
 // automatic "segment everything" generator. Pure logic — no DOM — so the app
 // keeps full control of layout and the stage owns all drawing.
-(function () {
-  'use strict';
-
   function create() {
     var model = null;        // native Sam handle
     var encoded = false;     // setImage() embedding is cached
@@ -84,6 +81,4 @@
     };
   }
 
-  window.VLab = window.VLab || {};
-  window.VLab.Sam = { create: create };
-})();
+  export const Sam = { create: create };

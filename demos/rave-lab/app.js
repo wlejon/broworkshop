@@ -2,6 +2,12 @@
 // curves, and hear the decode morph in real time. See lib/state.js for the
 // module map and the encode → edit → decode loop this app is built around.
 
+import { $ } from "/app/lib/state.js";
+import { rave, setBadge, browseFolder, loadModel, browseFile, defaultModelDir, fileExists } from "/app/lib/model.js";
+import { genTone, decodeFileToSource, playClipId } from "/app/lib/audio.js";
+import { setSource, srcClipId, outClipId, runDecode, enc } from "/app/lib/render.js";
+import { resetAll, activePaint, paintAt, onPaintUp } from "/app/lib/curves.js";
+
 function makeTone() {
   if (!rave) { setBadge('load a model first', true); return; }
   const freq = parseFloat($('#tone-freq').value) || 220;

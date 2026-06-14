@@ -4,9 +4,7 @@
 // GPU call. Every op is timed with a sync()-bracketed clock so the per-node
 // numbers reflect actual kernel cost. Supports a full run() or single
 // step() for watching the forward pass unfold one op at a time.
-(function () {
-  'use strict';
-  const Lab = (window.Lab = window.Lab || {});
+import { Ops } from "/app/lab/ops.js";
 
   const clock = (typeof performance !== 'undefined' && performance.now)
     ? () => performance.now() : () => Date.now();
@@ -18,7 +16,7 @@
 
     // execute a single node: gather inputs, time the kernel, store outputs
     function runNode(n) {
-      const def = Lab.Ops.get(n.type);
+      const def = Ops.get(n.type);
       const ins = [];
       for (let p = 0; p < def.ins.length; p++) {
         const e = graph.edgeInto(n, p);
@@ -39,7 +37,7 @@
     function nextNode(order) {
       for (const n of order) {
         if (n._ran) continue;
-        const def = Lab.Ops.get(n.type);
+        const def = Ops.get(n.type);
         let ok = true;
         for (let p = 0; p < def.ins.length; p++) {
           const e = graph.edgeInto(n, p);
@@ -76,7 +74,7 @@
         const order = graph.topo();
         if (!order) throw new Error('graph has a cycle');
         for (const n of order) {
-          if (n.error) throw new Error(Lab.Ops.get(n.type).label + ': ' + n.error);
+          if (n.error) throw new Error(Ops.get(n.type).label + ': ' + n.error);
         }
         graph.clearRun();
         let done = 0;
@@ -92,5 +90,4 @@
     };
   }
 
-  Lab.Runner = { create: create };
-})();
+  export const Runner = { create: create };

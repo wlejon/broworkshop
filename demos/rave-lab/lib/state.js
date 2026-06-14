@@ -16,22 +16,6 @@
 // big, interpretable controls (loudness, pitch) and later rows carry timbre —
 // each row is one editable time-series curve.
 
-const $ = (s) => document.querySelector(s);
+export const $ = (s) => document.querySelector(s);
 
-let rave = null;            // the loaded bro.rave handle
-let audioCtx = null;        // broaudio context (lazy)
-
-let srcSamples = null;      // Float32Array — source audio at rave.sampleRate
-let srcClipId = -1;         // published audio clip for the source (A)
-let outClipId = -1;         // published audio clip for the morph   (B)
-
-let enc = null;             // { latent:Float32Array, nLatent, frames } — the ORIGINAL encode
-let work = null;            // Float32Array(nLatent*frames) — the editable latent (channel-major)
-let lastOut = null;         // Float32Array — most recent decoded waveform (interleaved if stereo)
-let outChannels = 1;        // channel count of lastOut (2 when the stereo toggle is on)
-let dimRanges = [];         // [mn,mx] per dim — fixed vertical frame for each curve
-let curveCells = [];        // per-dim { cv, body, c, statsEl } — canvases persist, redraw in place
-
-let busy = false;           // an encode/decode is in flight (guards the UI)
-let activePaint = null;     // in-progress curve drag {cv,c,mn,mx,W,H,pad,lastI,lastV}
 let decodeTimer = 0;        // debounce auto-decode after a non-drag edit

@@ -1,3 +1,5 @@
+import "/lib/camera.js";
+
 // =============================================================================
 // Mesh viewer + workbench. Heavy bromesh ops run in a worker; the main thread
 // only handles rendering, skinning, and UI. Stats checks are on-demand to keep

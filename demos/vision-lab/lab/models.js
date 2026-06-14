@@ -11,11 +11,10 @@
 // opts) -> { image: ImageBitmap, ...raw }. SAM is `group: 'sam'` — its two-phase
 // setImage/segment/segmentEverything flow lives in lab/sam.js — so it has a
 // loader and availability entry here but no generic run().
-(function () {
-  'use strict';
+import { Util } from "/app/lab/util.js";
 
   var V = function () { return window.bro && bro.vision; };
-  var U = function () { return window.VLab.Util; };
+  var U = function () { return Util; };
 
   function path(root, subdir) { return root + '/' + subdir; }
 
@@ -285,11 +284,9 @@
   // Annotators in contact-sheet / "run all" order.
   var ANNOTATORS = ALL.filter(function (m) { return m.group === 'annotator'; });
 
-  window.VLab = window.VLab || {};
-  window.VLab.Models = {
+  export const Models = {
     all: ALL,
     annotators: ANNOTATORS,
     byId: function (id) { return BY_ID[id]; },
     adeName: adeName,
   };
-})();

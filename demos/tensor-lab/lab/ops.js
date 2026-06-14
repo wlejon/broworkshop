@@ -15,13 +15,10 @@
 // are created lazily and cached on the node, rebuilt only when their
 // signature (the dims they depend on) changes — so re-running keeps a stable
 // network and only the activations move.
-(function () {
-  'use strict';
-  const Lab = (window.Lab = window.Lab || {});
-  const Shape = Lab.Shape;
+import { Shape } from "/app/lab/shape.js";
 
   // ---- number formatting (shared across modules) -----------------------
-  Lab.fmtNum = function (n) {
+  export const fmtNum = function (n) {
     if (n == null || !isFinite(n)) return '—';
     const a = Math.abs(n);
     if (a >= 1e9) return (n / 1e9).toFixed(2) + 'G';
@@ -29,7 +26,7 @@
     if (a >= 1e3) return (n / 1e3).toFixed(1) + 'K';
     return String(n | 0);
   };
-  Lab.fmtMs = function (ms) {
+  export const fmtMs = function (ms) {
     if (ms == null || !isFinite(ms)) return '—';
     if (ms < 1) return ms.toFixed(3) + ' ms';
     if (ms < 100) return ms.toFixed(2) + ' ms';
@@ -1212,11 +1209,10 @@
   // ---- public API ------------------------------------------------------
   const ORDER = ['Source', 'Dense', 'Activation', 'Norm', 'Attention', 'T5',
     'Conv', 'Spatial', 'Layout', 'Tensor'];
-  Lab.Ops = {
+  export const Ops = {
     defs: DEFS,
     get: (type) => DEFS[type],
     list: () => Object.keys(DEFS).map((k) => DEFS[k]),
     categories: () => ORDER,
     byCategory: (cat) => Object.keys(DEFS).map((k) => DEFS[k]).filter((d) => d.cat === cat),
   };
-})();

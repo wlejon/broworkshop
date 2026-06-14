@@ -6,6 +6,10 @@
 // transport buttons just re-trigger the already-published clip. Auto-play after
 // a decode is deferred a few frames so the upload lands first.
 
+import { rave, setBadge } from "/app/lib/model.js";
+
+let audioCtx = null;        // broaudio context (lazy)
+
 function ensureCtx() {
   audioCtx = audioCtx || new AudioContext();
   return audioCtx;
@@ -28,7 +32,7 @@ function resample(samples, inRate, outRate) {
 // is mono, or interleaved when channels === 2 (samples[t*2 + c]). Resamples to
 // the context rate per channel, then hands an interleaved buffer to createClip.
 // Returns the new clip id, or -1 on failure.
-function publishClip(prevId, samples, channels) {
+export function publishClip(prevId, samples, channels) {
   channels = channels || 1;
   try {
     const ctx = ensureCtx();
@@ -55,14 +59,14 @@ function publishClip(prevId, samples, channels) {
   } catch (e) { setBadge('audio: ' + e.message, true); return -1; }
 }
 
-function playClipId(id) {
+export function playClipId(id) {
   if (id < 0 || !audioCtx) return;
   try { audioCtx.playClip(id, 1.0, false); }
   catch (e) { setBadge('audio: ' + e.message, true); }
 }
 
 // Decode an audio file off disk to mono Float32 at rave.sampleRate.
-function decodeFileToSource(path) {
+export function decodeFileToSource(path) {
   const ctx = ensureCtx();
   const dec = ctx.decodeAudioFile(path);
   if (!dec || !dec.samples || !dec.numFrames) return null;
@@ -82,7 +86,7 @@ function decodeFileToSource(path) {
 
 // Synthesize a test tone (at rave.sampleRate) — gives the latent something with
 // structure to encode when there's no file handy.
-function genTone(kind, freq, secs) {
+export function genTone(kind, freq, secs) {
   const sr = rave.sampleRate;
   const n = Math.max(1, Math.floor(secs * sr));
   const out = new Float32Array(n);

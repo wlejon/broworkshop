@@ -3,6 +3,13 @@
 // buttons offer the common moves (reset / smooth / flatten / invert / nudge).
 // Every edit re-decodes (debounced) so you hear the morph as you go.
 
+import { $ } from "/app/lib/state.js";
+import { work, enc, busy, runDecode, el } from "/app/lib/render.js";
+
+let dimRanges = [];         // [mn,mx] per dim — fixed vertical frame for each curve
+let curveCells = [];        // per-dim { cv, body, c, statsEl } — canvases persist, redraw in place
+export let activePaint = null;     // in-progress curve drag {cv,c,mn,mx,W,H,pad,lastI,lastV}
+
 const DIM_W = 1100, DIM_H = 96, DIM_PAD = 6;
 
 function dimLabel(c) {
@@ -22,7 +29,7 @@ function origRow(c) { return enc.latent.subarray(c * enc.frames, (c + 1) * enc.f
 // Fixed vertical frame per dim, taken from the ORIGINAL encoded curve with
 // headroom so a drag up/down always has somewhere to go and the frame is stable
 // across edits.
-function computeDimRanges() {
+export function computeDimRanges() {
   dimRanges = [];
   for (let c = 0; c < enc.nLatent; c++) {
     const d = origRow(c);
@@ -100,7 +107,7 @@ function scheduleDecode() {
 }
 
 // ── build the grid ───────────────────────────────────────────────────────────
-function buildCurves() {
+export function buildCurves() {
   const host = $('#curves');
   host.textContent = '';
   curveCells = [];
@@ -146,7 +153,7 @@ function buildCurves() {
 }
 
 // Map mouse → (frame index, value), painting a continuous sweep into work[].
-function paintAt(e) {
+export function paintAt(e) {
   const p = activePaint; if (!p) return;
   const rect = p.cv.getBoundingClientRect();
   const xf = Math.max(0, Math.min(0.99999, (e.clientX - rect.left) / rect.width));
@@ -163,13 +170,13 @@ function paintAt(e) {
 }
 
 // Finish a drag: re-decode the edited latent.
-function onPaintUp() {
+export function onPaintUp() {
   if (!activePaint) return;
   activePaint = null;
   runDecode($('#autoplay').checked);
 }
 
-function resetAll() {
+export function resetAll() {
   if (!enc) return;
   work.set(enc.latent);
   for (let c = 0; c < enc.nLatent; c++) redrawDim(c);

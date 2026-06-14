@@ -18,22 +18,6 @@
 // The timeline pins every token to the moment in the waveform it was decoded
 // from, and the transcript streams in live as the TDT loop emits.
 
-const $ = (s) => document.querySelector(s);
+export const $ = (s) => document.querySelector(s);
 
-const TARGET_RATE = 16000;   // Parakeet's fixed input rate
-
-let model = null;            // the loaded bro.stt Parakeet handle
-let tok = null;              // the loaded ParakeetTokenizer (SentencePiece)
-let audioCtx = null;         // broaudio context (lazy)
-
-let srcSamples = null;       // Float32Array — source audio @ 16 kHz mono
-let srcLabel = '';           // short description for the src meta line
-let srcClipId = -1;          // published audio clip for the source
-
-let recording = false;       // mic capture in progress
-let recChunks = [];          // Float32Array chunks accumulated while recording
-
-let transcribing = false;    // an async transcribe is in flight
-let runHandle = null;        // AsyncHandle of the in-flight transcribe
-let streamIds = [];          // token ids streamed so far (live partial)
-let lastResult = null;       // { tokenIds, tokenFrames } of the last finished run
+export const TARGET_RATE = 16000;   // Parakeet's fixed input rate

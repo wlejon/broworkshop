@@ -2,7 +2,7 @@
 //
 // All `hex` strings are "#rrggbb"; HSL uses h:[0,360), s,l:[0,1].
 
-const color = (() => {
+export const color = (() => {
 
     function hexToRgb(hex) {
         const s = hex.replace('#','');

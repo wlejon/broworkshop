@@ -4,6 +4,9 @@
 // timestamp — a tick into the waveform plus the piece text on one of two
 // staggered label rows below.
 
+import { $, TARGET_RATE } from "/app/lib/state.js";
+import { model, tok } from "/app/lib/model.js";
+
 const TL_H = 150;      // canvas height
 const WAVE_H = 84;     // waveform band height
 const LABEL_ROWS = 2;  // staggered token-label rows
@@ -21,7 +24,7 @@ function timelineCanvas() {
 }
 
 // Draw the waveform, and the token pins when `result` is non-null.
-function drawTimeline(samples, result) {
+export function drawTimeline(samples, result) {
   if (!samples || !samples.length) return;
   $('#timeline-head').style.display = '';
   const cv = timelineCanvas();
@@ -75,7 +78,7 @@ function drawTimeline(samples, result) {
 }
 
 // The raw-emissions table: start time · piece · id.
-function renderTokenTable(result) {
+export function renderTokenTable(result) {
   const host = $('#tokens');
   host.innerHTML = '';
   $('#tokens-head').style.display = result && result.tokenIds.length ? '' : 'none';

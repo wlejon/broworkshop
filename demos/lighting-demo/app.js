@@ -1,3 +1,5 @@
+import "/lib/camera.js";
+
 const canvas = document.getElementById('stage');
 const scene = canvas.getContext('scene');
 

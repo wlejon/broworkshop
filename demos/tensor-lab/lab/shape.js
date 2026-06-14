@@ -9,10 +9,6 @@
 //
 // Ops infer and validate Shapes in pure JS; exec() reads the storage dims off
 // the GpuTensor directly, and the logical N/C/H/W off node.inShapes.
-(function () {
-  'use strict';
-  const Lab = (window.Lab = window.Lab || {});
-
   function matrix(rows, cols) {
     return { layout: 'matrix', dims: [rows | 0, cols | 0] };
   }
@@ -39,10 +35,9 @@
   // compact logical label: "32×128" or "1×3×32×32"
   function label(s) { return s ? s.dims.join('×') : '—'; }
 
-  Lab.Shape = {
+  export const Shape = {
     matrix: matrix, image: image,
     rows: rows, cols: cols, elems: elems,
     isMatrix: isMatrix, isImage: isImage,
     eq: eq, label: label,
   };
-})();

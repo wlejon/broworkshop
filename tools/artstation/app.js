@@ -7,7 +7,8 @@
 //   3. Output PNG lives in apps/artstation/output/<name>.png and is ready
 //      to feed back into scene.createSprite / createTilemap.
 
-(function () {
+import "/app/color.js";
+import "/app/brush.js";
 
     const sheetCanvas   = document.getElementById('sheet');
     const stageCanvas   = document.getElementById('stage');
@@ -1619,5 +1620,3 @@
     window.saveGif       = saveGif;
     window.preview       = preview;
     window.previewMap    = previewMap;
-
-})();

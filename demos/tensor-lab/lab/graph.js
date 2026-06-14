@@ -8,9 +8,7 @@
 //   stats()      aggregate parameter / FLOP totals
 //
 // Each input port accepts exactly one edge; output ports fan out freely.
-(function () {
-  'use strict';
-  const Lab = (window.Lab = window.Lab || {});
+import { Ops } from "/app/lab/ops.js";
 
   let nextId = 1;
   const uid = (pfx) => pfx + (nextId++);
@@ -22,7 +20,7 @@
 
       // --- mutation -----------------------------------------------------
       addNode(type, x, y) {
-        const def = Lab.Ops.get(type);
+        const def = Ops.get(type);
         if (!def) throw new Error('unknown op: ' + type);
         const params = {};
         for (const f of def.params) params[f.key] = f.def;
@@ -101,7 +99,7 @@
           return;
         }
         for (const n of order) {
-          const def = Lab.Ops.get(n.type);
+          const def = Ops.get(n.type);
           const ins = [];
           let missing = false;
           for (let p = 0; p < def.ins.length; p++) {
@@ -127,7 +125,7 @@
         let params = 0, flops = 0, time = 0;
         for (const n of this.nodes) {
           if (n.error || !n.inShapes) continue;
-          const def = Lab.Ops.get(n.type);
+          const def = Ops.get(n.type);
           if (def.ins.length && n.inShapes.length < def.ins.length) continue;
           try {
             const s = def.stats(n.inShapes, n.params);
@@ -162,5 +160,4 @@
     return g;
   }
 
-  Lab.Graph = { create: create };
-})();
+  export const Graph = { create: create };

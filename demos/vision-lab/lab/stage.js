@@ -5,9 +5,6 @@
 // segments, OpenPose skeletons. Everything is drawn in a single contain-fit
 // rect so screen<->image coordinate mapping is one shared transform — which the
 // SAM controller needs to turn clicks into original-image pixel prompts.
-(function () {
-  'use strict';
-
   // COCO-18 skeleton bone pairs + per-keypoint colours (OpenPose convention).
   var POSE_BONES = [
     [1,2],[1,5],[2,3],[3,4],[5,6],[6,7],[1,8],[8,9],[9,10],
@@ -167,6 +164,4 @@
     };
   }
 
-  window.VLab = window.VLab || {};
-  window.VLab.Stage = { create: create };
-})();
+  export const Stage = { create: create };

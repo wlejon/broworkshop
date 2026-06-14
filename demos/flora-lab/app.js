@@ -17,6 +17,9 @@
 //   seed ring     wire circle at each plant's seedingRadius (diag)     white
 //   plant origins cross + stem marker per plant origin     (diag)      amber
 
+import { wire } from "/app/wire.js";
+import { createLighting } from "/app/lighting.js";
+
 const canvas = document.getElementById('stage');
 const scene = canvas.getContext('scene');
 

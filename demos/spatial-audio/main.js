@@ -1,6 +1,8 @@
 // Spatial Audio Demo — procedural 3D audio shaped by environment zones
 // Three.js scene with broaudio spatial sources, zone buses, and effect chains
 
+import "/app/three.min.js";   // vendored UMD bundle — sets the global THREE
+
 // ───────────────────────── Three.js setup ─────────────────────────
 
 var canvas = document.getElementById('c');

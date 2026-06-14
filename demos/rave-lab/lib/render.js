@@ -1,8 +1,23 @@
 // ═══ waveforms + pipeline orchestration ══════════════════════════════════════
 
+import { $ } from "/app/lib/state.js";
+import { rave, setBadge } from "/app/lib/model.js";
+import { publishClip, playClipId } from "/app/lib/audio.js";
+import { computeDimRanges, buildCurves } from "/app/lib/curves.js";
+
+export let srcClipId = -1;       // published audio clip for the source (A)
+export let outClipId = -1;       // published audio clip for the morph   (B)
+export let enc = null;           // { latent:Float32Array, nLatent, frames } — the ORIGINAL encode
+export let work = null;          // Float32Array(nLatent*frames) — the editable latent (channel-major)
+export let busy = false;         // an encode/decode is in flight (guards the UI)
+
+let srcSamples = null;           // Float32Array — source audio at rave.sampleRate
+let lastOut = null;              // Float32Array — most recent decoded waveform (interleaved if stereo)
+let outChannels = 1;             // channel count of lastOut (2 when the stereo toggle is on)
+
 let srcWaveCv = null, outWaveCv = null;
 
-function el(tag, cls, text) {
+export function el(tag, cls, text) {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
   if (text != null) e.textContent = text;
@@ -67,7 +82,7 @@ function refreshWaves() {
 // ── pipeline ─────────────────────────────────────────────────────────────────
 
 // Adopt a new source clip: publish it for monitoring, then encode + decode.
-function setSource(samples, label) {
+export function setSource(samples, label) {
   if (!rave) { setBadge('load a model first', true); return; }
   srcSamples = samples;
   srcClipId = publishClip(srcClipId, srcSamples);
@@ -96,7 +111,7 @@ function encodeSource() {
 }
 
 // Decode the (possibly edited) latent and publish the morph clip.
-function runDecode(autoplay) {
+export function runDecode(autoplay) {
   if (!rave || !enc || busy) return;
   busy = true; setBadge('decoding…');
   const t0 = Date.now();

@@ -3,9 +3,14 @@
 // A freeform node-graph builder for modern neural networks, running every
 // op live on the GPU through bro.tensor (brotensor / CUDA). Wires together
 // the graph model, canvas editor, execution runner, inspector and palette.
-(function () {
-  'use strict';
-  const Lab = window.Lab;
+import { Graph } from "/app/lab/graph.js";
+import { Runner } from "/app/lab/runner.js";
+import { Inspector } from "/app/lab/inspector.js";
+import { Editor } from "/app/lab/editor.js";
+import { Palette } from "/app/lab/palette.js";
+import { Presets } from "/app/lab/presets.js";
+import { T5 } from "/app/lab/t5import.js";
+import { Ops, fmtNum, fmtMs } from "/app/lab/ops.js";
 
   function $(id) { return document.getElementById(id); }
 
@@ -16,10 +21,10 @@
   }
 
   function init(canvas) {
-    const graph = Lab.Graph.create();
-    const runner = Lab.Runner.create(graph);
+    const graph = Graph.create();
+    const runner = Runner.create(graph);
 
-    const inspector = Lab.Inspector.create($('inspector'), {
+    const inspector = Inspector.create($('inspector'), {
       onParamChange() {
         graph.propagate();
         graph.clearRun();
@@ -29,7 +34,7 @@
       },
     });
 
-    const editor = Lab.Editor.create(canvas, graph, {
+    const editor = Editor.create(canvas, graph, {
       onSelect(sel) { inspector.show(sel); },
       onChange() {
         graph.propagate();
@@ -40,7 +45,7 @@
       },
     });
 
-    Lab.Palette.create($('palette'), (type) => {
+    Palette.create($('palette'), (type) => {
       const node = graph.addNode(type);
       editor.placeNew(node);
       graph.propagate();
@@ -52,9 +57,9 @@
     function updateStatus() {
       const s = graph.stats();
       $('stat-nodes').textContent = s.nodes + (s.nodes === 1 ? ' node' : ' nodes');
-      $('stat-params').textContent = Lab.fmtNum(s.params) + ' params';
-      $('stat-flops').textContent = Lab.fmtNum(s.flops) + ' FLOPs';
-      $('stat-time').textContent = s.time > 0 ? 'forward ' + Lab.fmtMs(s.time) : 'not run';
+      $('stat-params').textContent = fmtNum(s.params) + ' params';
+      $('stat-flops').textContent = fmtNum(s.flops) + ' FLOPs';
+      $('stat-time').textContent = s.time > 0 ? 'forward ' + fmtMs(s.time) : 'not run';
     }
 
     // --- transient toast ------------------------------------------------
@@ -82,7 +87,7 @@
       for (const n of graph.nodes) {
         if (n.error) {
           editor.select(n, null);
-          toast(Lab.Ops.get(n.type).label + ': ' + n.error);
+          toast(Ops.get(n.type).label + ': ' + n.error);
           return false;
         }
       }
@@ -157,7 +162,7 @@
 
     // --- presets --------------------------------------------------------
     const presetSel = $('preset');
-    for (const p of Lab.Presets.list()) {
+    for (const p of Presets.list()) {
       const opt = document.createElement('option');
       opt.value = p.name;
       opt.textContent = p.name;
@@ -165,14 +170,14 @@
     }
     function loadPreset(name) {
       if (!name) return;
-      Lab.Presets.load(name, graph);
+      Presets.load(name, graph);
       runner.reset();
       editor.activeNode = null;
       editor.select(null, null);
       editor.resize();
       editor.frameAll();
       updateStatus();
-      const p = Lab.Presets.list().find((x) => x.name === name);
+      const p = Presets.list().find((x) => x.name === name);
       if (p) toast(p.desc);
     }
     presetSel.addEventListener('change', () => loadPreset(presetSel.value));
@@ -187,8 +192,8 @@
       if (!paths || !paths.length) return;
       let cfg;
       try {
-        const file = Lab.T5.open(paths[0]);
-        cfg = Lab.T5.importEncoder(file, graph, { layers: 2, seqLen: 16 });
+        const file = T5.open(paths[0]);
+        cfg = T5.importEncoder(file, graph, { layers: 2, seqLen: 16 });
       } catch (e) {
         toast('T5 import failed: ' + (e && e.message || e));
         return;
@@ -241,4 +246,3 @@
   } else {
     window.addEventListener('load', start);
   }
-})();

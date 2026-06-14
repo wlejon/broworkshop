@@ -9,6 +9,14 @@
 // each onChunk hands us 160 samples (10 ms) of ready-to-transcribe PCM that we
 // accumulate until the recording stops.
 
+import { $, TARGET_RATE } from "/app/lib/state.js";
+import { setBadge } from "/app/lib/model.js";
+import { setSource } from "/app/lib/transcribe.js";
+
+let audioCtx = null;         // broaudio context (lazy)
+let recChunks = [];          // Float32Array chunks accumulated while recording
+export let recording = false;       // mic capture in progress
+
 function ensureCtx() {
   audioCtx = audioCtx || new AudioContext();
   return audioCtx;
@@ -29,7 +37,7 @@ function resample(samples, inRate, outRate) {
 
 // Publish the 16 kHz source as a clip at the context rate, replacing the old
 // one. Returns the new clip id, or -1 on failure.
-function publishClip(prevId, samples) {
+export function publishClip(prevId, samples) {
   try {
     const ctx = ensureCtx();
     const buf = resample(samples, TARGET_RATE, ctx.sampleRate || 48000);
@@ -38,14 +46,14 @@ function publishClip(prevId, samples) {
   } catch (e) { setBadge('audio: ' + e.message, true); return -1; }
 }
 
-function playClipId(id) {
+export function playClipId(id) {
   if (id < 0 || !audioCtx) return;
   try { audioCtx.playClip(id, 1.0, false); }
   catch (e) { setBadge('audio: ' + e.message, true); }
 }
 
 // Decode an audio file off disk to mono Float32 @ 16 kHz.
-function decodeFileToSource(path) {
+export function decodeFileToSource(path) {
   const ctx = ensureCtx();
   const dec = ctx.decodeAudioFile(path);
   if (!dec || !dec.samples || !dec.numFrames) return null;
@@ -71,7 +79,7 @@ function setMicLevel(p) {
 
 // Start accumulating mic audio. opts.live=false lets a headless script drive
 // the tap via bro.mic.feed() instead of the recording device.
-function startRecording(opts) {
+export function startRecording(opts) {
   if (recording) return;
   recChunks = [];
   recording = true;
@@ -93,7 +101,7 @@ function startRecording(opts) {
 }
 
 // Stop the mic and hand the utterance to setSource. Returns the sample count.
-function stopRecording() {
+export function stopRecording() {
   if (!recording) return 0;
   recording = false;
   bro.mic.stop();

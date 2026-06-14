@@ -3,12 +3,8 @@
 // Each preset wires a real modern network block out of the op registry.
 // They load straight into the freeform editor, so they double as both a
 // guided tour and an editable starting point.
-(function () {
-  'use strict';
-  const Lab = (window.Lab = window.Lab || {});
-
   // layered (left-to-right) auto-layout over a DAG
-  function autoLayout(g) {
+  export function autoLayout(g) {
     const order = g.topo();
     if (!order) return;
     const depth = new Map();
@@ -34,8 +30,6 @@
       }
     }
   }
-  Lab.autoLayout = autoLayout;
-
   // small builder: add(type, params) -> node ; link(from, to, toPort, fromPort)
   function builder(g) {
     return {
@@ -241,7 +235,7 @@
     },
   ];
 
-  Lab.Presets = {
+  export const Presets = {
     list: () => PRESETS,
     load(name, g) {
       const p = PRESETS.find((x) => x.name === name);
@@ -254,4 +248,3 @@
       return true;
     },
   };
-})();

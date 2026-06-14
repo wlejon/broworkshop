@@ -1,6 +1,12 @@
 // ═══ model load + dialogs ════════════════════════════════════════════════════
 
-function setBadge(text, err) {
+import { $ } from "/app/lib/state.js";
+import { srcSamples } from "/app/lib/transcribe.js";
+
+export let model = null;            // the loaded bro.stt Parakeet handle
+export let tok = null;              // the loaded ParakeetTokenizer (SentencePiece)
+
+export function setBadge(text, err) {
   const b = $('#backend');
   b.textContent = text;
   b.classList.toggle('err', !!err);
@@ -8,13 +14,13 @@ function setBadge(text, err) {
 
 const _fs = (typeof require === 'function') ? require('fs') : null;
 const _os = (typeof require === 'function') ? require('os') : null;
-function fileExists(p) { try { return !!_fs && _fs.existsSync(p); } catch (e) { return false; } }
+export function fileExists(p) { try { return !!_fs && _fs.existsSync(p); } catch (e) { return false; } }
 
 function remember(key, val) { try { localStorage.setItem(key, val); } catch (e) {} }
 function recall(key)        { try { return localStorage.getItem(key) || ''; } catch (e) { return ''; } }
 
 // Probe the usual spots for a Parakeet checkpoint so the field is pre-filled.
-function defaultModelDir(current) {
+export function defaultModelDir(current) {
   const home = _os ? _os.homedir().replace(/\\/g, '/') : '';
   const cands = [
     current,
@@ -28,12 +34,12 @@ function defaultModelDir(current) {
 }
 
 // Native dialogs, defensively gated (absent in headless / GPU-less builds).
-function browseFolder(start) {
+export function browseFolder(start) {
   if (typeof showOpenFolderDialog !== 'function') { setBadge('folder dialog unavailable in this build', true); return null; }
   const r = showOpenFolderDialog(start || null);
   return r && r.length ? r[0] : null;
 }
-function browseFile(filter) {
+export function browseFile(filter) {
   if (typeof showOpenFileDialog !== 'function') { setBadge('file dialog unavailable in this build', true); return null; }
   const r = showOpenFileDialog(filter || '');
   return r && r.length ? r[0] : null;
@@ -41,7 +47,7 @@ function browseFile(filter) {
 
 // Load the model and its SentencePiece tokenizer in parallel (both async, so
 // the UI stays live during the ~2.4 GB weight upload).
-function loadModel(dir) {
+export function loadModel(dir) {
   dir = (dir || '').trim().replace(/[\\\/]+$/, '');
   if (!dir) { setBadge('pick a model directory', true); return; }
   if (!fileExists(dir + '/config.json')) { setBadge('no config.json in ' + dir, true); return; }

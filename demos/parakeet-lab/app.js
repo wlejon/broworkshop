@@ -3,6 +3,11 @@
 // the encoder frame it was decoded from. See lib/state.js for the module map
 // and the mic/file → transcribe → timeline loop this app is built around.
 
+import { $ } from "/app/lib/state.js";
+import { setBadge, browseFolder, loadModel, browseFile, defaultModelDir, fileExists } from "/app/lib/model.js";
+import { decodeFileToSource, recording, startRecording, stopRecording, playClipId } from "/app/lib/audio.js";
+import { setSource, transcribing, srcClipId, runTranscribe, cancelTranscribe } from "/app/lib/transcribe.js";
+
 function loadSourceFile() {
   const path = $('#src-file').value.trim();
   if (!path) { setBadge('pick an audio file', true); return; }

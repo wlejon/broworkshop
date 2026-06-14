@@ -2,9 +2,7 @@
 //
 // The left rail. Lists every op in the registry grouped by category;
 // clicking one drops a fresh node into the editor.
-(function () {
-  'use strict';
-  const Lab = (window.Lab = window.Lab || {});
+import { Ops } from "/app/lab/ops.js";
 
   function el(tag, cls, html) {
     const e = document.createElement(tag);
@@ -16,8 +14,8 @@
   function create(panel, onAdd) {
     panel.innerHTML = '';
     panel.appendChild(el('div', 'pal-title', 'OPERATIONS'));
-    for (const cat of Lab.Ops.categories()) {
-      const ops = Lab.Ops.byCategory(cat);
+    for (const cat of Ops.categories()) {
+      const ops = Ops.byCategory(cat);
       if (!ops.length) continue;
       panel.appendChild(el('div', 'pal-cat', cat));
       for (const def of ops) {
@@ -36,5 +34,4 @@
       'select + Delete to remove.'));
   }
 
-  Lab.Palette = { create: create };
-})();
+  export const Palette = { create: create };

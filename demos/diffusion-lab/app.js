@@ -4,10 +4,13 @@
 // API the binding was built for: a worker owns the pipeline, the main
 // thread paces one denoising step per worker round-trip, stores every
 // frame for scrubbing, and renders — or steers — cross-attention.
-(function () {
-  'use strict';
+import { Tokenizer } from "/app/lab/tokenizer.js";
+import { Profiles } from "/app/lab/profiles.js";
+import { Client } from "/app/lab/client.js";
+import { Viewport } from "/app/lab/viewport.js";
+import { Attention } from "/app/lab/attention.js";
 
-  var DLab = window.DLab;
+  const DLab = { Tokenizer, Profiles, Client, Viewport, Attention };
   function $(id) { return document.getElementById(id); }
 
   // ── persisted UI state ───────────────────────────────────────────────
@@ -1060,4 +1063,3 @@
   } else {
     window.addEventListener('load', start);
   }
-})();

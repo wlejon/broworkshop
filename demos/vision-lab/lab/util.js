@@ -6,9 +6,6 @@
 // either an ImageBitmap or an `{ data, width, height }` ImageData shape; we keep
 // the canonical input as an ImageBitmap (drawable on the stage AND a valid
 // vision input AND a WebGL texture source).
-(function () {
-  'use strict';
-
   // The app's absolute directory. The engine resolves `fs` relative paths
   // against the app dir, but `new Image().src` resolves against a process-global
   // base that other contexts (system panels) can clobber — so a bare
@@ -79,8 +76,7 @@
   // Human-readable byte / count formatting for metadata panels.
   function fmtInt(n) { return n.toLocaleString ? n.toLocaleString() : '' + n; }
 
-  window.VLab = window.VLab || {};
-  window.VLab.Util = {
+  export const Util = {
     appBase: APP_BASE,
     appPath: appPath,
     isAbsolute: isAbsolute,
@@ -90,4 +86,3 @@
     classHistogram: classHistogram,
     fmtInt: fmtInt,
   };
-})();

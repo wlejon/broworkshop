@@ -20,7 +20,7 @@
 // duplicated). If they're missing the rig degrades to a tuned flat ambient so
 // the app still runs.
 
-(function (root) {
+export const createLighting = (function () {
 
     const HDRI = '../lighting-demo/hdri/';
 
@@ -229,6 +229,6 @@
         };
     }
 
-    root.createLighting = createLighting;
+    return createLighting;
 
-})(globalThis);
+})();

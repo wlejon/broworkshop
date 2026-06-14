@@ -9,9 +9,7 @@
 // The graph is built from the same ops as the freeform editor — embedding,
 // rmsnorm, t5-relbias, t5-attention, t5-ffn, add — so every layer is a
 // navigable circuit, not an opaque blob.
-(function () {
-  'use strict';
-  const Lab = (window.Lab = window.Lab || {});
+import { autoLayout } from "/app/lab/presets.js";
 
   // first present name from a candidate list
   function firstName(hdr, cands) {
@@ -105,16 +103,15 @@
       link(x, add('rmsnorm', null, { g: 'encoder.final_layer_norm.weight' }));
     }
 
-    if (Lab.autoLayout) Lab.autoLayout(graph);
+    if (autoLayout) autoLayout(graph);
     graph.propagate();
     cfg.builtLayers = nLayers;
     cfg.seqLen = seqLen;
     return cfg;
   }
 
-  Lab.T5 = {
+  export const T5 = {
     open: function (path) { return bro.tensor.openSafetensors(path); },
     inferConfig: inferConfig,
     importEncoder: importEncoder,
   };
-})();

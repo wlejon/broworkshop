@@ -6,11 +6,13 @@
 // via onReady/onDone); SAM gets the interactive setImage → click/box → segment
 // flow plus the automatic "segment everything" generator. The model registry
 // (lab/models.js) is the single source of truth; this file is wiring.
-(function () {
-  'use strict';
+import { Util } from "/app/lab/util.js";
+import { Models } from "/app/lab/models.js";
+import { Stage } from "/app/lab/stage.js";
+import { Sam } from "/app/lab/sam.js";
 
   function $(id) { return document.getElementById(id); }
-  var U = window.VLab.Util, Models = window.VLab.Models;
+  var U = Util;
 
   var STORE_KEY = 'vision-lab.v1';
   function loadPrefs() {
@@ -23,7 +25,7 @@
   }
 
   function start() {
-    if (!$('view') || !window.VLab.Stage || !window.VLab.Sam) {
+    if (!$('view') || !Stage || !Sam) {
       requestAnimationFrame(start); return;
     }
     init();
@@ -31,8 +33,8 @@
 
   function init() {
     var prefs = loadPrefs();
-    var stage = window.VLab.Stage.create($('view'));
-    var samCtl = window.VLab.Sam.create();
+    var stage = Stage.create($('view'));
+    var samCtl = Sam.create();
 
     // session state
     var weightsRoot = prefs.weightsRoot ||
@@ -622,4 +624,3 @@
   }
 
   start();
-})();
