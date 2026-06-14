@@ -1,8 +1,17 @@
 // app.js — entry point + core Game module.
 'use strict';
-var F = window.F = window.F || {};
+import { Canvas } from "/lib/canvas.js";
+import { Hud } from "/lib/hud.js";
+import { GameLoop } from "/lib/loop.js";
+import { Audio } from "/app/audio.js";
+import { Economy } from "/app/economy.js";
+import { Particles } from "/app/particles.js";
+import { Fish } from "/app/fish.js";
+import { Intruders } from "/app/intruders.js";
+import { Pets } from "/app/pets.js";
+import { Screens } from "/app/screens.js";
 
-F.Game = (function () {
+export const Game = (function () {
     var canvas, ctx;
 
     // World state
@@ -46,8 +55,8 @@ F.Game = (function () {
             wobble: Math.random() * Math.PI * 2,
             age: 0
         });
-        F.Particles.splash(x, tankTop);
-        F.Audio.splash();
+        Particles.splash(x, tankTop);
+        Audio.splash();
     }
 
     function addCoin(x, y, tier, value) {
@@ -63,7 +72,7 @@ F.Game = (function () {
             spin: Math.random() * Math.PI * 2,
             settled: false
         });
-        F.Audio.coinDrop(tier);
+        Audio.coinDrop(tier);
     }
 
     function collectCoin(c) {
@@ -73,61 +82,61 @@ F.Game = (function () {
         slot.coins += c.value;
         slot.totalCoins = (slot.totalCoins || 0) + c.value;
         coinsGainedToday += c.value;
-        F.Audio.coinGet(c.tier);
-        F.Particles.floatText(c.x, c.y - 10, '+' + c.value, '#f2c95b');
+        Audio.coinGet(c.tier);
+        Particles.floatText(c.x, c.y - 10, '+' + c.value, '#f2c95b');
     }
 
     function onFishAte(f) {
-        F.Audio.chomp();
-        F.Particles.spark(f.x, f.y, '#ffd080', 4);
+        Audio.chomp();
+        Particles.spark(f.x, f.y, '#ffd080', 4);
     }
 
     function damageIntruder(iu, amt) {
-        var died = F.Intruders.damage(iu, amt);
+        var died = Intruders.damage(iu, amt);
         if (died) {
-            F.Audio.intruderDie();
-            F.Particles.spark(iu.x, iu.y, iu.def.color, 14);
-            F.Particles.shake(4);
+            Audio.intruderDie();
+            Particles.spark(iu.x, iu.y, iu.def.color, 14);
+            Particles.shake(4);
             // drop bonus coins
             slot.coins += iu.def.reward;
             slot.totalCoins = (slot.totalCoins || 0) + iu.def.reward;
             coinsGainedToday += iu.def.reward;
-            F.Particles.floatText(iu.x, iu.y, '+' + iu.def.reward, '#c0ff70');
+            Particles.floatText(iu.x, iu.y, '+' + iu.def.reward, '#c0ff70');
             intrudersKilledToday++;
         } else {
-            F.Audio.hit();
-            F.Particles.spark(iu.x, iu.y, '#ff6060', 5);
+            Audio.hit();
+            Particles.spark(iu.x, iu.y, '#ff6060', 5);
         }
     }
 
     function spawnIntruder(type) {
-        var def = F.Intruders.TYPES[type] || F.Intruders.TYPES.snatcher;
+        var def = Intruders.TYPES[type] || Intruders.TYPES.snatcher;
         var fromLeft = Math.random() < 0.5;
         var x = fromLeft ? tankLeft - 40 : tankRight + 40;
         var y = rand(tankTop + 40, tankBottom - 40);
-        var iu = F.Intruders.makeIntruder(type, x, y, slot ? slot.day : 1);
+        var iu = Intruders.makeIntruder(type, x, y, slot ? slot.day : 1);
         intruders.push(iu);
-        F.Audio.intruderRoar();
+        Audio.intruderRoar();
     }
 
     function onEggLay(x, y) {
         // Immediately hatch a tier-1 baby fish (if capacity allows).
         if (!slot) return;
-        var cap = F.Economy.maxFishCap(slot);
+        var cap = Economy.maxFishCap(slot);
         if (fish.filter(function (f) { return !f.dead; }).length >= cap) return;
-        var nf = F.Fish.makeFish(1, x, y);
+        var nf = Fish.makeFish(1, x, y);
         nf.size = 4;
         fish.push(nf);
-        F.Particles.spark(x, y, '#a8f06c', 8);
-        F.Audio.hatch();
+        Particles.spark(x, y, '#a8f06c', 8);
+        Audio.hatch();
     }
 
     // ---- Game setup ----
     function startGame(slotN) {
-        slot = F.Economy.loadSlot(slotN);
+        slot = Economy.loadSlot(slotN);
         slot.slot = slotN;
-        F.Economy.settings.activeSlot = slotN;
-        F.Economy.saveSettings();
+        Economy.settings.activeSlot = slotN;
+        Economy.saveSettings();
         // Ensure at least a couple starter fish for new slots.
         if (!slot.fish || slot.fish.length === 0) {
             slot.fish = [{ tier: 1 }, { tier: 1 }];
@@ -135,7 +144,7 @@ F.Game = (function () {
     }
 
     function enterPlayScreen() {
-        F.Economy.saveSlot(slot);
+        Economy.saveSlot(slot);
         beginDay();
     }
 
@@ -144,25 +153,25 @@ F.Game = (function () {
         pellets = [];
         coins = [];
         intruders = [];
-        F.Particles.reset();
+        Particles.reset();
         // Build fish from inventory
         var Wd = getW(), Hd = getH();
         computeLayout(Wd, Hd);
         for (var i = 0; i < slot.fish.length; i++) {
-            var def = F.Economy.fishById(slot.fish[i].tier) || F.Economy.FISH_TIERS[0];
+            var def = Economy.fishById(slot.fish[i].tier) || Economy.FISH_TIERS[0];
             var x = rand(tankLeft + 50, tankRight - 50);
             var y = rand(tankTop + 60, tankBottom - 60);
-            var f = F.Fish.makeFish(def.id, x, y);
+            var f = Fish.makeFish(def.id, x, y);
             f.size = def.size; f.grown = true; f.hunger = 80;
             fish.push(f);
         }
-        activePet = slot.activePet ? F.Pets.makeActivePet(slot.activePet) : null;
+        activePet = slot.activePet ? Pets.makeActivePet(slot.activePet) : null;
 
         dayTimer = 0;
         coinsGainedToday = 0;
         intrudersKilledToday = 0;
         lastDayBonus = 0;
-        waveSchedule = F.Intruders.spawnWaveForDay(slot.day, Math.random);
+        waveSchedule = Intruders.spawnWaveForDay(slot.day, Math.random);
         waveCursor = 0;
         nextStatus = 'playing';
     }
@@ -193,24 +202,24 @@ F.Game = (function () {
             tankLeft: tankLeft, tankRight: tankRight, tankTop: tankTop, tankBottom: tankBottom,
             fish: fish, pellets: pellets, coins: coins, intruders: intruders,
             pelletTier: function () { return slot.pelletTier; },
-            filterMult: function () { return F.Economy.filterMult(slot); },
+            filterMult: function () { return Economy.filterMult(slot); },
             onCoinDrop: function (x, y, tier, val) { addCoin(x, y, tier, val); },
             onFishAte: onFishAte,
             onEggLay: onEggLay,
-            onFishEaten: function (f) { F.Audio.fishDie(); F.Particles.spark(f.x, f.y, '#ff6080', 10); },
+            onFishEaten: function (f) { Audio.fishDie(); Particles.spark(f.x, f.y, '#ff6080', 10); },
             onCoinTaken: function (c) {
                 // siphoner took the coin
-                F.Particles.spark(c.x, c.y, '#ff4040', 6);
+                Particles.spark(c.x, c.y, '#ff4040', 6);
             },
             addPellet: function (x, y) { addPellet(x, y != null ? y : tankTop + 20); },
             addCoinAt: function (x, y, tier, val) { addCoin(x, y, tier, val); },
             collectCoin: collectCoin,
             damageIntruder: damageIntruder,
-            onAlchemUpgrade: function (c) { F.Particles.spark(c.x, c.y, '#b06acb', 6); }
+            onAlchemUpgrade: function (c) { Particles.spark(c.x, c.y, '#b06acb', 6); }
         };
 
         for (var i = fish.length - 1; i >= 0; i--) {
-            F.Fish.step(fish[i], ms, worldCtx);
+            Fish.step(fish[i], ms, worldCtx);
             if (fish[i]._despawn) fish.splice(i, 1);
         }
 
@@ -247,15 +256,15 @@ F.Game = (function () {
 
         // Intruders
         for (var m = intruders.length - 1; m >= 0; m--) {
-            F.Intruders.step(intruders[m], ms, worldCtx);
+            Intruders.step(intruders[m], ms, worldCtx);
             if (intruders[m]._despawn) intruders.splice(m, 1);
         }
 
         // Pet
-        if (activePet) F.Pets.step(activePet, ms, worldCtx);
+        if (activePet) Pets.step(activePet, ms, worldCtx);
 
         // Particles
-        F.Particles.update(ms, Wd, Hd);
+        Particles.update(ms, Wd, Hd);
 
         // Prune dead fish after float animation
         for (var q = fish.length - 1; q >= 0; q--) {
@@ -271,7 +280,7 @@ F.Game = (function () {
             // zero fish alive -> check if inventory also empty (no retry)
             // Actually end now
             slot.fish = []; // lose them all
-            F.Economy.saveSlot(slot);
+            Economy.saveSlot(slot);
             nextStatus = 'gameover';
         }
         if (dayTimer >= DAY_MS && nextStatus === 'playing') {
@@ -290,13 +299,13 @@ F.Game = (function () {
         slot.totalCoins = (slot.totalCoins || 0) + bonus;
         lastDayBonus = bonus;
         if (slot.day > (slot.bestDay || 0)) slot.bestDay = slot.day;
-        F.Economy.saveSlot(slot);
+        Economy.saveSlot(slot);
         nextStatus = 'dayclear';
     }
 
     function advanceToNextDay() {
         slot.day = (slot.day || 1) + 1;
-        F.Economy.saveSlot(slot);
+        Economy.saveSlot(slot);
         beginDay();
     }
 
@@ -305,23 +314,23 @@ F.Game = (function () {
         slot.fish = [{ tier: 1 }, { tier: 1 }];
         slot.day = 1;
         slot.coins = Math.max(slot.coins, 150);
-        F.Economy.saveSlot(slot);
+        Economy.saveSlot(slot);
     }
 
     // ---- Shop buys ----
     function shopBuyAt(idx) {
-        var items = F.Economy.shopCatalog(slot);
+        var items = Economy.shopCatalog(slot);
         var it = items[idx];
         if (!it || it.disabled) return { ok: false };
         var res;
-        if (it.kind === 'pellet') res = F.Economy.buyPelletNext(slot);
+        if (it.kind === 'pellet') res = Economy.buyPelletNext(slot);
         else if (it.kind === 'fish') {
-            res = F.Economy.buyFish(slot, it.id);
+            res = Economy.buyFish(slot, it.id);
         }
-        else if (it.kind === 'upgrade') res = F.Economy.buyUpgrade(slot, it.id);
-        else if (it.kind === 'pet') res = F.Economy.buyPet(slot, it.id);
+        else if (it.kind === 'upgrade') res = Economy.buyUpgrade(slot, it.id);
+        else if (it.kind === 'pet') res = Economy.buyPet(slot, it.id);
         else res = { ok: false };
-        if (res.ok) F.Economy.saveSlot(slot);
+        if (res.ok) Economy.saveSlot(slot);
         return res;
     }
 
@@ -329,31 +338,31 @@ F.Game = (function () {
     function buy(item) {
         if (!slot) return { ok: false };
         var res;
-        if (item === 'pellet') res = F.Economy.buyPelletNext(slot);
+        if (item === 'pellet') res = Economy.buyPelletNext(slot);
         else if (item.indexOf('fish_tier') === 0) {
             var t = parseInt(item.substr('fish_tier'.length), 10);
-            res = F.Economy.buyFish(slot, t);
+            res = Economy.buyFish(slot, t);
             if (res.ok) {
                 var Wd = getW(), Hd = getH();
                 computeLayout(Wd, Hd);
-                var f = F.Fish.makeFish(t, rand(tankLeft + 60, tankRight - 60), rand(tankTop + 60, tankBottom - 60));
+                var f = Fish.makeFish(t, rand(tankLeft + 60, tankRight - 60), rand(tankTop + 60, tankBottom - 60));
                 f.size = f.def.size * 0.6;
                 fish.push(f);
             }
         }
         else if (item.indexOf('upgrade_') === 0) {
-            res = F.Economy.buyUpgrade(slot, item.substr('upgrade_'.length));
+            res = Economy.buyUpgrade(slot, item.substr('upgrade_'.length));
         }
         else if (item.indexOf('pet_') === 0) {
             var pid = item.substr('pet_'.length);
-            res = F.Economy.buyPet(slot, pid);
+            res = Economy.buyPet(slot, pid);
             if (res.ok) {
-                activePet = F.Pets.makeActivePet(pid);
+                activePet = Pets.makeActivePet(pid);
                 slot.activePet = pid;
             }
         }
         else res = { ok: false, reason: 'UNKNOWN' };
-        if (res && res.ok) F.Economy.saveSlot(slot);
+        if (res && res.ok) Economy.saveSlot(slot);
         return res;
     }
 
@@ -394,7 +403,7 @@ F.Game = (function () {
         // 3. Drop pellet if click is inside the tank
         if (y > tankTop + 5 && y < tankBottom - 5 && x > tankLeft && x < tankRight) {
             addPellet(x, tankTop + 15);
-            F.Audio.feed();
+            Audio.feed();
         }
     }
 
@@ -407,7 +416,7 @@ F.Game = (function () {
         Hud.text('#hud-time', String(secLeft));
         var aliveFish = 0;
         for (var i = 0; i < fish.length; i++) if (!fish[i].dead) aliveFish++;
-        Hud.text('#hud-fish', aliveFish + '/' + F.Economy.maxFishCap(slot));
+        Hud.text('#hud-fish', aliveFish + '/' + Economy.maxFishCap(slot));
         Hud.text('#hud-pet', slot.activePet ? slot.activePet.toUpperCase() : '-');
     }
 
@@ -416,7 +425,7 @@ F.Game = (function () {
         computeLayout(Wd, Hd);
         // Background water
         var g = dctx.createLinearGradient(0, tankTop, 0, tankBottom);
-        var lightMult = slot ? F.Economy.lightMult(slot) : 1.0;
+        var lightMult = slot ? Economy.lightMult(slot) : 1.0;
         var topCol = shadeHex('#155874', lightMult - 1);
         var botCol = shadeHex('#061a2a', 0);
         g.addColorStop(0, topCol);
@@ -443,7 +452,7 @@ F.Game = (function () {
         drawPlant(dctx, tankRight - 80, tankBottom - 14, 120);
 
         // Particles (bubbles layer)
-        F.Particles.draw(dctx);
+        Particles.draw(dctx);
 
         // Pellets
         for (var i = 0; i < pellets.length; i++) {
@@ -467,16 +476,16 @@ F.Game = (function () {
 
         // Fish
         for (var k = 0; k < fish.length; k++) {
-            F.Fish.draw(dctx, fish[k]);
+            Fish.draw(dctx, fish[k]);
         }
 
         // Intruders
         for (var m = 0; m < intruders.length; m++) {
-            F.Intruders.draw(dctx, intruders[m]);
+            Intruders.draw(dctx, intruders[m]);
         }
 
         // Pet
-        if (activePet) F.Pets.draw(dctx, activePet);
+        if (activePet) Pets.draw(dctx, activePet);
     }
 
     function drawCoin(dctx, c) {
@@ -549,20 +558,20 @@ F.Game = (function () {
         canvas = document.getElementById('game');
         ctx = canvas.getContext('2d');
 
-        F.Economy.settings; // init defaults
-        F.Audio.init();
-        F.Screens.init();
+        Economy.settings; // init defaults
+        Audio.init();
+        Screens.init();
 
         // Keyboard routing
         document.body.addEventListener('keydown', function (e) {
-            var name = F.Screens.manager().name();
+            var name = Screens.manager().name();
             if (e.repeat && name === 'playing') return;
-            F.Screens.manager().keydown(e.key);
+            Screens.manager().keydown(e.key);
         });
 
         // Canvas mouse routing during gameplay only.
         canvas.addEventListener('mousedown', function (e) {
-            var name = F.Screens.manager().name();
+            var name = Screens.manager().name();
             if (name !== 'playing') return;
             var r = canvas.getBoundingClientRect();
             var sx = getW() / r.width;
@@ -572,14 +581,14 @@ F.Game = (function () {
             clickAt(x, y);
         });
 
-        F.Screens.switchTo('title');
+        Screens.switchTo('title');
 
         var loop = GameLoop.create({
-            tick: function (dt) { F.Screens.manager().update(dt, getW(), getH()); },
+            tick: function (dt) { Screens.manager().update(dt, getW(), getH()); },
             draw: function () {
                 var Wd = getW(), Hd = getH();
                 ctx.clearRect(0, 0, Wd, Hd);
-                F.Screens.manager().draw(ctx, Wd, Hd);
+                Screens.manager().draw(ctx, Wd, Hd);
             }
         });
         loop.start();
@@ -615,7 +624,7 @@ F.Game = (function () {
             };
         },
         _forceEndDay: function () { endDay(); },
-        _addCoins: function (n) { slot.coins += n; slot.totalCoins = (slot.totalCoins||0) + n; F.Economy.saveSlot(slot); },
+        _addCoins: function (n) { slot.coins += n; slot.totalCoins = (slot.totalCoins||0) + n; Economy.saveSlot(slot); },
         _addPellet: addPellet,
         _addCoin: addCoin,
         _spawnIntruder: spawnIntruder,
@@ -644,27 +653,27 @@ F.Game = (function () {
 })();
 
 // ---- Entry ----
-(function () {
-    var loop = F.Game.init();
+{
+    var loop = Game.init();
 
     // Expose test hooks
     window.__fintank = {
-        F: F,
-        state: function () { return F.Game._state(); },
-        feed: function (x) { F.Game._addPellet(x != null ? x : 600, 100); },
-        buy: function (item) { return F.Game.buy(item); },
-        addCoins: function (n) { F.Game._addCoins(n); },
-        spawnIntruder: function (type) { F.Game._spawnIntruder(type || 'snatcher'); },
-        killAllIntruders: function () { F.Game._killAllIntruders(); },
-        collectAllCoins: function () { F.Game._collectAllCoins(); },
-        feedFish: function (i) { F.Game._feedFish(i); },
-        endDay: function () { F.Game._forceEndDay(); },
-        dayProgress: function () { var s = F.Game._state(); return s.dayTimer; },
-        screens: F.Screens,
-        game: F.Game,
-        economy: F.Economy,
+        F: { Audio: Audio, Economy: Economy, Particles: Particles, Fish: Fish, Intruders: Intruders, Pets: Pets, Screens: Screens, Game: Game },
+        state: function () { return Game._state(); },
+        feed: function (x) { Game._addPellet(x != null ? x : 600, 100); },
+        buy: function (item) { return Game.buy(item); },
+        addCoins: function (n) { Game._addCoins(n); },
+        spawnIntruder: function (type) { Game._spawnIntruder(type || 'snatcher'); },
+        killAllIntruders: function () { Game._killAllIntruders(); },
+        collectAllCoins: function () { Game._collectAllCoins(); },
+        feedFish: function (i) { Game._feedFish(i); },
+        endDay: function () { Game._forceEndDay(); },
+        dayProgress: function () { var s = Game._state(); return s.dayTimer; },
+        screens: Screens,
+        game: Game,
+        economy: Economy,
         loop: loop
     };
 
     console.log('Fintank loaded.');
-})();
+}

@@ -10,9 +10,7 @@
 //
 // Paths are designed to use the full viewport and curl back so the
 // shooter always has visible chain to target.
-var SC = SC || {};
-
-SC.Levels = (function () {
+export const Levels = (function () {
     "use strict";
 
     var W = 1280, H = 800;

@@ -1,5 +1,5 @@
 // audio.js — SFX layer over lib/audio (SFX). Original cues only — no samples.
-var N = N || {};
+import { SFX } from "/lib/audio.js";
 
 // Pitched sweep — rising or falling glide used for lock tone and enemy sweep.
 // Approximates a frequency slide via two crossfaded tones since SFX has no
@@ -35,7 +35,7 @@ function _sweep(f0, f1, dur, wave, vol) {
     } catch (e) {}
 }
 
-N.Audio = {
+export const Audio = {
     init: function() { SFX.init(); },
 
     // --- Weapons ---

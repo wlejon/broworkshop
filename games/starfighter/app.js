@@ -1,6 +1,11 @@
 // app.js — Entry point: canvas, input wiring, game loop.
-(function() {
-"use strict";
+import { Storage } from "/app/storage.js";
+import { Audio } from "/app/audio.js";
+import { Screens } from "/app/screens.js";
+import { Game } from "/app/game.js";
+import { Input } from "/lib/input.js";
+import { Canvas } from "/lib/canvas.js";
+import { GameLoop } from "/lib/loop.js";
 
 var canvas = document.getElementById("game");
 var ctx = canvas.getContext("2d");
@@ -8,8 +13,8 @@ var ctx = canvas.getContext("2d");
 function getW() { return Canvas.w(ctx, 1024); }
 function getH() { return Canvas.h(ctx, 768); }
 
-N.Storage.load();
-N.Audio.init();
+Storage.load();
+Audio.init();
 
 // Standard action vocabulary plus a few starfighter-specific additions.
 // Keep names aligned with apps/lib/input.js STANDARD_ACTIONS so the
@@ -27,20 +32,20 @@ Input.init([
 ]);
 Input.attach(window);
 
-N.Screens.init(getW(), getH());
+Screens.init(getW(), getH());
 
 Input.onAction(function(action, phase, key) {
     if (phase !== "down") return;
-    var name = N.Screens.getName();
+    var name = Screens.getName();
     if (name === "playing") {
-        if (action === "pause")   N.Screens.keydown("Escape", getW(), getH());
-        if (action === "target")  N.Screens.keydown("t", getW(), getH());
+        if (action === "pause")   Screens.keydown("Escape", getW(), getH());
+        if (action === "target")  Screens.keydown("t", getW(), getH());
         return;
     }
-    if (action === "up")          N.Screens.keydown("ArrowUp",   getW(), getH());
-    else if (action === "down")   N.Screens.keydown("ArrowDown", getW(), getH());
-    else if (action === "confirm")N.Screens.keydown("Enter",     getW(), getH());
-    else if (action === "pause")  N.Screens.keydown("Escape",    getW(), getH());
+    if (action === "up")          Screens.keydown("ArrowUp",   getW(), getH());
+    else if (action === "down")   Screens.keydown("ArrowDown", getW(), getH());
+    else if (action === "confirm")Screens.keydown("Enter",     getW(), getH());
+    else if (action === "pause")  Screens.keydown("Escape",    getW(), getH());
 });
 
 // --- Mouse yoke: normalized to -1..1. -------------------------------------
@@ -84,19 +89,19 @@ canvas.addEventListener("mousemove", function(ev) {
         // Accumulate locked deltas. Y inverted — pull-up to climb.
         vYokeX = clamp1(vYokeX + ev.movementX * YOKE_SENSITIVITY);
         vYokeY = clamp1(vYokeY - ev.movementY * YOKE_SENSITIVITY);
-        N.Game.setYoke(vYokeX, vYokeY);
+        Game.setYoke(vYokeX, vYokeY);
         return;
     }
     var p = toCanvasCoords(ev);
     var y = toYoke(p.x, p.y, getW(), getH());
-    N.Game.setYoke(y.x, y.y);
+    Game.setYoke(y.x, y.y);
 });
 
 canvas.addEventListener("mousedown", function(ev) {
-    if (ev.button === 0 || ev.button === 2) N.Game.setFire(true);
+    if (ev.button === 0 || ev.button === 2) Game.setFire(true);
 });
 window.addEventListener("mouseup", function(ev) {
-    if (ev.button === 0 || ev.button === 2) N.Game.setFire(false);
+    if (ev.button === 0 || ev.button === 2) Game.setFire(false);
 });
 canvas.addEventListener("contextmenu", function(ev) { ev.preventDefault(); });
 
@@ -108,7 +113,7 @@ document.addEventListener("pointerlockchange", function() {
     if (pointerLocked) { vYokeX = 0; vYokeY = 0; }
 });
 
-N.Screens.setOnPlayingChange(function(isPlaying) {
+Screens.setOnPlayingChange(function(isPlaying) {
     if (isPlaying) {
         // Must be called from within a user gesture (click/keydown) — it is:
         // every "enter playing" transition is triggered by a menu click or Enter.
@@ -121,17 +126,16 @@ N.Screens.setOnPlayingChange(function(isPlaying) {
 // Space also fires (keyboard fallback).
 Input.onAction(function(action, phase) {
     if (action !== "primary") return;
-    N.Game.setFire(phase === "down");
+    Game.setFire(phase === "down");
 });
 
-N.Screens.switchTo("title");
+Screens.switchTo("title");
 
 GameLoop.create({
-    tick: function(dt) { N.Screens.update(dt, getW(), getH()); },
+    tick: function(dt) { Screens.update(dt, getW(), getH()); },
     draw: function()   {
         var W = getW(), H = getH();
         ctx.clearRect(0, 0, W, H);
-        N.Screens.draw(ctx, W, H);
+        Screens.draw(ctx, W, H);
     }
 }).start();
-})();

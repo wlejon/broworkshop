@@ -4,7 +4,6 @@
 // menu key navigation to the library.
 
 'use strict';
-(function (global) {
 
     // Build level select grid from store state.
     function renderLevelGrid(gridEl, LEVELS, store, onClick) {
@@ -86,8 +85,6 @@
         bind('screenshake', 'screenshake', 'bool');
     }
 
-    global.PegScreens = {
+    export const PegScreens = {
         renderLevelGrid, renderGuideCards, renderHighScores, renderSettings,
     };
-
-})(typeof window !== 'undefined' ? window : globalThis);

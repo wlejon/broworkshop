@@ -6,8 +6,9 @@
 // for the renderer to pick up.
 
 'use strict';
-(function (global) {
-    const P = global.Physics;
+import { Physics } from "/app/physics.js";
+
+    const P = Physics;
 
     const GUIDES = [
         {
@@ -89,5 +90,4 @@
 
     function byId(id) { return GUIDES.find(g => g.id === id) || GUIDES[0]; }
 
-    global.Guides = { GUIDES, byId };
-})(typeof window !== 'undefined' ? window : globalThis);
+    export const Guides = { GUIDES, byId };

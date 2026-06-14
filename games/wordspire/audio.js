@@ -1,12 +1,13 @@
 // audio.js — wordspire SFX. Ascending pitch per chain length, stingers.
 'use strict';
-var W = window.W = window.W || {};
+import { SFX } from "/lib/audio.js";
+import { Storage } from "/app/storage.js";
 
-W.Audio = (function () {
+export const Audio = (function () {
     function init() {
         return SFX.init({
-            sfxVol: W.Storage.settings.sfxVol / 100,
-            musicVol: W.Storage.settings.musicVol / 100
+            sfxVol: Storage.settings.sfxVol / 100,
+            musicVol: Storage.settings.musicVol / 100
         });
     }
 

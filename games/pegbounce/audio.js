@@ -2,7 +2,7 @@
 // Peg-hit pitch climbs a chromatic ladder with combo count.
 
 'use strict';
-(function (global) {
+import { SFX } from "/lib/audio.js";
 
     // Chromatic ladder of frequencies: C4 to C6 and then saturates.
     const LADDER = (function () {
@@ -17,7 +17,7 @@
         return LADDER[i];
     }
 
-    const Sfx = {
+    export const Sfx = {
         init(vol) { SFX.init({ sfxVol: vol || 0.8 }); },
         pegHit(combo) {
             const f = ladderFreq(combo);
@@ -53,5 +53,3 @@
         menuSelect(){ SFX.tone(660, 0.06, 'square', 0.45); },
     };
 
-    global.Sfx = Sfx;
-})(typeof window !== 'undefined' ? window : globalThis);

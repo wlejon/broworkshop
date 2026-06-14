@@ -8,9 +8,12 @@
 //     four cosmetic wingtip bolts travel toward the convergence point.
 //   • Enemies advance along parametric flight paths and spawn bolts that
 //     travel toward the player's position at fire time.
-var N = N || {};
+import { Waves } from "/app/waves.js";
+import { Render } from "/app/render.js";
+import { Enemies } from "/app/enemies.js";
+import { Audio } from "/app/audio.js";
 
-N.Game = (function() {
+export const Game = (function() {
     "use strict";
 
     // --- Tunables ----------------------------------------------------------
@@ -40,7 +43,7 @@ N.Game = (function() {
     function resetState() {
         state = {
             score: 0, loop: 1, sector: 1,
-            wave: N.Waves.startingWave(),
+            wave: Waves.startingWave(),
             shields: START_SHIELDS,
             gameOver: false, paused: false,
             victoryPending: false,
@@ -71,7 +74,7 @@ N.Game = (function() {
     function setViewport(W, H) {
         if (!state) return;
         state.W = W; state.H = H;
-        N.Render.setViewport(W, H);
+        Render.setViewport(W, H);
     }
     function setYoke(nx, ny) {
         if (!state) return;
@@ -94,9 +97,9 @@ N.Game = (function() {
     function start(W, H) {
         resetState();
         setViewport(W, H);
-        N.Render.initStars();
+        Render.initStars();
         enterWave();
-        N.Audio.sfxWave();
+        Audio.sfxWave();
     }
 
     function enterWave() {
@@ -106,12 +109,12 @@ N.Game = (function() {
         state.playerBolts.length = 0;
         state.enemyBolts.length = 0;
         state.explosions.length = 0;
-        state.wavescript = N.Waves.create(state.wave, api);
-        if (state.wave === N.Waves.SPACE) {
+        state.wavescript = Waves.create(state.wave, api);
+        if (state.wave === Waves.SPACE) {
             radio("SECTOR " + state.loop + "-1  ::  ENEMY FIGHTERS INBOUND", 2600);
-        } else if (state.wave === N.Waves.SURFACE) {
+        } else if (state.wave === Waves.SURFACE) {
             radio("SECTOR " + state.loop + "-2  ::  CITADEL SURFACE  ::  TOWERS HOT", 2600);
-        } else if (state.wave === N.Waves.TRENCH) {
+        } else if (state.wave === Waves.TRENCH) {
             radio("SECTOR " + state.loop + "-3  ::  TRENCH APPROACH  ::  HIT THE VENT", 2600);
         }
     }
@@ -124,55 +127,55 @@ N.Game = (function() {
     function completeWave() {
         // Bonus shield (if we're below cap).
         if (state.shields < MAX_SHIELDS) {
-            state.shields = Math.min(MAX_SHIELDS, state.shields + N.Waves.waveCompleteBonusShields());
-            N.Audio.sfxBonusShield();
+            state.shields = Math.min(MAX_SHIELDS, state.shields + Waves.waveCompleteBonusShields());
+            Audio.sfxBonusShield();
         }
 
         // Sector bonus scaled by loop.
-        var bonus = (SECTOR_BONUS[state.wave] || 0) * N.Waves.loopScale(state.loop);
+        var bonus = (SECTOR_BONUS[state.wave] || 0) * Waves.loopScale(state.loop);
         bonus = Math.round(bonus);
         if (bonus > 0) {
             addScore(bonus);
             radio("SECTOR CLEAR  +" + bonus, 2200);
         }
 
-        var next = N.Waves.nextWave(state.wave);
+        var next = Waves.nextWave(state.wave);
         if (!next) {
             // Trench victory: additional shield bonus — reward surviving the climax.
-            var sb = state.shields * SHIELD_BONUS_PER * N.Waves.loopScale(state.loop);
+            var sb = state.shields * SHIELD_BONUS_PER * Waves.loopScale(state.loop);
             sb = Math.round(sb);
             if (sb > 0) addScore(sb);
             state.victoryPending = true;
             return;
         }
         state.wave = next;
-        state.sector = (state.wave === N.Waves.SPACE ? 1 : state.wave === N.Waves.SURFACE ? 2 : 3);
+        state.sector = (state.wave === Waves.SPACE ? 1 : state.wave === Waves.SURFACE ? 2 : 3);
         enterWave();
-        N.Audio.sfxWave();
+        Audio.sfxWave();
     }
 
     function advanceLoop() {
         state.loop += 1;
         state.sector = 1;
-        state.wave = N.Waves.SPACE;
+        state.wave = Waves.SPACE;
         state.victoryPending = false;
         enterWave();
-        N.Audio.sfxWave();
+        Audio.sfxWave();
     }
 
     function takeDamage(amount) {
         amount = amount || 1;
         state.shields -= amount;
-        N.Render.shake(8, 260);
-        N.Render.setJitter(1.5);
-        N.Render.flash("#f33", 220);
-        N.Audio.sfxShieldHit();
-        setTimeout(function() { N.Render.setJitter(0); }, 220);
+        Render.shake(8, 260);
+        Render.setJitter(1.5);
+        Render.flash("#f33", 220);
+        Audio.sfxShieldHit();
+        setTimeout(function() { Render.setJitter(0); }, 220);
         if (state.shields <= 0) {
             state.shields = 0;
             state.gameOver = true;
-            N.Audio.sfxShipExplode();
-            N.Render.shake(16, 900);
+            Audio.sfxShipExplode();
+            Render.shake(16, 900);
         }
     }
 
@@ -203,7 +206,7 @@ N.Game = (function() {
                 color: "#f44"
             });
         }
-        N.Audio.sfxLaser();
+        Audio.sfxLaser();
 
         // Hitscan: single ray from ship through reticle, out to max depth.
         // Find the closest enemy whose bounding sphere is intersected by the ray.
@@ -238,7 +241,7 @@ N.Game = (function() {
                 if (!bestEnemy.flee) {
                     bestEnemy.flee = true;
                     addScore(2000);
-                    N.Audio.sfxEnemyHit();
+                    Audio.sfxEnemyHit();
                     radio("BLACK ACE BREAKING OFF", 1600);
                 }
             } else if (bestEnemy.kind === "port") {
@@ -272,18 +275,18 @@ N.Game = (function() {
             var pts = 100000 * trustMult;
             addScore(pts);
             radio(trust ? "BULLSEYE  ::  TRUST BONUS x2" : "BULLSEYE", 2600);
-            N.Audio.sfxBullseye();
+            Audio.sfxBullseye();
         } else {
             var dpts = 25000 * trustMult;
             addScore(dpts);
             radio(trust ? "DIRECT HIT  ::  TRUST BONUS x2" : "DIRECT HIT", 2600);
-            N.Audio.sfxDirectHit();
+            Audio.sfxDirectHit();
         }
         port.resolved = true;
         port.dead = true;
         spawnExplosion(port.x, port.y, port.z, 3.5);
-        N.Render.shake(18, 900);
-        N.Render.flash("#fff", 360);
+        Render.shake(18, 900);
+        Render.flash("#fff", 360);
         if (state.wavescript) state.wavescript.portResolved = true;
     }
 
@@ -291,7 +294,7 @@ N.Game = (function() {
         e.dead = true;
         addScore(e.score || 0);
         spawnExplosion(e.x, e.y, e.z, e.scale || 1.4);
-        N.Audio.sfxEnemyBoom();
+        Audio.sfxEnemyBoom();
     }
 
     // --- Explosions (line-burst particles) --------------------------------
@@ -338,7 +341,7 @@ N.Game = (function() {
                 var by = ay - s.vy * 40;
                 var bz = az - s.vz * 40;
                 var c = u < 0.3 ? "#ff8" : (u < 0.7 ? "#f84" : "#844");
-                N.Render.line(ctx, ax, ay, az, bx, by, bz, c, alpha);
+                Render.line(ctx, ax, ay, az, bx, by, bz, c, alpha);
             }
         }
     }
@@ -364,7 +367,7 @@ N.Game = (function() {
             var tx = b.ox + (b.tx - b.ox) * tailU;
             var ty = b.oy + (b.ty - b.oy) * tailU;
             var tz = b.oz + (b.tz - b.oz) * tailU;
-            N.Render.line(ctx, hx, hy, hz, tx, ty, tz, b.color, 1 - u * 0.4);
+            Render.line(ctx, hx, hy, hz, tx, ty, tz, b.color, 1 - u * 0.4);
         }
     }
 
@@ -386,7 +389,7 @@ N.Game = (function() {
             life: 4500, t: 0,
             color: "#6cf"
         });
-        N.Audio.sfxEnemyLaser();
+        Audio.sfxEnemyLaser();
     }
 
     function updateEnemyBolts(dt) {
@@ -398,7 +401,7 @@ N.Game = (function() {
             b.t += dt;
             if (b.z < 0 || b.t >= b.life) {
                 // Check proximity to ship at crossing.
-                if (b.z < N.Render.NEAR_Z + 1) {
+                if (b.z < Render.NEAR_Z + 1) {
                     var dx = b.x - state.shipX, dy = b.y - state.shipY;
                     if (dx*dx + dy*dy < PLAYER_HIT_RADIUS * PLAYER_HIT_RADIUS + 2) {
                         takeDamage(1);
@@ -416,7 +419,7 @@ N.Game = (function() {
             var tx = b.x - b.vx * trail;
             var ty = b.y - b.vy * trail;
             var tz = b.z - b.vz * trail;
-            N.Render.line(ctx, b.x, b.y, b.z, tx, ty, tz, b.color, 1);
+            Render.line(ctx, b.x, b.y, b.z, tx, ty, tz, b.color, 1);
         }
     }
 
@@ -437,21 +440,21 @@ N.Game = (function() {
 
         // Parallax view shift — camera slides with the ship so the world
         // appears to slide opposite the yoke.
-        N.Render.setCamera(state.shipX * PARALLAX, state.shipY * PARALLAX);
+        Render.setCamera(state.shipX * PARALLAX, state.shipY * PARALLAX);
 
-        N.Render.advanceStars(FORWARD_SPEED * dt);
-        N.Render.updateShake(dt);
-        N.Render.updateFlash(dt);
+        Render.advanceStars(FORWARD_SPEED * dt);
+        Render.updateShake(dt);
+        Render.updateFlash(dt);
 
         if (state.fireCooldown > 0) state.fireCooldown -= dt;
         if (state.firePressed) fireLasers();
 
         // Wave logic.
-        N.Waves.update(state.wavescript, dt, api);
+        Waves.update(state.wavescript, dt, api);
 
         // Enemy update + cull.
         for (var i = 0; i < state.enemies.length; i++) {
-            N.Enemies.update(state.enemies[i], dt, api);
+            Enemies.update(state.enemies[i], dt, api);
         }
         for (var j = state.enemies.length - 1; j >= 0; j--) {
             if (state.enemies[j].dead) state.enemies.splice(j, 1);
@@ -461,7 +464,7 @@ N.Game = (function() {
         updateEnemyBolts(dt);
         updateExplosions(dt);
 
-        if (!state.victoryPending && N.Waves.isComplete(state.wavescript, api)) {
+        if (!state.victoryPending && Waves.isComplete(state.wavescript, api)) {
             completeWave();
         }
     }
@@ -493,8 +496,8 @@ N.Game = (function() {
     function drawReticle(ctx) {
         // Reticle and ship marker are cockpit-attached — project without
         // the parallax camera offset so they stay anchored to the yoke.
-        var pr = N.Render.projectHud(state.reticleX, state.reticleY, RETICLE_Z);
-        var ps = N.Render.projectHud(state.shipX, state.shipY, RETICLE_Z);
+        var pr = Render.projectHud(state.reticleX, state.reticleY, RETICLE_Z);
+        var ps = Render.projectHud(state.shipX, state.shipY, RETICLE_Z);
         if (pr.visible) {
             ctx.strokeStyle = "#ff4";
             ctx.lineWidth = 2;
@@ -525,14 +528,14 @@ N.Game = (function() {
         ctx.fillStyle = "#000000";
         ctx.fillRect(0, 0, W, H);
 
-        N.Waves.draw(state.wavescript, ctx, api);
+        Waves.draw(state.wavescript, ctx, api);
 
         ctx.lineWidth = 1.5;
 
         // Sort enemies back-to-front for stable overdraw.
         var drawList = state.enemies.slice().sort(function(a, b) { return b.z - a.z; });
         for (var i = 0; i < drawList.length; i++) {
-            N.Enemies.draw(drawList[i], ctx);
+            Enemies.draw(drawList[i], ctx);
         }
 
         drawEnemyBolts(ctx);
@@ -541,7 +544,7 @@ N.Game = (function() {
 
         drawCockpit(ctx, W, H);
         drawReticle(ctx);
-        N.Render.drawFlash(ctx);
+        Render.drawFlash(ctx);
     }
 
     // --- HUD queries -------------------------------------------------------

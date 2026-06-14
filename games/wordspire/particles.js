@@ -1,8 +1,6 @@
 // particles.js — sparkle particles, shake, action text.
 'use strict';
-var W = window.W = window.W || {};
-
-W.Particles = (function () {
+export const Particles = (function () {
     var parts = [];
     var shakeTimer = 0, shakeMag = 0;
     var actionTextTimer = 0;

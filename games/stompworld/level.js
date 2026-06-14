@@ -26,8 +26,10 @@
 //   96–104 5-step staircase ascent
 //   105–119 ground approach + beam pickup (col 115) + flag (col 118)
 
-(function (global) {
-    'use strict';
+'use strict';
+
+import { Tilemap } from "/lib/tilemap.js";
+import { Art } from "/app/art.js";
 
     const COLS = 120;
     const ROWS_N = 18;
@@ -241,6 +243,5 @@
         };
     }
 
-    global.Level = { load, buildLevel, makeStomper, makeFlyer, makeFlag, makePickup,
+    export const Level = { load, buildLevel, makeStomper, makeFlyer, makeFlag, makePickup,
                      COLS, ROWS_N };
-})(typeof window !== 'undefined' ? window : globalThis);

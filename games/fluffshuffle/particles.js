@@ -1,8 +1,6 @@
 // particles.js — cascade burst + tiny fur-mote effects.
 'use strict';
-var G = G || {};
-
-G.Particles = (function () {
+export const Particles = (function () {
     var particles = [];
     var labels = [];   // floating score / chain popups
 

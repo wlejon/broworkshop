@@ -1,7 +1,15 @@
 // screens.js — screen manager + gameplay state for Serpcoil.
-var SC = SC || {};
+import { SFX } from "/lib/audio.js";
+import { Hud } from "/lib/hud.js";
+import { Storage } from "/lib/storage.js";
+import { Audio } from "/app/audio.js";
+import { Path } from "/app/path.js";
+import { Chain } from "/app/chain.js";
+import { Shooter } from "/app/shooter.js";
+import { FX } from "/app/particles.js";
+import { Levels } from "/app/levels.js";
 
-SC.Game = (function () {
+export const Game = (function () {
     "use strict";
 
     // --- Runtime state ---
@@ -95,20 +103,20 @@ SC.Game = (function () {
         state.popsCounted += popped.length;
 
         for (var i = 0; i < positions.length; i++) {
-            SC.FX.burst(positions[i].x, positions[i].y, positions[i].color, 14);
+            FX.burst(positions[i].x, positions[i].y, positions[i].color, 14);
         }
         var p0 = positions[0];
         if (p0) {
-            SC.FX.floatText(p0.x, p0.y - 10, "+" + gain, "#ffd86b");
-            SC.FX.shockwave(p0.x, p0.y, { maxR: 80 });
+            FX.floatText(p0.x, p0.y - 10, "+" + gain, "#ffd86b");
+            FX.shockwave(p0.x, p0.y, { maxR: 80 });
         }
-        SC.Audio.sfxPop(color, state.cascadeDepth);
+        Audio.sfxPop(color, state.cascadeDepth);
 
         // Chance to award powerup onto next slot.
         if (state.shooter.maybeInjectPU()) {
-            SC.FX.floatText(state.shooter.x(), state.shooter.y() - 40,
+            FX.floatText(state.shooter.x(), state.shooter.y() - 40,
                 "POWERUP!", "#b56dff");
-            SC.Audio.sfxPowerup();
+            Audio.sfxPowerup();
         }
     }
 
@@ -145,42 +153,42 @@ SC.Game = (function () {
 
     function applyProjectileEffect(proj, insertD, hitIdx) {
         state.shooter.removeProjectile(proj);
-        if (proj.pu === SC.Shooter.PU_BACKTRACK) {
+        if (proj.pu === Shooter.PU_BACKTRACK) {
             state.chain.backtrack(160);
-            SC.Audio.sfxPowerup();
-            SC.FX.shockwave(proj.x, proj.y, { maxR: 140, color: "#56d8ff" });
-            SC.FX.floatText(proj.x, proj.y, "BACKTRACK", "#56d8ff");
+            Audio.sfxPowerup();
+            FX.shockwave(proj.x, proj.y, { maxR: 140, color: "#56d8ff" });
+            FX.floatText(proj.x, proj.y, "BACKTRACK", "#56d8ff");
             return;
         }
-        if (proj.pu === SC.Shooter.PU_BLASTER) {
+        if (proj.pu === Shooter.PU_BLASTER) {
             var res = state.chain.blastAt(proj.x, proj.y, 80);
             for (var i = 0; i < res.positions.length; i++) {
-                SC.FX.burst(res.positions[i].x, res.positions[i].y, res.positions[i].color, 12);
+                FX.burst(res.positions[i].x, res.positions[i].y, res.positions[i].color, 12);
             }
             state.score += res.popped.length * 25;
-            SC.FX.shockwave(proj.x, proj.y, { maxR: 180, color: "#e63946" });
-            SC.FX.floatText(proj.x, proj.y, "+" + (res.popped.length * 25), "#ffd86b");
-            SC.Audio.sfxPowerup();
+            FX.shockwave(proj.x, proj.y, { maxR: 180, color: "#e63946" });
+            FX.floatText(proj.x, proj.y, "+" + (res.popped.length * 25), "#ffd86b");
+            Audio.sfxPowerup();
             return;
         }
-        if (proj.pu === SC.Shooter.PU_COLORSHIFT) {
+        if (proj.pu === Shooter.PU_COLORSHIFT) {
             var n = state.chain.colorshift(hitIdx, proj.color);
-            SC.FX.floatText(proj.x, proj.y, "SHIFTED x" + n, "#e9c46a");
-            SC.Audio.sfxPowerup();
+            FX.floatText(proj.x, proj.y, "SHIFTED x" + n, "#e9c46a");
+            Audio.sfxPowerup();
             // Check for matches at hitIdx now.
             handlePopAt(hitIdx);
             return;
         }
-        if (proj.pu === SC.Shooter.PU_SLOWMO) {
+        if (proj.pu === Shooter.PU_SLOWMO) {
             state.chain.setSlowmo(6000);
-            SC.FX.shockwave(proj.x, proj.y, { maxR: 200, color: "#4cc9f0" });
-            SC.FX.floatText(proj.x, proj.y, "SLOW-MO", "#4cc9f0");
-            SC.Audio.sfxPowerup();
+            FX.shockwave(proj.x, proj.y, { maxR: 200, color: "#4cc9f0" });
+            FX.floatText(proj.x, proj.y, "SLOW-MO", "#4cc9f0");
+            Audio.sfxPowerup();
             return;
         }
         // Normal orb — insert and detect.
         var idx = state.chain.insertAt(insertD, proj.color);
-        SC.Audio.sfxInsert();
+        Audio.sfxInsert();
         handlePopAt(idx);
     }
 
@@ -196,23 +204,23 @@ SC.Game = (function () {
         state.ended = null;
         state.levelClearBonus = 0;
 
-        var L = SC.Levels.scaled(levelIdx, state.W, state.H);
-        state.path = SC.Path.create(L.controls);
+        var L = Levels.scaled(levelIdx, state.W, state.H);
+        state.path = Path.create(L.controls);
         var rng = seed != null ? makeRng(seed) : Math.random;
-        state.chain = SC.Chain.create({
+        state.chain = Chain.create({
             path: state.path,
             palette: L.palette,
             totalToSpawn: L.totalOrbs,
             speed: L.chainSpeed,
             rng: rng
         });
-        state.shooter = SC.Shooter.create({
+        state.shooter = Shooter.create({
             x: L.shooter.x, y: L.shooter.y,
             palette: L.palette,
             rng: rng
         });
         state.active = true;
-        SC.FX.clear();
+        FX.clear();
     }
 
     function makeRng(seed) {
@@ -239,7 +247,7 @@ SC.Game = (function () {
         // Danger enter transition
         var d = state.chain.dangerActive();
         if (d && !state.dangerPrev) {
-            SC.Audio.sfxDanger();
+            Audio.sfxDanger();
         }
         state.dangerPrev = d;
         state.danger = d;
@@ -270,13 +278,13 @@ SC.Game = (function () {
                 var sx = state.shooter.x(), sy = state.shooter.y();
                 var pickLive = function () { return live[(Math.random() * live.length) | 0]; };
                 if (live.indexOf(state.shooter.current()) < 0) {
-                    SC.FX.burst(sx, sy, state.shooter.current(), 14);
+                    FX.burst(sx, sy, state.shooter.current(), 14);
                     state.shooter.setCurrent(pickLive(), state.shooter.currentPU());
                 }
                 if (live.indexOf(state.shooter.next()) < 0) {
                     var ang = state.shooter.aim();
                     var bx = sx - Math.cos(ang) * 38, by = sy - Math.sin(ang) * 38;
-                    SC.FX.burst(bx, by, state.shooter.next(), 10);
+                    FX.burst(bx, by, state.shooter.next(), 10);
                     state.shooter.setNext(pickLive(), state.shooter.nextPU());
                 }
             }
@@ -297,11 +305,11 @@ SC.Game = (function () {
             if (state.spawnTicker > 260) {
                 state.spawnTicker = 0;
                 var p0 = state.path.pointAt(0);
-                SC.FX.puff(p0.x, p0.y);
+                FX.puff(p0.x, p0.y);
             }
         }
 
-        SC.FX.update(dt);
+        FX.update(dt);
 
         // Win / lose checks
         if (!state.ended) {
@@ -329,7 +337,7 @@ SC.Game = (function () {
         var bonus = 500 + state.level * 100;
         state.levelClearBonus = bonus;
         state.score += bonus;
-        SC.Audio.sfxClear();
+        Audio.sfxClear();
         // Persist progress
         var stars = computeStars();
         persistLevelResult(stars);
@@ -337,7 +345,7 @@ SC.Game = (function () {
     }
 
     function onLevelLose() {
-        SC.Audio.sfxGameOver();
+        Audio.sfxGameOver();
         persistHighScore();
         Screens.switchTo("gameover");
     }
@@ -346,7 +354,7 @@ SC.Game = (function () {
         // 3 stars if fewer than ~15% of orbs ever reached past 70%,
         // 2 if under danger threshold cleared, 1 otherwise.
         // Simple proxy: score thresholds by level.
-        var L = SC.Levels.get(state.level);
+        var L = Levels.get(state.level);
         var perfect = L.totalOrbs * 20;
         var s = state.score;
         if (s >= perfect * 1.2) return 3;
@@ -360,7 +368,7 @@ SC.Game = (function () {
         if (stars > prev) state.progress.stars[state.level] = stars;
         var prevScore = state.progress.bestScore[state.level] || 0;
         if (state.score > prevScore) state.progress.bestScore[state.level] = state.score;
-        if (state.progress.unlocked <= state.level + 1 && state.level + 1 < SC.Levels.count()) {
+        if (state.progress.unlocked <= state.level + 1 && state.level + 1 < Levels.count()) {
             state.progress.unlocked = state.level + 2;
         }
         state.storage.set("unlocked", state.progress.unlocked);
@@ -401,7 +409,7 @@ SC.Game = (function () {
 
         if (state.chain) state.chain.draw(ctx);
         if (state.shooter) state.shooter.draw(ctx);
-        SC.FX.draw(ctx);
+        FX.draw(ctx);
     }
 
     var stars = null;
@@ -489,10 +497,10 @@ SC.Game = (function () {
         if (!state.active) return;
         if (e.button === 0) {
             var p = state.shooter.fire();
-            if (p) SC.Audio.sfxShoot();
+            if (p) Audio.sfxShoot();
         } else if (e.button === 2) {
             state.shooter.swap();
-            SC.Audio.sfxSwap();
+            Audio.sfxSwap();
         }
     }
 
@@ -500,7 +508,7 @@ SC.Game = (function () {
         e.preventDefault();
         if (state.active) {
             state.shooter.swap();
-            SC.Audio.sfxSwap();
+            Audio.sfxSwap();
         }
         return false;
     }
@@ -515,10 +523,10 @@ SC.Game = (function () {
             if (!state.active) return;
             if (k === " ") {
                 var p = state.shooter.fire();
-                if (p) SC.Audio.sfxShoot();
+                if (p) Audio.sfxShoot();
             } else if (k === "Shift") {
                 state.shooter.swap();
-                SC.Audio.sfxSwap();
+                Audio.sfxSwap();
             } else if (k === "ArrowLeft") state.aimKeyX = -1;
             else if (k === "ArrowRight") state.aimKeyX = 1;
             else if (k === "ArrowUp") state.aimKeyY = -1;
@@ -565,7 +573,7 @@ SC.Game = (function () {
             if (state.progress.stars[lk] > 0) {
                 var minUnlock = (parseInt(lk, 10) | 0) + 2;
                 if (minUnlock > state.progress.unlocked &&
-                    minUnlock <= SC.Levels.count()) {
+                    minUnlock <= Levels.count()) {
                     state.progress.unlocked = minUnlock;
                 }
             }
@@ -657,12 +665,12 @@ SC.Game = (function () {
             var list = items(id);
             if (key === "ArrowUp") {
                 menuIndex = (menuIndex - 1 + list.length) % list.length;
-                refreshSel(id); SC.Audio.sfxMenu();
+                refreshSel(id); Audio.sfxMenu();
             } else if (key === "ArrowDown") {
                 menuIndex = (menuIndex + 1) % list.length;
-                refreshSel(id); SC.Audio.sfxMenu();
+                refreshSel(id); Audio.sfxMenu();
             } else if (key === "Enter") {
-                SC.Audio.sfxSelect();
+                Audio.sfxSelect();
                 if (onSelect) onSelect(menuIndex, list[menuIndex]);
             } else if (key === "ArrowLeft" && opts.onAdjust) {
                 opts.onAdjust(-1);
@@ -679,7 +687,7 @@ SC.Game = (function () {
             if (!grid) return;
             grid.innerHTML = "";
             var unlocked = state.progress.unlocked;
-            for (var i = 0; i < SC.Levels.count(); i++) {
+            for (var i = 0; i < Levels.count(); i++) {
                 var locked = (i + 1) > unlocked;
                 var node = document.createElement("div");
                 node.className = "level-node" + (locked ? " locked" : "");
@@ -692,7 +700,7 @@ SC.Game = (function () {
                 (function (idx, lk) {
                     node.addEventListener("click", function () {
                         if (lk) return;
-                        SC.Audio.sfxSelect();
+                        Audio.sfxSelect();
                         startLevel(idx);
                         switchTo("play");
                     });
@@ -734,7 +742,7 @@ SC.Game = (function () {
             }
             saveSettings();
             refreshSettings();
-            SC.Audio.sfxMenu();
+            Audio.sfxMenu();
         }
 
         // --- HIGH SCORES ---
@@ -844,7 +852,7 @@ SC.Game = (function () {
                     var act = items("levelclear")[idx].getAttribute("data-action");
                     if (act === "next") {
                         var nxt = state.level + 1;
-                        if (nxt >= SC.Levels.count()) switchTo("title");
+                        if (nxt >= Levels.count()) switchTo("title");
                         else { startLevel(nxt); switchTo("play"); }
                     } else if (act === "retry") { startLevel(state.level); switchTo("play"); }
                     else if (act === "quit") switchTo("title");
@@ -930,7 +938,7 @@ SC.Game = (function () {
                     if (list[i] === t && menuIndex !== i) {
                         menuIndex = i;
                         refreshSel(activeDOM);
-                        SC.Audio.sfxMenu();
+                        Audio.sfxMenu();
                         break;
                     }
                 }

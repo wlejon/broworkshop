@@ -13,8 +13,11 @@
 // workers, no MCTS. If `ckpt/best.bin` is missing the demo bounces back
 // to the title.
 
-(function (global) {
-    'use strict';
+'use strict';
+
+import { Level } from "/app/level.js";
+import { SwSim } from "/app/sim.js";
+import { SwAgentObs } from "/app/agent_obs.js";
 
     const TILE = 32;
     const VIEW_W = 800;
@@ -305,5 +308,4 @@
         return { start, stop, update, draw, get phase() { return phase; } };
     }
 
-    global.SwDemo = { create };
-})(typeof window !== 'undefined' ? window : globalThis);
+    export const SwDemo = { create };

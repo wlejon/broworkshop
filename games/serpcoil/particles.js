@@ -1,7 +1,7 @@
 // particles.js — pop bursts, mouth puffs, shockwaves.
-var SC = SC || {};
+import { Chain } from "/app/chain.js";
 
-SC.FX = (function () {
+export const FX = (function () {
     "use strict";
 
     var particles = [];
@@ -17,7 +17,7 @@ SC.FX = (function () {
     function burst(x, y, color, count, opts) {
         opts = opts || {};
         count = count || 14;
-        var hex = (SC.Chain.COLORS[color] && SC.Chain.COLORS[color].hex) || "#fff";
+        var hex = (Chain.COLORS[color] && Chain.COLORS[color].hex) || "#fff";
         for (var i = 0; i < count; i++) {
             var a = Math.random() * Math.PI * 2;
             var sp = (opts.speed || 0.28) * (0.4 + Math.random() * 0.9);

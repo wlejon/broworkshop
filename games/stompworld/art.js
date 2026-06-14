@@ -8,8 +8,7 @@
 // HTMLCanvasElement as a source — exercised here because Stompworld is the
 // reference implementation for the new sprite/tilemap stack.
 
-(function (global) {
-    'use strict';
+'use strict';
 
     const TILE = 32;
     const N    = 8;            // 8×8 source cells per tile
@@ -270,11 +269,10 @@
         ctx.restore();
     }
 
-    global.Art = {
+    export const Art = {
         TILE,
         HERO_W, HERO_H,
         STOMP_W, STOMP_H,
         FLY_W, FLY_H,
         drawTile, drawHero, drawStomper, drawFlyer, drawFlag, drawPickup,
     };
-})(typeof window !== 'undefined' ? window : globalThis);

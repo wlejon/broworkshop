@@ -1,8 +1,14 @@
 // board.js — letter-grid word-builder. Grid, chain, pop, settle, burning tiles.
 'use strict';
-var W = window.W = window.W || {};
+import { Hud } from "/lib/hud.js";
+import { Dictionary } from "/app/dictionary.js";
+import { Audio } from "/app/audio.js";
+import { Particles } from "/app/particles.js";
+import { Scoring } from "/app/scoring.js";
+import { Storage } from "/app/storage.js";
+import { Text } from "/app/text.js";
 
-W.Board = (function () {
+export const Board = (function () {
     // ---- Constants ------------------------------------------------------
     var COLS = 7;
     var ROWS = 8;
@@ -278,18 +284,18 @@ W.Board = (function () {
     // dictionary words. Primarily used for hints/puzzle gen — expensive.
     function findMatches(maxResults) {
         maxResults = maxResults || 20;
-        if (!W.Dictionary.loaded()) return [];
+        if (!Dictionary.loaded()) return [];
         var found = [];
         var seenWords = {};
         var g = grid;
         function dfs(path, word) {
             if (found.length >= maxResults) return;
-            if (word.length >= 3 && W.Dictionary.isWord(word) && !seenWords[word]) {
+            if (word.length >= 3 && Dictionary.isWord(word) && !seenWords[word]) {
                 seenWords[word] = true;
                 found.push({ word: word, path: path.slice() });
             }
             if (word.length >= 9) return;
-            if (word.length >= 2 && !W.Dictionary.isPrefix(word)) return;
+            if (word.length >= 2 && !Dictionary.isPrefix(word)) return;
             var last = path[path.length - 1];
             for (var dc = -1; dc <= 1; dc++) {
                 for (var dr = -1; dr <= 1; dr++) {
@@ -325,20 +331,20 @@ W.Board = (function () {
     // ---- Submit chain ---------------------------------------------------
     function submitChain() {
         if (currentChain.length < 3) {
-            W.Audio.submitFail();
-            W.Particles.showAction('TOO SHORT');
+            Audio.submitFail();
+            Particles.showAction('TOO SHORT');
             resetChain();
             return false;
         }
         if (!isValidPath(currentChain, grid)) {
-            W.Audio.submitFail();
+            Audio.submitFail();
             resetChain();
             return false;
         }
         var word = pathToWord(currentChain, grid);
-        if (!W.Dictionary.isWord(word)) {
-            W.Audio.submitFail();
-            W.Particles.showAction('NOT A WORD');
+        if (!Dictionary.isWord(word)) {
+            Audio.submitFail();
+            Particles.showAction('NOT A WORD');
             streak = 0;
             updateCombo();
             resetChain();
@@ -347,9 +353,9 @@ W.Board = (function () {
 
         // Valid word!
         var tiles = pathToTiles(currentChain, grid);
-        var base  = W.Scoring.computeWordScore(word, tiles);
+        var base  = Scoring.computeWordScore(word, tiles);
         streak++;
-        var comboMult = W.Scoring.comboMultiplier(streak);
+        var comboMult = Scoring.comboMultiplier(streak);
         var pts = Math.floor(base * comboMult);
 
         // Burning tiles in the chain are extinguished.
@@ -380,7 +386,7 @@ W.Board = (function () {
             if (rnd() < burnChance) {
                 var howMany = 1 + (wordsPlayed > 12 ? 1 : 0);
                 sprinkleBurning(grid, Math.min(howMany, 2));
-                W.Audio.sizzle();
+                Audio.sizzle();
             }
         }
 
@@ -392,7 +398,7 @@ W.Board = (function () {
 
         // Top-word persistence.
         try {
-            W.Storage.addWord({
+            Storage.addWord({
                 word: word,
                 score: pts,
                 length: word.length,
@@ -402,12 +408,12 @@ W.Board = (function () {
         } catch (e) {}
 
         // Audio/visual feedback.
-        W.Audio.submitOk(word.length);
+        Audio.submitOk(word.length);
         if (word.length >= 7) {
-            W.Audio.fanfare();
-            W.Particles.showAction(word.toUpperCase() + '!  +' + pts);
+            Audio.fanfare();
+            Particles.showAction(word.toUpperCase() + '!  +' + pts);
         } else {
-            W.Particles.showAction(word.toUpperCase() + '  +' + pts);
+            Particles.showAction(word.toUpperCase() + '  +' + pts);
         }
 
         // Level up every 10 words.
@@ -432,7 +438,7 @@ W.Board = (function () {
 
     function burnChancePerWord() {
         // 0 = easy, 1 = normal, 2 = hard
-        var d = W.Storage.settings.difficulty | 0;
+        var d = Storage.settings.difficulty | 0;
         if (d === 0) return 0.18;
         if (d === 2) return 0.55;
         return 0.32;
@@ -445,9 +451,9 @@ W.Board = (function () {
             var cx = rect.x + c * rect.cell + rect.cell * 0.5;
             var cy = rect.y + r * rect.cell + rect.cell * 0.5;
             var color = length >= 7 ? '#e8c168' : (length >= 5 ? '#8cdff6' : '#c8b8e8');
-            W.Particles.burst(cx, cy, color);
+            Particles.burst(cx, cy, color);
         }
-        if (length >= 6) W.Particles.shake(300, 6);
+        if (length >= 6) Particles.shake(300, 6);
     }
 
     // ---- Chain building -------------------------------------------------
@@ -461,7 +467,7 @@ W.Board = (function () {
         if (!grid[c][r]) return false;
         if (currentChain.length === 0) {
             currentChain.push([c, r]);
-            W.Audio.tileAdd(1);
+            Audio.tileAdd(1);
             return true;
         }
         var last = currentChain[currentChain.length - 1];
@@ -485,20 +491,20 @@ W.Board = (function () {
             if (currentChain[i][0] === c && currentChain[i][1] === r) return false;
         }
         currentChain.push([c, r]);
-        W.Audio.tileAdd(currentChain.length);
+        Audio.tileAdd(currentChain.length);
         return true;
     }
 
     function removeLastTile() {
         if (currentChain.length === 0) return;
         currentChain.pop();
-        W.Audio.tileRemove();
+        Audio.tileRemove();
     }
 
     function clearChain() {
         if (currentChain.length === 0) return;
         currentChain = [];
-        W.Audio.clearChain();
+        Audio.clearChain();
     }
 
     function updateCombo() {
@@ -532,7 +538,7 @@ W.Board = (function () {
         fillGrid(grid);
         // Ensure at least one valid word exists initially — retry up to 10x.
         for (var k = 0; k < 10; k++) {
-            if (W.Dictionary.loaded()) {
+            if (Dictionary.loaded()) {
                 var hints = findMatches(1);
                 if (hints.length > 0) break;
             }
@@ -543,7 +549,7 @@ W.Board = (function () {
         currentChain = [];
         cursorCol = Math.floor(COLS / 2);
         cursorRow = Math.floor(ROWS / 2);
-        W.Particles.clear();
+        Particles.clear();
 
         if (mode === 'puzzle') {
             puzzleIndex = 0;
@@ -558,7 +564,7 @@ W.Board = (function () {
     function startPuzzle(idx) {
         puzzleIndex = idx;
         // Pick a target word from dictionary that's 6-7 letters long.
-        if (!W.Dictionary.loaded()) {
+        if (!Dictionary.loaded()) {
             puzzleTarget = '';
             return;
         }
@@ -586,8 +592,8 @@ W.Board = (function () {
 
     function triggerGameOver() {
         gameOver = true;
-        W.Audio.gameover();
-        W.Particles.shake(500, 12);
+        Audio.gameover();
+        Particles.shake(500, 12);
     }
 
     // ---- HUD ------------------------------------------------------------
@@ -633,7 +639,7 @@ W.Board = (function () {
     function tick(dt) {
         gameTime += dt;
         animTime += dt;
-        W.Particles.update(dt);
+        Particles.update(dt);
         // Pop animation counters.
         for (var i = popAnim.length - 1; i >= 0; i--) {
             popAnim[i].timer -= dt;
@@ -717,22 +723,22 @@ W.Board = (function () {
 
         // Pixel-font letter (centered).
         var letterScale = Math.max(2, Math.floor(cell / 12));
-        W.Text.drawCentered(ctx, tile.letter,
+        Text.drawCentered(ctx, tile.letter,
                                  rx + w / 2, ry + h / 2 - letterScale,
                                  letterScale, text);
 
         // Letter-value chip bottom-right.
-        var v = W.Scoring.letterValue(tile.letter);
+        var v = Scoring.letterValue(tile.letter);
         var vScale = Math.max(1, Math.floor(cell / 28));
-        var vw = W.Text.measure(String(v), vScale);
-        W.Text.draw(ctx, String(v),
+        var vw = Text.measure(String(v), vScale);
+        Text.draw(ctx, String(v),
                          rx + w - vw - 4, ry + h - 7 * vScale - 3,
                          vScale, 'rgba(220,220,255,0.7)');
 
         // Multiplier chip top-left (x2/x3/...).
         if (tile.mult > 1) {
             var mScale = Math.max(1, Math.floor(cell / 28));
-            W.Text.draw(ctx, 'x' + tile.mult, rx + 4, ry + 3, mScale, border);
+            Text.draw(ctx, 'x' + tile.mult, rx + 4, ry + 3, mScale, border);
         }
     }
 
@@ -796,31 +802,31 @@ W.Board = (function () {
             ctx.save();
             ctx.globalAlpha = a;
             var ls = Math.max(2, Math.floor(r.cell * (0.08 + (1 - a) * 0.06)));
-            W.Text.drawCentered(ctx, pa.letter, px, py, ls, '#e8c168');
+            Text.drawCentered(ctx, pa.letter, px, py, ls, '#e8c168');
             ctx.restore();
         }
 
         // Particles.
-        W.Particles.draw(ctx);
+        Particles.draw(ctx);
 
         // Word preview below board.
         var previewY = r.y + r.cell * ROWS + 18;
         var word = pathToWord(currentChain, grid);
         if (word) {
             var previewScale = 4;
-            W.Text.drawCentered(ctx, word.toUpperCase(),
+            Text.drawCentered(ctx, word.toUpperCase(),
                                      r.x + r.cell * COLS / 2, previewY,
                                      previewScale, '#e0d4ff');
-            var predicted = W.Scoring.computeWordScore(word, pathToTiles(currentChain, grid));
-            var valid = W.Dictionary.isWord(word);
-            W.Text.drawCentered(ctx, '+' + predicted + (valid ? '' : ' ?'),
+            var predicted = Scoring.computeWordScore(word, pathToTiles(currentChain, grid));
+            var valid = Dictionary.isWord(word);
+            Text.drawCentered(ctx, '+' + predicted + (valid ? '' : ' ?'),
                                      r.x + r.cell * COLS / 2, previewY + 36,
                                      2, valid ? '#8cdff6' : '#aa7788');
         } else {
             var hint = (mode === 'puzzle' && puzzleTarget)
                 ? ('TARGET: ' + puzzleTarget.toUpperCase())
                 : 'CHAIN 3+ LETTERS AND SUBMIT';
-            W.Text.drawCentered(ctx, hint,
+            Text.drawCentered(ctx, hint,
                                      r.x + r.cell * COLS / 2, previewY + 8,
                                      2, '#554966');
         }
@@ -843,7 +849,7 @@ W.Board = (function () {
         ctx.strokeStyle = currentChain.length >= 3 ? '#e8c168' : '#3a3258';
         ctx.lineWidth = 2;
         ctx.stroke();
-        W.Text.drawCentered(ctx, 'SUBMIT', bx + bw / 2, by + bh / 2, 3,
+        Text.drawCentered(ctx, 'SUBMIT', bx + bw / 2, by + bh / 2, 3,
                                  currentChain.length >= 3 ? '#fff4d8' : '#7a6a9a');
 
         var cx2 = bx, cy2 = by + bh + 10;
@@ -852,7 +858,7 @@ W.Board = (function () {
         ctx.fill();
         ctx.strokeStyle = '#3a3258';
         ctx.stroke();
-        W.Text.drawCentered(ctx, 'CLEAR', cx2 + bw / 2, cy2 + 17, 2, '#b8a8d8');
+        Text.drawCentered(ctx, 'CLEAR', cx2 + bw / 2, cy2 + 17, 2, '#b8a8d8');
     }
 
 

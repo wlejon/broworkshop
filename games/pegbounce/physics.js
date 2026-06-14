@@ -23,12 +23,11 @@
 // while giving Jolt's solver normal-shaped restitution and friction.
 
 'use strict';
-(function (global) {
 
     // Engine-bound Jolt physics namespace. Captured BEFORE we overwrite
     // global.Physics with the pegbounce module surface below — otherwise
     // every Physics.createWorldHandle call would recurse into ourselves.
-    const Jolt = global.Physics;
+    const Jolt = globalThis.Physics;
     if (!Jolt || typeof Jolt.createWorldHandle !== 'function') {
         throw new Error('pegbounce: engine Physics.createWorldHandle missing');
     }
@@ -651,7 +650,7 @@
     }
 
     // Public API matches the legacy custom-solver surface.
-    global.Physics = {
+    export const Physics = {
         createWorld, destroyWorld,
         addPeg, addMovingPeg,
         resetBall, launchBall, spawnSplitBalls,
@@ -663,5 +662,3 @@
         CATCHBAR_Y, CATCHBAR_H, CATCHBAR_HALFW,
         rand, closestOnSeg,
     };
-
-})(typeof window !== 'undefined' ? window : globalThis);

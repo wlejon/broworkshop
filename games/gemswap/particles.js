@@ -1,8 +1,6 @@
 // particles.js — Gem shatter shards + score labels.
 'use strict';
-var G = G || {};
-
-G.Particles = (function () {
+export const Particles = (function () {
     var shards = [];
     var labels = [];
 

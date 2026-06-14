@@ -19,7 +19,20 @@
 //                  the headless test harness (apps/pegbounce/test.js).
 
 'use strict';
-(function () {
+import { GameLoop } from "/lib/loop.js";
+import { Canvas } from "/lib/canvas.js";
+import { Input } from "/lib/input.js";
+import { SFX } from "/lib/audio.js";
+import { Storage } from "/lib/storage.js";
+import { Hud } from "/lib/hud.js";
+import { Screens } from "/lib/screens.js";
+import { Particles } from "/lib/particles.js";
+import { Physics } from "/app/physics.js";
+import { Levels } from "/app/levels.js";
+import { Guides } from "/app/guides.js";
+import { Sfx } from "/app/audio.js";
+import { PegScreens } from "/app/screens.js";
+
     const canvas = document.getElementById('game');
     const ctx    = canvas.getContext('2d');
     const FIELD_W = Physics.FIELD_W, FIELD_H = Physics.FIELD_H;
@@ -1003,4 +1016,3 @@
     };
 
     console.log('Pegbounce loaded.');
-})();

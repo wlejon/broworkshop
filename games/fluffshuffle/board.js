@@ -1,9 +1,12 @@
 // board.js — Fluffshuffle board state, wrap-drag mechanics, match detection,
 // cascades, scoring, and rendering.
 'use strict';
-var G = G || {};
+import { Puffs } from "/app/puffs.js";
+import { Particles } from "/app/particles.js";
+import { AppAudio } from "/app/audio.js";
+import { Screens } from "/app/screens.js";
 
-G.Board = (function () {
+export const Board = (function () {
     var ROWS = 6;
     var COLS = 6;
     var COLORS_N = 6;
@@ -714,7 +717,7 @@ G.Board = (function () {
 
     function drawPuffAt(ctx, puff, cx, cy, cell, held, popOpts) {
         if (!puff) return;
-        var lookAt = (G.Screens && G.Screens.settings && G.Screens.settings().eyeTrack)
+        var lookAt = (Screens && Screens.settings && Screens.settings().eyeTrack)
             ? pointer : null;
         var state = held ? 'held' : 'idle';
         var pulse = 0;
@@ -739,10 +742,10 @@ G.Board = (function () {
         if (alpha < 1) {
             ctx.save();
             ctx.globalAlpha = Math.max(0, alpha);
-            G.Puffs.draw(ctx, puff, cx, cy, cell, opts);
+            Puffs.draw(ctx, puff, cx, cy, cell, opts);
             ctx.restore();
         } else {
-            G.Puffs.draw(ctx, puff, cx, cy, cell, opts);
+            Puffs.draw(ctx, puff, cx, cy, cell, opts);
         }
     }
 
@@ -774,7 +777,7 @@ G.Board = (function () {
             offsetPx: 0,
             moved: false,
         };
-        if (G.AppAudio) G.AppAudio.grab();
+        if (AppAudio) AppAudio.grab();
     }
 
     function handleMouseMove(px, py) {
@@ -783,14 +786,14 @@ G.Board = (function () {
         var dx = px - drag.startX;
         var dy = py - drag.startY;
         if (drag.axis === null) {
-            var dead = (G.Screens && G.Screens.settings && G.Screens.settings().dragDead) || 6;
+            var dead = (Screens && Screens.settings && Screens.settings().dragDead) || 6;
             if (Math.abs(dx) >= dead || Math.abs(dy) >= dead) {
                 drag.axis  = Math.abs(dx) >= Math.abs(dy) ? 'h' : 'v';
                 drag.index = drag.axis === 'h' ? drag.startR : drag.startC;
                 // Lock check: if this row/column contains a locked puff,
                 // cancel the drag with a thud.
                 if (rowOrColLocked(drag.axis, drag.index)) {
-                    if (G.AppAudio) G.AppAudio.thud();
+                    if (AppAudio) AppAudio.thud();
                     drag = null;
                     return;
                 }
@@ -828,7 +831,7 @@ G.Board = (function () {
             cells: cells,
         };
         drag = null;
-        if (G.AppAudio) G.AppAudio.snap();
+        if (AppAudio) AppAudio.snap();
     }
 
     function applySnap() {
@@ -856,7 +859,7 @@ G.Board = (function () {
         cursor.active = true;
         cursor.r = ((cursor.r + dr) % rows + rows) % rows;
         cursor.c = ((cursor.c + dc) % cols + cols) % cols;
-        if (G.AppAudio) G.AppAudio.cursor();
+        if (AppAudio) AppAudio.cursor();
     }
 
     // Space to grab/release; when grabbed, arrow keys slide.
@@ -878,7 +881,7 @@ G.Board = (function () {
             offsetPx: 0,
             moved: false,
         };
-        if (G.AppAudio) G.AppAudio.grab();
+        if (AppAudio) AppAudio.grab();
     }
 
     function cursorSlide(dr, dc) {
@@ -888,7 +891,7 @@ G.Board = (function () {
             if (dc !== 0) { drag.axis = 'h'; drag.index = drag.startR; }
             else          { drag.axis = 'v'; drag.index = drag.startC; }
             if (rowOrColLocked(drag.axis, drag.index)) {
-                if (G.AppAudio) G.AppAudio.thud();
+                if (AppAudio) AppAudio.thud();
                 drag = null;
                 return;
             }
@@ -924,7 +927,7 @@ G.Board = (function () {
         popped += count;
         stats.popped += count;
 
-        if (G.AppAudio) G.AppAudio.match(chain, groups[0].color, groups[0].size);
+        if (AppAudio) AppAudio.match(chain, groups[0].color, groups[0].size);
         shakeAmp = Math.min(6, chain * 1.5);
         shakeT = 180;
 
@@ -1026,8 +1029,8 @@ G.Board = (function () {
         settleTimer = 0;
 
         // Score popup at each match group's centroid (escalates with chain).
-        if (G.Particles) {
-            var PAL2 = G.Puffs.PALETTE;
+        if (Particles) {
+            var PAL2 = Puffs.PALETTE;
             for (var gi = 0; gi < groups.length; gi++) {
                 var grpL = groups[gi];
                 var midR = 0, midC = 0;
@@ -1039,12 +1042,12 @@ G.Board = (function () {
                 var ly = layout.oy + (midR + 0.5) * layout.cell;
                 var labelColor = (PAL2[grpL.color] && PAL2[grpL.color].belly) || '#ffe9b0';
                 var groupScore = scoreChain(grpL.size, chain - 1);
-                G.Particles.popLabel(lx, ly - 10, '+' + groupScore, labelColor, false);
+                Particles.popLabel(lx, ly - 10, '+' + groupScore, labelColor, false);
             }
             if (chain >= 2) {
                 var px = layout.ox + layout.boardW / 2;
                 var py = layout.oy + layout.boardH / 2;
-                G.Particles.popLabel(px, py, 'CHAIN x' + chain, '#ffd980', true);
+                Particles.popLabel(px, py, 'CHAIN x' + chain, '#ffd980', true);
             }
         }
 
@@ -1117,7 +1120,7 @@ G.Board = (function () {
                 var c = Math.floor(Math.random() * cols);
                 if (grid[r][c] && !grid[r][c].locked) {
                     grid[r][c].locked = true;
-                    if (G.AppAudio) G.AppAudio.lock();
+                    if (AppAudio) AppAudio.lock();
                     return;
                 }
             }
@@ -1156,8 +1159,8 @@ G.Board = (function () {
         // Flash countdown — and per-tile burst emission as each one pops.
         if (flashTiles.length > 0) {
             flashTimer += dt;
-            if (G.Particles) {
-                var PALb = G.Puffs.PALETTE;
+            if (Particles) {
+                var PALb = Puffs.PALETTE;
                 for (var fi = 0; fi < flashTiles.length; fi++) {
                     var ft = flashTiles[fi];
                     if (ft.burstFired) continue;
@@ -1165,7 +1168,7 @@ G.Board = (function () {
                     var gb = grid[ft.r][ft.c];
                     var bcolor = (gb && PALb[gb.color]) ? PALb[gb.color].core : '#ffffff';
                     var bp = cellXY(ft.r, ft.c);
-                    G.Particles.burst(bp.x + layout.cell / 2, bp.y + layout.cell / 2,
+                    Particles.burst(bp.x + layout.cell / 2, bp.y + layout.cell / 2,
                                       bcolor, 10 + chain * 2);
                     ft.burstFired = true;
                 }
@@ -1206,7 +1209,7 @@ G.Board = (function () {
                     var threshold = level * 15;
                     if (popped >= threshold) {
                         level++;
-                        if (G.AppAudio) G.AppAudio.levelUp();
+                        if (AppAudio) AppAudio.levelUp();
                     }
                     if (!hasAnyMatchingShift(grid)) {
                         // Deadlock = game over in classic.

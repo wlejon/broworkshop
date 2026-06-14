@@ -1,8 +1,13 @@
 // screens.js — screen flow for fluffshuffle.
 'use strict';
-var G = G || {};
+import { Screens as ScreensLib } from "/lib/screens.js";
+import { Storage } from "/lib/storage.js";
+import { Hud } from "/lib/hud.js";
+import { Board } from "/app/board.js";
+import { Particles } from "/app/particles.js";
+import { AppAudio } from "/app/audio.js";
 
-G.Screens = (function () {
+export const Screens = (function () {
     var Sc = null;
     var backTarget = 'title';
     var hsMode = 'classic';
@@ -16,10 +21,10 @@ G.Screens = (function () {
     var MODES = ['classic', 'timed', 'puzzle'];
 
     function init() {
-        Sc = Screens.create({
+        Sc = ScreensLib.create({
             overlay: '#overlay',
             prefix: 'screen-',
-            onMenuMove: function () { if (G.AppAudio) G.AppAudio.menuMove(); },
+            onMenuMove: function () { if (AppAudio) AppAudio.menuMove(); },
             onMenuSelect: function () {},
         });
 
@@ -36,7 +41,7 @@ G.Screens = (function () {
         defineScreens();
         wireMouse();
         wireActions();
-        if (G.AppAudio) G.AppAudio.init({ sfxVol: settingsState.sfxVol / 100, musicVol: settingsState.musicVol / 100 });
+        if (AppAudio) AppAudio.init({ sfxVol: settingsState.sfxVol / 100, musicVol: settingsState.musicVol / 100 });
     }
 
     function saveSettings() {
@@ -53,7 +58,7 @@ G.Screens = (function () {
             draw: function (ctx, W, H) { drawBg(ctx, W, H); },
             keydown: function (key) {
                 Sc.menuNav('title', key, function (idx) {
-                    if (G.AppAudio) G.AppAudio.menuSelect();
+                    if (AppAudio) AppAudio.menuSelect();
                     if (idx === 0) Sc.switchTo('modeSelect');
                     else if (idx === 1) Sc.switchTo('highScores');
                     else if (idx === 2) Sc.switchTo('howToPlay');
@@ -69,9 +74,9 @@ G.Screens = (function () {
             draw: function (ctx, W, H) { drawBg(ctx, W, H); },
             keydown: function (key) {
                 Sc.menuNav('mode-select', key, function (idx) {
-                    if (G.AppAudio) G.AppAudio.menuSelect();
+                    if (AppAudio) AppAudio.menuSelect();
                     if (idx <= 2) {
-                        G.Board.startGame(MODES[idx]);
+                        Board.startGame(MODES[idx]);
                         Sc.switchTo('playing');
                     } else Sc.switchTo('title');
                 }, { onBack: function () { Sc.switchTo('title'); } });
@@ -95,47 +100,47 @@ G.Screens = (function () {
         });
 
         Sc.define('playing', {
-            enter: function () { Sc.hideOverlay(); showHUD(); G.Board.updateHUD(); },
+            enter: function () { Sc.hideOverlay(); showHUD(); Board.updateHUD(); },
             exit: function () { hideHUD(); },
             update: function (dt) {
-                G.Board.update(dt);
-                if (G.Particles) G.Particles.update(dt);
-                G.Board.updateHUD();
-                var done = G.Board.isGameOver() || (G.Board.getMode() === 'puzzle' && G.Board.isFinished());
+                Board.update(dt);
+                if (Particles) Particles.update(dt);
+                Board.updateHUD();
+                var done = Board.isGameOver() || (Board.getMode() === 'puzzle' && Board.isFinished());
                 if (done) Sc.switchTo('gameOver');
             },
             draw: function (ctx, W, H) {
-                G.Board.calcLayout(W, H);
-                G.Board.drawBackground(ctx, W, H);
-                G.Board.drawBoard(ctx);
-                if (G.Particles) G.Particles.draw(ctx);
+                Board.calcLayout(W, H);
+                Board.drawBackground(ctx, W, H);
+                Board.drawBoard(ctx);
+                if (Particles) Particles.draw(ctx);
             },
             keydown: function (key) {
                 if (key === 'Escape' || key === 'p') { Sc.switchTo('paused'); return; }
-                if (key === 'ArrowUp' || key === 'w') G.Board.cursorSlide(-1, 0);
-                else if (key === 'ArrowDown' || key === 's') G.Board.cursorSlide(1, 0);
-                else if (key === 'ArrowLeft' || key === 'a') G.Board.cursorSlide(0, -1);
-                else if (key === 'ArrowRight' || key === 'd') G.Board.cursorSlide(0, 1);
-                else if (key === ' ' || key === 'Enter') G.Board.cursorAction();
+                if (key === 'ArrowUp' || key === 'w') Board.cursorSlide(-1, 0);
+                else if (key === 'ArrowDown' || key === 's') Board.cursorSlide(1, 0);
+                else if (key === 'ArrowLeft' || key === 'a') Board.cursorSlide(0, -1);
+                else if (key === 'ArrowRight' || key === 'd') Board.cursorSlide(0, 1);
+                else if (key === ' ' || key === 'Enter') Board.cursorAction();
             },
-            onMouseDown: function (px, py) { G.Board.handleMouseDown(px, py); },
-            onMouseMove: function (px, py) { G.Board.handleMouseMove(px, py); },
-            onMouseUp:   function (px, py) { G.Board.handleMouseUp(px, py); },
+            onMouseDown: function (px, py) { Board.handleMouseDown(px, py); },
+            onMouseMove: function (px, py) { Board.handleMouseMove(px, py); },
+            onMouseUp:   function (px, py) { Board.handleMouseUp(px, py); },
         });
 
         Sc.define('paused', {
             enter: function () { Sc.showOverlay('pause'); Sc.updateSelection('pause'); },
             draw: function (ctx, W, H) {
-                G.Board.calcLayout(W, H);
-                G.Board.drawBackground(ctx, W, H);
-                G.Board.drawBoard(ctx);
+                Board.calcLayout(W, H);
+                Board.drawBackground(ctx, W, H);
+                Board.drawBoard(ctx);
             },
             keydown: function (key) {
                 Sc.menuNav('pause', key, function (idx) {
-                    if (G.AppAudio) G.AppAudio.menuSelect();
+                    if (AppAudio) AppAudio.menuSelect();
                     if (idx === 0) Sc.switchTo('playing');
                     else if (idx === 1) { backTarget = 'paused'; Sc.switchTo('settings'); }
-                    else if (idx === 2) { G.Board.startGame(G.Board.getMode()); Sc.switchTo('playing'); }
+                    else if (idx === 2) { Board.startGame(Board.getMode()); Sc.switchTo('playing'); }
                     else if (idx === 3) Sc.switchTo('title');
                 }, { onBack: function () { Sc.switchTo('playing'); } });
             },
@@ -143,14 +148,14 @@ G.Screens = (function () {
 
         Sc.define('gameOver', {
             enter: function () {
-                if (G.AppAudio) G.AppAudio.gameOver();
-                var m = G.Board.getMode();
-                var score = G.Board.getScore();
-                var stats = G.Board.getStats() || {};
+                if (AppAudio) AppAudio.gameOver();
+                var m = Board.getMode();
+                var score = Board.getScore();
+                var stats = Board.getStats() || {};
                 var isHS = hs[m].qualifies(score);
                 if (isHS && score > 0) {
-                    hs[m].add({ score: score, level: G.Board.getLevel(),
-                                chain: G.Board.getMaxChain(),
+                    hs[m].add({ score: score, level: Board.getLevel(),
+                                chain: Board.getMaxChain(),
                                 date: new Date().toISOString().slice(0, 10) });
                 }
                 var el = document.getElementById('gameover-stats');
@@ -158,12 +163,12 @@ G.Screens = (function () {
                     var lines = [];
                     var modeLabel = m.charAt(0).toUpperCase() + m.slice(1);
                     var title = document.querySelector('#screen-gameover .overlay-title');
-                    var finished = G.Board.isFinished();
+                    var finished = Board.isFinished();
                     if (title) title.textContent = finished ? (modeLabel + ' Complete!') : 'Game Over';
                     lines.push('Score: ' + score);
-                    lines.push('Level: ' + G.Board.getLevel() + '    Moves: ' + G.Board.getMoves());
+                    lines.push('Level: ' + Board.getLevel() + '    Moves: ' + Board.getMoves());
                     lines.push('Popped: ' + (stats.popped || 0));
-                    lines.push('Max Chain: x' + G.Board.getMaxChain());
+                    lines.push('Max Chain: x' + Board.getMaxChain());
                     lines.push('Specials: J' + (stats.jumboMade || 0) +
                                ' A' + (stats.arrowMade || 0) +
                                ' P' + (stats.prismMade || 0));
@@ -177,8 +182,8 @@ G.Screens = (function () {
             draw: function (ctx, W, H) { drawBg(ctx, W, H); },
             keydown: function (key) {
                 Sc.menuNav('gameover', key, function (idx) {
-                    if (G.AppAudio) G.AppAudio.menuSelect();
-                    if (idx === 0) { G.Board.startGame(G.Board.getMode()); Sc.switchTo('playing'); }
+                    if (AppAudio) AppAudio.menuSelect();
+                    if (idx === 0) { Board.startGame(Board.getMode()); Sc.switchTo('playing'); }
                     else if (idx === 1) Sc.switchTo('highScores');
                     else if (idx === 2) Sc.switchTo('title');
                 });
@@ -194,7 +199,7 @@ G.Screens = (function () {
                     idx = key === 'ArrowLeft' ? (idx - 1 + 3) % 3 : (idx + 1) % 3;
                     hsMode = MODES[idx];
                     refreshHS();
-                    if (G.AppAudio) G.AppAudio.menuMove();
+                    if (AppAudio) AppAudio.menuMove();
                     return;
                 }
                 Sc.menuNav('highscores', key, function () { Sc.switchTo('title'); },
@@ -241,10 +246,10 @@ G.Screens = (function () {
         else if (setting === 'dragDead') settingsState.dragDead = clamp(settingsState.dragDead + dir, 2, 20);
         else if (setting === 'showCursor') settingsState.showCursor = !settingsState.showCursor;
         else if (setting === 'eyeTrack')   settingsState.eyeTrack = !settingsState.eyeTrack;
-        if (G.AppAudio) G.AppAudio.setSettings({ sfxVol: settingsState.sfxVol / 100, musicVol: settingsState.musicVol / 100 });
+        if (AppAudio) AppAudio.setSettings({ sfxVol: settingsState.sfxVol / 100, musicVol: settingsState.musicVol / 100 });
         saveSettings();
         refreshSettings();
-        if (G.AppAudio) G.AppAudio.menuMove();
+        if (AppAudio) AppAudio.menuMove();
     }
 
     function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }

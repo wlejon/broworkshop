@@ -1,8 +1,20 @@
 // app.js — Stompworld main loop. Wires lib/{loop,input,screens,camera2d,
 // tilemap,platformer} together over Art assets and the World 1-1 layout.
 
-(function () {
-    'use strict';
+'use strict';
+
+import { GameLoop } from "/lib/loop.js";
+import { Canvas } from "/lib/canvas.js";
+import { Input } from "/lib/input.js";
+import { SFX } from "/lib/audio.js";
+import { Storage } from "/lib/storage.js";
+import { Screens } from "/lib/screens.js";
+import { Camera2D } from "/lib/camera2d.js";
+import { Platformer } from "/lib/platformer.js";
+import { Art } from "/app/art.js";
+import { Level } from "/app/level.js";
+import { SwSim } from "/app/sim.js";
+import { SwDemo } from "/app/demo.js";
 
     const VIEW_W = 800;
     const VIEW_H = 576;
@@ -1609,4 +1621,3 @@
 
     // Expose for debugging in headless / devtools.
     window.__SW = { Game, S, Art, Training };
-})();

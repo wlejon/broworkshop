@@ -1,12 +1,13 @@
 // audio.js — fintank SFX.
 'use strict';
-var F = window.F = window.F || {};
+import { SFX } from "/lib/audio.js";
+import { Economy } from "/app/economy.js";
 
-F.Audio = (function () {
+export const Audio = (function () {
     function init() {
         return SFX.init({
-            sfxVol: F.Economy.settings.sfxVol / 100,
-            musicVol: F.Economy.settings.musicVol / 100
+            sfxVol: Economy.settings.sfxVol / 100,
+            musicVol: Economy.settings.musicVol / 100
         });
     }
 

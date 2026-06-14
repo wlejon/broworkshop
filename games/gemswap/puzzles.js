@@ -1,9 +1,7 @@
 // puzzles.js — Puzzle mode layouts. 'F' prefix = frozen cell.
 // Each puzzle is an 8-row 8-col array of strings. Empty string = random fill.
 'use strict';
-var G = G || {};
-
-G.Puzzles = (function () {
+export const Puzzles = (function () {
     // Helper to generate a puzzle with a random pattern of frozen cells.
     function gen(seed, density) {
         var rows = 8, cols = 8;

@@ -1,8 +1,8 @@
 // input.js — named action setup for gemswap.
 'use strict';
-var G = G || {};
+import { Input } from "/lib/input.js";
 
-G.Controls = (function () {
+export const Controls = (function () {
     var ACTIONS = [
         { name: 'cursor_up',    label: 'Cursor Up',    defaults: ['w', 'ArrowUp']    },
         { name: 'cursor_down',  label: 'Cursor Down',  defaults: ['s', 'ArrowDown']  },

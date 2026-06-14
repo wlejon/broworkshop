@@ -1,8 +1,8 @@
 // intruders.js — original intruder types (snatcher, siphoner, drifter, swarmer, boss)
 'use strict';
-var F = window.F = window.F || {};
+import { Fish } from "/app/fish.js";
 
-F.Intruders = (function () {
+export const Intruders = (function () {
     // type definitions (original, not trademarked):
     //   snatcher  — small fast fish predator
     //   siphoner  — drains coins
@@ -170,7 +170,7 @@ F.Intruders = (function () {
             ctx.ellipse(0, 0, sz, sz * 0.8, 0, 0, Math.PI * 2);
             ctx.fill();
             // spots
-            ctx.fillStyle = F.Fish.shade(iu.def.color, -0.3);
+            ctx.fillStyle = Fish.shade(iu.def.color, -0.3);
             for (var i = -1; i <= 1; i++) {
                 ctx.beginPath();
                 ctx.arc(i * sz * 0.4, -sz * 0.15, sz * 0.15, 0, Math.PI * 2);
@@ -223,7 +223,7 @@ F.Intruders = (function () {
             ctx.ellipse(0, 0, sz, sz * 0.4, 0, 0, Math.PI * 2);
             ctx.fill();
             // tail
-            ctx.fillStyle = F.Fish.shade(iu.def.color, -0.2);
+            ctx.fillStyle = Fish.shade(iu.def.color, -0.2);
             ctx.beginPath();
             ctx.moveTo(-sz, 0);
             ctx.lineTo(-sz * 1.6, -sz * 0.5);

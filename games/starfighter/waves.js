@@ -4,9 +4,11 @@
 // game.js. The wave is responsible for scheduling enemy spawns and wave-
 // specific geometry (star field vs surface grid vs trench); game.js owns
 // enemy lists, projectiles, collisions, and HUD.
-var N = N || {};
+import { Enemies } from "/app/enemies.js";
+import { Render } from "/app/render.js";
+import { Audio } from "/app/audio.js";
 
-N.Waves = (function() {
+export const Waves = (function() {
     "use strict";
 
     var SPACE = "space", SURFACE = "surface", TRENCH = "trench";
@@ -70,14 +72,14 @@ N.Waves = (function() {
         while (ws.spawned < ws.schedule.length && ws.schedule[ws.spawned].at <= ws.elapsed) {
             var entry = ws.schedule[ws.spawned++];
             if (entry.type === "fighter") {
-                var f = N.Enemies.createFighter({
-                    path: N.Enemies.randomSwoop(),
+                var f = Enemies.createFighter({
+                    path: Enemies.randomSwoop(),
                     life: 4400 + Math.random() * 1200,
                     fireCount: 1 + (Math.random() < ws.loopScale - 0.8 ? 1 : 0)
                 });
                 game.addEnemy(f);
             } else if (entry.type === "fireball") {
-                var fb = N.Enemies.createFireball({
+                var fb = Enemies.createFireball({
                     x: (Math.random() * 2 - 1) * 14,
                     y: (Math.random() * 2 - 1) * 10,
                     z: 240,
@@ -87,20 +89,20 @@ N.Waves = (function() {
                 if (game.radio) game.radio("FIREBALL :: EVADE", 900);
             } else if (entry.type === "ace") {
                 // Ace flies a slow, high-amplitude swoop directly at the player.
-                var a = N.Enemies.createAce({
-                    path: N.Enemies.swoopPath(55, 18, 4, 2, -55, -12),
+                var a = Enemies.createAce({
+                    path: Enemies.swoopPath(55, 18, 4, 2, -55, -12),
                     life: 7000
                 });
                 game.addEnemy(a);
                 ws.aceAnnounced = true;
                 if (game.radio) game.radio("!! BLACK ACE INBOUND !!", 2000);
-                N.Audio.sfxAceEngine();
+                Audio.sfxAceEngine();
             }
         }
     }
 
     function drawSpaceWave(ctx, game) {
-        N.Render.drawStars(ctx);
+        Render.drawStars(ctx);
     }
 
     function isSpaceComplete(ws, game) {
@@ -192,11 +194,11 @@ N.Waves = (function() {
             var liveZ = entry.z - ws.elapsed * ws.railSpeed;
             if (liveZ > horizon) break;
             if (entry.type === "tower") {
-                game.addEnemy(N.Enemies.createTower({ x: entry.x, y: GROUND_Y, z: liveZ }));
+                game.addEnemy(Enemies.createTower({ x: entry.x, y: GROUND_Y, z: liveZ }));
             } else if (entry.type === "bunker") {
-                game.addEnemy(N.Enemies.createBunker({ x: entry.x, y: GROUND_Y, z: liveZ }));
+                game.addEnemy(Enemies.createBunker({ x: entry.x, y: GROUND_Y, z: liveZ }));
             } else if (entry.type === "catwalk") {
-                game.addEnemy(N.Enemies.createCatwalk({
+                game.addEnemy(Enemies.createCatwalk({
                     x: entry.x, y: entry.y, z: liveZ, spanX: entry.spanX
                 }));
             }
@@ -213,12 +215,12 @@ N.Waves = (function() {
         if (!ws) return;
 
         // Sky gradient via horizon band (lighter above horizon, black below).
-        var W = N.Render.width(), H = N.Render.height();
+        var W = Render.width(), H = Render.height();
         ctx.fillStyle = "#000";
         ctx.fillRect(0, 0, W, H);
 
         // Subtle horizon glow.
-        var horizonP = N.Render.project(0, GROUND_Y, GRID_FAR);
+        var horizonP = Render.project(0, GROUND_Y, GRID_FAR);
         if (horizonP.visible) {
             var grd = ctx.createLinearGradient(0, horizonP.y - 60, 0, horizonP.y + 4);
             grd.addColorStop(0, "rgba(60, 40, 80, 0)");
@@ -231,8 +233,8 @@ N.Waves = (function() {
         ctx.lineWidth = 1.2;
         for (var lx = 0; lx < GRID_LONGX.length; lx++) {
             var x = GRID_LONGX[lx];
-            N.Render.line(ctx,
-                x, GROUND_Y, N.Render.NEAR_Z + 0.1,
+            Render.line(ctx,
+                x, GROUND_Y, Render.NEAR_Z + 0.1,
                 x, GROUND_Y, GRID_FAR,
                 "#3a6", 0.7);
         }
@@ -240,9 +242,9 @@ N.Waves = (function() {
         // Transverse lines (fixed Z, spanning X range), scrolling.
         for (var ti = 0; ti < ws.gridZ.length; ti++) {
             var tz = ws.gridZ[ti];
-            if (tz < N.Render.NEAR_Z + 0.2 || tz > GRID_FAR) continue;
+            if (tz < Render.NEAR_Z + 0.2 || tz > GRID_FAR) continue;
             var fade = 1 - tz / GRID_FAR;
-            N.Render.line(ctx,
+            Render.line(ctx,
                 -GRID_X_HALF, GROUND_Y, tz,
                  GRID_X_HALF, GROUND_Y, tz,
                 "#3a6", 0.25 + fade * 0.6);
@@ -345,21 +347,21 @@ N.Waves = (function() {
             var liveZ = entry.z - ws.elapsed * ws.railSpeed;
             if (liveZ > horizon) break;
             if (entry.type === "catwalk") {
-                game.addEnemy(N.Enemies.createCatwalk({
+                game.addEnemy(Enemies.createCatwalk({
                     x: entry.x, y: entry.y, z: liveZ, spanX: entry.spanX
                 }));
             } else if (entry.type === "pylon") {
-                game.addEnemy(N.Enemies.createPylon({
+                game.addEnemy(Enemies.createPylon({
                     x: entry.x, z: liveZ, halfWidth: entry.halfWidth
                 }));
             } else if (entry.type === "turret") {
-                game.addEnemy(N.Enemies.createTurret({
+                game.addEnemy(Enemies.createTurret({
                     x: entry.x, y: entry.y, z: liveZ, side: entry.side
                 }));
             } else if (entry.type === "port") {
                 // Port shrinks with each loop — bullseye tolerance tightens.
                 var loopShrink = Math.max(0.45, 1 - (game.getLoop() - 1) * 0.15);
-                var p = N.Enemies.createPort({ x: entry.x, y: entry.y, z: liveZ });
+                var p = Enemies.createPort({ x: entry.x, y: entry.y, z: liveZ });
                 p.radius *= loopShrink;
                 p.innerRadius *= loopShrink;
                 game.addEnemy(p);
@@ -380,7 +382,7 @@ N.Waves = (function() {
             if (inLock) {
                 ws._lockTonePulse -= dt;
                 if (ws._lockTonePulse <= 0) {
-                    N.Audio.sfxLockTone();
+                    Audio.sfxLockTone();
                     // Pulse faster as port approaches.
                     var tt = (pz - 10) / 75; // 0..1, 0=closest
                     ws._lockTonePulse = 90 + tt * 260;
@@ -394,36 +396,36 @@ N.Waves = (function() {
     function drawTrenchWave(ctx, game) {
         var ws = game.getWaveScript();
         if (!ws) return;
-        var W = N.Render.width(), H = N.Render.height();
+        var W = Render.width(), H = Render.height();
         ctx.fillStyle = "#000";
         ctx.fillRect(0, 0, W, H);
 
         // Left + right wall long runners (top/bottom edges) running far to near.
         var col = "#68f";
-        N.Render.line(ctx, -TRENCH_HALF_W, FLOOR_Y, N.Render.NEAR_Z + 0.2,
+        Render.line(ctx, -TRENCH_HALF_W, FLOOR_Y, Render.NEAR_Z + 0.2,
                            -TRENCH_HALF_W, FLOOR_Y, TRENCH_FAR, col, 0.9);
-        N.Render.line(ctx, -TRENCH_HALF_W, CEIL_Y,  N.Render.NEAR_Z + 0.2,
+        Render.line(ctx, -TRENCH_HALF_W, CEIL_Y,  Render.NEAR_Z + 0.2,
                            -TRENCH_HALF_W, CEIL_Y,  TRENCH_FAR, col, 0.9);
-        N.Render.line(ctx,  TRENCH_HALF_W, FLOOR_Y, N.Render.NEAR_Z + 0.2,
+        Render.line(ctx,  TRENCH_HALF_W, FLOOR_Y, Render.NEAR_Z + 0.2,
                             TRENCH_HALF_W, FLOOR_Y, TRENCH_FAR, col, 0.9);
-        N.Render.line(ctx,  TRENCH_HALF_W, CEIL_Y,  N.Render.NEAR_Z + 0.2,
+        Render.line(ctx,  TRENCH_HALF_W, CEIL_Y,  Render.NEAR_Z + 0.2,
                             TRENCH_HALF_W, CEIL_Y,  TRENCH_FAR, col, 0.9);
         // Floor center longitudinal for depth cue.
-        N.Render.line(ctx,  0, FLOOR_Y, N.Render.NEAR_Z + 0.2,
+        Render.line(ctx,  0, FLOOR_Y, Render.NEAR_Z + 0.2,
                             0, FLOOR_Y, TRENCH_FAR, col, 0.35);
 
         // Transverse ribs on each wall — four vertical segments per rib position.
         for (var ti = 0; ti < ws.ribZ.length; ti++) {
             var rz = ws.ribZ[ti];
-            if (rz < N.Render.NEAR_Z + 0.3 || rz > TRENCH_FAR) continue;
+            if (rz < Render.NEAR_Z + 0.3 || rz > TRENCH_FAR) continue;
             var fade = 1 - rz / TRENCH_FAR;
             var a = 0.25 + fade * 0.6;
-            N.Render.line(ctx, -TRENCH_HALF_W, FLOOR_Y, rz,
+            Render.line(ctx, -TRENCH_HALF_W, FLOOR_Y, rz,
                                -TRENCH_HALF_W, CEIL_Y,  rz, col, a);
-            N.Render.line(ctx,  TRENCH_HALF_W, FLOOR_Y, rz,
+            Render.line(ctx,  TRENCH_HALF_W, FLOOR_Y, rz,
                                 TRENCH_HALF_W, CEIL_Y,  rz, col, a);
             // Floor rib spanning trench width (bottom).
-            N.Render.line(ctx, -TRENCH_HALF_W, FLOOR_Y, rz,
+            Render.line(ctx, -TRENCH_HALF_W, FLOOR_Y, rz,
                                 TRENCH_HALF_W, FLOOR_Y, rz, col, a * 0.6);
         }
     }

@@ -1,8 +1,9 @@
 // particles.js — bubbles, splash drops, hit sparks, floating text.
 'use strict';
-var F = window.F = window.F || {};
+import { FX } from "/lib/fx.js";
+import { Text } from "/app/text.js";
 
-F.Particles = (function () {
+export const Particles = (function () {
     var items = [];
     var bubbles = [];
 
@@ -118,7 +119,7 @@ F.Particles = (function () {
                 ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2);
                 ctx.fill();
             } else if (p.kind === 'text') {
-                W.Text.drawCentered(ctx, p.text, p.x, p.y, 2, p.color);
+                Text.drawCentered(ctx, p.text, p.x, p.y, 2, p.color);
             }
         }
         ctx.globalAlpha = 1;
@@ -135,5 +136,3 @@ F.Particles = (function () {
         count: function () { return items.length; }
     };
 })();
-
-window.W = window.W || {};

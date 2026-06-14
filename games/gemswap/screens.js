@@ -1,8 +1,13 @@
 // screens.js — screen flow for gemswap.
 'use strict';
-var G = G || {};
+import { Screens as ScreensLib } from "/lib/screens.js";
+import { Storage } from "/lib/storage.js";
+import { Hud } from "/lib/hud.js";
+import { Board } from "/app/board.js";
+import { Particles } from "/app/particles.js";
+import { AppAudio } from "/app/audio.js";
 
-G.Screens = (function () {
+export const Screens = (function () {
     var Sc = null;
     var backTarget = 'title';
     var hsMode = 'classic';
@@ -15,10 +20,10 @@ G.Screens = (function () {
     var MODES = ['classic', 'timed', 'puzzle'];
 
     function init() {
-        Sc = Screens.create({
+        Sc = ScreensLib.create({
             overlay: '#overlay',
             prefix: 'screen-',
-            onMenuMove: function () { if (G.AppAudio) G.AppAudio.menuMove(); },
+            onMenuMove: function () { if (AppAudio) AppAudio.menuMove(); },
             onMenuSelect: function () { /* select sfx played inside callbacks */ },
         });
 
@@ -36,11 +41,11 @@ G.Screens = (function () {
         wireMouse();
         wireActions();
         applySettingsToBoard();
-        if (G.AppAudio) G.AppAudio.init({ sfxVol: settingsState.sfxVol / 100, musicVol: settingsState.musicVol / 100 });
+        if (AppAudio) AppAudio.init({ sfxVol: settingsState.sfxVol / 100, musicVol: settingsState.musicVol / 100 });
     }
 
     function applySettingsToBoard() {
-        if (G.Board && G.Board.setHintDelay) G.Board.setHintDelay(settingsState.hintDelay * 1000);
+        if (Board && Board.setHintDelay) Board.setHintDelay(settingsState.hintDelay * 1000);
     }
 
     function saveSettings() { storage.load(settingsState); for (var k in settingsState) storage.set(k, settingsState[k]); storage.save(); }
@@ -58,7 +63,7 @@ G.Screens = (function () {
             draw: function (ctx, W, H) { drawBg(ctx, W, H); },
             keydown: function (key) {
                 Sc.menuNav('title', key, function (idx) {
-                    if (G.AppAudio) G.AppAudio.menuSelect();
+                    if (AppAudio) AppAudio.menuSelect();
                     if (idx === 0) Sc.switchTo('modeSelect');
                     else if (idx === 1) Sc.switchTo('highScores');
                     else if (idx === 2) Sc.switchTo('howToPlay');
@@ -74,9 +79,9 @@ G.Screens = (function () {
             draw: function (ctx, W, H) { drawBg(ctx, W, H); },
             keydown: function (key) {
                 Sc.menuNav('mode-select', key, function (idx) {
-                    if (G.AppAudio) G.AppAudio.menuSelect();
+                    if (AppAudio) AppAudio.menuSelect();
                     if (idx <= 2) {
-                        G.Board.startGame(MODES[idx]);
+                        Board.startGame(MODES[idx]);
                         Sc.switchTo('playing');
                     } else Sc.switchTo('title');
                 }, { onBack: function () { Sc.switchTo('title'); } });
@@ -100,35 +105,35 @@ G.Screens = (function () {
         });
 
         Sc.define('playing', {
-            enter: function () { Sc.hideOverlay(); showHUD(); G.Board.updateHUD(); },
+            enter: function () { Sc.hideOverlay(); showHUD(); Board.updateHUD(); },
             exit: function () { hideHUD(); },
             update: function (dt) {
-                G.Board.update(dt);
-                if (G.Particles) G.Particles.update(dt);
-                G.Board.updateHUD();
-                var done = G.Board.isGameOver() || (G.Board.getMode() === 'puzzle' && G.Board.isFinished());
+                Board.update(dt);
+                if (Particles) Particles.update(dt);
+                Board.updateHUD();
+                var done = Board.isGameOver() || (Board.getMode() === 'puzzle' && Board.isFinished());
                 if (done) Sc.switchTo('gameOver');
             },
             draw: function (ctx, W, H) {
-                G.Board.calcLayout(W, H);
-                G.Board.drawBackground(ctx, W, H);
-                G.Board.drawBoard(ctx);
-                if (G.Particles) G.Particles.draw(ctx);
+                Board.calcLayout(W, H);
+                Board.drawBackground(ctx, W, H);
+                Board.drawBoard(ctx);
+                if (Particles) Particles.draw(ctx);
             },
             keydown: function (key) {
                 if (key === 'Escape' || key === 'p') { Sc.switchTo('paused'); return; }
-                if (key === 'ArrowUp' || key === 'w') G.Board.cursorMove(-1, 0);
-                else if (key === 'ArrowDown' || key === 's') G.Board.cursorMove(1, 0);
-                else if (key === 'ArrowLeft' || key === 'a') G.Board.cursorMove(0, -1);
-                else if (key === 'ArrowRight' || key === 'd') G.Board.cursorMove(0, 1);
-                else if (key === ' ' || key === 'Enter') G.Board.cursorConfirm();
-                else if (key === 'h') G.Board.clearHint();
+                if (key === 'ArrowUp' || key === 'w') Board.cursorMove(-1, 0);
+                else if (key === 'ArrowDown' || key === 's') Board.cursorMove(1, 0);
+                else if (key === 'ArrowLeft' || key === 'a') Board.cursorMove(0, -1);
+                else if (key === 'ArrowRight' || key === 'd') Board.cursorMove(0, 1);
+                else if (key === ' ' || key === 'Enter') Board.cursorConfirm();
+                else if (key === 'h') Board.clearHint();
             },
             onMouseDown: function (px, py) {
-                if (!settingsState.dragSwap) { G.Board.handleClick(px, py); return; }
+                if (!settingsState.dragSwap) { Board.handleClick(px, py); return; }
                 var cell = pointToCell(px, py);
                 dragFrom = cell;
-                if (cell) G.Board.handleClick(px, py);
+                if (cell) Board.handleClick(px, py);
             },
             onMouseUp: function (px, py) {
                 if (!settingsState.dragSwap || !dragFrom) return;
@@ -137,7 +142,7 @@ G.Screens = (function () {
                 var dr = cell.r - dragFrom.r, dc = cell.c - dragFrom.c;
                 if (Math.abs(dr) + Math.abs(dc) === 1) {
                     // simulate two clicks: dragFrom already selected via down; now click target
-                    G.Board.handleClick(px, py);
+                    Board.handleClick(px, py);
                 }
                 dragFrom = null;
             },
@@ -146,16 +151,16 @@ G.Screens = (function () {
         Sc.define('paused', {
             enter: function () { Sc.showOverlay('pause'); Sc.updateSelection('pause'); },
             draw: function (ctx, W, H) {
-                G.Board.calcLayout(W, H);
-                G.Board.drawBackground(ctx, W, H);
-                G.Board.drawBoard(ctx);
+                Board.calcLayout(W, H);
+                Board.drawBackground(ctx, W, H);
+                Board.drawBoard(ctx);
             },
             keydown: function (key) {
                 Sc.menuNav('pause', key, function (idx) {
-                    if (G.AppAudio) G.AppAudio.menuSelect();
+                    if (AppAudio) AppAudio.menuSelect();
                     if (idx === 0) Sc.switchTo('playing');
                     else if (idx === 1) { backTarget = 'paused'; Sc.switchTo('settings'); }
-                    else if (idx === 2) { G.Board.startGame(G.Board.getMode()); Sc.switchTo('playing'); }
+                    else if (idx === 2) { Board.startGame(Board.getMode()); Sc.switchTo('playing'); }
                     else if (idx === 3) Sc.switchTo('title');
                 }, { onBack: function () { Sc.switchTo('playing'); } });
             },
@@ -163,13 +168,13 @@ G.Screens = (function () {
 
         Sc.define('gameOver', {
             enter: function () {
-                if (G.AppAudio) G.AppAudio.gameOver();
-                var m = G.Board.getMode();
-                var score = G.Board.getScore();
-                var stats = G.Board.getStats() || {};
+                if (AppAudio) AppAudio.gameOver();
+                var m = Board.getMode();
+                var score = Board.getScore();
+                var stats = Board.getStats() || {};
                 var isHS = hs[m].qualifies(score);
                 if (isHS && score > 0) {
-                    hs[m].add({ score: score, level: G.Board.getLevel(), chain: G.Board.getMaxChain(),
+                    hs[m].add({ score: score, level: Board.getLevel(), chain: Board.getMaxChain(),
                                 date: new Date().toISOString().slice(0, 10) });
                 }
                 var el = document.getElementById('gameover-stats');
@@ -177,11 +182,11 @@ G.Screens = (function () {
                     var lines = [];
                     var modeLabel = m.charAt(0).toUpperCase() + m.slice(1);
                     var title = document.querySelector('#screen-gameover .overlay-title');
-                    var finished = G.Board.isFinished();
+                    var finished = Board.isFinished();
                     if (title) title.textContent = finished ? (modeLabel + ' Complete!') : 'Game Over';
                     lines.push('Score: ' + score);
-                    lines.push('Level: ' + G.Board.getLevel() + '    Moves: ' + G.Board.getMoves());
-                    lines.push('Max Chain: x' + G.Board.getMaxChain());
+                    lines.push('Level: ' + Board.getLevel() + '    Moves: ' + Board.getMoves());
+                    lines.push('Max Chain: x' + Board.getMaxChain());
                     lines.push('Matches: ' + (stats.matches || 0));
                     lines.push('Specials: F' + (stats.flameMade || 0) + ' S' + (stats.starMade || 0) + ' H' + (stats.hyperMade || 0));
                     if (isHS && score > 0) lines.push('\n★ NEW HIGH SCORE! ★');
@@ -193,8 +198,8 @@ G.Screens = (function () {
             draw: function (ctx, W, H) { drawBg(ctx, W, H); },
             keydown: function (key) {
                 Sc.menuNav('gameover', key, function (idx) {
-                    if (G.AppAudio) G.AppAudio.menuSelect();
-                    if (idx === 0) { G.Board.startGame(G.Board.getMode()); Sc.switchTo('playing'); }
+                    if (AppAudio) AppAudio.menuSelect();
+                    if (idx === 0) { Board.startGame(Board.getMode()); Sc.switchTo('playing'); }
                     else if (idx === 1) Sc.switchTo('highScores');
                     else if (idx === 2) Sc.switchTo('title');
                 });
@@ -210,7 +215,7 @@ G.Screens = (function () {
                     idx = key === 'ArrowLeft' ? (idx - 1 + 3) % 3 : (idx + 1) % 3;
                     hsMode = MODES[idx];
                     refreshHS();
-                    if (G.AppAudio) G.AppAudio.menuMove();
+                    if (AppAudio) AppAudio.menuMove();
                     return;
                 }
                 Sc.menuNav('highscores', key, function () { Sc.switchTo('title'); },
@@ -257,11 +262,11 @@ G.Screens = (function () {
         else if (setting === 'hintDelay') settingsState.hintDelay = clamp(settingsState.hintDelay + dir, 1, 30);
         else if (setting === 'dragSwap') settingsState.dragSwap = !settingsState.dragSwap;
         else if (setting === 'showCursor') settingsState.showCursor = !settingsState.showCursor;
-        if (G.AppAudio) G.AppAudio.setSettings({ sfxVol: settingsState.sfxVol / 100, musicVol: settingsState.musicVol / 100 });
+        if (AppAudio) AppAudio.setSettings({ sfxVol: settingsState.sfxVol / 100, musicVol: settingsState.musicVol / 100 });
         applySettingsToBoard();
         saveSettings();
         refreshSettings();
-        if (G.AppAudio) G.AppAudio.menuMove();
+        if (AppAudio) AppAudio.menuMove();
     }
 
     function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
@@ -292,12 +297,12 @@ G.Screens = (function () {
     }
 
     function pointToCell(px, py) {
-        var layout = G.Board.getLayout();
+        var layout = Board.getLayout();
         var dx = px - layout.ox, dy = py - layout.oy;
         if (dx < 0 || dy < 0) return null;
         var c = Math.floor(dx / layout.cell);
         var r = Math.floor(dy / layout.cell);
-        if (r < 0 || r >= G.Board.ROWS || c < 0 || c >= G.Board.COLS) return null;
+        if (r < 0 || r >= Board.ROWS || c < 0 || c >= Board.COLS) return null;
         return { r: r, c: c };
     }
 

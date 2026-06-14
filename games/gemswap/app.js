@@ -1,39 +1,46 @@
 // app.js — entry point for gemswap.
 'use strict';
-(function () {
+import { GameLoop } from "/lib/loop.js";
+import { Canvas } from "/lib/canvas.js";
+import { Particles } from "/app/particles.js";
+import { Puzzles } from "/app/puzzles.js";
+import { AppAudio } from "/app/audio.js";
+import { Controls } from "/app/input.js";
+import { Board } from "/app/board.js";
+import { Screens } from "/app/screens.js";
+
     var canvas = document.getElementById('game');
     var ctx = canvas.getContext('2d');
 
     function W() { return Canvas.w(ctx, 900); }
     function H() { return Canvas.h(ctx, 800); }
 
-    G.Controls.init();
-    G.Screens.init();
+    Controls.init();
+    Screens.init();
 
     var loop = GameLoop.create({
         tick: function (dt) {
-            var Sc = G.Screens.manager();
+            var Sc = Screens.manager();
             Sc.update(dt, W(), H());
         },
         draw: function () {
             ctx.clearRect(0, 0, W(), H());
-            var Sc = G.Screens.manager();
+            var Sc = Screens.manager();
             Sc.draw(ctx, W(), H());
         },
     });
 
-    G.Screens.switchTo('title');
+    Screens.switchTo('title');
     loop.start();
 
     // Expose test hooks.
     window.__gemswap = {
-        G: G,
-        board: G.Board,
-        particles: G.Particles,
-        puzzles: G.Puzzles,
-        screens: G.Screens,
+        G: { Board: Board, Puzzles: Puzzles, Particles: Particles, AppAudio: AppAudio, Controls: Controls, Screens: Screens },
+        board: Board,
+        particles: Particles,
+        puzzles: Puzzles,
+        screens: Screens,
         loop: loop,
     };
 
     console.log('Gemswap loaded.');
-})();

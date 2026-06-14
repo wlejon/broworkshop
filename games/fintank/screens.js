@@ -1,19 +1,24 @@
 // screens.js — screen state machine.
 'use strict';
-var F = window.F = window.F || {};
+import { Screens as ScreensLib } from "/lib/screens.js";
+import { Hud } from "/lib/hud.js";
+import { Audio } from "/app/audio.js";
+import { Economy } from "/app/economy.js";
+import { Game } from "/app/app.js";
+import { Particles } from "/app/particles.js";
 
-F.Screens = (function () {
+export const Screens = (function () {
     var mgr = null;
     var backTarget = 'title';
     var bgT = 0;
     var shopSel = 0;
 
     function init() {
-        mgr = Screens.create({
+        mgr = ScreensLib.create({
             overlay: '#overlay',
             prefix: 'screen-',
-            onMenuMove: function () { F.Audio.menuMove(); },
-            onMenuSelect: function () { F.Audio.menuSelect(); }
+            onMenuMove: function () { Audio.menuMove(); },
+            onMenuSelect: function () { Audio.menuSelect(); }
         });
         mgr.define('title',      titleScreen);
         mgr.define('slots',      slotsScreen);
@@ -97,7 +102,7 @@ F.Screens = (function () {
                 var slot = items[i].getAttribute('data-slot');
                 if (!slot) continue;
                 var n = parseInt(slot, 10);
-                var s = F.Economy.loadSlot(n);
+                var s = Economy.loadSlot(n);
                 var fresh = (s.day === 1 && s.fish.length === 0 && s.coins === 200 && !s.bestDay);
                 items[i].textContent = 'SLOT ' + n + (fresh ? ' - NEW'
                     : ' - DAY ' + s.day + ' - ' + s.coins + 'C - ' + s.fish.length + ' FISH');
@@ -110,13 +115,13 @@ F.Screens = (function () {
                 var idx = selIdx('slots');
                 var el = items[idx];
                 var s = el && el.getAttribute('data-slot');
-                if (s) { F.Economy.eraseSlot(parseInt(s, 10)); self.refresh(); }
+                if (s) { Economy.eraseSlot(parseInt(s, 10)); self.refresh(); }
                 return;
             }
             mgr.menuNav('slots', key, function (idx, el) {
                 var s = el && el.getAttribute('data-slot');
                 var a = el && el.getAttribute('data-action');
-                if (s) { F.Game.startGame(parseInt(s, 10)); switchTo('shop'); }
+                if (s) { Game.startGame(parseInt(s, 10)); switchTo('shop'); }
                 else if (a === 'back') switchTo('title');
             }, { onBack: function () { switchTo('title'); } });
         }
@@ -127,16 +132,16 @@ F.Screens = (function () {
         enter: function () {
             mgr.showOverlay('shop');
             showHUD();
-            F.Game.refreshHUD();
+            Game.refreshHUD();
             shopSel = 0;
             this.rebuild();
         },
         exit: function () {},
-        update: function () { F.Game.refreshHUD(); },
+        update: function () { Game.refreshHUD(); },
         draw: drawBg,
         rebuild: function () {
-            var slot = F.Game.getSlot();
-            var items = F.Economy.shopCatalog(slot);
+            var slot = Game.getSlot();
+            var items = Economy.shopCatalog(slot);
             var host = document.getElementById('shop-items');
             if (!host) return;
             host.innerHTML = '';
@@ -166,23 +171,23 @@ F.Screens = (function () {
             mgr.menuNav('shop', key, function (idx, el) {
                 var a = el && el.getAttribute('data-action');
                 if (a === 'next') {
-                    F.Game.enterPlayScreen();
+                    Game.enterPlayScreen();
                     switchTo('playing');
                     return;
                 }
                 var shopIdx = el && el.getAttribute('data-shop-idx');
                 if (shopIdx != null) {
                     var i = parseInt(shopIdx, 10);
-                    var res = F.Game.shopBuyAt(i);
-                    if (res && res.ok) { F.Audio.buy(); }
-                    else { F.Audio.buyFail(); }
+                    var res = Game.shopBuyAt(i);
+                    if (res && res.ok) { Audio.buy(); }
+                    else { Audio.buyFail(); }
                     self.rebuild();
                 }
             }, {
                 onBack: function () { switchTo('dayclear'); }
             });
             if (key === 'n' || key === 'N') {
-                F.Game.enterPlayScreen();
+                Game.enterPlayScreen();
                 switchTo('playing');
             }
         }
@@ -193,31 +198,31 @@ F.Screens = (function () {
         enter: function () {
             mgr.hideOverlay();
             showHUD();
-            F.Game.onEnterPlay();
+            Game.onEnterPlay();
         },
         exit: function () { hideHUD(); },
         update: function (dt) {
-            F.Game.tick(dt);
-            var st = F.Game.status();
+            Game.tick(dt);
+            var st = Game.status();
             if (st === 'dayclear') switchTo('dayclear');
             else if (st === 'gameover') switchTo('gameover');
         },
         draw: function (ctx, Wd, Hd) {
-            var sh = F.Particles.shakeOffset();
+            var sh = Particles.shakeOffset();
             ctx.save();
             ctx.translate(sh.x, sh.y);
-            F.Game.draw(ctx, Wd, Hd);
+            Game.draw(ctx, Wd, Hd);
             ctx.restore();
         },
         keydown: function (key) {
             if (key === 'Escape' || key === 'p' || key === 'P') { switchTo('paused'); return; }
-            if (key === ' ') { F.Game.quickFeed(); return; }
+            if (key === ' ') { Game.quickFeed(); return; }
             // Number keys quick-buy
             if (/^[1-5]$/.test(key)) {
-                F.Game.quickBuy(parseInt(key, 10));
+                Game.quickBuy(parseInt(key, 10));
             }
         },
-        mousedown: function (x, y) { F.Game.clickAt(x, y); }
+        mousedown: function (x, y) { Game.clickAt(x, y); }
     };
 
     // ---- PAUSED ----
@@ -226,7 +231,7 @@ F.Screens = (function () {
         exit: function () {},
         update: function () {},
         draw: function (ctx, Wd, Hd) {
-            F.Game.draw(ctx, Wd, Hd);
+            Game.draw(ctx, Wd, Hd);
         },
         keydown: function (key) {
             mgr.menuNav('pause', key, function (idx, el) {
@@ -242,8 +247,8 @@ F.Screens = (function () {
     var dayClear = {
         enter: function () {
             mgr.showOverlay('dayclear');
-            F.Audio.dayEnd();
-            var st = F.Game.dayStats();
+            Audio.dayEnd();
+            var st = Game.dayStats();
             var el = document.getElementById('dayclear-stats');
             if (el) {
                 var lines = [];
@@ -262,8 +267,8 @@ F.Screens = (function () {
         keydown: function (key) {
             mgr.menuNav('dayclear', key, function (idx, el) {
                 var a = el && el.getAttribute('data-action');
-                if (a === 'shop') { F.Game.advanceToNextDay(); switchTo('shop'); }
-                else if (a === 'next') { F.Game.advanceToNextDay(); F.Game.enterPlayScreen(); switchTo('playing'); }
+                if (a === 'shop') { Game.advanceToNextDay(); switchTo('shop'); }
+                else if (a === 'next') { Game.advanceToNextDay(); Game.enterPlayScreen(); switchTo('playing'); }
                 else if (a === 'quit') switchTo('title');
             });
         }
@@ -273,9 +278,9 @@ F.Screens = (function () {
     var gameover = {
         enter: function () {
             mgr.showOverlay('gameover');
-            F.Audio.gameover();
-            var st = F.Game.gameOverStats();
-            F.Economy.addHS({ day: st.bestDay, slot: st.slot, totalCoins: st.totalCoins });
+            Audio.gameover();
+            var st = Game.gameOverStats();
+            Economy.addHS({ day: st.bestDay, slot: st.slot, totalCoins: st.totalCoins });
             var el = document.getElementById('gameover-stats');
             if (el) {
                 var lines = [];
@@ -292,7 +297,7 @@ F.Screens = (function () {
         keydown: function (key) {
             mgr.menuNav('gameover', key, function (idx, el) {
                 var a = el && el.getAttribute('data-action');
-                if (a === 'restart') { F.Game.resetSlotForRetry(); switchTo('shop'); }
+                if (a === 'restart') { Game.resetSlotForRetry(); switchTo('shop'); }
                 else if (a === 'highscores') switchTo('highscores');
                 else if (a === 'quit') switchTo('title');
             });
@@ -308,7 +313,7 @@ F.Screens = (function () {
         refresh: function () {
             var out = document.getElementById('hs-list');
             if (!out) return;
-            var list = F.Economy.listHS();
+            var list = Economy.listHS();
             if (!list.length) { out.textContent = 'NO SCORES YET'; return; }
             var lines = list.map(function (e, i) {
                 var rank = (i + 1) + '.';
@@ -354,29 +359,29 @@ F.Screens = (function () {
         update: function () {},
         draw: drawBg,
         refresh: function () {
-            var s = F.Economy.settings;
+            var s = Economy.settings;
             Hud.text('#opt-sfxVol', String(s.sfxVol));
             Hud.text('#opt-musicVol', String(s.musicVol));
-            Hud.text('#opt-difficulty', F.Economy.difficultyLabel());
+            Hud.text('#opt-difficulty', Economy.difficultyLabel());
         },
         adjust: function (dir) {
             var items = mgr.getMenuItems('settings');
             var idx = selIdx('settings');
             var item = items[idx]; if (!item) return;
             var k = item.getAttribute('data-setting'); if (!k) return;
-            var s = F.Economy.settings;
+            var s = Economy.settings;
             if (k === 'sfxVol') {
                 s.sfxVol = Math.max(0, Math.min(100, s.sfxVol + dir * 10));
-                F.Audio.setSfxVol(s.sfxVol / 100);
+                Audio.setSfxVol(s.sfxVol / 100);
             } else if (k === 'musicVol') {
                 s.musicVol = Math.max(0, Math.min(100, s.musicVol + dir * 10));
-                F.Audio.setMusicVol(s.musicVol / 100);
+                Audio.setMusicVol(s.musicVol / 100);
             } else if (k === 'difficulty') {
                 s.difficulty = Math.max(0, Math.min(2, s.difficulty + dir));
             }
-            F.Economy.saveSettings();
+            Economy.saveSettings();
             this.refresh();
-            F.Audio.menuMove();
+            Audio.menuMove();
         },
         keydown: function (key) {
             var self = this;

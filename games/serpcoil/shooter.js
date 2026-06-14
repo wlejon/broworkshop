@@ -1,7 +1,7 @@
 // shooter.js — fixed center shooter with aim + projectiles.
-var SC = SC || {};
+import { Chain } from "/app/chain.js";
 
-SC.Shooter = (function () {
+export const Shooter = (function () {
     "use strict";
 
     var MUZZLE_OFFSET = 28;
@@ -147,7 +147,7 @@ SC.Shooter = (function () {
             ctx.beginPath();
             ctx.arc(x, y, 16, 0, Math.PI * 2);
             ctx.fill(); ctx.stroke();
-            SC.Chain.COLORS[current] && drawShooterOrb(ctx, x, y, current, currentPU);
+            Chain.COLORS[current] && drawShooterOrb(ctx, x, y, current, currentPU);
             ctx.restore();
 
             // Next preview behind shooter
@@ -158,7 +158,7 @@ SC.Shooter = (function () {
             ctx.beginPath();
             ctx.arc(back.x, back.y, 13, 0, Math.PI * 2);
             ctx.fill();
-            if (SC.Chain.COLORS[next]) drawShooterOrb(ctx, back.x, back.y, next, nextPU, 11);
+            if (Chain.COLORS[next]) drawShooterOrb(ctx, back.x, back.y, next, nextPU, 11);
             ctx.restore();
 
             // Projectiles
@@ -170,7 +170,7 @@ SC.Shooter = (function () {
 
         function drawShooterOrb(ctx, ox, oy, color, pu, radius) {
             var r = radius || 12;
-            var c = SC.Chain.COLORS[color];
+            var c = Chain.COLORS[color];
             if (!c) return;
             ctx.fillStyle = c.hex;
             ctx.beginPath();

@@ -1,8 +1,8 @@
 // audio.js — Gemswap-specific SFX layer on top of shared SFX module.
 'use strict';
-var G = G || {};
+import { SFX } from "/lib/audio.js";
 
-G.AppAudio = (function () {
+export const AppAudio = (function () {
     var settings = { sfxVol: 0.8, musicVol: 0.6 };
 
     function init(s) {

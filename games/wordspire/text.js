@@ -1,9 +1,7 @@
 // text.js — thin canvas-text helpers. Uses ctx.fillText, which renders
 // correctly in both windowed and bro-headless GPU screenshots.
 'use strict';
-var W = window.W = window.W || {};
-
-W.Text = (function () {
+export const Text = (function () {
     // The old API took a "scale" (bitmap-font pixel multiplier, ~7px tall per
     // unit). Map to a comparable sans-serif size so call sites stay terse.
     function sizeFor(scale) { return Math.max(12, Math.round(scale * 9)); }

@@ -1,11 +1,12 @@
 // fish.js — fish entities: movement, hunger, feeding, coin dropping, eggs.
 'use strict';
-var F = window.F = window.F || {};
+import { Economy } from "/app/economy.js";
+import { Text } from "/app/text.js";
 
-F.Fish = (function () {
+export const Fish = (function () {
     // Internal state lives in Game; this module just exports pure(ish) helpers.
     function makeFish(tierId, x, y) {
-        var t = F.Economy.fishById(tierId) || F.Economy.FISH_TIERS[0];
+        var t = Economy.fishById(tierId) || Economy.FISH_TIERS[0];
         return {
             tier: t.id,
             def: t,
@@ -42,8 +43,8 @@ F.Fish = (function () {
         f.age += ms;
         // Hunger decay (modified by filter upgrade)
         var decayPerSec = 1.6 * ctx.filterMult();
-        if (F.Economy.settings.difficulty === 0) decayPerSec *= 0.7;
-        else if (F.Economy.settings.difficulty === 2) decayPerSec *= 1.3;
+        if (Economy.settings.difficulty === 0) decayPerSec *= 0.7;
+        else if (Economy.settings.difficulty === 2) decayPerSec *= 1.3;
         f.hunger = Math.max(0, f.hunger - decayPerSec * (ms/1000));
         if (f.hunger <= 0) {
             // Starve over time: if starved for 12s continuously, die.
@@ -70,14 +71,14 @@ F.Fish = (function () {
             f.coinTimer -= ms;
             if (f.coinTimer <= 0) {
                 var tier = f.def.coinTier;
-                var value = F.Economy.coinValue(tier);
+                var value = Economy.coinValue(tier);
                 // Diamond drop chance for pearlscale
                 if (f.def.diamondDrop && Math.random() < 0.3) {
                     value = value * 2;
                     tier = 6;
                 }
                 // Pellet boost from current pellet tier
-                var pellet = F.Economy.pelletById(ctx.pelletTier()) || F.Economy.PELLET_TIERS[0];
+                var pellet = Economy.pelletById(ctx.pelletTier()) || Economy.PELLET_TIERS[0];
                 value = Math.round(value * pellet.coinBoost);
                 ctx.onCoinDrop(f.x, f.y + 10, tier, value);
                 f.hasFood = false;
@@ -109,7 +110,7 @@ F.Fish = (function () {
             if (d < 14) {
                 // Eat!
                 f.target._consumed = true;
-                var pellet2 = F.Economy.pelletById(ctx.pelletTier()) || F.Economy.PELLET_TIERS[0];
+                var pellet2 = Economy.pelletById(ctx.pelletTier()) || Economy.PELLET_TIERS[0];
                 f.hunger = Math.min(100, f.hunger + pellet2.restore);
                 f.hasFood = true;
                 f.coinTimer = f.def.feedMs;
@@ -206,7 +207,7 @@ F.Fish = (function () {
         if (!f.dead && hungry) {
             ctx.save();
             ctx.globalAlpha = 0.7 + 0.3 * Math.sin(f.wag * 2);
-            W.Text.drawCentered(ctx, '!', f.x, f.y - sz - 14, 2, '#ff9a6a');
+            Text.drawCentered(ctx, '!', f.x, f.y - sz - 14, 2, '#ff9a6a');
             ctx.restore();
         }
     }

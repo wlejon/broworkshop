@@ -1,12 +1,12 @@
 // pets.js — persistent helpers that automate chores.
 'use strict';
-var F = window.F = window.F || {};
+import { Economy } from "/app/economy.js";
 
-F.Pets = (function () {
+export const Pets = (function () {
     // ctx provides: Wd, Hd, tankLeft/Right/Top/Bottom, fish, pellets, coins, intruders,
     //               addPellet(x), addCoinAt(x,y,tier,value), collectCoin(c), damageIntruder(i,amt)
     function makeActivePet(petId) {
-        var def = F.Economy.petById(petId);
+        var def = Economy.petById(petId);
         if (!def) return null;
         return {
             id: petId,
@@ -117,7 +117,7 @@ F.Pets = (function () {
                 var pick = cands[Math.floor(Math.random() * cands.length)];
                 p.tx = pick.x; p.ty = pick.y;
                 pick.tier = Math.min(6, pick.tier + 1);
-                pick.value = F.Economy.coinValue(pick.tier);
+                pick.value = Economy.coinValue(pick.tier);
                 if (ctx.onAlchemUpgrade) ctx.onAlchemUpgrade(pick);
             }
             p.actCooldown = randCooldown(p.id);

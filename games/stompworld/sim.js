@@ -37,8 +37,9 @@
 //
 // done becomes true on death, flag, timeout, or stall.
 
-(function (global) {
-    'use strict';
+'use strict';
+
+import { Platformer } from "/lib/platformer.js";
 
     const TILE         = 32;
     const FIXED_DT_MS  = 1000 / 60;     // 16.67 ms — matches the live engine
@@ -696,7 +697,7 @@
         };
     }
 
-    global.SwSim = {
+    export const SwSim = {
         create,
         TILE, FIXED_DT_MS, FRAME_SKIP,
         REW_PER_PIXEL, REW_STOMP, REW_BEAM_STOMP, REW_BEAM_FLYER,
@@ -706,4 +707,3 @@
         AUTO_FIRE_RANGE_PX,
         HEAD_SIZES, HEAD_OFFSETS, PER_HEAD_TOTAL, FLAT_NUM_ACTIONS,
     };
-})(typeof window !== 'undefined' ? window : globalThis);

@@ -1,9 +1,9 @@
 // storage.js — wordspire settings + per-mode high scores + top words.
 'use strict';
-var W = window.W = window.W || {};
+import { Storage as StorageLib } from "/lib/storage.js";
 
-W.Storage = (function () {
-    var store = Storage.create('wordspire');
+export const Storage = (function () {
+    var store = StorageLib.create('wordspire');
     var defaults = {
         sfxVol: 80,
         musicVol: 60,
@@ -11,14 +11,14 @@ W.Storage = (function () {
     };
     var settings = store.load(defaults);
 
-    var hsClassic = Storage.highscores('wordspire:classic', 10);
-    var hsTimed   = Storage.highscores('wordspire:timed',   10);
-    var hsPuzzle  = Storage.highscores('wordspire:puzzle',  10);
+    var hsClassic = StorageLib.highscores('wordspire:classic', 10);
+    var hsTimed   = StorageLib.highscores('wordspire:timed',   10);
+    var hsPuzzle  = StorageLib.highscores('wordspire:puzzle',  10);
 
     // Top words table ranked by score-per-word.
-    var topWords  = Storage.highscores('wordspire:words', 10, { field: 'score' });
+    var topWords  = StorageLib.highscores('wordspire:words', 10, { field: 'score' });
     // Longest-ever-word table ranked by length.
-    var longest   = Storage.highscores('wordspire:longest', 10, { field: 'length' });
+    var longest   = StorageLib.highscores('wordspire:longest', 10, { field: 'length' });
 
     function hs(mode) {
         if (mode === 'timed')  return hsTimed;

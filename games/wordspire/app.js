@@ -1,6 +1,18 @@
 // app.js — entry point for wordspire.
 'use strict';
-(function () {
+import { Canvas } from "/lib/canvas.js";
+import { GameLoop } from "/lib/loop.js";
+import { Storage } from "/app/storage.js";
+import { Audio } from "/app/audio.js";
+import { Dictionary } from "/app/dictionary.js";
+import { Scoring } from "/app/scoring.js";
+import { Text } from "/app/text.js";
+import { Particles } from "/app/particles.js";
+import { Board } from "/app/board.js";
+import { Screens } from "/app/screens.js";
+
+const W = { Storage, Audio, Dictionary, Scoring, Text, Particles, Board, Screens };
+
     var canvas = document.getElementById('game');
     var ctx = canvas.getContext('2d');
     function Wd() { return Canvas.w(ctx, 1000); }
@@ -86,4 +98,3 @@
     };
 
     console.log('Wordspire loaded.');
-})();

@@ -4,9 +4,7 @@
 // samples so that `pointAt(d)` and `tangentAt(d)` are O(log n) in
 // distance-along-path. Orbs in the chain store a scalar `d` and render
 // by converting to (x,y) via this module.
-var SC = SC || {};
-
-SC.Path = (function () {
+export const Path = (function () {
     "use strict";
 
     // Catmull-Rom interpolation of 4 points at parameter t in [0,1].

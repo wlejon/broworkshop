@@ -5,9 +5,7 @@
 // (with small backlog when inserted orbs push the line back). The leading
 // orb advances at `speed` px/s; trailing orbs are kept tightly packed
 // behind it.
-var SC = SC || {};
-
-SC.Chain = (function () {
+export const Chain = (function () {
     "use strict";
 
     var ORB_DIAM = 30; // render & spacing diameter

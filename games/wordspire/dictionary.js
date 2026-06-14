@@ -1,8 +1,6 @@
 // dictionary.js — loads words.txt and builds fast lookup + prefix trie.
 'use strict';
-var W = window.W = window.W || {};
-
-W.Dictionary = (function () {
+export const Dictionary = (function () {
     var words = null;          // Set<string>
     var prefixes = null;       // Set<string> of all prefixes (for branch pruning)
     var loaded = false;

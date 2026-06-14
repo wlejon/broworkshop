@@ -1,8 +1,8 @@
 // economy.js — fintank storage, save slots, shop catalogue, high-scores.
 'use strict';
-var F = window.F = window.F || {};
+import { Storage } from "/lib/storage.js";
 
-F.Economy = (function () {
+export const Economy = (function () {
     var store = Storage.create('fintank');
     var defaults = {
         sfxVol: 80,

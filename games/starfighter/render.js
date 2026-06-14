@@ -5,9 +5,7 @@
 // The camera sits at the origin, looking toward +Z. World objects are
 // positioned in camera-relative space (the player craft advances forward
 // by translating world objects backward each frame on a rail).
-var N = N || {};
-
-N.Render = (function() {
+export const Render = (function() {
     "use strict";
 
     // Field-of-view is a vertical FOV scaling factor: projected_y_px = H/2 - (y/z) * focal.

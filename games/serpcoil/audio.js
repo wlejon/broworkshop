@@ -1,12 +1,13 @@
 // audio.js — short sfx for Serpcoil layered on top of apps/lib/audio.js (SFX).
-var SC = SC || {};
+import { SFX } from "/lib/audio.js";
+import { Chain } from "/app/chain.js";
 
-SC.Audio = (function () {
+export const Audio = (function () {
     "use strict";
 
-    // Pentatonic color tones, loaded from SC.Chain.COLORS when available.
+    // Pentatonic color tones, loaded from Chain.COLORS when available.
     function colorTone(color) {
-        var c = SC.Chain && SC.Chain.COLORS && SC.Chain.COLORS[color];
+        var c = Chain && Chain.COLORS && Chain.COLORS[color];
         return c ? c.tone : 440;
     }
 

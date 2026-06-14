@@ -1,8 +1,10 @@
 // board.js — Gemswap board state, match detection, cascades, rendering.
 'use strict';
-var G = G || {};
+import { Puzzles } from "/app/puzzles.js";
+import { Particles } from "/app/particles.js";
+import { AppAudio } from "/app/audio.js";
 
-G.Board = (function () {
+export const Board = (function () {
     var ROWS = 8;
     var COLS = 8;
     var COLORS_N = 7;
@@ -318,8 +320,8 @@ G.Board = (function () {
     }
 
     function loadPuzzle(idx) {
-        if (!G.Puzzles) { grid = seedGrid(); return; }
-        var p = G.Puzzles.get(idx);
+        if (!Puzzles) { grid = seedGrid(); return; }
+        var p = Puzzles.get(idx);
         grid = makeEmptyGrid();
         frozenRemaining = 0;
         for (var r = 0; r < rows; r++) {
@@ -354,7 +356,7 @@ G.Board = (function () {
 
     function nextPuzzle() {
         puzzleIndex++;
-        if (!G.Puzzles || puzzleIndex >= G.Puzzles.count()) {
+        if (!Puzzles || puzzleIndex >= Puzzles.count()) {
             finished = true;
             return false;
         }
@@ -761,7 +763,7 @@ G.Board = (function () {
         if (!grid[r][c] || grid[r][c].frozen) return;
         if (!sel) {
             sel = { r: r, c: c };
-            if (G.AppAudio) G.AppAudio.pick();
+            if (AppAudio) AppAudio.pick();
             return;
         }
         if (sel.r === r && sel.c === c) {
@@ -772,7 +774,7 @@ G.Board = (function () {
             sel = null;
         } else {
             sel = { r: r, c: c };
-            if (G.AppAudio) G.AppAudio.pick();
+            if (AppAudio) AppAudio.pick();
         }
     }
 
@@ -790,7 +792,7 @@ G.Board = (function () {
             }
         }
         cursor.r = nr; cursor.c = nc;
-        if (G.AppAudio) G.AppAudio.cursor();
+        if (AppAudio) AppAudio.cursor();
     }
 
     function cursorConfirm() {
@@ -858,7 +860,7 @@ G.Board = (function () {
                 hint = findAnyMove(grid);
                 if (!hint) {
                     // deadlock detected: shuffle
-                    if (G.AppAudio) G.AppAudio.shuffle();
+                    if (AppAudio) AppAudio.shuffle();
                     shuffleBoard();
                 }
             }
@@ -871,7 +873,7 @@ G.Board = (function () {
                 var a = swapPair.a, b = swapPair.b;
                 if (swapPair._commit) {
                     // grid already swapped during beginSwap
-                    if (G.AppAudio) G.AppAudio.swap(true);
+                    if (AppAudio) AppAudio.swap(true);
                     stats.swaps++;
                     moves++;
                     chain = 0;
@@ -891,7 +893,7 @@ G.Board = (function () {
                             if (gg === h || gg.color === targetColor) toClear.push({ r: r, c: c });
                         }
                     }
-                    if (G.AppAudio) G.AppAudio.hyper();
+                    if (AppAudio) AppAudio.hyper();
                     clearTiles(toClear, targetColor);
                     stats.swaps++;
                     moves++;
@@ -899,7 +901,7 @@ G.Board = (function () {
                     swapPair = null;
                     scheduleCollapse();
                 } else if (swapPair.back) {
-                    if (G.AppAudio) G.AppAudio.swap(false);
+                    if (AppAudio) AppAudio.swap(false);
                     swapPair = null;
                     animating = false;
                 } else {
@@ -912,7 +914,7 @@ G.Board = (function () {
         // Flash countdown — fire shard bursts as each tile begins shattering.
         if (flashTiles.length > 0) {
             flashTimer += dt;
-            if (G.Particles) {
+            if (Particles) {
                 for (var fi = 0; fi < flashTiles.length; fi++) {
                     var ft = flashTiles[fi];
                     if (ft.burstFired) continue;
@@ -920,7 +922,7 @@ G.Board = (function () {
                     var gb = grid[ft.r][ft.c];
                     var bcol = (gb && PALETTE[gb.color]) ? PALETTE[gb.color].core : '#ffffff';
                     var bp = cellXY(ft.r, ft.c);
-                    G.Particles.burst(bp.x + layout.cell / 2, bp.y + layout.cell / 2,
+                    Particles.burst(bp.x + layout.cell / 2, bp.y + layout.cell / 2,
                                       bcol, 8 + chain * 2);
                     ft.burstFired = true;
                 }
@@ -999,7 +1001,7 @@ G.Board = (function () {
                         var threshold = level * 1000;
                         if (score >= threshold) {
                             level++;
-                            if (G.AppAudio) G.AppAudio.levelUp();
+                            if (AppAudio) AppAudio.levelUp();
                         }
                     }
                     // check deadlock
@@ -1036,7 +1038,7 @@ G.Board = (function () {
         score += delta;
 
         // sound pitch step on cascade
-        if (G.AppAudio) G.AppAudio.match(chain, groups[0].size);
+        if (AppAudio) AppAudio.match(chain, groups[0].size);
 
         // Collect all cells to clear; also determine upgrade cells (special gen).
         var cellsToClear = [];
@@ -1107,7 +1109,7 @@ G.Board = (function () {
 
         // Score popup at each match group's centroid (tinted with gem color).
         // Chain banner for x2+.
-        if (G.Particles) {
+        if (Particles) {
             for (var gi = 0; gi < groups.length; gi++) {
                 var grpL = groups[gi];
                 var mr = 0, mc = 0;
@@ -1119,12 +1121,12 @@ G.Board = (function () {
                 var ly = layout.oy + (mr + 0.5) * layout.cell;
                 var labelColor = (PALETTE[grpL.color] && PALETTE[grpL.color].core) || '#ffe9b0';
                 var groupScore = baseScore(grpL.size) * Math.max(1, chain);
-                G.Particles.popLabel(lx, ly - 6, '+' + groupScore, labelColor, false);
+                Particles.popLabel(lx, ly - 6, '+' + groupScore, labelColor, false);
             }
             if (chain >= 2) {
                 var bx = layout.ox + layout.boardW / 2;
                 var by = layout.oy + layout.boardH / 2;
-                G.Particles.popLabel(bx, by, 'CHAIN x' + chain, '#ffe070', true);
+                Particles.popLabel(bx, by, 'CHAIN x' + chain, '#ffe070', true);
             }
         }
 

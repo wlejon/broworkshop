@@ -28,8 +28,7 @@
 // Aiming is scripted (not a learned action), so the observation no longer
 // exposes weaponCooldown, phase, or remembered-enemy compass features.
 
-(function (global) {
-    'use strict';
+'use strict';
 
     const TILE = 32;
 
@@ -147,12 +146,7 @@
         return _win.build(egoCol, egoRow, _selfBuf);
     }
 
-    Object.defineProperty(global, 'SwAgentObs', {
-        value: {
-            build,
-            get OBS_DIM() { ensureWindow(); return _win.outDim; },
-        },
-        configurable: true,
-        writable: true,
-    });
-})(typeof window !== 'undefined' ? window : globalThis);
+    export const SwAgentObs = {
+        build,
+        get OBS_DIM() { ensureWindow(); return _win.outDim; },
+    };

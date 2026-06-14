@@ -1,9 +1,9 @@
 // audio.js — Fluffshuffle SFX: per-color pitches, cascade steps, drag whoosh,
 // snap click, pop squeak, lock thud.
 'use strict';
-var G = G || {};
+import { SFX } from "/lib/audio.js";
 
-G.AppAudio = (function () {
+export const AppAudio = (function () {
     var settings = { sfxVol: 0.8, musicVol: 0.6 };
 
     // Distinct base pitch per color so matches also carry aural identity.

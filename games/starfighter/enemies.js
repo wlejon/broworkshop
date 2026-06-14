@@ -3,9 +3,9 @@
 // Each enemy is a plain object with a shared update/draw dispatch by
 // `.kind`. We avoid prototypal classes to stay consistent with the rest
 // of the arcade apps (IIFE + factory pattern).
-var N = N || {};
+import { Render } from "/app/render.js";
 
-N.Enemies = (function() {
+export const Enemies = (function() {
     "use strict";
 
     // --- Fighter wireframe (legally-distinct "twin-vane" silhouette) -------
@@ -59,7 +59,7 @@ N.Enemies = (function() {
     }
 
     function drawMesh(ctx, verts, edges, ox, oy, oz, color, alpha) {
-        N.Render.edges(ctx, verts, edges, color, alpha != null ? alpha : 1,
+        Render.edges(ctx, verts, edges, color, alpha != null ? alpha : 1,
             { ox: ox, oy: oy, oz: oz });
     }
 
@@ -169,7 +169,7 @@ N.Enemies = (function() {
 
         if (e.kind === "fireball") {
             e.z += e.vz * dt;
-            if (e.z < N.Render.NEAR_Z) {
+            if (e.z < Render.NEAR_Z) {
                 // Made contact — deal damage and vanish.
                 if (game) game.onFireballImpact(e);
                 e.dead = true;
@@ -286,13 +286,13 @@ N.Enemies = (function() {
             [4,5],[5,6],[6,7],[7,4],           // top
             [0,4],[1,5],[2,6],[3,7]            // posts
         ];
-        N.Render.edges(ctx, verts, E, e.color, 1, { ox: e.x, oy: e.y, oz: e.z });
+        Render.edges(ctx, verts, E, e.color, 1, { ox: e.x, oy: e.y, oz: e.z });
         // Glowing top — cross of lines inside the top square.
         var topVerts = [
             { x: -0.6, y: h, z: -0.6 }, { x:  0.6, y: h, z:  0.6 },
             { x:  0.6, y: h, z: -0.6 }, { x: -0.6, y: h, z:  0.6 }
         ];
-        N.Render.edges(ctx, topVerts, [[0,1],[2,3]], e.topColor, 1,
+        Render.edges(ctx, topVerts, [[0,1],[2,3]], e.topColor, 1,
             { ox: e.x, oy: e.y, oz: e.z });
     }
 
@@ -321,7 +321,7 @@ N.Enemies = (function() {
             [4,5],[5,6],[6,7],[7,4],
             [0,4],[1,5],[2,6],[3,7]
         ];
-        N.Render.edges(ctx, verts, E, e.color, 1, { ox: e.x, oy: e.y, oz: e.z });
+        Render.edges(ctx, verts, E, e.color, 1, { ox: e.x, oy: e.y, oz: e.z });
     }
 
     // --- Catwalk (horizontal hazard — collides with ship if in the way) ----
@@ -355,7 +355,7 @@ N.Enemies = (function() {
             [4,5],[5,6],[6,7],[7,4],
             [0,4],[1,5],[2,6],[3,7]
         ];
-        N.Render.edges(ctx, verts, E, e.color, 1, { ox: e.x, oy: e.y, oz: e.z });
+        Render.edges(ctx, verts, E, e.color, 1, { ox: e.x, oy: e.y, oz: e.z });
     }
 
     // --- Unified update/draw for surface features ------------------------
@@ -434,7 +434,7 @@ N.Enemies = (function() {
             { x:  hw, y:  10, z:  0.5 }, { x: -hw, y:  10, z:  0.5 }
         ];
         var E = [[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6],[3,7]];
-        N.Render.edges(ctx, verts, E, e.color, 1, { ox: e.x, oy: 0, oz: e.z });
+        Render.edges(ctx, verts, E, e.color, 1, { ox: e.x, oy: 0, oz: e.z });
     }
 
     // --- Trench turret (wall-mounted, fires across the trench) ------------
@@ -460,7 +460,7 @@ N.Enemies = (function() {
             { x: -side*1.4, y: 0,    z:  0 }
         ];
         var E = [[0,1],[1,2],[2,3],[3,0],[0,4],[1,4],[2,4],[3,4]];
-        N.Render.edges(ctx, verts, E, e.color, 1, { ox: e.x, oy: e.y, oz: e.z });
+        Render.edges(ctx, verts, E, e.color, 1, { ox: e.x, oy: e.y, oz: e.z });
     }
 
     // --- Exhaust port (the reactor vent — the objective) ------------------
@@ -492,12 +492,12 @@ N.Enemies = (function() {
             { x:  inner, y: -inner, z: 0 }, { x: -inner, y: -inner, z: 0 }
         ];
         var E = [[0,1],[1,2],[2,3],[3,0]];
-        N.Render.edges(ctx, o, E, e.color, 1, { ox: e.x, oy: e.y, oz: e.z });
-        N.Render.edges(ctx, i, E, "#fff", 1, { ox: e.x, oy: e.y, oz: e.z });
+        Render.edges(ctx, o, E, e.color, 1, { ox: e.x, oy: e.y, oz: e.z });
+        Render.edges(ctx, i, E, "#fff", 1, { ox: e.x, oy: e.y, oz: e.z });
         // Crosshair across the inner.
-        N.Render.line(ctx,
+        Render.line(ctx,
             e.x - outer, e.y, e.z, e.x + outer, e.y, e.z, e.color, 0.6);
-        N.Render.line(ctx,
+        Render.line(ctx,
             e.x, e.y - outer, e.z, e.x, e.y + outer, e.z, e.color, 0.6);
     }
 

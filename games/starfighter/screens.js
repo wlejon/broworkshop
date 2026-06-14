@@ -3,9 +3,13 @@
 // Star-tunnel background runs on title and howtoplay (lib runs the
 // per-screen wiring via backgroundScreens). HUD show/hide is auto-
 // toggled by lib (hudFor: ['playing']).
-var N = N || {};
+import { Game } from "/app/game.js";
+import { Storage } from "/app/storage.js";
+import { Audio } from "/app/audio.js";
+import { Hud } from "/lib/hud.js";
+import { Screens as ScreensLib } from "/lib/screens.js";
 
-N.Screens = (function () {
+export const Screens = (function () {
     'use strict';
 
     // ----- Star tunnel background -----
@@ -65,10 +69,10 @@ N.Screens = (function () {
 
     // ----- HUD update -----
     function updateHud() {
-        var s = N.Game.getState();
+        var s = Game.getState();
         if (!s) return;
         Hud.text('#hud-score', s.score);
-        Hud.text('#hud-hi', N.Storage.highScore);
+        Hud.text('#hud-hi', Storage.highScore);
         Hud.text('#hud-wave', s.waveLabel);
         Hud.text('#hud-shields', s.shieldBar);
         var lock = document.getElementById('hud-lock');
@@ -80,10 +84,10 @@ N.Screens = (function () {
     }
 
     // ----- Lib screen manager -----
-    var S = Screens.create({
+    var S = ScreensLib.create({
         overlay:           '#overlay',
-        onMenuMove:        function () { N.Audio.sfxMenuMove(); },
-        onMenuSelect:      function () { N.Audio.sfxMenuSelect(); },
+        onMenuMove:        function () { Audio.sfxMenuMove(); },
+        onMenuSelect:      function () { Audio.sfxMenuSelect(); },
         backgroundScreens: ['title', 'howtoplay'],
         backgroundInit:    bgInit,
         backgroundUpdate:  bgUpdate,
@@ -118,28 +122,28 @@ N.Screens = (function () {
     S.define('playing', {
         enter: function (payload) {
             S.hideOverlay();
-            if (!payload || !payload.resume) N.Game.start(W(), H());
-            N.Game.setPaused(false);
+            if (!payload || !payload.resume) Game.start(W(), H());
+            Game.setPaused(false);
             updateHud();
             setPlaying(true);
         },
         exit: function () { setPlaying(false); },
         keydown: function (key) {
             if (key === 'Escape' || key === 'p' || key === 'P') S.switchTo('pause');
-            else if (key === 't' || key === 'T') N.Game.toggleTargetingComputer();
+            else if (key === 't' || key === 'T') Game.toggleTargetingComputer();
         },
         update: function (dt, w, h) {
-            N.Game.update(dt, w, h);
-            if (N.Game.isGameOver()) { S.switchTo('gameover'); return; }
-            var s = N.Game.getState();
+            Game.update(dt, w, h);
+            if (Game.isGameOver()) { S.switchTo('gameover'); return; }
+            var s = Game.getState();
             if (s && s.victoryPending) { S.switchTo('victory'); return; }
             updateHud();
         },
-        draw: function (ctx, w, h) { N.Game.draw(ctx, w, h); },
+        draw: function (ctx, w, h) { Game.draw(ctx, w, h); },
     });
 
     S.define('pause', {
-        enter: function () { S.showOverlay('pause'); S.updateSelection('pause'); N.Game.setPaused(true); },
+        enter: function () { S.showOverlay('pause'); S.updateSelection('pause'); Game.setPaused(true); },
         keydown: function (key) {
             if (key === 'Escape') { S.switchTo('playing', { resume: true }); return; }
             S.menuNav('pause', key, function (idx, item) {
@@ -150,17 +154,17 @@ N.Screens = (function () {
             });
         },
         // Keep the last frame visible behind the pause overlay.
-        draw: function (ctx, w, h) { N.Game.draw(ctx, w, h); },
+        draw: function (ctx, w, h) { Game.draw(ctx, w, h); },
     });
 
     S.define('gameover', {
         enter: function () {
-            var s = N.Game.getState();
-            var isHi = N.Storage.maybeUpdate(s ? s.score : 0);
+            var s = Game.getState();
+            var isHi = Storage.maybeUpdate(s ? s.score : 0);
             var lines = [
                 'SCORE    ' + (s ? s.score : 0),
                 'SECTOR   ' + (s ? s.waveLabel : '1-1'),
-                'HI       ' + N.Storage.highScore,
+                'HI       ' + Storage.highScore,
             ];
             if (isHi) { lines.push(''); lines.push('NEW HIGH SCORE!'); }
             Hud.text('#gameover-stats', lines.join('\n'));
@@ -173,12 +177,12 @@ N.Screens = (function () {
                 else if (act === 'quit') S.switchTo('title');
             });
         },
-        draw: function (ctx, w, h) { N.Game.draw(ctx, w, h); },
+        draw: function (ctx, w, h) { Game.draw(ctx, w, h); },
     });
 
     S.define('victory', {
         enter: function () {
-            var s = N.Game.getState();
+            var s = Game.getState();
             var stats = 'CITADEL CAMPAIGN ' + (s ? s.loop : 1) + ' COMPLETE\n\n' +
                         'SCORE   ' + (s ? s.score : 0);
             Hud.text('#victory-stats', stats);
@@ -188,12 +192,12 @@ N.Screens = (function () {
             S.menuNav('victory', key, function (idx, item) {
                 var act = item.getAttribute('data-action');
                 if (act === 'continue') {
-                    N.Game.advanceLoop();
+                    Game.advanceLoop();
                     S.switchTo('playing', { resume: true });
                 }
             });
         },
-        draw: function (ctx, w, h) { N.Game.draw(ctx, w, h); },
+        draw: function (ctx, w, h) { Game.draw(ctx, w, h); },
     });
 
     // ----- Public shim — preserves N.Screens.* API -----

@@ -12,8 +12,9 @@
 // The build fn adds pegs via Physics.addPeg / addMovingPeg.
 
 'use strict';
-(function (global) {
-    const P = global.Physics;
+import { Physics } from "/app/physics.js";
+
+    const P = Physics;
     const GRID_COLS = 32;
     const CELL = 32;
     const MARGIN_X = 16;          // ensures first column is at x=32
@@ -410,5 +411,4 @@
         return world;
     }
 
-    global.Levels = { LEVELS, buildLevel, gx, gy, CELL, GRID_COLS, TOP };
-})(typeof window !== 'undefined' ? window : globalThis);
+    export const Levels = { LEVELS, buildLevel, gx, gy, CELL, GRID_COLS, TOP };

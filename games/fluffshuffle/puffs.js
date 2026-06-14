@@ -5,9 +5,7 @@
 // No external images; shapes are parameterized by color index so each
 // variety reads as its own character even to colorblind players.
 'use strict';
-var G = G || {};
-
-G.Puffs = (function () {
+export const Puffs = (function () {
 
     // Core palette — six distinct puff flavors.
     var PALETTE = [
