@@ -57,10 +57,9 @@ const $gestures = $('#gestures'), $noGest = $('#noGest');
 const $status = $('#status'), $streamT = $('#streamT'), $spotCount = $('#spotCount');
 const $transcript = $('#transcript'), $txStat = $('#txStat'),
       $txLive = $('#txLive'), $txLines = $('#txLines'), $txToggle = $('#txToggle');
-const $sysMeta = $('#sysMeta'), $sysToggle = $('#sysToggle'), $sysBody = $('#sysBody');
-const $sysVoiceDot = $('#sysVoiceDot'), $sysVoiceTxt = $('#sysVoiceTxt'), $sysDb = $('#sysDb');
-const $sysOnsetDot = $('#sysOnsetDot'), $sysOnsets = $('#sysOnsets');
-const $sysTonalDot = $('#sysTonalDot'), $sysTonalTxt = $('#sysTonalTxt'), $sysSpot = $('#sysSpot');
+const $streamsSub = $('#streamsSub'), $srcSel = $('#srcSel');
+const $addStream = $('#addStream'), $refreshApps = $('#refreshApps');
+const $streamCards = $('#streamCards');
 
 let kwsReady = false;
 let listening = false;
@@ -598,6 +597,15 @@ function renderScratchBar() {
         const sp = scratchSpan();
         if (sp) playRegion(sp);
     }));
+    const wav = mkbtn('💾 WAV', () => {
+        const sp = scratchSpan();
+        if (!sp) { status('selection is no longer on the timeline', true); return; }
+        const pcm = bro.listen.audio(sp.a, sp.b);
+        exportWav(pcm, bro.listen.info().rate, 'listen-selection.wav');
+    });
+    wav.disabled = !retained;
+    wav.title = retained ? 'save this selection to a .wav file' : 'stream retention is off';
+    $scratch.appendChild(wav);
     const make = mkbtn('✚ Gesture from selection', scratchToGesture);
     make.className = 'smake';
     make.disabled = !retained || !kwsReady;
@@ -815,6 +823,14 @@ function selectEvent(ev) {
             play.title = 'replay the retained audio for this region';
             play.addEventListener('click', () => playRegion(region));
             span.appendChild(play);
+            const save = document.createElement('button');
+            save.className = 'dplay';
+            save.textContent = '💾 wav';
+            save.title = 'save this region to a .wav file';
+            save.addEventListener('click', () =>
+                exportWav(bro.listen.audio(Math.round(region.a), Math.round(region.b)),
+                          bro.listen.info().rate, 'listen-' + ev.type + '.wav'));
+            span.appendChild(save);
         }
         $detail.appendChild(span);
     }
@@ -1087,7 +1103,28 @@ const Transcribe = {
     // synchronous stub so the VAD-gated lifecycle is testable without the 2.4 GB
     // model load (the real path is exercised by the app + parakeet-lab).
     run: null,
+    // Parakeet is single-op: only ONE source is transcribed at a time. `source`
+    // is the current owner — an adapter exposing audio()/frame()/oldest()/
+    // active() over a stream plus onPartial/onCommit/onStatus UI routing. The
+    // primary mic dashboard owns it by default (PrimarySource); a stream card
+    // can take it over (and hand it back) via its transcript toggle.
+    source: null,
 };
+
+// The primary mic dashboard as a transcript source: pulls from the shared
+// default stream (bro.listen + bro.sense) and routes output to the rich
+// transcript panel (lines list, timeline speech markers, [heard] feed rows).
+const PrimarySource = {
+    id: 'primary', name: 'mic', _prev: null, _cur: null,
+    audio: (a, b) => bro.listen.audio(a, b),
+    frame: () => bro.listen.frame(),
+    oldest: () => Stream.oldestFrame(),
+    active: () => bro.listen.info().active,
+    onPartial: primaryRenderPartial,
+    onCommit: primaryCommitLine,
+    onStatus: (text, err, live) => txSetStatus(text, err, live),
+};
+Transcribe.source = PrimarySource;     // the primary mic owns transcript by default
 
 // Wrap bro.stt's async Parakeet decode into the uniform runner interface:
 // accumulate emitted ids, decode the running prefix to text on each token, and
@@ -1118,9 +1155,16 @@ function txSetStatus(text, err, live) {
 // in-progress utterance doesn't wrap and shove the panel around (that growth was
 // the "lines clobber each other" the list seemed to do).
 const TX_PARTIAL_MAX = 96;
+
+// Render the current owner's partial. The transcriber is a singleton, so this
+// routes through whichever source owns it (primary panel or a stream card).
 function renderPartial() {
-    if (Transcribe.partial) {
-        let p = Transcribe.partial;
+    (Transcribe.source || PrimarySource).onPartial(Transcribe.partial);
+}
+
+function primaryRenderPartial(partial) {
+    if (partial) {
+        let p = partial;
         if (p.length > TX_PARTIAL_MAX) p = '…' + p.slice(p.length - TX_PARTIAL_MAX);
         $txLive.textContent = p + ' ';
         const cur = document.createElement('span');
@@ -1166,16 +1210,21 @@ function renderLines() {
 function finishUtterance(text, a, b) {
     Transcribe.active = false;
     Transcribe.partial = '';
-    if (text) {
-        Transcribe.lines.unshift({ t: b / FPS, text, a, b });
-        while (Transcribe.lines.length > 80) Transcribe.lines.pop();
-        fusionRow('heard', '“' + text + '”');
-        logEvent('speech', text, null, '', null,
-                 { startFrame: a, endFrame: b, matchedFrames: b - a });
-        renderLines();
-    }
+    (Transcribe.source || PrimarySource).onCommit(text, a, b);
     renderPartial();
-    txSetStatus('ready · voice-gated', false, false);
+    (Transcribe.source || PrimarySource).onStatus('ready · voice-gated', false, false);
+}
+
+// Primary owner: a replayable transcript line + a timeline speech marker + a
+// [heard] fusion row (the rich panel). a/b are on the shared stream axis.
+function primaryCommitLine(text, a, b) {
+    if (!text) return;
+    Transcribe.lines.unshift({ t: b / FPS, text, a, b });
+    while (Transcribe.lines.length > 80) Transcribe.lines.pop();
+    fusionRow('heard', '“' + text + '”');
+    logEvent('speech', text, null, '', null,
+             { startFrame: a, endFrame: b, matchedFrames: b - a });
+    renderLines();
 }
 
 // Run one transcription pass over [startFrame, endFrame] of the retained stream.
@@ -1184,11 +1233,12 @@ function finishUtterance(text, a, b) {
 // (pendingFinal) and kicked the moment the current pass frees up, so the line is
 // never lost.
 function txKick(endFrame, isFinal) {
+    const src = Transcribe.source || PrimarySource;
     if (Transcribe.busy) { if (isFinal) Transcribe.pendingFinal = endFrame; return; }
-    const a = Math.max(Math.round(Transcribe.startFrame), Stream.oldestFrame());
-    const b = Math.min(Math.round(endFrame), bro.listen.frame());
+    const a = Math.max(Math.round(Transcribe.startFrame), src.oldest());
+    const b = Math.min(Math.round(endFrame), src.frame());
     if (b - a < 1) { if (isFinal) finishUtterance('', a, b); return; }
-    const pcm = bro.listen.audio(a, b);
+    const pcm = src.audio(a, b);
     if (!pcm || !pcm.length) { if (isFinal) finishUtterance('', a, b); return; }
     Transcribe.busy = true;
     let done = false;
@@ -1219,14 +1269,15 @@ function txKick(endFrame, isFinal) {
 
 // Edge-driven from the poll loop: voice onset arms an utterance, rolling passes
 // stream partial words while voice holds, voice offset commits the final line.
-function transcribeTick(prev, s) {
+function transcribeTick(prev, s, src) {
     if (!Transcribe.ready || !Transcribe.enabled) return;
-    if (!bro.listen.info().active) return;        // needs the retained stream
+    if (!s) return;
+    if (!src.active()) return;                     // needs the retained stream
     const rising = s.voice && (!prev || !prev.voice);
     const falling = prev && prev.voice && !s.voice;
     if (rising) {
         Transcribe.active = true;
-        Transcribe.startFrame = Math.max(Stream.oldestFrame(), s.frames - TX_PREROLL);
+        Transcribe.startFrame = Math.max(src.oldest(), s.frames - TX_PREROLL);
         Transcribe.lastRunFrame = s.frames;
         Transcribe.partial = '';
         renderPartial();
@@ -1310,14 +1361,17 @@ function tick() {
         updateSensorCards(s, ph);
         if (!lastS || s.frames > lastS.frames) Stream.push(lastS, s, ph);
         if (lastS) emitTier0Events(lastS, s);
-        transcribeTick(lastS, s);
+        PrimarySource._prev = lastS; PrimarySource._cur = s;
         lastS = s;
     }
     if (kwsReady && bro.kws.isLoaded()) {
         const p = bro.kws.progress();
         if (p) updateTemplateRows(p, s);
     }
-    updateSystemMeters();
+    updateStreamPanels();
+    // Transcript is single-op: drive it once, for whichever source owns it.
+    const txo = Transcribe.source || PrimarySource;
+    transcribeTick(txo._prev, txo._cur, txo);
     updatePlayback();
     drawStream();
     requestAnimationFrame(tick);
@@ -1334,7 +1388,7 @@ function withMutableSpotter(fn) {
     catch (e) { status(String(e.message || e), true); }
     if (wasListening && bro.kws.templates().length) startListening();
     $listen.disabled = !kwsReady || bro.kws.templates().length === 0;
-    if (sysStream) mirrorToSystem();      // keep the system stream's vocabulary in sync
+    mirrorToStreams();                    // keep every kws stream's vocabulary in sync
 }
 
 // A typed phrase carries minCoverage: a completion must have at least that
@@ -1793,103 +1847,362 @@ function stopRecord() {
 
 function toggleRecord() { startRecord(null, $record); }
 
-// ── second stream: system-audio loopback (bro.listen.open) ────────────────────
-// The payoff of the multi-stream host: a SECOND, unmixed pipeline running
-// concurrently with the mic dashboard above. We open the whole-system render
-// mix, give it its OWN tier-0 sensors (sys.sense) and its OWN kws session over
-// the ONE loaded PhonemeNet (sys.kws) — the mic's enrolled phrases are mirrored
-// onto it, so the same vocabulary spots in whatever the machine is playing, with
-// no weights copied and no crosstalk between the two streams. The two streams
-// keep independent frame axes, sensors, and matcher state.
+// ── streams rack: N independent sources, each configured live ──────────────────
+// The payoff of the multi-stream host: the mic dashboard above is stream #0, and
+// the user can open any number of MORE pipelines — another mic, the whole-system
+// render mix, or one specific application — each unmixed and concurrent. Per
+// stream the user picks WHICH SENSORS / ACTIONS run on it:
+//
+//   tier-0  sense      — model-free level / voice / onset / tonality
+//   tier-2  kws        — the mic's enrolled phrases mirrored onto this stream's
+//                        own session over the ONE shared PhonemeNet (no copy)
+//   tier-0  gestures   — non-speech rhythm/tone matching (its own GestureSpotter)
+//   tier-3  transcript — voice-gated Parakeet (single-op: this stream TAKES the
+//                        one transcriber from whoever held it)
+//
+// Each stream keeps its own frame axis, sensors, and matcher state; toggling a
+// member on a stream is independent of every other stream and of the mic above.
 
-let sysStream = null;             // the open ListenStream handle, or null
-let sysListening = false;         // sys.kws.listen() active
-let sysFlashAt = 0;               // wall-clock of the last system spot (fade the label)
+const panels = [];                // open StreamPanel objects
+let appNames = {};                // pid -> name, from the last bro.listen.apps() scan
 
-// Mirror the mic's plain phrase templates onto the system stream's kws session.
+// Resolve a source spec into the bro.listen.open() argument + a display label.
+function sourceArg(spec) {
+    if (spec.kind === 'system') return 'system';
+    if (spec.kind === 'process') return { process: spec.pid };
+    return 'mic';
+}
+function sourceLabel(spec) {
+    if (spec.kind === 'system') return 'system audio';
+    if (spec.kind === 'process') return (spec.name || ('pid ' + spec.pid)) + ' (#' + spec.pid + ')';
+    return 'mic';
+}
+
+// Mirror the mic's plain phrase templates onto a stream's kws session.
 // enrollFromClasses replays the decoded class ids over the SHARED net — rhythm
-// (gap) templates can't round-trip through classes, so they're skipped. The sys
-// session is bounced around the mutation (single-producer rule, per stream).
-function mirrorToSystem() {
-    if (!sysStream || !sysStream.valid || !kwsReady) return;
-    if (sysListening) { sysStream.kws.stop(); sysListening = false; }
+// (gap) templates can't round-trip through classes, so they're skipped. The
+// stream session is bounced around the mutation (single-producer rule, per
+// stream); only called while the stream's kws action is on.
+function mirrorPhrasesTo(p) {
+    if (!p.handle.valid || !kwsReady || !p.actions.kws) return;
+    if (p.kwsListening) { p.handle.kws.stop(); p.kwsListening = false; }
     try {
-        sysStream.kws.clear();
+        p.handle.kws.clear();
         for (const name of bro.kws.templates()) {
             const v = bro.kws.inspect(name);
             if (!v || v.hasGaps) continue;                 // rhythm/gap → skip
             const cls = v.states.filter((st) => !st.gap).map((st) => st.cls);
-            if (cls.length) sysStream.kws.enrollFromClasses(name, cls, phrasePolicy());
+            if (cls.length) p.handle.kws.enrollFromClasses(name, cls, phrasePolicy());
         }
-    } catch (e) { status('system mirror: ' + (e.message || e), true); }
-    if (sysStream.kws.templates().length) startSystemListening();
+    } catch (e) { status('mirror → ' + p.name + ': ' + (e.message || e), true); }
+    if (p.handle.kws.templates().length) startPanelKws(p);
 }
 
-function startSystemListening() {
-    if (!sysStream || sysListening) return;
-    sysStream.kws.listen({
-        onSpot: (name, confidence) => {
-            $sysSpot.textContent = '“' + name + '” @ ' + confidence.toFixed(2);
-            $sysSpot.classList.add('fired');
-            sysFlashAt = Date.now();
-            fusionRow('sys', 'system audio: "' + name + '" @ conf ' + confidence.toFixed(3));
-        },
+// Re-mirror the current phrase vocabulary onto every kws-enabled stream — called
+// whenever the mic's templates change (withMutableSpotter).
+function mirrorToStreams() {
+    for (const p of panels) if (p.actions.kws) mirrorPhrasesTo(p);
+}
+
+function startPanelKws(p) {
+    if (!p.handle.valid || p.kwsListening) return;
+    p.handle.kws.listen({
+        onSpot: (name, confidence) => panelSpot(p, '“' + name + '” @ ' + confidence.toFixed(2),
+            'kws: "' + name + '" @ conf ' + confidence.toFixed(3)),
     });
-    sysListening = true;
+    p.kwsListening = true;
 }
 
-function openSystem() {
-    if (sysStream) return;
-    if (!bro.listen.supported()) { status('system loopback not available on this build', true); return; }
+function startPanelGestures(p) {
+    if (!p.handle.valid || p.gestureListening) return;
+    // The stream's gesture session shares the mic's enrolled gesture vocabulary
+    // by re-enrolling the retained clips onto its own spotter.
     try {
-        sysStream = bro.listen.open('system');
-    } catch (e) {
-        status('system audio: ' + (e.message || e), true);
-        sysStream = null;
-        return;
+        p.handle.gesture.clear && p.handle.gesture.clear();
+    } catch (e) { /* clear is best-effort */ }
+    for (const name of bro.gesture.templates()) {
+        const clip = clipStore[name];
+        if (clip) { try { p.handle.gesture.enrollFromAudio(name, clip, policyStore[name] || {}); } catch (e) { /* skip */ } }
     }
-    sysStream.sense.start({});            // tier-0 sensors on the system stream
-    mirrorToSystem();                     // share the loaded net; spot the same phrases
-    $sysBody.classList.remove('hidden');
-    $sysToggle.textContent = '■ Stop';
-    $sysToggle.classList.add('active');
-    fusionRow('sys', 'opened system-audio stream #' + sysStream.id + ' — tier-0 + kws (' +
-        sysStream.kws.templates().length + ' mirrored phrase' +
-        (sysStream.kws.templates().length === 1 ? '' : 's') + ')');
-    status('listening to system audio on a second stream (#' + sysStream.id + ')');
+    p.handle.gesture.listen({
+        onGesture: (name, confidence, kind) => panelSpot(p,
+            '“' + name + '” (' + kind + ') @ ' + confidence.toFixed(2),
+            'gesture: "' + name + '" (' + kind + ') @ conf ' + confidence.toFixed(3)),
+    });
+    p.gestureListening = true;
 }
 
-function closeSystem() {
-    if (!sysStream) return;
-    const id = sysStream.id;
-    if (sysListening) { sysStream.kws.stop(); sysListening = false; }
-    sysStream.close();                    // detaches members, stops the loopback source
-    sysStream = null;
-    $sysBody.classList.add('hidden');
-    $sysToggle.textContent = '▶ Listen';
-    $sysToggle.classList.remove('active');
-    $sysSpot.textContent = '— no spot yet —';
-    $sysSpot.classList.remove('fired');
-    fusionRow('sys', 'closed system-audio stream #' + id);
+// A fired spot/gesture on a stream → its card's spot line + a tagged fusion row.
+function panelSpot(p, line, feed) {
+    p.dom.spot.textContent = line;
+    p.dom.spot.classList.add('fired');
+    p.flashAt = Date.now();
+    p.dom.root.classList.add('fired');
+    setTimeout(() => { if (p.dom) p.dom.root.classList.remove('fired'); }, 600);
+    fusionRow('sys', p.name + ' — ' + feed);
 }
 
-function toggleSystem() { sysStream ? closeSystem() : openSystem(); }
+// ── transcript ownership (single-op) ──────────────────────────────────────────
+// Parakeet is one model: only one source transcribes at a time. A stream taking
+// transcript steals it from whoever held it (the primary, or another stream).
 
-// Polled from the tick loop: the system stream's OWN tier-0 snapshot, fully
-// independent of the mic's bro.sense cards above (separate hub, separate axis).
-function updateSystemMeters() {
-    if (!sysStream || !sysStream.valid || !sysStream.sense.isActive()) return;
-    const s = sysStream.sense.snapshot();
-    if (!s) return;
-    $sysVoiceDot.className = 'dot' + (s.voice ? ' on' : '');
-    $sysVoiceTxt.textContent = s.voice ? 'voice' : 'quiet';
-    $sysDb.textContent = (s.db <= -90 ? '−∞' : s.db.toFixed(1)) + ' dB';
-    $sysOnsetDot.className = 'dot onset' + (s.frames - s.lastOnsetFrame < 15 ? ' on' : '');
-    $sysOnsets.textContent = String(s.onsets);
-    $sysTonalDot.className = 'dot tonal' + (s.tonal ? ' on' : '');
-    $sysTonalTxt.textContent = s.tonal ? Math.round(s.dominantHz) + ' Hz' : '—';
-    if ($sysSpot.classList.contains('fired') && Date.now() - sysFlashAt > 2500)
-        $sysSpot.classList.remove('fired');
+function setTranscriptOwner(src) {
+    if (Transcribe.source === src) return;
+    Transcribe.active = false;
+    Transcribe.partial = '';
+    Transcribe.source = src;
+    src._prev = null; src._cur = null;        // don't fire on a stale falling edge
+    const onPrimary = src === PrimarySource;
+    $txToggle.disabled = !Transcribe.ready || !onPrimary;
+    if (onPrimary) {
+        renderPartial();
+        txSetStatus(Transcribe.ready ? 'ready · voice-gated' : '…');
+    } else {
+        // Hand-off note in the rich panel; the stream card drives the partials.
+        $txLive.innerHTML = '<span class="ph">— transcript handed to stream “' +
+            src.name + '” —</span>';
+        $txStat.textContent = 'on stream “' + src.name + '”';
+        $txStat.className = 'txstat';
+    }
+}
+
+// ── add / remove / configure a stream ─────────────────────────────────────────
+
+function addStream(spec) {
+    if (spec.kind !== 'mic' && !bro.listen.supported()) {
+        status('loopback / per-app capture not available on this build', true);
+        return null;
+    }
+    let handle;
+    try { handle = bro.listen.open(sourceArg(spec)); }
+    catch (e) { status('open ' + sourceLabel(spec) + ': ' + (e.message || e), true); return null; }
+    if (!handle || !handle.valid) { status('could not open ' + sourceLabel(spec), true); return null; }
+
+    const p = {
+        handle, spec, name: sourceLabel(spec),
+        actions: { sense: true, kws: false, gestures: false, transcript: false },
+        kwsListening: false, gestureListening: false, flashAt: 0,
+        lastSnap: null, prevSnap: null, dom: null, txSource: null,
+    };
+    p.txSource = {
+        id: 'stream-' + handle.id, name: p.name, _prev: null, _cur: null,
+        audio: (a, b) => handle.audio(a, b),
+        frame: () => handle.frame(),
+        oldest: () => { const i = handle.info(); return i.streamFrame - i.heldFrames; },
+        active: () => handle.valid && handle.info().active,
+        onPartial: (partial) => {
+            if (!p.dom) return;
+            p.dom.tx.textContent = partial || '';
+            if (!partial) p.dom.tx.innerHTML = Transcribe.active
+                ? '<span class="ph">…</span>'
+                : '<span class="ph">— voice-gated; speak on this stream —</span>';
+        },
+        onCommit: (text, a, b) => {
+            if (text) {
+                panelSpot(p, '“' + text + '”', 'transcript: “' + text + '”');
+                if (p.dom) p.dom.tx.innerHTML = '<span class="ph">— ' + text + ' —</span>';
+            }
+        },
+        onStatus: () => {},
+    };
+
+    p.handle.sense.start({});                       // tier-0 on by default
+    panels.push(p);
+    renderStreamCard(p);
+    fusionRow('sys', 'opened ' + p.name + ' stream #' + handle.id + ' — tier-0 sensors on');
+    status('opened stream "' + p.name + '" (#' + handle.id + ') — toggle sensors/actions on its card');
+    return p;
+}
+
+function removeStream(p) {
+    const i = panels.indexOf(p);
+    if (i < 0) return;
+    if (Transcribe.source === p.txSource) setTranscriptOwner(PrimarySource);
+    if (p.kwsListening) { try { p.handle.kws.stop(); } catch (e) {} }
+    if (p.gestureListening) { try { p.handle.gesture.stop(); } catch (e) {} }
+    const id = p.handle.id;
+    try { p.handle.close(); } catch (e) {}
+    panels.splice(i, 1);
+    if (p.dom) p.dom.root.remove();
+    p.dom = null;
+    fusionRow('sys', 'closed stream #' + id + ' (' + p.name + ')');
+}
+
+// Toggle one action/sensor on a stream, bouncing the relevant session.
+function setPanelAction(p, action, on) {
+    p.actions[action] = on;
+    if (action === 'sense') {
+        if (on) p.handle.sense.start({}); else p.handle.sense.stop();
+    } else if (action === 'kws') {
+        if (on) { if (!p.handle.sense.isActive()) { p.actions.sense = true; p.handle.sense.start({}); } mirrorPhrasesTo(p); }
+        else if (p.kwsListening) { p.handle.kws.stop(); p.kwsListening = false; }
+    } else if (action === 'gestures') {
+        if (on) { if (!p.handle.sense.isActive()) { p.actions.sense = true; p.handle.sense.start({}); } startPanelGestures(p); }
+        else if (p.gestureListening) { p.handle.gesture.stop(); p.gestureListening = false; }
+    } else if (action === 'transcript') {
+        if (on) {
+            // Transcript needs voice gating (sense) + retained audio to pull from.
+            if (!p.handle.sense.isActive()) { p.actions.sense = true; p.handle.sense.start({}); }
+            if (!p.handle.info().active) p.handle.retain(30);
+            if (!Transcribe.ready) status('transcript model not loaded — no Parakeet weights', true);
+            setTranscriptOwner(p.txSource);
+        } else if (Transcribe.source === p.txSource) {
+            setTranscriptOwner(PrimarySource);
+        }
+    }
+    renderStreamCard(p);                            // reflect toggle + show/hide rows
+}
+
+// ── stream card DOM ───────────────────────────────────────────────────────────
+
+function mkToggle(label, on, extraClass, fn) {
+    const b = document.createElement('button');
+    b.textContent = label;
+    b.className = (extraClass || '') + (on ? ' on' : '');
+    b.addEventListener('click', fn);
+    return b;
+}
+
+function renderStreamCard(p) {
+    const exists = p.dom && p.dom.root;
+    const root = exists ? p.dom.root : document.createElement('div');
+    root.className = 'sc' + (root.classList.contains('fired') ? ' fired' : '');
+    root.innerHTML =
+        '<div class="scHdr">' +
+          '<span class="scKind ' + p.spec.kind + '">' + p.spec.kind + '</span>' +
+          '<span class="scName"></span>' +
+          '<button class="scClose" title="close this stream">×</button>' +
+        '</div>' +
+        '<div class="scToggles"></div>' +
+        '<div class="scMeters"></div>' +
+        '<div class="scSpot">— no spot yet —</div>' +
+        '<div class="scTx"></div>' +
+        '<div class="scExport"></div>';
+    root.querySelector('.scName').textContent = p.name + ' · #' + p.handle.id;
+    root.querySelector('.scClose').addEventListener('click', () => removeStream(p));
+
+    const tg = root.querySelector('.scToggles');
+    tg.appendChild(mkToggle('tier-0', p.actions.sense, '', () => setPanelAction(p, 'sense', !p.actions.sense)));
+    const kwsBtn = mkToggle('kws', p.actions.kws, '', () => setPanelAction(p, 'kws', !p.actions.kws));
+    kwsBtn.disabled = !kwsReady;
+    tg.appendChild(kwsBtn);
+    const gBtn = mkToggle('gestures', p.actions.gestures, '', () => setPanelAction(p, 'gestures', !p.actions.gestures));
+    gBtn.disabled = !kwsReady;
+    tg.appendChild(gBtn);
+    const txBtn = mkToggle('transcript', p.actions.transcript, 'tx', () => setPanelAction(p, 'transcript', !p.actions.transcript));
+    txBtn.title = 'voice-gated Parakeet — single-op, takes the one transcriber';
+    tg.appendChild(txBtn);
+
+    const meters = root.querySelector('.scMeters');
+    meters.classList.toggle('hidden', !p.actions.sense);
+    meters.innerHTML =
+        '<span class="scm"><span class="dot" data-m="voiceDot"></span><span data-m="voiceTxt">quiet</span></span>' +
+        '<span class="scm" data-m="db">−∞ dB</span>' +
+        '<span class="scm"><span class="dot onset" data-m="onsetDot"></span><span data-m="onsets">0</span> onsets</span>' +
+        '<span class="scm"><span class="dot tonal" data-m="tonalDot"></span><span data-m="tonalTxt">—</span></span>';
+
+    const spot = root.querySelector('.scSpot');
+    spot.classList.toggle('hidden', !(p.actions.kws || p.actions.gestures || p.actions.transcript));
+
+    const tx = root.querySelector('.scTx');
+    tx.classList.toggle('hidden', !p.actions.transcript);
+    if (p.actions.transcript && !tx.textContent)
+        tx.innerHTML = '<span class="ph">— voice-gated; speak on this stream —</span>';
+
+    const exp = root.querySelector('.scExport');
+    buildExportRow(exp, p);
+
+    p.dom = {
+        root, spot, tx,
+        voiceDot: meters.querySelector('[data-m=voiceDot]'),
+        voiceTxt: meters.querySelector('[data-m=voiceTxt]'),
+        db: meters.querySelector('[data-m=db]'),
+        onsetDot: meters.querySelector('[data-m=onsetDot]'),
+        onsets: meters.querySelector('[data-m=onsets]'),
+        tonalDot: meters.querySelector('[data-m=tonalDot]'),
+        tonalTxt: meters.querySelector('[data-m=tonalTxt]'),
+    };
+    if (!exists) $streamCards.appendChild(root);
+}
+
+// Per-stream WAV export row: a retention toggle (capture must be on to have any
+// audio to save) + a Save button that writes the held buffer to a .wav.
+function buildExportRow(exp, p) {
+    exp.innerHTML = '';
+    const info = p.handle.info();
+    const retBtn = mkbtn(info.active ? '◉ capturing ' + info.seconds + 's' : '○ capture off', () => {
+        const cur = p.handle.info();
+        p.handle.retain(cur.active ? 0 : 30);
+        renderStreamCard(p);
+    });
+    retBtn.title = 'retain raw audio on this stream so it can be saved';
+    exp.appendChild(retBtn);
+    const save = mkbtn('💾 Save WAV', () => saveStreamWav(p));
+    save.disabled = !info.active || info.heldFrames <= 0;
+    save.title = info.active ? 'save the retained buffer to a .wav file' : 'turn capture on first';
+    exp.appendChild(save);
+    const held = document.createElement('span');
+    held.textContent = info.active ? info.heldSeconds.toFixed(1) + ' s held' : '';
+    exp.appendChild(held);
+}
+
+// Polled from the tick loop: refresh each stream's own tier-0 meters from its
+// OWN sense hub, keep its transcript source snapshots fresh, and fade spots.
+function updateStreamPanels() {
+    for (const p of panels) {
+        if (!p.handle.valid) continue;
+        let s = null;
+        if (p.actions.sense && p.handle.sense.isActive()) s = p.handle.sense.snapshot();
+        if (s && p.dom) {
+            const d = p.dom;
+            d.voiceDot.className = 'dot' + (s.voice ? ' on' : '');
+            d.voiceTxt.textContent = s.voice ? 'voice' : 'quiet';
+            d.db.textContent = (s.db <= -90 ? '−∞' : s.db.toFixed(1)) + ' dB';
+            d.onsetDot.className = 'dot onset' + (s.frames - s.lastOnsetFrame < 15 ? ' on' : '');
+            d.onsets.textContent = String(s.onsets);
+            d.tonalDot.className = 'dot tonal' + (s.tonal ? ' on' : '');
+            d.tonalTxt.textContent = s.tonal ? Math.round(s.dominantHz) + ' Hz' : '—';
+        }
+        // Transcript source snapshots (only meaningful while this stream owns it).
+        p.txSource._prev = p.prevSnap; p.txSource._cur = s;
+        p.prevSnap = s;
+        if (p.dom && p.dom.spot.classList.contains('fired') && Date.now() - p.flashAt > 2500)
+            p.dom.spot.classList.remove('fired');
+    }
+}
+
+// ── WAV export (showSaveFileDialog + audioCtx.saveWav) ────────────────────────
+
+let exportPathOverride = null;          // headless seam: skip the native dialog
+
+function ensureAudioCtx() { if (!audioCtx) audioCtx = new AudioContext(); return audioCtx; }
+
+// Write a mono Float32Array to a .wav. Returns the path written, or null.
+function exportWav(pcm, rate, defaultName) {
+    if (!pcm || !pcm.length) { status('nothing to export', true); return null; }
+    let path = exportPathOverride;
+    if (!path) {
+        if (typeof showSaveFileDialog !== 'function') { status('save dialog unavailable', true); return null; }
+        path = showSaveFileDialog('WAV audio|wav', defaultName || 'clip.wav');
+    }
+    if (!path) return null;                       // cancelled
+    if (!/\.wav$/i.test(path)) path += '.wav';
+    const ok = ensureAudioCtx().saveWav(path, pcm, 1, rate || 16000);
+    if (ok) { status('saved ' + (pcm.length / (rate || 16000)).toFixed(2) + ' s → ' + path);
+              fusionRow('info', 'exported ' + pcm.length + ' samples → ' + path); }
+    else status('WAV export failed', true);
+    return ok ? path : null;
+}
+
+function saveStreamWav(p) {
+    const info = p.handle.info();
+    if (!info.active) { status('turn capture on for this stream first', true); return; }
+    const newest = p.handle.frame();
+    const oldest = info.streamFrame - info.heldFrames;
+    const pcm = p.handle.audio(oldest, newest);
+    if (!pcm || !pcm.length) { status('no retained audio on this stream yet', true); return; }
+    const tag = p.spec.kind + '-' + p.handle.id;
+    exportWav(pcm, info.rate, 'listen-' + tag + '.wav');
 }
 
 function startListening() {
@@ -1928,12 +2241,64 @@ $enroll.addEventListener('click', enrollPhrase);
 $phrase.addEventListener('keydown', (e) => { if (e.key === 'Enter') enrollPhrase(); });
 $record.addEventListener('click', toggleRecord);
 $listen.addEventListener('click', () => (listening ? stopListening() : startListening()));
-$sysToggle.addEventListener('click', toggleSystem);
 $txToggle.addEventListener('click', () => {
+    if (Transcribe.source !== PrimarySource) return;   // a stream owns it; toggle there
     Transcribe.enabled = !Transcribe.enabled;
     if (!Transcribe.enabled) { Transcribe.active = false; Transcribe.partial = ''; renderPartial(); }
     txSetStatus(Transcribe.enabled ? 'ready · voice-gated' : 'paused');
 });
+
+// ── source picker: populate the dropdown from bro.listen.apps() ───────────────
+// Offers mic, system audio (where loopback is supported), and one entry per app
+// currently holding a render-audio session — the candidates for {process: pid}.
+function buildSourceOptions() {
+    const supported = bro.listen.supported();
+    const apps = supported ? bro.listen.apps() : [];
+    appNames = {};
+    const prev = $srcSel.value;
+    $srcSel.innerHTML = '';
+    const add = (value, label) => {
+        const o = document.createElement('option');
+        o.value = value; o.textContent = label;
+        $srcSel.appendChild(o);
+    };
+    add('mic', 'mic (another tap)');
+    if (supported) add('system', 'system audio (loopback)');
+    for (const a of apps) {
+        appNames[a.pid] = a.name;
+        add('pid:' + a.pid, a.name + '  ·  #' + a.pid);
+    }
+    if (!supported) {
+        const o = document.createElement('option');
+        o.disabled = true; o.textContent = '— loopback/per-app unsupported here —';
+        $srcSel.appendChild(o);
+    }
+    // Restore the previous selection if it still exists. (bro's <select> exposes
+    // .value but not the .options collection — enumerate the <option> children.)
+    if (prev && Array.from($srcSel.querySelectorAll('option')).some((o) => o.value === prev))
+        $srcSel.value = prev;
+    $streamsSub.textContent = supported
+        ? 'mic dashboard = stream #0 · add a mic, system audio, or a specific app — each unmixed, with its own sensors'
+        : 'mic dashboard = stream #0 · add another mic tap (system/per-app loopback unsupported on this build)';
+}
+
+function specFromSelect() {
+    const v = $srcSel.value;
+    if (v === 'mic') return { kind: 'mic' };
+    if (v === 'system') return { kind: 'system' };
+    if (v && v.indexOf('pid:') === 0) {
+        const pid = parseInt(v.slice(4), 10);
+        return { kind: 'process', pid, name: appNames[pid] };
+    }
+    return null;
+}
+
+$addStream.addEventListener('click', () => {
+    const spec = specFromSelect();
+    if (!spec) { status('pick a source first', true); return; }
+    addStream(spec);
+});
+$refreshApps.addEventListener('click', buildSourceOptions);
 
 // ── boot ─────────────────────────────────────────────────────────────────────
 
@@ -1974,12 +2339,10 @@ $txToggle.addEventListener('click', () => {
     fusionRow('info', 'stream retention on — ' +
         (bro.listen.info().seconds / 60).toFixed(0) + ' min of raw audio kept');
 
-    // Second-stream panel: enabled only where render-side loopback is available
-    // (Windows here; the null backend reports unsupported on other platforms).
-    if (!bro.listen.supported()) {
-        $sysToggle.disabled = true;
-        $sysMeta.textContent = 'system loopback not available on this build';
-    }
+    // Streams rack: populate the source picker. System / per-app loopback is
+    // offered only where render-side capture is available (Windows here; the
+    // null backend reports unsupported, leaving just "another mic tap").
+    buildSourceOptions();
 
     // require('fs') resolves relative paths against the app dir, but the C++
     // loader resolves against the process CWD — hand it an absolute path.
@@ -2025,8 +2388,14 @@ globalThis.listenLab = {
     scratchToGesture, renderScratchBar, clearScratch, scratchSpan,
     buildEditor, gainedSlice, clipStore, gestRows,
     Playback, focusRegion, playFrac,
-    // second stream: open/close the system-audio loopback + reach its handle.
-    openSystem, closeSystem, sysHandle: () => sysStream,
+    // streams rack: open/close/configure arbitrary-source streams + reach them.
+    addStream, removeStream, setPanelAction, panels,
+    buildSourceOptions, specFromSelect, mirrorToStreams,
+    PrimarySource, setTranscriptOwner,
+    // WAV export: the dialog-driven path plus a headless seam that skips the
+    // native dialog by forcing the output path (exportPathOverride).
+    exportWav, saveStreamWav,
+    exportTo: (path) => { exportPathOverride = path; },
     // tier-3 transcript: real loader (manual e2e check) + a stub installer that
     // makes the VAD-gated lifecycle testable without the 2.4 GB Parakeet load.
     Transcribe, loadTranscriber: txLoad,

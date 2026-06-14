@@ -532,61 +532,124 @@ console.log('[listen-lab] editor: opened whistle clip editor (' +
                 (spEv.span.b - spEv.span.a) + 'f · click→playhead @ ' + listenLab.Playback.key);
 }
 
-// ── 4g. second stream: system-audio loopback (bro.listen.open) ───────────────
-// The multi-stream payoff: a SECOND, unmixed pipeline opened concurrently with
-// the live mic dashboard. It gets its own tier-0 sensors and its own kws session
-// over the ONE loaded PhonemeNet — the mic's phrases are mirrored onto it (shared
-// weights, no copy) — and the mic side keeps running untouched the whole time.
+// ── 4g. streams rack: N independent sources, each configured live ────────────
+// The multi-stream payoff generalized: the user adds streams (mic / system /
+// a specific app via bro.listen.apps()) and toggles WHICH sensors/actions run on
+// each — all concurrent with, and independent of, the mic dashboard above.
+//
+// Headless has no live mic and (null backend) no loopback, so we drive an added
+// MIC stream through stream.feed() — the same one-stream path the host uses, so
+// the stream's own sense + kws + transcript see the fed audio.
 {
-    const supported = bro.listen.supported();
-    if (!supported) {
-        // Non-Windows / null backend: the panel degrades and the toggle is off.
-        assert(document.querySelector('#sysToggle').disabled,
-               'system toggle disabled when loopback is unsupported');
-        console.log('[listen-lab] system: loopback unsupported on this build — panel degraded (ok)');
-    } else {
-        // Mic side is live going in — capture its state to prove it survives.
-        const micKwsLive = bro.kws.isActive(), micSenseLive = bro.sense.isActive();
-        assert(micKwsLive && micSenseLive, 'mic dashboard live before opening the second stream');
+    // (a) the source picker is populated from bro.listen — mic is always offered.
+    listenLab.buildSourceOptions();
+    const opts = Array.from(document.querySelectorAll('#srcSel option')).map((o) => o.value);
+    assert(opts.indexOf('mic') >= 0, 'source picker offers a mic source (' + JSON.stringify(opts) + ')');
+    console.log('[listen-lab] picker: ' + opts.length + ' source option(s) · supported=' +
+                bro.listen.supported());
 
-        listenLab.openSystem();
-        const h = listenLab.sysHandle();
-        if (!h) {
-            // supported() is true but the render endpoint couldn't open in this
-            // context (e.g. no default playback device) — a real, honest skip.
-            console.log('[listen-lab] system: loopback supported but no render endpoint here — skipped');
-        } else {
-            assert(h.valid && h.kind === 'system', 'system loopback stream opened (kind=system)');
-            assert(h.id > 0, 'system stream has its own id (#' + h.id + ')');
-            // Its OWN tier-0 sensors, independent of the mic's bro.sense.
-            assert(h.sense.isActive(), "system stream's own tier-0 sense is live");
-            assert(bro.sense.isActive() && bro.kws.isActive(),
-                   'mic dashboard still live alongside the second stream (two concurrent streams)');
-            // Shared net: the mic's plain phrase mirrored onto the system kws.
-            assert(h.kws.templates().indexOf('hello there') >= 0,
-                   'mic phrase mirrored onto the system stream over the shared PhonemeNet (' +
-                   JSON.stringify(h.kws.templates()) + ')');
-            // The panel reflects the open stream.
-            assert(!document.querySelector('#sysBody').classList.contains('hidden'),
-                   'system panel body shown while the stream is open');
-            assert(document.querySelector('#sysToggle').textContent.indexOf('Stop') >= 0,
-                   'system toggle reads Stop while open');
-            const sysFusion = feedRows('sys');
-            assert(sysFusion.some((t) => t.indexOf('opened system-audio stream') >= 0),
-                   'opening the system stream logged a [sys] fusion row');
-            console.log('[listen-lab] system: stream #' + h.id + ' open · sense live · ' +
-                        h.kws.templates().length + ' mirrored phrase(s) · mic untouched');
+    // The mic dashboard (stream #0) is live going in — it must stay untouched.
+    assert(bro.sense.isActive() && bro.kws.isActive(), 'mic dashboard live before adding a stream');
 
-            // Close it: the second stream tears down and the mic side is unaffected.
-            listenLab.closeSystem();
-            assert(!listenLab.sysHandle(), 'system stream closed');
-            assert(document.querySelector('#sysBody').classList.contains('hidden'),
-                   'system panel body hidden after close');
-            assert(bro.sense.isActive() && bro.kws.isActive(),
-                   'closing the second stream left the mic dashboard live (independent streams)');
-            console.log('[listen-lab] system: closed — mic dashboard still live');
+    // (b) add a second mic stream and confirm it rendered a card + opened a handle.
+    const p = listenLab.addStream({ kind: 'mic' });
+    assert(p && p.handle.valid && p.handle.kind === 'mic', 'added mic stream opened a valid handle');
+    assert(listenLab.panels.length === 1, 'one stream in the rack');
+    const card = Array.from(document.querySelectorAll('.sc')).find((c) =>
+        c.querySelector('.scName').textContent.indexOf('#' + p.handle.id) >= 0);
+    assert(card, 'stream card rendered for the new stream');
+    assert(card.querySelectorAll('.scToggles button').length === 4,
+           'card exposes the four action toggles (tier-0 / kws / gestures / transcript)');
+    assert(p.handle.sense.isActive(), 'tier-0 sensors on by default for the new stream');
+    // The mic side survived the add.
+    assert(bro.sense.isActive() && bro.kws.isActive(), 'mic dashboard untouched by the add');
+    p.handle.retain(30);                       // capture so we can feed + export
+
+    // helper: feed audio into THIS stream (advances its own sense + kws).
+    function feedStream(all) {
+        const CHUNK = Math.floor(rate / 40);
+        for (let off = 0; off < all.length; off += CHUNK) {
+            p.handle.feed(all.subarray(off, Math.min(off + CHUNK, all.length)));
+            sleep(15);
         }
     }
+
+    // (c) tier-0: a tone fed into the stream lights its OWN tonality sensor,
+    // independent of the mic's bro.sense above.
+    feedStream(concat(silence(0.3), tone(0.8, 1300, 0.18), silence(0.3)));
+    const ss = p.handle.sense.snapshot();
+    assert(ss && ss.tonalEvents >= 1,
+           "the stream's own tier-0 sensor counted the tone (events " + (ss ? ss.tonalEvents : 'n/a') + ')');
+    console.log('[listen-lab] stream tier-0: tonalEvents=' + ss.tonalEvents + ' onsets=' + ss.onsets);
+
+    // (d) kws action: turning it on mirrors the mic's phrase vocabulary onto the
+    // stream's own session over the shared net; a spoken phrase then self-spots.
+    listenLab.setPanelAction(p, 'kws', true);
+    assert(p.actions.kws && p.handle.kws.templates().indexOf('hello there') >= 0,
+           'kws on → mic phrase mirrored onto the stream (' +
+           JSON.stringify(p.handle.kws.templates()) + ')');
+    feedStream(concat(silence(0.4), speak('hello there'), silence(0.4)));
+    assert(pumpUntil(() => feedRows('sys').some((t) =>
+        t.indexOf('hello there') >= 0 && t.indexOf('kws') >= 0), 8000),
+        'the stream self-spotted the mirrored phrase (tagged [sys] fusion row)');
+    console.log('[listen-lab] stream kws: ' +
+                feedRows('sys').find((t) => t.indexOf('hello there') >= 0));
+
+    // (e) transcript is single-op: turning it on for the stream TAKES the one
+    // transcriber from the primary (the stub installed in 4f still stands in).
+    listenLab.setPanelAction(p, 'transcript', true);
+    assert(listenLab.Transcribe.source === p.txSource,
+           'transcript handed to the stream (it owns the single transcriber)');
+    assert(document.querySelector('#txToggle').disabled,
+           'primary transcript toggle disabled while a stream owns it');
+    feedStream(concat(silence(0.4), speak('hello there'), silence(0.6)));
+    assert(pumpUntil(() => feedRows('sys').some((t) => t.indexOf('transcript') >= 0), 8000),
+           'voice-gated transcript on the stream committed (tagged [sys] row)');
+    // Hand it back: the primary owns transcript again.
+    listenLab.setPanelAction(p, 'transcript', false);
+    assert(listenLab.Transcribe.source === listenLab.PrimarySource,
+           'turning the stream transcript off returns the transcriber to the primary');
+    assert(!document.querySelector('#txToggle').disabled,
+           'primary transcript toggle re-enabled after hand-back');
+    console.log('[listen-lab] stream transcript: took + returned the single-op transcriber');
+
+    // (f) WAV export: the stream's retained buffer writes a real .wav. The
+    // headless seam forces the output path (no native dialog).
+    {
+        const fs2 = require('fs');
+        const tmp = require('os').tmpdir() + '/listen-lab-stream-' + p.handle.id + '.wav';
+        listenLab.exportTo(tmp);
+        listenLab.saveStreamWav(p);
+        listenLab.exportTo(null);
+        assert(fs2.existsSync(tmp), 'stream WAV written to disk (' + tmp + ')');
+        const buf = fs2.readFileSync(tmp);            // Uint8Array (no encoding)
+        const tag = (o) => String.fromCharCode(buf[o], buf[o + 1], buf[o + 2], buf[o + 3]);
+        assert(tag(0) === 'RIFF' && tag(8) === 'WAVE',
+               'exported file is a RIFF/WAVE container (' + tag(0) + '/' + tag(8) + ')');
+        assert(buf.length > 44, 'WAV carries audio past the header (' + buf.length + ' bytes)');
+        console.log('[listen-lab] stream wav: ' + buf.length + ' bytes → ' + tmp);
+    }
+
+    // (g) primary WAV export from a retained timeline region.
+    {
+        const tmp = require('os').tmpdir() + '/listen-lab-primary.wav';
+        const b = bro.listen.frame(), a = Math.max(bro.listen.frame() - 200, 0);
+        listenLab.exportTo(tmp);
+        const path = listenLab.exportWav(bro.listen.audio(a, b), bro.listen.info().rate, 'x.wav');
+        listenLab.exportTo(null);
+        assert(path === tmp && require('fs').existsSync(tmp), 'primary region exported to a .wav');
+        console.log('[listen-lab] primary wav: exported region → ' + tmp);
+    }
+
+    // (h) remove the stream: its card + handle go, the mic dashboard is unaffected.
+    listenLab.removeStream(p);
+    assert(listenLab.panels.length === 0, 'stream removed from the rack');
+    assert(!Array.from(document.querySelectorAll('.sc')).some((c) =>
+        c.querySelector('.scName').textContent.indexOf('#' + p.handle.id) >= 0),
+        'stream card removed');
+    assert(bro.sense.isActive() && bro.kws.isActive(),
+           'removing the stream left the mic dashboard live (independent streams)');
+    console.log('[listen-lab] rack: add → configure (tier-0/kws/transcript) → export → remove · mic untouched');
 }
 
 // ── 5. remove the gesture via its × button while live ────────────────────────
