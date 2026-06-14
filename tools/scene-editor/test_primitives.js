@@ -1,3 +1,4 @@
+import { Inference } from "/app/inference.js";
 // Headless tests for multi-primitive support.
 //
 // Exercises PrimitiveRegistry + Primitive + multi-primitive inference via
@@ -133,7 +134,7 @@ assert(box2.visible, 'box2 visible again');
 // (orbit starts at dist=4 target=origin), so project manually via Inference.
 
 {
-    const I = window.Inference;
+    const I = Inference;
     const cnv = document.getElementById('canvas');
     const camOpts = Camera.orbitViewOpts(E.cam, cnv);
     // Use the canvas's own client dims for projection — that's the FBO size

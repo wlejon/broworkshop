@@ -1,3 +1,4 @@
+import { EditMesh } from "/app/edit-mesh.js";
 // Smoke test for the new SketchUp-style push/pull (additive surgery, no warp).
 // Verifies the basic flows work without crashing and produce sane geometry.
 //

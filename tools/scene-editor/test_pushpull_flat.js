@@ -1,3 +1,4 @@
+import { EditMesh } from "/app/edit-mesh.js";
 // Integration test: push/pull on a flat (rectangle-tool) sketch face.
 //
 // SketchUp-style surgery handles this uniformly with all other push/pulls:

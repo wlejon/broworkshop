@@ -1,3 +1,4 @@
+import { ArcTool } from "/app/arc-tool.js";
 // Headless tests for ArcTool + Sketch.arcPolyline + the app's arc wiring.
 // Run: bro-headless apps/scene-editor apps/scene-editor/test_arc.js
 

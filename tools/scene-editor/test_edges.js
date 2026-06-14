@@ -1,3 +1,4 @@
+import { EdgeMesh } from "/app/edge-mesh.js";
 // Headless tests for EdgeMesh + the edges scene node.
 // Run: bro-headless apps/scene-editor apps/scene-editor/test_edges.js
 
@@ -5,7 +6,7 @@ advanceTime(100);
 flush();
 
 const E = window.__editor;
-const EM = window.EdgeMesh;
+const EM = EdgeMesh;
 assert(EM, 'EdgeMesh module is loaded');
 
 // --- orthoBasis --------------------------------------------------------------

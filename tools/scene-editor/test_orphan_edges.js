@@ -1,3 +1,4 @@
+import { EdgePrimitive } from "/app/edge-primitive.js";
 // Headless tests for EdgePrimitive (orphan edges).
 //   - Direct creation via registry.createEdgePrimitive
 //   - Inference geo dedups vertices and edges

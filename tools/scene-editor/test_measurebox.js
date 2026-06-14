@@ -1,3 +1,4 @@
+import { MeasureBox } from "/app/measure-box.js";
 // Headless tests for the Measurement Box (VCB).
 //
 // Exercises: parser, mid-drag distance override, post-commit re-apply,
@@ -11,7 +12,7 @@ advanceTime(100);
 flush();
 
 const E  = window.__editor;
-const MB = window.MeasureBox;
+const MB = MeasureBox;
 assert(MB, 'MeasureBox module is loaded');
 
 // --- Parser ----------------------------------------------------------------

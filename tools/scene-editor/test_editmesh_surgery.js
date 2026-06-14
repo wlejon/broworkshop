@@ -1,3 +1,5 @@
+import { EditMesh } from "/app/edit-mesh.js";
+import { Primitive } from "/app/primitive.js";
 // EditMesh surgery primitives — unit tests.
 //
 // Exercises findFaceGroupBoundary / duplicateBoundary / addBridge against

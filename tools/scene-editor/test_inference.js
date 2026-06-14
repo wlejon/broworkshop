@@ -1,3 +1,4 @@
+import { Inference } from "/app/inference.js";
 // Headless tests for the inference engine.
 // Run: bro-headless apps/scene-editor apps/scene-editor/test_inference.js
 
@@ -5,7 +6,7 @@ advanceTime(100);
 flush();
 
 const E = window.__editor;
-const I = window.Inference;
+const I = Inference;
 assert(I, 'Inference module is loaded');
 
 // --- buildInferenceGeo on the cube -----------------------------------------
