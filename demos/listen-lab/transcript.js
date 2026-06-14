@@ -1,29 +1,25 @@
-// Listen Lab — tier-3 transcript (Parakeet, voice-gated), concurrent per stream.
+// Listen Lab — tier-3 transcript (Parakeet, voice-gated), one per stream.
 // (load after timeline.js)
 ;(function () {
     const LL = globalThis.LL;
     const fs = require('fs');
     const { $txStat, $txLive, $txToggle, $txLines,
-            FPS, fusionRow, Stream, Playback, focusRegion, playRegion, logEvent } = LL;
+            FPS, fusionRow, focusRegion, playRegion, logEvent } = LL;
 
 // ── tier-3 transcript — Parakeet STT, voice-gated, rolling realtime ───────────
 // The heaviest tier, armed by the cheapest one: bro.sense's energy VAD decides
-// WHEN to wake the model. On voice onset we pull the utterance straight from the
-// retained stream (already 16 kHz, Parakeet's rate, no extra tap), re-transcribe
-// a rolling window every ~350 ms for live partial words, and commit a final line
-// when voice ends. Parakeet is a TDT transducer — streaming-shaped and faster
-// than realtime — so each pass is cheap; VAD-gating keeps it dormant in silence
-// and bounds every utterance, so the rolling re-runs never grow without limit.
+// WHEN to wake the model. On voice onset we pull the utterance from the stream's
+// retained audio (already 16 kHz, Parakeet's rate), re-transcribe a rolling
+// window every ~350 ms for live partial words, and commit a final line on voice
+// end.
 //
-// CONCURRENCY: the mic dashboard and every stream each transcribe their OWN
-// audio at the same time. Each gets an independent transcript CONTEXT (ctx) with
-// its own voice-gated lifecycle and partial/commit state. The model itself is
-// single-op (one decode in flight at a time — a second concurrent call throws),
-// so all contexts feed ONE serialized queue (TxQueue): jobs run back-to-back,
-// never overlapping. Each pass fully decodes its window (Parakeet is
-// unconditional), so interleaving contexts never cross-talks. This replaces the
-// old single-owner model where a second stream "stole" the transcriber (and a
-// stuck busy-flag on the hand-off left BOTH streams unable to transcribe).
+// EVERY STREAM transcribes its OWN audio — the mic dashboard and each added
+// source each get a transcript CONTEXT (ctx) with an independent voice-gated
+// lifecycle. The model is single-op (one decode in flight; a second throws), so
+// all contexts feed ONE serialized queue (TxQueue) and run back-to-back. Each
+// pass fully decodes its window (Parakeet is unconditional), so interleaving
+// streams never cross-talk. Only the ACTIVE tab's ctx renders into the shared
+// transcript panel; a background stream still accumulates committed lines.
 
 const PARA_CANDIDATES = [
     '../../../brosoundml/weights/parakeet/0.6b-v3',
@@ -32,20 +28,13 @@ const PARA_CANDIDATES = [
 const TX_PREROLL = 20;         // frames of pre-voice audio to include (~200 ms)
 const TX_ROLL    = 35;         // frames between rolling partial passes (~350 ms)
 
-// Shared transcript runtime: the loaded model + tokenizer + global ready/enable
-// flags. `lines` is the PRIMARY (mic) dashboard's committed transcript — the
-// rich panel renders it; stream contexts surface their commits on their own UI.
 const Transcribe = {
     model: null, tok: null,
     ready: false, enabled: true,
-    lines: [],                 // primary committed { t, text, a, b }
     stubRun: null,             // headless test seam: a synchronous runner for all ctxs
 };
 
 // ── the serialized model queue ────────────────────────────────────────────────
-// One in-flight decode at a time across ALL contexts. Rolling (partial) jobs for
-// a context collapse to the latest (partials are best-effort); final jobs always
-// run so no committed line is lost.
 const TxQueue = { q: [], busy: false };
 
 function txEnqueue(ctx, pcm, isFinal, a, b) {
@@ -81,18 +70,14 @@ function txDrain() {
             onDone: finish,
         });
     } catch (e) {
-        // A model that rejects (e.g. an unexpected second in-flight op) — drop to
-        // a best-effort commit and keep the queue moving.
         TxQueue.busy = false;
         if (job.isFinal) finishUtterance(ctx, ctx.tx.partial || '', job.a, job.b);
         txDrain();
     }
 }
 
-// Wrap bro.stt's async Parakeet decode into the uniform runner interface:
-// accumulate emitted ids, decode the running prefix on each token, hand the
-// committed transcript back on done. Each ctx gets its own runner bound to the
-// shared model; calls are serialized by TxQueue so they never overlap.
+// Wrap bro.stt's async Parakeet decode into the uniform runner interface; calls
+// are serialized by TxQueue so they never overlap.
 function realRun(pcm, cb) {
     const acc = [];
     return bro.stt.transcribe(Transcribe.model, pcm, {
@@ -108,11 +93,6 @@ function realRun(pcm, cb) {
     });
 }
 
-// Attach a fresh voice-gated transcript state to a context (the primary mic, or
-// a stream). A ctx supplies the audio plumbing — audio(a,b)/frame()/oldest()/
-// active() — plus UI routing (onPartial/onCommit/onStatus); this adds the
-// lifecycle state + the model runner. _prev/_cur are the driver's sensor
-// snapshots (set each frame before transcribeTick).
 function initTxCtx(ctx) {
     ctx.tx = { active: false, startFrame: 0, lastRunFrame: 0, partial: '' };
     if (!ctx.run) ctx.run = realRun;
@@ -121,20 +101,23 @@ function initTxCtx(ctx) {
     return ctx;
 }
 
-// The primary mic dashboard as a transcript context: pulls from the shared
-// default stream (bro.listen + bro.sense) and routes output to the rich
-// transcript panel (lines list, timeline speech markers, [heard] feed rows).
-const PrimarySource = {
-    id: 'primary', name: 'mic', _prev: null, _cur: null,
-    audio: (a, b) => bro.listen.audio(a, b),
-    frame: () => bro.listen.frame(),
-    oldest: () => Stream.oldestFrame(),
-    active: () => bro.listen.info().active,
-    onPartial: primaryRenderPartial,
-    onCommit: primaryCommitLine,
-    onStatus: (text, err, live) => txSetStatus(text, err, live),
-};
-initTxCtx(PrimarySource);
+// Build the transcript context for a stream: audio plumbing over the stream's
+// retained buffer + its ring, and UI routing that only touches the shared panel
+// when this stream is the active tab.
+function makeTxCtx(st) {
+    const ctx = {
+        id: 'tx-' + st.id, name: st.label, st, _prev: null, _cur: null,
+        audio: (a, b) => st.source.listen.audio(a, b),
+        frame: () => st.source.listen.frame(),
+        oldest: () => st.ring.oldestFrame(),
+        active: () => st.source.listen.info().active,
+        onPartial: (partial) => { if (st === LL.active) renderActivePartial(partial); },
+        onCommit: (text, a, b) => commitLine(st, text, a, b),
+        onStatus: (text, err, live) => { if (st === LL.active) txSetStatus(text, err, live); },
+    };
+    initTxCtx(ctx);
+    return ctx;
+}
 
 function txSetStatus(text, err, live) {
     $txStat.textContent = text;
@@ -143,16 +126,15 @@ function txSetStatus(text, err, live) {
     $txToggle.textContent = Transcribe.enabled ? '⏸' : '▶';
 }
 
-// The live partial is held to ONE line: keep the TAIL (newest words) so a long
-// in-progress utterance doesn't wrap and shove the panel around.
 const TX_PARTIAL_MAX = 96;
 
-// Render a context's partial through whichever UI it owns.
 function renderPartial(ctx) {
     ctx.onPartial(ctx.tx.partial);
 }
 
-function primaryRenderPartial(partial) {
+// Render the ACTIVE tab's live partial into the shared transcript panel.
+function renderActivePartial(partial) {
+    const ctx = LL.active && LL.active.txCtx;
     if (partial) {
         let p = partial;
         if (p.length > TX_PARTIAL_MAX) p = '…' + p.slice(p.length - TX_PARTIAL_MAX);
@@ -160,7 +142,7 @@ function primaryRenderPartial(partial) {
         const cur = document.createElement('span');
         cur.className = 'cur'; cur.textContent = '▌';
         $txLive.appendChild(cur);
-    } else if (PrimarySource.tx.active) {
+    } else if (ctx && ctx.tx.active) {
         $txLive.innerHTML = '<span class="cur">▌</span>';
     } else {
         $txLive.innerHTML = '<span class="ph">— speak; words appear here while voice is active —</span>';
@@ -169,15 +151,16 @@ function primaryRenderPartial(partial) {
 
 const lineKey = (ln) => ln.a + '-' + ln.b;
 
-// Each committed line is the INDEX into the timeline: a single ellipsized row
-// that, clicked, scrubs the timeline to where it was said and plays it with a
-// swept playhead. The row driving the current playback is highlighted.
+// Render the ACTIVE tab's committed lines. Each is a timeline index: clicked, it
+// scrubs the (active) timeline to where it was said and plays it.
 function renderLines() {
+    const st = LL.active;
     $txLines.innerHTML = '';
-    for (const ln of Transcribe.lines) {
+    if (!st) return;
+    for (const ln of st.txLines) {
         const row = document.createElement('div');
         row.className = 'txline' +
-            (Playback.active && Playback.key === lineKey(ln) ? ' playing' : '');
+            (st.playback.active && st.playback.key === lineKey(ln) ? ' playing' : '');
         row.title = 'jump to the timeline and play';
         const mm = Math.floor(ln.t / 60), ss = Math.floor(ln.t % 60);
         const t = document.createElement('span');
@@ -188,14 +171,12 @@ function renderLines() {
         row.addEventListener('click', () => {
             focusRegion(ln.a, ln.b);
             playRegion({ a: ln.a, b: ln.b }, lineKey(ln));
-            renderLines();          // reflect the new playing row immediately
+            renderLines();
         });
         $txLines.appendChild(row);
     }
 }
 
-// Commit a finished utterance for a context: clear the partial, route the text
-// to the ctx's UI, and reset the live partial.
 function finishUtterance(ctx, text, a, b) {
     ctx.tx.active = false;
     ctx.tx.partial = '';
@@ -204,21 +185,18 @@ function finishUtterance(ctx, text, a, b) {
     ctx.onStatus('ready · voice-gated', false, false);
 }
 
-// Primary owner: a replayable transcript line + a timeline speech marker + a
-// [heard] fusion row (the rich panel). a/b are on the shared stream axis.
-function primaryCommitLine(text, a, b) {
+// Commit a finished utterance to a stream: a replayable transcript line, a
+// [heard] fusion row, and a timeline speech marker — all on that stream.
+function commitLine(st, text, a, b) {
     if (!text) return;
-    Transcribe.lines.unshift({ t: b / FPS, text, a, b });
-    while (Transcribe.lines.length > 80) Transcribe.lines.pop();
-    fusionRow('heard', '“' + text + '”');
-    logEvent('speech', text, null, '', null,
+    st.txLines.unshift({ t: b / FPS, text, a, b });
+    while (st.txLines.length > 80) st.txLines.pop();
+    fusionRow(st, 'heard', '“' + text + '”');
+    logEvent(st, 'speech', text, null, '', null,
              { startFrame: a, endFrame: b, matchedFrames: b - a });
-    renderLines();
+    if (st === LL.active) renderLines();
 }
 
-// Queue one transcription pass over [startFrame, endFrame] of the ctx's retained
-// stream. A rolling pass is collapsed (best-effort); a final commit is always
-// queued so the line is never lost.
 function txKick(ctx, endFrame, isFinal) {
     const T = ctx.tx;
     const a = Math.max(Math.round(T.startFrame), ctx.oldest());
@@ -229,14 +207,13 @@ function txKick(ctx, endFrame, isFinal) {
     txEnqueue(ctx, pcm, isFinal, a, b);
 }
 
-// Edge-driven from the poll loop, ONCE PER CONTEXT: voice onset arms an
-// utterance, rolling passes stream partial words while voice holds, voice offset
-// commits the final line. The driver sets ctx._prev/_cur before calling.
+// Edge-driven from the poll loop, once per context. The driver sets
+// ctx._prev/_cur (the stream's sensor snapshots) before calling.
 function transcribeTick(ctx) {
     if (!Transcribe.ready || !Transcribe.enabled) return;
     const prev = ctx._prev, s = ctx._cur;
     if (!s) return;
-    if (!ctx.active()) return;                      // needs the retained stream
+    if (!ctx.active()) return;
     const T = ctx.tx;
     const rising = s.voice && (!prev || !prev.voice);
     const falling = prev && prev.voice && !s.voice;
@@ -255,8 +232,6 @@ function transcribeTick(ctx) {
     if (falling && T.active) txKick(ctx, s.frames, true);
 }
 
-// Stop driving a context's transcript (toggle off / stream removed): drop any
-// in-progress utterance so a stale falling edge never commits later.
 function txReset(ctx) {
     ctx.tx.active = false;
     ctx.tx.partial = '';
@@ -266,17 +241,14 @@ function txReset(ctx) {
 function txMaybeReady() {
     if (!Transcribe.model || !Transcribe.tok) return;
     Transcribe.ready = true;
-    fusionRow('info', 'tier-3 transcript ready — Parakeet ' +
-        (Transcribe.model.sampleRate / 1000) + ' kHz, voice-gated');
+    fusionRow(LL.active, 'info', 'tier-3 transcript ready — Parakeet ' +
+        (Transcribe.model.sampleRate / 1000) + ' kHz, voice-gated · every stream');
     txSetStatus('ready · voice-gated');
-    renderPartial(PrimarySource);
+    renderActivePartial('');
 }
 
-// Load Parakeet + its tokenizer (both async, non-blocking — the dashboard stays
-// live during the weight upload). Independent of the PhonemeNet checkpoint: the
-// transcript tier needs only bro.sense (voice VAD) + the retained stream.
 function txLoad() {
-    if (Transcribe.stubRun) return;   // a test stub is installed — don't load the model
+    if (Transcribe.stubRun) return;
     let dir = null;
     for (const p of PARA_CANDIDATES) {
         try { if (fs.existsSync(p + '/config.json')) { dir = fs.realpathSync(p); break; } }
@@ -299,8 +271,8 @@ function txLoad() {
 }
 
     Object.assign(LL, {
-        Transcribe, PrimarySource, realRun, initTxCtx, txReset,
-        txSetStatus, renderPartial, renderLines,
+        Transcribe, makeTxCtx, initTxCtx, realRun, txReset,
+        txSetStatus, renderPartial, renderActivePartial, renderLines,
         finishUtterance, transcribeTick, txMaybeReady, txLoad,
     });
 })();

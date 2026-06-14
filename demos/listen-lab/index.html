@@ -43,48 +43,31 @@
   }
   .meter .fill { height: 100%; width: 0%; background: #3c8c63; }
   .meter .mark { position: absolute; top: -2px; bottom: -2px; width: 2px; background: #5a657a; }
-  /* ── streams rack: N independent sources (bro.listen.open) ─────────────── */
-  .streams { margin: 0 14px 4px; border: 1px solid #2a2335; border-radius: 8px; background: #120f18; }
-  .streamsHdr { display: flex; align-items: center; gap: 8px; padding: 8px 12px; flex-wrap: wrap; }
-  .streamsHdr .streamsTitle { font-size: 11px; color: #c9a6ff; text-transform: uppercase; letter-spacing: .8px; font-weight: 600; }
-  .streamsHdr .streamsSub { flex: 1; font-size: 11px; color: #6b7686; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 80px; }
-  .streamsHdr select.srcSel {
-    background: #1e1828; color: #d7dde6; border: 1px solid #4a3a55; border-radius: 6px;
-    padding: 5px 8px; font: inherit; font-size: 11px; max-width: 220px;
+  /* ── stream tabs: each source is a full, identical dashboard ───────────── */
+  .tabs { display: flex; align-items: center; gap: 8px; padding: 8px 14px 0; flex-wrap: wrap; }
+  .tabstrip { display: flex; align-items: stretch; gap: 4px; flex-wrap: wrap; flex: 1; min-width: 0; }
+  .tab {
+    display: flex; align-items: center; gap: 7px; padding: 6px 12px; font-size: 12px;
+    border: 1px solid #1d2330; border-bottom: none; border-radius: 8px 8px 0 0;
+    background: #11141b; color: #97a1b2; cursor: pointer; max-width: 220px;
   }
-  .streamsHdr .addStream { padding: 5px 12px; font-size: 11px; border-color: #4a3a55; color: #c9a6ff; background: #1e1828; }
-  .streamsHdr .addStream:hover { background: #2c2238; }
-  .streamsHdr .addStream:disabled { opacity: .45; cursor: default; }
-  .streamsHdr .refreshApps { padding: 5px 9px; font-size: 11px; border-color: #4a3a55; color: #c9a6ff; background: #1e1828; }
-  .streamCards { display: flex; flex-direction: column; gap: 8px; padding: 0 12px 10px; }
-  .streamCards:empty { display: none; }
-  /* one stream card — its own toggles, meters, spot + transcript line, export */
-  .sc { border: 1px solid #2a2335; border-radius: 8px; background: #161020; padding: 8px 10px; display: flex; flex-direction: column; gap: 7px; }
-  .sc.fired { border-color: #54d68a; }
-  .scHdr { display: flex; align-items: center; gap: 8px; }
-  .scKind { font-size: 10px; border-radius: 4px; padding: 1px 7px; text-transform: uppercase; letter-spacing: .5px; }
-  .scKind.mic { background: #1e3a2c; color: #8be0ae; }
-  .scKind.system { background: #2a2335; color: #c9a6ff; }
-  .scKind.process { background: #1e2a3a; color: #6aa6ff; }
-  .scName { font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .scClose { padding: 0 7px; border-radius: 10px; font-size: 11px; }
-  .scToggles { display: flex; gap: 6px; flex-wrap: wrap; }
-  .scToggles button { padding: 3px 9px; font-size: 11px; border-radius: 12px; }
-  .scToggles button.on { background: #2f6f4f; border-color: #3c8c63; color: #eafff2; }
-  .scToggles button.tx.on { background: #16414c; border-color: #36c5d0; color: #d6f7fb; }
-  .scToggles button:disabled { opacity: .4; cursor: default; }
-  .scMeters { display: flex; align-items: center; gap: 14px; font-size: 11px; color: #b8a6d0; flex-wrap: wrap; font-variant-numeric: tabular-nums; }
-  .scMeters.hidden { display: none; }
-  .scMeters .scm { display: flex; align-items: center; gap: 6px; }
-  .scSpot { font-size: 11px; color: #8a94a6; transition: color .12s; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .scSpot.fired { color: #eafff2; }
-  .scSpot.hidden { display: none; }
-  .scTx { font-size: 12px; color: #9fe7ef; height: 17px; line-height: 17px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .scTx.hidden { display: none; }
-  .scTx .ph { color: #46555c; font-size: 11px; }
-  .scExport { display: flex; align-items: center; gap: 8px; font-size: 11px; color: #6b7686; }
-  .scExport.hidden { display: none; }
-  .scExport button { padding: 3px 10px; font-size: 11px; }
+  .tab:hover { background: #161b24; }
+  .tab.active { background: #0d1016; color: #eaf1fb; border-color: #2c3c57; font-weight: 600; }
+  .tab .tlabel { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tab.mic { border-top: 2px solid #3c8c63; }
+  .tab.system { border-top: 2px solid #c9a6ff; }
+  .tab.process { border-top: 2px solid #6aa6ff; }
+  .tab .tclose { color: #6b7686; border-radius: 8px; padding: 0 4px; line-height: 1; }
+  .tab .tclose:hover { color: #ff8585; background: #2a1c1c; }
+  .tabadd { display: flex; align-items: center; gap: 6px; padding-bottom: 4px; }
+  .tabadd select.srcSel {
+    background: #1e1828; color: #d7dde6; border: 1px solid #4a3a55; border-radius: 6px;
+    padding: 5px 8px; font: inherit; font-size: 11px; max-width: 200px;
+  }
+  .tabadd .addStream { padding: 5px 11px; font-size: 12px; border-color: #4a3a55; color: #c9a6ff; background: #1e1828; }
+  .tabadd .addStream:hover { background: #2c2238; }
+  .tabadd .addStream:disabled { opacity: .45; cursor: default; }
+  .tabadd .refreshApps { padding: 5px 9px; font-size: 11px; border-color: #4a3a55; color: #c9a6ff; background: #1e1828; }
   /* ── timeline (scrollable ~10 min stream history) ─────────────────────── */
   .tlbar { display: flex; align-items: center; gap: 12px; padding: 6px 14px 4px; font-size: 11px; color: #8a94a6; }
   .tlbar button { padding: 3px 10px; font-size: 11px; }
@@ -287,6 +270,14 @@
   </header>
   <main>
     <div class="left">
+      <div class="tabs">
+        <div class="tabstrip" id="tabStrip"></div>
+        <span class="tabadd">
+          <select class="srcSel" id="srcSel" title="pick a source to add as a new stream"></select>
+          <button class="refreshApps" id="refreshApps" title="rescan apps currently playing audio">⟳</button>
+          <button class="addStream" id="addStream">＋ Add stream</button>
+        </span>
+      </div>
       <div class="sensors">
         <div class="card">
           <span class="title">level</span>
@@ -309,16 +300,6 @@
           <span class="big"><span class="dot tonal" id="tonalDot"></span><span id="tonalTxt">—</span></span>
           <span class="small" id="tonalSmall">periodicity —</span>
         </div>
-      </div>
-      <div class="streams" id="streams">
-        <div class="streamsHdr">
-          <span class="streamsTitle">streams</span>
-          <span class="streamsSub" id="streamsSub">the mic dashboard above is stream #0 · add more sources — each unmixed, with its own sensors</span>
-          <select class="srcSel" id="srcSel" title="pick a source to add as a new stream"></select>
-          <button class="refreshApps" id="refreshApps" title="rescan apps currently playing audio">⟳</button>
-          <button class="addStream" id="addStream">＋ Add stream</button>
-        </div>
-        <div class="streamCards" id="streamCards"></div>
       </div>
       <div class="tlbar">
         <button id="tlLive" class="active" title="follow the live edge">● Live</button>

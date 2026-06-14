@@ -5,12 +5,16 @@
 // classic script's top-level const/let does NOT cross <script> boundaries in
 // QuickJS, so every cross-module symbol is published on `LL` and read back from
 // it. This file owns the things every module touches: the DOM element handles,
-// the fusion-feed + status helpers, a tiny audio-clip player, and the small set
-// of mutable cross-cutting flags (kwsReady / spots / gestureN).
+// the status helper, a tiny audio-clip player, the per-stream fusion feed, and
+// the small set of mutable cross-cutting flags.
+//
+// Multi-stream: the dashboard is a per-stream component. `LL.streams` holds one
+// state object per source (the mic = tab #0, plus any added stream); `LL.active`
+// is the one whose dashboard is currently shown. The shared DOM (sensor cards,
+// timeline, transcript, feed) renders whichever stream is active.
 //
 // Load order (see index.html): core → timeline → transcript → gestures →
-// streams → main. Each later file may alias anything this one (and earlier
-// ones) put on LL.
+// streams → main. Each later file may alias anything this one put on LL.
 
 ;(function (global) {
     const LL = (global.LL = global.LL || {});
@@ -36,17 +40,19 @@
         $status: $('#status'), $streamT: $('#streamT'), $spotCount: $('#spotCount'),
         $transcript: $('#transcript'), $txStat: $('#txStat'),
         $txLive: $('#txLive'), $txLines: $('#txLines'), $txToggle: $('#txToggle'),
-        $streamsSub: $('#streamsSub'), $srcSel: $('#srcSel'),
-        $addStream: $('#addStream'), $refreshApps: $('#refreshApps'),
-        $streamCards: $('#streamCards'),
+        $srcSel: $('#srcSel'), $addStream: $('#addStream'), $refreshApps: $('#refreshApps'),
+        $tabStrip: $('#tabStrip'),
     });
 
     LL.FPS = 100;                 // sensor frame rate (10 ms hop)
 
-    // Cross-cutting mutable flags. These are read AND written from more than one
-    // module, so they live on LL (an aliased local would capture a stale value).
+    // The per-stream dashboards. main.js seeds streams[0] (the mic) at boot.
+    LL.streams = [];
+    LL.active = null;
+
+    // Cross-cutting mutable flags. Read AND written from more than one module, so
+    // they live on LL (an aliased local would capture a stale value).
     LL.kwsReady = false;          // PhonemeNet checkpoint loaded + bro.kws live
-    LL.spots = 0;                 // total fires (phrases + gestures), for the statusbar
     LL.gestureN = 0;              // auto-name counter for unnamed gesture clips
 
     const $status = LL.$status, $feed = LL.$feed;
@@ -56,19 +62,38 @@
         $status.className = isErr ? 'err' : '';
     };
 
-    // ── fusion feed ───────────────────────────────────────────────────────────
-    LL.fusionRow = function (kind, text) {
+    // ── per-stream fusion feed ──────────────────────────────────────────────────
+    // Each stream keeps its OWN feed (so switching tabs shows that stream's
+    // events). fusionRow appends to a stream's feed and, if it's the active tab,
+    // renders the row into the shared #feed; renderFeed rebuilds it on tab switch.
+    function pad(n) { return String(n).padStart(2, '0'); }
+
+    function makeFeedRow(entry) {
         const row = document.createElement('div');
         row.className = 'row';
+        row.innerHTML = '<span class="t">' + entry.ts + '</span>' +
+            '<span class="kind ' + entry.kind + '">' + entry.kind + '</span><span class="txt"></span>';
+        row.querySelector('.txt').textContent = entry.text;
+        return row;
+    }
+
+    LL.fusionRow = function (st, kind, text) {
+        if (!st) st = LL.active;
+        if (!st) return;
         const t = new Date();
-        const hh = String(t.getHours()).padStart(2, '0');
-        const mm = String(t.getMinutes()).padStart(2, '0');
-        const ss = String(t.getSeconds()).padStart(2, '0');
-        row.innerHTML = '<span class="t">' + hh + ':' + mm + ':' + ss + '</span>' +
-            '<span class="kind ' + kind + '">' + kind + '</span><span class="txt"></span>';
-        row.querySelector('.txt').textContent = text;
-        $feed.insertBefore(row, $feed.firstChild);
-        while ($feed.children.length > 200) $feed.removeChild($feed.lastChild);
+        const entry = { kind, text, ts: pad(t.getHours()) + ':' + pad(t.getMinutes()) + ':' + pad(t.getSeconds()) };
+        st.feed.unshift(entry);
+        while (st.feed.length > 200) st.feed.pop();
+        if (st === LL.active) {
+            $feed.insertBefore(makeFeedRow(entry), $feed.firstChild);
+            while ($feed.children.length > 200) $feed.removeChild($feed.lastChild);
+        }
+    };
+
+    LL.renderFeed = function (st) {
+        $feed.innerHTML = '';
+        if (!st) return;
+        for (const entry of st.feed) $feed.appendChild(makeFeedRow(entry));  // st.feed is newest-first
     };
 
     LL.mkbtn = function (label, fn) {
@@ -79,20 +104,17 @@
     };
 
     // A typed phrase carries minCoverage: a completion must have at least that
-    // fraction of its phonemes ACTUALLY heard (not riding the emission floor), so
-    // "what is the first" no longer fires on just "first" with the head floored.
+    // fraction of its phonemes ACTUALLY heard (not riding the emission floor).
     LL.phrasePolicy = function () {
         return { threshold: +LL.$threshold.value, minCoverage: +LL.$coverage.value };
     };
 
     // ── shared audio-clip playback (bro's native AudioContext clip API) ────────
-    // One AudioContext, one live clip at a time — timeline playback and stream
-    // WAV export both reach it through here so neither owns the singleton.
     let audioCtx = null, lastClip = -1;
     LL.ensureAudioCtx = function () { if (!audioCtx) audioCtx = new AudioContext(); return audioCtx; };
     LL.playPcm = function (pcm, rate) {
         const c = LL.ensureAudioCtx();
-        if (lastClip >= 0) c.deleteClip(lastClip);     // free the previous so plays don't accumulate
+        if (lastClip >= 0) c.deleteClip(lastClip);
         lastClip = c.createClip(pcm, 1, rate || 16000);
         c.playClip(lastClip, 1.0, false);
     };

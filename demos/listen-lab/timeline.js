@@ -1,105 +1,135 @@
-// Listen Lab — stream-history ring, scrollable timeline, detail panel, playback.
+// Listen Lab — per-stream history ring, scrollable timeline, detail, playback.
 // (load after core.js)
+//
+// Every stream (the mic = tab #0, plus any added source) owns its OWN dashboard
+// state: a history ring, an event log, a view window, a playback cursor, and a
+// phoneme-label table. This module provides the FACTORIES for that state
+// (makeRing/makeView/makePlayback) and the draw/interaction code that renders
+// whichever stream is active. `bindTimeline(st)` repoints the module's working
+// references (Stream/events/View/Playback/phLabels/SRC) at the active stream, so
+// the existing single-stream draw code renders the active tab unchanged. Per-
+// stream UPDATES (logEvent, ring.push) take an explicit `st` instead, so a
+// background stream keeps accumulating history while another tab is shown.
 ;(function () {
     const LL = globalThis.LL;
     const { $chart, $overview, $detail, $scratch, $tlLive, $tlHover, $phrase,
             status, fusionRow, mkbtn, FPS, playPcm } = LL;
 
-// ── stream history ring + scrollable timeline ─────────────────────────────────
-// Every sensor frame the poll loop observes is appended to a columnar ring
-// (~10 min). The timeline renders a pan/zoom window over it — level envelope +
-// adaptive floor, voice/tonal bands, onset ticks, and the discrete event
-// markers (spots, gestures, arm) — so the whole incoming stream stays legible
-// and scrollable, not just the last few seconds. Follow mode pins the live
-// edge; pan/zoom/overview-drag detaches into scrub.
-
 const CAP = 10 * 60 * FPS;                // ~10 min of frames (FPS from core/LL)
-const Stream = {
-    frame: new Float64Array(CAP),
-    db:    new Float32Array(CAP),
-    floor: new Float32Array(CAP),
-    peak:  new Float32Array(CAP),
-    domHz: new Float32Array(CAP),
-    flags: new Uint8Array(CAP),           // bit0 voice · bit1 tonal · bit2 onset
-    phCls: new Int16Array(CAP),           // tier-1: top phoneme class (0 = silence)
-    phP:   new Float32Array(CAP),         //         its posterior
-    head: 0, count: 0,
-    push(prev, s, ph) {
-        const i = this.head;
-        this.frame[i] = s.frames;
-        this.db[i] = s.db; this.floor[i] = s.noiseFloorDb;
-        this.peak[i] = s.peak; this.domHz[i] = s.tonal ? s.dominantHz : 0;
-        this.flags[i] = (s.voice ? 1 : 0) | (s.tonal ? 2 : 0) |
-            ((prev && s.onsets > prev.onsets) ? 4 : 0);
-        this.phCls[i] = ph ? ph.cls : 0;
-        this.phP[i] = ph ? ph.p : 0;
-        this.head = (i + 1) % CAP;
-        this.count = Math.min(this.count + 1, CAP);
-    },
-    slot(i) { return (this.head - this.count + i + CAP) % CAP; },   // logical→slot
-    newestFrame() { return this.count ? this.frame[this.slot(this.count - 1)] : 0; },
-    oldestFrame() { return this.count ? this.frame[this.slot(0)] : 0; },
-    // Nearest stored sample to an absolute frame (linear; the ring is small).
-    nearest(f) {
-        let bi = -1, bd = Infinity;
-        for (let i = 0; i < this.count; i++) {
-            const sl = this.slot(i), d = Math.abs(this.frame[sl] - f);
-            if (d < bd) { bd = d; bi = sl; }
-        }
-        return bi;
-    },
-};
+
+// A fresh stream-history ring. Columnar (~10 min); the timeline renders a
+// pan/zoom window over it — level envelope + adaptive floor, voice/tonal bands,
+// onset ticks, the tier-1 phoneme lane, and discrete event markers.
+function makeRing() {
+    return {
+        frame: new Float64Array(CAP),
+        db:    new Float32Array(CAP),
+        floor: new Float32Array(CAP),
+        peak:  new Float32Array(CAP),
+        domHz: new Float32Array(CAP),
+        flags: new Uint8Array(CAP),           // bit0 voice · bit1 tonal · bit2 onset
+        phCls: new Int16Array(CAP),           // tier-1: top phoneme class (0 = silence)
+        phP:   new Float32Array(CAP),         //         its posterior
+        head: 0, count: 0,
+        push(prev, s, ph) {
+            const i = this.head;
+            this.frame[i] = s.frames;
+            this.db[i] = s.db; this.floor[i] = s.noiseFloorDb;
+            this.peak[i] = s.peak; this.domHz[i] = s.tonal ? s.dominantHz : 0;
+            this.flags[i] = (s.voice ? 1 : 0) | (s.tonal ? 2 : 0) |
+                ((prev && s.onsets > prev.onsets) ? 4 : 0);
+            this.phCls[i] = ph ? ph.cls : 0;
+            this.phP[i] = ph ? ph.p : 0;
+            this.head = (i + 1) % CAP;
+            this.count = Math.min(this.count + 1, CAP);
+        },
+        slot(i) { return (this.head - this.count + i + CAP) % CAP; },   // logical→slot
+        newestFrame() { return this.count ? this.frame[this.slot(this.count - 1)] : 0; },
+        oldestFrame() { return this.count ? this.frame[this.slot(0)] : 0; },
+        // Nearest stored sample to an absolute frame (linear; the ring is small).
+        nearest(f) {
+            let bi = -1, bd = Infinity;
+            for (let i = 0; i < this.count; i++) {
+                const sl = this.slot(i), d = Math.abs(this.frame[sl] - f);
+                if (d < bd) { bd = d; bi = sl; }
+            }
+            return bi;
+        },
+    };
+}
+
+const PH_CONF = 0.45;          // posterior above which a phoneme counts as heard
+
+function makeView() {
+    return {
+        follow: true,
+        span: 10 * FPS,           // visible width, in frames (default 10 s)
+        endFrame: 0,              // right edge frame when scrubbing
+        hoverFrame: -1,
+        selId: -1,                // selected event (detail panel open)
+        selRegion: null,          // { a, b } frame span highlighted for the selection
+        scratchSel: null,         // { a, b } stream-frame region grabbed for a new clip
+    };
+}
+
+const Playback0 = () => ({ active: false, a: 0, b: 0, startMs: 0, durMs: 0, key: '' });
+function makePlayback() { return Playback0(); }
+
+// ── working references for the ACTIVE stream (repointed by bindTimeline) ───────
+let Stream   = makeRing();
+let events   = [];
+let View     = makeView();
+let Playback = makePlayback();
+let phLabels = { 0: 'sil' };
+let SRC      = null;            // active stream's source (sense/kws/gesture/listen)
+
+function bindTimeline(st) {
+    Stream = st.ring;
+    events = st.events;
+    View = st.view;
+    Playback = st.playback;
+    phLabels = st.phLabels;
+    SRC = st.source;
+}
+
+const SPAN_MIN = 2 * FPS, SPAN_MAX = CAP;
 
 // ── event log (timeline markers + click-inspect targets) ──────────────────────
-// Distinct from the text fusion feed: the notable discrete events (a fired
-// spot, a fired gesture, an arm moment) tagged with the absolute frame they
-// occurred on, so each lands at the right x on the timeline and carries the
-// detail a click expands.
 
-const events = [];
 let evId = 0;
 const EV_CAP = 4000;
 
 // Re-anchor a spotter-axis span onto the shared stream axis (bro.sense frames)
 // using the matched duration, so spot markers/regions line up with the
-// envelope and the retained audio. Returns a span on the stream axis (or the
-// original if we can't read the stream clock).
+// envelope and the retained audio.
 function toStreamSpan(span, s) {
     if (!span || !(span.matchedFrames > 0) || !s) return span;
     return { startFrame: s.frames - span.matchedFrames + 1, endFrame: s.frames,
              matchedFrames: span.matchedFrames };
 }
 
-function logEvent(type, name, conf, kind, detail, span) {
-    const s = bro.sense.isActive() ? bro.sense.snapshot() : null;
-    // Prefer the matcher's exact reported span (frames axis) for the event's
-    // anchor + region; fall back to the current frame when none is given (arm).
+// Log a discrete event onto a SPECIFIC stream's timeline (not necessarily the
+// active one). Uses the stream's own sense clock + ring for the anchor.
+function logEvent(st, type, name, conf, kind, detail, span) {
+    const s = st.source.sense.isActive() ? st.source.sense.snapshot() : null;
     const exact = span && span.startFrame >= 0;
+    const anchor = exact ? span.endFrame : (s ? s.frames : st.ring.newestFrame());
     const ev = {
         id: ++evId, type, name: name || '',
         conf: (conf == null ? null : conf), kind: kind || '',
-        frame: exact ? span.endFrame : (s ? s.frames : Stream.newestFrame()),
-        t: (exact ? span.endFrame : (s ? s.frames : Stream.newestFrame())) / FPS,
+        frame: anchor,
+        t: anchor / FPS,
         span: exact ? { a: span.startFrame, b: span.endFrame } : null,
         detail: detail || null,
     };
-    events.push(ev);
-    while (events.length > EV_CAP) events.shift();
+    st.events.push(ev);
+    while (st.events.length > EV_CAP) st.events.shift();
     return ev;
 }
 
 // ── tier-1 phoneme stream (bro.kws.posterior) ─────────────────────────────────
-// The model's raw per-frame readout — which phoneme PhonemeNet is hearing,
-// independent of any template. Stored alongside the sensors in the ring so the
-// timeline and detail panel can show what was actually decoded where; class
-// labels are learned from the live stream (cls 0 == silence).
-
-const phLabels = { 0: 'sil' };
-const PH_CONF = 0.45;          // posterior above which a phoneme counts as heard
-
-// Collapse the ring's per-frame top phoneme over [a,b] into a legible run:
-// drop silence/low-confidence frames, merge adjacent duplicates — what the
-// model decoded across a span (e.g. the region a spot matched).
+// Collapse the active ring's per-frame top phoneme over [a,b] into a legible
+// run: drop silence/low-confidence frames, merge adjacent duplicates.
 function decodedOver(a, b) {
     const out = [];
     let last = -1;
@@ -117,17 +147,6 @@ function decodedOver(a, b) {
 
 // ── view + interaction ────────────────────────────────────────────────────────
 
-const View = {
-    follow: true,
-    span: 10 * FPS,           // visible width, in frames (default 10 s)
-    endFrame: 0,              // right edge frame when scrubbing
-    hoverFrame: -1,
-    selId: -1,                // selected event (detail panel open)
-    selRegion: null,          // { a, b } frame span highlighted for the selection
-    scratchSel: null,         // { a, b } stream-frame region grabbed for a new clip
-};
-const SPAN_MIN = 2 * FPS, SPAN_MAX = CAP;
-
 function viewWindow() {
     const end = View.follow ? Stream.newestFrame() : View.endFrame;
     const span = Math.max(SPAN_MIN, Math.min(SPAN_MAX, View.span));
@@ -136,19 +155,14 @@ function viewWindow() {
 
 const MARK = { spot: '#54d68a', gesture: '#c9a6ff', arm: '#c9a6ff', speech: '#36c5d0' };
 
-// Size a canvas's backing store to physical pixels (CSS size × devicePixelRatio)
-// so lines/text render crisp on HiDPI displays. Display width stays responsive
-// via CSS (calc 100%); the design height is pinned inline. Draw code works in
-// logical CSS pixels (_cw/_ch) and each draw resets the DPR transform.
+// Size a canvas's backing store to physical pixels so lines/text render crisp on
+// HiDPI displays. Draw code works in logical CSS pixels (_cw/_ch).
 function sizeCanvas(canvas) {
     const dpr = window.devicePixelRatio || 1;
     const cssH = canvas._ch || canvas.height;        // fixed design height (200/46)
     const cssW = Math.max(400, canvas.clientWidth || 800);
-    // Only re-allocate when the display size or DPR actually changed — this runs
-    // every frame, so it self-corrects after boot layout settles or a resize,
-    // without leaning on the resize event firing at exactly the right moment.
     if (canvas._cw === cssW && canvas._ch === cssH && canvas._dpr === dpr) return;
-    canvas.style.height = cssH + 'px';               // pin display height; backing store scales
+    canvas.style.height = cssH + 'px';
     canvas.width = Math.round(cssW * dpr);
     canvas.height = Math.round(cssH * dpr);
     canvas._cw = cssW; canvas._ch = cssH; canvas._dpr = dpr;
@@ -164,17 +178,15 @@ function drawTimeline() {
     const { start, end, span } = viewWindow();
     const xOf = (f) => (f - start) / span * W;
     const yOf = (db) => (1 - Math.max(0, Math.min(1, (db + 80) / 80))) * (H - 26) + 6;
-    const phLaneY = H - 22;       // tier-1 phoneme lane sits below the envelope
+    const phLaneY = H - 22;
 
-    // Reduce visible samples into per-pixel columns: min/max dB envelope, the
-    // floor, OR'd flags, and the column's dominant (highest-posterior) phoneme.
     const minDb = new Float32Array(W).fill(999);
     const maxDb = new Float32Array(W).fill(-999);
     const floor = new Float32Array(W).fill(-999);
     const flags = new Uint8Array(W);
     const phCls = new Int16Array(W);
     const phP   = new Float32Array(W);
-    const has   = new Uint8Array(W);     // column received at least one frame
+    const has   = new Uint8Array(W);
     let any = false;
     for (let i = 0; i < Stream.count; i++) {
         const sl = Stream.slot(i), f = Stream.frame[sl];
@@ -193,28 +205,20 @@ function drawTimeline() {
     }
     if (!any) return;
 
-    // When zoomed in there are more pixel columns than frames, so the scatter
-    // above leaves empty columns between samples — the waveform would render as
-    // disconnected stripes. Forward-fill interior gaps from the previous column
-    // for the continuous layers (envelope, floor, voice/tonal bands, phoneme).
-    // Onset (flag bit 4) is momentary, so it is NOT carried — ticks stay sharp.
     let last = -1;
     for (let c = 0; c < W; c++) {
         if (has[c]) { last = c; continue; }
-        if (last < 0) continue;          // before the first sample — genuine gap
+        if (last < 0) continue;
         minDb[c] = minDb[last]; maxDb[c] = maxDb[last]; floor[c] = floor[last];
-        flags[c] = flags[last] & 3;      // carry voice/tonal, drop onset
+        flags[c] = flags[last] & 3;
         phCls[c] = phCls[last]; phP[c] = phP[last];
     }
 
-    // selection region highlight (where the selected event matched)
     if (View.selRegion) {
         const xa = xOf(View.selRegion.a), xb = xOf(View.selRegion.b);
         ctx.fillStyle = 'rgba(201,166,255,.12)';
         ctx.fillRect(xa, 0, Math.max(2, xb - xa), H);
     }
-    // scratch-pad selection: a region the user shift-dragged to clip out of the
-    // live stream (green, distinct from the purple event highlight) + edges.
     if (View.scratchSel) {
         const xa = xOf(View.scratchSel.a), xb = xOf(View.scratchSel.b);
         ctx.fillStyle = 'rgba(84,214,138,.14)';
@@ -222,12 +226,10 @@ function drawTimeline() {
         ctx.fillStyle = '#54d68a';
         ctx.fillRect(xa - 1, 0, 2, H); ctx.fillRect(xb - 1, 0, 2, H);
     }
-    // voice / tonal background bands
     for (let c = 0; c < W; c++) {
         if (flags[c] & 1) { ctx.fillStyle = 'rgba(84,214,138,.10)'; ctx.fillRect(c, 0, 1, H); }
         if (flags[c] & 2) { ctx.fillStyle = 'rgba(106,166,255,.14)'; ctx.fillRect(c, 0, 1, H); }
     }
-    // adaptive noise floor
     ctx.strokeStyle = '#5a657a'; ctx.lineWidth = 1; ctx.beginPath();
     let pen = false;
     for (let c = 0; c < W; c++) {
@@ -235,7 +237,6 @@ function drawTimeline() {
         const y = yOf(floor[c]); pen ? ctx.lineTo(c, y) : ctx.moveTo(c, y); pen = true;
     }
     ctx.stroke();
-    // dB envelope: min..max fill + max trace
     ctx.fillStyle = 'rgba(139,224,174,.16)';
     for (let c = 0; c < W; c++) {
         if (maxDb[c] < -998) continue;
@@ -248,13 +249,9 @@ function drawTimeline() {
         const y = yOf(maxDb[c]); pen ? ctx.lineTo(c, y) : ctx.moveTo(c, y); pen = true;
     }
     ctx.stroke();
-    // onset ticks
     ctx.fillStyle = '#ffb454';
     for (let c = 0; c < W; c++) if (flags[c] & 4) ctx.fillRect(c - 1, 0, 2, 9);
 
-    // tier-1 phoneme lane: cyan where the model decodes a phoneme (distinct
-    // from the green energy-VAD band — model evidence, not just energy), with
-    // labels once the window is zoomed in enough to read them.
     const showPhLabels = span <= 18 * FPS;
     if (showPhLabels) { ctx.font = '9px ui-monospace, monospace'; ctx.textAlign = 'left'; }
     let prevPh = -1;
@@ -269,7 +266,6 @@ function drawTimeline() {
         prevPh = phCls[c];
     }
 
-    // event markers
     for (const ev of events) {
         if (ev.frame < start || ev.frame > end) continue;
         const x = xOf(ev.frame), sel = ev.id === View.selId;
@@ -280,7 +276,6 @@ function drawTimeline() {
         ctx.beginPath(); ctx.arc(x, 13, sel ? 5 : 4, 0, Math.PI * 2); ctx.fill();
     }
 
-    // playback: the region being auditioned (cyan band) + a swept playhead.
     const frac = playFrac();
     if (frac >= 0) {
         const xa = xOf(Playback.a), xb = xOf(Playback.b);
@@ -297,7 +292,6 @@ function drawTimeline() {
         }
     }
 
-    // hover cursor + time ticks
     if (View.hoverFrame >= start && View.hoverFrame <= end) {
         const x = xOf(View.hoverFrame);
         ctx.strokeStyle = '#3a455c';
@@ -307,10 +301,9 @@ function drawTimeline() {
 }
 
 function drawTimeTicks(ctx, W, H, start, span) {
-    // A handful of mm:ss labels across the window (stream time).
     ctx.font = '9px ui-monospace, monospace';
     const secs = span / FPS;
-    const step = secs > 240 ? 60 : secs > 60 ? 20 : secs > 20 ? 5 : 1;   // s between labels
+    const step = secs > 240 ? 60 : secs > 60 ? 20 : secs > 20 ? 5 : 1;
     const sStart = start / FPS;
     const first = Math.ceil(sStart / step) * step;
     for (let s = first; s <= (start + span) / FPS; s += step) {
@@ -374,7 +367,6 @@ function setLive(on) {
 }
 
 function hitEvent(frame, span) {
-    // Nearest event within ~6 px of the cursor frame.
     const tolFrames = span / $chart._cw * 7;
     let best = null, bd = tolFrames;
     for (const ev of events) {
@@ -399,10 +391,8 @@ function onTimelineHover(e) {
 }
 
 let drag = null;
-let scratchDrag = null;          // { a } anchor frame while shift-dragging a clip region
+let scratchDrag = null;
 function onTimelineDown(e) {
-    // Shift-drag carves a region out of the live stream (the "scratch pad")
-    // instead of panning — release turns it into a new clip.
     if (e.shiftKey) {
         const { frame } = frameAtX($chart, e.clientX);
         scratchDrag = { a: frame };
@@ -432,12 +422,11 @@ function onTimelineMove(e) {
 function onTimelineUp(e) {
     if (scratchDrag) {
         scratchDrag = null;
-        // A bare shift-click (no real span) just clears any prior selection.
         if (!View.scratchSel || View.scratchSel.b - View.scratchSel.a < FPS / 10) clearScratch();
         else renderScratchBar();
         return;
     }
-    if (drag && !drag.moved) {                 // a click, not a drag → select
+    if (drag && !drag.moved) {
         const { frame, } = frameAtX($chart, e.clientX);
         const ev = hitEvent(frame, viewWindow().span);
         if (ev) selectEvent(ev); else closeDetail();
@@ -446,9 +435,6 @@ function onTimelineUp(e) {
 }
 
 // ── scratch pad — turn a grabbed timeline region into a clip ──────────────────
-// The timeline already retains ~10 min of raw audio (bro.listen). A shift-drag
-// marks a span on the stream axis; this bar lets you audition it and promote it
-// to a gesture, which opens straight into the clip editor (trim / volume / tune).
 
 function clearScratch() {
     View.scratchSel = null;
@@ -457,7 +443,6 @@ function clearScratch() {
 }
 
 function scratchSpan() {
-    // Clamp the dragged region to what's actually retained on the stream axis.
     if (!View.scratchSel) return null;
     const a = Math.max(Stream.oldestFrame(), Math.round(View.scratchSel.a));
     const b = Math.min(Stream.newestFrame(), Math.round(View.scratchSel.b));
@@ -476,7 +461,7 @@ function renderScratchBar() {
         Math.round(sel.a) + '–' + Math.round(sel.b);
     $scratch.appendChild(label);
 
-    const retained = bro.listen.info().active;
+    const retained = SRC.listen.info().active;
     $scratch.appendChild(mkbtn('▶ Play', () => {
         const sp = scratchSpan();
         if (sp) playRegion(sp);
@@ -484,8 +469,8 @@ function renderScratchBar() {
     const wav = mkbtn('💾 WAV', () => {
         const sp = scratchSpan();
         if (!sp) { status('selection is no longer on the timeline', true); return; }
-        const pcm = bro.listen.audio(sp.a, sp.b);
-        LL.exportWav(pcm, bro.listen.info().rate, 'listen-selection.wav');
+        const pcm = SRC.listen.audio(sp.a, sp.b);
+        LL.exportWav(pcm, SRC.listen.info().rate, 'listen-selection.wav');
     });
     wav.disabled = !retained;
     wav.title = retained ? 'save this selection to a .wav file' : 'stream retention is off';
@@ -506,11 +491,11 @@ function scratchToGesture() {
     const sp = scratchSpan();
     if (!sp) { status('selection is no longer on the timeline', true); return; }
     if (!LL.kwsReady) { status('gestures need the listen host (still loading)', true); return; }
-    if (!bro.listen.info().active) { status('stream retention is off — nothing to capture', true); return; }
-    const pcm = bro.listen.audio(sp.a, sp.b);
+    if (!SRC.listen.info().active) { status('stream retention is off — nothing to capture', true); return; }
+    const pcm = SRC.listen.audio(sp.a, sp.b);
     if (!pcm || !pcm.length) { status('that region is no longer retained', true); return; }
     const name = $phrase.value.trim() || ('clip-' + (++LL.gestureN));
-    LL.enrollGestureFromTimeline(name, pcm);   // retains the clip, re-renders, opens its editor
+    LL.enrollGestureFromTimeline(name, pcm);
     $phrase.value = '';
     clearScratch();
     status('made gesture "' + name + '" from ' + ((sp.b - sp.a) / FPS).toFixed(2) +
@@ -522,7 +507,6 @@ function onTimelineWheel(e) {
     const factor = e.deltaY > 0 ? 1.25 : 0.8;
     const oldSpan = viewWindow().span;
     View.span = Math.max(SPAN_MIN, Math.min(SPAN_MAX, oldSpan * factor));
-    // Keep the frame under the cursor fixed: anchor the right edge.
     setLive(false);
     const { span } = viewWindow();
     const fracFromRight = (viewWindow().end - frame) / oldSpan;
@@ -566,12 +550,8 @@ function chip(text, gap) {
     return c;
 }
 
-// Matched-region span (frames) for a fired event, to highlight the wave and
-// label the detail. The matcher now reports the EXACT span (start..end frames)
-// on the events — use it. Older events / arms without a span fall back to an
-// estimate from the enrolled length.
 function eventRegion(ev) {
-    if (ev.span) return { a: ev.span.a, b: ev.span.b };   // exact, from the matcher
+    if (ev.span) return { a: ev.span.a, b: ev.span.b };
     const end = ev.frame;
     if (ev.type === 'gesture') {
         const v = bro.gesture.inspect(ev.name);
@@ -582,12 +562,8 @@ function eventRegion(ev) {
             return { a: end - ms / 10, b: end };
         }
     }
-    if ((ev.type === 'spot' || ev.type === 'arm') && bro.kws.isLoaded()) {
-        const v = bro.kws.inspect(ev.name);
-        // ~60 ms/phoneme estimate. An arm fires mid-phrase, so span only the
-        // states that actually aligned (ev.detail.matched) — spanning the whole
-        // template would reach back into pre-phrase silence and the replayed
-        // clip would be inaudible.
+    if ((ev.type === 'spot' || ev.type === 'arm') && SRC.kws.isLoaded()) {
+        const v = SRC.kws.inspect(ev.name);
         const states = ev.type === 'arm' && ev.detail && ev.detail.matched > 0
             ? ev.detail.matched
             : (v ? v.states.length : 10);
@@ -597,19 +573,12 @@ function eventRegion(ev) {
 }
 
 // ── playhead — sweep a marker across the region being auditioned ──────────────
-// The clip API has no position query, so we interpolate on wall-clock: playback
-// starts immediately, so a marker swept across the played span over the clip's
-// duration stays in sync. Drawn on the timeline so clicking a transcript line
-// (or a detail ▶) shows WHERE on the stream the audio you're hearing lives.
-const Playback = { active: false, a: 0, b: 0, startMs: 0, durMs: 0, key: '' };
 
 function startPlayhead(a, b, durSec, key) {
     Playback.active = true; Playback.a = a; Playback.b = b;
     Playback.startMs = Date.now(); Playback.durMs = Math.max(60, durSec * 1000);
     Playback.key = key || '';
 }
-// Fraction played [0,1], or -1 when idle. Pure read — deactivation is handled by
-// updatePlayback() so drawTimeline can call this every frame without side effects.
 function playFrac() {
     if (!Playback.active) return -1;
     return Math.min(1, (Date.now() - Playback.startMs) / Playback.durMs);
@@ -617,12 +586,10 @@ function playFrac() {
 function updatePlayback() {
     if (Playback.active && Date.now() - Playback.startMs >= Playback.durMs) {
         Playback.active = false;
-        LL.renderLines();           // drop the "playing" row highlight when it ends (transcript)
+        LL.renderLines();
     }
 }
 
-// Bring a stream region into view without snapping back to the live edge — used
-// when a transcript line is clicked, so the timeline scrubs to where it was said.
 function focusRegion(a, b) {
     const margin = Math.max(FPS, (b - a) * 0.6);
     View.span = Math.min(SPAN_MAX, Math.max(SPAN_MIN, (b - a) + 2 * margin));
@@ -632,24 +599,18 @@ function focusRegion(a, b) {
     if (View.endFrame - span < Stream.oldestFrame()) View.endFrame = Stream.oldestFrame() + span;
 }
 
-// Replay retained stream audio for a frame range (bro.listen). Pads the clip a
-// little so a short match isn't a clipped blip, and sweeps a playhead across the
-// padded span (`key` identifies the transcript row driving it, for highlighting).
 function playRegion(region, key) {
-    const info = bro.listen.info();
+    const info = SRC.listen.info();
     if (!info.active) { status('audio retention is off', true); return; }
-    const pad = Math.round(0.25 * info.frameRate);
+    const pad = Math.round(0.25 * (info.frameRate || info.rate || 16000));
     const a = Math.round(region.a) - pad, b = Math.round(region.b) + pad;
-    const pcm = bro.listen.audio(a, b);
+    const pcm = SRC.listen.audio(a, b);
     if (!pcm || !pcm.length) { status('audio for that region is no longer retained', true); return; }
-    playPcm(pcm, info.rate);        // shared clip player (core); host runs at 16 kHz
+    playPcm(pcm, info.rate);
     startPlayhead(a, b, pcm.length / info.rate, key);
     status('playing ' + (pcm.length / info.rate).toFixed(2) + ' s clip');
 }
 
-// Play a raw mono PCM clip (e.g. an enrolled gesture clip or a trimmed
-// selection of it) through the same native clip API. rate defaults to the
-// gesture/host 16 kHz; the engine resamples to its own rate.
 function playSamples(pcm, rate) {
     if (!pcm || !pcm.length) { status('nothing to play', true); return; }
     playPcm(pcm, rate || 16000);
@@ -679,8 +640,6 @@ function selectEvent(ev) {
         sensorContextAt(ev.frame);
     $detail.appendChild(when);
 
-    // Matched span — exact from the matcher when available, else estimated.
-    // With retention on, a ▶ button replays the exact audio the match fired on.
     if (View.selRegion) {
         const dur = ((View.selRegion.b - View.selRegion.a) / FPS).toFixed(2);
         const span = document.createElement('div');
@@ -689,7 +648,7 @@ function selectEvent(ev) {
             Math.round(View.selRegion.a) + '–' + Math.round(View.selRegion.b) +
             (ev.span ? '' : ' <span style="color:#6b7686">(estimated)</span>') + ' ';
         const region = View.selRegion;
-        if (bro.listen.info().active) {
+        if (SRC.listen.info().active) {
             const play = document.createElement('button');
             play.className = 'dplay';
             play.textContent = '▶ play';
@@ -701,14 +660,13 @@ function selectEvent(ev) {
             save.textContent = '💾 wav';
             save.title = 'save this region to a .wav file';
             save.addEventListener('click', () =>
-                LL.exportWav(bro.listen.audio(Math.round(region.a), Math.round(region.b)),
-                             bro.listen.info().rate, 'listen-' + ev.type + '.wav'));
+                LL.exportWav(SRC.listen.audio(Math.round(region.a), Math.round(region.b)),
+                             SRC.listen.info().rate, 'listen-' + ev.type + '.wav'));
             span.appendChild(save);
         }
         $detail.appendChild(span);
     }
 
-    // The clip / template it matched.
     if (ev.type === 'gesture') {
         const v = bro.gesture.inspect(ev.name);
         const row = document.createElement('div');
@@ -720,8 +678,8 @@ function selectEvent(ev) {
                   v.intervalsMs.map((m) => Math.round(m)).join('/') + ' ms')
             : '(template removed)';
         $detail.appendChild(row);
-    } else if ((ev.type === 'spot' || ev.type === 'arm') && bro.kws.isLoaded()) {
-        const v = bro.kws.inspect(ev.name);
+    } else if ((ev.type === 'spot' || ev.type === 'arm') && SRC.kws.isLoaded()) {
+        const v = SRC.kws.inspect(ev.name);
         if (v) {
             const lbl = document.createElement('div');
             lbl.className = 'drow';
@@ -740,10 +698,6 @@ function selectEvent(ev) {
         }
     }
 
-    // What the MODEL actually decoded over the matched region (tier-1), from
-    // the ring — independent of the template. For a phrase this is the heard
-    // phonemes; for a gesture, this is the tell: real phonemes here mean the
-    // "non-speech" gesture actually fired on speech (a fuser would veto it).
     if (View.selRegion) {
         const heard = decodedOver(View.selRegion.a, View.selRegion.b);
         const row = document.createElement('div');
@@ -773,11 +727,16 @@ function closeDetail() {
 }
 
     Object.assign(LL, {
-        Stream, events, logEvent, toStreamSpan, decodedOver, phLabels, PH_CONF,
-        View, viewWindow, drawStream, sizeCanvas, setLive, hitEvent, frameAtX,
+        makeRing, makeView, makePlayback, bindTimeline,
+        logEvent, toStreamSpan, decodedOver, PH_CONF,
+        viewWindow, drawStream, sizeCanvas, setLive, hitEvent, frameAtX,
         onTimelineDown, onTimelineMove, onTimelineUp, onTimelineWheel, onOverviewNav,
         renderScratchBar, clearScratch, scratchSpan, scratchToGesture,
         selectEvent, closeDetail, eventRegion, focusRegion,
-        playRegion, playSamples, playFrac, Playback, updatePlayback,
+        playRegion, playSamples, playFrac, updatePlayback,
+        // active-stream accessors for the seam/test (read the bound references).
+        activeRing: () => Stream, activeEvents: () => events,
+        activeView: () => View, activePlayback: () => Playback,
+        activePhLabels: () => phLabels,
     });
 })();

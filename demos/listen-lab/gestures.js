@@ -1,27 +1,24 @@
 // Listen Lab — gestures (tier-0 non-speech) + clip editor + mic recording.
 // (load after timeline.js)
+//
+// The gesture VOCABULARY is shared (one master, bro.gesture = the mic stream's
+// matcher); the right-column rows render it. But EVERY stream runs its own
+// gesture session (the mic's master + each added stream's handle session) over
+// the shared SensorHub, so a click/whistle on any source fires on THAT stream's
+// dashboard. Enrolling adds to the master and mirrors onto every stream.
 ;(function () {
     const LL = globalThis.LL;
     const { $gestures, $noGest, $record, $phrase, $spotCount,
             status, fusionRow, mkbtn, playSamples, logEvent } = LL;
 
-// Gesture enrollment (tier-0, non-speech): a recorded click rhythm or whistle
-// goes to bro.gesture, which matches on SensorHub onsets/pitch — NOT the speech
-// model, which only hears such sounds as garbage phonemes. The clip is
-// classified into a rhythm (onset intervals) or a tone (sustained pitch).
 const gestRows = {};            // name -> { root, body, editBtn }
 const clipStore = {};           // name -> Float32Array (raw 16 kHz enroll clip)
 const policyStore = {};         // name -> per-gesture tolerance overrides
-let gesturesListening = false;
 let openEditor = null;          // name of the gesture whose editor is expanded
 let currentEd = null;           // the live editor object (for listener teardown)
 let recording = false;          // a mic ● Record capture is in progress
 const GEST_RATE = 16000;        // bro.gesture.sampleRate() — fixed host rate
 
-// Describe a rhythm's per-beat sound shape (bro.gesture.inspect().onsets): are
-// the beats broadband clicks or voiced/pitched, and at what pitch. This is the
-// signature the matcher now requires beats to reproduce — so a laugh no longer
-// fires a tongue-click rhythm.
 function rhythmShape(v) {
     if (!v.onsets || !v.onsets.length) return '';
     let voiced = 0, pitchSum = 0, pitchN = 0;
@@ -63,7 +60,7 @@ function renderGestureRows() {
         root.querySelector('.gname').textContent = name;
         root.querySelector('.gmeta').textContent = gestureSummary(v);
         const editBtn = root.querySelector('.edit');
-        editBtn.disabled = !clipStore[name];   // no retained clip → nothing to edit
+        editBtn.disabled = !clipStore[name];
         editBtn.title = clipStore[name] ? 'audition, trim, tune' : 'no retained clip (enrolled before edit existed)';
         editBtn.addEventListener('click', () => toggleEditor(name));
         root.querySelector('.rm').addEventListener('click', () => {
@@ -85,12 +82,6 @@ function flashGesture(name) {
 }
 
 // ── clip editor (audition / trim / re-record / tune) ─────────────────────────
-// Each enrolled gesture keeps its raw clip. The editor shows the waveform with
-// the SAME tier-0 analysis the matcher enrolled from (bro.sense.analyze): onset
-// ticks, and a tonal band hue-coded by pitch — a steady whistle paints one hue,
-// a wandering cough paints a gradient, so a bad clip is visible at a glance.
-// Drag the handles to trim to the real gesture and re-enroll; the sliders re-
-// enroll the same clip with a tighter/looser policy without re-recording.
 
 function detachEditor() {
     if (currentEd && currentEd._detach) currentEd._detach();
@@ -107,17 +98,12 @@ function toggleEditor(name) {
     buildEditor(openEditor);
 }
 
-// hue ↔ pitch so a steady tone is one colour and a sweep is a gradient.
 function pitchColor(hz, alpha) {
     const lo = Math.log2(150), hi = Math.log2(4000);
     const t = Math.max(0, Math.min(1, (Math.log2(Math.max(1, hz)) - lo) / (hi - lo)));
     return 'hsla(' + (210 - t * 210).toFixed(0) + ',72%,56%,' + (alpha != null ? alpha : 0.34) + ')';
 }
 
-// Volume: the editor keeps a base clip and a gain multiplier; gain is baked
-// into the stored clip on re-enroll (so it survives, and the matcher sees the
-// louder/quieter signal — a too-quiet clip whose onsets/tone never crossed the
-// sensor thresholds can be rescued by turning it up). gain 1 = unchanged.
 function gainedSlice(clip, gain, a, b) {
     const out = new Float32Array(b - a);
     for (let i = a; i < b; i++) out[i - a] = clip[i] * gain;
@@ -153,7 +139,7 @@ function drawWave(ed) {
 
     if (a) {
         for (let f = 0; f < a.frames; f++) {
-            if (a.flags[f] & 2) {                       // tonal frame → pitch hue
+            if (a.flags[f] & 2) {
                 const x0 = x(f * a.hop), x1 = x(f * a.hop + a.hop);
                 ctx.fillStyle = pitchColor(a.dominantHz[f]);
                 ctx.fillRect(x0, 0, Math.max(1, x1 - x0), h);
@@ -177,13 +163,13 @@ function drawWave(ed) {
     }
     ctx.stroke();
 
-    if (a) {                                            // onset ticks
+    if (a) {
         ctx.fillStyle = '#ffb454';
         for (let f = 0; f < a.frames; f++)
             if (a.flags[f] & 4) ctx.fillRect(x(f * a.hop) - 0.5, 0, 1.5, h);
     }
 
-    const xa = x(ed.sel.a), xb = x(ed.sel.b);           // selection + handles
+    const xa = x(ed.sel.a), xb = x(ed.sel.b);
     ctx.fillStyle = 'rgba(8,10,14,0.62)';
     ctx.fillRect(0, 0, xa, h); ctx.fillRect(xb, 0, w - xb, h);
     ctx.fillStyle = '#54d68a';
@@ -252,10 +238,6 @@ function addSlider(parent, label, key, val, min, max, step, name) {
     parent.appendChild(wrap);
 }
 
-// Volume slider: live visual scaling while dragging, then bakes the gain into
-// the stored clip on release (re-enroll) so the matcher sees the new level and
-// the change persists. Distinct from addSlider — gain transforms the clip, not
-// a policy key, and reads as a ×multiplier rather than a percent.
 function addGainSlider(parent, ed, name) {
     const wrap = document.createElement('label');
     wrap.className = 'gslider';
@@ -266,11 +248,11 @@ function addGainSlider(parent, ed, name) {
     input.addEventListener('input', () => {
         ed.gain = +input.value;
         out.textContent = '×' + ed.gain.toFixed(2);
-        drawWave(ed); updateInfo(ed);          // live preview; hue re-analyses on bake
+        drawWave(ed); updateInfo(ed);
     });
     input.addEventListener('change', () => {
         ed.gain = +input.value;
-        if (Math.abs(ed.gain - 1) < 1e-3) return;   // nothing to bake
+        if (Math.abs(ed.gain - 1) < 1e-3) return;
         reEnroll(name, gainedSlice(ed.clip, ed.gain, 0, ed.clip.length), policyStore[name]);
     });
     wrap.append(span, input, out);
@@ -317,7 +299,7 @@ function buildEditor(name) {
     const tol = document.createElement('div');
     tol.className = 'gtol';
     const pol = policyStore[name] || {};
-    addGainSlider(tol, ed, name);          // volume applies to both kinds
+    addGainSlider(tol, ed, name);
     if (v && v.kind === 'tone') {
         addSlider(tol, 'pitch ±', 'pitchTol', pol.pitchTol != null ? pol.pitchTol : 0.12, 0.02, 0.30, 0.01, name);
         addSlider(tol, 'steadiness', 'pitchStabilityTol', pol.pitchStabilityTol != null ? pol.pitchStabilityTol : 0.06, 0.01, 0.20, 0.005, name);
@@ -330,9 +312,6 @@ function buildEditor(name) {
     drawWave(ed); updateInfo(ed); attachTrim(ed);
 }
 
-// Re-enroll an existing gesture from a (possibly trimmed) clip and/or a new
-// policy. Goes through withMutableGesture, which re-renders and — because
-// openEditor is unchanged — rebuilds this editor on the fresh template.
 function reEnroll(name, clip, policy) {
     withMutableGesture(() => {
         bro.gesture.enrollFromAudio(name, clip, policy || {});
@@ -340,70 +319,90 @@ function reEnroll(name, clip, policy) {
         if (policy) policyStore[name] = policy;
         const view = bro.gesture.inspect(name);
         status('re-enrolled "' + name + '" (' + gestureSummary(view) + ')');
-        fusionRow('info', 're-enrolled gesture "' + name + '" — ' + gestureSummary(view));
+        fusionRow(LL.active, 'info', 're-enrolled gesture "' + name + '" — ' + gestureSummary(view));
     });
 }
 
-function startGestureListening() {
-    if (gesturesListening) return;
-    bro.gesture.listen({
-        onGesture: (name, confidence, kind, span) => {
-            LL.spots++;
-            $spotCount.textContent = String(LL.spots);
-            fusionRow('spot', 'gesture "' + name + '" (' + kind + ') @ conf ' + confidence.toFixed(3));
-            logEvent('gesture', name, confidence, kind, null, span);
-            flashGesture(name);
-        },
+// ── per-stream gesture sessions ───────────────────────────────────────────────
+
+function onGestureFire(st, name, confidence, kind, span) {
+    st.spots++;
+    fusionRow(st, 'spot', 'gesture "' + name + '" (' + kind + ') @ conf ' + confidence.toFixed(3));
+    logEvent(st, 'gesture', name, confidence, kind, null, span);
+    if (st === LL.active) {
+        flashGesture(name);
+        $spotCount.textContent = String(st.spots);
+    }
+}
+
+function startStreamGesture(st) {
+    if (st.gestureListening) return;
+    st.source.gesture.listen({
+        onGesture: (name, confidence, kind, span) => onGestureFire(st, name, confidence, kind, span),
     });
-    gesturesListening = true;
+    st.gestureListening = true;
 }
 
-function stopGestureListening() {
-    bro.gesture.stop();
-    gesturesListening = false;
+function stopStreamGesture(st) {
+    try { st.source.gesture.stop(); } catch (e) { /* not listening */ }
+    st.gestureListening = false;
 }
 
-// Gesture mutators share the matcher's feed thread — bounce the session around
-// any change, mirroring withMutableSpotter.
+// Replay the master gesture vocabulary onto every added (handle) stream's own
+// session — the mic stream IS the master, so it's skipped. Sessions must be
+// stopped first (mutators share the matcher feed thread).
+function mirrorGesturesToStreams() {
+    for (const st of LL.streams) {
+        if (!st.source.isHandle) continue;
+        try { st.source.gesture.clear && st.source.gesture.clear(); } catch (e) { /* best-effort */ }
+        for (const name of bro.gesture.templates()) {
+            const clip = clipStore[name];
+            if (clip) {
+                try { st.source.gesture.enrollFromAudio(name, clip, policyStore[name] || {}); }
+                catch (e) { /* skip a clip that won't enroll on this session */ }
+            }
+        }
+    }
+}
+
+// Gesture mutators share the matcher's feed thread — bounce EVERY stream's
+// session around any vocabulary change, then re-mirror + restart.
 function withMutableGesture(fn) {
-    const was = gesturesListening;
-    if (was) stopGestureListening();
+    const were = LL.streams.filter((st) => st.gestureListening);
+    for (const st of were) stopStreamGesture(st);
     try { fn(); }
     catch (e) { status(String(e.message || e), true); }
     renderGestureRows();
-    if (bro.gesture.templates().length) startGestureListening();
+    mirrorGesturesToStreams();
+    if (bro.gesture.templates().length)
+        for (const st of LL.streams) startStreamGesture(st);
 }
 
 function enrollGesture(name, clip) {
-    if (!LL.kwsReady) return;   // boot also brings up bro.sense, which gestures need
+    if (!LL.kwsReady) return;
     withMutableGesture(() => {
         bro.gesture.enrollFromAudio(name, clip, policyStore[name] || {});
-        clipStore[name] = clip;   // retain the raw clip so it stays editable
+        clipStore[name] = clip;
         const v = bro.gesture.inspect(name);
         status('enrolled gesture "' + name + '" (' + gestureSummary(v) + ')');
-        fusionRow('info', 'enrolled gesture "' + name + '" — ' + gestureSummary(v) +
+        fusionRow(LL.active, 'info', 'enrolled gesture "' + name + '" — ' + gestureSummary(v) +
             ' (' + (clip.length / bro.gesture.sampleRate()).toFixed(1) + ' s clip)');
     });
 }
 
-// Promote a timeline selection to a gesture AND open its editor — the seam the
-// timeline's scratch-pad uses (it can't touch this module's openEditor directly).
 function enrollGestureFromTimeline(name, clip) {
-    openEditor = name;             // renderGestureRows (via enrollGesture) opens it
+    openEditor = name;
     enrollGesture(name, clip);
 }
 
-// ● Record: capture raw (no-AGC) mic PCM at the spotter rate via bro.mic —
-// its own broaudio tap, so it runs happily alongside the live listen host. The
-// same toggle records a NEW gesture (target null, named from the input) or
-// re-records over an existing one (target set, from the editor's ● Re-record).
+// ● Record: capture raw (no-AGC) mic PCM at the spotter rate via bro.mic.
 let recChunks = [];
-let recordTarget = null;        // name being re-recorded, or null for a new one
-let recBtn = null;              // the button acting as the record/stop toggle
+let recordTarget = null;
+let recBtn = null;
 
 function startRecord(target, btn) {
     if (!LL.kwsReady) return;
-    if (recording) { stopRecord(); return; }   // a second click stops
+    if (recording) { stopRecord(); return; }
     recChunks = [];
     try {
         bro.mic.start({
@@ -435,7 +434,7 @@ function stopRecord() {
     for (const c of recChunks) { clip.set(c, o); o += c.length; }
     recChunks = [];
     if (target) {
-        reEnroll(target, clip, policyStore[target]);   // re-record in place
+        reEnroll(target, clip, policyStore[target]);
     } else {
         enrollGesture($phrase.value.trim() || ('gesture-' + (++LL.gestureN)), clip);
         $phrase.value = '';
@@ -444,11 +443,10 @@ function stopRecord() {
 
 function toggleRecord() { startRecord(null, $record); }
 
-
     Object.assign(LL, {
         enrollGesture, enrollGestureFromTimeline, renderGestureRows, withMutableGesture,
-        startGestureListening, stopGestureListening, gestureSummary, buildEditor,
-        gainedSlice, clipStore, policyStore, gestRows, flashGesture,
+        startStreamGesture, stopStreamGesture, mirrorGesturesToStreams, gestureSummary,
+        buildEditor, gainedSlice, clipStore, policyStore, gestRows, flashGesture,
         startRecord, stopRecord, toggleRecord,
     });
 })();

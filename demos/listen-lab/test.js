@@ -1,10 +1,11 @@
 // Listen Lab — headless smoke test. Boot arms both tiers on the shared listen
 // host; synthetic audio fed through bro.kws.feed() (ONE stream — it advances
 // bro.sense too) must light every sensor family and land the right rows in
-// the fusion feed: [tonal] for a sustained tone, [onset] for a click train,
-// [voice]/[arm]/[spot] for a spoken enrolled phrase, and a rhythm template
-// (enrollGaps, via the listenLab seam — no live mic to record from) must
-// self-fire on its own clip.
+// the mic tab's fusion feed: [tonal] for a sustained tone, [onset] for a click
+// train, [voice]/[arm]/[spot] for a spoken enrolled phrase, and a rhythm gesture
+// must self-fire on its own clip. Then the stream TABS: adding a source opens a
+// full, identical dashboard with its own history/kws/transcript, concurrent with
+// the mic.
 //
 //   bro-headless ../broworkshop/demos/listen-lab ../broworkshop/demos/listen-lab/test.js
 
@@ -18,12 +19,16 @@ function pumpUntil(pred, budgetMs) {
 const KOKORO_DIR = 'D:/projects/brosoundml/weights/kokoro';
 const VOICE_PATH = KOKORO_DIR + '/voices/af_bella.bin';
 
-// ── boot: both tiers live ────────────────────────────────────────────────────
+// ── boot: both tiers live, mic = tab #0 ──────────────────────────────────────
 
 assert(pumpUntil(() => bro.sense.isActive(), 30000), 'sense live at boot');
 assert(pumpUntil(() => bro.kws.isLoaded() && bro.kws.isActive(), 30000), 'kws live at boot');
 assert(pumpUntil(() => document.querySelectorAll('.tmpl').length === 1, 5000),
        'seed template row rendered');
+assert(pumpUntil(() => document.querySelectorAll('#tabStrip .tab').length === 1, 5000),
+       'the mic tab is present');
+assert(listenLab.streams().length === 1 && listenLab.active().kind === 'mic',
+       'the mic is the only (active) tab at boot');
 
 const rate = bro.kws.sampleRate();
 
@@ -31,7 +36,6 @@ const rate = bro.kws.sampleRate();
 
 function silence(sec) { return new Float32Array(Math.floor(sec * rate)); }
 
-// 10 ms fade-out — a hard mid-cycle cutoff is a real broadband transient.
 function tone(sec, hz, amp) {
     const n = Math.floor(sec * rate), fade = Math.floor(0.01 * rate);
     const s = new Float32Array(n);
@@ -42,7 +46,6 @@ function tone(sec, hz, amp) {
     return s;
 }
 
-// n damped 5 ms noise bursts, gapSec apart (deterministic LCG noise).
 function clicks(n, gapSec, amp) {
     const parts = [];
     let seed = 12345;
@@ -55,8 +58,6 @@ function clicks(n, gapSec, amp) {
     return concat(...parts);
 }
 
-// n voiced bursts (short pitched tones with a sharp attack), gapSec apart — a
-// "laugh" performed at a click rhythm's tempo: same onset timing, voiced timbre.
 function voicedBursts(n, gapSec, hz, amp) {
     const parts = [];
     for (let k = 0; k < n; k++) {
@@ -91,9 +92,8 @@ function speak(text) {
 }
 
 // Feed in 50 ms chunks with a pump after each, so the app's poll loop (RAF —
-// only runs while frames pump) observes the INTERMEDIATE states: that's what
-// makes the [arm] row reachable mid-phrase. Returns the events feed() itself
-// reported.
+// only runs while frames pump) observes the INTERMEDIATE states (that's what
+// makes the [arm] row reachable mid-phrase). Drives the MIC (bro.kws.feed).
 function feedPumped(all) {
     const events = [];
     const CHUNK = Math.floor(rate / 40);
@@ -149,9 +149,6 @@ console.log('[listen-lab] phrase: arm="' + feedRows('arm')[feedRows('arm').lengt
             '" spot="' + feedRows('spot')[0] + '"');
 
 // ── 3b. token panel: inspect + edit the seeded phrase ───────────────────────
-// The ⋯ button opens the decoded phoneme sequence (bro.kws.inspect); for a
-// plain phrase the chips are editable and "apply edit" re-enrolls the trimmed
-// class ids (enrollFromClasses).
 
 {
     const seedRow = Array.from(document.querySelectorAll('.tmpl'))
@@ -163,7 +160,6 @@ console.log('[listen-lab] phrase: arm="' + feedRows('arm')[feedRows('arm').lengt
     assert(Array.from(chips).every((c) => c.textContent.replace('×', '').trim().length),
            'every chip carries a phoneme label');
     const before = bro.kws.inspect('hello there').states.length;
-    // Drop the first token and apply the edit.
     seedRow.querySelector('.tokens .chip .x').click();
     seedRow.querySelector('.tokens .tokedit button').click();   // "apply edit"
     assert(pumpUntil(() => {
@@ -176,9 +172,6 @@ console.log('[listen-lab] phrase: arm="' + feedRows('arm')[feedRows('arm').lengt
 }
 
 // ── 4. tier-0 gesture: a click rhythm enrolls (bro.gesture) and self-fires ───
-// The non-speech path. A click train is matched on SensorHub onsets, not the
-// speech model — feeding via bro.kws.feed advances the ONE shared stream, so
-// the gesture spotter (a host member once we listen) sees the same clicks.
 
 const clickTrain = concat(silence(0.3), clicks(3, 0.25, 0.6), silence(0.3));
 listenLab.enrollGesture('triple-tap', clickTrain);
@@ -201,26 +194,20 @@ assert(pumpUntil(() => +document.querySelector('#spotCount').textContent > spots
 console.log('[listen-lab] gesture: ' +
             feedRows('spot').find((t) => t.indexOf('triple-tap') >= 0));
 
-// ── 4b. timeline: history ring filled, events logged, click-to-inspect ───────
-// The scrollable stream history (Stream ring) accumulated frames across the
-// whole run, the notable fires landed in the event log as markers, and
-// selecting a marker opens the detail panel with the matched clip.
+// ── 4b. timeline: per-stream history ring, events logged, click-to-inspect ───
 
-assert(listenLab.Stream.count > 100,
-       'stream history ring accumulated frames (' + listenLab.Stream.count + ')');
-const gestEv = listenLab.events.find((e) => e.type === 'gesture' && e.name === 'triple-tap');
+const ring = listenLab.ring();             // the ACTIVE (mic) tab's history ring
+assert(ring.count > 100, 'stream history ring accumulated frames (' + ring.count + ')');
+const gestEv = listenLab.events().find((e) => e.type === 'gesture' && e.name === 'triple-tap');
 assert(gestEv, 'gesture fire landed in the timeline event log');
 assert(gestEv.frame > 0 && gestEv.conf > 0.9, 'event carries its frame + confidence');
-const spotEv = listenLab.events.find((e) => e.type === 'spot' && e.name === 'hello there');
+const spotEv = listenLab.events().find((e) => e.type === 'spot' && e.name === 'hello there');
 assert(spotEv, 'phrase spot landed in the timeline event log');
 
-// Exact matched spans now flow from the matchers through the event callbacks.
 assert(gestEv.span && gestEv.span.b > gestEv.span.a && gestEv.span.b === gestEv.frame,
        'gesture event carries an exact matched span ending at the fire frame');
 assert(spotEv.span && spotEv.span.b > spotEv.span.a && spotEv.span.b === spotEv.frame,
-       'spot event carries an exact matched span (' +
-       JSON.stringify(spotEv.span) + ')');
-// The decoded phonemes over the EXACT spot span spell the phrase.
+       'spot event carries an exact matched span (' + JSON.stringify(spotEv.span) + ')');
 const heardExact = listenLab.decodedOver(spotEv.span.a, spotEv.span.b);
 assert(heardExact.length >= 2,
        'decoded phonemes over the exact spot span (' + JSON.stringify(heardExact) + ')');
@@ -228,8 +215,7 @@ console.log('[listen-lab] spans: gesture ' + (gestEv.span.b - gestEv.span.a) +
             'f · spot ' + (spotEv.span.b - spotEv.span.a) + 'f heard ' +
             JSON.stringify(heardExact));
 
-// Stream retention: the raw audio that drove a match is replayable by frame
-// range (bro.listen). Enabled at boot; the headless feed() path is captured too.
+// Stream retention: raw audio that drove a match is replayable by frame range.
 const rInfo = bro.listen.info();
 assert(rInfo.active && rInfo.seconds === 600,
        'retention enabled at boot (' + JSON.stringify(rInfo) + ')');
@@ -242,7 +228,6 @@ let clipEnergy = 0;
 for (let i = 0; i < clip.length; i++) clipEnergy += clip[i] * clip[i];
 assert(clipEnergy > 0,
        'retained clip carries real audio, not silence (energy ' + clipEnergy.toFixed(3) + ')');
-// A region far in the future / before the held window returns null.
 assert(bro.listen.audio(bro.listen.frame() + 10000, bro.listen.frame() + 20000) === null,
        'audio() returns null outside the retained window');
 console.log('[listen-lab] retention: held ' + rInfo.heldSeconds.toFixed(1) + ' s · spot clip ' +
@@ -250,14 +235,13 @@ console.log('[listen-lab] retention: held ' + rInfo.heldSeconds.toFixed(1) + ' s
 
 // tier-1: the phoneme ring captured what the model decoded during the phrase.
 let phFrames = 0;
-for (let i = 0; i < listenLab.Stream.count; i++) {
-    if (listenLab.Stream.phCls[listenLab.Stream.slot(i)] > 0) phFrames++;
+for (let i = 0; i < ring.count; i++) {
+    if (ring.phCls[ring.slot(i)] > 0) phFrames++;
 }
 assert(phFrames > 5, 'phoneme ring captured decoded frames (' + phFrames + ')');
 const heardSeq = listenLab.decodedOver(spotEv.frame - 80, spotEv.frame);
 assert(heardSeq.length >= 1,
        'decodedOver yields the heard phonemes near the spot (' + JSON.stringify(heardSeq) + ')');
-// The detail panel surfaces that decoded sequence for the spot.
 listenLab.selectEvent(spotEv);
 const detailSpot = document.querySelector('#detail');
 assert(/model heard here/.test(detailSpot.textContent),
@@ -274,20 +258,15 @@ assert(detailEl.querySelector('.dkind').textContent === 'gesture', 'detail names
 assert(/rhythm template/.test(detailEl.textContent) && /taps/.test(detailEl.textContent),
        'detail shows the matched rhythm clip (' +
        detailEl.querySelector('.drow').textContent + ')');
-assert(listenLab.View.selRegion && listenLab.View.selRegion.b === gestEv.frame,
+assert(listenLab.view().selRegion && listenLab.view().selRegion.b === gestEv.frame,
        'selection highlights the matched region ending at the fire frame');
 listenLab.closeDetail();
 assert(detailEl.classList.contains('hidden'), 'detail panel closes');
-console.log('[listen-lab] timeline: ' + listenLab.Stream.count + ' frames · ' +
-            listenLab.events.length + ' events · detail inspect ok');
+console.log('[listen-lab] timeline: ' + ring.count + ' frames · ' +
+            listenLab.events().length + ' events · detail inspect ok');
 
 // ── 4c. clip editor: retained clip, offline analysis, tone stability gate ────
-// Each enrolled gesture keeps its raw clip and is editable. bro.sense.analyze
-// gives the per-frame tier-0 timeline the editor overlays; the tone stability
-// gate — a held whistle fires, a swept "cough" pitch does not — is the library
-// fix that motivated the editor.
 
-// (a) offline analysis of a clip mirrors what the matcher enrolls from.
 const whistleClip = concat(silence(0.3), tone(0.6, 1200, 0.2), silence(0.3));
 const an = bro.sense.analyze(whistleClip);
 assert(an.frames > 50 && an.flags.length === an.frames, 'analyze returns a per-frame timeline');
@@ -301,7 +280,6 @@ assert(pitchN > 0 && Math.abs(pitchSum / pitchN - 1200) < 80,
 console.log('[listen-lab] analyze: ' + an.frames + ' frames · ' + tonalFrames +
             ' tonal · ~' + (pitchSum / pitchN).toFixed(0) + ' Hz');
 
-// (b) enroll the whistle as a tone gesture; its row is editable (clip retained).
 listenLab.enrollGesture('whistle', whistleClip);
 const wv = bro.gesture.inspect('whistle');
 assert(wv && wv.kind === 'tone', 'whistle enrolled as a tone gesture');
@@ -312,7 +290,6 @@ assert(pumpUntil(() => Array.from(document.querySelectorAll('.gest')).some((r) =
     !r.querySelector('.edit').disabled), 5000),
     'whistle row has an enabled edit button (clip retained)');
 
-// (c) open the editor → waveform canvas + the two tone sliders render.
 const wrow = Array.from(document.querySelectorAll('.gest')).find((r) =>
     r.querySelector('.gname').textContent === 'whistle');
 wrow.querySelector('.edit').click();
@@ -324,16 +301,12 @@ assert(/peak .* dB/.test(wrow.querySelector('.ginfo').textContent),
 console.log('[listen-lab] editor: opened whistle clip editor (' +
             wrow.querySelectorAll('.gslider').length + ' sliders)');
 
-// (d) the stability gate end-to-end: the steady whistle self-fires…
 {
     const before = +document.querySelector('#spotCount').textContent;
     feedPumped(concat(silence(0.4), whistleClip, silence(0.4)));
     assert(pumpUntil(() => +document.querySelector('#spotCount').textContent > before, 6000),
            'steady whistle self-fires the tone gesture');
 }
-// …but a swept-pitch "cough" (same mean, wandering) does NOT — the failure the
-// user reported. Continuous-phase 1000→1500 Hz sweep: tonal every frame, mean
-// in-band, but never a held pitch.
 {
     const n = Math.floor(0.6 * rate), sweep = new Float32Array(n), fade = Math.floor(0.01 * rate);
     let ph = 0;
@@ -345,27 +318,21 @@ console.log('[listen-lab] editor: opened whistle clip editor (' +
     }
     const before = +document.querySelector('#spotCount').textContent;
     feedPumped(concat(silence(0.5), sweep, silence(0.4)));
-    for (let i = 0; i < 30; i++) sleep(20);   // give any (non-)fire time to deliver
+    for (let i = 0; i < 30; i++) sleep(20);
     assert(+document.querySelector('#spotCount').textContent === before,
            'a swept-pitch cough does NOT fire the whistle (stability gate)');
     console.log('[listen-lab] stability: steady whistle fires, swept cough rejected');
 }
 
-// clean up the whistle so the next section starts from the seeded state.
 {
     const r = Array.from(document.querySelectorAll('.gest')).find((x) =>
         x.querySelector('.gname').textContent === 'whistle');
     if (r) r.querySelector('.rm').click();
 }
 
-// ── 4d. volume + scratch-pad (the new edits) ─────────────────────────────────
-// (1) The volume slider scales a clip and bakes the gain into the stored clip
-// on release (re-enroll). (2) A region grabbed off the live timeline (the
-// retained stream) can be promoted to a new gesture, which opens in the editor.
+// ── 4d. volume + scratch-pad ──────────────────────────────────────────────────
 
-// (1) volume: gainedSlice is the transform; the slider bakes it into clipStore.
 {
-    // gainedSlice scales amplitude exactly.
     const src = concat(silence(0.2), tone(0.5, 900, 0.15), silence(0.2));
     const louder = listenLab.gainedSlice(src, 3, 0, src.length);
     let ps = 0, pl = 0;
@@ -382,7 +349,6 @@ console.log('[listen-lab] editor: opened whistle clip editor (' +
     const volInput = vrow.querySelector('.gtol .gslider input[type="range"]');
     assert(volInput && +volInput.max === 4, 'volume slider is the first editor slider (×0–4)');
     const peak0 = listenLab.clipStore['vol-test'].reduce((m, v) => Math.max(m, Math.abs(v)), 0);
-    // Drive the slider: set value, fire input (live preview) then change (bake).
     volInput.value = '2.5';
     volInput.dispatchEvent({ type: 'input' });
     volInput.dispatchEvent({ type: 'change' });
@@ -393,23 +359,16 @@ console.log('[listen-lab] editor: opened whistle clip editor (' +
     }, 5000), 'volume change baked the 2.5× gain into the stored clip');
     console.log('[listen-lab] volume: vol-test peak ' + peak0.toFixed(3) + ' → ' +
                 listenLab.clipStore['vol-test'].reduce((m, v) => Math.max(m, Math.abs(v)), 0).toFixed(3));
-    // tidy up
     Array.from(document.querySelectorAll('.gest')).find((r) =>
         r.querySelector('.gname').textContent === 'vol-test').querySelector('.rm').click();
 }
 
-// (2) scratch-pad: clip a retained region of the timeline into a new gesture.
-// Feed a fresh whistle so it sits at the live edge, then select that span on
-// the stream axis (the same frames bro.listen.audio + the timeline use) and
-// promote it. The new gesture must enroll from the retained audio and open in
-// the editor.
 {
     const before = bro.listen.frame();
     feedPumped(concat(silence(0.3), tone(0.7, 1400, 0.2), silence(0.3)));
     const after = bro.listen.frame();
     assert(after > before, 'stream advanced for the scratch source (' + before + '→' + after + ')');
-    // Select the whistle's span (skip the leading/trailing silence padding).
-    listenLab.View.scratchSel = { a: before + 35, b: after - 35 };
+    listenLab.view().scratchSel = { a: before + 35, b: after - 35 };
     const sp = listenLab.scratchSpan();
     assert(sp && sp.b > sp.a, 'scratchSpan clamps to the retained window (' + JSON.stringify(sp) + ')');
     const gBefore = bro.gesture.templates().length;
@@ -425,8 +384,7 @@ console.log('[listen-lab] editor: opened whistle clip editor (' +
     const c = listenLab.clipStore['from-timeline'];
     for (let i = 0; i < c.length; i++) e += c[i] * c[i];
     assert(e > 0, 'clipped timeline region carries real audio (energy ' + e.toFixed(2) + ')');
-    assert(listenLab.View.scratchSel === null, 'scratch selection cleared after promotion');
-    // It opened straight into the editor.
+    assert(listenLab.view().scratchSel === null, 'scratch selection cleared after promotion');
     assert(pumpUntil(() => {
         const r = Array.from(document.querySelectorAll('.gest')).find((x) =>
             x.querySelector('.gname').textContent === 'from-timeline');
@@ -435,16 +393,12 @@ console.log('[listen-lab] editor: opened whistle clip editor (' +
     const fv = bro.gesture.inspect('from-timeline');
     console.log('[listen-lab] scratch: clipped ' + (c.length / rate).toFixed(2) +
                 ' s off the timeline → gesture (' + (fv ? fv.kind : '?') + ')');
-    // tidy up
     Array.from(document.querySelectorAll('.gest')).find((r) =>
         r.querySelector('.gname').textContent === 'from-timeline').querySelector('.rm').click();
 }
 
-// ── 4e. rhythm sound-shape gate (new): a voiced "laugh" at the click tempo
-// must NOT fire the click rhythm ─────────────────────────────────────────────
-// The reported failure: a tongue-click rhythm fired on any sound at that pace
-// (a laugh). Each beat now carries an acoustic signature; the click beats are
-// unvoiced, so voiced bursts at the same tempo are rejected on sound shape.
+// ── 4e. rhythm sound-shape gate: a voiced "laugh" at the click tempo ──────────
+
 {
     const tv = bro.gesture.inspect('triple-tap');
     assert(tv && tv.onsets && tv.onsets.length === 3,
@@ -456,7 +410,7 @@ console.log('[listen-lab] editor: opened whistle clip editor (' +
     const onsets0 = bro.sense.snapshot().onsets;
     const spots0  = +document.querySelector('#spotCount').textContent;
     feedPumped(concat(silence(0.4), voicedBursts(3, 0.25, 220, 0.4), silence(0.4)));
-    for (let i = 0; i < 25; i++) sleep(20);   // let any (non-)fire deliver
+    for (let i = 0; i < 25; i++) sleep(20);
     const onsetsDelta = bro.sense.snapshot().onsets - onsets0;
     assert(onsetsDelta >= 3,
            'the laugh really did produce beats at the tempo (' + onsetsDelta +
@@ -468,12 +422,10 @@ console.log('[listen-lab] editor: opened whistle clip editor (' +
                 tv.onsets.map((o) => o.voiced.toFixed(2)).join('/') + ')');
 }
 
-// ── 4f. tier-3 transcript: voice-gated Parakeet, rolling realtime ────────────
-// bro.sense's voice VAD arms the transcriber; the utterance is pulled from the
-// retained shared stream (bro.listen.audio) and committed on voice-end. The
-// 2.4 GB model isn't loaded in headless — a synchronous stub runner stands in
-// for bro.stt so the VAD-gated LIFECYCLE (arm → pull PCM → commit) is what's
-// under test here; the real model path is exercised by the app + parakeet-lab.
+// ── 4f. tier-3 transcript: voice-gated Parakeet, rolling realtime (mic tab) ───
+// A synchronous stub stands in for the 2.4 GB model so the VAD-gated LIFECYCLE
+// (arm → pull PCM → commit) is what's under test; the real model path is
+// exercised by the app + parakeet-lab.
 {
     let txCalls = 0, lastPcmLen = 0;
     listenLab.installTranscriber((pcm, cb) => {
@@ -486,29 +438,25 @@ console.log('[listen-lab] editor: opened whistle clip editor (' +
     assert(listenLab.Transcribe.ready, 'stub transcriber installed (tier-3 ready)');
     assert(document.querySelector('#transcript'), 'transcript panel present');
 
-    const linesBefore = listenLab.Transcribe.lines.length;
+    const micSt = listenLab.active();
+    const linesBefore = micSt.txLines.length;
     const heardBefore = feedRows('heard').length;
-    // A voiced utterance: VAD rises then (over the trailing silence) falls — that
-    // edge arms the tier, rolls partial passes, and commits the final line.
     feedPumped(concat(silence(0.4), speak('hello there'), silence(0.5)));
-    assert(pumpUntil(() => listenLab.Transcribe.lines.length > linesBefore, 8000),
+    assert(pumpUntil(() => micSt.txLines.length > linesBefore, 8000),
            'voice-gated transcript committed a line on voice-end');
     assert(txCalls > 0 && lastPcmLen > 0,
            'transcriber was handed real PCM from the retained stream (' + lastPcmLen + ' samples)');
-    const line = listenLab.Transcribe.lines[0];
+    const line = micSt.txLines[0];
     assert(line.text === 'hello there', 'committed line carries the transcript ("' + line.text + '")');
     assert(line.b > line.a, 'committed line spans the utterance frames (' + line.a + '–' + line.b + ')');
     assert(feedRows('heard').length > heardBefore, '[heard] fusion row rendered for the utterance');
 
-    // The committed line shows in the transcript panel, timestamped.
     assert(pumpUntil(() => document.querySelectorAll('#txLines .txline').length >= 1, 3000),
            'transcript panel rendered the committed line');
     assert(/hello there/.test(document.querySelector('#txLines .txline .tx').textContent),
            'transcript row shows the words');
 
-    // It also dropped a speech marker on the timeline (clickable to inspect; the
-    // detail cross-checks what the phoneme model decoded over the SAME span).
-    const spEv = listenLab.events.find((e) => e.type === 'speech' && e.name === 'hello there');
+    const spEv = listenLab.events().find((e) => e.type === 'speech' && e.name === 'hello there');
     assert(spEv && spEv.span && spEv.span.b > spEv.span.a,
            'speech event landed on the timeline with a matched span');
     listenLab.selectEvent(spEv);
@@ -516,113 +464,98 @@ console.log('[listen-lab] editor: opened whistle clip editor (' +
            'selecting the speech marker opens its detail panel');
     listenLab.closeDetail();
 
-    // Clicking the committed line binds it to the timeline: scrub there + play +
-    // a swept playhead, with the row highlighted as playing.
     document.querySelector('#txLines .txline').click();
-    assert(listenLab.Playback.active, 'clicking a transcript line started playback (playhead)');
-    assert(listenLab.Playback.key === (line.a + '-' + line.b),
-           'playhead bound to the clicked utterance (' + listenLab.Playback.key + ')');
+    assert(listenLab.playback().active, 'clicking a transcript line started playback (playhead)');
+    assert(listenLab.playback().key === (line.a + '-' + line.b),
+           'playhead bound to the clicked utterance (' + listenLab.playback().key + ')');
     assert(listenLab.playFrac() >= 0, 'playhead fraction is live');
-    assert(!listenLab.View.follow, 'timeline left follow mode to focus the utterance');
+    assert(!listenLab.view().follow, 'timeline left follow mode to focus the utterance');
     assert(document.querySelector('#txLines .txline.playing'),
            'the clicked line is highlighted as playing');
-    listenLab.View.follow = true;     // re-pin live for the remaining sections
+    listenLab.view().follow = true;
     console.log('[listen-lab] transcript: voice-gated commit "' + line.text + '" · ' +
                 txCalls + ' passes · ' + lastPcmLen + ' samples · span ' +
-                (spEv.span.b - spEv.span.a) + 'f · click→playhead @ ' + listenLab.Playback.key);
+                (spEv.span.b - spEv.span.a) + 'f · click→playhead @ ' + listenLab.playback().key);
 }
 
-// ── 4g. streams rack: N independent sources, each configured live ────────────
-// The multi-stream payoff generalized: the user adds streams (mic / system /
-// a specific app via bro.listen.apps()) and toggles WHICH sensors/actions run on
-// each — all concurrent with, and independent of, the mic dashboard above.
-//
-// Headless has no live mic and (null backend) no loopback, so we drive an added
-// MIC stream through stream.feed() — the same one-stream path the host uses, so
-// the stream's own sense + kws + transcript see the fed audio.
+// ── 4g. stream tabs: every source is a full, identical dashboard ──────────────
+// The mic is tab #0; adding a source opens a new tab with the SAME full stack
+// (tier-0 + kws + gestures + transcript) over its own unmixed stream. Headless
+// has no live mic / loopback, so we drive an added MIC stream via stream.feed().
 {
-    // (a) the source picker is populated from bro.listen — mic is always offered.
     listenLab.buildSourceOptions();
     const opts = Array.from(document.querySelectorAll('#srcSel option')).map((o) => o.value);
     assert(opts.indexOf('mic') >= 0, 'source picker offers a mic source (' + JSON.stringify(opts) + ')');
     console.log('[listen-lab] picker: ' + opts.length + ' source option(s) · supported=' +
                 bro.listen.supported());
 
-    // The mic dashboard (stream #0) is live going in — it must stay untouched.
+    const micSt = listenLab.active();
+    const micLinesBefore = micSt.txLines.length;
+    assert(listenLab.streams().length === 1, 'one tab (the mic) before adding');
     assert(bro.sense.isActive() && bro.kws.isActive(), 'mic dashboard live before adding a stream');
 
-    // (b) add a second mic stream and confirm it rendered a card + opened a handle.
-    const p = listenLab.addStream({ kind: 'mic' });
-    assert(p && p.handle.valid && p.handle.kind === 'mic', 'added mic stream opened a valid handle');
-    assert(listenLab.panels.length === 1, 'one stream in the rack');
-    const card = Array.from(document.querySelectorAll('.sc')).find((c) =>
-        c.querySelector('.scName').textContent.indexOf('#' + p.handle.id) >= 0);
-    assert(card, 'stream card rendered for the new stream');
-    assert(card.querySelectorAll('.scToggles button').length === 4,
-           'card exposes the four action toggles (tier-0 / kws / gestures / transcript)');
-    assert(p.handle.sense.isActive(), 'tier-0 sensors on by default for the new stream');
-    // The mic side survived the add.
-    assert(bro.sense.isActive() && bro.kws.isActive(), 'mic dashboard untouched by the add');
-    p.handle.retain(30);                       // capture so we can feed + export
+    // (a) add a second mic stream → a new tab, switched to, with the full stack.
+    const st = listenLab.addStream({ kind: 'mic' });
+    assert(st && st.source.handle.valid && st.kind === 'mic', 'added mic stream opened a valid handle');
+    assert(listenLab.streams().length === 2, 'two tabs now');
+    assert(listenLab.active() === st, 'adding a stream switches to its tab');
+    const tabs = Array.from(document.querySelectorAll('#tabStrip .tab'));
+    assert(tabs.length === 2 && tabs[1].classList.contains('active'),
+           'the tab strip shows both streams, the new one active');
+    assert(st.source.sense.isActive(), 'the stream runs its own tier-0 sensors');
+    assert(bro.sense.isActive() && bro.kws.isActive(), 'mic stream untouched by the add');
+    st.source.handle.retain(60);
 
-    // helper: feed audio into THIS stream (advances its own sense + kws).
     function feedStream(all) {
         const CHUNK = Math.floor(rate / 40);
         for (let off = 0; off < all.length; off += CHUNK) {
-            p.handle.feed(all.subarray(off, Math.min(off + CHUNK, all.length)));
+            st.source.handle.feed(all.subarray(off, Math.min(off + CHUNK, all.length)));
             sleep(15);
         }
     }
 
-    // (c) tier-0: a tone fed into the stream lights its OWN tonality sensor,
-    // independent of the mic's bro.sense above.
+    // (b) tier-0 on the stream's OWN dashboard: a tone lights its sensor + ring.
     feedStream(concat(silence(0.3), tone(0.8, 1300, 0.18), silence(0.3)));
-    const ss = p.handle.sense.snapshot();
-    assert(ss && ss.tonalEvents >= 1,
-           "the stream's own tier-0 sensor counted the tone (events " + (ss ? ss.tonalEvents : 'n/a') + ')');
-    console.log('[listen-lab] stream tier-0: tonalEvents=' + ss.tonalEvents + ' onsets=' + ss.onsets);
+    const ss = st.source.sense.snapshot();
+    assert(ss && ss.tonalEvents >= 1, "the stream's own tier-0 sensor counted the tone");
+    assert(listenLab.ring() === st.ring && st.ring.count > 40,
+           "the active timeline shows the stream's own history (" + st.ring.count + ' frames)');
+    assert(feedRows('tonal').length >= 1, "the stream's feed shows its own tonal event");
+    console.log('[listen-lab] stream tier-0: ring ' + st.ring.count + ' frames · tonalEvents=' + ss.tonalEvents);
 
-    // (d) kws action: turning it on mirrors the mic's phrase vocabulary onto the
-    // stream's own session over the shared net; a spoken phrase then self-spots.
-    listenLab.setPanelAction(p, 'kws', true);
-    assert(p.actions.kws && p.handle.kws.templates().indexOf('hello there') >= 0,
-           'kws on → mic phrase mirrored onto the stream (' +
-           JSON.stringify(p.handle.kws.templates()) + ')');
+    // (c) kws: the mic's vocabulary was mirrored; a spoken phrase self-spots here.
+    assert(st.source.kws.templates().indexOf('hello there') >= 0,
+           'mic phrase mirrored onto the stream session');
+    const stSpots0 = st.spots;
     feedStream(concat(silence(0.4), speak('hello there'), silence(0.4)));
-    assert(pumpUntil(() => feedRows('sys').some((t) =>
-        t.indexOf('hello there') >= 0 && t.indexOf('kws') >= 0), 8000),
-        'the stream self-spotted the mirrored phrase (tagged [sys] fusion row)');
-    console.log('[listen-lab] stream kws: ' +
-                feedRows('sys').find((t) => t.indexOf('hello there') >= 0));
+    assert(pumpUntil(() => st.spots > stSpots0, 8000), 'the stream self-spotted the mirrored phrase');
+    assert(feedRows('spot').some((t) => t.indexOf('hello there') >= 0),
+           "the spot landed on the stream's own feed");
+    console.log('[listen-lab] stream kws: ' + feedRows('spot').find((t) => t.indexOf('hello there') >= 0));
 
-    // (e) transcript runs CONCURRENTLY: turning it on for the stream transcribes
-    // its OWN audio alongside the mic's — no stealing. The model is single-op, so
-    // calls are serialized through one queue, but BOTH commit (the stub from 4f
-    // stands in for the model). This is the bug the user hit: a second stream used
-    // to steal the transcriber and leave both unable to transcribe.
-    const primaryLinesBefore = listenLab.Transcribe.lines.length;
-    listenLab.setPanelAction(p, 'transcript', true);
-    assert(p.actions.transcript, 'stream transcript action enabled');
-    assert(!document.querySelector('#txToggle').disabled,
-           'primary transcript stays enabled — the stream did not steal it');
+    // (d) transcript runs CONCURRENTLY: the stream transcribes its own audio AND
+    // the mic still transcribes — no stealing (the 4f stub stands in for the model).
+    const stTxBefore = st.txLines.length;
     feedStream(concat(silence(0.4), speak('hello there'), silence(0.6)));
-    assert(pumpUntil(() => feedRows('sys').some((t) => t.indexOf('transcript') >= 0), 8000),
-           "the stream's own voice-gated transcript committed (tagged [sys] row)");
-    // The mic transcript STILL commits with a stream also transcribing.
+    assert(pumpUntil(() => st.txLines.length > stTxBefore, 8000),
+           "the stream's own voice-gated transcript committed a line");
+    assert(/hello there/.test(document.querySelector('#txLines .txline .tx').textContent),
+           "the active (stream) transcript panel shows the line");
+    listenLab.switchTab(0);
+    assert(listenLab.active() === micSt, 'switched back to the mic tab');
+    assert(listenLab.ring() === micSt.ring && micSt.ring !== st.ring,
+           'each stream keeps its own independent history ring');
     feedPumped(concat(silence(0.4), speak('hello there'), silence(0.6)));
-    assert(pumpUntil(() => listenLab.Transcribe.lines.length > primaryLinesBefore, 8000),
-           'the mic transcript still commits while a stream also transcribes');
-    listenLab.setPanelAction(p, 'transcript', false);
-    assert(!p.actions.transcript, 'stream transcript action disabled');
-    console.log('[listen-lab] stream transcript: mic + stream transcribe concurrently (no steal)');
+    assert(pumpUntil(() => micSt.txLines.length > micLinesBefore, 8000),
+           'the mic transcript still commits while a stream also transcribes (no steal)');
+    console.log('[listen-lab] concurrent transcript: stream + mic both committed (no steal)');
 
-    // (f) WAV export: the stream's retained buffer writes a real .wav. The
-    // headless seam forces the output path (no native dialog).
+    // (e) WAV export: the stream's retained buffer writes a real RIFF/WAVE file.
     {
         const fs2 = require('fs');
-        const tmp = require('os').tmpdir() + '/listen-lab-stream-' + p.handle.id + '.wav';
+        const tmp = require('os').tmpdir() + '/listen-lab-stream-' + st.id + '.wav';
         listenLab.exportTo(tmp);
-        listenLab.saveStreamWav(p);
+        listenLab.saveStreamWav(st);
         listenLab.exportTo(null);
         assert(fs2.existsSync(tmp), 'stream WAV written to disk (' + tmp + ')');
         const buf = fs2.readFileSync(tmp);            // Uint8Array (no encoding)
@@ -633,7 +566,7 @@ console.log('[listen-lab] editor: opened whistle clip editor (' +
         console.log('[listen-lab] stream wav: ' + buf.length + ' bytes → ' + tmp);
     }
 
-    // (g) primary WAV export from a retained timeline region.
+    // (f) primary WAV export from a retained timeline region (mic active).
     {
         const tmp = require('os').tmpdir() + '/listen-lab-primary.wav';
         const b = bro.listen.frame(), a = Math.max(bro.listen.frame() - 200, 0);
@@ -644,20 +577,17 @@ console.log('[listen-lab] editor: opened whistle clip editor (' +
         console.log('[listen-lab] primary wav: exported region → ' + tmp);
     }
 
-    // (h) remove the stream: its card + handle go, the mic dashboard is unaffected.
-    listenLab.removeStream(p);
-    assert(listenLab.panels.length === 0, 'stream removed from the rack');
-    assert(!Array.from(document.querySelectorAll('.sc')).some((c) =>
-        c.querySelector('.scName').textContent.indexOf('#' + p.handle.id) >= 0),
-        'stream card removed');
+    // (g) close the stream tab → back to one tab, mic dashboard intact.
+    listenLab.removeStream(st);
+    assert(listenLab.streams().length === 1, 'stream tab closed');
+    assert(listenLab.active() === micSt, 'closing the active stream falls back to the mic tab');
+    assert(document.querySelectorAll('#tabStrip .tab').length === 1, 'tab strip back to one tab');
     assert(bro.sense.isActive() && bro.kws.isActive(),
-           'removing the stream left the mic dashboard live (independent streams)');
-    console.log('[listen-lab] rack: add → configure (tier-0/kws/transcript) → export → remove · mic untouched');
+           'closing the stream left the mic dashboard live (independent streams)');
+    console.log('[listen-lab] tabs: add → own dashboard (tier-0/kws/transcript) → export → close · mic intact');
 }
 
 // ── 5. remove the gesture via its × button while live ────────────────────────
-// withMutableGesture bounces the gesture session (stop → remove → listen);
-// afterwards the row is gone and kws listening is untouched (separate member).
 
 {
     const rows = Array.from(document.querySelectorAll('.gest'));

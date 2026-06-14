@@ -1,9 +1,9 @@
-// Listen Lab — orchestrator: tier-0 sensor cards, tier-2 template rows, the poll
-// loop that fuses every tier, enroll/listen controls, boot, and the headless
-// test seam. The heavy machinery lives in sibling modules sharing the `LL`
-// namespace (see core.js): timeline.js (history ring + detail + playback),
-// transcript.js (tier-3 Parakeet), gestures.js (non-speech + clip editor),
-// streams.js (the streams rack). This file loads LAST.
+// Listen Lab — orchestrator: per-stream poll loop, sensor cards + template rows
+// for the active tab, enroll/listen controls, boot, and the headless test seam.
+// The heavy machinery lives in sibling modules sharing the `LL` namespace (see
+// core.js): timeline.js (per-stream ring + detail + playback), transcript.js
+// (tier-3 Parakeet, one ctx per stream), gestures.js (non-speech + clip editor),
+// streams.js (sources + tabs). This file loads LAST.
 ;(function () {
     const LL = globalThis.LL;
     const fs = require('fs');
@@ -11,19 +11,17 @@
         $dbBig, $levelFill, $floorMark, $levelSmall, $voiceDot, $voiceTxt, $voiceSmall,
         $onsetDot, $onsetTxt, $tonalDot, $tonalTxt, $tonalSmall, $streamT,
         $tmpls, $noTmpls, $listen, $phrase, $enroll, $record, $threshold, $txToggle,
-        $srcSel, $addStream, $refreshApps, $streamsSub, $spotCount, $tlLive, $tlSpan,
-        $chart, $overview,
+        $srcSel, $addStream, $refreshApps, $spotCount, $tlLive, $tlSpan, $chart, $overview,
         status, fusionRow, FPS, phrasePolicy, PH_CONF,
-        phLabels, Stream, drawStream, sizeCanvas, setLive, viewWindow,
+        drawStream, sizeCanvas, setLive, viewWindow,
         onTimelineDown, onTimelineMove, onTimelineUp, onTimelineWheel, onOverviewNav,
-        logEvent, toStreamSpan, decodedOver, selectEvent, closeDetail, focusRegion,
-        playFrac, Playback, View, events, updatePlayback,
-        scratchToGesture, renderScratchBar, clearScratch, scratchSpan,
-        Transcribe, PrimarySource, transcribeTick, txLoad, txSetStatus, renderPartial,
-        updateStreamPanels, mirrorToStreams,
-        buildSourceOptions, specFromSelect, addStream, removeStream, setPanelAction, panels,
-        exportWav, saveStreamWav, setExportPath,
+        logEvent, toStreamSpan, selectEvent, closeDetail, focusRegion, playFrac, updatePlayback,
+        scratchToGesture, renderScratchBar, clearScratch, scratchSpan, decodedOver,
+        Transcribe, transcribeTick, txLoad, txSetStatus, renderActivePartial, renderLines,
+        makeStream, makeSource, addStream, removeStream, switchTab, bindActive,
+        buildSourceOptions, specFromSelect, exportWav, saveStreamWav, setExportPath,
         enrollGesture, buildEditor, gainedSlice, clipStore, gestRows, toggleRecord,
+        renderGestureRows,
     } = LL;
 
     const WEIGHT_CANDIDATES = [
@@ -33,14 +31,23 @@
         'D:/projects/brosoundml/build-cuda/english.bpm',
     ];
 
-    let listening = false;            // bro.kws.listen() active on the mic dashboard
     const rhythmNames = {};           // name -> true for templates enrolled with gaps
 
-// ── tier-0 sensor cards ──────────────────────────────────────────────────────
+// ── tier-0 sensor cards (render the ACTIVE stream's latest frame) ─────────────
 
 const dbPct = (db) => Math.max(0, Math.min(100, (db + 80) / 80 * 100));
 
-function updateSensorCards(s, ph) {
+function renderSensors(st) {
+    const s = st && st.lastS, ph = st && st.lastPh;
+    if (!s) {
+        $dbBig.textContent = '−∞ dB'; $levelFill.style.width = '0%';
+        $floorMark.style.left = '0%'; $levelSmall.textContent = 'floor — · snr —';
+        $voiceDot.className = 'dot'; $voiceTxt.textContent = 'quiet'; $voiceSmall.textContent = 'events 0';
+        $onsetDot.className = 'dot onset'; $onsetTxt.textContent = '0';
+        $tonalDot.className = 'dot tonal'; $tonalTxt.textContent = '—'; $tonalSmall.textContent = 'periodicity —';
+        $streamT.textContent = '0.0 s';
+        return;
+    }
     $dbBig.textContent = (s.db <= -90 ? '−∞' : s.db.toFixed(1)) + ' dB';
     $levelFill.style.width = dbPct(s.db).toFixed(0) + '%';
     $floorMark.style.left = dbPct(s.noiseFloorDb).toFixed(0) + '%';
@@ -54,8 +61,6 @@ function updateSensorCards(s, ph) {
         : 'events ' + s.voiceEvents) +
         (ph ? ' · /' + ph.label + '/' : '');
 
-    // Onset is true only on its trigger frame; hold the dot lit briefly via
-    // the last-event frame index instead of trying to catch that one frame.
     $onsetDot.className = 'dot onset' + (s.frames - s.lastOnsetFrame < 15 ? ' on' : '');
     $onsetTxt.textContent = String(s.onsets);
 
@@ -67,35 +72,83 @@ function updateSensorCards(s, ph) {
     $streamT.textContent = s.t.toFixed(1) + ' s';
 }
 
-// ── tier-0 event edges → fusion feed ─────────────────────────────────────────
+// ── tier-0 event edges → a stream's fusion feed ──────────────────────────────
 
-let tonalAnnounced = false;
-
-function emitTier0Events(prev, s) {
+function emitTier0Events(st, prev, s) {
     if (s.voiceEvents > prev.voiceEvents)
-        fusionRow('voice', 'voice started (snr +' + Math.max(0, s.snrDb).toFixed(0) + ' dB)');
+        fusionRow(st, 'voice', 'voice started (snr +' + Math.max(0, s.snrDb).toFixed(0) + ' dB)');
     if (!s.voice && prev.voice)
-        fusionRow('voice', 'voice ended after ' + (prev.voiceFrames / 100).toFixed(1) + ' s');
+        fusionRow(st, 'voice', 'voice ended after ' + (prev.voiceFrames / 100).toFixed(1) + ' s');
     if (s.onsets > prev.onsets) {
         const n = s.onsets - prev.onsets;
-        fusionRow('onset', n === 1 ? 'transient' : n + ' transients');
+        fusionRow(st, 'onset', n === 1 ? 'transient' : n + ' transients');
     }
-    if (s.tonal && s.tonalFrames >= 30 && !tonalAnnounced) {
-        tonalAnnounced = true;
-        fusionRow('tonal', 'sustained tone ~' + Math.round(s.dominantHz) +
+    if (s.tonal && s.tonalFrames >= 30 && !st.tonalAnnounced) {
+        st.tonalAnnounced = true;
+        fusionRow(st, 'tonal', 'sustained tone ~' + Math.round(s.dominantHz) +
             ' Hz (periodicity ' + s.periodicity.toFixed(2) + ')');
     }
-    if (!s.tonal) tonalAnnounced = false;
+    if (!s.tonal) st.tonalAnnounced = false;
 }
 
-// ── tier-2 template rows (bro.kws.progress) ──────────────────────────────────
+// ── tier-2 kws sessions (one per stream over the shared net) ──────────────────
+// The phrase vocabulary is the master (bro.kws = the mic's matcher). Each added
+// stream mirrors it onto its own session (enrollFromClasses replays decoded class
+// ids over the SHARED net; rhythm/gap templates can't round-trip, so they're
+// skipped). Every stream listens independently and fires onto its own dashboard.
+
+function mirrorKwsTo(st) {
+    if (!st.source.isHandle || !LL.kwsReady) return;
+    const k = st.source.kws;
+    try {
+        k.clear();
+        for (const name of bro.kws.templates()) {
+            const v = bro.kws.inspect(name);
+            if (!v || v.hasGaps) continue;
+            const cls = v.states.filter((s) => !s.gap).map((s) => s.cls);
+            if (cls.length) k.enrollFromClasses(name, cls, phrasePolicy());
+        }
+    } catch (e) { status('mirror → ' + st.label + ': ' + (e.message || e), true); }
+}
+
+function onKwsSpot(st, name, confidence, span) {
+    st.spots++;
+    const s = st.source.sense.isActive() ? st.source.sense.snapshot() : null;
+    fusionRow(st, 'spot', '"' + name + '" completed @ conf ' + confidence.toFixed(3) +
+        (s && s.voice ? ' · voice run ' + (s.voiceFrames / 100).toFixed(1) + ' s' : ''));
+    // The matcher reports the span on the SPOTTER's frame axis; re-anchor onto
+    // the stream axis via the matched DURATION ending ~now (the fire just happened).
+    logEvent(st, 'spot', name, confidence, '', null, toStreamSpan(span, s));
+    st.armState[name] = false;
+    if (st === LL.active) { flashRow(name); $spotCount.textContent = String(st.spots); }
+}
+
+function startStreamKws(st) {
+    if (st.kwsListening) return;
+    st.source.kws.listen({ onSpot: (name, conf, span) => onKwsSpot(st, name, conf, span) });
+    st.kwsListening = true;
+    updateListenButton();
+}
+
+function stopStreamKws(st) {
+    try { st.source.kws.stop(); } catch (e) {}
+    st.kwsListening = false;
+    updateListenButton();
+}
+
+function updateListenButton() {
+    const st = LL.active;
+    const on = !!(st && st.kwsListening);
+    $listen.textContent = on ? 'Stop' : 'Listen';
+    $listen.classList.toggle('active', on);
+    $listen.disabled = !LL.kwsReady || bro.kws.templates().length === 0;
+}
+
+// ── tier-2 template rows (bro.kws.progress for the ACTIVE stream) ─────────────
 
 const tmplRows = {};           // name -> { root, fill, meta }
-let lastGeneration = -1;
-const armState = {};           // name -> announced "arming" for the current attempt
-const lastCompletions = {};
 
-function rebuildTemplateRows(p) {
+function rebuildTemplateRows(st, p) {
     Object.keys(tmplRows).forEach((k) => { tmplRows[k].root.remove(); delete tmplRows[k]; });
     $noTmpls.style.display = p.templates.length ? 'none' : '';
     for (const t of p.templates) {
@@ -116,15 +169,15 @@ function rebuildTemplateRows(p) {
         }));
         $tmpls.appendChild(root);
         tmplRows[t.name] = { root, fill: root.querySelector('.tfill'), meta: root.querySelector('.tmeta') };
-        lastCompletions[t.name] = t.completions;
+        st.lastCompletions[t.name] = t.completions;
     }
     $listen.disabled = !LL.kwsReady || p.templates.length === 0;
 }
 
-function updateTemplateRows(p, s) {
-    if (p.generation !== lastGeneration) {
-        lastGeneration = p.generation;
-        rebuildTemplateRows(p);
+function updateTemplateRows(st, p, s) {
+    if (p.generation !== st.lastGeneration) {
+        st.lastGeneration = p.generation;
+        rebuildTemplateRows(st, p);
     }
     for (const t of p.templates) {
         const row = tmplRows[t.name];
@@ -132,43 +185,37 @@ function updateTemplateRows(p, s) {
         row.fill.style.width = (t.progress * 100).toFixed(0) + '%';
         row.meta.textContent = t.matched + '/' + t.length +
             ' · conf ' + t.confidence.toFixed(2) + ' · fires ' + t.completions;
-        if (t.completions > (lastCompletions[t.name] || 0)) flashRow(t.name);
-        lastCompletions[t.name] = t.completions;
+        if (t.completions > (st.lastCompletions[t.name] || 0)) flashRow(t.name);
+        st.lastCompletions[t.name] = t.completions;
 
         // The fusion moment: most of a template has aligned and its partial
-        // confidence is already in threshold territory — this is where a
-        // heavier tier (streaming STT confirmation) would spin up, seconds
-        // before any onSpot fires.
-        if (!armState[t.name] && t.matched < t.length && t.progress >= 0.5) {
-            armState[t.name] = true;
-            fusionRow('arm', '"' + t.name + '" ' + t.matched + '/' + t.length +
+        // confidence is already in threshold territory — where a heavier tier
+        // would arm, seconds before any onSpot fires.
+        if (!st.armState[t.name] && t.matched < t.length && t.progress >= 0.5) {
+            st.armState[t.name] = true;
+            fusionRow(st, 'arm', '"' + t.name + '" ' + t.matched + '/' + t.length +
                 ' aligned @ conf ' + t.confidence.toFixed(2) +
                 (s && s.voice ? ' · voice live' : '') +
                 ' — confirmation tier would arm here');
-            logEvent('arm', t.name, t.confidence, '',
+            logEvent(st, 'arm', t.name, t.confidence, '',
                 { matched: t.matched, length: t.length });
-        } else if (armState[t.name] && t.progress < 0.3) {
-            armState[t.name] = false;
+        } else if (st.armState[t.name] && t.progress < 0.3) {
+            st.armState[t.name] = false;
         }
     }
 }
+
+// Force the template rows to rebuild against the active stream (tab switch).
+function forceTemplateRebuild() { if (LL.active) LL.active.lastGeneration = -1; }
 
 function flashRow(name) {
     const row = tmplRows[name];
     if (!row) return;
     row.root.classList.add('fired');
-    // Re-look-up at expiry: a template-set rebuild may have replaced (and
-    // detached) this row in the meantime.
     setTimeout(() => { if (tmplRows[name] === row) row.root.classList.remove('fired'); }, 600);
 }
 
 // ── token panel — bro.kws.inspect: see (and edit) what a template became ──────
-// A phrase enrolled as "what is the first" is really the phoneme sequence
-// [W AH T · IH Z · DH AH · F ER S T]; a recorded click gesture is whatever
-// garbage phonemes the speech model decoded plus its timed gaps. Showing that
-// makes both the suffix-firing and the "sounds don't work" problems legible —
-// and for a plain phrase the user can drop tokens and re-enroll the trimmed
-// sequence (enrollFromClasses), the intuitive clip edit.
 
 function toggleTokens(name, root, btn) {
     const existing = root.querySelector('.tokens');
@@ -179,9 +226,6 @@ function toggleTokens(name, root, btn) {
 
     const panel = document.createElement('div');
     panel.className = 'tokens';
-    // A working copy of the editable token list (sound states only; gaps are
-    // shown but not editable — re-enroll goes through enrollFromClasses, which
-    // can't carry timed gaps).
     let edited = view.states.map((s) => ({ ...s }));
 
     function render() {
@@ -195,7 +239,6 @@ function toggleTokens(name, root, btn) {
                 ? 'gap ' + Math.round(s.gapLo * view.frameMs) + '–' +
                   Math.round(s.gapHi * view.frameMs) + ' ms'
                 : s.label;
-            // Editable only for plain (non-rhythm) phrases.
             if (!s.gap && !view.hasGaps) {
                 const x = document.createElement('button');
                 x.className = 'x';
@@ -225,7 +268,7 @@ function toggleTokens(name, root, btn) {
                 const cls = edited.filter((s) => !s.gap).map((s) => s.cls);
                 bro.kws.enrollFromClasses(name, cls, phrasePolicy());
                 status('edited "' + name + '" → ' + cls.length + ' tokens');
-                fusionRow('info', 'edited "' + name + '" to ' + cls.length + ' tokens');
+                fusionRow(LL.active, 'info', 'edited "' + name + '" to ' + cls.length + ' tokens');
             }));
             const reset = document.createElement('button');
             reset.textContent = 'reset';
@@ -239,17 +282,13 @@ function toggleTokens(name, root, btn) {
     root.appendChild(panel);
 }
 
-// ── the poll loop — ONE place fuses every tier ───────────────────────────────
+// ── the poll loop — update EVERY stream, render the ACTIVE one ────────────────
 
-let lastS = null;
 let txBooted = false;
 
-// Tier-3 transcript auto-load decision, deferred to the first frame: the
-// headless globals (advanceTime) are installed AFTER the app's top-level boot
-// runs, so the only reliable place to detect headless is from a frame callback.
-// The 2.4 GB Parakeet load is real — auto-load it for the live app; in headless
-// the test installs a stub runner through the seam instead, so the suite never
-// pulls the heavy model.
+// Tier-3 transcript auto-load, deferred to the first frame (headless globals are
+// installed after the app's boot runs). The 2.4 GB Parakeet load is real — auto-
+// load it for the live app; in headless the test installs a stub through the seam.
 function bootTranscript() {
     if (txBooted) return;
     txBooted = true;
@@ -257,51 +296,66 @@ function bootTranscript() {
     else txLoad();
 }
 
-function tick() {
-    bootTranscript();
-    const s = bro.sense.isActive() ? bro.sense.snapshot() : null;
-    // tier-1: the live top phoneme, cached and ring-stored alongside the sensors.
+// Update one stream's state (no DOM): sensor snapshot → ring, tier-0 edges, the
+// tier-1 phoneme, and its voice-gated transcript context.
+function updateStream(st) {
+    const src = st.source;
+    const s = src.sense.isActive() ? src.sense.snapshot() : null;
     let ph = null;
-    if (LL.kwsReady && bro.kws.isLoaded()) {
-        const post = bro.kws.posterior(1);
+    if (LL.kwsReady && src.kwsLoaded()) {
+        const post = src.kws.posterior(1);
         if (post && post.top.length) {
             const top = post.top[0];
-            phLabels[top.cls] = top.label;
+            st.phLabels[top.cls] = top.label;
             if (top.cls !== 0 && top.p >= PH_CONF) ph = top;
         }
     }
+    st.lastPh = ph;
+    const prev = st.lastS;
     if (s) {
-        updateSensorCards(s, ph);
-        if (!lastS || s.frames > lastS.frames) Stream.push(lastS, s, ph);
-        if (lastS) emitTier0Events(lastS, s);
-        PrimarySource._prev = lastS; PrimarySource._cur = s;
-        lastS = s;
+        if (!prev || s.frames > prev.frames) st.ring.push(prev, s, ph);
+        if (prev) emitTier0Events(st, prev, s);
+        st.lastS = s;
     }
-    if (LL.kwsReady && bro.kws.isLoaded()) {
-        const p = bro.kws.progress();
-        if (p) updateTemplateRows(p, s);
+    // Drive this stream's own transcript (serialized with every other stream's).
+    st.txCtx._prev = prev; st.txCtx._cur = s;
+    transcribeTick(st.txCtx);
+}
+
+function renderActive() {
+    const st = LL.active;
+    renderSensors(st);
+    if (LL.kwsReady && st.source.kwsLoaded()) {
+        const p = st.source.kws.progress();
+        if (p) updateTemplateRows(st, p, st.lastS);
     }
-    updateStreamPanels();
-    // Primary (mic) transcript — runs concurrently with any stream transcripts
-    // (updateStreamPanels drives those); all model calls share one queue.
-    transcribeTick(PrimarySource);
     updatePlayback();
     drawStream();
+    $spotCount.textContent = String(st.spots);
+}
+
+function tick() {
+    bootTranscript();
+    for (const st of LL.streams) updateStream(st);
+    renderActive();
     requestAnimationFrame(tick);
 }
 
 // ── enroll / record / listen ─────────────────────────────────────────────────
 
-// Template mutators share the spotter's feed thread, so they're rejected while
-// listening; bounce the live session around any mutation.
+// Template mutators share each spotter's feed thread, so they're rejected while
+// listening; bounce EVERY stream's session around the master mutation, then
+// re-mirror the vocabulary onto the handle streams and restart them all.
 function withMutableSpotter(fn) {
-    const wasListening = listening;
-    if (wasListening) stopListening();
+    const were = LL.streams.filter((st) => st.kwsListening);
+    for (const st of were) stopStreamKws(st);
     try { fn(); }
     catch (e) { status(String(e.message || e), true); }
-    if (wasListening && bro.kws.templates().length) startListening();
-    $listen.disabled = !LL.kwsReady || bro.kws.templates().length === 0;
-    mirrorToStreams();                    // keep every kws stream's vocabulary in sync
+    for (const st of LL.streams) {
+        if (st.source.isHandle) mirrorKwsTo(st);
+        if (bro.kws.templates().length) startStreamKws(st);
+    }
+    updateListenButton();
 }
 
 function enrollPhrase() {
@@ -310,52 +364,23 @@ function enrollPhrase() {
     withMutableSpotter(() => {
         const len = bro.kws.enroll(text, bro.tts.phonemize(text), phrasePolicy());
         status('enrolled "' + text + '" (' + len + ' phoneme classes)');
-        fusionRow('info', 'enrolled phrase "' + text + '" (' + len + ' classes)');
+        fusionRow(LL.active, 'info', 'enrolled phrase "' + text + '" (' + len + ' classes)');
         $phrase.value = '';
     });
-}
-
-function startListening() {
-    bro.kws.listen({
-        onSpot: (name, confidence, span) => {
-            LL.spots++;
-            $spotCount.textContent = String(LL.spots);
-            const s = bro.sense.isActive() ? bro.sense.snapshot() : null;
-            fusionRow('spot', '"' + name + '" completed @ conf ' + confidence.toFixed(3) +
-                (s && s.voice ? ' · voice run ' + (s.voiceFrames / 100).toFixed(1) + ' s' : ''));
-            // The matcher reports the span on the SPOTTER's frame axis; the
-            // timeline + retention run on the shared STREAM axis (bro.sense /
-            // host frames), which diverges from the spotter's once the spotter
-            // joins after sense (live mic). Re-anchor on the stream axis using
-            // the axis-independent matched DURATION ending ~now (the fire just
-            // happened): start = now − matchedFrames. Gestures already report on
-            // the sense axis, so only spots need this.
-            logEvent('spot', name, confidence, '', null, toStreamSpan(span, s));
-            flashRow(name);
-            armState[name] = false;
-        },
-    });
-    listening = true;
-    $listen.textContent = 'Stop';
-    $listen.classList.add('active');
-}
-
-function stopListening() {
-    bro.kws.stop();
-    listening = false;
-    $listen.textContent = 'Listen';
-    $listen.classList.remove('active');
 }
 
 $enroll.addEventListener('click', enrollPhrase);
 $phrase.addEventListener('keydown', (e) => { if (e.key === 'Enter') enrollPhrase(); });
 $record.addEventListener('click', toggleRecord);
-$listen.addEventListener('click', () => (listening ? stopListening() : startListening()));
+$listen.addEventListener('click', () => {
+    const st = LL.active;
+    if (st.kwsListening) stopStreamKws(st); else startStreamKws(st);
+});
 $txToggle.addEventListener('click', () => {
-    Transcribe.enabled = !Transcribe.enabled;           // pauses every context's transcript
-    if (!Transcribe.enabled) {
-        PrimarySource.tx.active = false; PrimarySource.tx.partial = '';
-        renderPartial(PrimarySource);
+    Transcribe.enabled = !Transcribe.enabled;           // pauses every stream's transcript
+    if (!Transcribe.enabled && LL.active) {
+        LL.active.txCtx.tx.active = false; LL.active.txCtx.tx.partial = '';
+        renderActivePartial('');
     }
     txSetStatus(Transcribe.enabled ? 'ready · voice-gated' : 'paused');
 });
@@ -367,52 +392,54 @@ $addStream.addEventListener('click', () => {
 });
 $refreshApps.addEventListener('click', buildSourceOptions);
 
+// expose the main-owned pieces that streams.js/bindActive reach at runtime
+Object.assign(LL, {
+    renderSensors, forceTemplateRebuild, updateListenButton,
+    mirrorKwsTo, startStreamKws, stopStreamKws,
+});
+
 // ── boot ─────────────────────────────────────────────────────────────────────
 
 (function boot() {
     sizeCanvas($chart);
     sizeCanvas($overview);
-    // drawStream() re-checks canvas size every frame (see sizeCanvas), so it
-    // self-corrects on resize / DPI change without a separate resize listener.
 
-    // Timeline interaction: drag to pan, wheel to zoom, click a marker to
-    // inspect, Live to re-pin the edge, overview to scrub the full history.
     $chart.addEventListener('mousedown', onTimelineDown);
     window.addEventListener('mousemove', onTimelineMove);
     window.addEventListener('mouseup', onTimelineUp);
     $chart.addEventListener('wheel', onTimelineWheel, { passive: false });
-    $chart.addEventListener('mouseleave', () => { View.hoverFrame = -1; });
+    $chart.addEventListener('mouseleave', () => { LL.active.view.hoverFrame = -1; });
     $tlLive.addEventListener('click', () => { setLive(true); });
     let ovDrag = false;
     $overview.addEventListener('mousedown', (e) => { ovDrag = true; onOverviewNav(e); });
     window.addEventListener('mousemove', (e) => { if (ovDrag) onOverviewNav(e); });
     window.addEventListener('mouseup', () => { ovDrag = false; });
 
-    // Keep the visible span label in sync with the view each frame.
     setInterval(() => {
         const secs = viewWindow().span / FPS;
         $tlSpan.textContent = (secs >= 60 ? (secs / 60).toFixed(1) + ' min' : secs.toFixed(1) + ' s') +
-            (View.follow ? '' : ' · scrubbing');
+            (LL.active.view.follow ? '' : ' · scrubbing');
     }, 100);
 
-    // Tier-0 first: model-free, always available, no weights needed.
-    bro.sense.start({});
-    fusionRow('info', 'tier-0 sensors live (level / voice / onset / tonality)');
+    // The mic is tab #0 — a stream over the default-mic globals. Create it and
+    // bind the dashboard to it before anything emits feed rows.
+    const micSt = makeStream(makeSource('mic-default'), { id: 0, kind: 'mic', label: 'mic' });
+    LL.streams = [micSt];
+    bindActive(micSt);
 
-    // Retain ~10 min of the raw shared stream so a matched region can be
-    // replayed from the detail panel (opt-in; ~38 MB). Source-agnostic — it
-    // captures whatever feeds the host, mic or otherwise.
+    bro.sense.start({});
+    fusionRow(micSt, 'info', 'tier-0 sensors live (level / voice / onset / tonality)');
+
+    // Retain ~10 min of the mic's raw stream so a matched region replays from the
+    // detail panel. Added streams retain on open (60 s) — see addStream.
     bro.listen.retain(600);
-    fusionRow('info', 'stream retention on — ' +
+    fusionRow(micSt, 'info', 'stream retention on — ' +
         (bro.listen.info().seconds / 60).toFixed(0) + ' min of raw audio kept');
 
-    // Streams rack: populate the source picker. System / per-app loopback is
-    // offered only where render-side capture is available (Windows here; the
-    // null backend reports unsupported, leaving just "another mic tap").
+    // Streams rack: populate the source picker (system/per-app only where loopback
+    // is available; the null backend leaves just "another mic tap").
     buildSourceOptions();
 
-    // require('fs') resolves relative paths against the app dir, but the C++
-    // loader resolves against the process CWD — hand it an absolute path.
     let weights = null;
     for (const p of WEIGHT_CANDIDATES) {
         try { if (fs.existsSync(p)) { weights = fs.realpathSync(p); break; } }
@@ -434,45 +461,48 @@ $refreshApps.addEventListener('click', buildSourceOptions);
         return;
     }
 
-    // Seed one phrase template and go live — the dashboard is the demo.
+    // Seed one phrase template and go live (withMutableSpotter starts the mic's
+    // kws session) — the dashboard is the demo.
     withMutableSpotter(() => {
         bro.kws.enroll('hello there', bro.tts.phonemize('hello there'), phrasePolicy());
     });
-    startListening();
-    fusionRow('info', 'tier-2 spotter live on the shared host (template "hello there")');
-    status('listening — speak, click, whistle; enroll phrases or record a rhythm gesture');
+    fusionRow(micSt, 'info', 'tier-2 spotter live on the shared host (template "hello there")');
+    status('listening — speak, click, whistle; add a stream to watch another source');
 
     requestAnimationFrame(tick);
 })();
 
-// Headless test seam: the gesture-enroll path (no live mic to record from)
-// plus the timeline internals (history ring, event log, click-to-inspect) so
-// the scrollback/marker/detail behaviour is testable without mouse events.
+// ── headless test seam ────────────────────────────────────────────────────────
+// The gesture-enroll path (no live mic to record from), timeline internals
+// (history ring, event log, click-to-inspect), the tabs/streams API, WAV export,
+// and a transcript stub installer so the VAD-gated lifecycle is testable without
+// the 2.4 GB Parakeet load. Active-stream state is exposed via accessors (the
+// dashboard is now per-stream; `active()` is whichever tab is shown).
 globalThis.listenLab = {
-    enrollGesture,
-    Stream, events, View, phLabels,
-    selectEvent, closeDetail, decodedOver,
+    enrollGesture, buildEditor, gainedSlice, clipStore, gestRows,
+    // active-stream introspection
+    active: () => LL.active,
+    streams: () => LL.streams,
+    ring: () => LL.activeRing(),
+    events: () => LL.activeEvents(),
+    view: () => LL.activeView(),
+    playback: () => LL.activePlayback(),
+    phLabels: () => LL.activePhLabels(),
+    selectEvent, closeDetail, decodedOver, focusRegion, playFrac,
     scratchToGesture, renderScratchBar, clearScratch, scratchSpan,
-    buildEditor, gainedSlice, clipStore, gestRows,
-    Playback, focusRegion, playFrac,
-    // streams rack: open/close/configure arbitrary-source streams + reach them.
-    addStream, removeStream, setPanelAction, panels,
-    buildSourceOptions, specFromSelect, mirrorToStreams,
-    PrimarySource,
-    // WAV export: the dialog-driven path plus a headless seam that skips the
-    // native dialog by forcing the output path (exportPathOverride).
-    exportWav, saveStreamWav,
-    exportTo: setExportPath,
-    // tier-3 transcript: real loader (manual e2e check) + a stub installer that
-    // makes the VAD-gated lifecycle testable without the 2.4 GB Parakeet load.
+    // tabs / streams
+    addStream, removeStream, switchTab, buildSourceOptions, specFromSelect,
+    // WAV export (+ a headless seam that forces the output path)
+    exportWav, saveStreamWav, exportTo: setExportPath,
+    // tier-3 transcript: real loader (manual e2e) + a stub for the test.
     Transcribe, loadTranscriber: txLoad,
     installTranscriber: (runFn) => {
-        Transcribe.stubRun = runFn;                     // used by every context's queue jobs
+        Transcribe.stubRun = runFn;                     // used by every stream's queue jobs
         Transcribe.ready = true;
         Transcribe.enabled = true;
         if (!Transcribe.tok) Transcribe.tok = { decode: () => '' };
         txSetStatus('ready · voice-gated (stub)');
-        renderPartial(PrimarySource);
+        renderActivePartial('');
     },
 };
 })();
