@@ -2,11 +2,13 @@
 import { $ } from "/app/lib/state.js";
 import { _fs, _os, pExists, recall, remember } from "/app/lib/helpers.js";
 import { bargeIn, scheduleLive } from "/app/lib/synth.js";
+import { initDesign, designActive, designedMatrices } from "/app/lib/design.js";
 
 // owned shared state (read by synth / app)
 export let supertonic = null;   // the loaded Supertonic model
 let voiceStylesDir = '';        // <modelDir>/voice_styles
 const voiceCache = {};          // name -> SupertonicVoice handle (lazily loaded)
+const presetMats = {};          // name -> { ttl, dp } (read once for the designer)
 
 export function setBadge(text, err) {
   const b = $('#backend');
@@ -44,6 +46,7 @@ function fillVoices(dir) {
   const sel = $('#voice-sel');
   sel.textContent = '';
   for (const k of Object.keys(voiceCache)) delete voiceCache[k];
+  for (const k of Object.keys(presetMats)) delete presetMats[k];
   voiceStylesDir = dir + '/voice_styles';
   let names = [];
   try {
@@ -61,6 +64,19 @@ function fillVoices(dir) {
   sel.value = names.indexOf(want) >= 0 ? want : names[0];
   sel.onchange = () => { remember('supertonic-lab.voice', sel.value); scheduleLive(); };
   $('#voice-meta').textContent = names.length + ' presets';
+
+  // Read every preset's matrices once (host-side, fast) so the designer can
+  // compute the global mean + the masc↔fem axis and blend any two voices.
+  const ok = [];
+  for (const n of names) {
+    try {
+      const v = supertonic.loadVoiceStyle(voiceStylesDir + '/' + n + '.json');
+      voiceCache[n] = v;
+      presetMats[n] = { ttl: v.ttl, dp: v.dp };
+      ok.push(n);
+    } catch (e) {}
+  }
+  if (ok.length) initDesign(presetMats, ok);
 }
 
 function fillLanguages() {
@@ -74,10 +90,18 @@ function fillLanguages() {
   sel.onchange = () => { remember('supertonic-lab.lang', sel.value); scheduleLive(); };
 }
 
-// The selected voice preset, loaded + cached on first use (host-side, fast).
+// The voice to synthesize: a designed voice (when any design axis is active) built
+// over the selected preset's matrices, else the raw preset (cached host-side).
 export function currentVoice() {
   const name = $('#voice-sel').value;
   if (!name || !supertonic) return null;
+  if (designActive()) {
+    const d = designedMatrices(name);
+    if (d) {
+      try { return supertonic.createVoice(d.ttl, d.dp, d.label); }
+      catch (e) { setBadge('design: ' + e.message, true); /* fall back to preset */ }
+    }
+  }
   if (!voiceCache[name]) {
     try { voiceCache[name] = supertonic.loadVoiceStyle(voiceStylesDir + '/' + name + '.json'); }
     catch (e) { setBadge('voice ' + name + ': ' + e.message, true); return null; }

@@ -23,7 +23,7 @@ body {
 
 /* ── bars ── */
 section { padding: 9px 16px; border-bottom: 1px solid #161c26; }
-#modelbar, #voice, #delivery, #prompt {
+#modelbar, #voice, #design, #delivery, #prompt {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
 }
 .cfg { display: inline-flex; align-items: center; gap: 6px; color: #8b94a3; }
