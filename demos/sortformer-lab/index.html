@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Sortformer Lab</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <header id="toolbar">
+      <span id="brand">◈ Sortformer&nbsp;Lab</span>
+      <span class="tagline">who's speaking, live · streaming 4-speaker diarization (NVIDIA Sortformer)</span>
+      <span class="grow"></span>
+      <span id="backend" class="badge">loading…</span>
+    </header>
+
+    <!-- model directory: a converted Sortformer checkpoint (config.json +
+         model.safetensors — brosoundml/scripts/convert-sortformer.py) -->
+    <section id="controls">
+      <label class="cfg">model
+        <input id="model-dir" type="text" placeholder="dir with config.json + model.safetensors">
+      </label>
+      <button id="btn-browse-model" class="iconbtn" title="Choose a Sortformer checkpoint directory">📁</button>
+      <button id="btn-load" title="Load the Sortformer model">↻ Load</button>
+      <span id="model-meta" class="meta"></span>
+    </section>
+
+    <!-- source audio: the microphone, the whole-system output, or one app -->
+    <section id="srcbar">
+      <span class="grouplbl">source</span>
+      <select id="src-sel" title="Pick an audio source"></select>
+      <button id="btn-listen" disabled title="Open the source and start live diarization">▶ listen</button>
+      <button id="btn-stop" disabled title="Stop and close the source">■ stop</button>
+      <button id="btn-clear" title="Clear the timeline + speaker cache">⟲ clear</button>
+      <div id="level" title="Live input level"><div id="level-fill"></div></div>
+      <span class="grow"></span>
+      <label class="cfg" title="How much audio the model hears per update. Longer = it separates similar-sounding speakers better (it needs to hear enough of each voice to tell them apart), at the cost of update latency. The model's native chunk is ~15 s.">context
+        <select id="ctx">
+          <option value="1">1 s · lowest latency</option>
+          <option value="2">2 s</option>
+          <option value="4" selected>4 s · balanced</option>
+          <option value="8">8 s</option>
+          <option value="15">15 s · best separation</option>
+        </select>
+      </label>
+      <label class="cfg thresh">threshold
+        <input id="thresh" type="range" min="0.05" max="0.9" step="0.05" value="0.5">
+        <span id="thresh-val">0.50</span>
+      </label>
+    </section>
+
+    <main id="stages">
+      <div class="section-title">speakers — <span class="dim-hint">arrival-order; intensity = activity probability this instant</span></div>
+      <div id="speakers"></div>
+
+      <div class="section-title">timeline — <span class="dim-hint">each column is one 80 ms frame · lanes are speakers · brighter = more confident</span></div>
+      <canvas id="timeline" width="1180" height="200"></canvas>
+
+      <div id="stats" class="stats"><span class="placeholder">Load a model, pick a source, then press listen.</span></div>
+    </main>
+  </div>
+
+  <script type="module" src="/app/app.js"></script>
+</body>
+</html>
