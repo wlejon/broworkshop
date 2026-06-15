@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Supertonic Lab</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <header id="toolbar">
+      <span id="brand">♪&nbsp;Supertonic&nbsp;Lab</span>
+      <span class="tagline">flow-matching multilingual TTS — pick a voice, shape the flow, hear it</span>
+      <span class="grow"></span>
+      <span id="backend" class="badge">loading…</span>
+    </header>
+
+    <!-- which converted model directory -->
+    <section id="modelbar">
+      <label class="cfg">model
+        <input id="model-dir" type="text" value="D:/projects/brosoundml-data/supertonic">
+      </label>
+      <button id="btn-browse-model" class="iconbtn" title="Choose a converted Supertonic model directory">📁</button>
+      <span class="grow"></span>
+      <span id="model-meta" class="meta"></span>
+      <button id="btn-reload" title="Reload this model">↺</button>
+    </section>
+
+    <!-- VOICE — identity. A VoiceStyle preset (voice_styles/) + the synthesis language. -->
+    <section id="voice">
+      <span class="vlabel">voice</span>
+      <select id="voice-sel" title="A voice preset (style_ttl / style_dp) from the model's voice_styles/"></select>
+      <span id="voice-meta" class="meta"></span>
+      <label class="cfg lang">lang
+        <select id="language" title="Synthesis language (codepoint frontend, no G2P)"></select>
+      </label>
+    </section>
+
+    <!-- FLOW — the synthesis seams: how many guided Euler steps, how fast, which noise draw. -->
+    <section id="delivery">
+      <span class="vlabel">flow</span>
+      <div class="dial" title="Flow-matching Euler steps — more = smoother latent, slower (8 is the upstream default)">
+        <label>steps <span id="v-steps">8</span></label>
+        <input id="steps" type="range" min="2" max="32" step="1" value="8"></div>
+      <div class="dial" title="Speed — &gt;1 shortens the utterance (1.05 is the upstream default)">
+        <label>speed <span id="v-speed">1.05</span></label>
+        <input id="speed" type="range" min="0.5" max="2" step="0.01" value="1.05"></div>
+      <label class="cfg seed" title="Philox seed for the N(0,1) flow noise — varies the take">seed
+        <input id="seed" type="number" value="0" min="0" step="1">
+      </label>
+      <label class="lock" title="Keep the seed fixed across runs (A/B the same draw)">
+        <input id="seed-lock" type="checkbox" checked> lock
+      </label>
+      <button id="btn-reseed" title="Roll a fresh noise seed and re-synthesize">🎲 reseed</button>
+      <label class="lock" title="Split into sentences and concatenate — for paragraphs">
+        <input id="longform" type="checkbox"> long-form
+      </label>
+      <div class="dial" id="gap-dial" title="Silence between sentences in long-form mode" style="display:none">
+        <label>gap <span id="v-gap">0.30</span>s</label>
+        <input id="gap" type="range" min="0" max="1" step="0.05" value="0.3"></div>
+      <span id="delivery-meta" class="meta"></span>
+    </section>
+
+    <!-- TEXT + transport. -->
+    <section id="prompt">
+      <input id="text" type="text" value="Hello there. This is a test of the Supertonic pipeline."
+             placeholder="Type something to speak…">
+      <button id="btn-synth" disabled title="Synthesize and play">▶ Synthesize</button>
+      <button id="btn-stop" disabled title="Cancel the in-flight synthesis">■ Stop</button>
+      <button id="btn-play" disabled title="Replay the last synthesized buffer">♪</button>
+      <button id="btn-save-wav" disabled title="Save the last synthesized buffer as a .wav file">⤓ wav</button>
+      <span id="run-meta" class="meta"></span>
+      <span class="grow"></span>
+      <span id="latency" class="meta"></span>
+    </section>
+
+    <main id="stages"></main>
+  </div>
+
+  <script type="module" src="/app/app.js"></script>
+</body>
+</html>
