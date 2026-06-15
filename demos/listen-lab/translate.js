@@ -186,9 +186,12 @@ import { LL } from "/app/core.js";
     // ── load (fallback through the candidate list on miss / error) ────────────
     function tlLoad() {
         if (Translate.stub) return;
+        // Resolve to an ABSOLUTE path (like txLoad): brokit's fs reads the relative
+        // candidate against the app mount root, but bro.lm's loader reads it against
+        // the process CWD — so hand the loader the realpath, not the relative string.
         let dir = null;
         for (const p of NLLB_CANDIDATES) {
-            try { if (fs.existsSync(p + '/config.json')) { dir = p; break; } } catch (e) {}
+            try { if (fs.existsSync(p + '/config.json')) { dir = fs.realpathSync(p); break; } } catch (e) {}
         }
         if (!dir) {
             setTlStatus('err', 'translate off');
