@@ -8,7 +8,7 @@
 //        ../broworkshop/demos/supertonic-lab/tests/test_design.js
 
 import { $ } from "/app/lib/state.js";
-import { initDesign, designActive, designedMatrices, resetDesign } from "/app/lib/design.js";
+import { initDesign, designActive, designedMatrices, resetDesign, basisInfo, setBasis } from "/app/lib/design.js";
 
 const DATA = (typeof process !== 'undefined' && process.env && process.env.BRO_STDATA)
   || 'D:/projects/brosoundml-data/supertonic';
@@ -68,6 +68,23 @@ t = designedTake(); f = audible(t.r.samples);
 console.log('IDENTITY · ' + t.label + ' · peak', f.peak.toFixed(3), '· Δ vs preset', l1(t.r.samples, ref.samples, 40000).toFixed(1));
 assert(f.bad === 0 && f.peak > 0.01, 'identity-scaled voice finite + audible');
 assert(l1(t.r.samples, ref.samples, 40000) > 1, 'identity differs from the raw preset');
+
+// ── PCA basis: a component slider activates + shifts the voice ────────────────
+resetDesign(); $('#pc0').value = '0.8';
+assert(designActive(), 'basis pc0 activates the designer');
+t = designedTake(); f = audible(t.r.samples);
+console.log('BASIS pc0 · ' + t.label + ' · peak', f.peak.toFixed(3), '· Δ vs preset', l1(t.r.samples, ref.samples, 40000).toFixed(1));
+assert(f.bad === 0 && f.peak > 0.01, 'basis voice finite + audible');
+assert(l1(t.r.samples, ref.samples, 40000) > 1, 'basis pc0 differs from the raw preset');
+
+// ── voice-map plumbing: basisInfo coords + setBasis drive the same sliders ────
+const info = basisInfo();
+assert(info && info.ncomp >= 2 && info.coords.length === names.length, 'basisInfo exposes preset coords');
+resetDesign(); setBasis(0, 1.5, 1, -1.0);   // σ-unit offsets on PC0/PC1
+assert(designActive(), 'setBasis activates the designer');
+t = designedTake(); f = audible(t.r.samples);
+console.log('MAP setBasis · ' + t.label + ' · peak', f.peak.toFixed(3));
+assert(f.bad === 0 && f.peak > 0.01, 'map-set voice finite + audible');
 
 // ── reset returns to the preset ──────────────────────────────────────────────
 resetDesign();
