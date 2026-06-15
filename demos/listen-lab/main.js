@@ -305,7 +305,7 @@ function bootTranscript() {
     if (typeof advanceTime === 'function') { txSetStatus('headless — install a runner to test'); return; }
     txLoad();          // Qwen3-ASR transcription + language ID
     LL.dzLoad();       // ECAPA speaker encoder → diarization
-    LL.tlLoad();       // NLLB-200 → English translation of non-English lines
+    LL.tlLoad();       // NLLB-200 (live/fast) + Qwen3-1.7B (context correctness) → English
 }
 
 // Update one stream's state (no DOM): sensor snapshot → ring, tier-0 edges, the
@@ -517,10 +517,17 @@ globalThis.listenLab = {
         renderActivePartial('');
     },
     // tier-3.5 diarization + translation: real loaders + stubs for the test.
-    Diarize: LL.Diarize, Translate: LL.Translate,
+    Diarize: LL.Diarize, Translate: LL.Translate, Refine: LL.Refine,
     loadDiarizer: LL.dzLoad, loadTranslator: LL.tlLoad,
     installDiarizer: (embedFn) => { LL.Diarize.stub = embedFn; LL.Diarize.ready = true; },
     installTranslator: (xlateFn) => { LL.Translate.stub = xlateFn; LL.Translate.ready = true; },
+    // correctness tier: install a synchronous (text, lang, dialogue) → english
+    // stub so the scene/context pump is testable without the GPU LLM.
+    installRefiner: (refineFn) => {
+        LL.Refine.stub = refineFn;
+        LL.Refine.ready = true;
+    },
+    refine: (st, line) => LL.ctxRefine(st, line),     // re-run a context pass (test)
     // streaming sentence chunker — exposed so the test can drive a seal directly.
     sealSentences: (ctx, text, a, b) => LL.maybeSealSentences(ctx, text, a, b),
 };

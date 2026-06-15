@@ -718,6 +718,88 @@ console.log('[listen-lab] editor: opened whistle clip editor (' +
     ctx.tx.active = false; ctx.tx.prevPartial = '';   // don't leak utterance state into teardown
 }
 
+// ── 4j. correctness tier: context-aware, scene-segmented re-translation ───────
+// The fast tier (NLLB stub) translates each sentence in isolation; the slow
+// correctness tier (Qwen3-1.7B in the app) re-translates it with the running,
+// speaker-tagged dialogue as CONTEXT, replacing the line when it improves. Stub
+// the correctness model with a function that ECHOES the dialogue it was handed,
+// so the test can prove (a) it fires and marks the line refined, (b) it is given
+// MORE information than the fast tier — speaker labels + neighbouring lines, the
+// target marked ► — (c) a line is re-refined once its successor lands (the
+// following context can only sharpen it), and (d) a scene cut (long silence gap)
+// bounds the context so dialogue never bleeds across it.
+{
+    const micSt = listenLab.active();
+    let lastDialogue = '';
+    listenLab.installRefiner((text, lang, dialogue) => {
+        lastDialogue = dialogue;
+        return 'CTX(' + dialogue.split('\n').length + '): ' + text;   // # of context lines fed
+    });
+    listenLab.installTranslator((text, lang) => '[en] ' + text);      // fast tier (NLLB stub)
+
+    const ctx = micSt.txCtx;
+    const b = bro.listen.frame(), a = Math.max(ctx.oldest() + 5, b - 400);
+    assert(b - a > 60, 'a real retained window for the correctness test (' + (b - a) + ' frames)');
+    ctx.tx.active = true; ctx.tx.lang = 'Japanese';
+    ctx.tx.startFrame = a; ctx.tx.sealedFrame = a; ctx.tx.prevPartial = '';
+    micSt._lastB = a - (350 + 50);      // open a FRESH scene (gap > SCENE_GAP) — no prior-section bleed
+
+    // Sentence 1 (two stable passes → seal), pretend-diarized to speaker 1.
+    listenLab.sealSentences(ctx, 'Sentence uno. mas', a, b);
+    listenLab.sealSentences(ctx, 'Sentence uno. mas', a, b);
+    const ln1 = micSt.txLines[0];
+    assert(ln1.text === 'Sentence uno.', 'line 1 sealed for the correctness test');
+    ln1.speaker = 1;
+    assert(pumpUntil(() => ln1.refined && /^CTX\(/.test(ln1.en || ''), 3000),
+           'line 1 was re-translated by the correctness tier ("' + ln1.en + '")');
+    assert(ln1.en === 'CTX(1): Sentence uno.',
+           'line 1, alone in its scene, got 1 line of context ("' + ln1.en + '")');
+
+    // Sentence 2 from the ADVANCED window → same scene (contiguous), speaker 2.
+    const aa = ctx.tx.startFrame;
+    listenLab.sealSentences(ctx, 'Sentence dos. mas', aa, b);
+    listenLab.sealSentences(ctx, 'Sentence dos. mas', aa, b);
+    const ln2 = micSt.txLines[0];
+    assert(ln2.text === 'Sentence dos.', 'line 2 sealed');
+    ln2.speaker = 2;
+    assert(ln2.scene === ln1.scene, 'contiguous sentences share a scene (no gap)');
+    // ln2 refines WITH ln1 as prior context; ln1 re-refines WITH ln2 as following
+    // context — both now see 2 lines. (Progressive: ln1 went 1→2 lines of context.)
+    assert(pumpUntil(() => ln2.en === 'CTX(2): Sentence dos.', 3000),
+           'line 2 refined with its neighbour as context ("' + ln2.en + '")');
+    assert(pumpUntil(() => ln1.en === 'CTX(2): Sentence uno.', 3000),
+           'line 1 was RE-refined once line 2 arrived (progressive, "' + ln1.en + '")');
+
+    // Re-run the context pass now BOTH turns are diarized, to inspect the
+    // speaker-tagged dialogue the model is handed (the stub captures it).
+    listenLab.refine(micSt, ln2);
+    assert(pumpUntil(() => /S1:/.test(lastDialogue) && /S2:/.test(lastDialogue), 3000),
+           'dialogue not refreshed with both speakers');
+    // The dialogue handed to the model is speaker-tagged with the target marked ►.
+    assert(/►/.test(lastDialogue), 'the correctness model is told which line to translate (►)');
+    assert(/S1:/.test(lastDialogue) && /S2:/.test(lastDialogue),
+           'the dialogue carries speaker labels for both turns:\n' + lastDialogue);
+
+    // Scene cut: a long silence gap before the next line starts a NEW scene, so
+    // the prior conversation is NOT fed as context (it bounds the window).
+    const cutLineB = micSt.txLines[0].b;
+    micSt._lastB = cutLineB - (350 + 50);            // force gap > SCENE_GAP at the next seal
+    const aac = ctx.tx.startFrame;
+    listenLab.sealSentences(ctx, 'Sentence tres. mas', aac, b);
+    listenLab.sealSentences(ctx, 'Sentence tres. mas', aac, b);
+    const ln3 = micSt.txLines[0];
+    assert(ln3.text === 'Sentence tres.', 'post-cut line sealed');
+    assert(ln3.scene !== ln2.scene, 'a long gap started a new scene (' + ln2.scene + '→' + ln3.scene + ')');
+    assert(pumpUntil(() => ln3.en === 'CTX(1): Sentence tres.', 3000),
+           'the post-cut line is translated alone — context did not bleed across the cut ("' + ln3.en + '")');
+
+    console.log('[listen-lab] correctness: NLLB fast → Qwen-style context refine · ' +
+                'ln1 ctx grew 1→2 lines (progressive) · scene cut at gap > SCENE_GAP isolated ln3');
+
+    ctx.tx.active = false; ctx.tx.prevPartial = '';
+    listenLab.Refine.ready = false;                   // stop the correctness tier for later sections
+}
+
 // ── 5. remove the gesture via its × button while live ────────────────────────
 
 {
