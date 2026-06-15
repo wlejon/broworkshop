@@ -220,8 +220,13 @@ export function setBasis(cx, ax, cy, ay) {
 }
 
 function updateDesignMeta() {
-  const meta = $('#design-meta'); if (!meta) return;
-  if (!ready) { meta.textContent = ''; return; }
-  const d = designActive() ? designedMatrices($('#voice-sel').value) : null;
-  meta.textContent = d ? ('designed · ' + d.label) : 'preset (design off)';
+  const meta = $('#design-meta');
+  if (meta) {
+    if (!ready) meta.textContent = '';
+    else {
+      const d = designActive() ? designedMatrices($('#voice-sel').value) : null;
+      meta.textContent = d ? ('designed · ' + d.label) : 'preset (design off)';
+    }
+  }
+  try { document.dispatchEvent(new Event('design-update')); } catch (e) {}   // voice map redraws
 }

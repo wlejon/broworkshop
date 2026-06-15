@@ -80,4 +80,5 @@ select {
 .canvas-wrap { line-height: 0; border-radius: 5px; overflow: hidden;
   display: inline-block; align-self: flex-start; max-width: 100%; }
 canvas { display: block; max-width: 100%; }
+#voicemap { border: 1px solid #232c3a; border-radius: 6px; cursor: crosshair; }
 .axis-note { color: #5f6878; font-size: 11px; }

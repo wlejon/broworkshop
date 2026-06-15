@@ -6,6 +6,7 @@ import { browseFolder, pParent } from "/app/lib/helpers.js";
 import { loadModel, defaultModelDir } from "/app/lib/model.js";
 import { buildFlow } from "/app/lib/delivery.js";
 import { buildDesign } from "/app/lib/design.js";
+import { buildVoiceMap } from "/app/lib/voicemap.js";
 import { play, saveWav } from "/app/lib/audio.js";
 import { requestSynth, bargeIn } from "/app/lib/synth.js";
 
@@ -18,9 +19,10 @@ function init() {
   $('#model-dir').addEventListener('change', () => loadModel($('#model-dir').value.trim()));
   $('#btn-reload').addEventListener('click', () => loadModel($('#model-dir').value.trim()));
 
-  // ── flow dials + voice designer ──
+  // ── flow dials + voice designer + map ──
   buildFlow();
   buildDesign();
+  buildVoiceMap();
 
   // ── transport ──
   $('#btn-synth').addEventListener('click', requestSynth);

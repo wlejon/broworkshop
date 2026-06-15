@@ -67,6 +67,8 @@
         <label>pc2 <span id="v-pc2">0</span></label>
         <input id="pc2" type="range" min="-1" max="1" step="0.05" value="0"></div>
       <span id="basis-meta" class="meta">PCA over the preset palette — pc0 ≈ gender/pitch</span>
+      <span class="grow"></span>
+      <canvas id="voicemap" width="220" height="160" title="Drag in the principal plane (pc0 × pc1) to author a voice by position"></canvas>
     </section>
 
     <!-- FLOW — the synthesis seams: how many guided Euler steps, how fast, which noise draw. -->
