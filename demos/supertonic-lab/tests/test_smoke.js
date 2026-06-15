@@ -70,6 +70,13 @@ const rS = st.synthesize(TEXT, { voice: vA, language: 'en', seed: 7, steps: 16 }
 console.log('STEPS · 8↔16 Δ', diff(r0.samples, rS.samples, 40000).toFixed(1));
 assert(diff(r0.samples, rS.samples, 40000) > 0.1, 'step count affects the take');
 
+// ── guidance (CFG scale) changes the take, low vs high ───────────────────────
+const rGlo = st.synthesize(TEXT, { voice: vA, language: 'en', seed: 7, guidance: 1 });
+const rGhi = st.synthesize(TEXT, { voice: vA, language: 'en', seed: 7, guidance: 5 });
+console.log('GUIDANCE · 1↔5 Δ', diff(rGlo.samples, rGhi.samples, 40000).toFixed(1));
+assert(diff(rGlo.samples, rGhi.samples, 40000) > 1, 'guidance affects the take');
+assert(diff(r0.samples, rGlo.samples, 40000) > 1, 'guidance 1 differs from default w3');
+
 // ── long-form: a paragraph splits + concatenates longer than one sentence ────
 const PARA = 'The morning was bright. Birds sang in the trees. A gentle breeze moved through the valley.';
 const rL = st.synthesize(PARA, { voice: vA, language: 'en', longForm: true, gapSeconds: 0.3 });

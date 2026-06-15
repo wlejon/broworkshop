@@ -44,6 +44,9 @@
       <div class="dial" title="Speed — &gt;1 shortens the utterance (1.05 is the upstream default)">
         <label>speed <span id="v-speed">1.05</span></label>
         <input id="speed" type="range" min="0.5" max="2" step="0.01" value="1.05"></div>
+      <div class="dial" id="guidance-dial" title="Guidance (classifier-free-guidance scale) — the flow-matching conviction dial. 3 is the trained voice; lower (→0) relaxes to flatter/breathier, higher pushes crisper/more articulated. Overdrives into clipping past ~6. Unique to Supertonic — Kokoro/Qwen have no equivalent.">
+        <label>guidance <span id="v-guidance">3.0</span></label>
+        <input id="guidance" type="range" min="0" max="8" step="0.1" value="3"></div>
       <label class="cfg seed" title="Philox seed for the N(0,1) flow noise — varies the take">seed
         <input id="seed" type="number" value="0" min="0" step="1">
       </label>

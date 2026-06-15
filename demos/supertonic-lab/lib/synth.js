@@ -69,6 +69,7 @@ function doSynth() {
       language:   currentLanguage(),
       steps:      flow.steps,
       speed:      flow.speed,
+      guidance:   flow.guidance,
       seed:       flow.seed,
       longForm:   flow.longForm,
       gapSeconds: flow.gapSeconds,
@@ -82,7 +83,8 @@ function doSynth() {
           renderWave(r.samples, r.sampleRate);
           const ms = (performance.now() - t0).toFixed(0);
           const secs = (r.samples.length / r.sampleRate).toFixed(2);
-          $('#run-meta').textContent = secs + 's audio · ' + flow.steps + ' steps · seed ' + flow.seed;
+          $('#run-meta').textContent = secs + 's audio · ' + flow.steps + ' steps · g' +
+            flow.guidance.toFixed(1) + ' · seed ' + flow.seed;
           $('#latency').textContent = 'synthesised in ' + ms + ' ms (' +
             (parseFloat(secs) / (ms / 1000)).toFixed(1) + '× realtime)';
           setBadge('ready');
