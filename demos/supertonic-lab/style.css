@@ -23,9 +23,13 @@ body {
 
 /* ── bars ── */
 section { padding: 9px 16px; border-bottom: 1px solid #161c26; }
-#modelbar, #voice, #design, #basis, #delivery, #prompt {
+#modelbar, #voice, #delivery, #prompt {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
 }
+#design { display: flex; align-items: flex-start; gap: 18px; flex-wrap: wrap; }
+#design-side { display: flex; flex-direction: column; gap: 12px; padding-top: 4px; min-width: 200px; }
+#design-side .dial input[type=range] { width: 180px; }
+#design-side .vlabel { margin-bottom: 2px; }
 .cfg { display: inline-flex; align-items: center; gap: 6px; color: #8b94a3; }
 .cfg input[type=text], #text {
   background: #0e131b; border: 1px solid #232c3a; color: #d7dde6;
@@ -80,5 +84,5 @@ select {
 .canvas-wrap { line-height: 0; border-radius: 5px; overflow: hidden;
   display: inline-block; align-self: flex-start; max-width: 100%; }
 canvas { display: block; max-width: 100%; }
-#voicemap { border: 1px solid #232c3a; border-radius: 6px; cursor: crosshair; }
+#voicemap { border: 1px solid #232c3a; border-radius: 8px; cursor: crosshair; flex: 0 0 auto; }
 .axis-note { color: #5f6878; font-size: 11px; }

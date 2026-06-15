@@ -2,7 +2,7 @@
 import { $ } from "/app/lib/state.js";
 import { _fs, _os, pExists, recall, remember } from "/app/lib/helpers.js";
 import { bargeIn, scheduleLive } from "/app/lib/synth.js";
-import { initDesign, designActive, designedMatrices } from "/app/lib/design.js";
+import { initDesign, designActive, designedMatrices, selectPreset } from "/app/lib/design.js";
 
 // owned shared state (read by synth / app)
 export let supertonic = null;   // the loaded Supertonic model
@@ -62,7 +62,7 @@ function fillVoices(dir) {
   }
   const want = recall('supertonic-lab.voice');
   sel.value = names.indexOf(want) >= 0 ? want : names[0];
-  sel.onchange = () => { remember('supertonic-lab.voice', sel.value); scheduleLive(); };
+  sel.onchange = () => { remember('supertonic-lab.voice', sel.value); selectPreset(); scheduleLive(); };
   $('#voice-meta').textContent = names.length + ' presets';
 
   // Read every preset's matrices once (host-side, fast) so the designer can

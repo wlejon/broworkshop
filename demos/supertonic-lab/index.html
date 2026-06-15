@@ -35,40 +35,20 @@
       </label>
     </section>
 
-    <!-- DESIGN — axes discovered in the preset style space (blend / masc↔fem / identity). -->
+    <!-- DESIGN — navigate the palette's voice space: drag the map, tune pc2 / identity. -->
     <section id="design">
-      <span class="vlabel">design</span>
-      <div class="dial" id="d-mascfem-dial" title="Masc↔fem — nudge the voice along centroid(M)−centroid(F), the labeled gender axis derived from the 5F/5M preset palette. 0 leaves the preset untouched.">
-        <label>masc↔fem <span id="v-d-mascfem">0</span></label>
-        <input id="d-mascfem" type="range" min="-1" max="1" step="0.05" value="0"></div>
-      <label class="cfg blend" title="Blend the selected voice toward another preset">toward
-        <select id="d-blend-target" title="Blend target preset"></select>
-      </label>
-      <div class="dial" title="Blend amount — lerp the base voice toward the target preset (0 = base only)">
-        <label>blend <span id="v-d-blend-amt">0.00</span></label>
-        <input id="d-blend-amt" type="range" min="0" max="1" step="0.05" value="0"></div>
-      <div class="dial" title="Identity strength — scale the voice's deviation from the average voice. 1 = the preset, <1 averages toward neutral, >1 caricatures.">
-        <label>identity <span id="v-d-identity">1.00</span></label>
-        <input id="d-identity" type="range" min="0" max="2" step="0.05" value="1"></div>
-      <button id="d-reset" title="Reset the designer to the raw preset">reset</button>
-      <span id="design-meta" class="meta"></span>
-    </section>
-
-    <!-- BASIS — the palette's principal components (PCA) as nudge sliders. -->
-    <section id="basis">
-      <span class="vlabel">basis</span>
-      <div class="dial" id="pc0-dial" title="Principal component 0" style="display:none">
-        <label>pc0 <span id="v-pc0">0</span></label>
-        <input id="pc0" type="range" min="-1" max="1" step="0.05" value="0"></div>
-      <div class="dial" id="pc1-dial" title="Principal component 1" style="display:none">
-        <label>pc1 <span id="v-pc1">0</span></label>
-        <input id="pc1" type="range" min="-1" max="1" step="0.05" value="0"></div>
-      <div class="dial" id="pc2-dial" title="Principal component 2" style="display:none">
-        <label>pc2 <span id="v-pc2">0</span></label>
-        <input id="pc2" type="range" min="-1" max="1" step="0.05" value="0"></div>
-      <span id="basis-meta" class="meta">PCA over the preset palette — pc0 ≈ gender/pitch</span>
-      <span class="grow"></span>
-      <canvas id="voicemap" width="220" height="160" title="Drag in the principal plane (pc0 × pc1) to author a voice by position"></canvas>
+      <canvas id="voicemap" width="440" height="300" title="Drag to author a voice by position (pc0 ≈ gender/pitch · pc1). Presets are landmarks; drag past them — the model still holds."></canvas>
+      <div id="design-side">
+        <span class="vlabel">design</span>
+        <div class="dial" id="pc2-dial" title="pc2 — the palette's 3rd axis" style="display:none">
+          <label>pc2 <span id="v-pc2">0</span></label>
+          <input id="pc2" type="range" min="-6" max="6" step="0.1" value="0"></div>
+        <div class="dial" title="Identity strength — scale the voice's deviation from the average voice. 1 = the preset, &lt;1 averages toward neutral, &gt;1 caricatures.">
+          <label>identity <span id="v-d-identity">1.00</span></label>
+          <input id="d-identity" type="range" min="0" max="2" step="0.05" value="1"></div>
+        <button id="d-reset" title="Re-seat the designer on the selected preset">reset</button>
+        <span id="design-meta" class="meta"></span>
+      </div>
     </section>
 
     <!-- FLOW — the synthesis seams: how many guided Euler steps, how fast, which noise draw. -->
