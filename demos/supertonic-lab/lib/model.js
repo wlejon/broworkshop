@@ -2,7 +2,7 @@
 import { $ } from "/app/lib/state.js";
 import { _fs, _os, pExists, recall, remember } from "/app/lib/helpers.js";
 import { bargeIn, scheduleLive } from "/app/lib/synth.js";
-import { initDesign, designActive, designedMatrices, selectPreset } from "/app/lib/design.js";
+import { initDesign, designActive, designedMatrices, selectPreset, setGenderBasis } from "/app/lib/design.js";
 
 // owned shared state (read by synth / app)
 export let supertonic = null;   // the loaded Supertonic model
@@ -77,6 +77,17 @@ function fillVoices(dir) {
     } catch (e) {}
   }
   if (ok.length) initDesign(presetMats, ok);
+
+  // Data-derived masc↔fem axis (mean female-preset − mean male-preset in style space),
+  // produced offline by brosoundml's preset_gender tool and shipped beside the model.
+  // Drives the design panel's masc↔fem slider; absent → the slider stays hidden.
+  try {
+    const bp = dir + '/masc_fem_basis.json';
+    if (pExists(bp)) {
+      const j = JSON.parse(_fs.readFileSync(bp, 'utf8'));
+      setGenderBasis(Float32Array.from(j.half_axis_ttl || []));
+    } else setGenderBasis(null);
+  } catch (e) { setGenderBasis(null); }
 }
 
 function fillLanguages() {

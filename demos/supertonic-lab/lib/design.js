@@ -24,7 +24,21 @@ let MATS = {}, NAMES = [], IDX = {};
 let MEAN = null;               // { ttl, dp } global mean
 let COMPS = [];                // [{ w:Float32Array(D), sd, projsd:number[] (σ per preset), lo, hi }]
 let MAP = [0, 0];              // absolute σ targets for pc0/pc1 (the map drives these)
+let GENDER = null;             // Float32Array(TTLN) — data-derived masc↔fem half-axis
+                               // (mean female-preset ttl − mean male-preset ttl, halved),
+                               // applied as an absolute style_ttl offset on top of any preset.
 let ready = false;
+
+// the masc↔fem slider value (style_ttl offset units; 0 = the selected preset).
+function genderG() { const el = $('#gender'); return (el && GENDER) ? (parseFloat(el.value) || 0) : 0; }
+
+// Install the data-derived masc↔fem axis (half_axis_ttl from masc_fem_basis.json).
+// Shows/hides the slider depending on whether the basis is present beside the model.
+export function setGenderBasis(halfAxisTtl) {
+  GENDER = (halfAxisTtl && halfAxisTtl.length >= TTLN) ? halfAxisTtl : null;
+  const dial = $('#gender-dial');
+  if (dial) dial.style.display = GENDER ? 'inline-flex' : 'none';
+}
 
 // absolute σ target of a controlled component: pc0/pc1 from the map, pc2 from its slider.
 function target(k) {
@@ -104,6 +118,8 @@ export function buildDesign() {
   if (idSl) { const upd = () => { if (idOut) idOut.textContent = parseFloat(idSl.value).toFixed(2); emit(); }; idSl.oninput = () => { upd(); scheduleLive(); }; upd(); }
   const pc2 = $('#pc2'), pc2Out = $('#v-pc2');
   if (pc2) { pc2.oninput = () => { if (pc2Out) pc2Out.textContent = (parseFloat(pc2.value) || 0).toFixed(1); emit(); scheduleLive(); }; }
+  const gen = $('#gender'), genOut = $('#v-gender');
+  if (gen) { gen.oninput = () => { if (genOut) genOut.textContent = (parseFloat(gen.value) || 0).toFixed(2); emit(); scheduleLive(); }; }
   const rb = $('#d-reset'); if (rb) rb.onclick = () => { resetDesign(); scheduleLive(); };
   emit();
 }
@@ -120,6 +136,8 @@ export function selectPreset() {
 export function resetDesign() {
   if ($('#d-identity')) $('#d-identity').value = '1';
   if ($('#v-d-identity')) $('#v-d-identity').textContent = '1.00';
+  if ($('#gender')) $('#gender').value = '0';
+  if ($('#v-gender')) $('#v-gender').textContent = '0.00';
   selectPreset();
 }
 
@@ -130,6 +148,7 @@ export function designActive() {
   if (!ready) return false;
   const b = baseline($('#voice-sel') ? $('#voice-sel').value : NAMES[0]);
   if (identity() !== 1) return true;
+  if (genderG() !== 0) return true;
   for (let k = 0; k < COMPS.length; k++) if (Math.abs(target(k) - (b[k] || 0)) > 1e-3) return true;
   return false;
 }
@@ -150,6 +169,11 @@ export function designedMatrices(name) {
     for (let i = 0; i < TTLN; i++) ttl[i] += d * w[i];
     for (let i = 0; i < DPN; i++) dp[i] += d * w[TTLN + i];
     label += ' pc' + k + (tk >= 0 ? '+' : '') + tk.toFixed(1);
+  }
+  const g = genderG();
+  if (g !== 0 && GENDER) {
+    for (let i = 0; i < TTLN; i++) ttl[i] += g * GENDER[i];   // ttl-only; dp travels with the preset
+    label += ' masc↔fem' + (g >= 0 ? '+' : '') + g.toFixed(2);
   }
   const id = identity();
   if (id !== 1 && MEAN) { scaleInto(ttl, MEAN.ttl, id); scaleInto(dp, MEAN.dp, id); label += ' id' + id.toFixed(2); }
