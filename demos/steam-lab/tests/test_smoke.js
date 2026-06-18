@@ -13,8 +13,12 @@
 // logged in): additionally asserts live identity, the RunCallbacks heartbeat,
 // and a create → setData → read → leave lobby roundtrip.
 
-function pump(ms) { const s = Date.now(); while (Date.now() - s < ms) sleep(10); }
-function pumpUntil(pred, ms) { const s = Date.now(); while (!pred() && (Date.now() - s) < ms) sleep(10); return pred(); }
+// Real wall-clock pump + flush(). The Steam service runs on its own thread and
+// emits the pulse heartbeat on a real-time cadence, so virtual-time sleep()
+// would never see it; wallSleep gives the service real time and flush() drains
+// its events (friends/lobby/avatar/voice/pulse) into the JS callbacks.
+function pump(ms) { const s = Date.now(); do { flush(); wallSleep(15); } while (Date.now() - s < ms); flush(); }
+function pumpUntil(pred, ms) { const s = Date.now(); while (!pred() && (Date.now() - s) < ms) { flush(); wallSleep(15); } flush(); return pred(); }
 
 // ── 1. surface: namespace, getters, methods, callbacks ───────────────────────
 assert(typeof bro === 'object' && bro, 'bro global present');
@@ -84,11 +88,11 @@ if (bro.steam.available) {
   assert(bro.steam.personaName.length > 0, 'live personaName: ' + bro.steam.personaName);
   assert(bro.steam.appId > 0, 'live appId: ' + bro.steam.appId);
 
-  // RunCallbacks heartbeat — proves the service pump thread is alive.
+  // RunCallbacks heartbeat — proves the service pump thread is alive. The pulse
+  // is ~1 Hz (service loop is 10ms/iter, emits every 100th), so allow >1s.
   let pulses = 0;
   bro.steam.onpulse = () => { pulses++; };
-  pump(600);
-  assert(pulses > 0, 'pump heartbeat alive (' + pulses + ' pulses in 600ms)');
+  assert(pumpUntil(() => pulses > 0, 3000), 'pump heartbeat alive (' + pulses + ' pulses)');
 
   // create → setData → read-back-through-cache → leave
   let lobbyId = null;
