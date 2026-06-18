@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Steam Lab</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; height: 100vh; display: flex; flex-direction: column;
+    background: #0c0e12; color: #d7dde6;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  header {
+    padding: 12px 18px; border-bottom: 1px solid #1d2330;
+    display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
+  }
+  header h1 { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: .3px; }
+  header .sub { color: #6b7686; font-size: 12px; }
+
+  /* identity / availability strip */
+  .strip {
+    display: flex; gap: 22px; align-items: center; flex-wrap: wrap;
+    padding: 9px 18px; border-bottom: 1px solid #1d2330; font-size: 12px;
+  }
+  .strip .k { color: #6b7686; margin-right: 6px; }
+  .strip .v { color: #d7dde6; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 7px;
+    border-radius: 12px; padding: 3px 11px; font-size: 12px; font-weight: 600;
+    border: 1px solid #2c3c57; background: #131720;
+  }
+  .pill .dot { width: 9px; height: 9px; border-radius: 50%; background: #6b7686; }
+  .pill.up   { border-color: #3c8c63; color: #8be0ae; }
+  .pill.up   .dot { background: #54d68a; box-shadow: 0 0 6px #54d68a; }
+  .pill.down { border-color: #7a3a3a; color: #ff9a9a; }
+  .pill.down .dot { background: #ff6b6b; }
+  .heart { width: 9px; height: 9px; border-radius: 50%; background: #2c3c57; transition: background .08s; }
+  .heart.beat { background: #54d68a; box-shadow: 0 0 6px #54d68a; }
+
+  /* panel grid */
+  .grid {
+    flex: 1; min-height: 0; display: grid;
+    grid-template-columns: 1fr 1fr; grid-auto-rows: minmax(0, 1fr);
+    gap: 1px; background: #1d2330;
+  }
+  .panel { background: #0c0e12; display: flex; flex-direction: column; min-height: 0; }
+  .panel > h2 {
+    margin: 0; padding: 8px 14px; font-size: 12px; font-weight: 600; letter-spacing: .4px;
+    color: #97a1b2; border-bottom: 1px solid #1d2330; display: flex; gap: 10px; align-items: center;
+  }
+  .panel > h2 .tag { color: #5a6678; font-weight: 400; }
+  .panel .body { flex: 1; overflow-y: auto; padding: 10px 14px; min-height: 0; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+
+  input[type="text"], input[type="number"], select {
+    background: #131720; color: #d7dde6; border: 1px solid #2c3c57;
+    border-radius: 6px; padding: 6px 9px; font: inherit; font-size: 12px;
+  }
+  input[type="text"] { width: 150px; }
+  input[type="number"] { width: 64px; }
+  button {
+    background: #1b2638; color: #cfe0ff; border: 1px solid #2c3c57;
+    border-radius: 6px; padding: 6px 12px; font: inherit; font-size: 12px; cursor: pointer;
+  }
+  button:hover { background: #233248; }
+  button.active { background: #2f6f4f; border-color: #3c8c63; color: #eafff2; }
+  button:disabled { opacity: .4; cursor: default; }
+  .hint { color: #5a6678; font-size: 11px; }
+  .mono { color: #8be0ae; }
+
+  /* friends list */
+  .friend {
+    display: flex; align-items: center; gap: 9px; padding: 4px 6px; border-radius: 6px;
+    cursor: pointer; font-size: 12px;
+  }
+  .friend:hover { background: #131720; }
+  .friend canvas { width: 28px; height: 28px; border-radius: 5px; background: #1b2638; }
+  .friend .nm { flex: 1; }
+  .sdot { width: 8px; height: 8px; border-radius: 50%; background: #6b7686; }
+  .sdot.online { background: #54d68a; }
+  .sdot.busy   { background: #d6a154; }
+  .sdot.away   { background: #d6a154; opacity: .6; }
+  .sdot.play   { background: #6fb3ff; }
+
+  /* lobby members */
+  .member { display: flex; gap: 8px; align-items: center; font-size: 12px; padding: 2px 0; }
+  .member .own { color: #d6a154; font-size: 10px; }
+
+  /* voice meter */
+  .meter { height: 12px; background: #131720; border: 1px solid #1d2330; border-radius: 6px; overflow: hidden; }
+  .meter .fill { height: 100%; width: 0%; background: linear-gradient(90deg,#3c8c63,#54d68a); transition: width .06s linear; }
+
+  /* event log */
+  .log .e { padding: 2px 0; border-bottom: 1px solid #131720; font-size: 11px; }
+  .log .e .t { color: #5a6678; margin-right: 8px; }
+  .log .e .k { color: #6fb3ff; }
+  .log .e.warn .k { color: #d6a154; }
+  .log .e.err  .k { color: #ff8585; }
+
+  .kv { font-size: 12px; line-height: 1.7; }
+  .kv .k { color: #6b7686; display: inline-block; min-width: 96px; }
+  .empty { color: #5a6678; font-size: 12px; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Steam Lab</h1>
+    <span class="sub">bro.steam — Steamworks via the runtime flat C API · exercises every binding call</span>
+  </header>
+
+  <div class="strip">
+    <span class="pill down" id="availPill"><span class="dot"></span><span id="availText">probing…</span></span>
+    <span><span class="k">reason</span><span class="v" id="reason">—</span></span>
+    <span><span class="k">steamId</span><span class="v mono" id="steamId">—</span></span>
+    <span><span class="k">persona</span><span class="v" id="persona">—</span></span>
+    <span><span class="k">appId</span><span class="v" id="appId">—</span></span>
+    <span><span class="k">pump</span><span class="heart" id="heart"></span><span class="v" id="pulse">0</span></span>
+    <span><span class="k">overlay</span><span class="v" id="overlay">closed</span></span>
+  </div>
+
+  <div class="grid">
+    <!-- Identity & presence -->
+    <section class="panel">
+      <h2>Presence &amp; Overlay <span class="tag">M1 · M2</span></h2>
+      <div class="body">
+        <div class="row">
+          <input type="text" id="rpKey" placeholder="key (e.g. status)">
+          <input type="text" id="rpVal" placeholder="value (e.g. In the lobby)">
+          <button id="rpSet">setRichPresence</button>
+          <button id="rpClear">clear</button>
+        </div>
+        <div class="row">
+          <span class="hint">activateOverlay:</span>
+          <button data-ov="friends">friends</button>
+          <button data-ov="community">community</button>
+          <button data-ov="players">players</button>
+          <button data-ov="settings">settings</button>
+        </div>
+        <div class="hint">Rich presence shows under your name in friends' lists. Overlay needs the
+          Steam overlay enabled and the app launched through Steam (or steam_appid.txt present).</div>
+      </div>
+    </section>
+
+    <!-- Friends -->
+    <section class="panel">
+      <h2>Friends <span class="tag">M2 · getFriends / getAvatar</span></h2>
+      <div class="body">
+        <div class="row">
+          <button id="friendsRefresh">refresh</button>
+          <span class="hint" id="friendsCount">—</span>
+          <span class="hint">click a friend → open their Steam profile overlay</span>
+        </div>
+        <div id="friends"><span class="empty">no friends loaded</span></div>
+      </div>
+    </section>
+
+    <!-- Lobby -->
+    <section class="panel">
+      <h2>Lobby <span class="tag">M3 · matchmaking</span></h2>
+      <div class="body">
+        <div class="row">
+          <select id="lobbyType">
+            <option value="public">public</option>
+            <option value="friends" selected>friends-only</option>
+            <option value="private">private</option>
+          </select>
+          <label class="hint">max <input type="number" id="lobbyMax" min="2" max="30" value="8"></label>
+          <button id="lobbyCreate">createLobby</button>
+          <button id="lobbyLeave" disabled>leave</button>
+        </div>
+        <div class="kv">
+          <div><span class="k">lobby id</span><span class="mono" id="lobbyId">—</span></div>
+          <div><span class="k">owner</span><span class="mono" id="lobbyOwner">—</span></div>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <input type="text" id="ldKey" placeholder="data key">
+          <input type="text" id="ldVal" placeholder="data value">
+          <button id="ldSet" disabled>setLobbyData</button>
+        </div>
+        <div class="row">
+          <button id="lobbyInvite" disabled>invite via overlay</button>
+          <button id="lobbyList">requestLobbyList</button>
+        </div>
+        <div class="row">
+          <input type="text" id="joinId" placeholder="lobby id to join">
+          <button id="joinBtn">joinLobby</button>
+        </div>
+        <div style="margin-top:6px"><span class="hint">members</span></div>
+        <div id="members"><span class="empty">not in a lobby</span></div>
+        <div style="margin-top:6px"><span class="hint">requestLobbyList results</span></div>
+        <div id="lobbyResults"><span class="empty">—</span></div>
+      </div>
+    </section>
+
+    <!-- Voice -->
+    <section class="panel">
+      <h2>Voice <span class="tag">M4 · capture + codec loopback</span></h2>
+      <div class="body">
+        <div class="row">
+          <button id="voiceToggle">start recording</button>
+          <span class="hint">rate <b id="voiceRate">—</b> Hz</span>
+        </div>
+        <div class="kv">
+          <div><span class="k">frames</span><span class="mono" id="voiceFrames">0</span></div>
+          <div><span class="k">bytes</span><span class="mono" id="voiceBytes">0</span></div>
+          <div><span class="k">decoded rate</span><span class="mono" id="voiceDecRate">—</span></div>
+        </div>
+        <div style="margin-top:8px"><span class="hint">decodeVoice loopback level (your mic, encoded → decoded locally)</span></div>
+        <div class="meter"><div class="fill" id="voiceMeter"></div></div>
+        <div class="hint" style="margin-top:8px">Capture is local. Each compressed frame is fed straight back
+          through <b>decodeVoice</b> to prove the codec roundtrip solo. Sending frames to peers (over bro.net)
+          and positional mixing (broaudio) is the game's job — out of this lab's scope.</div>
+      </div>
+    </section>
+
+    <!-- Event log -->
+    <section class="panel" style="grid-column: 1 / -1;">
+      <h2>Events <span class="tag">join requests · lobby · invites · overlay</span></h2>
+      <div class="body log" id="log"></div>
+    </section>
+  </div>
+
+  <script type="module" src="/app/main.js"></script>
+</body>
+</html>
