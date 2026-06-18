@@ -82,6 +82,21 @@ bro.steam.decodeVoice(new Uint8Array(0)).then((res) => {
 assert(pumpUntil(() => avatarOK && listOK && decodeOK, 5000), 'async calls settled');
 console.log('inert paths OK');
 
+// ── 4b. avatar render path — the ImageData global + canvas roundtrip the lab
+//        uses to paint getAvatar() pixels. Steam-independent (runs in CI). ──────
+const _id = new ImageData(2, 3);
+assert(_id.width === 2 && _id.height === 3 && _id.data.length === 24, 'new ImageData(w,h) shape');
+const _px = new Uint8ClampedArray(2 * 1 * 4);
+_px[0] = 200; _px[3] = 255;                          // opaque red-ish pixel
+const _wrap = new ImageData(_px, 2);
+assert(_wrap.width === 2 && _wrap.height === 1, 'new ImageData(data,w) infers height');
+const _cv = document.createElement('canvas');
+_cv.width = 2; _cv.height = 1;
+const _cx = _cv.getContext('2d');
+_cx.putImageData(new ImageData(_px, 2, 1), 0, 0);
+assert(_cx.getImageData(0, 0, 2, 1).data[0] === 200, 'canvas putImageData/getImageData roundtrip');
+console.log('avatar render path OK');
+
 // ── 5. live checks (only when Steam is actually up) ──────────────────────────
 if (bro.steam.available) {
   assert(bro.steam.steamId !== '0' && bro.steam.steamId.length >= 17, 'live steamId: ' + bro.steam.steamId);
@@ -109,7 +124,24 @@ if (bro.steam.available) {
   assert(owner === bro.steam.steamId, 'I own the lobby I created (' + owner + ')');
 
   bro.steam.leaveLobby(lobbyId);
-  console.log('LIVE OK — ' + bro.steam.personaName + ' appId=' + bro.steam.appId + ' lobby=' + lobbyId);
+
+  // A real friend avatar, painted onto a canvas via ImageData — the lab's path.
+  pumpUntil(() => bro.steam.getFriends().length > 0, 4000);
+  const friends = bro.steam.getFriends();
+  if (friends.length) {
+    let painted = false;
+    bro.steam.getAvatar(friends[0].steamId, 'small').then((av) => {
+      if (!av) { painted = true; return; } // friend genuinely has no avatar — still a settled answer
+      const c = document.createElement('canvas');
+      c.width = av.width; c.height = av.height;
+      c.getContext('2d').putImageData(new ImageData(av.data, av.width, av.height), 0, 0);
+      painted = true;
+    });
+    assert(pumpUntil(() => painted, 6000), 'friend avatar resolved + painted (' + friends[0].name + ')');
+  }
+
+  console.log('LIVE OK — ' + bro.steam.personaName + ' appId=' + bro.steam.appId +
+              ' friends=' + friends.length + ' lobby=' + lobbyId);
 } else {
   console.log('Steam unavailable — surface + inert-path checks only (this is expected in CI)');
 }
