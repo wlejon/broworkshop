@@ -50,7 +50,15 @@ function createClient() {
       send({ type: 'load', modelDir, dictPath }, cb),
     generate: (prompt, opts, controls, cb) =>
       send({ type: 'generate', prompt, opts, controls }, cb),
+    search: (neg, pos, name, cb) =>
+      send({ type: 'search', neg, pos, name }, cb),
   };
+}
+
+// Split a textarea of words/phrases into a clean list (newline- or comma-
+// separated; blanks dropped). Each item is one phrase the encoder sees.
+function splitPhrases(text) {
+  return (text || '').split(/[\n,]+/).map((s) => s.trim()).filter(Boolean);
 }
 
 function init() {
@@ -60,6 +68,8 @@ function init() {
   let axes = [];           // axis names from the loaded dictionary
   let loaded = false;
   let busy = false;
+  let searchReady = false; // a search axis has been built this session
+  const SEARCH_AXIS = 'search';
   const sliders = {};      // axisName -> { range, num, get(), set(v) }
 
   const canvas = $('view');
@@ -69,6 +79,8 @@ function init() {
   if (prefs.modelDir) $('model-dir').value = prefs.modelDir;
   if (prefs.dictPath) $('dict-path').value = prefs.dictPath;
   if (prefs.prompt)   $('prompt').value = prefs.prompt;
+  if (prefs.searchNeg) $('search-neg').value = prefs.searchNeg;
+  if (prefs.searchPos) $('search-pos').value = prefs.searchPos;
   ['seed', 'steps', 'guidance', 'size'].forEach((k) => {
     if (prefs[k] != null) $(k).value = prefs[k];
   });
@@ -80,6 +92,7 @@ function init() {
       prompt: $('prompt').value,
       seed: $('seed').value, steps: $('steps').value,
       guidance: $('guidance').value, size: $('size').value,
+      searchNeg: $('search-neg').value, searchPos: $('search-pos').value,
       controls: collectControls(),
     });
   }
@@ -182,6 +195,10 @@ function init() {
       const v = sliders[name].get();
       if (v) out[name] = v;
     }
+    if (searchReady) {
+      const s = +$('search-strength').value;
+      if (s) out[SEARCH_AXIS] = s;
+    }
     return out;
   }
 
@@ -198,6 +215,7 @@ function init() {
   function setBusy(b) {
     busy = b;
     $('btn-generate').disabled = b || !loaded;
+    $('btn-build-axis').disabled = b || !loaded;
     $('btn-load').disabled = b;
   }
 
@@ -225,6 +243,7 @@ function init() {
       status(cls + ' ready · ' + axes.length + ' control axes', 'ok');
       buildControls();
       $('btn-generate').disabled = false;
+      $('btn-build-axis').disabled = false;
     });
   }
 
@@ -252,11 +271,50 @@ function init() {
     });
   }
 
+  // ── axis search ──────────────────────────────────────────────────────────
+  function refreshSearchVal() {
+    const v = +$('search-strength').value;
+    const el = $('search-val');
+    el.textContent = (v > 0 ? '+' : '') + v;
+    el.classList.toggle('off', v === 0);
+  }
+  function doBuildAxis() {
+    if (!loaded || busy) return;
+    const neg = splitPhrases($('search-neg').value);
+    const pos = splitPhrases($('search-pos').value);
+    if (!neg.length || !pos.length) {
+      status('enter at least one word in each set', 'err'); return;
+    }
+    persist();
+    setBusy(true);
+    status('building axis — encoding ' + (neg.length + pos.length) + ' phrases…');
+    client.search(neg, pos, SEARCH_AXIS, (err, msg) => {
+      setBusy(false);
+      if (err) { status(String(err.message || err), 'err'); return; }
+      searchReady = true;
+      $('search-row').classList.remove('hidden');
+      $('search-strength').value = '0';
+      refreshSearchVal();
+      $('search-meta').textContent =
+        'axis ready · ' + msg.negN + ' ↔ ' + msg.posN +
+        ' phrases · separation ' + msg.sep.toFixed(2) +
+        ' · slider = injection norm (A↓ / B↑)';
+      status('axis built — drag strength, then Generate', 'ok');
+    });
+  }
+
   // ── wire up ────────────────────────────────────────────────────────────
   $('btn-load').addEventListener('click', doLoad);
   $('btn-generate').addEventListener('click', doGenerate);
+  $('btn-build-axis').addEventListener('click', doBuildAxis);
+  $('search-strength').addEventListener('input', () => { refreshSearchVal(); persist(); });
+  $('search-val').addEventListener('dblclick', () => {
+    $('search-strength').value = '0'; refreshSearchVal(); persist();
+  });
+  ['search-neg', 'search-pos'].forEach((id) => $(id).addEventListener('change', persist));
   $('btn-reset-ctl').addEventListener('click', () => {
     for (const name in sliders) sliders[name].set(0);
+    if (searchReady) { $('search-strength').value = '0'; refreshSearchVal(); }
     persist();
   });
   $('btn-browse-model').addEventListener('click', () => {

@@ -9,6 +9,7 @@
 //
 //   main -> load     {modelDir, dictPath}     ->  loaded {config, axes, backend}
 //   main -> generate {prompt, opts, controls} ->  done {bitmap, width, height, ms}
+//   main -> search   {neg[], pos[], name}     ->  axisBuilt {name, negN, posN, sep}
 //   errors come back as                       ->  error {stage, message}
 //
 // `controls` is a plain { axisName: alpha } map. The worker clears the control
@@ -17,6 +18,11 @@
 
 var pipeline = null;     // native Pipeline handle
 var axes = [];           // control axis names from the loaded dictionary
+
+// Gemma "massive activation" dims — a handful of huge-norm channels that act as
+// an attention sink. The offline axes are built with these zeroed; a live axis
+// must zero them too or the injection destabilizes. (sana-research fit_axis.py)
+var MASSIVE = [334, 976, 1173, 593, 1304, 1535, 833, 1142, 184];
 
 function fail(stage, err) {
   self.postMessage({
@@ -100,11 +106,74 @@ function handleGenerate(msg) {
   }
 }
 
+// ── search: build a control axis from two phrase sets (diff-of-means) ──────
+// Encode each phrase, mean its content-token rows (skip BOS), average per set,
+// difference the set means, zero the MASSIVE dims, unit-normalize. The result is
+// registered as a runtime control axis (`name`, weight 0) the app then drives
+// like any other — alpha is the injection norm. This is the Tier-2 recipe the
+// offline detail axes use, run live on the user's words.
+function meanContent(prompt) {
+  var enc = pipeline.encodeConditioning(prompt);   // { rows, cols, data }
+  var rows = enc.rows, cols = enc.cols, d = enc.data;
+  var out = new Float64Array(cols);
+  var n = rows - 1;                                 // rows 1.. are content
+  for (var r = 1; r < rows; r++) {
+    var off = r * cols;
+    for (var c = 0; c < cols; c++) out[c] += d[off + c];
+  }
+  if (n > 0) for (var k = 0; k < cols; k++) out[k] /= n;
+  return out;
+}
+function setMean(phrases) {
+  var sum = null, cols = 0;
+  for (var i = 0; i < phrases.length; i++) {
+    var m = meanContent(phrases[i]);
+    if (!sum) { sum = new Float64Array(m.length); cols = m.length; }
+    for (var c = 0; c < cols; c++) sum[c] += m[c];
+  }
+  for (var k = 0; k < cols; k++) sum[k] /= phrases.length;
+  return sum;
+}
+function handleSearch(msg) {
+  try {
+    if (!pipeline) throw new Error('no model loaded');
+    var neg = (msg.neg || []).filter(function (s) { return s && s.trim(); });
+    var pos = (msg.pos || []).filter(function (s) { return s && s.trim(); });
+    if (!neg.length || !pos.length)
+      throw new Error('need at least one phrase in each set');
+
+    var mneg = setMean(neg), mpos = setMean(pos);
+    var cols = mpos.length;
+    var v = new Float64Array(cols);
+    for (var c = 0; c < cols; c++) v[c] = mpos[c] - mneg[c];
+    for (var i = 0; i < MASSIVE.length; i++) if (MASSIVE[i] < cols) v[MASSIVE[i]] = 0;
+
+    var norm = 0;
+    for (var k = 0; k < cols; k++) norm += v[k] * v[k];
+    norm = Math.sqrt(norm);
+    var unit = new Float32Array(cols);
+    if (norm > 0) for (var j = 0; j < cols; j++) unit[j] = v[j] / norm;
+
+    // scale 1, weight 0: alpha (set later by the strength slider) is the literal
+    // injection norm, so the app's slider matches the offline vet's norm sweep.
+    var name = msg.name || 'search';
+    pipeline.setControlVector(name, unit, 0.0, 1.0);
+
+    self.postMessage({
+      type: 'axisBuilt', name: name,
+      negN: neg.length, posN: pos.length, sep: norm,
+    });
+  } catch (e) {
+    fail('search', e);
+  }
+}
+
 self.onmessage = function (e) {
   var msg = e.data || {};
   switch (msg.type) {
     case 'load':     handleLoad(msg); break;
     case 'generate': handleGenerate(msg); break;
+    case 'search':   handleSearch(msg); break;
     default: fail('dispatch', new Error('unknown message: ' + msg.type));
   }
 };

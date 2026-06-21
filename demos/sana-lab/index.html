@@ -58,8 +58,27 @@
           <button id="btn-generate" class="primary" disabled>Generate</button>
         </section>
 
+        <section class="panel">
+          <h2>axis search
+            <span class="hint inline">two word sets &rarr; one direction</span>
+          </h2>
+          <label class="field">set A &mdash; the “from” concept
+            <textarea id="search-neg" rows="2"
+              placeholder="small, tiny, little"></textarea></label>
+          <label class="field">set B &mdash; the “to” concept
+            <textarea id="search-pos" rows="2"
+              placeholder="large, huge, enormous"></textarea></label>
+          <button id="btn-build-axis" disabled>Build axis from words</button>
+          <div id="search-row" class="ctl-row hidden">
+            <span class="ctl-name">strength</span>
+            <input id="search-strength" type="range" min="-20" max="20" step="0.5" value="0">
+            <span id="search-val" class="ctl-val off">0</span>
+          </div>
+          <p id="search-meta" class="hint"></p>
+        </section>
+
         <section class="panel grow-panel">
-          <h2>controls
+          <h2>dictionary axes
             <button id="btn-reset-ctl" class="link" title="Zero every slider">reset</button>
           </h2>
           <p id="ctl-hint" class="hint">Load a model to populate the control axes.</p>

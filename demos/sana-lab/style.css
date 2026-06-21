@@ -83,7 +83,9 @@ button.link {
 button.link:hover { color: #8ab4ee; background: none; }
 
 /* ── control sliders ─────────────────────────────────────────────────── */
+.hidden { display: none !important; }
 .hint { margin: 0; color: #5b6470; font-size: 11px; }
+.hint.inline { font-weight: 400; letter-spacing: 0; text-transform: none; }
 #controls-host { display: flex; flex-direction: column; gap: 10px; }
 .ctl-group { display: flex; flex-direction: column; gap: 4px; }
 .ctl-cat {
