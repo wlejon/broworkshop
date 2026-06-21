@@ -45,8 +45,20 @@
         send({ type: 'load', spec: spec }, null, cb);
       },
 
-      prime: function (prompt, opts, cb) {
-        send({ type: 'prime', prompt: prompt, opts: opts }, null, cb);
+      prime: function (prompt, opts, controls, cb) {
+        send({ type: 'prime', prompt: prompt, opts: opts, controls: controls },
+             null, cb);
+      },
+
+      // Build a conditioning-control axis from two word sets (diff-of-means);
+      // the worker encodes the phrases and registers a runtime axis `name`.
+      search: function (neg, pos, name, cb) {
+        send({ type: 'search', neg: neg, pos: pos, name: name }, null, cb);
+      },
+
+      // Drop a built axis from the pipeline.
+      removeAxis: function (name, cb) {
+        send({ type: 'remove', name: name }, null, cb || function () {});
       },
 
       // ctrl is forwarded verbatim to PipelineState.stepOnce() in the worker

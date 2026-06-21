@@ -410,6 +410,47 @@ input[type=range] { accent-color: #4a6cf0; }
 #steer-bias { width: 100%; margin-top: 2px; }
 #steer-clear { width: 100%; margin-top: 10px; }
 
+/* ── word axes (conditioning-space control) ───────────────────────── */
+
+#wa-neg, #wa-pos { width: 100%; resize: vertical; min-height: 38px; }
+#wa-name { width: 100%; }
+#wa-build { width: 100%; margin-top: 8px; }
+#wa-hint { margin: 8px 0 4px; }
+
+.axes-host { display: flex; flex-direction: column; gap: 8px; }
+.axis-card {
+  padding: 8px 9px;
+  background: #161a24;
+  border: 1px solid #232838;
+  border-radius: 6px;
+}
+.axis-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.axis-name {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 600;
+  color: #cdd6f4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.axis-del { padding: 2px 6px; font-size: 11px; }
+.axis-ctl { display: flex; align-items: center; gap: 8px; }
+.axis-ctl input[type="range"] { flex: 1; }
+.axis-val {
+  min-width: 30px;
+  text-align: right;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: #8aa6ff;
+}
+.axis-val.off { color: #5b6378; }
+
 /* ── footer ──────────────────────────────────────────────────────── */
 
 #status {

@@ -8,8 +8,9 @@ import { Profiles } from "/app/lab/profiles.js";
 import { Client } from "/app/lab/client.js";
 import { Viewport } from "/app/lab/viewport.js";
 import { Attention } from "/app/lab/attention.js";
+import { Axes } from "/app/lab/axes.js";
 window.DLab = { Tokenizer: Tokenizer, Profiles: Profiles, Client: Client,
-                Viewport: Viewport, Attention: Attention };
+                Viewport: Viewport, Attention: Attention, Axes: Axes };
 
 (function () {
   var fails = 0;
@@ -26,6 +27,7 @@ window.DLab = { Tokenizer: Tokenizer, Profiles: Profiles, Client: Client,
   ok('Client module', !!(window.DLab && DLab.Client));
   ok('Viewport module', !!(window.DLab && DLab.Viewport));
   ok('Attention module', !!(window.DLab && DLab.Attention));
+  ok('Axes module', !!(window.DLab && DLab.Axes));
   ok('app bootstrapped (DLabApp)', !!window.DLabApp);
 
   // ── tokenizer against the real CLIP vocab ─────────────────────────────

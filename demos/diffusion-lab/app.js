@@ -9,8 +9,9 @@ import { Profiles } from "/app/lab/profiles.js";
 import { Client } from "/app/lab/client.js";
 import { Viewport } from "/app/lab/viewport.js";
 import { Attention } from "/app/lab/attention.js";
+import { Axes } from "/app/lab/axes.js";
 
-  const DLab = { Tokenizer, Profiles, Client, Viewport, Attention };
+  const DLab = { Tokenizer, Profiles, Client, Viewport, Attention, Axes };
   function $(id) { return document.getElementById(id); }
 
   // ── persisted UI state ───────────────────────────────────────────────
@@ -83,6 +84,17 @@ import { Attention } from "/app/lab/attention.js";
         if (aggTrace) $('overlay-on').checked = true;
         refreshOverlay();
       },
+    });
+
+    // Word axes — conditioning-space control built from word sets. Persists its
+    // definitions under prefs.axes; re-registered against the worker on load.
+    function persistAxes() { prefs.axes = axes.serialize(); savePrefs(prefs); }
+    var axes = DLab.Axes.create({
+      client: client,
+      status: status,
+      persist: persistAxes,
+      getReady: function () { return loaded && !running; },
+      setBusy: setBusy,
     });
 
     // ── live prompt tokenization ───────────────────────────────────────
@@ -270,6 +282,12 @@ import { Attention } from "/app/lab/attention.js";
         status(ready, 'ok');
         $('btn-generate').disabled = false;
         $('btn-load').disabled = false;
+
+        // Re-register word axes against the fresh pipeline (the worker starts
+        // clean on every load); clear stale cards first, then restore from prefs.
+        axes.setLoaded(true);
+        axes.reset();
+        axes.restore(prefs.axes);
       });
     }
 
@@ -672,7 +690,13 @@ import { Attention } from "/app/lab/attention.js";
       prefs.seed = opts.seed;
       prefs.scheduler = $('scheduler').value;
       prefs.int8 = $('int8').checked;
+      prefs.axes = axes.serialize();
       savePrefs(prefs);
+
+      // Conditioning-space word axes — a separate steering surface from the
+      // per-token attention bias; applied to the positive conditioning at prime.
+      var controls = axes.collectControls();
+      var nAxes = Object.keys(controls).length;
 
       // reset run state — release the previous run's frame bitmaps eagerly
       // rather than waiting on GC.
@@ -695,10 +719,14 @@ import { Attention } from "/app/lab/attention.js";
       $('scrub').value = 0;
       viewport.setOverlay(null);
       setBusy(true);
-      status(runBias ? 'encoding prompt — steering ' +
-        Object.keys(runBiasMap).length + ' token(s)…' : 'encoding prompt…', '');
+      var steerMsg = runBias
+        ? 'encoding prompt — steering ' + Object.keys(runBiasMap).length +
+          ' token(s)' + (nAxes ? ' · ' + nAxes + ' axis' : '') + '…'
+        : (nAxes ? 'encoding prompt — ' + nAxes + ' axis' +
+                   (nAxes > 1 ? 'es' : '') + ' active…' : 'encoding prompt…');
+      status(steerMsg, '');
 
-      client.prime(prompt, opts, function (err, info) {
+      client.prime(prompt, opts, controls, function (err, info) {
         if (err || token !== runToken) {
           if (err) status('prime failed: ' + err.message, 'err');
           if (token === runToken) setBusy(false);

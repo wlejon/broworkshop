@@ -142,6 +142,30 @@
         </div>
 
         <div class="panel-block">
+          <label class="hdr">Word axes</label>
+          <p class="muted small">Build a control direction from two word sets —
+             diff-of-means in CLIP conditioning space. Drag strength to walk it.</p>
+          <div class="field">
+            <label>A · from</label>
+            <textarea id="wa-neg" rows="2"
+                      placeholder="young person, a child"></textarea>
+          </div>
+          <div class="field">
+            <label>B · to</label>
+            <textarea id="wa-pos" rows="2"
+                      placeholder="old person, an elderly face"></textarea>
+          </div>
+          <div class="field">
+            <label>Name <span class="muted small">(optional)</span></label>
+            <input id="wa-name" type="text" placeholder="age">
+          </div>
+          <button id="wa-build" disabled>Add axis</button>
+          <p id="wa-hint" class="muted small">Load a model, then build an axis
+             from two word sets.</p>
+          <div id="wa-host" class="axes-host"></div>
+        </div>
+
+        <div class="panel-block">
           <label class="hdr">Attention overlay</label>
           <div class="field">
             <label>Layer</label>
