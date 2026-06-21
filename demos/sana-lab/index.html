@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Sana Lab</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <header id="toolbar">
+      <span id="brand">⬡ Sana&nbsp;Lab</span>
+      <span class="tagline">steer Sana through its own conditioning space</span>
+      <span class="grow"></span>
+      <span id="backend" class="badge">loading…</span>
+    </header>
+
+    <div id="body">
+      <!-- ── left rail: model, prompt, generation settings, controls ──── -->
+      <aside id="rail">
+        <section class="panel">
+          <h2>model</h2>
+          <label class="field">Sana directory
+            <span class="row">
+              <input id="model-dir" type="text"
+                     value="D:/projects/brodiffusion/weights/sana-1.6b">
+              <button id="btn-browse-model" class="iconbtn"
+                      title="Choose a Sana diffusers directory">📁</button>
+            </span>
+          </label>
+          <label class="field">control dictionary
+            <span class="row">
+              <input id="dict-path" type="text" value="/app/sana_controls.bcd1">
+              <button id="btn-browse-dict" class="iconbtn"
+                      title="Choose a BCD1 control dictionary">📁</button>
+            </span>
+          </label>
+          <button id="btn-load" class="primary">Load model</button>
+        </section>
+
+        <section class="panel">
+          <h2>prompt</h2>
+          <textarea id="prompt" rows="3"
+            placeholder="a photo of a small bird perched on a branch">a photo of a small bird perched on a branch</textarea>
+          <div class="grid">
+            <label class="field">seed
+              <input id="seed" type="number" value="0" step="1"></label>
+            <label class="field">steps
+              <input id="steps" type="number" value="20" min="1" max="50"></label>
+            <label class="field">guidance
+              <input id="guidance" type="number" value="4.5" step="0.5"></label>
+            <label class="field">size
+              <select id="size">
+                <option value="512">512²</option>
+                <option value="768">768²</option>
+                <option value="1024">1024²</option>
+              </select></label>
+          </div>
+          <button id="btn-generate" class="primary" disabled>Generate</button>
+        </section>
+
+        <section class="panel grow-panel">
+          <h2>controls
+            <button id="btn-reset-ctl" class="link" title="Zero every slider">reset</button>
+          </h2>
+          <p id="ctl-hint" class="hint">Load a model to populate the control axes.</p>
+          <div id="controls-host"></div>
+        </section>
+      </aside>
+
+      <!-- ── viewport ─────────────────────────────────────────────────── -->
+      <main id="stage">
+        <div id="canvas-wrap">
+          <canvas id="view" width="512" height="512"></canvas>
+          <div id="view-hint">Load a model, then Generate.</div>
+        </div>
+        <div id="status-bar">
+          <span id="status-text">idle</span>
+          <span class="grow"></span>
+          <span id="timing" class="meta"></span>
+        </div>
+      </main>
+    </div>
+  </div>
+  <script type="module" src="/app/app.js"></script>
+</body>
+</html>
