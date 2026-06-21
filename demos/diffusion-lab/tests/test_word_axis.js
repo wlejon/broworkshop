@@ -89,6 +89,15 @@ import { Profiles } from "/app/lab/profiles.js";
   var base = render(null);
   var steer = render({ age: 30.0 });
   var zero = render({ age: 0.0 });
+
+  // Save real bro-rendered frames for visual confirmation (RGBA, 4 channels).
+  if (bro.image && bro.image.encodePngFile) {
+    try {
+      bro.image.encodePngFile('tests/out_age_baseline.png', base.data, base.width, base.height, 4);
+      bro.image.encodePngFile('tests/out_age_steered.png', steer.data, steer.width, steer.height, 4);
+      console.log('saved tests/out_age_{baseline,steered}.png');
+    } catch (e) { console.log('png save skipped: ' + e.message); }
+  }
   var dSteer = meanAbsDiff(base.data, steer.data);
   var dZero = meanAbsDiff(base.data, zero.data);
   console.log('mean|Δpixel| baseline vs steered(+30) = ' + dSteer.toFixed(2));
