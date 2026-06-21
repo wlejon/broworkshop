@@ -69,12 +69,20 @@ function init() {
   let axisSeq = prefs.axisSeq || 0;     // monotonic id for unique worker names
   const axes = [];                      // { wname, name, neg, pos, sep, els }
 
+  // Generation defaults (shown as hints; the reset button restores them). Sana's
+  // standard recipe: 20 steps, guidance 4.5, 1024² native resolution.
+  const DEFAULTS = { seed: 0, steps: 20, guidance: 4.5, size: 1024 };
+  // Generous character cap for the prompt fields — comfortably under Sana's
+  // 300-token budget for typical text (the model truncates at the token level).
+  const MAXCHARS = 1000;
+
   const canvas = $('view');
   const cctx = canvas.getContext('2d');
 
   // restore persisted text fields
   if (prefs.modelDir) $('model-dir').value = prefs.modelDir;
   if (prefs.prompt)   $('prompt').value = prefs.prompt;
+  if (prefs.negPrompt != null) $('neg-prompt').value = prefs.negPrompt;
   ['seed', 'steps', 'guidance', 'size'].forEach((k) => {
     if (prefs[k] != null) $(k).value = prefs[k];
   });
@@ -83,6 +91,7 @@ function init() {
     savePrefs({
       modelDir: $('model-dir').value,
       prompt: $('prompt').value,
+      negPrompt: $('neg-prompt').value,
       seed: $('seed').value, steps: $('steps').value,
       guidance: $('guidance').value, size: $('size').value,
       axisSeq,
@@ -225,6 +234,7 @@ function init() {
       steps: +$('steps').value || 20,
       guidance: +$('guidance').value || 4.5,
       seed: +$('seed').value || 0,
+      negativePrompt: $('neg-prompt').value.trim(),
     };
     const controls = collectControls();
     persist();
@@ -291,10 +301,31 @@ function init() {
     })();
   }
 
+  // character counters (entered / max) for the prompt fields
+  function bindCounter(taId, countId) {
+    const ta = $(taId), out = $(countId);
+    function upd() {
+      const n = ta.value.length;
+      out.textContent = n + ' / ' + MAXCHARS;
+      out.classList.toggle('warn', n >= MAXCHARS);
+    }
+    ta.addEventListener('input', upd);
+    upd();
+  }
+  bindCounter('prompt', 'prompt-count');
+  bindCounter('neg-prompt', 'neg-count');
+
   // ── wire up ──────────────────────────────────────────────────────────────
   $('btn-load').addEventListener('click', doLoad);
   $('btn-generate').addEventListener('click', doGenerate);
   $('btn-build-axis').addEventListener('click', doBuildAxis);
+  $('btn-reset-settings').addEventListener('click', () => {
+    $('seed').value = DEFAULTS.seed;
+    $('steps').value = DEFAULTS.steps;
+    $('guidance').value = DEFAULTS.guidance;
+    $('size').value = String(DEFAULTS.size);
+    persist();
+  });
   $('btn-reset-ctl').addEventListener('click', () => {
     for (const a of axes) { a.els.strength.value = '0'; a.els.strength.dispatchEvent(new Event('input')); }
     persist();
@@ -304,7 +335,8 @@ function init() {
       ? window.showOpenFolderDialog($('model-dir').value.trim()) : null;
     if (d) { $('model-dir').value = d; persist(); }
   });
-  ['model-dir', 'prompt', 'seed', 'steps', 'guidance', 'size', 'axis-name', 'search-neg', 'search-pos']
+  ['model-dir', 'prompt', 'neg-prompt', 'seed', 'steps', 'guidance', 'size',
+   'axis-name', 'search-neg', 'search-pos']
     .forEach((id) => $(id).addEventListener('change', persist));
   // Cmd/Ctrl+Enter in the prompt generates.
   $('prompt').addEventListener('keydown', (e) => {
