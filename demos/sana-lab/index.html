@@ -27,13 +27,6 @@
                       title="Choose a Sana diffusers directory">📁</button>
             </span>
           </label>
-          <label class="field">control dictionary
-            <span class="row">
-              <input id="dict-path" type="text" value="/app/sana_controls.bcd1">
-              <button id="btn-browse-dict" class="iconbtn"
-                      title="Choose a BCD1 control dictionary">📁</button>
-            </span>
-          </label>
           <button id="btn-load" class="primary">Load model</button>
         </section>
 
@@ -50,39 +43,33 @@
               <input id="guidance" type="number" value="4.5" step="0.5"></label>
             <label class="field">size
               <select id="size">
-                <option value="512">512²</option>
+                <option value="1024" selected>1024²</option>
                 <option value="768">768²</option>
-                <option value="1024">1024²</option>
+                <option value="512">512²</option>
               </select></label>
           </div>
           <button id="btn-generate" class="primary" disabled>Generate</button>
         </section>
 
-        <section class="panel">
-          <h2>axis search
-            <span class="hint inline">two word sets &rarr; one direction</span>
+        <section class="panel grow-panel">
+          <h2>axes
+            <span class="hint inline">two word sets &rarr; a direction</span>
+            <span class="grow"></span>
+            <button id="btn-reset-ctl" class="link" title="Zero every strength slider">reset</button>
           </h2>
+
+          <label class="field">name <span class="hint inline">(optional)</span>
+            <input id="axis-name" type="text" placeholder="petal size"></label>
           <label class="field">set A &mdash; the “from” concept
             <textarea id="search-neg" rows="2"
-              placeholder="small, tiny, little"></textarea></label>
+              placeholder="large petals"></textarea></label>
           <label class="field">set B &mdash; the “to” concept
             <textarea id="search-pos" rows="2"
-              placeholder="large, huge, enormous"></textarea></label>
-          <button id="btn-build-axis" disabled>Build axis from words</button>
-          <div id="search-row" class="ctl-row hidden">
-            <span class="ctl-name">strength</span>
-            <input id="search-strength" type="range" min="-20" max="20" step="0.5" value="0">
-            <span id="search-val" class="ctl-val off">0</span>
-          </div>
-          <p id="search-meta" class="hint"></p>
-        </section>
+              placeholder="small petals"></textarea></label>
+          <button id="btn-build-axis" disabled>Add axis</button>
 
-        <section class="panel grow-panel">
-          <h2>dictionary axes
-            <button id="btn-reset-ctl" class="link" title="Zero every slider">reset</button>
-          </h2>
-          <p id="ctl-hint" class="hint">Load a model to populate the control axes.</p>
-          <div id="controls-host"></div>
+          <p id="ctl-hint" class="hint">Load a model, then add an axis from two word sets.</p>
+          <div id="axes-host"></div>
         </section>
       </aside>
 

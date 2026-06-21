@@ -7,9 +7,10 @@
 // controlAxes. The worker is a thin long-lived inference server — load the
 // multi-GB weights + the (tiny) BCD1 dictionary once, then generate many times.
 //
-//   main -> load     {modelDir, dictPath}     ->  loaded {config, axes, backend}
+//   main -> load     {modelDir}              ->  loaded {config, axes, backend}
 //   main -> generate {prompt, opts, controls} ->  done {bitmap, width, height, ms}
 //   main -> search   {neg[], pos[], name}     ->  axisBuilt {name, negN, posN, sep}
+//   main -> remove   {name}                   ->  removed {name}
 //   errors come back as                       ->  error {stage, message}
 //
 // `controls` is a plain { axisName: alpha } map. The worker clears the control
@@ -168,12 +169,23 @@ function handleSearch(msg) {
   }
 }
 
+// ── remove: drop a built axis from the pipeline ───────────────────────────
+function handleRemove(msg) {
+  try {
+    if (pipeline && msg.name) pipeline.removeControl(msg.name);
+    self.postMessage({ type: 'removed', name: msg.name });
+  } catch (e) {
+    fail('remove', e);
+  }
+}
+
 self.onmessage = function (e) {
   var msg = e.data || {};
   switch (msg.type) {
     case 'load':     handleLoad(msg); break;
     case 'generate': handleGenerate(msg); break;
     case 'search':   handleSearch(msg); break;
+    case 'remove':   handleRemove(msg); break;
     default: fail('dispatch', new Error('unknown message: ' + msg.type));
   }
 };

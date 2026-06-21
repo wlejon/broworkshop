@@ -93,6 +93,21 @@ button.link:hover { color: #8ab4ee; background: none; }
 .hint { margin: 0; color: #5b6470; font-size: 11px; }
 .hint.inline { font-weight: 400; letter-spacing: 0; text-transform: none; }
 #controls-host { display: flex; flex-direction: column; gap: 10px; }
+
+/* word-built axis cards */
+#axes-host { display: flex; flex-direction: column; gap: 8px; margin-top: 2px; }
+.axis-card {
+  border: 1px solid #1a2233; border-radius: 6px; background: #0e131c;
+  padding: 7px 9px; display: flex; flex-direction: column; gap: 5px;
+}
+.axis-head { display: flex; align-items: center; gap: 8px; }
+.axis-name {
+  flex: 1; color: #cdd5e0; font-size: 12px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: default;
+}
+.axis-del { color: #7c8593; font-size: 12px; }
+.axis-del:hover { color: #ff8e8e; }
+.axis-card .ctl-row { grid-template-columns: 1fr 50px; }
 .ctl-group { display: flex; flex-direction: column; gap: 4px; }
 .ctl-cat {
   color: #8ad9ff; font-size: 10px; font-weight: 700; letter-spacing: 0.5px;

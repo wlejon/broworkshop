@@ -1,17 +1,17 @@
-// Sana Lab — main thread. Drives the Sana pipeline (in a worker) and turns its
-// conditioning-control dictionary into live sliders.
+// Sana Lab — main thread. Drives the Sana pipeline (in a worker) and lets you
+// build any number of control axes from words.
 //
-// The interesting part of this app is the control rail: every axis the loaded
-// BCD1 dictionary reports (controlAxes()) becomes a slider, grouped by category
-// (the prefix before the dot — "bird", "flower", ...). Moving a slider sets that
-// axis's alpha; Generate re-applies the whole map and renders. alpha is in the
-// dictionary's natural units — the lab vetted clean actuation in roughly ±3, so
-// that's the slider range. At 0 the seam is a true no-op.
+// Each axis is a direction in Sana's conditioning space, searched for live from
+// two word sets: a "from" concept (A) and a "to" concept (B). The worker encodes
+// each phrase through Gemma, takes the diff-of-means, MASSIVE-zeros and unit-
+// normalizes it, and registers it as a named control axis. Each axis gets a
+// strength slider (value = injection norm, A↓ / B↑); Generate applies all the
+// active axes at once. At strength 0 an axis is a true no-op.
 
 function $(id) { return document.getElementById(id); }
 
 // ── persisted UI state ─────────────────────────────────────────────────────
-const STORE_KEY = 'sana-lab.v1';
+const STORE_KEY = 'sana-lab.v2';
 function loadPrefs() {
   try { return JSON.parse(window.localStorage.getItem(STORE_KEY) || '{}'); }
   catch (e) { return {}; }
@@ -46,12 +46,11 @@ function createClient() {
   }
   return {
     onReady: (cb) => { if (ready) cb(); else readyCb = cb; },
-    load: (modelDir, dictPath, cb) =>
-      send({ type: 'load', modelDir, dictPath }, cb),
+    load: (modelDir, cb) => send({ type: 'load', modelDir }, cb),
     generate: (prompt, opts, controls, cb) =>
       send({ type: 'generate', prompt, opts, controls }, cb),
-    search: (neg, pos, name, cb) =>
-      send({ type: 'search', neg, pos, name }, cb),
+    search: (neg, pos, name, cb) => send({ type: 'search', neg, pos, name }, cb),
+    remove: (name, cb) => send({ type: 'remove', name }, cb || function () {}),
   };
 }
 
@@ -65,22 +64,17 @@ function init() {
   const prefs = loadPrefs();
   const client = createClient();
 
-  let axes = [];           // axis names from the loaded dictionary
   let loaded = false;
   let busy = false;
-  let searchReady = false; // a search axis has been built this session
-  const SEARCH_AXIS = 'search';
-  const sliders = {};      // axisName -> { range, num, get(), set(v) }
+  let axisSeq = prefs.axisSeq || 0;     // monotonic id for unique worker names
+  const axes = [];                      // { wname, name, neg, pos, sep, els }
 
   const canvas = $('view');
   const cctx = canvas.getContext('2d');
 
   // restore persisted text fields
   if (prefs.modelDir) $('model-dir').value = prefs.modelDir;
-  if (prefs.dictPath) $('dict-path').value = prefs.dictPath;
   if (prefs.prompt)   $('prompt').value = prefs.prompt;
-  if (prefs.searchNeg) $('search-neg').value = prefs.searchNeg;
-  if (prefs.searchPos) $('search-pos').value = prefs.searchPos;
   ['seed', 'steps', 'guidance', 'size'].forEach((k) => {
     if (prefs[k] != null) $(k).value = prefs[k];
   });
@@ -88,12 +82,14 @@ function init() {
   function persist() {
     savePrefs({
       modelDir: $('model-dir').value,
-      dictPath: $('dict-path').value,
       prompt: $('prompt').value,
       seed: $('seed').value, steps: $('steps').value,
       guidance: $('guidance').value, size: $('size').value,
-      searchNeg: $('search-neg').value, searchPos: $('search-pos').value,
-      controls: collectControls(),
+      axisSeq,
+      axes: axes.map((a) => ({
+        name: a.name, neg: a.neg, pos: a.pos, sep: a.sep,
+        strength: +a.els.strength.value,
+      })),
     });
   }
 
@@ -108,110 +104,89 @@ function init() {
     el.className = 'badge' + (kind ? ' ' + kind : '');
   }
 
-  // ── control rail ─────────────────────────────────────────────────────────
-  // Build one slider per axis, grouped by the category prefix. Slider value is
-  // alpha in natural units; ±3 brackets the vetted actuation range.
-  function buildControls() {
-    const host = $('controls-host');
-    host.innerHTML = '';
-    for (const k in sliders) delete sliders[k];
+  // ── axis rows ──────────────────────────────────────────────────────────
+  function refreshHint() {
+    $('ctl-hint').textContent = axes.length
+      ? 'strength = injection norm · A↓ / B↑ · 0 = no change'
+      : (loaded ? 'Add an axis from two word sets.'
+                : 'Load a model, then add an axis from two word sets.');
+  }
 
-    if (!axes.length) {
-      $('ctl-hint').textContent = loaded
-        ? 'This model has no control dictionary loaded.'
-        : 'Load a model to populate the control axes.';
-      return;
+  // Build the UI row for an already-registered axis and track it.
+  function addAxisRow(def) {
+    const card = document.createElement('div');
+    card.className = 'axis-card';
+
+    const head = document.createElement('div');
+    head.className = 'axis-head';
+    const nm = document.createElement('span');
+    nm.className = 'axis-name';
+    nm.textContent = def.name;
+    nm.title = 'A: ' + def.neg.join(', ') + '  ↔  B: ' + def.pos.join(', ') +
+               '  · separation ' + def.sep.toFixed(2);
+    const del = document.createElement('button');
+    del.className = 'link axis-del';
+    del.textContent = '✕';
+    del.title = 'Remove this axis';
+    head.appendChild(nm);
+    head.appendChild(del);
+
+    const row = document.createElement('div');
+    row.className = 'ctl-row';
+    const range = document.createElement('input');
+    range.type = 'range';
+    range.min = '-25'; range.max = '25'; range.step = '0.5';
+    range.value = String(def.strength || 0);
+    const val = document.createElement('span');
+    val.className = 'ctl-val';
+    function refresh() {
+      const v = +range.value;
+      val.textContent = (v > 0 ? '+' : '') + v;
+      val.classList.toggle('off', v === 0);
     }
-    $('ctl-hint').textContent =
-      'alpha in the dictionary’s natural units · 0 = no change';
+    range.addEventListener('input', () => { refresh(); persist(); });
+    val.addEventListener('dblclick', () => { range.value = '0'; refresh(); persist(); });
+    refresh();
+    row.appendChild(range);
+    row.appendChild(val);
 
-    // group by prefix before the first dot
-    const groups = {};
-    axes.forEach((name) => {
-      const dot = name.indexOf('.');
-      const cat = dot > 0 ? name.slice(0, dot) : 'general';
-      (groups[cat] = groups[cat] || []).push(name);
+    card.appendChild(head);
+    card.appendChild(row);
+    $('axes-host').appendChild(card);
+
+    const rec = { wname: def.wname, name: def.name, neg: def.neg, pos: def.pos,
+                  sep: def.sep, els: { card, strength: range, val } };
+    axes.push(rec);
+
+    del.addEventListener('click', () => {
+      client.remove(rec.wname);
+      const i = axes.indexOf(rec);
+      if (i >= 0) axes.splice(i, 1);
+      card.remove();
+      refreshHint();
+      persist();
     });
-
-    const saved = (prefs.controls && typeof prefs.controls === 'object')
-      ? prefs.controls : {};
-
-    Object.keys(groups).sort().forEach((cat) => {
-      const sec = document.createElement('div');
-      sec.className = 'ctl-group';
-      const h = document.createElement('div');
-      h.className = 'ctl-cat';
-      h.textContent = cat;
-      sec.appendChild(h);
-
-      groups[cat].forEach((name) => {
-        const dot = name.indexOf('.');
-        const short = dot > 0 ? name.slice(dot + 1) : name;
-
-        const row = document.createElement('div');
-        row.className = 'ctl-row';
-
-        const label = document.createElement('span');
-        label.className = 'ctl-name';
-        label.textContent = short;
-
-        const range = document.createElement('input');
-        range.type = 'range';
-        range.min = '-3'; range.max = '3'; range.step = '0.05';
-        range.value = String(+saved[name] || 0);
-
-        const num = document.createElement('span');
-        num.className = 'ctl-val';
-
-        function refresh() {
-          const v = +range.value;
-          num.textContent = (v > 0 ? '+' : '') + v.toFixed(2);
-          num.classList.toggle('off', v === 0);
-        }
-        range.addEventListener('input', () => { refresh(); persist(); });
-        // double-click the value to recenter
-        num.addEventListener('dblclick', () => {
-          range.value = '0'; refresh(); persist();
-        });
-        refresh();
-
-        row.appendChild(label);
-        row.appendChild(range);
-        row.appendChild(num);
-        sec.appendChild(row);
-
-        sliders[name] = {
-          get: () => +range.value,
-          set: (v) => { range.value = String(v); refresh(); },
-        };
-      });
-      host.appendChild(sec);
-    });
+    refreshHint();
+    return rec;
   }
 
   function collectControls() {
     const out = {};
-    for (const name in sliders) {
-      const v = sliders[name].get();
-      if (v) out[name] = v;
-    }
-    if (searchReady) {
-      const s = +$('search-strength').value;
-      if (s) out[SEARCH_AXIS] = s;
+    for (const a of axes) {
+      const v = +a.els.strength.value;
+      if (v) out[a.wname] = v;
     }
     return out;
   }
 
   // ── render ─────────────────────────────────────────────────────────────
   function drawBitmap(bitmap, w, h) {
-    if (canvas.width !== w || canvas.height !== h) {
-      canvas.width = w; canvas.height = h;
-    }
+    if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
     cctx.drawImage(bitmap, 0, 0);
     $('view-hint').style.display = 'none';
   }
 
-  // ── actions ──────────────────────────────────────────────────────────────
+  // ── actions ────────────────────────────────────────────────────────────
   function setBusy(b) {
     busy = b;
     $('btn-generate').disabled = b || !loaded;
@@ -221,29 +196,24 @@ function init() {
 
   function doLoad() {
     const modelDir = $('model-dir').value.trim();
-    const dictPath = $('dict-path').value.trim();
     if (!modelDir) { status('set a Sana directory first', 'err'); return; }
     persist();
     setBusy(true);
     loaded = false;
     backend('loading…');
     status('loading model — this reads multi-GB weights, give it a moment');
-    client.load(modelDir, dictPath, (err, msg) => {
+    client.load(modelDir, (err, msg) => {
       setBusy(false);
-      if (err) {
-        backend('error', 'err');
-        status(String(err.message || err), 'err');
-        return;
-      }
+      if (err) { backend('error', 'err'); status(String(err.message || err), 'err'); return; }
       loaded = true;
-      axes = msg.axes || [];
       backend(msg.backend === 'cpu' ? 'CPU' : (msg.backend || 'gpu').toUpperCase(),
               msg.backend === 'cpu' ? 'warn' : 'ok');
       const cls = (msg.config && msg.config.modelClass) || 'model';
-      status(cls + ' ready · ' + axes.length + ' control axes', 'ok');
-      buildControls();
+      status(cls + ' ready', 'ok');
       $('btn-generate').disabled = false;
       $('btn-build-axis').disabled = false;
+      refreshHint();
+      rebuildSavedAxes();   // re-register any axes from a prior session
     });
   }
 
@@ -259,8 +229,8 @@ function init() {
     const controls = collectControls();
     persist();
     setBusy(true);
-    const nctl = Object.keys(controls).length;
-    status('generating' + (nctl ? ' · ' + nctl + ' axis' + (nctl > 1 ? 'es' : '') + ' active' : ' · baseline') + '…');
+    const n = Object.keys(controls).length;
+    status('generating' + (n ? ' · ' + n + ' axis' + (n > 1 ? 'es' : '') + ' active' : ' · baseline') + '…');
     $('timing').textContent = '';
     client.generate($('prompt').value, opts, controls, (err, msg) => {
       setBusy(false);
@@ -271,13 +241,7 @@ function init() {
     });
   }
 
-  // ── axis search ──────────────────────────────────────────────────────────
-  function refreshSearchVal() {
-    const v = +$('search-strength').value;
-    const el = $('search-val');
-    el.textContent = (v > 0 ? '+' : '') + v;
-    el.classList.toggle('off', v === 0);
-  }
+  // Build a new axis from the form's two word sets.
   function doBuildAxis() {
     if (!loaded || busy) return;
     const neg = splitPhrases($('search-neg').value);
@@ -285,36 +249,54 @@ function init() {
     if (!neg.length || !pos.length) {
       status('enter at least one word in each set', 'err'); return;
     }
+    const name = $('axis-name').value.trim() ||
+                 (neg[0] + ' → ' + pos[0]);
+    const wname = 'ax' + (axisSeq++);
     persist();
     setBusy(true);
     status('building axis — encoding ' + (neg.length + pos.length) + ' phrases…');
-    client.search(neg, pos, SEARCH_AXIS, (err, msg) => {
+    client.search(neg, pos, wname, (err, msg) => {
       setBusy(false);
       if (err) { status(String(err.message || err), 'err'); return; }
-      searchReady = true;
-      $('search-row').classList.remove('hidden');
-      $('search-strength').value = '0';
-      refreshSearchVal();
-      $('search-meta').textContent =
-        'axis ready · ' + msg.negN + ' ↔ ' + msg.posN +
-        ' phrases · separation ' + msg.sep.toFixed(2) +
-        ' · slider = injection norm (A↓ / B↑)';
-      status('axis built — drag strength, then Generate', 'ok');
+      addAxisRow({ wname, name, neg, pos, sep: msg.sep, strength: 0 });
+      // clear the form for the next axis (keep words handy is less useful than a
+      // clean slate once an axis is captured)
+      $('axis-name').value = '';
+      $('search-neg').value = '';
+      $('search-pos').value = '';
+      status('axis “' + name + '” added · separation ' + msg.sep.toFixed(2), 'ok');
+      persist();
     });
   }
 
-  // ── wire up ────────────────────────────────────────────────────────────
+  // Re-register axes saved from a prior session (sequentially — the client
+  // serializes requests). Rows appear as each is rebuilt.
+  function rebuildSavedAxes() {
+    const defs = Array.isArray(prefs.axes) ? prefs.axes.slice() : [];
+    let i = 0;
+    (function next() {
+      if (i >= defs.length) return;
+      const d = defs[i++];
+      if (!d || !d.neg || !d.pos) { next(); return; }
+      const wname = 'ax' + (axisSeq++);
+      client.search(d.neg, d.pos, wname, (err, msg) => {
+        if (!err) {
+          addAxisRow({ wname, name: d.name || (d.neg[0] + ' → ' + d.pos[0]),
+                       neg: d.neg, pos: d.pos, sep: msg.sep,
+                       strength: +d.strength || 0 });
+          persist();
+        }
+        next();
+      });
+    })();
+  }
+
+  // ── wire up ──────────────────────────────────────────────────────────────
   $('btn-load').addEventListener('click', doLoad);
   $('btn-generate').addEventListener('click', doGenerate);
   $('btn-build-axis').addEventListener('click', doBuildAxis);
-  $('search-strength').addEventListener('input', () => { refreshSearchVal(); persist(); });
-  $('search-val').addEventListener('dblclick', () => {
-    $('search-strength').value = '0'; refreshSearchVal(); persist();
-  });
-  ['search-neg', 'search-pos'].forEach((id) => $(id).addEventListener('change', persist));
   $('btn-reset-ctl').addEventListener('click', () => {
-    for (const name in sliders) sliders[name].set(0);
-    if (searchReady) { $('search-strength').value = '0'; refreshSearchVal(); }
+    for (const a of axes) { a.els.strength.value = '0'; a.els.strength.dispatchEvent(new Event('input')); }
     persist();
   });
   $('btn-browse-model').addEventListener('click', () => {
@@ -322,12 +304,7 @@ function init() {
       ? window.showOpenFolderDialog($('model-dir').value.trim()) : null;
     if (d) { $('model-dir').value = d; persist(); }
   });
-  $('btn-browse-dict').addEventListener('click', () => {
-    const f = window.showOpenFileDialog
-      ? window.showOpenFileDialog('Control dictionary|bcd1') : null;
-    if (f) { $('dict-path').value = f; persist(); }
-  });
-  ['model-dir', 'dict-path', 'prompt', 'seed', 'steps', 'guidance', 'size']
+  ['model-dir', 'prompt', 'seed', 'steps', 'guidance', 'size', 'axis-name', 'search-neg', 'search-pos']
     .forEach((id) => $(id).addEventListener('change', persist));
   // Cmd/Ctrl+Enter in the prompt generates.
   $('prompt').addEventListener('keydown', (e) => {
@@ -336,9 +313,7 @@ function init() {
 
   client.onReady(() => {
     status('ready — load a model to begin');
-    // Auto-load if a model dir is remembered and looks absolute.
-    const md = $('model-dir').value.trim();
-    if (md) doLoad();
+    if ($('model-dir').value.trim()) doLoad();
   });
 }
 
