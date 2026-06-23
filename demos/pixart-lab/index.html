@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>PixArt Lab</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <header id="toolbar">
+      <span id="brand">◆ PixArt&nbsp;Lab</span>
+      <span class="tagline">PixArt-Σ text-to-image · T5-XXL + DiT + KL-VAE</span>
+      <span class="grow"></span>
+      <span id="backend" class="badge">loading…</span>
+    </header>
+
+    <div id="body">
+      <!-- ── left rail: model, prompt, generation settings ──────────────── -->
+      <aside id="rail">
+        <section class="panel">
+          <h2>model</h2>
+          <label class="field">PixArt directory
+            <span class="row">
+              <input id="model-dir" type="text"
+                     value="D:/projects/brodiffusion/weights/pixart-sigma">
+              <button id="btn-browse-model" class="iconbtn"
+                      title="Choose a PixArt-Sigma diffusers directory">📁</button>
+            </span>
+          </label>
+          <p class="hint">T5-XXL resolves from <code>$BRODIFFUSION_T5_DIR</code>,
+            a bundled <code>text_encoder/</code>, or a sibling
+            <code>../t5-xxl</code>. See README.</p>
+          <button id="btn-load" class="primary">Load model</button>
+        </section>
+
+        <section class="panel">
+          <h2>prompt</h2>
+          <label class="field">
+            <span class="field-head">prompt <span class="counter" id="prompt-count"></span></span>
+            <textarea id="prompt" rows="4" maxlength="1000"
+              placeholder="a photo of a small bird perched on a branch">a photo of a small bird perched on a branch</textarea>
+          </label>
+          <label class="field">
+            <span class="field-head">negative prompt
+              <span class="hint inline">— what to avoid</span>
+              <span class="counter" id="neg-count"></span></span>
+            <textarea id="neg-prompt" rows="2" maxlength="1000"
+              placeholder="blurry, low quality, deformed, watermark"></textarea>
+          </label>
+
+          <div class="subhead">settings
+            <button id="btn-reset-settings" class="link"
+                    title="Restore seed / steps / guidance / size to defaults">reset</button>
+          </div>
+          <div class="grid">
+            <label class="field">seed <span class="dim">· def 0</span>
+              <input id="seed" type="number" value="0" step="1"></label>
+            <label class="field">steps <span class="dim">· def 20</span>
+              <input id="steps" type="number" value="20" min="1" max="50"></label>
+            <label class="field">guidance <span class="dim">· def 4.5</span>
+              <input id="guidance" type="number" value="4.5" step="0.5"></label>
+            <label class="field">size <span class="dim">· def 1024²</span>
+              <select id="size">
+                <option value="1024" selected>1024²</option>
+                <option value="768">768²</option>
+                <option value="512">512²</option>
+              </select></label>
+          </div>
+          <button id="btn-generate" class="primary" disabled>Generate</button>
+        </section>
+      </aside>
+
+      <!-- ── viewport ─────────────────────────────────────────────────── -->
+      <main id="stage">
+        <div id="canvas-wrap">
+          <canvas id="view" width="512" height="512"></canvas>
+          <div id="view-hint">Load a model, then Generate.</div>
+        </div>
+        <div id="status-bar">
+          <span id="status-text">idle</span>
+          <span class="grow"></span>
+          <span id="timing" class="meta"></span>
+        </div>
+      </main>
+    </div>
+  </div>
+  <script type="module" src="/app/app.js"></script>
+</body>
+</html>
