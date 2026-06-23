@@ -232,7 +232,7 @@ function init() {
     const opts = {
       width: size, height: size,
       steps: +$('steps').value || 20,
-      guidance: +$('guidance').value || 4.5,
+      guidanceScale: +$('guidance').value || 4.5,
       seed: +$('seed').value || 0,
       negativePrompt: $('neg-prompt').value.trim(),
     };
