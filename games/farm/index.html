@@ -7,7 +7,7 @@
 <body>
     <canvas id="game"></canvas>
 
-    <div id="hud">
+    <div id="hud" style="display:none">
         <div id="hud-clock" class="hud-clock">Day 1 · 06:00</div>
 
         <div class="hud-section-title">RESOURCES</div>
@@ -20,11 +20,59 @@
         <div id="hud-dialog" class="hud-dialog"></div>
 
         <div class="hud-keys">
-            <div class="hud-section-title">DEBUG KEYS</div>
-            <div><b>1</b> refill feed &nbsp; <b>2</b> refill water</div>
-            <div><b>3</b> water crops &nbsp; <b>4</b> harvest+collect</div>
-            <div><b>5</b> plant empty &nbsp; <b>6</b> resupply</div>
-            <div><b>P</b> pause &nbsp; <b>O</b> log observe()</div>
+            <div class="hud-section-title">CONTROLS</div>
+            <div><b>WASD</b> / arrows move &nbsp; <b>E</b>/<b>Space</b> interact</div>
+            <div><b>Esc</b>/<b>P</b> pause</div>
+            <div class="hud-keys-debug"><b>1</b>feed <b>2</b>water <b>3</b>water crops
+                <b>4</b>harvest <b>5</b>plant <b>6</b>resupply <b>O</b>observe</div>
+        </div>
+    </div>
+
+    <div id="overlay">
+        <!-- TITLE -->
+        <div id="screen-title" class="screen">
+            <div class="overlay-title">FARM</div>
+            <div class="overlay-sub">
+                A farm run by talking NPC workers and their foreman.<br>
+                Lend a hand — or just watch it run itself.
+            </div>
+            <div class="menu-items">
+                <div class="menu-item selected" data-action="play">START</div>
+                <div class="menu-item" data-action="howto">HOW TO PLAY</div>
+            </div>
+            <div class="overlay-hint">Up/Down to navigate · Enter to select</div>
+        </div>
+
+        <!-- HOW TO PLAY -->
+        <div id="screen-howto" class="screen">
+            <div class="overlay-title">HOW TO PLAY</div>
+            <div class="overlay-sub htp-body">
+                <p>The foreman watches the farm and assigns Mara, Tom and Lily to
+                feed the animals, water and harvest the crops, and gather produce.
+                The farm sustains itself — you can pitch in any time.</p>
+                <p><strong>You are the farmer in the straw hat.</strong> Walk up to
+                anything that needs doing and interact:</p>
+                <pre>WASD / Arrows     Move
+E / Space         Interact with what you're next to
+                  (fill troughs, harvest, water, plant,
+                   collect produce, draw water, load feed)
+Esc / P           Pause</pre>
+                <p><strong>Debug:</strong> 1 feed · 2 water · 3 water crops ·
+                4 harvest+collect · 5 plant · 6 resupply · O log observe()</p>
+            </div>
+            <div class="menu-items">
+                <div class="menu-item selected" data-action="back">BACK</div>
+            </div>
+        </div>
+
+        <!-- PAUSE -->
+        <div id="screen-pause" class="screen">
+            <div class="overlay-title">PAUSED</div>
+            <div class="menu-items">
+                <div class="menu-item selected" data-action="resume">RESUME</div>
+                <div class="menu-item" data-action="howto">HOW TO PLAY</div>
+                <div class="menu-item" data-action="quit">QUIT TO TITLE</div>
+            </div>
         </div>
     </div>
 

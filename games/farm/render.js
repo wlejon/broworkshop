@@ -64,6 +64,82 @@ export function render(ctx, world, W, H) {
     drawTroughs(ctx, world, b, px, py);
     drawAnimals(ctx, world, b, px, py);
     drawNpcs(ctx, world, b, px, py);
+    drawPlayer(ctx, world, b, px, py);
+
+    // Subtle day/night tint over the play area (cheap single overlay).
+    drawDayNight(ctx, world, b);
+}
+
+// A low-alpha wash whose color + strength tracks the clock: cool blue and
+// stronger at night, clear at midday. Drawn last so it sits over the board.
+function drawDayNight(ctx, world, b) {
+    const hour = world.clock.hour + world.clock.minute / 60;
+    // 0 at noon, 1 deep night. Smooth-ish ramp around dawn(6)/dusk(20).
+    let night;
+    if (hour < 5 || hour >= 21) night = 1;
+    else if (hour < 7) night = (7 - hour) / 2;       // dawn fade-out
+    else if (hour > 19) night = (hour - 19) / 2;      // dusk fade-in
+    else night = 0;
+    night = Math.max(0, Math.min(1, night));
+    if (night <= 0.01) return;
+    ctx.save();
+    ctx.fillStyle = `rgba(18, 26, 58, ${0.42 * night})`;
+    ctx.fillRect(b.ox, b.oy, b.w, b.h);
+    ctx.restore();
+}
+
+function drawPlayer(ctx, world, b, px, py) {
+    const p = world.player;
+    if (!p) return;
+    const cx = px(p.x), cy = py(p.y);
+    const r = b.cell * 0.34;
+
+    // Interaction highlight: pulsing ring on the in-reach target.
+    if (p.highlight) {
+        const hx = px(p.highlight.x), hy = py(p.highlight.y);
+        const pulse = 0.6 + 0.4 * Math.sin(world.clock.t / 140);
+        ctx.strokeStyle = `rgba(120, 230, 255, ${0.45 + 0.35 * pulse})`;
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.arc(hx, hy, b.cell * (0.5 + 0.12 * pulse), 0, Math.PI * 2);
+        ctx.stroke();
+        // guide line from player to the target
+        ctx.strokeStyle = 'rgba(120, 230, 255, 0.25)';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([3, 4]);
+        ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(hx, hy); ctx.stroke();
+        ctx.setLineDash([]);
+    }
+
+    // Shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.28)';
+    ctx.beginPath(); ctx.ellipse(cx, cy + r * 1.4, r * 0.9, r * 0.4, 0, 0, Math.PI * 2); ctx.fill();
+
+    // Body (distinct blue, heavier outline than NPCs)
+    ctx.fillStyle = '#3fa9e8';
+    ctx.beginPath(); ctx.arc(cx, cy + r, r, 0, Math.PI * 2); ctx.fill();
+    // Head
+    ctx.beginPath(); ctx.arc(cx, cy - r * 0.6, r * 0.72, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#0d3a5c'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(cx, cy + r, r, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(cx, cy - r * 0.6, r * 0.72, 0, Math.PI * 2); ctx.stroke();
+
+    // Straw hat: brim + crown, so the avatar reads instantly as "the farmer".
+    const hy = cy - r * 1.05;
+    ctx.fillStyle = '#e8c662';
+    ctx.beginPath(); ctx.ellipse(cx, hy, r * 1.15, r * 0.42, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#8a6a22'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.ellipse(cx, hy, r * 1.15, r * 0.42, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = '#f0d678';
+    ctx.beginPath(); ctx.ellipse(cx, hy - r * 0.2, r * 0.6, r * 0.5, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.stroke();
+
+    // "You" name tag
+    const txt = 'You';
+    const lw = txt.length * 7 + 10;
+    ctx.fillStyle = 'rgba(20, 70, 110, 0.85)';
+    roundRect(ctx, cx - lw / 2, cy - r * 2.7, lw, 14, 3); ctx.fill();
+    label(ctx, txt, cx, cy - r * 2.7 + 11, '#dff3ff', 11, 'center');
 }
 
 function drawRegions(ctx, world, b, px, py) {

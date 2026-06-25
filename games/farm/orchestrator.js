@@ -161,6 +161,12 @@ export function createOrchestrator() {
         for (const n of world.npcs) {
             if (n.task && n.task.target) inflight.add(n.task.target);
         }
+        // Treat whatever the human player is currently standing over as claimed
+        // too, so we don't dispatch an NPC to a trough/crop the player is about
+        // to handle. The hint clears the moment they walk away.
+        if (world.player && world.player.targetHint) {
+            inflight.add(world.player.targetHint);
+        }
 
         let idle = world.npcs.filter((n) => n.task == null);
         if (idle.length === 0) return;
