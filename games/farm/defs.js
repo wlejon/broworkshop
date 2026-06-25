@@ -74,6 +74,43 @@ export const PENS = {
     },
 };
 
+// ---- stations: a worker is assigned to ONE station and services ALL of its
+// general work. The Foreman hands out station assignments (briefed once, then
+// re-briefed each morning); the worker then autonomously works whatever the
+// station needs (stations.js stationChores) without reporting back per chore.
+// At this scale it's ~1 worker : 1 station — each person fully owns their patch.
+//   kind    'animal' (a pen) | 'crop' (the field)
+//   penId   the pen an animal station owns (null for the garden)
+//   region  REGIONS id, for the on-board station marker + briefing walk target
+//   domain  proficiency domain its work draws on (husbandry | farming)
+//   role    the worker role that fits best (assignment affinity)
+export const STATIONS = [
+    { id: 'pasture', label: 'Cow Pasture',  kind: 'animal', penId: 'pasture', region: 'pasture', domain: 'husbandry', role: 'rancher'  },
+    { id: 'coop',    label: 'Chicken Coop', kind: 'animal', penId: 'coop',    region: 'coop',    domain: 'husbandry', role: 'rancher'  },
+    { id: 'meadow',  label: 'Sheep Meadow', kind: 'animal', penId: 'meadow',  region: 'meadow',  domain: 'husbandry', role: 'rancher'  },
+    { id: 'garden',  label: 'Garden',       kind: 'crop',   penId: null,      region: 'field',   domain: 'farming',   role: 'gardener' },
+];
+
+// Station detail. Each animal pen has a CLEANLINESS meter that decays over time
+// (faster with a bigger herd) and, when it falls, raises the illness chance —
+// the rancher's recurring "muck out" chore restores it. Each planted garden plot
+// grows WEEDS that slow its growth until pulled — the gardener's recurring "weed"
+// chore. These give a station-owner varied general work beyond troughs/harvest.
+export const PEN_CARE = {
+    cleanDecay:   0.18,  // cleanliness lost/s, baseline (gentle: a day-ish to dirty)
+    cleanPerHead: 0.035, // extra cleanliness lost/s per animal in the pen
+    muckRestore:  100,   // muck-out resets cleanliness to full
+    dirty:        50,    // below this -> a 'muck out' chore is generated
+    filthy:       25,    // below this -> illness chance climbs
+    illnessMul:   2.0,   // illness-chance multiplier while a pen is filthy
+};
+export const CROP_CARE = {
+    weedRise:      0.6,  // weeds climb/s on a planted (non-empty) plot
+    weedGrowthMin: 0.45, // growth slowed to this fraction of normal at full weeds
+    weedClear:     100,  // weeding clears weeds fully
+    weedy:         55,   // above this -> a 'weed' chore is generated
+};
+
 // Per-species metabolism + production stats. hungerMul/thirstMul scale the base
 // RATES.*Rise; produceMul/produceInterval govern the good output; radius/color
 // drive render. The new species is the sheep (wool).
@@ -354,6 +391,8 @@ export const COLORS = {
     cropCorn:  '#e0b94a',
     cropTomato:'#e0533a',
     cropSprout:'#7fc24a',
+    clean:     '#5fb6c0',  // pen cleanliness meter
+    weeds:     '#7a9a3a',  // garden weed tufts
 };
 
 // Crop kind -> growth/water/value/spoilage stats, surfaced to render + sim.

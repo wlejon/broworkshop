@@ -131,7 +131,8 @@ canvas {
 .wk-name.role-rancher  { color: #e89a4a; }
 .wk-name.role-gardener { color: #6fc24a; }
 .wk-name.role-farmhand { color: #5aa6e0; }
-.wk-state { width: 54px; color: #9bb592; }
+.wk-state { width: 50px; color: #9bb592; }
+.wk-station { width: 38px; color: #7fb0c0; font-size: 9px; text-align: right; white-space: nowrap; }
 .wk-bars { display: flex; flex-direction: column; gap: 2px; flex: 1; }
 .wk-bar { height: 4px; background: rgba(0,0,0,0.45); border-radius: 2px; overflow: hidden; }
 .wk-fill { display: block; height: 100%; background: #6fc24a; }
@@ -244,6 +245,8 @@ canvas {
 .ss-close:hover { color: #f08a80; }
 .ss-state { font-size: 11px; color: #9bb592; margin: 6px 0 2px; min-height: 14px; }
 .ss-state .carry { color: #e8c662; }
+.ss-station { font-size: 11px; color: #7fb0c0; margin: 0 0 4px; min-height: 13px; }
+.ss-station .st-k { color: #6a8a96; }
 
 /* Need bars (stamina / energy) mirror the worker roster bars. */
 .ss-needs { display: flex; flex-direction: column; gap: 6px; }

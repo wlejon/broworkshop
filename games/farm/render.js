@@ -1,7 +1,10 @@
 // render.js — draws a world snapshot to a 2D canvas context.
 // Pure rendering: reads world state, NEVER mutates it.
 
-import { GRID, REGIONS, PENS, COLORS, CROP_KINDS, ANIMAL_KINDS, ROLE_COLOR, RATES, WORKER, staminaMaxFor } from './defs.js';
+import { GRID, REGIONS, PENS, COLORS, CROP_KINDS, ANIMAL_KINDS, ROLE_COLOR, RATES, WORKER, PEN_CARE, CROP_CARE, staminaMaxFor } from './defs.js';
+
+// Short on-board station tags shown under each worker (their assigned patch).
+const STATION_SHORT = { pasture: 'Pasture', coop: 'Coop', meadow: 'Meadow', garden: 'Garden' };
 
 // Reserve a strip on the right for the DOM HUD overlay.
 const HUD_W = 270;
@@ -279,6 +282,18 @@ function drawRegions(ctx, world, b, px, py) {
             ctx.lineWidth = 3;
             roundRect(ctx, x, y, w, h, 6); ctx.stroke();
             label(ctx, reg.label, x + 6, y + 14, '#fff', 12);
+            // cleanliness meter under the pen label — reddens as it gets dirty,
+            // so the player can see a pen that's due for a muck-out at a glance.
+            const pen = world.pens[reg.penId];
+            if (pen && pen.cleanliness != null) {
+                const cw = Math.min(w - 12, b.cell * 3), cx0 = x + 6, cy0 = y + 18;
+                const cf = Math.max(0, Math.min(1, pen.cleanliness / 100));
+                ctx.fillStyle = 'rgba(0,0,0,0.45)';
+                ctx.fillRect(cx0, cy0, cw, 3);
+                ctx.fillStyle = pen.cleanliness < PEN_CARE.filthy ? '#d6453a'
+                    : (pen.cleanliness < PEN_CARE.dirty ? '#e0b94a' : COLORS.clean);
+                ctx.fillRect(cx0, cy0, cw * cf, 3);
+            }
             continue;
         }
         if (reg.type === 'field') {
@@ -376,6 +391,24 @@ function drawCrops(ctx, world, b, px, py) {
         ctx.fillRect(mx, myy, mw, 3);
         ctx.fillStyle = c.moisture < 15 ? '#d6453a' : COLORS.troughWater;
         ctx.fillRect(mx, myy, mw * (c.moisture / 100), 3);
+
+        // weeds: small dark-green tufts creep in at the bed corners as a plot is
+        // overgrown, so a plot the gardener needs to weed reads at a glance.
+        if ((c.weeds || 0) > CROP_CARE.weedy) {
+            const heavy = c.weeds > 80;
+            ctx.strokeStyle = COLORS.weeds;
+            ctx.lineWidth = Math.max(1, b.cell * 0.08);
+            const corners = heavy ? [[-0.36, 0.36], [0.36, 0.36], [-0.36, -0.36], [0.36, -0.36]]
+                                  : [[-0.36, 0.36], [0.36, 0.36]];
+            for (const [dx, dy] of corners) {
+                const wx = cx + dx * bed, wy = cy + dy * bed;
+                ctx.beginPath();
+                ctx.moveTo(wx, wy);             ctx.lineTo(wx - b.cell * 0.1, wy - b.cell * 0.22);
+                ctx.moveTo(wx, wy);             ctx.lineTo(wx, wy - b.cell * 0.26);
+                ctx.moveTo(wx, wy);             ctx.lineTo(wx + b.cell * 0.1, wy - b.cell * 0.22);
+                ctx.stroke();
+            }
+        }
     }
 }
 
@@ -599,6 +632,12 @@ function drawNpcs(ctx, world, b, px, py) {
             const f = Math.max(0, Math.min(1, n.stamina / staminaMaxFor(n)));
             ctx.fillStyle = n.stamina < 25 ? '#d6453a' : (n.stamina < 55 ? '#e0b94a' : '#6fc24a');
             ctx.fillRect(bx, by, bw * f, 3);
+        }
+
+        // assigned-station tag under the bars — which patch this worker owns.
+        if (n.station) {
+            const tag = STATION_SHORT[n.station] || n.station;
+            label(ctx, tag, cx, cy - r * 2.6 + 26, 'rgba(220,235,210,0.9)', 9, 'center');
         }
 
         // critical-need badge: a small red "!" disc when a need is in the danger

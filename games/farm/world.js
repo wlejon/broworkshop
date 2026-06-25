@@ -12,7 +12,7 @@
 import {
     GRID, DAY_LENGTH_MS, RATES, REGIONS, PENS,
     ANIMAL_SPECS, ANIMAL_KINDS, CROP_PLOTS, NPC_SPECS, START_RESOURCES, START_TROUGHS,
-    CROP_KINDS, WORKER, FOREMAN_STATS,
+    CROP_KINDS, WORKER, FOREMAN_STATS, PEN_CARE, CROP_CARE,
     makeStatSheet, awardStatXp, staminaMaxFor, staminaDrainMul, moveSpeedMul,
     healthMaxFor, healthRegenMul, hydrationDrainMul,
     STAT_XP, STAT_LABEL,
@@ -97,7 +97,8 @@ export function createWorld(opts = {}) {
     // Pens + their pending (uncollected) produce, capacity cap, and breed timer.
     for (const penId of Object.keys(PENS)) {
         const p = PENS[penId];
-        world.pens[penId] = { ...p, pending: 0, cap: p.cap ?? 8, breedTimer: BREED_INTERVAL };
+        world.pens[penId] = { ...p, pending: 0, cap: p.cap ?? 8, breedTimer: BREED_INTERVAL,
+                              cleanliness: 85 };   // station-detail: decays, drives illness
         world.troughs[penId + '-feed']  = { id: penId + '-feed',  penId, kind: 'feed',  x: p.feedTrough.x,  y: p.feedTrough.y,  fill: START_TROUGHS[penId + '-feed']  ?? 100 };
         world.troughs[penId + '-water'] = { id: penId + '-water', penId, kind: 'water', x: p.waterTrough.x, y: p.waterTrough.y, fill: START_TROUGHS[penId + '-water'] ?? 100 };
     }
@@ -124,6 +125,7 @@ export function createWorld(opts = {}) {
             id: c.id, plotIndex: c.plotIndex, x: c.x, y: c.y,
             kind: c.kind, stage: c.stage, growth: c.growth, moisture: c.moisture,
             ripeTimer: c.stage === 'ripe' ? (kd.spoilMs || 20000) : null,
+            weeds: 0,   // station-detail: climbs while planted, slows growth
         });
     }
 
@@ -305,6 +307,9 @@ export function createWorld(opts = {}) {
                 let chance = ILL_BASE;
                 if (worst > 50) chance *= 3;
                 if (world.env.weather === 'frost' || world.env.weather === 'storm') chance *= 2.5;
+                // A filthy pen breeds illness — the muck-out chore keeps it down.
+                const pen = world.pens[a.penId];
+                if (pen && pen.cleanliness < PEN_CARE.filthy) chance *= PEN_CARE.illnessMul;
                 if (rng() < chance * s) {
                     a.sick = true;
                     pushNotice('warning', a.id, `${a.id} fell ill`);
@@ -330,6 +335,10 @@ export function createWorld(opts = {}) {
         // healthy + well-fed and below the pen's capacity cap.
         for (const penId of Object.keys(world.pens)) {
             const pen = world.pens[penId];
+            // Cleanliness decays with time + herd size; a muck-out chore restores
+            // it. Low cleanliness raises the illness chance (animal loop above).
+            const herdN = world.animals.reduce((acc, a) => acc + (a.alive && a.penId === penId ? 1 : 0), 0);
+            pen.cleanliness = clamp(pen.cleanliness - (PEN_CARE.cleanDecay + PEN_CARE.cleanPerHead * herdN) * s, 0, 100);
             pen.breedTimer -= dt;
             if (pen.breedTimer > 0) continue;
             pen.breedTimer = BREED_INTERVAL * (0.8 + 0.4 * rng());
@@ -356,8 +365,12 @@ export function createWorld(opts = {}) {
             if (c.stage === 'empty') continue;
             const kd = CROP_KINDS[c.kind] || {};
             c.moisture = clamp(c.moisture - RATES.moistureDecay * mods.moistureDecayMult * (kd.dryMul || 1) * s, 0, 100);
+            // Weeds climb while planted and choke growth until pulled (weed chore).
+            if (c.weeds == null) c.weeds = 0;
+            c.weeds = clamp(c.weeds + CROP_CARE.weedRise * s, 0, 100);
             if (c.moisture > 0 && c.stage !== 'ripe') {
-                c.growth = clamp(c.growth + RATES.growthRate * mods.growthMult * (kd.growMul || 1) * s, 0, 100);
+                const weedMul = 1 - (c.weeds / 100) * (1 - CROP_CARE.weedGrowthMin);
+                c.growth = clamp(c.growth + RATES.growthRate * mods.growthMult * (kd.growMul || 1) * weedMul * s, 0, 100);
             }
             if (c.stage === 'seed' && c.growth >= RATES.growGrowing) c.stage = 'growing';
             if (c.stage !== 'ripe' && c.growth >= RATES.growRipe) {
@@ -370,7 +383,7 @@ export function createWorld(opts = {}) {
                 if (c.ripeTimer <= 0) {
                     pushNotice('warning', c.id, `${c.kind} in ${c.id} rotted, unharvested`);
                     pushLog(`${c.kind} in ${c.id} rotted`);
-                    c.kind = null; c.stage = 'empty'; c.growth = 0; c.moisture = 0; c.ripeTimer = null;
+                    c.kind = null; c.stage = 'empty'; c.growth = 0; c.moisture = 0; c.ripeTimer = null; c.weeds = 0;
                 }
             }
         }
@@ -513,6 +526,7 @@ export function createWorld(opts = {}) {
             return {
                 id: c.id, plotIndex: c.plotIndex, kind: c.kind,
                 stage: c.stage, growth: r1(c.growth), moisture: r1(c.moisture),
+                weeds: r1(c.weeds || 0),
                 value: kd.gold || 0,
                 spoilIn: (c.stage === 'ripe' && c.ripeTimer != null) ? Math.max(0, Math.round(c.ripeTimer)) : null,
             };
@@ -522,6 +536,7 @@ export function createWorld(opts = {}) {
         }));
         const npcs = world.npcs.map((n) => ({
             id: n.id, name: n.name, role: n.role, busy: n.task != null,
+            station: n.station || null,   // the station this worker is assigned to
             state: n.state === 'walking' ? 'working' : n.state,   // idle|working|resting|sleeping|eating|recovering
             stamina: r1(n.stamina), energy: r1(n.energy),
             hydration: r1(n.hydration), health: r1(n.health),
@@ -531,7 +546,12 @@ export function createWorld(opts = {}) {
         const resources = {};
         for (const k of Object.keys(world.resources)) resources[k] = r1(world.resources[k]);
         const pending = {};
-        for (const penId of Object.keys(world.pens)) pending[penId] = world.pens[penId].pending;
+        const pens = {};
+        for (const penId of Object.keys(world.pens)) {
+            const p = world.pens[penId];
+            pending[penId] = p.pending;
+            pens[penId] = { pending: p.pending, cleanliness: r1(p.cleanliness), cap: p.cap };
+        }
 
         return {
             clock: {
@@ -554,7 +574,7 @@ export function createWorld(opts = {}) {
                 deadlineDay: world.objective.deadlineDay,
                 met: resources.gold >= world.objective.target,
             },
-            animals, crops, troughs, npcs, resources, pending,
+            animals, crops, troughs, npcs, resources, pending, pens,
             alerts: deriveAlerts(animals, crops, troughs, resources)
                 .concat(envAlerts(world.env))
                 .concat(marketAlerts(world))
@@ -682,7 +702,7 @@ export function createWorld(opts = {}) {
             if (!world.env.plantable.includes(kind)) return { ok: false, reason: 'out of season' };
             if (world.resources.gold < SEED_COST) return { ok: false, reason: 'no gold for seed' };
             world.resources.gold -= SEED_COST;
-            c.kind = kind; c.stage = 'seed'; c.growth = 0; c.moisture = 60;
+            c.kind = kind; c.stage = 'seed'; c.growth = 0; c.moisture = 60; c.weeds = 0;
             pushLog(`planted ${kind} in plot ${plotIndex} (-${SEED_COST}g)`);
             return { ok: true, cropId: c.id, cost: SEED_COST };
         },
@@ -704,9 +724,30 @@ export function createWorld(opts = {}) {
             if (c.stage !== 'ripe') return { ok: false, reason: 'not ripe' };
             const kind = c.kind;
             world.resources.crops += 1;
-            c.kind = null; c.stage = 'empty'; c.growth = 0; c.moisture = 0; c.ripeTimer = null;
+            c.kind = null; c.stage = 'empty'; c.growth = 0; c.moisture = 0; c.ripeTimer = null; c.weeds = 0;
             pushLog(`harvested ${kind}`);
             return { ok: true, kind };
+        },
+        // Muck out a pen: reset its cleanliness to full (the rancher's recurring
+        // station chore; a clean pen keeps illness down — see the animal loop).
+        muckOut(penId) {
+            const pen = world.pens[penId];
+            if (!pen) return { ok: false, reason: 'no such pen' };
+            if (pen.cleanliness >= 95) return { ok: false, reason: 'already clean' };
+            pen.cleanliness = PEN_CARE.muckRestore;
+            pushLog(`mucked out the ${pen.label}`);
+            return { ok: true, cleanliness: pen.cleanliness };
+        },
+        // Pull the weeds on a planted plot (the gardener's recurring station
+        // chore; weeds choke growth until cleared — see the crop loop).
+        weedPlot(cropId) {
+            const c = world.crops.find((x) => x.id === cropId);
+            if (!c) return { ok: false, reason: 'no such crop' };
+            if (c.stage === 'empty') return { ok: false, reason: 'nothing planted' };
+            if ((c.weeds || 0) < 15) return { ok: false, reason: 'no weeds' };
+            c.weeds = Math.max(0, c.weeds - CROP_CARE.weedClear);
+            pushLog(`weeded ${cropId}`);
+            return { ok: true, weeds: c.weeds };
         },
         // Tend a sick animal back toward health (cures the illness).
         tendAnimal(animalId) {

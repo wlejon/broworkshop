@@ -46,9 +46,11 @@ const VERB_XP = {
     refillFeedTrough:  [['husbandry', STAT_XP.husbandry], ['strength', STAT_XP.strength * 0.5]],
     tendAnimal:        [['husbandry', STAT_XP.husbandry]],
     collectProduce:    [['husbandry', STAT_XP.husbandry * 0.7], ['strength', STAT_XP.strength * 0.4]],
+    muckOut:           [['husbandry', STAT_XP.husbandry * 0.8], ['strength', STAT_XP.strength * 0.6]],
     plant:             [['farming', STAT_XP.farming]],
     waterCrop:         [['farming', STAT_XP.farming]],
     harvest:           [['farming', STAT_XP.farming]],
+    weedPlot:          [['farming', STAT_XP.farming * 0.8]],
 };
 
 // The work DOMAIN a job's role belongs to, for the proficiency speed-up: a
@@ -357,6 +359,30 @@ export function buildPlant(world, plotIndex, kind = 'wheat') {
         { type: 'move', x, y, label: 'plot ' + plotIndex },
         { type: 'wait', ms: 250 },
         { type: 'act', verb: 'plant', args: [plotIndex, kind], say: kind + ' is in the ground.' },
+    ]);
+}
+
+// Muck out a pen: walk into it and restore its cleanliness. A station-owner's
+// recurring animal chore — a clean pen keeps illness down.
+export function buildMuckOut(world, penId) {
+    const r = REGIONS.find((x) => x.penId === penId);
+    const x = r ? (r.x0 + r.x1) / 2 : 0, y = r ? (r.y0 + r.y1) / 2 : 0;
+    return makeTask('muck:' + penId, 'muck:' + penId, [
+        { type: 'move', x, y, label: penLabel(penId) },
+        { type: 'wait', ms: 350 },
+        { type: 'act', verb: 'muckOut', args: [penId],
+          say: 'Got the ' + penLabel(penId).toLowerCase() + ' cleaned up.' },
+    ]);
+}
+
+// Pull the weeds on a planted plot. The gardener's recurring crop chore.
+export function buildWeed(world, cropId) {
+    const c = world.crops.find((x) => x.id === cropId);
+    const x = c ? c.x : 0, y = c ? c.y : 0;
+    return makeTask('weed:' + cropId, 'crop:' + cropId, [
+        { type: 'move', x, y, label: cropId },
+        { type: 'wait', ms: 200 },
+        { type: 'act', verb: 'weedPlot', args: [cropId], say: 'Cleared the weeds out.' },
     ]);
 }
 

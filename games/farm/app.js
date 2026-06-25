@@ -28,8 +28,13 @@ import { render, computeBoard } from '/app/render.js';
 import {
     STAT_KEYS, STAT_LABEL, STAT_MAX_LEVEL, statXpToNext,
     staminaMaxFor, staminaDrainMul, moveSpeedMul, proficiencyMul, ROLE_COLOR,
-    healthMaxFor, healthRegenMul, hydrationDrainMul,
+    healthMaxFor, healthRegenMul, hydrationDrainMul, STATIONS,
 } from '/app/defs.js';
+
+// Worker station id -> display label for the HUD roster + stat sheet.
+const STATION_LABEL = {};
+for (const s of STATIONS) STATION_LABEL[s.id] = s.label;
+const STATION_SHORT = { pasture: 'Pasture', coop: 'Coop', meadow: 'Meadow', garden: 'Garden' };
 import { advanceTask } from '/app/tasks.js';
 import { createOrchestrator } from '/app/orchestrator.js';
 import { initPlayer, movePlayer, runInteract, buyFeed } from '/app/player.js';
@@ -174,7 +179,7 @@ const hudWorkers = document.getElementById('hud-workers');
 const hudAlerts = document.getElementById('hud-alerts');
 const hudDialog = document.getElementById('hud-dialog');
 
-const STATE_LABEL = { idle: 'idle', working: 'working', resting: 'resting', sleeping: 'asleep', eating: 'eating', recovering: 'recovering' };
+const STATE_LABEL = { idle: 'idle', working: 'working', resting: 'resting', sleeping: 'asleep', eating: 'eating', recovering: 'recovering', waiting: 'in line', talking: 'talking', listening: 'listening' };
 function workerRow(n) {
     const sCls = n.stamina < 25 ? 'low' : (n.stamina < 55 ? 'mid' : 'ok');
     const eCls = n.energy < 30 ? 'low' : (n.energy < 55 ? 'mid' : 'ok');
@@ -189,6 +194,7 @@ function workerRow(n) {
     // At-a-glance critical flag: thirsty / hungry / exhausted / unwell.
     const crit = n.stamina < 15 || n.energy < 20 || n.hydration < 22 || n.health < 30;
     const dot = crit ? '<span class="wk-crit" title="needs care">!</span>' : '';
+    const station = n.station ? (STATION_SHORT[n.station] || n.station) : '';
     return `<div class="wk-row${crit ? ' crit' : ''}">` +
         `<span class="wk-name role-${n.role}">${n.name}${dot}</span>` +
         `<span class="wk-state">${STATE_LABEL[n.state] || n.state}</span>` +
@@ -197,7 +203,9 @@ function workerRow(n) {
             `<span class="wk-bar"><span class="wk-fill en ${eCls}" style="width:${Math.round(n.energy)}%"></span></span>` +
             `<span class="wk-bar"><span class="wk-fill wa ${wCls}" style="width:${Math.round(n.hydration)}%"></span></span>` +
             `<span class="wk-bar"><span class="wk-fill hp ${hCls}" style="width:${hPct}%"></span></span>` +
-        '</span></div>';
+        '</span>' +
+        `<span class="wk-station" title="${station ? STATION_LABEL[n.station] || station : ''}">${station}</span>` +
+        '</div>';
 }
 
 const GOOD_LABEL = { eggs: 'Eggs', milk: 'Milk', wool: 'Wool', crops: 'Crop', feed: 'Feed' };
@@ -311,6 +319,7 @@ const ssSwatch = document.getElementById('ss-swatch');
 const ssName   = document.getElementById('ss-name');
 const ssRole   = document.getElementById('ss-role');
 const ssState  = document.getElementById('ss-state');
+const ssStation = document.getElementById('ss-station');
 const ssNeeds  = document.getElementById('ss-needs');
 const ssStats  = document.getElementById('ss-stats');
 let statOpen = false;
@@ -318,7 +327,7 @@ let statOpen = false;
 const PANEL_STATE = {
     idle: 'idle', working: 'working', walking: 'walking', resting: 'resting',
     sleeping: 'asleep', eating: 'eating', recovering: 'recovering', talking: 'talking',
-    listening: 'listening', supervising: 'supervising',
+    listening: 'listening', waiting: 'waiting to report', supervising: 'supervising',
 };
 const ROLE_DISPLAY = { rancher: 'Rancher', gardener: 'Gardener', farmhand: 'Farmhand', foreman: 'Foreman' };
 
@@ -330,6 +339,7 @@ function inspectEntity(id) {
         return {
             id: f.id, name: f.name, roleLabel: ROLE_DISPLAY.foreman, color: '#b5343a',
             stats: f.stats, hasVitals: false, state: 'supervising', carrying: null,
+            station: null,
         };
     }
     const n = world.npcs.find((x) => x.id === id);
@@ -339,7 +349,7 @@ function inspectEntity(id) {
         color: ROLE_COLOR[n.role] || '#caa', stats: n.stats, hasVitals: true,
         stamina: n.stamina, staminaMax: staminaMaxFor(n), energy: n.energy,
         hydration: n.hydration, health: n.health, healthMax: healthMaxFor(n),
-        state: n.state, carrying: n.carrying,
+        state: n.state, carrying: n.carrying, station: n.station || null,
     };
 }
 
@@ -415,6 +425,11 @@ function renderStatPanel() {
         let line = PANEL_STATE[e.state] || e.state || '';
         if (e.carrying) line += ` · <span class="carry">carrying ${escapeHtml(e.carrying)}</span>`;
         ssState.innerHTML = line;
+    }
+    if (ssStation) {
+        ssStation.innerHTML = e.station
+            ? `<span class="st-k">Station ·</span> ${escapeHtml(STATION_LABEL[e.station] || e.station)}`
+            : (e.hasVitals ? '<span class="st-k">Station · unassigned</span>' : '');
     }
     if (ssNeeds) {
         ssNeeds.innerHTML = e.hasVitals
