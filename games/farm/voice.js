@@ -239,14 +239,22 @@ export function createVoice(opts = {}) {
         if (clipId >= 0) pendingPlays.push({ clipId, gain: PLAY_GAIN, framesLeft: PLAY_DELAY_FR });
         const endsAt = Date.now() + durationSec * 1000;
         voice.currentUtterance = { speakerId, text, durationSec, endsAt };
+        // Report the real length the moment playback begins, so the model's
+        // speech channel can hold the line (bubble + worker gating) to match.
+        try { if (item.onStart) item.onStart(durationSec); } catch (e) {}
+        // Synthesis for this line is DONE — release the synth gate NOW (rather
+        // than after playback) so the NEXT speaker's line can synthesize while
+        // this one plays. Kokoro still synthesizes one at a time, but broaudio
+        // mixes playback, so different individuals' voices overlap. The model
+        // (world.js) keeps each individual from overlapping THEMSELVES.
+        busy = false;
+        setTimeout(drain, 0);
         setTimeout(() => {
             if (voice.currentUtterance && voice.currentUtterance.endsAt === endsAt) {
                 voice.currentUtterance = null;
             }
             try { item.resolve(durationSec); } catch (e) {}
             try { if (item.onSpoken) item.onSpoken(durationSec); } catch (e) {}
-            busy = false;
-            drain();
         }, durationSec * 1000 + GAP_MS);
     }
 
@@ -337,7 +345,7 @@ export function createVoice(opts = {}) {
             return Promise.resolve(0);
         }
         return new Promise((resolve) => {
-            queue.push({ speakerId, text: String(text), resolve, onSpoken: sopts.onSpoken, priority: !!sopts.priority });
+            queue.push({ speakerId, text: String(text), resolve, onSpoken: sopts.onSpoken, onStart: sopts.onStart, priority: !!sopts.priority });
             // Bound the backlog so speech latency can't run away under chatter —
             // but only ever evict NON-priority lines. Priority (briefing) lines
             // are gating worker behaviour and must be spoken, so they're skipped.

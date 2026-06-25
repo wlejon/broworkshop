@@ -33,6 +33,23 @@ const SEED_COST = 3;        // gold deducted when a seed is sown
 const BARN_LOW  = 220;      // barnFeed below this -> "buy more" alert
 const WELL = { level: 450, cap: 600, regen: 30 };   // renewable water source
 
+// ---- speech tuning ----------------------------------------------------------
+// Speech is serialized PER SPEAKER: different individuals can talk at the same
+// time, but one individual never overlaps their own lines (their lines queue on
+// their own channel). A line is held for its REAL Kokoro length when audio is on
+// (reported back when playback starts) or this text estimate when silent, so a
+// speaker's bubble + any worker gating on it track the actual utterance.
+const SPEECH_GAP_MS   = 220;   // brief silence between one speaker's lines
+const SPEECH_MIN_MS   = 850;   // floor so a one-word line still reads
+const SPEECH_PER_WORD = 300;   // ms/word (~Kokoro pace) for the silent estimate
+const SPEECH_LEAD_MS  = 300;   // lead-in
+const SPEECH_SPEAKER_CAP = 4;  // max backlog per speaker before dropping their oldest non-priority line
+const SPEECH_MAX_MS   = 9000;  // hard cap so one line can never wedge a speaker's channel
+function estimateMs(text) {
+    const words = String(text || '').trim().split(/\s+/).filter(Boolean).length || 1;
+    return Math.max(SPEECH_MIN_MS, words * SPEECH_PER_WORD + SPEECH_LEAD_MS);
+}
+
 function ageStageOf(ms) {
     return ms < YOUNG_MS ? 'young' : ms >= OLD_MS ? 'old' : 'adult';
 }
@@ -73,6 +90,12 @@ export function createWorld(opts = {}) {
         notices: [],      // transient event alerts: { level, who, msg, until }
         log: [],          // recent action results (most recent first)
         dialog: [],       // recent spoken lines: { t, speaker, text } (most recent first)
+        // Per-speaker speech channels — each individual speaks one line at a time
+        // (their own lines queue), but DIFFERENT individuals speak concurrently.
+        // say() enqueues on the speaker's channel; stepSpeech() advances them all.
+        // _emitSpeech is the audio sink app.js installs (drives Kokoro per line).
+        speech: { channels: {}, _seq: 0 },   // channels[speakerId] = { queue, active }
+        _emitSpeech: null,
         // The Foreman: a real, stationary entity (a command post), not just a
         // dialog label. Posted central in the open yard between the field (ends
         // x21) and the pens (start x24), below the barn/well row — central to the
@@ -85,13 +108,6 @@ export function createWorld(opts = {}) {
         // Currently inspected entity id (npc id / 'Foreman' / 'You') for the
         // click-to-inspect stat-sheet panel + its on-board selection ring.
         inspect: null,
-        // Conversation floor — a single global "talking stick" so spoken NPC
-        // exchanges happen ONE at a time and workers take turns. A worker that
-        // has reached a say step requests the floor; it's granted in arrival
-        // order (FIFO). Until granted, the worker stands and waits its turn, so
-        // two briefings never overlap and each NPC's spoken timing lines up with
-        // its OWN line instead of elapsing while someone else is being spoken to.
-        conversation: { holder: null, waiting: [] },
     };
 
     // Pens + their pending (uncollected) produce, capacity cap, and breed timer.
@@ -183,44 +199,97 @@ export function createWorld(opts = {}) {
         return a;
     }
 
-    // ---- speech channel: the hook the LLM + TTS plug into later -----------
-    // say() pushes a line onto the bounded dialog buffer AND, when the speaker
-    // is an NPC, sets a transient speech bubble. Later this is where TTS hangs.
-    const SPEECH_MS = 3500;
-    function say(speakerId, text) {
-        world.dialog.unshift({ t: world.clock.t, speaker: speakerId, text });
+    // ---- speech: per-speaker serialized channels, the TTS hook -------------
+    // say(speakerId, text, opts?) — ENQUEUE a spoken line on the SPEAKER'S OWN
+    // channel. It does NOT speak immediately: stepSpeech() plays each speaker's
+    // lines one at a time, so an individual never overlaps themselves, while
+    // different individuals speak concurrently. Returns a small HANDLE ({ done })
+    // the briefing 'say' step polls to know its line was fully heard.
+    // opts.priority floats a behaviour-gating line ahead of that speaker's own
+    // chatter (e.g. the Foreman's order ahead of his market notes).
+    function say(speakerId, text, opts) {
+        opts = opts || {};
+        const t = String(text == null ? '' : text);
+        if (!t.trim()) return null;
+        // The scrolling dialog LOG is history — record it right away.
+        world.dialog.unshift({ t: world.clock.t, speaker: speakerId, text: t });
         if (world.dialog.length > 24) world.dialog.pop();
-        const npc = world.npcs.find((n) => n.id === speakerId);
-        if (npc) npc.speech = { text, until: world.clock.t + SPEECH_MS };
-        // The Foreman is an entity too, so his lines get a speech bubble over the
-        // command post (he isn't in world.npcs).
-        else if (world.foreman && world.foreman.id === speakerId) {
-            world.foreman.speech = { text, until: world.clock.t + SPEECH_MS };
+        const ch = world.speech.channels[speakerId] ||
+                   (world.speech.channels[speakerId] = { queue: [], active: null });
+        const item = { id: ++world.speech._seq, speakerId, text: t,
+                       priority: opts.priority ? 1 : 0, est: estimateMs(t),
+                       realMs: null, startedAt: null, done: false };
+        ch.queue.push(item);
+        // Bound THIS speaker's backlog so their words can't lag far behind the
+        // action: drop their oldest non-priority pending line on overflow.
+        while (ch.queue.length > SPEECH_SPEAKER_CAP) {
+            const idx = ch.queue.findIndex((x) => !x.priority);
+            if (idx === -1) break;
+            ch.queue.splice(idx, 1)[0].done = true;
         }
+        return item;
     }
 
-    // ---- conversation floor: turn-taking for spoken exchanges --------------
-    // Only ONE briefing exchange is "on the floor" at a time. The say task step
-    // (tasks.js) requests the floor when a worker reports in; it's granted in
-    // arrival order. A worker not yet granted stands and waits — it does not
-    // begin its utterance or its timer — so exchanges never overlap. The floor
-    // is held across the whole exchange (the Foreman's order + the worker's ack)
-    // and released when the say-run ends or the task finishes/aborts.
-    function convRequest(id) {
-        const c = world.conversation;
-        if (c.holder === id) return true;
-        if (!c.waiting.includes(id)) c.waiting.push(id);
-        if (c.holder == null && c.waiting[0] === id) {
-            c.waiting.shift();
-            c.holder = id;
-            return true;
+    // The Foreman is an entity too (not in world.npcs), so his lines bubble over
+    // the command post. setBubble/clearBubble drive whichever entity is active.
+    function setBubble(speakerId, text, until) {
+        const npc = world.npcs.find((n) => n.id === speakerId);
+        if (npc) npc.speech = { text, until };
+        else if (world.foreman && world.foreman.id === speakerId) {
+            world.foreman.speech = { text, until };
         }
-        return false;
     }
-    function convRelease(id) {
-        const c = world.conversation;
-        if (c.holder === id) c.holder = null;
-        c.waiting = c.waiting.filter((x) => x !== id);
+    function clearBubble(speakerId) {
+        const npc = world.npcs.find((n) => n.id === speakerId);
+        if (npc) npc.speech = null;
+        else if (world.foreman && world.foreman.id === speakerId) world.foreman.speech = null;
+    }
+
+    // Advance EVERY speaker channel once per step(): retire each speaker's active
+    // line when its time is up, then start their next queued line (priority
+    // first) and drive its audio. Channels are independent, so several people can
+    // be mid-sentence at once; each line is held for the real utterance length
+    // (learned when audio playback starts) or the text estimate when silent, so a
+    // speaker's bubble + audio + any worker waiting on it all end together.
+    function stepSpeech() {
+        const now = world.clock.t;
+        const chans = world.speech.channels;
+        for (const speakerId of Object.keys(chans)) {
+            const ch = chans[speakerId];
+            if (ch.active) {
+                const a = ch.active;
+                const dur = (a.realMs != null) ? a.realMs : a.est;
+                if (now >= a.startedAt + dur + SPEECH_GAP_MS || now >= a.startedAt + SPEECH_MAX_MS) {
+                    clearBubble(speakerId);
+                    a.item.done = true;
+                    ch.active = null;
+                } else {
+                    setBubble(speakerId, a.text, now + 1000);   // keep the bubble lit
+                    continue;
+                }
+            }
+            if (!ch.active && ch.queue.length) {
+                let idx = 0;
+                for (let i = 1; i < ch.queue.length; i++) {
+                    if (ch.queue[i].priority > ch.queue[idx].priority) idx = i;
+                }
+                const item = ch.queue.splice(idx, 1)[0];
+                if (item.done) continue;   // dropped while queued
+                item.startedAt = now;
+                const active = { item, text: item.text, startedAt: now, est: item.est, realMs: null };
+                ch.active = active;
+                setBubble(speakerId, item.text, now + 1000);
+                // Voice THIS speaker's line. onStart reports its real length the
+                // moment playback begins, so we hold it to match the audio.
+                if (typeof world._emitSpeech === 'function') {
+                    try {
+                        world._emitSpeech(speakerId, item.text, (sec) => {
+                            if (ch.active === active && sec > 0) active.realMs = sec * 1000;
+                        });
+                    } catch (e) {}
+                }
+            }
+        }
     }
 
     // ---- simulation step -------------------------------------------------
@@ -400,6 +469,9 @@ export function createWorld(opts = {}) {
         if (world.foreman && world.foreman.speech && world.clock.t >= world.foreman.speech.until) {
             world.foreman.speech = null;
         }
+
+        // Drive the serialized speech channel: one line audible/visible at a time.
+        stepSpeech();
     }
 
     // Stamina/energy dynamics keyed off the worker's state (set by the task
@@ -835,7 +907,5 @@ export function createWorld(opts = {}) {
     world.actions = actions;
     world.say = say;
     world.awardWork = awardWork;   // XP seam the task executor (tasks.js) calls
-    world.convRequest = convRequest;   // conversation-floor seam (tasks.js say step)
-    world.convRelease = convRelease;
     return world;
 }

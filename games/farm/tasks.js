@@ -144,63 +144,28 @@ export function advanceTask(world, npc, dt) {
     //   3. a hard safety cap elapsed (est*2 + 3s) — a worker can NEVER wedge here
     //      if an utterance never resolves.
     if (step.type === 'say') {
-        // Turn-taking: a spoken exchange holds a single global conversation floor
-        // (world.convRequest/convRelease) so only ONE briefing is live at a time.
-        // A worker that has reached its say step but hasn't been granted the floor
-        // stands and waits its turn — it does NOT begin its utterance or start its
-        // timer until the floor is free, so its spoken timing lines up with its
-        // OWN line instead of elapsing while another worker is being spoken to.
-        // The floor is held across the whole contiguous say-run (the Foreman's
-        // order + the worker's ack) and released when the run ends (below) or the
-        // task finishes/aborts (finishTask).
-        const reqFloor = world.convRequest || (() => true);
-        if (!reqFloor(npc.id)) {
-            npc.state = 'waiting';   // in line at the Foreman, awaiting their turn
-            return true;
-        }
+        // Per-speaker serialized speech: enqueue the line on the SPEAKER'S own
+        // channel (world.say) and hold the worker until that channel has fully
+        // delivered it (handle.done) — the real Kokoro length when voiced, a text
+        // estimate when silent. Because the Foreman is one individual, two
+        // workers briefed at once simply queue behind his single voice and are
+        // addressed in turn; meanwhile a worker's reply (its OWN channel) may
+        // overlap other workers' chatter, which is fine — different people, one
+        // mouth each. So the word stays tied to the action without forcing the
+        // whole farm to fall silent for every exchange.
         npc.state = (step.speaker === npc.id) ? 'talking' : 'listening';
         if (!step._started) {
             step._started = true;
-            const words = String(step.text || '').trim().split(/\s+/).filter(Boolean).length || 1;
-            step._estSec = words * 0.38 + 0.4;     // ~speaking rate + lead-in
             step._waitMs = 0;
-            step._spokenSec = null;                 // set when the real utterance resolves
-            step._spokenDone = false;
-            // world.say is teed into the voice channel in app.js and returns the
-            // voice.speak Promise<seconds>; capture it to learn the real length.
-            // A bare world.say (untee'd) returns undefined -> we fall back to the
-            // estimate path, which is fully deterministic under virtual time.
-            let p = null;
-            try { p = world.say(step.speaker, step.text, { priority: true }); } catch (e) { p = null; }
-            if (p && typeof p.then === 'function') {
-                p.then((sec) => { step._spokenSec = sec; step._spokenDone = true; },
-                       () => { step._spokenDone = true; });
-            }
+            step._handle = null;
+            try { step._handle = world.say(step.speaker, step.text, { priority: true }); } catch (e) { step._handle = null; }
         }
         step._waitMs += dt;
-        const estMs = step._estSec * 1000;
-        const safetyMs = estMs * 2 + 3000;
-        const v = (typeof globalThis !== 'undefined') ? globalThis.farmVoice : null;
-        const speakingThisLine = !!(v && v.speaking && v.speaking(step.speaker));
-
         let done = false;
-        if (step._spokenDone && step._spokenSec > 0) {
-            done = true;                                   // real audio finished
-        } else if (step._waitMs >= estMs && !speakingThisLine) {
-            done = true;                                   // estimate path (silent)
-        } else if (step._waitMs >= safetyMs) {
-            done = true;                                   // hard safety cap
-        }
-        if (done) {
-            task.cursor++;
-            // Release the floor when leaving the contiguous say-run, so the next
-            // worker in line can take their turn. Held across consecutive say
-            // steps (order -> ack); freed the moment the worker departs to work.
-            const next = task.steps[task.cursor];
-            if (!next || next.type !== 'say') {
-                (world.convRelease || (() => {}))(npc.id);
-            }
-        }
+        if (!step._handle) done = true;               // nothing to say
+        else if (step._handle.done) done = true;      // channel delivered it
+        else if (step._waitMs >= 20000) done = true;  // backstop; channel sets done well before
+        if (done) task.cursor++;
         return true;
     }
 
@@ -278,9 +243,6 @@ export function advanceTask(world, npc, dt) {
 }
 
 function finishTask(world, npc, task, status) {
-    // Free the conversation floor in case the task ended mid-exchange, so a
-    // worker can never leave the talking stick held and stall the whole line.
-    if (world.convRelease) world.convRelease(npc.id);
     // Seeing a real job (one with a dedup target) through to completion builds
     // Endurance — the sustained-effort stat. Care errands (rest/sleep/eat carry
     // no target) and aborted tasks grant nothing.
