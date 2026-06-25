@@ -93,6 +93,8 @@ function init() {
 
   const canvas = $('view');
   const cctx = canvas.getContext('2d');
+  const refCanvas = $('ref-view');
+  const refCtx = refCanvas.getContext('2d');
 
   // restore persisted text fields
   if (prefs.modelDir) $('model-dir').value = prefs.modelDir;
@@ -296,6 +298,9 @@ function init() {
     const iw = identityWeight();
     persist();
     setBusy(true);
+    const o = genOpts(quality);
+    $('gen-sub').textContent = o.width + '² · ' + o.steps + ' steps' +
+      (iw ? ' · held' : '');
     const bits = [];
     if (iw) bits.push('identity ' + iw.toFixed(1));
     const n = Object.keys(controls).length;
@@ -303,7 +308,7 @@ function init() {
     status((quality === 'preview' ? 'preview' : 'generating') +
            (bits.length ? ' · ' + bits.join(' · ') : ' · baseline') + '…');
     $('timing').textContent = '';
-    client.generate($('prompt').value, genOpts(quality), controls, iw, (err, msg) => {
+    client.generate($('prompt').value, o, controls, iw, (err, msg) => {
       setBusy(false);
       if (err) { status(String(err.message || err), 'err'); pump(); return; }
       drawBitmap(msg.bitmap, msg.width, msg.height);
@@ -332,12 +337,14 @@ function init() {
     client.anchor(prompt, genOpts('full'), (err, msg) => {
       setBusy(false);
       if (err) { status(String(err.message || err), 'err'); return; }
-      drawAnchorThumb(msg.bitmap, msg.width, msg.height);
+      drawAnchorRef(msg.bitmap, msg.width, msg.height);
       anchor.steps = captureSteps;   // lock renders to this schedule while armed
       anchor.armed = true;
-      anchor.els.weight.disabled = false;
       anchor.els.clear.disabled = false;
+      setStepsLock(true);
       $('identity-host').classList.add('armed');
+      $('stage').classList.add('has-ref');
+      $('ref-hint').style.display = 'none';
       refreshAnchorHint();
       status('identity anchor captured · ' + (msg.ms ? msg.ms + ' ms' : ''), 'ok');
     });
@@ -346,25 +353,33 @@ function init() {
   function doClearAnchor() {
     client.clearAnchor();
     anchor.armed = false;
-    anchor.els.weight.disabled = true;
     anchor.els.clear.disabled = true;
-    if (anchor.els.thumbCtx) {
-      anchor.els.thumbCtx.clearRect(0, 0, anchor.els.thumb.width, anchor.els.thumb.height);
-    }
+    setStepsLock(false);
+    refCtx.clearRect(0, 0, refCanvas.width, refCanvas.height);
     $('identity-host').classList.remove('armed');
+    $('stage').classList.remove('has-ref');
+    $('ref-hint').style.display = '';
     refreshAnchorHint();
     persist();
     status('identity anchor cleared', 'ok');
   }
 
-  function drawAnchorThumb(bitmap, w, h) {
-    const c = anchor.els.thumb;
-    const ctx = anchor.els.thumbCtx;
-    ctx.clearRect(0, 0, c.width, c.height);
-    // contain the square render into the thumb box
-    const s = Math.min(c.width / w, c.height / h);
-    const dw = w * s, dh = h * s;
-    ctx.drawImage(bitmap, (c.width - dw) / 2, (c.height - dh) / 2, dw, dh);
+  // While an anchor is armed the injected summaries are per-step, so renders are
+  // pinned to the anchor's step count (t-alignment). Reflect that in the form so
+  // the steps field doesn't look broken: lock it and flag it.
+  function setStepsLock(on) {
+    $('steps').disabled = on;
+    $('steps-lock').classList.toggle('hidden', !on);
+    if (on) $('steps').value = anchor.steps;
+  }
+
+  // Paint the captured anchor into the reference pane (contained, square).
+  function drawAnchorRef(bitmap, w, h) {
+    if (refCanvas.width !== w || refCanvas.height !== h) {
+      refCanvas.width = w; refCanvas.height = h;
+    }
+    refCtx.clearRect(0, 0, refCanvas.width, refCanvas.height);
+    refCtx.drawImage(bitmap, 0, 0);
   }
 
   function refreshAnchorHint() {
@@ -440,19 +455,21 @@ function init() {
   // ── identity anchor wiring ───────────────────────────────────────────────
   anchor.els = {
     weight: $('identity-weight'),
+    weightVal: $('identity-weight-val'),
     clear: $('btn-clear-anchor'),
-    thumb: $('anchor-thumb'),
-    thumbCtx: $('anchor-thumb').getContext('2d'),
   };
+  function refreshWeightVal() {
+    anchor.els.weightVal.textContent = (+anchor.els.weight.value).toFixed(1);
+  }
   if (prefs.anchorPrompt) $('anchor-prompt').value = prefs.anchorPrompt;
   if (prefs.identityWeight != null) anchor.els.weight.value = prefs.identityWeight;
-  anchor.els.weight.disabled = true;   // until an anchor is captured
-  anchor.els.clear.disabled = true;
+  anchor.els.clear.disabled = true;    // until an anchor is captured
+  refreshWeightVal();
   refreshAnchorHint();
   anchor.els.weight.addEventListener('input', () => {
-    persist(); if (live) schedule('preview');
+    refreshWeightVal(); persist(); if (live && anchor.armed) schedule('preview');
   });
-  anchor.els.weight.addEventListener('change', () => { if (live) schedule('full'); });
+  anchor.els.weight.addEventListener('change', () => { if (live && anchor.armed) schedule('full'); });
   $('btn-capture-anchor').addEventListener('click', doCaptureAnchor);
   $('btn-clear-anchor').addEventListener('click', doClearAnchor);
 
@@ -471,7 +488,7 @@ function init() {
   $('btn-build-axis').addEventListener('click', doBuildAxis);
   $('btn-reset-settings').addEventListener('click', () => {
     $('seed').value = DEFAULTS.seed;
-    $('steps').value = DEFAULTS.steps;
+    if (!anchor.armed) $('steps').value = DEFAULTS.steps;  // steps is locked while held
     $('guidance').value = DEFAULTS.guidance;
     $('size').value = String(DEFAULTS.size);
     persist();

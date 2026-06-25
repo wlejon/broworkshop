@@ -9,7 +9,7 @@
   <div id="app">
     <header id="toolbar">
       <span id="brand">⬡ Sana&nbsp;Lab</span>
-      <span class="tagline">steer Sana through its own conditioning space</span>
+      <span class="tagline">hold one face while you steer Sana through its own conditioning space</span>
       <span class="grow"></span>
       <span id="backend" class="badge">loading…</span>
     </header>
@@ -42,7 +42,7 @@
               <span class="hint inline">— what to avoid</span>
               <span class="counter" id="neg-count"></span></span>
             <textarea id="neg-prompt" rows="2" maxlength="1000"
-              placeholder="deformed eyes, asymmetric eyes, blurry, low quality, extra fingers"></textarea>
+              placeholder="blurry, low quality, deformed"></textarea>
           </label>
 
           <div class="subhead">settings
@@ -52,7 +52,9 @@
           <div class="grid">
             <label class="field">seed <span class="dim">· def 0</span>
               <input id="seed" type="number" value="0" step="1"></label>
-            <label class="field">steps <span class="dim">· def 20</span>
+            <label class="field">
+              <span class="field-head">steps <span class="dim">· def 20</span>
+                <span id="steps-lock" class="lock-note hidden" title="pinned to the anchor's step count while a face is held">locked</span></span>
               <input id="steps" type="number" value="20" min="1" max="50"></label>
             <label class="field">guidance <span class="dim">· def 4.5</span>
               <input id="guidance" type="number" value="4.5" step="0.5"></label>
@@ -77,13 +79,12 @@
             <span class="hint inline">hold one face across edits</span>
           </h2>
           <label class="field">anchor &mdash; the face to keep
-            <textarea id="anchor-prompt" rows="2"
+            <textarea id="anchor-prompt" rows="3"
               placeholder="a portrait photo of a person, neutral expression, plain studio background">a portrait photo of a woman, neutral expression, head and shoulders, plain studio background</textarea></label>
-          <div class="row anchor-row">
-            <button id="btn-capture-anchor">Capture anchor</button>
-            <canvas id="anchor-thumb" width="64" height="64" title="captured identity"></canvas>
-          </div>
-          <label class="field">strength
+          <button id="btn-capture-anchor">Capture anchor</button>
+          <label class="field" id="strength-field">
+            <span class="field-head">strength
+              <span class="ctl-val" id="identity-weight-val">1.0</span></span>
             <span class="row">
               <input id="identity-weight" type="range" min="0" max="2.5" step="0.1" value="1">
               <button id="btn-clear-anchor" class="link" title="Drop the anchor">clear</button>
@@ -100,13 +101,13 @@
           </h2>
 
           <label class="field">name <span class="hint inline">(optional)</span>
-            <input id="axis-name" type="text" placeholder="petal size"></label>
-          <label class="field">set A &mdash; the “from” concept
+            <input id="axis-name" type="text" placeholder="expression"></label>
+          <label class="field">set A &mdash; the &ldquo;from&rdquo; concept
             <textarea id="search-neg" rows="2"
-              placeholder="large petals"></textarea></label>
-          <label class="field">set B &mdash; the “to” concept
+              placeholder="neutral expression, calm face"></textarea></label>
+          <label class="field">set B &mdash; the &ldquo;to&rdquo; concept
             <textarea id="search-pos" rows="2"
-              placeholder="small petals"></textarea></label>
+              placeholder="a big joyful broad smile, beaming"></textarea></label>
           <button id="btn-build-axis" disabled>Add axis</button>
 
           <p id="ctl-hint" class="hint">Load a model, then add an axis from two word sets.</p>
@@ -114,11 +115,25 @@
         </section>
       </aside>
 
-      <!-- ── viewport ─────────────────────────────────────────────────── -->
+      <!-- ── viewport: identity reference | live generation ───────────── -->
       <main id="stage">
-        <div id="canvas-wrap">
-          <canvas id="view" width="512" height="512"></canvas>
-          <div id="view-hint">Load a model, then Generate.</div>
+        <div id="panes">
+          <section id="ref-pane" class="pane">
+            <div class="pane-head">identity reference
+              <span class="pane-sub">the face being held</span></div>
+            <div class="pane-canvas">
+              <canvas id="ref-view" width="512" height="512"></canvas>
+              <div id="ref-hint" class="pane-hint">Capture an anchor to hold a face across edits.</div>
+            </div>
+          </section>
+          <section id="gen-pane" class="pane">
+            <div class="pane-head">generation
+              <span class="pane-sub" id="gen-sub"></span></div>
+            <div class="pane-canvas">
+              <canvas id="view" width="512" height="512"></canvas>
+              <div id="view-hint" class="pane-hint">Load a model, then Generate.</div>
+            </div>
+          </section>
         </div>
         <div id="status-bar">
           <span id="status-text">idle</span>

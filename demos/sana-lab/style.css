@@ -55,7 +55,11 @@ body {
   display: flex; flex-direction: column; gap: 4px;
   font-size: 11px; color: #7c8593;
 }
-.field .row { display: flex; gap: 6px; align-items: center; }
+.field { min-width: 0; }
+.field .row { display: flex; gap: 6px; align-items: center; min-width: 0; }
+/* flex children default to min-width:auto and refuse to shrink below their
+   content — pin to 0 so a long value never pushes the input past the rail. */
+.field .row > input, .field .row > select { min-width: 0; }
 /* a label's first line: name on the left, counter pinned right */
 .field-head { display: flex; align-items: baseline; gap: 6px; }
 .field-head .counter { margin-left: auto; }
@@ -155,18 +159,46 @@ input[type=range] {
 
 /* ── stage / viewport ─────────────────────────────────────────────────── */
 #stage { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-#canvas-wrap {
-  flex: 1; display: flex; align-items: center; justify-content: center;
-  position: relative; background:
-    repeating-conic-gradient(#13161c 0% 25%, #0d1015 0% 50%) 50% / 24px 24px;
+
+/* The stage is a side-by-side: the captured identity reference (left) and the
+   live generation (right). The reference pane only exists once an anchor is
+   armed — until then the generation takes the whole stage. */
+#panes { flex: 1; display: flex; min-height: 0; min-width: 0; }
+.pane {
+  flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0;
 }
-#view {
-  max-width: calc(100% - 48px); max-height: calc(100% - 48px);
+#ref-pane { border-right: 1px solid #1a1f27; }
+#stage:not(.has-ref) #ref-pane { display: none; }
+
+.pane-head {
+  display: flex; align-items: baseline; gap: 8px; min-width: 0;
+  padding: 8px 16px; border-bottom: 1px solid #161b23;
+  font-size: 11px; letter-spacing: 0.6px; text-transform: uppercase;
+  color: #5b6470; font-weight: 700; white-space: nowrap;
+}
+.pane-head > :first-child { flex: none; }
+#ref-pane .pane-head { color: #6f93c8; }
+/* the sub-label gives way first: it shrinks and ellipsizes rather than
+   overflowing the half-width header and colliding with the title. */
+.pane-sub {
+  flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  font-size: 11px; letter-spacing: 0; text-transform: none; font-weight: 400;
+  color: #4d5562;
+}
+.pane-canvas {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  position: relative; min-height: 0; min-width: 0;
+  background: repeating-conic-gradient(#13161c 0% 25%, #0d1015 0% 50%) 50% / 24px 24px;
+}
+.pane-canvas canvas {
+  max-width: calc(100% - 40px); max-height: calc(100% - 40px);
   image-rendering: auto; box-shadow: 0 6px 30px #0008;
   border: 1px solid #1c222c; background: #07090d;
 }
-#view-hint {
+#ref-pane .pane-canvas canvas { border-color: #234063; box-shadow: 0 6px 30px #0006, 0 0 0 1px #2f6dba33; }
+.pane-hint {
   position: absolute; color: #5b6470; font-size: 13px; pointer-events: none;
+  text-align: center; max-width: 80%;
 }
 #status-bar {
   display: flex; align-items: center; gap: 12px;
@@ -189,11 +221,15 @@ input[type=range] {
 
 #identity-host { border-left: 2px solid #1a2233; transition: border-color 0.2s; }
 #identity-host.armed { border-left-color: #2f6dba; }
-.anchor-row { display: flex; gap: 8px; align-items: center; }
-.anchor-row button { flex: 1; }
-#anchor-thumb {
-  width: 48px; height: 48px; flex: none;
-  border: 1px solid #1c222c; border-radius: 5px; background: #07090d;
-}
-#identity-host.armed #anchor-thumb { border-color: #2f6dba; }
+#btn-capture-anchor { width: 100%; }
+/* strength is meaningless until a face is captured — dim the whole row */
+#strength-field { opacity: 0.4; transition: opacity 0.2s; }
+#identity-host.armed #strength-field { opacity: 1; }
 #identity-weight { flex: 1; }
+#identity-weight-val { color: #7fd1a6; font-variant-numeric: tabular-nums; }
+
+/* "locked" note on the steps field while an anchor is armed */
+.lock-note {
+  margin-left: auto; flex: none; font-size: 10px; color: #6f93c8;
+  letter-spacing: 0; text-transform: none; font-weight: 400;
+}
