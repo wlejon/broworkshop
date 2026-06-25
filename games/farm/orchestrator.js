@@ -61,6 +61,57 @@ const TEMPLATES = {
 
 const ACKS = ['On it.', 'Right away.', 'Heading over.', 'Got it.', 'Will do.'];
 
+// ---- economic policy (instant management transactions) ----------------------
+// This is the buy/sell layer the LLM will later replace. It runs each decide()
+// tick alongside physical job assignment: realize produce for gold (preferring
+// high prices) and keep the barn stocked, always holding back a gold reserve so
+// the farm never bankrupts itself into starvation.
+// Feed is the lifeline: keep only a THIN gold reserve so the barn is always
+// restockable (a large reserve that blocks feed-buying would itself starve the
+// herd). Feed is cheap, so a thin reserve still buys plenty of stock.
+const GOLD_RESERVE = 40;    // small floor; feed-buying spends down to here
+const BARN_TARGET  = 600;   // restock barn up to here
+const BARN_LOW     = 250;   // restock when barnFeed dips under here
+const SELL_PILE    = 6;     // sell a good once inventory reaches this, any price
+const ANIMAL_BUY_GOLD = 600;   // only expand the herd when comfortably flush
+const SELLABLE = ['eggs', 'milk', 'wool', 'crops'];
+
+function manageEconomy(world, o) {
+    const r = world.resources;
+
+    // Sell produce whenever the price is high or inventory is piling up.
+    for (const good of SELLABLE) {
+        const units = r[good];
+        if (units <= 0) continue;
+        if (o.market.level[good] === 'high' || units >= SELL_PILE) {
+            const res = world.actions.sell(good);
+            if (res.ok && res.gold >= 25) {
+                world.say(BOSS, `Sold ${res.sold} ${good} at ${res.price.toFixed(1)}g — ${res.gold}g in.`);
+            }
+        }
+    }
+
+    // Buy feed when the barn runs low — the priority spend, down to the reserve.
+    if (r.barnFeed < BARN_LOW && r.gold > GOLD_RESERVE) {
+        const price = world.market.prices.feed || 0.25;
+        const want = Math.min(BARN_TARGET - r.barnFeed, Math.floor((r.gold - GOLD_RESERVE) / price));
+        if (want > 0) {
+            const res = world.actions.buy('feed', want);
+            if (res.ok && res.cost >= 15) world.say(BOSS, `Bought ${res.bought} feed for ${res.cost}g.`);
+        }
+    }
+
+    // Expand the herd only when very flush and a pen has room.
+    if (r.gold > ANIMAL_BUY_GOLD) {
+        const room = Object.keys(world.pens).find((p) =>
+            world.animals.filter((a) => a.alive && a.penId === p).length < world.pens[p].cap);
+        if (room) {
+            const res = world.actions.buy('animal', room);
+            if (res.ok) world.say(BOSS, `Bought a ${res.kind} for the ${room} — ${res.cost}g.`);
+        }
+    }
+}
+
 function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
 function fill(tmpl, name, what) {
@@ -177,6 +228,11 @@ export function createOrchestrator() {
 
     function decide(world) {
         const o = world.observe();
+
+        // Economic management runs every tick, independent of worker assignment:
+        // sell produce for gold and keep the barn stocked (the policy an LLM
+        // goal-pursuer will later replace).
+        manageEconomy(world, o);
 
         // In-flight targets, read straight off the workers (no hidden state).
         const inflight = new Set();

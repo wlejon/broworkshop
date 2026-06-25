@@ -15,6 +15,7 @@ import {
     CROP_KINDS,
 } from './defs.js';
 import { createEnv, stepEnv, envObserve, envAlerts } from './env.js';
+import { createMarket, stepMarket, marketObserve, marketAlerts } from './market.js';
 
 // ---- life-cycle tuning ------------------------------------------------------
 const YOUNG_MS = 45000;     // age below which an animal is 'young' (no produce)
@@ -23,6 +24,11 @@ const BREED_INTERVAL = 35000;   // ms between a pen's breeding checks
 const ILL_BASE = 0.0010;    // baseline per-second chance an animal falls sick
 const SICK_DECAY = 1.5;     // health/s lost while sick (and recovery is blocked)
 const NOTICE_MS = 12000;    // how long event notices (rot/birth/illness) stay up
+
+// ---- economy tuning ---------------------------------------------------------
+const SEED_COST = 3;        // gold deducted when a seed is sown
+const BARN_LOW  = 220;      // barnFeed below this -> "buy more" alert
+const WELL = { level: 450, cap: 600, regen: 30 };   // renewable water source
 
 function ageStageOf(ms) {
     return ms < YOUNG_MS ? 'young' : ms >= OLD_MS ? 'old' : 'adult';
@@ -56,6 +62,10 @@ export function createWorld(opts = {}) {
         npcs: [],
         resources: { ...START_RESOURCES },
         env: createEnv(), // season / weather / day-phase substrate (env.js)
+        market: createMarket(),   // fluctuating prices (market.js)
+        well: { ...WELL },        // renewable, rate-limited water source
+        // The goal the orchestrator (and later an LLM) optimizes toward.
+        objective: { type: 'gold', target: 1500, deadlineDay: 8 },
         births: 0,        // running count for unique offspring ids
         notices: [],      // transient event alerts: { level, who, msg, until }
         log: [],          // recent action results (most recent first)
@@ -166,6 +176,11 @@ export function createWorld(opts = {}) {
         // produces scale the need/growth integration below.
         stepEnv(world, dt, rng);
         const mods = world.env.mods;
+
+        // Economy: drift market prices; the well slowly refills (rain adds more
+        // in stepEnv) up to its cap — water is renewable but rate-limited.
+        stepMarket(world, dt, rng);
+        world.well.level = Math.min(world.well.cap, world.well.level + world.well.regen * s);
 
         // Animals: aging, metabolism (per-species), auto-feed/drink, sickness,
         // health, produce.
@@ -362,9 +377,21 @@ export function createWorld(opts = {}) {
                 t: Math.round(world.clock.t),
             },
             env: envObserve(world.env),
+            market: marketObserve(world),
+            barnFeed: r1(world.resources.barnFeed),
+            well: { level: r1(world.well.level), cap: world.well.cap },
+            inventory: { eggs: resources.eggs, milk: resources.milk, wool: resources.wool, crops: resources.crops },
+            objective: {
+                type: world.objective.type,
+                target: world.objective.target,
+                progress: resources.gold,
+                deadlineDay: world.objective.deadlineDay,
+                met: resources.gold >= world.objective.target,
+            },
             animals, crops, troughs, npcs, resources, pending,
             alerts: deriveAlerts(animals, crops, troughs, resources)
                 .concat(envAlerts(world.env))
+                .concat(marketAlerts(world))
                 .concat(activeNotices()),
         };
     }
@@ -397,8 +424,16 @@ export function createWorld(opts = {}) {
                 alerts.push({ level: 'warning', who: c.id, msg: `${c.id} needs water` });
             }
         }
-        if (resources.feed < 40)  alerts.push({ level: 'warning', who: 'barn', msg: 'feed stock low' });
-        if (resources.water < 40) alerts.push({ level: 'warning', who: 'well', msg: 'water stock low' });
+        if (resources.feed < 40)  alerts.push({ level: 'warning', who: 'feedpool', msg: 'feed pool low' });
+        if (resources.water < 40) alerts.push({ level: 'warning', who: 'waterpool', msg: 'water pool low' });
+        // Economy pressure. "Broke" = barn empty and not enough gold to restock
+        // a meaningful amount of feed.
+        const feedPrice = world.market.prices.feed || 0.25;
+        if (resources.barnFeed <= 0 && resources.gold < feedPrice * 50) {
+            alerts.push({ level: 'critical', who: 'economy', msg: 'broke — can\'t afford feed' });
+        } else if (resources.barnFeed < BARN_LOW) {
+            alerts.push({ level: 'warning', who: 'barn', msg: 'barn feed low — buy more' });
+        }
         return alerts;
     }
 
@@ -424,29 +459,39 @@ export function createWorld(opts = {}) {
         // Top up a pen's water trough from the water pool.
         refillWaterTrough(penId) { return refillTrough(penId, 'water', 'water'); },
 
-        // Draw water from the well into the water pool.
+        // Draw water from the WELL into the working water pool. Capped by the
+        // well's current level — the well is renewable but finite per moment.
         drawWater(units = 50) {
-            world.resources.water += units;
-            pushLog(`drew ${units} water from well`);
-            return { ok: true, water: world.resources.water };
+            const avail = Math.min(units, world.well.level);
+            if (avail <= 0) return { ok: false, reason: 'well dry', drawn: 0 };
+            world.well.level -= avail;
+            world.resources.water += avail;
+            pushLog(`drew ${Math.round(avail)} water from well`);
+            return { ok: true, drawn: avail, water: world.resources.water, partial: avail < units };
         },
-        // Load feed from the barn into the feed pool.
+        // Load feed from the finite BARN STOCK into the working feed pool. If
+        // barnFeed is short it loads what's there; empty barn -> failure.
         loadFeed(units = 50) {
-            world.resources.feed += units;
-            pushLog(`loaded ${units} feed from barn`);
-            return { ok: true, feed: world.resources.feed };
+            const avail = Math.min(units, world.resources.barnFeed);
+            if (avail <= 0) return { ok: false, reason: 'barn empty', loaded: 0 };
+            world.resources.barnFeed -= avail;
+            world.resources.feed += avail;
+            pushLog(`loaded ${Math.round(avail)} feed from barn`);
+            return { ok: true, loaded: avail, feed: world.resources.feed, partial: avail < units };
         },
 
-        // Plant a seed into an empty plot.
+        // Plant a seed into an empty plot (costs a small seed fee).
         plant(plotIndex, kind = 'wheat') {
             const c = world.crops.find((x) => x.plotIndex === plotIndex);
             if (!c) return { ok: false, reason: 'no such plot' };
             if (c.stage !== 'empty') return { ok: false, reason: 'plot occupied' };
             // Season gate: only in-season kinds will take.
             if (!world.env.plantable.includes(kind)) return { ok: false, reason: 'out of season' };
+            if (world.resources.gold < SEED_COST) return { ok: false, reason: 'no gold for seed' };
+            world.resources.gold -= SEED_COST;
             c.kind = kind; c.stage = 'seed'; c.growth = 0; c.moisture = 60;
-            pushLog(`planted ${kind} in plot ${plotIndex}`);
-            return { ok: true, cropId: c.id };
+            pushLog(`planted ${kind} in plot ${plotIndex} (-${SEED_COST}g)`);
+            return { ok: true, cropId: c.id, cost: SEED_COST };
         },
         // Water a crop back to full moisture.
         waterCrop(cropId) {
@@ -458,18 +503,17 @@ export function createWorld(opts = {}) {
             world.resources.water -= used;
             return { ok: true, moisture: c.moisture, used };
         },
-        // Harvest a ripe crop: clears the plot, banks the good + gold.
+        // Harvest a ripe crop: clears the plot, banks the good into INVENTORY
+        // (sold later at market — no auto-gold).
         harvest(cropId) {
             const c = world.crops.find((x) => x.id === cropId);
             if (!c) return { ok: false, reason: 'no such crop' };
             if (c.stage !== 'ripe') return { ok: false, reason: 'not ripe' };
             const kind = c.kind;
-            const gold = (CROP_KINDS[kind] && CROP_KINDS[kind].gold) || 4;
             world.resources.crops += 1;
-            world.resources.gold += gold;
             c.kind = null; c.stage = 'empty'; c.growth = 0; c.moisture = 0; c.ripeTimer = null;
-            pushLog(`harvested ${kind} (+${gold}g)`);
-            return { ok: true, kind, gold };
+            pushLog(`harvested ${kind}`);
+            return { ok: true, kind };
         },
         // Tend a sick animal back toward health (cures the illness).
         tendAnimal(animalId) {
@@ -482,17 +526,73 @@ export function createWorld(opts = {}) {
             pushLog(`tended ${animalId}`);
             return { ok: true, health: a.health };
         },
-        // Collect a pen's uncollected produce into storage + gold.
+        // Collect a pen's uncollected produce into INVENTORY (sold at market
+        // later — no auto-gold).
         collectProduce(penId) {
             const pen = world.pens[penId];
             if (!pen) return { ok: false, reason: 'no such pen' };
             const n = pen.pending;
             if (n <= 0) return { ok: false, reason: 'nothing to collect', collected: 0 };
             world.resources[pen.good] += n;
-            world.resources.gold += n * pen.goldPerGood;
             pen.pending = 0;
-            pushLog(`collected ${n} ${pen.good} (+${n * pen.goldPerGood}g)`);
+            pushLog(`collected ${n} ${pen.good}`);
             return { ok: true, good: pen.good, collected: n };
+        },
+
+        // ---- market (instant management transactions) -----------------------
+        // Sell inventory of a good at the current market price -> gold.
+        sell(good, units) {
+            if (world.resources[good] == null || good === 'feed' || good === 'gold' ||
+                good === 'barnFeed' || good === 'water') {
+                return { ok: false, reason: 'not sellable' };
+            }
+            const have = world.resources[good];
+            const n = (units == null) ? have : Math.min(units, have);
+            if (n <= 0) return { ok: false, reason: 'nothing to sell', sold: 0 };
+            const price = world.market.prices[good] || 0;
+            const gold = Math.round(n * price);
+            world.resources[good] -= n;
+            world.resources.gold += gold;
+            pushLog(`sold ${n} ${good} (+${gold}g)`);
+            return { ok: true, good, sold: n, gold, price };
+        },
+        // Buy feed (-> barnFeed) or a young animal for a pen under cap. Spends
+        // gold; partial-buys feed if gold is short rather than failing outright.
+        buy(item, arg) {
+            if (item === 'feed') {
+                const price = world.market.prices.feed || 0.2;
+                let n = (arg == null) ? 200 : arg;
+                const maxAfford = Math.floor(world.resources.gold / price);
+                if (maxAfford <= 0) return { ok: false, reason: 'cant afford feed', bought: 0 };
+                if (n > maxAfford) n = maxAfford;
+                const cost = Math.round(n * price);
+                world.resources.gold -= cost;
+                world.resources.barnFeed += n;
+                pushLog(`bought ${n} feed (-${cost}g)`);
+                return { ok: true, item: 'feed', bought: n, cost, partial: arg != null && n < arg };
+            }
+            if (item === 'animal') {
+                const price = world.market.prices.animal || 90;
+                if (world.resources.gold < price) return { ok: false, reason: 'cant afford animal' };
+                // Pick the pen (arg) or the first pen under cap.
+                let penId = arg;
+                if (!penId || !world.pens[penId]) {
+                    penId = Object.keys(world.pens).find((p) =>
+                        world.animals.filter((a) => a.alive && a.penId === p).length < world.pens[p].cap);
+                }
+                if (!penId) return { ok: false, reason: 'no pen has room' };
+                const pen = world.pens[penId];
+                const herd = world.animals.filter((a) => a.alive && a.penId === penId);
+                if (herd.length >= pen.cap) return { ok: false, reason: 'pen full' };
+                const kind = (herd[0] && herd[0].kind) ||
+                    (penId === 'coop' ? 'chicken' : penId === 'meadow' ? 'sheep' : 'cow');
+                const ctr = penCenter(penId);
+                world.resources.gold -= Math.round(price);
+                const baby = spawnAnimal(penId, kind, ctr.x + (rng() * 2 - 1), ctr.y + (rng() * 2 - 1));
+                pushLog(`bought a ${kind} for ${penId} (-${Math.round(price)}g)`);
+                return { ok: true, item: 'animal', kind, penId, id: baby.id, cost: Math.round(price) };
+            }
+            return { ok: false, reason: 'unknown item' };
         },
     };
 

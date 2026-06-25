@@ -16,7 +16,9 @@ export const RATES = {
     hungerRise:   2.2,   // animal hunger climbs this fast when not eating
     thirstRise:   2.6,
     feedRate:     8.0,   // how fast a feeding animal pulls its need down
-    troughDraw:   0.5,   // trough units consumed per need-point restored
+    troughDraw:   0.22,  // trough units consumed per need-point restored
+                         // (low so a refill lasts long enough that 4 workers
+                         //  keep all 6 troughs full AND have slack to collect)
     healthDecay:  4.0,   // health lost/s while a need is critical (>70)
     healthRegen:  2.0,   // health gained/s while well-fed AND watered (<35)
     needCritical: 70,    // need level at which health starts to decline
@@ -110,8 +112,9 @@ export const NPC_SPECS = [
     { id: 'npc-sam',  name: 'Sam',  role: 'rancher',  voice: 'calm',   home: { x: 30, y: 17 } },
 ];
 
-// Starting resource pools.
-export const START_RESOURCES = { feed: 200, water: 200, gold: 50, eggs: 0, milk: 0, wool: 0, crops: 0 };
+// Starting resource pools. `feed`/`water` are the working pools troughs draw
+// from; `barnFeed` is the finite, must-be-bought feed stock loadFeed pulls from.
+export const START_RESOURCES = { feed: 180, barnFeed: 600, water: 150, gold: 200, eggs: 0, milk: 0, wool: 0, crops: 0 };
 
 // Starting trough fill levels (0..100). Some start low so alerts/pressure
 // appear within the first demo seconds.

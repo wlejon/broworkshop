@@ -155,7 +155,12 @@ export function stepEnv(world, dt, rng) {
             if (c.stage !== 'empty') c.moisture = Math.min(100, c.moisture + m.rainMoisture * s);
         }
     }
-    if (m.poolWater > 0) world.resources.water += m.poolWater * s;
+    // Rain refills the renewable WELL (the natural source) when present, else
+    // the working water pool directly.
+    if (m.poolWater > 0) {
+        if (world.well) world.well.level = Math.min(world.well.cap, world.well.level + m.poolWater * s);
+        else world.resources.water += m.poolWater * s;
+    }
 }
 
 // Serializable env subset for observe(). plantable is what a future orchestrator

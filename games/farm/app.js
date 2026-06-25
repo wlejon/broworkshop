@@ -27,7 +27,7 @@ import { createWorld } from '/app/world.js';
 import { render } from '/app/render.js';
 import { advanceTask } from '/app/tasks.js';
 import { createOrchestrator } from '/app/orchestrator.js';
-import { initPlayer, movePlayer, runInteract } from '/app/player.js';
+import { initPlayer, movePlayer, runInteract, buyFeed } from '/app/player.js';
 
 const W_FALLBACK = 1100, H_FALLBACK = 760;
 
@@ -72,6 +72,7 @@ Input.init([
     { name: 'left',     label: 'Left',     defaults: ['a', 'ArrowLeft'] },
     { name: 'right',    label: 'Right',    defaults: ['d', 'ArrowRight'] },
     { name: 'interact', label: 'Interact', defaults: ['e', ' '] },
+    { name: 'market',   label: 'Buy feed', defaults: ['m'] },
     { name: 'pause',    label: 'Pause',    defaults: ['Escape', 'p'] },
     { name: 'confirm',  label: 'Confirm',  defaults: ['Enter'] },
 ]);
@@ -82,6 +83,7 @@ Input.onAction((action, phase) => {
     if (phase !== 'down') return;
     if (screens.name() === 'playing') {
         if (action === 'interact') { doInteract(); return; }
+        if (action === 'market')   { doBuyFeed(); return; }
         if (action === 'pause')    { screens.switchTo('pause'); return; }
         return;
     }
@@ -101,7 +103,7 @@ window.addEventListener('keydown', (e) => {
     const fn = debugKeys[k];
     if (fn) { fn(); updateHUD(); }
 });
-function eachPen(fn) { ['coop', 'pasture'].forEach(fn); }
+function eachPen(fn) { ['coop', 'meadow', 'pasture'].forEach(fn); }
 const debugKeys = {
     '1': () => eachPen((p) => world.actions.refillFeedTrough(p)),
     '2': () => eachPen((p) => world.actions.refillWaterTrough(p)),
@@ -123,13 +125,28 @@ function doInteract() {
     updateHUD();
     return res;
 }
+function doBuyFeed() {
+    const res = buyFeed(world, 200);
+    playSfx(res.ok ? 'pickup' : 'nope');
+    updateHUD();
+    return res;
+}
+globalThis.farmBuyFeed = () => doBuyFeed();
 
 // ---------- HUD ----------
 const hudClock  = document.getElementById('hud-clock');
 const hudEnv    = document.getElementById('hud-env');
 const hudRes    = document.getElementById('hud-resources');
+const hudMarket = document.getElementById('hud-market');
+const hudObjective = document.getElementById('hud-objective');
 const hudAlerts = document.getElementById('hud-alerts');
 const hudDialog = document.getElementById('hud-dialog');
+
+const GOOD_LABEL = { eggs: 'Eggs', milk: 'Milk', wool: 'Wool', crops: 'Crop', feed: 'Feed' };
+function priceChip(good, price, level) {
+    return `<div class="price-chip ${level}"><span class="price-k">${GOOD_LABEL[good] || good}</span>` +
+           `<span class="price-v">${price.toFixed(1)}g</span></div>`;
+}
 
 function cap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
 const WEATHER_LABEL = {
@@ -178,6 +195,24 @@ function updateHUD() {
             chip('Milk', r.milk) +
             chip('Wool', r.wool) +
             chip('Crops', r.crops);
+    }
+
+    if (hudMarket) {
+        const m = o.market;
+        const order = ['eggs', 'milk', 'wool', 'crops', 'feed'];
+        hudMarket.innerHTML =
+            order.map((g) => priceChip(g, m.prices[g], m.level[g])).join('') +
+            chip('Barn', o.barnFeed, o.barnFeed < 220 ? 'low' : '') +
+            chip('Well', o.well.level);
+    }
+
+    if (hudObjective) {
+        const obj = o.objective;
+        const pct = Math.max(0, Math.min(100, Math.round(100 * obj.progress / obj.target)));
+        hudObjective.innerHTML =
+            `<div class="obj-row"><span>Reach ${obj.target}g by Day ${obj.deadlineDay}</span>` +
+            `<span class="obj-num ${obj.met ? 'met' : ''}">${obj.progress} / ${obj.target}g</span></div>` +
+            `<div class="obj-bar"><div class="obj-fill ${obj.met ? 'met' : ''}" style="width:${pct}%"></div></div>`;
     }
 
     if (hudAlerts) {

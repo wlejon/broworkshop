@@ -93,6 +93,37 @@ canvas {
 .res-chip.low { border-color: #d6453a; }
 .res-chip.low .res-v { color: #f08a80; }
 
+/* --- Market price chips + objective bar --- */
+.hud-market {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+}
+.price-chip {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 44px;
+    padding: 4px 6px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid #2a3a26;
+}
+.price-k { font-size: 9px; color: #7fa377; letter-spacing: 1px; }
+.price-v { font-size: 13px; font-weight: bold; color: #e8f4df; }
+.price-chip.high { border-color: #4a9a4a; background: rgba(90,200,90,0.10); }
+.price-chip.high .price-v { color: #8fe08f; }
+.price-chip.low  { border-color: #b06a3a; background: rgba(210,120,60,0.10); }
+.price-chip.low  .price-v { color: #f0a070; }
+
+.hud-objective { font-size: 11px; color: #c8d8bf; }
+.obj-row { display: flex; justify-content: space-between; margin-bottom: 4px; }
+.obj-num { font-weight: bold; color: #f6d24a; }
+.obj-num.met { color: #8fe08f; }
+.obj-bar { height: 7px; background: rgba(0,0,0,0.4); border-radius: 4px; overflow: hidden; }
+.obj-fill { height: 100%; background: #e0b94a; border-radius: 4px; }
+.obj-fill.met { background: #6fc24a; }
+
 .hud-alerts {
     display: flex;
     flex-direction: column;

@@ -128,6 +128,18 @@ function candidates(world) {
         });
     }
 
+    // Silo / market -> sell all produce on hand (only when there's something).
+    const inv = world.resources;
+    if ((inv.eggs + inv.milk + inv.wool + inv.crops) > 0) {
+        const silo = regionCenter('silo');
+        out.push({
+            x: silo.x, y: silo.y, target: null, sfx: 'pickup',
+            label: 'Sell produce at market',
+            run: () => sellAll(world),
+            say: null,   // sellAll speaks its own (dynamic) line
+        });
+    }
+
     // Well -> draw water into the pool. Barn -> load feed into the pool. These
     // are resupply, not pen-jobs, so they carry no orchestrator dedup target.
     const well = regionCenter('well');
@@ -171,6 +183,26 @@ export function runInteract(world) {
     if (res && res.ok === false) {
         return { ok: false, sfx: best.sfx, label: best.label, reason: res.reason };
     }
-    world.say('You', best.say);
+    if (best.say) world.say('You', best.say);   // null when run() spoke its own line
     return { ok: true, sfx: best.sfx, label: best.label };
+}
+
+// Sell every unit of produce the farm holds at current market prices.
+function sellAll(world) {
+    let total = 0, gold = 0;
+    for (const g of ['eggs', 'milk', 'wool', 'crops']) {
+        const r = world.actions.sell(g);
+        if (r.ok) { total += r.sold; gold += r.gold; }
+    }
+    if (total <= 0) return { ok: false, reason: 'nothing to sell' };
+    world.say('You', `Sold ${total} goods at market for ${gold}g.`);
+    return { ok: true, total, gold };
+}
+
+// Buy feed into the barn (the 'market' key). Returns the action result so the
+// caller can pick a success/fail SFX.
+export function buyFeed(world, units = 200) {
+    const r = world.actions.buy('feed', units);
+    if (r.ok) world.say('You', `Bought ${r.bought} feed for ${r.cost}g.`);
+    return r;
 }
