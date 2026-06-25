@@ -43,6 +43,7 @@ export function createWorld(opts = {}) {
         npcs: [],
         resources: { ...START_RESOURCES },
         log: [],          // recent action results (most recent first)
+        dialog: [],       // recent spoken lines: { t, speaker, text } (most recent first)
     };
 
     // Pens + their pending (uncollected) produce.
@@ -78,7 +79,7 @@ export function createWorld(opts = {}) {
             x: n.home.x, y: n.home.y,
             tx: n.home.x, ty: n.home.y,
             home: { ...n.home },
-            state: 'idle', carrying: null, task: null,
+            state: 'idle', carrying: null, task: null, speech: null,
         });
     }
 
@@ -87,6 +88,17 @@ export function createWorld(opts = {}) {
     function pushLog(msg) {
         world.log.unshift({ t: world.clock.t, msg });
         if (world.log.length > 12) world.log.pop();
+    }
+
+    // ---- speech channel: the hook the LLM + TTS plug into later -----------
+    // say() pushes a line onto the bounded dialog buffer AND, when the speaker
+    // is an NPC, sets a transient speech bubble. Later this is where TTS hangs.
+    const SPEECH_MS = 3500;
+    function say(speakerId, text) {
+        world.dialog.unshift({ t: world.clock.t, speaker: speakerId, text });
+        if (world.dialog.length > 24) world.dialog.pop();
+        const npc = world.npcs.find((n) => n.id === speakerId);
+        if (npc) npc.speech = { text, until: world.clock.t + SPEECH_MS };
     }
 
     // ---- simulation step -------------------------------------------------
@@ -158,8 +170,11 @@ export function createWorld(opts = {}) {
             if (c.growth >= RATES.growRipe) c.stage = 'ripe';
         }
 
-        // NPCs: idle gentle wander only (Pass 1 — no real tasks yet).
+        // NPCs: task executor (app.js) drives any npc with a task; the ones
+        // without one fall back to a gentle idle wander. Expire speech bubbles.
         for (const n of world.npcs) {
+            if (n.speech && world.clock.t >= n.speech.until) n.speech = null;
+            if (n.task) continue;   // advanceTask() owns tasked npcs
             wanderNpc(n, s);
         }
     }
@@ -333,5 +348,6 @@ export function createWorld(opts = {}) {
     world.step = step;
     world.observe = observe;
     world.actions = actions;
+    world.say = say;
     return world;
 }

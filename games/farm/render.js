@@ -221,7 +221,34 @@ function drawAnimals(ctx, world, b, px, py) {
     }
 }
 
+// Color for a carried item shown as a small chip on the worker.
+const CARRY_COLOR = {
+    water: COLORS.troughWater,
+    feed:  COLORS.troughFeed,
+    crop:  COLORS.cropWheat,
+    crate: '#caa86a',
+};
+
 function drawNpcs(ctx, world, b, px, py) {
+    const now = world.clock.t;
+
+    // First pass: faint move-target lines + markers (drawn under the bodies).
+    for (const n of world.npcs) {
+        const target = currentMoveTarget(n);
+        if (!target) continue;
+        const cx = px(n.x), cy = py(n.y);
+        const tx = px(target.x), ty = py(target.y);
+        ctx.strokeStyle = 'rgba(255,225,120,0.30)';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(tx, ty); ctx.stroke();
+        ctx.setLineDash([]);
+        // destination ring
+        ctx.strokeStyle = 'rgba(255,225,120,0.55)';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(tx, ty, b.cell * 0.35, 0, Math.PI * 2); ctx.stroke();
+    }
+
     for (const n of world.npcs) {
         const cx = px(n.x), cy = py(n.y);
         const r = b.cell * 0.3;
@@ -232,12 +259,60 @@ function drawNpcs(ctx, world, b, px, py) {
         ctx.beginPath(); ctx.arc(cx, cy - r * 0.6, r * 0.7, 0, Math.PI * 2); ctx.fill();
         ctx.strokeStyle = 'rgba(0,0,0,0.5)'; ctx.lineWidth = 1;
         ctx.beginPath(); ctx.arc(cx, cy + r, r, 0, Math.PI * 2); ctx.stroke();
+
+        // carrying indicator: small chip to the worker's side
+        if (n.carrying) {
+            const col = CARRY_COLOR[n.carrying] || '#fff';
+            const ix = cx + r * 1.5, iy = cy + r * 0.3;
+            ctx.fillStyle = col;
+            roundRect(ctx, ix - r * 0.45, iy - r * 0.45, r * 0.9, r * 0.9, 2); ctx.fill();
+            ctx.strokeStyle = 'rgba(0,0,0,0.5)'; ctx.lineWidth = 1;
+            roundRect(ctx, ix - r * 0.45, iy - r * 0.45, r * 0.9, r * 0.9, 2); ctx.stroke();
+        }
+
+        // working pip (small dot above head) when on a task
+        if (n.task) {
+            ctx.fillStyle = '#7fc24a';
+            ctx.beginPath(); ctx.arc(cx + r * 0.9, cy - r * 1.4, r * 0.3, 0, Math.PI * 2); ctx.fill();
+        }
+
         // name label
-        const lw = ctx.measureText ? n.name.length * 7 + 8 : 40;
+        const lw = n.name.length * 7 + 8;
         ctx.fillStyle = 'rgba(0,0,0,0.6)';
         roundRect(ctx, cx - lw / 2, cy - r * 2.4, lw, 14, 3); ctx.fill();
         label(ctx, n.name, cx, cy - r * 2.4 + 11, '#fff', 11, 'center');
+
+        // speech bubble while a line is live
+        if (n.speech && now < n.speech.until) {
+            drawSpeech(ctx, n.speech.text, cx, cy - r * 2.4 - 4);
+        }
     }
+}
+
+function currentMoveTarget(n) {
+    if (!n.task) return null;
+    const step = n.task.steps[n.task.cursor];
+    if (step && step.type === 'move') return { x: step.x, y: step.y };
+    return null;
+}
+
+function drawSpeech(ctx, text, cx, baseY) {
+    ctx.font = '11px Consolas, monospace';
+    const tw = (ctx.measureText ? ctx.measureText(text).width : text.length * 6) + 14;
+    const bh = 18;
+    const x = cx - tw / 2, y = baseY - bh;
+    ctx.fillStyle = 'rgba(250,250,245,0.95)';
+    roundRect(ctx, x, y, tw, bh, 5); ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,0.4)'; ctx.lineWidth = 1;
+    roundRect(ctx, x, y, tw, bh, 5); ctx.stroke();
+    // tail
+    ctx.fillStyle = 'rgba(250,250,245,0.95)';
+    ctx.beginPath();
+    ctx.moveTo(cx - 4, y + bh - 1);
+    ctx.lineTo(cx + 4, y + bh - 1);
+    ctx.lineTo(cx, y + bh + 5);
+    ctx.fill();
+    label(ctx, text, cx, y + 13, '#222', 11, 'center');
 }
 
 function label(ctx, text, x, y, color, size, align) {

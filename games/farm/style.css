@@ -82,6 +82,24 @@ canvas {
 .alert.warning  { color: #e9c66a; border-left-color: #e0b94a; }
 .alert.critical { color: #f08a80; border-left-color: #d6453a; }
 
+.hud-dialog {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    font-size: 11px;
+    line-height: 1.4;
+    max-height: 150px;
+    overflow: hidden;
+}
+.hud-dialog .line {
+    color: #c8d8bf;
+    padding: 2px 6px;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.03);
+}
+.hud-dialog .line .who { color: #f6d24a; font-weight: bold; }
+.hud-dialog .line.muted { color: #5a6a52; background: none; }
+
 .hud-keys {
     margin-top: 18px;
     font-size: 11px;

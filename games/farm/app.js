@@ -16,6 +16,8 @@ import { GameLoop } from '/lib/loop.js';
 import { Canvas } from '/lib/canvas.js';
 import { createWorld } from '/app/world.js';
 import { render } from '/app/render.js';
+import { advanceTask } from '/app/tasks.js';
+import { createOrchestrator } from '/app/orchestrator.js';
 
 const W_FALLBACK = 1100, H_FALLBACK = 760;
 
@@ -27,6 +29,13 @@ const getH = () => Canvas.h(ctx, H_FALLBACK);
 const world = createWorld({ seed: 7 });
 // Expose for headless inspection / future agent layer.
 globalThis.world = world;
+
+// Rule-based orchestrator (swappable seam — an LLM version drops in with the
+// same decide(world) signature). Set globalThis.farmAuto=false to compare a
+// do-nothing baseline (NPCs idle-wander, no tasks assigned).
+const orchestrator = createOrchestrator();
+globalThis.orchestrator = orchestrator;
+globalThis.farmAuto = true;
 
 let paused = false;
 
@@ -56,6 +65,16 @@ window.addEventListener('keydown', (e) => {
 const hudClock = document.getElementById('hud-clock');
 const hudRes   = document.getElementById('hud-resources');
 const hudAlerts = document.getElementById('hud-alerts');
+const hudDialog = document.getElementById('hud-dialog');
+
+// Map a dialog speaker id to a display name (npc id -> name; else the label).
+function speakerName(id) {
+    const n = world.npcs.find((x) => x.id === id);
+    return n ? n.name : id;
+}
+function escapeHtml(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
 
 function chip(label, value, cls) {
     return `<div class="res-chip ${cls || ''}"><span class="res-k">${label}</span><span class="res-v">${value}</span></div>`;
@@ -86,13 +105,42 @@ function updateHUD() {
                 .join('');
         }
     }
+
+    if (hudDialog) {
+        if (world.dialog.length === 0) {
+            hudDialog.innerHTML = '<div class="line muted">…</div>';
+        } else {
+            hudDialog.innerHTML = world.dialog
+                .slice(0, 7)
+                .map((d) => `<div class="line"><span class="who">${escapeHtml(speakerName(d.speaker))}:</span> ${escapeHtml(d.text)}</div>`)
+                .join('');
+        }
+    }
 }
 
 // ---------- loop ----------
 let hudAccum = 0;
+let decideAccum = 0;
+const DECIDE_INTERVAL = 1000;   // run the orchestrator ~1x / sim-second
+
 function tick(dt) {
     if (paused) return;
     world.step(dt);
+
+    // Drive every npc that has a task; task-less npcs idle-wander in world.step.
+    for (const n of world.npcs) {
+        if (n.task) advanceTask(world, n, dt);
+    }
+
+    // Throttled orchestration: re-decide on an interval, and immediately when a
+    // worker just freed up (so idle hands don't wait a full tick for a job).
+    decideAccum += dt;
+    const anyIdle = world.npcs.some((n) => n.task == null);
+    if (globalThis.farmAuto && (decideAccum >= DECIDE_INTERVAL || anyIdle)) {
+        decideAccum = 0;
+        orchestrator.decide(world);
+    }
+
     hudAccum += dt;
     if (hudAccum >= 250) { hudAccum = 0; updateHUD(); }
 }
