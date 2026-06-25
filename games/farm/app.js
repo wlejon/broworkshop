@@ -28,6 +28,7 @@ import { render } from '/app/render.js';
 import { advanceTask } from '/app/tasks.js';
 import { createOrchestrator } from '/app/orchestrator.js';
 import { initPlayer, movePlayer, runInteract, buyFeed } from '/app/player.js';
+import { createVoice } from '/app/voice.js';
 
 const W_FALLBACK = 1100, H_FALLBACK = 760;
 
@@ -53,6 +54,24 @@ globalThis.farmStart = () => doAction('play');
 
 // ---------- audio ----------
 SFX.init();
+
+// ---------- spoken NPC voices (Kokoro TTS) ----------
+// Each speaker that flows through world.say() also gets a distinct synthesized
+// voice, played through the SAME broaudio AudioContext as the SFX so the two
+// don't fight over the device. Loads on the GPU in the background; if it can't
+// load, voice.disabled is set and speak() is a silent no-op (the game keeps
+// running text-only). See voice.js for the utterance-duration API the next pass
+// gates NPC behaviour on (speak() returns Promise<durationSec>, voice.speaking()).
+const voice = createVoice({
+    getAudioCtx: () => SFX.ctx(),
+    npcVoiceTag: (id) => { const n = world.npcs.find((x) => x.id === id); return n ? n.voice : null; },
+    isActive: () => globalThis.screens && globalThis.screens.name() === 'playing',
+});
+globalThis.farmVoice = voice;
+
+// Tee world.say into the voice channel: every spoken line is also synthesized.
+const _say = world.say;
+world.say = (id, text) => { _say(id, text); voice.speak(id, text); };
 const sfx = {
     splash:  () => SFX.noise(0.16, 0.35, 170),
     feed:    () => SFX.noise(0.12, 0.30, 320),
