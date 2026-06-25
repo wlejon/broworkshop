@@ -12,14 +12,25 @@ export const GRID = { cols: 40, rows: 28 };
 export const DAY_LENGTH_MS = 120000;
 
 // Tuning — all *Rise / *Rate / *Decay values are per simulated SECOND.
+//
+// METABOLISM RELAXED for the briefing protocol: workers now physically report to
+// the Foreman (walk to the central command post + hear the full spoken order +
+// reply, ~6 s of talking) before every assigned job. That round-trip roughly
+// halves service throughput, so hunger/thirst accrual is slowed ~45% and
+// healthDecay softened to keep all animals alive through a multi-day run with the
+// briefing in place. Deliberate game-balance tuning to absorb the protocol's
+// overhead — the upcoming MCTS Foreman pass (smarter BATCHED scheduling, fewer
+// round-trips per unit of work) is expected to let these be tightened back
+// toward their original values.
+//   hungerRise 2.2->1.2   thirstRise 2.6->1.4   healthDecay 4.0->2.5
 export const RATES = {
-    hungerRise:   2.2,   // animal hunger climbs this fast when not eating
-    thirstRise:   2.6,
+    hungerRise:   1.2,   // animal hunger climbs this fast when not eating (was 2.2)
+    thirstRise:   1.4,   // (was 2.6)
     feedRate:     8.0,   // how fast a feeding animal pulls its need down
     troughDraw:   0.22,  // trough units consumed per need-point restored
                          // (low so a refill lasts long enough that 4 workers
                          //  keep all 6 troughs full AND have slack to collect)
-    healthDecay:  4.0,   // health lost/s while a need is critical (>70)
+    healthDecay:  2.5,   // health lost/s while a need is critical (>70) (was 4.0)
     healthRegen:  2.0,   // health gained/s while well-fed AND watered (<35)
     needCritical: 70,    // need level at which health starts to decline
     needComfort:  35,    // need level below which an animal recovers

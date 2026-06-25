@@ -95,6 +95,58 @@ export function advanceTask(world, npc, dt) {
         return true;
     }
 
+    // ---- spoken-exchange step: hold the worker until the line is fully heard ---
+    // { type:'say', speaker, text } — on first entry, trigger the utterance via
+    // the PRIORITY voice path (so the bounded queue can't drop a behaviour-gating
+    // briefing line) and push it to the dialog/speech-bubble channel. Then the
+    // worker stands ('talking' if it's their own line, else 'listening') until the
+    // utterance has FINISHED before the cursor advances — so a briefed worker
+    // hears the whole order, and waits out their own reply, before departing.
+    //
+    // Gating (advance when ANY is true):
+    //   1. the real Kokoro utterance resolved with audio (audio on -> exact length)
+    //   2. the text-length estimate elapsed AND nothing is currently speaking this
+    //      line (audio off/unavailable -> deterministic, readable silent pacing)
+    //   3. a hard safety cap elapsed (est*2 + 3s) — a worker can NEVER wedge here
+    //      if an utterance never resolves.
+    if (step.type === 'say') {
+        npc.state = (step.speaker === npc.id) ? 'talking' : 'listening';
+        if (!step._started) {
+            step._started = true;
+            const words = String(step.text || '').trim().split(/\s+/).filter(Boolean).length || 1;
+            step._estSec = words * 0.38 + 0.4;     // ~speaking rate + lead-in
+            step._waitMs = 0;
+            step._spokenSec = null;                 // set when the real utterance resolves
+            step._spokenDone = false;
+            // world.say is teed into the voice channel in app.js and returns the
+            // voice.speak Promise<seconds>; capture it to learn the real length.
+            // A bare world.say (untee'd) returns undefined -> we fall back to the
+            // estimate path, which is fully deterministic under virtual time.
+            let p = null;
+            try { p = world.say(step.speaker, step.text, { priority: true }); } catch (e) { p = null; }
+            if (p && typeof p.then === 'function') {
+                p.then((sec) => { step._spokenSec = sec; step._spokenDone = true; },
+                       () => { step._spokenDone = true; });
+            }
+        }
+        step._waitMs += dt;
+        const estMs = step._estSec * 1000;
+        const safetyMs = estMs * 2 + 3000;
+        const v = (typeof globalThis !== 'undefined') ? globalThis.farmVoice : null;
+        const speakingThisLine = !!(v && v.speaking && v.speaking(step.speaker));
+
+        let done = false;
+        if (step._spokenDone && step._spokenSec > 0) {
+            done = true;                                   // real audio finished
+        } else if (step._waitMs >= estMs && !speakingThisLine) {
+            done = true;                                   // estimate path (silent)
+        } else if (step._waitMs >= safetyMs) {
+            done = true;                                   // hard safety cap
+        }
+        if (done) task.cursor++;
+        return true;
+    }
+
     // ---- worker-care steps (Pass D) -----------------------------------------
     if (step.type === 'rest') {
         npc.state = 'resting';
@@ -271,6 +323,28 @@ export function buildCollectProduce(world, penId) {
           say: goodLabel + ' collected.' },
         { type: 'wait', ms: 150 },
     ]);
+}
+
+// ---- briefing protocol ------------------------------------------------------
+// Turn an instant job assignment into a physical briefing: the worker walks to
+// the embodied Foreman, HEARS the spoken order in full, replies, waits out their
+// own reply, and only THEN runs the job's own steps. Prepends three steps to an
+// already-built job task (preserving task.target so the orchestrator's in-flight
+// dedup keeps working). Steps stay plain serializable data — a future LLM can
+// emit this same shape directly.
+//
+//   1. move to the Foreman's post
+//   2. Foreman speaks the order   (worker stands and listens, gated on duration)
+//   3. worker speaks the ack      (worker waits out their own reply)
+export function prependBriefing(task, opts) {
+    const { foremanId, foremanPos, order, npcId, ack } = opts || {};
+    const pre = [
+        { type: 'move', x: foremanPos.x, y: foremanPos.y, label: 'foreman' },
+    ];
+    if (order) pre.push({ type: 'say', speaker: foremanId, text: order });
+    if (ack)   pre.push({ type: 'say', speaker: npcId, text: ack });
+    task.steps = pre.concat(task.steps);
+    return task;
 }
 
 export { CROP_KINDS };

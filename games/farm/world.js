@@ -70,6 +70,12 @@ export function createWorld(opts = {}) {
         notices: [],      // transient event alerts: { level, who, msg, until }
         log: [],          // recent action results (most recent first)
         dialog: [],       // recent spoken lines: { t, speaker, text } (most recent first)
+        // The Foreman: a real, stationary entity (a command post), not just a
+        // dialog label. Posted central in the open yard between the field (ends
+        // x21) and the pens (start x24), below the barn/well row — central to the
+        // survival-critical well/barn -> trough service path so briefing detours
+        // stay short. Workers walk here to be briefed before any job (tasks.js).
+        foreman: { id: 'Foreman', name: 'Foreman', x: 22, y: 12, speech: null },
     };
 
     // Pens + their pending (uncollected) produce, capacity cap, and breed timer.
@@ -159,6 +165,11 @@ export function createWorld(opts = {}) {
         if (world.dialog.length > 24) world.dialog.pop();
         const npc = world.npcs.find((n) => n.id === speakerId);
         if (npc) npc.speech = { text, until: world.clock.t + SPEECH_MS };
+        // The Foreman is an entity too, so his lines get a speech bubble over the
+        // command post (he isn't in world.npcs).
+        else if (world.foreman && world.foreman.id === speakerId) {
+            world.foreman.speech = { text, until: world.clock.t + SPEECH_MS };
+        }
     }
 
     // ---- simulation step -------------------------------------------------
@@ -313,6 +324,9 @@ export function createWorld(opts = {}) {
             updateWorkerVitals(n, s);
             if (n.task) continue;   // advanceTask() owns tasked npcs
             wanderNpc(n, s);
+        }
+        if (world.foreman && world.foreman.speech && world.clock.t >= world.foreman.speech.until) {
+            world.foreman.speech = null;
         }
     }
 

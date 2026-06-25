@@ -18,7 +18,7 @@
 import {
     buildServiceWaterTrough, buildServiceFeedTrough,
     buildHarvest, buildWaterCrop, buildPlant, buildCollectProduce, buildTend,
-    buildRest, buildSleep, buildEat,
+    buildRest, buildSleep, buildEat, prependBriefing,
 } from './tasks.js';
 import { WORKER } from './defs.js';
 
@@ -291,15 +291,23 @@ export function createOrchestrator() {
             const task = job.build();
             task.npcId = npc.id;
             task.role = job.role;     // lets the executor apply the specialist bonus
+
+            // Briefing protocol: instead of speaking the order instantly, prepend
+            // a walk-to-Foreman + spoken-order + spoken-ack preamble. The worker
+            // physically reports in and HEARS the full order before departing to
+            // the job (tasks.js prependBriefing / the duration-gated 'say' step).
+            // The job's own steps (and task.target for dedup) follow unchanged.
+            const tmpl = TEMPLATES[job.kind];
+            const order = tmpl ? fill(pick(tmpl), npc.name, job.subject)
+                               : `${npc.name}, see to the ${job.subject}.`;
+            const ack = pick(ACKS);
+            const fpos = world.foreman ? { x: world.foreman.x, y: world.foreman.y }
+                                       : { x: npc.x, y: npc.y };
+            prependBriefing(task, { foremanId: BOSS, foremanPos: fpos, order, npcId: npc.id, ack });
+
             npc.task = task;
             npc.state = 'working';
-
             assignedTargets.add(job.target);
-
-            // Speak: boss issues the order, worker acknowledges.
-            const tmpl = TEMPLATES[job.kind];
-            if (tmpl) world.say(BOSS, fill(pick(tmpl), npc.name, job.subject));
-            world.say(npc.id, pick(ACKS));
         }
     }
 

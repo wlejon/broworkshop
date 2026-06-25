@@ -65,6 +65,7 @@ export function render(ctx, world, W, H) {
     drawCrops(ctx, world, b, px, py);
     drawTroughs(ctx, world, b, px, py);
     drawAnimals(ctx, world, b, px, py);
+    drawForeman(ctx, world, b, px, py);
     drawNpcs(ctx, world, b, px, py);
     drawPlayer(ctx, world, b, px, py);
 
@@ -201,6 +202,63 @@ function drawPlayer(ctx, world, b, px, py) {
     ctx.fillStyle = 'rgba(20, 70, 110, 0.85)';
     roundRect(ctx, cx - lw / 2, cy - r * 2.7, lw, 14, 3); ctx.fill();
     label(ctx, txt, cx, cy - r * 2.7 + 11, '#dff3ff', 11, 'center');
+}
+
+// The Foreman: a stationary command post the workers report to for briefing.
+// Drawn visually distinct from the workers — deep crimson body, a peaked
+// supervisor's cap, and a clipboard — so the player can spot him at a glance.
+function drawForeman(ctx, world, b, px, py) {
+    const f = world.foreman;
+    if (!f) return;
+    const cx = px(f.x), cy = py(f.y);
+    const r = b.cell * 0.34;
+
+    // post marker ring on the ground so the command post reads even from afar
+    ctx.strokeStyle = 'rgba(220, 80, 70, 0.35)';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([3, 4]);
+    ctx.beginPath(); ctx.arc(cx, cy + r, b.cell * 0.95, 0, Math.PI * 2); ctx.stroke();
+    ctx.setLineDash([]);
+
+    // shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.30)';
+    ctx.beginPath(); ctx.ellipse(cx, cy + r * 1.5, r * 1.0, r * 0.42, 0, 0, Math.PI * 2); ctx.fill();
+
+    // body (deep crimson — unlike any worker tint) + head, heavy dark outline
+    ctx.fillStyle = '#b5343a';
+    ctx.beginPath(); ctx.arc(cx, cy + r, r * 1.08, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(cx, cy - r * 0.6, r * 0.78, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#3a0e10'; ctx.lineWidth = 2.2;
+    ctx.beginPath(); ctx.arc(cx, cy + r, r * 1.08, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(cx, cy - r * 0.6, r * 0.78, 0, Math.PI * 2); ctx.stroke();
+
+    // peaked supervisor's cap (dark band + brim) so he reads as "the boss"
+    const hy = cy - r * 1.12;
+    ctx.fillStyle = '#23262b';
+    ctx.beginPath(); ctx.ellipse(cx, hy, r * 0.95, r * 0.3, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(cx, hy - r * 0.12, r * 0.62, Math.PI, 0); ctx.fill();
+    ctx.fillStyle = '#3a3f47';
+    ctx.fillRect(cx - r * 0.62, hy - r * 0.04, r * 1.24, r * 0.18);
+
+    // clipboard tucked to his side — the briefing prop
+    ctx.fillStyle = '#caa86a';
+    roundRect(ctx, cx + r * 0.9, cy + r * 0.1, r * 0.7, r * 0.95, 2); ctx.fill();
+    ctx.strokeStyle = '#5a4324'; ctx.lineWidth = 1;
+    roundRect(ctx, cx + r * 0.9, cy + r * 0.1, r * 0.7, r * 0.95, 2); ctx.stroke();
+    ctx.fillStyle = '#f4efe6';
+    ctx.fillRect(cx + r * 1.02, cy + r * 0.24, r * 0.46, r * 0.6);
+
+    // name label
+    const txt = f.name || 'Foreman';
+    const lw = txt.length * 7 + 10;
+    ctx.fillStyle = 'rgba(90, 18, 20, 0.88)';
+    roundRect(ctx, cx - lw / 2, cy - r * 2.7, lw, 14, 3); ctx.fill();
+    label(ctx, txt, cx, cy - r * 2.7 + 11, '#ffe2e0', 11, 'center');
+
+    // speech bubble while the Foreman is briefing
+    if (f.speech && world.clock.t < f.speech.until) {
+        drawSpeech(ctx, f.speech.text, cx, cy - r * 2.7 - 4);
+    }
 }
 
 function drawRegions(ctx, world, b, px, py) {

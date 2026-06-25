@@ -327,15 +327,26 @@ export function createVoice(opts = {}) {
     //   Enqueues a line for spoken playback and resolves with its duration in
     //   SECONDS once it finishes (0 if skipped / disabled). opts.onSpoken(sec)
     //   fires at the same moment. No-op (resolves 0) while the sim isn't active.
+    //   opts.priority:true marks the line as behaviour-gating — it bypasses the
+    //   drop-oldest backpressure below, so a briefing line a worker is physically
+    //   waiting on can NEVER be silently evicted under heavy chatter. The timing
+    //   contract is unchanged: it still resolves with its real duration in seconds.
     function speak(speakerId, text, sopts) {
         sopts = sopts || {};
         if (voice.disabled || !isActive() || !text || !String(text).trim()) {
             return Promise.resolve(0);
         }
         return new Promise((resolve) => {
-            queue.push({ speakerId, text: String(text), resolve, onSpoken: sopts.onSpoken });
-            // Bound the backlog so speech latency can't run away under chatter.
-            while (queue.length > QUEUE_CAP) { const dropped = queue.shift(); try { dropped.resolve(0); } catch (e) {} }
+            queue.push({ speakerId, text: String(text), resolve, onSpoken: sopts.onSpoken, priority: !!sopts.priority });
+            // Bound the backlog so speech latency can't run away under chatter —
+            // but only ever evict NON-priority lines. Priority (briefing) lines
+            // are gating worker behaviour and must be spoken, so they're skipped.
+            while (queue.length > QUEUE_CAP) {
+                const idx = queue.findIndex((q) => !q.priority);
+                if (idx === -1) break;   // backlog is all priority — keep them all
+                const dropped = queue.splice(idx, 1)[0];
+                try { dropped.resolve(0); } catch (e) {}
+            }
             drain();
         });
     }

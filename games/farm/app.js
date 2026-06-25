@@ -70,8 +70,11 @@ const voice = createVoice({
 globalThis.farmVoice = voice;
 
 // Tee world.say into the voice channel: every spoken line is also synthesized.
+// Returns the voice.speak Promise<durationSec> and forwards opts (e.g.
+// { priority:true } for behaviour-gating briefing lines) so the duration-gated
+// 'say' task step can wait out the real utterance. See voice.js / tasks.js.
 const _say = world.say;
-world.say = (id, text) => { _say(id, text); voice.speak(id, text); };
+world.say = (id, text, opts) => { _say(id, text); return voice.speak(id, text, opts); };
 const sfx = {
     splash:  () => SFX.noise(0.16, 0.35, 170),
     feed:    () => SFX.noise(0.12, 0.30, 320),
