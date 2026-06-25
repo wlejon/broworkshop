@@ -126,9 +126,17 @@ function doInteract() {
 
 // ---------- HUD ----------
 const hudClock  = document.getElementById('hud-clock');
+const hudEnv    = document.getElementById('hud-env');
 const hudRes    = document.getElementById('hud-resources');
 const hudAlerts = document.getElementById('hud-alerts');
 const hudDialog = document.getElementById('hud-dialog');
+
+function cap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
+const WEATHER_LABEL = {
+    clear: '☀ Clear', rain: '🌧 Rain', drought: '🔥 Drought',
+    frost: '❄ Frost', storm: '⛈ Storm',
+};
+function weatherLabel(w) { return WEATHER_LABEL[w] || cap(w); }
 
 function speakerName(id) {
     const n = world.npcs.find((x) => x.id === id);
@@ -149,6 +157,15 @@ function chip(label, value, cls) {
 function updateHUD() {
     const o = world.observe();
     if (hudClock) hudClock.textContent = `Day ${o.clock.day} · ${o.clock.time}`;
+
+    if (hudEnv) {
+        const e = o.env;
+        hudEnv.innerHTML =
+            `<span class="env-chip season-${e.season}">${cap(e.season)}</span>` +
+            `<span class="env-chip wx-${e.weather}">${weatherLabel(e.weather)}</span>` +
+            `<span class="env-chip temp">${e.temperature}°</span>` +
+            `<span class="env-chip phase">${cap(e.dayPhase)}</span>`;
+    }
 
     if (hudRes) {
         const r = o.resources;

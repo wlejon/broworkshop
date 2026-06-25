@@ -119,7 +119,9 @@ export function createOrchestrator() {
                     priority: 58,
                     build: () => buildHarvest(world, c.id),
                 });
-            } else if (c.stage === 'empty') {
+            } else if (c.stage === 'empty' && o.env && o.env.plantable.includes('wheat')) {
+                // Only sow when wheat is in season — otherwise the plant action
+                // would just abort ('out of season'), churning workers for nothing.
                 jobs.push({
                     goal: 'plant:' + c.plotIndex, target: 'plot:' + c.plotIndex,
                     role: 'gardener', kind: 'plant', subject: 'wheat',

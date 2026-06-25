@@ -14,6 +14,7 @@ import {
     ANIMAL_SPECS, CROP_PLOTS, NPC_SPECS, START_RESOURCES, START_TROUGHS,
     CROP_KINDS,
 } from './defs.js';
+import { createEnv, stepEnv, envObserve, envAlerts } from './env.js';
 
 // Small deterministic RNG so wander/produce jitter is reproducible.
 function mulberry32(seed) {
@@ -42,6 +43,7 @@ export function createWorld(opts = {}) {
         crops: [],
         npcs: [],
         resources: { ...START_RESOURCES },
+        env: createEnv(), // season / weather / day-phase substrate (env.js)
         log: [],          // recent action results (most recent first)
         dialog: [],       // recent spoken lines: { t, speaker, text } (most recent first)
     };
@@ -114,14 +116,20 @@ export function createWorld(opts = {}) {
         world.clock.hour = Math.floor(hf);
         world.clock.minute = Math.floor((hf - world.clock.hour) * 60);
 
+        // Environment: advance season/weather/day-phase and apply passive
+        // weather effects (rain watering crops + topping the pool). The mods it
+        // produces scale the need/growth integration below.
+        stepEnv(world, dt, rng);
+        const mods = world.env.mods;
+
         // Animals: metabolism, auto-feed/drink from pen troughs, health, produce
         for (const a of world.animals) {
             if (!a.alive) continue;
             const feed  = world.troughs[a.penId + '-feed'];
             const water = world.troughs[a.penId + '-water'];
 
-            a.hunger = clamp(a.hunger + RATES.hungerRise * s, 0, 100);
-            a.thirst = clamp(a.thirst + RATES.thirstRise * s, 0, 100);
+            a.hunger = clamp(a.hunger + RATES.hungerRise * mods.hungerMult * s, 0, 100);
+            a.thirst = clamp(a.thirst + RATES.thirstRise * mods.thirstMult * s, 0, 100);
 
             // Eat: pull hunger down, draw the feed trough down with it.
             if (a.hunger > 0 && feed.fill > 0) {
@@ -146,10 +154,11 @@ export function createWorld(opts = {}) {
                 a.health = clamp(a.health + RATES.healthRegen * s, 0, 100);
             }
 
-            // Produce goods into the pen's uncollected pile.
+            // Produce goods into the pen's uncollected pile. Gated by the env
+            // production multiplier — halts overnight, halved at dawn/dusk.
             if (a.alive && a.health >= RATES.produceMin &&
-                a.hunger < 50 && a.thirst < 50) {
-                a.produceTimer -= s;
+                a.hunger < 50 && a.thirst < 50 && mods.produceMult > 0) {
+                a.produceTimer -= s * mods.produceMult;
                 if (a.produceTimer <= 0) {
                     world.pens[a.penId].pending += 1;
                     a.produceTimer = RATES.produceInterval;
@@ -159,12 +168,14 @@ export function createWorld(opts = {}) {
             wander(a, s, 0.6);
         }
 
-        // Crops: dry out, grow only while moist, ripen.
+        // Crops: dry out, grow only while moist, ripen. Drying and growth are
+        // both scaled by the env (drought dries faster; season/night/storm slow
+        // growth; rain set decay to zero and is added back as passive moisture).
         for (const c of world.crops) {
             if (c.stage === 'empty') continue;
-            c.moisture = clamp(c.moisture - RATES.moistureDecay * s, 0, 100);
+            c.moisture = clamp(c.moisture - RATES.moistureDecay * mods.moistureDecayMult * s, 0, 100);
             if (c.moisture > 0 && c.stage !== 'ripe') {
-                c.growth = clamp(c.growth + RATES.growthRate * s, 0, 100);
+                c.growth = clamp(c.growth + RATES.growthRate * mods.growthMult * s, 0, 100);
             }
             if (c.stage === 'seed' && c.growth >= RATES.growGrowing) c.stage = 'growing';
             if (c.growth >= RATES.growRipe) c.stage = 'ripe';
@@ -238,8 +249,10 @@ export function createWorld(opts = {}) {
                       String(world.clock.minute).padStart(2, '0'),
                 t: Math.round(world.clock.t),
             },
+            env: envObserve(world.env),
             animals, crops, troughs, npcs, resources, pending,
-            alerts: deriveAlerts(animals, crops, troughs, resources),
+            alerts: deriveAlerts(animals, crops, troughs, resources)
+                .concat(envAlerts(world.env)),
         };
     }
 
@@ -304,6 +317,8 @@ export function createWorld(opts = {}) {
             const c = world.crops.find((x) => x.plotIndex === plotIndex);
             if (!c) return { ok: false, reason: 'no such plot' };
             if (c.stage !== 'empty') return { ok: false, reason: 'plot occupied' };
+            // Season gate: only in-season kinds will take.
+            if (!world.env.plantable.includes(kind)) return { ok: false, reason: 'out of season' };
             c.kind = kind; c.stage = 'seed'; c.growth = 0; c.moisture = 60;
             pushLog(`planted ${kind} in plot ${plotIndex}`);
             return { ok: true, cropId: c.id };

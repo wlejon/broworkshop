@@ -31,9 +31,38 @@ canvas {
     font-size: 22px;
     font-weight: bold;
     color: #cfe6b6;
-    margin-bottom: 14px;
+    margin-bottom: 8px;
     letter-spacing: 1px;
 }
+
+/* Season / weather / temperature / day-phase badges under the clock. */
+.hud-env {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin-bottom: 6px;
+}
+.env-chip {
+    font-size: 11px;
+    font-weight: bold;
+    padding: 3px 7px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid #2a3a26;
+    color: #d8e8cf;
+}
+/* Season tints */
+.env-chip.season-spring { background: rgba(90,180,90,0.18);  border-color: #4a7a3a; color: #b6e6a6; }
+.env-chip.season-summer { background: rgba(190,170,60,0.18); border-color: #8a7a2a; color: #ecdca0; }
+.env-chip.season-fall   { background: rgba(190,120,50,0.18); border-color: #8a5a2a; color: #ecc090; }
+.env-chip.season-winter { background: rgba(150,180,210,0.16);border-color: #5a7088; color: #cfe0ef; }
+/* Weather tints */
+.env-chip.wx-rain    { color: #9cc6ee; border-color: #3f6a9a; }
+.env-chip.wx-drought { color: #f0b870; border-color: #a07028; }
+.env-chip.wx-frost   { color: #bfe0f4; border-color: #5a8aa8; }
+.env-chip.wx-storm   { color: #c0b0e8; border-color: #6a5a9a; }
+.env-chip.temp  { color: #e8d8b0; }
+.env-chip.phase { color: #aac6b1; }
 
 .hud-section-title {
     font-size: 11px;

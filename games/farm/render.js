@@ -46,10 +46,12 @@ export function render(ctx, world, W, H) {
     ctx.fillStyle = '#10160f';
     ctx.fillRect(0, 0, W, H);
 
-    // Grass field (checkered) across the board
+    // Grass field (checkered) across the board — tinted by the active season.
+    const season = (world.env && world.env.season) || 'spring';
+    const grass = SEASON_GRASS[season] || SEASON_GRASS.spring;
     for (let r = 0; r < GRID.rows; r++) {
         for (let c = 0; c < GRID.cols; c++) {
-            ctx.fillStyle = ((r + c) & 1) ? COLORS.grass : COLORS.grassAlt;
+            ctx.fillStyle = ((r + c) & 1) ? grass[0] : grass[1];
             ctx.fillRect(px(c), py(r), b.cell + 1, b.cell + 1);
         }
     }
@@ -66,25 +68,84 @@ export function render(ctx, world, W, H) {
     drawNpcs(ctx, world, b, px, py);
     drawPlayer(ctx, world, b, px, py);
 
-    // Subtle day/night tint over the play area (cheap single overlay).
+    // Weather visual, then the day/night wash, both over the board.
+    drawWeather(ctx, world, b);
     drawDayNight(ctx, world, b);
 }
 
-// A low-alpha wash whose color + strength tracks the clock: cool blue and
-// stronger at night, clear at midday. Drawn last so it sits over the board.
+// Season -> [grassA, grassB] checker pair: spring green, summer gold-green,
+// autumn amber, winter pale/desaturated.
+const SEASON_GRASS = {
+    spring: ['#2e5d34', '#346a3b'],
+    summer: ['#4a6e2c', '#577b33'],
+    fall:   ['#6a5a2c', '#766433'],
+    winter: ['#5d6f5d', '#697b69'],
+};
+
+// Cheap weather overlay: rain/storm draw animated falling streaks; frost a cool
+// blue wash; drought a warm haze. Deterministic-ish positions from the index so
+// it animates without per-frame RNG.
+function drawWeather(ctx, world, b) {
+    const w = (world.env && world.env.weather) || 'clear';
+    if (w === 'rain' || w === 'storm') { drawRain(ctx, world, b, w === 'storm'); return; }
+    ctx.save();
+    if (w === 'frost') ctx.fillStyle = 'rgba(150, 195, 240, 0.16)';
+    else if (w === 'drought') ctx.fillStyle = 'rgba(232, 184, 96, 0.13)';
+    else { ctx.restore(); return; }
+    ctx.fillRect(b.ox, b.oy, b.w, b.h);
+    ctx.restore();
+}
+
+function drawRain(ctx, world, b, storm) {
+    const t = world.clock.t;
+    const n = storm ? 80 : 44;
+    const speed = storm ? 1.05 : 0.62;
+    const len = storm ? 15 : 9;
+    if (storm) {
+        ctx.save();
+        ctx.fillStyle = 'rgba(20, 30, 50, 0.22)';
+        ctx.fillRect(b.ox, b.oy, b.w, b.h);
+        ctx.restore();
+    }
+    ctx.save();
+    ctx.strokeStyle = storm ? 'rgba(185, 205, 235, 0.55)' : 'rgba(170, 195, 225, 0.42)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let i = 0; i < n; i++) {
+        const seed = i * 137.5 + 11;
+        const x = b.ox + ((seed * 53.3) % b.w);
+        const y = b.oy + (((seed * 97.1) + t * speed) % b.h);
+        ctx.moveTo(x, y);
+        ctx.lineTo(x - 2, y + len);
+    }
+    ctx.stroke();
+    ctx.restore();
+}
+
+// Day/night wash driven by the clock + env.dayPhase: deep cool blue at night,
+// warm amber at the dawn/dusk shoulders, clear at midday. Stronger than before
+// so the phase reads at a glance.
 function drawDayNight(ctx, world, b) {
     const hour = world.clock.hour + world.clock.minute / 60;
-    // 0 at noon, 1 deep night. Smooth-ish ramp around dawn(6)/dusk(20).
+    // night factor 0..1 (1 = deepest dark)
     let night;
     if (hour < 5 || hour >= 21) night = 1;
-    else if (hour < 7) night = (7 - hour) / 2;       // dawn fade-out
-    else if (hour > 19) night = (hour - 19) / 2;      // dusk fade-in
+    else if (hour < 7) night = (7 - hour) / 2;
+    else if (hour > 19) night = (hour - 19) / 2;
     else night = 0;
     night = Math.max(0, Math.min(1, night));
-    if (night <= 0.01) return;
+
     ctx.save();
-    ctx.fillStyle = `rgba(18, 26, 58, ${0.42 * night})`;
-    ctx.fillRect(b.ox, b.oy, b.w, b.h);
+    if (night > 0.01) {
+        ctx.fillStyle = `rgba(14, 22, 58, ${0.62 * night})`;
+        ctx.fillRect(b.ox, b.oy, b.w, b.h);
+    }
+    // Warm shoulder glow at dawn/dusk (when partly dark but not deep night).
+    const phase = world.env && world.env.dayPhase;
+    if (phase === 'dawn' || phase === 'dusk') {
+        ctx.fillStyle = `rgba(232, 150, 70, ${0.14 * (1 - night * 0.5)})`;
+        ctx.fillRect(b.ox, b.oy, b.w, b.h);
+    }
     ctx.restore();
 }
 
