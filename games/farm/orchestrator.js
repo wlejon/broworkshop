@@ -17,7 +17,7 @@
 
 import {
     buildServiceWaterTrough, buildServiceFeedTrough,
-    buildHarvest, buildWaterCrop, buildPlant, buildCollectProduce,
+    buildHarvest, buildWaterCrop, buildPlant, buildCollectProduce, buildTend,
 } from './tasks.js';
 
 const BOSS = 'Foreman';   // orchestrator's speaker label in the dialog feed
@@ -51,6 +51,11 @@ const TEMPLATES = {
     collect: [
         '{name}, go collect the {what}.',
         '{name}, {what} are piling up — gather them.',
+    ],
+    tend: [
+        '{name}, {what} is sick — go tend to it, quick.',
+        '{name}, see to {what}, the poor thing\'s unwell.',
+        'Drop what you\'re doing, {name} — {what} needs tending.',
     ],
 };
 
@@ -110,23 +115,38 @@ export function createOrchestrator() {
             }
         }
 
-        // Crops: harvest ripe, water dry, plant empty.
+        // Sick animals: tend them — high priority, rises as health falls.
+        for (const a of o.animals) {
+            if (a.alive && a.sick) {
+                jobs.push({
+                    goal: 'tend:' + a.id, target: 'tend:' + a.id,
+                    role: 'rancher', kind: 'tend', subject: a.id,
+                    priority: 88 + (a.health < 35 ? 25 : 0),
+                    build: () => buildTend(world, a.id),
+                });
+            }
+        }
+
+        // Crops: harvest ripe (sooner as spoilage nears), water dry, plant empty.
+        const sow = o.env && o.env.plantable.length ? o.env.plantable[0] : null;
         for (const c of o.crops) {
             if (c.stage === 'ripe') {
+                const urgent = c.spoilIn != null && c.spoilIn < 10000;
+                const veryUrgent = c.spoilIn != null && c.spoilIn < 5000;
                 jobs.push({
                     goal: 'harvest:' + c.id, target: 'crop:' + c.id,
                     role: 'gardener', kind: 'harvest', subject: c.kind + ' (' + c.id + ')',
-                    priority: 58,
+                    priority: 58 + (veryUrgent ? 45 : urgent ? 22 : 0),
                     build: () => buildHarvest(world, c.id),
                 });
-            } else if (c.stage === 'empty' && o.env && o.env.plantable.includes('wheat')) {
-                // Only sow when wheat is in season — otherwise the plant action
-                // would just abort ('out of season'), churning workers for nothing.
+            } else if (c.stage === 'empty' && sow) {
+                // Sow whatever's in season (skip entirely out of season so the
+                // plant action doesn't just abort and churn workers).
                 jobs.push({
                     goal: 'plant:' + c.plotIndex, target: 'plot:' + c.plotIndex,
-                    role: 'gardener', kind: 'plant', subject: 'wheat',
+                    role: 'gardener', kind: 'plant', subject: sow,
                     priority: 22,
-                    build: () => buildPlant(world, c.plotIndex, 'wheat'),
+                    build: () => buildPlant(world, c.plotIndex, sow),
                 });
             } else if (c.moisture < 25) {
                 jobs.push({
@@ -209,5 +229,6 @@ function penLabelLower(world, penId) {
     // "Cow Pasture" -> "cows", "Chicken Coop" -> "chickens" — light touch.
     if (penId === 'pasture') return 'cows';
     if (penId === 'coop') return 'chickens';
+    if (penId === 'meadow') return 'sheep';
     return (pen.label || penId).toLowerCase();
 }

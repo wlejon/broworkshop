@@ -1,7 +1,7 @@
 // render.js — draws a world snapshot to a 2D canvas context.
 // Pure rendering: reads world state, NEVER mutates it.
 
-import { GRID, REGIONS, PENS, COLORS, CROP_KINDS, RATES } from './defs.js';
+import { GRID, REGIONS, PENS, COLORS, CROP_KINDS, ANIMAL_KINDS, RATES } from './defs.js';
 
 // Reserve a strip on the right for the DOM HUD overlay.
 const HUD_W = 270;
@@ -287,16 +287,23 @@ function drawCrops(ctx, world, b, px, py) {
             ctx.beginPath(); ctx.moveTo(cx, cy + b.cell * 0.5); ctx.lineTo(cx, cy + b.cell * 0.5 - hgt); ctx.stroke();
             ctx.fillStyle = COLORS.cropSprout;
             ctx.beginPath(); ctx.arc(cx, cy + b.cell * 0.5 - hgt, b.cell * 0.22, 0, Math.PI * 2); ctx.fill();
-        } else { // ripe
-            ctx.fillStyle = kindColor;
-            for (const [dx, dy] of [[-0.3, -0.2], [0.3, -0.2], [0, 0.25]]) {
+        } else { // ripe — distinct shape per kind
+            drawRipe(ctx, c.kind, kindColor, cx, cy, b);
+
+            // spoilage indicator: a ring that drains + reddens as rot nears.
+            const spoilMs = (CROP_KINDS[c.kind] && CROP_KINDS[c.kind].spoilMs) || 20000;
+            if (c.ripeTimer != null) {
+                const frac = Math.max(0, Math.min(1, c.ripeTimer / spoilMs));
+                ctx.strokeStyle = frac < 0.33 ? '#d6453a' : (frac < 0.66 ? '#e0b94a' : '#7fc24a');
+                ctx.lineWidth = 2.2;
                 ctx.beginPath();
-                ctx.arc(cx + dx * b.cell, cy + dy * b.cell, b.cell * 0.32, 0, Math.PI * 2);
-                ctx.fill();
+                ctx.arc(cx, cy, bed * 0.42, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * frac);
+                ctx.stroke();
+            } else {
+                // "ready" star tick when no spoil ring applies
+                ctx.fillStyle = '#fff';
+                ctx.beginPath(); ctx.arc(cx + bed * 0.32, cy - bed * 0.32, b.cell * 0.18, 0, Math.PI * 2); ctx.fill();
             }
-            // "ready" star tick
-            ctx.fillStyle = '#fff';
-            ctx.beginPath(); ctx.arc(cx + bed * 0.32, cy - bed * 0.32, b.cell * 0.18, 0, Math.PI * 2); ctx.fill();
         }
 
         // moisture bar under bed
@@ -308,13 +315,62 @@ function drawCrops(ctx, world, b, px, py) {
     }
 }
 
+// Distinct ripe-crop silhouette per kind.
+function drawRipe(ctx, kind, color, cx, cy, b) {
+    ctx.fillStyle = color;
+    if (kind === 'corn') {
+        // tall cob + two leaves
+        ctx.beginPath();
+        ctx.ellipse(cx, cy - b.cell * 0.05, b.cell * 0.22, b.cell * 0.5, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#5fae3a';
+        ctx.beginPath(); ctx.ellipse(cx - b.cell * 0.28, cy + b.cell * 0.1, b.cell * 0.22, b.cell * 0.1, -0.6, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(cx + b.cell * 0.28, cy + b.cell * 0.1, b.cell * 0.22, b.cell * 0.1, 0.6, 0, Math.PI * 2); ctx.fill();
+    } else if (kind === 'pumpkin') {
+        // big ribbed round gourd + stem
+        for (const dx of [-0.26, 0, 0.26]) {
+            ctx.beginPath();
+            ctx.ellipse(cx + dx * b.cell, cy, b.cell * 0.26, b.cell * 0.42, 0, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        ctx.fillStyle = '#5a7a3a';
+        ctx.fillRect(cx - b.cell * 0.05, cy - b.cell * 0.5, b.cell * 0.1, b.cell * 0.18);
+    } else if (kind === 'carrot') {
+        // downward triangle root + green frill
+        ctx.beginPath();
+        ctx.moveTo(cx - b.cell * 0.3, cy - b.cell * 0.18);
+        ctx.lineTo(cx + b.cell * 0.3, cy - b.cell * 0.18);
+        ctx.lineTo(cx, cy + b.cell * 0.5);
+        ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#5fae3a';
+        for (const dx of [-0.16, 0, 0.16]) {
+            ctx.beginPath(); ctx.ellipse(cx + dx * b.cell, cy - b.cell * 0.28, b.cell * 0.07, b.cell * 0.2, 0, 0, Math.PI * 2); ctx.fill();
+        }
+    } else if (kind === 'tomato') {
+        // cluster of red orbs
+        for (const [dx, dy] of [[-0.24, -0.12], [0.24, -0.12], [0, 0.2]]) {
+            ctx.beginPath(); ctx.arc(cx + dx * b.cell, cy + dy * b.cell, b.cell * 0.28, 0, Math.PI * 2); ctx.fill();
+        }
+    } else {
+        // wheat / default: three golden grain heads
+        for (const [dx, dy] of [[-0.3, -0.2], [0.3, -0.2], [0, 0.25]]) {
+            ctx.beginPath(); ctx.arc(cx + dx * b.cell, cy + dy * b.cell, b.cell * 0.32, 0, Math.PI * 2); ctx.fill();
+        }
+    }
+}
+
 function drawAnimals(ctx, world, b, px, py) {
     for (const a of world.animals) {
         const cx = px(a.x), cy = py(a.y);
+        const sk = ANIMAL_KINDS[a.kind] || {};
         const need = Math.max(a.hunger, a.thirst) / 100;
-        let base = a.kind === 'cow' ? COLORS.cow : COLORS.chicken;
+        let base = sk.color || COLORS.chicken;
+        // Old animals read a touch grayer.
+        if (a.ageStage === 'old') base = lerpColor(base, '#9a9a92', 0.35);
         let col = a.alive ? lerpColor(base, COLORS.needHigh, Math.min(1, need)) : '#6a6a6a';
-        const rad = (a.kind === 'cow' ? 0.5 : 0.34) * b.cell;
+        // Young animals are smaller.
+        const ageScale = a.ageStage === 'young' ? 0.62 : 1.0;
+        const rad = (sk.radius || 0.34) * b.cell * ageScale;
 
         // body
         ctx.fillStyle = col;
@@ -328,8 +384,18 @@ function drawAnimals(ctx, world, b, px, py) {
             ctx.fillStyle = a.alive ? 'rgba(40,30,30,0.55)' : 'rgba(40,40,40,0.5)';
             ctx.beginPath(); ctx.arc(cx - rad * 0.4, cy - rad * 0.2, rad * 0.3, 0, Math.PI * 2); ctx.fill();
             ctx.beginPath(); ctx.arc(cx + rad * 0.35, cy + rad * 0.3, rad * 0.25, 0, Math.PI * 2); ctx.fill();
+        } else if (a.kind === 'sheep') {
+            // fluffy wool bumps around the body + a small dark face
+            ctx.fillStyle = a.alive ? 'rgba(255,255,255,0.55)' : 'rgba(150,150,150,0.4)';
+            for (const ang of [0.3, 1.4, 2.5, 3.6, 4.7, 5.8]) {
+                ctx.beginPath();
+                ctx.arc(cx + Math.cos(ang) * rad * 0.7, cy + Math.sin(ang) * rad * 0.7, rad * 0.42, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.fillStyle = a.alive ? '#3a3530' : '#5a5a5a';
+            ctx.beginPath(); ctx.arc(cx + rad * 0.7, cy, rad * 0.34, 0, Math.PI * 2); ctx.fill();
         } else {
-            // beak
+            // chicken beak
             ctx.fillStyle = '#e8a23a';
             ctx.beginPath();
             ctx.moveTo(cx + rad, cy);
@@ -343,6 +409,23 @@ function drawAnimals(ctx, world, b, px, py) {
             ctx.strokeStyle = a.health < 40 ? '#d6453a' : '#e0b94a';
             ctx.lineWidth = 2;
             ctx.beginPath(); ctx.arc(cx, cy, rad + 3, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (a.health / 100)); ctx.stroke();
+        }
+
+        // sick marker: a magenta cross on a pale disc above the animal
+        if (a.alive && a.sick) {
+            const mx = cx, my = cy - rad - b.cell * 0.32;
+            const mr = b.cell * 0.22;
+            ctx.fillStyle = 'rgba(250,250,250,0.92)';
+            ctx.beginPath(); ctx.arc(mx, my, mr, 0, Math.PI * 2); ctx.fill();
+            ctx.strokeStyle = COLORS.sick; ctx.lineWidth = 2.4;
+            ctx.beginPath(); ctx.moveTo(mx - mr * 0.5, my); ctx.lineTo(mx + mr * 0.5, my);
+            ctx.moveTo(mx, my - mr * 0.5); ctx.lineTo(mx, my + mr * 0.5); ctx.stroke();
+        }
+
+        // young marker: a tiny sprout dot so newborns read at a glance
+        if (a.alive && a.ageStage === 'young') {
+            ctx.fillStyle = '#9ee06a';
+            ctx.beginPath(); ctx.arc(cx, cy - rad - b.cell * 0.18, b.cell * 0.1, 0, Math.PI * 2); ctx.fill();
         }
     }
     // pending-produce badges on pens
@@ -364,6 +447,7 @@ const CARRY_COLOR = {
     feed:  COLORS.troughFeed,
     crop:  COLORS.cropWheat,
     crate: '#caa86a',
+    medkit: '#e85a6a',
 };
 
 function drawNpcs(ctx, world, b, px, py) {

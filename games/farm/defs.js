@@ -37,21 +37,37 @@ export const REGIONS = [
     { id: 'silo',      type: 'silo',      label: 'Silo',      x0: 33, y0: 1,  x1: 39, y1: 7  },
     { id: 'field',     type: 'field',     label: 'Fields',    x0: 2,  y0: 9,  x1: 21, y1: 26 },
     { id: 'coop',      type: 'pen',       label: 'Chicken Coop', penId: 'coop',    x0: 24, y0: 9,  x1: 31, y1: 16 },
+    { id: 'meadow',    type: 'pen',       label: 'Sheep Meadow', penId: 'meadow',  x0: 33, y0: 9,  x1: 39, y1: 16 },
     { id: 'pasture',   type: 'pen',       label: 'Cow Pasture',  penId: 'pasture', x0: 24, y0: 18, x1: 39, y1: 26 },
 ];
 
-// Pen metadata: where each pen's two troughs sit, and which animals live there.
+// Pen metadata: where each pen's two troughs sit, the good its animals produce,
+// and the population cap breeding will not exceed.
 export const PENS = {
     coop: {
-        penId: 'coop', label: 'Chicken Coop', good: 'eggs', goodLabel: 'Eggs', goldPerGood: 3,
+        penId: 'coop', label: 'Chicken Coop', good: 'eggs', goodLabel: 'Eggs', goldPerGood: 3, cap: 8,
         feedTrough:  { x: 25.0, y: 10.0 },
         waterTrough: { x: 29.0, y: 10.0 },
     },
+    meadow: {
+        penId: 'meadow', label: 'Sheep Meadow', good: 'wool', goodLabel: 'Wool', goldPerGood: 8, cap: 6,
+        feedTrough:  { x: 34.0, y: 10.0 },
+        waterTrough: { x: 38.0, y: 10.0 },
+    },
     pasture: {
-        penId: 'pasture', label: 'Cow Pasture', good: 'milk', goodLabel: 'Milk', goldPerGood: 6,
+        penId: 'pasture', label: 'Cow Pasture', good: 'milk', goodLabel: 'Milk', goldPerGood: 6, cap: 6,
         feedTrough:  { x: 25.5, y: 19.0 },
         waterTrough: { x: 37.0, y: 19.0 },
     },
+};
+
+// Per-species metabolism + production stats. hungerMul/thirstMul scale the base
+// RATES.*Rise; produceMul/produceInterval govern the good output; radius/color
+// drive render. The new species is the sheep (wool).
+export const ANIMAL_KINDS = {
+    chicken: { label: 'Chicken', good: 'eggs', hungerMul: 1.0, thirstMul: 1.0, produceMul: 1.0, produceInterval: 10, radius: 0.34, color: '#f0e3b0' },
+    cow:     { label: 'Cow',     good: 'milk', hungerMul: 1.1, thirstMul: 1.2, produceMul: 1.4, produceInterval: 14, radius: 0.50, color: '#e8e8e8' },
+    sheep:   { label: 'Sheep',   good: 'wool', hungerMul: 0.9, thirstMul: 0.8, produceMul: 1.0, produceInterval: 16, radius: 0.42, color: '#dcdcdc' },
 };
 
 // Animal roster. Positions are starting tile centers; needs start mid-range
@@ -61,6 +77,9 @@ export const ANIMAL_SPECS = [
     { id: 'hen-2', kind: 'chicken', penId: 'coop', x: 28.5, y: 14.0, hunger: 25, thirst: 30 },
     { id: 'hen-3', kind: 'chicken', penId: 'coop', x: 27.0, y: 12.0, hunger: 40, thirst: 28 },
     { id: 'hen-4', kind: 'chicken', penId: 'coop', x: 29.0, y: 13.5, hunger: 22, thirst: 38 },
+    { id: 'ewe-1', kind: 'sheep', penId: 'meadow', x: 35.0, y: 12.0, hunger: 30, thirst: 25 },
+    { id: 'ewe-2', kind: 'sheep', penId: 'meadow', x: 37.0, y: 13.0, hunger: 35, thirst: 28 },
+    { id: 'ram-1', kind: 'sheep', penId: 'meadow', x: 36.0, y: 11.0, hunger: 28, thirst: 33 },
     { id: 'cow-1', kind: 'cow', penId: 'pasture', x: 28.0, y: 22.0, hunger: 35, thirst: 30 },
     { id: 'cow-2', kind: 'cow', penId: 'pasture', x: 33.0, y: 23.5, hunger: 45, thirst: 55 },
     { id: 'cow-3', kind: 'cow', penId: 'pasture', x: 31.0, y: 24.5, hunger: 28, thirst: 40 },
@@ -69,15 +88,15 @@ export const ANIMAL_SPECS = [
 // Crop plots — fixed tile slots inside the 'field' region. Each is a soil bed
 // that may hold one crop. Initial stage/growth/moisture vary to show variety.
 export const CROP_PLOTS = [
-    { id: 'plot-0', plotIndex: 0, x: 4.5,  y: 11.0, kind: 'wheat',  stage: 'ripe',    growth: 100, moisture: 40 },
-    { id: 'plot-1', plotIndex: 1, x: 10.0, y: 11.0, kind: 'wheat',  stage: 'growing', growth: 60,  moisture: 55 },
-    { id: 'plot-2', plotIndex: 2, x: 15.5, y: 11.0, kind: 'corn',   stage: 'seed',    growth: 8,   moisture: 70 },
-    { id: 'plot-3', plotIndex: 3, x: 4.5,  y: 17.5, kind: 'corn',   stage: 'growing', growth: 35,  moisture: 20 },
-    { id: 'plot-4', plotIndex: 4, x: 10.0, y: 17.5, kind: null,     stage: 'empty',   growth: 0,   moisture: 0  },
-    { id: 'plot-5', plotIndex: 5, x: 15.5, y: 17.5, kind: 'tomato', stage: 'ripe',    growth: 100, moisture: 60 },
-    { id: 'plot-6', plotIndex: 6, x: 4.5,  y: 24.0, kind: 'tomato', stage: 'growing', growth: 75,  moisture: 50 },
-    { id: 'plot-7', plotIndex: 7, x: 10.0, y: 24.0, kind: null,     stage: 'empty',   growth: 0,   moisture: 0  },
-    { id: 'plot-8', plotIndex: 8, x: 15.5, y: 24.0, kind: 'wheat',  stage: 'seed',    growth: 3,   moisture: 80 },
+    { id: 'plot-0', plotIndex: 0, x: 4.5,  y: 11.0, kind: 'wheat',   stage: 'ripe',    growth: 100, moisture: 40 },
+    { id: 'plot-1', plotIndex: 1, x: 10.0, y: 11.0, kind: 'pumpkin', stage: 'growing', growth: 60,  moisture: 55 },
+    { id: 'plot-2', plotIndex: 2, x: 15.5, y: 11.0, kind: 'corn',    stage: 'seed',    growth: 8,   moisture: 70 },
+    { id: 'plot-3', plotIndex: 3, x: 4.5,  y: 17.5, kind: 'carrot',  stage: 'growing', growth: 35,  moisture: 20 },
+    { id: 'plot-4', plotIndex: 4, x: 10.0, y: 17.5, kind: null,      stage: 'empty',   growth: 0,   moisture: 0  },
+    { id: 'plot-5', plotIndex: 5, x: 15.5, y: 17.5, kind: 'tomato',  stage: 'ripe',    growth: 100, moisture: 60 },
+    { id: 'plot-6', plotIndex: 6, x: 4.5,  y: 24.0, kind: 'tomato',  stage: 'growing', growth: 75,  moisture: 50 },
+    { id: 'plot-7', plotIndex: 7, x: 10.0, y: 24.0, kind: null,      stage: 'empty',   growth: 0,   moisture: 0  },
+    { id: 'plot-8', plotIndex: 8, x: 15.5, y: 24.0, kind: 'wheat',   stage: 'seed',    growth: 3,   moisture: 80 },
 ];
 
 // NPC workers. role/voice are carried now but UNUSED in this pass — the agent
@@ -86,15 +105,19 @@ export const NPC_SPECS = [
     { id: 'npc-mara', name: 'Mara', role: 'rancher',  voice: 'warm',   home: { x: 20, y: 20 } },
     { id: 'npc-tom',  name: 'Tom',  role: 'farmhand', voice: 'gruff',  home: { x: 12, y: 8  } },
     { id: 'npc-lily', name: 'Lily', role: 'gardener', voice: 'bright', home: { x: 6,  y: 16 } },
+    // A second rancher — the farm now runs three pens, so animal care needs
+    // more hands to keep every trough topped and tend the sick.
+    { id: 'npc-sam',  name: 'Sam',  role: 'rancher',  voice: 'calm',   home: { x: 30, y: 17 } },
 ];
 
 // Starting resource pools.
-export const START_RESOURCES = { feed: 200, water: 200, gold: 50, eggs: 0, milk: 0, crops: 0 };
+export const START_RESOURCES = { feed: 200, water: 200, gold: 50, eggs: 0, milk: 0, wool: 0, crops: 0 };
 
 // Starting trough fill levels (0..100). Some start low so alerts/pressure
 // appear within the first demo seconds.
 export const START_TROUGHS = {
     'coop-feed': 75, 'coop-water': 40,
+    'meadow-feed': 65, 'meadow-water': 55,
     'pasture-feed': 60, 'pasture-water': 70,
 };
 
@@ -114,7 +137,9 @@ export const COLORS = {
     troughWater: '#3f86c4',
     chicken:   '#f0e3b0',
     cow:       '#e8e8e8',
+    sheep:     '#dcdcdc',
     needHigh:  '#d6453a',  // tint target as a need approaches critical
+    sick:      '#c24ad0',  // sick-animal marker
     npc:       '#ffd76a',
     cropWheat: '#d8c25a',
     cropCorn:  '#e0b94a',
@@ -122,9 +147,15 @@ export const COLORS = {
     cropSprout:'#7fc24a',
 };
 
-// Crop kind -> harvested-good color/label, for the silo storage tally.
+// Crop kind -> growth/water/value/spoilage stats, surfaced to render + sim.
+//   growMul   growth-rate multiplier (lower = longer to mature)
+//   dryMul    moisture-decay multiplier (higher = thirstier crop)
+//   gold      sell value per harvested unit
+//   spoilMs   once ripe, ms before it rots if left unharvested
 export const CROP_KINDS = {
-    wheat:  { color: '#d8c25a', label: 'Wheat',  gold: 4 },
-    corn:   { color: '#e0b94a', label: 'Corn',   gold: 5 },
-    tomato: { color: '#e0533a', label: 'Tomato', gold: 6 },
+    wheat:   { color: '#d8c25a', label: 'Wheat',   gold: 4, growMul: 1.0, dryMul: 0.9, spoilMs: 28000 },
+    corn:    { color: '#e0b94a', label: 'Corn',    gold: 5, growMul: 0.8, dryMul: 1.0, spoilMs: 25000 },
+    tomato:  { color: '#e0533a', label: 'Tomato',  gold: 6, growMul: 0.9, dryMul: 1.3, spoilMs: 15000 },
+    pumpkin: { color: '#e08a2a', label: 'Pumpkin', gold: 9, growMul: 0.6, dryMul: 1.1, spoilMs: 40000 },
+    carrot:  { color: '#e0772a', label: 'Carrot',  gold: 5, growMul: 1.2, dryMul: 0.8, spoilMs: 20000 },
 };

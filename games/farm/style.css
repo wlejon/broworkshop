@@ -133,6 +133,8 @@ canvas {
 .hud-dialog .line.foreman .who { color: #f6d24a; }
 .hud-dialog .line.you { background: rgba(63,169,232,0.10); border-left: 2px solid #3fa9e8; }
 .hud-dialog .line.you .who { color: #7fcffa; }
+.hud-dialog .line.farm { background: rgba(126,194,74,0.10); border-left: 2px solid #7fc24a; font-style: italic; }
+.hud-dialog .line.farm .who { color: #9ee06a; }
 
 .hud-keys {
     margin-top: 18px;

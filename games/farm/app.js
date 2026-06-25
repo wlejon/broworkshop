@@ -145,6 +145,7 @@ function speakerName(id) {
 function speakerClass(id) {
     if (id === 'Foreman') return 'foreman';
     if (id === 'You') return 'you';
+    if (id === 'Farm') return 'farm';
     return '';
 }
 function escapeHtml(s) {
@@ -175,6 +176,7 @@ function updateHUD() {
             chip('Water', r.water, r.water < 40 ? 'low' : '') +
             chip('Eggs', r.eggs) +
             chip('Milk', r.milk) +
+            chip('Wool', r.wool) +
             chip('Crops', r.crops);
     }
 

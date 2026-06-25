@@ -34,9 +34,9 @@ const SEASON_GROWTH = { spring: 1.2, summer: 1.3, fall: 0.9, winter: 0.45 };
 const SEASON_TEMP = { spring: 14, summer: 27, fall: 11, winter: -1 };
 // Season -> which crop kinds may be planted. Winter sprouts nothing.
 const PLANTABLE = {
-    spring: ['wheat', 'corn', 'tomato'],
-    summer: ['corn', 'tomato'],
-    fall:   ['wheat'],
+    spring: ['wheat', 'carrot', 'tomato'],
+    summer: ['corn', 'tomato', 'pumpkin'],
+    fall:   ['wheat', 'pumpkin', 'carrot'],
     winter: [],
 };
 

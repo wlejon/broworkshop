@@ -139,7 +139,7 @@ export function buildServiceWaterTrough(world, penId) {
     return makeTask('service-water:' + penId, 'water:' + penId, [
         { type: 'move', x: well.x, y: well.y, label: 'well' },
         { type: 'wait', ms: 250 },
-        { type: 'act', verb: 'drawWater', args: [80], carry: 'water' },
+        { type: 'act', verb: 'drawWater', args: [140], carry: 'water' },
         { type: 'move', x: t.x, y: t.y, label: penLabel(penId) + ' water trough' },
         { type: 'wait', ms: 250 },
         { type: 'act', verb: 'refillWaterTrough', args: [penId], drop: true,
@@ -154,7 +154,7 @@ export function buildServiceFeedTrough(world, penId) {
     return makeTask('service-feed:' + penId, 'feed:' + penId, [
         { type: 'move', x: barn.x, y: barn.y, label: 'barn' },
         { type: 'wait', ms: 250 },
-        { type: 'act', verb: 'loadFeed', args: [80], carry: 'feed' },
+        { type: 'act', verb: 'loadFeed', args: [120], carry: 'feed' },
         { type: 'move', x: t.x, y: t.y, label: penLabel(penId) + ' feed trough' },
         { type: 'wait', ms: 250 },
         { type: 'act', verb: 'refillFeedTrough', args: [penId], drop: true,
@@ -193,6 +193,19 @@ export function buildPlant(world, plotIndex, kind = 'wheat') {
         { type: 'move', x, y, label: 'plot ' + plotIndex },
         { type: 'wait', ms: 250 },
         { type: 'act', verb: 'plant', args: [plotIndex, kind], say: kind + ' is in the ground.' },
+    ]);
+}
+
+// Walk to a sick animal and tend it back to health.
+export function buildTend(world, animalId) {
+    const a = world.animals.find((x) => x.id === animalId);
+    const x = a ? a.x : 0, y = a ? a.y : 0;
+    return makeTask('tend:' + animalId, 'tend:' + animalId, [
+        { type: 'move', x, y, label: animalId },
+        { type: 'wait', ms: 300 },
+        { type: 'act', verb: 'tendAnimal', args: [animalId], carry: 'medkit',
+          say: 'Easy now — you\'ll be alright.' },
+        { type: 'wait', ms: 150 },
     ]);
 }
 
