@@ -18,7 +18,9 @@
 import {
     buildServiceWaterTrough, buildServiceFeedTrough,
     buildHarvest, buildWaterCrop, buildPlant, buildCollectProduce, buildTend,
+    buildRest, buildSleep, buildEat,
 } from './tasks.js';
+import { WORKER } from './defs.js';
 
 const BOSS = 'Foreman';   // orchestrator's speaker label in the dialog feed
 
@@ -246,6 +248,30 @@ export function createOrchestrator() {
             inflight.add(world.player.targetHint);
         }
 
+        // --- worker care + day/night schedule (Pass D) -----------------------
+        // Idle workers that need looking after are routed to the farmhouse
+        // before any job assignment: sleep at night (all but one rotating
+        // night-watch), rest when exhausted, eat when hungry. Workers on a
+        // care task aren't idle, so they're naturally excluded from jobs.
+        const isNight = world.env.dayPhase === 'night';
+        const watchId = nightWatch(world);
+        for (const n of world.npcs) {
+            if (n.task) continue;
+            if (isNight && n.id !== watchId) {
+                n.task = buildSleep(world); n.state = 'sleeping';
+                continue;
+            }
+            if (n.stamina < WORKER.staminaRest) {
+                n.task = buildRest(world); n.state = 'resting';
+                if (!isNight) world.say(n.id, 'Need a breather.');
+                continue;
+            }
+            if (n.energy < WORKER.energyEat) {
+                n.task = buildEat(world); n.state = 'eating';
+                continue;
+            }
+        }
+
         let idle = world.npcs.filter((n) => n.task == null);
         if (idle.length === 0) return;
 
@@ -264,6 +290,7 @@ export function createOrchestrator() {
 
             const task = job.build();
             task.npcId = npc.id;
+            task.role = job.role;     // lets the executor apply the specialist bonus
             npc.task = task;
             npc.state = 'working';
 
@@ -277,6 +304,15 @@ export function createOrchestrator() {
     }
 
     return { decide };
+}
+
+// One worker stays awake each night, rotating by day so the lost-sleep burden is
+// shared. Reduced nighttime animal metabolism (env needMult) lets a single watch
+// keep the troughs topped.
+function nightWatch(world) {
+    const ids = world.npcs.map((n) => n.id);
+    if (ids.length === 0) return null;
+    return ids[(world.clock.day) % ids.length];
 }
 
 function penLabelLower(world, penId) {

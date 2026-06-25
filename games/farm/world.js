@@ -12,7 +12,7 @@
 import {
     GRID, DAY_LENGTH_MS, RATES, REGIONS, PENS,
     ANIMAL_SPECS, ANIMAL_KINDS, CROP_PLOTS, NPC_SPECS, START_RESOURCES, START_TROUGHS,
-    CROP_KINDS,
+    CROP_KINDS, WORKER,
 } from './defs.js';
 import { createEnv, stepEnv, envObserve, envAlerts } from './env.js';
 import { createMarket, stepMarket, marketObserve, marketAlerts } from './market.js';
@@ -112,6 +112,9 @@ export function createWorld(opts = {}) {
             tx: n.home.x, ty: n.home.y,
             home: { ...n.home },
             state: 'idle', carrying: null, task: null, speech: null,
+            // Labor depth: stamina drains with work, energy is the daily meal
+            // need; speed is per-worker (role bonus applied in the task executor).
+            stamina: 100, energy: 100, speed: n.speed != null ? n.speed : 1.0,
         });
     }
 
@@ -194,8 +197,8 @@ export function createWorld(opts = {}) {
             a.ageMs += dt;
             a.ageStage = ageStageOf(a.ageMs);
 
-            a.hunger = clamp(a.hunger + RATES.hungerRise * mods.hungerMult * (sk.hungerMul || 1) * s, 0, 100);
-            a.thirst = clamp(a.thirst + RATES.thirstRise * mods.thirstMult * (sk.thirstMul || 1) * s, 0, 100);
+            a.hunger = clamp(a.hunger + RATES.hungerRise * mods.hungerMult * mods.needMult * (sk.hungerMul || 1) * s, 0, 100);
+            a.thirst = clamp(a.thirst + RATES.thirstRise * mods.thirstMult * mods.needMult * (sk.thirstMul || 1) * s, 0, 100);
 
             // Eat: pull hunger down, draw the feed trough down with it.
             if (a.hunger > 0 && feed.fill > 0) {
@@ -303,11 +306,41 @@ export function createWorld(opts = {}) {
         }
 
         // NPCs: task executor (app.js) drives any npc with a task; the ones
-        // without one fall back to a gentle idle wander. Expire speech bubbles.
+        // without one fall back to a gentle idle wander. Expire speech bubbles
+        // and integrate worker stamina/energy from the current state.
         for (const n of world.npcs) {
             if (n.speech && world.clock.t >= n.speech.until) n.speech = null;
+            updateWorkerVitals(n, s);
             if (n.task) continue;   // advanceTask() owns tasked npcs
             wanderNpc(n, s);
+        }
+    }
+
+    // Stamina/energy dynamics keyed off the worker's state (set by the task
+    // executor). Active states drain; rest/sleep/eat recover.
+    function updateWorkerVitals(n, s) {
+        switch (n.state) {
+            case 'sleeping':
+                n.stamina = clamp(n.stamina + WORKER.sleepRecover * s, 0, 100);
+                n.energy  = clamp(n.energy  + WORKER.sleepRecover * s, 0, 100);
+                break;
+            case 'resting':
+                n.stamina = clamp(n.stamina + WORKER.restRecover * s, 0, 100);
+                n.energy  = clamp(n.energy  - WORKER.energyIdle * s, 0, 100);
+                break;
+            case 'eating':
+                n.stamina = clamp(n.stamina + WORKER.eatStamina * s, 0, 100);
+                n.energy  = clamp(n.energy  + WORKER.eatEnergy * s, 0, 100);
+                break;
+            case 'walking':
+            case 'working':
+                n.stamina = clamp(n.stamina - WORKER.staminaDrain * s, 0, 100);
+                n.energy  = clamp(n.energy  - WORKER.energyDrain * s, 0, 100);
+                break;
+            default: // idle
+                n.stamina = clamp(n.stamina + WORKER.idleRecover * s, 0, 100);
+                n.energy  = clamp(n.energy  - WORKER.energyIdle * s, 0, 100);
+                break;
         }
     }
 
@@ -360,7 +393,9 @@ export function createWorld(opts = {}) {
             id: t.id, penId: t.penId, kind: t.kind, fill: r1(t.fill),
         }));
         const npcs = world.npcs.map((n) => ({
-            id: n.id, name: n.name, busy: n.task != null,
+            id: n.id, name: n.name, role: n.role, busy: n.task != null,
+            state: n.state === 'walking' ? 'working' : n.state,   // idle|working|resting|sleeping|eating
+            stamina: r1(n.stamina), energy: r1(n.energy),
         }));
         const resources = {};
         for (const k of Object.keys(world.resources)) resources[k] = r1(world.resources[k]);
@@ -392,8 +427,27 @@ export function createWorld(opts = {}) {
             alerts: deriveAlerts(animals, crops, troughs, resources)
                 .concat(envAlerts(world.env))
                 .concat(marketAlerts(world))
+                .concat(laborAlerts())
                 .concat(activeNotices()),
         };
+    }
+
+    // Labor availability alerts: exhausted / hungry workers, and a short-handed
+    // night warning when too few workers are awake-and-able.
+    function laborAlerts() {
+        const out = [];
+        let available = 0;
+        for (const n of world.npcs) {
+            if (n.stamina < WORKER.exhausted) out.push({ level: 'warning', who: n.id, msg: `${n.name} is exhausted` });
+            if (n.energy < WORKER.hungry) out.push({ level: 'warning', who: n.id, msg: `${n.name} is hungry` });
+            const able = n.stamina >= WORKER.staminaRest && n.energy >= WORKER.energyEat &&
+                n.state !== 'sleeping' && n.state !== 'resting' && n.state !== 'eating';
+            if (able) available++;
+        }
+        if (world.env.dayPhase === 'night' && available < 1) {
+            out.push({ level: 'warning', who: 'labor', msg: 'short-handed at night' });
+        }
+        return out;
     }
 
     // Event notices still within their lifetime, as alert-shaped objects.

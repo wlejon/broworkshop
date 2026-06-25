@@ -26,7 +26,7 @@
 //   drop   — clear npc.carrying after the act
 //   say    — npc speaks this line on success (announce on completion)
 
-import { REGIONS, PENS, CROP_KINDS } from './defs.js';
+import { REGIONS, PENS, CROP_KINDS, WORKER, ROLE_SPEED_BONUS } from './defs.js';
 
 const WALK = 3.2;     // tiles / second when executing a task (brisker than wander)
 const ARRIVE = 0.28;  // tiles — "close enough" to count a move step done
@@ -67,6 +67,11 @@ export function advanceTask(world, npc, dt) {
     let step = task.steps[task.cursor];
     if (!step) { finishTask(world, npc, task, 'done'); return false; }
 
+    // Specialist on their own domain works faster (move + dwell). task.role is
+    // stamped by the orchestrator from the job's role.
+    const roleMatch = task.role && task.role === npc.role;
+    const eff = (npc.speed || 1) * (roleMatch ? ROLE_SPEED_BONUS : 1);
+
     if (step.type === 'move') {
         npc.state = 'walking';
         npc.tx = step.x; npc.ty = step.y;
@@ -76,7 +81,7 @@ export function advanceTask(world, npc, dt) {
             npc.x = step.x; npc.y = step.y;
             task.cursor++;
         } else {
-            const sp = Math.min(WALK * s, d);
+            const sp = Math.min(WALK * eff * s, d);
             npc.x += (dx / d) * sp;
             npc.y += (dy / d) * sp;
         }
@@ -86,7 +91,27 @@ export function advanceTask(world, npc, dt) {
     if (step.type === 'wait') {
         npc.state = 'working';
         step._elapsed = (step._elapsed || 0) + dt;
-        if (step._elapsed >= (step.ms || 0)) task.cursor++;
+        if (step._elapsed >= (step.ms || 0) / eff) task.cursor++;
+        return true;
+    }
+
+    // ---- worker-care steps (Pass D) -----------------------------------------
+    if (step.type === 'rest') {
+        npc.state = 'resting';
+        if (npc.stamina >= (step.until || WORKER.staminaOk)) task.cursor++;
+        return true;
+    }
+    if (step.type === 'sleep') {
+        npc.state = 'sleeping';
+        // Wake at morning (dawn/day); sleep through the whole night otherwise.
+        const ph = world.env.dayPhase;
+        if (ph === 'dawn' || ph === 'day') task.cursor++;
+        return true;
+    }
+    if (step.type === 'eat') {
+        npc.state = 'eating';
+        step._elapsed = (step._elapsed || 0) + dt;
+        if (npc.energy >= (step.until || WORKER.energyOk) || step._elapsed >= (step.ms || 4000)) task.cursor++;
         return true;
     }
 
@@ -193,6 +218,31 @@ export function buildPlant(world, plotIndex, kind = 'wheat') {
         { type: 'move', x, y, label: 'plot ' + plotIndex },
         { type: 'wait', ms: 250 },
         { type: 'act', verb: 'plant', args: [plotIndex, kind], say: kind + ' is in the ground.' },
+    ]);
+}
+
+// ---- worker-care task builders (Pass D) -------------------------------------
+// All head to the farmhouse; the differing final step recovers stamina/energy.
+export function buildRest(world) {
+    const h = regionCenter('farmhouse');
+    return makeTask('rest', null, [
+        { type: 'move', x: h.x, y: h.y, label: 'farmhouse' },
+        { type: 'rest' },
+    ]);
+}
+export function buildSleep(world) {
+    const h = regionCenter('farmhouse');
+    return makeTask('sleep', null, [
+        { type: 'move', x: h.x, y: h.y, label: 'farmhouse' },
+        { type: 'sleep' },
+    ]);
+}
+export function buildEat(world) {
+    const h = regionCenter('farmhouse');
+    return makeTask('eat', null, [
+        { type: 'move', x: h.x, y: h.y, label: 'farmhouse' },
+        { type: 'wait', ms: 150 },
+        { type: 'eat', ms: 4000 },
     ]);
 }
 

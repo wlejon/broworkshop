@@ -67,7 +67,7 @@ export function createEnv() {
         plantable: PLANTABLE.spring.slice(),
         mods: {
             growthMult: 1, moistureDecayMult: 1, thirstMult: 1, hungerMult: 1,
-            produceMult: 1, rainMoisture: 0, poolWater: 0,
+            produceMult: 1, needMult: 1, rainMoisture: 0, poolWater: 0,
         },
     };
 }
@@ -109,11 +109,14 @@ function computeMods(env) {
     }
 
     // Day/night: production halts overnight, crops barely grow; shoulders are
-    // partial. This is the hook the worker-schedule pass will lean on.
-    if (env.dayPhase === 'night') { produceMult = 0; growthMult *= 0.3; }
-    else if (env.dayPhase === 'dawn' || env.dayPhase === 'dusk') { produceMult = 0.5; growthMult *= 0.7; }
+    // partial. needMult slows animal hunger/thirst at night so a small night
+    // crew can cope — the compensation that keeps the farm alive once workers
+    // sleep (Pass D).
+    let needMult = 1.0;
+    if (env.dayPhase === 'night') { produceMult = 0; growthMult *= 0.3; needMult = 0.4; }
+    else if (env.dayPhase === 'dawn' || env.dayPhase === 'dusk') { produceMult = 0.5; growthMult *= 0.7; needMult = 0.75; }
 
-    return { growthMult, moistureDecayMult, thirstMult, hungerMult, produceMult, rainMoisture, poolWater };
+    return { growthMult, moistureDecayMult, thirstMult, hungerMult, produceMult, needMult, rainMoisture, poolWater };
 }
 
 function computeTemp(env) {

@@ -139,8 +139,22 @@ const hudEnv    = document.getElementById('hud-env');
 const hudRes    = document.getElementById('hud-resources');
 const hudMarket = document.getElementById('hud-market');
 const hudObjective = document.getElementById('hud-objective');
+const hudWorkers = document.getElementById('hud-workers');
 const hudAlerts = document.getElementById('hud-alerts');
 const hudDialog = document.getElementById('hud-dialog');
+
+const STATE_LABEL = { idle: 'idle', working: 'working', resting: 'resting', sleeping: 'asleep', eating: 'eating' };
+function workerRow(n) {
+    const sCls = n.stamina < 25 ? 'low' : (n.stamina < 55 ? 'mid' : 'ok');
+    const eCls = n.energy < 30 ? 'low' : (n.energy < 55 ? 'mid' : 'ok');
+    return '<div class="wk-row">' +
+        `<span class="wk-name role-${n.role}">${n.name}</span>` +
+        `<span class="wk-state">${STATE_LABEL[n.state] || n.state}</span>` +
+        '<span class="wk-bars">' +
+            `<span class="wk-bar"><span class="wk-fill ${sCls}" style="width:${Math.round(n.stamina)}%"></span></span>` +
+            `<span class="wk-bar"><span class="wk-fill en ${eCls}" style="width:${Math.round(n.energy)}%"></span></span>` +
+        '</span></div>';
+}
 
 const GOOD_LABEL = { eggs: 'Eggs', milk: 'Milk', wool: 'Wool', crops: 'Crop', feed: 'Feed' };
 function priceChip(good, price, level) {
@@ -213,6 +227,10 @@ function updateHUD() {
             `<div class="obj-row"><span>Reach ${obj.target}g by Day ${obj.deadlineDay}</span>` +
             `<span class="obj-num ${obj.met ? 'met' : ''}">${obj.progress} / ${obj.target}g</span></div>` +
             `<div class="obj-bar"><div class="obj-fill ${obj.met ? 'met' : ''}" style="width:${pct}%"></div></div>`;
+    }
+
+    if (hudWorkers) {
+        hudWorkers.innerHTML = o.npcs.map(workerRow).join('');
     }
 
     if (hudAlerts) {

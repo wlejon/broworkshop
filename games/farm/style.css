@@ -124,6 +124,23 @@ canvas {
 .obj-fill { height: 100%; background: #e0b94a; border-radius: 4px; }
 .obj-fill.met { background: #6fc24a; }
 
+/* --- Worker roster --- */
+.hud-workers { display: flex; flex-direction: column; gap: 4px; }
+.wk-row { display: flex; align-items: center; gap: 6px; font-size: 11px; }
+.wk-name { width: 38px; font-weight: bold; }
+.wk-name.role-rancher  { color: #e89a4a; }
+.wk-name.role-gardener { color: #6fc24a; }
+.wk-name.role-farmhand { color: #5aa6e0; }
+.wk-state { width: 54px; color: #9bb592; }
+.wk-bars { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+.wk-bar { height: 4px; background: rgba(0,0,0,0.45); border-radius: 2px; overflow: hidden; }
+.wk-fill { display: block; height: 100%; background: #6fc24a; }
+.wk-fill.mid { background: #e0b94a; }
+.wk-fill.low { background: #d6453a; }
+.wk-fill.en { background: #d8943f; }
+.wk-fill.en.mid { background: #caa34a; }
+.wk-fill.en.low { background: #d6453a; }
+
 .hud-alerts {
     display: flex;
     flex-direction: column;

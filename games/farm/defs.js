@@ -112,6 +112,30 @@ export const NPC_SPECS = [
     { id: 'npc-sam',  name: 'Sam',  role: 'rancher',  voice: 'calm',   home: { x: 30, y: 17 } },
 ];
 
+// Worker labor tuning (Pass D). Stamina/energy are gentle so workers spend most
+// of their time working — the constraint adds allocation decisions without
+// crippling labor. ROLE_SPEED_BONUS speeds a specialist on their own domain.
+export const WORKER = {
+    staminaDrain: 1.3,   // /s while walking or working
+    restRecover:  12,    // /s while resting at the farmhouse
+    sleepRecover: 16,    // /s while sleeping (stamina AND energy)
+    idleRecover:  3,     // /s while idle in the field
+    eatStamina:   6,     // /s stamina regained while eating
+    energyDrain:  0.22,  // /s while active
+    energyIdle:   0.08,  // /s while idle
+    eatEnergy:    30,    // /s energy regained while eating
+    staminaRest:  25,    // below this -> must rest
+    staminaOk:    80,    // rest until at least this
+    energyEat:    30,    // below this -> must eat
+    energyOk:     90,    // eat until at least this
+    exhausted:    15,    // stamina alert threshold
+    hungry:       20,    // energy alert threshold
+};
+export const ROLE_SPEED_BONUS = 1.30;   // specialist on their own task type
+
+// Per-role tint for render + HUD.
+export const ROLE_COLOR = { rancher: '#e89a4a', gardener: '#6fc24a', farmhand: '#5aa6e0' };
+
 // Starting resource pools. `feed`/`water` are the working pools troughs draw
 // from; `barnFeed` is the finite, must-be-bought feed stock loadFeed pulls from.
 export const START_RESOURCES = { feed: 180, barnFeed: 600, water: 150, gold: 200, eggs: 0, milk: 0, wool: 0, crops: 0 };

@@ -1,7 +1,7 @@
 // render.js — draws a world snapshot to a 2D canvas context.
 // Pure rendering: reads world state, NEVER mutates it.
 
-import { GRID, REGIONS, PENS, COLORS, CROP_KINDS, ANIMAL_KINDS, RATES } from './defs.js';
+import { GRID, REGIONS, PENS, COLORS, CROP_KINDS, ANIMAL_KINDS, ROLE_COLOR, RATES } from './defs.js';
 
 // Reserve a strip on the right for the DOM HUD overlay.
 const HUD_W = 270;
@@ -473,12 +473,14 @@ function drawNpcs(ctx, world, b, px, py) {
     for (const n of world.npcs) {
         const cx = px(n.x), cy = py(n.y);
         const r = b.cell * 0.3;
+        const roleCol = ROLE_COLOR[n.role] || '#caa';
         // body
         ctx.fillStyle = COLORS.npc;
         ctx.beginPath(); ctx.arc(cx, cy + r, r, 0, Math.PI * 2); ctx.fill();
         // head
         ctx.beginPath(); ctx.arc(cx, cy - r * 0.6, r * 0.7, 0, Math.PI * 2); ctx.fill();
-        ctx.strokeStyle = 'rgba(0,0,0,0.5)'; ctx.lineWidth = 1;
+        // role-tinted outline so each worker's specialty reads at a glance
+        ctx.strokeStyle = roleCol; ctx.lineWidth = 2;
         ctx.beginPath(); ctx.arc(cx, cy + r, r, 0, Math.PI * 2); ctx.stroke();
 
         // carrying indicator: small chip to the worker's side
@@ -491,8 +493,23 @@ function drawNpcs(ctx, world, b, px, py) {
             roundRect(ctx, ix - r * 0.45, iy - r * 0.45, r * 0.9, r * 0.9, 2); ctx.stroke();
         }
 
-        // working pip (small dot above head) when on a task
-        if (n.task) {
+        // state indicator above the head: Zzz asleep, pause-bars resting,
+        // fork eating, green pip when actively on a job.
+        if (n.state === 'sleeping') {
+            ctx.fillStyle = '#bfe0ff';
+            ctx.font = `bold ${Math.max(9, b.cell * 0.5)}px Consolas, monospace`;
+            ctx.textAlign = 'left';
+            ctx.fillText('z', cx + r * 0.7, cy - r * 1.2);
+            ctx.font = `bold ${Math.max(7, b.cell * 0.35)}px Consolas, monospace`;
+            ctx.fillText('z', cx + r * 1.3, cy - r * 1.7);
+        } else if (n.state === 'resting') {
+            ctx.fillStyle = '#9ec6f0';
+            ctx.fillRect(cx + r * 0.7, cy - r * 1.7, r * 0.25, r * 0.7);
+            ctx.fillRect(cx + r * 1.1, cy - r * 1.7, r * 0.25, r * 0.7);
+        } else if (n.state === 'eating') {
+            ctx.fillStyle = '#e8c662';
+            ctx.beginPath(); ctx.arc(cx + r * 0.9, cy - r * 1.4, r * 0.32, 0, Math.PI * 2); ctx.fill();
+        } else if (n.task) {
             ctx.fillStyle = '#7fc24a';
             ctx.beginPath(); ctx.arc(cx + r * 0.9, cy - r * 1.4, r * 0.3, 0, Math.PI * 2); ctx.fill();
         }
@@ -500,12 +517,22 @@ function drawNpcs(ctx, world, b, px, py) {
         // name label
         const lw = n.name.length * 7 + 8;
         ctx.fillStyle = 'rgba(0,0,0,0.6)';
-        roundRect(ctx, cx - lw / 2, cy - r * 2.4, lw, 14, 3); ctx.fill();
-        label(ctx, n.name, cx, cy - r * 2.4 + 11, '#fff', 11, 'center');
+        roundRect(ctx, cx - lw / 2, cy - r * 2.6, lw, 14, 3); ctx.fill();
+        label(ctx, n.name, cx, cy - r * 2.6 + 11, '#fff', 11, 'center');
+
+        // stamina bar just under the name
+        if (n.stamina != null) {
+            const bw = lw, bx = cx - bw / 2, by = cy - r * 2.6 + 15;
+            ctx.fillStyle = 'rgba(0,0,0,0.55)';
+            ctx.fillRect(bx, by, bw, 3);
+            const f = Math.max(0, Math.min(1, n.stamina / 100));
+            ctx.fillStyle = n.stamina < 25 ? '#d6453a' : (n.stamina < 55 ? '#e0b94a' : '#6fc24a');
+            ctx.fillRect(bx, by, bw * f, 3);
+        }
 
         // speech bubble while a line is live
         if (n.speech && now < n.speech.until) {
-            drawSpeech(ctx, n.speech.text, cx, cy - r * 2.4 - 4);
+            drawSpeech(ctx, n.speech.text, cx, cy - r * 2.6 - 4);
         }
     }
 }
