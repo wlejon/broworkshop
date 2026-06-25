@@ -210,6 +210,10 @@ export const STAT_COUPLING = {
     speedPerAgility:     0.05,  // move-speed gain per Agility level above 1
     proficiencyPerSkill: 0.075, // task-speed gain per relevant skill level
     proficiencyFloor:    0.75,  // novice task-speed floor (never unusably slow)
+    // --- the health/hydration needs pass ---
+    healthPerVitality:   10,    // +max health per Vitality level above 1 (lvl 1 = 100)
+    healthRegenPerVit:   0.18,  // health-regen rate gain per Vitality level above 1
+    hydrationDrainPerEnd: 0.04, // hydration drains SLOWER per Endurance level (lighter than stamina)
 };
 
 // Max stamina capacity grows with Endurance (level 1 = 100).
@@ -220,9 +224,32 @@ export function staminaMaxFor(n) {
 export function staminaDrainMul(n) {
     return 1 / (1 + (statLevel(n, 'endurance') - 1) * STAT_COUPLING.staminaDrainPerEnd);
 }
-// Walk-speed multiplier from Agility (>= 1).
+// Max HEALTH capacity grows with Vitality (level 1 = 100). The reserved
+// vitality stat from the prior pass now drives the worker's health ceiling.
+export function healthMaxFor(n) {
+    return 100 + (statLevel(n, 'vitality') - 1) * STAT_COUPLING.healthPerVitality;
+}
+// Health recovers FASTER at higher Vitality (multiplier >= 1).
+export function healthRegenMul(n) {
+    return 1 + (statLevel(n, 'vitality') - 1) * STAT_COUPLING.healthRegenPerVit;
+}
+// Hydration drains slower at higher Endurance (multiplier <= 1) — fit workers
+// thirst more slowly. Lighter coupling than stamina so the effect stays subtle.
+export function hydrationDrainMul(n) {
+    return 1 / (1 + (statLevel(n, 'endurance') - 1) * STAT_COUPLING.hydrationDrainPerEnd);
+}
+// Walk-speed multiplier from Agility (>= 1), bent DOWN when health is low: a
+// weakened (run-down) worker moves slower until they recover. Entities without
+// a health field (the Foreman) are unaffected.
 export function moveSpeedMul(n) {
-    return 1 + (statLevel(n, 'agility') - 1) * STAT_COUPLING.speedPerAgility;
+    let m = 1 + (statLevel(n, 'agility') - 1) * STAT_COUPLING.speedPerAgility;
+    if (n && n.health != null && n.health < WORKER.weakened) m *= WORKER.weakenedSpeedMul;
+    return m;
+}
+// A worker whose health has fallen into the weakened band (moves slower, reads
+// as "run down" in the HUD/alerts).
+export function isWeakened(n) {
+    return n && n.health != null && n.health < WORKER.weakened;
 }
 // Task-proficiency multiplier for a work domain ('husbandry' | 'farming' | null).
 // Higher relevant skill works faster; a floor keeps a novice from crawling.
@@ -252,6 +279,37 @@ export const WORKER = {
     energyOk:     90,    // eat until at least this
     exhausted:    15,    // stamina alert threshold
     hungry:       20,    // energy alert threshold
+
+    // ---- hydration (water) need -------------------------------------------
+    // Drains while active (and slowly while idle), FASTER in heat (see heat* and
+    // the temperature coupling in world.js). Restored by drinking during a home
+    // recover visit. Drain is bent lighter per-Endurance (hydrationDrainMul).
+    hydrationDrain: 0.9,   // /s while walking or working (gentle: co-times ~ with stamina)
+    hydrationIdle:  0.3,   // /s while idle in the field
+    drinkRecover:   22,    // /s hydration regained while drinking (recover visit)
+    heatBaseTemp:   20,    // °C above which heat starts accelerating thirst
+    heatThirstPerDeg: 0.04,// thirst-drain gain per °C over heatBaseTemp (summer/drought bite)
+    thirstDrink:    35,    // below this -> must drink (a home recover visit)
+    hydrationOk:    85,    // drink until at least this
+    thirsty:        22,    // hydration alert threshold (also the CRITICAL care trigger)
+
+    // ---- health need (driven by Vitality) ---------------------------------
+    // Health decays slowly while a CORE need is held critical and the worker
+    // isn't being cared for; recovers (faster at home) while needs are okay, at a
+    // rate scaled by Vitality (healthRegenMul). FLOORED — a worker can never die
+    // or be lost; low health forces a recovery visit instead.
+    healthDecay:    1.0,   // /s while a core need is critical and uncared-for
+    healthRegen:    2.0,   // /s base recovery while no core need is critical
+    healthCareBonus: 1.6,  // recovery multiplier while at a home recover visit
+    healthCritHydration: 12, // hydration at/below this counts as a core-need crisis
+    healthCritEnergy:    12, // energy at/below this counts as a core-need crisis
+    healthCritStamina:   4,  // stamina pinned at/below this counts as a crisis
+    healthFloor:    5,     // health is clamped here — NEVER lethal
+    weakened:       50,    // below this health -> "run down" (slower, alert)
+    weakenedSpeedMul: 0.7, // move-speed penalty while weakened
+    healthForce:    30,    // below this -> a forced recovery visit (always critical)
+    healthOk:       65,    // recover visit heals to at least this
+    recoverMaxMs:   12000, // safety cap on a recover visit's dwell (never wedge)
 };
 // Specialist task-speed is now driven by the worker's Husbandry/Farming skill
 // (proficiencyMul), superseding this flat per-role bonus. Kept for reference.

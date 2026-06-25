@@ -198,6 +198,24 @@ export function advanceTask(world, npc, dt) {
         if (npc.energy >= (step.until || WORKER.energyOk) || step._elapsed >= (step.ms || 4000)) task.cursor++;
         return true;
     }
+    // Consolidated home care: one visit recovers EVERY low need at once (rest +
+    // eat + drink + passive heal — see updateWorkerVitals 'recovering'). Stays
+    // until all needs are back to "ok" (or a safety cap), so a worker leaves home
+    // topped up across the board — this bounds downtime far better than separate
+    // per-need trips, which is what keeps the farm self-sustaining.
+    if (step.type === 'recover') {
+        npc.state = 'recovering';
+        step._elapsed = (step._elapsed || 0) + dt;
+        const okStam = npc.stamina  >= (step.staminaOk  != null ? step.staminaOk  : WORKER.staminaOk);
+        const okEner = npc.energy   >= (step.energyOk   != null ? step.energyOk   : WORKER.energyOk);
+        const okHydr = npc.hydration >= (step.hydrationOk != null ? step.hydrationOk : WORKER.hydrationOk);
+        const okHlth = npc.health   >= (step.healthOk   != null ? step.healthOk   : WORKER.healthOk);
+        if ((okStam && okEner && okHydr && okHlth) ||
+            step._elapsed >= (step.maxMs != null ? step.maxMs : WORKER.recoverMaxMs)) {
+            task.cursor++;
+        }
+        return true;
+    }
 
     if (step.type === 'act') {
         npc.state = 'working';
@@ -338,6 +356,22 @@ export function buildEat(world) {
         { type: 'move', x: h.x, y: h.y, label: 'farmhouse' },
         { type: 'wait', ms: 150 },
         { type: 'eat', ms: 4000 },
+    ]);
+}
+// Consolidated care: go HOME and recover every low need in one visit (stamina,
+// energy, hydration AND health). Thematically "the worker goes home to recover."
+// Supersedes per-need rest/eat/drink trips so worker downtime stays bounded — the
+// single biggest lever on keeping the farm self-sustaining once needs multiply.
+export function buildRecover(world, opts = {}) {
+    const h = regionCenter('farmhouse');
+    return makeTask('recover', null, [
+        { type: 'move', x: h.x, y: h.y, label: 'farmhouse' },
+        { type: 'recover',
+          staminaOk:   opts.staminaOk,
+          energyOk:    opts.energyOk,
+          hydrationOk: opts.hydrationOk,
+          healthOk:    opts.healthOk,
+          maxMs:       opts.maxMs },
     ]);
 }
 

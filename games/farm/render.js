@@ -1,7 +1,7 @@
 // render.js — draws a world snapshot to a 2D canvas context.
 // Pure rendering: reads world state, NEVER mutates it.
 
-import { GRID, REGIONS, PENS, COLORS, CROP_KINDS, ANIMAL_KINDS, ROLE_COLOR, RATES, staminaMaxFor } from './defs.js';
+import { GRID, REGIONS, PENS, COLORS, CROP_KINDS, ANIMAL_KINDS, ROLE_COLOR, RATES, WORKER, staminaMaxFor } from './defs.js';
 
 // Reserve a strip on the right for the DOM HUD overlay.
 const HUD_W = 270;
@@ -575,6 +575,11 @@ function drawNpcs(ctx, world, b, px, py) {
         } else if (n.state === 'eating') {
             ctx.fillStyle = '#e8c662';
             ctx.beginPath(); ctx.arc(cx + r * 0.9, cy - r * 1.4, r * 0.32, 0, Math.PI * 2); ctx.fill();
+        } else if (n.state === 'recovering') {
+            // small green healing cross while recovering at home
+            ctx.fillStyle = '#7fd0a0';
+            ctx.fillRect(cx + r * 0.78, cy - r * 1.55, r * 0.55, r * 0.18);
+            ctx.fillRect(cx + r * 0.96, cy - r * 1.73, r * 0.18, r * 0.55);
         } else if (n.task) {
             ctx.fillStyle = '#7fc24a';
             ctx.beginPath(); ctx.arc(cx + r * 0.9, cy - r * 1.4, r * 0.3, 0, Math.PI * 2); ctx.fill();
@@ -594,6 +599,24 @@ function drawNpcs(ctx, world, b, px, py) {
             const f = Math.max(0, Math.min(1, n.stamina / staminaMaxFor(n)));
             ctx.fillStyle = n.stamina < 25 ? '#d6453a' : (n.stamina < 55 ? '#e0b94a' : '#6fc24a');
             ctx.fillRect(bx, by, bw * f, 3);
+        }
+
+        // critical-need badge: a small red "!" disc when a need is in the danger
+        // zone (parched / starving / spent / unwell) so it reads at a glance.
+        const critNeed = (n.hydration != null && n.hydration < WORKER.thirsty) ||
+                         (n.energy != null && n.energy < WORKER.hungry) ||
+                         (n.stamina != null && n.stamina < WORKER.exhausted) ||
+                         (n.health != null && n.health < WORKER.healthForce);
+        if (critNeed) {
+            const bx = cx - r * 1.5, by = cy - r * 0.2;
+            ctx.fillStyle = '#d6453a';
+            ctx.beginPath(); ctx.arc(bx, by, r * 0.5, 0, Math.PI * 2); ctx.fill();
+            ctx.strokeStyle = 'rgba(0,0,0,0.55)'; ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.arc(bx, by, r * 0.5, 0, Math.PI * 2); ctx.stroke();
+            ctx.fillStyle = '#fff';
+            ctx.font = `bold ${Math.max(8, b.cell * 0.4)}px Consolas, monospace`;
+            ctx.textAlign = 'center';
+            ctx.fillText('!', bx, by + r * 0.35);
         }
 
         // speech bubble while a line is live

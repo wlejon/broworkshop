@@ -14,6 +14,7 @@ import {
     ANIMAL_SPECS, ANIMAL_KINDS, CROP_PLOTS, NPC_SPECS, START_RESOURCES, START_TROUGHS,
     CROP_KINDS, WORKER, FOREMAN_STATS,
     makeStatSheet, awardStatXp, staminaMaxFor, staminaDrainMul, moveSpeedMul,
+    healthMaxFor, healthRegenMul, hydrationDrainMul,
     STAT_XP, STAT_LABEL,
 } from './defs.js';
 import { createEnv, stepEnv, envObserve, envAlerts } from './env.js';
@@ -130,10 +131,14 @@ export function createWorld(opts = {}) {
             // meters/movement below (the coupling).
             stats: makeStatSheet(n.stats),
             // Labor depth: stamina drains with work, energy is the daily meal
-            // need. Stamina CAPACITY scales with Endurance, so start full at cap.
-            stamina: 100, energy: 100, speed: n.speed != null ? n.speed : 1.0,
+            // need, hydration is the water need (drains faster in heat), health is
+            // the Vitality-driven resilience meter. Stamina CAPACITY scales with
+            // Endurance and health CAPACITY with Vitality, so start each full at cap.
+            stamina: 100, energy: 100, hydration: 100, health: 100,
+            speed: n.speed != null ? n.speed : 1.0,
         };
         npc.stamina = staminaMaxFor(npc);
+        npc.health = healthMaxFor(npc);
         world.npcs.push(npc);
     }
 
@@ -359,29 +364,67 @@ export function createWorld(opts = {}) {
     // so a high-Endurance worker has a deeper reserve that empties more slowly.
     function updateWorkerVitals(n, s) {
         const sMax = staminaMaxFor(n);
+        const hMax = healthMaxFor(n);
         const drainMul = staminaDrainMul(n);
+        const hydrMul = hydrationDrainMul(n);
+        if (n.hydration == null) n.hydration = 100;
+        if (n.health == null) n.health = hMax;
+        // Heat raises thirst: temperature above heatBaseTemp scales the hydration
+        // drain up. world.env.temperature already folds in season (summer is hot)
+        // AND weather (drought adds, frost subtracts), so one signal covers both.
+        const temp = (world.env && world.env.temperature != null) ? world.env.temperature : 18;
+        const heatMul = 1 + Math.max(0, temp - WORKER.heatBaseTemp) * WORKER.heatThirstPerDeg;
+        const idleThirst = WORKER.hydrationIdle * hydrMul * heatMul * s;
         switch (n.state) {
             case 'sleeping':
                 n.stamina = clamp(n.stamina + WORKER.sleepRecover * s, 0, sMax);
                 n.energy  = clamp(n.energy  + WORKER.sleepRecover * s, 0, 100);
+                n.hydration = clamp(n.hydration - idleThirst * 0.5, 0, 100);   // barely thirsts asleep
+                break;
+            case 'recovering':   // consolidated home care: rest + eat + drink at once
+                n.stamina = clamp(n.stamina + WORKER.restRecover * s, 0, sMax);
+                n.energy  = clamp(n.energy  + WORKER.eatEnergy * s, 0, 100);
+                n.hydration = clamp(n.hydration + WORKER.drinkRecover * s, 0, 100);
                 break;
             case 'resting':
                 n.stamina = clamp(n.stamina + WORKER.restRecover * s, 0, sMax);
                 n.energy  = clamp(n.energy  - WORKER.energyIdle * s, 0, 100);
+                n.hydration = clamp(n.hydration - idleThirst, 0, 100);
                 break;
             case 'eating':
                 n.stamina = clamp(n.stamina + WORKER.eatStamina * s, 0, sMax);
                 n.energy  = clamp(n.energy  + WORKER.eatEnergy * s, 0, 100);
+                n.hydration = clamp(n.hydration + WORKER.drinkRecover * s, 0, 100);
                 break;
             case 'walking':
             case 'working':
                 n.stamina = clamp(n.stamina - WORKER.staminaDrain * drainMul * s, 0, sMax);
                 n.energy  = clamp(n.energy  - WORKER.energyDrain * s, 0, 100);
+                n.hydration = clamp(n.hydration - WORKER.hydrationDrain * hydrMul * heatMul * s, 0, 100);
                 break;
-            default: // idle
+            default: // idle (also talking/listening during a briefing)
                 n.stamina = clamp(n.stamina + WORKER.idleRecover * s, 0, sMax);
                 n.energy  = clamp(n.energy  - WORKER.energyIdle * s, 0, 100);
+                n.hydration = clamp(n.hydration - idleThirst, 0, 100);
                 break;
+        }
+
+        // Health: FLOORED so a worker can never die or be lost. It decays slowly
+        // while a core need (hydration / energy / stamina) is held critical AND the
+        // worker isn't being cared for; otherwise it recovers (faster at a home
+        // recover visit) at a rate scaled by Vitality. A worker who is critical but
+        // already being cared for gets a grace window (holds steady) while the care
+        // pulls the need back up.
+        const caring = n.state === 'recovering' || n.state === 'resting' ||
+                       n.state === 'eating' || n.state === 'sleeping';
+        const critNeed = n.hydration <= WORKER.healthCritHydration ||
+                         n.energy    <= WORKER.healthCritEnergy ||
+                         n.stamina   <= WORKER.healthCritStamina;
+        if (critNeed && !caring) {
+            n.health = clamp(n.health - WORKER.healthDecay * s, WORKER.healthFloor, hMax);
+        } else if (!critNeed) {
+            const rate = WORKER.healthRegen * healthRegenMul(n) * (caring ? WORKER.healthCareBonus : 1);
+            n.health = clamp(n.health + rate * s, WORKER.healthFloor, hMax);
         }
     }
 
@@ -448,9 +491,11 @@ export function createWorld(opts = {}) {
         }));
         const npcs = world.npcs.map((n) => ({
             id: n.id, name: n.name, role: n.role, busy: n.task != null,
-            state: n.state === 'walking' ? 'working' : n.state,   // idle|working|resting|sleeping|eating
+            state: n.state === 'walking' ? 'working' : n.state,   // idle|working|resting|sleeping|eating|recovering
             stamina: r1(n.stamina), energy: r1(n.energy),
+            hydration: r1(n.hydration), health: r1(n.health),
             staminaMax: r1(staminaMaxFor(n)),   // bar fills against this Endurance-driven cap
+            healthMax: r1(healthMaxFor(n)),     // health bar fills against this Vitality-driven cap
         }));
         const resources = {};
         for (const k of Object.keys(world.resources)) resources[k] = r1(world.resources[k]);
@@ -495,8 +540,16 @@ export function createWorld(opts = {}) {
         for (const n of world.npcs) {
             if (n.stamina < WORKER.exhausted) out.push({ level: 'warning', who: n.id, msg: `${n.name} is exhausted` });
             if (n.energy < WORKER.hungry) out.push({ level: 'warning', who: n.id, msg: `${n.name} is hungry` });
+            if (n.hydration < WORKER.thirsty) out.push({ level: 'warning', who: n.id, msg: `${n.name} is thirsty` });
+            if (n.health < WORKER.weakened) {
+                const crit = n.health < WORKER.healthForce;
+                out.push({ level: crit ? 'critical' : 'warning', who: n.id,
+                           msg: `${n.name} is ${crit ? 'unwell' : 'run down'}` });
+            }
             const able = n.stamina >= WORKER.staminaRest && n.energy >= WORKER.energyEat &&
-                n.state !== 'sleeping' && n.state !== 'resting' && n.state !== 'eating';
+                n.hydration >= WORKER.thirstDrink && n.health >= WORKER.healthForce &&
+                n.state !== 'sleeping' && n.state !== 'resting' &&
+                n.state !== 'eating' && n.state !== 'recovering';
             if (able) available++;
         }
         if (world.env.dayPhase === 'night' && available < 1) {

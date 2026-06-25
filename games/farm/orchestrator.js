@@ -18,7 +18,7 @@
 import {
     buildServiceWaterTrough, buildServiceFeedTrough,
     buildHarvest, buildWaterCrop, buildPlant, buildCollectProduce, buildTend,
-    buildRest, buildSleep, buildEat, prependBriefing,
+    buildSleep, buildRecover, prependBriefing,
 } from './tasks.js';
 import { WORKER } from './defs.js';
 
@@ -248,28 +248,43 @@ export function createOrchestrator() {
             inflight.add(world.player.targetHint);
         }
 
-        // --- worker care + day/night schedule (Pass D) -----------------------
-        // Idle workers that need looking after are routed to the farmhouse
+        // --- worker care + day/night schedule --------------------------------
+        // Idle workers that need looking after are routed HOME to a single
+        // consolidated recover visit (rest + eat + drink + heal in one trip)
         // before any job assignment: sleep at night (all but one rotating
-        // night-watch), rest when exhausted, eat when hungry. Workers on a
-        // care task aren't idle, so they're naturally excluded from jobs.
+        // night-watch), otherwise recover when any need crosses its threshold —
+        // low stamina, low energy, thirst, OR low health. Workers on a care task
+        // aren't idle, so they're naturally excluded from jobs.
         const isNight = world.env.dayPhase === 'night';
         const watchId = nightWatch(world);
+
+        // ANTI-COLLAPSE STOPGAP (the MCTS Foreman pass replaces this): the naive
+        // per-worker triggers above can stampede the whole crew home at once and
+        // starve the animals. Until the smart scheduler exists, hold back only
+        // NON-critical care so the on-duty crew never drops below one. A worker
+        // whose need is genuinely CRITICAL (exhausted / starving / parched / unwell)
+        // still goes regardless — survival of the worker wins over throughput.
+        const inCare = (n) => n.state === 'recovering' || n.state === 'resting' ||
+                              n.state === 'eating' || n.state === 'sleeping';
+        let onDuty = world.npcs.filter((n) => !inCare(n)).length;
+
         for (const n of world.npcs) {
             if (n.task) continue;
             if (isNight && n.id !== watchId) {
                 n.task = buildSleep(world); n.state = 'sleeping';
+                onDuty--;
                 continue;
             }
-            if (n.stamina < WORKER.staminaRest) {
-                n.task = buildRest(world); n.state = 'resting';
-                if (!isNight) world.say(n.id, 'Need a breather.');
-                continue;
-            }
-            if (n.energy < WORKER.energyEat) {
-                n.task = buildEat(world); n.state = 'eating';
-                continue;
-            }
+            const needCare = n.stamina < WORKER.staminaRest || n.energy < WORKER.energyEat ||
+                             n.hydration < WORKER.thirstDrink || n.health < WORKER.healthForce;
+            if (!needCare) continue;
+            const critical = n.stamina < WORKER.exhausted || n.energy < WORKER.hungry ||
+                             n.hydration < WORKER.thirsty || n.health < WORKER.healthForce;
+            // Stopgap guard: defer non-critical care that would empty the crew.
+            if (!critical && onDuty <= 1) continue;
+            n.task = buildRecover(world); n.state = 'recovering';
+            onDuty--;
+            if (!isNight && n.stamina < WORKER.staminaRest) world.say(n.id, 'Need a breather.');
         }
 
         let idle = world.npcs.filter((n) => n.task == null);

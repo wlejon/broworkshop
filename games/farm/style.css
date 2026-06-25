@@ -140,6 +140,15 @@ canvas {
 .wk-fill.en { background: #d8943f; }
 .wk-fill.en.mid { background: #caa34a; }
 .wk-fill.en.low { background: #d6453a; }
+.wk-fill.wa { background: #3f86c4; }            /* hydration (water) — blue */
+.wk-fill.wa.mid { background: #4a98c0; }
+.wk-fill.wa.low { background: #d6453a; }
+.wk-fill.hp { background: #57b86a; }            /* health — green, reddens when low */
+.wk-fill.hp.mid { background: #e0b94a; }
+.wk-fill.hp.low { background: #d6453a; }
+/* at-a-glance critical-need flag on a worker row */
+.wk-row.crit .wk-name { text-shadow: 0 0 6px rgba(214,69,58,0.9); }
+.wk-crit { color: #ff5b4d; font-weight: bold; margin-left: 3px; }
 
 .hud-alerts {
     display: flex;
@@ -247,6 +256,12 @@ canvas {
 .ss-need-fill.en  { background: #d8943f; }
 .ss-need-fill.en.mid { background: #caa34a; }
 .ss-need-fill.en.low { background: #d6453a; }
+.ss-need-fill.wa  { background: #3f86c4; }
+.ss-need-fill.wa.mid { background: #4a98c0; }
+.ss-need-fill.wa.low { background: #d6453a; }
+.ss-need-fill.hp  { background: #57b86a; }
+.ss-need-fill.hp.mid { background: #e0b94a; }
+.ss-need-fill.hp.low { background: #d6453a; }
 .ss-need-v { width: 28px; text-align: right; color: #c8d8bf; }
 
 /* Attribute rows: name, level badge, XP-to-next progress bar. */

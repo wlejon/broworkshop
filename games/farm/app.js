@@ -28,6 +28,7 @@ import { render, computeBoard } from '/app/render.js';
 import {
     STAT_KEYS, STAT_LABEL, STAT_MAX_LEVEL, statXpToNext,
     staminaMaxFor, staminaDrainMul, moveSpeedMul, proficiencyMul, ROLE_COLOR,
+    healthMaxFor, healthRegenMul, hydrationDrainMul,
 } from '/app/defs.js';
 import { advanceTask } from '/app/tasks.js';
 import { createOrchestrator } from '/app/orchestrator.js';
@@ -173,19 +174,29 @@ const hudWorkers = document.getElementById('hud-workers');
 const hudAlerts = document.getElementById('hud-alerts');
 const hudDialog = document.getElementById('hud-dialog');
 
-const STATE_LABEL = { idle: 'idle', working: 'working', resting: 'resting', sleeping: 'asleep', eating: 'eating' };
+const STATE_LABEL = { idle: 'idle', working: 'working', resting: 'resting', sleeping: 'asleep', eating: 'eating', recovering: 'recovering' };
 function workerRow(n) {
     const sCls = n.stamina < 25 ? 'low' : (n.stamina < 55 ? 'mid' : 'ok');
     const eCls = n.energy < 30 ? 'low' : (n.energy < 55 ? 'mid' : 'ok');
-    // Stamina bar fills against the Endurance-driven cap (staminaMax), so it
-    // doesn't overflow when a seasoned worker's reserve climbs past 100.
+    const wCls = n.hydration < 22 ? 'low' : (n.hydration < 50 ? 'mid' : 'ok');
+    const healthMax = n.healthMax || 100;
+    const hCls = n.health < healthMax * 0.30 ? 'low' : (n.health < healthMax * 0.55 ? 'mid' : 'ok');
+    // Stamina bar fills against the Endurance-driven cap (staminaMax), health
+    // against the Vitality-driven cap (healthMax), so neither overflows when a
+    // seasoned worker's reserve climbs past 100.
     const sPct = Math.round(100 * n.stamina / (n.staminaMax || 100));
-    return '<div class="wk-row">' +
-        `<span class="wk-name role-${n.role}">${n.name}</span>` +
+    const hPct = Math.round(100 * n.health / healthMax);
+    // At-a-glance critical flag: thirsty / hungry / exhausted / unwell.
+    const crit = n.stamina < 15 || n.energy < 20 || n.hydration < 22 || n.health < 30;
+    const dot = crit ? '<span class="wk-crit" title="needs care">!</span>' : '';
+    return `<div class="wk-row${crit ? ' crit' : ''}">` +
+        `<span class="wk-name role-${n.role}">${n.name}${dot}</span>` +
         `<span class="wk-state">${STATE_LABEL[n.state] || n.state}</span>` +
         '<span class="wk-bars">' +
             `<span class="wk-bar"><span class="wk-fill ${sCls}" style="width:${sPct}%"></span></span>` +
             `<span class="wk-bar"><span class="wk-fill en ${eCls}" style="width:${Math.round(n.energy)}%"></span></span>` +
+            `<span class="wk-bar"><span class="wk-fill wa ${wCls}" style="width:${Math.round(n.hydration)}%"></span></span>` +
+            `<span class="wk-bar"><span class="wk-fill hp ${hCls}" style="width:${hPct}%"></span></span>` +
         '</span></div>';
 }
 
@@ -306,7 +317,7 @@ let statOpen = false;
 
 const PANEL_STATE = {
     idle: 'idle', working: 'working', walking: 'walking', resting: 'resting',
-    sleeping: 'asleep', eating: 'eating', talking: 'talking',
+    sleeping: 'asleep', eating: 'eating', recovering: 'recovering', talking: 'talking',
     listening: 'listening', supervising: 'supervising',
 };
 const ROLE_DISPLAY = { rancher: 'Rancher', gardener: 'Gardener', farmhand: 'Farmhand', foreman: 'Foreman' };
@@ -327,6 +338,7 @@ function inspectEntity(id) {
         id: n.id, name: n.name, roleLabel: ROLE_DISPLAY[n.role] || n.role,
         color: ROLE_COLOR[n.role] || '#caa', stats: n.stats, hasVitals: true,
         stamina: n.stamina, staminaMax: staminaMaxFor(n), energy: n.energy,
+        hydration: n.hydration, health: n.health, healthMax: healthMaxFor(n),
         state: n.state, carrying: n.carrying,
     };
 }
@@ -406,7 +418,10 @@ function renderStatPanel() {
     }
     if (ssNeeds) {
         ssNeeds.innerHTML = e.hasVitals
-            ? needRow('Stamina', e.stamina, e.staminaMax, '') + needRow('Energy', e.energy, 100, 'en')
+            ? needRow('Stamina', e.stamina, e.staminaMax, '') +
+              needRow('Energy', e.energy, 100, 'en') +
+              needRow('Water', e.hydration, 100, 'wa') +
+              needRow('Health', e.health, e.healthMax, 'hp')
             : '<div class="ss-need-row"><span class="ss-need-k" style="width:auto;color:#9bb592">command post · always on duty</span></div>';
     }
     if (ssStats) {
@@ -442,7 +457,8 @@ globalThis.farmInspect = {
         };
     },
 };
-globalThis.farmStats = { staminaMaxFor, staminaDrainMul, moveSpeedMul, proficiencyMul, statXpToNext };
+globalThis.farmStats = { staminaMaxFor, staminaDrainMul, moveSpeedMul, proficiencyMul, statXpToNext,
+                         healthMaxFor, healthRegenMul, hydrationDrainMul };
 
 // ---------- screens ----------
 const hudEl = document.getElementById('hud');
