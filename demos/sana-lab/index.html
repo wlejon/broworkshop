@@ -63,7 +63,33 @@
                 <option value="512">512²</option>
               </select></label>
           </div>
-          <button id="btn-generate" class="primary" disabled>Generate</button>
+          <div class="row gen-row">
+            <button id="btn-generate" class="primary" disabled>Generate</button>
+            <label class="live-toggle" title="Re-render as you drag the sliders (fast preview)">
+              <input id="live" type="checkbox"> live
+            </label>
+          </div>
+        </section>
+
+        <!-- ── identity anchor: Sana's training-free reference-attention seam ── -->
+        <section class="panel" id="identity-host">
+          <h2>identity
+            <span class="hint inline">hold one face across edits</span>
+          </h2>
+          <label class="field">anchor &mdash; the face to keep
+            <textarea id="anchor-prompt" rows="2"
+              placeholder="a portrait photo of a person, neutral expression, plain studio background">a portrait photo of a woman, neutral expression, head and shoulders, plain studio background</textarea></label>
+          <div class="row anchor-row">
+            <button id="btn-capture-anchor">Capture anchor</button>
+            <canvas id="anchor-thumb" width="64" height="64" title="captured identity"></canvas>
+          </div>
+          <label class="field">strength
+            <span class="row">
+              <input id="identity-weight" type="range" min="0" max="2.5" step="0.1" value="1">
+              <button id="btn-clear-anchor" class="link" title="Drop the anchor">clear</button>
+            </span>
+          </label>
+          <p id="identity-hint" class="hint"></p>
         </section>
 
         <section class="panel grow-panel">

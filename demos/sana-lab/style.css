@@ -177,3 +177,23 @@ input[type=range] {
 #status-text.ok  { color: #7fd1a6; }
 #status-text.err { color: #ff8e8e; }
 .meta { color: #5b6470; font-size: 11px; font-variant-numeric: tabular-nums; }
+
+/* ── live toggle + identity anchor ─────────────────────────────────────────── */
+.gen-row { display: flex; gap: 8px; align-items: center; }
+.gen-row .primary { flex: 1; }
+.live-toggle {
+  display: flex; align-items: center; gap: 5px;
+  color: #9aa3b0; font-size: 12px; user-select: none; cursor: pointer;
+}
+.live-toggle input { accent-color: #5f9bff; cursor: pointer; }
+
+#identity-host { border-left: 2px solid #1a2233; transition: border-color 0.2s; }
+#identity-host.armed { border-left-color: #2f6dba; }
+.anchor-row { display: flex; gap: 8px; align-items: center; }
+.anchor-row button { flex: 1; }
+#anchor-thumb {
+  width: 48px; height: 48px; flex: none;
+  border: 1px solid #1c222c; border-radius: 5px; background: #07090d;
+}
+#identity-host.armed #anchor-thumb { border-color: #2f6dba; }
+#identity-weight { flex: 1; }

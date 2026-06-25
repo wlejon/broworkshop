@@ -47,8 +47,10 @@ function createClient() {
   return {
     onReady: (cb) => { if (ready) cb(); else readyCb = cb; },
     load: (modelDir, cb) => send({ type: 'load', modelDir }, cb),
-    generate: (prompt, opts, controls, cb) =>
-      send({ type: 'generate', prompt, opts, controls }, cb),
+    generate: (prompt, opts, controls, identityWeight, cb) =>
+      send({ type: 'generate', prompt, opts, controls, identityWeight }, cb),
+    anchor: (prompt, opts, cb) => send({ type: 'anchor', prompt, opts }, cb),
+    clearAnchor: (cb) => send({ type: 'clearAnchor' }, cb || function () {}),
     search: (neg, pos, name, cb) => send({ type: 'search', neg, pos, name }, cb),
     remove: (name, cb) => send({ type: 'remove', name }, cb || function () {}),
   };
@@ -68,6 +70,16 @@ function init() {
   let busy = false;
   let axisSeq = prefs.axisSeq || 0;     // monotonic id for unique worker names
   const axes = [];                      // { wname, name, neg, pos, sep, els }
+
+  // Identity anchor (Sana's reference-attention seam) + the live render loop.
+  const anchor = { armed: false, els: null };
+  let live = prefs.live || false;       // auto-render on slider drag
+  // Latest-wins render scheduler: a slider change marks the desired quality
+  // ('preview' = few steps, fast; 'full' = the steps setting). pump() fires one
+  // generation at a time; whatever was requested while busy runs next (drags
+  // coalesce — see the kokoro-lab pattern). 'full' always beats a queued 'preview'.
+  let pendingQuality = null;
+  const PREVIEW_STEPS = 8;
 
   // Generation defaults (shown as hints; the reset button restores them). Sana's
   // standard recipe: 20 steps, guidance 4.5, 1024² native resolution.
@@ -94,12 +106,20 @@ function init() {
       negPrompt: $('neg-prompt').value,
       seed: $('seed').value, steps: $('steps').value,
       guidance: $('guidance').value, size: $('size').value,
+      live,
+      anchorPrompt: $('anchor-prompt').value,
+      identityWeight: anchor.els ? +anchor.els.weight.value : 0,
       axisSeq,
       axes: axes.map((a) => ({
         name: a.name, neg: a.neg, pos: a.pos, sep: a.sep,
         strength: +a.els.strength.value,
       })),
     });
+  }
+
+  // Current identity injection strength (0 when no anchor armed = a true no-op).
+  function identityWeight() {
+    return anchor.armed && anchor.els ? +anchor.els.weight.value : 0;
   }
 
   function status(msg, kind) {
@@ -153,8 +173,13 @@ function init() {
       val.textContent = (v > 0 ? '+' : '') + v;
       val.classList.toggle('off', v === 0);
     }
-    range.addEventListener('input', () => { refresh(); persist(); });
-    val.addEventListener('dblclick', () => { range.value = '0'; refresh(); persist(); });
+    range.addEventListener('input', () => {
+      refresh(); persist(); if (live) schedule('preview');
+    });
+    range.addEventListener('change', () => { if (live) schedule('full'); });
+    val.addEventListener('dblclick', () => {
+      range.value = '0'; refresh(); persist(); if (live) schedule('full');
+    });
     refresh();
     row.appendChild(range);
     row.appendChild(val);
@@ -226,29 +251,115 @@ function init() {
     });
   }
 
-  function doGenerate() {
-    if (!loaded || busy) return;
+  // Generation opts from the form. quality 'preview' caps steps for a fast,
+  // coalesced live frame; 'full' uses the steps setting.
+  function genOpts(quality) {
     const size = +$('size').value;
-    const opts = {
+    const steps = +$('steps').value || 20;
+    return {
       width: size, height: size,
-      steps: +$('steps').value || 20,
+      steps: quality === 'preview' ? Math.min(steps, PREVIEW_STEPS) : steps,
       guidanceScale: +$('guidance').value || 4.5,
       seed: +$('seed').value || 0,
       negativePrompt: $('neg-prompt').value.trim(),
     };
+  }
+
+  // Latest-wins render scheduler. schedule() records the desired quality; pump()
+  // runs one generation at a time and, on completion, fires whatever was queued
+  // meanwhile — so dragging a slider coalesces to its final value. A 'full'
+  // request upgrades a queued 'preview', so releasing a slider lands a clean frame.
+  function schedule(quality) {
+    if (!loaded) return;
+    if (quality === 'full' || pendingQuality !== 'full') pendingQuality = quality;
+    pump();
+  }
+
+  function pump() {
+    if (busy || !loaded || !pendingQuality) return;
+    const quality = pendingQuality;
+    pendingQuality = null;
+    runGenerate(quality);
+  }
+
+  function runGenerate(quality) {
     const controls = collectControls();
+    const iw = identityWeight();
     persist();
     setBusy(true);
+    const bits = [];
+    if (iw) bits.push('identity ' + iw.toFixed(1));
     const n = Object.keys(controls).length;
-    status('generating' + (n ? ' · ' + n + ' axis' + (n > 1 ? 'es' : '') + ' active' : ' · baseline') + '…');
+    if (n) bits.push(n + ' axis' + (n > 1 ? 'es' : ''));
+    status((quality === 'preview' ? 'preview' : 'generating') +
+           (bits.length ? ' · ' + bits.join(' · ') : ' · baseline') + '…');
     $('timing').textContent = '';
-    client.generate($('prompt').value, opts, controls, (err, msg) => {
+    client.generate($('prompt').value, genOpts(quality), controls, iw, (err, msg) => {
+      setBusy(false);
+      if (err) { status(String(err.message || err), 'err'); pump(); return; }
+      drawBitmap(msg.bitmap, msg.width, msg.height);
+      status(quality === 'preview' ? 'preview' : 'done', 'ok');
+      $('timing').textContent =
+        (msg.ms ? msg.ms + ' ms' : '') + (quality === 'preview' ? ' · preview' : '');
+      pump();   // run whatever was requested while this was in flight
+    });
+  }
+
+  // The Generate button always renders at full quality.
+  function doGenerate() { schedule('full'); }
+
+  // ── identity anchor ──────────────────────────────────────────────────────
+  // Capture a reference identity from one full render of the anchor prompt, then
+  // arm the seam. Subsequent generations inject it (scaled by the weight slider)
+  // so the subject stays the same person while the prompt + axes drive expression.
+  function doCaptureAnchor() {
+    if (!loaded || busy) return;
+    const prompt = $('anchor-prompt').value.trim();
+    if (!prompt) { status('enter an anchor prompt first', 'err'); return; }
+    persist();
+    setBusy(true);
+    status('capturing identity anchor — one full render…');
+    client.anchor(prompt, genOpts('full'), (err, msg) => {
       setBusy(false);
       if (err) { status(String(err.message || err), 'err'); return; }
-      drawBitmap(msg.bitmap, msg.width, msg.height);
-      status('done', 'ok');
-      $('timing').textContent = msg.ms ? (msg.ms + ' ms') : '';
+      drawAnchorThumb(msg.bitmap, msg.width, msg.height);
+      anchor.armed = true;
+      anchor.els.weight.disabled = false;
+      anchor.els.clear.disabled = false;
+      $('identity-host').classList.add('armed');
+      refreshAnchorHint();
+      status('identity anchor captured · ' + (msg.ms ? msg.ms + ' ms' : ''), 'ok');
     });
+  }
+
+  function doClearAnchor() {
+    client.clearAnchor();
+    anchor.armed = false;
+    anchor.els.weight.disabled = true;
+    anchor.els.clear.disabled = true;
+    if (anchor.els.thumbCtx) {
+      anchor.els.thumbCtx.clearRect(0, 0, anchor.els.thumb.width, anchor.els.thumb.height);
+    }
+    $('identity-host').classList.remove('armed');
+    refreshAnchorHint();
+    persist();
+    status('identity anchor cleared', 'ok');
+  }
+
+  function drawAnchorThumb(bitmap, w, h) {
+    const c = anchor.els.thumb;
+    const ctx = anchor.els.thumbCtx;
+    ctx.clearRect(0, 0, c.width, c.height);
+    // contain the square render into the thumb box
+    const s = Math.min(c.width / w, c.height / h);
+    const dw = w * s, dh = h * s;
+    ctx.drawImage(bitmap, (c.width - dw) / 2, (c.height - dh) / 2, dw, dh);
+  }
+
+  function refreshAnchorHint() {
+    $('identity-hint').textContent = anchor.armed
+      ? 'weight = identity pull · push an expression axis and the face holds'
+      : 'Capture a neutral portrait to hold its identity across edits.';
   }
 
   // Build a new axis from the form's two word sets.
@@ -315,6 +426,34 @@ function init() {
   bindCounter('prompt', 'prompt-count');
   bindCounter('neg-prompt', 'neg-count');
 
+  // ── identity anchor wiring ───────────────────────────────────────────────
+  anchor.els = {
+    weight: $('identity-weight'),
+    clear: $('btn-clear-anchor'),
+    thumb: $('anchor-thumb'),
+    thumbCtx: $('anchor-thumb').getContext('2d'),
+  };
+  if (prefs.anchorPrompt) $('anchor-prompt').value = prefs.anchorPrompt;
+  if (prefs.identityWeight != null) anchor.els.weight.value = prefs.identityWeight;
+  anchor.els.weight.disabled = true;   // until an anchor is captured
+  anchor.els.clear.disabled = true;
+  refreshAnchorHint();
+  anchor.els.weight.addEventListener('input', () => {
+    persist(); if (live) schedule('preview');
+  });
+  anchor.els.weight.addEventListener('change', () => { if (live) schedule('full'); });
+  $('btn-capture-anchor').addEventListener('click', doCaptureAnchor);
+  $('btn-clear-anchor').addEventListener('click', doClearAnchor);
+
+  // ── live toggle ──────────────────────────────────────────────────────────
+  const liveBox = $('live');
+  liveBox.checked = live;
+  liveBox.addEventListener('change', () => {
+    live = liveBox.checked;
+    persist();
+    if (live) schedule('full');   // catch up to the current sliders
+  });
+
   // ── wire up ──────────────────────────────────────────────────────────────
   $('btn-load').addEventListener('click', doLoad);
   $('btn-generate').addEventListener('click', doGenerate);
@@ -336,7 +475,7 @@ function init() {
     if (d) { $('model-dir').value = d; persist(); }
   });
   ['model-dir', 'prompt', 'neg-prompt', 'seed', 'steps', 'guidance', 'size',
-   'axis-name', 'search-neg', 'search-pos']
+   'axis-name', 'search-neg', 'search-pos', 'anchor-prompt']
     .forEach((id) => $(id).addEventListener('change', persist));
   // Cmd/Ctrl+Enter in the prompt generates.
   $('prompt').addEventListener('keydown', (e) => {

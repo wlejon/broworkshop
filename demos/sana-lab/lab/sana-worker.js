@@ -8,10 +8,17 @@
 // multi-GB weights + the (tiny) BCD1 dictionary once, then generate many times.
 //
 //   main -> load     {modelDir}              ->  loaded {config, axes, backend}
-//   main -> generate {prompt, opts, controls} ->  done {bitmap, width, height, ms}
+//   main -> generate {prompt, opts, controls, identityWeight} -> done {bitmap, ...}
+//   main -> anchor   {prompt, opts}           ->  anchorSet {bitmap, width, height, ms}
+//   main -> clearAnchor {}                    ->  anchorCleared {}
 //   main -> search   {neg[], pos[], name}     ->  axisBuilt {name, negN, posN, sep}
 //   main -> remove   {name}                   ->  removed {name}
 //   errors come back as                       ->  error {stage, message}
+//
+// The identity anchor is Sana's training-free reference-attention seam: capture
+// a neutral portrait's per-step linear-attention summaries once, then every
+// generate() adds them back (scaled by identityWeight) so the face stays the
+// same person while the prompt + control axes drive expression. Sana only.
 //
 // `controls` is a plain { axisName: alpha } map. The worker clears the control
 // state and re-applies the map before every generation, so a slider at 0 (or
@@ -66,44 +73,73 @@ function handleLoad(msg) {
   }
 }
 
-// ── generate: apply the control map, run one-shot txt2img, return a bitmap ──
+// Hand a decoded RGBA frame back to the main thread as a zero-copy ImageBitmap
+// under the given message type (so generate / anchor share one return path).
+function respondImage(type, img, ms, stage) {
+  var data = new ImageData(img.data, img.width, img.height);
+  createImageBitmap(data).then(function (bitmap) {
+    self.postMessage({ type: type, bitmap: bitmap, width: img.width,
+                       height: img.height, ms: ms }, [bitmap]);
+  }).catch(function (e) { fail(stage, e); });
+}
+
+function now() {
+  return (typeof performance !== 'undefined' && performance.now)
+    ? performance.now() : 0;
+}
+
+// Apply the {axisName: alpha} control map from scratch: clear, then set the
+// nonzero axes, so each run is self-describing (nothing sticky from a prior one).
+function applyControls(controls) {
+  pipeline.clearControl();
+  var active = {}, any = false;
+  for (var name in controls) {
+    if (!controls.hasOwnProperty(name)) continue;
+    var a = +controls[name];
+    if (a) { active[name] = a; any = true; }
+  }
+  if (any) pipeline.setControl(active);
+}
+
+// ── generate: apply controls + identity weight, run txt2img, return a bitmap ──
 function handleGenerate(msg) {
   try {
     if (!pipeline) throw new Error('no model loaded');
+    applyControls(msg.controls || {});
+    // Identity injection strength for the armed anchor (0 when none / off). A
+    // true no-op at 0, so live sliders that pass 0 cost nothing extra.
+    pipeline.setIdentityWeight(+msg.identityWeight || 0);
 
-    // Re-apply the control surface from scratch every run: clear, then set only
-    // the nonzero axes. This keeps each generation self-describing — what you
-    // see is exactly the map you sent, nothing sticky from a prior run.
-    pipeline.clearControl();
-    var controls = msg.controls || {};
-    var active = {};
-    var any = false;
-    for (var name in controls) {
-      if (!controls.hasOwnProperty(name)) continue;
-      var a = +controls[name];
-      if (a) { active[name] = a; any = true; }
-    }
-    if (any) pipeline.setControl(active);
-
-    var t0 = (typeof performance !== 'undefined' && performance.now)
-      ? performance.now() : 0;
+    var t0 = now();
     var img = pipeline.generate(msg.prompt, msg.opts || {});
-    var ms = t0 ? Math.round((typeof performance !== 'undefined'
-      ? performance.now() : 0) - t0) : 0;
-
-    // Hand the decoded RGBA frame back as a zero-copy ImageBitmap.
-    var data = new ImageData(img.data, img.width, img.height);
-    createImageBitmap(data).then(function (bitmap) {
-      self.postMessage({
-        type: 'done',
-        bitmap: bitmap,
-        width: img.width,
-        height: img.height,
-        ms: ms,
-      }, [bitmap]);
-    }).catch(function (e) { fail('generate', e); });
+    respondImage('done', img, Math.round(now() - t0), 'generate');
   } catch (e) {
     fail('generate', e);
+  }
+}
+
+// ── anchor: capture a reference identity from one full generation ───────────
+// Renders `prompt` with the denoiser recording its per-step attention summaries,
+// arms the seam, and hands back the anchor image (e.g. the neutral portrait).
+function handleAnchor(msg) {
+  try {
+    if (!pipeline) throw new Error('no model loaded');
+    applyControls({});                 // capture the clean identity, unsteered
+    pipeline.setIdentityWeight(0);     // the anchor renders itself, no injection
+    var t0 = now();
+    var img = pipeline.setIdentityAnchor(msg.prompt, msg.opts || {});
+    respondImage('anchorSet', img, Math.round(now() - t0), 'anchor');
+  } catch (e) {
+    fail('anchor', e);
+  }
+}
+
+function handleClearAnchor() {
+  try {
+    if (pipeline) pipeline.clearIdentityAnchor();
+    self.postMessage({ type: 'anchorCleared' });
+  } catch (e) {
+    fail('clearAnchor', e);
   }
 }
 
@@ -182,10 +218,12 @@ function handleRemove(msg) {
 self.onmessage = function (e) {
   var msg = e.data || {};
   switch (msg.type) {
-    case 'load':     handleLoad(msg); break;
-    case 'generate': handleGenerate(msg); break;
-    case 'search':   handleSearch(msg); break;
-    case 'remove':   handleRemove(msg); break;
+    case 'load':        handleLoad(msg); break;
+    case 'generate':    handleGenerate(msg); break;
+    case 'anchor':      handleAnchor(msg); break;
+    case 'clearAnchor': handleClearAnchor(); break;
+    case 'search':      handleSearch(msg); break;
+    case 'remove':      handleRemove(msg); break;
     default: fail('dispatch', new Error('unknown message: ' + msg.type));
   }
 };
