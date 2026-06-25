@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Farm</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <canvas id="game"></canvas>
+
+    <div id="hud">
+        <div id="hud-clock" class="hud-clock">Day 1 · 06:00</div>
+
+        <div class="hud-section-title">RESOURCES</div>
+        <div id="hud-resources" class="hud-resources"></div>
+
+        <div class="hud-section-title">ALERTS</div>
+        <div id="hud-alerts" class="hud-alerts"></div>
+
+        <div class="hud-keys">
+            <div class="hud-section-title">DEBUG KEYS</div>
+            <div><b>1</b> refill feed &nbsp; <b>2</b> refill water</div>
+            <div><b>3</b> water crops &nbsp; <b>4</b> harvest+collect</div>
+            <div><b>5</b> plant empty &nbsp; <b>6</b> resupply</div>
+            <div><b>P</b> pause &nbsp; <b>O</b> log observe()</div>
+        </div>
+    </div>
+
+    <script type="module" src="/app/app.js"></script>
+</body>
+</html>
