@@ -12,7 +12,9 @@
 import {
     GRID, DAY_LENGTH_MS, RATES, REGIONS, PENS,
     ANIMAL_SPECS, ANIMAL_KINDS, CROP_PLOTS, NPC_SPECS, START_RESOURCES, START_TROUGHS,
-    CROP_KINDS, WORKER,
+    CROP_KINDS, WORKER, FOREMAN_STATS,
+    makeStatSheet, awardStatXp, staminaMaxFor, staminaDrainMul, moveSpeedMul,
+    STAT_XP, STAT_LABEL,
 } from './defs.js';
 import { createEnv, stepEnv, envObserve, envAlerts } from './env.js';
 import { createMarket, stepMarket, marketObserve, marketAlerts } from './market.js';
@@ -75,7 +77,13 @@ export function createWorld(opts = {}) {
         // x21) and the pens (start x24), below the barn/well row — central to the
         // survival-critical well/barn -> trough service path so briefing detours
         // stay short. Workers walk here to be briefed before any job (tasks.js).
-        foreman: { id: 'Foreman', name: 'Foreman', x: 22, y: 12, speech: null },
+        foreman: { id: 'Foreman', name: 'Foreman', role: 'foreman', x: 22, y: 12, speech: null,
+                   stats: makeStatSheet(FOREMAN_STATS) },
+        // Day boundary tracker for the daily stat trickle (vitality/endurance).
+        _statDay: 1,
+        // Currently inspected entity id (npc id / 'Foreman' / 'You') for the
+        // click-to-inspect stat-sheet panel + its on-board selection ring.
+        inspect: null,
     };
 
     // Pens + their pending (uncollected) produce, capacity cap, and breed timer.
@@ -112,16 +120,21 @@ export function createWorld(opts = {}) {
     }
 
     for (const n of NPC_SPECS) {
-        world.npcs.push({
+        const npc = {
             id: n.id, name: n.name, role: n.role, voice: n.voice,
             x: n.home.x, y: n.home.y,
             tx: n.home.x, ty: n.home.y,
             home: { ...n.home },
             state: 'idle', carrying: null, task: null, speech: null,
+            // Persistent stat sheet — grows from work (tasks.js), drives the
+            // meters/movement below (the coupling).
+            stats: makeStatSheet(n.stats),
             // Labor depth: stamina drains with work, energy is the daily meal
-            // need; speed is per-worker (role bonus applied in the task executor).
+            // need. Stamina CAPACITY scales with Endurance, so start full at cap.
             stamina: 100, energy: 100, speed: n.speed != null ? n.speed : 1.0,
-        });
+        };
+        npc.stamina = staminaMaxFor(npc);
+        world.npcs.push(npc);
     }
 
     const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
@@ -184,6 +197,16 @@ export function createWorld(opts = {}) {
         const hf = dayPos * 24;
         world.clock.hour = Math.floor(hf);
         world.clock.minute = Math.floor((hf - world.clock.hour) * 60);
+
+        // Daily stat trickle: a worker who lives another day gains a little
+        // Vitality (the reserved health stat) and Endurance for the sustained
+        // grind. Keeps Vitality growing without coupling it to anything yet.
+        if (world.clock.day !== world._statDay) {
+            world._statDay = world.clock.day;
+            for (const n of world.npcs) {
+                awardWork(n, [['vitality', STAT_XP.vitality], ['endurance', STAT_XP.endurance * 0.5]]);
+            }
+        }
 
         // Environment: advance season/weather/day-phase and apply passive
         // weather effects (rain watering crops + topping the pool). The mods it
@@ -331,30 +354,47 @@ export function createWorld(opts = {}) {
     }
 
     // Stamina/energy dynamics keyed off the worker's state (set by the task
-    // executor). Active states drain; rest/sleep/eat recover.
+    // executor). Active states drain; rest/sleep/eat recover. Endurance drives
+    // BOTH the cap (sMax) the bar fills to AND the drain rate (drainMul slows it),
+    // so a high-Endurance worker has a deeper reserve that empties more slowly.
     function updateWorkerVitals(n, s) {
+        const sMax = staminaMaxFor(n);
+        const drainMul = staminaDrainMul(n);
         switch (n.state) {
             case 'sleeping':
-                n.stamina = clamp(n.stamina + WORKER.sleepRecover * s, 0, 100);
+                n.stamina = clamp(n.stamina + WORKER.sleepRecover * s, 0, sMax);
                 n.energy  = clamp(n.energy  + WORKER.sleepRecover * s, 0, 100);
                 break;
             case 'resting':
-                n.stamina = clamp(n.stamina + WORKER.restRecover * s, 0, 100);
+                n.stamina = clamp(n.stamina + WORKER.restRecover * s, 0, sMax);
                 n.energy  = clamp(n.energy  - WORKER.energyIdle * s, 0, 100);
                 break;
             case 'eating':
-                n.stamina = clamp(n.stamina + WORKER.eatStamina * s, 0, 100);
+                n.stamina = clamp(n.stamina + WORKER.eatStamina * s, 0, sMax);
                 n.energy  = clamp(n.energy  + WORKER.eatEnergy * s, 0, 100);
                 break;
             case 'walking':
             case 'working':
-                n.stamina = clamp(n.stamina - WORKER.staminaDrain * s, 0, 100);
+                n.stamina = clamp(n.stamina - WORKER.staminaDrain * drainMul * s, 0, sMax);
                 n.energy  = clamp(n.energy  - WORKER.energyDrain * s, 0, 100);
                 break;
             default: // idle
-                n.stamina = clamp(n.stamina + WORKER.idleRecover * s, 0, 100);
+                n.stamina = clamp(n.stamina + WORKER.idleRecover * s, 0, sMax);
                 n.energy  = clamp(n.energy  - WORKER.energyIdle * s, 0, 100);
                 break;
+        }
+    }
+
+    // Grant work XP across one or more stats and surface a notice on any level-up.
+    // awards: array of [statKey, amount]. The single seam tasks.js calls so all
+    // XP + level-up announcements stay centralized here.
+    function awardWork(n, awards) {
+        if (!n || !n.stats) return;
+        for (const [key, amt] of awards) {
+            const leveled = awardStatXp(n, key, amt);
+            if (leveled) {
+                pushNotice('info', n.id, `${n.name}'s ${STAT_LABEL[leveled]} rose to ${n.stats[leveled].level}`);
+            }
         }
     }
 
@@ -379,7 +419,7 @@ export function createWorld(opts = {}) {
             n.tx = n.home.x + (rng() * 2 - 1) * 2.5;
             n.ty = n.home.y + (rng() * 2 - 1) * 2.5;
         } else {
-            const sp = 1.2 * s;
+            const sp = 1.2 * moveSpeedMul(n) * s;   // Agility quickens even idle wander
             n.x += (dx / d) * Math.min(sp, d);
             n.y += (dy / d) * Math.min(sp, d);
         }
@@ -410,6 +450,7 @@ export function createWorld(opts = {}) {
             id: n.id, name: n.name, role: n.role, busy: n.task != null,
             state: n.state === 'walking' ? 'working' : n.state,   // idle|working|resting|sleeping|eating
             stamina: r1(n.stamina), energy: r1(n.energy),
+            staminaMax: r1(staminaMaxFor(n)),   // bar fills against this Endurance-driven cap
         }));
         const resources = {};
         for (const k of Object.keys(world.resources)) resources[k] = r1(world.resources[k]);
@@ -668,5 +709,6 @@ export function createWorld(opts = {}) {
     world.observe = observe;
     world.actions = actions;
     world.say = say;
+    world.awardWork = awardWork;   // XP seam the task executor (tasks.js) calls
     return world;
 }

@@ -38,6 +38,22 @@
         </div>
     </div>
 
+    <!-- Click-to-inspect stat sheet: a live panel bound to the clicked worker
+         or the Foreman. Hidden until a person is clicked on the board. -->
+    <div id="statsheet" class="statsheet" style="display:none">
+        <div class="ss-head">
+            <span class="ss-swatch" id="ss-swatch"></span>
+            <span class="ss-name" id="ss-name"></span>
+            <span class="ss-role" id="ss-role"></span>
+            <span class="ss-close" id="ss-close" title="Close (Esc)">×</span>
+        </div>
+        <div class="ss-state" id="ss-state"></div>
+        <div class="hud-section-title">NEEDS</div>
+        <div class="ss-needs" id="ss-needs"></div>
+        <div class="hud-section-title">ATTRIBUTES</div>
+        <div class="ss-stats" id="ss-stats"></div>
+    </div>
+
     <div id="overlay">
         <!-- TITLE -->
         <div id="screen-title" class="screen">

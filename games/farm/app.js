@@ -24,7 +24,11 @@ import { Input } from '/lib/input.js';
 import { SFX } from '/lib/audio.js';
 import { Screens } from '/lib/screens.js';
 import { createWorld } from '/app/world.js';
-import { render } from '/app/render.js';
+import { render, computeBoard } from '/app/render.js';
+import {
+    STAT_KEYS, STAT_LABEL, STAT_MAX_LEVEL, statXpToNext,
+    staminaMaxFor, staminaDrainMul, moveSpeedMul, proficiencyMul, ROLE_COLOR,
+} from '/app/defs.js';
 import { advanceTask } from '/app/tasks.js';
 import { createOrchestrator } from '/app/orchestrator.js';
 import { initPlayer, movePlayer, runInteract, buyFeed } from '/app/player.js';
@@ -106,7 +110,11 @@ Input.onAction((action, phase) => {
     if (screens.name() === 'playing') {
         if (action === 'interact') { doInteract(); return; }
         if (action === 'market')   { doBuyFeed(); return; }
-        if (action === 'pause')    { screens.switchTo('pause'); return; }
+        if (action === 'pause') {
+            // Esc dismisses an open stat sheet first; only then pauses.
+            if (statOpen) { playSfx('menu'); closeStatPanel(); return; }
+            screens.switchTo('pause'); return;
+        }
         return;
     }
     // In menus, funnel actions to the active screen as DOM key strings.
@@ -169,11 +177,14 @@ const STATE_LABEL = { idle: 'idle', working: 'working', resting: 'resting', slee
 function workerRow(n) {
     const sCls = n.stamina < 25 ? 'low' : (n.stamina < 55 ? 'mid' : 'ok');
     const eCls = n.energy < 30 ? 'low' : (n.energy < 55 ? 'mid' : 'ok');
+    // Stamina bar fills against the Endurance-driven cap (staminaMax), so it
+    // doesn't overflow when a seasoned worker's reserve climbs past 100.
+    const sPct = Math.round(100 * n.stamina / (n.staminaMax || 100));
     return '<div class="wk-row">' +
         `<span class="wk-name role-${n.role}">${n.name}</span>` +
         `<span class="wk-state">${STATE_LABEL[n.state] || n.state}</span>` +
         '<span class="wk-bars">' +
-            `<span class="wk-bar"><span class="wk-fill ${sCls}" style="width:${Math.round(n.stamina)}%"></span></span>` +
+            `<span class="wk-bar"><span class="wk-fill ${sCls}" style="width:${sPct}%"></span></span>` +
             `<span class="wk-bar"><span class="wk-fill en ${eCls}" style="width:${Math.round(n.energy)}%"></span></span>` +
         '</span></div>';
 }
@@ -276,7 +287,162 @@ function updateHUD() {
                 .join('');
         }
     }
+
+    // Keep the inspect panel live while it's open (stats/needs tick every frame).
+    if (statOpen) renderStatPanel();
 }
+
+// ---------- click-to-inspect stat sheet ----------
+// A click on the board hit-tests the nearest worker/Foreman and opens a live
+// stat-sheet panel bound to them. The sim keeps running while it's open.
+const statEl   = document.getElementById('statsheet');
+const ssSwatch = document.getElementById('ss-swatch');
+const ssName   = document.getElementById('ss-name');
+const ssRole   = document.getElementById('ss-role');
+const ssState  = document.getElementById('ss-state');
+const ssNeeds  = document.getElementById('ss-needs');
+const ssStats  = document.getElementById('ss-stats');
+let statOpen = false;
+
+const PANEL_STATE = {
+    idle: 'idle', working: 'working', walking: 'walking', resting: 'resting',
+    sleeping: 'asleep', eating: 'eating', talking: 'talking',
+    listening: 'listening', supervising: 'supervising',
+};
+const ROLE_DISPLAY = { rancher: 'Rancher', gardener: 'Gardener', farmhand: 'Farmhand', foreman: 'Foreman' };
+
+// Resolve an inspect id ('npc-*' | 'Foreman') to a uniform view model.
+function inspectEntity(id) {
+    if (!id) return null;
+    if (world.foreman && id === world.foreman.id) {
+        const f = world.foreman;
+        return {
+            id: f.id, name: f.name, roleLabel: ROLE_DISPLAY.foreman, color: '#b5343a',
+            stats: f.stats, hasVitals: false, state: 'supervising', carrying: null,
+        };
+    }
+    const n = world.npcs.find((x) => x.id === id);
+    if (!n) return null;
+    return {
+        id: n.id, name: n.name, roleLabel: ROLE_DISPLAY[n.role] || n.role,
+        color: ROLE_COLOR[n.role] || '#caa', stats: n.stats, hasVitals: true,
+        stamina: n.stamina, staminaMax: staminaMaxFor(n), energy: n.energy,
+        state: n.state, carrying: n.carrying,
+    };
+}
+
+// Nearest inspectable person (worker or Foreman) within ~1 tile of a world tile.
+function pickPersonAt(tileX, tileY) {
+    let best = null, bestD = 1.0;
+    const consider = (cid, x, y) => {
+        const d = Math.hypot(x - tileX, y - tileY);
+        if (d <= bestD) { best = cid; bestD = d; }
+    };
+    for (const n of world.npcs) consider(n.id, n.x, n.y);
+    if (world.foreman) consider(world.foreman.id, world.foreman.x, world.foreman.y);
+    return best;
+}
+
+// Hit-test a world tile: open/switch the panel on a person, close on empty board.
+function handleTileClick(tileX, tileY) {
+    const id = pickPersonAt(tileX, tileY);
+    if (id) selectStatPanel(id);
+    else closeStatPanel();
+    return id;
+}
+
+// Map a client point (CSS px) through the canvas scaling AND the board transform
+// to a world tile, then hit-test. This is the EXACT inverse of render's px/py.
+function boardClickClient(clientX, clientY) {
+    const W = getW(), H = getH();
+    const b = computeBoard(W, H);
+    const rect = canvas.getBoundingClientRect();
+    const cx = (clientX - rect.left) * (W / rect.width);
+    const cy = (clientY - rect.top) * (H / rect.height);
+    const tileX = (cx - b.ox) / b.cell;
+    const tileY = (cy - b.oy) / b.cell;
+    return handleTileClick(tileX, tileY);
+}
+
+function selectStatPanel(id) {
+    world.inspect = id;
+    statOpen = true;
+    if (statEl) statEl.style.display = 'block';
+    renderStatPanel();
+}
+function closeStatPanel() {
+    world.inspect = null;
+    statOpen = false;
+    if (statEl) statEl.style.display = 'none';
+}
+
+function needRow(lbl, val, max, enClass) {
+    const f = Math.max(0, Math.min(1, val / max));
+    const cls = val < max * 0.25 ? 'low' : (val < max * 0.55 ? 'mid' : 'ok');
+    return '<div class="ss-need-row">' +
+        `<span class="ss-need-k">${lbl}</span>` +
+        `<span class="ss-need-bar"><span class="ss-need-fill ${enClass} ${cls}" style="width:${Math.round(f * 100)}%"></span></span>` +
+        `<span class="ss-need-v">${Math.round(val)}</span></div>`;
+}
+function statRow(key, s) {
+    const maxed = s.level >= STAT_MAX_LEVEL;
+    const need = statXpToNext(s.level);
+    const pct = maxed ? 100 : Math.max(0, Math.min(100, Math.round(100 * s.xp / need)));
+    return `<div class="ss-stat-row ${maxed ? 'maxed' : ''}">` +
+        `<span class="ss-stat-k">${STAT_LABEL[key]}</span>` +
+        `<span class="ss-stat-lvl">${s.level}</span>` +
+        `<span class="ss-stat-xpwrap"><span class="ss-stat-xp" style="width:${pct}%"></span></span></div>`;
+}
+function renderStatPanel() {
+    const e = inspectEntity(world.inspect);
+    if (!e) { closeStatPanel(); return; }
+    if (ssSwatch) ssSwatch.style.background = e.color;
+    if (ssName) ssName.textContent = e.name;
+    if (ssRole) { ssRole.textContent = e.roleLabel; ssRole.style.color = e.color; }
+    if (ssState) {
+        let line = PANEL_STATE[e.state] || e.state || '';
+        if (e.carrying) line += ` · <span class="carry">carrying ${escapeHtml(e.carrying)}</span>`;
+        ssState.innerHTML = line;
+    }
+    if (ssNeeds) {
+        ssNeeds.innerHTML = e.hasVitals
+            ? needRow('Stamina', e.stamina, e.staminaMax, '') + needRow('Energy', e.energy, 100, 'en')
+            : '<div class="ss-need-row"><span class="ss-need-k" style="width:auto;color:#9bb592">command post · always on duty</span></div>';
+    }
+    if (ssStats) {
+        ssStats.innerHTML = e.stats ? STAT_KEYS.map((k) => statRow(k, e.stats[k])).join('') : '';
+    }
+}
+
+if (statEl) {
+    const closeBtn = document.getElementById('ss-close');
+    if (closeBtn) closeBtn.addEventListener('click', (ev) => { ev.stopPropagation(); playSfx('menu'); closeStatPanel(); });
+}
+// Board click: open/switch/close the inspect panel (only while playing).
+canvas.addEventListener('click', (e) => {
+    if (screens.name() !== 'playing') return;
+    boardClickClient(e.clientX, e.clientY);
+});
+
+// Headless / inspection hooks for the stat-sheet panel.
+globalThis.farmInspect = {
+    clickTile:   (tx, ty) => handleTileClick(tx, ty),
+    clickClient: (cx, cy) => boardClickClient(cx, cy),
+    close:       () => closeStatPanel(),
+    selectedId:  () => world.inspect,
+    isOpen:      () => statOpen,
+    panelEl:     () => statEl,
+    // Forward transform: world tile -> client point (inverse of boardClickClient).
+    worldToScreen: (tx, ty) => {
+        const W = getW(), H = getH(), b = computeBoard(W, H);
+        const rect = canvas.getBoundingClientRect();
+        return {
+            clientX: rect.left + (b.ox + tx * b.cell) * (rect.width / W),
+            clientY: rect.top + (b.oy + ty * b.cell) * (rect.height / H),
+        };
+    },
+};
+globalThis.farmStats = { staminaMaxFor, staminaDrainMul, moveSpeedMul, proficiencyMul, statXpToNext };
 
 // ---------- screens ----------
 const hudEl = document.getElementById('hud');
@@ -302,6 +468,7 @@ function doAction(action) {
 function showOverlay(name) {
     screens.showOverlay(name);
     hudEl.style.display = 'none';
+    closeStatPanel();   // the inspect panel belongs to the playing screen only
 }
 
 screens.define('title', {

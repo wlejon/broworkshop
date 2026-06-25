@@ -203,6 +203,65 @@ canvas {
 }
 .hud-keys-debug b { min-width: 10px; color: #b59a4a; }
 
+/* --- Click-to-inspect stat sheet (left dock) --- */
+.statsheet {
+    position: absolute;
+    top: 16px;
+    left: 16px;
+    width: 248px;
+    box-sizing: border-box;
+    padding: 12px 14px 14px;
+    background: rgba(8, 14, 9, 0.92);
+    border: 1px solid #2a3a26;
+    border-radius: 6px;
+    font-family: Consolas, monospace;
+    color: #d8e8cf;
+    box-shadow: 0 6px 22px rgba(0, 0, 0, 0.5);
+    z-index: 5;
+}
+.ss-head { display: flex; align-items: center; gap: 8px; }
+.ss-swatch {
+    width: 16px; height: 16px; border-radius: 50%;
+    border: 2px solid rgba(0, 0, 0, 0.5);
+    flex: 0 0 auto;
+}
+.ss-name { font-size: 17px; font-weight: bold; color: #e8f4df; }
+.ss-role { font-size: 11px; font-weight: bold; letter-spacing: 1px; text-transform: uppercase; }
+.ss-close {
+    margin-left: auto;
+    font-size: 20px; line-height: 1; color: #7fa377;
+    cursor: pointer; padding: 0 4px;
+}
+.ss-close:hover { color: #f08a80; }
+.ss-state { font-size: 11px; color: #9bb592; margin: 6px 0 2px; min-height: 14px; }
+.ss-state .carry { color: #e8c662; }
+
+/* Need bars (stamina / energy) mirror the worker roster bars. */
+.ss-needs { display: flex; flex-direction: column; gap: 6px; }
+.ss-need-row { display: flex; align-items: center; gap: 8px; font-size: 11px; }
+.ss-need-k { width: 58px; color: #7fa377; }
+.ss-need-bar { height: 6px; flex: 1; background: rgba(0, 0, 0, 0.45); border-radius: 3px; overflow: hidden; }
+.ss-need-fill { display: block; height: 100%; background: #6fc24a; }
+.ss-need-fill.mid { background: #e0b94a; }
+.ss-need-fill.low { background: #d6453a; }
+.ss-need-fill.en  { background: #d8943f; }
+.ss-need-fill.en.mid { background: #caa34a; }
+.ss-need-fill.en.low { background: #d6453a; }
+.ss-need-v { width: 28px; text-align: right; color: #c8d8bf; }
+
+/* Attribute rows: name, level badge, XP-to-next progress bar. */
+.ss-stats { display: flex; flex-direction: column; gap: 6px; }
+.ss-stat-row { display: flex; align-items: center; gap: 8px; font-size: 11px; }
+.ss-stat-k { width: 70px; color: #c8d8bf; }
+.ss-stat-lvl {
+    min-width: 22px; text-align: center; font-weight: bold; color: #1a1f16;
+    background: #cfe6a6; border-radius: 3px; padding: 1px 4px; font-size: 11px;
+}
+.ss-stat-xpwrap { flex: 1; height: 5px; background: rgba(0, 0, 0, 0.45); border-radius: 3px; overflow: hidden; }
+.ss-stat-xp { display: block; height: 100%; background: #6f9a6a; }
+.ss-stat-row.maxed .ss-stat-lvl { background: #f6d24a; }
+.ss-stat-row.maxed .ss-stat-xp { background: #f6d24a; }
+
 /* --- Overlay screens (title / how-to / pause) --- */
 #overlay {
     position: absolute;

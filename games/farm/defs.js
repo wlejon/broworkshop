@@ -114,18 +114,129 @@ export const CROP_PLOTS = [
 
 // NPC workers. role/voice are carried now but UNUSED in this pass — the agent
 // layer (Pass 2) reads them. home is the tile they gently wander around.
+//
+// stats: each worker's starting STAT LEVELS (1..STAT_MAX_LEVEL). world.js turns
+// these into a full sheet ({ level, xp }) the work they do grows over time, and
+// the levels DRIVE the dynamic need meters + movement (see the coupling helpers
+// below + world.js / tasks.js). Roster is seeded distinctly so each worker feels
+// like a specialist: the ranchers (Mara/Sam) start strong in Husbandry, the
+// gardener (Lily) in Farming, the farmhand (Tom) is a balanced hauler.
 export const NPC_SPECS = [
-    { id: 'npc-mara', name: 'Mara', role: 'rancher',  voice: 'warm',   home: { x: 20, y: 20 } },
-    { id: 'npc-tom',  name: 'Tom',  role: 'farmhand', voice: 'gruff',  home: { x: 12, y: 8  } },
-    { id: 'npc-lily', name: 'Lily', role: 'gardener', voice: 'bright', home: { x: 6,  y: 16 } },
+    { id: 'npc-mara', name: 'Mara', role: 'rancher',  voice: 'warm',   home: { x: 20, y: 20 },
+      stats: { strength: 3, endurance: 3, vitality: 3, agility: 3, husbandry: 5, farming: 2 } },
+    { id: 'npc-tom',  name: 'Tom',  role: 'farmhand', voice: 'gruff',  home: { x: 12, y: 8  },
+      stats: { strength: 5, endurance: 4, vitality: 3, agility: 3, husbandry: 3, farming: 3 } },
+    { id: 'npc-lily', name: 'Lily', role: 'gardener', voice: 'bright', home: { x: 6,  y: 16 },
+      stats: { strength: 2, endurance: 3, vitality: 3, agility: 4, husbandry: 2, farming: 5 } },
     // A second rancher — the farm now runs three pens, so animal care needs
     // more hands to keep every trough topped and tend the sick.
-    { id: 'npc-sam',  name: 'Sam',  role: 'rancher',  voice: 'calm',   home: { x: 30, y: 17 } },
+    { id: 'npc-sam',  name: 'Sam',  role: 'rancher',  voice: 'calm',   home: { x: 30, y: 17 },
+      stats: { strength: 3, endurance: 4, vitality: 3, agility: 2, husbandry: 4, farming: 2 } },
 ];
+
+// The Foreman's stat sheet (he's stationary and never tasked, so these are
+// static) — surfaced so the player can inspect him too. A seasoned supervisor:
+// strong endurance/strength, broad domain knowledge, unremarkable agility.
+export const FOREMAN_STATS = { strength: 5, endurance: 6, vitality: 5, agility: 2, husbandry: 5, farming: 5 };
+
+// ---- worker stat sheet --------------------------------------------------------
+// Six attributes. Each grows from the work a worker does (XP awarded in the task
+// executor, tasks.js) and feeds back into the simulation:
+//   strength   hauling/refilling heavy loads (grows from draw/load/refill)
+//   endurance  stamina capacity + fatigue resistance (drives stamina cap/drain)
+//   vitality   reserved to drive HEALTH in the later needs pass — defined now,
+//              grown lightly (daily trickle), but it couples to nothing yet
+//   agility    movement speed (drives walk speed)
+//   husbandry  animal-work proficiency (speeds animal tasks)
+//   farming    crop-work proficiency (speeds crop tasks)
+export const STAT_KEYS = ['strength', 'endurance', 'vitality', 'agility', 'husbandry', 'farming'];
+export const STAT_LABEL = {
+    strength: 'Strength', endurance: 'Endurance', vitality: 'Vitality',
+    agility: 'Agility', husbandry: 'Husbandry', farming: 'Farming',
+};
+export const STAT_MAX_LEVEL = 10;
+
+// XP needed to advance FROM `level` to level+1 — a gentle escalating curve so
+// early levels come quickly and later ones take sustained work.
+export function statXpToNext(level) { return 40 + (level - 1) * 25; }
+
+// XP granted per unit of completed work, by stat. Tuned so a worker on their
+// own domain visibly levels within a couple of in-game days (~10 acts/level).
+export const STAT_XP = {
+    husbandry: 10,   // per animal-domain act (refill/tend/collect)
+    farming:   10,   // per crop-domain act (plant/water/harvest)
+    strength:  7,    // per haul act (draw/load/refill)
+    agility:   0.7,  // per tile walked (accumulated over move steps)
+    endurance: 6,    // per completed job (a unit of sustained effort)
+    vitality:  3,    // daily trickle for staying active
+};
+
+// Build a live stat sheet ({ level, xp }) from a spec's starting LEVELS map.
+export function makeStatSheet(levels) {
+    const out = {};
+    for (const k of STAT_KEYS) out[k] = { level: (levels && levels[k]) || 1, xp: 0 };
+    return out;
+}
+
+// Current level of a stat on an entity (defaults to 1 if it has no sheet).
+export function statLevel(n, key) {
+    const s = n && n.stats && n.stats[key];
+    return s ? s.level : 1;
+}
+
+// Add XP to a stat, rolling over level-ups against the curve. Returns the stat
+// key if it leveled up (for a notice), else null. Caps at STAT_MAX_LEVEL.
+export function awardStatXp(n, key, amount) {
+    const s = n && n.stats && n.stats[key];
+    if (!s || amount <= 0) return null;
+    if (s.level >= STAT_MAX_LEVEL) { s.xp = 0; return null; }
+    s.xp += amount;
+    let leveled = null;
+    while (s.level < STAT_MAX_LEVEL && s.xp >= statXpToNext(s.level)) {
+        s.xp -= statXpToNext(s.level);
+        s.level += 1;
+        leveled = key;
+    }
+    if (s.level >= STAT_MAX_LEVEL) s.xp = 0;
+    return leveled;
+}
+
+// ---- the coupling: stats -> dynamic meters + movement -------------------------
+// Tunables for how strongly each stat bends the sim. Kept modest so the farm
+// stays self-sustaining (animals must still survive) while the differences read.
+export const STAT_COUPLING = {
+    staminaPerEndurance: 8,     // +max stamina per Endurance level above 1
+    staminaDrainPerEnd:  0.06,  // drain SLOWS this much per Endurance level
+    speedPerAgility:     0.05,  // move-speed gain per Agility level above 1
+    proficiencyPerSkill: 0.075, // task-speed gain per relevant skill level
+    proficiencyFloor:    0.75,  // novice task-speed floor (never unusably slow)
+};
+
+// Max stamina capacity grows with Endurance (level 1 = 100).
+export function staminaMaxFor(n) {
+    return 100 + (statLevel(n, 'endurance') - 1) * STAT_COUPLING.staminaPerEndurance;
+}
+// Stamina drains slower at higher Endurance (multiplier <= 1).
+export function staminaDrainMul(n) {
+    return 1 / (1 + (statLevel(n, 'endurance') - 1) * STAT_COUPLING.staminaDrainPerEnd);
+}
+// Walk-speed multiplier from Agility (>= 1).
+export function moveSpeedMul(n) {
+    return 1 + (statLevel(n, 'agility') - 1) * STAT_COUPLING.speedPerAgility;
+}
+// Task-proficiency multiplier for a work domain ('husbandry' | 'farming' | null).
+// Higher relevant skill works faster; a floor keeps a novice from crawling.
+export function proficiencyMul(n, domain) {
+    if (!domain) return 1;
+    const lvl = statLevel(n, domain);
+    return Math.max(STAT_COUPLING.proficiencyFloor, 1 + (lvl - 1) * STAT_COUPLING.proficiencyPerSkill);
+}
 
 // Worker labor tuning (Pass D). Stamina/energy are gentle so workers spend most
 // of their time working — the constraint adds allocation decisions without
-// crippling labor. ROLE_SPEED_BONUS speeds a specialist on their own domain.
+// crippling labor. NOTE: the stamina CAP/drain are now further bent per-worker
+// by Endurance (see staminaMaxFor / staminaDrainMul) — these are the level-1
+// baselines.
 export const WORKER = {
     staminaDrain: 1.3,   // /s while walking or working
     restRecover:  12,    // /s while resting at the farmhouse
@@ -142,7 +253,9 @@ export const WORKER = {
     exhausted:    15,    // stamina alert threshold
     hungry:       20,    // energy alert threshold
 };
-export const ROLE_SPEED_BONUS = 1.30;   // specialist on their own task type
+// Specialist task-speed is now driven by the worker's Husbandry/Farming skill
+// (proficiencyMul), superseding this flat per-role bonus. Kept for reference.
+export const ROLE_SPEED_BONUS = 1.30;
 
 // Per-role tint for render + HUD.
 export const ROLE_COLOR = { rancher: '#e89a4a', gardener: '#6fc24a', farmhand: '#5aa6e0' };

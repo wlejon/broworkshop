@@ -26,10 +26,36 @@
 //   drop   — clear npc.carrying after the act
 //   say    — npc speaks this line on success (announce on completion)
 
-import { REGIONS, PENS, CROP_KINDS, WORKER, ROLE_SPEED_BONUS } from './defs.js';
+import {
+    REGIONS, PENS, CROP_KINDS, WORKER,
+    moveSpeedMul, proficiencyMul, STAT_XP,
+} from './defs.js';
 
 const WALK = 3.2;     // tiles / second when executing a task (brisker than wander)
 const ARRIVE = 0.28;  // tiles — "close enough" to count a move step done
+
+// Work-XP awarded per completed `act`, by verb. Animal-domain acts feed
+// Husbandry (with a little Strength for the haul), crop acts feed Farming, and
+// the raw fetch/load acts feed Strength. world.awardWork rolls these into the
+// worker's sheet and announces any level-up. (Distance walked -> Agility, and a
+// finished job -> Endurance, are handled in the executor below.)
+const VERB_XP = {
+    drawWater:         [['strength', STAT_XP.strength]],
+    loadFeed:          [['strength', STAT_XP.strength]],
+    refillWaterTrough: [['husbandry', STAT_XP.husbandry], ['strength', STAT_XP.strength * 0.5]],
+    refillFeedTrough:  [['husbandry', STAT_XP.husbandry], ['strength', STAT_XP.strength * 0.5]],
+    tendAnimal:        [['husbandry', STAT_XP.husbandry]],
+    collectProduce:    [['husbandry', STAT_XP.husbandry * 0.7], ['strength', STAT_XP.strength * 0.4]],
+    plant:             [['farming', STAT_XP.farming]],
+    waterCrop:         [['farming', STAT_XP.farming]],
+    harvest:           [['farming', STAT_XP.farming]],
+};
+
+// The work DOMAIN a job's role belongs to, for the proficiency speed-up: a
+// rancher job is animal work (Husbandry), a gardener job is crop work (Farming).
+function jobDomain(role) {
+    return role === 'rancher' ? 'husbandry' : role === 'gardener' ? 'farming' : null;
+}
 
 let _taskSeq = 0;
 
@@ -67,10 +93,14 @@ export function advanceTask(world, npc, dt) {
     let step = task.steps[task.cursor];
     if (!step) { finishTask(world, npc, task, 'done'); return false; }
 
-    // Specialist on their own domain works faster (move + dwell). task.role is
-    // stamped by the orchestrator from the job's role.
-    const roleMatch = task.role && task.role === npc.role;
-    const eff = (npc.speed || 1) * (roleMatch ? ROLE_SPEED_BONUS : 1);
+    // Stat coupling replaces the old flat role bonus:
+    //   • walk speed   <- Agility (moveSpeedMul)
+    //   • work dwell   <- the relevant skill for this job's domain (proficiencyMul:
+    //                     Husbandry speeds animal tasks, Farming speeds crop tasks)
+    // task.role is stamped by the orchestrator from the job's role.
+    const domain = jobDomain(task.role);
+    const walkMul = moveSpeedMul(npc);
+    const workMul = proficiencyMul(npc, domain);
 
     if (step.type === 'move') {
         npc.state = 'walking';
@@ -81,9 +111,11 @@ export function advanceTask(world, npc, dt) {
             npc.x = step.x; npc.y = step.y;
             task.cursor++;
         } else {
-            const sp = Math.min(WALK * eff * s, d);
+            const sp = Math.min(WALK * walkMul * s, d);
             npc.x += (dx / d) * sp;
             npc.y += (dy / d) * sp;
+            // Distance walked builds Agility (small, accumulated over move steps).
+            world.awardWork(npc, [['agility', sp * STAT_XP.agility]]);
         }
         return true;
     }
@@ -91,7 +123,7 @@ export function advanceTask(world, npc, dt) {
     if (step.type === 'wait') {
         npc.state = 'working';
         step._elapsed = (step._elapsed || 0) + dt;
-        if (step._elapsed >= (step.ms || 0) / eff) task.cursor++;
+        if (step._elapsed >= (step.ms || 0) / workMul) task.cursor++;
         return true;
     }
 
@@ -176,6 +208,11 @@ export function advanceTask(world, npc, dt) {
         if (step.carry) npc.carrying = step.carry;
         if (step.drop) npc.carrying = null;
 
+        // A unit of useful work grows the matching attribute(s).
+        if (res && res.ok !== false && VERB_XP[step.verb]) {
+            world.awardWork(npc, VERB_XP[step.verb]);
+        }
+
         task.cursor++;
 
         // An act that returned {ok:false} makes the rest of the errand pointless
@@ -198,6 +235,12 @@ export function advanceTask(world, npc, dt) {
 }
 
 function finishTask(world, npc, task, status) {
+    // Seeing a real job (one with a dedup target) through to completion builds
+    // Endurance — the sustained-effort stat. Care errands (rest/sleep/eat carry
+    // no target) and aborted tasks grant nothing.
+    if (status === 'done' && task.target) {
+        world.awardWork(npc, [['endurance', STAT_XP.endurance]]);
+    }
     task.status = status;
     npc.task = null;
     npc.state = 'idle';

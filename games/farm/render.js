@@ -1,12 +1,15 @@
 // render.js — draws a world snapshot to a 2D canvas context.
 // Pure rendering: reads world state, NEVER mutates it.
 
-import { GRID, REGIONS, PENS, COLORS, CROP_KINDS, ANIMAL_KINDS, ROLE_COLOR, RATES } from './defs.js';
+import { GRID, REGIONS, PENS, COLORS, CROP_KINDS, ANIMAL_KINDS, ROLE_COLOR, RATES, staminaMaxFor } from './defs.js';
 
 // Reserve a strip on the right for the DOM HUD overlay.
 const HUD_W = 270;
 
-function computeBoard(W, H) {
+// Tile<->screen transform. EXPORTED so the click handler (app.js) can map a
+// click back to a world tile with the EXACT same board geometry the renderer
+// uses — keeping hit-testing pixel-aligned with what's drawn.
+export function computeBoard(W, H) {
     const margin = 24;
     const availW = W - HUD_W - margin * 2;
     const availH = H - margin * 2;
@@ -212,6 +215,9 @@ function drawForeman(ctx, world, b, px, py) {
     if (!f) return;
     const cx = px(f.x), cy = py(f.y);
     const r = b.cell * 0.34;
+
+    // selection ring when the Foreman is being inspected
+    if (world.inspect === f.id) drawSelectRing(ctx, cx, cy + r * 0.2, b.cell * 1.0, world.clock.t, '#ff7a72');
 
     // post marker ring on the ground so the command post reads even from afar
     ctx.strokeStyle = 'rgba(220, 80, 70, 0.35)';
@@ -532,6 +538,8 @@ function drawNpcs(ctx, world, b, px, py) {
         const cx = px(n.x), cy = py(n.y);
         const r = b.cell * 0.3;
         const roleCol = ROLE_COLOR[n.role] || '#caa';
+        // selection ring when this worker is the one being inspected
+        if (world.inspect === n.id) drawSelectRing(ctx, cx, cy + r * 0.2, b.cell * 0.85, world.clock.t, roleCol);
         // body
         ctx.fillStyle = COLORS.npc;
         ctx.beginPath(); ctx.arc(cx, cy + r, r, 0, Math.PI * 2); ctx.fill();
@@ -578,12 +586,12 @@ function drawNpcs(ctx, world, b, px, py) {
         roundRect(ctx, cx - lw / 2, cy - r * 2.6, lw, 14, 3); ctx.fill();
         label(ctx, n.name, cx, cy - r * 2.6 + 11, '#fff', 11, 'center');
 
-        // stamina bar just under the name
+        // stamina bar just under the name (fills against the Endurance-driven cap)
         if (n.stamina != null) {
             const bw = lw, bx = cx - bw / 2, by = cy - r * 2.6 + 15;
             ctx.fillStyle = 'rgba(0,0,0,0.55)';
             ctx.fillRect(bx, by, bw, 3);
-            const f = Math.max(0, Math.min(1, n.stamina / 100));
+            const f = Math.max(0, Math.min(1, n.stamina / staminaMaxFor(n)));
             ctx.fillStyle = n.stamina < 25 ? '#d6453a' : (n.stamina < 55 ? '#e0b94a' : '#6fc24a');
             ctx.fillRect(bx, by, bw * f, 3);
         }
@@ -619,6 +627,22 @@ function drawSpeech(ctx, text, cx, baseY) {
     ctx.lineTo(cx, y + bh + 5);
     ctx.fill();
     label(ctx, text, cx, y + 13, '#222', 11, 'center');
+}
+
+// Pulsing dashed ring marking the entity the stat-sheet panel is bound to.
+function drawSelectRing(ctx, cx, cy, radius, t, color) {
+    const pulse = 0.5 + 0.5 * Math.sin(t / 180);
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = 0.55 + 0.35 * pulse;
+    ctx.lineWidth = 2.5;
+    ctx.setLineDash([5, 4]);
+    ctx.lineDashOffset = -t / 40;
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius * (1 + 0.05 * pulse), 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
 }
 
 function label(ctx, text, x, y, color, size, align) {
