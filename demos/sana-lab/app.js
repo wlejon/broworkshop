@@ -72,14 +72,17 @@ function init() {
   const axes = [];                      // { wname, name, neg, pos, sep, els }
 
   // Identity anchor (Sana's reference-attention seam) + the live render loop.
-  const anchor = { armed: false, els: null };
+  // steps records the schedule the anchor was captured at: while armed, every
+  // render reuses it so the injected per-step summaries stay t-aligned.
+  const anchor = { armed: false, steps: 0, els: null };
   let live = prefs.live || false;       // auto-render on slider drag
   // Latest-wins render scheduler: a slider change marks the desired quality
   // ('preview' = few steps, fast; 'full' = the steps setting). pump() fires one
   // generation at a time; whatever was requested while busy runs next (drags
   // coalesce — see the kokoro-lab pattern). 'full' always beats a queued 'preview'.
   let pendingQuality = null;
-  const PREVIEW_STEPS = 8;
+  const PREVIEW_STEPS = 8;     // no-anchor preview: fewer steps is fine
+  const PREVIEW_SIZE = 512;    // anchor preview: shrink resolution, keep steps
 
   // Generation defaults (shown as hints; the reset button restores them). Sana's
   // standard recipe: 20 steps, guidance 4.5, 1024² native resolution.
@@ -251,14 +254,20 @@ function init() {
     });
   }
 
-  // Generation opts from the form. quality 'preview' caps steps for a fast,
-  // coalesced live frame; 'full' uses the steps setting.
+  // Generation opts from the form. A 'preview' frame trades quality for speed.
+  // With an identity anchor armed, the injected summaries are per-step, so every
+  // render must keep the anchor's step schedule (t-alignment) — speed then comes
+  // from a smaller resolution only, which is free because the summaries are
+  // token-count independent. With no anchor, a preview can also drop steps.
   function genOpts(quality) {
-    const size = +$('size').value;
-    const steps = +$('steps').value || 20;
+    const preview = quality === 'preview';
+    const fieldSize = +$('size').value;
+    const fieldSteps = +$('steps').value || 20;
+    const size = preview ? Math.min(fieldSize, PREVIEW_SIZE) : fieldSize;
+    const steps = anchor.armed ? anchor.steps
+                  : (preview ? Math.min(fieldSteps, PREVIEW_STEPS) : fieldSteps);
     return {
-      width: size, height: size,
-      steps: quality === 'preview' ? Math.min(steps, PREVIEW_STEPS) : steps,
+      width: size, height: size, steps,
       guidanceScale: +$('guidance').value || 4.5,
       seed: +$('seed').value || 0,
       negativePrompt: $('neg-prompt').value.trim(),
@@ -318,11 +327,13 @@ function init() {
     if (!prompt) { status('enter an anchor prompt first', 'err'); return; }
     persist();
     setBusy(true);
+    const captureSteps = +$('steps').value || 20;
     status('capturing identity anchor — one full render…');
     client.anchor(prompt, genOpts('full'), (err, msg) => {
       setBusy(false);
       if (err) { status(String(err.message || err), 'err'); return; }
       drawAnchorThumb(msg.bitmap, msg.width, msg.height);
+      anchor.steps = captureSteps;   // lock renders to this schedule while armed
       anchor.armed = true;
       anchor.els.weight.disabled = false;
       anchor.els.clear.disabled = false;
