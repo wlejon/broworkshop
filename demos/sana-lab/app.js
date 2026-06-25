@@ -96,6 +96,28 @@ function init() {
   const refCanvas = $('ref-view');
   const refCtx = refCanvas.getContext('2d');
 
+  // Fit the canvases into their panes. bro's flex engine won't contain a native-
+  // resolution canvas in a nested pane (no %, no min()/clamp(), unreliable
+  // object-fit/measurement here), so we compute the square display size in JS
+  // from the real window dimensions and set it explicitly. The backing store
+  // stays at image resolution (crisp); only the CSS px size scales.
+  //   single pane (no anchor): height-bound — one big square fills the stage.
+  //   two panes (armed):       width-bound  — each pane is ~half the stage.
+  function paneSquare() {
+    const vw = window.innerWidth || 1280, vh = window.innerHeight || 800;
+    const stageW = vw - 380;                  // minus the fixed 380px rail
+    // vertical chrome above/below the canvas: toolbar + pane-head + status-bar +
+    // breathing room. width budget leaves a gutter and (when armed) splits in two.
+    const hBudget = vh - 150;
+    const wBudget = anchor.armed ? (stageW - 80) / 2 : (stageW - 64);
+    return Math.max(80, Math.floor(Math.min(wBudget, hBudget)));
+  }
+  function fitPanes() {
+    const d = paneSquare() + 'px';
+    canvas.style.width = d; canvas.style.height = d;
+    refCanvas.style.width = d; refCanvas.style.height = d;
+  }
+
   // restore persisted text fields
   if (prefs.modelDir) $('model-dir').value = prefs.modelDir;
   if (prefs.prompt)   $('prompt').value = prefs.prompt;
@@ -223,6 +245,7 @@ function init() {
     if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
     cctx.drawImage(bitmap, 0, 0);
     $('view-hint').style.display = 'none';
+    fitPanes();
   }
 
   // ── actions ────────────────────────────────────────────────────────────
@@ -345,6 +368,7 @@ function init() {
       $('identity-host').classList.add('armed');
       $('stage').classList.add('has-ref');
       $('ref-hint').style.display = 'none';
+      fitPanes();   // two panes now — each is half-width, re-fit both squares
       refreshAnchorHint();
       status('identity anchor captured · ' + (msg.ms ? msg.ms + ' ms' : ''), 'ok');
     });
@@ -359,6 +383,7 @@ function init() {
     $('identity-host').classList.remove('armed');
     $('stage').classList.remove('has-ref');
     $('ref-hint').style.display = '';
+    fitPanes();   // back to a single pane — the generation square grows
     refreshAnchorHint();
     persist();
     status('identity anchor cleared', 'ok');
@@ -380,6 +405,7 @@ function init() {
     }
     refCtx.clearRect(0, 0, refCanvas.width, refCanvas.height);
     refCtx.drawImage(bitmap, 0, 0);
+    fitPanes();
   }
 
   function refreshAnchorHint() {
@@ -509,6 +535,10 @@ function init() {
   $('prompt').addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); doGenerate(); }
   });
+
+  // Size the canvases to the window now, and re-fit whenever it changes.
+  fitPanes();
+  window.addEventListener('resize', fitPanes);
 
   client.onReady(() => {
     status('ready — load a model to begin');

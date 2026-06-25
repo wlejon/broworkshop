@@ -187,11 +187,13 @@ input[type=range] {
 }
 .pane-canvas {
   flex: 1; display: flex; align-items: center; justify-content: center;
-  position: relative; min-height: 0; min-width: 0;
+  position: relative; min-height: 0; min-width: 0; overflow: hidden;
   background: repeating-conic-gradient(#13161c 0% 25%, #0d1015 0% 50%) 50% / 24px 24px;
 }
 .pane-canvas canvas {
-  max-width: calc(100% - 40px); max-height: calc(100% - 40px);
+  /* Display size is set in JS (a Math.min fit from window.innerWidth/Height).
+     bro resolves neither %-based max-* nor min()/clamp() in this nested flex,
+     so the square is computed explicitly rather than via CSS constraints. */
   image-rendering: auto; box-shadow: 0 6px 30px #0008;
   border: 1px solid #1c222c; background: #07090d;
 }
