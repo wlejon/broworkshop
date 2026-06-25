@@ -85,6 +85,13 @@ export function createWorld(opts = {}) {
         // Currently inspected entity id (npc id / 'Foreman' / 'You') for the
         // click-to-inspect stat-sheet panel + its on-board selection ring.
         inspect: null,
+        // Conversation floor — a single global "talking stick" so spoken NPC
+        // exchanges happen ONE at a time and workers take turns. A worker that
+        // has reached a say step requests the floor; it's granted in arrival
+        // order (FIFO). Until granted, the worker stands and waits its turn, so
+        // two briefings never overlap and each NPC's spoken timing lines up with
+        // its OWN line instead of elapsing while someone else is being spoken to.
+        conversation: { holder: null, waiting: [] },
     };
 
     // Pens + their pending (uncollected) produce, capacity cap, and breed timer.
@@ -188,6 +195,30 @@ export function createWorld(opts = {}) {
         else if (world.foreman && world.foreman.id === speakerId) {
             world.foreman.speech = { text, until: world.clock.t + SPEECH_MS };
         }
+    }
+
+    // ---- conversation floor: turn-taking for spoken exchanges --------------
+    // Only ONE briefing exchange is "on the floor" at a time. The say task step
+    // (tasks.js) requests the floor when a worker reports in; it's granted in
+    // arrival order. A worker not yet granted stands and waits — it does not
+    // begin its utterance or its timer — so exchanges never overlap. The floor
+    // is held across the whole exchange (the Foreman's order + the worker's ack)
+    // and released when the say-run ends or the task finishes/aborts.
+    function convRequest(id) {
+        const c = world.conversation;
+        if (c.holder === id) return true;
+        if (!c.waiting.includes(id)) c.waiting.push(id);
+        if (c.holder == null && c.waiting[0] === id) {
+            c.waiting.shift();
+            c.holder = id;
+            return true;
+        }
+        return false;
+    }
+    function convRelease(id) {
+        const c = world.conversation;
+        if (c.holder === id) c.holder = null;
+        c.waiting = c.waiting.filter((x) => x !== id);
     }
 
     // ---- simulation step -------------------------------------------------
@@ -763,5 +794,7 @@ export function createWorld(opts = {}) {
     world.actions = actions;
     world.say = say;
     world.awardWork = awardWork;   // XP seam the task executor (tasks.js) calls
+    world.convRequest = convRequest;   // conversation-floor seam (tasks.js say step)
+    world.convRelease = convRelease;
     return world;
 }

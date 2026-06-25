@@ -142,6 +142,20 @@ export function advanceTask(world, npc, dt) {
     //   3. a hard safety cap elapsed (est*2 + 3s) — a worker can NEVER wedge here
     //      if an utterance never resolves.
     if (step.type === 'say') {
+        // Turn-taking: a spoken exchange holds a single global conversation floor
+        // (world.convRequest/convRelease) so only ONE briefing is live at a time.
+        // A worker that has reached its say step but hasn't been granted the floor
+        // stands and waits its turn — it does NOT begin its utterance or start its
+        // timer until the floor is free, so its spoken timing lines up with its
+        // OWN line instead of elapsing while another worker is being spoken to.
+        // The floor is held across the whole contiguous say-run (the Foreman's
+        // order + the worker's ack) and released when the run ends (below) or the
+        // task finishes/aborts (finishTask).
+        const reqFloor = world.convRequest || (() => true);
+        if (!reqFloor(npc.id)) {
+            npc.state = 'waiting';   // in line at the Foreman, awaiting their turn
+            return true;
+        }
         npc.state = (step.speaker === npc.id) ? 'talking' : 'listening';
         if (!step._started) {
             step._started = true;
@@ -175,7 +189,16 @@ export function advanceTask(world, npc, dt) {
         } else if (step._waitMs >= safetyMs) {
             done = true;                                   // hard safety cap
         }
-        if (done) task.cursor++;
+        if (done) {
+            task.cursor++;
+            // Release the floor when leaving the contiguous say-run, so the next
+            // worker in line can take their turn. Held across consecutive say
+            // steps (order -> ack); freed the moment the worker departs to work.
+            const next = task.steps[task.cursor];
+            if (!next || next.type !== 'say') {
+                (world.convRelease || (() => {}))(npc.id);
+            }
+        }
         return true;
     }
 
@@ -253,6 +276,9 @@ export function advanceTask(world, npc, dt) {
 }
 
 function finishTask(world, npc, task, status) {
+    // Free the conversation floor in case the task ended mid-exchange, so a
+    // worker can never leave the talking stick held and stall the whole line.
+    if (world.convRelease) world.convRelease(npc.id);
     // Seeing a real job (one with a dedup target) through to completion builds
     // Endurance — the sustained-effort stat. Care errands (rest/sleep/eat carry
     // no target) and aborted tasks grant nothing.
