@@ -19,7 +19,7 @@ import {
 } from './defs.js';
 import { createEnv, stepEnv, envObserve, envAlerts } from './env.js';
 import { createMarket, stepMarket, marketObserve, marketAlerts } from './market.js';
-import { stepPerception, SIGHT_RADIUS } from './knowledge.js';
+import { stepPerception, propagateSpeech, SIGHT_RADIUS } from './knowledge.js';
 
 // ---- life-cycle tuning ------------------------------------------------------
 const YOUNG_MS = 45000;     // age below which an animal is 'young' (no produce)
@@ -335,6 +335,10 @@ export function createWorld(opts = {}) {
                 item.startedAt = now;
                 ch.active = item;
                 setBubble(speakerId, item.text, now + 1000);
+                // Word of mouth: the moment a line is spoken, every agent within
+                // earshot of the speaker absorbs what the speaker knows. This is
+                // the ONLY channel by which second-hand knowledge travels.
+                propagateSpeech(world, speakerId);
                 // Voice THIS speaker's line. onStart reports its real length the
                 // moment playback begins, so we hold it to match the audio.
                 if (typeof world._emitSpeech === 'function') {

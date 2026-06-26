@@ -27,6 +27,13 @@ const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 // Foreman's standing domain: he always knows it; a laborer only near the barn/silo.
 export const SIGHT_RADIUS = 5;
 
+// How close (tiles) a listener must be to a speaker to pick up what they know.
+// A conversational range — wider than detailed sight (voices carry), tighter than
+// the faint tail of audibility. Standing at the Foreman's post to be briefed, or
+// next to a worker as they talk, puts you inside it; this is the ONLY channel by
+// which second-hand knowledge moves.
+export const EARSHOT = 7;
+
 // ── the belief store ─────────────────────────────────────────────────────────
 export function createBeliefs() {
     const facts = new Map();   // key -> { value, at, source }
@@ -163,4 +170,41 @@ export function stepPerception(world) {
     for (const n of world.npcs) senseInto(world, n, now, false);
     if (world.foreman) senseInto(world, world.foreman, now, true);
     if (world.player) senseInto(world, world.player, now, false);
+}
+
+// ── word of mouth ────────────────────────────────────────────────────────────
+// Every positioned actor that can hold beliefs.
+function allAgents(world) {
+    const out = world.npcs.slice();
+    if (world.foreman) out.push(world.foreman);
+    if (world.player) out.push(world.player);
+    return out;
+}
+
+// Resolve a say() speaker id to its agent (or null for the 'Farm' narrator, which
+// has no position and no beliefs to share).
+export function agentBySpeakerId(world, speakerId) {
+    if (speakerId === 'You') return world.player || null;
+    if (world.foreman && speakerId === world.foreman.id) return world.foreman;
+    return world.npcs.find((n) => n.id === speakerId) || null;
+}
+
+// propagateSpeech(world, speakerId) — the moment a line is spoken, every OTHER
+// agent within EARSHOT of the speaker absorbs the speaker's beliefs. This is how
+// knowledge travels: a worker checking in at the Foreman's post hands him their
+// (possibly stale) read of their station; the player picks up what they overhear
+// standing near the talk. Returns how many listeners took something in.
+export function propagateSpeech(world, speakerId) {
+    const speaker = agentBySpeakerId(world, speakerId);
+    if (!speaker || !speaker.beliefs) return 0;   // narrator / unknown: nothing to share
+    let listeners = 0;
+    for (const a of allAgents(world)) {
+        if (a === speaker) continue;
+        if (Math.hypot(a.x - speaker.x, a.y - speaker.y) <= EARSHOT) {
+            if (!a.beliefs) a.beliefs = createBeliefs();
+            a.beliefs.absorb(speaker.beliefs);
+            listeners++;
+        }
+    }
+    return listeners;
 }
