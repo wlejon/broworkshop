@@ -96,6 +96,12 @@ export function createWorld(opts = {}) {
         // _emitSpeech is the audio sink app.js installs (drives Kokoro per line).
         speech: { channels: {}, _seq: 0 },   // channels[speakerId] = { queue, active }
         _emitSpeech: null,
+        // Morning-briefing queue: an ordered list of worker ids waiting at the
+        // Foreman's post. The worker at the head (index 0) is the one being
+        // briefed; the rest hold their place in line behind it. A briefLine task
+        // step (tasks.js) joins this on arrival and leaves once acknowledged, so
+        // the Foreman only addresses whoever has actually reached the front.
+        briefing: { line: [] },
         // The Foreman: a real, stationary entity (a command post), not just a
         // dialog label. Posted central in the open yard between the field (ends
         // x21) and the pens (start x24), below the barn/well row — central to the

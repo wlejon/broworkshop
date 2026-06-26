@@ -34,6 +34,12 @@ import {
 const WALK = 3.2;     // tiles / second when executing a task (brisker than wander)
 const ARRIVE = 0.28;  // tiles — "close enough" to count a move step done
 
+// Briefing queue geometry: the line forms south of the Foreman (+y, the open
+// yard), the head worker standing FRONT_GAP in front of him and each further
+// place QUEUE_SPACING behind the last.
+const FRONT_GAP = 1.5;
+const QUEUE_SPACING = 1.4;
+
 // Work-XP awarded per completed `act`, by verb. Animal-domain acts feed
 // Husbandry (with a little Strength for the haul), crop acts feed Farming, and
 // the raw fetch/load acts feed Strength. world.awardWork rolls these into the
@@ -192,6 +198,68 @@ export function advanceTask(world, npc, dt) {
         return true;
     }
 
+    // ---- queued briefing: line up, wait your turn, then be addressed ----------
+    // { type:'briefLine', foremanId, fx, fy, order, ack } — the worker joins the
+    // shared world.briefing.line, walks to its numbered place in the queue, and
+    // holds. Only the worker at the HEAD (index 0) is briefed, and only once it
+    // has actually reached the front spot — so the Foreman naturally waits for the
+    // next person to approach before speaking. The head hears the order in full,
+    // replies (waiting out its own ack), then leaves the line; everyone behind
+    // advances one place and walks forward. One worker addressed at a time, no
+    // crowd. Self-coordinating across independent task runners via the shared line.
+    if (step.type === 'briefLine') {
+        if (!world.briefing) world.briefing = { line: [] };
+        const line = world.briefing.line;
+        if (!step._joined) { step._joined = true; if (!line.includes(npc.id)) line.push(npc.id); }
+
+        const i = line.indexOf(npc.id);
+        const place = i < 0 ? 0 : i;                       // my slot from the front
+        const gx = step.fx;
+        const gy = step.fy + FRONT_GAP + place * QUEUE_SPACING;
+        const dx = gx - npc.x, dy = gy - npc.y, d = Math.hypot(dx, dy);
+
+        if (d > ARRIVE) {                                  // still walking to my place
+            npc.state = 'walking';
+            npc.tx = gx; npc.ty = gy;
+            const sp = Math.min(WALK * walkMul * s, d);
+            npc.x += (dx / d) * sp; npc.y += (dy / d) * sp;
+            world.awardWork(npc, [['agility', sp * STAT_XP.agility]]);
+            return true;
+        }
+        npc.x = gx; npc.y = gy;
+
+        if (place > 0) { npc.state = 'listening'; return true; }   // not my turn yet
+
+        // I'm at the front and have arrived — run the exchange.
+        if (step._phase !== 'ack') {
+            npc.state = 'listening';
+            if (!step._orderStarted) {
+                step._orderStarted = true; step._orderMs = 0;
+                try { step._orderHandle = step.order ? world.say(step.foremanId, step.order, { priority: true }) : null; }
+                catch (e) { step._orderHandle = null; }
+            }
+            step._orderMs += dt;
+            const orderDone = !step._orderHandle || step._orderHandle.done || step._orderMs >= 20000;
+            if (orderDone) step._phase = 'ack';
+            return true;
+        }
+
+        npc.state = 'talking';
+        if (!step._ackStarted) {
+            step._ackStarted = true; step._ackMs = 0;
+            try { step._ackHandle = step.ack ? world.say(npc.id, step.ack, { priority: true }) : null; }
+            catch (e) { step._ackHandle = null; }
+        }
+        step._ackMs += dt;
+        const ackDone = !step._ackHandle || step._ackHandle.done || step._ackMs >= 20000;
+        if (ackDone) {
+            const idx = line.indexOf(npc.id);
+            if (idx >= 0) line.splice(idx, 1);             // leave; line behind advances
+            task.cursor++;
+        }
+        return true;
+    }
+
     // ---- worker-care steps (Pass D) -----------------------------------------
     if (step.type === 'rest') {
         npc.state = 'resting';
@@ -276,6 +344,11 @@ function finishTask(world, npc, task, status) {
     npc.task = null;
     npc.state = 'idle';
     npc.carrying = null;
+    // Never leave a stranded id holding up the briefing line.
+    if (world.briefing && world.briefing.line) {
+        const bi = world.briefing.line.indexOf(npc.id);
+        if (bi >= 0) world.briefing.line.splice(bi, 1);
+    }
     // Anchor wander to where we ended so the npc doesn't snap home.
     npc.tx = npc.x; npc.ty = npc.y;
 }
@@ -440,24 +513,22 @@ export function buildCollectProduce(world, penId) {
 }
 
 // ---- briefing protocol ------------------------------------------------------
-// Turn an instant job assignment into a physical briefing: the worker walks to
-// the embodied Foreman, HEARS the spoken order in full, replies, waits out their
-// own reply, and only THEN runs the job's own steps. Prepends three steps to an
-// already-built job task (preserving task.target so the orchestrator's in-flight
-// dedup keeps working). Steps stay plain serializable data — a future LLM can
-// emit this same shape directly.
-//
-//   1. move to the Foreman's post
-//   2. Foreman speaks the order   (worker stands and listens, gated on duration)
-//   3. worker speaks the ack      (worker waits out their own reply)
+// Turn an instant job assignment into a physical briefing where workers QUEUE
+// at the Foreman rather than crowd him: each joins a single-file line, waits its
+// turn, steps to the front when the worker ahead leaves, HEARS the order, replies,
+// and only THEN departs for the job. The whole exchange is one `briefLine` step
+// (state machine in advanceTask) so the coordination — who's at the front, the
+// Foreman waiting for the next worker to actually arrive — lives in one place.
+// Prepended ahead of the job's own steps; task.target is preserved so the
+// orchestrator's in-flight dedup keeps working. Plain serializable data — a
+// future LLM can emit this same shape directly.
 export function prependBriefing(task, opts) {
     const { foremanId, foremanPos, order, npcId, ack } = opts || {};
-    const pre = [
-        { type: 'move', x: foremanPos.x, y: foremanPos.y, label: 'foreman' },
-    ];
-    if (order) pre.push({ type: 'say', speaker: foremanId, text: order });
-    if (ack)   pre.push({ type: 'say', speaker: npcId, text: ack });
-    task.steps = pre.concat(task.steps);
+    const step = {
+        type: 'briefLine', foremanId, npcId,
+        fx: foremanPos.x, fy: foremanPos.y, order, ack,
+    };
+    task.steps = [step].concat(task.steps);
     return task;
 }
 
