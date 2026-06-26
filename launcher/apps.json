@@ -26,7 +26,6 @@
         { "dir": "tools/synth" },
         { "dir": "tools/mesh-viewer" },
         { "dir": "tools/scene-editor" },
-        { "dir": "tools/artstation" },
         { "dir": "tools/algo-viz" },
         { "dir": "demos/ai-arena" },
         { "dir": "demos/tensor-lab" },
