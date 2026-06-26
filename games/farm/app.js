@@ -1,6 +1,7 @@
 // app.js — Farm sim entry point.
 //
-// Wires the pure world model (world.js), the renderer (render.js), a DOM HUD,
+// Wires the pure world model (world.js), the 3D isometric renderer
+// (render3d.js, through bro's scene graph + TileWorld), a DOM HUD,
 // the title/help/pause screens, and the human-controlled player avatar to the
 // shared GameLoop.
 //
@@ -19,12 +20,11 @@
 //   5 plant empty  6 resupply pools  O  log world.observe()
 
 import { GameLoop } from '/lib/loop.js';
-import { Canvas } from '/lib/canvas.js';
 import { Input } from '/lib/input.js';
 import { SFX } from '/lib/audio.js';
 import { Screens } from '/lib/screens.js';
 import { createWorld } from '/app/world.js';
-import { render, computeBoard } from '/app/render.js';
+import { createRenderer } from '/app/render3d.js';
 import {
     STAT_KEYS, STAT_LABEL, STAT_MAX_LEVEL, statXpToNext,
     staminaMaxFor, staminaDrainMul, moveSpeedMul, proficiencyMul, ROLE_COLOR,
@@ -44,13 +44,16 @@ const W_FALLBACK = 1100, H_FALLBACK = 760;
 
 // ---------- canvas ----------
 const canvas = document.getElementById('game');
-const ctx = canvas.getContext('2d');
-const getW = () => Canvas.w(ctx, W_FALLBACK);
-const getH = () => Canvas.h(ctx, H_FALLBACK);
+const scene = canvas.getContext('scene');
+const getW = () => canvas.width || W_FALLBACK;
+const getH = () => canvas.height || H_FALLBACK;
 
 // ---------- world + player + orchestrator ----------
 const world = createWorld({ seed: 7 });
 initPlayer(world, 22, 14);
+
+// ---------- 3D isometric renderer (scene graph) ----------
+const renderer = createRenderer(scene, world);
 
 const orchestrator = createOrchestrator();
 globalThis.farmAuto = true;   // false => do-nothing baseline (NPCs idle-wander)
@@ -374,17 +377,13 @@ function handleTileClick(tileX, tileY) {
     return id;
 }
 
-// Map a client point (CSS px) through the canvas scaling AND the board transform
-// to a world tile, then hit-test. This is the EXACT inverse of render's px/py.
+// Map a client point (CSS px) into the 3D scene: cast the camera ray through
+// the clicked pixel, intersect the ground plane, and hit-test the resulting
+// world tile. Replaces the old 2D board-inverse transform.
 function boardClickClient(clientX, clientY) {
-    const W = getW(), H = getH();
-    const b = computeBoard(W, H);
-    const rect = canvas.getBoundingClientRect();
-    const cx = (clientX - rect.left) * (W / rect.width);
-    const cy = (clientY - rect.top) * (H / rect.height);
-    const tileX = (cx - b.ox) / b.cell;
-    const tileY = (cy - b.oy) / b.cell;
-    return handleTileClick(tileX, tileY);
+    const hit = renderer.pickClient(clientX, clientY, canvas, getW(), getH());
+    if (!hit) { closeStatPanel(); return null; }
+    return handleTileClick(hit.x, hit.y);
 }
 
 function selectStatPanel(id) {
@@ -463,15 +462,10 @@ globalThis.farmInspect = {
     selectedId:  () => world.inspect,
     isOpen:      () => statOpen,
     panelEl:     () => statEl,
-    // Forward transform: world tile -> client point (inverse of boardClickClient).
-    worldToScreen: (tx, ty) => {
-        const W = getW(), H = getH(), b = computeBoard(W, H);
-        const rect = canvas.getBoundingClientRect();
-        return {
-            clientX: rect.left + (b.ox + tx * b.cell) * (rect.width / W),
-            clientY: rect.top + (b.oy + ty * b.cell) * (rect.height / H),
-        };
-    },
+    // Headless click-by-tile is the supported path now (clickTile); the old
+    // pixel-space worldToScreen inverse belonged to the 2D board and no longer
+    // applies under the 3D camera.
+    worldToScreen: null,
 };
 globalThis.farmStats = { staminaMaxFor, staminaDrainMul, moveSpeedMul, proficiencyMul, statXpToNext,
                          healthMaxFor, healthRegenMul, hydrationDrainMul };
@@ -558,7 +552,7 @@ function tick(dt) {
 }
 
 function draw() {
-    render(ctx, world, getW(), getH());
+    renderer.frame(world, getW(), getH());
 }
 
 GameLoop.create({ tick, draw }).start();

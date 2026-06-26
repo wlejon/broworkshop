@@ -1,0 +1,260 @@
+// render3d.js — isometric 3D renderer for the farm, through bro's scene graph.
+//
+// Replaces the flat 2D-canvas render.js. The farm model is pure tile space
+// (x in [0..GRID.cols), y in [0..GRID.rows), continuous floats); this renderer
+// maps that 1:1 onto a `cellSize = 1` TileWorld in the 3D scene — model (x, y)
+// becomes world (X = x, Z = y), with Y up. "Isometric" is just an orthographic
+// camera tilted over that grid, so the same data could render top-down or in
+// free 3D by changing the camera alone.
+//
+// Static geometry (ground tiles, buildings, trough frames, crop soil beds) is
+// built once. Dynamic actors (crops, troughs' fill level, animals, workers, the
+// player, the foreman) are pooled nodes whose transform/colour are updated each
+// frame from the live world — the renderer never allocates per frame.
+
+import {
+    GRID, REGIONS, COLORS, ANIMAL_KINDS, CROP_KINDS, ROLE_COLOR,
+} from '/app/defs.js';
+
+// --- colour helpers -------------------------------------------------------
+// The PBR shader and the TileWorld palette both take LINEAR RGB; CSS hex is
+// sRGB, so linearize once and cache.
+function srgbToLinear(c) {
+    return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+}
+const _linCache = new Map();
+function lin(hex) {
+    let v = _linCache.get(hex);
+    if (v) return v;
+    const n = parseInt(hex.slice(1), 16);
+    v = [srgbToLinear((n >> 16 & 255) / 255),
+         srgbToLinear((n >> 8 & 255) / 255),
+         srgbToLinear((n & 255) / 255)];
+    _linCache.set(hex, v);
+    return v;
+}
+function linA(hex, a) { const c = lin(hex); return [c[0], c[1], c[2], a == null ? 1 : a]; }
+function mix(a, b, t) { return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]; }
+function clamp01(x) { return x < 0 ? 0 : x > 1 ? 1 : x; }
+function lerp(a, b, t) { return a + (b - a) * t; }
+
+// Board centre (in tile/world units) and camera framing.
+const CX = GRID.cols / 2;   // 20
+const CZ = GRID.rows / 2;   // 14
+const CAM = { dist: 24, height: 30, view: 33 };  // iso offset + ortho view height
+
+export function createRenderer(scene, world) {
+    // --- lighting + tonemap ------------------------------------------------
+    scene.setToneMap({ mode: 'aces', exposure: 1.0, gamma: 2.2 });
+    scene.setAmbient([0.30, 0.33, 0.40]);
+    const sun = scene.createLight({
+        type: 'directional', direction: [-0.5, -1.0, -0.45],
+        color: [1.0, 0.97, 0.9], intensity: 3.2, name: 'sun',
+    });
+    sun.castsShadow = true;
+    sun.cascadeCount = 4;
+    if ('shadowNormalBias' in sun) sun.shadowNormalBias = 0.05;
+    if (scene.setShadowQuality) scene.setShadowQuality(4096, 3);
+
+    // --- ground: one TileWorld tinted by region ----------------------------
+    // Palette indices: 1 grass, 2 grass-dark (checker), 3 field soil,
+    // 4 pen floor, 5 building foundation, 6 well water.
+    const palette = new Float32Array([
+        0, 0, 0, 0,
+        ...linA(COLORS.grass), ...linA(COLORS.grassAlt),
+        ...linA(COLORS.field), ...linA(COLORS.penFill),
+        ...linA(COLORS.path),  ...linA(COLORS.well),
+    ]);
+    const ground = scene.createTileWorld({
+        width: GRID.cols, height: GRID.rows, cellSize: 1.0,
+        heightStep: 0.4, chunkSize: 20, aoStrength: 0.35,
+        palette, origin: [0, 0, 0],
+    });
+    // Base grass with a subtle checker.
+    for (let y = 0; y < GRID.rows; y++)
+        for (let x = 0; x < GRID.cols; x++)
+            ground.setTile(x, y, ((x + y) & 1) ? 1 : 2);
+    // Region footprints.
+    const REGION_TILE = { field: 3, pen: 4, farmhouse: 5, barn: 5, silo: 5, well: 6 };
+    for (const r of REGIONS) {
+        const id = REGION_TILE[r.type] || 1;
+        for (let y = r.y0; y <= r.y1; y++)
+            for (let x = r.x0; x <= r.x1; x++) ground.setTile(x, y, id);
+    }
+    ground.rebuild();
+
+    // --- static mesh helpers ----------------------------------------------
+    function box(cx, cy, cz, w, h, d, color, rough) {
+        const n = scene.createMesh({ mesh: 'box', x: cx, y: cy, z: cz, color, roughness: rough == null ? 0.85 : rough });
+        n.scaleX = w; n.scaleY = h; n.scaleZ = d;
+        return n;
+    }
+    function regionBox(r) {
+        return {
+            cx: (r.x0 + r.x1 + 1) / 2, cz: (r.y0 + r.y1 + 1) / 2,
+            w: (r.x1 - r.x0 + 1), d: (r.y1 - r.y0 + 1),
+        };
+    }
+
+    // --- buildings ---------------------------------------------------------
+    for (const r of REGIONS) {
+        const b = regionBox(r);
+        if (r.type === 'farmhouse') {
+            box(b.cx, 0.9, b.cz, b.w * 0.7, 1.8, b.d * 0.7, lin(COLORS.farmhouse));
+            box(b.cx, 2.0, b.cz, b.w * 0.78, 0.45, b.d * 0.78, lin('#5d3522'));
+        } else if (r.type === 'barn') {
+            box(b.cx, 1.0, b.cz, b.w * 0.72, 2.0, b.d * 0.72, lin(COLORS.barn));
+            box(b.cx, 2.25, b.cz, b.w * 0.8, 0.5, b.d * 0.8, lin('#7a2f29'));
+        } else if (r.type === 'silo') {
+            const R = Math.min(b.w, b.d) * 0.32;
+            const body = scene.createMesh({ mesh: 'cylinder', x: b.cx, y: 1.9, z: b.cz, color: lin(COLORS.silo), roughness: 0.55, metallic: 0.2 });
+            body.scaleX = R * 2; body.scaleZ = R * 2; body.scaleY = 3.8;
+            const dome = scene.createMesh({ mesh: 'sphere', x: b.cx, y: 3.8, z: b.cz, color: lin(COLORS.silo), roughness: 0.55, metallic: 0.2 });
+            dome.scaleX = R * 2; dome.scaleZ = R * 2; dome.scaleY = R * 1.4;
+        } else if (r.type === 'well') {
+            box(b.cx, 0.35, b.cz, b.w * 0.6, 0.7, b.d * 0.6, lin('#6b6b6b'));
+        }
+        // field + pens: ground tint only (animals/crops sit on them).
+    }
+
+    // --- troughs (frame static, fill dynamic) ------------------------------
+    const troughFill = {};
+    for (const t of Object.values(world.troughs)) {
+        box(t.x, 0.15, t.y, 0.85, 0.3, 0.55, lin('#6b5436'), 0.9);
+        const f = scene.createMesh({
+            mesh: 'box', x: t.x, y: 0.2, z: t.y,
+            color: t.kind === 'water' ? lin(COLORS.troughWater) : lin(COLORS.troughFeed),
+            roughness: t.kind === 'water' ? 0.3 : 0.8,
+        });
+        f.scaleX = 0.7; f.scaleZ = 0.42;
+        troughFill[t.id] = f;
+    }
+
+    // --- crops (soil bed static, plant dynamic) ----------------------------
+    const cropPlant = {};
+    for (const c of world.crops) {
+        box(c.x, 0.06, c.y, 0.95, 0.12, 0.95, lin(COLORS.soil), 0.95);
+        const p = scene.createMesh({ mesh: 'cylinder', x: c.x, y: 0.25, z: c.y, color: lin(COLORS.cropSprout), roughness: 0.8 });
+        cropPlant[c.id] = p;
+    }
+
+    // --- animals -----------------------------------------------------------
+    const animalNode = {};
+    for (const a of world.animals) {
+        const k = ANIMAL_KINDS[a.kind] || ANIMAL_KINDS.chicken;
+        const base = lin(k.color), R = k.radius;
+        const body = scene.createMesh({ mesh: 'sphere', x: a.x, y: R * 0.7, z: a.y, color: base, roughness: 0.85 });
+        body.scaleX = R * 2; body.scaleZ = R * 2.4; body.scaleY = R * 1.5;
+        animalNode[a.id] = { body, base, R };
+    }
+
+    // --- people (player, foreman, workers) ---------------------------------
+    function makePerson(bodyColor) {
+        const body = scene.createMesh({ mesh: 'cylinder', color: bodyColor, roughness: 0.8 });
+        body.scaleX = 0.44; body.scaleZ = 0.44; body.scaleY = 0.7;
+        const head = scene.createMesh({ mesh: 'sphere', color: lin('#e8c9a0'), roughness: 0.7 });
+        head.scaleX = 0.34; head.scaleY = 0.34; head.scaleZ = 0.34;
+        return { body, head };
+    }
+    function placePerson(p, x, y) {
+        p.body.x = x; p.body.z = y; p.body.y = 0.35;
+        p.head.x = x; p.head.z = y; p.head.y = 0.82;
+    }
+    const playerNode  = makePerson(lin('#4a78d0'));
+    const foremanNode = world.foreman ? makePerson(lin('#b5343a')) : null;
+    const npcNodes = world.npcs.map((n) => makePerson(lin(ROLE_COLOR[n.role] || '#caa86a')));
+
+    // --- per-frame camera ---------------------------------------------------
+    function updateCamera(W, H) {
+        const aspect = (W && H) ? W / H : 1100 / 760;
+        scene.setCamera({
+            mode: 'orthographic', size: CAM.view, aspect, near: 0.1, far: 400,
+            position: [CX + CAM.dist, CAM.height, CZ + CAM.dist],
+            target: [CX, 0, CZ], up: [0, 1, 0],
+        });
+    }
+
+    // --- per-frame day/night -----------------------------------------------
+    function updateDayNight(world) {
+        const hour = world.clock.hour + world.clock.minute / 60;
+        let night;
+        if (hour < 5 || hour >= 21) night = 1;
+        else if (hour < 7) night = (7 - hour) / 2;
+        else if (hour > 19) night = (hour - 19) / 2;
+        else night = 0;
+        night = clamp01(night);
+
+        const dayT = clamp01((hour - 6) / 12);          // 0 at 06:00, 1 at 18:00
+        const az = Math.PI * dayT;                       // sun arc E->W
+        sun.direction = [-Math.cos(az) * 0.6, -Math.max(0.28, Math.sin(az)), -0.42];
+        const shoulder = (hour < 8 || hour > 17) && night < 0.95;  // dawn/dusk warmth
+        sun.color = night > 0.5 ? [0.55, 0.62, 0.95]
+                  : shoulder    ? [1.0, 0.82, 0.6]
+                  :               [1.0, 0.97, 0.9];
+        sun.intensity = lerp(3.3, 0.5, night);
+        scene.setAmbient([lerp(0.30, 0.10, night), lerp(0.33, 0.13, night), lerp(0.40, 0.24, night)]);
+    }
+
+    // --- per-frame crop visuals --------------------------------------------
+    function updateCrop(p, c) {
+        if (c.stage === 'empty') { p.visible = false; return; }
+        p.visible = true;
+        if (c.stage === 'ripe') {
+            const ck = CROP_KINDS[c.kind];
+            p.color = lin((ck && ck.color) || COLORS.cropWheat);
+            p.scaleX = 0.5; p.scaleZ = 0.5; p.scaleY = 0.6; p.y = 0.34;
+        } else {
+            const g = clamp01((c.growth || 0) / 100);
+            const h = 0.18 + g * 0.6;
+            p.color = lin(COLORS.cropSprout);
+            p.scaleX = 0.16; p.scaleZ = 0.16; p.scaleY = h; p.y = 0.06 + h / 2;
+        }
+    }
+
+    // --- the frame ----------------------------------------------------------
+    function frame(world, W, H) {
+        updateCamera(W, H);
+        updateDayNight(world);
+
+        for (const c of world.crops) { const p = cropPlant[c.id]; if (p) updateCrop(p, c); }
+
+        for (const t of Object.values(world.troughs)) {
+            const f = troughFill[t.id]; if (!f) continue;
+            const h = Math.max(0.02, (t.fill / 100) * 0.26);
+            f.scaleY = h; f.y = 0.05 + h / 2;
+        }
+
+        for (const a of world.animals) {
+            const n = animalNode[a.id]; if (!n) continue;
+            const alive = a.alive !== false;
+            n.body.visible = alive;
+            if (!alive) continue;
+            n.body.x = a.x; n.body.z = a.y;
+            const need = Math.max(a.hunger || 0, a.thirst || 0);
+            const t = clamp01((need - 50) / 50);
+            n.body.color = mix(n.base, lin(COLORS.needHigh), t * 0.6);
+        }
+
+        if (world.player) placePerson(playerNode, world.player.x, world.player.y);
+        if (foremanNode && world.foreman) placePerson(foremanNode, world.foreman.x, world.foreman.y);
+        for (let i = 0; i < world.npcs.length; i++) {
+            const n = world.npcs[i]; placePerson(npcNodes[i], n.x, n.y);
+        }
+    }
+
+    // --- screen -> tile picking (ground-plane intersect) -------------------
+    function pickClient(clientX, clientY, canvas, W, H) {
+        const rect = canvas.getBoundingClientRect();
+        const lx = (clientX - rect.left) * (W / Math.max(1, rect.width));
+        const ly = (clientY - rect.top) * (H / Math.max(1, rect.height));
+        const r = scene.unprojectLocal(lx, ly);
+        if (!r) return null;
+        const o = r.origin, d = r.dir;
+        if (Math.abs(d[1]) < 1e-6) return null;
+        const t = -o[1] / d[1];
+        if (t < 0) return null;
+        return { x: o[0] + d[0] * t, y: o[2] + d[2] * t };   // (worldX, worldZ) == (tileX, tileY)
+    }
+
+    return { frame, pickClient, ground };
+}
