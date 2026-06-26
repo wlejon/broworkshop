@@ -99,12 +99,34 @@ SFX.init();
 // load, voice.disabled is set and speak() is a silent no-op (the game keeps
 // running text-only). See voice.js for the utterance-duration API the next pass
 // gates NPC behaviour on (speak() returns Promise<durationSec>, voice.speaking()).
+// Where a voice plays FROM and where the player is HEARING it. Tiles in, tiles
+// out; voice.js maps (x,y) -> audio (x,0,y). 'You' speaks from the player, the
+// Foreman from his command post, every worker from where they stand. An unknown
+// speaker (the 'Farm' narrator) returns null -> plays non-spatial / always heard.
+function speakerPos(id) {
+    if (id === 'You') return world.player ? { x: world.player.x, y: world.player.y } : null;
+    if (world.foreman && id === world.foreman.id) return { x: world.foreman.x, y: world.foreman.y };
+    const n = world.npcs.find((x) => x.id === id);
+    return n ? { x: n.x, y: n.y } : null;
+}
+function listenerPos() { return world.player ? { x: world.player.x, y: world.player.y } : null; }
+
 const voice = createVoice({
     getAudioCtx: () => SFX.ctx(),
     npcVoiceTag: (id) => { const n = world.npcs.find((x) => x.id === id); return n ? n.voice : null; },
     isActive: () => globalThis.screens && globalThis.screens.name() === 'playing',
+    speakerPos,
+    listenerPos,
 });
 globalThis.farmVoice = voice;
+// Headless hook for the proximity rule: positions feeding the spatializer + the
+// last line that was actually placed in the world (debug.lastSpatial).
+globalThis.farmAudio = {
+    speakerPos, listenerPos,
+    earshot: () => voice.spatial,
+    lastSpatial: () => voice.debug.lastSpatial,
+    computeSpatial: (a, b) => voice.computeSpatial(a, b),
+};
 
 // Drive spoken audio from the model's serialized speech channel. The model
 // (world.js stepSpeech) plays ONE line at a time and asks us to voice the

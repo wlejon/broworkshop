@@ -85,14 +85,52 @@ const GAP_MS        = 120;   // small silence between queued utterances
 const QUEUE_CAP     = 12;    // drop the oldest pending line beyond this
 const CACHE_CAP     = 64;    // max cached phrase clips before LRU eviction
 
+// ── proximity / spatial voice ────────────────────────────────────────────────
+// Voices play from where the speaker is STANDING, attenuated by distance to the
+// player (the listener). Beyond maxDistance a line is inaudible — the farm is
+// 40x28 tiles, so you only ever hear your own corner of it, and word of mouth
+// has to physically travel. A 'linear' distance model gives a clean hard edge at
+// maxDistance (vs inverse, which only asymptotes), so earshot is a real boundary.
+export const SPEECH_SPATIAL = {
+    refDistance: 2.5,    // tiles within which a voice is at full volume
+    maxDistance: 12,     // tiles past which it's silent (out of earshot)
+    rolloff:     1.0,    // linear fall-off strength across [ref, max]
+    model:       'linear',
+};
+
+// Pure proximity math, exported so the rule is testable without audio/GPU.
+// speaker / listener are tile positions { x, y } (or null). Returns the spatial
+// params for one utterance, or null when either position is unknown — a null
+// speaker (the 'Farm' narrator, pre-spawn lines) plays NON-spatial (always
+// audible), which is the right call for UI/omniscient voices. Tiles map to audio
+// space as (x, 0, y): tile-y is the world Z plane, matching the iso renderer.
+export function computeSpatial(speaker, listener) {
+    if (!speaker || !listener) return null;
+    const dx = speaker.x - listener.x, dy = speaker.y - listener.y;
+    const distance = Math.hypot(dx, dy);
+    return {
+        x: speaker.x, y: 0, z: speaker.y,
+        refDistance: SPEECH_SPATIAL.refDistance,
+        maxDistance: SPEECH_SPATIAL.maxDistance,
+        rolloff:     SPEECH_SPATIAL.rolloff,
+        model:       SPEECH_SPATIAL.model,
+        distance,
+        audible: distance <= SPEECH_SPATIAL.maxDistance,
+    };
+}
+
 // createVoice(opts)
 //   opts.getAudioCtx()        → the shared broaudio AudioContext (or null)
 //   opts.npcVoiceTag(id)      → the abstract voice tag for an NPC speaker id
 //   opts.isActive()           → true only while the sim is actually playing
+//   opts.speakerPos(id)       → { x, y } tile of a speaker, or null (non-spatial)
+//   opts.listenerPos()        → { x, y } tile of the player (the listener), or null
 export function createVoice(opts = {}) {
     const getAudioCtx  = opts.getAudioCtx  || (() => (typeof AudioContext === 'function' ? null : null));
     const npcVoiceTag  = opts.npcVoiceTag  || (() => null);
     const isActive     = opts.isActive     || (() => true);
+    const speakerPos   = opts.speakerPos   || (() => null);
+    const listenerPos  = opts.listenerPos  || (() => null);
 
     const voice = {
         ready: false,
@@ -103,6 +141,7 @@ export function createVoice(opts = {}) {
             kokoroDir: null,
             speakers: {},         // id → { voice, count, lastSamples, lastDurationSec, fromCache }
             lastError: null,
+            lastSpatial: null,    // { speakerId, x, z, distance, audible } of the last positioned line
         },
         _lastSamples: null,       // Float32Array of the most recent synthesis
         _lastSpeaker: null,
@@ -117,7 +156,8 @@ export function createVoice(opts = {}) {
     let loggedDisable = false;
 
     const clipCache = new Map();    // key → { clipId, durationSec } (insertion-ordered LRU)
-    const pendingPlays = [];        // { clipId, gain, framesLeft }
+    const pendingPlays = [];        // { clipId, gain, framesLeft, speakerId, durationSec }
+    const activeSpatial = [];       // { pid, speakerId, endsAt } — live positioned playbacks to track
 
     function logOnce(msg) {
         voice.debug.lastError = msg;
@@ -179,14 +219,58 @@ export function createVoice(opts = {}) {
     }
 
     function pump() {
-        for (let i = pendingPlays.length - 1; i >= 0; i--) {
-            const pp = pendingPlays[i];
-            if (--pp.framesLeft <= 0) {
-                const ctx = getAudioCtx();
-                if (ctx) { try { ctx.playClip(pp.clipId, pp.gain, false); } catch (e) {} }
-                pendingPlays.splice(i, 1);
+        const ctx = getAudioCtx();
+
+        // Glue the listener to the player every frame so distance attenuation is
+        // live as either moves. The iso camera looks from +x+z toward the board
+        // centre, so its ground-forward is (-1,0,-1): aligning the listener with
+        // it makes the head model's left/right match what's on screen.
+        if (ctx) {
+            const lp = listenerPos();
+            if (lp) {
+                try {
+                    ctx.setListenerPosition(lp.x, 0, lp.y);
+                    ctx.setListenerOrientation(-0.7071, 0, -0.7071, 0, 1, 0);
+                } catch (e) {}
             }
         }
+
+        // Fire any clip whose upload-settle delay elapsed, spatialising it at its
+        // speaker's position. A speaker with no position (the narrator) just plays
+        // flat. We capture the playbackId so a moving speaker can be tracked.
+        for (let i = pendingPlays.length - 1; i >= 0; i--) {
+            const pp = pendingPlays[i];
+            if (--pp.framesLeft > 0) continue;
+            pendingPlays.splice(i, 1);
+            if (!ctx) continue;
+            let pid = -1;
+            try { pid = ctx.playClip(pp.clipId, pp.gain, false); } catch (e) { continue; }
+            if (pid == null || pid < 0) continue;
+            const sp = computeSpatial(speakerPos(pp.speakerId), listenerPos());
+            if (!sp) continue;   // non-spatial speaker (narrator) — leave it flat
+            try {
+                ctx.setPlaybackSpatialEnabled(pid, true);
+                ctx.setPlaybackSpatialDistanceModel(pid, sp.model);
+                ctx.setPlaybackSpatialRefDistance(pid, sp.refDistance);
+                ctx.setPlaybackSpatialMaxDistance(pid, sp.maxDistance);
+                ctx.setPlaybackSpatialRolloff(pid, sp.rolloff);
+                ctx.setPlaybackSpatialPosition(pid, sp.x, sp.y, sp.z);
+            } catch (e) { continue; }
+            activeSpatial.push({ pid, speakerId: pp.speakerId, endsAt: Date.now() + pp.durationSec * 1000 + 400 });
+            voice.debug.lastSpatial = { speakerId: pp.speakerId, x: sp.x, z: sp.z, distance: sp.distance, audible: sp.audible };
+        }
+
+        // Track moving speakers: keep each live positioned playback glued to its
+        // speaker so a walking worker's voice travels with them; prune the ended.
+        const now = Date.now();
+        for (let i = activeSpatial.length - 1; i >= 0; i--) {
+            const a = activeSpatial[i];
+            if (now >= a.endsAt) { activeSpatial.splice(i, 1); continue; }
+            if (!ctx) continue;
+            const pos = speakerPos(a.speakerId);
+            if (pos) { try { ctx.setPlaybackSpatialPosition(a.pid, pos.x, 0, pos.y); } catch (e) {} }
+        }
+
         if (typeof requestAnimationFrame === 'function') requestAnimationFrame(pump);
     }
 
@@ -236,7 +320,7 @@ export function createVoice(opts = {}) {
     // Schedule a clip to play a few frames after it was uploaded, then mark it as
     // the current utterance and resolve the awaiter when it finishes.
     function playUtterance(speakerId, text, clipId, durationSec, item) {
-        if (clipId >= 0) pendingPlays.push({ clipId, gain: PLAY_GAIN, framesLeft: PLAY_DELAY_FR });
+        if (clipId >= 0) pendingPlays.push({ clipId, gain: PLAY_GAIN, framesLeft: PLAY_DELAY_FR, speakerId, durationSec });
         const endsAt = Date.now() + durationSec * 1000;
         voice.currentUtterance = { speakerId, text, durationSec, endsAt };
         // Report the real length the moment playback begins, so the model's
@@ -371,6 +455,8 @@ export function createVoice(opts = {}) {
     voice.speak = speak;
     voice.speaking = speaking;
     voice.load = load;
+    voice.computeSpatial = computeSpatial;   // pure proximity math (headless tests reach it here)
+    voice.spatial = SPEECH_SPATIAL;
     load();
     return voice;
 }
