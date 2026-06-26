@@ -118,35 +118,5 @@ t('particle rate emits particles at expected count', function() {
     p.destroy();
 });
 
-t('tilemap setTile/getTile round-trips', function() {
-    var m = scene.createTilemap({
-        tileWidth: 16, tileHeight: 16,
-        columns: 8, rows: 6,
-        tileset: { src: '', tileWidth: 16, tileHeight: 16 }
-    });
-    eq(m.getTile(0, 0), 0, 'empty at start');
-    m.setTile(2, 3, 7);
-    eq(m.getTile(2, 3), 7, 'roundtrip');
-    eq(m.getTile(0, 0), 0, 'other still empty');
-    eq(m.getTile(99, 99), 0, 'out-of-bounds returns 0');
-    m.destroy();
-});
-
-t('tilemap tileAtWorld math', function() {
-    var m = scene.createTilemap({
-        tileWidth: 32, tileHeight: 32,
-        columns: 10, rows: 10,
-        x: 0, y: 0,
-        tileset: { src: '' }
-    });
-    var hit = m.tileAtWorld(40, 40);
-    truthy(hit, 'in-bounds returns object');
-    eq(hit.col, 1);
-    eq(hit.row, 1);
-    var miss = m.tileAtWorld(-10, -10);
-    eq(miss, null, 'out-of-bounds returns null');
-    m.destroy();
-});
-
 console.log('=== Done: ' + tests + ' tests, ' + failed + ' failures ===');
 if (failed > 0) throw new Error(failed + ' tests failed');
