@@ -32,6 +32,9 @@ const STATION_BRIEF = [
     'Morning, {name}. You\'ve got the {what} — keep it topped up and tidy.',
 ];
 const ACKS = ['On it.', 'Right away.', 'Heading over.', 'Got it.', 'Will do.'];
+// Foreman's one acknowledgement after the crew turns in their day-recaps at dusk.
+const REPORT_ACKS = ['Good work today, everyone.', 'Solid day, team.',
+                     'Well done. Get some rest.', 'Nice work out there today.'];
 
 // A quiet-station worker only lends a hand to another station for work at least
 // this urgent (survival-grade water/feed/tend/harvest), never low upkeep.
@@ -85,12 +88,24 @@ function fill(tmpl, name, what) { return tmpl.replace('{name}', name).replace('{
 
 export function createOrchestrator() {
     let lastStandupDay = 0;   // morning re-brief tracker
+    let lastReportDay = 0;    // dusk day-recap tracker
 
     function decide(world) {
         const o = world.observe();
 
         // Economic management runs every tick, independent of worker assignment.
         manageEconomy(world, o);
+
+        // End-of-day debrief: at dusk, each worker reports the day's deeds to the
+        // Foreman in a single recap (instead of narrating each chore as it goes),
+        // and the Foreman acknowledges once. Fires once per day; a worker who did
+        // nothing notable simply says nothing.
+        if (world.env.dayPhase === 'dusk' && world.clock.day !== lastReportDay) {
+            lastReportDay = world.clock.day;
+            let any = false;
+            for (const n of world.npcs) if (world.deliverReport(n.id)) any = true;
+            if (any && world.foreman) world.say(BOSS, pick(REPORT_ACKS));
+        }
 
         // Station assignment: every worker owns a station (stable + affine). At a
         // new day, re-brief everyone — the Foreman's morning standup. The brief is

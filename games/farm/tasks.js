@@ -322,7 +322,9 @@ export function advanceTask(world, npc, dt) {
             return false;
         }
 
-        if (step.say) world.say(npc.id, step.say);
+        // A worker doesn't narrate each act as it happens — it REMEMBERS the deed
+        // and recaps the day to the Foreman at dusk (world.deliverReport).
+        if (step.say) world.report(npc.id, step.say);
 
         if (task.cursor >= task.steps.length) finishTask(world, npc, task, 'done');
         return true;
@@ -493,7 +495,7 @@ export function buildTend(world, animalId) {
         { type: 'move', x, y, label: animalId },
         { type: 'wait', ms: 300 },
         { type: 'act', verb: 'tendAnimal', args: [animalId], carry: 'medkit',
-          say: 'Easy now — you\'ll be alright.' },
+          say: 'Nursed a sick animal back to health.' },
         { type: 'wait', ms: 150 },
     ]);
 }
