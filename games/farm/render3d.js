@@ -349,10 +349,14 @@ export function createRenderer(scene, world) {
     }
 
     // --- screen -> tile picking (ground-plane intersect) -------------------
+    // unprojectLocal expects pixels in the canvas element's LAYOUT space (the
+    // scene sizes its viewport from the element's content box, not the canvas's
+    // 300x150 default backing store) — so feed it client coords relative to the
+    // element rect, with no rescale into canvas.width/height.
     function pickClient(clientX, clientY, canvas, W, H) {
         const rect = canvas.getBoundingClientRect();
-        const lx = (clientX - rect.left) * (W / Math.max(1, rect.width));
-        const ly = (clientY - rect.top) * (H / Math.max(1, rect.height));
+        const lx = clientX - rect.left;
+        const ly = clientY - rect.top;
         const r = scene.unprojectLocal(lx, ly);
         if (!r) return null;
         const o = r.origin, d = r.dir;
@@ -362,5 +366,31 @@ export function createRenderer(scene, world) {
         return { x: o[0] + d[0] * t, y: o[2] + d[2] * t };   // (worldX, worldZ) == (tileX, tileY)
     }
 
-    return { frame, pickClient, ground };
+    // --- world -> screen projection ----------------------------------------
+    // Forward of pickClient: project a world point to a client (CSS) pixel via
+    // the live view+projection. Used to pick PEOPLE by where their body actually
+    // appears, which the flat ground-plane pick can't do (a tall figure draws
+    // well above its foot tile). Returns null if behind the camera.
+    function m4v(m, v) {           // column-major 4x4 * vec4
+        return [
+            m[0] * v[0] + m[4] * v[1] + m[8]  * v[2] + m[12] * v[3],
+            m[1] * v[0] + m[5] * v[1] + m[9]  * v[2] + m[13] * v[3],
+            m[2] * v[0] + m[6] * v[1] + m[10] * v[2] + m[14] * v[3],
+            m[3] * v[0] + m[7] * v[1] + m[11] * v[2] + m[15] * v[3],
+        ];
+    }
+    function worldToScreen(wx, wy, wz, canvas) {
+        const view = scene.viewMatrix, proj = scene.projectionMatrix;
+        if (!view || !proj) return null;
+        const c = m4v(proj, m4v(view, [wx, wy, wz, 1]));
+        const w = c[3];
+        if (w < 0) return null;                       // behind a perspective eye
+        const iw = (w === 0) ? 1 : w;                 // ortho: w == 1
+        const ndcx = c[0] / iw, ndcy = c[1] / iw;
+        const rect = canvas.getBoundingClientRect();
+        return [rect.left + (ndcx * 0.5 + 0.5) * rect.width,
+                rect.top + (1 - (ndcy * 0.5 + 0.5)) * rect.height];
+    }
+
+    return { frame, pickClient, worldToScreen, ground };
 }

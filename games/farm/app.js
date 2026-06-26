@@ -382,6 +382,7 @@ function inspectEntity(id) {
 }
 
 // Nearest inspectable person (worker or Foreman) within ~1 tile of a world tile.
+// Tile-space pick — used by the headless clickTile hook.
 function pickPersonAt(tileX, tileY) {
     let best = null, bestD = 1.0;
     const consider = (cid, x, y) => {
@@ -401,13 +402,45 @@ function handleTileClick(tileX, tileY) {
     return id;
 }
 
-// Map a client point (CSS px) into the 3D scene: cast the camera ray through
-// the clicked pixel, intersect the ground plane, and hit-test the resulting
-// world tile. Replaces the old 2D board-inverse transform.
+// Distance from point P to segment A-B, all in screen pixels.
+function distToSeg(px, py, ax, ay, bx, by) {
+    const vx = bx - ax, vy = by - ay;
+    const len2 = vx * vx + vy * vy;
+    let t = len2 > 0 ? ((px - ax) * vx + (py - ay) * vy) / len2 : 0;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    const cx = ax + t * vx, cy = ay + t * vy;
+    return Math.hypot(px - cx, py - cy);
+}
+
+// Screen-space person pick: a click hits whoever's drawn FIGURE it lands on,
+// scored as distance to that figure's foot->head screen segment. Robust to the
+// capsule standing well above its foot tile — which a flat ground-plane pick
+// (used by the old tile path) fundamentally can't account for under a tilted
+// camera. Capture radius scales with the figure's on-screen height so it works
+// at any zoom / window size.
+function pickPersonClient(clientX, clientY) {
+    let best = null, bestD = Infinity;
+    const consider = (id, x, y) => {
+        const foot = renderer.worldToScreen(x, 0.1, y, canvas);
+        const head = renderer.worldToScreen(x, 1.5, y, canvas);
+        if (!foot || !head) return;
+        const segLen = Math.hypot(head[0] - foot[0], head[1] - foot[1]);
+        const radius = Math.max(18, segLen * 0.5);
+        const d = distToSeg(clientX, clientY, foot[0], foot[1], head[0], head[1]);
+        if (d <= radius && d < bestD) { best = id; bestD = d; }
+    };
+    for (const n of world.npcs) consider(n.id, n.x, n.y);
+    if (world.foreman) consider(world.foreman.id, world.foreman.x, world.foreman.y);
+    return best;
+}
+
+// A board click selects whatever figure was clicked (live stat sheet), or closes
+// the panel when it lands on empty ground.
 function boardClickClient(clientX, clientY) {
-    const hit = renderer.pickClient(clientX, clientY, canvas, getW(), getH());
-    if (!hit) { closeStatPanel(); return null; }
-    return handleTileClick(hit.x, hit.y);
+    const id = pickPersonClient(clientX, clientY);
+    if (id) { selectStatPanel(id); return id; }
+    closeStatPanel();
+    return null;
 }
 
 function selectStatPanel(id) {
