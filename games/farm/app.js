@@ -29,6 +29,7 @@ import {
     STAT_KEYS, STAT_LABEL, STAT_MAX_LEVEL, statXpToNext,
     staminaMaxFor, staminaDrainMul, moveSpeedMul, proficiencyMul, ROLE_COLOR,
     healthMaxFor, healthRegenMul, hydrationDrainMul, STATIONS,
+    GRID, REGIONS,
 } from '/app/defs.js';
 
 // Worker station id -> display label for the HUD roster + stat sheet.
@@ -54,6 +55,29 @@ initPlayer(world, 22, 14);
 
 // ---------- 3D isometric renderer (scene graph) ----------
 const renderer = createRenderer(scene, world);
+
+// ---------- navigation: workers path around the solid buildings ----------
+// A nav grid spanning the board, with the four solid structures (farmhouse,
+// barn, silo, well) as obstacles; the open field and animal pens stay fully
+// walkable. The task executor routes every `move` step over this grid, so a
+// worker crossing the yard now bends around the barn instead of clipping
+// through it. findPath returns a smoothed path — a straight line when nothing
+// is in the way — and an empty path when the target sits inside a structure,
+// in which case the executor falls back to a direct line so movement can never
+// wedge. (Picking + nav grid are the same engine seam added to TileWorld.)
+const NAV_BLOCKERS = new Set(['farmhouse', 'barn', 'silo', 'well']);
+const navGrid = bro.ai.game.createNavGrid({
+    minX: 0, minZ: 0, maxX: GRID.cols, maxZ: GRID.rows, cellSize: 0.5,
+    padding: 0.1,
+    obstacles: REGIONS.filter((r) => NAV_BLOCKERS.has(r.type)).map((r) => ({
+        x: (r.x0 + r.x1 + 1) / 2, z: (r.y0 + r.y1 + 1) / 2,
+        hw: (r.x1 - r.x0 + 1) / 2, hd: (r.y1 - r.y0 + 1) / 2,
+    })),
+});
+// world-tile (x,y) in, world-tile waypoints out (nav grid speaks x/z).
+world.pathfind = (x0, y0, x1, y1) =>
+    navGrid.findPath(x0, y0, x1, y1).map((p) => ({ x: p.x, y: p.z }));
+globalThis.farmNav = navGrid;
 
 const orchestrator = createOrchestrator();
 globalThis.farmAuto = true;   // false => do-nothing baseline (NPCs idle-wander)

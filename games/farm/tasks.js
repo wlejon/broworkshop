@@ -107,11 +107,34 @@ export function advanceTask(world, npc, dt) {
     if (step.type === 'move') {
         npc.state = 'walking';
         npc.tx = step.x; npc.ty = step.y;
-        const dx = step.x - npc.x, dy = step.y - npc.y;
+
+        // Resolve a route around obstacles once, on first entry to this step.
+        // world.pathfind (injected by the app from the nav grid) returns
+        // waypoints from the worker to the target; absent or unroutable -> a
+        // null route and we walk straight at the target, so movement can never
+        // wedge. We then consume the route waypoint by waypoint.
+        if (step._route === undefined) {
+            step._route = null;
+            if (world.pathfind) {
+                const pts = world.pathfind(npc.x, npc.y, step.x, step.y);
+                if (pts && pts.length) { step._route = pts; step._leg = 0; }
+            }
+        }
+
+        // Current leg goal: the active waypoint, or the step target if no route.
+        let gx = step.x, gy = step.y, lastLeg = true;
+        if (step._route) {
+            const wp = step._route[step._leg];
+            if (wp) { gx = wp.x; gy = wp.y; }
+            lastLeg = step._leg >= step._route.length - 1;
+        }
+
+        const dx = gx - npc.x, dy = gy - npc.y;
         const d = Math.hypot(dx, dy);
         if (d <= ARRIVE) {
-            npc.x = step.x; npc.y = step.y;
-            task.cursor++;
+            npc.x = gx; npc.y = gy;
+            if (!lastLeg) step._leg++;          // advance to the next waypoint
+            else { npc.x = step.x; npc.y = step.y; task.cursor++; }  // arrived
         } else {
             const sp = Math.min(WALK * walkMul * s, d);
             npc.x += (dx / d) * sp;
