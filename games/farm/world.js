@@ -43,11 +43,18 @@ const SPEECH_GAP_MS   = 220;   // brief silence between one speaker's lines
 const SPEECH_MIN_MS   = 850;   // floor so a one-word line still reads
 const SPEECH_PER_WORD = 300;   // ms/word (~Kokoro pace) for the silent estimate
 const SPEECH_LEAD_MS  = 300;   // lead-in
-const SPEECH_SPEAKER_CAP = 4;  // max backlog per speaker before dropping their oldest non-priority line
-const SPEECH_MAX_MS   = 9000;  // hard cap so one line can never wedge a speaker's channel
+const SPEECH_MAX_MS   = 12000; // hard cap so one combined utterance can't wedge a channel
 function estimateMs(text) {
     const words = String(text || '').trim().split(/\s+/).filter(Boolean).length || 1;
     return Math.max(SPEECH_MIN_MS, words * SPEECH_PER_WORD + SPEECH_LEAD_MS);
+}
+// Coalescing helpers: normalise a line for equality, drop repeats from a segment
+// list (keeping first occurrence) so "say the same thing twice" stays one line.
+function normSeg(s) { return String(s == null ? '' : s).trim().replace(/\s+/g, ' ').toLowerCase(); }
+function dedupeSegs(segs) {
+    const seen = new Set(); const out = [];
+    for (const s of segs) { const k = normSeg(s); if (k && !seen.has(k)) { seen.add(k); out.push(s); } }
+    return out;
 }
 
 function ageStageOf(ms) {
@@ -90,12 +97,16 @@ export function createWorld(opts = {}) {
         notices: [],      // transient event alerts: { level, who, msg, until }
         log: [],          // recent action results (most recent first)
         dialog: [],       // recent spoken lines: { t, speaker, text } (most recent first)
-        // Per-speaker speech channels — each individual speaks one line at a time
-        // (their own lines queue), but DIFFERENT individuals speak concurrently.
-        // say() enqueues on the speaker's channel; stepSpeech() advances them all.
-        // _emitSpeech is the audio sink app.js installs (drives Kokoro per line).
-        speech: { channels: {}, _seq: 0 },   // channels[speakerId] = { queue, active }
+        // Per-speaker speech channels — each individual has AT MOST ONE utterance
+        // in flight; DIFFERENT individuals speak concurrently. say() COALESCES: a
+        // new line for someone already mid-sentence cuts that line off and folds
+        // its words into a single combined utterance (identical text is left to
+        // finish), so rapid actions never stack a backlog of half-redundant lines.
+        // stepSpeech() renders each speaker's current utterance; _emitSpeech is the
+        // audio sink app.js installs (Kokoro) and _stopSpeech cancels it mid-line.
+        speech: { channels: {}, _seq: 0 },   // channels[speakerId] = { cur }
         _emitSpeech: null,
+        _stopSpeech: null,
         // Morning-briefing queue: an ordered list of worker ids waiting at the
         // Foreman's post. The worker at the head (index 0) is the one being
         // briefed; the rest hold their place in line behind it. A briefLine task
@@ -205,35 +216,59 @@ export function createWorld(opts = {}) {
         return a;
     }
 
-    // ---- speech: per-speaker serialized channels, the TTS hook -------------
-    // say(speakerId, text, opts?) — ENQUEUE a spoken line on the SPEAKER'S OWN
-    // channel. It does NOT speak immediately: stepSpeech() plays each speaker's
-    // lines one at a time, so an individual never overlaps themselves, while
-    // different individuals speak concurrently. Returns a small HANDLE ({ done })
-    // the briefing 'say' step polls to know its line was fully heard.
-    // opts.priority floats a behaviour-gating line ahead of that speaker's own
-    // chatter (e.g. the Foreman's order ahead of his market notes).
+    // ---- speech: per-speaker COALESCING channel, the TTS hook -------------
+    // say(speakerId, text, opts?) — fold a spoken line into the SPEAKER'S single
+    // in-flight utterance. It does NOT speak immediately: stepSpeech() renders it.
+    // A speaker only ever has ONE utterance going; when a new line arrives:
+    //   • identical to what they're already saying / about to say → left alone, so
+    //     it finishes instead of restarting (no stutter when an action repeats);
+    //   • new words → the current line (if mid-sentence) is CUT OFF — bubble and
+    //     audio stopped — and the new words are appended, so the speaker re-renders
+    //     ONE combined line that includes everything they had to say.
+    // This keeps rapid actions from stacking a backlog of half-redundant lines for
+    // workers and the player alike. Returns a HANDLE ({ done, segments, ... }) the
+    // briefing steps poll; because the same item is extended in place, a handle a
+    // worker is waiting on stays valid and flips done only when the speaker is
+    // fully heard. opts.priority marks a behaviour-gating line (kept by the voice
+    // backpressure, never evicted).
+    function makeUtterance(speakerId) {
+        return { id: ++world.speech._seq, speakerId, segments: [], text: '',
+                 priority: 0, est: 0, realMs: null, startedAt: null,
+                 playing: false, done: false };
+    }
     function say(speakerId, text, opts) {
         opts = opts || {};
         const t = String(text == null ? '' : text);
         if (!t.trim()) return null;
-        // The scrolling dialog LOG is history — record it right away.
+        // The scrolling dialog LOG is history — record every line right away.
         world.dialog.unshift({ t: world.clock.t, speaker: speakerId, text: t });
         if (world.dialog.length > 24) world.dialog.pop();
+
         const ch = world.speech.channels[speakerId] ||
-                   (world.speech.channels[speakerId] = { queue: [], active: null });
-        const item = { id: ++world.speech._seq, speakerId, text: t,
-                       priority: opts.priority ? 1 : 0, est: estimateMs(t),
-                       realMs: null, startedAt: null, done: false };
-        ch.queue.push(item);
-        // Bound THIS speaker's backlog so their words can't lag far behind the
-        // action: drop their oldest non-priority pending line on overflow.
-        while (ch.queue.length > SPEECH_SPEAKER_CAP) {
-            const idx = ch.queue.findIndex((x) => !x.priority);
-            if (idx === -1) break;
-            ch.queue.splice(idx, 1)[0].done = true;
+                   (world.speech.channels[speakerId] = { cur: null });
+        if (!ch.cur) ch.cur = makeUtterance(speakerId);
+        const cur = ch.cur;
+        const nt = normSeg(t);
+
+        // Already saying / queued to say this exact line — let it ride untouched.
+        if (cur.segments.some((s) => normSeg(s) === nt)) {
+            if (opts.priority) cur.priority = 1;
+            return cur;
         }
-        return item;
+        // New words. If we're mid-sentence, cut the line off — stop its audio and
+        // bubble — so it re-renders from the top as one combined utterance.
+        if (cur.playing) {
+            if (typeof world._stopSpeech === 'function') {
+                try { world._stopSpeech(speakerId); } catch (e) {}
+            }
+            clearBubble(speakerId);
+            cur.playing = false; cur.startedAt = null; cur.realMs = null;
+        }
+        cur.segments = dedupeSegs(cur.segments.concat([t]));
+        if (opts.priority) cur.priority = 1;
+        cur.text = cur.segments.join(' ');
+        cur.est = estimateMs(cur.text);
+        return cur;
     }
 
     // The Foreman is an entity too (not in world.npcs), so his lines bubble over
@@ -251,49 +286,44 @@ export function createWorld(opts = {}) {
         else if (world.foreman && world.foreman.id === speakerId) world.foreman.speech = null;
     }
 
-    // Advance EVERY speaker channel once per step(): retire each speaker's active
-    // line when its time is up, then start their next queued line (priority
-    // first) and drive its audio. Channels are independent, so several people can
-    // be mid-sentence at once; each line is held for the real utterance length
-    // (learned when audio playback starts) or the text estimate when silent, so a
-    // speaker's bubble + audio + any worker waiting on it all end together.
+    // Advance EVERY speaker channel once per step(): retire a speaker's utterance
+    // when its time is up, otherwise (if it hasn't started, or was cut off and
+    // recombined by say()) start playing it and drive its audio. Channels are
+    // independent, so several people can be mid-sentence at once; each utterance is
+    // held for its real length (learned when audio playback starts) or the text
+    // estimate when silent, so a speaker's bubble + audio + any worker waiting on
+    // it all end together.
     function stepSpeech() {
         const now = world.clock.t;
         const chans = world.speech.channels;
         for (const speakerId of Object.keys(chans)) {
             const ch = chans[speakerId];
-            if (ch.active) {
-                const a = ch.active;
-                const dur = (a.realMs != null) ? a.realMs : a.est;
-                if (now >= a.startedAt + dur + SPEECH_GAP_MS || now >= a.startedAt + SPEECH_MAX_MS) {
+            const cur = ch.cur;
+            if (!cur) continue;
+            if (cur.playing) {
+                const dur = (cur.realMs != null) ? cur.realMs : cur.est;
+                if (now >= cur.startedAt + dur + SPEECH_GAP_MS || now >= cur.startedAt + SPEECH_MAX_MS) {
                     clearBubble(speakerId);
-                    a.item.done = true;
-                    ch.active = null;
+                    cur.done = true;
+                    ch.cur = null;
                 } else {
-                    setBubble(speakerId, a.text, now + 1000);   // keep the bubble lit
-                    continue;
+                    setBubble(speakerId, cur.text, now + 1000);   // keep the bubble lit
                 }
+                continue;
             }
-            if (!ch.active && ch.queue.length) {
-                let idx = 0;
-                for (let i = 1; i < ch.queue.length; i++) {
-                    if (ch.queue[i].priority > ch.queue[idx].priority) idx = i;
-                }
-                const item = ch.queue.splice(idx, 1)[0];
-                if (item.done) continue;   // dropped while queued
-                item.startedAt = now;
-                const active = { item, text: item.text, startedAt: now, est: item.est, realMs: null };
-                ch.active = active;
-                setBubble(speakerId, item.text, now + 1000);
-                // Voice THIS speaker's line. onStart reports its real length the
-                // moment playback begins, so we hold it to match the audio.
-                if (typeof world._emitSpeech === 'function') {
-                    try {
-                        world._emitSpeech(speakerId, item.text, (sec) => {
-                            if (ch.active === active && sec > 0) active.realMs = sec * 1000;
-                        });
-                    } catch (e) {}
-                }
+            // Not playing yet (fresh, or just recombined by say()): kick it off.
+            cur.playing = true;
+            cur.startedAt = now;
+            cur.realMs = null;
+            setBubble(speakerId, cur.text, now + 1000);
+            // Voice it. onStart reports the real length the moment playback begins,
+            // so we hold the line to match the audio.
+            if (typeof world._emitSpeech === 'function') {
+                try {
+                    world._emitSpeech(speakerId, cur.text, (sec) => {
+                        if (ch.cur === cur && sec > 0) cur.realMs = sec * 1000;
+                    });
+                } catch (e) {}
             }
         }
     }

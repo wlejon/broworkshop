@@ -113,6 +113,10 @@ globalThis.farmVoice = voice;
 // line in lockstep with the audio. world.say itself now just enqueues, so a
 // single channel governs every spoken line — no two ever overlap.
 world._emitSpeech = (id, text, onStart) => voice.speak(id, text, { onStart });
+// Coalescing cut-off: when the model folds new words into a speaker mid-sentence,
+// it asks us to STOP that speaker's in-flight line (queued synth + sounding clip)
+// so the recombined utterance doesn't overlap the one it replaces.
+world._stopSpeech = (id) => voice.stop(id);
 const sfx = {
     splash:  () => SFX.noise(0.16, 0.35, 170),
     feed:    () => SFX.noise(0.12, 0.30, 320),

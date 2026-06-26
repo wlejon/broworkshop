@@ -117,7 +117,8 @@ export function createVoice(opts = {}) {
     let loggedDisable = false;
 
     const clipCache = new Map();    // key → { clipId, durationSec } (insertion-ordered LRU)
-    const pendingPlays = [];        // { clipId, gain, framesLeft }
+    const pendingPlays = [];        // { clipId, gain, framesLeft, speakerId, act }
+    const activePlaybacks = new Map(); // speakerId → { playbackId, endTimer, resolve } (current sounding line)
 
     function logOnce(msg) {
         voice.debug.lastError = msg;
@@ -183,7 +184,12 @@ export function createVoice(opts = {}) {
             const pp = pendingPlays[i];
             if (--pp.framesLeft <= 0) {
                 const ctx = getAudioCtx();
-                if (ctx) { try { ctx.playClip(pp.clipId, pp.gain, false); } catch (e) {} }
+                if (ctx) {
+                    // Capture the playbackId so stop(speakerId) can halt THIS clip if
+                    // the model cuts the line off mid-playback.
+                    try { const pid = ctx.playClip(pp.clipId, pp.gain, false); if (pp.act) pp.act.playbackId = pid; }
+                    catch (e) {}
+                }
                 pendingPlays.splice(i, 1);
             }
         }
@@ -236,7 +242,11 @@ export function createVoice(opts = {}) {
     // Schedule a clip to play a few frames after it was uploaded, then mark it as
     // the current utterance and resolve the awaiter when it finishes.
     function playUtterance(speakerId, text, clipId, durationSec, item) {
-        if (clipId >= 0) pendingPlays.push({ clipId, gain: PLAY_GAIN, framesLeft: PLAY_DELAY_FR });
+        // Track this as the speaker's current sounding line so stop(speakerId) can
+        // halt it. The endTimer below is the natural end; stop() clears it early.
+        const act = { playbackId: -1, endTimer: null, resolve: item.resolve };
+        activePlaybacks.set(speakerId, act);
+        if (clipId >= 0) pendingPlays.push({ clipId, gain: PLAY_GAIN, framesLeft: PLAY_DELAY_FR, speakerId, act });
         const endsAt = Date.now() + durationSec * 1000;
         voice.currentUtterance = { speakerId, text, durationSec, endsAt };
         // Report the real length the moment playback begins, so the model's
@@ -249,13 +259,44 @@ export function createVoice(opts = {}) {
         // (world.js) keeps each individual from overlapping THEMSELVES.
         busy = false;
         setTimeout(drain, 0);
-        setTimeout(() => {
+        act.endTimer = setTimeout(() => {
+            if (activePlaybacks.get(speakerId) === act) activePlaybacks.delete(speakerId);
             if (voice.currentUtterance && voice.currentUtterance.endsAt === endsAt) {
                 voice.currentUtterance = null;
             }
             try { item.resolve(durationSec); } catch (e) {}
             try { if (item.onSpoken) item.onSpoken(durationSec); } catch (e) {}
         }, durationSec * 1000 + GAP_MS);
+    }
+
+    // stop(speakerId) — cut off everything in flight for one speaker: drop their
+    // queued (not-yet-synthesized) lines, cancel any not-yet-triggered deferred
+    // play, and halt the clip currently sounding. Used when the model coalesces a
+    // new line into someone mid-sentence, so the recombined utterance replaces the
+    // old audio instead of overlapping it. Awaiters resolve(0) so nothing hangs.
+    function stop(speakerId) {
+        for (let i = queue.length - 1; i >= 0; i--) {
+            if (queue[i].speakerId === speakerId) {
+                const it = queue.splice(i, 1)[0];
+                try { it.resolve(0); } catch (e) {}
+            }
+        }
+        for (let i = pendingPlays.length - 1; i >= 0; i--) {
+            if (pendingPlays[i].speakerId === speakerId) pendingPlays.splice(i, 1);
+        }
+        const act = activePlaybacks.get(speakerId);
+        if (act) {
+            if (act.playbackId >= 0) {
+                const ctx = getAudioCtx();
+                if (ctx) { try { ctx.stopPlayback(act.playbackId); } catch (e) {} }
+            }
+            if (act.endTimer) { try { clearTimeout(act.endTimer); } catch (e) {} }
+            activePlaybacks.delete(speakerId);
+            try { act.resolve(0); } catch (e) {}
+        }
+        if (voice.currentUtterance && voice.currentUtterance.speakerId === speakerId) {
+            voice.currentUtterance = null;
+        }
     }
 
     // ── the drain loop — one synthesis at a time ─────────────────────────────
@@ -370,6 +411,7 @@ export function createVoice(opts = {}) {
 
     voice.speak = speak;
     voice.speaking = speaking;
+    voice.stop = stop;
     voice.load = load;
     load();
     return voice;
