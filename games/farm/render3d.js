@@ -14,7 +14,18 @@
 
 import {
     GRID, REGIONS, COLORS, ANIMAL_KINDS, CROP_KINDS, ROLE_COLOR,
+    WORKER, staminaMaxFor,
 } from '/app/defs.js';
+
+// Short station tags shown under a worker's name (which patch they own).
+const STATION_SHORT = { pasture: 'Pasture', coop: 'Coop', meadow: 'Meadow', garden: 'Garden' };
+
+// HTML-escape model-authored strings (names, speech) before they go into a
+// billboard's innerHTML.
+function esc(s) {
+    return String(s).replace(/[&<>"]/g, (c) =>
+        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
 
 // --- colour helpers -------------------------------------------------------
 // The PBR shader and the TileWorld palette both take LINEAR RGB; CSS hex is
@@ -164,6 +175,117 @@ export function createRenderer(scene, world) {
     const foremanNode = world.foreman ? makePerson(lin('#b5343a')) : null;
     const npcNodes = world.npcs.map((n) => makePerson(lin(ROLE_COLOR[n.role] || '#caa86a')));
 
+    // --- in-world labels (name tags + speech bubbles) ----------------------
+    // Each person carries one HtmlNode billboard floating above the head. The
+    // surface is bottom-anchored: the name pill sits just over the head and a
+    // speech bubble (when live) grows upward into the empty space above. We
+    // only re-rasterize (setHtml) when the rendered string actually changes,
+    // and just move the worldAnchor each frame.
+    const LABEL = { w: 320, h: 220, ppu: 100 };   // 3.2 × 2.2 world units
+    const LABEL_Y = 1.15 + (LABEL.h / LABEL.ppu) / 2;   // head-top + half surface
+    function makeLabel(accent) {
+        const node = scene.createHtmlNode({
+            width: LABEL.w, height: LABEL.h, pxPerUnit: LABEL.ppu,
+            worldAnchor: [0, LABEL_Y, 0], billboard: 'full', html: '',
+        });
+        return { node, accent, last: null };
+    }
+    function pillHTML(name, accent) {
+        return `<div style="display:inline-block;padding:3px 11px;border-radius:8px;`
+            + `background:rgba(20,22,28,0.72);border:2px solid ${accent};`
+            + `color:#fff;font:600 30px sans-serif;white-space:nowrap;`
+            + `text-shadow:0 1px 2px #000">${esc(name)}</div>`;
+    }
+    function barHTML(frac, color) {
+        const w = Math.round(clamp01(frac) * 100);
+        return `<div style="width:150px;height:9px;margin-top:4px;border-radius:5px;`
+            + `background:rgba(0,0,0,0.55);overflow:hidden">`
+            + `<div style="width:${w}%;height:100%;background:${color}"></div></div>`;
+    }
+    function tagHTML(text, color) {
+        return `<div style="margin-top:3px;color:${color};font:500 22px sans-serif;`
+            + `text-shadow:0 1px 2px #000">${esc(text)}</div>`;
+    }
+    function bubbleHTML(text) {
+        return `<div style="max-width:300px;margin-bottom:7px;padding:6px 12px;`
+            + `border-radius:11px;background:rgba(250,250,245,0.96);`
+            + `border:2px solid rgba(0,0,0,0.35);color:#1a1a1a;`
+            + `font:500 26px sans-serif;line-height:1.15;text-align:center">`
+            + `${esc(text)}</div>`;
+    }
+    function wrap(inner) {
+        return `<div style="display:flex;flex-direction:column;align-items:center;`
+            + `justify-content:flex-end;width:${LABEL.w}px;height:${LABEL.h}px;`
+            + `font-family:sans-serif">${inner}</div>`;
+    }
+    // Build the label HTML for a person; `kind` tweaks which rows appear.
+    function personLabelHTML(p, kind, now) {
+        let s = '';
+        if (p.speech && now < p.speech.until && p.speech.text)
+            s += bubbleHTML(p.speech.text);
+        const accent = kind === 'player' ? '#4a78d0'
+                     : kind === 'foreman' ? '#b5343a'
+                     : (ROLE_COLOR[p.role] || '#caa86a');
+        s += pillHTML(p.name || (kind === 'player' ? 'You' : '?'), accent);
+        if (kind === 'worker') {
+            if (p.stamina != null) {
+                const f = p.stamina / staminaMaxFor(p);
+                const col = p.stamina < 25 ? '#d6453a' : p.stamina < 55 ? '#e0b94a' : '#6fc24a';
+                s += barHTML(f, col);
+            }
+            const st = p.state;
+            let line = null, col = 'rgba(220,235,210,0.92)';
+            if (st === 'sleeping') { line = 'sleeping'; col = '#bfe0ff'; }
+            else if (st === 'resting') { line = 'resting'; col = '#9ec6f0'; }
+            else if (st === 'eating') { line = 'eating'; col = '#e8c662'; }
+            else if (st === 'recovering') { line = 'recovering'; col = '#7fd0a0'; }
+            else if (p.station) line = STATION_SHORT[p.station] || p.station;
+            const crit = (p.hydration != null && p.hydration < WORKER.thirsty)
+                || (p.energy != null && p.energy < WORKER.hungry)
+                || (p.stamina != null && p.stamina < WORKER.exhausted)
+                || (p.health != null && p.health < WORKER.healthForce);
+            if (crit) { line = (line ? line + '  ' : '') + '⚠'; col = '#ff8a7a'; }
+            if (line) s += tagHTML(line, col);
+        }
+        return wrap(s);
+    }
+    function updateLabel(lbl, p, kind, now) {
+        if (!p) { lbl.node.visible = false; return; }
+        lbl.node.visible = true;
+        lbl.node.worldAnchor = [p.x, LABEL_Y, p.y];
+        const html = personLabelHTML(p, kind, now);
+        if (html !== lbl.last) { lbl.node.setHtml(html); lbl.last = html; }
+    }
+    const playerLabel  = makeLabel('#4a78d0');
+    const foremanLabel = world.foreman ? makeLabel('#b5343a') : null;
+    const npcLabels = world.npcs.map((n) => makeLabel(ROLE_COLOR[n.role] || '#caa86a'));
+
+    // --- static region name labels (orientation) ---------------------------
+    // One floating tag over each building / pen / field so the board reads at a
+    // glance. Placed above the tallest geometry in that footprint.
+    const REGION_LABEL_Y = {
+        farmhouse: 3.0, barn: 3.4, silo: 5.2, well: 1.4,
+        field: 0.5, pen: 0.5,
+    };
+    for (const r of REGIONS) {
+        if (!r.label) continue;
+        const b = regionBox(r);
+        const y = REGION_LABEL_Y[r.type] != null ? REGION_LABEL_Y[r.type] : 1.5;
+        const building = r.type !== 'field' && r.type !== 'pen';
+        const accent = building ? 'rgba(255,255,255,0.5)' : 'rgba(255,236,180,0.55)';
+        const col = building ? '#ffffff' : '#ffe9b0';
+        scene.createHtmlNode({
+            width: 360, height: 70, pxPerUnit: 110,
+            worldAnchor: [b.cx, y, b.cz], billboard: 'full',
+            html: `<div style="display:flex;align-items:center;justify-content:center;`
+                + `width:360px;height:70px;font-family:sans-serif">`
+                + `<div style="padding:3px 14px;border-radius:9px;`
+                + `background:rgba(20,22,28,0.5);border:2px solid ${accent};`
+                + `color:${col};font:600 30px sans-serif;white-space:nowrap;`
+                + `text-shadow:0 1px 3px #000">${esc(r.label)}</div></div>`,
+        });
+    }
+
     // --- per-frame camera ---------------------------------------------------
     function updateCamera(W, H) {
         const aspect = (W && H) ? W / H : 1100 / 760;
@@ -235,11 +357,18 @@ export function createRenderer(scene, world) {
             n.body.color = mix(n.base, lin(COLORS.needHigh), t * 0.6);
         }
 
+        const now = world.clock.t;
         if (world.player) placePerson(playerNode, world.player.x, world.player.y);
         if (foremanNode && world.foreman) placePerson(foremanNode, world.foreman.x, world.foreman.y);
         for (let i = 0; i < world.npcs.length; i++) {
             const n = world.npcs[i]; placePerson(npcNodes[i], n.x, n.y);
         }
+
+        // floating labels follow their actor and re-rasterize only on change
+        updateLabel(playerLabel, world.player, 'player', now);
+        if (foremanLabel) updateLabel(foremanLabel, world.foreman, 'foreman', now);
+        for (let i = 0; i < world.npcs.length; i++)
+            updateLabel(npcLabels[i], world.npcs[i], 'worker', now);
     }
 
     // --- screen -> tile picking (ground-plane intersect) -------------------
