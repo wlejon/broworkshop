@@ -13,12 +13,8 @@
 // frame from the live world — the renderer never allocates per frame.
 
 import {
-    GRID, REGIONS, COLORS, ANIMAL_KINDS, CROP_KINDS, ROLE_COLOR,
-    WORKER, staminaMaxFor,
+    GRID, REGIONS, COLORS, ANIMAL_KINDS, CROP_KINDS, ROLE_COLOR, WORKER,
 } from '/app/defs.js';
-
-// Short station tags shown under a worker's name (which patch they own).
-const STATION_SHORT = { pasture: 'Pasture', coop: 'Coop', meadow: 'Meadow', garden: 'Garden' };
 
 // HTML-escape model-authored strings (names, speech) before they go into a
 // billboard's innerHTML.
@@ -52,7 +48,7 @@ function lerp(a, b, t) { return a + (b - a) * t; }
 // Board centre (in tile/world units) and camera framing.
 const CX = GRID.cols / 2;   // 20
 const CZ = GRID.rows / 2;   // 14
-const CAM = { dist: 24, height: 30, view: 33 };  // iso offset + ortho view height
+const CAM = { dist: 24, height: 30, view: 29 };  // iso offset + ortho view height
 
 export function createRenderer(scene, world) {
     // --- lighting + tonemap ------------------------------------------------
@@ -161,15 +157,15 @@ export function createRenderer(scene, world) {
 
     // --- people (player, foreman, workers) ---------------------------------
     function makePerson(bodyColor) {
-        const body = scene.createMesh({ mesh: 'cylinder', color: bodyColor, roughness: 0.8 });
-        body.scaleX = 0.44; body.scaleZ = 0.44; body.scaleY = 0.7;
+        const body = scene.createMesh({ mesh: 'capsule', color: bodyColor, roughness: 0.8 });
+        body.scaleX = 0.62; body.scaleZ = 0.62; body.scaleY = 1.2;
         const head = scene.createMesh({ mesh: 'sphere', color: lin('#e8c9a0'), roughness: 0.7 });
-        head.scaleX = 0.34; head.scaleY = 0.34; head.scaleZ = 0.34;
+        head.scaleX = 0.46; head.scaleY = 0.46; head.scaleZ = 0.46;
         return { body, head };
     }
     function placePerson(p, x, y) {
-        p.body.x = x; p.body.z = y; p.body.y = 0.35;
-        p.head.x = x; p.head.z = y; p.head.y = 0.82;
+        p.body.x = x; p.body.z = y; p.body.y = 0.62;
+        p.head.x = x; p.head.z = y; p.head.y = 1.32;
     }
     const playerNode  = makePerson(lin('#4a78d0'));
     const foremanNode = world.foreman ? makePerson(lin('#b5343a')) : null;
@@ -181,8 +177,8 @@ export function createRenderer(scene, world) {
     // speech bubble (when live) grows upward into the empty space above. We
     // only re-rasterize (setHtml) when the rendered string actually changes,
     // and just move the worldAnchor each frame.
-    const LABEL = { w: 320, h: 220, ppu: 100 };   // 3.2 × 2.2 world units
-    const LABEL_Y = 1.15 + (LABEL.h / LABEL.ppu) / 2;   // head-top + half surface
+    const LABEL = { w: 360, h: 150, ppu: 88 };   // ~4.1 × 1.7 world units
+    const LABEL_Y = 1.6 + (LABEL.h / LABEL.ppu) / 2;   // head-top + half surface
     function makeLabel(accent) {
         const node = scene.createHtmlNode({
             width: LABEL.w, height: LABEL.h, pxPerUnit: LABEL.ppu,
@@ -196,16 +192,6 @@ export function createRenderer(scene, world) {
             + `color:#fff;font:600 30px sans-serif;white-space:nowrap;`
             + `text-shadow:0 1px 2px #000">${esc(name)}</div>`;
     }
-    function barHTML(frac, color) {
-        const w = Math.round(clamp01(frac) * 100);
-        return `<div style="width:150px;height:9px;margin-top:4px;border-radius:5px;`
-            + `background:rgba(0,0,0,0.55);overflow:hidden">`
-            + `<div style="width:${w}%;height:100%;background:${color}"></div></div>`;
-    }
-    function tagHTML(text, color) {
-        return `<div style="margin-top:3px;color:${color};font:500 22px sans-serif;`
-            + `text-shadow:0 1px 2px #000">${esc(text)}</div>`;
-    }
     function bubbleHTML(text) {
         return `<div style="max-width:300px;margin-bottom:7px;padding:6px 12px;`
             + `border-radius:11px;background:rgba(250,250,245,0.96);`
@@ -218,7 +204,10 @@ export function createRenderer(scene, world) {
             + `justify-content:flex-end;width:${LABEL.w}px;height:${LABEL.h}px;`
             + `font-family:sans-serif">${inner}</div>`;
     }
-    // Build the label HTML for a person; `kind` tweaks which rows appear.
+    // Build the label HTML for a person: a name pill, plus a speech bubble when
+    // a line is live, plus a small ⚠ on the pill for a worker in critical need.
+    // Detailed status (stamina / station / state) lives in the side panel, so we
+    // deliberately keep the in-world tag minimal to avoid clutter.
     function personLabelHTML(p, kind, now) {
         let s = '';
         if (p.speech && now < p.speech.until && p.speech.text)
@@ -226,27 +215,15 @@ export function createRenderer(scene, world) {
         const accent = kind === 'player' ? '#4a78d0'
                      : kind === 'foreman' ? '#b5343a'
                      : (ROLE_COLOR[p.role] || '#caa86a');
-        s += pillHTML(p.name || (kind === 'player' ? 'You' : '?'), accent);
+        let name = p.name || (kind === 'player' ? 'You' : '?');
         if (kind === 'worker') {
-            if (p.stamina != null) {
-                const f = p.stamina / staminaMaxFor(p);
-                const col = p.stamina < 25 ? '#d6453a' : p.stamina < 55 ? '#e0b94a' : '#6fc24a';
-                s += barHTML(f, col);
-            }
-            const st = p.state;
-            let line = null, col = 'rgba(220,235,210,0.92)';
-            if (st === 'sleeping') { line = 'sleeping'; col = '#bfe0ff'; }
-            else if (st === 'resting') { line = 'resting'; col = '#9ec6f0'; }
-            else if (st === 'eating') { line = 'eating'; col = '#e8c662'; }
-            else if (st === 'recovering') { line = 'recovering'; col = '#7fd0a0'; }
-            else if (p.station) line = STATION_SHORT[p.station] || p.station;
             const crit = (p.hydration != null && p.hydration < WORKER.thirsty)
                 || (p.energy != null && p.energy < WORKER.hungry)
                 || (p.stamina != null && p.stamina < WORKER.exhausted)
                 || (p.health != null && p.health < WORKER.healthForce);
-            if (crit) { line = (line ? line + '  ' : '') + '⚠'; col = '#ff8a7a'; }
-            if (line) s += tagHTML(line, col);
+            if (crit) name += ' ⚠';
         }
+        s += pillHTML(name, accent);
         return wrap(s);
     }
     function updateLabel(lbl, p, kind, now) {
