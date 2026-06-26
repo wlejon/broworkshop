@@ -19,6 +19,7 @@ import {
 } from './defs.js';
 import { createEnv, stepEnv, envObserve, envAlerts } from './env.js';
 import { createMarket, stepMarket, marketObserve, marketAlerts } from './market.js';
+import { stepPerception, SIGHT_RADIUS } from './knowledge.js';
 
 // ---- life-cycle tuning ------------------------------------------------------
 const YOUNG_MS = 45000;     // age below which an animal is 'young' (no produce)
@@ -525,6 +526,11 @@ export function createWorld(opts = {}) {
             world.foreman.speech = null;
         }
 
+        // Perception: every agent (workers, Foreman, player) learns first-hand
+        // what's near them right now — the substrate the agent layer dispatches
+        // on and the HUD reflects. Runs AFTER positions settle so sight is current.
+        stepPerception(world);
+
         // Drive the serialized speech channel: one line audible/visible at a time.
         stepSpeech();
     }
@@ -957,6 +963,7 @@ export function createWorld(opts = {}) {
         },
     };
 
+    world.sightRadius = SIGHT_RADIUS;   // how far an agent sees first-hand (HUD + tests)
     world.step = step;
     world.observe = observe;
     world.actions = actions;
