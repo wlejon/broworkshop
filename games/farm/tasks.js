@@ -446,6 +446,19 @@ export function buildWeed(world, cropId) {
     ]);
 }
 
+// Walk to the Foreman's post and give a brief status report. Speaking within his
+// earshot hands the worker's first-hand beliefs to him (propagateSpeech, the
+// word-of-mouth channel) — this is how central command's picture of the field
+// stays current. Plain data; npcId stamps who's talking. Carries no work target.
+export function buildReport(world, npcId, line) {
+    const f = world.foreman || { x: 22, y: 12 };
+    return makeTask('report', null, [
+        { type: 'move', x: f.x, y: f.y + FRONT_GAP, label: 'Foreman' },
+        { type: 'say', speaker: npcId, text: line || 'Reporting in.' },
+        { type: 'wait', ms: 120 },
+    ]);
+}
+
 // Walk into a station's work-area to SEE (first-hand) what it currently needs.
 // Dispatched when a worker has nothing it KNOWS to do and isn't already near the
 // station: walking there refreshes its belief (senseInto, every step within

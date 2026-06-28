@@ -15,7 +15,7 @@
 // station. Care/sleep still preempt. decide() is the entire contract.
 
 import {
-    buildSleep, buildRecover, buildAssessStation, prependBriefing,
+    buildSleep, buildRecover, buildAssessStation, buildReport, prependBriefing,
 } from './tasks.js';
 import { WORKER, STATIONS } from './defs.js';
 import { stationChores, stationById, assignStations } from './stations.js';
@@ -40,6 +40,14 @@ const REPORT_ACKS = ['Good work today, everyone.', 'Solid day, team.',
 // A quiet-station worker only lends a hand to another station for work at least
 // this urgent (survival-grade water/feed/tend/harvest), never low upkeep.
 const ASSIST_MIN = 55;
+
+// Central-command information loop. A quiet worker checks in with the Foreman
+// this often, refreshing his picture of the field; a station he hasn't heard
+// about in STALE_REPORT gets a worker sent to look (turning uncertainty into a
+// fresh first-hand read). These cadences set how far behind reality the
+// Foreman's dispatch can drift — the source of his honest mistakes.
+const REPORT_INTERVAL = 22000;   // ms between a spare worker's voluntary check-ins
+const STALE_REPORT    = 38000;   // ms a station may go unheard-of before he investigates
 
 // ---- economic policy (instant management transactions) ----------------------
 // The buy/sell layer the LLM will later replace. Realize produce for gold and
@@ -155,70 +163,81 @@ export function createOrchestrator() {
             if (!isNight && n.stamina < WORKER.staminaRest) world.say(n.id, 'Need a breather.');
         }
 
-        // --- station servicing ----------------------------------------------
-        // Each idle worker pulls the top chore at ITS station; if its station is
-        // quiet it assists the neediest other station's urgent work. The briefing
-        // (walk to the Foreman, hear the assignment, ack) is prepended ONLY when
-        // the worker was just (re)assigned — otherwise it just goes.
+        // --- station servicing: central command on reported word -------------
+        // Two pictures are in play. A worker AT its station sees it first-hand, so
+        // it handles its own patch on fresh truth — the survival floor that never
+        // goes blind. Everything else is the FOREMAN's call, and he decides on HIS
+        // picture, which is only as fresh as the last report he heard. So he sends
+        // help where he believes it's needed (sometimes wrong), sends a hand to
+        // LOOK at a station that's gone quiet, and otherwise a spare worker checks
+        // in to keep his picture current. Honest mistakes, made on stale word.
         const idle = world.npcs.filter((n) => n.task == null);
         if (idle.length === 0) return;
 
+        const now = world.clock.t;
+        const fo = believedObserve(world, world.foreman);   // central command's (lagging) view
         const assigned = new Set();
+        const free = (j) => j && !inflight.has(j.target) && !assigned.has(j.target);
+        const take = (n, task, target) => {
+            task.npcId = n.id;
+            maybeBrief(world, n, task);
+            n.task = task;
+            n.state = 'working';
+            if (target) { inflight.add(target); assigned.add(target); }
+        };
+
         for (const n of idle) {
             if (!n.station) continue;   // assignStations should have covered all
 
-            // The worker decides on ITS OWN beliefs: its station as it last saw it,
-            // plus whatever it has overheard about the others.
+            // 1) Mind your own patch, on what you can SEE there (first-hand).
             const bo = believedObserve(world, n);
-
-            let chores = stationChores(world, bo, n.station)
-                .filter((j) => !inflight.has(j.target) && !assigned.has(j.target));
-            let job = chores[0];
-
-            if (!job) {
-                // Overflow: lend a hand to the neediest OTHER station's urgent
-                // work — but only ones the worker actually KNOWS need help (seen
-                // recently or heard by word of mouth). You can't assist a problem
-                // nobody told you about.
-                const others = [];
-                for (const st of STATIONS) {
-                    if (st.id === n.station) continue;
-                    for (const j of stationChores(world, bo, st.id)) {
-                        if (j.priority >= ASSIST_MIN && !inflight.has(j.target) && !assigned.has(j.target)) {
-                            others.push(j);
-                        }
-                    }
-                }
-                job = others.sort((a, b) => b.priority - a.priority)[0];
-            }
-
-            if (!job) {
-                // Nothing the worker knows to do. Rather than freeze on ignorance,
-                // go LOOK: walk to a station to refresh first-hand belief. The night
-                // watch (lone cover) tours the station it's known about longest-ago,
-                // so coverage keeps circulating; everyone else just minds their own
-                // post. Skip if already there (genuinely idle, station quiet).
-                const target = (isNight && n.id === watchId)
-                    ? stalestStation(world, n) : n.station;
-                if (target && !nearStation(n, target)) {
-                    const task = buildAssessStation(world, target);
-                    task.npcId = n.id;
-                    maybeBrief(world, n, task);
-                    n.task = task;
-                    n.state = 'working';
-                }
+            let job = stationChores(world, bo, n.station).filter(free)[0];
+            if (job) {
+                const task = job.build();
+                task.role = job.role;   // lets the executor apply the specialist bonus
+                take(n, task, job.target);
                 continue;
             }
 
-            const task = job.build();
-            task.npcId = n.id;
-            task.role = job.role;   // lets the executor apply the specialist bonus
-            maybeBrief(world, n, task);
+            // 2) The Foreman reallocates this spare hand on HIS picture — help
+            //    where central command BELIEVES it's needed, which may already be
+            //    handled (a wasted trip) or miss a problem he hasn't heard of.
+            const others = [];
+            for (const st of STATIONS) {
+                if (st.id === n.station) continue;
+                for (const j of stationChores(world, fo, st.id)) {
+                    if (j.priority >= ASSIST_MIN && free(j)) others.push(j);
+                }
+            }
+            job = others.sort((a, b) => b.priority - a.priority)[0];
+            if (job) {
+                const task = job.build();
+                task.role = job.role;
+                take(n, task, job.target);
+                continue;
+            }
 
-            n.task = task;
-            n.state = 'working';
-            inflight.add(job.target);
-            assigned.add(job.target);
+            // 3) Stay present on your own patch: if you've drifted off it, head
+            //    back so it never goes unwatched (and your read of it stays fresh).
+            if (!nearStation(n, n.station)) {
+                take(n, buildAssessStation(world, n.station), null);
+                continue;
+            }
+
+            // 4) Investigate for the Foreman: a station he hasn't heard about in a
+            //    while (the night watch, lone cover, tours the stalest aggressively).
+            const stale = staleStationForForeman(world, now, isNight && n.id === watchId);
+            if (stale && !nearStation(n, stale)) {
+                take(n, buildAssessStation(world, stale), null);
+                continue;
+            }
+
+            // 5) Nothing pressing: check in with the Foreman so his picture stays
+            //    current — a quiet worker reports rather than standing idle.
+            if (now - (n._lastReport || 0) >= REPORT_INTERVAL) {
+                n._lastReport = now;
+                take(n, buildReport(world, n.id, reportLine(n, bo)), null);
+            }
         }
     }
 
@@ -245,16 +264,37 @@ function maybeBrief(world, n, task) {
     n._justAssigned = false;
 }
 
-// The station this agent has gone longest without learning about (Infinity for
-// one it has never seen). The night watch heads there next, so its rounds keep
-// every station's knowledge — and thus its service — from going stale.
-function stalestStation(world, agent) {
-    if (!agent.beliefs) return agent.station || (STATIONS[0] && STATIONS[0].id) || null;
-    const now = world.clock.t;
+// The station the FOREMAN has gone longest without hearing about (Infinity for
+// one he's never heard of). He sends a hand to look there, turning his oldest
+// uncertainty into a fresh read. `aggressive` (the lone night watch) always
+// returns the stalest so coverage keeps circulating; otherwise only one that has
+// gone quiet past STALE_REPORT warrants pulling someone to investigate.
+function staleStationForForeman(world, now, aggressive) {
+    const b = world.foreman && world.foreman.beliefs;
+    if (!b) return STATIONS[0] ? STATIONS[0].id : null;
     let best = null, bestAge = -1;
     for (const st of STATIONS) {
-        const age = agent.beliefs.age('station:' + st.id, now);
+        const age = b.age('station:' + st.id, now);
         if (age > bestAge) { bestAge = age; best = st.id; }
     }
-    return best;
+    if (aggressive) return best;
+    return bestAge > STALE_REPORT ? best : null;
+}
+
+// A short, flavorful status line for a worker's check-in, drawn from what it
+// last saw at its own station (bo = its beliefs). Content is cosmetic — the
+// REPORT's real job is to carry those beliefs to the Foreman by speaking near
+// him — but a true-to-its-knowledge line reads better than rote "checking in".
+function reportLine(n, bo) {
+    const st = stationById(n.station);
+    const label = st ? st.label : n.station;
+    if (st && st.kind === 'animal') {
+        const herd = bo.animals.filter((a) => a.penId === st.penId);
+        if (herd.some((a) => a.sick)) return `${label}: one of them's ailing.`;
+        if (herd.some((a) => a.thirst >= 55 || a.hunger >= 55)) return `${label} will want a top-up soon.`;
+        return `${label}'s all squared away.`;
+    }
+    if (bo.crops.some((c) => c.stage === 'ripe')) return `${label}: there's a crop ready to bring in.`;
+    if (bo.crops.some((c) => c.stage !== 'empty' && c.moisture < 25)) return `${label} could use watering.`;
+    return `${label}'s looking good.`;
 }
