@@ -15,7 +15,7 @@
 // exact fields stations.js reads, so a believed world drops into stationChores
 // unchanged (see believedObserve).
 
-import { REGIONS, PENS, STATIONS, CROP_KINDS } from './defs.js';
+import { REGIONS, STATIONS, CROP_KINDS } from './defs.js';
 
 const r1 = (v) => Math.round(v);
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);

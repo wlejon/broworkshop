@@ -1,7 +1,7 @@
 // defs.js — static farm definitions. No state, no DOM, no canvas.
 //
 // This is the data the simulation (world.js) instantiates from and the
-// renderer (render.js) reads for colors/labels. Tile coordinates are in
+// renderer (render3d.js) reads for colors/labels. Tile coordinates are in
 // grid space (0..GRID.cols, 0..GRID.rows); world entities live in the same
 // continuous tile space so the renderer only needs one tile->pixel map.
 
@@ -283,11 +283,6 @@ export function moveSpeedMul(n) {
     if (n && n.health != null && n.health < WORKER.weakened) m *= WORKER.weakenedSpeedMul;
     return m;
 }
-// A worker whose health has fallen into the weakened band (moves slower, reads
-// as "run down" in the HUD/alerts).
-export function isWeakened(n) {
-    return n && n.health != null && n.health < WORKER.weakened;
-}
 // Task-proficiency multiplier for a work domain ('husbandry' | 'farming' | null).
 // Higher relevant skill works faster; a floor keeps a novice from crawling.
 export function proficiencyMul(n, domain) {
@@ -348,10 +343,6 @@ export const WORKER = {
     healthOk:       65,    // recover visit heals to at least this
     recoverMaxMs:   12000, // safety cap on a recover visit's dwell (never wedge)
 };
-// Specialist task-speed is now driven by the worker's Husbandry/Farming skill
-// (proficiencyMul), superseding this flat per-role bonus. Kept for reference.
-export const ROLE_SPEED_BONUS = 1.30;
-
 // Per-role tint for render + HUD.
 export const ROLE_COLOR = { rancher: '#e89a4a', gardener: '#6fc24a', farmhand: '#5aa6e0' };
 

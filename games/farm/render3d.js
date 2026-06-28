@@ -1,6 +1,6 @@
 // render3d.js — isometric 3D renderer for the farm, through bro's scene graph.
 //
-// Replaces the flat 2D-canvas render.js. The farm model is pure tile space
+// The farm model is pure tile space
 // (x in [0..GRID.cols), y in [0..GRID.rows), continuous floats); this renderer
 // maps that 1:1 onto a `cellSize = 1` TileWorld in the 3D scene — model (x, y)
 // becomes world (X = x, Z = y), with Y up. "Isometric" is just an orthographic
