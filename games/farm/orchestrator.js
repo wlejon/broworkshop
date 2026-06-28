@@ -15,10 +15,11 @@
 // station. Care/sleep still preempt. decide() is the entire contract.
 
 import {
-    buildSleep, buildRecover, prependBriefing,
+    buildSleep, buildRecover, buildAssessStation, prependBriefing,
 } from './tasks.js';
 import { WORKER, STATIONS } from './defs.js';
 import { stationChores, stationById, assignStations } from './stations.js';
+import { believedObserve, nearStation } from './knowledge.js';
 
 const BOSS = 'Foreman';   // orchestrator's speaker label in the dialog feed
 
@@ -91,10 +92,11 @@ export function createOrchestrator() {
     let lastReportDay = 0;    // dusk day-recap tracker
 
     function decide(world) {
-        const o = world.observe();
-
-        // Economic management runs every tick, independent of worker assignment.
-        manageEconomy(world, o);
+        // Decisions run on BELIEF, not truth. The Foreman keeps the books, so he
+        // decides the economy on his own (always-current) econ beliefs; each
+        // worker below decides chores on what IT knows. observe() is no longer
+        // consulted for dispatch — an agent acts only on what it has learned.
+        manageEconomy(world, believedObserve(world, world.foreman));
 
         // End-of-day debrief: at dusk, each worker reports the day's deeds to the
         // Foreman in a single recap (instead of narrating each chore as it goes),
@@ -165,16 +167,23 @@ export function createOrchestrator() {
         for (const n of idle) {
             if (!n.station) continue;   // assignStations should have covered all
 
-            let chores = stationChores(world, o, n.station)
+            // The worker decides on ITS OWN beliefs: its station as it last saw it,
+            // plus whatever it has overheard about the others.
+            const bo = believedObserve(world, n);
+
+            let chores = stationChores(world, bo, n.station)
                 .filter((j) => !inflight.has(j.target) && !assigned.has(j.target));
             let job = chores[0];
 
             if (!job) {
-                // Overflow: lend a hand to the neediest OTHER station's urgent work.
+                // Overflow: lend a hand to the neediest OTHER station's urgent
+                // work — but only ones the worker actually KNOWS need help (seen
+                // recently or heard by word of mouth). You can't assist a problem
+                // nobody told you about.
                 const others = [];
                 for (const st of STATIONS) {
                     if (st.id === n.station) continue;
-                    for (const j of stationChores(world, o, st.id)) {
+                    for (const j of stationChores(world, bo, st.id)) {
                         if (j.priority >= ASSIST_MIN && !inflight.has(j.target) && !assigned.has(j.target)) {
                             others.push(j);
                         }
@@ -182,20 +191,29 @@ export function createOrchestrator() {
                 }
                 job = others.sort((a, b) => b.priority - a.priority)[0];
             }
-            if (!job) continue;   // nothing pressing — idle near the station
+
+            if (!job) {
+                // Nothing the worker knows to do. Rather than freeze on ignorance,
+                // go LOOK: walk to a station to refresh first-hand belief. The night
+                // watch (lone cover) tours the station it's known about longest-ago,
+                // so coverage keeps circulating; everyone else just minds their own
+                // post. Skip if already there (genuinely idle, station quiet).
+                const target = (isNight && n.id === watchId)
+                    ? stalestStation(world, n) : n.station;
+                if (target && !nearStation(n, target)) {
+                    const task = buildAssessStation(world, target);
+                    task.npcId = n.id;
+                    maybeBrief(world, n, task);
+                    n.task = task;
+                    n.state = 'working';
+                }
+                continue;
+            }
 
             const task = job.build();
             task.npcId = n.id;
             task.role = job.role;   // lets the executor apply the specialist bonus
-
-            if (n._justAssigned) {
-                const st = stationById(n.station);
-                const order = fill(pick(STATION_BRIEF), n.name, st ? st.label : n.station);
-                const fpos = world.foreman ? { x: world.foreman.x, y: world.foreman.y }
-                                           : { x: n.x, y: n.y };
-                prependBriefing(task, { foremanId: BOSS, foremanPos: fpos, order, npcId: n.id, ack: pick(ACKS) });
-                n._justAssigned = false;
-            }
+            maybeBrief(world, n, task);
 
             n.task = task;
             n.state = 'working';
@@ -213,4 +231,30 @@ function nightWatch(world) {
     const ids = world.npcs.map((n) => n.id);
     if (ids.length === 0) return null;
     return ids[(world.clock.day) % ids.length];
+}
+
+// Prepend the morning briefing (walk to the Foreman, hear the assignment, reply)
+// to a freshly-(re)assigned worker's NEXT task — be that a chore or a go-look
+// walk — then clear the flag. No-op once the worker has been briefed for the day.
+function maybeBrief(world, n, task) {
+    if (!n._justAssigned) return;
+    const st = stationById(n.station);
+    const order = fill(pick(STATION_BRIEF), n.name, st ? st.label : n.station);
+    const fpos = world.foreman ? { x: world.foreman.x, y: world.foreman.y } : { x: n.x, y: n.y };
+    prependBriefing(task, { foremanId: BOSS, foremanPos: fpos, order, npcId: n.id, ack: pick(ACKS) });
+    n._justAssigned = false;
+}
+
+// The station this agent has gone longest without learning about (Infinity for
+// one it has never seen). The night watch heads there next, so its rounds keep
+// every station's knowledge — and thus its service — from going stale.
+function stalestStation(world, agent) {
+    if (!agent.beliefs) return agent.station || (STATIONS[0] && STATIONS[0].id) || null;
+    const now = world.clock.t;
+    let best = null, bestAge = -1;
+    for (const st of STATIONS) {
+        const age = agent.beliefs.age('station:' + st.id, now);
+        if (age > bestAge) { bestAge = age; best = st.id; }
+    }
+    return best;
 }

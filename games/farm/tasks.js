@@ -27,7 +27,7 @@
 //   say    — npc speaks this line on success (announce on completion)
 
 import {
-    REGIONS, PENS, CROP_KINDS, WORKER,
+    REGIONS, PENS, STATIONS, CROP_KINDS, WORKER,
     moveSpeedMul, proficiencyMul, STAT_XP,
 } from './defs.js';
 
@@ -443,6 +443,20 @@ export function buildWeed(world, cropId) {
         { type: 'move', x, y, label: cropId },
         { type: 'wait', ms: 200 },
         { type: 'act', verb: 'weedPlot', args: [cropId], say: 'Cleared the weeds out.' },
+    ]);
+}
+
+// Walk into a station's work-area to SEE (first-hand) what it currently needs.
+// Dispatched when a worker has nothing it KNOWS to do and isn't already near the
+// station: walking there refreshes its belief (senseInto, every step within
+// sight), so the next decision can pull real chores. Carries no dedup target —
+// it's pure information-gathering, not a unit of work.
+export function buildAssessStation(world, stationId) {
+    const st = STATIONS.find((s) => s.id === stationId);
+    const c = st ? regionCenter(st.region) : { x: 0, y: 0 };
+    return makeTask('assess:' + stationId, null, [
+        { type: 'move', x: c.x, y: c.y, label: (st && st.label) || stationId },
+        { type: 'wait', ms: 200 },
     ]);
 }
 

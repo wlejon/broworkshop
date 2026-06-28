@@ -172,6 +172,59 @@ export function stepPerception(world) {
     if (world.player) senseInto(world, world.player, now, false);
 }
 
+// ── the believed world: what decisions run on ────────────────────────────────
+// believedObserve(world, agent) — reconstruct the slice of world.observe() that
+// stations.js (stationChores) and the orchestrator's economy read, but sourced
+// ENTIRELY from `agent`'s beliefs rather than from ground truth. A station the
+// agent has never seen or heard about is simply absent, so stationChores yields
+// nothing for it: an agent cannot act on what it does not know. This is the
+// bridge that makes belief load-bearing — feed it wherever world.observe() used
+// to go. (Execution still acts on the real world; only the DECISION runs on
+// belief, so acting on a stale read just no-ops gracefully when it arrives.)
+export function believedObserve(world, agent) {
+    const o = {
+        animals: [], troughs: [], crops: [],
+        pens: {}, pending: {}, env: { plantable: [] },
+        resources: {}, barnFeed: 0, well: { level: 0, cap: 0 },
+        market: { prices: {}, level: {} },
+    };
+    const b = agent && agent.beliefs;
+    if (!b) return o;
+    for (const st of STATIONS) {
+        const snap = b.value('station:' + st.id, null);
+        if (!snap) continue;
+        if (snap.kind === 'animal') {
+            for (const a of snap.animals) o.animals.push(a);
+            for (const t of snap.troughs) o.troughs.push(t);
+            o.pens[snap.penId] = {
+                pending: snap.pen.pending, cleanliness: snap.pen.cleanliness, cap: snap.pen.cap,
+            };
+            o.pending[snap.penId] = snap.pen.pending;
+        } else if (snap.kind === 'crop') {
+            o.crops = snap.crops.slice();
+            o.env.plantable = (snap.plantable || []).slice();
+        }
+    }
+    const econ = b.value('econ', null);
+    if (econ) {
+        o.resources = { ...econ.resources };
+        o.barnFeed = econ.barnFeed;
+        o.well = { ...econ.well };
+        o.market = { prices: { ...econ.market.prices }, level: { ...econ.market.level } };
+    }
+    return o;
+}
+
+// Whether `agent` is close enough to a station's work-area to perceive it
+// first-hand right now (same radius senseInto uses). The orchestrator uses this
+// to send an idle-but-ignorant worker to LOOK rather than freeze.
+export function nearStation(agent, stationId) {
+    const st = STATIONS.find((s) => s.id === stationId);
+    if (!st) return false;
+    const reg = regionOf(st.region);
+    return reg ? distToRegion(agent.x, agent.y, reg) <= SIGHT_RADIUS : false;
+}
+
 // ── word of mouth ────────────────────────────────────────────────────────────
 // Every positioned actor that can hold beliefs.
 function allAgents(world) {
