@@ -28,6 +28,7 @@ import "/app/agents/team_mcts.js";
 import "/app/agents/layered_planner.js";
 import "/app/agents/infoset_mcts.js";
 import "/app/agents/root_parallel.js";
+import { ExitNet } from "/app/agents/exit_net.js";
 import { Render } from "/app/render.js";
 import { Scene3D } from "/app/scene_setup.js";
 import { Fog } from "/app/fog.js";
@@ -165,10 +166,80 @@ export const App = {};
         Loop.frame(state, App.canvas, dt);
     }
 
+    // File/View content for the native system menu. Every handler here
+    // reuses the exact same function the matching in-canvas control calls
+    // (Controls.resetMatch/toggleFog/togglePause, Replay.toggleRecord/
+    // togglePlay, App.setScenario) so the menu and the canvas UI can never
+    // drift out of sync with each other.
+    function setupSystemMenu() {
+        var fs = require("fs");
+
+        var scenarioItems = [];
+        var scenarioHandlers = {};
+        for (var i = 0; i < Scenarios.ALL.length; i++) {
+            (function (scn) {
+                var id = "view.scenario." + scn.id;
+                scenarioItems.push({ id: id, label: scn.name });
+                scenarioHandlers[id] = function () { App.setScenario(scn); };
+            })(Scenarios.ALL[i]);
+        }
+
+        var handlers = {
+            "file.newMatch": function () { Controls.resetMatch(App.rebuild); },
+            "file.saveReplay": function () {
+                var s = State.current;
+                if (s.recording) Replay.toggleRecord(s, document.getElementById("btn-record"));
+                if (!s._recordingPath) { UI.log("no replay to save - record one first"); return; }
+                var dest = showSaveFileDialog("Replay Files|bgar", "arena-replay.bgar");
+                if (!dest) return;
+                fs.copyFileSync(s._recordingPath, dest);
+                UI.log("replay saved -> " + dest, "log-kill");
+            },
+            "file.loadReplay": function () {
+                var files = showOpenFileDialog("Replay Files|bgar");
+                if (!files.length) return;
+                var s = State.current;
+                if (s.replayPlaying) Replay.stopPlaying(s, "replay stopped");
+                s._recordingPath = files[0];
+                Replay.togglePlay(s, document.getElementById("btn-play"));
+            },
+            "file.openCheckpoint": function () {
+                var files = showOpenFileDialog("Checkpoint Files|bgnn");
+                if (!files.length) return;
+                var bytes = new Uint8Array(fs.readFileSync(files[0]));
+                ExitNet.loadCheckpoint(bytes);
+                UI.log("checkpoint loaded -> " + files[0], "log-kill");
+            },
+            "view.fog":         function () { Controls.toggleFog(); },
+            "view.pause":       function () { Controls.togglePause(); },
+            "view.resetCamera": function () { Scene3D.resetCamera(); },
+        };
+        for (var id2 in scenarioHandlers) handlers[id2] = scenarioHandlers[id2];
+
+        installSystemMenu({
+            file: [
+                { id: "file.newMatch", label: "New Match", accel: "Ctrl+N" },
+                { separator: true },
+                { id: "file.saveReplay", label: "Save Replay As..." },
+                { id: "file.loadReplay", label: "Load Replay..." },
+                { separator: true },
+                { id: "file.openCheckpoint", label: "Open Checkpoint..." },
+            ],
+            view: [
+                { id: "view.scenario", label: "Scenario", items: scenarioItems },
+                { id: "view.fog", label: "Fog of War", checked: Fog.isEnabled() },
+                { id: "view.pause", label: "Pause", checked: false },
+                { separator: true },
+                { id: "view.resetCamera", label: "Reset Camera" },
+            ],
+            handlers: handlers,
+        });
+    }
+
     App.canvas = document.getElementById("arena");
     App.scenario = Scenarios.ALL[0];
 
-    installSystemMenu();
+    setupSystemMenu();
     UI.init();
     Scene3D.init(App.canvas);
     Controls.populateSelectors("scripted", "scripted");
@@ -187,6 +258,7 @@ export const App = {};
         App.setScenario(scn);
     };
     window.getScene = function () { return Scene3D; };
+    window.getExitNet = function () { return ExitNet; };
 
     lastT = performance.now();
     requestAnimationFrame(frame);

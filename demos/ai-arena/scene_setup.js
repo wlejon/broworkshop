@@ -47,12 +47,8 @@ export const Scene3D = {};
     var HP_BAR_H = 0.18;
     var HP_BAR_Y = 2.2;      // a bit above UNIT_Y + halfHeight + radius (1.8)
 
-    Scene3D.init = function (canvas) {
-        Scene3D.canvas = canvas;
-        Scene3D.scene = canvas.getContext("scene");
-        buildGizmos();
-
-        Scene3D.cam = Camera.createOrbit({
+    function defaultCamOpts() {
+        return {
             pivot: [0, 0, 0],
             dist: 58,
             fov: 45,
@@ -60,7 +56,22 @@ export const Scene3D = {};
             // Negative angle around +X tilts camera above the pivot looking
             // down; positive would flip it under the ground plane.
             rot: quatFromAxisAngle(1, 0, 0, -0.95),
-        });
+        };
+    }
+
+    // Restores the startup orbit — used by the system menu's Reset Camera
+    // item (View menu) so a spun-out/zoomed-in view is one click to recover.
+    Scene3D.resetCamera = function () {
+        Scene3D.cam = Camera.createOrbit(defaultCamOpts());
+        Scene3D.applyCamera();
+    };
+
+    Scene3D.init = function (canvas) {
+        Scene3D.canvas = canvas;
+        Scene3D.scene = canvas.getContext("scene");
+        buildGizmos();
+
+        Scene3D.cam = Camera.createOrbit(defaultCamOpts());
         Scene3D.applyCamera();
         // First applyCamera() above runs before htmlayout has computed the
         // canvas's box, so clientWidth/Height fall back to the canvas
