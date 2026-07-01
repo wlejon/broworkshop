@@ -9,6 +9,7 @@ import { Scene3D } from "/app/scene_setup.js";
 import { UI } from "/app/ui.js";
 import { Config } from "/app/config.js";
 import { Agents } from "/app/agents/registry.js";
+import { Panels } from "/app/ui_registry.js";
 
 export const Loop = {};
 (function () {
@@ -46,8 +47,76 @@ export const Loop = {};
         state.world.clearEvents();
     }
 
+    // Existing HUD panels, migrated onto the Panels registry (see
+    // ui_registry.js) so new modes' panels don't need another hardcoded
+    // block here — same throttle cadences as before (Config.*_HZ), same
+    // update logic, just declared instead of inlined.
+    Panels.register({
+        id: "roster",
+        throttleSec: Config.ROSTER_HZ,
+        update: function (state) {
+            UI.updateRoster(state.agents);
+        },
+    });
+
+    Panels.register({
+        id: "damageLog",
+        throttleSec: Config.ROSTER_HZ,
+        update: function (state) {
+            if (!state.pendingLog.length) return;
+            for (var pl = 0; pl < state.pendingLog.length; pl++) {
+                UI.log(state.pendingLog[pl].text, state.pendingLog[pl].cls);
+            }
+            state.pendingLog.length = 0;
+        },
+    });
+
+    Panels.register({
+        id: "observationAndMask",
+        throttleSec: Config.OBS_HZ,
+        update: function (state) {
+            var focus = state.byId[state.focusId];
+            if (!focus) return;
+            try {
+                var obs = bro.ai.game.buildObservation(focus, state.world);
+                UI.drawObservation(obs);
+                var mask = bro.ai.game.buildActionMask(focus, state.world);
+                UI.drawActionMask(mask.mask);
+            } catch (e) { /* observation may throw if agent dead */ }
+        },
+    });
+
+    Panels.register({
+        id: "reward",
+        throttleSec: Config.REWARD_HZ,
+        update: function (state) {
+            var redD = 0, blueD = 0;
+            for (var ri = 0; ri < state.agents.length; ri++) {
+                var ra = state.agents[ri];
+                var tr = state.rewards[ra.unit.id];
+                if (!tr) continue;
+                var d = tr.consume(ra, state.world);
+                var r = d.damageDealt - d.damageTaken + d.kills * 20 - d.deaths * 20;
+                if (ra.unit.teamId === 0) redD += r; else blueD += r;
+            }
+            UI.pushReward(redD, blueD);
+            UI.drawReward();
+        },
+    });
+
+    Panels.register({
+        id: "status",
+        throttleSec: Config.STATUS_HZ,
+        update: function (state) {
+            UI.updateAgentStats(Agents.collectStats(state));
+            if (state.paused) UI.setStatus("paused");
+            else if (state.recording) UI.setStatus("recording  " + state.recorder.frameCount + " frames");
+            else UI.setStatus("running  t=" + state.elapsed.toFixed(1) + "s  steps=" + state.simSteps);
+        },
+    });
+
     // Per-rAF render frame. Auto-tick handled by the scene; we just drain
-    // events, maintain replay/recording, and pump HUD panels.
+    // events, maintain replay/recording, sync the 3D scene, and pump panels.
     Loop.frame = function (state, canvas, dt) {
         if (!state.paused) {
             drainEvents(state);
@@ -66,55 +135,6 @@ export const Loop = {};
         Scene3D.update(state, dt);
         Render.tickFx(dt);
 
-        state.rosterAccum += dt;
-        if (state.rosterAccum >= Config.ROSTER_HZ) {
-            state.rosterAccum = 0;
-            UI.updateRoster(state.agents);
-            if (state.pendingLog.length) {
-                for (var pl = 0; pl < state.pendingLog.length; pl++) {
-                    UI.log(state.pendingLog[pl].text, state.pendingLog[pl].cls);
-                }
-                state.pendingLog.length = 0;
-            }
-        }
-
-        state.obsAccum += dt;
-        if (state.obsAccum >= Config.OBS_HZ) {
-            state.obsAccum = 0;
-            var focus = state.byId[state.focusId];
-            if (focus) {
-                try {
-                    var obs = bro.ai.game.buildObservation(focus, state.world);
-                    UI.drawObservation(obs);
-                    var mask = bro.ai.game.buildActionMask(focus, state.world);
-                    UI.drawActionMask(mask.mask);
-                } catch (e) { /* observation may throw if agent dead */ }
-            }
-        }
-
-        state.rewardAccum += dt;
-        if (state.rewardAccum >= Config.REWARD_HZ) {
-            state.rewardAccum = 0;
-            var redD = 0, blueD = 0;
-            for (var ri = 0; ri < state.agents.length; ri++) {
-                var ra = state.agents[ri];
-                var tr = state.rewards[ra.unit.id];
-                if (!tr) continue;
-                var d = tr.consume(ra, state.world);
-                var r = d.damageDealt - d.damageTaken + d.kills * 20 - d.deaths * 20;
-                if (ra.unit.teamId === 0) redD += r; else blueD += r;
-            }
-            UI.pushReward(redD, blueD);
-            UI.drawReward();
-        }
-
-        state.statusAccum += dt;
-        if (state.statusAccum >= Config.STATUS_HZ) {
-            state.statusAccum = 0;
-            UI.updateAgentStats(Agents.collectStats(state));
-            if (state.paused) UI.setStatus("paused");
-            else if (state.recording) UI.setStatus("recording  " + state.recorder.frameCount + " frames");
-            else UI.setStatus("running  t=" + state.elapsed.toFixed(1) + "s  steps=" + state.simSteps);
-        }
+        Panels.tick(state, dt);
     };
 })();
