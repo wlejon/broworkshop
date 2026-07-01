@@ -1,4 +1,5 @@
 import "/lib/camera.js";
+import { installSystemMenu } from "/lib/system-menu.js";
 
 // =============================================================================
 // Terrain — Infinite blocky voxel world with comprehensive UI
@@ -18,6 +19,8 @@ var scene  = canvas.getContext('scene');
 var info   = document.getElementById('info');
 var status = document.getElementById('status');
 var panel  = document.getElementById('panel');
+
+installSystemMenu();
 
 // Engine crosshair — replaces the old CSS circle
 bro.crosshair.configure({

@@ -2,5 +2,6 @@
     "app": ".",
     "title": "Voice Pipeline",
     "width": 900,
-    "height": 700
+    "height": 700,
+    "lib": "../../lib"
 }

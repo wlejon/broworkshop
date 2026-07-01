@@ -7,6 +7,7 @@ import { rave, setBadge, browseFolder, loadModel, browseFile, defaultModelDir, f
 import { genTone, decodeFileToSource, playClipId } from "/app/lib/audio.js";
 import { setSource, srcClipId, outClipId, runDecode, enc } from "/app/lib/render.js";
 import { resetAll, activePaint, paintAt, onPaintUp } from "/app/lib/curves.js";
+import { installSystemMenu } from "/lib/system-menu.js";
 
 function makeTone() {
   if (!rave) { setBadge('load a model first', true); return; }
@@ -63,4 +64,5 @@ function init() {
   if (fileExists(dir + '/config.json')) loadModel(dir);
   else setBadge('pick a RAVE model directory, then Load');
 }
+installSystemMenu();
 init();

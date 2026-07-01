@@ -2,5 +2,6 @@
     "app": ".",
     "title": "AI Arena",
     "width": 1080,
-    "height": 820
+    "height": 820,
+    "lib": "../../lib"
 }

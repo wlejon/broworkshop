@@ -23,6 +23,8 @@
 // containing 480 (Spacewar) next to it, with Steam running and logged in.
 // See README.md.
 
+import { installSystemMenu } from "/lib/system-menu.js";
+
 const $ = (s) => document.querySelector(s);
 
 // ── identity / availability strip ────────────────────────────────────────────
@@ -312,6 +314,7 @@ bro.steam.onvoicecaptured = (compressed) => {
 };
 
 // ── boot ─────────────────────────────────────────────────────────────────────
+installSystemMenu();
 (function boot() {
   refreshIdentity();
   if (bro.steam.available) {

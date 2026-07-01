@@ -1,0 +1,5 @@
+{
+    "app": ".",
+    "title": "Flora — procedural plant viewer",
+    "lib": "../../lib"
+}

@@ -19,6 +19,7 @@
 
 import { wire } from "/app/wire.js";
 import { createLighting } from "/app/lighting.js";
+import { installSystemMenu } from "/lib/system-menu.js";
 
 const canvas = document.getElementById('stage');
 const scene = canvas.getContext('scene');
@@ -649,6 +650,7 @@ function tick() {
     requestAnimationFrame(tick);
 }
 
+installSystemMenu();
 selectTod(START_PRESET);   // light the scene before the first frame
 rebuildAll();
 requestAnimationFrame(tick);

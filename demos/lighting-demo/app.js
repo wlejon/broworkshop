@@ -1,4 +1,7 @@
 import "/lib/camera.js";
+import { installSystemMenu } from "/lib/system-menu.js";
+
+installSystemMenu();
 
 const canvas = document.getElementById('stage');
 const scene = canvas.getContext('scene');

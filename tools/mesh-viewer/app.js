@@ -1196,6 +1196,10 @@ function setupMenu() {
         ]},
         { id: 'view', label: 'View', items: [
             { id: 'view.togglePanel', label: 'Hide Ops Panel', accel: 'H' },
+        ]},
+        { id: 'debug', label: 'Debug', items: [
+            { id: '__system.inspector', label: 'Inspector' },
+            { id: '__system.togglePerf', label: 'Perf HUD' },
             { separator: true },
             { id: '__system.preferences', label: 'Preferences...' },
         ]},

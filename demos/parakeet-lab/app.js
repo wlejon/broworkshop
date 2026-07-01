@@ -3,6 +3,7 @@
 // the encoder frame it was decoded from. See lib/state.js for the module map
 // and the mic/file → transcribe → timeline loop this app is built around.
 
+import { installSystemMenu } from "/lib/system-menu.js";
 import { $ } from "/app/lib/state.js";
 import { setBadge, browseFolder, loadModel, browseFile, defaultModelDir, fileExists } from "/app/lib/model.js";
 import { decodeFileToSource, recording, startRecording, stopRecording, playClipId } from "/app/lib/audio.js";
@@ -51,4 +52,5 @@ function init() {
   if (fileExists(dir + '/config.json')) loadModel(dir);
   else setBadge('pick a Parakeet checkpoint directory, then Load');
 }
+installSystemMenu();
 init();

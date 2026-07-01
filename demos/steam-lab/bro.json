@@ -2,5 +2,6 @@
     "app": ".",
     "title": "Steam Lab",
     "width": 1200,
-    "height": 840
+    "height": 840,
+    "lib": "../../lib"
 }

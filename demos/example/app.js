@@ -7,6 +7,7 @@ import "/app/views/network.js";
 import "/app/views/webgl.js";
 import "/app/views/mesh.js";
 import "/app/views/jquery.js";
+import { installSystemMenu } from "/lib/system-menu.js";
 
 var fs = require('fs');
 var content = document.getElementById('content');
@@ -44,4 +45,5 @@ for (var i = 0; i < navLinks.length; i++) {
 }
 
 window.views = window.views || {};
+installSystemMenu();
 showView('css');

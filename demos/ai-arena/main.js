@@ -26,6 +26,7 @@ import { UI } from "/app/ui.js";
 import { Replay } from "/app/replay.js";
 import { Loop } from "/app/loop.js";
 import { Controls } from "/app/controls.js";
+import { installSystemMenu } from "/lib/system-menu.js";
 
 export const App = {};
 (function () {
@@ -150,6 +151,7 @@ export const App = {};
     App.canvas = document.getElementById("arena");
     App.scenario = Scenarios.ALL[0];
 
+    installSystemMenu();
     UI.init();
     Scene3D.init(App.canvas);
     Controls.populateSelectors("scripted", "scripted");

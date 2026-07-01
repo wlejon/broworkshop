@@ -16,6 +16,10 @@ import { initSidebar } from "/app/views/sidebar.js";
 import { initLayersGrid, rebuild } from "/app/views/layers-grid.js";
 import { initPresetsUI } from "/app/views/presets-ui.js";
 import { initMic } from "/app/views/mic.js";
+import { installSystemMenu } from "/lib/system-menu.js";
+
+// Init system menu
+installSystemMenu();
 
 // Init audio engine
 engine.init();

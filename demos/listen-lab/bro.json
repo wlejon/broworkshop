@@ -1,5 +1,6 @@
 {
     "title": "Listen Lab",
     "width": 1180,
-    "height": 760
+    "height": 760,
+    "lib": "../../lib"
 }

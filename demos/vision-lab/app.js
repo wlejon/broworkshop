@@ -10,6 +10,7 @@ import { Util } from "/app/lab/util.js";
 import { Models } from "/app/lab/models.js";
 import { Stage } from "/app/lab/stage.js";
 import { Sam } from "/app/lab/sam.js";
+import { installSystemMenu } from "/lib/system-menu.js";
 
   function $(id) { return document.getElementById(id); }
   var U = Util;
@@ -624,3 +625,5 @@ import { Sam } from "/app/lab/sam.js";
   }
 
   start();
+
+  installSystemMenu();

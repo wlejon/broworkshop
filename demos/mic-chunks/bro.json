@@ -1,5 +1,6 @@
 {
     "title": "Mic Chunks",
     "width": 960,
-    "height": 600
+    "height": 600,
+    "lib": "../../lib"
 }

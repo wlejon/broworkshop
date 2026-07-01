@@ -32,6 +32,7 @@
 // with no main-thread setTimeout jitter.
 
 import * as VoiceModels from "/app/models.js";
+import { installSystemMenu } from "/lib/system-menu.js";
 
 // ─── element refs ──────────────────────────────────────────────────────────
 const $status     = document.getElementById('status');
@@ -1522,6 +1523,8 @@ window.addEventListener('keydown', (e) => {
 window.addEventListener('keyup', (e) => {
     if (e.key === ' ') { e.preventDefault(); onTalkUp(); }
 });
+
+installSystemMenu();
 
 // ─── boot after first paint ──────────────────────────────────────────────────
 // Two rAFs guarantee the splash UI has painted before we kick off the

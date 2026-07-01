@@ -10,6 +10,9 @@ import { Client } from "/app/lab/client.js";
 import { Viewport } from "/app/lab/viewport.js";
 import { Attention } from "/app/lab/attention.js";
 import { Axes } from "/app/lab/axes.js";
+import { installSystemMenu } from "/lib/system-menu.js";
+
+  installSystemMenu();
 
   const DLab = { Tokenizer, Profiles, Client, Viewport, Attention, Axes };
   function $(id) { return document.getElementById(id); }

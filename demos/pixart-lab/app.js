@@ -7,6 +7,8 @@
 // There is no conditioning-control axis seam here (it is wired for Sana and SD1.5
 // only, not PixArt's T5 branch).
 
+import { installSystemMenu } from "/lib/system-menu.js";
+
 function $(id) { return document.getElementById(id); }
 
 // ── persisted UI state ─────────────────────────────────────────────────────
@@ -193,4 +195,5 @@ function init() {
   });
 }
 
+installSystemMenu();
 init();

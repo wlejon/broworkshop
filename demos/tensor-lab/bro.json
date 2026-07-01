@@ -2,5 +2,6 @@
     "app": ".",
     "title": "Tensor Lab",
     "width": 1360,
-    "height": 860
+    "height": 860,
+    "lib": "../../lib"
 }

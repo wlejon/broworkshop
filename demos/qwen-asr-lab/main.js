@@ -12,6 +12,8 @@
 // Headless note: with no audio device the live mic can't capture; test.js
 // decodes a known clip off disk and drives the same transcribe path.
 
+import { installSystemMenu } from "/lib/system-menu.js";
+
 const fs = require('fs');
 const $ = (s) => document.querySelector(s);
 
@@ -199,6 +201,7 @@ function loadModel(dir) {
 
 // ── wire up ──────────────────────────────────────────────────────────────────
 
+installSystemMenu();
 $('#btn-load').addEventListener('click', () => loadModel($('#model-dir').value.trim()));
 $('#btn-record').addEventListener('click', () => (recording ? stopRecording() : startRecording()));
 $('#btn-loadfile').addEventListener('click', () => {

@@ -8,6 +8,8 @@
 // strength slider (value = injection norm, A↓ / B↑); Generate applies all the
 // active axes at once. At strength 0 an axis is a true no-op.
 
+import { installSystemMenu } from "/lib/system-menu.js";
+
 function $(id) { return document.getElementById(id); }
 
 // ── persisted UI state ─────────────────────────────────────────────────────
@@ -546,4 +548,5 @@ function init() {
   });
 }
 
+installSystemMenu();
 init();

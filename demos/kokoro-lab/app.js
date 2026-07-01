@@ -10,6 +10,7 @@ import { buildEmotion, resetEmotion } from "/app/lib/emotion.js";
 import { buildTimbre, resetTimbre } from "/app/lib/timbre.js";
 import { buildMascFem, resetMascFem } from "/app/lib/mascfem.js";
 import { play, saveWav } from "/app/lib/helpers.js";
+import { installSystemMenu } from "/lib/system-menu.js";
 
 // Kokoro Lab — entry point. Steer a voice through Kokoro's style space, then
 // watch and hear it take shape stage by stage. The app is split across lib/
@@ -75,3 +76,4 @@ function init() {
   switchSource(root);
 }
 init();
+installSystemMenu();

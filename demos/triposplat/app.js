@@ -10,6 +10,7 @@
 // in brodiffusion + brovisionml). Edit WEIGHTS if yours are elsewhere.
 import { Viewport } from "/app/lab/viewport.js";
 import { Client } from "/app/lab/client.js";
+import { installSystemMenu } from "/lib/system-menu.js";
 
   var WEIGHTS = {
     dinov3:   'D:/projects/brovisionml/weights/triposplat/clip_vision/dino_v3_vit_h.safetensors',
@@ -382,3 +383,5 @@ import { Client } from "/app/lab/client.js";
 
   if (document.readyState === 'complete' || document.readyState === 'interactive') start();
   else window.addEventListener('load', start);
+
+  installSystemMenu();

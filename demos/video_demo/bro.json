@@ -1,4 +1,5 @@
 {
   "name": "video_demo",
-  "main": "index.html"
+  "main": "index.html",
+  "lib": "../../lib"
 }

@@ -9,6 +9,10 @@
 // Headless note: with no audio device, bro.mic.start() can't capture, so a
 // script drives the same tap via bro.mic.feed() instead (see test.js).
 
+import { installSystemMenu } from "/lib/system-menu.js";
+
+installSystemMenu();
+
 const CHUNK_FRAMES = 160;     // 10 ms at 16 kHz
 const TARGET_RATE  = 16000;
 

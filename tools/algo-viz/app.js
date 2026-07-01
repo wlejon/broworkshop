@@ -6,6 +6,7 @@ import { VIZ } from "/app/viz/_registry.js";
 import "/app/viz/pathfinding.js";
 import "/app/viz/noise.js";
 import "/app/viz/isosurface.js";
+import { installSystemMenu } from "/lib/system-menu.js";
 
 const sidebarEl = document.getElementById('viz-list');
 const stageEl   = document.getElementById('stage');
@@ -68,5 +69,6 @@ function activate(id) {
     }
 }
 
+installSystemMenu();
 buildSidebar();
 if (VIZ.length) activate(VIZ[0].id);

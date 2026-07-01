@@ -10,6 +10,8 @@
 // dropdowns offer a curated common set; the model itself knows 200+
 // (model.languageCount), and model.hasLanguage(code) checks any code.
 
+import { installSystemMenu } from "/lib/system-menu.js";
+
 const fs = require('fs');
 const $ = (s) => document.querySelector(s);
 
@@ -153,6 +155,7 @@ function loadModel(dir) {
 
 // ── wire up ──────────────────────────────────────────────────────────────────
 
+installSystemMenu();
 fillLangSelects();
 $('#btn-load').addEventListener('click', () => loadModel($('#model-dir').value.trim()));
 $('#btn-translate').addEventListener('click', runTranslate);

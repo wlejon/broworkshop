@@ -1,5 +1,6 @@
 {
   "title": "Spatial Hash 3D",
   "width": 1280,
-  "height": 800
+  "height": 800,
+  "lib": "../../lib"
 }

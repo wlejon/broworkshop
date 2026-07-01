@@ -9,6 +9,7 @@ import { buildDesign } from "/app/lib/design.js";
 import { buildVoiceMap } from "/app/lib/voicemap.js";
 import { play, saveWav } from "/app/lib/audio.js";
 import { requestSynth, bargeIn } from "/app/lib/synth.js";
+import { installSystemMenu } from "/lib/system-menu.js";
 
 function init() {
   // ── model bar ──
@@ -38,3 +39,4 @@ function init() {
   loadModel(dir);
 }
 init();
+installSystemMenu();

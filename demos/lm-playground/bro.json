@@ -1,5 +1,6 @@
 {
     "title": "LM Playground",
     "width": 1000,
-    "height": 680
+    "height": 680,
+    "lib": "../../lib"
 }

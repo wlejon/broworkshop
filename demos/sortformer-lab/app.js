@@ -21,6 +21,8 @@
 // Offline whole-clip diarization is the separate bro.diar.diarize(model, audio)
 // path (not used by this live lab).
 
+import { installSystemMenu } from "/lib/system-menu.js";
+
 const $ = (s) => document.querySelector(s);
 const fs = require('fs');
 
@@ -357,4 +359,5 @@ function init() {
   catch (e) { /* manual load */ }
 }
 
+installSystemMenu();
 init();

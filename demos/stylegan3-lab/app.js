@@ -8,6 +8,7 @@ import { prepareMix, renderMix, syncMixLabel } from "/app/lib/mix.js";
 import { refreshInvert, invFromSeed, invFromFile, runInvert, sendInvTo } from "/app/lib/invert.js";
 import { renderGrid, gridPage, onGridClick } from "/app/lib/grid.js";
 import { browseFolder, pParent, randSeed } from "/app/lib/helpers.js";
+import { installSystemMenu } from "/lib/system-menu.js";
 
 // Show exactly one seam panel; refresh it for the loaded model.
 export function showSeam(name) {
@@ -112,3 +113,4 @@ function init() {
 }
 
 init();
+installSystemMenu();

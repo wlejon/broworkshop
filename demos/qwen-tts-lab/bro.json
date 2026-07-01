@@ -2,5 +2,6 @@
     "app": ".",
     "title": "Qwen TTS Lab",
     "width": 1320,
-    "height": 920
+    "height": 920,
+    "lib": "../../lib"
 }

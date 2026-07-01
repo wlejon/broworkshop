@@ -14,6 +14,8 @@
 //
 // Headless note: test.js drives the same UI with the small Qwen3.5 checkpoint.
 
+import { installSystemMenu } from "/lib/system-menu.js";
+
 const fs = require('fs');
 const $ = (s) => document.querySelector(s);
 
@@ -171,5 +173,6 @@ $('#btn-generate').addEventListener('click', generate);
 $('#btn-stop').addEventListener('click', () => { if (runHandle) runHandle.cancel(); });
 
 (function boot() {
+    installSystemMenu();
     $('#model-path').value = defaultPath(currentFamily);
 })();

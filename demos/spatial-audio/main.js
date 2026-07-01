@@ -2,6 +2,9 @@
 // Three.js scene with broaudio spatial sources, zone buses, and effect chains
 
 import "/app/three.min.js";   // vendored UMD bundle — sets the global THREE
+import { installSystemMenu } from "/lib/system-menu.js";
+
+installSystemMenu();
 
 // ───────────────────────── Three.js setup ─────────────────────────
 

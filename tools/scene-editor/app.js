@@ -2,6 +2,7 @@ import "/lib/camera.js";
 import "/lib/history.js";
 import "/lib/project.js";
 import "/lib/sketch.js";
+import { installSystemMenu } from "/lib/system-menu.js";
 import { Mat4Lib } from "/app/mat4.js";
 import { Primitive } from "/app/primitive.js";
 import { SceneObject, Group, ComponentDefinition, ComponentInstance } from "/app/scene-object.js";
@@ -60,6 +61,7 @@ function setupDefaultScene() {
     });
 }
 setupDefaultScene();
+installSystemMenu();
 
 // --- Highlight overlay ------------------------------------------------------
 //

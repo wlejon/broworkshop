@@ -12,6 +12,8 @@
 // Feed it CLEAN 16 kHz: bro.listen delivers exactly that, so we pull raw retained
 // PCM (no decode/resample round-trip, which would blur the speaker margin).
 
+import { installSystemMenu } from "/lib/system-menu.js";
+
 const $ = (s) => document.querySelector(s);
 const fs = require('fs');
 
@@ -312,4 +314,5 @@ function init() {
   } catch (e) { /* manual load */ }
 }
 
+installSystemMenu();
 init();

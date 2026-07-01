@@ -6,6 +6,7 @@
 // clustering), translate.js (non-English → English via bro.lm), gestures.js
 // (non-speech + clip editor), streams.js (sources + tabs). This file loads LAST.
 import { LL } from "/app/core.js";
+import { installSystemMenu } from "/lib/system-menu.js";
 // Load order (these publish onto LL; main wires them at the end — see core.js).
 import "/app/timeline.js";
 import "/app/transcript.js";
@@ -413,6 +414,8 @@ Object.assign(LL, {
 // ── boot ─────────────────────────────────────────────────────────────────────
 
 (function boot() {
+    installSystemMenu();
+
     sizeCanvas($chart);
     sizeCanvas($overview);
 

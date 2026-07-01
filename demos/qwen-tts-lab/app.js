@@ -1,5 +1,6 @@
 // Qwen TTS Lab — entry point. Wire the DOM up and load the first checkpoint.
 // (ES module entry: imports the lib/ modules in the original index.html order.)
+import { installSystemMenu } from "/lib/system-menu.js";
 import { $ } from "/app/lib/state.js";
 import { browseFolder, browseFile, pParent, pName, toMono } from "/app/lib/helpers.js";
 import { loadModel, defaultModelDir, setBadge, qwen, variant } from "/app/lib/model.js";
@@ -78,4 +79,5 @@ function cloneOnce() {
   } catch (e) { setBadge('clone: ' + e.message, true); }
 }
 
+installSystemMenu();
 init();

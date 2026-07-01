@@ -1,5 +1,6 @@
 import "/lib/camera.js";
 import { createEditor, GROUND_IDS, OVERLAY_IDS } from "/app/editor.js";
+import { installSystemMenu } from "/lib/system-menu.js";
 
 // =============================================================================
 // Tile Editor — an interactive tools/ app that exercises the full
@@ -25,6 +26,7 @@ const sun = scene.createLight({
 sun.castsShadow = true;
 
 const editor = createEditor(scene);
+installSystemMenu();
 
 // ---------------------------------------------------------------------------
 // Camera

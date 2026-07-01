@@ -14,6 +14,8 @@
 // Headless note: with no audio device the live mic can't capture; test.js
 // drives the same spotter via bro.kws.feed() with Kokoro-synthesized speech.
 
+import { installSystemMenu } from "/lib/system-menu.js";
+
 const fs = require('fs');
 
 const WROOT = (typeof process !== 'undefined' && process.env && process.env.BRO_WEIGHTS) || 'D:/projects';
@@ -142,6 +144,8 @@ function tick() {
     requestAnimationFrame(tick);
 }
 requestAnimationFrame(tick);
+
+installSystemMenu();
 
 // ── boot ─────────────────────────────────────────────────────────────────────
 (function boot() {

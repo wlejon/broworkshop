@@ -1,7 +1,11 @@
+import { installSystemMenu } from "/lib/system-menu.js";
+
 const v = document.getElementById('v');
 const status = document.getElementById('status');
 const eventsEl = document.getElementById('events');
 const progbar = document.getElementById('progbar');
+
+installSystemMenu();
 
 // ---- event log -------------------------------------------------------------
 

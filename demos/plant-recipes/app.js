@@ -16,6 +16,7 @@ import "/app/recipes/rosebush.js";
 import "/app/recipes/cactus.js";
 import "/app/recipes/palm.js";
 import { Recipes } from "/app/recipes/index.js";
+import { installSystemMenu } from "/lib/system-menu.js";
 
 const canvas = document.getElementById('stage');
 const scene = canvas.getContext('scene');
@@ -904,6 +905,7 @@ document.getElementById('anim').addEventListener('click', () => setAnimActive(!a
 
 // ─── Boot ─────────────────────────────────────────────────────────────────
 
+installSystemMenu();
 setDefaults();
 buildPanel();
 regenerate(true);

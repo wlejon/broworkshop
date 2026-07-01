@@ -11,6 +11,7 @@ import { Palette } from "/app/lab/palette.js";
 import { Presets } from "/app/lab/presets.js";
 import { T5 } from "/app/lab/t5import.js";
 import { Ops, fmtNum, fmtMs } from "/app/lab/ops.js";
+import { installSystemMenu } from "/lib/system-menu.js";
 
   function $(id) { return document.getElementById(id); }
 
@@ -246,3 +247,5 @@ import { Ops, fmtNum, fmtMs } from "/app/lab/ops.js";
   } else {
     window.addEventListener('load', start);
   }
+
+  installSystemMenu();

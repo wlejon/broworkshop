@@ -2,5 +2,6 @@
     "app": ".",
     "title": "Supertonic Lab",
     "width": 1280,
-    "height": 860
+    "height": 860,
+    "lib": "../../lib"
 }

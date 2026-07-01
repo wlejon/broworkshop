@@ -23,6 +23,8 @@
 //   nearest(...)           — probe line from cursor to closest agent center
 //   .size / .cellSize / .maxRadius — surfaced live in the HUD
 
+import { installSystemMenu } from "/lib/system-menu.js";
+
 // Tiny self-contained math helpers (the shared /lib/math.js MathX only mounts
 // when launched through the workshop project root; this demo stands alone, so
 // we inline just the few helpers it uses).
@@ -32,6 +34,8 @@ const MathX = {
   lerp(a, b, t) { return a + (b - a) * t; },
   randRange(lo, hi) { return lo + Math.random() * (hi - lo); },
 };
+
+installSystemMenu();
 
 const canvas = document.querySelector('#view');
 const ctx = canvas.getContext('2d');
