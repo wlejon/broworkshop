@@ -1,6 +1,6 @@
 // agents/action_exec.js — Applies a raw CombatAction {moveDir, attackSlot,
 // abilitySlot} (what DecoupledMcts / TeamMcts / LayeredPlanner / InfoSetMcts
-// / rootParallelSearch all return) to a live agent via the self capability
+// all return) to a live agent via the self capability
 // proxy (move_to / cast_ability — see main.js's CAPS list).
 //
 // Mirrors brogameagent's own CombatAction::apply() (brogameagent/src/mcts.cpp)

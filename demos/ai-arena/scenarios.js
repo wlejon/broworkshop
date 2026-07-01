@@ -156,8 +156,8 @@ export const Scenarios = {};
         abilities: DEFAULT_ABILITIES,
     };
 
-    // 1v1 — required by decoupled_mcts / root_parallel, both of which plan
-    // for a single hero-vs-opponent pair.
+    // 1v1 — required by decoupled_mcts, which plans for a single
+    // hero-vs-opponent pair.
     Scenarios.DUEL_1V1 = {
         id: "duel_1v1",
         name: "1v1 duel",

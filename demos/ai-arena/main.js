@@ -27,7 +27,6 @@ import "/app/agents/decoupled_mcts.js";
 import "/app/agents/team_mcts.js";
 import "/app/agents/layered_planner.js";
 import "/app/agents/infoset_mcts.js";
-import "/app/agents/root_parallel.js";
 import { ExitNet } from "/app/agents/exit_net.js";
 import { Render } from "/app/render.js";
 import { Scene3D } from "/app/scene_setup.js";
