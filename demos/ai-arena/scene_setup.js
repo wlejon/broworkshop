@@ -24,6 +24,7 @@ export const Scene3D = {};
     Scene3D.units = {};                  // agentId → capsule node
     Scene3D.unitFovs = {};               // agentId → faint per-unit FOV mesh
     Scene3D.hpBars = {};                 // agentId → { bg, fill, lastFrac, maxHp }
+    Scene3D.fogGhosts = {};               // enemyId → translucent ghost capsule (fog-of-war)
     Scene3D.projPool = [[], []];         // [team] → sphere nodes (pooled)
     Scene3D.explosionPool = [];          // { node, t, maxT, r } entries
     Scene3D.dmgPool = [];                // pool of HtmlNode floating-damage nodes
@@ -199,6 +200,7 @@ export const Scene3D = {};
         destroyList(Scene3D.obstacles);
         destroyMap(Scene3D.units);
         destroyMap(Scene3D.unitFovs);
+        destroyMap(Scene3D.fogGhosts);
         for (var hid in Scene3D.hpBars) {
             var hb = Scene3D.hpBars[hid];
             if (hb) {
@@ -407,6 +409,74 @@ export const Scene3D = {};
         g.fovCone.visible = false;
         g.targetLine.visible = false;
         g.intentLabel.visible = false;
+    };
+
+    function ensureFogGhost(id, teamId) {
+        var g = Scene3D.fogGhosts[id];
+        if (g) return g;
+        var c = teamId === 0 ? [0.90, 0.30, 0.24, 0.32] : [0.20, 0.60, 0.85, 0.32];
+        g = Scene3D.scene.createMesh({
+            mesh: "capsule", radius: CAPSULE_R, halfHeight: CAPSULE_HALF_H,
+            color: c, emissive: 0.2,
+            x: 0, y: Scene3D.UNIT_Y, z: 0,
+            name: "fog-ghost-" + id,
+        });
+        g.visible = false;
+        Scene3D.fogGhosts[id] = g;
+        return g;
+    }
+
+    // Fog-of-war visual layer (fog.js owns the belief lifecycle; this just
+    // applies the result). For each of viewTeam's enemies, per the belief's
+    // `enemies` entries: fully visible -> real capsule shows normally
+    // (Scene3D.update already drew it this frame, runs before this in
+    // Loop.frame); tracked-but-not-currently-visible -> hide the real
+    // capsule and show a translucent ghost at the belief's mean position;
+    // never seen -> hide both. Allies of viewTeam are never touched here.
+    Scene3D.syncVisibility = function (viewTeam, enemies, byId) {
+        var trackedIds = {};
+        for (var i = 0; i < enemies.length; i++) {
+            var e = enemies[i];
+            trackedIds[e.enemyId] = true;
+            var owner = byId[e.enemyId];
+            var alive = !!(owner && owner.unit.alive);
+
+            var node = Scene3D.units[e.enemyId];
+            var hb = Scene3D.hpBars[e.enemyId];
+            var ghost = Scene3D.fogGhosts[e.enemyId];
+
+            if (!alive || e.visible) {
+                // Dead units stay however Scene3D.update left them (hidden);
+                // currently-visible ones keep the real capsule already drawn
+                // this frame. Either way, no ghost needed.
+                if (ghost) ghost.visible = false;
+                continue;
+            }
+
+            // Alive but outside current vision — hide the real capsule.
+            if (node) node.visible = false;
+            if (hb) { hb.bg.visible = false; hb.fill.visible = false; }
+
+            if (e.everSeen && e.meanX != null) {
+                var g = ensureFogGhost(e.enemyId, owner.unit.teamId);
+                g.visible = true;
+                g.x = e.meanX; g.y = Scene3D.UNIT_Y; g.z = e.meanZ;
+            } else if (ghost) {
+                ghost.visible = false;
+            }
+        }
+        // Enemies not present in this belief's roster yet (not registered) —
+        // nothing to draw for them beyond what Scene3D.update already did.
+        for (var id in Scene3D.fogGhosts) {
+            if (!trackedIds[id]) Scene3D.fogGhosts[id].visible = false;
+        }
+    };
+
+    // Restores normal (non-fogged) visibility — called when the Fog toggle
+    // turns off. Scene3D.update's next pass re-asserts alive-based
+    // visibility for every unit on its own; this only needs to hide ghosts.
+    Scene3D.clearFog = function () {
+        for (var id in Scene3D.fogGhosts) Scene3D.fogGhosts[id].visible = false;
     };
 
     // Per-unit HP bar — now two stacked world-anchored rects above the

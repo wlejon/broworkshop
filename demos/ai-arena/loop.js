@@ -10,6 +10,7 @@ import { UI } from "/app/ui.js";
 import { Config } from "/app/config.js";
 import { Agents } from "/app/agents/registry.js";
 import { Panels } from "/app/ui_registry.js";
+import { Fog } from "/app/fog.js";
 
 export const Loop = {};
 (function () {
@@ -134,6 +135,9 @@ export const Loop = {};
 
         Scene3D.update(state, dt);
         Render.tickFx(dt);
+        // Runs after Scene3D.update so a fogged enemy's hide-the-real-capsule
+        // decision is the one that sticks for this frame, not the reverse.
+        Fog.tick(state, dt);
 
         Panels.tick(state, dt);
     };

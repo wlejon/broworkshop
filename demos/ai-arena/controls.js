@@ -4,6 +4,7 @@
 import { Agents } from "/app/agents/registry.js";
 import { Replay } from "/app/replay.js";
 import { State } from "/app/state.js";
+import { Fog } from "/app/fog.js";
 
 export const Controls = {};
 (function () {
@@ -37,6 +38,8 @@ export const Controls = {};
         var selRed    = document.getElementById("sel-red-ai");
         var selBlue   = document.getElementById("sel-blue-ai");
         var selFocus  = document.getElementById("sel-focus");
+        var btnFog    = document.getElementById("btn-fog");
+        var selFogTeam = document.getElementById("sel-fog-team");
 
         btnPause.addEventListener("click", function () {
             var s = State.current;
@@ -60,6 +63,14 @@ export const Controls = {};
         selRed.addEventListener("change",  function () { State.current.redAi  = selRed.value;  });
         selBlue.addEventListener("change", function () { State.current.blueAi = selBlue.value; });
         selFocus.addEventListener("change", function () { State.current.focusId = +selFocus.value; });
+
+        Fog.setTeam(+selFogTeam.value);
+        btnFog.addEventListener("click", function () {
+            Fog.setEnabled(!Fog.isEnabled());
+            btnFog.textContent = Fog.isEnabled() ? "Fog On" : "Fog Off";
+            btnFog.classList.toggle("active", Fog.isEnabled());
+        });
+        selFogTeam.addEventListener("change", function () { Fog.setTeam(+selFogTeam.value); });
     };
 
     // Seed state from the current selector values. Called after rebuild

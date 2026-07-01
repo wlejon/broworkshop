@@ -30,6 +30,7 @@ import "/app/agents/infoset_mcts.js";
 import "/app/agents/root_parallel.js";
 import { Render } from "/app/render.js";
 import { Scene3D } from "/app/scene_setup.js";
+import { Fog } from "/app/fog.js";
 import { UI } from "/app/ui.js";
 import { Replay } from "/app/replay.js";
 import { Loop } from "/app/loop.js";
@@ -91,6 +92,12 @@ export const App = {};
         };
 
         AI.memory = {};
+        // Per-agent caches (MCTS handles, belief filters, etc.) reference the
+        // outgoing world/roster — stale state here silently persisted across
+        // Reset/scenario-switch until this call was added, since resetAll()
+        // was previously only invoked by fast_eval.js's batch-eval harness.
+        Agents.resetAll();
+        Fog.reset();
 
         // Ensure shared state is populated before the first think() fires —
         // attachAIWorld/attachAgent immediately schedule a tick.
@@ -179,6 +186,7 @@ export const App = {};
         if (!scn) { console.warn("setScenario: unknown id " + id); return; }
         App.setScenario(scn);
     };
+    window.getScene = function () { return Scene3D; };
 
     lastT = performance.now();
     requestAnimationFrame(frame);
