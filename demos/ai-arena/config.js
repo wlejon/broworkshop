@@ -26,15 +26,20 @@ export const Config = {};
     Config.SNAPSHOT_KEEP = 5;
     Config.REWIND_SECONDS = 1.5;
 
-    // Replay playback rate (sim tick hz = 30).
-    Config.REPLAY_FRAME_DT = 0.033;
-
     // DAMAGE LOG cap (lines).
     Config.LOG_LINES = 60;
 
     // Reward chart history length (samples).
     Config.REWARD_HISTORY = 200;
 
-    // Recording output directory (relative to working dir).
-    Config.REPLAY_DIR = "apps/ai-arena/replays/";
+    // Recording output directory. Recorder.open() does a raw native fopen —
+    // resolved against the process's actual OS working directory, which per
+    // the documented bro/bro-headless invocation (run from the bro repo,
+    // app path passed as an argument) is NOT this app's own directory. Build
+    // an absolute path from BRO_APP_DIR (set by the engine to this app's
+    // real directory, src/main.cpp:328) so recording works regardless of
+    // where the process was launched from. Previously a bare relative
+    // "apps/ai-arena/replays/" (stale pre-reorg path, and CWD-relative even
+    // if corrected) made every recording silently fail to open.
+    Config.REPLAY_DIR = (process.env.BRO_APP_DIR || ".") + "/replays/";
 })();

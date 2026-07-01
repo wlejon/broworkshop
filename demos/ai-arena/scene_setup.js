@@ -343,6 +343,72 @@ export const Scene3D = {};
         syncGizmos(state);
     };
 
+    // Renders one ReplayReader frame ({stepIdx, elapsed, agents: [{id,x,z,
+    // hp,mana,yaw,alive}], events}) directly onto the existing capsule/HP-bar
+    // nodes, bypassing the live AgentBinding/attachAIWorld position feed
+    // Scene3D.update relies on during a real match. `byId` supplies maxHp
+    // per unit id (the replay frame only carries current hp) — pass
+    // state.byId, which stays valid across playback since the roster/scenario
+    // doesn't change between recording and replaying a session.
+    //
+    // Projectiles, FOV cones, and focus gizmos have no recorded per-frame
+    // equivalent exposed to JS yet (ReplayReader.frame() only returns agents
+    // + damage events, not the projectile records the .bgar format also
+    // stores) — they're just hidden for the duration of playback rather than
+    // faked.
+    Scene3D.renderReplayFrame = function (frame, byId) {
+        var seen = {};
+        for (var i = 0; i < frame.agents.length; i++) {
+            var a = frame.agents[i];
+            seen[a.id] = true;
+
+            var node = Scene3D.units[a.id];
+            if (node) {
+                node.visible = a.alive;
+                if (a.alive) {
+                    node.x = a.x; node.y = Scene3D.UNIT_Y; node.z = a.z;
+                    node.rotationY = -a.yaw;
+                }
+            }
+
+            var hb = Scene3D.hpBars[a.id];
+            if (hb) {
+                hb.bg.visible = a.alive;
+                hb.fill.visible = a.alive;
+                if (a.alive) {
+                    hb.bg.worldAnchor   = [a.x, HP_BAR_Y, a.z];
+                    hb.fill.worldAnchor = [a.x, HP_BAR_Y + 0.001, a.z];
+                    var owner = byId[a.id];
+                    var max = (owner && owner.unit.maxHp) || hb.maxHp || 1;
+                    var frac = Math.max(0, Math.min(1, a.hp / max));
+                    hb.fill.scaleX = Math.max(0.0001, frac);
+                    hb.fill.fillColor = hpColor(frac);
+                }
+            }
+
+            var cone = Scene3D.unitFovs[a.id];
+            if (cone) cone.visible = false;
+        }
+
+        // Any roster unit missing from this frame is dead (the recorder
+        // omits dead agents from AgentState[liveCount]) — hide it.
+        for (var id in Scene3D.units) {
+            if (seen[id]) continue;
+            Scene3D.units[id].visible = false;
+            var hb2 = Scene3D.hpBars[id];
+            if (hb2) { hb2.bg.visible = false; hb2.fill.visible = false; }
+            var cone2 = Scene3D.unitFovs[id];
+            if (cone2) cone2.visible = false;
+        }
+
+        var g = Scene3D.gizmos;
+        g.focusRing.visible = false;
+        g.rangeRing.visible = false;
+        g.fovCone.visible = false;
+        g.targetLine.visible = false;
+        g.intentLabel.visible = false;
+    };
+
     // Per-unit HP bar — now two stacked world-anchored rects above the
     // capsule. Fill scaleX shrinks with HP fraction (center-to-center, which
     // looks fine at these sizes). Color ramps green→yellow→red.

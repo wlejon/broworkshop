@@ -3,17 +3,46 @@
 // and delegates to Replay.drawFrame when true.
 import { UI } from "/app/ui.js";
 import { Config } from "/app/config.js";
+import { Scene3D } from "/app/scene_setup.js";
 
 export const Replay = {};
 (function () {
     "use strict";
 
-    // Replay playback paused during the 3D scene migration — the old 2D
-    // renderer is gone and the scene-backed version lands in Phase 5.
-    // Recording still works; only playback is disabled.
-    Replay.drawFrame = function (state, canvas, dt) {
-        UI.setStatus("replay playback disabled during 3D refactor");
+    // Shared by the manual Stop-Play click and the auto-stop-at-end-of-file
+    // path in drawFrame — both need to reset the same button/state.
+    Replay.stopPlaying = function (state, msg) {
         state.replayPlaying = false;
+        state.replayReader = null;
+        var btn = document.getElementById("btn-play");
+        if (btn) { btn.textContent = "Play"; btn.classList.remove("active"); }
+        UI.log(msg || "replay stopped");
+    };
+
+    // Advances playback by dt (real wall-clock frame time — playback runs at
+    // the recording's fixed step rate regardless of how the match itself was
+    // paced) and pushes the resulting frame onto the scene via
+    // Scene3D.renderReplayFrame. state.byId still describes the current
+    // roster (teamId/maxHp don't change across a session), so it's reused
+    // as the static-data lookup the replay frame itself doesn't carry.
+    Replay.drawFrame = function (state, canvas, dt) {
+        var rr = state.replayReader;
+        state.replayElapsed += dt;
+        var idx = Math.floor(state.replayElapsed / Config.SIM_STEP);
+        if (idx >= rr.frameCount) {
+            idx = rr.frameCount - 1;
+            state.replayFrame = idx;
+            var f0 = rr.frame(idx);
+            if (f0) Scene3D.renderReplayFrame(f0, state.byId);
+            Replay.stopPlaying(state, "replay finished (" + rr.frameCount + " frames)");
+            return;
+        }
+        state.replayFrame = idx;
+        var f = rr.frame(idx);
+        if (!f) { Replay.stopPlaying(state, "replay read failed at frame " + idx); return; }
+        Scene3D.renderReplayFrame(f, state.byId);
+        UI.setStatus("replay " + (idx + 1) + "/" + rr.frameCount +
+                      "  t=" + f.elapsed.toFixed(2) + "s");
     };
 
     Replay.toggleRecord = function (state, btn) {
@@ -39,11 +68,7 @@ export const Replay = {};
 
     Replay.togglePlay = function (state, btn) {
         if (state.replayPlaying) {
-            state.replayPlaying = false;
-            state.replayReader = null;
-            btn.textContent = "Play";
-            btn.classList.remove("active");
-            UI.log("replay stopped");
+            Replay.stopPlaying(state, "replay stopped");
             return;
         }
         var path = state._recordingPath;
@@ -53,6 +78,7 @@ export const Replay = {};
         if (!ok) { UI.log("replay open failed: " + rr.errorMessage); return; }
         state.replayReader = rr;
         state.replayFrame = 0;
+        state.replayElapsed = 0;
         state.replayPlaying = true;
         btn.textContent = "Stop Play";
         btn.classList.add("active");
