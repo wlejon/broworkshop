@@ -13,6 +13,20 @@
 // same reasoning as team_mcts.js / layered_planner.js. Best on a small
 // roster (Scenarios.SQUAD_3V3 / SQUAD_4V4) — an InfoSetMcts search per
 // hero doesn't scale to 8-a-side at interactive budgets.
+//
+// The search itself is genuinely belief-driven, not decorative:
+// InfoSetMcts::search (brogameagent/src/info_set_mcts.cpp) determinizes a
+// fresh sample from the belief before every rollout and restores real truth
+// only after search completes — enemy positions/hp the rollouts reason over
+// are sampled, not read off the live World. That alone wasn't sufficient
+// for real partial observability end-to-end, though: buildActionMask (used
+// by action_exec.js to turn the search's chosen attackSlot into an actual
+// target id) reads the live, fully-visible World, so execution could always
+// resolve and hit a real enemy at a given slot regardless of whether this
+// team's belief had ever detected it — an omniscience leak between planning
+// and execution. think() below closes that gap by passing a knownEnemyIds
+// set (belief.enemies()'s everSeen flags) into ActionExec.apply, so a hero
+// can't target what its own team has never observed.
 import { AI } from "/app/ai.js";
 import { ActionExec } from "/app/agents/action_exec.js";
 import { Agents } from "/app/agents/registry.js";
@@ -99,13 +113,30 @@ var REPLAN_EVERY_SEC = 0.4;
         actionsByTeam[teamId] = byUnitId;
     }
 
+    // Belief-driven search alone isn't real fog of war if execution can
+    // still reach through to any ground-truth enemy — see action_exec.js's
+    // knownEnemyIds header comment. "Known" = ever detected by this team's
+    // belief (TeamBelief keeps tracking/predicting a particle after losing
+    // sight, matching typical fog-of-war "last known position" memory); an
+    // enemy this team has genuinely never observed can't be targeted yet.
+    function knownEnemyIdsForTeam(teamId) {
+        var tb = beliefByTeam[teamId];
+        if (!tb) return null;
+        var list = tb.enemies();
+        var known = {};
+        for (var i = 0; i < list.length; i++) {
+            if (list[i].everSeen) known[list[i].enemyId] = true;
+        }
+        return known;
+    }
+
     function think(self, world) {
         var u = self.agent.unit;
         if (!u.alive) { self.hold(0.3); return; }
         var byUnitId = actionsByTeam[u.teamId];
         var action = byUnitId && byUnitId[u.id];
         if (!action) { self.hold(0.2); return; }
-        ActionExec.apply(self, world, action);
+        ActionExec.apply(self, world, action, knownEnemyIdsForTeam(u.teamId));
     }
 
     Agents.register({

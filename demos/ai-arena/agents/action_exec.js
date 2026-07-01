@@ -19,6 +19,20 @@
 //     PathToTarget/PathAway are the pre-resolved pathfinding directions
 //     (lead point 4 units toward/away from the target).
 //
+// Optional 4th arg `knownEnemyIds` ({id: true, ...} or falsy) restricts
+// attackSlot/ability/aim-lock target resolution to that id set — used by
+// infoset_mcts.js so partial observability actually holds at execution
+// time, not just inside the search. Without it (every other mode), targeting
+// draws from the full ground-truth enemy list, unchanged from before this
+// param existed. Belief-driven search alone wasn't enough: search reasons
+// under uncertainty to pick a slot index, but buildActionMask(agent, world)
+// resolves that index against the real World — so even a search that
+// correctly hedged over "maybe there's an enemy at slot 2" would, at
+// execution, always find and hit a real target there regardless of whether
+// the hero's belief had ever actually detected it. That's a real
+// omniscience leak, not a cosmetic one — a hero could reliably land hits on
+// enemies it structurally shouldn't know exist yet.
+//
 // Basic-attack fires via a direct world.resolveAttack(agent, targetId) call
 // below, bypassing the native "basic_attack" Capability — that capability
 // is BLOCKING (occupies the AgentBinding's single active-capability slot
@@ -65,6 +79,15 @@ export const ActionExec = (function () {
         return best;
     }
 
+    function filterKnown(enemies, knownEnemyIds) {
+        if (!knownEnemyIds) return enemies;
+        var out = [];
+        for (var i = 0; i < enemies.length; i++) {
+            if (knownEnemyIds[enemies[i].unit.id]) out.push(enemies[i]);
+        }
+        return out;
+    }
+
     // yaw=0 faces -Z, yaw increases toward +X (matches brogameagent's
     // aim_yaw_toward convention).
     function aimYawToward(fromX, fromZ, toX, toZ) {
@@ -73,18 +96,19 @@ export const ActionExec = (function () {
 
     // Apply CombatAction `action` to `self` (the bound AgentBinding proxy).
     // `world` is only used to build the action mask (attackSlot -> enemyId).
-    function apply(self, world, action) {
+    function apply(self, world, action, knownEnemyIds) {
         var agent = self.agent;
         var u = agent.unit;
         if (!u.alive) { self.hold(0.2); return; }
 
-        var enemies = AI.shared.teams[1 - u.teamId] || [];
+        var enemies = filterKnown(AI.shared.teams[1 - u.teamId] || [], knownEnemyIds);
 
         var attackTargetId = -1;
         if (action.attackSlot >= 0) {
             var am = bro.ai.game.buildActionMask(agent, world);
             if (action.attackSlot < am.enemyIds.length) {
-                attackTargetId = am.enemyIds[action.attackSlot];
+                var slotId = am.enemyIds[action.attackSlot];
+                if (!knownEnemyIds || knownEnemyIds[slotId]) attackTargetId = slotId;
             }
         }
         var abilityTargetId = attackTargetId;
