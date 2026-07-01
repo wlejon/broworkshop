@@ -1211,6 +1211,7 @@ function setupMenu() {
     bro.menu.on('file.exportPly',  () => exportMesh('ply'));
     bro.menu.on('file.exportStl',  () => exportMesh('stl'));
     bro.menu.on('view.togglePanel', () => togglePanel());
+    bro.menu.show();
 }
 
 function togglePanel() {
