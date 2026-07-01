@@ -156,7 +156,55 @@ export const Scenarios = {};
         abilities: DEFAULT_ABILITIES,
     };
 
-    Scenarios.ALL = [Scenarios.DEFAULT_8V8];
+    // 1v1 — required by decoupled_mcts / root_parallel, both of which plan
+    // for a single hero-vs-opponent pair.
+    Scenarios.DUEL_1V1 = {
+        id: "duel_1v1",
+        name: "1v1 duel",
+        bounds: { minX: -14, minZ: -14, maxX: 14, maxZ: 14 },
+        navCell: 0.5,
+        navPadding: 0,
+        colors: { 0: "#e74c3c", 1: "#3498db" },
+        obstacles: [],
+        roster: rosterLine(["Alpha"], 0, -10, 0, 0, 0)
+          .concat(rosterLine(["India"], 1, 10, 0, 0, 1)),
+        unitDefaults: DEFAULT_UNIT_STATS,
+        abilities: DEFAULT_ABILITIES,
+    };
+
+    // Small squads — team_mcts / layered_planner / infoset_mcts all search
+    // jointly across the whole live roster each tick/window, so keep these
+    // small enough to stay responsive at interactive iteration counts.
+    Scenarios.SQUAD_3V3 = {
+        id: "squad_3v3",
+        name: "3v3 squad",
+        bounds: { minX: -18, minZ: -18, maxX: 18, maxZ: 18 },
+        navCell: 0.5,
+        navPadding: 0,
+        colors: { 0: "#e74c3c", 1: "#3498db" },
+        obstacles: generateSymmetricObstacles(5),
+        roster: rosterLine(RED8.slice(0, 3), 0, -15, -8, 8, 0)
+          .concat(rosterLine(BLUE8.slice(0, 3), 1, 15, -8, 8, 3)),
+        unitDefaults: DEFAULT_UNIT_STATS,
+        abilities: DEFAULT_ABILITIES,
+    };
+
+    Scenarios.SQUAD_4V4 = {
+        id: "squad_4v4",
+        name: "4v4 squad",
+        bounds: { minX: -18, minZ: -18, maxX: 18, maxZ: 18 },
+        navCell: 0.5,
+        navPadding: 0,
+        colors: { 0: "#e74c3c", 1: "#3498db" },
+        obstacles: generateSymmetricObstacles(7),
+        roster: rosterLine(RED8.slice(0, 4), 0, -16, -9, 6, 0)
+          .concat(rosterLine(BLUE8.slice(0, 4), 1, 16, -9, 6, 4)),
+        unitDefaults: DEFAULT_UNIT_STATS,
+        abilities: DEFAULT_ABILITIES,
+    };
+
+    Scenarios.ALL = [Scenarios.DEFAULT_8V8, Scenarios.DUEL_1V1,
+                     Scenarios.SQUAD_3V3, Scenarios.SQUAD_4V4];
 
     Scenarios.byId = function (id) {
         for (var i = 0; i < Scenarios.ALL.length; i++) {

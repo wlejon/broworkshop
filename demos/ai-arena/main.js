@@ -21,6 +21,13 @@ import "/app/agents/tactical.js";
 import "/app/agents/options_shared.js";
 import "/app/agents/options_mcts.js";
 import "/app/agents/options_commander.js";
+import "/app/agents/action_exec.js";
+import "/app/agents/capability_scripted.js";
+import "/app/agents/decoupled_mcts.js";
+import "/app/agents/team_mcts.js";
+import "/app/agents/layered_planner.js";
+import "/app/agents/infoset_mcts.js";
+import "/app/agents/root_parallel.js";
 import { Render } from "/app/render.js";
 import { Scene3D } from "/app/scene_setup.js";
 import { UI } from "/app/ui.js";
@@ -94,7 +101,14 @@ export const App = {};
         });
 
         // Bind each unit capsule to its agent with the scripted think().
-        var CAPS = ["move_to", "cast_ability", "flee", "hold", "aimed_shot"];
+        // Superset of every registered agent's needs — an enabled
+        // capability that a given agent's think() never calls is inert, so
+        // one shared list keeps hot-swapping the Red/Blue AI selector safe
+        // regardless of which agent is picked. "basic_attack"/"battle_cry"
+        // are for capability_scripted (see agents/capability_scripted.js);
+        // everything else routes execution through bot.js instead.
+        var CAPS = ["move_to", "basic_attack", "cast_ability", "flee", "hold",
+                    "aimed_shot", "battle_cry"];
         for (var j = 0; j < built.agents.length; j++) {
             var ag = built.agents[j];
             var node = Scene3D.units[ag.unit.id];
@@ -154,8 +168,17 @@ export const App = {};
     App.rebuild();
     Controls.bind(App.rebuild);
 
-    // Debug hook — exposes state globally so headless scripts can inspect.
+    // Debug hooks — expose state + scenario switching globally. Script-file
+    // headless invocations run as plain classic scripts (no ES module
+    // import), so this is the only bridge back into the app's module
+    // graph; also doubles as the scenario-switch primitive Milestone 8's
+    // system menu will call into.
     window.getState = function () { return State.current; };
+    window.setScenario = function (id) {
+        var scn = Scenarios.byId(id);
+        if (!scn) { console.warn("setScenario: unknown id " + id); return; }
+        App.setScenario(scn);
+    };
 
     lastT = performance.now();
     requestAnimationFrame(frame);
