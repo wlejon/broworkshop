@@ -258,6 +258,17 @@ export const App = {};
     };
     window.getScene = function () { return Scene3D; };
     window.getExitNet = function () { return ExitNet; };
+    // fast_eval.js/headless_eval.js need direct access to these module
+    // objects (Arena.build, Agents.resetAll/tickTeams/get, AI.updateShared/
+    // memory, State.current assignment, Scenarios.ALL/byId, App.setScenario)
+    // — bridge them wholesale rather than adding narrower getters one at a
+    // time as each evaluator script grows new needs.
+    window.Agents = Agents;
+    window.Scenarios = Scenarios;
+    window.Arena = Arena;
+    window.AI = AI;
+    window.State = State;
+    window.App = App;
 
     lastT = performance.now();
     requestAnimationFrame(frame);

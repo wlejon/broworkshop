@@ -9,9 +9,13 @@
 //
 // Why it shouldn't thrash: the option layer compresses the decision
 // space from ~18 CombatActions × N-deep tree to 8 options × (often) 2-3
-// deep. A 100-iteration search at ~option_max=6 windows plans ~18
+// deep. A 300-iteration search at ~option_max=6 windows plans ~18
 // windows of game time — enough to see past a peek-and-retreat
 // consequence, which plain MCTS never could at the same budget.
+//
+// Search only runs once per option commit (every ~0.3-0.8s per hero, see
+// OPTION_DURATION below), not every tick, so the 20ms budget here costs
+// far less than it looks — it's nowhere near the per-tick real-time path.
 //
 // To tune: adjust iterations / budgetMs in the cfg below, or swap the
 // evaluator to "teamAdvantage" via Commander (see options_commander.js).
@@ -31,8 +35,8 @@ import { Agents } from "/app/agents/registry.js";
 
     function cfg() {
         return {
-            iterations:       80,
-            budgetMs:         3,
+            iterations:       300,
+            budgetMs:         20,
             rolloutHorizon:   3,
             actionRepeat:     2,
             optionMaxWindows: 6,

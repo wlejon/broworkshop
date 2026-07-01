@@ -19,10 +19,15 @@
 //     PathToTarget/PathAway are the pre-resolved pathfinding directions
 //     (lead point 4 units toward/away from the target).
 //
-// Basic-attack itself needs no explicit call here — every agent's aim/fire
-// runs as a background side effect independent of think()'s pick (bot.js
-// does this via world.spawnProjectile; the built-in "aimed_shot" capability
-// does it for agents that use it), same as the search assumes.
+// Basic-attack fires via a direct world.resolveAttack(agent, targetId) call
+// below, bypassing the native "basic_attack" Capability — that capability
+// is BLOCKING (occupies the AgentBinding's single active-capability slot
+// for the swing duration, preempting movement), which doesn't match what
+// mcts.cpp's own CombatAction::apply() assumes: move, resolveAttack, and
+// resolveAbility all happen independently in the same simulated step, none
+// blocking the others. Calling world.resolveAttack directly sidesteps the
+// capability system entirely so this stays consistent with what the search
+// scored the action against.
 import { AI } from "/app/ai.js";
 
 export const ActionExec = (function () {
@@ -87,6 +92,11 @@ export const ActionExec = (function () {
             var near0 = nearestEnemy(agent, enemies);
             abilityTargetId = near0 ? near0.unit.id : -1;
         }
+
+        // Fires independently of the cast/movement branches below — see
+        // the file header. world.resolveAttack no-ops on cooldown/range
+        // failure the same way the search's own rollouts would score it.
+        if (attackTargetId >= 0) world.resolveAttack(agent, attackTargetId);
 
         // Ability autocast consumes the tick — no movement call below.
         if (action.abilitySlot >= 0 && abilityTargetId >= 0) {

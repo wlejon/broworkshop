@@ -28,7 +28,16 @@ var REPLAN_EVERY_SEC = 0.35;
         if (!duel) {
             duel = bro.ai.game.createDecoupledMcts({
                 iterations: 600, budgetMs: 10, rolloutHorizon: 16, simDt: 1 / 60, actionRepeat: 3,
-                prior: "attackBias", evaluator: "hpDelta",
+                // priorC switches selection from plain-UCT to PUCT. Without
+                // it, plain-UCT's "unvisited-first" rule forces an
+                // exhaustive linear pass through every untried action
+                // before any real tree statistics can build — with a
+                // ~130-action-per-side space (11 moveDirs x 2 attack x 6
+                // ability slots in a 1v1 duel) and a 10ms budget, that
+                // never finishes once, so search always returns whatever
+                // the FIRST enumerated action happened to be (Hold/no-op).
+                // See examples/08_decoupled_1v1.cpp for the reference config.
+                prior: "attackBias", priorC: 1.5, evaluator: "hpDelta",
                 rolloutPolicy: "aggressive", seed: 0xD3C0,
             });
         }
@@ -65,6 +74,11 @@ var REPLAN_EVERY_SEC = 0.35;
     Agents.register({
         id: "decoupled_mcts",
         label: "Decoupled MCTS (1v1)",
+        // Only ever produces a real decision for the FIRST hero on each
+        // side (see file header) — everywhere else 7/8 heroes would just
+        // hold(). The evaluators (fast_eval.js/headless_eval.js) read this
+        // to force the matching scenario instead of blindly rotating.
+        homeScenarios: ["duel_1v1"],
         reset: function () { duel = null; lastPlanT = -999; joint = null; },
         teamTick: teamTick,
         think: think,

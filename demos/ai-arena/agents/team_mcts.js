@@ -23,8 +23,18 @@ var REPLAN_EVERY_SEC = 0.35;
         if (!mctsByTeam[teamId]) {
             mctsByTeam[teamId] = bro.ai.game.createTeamMcts({
                 iterations: 350, budgetMs: 12, rolloutHorizon: 12, actionRepeat: 3,
-                prior: "attackBias", rolloutPolicy: "aggressive",
-                opponentPolicy: "aggressive", evaluator: "teamHpDelta",
+                // priorC — see decoupled_mcts.js for why this is required,
+                // not optional, once the per-node action space is bigger
+                // than the iteration budget can exhaustively try once.
+                // Joint per-hero search makes this worse than the 1v1
+                // case, not better.
+                prior: "attackBias", priorC: 1.5, rolloutPolicy: "aggressive",
+                // Modeled opponent must match who this mode is actually
+                // evaluated against — the showcase's whole point is
+                // coordinated search beating scripted's independent
+                // reflexes, so the search needs to plan against scripted's
+                // actual behavior, not a generic aggressive stand-in.
+                opponentPolicy: "scripted", evaluator: "teamHpDelta",
                 seed: (0x7EA3 + teamId) >>> 0,
             });
         }
@@ -63,6 +73,10 @@ var REPLAN_EVERY_SEC = 0.35;
     Agents.register({
         id: "team_mcts",
         label: "Team MCTS (cooperative)",
+        // Joint search over the whole live squad — needs a small roster to
+        // stay responsive (see file header). Evaluators force one of these
+        // instead of blindly rotating through Scenarios.ALL.
+        homeScenarios: ["squad_3v3", "squad_4v4"],
         reset: function () { mctsByTeam = {}; actionsByTeam = {}; lastPlanT = {}; },
         teamTick: teamTick,
         think: think,

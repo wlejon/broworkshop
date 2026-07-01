@@ -32,8 +32,22 @@ function totalHp(state, teamId) {
     return hp;
 }
 
+// See fast_eval.js's pickScenario for why this isn't a blind rotation:
+// modes with a declared homeScenarios (decoupled_mcts, team_mcts,
+// layered_planner, infoset_mcts) only produce meaningful results on the
+// roster size they were designed for.
+function pickScenario(matchIdx) {
+    var redDef = Agents.get(RED_AI), blueDef = Agents.get(BLUE_AI);
+    var pool = (redDef && redDef.homeScenarios) || (blueDef && blueDef.homeScenarios);
+    if (pool && pool.length) {
+        var scn = Scenarios.byId(pool[matchIdx % pool.length]);
+        if (scn) return scn;
+    }
+    return Scenarios.ALL[matchIdx % Scenarios.ALL.length];
+}
+
 function runMatch(matchIdx) {
-    var scn = Scenarios.ALL[matchIdx % Scenarios.ALL.length];
+    var scn = pickScenario(matchIdx);
     App.setScenario(scn);
 
     State.current.redAi  = RED_AI;

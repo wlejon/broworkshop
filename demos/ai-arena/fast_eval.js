@@ -89,8 +89,26 @@ function buildMatch(scenario, seed) {
     return state;
 }
 
+// Modes that only make sense on a particular roster size (decoupled_mcts
+// needs exactly one hero per side; team_mcts/layered_planner/infoset_mcts
+// need a small squad to stay responsive at interactive search budgets)
+// declare `homeScenarios` on their registry entry. Respect that instead of
+// blindly rotating Scenarios.ALL — otherwise a mode only lands in the
+// scenario it was actually designed for ~1/N of the time. Prefer RED_AI's
+// declared pool since the showcased mode is conventionally red vs a
+// scripted/baseline blue.
+function pickScenario(matchIdx) {
+    var redDef = Agents.get(RED_AI), blueDef = Agents.get(BLUE_AI);
+    var pool = (redDef && redDef.homeScenarios) || (blueDef && blueDef.homeScenarios);
+    if (pool && pool.length) {
+        var scn = Scenarios.byId(pool[matchIdx % pool.length]);
+        if (scn) return scn;
+    }
+    return Scenarios.ALL[matchIdx % Scenarios.ALL.length];
+}
+
 function runMatch(matchIdx) {
-    var scenario = Scenarios.ALL[matchIdx % Scenarios.ALL.length];
+    var scenario = pickScenario(matchIdx);
     var state = buildMatch(scenario, SEED_BASE + matchIdx);
     var world = state.world;
 

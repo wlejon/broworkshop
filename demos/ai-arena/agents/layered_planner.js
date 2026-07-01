@@ -22,10 +22,18 @@ var REPLAN_EVERY_SEC = 0.4;
 
     function ensurePlanner(teamId) {
         if (!plannerByTeam[teamId]) {
+            // priorC on both layers — see decoupled_mcts.js for why this
+            // is required once a node's action space exceeds what the
+            // iteration budget can exhaustively try once (plain-UCT's
+            // unvisited-first rule otherwise never reaches real tree
+            // statistics). fine wraps TeamMcts internally, same exposure
+            // as team_mcts.js.
             plannerByTeam[teamId] = bro.ai.game.createLayeredPlanner({
-                tactic: { iterations: 150, budgetMs: 8, rolloutHorizon: 10, tacticWindowDecisions: 4, actionRepeat: 4 },
-                fine:   { iterations: 250, budgetMs: 10, rolloutHorizon: 10, actionRepeat: 3 },
-                rolloutPolicy: "aggressive", opponentPolicy: "aggressive",
+                tactic: { iterations: 150, budgetMs: 8, rolloutHorizon: 10, tacticWindowDecisions: 4, actionRepeat: 4, priorC: 1.5 },
+                fine:   { iterations: 250, budgetMs: 10, rolloutHorizon: 10, actionRepeat: 3, priorC: 1.5 },
+                // Model the opponent this mode is actually evaluated
+                // against — see team_mcts.js for why "aggressive" was wrong.
+                rolloutPolicy: "aggressive", opponentPolicy: "scripted",
                 evaluator: "teamHpDelta", seed: (0x1A4E + teamId) >>> 0,
             });
         }
@@ -63,6 +71,7 @@ var REPLAN_EVERY_SEC = 0.4;
     Agents.register({
         id: "layered_planner",
         label: "Layered Planner (tactic+fine)",
+        homeScenarios: ["squad_3v3", "squad_4v4"],
         reset: function () { plannerByTeam = {}; actionsByTeam = {}; lastPlanT = {}; },
         teamTick: teamTick,
         think: think,

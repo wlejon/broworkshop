@@ -72,8 +72,12 @@ import { Agents } from "/app/agents/registry.js";
             "holdAndFire", "strafeFire",
         ]);
 
+        // Per-role, per-hero search — same reasoning as options_mcts.js:
+        // this only runs when a hero's committed option terminates, not
+        // every tick, so a realistic budget here doesn't threaten
+        // real-time responsiveness.
         var roleCfg = {
-            iterations: 60, budgetMs: 3, rolloutHorizon: 3,
+            iterations: 250, budgetMs: 16, rolloutHorizon: 3,
             actionRepeat: 2, optionMaxWindows: 6, useLeafValue: true,
             seed: 0xABCDEF,
         };

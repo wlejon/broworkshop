@@ -61,7 +61,10 @@ var REPLAN_EVERY_SEC = 0.4;
             var m = bro.ai.game.createInfoSetMcts();
             m.setEvaluator("hpDelta");
             m.setPrior("attackBias");
-            m.setConfig({ iterations: 150, budgetMs: 10, rolloutHorizon: 12, simDt: 1 / 60 });
+            // priorC — see decoupled_mcts.js for why this is required, not
+            // optional, once a node's action space exceeds what the
+            // iteration budget can exhaustively try once.
+            m.setConfig({ iterations: 150, budgetMs: 10, rolloutHorizon: 12, simDt: 1 / 60, priorC: 1.5 });
             isMctsByHero[heroId] = m;
         }
         return isMctsByHero[heroId];
@@ -108,6 +111,7 @@ var REPLAN_EVERY_SEC = 0.4;
     Agents.register({
         id: "infoset_mcts",
         label: "InfoSet MCTS (fog of war)",
+        homeScenarios: ["squad_3v3", "squad_4v4"],
         reset: function () {
             beliefByTeam = {}; registeredByTeam = {};
             isMctsByHero = {}; actionsByTeam = {}; lastPlanT = {};
