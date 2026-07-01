@@ -27,6 +27,7 @@
         { "dir": "tools/mesh-viewer" },
         { "dir": "tools/scene-editor" },
         { "dir": "tools/algo-viz" },
+        { "dir": "tools/tile-editor" },
         { "dir": "demos/ai-arena" },
         { "dir": "demos/tensor-lab" },
         { "dir": "demos/diffusion-lab" },

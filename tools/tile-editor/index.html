@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Tile Editor</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <canvas id="c"></canvas>
+
+    <div id="hud">
+        <div id="stats">Loading...</div>
+    </div>
+
+    <div id="panel">
+        <div id="panel-header">
+            <span class="title">Tile Editor</span>
+            <span class="hint">right-drag orbit · wheel zoom</span>
+        </div>
+
+        <div class="section">
+            <div class="section-title">Mode</div>
+            <div class="btn-row wrap" id="mode-buttons">
+                <div class="btn mode-btn accent" data-mode="ground">Ground</div>
+                <div class="btn mode-btn" data-mode="elevation">Elevation</div>
+                <div class="btn mode-btn" data-mode="overlay">Overlay</div>
+                <div class="btn mode-btn" data-mode="tint">Tint</div>
+                <div class="btn mode-btn" data-mode="object">Objects</div>
+                <div class="btn mode-btn" data-mode="pathfind">Pathfind</div>
+            </div>
+        </div>
+
+        <div class="section" id="sec-ground">
+            <div class="section-title">Ground brush</div>
+            <div class="btn-row wrap" id="ground-swatches">
+                <div class="btn swatch" data-id="1" style="border-color:#4a8f3c">Grass</div>
+                <div class="btn swatch" data-id="2" style="border-color:#6b4a2c">Dirt</div>
+                <div class="btn swatch" data-id="3" style="border-color:#8c8c94">Stone</div>
+                <div class="btn swatch" data-id="4" style="border-color:#d8c27a">Sand</div>
+                <div class="btn swatch" data-id="5" style="border-color:#3a7dc0">Water</div>
+                <div class="btn swatch" data-id="0" style="border-color:#555">Erase</div>
+            </div>
+            <div class="hint2">Stone &amp; water block pathfinding.</div>
+        </div>
+
+        <div class="section" id="sec-elevation">
+            <div class="section-title">Elevation brush</div>
+            <div class="btn-row">
+                <div class="btn elev-btn accent" data-dir="1">Raise</div>
+                <div class="btn elev-btn" data-dir="-1">Lower</div>
+            </div>
+        </div>
+
+        <div class="section" id="sec-overlay">
+            <div class="section-title">Overlay brush (autotiled road)</div>
+            <div class="btn-row wrap" id="overlay-swatches">
+                <div class="btn swatch" data-id="20" style="border-color:#c9c2a8">Road</div>
+                <div class="btn swatch" data-id="21" style="border-color:#9bbf3a">Crop</div>
+                <div class="btn swatch" data-id="0" style="border-color:#555">Erase</div>
+            </div>
+        </div>
+
+        <div class="section" id="sec-tint">
+            <div class="section-title">Tint brush</div>
+            <div class="color-row">
+                <label>colour</label>
+                <input type="color" id="tint-color" value="#ff6644">
+            </div>
+            <div class="row">
+                <label>alpha</label>
+                <input type="range" id="tint-alpha" min="0" max="1" step="0.05" value="1">
+                <span class="val" id="tint-alpha-val">1.00</span>
+            </div>
+        </div>
+
+        <div class="section" id="sec-object">
+            <div class="section-title">Object placement</div>
+            <div class="btn-row wrap" id="object-swatches">
+                <div class="btn swatch" data-kind="tree" style="border-color:#3a7a2a">Tree</div>
+                <div class="btn swatch" data-kind="rock" style="border-color:#8c8c94">Rock</div>
+                <div class="btn swatch" data-kind="crate" style="border-color:#8c5a2e">Crate</div>
+            </div>
+            <div class="btn-row">
+                <div class="btn" id="btn-clear-objects">Clear All Objects</div>
+            </div>
+        </div>
+
+        <div class="section" id="sec-pathfind">
+            <div class="section-title">Pathfind query</div>
+            <div class="hint2">Click a start cell, then a goal cell.</div>
+            <div class="btn-row">
+                <div class="btn" id="btn-clear-path">Clear Path</div>
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="section-title">Save / Load</div>
+            <div class="btn-row">
+                <div class="btn accent" id="btn-save">Save</div>
+                <div class="btn accent" id="btn-load">Load</div>
+            </div>
+            <div class="hint2" id="save-status"></div>
+        </div>
+    </div>
+
+    <script type="module" src="/app/app.js"></script>
+</body>
+</html>

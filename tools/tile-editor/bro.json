@@ -1,0 +1,7 @@
+{
+    "app": ".",
+    "title": "Tile Editor",
+    "width": 1200,
+    "height": 780,
+    "lib": "../../lib"
+}
