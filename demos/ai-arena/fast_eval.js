@@ -64,8 +64,8 @@ function totalHpOnTeam(state, teamId) {
 }
 
 // Fresh sim state for one match. Rebuilds the world + agents + abilities;
-// never touches Scene3D. We still overwrite App.state so Agents.thinkFor
-// (which reads App.state.redAi / blueAi) routes to the configured agents.
+// never touches Scene3D. We still overwrite State.current so Agents.thinkFor
+// (which reads State.current.redAi / blueAi) routes to the configured agents.
 function buildMatch(scenario, seed) {
     var built = Arena.build(scenario);
     built.world.seed(seed);
@@ -85,7 +85,7 @@ function buildMatch(scenario, seed) {
     AI.claimedCover = [];
     AI.tuningByTeam = [null, null];
     Agents.resetAll();
-    App.state = state;
+    State.current = state;
     return state;
 }
 

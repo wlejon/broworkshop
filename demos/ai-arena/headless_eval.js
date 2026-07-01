@@ -36,32 +36,32 @@ function runMatch(matchIdx) {
     var scn = Scenarios.ALL[matchIdx % Scenarios.ALL.length];
     App.setScenario(scn);
 
-    App.state.redAi  = RED_AI;
-    App.state.blueAi = BLUE_AI;
+    State.current.redAi  = RED_AI;
+    State.current.blueAi = BLUE_AI;
 
     var t0 = Date.now();
     var winner = -1;
     var steps = Math.ceil(MATCH_SECONDS * 1000 / TICK_MS);
     for (var k = 0; k < steps; k++) {
         advanceTime(TICK_MS);
-        var redN = teamAlive(App.state, 0);
-        var blueN = teamAlive(App.state, 1);
+        var redN = teamAlive(State.current, 0);
+        var blueN = teamAlive(State.current, 1);
         if (redN === 0 && blueN === 0) { winner = -1; break; }
         if (redN === 0) { winner = 1; break; }
         if (blueN === 0) { winner = 0; break; }
     }
     if (winner < 0) {
-        var rh = totalHp(App.state, 0), bh = totalHp(App.state, 1);
+        var rh = totalHp(State.current, 0), bh = totalHp(State.current, 1);
         if (bh > rh * 1.05) winner = 1;
         else if (rh > bh * 1.05) winner = 0;
     }
     return {
         scenario: scn.name, winner: winner,
-        redAlive: teamAlive(App.state, 0),
-        blueAlive: teamAlive(App.state, 1),
-        redHp: totalHp(App.state, 0),
-        blueHp: totalHp(App.state, 1),
-        elapsed: App.state.elapsed.toFixed(1),
+        redAlive: teamAlive(State.current, 0),
+        blueAlive: teamAlive(State.current, 1),
+        redHp: totalHp(State.current, 0),
+        blueHp: totalHp(State.current, 1),
+        elapsed: State.current.elapsed.toFixed(1),
         wallMs: Date.now() - t0,
     };
 }

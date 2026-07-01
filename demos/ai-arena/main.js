@@ -8,6 +8,7 @@
 // The Red AI / Blue AI selectors pick which registered agent runs for
 // each team's units — see agents/registry.js.
 import { Config } from "/app/config.js";
+import { State } from "/app/state.js";
 import { Scenarios } from "/app/scenarios.js";
 import { Arena } from "/app/arena.js";
 import { AI } from "/app/ai.js";
@@ -32,7 +33,6 @@ export const App = {};
 (function () {
     "use strict";
 
-    App.state = null;
     App.canvas = null;
     App.scenario = null;
 
@@ -42,10 +42,10 @@ export const App = {};
     };
 
     App.rebuild = function () {
-        if (App.state && App.state.world) {
+        if (State.current && State.current.world) {
             Scene3D.scene.detachAIWorld();
-            for (var di = 0; di < App.state.agents.length; di++) {
-                var dn = Scene3D.units[App.state.agents[di].unit.id];
+            for (var di = 0; di < State.current.agents.length; di++) {
+                var dn = Scene3D.units[State.current.agents[di].unit.id];
                 if (dn) { try { dn.detachAgent(); } catch (e) {} }
             }
         }
@@ -59,7 +59,7 @@ export const App = {};
             rewardTrackers[a.unit.id] = bro.ai.game.createRewardTracker(a, built.world);
         }
 
-        App.state = {
+        State.current = {
             nav: built.nav,
             world: built.world,
             agents: built.agents,
@@ -91,7 +91,7 @@ export const App = {};
 
         // Ensure shared state is populated before the first think() fires —
         // attachAIWorld/attachAgent immediately schedule a tick.
-        AI.updateShared(App.state);
+        AI.updateShared(State.current);
 
         Scene3D.scene.attachAIWorld(built.world, {
             stepHz: 60, maxStepsPerFrame: Config.MAX_STEPS_PER_FRAME,
@@ -114,7 +114,7 @@ export const App = {};
 
         Render.clearFx();
         UI.rebuildRoster(Arena.ROSTER);
-        Controls.syncFromDom(App.state);
+        Controls.syncFromDom(State.current);
         UI.rewardHistory = { red: [], blue: [] };
         UI.log("arena built - " + built.agents.length + " agents (" +
                App.scenario.name + ")", "");
@@ -128,7 +128,7 @@ export const App = {};
         lastT = now;
         if (dt > 0.1) dt = 0.1;
 
-        var state = App.state;
+        var state = State.current;
         if (!state) return;
 
         if (state.replayPlaying && state.replayReader) {
@@ -159,7 +159,7 @@ export const App = {};
     Controls.bind(App.rebuild);
 
     // Debug hook — exposes state globally so headless scripts can inspect.
-    window.getState = function () { return App.state; };
+    window.getState = function () { return State.current; };
 
     lastT = performance.now();
     requestAnimationFrame(frame);
