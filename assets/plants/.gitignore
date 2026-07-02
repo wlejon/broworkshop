@@ -1,0 +1,4 @@
+# Extracted texture files are fetched by download.sh, not committed.
+leaves/
+bark/
+grass/
