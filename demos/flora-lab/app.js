@@ -266,7 +266,7 @@ function rebuildFoliage() {
     // peaks at mid-length and tapers to both ends; `cup` dishes the cross-
     // section so it catches light like a real leaf instead of a flat sheet.
     const leaf = Mesh.leafCard('oval', {
-        width: 0.11, length: 0.2, bend: 0.45,
+        width: 0.13, length: 0.23, bend: 0.45,
         fullUV: true, shapedSilhouette: true, cup: 0.3,
         widthSegments: 3, lengthSegments: 6,
     });
@@ -306,7 +306,7 @@ function rebuildFoliage() {
             // inside. Fall back to full density when the field is absent (older
             // engine without lightExposure01) so leaves still scatter.
             const raw      = f && f.lightExposure01 !== undefined ? f.lightExposure01 : 1.0;
-            const exposure = 0.03 + 0.97 * raw;
+            const exposure = 0.12 + 0.88 * raw;
             const maturity = f ? Math.min(1, f.age01) : 1.0;
             const alive    = f ? (1.0 - f.senescence01) : 1.0;
             g.w.push(exposure * maturity * alive);
@@ -319,12 +319,13 @@ function rebuildFoliage() {
         const segs = groups[key].segs;
         if (segs.length === 0) continue;
         const foliage = Mesh.scatterLeaves(segs, leaf, {
-            maxRadius:     0.16,   // leaves on twigs, not the thick stems
+            maxRadius:     0.22,   // leaves on twigs, not the thick stems
             minDepth:      1,
             // perUnitLength is the *full-sun* rate; the per-segment exposure
-            // weight scales it down in shade, so this runs higher than the old
-            // uniform 46 to keep the sunlit shell dense.
-            perUnitLength: 95,
+            // weight scales it down in shade. A mature canopy this thick needs
+            // full coverage to read as a plant that could actually survive on
+            // this much leaf area, not a wireframe with a few leaves clipped on.
+            perUnitLength: 220,
             densityWeight: groups[key].w,
             upBias:        0.5,    // leaves tip toward the light
             tiltJitter:    0.55,
