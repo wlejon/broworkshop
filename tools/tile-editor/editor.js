@@ -9,6 +9,8 @@
 // buildTileAtlasTable below); everything else (cliff, crop, road variants)
 // lives at higher, non-colliding cell indices.
 
+import "/lib/history.js";
+
 export const GROUND_IDS = {
     grass: 1, dirt: 2, stone: 3, sand: 4, water: 5,
     wood: 9, plaza: 10, lush: 11,
@@ -204,15 +206,73 @@ export function createEditor(scene, initialConfig) {
         dirty = false;
     }
 
+    // ---- undo/redo (per-stroke cell snapshots) -----------------------------
+    //
+    // TileWorld has getTile/getElevation/hasFlag but no getTint, so tint is
+    // additionally shadowed here — paintTint is this app's only writer, so
+    // the shadow stays authoritative. A "stroke" is a mousedown..mouseup drag
+    // (or a single rect/flood-fill op); beginStroke/endStroke bracket it and
+    // collapse every cell it touched into one history entry.
+    const history = new History({ limit: 200 });
+    const tintShadow = new Map();
+    function cellKey(x, y) { return x + ',' + y; }
+    function shadowTint(x, y) { return tintShadow.get(cellKey(x, y)) || [1, 1, 1, 1]; }
+
+    let strokeTouched = null;
+    let strokeLabel = '';
+
+    function beginStroke(label) {
+        strokeTouched = new Map();
+        strokeLabel = label;
+    }
+    function captureCell(x, y) {
+        if (!strokeTouched) return;
+        const key = cellKey(x, y);
+        if (strokeTouched.has(key)) return;   // keep first-seen (pre-stroke) state
+        strokeTouched.set(key, cellSnapshot(x, y));
+    }
+    function cellSnapshot(x, y) {
+        return {
+            x, y,
+            ground: world.getTile(x, y, 0),
+            overlay: world.getTile(x, y, 1),
+            elevation: world.getElevation(x, y),
+            blocked: world.hasFlag(x, y, BLOCK_BIT),
+            tint: shadowTint(x, y).slice(),
+        };
+    }
+    function applyCellSnapshot(snap) {
+        world.setTile(snap.x, snap.y, snap.ground, 0);
+        world.setTile(snap.x, snap.y, snap.overlay, 1);
+        world.setElevation(snap.x, snap.y, snap.elevation);
+        world.setFlag(snap.x, snap.y, BLOCK_BIT, snap.blocked);
+        world.setTint(snap.x, snap.y, snap.tint[0], snap.tint[1], snap.tint[2], snap.tint[3]);
+        tintShadow.set(cellKey(snap.x, snap.y), snap.tint.slice());
+    }
+    function endStroke() {
+        const before = strokeTouched;
+        strokeTouched = null;
+        if (!before || before.size === 0) return;
+        const after = new Map();
+        for (const snap of before.values()) after.set(cellKey(snap.x, snap.y), cellSnapshot(snap.x, snap.y));
+        history.record(strokeLabel,
+            () => { for (const s of after.values()) applyCellSnapshot(s); markDirty(); },
+            () => { for (const s of before.values()) applyCellSnapshot(s); markDirty(); });
+    }
+
     // ---- ground brush -----------------------------------------------------
 
     function paintGround(x, y, id) {
+        captureCell(x, y);
         world.setTile(x, y, id, 0);
         const blocked = id === GROUND_IDS.stone || id === GROUND_IDS.water;
         world.setFlag(x, y, BLOCK_BIT, blocked);
         markDirty();
     }
     function fillGround(x0, y0, x1, y1, id) {
+        for (let y = Math.min(y0, y1); y <= Math.max(y0, y1); y++)
+            for (let x = Math.min(x0, x1); x <= Math.max(x0, x1); x++)
+                captureCell(x, y);
         world.fillTile(x0, y0, x1, y1, id, 0);
         const blocked = id === GROUND_IDS.stone || id === GROUND_IDS.water;
         for (let y = Math.min(y0, y1); y <= Math.max(y0, y1); y++)
@@ -224,6 +284,7 @@ export function createEditor(scene, initialConfig) {
     // ---- elevation brush ----------------------------------------------
 
     function raiseElevation(x, y, dir) {
+        captureCell(x, y);
         const level = Math.max(-4, Math.min(8, world.getElevation(x, y) + dir));
         world.setElevation(x, y, level);
         markDirty();
@@ -232,6 +293,7 @@ export function createEditor(scene, initialConfig) {
     // ---- overlay brush ------------------------------------------------
 
     function paintOverlay(x, y, id) {
+        captureCell(x, y);
         world.setTile(x, y, id, 1);
         markDirty();
     }
@@ -239,7 +301,9 @@ export function createEditor(scene, initialConfig) {
     // ---- tint brush -----------------------------------------------------
 
     function paintTint(x, y, r, g, b, a) {
+        captureCell(x, y);
         world.setTint(x, y, r, g, b, a);
+        tintShadow.set(cellKey(x, y), [r, g, b, a]);
         markDirty();
     }
 
@@ -340,6 +404,8 @@ export function createEditor(scene, initialConfig) {
         world.clearObjects(-1);
         world.rebuildObjects();
         clearPathMarkers();
+        history.clear();
+        tintShadow.clear();
         fillGround(0, 0, cfg.width - 1, cfg.height - 1, GROUND_IDS.grass);
         world.fillElevation(0, 0, cfg.width - 1, cfg.height - 1, 0);
         world.rebuild();
@@ -379,13 +445,14 @@ export function createEditor(scene, initialConfig) {
     authorInitialMap();
 
     return {
-        world, atlas,
+        world, atlas, history,
         paintGround, fillGround, raiseElevation, paintOverlay, paintTint,
         placeObject, clearAllObjects,
         queryPath, clearPathMarkers,
         saveMap, loadMap,
         rebuildIfDirty,
         newMap,
+        beginStroke, endStroke,
         getConfig() { return Object.assign({}, cfg); },
         get mapWidth() { return cfg.width; },
         get mapHeight() { return cfg.height; },

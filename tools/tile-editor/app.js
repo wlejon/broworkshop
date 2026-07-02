@@ -105,6 +105,8 @@ function handlePathClick(hit) {
 let leftDown = false;
 let lastPaintKey = null;
 
+const STROKE_LABELS = { ground: 'Paint ground', elevation: 'Raise elevation', overlay: 'Paint overlay', tint: 'Paint tint' };
+
 canvas.addEventListener('mousedown', (e) => {
     if (e.button === 2) { rightDown = true; e.preventDefault(); updatePointerLock(); return; }
     if (e.button === 1) { middleDown = true; e.preventDefault(); updatePointerLock(); return; }
@@ -121,12 +123,13 @@ canvas.addEventListener('mousedown', (e) => {
     }
     leftDown = true;
     lastPaintKey = null;
+    editor.beginStroke(STROKE_LABELS[mode] || 'Paint');
     if (hit) { applyBrush(hit); lastPaintKey = hit.x + ',' + hit.y; }
 });
 document.addEventListener('mouseup', (e) => {
     if (e.button === 2) rightDown = false;
     if (e.button === 1) middleDown = false;
-    if (e.button === 0) leftDown = false;
+    if (e.button === 0 && leftDown) { leftDown = false; editor.endStroke(); }
     updatePointerLock();
 });
 document.addEventListener('mousemove', (e) => {
@@ -312,6 +315,27 @@ const tintAlphaInput = document.getElementById('tint-alpha');
 const tintAlphaVal = document.getElementById('tint-alpha-val');
 tintAlphaInput.addEventListener('input', () => {
     tintAlphaVal.textContent = parseFloat(tintAlphaInput.value).toFixed(2);
+});
+
+// ---------------------------------------------------------------------------
+// Undo / redo
+// ---------------------------------------------------------------------------
+
+const btnUndo = document.getElementById('btn-undo');
+const btnRedo = document.getElementById('btn-redo');
+function updateHistoryButtons() {
+    btnUndo.classList.toggle('disabled', !editor.history.canUndo());
+    btnRedo.classList.toggle('disabled', !editor.history.canRedo());
+}
+editor.history.on('change', updateHistoryButtons);
+updateHistoryButtons();
+btnUndo.addEventListener('click', () => { editor.history.undo(); editor.rebuildIfDirty(); });
+btnRedo.addEventListener('click', () => { editor.history.redo(); editor.rebuildIfDirty(); });
+document.addEventListener('keydown', (e) => {
+    if (!e.ctrlKey || e.key.toLowerCase() !== 'z') return;
+    e.preventDefault();
+    if (e.shiftKey) editor.history.redo(); else editor.history.undo();
+    editor.rebuildIfDirty();
 });
 
 function flashStatus(msg) {

@@ -66,6 +66,7 @@ canvas { display: block; cursor: crosshair; width: 100vw; height: 100vh; }
 .btn.accent { border-color: #b5e853; color: #b5e853; }
 .btn.accent:hover { background: rgba(181,232,83,0.15); }
 .btn.selected { background: rgba(181,232,83,0.25); border-color: #b5e853; color: #fff; }
+.btn.disabled { opacity: 0.35; cursor: default; pointer-events: none; }
 
 .swatch {
     flex: 0 0 auto; border-width: 2px;
