@@ -102,6 +102,7 @@ canvas {
     padding: 6px 20px;
     margin-bottom: 4px;
     width: 100%;
+    box-sizing: border-box;
     cursor: pointer;
 }
 
