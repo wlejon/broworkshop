@@ -21,8 +21,19 @@ import { installSystemMenu } from "/lib/system-menu.js";
 const canvas = document.getElementById('stage');
 const scene = canvas.getContext('scene');
 
-scene.setAmbient([0.05, 0.06, 0.07]);
-scene.setToneMap({ mode: 'aces', exposure: 1.0 });
+scene.setToneMap({ mode: 'aces', exposure: 1.02 });
+
+// Studio IBL: a neutral bright HDR sky (shared with the lighting demo) gives
+// every archetype orientation-dependent ambient — cool skylight from above,
+// warm bounce below — plus a real horizon, instead of the old flat near-black
+// void. Falls back to a tuned flat ambient if the HDR is missing so the app
+// still runs.
+const haveHDR = scene.setEnvironment({
+    hdr: '../lighting-demo/hdri/kloofendal_43d_clear_puresky_2k.hdr',
+    intensity: 0.85, rotation: 2.3,
+});
+if (!haveHDR) scene.setAmbient([0.30, 0.33, 0.36]);
+scene.setFog({ start: 24, end: 110, color: [0.72, 0.78, 0.84] });
 
 // ─── Orbit camera ─────────────────────────────────────────────────────────
 
@@ -99,12 +110,25 @@ canvas.addEventListener('wheel', (e) => {
 
 // ─── Lights & ground ──────────────────────────────────────────────────────
 
+// Key sun (CSM-shadowed) — warm, angled to rake form across the plant.
+const keyLight = scene.createLight({
+    type: 'directional',
+    direction: [-0.42, -0.82, -0.35],
+    color: [1.0, 0.96, 0.88],
+    intensity: 3.0,
+    castsShadow: true,
+});
+keyLight.cascadeCount = 4;
+keyLight.cascadeSplitLambda = 0.75;
+scene.setShadowQuality(4096, 3);
+
+// Cool sky-toned fill from the opposite side (no shadow) so the shaded side
+// reads with depth instead of crushing to black.
 scene.createLight({
     type: 'directional',
-    direction: [-0.4, -0.8, -0.3],
-    color: [1.0, 0.97, 0.92],
-    intensity: 2.0,
-    castsShadow: true,
+    direction: [0.55, -0.3, 0.45],
+    color: [0.55, 0.68, 0.85],
+    intensity: 0.6,
 });
 
 let groundNode = null;
