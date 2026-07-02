@@ -42,15 +42,11 @@ function buildFernSprout(opts, stageT) {
     return { parts, aabbMin: [-0.04, 0, -0.04], aabbMax: [0.04, cy + coilR * 1.5, 0.04] };
 }
 
-function buildFernCore(opts, age01, scaleMul) {
-    scaleMul = scaleMul ?? 1;
-    const pairs = Math.max(2, opts.leafletPairs ?? 14);
-    const length = (opts.length ?? 1.5) * scaleMul;
-    const stemRadius = (opts.stemRadius ?? 0.012) * scaleMul;
-    const leafletLength = (opts.leafletLength ?? 0.32) * scaleMul;
-    const curvature = opts.curvature ?? 1.4;
-    const leafColor = F.hexToRgb(opts.leafColor || F.PALETTE.fernLeaf);
-
+// One frond (rachis + paired pinnae), built in local space: base at the
+// origin, arching toward +Z in the Y-Z plane. Returns its sub-meshes so the
+// caller can rotate copies of it into a radial crown.
+function buildOneFrond(p) {
+    const { pairs, length, stemRadius, leafletLength, curvature, scaleMul } = p;
     const fCount = pairs;
     const step = length / fCount;
     const bendPerStep = curvature / fCount;
@@ -72,45 +68,90 @@ function buildFernCore(opts, age01, scaleMul) {
     const rachisMesh = Mesh.tube(rachis, stemScale, 6);
     if (rachisMesh) sub.push(rachisMesh);
 
+    // The rachis is built entirely in the Y-Z plane, so the frond's plane
+    // normal is a constant world X. Push pinnae out along ±X directly — the
+    // old cross(tangent, ±axis) flipped *into* the plane on the arched upper
+    // half (|cross| → 0 there), which collapsed the upper leaflets onto the
+    // rachis and z-fought. `frondUp` is the frond-sheet normal; a little of
+    // it gives the pinnae an upward dihedral (V-shaped feather) and a gentle
+    // tip droop, so the frond reads as 3D instead of a flat sliver.
+    const planeNormal = [1, 0, 0];
     for (let i = 1; i < rachis.length; i++) {
-        const p = rachis[i];
+        const pt = rachis[i];
         const tangent = F.vNormOr(F.vSub(rachis[i], rachis[i - 1]), [0, 1, 0]);
         const t = i / (rachis.length - 1);
         const taper = Math.sin(Math.PI * t);
         const ll = leafletLength * Math.max(0.15, taper);
 
-        let ortho = F.vCross(tangent, [0, 0, 1]);
-        if (F.vLen(ortho) < 0.5) ortho = F.vCross(tangent, [1, 0, 0]);
-        ortho = F.vNorm(ortho);
+        const frondUp = F.vNormOr(F.vCross(tangent, planeNormal), [0, 0, 1]);
 
         for (const sign of [1, -1]) {
-            const sideDir = F.vScale(ortho, sign);
+            // Out to the side, swept toward the tip, lifted a touch out of plane.
+            const sideDir = F.vNorm([
+                planeNormal[0] * sign + tangent[0] * 0.4 + frondUp[0] * 0.18,
+                planeNormal[1] * sign + tangent[1] * 0.4 + frondUp[1] * 0.18,
+                planeNormal[2] * sign + tangent[2] * 0.4 + frondUp[2] * 0.18,
+            ]);
             const leafPath = [];
             const lsegs = 6;
             for (let k = 0; k <= lsegs; k++) {
                 const u = k / lsegs;
-                leafPath.push(F.vAdd(F.vAdd(p, F.vScale(sideDir, u * ll)),
-                                            F.vScale(tangent, u * ll * 0.1)));
+                const base = F.vAdd(pt, F.vScale(sideDir, u * ll));
+                // Curl the pinna tip gently back down out of the flat sheet.
+                leafPath.push(F.vAdd(base, F.vScale(frondUp, -0.12 * u * u * ll)));
             }
-            const leafW = 0.025 * Math.max(0.2, taper) * scaleMul;
-            const leafScale = leafPath.map((_, k) => Math.max(0.1, 1 - k / (leafPath.length - 1)));
+            const leafW = 0.05 * Math.max(0.2, taper) * scaleMul;
+            const leafScale = leafPath.map((_, k) => Math.max(0.08, 1 - k / (leafPath.length - 1)));
             const lm = Mesh.bladeStrip(leafPath, {
-                width: leafW, thickness: leafW * 0.2,
+                width: leafW, thickness: leafW * 0.15,
                 capStart: false, capEnd: true, miterJoints: false,
                 profileScale: leafScale,
             });
             if (lm) sub.push(lm);
         }
     }
+    return { sub, rachis };
+}
 
-    const merged = sub.length > 1 ? Mesh.merge(sub) : sub[0];
-    const aabb = F.emptyAabb();
-    for (const p of rachis) F.aabbInclude(aabb, p, leafletLength);
+function buildFernCore(opts, age01, scaleMul) {
+    scaleMul = scaleMul ?? 1;
+    const pairs = Math.max(2, opts.leafletPairs ?? 20);
+    const length = (opts.length ?? 1.5) * scaleMul;
+    const stemRadius = (opts.stemRadius ?? 0.012) * scaleMul;
+    const leafletLength = (opts.leafletLength ?? 0.32) * scaleMul;
+    const curvature = opts.curvature ?? 1.4;
+    const leafColor = F.hexToRgb(opts.leafColor || F.PALETTE.fernLeaf);
 
-    const fin = F.finalizeAabb(aabb, { min: [-leafletLength, 0, -leafletLength], max: [leafletLength, length, leafletLength] });
+    // A fern is a crown of fronds sprung from a single base, not one blade.
+    // Scale the count with age so seedlings are sparse and mature ferns full.
+    const frondMax = Math.max(1, Math.round(opts.fronds ?? 7));
+    const frondCount = Math.max(1, Math.round(frondMax * (0.35 + 0.65 * (age01 ?? 1))));
+    const rng = F.mulberry32(((opts.seed | 0) || 1) ^ 0x5e12);
+
+    const allSub = [];
+    let aabbLen = length;
+    for (let fi = 0; fi < frondCount; fi++) {
+        // Even radial spread with a little jitter; vary length/curvature so the
+        // crown reads organic rather than stamped.
+        const az = (fi / frondCount) * F.TAU + (rng() - 0.5) * 0.5;
+        const lenMul = 0.82 + rng() * 0.36;
+        const curveMul = 0.85 + rng() * 0.35;
+        const fr = buildOneFrond({
+            pairs, length: length * lenMul, stemRadius,
+            leafletLength, curvature: curvature * curveMul, scaleMul,
+        });
+        aabbLen = Math.max(aabbLen, length * lenMul);
+        for (const m of fr.sub) {
+            m.rotate(0, 1, 0, az);
+            allSub.push(m);
+        }
+    }
+
+    const merged = allSub.length > 1 ? Mesh.merge(allSub) : allSub[0];
+    const reach = aabbLen + leafletLength;
     return {
         parts: [{ mesh: merged, color: leafColor, metallic: 0, roughness: 0.9 }],
-        aabbMin: fin.aabbMin, aabbMax: fin.aabbMax,
+        aabbMin: [-reach, 0, -reach], aabbMax: [reach, aabbLen, reach],
     };
 }
 

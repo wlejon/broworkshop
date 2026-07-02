@@ -39,28 +39,46 @@ function buildBarrel(opts, scaleMul, anchorsOut) {
 
     const parts = [];
     const cy = H * 0.5;
-    // Main body — vertically scaled blob with rib jitter.
-    const body = F.buildBlob([0, cy, 0], R, seed ^ 0xCC10,
-        { nsub: 3, sx: 1.0, sy: H / (2 * R), sz: 1.0 });
-    parts.push({ mesh: body, color, metallic: 0, roughness: 0.7 });
-
-    // Add subtle vertical rib bumps via small tubes along the surface.
-    for (let i = 0; i < ribs; i++) {
-        const a = (i / ribs) * TAU;
-        const path = [
-            [Math.cos(a) * R * 0.97, 0.02, Math.sin(a) * R * 0.97],
-            [Math.cos(a) * R * 0.97, H - 0.02, Math.sin(a) * R * 0.97],
-        ];
-        const m = Mesh.tube(path, R * 0.04, 4);
-        if (m) parts.push({ mesh: m, color: F.tint(color, [0, 0, 0], 0.15), metallic: 0, roughness: 0.7, twoSided: false });
+    // Ribbed body: sweep a fluted circular profile up a domed vertical path so
+    // the ribs are real surface geometry. (The old blob body + separate rib
+    // tubes never aligned — the clean tubes poked through the noisy blob and
+    // read as green rods hovering off the surface.)
+    const ribDepth = 0.07;
+    const N = Math.max(24, ribs * 6);
+    const profile = [];
+    for (let k = 0; k < N; k++) {
+        const th = (k / N) * TAU;
+        const rr = 1 + ribDepth * Math.cos(ribs * th);
+        profile.push([Math.cos(th) * rr, Math.sin(th) * rr]);
     }
+    const rings = 14;
+    const bodyPath = [];
+    const pscale = [];
+    for (let j = 0; j <= rings; j++) {
+        const t = j / rings;
+        bodyPath.push([0, t * H, 0]);
+        // Cylindrical body with a lightly flared base and a rounded top dome.
+        const bodyS = 0.86 + 0.14 * Math.sin(Math.PI * Math.min(1, t / 0.82) * 0.85);
+        const s = (t < 0.82)
+            ? bodyS
+            : bodyS * Math.cos(((t - 0.82) / 0.18) * Math.PI * 0.5);
+        pscale.push(R * Math.max(0.02, s));
+    }
+    const body = Mesh.sweep(profile, bodyPath, {
+        closeProfile: true, capStart: true, capEnd: true,
+        profileScale: pscale, miterJoints: false,
+    });
+    if (body) parts.push({ mesh: body, color, metallic: 0, roughness: 0.72 });
 
     // Spines.
+    // spineCluster measures yMin/yMax relative to `center`, so pass the body
+    // half-height band (not absolute world heights) — otherwise the center's
+    // own H/2 offset is double-counted and spines float above the body.
     const spines = F.spineCluster({
         seed: seed ^ 0xCC20,
         center: [0, cy, 0], surfaceRadius: R, surfaceHeight: H,
         count: Math.round(120 * scaleMul * scaleMul), length: 0.025 * scaleMul,
-        yMin: 0.05, yMax: H - 0.05,
+        yMin: 0.05 - cy, yMax: cy - 0.05,
     });
     for (const p of spines.parts) parts.push(p);
 
@@ -164,12 +182,13 @@ function buildSaguaro(opts, scaleMul, anchorsOut) {
         if (anchorsOut) anchorsOut.push(ctrl[3]);
     }
 
-    // Spines along main column.
+    // Spines along main column. yMin/yMax are relative to `center` (body
+    // mid-height), so use the half-height band, not absolute world heights.
     const spines = F.spineCluster({
         seed: seed ^ 0xCC50,
         center: [0, H * 0.5, 0], surfaceRadius: R, surfaceHeight: H,
         count: Math.round(180 * scaleMul), length: 0.022 * scaleMul,
-        yMin: 0.05, yMax: H - 0.05,
+        yMin: 0.05 - H * 0.5, yMax: H * 0.5 - 0.05,
     });
     for (const p of spines.parts) parts.push(p);
 
