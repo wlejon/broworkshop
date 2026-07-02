@@ -309,7 +309,15 @@ function rebuildFoliage() {
             const exposure = 0.12 + 0.88 * raw;
             const maturity = f ? Math.min(1, f.age01) : 1.0;
             const alive    = f ? (1.0 - f.senescence01) : 1.0;
-            g.w.push(exposure * maturity * alive);
+            // twigGrade01 is broflora's "off the trunk" gate: 1 on shoots at
+            // leaf thickness, 0 on branches thicker than ~6x leaf diameter.
+            // Without it, this hand-rolled recipe (built from exposure/age/
+            // senescence alone) has no notion of branch thickness, so it
+            // scatters leaves onto trunks and scaffold limbs exactly as
+            // readily as onto twigs — real plants only leaf their finest
+            // shoots. Default to 1 for older engines missing the field.
+            const twig     = f && f.twigGrade01 !== undefined ? f.twigGrade01 : 1.0;
+            g.w.push(exposure * maturity * alive * twig);
         }
     }
 
