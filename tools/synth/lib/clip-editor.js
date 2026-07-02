@@ -413,11 +413,13 @@ const Editor = ClipEditor;
     };
 
     Editor.fadeIn = function() {
-        if (!samples || !hasSelection) return;
+        if (!samples) return;
         pushUndo();
-        var len = selEnd - selStart;
+        var start = hasSelection ? selStart : 0;
+        var end = hasSelection ? selEnd : samples.length;
+        var len = end - start;
         for (var i = 0; i < len; i++) {
-            samples[selStart + i] *= i / len;
+            samples[start + i] *= i / len;
         }
         recreateClip();
         Editor.draw();
@@ -425,11 +427,13 @@ const Editor = ClipEditor;
     };
 
     Editor.fadeOut = function() {
-        if (!samples || !hasSelection) return;
+        if (!samples) return;
         pushUndo();
-        var len = selEnd - selStart;
+        var start = hasSelection ? selStart : 0;
+        var end = hasSelection ? selEnd : samples.length;
+        var len = end - start;
         for (var i = 0; i < len; i++) {
-            samples[selStart + i] *= 1 - (i / len);
+            samples[start + i] *= 1 - (i / len);
         }
         recreateClip();
         Editor.draw();

@@ -611,8 +611,9 @@ test('440Hz sine shows peak at correct frequency bin', function() {
         }
     }
 
-    // Convert bin to frequency
-    var binHz = ctx.sampleRate / numBins;
+    // Convert bin to frequency (spectrum length is fftSize/2, i.e. numBins
+    // covers 0..sampleRate/2 — matching Web Audio AnalyserNode semantics)
+    var binHz = ctx.sampleRate / (2 * numBins);
     var peakFreq = peakBin * binHz;
 
     assertGt(peakVal, 0, 'should have spectral peak');
