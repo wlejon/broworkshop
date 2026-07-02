@@ -1,6 +1,6 @@
 import "/lib/camera.js";
 import "/lib/project.js";
-import { createEditor, GROUND_IDS, OVERLAY_IDS, atlasCellPxRect, OVERLAY_THUMB_CELL } from "/app/editor.js";
+import { createEditor, GROUND_IDS, OVERLAY_IDS, BLOCK_BIT, atlasCellPxRect, OVERLAY_THUMB_CELL } from "/app/editor.js";
 import { installSystemMenu } from "/lib/system-menu.js";
 
 // =============================================================================
@@ -62,8 +62,16 @@ let mode = 'ground';
 let groundId = GROUND_IDS.grass;
 let overlayId = OVERLAY_IDS.road;
 let elevDir = 1;
+let flagValue = true;
+let brushRadius = 0;
 let selectedKind = 'tree';
 let pathStart = null;
+
+// Modes that paint a single scalar value per cell and so support the shared
+// brush-size/rect-fill/flood-fill machinery (object/pathfind pick instead).
+const PAINT_MODES = new Set(['ground', 'elevation', 'overlay', 'tint', 'flags']);
+const FLOOD_MODES = new Set(['ground', 'overlay']);   // id-based layers only
+const EYEDROP_MODES = new Set(['ground', 'overlay']);
 
 function hexToRgb01(hex) {
     const v = parseInt(hex.slice(1), 16);
@@ -78,14 +86,49 @@ function cellFromEvent(e) {
     return editor.world.raycastCell(ray.origin, ray.dir, 1000);
 }
 
-function applyBrush(hit) {
-    if (!hit) return;
-    if (mode === 'ground') editor.paintGround(hit.x, hit.y, groundId);
-    else if (mode === 'elevation') editor.raiseElevation(hit.x, hit.y, elevDir);
-    else if (mode === 'overlay') editor.paintOverlay(hit.x, hit.y, overlayId);
+function paintCell(x, y) {
+    if (mode === 'ground') editor.paintGround(x, y, groundId);
+    else if (mode === 'elevation') editor.raiseElevation(x, y, elevDir);
+    else if (mode === 'overlay') editor.paintOverlay(x, y, overlayId);
     else if (mode === 'tint') {
         const rgb = hexToRgb01(tintColorInput.value);
-        editor.paintTint(hit.x, hit.y, rgb[0], rgb[1], rgb[2], parseFloat(tintAlphaInput.value));
+        editor.paintTint(x, y, rgb[0], rgb[1], rgb[2], parseFloat(tintAlphaInput.value));
+    } else if (mode === 'flags') {
+        editor.paintFlag(x, y, BLOCK_BIT, flagValue);
+    }
+}
+
+function applyBrush(hit) {
+    if (!hit) return;
+    for (const [x, y] of editor.cellsInRadius(hit.x, hit.y, brushRadius)) paintCell(x, y);
+}
+
+function applyRectFill(x0, y0, x1, y1) {
+    if (mode === 'ground') editor.fillGround(x0, y0, x1, y1, groundId);
+    else if (mode === 'elevation') editor.fillElevationDelta(x0, y0, x1, y1, elevDir);
+    else if (mode === 'overlay') editor.fillOverlay(x0, y0, x1, y1, overlayId);
+    else if (mode === 'tint') {
+        const rgb = hexToRgb01(tintColorInput.value);
+        editor.fillTint(x0, y0, x1, y1, rgb[0], rgb[1], rgb[2], parseFloat(tintAlphaInput.value));
+    } else if (mode === 'flags') {
+        editor.fillFlag(x0, y0, x1, y1, BLOCK_BIT, flagValue);
+    }
+}
+
+function applyFloodFill(hit) {
+    if (!hit || !FLOOD_MODES.has(mode)) return;
+    if (mode === 'ground') editor.floodFill(0, hit.x, hit.y, groundId);
+    else if (mode === 'overlay') editor.floodFill(1, hit.x, hit.y, overlayId);
+}
+
+function applyEyedropper(hit) {
+    if (!hit || !EYEDROP_MODES.has(mode)) return;
+    if (mode === 'ground') {
+        groundId = editor.eyedrop(0, hit.x, hit.y);
+        selectSibling(groundButtons, groundButtons.find((el) => Number(el.dataset.id) === groundId) || groundButtons[groundButtons.length - 1]);
+    } else if (mode === 'overlay') {
+        overlayId = editor.eyedrop(1, hit.x, hit.y);
+        selectSibling(overlayButtons, overlayButtons.find((el) => Number(el.dataset.id) === overlayId) || overlayButtons[overlayButtons.length - 1]);
     }
 }
 
@@ -105,8 +148,14 @@ function handlePathClick(hit) {
 
 let leftDown = false;
 let lastPaintKey = null;
+let rectDragActive = false;
+let rectStart = null;
+let rectEnd = null;
 
-const STROKE_LABELS = { ground: 'Paint ground', elevation: 'Raise elevation', overlay: 'Paint overlay', tint: 'Paint tint' };
+const STROKE_LABELS = {
+    ground: 'Paint ground', elevation: 'Raise elevation', overlay: 'Paint overlay',
+    tint: 'Paint tint', flags: 'Paint flags',
+};
 
 canvas.addEventListener('mousedown', (e) => {
     if (e.button === 2) { rightDown = true; e.preventDefault(); updatePointerLock(); return; }
@@ -122,6 +171,23 @@ canvas.addEventListener('mousedown', (e) => {
         if (hit) handlePathClick(hit);
         return;
     }
+    if (!PAINT_MODES.has(mode)) return;
+
+    if (e.altKey) { applyEyedropper(hit); return; }
+    if (e.ctrlKey) {
+        if (!hit || !FLOOD_MODES.has(mode)) return;
+        editor.beginStroke('Flood fill');
+        applyFloodFill(hit);
+        editor.endStroke();
+        return;
+    }
+    if (e.shiftKey) {
+        rectDragActive = true;
+        rectStart = hit;
+        rectEnd = hit;
+        return;
+    }
+
     leftDown = true;
     lastPaintKey = null;
     editor.beginStroke(STROKE_LABELS[mode] || 'Paint');
@@ -130,13 +196,27 @@ canvas.addEventListener('mousedown', (e) => {
 document.addEventListener('mouseup', (e) => {
     if (e.button === 2) rightDown = false;
     if (e.button === 1) middleDown = false;
+    if (e.button === 0 && rectDragActive) {
+        rectDragActive = false;
+        if (rectStart && rectEnd) {
+            editor.beginStroke('Rect fill');
+            applyRectFill(rectStart.x, rectStart.y, rectEnd.x, rectEnd.y);
+            editor.endStroke();
+        }
+        rectStart = null; rectEnd = null;
+    }
     if (e.button === 0 && leftDown) { leftDown = false; editor.endStroke(); }
     updatePointerLock();
 });
 document.addEventListener('mousemove', (e) => {
     if (rightDown) Camera.orbitLook(cam, e.movementX, e.movementY);
     if (middleDown) Camera.orbitPan(cam, e.movementX, e.movementY);
-    if (leftDown && mode !== 'object' && mode !== 'pathfind') {
+    if (rectDragActive) {
+        const hit = cellFromEvent(e);
+        if (hit) rectEnd = hit;
+        return;
+    }
+    if (leftDown && PAINT_MODES.has(mode)) {
         const hit = cellFromEvent(e);
         if (hit) {
             const key = hit.x + ',' + hit.y;
@@ -162,18 +242,22 @@ const modeSections = {
     elevation: document.getElementById('sec-elevation'),
     overlay: document.getElementById('sec-overlay'),
     tint: document.getElementById('sec-tint'),
+    flags: document.getElementById('sec-flags'),
     object: document.getElementById('sec-object'),
     pathfind: document.getElementById('sec-pathfind'),
 };
+const brushSectionEl = document.getElementById('sec-brush');
 const modeButtons = Array.from(document.querySelectorAll('.mode-btn'));
 modeButtons.forEach((btn) => {
     btn.addEventListener('click', () => {
         mode = btn.dataset.mode;
         modeButtons.forEach((b) => b.classList.toggle('accent', b === btn));
         for (const key in modeSections) modeSections[key].style.display = (key === mode) ? 'block' : 'none';
+        brushSectionEl.style.display = PAINT_MODES.has(mode) ? 'block' : 'none';
         if (mode !== 'pathfind') pathStart = null;
     });
 });
+brushSectionEl.style.display = PAINT_MODES.has(mode) ? 'block' : 'none';
 modeSections[mode].style.display = 'block';
 
 // ---------------------------------------------------------------------------
@@ -293,10 +377,10 @@ const OVERLAY_SWATCH_DEFS = [
     { id: 0, label: 'Erase' },
 ];
 
-buildSwatchRow(document.getElementById('ground-swatches'), GROUND_SWATCH_DEFS, editor.atlas, (id) => {
+const groundButtons = buildSwatchRow(document.getElementById('ground-swatches'), GROUND_SWATCH_DEFS, editor.atlas, (id) => {
     groundId = id;
 });
-buildSwatchRow(document.getElementById('overlay-swatches'), OVERLAY_SWATCH_DEFS, editor.atlas, (id) => {
+const overlayButtons = buildSwatchRow(document.getElementById('overlay-swatches'), OVERLAY_SWATCH_DEFS, editor.atlas, (id) => {
     overlayId = id;
 });
 
@@ -308,6 +392,22 @@ elevButtons.forEach((el) => {
     });
 });
 selectSibling(elevButtons, elevButtons[0]);
+
+const flagButtons = Array.from(document.querySelectorAll('.flag-btn'));
+flagButtons.forEach((el) => {
+    el.addEventListener('click', () => {
+        flagValue = el.dataset.value === '1';
+        selectSibling(flagButtons, el);
+    });
+});
+selectSibling(flagButtons, flagButtons[0]);
+
+const brushRadiusInput = document.getElementById('brush-radius');
+const brushRadiusVal = document.getElementById('brush-radius-val');
+brushRadiusInput.addEventListener('input', () => {
+    brushRadius = parseInt(brushRadiusInput.value, 10) || 0;
+    brushRadiusVal.textContent = String(brushRadius);
+});
 
 const objectSwatches = Array.from(document.querySelectorAll('#object-swatches .swatch'));
 objectSwatches.forEach((el) => {

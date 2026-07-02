@@ -217,6 +217,44 @@ export function createEditor(scene, initialConfig) {
     const tintShadow = new Map();
     function cellKey(x, y) { return x + ',' + y; }
     function shadowTint(x, y) { return tintShadow.get(cellKey(x, y)) || [1, 1, 1, 1]; }
+    function inBounds(x, y) { return x >= 0 && y >= 0 && x < cfg.width && y < cfg.height; }
+
+    // ---- topology-aware neighbours / brush shape -------------------------
+    //
+    // Offset->axial conversion mirrors TileWorld::cellCenterLocal's hex
+    // branch (see tests/scene/test_tileworld.js): odd-r horizontal layout,
+    // q = x - (y - (y&1))/2, r = y.
+    function toAxial(x, y) { return { q: x - (y - (y & 1)) / 2, r: y }; }
+    function hexDistance(x0, y0, x1, y1) {
+        const a = toAxial(x0, y0), b = toAxial(x1, y1);
+        const dq = b.q - a.q, dr = b.r - a.r;
+        return (Math.abs(dq) + Math.abs(dq + dr) + Math.abs(dr)) / 2;
+    }
+    // Standard odd-r neighbour table (6 hex neighbours in offset coords).
+    const HEX_NEIGHBORS_EVEN = [[1, 0], [-1, 0], [0, -1], [-1, -1], [0, 1], [-1, 1]];
+    const HEX_NEIGHBORS_ODD  = [[1, 0], [-1, 0], [0, -1], [1, -1], [0, 1], [1, 1]];
+    function neighbors(x, y) {
+        if (cfg.topology === 'hex') {
+            const dirs = (y & 1) ? HEX_NEIGHBORS_ODD : HEX_NEIGHBORS_EVEN;
+            return dirs.map(([dx, dy]) => [x + dx, y + dy]);
+        }
+        return [[x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]];
+    }
+    // Disc-shaped brush footprint: hex distance for hex grids, Euclidean for
+    // square, both clipped to map bounds.
+    function cellsInRadius(cx, cy, radius) {
+        const cells = [];
+        for (let y = cy - radius; y <= cy + radius; y++) {
+            for (let x = cx - radius; x <= cx + radius; x++) {
+                if (!inBounds(x, y)) continue;
+                const d = cfg.topology === 'hex'
+                    ? hexDistance(cx, cy, x, y)
+                    : Math.sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy));
+                if (d <= radius + 1e-6) cells.push([x, y]);
+            }
+        }
+        return cells;
+    }
 
     let strokeTouched = null;
     let strokeLabel = '';
@@ -289,12 +327,24 @@ export function createEditor(scene, initialConfig) {
         world.setElevation(x, y, level);
         markDirty();
     }
+    function fillElevationDelta(x0, y0, x1, y1, dir) {
+        for (let y = Math.min(y0, y1); y <= Math.max(y0, y1); y++)
+            for (let x = Math.min(x0, x1); x <= Math.max(x0, x1); x++)
+                raiseElevation(x, y, dir);
+    }
 
     // ---- overlay brush ------------------------------------------------
 
     function paintOverlay(x, y, id) {
         captureCell(x, y);
         world.setTile(x, y, id, 1);
+        markDirty();
+    }
+    function fillOverlay(x0, y0, x1, y1, id) {
+        for (let y = Math.min(y0, y1); y <= Math.max(y0, y1); y++)
+            for (let x = Math.min(x0, x1); x <= Math.max(x0, x1); x++)
+                captureCell(x, y);
+        world.fillTile(x0, y0, x1, y1, id, 1);
         markDirty();
     }
 
@@ -306,6 +356,56 @@ export function createEditor(scene, initialConfig) {
         tintShadow.set(cellKey(x, y), [r, g, b, a]);
         markDirty();
     }
+    function fillTint(x0, y0, x1, y1, r, g, b, a) {
+        for (let y = Math.min(y0, y1); y <= Math.max(y0, y1); y++)
+            for (let x = Math.min(x0, x1); x <= Math.max(x0, x1); x++)
+                paintTint(x, y, r, g, b, a);
+    }
+
+    // ---- flags brush ------------------------------------------------------
+    //
+    // Generic bit-marker brush wrapping setFlag/hasFlag, independent of
+    // ground/overlay ids — e.g. force a grass tile unwalkable, or force a
+    // stone tile walkable, without changing what's drawn there.
+
+    function paintFlag(x, y, bit, value) {
+        captureCell(x, y);
+        world.setFlag(x, y, bit, value);
+        markDirty();
+    }
+    function fillFlag(x0, y0, x1, y1, bit, value) {
+        for (let y = Math.min(y0, y1); y <= Math.max(y0, y1); y++)
+            for (let x = Math.min(x0, x1); x <= Math.max(x0, x1); x++)
+                paintFlag(x, y, bit, value);
+    }
+
+    // ---- flood fill / eyedropper -------------------------------------
+
+    // JS BFS over same-id contiguous cells on the given layer (0=ground,
+    // 1=overlay), bounded by map size and a hard cap against runaway fills.
+    function floodFill(layer, x, y, newId) {
+        const targetId = world.getTile(x, y, layer);
+        if (targetId === newId) return;
+        const stack = [[x, y]];
+        const visited = new Set();
+        const touched = [];
+        while (stack.length) {
+            const [cx, cy] = stack.pop();
+            if (!inBounds(cx, cy)) continue;
+            const key = cellKey(cx, cy);
+            if (visited.has(key)) continue;
+            visited.add(key);
+            if (world.getTile(cx, cy, layer) !== targetId) continue;
+            touched.push([cx, cy]);
+            if (touched.length >= 40000) break;
+            for (const n of neighbors(cx, cy)) stack.push(n);
+        }
+        const paint = layer === 0 ? paintGround : paintOverlay;
+        for (const [tx, ty] of touched) paint(tx, ty, newId);
+    }
+
+    // Pick the id under (x,y) on the given layer — read-only, no history entry.
+    function eyedrop(layer, x, y) { return world.getTile(x, y, layer); }
 
     // ---- objects --------------------------------------------------------
 
@@ -452,7 +552,13 @@ export function createEditor(scene, initialConfig) {
 
     return {
         world, atlas, history,
-        paintGround, fillGround, raiseElevation, paintOverlay, paintTint,
+        paintGround, fillGround,
+        raiseElevation, fillElevationDelta,
+        paintOverlay, fillOverlay,
+        paintTint, fillTint,
+        paintFlag, fillFlag,
+        floodFill, eyedrop,
+        cellsInRadius,
         placeObject, clearAllObjects,
         queryPath, clearPathMarkers,
         rebuildIfDirty,

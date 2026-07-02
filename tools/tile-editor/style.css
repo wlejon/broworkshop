@@ -80,6 +80,6 @@ canvas { display: block; cursor: crosshair; width: 100vw; height: 100vh; }
 }
 .swatch span { font-size: 10px; }
 
-#sec-ground, #sec-elevation, #sec-overlay, #sec-tint, #sec-object, #sec-pathfind {
+#sec-ground, #sec-elevation, #sec-overlay, #sec-tint, #sec-flags, #sec-object, #sec-pathfind {
     display: none;
 }

@@ -48,9 +48,20 @@
                 <div class="btn mode-btn" data-mode="elevation">Elevation</div>
                 <div class="btn mode-btn" data-mode="overlay">Overlay</div>
                 <div class="btn mode-btn" data-mode="tint">Tint</div>
+                <div class="btn mode-btn" data-mode="flags">Flags</div>
                 <div class="btn mode-btn" data-mode="object">Objects</div>
                 <div class="btn mode-btn" data-mode="pathfind">Pathfind</div>
             </div>
+        </div>
+
+        <div class="section" id="sec-brush">
+            <div class="section-title">Brush</div>
+            <div class="row">
+                <label>size</label>
+                <input type="range" id="brush-radius" min="0" max="5" step="1" value="0">
+                <span class="val" id="brush-radius-val">0</span>
+            </div>
+            <div class="hint2">Shift-drag: rect fill &middot; Ctrl-click: flood fill &middot; Alt-click: eyedropper</div>
         </div>
 
         <div class="section" id="sec-ground">
@@ -83,6 +94,15 @@
                 <input type="range" id="tint-alpha" min="0" max="1" step="0.05" value="1">
                 <span class="val" id="tint-alpha-val">1.00</span>
             </div>
+        </div>
+
+        <div class="section" id="sec-flags">
+            <div class="section-title">Flags brush</div>
+            <div class="btn-row">
+                <div class="btn flag-btn accent" data-value="1">Block</div>
+                <div class="btn flag-btn" data-value="0">Unblock</div>
+            </div>
+            <div class="hint2">Overrides pathfinding-blocked independent of ground/overlay.</div>
         </div>
 
         <div class="section" id="sec-object">
