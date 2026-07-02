@@ -40,22 +40,88 @@ function buildShrubMature(opts, age01, scaleMul) {
     const R = (opts.radius ?? 1.2) * scaleMul;
     const blobCount = Math.max(2, opts.blobCount ?? 5);
     const canopyColor = F.hexToRgb(opts.canopyColor || F.PALETTE.canopyShrub);
+    const leafShape = opts.leafShape || 'oval';
 
     const rng = F.mulberry32(seed);
     const parts = [];
     const aabb = F.emptyAabb();
     const anchors = [];
+    const lobes = [];
 
+    // Lobe centers/radii describe the canopy volume (same layout as
+    // before); they no longer render as visible blobs directly — they're
+    // shells that the twig cloud below scatters leaf cards over, and
+    // anchors bloom/fruit clusters key off.
     for (let i = 0; i < blobCount; i++) {
         const a = TAU * i / blobCount + rng() * 0.5;
         const off = R * (0.2 + rng() * 0.55);
         const c = [Math.cos(a) * off, H * (0.35 + rng() * 0.4), Math.sin(a) * off];
         const r = R * (0.40 + rng() * 0.25);
-        const blob = F.buildBlob(c, r, (seed * 13 + i * 29) ^ 0x3003,
-            { nsub: 2, sy: 0.85 });
-        parts.push({ mesh: blob, color: canopyColor, metallic: 0, roughness: 0.88 });
+        lobes.push({ c, r });
         anchors.push(c);
         F.aabbInclude(aabb, c, r * 1.1);
+    }
+
+    // A few thin woody stems ground the canopy instead of leaving it
+    // floating — most clipped shrubs show little bark, so keep these
+    // short and just tall enough to reach into the lowest lobes.
+    const stemSegs = [];
+    const stemCount = Math.min(lobes.length, Math.max(3, Math.round(blobCount * 0.6)));
+    for (let i = 0; i < stemCount; i++) {
+        const lobe = lobes[i];
+        const baseR = Math.max(0.01, R * 0.05 * (0.8 + rng() * 0.4));
+        const mid = [lobe.c[0] * 0.4, lobe.c[1] * 0.5, lobe.c[2] * 0.4];
+        const s0 = stemSegs.length;
+        stemSegs.push({ parent: -1, from: [0, 0, 0], to: mid, radius: baseR });
+        stemSegs.push({ parent: s0, from: mid, to: lobe.c, radius: baseR * 0.55 });
+    }
+    if (stemSegs.length) {
+        const stemMesh = Mesh.meshBranches(stemSegs, 6);
+        if (stemMesh) parts.push({
+            mesh: stemMesh, color: F.hexToRgb(opts.stemColor || F.PALETTE.bark),
+            metallic: 0, roughness: 0.9, twoSided: false,
+        });
+    }
+
+    // Foliage: a twig cloud synthesized over each lobe's shell, clothed in
+    // leaf cards via Mesh.scatterLeaves — replaces the old solid smooth
+    // blob (no leaf detail at all, just a tinted potato).
+    const leafLen = F.clamp(R * 0.16, 0.03, 0.5);
+    const leafW = leafLen * 0.55;
+    const leaf = Mesh.leafCard(leafShape, {
+        width: leafW, length: leafLen, bend: 0.3, fullUV: true, shapedSilhouette: true,
+        widthSegments: 2, lengthSegments: 3,
+    });
+    F.stripVertexColors(leaf);
+
+    const twigs = [];
+    const lrng = F.mulberry32((seed * 977 + 3) >>> 0);
+    for (const { c, r } of lobes) {
+        const twigCount = Math.max(14, Math.round(40 * (r / Math.max(0.2, R))));
+        for (let k = 0; k < twigCount; k++) {
+            const u = lrng() * 2 - 1;
+            const th = lrng() * TAU;
+            const sq = Math.sqrt(Math.max(0, 1 - u * u));
+            const dir = [sq * Math.cos(th), u, sq * Math.sin(th)];
+            const shell = 0.75 + lrng() * 0.3;
+            const outer = [c[0] + dir[0] * r * shell, c[1] + dir[1] * r * shell * 0.85, c[2] + dir[2] * r * shell];
+            const inner = [c[0] + dir[0] * r * shell * 0.55, c[1] + dir[1] * r * shell * 0.55 * 0.85, c[2] + dir[2] * r * shell * 0.55];
+            twigs.push({ parent: -1, from: inner, to: outer, radius: 0.01 });
+        }
+    }
+    const foliage = Mesh.scatterLeaves(twigs, leaf, {
+        maxRadius:     0.05,
+        minDepth:      0,
+        perUnitLength: 70,
+        upBias:        0.25,
+        tiltJitter:    0.6,
+        rollJitter:    1.0,
+        baseScale:     1.0,
+        scaleJitter:   0.3,
+        seed:          (seed * 211 + 7) >>> 0,
+    });
+    if (foliage && foliage.triangleCount > 0) {
+        parts.push({ mesh: foliage, color: canopyColor, metallic: 0, roughness: 0.85, twoSided: true });
     }
 
     const fin = F.finalizeAabb(aabb, { min: [-R, 0, -R], max: [R, H, R] });

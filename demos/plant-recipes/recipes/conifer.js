@@ -1,4 +1,5 @@
-// Conifer archetype — stylized stacked-cone Christmas tree with life cycle.
+// Conifer archetype — trunk + whorled boughs with needle-scatter foliage,
+// and life cycle.
 
 import { FloraCore } from "/app/recipes/core.js";
 import { Lifecycle } from "/app/recipes/lifecycle.js";
@@ -7,6 +8,7 @@ import { Recipes } from "/app/recipes/index.js";
 
 const F = FloraCore;
 const L = Lifecycle;
+const TAU = F.TAU;
 
 function buildConiferSeed(opts) {
     const r = 0.04;
@@ -57,23 +59,18 @@ function buildConiferMatureStage(opts, stageT) {
 }
 
 function buildConiferFlowering(opts, stageT) {
-    // Small brown male cones along upper branches.
+    // Small brown male cones along the upper half of the boughs.
     const r = buildMature(opts, stageT, 1);
-    // Synthesize anchors at cone tips for cone-flower decoration.
-    const H = (opts.height ?? 8);
     const seed = (opts.seed | 0) ^ 0xC1A0;
     const rng = F.mulberry32(seed);
     const baseR = opts.baseCanopyRadius ?? 2.5;
+    const upperAnchors = r.anchors.filter((a) => a[1] > r.midY);
     const anchors = [];
-    const layers = opts.layers ?? 7;
-    for (let i = Math.floor(layers / 2); i < layers; i++) {
-        const t = i / Math.max(1, layers - 1);
-        const ringR = baseR * (1 - t * 0.85) * 0.95;
-        const y = H * 0.18 + t * H * 0.84;
-        const n = 3 + Math.floor(rng() * 3);
+    for (const a of upperAnchors) {
+        const n = 2 + Math.floor(rng() * 3);
         for (let k = 0; k < n; k++) {
-            const a = (k / n) * F.TAU + rng() * 0.4;
-            anchors.push([Math.cos(a) * ringR, y, Math.sin(a) * ringR]);
+            const j = 0.06 * baseR;
+            anchors.push([a[0] + (rng() - 0.5) * j, a[1] + (rng() - 0.5) * j * 0.5, a[2] + (rng() - 0.5) * j]);
         }
     }
     const cones = F.fruitCluster({
@@ -86,21 +83,15 @@ function buildConiferFlowering(opts, stageT) {
 
 function buildConiferFruiting(opts, stageT) {
     const r = buildMature(opts, stageT, 1);
-    const H = (opts.height ?? 8);
     const seed = (opts.seed | 0) ^ 0xF1A0;
     const rng = F.mulberry32(seed);
     const baseR = opts.baseCanopyRadius ?? 2.5;
-    const layers = opts.layers ?? 7;
+    // Cones hang from mid-to-upper boughs, skipping the very tip whorl.
+    const midAnchors = r.anchors.filter((a) => a[1] > r.baseY && a[1] < r.topY - r.span * 0.08);
     const anchors = [];
-    for (let i = 1; i < layers - 1; i++) {
-        const t = i / Math.max(1, layers - 1);
-        const ringR = baseR * (1 - t * 0.85) * 0.92;
-        const y = H * 0.18 + t * H * 0.82;
-        const n = 2 + Math.floor(rng() * 3);
-        for (let k = 0; k < n; k++) {
-            const a = (k / n) * F.TAU + rng() * 0.4;
-            anchors.push([Math.cos(a) * ringR, y, Math.sin(a) * ringR]);
-        }
+    for (const a of midAnchors) {
+        if (rng() > 0.6) continue;
+        anchors.push(a);
     }
     const cones = F.fruitCluster({
         anchors, seed, color: F.hexToRgb(opts.coneColor || '#7a5630'),
@@ -111,7 +102,14 @@ function buildConiferFruiting(opts, stageT) {
 }
 
 // ─── Core mature builder (shared with seedling/juvenile via scale) ───────
-
+//
+// Real trunk + whorled boughs (built as a proper branch-segment skeleton,
+// swept with Mesh.meshBranches) clothed in a dense needle scatter via
+// Mesh.scatterLeaves. Needles are gated off the trunk by `maxRadius`: the
+// trunk never tapers below ~0.45x its base radius, while every bough is
+// authored much thinner than that from its own base — so the same
+// mechanism that keeps flora-lab's leaves off broflora's trunks works
+// here by construction instead of by a runtime signal.
 function buildMature(opts, age01, scaleMul) {
     scaleMul = scaleMul ?? 1;
     const seed = (opts.seed | 0) || 1;
@@ -122,45 +120,125 @@ function buildMature(opts, age01, scaleMul) {
     const canopyColor = F.hexToRgb(opts.canopyColor || '#2e6633');
     const trunkColor = F.hexToRgb(opts.trunkColor || F.PALETTE.bark);
     const coneShape = opts.coneShape || 'soft';
+    const rng = F.mulberry32(seed);
 
-    const Heff = H;
+    const widthMul  = coneShape === 'columnar' ? 0.55 : coneShape === 'spreading' ? 1.25 : 1.0;
+    const taperPow  = coneShape === 'sharp' ? 1.7 : coneShape === 'tight' ? 1.35 : coneShape === 'spreading' ? 0.85 : 1.0;
+    const layerBias = coneShape === 'tight' ? 0.7 : 1.0;   // <1 packs whorls toward the top
+
+    const baseY = H * 0.18;
+    const topY  = H * 1.0;
+    const span  = topY - baseY;
+    const tipY  = topY + Math.max(0.12, baseCanopyRadius * 0.05);
+
     const parts = [];
     const aabb = F.emptyAabb();
+    const segs = [];
+    const anchors = [];
 
-    const baseY = Heff * 0.18;
-    const topY = Heff * 1.02;
-    const span = topY - baseY;
-    const layerH = (span / layers) * (coneShape === 'sharp' ? 1.55 : coneShape === 'tight' ? 1.30 : coneShape === 'columnar' ? 1.15 : 1.45);
-    const tipR = baseCanopyRadius * 0.10;
-    let canopyTopY = baseY;
-    const widthMul = coneShape === 'columnar' ? 0.55 : coneShape === 'spreading' ? 1.20 : 1.0;
-
-    const coneParts = [];
+    // Trunk: one continuous tapering chain through every whorl height, so
+    // each bough attaches to an exact trunk-surface node (no gaps, no
+    // guesswork about where the parent segment actually ended).
+    const layerYs = [];
     for (let i = 0; i < layers; i++) {
-        const t = i / Math.max(1, layers - 1);
-        const y = baseY + t * span;
-        const layerR = (baseCanopyRadius * (1 - t * 0.85) + tipR * t) * widthMul;
-        const layerHeight = layerH * (0.7 + 0.3 * (1 - t));
-
-        const cone = F.buildCone(layerR, layerHeight, 14, 2);
-        cone.translate(0, y, 0);
-        coneParts.push({ mesh: cone, color: canopyColor, metallic: 0, roughness: 0.9 });
-        F.aabbInclude(aabb, [-layerR, y, -layerR]);
-        F.aabbInclude(aabb, [layerR, y + layerHeight, layerR]);
-        const top = y + layerHeight;
-        if (top > canopyTopY) canopyTopY = top;
+        const tRaw = i / Math.max(1, layers - 1);
+        const t = Math.pow(tRaw, layerBias);
+        layerYs.push(baseY + t * span);
+    }
+    const trunkHeights = [0, ...layerYs, tipY];
+    const trunkNodeAt = [];
+    let prevIdx = -1;
+    let prevPos = [0, 0, 0];
+    for (let j = 1; j < trunkHeights.length; j++) {
+        const y0 = trunkHeights[j - 1], y1 = trunkHeights[j];
+        const substeps = j === trunkHeights.length - 1 ? 3 : 2;
+        for (let s = 1; s <= substeps; s++) {
+            const y = y0 + (y1 - y0) * (s / substeps);
+            const tGlobal = F.clamp(y / topY, 0, 1);
+            const r = Math.max(trunkRadius * 0.12, trunkRadius * (1 - tGlobal * 0.55));
+            const pos = [0, y, 0];
+            segs.push({ parent: prevIdx, from: prevPos, to: pos, radius: r });
+            prevIdx = segs.length - 1;
+            prevPos = pos;
+        }
+        trunkNodeAt.push(prevIdx);
     }
 
-    const trunkH = Math.max(Heff * 0.18, canopyTopY * 0.95);
-    const trunkMesh = F.buildCone(trunkRadius, trunkH, 12, 1);
-    parts.push({ mesh: trunkMesh, color: trunkColor, metallic: 0, roughness: 0.95, twoSided: false });
-    F.aabbInclude(aabb, [-trunkRadius, 0, -trunkRadius]);
-    F.aabbInclude(aabb, [trunkRadius, trunkH, trunkRadius]);
+    // Boughs: a whorl of tapering two-segment branches at each layer height,
+    // drooping downward near the base (heavy old growth) and lifting
+    // upward near the crown (young growth) — the classic conifer profile.
+    const branchBaseR = Math.max(0.01 * scaleMul, trunkRadius * 0.22);
+    const branchTipR  = Math.max(0.004 * scaleMul, trunkRadius * 0.04);
+    let midY = baseY;
+    for (let i = 0; i < layers; i++) {
+        const t = i / Math.max(1, layers - 1);
+        const y = layerYs[i];
+        midY = baseY + span * 0.5;
+        const layerR = (baseCanopyRadius * (Math.pow(1 - t, taperPow) * 0.88 + 0.05)) * widthMul;
+        const branchCount = 5 + Math.floor(rng() * 3);
+        const rot0 = rng() * TAU;
+        const parentIdx = trunkNodeAt[i + 1];   // trunkHeights[i+1] === layerYs[i]
+        const droop = F.lerp(0.42, -0.22, t);   // + droops down, - lifts up
+        for (let k = 0; k < branchCount; k++) {
+            const a = rot0 + TAU * k / branchCount + (rng() - 0.5) * 0.25;
+            const dir = [Math.cos(a), 0, Math.sin(a)];
+            const midR = layerR * 0.55;
+            const mid = [dir[0] * midR, y - droop * midR * 0.45, dir[2] * midR];
+            const tip = [dir[0] * layerR, y - droop * layerR * 0.8, dir[2] * layerR];
+            const s1 = segs.length;
+            segs.push({ parent: parentIdx, from: [0, y, 0], to: mid, radius: branchBaseR });
+            segs.push({ parent: s1, from: mid, to: tip, radius: branchTipR });
+            anchors.push(tip);
+            F.aabbInclude(aabb, tip, layerR * 0.1);
+        }
+    }
 
-    for (const c of coneParts) parts.push(c);
+    if (segs.length > 0) {
+        const trunkMesh = Mesh.meshBranches(segs, 8);
+        if (trunkMesh) parts.push({
+            mesh: trunkMesh, color: trunkColor, metallic: 0, roughness: 0.95, twoSided: false,
+        });
+        for (const s of segs) {
+            F.aabbInclude(aabb, s.from, s.radius);
+            F.aabbInclude(aabb, s.to, s.radius);
+        }
+    }
+
+    // Needles: scattered along every bough segment, gated off the trunk by
+    // maxRadius (boughs are authored much thinner than the trunk everywhere
+    // along their length — see the doc comment above). Sized relative to
+    // the canopy (not a fixed constant) and built with a minimal grid —
+    // a needle is a thin flat wedge, not a card that needs to bend/curl —
+    // so the scatter can run dense enough to read as a filled bough
+    // instead of a few wisps without an unreasonable triangle budget.
+    const needleLen = F.clamp(baseCanopyRadius * 0.24, 0.05, 0.8);
+    const needleW   = needleLen * 0.16;
+    const needle = Mesh.leafCard('needle', {
+        width: needleW, length: needleLen, bend: 0.1, fullUV: true,
+        widthSegments: 1, lengthSegments: 2,
+    });
+    F.stripVertexColors(needle);
+    const boughSegs = segs.filter((s) => s.radius <= branchBaseR * 1.01);
+    const needles = Mesh.scatterLeaves(boughSegs, needle, {
+        maxRadius:     branchBaseR * 1.05,
+        minDepth:      0,
+        perUnitLength: 220,
+        upBias:        0.15,
+        tiltJitter:    0.5,
+        rollJitter:    1.0,
+        baseScale:     1.0,
+        scaleJitter:   0.25,
+        seed:          (seed * 733 + 11) >>> 0,
+    });
+    if (needles && needles.triangleCount > 0) {
+        parts.push({ mesh: needles, color: canopyColor, metallic: 0, roughness: 0.88, twoSided: true });
+    }
 
     const fin = F.finalizeAabb(aabb, { min: [-baseCanopyRadius, 0, -baseCanopyRadius], max: [baseCanopyRadius, H, baseCanopyRadius] });
-    return { parts, aabbMin: fin.aabbMin, aabbMax: fin.aabbMax };
+    return {
+        parts, aabbMin: fin.aabbMin, aabbMax: fin.aabbMax,
+        anchors, baseY, topY, midY, span,
+    };
 }
 
 const STAGES = ['seed', 'sprout', 'seedling', 'juvenile', 'mature', 'flowering', 'fruiting'];

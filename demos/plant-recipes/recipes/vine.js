@@ -53,16 +53,46 @@ function buildVineCore(opts, age01, scaleMul, fullness) {
     const parts = [];
     if (stem) parts.push({ mesh: stem, color: stemColor, metallic: 0, roughness: 0.9, twoSided: false });
 
+    // Leaves: scattered directly along the climbing stem — ivy-style
+    // foliage attaches via short petioles right on the stem, no separate
+    // twig layer needed. Replaces the old blob clusters (no leaf shape
+    // at all, just tinted balls strung along the helix).
+    const leafShape = opts.leafShape || 'oval';
+    const leafLen = F.clamp(helixRadius * 0.55, 0.04, 0.4) * scaleMul;
+    const leafW = leafLen * 0.8;
+    const leaf = Mesh.leafCard(leafShape, {
+        width: leafW, length: leafLen, bend: 0.25, fullUV: true, shapedSilhouette: true,
+        widthSegments: 2, lengthSegments: 3,
+    });
+    F.stripVertexColors(leaf);
+
+    const stemSegs = [];
+    let prevIdx = -1;
+    for (let i = 1; i < path.length; i++) {
+        stemSegs.push({ parent: prevIdx, from: path[i - 1], to: path[i], radius });
+        prevIdx = stemSegs.length - 1;
+    }
+    const foliage = Mesh.scatterLeaves(stemSegs, leaf, {
+        maxRadius:     radius * 4,
+        minDepth:      0,
+        perUnitLength: Math.max(18, 42 * fullness),
+        upBias:        0.3,
+        tiltJitter:    0.6,
+        rollJitter:    1.0,
+        baseScale:     1.0,
+        scaleJitter:   0.3,
+        seed:          (seed * 331 + 13) >>> 0,
+    });
+    if (foliage && foliage.triangleCount > 0) {
+        parts.push({ mesh: foliage, color: canopyColor, metallic: 0, roughness: 0.85, twoSided: true });
+    }
+
     const leafEvery = Math.max(1, Math.floor(samples / Math.max(8, length * 4)));
     const blobR = Math.max(0.06, helixRadius * 0.45) * scaleMul;
     const anchors = [];
     for (let i = 0; i < path.length; i += leafEvery) {
         if (rng() > fullness) continue;
-        const c = path[i];
-        const blob = F.buildBlob(c, blobR * (0.85 + rng() * 0.35),
-            (seed * 7 + i * 41) ^ 0x4004, { nsub: 1, sy: 0.7 });
-        parts.push({ mesh: blob, color: canopyColor, metallic: 0, roughness: 0.88 });
-        anchors.push(c);
+        anchors.push(path[i]);
     }
 
     const aabb = F.emptyAabb();

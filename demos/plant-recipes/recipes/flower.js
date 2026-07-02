@@ -145,18 +145,30 @@ function buildFlowerCore(opts, stageT, cfg) {
             metallic: 0, roughness: 0.85 });
         F.aabbInclude(aabb, stemTip, headSize * 0.6);
     } else {
-        // Open (mature / flowering).
+        // Open (mature / flowering). Mesh.flower merges petals + center dome
+        // into one mesh with one vertex-color stream; petals bake leafCard's
+        // windBend into the R channel (see F.stripVertexColors), so the merged
+        // mesh is rendered stripped with a single material (petalColor) — that
+        // washes out the dome's baked centerColor too. Keep the built-in dome
+        // negligibly small and paint the center with its own blob part instead,
+        // so it actually shows centerColor rather than petalColor.
+        const centerR = headSize * 0.25;
+        const centerH = headSize * 0.15;
         const head = Mesh.flower({
             petalCount, petalShape,
             petalLength: headSize, petalWidth: headSize * 0.55,
             petalCurl, petalBend, layers, layerTwist: 0.45,
-            centerRadius: headSize * 0.25, centerHeight: headSize * 0.15,
+            centerRadius: 0.001, centerHeight: 0.001,
             centerColor,
         });
         if (head) {
             F.stripVertexColors(head);
             head.translate(stemTip[0], stemTip[1], stemTip[2]);
-            parts.push({ mesh: head, color: petalColor, metallic: 0, roughness: 0.7 });
+            parts.push({ mesh: head, color: petalColor, metallic: 0, roughness: 0.7, twoSided: true });
+            const center = F.buildBlob(
+                [stemTip[0], stemTip[1] + centerH * 0.5, stemTip[2]],
+                centerR, (seed * 17) ^ 0xC100, { nsub: 1, sy: centerH / centerR });
+            parts.push({ mesh: center, color: centerColor, metallic: 0, roughness: 0.6 });
             F.aabbInclude(aabb, stemTip, headSize * 1.2);
         }
     }
