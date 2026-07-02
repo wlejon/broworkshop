@@ -385,29 +385,54 @@ function buildTreeMature(opts, stageT, modifiers) {
         }
     }
 
-    if (foliageStyle === 'leaves' && segs.length > 0) {
-        const leafLen = Math.max(0.08, Math.min(0.32, CReff * 0.06));
-        const leafW   = leafLen * 0.45;
+    if (foliageStyle === 'leaves') {
+        const leafLen = Math.max(0.12, Math.min(0.42, CReff * 0.11));
+        const leafW   = leafLen * 0.6;
         const leafMesh = Mesh.leafCard(leafShape, {
-            width: leafW, length: leafLen, bend: 0.3, fullUV: true,
+            width: leafW, length: leafLen, bend: 0.35, fullUV: true,
+            shapedSilhouette: true,
         });
         F.stripVertexColors(leafMesh);
-        const perUnit = Math.max(20, Math.min(80, 60 - CReff * 1.5)) * densityMul;
-        const foliage = Mesh.scatterLeaves(segs, leafMesh, {
-            maxRadius:     trunkRadius * 0.45,
-            minDepth:      2,
-            perUnitLength: perUnit,
-            upBias:        0.4,
-            tiltJitter:    0.4,
-            rollJitter:    0.6,
+
+        // The branch skeleton follows the few blob anchors, so it has far too
+        // few twigs to carry foliage. Synthesize a cloud of short radial twigs
+        // over the canopy-ellipsoid shell and clothe each with a leaf tuft —
+        // this fills the canopy densely regardless of branch/blob count.
+        const lrng = F.mulberry32((seed * 733 + 5) >>> 0);
+        const rx = CReff, ry = Math.max(CReff * 0.5, canopyH * 0.5), rz = CReff;
+        const twigs = [];
+        const twigCount = Math.max(30, Math.round(100 * densityMul));
+        for (let i = 0; i < twigCount; i++) {
+            // Even-ish direction on the sphere, kept off the underside so
+            // leaves crown the canopy instead of hanging below it.
+            let u = lrng() * 2 - 1;
+            if (u < -0.3) u = -0.3 + lrng() * 0.25;
+            const th = lrng() * TAU;
+            const sq = Math.sqrt(Math.max(0, 1 - u * u));
+            const dir = [sq * Math.cos(th), u, sq * Math.sin(th)];
+            const shell = 0.7 + lrng() * 0.3;
+            const outer = [canopyCenter[0] + dir[0] * rx * shell,
+                           canopyCenter[1] + dir[1] * ry * shell,
+                           canopyCenter[2] + dir[2] * rz * shell];
+            const inner = [canopyCenter[0] + dir[0] * rx * shell * 0.62,
+                           canopyCenter[1] + dir[1] * ry * shell * 0.62,
+                           canopyCenter[2] + dir[2] * rz * shell * 0.62];
+            twigs.push({ parent: -1, from: inner, to: outer, radius: 0.012 });
+        }
+        const foliage = Mesh.scatterLeaves(twigs, leafMesh, {
+            maxRadius:     leafLen * 0.6,
+            minDepth:      0,
+            perUnitLength: Math.max(14, 22 * densityMul),
+            upBias:        0.2,
+            tiltJitter:    0.6,
+            rollJitter:    0.9,
             baseScale:     1.0,
-            scaleJitter:   0.25,
-            scaleByRadius: 0.3,
+            scaleJitter:   0.3,
             seed:          (seed * 257 + 1) >>> 0,
         });
         if (foliage) {
             F.stripVertexColors(foliage);
-            parts.push({ mesh: foliage, color: canopyColor, metallic: 0, roughness: 0.85 });
+            parts.push({ mesh: foliage, color: canopyColor, metallic: 0, roughness: 0.85, twoSided: true });
         }
     } else {
         for (const p of canopy.parts) parts.push(p);

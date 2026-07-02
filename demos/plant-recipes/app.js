@@ -189,7 +189,7 @@ const archetypeSchema = {
         { key: 'canopyColor',    label: 'canopy color',   type: 'color', default: '#4f8c39', group: 'appearance' },
         { key: 'trunkColor',     label: 'trunk color',    type: 'color', default: '#6b4828', group: 'appearance' },
         { key: 'leafShape',      label: 'leaf shape',     type: 'select', options: ['oval','pointed','lobed','frond','needle'], default: 'oval', group: 'appearance' },
-        { key: 'foliageStyle',   label: 'foliage style',  type: 'select', options: ['blobs','leaves'], default: 'blobs', group: 'appearance' },
+        { key: 'foliageStyle',   label: 'foliage style',  type: 'select', options: ['blobs','leaves'], default: 'leaves', group: 'appearance' },
         { key: 'bloomColor',     label: 'bloom color',    type: 'color', default: '#f7c8d8', group: 'lifecycle' },
         { key: 'fruitColor',     label: 'fruit color',    type: 'color', default: '#a01030', group: 'lifecycle' },
     ],
