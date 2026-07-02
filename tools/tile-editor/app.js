@@ -1,4 +1,5 @@
 import "/lib/camera.js";
+import "/lib/project.js";
 import { createEditor, GROUND_IDS, OVERLAY_IDS, atlasCellPxRect, OVERLAY_THUMB_CELL } from "/app/editor.js";
 import { installSystemMenu } from "/lib/system-menu.js";
 
@@ -13,7 +14,7 @@ import { installSystemMenu } from "/lib/system-menu.js";
 const canvas = document.getElementById('c');
 const scene  = canvas.getContext('scene');
 const statsEl = document.getElementById('stats');
-const saveStatusEl = document.getElementById('save-status');
+const fileStatusEl = document.getElementById('file-status');
 
 scene.setToneMap({ mode: 'aces', exposure: 1.0, gamma: 2.2 });
 scene.setAmbient([0.08, 0.09, 0.11]);
@@ -199,13 +200,26 @@ function flashMapStatus(msg) {
     setTimeout(() => { if (mapStatusEl.textContent === msg) mapStatusEl.textContent = ''; }, 2500);
 }
 
-document.getElementById('btn-new-map').addEventListener('click', () => {
+function readMapFormValues() {
     const width = Math.max(4, Math.min(200, parseInt(mapWidthInput.value, 10) || 48));
     const height = Math.max(4, Math.min(200, parseInt(mapHeightInput.value, 10) || 48));
     const cellSize = Math.max(0.25, Math.min(4, parseFloat(mapCellSizeInput.value) || 1));
-    editor.newMap({ width, height, topology: newMapTopology, cellSize });
-    frameCameraToMap(cam);
-    flashMapStatus(`New ${newMapTopology} map (${width}x${height}).`);
+    return { width, height, cellSize, topology: newMapTopology };
+}
+
+function syncMapFormFromEditor() {
+    const c = editor.getConfig();
+    mapWidthInput.value = c.width;
+    mapHeightInput.value = c.height;
+    mapCellSizeInput.value = c.cellSize;
+    newMapTopology = c.topology;
+    selectSibling(topoButtons, topoButtons.find((el) => el.dataset.topology === c.topology) || topoButtons[0]);
+}
+
+document.getElementById('btn-new-map').addEventListener('click', () => {
+    const v = readMapFormValues();
+    proj.new();
+    flashMapStatus(`New ${v.topology} map (${v.width}x${v.height}).`);
 });
 
 // Crop+scale one atlas cell into a small pixelated thumbnail canvas.
@@ -338,16 +352,31 @@ document.addEventListener('keydown', (e) => {
     editor.rebuildIfDirty();
 });
 
-function flashStatus(msg) {
-    saveStatusEl.textContent = msg;
-    setTimeout(() => { if (saveStatusEl.textContent === msg) saveStatusEl.textContent = ''; }, 2000);
-}
-document.getElementById('btn-save').addEventListener('click', () => {
-    editor.saveMap();
-    flashStatus('Saved.');
+const proj = new Project({
+    app: 'tile-editor',
+    schema: 1,
+    serialize: () => editor.serializeMap(),
+    deserialize: (data) => editor.deserializeMap(data),
+    onNew: () => editor.newMap(readMapFormValues()),
+    history: editor.history,
 });
-document.getElementById('btn-load').addEventListener('click', () => {
-    flashStatus(editor.loadMap() ? 'Loaded.' : 'No saved map.');
+
+function updateFileStatus() {
+    fileStatusEl.textContent = proj.name + (proj.isDirty() ? ' *' : '');
+}
+proj.on('change', updateFileStatus);
+proj.on('new', () => { syncMapFormFromEditor(); frameCameraToMap(cam); });
+proj.on('loaded', () => { syncMapFormFromEditor(); frameCameraToMap(cam); });
+updateFileStatus();
+
+document.getElementById('btn-save').addEventListener('click', () => {
+    if (proj.save() || proj.saveAs()) updateFileStatus();
+});
+document.getElementById('btn-save-as').addEventListener('click', () => {
+    proj.saveAs();
+});
+document.getElementById('btn-open').addEventListener('click', () => {
+    proj.open();
 });
 
 // ---------------------------------------------------------------------------

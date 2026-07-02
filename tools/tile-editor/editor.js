@@ -364,7 +364,7 @@ export function createEditor(scene, initialConfig) {
         return path;
     }
 
-    // ---- save / load --------------------------------------------------
+    // ---- new map / topology switch / project save-load -----------------
 
     function bytesToBase64(bytes) {
         let bin = '';
@@ -377,28 +377,12 @@ export function createEditor(scene, initialConfig) {
         for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
         return out;
     }
-    const SAVE_KEY = 'tile-editor:map';
-    function saveMap() {
-        localStorage.setItem(SAVE_KEY, bytesToBase64(world.save()));
-        return true;
-    }
-    function loadMap() {
-        const b64 = localStorage.getItem(SAVE_KEY);
-        if (!b64) return false;
-        const ok = world.load(base64ToBytes(b64));
-        if (ok) markDirty();
-        return ok;
-    }
-
-    // ---- new map / topology switch -----------------------------------
 
     // Rebuild the grid from scratch with a new width/height/topology/cellSize
     // (world.configure() fully rebuilds the underlying grid, so no need to
-    // destroy/recreate the TileWorld object itself). Starts filled with flat
-    // grass, not empty — picking (raycastCell) only hits solid cells, so a
-    // truly blank grid would give the user nothing to click on to start
-    // painting.
-    function newMap(newConfig) {
+    // destroy/recreate the TileWorld object itself). Shared by newMap() and
+    // deserializeMap() — the two differ only in what fills the fresh grid.
+    function reconfigure(newConfig) {
         cfg = Object.assign({}, cfg, newConfig);
         world.configure(tileWorldOptions());
         world.clearObjects(-1);
@@ -406,11 +390,33 @@ export function createEditor(scene, initialConfig) {
         clearPathMarkers();
         history.clear();
         tintShadow.clear();
+    }
+
+    // Starts filled with flat grass, not empty — picking (raycastCell) only
+    // hits solid cells, so a truly blank grid would give the user nothing to
+    // click on to start painting.
+    function newMap(newConfig) {
+        reconfigure(newConfig);
         fillGround(0, 0, cfg.width - 1, cfg.height - 1, GROUND_IDS.grass);
         world.fillElevation(0, 0, cfg.width - 1, cfg.height - 1, 0);
         world.rebuild();
         dirty = false;
     }
+
+    // For lib/project.js's { serialize, deserialize }: the grid's tile/
+    // elevation/flag/tint contents round-trip through world.save()/load();
+    // everything else about the map (dimensions, topology, cell size) is
+    // config that must be reconfigure()'d before loading the bytes back in.
+    function serializeMap() {
+        return { config: getConfigSnapshot(), gridBytes: bytesToBase64(world.save()) };
+    }
+    function deserializeMap(data) {
+        reconfigure(data.config);
+        world.load(base64ToBytes(data.gridBytes));
+        world.rebuild();
+        dirty = false;
+    }
+    function getConfigSnapshot() { return Object.assign({}, cfg); }
 
     // ---- initial authored map ------------------------------------------
 
@@ -449,11 +455,11 @@ export function createEditor(scene, initialConfig) {
         paintGround, fillGround, raiseElevation, paintOverlay, paintTint,
         placeObject, clearAllObjects,
         queryPath, clearPathMarkers,
-        saveMap, loadMap,
         rebuildIfDirty,
         newMap,
+        serializeMap, deserializeMap,
         beginStroke, endStroke,
-        getConfig() { return Object.assign({}, cfg); },
+        getConfig: getConfigSnapshot,
         get mapWidth() { return cfg.width; },
         get mapHeight() { return cfg.height; },
         get cellSize() { return cfg.cellSize; },
