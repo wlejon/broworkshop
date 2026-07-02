@@ -1,29 +1,57 @@
 // editor.js — TileWorld setup, atlas generation, brush operations, object
 // placement, pathfind query, and save/load for the tile-editor tool.
 //
-// Ground tile ids: 1 grass, 2 dirt, 3 stone, 4 sand, 5 water (animated).
+// Ground tile ids: 1 grass, 2 dirt, 3 stone, 4 sand, 5 water (animated),
+// 9 wood, 10 plaza (tan tile), 11 lush grass.
 // Overlay (layer 1) tile ids: 20 road (autotiled, edge mode), 21 crop.
 // Flag bit 1 marks "blocks pathfinding" — set automatically on stone/water.
+// Ground tile ids double as their own atlas cell index (identity-mapped via
+// buildTileAtlasTable below); everything else (cliff, crop, road variants)
+// lives at higher, non-colliding cell indices.
 
-export const GROUND_IDS = { grass: 1, dirt: 2, stone: 3, sand: 4, water: 5 };
+export const GROUND_IDS = {
+    grass: 1, dirt: 2, stone: 3, sand: 4, water: 5,
+    wood: 9, plaza: 10, lush: 11,
+};
 export const OVERLAY_IDS = { road: 20, crop: 21 };
 export const BLOCK_BIT = 1;
 
 const MAP_W = 48, MAP_H = 48;
 const CELL_SIZE = 1.0, HEIGHT_STEP = 0.5, CHUNK_SIZE = 16;
 
-const ATLAS_COLS = 8, ATLAS_ROWS = 6, CELL_PX = 32;
-const CLIFF_CELL = 9;
-const ROAD_VARIANT_BASE = 10;   // 16 cells, 10..25
-const CROP_CELL = 40;
+// Atlas cells are laid out at the source textures' native 64px resolution —
+// no rescale needed. 8x4 = 32 cells is comfortably more than the ~30 used.
+const ATLAS_COLS = 8, ATLAS_ROWS = 4, CELL_PX = 64;
+const CLIFF_CELL = 12;
+const CROP_CELL = 13;
+const ROAD_VARIANT_BASE = 14;   // 16 cells, 14..29
 const WATER_FRAMES = [5, 6, 7, 8];
+const TILE_ATLAS_TABLE_SIZE = 32;
 
 // ---------------------------------------------------------------------------
-// Procedural tileset — no binary asset; matches stompworld's baked-canvas
-// precedent. Road edge-variant cells encode the 4-bit neighbour mask (bit0=E,
-// bit1=N, bit2=W, bit3=S) as tick marks toward the joined edges, so autotile
-// borders are visually legible without real art.
+// Real CC0 art (Kenney "Retro Textures Fantasy", tools/tile-editor/assets/tiles/
+// — see LICENSE.txt there) composited at runtime into a single atlas canvas.
+// Road autotile-variant cells encode the 4-bit neighbour mask (bit0=E, bit1=N,
+// bit2=W, bit3=S) as tick marks toward the joined edges over the plaza base,
+// so autotile borders stay visually legible; the crop overlay is dirt with a
+// scattered leaf pattern over it.
 // ---------------------------------------------------------------------------
+
+// The engine's `Image` element decodes a file synchronously via broimage on
+// `.src =`. Anchor relative paths against the real app directory (fs) rather
+// than a bare 'assets/x.png' — `new Image().src` resolves against a
+// process-global base that other contexts (e.g. system panels) can clobber.
+let appBase = '';
+try { appBase = require('fs').realpathSync('.'); } catch (e) { appBase = ''; }
+function appPath(p) {
+    if (/^[a-zA-Z]:[\\/]/.test(p) || p.charAt(0) === '/' || p.charAt(0) === '\\' || !appBase) return p;
+    return appBase + '/' + p;
+}
+function loadTileImage(name) {
+    const img = new Image();
+    img.src = appPath('assets/tiles/' + name + '.png');
+    return img;
+}
 
 function buildAtlas() {
     const w = ATLAS_COLS * CELL_PX, h = ATLAS_ROWS * CELL_PX;
@@ -36,26 +64,69 @@ function buildAtlas() {
     function rect(i) {
         return [(i % ATLAS_COLS) * CELL_PX, Math.floor(i / ATLAS_COLS) * CELL_PX, CELL_PX, CELL_PX];
     }
-    function fill(i, color) {
-        const [x, y, cw, ch] = rect(i);
-        ctx.fillStyle = color; ctx.fillRect(x, y, cw, ch);
+    function draw(i, img) {
+        const [x, y] = rect(i);
+        ctx.drawImage(img, x, y, CELL_PX, CELL_PX);
     }
 
-    fill(GROUND_IDS.grass, '#4a8f3c');
-    fill(GROUND_IDS.dirt, '#6b4a2c');
-    fill(GROUND_IDS.stone, '#8c8c94');
-    fill(GROUND_IDS.sand, '#d8c27a');
-    const waterShades = ['#2f6fb0', '#3a7dc0', '#4589cc', '#3a7dc0'];
-    WATER_FRAMES.forEach((cell, i) => fill(cell, waterShades[i]));
-    fill(CLIFF_CELL, '#3a3a3f');
+    const tex = {
+        grass: loadTileImage('floor_ground_grass'),
+        grassLush: loadTileImage('floor_ground_grass_overlay'),
+        dirt: loadTileImage('floor_ground_dirt'),
+        sand: loadTileImage('floor_ground_sand'),
+        water: loadTileImage('floor_ground_water'),
+        waterGreen: loadTileImage('floor_ground_water_green'),
+        stone: loadTileImage('floor_stone'),
+        wood: loadTileImage('floor_wood_planks'),
+        plaza: loadTileImage('floor_tiles_tan_small'),
+    };
 
+    draw(GROUND_IDS.grass, tex.grass);
+    draw(GROUND_IDS.dirt, tex.dirt);
+    draw(GROUND_IDS.stone, tex.stone);
+    draw(GROUND_IDS.sand, tex.sand);
+    draw(GROUND_IDS.wood, tex.wood);
+    draw(GROUND_IDS.plaza, tex.plaza);
+    draw(GROUND_IDS.lush, tex.grassLush);
+
+    // Water animation: 4 frames from the 2 source textures, alternating a
+    // subtle lighten pass for a shimmer effect.
+    const waterSrc = [tex.water, tex.water, tex.waterGreen, tex.waterGreen];
+    const waterLighten = [0, 0.12, 0, 0.12];
+    WATER_FRAMES.forEach((cell, i) => {
+        draw(cell, waterSrc[i]);
+        if (waterLighten[i] > 0) {
+            const [x, y] = rect(cell);
+            ctx.fillStyle = `rgba(255,255,255,${waterLighten[i]})`;
+            ctx.fillRect(x, y, CELL_PX, CELL_PX);
+        }
+    });
+
+    // Cliff face: stone, darkened for contrast against the ground above it.
+    draw(CLIFF_CELL, tex.stone);
+    {
+        const [x, y] = rect(CLIFF_CELL);
+        ctx.fillStyle = 'rgba(0,0,0,0.35)';
+        ctx.fillRect(x, y, CELL_PX, CELL_PX);
+    }
+
+    // Crop overlay: dirt base with a scattered leaf pattern.
+    draw(CROP_CELL, tex.dirt);
+    {
+        const [x, y] = rect(CROP_CELL);
+        ctx.fillStyle = '#5f9a2f';
+        for (let ry = 0; ry < 3; ry++)
+            for (let rx = 0; rx < 3; rx++)
+                ctx.fillRect(x + 8 + rx * 20, y + 8 + ry * 20, 8, 8);
+    }
+
+    // Road autotile variants: plaza base + tick marks toward joined edges.
     for (let v = 0; v < 16; v++) {
         const idx = ROAD_VARIANT_BASE + v;
         const [x, y, cw, ch] = rect(idx);
-        ctx.fillStyle = '#5a5248';
-        ctx.fillRect(x, y, cw, ch);
-        ctx.strokeStyle = '#d8d0c0';
-        ctx.lineWidth = 3;
+        ctx.drawImage(tex.plaza, x, y, cw, ch);
+        ctx.strokeStyle = 'rgba(216,208,192,0.85)';
+        ctx.lineWidth = 6;
         const cx = x + cw / 2, cy = y + ch / 2;
         ctx.beginPath();
         if (v & 1) { ctx.moveTo(cx, cy); ctx.lineTo(x + cw, cy); }   // E
@@ -65,21 +136,12 @@ function buildAtlas() {
         ctx.stroke();
     }
 
-    fill(CROP_CELL, '#9bbf3a');
-    {
-        const [x, y] = rect(CROP_CELL);
-        ctx.fillStyle = '#5f7a1f';
-        for (let ry = 0; ry < 3; ry++)
-            for (let rx = 0; rx < 3; rx++)
-                ctx.fillRect(x + 4 + rx * 10, y + 4 + ry * 10, 4, 4);
-    }
-
     const img = ctx.getImageData(0, 0, w, h);
     return { pixels: img.data, width: w, height: h };
 }
 
 function buildTileAtlasTable() {
-    const table = new Array(CROP_CELL + 1).fill(0);
+    const table = new Array(TILE_ATLAS_TABLE_SIZE).fill(0);
     for (const id of Object.values(GROUND_IDS)) table[id] = id;   // identity
     table[OVERLAY_IDS.crop] = CROP_CELL;
     // OVERLAY_IDS.road is left at 0 — it always resolves through the autotile
@@ -258,6 +320,12 @@ export function createEditor(scene) {
 
         // A river band across the map.
         fillGround(0, 30, MAP_W - 1, 32, GROUND_IDS.water);
+        // A wood bridge crossing it.
+        fillGround(33, 29, 35, 33, GROUND_IDS.wood);
+
+        // A lush meadow patch and a paved plaza, for texture variety.
+        fillGround(2, 2, 8, 8, GROUND_IDS.lush);
+        fillGround(14, 26, 20, 32, GROUND_IDS.plaza);
 
         // A road connecting the mesa to the river crossing.
         for (let x = 12; x <= 34; x++) paintOverlay(x, 24, OVERLAY_IDS.road);
