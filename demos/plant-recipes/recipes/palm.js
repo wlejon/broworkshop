@@ -65,7 +65,7 @@ function buildPalmFrond(length, width, bend, seed) {
     // The rachis lives in the X-Y plane, so leaflets go out along the plane
     // normal (±Z), swept toward the tip and pitched up out of the sheet.
     const planeNormal = [0, 0, 1];
-    const pairs = 18;
+    const pairs = 22;
     for (let i = 1; i <= pairs; i++) {
         const t = i / (pairs + 1);
         const ri = t * (rachis.length - 1);
@@ -77,9 +77,9 @@ function buildPalmFrond(length, width, bend, seed) {
         const frondUp = F.vNormOr(F.vCross(tangent, planeNormal), [0, 1, 0]);
         for (const sign of [1, -1]) {
             const sideDir = F.vNorm([
-                planeNormal[0] * sign + tangent[0] * 0.55 + frondUp[0] * 0.22,
-                planeNormal[1] * sign + tangent[1] * 0.55 + frondUp[1] * 0.22,
-                planeNormal[2] * sign + tangent[2] * 0.55 + frondUp[2] * 0.22,
+                planeNormal[0] * sign + tangent[0] * 0.15 + frondUp[0] * 0.1,
+                planeNormal[1] * sign + tangent[1] * 0.15 + frondUp[1] * 0.1,
+                planeNormal[2] * sign + tangent[2] * 0.15 + frondUp[2] * 0.1,
             ]);
             const lsegs = 5;
             const leafPath = [];
@@ -88,7 +88,7 @@ function buildPalmFrond(length, width, bend, seed) {
                 const base = F.vAdd(p, F.vScale(sideDir, u * ll));
                 leafPath.push(F.vAdd(base, F.vScale(frondUp, -0.28 * u * u * ll)));
             }
-            const lw = width * 0.11 * Math.max(0.25, taper);
+            const lw = width * 0.17 * Math.max(0.3, taper);
             const lscale = leafPath.map((_, k) => Math.max(0.06, 1 - k / (leafPath.length - 1)));
             const lm = Mesh.bladeStrip(leafPath, {
                 width: lw, thickness: lw * 0.12,
