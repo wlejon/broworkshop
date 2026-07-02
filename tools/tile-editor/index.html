@@ -17,6 +17,30 @@
             <span class="hint">right-drag orbit · wheel zoom</span>
         </div>
 
+        <div class="section" id="sec-map">
+            <div class="section-title">Map</div>
+            <div class="row">
+                <label>width</label>
+                <input type="number" id="map-width" min="4" max="200" value="48">
+            </div>
+            <div class="row">
+                <label>height</label>
+                <input type="number" id="map-height" min="4" max="200" value="48">
+            </div>
+            <div class="row">
+                <label>cell size</label>
+                <input type="number" id="map-cellsize" min="0.25" max="4" step="0.25" value="1">
+            </div>
+            <div class="btn-row" id="topology-buttons">
+                <div class="btn topo-btn accent" data-topology="square">Square</div>
+                <div class="btn topo-btn" data-topology="hex">Hex</div>
+            </div>
+            <div class="btn-row">
+                <div class="btn accent" id="btn-new-map">New Map</div>
+            </div>
+            <div class="hint2" id="map-status"></div>
+        </div>
+
         <div class="section">
             <div class="section-title">Mode</div>
             <div class="btn-row wrap" id="mode-buttons">

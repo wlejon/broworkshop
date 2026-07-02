@@ -166,22 +166,35 @@ export const OVERLAY_THUMB_CELL = { road: ROAD_VARIANT_BASE + 15, crop: CROP_CEL
 
 // ---------------------------------------------------------------------------
 
-export function createEditor(scene) {
-    const atlas = buildAtlas();
+const DEFAULT_MAP_CONFIG = {
+    width: MAP_W, height: MAP_H, topology: 'square',
+    cellSize: CELL_SIZE, heightStep: HEIGHT_STEP, chunkSize: CHUNK_SIZE,
+};
 
-    const world = scene.createTileWorld({
-        width: MAP_W, height: MAP_H,
-        layers: ['ground', 'overlay'],
-        cellSize: CELL_SIZE, heightStep: HEIGHT_STEP, chunkSize: CHUNK_SIZE,
-        aoStrength: 0.45,
-        atlasPixels: atlas.pixels, atlasWidth: atlas.width, atlasHeight: atlas.height,
-        atlasColumns: ATLAS_COLS, atlasRows: ATLAS_ROWS,
-        cliffCell: CLIFF_CELL,
-        tileAtlas: buildTileAtlasTable(),
-        autotiles: [buildRoadAutotileRule()],
-        overlays: [{}, { opacity: 0.9 }],
-        animations: [{ id: GROUND_IDS.water, fps: 2, frames: WATER_FRAMES }],
-    });
+export function createEditor(scene, initialConfig) {
+    const atlas = buildAtlas();
+    let cfg = Object.assign({}, DEFAULT_MAP_CONFIG, initialConfig);
+
+    // Full scene.createTileWorld() options for the current `cfg` — shared by
+    // the initial construction and every later newMap() reconfigure so the
+    // two can never drift apart.
+    function tileWorldOptions() {
+        return {
+            width: cfg.width, height: cfg.height, topology: cfg.topology,
+            layers: ['ground', 'overlay'],
+            cellSize: cfg.cellSize, heightStep: cfg.heightStep, chunkSize: cfg.chunkSize,
+            aoStrength: 0.45,
+            atlasPixels: atlas.pixels, atlasWidth: atlas.width, atlasHeight: atlas.height,
+            atlasColumns: ATLAS_COLS, atlasRows: ATLAS_ROWS,
+            cliffCell: CLIFF_CELL,
+            tileAtlas: buildTileAtlasTable(),
+            autotiles: [buildRoadAutotileRule()],
+            overlays: [{}, { opacity: 0.9 }],
+            animations: [{ id: GROUND_IDS.water, fps: 2, frames: WATER_FRAMES }],
+        };
+    }
+
+    const world = scene.createTileWorld(tileWorldOptions());
 
     let dirty = false;
     function markDirty() { dirty = true; }
@@ -313,6 +326,26 @@ export function createEditor(scene) {
         return ok;
     }
 
+    // ---- new map / topology switch -----------------------------------
+
+    // Rebuild the grid from scratch with a new width/height/topology/cellSize
+    // (world.configure() fully rebuilds the underlying grid, so no need to
+    // destroy/recreate the TileWorld object itself). Starts filled with flat
+    // grass, not empty — picking (raycastCell) only hits solid cells, so a
+    // truly blank grid would give the user nothing to click on to start
+    // painting.
+    function newMap(newConfig) {
+        cfg = Object.assign({}, cfg, newConfig);
+        world.configure(tileWorldOptions());
+        world.clearObjects(-1);
+        world.rebuildObjects();
+        clearPathMarkers();
+        fillGround(0, 0, cfg.width - 1, cfg.height - 1, GROUND_IDS.grass);
+        world.fillElevation(0, 0, cfg.width - 1, cfg.height - 1, 0);
+        world.rebuild();
+        dirty = false;
+    }
+
     // ---- initial authored map ------------------------------------------
 
     function authorInitialMap() {
@@ -352,6 +385,11 @@ export function createEditor(scene) {
         queryPath, clearPathMarkers,
         saveMap, loadMap,
         rebuildIfDirty,
-        mapWidth: MAP_W, mapHeight: MAP_H, cellSize: CELL_SIZE,
+        newMap,
+        getConfig() { return Object.assign({}, cfg); },
+        get mapWidth() { return cfg.width; },
+        get mapHeight() { return cfg.height; },
+        get cellSize() { return cfg.cellSize; },
+        get topology() { return cfg.topology; },
     };
 }

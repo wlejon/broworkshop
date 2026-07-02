@@ -32,8 +32,18 @@ installSystemMenu();
 // Camera
 // ---------------------------------------------------------------------------
 
-const mapCenter = [editor.mapWidth * editor.cellSize / 2, 0, editor.mapHeight * editor.cellSize / 2];
-const cam = Camera.createOrbit({ target: mapCenter, dist: 40, fov: 50 });
+// worldBounds() is topology-aware (a hex grid's extent isn't a clean
+// width*cellSize box), so frame the camera from it rather than
+// mapWidth/mapHeight*cellSize — works identically for square and hex.
+function frameCameraToMap(camera) {
+    const b = editor.world.worldBounds();
+    const cx = (b.minX + b.maxX) / 2, cz = (b.minZ + b.maxZ) / 2;
+    const dist = Math.max(10, Math.max(b.maxX - b.minX, b.maxZ - b.minZ) * 0.9);
+    Camera.orbitReframe(camera, [cx, 0, cz], dist);
+}
+
+const cam = Camera.createOrbit({ target: [0, 0, 0], dist: 40, fov: 50 });
+frameCameraToMap(cam);
 
 let rightDown = false, middleDown = false;
 function updatePointerLock() {
@@ -161,6 +171,39 @@ modeButtons.forEach((btn) => {
     });
 });
 modeSections[mode].style.display = 'block';
+
+// ---------------------------------------------------------------------------
+// New Map
+// ---------------------------------------------------------------------------
+
+const mapWidthInput = document.getElementById('map-width');
+const mapHeightInput = document.getElementById('map-height');
+const mapCellSizeInput = document.getElementById('map-cellsize');
+const mapStatusEl = document.getElementById('map-status');
+
+let newMapTopology = editor.topology;
+const topoButtons = Array.from(document.querySelectorAll('.topo-btn'));
+topoButtons.forEach((el) => {
+    el.addEventListener('click', () => {
+        newMapTopology = el.dataset.topology;
+        selectSibling(topoButtons, el);
+    });
+});
+selectSibling(topoButtons, topoButtons.find((el) => el.dataset.topology === newMapTopology) || topoButtons[0]);
+
+function flashMapStatus(msg) {
+    mapStatusEl.textContent = msg;
+    setTimeout(() => { if (mapStatusEl.textContent === msg) mapStatusEl.textContent = ''; }, 2500);
+}
+
+document.getElementById('btn-new-map').addEventListener('click', () => {
+    const width = Math.max(4, Math.min(200, parseInt(mapWidthInput.value, 10) || 48));
+    const height = Math.max(4, Math.min(200, parseInt(mapHeightInput.value, 10) || 48));
+    const cellSize = Math.max(0.25, Math.min(4, parseFloat(mapCellSizeInput.value) || 1));
+    editor.newMap({ width, height, topology: newMapTopology, cellSize });
+    frameCameraToMap(cam);
+    flashMapStatus(`New ${newMapTopology} map (${width}x${height}).`);
+});
 
 // Crop+scale one atlas cell into a small pixelated thumbnail canvas.
 function atlasThumbnail(atlas, cell, size) {
