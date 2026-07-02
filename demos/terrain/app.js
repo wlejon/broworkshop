@@ -226,7 +226,7 @@ document.addEventListener('keyup', function(e) {
 });
 
 canvas.addEventListener('mousedown', function(e) {
-    if (e.button === 0) pickAndEdit('lower');
+    if (e.button === 0) pickAndEdit(sculptMode);
     else if (e.button === 2) {
         rightMouseDown = true;
         canvas.requestPointerLock();
@@ -558,13 +558,13 @@ panel.addEventListener('mousedown', function(e) {
 // Render loop
 // ============================================================================
 
-var lastTime = Date.now();
+var lastTime = performance.now();
 var frameCount = 0;
 var fpsAccum = 0;
 var fps = 0;
 
 function render() {
-    var now = Date.now();
+    var now = performance.now();
     var dt = Math.min((now - lastTime) / 1000, 0.05);
     lastTime = now;
 
