@@ -480,6 +480,66 @@ document.getElementById('btn-open').addEventListener('click', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Minimap — ground-id colour lookup rasterized at 1px/cell into an offscreen
+// canvas, then upscaled (pixelated) into the visible HUD widget. Click jumps
+// the camera there via cellCenterWorldXZ, so it works identically for hex.
+// ---------------------------------------------------------------------------
+
+const MINIMAP_COLORS = {
+    [GROUND_IDS.grass]: [110, 158, 92],
+    [GROUND_IDS.dirt]: [138, 100, 66],
+    [GROUND_IDS.stone]: [150, 150, 158],
+    [GROUND_IDS.sand]: [214, 198, 158],
+    [GROUND_IDS.water]: [86, 134, 196],
+    [GROUND_IDS.wood]: [140, 95, 55],
+    [GROUND_IDS.plaza]: [196, 190, 172],
+    [GROUND_IDS.lush]: [58, 122, 50],
+    0: [24, 24, 28],
+};
+
+const minimapCanvas = document.getElementById('minimap');
+minimapCanvas.width = 160;
+minimapCanvas.height = 160;
+const minimapCtx = minimapCanvas.getContext('2d');
+const minimapSource = document.createElement('canvas');
+
+function redrawMinimap() {
+    const c = editor.getConfig();
+    const w = c.width, h = c.height;
+    minimapSource.width = w;
+    minimapSource.height = h;
+    const sctx = minimapSource.getContext('2d');
+    const img = sctx.createImageData(w, h);
+    for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+            const id = editor.world.getTile(x, y, 0);
+            const col = MINIMAP_COLORS[id] || MINIMAP_COLORS[0];
+            const i = (y * w + x) * 4;
+            img.data[i] = col[0]; img.data[i + 1] = col[1]; img.data[i + 2] = col[2]; img.data[i + 3] = 255;
+        }
+    }
+    sctx.putImageData(img, 0, 0);
+    minimapCtx.imageSmoothingEnabled = false;
+    minimapCtx.clearRect(0, 0, minimapCanvas.width, minimapCanvas.height);
+    minimapCtx.drawImage(minimapSource, 0, 0, minimapCanvas.width, minimapCanvas.height);
+}
+editor.history.on('change', redrawMinimap);
+proj.on('new', redrawMinimap);
+proj.on('loaded', redrawMinimap);
+redrawMinimap();
+
+minimapCanvas.addEventListener('click', (e) => {
+    const rect = minimapCanvas.getBoundingClientRect();
+    const c = editor.getConfig();
+    const px = (e.clientX - rect.left) / rect.width;
+    const py = (e.clientY - rect.top) / rect.height;
+    const cx = Math.max(0, Math.min(c.width - 1, Math.floor(px * c.width)));
+    const cy = Math.max(0, Math.min(c.height - 1, Math.floor(py * c.height)));
+    const center = editor.world.cellCenterWorldXZ(cx, cy);
+    if (center) Camera.orbitReframe(cam, [center.x, 0, center.z], cam.dist);
+});
+
+// ---------------------------------------------------------------------------
 // Main loop
 // ---------------------------------------------------------------------------
 
