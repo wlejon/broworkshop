@@ -41,6 +41,67 @@ function buildPalmSprout(opts, stageT) {
     return { parts, aabbMin: [-0.10, 0, -0.10], aabbMax: [0.10, stemH + 0.10, 0.10] };
 }
 
+// One feathered (pinnate) palm frond, in local space: springs from the origin
+// along +X, arching and drooping in -Y, with paired leaflets fanning out in
+// ±Z. Returns its sub-meshes so the caller can rotate copies into the crown.
+// A single flat leaf card reads as a crude paddle; real palm fronds are a
+// midrib carrying dozens of thin leaflets.
+function buildPalmFrond(length, width, bend, seed) {
+    const rng = F.mulberry32((seed >>> 0) || 1);
+    const segs = 12;
+    const rachis = [];
+    for (let k = 0; k <= segs; k++) {
+        const t = k / segs;
+        rachis.push([t * length, -bend * length * t * t, 0]);
+    }
+    const sub = [];
+    const rScale = rachis.map((_, k) => {
+        const t = k / (rachis.length - 1);
+        return width * 0.06 * Math.max(0.15, 1 - t);
+    });
+    const rmesh = Mesh.tube(rachis, rScale, 5);
+    if (rmesh) sub.push(rmesh);
+
+    // The rachis lives in the X-Y plane, so leaflets go out along the plane
+    // normal (±Z), swept toward the tip and pitched up out of the sheet.
+    const planeNormal = [0, 0, 1];
+    const pairs = 18;
+    for (let i = 1; i <= pairs; i++) {
+        const t = i / (pairs + 1);
+        const ri = t * (rachis.length - 1);
+        const idx = Math.min(rachis.length - 1, Math.max(1, Math.round(ri)));
+        const p = rachis[idx];
+        const tangent = F.vNormOr(F.vSub(rachis[idx], rachis[idx - 1]), [1, 0, 0]);
+        const taper = Math.sin(Math.PI * t);
+        const ll = width * (0.5 + 0.5 * taper);
+        const frondUp = F.vNormOr(F.vCross(tangent, planeNormal), [0, 1, 0]);
+        for (const sign of [1, -1]) {
+            const sideDir = F.vNorm([
+                planeNormal[0] * sign + tangent[0] * 0.55 + frondUp[0] * 0.22,
+                planeNormal[1] * sign + tangent[1] * 0.55 + frondUp[1] * 0.22,
+                planeNormal[2] * sign + tangent[2] * 0.55 + frondUp[2] * 0.22,
+            ]);
+            const lsegs = 5;
+            const leafPath = [];
+            for (let k = 0; k <= lsegs; k++) {
+                const u = k / lsegs;
+                const base = F.vAdd(p, F.vScale(sideDir, u * ll));
+                leafPath.push(F.vAdd(base, F.vScale(frondUp, -0.28 * u * u * ll)));
+            }
+            const lw = width * 0.11 * Math.max(0.25, taper);
+            const lscale = leafPath.map((_, k) => Math.max(0.06, 1 - k / (leafPath.length - 1)));
+            const lm = Mesh.bladeStrip(leafPath, {
+                width: lw, thickness: lw * 0.12,
+                capStart: false, capEnd: true, miterJoints: false,
+                profileScale: lscale,
+            });
+            if (lm) sub.push(lm);
+        }
+        void rng;
+    }
+    return sub;
+}
+
 function buildPalmCore(opts, age01, scaleMul, includeFruits) {
     scaleMul = scaleMul ?? 1;
     const seed = (opts.seed | 0) || 1;
@@ -84,19 +145,16 @@ function buildPalmCore(opts, age01, scaleMul, includeFruits) {
     for (let i = 0; i < fronds; i++) {
         const a = (i / fronds) * TAU + rng() * 0.2;
         const tilt = -(0.20 + rng() * 0.35); // angle below horizontal
-        const f = Mesh.leafCard('frond', {
-            width: frondLength * 0.25,
-            length: frondLength * (0.85 + rng() * 0.30),
-            bend: 0.55 + rng() * 0.20,
-            curl: (rng() - 0.5) * 0.20,
-            fullUV: true,
-            lengthSegments: 12,
-        });
-        F.stripVertexColors(f);
-        f.rotate(1, 0, 0, tilt);
-        f.rotate(0, 1, 0, a);
-        f.translate(tip[0], tip[1], tip[2]);
-        parts.push({ mesh: f, color: frondColor, metallic: 0, roughness: 0.85 });
+        const flen = frondLength * (0.85 + rng() * 0.30);
+        const fwidth = frondLength * 0.28;
+        const fbend = 0.45 + rng() * 0.25;
+        const frond = buildPalmFrond(flen, fwidth, fbend, (seed * 131 + i * 17) >>> 0);
+        for (const m of frond) {
+            m.rotate(0, 0, 1, tilt);   // droop the whole frond below horizontal
+            m.rotate(0, 1, 0, a);      // fan around the crown
+            m.translate(tip[0], tip[1], tip[2]);
+            parts.push({ mesh: m, color: frondColor, metallic: 0, roughness: 0.85, twoSided: true });
+        }
         F.aabbInclude(aabb, tip, frondLength * 1.2);
     }
 
