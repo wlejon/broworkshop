@@ -99,6 +99,7 @@ const MSG_INPUT   = 0x01;
 const MSG_STATE   = 0x02;
 const MSG_WELCOME = 0x03;
 const MSG_EVENT   = 0x04;
+const MSG_NAMES   = 0x05;
 
 // --- Event subtypes ---
 const EVT_KILL  = 0;
@@ -338,6 +339,37 @@ function sendEvent(connId, evtType, id1, id2, value) {
     bro.net.send(connId, buf);
 }
 
+// Roster broadcast: id -> name for every current player (bots included, so
+// kill-feed/scoreboard text can show real names instead of raw connection
+// ids). Sent whenever the roster or a name changes — not part of the
+// per-tick state packet, which is fixed-width and has no room for strings.
+function broadcastNames() {
+    const encoder = new TextEncoder();
+    const entries = [];
+    let totalLen = 2; // type + count
+    for (const [id, p] of players) {
+        const nameBytes = encoder.encode(p.name);
+        entries.push({ id, nameBytes });
+        totalLen += 2 + 1 + nameBytes.length;
+    }
+
+    const buf = new ArrayBuffer(totalLen);
+    const v = new DataView(buf);
+    v.setUint8(0, MSG_NAMES);
+    v.setUint8(1, entries.length);
+    let off = 2;
+    for (const { id, nameBytes } of entries) {
+        v.setUint16(off, id, true); off += 2;
+        v.setUint8(off, nameBytes.length); off += 1;
+        new Uint8Array(buf, off, nameBytes.length).set(nameBytes);
+        off += nameBytes.length;
+    }
+
+    for (const [id, p] of players) {
+        if (!p.isBot) bro.net.send(id, buf);
+    }
+}
+
 function sendSpawnEvent(connId, x, z) {
     const buf = new ArrayBuffer(10);
     const v = new DataView(buf);
@@ -405,12 +437,14 @@ bro.net.onconnect = (connId) => {
     console.log('Player ' + connId + ' joined [' + players.size + ' players]');
     sendWelcome(connId, player);
     sendSpawnEvent(connId, player.x, player.z);
+    broadcastNames();
 };
 
 bro.net.ondisconnect = (connId) => {
     const p = players.get(connId);
     if (p) console.log(p.name + ' left [' + (players.size - 1) + ' players]');
     players.delete(connId);
+    broadcastNames();
 };
 
 bro.net.onmessage = (connId, data) => {
@@ -426,6 +460,7 @@ bro.net.onmessage = (connId, data) => {
                 if (msg.type === 'set_name' && typeof msg.name === 'string') {
                     p.name = msg.name.substring(0, 16);
                     console.log('Player ' + connId + ' is "' + p.name + '"');
+                    broadcastNames();
                 }
             } catch (e) {}
             return;
@@ -737,6 +772,7 @@ function spawnBot() {
     });
 
     console.log(name + ' spawned [' + players.size + ' total]');
+    broadcastNames();
 }
 
 // Spawn initial bots

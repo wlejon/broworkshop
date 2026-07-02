@@ -38,6 +38,12 @@ const MSG_INPUT   = 0x01;
 const MSG_STATE   = 0x02;
 const MSG_WELCOME = 0x03;
 const MSG_EVENT   = 0x04;
+const MSG_NAMES   = 0x05;
+
+// id -> name, kept current from MSG_NAMES broadcasts (connect/disconnect/
+// set_name/bot spawn) — the fixed-width per-tick MSG_STATE packet has no
+// room for strings, so kill-feed/scoreboard text looks names up here.
+const playerNames = new Map();
 
 const EVT_KILL  = 0;
 const EVT_HIT   = 1;
@@ -381,6 +387,20 @@ function handleBinaryMessage(data) {
             break;
         }
 
+        case MSG_NAMES: {
+            const count = v.getUint8(1);
+            playerNames.clear();
+            let off = 2;
+            for (let i = 0; i < count; i++) {
+                const id = v.getUint16(off, true); off += 2;
+                const nameLen = v.getUint8(off); off += 1;
+                const name = new TextDecoder().decode(new Uint8Array(data, off, nameLen));
+                off += nameLen;
+                playerNames.set(id, name);
+            }
+            break;
+        }
+
         case MSG_EVENT: {
             const evtType = v.getUint8(1);
             if (evtType === EVT_KILL) {
@@ -420,8 +440,8 @@ function updateHUD() {
 function addKillFeed(killerId, victimId) {
     const entry = document.createElement('div');
     entry.className = 'kill-entry';
-    const kName = killerId === myId ? 'You' : 'Player ' + killerId;
-    const vName = victimId === myId ? 'You' : 'Player ' + victimId;
+    const kName = killerId === myId ? 'You' : (playerNames.get(killerId) || 'Player ' + killerId);
+    const vName = victimId === myId ? 'You' : (playerNames.get(victimId) || 'Player ' + victimId);
     entry.textContent = kName + ' killed ' + vName;
     killFeed.appendChild(entry);
     setTimeout(() => { if (entry.parentNode) entry.parentNode.removeChild(entry); }, 3500);
