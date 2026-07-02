@@ -270,7 +270,9 @@ function rebuildFoliage() {
         fullUV: true, shapedSilhouette: true, cup: 0.3,
         widthSegments: 3, lengthSegments: 6,
     });
-    stripVertexColors(leaf);
+    // Keep leafCard's vertex colors: R carries the base→tip windBend the
+    // wind VS reads. The material sets vertexColorTint:false so the bend
+    // gradient drives sway without washing the leaf's green albedo.
 
     // Tint each canopy by species so the patch isn't one flat green. Plant
     // indices reorder every step (senescence swap-pop + new seedlings), so
@@ -334,7 +336,6 @@ function rebuildFoliage() {
         });
         seed = (seed * 2654435761) >>> 0;   // decorrelate the two passes
         if (!foliage || foliage.triangleCount === 0) continue;
-        stripVertexColors(foliage);
         nodes.push(scene.createMesh({
             data: foliage,
             color: SPECIES[key].color,
@@ -344,6 +345,9 @@ function rebuildFoliage() {
             // carries the sheen instead.
             metallic: 0.0, roughness: 0.92,
             twoSided: true, subsurface: 0.5,
+            // Keep the color buffer for windBend but don't let it tint albedo,
+            // then opt this canopy into the global wind sway.
+            vertexColorTint: false, wind: 1,
             castsShadow: true, receivesShadow: true,
         }));
     }
@@ -651,6 +655,10 @@ function tick() {
 }
 
 installSystemMenu();
+// A gentle breeze. Foliage meshes opt in via `wind:1`; the per-vertex
+// windBend (leaf base→tip) shapes the sway so tips flutter and stems stay
+// put. Branches carry no color buffer, so the woody structure holds firm.
+scene.setWind({ direction: [1, 0, 0.35], strength: 0.06, frequency: 1.1 });
 selectTod(START_PRESET);   // light the scene before the first frame
 rebuildAll();
 requestAnimationFrame(tick);
