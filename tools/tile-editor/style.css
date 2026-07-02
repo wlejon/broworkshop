@@ -67,7 +67,17 @@ canvas { display: block; cursor: crosshair; width: 100vw; height: 100vh; }
 .btn.accent:hover { background: rgba(181,232,83,0.15); }
 .btn.selected { background: rgba(181,232,83,0.25); border-color: #b5e853; color: #fff; }
 
-.swatch { flex: 0 0 auto; border-width: 2px; }
+.swatch {
+    flex: 0 0 auto; border-width: 2px;
+    display: flex; flex-direction: column; align-items: center; gap: 3px;
+    width: 46px; padding: 4px 2px;
+}
+.swatch-thumb {
+    width: 28px; height: 28px; border-radius: 3px;
+    border: 1px solid rgba(255,255,255,0.25);
+    image-rendering: pixelated;
+}
+.swatch span { font-size: 10px; }
 
 #sec-ground, #sec-elevation, #sec-overlay, #sec-tint, #sec-object, #sec-pathfind {
     display: none;

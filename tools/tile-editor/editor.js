@@ -155,6 +155,15 @@ function buildRoadAutotileRule() {
     return { id: OVERLAY_IDS.road, layer: 1, mode: 'edge', cells };
 }
 
+// Atlas-cell pixel rect for a given cell index — used to crop swatch
+// thumbnails out of the built atlas (see app.js).
+export function atlasCellPxRect(cell) {
+    return [(cell % ATLAS_COLS) * CELL_PX, Math.floor(cell / ATLAS_COLS) * CELL_PX, CELL_PX];
+}
+// A representative single cell to thumbnail each overlay id with (road has
+// 16 autotile variants; show the all-sides-connected "crossroads" one).
+export const OVERLAY_THUMB_CELL = { road: ROAD_VARIANT_BASE + 15, crop: CROP_CELL };
+
 // ---------------------------------------------------------------------------
 
 export function createEditor(scene) {
@@ -337,7 +346,7 @@ export function createEditor(scene) {
     authorInitialMap();
 
     return {
-        world,
+        world, atlas,
         paintGround, fillGround, raiseElevation, paintOverlay, paintTint,
         placeObject, clearAllObjects,
         queryPath, clearPathMarkers,

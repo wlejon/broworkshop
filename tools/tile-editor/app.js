@@ -1,5 +1,5 @@
 import "/lib/camera.js";
-import { createEditor, GROUND_IDS, OVERLAY_IDS } from "/app/editor.js";
+import { createEditor, GROUND_IDS, OVERLAY_IDS, atlasCellPxRect, OVERLAY_THUMB_CELL } from "/app/editor.js";
 import { installSystemMenu } from "/lib/system-menu.js";
 
 // =============================================================================
@@ -162,23 +162,83 @@ modeButtons.forEach((btn) => {
 });
 modeSections[mode].style.display = 'block';
 
-const groundSwatches = Array.from(document.querySelectorAll('#ground-swatches .swatch'));
-groundSwatches.forEach((el) => {
-    el.addEventListener('click', () => {
-        groundId = parseInt(el.dataset.id, 10);
-        selectSibling(groundSwatches, el);
-    });
-});
-selectSibling(groundSwatches, groundSwatches[0]);
+// Crop+scale one atlas cell into a small pixelated thumbnail canvas.
+function atlasThumbnail(atlas, cell, size) {
+    const [cx, cy, cellPx] = atlasCellPxRect(cell);
+    const crop = new Uint8ClampedArray(cellPx * cellPx * 4);
+    for (let row = 0; row < cellPx; row++) {
+        const srcOff = ((cy + row) * atlas.width + cx) * 4;
+        crop.set(atlas.pixels.subarray(srcOff, srcOff + cellPx * 4), row * cellPx * 4);
+    }
+    const small = document.createElement('canvas');
+    small.width = cellPx; small.height = cellPx;
+    small.getContext('2d').putImageData(new ImageData(crop, cellPx, cellPx), 0, 0);
 
-const overlaySwatches = Array.from(document.querySelectorAll('#overlay-swatches .swatch'));
-overlaySwatches.forEach((el) => {
-    el.addEventListener('click', () => {
-        overlayId = parseInt(el.dataset.id, 10);
-        selectSibling(overlaySwatches, el);
-    });
+    const out = document.createElement('canvas');
+    out.width = size; out.height = size;
+    out.className = 'swatch-thumb';
+    out.style.width = size + 'px';
+    out.style.height = size + 'px';
+    const octx = out.getContext('2d');
+    octx.imageSmoothingEnabled = false;
+    octx.drawImage(small, 0, 0, size, size);
+    return out;
+}
+
+// Build a row of swatch buttons from atlas cells; `defs` entries are
+// { id, label, cell } (cell omitted -> plain "erase" style swatch).
+function buildSwatchRow(container, defs, atlas, onSelect) {
+    container.innerHTML = '';
+    const buttons = [];
+    for (const def of defs) {
+        const el = document.createElement('div');
+        el.className = 'btn swatch';
+        el.dataset.id = def.id;
+        if (def.cell === undefined) {
+            el.style.borderColor = '#555';
+            const label = document.createElement('span');
+            label.textContent = def.label;
+            el.appendChild(label);
+        } else {
+            el.appendChild(atlasThumbnail(atlas, def.cell, 28));
+            const label = document.createElement('span');
+            label.textContent = def.label;
+            el.appendChild(label);
+        }
+        el.addEventListener('click', () => {
+            onSelect(def.id);
+            selectSibling(buttons, el);
+        });
+        container.appendChild(el);
+        buttons.push(el);
+    }
+    if (buttons.length) selectSibling(buttons, buttons[0]);
+    return buttons;
+}
+
+const GROUND_SWATCH_DEFS = [
+    { id: GROUND_IDS.grass, label: 'Grass', cell: GROUND_IDS.grass },
+    { id: GROUND_IDS.dirt, label: 'Dirt', cell: GROUND_IDS.dirt },
+    { id: GROUND_IDS.stone, label: 'Stone', cell: GROUND_IDS.stone },
+    { id: GROUND_IDS.sand, label: 'Sand', cell: GROUND_IDS.sand },
+    { id: GROUND_IDS.water, label: 'Water', cell: GROUND_IDS.water },
+    { id: GROUND_IDS.wood, label: 'Wood', cell: GROUND_IDS.wood },
+    { id: GROUND_IDS.plaza, label: 'Plaza', cell: GROUND_IDS.plaza },
+    { id: GROUND_IDS.lush, label: 'Lush', cell: GROUND_IDS.lush },
+    { id: 0, label: 'Erase' },
+];
+const OVERLAY_SWATCH_DEFS = [
+    { id: OVERLAY_IDS.road, label: 'Road', cell: OVERLAY_THUMB_CELL.road },
+    { id: OVERLAY_IDS.crop, label: 'Crop', cell: OVERLAY_THUMB_CELL.crop },
+    { id: 0, label: 'Erase' },
+];
+
+buildSwatchRow(document.getElementById('ground-swatches'), GROUND_SWATCH_DEFS, editor.atlas, (id) => {
+    groundId = id;
 });
-selectSibling(overlaySwatches, overlaySwatches[0]);
+buildSwatchRow(document.getElementById('overlay-swatches'), OVERLAY_SWATCH_DEFS, editor.atlas, (id) => {
+    overlayId = id;
+});
 
 const elevButtons = Array.from(document.querySelectorAll('.elev-btn'));
 elevButtons.forEach((el) => {
