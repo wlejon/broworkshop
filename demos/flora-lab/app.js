@@ -135,7 +135,7 @@ const SPECIES = {
                     tropismG2: 0.12, growthScale: 1.0,
                     orthotropy: 0.4, rootVigorMax: 3.0,
                     apicalControl: 0.35, apicalControlMature: 0.3,
-                    maxAge: 60 },
+                    individualVariation: 0.18, maxAge: 60 },
         color: [0.55, 0.78, 0.32],
     },
     shade: {
@@ -145,7 +145,7 @@ const SPECIES = {
                     tropismG2: 0.12, growthScale: 0.8,
                     orthotropy: 0.48, rootVigorMax: 2.5,
                     apicalControl: 0.30, apicalControlMature: 0.3,
-                    maxAge: 70 },
+                    individualVariation: 0.16, maxAge: 70 },
         color: [0.30, 0.62, 0.45],
     },
 };
