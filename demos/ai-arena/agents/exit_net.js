@@ -31,13 +31,17 @@ export const ExitNet = (function () {
     var capturing = false;
     var captured = [];     // Situations recorded this episode (only while capturing)
 
+    // Shared so loadCheckpoint can build a fresh net with the exact same
+    // architecture (load() assumes matching tensor shapes).
+    var NET_CFG = {
+        enc: { hidden: 32, embedDim: 32 },
+        trunkHidden: 64, valueHidden: 32,
+        seed: 0xE7C0DEn,
+    };
+
     function ensureNet() {
         if (!net) {
-            net = bro.ai.game.nn.createSingleHeroNet({
-                enc: { hidden: 32, embedDim: 32 },
-                trunkHidden: 64, valueHidden: 32,
-                seed: 0xE7C0DEn,
-            });
+            net = bro.ai.game.nn.createSingleHeroNet(NET_CFG);
             handle = bro.ai.game.nn.createWeightsHandle();
             handle.publish(net.save(), 0n);
         }
@@ -72,11 +76,30 @@ export const ExitNet = (function () {
         handle: function () { ensureNet(); return handle; },
 
         // bytes: Uint8Array of a saved .bgnn blob (see net.save()/net.load()).
+        //
+        // Loads into a FRESH net and swaps the module-level reference,
+        // rather than calling load() on the live `net` in place. The
+        // native file dialog (showOpenFileDialog, used by the "Open
+        // Checkpoint" menu item) keeps the whole engine ticking while the
+        // picker is open — see dialog_bindings.cpp's waitForDialog, which
+        // spins calling the frame-tick callback (every agent's think(),
+        // every MCTS search) nested inside the JS call stack until the
+        // user picks a file. Any NeuralEvaluator/NeuralPrior built from
+        // the old net during that window keeps a live reference to it, so
+        // mutating that net's tensors in place while such a reference
+        // might still be reachable is exactly the kind of shared-state
+        // hazard this project avoids mutexes by not creating in the first
+        // place. Building a new net + swapping the reference instead means
+        // nothing already holding the old net ever sees it rewritten
+        // underneath it — mirrors WeightsHandle.publish's own pattern
+        // (new Entry + pointer swap, never an in-place mutation).
         loadCheckpoint: function (bytes) {
             ensureNet();
-            net.load(bytes);
+            var fresh = bro.ai.game.nn.createSingleHeroNet(NET_CFG);
+            fresh.load(bytes);
+            net = fresh;
             handle.publish(net.save(), (handle.version() || 0n) + 1n);
-            mctsByHero = {};   // stale NeuralEvaluator/Prior closures reference the old blob
+            mctsByHero = {};   // stale NeuralEvaluator/Prior closures reference the old net
         },
 
         setUseNet: function (v) { useNet = !!v; },
