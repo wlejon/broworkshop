@@ -10,7 +10,6 @@ import { Graph } from "/app/lab/graph.js";
 import { Runner } from "/app/lab/runner.js";
 import { Editor } from "/app/lab/editor.js";
 import { Palette } from "/app/lab/palette.js";
-import { Presets } from "/app/lab/presets.js";
 import { Nodes } from "/app/lab/node-registry.js";
 import "/app/nodes/rave-node.js";               // registers the RAVE node type
 import "/app/nodes/kokoro-node.js";              // registers the Kokoro node type
@@ -111,29 +110,6 @@ import { installSystemMenu } from "/lib/system-menu.js";
       toast('Canvas cleared.');
       proj.markDirty();
     });
-
-    // --- presets ----------------------------------------------------------
-    const presetSel = $('preset');
-    for (const p of Presets.list()) {
-      const opt = document.createElement('option');
-      opt.value = p.name;
-      opt.textContent = p.name;
-      presetSel.appendChild(opt);
-    }
-    function loadPreset(name) {
-      if (!name) return;
-      Presets.load(name, graph);
-      runner.reset();
-      editor.select(null);
-      editor.resize();
-      editor.draw(0);
-      editor.frameAll();
-      updateStatus();
-      const p = Presets.list().find((x) => x.name === name);
-      if (p) toast(p.desc);
-      proj.markDirty();
-    }
-    presetSel.addEventListener('change', () => loadPreset(presetSel.value));
 
     // --- project (save/load) ----------------------------------------------
     const proj = new Project({
