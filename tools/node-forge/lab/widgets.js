@@ -65,6 +65,17 @@
     container.appendChild(input);
   }
 
+  // free-text string param (model directory / file path, ...) — added
+  // alongside the audio domain nodes, which are the first ops needing a
+  // string-valued param rather than a scalar/enum.
+  function mountText(container, node, f, ctx) {
+    const input = el('input', 'form-input wide');
+    input.type = 'text';
+    input.value = node.params[f.key] || '';
+    input.addEventListener('change', () => ctx.commit(input.value));
+    container.appendChild(input);
+  }
+
   // registered up front so the four existing field kinds behave exactly as
   // inspector.js's old inline switch did — this is a pure refactor, not a
   // behavior change. '__default__' covers any param `type` not otherwise
@@ -73,6 +84,7 @@
   FIELD_WIDGETS.bool = { mount: mountBool };
   FIELD_WIDGETS.int = { mount: mountNumber };
   FIELD_WIDGETS.float = { mount: mountNumber };
+  FIELD_WIDGETS.text = { mount: mountText };
   FIELD_WIDGETS.__default__ = { mount: mountNumber };
 
   export const Widgets = {
