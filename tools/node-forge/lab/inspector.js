@@ -342,13 +342,17 @@ import { Widgets } from "/app/lab/widgets.js";
       // attention (before generic tensor view — it's the headline)
       if (n._attn && n._attn.tensor) panel.appendChild(buildAttnView(n));
 
-      // output tensor view
-      if (n._out && n._out[0]) {
+      // output tensor view — only for ops whose primary output is actually a
+      // GpuTensor (port type 'tensor'). Non-tensor domains (RAVE/Kokoro
+      // model-handle, audio-buffer, kokoro-trace, ...) have no raw-value
+      // heatmap to show; their panel widget (if any) already covers it.
+      const outIsTensor = def.outs[0] && def.outs[0].type === 'tensor';
+      if (outIsTensor && n._out && n._out[0]) {
         panel.appendChild(buildTensorView(() => {
           const t = n._out[0];
           return { array: t.download(), rows: t.rows, cols: t.cols };
         }, n.type === 'softmax' ? 'prob' : 'value', 'Output'));
-      } else {
+      } else if (outIsTensor) {
         panel.appendChild(el('div', 'viz-note pad',
           bro.tensor && bro.tensor.available
             ? 'Run or Step to compute this node.'
