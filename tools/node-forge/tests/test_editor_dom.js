@@ -24,6 +24,18 @@ def({
   exec() { return []; },
   mount(body) { body.textContent = 'test wrong-type sink'; },
 });
+def({
+  type: 'test-dialog', label: 'Test Dialog', cat: 'Test', color: '#a78bfa',
+  ins: [], outs: [],
+  exec() { return []; },
+  mount(body, node, graph, api) {
+    body.textContent = 'mini card';
+    const advanced = document.createElement('div');
+    advanced.className = 'test-advanced-marker';
+    advanced.textContent = 'full controls content';
+    api.dialogBody.appendChild(advanced);
+  },
+});
 
 advanceTime(50);
 flush();
@@ -55,6 +67,42 @@ collapseBtn.click();
 assert(src.collapsed === false, 'expand did not clear node.collapsed');
 assert(body.style.display !== 'none', 'body should be visible once expanded');
 console.log('OK: collapse/expand toggles node.collapsed + body visibility');
+
+// ── full-controls dialog: hidden gear when api.dialogBody is untouched,
+//    shown + working when a node type populates it ─────────────────────────
+{
+  const srcGear = srcCard.querySelector('.node-gear');
+  assert(srcGear && srcGear.style.display === 'none', 'gear button should stay hidden when mount() never touches api.dialogBody');
+
+  const dlg = app.graph.addNode('test-dialog');
+  dlg.x = 100; dlg.y = 400;
+  app.editor.draw(0);
+  advanceTime(16); flush();
+  const dlgCard = findCardByTitle('Test Dialog');
+  const dlgGear = dlgCard.querySelector('.node-gear');
+  assert(dlgGear && dlgGear.style.display !== 'none', 'gear button should show once mount() appends into api.dialogBody');
+
+  dlgGear.click();
+  const backdrop = document.querySelector('.node-dialog-backdrop');
+  const dialogHost = document.querySelector('.node-dialog-body');
+  assert(backdrop.style.display === 'flex', 'dialog should be visible after clicking the gear button');
+  assert(document.querySelector('.node-dialog-title').textContent.includes('Test Dialog'), 'dialog title should name the open node');
+  assert(dialogHost.querySelector('.test-advanced-marker'), 'dialog body should contain the moved dialogBody content');
+  assert(!dlgCard.querySelector('.test-advanced-marker'), 'advanced content must not remain on the mini card once moved into the dialog');
+
+  // backdrop click (not on the panel itself) closes it
+  backdrop.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: 2, clientY: 2 }));
+  assert(backdrop.style.display === 'none', 'clicking the backdrop should close the dialog');
+
+  // Escape closes it too
+  dlgGear.click();
+  assert(backdrop.style.display === 'flex', 'dialog should reopen');
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+  assert(backdrop.style.display === 'none', 'Escape should close the dialog');
+  console.log('OK: full-controls dialog opens/closes (gear, backdrop click, Escape) and hosts the node-owned dialogBody');
+
+  dlgCard.querySelector('.node-del').click();
+}
 
 // ── header drag repositions the node in world space ────────────────────────
 const header = srcCard.querySelector('.node-header');

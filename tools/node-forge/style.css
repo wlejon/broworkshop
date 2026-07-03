@@ -213,12 +213,58 @@ main {
   background: #1a2030; color: #7fd1a6; border: 1px solid #243046;
 }
 .node-badge.err { color: #ff8e8e; background: #3a1a1a; border-color: #50262a; }
-.node-collapse, .node-del {
+.node-collapse, .node-gear, .node-del {
   background: none; border: none; color: #8b97ac; cursor: pointer;
   font-size: 13px; padding: 2px 5px; line-height: 1;
 }
-.node-collapse:hover, .node-del:hover { color: #e8edf6; }
+.node-collapse:hover, .node-gear:hover, .node-del:hover { color: #e8edf6; }
 .node-mount-error { padding: 10px 12px; color: #fca5a5; font-size: 11.5px; }
+
+/* ---- shared full-controls dialog (hand-built — no native <dialog> in
+   bro/htmlayout). Appended to document.body, not #stage, so it's never
+   clipped or double-transformed by #nodes-layer's pan/zoom transform. --- */
+.node-dialog-backdrop {
+  position: fixed; inset: 0; z-index: 50;
+  display: none; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+}
+.node-dialog {
+  width: 640px; max-width: 92vw; max-height: 85vh; overflow-y: auto;
+  background: #161c2a; border: 1px solid #262d3e; border-top: 3px solid #7dd3fc;
+  border-radius: 10px; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+}
+.node-dialog-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 16px; border-bottom: 1px solid #1d2433;
+}
+.node-dialog-title { font-weight: 700; font-size: 13.5px; color: #f1f5fb; }
+.node-dialog-close {
+  background: none; border: none; color: #8b97ac; cursor: pointer;
+  font-size: 14px; padding: 2px 6px; line-height: 1;
+}
+.node-dialog-close:hover { color: #e8edf6; }
+.node-dialog-body { padding: 4px 16px 16px; user-select: text; }
+.node-dialog-body input, .node-dialog-body select, .node-dialog-body button { user-select: auto; }
+.node-dialog-body details {
+  margin-top: 10px; border-top: 1px solid #1d2433; padding-top: 8px;
+}
+.node-dialog-body summary {
+  cursor: pointer; font-size: 10px; font-weight: 700; letter-spacing: 1px;
+  color: #5b6577; text-transform: uppercase; margin-bottom: 6px;
+}
+.node-dialog-body summary:hover { color: #9aa6bd; }
+
+/* Well-known <details> footgun (same in real browsers, not a bro quirk):
+   the UA rule that hides a closed <details>'s content is a NORMAL-priority
+   declaration, so any author rule that also sets `display` on that content
+   (e.g. .form-row/.basis-sliders/.pc below, all used inside <details>
+   sections) wins the cascade and silently un-hides it regardless of [open].
+   Reassert the hide with !important so this app's own display rules can't
+   leak a closed section open. */
+.node-body details:not([open]) > *:not(summary),
+.node-dialog-body details:not([open]) > *:not(summary) {
+  display: none !important;
+}
 
 .node-ports {
   display: flex; justify-content: space-between;

@@ -30,13 +30,75 @@ import { Nodes } from "/app/lab/node-registry.js";
     const gctx = gridCanvas.getContext('2d');
 
     const view = { x: 80, y: 80, scale: 1 };
-    const cards = new Map();      // node -> {root, header, body, badge, ins:[dot], outs:[dot]}
+    const cards = new Map();      // node -> {root, header, body, badge, ins:[dot], outs:[dot], dialogBody, onDialogToggle}
     let focused = null;
     let wireDrag = null;          // { fromNode, fromPort, screen:{x,y}, hoverDot }
     let panDrag = null;           // { sx, sy, vx, vy }
     let cardDrag = null;          // { node, ox, oy } world-space grab offset
 
     const ed = { view: view, activeNode: null };
+
+    // --- shared full-controls dialog ---------------------------------------
+    // A node's "advanced" sections live in a detached per-card container
+    // (c.dialogBody), never appended to the card itself — only moved into
+    // this one singleton modal shell when opened. bro/htmlayout has no
+    // native <dialog>/showModal(), so this is a hand-built fixed-position
+    // div + backdrop, appended to document.body (not #stage) so it isn't
+    // clipped by #stage's overflow:hidden or double-transformed by
+    // #nodes-layer's pan/zoom CSS transform.
+    let dialogBackdrop = null, dialogPanel = null, dialogTitle = null, dialogHost = null;
+    let dialogOpenNode = null;
+
+    function ensureDialog() {
+      if (dialogBackdrop) return;
+      dialogBackdrop = el('div', 'node-dialog-backdrop');
+      dialogPanel = el('div', 'node-dialog');
+      const head = el('div', 'node-dialog-head');
+      dialogTitle = el('span', 'node-dialog-title', '');
+      const closeBtn = el('button', 'node-dialog-close', '✕');
+      closeBtn.title = 'Close';
+      head.appendChild(dialogTitle);
+      head.appendChild(el('span', 'grow'));
+      head.appendChild(closeBtn);
+      dialogHost = el('div', 'node-dialog-body');
+      dialogPanel.appendChild(head);
+      dialogPanel.appendChild(dialogHost);
+      dialogBackdrop.appendChild(dialogPanel);
+      document.body.appendChild(dialogBackdrop);
+
+      closeBtn.addEventListener('click', closeDialog);
+      dialogBackdrop.addEventListener('mousedown', (e) => { if (e.target === dialogBackdrop) closeDialog(); });
+      dialogPanel.addEventListener('mousedown', (e) => e.stopPropagation());
+      window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && dialogOpenNode) closeDialog(); });
+    }
+
+    function openDialogFor(node) {
+      const c = cards.get(node);
+      if (!c || !c.dialogBody) return;
+      ensureDialog();
+      const def = Nodes.get(node.type);
+      if (dialogOpenNode && dialogOpenNode !== node) {
+        const prev = cards.get(dialogOpenNode);
+        if (prev && prev.onDialogToggle) prev.onDialogToggle(false);
+      }
+      dialogTitle.textContent = def.label + ' — full controls';
+      dialogPanel.style.borderTopColor = def.color;
+      dialogHost.appendChild(c.dialogBody);
+      dialogBackdrop.style.display = 'flex';
+      dialogOpenNode = node;
+      if (c.onDialogToggle) c.onDialogToggle(true);
+    }
+
+    function closeDialog() {
+      if (!dialogBackdrop) return;
+      dialogBackdrop.style.display = 'none';
+      const node = dialogOpenNode;
+      dialogOpenNode = null;
+      if (node) {
+        const c = cards.get(node);
+        if (c && c.onDialogToggle) c.onDialogToggle(false);
+      }
+    }
 
     // --- coordinate transforms ---------------------------------------------
     function applyTransform() {
@@ -60,6 +122,7 @@ import { Nodes } from "/app/lab/node-registry.js";
     function removeCardFor(node) {
       const c = cards.get(node);
       if (!c) return;
+      if (dialogOpenNode === node) closeDialog();
       const def = Nodes.get(node.type);
       if (def.unmount) { try { def.unmount(node); } catch (e) {} }
       c.root.remove();
@@ -82,6 +145,10 @@ import { Nodes } from "/app/lab/node-registry.js";
       const badge = el('span', 'node-badge', '');
       header.appendChild(badge);
       header.appendChild(el('span', 'grow'));
+      const gearBtn = el('button', 'node-gear', '⚙');
+      gearBtn.title = 'Full controls';
+      gearBtn.style.display = 'none';   // shown once mount() populates dialogBody
+      header.appendChild(gearBtn);
       const delBtn = el('button', 'node-del', '✕');
       delBtn.title = 'Remove this node';
       header.appendChild(delBtn);
@@ -111,8 +178,12 @@ import { Nodes } from "/app/lab/node-registry.js";
       body.style.display = node.collapsed ? 'none' : '';
       ports.style.display = node.collapsed ? 'none' : '';
 
+      // Advanced/"full controls" sections live here, detached — never
+      // appended to the card, only moved into the shared dialog on open.
+      const dialogBody = el('div');
+
       layer.appendChild(root);
-      const c = { root: root, header: header, body: body, badge: badge, ins: inDots, outs: outDots };
+      const c = { root: root, header: header, body: body, badge: badge, ins: inDots, outs: outDots, dialogBody: dialogBody, onDialogToggle: null };
       cards.set(node, c);
 
       collapseBtn.addEventListener('click', (e) => {
@@ -123,6 +194,7 @@ import { Nodes } from "/app/lab/node-registry.js";
         ports.style.display = node.collapsed ? 'none' : '';
         change();
       });
+      gearBtn.addEventListener('click', (e) => { e.stopPropagation(); openDialogFor(node); });
       delBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         graph.removeNode(node);
@@ -133,7 +205,7 @@ import { Nodes } from "/app/lab/node-registry.js";
 
       // card drag — mousedown on the header (not its buttons) moves the node
       header.addEventListener('mousedown', (e) => {
-        if (e.target === collapseBtn || e.target === delBtn) return;
+        if (e.target === collapseBtn || e.target === gearBtn || e.target === delBtn) return;
         e.preventDefault();
         setFocus(node);
         const w = toWorld(e.clientX - stage.getBoundingClientRect().left, e.clientY - stage.getBoundingClientRect().top);
@@ -176,9 +248,21 @@ import { Nodes } from "/app/lab/node-registry.js";
           badge.textContent = text || '';
           badge.classList.toggle('err', !!isErr);
         },
+        // The node's own detached "advanced" container — mount() appends
+        // full-controls sections here instead of `body` to keep them off
+        // the small card; the editor moves this into the shared dialog on
+        // open (see openDialogFor above).
+        dialogBody: dialogBody,
+        // Optional: registers a callback fired with true/false right after
+        // this node's dialog opens/closes — for a node whose mini-card and
+        // dialog both mount a live widget over the same data (e.g. RAVE's
+        // curve painter), so each can refresh from current params when it's
+        // about to become visible again.
+        onDialogToggle(fn) { c.onDialogToggle = fn; },
       };
       try { def.mount(body, node, graph, api); }
       catch (e) { body.appendChild(el('div', 'node-mount-error', 'mount failed: ' + (e && e.message || e))); }
+      gearBtn.style.display = dialogBody.childElementCount ? '' : 'none';
       return c;
     }
 

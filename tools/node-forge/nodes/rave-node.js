@@ -112,7 +112,8 @@ import { Dialogs } from "/lib/dialogs.js";
     mount(body, node, graph, api) {
       seedDefaults(node.params);
 
-      // ---- Model & source (collapsed — set once, rarely touched) ---------
+      // ---- Model & source (in the full-controls dialog — set once, rarely
+      //      touched) --------------------------------------------------------
       const modelDet = el('details');
       const modelSum = el('summary', null, 'Model & source'); modelDet.appendChild(modelSum);
 
@@ -163,13 +164,25 @@ import { Dialogs } from "/lib/dialogs.js";
         fileRow.style.display = isFile ? '' : 'none';
       }
       syncSourceVisibility();
-      body.appendChild(modelDet);
+      api.dialogBody.appendChild(modelDet);
 
-      // ---- curve painter (open by default — this is the point of the node) --
-      const curveWrap = el('div');
-      body.appendChild(curveWrap);
+      // ---- curve painter — the point of the node. The mini card shows one
+      //      dim at a time (a picker); the dialog holds the full grid (every
+      //      dim at once, for side-by-side editing) — both read/write the
+      //      same node.params.curves arrays, so an edit in either place is
+      //      visible in the other once it's shown again (see onDialogToggle
+      //      below, which refreshes whichever one is about to appear). -----
+      const dimRow = el('div', 'form-row');
+      dimRow.appendChild(el('span', 'form-label', 'Latent dim'));
+      const dimSel = el('select', 'form-input');
+      dimRow.appendChild(dimSel);
+      body.appendChild(dimRow);
+      const cardCurveWrap = el('div');
+      body.appendChild(cardCurveWrap);
 
-      // ---- Decode options (collapsed) --------------------------------------
+      const dialogCurveWrap = el('div');
+
+      // ---- Decode options (in the full-controls dialog) --------------------
       const decodeDet = el('details');
       decodeDet.appendChild(el('summary', null, 'Decode options'));
       const noiseRow = el('div', 'form-row');
@@ -187,7 +200,8 @@ import { Dialogs } from "/lib/dialogs.js";
       decodeDet.appendChild(widthRow);
       function syncStereoVisibility() { widthRow.style.display = stereoChk.checked ? '' : 'none'; }
       syncStereoVisibility();
-      body.appendChild(decodeDet);
+      api.dialogBody.appendChild(dialogCurveWrap);
+      api.dialogBody.appendChild(decodeDet);
 
       // ---- output: waveform + play (always visible) ------------------------
       const outSec = el('div', 'audio-preview');
@@ -217,19 +231,40 @@ import { Dialogs } from "/lib/dialogs.js";
         if (node.params.autoplay) ClipAudio.playClipId(node._clipId);
       }
 
-      let curveCfg = null;
-      function rebuildCurvePanel() {
-        curveWrap.textContent = '';
-        curveCfg = {
+      let selectedDim = 0;
+      function rebuildDimPicker() {
+        dimSel.textContent = '';
+        const n = node._enc ? node._enc.nLatent : 0;
+        for (let i = 0; i < n; i++) { const o = el('option', null, 'dim ' + i); o.value = String(i); dimSel.appendChild(o); }
+        if (selectedDim >= n) selectedDim = 0;
+        dimSel.value = String(selectedDim);
+      }
+      function rebuildCardCurve() {
+        cardCurveWrap.textContent = '';
+        const cfg = {
+          count: (n) => (n._enc ? 1 : 0),
+          label: () => 'dim ' + selectedDim,
+          get: (n) => n.params.curves && n.params.curves[selectedDim],
+          original: (n) => n._original && n._original[selectedDim],
+        };
+        cardCurveWrap.appendChild(mountCurvePainter(node, cfg, { onEdit() { scheduleLiveDecode(); } }));
+      }
+      function rebuildDialogCurve() {
+        dialogCurveWrap.textContent = '';
+        const cfg = {
           count: (n) => (n._enc ? n._enc.nLatent : 0),
           label: (n, i) => 'dim ' + i,
           get: (n, i) => n.params.curves && n.params.curves[i],
           original: (n, i) => n._original && n._original[i],
         };
-        curveWrap.appendChild(mountCurvePainter(node, curveCfg, {
-          onEdit() { scheduleLiveDecode(); },
-        }));
+        dialogCurveWrap.appendChild(mountCurvePainter(node, cfg, { onEdit() { scheduleLiveDecode(); } }));
       }
+      dimSel.addEventListener('change', () => { selectedDim = parseInt(dimSel.value, 10) || 0; rebuildCardCurve(); });
+      // Refresh whichever curve view is about to become visible again, so an
+      // edit made in one (card or dialog) is reflected in the other — the
+      // mini card and dialog are only ever interactive one at a time (the
+      // dialog's backdrop blocks the card underneath while open).
+      api.onDialogToggle((open) => { if (open) rebuildDialogCurve(); else rebuildCardCurve(); });
 
       let liveTimer = 0;
       function scheduleLiveDecode() {
@@ -265,7 +300,7 @@ import { Dialogs } from "/lib/dialogs.js";
           api.setBadge('loading…', false);
           const t0 = performance.now();
           const out = recompute(node);
-          if (node._enc !== prevEnc) rebuildCurvePanel();   // model/source changed shape
+          if (node._enc !== prevEnc) { rebuildDimPicker(); rebuildCardCurve(); rebuildDialogCurve(); }   // model/source changed shape
           api.invalidate(node, [out], performance.now() - t0);
           publishOutput(out);
           api.setBadge('ready · ' + node._enc.nLatent + ' latent', false);
@@ -277,7 +312,7 @@ import { Dialogs } from "/lib/dialogs.js";
       [kindSel, freqInput, secsInput, noiseChk, stereoChk, widthInput].forEach((i) => i.addEventListener('change', applyStructuralChange));
       widthInput.addEventListener('input', () => { syncStereoVisibility(); });
 
-      rebuildCurvePanel();
+      rebuildDimPicker(); rebuildCardCurve(); rebuildDialogCurve();
       if (node.params.dir) applyStructuralChange();   // populate on load (a saved graph reopening)
     },
   });
