@@ -216,14 +216,21 @@ import { Nodes } from "/app/lab/node-registry.js";
       }
     });
 
+    // Hit-test against the known port dots' own rects rather than
+    // document.elementFromPoint (unimplemented in bro's DOM) — a bounded,
+    // known set of small interactive elements, so a direct rect scan is
+    // both sufficient and cheap (a handful of dots per visible card).
     function dotUnder(clientX, clientY, dir) {
-      const el2 = document.elementFromPoint(clientX, clientY);
-      if (!el2 || !el2.classList || !el2.classList.contains('port-dot')) return null;
-      if (dir && el2.dataset.dir !== dir) return null;
       for (const [node, c] of cards) {
         const list = dir === 'out' ? c.outs : c.ins;
-        const i = list.indexOf(el2);
-        if (i !== -1) return { node: node, port: i, el: el2 };
+        for (let i = 0; i < list.length; i++) {
+          const dot = list[i];
+          if (dot.offsetParent === null) continue;   // collapsed / detached
+          const r = dot.getBoundingClientRect();
+          if (clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom) {
+            return { node: node, port: i, el: dot };
+          }
+        }
       }
       return null;
     }
