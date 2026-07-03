@@ -1,8 +1,8 @@
-// Tensor Lab — op palette.
+// Node Forge — node palette.
 //
-// The left rail. Lists every op in the registry grouped by category;
-// clicking one drops a fresh node into the editor.
-import { Ops } from "/app/lab/ops-registry.js";
+// The left rail. Lists every registered node type grouped by category;
+// clicking one drops a fresh card into the editor.
+import { Nodes } from "/app/lab/node-registry.js";
 
   function el(tag, cls, html) {
     const e = document.createElement(tag);
@@ -13,9 +13,9 @@ import { Ops } from "/app/lab/ops-registry.js";
 
   function create(panel, onAdd) {
     panel.innerHTML = '';
-    panel.appendChild(el('div', 'pal-title', 'OPERATIONS'));
-    for (const cat of Ops.categories()) {
-      const ops = Ops.byCategory(cat);
+    panel.appendChild(el('div', 'pal-title', 'NODES'));
+    for (const cat of Nodes.categories()) {
+      const ops = Nodes.byCategory(cat);
       if (!ops.length) continue;
       panel.appendChild(el('div', 'pal-cat', cat));
       for (const def of ops) {
@@ -30,8 +30,9 @@ import { Ops } from "/app/lab/ops-registry.js";
       }
     }
     panel.appendChild(el('div', 'pal-hint',
-      'Click to add. Drag a node by its body, drag port→port to wire, ' +
-      'select + Delete to remove.'));
+      'Click to add. Drag a card by its header to move it, drag port→port ' +
+      'to wire, click a card then Delete to remove it. Collapse a card with ' +
+      'the ▾ button once you\'re done with it.'));
   }
 
   export const Palette = { create: create };

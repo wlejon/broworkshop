@@ -25,11 +25,18 @@
 //   mapExtent(node)       -> a symmetric ± range for the two mapped axes.
 //                            Optional; defaults to the larger of the two
 //                            axisRange() magnitudes, or 6.
+//   snapPx                -> click-to-snap radius in canvas px (a plain
+//                            number, not a function). Optional; default 11.
 //
 // Like curve-painter, every interaction (slider drag, map drag, preset
-// pick) fires ctx.onEdit() only — never ctx.onCommit() — since none of
-// these ever need a full-graph clearRun().
-import { Widgets } from "/app/lab/widgets.js";
+// pick, snap-to-point) fires ctx.onEdit() only — never a full-graph
+// clearRun(). mount(node, cfg, ctx) is called directly by a node type's own
+// mount() — there is no generic panel-widget registry to route through.
+//
+// cfg.presets(node) points are drawn on the map AND are click-to-snap
+// targets (within snapPx, default 11) — not just a separate <select>
+// picker — matching qwen-tts-lab's voice map (click the nearest real
+// speaker to jump straight to their exact coords) alongside free dragging.
 
   const MAP_W = 280, MAP_H = 280, MAP_PAD = 26;
 
@@ -50,7 +57,18 @@ import { Widgets } from "/app/lab/widgets.js";
     return m > 0 ? m : 6;
   }
 
-  function mount(node, def, cfg, ctx) {
+  // nearest preset point to a canvas pixel, within snapPx (or -1)
+  function nearestPreset(presets, ai, aj, sigToPx, px, py, snapPx) {
+    let bi = -1, bd = snapPx * snapPx;
+    for (let i = 0; i < presets.length; i++) {
+      const [dx, dy] = sigToPx(presets[i].coords[ai] || 0, presets[i].coords[aj] || 0);
+      const d = (dx - px) * (dx - px) + (dy - py) * (dy - py);
+      if (d < bd) { bd = d; bi = i; }
+    }
+    return bi;
+  }
+
+  export function mountBasisSliderMap(node, cfg, ctx) {
     const root = el('div', 'basis-panel');
     const k = cfg.dim(node);
     const coords = cfg.coords(node);
@@ -110,8 +128,27 @@ import { Widgets } from "/app/lab/widgets.js";
       drawMap();
       ctx.onEdit();
     }
+    // snap ALL coords to a plotted preset's complete position (not just the
+    // two mapped axes), or free-move just the two map axes from the clicked
+    // spot — matching qwen-tts-lab's voice map (click a real speaker to jump
+    // to their exact identity; drag freely elsewhere).
+    function snapToPreset(presets, i) {
+      const p = presets[i];
+      for (let d = 0; d < k; d++) coords[d] = p.coords[d] != null ? p.coords[d] : 0;
+      syncSliders();
+      drawMap();
+      ctx.onEdit();
+    }
     let dragging = false;
-    cv.addEventListener('mousedown', (e) => { dragging = true; placeFromEvent(e); });
+    const snapPx = cfg.snapPx || 11;
+    cv.addEventListener('mousedown', (e) => {
+      const rect = cv.getBoundingClientRect();
+      const px = e.clientX - rect.left, py = e.clientY - rect.top;
+      const presets = cfg.presets ? cfg.presets(node) : [];
+      const i = presets.length ? nearestPreset(presets, ai, aj, sigToPx, px, py, snapPx) : -1;
+      if (i >= 0) { snapToPreset(presets, i); dragging = false; }
+      else { dragging = true; placeFromEvent(e); }
+    });
     window.addEventListener('mousemove', (e) => { if (dragging) placeFromEvent(e); });
     window.addEventListener('mouseup', () => { dragging = false; });
 
@@ -170,5 +207,3 @@ import { Widgets } from "/app/lab/widgets.js";
     drawMap();
     return root;
   }
-
-  Widgets.registerPanel('basis-slider-map', { mount: mount });

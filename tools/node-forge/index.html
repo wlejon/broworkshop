@@ -18,9 +18,7 @@
       <button id="btn-open" title="Open a saved graph">Open…</button>
       <button id="btn-save" title="Save">Save</button>
       <button id="btn-save-as" title="Save As…">Save As…</button>
-      <button id="btn-open-t5" title="Open a T5 text-encoder safetensors checkpoint">⬇ Open T5…</button>
-      <button id="btn-run" title="Run the whole forward pass">▶ Run</button>
-      <button id="btn-step" title="Execute the next op">⏭ Step</button>
+      <button id="btn-run" title="Deterministically recompute every node (Run/Step/tests use this path; a card's own live edits don't)">▶ Run</button>
       <button id="btn-reset" title="Clear computed values">↺ Reset</button>
       <button id="btn-clear" title="Remove every node">✕ Clear</button>
       <span id="backend" class="badge">…</span>
@@ -29,17 +27,11 @@
     <main>
       <aside id="palette"></aside>
       <section id="stage">
-        <canvas id="graph"></canvas>
         <div id="toast"></div>
       </section>
-      <aside id="inspector"></aside>
     </main>
     <footer id="status">
       <span id="stat-nodes">0 nodes</span>
-      <span class="dot">·</span>
-      <span id="stat-params">0 params</span>
-      <span class="dot">·</span>
-      <span id="stat-flops">0 FLOPs</span>
       <span class="grow"></span>
       <span id="stat-time">not run</span>
     </footer>

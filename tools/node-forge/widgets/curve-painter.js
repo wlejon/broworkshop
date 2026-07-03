@@ -30,13 +30,14 @@
 //                                 Kokoro's F0 curve: Math.max(0, value)).
 //                                 Optional; identity if omitted.
 //
-// Every mutation (drag tick or button op) calls ctx.onEdit() — the
-// debounced invalidateFrom(node) + runner.continue() path — never
-// ctx.onCommit(). A curve edit only ever changes this node's own output;
-// there is no structural reason to pay the full-graph clearRun() a plain
-// param-form edit takes, and doing so on every brush stroke would defeat
-// the entire point of incremental invalidation.
-import { Widgets } from "/app/lab/widgets.js";
+// Every mutation (drag tick or button op) calls ctx.onEdit() — a node's
+// api.invalidate(node), i.e. the debounced invalidateFrom(node) +
+// runner.continue() path. A curve edit only ever changes this node's own
+// output; there is no structural reason for a full graph clearRun(), and
+// doing one on every brush stroke would defeat incremental invalidation.
+//
+// mount(node, cfg, ctx) is called directly by a node type's own mount() —
+// there is no generic panel-widget registry to route through.
 
   const CURVE_W = 1100, CURVE_H = 96, CURVE_PAD = 6;
   const DEFAULT_HUES = [42, 198, 150, 280, 16, 100, 320, 222];
@@ -70,7 +71,7 @@ import { Widgets } from "/app/lab/widgets.js";
     return cfg.clamp ? cfg.clamp(node, i, v) : v;
   }
 
-  function mount(node, def, cfg, ctx) {
+  export function mountCurvePainter(node, cfg, ctx) {
     const root = el('div', 'curve-panel');
     const count = cfg.count(node);
     const ranges = [];
@@ -216,5 +217,3 @@ import { Widgets } from "/app/lab/widgets.js";
     root._cells = cells;   // test seam
     return root;
   }
-
-  Widgets.registerPanel('multi-curve-painter', { mount: mount });

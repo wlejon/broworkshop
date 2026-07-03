@@ -1,32 +1,34 @@
-// Tensor Lab — execution engine.
+// Node Forge — execution engine.
 //
-// Walks the graph in topological order and runs each op's real bro.tensor
-// GPU call. Every op is timed with a sync()-bracketed clock so the per-node
-// numbers reflect actual kernel cost. Supports a full run() or single
-// step() for watching the forward pass unfold one op at a time.
-import { Ops } from "/app/lab/ops-registry.js";
+// Walks the graph in topological order and runs each node's deterministic
+// exec() — the sync recompute path used by Run/Step/tests/save-load. A
+// node's own live interaction (dragging a slider/curve) does NOT go through
+// here; it calls the model directly and asynchronously, then tells the
+// graph it changed via invalidateFrom + a debounced continue() (see
+// app.js's api.invalidate). This engine is what makes that "only the
+// downstream subgraph re-runs" property hold for the deterministic path too.
+import { Nodes } from "/app/lab/node-registry.js";
 
   const clock = (typeof performance !== 'undefined' && performance.now)
     ? () => performance.now() : () => Date.now();
 
   function create(graph) {
-    const T = bro.tensor;
+    // bro.tensor.available is the documented general-purpose "will an ML
+    // model run on GPU" probe (docs/gpu-api.js) — used here as the umbrella
+    // gate even though individual nodes talk to bro.rave/bro.tts, both of
+    // which land on the same CUDA backend bro.tensor reports.
+    function ready() { return !!(bro.tensor && bro.tensor.available); }
 
-    function ready() { return !!(T && T.available); }
-
-    // execute a single node: gather inputs, time the kernel, store outputs
     function runNode(n) {
-      const def = Ops.get(n.type);
+      const def = Nodes.get(n.type);
       const ins = [];
       for (let p = 0; p < def.ins.length; p++) {
         const e = graph.edgeInto(n, p);
         if (!e || !e.from.node._out) throw new Error('input ' + (p + 1) + ' has no value');
         ins.push(e.from.node._out[e.from.port]);
       }
-      T.sync();
       const t0 = clock();
-      const out = def.exec(T, ins, n.params, n);
-      T.sync();
+      const out = def.exec(ins, n.params, n);
       n._time = clock() - t0;
       n._out = out;
       n._ran = true;
@@ -37,7 +39,7 @@ import { Ops } from "/app/lab/ops-registry.js";
     function nextNode(order) {
       for (const n of order) {
         if (n._ran) continue;
-        const def = Ops.get(n.type);
+        const def = Nodes.get(n.type);
         let ok = true;
         for (let p = 0; p < def.ins.length; p++) {
           const e = graph.edgeInto(n, p);
@@ -53,15 +55,13 @@ import { Ops } from "/app/lab/ops-registry.js";
 
       reset() { graph.clearRun(); },
 
-      // run one op; returns the executed node, or null when the graph is done
+      // run one node; returns the executed node, or null when the graph is done
       step() {
-        if (!ready()) throw new Error('bro.tensor GPU backend unavailable');
-        graph.propagate();
+        if (!ready()) throw new Error('GPU backend unavailable');
         const order = graph.topo();
         if (!order) throw new Error('graph has a cycle');
         const n = nextNode(order);
         if (!n) return null;
-        if (n.error) throw new Error(n.type + ': ' + n.error);
         try { runNode(n); }
         catch (err) { n.error = String(err && err.message || err); throw err; }
         return n;
@@ -75,18 +75,11 @@ import { Ops } from "/app/lab/ops-registry.js";
 
       // like run(), but does NOT clearRun() first — resumes from whatever
       // nodes are already _ran (typically after graph.invalidateFrom(node)
-      // wiped just the downstream-of-an-edit subset). This is what a
-      // widget's debounced onEdit() should call: only the invalidated
-      // nodes and below re-execute, so editing a downstream curve/slider
-      // doesn't force an upstream encode/load node to redundantly re-run.
+      // wiped just the downstream-of-an-edit subset).
       continue(onProgress) {
-        if (!ready()) throw new Error('bro.tensor GPU backend unavailable');
-        graph.propagate();
+        if (!ready()) throw new Error('GPU backend unavailable');
         const order = graph.topo();
         if (!order) throw new Error('graph has a cycle');
-        for (const n of order) {
-          if (n.error) throw new Error(Ops.get(n.type).label + ': ' + n.error);
-        }
         let done = 0;
         let n;
         while ((n = nextNode(order)) !== null) {
