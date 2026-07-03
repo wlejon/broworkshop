@@ -31,6 +31,36 @@ function fakeNode(params) { return { params: params }; }
   assert(committed === '9', 'int widget fires ctx.commit(raw) on change');
 }
 
+// --- text: plain string input, no browse button without f.browse -----------
+{
+  const node = fakeNode({ dir: '' });
+  const field = { key: 'dir', label: 'Dir', type: 'text', def: '' };
+  const container = document.createElement('div');
+  let committed = null;
+  Widgets.getField('text').mount(container, node, field, { commit: (raw) => { committed = raw; } });
+  const input = container.querySelector('input');
+  assert(input !== null && input.type === 'text', 'text widget mounts a text <input>');
+  assert(container.querySelectorAll('.tinybtn').length === 0, 'no browse button when the field has no f.browse');
+  input.value = 'D:/some/path';
+  input.dispatchEvent(new Event('change'));
+  assert(committed === 'D:/some/path', 'text widget commits the typed string');
+}
+
+// --- text with f.browse: 'folder' — mounts a Browse button ------------------
+// showOpenFolderDialog/showOpenFileDialog are REAL SDL3 native dialogs, not
+// stubs, and exist even in GPU-headless mode (unlike --no-gpu) — clicking
+// this button opens an actual blocking OS dialog with nobody to dismiss it.
+// NEVER click it in an automated test; only assert it mounts and is wired.
+{
+  const node = fakeNode({ dir: '' });
+  const field = { key: 'dir', label: 'Dir', type: 'text', def: '', browse: 'folder' };
+  const container = document.createElement('div');
+  Widgets.getField('text').mount(container, node, field, { commit: () => {} });
+  const btn = container.querySelector('.tinybtn');
+  assert(btn !== null, 'f.browse: "folder" mounts a Browse button');
+  assert(btn.title === 'Browse…', 'browse button is titled for discoverability');
+}
+
 // --- bool: checkbox ----------------------------------------------------------
 {
   const node = fakeNode({ bias: true });

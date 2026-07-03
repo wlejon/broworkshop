@@ -25,6 +25,7 @@
 //                 same full propagate()+clearRun() path a param-form edit
 //                 already takes, keeping the "settled" behavior identical
 //                 to editing a plain field.
+import { Dialogs } from "/lib/dialogs.js";
 
   function el(tag, cls, html) {
     const e = document.createElement(tag);
@@ -67,13 +68,28 @@
 
   // free-text string param (model directory / file path, ...) — added
   // alongside the audio domain nodes, which are the first ops needing a
-  // string-valued param rather than a scalar/enum.
+  // string-valued param rather than a scalar/enum. A field declaring
+  // `browse: 'folder'` or `browse: 'file'` (+ optional `browseFilter`) gets
+  // a native-dialog button beside the text input — absent in headless/
+  // GPU-less builds, where Dialogs.browseFolder/browseFile just return null
+  // and the button quietly no-ops.
   function mountText(container, node, f, ctx) {
     const input = el('input', 'form-input wide');
     input.type = 'text';
     input.value = node.params[f.key] || '';
     input.addEventListener('change', () => ctx.commit(input.value));
     container.appendChild(input);
+    if (f.browse === 'folder' || f.browse === 'file') {
+      const btn = el('button', 'tinybtn', '…');
+      btn.title = 'Browse…';
+      btn.addEventListener('click', () => {
+        const picked = f.browse === 'folder'
+          ? Dialogs.browseFolder(input.value)
+          : Dialogs.browseFile(f.browseFilter || '');
+        if (picked) { input.value = picked; ctx.commit(picked); }
+      });
+      container.appendChild(btn);
+    }
   }
 
   // registered up front so the four existing field kinds behave exactly as

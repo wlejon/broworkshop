@@ -51,8 +51,8 @@ import { def, registerCategory } from "/app/lab/ops-registry.js";
     desc: 'Load a Kokoro model (config.json + model.safetensors + voices/). dataRoot (optional) points the phonemizer at a brosoundml-data root for g2p/pos_tagger assets.',
     ins: [], outs: [{ name: 'kokoro', type: 'model-handle' }],
     params: [
-      { key: 'dir', label: 'Model dir', type: 'text', def: '' },
-      { key: 'dataRoot', label: 'Data root (g2p)', type: 'text', def: '' },
+      { key: 'dir', label: 'Model dir', type: 'text', def: '', browse: 'folder' },
+      { key: 'dataRoot', label: 'Data root (g2p)', type: 'text', def: '', browse: 'folder' },
     ],
     shape(ins, p) {
       if (!p.dir) return 'set a model directory';
@@ -84,7 +84,7 @@ import { def, registerCategory } from "/app/lab/ops-registry.js";
     type: 'kokoro-voice', label: 'Kokoro Voice', cat: 'Kokoro', color: '#c084fc',
     desc: 'Load a named voice pack (e.g. voices/af_heart.bin).',
     ins: [{ name: 'kokoro', type: 'model-handle' }], outs: [{ name: 'voice', type: 'voice-handle' }],
-    params: [{ key: 'path', label: 'Voice file', type: 'text', def: '' }],
+    params: [{ key: 'path', label: 'Voice file', type: 'text', def: '', browse: 'file', browseFilter: 'Voice|bin' }],
     shape(ins, p) {
       if (!p.path) return 'set a voice file path';
       return [Shape.tag('voice · ' + p.path.split(/[\\/]/).pop())];
@@ -105,7 +105,7 @@ import { def, registerCategory } from "/app/lab/ops-registry.js";
     type: 'kokoro-basis', label: 'Kokoro Basis', cat: 'Kokoro', color: '#c084fc',
     desc: 'Load voice_basis.json — the PCA voice-design space (axes, ranges, named preset anchors) alongside the model.',
     ins: [], outs: [{ name: 'basis', type: 'voice-basis' }],
-    params: [{ key: 'path', label: 'voice_basis.json', type: 'text', def: '' }],
+    params: [{ key: 'path', label: 'voice_basis.json', type: 'text', def: '', browse: 'file', browseFilter: 'Basis JSON|json' }],
     shape(ins, p) {
       if (!p.path) return 'set a voice_basis.json path';
       return [Shape.tag('basis (unread)')];

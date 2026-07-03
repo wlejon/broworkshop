@@ -29,7 +29,7 @@ import { ClipAudio } from "/lib/clip-audio.js";
     type: 'rave-load', label: 'RAVE Load', cat: 'RAVE', color: '#34d399',
     desc: 'Load a converted RAVE model (a directory with config.json + model.safetensors).',
     ins: [], outs: [{ name: 'rave', type: 'model-handle' }],
-    params: [{ key: 'dir', label: 'Model dir', type: 'text', def: '' }],
+    params: [{ key: 'dir', label: 'Model dir', type: 'text', def: '', browse: 'folder' }],
     shape(ins, p) {
       if (!p.dir) return 'set a model directory';
       return [Shape.tag('RAVE · ' + p.dir.replace(/[\\/]+$/, '').split(/[\\/]/).pop())];
@@ -57,7 +57,7 @@ import { ClipAudio } from "/lib/clip-audio.js";
       { key: 'kind', label: 'Source', type: 'select', def: 'harm', options: ['sine', 'harm', 'saw', 'sweep', 'noise', 'file'] },
       { key: 'freq', label: 'Freq (Hz)', type: 'float', def: 220, min: 20, max: 4000 },
       { key: 'secs', label: 'Duration (s)', type: 'float', def: 2.0, min: 0.1, max: 10 },
-      { key: 'file', label: 'File path', type: 'text', def: '' },
+      { key: 'file', label: 'File path', type: 'text', def: '', browse: 'file', browseFilter: 'Audio|wav;mp3;flac;ogg' },
     ],
     shape(ins, p) {
       if (p.kind === 'file' && !p.file) return 'set a file path';
