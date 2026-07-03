@@ -233,6 +233,51 @@
         b.link(emb, ln); b.link(ln, attn); b.link(attn, proj);
       },
     },
+    {
+      name: 'RAVE Latent Morph',
+      desc: 'Encode a tone into RAVE\'s latent time-series, paint a dimension by hand, decode ' +
+            'and preview both the original synth and the morphed result. Edit dir/paths for your setup.',
+      build(g) {
+        const b = builder(g);
+        const load = b.add('rave-load', { dir: 'D:/projects/brosoundml-data/rave/magnets_z8' });
+        const source = b.add('rave-source', { kind: 'harm', freq: 220, secs: 2.0 });
+        const encode = b.add('rave-encode');
+        const curve = b.add('rave-curve-edit');
+        const decode = b.add('rave-decode');
+        const preview = b.add('audio-preview');
+        b.link(load, source, 0); b.link(load, encode, 0); b.link(source, encode, 1);
+        b.link(encode, curve, 0);
+        b.link(load, decode, 0); b.link(curve, decode, 1);
+        b.link(decode, preview, 0);
+      },
+    },
+    {
+      name: 'Kokoro Voice Design',
+      desc: 'Design a voice by position in the PCA basis, synthesize with a captured pitch/energy ' +
+            'trace, then paint the prosody and re-decode just the back half. Edit dir/paths for your setup.',
+      build(g) {
+        const b = builder(g);
+        const load = b.add('kokoro-load', {
+          dir: 'D:/projects/brosoundml-data/kokoro',
+          dataRoot: 'D:/projects/brosoundml-data',
+        });
+        const basis = b.add('kokoro-basis', { path: 'D:/projects/brosoundml-data/kokoro/voice_basis.json' });
+        const design = b.add('kokoro-voice-design');
+        const text = b.add('kokoro-text', { text: 'Hello, Bro.' });
+        const synth = b.add('kokoro-synthesize');
+        const prosody = b.add('kokoro-prosody-edit');
+        const redecode = b.add('kokoro-redecode');
+        const previewA = b.add('audio-preview');
+        const previewB = b.add('audio-preview');
+        b.link(load, design, 0); b.link(basis, design, 1);
+        b.link(load, text, 0);
+        b.link(load, synth, 0); b.link(design, synth, 1); b.link(text, synth, 2);
+        b.link(synth, previewA, 0, 0);
+        b.link(synth, prosody, 0, 1);
+        b.link(load, redecode, 0); b.link(design, redecode, 1); b.link(prosody, redecode, 2);
+        b.link(redecode, previewB, 0);
+      },
+    },
   ];
 
   export const Presets = {
