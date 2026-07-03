@@ -237,6 +237,41 @@ import { Dialogs } from "/lib/dialogs.js";
       seedDefaults(node.params);
       const p = node.params;
 
+      // ══ Common: text + transport (always visible, on the small card) ════
+      const textRow = el('div', 'form-row');
+      const textInput = el('input', 'form-input wide'); textInput.type = 'text'; textInput.value = p.text;
+      textInput.placeholder = 'Type something to speak…';
+      textRow.appendChild(textInput);
+      const speakBtn = el('button', 'tinybtn', '▶'); speakBtn.title = 'Render';
+      textRow.appendChild(speakBtn);
+      body.appendChild(textRow);
+
+      // Variant chip row is a compact, frequently-touched mode switch —
+      // stays on the card, not tucked into the dialog's Model & checkpoint.
+      const chipRow = el('div', 'form-row');
+      const chipBtns = {};
+      for (const id of ['cv', 'vd', 'base']) {
+        const b = el('button', 'tinybtn', id);
+        b.addEventListener('click', () => { dirInput.value = chipBtns[id]._dir; dirInput.dispatchEvent(new Event('change')); });
+        chipBtns[id] = b;
+        chipRow.appendChild(b);
+      }
+      body.appendChild(chipRow);
+
+      const outSec = el('div', 'audio-preview');
+      const outCv = document.createElement('canvas'); outCv.className = 'curve-canvas';
+      outSec.appendChild(outCv);
+      const outControls = el('div', 'audio-preview-controls');
+      const playBtn = el('button', 'tinybtn', '▶ Play'); playBtn.disabled = true;
+      const wavBtn = el('button', 'tinybtn', '⤓ wav'); wavBtn.disabled = true;
+      const autoplayLbl = el('label', null, '');
+      const autoplayChk = el('input', 'form-check'); autoplayChk.type = 'checkbox'; autoplayChk.checked = p.autoplay;
+      autoplayLbl.appendChild(autoplayChk); autoplayLbl.appendChild(document.createTextNode(' autoplay'));
+      const info = el('span', 'curve-stats', 'no audio yet — set a checkpoint dir');
+      outControls.appendChild(playBtn); outControls.appendChild(wavBtn); outControls.appendChild(autoplayLbl); outControls.appendChild(info);
+      outSec.appendChild(outControls);
+      body.appendChild(outSec);
+
       // ══ Model & data source ═══════════════════════════════════════════
       const modelDet = el('details'); modelDet.appendChild(el('summary', null, 'Model & checkpoint'));
       const dirRow = el('div', 'form-row');
@@ -250,19 +285,9 @@ import { Dialogs } from "/lib/dialogs.js";
       });
       dirRow.appendChild(dirBrowse);
       modelDet.appendChild(dirRow);
-
-      const chipRow = el('div', 'form-row');
-      const chipBtns = {};
-      for (const id of ['cv', 'vd', 'base']) {
-        const b = el('button', 'tinybtn', id);
-        b.addEventListener('click', () => { dirInput.value = chipBtns[id]._dir; dirInput.dispatchEvent(new Event('change')); });
-        chipBtns[id] = b;
-        chipRow.appendChild(b);
-      }
-      modelDet.appendChild(chipRow);
       const modelMeta = el('div', 'axis-note', '');
       modelDet.appendChild(modelMeta);
-      body.appendChild(modelDet);
+      api.dialogBody.appendChild(modelDet);
 
       function wireQuickChips(dir) {
         const root = pParent(dir);
@@ -328,7 +353,7 @@ import { Dialogs } from "/lib/dialogs.js";
 
       const basePanel = el('div', 'axis-note', 'identity comes from Voice design, below — enroll a clip or go random.');
       voiceDet.appendChild(basePanel);
-      body.appendChild(voiceDet);
+      api.dialogBody.appendChild(voiceDet);
       vdPanel.style.display = 'none';
       basePanel.style.display = 'none';
 
@@ -357,14 +382,14 @@ import { Dialogs } from "/lib/dialogs.js";
       designerDet.appendChild(cloneRow);
       const designerMeta = el('div', 'axis-note', '');
       designerDet.appendChild(designerMeta);
-      body.appendChild(designerDet);
+      api.dialogBody.appendChild(designerDet);
       designerDet.style.display = 'none';
 
       // ══ Emotion — learned x-vector directions (hidden without a basis) ═════
       const emoDet = el('details'); emoDet.appendChild(el('summary', null, 'Emotion ✦ learned'));
       const emoAxes = el('div'); emoDet.appendChild(emoAxes);
       const emoNeutralBtn = el('button', 'tinybtn', '○ none'); emoDet.appendChild(emoNeutralBtn);
-      body.appendChild(emoDet);
+      api.dialogBody.appendChild(emoDet);
       emoDet.style.display = 'none';
 
       // ══ Masc ↔ Fem (hidden without a basis) ═════════════════════════════
@@ -376,7 +401,7 @@ import { Dialogs } from "/lib/dialogs.js";
       mfRow.appendChild(mfFemLbl); mfRow.appendChild(mfSlider); mfRow.appendChild(mfMascLbl); mfRow.appendChild(mfVal);
       mfDet.appendChild(mfRow);
       const mfNeutralBtn = el('button', 'tinybtn', '○ neutral'); mfDet.appendChild(mfNeutralBtn);
-      body.appendChild(mfDet);
+      api.dialogBody.appendChild(mfDet);
       mfDet.style.display = 'none';
 
       // ══ Delivery — sampling dials ═══════════════════════════════════════
@@ -411,7 +436,7 @@ import { Dialogs } from "/lib/dialogs.js";
       deliveryDet.appendChild(seedRow);
       const deliveryMeta = el('div', 'axis-note', '');
       deliveryDet.appendChild(deliveryMeta);
-      body.appendChild(deliveryDet);
+      api.dialogBody.appendChild(deliveryDet);
 
       // ══ Steer — codebook-0 logit bias ═══════════════════════════════════
       const steerDet = el('details'); steerDet.appendChild(el('summary', null, 'Steer'));
@@ -425,36 +450,13 @@ import { Dialogs } from "/lib/dialogs.js";
       steerDet.appendChild(steerRow);
       const steerMeta = el('div', 'axis-note', '');
       steerDet.appendChild(steerMeta);
-      body.appendChild(steerDet);
+      api.dialogBody.appendChild(steerDet);
 
       // ══ Pipeline trace ══════════════════════════════════════════════════
       const traceDet = el('details'); traceDet.appendChild(el('summary', null, 'Pipeline trace'));
       const traceWrap = el('div'); traceDet.appendChild(traceWrap);
-      body.appendChild(traceDet);
+      api.dialogBody.appendChild(traceDet);
       const traceView = createTraceView(traceWrap);
-
-      // ══ Common: text + transport (always visible) ═══════════════════════
-      const textRow = el('div', 'form-row');
-      const textInput = el('input', 'form-input wide'); textInput.type = 'text'; textInput.value = p.text;
-      textInput.placeholder = 'Type something to speak…';
-      textRow.appendChild(textInput);
-      const speakBtn = el('button', 'tinybtn', '▶'); speakBtn.title = 'Render';
-      textRow.appendChild(speakBtn);
-      body.appendChild(textRow);
-
-      const outSec = el('div', 'audio-preview');
-      const outCv = document.createElement('canvas'); outCv.className = 'curve-canvas';
-      outSec.appendChild(outCv);
-      const outControls = el('div', 'audio-preview-controls');
-      const playBtn = el('button', 'tinybtn', '▶ Play'); playBtn.disabled = true;
-      const wavBtn = el('button', 'tinybtn', '⤓ wav'); wavBtn.disabled = true;
-      const autoplayLbl = el('label', null, '');
-      const autoplayChk = el('input', 'form-check'); autoplayChk.type = 'checkbox'; autoplayChk.checked = p.autoplay;
-      autoplayLbl.appendChild(autoplayChk); autoplayLbl.appendChild(document.createTextNode(' autoplay'));
-      const info = el('span', 'curve-stats', 'no audio yet — set a checkpoint dir');
-      outControls.appendChild(playBtn); outControls.appendChild(wavBtn); outControls.appendChild(autoplayLbl); outControls.appendChild(info);
-      outSec.appendChild(outControls);
-      body.appendChild(outSec);
 
       autoplayChk.addEventListener('change', () => { p.autoplay = autoplayChk.checked; });
       playBtn.addEventListener('click', () => ClipAudio.playClipId(node._clipId != null ? node._clipId : -1));

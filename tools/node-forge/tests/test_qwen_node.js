@@ -22,6 +22,16 @@ let card = document.querySelector('.node-card');
 assert(card, 'no .node-card rendered');
 console.log('card built, waiting for checkpoint load + first synth...');
 
+// Model/Voice/Voice design/Emotion/Masc-Fem/Delivery/Steer/Pipeline trace
+// live in the full-controls dialog now, not the mini card. The variant chip
+// row stays on the card (a compact, frequently-touched mode switch).
+const gearBtn = card.querySelector('.node-gear');
+assert(gearBtn, 'no full-controls gear button on the card');
+gearBtn.click();
+flush();
+let dialogBody = document.querySelector('.node-dialog-body');
+assert(dialogBody, 'full-controls dialog did not open');
+
 let _w = 0;
 while (!(node._out && node._out[0]) && !node.error && _w++ < 60000) advanceTime(16);
 assert(!node.error, 'node reported an error: ' + node.error);
@@ -44,7 +54,7 @@ assert(same, 'exec() sync path is not deterministic at greedy sampling');
 console.log('OK: exec() sync path matches the live-path result at greedy sampling');
 
 // voice-design slider drag flips cvSource to 'designed' and re-synthesizes
-const designerDetails = [...card.querySelectorAll('details')].find((d) => d.querySelector('summary').textContent.indexOf('Voice design') !== -1);
+const designerDetails = [...dialogBody.querySelectorAll('details')].find((d) => d.querySelector('summary').textContent.indexOf('Voice design') !== -1);
 assert(designerDetails, 'Voice design details missing');
 designerDetails.open = true;
 const slider = designerDetails.querySelector('.basis-sliders input[type=range]');
@@ -59,7 +69,7 @@ assert(node.params.cvSource === 'designed', 'slider drag did not switch cvSource
 console.log('OK: voice-design slider drag re-synthesized and switched to the designed-slot override');
 
 // delivery dial: crank temperature, confirm sampling actually applies
-const deliveryDetails = [...card.querySelectorAll('details')].find((d) => d.querySelector('summary').textContent.indexOf('Delivery') !== -1);
+const deliveryDetails = [...dialogBody.querySelectorAll('details')].find((d) => d.querySelector('summary').textContent.indexOf('Delivery') !== -1);
 deliveryDetails.open = true;
 const tempSlider = deliveryDetails.querySelectorAll('.dial input[type=range]')[0];
 assert(tempSlider, 'no delivery dials rendered');
@@ -76,7 +86,7 @@ assert(node.params.sampling.temperature === 0.8, 'temperature param not applied'
 console.log('OK: delivery dial re-synthesized at temperature=' + node.params.sampling.temperature);
 
 // steer: stage a code bias directly (deterministic — not a raster click) and confirm re-synth
-const steerDetails = [...card.querySelectorAll('details')].find((d) => d.querySelector('summary').textContent.indexOf('Steer') !== -1);
+const steerDetails = [...dialogBody.querySelectorAll('details')].find((d) => d.querySelector('summary').textContent.indexOf('Steer') !== -1);
 steerDetails.open = true;
 const steerIdInput = steerDetails.querySelector('input[type=number]');
 const steerAddBtn = [...steerDetails.querySelectorAll('button')].find((b) => b.textContent.indexOf('bias') !== -1);
@@ -93,11 +103,14 @@ assert(Object.keys(node.params.steer).length === 1, 'steer bias not recorded in 
 console.log('OK: steer bias re-synthesized, steer=' + JSON.stringify(node.params.steer));
 
 // pipeline trace: code raster + confidence + waveform cards landed
-const traceDetails = [...card.querySelectorAll('details')].find((d) => d.querySelector('summary').textContent.indexOf('Pipeline trace') !== -1);
+const traceDetails = [...dialogBody.querySelectorAll('details')].find((d) => d.querySelector('summary').textContent.indexOf('Pipeline trace') !== -1);
 traceDetails.open = true;
 const traceCards = traceDetails.querySelectorAll('.trace-card');
 assert(traceCards.length >= 2, 'expected at least codes+audio trace cards, got ' + traceCards.length);
 console.log('OK: ' + traceCards.length + ' trace cards rendered');
+
+document.querySelector('.node-dialog-close').click();
+assert(document.querySelector('.node-dialog-backdrop').style.display === 'none', 'dialog did not close');
 
 // collapse / delete
 const collapseBtn = card.querySelector('.node-collapse');
