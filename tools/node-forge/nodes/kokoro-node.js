@@ -340,6 +340,29 @@ import { Dialogs } from "/lib/dialogs.js";
       seedDefaults(node.params);
       const p = node.params;
 
+      // ══ Common: text + output (always visible, on the small card) ══════
+      const textRow = el('div', 'form-row');
+      const textInput = el('input', 'form-input wide'); textInput.type = 'text'; textInput.value = p.text;
+      textInput.placeholder = 'Type something to speak…';
+      textRow.appendChild(textInput);
+      const speakBtn = el('button', 'tinybtn', '▶'); speakBtn.title = 'Speak';
+      textRow.appendChild(speakBtn);
+      body.appendChild(textRow);
+
+      const outSec = el('div', 'audio-preview');
+      const outCv = document.createElement('canvas'); outCv.className = 'curve-canvas';
+      outSec.appendChild(outCv);
+      const outControls = el('div', 'audio-preview-controls');
+      const playBtn = el('button', 'tinybtn', '▶ Play'); playBtn.disabled = true;
+      const wavBtn = el('button', 'tinybtn', '⤓ wav'); wavBtn.disabled = true;
+      const autoplayLbl = el('label', null, '');
+      const autoplayChk = el('input', 'form-check'); autoplayChk.type = 'checkbox'; autoplayChk.checked = p.autoplay;
+      autoplayLbl.appendChild(autoplayChk); autoplayLbl.appendChild(document.createTextNode(' autoplay'));
+      const info = el('span', 'curve-stats', 'no audio yet — set a data root');
+      outControls.appendChild(playBtn); outControls.appendChild(wavBtn); outControls.appendChild(autoplayLbl); outControls.appendChild(info);
+      outSec.appendChild(outControls);
+      body.appendChild(outSec);
+
       // ══ Model & data source ═══════════════════════════════════════════
       const modelDet = el('details'); modelDet.appendChild(el('summary', null, 'Model & data source'));
       const rootRow = el('div', 'form-row');
@@ -355,7 +378,7 @@ import { Dialogs } from "/lib/dialogs.js";
       modelDet.appendChild(rootRow);
       const modelMeta = el('div', 'axis-note', '');
       modelDet.appendChild(modelMeta);
-      body.appendChild(modelDet);
+      api.dialogBody.appendChild(modelDet);
 
       // ══ Voice design ══════════════════════════════════════════════════
       const voiceDet = el('details'); voiceDet.appendChild(el('summary', null, 'Voice design'));
@@ -389,7 +412,7 @@ import { Dialogs } from "/lib/dialogs.js";
       const voiceMeta = el('span', 'curve-stats', '');
       voiceToolsRow.appendChild(voiceMeta);
       voiceDet.appendChild(voiceToolsRow);
-      body.appendChild(voiceDet);
+      api.dialogBody.appendChild(voiceDet);
 
       // ══ Emotion — prosody (VAD, Tier 0) ═══════════════════════════════
       const emoDet = el('details'); emoDet.appendChild(el('summary', null, 'Emotion — prosody (VAD)'));
@@ -411,13 +434,13 @@ import { Dialogs } from "/lib/dialogs.js";
         emoDet.appendChild(cell);
       }
       const emoNeutralBtn = el('button', 'tinybtn', '○ neutral'); emoDet.appendChild(emoNeutralBtn);
-      body.appendChild(emoDet);
+      api.dialogBody.appendChild(emoDet);
 
       // ══ Emotion — learned (timbre, Tier 1) — hidden without a basis ═══
       const timbreDet = el('details'); timbreDet.appendChild(el('summary', null, 'Emotion ✦ learned'));
       const timbreAxes = el('div'); timbreDet.appendChild(timbreAxes);
       const timbreNeutralBtn = el('button', 'tinybtn', '○ neutral'); timbreDet.appendChild(timbreNeutralBtn);
-      body.appendChild(timbreDet);
+      api.dialogBody.appendChild(timbreDet);
 
       // ══ Masc ↔ Fem — hidden without a basis ════════════════════════════
       const mfDet = el('details'); mfDet.appendChild(el('summary', null, 'Masc ✦ Fem'));
@@ -428,42 +451,19 @@ import { Dialogs } from "/lib/dialogs.js";
       mfRow.appendChild(mfFemLbl); mfRow.appendChild(mfSlider); mfRow.appendChild(mfMascLbl); mfRow.appendChild(mfVal);
       mfDet.appendChild(mfRow);
       const mfNeutralBtn = el('button', 'tinybtn', '○ neutral'); mfDet.appendChild(mfNeutralBtn);
-      body.appendChild(mfDet);
+      api.dialogBody.appendChild(mfDet);
 
       // ══ Prosody & alignment ═════════════════════════════════════════════
       const prosodyDet = el('details'); prosodyDet.appendChild(el('summary', null, 'Prosody & alignment'));
       const pinLabel = el('div', 'axis-note'); pinLabel.style.display = 'none'; prosodyDet.appendChild(pinLabel);
       const curveWrap = el('div'); prosodyDet.appendChild(curveWrap);
       const alignWrap = el('div'); prosodyDet.appendChild(alignWrap);
-      body.appendChild(prosodyDet);
+      api.dialogBody.appendChild(prosodyDet);
 
       // ══ Pipeline trace ══════════════════════════════════════════════════
       const traceDet = el('details'); traceDet.appendChild(el('summary', null, 'Pipeline trace'));
       const traceWrap = el('div'); traceDet.appendChild(traceWrap);
-      body.appendChild(traceDet);
-
-      // ══ Common: text + output (always visible) ═════════════════════════
-      const textRow = el('div', 'form-row');
-      const textInput = el('input', 'form-input wide'); textInput.type = 'text'; textInput.value = p.text;
-      textInput.placeholder = 'Type something to speak…';
-      textRow.appendChild(textInput);
-      const speakBtn = el('button', 'tinybtn', '▶'); speakBtn.title = 'Speak';
-      textRow.appendChild(speakBtn);
-      body.appendChild(textRow);
-
-      const outSec = el('div', 'audio-preview');
-      const outCv = document.createElement('canvas'); outCv.className = 'curve-canvas';
-      outSec.appendChild(outCv);
-      const outControls = el('div', 'audio-preview-controls');
-      const playBtn = el('button', 'tinybtn', '▶ Play'); playBtn.disabled = true;
-      const wavBtn = el('button', 'tinybtn', '⤓ wav'); wavBtn.disabled = true;
-      const autoplayLbl = el('label', null, '');
-      const autoplayChk = el('input', 'form-check'); autoplayChk.type = 'checkbox'; autoplayChk.checked = p.autoplay;
-      autoplayLbl.appendChild(autoplayChk); autoplayLbl.appendChild(document.createTextNode(' autoplay'));
-      const info = el('span', 'curve-stats', 'no audio yet — set a data root');
-      outControls.appendChild(playBtn); outControls.appendChild(wavBtn); outControls.appendChild(autoplayLbl); outControls.appendChild(info);
-      outSec.appendChild(outControls);
-      body.appendChild(outSec);
+      api.dialogBody.appendChild(traceDet);
 
       autoplayChk.addEventListener('change', () => { p.autoplay = autoplayChk.checked; });
       playBtn.addEventListener('click', () => ClipAudio.playClipId(node._clipId != null ? node._clipId : -1));

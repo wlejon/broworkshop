@@ -19,6 +19,15 @@ let card = document.querySelector('.node-card');
 assert(card, 'no .node-card rendered');
 console.log('card built, waiting for load+first synth...');
 
+// Model/voice/emotion/prosody/trace controls live in the full-controls
+// dialog now, not the mini card.
+const gearBtn = card.querySelector('.node-gear');
+assert(gearBtn, 'no full-controls gear button on the card');
+gearBtn.click();
+flush();
+let dialogBody = document.querySelector('.node-dialog-body');
+assert(dialogBody, 'full-controls dialog did not open');
+
 // the model load + first async synth/trace pass happens off-thread; poll
 // virtual time in small 16ms ticks (matches kokoro-lab's own async tests —
 // each tick gives the background thread a real scheduling opportunity, a
@@ -46,7 +55,7 @@ assert(same, 'exec() sync path is not deterministic against the live-path result
 console.log('OK: exec() sync path matches the live-path result (Run/save-load determinism)');
 
 // drag a voice slider (via its DOM input) and confirm a re-synth eventually lands
-const voiceDetails = [...card.querySelectorAll('details')].find((d) => d.querySelector('summary').textContent.indexOf('Voice design') !== -1);
+const voiceDetails = [...dialogBody.querySelectorAll('details')].find((d) => d.querySelector('summary').textContent.indexOf('Voice design') !== -1);
 assert(voiceDetails, 'Voice design details missing');
 voiceDetails.open = true;
 const firstSlider = voiceDetails.querySelector('.pc input[type=range]');
@@ -61,7 +70,7 @@ console.log('OK: voice slider drag re-synthesized');
 
 // duration-cell edit (Prosody & alignment) — pins a prosody edit that
 // should ride across the change (capturePin/reapplyPin).
-const prosodyDetails = [...card.querySelectorAll('details')].find((d) => d.querySelector('summary').textContent.indexOf('Prosody') !== -1);
+const prosodyDetails = [...dialogBody.querySelectorAll('details')].find((d) => d.querySelector('summary').textContent.indexOf('Prosody') !== -1);
 prosodyDetails.open = true;
 const cell = prosodyDetails.querySelector('.acell');
 assert(cell, 'no duration cells rendered');
@@ -74,6 +83,9 @@ while ((!node._out || node._out[0].samples === beforeDurSamples) && _w++ < 60000
 assert(node._out && node._out[0].samples !== beforeDurSamples, 'duration-cell edit did not trigger a re-decode');
 assert(node._pinnedEdit, 'duration-cell edit should capture a pinned prosody edit');
 console.log('OK: duration-cell edit re-decoded, pinned=' + !!node._pinnedEdit);
+
+document.querySelector('.node-dialog-close').click();
+assert(document.querySelector('.node-dialog-backdrop').style.display === 'none', 'dialog did not close');
 
 // collapse / delete
 const collapseBtn = card.querySelector('.node-collapse');
