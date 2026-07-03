@@ -114,6 +114,31 @@ assert(srcNode._ran && srcNode._out && srcNode._out[0].samples.length === 3, 'te
 assert(!wrongNode._ran, 'test-wrong has an unconnected required input — it should never become ready to run');
 console.log('OK: runner.run() executes the wired pair and correctly stalls a node with an unconnected required input');
 
+// ── widget-owned params must survive a real JSON round trip (the footgun a
+// node's own mount() must avoid: a raw typed array in node.params serializes
+// via JSON.stringify as a numeric-keyed plain object and silently corrupts
+// on reload — every widget in nodes/ stores plain number[]/number[][], e.g.
+// rave-node.js's params.curves, kokoro-node.js's params.coords/emo/timbre,
+// qwen-node.js's params.coords/emoAlpha/steer). ─────────────────────────────
+{
+  const t = app.graph.addNode('test-src');
+  t.params.__curve = [0.1, 0.2, 0.3, -0.4];
+  const snap = app.graph.serialize();
+  const wire = JSON.parse(JSON.stringify(snap));   // exactly what Project.saveTo/openPath do
+  const restored = wire.nodes.find((x) => x.id === t.id);
+  assert(Array.isArray(restored.params.__curve) && restored.params.__curve.length === 4 && restored.params.__curve[3] === -0.4,
+    'plain-array param must survive a JSON round trip: ' + JSON.stringify(restored.params.__curve));
+
+  t.params.__badCurve = new Float32Array([0.1, 0.2, 0.3]);
+  const snap2 = app.graph.serialize();
+  const wire2 = JSON.parse(JSON.stringify(snap2));
+  const restored2 = wire2.nodes.find((x) => x.id === t.id);
+  assert(!Array.isArray(restored2.params.__badCurve),
+    'documenting the footgun: a typed-array param round-trips as a plain {0:..,1:..} object, ' +
+    'NOT an array — this is why widget code must store plain number[] in node.params');
+  console.log('OK: plain-array params survive JSON round trip; typed-array params demonstrably do not (by design constraint)');
+}
+
 // ── delete removes both the node and its card ───────────────────────────────
 app.editor.draw(0);
 const delTargets = [...document.querySelectorAll('.node-card')];
