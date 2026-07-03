@@ -1,12 +1,13 @@
 // Headless test — field-level widget registry (lab/widgets.js).
 //
-// Milestone 1a scope: only the four ported field widgets (int/float/bool/
-// select) exist yet — this proves the registry mechanism against them with
-// no behavior change from tensor-lab's old inline buildForm() switch. The
-// panel-widget half of this file (multi-curve-painter, basis-slider-map)
-// gets exercised once those widgets land (see plan Milestone 1a step 5 /
-// 1b) — extend this file at that point rather than adding a new one.
+// Field-level section proves the registry mechanism against the four ported
+// widgets (int/float/bool/select) with no behavior change from tensor-lab's
+// old inline buildForm() switch. The panel-widget section below exercises
+// the multi-curve-painter standalone, against a synthetic op — no real
+// audio model involved (see plan Milestone 1a step 5). Extend this file
+// when basis-slider-map lands rather than adding a new one.
 import { Widgets } from "/app/lab/widgets.js";
+import "/app/widgets/curve-painter.js";   // registers 'multi-curve-painter'
 
 flush();
 advanceTime(50);
@@ -71,6 +72,95 @@ function fakeNode(params) { return { params: params }; }
   Widgets.getField('some-future-type').mount(container, node, field, { commit: () => {} });
   assert(container.querySelector('input[type="number"]') !== null,
     'unregistered field type falls back to the default numeric widget, matching the old switch\'s implicit fallback');
+}
+
+// --- multi-curve-painter: panel widget, against a synthetic 2-curve op -----
+{
+  const widget = Widgets.getPanel('multi-curve-painter');
+  assert(widget !== null, 'multi-curve-painter registers as a panel widget');
+
+  const original0 = [0, 1, 2, 3, 4, 5, 6, 7];
+  const node = fakeNode({
+    curveA: original0.slice(),
+    curveB: [10, 10, 10, 10],
+  });
+  const cfg = {
+    count: () => 2,
+    label: (n, i) => 'curve ' + i,
+    get: (n, i) => i === 0 ? n.params.curveA : n.params.curveB,
+    original: (n, i) => i === 0 ? original0 : null,   // curveB has no ghost baseline
+    clamp: (n, i, v) => i === 1 ? Math.max(0, v) : v, // curveB can't go negative
+  };
+  let edits = 0, commits = 0;
+  const ctx = { onEdit: () => edits++, onCommit: () => commits++ };
+  const root = widget.mount(node, {}, cfg, ctx);
+  document.body.appendChild(root);
+
+  assert(root.querySelectorAll('.curve-cell').length === 2, 'mounts one cell per curve');
+  assert(root.querySelectorAll('.curve-canvas').length === 2, 'one canvas per curve');
+  const buttonsPerCell = root.querySelectorAll('.curve-cell')[0].querySelectorAll('.tinybtn').length;
+  assert(buttonsPerCell === 6, 'each cell gets the 6 op buttons (reset/smooth/flatten/invert/nudge x2)');
+
+  // flatten curveA to its mean, in place
+  const cellA = root.querySelectorAll('.curve-cell')[0];
+  const flattenBtn = Array.prototype.filter.call(cellA.querySelectorAll('.tinybtn'), (b) => b.title === 'flatten to mean')[0];
+  assert(flattenBtn !== undefined, 'flatten button is findable by title');
+  flattenBtn.click();
+  const meanA = original0.reduce((a, b) => a + b, 0) / original0.length;
+  assert(node.params.curveA.every((v) => Math.abs(v - meanA) < 1e-9),
+    'flatten mutates node.params.curveA in place to its mean: ' + JSON.stringify(node.params.curveA));
+  assert(edits === 1, 'flatten fires exactly one ctx.onEdit() tick, not onCommit()');
+  assert(commits === 0, 'panel widget never calls ctx.onCommit() — only onEdit(), by design (see file header)');
+
+  // reset curveA back to its original ghost baseline
+  const resetBtn = Array.prototype.filter.call(cellA.querySelectorAll('.tinybtn'), (b) => b.title === 'reset to original')[0];
+  resetBtn.click();
+  assert(JSON.stringify(node.params.curveA) === JSON.stringify(original0),
+    'reset restores node.params.curveA from the original(node,i) ghost baseline');
+  assert(edits === 2, 'reset also ticks onEdit()');
+
+  // nudge curveB down past 0 — per-curve clamp must hold it at 0, not go negative
+  const cellB = root.querySelectorAll('.curve-cell')[1];
+  const nudgeDownBtn = Array.prototype.filter.call(cellB.querySelectorAll('.tinybtn'), (b) => b.title.indexOf('nudge down') === 0)[0];
+  nudgeDownBtn.click();  // 10 -> 9.5
+  nudgeDownBtn.click();  // 9.5 -> 9
+  assert(node.params.curveB.every((v) => v === 9), 'unclamped nudge-down applies normally while positive');
+  for (let k = 0; k < 30; k++) nudgeDownBtn.click();   // drive well past zero
+  assert(node.params.curveB.every((v) => v === 0),
+    'per-curve clamp(node,i,v) holds curveB at its floor instead of going negative: ' + JSON.stringify(node.params.curveB));
+
+  // a curve with no original(node,i) baseline must not throw when reset is clicked
+  const resetBBtn = Array.prototype.filter.call(cellB.querySelectorAll('.tinybtn'), (b) => b.title === 'reset to original')[0];
+  resetBBtn.click();   // original(node,1) returns null — must no-op, not throw
+  console.log('TEST: reset-with-no-baseline did not throw; curveB still', JSON.stringify(node.params.curveB));
+
+  document.body.removeChild(root);
+}
+
+// --- multi-curve-painter: real mouse-driven paint drag ----------------------
+// (the button-op tests above exercise the same mutate+redraw+onEdit tail via
+// applyOp(); this closes the loop on the primary interaction, freehand
+// painting via paintAt(), which needs a real layout pass for
+// getBoundingClientRect() to return non-zero canvas geometry.)
+{
+  const node = fakeNode({ c: [0, 0, 0, 0, 0, 0, 0, 0] });
+  const cfg = { count: () => 1, label: () => 'c', get: (n, i) => n.params.c, range: () => [-2, 2] };
+  let edits = 0;
+  const ctx = { onEdit: () => edits++, onCommit: () => {} };
+  const root = Widgets.getPanel('multi-curve-painter').mount(node, {}, cfg, ctx);
+  document.body.appendChild(root);
+  flush(); advanceTime(50); flush();   // force a layout so the canvas has real geometry
+
+  const cv = root.querySelector('.curve-canvas');
+  const rect = cv.getBoundingClientRect();
+  assert(rect.width > 0 && rect.height > 0, 'canvas has real layout geometry after flush()');
+  cv.dispatchEvent(new MouseEvent('mousedown', { clientX: rect.left + 10, clientY: rect.top + 10 }));
+  window.dispatchEvent(new MouseEvent('mousemove', { clientX: rect.left + 50, clientY: rect.top + 80 }));
+  window.dispatchEvent(new MouseEvent('mouseup', {}));
+
+  assert(edits > 0, 'a real mouse drag fires ctx.onEdit() at least once per tick');
+  assert(node.params.c.some((v) => v !== 0), 'the drag actually mutated node.params.c in place');
+  document.body.removeChild(root);
 }
 
 flush();
