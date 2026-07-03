@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Node Forge</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <header id="toolbar">
+      <span id="brand">⬡ Node&nbsp;Forge</span>
+      <span class="tagline">generative + 3D authoring, one graph</span>
+      <span class="grow"></span>
+      <select id="preset" title="Load a preset graph">
+        <option value="">Load preset…</option>
+      </select>
+      <button id="btn-new" title="New graph">New</button>
+      <button id="btn-open" title="Open a saved graph">Open…</button>
+      <button id="btn-save" title="Save">Save</button>
+      <button id="btn-save-as" title="Save As…">Save As…</button>
+      <button id="btn-open-t5" title="Open a T5 text-encoder safetensors checkpoint">⬇ Open T5…</button>
+      <button id="btn-run" title="Run the whole forward pass">▶ Run</button>
+      <button id="btn-step" title="Execute the next op">⏭ Step</button>
+      <button id="btn-reset" title="Clear computed values">↺ Reset</button>
+      <button id="btn-clear" title="Remove every node">✕ Clear</button>
+      <span id="backend" class="badge">…</span>
+      <span id="file-status" class="badge"></span>
+    </header>
+    <main>
+      <aside id="palette"></aside>
+      <section id="stage">
+        <canvas id="graph"></canvas>
+        <div id="toast"></div>
+      </section>
+      <aside id="inspector"></aside>
+    </main>
+    <footer id="status">
+      <span id="stat-nodes">0 nodes</span>
+      <span class="dot">·</span>
+      <span id="stat-params">0 params</span>
+      <span class="dot">·</span>
+      <span id="stat-flops">0 FLOPs</span>
+      <span class="grow"></span>
+      <span id="stat-time">not run</span>
+    </footer>
+  </div>
+
+  <script type="module" src="/app/app.js"></script>
+</body>
+</html>
