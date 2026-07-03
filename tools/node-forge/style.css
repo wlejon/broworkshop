@@ -258,6 +258,21 @@ main {
   border: 1px solid #1d2433; border-radius: 4px; cursor: crosshair;
 }
 
+/* basis-slider-map panel widget */
+.basis-panel { padding: 12px 16px; border-bottom: 1px solid #1d2433; }
+.basis-map-wrap { margin-bottom: 10px; }
+.basis-map {
+  display: block; width: 100%; max-width: 280px; margin-bottom: 6px;
+  background: #0a0d12; border: 1px solid #1d2433; border-radius: 8px; cursor: crosshair;
+}
+.basis-preset { width: 100%; max-width: 280px; }
+.basis-sliders { display: flex; flex-direction: column; gap: 4px; }
+.pc { padding: 3px 0; }
+.pc-head { display: flex; align-items: baseline; gap: 6px; margin-bottom: 2px; }
+.pc-name { color: #8ad9ff; font-size: 10px; font-weight: 700; flex: 1; }
+.pc-val { color: #5b6577; font-size: 9px; font-variant-numeric: tabular-nums; }
+.pc input[type=range] { width: 100%; }
+
 /* key/value blocks */
 .kv-row {
   display: flex;

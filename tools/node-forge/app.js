@@ -15,6 +15,7 @@ import { T5 } from "/app/lab/t5import.js";
 import { Ops, fmtNum, fmtMs } from "/app/lab/ops-registry.js";
 import "/app/ops/tensor-ops.js";               // registers the tensor op pack
 import "/app/widgets/curve-painter.js";        // registers the 'multi-curve-painter' panel widget
+import "/app/widgets/basis-slider-map.js";     // registers the 'basis-slider-map' panel widget
 import "/lib/project.js";                       // attaches global Project
 import { installSystemMenu } from "/lib/system-menu.js";
 

@@ -2,12 +2,12 @@
 //
 // Field-level section proves the registry mechanism against the four ported
 // widgets (int/float/bool/select) with no behavior change from tensor-lab's
-// old inline buildForm() switch. The panel-widget section below exercises
-// the multi-curve-painter standalone, against a synthetic op — no real
-// audio model involved (see plan Milestone 1a step 5). Extend this file
-// when basis-slider-map lands rather than adding a new one.
+// old inline buildForm() switch. The panel-widget sections below exercise
+// multi-curve-painter and basis-slider-map standalone, against synthetic
+// ops — no real audio model involved (see plan Milestone 1a step 5).
 import { Widgets } from "/app/lab/widgets.js";
-import "/app/widgets/curve-painter.js";   // registers 'multi-curve-painter'
+import "/app/widgets/curve-painter.js";      // registers 'multi-curve-painter'
+import "/app/widgets/basis-slider-map.js";   // registers 'basis-slider-map'
 
 flush();
 advanceTime(50);
@@ -160,6 +160,70 @@ function fakeNode(params) { return { params: params }; }
 
   assert(edits > 0, 'a real mouse drag fires ctx.onEdit() at least once per tick');
   assert(node.params.c.some((v) => v !== 0), 'the drag actually mutated node.params.c in place');
+  document.body.removeChild(root);
+}
+
+// --- basis-slider-map: panel widget, against a synthetic 3-axis basis -----
+{
+  const widget = Widgets.getPanel('basis-slider-map');
+  assert(widget !== null, 'basis-slider-map registers as a panel widget');
+
+  const node = fakeNode({ coords: [0, 0, 0] });
+  const cfg = {
+    dim: () => 3,
+    axisName: (n, i) => 'axis ' + i,
+    axisRange: () => [-3, 3],
+    coords: (n) => n.params.coords,
+    presets: () => [{ name: 'A', coords: [1, 2, 0] }, { name: 'B', coords: [-1, -2, 0.5] }],
+    mapAxes: () => [0, 1],
+  };
+  let edits = 0, commits = 0;
+  const ctx = { onEdit: () => edits++, onCommit: () => commits++ };
+  const root = widget.mount(node, {}, cfg, ctx);
+  document.body.appendChild(root);
+  flush(); advanceTime(50); flush();   // force a layout for the map canvas geometry
+
+  assert(root.querySelectorAll('.basis-map').length === 1, 'mounts exactly one map canvas');
+  assert(root.querySelectorAll('.pc').length === 3, 'mounts one slider row per axis');
+  assert(root.querySelectorAll('.pc input[type="range"]').length === 3, 'each row has a range input');
+  const presetSel = root.querySelector('select.basis-preset');
+  assert(presetSel !== null, 'preset picker mounts when presets() is non-empty');
+  assert(root.querySelectorAll('option').length === 3, 'blank option + 2 presets');
+
+  // slider drag: dragging axis 2 (not on the map) only touches coords[2]
+  const sliders = root.querySelectorAll('.pc input[type="range"]');
+  sliders[2].value = '1.5';
+  sliders[2].dispatchEvent(new Event('input'));
+  assert(node.params.coords[2] === 1.5, 'slider 2 updates coords[2] directly: ' + JSON.stringify(node.params.coords));
+  assert(node.params.coords[0] === 0 && node.params.coords[1] === 0, 'slider 2 does not touch coords[0]/[1]');
+  assert(edits === 1, 'slider drag fires ctx.onEdit()');
+
+  // preset pick: sets ALL k coords from the preset, not just the mapped two
+  presetSel.value = 'A';
+  presetSel.dispatchEvent(new Event('change'));
+  assert(JSON.stringify(node.params.coords) === JSON.stringify([1, 2, 0]),
+    'picking preset A sets every coord from the preset: ' + JSON.stringify(node.params.coords));
+  assert(edits === 2, 'preset pick fires ctx.onEdit()');
+  // the slider readouts must resync to the picked preset, not just node.params
+  assert(sliders[0].value === '1' && sliders[1].value === '2' && sliders[2].value === '0',
+    'slider positions resync after a preset pick');
+
+  // map drag: only touches the two mapped axes (0 and 1), never axis 2
+  const cv = root.querySelector('.basis-map');
+  const rect = cv.getBoundingClientRect();
+  assert(rect.width > 0 && rect.height > 0, 'map canvas has real layout geometry after flush()');
+  cv.dispatchEvent(new MouseEvent('mousedown', { clientX: rect.left + 10, clientY: rect.top + 10 }));
+  window.dispatchEvent(new MouseEvent('mouseup', {}));
+  assert(node.params.coords[2] === 0, 'map drag never touches the unmapped axis (coords[2] stays put after preset A zeroed it)');
+  assert(edits === 3, 'map drag fires ctx.onEdit()');
+  // dragging toward the top-left corner should move axis 0 down and axis 1 up
+  // from wherever preset A left them (1, 2) — exact pixel math isn't asserted,
+  // just that the drag actually repositioned the crosshair.
+  assert(node.params.coords[0] !== 1 || node.params.coords[1] !== 2,
+    'map drag repositions the crosshair away from the preset it started at');
+
+  assert(commits === 0, 'basis-slider-map never calls ctx.onCommit() — only onEdit(), matching multi-curve-painter');
+
   document.body.removeChild(root);
 }
 
