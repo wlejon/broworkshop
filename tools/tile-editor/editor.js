@@ -445,15 +445,12 @@ export function createEditor(scene, initialConfig) {
         clearPathMarkers();
         const nav = world.toNavGrid({ blockMask: BLOCK_BIT, padding: 0.1 });
         if (!nav) return null;
-        const cs = CELL_SIZE;
-        const wx0 = (x0 + 0.5) * cs, wz0 = (y0 + 0.5) * cs;
-        const wx1 = (x1 + 0.5) * cs, wz1 = (y1 + 0.5) * cs;
-        const path = nav.findPath(wx0, wz0, wx1, wz1);
+        const start = world.cellCenterWorldXZ(x0, y0);
+        const end = world.cellCenterWorldXZ(x1, y1);
+        if (!start || !end) return null;
+        const path = nav.findPath(start.x, start.z, end.x, end.z);
         if (!Array.isArray(path)) return null;
         for (const p of path) {
-            let gx = Math.floor(p.x / cs), gy = Math.floor(p.z / cs);
-            gx = Math.max(0, Math.min(MAP_W - 1, gx));
-            gy = Math.max(0, Math.min(MAP_H - 1, gy));
             let py = world.sampleHeight(p.x, p.z);
             if (py === null) py = 0;
             pathMarkers.push(scene.createMesh({
@@ -485,7 +482,10 @@ export function createEditor(scene, initialConfig) {
     function reconfigure(newConfig) {
         cfg = Object.assign({}, cfg, newConfig);
         world.configure(tileWorldOptions());
-        world.clearObjects(-1);
+        // configure() rebuilds the grid from scratch and drops every
+        // registered object kind (see TileWorld::clear()), so kinds must be
+        // re-registered before anything can be placed again.
+        registerObjectKinds();
         world.rebuildObjects();
         clearPathMarkers();
         history.clear();
