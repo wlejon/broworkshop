@@ -269,6 +269,24 @@ main {
   cursor: pointer;
 }
 .tinybtn:hover { background: #1b2736; }
+.tinybtn.active { background: #1f3a52; color: #8ad9ff; border-color: #3f6d94; }
+
+/* ---- small chip tags (phoneme ids, voice-description tags) ------------- */
+.chips { display: flex; flex-wrap: wrap; gap: 3px; }
+.chip {
+  display: inline-block; padding: 1px 6px; font-size: 10px;
+  background: #131a24; color: #8ab4d8; border: 1px solid #262d3e; border-radius: 3px;
+}
+
+/* ---- delivery dials + steer list (Qwen) -------------------------------- */
+.dial { padding: 3px 0; }
+.dial input[type=range] { width: 100%; }
+.steer-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }
+.steer-entry { display: flex; align-items: center; gap: 8px; }
+.steer-id { font-size: 10.5px; color: #cfe6ff; min-width: 56px; }
+.steer-entry input[type=range] { flex: 1; }
+.steer-val { font-size: 10px; color: #5b6577; min-width: 30px; text-align: right; }
+.steer-entry .tinybtn { color: #ff8e8e; }
 
 /* ---- multi-curve-painter panel widget ---------------------------------- */
 .curve-panel { padding-top: 4px; }

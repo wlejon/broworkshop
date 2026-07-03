@@ -14,6 +14,7 @@ import { Presets } from "/app/lab/presets.js";
 import { Nodes } from "/app/lab/node-registry.js";
 import "/app/nodes/rave-node.js";               // registers the RAVE node type
 import "/app/nodes/kokoro-node.js";              // registers the Kokoro node type
+import "/app/nodes/qwen-node.js";                // registers the Qwen-TTS node type
 import "/lib/project.js";                       // attaches global Project
 import { installSystemMenu } from "/lib/system-menu.js";
 
