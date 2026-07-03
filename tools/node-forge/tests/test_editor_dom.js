@@ -139,6 +139,34 @@ console.log('OK: runner.run() executes the wired pair and correctly stalls a nod
   console.log('OK: plain-array params survive JSON round trip; typed-array params demonstrably do not (by design constraint)');
 }
 
+// ── dragging (pan/card/wire) suppresses text selection page-wide ───────────
+// Fresh DOM lookups throughout: deserialize() above rebuilt every card from
+// scratch, so the src/sink/header/outDot bindings from earlier in this file
+// point at detached elements no longer tracked by editor.js's card map.
+{
+  assert(!document.body.classList.contains('nf-dragging'), 'should not be dragging yet');
+  const liveHeader = findCardByTitle('Test Source').querySelector('.node-header');
+  const hr2 = liveHeader.getBoundingClientRect();
+  liveHeader.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: hr2.left + 10, clientY: hr2.top + 8 }));
+  assert(document.body.classList.contains('nf-dragging'), 'nf-dragging should be set during a card drag');
+  window.dispatchEvent(new MouseEvent('mouseup', {}));
+  assert(!document.body.classList.contains('nf-dragging'), 'nf-dragging should clear on mouseup');
+
+  const stage = document.getElementById('stage');
+  stage.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: 20, clientY: 20 }));
+  assert(document.body.classList.contains('nf-dragging'), 'nf-dragging should be set during a stage pan');
+  window.dispatchEvent(new MouseEvent('mouseup', {}));
+  assert(!document.body.classList.contains('nf-dragging'), 'nf-dragging should clear after a pan');
+
+  const liveOutDot = findCardByTitle('Test Source').querySelector('.port-dot[data-dir=out]');
+  const outR2 = liveOutDot.getBoundingClientRect();
+  liveOutDot.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: outR2.left + 5, clientY: outR2.top + 5 }));
+  assert(document.body.classList.contains('nf-dragging'), 'nf-dragging should be set during a wire drag');
+  window.dispatchEvent(new MouseEvent('mouseup', {}));
+  assert(!document.body.classList.contains('nf-dragging'), 'nf-dragging should clear after a wire drag');
+  console.log('OK: pan/card/wire drags all toggle body.nf-dragging (suppresses text selection)');
+}
+
 // ── delete removes both the node and its card ───────────────────────────────
 app.editor.draw(0);
 const delTargets = [...document.querySelectorAll('.node-card')];

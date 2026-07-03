@@ -19,6 +19,13 @@ html, body {
 
 .grow { flex: 1; }
 
+/* while panning/dragging a card/wiring a port, suppress text selection
+   anywhere on the page — a fast mouse move mid-drag would otherwise select
+   surrounding card text (labels, headers) along the way. */
+body.nf-dragging, body.nf-dragging * {
+  user-select: none !important;
+}
+
 /* ---- toolbar ---------------------------------------------------------- */
 #toolbar {
   height: 50px;

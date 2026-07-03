@@ -67,7 +67,10 @@ tempSlider.value = '0.8';
 tempSlider.dispatchEvent(new Event('input'));
 const beforeDeliverySamples = node._out[0].samples;
 _w = 0;
-while ((!node._out || node._out[0].samples === beforeDeliverySamples) && _w++ < 60000) advanceTime(16);
+// Non-greedy sampling (temperature>0) genuinely takes longer per-token than
+// greedy argmax — measured ~2x wall time in practice — so this needs a
+// bigger wait budget than the greedy-path waits above.
+while ((!node._out || node._out[0].samples === beforeDeliverySamples) && _w++ < 150000) advanceTime(16);
 assert(node._out && node._out[0].samples !== beforeDeliverySamples, 'temperature change did not trigger a re-synth');
 assert(node.params.sampling.temperature === 0.8, 'temperature param not applied');
 console.log('OK: delivery dial re-synthesized at temperature=' + node.params.sampling.temperature);
@@ -82,7 +85,9 @@ steerIdInput.value = '5';
 const beforeSteerSamples = node._out[0].samples;
 steerAddBtn.click();
 _w = 0;
-while ((!node._out || node._out[0].samples === beforeSteerSamples) && _w++ < 60000) advanceTime(16);
+// still at temperature=0.8 from the delivery-dial step above — same longer
+// non-greedy budget applies here.
+while ((!node._out || node._out[0].samples === beforeSteerSamples) && _w++ < 150000) advanceTime(16);
 assert(node._out && node._out[0].samples !== beforeSteerSamples, 'steer bias did not trigger a re-synth');
 assert(Object.keys(node.params.steer).length === 1, 'steer bias not recorded in params');
 console.log('OK: steer bias re-synthesized, steer=' + JSON.stringify(node.params.steer));

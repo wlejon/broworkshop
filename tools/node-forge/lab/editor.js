@@ -138,6 +138,7 @@ import { Nodes } from "/app/lab/node-registry.js";
         setFocus(node);
         const w = toWorld(e.clientX - stage.getBoundingClientRect().left, e.clientY - stage.getBoundingClientRect().top);
         cardDrag = { node: node, ox: w.x - node.x, oy: w.y - node.y };
+        beginDragSelect();
       });
       body.addEventListener('mousedown', () => setFocus(node));
 
@@ -149,6 +150,7 @@ import { Nodes } from "/app/lab/node-registry.js";
           if (existing) {
             graph.removeEdge(existing);
             wireDrag = { fromNode: existing.from.node, fromPort: existing.from.port, screen: stagePos(e), hoverDot: null };
+            beginDragSelect();
             change();
           }
         });
@@ -157,6 +159,7 @@ import { Nodes } from "/app/lab/node-registry.js";
         dot.addEventListener('mousedown', (e) => {
           e.preventDefault(); e.stopPropagation();
           wireDrag = { fromNode: node, fromPort: i, screen: stagePos(e), hoverDot: null };
+          beginDragSelect();
         });
       });
 
@@ -189,12 +192,19 @@ import { Nodes } from "/app/lab/node-registry.js";
       }
     }
 
+    // Suppress text selection for the duration of any drag (pan/card/wire) —
+    // otherwise a fast mouse move during a drag also selects surrounding
+    // card text, same as any canvas-drag UI needs to guard against.
+    function beginDragSelect() { document.body.classList.add('nf-dragging'); }
+    function endDragSelect() { document.body.classList.remove('nf-dragging'); }
+
     // --- stage-level mouse handling -----------------------------------------
     stage.addEventListener('mousedown', (e) => {
       if (e.target !== stage && e.target !== gridCanvas && e.target !== wireCanvas) return;
       setFocus(null);
       const p = stagePos(e);
       panDrag = { sx: p.x, sy: p.y, vx: view.x, vy: view.y };
+      beginDragSelect();
     });
 
     window.addEventListener('mousemove', (e) => {
@@ -243,6 +253,7 @@ import { Nodes } from "/app/lab/node-registry.js";
       }
       panDrag = null;
       cardDrag = null;
+      endDragSelect();
     });
 
     stage.addEventListener('wheel', (e) => {
