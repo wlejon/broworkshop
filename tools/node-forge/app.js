@@ -13,6 +13,7 @@ import { Palette } from "/app/lab/palette.js";
 import { Presets } from "/app/lab/presets.js";
 import { Nodes } from "/app/lab/node-registry.js";
 import "/app/nodes/rave-node.js";               // registers the RAVE node type
+import "/app/nodes/kokoro-node.js";              // registers the Kokoro node type
 import "/lib/project.js";                       // attaches global Project
 import { installSystemMenu } from "/lib/system-menu.js";
 
@@ -35,8 +36,12 @@ import { installSystemMenu } from "/lib/system-menu.js";
     // exists to keep any WIRED downstream node (future: a mixer, scene
     // audio) in sync, plus the dirty flag / status bar.
     let invalidateTimer = 0;
-    function scheduleContinue(node) {
+    function scheduleContinue(node, out, time) {
       graph.invalidateFrom(node);
+      // the live path already computed this node's fresh result — restore
+      // it right away so only genuinely-stale downstream nodes are left for
+      // the debounced continue() below, and node._out is never left null.
+      if (out !== undefined) { node._out = out; node._ran = true; node._time = time || 0; }
       updateStatus();
       proj.markDirty();
       clearTimeout(invalidateTimer);
@@ -52,7 +57,7 @@ import { installSystemMenu } from "/lib/system-menu.js";
         updateStatus();
         proj.markDirty();
       },
-      onInvalidate(node) { scheduleContinue(node); },
+      onInvalidate(node, out, time) { scheduleContinue(node, out, time); },
     });
 
     Palette.create($('palette'), (type) => {

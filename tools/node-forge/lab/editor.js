@@ -161,7 +161,13 @@ import { Nodes } from "/app/lab/node-registry.js";
       });
 
       const api = {
-        invalidate(n) { if (cb.onInvalidate) cb.onInvalidate(n || node); },
+        // out/time optional: when a live edit already computed a fresh
+        // result, pass it so the caller can re-populate n._out/_ran right
+        // after invalidateFrom() nulls it — otherwise the node sits with a
+        // null _out until the debounced continue() redundantly recomputes
+        // it via exec() (correct, but pays for the work twice and leaves a
+        // window where _out is null).
+        invalidate(n, out, time) { if (cb.onInvalidate) cb.onInvalidate(n || node, out, time); },
         markDirty() { if (cb.onChange) cb.onChange(); },
         setBadge(text, isErr) {
           badge.textContent = text || '';
