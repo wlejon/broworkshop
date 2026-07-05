@@ -1,0 +1,7 @@
+{
+    "app": ".",
+    "title": "Krea 2 Lab",
+    "width": 1440,
+    "height": 980,
+    "lib": "../../lib"
+}

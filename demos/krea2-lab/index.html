@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Krea 2 Lab</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <header id="toolbar">
+      <span id="brand">◈ Krea&nbsp;2&nbsp;Lab</span>
+      <span class="tagline">every control-surface krea-research found in Krea 2 Turbo &mdash; dials, bands, axes, gates, spatial paint</span>
+      <span class="grow"></span>
+      <span id="backend" class="badge">loading…</span>
+    </header>
+
+    <div id="body">
+      <!-- ── left rail ────────────────────────────────────────────────── -->
+      <aside id="rail">
+
+        <!-- 0. model -->
+        <section class="panel">
+          <h2>model</h2>
+          <label class="field">Krea 2 directory
+            <span class="row">
+              <input id="model-dir" type="text"
+                     value="D:/projects/brodiffusion/weights/krea-2-turbo">
+              <button id="btn-browse-model" class="iconbtn"
+                      title="Choose a Krea 2 diffusers directory">📁</button>
+            </span>
+          </label>
+          <p class="hint">Loads with the bundled 18-axis control dictionary
+            (<code>assets/axes_turbo.bcd1</code>).</p>
+          <button id="btn-load" class="primary">Load model</button>
+        </section>
+
+        <!-- 1. prompt + core settings -->
+        <section class="panel">
+          <h2>prompt</h2>
+          <label class="field">
+            <span class="field-head">prompt <span class="counter" id="prompt-count"></span></span>
+            <textarea id="prompt" rows="3" maxlength="1000"
+              placeholder="a red fox sitting in a snowy forest clearing at dawn, cinematic lighting">a red fox sitting in a snowy forest clearing at dawn, cinematic lighting</textarea>
+          </label>
+          <label class="field">
+            <span class="field-head">negative prompt
+              <span class="hint inline">— what to avoid</span>
+              <span class="counter" id="neg-count"></span></span>
+            <textarea id="neg-prompt" rows="2" maxlength="1000"
+              placeholder="blurry, low quality, deformed, watermark"></textarea>
+          </label>
+
+          <div class="subhead">settings
+            <button id="btn-reset-settings" class="link"
+                    title="Restore seed / steps / guidance / size to defaults">reset</button>
+          </div>
+          <div class="grid">
+            <label class="field">seed <span class="dim">· def 0</span>
+              <input id="seed" type="number" value="0" step="1"></label>
+            <label class="field">steps <span class="dim">· def 8</span>
+              <select id="steps">
+                <option value="4">4 (draft)</option>
+                <option value="8" selected>8</option>
+                <option value="12">12</option>
+              </select></label>
+            <label class="field">guidance <span class="dim">· def 1.0</span>
+              <input id="guidance" type="number" value="1.0" step="0.5"></label>
+            <label class="field">size <span class="dim">· def 1024²</span>
+              <select id="size">
+                <option value="1024" selected>1024²</option>
+                <option value="768">768²</option>
+                <option value="512">512²</option>
+              </select></label>
+          </div>
+          <p class="hint">Turbo is distilled: guidance 1.0 disables CFG (its
+            intended mode). Krea 2's Raw g maps to guidance = 1 + g.</p>
+          <div class="row gen-row">
+            <button id="btn-generate" class="primary" disabled>Generate</button>
+            <label class="live-toggle" title="Re-render as you drag dial/band/axis/gate sliders">
+              <input id="live" type="checkbox" checked> live
+            </label>
+          </div>
+        </section>
+
+        <!-- 2. AdaLN dials -->
+        <section class="panel">
+          <h2>AdaLN dials <span class="hint inline">per-step temb mod, blocks 19-28</span></h2>
+          <div class="ctl-row">
+            <span class="ctl-name" title="detail density (AdaLN pregate)">detail density</span>
+            <input id="dial-pregate" type="range" min="0.6" max="2.0" step="0.05" value="1.0">
+            <span class="ctl-val" id="dial-pregate-val">1.00</span>
+          </div>
+          <div class="ctl-row">
+            <span class="ctl-name" title="crispness (AdaLN prescale)">crispness</span>
+            <input id="dial-prescale" type="range" min="0.7" max="1.5" step="0.05" value="1.0">
+            <span class="ctl-val" id="dial-prescale-val">1.00</span>
+          </div>
+          <p class="hint">1.00 = neutral (off) on both.</p>
+        </section>
+
+        <!-- 3. band dial -->
+        <section class="panel">
+          <h2>band dial <span class="hint inline">deep-tap layers 7-10</span></h2>
+          <div class="ctl-row">
+            <span class="ctl-name">literal ↔ stylized</span>
+            <input id="band" type="range" min="0.5" max="3.5" step="0.1" value="1.0">
+            <span class="ctl-val" id="band-val">1.0</span>
+          </div>
+          <p class="hint">1.0 = off. Scales the 4 tapped decoder layers krea-research
+            found most style-carrying, before fusion.</p>
+        </section>
+
+        <!-- 4. axis bank -->
+        <section class="panel">
+          <h2>axis bank <span class="hint inline">18 generic perceptual gradients</span>
+            <span class="grow"></span>
+            <button id="btn-reset-axes" class="link" title="Zero every axis slider">reset</button>
+          </h2>
+          <div id="axis-categories"></div>
+
+          <div class="subhead">your axes</div>
+          <div id="user-slots"></div>
+        </section>
+
+        <!-- 5. mint your own axis -->
+        <section class="panel">
+          <h2>mint your own axis</h2>
+
+          <div class="mint-sub">
+            <div class="mint-sub-head">from a text pair <span class="hint inline">~10s, averaged over 6 scenes</span></div>
+            <label class="field">name
+              <input id="mint-text-name" type="text" placeholder="candlelight"></label>
+            <label class="field">toward <span class="hint inline">(slider +)</span>
+              <textarea id="mint-text-pos" rows="2" placeholder="lit by warm candlelight"></textarea></label>
+            <label class="field">away <span class="hint inline">(slider -)</span>
+              <textarea id="mint-text-neg" rows="2" placeholder="lit by harsh fluorescent light"></textarea></label>
+            <button id="btn-mint-text" class="primary" disabled>Mint from text</button>
+          </div>
+
+          <div class="mint-sub">
+            <div class="mint-sub-head">from an image pair</div>
+            <label class="field">name
+              <input id="mint-image-name" type="text" placeholder="warm-vs-cool"></label>
+            <div class="imgpair">
+              <div class="imgpick" id="mint-a-pick">
+                <div class="imgpick-thumb" id="mint-a-thumb"></div>
+                <button class="link" id="btn-mint-pick-a">toward this (slider +)</button>
+              </div>
+              <div class="imgpick" id="mint-b-pick">
+                <div class="imgpick-thumb" id="mint-b-thumb"></div>
+                <button class="link" id="btn-mint-pick-b">away from this (slider -)</button>
+              </div>
+            </div>
+            <button id="btn-mint-image" class="primary" disabled>Mint from images</button>
+          </div>
+
+          <p id="mint-status" class="hint"></p>
+        </section>
+
+        <!-- 6. gate controls (global scale only — the brush workflow lives in the Gate Paint tab) -->
+        <section class="panel">
+          <h2>gate controls <span class="hint inline">attention-gate research hooks</span></h2>
+          <div class="ctl-row">
+            <span class="ctl-name">text gate scale</span>
+            <input id="gate-txt" type="range" min="0" max="2" step="0.05" value="1.0">
+            <span class="ctl-val" id="gate-txt-val">1.00</span>
+          </div>
+          <div class="ctl-row">
+            <span class="ctl-name">image gate scale</span>
+            <input id="gate-img" type="range" min="0" max="2" step="0.05" value="1.0">
+            <span class="ctl-val" id="gate-img-val">1.00</span>
+          </div>
+          <p class="hint">1.00 = neutral. Applies to every render. Paint a
+            per-region gate mask in the <b>Gate Paint</b> tab &rarr;</p>
+        </section>
+      </aside>
+
+      <!-- ── stage ────────────────────────────────────────────────────── -->
+      <main id="stage">
+        <div id="tabbar">
+          <button class="tabbtn active" data-tab="render">Render</button>
+          <button class="tabbtn" data-tab="gate">Gate Paint</button>
+          <button class="tabbtn" data-tab="spatial">Spatial Paint</button>
+        </div>
+
+        <!-- tab: render -->
+        <div class="tabpanel active" id="tab-render">
+          <div id="canvas-wrap">
+            <canvas id="view" width="512" height="512"></canvas>
+            <div id="view-hint" class="pane-hint">Load a model, then Generate.</div>
+          </div>
+          <div class="status-bar">
+            <span id="status-text">idle</span>
+            <span class="grow"></span>
+            <span id="timing" class="meta"></span>
+          </div>
+        </div>
+
+        <!-- tab: gate paint -->
+        <div class="tabpanel" id="tab-gate">
+          <div class="tab-toolbar">
+            <button id="btn-gate-capture" disabled>Capture</button>
+            <label class="field inline-field">brush radius
+              <input id="gate-brush-radius" type="range" min="1" max="10" step="1" value="3">
+            </label>
+            <label class="field inline-field">target value <span class="dim">· suppress &lt;1, amplify &gt;1</span>
+              <input id="gate-brush-target" type="range" min="0" max="2" step="0.05" value="0.3">
+              <span class="ctl-val" id="gate-brush-target-val">0.30</span>
+            </label>
+            <button id="btn-gate-clear" title="Clear the painted mask">Clear paint</button>
+            <button id="btn-gate-apply" class="primary" disabled>Apply</button>
+          </div>
+          <div id="gate-panes" class="panes">
+            <section class="pane">
+              <div class="pane-head">gate heatmap <span class="pane-sub">image-row activity · paint to suppress/amplify</span></div>
+              <div class="pane-canvas">
+                <canvas id="gate-heatmap" width="64" height="64"></canvas>
+                <div id="gate-hint" class="pane-hint">Capture a render's gates first.</div>
+              </div>
+            </section>
+            <section class="pane">
+              <div class="pane-head">result <span class="pane-sub" id="gate-result-sub"></span></div>
+              <div class="pane-canvas">
+                <canvas id="gate-result" width="512" height="512"></canvas>
+                <div id="gate-result-hint" class="pane-hint">Paint, then Apply.</div>
+              </div>
+            </section>
+          </div>
+          <div class="status-bar">
+            <span id="gate-status-text">idle</span>
+            <span class="grow"></span>
+            <span id="gate-timing" class="meta"></span>
+          </div>
+        </div>
+
+        <!-- tab: spatial paint -->
+        <div class="tabpanel" id="tab-spatial">
+          <div class="tab-toolbar">
+            <label class="field inline-field grow-field">base prompt
+              <input id="sp-prompt" type="text"
+                value="a red fox sitting in a snowy forest clearing at dawn, cinematic lighting">
+            </label>
+            <label class="field inline-field">seed
+              <input id="sp-seed" type="number" value="0" step="1" style="width:70px">
+            </label>
+            <label class="field inline-field">steps
+              <select id="sp-steps">
+                <option value="4" selected>4</option>
+                <option value="8">8</option>
+              </select>
+            </label>
+            <button id="btn-sp-base">Base render</button>
+          </div>
+          <div class="tab-toolbar">
+            <label class="field inline-field grow-field">axis
+              <select id="sp-axis"></select>
+            </label>
+            <label class="field inline-field">strength
+              <input id="sp-strength" type="range" min="-3" max="3" step="0.25" value="1.5">
+              <span class="ctl-val" id="sp-strength-val">1.50</span>
+            </label>
+            <label class="field inline-field">brush radius
+              <input id="sp-brush-radius" type="range" min="4" max="80" step="2" value="24">
+            </label>
+            <button id="btn-sp-clear" title="Clear the painted mask">Clear paint</button>
+            <button id="btn-sp-go" class="primary" disabled>Render composite</button>
+          </div>
+          <div id="sp-panes" class="panes">
+            <section class="pane">
+              <div class="pane-head">paint <span class="pane-sub">freehand — mark where the axis applies</span></div>
+              <div class="pane-canvas">
+                <canvas id="sp-paint" width="512" height="512"></canvas>
+                <div id="sp-hint" class="pane-hint">Base render first.</div>
+              </div>
+            </section>
+            <section class="pane">
+              <div class="pane-head">composite <span class="pane-sub" id="sp-result-sub"></span></div>
+              <div class="pane-canvas">
+                <canvas id="sp-result" width="512" height="512"></canvas>
+                <div id="sp-result-hint" class="pane-hint">Paint, pick an axis, then render.</div>
+              </div>
+            </section>
+          </div>
+          <div class="status-bar">
+            <span id="sp-status-text">idle</span>
+            <span class="grow"></span>
+            <span id="sp-timing" class="meta"></span>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+  <script type="module" src="/app/app.js"></script>
+</body>
+</html>

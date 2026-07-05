@@ -1,0 +1,92 @@
+{
+ "composition.proximity": {
+  "category": "Composition",
+  "label": "wide \u2194 closeup",
+  "order": 0
+ },
+ "composition.elevation": {
+  "category": "Composition",
+  "label": "ground \u2194 aerial",
+  "order": 1
+ },
+ "composition.density": {
+  "category": "Composition",
+  "label": "sparse \u2194 busy",
+  "order": 2
+ },
+ "composition.symmetry": {
+  "category": "Composition",
+  "label": "dynamic \u2194 formal",
+  "order": 3
+ },
+ "composition.depth": {
+  "category": "Composition",
+  "label": "flat \u2194 deep",
+  "order": 4
+ },
+ "color.temperature": {
+  "category": "Color",
+  "label": "cool \u2194 warm",
+  "order": 5
+ },
+ "color.saturation": {
+  "category": "Color",
+  "label": "muted \u2194 vivid",
+  "order": 6
+ },
+ "color.key": {
+  "category": "Color",
+  "label": "dark \u2194 bright",
+  "order": 7
+ },
+ "color.contrast": {
+  "category": "Color",
+  "label": "soft \u2194 punchy",
+  "order": 8
+ },
+ "color.breadth": {
+  "category": "Color",
+  "label": "single-hue \u2194 multicolor",
+  "order": 9
+ },
+ "light.hardness": {
+  "category": "Light",
+  "label": "soft \u2194 hard",
+  "order": 10
+ },
+ "light.direction": {
+  "category": "Light",
+  "label": "front-lit \u2194 backlit",
+  "order": 11
+ },
+ "light.atmosphere": {
+  "category": "Light",
+  "label": "clear \u2194 hazy",
+  "order": 12
+ },
+ "rendering.graphic": {
+  "category": "Rendering",
+  "label": "photographic \u2194 graphic",
+  "order": 13
+ },
+ "rendering.texture": {
+  "category": "Rendering",
+  "label": "smooth \u2194 textured",
+  "order": 14
+ },
+ "rendering.era": {
+  "category": "Rendering",
+  "label": "modern \u2194 vintage",
+  "order": 15
+ },
+ "mood.drama": {
+  "category": "Mood",
+  "label": "serene \u2194 dramatic",
+  "order": 16
+ },
+ "mood.scale": {
+  "category": "Mood",
+  "label": "mundane \u2194 epic",
+  "order": 17
+ }
+}
