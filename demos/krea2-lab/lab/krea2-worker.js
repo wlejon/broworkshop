@@ -95,7 +95,13 @@ function handleLoad(msg) {
     // to ~17GB — quantize by default; only skip it if the caller explicitly
     // asks (e.g. a CPU run, or a card with enough VRAM to go FP16).
     var quantize = msg.quantizeWeights !== false;
-    pipeline = bro.diffusion.loadModel(msg.modelDir, { quantizeWeights: quantize });
+    var loadedPipeline = bro.diffusion.loadModel(msg.modelDir, { quantizeWeights: quantize });
+    // loadModel returns { cancelled: true } (not a Pipeline) when the process is
+    // shutting down mid-load (window close / Ctrl+C / teardown). Bail silently —
+    // there is no window left to receive a reply, and touching it as a Pipeline
+    // would throw.
+    if (!loadedPipeline || loadedPipeline.cancelled) { pipeline = null; return; }
+    pipeline = loadedPipeline;
     var cfg = pipeline.config();
     if (cfg.modelClass !== 'Krea2') {
       throw new Error('expected a Krea 2 model, got ' + cfg.modelClass);
