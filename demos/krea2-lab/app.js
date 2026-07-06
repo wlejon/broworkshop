@@ -393,7 +393,7 @@ function init() {
   const clampZoom = (z) => Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z));
   function fitScale() {
     const wrap = $('canvas-wrap');
-    const availW = wrap.clientWidth - 48, availH = wrap.clientHeight - 48;
+    const availW = wrap.clientWidth - 16, availH = wrap.clientHeight - 16;
     if (viewW <= 0 || viewH <= 0 || availW <= 0 || availH <= 0) return 1;
     return Math.min(availW / viewW, availH / viewH);
   }
