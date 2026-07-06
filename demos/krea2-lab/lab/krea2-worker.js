@@ -42,10 +42,12 @@
 //        <- spatialDone   {bitmap, width, height, ms}
 //   main -> mintTextAxis  {name, pos, neg}
 //        <- mintProgress  {label, done, total}      (interim, several)
-//        <- axisMinted    {name, consistency, components, residual}
+//        <- axisMinted    {name, axis, consistency, components, residual}
 //   main -> mintImageAxis {name, a: {pixels,H,W}, b: {pixels,H,W}}
 //        <- mintProgress  {label, done, total}      (interim, several)
-//        <- axisMinted    {name, components, residual}
+//        <- axisMinted    {name, axis, components, residual}
+//   main -> registerAxis  {name, axis}       (restore a saved axis — no encodes)
+//        <- axisRegistered{name, components, residual}
 //   main -> removeControl {name}
 //        <- removed       {name}
 //   errors come back as   <- error {stage, message}
@@ -363,6 +365,19 @@ function mintProgress(label, done, total) {
   self.postMessage({ type: 'mintProgress', label: label, done: done, total: total });
 }
 
+// Minted axes must inject at the SAME calibrated magnitude as the bank.
+// The dictionary bakes scale = 0.15 x mean fused token norm (~46 for Krea 2
+// Turbo) so "slider 1.0 means the same relative push everywhere", and
+// krea-research's ui.py applies USER axes with that same AXIS_SCALE
+// (apply_axes, line 131). Registering minted axes with scale 1.0 made every
+// mint ~46x weaker than a bank axis — a flat sweep, an invisible slider.
+// Read the calibration off any dictionary axis at runtime; 1.0 only if
+// there's no dictionary or the engine predates controlVector().
+function bankScale() {
+  if (!dictAxes.length || !pipeline.controlVector) return 1.0;
+  return pipeline.controlVector(dictAxes[0]).scale;
+}
+
 // Explain a freshly minted unit direction against the dictionary's named
 // bank: per-axis cosine (the bank directions are unit vectors by the BCD1
 // format), plus how much of the direction lies OUTSIDE the bank's span.
@@ -475,10 +490,10 @@ function handleMintTextAxis(msg) {
     for (var c = 0; c < cols; c++) mean[c] /= diffs.length;
     var axis = unitNormalize(mean);
 
-    pipeline.setControlVector(name, axis, 0.0, 1.0);
+    pipeline.setControlVector(name, axis, 0.0, bankScale());
     var explain = explainAxis(axis);
     self.postMessage({
-      type: 'axisMinted', name: name, consistency: consistency,
+      type: 'axisMinted', name: name, consistency: consistency, axis: axis,
       components: explain ? explain.components : null,
       residual: explain ? explain.residual : null,
     });
@@ -508,15 +523,39 @@ function handleMintImageAxis(msg) {
     for (var c = 0; c < cols; c++) diff[c] = ma[c] - mb[c];
     var axis = unitNormalize(diff);
 
-    pipeline.setControlVector(name, axis, 0.0, 1.0);
+    pipeline.setControlVector(name, axis, 0.0, bankScale());
     var explain = explainAxis(axis);
     self.postMessage({
-      type: 'axisMinted', name: name,
+      type: 'axisMinted', name: name, axis: axis,
       components: explain ? explain.components : null,
       residual: explain ? explain.residual : null,
     });
   } catch (e) {
     fail('mintImageAxis', e);
+  }
+}
+
+// Re-register a previously minted axis from its saved unit direction — a
+// plain setControlVector at bank scale, zero encodes. This is what load-time
+// restore uses: the saved vector IS the axis, so re-deriving it every launch
+// (12 encodes per text axis, impossible for history-sourced image pairs) was
+// pure waste. explainAxis reruns here so the inspector's decomposition always
+// reflects the currently loaded dictionary.
+function handleRegisterAxis(msg) {
+  try {
+    if (!pipeline) throw new Error('no model loaded');
+    var name = (msg.name || '').trim();
+    if (!name || !msg.axis || !msg.axis.length) throw new Error('need a name and a direction');
+    var axis = (msg.axis instanceof Float32Array) ? msg.axis : new Float32Array(msg.axis);
+    pipeline.setControlVector(name, axis, 0.0, bankScale());
+    var explain = explainAxis(axis);
+    self.postMessage({
+      type: 'axisRegistered', name: name,
+      components: explain ? explain.components : null,
+      residual: explain ? explain.residual : null,
+    });
+  } catch (e) {
+    fail('registerAxis', e);
   }
 }
 
@@ -537,6 +576,7 @@ self.onmessage = function (e) {
     case 'spatialRender':  handleSpatialRender(msg); break;
     case 'mintTextAxis':   handleMintTextAxis(msg); break;
     case 'mintImageAxis':  handleMintImageAxis(msg); break;
+    case 'registerAxis':   handleRegisterAxis(msg); break;
     case 'removeControl':  handleRemoveControl(msg); break;
     default: fail('dispatch', new Error('unknown message: ' + msg.type));
   }
