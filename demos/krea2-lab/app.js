@@ -122,6 +122,31 @@ function tensorFromCanvas(cnv) {
   const id = cnv.getContext('2d').getImageData(0, 0, cnv.width, cnv.height);
   return toChwFp32(capLongSide(id, 1024));
 }
+// Paint the chosen image-pair source into its preview box. Draws into a real
+// <canvas> child (faithful in bro) rather than a CSS background-image from a
+// data:/file: URL, which didn't render — the box stayed black. `src` is a
+// canvas or ImageData; it's letterboxed into a small backing store keyed to the
+// box (`.imgpick-thumb` is square via aspect-ratio; object-fit:contain fits it).
+function paintMintThumb(which, src, sw, sh) {
+  const thumb = $('mint-' + which + '-thumb');
+  let cv = thumb.querySelector('canvas');
+  if (!cv) { cv = document.createElement('canvas'); thumb.appendChild(cv); }
+  const BOX = 160;
+  const scale = Math.min(BOX / sw, BOX / sh, 1);
+  cv.width = Math.max(1, Math.round(sw * scale));
+  cv.height = Math.max(1, Math.round(sh * scale));
+  const cx = cv.getContext('2d');
+  cx.clearRect(0, 0, cv.width, cv.height);
+  if (src instanceof ImageData) {
+    const tmp = document.createElement('canvas');
+    tmp.width = sw; tmp.height = sh;
+    tmp.getContext('2d').putImageData(src, 0, 0);
+    cx.drawImage(tmp, 0, 0, cv.width, cv.height);
+  } else {
+    cx.drawImage(src, 0, 0, cv.width, cv.height);
+  }
+  thumb.classList.add('filled');
+}
 
 function init() {
   const prefs = loadPrefs();
@@ -534,9 +559,7 @@ function init() {
     let tensor;
     try { tensor = tensorFromCanvas(h.canvas); }
     catch (e) { mintStatus('could not use that render: ' + (e.message || e), 'err'); return; }
-    const thumb = $('mint-' + which + '-thumb');
-    try { thumb.style.backgroundImage = 'url(' + h.canvas.toDataURL() + ')'; thumb.classList.add('filled'); }
-    catch (e) { thumb.classList.add('filled'); }
+    paintMintThumb(which, h.canvas, h.w, h.h);
     // No file path — this pixel source is a render, so the minted axis works this
     // session but isn't reloadable across restarts (rebuildMintedAxes skips it).
     if (which === 'a') mintImgA = { tensor: tensor, path: '' };
@@ -808,12 +831,10 @@ function init() {
     const files = showOpenFileDialog('Image|png;jpg;jpeg');
     if (!files || !files.length) return;
     const path = files[0];
-    let tensor;
-    try { tensor = loadImageTensor(path); }
+    let id, tensor;
+    try { id = capLongSide(fileToImageData(path), 1024); tensor = toChwFp32(id); }
     catch (e) { mintStatus('image load failed: ' + e.message, 'err'); return; }
-    const thumb = $('mint-' + which + '-thumb');
-    thumb.style.backgroundImage = 'url(' + appPath(path).replace(/\\/g, '/') + ')';
-    thumb.classList.add('filled');
+    paintMintThumb(which, id, id.width, id.height);
     if (which === 'a') mintImgA = { tensor: tensor, path: path };
     else mintImgB = { tensor: tensor, path: path };
     refreshButtons();
