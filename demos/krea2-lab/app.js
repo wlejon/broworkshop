@@ -254,7 +254,7 @@ function init() {
     const nm = document.createElement('span');
     nm.className = 'ctl-name'; nm.textContent = label; nm.title = key;
     const range = document.createElement('input');
-    range.type = 'range'; range.min = '-3'; range.max = '3'; range.step = '0.25'; range.value = '0';
+    range.type = 'range'; range.min = '-6'; range.max = '6'; range.step = '0.25'; range.value = '0';
     const val = document.createElement('span');
     val.className = 'ctl-val off'; val.textContent = '0';
     function refresh() {
@@ -276,7 +276,7 @@ function init() {
     row.className = 'slot-row';
     const sel = document.createElement('select');
     const range = document.createElement('input');
-    range.type = 'range'; range.min = '-3'; range.max = '3'; range.step = '0.25'; range.value = '0';
+    range.type = 'range'; range.min = '-6'; range.max = '6'; range.step = '0.25'; range.value = '0';
     const val = document.createElement('span');
     val.className = 'ctl-val off'; val.textContent = '0';
     function refresh() {
