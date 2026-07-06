@@ -203,6 +203,54 @@ details[open] > .ctl-cat::before { content: '▾ '; }
 .imgpick-label { font-size: 10px; color: #8b94a3; text-align: center; }
 .mint-hist { width: 100%; font-size: 10px; padding: 4px 6px; }
 
+/* mint progress bar (hidden unless .show) */
+.mint-progress {
+  display: none; height: 6px; border-radius: 3px;
+  background: #0a0d13; border: 1px solid #1c2431; overflow: hidden;
+}
+.mint-progress.show { display: block; }
+#mint-progress-fill {
+  height: 100%; width: 0%;
+  background: linear-gradient(90deg, #b8702c, #f0a860);
+  transition: width 0.15s ease-out;
+}
+
+/* minted-axis readout: signed center-zero cosine bars vs the named bank */
+.axis-bars { display: flex; flex-direction: column; gap: 4px; }
+.axis-bar-row {
+  display: grid; grid-template-columns: 96px 1fr 40px;
+  align-items: center; gap: 8px; font-size: 10px;
+}
+.axis-bar-name {
+  color: #8b94a3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.axis-bar-track {
+  position: relative; height: 8px; border-radius: 4px;
+  background: #0a0d13; border: 1px solid #1c2431;
+}
+.axis-bar-track::before {              /* center-zero line */
+  content: ''; position: absolute; left: 50%; top: -1px; bottom: -1px;
+  width: 1px; background: #263047;
+}
+.axis-bar-fill { position: absolute; top: 1px; bottom: 1px; border-radius: 3px; }
+.axis-bar-fill.pos { left: 50%; background: #d4914a; }
+.axis-bar-fill.neg { right: 50%; background: #5f83c9; }
+.axis-bar-val { color: #9aa3b0; text-align: right; font-variant-numeric: tabular-nums; }
+
+/* isolation sweep strip */
+.axis-sweep { display: none; gap: 4px; }
+.axis-sweep.show { display: flex; }
+.axis-sweep .cell { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.axis-sweep canvas {
+  width: 100%; height: auto; display: block; border-radius: 3px;
+  border: 1px solid #1c2431; background: #07090d; cursor: pointer;
+}
+.axis-sweep canvas:hover { outline: 1px solid #c9822f; outline-offset: -1px; }
+.axis-sweep .cell-label {
+  font-size: 9px; color: #6b7482; text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
 /* ── stage / tabs ─────────────────────────────────────────────────────── */
 #stage { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 #tabbar {
@@ -362,6 +410,11 @@ details[open] > .ctl-cat::before { content: '▾ '; }
 .hist-item {
   border: 1px solid #1a1f27; border-radius: 6px; background: #0b0e13;
   overflow: hidden; display: flex; flex-direction: column;
+  /* flex: none is load-bearing: as flex children of the scrollable column,
+     default flex-shrink:1 + overflow:hidden (which zeroes the automatic
+     min-height floor) let every item squish to fit the rail instead of
+     overflowing it — thumbs collapsed to strips and nothing scrolled. */
+  flex: none;
 }
 .hist-thumb {
   display: block; width: 100%; height: auto; cursor: pointer;
