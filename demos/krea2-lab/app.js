@@ -659,7 +659,13 @@ function init() {
   let pendingQuality = null;
   function schedule(quality) {
     if (!loaded) return;
-    if (quality === 'full' || pendingQuality !== 'full') pendingQuality = quality;
+    // No live low-res preview. It rendered a downscaled, 4-step throwaway frame
+    // while dragging and then swapped in the real one — two visibly different
+    // images per change, which read as confusing (and the downscale is what put
+    // a size-mismatched frame on the canvas). Live mode now lands ONE full-quality
+    // frame when a control settles (the slider 'change' event), nothing mid-drag.
+    if (quality !== 'full') return;
+    pendingQuality = 'full';
     pump();
   }
   function pump() {
