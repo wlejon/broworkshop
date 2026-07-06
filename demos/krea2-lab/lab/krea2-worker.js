@@ -89,6 +89,14 @@ function handleLoad(msg) {
     if (typeof bro === 'undefined' || !bro.diffusion) {
       throw new Error('bro.diffusion is not available in this build');
     }
+    // Free a previously-loaded model's VRAM BEFORE building the new one. Without
+    // this the old (~17GB) and new pipelines coexist during loadModel and OOM a
+    // 24GB card. dispose() is the engine's deterministic free (GC of the wrapper
+    // is too late); guarded for older builds that lack it.
+    if (pipeline) {
+      try { if (pipeline.dispose) pipeline.dispose(); } catch (e) { /* ignore */ }
+      pipeline = null;
+    }
     // Krea 2's FP16 total (DiT ~25GB + Qwen3-VL-4B text/vision ~8.3GB) doesn't
     // fit a single 24GB card. INT8 quantizes BOTH components (loadModel's
     // opts.quantizeWeights, see brodiffusion::Pipeline::ModelDirOptions) down

@@ -159,6 +159,13 @@ function init() {
   let spMaskCanvas = null;    // offscreen, full render resolution, white=painted
   let spDown = false;
 
+  // ── seed randomize + render history ──────────────────────────────────────
+  const SEED_MAX = 2147483647;   // int32 range — Krea 2's Philox seed
+  const SEED_HISTORY_MAX = 10;   // "recent seeds" dropdown depth
+  const HISTORY_MAX = 24;        // rendered-image thumbnails kept on the right
+  let seedHistory = Array.isArray(prefs.seedHistory) ? prefs.seedHistory.slice(0, SEED_HISTORY_MAX) : [];
+  let history = [];              // [{canvas, w, h, seed, steps, width, height}], newest first
+
   // restore persisted text fields
   if (prefs.modelDir) $('model-dir').value = prefs.modelDir;
   if (prefs.prompt)   $('prompt').value = prefs.prompt;
@@ -175,6 +182,7 @@ function init() {
   if (prefs.band != null) $('band').value = prefs.band;
   if (prefs.gateTxt != null) $('gate-txt').value = prefs.gateTxt;
   if (prefs.gateImg != null) $('gate-img').value = prefs.gateImg;
+  if (prefs.randSeed != null) $('rand-seed').checked = !!prefs.randSeed;
   if (prefs.spPrompt) $('sp-prompt').value = prefs.spPrompt;
   if (prefs.spSeed != null) $('sp-seed').value = prefs.spSeed;
   if (prefs.spSteps != null) $('sp-steps').value = prefs.spSteps;
@@ -202,6 +210,7 @@ function init() {
       })),
       spPrompt: $('sp-prompt').value, spSeed: $('sp-seed').value, spSteps: $('sp-steps').value,
       spAxis: $('sp-axis').value, spStrength: $('sp-strength').value,
+      randSeed: $('rand-seed').checked, seedHistory: seedHistory,
     });
   }
 
@@ -366,6 +375,132 @@ function init() {
     $('view-hint').style.display = 'none';
   }
 
+  // ── seed: randomize + recent-seed reuse ────────────────────────────────────
+  const randomSeed = () => Math.floor(Math.random() * SEED_MAX);
+  function refreshSeedRecent() {
+    const sel = $('seed-recent');
+    sel.innerHTML = '<option value="">recent…</option>';
+    seedHistory.forEach((s) => {
+      const o = document.createElement('option');
+      o.value = String(s); o.textContent = String(s);
+      sel.appendChild(o);
+    });
+    sel.value = '';   // keep it a picker, not a value display
+  }
+  function recordSeed(seed) {
+    if (seedHistory[0] === seed) return;         // dedup consecutive
+    seedHistory = seedHistory.filter((s) => s !== seed);
+    seedHistory.unshift(seed);
+    if (seedHistory.length > SEED_HISTORY_MAX) seedHistory.length = SEED_HISTORY_MAX;
+    refreshSeedRecent();
+    persist();
+  }
+
+  // ── render history (right rail) ────────────────────────────────────────────
+  function refreshHistButtons() {
+    const empty = history.length === 0;
+    $('btn-hist-clear').disabled = empty;
+    $('btn-hist-save-all').disabled = empty;
+  }
+  function addHistoryEntry(bitmap, w, h, meta) {
+    // Retain the full-resolution pixels (the canvas is the thumbnail, CSS-scaled)
+    // so "save" writes the real render, not a downscaled preview.
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    c.getContext('2d').drawImage(bitmap, 0, 0);
+    history.unshift({ canvas: c, w: w, h: h, seed: meta.seed, steps: meta.steps,
+                      width: meta.width, height: meta.height });
+    if (history.length > HISTORY_MAX) history.length = HISTORY_MAX;
+    renderHistory();
+  }
+  function renderHistory() {
+    const list = $('hist-list');
+    list.innerHTML = '';
+    if (history.length === 0) {
+      const e = document.createElement('div');
+      e.className = 'hist-empty'; e.textContent = 'Rendered images collect here.';
+      list.appendChild(e);
+      refreshHistButtons();
+      return;
+    }
+    history.forEach((h) => {
+      const item = document.createElement('div');
+      item.className = 'hist-item';
+      h.canvas.className = 'hist-thumb';
+      h.canvas.title = 'click to view in the render tab';
+      // onclick (not addEventListener): renderHistory() re-runs on every render
+      // and reuses these persistent canvas nodes — assignment avoids stacking
+      // duplicate handlers.
+      h.canvas.onclick = () => {
+        drawBitmap(h.canvas, h.w, h.h);
+        status('viewing history · seed ' + h.seed + ' · ' + h.width + '×' + h.height, 'ok');
+      };
+      const body = document.createElement('div');
+      body.className = 'hist-body';
+      const metaRow = document.createElement('div');
+      metaRow.className = 'hist-meta';
+      const dims = document.createElement('span');
+      dims.textContent = h.width + '×' + h.height + ' · ' + h.steps + 'st';
+      const seed = document.createElement('span');
+      seed.className = 'hist-seed'; seed.textContent = 'seed ' + h.seed;
+      seed.title = 'reuse this seed (pins it — turns off randomize)';
+      seed.addEventListener('click', () => reuseSeed(h.seed));
+      metaRow.appendChild(dims); metaRow.appendChild(seed);
+      const actions = document.createElement('div');
+      actions.className = 'hist-actions';
+      const save = document.createElement('button');
+      save.className = 'link'; save.textContent = 'save';
+      save.addEventListener('click', () => saveHistoryImage(h));
+      actions.appendChild(save);
+      body.appendChild(metaRow); body.appendChild(actions);
+      item.appendChild(h.canvas); item.appendChild(body);
+      list.appendChild(item);
+    });
+    refreshHistButtons();
+  }
+  function reuseSeed(seed) {
+    $('seed').value = String(seed);
+    $('rand-seed').checked = false;
+    recordSeed(seed);
+    persist();
+    if (live && loaded) schedule('full');
+  }
+  function saveHistoryImage(h) {
+    if (typeof window.showSaveFileDialog !== 'function') {
+      status('save dialog unavailable in this build', 'err'); return;
+    }
+    const name = 'krea2_' + h.seed + '_' + h.width + 'x' + h.height + '.png';
+    const path = window.showSaveFileDialog('PNG Image|png', name);
+    if (!path) return;   // cancelled
+    try {
+      const px = h.canvas.getContext('2d').getImageData(0, 0, h.w, h.h);
+      bro.image.encodePngFile(path, px.data, h.w, h.h, 4);
+      status('saved ' + path, 'ok');
+    } catch (e) {
+      status('save failed: ' + (e.message || e), 'err');
+    }
+  }
+  function saveAllHistory() {
+    if (typeof window.showOpenFolderDialog !== 'function') {
+      status('folder dialog unavailable in this build', 'err'); return;
+    }
+    const dir = window.showOpenFolderDialog('');
+    if (!dir) return;
+    const sep = dir.indexOf('\\') >= 0 ? '\\' : '/';
+    let n = 0;
+    for (let i = history.length - 1; i >= 0; i--) {   // oldest first, natural order
+      const h = history[i];
+      try {
+        const px = h.canvas.getContext('2d').getImageData(0, 0, h.w, h.h);
+        bro.image.encodePngFile(dir + sep + 'krea2_' + h.seed + '_' + h.width + 'x' + h.height + '.png',
+                                px.data, h.w, h.h, 4);
+        n++;
+      } catch (e) { /* skip a bad entry, keep going */ }
+    }
+    status('saved ' + n + ' image' + (n === 1 ? '' : 's') + ' to ' + dir, n ? 'ok' : 'err');
+  }
+  function clearHistory() { history = []; renderHistory(); }
+
   function refreshButtons() {
     const busyOrUnloaded = busy || !loaded;
     $('btn-generate').disabled = busyOrUnloaded;
@@ -498,16 +633,29 @@ function init() {
     status((quality === 'preview' ? 'preview' : 'generating') + ' · ' +
            msg.opts.width + '×' + msg.opts.height + ' · ' + msg.opts.steps + ' steps…');
     $('timing').textContent = '';
+    const usedSeed = msg.opts.seed;
     client.send(msg, (err, resp) => {
       setBusy(false);
       if (err) { status(String(err.message || err), 'err'); pump(); return; }
       drawBitmap(resp.bitmap, resp.width, resp.height);
+      // Only full-quality frames are keepers — previews (live slider scrubs) are
+      // throwaway, and downscaled, so they never enter the history or seed log.
+      if (quality === 'full') {
+        recordSeed(usedSeed);
+        addHistoryEntry(resp.bitmap, resp.width, resp.height,
+                        { seed: usedSeed, steps: msg.opts.steps, width: resp.width, height: resp.height });
+      }
       status(quality === 'preview' ? 'preview' : 'done', 'ok');
       $('timing').textContent = (resp.ms ? resp.ms + ' ms' : '') + (quality === 'preview' ? ' · preview' : '');
       pump();
     });
   }
-  function doGenerate() { schedule('full'); }
+  // Explicit Generate: with randomize on, roll a fresh seed first (control-driven
+  // re-renders keep the current seed so a slider's effect is A/B-comparable).
+  function doGenerate() {
+    if ($('rand-seed').checked) { $('seed').value = String(randomSeed()); persist(); }
+    schedule('full');
+  }
 
   // ── AdaLN dials / band / gate scale — shared live-preview wiring ────────
   function wireLiveSlider(id, valId, fmt, neutral) {
@@ -939,6 +1087,18 @@ function init() {
   });
   ['model-dir', 'prompt', 'neg-prompt', 'seed', 'steps', 'guidance', 'width', 'height']
     .forEach((id) => $(id).addEventListener('change', persist));
+
+  // ── seed randomize + recent + history controls ─────────────────────────────
+  $('rand-seed').addEventListener('change', persist);
+  $('seed-recent').addEventListener('change', () => {
+    const v = $('seed-recent').value;
+    if (v !== '') reuseSeed(+v);
+    $('seed-recent').value = '';
+  });
+  $('btn-hist-clear').addEventListener('click', clearHistory);
+  $('btn-hist-save-all').addEventListener('click', saveAllHistory);
+  refreshSeedRecent();
+  renderHistory();
 
   // ── size: width × height, aspect presets, swap ─────────────────────────────
   function syncSize() {

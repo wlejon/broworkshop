@@ -55,8 +55,15 @@
                     title="Restore seed / steps / guidance / size to defaults">reset</button>
           </div>
           <div class="grid">
-            <label class="field">seed <span class="dim">· def 0</span>
-              <input id="seed" type="number" value="0" step="1"></label>
+            <div class="field seed-field">seed
+              <input id="seed" type="number" value="0" step="1">
+              <div class="seed-ctl">
+                <label class="seed-rand" title="pick a fresh random seed on each Generate">
+                  <input id="rand-seed" type="checkbox" checked>🎲 random
+                </label>
+                <select id="seed-recent" class="seed-recent" title="reuse a recent seed"><option value="">recent…</option></select>
+              </div>
+            </div>
             <label class="field">steps <span class="dim">· turbo 4–12 · raw 20+</span>
               <input id="steps" type="number" value="8" min="1" max="60" step="1"></label>
             <label class="field">guidance <span class="dim">· def 1.0</span>
@@ -311,6 +318,19 @@
           </div>
         </div>
       </main>
+
+      <!-- ── history rail: every full render, newest first, with save ────── -->
+      <aside id="history">
+        <div class="hist-head">
+          <span>history</span>
+          <span class="grow"></span>
+          <button id="btn-hist-save-all" class="link" title="Save every image in the history" disabled>save all</button>
+          <button id="btn-hist-clear" class="link" title="Clear the render history" disabled>clear</button>
+        </div>
+        <div id="hist-list" class="hist-list">
+          <div class="hist-empty">Rendered images collect here.</div>
+        </div>
+      </aside>
     </div>
   </div>
   <script type="module" src="/app/app.js"></script>

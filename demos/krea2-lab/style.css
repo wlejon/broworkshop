@@ -6,7 +6,11 @@ body {
   font: 13px/1.4 ui-monospace, Menlo, Consolas, monospace;
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
+  /* This is a control surface, not a document — dragging should scrub sliders
+     and pan, never mark text. Editable fields opt back in below. */
+  user-select: none;
 }
+input, textarea { user-select: text; }
 #app { display: flex; flex-direction: column; height: 100vh; }
 
 /* ── toolbar ──────────────────────────────────────────────────────────── */
@@ -32,9 +36,7 @@ body {
   width: 420px; flex: none; display: flex; flex-direction: column;
   background: #0f1218; border-right: 1px solid #1a1f27;
   overflow-y: auto;
-  user-select: none;
 }
-#rail input, #rail textarea { user-select: text; }
 .panel {
   padding: 12px 16px; border-bottom: 1px solid #161b23;
   display: flex; flex-direction: column; gap: 9px;
@@ -88,6 +90,16 @@ textarea { resize: vertical; }
 }
 .ratio-chips button:hover { background: #1a2030; color: #cdd5e0; }
 .ratio-chips button.active { background: #63391c; border-color: #c9822f; color: #ffdcb0; }
+
+/* seed: value + randomize toggle + recent-seed reuse */
+.seed-field { gap: 5px; }
+.seed-ctl { display: flex; align-items: center; gap: 6px; }
+.seed-rand {
+  display: flex; align-items: center; gap: 4px; flex: none;
+  font-size: 10px; color: #9aa3b0; white-space: nowrap; cursor: pointer;
+}
+.seed-rand input { accent-color: #d4914a; cursor: pointer; }
+.seed-recent { flex: 1; min-width: 0; font-size: 10px; padding: 3px 5px; }
 
 /* inline fields used in tab toolbars */
 .inline-field { flex-direction: row; align-items: center; gap: 6px; white-space: nowrap; }
@@ -305,3 +317,38 @@ details[open] > .ctl-cat::before { content: '▾ '; }
   color: #9aa3b0; font-size: 12px; user-select: none; cursor: pointer;
 }
 .live-toggle input { accent-color: #d4914a; cursor: pointer; }
+
+/* ── history rail ─────────────────────────────────────────────────────── */
+#history {
+  width: 208px; flex: none; display: flex; flex-direction: column;
+  background: #0f1218; border-left: 1px solid #1a1f27;
+}
+.hist-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 14px; border-bottom: 1px solid #161b23;
+  font-size: 11px; letter-spacing: 0.6px; text-transform: uppercase;
+  color: #5b6470; font-weight: 700;
+}
+.hist-list {
+  flex: 1; overflow-y: auto; min-height: 0;
+  padding: 10px; display: flex; flex-direction: column; gap: 10px;
+}
+.hist-empty { color: #4d5562; font-size: 11px; text-align: center; padding: 20px 8px; }
+.hist-item {
+  border: 1px solid #1a1f27; border-radius: 6px; background: #0b0e13;
+  overflow: hidden; display: flex; flex-direction: column;
+}
+.hist-thumb {
+  display: block; width: 100%; height: auto; cursor: pointer;
+  background: repeating-conic-gradient(#13161c 0% 25%, #0d1015 0% 50%) 50% / 16px 16px;
+  border-bottom: 1px solid #161b23;
+}
+.hist-thumb:hover { outline: 1px solid #c9822f; outline-offset: -1px; }
+.hist-body { padding: 6px 8px; display: flex; flex-direction: column; gap: 4px; }
+.hist-meta {
+  display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap;
+  font-size: 10px; color: #6b7482; font-variant-numeric: tabular-nums;
+}
+.hist-seed { color: #9aa3b0; cursor: pointer; }
+.hist-seed:hover { color: #f0a860; }
+.hist-actions { display: flex; gap: 10px; }
