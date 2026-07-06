@@ -210,8 +210,12 @@ function runGeneration(msg, onDone) {
   pipeline.krea2CaptureGates(!!msg.captureGates);
 
   var taps = buildTaps(msg);
+  // NB: krea2PrimeFromTaps(embeds, mask, opts, uncondEmbeds?, uncondMask?) —
+  // opts is the 3rd arg. Passing it 5th (as uncondMask) silently drops width/
+  // height and the render falls back to the 512² default (the size field is
+  // ignored whenever the band dial / image-prompt engages this taps path).
   var state = taps
-    ? pipeline.krea2PrimeFromTaps(taps.embeds, taps.mask, undefined, undefined, msg.opts)
+    ? pipeline.krea2PrimeFromTaps(taps.embeds, taps.mask, msg.opts)
     : pipeline.prime(msg.prompt, msg.opts);
 
   var dial = msg.dial;

@@ -166,6 +166,13 @@ function init() {
   let seedHistory = Array.isArray(prefs.seedHistory) ? prefs.seedHistory.slice(0, SEED_HISTORY_MAX) : [];
   let history = [];              // [{canvas, w, h, seed, steps, width, height}], newest first
 
+  // ── main-canvas viewport (aspect-correct fit + zoom + pan) ────────────────
+  const ZOOM_MIN = 0.1, ZOOM_MAX = 12;
+  let viewW = 512, viewH = 512;  // current image backing dims
+  let viewZoom = 1;              // user zoom on top of fit (1 = fit-to-viewport)
+  let viewPanX = 0, viewPanY = 0;
+  let zoomHideTimer = null;
+
   // restore persisted text fields
   if (prefs.modelDir) $('model-dir').value = prefs.modelDir;
   if (prefs.prompt)   $('prompt').value = prefs.prompt;
@@ -373,6 +380,55 @@ function init() {
     if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
     cctx.drawImage(bitmap, 0, 0);
     $('view-hint').style.display = 'none';
+    // Reset the viewport to fit when the image dimensions change; keep the
+    // user's zoom/pan across same-size re-renders (so A/B'ing a control holds
+    // the framing). This is also what fixes non-square display: the canvas is
+    // sized/positioned in JS from its true w×h, not clamped by CSS.
+    if (w !== viewW || h !== viewH) { viewW = w; viewH = h; resetView(); }
+    else applyView();
+  }
+
+  // ── main-canvas viewport: aspect-correct fit + zoom + pan ───────────────────
+  const clampZoom = (z) => Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z));
+  function fitScale() {
+    const wrap = $('canvas-wrap');
+    const availW = wrap.clientWidth - 48, availH = wrap.clientHeight - 48;
+    if (viewW <= 0 || viewH <= 0 || availW <= 0 || availH <= 0) return 1;
+    return Math.min(availW / viewW, availH / viewH);
+  }
+  function applyView() {
+    const wrap = $('canvas-wrap');
+    const s = fitScale() * viewZoom;
+    const dw = viewW * s, dh = viewH * s;
+    canvas.style.width = dw + 'px';
+    canvas.style.height = dh + 'px';
+    canvas.style.left = ((wrap.clientWidth - dw) / 2 + viewPanX) + 'px';
+    canvas.style.top = ((wrap.clientHeight - dh) / 2 + viewPanY) + 'px';
+    showZoom(s);
+  }
+  function resetView() { viewZoom = 1; viewPanX = 0; viewPanY = 0; applyView(); }
+  function showZoom(s) {
+    const z = $('view-zoom');
+    z.textContent = Math.round(s * 100) + '%';
+    z.classList.add('show');
+    if (zoomHideTimer) clearInterval(zoomHideTimer);
+    // setTimeout isn't guaranteed here; use a one-shot interval tick.
+    zoomHideTimer = setInterval(() => { z.classList.remove('show'); clearInterval(zoomHideTimer); zoomHideTimer = null; }, 1100);
+  }
+  function zoomAt(clientX, clientY, factor) {
+    const wrap = $('canvas-wrap');
+    const rect = wrap.getBoundingClientRect();
+    const mx = clientX - rect.left, my = clientY - rect.top;
+    const s0 = fitScale() * viewZoom;
+    const cx0 = (wrap.clientWidth - viewW * s0) / 2 + viewPanX;
+    const cy0 = (wrap.clientHeight - viewH * s0) / 2 + viewPanY;
+    const imgX = (mx - cx0) / s0, imgY = (my - cy0) / s0;   // image-space point under cursor
+    viewZoom = clampZoom(viewZoom * factor);
+    const s1 = fitScale() * viewZoom;
+    // solve pan so (mx,my) still maps to (imgX,imgY): cx1 = mx - imgX*s1
+    viewPanX = (mx - imgX * s1) - (wrap.clientWidth - viewW * s1) / 2;
+    viewPanY = (my - imgY * s1) - (wrap.clientHeight - viewH * s1) / 2;
+    applyView();
   }
 
   // ── seed: randomize + recent-seed reuse ────────────────────────────────────
@@ -1100,6 +1156,30 @@ function init() {
   refreshSeedRecent();
   renderHistory();
 
+  // ── main-canvas viewport interactions: wheel zoom, drag pan, dbl-click fit ──
+  $('canvas-wrap').addEventListener('wheel', (e) => {
+    e.preventDefault();
+    zoomAt(e.clientX, e.clientY, e.deltaY < 0 ? 1.12 : 1 / 1.12);
+  });
+  let panning = false, panStartX = 0, panStartY = 0, panBaseX = 0, panBaseY = 0;
+  canvas.addEventListener('pointerdown', (e) => {
+    panning = true; panStartX = e.clientX; panStartY = e.clientY;
+    panBaseX = viewPanX; panBaseY = viewPanY;
+    canvas.classList.add('grabbing');
+    if (canvas.setPointerCapture) { try { canvas.setPointerCapture(e.pointerId); } catch (_) {} }
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (!panning) return;
+    viewPanX = panBaseX + (e.clientX - panStartX);
+    viewPanY = panBaseY + (e.clientY - panStartY);
+    applyView();
+  });
+  const endPan = () => { panning = false; canvas.classList.remove('grabbing'); };
+  canvas.addEventListener('pointerup', endPan);
+  canvas.addEventListener('pointercancel', endPan);
+  canvas.addEventListener('dblclick', resetView);
+  window.addEventListener('resize', () => { if (loaded || history.length) applyView(); });
+
   // ── size: width × height, aspect presets, swap ─────────────────────────────
   function syncSize() {
     const w = roundSize($('width').value), h = roundSize($('height').value);
@@ -1158,6 +1238,7 @@ function init() {
   // ── boot ─────────────────────────────────────────────────────────────────
   buildUserSlots();
   refreshButtons();
+  applyView();   // center the (empty) canvas before the first render
   fetch('assets/axes_meta.json').then((r) => r.json()).then((meta) => {
     axesMeta = meta;
     buildAxisBank(meta);

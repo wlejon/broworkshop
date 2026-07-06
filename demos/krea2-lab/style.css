@@ -216,14 +216,27 @@ details[open] > .ctl-cat::before { content: '▾ '; }
 
 #canvas-wrap {
   flex: 1; display: flex; align-items: center; justify-content: center;
-  position: relative; background:
+  position: relative; overflow: hidden; background:
     repeating-conic-gradient(#13161c 0% 25%, #0d1015 0% 50%) 50% / 24px 24px;
 }
+/* The image is positioned/sized entirely from JS (aspect-correct fit + zoom +
+   pan). No max-width/height — those clamp W and H independently and distort a
+   non-square render. */
 #view {
-  max-width: calc(100% - 48px); max-height: calc(100% - 48px);
+  position: absolute; top: 0; left: 0;
   image-rendering: auto; box-shadow: 0 6px 30px #0008;
   border: 1px solid #1c222c; background: #07090d;
+  cursor: grab; touch-action: none;
 }
+#view.grabbing { cursor: grabbing; }
+.view-zoom {
+  position: absolute; right: 12px; bottom: 12px; z-index: 4;
+  padding: 3px 8px; border-radius: 5px; pointer-events: none;
+  background: #0c0f16cc; border: 1px solid #1e2532; color: #9aa3b0;
+  font-size: 11px; font-variant-numeric: tabular-nums; opacity: 0;
+  transition: opacity 0.4s ease;
+}
+.view-zoom.show { opacity: 1; }
 .pane-hint {
   position: absolute; color: #5b6470; font-size: 13px; pointer-events: none;
   text-align: center; max-width: 80%;
