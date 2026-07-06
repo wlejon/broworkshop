@@ -371,6 +371,47 @@ function init() {
   }
   function setBusy(b) { busy = b; refreshButtons(); }
 
+  // ── loading overlay + live VRAM meter ──────────────────────────────────
+  // The worker's loadModel() is one synchronous native call, so it can't report
+  // progress. But the main thread stays live and CUDA VRAM is device-wide, so we
+  // poll bro.gpu.memoryInfo() here and watch used VRAM climb as the checkpoint
+  // streams onto the card. (On a CPU build there is no VRAM to show — we say so.)
+  let vramTimer = null;
+  const gpu = () => (typeof bro !== 'undefined' && bro.gpu) ? bro.gpu : null;
+  function cardName() {
+    const g = gpu();
+    if (!g) return 'GPU';
+    return (g.deviceName && g.deviceName()) || (g.backend ? g.backend.toUpperCase() : 'GPU');
+  }
+  function updateVram() {
+    const g = gpu();
+    const fill = $('vram-fill'), nums = $('vram-nums'), note = $('vram-note');
+    const mem = g && g.memoryInfo ? g.memoryInfo() : null;
+    if (!mem || !mem.totalBytes) {
+      nums.textContent = 'no VRAM meter';
+      note.textContent = 'loading on ' + (g && g.backend ? g.backend.toUpperCase() : 'CPU');
+      fill.style.width = '0%';
+      return;
+    }
+    const gb = (b) => (b / 1e9).toFixed(1);
+    const used = mem.totalBytes - mem.freeBytes;
+    const pct = Math.max(0, Math.min(100, used / mem.totalBytes * 100));
+    fill.style.width = pct.toFixed(1) + '%';
+    nums.textContent = gb(used) + ' / ' + gb(mem.totalBytes) + ' GB';
+    note.textContent = gb(mem.freeBytes) + ' GB free · ' + pct.toFixed(0) + '% used';
+  }
+  function startLoadOverlay() {
+    $('vram-card').textContent = cardName();
+    $('load-overlay').classList.add('show');
+    updateVram();
+    if (vramTimer) clearInterval(vramTimer);
+    vramTimer = setInterval(updateVram, 200);
+  }
+  function stopLoadOverlay() {
+    if (vramTimer) { clearInterval(vramTimer); vramTimer = null; }
+    $('load-overlay').classList.remove('show');
+  }
+
   function doLoad() {
     const modelDir = $('model-dir').value.trim();
     if (!modelDir) { status('set a Krea 2 directory first', 'err'); return; }
@@ -378,15 +419,19 @@ function init() {
     setBusy(true);
     loaded = false;
     backend('loading…');
+    startLoadOverlay();
     status('loading model — this reads ~26GB of weights, give it a moment');
     client.send({ type: 'load', modelDir: modelDir, dictPath: 'assets/axes_turbo.bcd1' }, (err, msg) => {
+      stopLoadOverlay();
       if (err) { setBusy(false); backend('error', 'err'); status(String(err.message || err), 'err'); return; }
       loaded = true;
       setBusy(false);
       backend(msg.backend === 'cpu' ? 'CPU' : (msg.backend || 'gpu').toUpperCase(),
               msg.backend === 'cpu' ? 'warn' : 'ok');
+      $('backend').title = cardName();
       const cls = (msg.config && msg.config.modelClass) || 'model';
-      status(cls + ' ready · ' + (msg.axes || []).length + ' axes', 'ok');
+      const card = msg.backend === 'cpu' ? '' : ' · ' + cardName();
+      status(cls + ' ready · ' + (msg.axes || []).length + ' axes' + card, 'ok');
       rebuildMintedAxes();   // re-mint any axes saved from a prior session
     });
   }

@@ -188,6 +188,27 @@
           <div id="canvas-wrap">
             <canvas id="view" width="512" height="512"></canvas>
             <div id="view-hint" class="pane-hint">Load a model, then Generate.</div>
+
+            <!-- loading overlay: spinner + live VRAM meter for the card in use.
+                 The load is one synchronous native call on the worker thread, so
+                 it can't report progress — but the main thread is free and CUDA
+                 VRAM is device-wide, so we poll bro.gpu.memoryInfo() here and
+                 watch used VRAM climb as the ~26 GB streams in. -->
+            <div id="load-overlay">
+              <div class="load-card">
+                <div class="spinner" aria-hidden="true"></div>
+                <div class="load-title">loading Krea&nbsp;2 Turbo</div>
+                <div class="load-sub">reading the checkpoint into VRAM — give it a moment</div>
+                <div class="vram">
+                  <div class="vram-head">
+                    <span id="vram-card" class="vram-card">GPU</span>
+                    <span id="vram-nums" class="vram-nums"></span>
+                  </div>
+                  <div class="vram-track"><div id="vram-fill" class="vram-fill"></div></div>
+                  <div id="vram-note" class="vram-note"></div>
+                </div>
+              </div>
+            </div>
           </div>
           <div class="status-bar">
             <span id="status-text">idle</span>

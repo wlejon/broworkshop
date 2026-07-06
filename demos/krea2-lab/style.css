@@ -202,6 +202,49 @@ details[open] > .ctl-cat::before { content: '▾ '; }
   position: absolute; color: #5b6470; font-size: 13px; pointer-events: none;
   text-align: center; max-width: 80%;
 }
+
+/* ── loading overlay + live VRAM meter ────────────────────────────────────── */
+#load-overlay {
+  position: absolute; inset: 0; display: none;
+  align-items: center; justify-content: center;
+  background: rgba(8, 10, 14, 0.82); backdrop-filter: blur(2px);
+  z-index: 5;
+}
+#load-overlay.show { display: flex; }
+.load-card {
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
+  padding: 28px 34px; border-radius: 12px;
+  background: #10141c; border: 1px solid #1e2532;
+  box-shadow: 0 12px 48px #000a; min-width: 320px; max-width: 440px;
+}
+.spinner {
+  width: 34px; height: 34px; border-radius: 50%;
+  border: 3px solid #232c3c; border-top-color: #f0a860;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.load-title { color: #e6ebf2; font-size: 15px; font-weight: 700; letter-spacing: 0.3px; }
+.load-sub { color: #6b7482; font-size: 12px; text-align: center; margin-top: -4px; }
+.vram { width: 100%; display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.vram-head {
+  display: flex; align-items: baseline; gap: 8px; justify-content: space-between;
+  font-size: 11px;
+}
+.vram-card {
+  color: #aeb6c2; font-weight: 600; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; min-width: 0;
+}
+.vram-nums { color: #f0a860; font-variant-numeric: tabular-nums; flex: none; }
+.vram-track {
+  height: 12px; border-radius: 6px; background: #0a0d13;
+  border: 1px solid #1c2431; overflow: hidden;
+}
+.vram-fill {
+  height: 100%; width: 0%;
+  background: linear-gradient(90deg, #b8702c, #f0a860);
+  transition: width 0.25s ease-out;
+}
+.vram-note { color: #5b6470; font-size: 10px; font-variant-numeric: tabular-nums; }
 .status-bar {
   display: flex; align-items: center; gap: 12px;
   padding: 8px 16px; background: #0f1218; border-top: 1px solid #1a1f27;
