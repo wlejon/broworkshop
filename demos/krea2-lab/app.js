@@ -34,6 +34,24 @@ function savePrefs(p) {
   catch (e) { /* storage unavailable — non-fatal */ }
 }
 
+// Minted axes persist as their actual unit direction (6144 float32, base64 —
+// ~32KB per axis). Restoring is then a cheap registerAxis instead of a full
+// re-mint, and axes minted from history renders survive restarts too.
+function f32ToB64(f) {
+  const u = new Uint8Array(f.buffer, f.byteOffset, f.byteLength);
+  let s = '';
+  for (let i = 0; i < u.length; i += 8192) {
+    s += String.fromCharCode.apply(null, u.subarray(i, Math.min(i + 8192, u.length)));
+  }
+  return btoa(s);
+}
+function b64ToF32(s) {
+  const bin = atob(s);
+  const u = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+  return new Float32Array(u.buffer);
+}
+
 // ── worker client (one outstanding request at a time) ──────────────────────
 function createClient() {
   const worker = new Worker('lab/krea2-worker.js');
@@ -120,9 +138,6 @@ function toChwFp32(imageData) {
   }
   return { pixels: out, H: H, W: W };
 }
-function loadImageTensor(path) {
-  return toChwFp32(capLongSide(fileToImageData(path), 1024));
-}
 // Same tensor a file would produce, but sourced from an already-rendered canvas
 // (the history thumbnails hold full-resolution pixels).
 function tensorFromCanvas(cnv) {
@@ -183,8 +198,16 @@ function init() {
   // ── axis dictionary + minted axes ─────────────────────────────────────
   let axesMeta = {};          // { key: {category,label,order} } from assets/axes_meta.json
   let coreAxisEls = {};       // { key: {range, val} }
-  let userSlots = [];         // [{select,range,val,refresh}] x3
   let mintedAxes = [];        // [{name, kind:'text'|'image', pos, neg, aPath, bPath, consistency}]
+  // Per-minted-axis "use" strength (what its slider sits at; 0 = off). Keyed by
+  // axis name so it survives re-rendering the manager list and deleting other
+  // axes. Migrated from the old 3-slot model's {name,strength} entries.
+  let axisStrengths = {};
+  if (prefs.axisStrengths && typeof prefs.axisStrengths === 'object') {
+    axisStrengths = Object.assign({}, prefs.axisStrengths);
+  } else if (Array.isArray(prefs.slots)) {
+    prefs.slots.forEach((s) => { if (s && s.name) axisStrengths[s.name] = +s.strength || 0; });
+  }
   let mintImgA = null, mintImgB = null;   // {tensor:{pixels,H,W}, path}
 
   // ── gate paint state ───────────────────────────────────────────────────
@@ -205,13 +228,14 @@ function init() {
   let history = [];              // [{id, canvas, w, h, seed, steps, width, height}], newest first
   let histSeq = 0;               // stable per-entry id (history index shifts as it grows)
 
-  // ── main-canvas viewport (aspect-correct fit + zoom + pan) ────────────────
-  // Min zoom is "fit" (1.0): you can zoom IN, but not out past the whole image
-  // filling the stage. Zooming out below fit just shrank the image and opened a
-  // big backdrop margin (which read as a growing black "bar" below the image).
-  const ZOOM_MIN = 1.0, ZOOM_MAX = 12;
+  // ── main-canvas viewport (absolute-scale zoom + pan) ──────────────────────
+  // viewScale is CSS px per image px, so 1.0 is a true 100% (1:1) view. A fresh
+  // image opens at native size unless it's bigger than the stage, in which case
+  // it opens fit-to-stage (defaultScale). You can zoom out only to that default
+  // (no shrinking-image-with-black-margin) and in well past 100%.
   let viewW = 512, viewH = 512;  // current image backing dims
-  let viewZoom = 1;              // user zoom on top of fit (1 = fit-to-viewport)
+  let viewScale = 1;             // absolute display scale (1 = 100%, native pixels)
+  let viewUserZoomed = false;    // true once the user wheel/dbl-clicks off the default
   let viewPanX = 0, viewPanY = 0;
   let zoomHideTimer = null;
 
@@ -253,9 +277,10 @@ function init() {
       band: $('band').value,
       gateTxt: $('gate-txt').value, gateImg: $('gate-img').value,
       axisBank: axisBank,
-      slots: userSlots.map((s) => ({ name: s.select.value, strength: +s.range.value })),
+      axisStrengths: axisStrengths,
       mintedAxes: mintedAxes.map((m) => ({
         name: m.name, kind: m.kind, pos: m.pos, neg: m.neg, aPath: m.aPath, bPath: m.bPath,
+        dir: m.dir, consistency: m.consistency,
       })),
       spPrompt: $('sp-prompt').value, spSeed: $('sp-seed').value, spSteps: $('sp-steps').value,
       spAxis: $('sp-axis').value, spStrength: $('sp-strength').value,
@@ -336,59 +361,73 @@ function init() {
     return row;
   }
 
-  // ── "your axes" — 3 slots picking from mintedAxes ──────────────────────
-  function buildSlot() {
-    const row = document.createElement('div');
-    row.className = 'slot-row';
-    const sel = document.createElement('select');
-    const range = document.createElement('input');
-    range.type = 'range'; range.min = '-6'; range.max = '6'; range.step = '0.01'; range.value = '0';
-    const val = document.createElement('span');
-    val.className = 'ctl-val off'; val.textContent = '0';
-    function refresh() {
-      const v = +range.value;
-      val.textContent = (v > 0 ? '+' : '') + v.toFixed(2);
-      val.classList.toggle('off', v === 0);
-    }
-    sel.addEventListener('change', () => {
-      persist();
-      // Picking a minted axis re-opens its readout (what it's made of + sweep).
-      const def = mintedAxes.find((m) => m.name === sel.value);
-      if (def) showAxisInspector(def);
-      if (live) schedule('full');
-    });
-    range.addEventListener('input', () => { refresh(); persist(); if (live) schedule('preview'); });
-    range.addEventListener('change', () => { if (live) schedule('full'); });
-    val.addEventListener('dblclick', () => { range.value = '0'; refresh(); persist(); if (live) schedule('full'); });
-    row.appendChild(sel); row.appendChild(range); row.appendChild(val);
-    return { row: row, select: sel, range: range, val: val, refresh: refresh };
-  }
-  function buildUserSlots() {
+  // ── "your axes" — a managed list of every minted axis ──────────────────
+  // Each minted axis is its own row: name (click to inspect), a use-strength
+  // slider (0 = off), and a delete button. This replaces the old 3-slot picker
+  // so an axis can be turned off (slider to 0) or removed entirely at a glance —
+  // and there's no artificial 3-at-once cap.
+  function renderAxisManager() {
     const host = $('user-slots');
     host.innerHTML = '';
-    userSlots = [];
-    for (let i = 0; i < 3; i++) {
-      const slot = buildSlot();
-      host.appendChild(slot.row);
-      userSlots.push(slot);
+    if (mintedAxes.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'axis-mine-empty';
+      empty.textContent = 'No minted axes yet — mint one below to add your own control.';
+      host.appendChild(empty);
+      refreshSpAxisOptions();
+      return;
     }
-    refreshSlotOptions();
-  }
-  function refreshSlotOptions() {
-    userSlots.forEach((slot) => {
-      const cur = slot.select.value;
-      slot.select.innerHTML = '';
-      const off = document.createElement('option');
-      off.value = ''; off.textContent = '(off)';
-      slot.select.appendChild(off);
-      mintedAxes.forEach((m) => {
-        const o = document.createElement('option');
-        o.value = m.name; o.textContent = m.name;
-        slot.select.appendChild(o);
+    mintedAxes.forEach((m) => {
+      const row = document.createElement('div');
+      row.className = 'axis-mine-row';
+      const nm = document.createElement('button');
+      nm.type = 'button'; nm.className = 'axis-mine-name';
+      nm.textContent = m.name;
+      nm.title = 'inspect what "' + m.name + '" is made of';
+      nm.addEventListener('click', () => showAxisInspector(m));
+      const range = document.createElement('input');
+      range.type = 'range'; range.min = '-6'; range.max = '6'; range.step = '0.01';
+      range.value = String(+axisStrengths[m.name] || 0);
+      const val = document.createElement('span');
+      val.className = 'ctl-val';
+      function refresh() {
+        const v = +range.value;
+        val.textContent = (v > 0 ? '+' : '') + v.toFixed(2);
+        val.classList.toggle('off', v === 0);
+      }
+      refresh();
+      range.addEventListener('input', () => { axisStrengths[m.name] = +range.value; refresh(); persist(); });
+      range.addEventListener('change', () => { if (live) schedule('full'); });
+      val.addEventListener('dblclick', () => {
+        range.value = '0'; axisStrengths[m.name] = 0; refresh(); persist(); if (live) schedule('full');
       });
-      slot.select.value = mintedAxes.some((m) => m.name === cur) ? cur : '';
+      const del = document.createElement('button');
+      del.type = 'button'; del.className = 'axis-mine-del';
+      del.textContent = '×'; del.title = 'delete "' + m.name + '"';
+      del.addEventListener('click', () => removeMintedAxis(m.name));
+      row.appendChild(nm); row.appendChild(range); row.appendChild(val); row.appendChild(del);
+      host.appendChild(row);
     });
     refreshSpAxisOptions();
+  }
+  // Remove a minted axis entirely: drop it from the registry + persisted state,
+  // and if it was active, re-render so its effect disappears. The worker's
+  // registered vector is left in place (harmless — applyAxisControls only injects
+  // axes named in the per-generation control map, and we stop naming it).
+  function removeMintedAxis(name) {
+    const i = mintedAxes.findIndex((m) => m.name === name);
+    if (i < 0) return;
+    const wasActive = !!(+axisStrengths[name]);
+    mintedAxes.splice(i, 1);
+    delete axisStrengths[name];
+    if (lastMinted && lastMinted.name === name) {
+      lastMinted = null;
+      $('axis-inspect').style.display = 'none';
+    }
+    renderAxisManager();
+    refreshButtons();
+    persist();
+    if (wasActive && live) schedule('full');
   }
   function refreshSpAxisOptions() {
     const sel = $('sp-axis');
@@ -415,10 +454,9 @@ function init() {
       const v = +coreAxisEls[k].range.value;
       if (v) out[k] = v;
     }
-    userSlots.forEach((slot) => {
-      const name = slot.select.value;
-      const v = +slot.range.value;
-      if (name && v) out[name] = (out[name] || 0) + v;
+    mintedAxes.forEach((m) => {
+      const v = +(axisStrengths[m.name] || 0);
+      if (v) out[m.name] = (out[m.name] || 0) + v;
     });
     return out;
   }
@@ -437,17 +475,22 @@ function init() {
     else applyView();
   }
 
-  // ── main-canvas viewport: aspect-correct fit + zoom + pan ───────────────────
-  const clampZoom = (z) => Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z));
+  // ── main-canvas viewport: absolute-scale zoom + pan ─────────────────────────
   function fitScale() {
     const wrap = $('canvas-wrap');
     const availW = wrap.clientWidth - 16, availH = wrap.clientHeight - 16;
     if (viewW <= 0 || viewH <= 0 || availW <= 0 || availH <= 0) return 1;
     return Math.min(availW / viewW, availH / viewH);
   }
+  // Default = native size, but never larger than fits the stage. Zoom-out floor
+  // is that default; zoom-in ceiling is a generous multiple of native size.
+  function defaultScale() { return Math.min(1, fitScale()); }
+  function minScale() { return Math.min(1, fitScale()); }
+  function maxScale() { return Math.max(1, fitScale()) * 8; }
+  const clampScale = (s) => Math.max(minScale(), Math.min(maxScale(), s));
   function applyView() {
     const wrap = $('canvas-wrap');
-    const s = fitScale() * viewZoom;
+    const s = viewScale;
     const dw = viewW * s, dh = viewH * s;
     canvas.style.width = dw + 'px';
     canvas.style.height = dh + 'px';
@@ -455,7 +498,8 @@ function init() {
     canvas.style.top = ((wrap.clientHeight - dh) / 2 + viewPanY) + 'px';
     showZoom(s);
   }
-  function resetView() { viewZoom = 1; viewPanX = 0; viewPanY = 0; applyView(); }
+  function setScale(s) { viewScale = clampScale(s); applyView(); }
+  function resetView() { viewScale = defaultScale(); viewUserZoomed = false; viewPanX = 0; viewPanY = 0; applyView(); }
   function showZoom(s) {
     const z = $('view-zoom');
     z.textContent = Math.round(s * 100) + '%';
@@ -573,8 +617,8 @@ function init() {
     try { tensor = tensorFromCanvas(h.canvas); }
     catch (e) { mintStatus('could not use that render: ' + (e.message || e), 'err'); return; }
     paintMintThumb(which, h.canvas, h.w, h.h);
-    // No file path — this pixel source is a render, so the minted axis works this
-    // session but isn't reloadable across restarts (rebuildMintedAxes skips it).
+    // No file path — this pixel source is a render. Fine: the minted axis
+    // persists as its saved direction, not its source images.
     if (which === 'a') mintImgA = { tensor: tensor, path: '' };
     else mintImgB = { tensor: tensor, path: '' };
     mintStatus((which === 'a' ? 'toward' : 'away') + ' ← render · seed ' + h.seed, 'ok');
@@ -829,7 +873,7 @@ function init() {
   function addMintedAxis(def) {
     const existing = mintedAxes.findIndex((m) => m.name === def.name);
     if (existing >= 0) mintedAxes[existing] = def; else mintedAxes.push(def);
-    refreshSlotOptions();
+    renderAxisManager();
     persist();
   }
 
@@ -957,7 +1001,7 @@ function init() {
       mintProgressDone();
       if (err) { mintStatus(String(err.message || err), 'err'); return; }
       const def = { name: resp.name, kind: 'text', pos: pos, neg: neg,
-                    consistency: resp.consistency,
+                    consistency: resp.consistency, dir: f32ToB64(resp.axis),
                     components: resp.components, residual: resp.residual };
       addMintedAxis(def);
       showAxisInspector(def);
@@ -996,6 +1040,7 @@ function init() {
       mintProgressDone();
       if (err) { mintStatus(String(err.message || err), 'err'); return; }
       const def = { name: resp.name, kind: 'image', aPath: mintImgA.path, bPath: mintImgB.path,
+                    dir: f32ToB64(resp.axis),
                     components: resp.components, residual: resp.residual };
       addMintedAxis(def);
       showAxisInspector(def);
@@ -1004,7 +1049,9 @@ function init() {
     });
   }
   // Re-register axes saved from a prior session (sequentially — the client
-  // serializes requests; mirrors sana-lab's rebuildSavedAxes()).
+  // serializes requests). Each saved axis carries its minted direction, so
+  // restore is a cheap registerAxis — zero encodes at load. Legacy entries
+  // without a saved direction are dropped; re-mint by hand if still wanted.
   function rebuildMintedAxes() {
     const defs = Array.isArray(prefs.mintedAxes) ? prefs.mintedAxes.slice() : [];
     mintedAxes = [];
@@ -1012,39 +1059,21 @@ function init() {
     (function next() {
       if (i >= defs.length) {
         mintProgressDone();
-        // restore slot selections / strengths once every axis is back
-        const slots = Array.isArray(prefs.slots) ? prefs.slots : [];
-        slots.forEach((s, idx) => {
-          if (!userSlots[idx]) return;
-          userSlots[idx].select.value = s.name || '';
-          userSlots[idx].range.value = s.strength || 0;
-          userSlots[idx].refresh();
-        });
-        refreshSlotOptions();
+        renderAxisManager();   // per-axis strengths come from axisStrengths (name-keyed)
         return;
       }
       const d = defs[i++];
-      if (!d || !d.name) { next(); return; }
-      if (d.kind === 'text' && d.pos && d.neg) {
-        client.send({ type: 'mintTextAxis', name: d.name, pos: d.pos, neg: d.neg }, (err, resp) => {
-          if (!err) addMintedAxis({ name: resp.name, kind: 'text', pos: d.pos, neg: d.neg,
-                                    consistency: resp.consistency,
-                                    components: resp.components, residual: resp.residual });
-          next();
-        });
-      } else if (d.kind === 'image' && d.aPath && d.bPath) {
-        try {
-          const ta = loadImageTensor(d.aPath), tb = loadImageTensor(d.bPath);
-          client.send({
-            type: 'mintImageAxis', name: d.name,
-            a: { pixels: ta.pixels, H: ta.H, W: ta.W }, b: { pixels: tb.pixels, H: tb.H, W: tb.W },
-          }, (err, resp) => {
-            if (!err) addMintedAxis({ name: resp.name, kind: 'image', aPath: d.aPath, bPath: d.bPath,
-                                      components: resp.components, residual: resp.residual });
-            next();
-          });
-        } catch (e) { next(); }
-      } else next();
+      if (!d || !d.name || !d.dir) { next(); return; }
+      let axis;
+      try { axis = b64ToF32(d.dir); }
+      catch (e) { next(); return; }
+      client.send({ type: 'registerAxis', name: d.name, axis: axis }, (err, resp) => {
+        if (!err) addMintedAxis({ name: d.name, kind: d.kind, pos: d.pos, neg: d.neg,
+                                  aPath: d.aPath, bPath: d.bPath, dir: d.dir,
+                                  consistency: d.consistency,
+                                  components: resp.components, residual: resp.residual });
+        next();
+      });
     })();
   }
 
@@ -1367,8 +1396,8 @@ function init() {
   // Wheel = plain zoom in/out about the image centre; drag does all repositioning.
   $('canvas-wrap').addEventListener('wheel', (e) => {
     e.preventDefault();
-    viewZoom = clampZoom(viewZoom * (e.deltaY < 0 ? 1.12 : 1 / 1.12));
-    applyView();
+    viewUserZoomed = true;
+    setScale(viewScale * (e.deltaY < 0 ? 1.12 : 1 / 1.12));
   });
   let panning = false, panStartX = 0, panStartY = 0, panBaseX = 0, panBaseY = 0;
   canvas.addEventListener('pointerdown', (e) => {
@@ -1386,8 +1415,18 @@ function init() {
   const endPan = () => { panning = false; canvas.classList.remove('grabbing'); };
   canvas.addEventListener('pointerup', endPan);
   canvas.addEventListener('pointercancel', endPan);
-  canvas.addEventListener('dblclick', resetView);
-  window.addEventListener('resize', () => { if (loaded || history.length) applyView(); });
+  // Double-click toggles between an exact 100% (1:1) view and the default
+  // fit-to-stage framing, so native-pixel viewing is always one gesture away.
+  canvas.addEventListener('dblclick', () => {
+    if (Math.abs(viewScale - 1.0) < 0.005) { resetView(); }
+    else { viewUserZoomed = true; viewPanX = 0; viewPanY = 0; setScale(1.0); }
+  });
+  window.addEventListener('resize', () => {
+    if (!(loaded || history.length)) return;
+    // At the default framing, keep tracking the stage size; once the user has
+    // zoomed, preserve their absolute scale (just re-clamp to the new bounds).
+    if (viewUserZoomed) setScale(viewScale); else resetView();
+  });
 
   // ── size: width × height, aspect presets, swap ─────────────────────────────
   function syncSize() {
@@ -1447,7 +1486,7 @@ function init() {
   ['sp-prompt', 'sp-seed', 'sp-steps', 'sp-axis', 'sp-strength'].forEach((id) => $(id).addEventListener('change', persist));
 
   // ── boot ─────────────────────────────────────────────────────────────────
-  buildUserSlots();
+  renderAxisManager();
   refreshButtons();
   canvas.style.display = 'none';   // no empty canvas box until the first render
   fetch('assets/axes_meta.json').then((r) => r.json()).then((meta) => {

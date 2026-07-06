@@ -171,13 +171,24 @@ details.axis-cat-group:last-child { border-bottom: none; }
 details[open] > .ctl-cat::before { content: '▾ '; }
 .axis-cat-body { display: flex; flex-direction: column; gap: 6px; padding: 2px 0 4px; }
 
-/* "your axes" slots */
+/* "your axes" — managed minted-axis list */
 #user-slots { display: flex; flex-direction: column; gap: 6px; }
-.slot-row {
-  display: grid; grid-template-columns: 1fr 90px 42px;
+.axis-mine-empty { color: #6b7382; font-size: 11px; padding: 2px 0; }
+.axis-mine-row {
+  display: grid; grid-template-columns: 1fr 84px 44px 20px;
   align-items: center; gap: 8px;
 }
-.slot-row select { font-size: 11px; padding: 5px 6px; }
+.axis-mine-name {
+  background: none; border: none; padding: 0; text-align: left; cursor: pointer;
+  color: #aeb6c2; font-size: 11px; font-family: inherit;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.axis-mine-name:hover { color: #f0a860; text-decoration: underline; }
+.axis-mine-del {
+  background: none; border: none; padding: 0; cursor: pointer;
+  color: #4d5562; font-size: 15px; line-height: 1; text-align: center;
+}
+.axis-mine-del:hover { color: #e0674a; }
 
 /* mint sub-panels */
 .mint-sub {
