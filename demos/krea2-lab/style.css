@@ -91,15 +91,16 @@ textarea { resize: vertical; }
 .ratio-chips button:hover { background: #1a2030; color: #cdd5e0; }
 .ratio-chips button.active { background: #63391c; border-color: #c9822f; color: #ffdcb0; }
 
-/* seed: value + randomize toggle + recent-seed reuse */
+/* seed: value + randomize toggle + recent-seed reuse, on one row */
 .seed-field { gap: 5px; }
-.seed-ctl { display: flex; align-items: center; gap: 6px; }
+.seed-row { display: flex; align-items: center; gap: 8px; }
+.seed-row > input[type=number] { flex: 1; min-width: 60px; }
 .seed-rand {
-  display: flex; align-items: center; gap: 4px; flex: none;
-  font-size: 10px; color: #9aa3b0; white-space: nowrap; cursor: pointer;
+  display: flex; align-items: center; gap: 5px; flex: none;
+  font-size: 11px; color: #9aa3b0; white-space: nowrap; cursor: pointer;
 }
 .seed-rand input { accent-color: #d4914a; cursor: pointer; }
-.seed-recent { flex: 1; min-width: 0; font-size: 10px; padding: 3px 5px; }
+.seed-recent { flex: none; width: 82px; font-size: 10px; padding: 5px 6px; }
 
 /* inline fields used in tab toolbars */
 .inline-field { flex-direction: row; align-items: center; gap: 6px; white-space: nowrap; }
@@ -241,6 +242,9 @@ details[open] > .ctl-cat::before { content: '▾ '; }
   position: absolute; color: #5b6470; font-size: 13px; pointer-events: none;
   text-align: center; max-width: 80%;
 }
+/* #view is absolutely positioned (JS-controlled), so its hint can't rely on the
+   wrap's flex centering — pin it to the middle explicitly. */
+#view-hint { top: 50%; left: 50%; transform: translate(-50%, -50%); }
 
 /* ── loading overlay + live VRAM meter ────────────────────────────────────── */
 #load-overlay {

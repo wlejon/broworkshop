@@ -54,34 +54,34 @@
             <button id="btn-reset-settings" class="link"
                     title="Restore seed / steps / guidance / size to defaults">reset</button>
           </div>
-          <div class="grid">
-            <div class="field seed-field">seed
+          <label class="field seed-field">seed
+            <span class="seed-row">
               <input id="seed" type="number" value="0" step="1">
-              <div class="seed-ctl">
-                <label class="seed-rand" title="pick a fresh random seed on each Generate">
-                  <input id="rand-seed" type="checkbox" checked>🎲 random
-                </label>
-                <select id="seed-recent" class="seed-recent" title="reuse a recent seed"><option value="">recent…</option></select>
-              </div>
-            </div>
-            <label class="field">steps <span class="dim">· turbo 4–12 · raw 20+</span>
+              <span class="seed-rand" title="roll a fresh random seed on each Generate">
+                <input id="rand-seed" type="checkbox" checked> randomize
+              </span>
+              <select id="seed-recent" class="seed-recent" title="reuse a recent seed"><option value="">recent</option></select>
+            </span>
+          </label>
+          <div class="grid">
+            <label class="field">steps <span class="dim">· 4–12 / 20+</span>
               <input id="steps" type="number" value="8" min="1" max="60" step="1"></label>
             <label class="field">guidance <span class="dim">· def 1.0</span>
               <input id="guidance" type="number" value="1.0" step="0.5"></label>
-            <div class="field size-field">size <span class="dim" id="size-note">· 1.05 MP</span>
-              <div class="size-inputs">
-                <input id="width" type="number" value="1024" min="256" max="2048" step="16">
-                <span class="size-x">×</span>
-                <input id="height" type="number" value="1024" min="256" max="2048" step="16">
-                <button id="btn-swap-size" class="mini-btn" type="button" title="swap width / height (landscape ⇄ portrait)">⇄</button>
-              </div>
-              <div class="ratio-chips" id="ratio-chips">
-                <button type="button" data-w="1024" data-h="1024">1:1</button>
-                <button type="button" data-w="1216" data-h="832">3:2</button>
-                <button type="button" data-w="1152" data-h="896">4:3</button>
-                <button type="button" data-w="1344" data-h="768">16:9</button>
-                <button type="button" data-w="1536" data-h="640">21:9</button>
-              </div>
+          </div>
+          <div class="field size-field">size <span class="dim" id="size-note">· 1.05 MP</span>
+            <div class="size-inputs">
+              <input id="width" type="number" value="1024" min="256" max="2048" step="16">
+              <span class="size-x">×</span>
+              <input id="height" type="number" value="1024" min="256" max="2048" step="16">
+              <button id="btn-swap-size" class="mini-btn" type="button" title="swap width / height (landscape ⇄ portrait)">⇄</button>
+            </div>
+            <div class="ratio-chips" id="ratio-chips">
+              <button type="button" data-w="1024" data-h="1024">1:1</button>
+              <button type="button" data-w="1216" data-h="832">3:2</button>
+              <button type="button" data-w="1152" data-h="896">4:3</button>
+              <button type="button" data-w="1344" data-h="768">16:9</button>
+              <button type="button" data-w="1536" data-h="640">21:9</button>
             </div>
           </div>
           <p class="hint">Turbo is distilled: guidance 1.0 disables CFG (its

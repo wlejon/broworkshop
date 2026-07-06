@@ -379,6 +379,7 @@ function init() {
   function drawBitmap(bitmap, w, h) {
     if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
     cctx.drawImage(bitmap, 0, 0);
+    canvas.style.display = '';   // revealed on first render (hidden at boot)
     $('view-hint').style.display = 'none';
     // Reset the viewport to fit when the image dimensions change; keep the
     // user's zoom/pan across same-size re-renders (so A/B'ing a control holds
@@ -414,21 +415,6 @@ function init() {
     if (zoomHideTimer) clearInterval(zoomHideTimer);
     // setTimeout isn't guaranteed here; use a one-shot interval tick.
     zoomHideTimer = setInterval(() => { z.classList.remove('show'); clearInterval(zoomHideTimer); zoomHideTimer = null; }, 1100);
-  }
-  function zoomAt(clientX, clientY, factor) {
-    const wrap = $('canvas-wrap');
-    const rect = wrap.getBoundingClientRect();
-    const mx = clientX - rect.left, my = clientY - rect.top;
-    const s0 = fitScale() * viewZoom;
-    const cx0 = (wrap.clientWidth - viewW * s0) / 2 + viewPanX;
-    const cy0 = (wrap.clientHeight - viewH * s0) / 2 + viewPanY;
-    const imgX = (mx - cx0) / s0, imgY = (my - cy0) / s0;   // image-space point under cursor
-    viewZoom = clampZoom(viewZoom * factor);
-    const s1 = fitScale() * viewZoom;
-    // solve pan so (mx,my) still maps to (imgX,imgY): cx1 = mx - imgX*s1
-    viewPanX = (mx - imgX * s1) - (wrap.clientWidth - viewW * s1) / 2;
-    viewPanY = (my - imgY * s1) - (wrap.clientHeight - viewH * s1) / 2;
-    applyView();
   }
 
   // ── seed: randomize + recent-seed reuse ────────────────────────────────────
@@ -1157,9 +1143,11 @@ function init() {
   renderHistory();
 
   // ── main-canvas viewport interactions: wheel zoom, drag pan, dbl-click fit ──
+  // Wheel = plain zoom in/out about the image centre; drag does all repositioning.
   $('canvas-wrap').addEventListener('wheel', (e) => {
     e.preventDefault();
-    zoomAt(e.clientX, e.clientY, e.deltaY < 0 ? 1.12 : 1 / 1.12);
+    viewZoom = clampZoom(viewZoom * (e.deltaY < 0 ? 1.12 : 1 / 1.12));
+    applyView();
   });
   let panning = false, panStartX = 0, panStartY = 0, panBaseX = 0, panBaseY = 0;
   canvas.addEventListener('pointerdown', (e) => {
@@ -1238,7 +1226,7 @@ function init() {
   // ── boot ─────────────────────────────────────────────────────────────────
   buildUserSlots();
   refreshButtons();
-  applyView();   // center the (empty) canvas before the first render
+  canvas.style.display = 'none';   // no empty canvas box until the first render
   fetch('assets/axes_meta.json').then((r) => r.json()).then((meta) => {
     axesMeta = meta;
     buildAxisBank(meta);
