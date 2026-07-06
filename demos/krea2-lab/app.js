@@ -116,6 +116,12 @@ function toChwFp32(imageData) {
 function loadImageTensor(path) {
   return toChwFp32(capLongSide(fileToImageData(path), 1024));
 }
+// Same tensor a file would produce, but sourced from an already-rendered canvas
+// (the history thumbnails hold full-resolution pixels).
+function tensorFromCanvas(cnv) {
+  const id = cnv.getContext('2d').getImageData(0, 0, cnv.width, cnv.height);
+  return toChwFp32(capLongSide(id, 1024));
+}
 
 function init() {
   const prefs = loadPrefs();
@@ -164,10 +170,14 @@ function init() {
   const SEED_HISTORY_MAX = 10;   // "recent seeds" dropdown depth
   const HISTORY_MAX = 24;        // rendered-image thumbnails kept on the right
   let seedHistory = Array.isArray(prefs.seedHistory) ? prefs.seedHistory.slice(0, SEED_HISTORY_MAX) : [];
-  let history = [];              // [{canvas, w, h, seed, steps, width, height}], newest first
+  let history = [];              // [{id, canvas, w, h, seed, steps, width, height}], newest first
+  let histSeq = 0;               // stable per-entry id (history index shifts as it grows)
 
   // ── main-canvas viewport (aspect-correct fit + zoom + pan) ────────────────
-  const ZOOM_MIN = 0.1, ZOOM_MAX = 12;
+  // Min zoom is "fit" (1.0): you can zoom IN, but not out past the whole image
+  // filling the stage. Zooming out below fit just shrank the image and opened a
+  // big backdrop margin (which read as a growing black "bar" below the image).
+  const ZOOM_MIN = 1.0, ZOOM_MAX = 12;
   let viewW = 512, viewH = 512;  // current image backing dims
   let viewZoom = 1;              // user zoom on top of fit (1 = fit-to-viewport)
   let viewPanX = 0, viewPanY = 0;
@@ -450,7 +460,7 @@ function init() {
     const c = document.createElement('canvas');
     c.width = w; c.height = h;
     c.getContext('2d').drawImage(bitmap, 0, 0);
-    history.unshift({ canvas: c, w: w, h: h, seed: meta.seed, steps: meta.steps,
+    history.unshift({ id: ++histSeq, canvas: c, w: w, h: h, seed: meta.seed, steps: meta.steps,
                       width: meta.width, height: meta.height });
     if (history.length > HISTORY_MAX) history.length = HISTORY_MAX;
     renderHistory();
@@ -499,6 +509,40 @@ function init() {
       list.appendChild(item);
     });
     refreshHistButtons();
+    refreshMintHistPicks();
+  }
+  // Populate the "or a render…" dropdowns in the image-pair minter with the
+  // current render history, so an axis can be minted from two images you made.
+  function refreshMintHistPicks() {
+    ['a', 'b'].forEach((which) => {
+      const sel = $('mint-hist-' + which);
+      if (!sel) return;
+      const keep = sel.value;
+      sel.innerHTML = '<option value="">or a render…</option>';
+      history.forEach((h) => {
+        const o = document.createElement('option');
+        o.value = String(h.id);
+        o.textContent = h.width + '×' + h.height + ' · seed ' + h.seed;
+        sel.appendChild(o);
+      });
+      sel.value = keep;   // harmless if the entry aged out (falls back to placeholder)
+    });
+  }
+  function useHistoryForMint(which, id) {
+    const h = history.find((e) => e.id === +id);
+    if (!h) return;
+    let tensor;
+    try { tensor = tensorFromCanvas(h.canvas); }
+    catch (e) { mintStatus('could not use that render: ' + (e.message || e), 'err'); return; }
+    const thumb = $('mint-' + which + '-thumb');
+    try { thumb.style.backgroundImage = 'url(' + h.canvas.toDataURL() + ')'; thumb.classList.add('filled'); }
+    catch (e) { thumb.classList.add('filled'); }
+    // No file path — this pixel source is a render, so the minted axis works this
+    // session but isn't reloadable across restarts (rebuildMintedAxes skips it).
+    if (which === 'a') mintImgA = { tensor: tensor, path: '' };
+    else mintImgB = { tensor: tensor, path: '' };
+    mintStatus((which === 'a' ? 'toward' : 'away') + ' ← render · seed ' + h.seed, 'ok');
+    refreshButtons();
   }
   function reuseSeed(seed) {
     $('seed').value = String(seed);
@@ -1219,6 +1263,8 @@ function init() {
   $('btn-mint-image').addEventListener('click', doMintImage);
   $('btn-mint-pick-a').addEventListener('click', () => pickMintImage('a'));
   $('btn-mint-pick-b').addEventListener('click', () => pickMintImage('b'));
+  $('mint-hist-a').addEventListener('change', (e) => { useHistoryForMint('a', e.target.value); e.target.value = ''; });
+  $('mint-hist-b').addEventListener('change', (e) => { useHistoryForMint('b', e.target.value); e.target.value = ''; });
 
   $('btn-gate-capture').addEventListener('click', doGateCapture);
   $('btn-gate-clear').addEventListener('click', doGateClear);
