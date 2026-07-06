@@ -262,6 +262,17 @@ details[open] > .ctl-cat::before { content: '▾ '; }
   font-variant-numeric: tabular-nums;
 }
 
+/* input flagged when a mint is blocked for want of a name — a brief red
+   flash + nudge draws the eye to the field instead of the far status bar */
+@keyframes flash-err {
+  0%   { border-color: #ff6b6b; box-shadow: 0 0 0 2px #ff6b6b55; transform: translateX(0); }
+  15%  { transform: translateX(-4px); }
+  45%  { transform: translateX(4px); }
+  70%  { transform: translateX(-2px); }
+  100% { border-color: #ff6b6b00; box-shadow: 0 0 0 2px #ff6b6b00; transform: translateX(0); }
+}
+.flash-err { animation: flash-err 0.6s ease-out; }
+
 /* ── Image Axis tab: pick a toward/away pair from a gallery of renders ──── */
 .imgaxis-body {
   flex: 1; min-height: 0; overflow-y: auto;

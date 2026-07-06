@@ -663,6 +663,17 @@ function init() {
   // Feedback for image-pair minting lands in both the rail hint and the tab's
   // own status bar, so it's visible wherever the user is looking.
   function mintImgStatus(msg, kind) { mintStatus(msg, kind); imgAxisStatus(msg, kind); }
+  // Draw the eye to the name field (right next to the Mint button) when a mint
+  // is blocked for want of a name — the bottom status bar is too far to notice.
+  function flagMintName() {
+    const el = $('mint-image-name');
+    if (!el) return;
+    el.focus();
+    el.classList.remove('flash-err');
+    // Force reflow so re-adding the class restarts the animation on repeat clicks.
+    void el.offsetWidth;
+    el.classList.add('flash-err');
+  }
   function useHistoryForMint(which, id) {
     const h = history.find((e) => e.id === +id);
     if (!h) return;
@@ -1111,7 +1122,7 @@ function init() {
   function doMintImage() {
     if (!loaded || busy || !mintImgA || !mintImgB) return;
     const name = $('mint-image-name').value.trim();
-    if (!name) { mintImgStatus('name the axis first', 'err'); return; }
+    if (!name) { flagMintName(); mintImgStatus('name the axis first', 'err'); return; }
     setBusy(true);
     mintImgStatus('minting "' + name + '" from the image pair…');
     client.send({
