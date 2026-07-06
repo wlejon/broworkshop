@@ -131,7 +131,10 @@ function init() {
   // Turbo's intended no-CFG mode (see brodiffusion/include/brodiffusion/
   // dit/krea2.h's CFG-convention comment: Raw g=4.5 -> guidance 5.5, Turbo
   // g=0 -> guidance 1.0).
-  const DEFAULTS = { seed: 0, steps: 8, guidance: 1.0, size: 1024 };
+  const DEFAULTS = { seed: 0, steps: 8, guidance: 1.0, width: 1024, height: 1024 };
+  const SIZE_MIN = 256, SIZE_MAX = 2048, SIZE_MULT = 16;   // Krea 2: /8 VAE × /2 patch = /16
+  const roundSize = (n) => Math.max(SIZE_MIN, Math.min(SIZE_MAX,
+    Math.round((+n || DEFAULTS.width) / SIZE_MULT) * SIZE_MULT));
   const MAXCHARS = 1000;
   const PREVIEW_STEPS = 4;
   const PREVIEW_SIZE = 512;
@@ -160,9 +163,13 @@ function init() {
   if (prefs.modelDir) $('model-dir').value = prefs.modelDir;
   if (prefs.prompt)   $('prompt').value = prefs.prompt;
   if (prefs.negPrompt != null) $('neg-prompt').value = prefs.negPrompt;
-  ['seed', 'steps', 'guidance', 'size'].forEach((k) => {
+  ['seed', 'steps', 'guidance'].forEach((k) => {
     if (prefs[k] != null) $(k).value = prefs[k];
   });
+  // width/height replaced the old square `size` select — migrate legacy prefs.
+  const legacySize = prefs.size != null ? +prefs.size : null;
+  if (prefs.width != null) $('width').value = prefs.width; else if (legacySize) $('width').value = legacySize;
+  if (prefs.height != null) $('height').value = prefs.height; else if (legacySize) $('height').value = legacySize;
   if (prefs.dialPregate != null) $('dial-pregate').value = prefs.dialPregate;
   if (prefs.dialPrescale != null) $('dial-prescale').value = prefs.dialPrescale;
   if (prefs.band != null) $('band').value = prefs.band;
@@ -182,7 +189,8 @@ function init() {
       prompt: $('prompt').value,
       negPrompt: $('neg-prompt').value,
       seed: $('seed').value, steps: $('steps').value,
-      guidance: $('guidance').value, size: $('size').value,
+      guidance: $('guidance').value,
+      width: $('width').value, height: $('height').value,
       live: live,
       dialPregate: $('dial-pregate').value, dialPrescale: $('dial-prescale').value,
       band: $('band').value,
@@ -440,12 +448,17 @@ function init() {
   // frame (sana-lab's schedule/pump convention); Generate always runs 'full'.
   function genOpts(quality) {
     const preview = quality === 'preview';
-    const fieldSize = +$('size').value;
+    let w = roundSize($('width').value);
+    let h = roundSize($('height').value);
     const fieldSteps = +$('steps').value || DEFAULTS.steps;
-    const size = preview ? Math.min(fieldSize, PREVIEW_SIZE) : fieldSize;
+    // Preview: scale the whole frame down under PREVIEW_SIZE, keeping aspect.
+    if (preview && Math.max(w, h) > PREVIEW_SIZE) {
+      const s = PREVIEW_SIZE / Math.max(w, h);
+      w = roundSize(w * s); h = roundSize(h * s);
+    }
     const steps = preview ? Math.min(fieldSteps, PREVIEW_STEPS) : fieldSteps;
     return {
-      width: size, height: size, steps: steps,
+      width: w, height: h, steps: steps,
       guidanceScale: +$('guidance').value || DEFAULTS.guidance,
       seed: +$('seed').value || 0,
     };
@@ -483,7 +496,7 @@ function init() {
     setBusy(true);
     const msg = buildGenerateMsg(quality);
     status((quality === 'preview' ? 'preview' : 'generating') + ' · ' +
-           msg.opts.width + '² · ' + msg.opts.steps + ' steps…');
+           msg.opts.width + '×' + msg.opts.height + ' · ' + msg.opts.steps + ' steps…');
     $('timing').textContent = '';
     client.send(msg, (err, resp) => {
       setBusy(false);
@@ -813,9 +826,8 @@ function init() {
     if (!loaded || busy) return;
     const prompt = $('sp-prompt').value.trim();
     if (!prompt) { spStatus('enter a prompt', 'err'); return; }
-    const size = +$('size').value;
     const opts = {
-      width: size, height: size,
+      width: roundSize($('width').value), height: roundSize($('height').value),
       steps: +$('sp-steps').value || 4,
       guidanceScale: +$('guidance').value || DEFAULTS.guidance,
       seed: +$('sp-seed').value || 0,
@@ -908,7 +920,9 @@ function init() {
     $('seed').value = DEFAULTS.seed;
     $('steps').value = DEFAULTS.steps;
     $('guidance').value = DEFAULTS.guidance;
-    $('size').value = String(DEFAULTS.size);
+    $('width').value = String(DEFAULTS.width);
+    $('height').value = String(DEFAULTS.height);
+    syncSize();
     persist();
   });
   $('btn-reset-axes').addEventListener('click', () => {
@@ -923,8 +937,42 @@ function init() {
     const d = window.showOpenFolderDialog ? window.showOpenFolderDialog($('model-dir').value.trim()) : null;
     if (d) { $('model-dir').value = d; persist(); }
   });
-  ['model-dir', 'prompt', 'neg-prompt', 'seed', 'steps', 'guidance', 'size']
+  ['model-dir', 'prompt', 'neg-prompt', 'seed', 'steps', 'guidance', 'width', 'height']
     .forEach((id) => $(id).addEventListener('change', persist));
+
+  // ── size: width × height, aspect presets, swap ─────────────────────────────
+  function syncSize() {
+    const w = roundSize($('width').value), h = roundSize($('height').value);
+    const mp = (w * h / 1e6).toFixed(2);
+    $('size-note').textContent = '· ' + mp + ' MP';
+    // Highlight a preset chip when the current size matches it exactly.
+    const chips = $('ratio-chips').querySelectorAll('button');
+    for (const c of chips) {
+      const cw = +c.dataset.w, ch = +c.dataset.h;
+      c.classList.toggle('active', (cw === w && ch === h) || (ch === w && cw === h));
+    }
+  }
+  function applySize(w, h, full) {
+    $('width').value = roundSize(w);
+    $('height').value = roundSize(h);
+    syncSize(); persist();
+    if (live) schedule(full ? 'full' : 'preview');
+  }
+  $('width').addEventListener('input', syncSize);
+  $('height').addEventListener('input', syncSize);
+  // Normalize to the /16 grid only once the user commits (change), not mid-type.
+  $('width').addEventListener('change', () => applySize($('width').value, $('height').value, true));
+  $('height').addEventListener('change', () => applySize($('width').value, $('height').value, true));
+  $('btn-swap-size').addEventListener('click', () => applySize($('height').value, $('width').value, true));
+  $('ratio-chips').querySelectorAll('button').forEach((c) => {
+    c.addEventListener('click', () => {
+      // Second click on the active chip flips its orientation.
+      const w = +c.dataset.w, h = +c.dataset.h;
+      if (c.classList.contains('active') && +$('width').value !== h) applySize(h, w, true);
+      else applySize(w, h, true);
+    });
+  });
+  syncSize();
   $('prompt').addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); doGenerate(); }
   });

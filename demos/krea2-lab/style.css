@@ -75,6 +75,20 @@ textarea { resize: vertical; }
 .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .iconbtn { flex: none; padding: 6px 9px; }
 
+/* size: free width × height + aspect-ratio presets */
+.size-field { gap: 5px; }
+.size-inputs { display: flex; align-items: center; gap: 6px; }
+.size-inputs input[type=number] { width: 100%; text-align: center; font-variant-numeric: tabular-nums; }
+.size-x { flex: none; color: #4d5562; font-size: 12px; }
+.mini-btn { flex: none; padding: 6px 8px; line-height: 1; font-size: 13px; }
+.ratio-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.ratio-chips button {
+  padding: 3px 8px; font-size: 10px;
+  background: #12161e; border-color: #20262f; color: #8b94a3;
+}
+.ratio-chips button:hover { background: #1a2030; color: #cdd5e0; }
+.ratio-chips button.active { background: #63391c; border-color: #c9822f; color: #ffdcb0; }
+
 /* inline fields used in tab toolbars */
 .inline-field { flex-direction: row; align-items: center; gap: 6px; white-space: nowrap; }
 .inline-field input[type=text], .inline-field input[type=number], .inline-field select { width: auto; }
