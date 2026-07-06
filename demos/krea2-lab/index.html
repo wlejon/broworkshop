@@ -171,6 +171,17 @@
           </div>
 
           <p id="mint-status" class="hint"></p>
+          <div id="mint-progress" class="mint-progress"><div id="mint-progress-fill"></div></div>
+
+          <!-- what the minted direction is made of: cosine vs the 18 named
+               bank axes + span residual, and an on-demand isolation sweep -->
+          <div class="mint-sub" id="axis-inspect" style="display: none">
+            <div class="mint-sub-head">minted axis · <span id="axis-inspect-name"></span></div>
+            <div id="axis-inspect-bars" class="axis-bars"></div>
+            <p class="hint" id="axis-inspect-note"></p>
+            <button id="btn-axis-sweep" class="link">render a −6…+6 sweep of this axis alone</button>
+            <div id="axis-sweep-strip" class="axis-sweep"></div>
+          </div>
         </section>
 
         <!-- 6. gate controls (global scale only — the brush workflow lives in the Gate Paint tab) -->

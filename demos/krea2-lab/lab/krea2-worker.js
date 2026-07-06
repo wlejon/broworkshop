@@ -41,16 +41,27 @@
 //                           maskData}
 //        <- spatialDone   {bitmap, width, height, ms}
 //   main -> mintTextAxis  {name, pos, neg}
-//        <- axisMinted    {name, consistency}
+//        <- mintProgress  {label, done, total}      (interim, several)
+//        <- axisMinted    {name, consistency, components, residual}
 //   main -> mintImageAxis {name, a: {pixels,H,W}, b: {pixels,H,W}}
-//        <- axisMinted    {name}
+//        <- mintProgress  {label, done, total}      (interim, several)
+//        <- axisMinted    {name, components, residual}
 //   main -> removeControl {name}
 //        <- removed       {name}
 //   errors come back as   <- error {stage, message}
+//
+// axisMinted's `components` explain WHAT the minted direction is made of:
+// its cosine against each of the dictionary's 18 named axes (sorted by
+// magnitude), plus `residual` — the fraction of the direction that lies
+// outside the span of all 18 (i.e. genuinely its own). Both are null when
+// the engine build predates pipeline.controlVector().
 
 var pipeline = null;   // native Pipeline handle
 var hiddenSize = 0;
 var numLayers = 0;
+var dictAxes = [];     // the loaded dictionary's axis names (the named bank
+                       // minted axes are decomposed against — never includes
+                       // runtime/minted axes, so the explanation stays stable)
 
 // The 6 fixed scenes krea-research's mint_text_axis() averages a text-pair
 // diff over (axis_factory.py's SCENES[:6]) — robustifies the direction
@@ -122,6 +133,7 @@ function handleLoad(msg) {
       pipeline.loadControlDictionary(msg.dictPath);
       axes = pipeline.controlAxes();
     }
+    dictAxes = axes.slice();
 
     var tensor = (typeof bro !== 'undefined' && bro.tensor) ? bro.tensor : null;
     self.postMessage({
@@ -346,6 +358,81 @@ function unitNormalize(v) {
   return out;
 }
 
+// Interim progress for the long minting encodes (the UI shows a bar).
+function mintProgress(label, done, total) {
+  self.postMessage({ type: 'mintProgress', label: label, done: done, total: total });
+}
+
+// Explain a freshly minted unit direction against the dictionary's named
+// bank: per-axis cosine (the bank directions are unit vectors by the BCD1
+// format), plus how much of the direction lies OUTSIDE the bank's span.
+// The axes aren't orthogonal, so summing squared cosines would overcount —
+// project onto the span properly (solve the 18x18 Gram system) and report
+// residual = |axis - proj| as the honest "genuinely its own" fraction.
+// Returns null when the engine build lacks pipeline.controlVector().
+function explainAxis(axis) {
+  if (!pipeline.controlVector || !dictAxes.length) return null;
+  var n = dictAxes.length, dim = axis.length;
+  var units = [], keptNames = [];
+  for (var i = 0; i < n; i++) {
+    var dir = pipeline.controlVector(dictAxes[i]).dir;
+    if (dir.length !== dim) continue;   // stale dict vs runtime dim mismatch
+    units.push(unitNormalize(dir));
+    keptNames.push(dictAxes[i]);
+  }
+  n = units.length;
+  if (!n) return null;
+
+  var b = new Float64Array(n);          // b_i = <u_i, axis>  (= cosine)
+  for (var i = 0; i < n; i++) {
+    var dot = 0;
+    for (var c = 0; c < dim; c++) dot += units[i][c] * axis[c];
+    b[i] = dot;
+  }
+  // Gram matrix (symmetric — fill the lower triangle, mirror the upper) +
+  // Gaussian elimination with partial pivoting (n is 18, this is trivial).
+  var M = [];
+  for (var i = 0; i < n; i++) M.push(new Float64Array(n));
+  for (var i = 0; i < n; i++) {
+    for (var j = 0; j <= i; j++) {
+      var dot = 0;
+      for (var c = 0; c < dim; c++) dot += units[i][c] * units[j][c];
+      M[i][j] = dot; M[j][i] = dot;
+    }
+  }
+  var coef = new Float64Array(b);
+  for (var col = 0; col < n; col++) {
+    var piv = col;
+    for (var r = col + 1; r < n; r++) if (Math.abs(M[r][col]) > Math.abs(M[piv][col])) piv = r;
+    if (Math.abs(M[piv][col]) < 1e-12) { coef[col] = 0; continue; }
+    if (piv !== col) {
+      var tr = M[piv]; M[piv] = M[col]; M[col] = tr;
+      var tb = coef[piv]; coef[piv] = coef[col]; coef[col] = tb;
+    }
+    for (var r = col + 1; r < n; r++) {
+      var f = M[r][col] / M[col][col];
+      if (!f) continue;
+      for (var c2 = col; c2 < n; c2++) M[r][c2] -= f * M[col][c2];
+      coef[r] -= f * coef[col];
+    }
+  }
+  for (var col = n - 1; col >= 0; col--) {
+    if (Math.abs(M[col][col]) < 1e-12) continue;
+    var s = coef[col];
+    for (var c2 = col + 1; c2 < n; c2++) s -= M[col][c2] * coef[c2];
+    coef[col] = s / M[col][col];
+  }
+  // |proj|^2 = b . coef (axis is unit), clamp for float noise.
+  var explained = 0;
+  for (var i = 0; i < n; i++) explained += b[i] * coef[i];
+  explained = Math.max(0, Math.min(1, explained));
+
+  var components = [];
+  for (var i = 0; i < n; i++) components.push({ name: keptNames[i], cos: b[i] });
+  components.sort(function (x, y) { return Math.abs(y.cos) - Math.abs(x.cos); });
+  return { components: components, residual: Math.sqrt(1 - explained) };
+}
+
 // Mint a user axis from a text pair, averaged over SCENES for robustness
 // (mirrors krea-research's mint_text_axis). Registers live via
 // setControlVector — coexists with the loaded dictionary's 18 core axes.
@@ -356,8 +443,11 @@ function handleMintTextAxis(msg) {
     if (!name || !pos || !neg) throw new Error('need a name and both descriptions');
 
     var diffs = [], cols = 0;
+    var total = SCENES.length * 2;
     for (var i = 0; i < SCENES.length; i++) {
+      mintProgress('scene ' + (i + 1) + '/' + SCENES.length + ' · toward', i * 2, total);
       var mp = meanRows(fusedFor(SCENES[i] + ', ' + pos));
+      mintProgress('scene ' + (i + 1) + '/' + SCENES.length + ' · away', i * 2 + 1, total);
       var mn = meanRows(fusedFor(SCENES[i] + ', ' + neg));
       cols = mp.length;
       var diff = new Float64Array(cols);
@@ -386,7 +476,12 @@ function handleMintTextAxis(msg) {
     var axis = unitNormalize(mean);
 
     pipeline.setControlVector(name, axis, 0.0, 1.0);
-    self.postMessage({ type: 'axisMinted', name: name, consistency: consistency });
+    var explain = explainAxis(axis);
+    self.postMessage({
+      type: 'axisMinted', name: name, consistency: consistency,
+      components: explain ? explain.components : null,
+      residual: explain ? explain.residual : null,
+    });
   } catch (e) {
     fail('mintTextAxis', e);
   }
@@ -400,9 +495,13 @@ function handleMintImageAxis(msg) {
     var name = (msg.name || '').trim();
     if (!name || !msg.a || !msg.b) throw new Error('need a name and both images');
 
+    mintProgress('encoding "toward" image (vision tower)', 0, 4);
     var ta = pipeline.krea2EncodeImagePrompt(msg.a.pixels, msg.a.H, msg.a.W);
+    mintProgress('encoding "away" image (vision tower)', 1, 4);
     var tb = pipeline.krea2EncodeImagePrompt(msg.b.pixels, msg.b.H, msg.b.W);
+    mintProgress('fusing "toward" conditioning', 2, 4);
     var ma = meanRows(pipeline.krea2EncodeText(ta.embeds, ta.mask));
+    mintProgress('fusing "away" conditioning', 3, 4);
     var mb = meanRows(pipeline.krea2EncodeText(tb.embeds, tb.mask));
     var cols = ma.length;
     var diff = new Float64Array(cols);
@@ -410,7 +509,12 @@ function handleMintImageAxis(msg) {
     var axis = unitNormalize(diff);
 
     pipeline.setControlVector(name, axis, 0.0, 1.0);
-    self.postMessage({ type: 'axisMinted', name: name });
+    var explain = explainAxis(axis);
+    self.postMessage({
+      type: 'axisMinted', name: name,
+      components: explain ? explain.components : null,
+      residual: explain ? explain.residual : null,
+    });
   } catch (e) {
     fail('mintImageAxis', e);
   }

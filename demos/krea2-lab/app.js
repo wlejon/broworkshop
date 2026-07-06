@@ -37,13 +37,19 @@ function savePrefs(p) {
 // ── worker client (one outstanding request at a time) ──────────────────────
 function createClient() {
   const worker = new Worker('lab/krea2-worker.js');
-  let pending = null, readyCb = null, ready = false;
+  let pending = null, readyCb = null, ready = false, progressCb = null;
 
   worker.onmessage = function (e) {
     const msg = e.data || {};
     if (msg.type === 'ready') {
       ready = true;
       if (readyCb) { const r = readyCb; readyCb = null; r(); }
+      return;
+    }
+    // Interim progress — reported mid-request, must NOT consume the pending
+    // response callback.
+    if (msg.type === 'mintProgress') {
+      if (progressCb) progressCb(msg);
       return;
     }
     const cb = pending; pending = null;
@@ -59,6 +65,7 @@ function createClient() {
   }
   return {
     onReady: (cb) => { if (ready) cb(); else readyCb = cb; },
+    onProgress: (cb) => { progressCb = cb; },
     send: send,
   };
 }
@@ -343,7 +350,13 @@ function init() {
       val.textContent = (v > 0 ? '+' : '') + v.toFixed(2);
       val.classList.toggle('off', v === 0);
     }
-    sel.addEventListener('change', () => { persist(); if (live) schedule('full'); });
+    sel.addEventListener('change', () => {
+      persist();
+      // Picking a minted axis re-opens its readout (what it's made of + sweep).
+      const def = mintedAxes.find((m) => m.name === sel.value);
+      if (def) showAxisInspector(def);
+      if (live) schedule('full');
+    });
     range.addEventListener('input', () => { refresh(); persist(); if (live) schedule('preview'); });
     range.addEventListener('change', () => { if (live) schedule('full'); });
     val.addEventListener('dblclick', () => { range.value = '0'; refresh(); persist(); if (live) schedule('full'); });
@@ -616,6 +629,7 @@ function init() {
     $('btn-load').disabled = busy;
     $('btn-mint-text').disabled = busyOrUnloaded;
     $('btn-mint-image').disabled = busyOrUnloaded || !mintImgA || !mintImgB;
+    $('btn-axis-sweep').disabled = busyOrUnloaded || !lastMinted;
     $('btn-gate-capture').disabled = busyOrUnloaded;
     $('btn-gate-apply').disabled = busyOrUnloaded || !gateCapture;
     $('btn-sp-base').disabled = busyOrUnloaded;
@@ -801,12 +815,135 @@ function init() {
     el.textContent = msg;
     el.className = 'hint' + (kind === 'err' ? ' err' : kind === 'warn' ? ' warn' : '');
   }
+  // Interim minting progress (the worker posts a message before each encode).
+  client.onProgress((p) => {
+    $('mint-progress').classList.add('show');
+    $('mint-progress-fill').style.width =
+      Math.round((p.done / Math.max(1, p.total)) * 100) + '%';
+    mintStatus('minting · ' + p.label);
+  });
+  function mintProgressDone() {
+    $('mint-progress').classList.remove('show');
+    $('mint-progress-fill').style.width = '0%';
+  }
   function addMintedAxis(def) {
     const existing = mintedAxes.findIndex((m) => m.name === def.name);
     if (existing >= 0) mintedAxes[existing] = def; else mintedAxes.push(def);
     refreshSlotOptions();
     persist();
   }
+
+  // ── minted-axis readout: what the direction is made of ──────────────────
+  // Signed cosine bars against the 18 named bank axes + the span residual
+  // ("how much of it is genuinely its own"), computed by the worker at mint
+  // time. Answers "what did the mint actually pick out of these images?"
+  // without guessing from slider sweeps.
+  let lastMinted = null;   // the def currently shown in the inspector
+  function showAxisInspector(def) {
+    lastMinted = def;
+    $('axis-inspect').style.display = '';
+    $('axis-inspect-name').textContent = def.name;
+    const bars = $('axis-inspect-bars');
+    bars.innerHTML = '';
+    const strip = $('axis-sweep-strip');
+    strip.innerHTML = ''; strip.classList.remove('show');
+    const note = $('axis-inspect-note');
+    if (def.components && def.components.length) {
+      def.components.slice(0, 6).forEach((c) => {
+        const row = document.createElement('div'); row.className = 'axis-bar-row';
+        const nm = document.createElement('span'); nm.className = 'axis-bar-name';
+        nm.textContent = (axesMeta[c.name] && axesMeta[c.name].label) || c.name;
+        nm.title = c.name;
+        const track = document.createElement('div'); track.className = 'axis-bar-track';
+        const fill = document.createElement('div');
+        fill.className = 'axis-bar-fill ' + (c.cos >= 0 ? 'pos' : 'neg');
+        fill.style.width = Math.min(50, Math.abs(c.cos) * 50) + '%';
+        track.appendChild(fill);
+        const val = document.createElement('span'); val.className = 'axis-bar-val';
+        val.textContent = (c.cos > 0 ? '+' : '') + c.cos.toFixed(2);
+        row.appendChild(nm); row.appendChild(track); row.appendChild(val);
+        bars.appendChild(row);
+      });
+      // residual² is the energy fraction outside the whole 18-axis span —
+      // the honest "not any named thing" number (the axes aren't orthogonal,
+      // so per-axis cosines alone would overcount).
+      const own = Math.round(def.residual * def.residual * 100);
+      note.textContent = 'cosine vs the named bank (top 6 of 18) · ' + own +
+        '% of its energy lies outside all 18 — genuinely its own direction' +
+        (def.kind === 'text' && def.consistency != null
+          ? ' · consistency ' + def.consistency.toFixed(2) : '');
+    } else {
+      note.textContent = 'no decomposition — this engine build predates ' +
+        'pipeline.controlVector(); rebuild and re-mint to see what the axis is made of';
+    }
+    refreshButtons();
+  }
+
+  // ── isolation sweep: SEE what the axis does, everything else neutral ────
+  // 5 small renders at alpha −6…+6 with the same prompt/seed and every other
+  // control zeroed — a probe strip, the ground truth for "what does this
+  // axis move". Click a frame to view it full-size on the render tab.
+  const SWEEP_ALPHAS = [-6, -3, 0, 3, 6];
+  const SWEEP_SIZE = 384;
+  function doAxisSweep() {
+    if (!loaded || busy || !lastMinted) return;
+    const name = lastMinted.name;
+    let w = roundSize($('width').value), h = roundSize($('height').value);
+    const s = SWEEP_SIZE / Math.max(w, h);
+    if (s < 1) { w = roundSize(w * s); h = roundSize(h * s); }
+    const prompt = $('prompt').value.trim() || 'a red fox sitting in a snowy forest clearing';
+    const seed = +$('seed').value || 0;
+    const steps = +$('steps').value || DEFAULTS.steps;
+    const strip = $('axis-sweep-strip');
+    strip.innerHTML = ''; strip.classList.add('show');
+    const cells = SWEEP_ALPHAS.map((a) => {
+      const cell = document.createElement('div'); cell.className = 'cell';
+      const cv = document.createElement('canvas');
+      cv.width = 1; cv.height = 1;
+      const lb = document.createElement('div'); lb.className = 'cell-label';
+      lb.textContent = (a > 0 ? '+' : '') + a;
+      cell.appendChild(cv); cell.appendChild(lb);
+      strip.appendChild(cell);
+      return cv;
+    });
+    setBusy(true);
+    let i = 0;
+    (function next() {
+      if (i >= SWEEP_ALPHAS.length) {
+        setBusy(false);
+        mintStatus('sweep of "' + name + '" · seed ' + seed + ' · click a frame to view', 'ok');
+        pump();
+        return;
+      }
+      const alpha = SWEEP_ALPHAS[i];
+      const cv = cells[i];
+      mintStatus('sweep ' + (i + 1) + '/' + SWEEP_ALPHAS.length + ' · ' + name +
+                 ' = ' + (alpha > 0 ? '+' : '') + alpha + '…');
+      const ac = {};
+      if (alpha) ac[name] = alpha;
+      client.send({
+        type: 'generate', prompt: prompt, negPrompt: '',
+        opts: { width: w, height: h, steps: steps,
+                guidanceScale: +$('guidance').value || DEFAULTS.guidance, seed: seed },
+        band: 1.0, dial: { pregate: 1.0, prescale: 1.0 },
+        gate: { txtScale: 1.0, imgScale: 1.0 },
+        axisControls: ac,
+      }, (err, resp) => {
+        if (err) { setBusy(false); mintStatus('sweep failed: ' + (err.message || err), 'err'); return; }
+        cv.width = resp.width; cv.height = resp.height;
+        cv.getContext('2d').drawImage(resp.bitmap, 0, 0);
+        cv.title = name + ' = ' + (alpha > 0 ? '+' : '') + alpha + ' · click to view';
+        cv.onclick = () => {
+          drawBitmap(cv, resp.width, resp.height);
+          status('sweep frame · ' + name + ' = ' + (alpha > 0 ? '+' : '') + alpha, 'ok');
+        };
+        i++;
+        next();
+      });
+    })();
+  }
+  $('btn-axis-sweep').addEventListener('click', doAxisSweep);
+
   function doMintText() {
     if (!loaded || busy) return;
     const name = $('mint-text-name').value.trim();
@@ -817,8 +954,13 @@ function init() {
     mintStatus('minting "' + name + '" — averaging over 6 scenes…');
     client.send({ type: 'mintTextAxis', name: name, pos: pos, neg: neg }, (err, resp) => {
       setBusy(false);
+      mintProgressDone();
       if (err) { mintStatus(String(err.message || err), 'err'); return; }
-      addMintedAxis({ name: resp.name, kind: 'text', pos: pos, neg: neg, consistency: resp.consistency });
+      const def = { name: resp.name, kind: 'text', pos: pos, neg: neg,
+                    consistency: resp.consistency,
+                    components: resp.components, residual: resp.residual };
+      addMintedAxis(def);
+      showAxisInspector(def);
       const low = resp.consistency < 0.8;
       mintStatus('minted "' + resp.name + '" · consistency ' + resp.consistency.toFixed(2) +
                  (low ? ' (low — the two descriptions may not name one clean direction)' : ''),
@@ -851,9 +993,13 @@ function init() {
       b: { pixels: mintImgB.tensor.pixels, H: mintImgB.tensor.H, W: mintImgB.tensor.W },
     }, (err, resp) => {
       setBusy(false);
+      mintProgressDone();
       if (err) { mintStatus(String(err.message || err), 'err'); return; }
-      addMintedAxis({ name: resp.name, kind: 'image', aPath: mintImgA.path, bPath: mintImgB.path });
-      mintStatus('minted "' + resp.name + '" from the image pair', 'ok');
+      const def = { name: resp.name, kind: 'image', aPath: mintImgA.path, bPath: mintImgB.path,
+                    components: resp.components, residual: resp.residual };
+      addMintedAxis(def);
+      showAxisInspector(def);
+      mintStatus('minted "' + resp.name + '" from the image pair — see what it picked out below', 'ok');
       $('mint-image-name').value = '';
     });
   }
@@ -865,6 +1011,7 @@ function init() {
     let i = 0;
     (function next() {
       if (i >= defs.length) {
+        mintProgressDone();
         // restore slot selections / strengths once every axis is back
         const slots = Array.isArray(prefs.slots) ? prefs.slots : [];
         slots.forEach((s, idx) => {
@@ -880,7 +1027,9 @@ function init() {
       if (!d || !d.name) { next(); return; }
       if (d.kind === 'text' && d.pos && d.neg) {
         client.send({ type: 'mintTextAxis', name: d.name, pos: d.pos, neg: d.neg }, (err, resp) => {
-          if (!err) addMintedAxis({ name: resp.name, kind: 'text', pos: d.pos, neg: d.neg, consistency: resp.consistency });
+          if (!err) addMintedAxis({ name: resp.name, kind: 'text', pos: d.pos, neg: d.neg,
+                                    consistency: resp.consistency,
+                                    components: resp.components, residual: resp.residual });
           next();
         });
       } else if (d.kind === 'image' && d.aPath && d.bPath) {
@@ -890,7 +1039,8 @@ function init() {
             type: 'mintImageAxis', name: d.name,
             a: { pixels: ta.pixels, H: ta.H, W: ta.W }, b: { pixels: tb.pixels, H: tb.H, W: tb.W },
           }, (err, resp) => {
-            if (!err) addMintedAxis({ name: resp.name, kind: 'image', aPath: d.aPath, bPath: d.bPath });
+            if (!err) addMintedAxis({ name: resp.name, kind: 'image', aPath: d.aPath, bPath: d.bPath,
+                                      components: resp.components, residual: resp.residual });
             next();
           });
         } catch (e) { next(); }
