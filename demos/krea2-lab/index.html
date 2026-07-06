@@ -9,7 +9,7 @@
   <div id="app">
     <header id="toolbar">
       <span id="brand">◈ Krea&nbsp;2&nbsp;Lab</span>
-      <span class="tagline">every control-surface krea-research found in Krea 2 Turbo &mdash; dials, bands, axes, gates, spatial paint</span>
+      <span class="tagline">dials, axes, gates, and spatial paint for Krea&nbsp;2&nbsp;Turbo</span>
       <span class="grow"></span>
       <span id="backend" class="badge">loading…</span>
     </header>
@@ -29,8 +29,7 @@
                       title="Choose a Krea 2 diffusers directory">📁</button>
             </span>
           </label>
-          <p class="hint">Loads with the bundled 18-axis control dictionary
-            (<code>assets/axes_turbo.bcd1</code>).</p>
+          <p class="hint">Loads with the built-in 18-axis control bank.</p>
           <button id="btn-load" class="primary">Load model</button>
         </section>
 
@@ -84,8 +83,7 @@
               <button type="button" data-w="1536" data-h="640">21:9</button>
             </div>
           </div>
-          <p class="hint">Turbo is distilled: guidance 1.0 disables CFG (its
-            intended mode). Krea 2's Raw g maps to guidance = 1 + g.</p>
+          <p class="hint">Leave guidance at 1.0 for Turbo's default mode.</p>
           <div class="row gen-row">
             <button id="btn-generate" class="primary" disabled>Generate</button>
             <label class="live-toggle" title="Re-render as you drag dial/band/axis/gate sliders">
@@ -96,7 +94,7 @@
 
         <!-- 2. AdaLN dials -->
         <section class="panel">
-          <h2>AdaLN dials <span class="hint inline">per-step temb mod, blocks 19-28</span></h2>
+          <h2>detail dials</h2>
           <div class="ctl-row">
             <span class="ctl-name" title="detail density (AdaLN pregate)">detail density</span>
             <input id="dial-pregate" type="range" min="0.6" max="2.0" step="0.05" value="1.0">
@@ -112,19 +110,18 @@
 
         <!-- 3. band dial -->
         <section class="panel">
-          <h2>band dial <span class="hint inline">deep-tap layers 7-10</span></h2>
+          <h2>band dial</h2>
           <div class="ctl-row">
             <span class="ctl-name">literal ↔ stylized</span>
             <input id="band" type="range" min="0.5" max="3.5" step="0.1" value="1.0">
             <span class="ctl-val" id="band-val">1.0</span>
           </div>
-          <p class="hint">1.0 = off. Scales the 4 tapped decoder layers krea-research
-            found most style-carrying, before fusion.</p>
+          <p class="hint">1.0 = off. Higher pushes toward stylized.</p>
         </section>
 
         <!-- 4. axis bank -->
         <section class="panel">
-          <h2>axis bank <span class="hint inline">18 generic perceptual gradients</span>
+          <h2>axis bank <span class="hint inline">18 perceptual axes</span>
             <span class="grow"></span>
             <button id="btn-reset-axes" class="link" title="Zero every axis slider">reset</button>
           </h2>
@@ -139,7 +136,7 @@
           <h2>mint your own axis</h2>
 
           <div class="mint-sub">
-            <div class="mint-sub-head">from a text pair <span class="hint inline">~10s, averaged over 6 scenes</span></div>
+            <div class="mint-sub-head">from a text pair <span class="hint inline">~10s</span></div>
             <label class="field">name
               <input id="mint-text-name" type="text" placeholder="candlelight"></label>
             <label class="field">toward <span class="hint inline">(slider +)</span>
@@ -151,23 +148,9 @@
 
           <div class="mint-sub">
             <div class="mint-sub-head">from an image pair</div>
-            <label class="field">name
-              <input id="mint-image-name" type="text" placeholder="warm-vs-cool"></label>
-            <div class="imgpair">
-              <div class="imgpick" id="mint-a-pick">
-                <div class="imgpick-thumb" id="mint-a-thumb"></div>
-                <div class="imgpick-label">toward this <span class="dim">(slider +)</span></div>
-                <button class="link" id="btn-mint-pick-a">browse file…</button>
-                <select class="mint-hist" id="mint-hist-a" title="use one of the images you've rendered"><option value="">or a render…</option></select>
-              </div>
-              <div class="imgpick" id="mint-b-pick">
-                <div class="imgpick-thumb" id="mint-b-thumb"></div>
-                <div class="imgpick-label">away from this <span class="dim">(slider -)</span></div>
-                <button class="link" id="btn-mint-pick-b">browse file…</button>
-                <select class="mint-hist" id="mint-hist-b" title="use one of the images you've rendered"><option value="">or a render…</option></select>
-              </div>
-            </div>
-            <button id="btn-mint-image" class="primary" disabled>Mint from images</button>
+            <p class="hint">Pick a <b>toward</b> and an <b>away</b> image from your
+              renders in a proper gallery — over in the
+              <button id="btn-goto-imgaxis" class="link">Image&nbsp;Axis tab&nbsp;&rarr;</button></p>
           </div>
 
           <p id="mint-status" class="hint"></p>
@@ -186,7 +169,7 @@
 
         <!-- 6. gate controls (global scale only — the brush workflow lives in the Gate Paint tab) -->
         <section class="panel">
-          <h2>gate controls <span class="hint inline">attention-gate research hooks</span></h2>
+          <h2>gate controls</h2>
           <div class="ctl-row">
             <span class="ctl-name">text gate scale</span>
             <input id="gate-txt" type="range" min="0" max="2" step="0.05" value="1.0">
@@ -206,6 +189,7 @@
       <main id="stage">
         <div id="tabbar">
           <button class="tabbtn active" data-tab="render">Render</button>
+          <button class="tabbtn" data-tab="imgaxis">Image Axis</button>
           <button class="tabbtn" data-tab="gate">Gate Paint</button>
           <button class="tabbtn" data-tab="spatial">Spatial Paint</button>
         </div>
@@ -242,6 +226,60 @@
             <span id="status-text">idle</span>
             <span class="grow"></span>
             <span id="timing" class="meta"></span>
+          </div>
+        </div>
+
+        <!-- tab: image axis — pick a toward/away pair from a visual gallery of
+             your renders (or browse files), then mint a control axis from them -->
+        <div class="tabpanel" id="tab-imgaxis">
+          <div class="tab-toolbar">
+            <label class="field inline-field grow-field">axis name
+              <input id="mint-image-name" type="text" placeholder="warm-vs-cool">
+            </label>
+            <button id="btn-mint-image" class="primary" disabled>Mint from image pair</button>
+          </div>
+
+          <div id="imgaxis-body" class="imgaxis-body">
+            <!-- the chosen pair -->
+            <div class="imgaxis-pair">
+              <div class="imgaxis-slot" id="mint-a-pick">
+                <div class="imgaxis-slot-head">
+                  <span class="slot-tag pos">toward</span>
+                  <span class="dim">slider +</span>
+                  <span class="grow"></span>
+                  <button class="link" id="btn-mint-pick-a" title="load an image file">browse…</button>
+                  <button class="link slot-clear" id="btn-mint-clear-a" title="clear this slot">✕</button>
+                </div>
+                <div class="imgpick-thumb" id="mint-a-thumb">
+                  <div class="slot-empty">pick a <b>toward</b> image below</div>
+                </div>
+              </div>
+              <div class="imgaxis-slot" id="mint-b-pick">
+                <div class="imgaxis-slot-head">
+                  <span class="slot-tag neg">away</span>
+                  <span class="dim">slider −</span>
+                  <span class="grow"></span>
+                  <button class="link" id="btn-mint-pick-b" title="load an image file">browse…</button>
+                  <button class="link slot-clear" id="btn-mint-clear-b" title="clear this slot">✕</button>
+                </div>
+                <div class="imgpick-thumb" id="mint-b-thumb">
+                  <div class="slot-empty">pick an <b>away</b> image below</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- gallery of every render, click to assign to a slot -->
+            <div class="imgaxis-gallery-head">your renders
+              <span class="pane-sub">click toward / away to pick the pair</span>
+            </div>
+            <div id="mint-gallery" class="mint-gallery">
+              <div class="mint-gallery-empty">Renders you make collect here — generate a few, then pick a pair.</div>
+            </div>
+          </div>
+
+          <div class="status-bar">
+            <span id="imgaxis-status-text">pick a toward + away image to mint an axis</span>
+            <span class="grow"></span>
           </div>
         </div>
 

@@ -209,6 +209,9 @@ function init() {
     prefs.slots.forEach((s) => { if (s && s.name) axisStrengths[s.name] = +s.strength || 0; });
   }
   let mintImgA = null, mintImgB = null;   // {tensor:{pixels,H,W}, path}
+  // Which render (history id) currently fills each slot, so the Image Axis
+  // gallery can badge the picked cells. null = a browsed file (no history id).
+  let mintSelId = { a: null, b: null };
 
   // ── gate paint state ───────────────────────────────────────────────────
   let gateCapture = null;     // {rows,cols,text_seq,img_len,gridW,gridH,heatNorm,msgUsed}
@@ -302,12 +305,14 @@ function init() {
   }
 
   // ── tabs ─────────────────────────────────────────────────────────────────
+  function switchTab(name) {
+    document.querySelectorAll('.tabbtn').forEach((b) =>
+      b.classList.toggle('active', b.getAttribute('data-tab') === name));
+    document.querySelectorAll('.tabpanel').forEach((p) =>
+      p.classList.toggle('active', p.id === 'tab-' + name));
+  }
   document.querySelectorAll('.tabbtn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const name = btn.getAttribute('data-tab');
-      document.querySelectorAll('.tabbtn').forEach((b) => b.classList.toggle('active', b === btn));
-      document.querySelectorAll('.tabpanel').forEach((p) => p.classList.toggle('active', p.id === 'tab-' + name));
-    });
+    btn.addEventListener('click', () => switchTab(btn.getAttribute('data-tab')));
   });
 
   // ── axis bank UI (built once from assets/axes_meta.json) ───────────────
@@ -585,43 +590,106 @@ function init() {
       const save = document.createElement('button');
       save.className = 'link'; save.textContent = 'save';
       save.addEventListener('click', () => saveHistoryImage(h));
-      actions.appendChild(save);
+      const del = document.createElement('button');
+      del.className = 'link hist-del'; del.textContent = 'delete';
+      del.title = 'remove this render from history';
+      del.addEventListener('click', () => deleteHistoryEntry(h.id));
+      actions.appendChild(save); actions.appendChild(del);
       body.appendChild(metaRow); body.appendChild(actions);
       item.appendChild(h.canvas); item.appendChild(body);
       list.appendChild(item);
     });
     refreshHistButtons();
-    refreshMintHistPicks();
+    renderMintGallery();
   }
-  // Populate the "or a render…" dropdowns in the image-pair minter with the
-  // current render history, so an axis can be minted from two images you made.
-  function refreshMintHistPicks() {
-    ['a', 'b'].forEach((which) => {
-      const sel = $('mint-hist-' + which);
-      if (!sel) return;
-      const keep = sel.value;
-      sel.innerHTML = '<option value="">or a render…</option>';
-      history.forEach((h) => {
-        const o = document.createElement('option');
-        o.value = String(h.id);
-        o.textContent = h.width + '×' + h.height + ' · seed ' + h.seed;
-        sel.appendChild(o);
-      });
-      sel.value = keep;   // harmless if the entry aged out (falls back to placeholder)
+  // ── Image Axis tab: pick a toward/away pair from a gallery of your renders ──
+  // Replaces the old size/seed dropdowns (useless when every render shares a
+  // size and seed) with a visual grid — you recognise the picture, not a label.
+  const GALLERY_THUMB = 132;
+  function renderMintGallery() {
+    const grid = $('mint-gallery');
+    if (!grid) return;
+    grid.innerHTML = '';
+    if (history.length === 0) {
+      const e = document.createElement('div');
+      e.className = 'mint-gallery-empty';
+      e.textContent = 'Renders you make collect here — generate a few, then pick a pair.';
+      grid.appendChild(e);
+      return;
+    }
+    history.forEach((h) => {
+      const cell = document.createElement('div');
+      cell.className = 'mint-cell';
+      const isA = mintSelId.a === h.id, isB = mintSelId.b === h.id;
+      if (isA) cell.classList.add('sel-a');
+      if (isB) cell.classList.add('sel-b');
+
+      const cv = document.createElement('canvas');
+      const scale = Math.min(GALLERY_THUMB / h.w, GALLERY_THUMB / h.h, 1);
+      cv.width = Math.max(1, Math.round(h.w * scale));
+      cv.height = Math.max(1, Math.round(h.h * scale));
+      cv.getContext('2d').drawImage(h.canvas, 0, 0, cv.width, cv.height);
+      cell.appendChild(cv);
+
+      if (isA || isB) {
+        const badge = document.createElement('div');
+        badge.className = 'mint-cell-badge ' + (isA ? 'pos' : 'neg');
+        badge.textContent = isA ? 'toward' : 'away';
+        cell.appendChild(badge);
+      }
+
+      const btns = document.createElement('div');
+      btns.className = 'mint-cell-btns';
+      const bA = document.createElement('button');
+      bA.className = 'mc-toward' + (isA ? ' on' : ''); bA.textContent = 'toward';
+      bA.title = 'use as the “toward” (slider +) image';
+      bA.addEventListener('click', () => useHistoryForMint('a', h.id));
+      const bB = document.createElement('button');
+      bB.className = 'mc-away' + (isB ? ' on' : ''); bB.textContent = 'away';
+      bB.title = 'use as the “away” (slider −) image';
+      bB.addEventListener('click', () => useHistoryForMint('b', h.id));
+      btns.appendChild(bA); btns.appendChild(bB);
+      cell.appendChild(btns);
+
+      grid.appendChild(cell);
     });
   }
+  function imgAxisStatus(msg, kind) {
+    const el = $('imgaxis-status-text');
+    if (!el) return;
+    el.textContent = msg;
+    el.className = kind === 'err' ? 'err' : kind === 'ok' ? 'ok' : '';
+  }
+  // Feedback for image-pair minting lands in both the rail hint and the tab's
+  // own status bar, so it's visible wherever the user is looking.
+  function mintImgStatus(msg, kind) { mintStatus(msg, kind); imgAxisStatus(msg, kind); }
   function useHistoryForMint(which, id) {
     const h = history.find((e) => e.id === +id);
     if (!h) return;
     let tensor;
     try { tensor = tensorFromCanvas(h.canvas); }
-    catch (e) { mintStatus('could not use that render: ' + (e.message || e), 'err'); return; }
+    catch (e) { mintImgStatus('could not use that render: ' + (e.message || e), 'err'); return; }
     paintMintThumb(which, h.canvas, h.w, h.h);
     // No file path — this pixel source is a render. Fine: the minted axis
     // persists as its saved direction, not its source images.
     if (which === 'a') mintImgA = { tensor: tensor, path: '' };
     else mintImgB = { tensor: tensor, path: '' };
-    mintStatus((which === 'a' ? 'toward' : 'away') + ' ← render · seed ' + h.seed, 'ok');
+    mintSelId[which] = h.id;
+    renderMintGallery();
+    mintImgStatus((which === 'a' ? 'toward' : 'away') + ' ← render · seed ' + h.seed +
+      (mintImgA && mintImgB ? ' · ready to mint' : ''), 'ok');
+    refreshButtons();
+  }
+  function clearMintSlot(which) {
+    if (which === 'a') mintImgA = null; else mintImgB = null;
+    mintSelId[which] = null;
+    const thumb = $('mint-' + which + '-thumb');
+    const cv = thumb && thumb.querySelector('canvas');
+    if (cv) cv.remove();
+    if (thumb) thumb.classList.remove('filled');
+    renderMintGallery();
+    imgAxisStatus(mintImgA || mintImgB ? 'pick the other image to mint an axis'
+                                       : 'pick a toward + away image to mint an axis');
     refreshButtons();
   }
   function reuseSeed(seed) {
@@ -665,7 +733,18 @@ function init() {
     }
     status('saved ' + n + ' image' + (n === 1 ? '' : 's') + ' to ' + dir, n ? 'ok' : 'err');
   }
-  function clearHistory() { history = []; renderHistory(); }
+  function deleteHistoryEntry(id) {
+    history = history.filter((h) => h.id !== id);
+    // Drop it from the mint pair too if it was one of the chosen images.
+    ['a', 'b'].forEach((which) => { if (mintSelId[which] === id) clearMintSlot(which); });
+    renderHistory();
+  }
+  function clearHistory() {
+    history = [];
+    if (mintSelId.a != null) clearMintSlot('a');
+    if (mintSelId.b != null) clearMintSlot('b');
+    renderHistory();
+  }
 
   function refreshButtons() {
     const busyOrUnloaded = busy || !loaded;
@@ -912,8 +991,8 @@ function init() {
       // the honest "not any named thing" number (the axes aren't orthogonal,
       // so per-axis cosines alone would overcount).
       const own = Math.round(def.residual * def.residual * 100);
-      note.textContent = 'cosine vs the named bank (top 6 of 18) · ' + own +
-        '% of its energy lies outside all 18 — genuinely its own direction' +
+      note.textContent = 'overlap with the named axes (top 6 of 18) · ' + own +
+        '% of it is new, outside all 18' +
         (def.kind === 'text' && def.consistency != null
           ? ' · consistency ' + def.consistency.toFixed(2) : '');
     } else {
@@ -1013,24 +1092,28 @@ function init() {
     });
   }
   function pickMintImage(which) {
-    if (typeof showOpenFileDialog !== 'function') { mintStatus('file dialog unavailable in this build', 'err'); return; }
+    if (typeof showOpenFileDialog !== 'function') { mintImgStatus('file dialog unavailable in this build', 'err'); return; }
     const files = showOpenFileDialog('Image|png;jpg;jpeg');
     if (!files || !files.length) return;
     const path = files[0];
     let id, tensor;
     try { id = capLongSide(fileToImageData(path), 1024); tensor = toChwFp32(id); }
-    catch (e) { mintStatus('image load failed: ' + e.message, 'err'); return; }
+    catch (e) { mintImgStatus('image load failed: ' + e.message, 'err'); return; }
     paintMintThumb(which, id, id.width, id.height);
     if (which === 'a') mintImgA = { tensor: tensor, path: path };
     else mintImgB = { tensor: tensor, path: path };
+    mintSelId[which] = null;   // a browsed file isn't one of the gallery renders
+    renderMintGallery();
+    mintImgStatus((which === 'a' ? 'toward' : 'away') + ' ← file' +
+      (mintImgA && mintImgB ? ' · ready to mint' : ''), 'ok');
     refreshButtons();
   }
   function doMintImage() {
     if (!loaded || busy || !mintImgA || !mintImgB) return;
     const name = $('mint-image-name').value.trim();
-    if (!name) { mintStatus('need a name', 'err'); return; }
+    if (!name) { mintImgStatus('name the axis first', 'err'); return; }
     setBusy(true);
-    mintStatus('minting "' + name + '" from the image pair…');
+    mintImgStatus('minting "' + name + '" from the image pair…');
     client.send({
       type: 'mintImageAxis', name: name,
       a: { pixels: mintImgA.tensor.pixels, H: mintImgA.tensor.H, W: mintImgA.tensor.W },
@@ -1038,13 +1121,13 @@ function init() {
     }, (err, resp) => {
       setBusy(false);
       mintProgressDone();
-      if (err) { mintStatus(String(err.message || err), 'err'); return; }
+      if (err) { mintImgStatus(String(err.message || err), 'err'); return; }
       const def = { name: resp.name, kind: 'image', aPath: mintImgA.path, bPath: mintImgB.path,
                     dir: f32ToB64(resp.axis),
                     components: resp.components, residual: resp.residual };
       addMintedAxis(def);
       showAxisInspector(def);
-      mintStatus('minted "' + resp.name + '" from the image pair — see what it picked out below', 'ok');
+      mintImgStatus('minted "' + resp.name + '" — added to the axis bank', 'ok');
       $('mint-image-name').value = '';
     });
   }
@@ -1473,8 +1556,9 @@ function init() {
   $('btn-mint-image').addEventListener('click', doMintImage);
   $('btn-mint-pick-a').addEventListener('click', () => pickMintImage('a'));
   $('btn-mint-pick-b').addEventListener('click', () => pickMintImage('b'));
-  $('mint-hist-a').addEventListener('change', (e) => { useHistoryForMint('a', e.target.value); e.target.value = ''; });
-  $('mint-hist-b').addEventListener('change', (e) => { useHistoryForMint('b', e.target.value); e.target.value = ''; });
+  $('btn-mint-clear-a').addEventListener('click', () => clearMintSlot('a'));
+  $('btn-mint-clear-b').addEventListener('click', () => clearMintSlot('b'));
+  $('btn-goto-imgaxis').addEventListener('click', () => switchTab('imgaxis'));
 
   $('btn-gate-capture').addEventListener('click', doGateCapture);
   $('btn-gate-clear').addEventListener('click', doGateClear);

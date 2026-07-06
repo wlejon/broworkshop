@@ -262,6 +262,70 @@ details[open] > .ctl-cat::before { content: '▾ '; }
   font-variant-numeric: tabular-nums;
 }
 
+/* ── Image Axis tab: pick a toward/away pair from a gallery of renders ──── */
+.imgaxis-body {
+  flex: 1; min-height: 0; overflow-y: auto;
+  padding: 14px 16px; display: flex; flex-direction: column; gap: 14px;
+}
+.imgaxis-pair { display: flex; gap: 14px; }
+.imgaxis-slot { flex: 1; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.imgaxis-slot-head {
+  display: flex; align-items: center; gap: 8px; font-size: 11px; color: #8b94a3;
+}
+.slot-tag {
+  padding: 2px 9px; border-radius: 10px; font-size: 10px; font-weight: 700;
+  letter-spacing: 0.4px; text-transform: uppercase;
+}
+.slot-tag.pos { background: #3a2a17; color: #f0a860; }
+.slot-tag.neg { background: #1c2740; color: #8fb0ec; }
+.slot-clear { color: #6b7482; }
+.slot-clear:hover { color: #e0674a; }
+/* larger than the rail thumbs — this tab has the room */
+.imgaxis-slot .imgpick-thumb {
+  aspect-ratio: auto; height: 190px; width: 100%;
+  display: flex; align-items: center; justify-content: center;
+}
+.slot-empty { font-size: 12px; color: #5b6470; text-align: center; padding: 0 12px; }
+.imgpick-thumb.filled .slot-empty { display: none; }
+
+.imgaxis-gallery-head {
+  display: flex; align-items: baseline; gap: 8px;
+  font-size: 11px; letter-spacing: 0.6px; text-transform: uppercase;
+  color: #5b6470; font-weight: 700;
+}
+.imgaxis-gallery-head .pane-sub { letter-spacing: 0; text-transform: none; font-weight: 400; }
+.mint-gallery {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px; align-content: start;
+}
+.mint-gallery-empty {
+  grid-column: 1 / -1; color: #5b6470; font-size: 13px; padding: 24px 0; text-align: center;
+}
+.mint-cell {
+  position: relative; border: 1px solid #1a222f; border-radius: 6px;
+  overflow: hidden; background: #07090d;
+}
+.mint-cell.sel-a { border-color: #d4914a; box-shadow: 0 0 0 1px #d4914a; }
+.mint-cell.sel-b { border-color: #5f83c9; box-shadow: 0 0 0 1px #5f83c9; }
+.mint-cell canvas { display: block; width: 100%; height: auto; }
+.mint-cell-badge {
+  position: absolute; top: 6px; left: 6px; padding: 2px 8px; border-radius: 9px;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.4px; text-transform: uppercase;
+}
+.mint-cell-badge.pos { background: #d4914a; color: #1a1206; }
+.mint-cell-badge.neg { background: #5f83c9; color: #0a1020; }
+.mint-cell-btns { display: flex; border-top: 1px solid #141a24; }
+.mint-cell-btns button {
+  flex: 1; border: none; background: #0e131c; color: #8b94a3;
+  padding: 6px 0; font-size: 11px; cursor: pointer;
+}
+.mint-cell-btns button + button { border-left: 1px solid #141a24; }
+.mint-cell-btns .mc-toward:hover { background: #221a10; color: #f0a860; }
+.mint-cell-btns .mc-away:hover { background: #141c2e; color: #8fb0ec; }
+.mint-cell-btns .mc-toward.on { background: #3a2a17; color: #f0a860; }
+.mint-cell-btns .mc-away.on { background: #1c2740; color: #8fb0ec; }
+.hist-del:hover { color: #e0674a; }
+
 /* ── stage / tabs ─────────────────────────────────────────────────────── */
 #stage { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 #tabbar {
@@ -360,7 +424,7 @@ details[open] > .ctl-cat::before { content: '▾ '; }
   padding: 8px 16px; background: #0f1218; border-top: 1px solid #1a1f27;
   font-size: 12px;
 }
-#status-text, #gate-status-text, #sp-status-text { color: #9aa3b0; }
+#status-text, #gate-status-text, #sp-status-text, #imgaxis-status-text { color: #9aa3b0; }
 .status-bar .ok  { color: #7fd1a6; }
 .status-bar .err { color: #ff8e8e; }
 .meta { color: #5b6470; font-size: 11px; font-variant-numeric: tabular-nums; }
