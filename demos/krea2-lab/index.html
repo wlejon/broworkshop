@@ -57,12 +57,8 @@
           <div class="grid">
             <label class="field">seed <span class="dim">· def 0</span>
               <input id="seed" type="number" value="0" step="1"></label>
-            <label class="field">steps <span class="dim">· def 8</span>
-              <select id="steps">
-                <option value="4">4 (draft)</option>
-                <option value="8" selected>8</option>
-                <option value="12">12</option>
-              </select></label>
+            <label class="field">steps <span class="dim">· turbo 4–12 · raw 20+</span>
+              <input id="steps" type="number" value="8" min="1" max="60" step="1"></label>
             <label class="field">guidance <span class="dim">· def 1.0</span>
               <input id="guidance" type="number" value="1.0" step="0.5"></label>
             <label class="field">size <span class="dim">· def 1024²</span>
@@ -265,10 +261,7 @@
               <input id="sp-seed" type="number" value="0" step="1" style="width:70px">
             </label>
             <label class="field inline-field">steps
-              <select id="sp-steps">
-                <option value="4" selected>4</option>
-                <option value="8">8</option>
-              </select>
+              <input id="sp-steps" type="number" value="4" min="1" max="60" step="1" style="width:60px">
             </label>
             <button id="btn-sp-base">Base render</button>
           </div>
