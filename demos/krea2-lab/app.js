@@ -254,12 +254,12 @@ function init() {
     const nm = document.createElement('span');
     nm.className = 'ctl-name'; nm.textContent = label; nm.title = key;
     const range = document.createElement('input');
-    range.type = 'range'; range.min = '-6'; range.max = '6'; range.step = '0.25'; range.value = '0';
+    range.type = 'range'; range.min = '-6'; range.max = '6'; range.step = '0.01'; range.value = '0';
     const val = document.createElement('span');
     val.className = 'ctl-val off'; val.textContent = '0';
     function refresh() {
       const v = +range.value;
-      val.textContent = (v > 0 ? '+' : '') + v;
+      val.textContent = (v > 0 ? '+' : '') + v.toFixed(2);
       val.classList.toggle('off', v === 0);
     }
     range.addEventListener('input', () => { refresh(); persist(); if (live) schedule('preview'); });
@@ -276,12 +276,12 @@ function init() {
     row.className = 'slot-row';
     const sel = document.createElement('select');
     const range = document.createElement('input');
-    range.type = 'range'; range.min = '-6'; range.max = '6'; range.step = '0.25'; range.value = '0';
+    range.type = 'range'; range.min = '-6'; range.max = '6'; range.step = '0.01'; range.value = '0';
     const val = document.createElement('span');
     val.className = 'ctl-val off'; val.textContent = '0';
     function refresh() {
       const v = +range.value;
-      val.textContent = (v > 0 ? '+' : '') + v;
+      val.textContent = (v > 0 ? '+' : '') + v.toFixed(2);
       val.classList.toggle('off', v === 0);
     }
     sel.addEventListener('change', () => { persist(); if (live) schedule('full'); });
