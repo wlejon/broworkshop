@@ -1,5 +1,6 @@
 import "/lib/camera.js";
 import { installSystemMenu } from "/lib/system-menu.js";
+import { crosshair } from "/lib/crosshair.js";
 
 // =============================================================================
 // Terrain — Infinite blocky voxel world with comprehensive UI
@@ -22,12 +23,12 @@ var panel  = document.getElementById('panel');
 
 installSystemMenu();
 
-// Engine crosshair — replaces the old CSS circle
-bro.crosshair.configure({
+// Crosshair overlay (lib/crosshair.js) — replaces the old CSS circle
+crosshair.configure({
     style: 'circle', size: 6, thickness: 1,
     color: '#ffffff', opacity: 0.7, outline: false
 });
-bro.crosshair.show();
+crosshair.show();
 
 // ============================================================================
 // Lighting — PBR sun + HDR sky (IBL)

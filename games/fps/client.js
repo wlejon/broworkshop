@@ -6,6 +6,7 @@
 // local movement with server correction, entity interpolation, binary protocol.
 
 import { Input } from "/lib/input.js";
+import { crosshair } from "/lib/crosshair.js";
 
 // ─── DOM ─────────────────────────────────────────────────────────────────────
 
@@ -497,14 +498,14 @@ bro.net.onconnect = (connId) => {
     connectScreen.classList.add('hidden');
     canvas.classList.add('active');
     hud.classList.remove('hidden');
-    bro.crosshair.configure({
+    crosshair.configure({
         style: 'crossdot', size: 12, thickness: 2, spread: 3, dotSize: 1,
         color: '#ffffff', opacity: 0.8, outline: true,
         outlineThickness: 1, outlineColor: '#000000',
         moveSpread: 8, fireBloom: 6, adsSpread: 1,
         bloomDecay: 30, lerpSpeed: 10
     });
-    bro.crosshair.show();
+    crosshair.show();
     buildScene();
     const name = nameInput.value.trim() || 'Player';
     sendName(name);
@@ -515,7 +516,7 @@ bro.net.ondisconnect = () => {
     serverConn = null;
     myId = null;
     pointerLocked = false;
-    bro.crosshair.hide();
+    crosshair.hide();
     canvas.classList.remove('active');
     hud.classList.add('hidden');
     connectScreen.classList.remove('hidden');
@@ -565,8 +566,8 @@ function render() {
     // Update crosshair spread state
     const bits = getInputBits();
     const isMoving = (bits & (IN_FWD | IN_BACK | IN_LEFT | IN_RIGHT)) !== 0;
-    bro.crosshair.setMoving(isMoving);
-    if ((bits & IN_SHOOT) && localAlive) bro.crosshair.addBloom(dt * 40);
+    crosshair.setMoving(isMoving);
+    if ((bits & IN_SHOOT) && localAlive) crosshair.addBloom(dt * 40);
 
     // Gentle server correction: nudge toward authoritative position
     // On localhost this is nearly zero; on real network it keeps us honest
