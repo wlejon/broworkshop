@@ -344,9 +344,64 @@ function init() {
       host.appendChild(det);
     });
   }
+  // ── press-and-hold ± steppers ──────────────────────────────────────────
+  // A single click nudges a range input by its own step (0.01 — the finest,
+  // exact increase a slider drag can't reliably hit); holding starts fine and
+  // ramps up to a fast steady sweep. onStep fires after every value change
+  // (mirrors the slider's 'input'); onSettle fires once on release (mirrors
+  // 'change'), so the live-preview / full-render cadence matches dragging.
+  function makeStepper(range, sign, onStep, onSettle) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'ctl-step';
+    btn.textContent = sign > 0 ? '+' : '−';   // real minus, not hyphen
+    btn.title = (sign > 0 ? 'increase' : 'decrease') + ' — click for one fine step, hold to ramp';
+    const step = +range.step || 0.01;
+    const lo = +range.min, hi = +range.max;
+    let timer = 0, ticks = 0, moved = false;
+    function nudge(mult) {
+      let v = +range.value + sign * step * mult;
+      v = Math.max(lo, Math.min(hi, v));
+      v = Math.round(v / step) * step;             // snap to grid, kill fp drift
+      if (v === +range.value) return;
+      range.value = String(v);
+      moved = true;
+      onStep();
+    }
+    function stop() {
+      if (!timer) return;
+      clearInterval(timer); timer = 0; ticks = 0;
+      window.removeEventListener('pointerup', stop);
+      window.removeEventListener('mouseup', stop);
+      if (moved) { moved = false; if (onSettle) onSettle(); }
+    }
+    function start(e) {
+      if (e && e.preventDefault) e.preventDefault();
+      if (timer) return;
+      moved = false;
+      nudge(1);                                    // one fine step on press
+      ticks = 0;
+      timer = setInterval(() => {
+        ticks++;
+        // fine for the first ~0.3s, then accelerate toward a fast sweep
+        const mult = ticks < 7 ? 1 : Math.min(25, 1 + (ticks - 6) * 0.7);
+        nudge(mult);
+      }, 45);
+      // End the hold on release ANYWHERE — pointer/mouse up bubble to window,
+      // so this fires even if the cursor drifts off the tiny button mid-hold.
+      window.addEventListener('pointerup', stop);
+      window.addEventListener('mouseup', stop);
+    }
+    // pointerdown is the primary path; mousedown is a fallback for any build
+    // that doesn't synthesize pointer events (start() guards against firing
+    // twice for the same press via the `timer` check).
+    btn.addEventListener('pointerdown', start);
+    btn.addEventListener('mousedown', start);
+    return btn;
+  }
   function buildAxisRow(key, label) {
     const row = document.createElement('div');
-    row.className = 'ctl-row';
+    row.className = 'ctl-row stepped';
     const nm = document.createElement('span');
     nm.className = 'ctl-name'; nm.textContent = label; nm.title = key;
     const range = document.createElement('input');
@@ -361,7 +416,11 @@ function init() {
     range.addEventListener('input', () => { refresh(); persist(); if (live) schedule('preview'); });
     range.addEventListener('change', () => { if (live) schedule('full'); });
     val.addEventListener('dblclick', () => { range.value = '0'; refresh(); persist(); if (live) schedule('full'); });
-    row.appendChild(nm); row.appendChild(range); row.appendChild(val);
+    const onStep = () => { refresh(); persist(); if (live) schedule('preview'); };
+    const onSettle = () => { if (live) schedule('full'); };
+    const minus = makeStepper(range, -1, onStep, onSettle);
+    const plus = makeStepper(range, +1, onStep, onSettle);
+    row.appendChild(nm); row.appendChild(minus); row.appendChild(range); row.appendChild(plus); row.appendChild(val);
     coreAxisEls[key] = { range: range, val: val };
     return row;
   }
@@ -406,11 +465,15 @@ function init() {
       val.addEventListener('dblclick', () => {
         range.value = '0'; axisStrengths[m.name] = 0; refresh(); persist(); if (live) schedule('full');
       });
+      const onStep = () => { axisStrengths[m.name] = +range.value; refresh(); persist(); };
+      const onSettle = () => { if (live) schedule('full'); };
+      const minus = makeStepper(range, -1, onStep, onSettle);
+      const plus = makeStepper(range, +1, onStep, onSettle);
       const del = document.createElement('button');
       del.type = 'button'; del.className = 'axis-mine-del';
       del.textContent = '×'; del.title = 'delete "' + m.name + '"';
       del.addEventListener('click', () => removeMintedAxis(m.name));
-      row.appendChild(nm); row.appendChild(range); row.appendChild(val); row.appendChild(del);
+      row.appendChild(nm); row.appendChild(minus); row.appendChild(range); row.appendChild(plus); row.appendChild(val); row.appendChild(del);
       host.appendChild(row);
     });
     refreshSpAxisOptions();

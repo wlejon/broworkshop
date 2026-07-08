@@ -141,7 +141,21 @@ button.link:hover { color: #eeb277; background: none; }
   display: grid; grid-template-columns: 96px 1fr 50px;
   align-items: center; gap: 10px;
 }
+/* axis-bank rows carry ± steppers flanking the slider */
+.ctl-row.stepped {
+  grid-template-columns: 80px 20px 1fr 20px 46px;
+  gap: 7px;
+}
 .ctl-row:hover .ctl-name { color: #d6dae0; }
+/* press-and-hold ± steppers flanking a slider */
+.ctl-step {
+  background: #141b26; border: 1px solid #263047; border-radius: 4px;
+  color: #aeb6c2; font-size: 13px; line-height: 1; font-family: inherit;
+  width: 20px; height: 20px; padding: 0; cursor: pointer; user-select: none;
+  display: flex; align-items: center; justify-content: center;
+}
+.ctl-step:hover { color: #f0a860; border-color: #3a4a63; background: #1a2331; }
+.ctl-step:active { background: #d4914a; border-color: #d4914a; color: #0b0f16; }
 .ctl-name {
   color: #aeb6c2; font-size: 11px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -175,8 +189,8 @@ details[open] > .ctl-cat::before { content: '▾ '; }
 #user-slots { display: flex; flex-direction: column; gap: 6px; }
 .axis-mine-empty { color: #6b7382; font-size: 11px; padding: 2px 0; }
 .axis-mine-row {
-  display: grid; grid-template-columns: 1fr 84px 44px 20px;
-  align-items: center; gap: 8px;
+  display: grid; grid-template-columns: 1fr 20px 60px 20px 40px 18px;
+  align-items: center; gap: 6px;
 }
 .axis-mine-name {
   background: none; border: none; padding: 0; text-align: left; cursor: pointer;
