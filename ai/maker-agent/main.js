@@ -40,11 +40,13 @@ function nextFrame() {
     });
 }
 
-// Rebuild the preview from the files the agent just wrote, then let the engine
-// paint the fresh sub-document into its GPU surface before we read it back.
+// Rebuild the preview from the files the agent just wrote. capture() is
+// authoritative — it applies this reload and renders the sub-document
+// synchronously before reading back — so look() reflects the just-written files
+// on the first call with no frame-timing wait. One frame yield lets the on-screen
+// preview repaint too, so the user sees what the agent is about to look at.
 async function renderPreview() {
     try { preview.reload(); } catch (e) { console.error("preview.reload", e); }
-    await nextFrame();
     await nextFrame();
 }
 
