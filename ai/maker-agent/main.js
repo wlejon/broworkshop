@@ -1,13 +1,13 @@
-// Maker Agent — a chat UI over an autonomous, tool-using agent that CREATES visual
-// things on a live stage, LOOKS at them (via a vision model), and CHANGES them until
-// they match the request — all inside this running bro app.
+// Maker Agent — a chat UI over an autonomous, tool-using agent that AUTHORS a small
+// web app (files on disk), LOOKS at how it renders in a live preview (via a vision
+// model), and REFINES it until it matches the request — all inside this running bro app.
 //
 // The agent brain is the pre-built `maker.bundle.js` harness (createAgentSession),
 // which wraps the earendil-works/pi Agent loop. This file: (1) picks a backend —
 // OpenRouter (default) or a local brolm model — and hands it to the session,
-// (2) renders the pi AgentEvent stream into the transcript, (3) exposes the stage
-// canvas as engine globals the agent draws into, and (4) implements the `look` tool
-// by capturing the stage and asking a vision model what it sees.
+// (2) renders the pi AgentEvent stream into the transcript, (3) points an <iframe>
+// preview at the agent's project directory, and (4) implements the `look` tool by
+// reloading that preview and capturing its rendered pixels for a vision model.
 
 import { installSystemMenu } from "/lib/system-menu.js";
 import { createAgentSession } from "/app/maker.bundle.js";
@@ -28,67 +28,37 @@ let running = false;    // a turn is in flight
 let brolmHandle = null; // { model, tokenizer } once a local model is loaded
 const sessionAllow = new Set(); // tools the user chose to always allow
 
-// ── stage: a 2D canvas the agent draws into, exposed as engine globals ────────
-const stageCanvas = $("#stage-canvas");
-const stageCtx = stageCanvas.getContext("2d");
+// ── preview: an <iframe> the agent's app renders into; `look` captures it ──────
+// The agent authors a full web app (index.html + css + js) in its working dir;
+// this iframe renders those files live. `look` reloads it from disk and reads
+// back the rendered pixels — the same frame the user sees is what the agent sees.
+const preview = $("#preview");
 
-// Managed animation: a single rAF loop that draws onto stageCanvas — the surface
-// `look` captures — so the agent never needs (and must not create) its own canvas.
-// Bumping stageAnimId cancels the running loop; a new stageAnimate() supersedes it.
-let stageAnimId = 0;
-function stageStop() { stageAnimId++; }
-
-function clearStage() {
-    stageStop();
-    stageCtx.fillStyle = "#ffffff";
-    stageCtx.fillRect(0, 0, stageCanvas.width, stageCanvas.height);
-}
-clearStage();
-
-// Run drawFrame(t) every frame onto stageCtx (t = seconds since it started). One
-// loop at a time — calling again cancels the previous; stageStop() ends it. The
-// first frame draws synchronously so a `look` right after sees output immediately.
-function stageAnimate(drawFrame) {
-    if (typeof drawFrame !== "function") throw new TypeError("stageAnimate(fn): fn must be a function");
-    stageStop();
-    const myId = stageAnimId;
-    const clock = (typeof performance !== "undefined" && performance.now) ? () => performance.now() : () => Date.now();
-    const t0 = clock();
-    const frame = () => {
-        if (myId !== stageAnimId) return;              // superseded or stopped
-        try { drawFrame((clock() - t0) / 1000); }
-        catch (e) { console.error("stageAnimate", e); stageStop(); return; }
-        raf(frame);
-    };
-    try { drawFrame(0); }
-    catch (e) { console.error("stageAnimate", e); stageStop(); return stageStop; }
-    raf(frame);
-    return stageStop;
+function nextFrame() {
+    return new Promise((resolve) => {
+        (typeof requestAnimationFrame === "function" ? requestAnimationFrame : (cb) => setTimeout(cb, 16))(resolve);
+    });
 }
 
-// eval_js runs code via `new Function`, i.e. in global scope — so the drawing
-// surface and the animation hook must be reachable as globals.
-globalThis.stage = $("#stage");
-globalThis.stageCanvas = stageCanvas;
-globalThis.stageCtx = stageCtx;
-globalThis.stageAnimate = stageAnimate;
-globalThis.stageStop = stageStop;
+// Rebuild the preview from the files the agent just wrote, then let the engine
+// paint the fresh sub-document into its GPU surface before we read it back.
+async function renderPreview() {
+    try { preview.reload(); } catch (e) { console.error("preview.reload", e); }
+    await nextFrame();
+    await nextFrame();
+}
 
 const MAKER_SYSTEM_PROMPT = [
     "You are an autonomous MAKER agent running INSIDE the bro engine (an HTML/CSS/JS app runtime).",
-    "Your job: CREATE a visual result on the stage, LOOK at it, and CHANGE it until it matches the request.",
-    "The stage is a FIXED 640x480 2D canvas already on screen. Draw into it using the engine globals your",
-    "eval_js tool can see: `stageCtx` (a CanvasRenderingContext2D) and `stageCanvas`.",
-    "CRITICAL: NEVER create or append your own <canvas> or DOM element — the `look` tool can ONLY see",
-    "`stageCanvas`, so anything you draw anywhere else is invisible to you and to the user.",
-    "For a STILL image, draw straight to stageCtx (fillStyle, fillRect, arc, paths, gradients, text).",
-    "For ANIMATION, do NOT call requestAnimationFrame yourself — instead call `stageAnimate(fn)`, where",
-    "fn(t) draws exactly ONE frame onto stageCtx (t = seconds since the animation began). It runs every",
-    "frame and automatically cancels any previous animation; call `stageStop()` to end it. This keeps the",
-    "animation on the canvas that `look` sees.",
-    "After each visible change, call the `look` tool to SEE the current stage — a vision model describes it",
-    "back to you — then use what you observe to refine. Work in small steps: draw, look, adjust.",
-    "When the stage matches the request, stop and briefly say what you made. Keep each eval_js focused.",
+    "Your job: BUILD a small web app that fulfills the request, LOOK at how it renders, and REFINE it until it matches.",
+    "Your working directory is a project folder. Author the app there with your file tools: write `index.html` (the",
+    "entry point) plus any `style.css`, `script.js`, or assets it needs. Plain HTML/CSS/JS and <canvas> all work.",
+    "Use classic scripts only — <script src=\"script.js\"></script>, NOT ES modules — and no network access.",
+    "The project renders LIVE in an on-screen preview beside this chat. After you write or edit files, call the `look`",
+    "tool: it reloads the preview from your files and returns a vision model's description of what ACTUALLY rendered.",
+    "Use what you see to fix layout, color, sizing, and content — write, look, refine, in small steps.",
+    "When the preview matches the request, stop and briefly say what you built. Prefer real files; `eval_js` is only an",
+    "escape hatch for poking the host engine, and anything it draws is NOT part of the preview the user sees.",
 ].join(" ");
 
 // ── status ────────────────────────────────────────────────────────────────────
@@ -372,7 +342,7 @@ function approve(toolName, args) {
     });
 }
 
-// ── look: capture the stage and ask a vision model what it sees ───────────────
+// ── look: reload the preview, capture it, and ask a vision model what it sees ──
 function toBase64(u8) {
     const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let out = "";
@@ -391,18 +361,20 @@ function toBase64(u8) {
     }
     return out;
 }
-// Capture the stage: returns { dataUri (jpeg, for the vision model), imageData (raw
-// RGBA, for the on-screen thumbnail) } or null.
-function captureStage() {
+// Capture the preview: returns { dataUri (jpeg, for the vision model), imageData
+// (raw RGBA, for the on-screen thumbnail) } or null. iframe.capture() reads the
+// sub-document's rendered pixels straight back as a top-down ImageData.
+function capturePreview() {
     try {
-        const w = stageCanvas.width, h = stageCanvas.height;
-        const imageData = stageCtx.getImageData(0, 0, w, h);
+        const imageData = preview.capture();
+        if (!imageData || !imageData.width || !imageData.height) return null;
+        const w = imageData.width, h = imageData.height;
         if (!(typeof bro !== "undefined" && bro.image && bro.image.encodeJpeg)) throw new Error("bro.image.encodeJpeg unavailable");
         const bytes = bro.image.encodeJpeg(imageData.data, w, h, 4, 82);
         if (!bytes || !bytes.length) throw new Error("jpeg encode failed");
         return { dataUri: "data:image/jpeg;base64," + toBase64(bytes), imageData };
     } catch (e) {
-        console.error("captureStage", e);
+        console.error("capturePreview", e);
         return null;
     }
 }
@@ -504,14 +476,17 @@ async function visionDescribe(dataUri, instruction) {
     throw new Error((lastErr && lastErr.message) || "all vision models failed");
 }
 async function look(instruction) {
-    const cap = captureStage();
-    if (!cap) return { content: [{ type: "text", text: "Error: could not capture the stage." }], details: { error: true } };
+    await renderPreview();
+    const cap = capturePreview();
+    if (!cap) {
+        return { content: [{ type: "text", text: "Error: the preview hasn't rendered anything yet — write your app's index.html first, then look." }], details: { error: true } };
+    }
     addLookShot(cap.imageData);
     try {
         const desc = await visionDescribe(cap.dataUri, instruction);
         return { content: [{ type: "text", text: desc }], details: { looked: true } };
     } catch (e) {
-        return { content: [{ type: "text", text: "Error looking at the stage: " + (e && e.message ? e.message : e) }], details: { error: true } };
+        return { content: [{ type: "text", text: "Error looking at the preview: " + (e && e.message ? e.message : e) }], details: { error: true } };
     }
 }
 
@@ -591,7 +566,11 @@ function ensureSession() {
     return session;
 }
 function setContextWindowFor() { contextWindow = 131072; updateContextMeter(null); }
-function agentCwd() { return "D:/projects/broworkshop/ai/maker-agent"; }
+// The agent authors into the `project/` subfolder — the exact directory the
+// preview iframe renders (src="project/"). Keeping it isolated from the app's
+// own files means the agent can freely create/overwrite without touching the
+// maker-agent itself.
+function agentCwd() { return "D:/projects/broworkshop/ai/maker-agent/project"; }
 
 // A backend/model change invalidates the running session (new conversation).
 function invalidateSession() { session = null; }
@@ -696,14 +675,14 @@ window.__makerDebug = {
         applyBackendVisibility();
     },
     prompt(text) { const s = ensureSession(); if (!s) throw new Error("no backend configured"); return s.prompt(text); },
-    look, captureStage, clearStage,
-    reset() { stageStop(); invalidateSession(); },
+    look, capturePreview, renderPreview,
+    reset() { invalidateSession(); },
 };
 
 (function boot() {
     installSystemMenu({
-        view: [{ id: "stage.clear", label: "Clear stage" }],
-        handlers: { "stage.clear": () => { clearStage(); } },
+        view: [{ id: "preview.reload", label: "Reload preview" }],
+        handlers: { "preview.reload": () => { renderPreview(); } },
     });
     $("#backend").value = store.get("backend", "openrouter");
     $("#or-key").value = store.get("orKey", "");

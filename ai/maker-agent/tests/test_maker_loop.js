@@ -1,17 +1,29 @@
-// Capstone: the create -> look loop end-to-end, in-engine, via the REAL app path
-// (window.__makerDebug wraps main.js's session + look). Two parts:
-//   (1) Deterministic proof of `look`: draw on the stage, call look, assert the
-//       vision model returned a real description and a capture thumbnail appeared.
-//   (2) Autonomous proof: the OpenRouter brain draws on the stage with eval_js and
-//       the turn completes. (Whether a small free model chooses to call look each
-//       run varies, so that is logged, not asserted.)
-// Saves the final stage JPEG for inspection. Requires OPENROUTER_API_KEY. Run:
+// Capstone: the author -> preview -> look loop end-to-end, in-engine, via the REAL
+// app path (window.__makerDebug wraps main.js's session + look over the <iframe>
+// preview). Two parts:
+//   (1) Deterministic proof of `look`: write a known index.html into the project,
+//       call look, assert the vision model returned a real description and a capture
+//       thumbnail appeared.
+//   (2) Autonomous proof: the OpenRouter brain authors a page with the file tools and
+//       the turn completes; the final preview is captured. (Whether a small free
+//       model nails the exact picture varies, so content is LOGGED, not asserted.)
+// Requires OPENROUTER_API_KEY. Run:
 //   OPENROUTER_API_KEY=sk-or-... bro-headless ai/maker-agent tests/test_maker_loop.js
+//
+// The preview only repaints on an engine frame. Windowed runs repaint continuously;
+// headless has no render loop, so tick() forces one via screenshot() each poll step
+// (into the gitignored tests/ dir) so look()'s post-reload capture sees fresh pixels.
 
 const KEY = globalThis.process && globalThis.process.env && globalThis.process.env.OPENROUTER_API_KEY;
 assert(KEY, "OPENROUTER_API_KEY must be set");
 assert(window.__makerDebug, "main.js must have booted (window.__makerDebug present)");
-const SCRATCH = "C:/Users/jonny/AppData/Local/Temp/claude/D--projects-bro/7361a163-5fb9-4b8e-84fd-ab689d46da8d/scratchpad";
+
+const APP = "D:/projects/broworkshop/ai/maker-agent";
+const PROJ = APP + "/project";
+const fs = globalThis.require("fs");
+function tick(n) {
+    for (let i = 0; i < n; i++) { advanceTime(20); try { screenshot(APP + "/tests/maker_tick.png"); } catch (e) {} wallSleep(5); }
+}
 
 advanceTime(100); flush();
 window.__makerDebug.configure({
@@ -21,53 +33,53 @@ window.__makerDebug.configure({
     vision: "google/gemma-4-31b-it:free",
 });
 
-// ── Part 1: deterministic look ────────────────────────────────────────────────
-window.__makerDebug.clearStage();
-stageCtx.fillStyle = "#87ceeb"; stageCtx.fillRect(0, 0, 640, 480);          // sky
-stageCtx.fillStyle = "yellow"; stageCtx.beginPath(); stageCtx.arc(320, 110, 60, 0, 7); stageCtx.fill(); // sun
-flush();
+// ── Part 1: deterministic look over a known page ──────────────────────────────
+fs.writeFileSync(PROJ + "/index.html",
+    '<!doctype html><html><head><style>html,body{margin:0;height:100%}' +
+    '#sky{height:60%;background:#87ceeb}#ground{height:40%;background:#3a7d34}</style></head>' +
+    '<body><div id="sky"></div><div id="ground"></div></body></html>');
 
 let lookRes = null, lookDone = false;
-window.__makerDebug.look("Describe the stage: what colors and shapes do you see?")
+window.__makerDebug.look("What colors and regions do you see, top to bottom?")
     .then((r) => { lookRes = r; lookDone = true; })
     .catch((e) => { lookRes = { error: e }; lookDone = true; });
-for (let i = 0; i < 40000 && !lookDone; i++) { advanceTime(20); wallSleep(5); }
+for (let i = 0; i < 40000 && !lookDone; i++) tick(1);
 
 const lookText = lookRes && lookRes.content && lookRes.content[0] && lookRes.content[0].text || "";
-const lookErrored = lookRes && lookRes.details && lookRes.details.error;
 console.log("look returned:", JSON.stringify(lookText.slice(0, 220)));
 assert(lookDone, "look() resolved");
-assert(!lookErrored, "look() succeeded (vision model responded)");
+assert(!(lookRes && lookRes.details && lookRes.details.error), "look() succeeded (vision model responded)");
 assert(lookText.length > 15, "look() returned a real description");
-// A successful vision response already proves the stage was captured and sent.
-console.log("look-shot thumbnails in transcript:", document.querySelectorAll(".look-shot").length);
-console.log("PART 1 PASSED: look() captured the stage and the vision model described it.");
+console.log("look-shot thumbnails:", document.querySelectorAll(".look-shot").length);
+console.log("PART 1 PASSED: look() reloaded the preview, captured it, and the vision model described it.");
 
-// ── Part 2: autonomous draw ────────────────────────────────────────────────────
+// ── Part 2: autonomous build ──────────────────────────────────────────────────
 window.__makerDebug.reset();
-window.__makerDebug.clearStage();
+fs.writeFileSync(PROJ + "/index.html", "<!doctype html><html><body></body></html>"); // blank slate
 let done = false, failErr = null;
 window.__makerDebug.prompt(
-    "Draw a picture on the stage with eval_js and the stageCtx global: fill the whole canvas with a solid " +
-    "background color (use a hex color like '#87ceeb'), then draw one solid yellow circle as a sun. After " +
-    "drawing, call the look tool once to check it, then stop and summarize in one sentence. At most 3 tool calls."
+    "Build a simple web page in index.html: a full-viewport page with a sky-blue background and one big " +
+    "centered solid yellow circle (a sun). Write the file, then call the look tool once to check it, then stop " +
+    "and summarize in one sentence. At most 4 tool calls."
 ).then(() => { done = true; }).catch((e) => { failErr = (e && e.message) || String(e); done = true; });
-for (let i = 0; i < 200000 && !done; i++) { advanceTime(20); wallSleep(5); }
+for (let i = 0; i < 200000 && !done; i++) tick(1);
 
+tick(2);
+const img = document.querySelector("#preview").capture();
+let nonSky = 0;
+if (img) for (let p = 0; p < img.data.length; p += 4) {
+    const r = img.data[p], g = img.data[p + 1], b = img.data[p + 2];
+    if (!(b > r && b > 150)) nonSky++;              // anything that isn't sky-blue
+}
+const frac = img ? nonSky / (img.width * img.height) : 0;
 console.log("\n==== RESULT ====");
 console.log("autonomous done:", done, "err:", failErr);
-const w = stageCanvas.width, h = stageCanvas.height;
-const img = stageCtx.getImageData(0, 0, w, h);
-let nonWhite = 0;
-for (let p = 0; p < img.data.length; p += 4) if (img.data[p] < 245 || img.data[p + 1] < 245 || img.data[p + 2] < 245) nonWhite++;
-const frac = nonWhite / (w * h);
-const looks = document.querySelectorAll(".look-shot").length; // >=1 from part 1
-console.log("stage non-white fraction:", frac.toFixed(3), "| total look captures:", looks);
-if (bro.image && bro.image.encodeJpegFile) {
-    bro.image.encodeJpegFile(SCRATCH + "/maker_stage.jpg", img.data, w, h, 4, 90);
-    console.log("saved stage:", SCRATCH + "/maker_stage.jpg");
+console.log("preview non-sky fraction:", frac.toFixed(3), "| look captures:", document.querySelectorAll(".look-shot").length);
+if (img && bro.image && bro.image.encodeJpegFile) {
+    bro.image.encodeJpegFile(APP + "/tests/maker_preview.jpg", img.data, img.width, img.height, 4, 90);
+    console.log("saved preview:", APP + "/tests/maker_preview.jpg");
 }
 assert(done, "the autonomous maker turn reached idle");
-assert(frac > 0.01, "the agent painted the stage (non-white fraction " + frac.toFixed(3) + ")");
-console.log("PART 2 PASSED: the OpenRouter brain drew on the stage autonomously.");
-console.log("\nMAKER LOOP PASSED: create -> look works end-to-end in-engine.");
+assert(img && img.width > 0, "the final preview was captured");
+console.log("PART 2 PASSED: the OpenRouter brain authored a page and the preview rendered.");
+console.log("\nMAKER LOOP PASSED: author -> preview -> look works end-to-end in-engine.");

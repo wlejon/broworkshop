@@ -40,7 +40,7 @@ written as plain JS to match the rest of broworkshop; the emitted bundle is iden
 | `openrouter.js` | **Primary backend.** OpenRouter `/chat/completions` → pi's `AssistantMessageEvent` stream, using NATIVE structured tool-calling (no text parsing). 429 backoff. Over brokit `fetch`. |
 | `provider.js`   | Local backend. `bro.lm.generate` → pi events; parses Hermes/Qwen `<tool_call>` / `<think>` blocks (the offline path). |
 | `env.js`        | `BrokitExecutionEnv` — pi's FileSystem + Shell over brokit `require('fs'\|…)`. |
-| `tools.js`      | The tool set: `read_file`/`write_file`/`edit_file`/`list_dir`/`bash` + `eval_js`, plus the **`look`** tool (app-injected stage-capture callback). |
+| `tools.js`      | The tool set: `read_file`/`write_file`/`edit_file`/`list_dir`/`bash` + `eval_js`, plus the **`look`** tool (app-injected preview-capture callback: reloads the `<iframe>` preview of the app the agent authored and returns a view of what rendered). |
 
 ## Third-party licenses
 

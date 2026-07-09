@@ -5,7 +5,13 @@ maker.bundle.js
 # Author-time bundler deps — restored with `npm install` in bundler/.
 bundler/node_modules/
 
-# Test-run artifacts (screenshots, captured stage images, logs).
+# Test-run artifacts (screenshots, captured preview images, logs).
 tests/*.png
 tests/*.jpg
 tests/*.txt
+
+# Agent scratch: the maker authors its app into project/ at runtime. Only the
+# seed index.html (the "nothing built yet" placeholder) is tracked; everything
+# the agent writes there during a session stays out of the repo.
+/project/*
+!/project/index.html

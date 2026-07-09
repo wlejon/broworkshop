@@ -1,15 +1,16 @@
 // tools.js — the maker-agent tool set: the same coding tools as pi-agent (files +
 // bash + eval_js over the ExecutionEnv seam) PLUS `look`, the tool that closes the
-// perceptual loop by capturing the live visual stage and returning a view of it.
+// perceptual loop by rendering the app the agent authored and returning a view of it.
 //
-// `eval_js` is the maker's primary lever: it runs JS in the LIVE bro engine, so the
-// agent draws/builds into the on-screen stage element with it, then calls `look` to
-// SEE the result and decide the next change — create → look → change, all in-app.
+// The agent BUILDS by writing app files (index.html/style.css/script.js) with the
+// file tools; those render live in an on-screen preview. `look` reloads that preview
+// and returns what actually rendered — author → look → refine, all in-app. `eval_js`
+// stays as an escape hatch into the host engine, not the primary lever.
 //
-// The `look` implementation is app-side (it captures the stage and runs a vision
+// The `look` implementation is app-side (it reloads the preview and runs a vision
 // model or hands the pixels to a vision-capable brain), injected as `opts.look`, so
 // the bundle stays model-agnostic. If no look callback is supplied the tool is
-// omitted (e.g. a headless run with no stage).
+// omitted (e.g. a headless run with no preview).
 //
 // Error signalling matches pi's contract: every execute() is total (resolves, never
 // throws) and surfaces failures as an "Error: …" text content + details.error.
@@ -251,12 +252,12 @@ export function makeTools(env, cwd, opts = {}) {
 		name: "eval_js",
 		label: "Evaluate JS in engine",
 		description:
-			"Run JavaScript in the LIVE bro engine — the context that owns `document`, the global `bro` API, the " +
-			"scene graph, canvas, and settings. THIS IS YOUR MAIN LEVER FOR MAKING THINGS: render into the visual " +
-			"stage with it. A container element with id 'stage' (also the global `stage`) is on screen for your " +
-			"creations — append a <canvas>, build a scene, draw, animate. After you draw, call the `look` tool to " +
-			"SEE the result. Runs as a function body: use multiple statements and `return` a value (or a Promise, " +
-			"which is awaited) to report it. Anything you console.log is captured; the returned value is shown after `=> `.",
+			"Run JavaScript in the LIVE bro engine that HOSTS this agent — the context owning `document`, the global " +
+			"`bro` API, the scene graph, and settings. This is an ESCAPE HATCH for inspecting or poking the host, NOT " +
+			"the way you build: whatever you draw here is NOT part of the preview the user sees. To make things, write " +
+			"app files (index.html/style.css/script.js) with the file tools and `look`. Runs as a function body: use " +
+			"multiple statements and `return` a value (or a Promise, which is awaited) to report it. Anything you " +
+			"console.log is captured; the returned value is shown after `=> `.",
 		parameters: Type.Object({
 			code: Type.String({ description: "JavaScript to execute in the engine (function body; `return` a value/Promise)." }),
 		}),
@@ -307,15 +308,15 @@ export function makeTools(env, cwd, opts = {}) {
 		const lookFn = opts.look;
 		tools.push({
 			name: "look",
-			label: "Look at the stage",
+			label: "Look at the preview",
 			description:
-				"Capture the current visual stage — what you have drawn or built — and get a view of it back. Pass " +
-				"`instruction` to focus the observation (e.g. 'is the horizon level and is the sun warm-colored?'). " +
-				"This is how you SEE your own work: draw with eval_js, then look, then decide what to change. Call it " +
-				"after each visible change and let what you see guide the next step.",
+				"Reload the live preview from the app files you have written and get a view of what actually rendered. " +
+				"Pass `instruction` to focus the observation (e.g. 'is the horizon level and is the sun warm-colored?'). " +
+				"This is how you SEE your own work: write files, then look, then decide what to change. Call it after " +
+				"each set of edits and let what you see guide the next step.",
 			parameters: Type.Object({
 				instruction: Type.Optional(
-					Type.String({ description: "What to look for or evaluate about the stage. Optional." }),
+					Type.String({ description: "What to look for or evaluate about the preview. Optional." }),
 				),
 			}),
 			executionMode: "sequential",

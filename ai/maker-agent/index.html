@@ -64,7 +64,8 @@
         <section class="left">
             <div id="transcript" class="transcript">
                 <div class="hint">Pick OpenRouter, paste your key, load models, then ask the agent to make something —
-                    e.g. "draw a calm sunset over mountains". It renders into the stage, looks at it, and refines.</div>
+                    e.g. "a calm sunset over mountains" or "a bouncing-ball demo". It writes the app's files,
+                    previews them, looks at what rendered, and refines.</div>
             </div>
             <div class="input-bar">
                 <textarea id="prompt" rows="2" placeholder="Ask the agent to make something…  (Enter to send, Shift+Enter for newline)"></textarea>
@@ -76,8 +77,8 @@
         </section>
 
         <section class="right">
-            <div class="stage-head"><span>Stage</span><span id="stage-note"></span></div>
-            <div id="stage" class="stage"><canvas id="stage-canvas" width="640" height="480"></canvas></div>
+            <div class="stage-head"><span>Preview</span><span id="stage-note"></span></div>
+            <div id="stage" class="stage"><iframe id="preview" src="project/" width="640" height="480"></iframe></div>
         </section>
     </main>
 
