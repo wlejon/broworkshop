@@ -31,25 +31,63 @@ const sessionAllow = new Set(); // tools the user chose to always allow
 // ── stage: a 2D canvas the agent draws into, exposed as engine globals ────────
 const stageCanvas = $("#stage-canvas");
 const stageCtx = stageCanvas.getContext("2d");
+
+// Managed animation: a single rAF loop that draws onto stageCanvas — the surface
+// `look` captures — so the agent never needs (and must not create) its own canvas.
+// Bumping stageAnimId cancels the running loop; a new stageAnimate() supersedes it.
+let stageAnimId = 0;
+function stageStop() { stageAnimId++; }
+
 function clearStage() {
+    stageStop();
     stageCtx.fillStyle = "#ffffff";
     stageCtx.fillRect(0, 0, stageCanvas.width, stageCanvas.height);
 }
 clearStage();
+
+// Run drawFrame(t) every frame onto stageCtx (t = seconds since it started). One
+// loop at a time — calling again cancels the previous; stageStop() ends it. The
+// first frame draws synchronously so a `look` right after sees output immediately.
+function stageAnimate(drawFrame) {
+    if (typeof drawFrame !== "function") throw new TypeError("stageAnimate(fn): fn must be a function");
+    stageStop();
+    const myId = stageAnimId;
+    const clock = (typeof performance !== "undefined" && performance.now) ? () => performance.now() : () => Date.now();
+    const t0 = clock();
+    const frame = () => {
+        if (myId !== stageAnimId) return;              // superseded or stopped
+        try { drawFrame((clock() - t0) / 1000); }
+        catch (e) { console.error("stageAnimate", e); stageStop(); return; }
+        raf(frame);
+    };
+    try { drawFrame(0); }
+    catch (e) { console.error("stageAnimate", e); stageStop(); return stageStop; }
+    raf(frame);
+    return stageStop;
+}
+
 // eval_js runs code via `new Function`, i.e. in global scope — so the drawing
-// surface must be reachable as globals.
+// surface and the animation hook must be reachable as globals.
 globalThis.stage = $("#stage");
 globalThis.stageCanvas = stageCanvas;
 globalThis.stageCtx = stageCtx;
+globalThis.stageAnimate = stageAnimate;
+globalThis.stageStop = stageStop;
 
 const MAKER_SYSTEM_PROMPT = [
     "You are an autonomous MAKER agent running INSIDE the bro engine (an HTML/CSS/JS app runtime).",
     "Your job: CREATE a visual result on the stage, LOOK at it, and CHANGE it until it matches the request.",
-    "The stage is a 640x480 2D canvas already on screen. Draw into it using the engine globals available to",
-    "your eval_js tool: `stageCtx` (a CanvasRenderingContext2D) and `stageCanvas`. Do NOT create your own",
-    "canvas — draw with stageCtx (e.g. stageCtx.fillStyle='...'; stageCtx.fillRect(...); gradients, paths,",
-    "arcs, text). After each visible change, call the `look` tool to SEE the current stage — a vision model",
-    "describes it back to you — then use what you observe to refine. Work in small steps: draw, look, adjust.",
+    "The stage is a FIXED 640x480 2D canvas already on screen. Draw into it using the engine globals your",
+    "eval_js tool can see: `stageCtx` (a CanvasRenderingContext2D) and `stageCanvas`.",
+    "CRITICAL: NEVER create or append your own <canvas> or DOM element — the `look` tool can ONLY see",
+    "`stageCanvas`, so anything you draw anywhere else is invisible to you and to the user.",
+    "For a STILL image, draw straight to stageCtx (fillStyle, fillRect, arc, paths, gradients, text).",
+    "For ANIMATION, do NOT call requestAnimationFrame yourself — instead call `stageAnimate(fn)`, where",
+    "fn(t) draws exactly ONE frame onto stageCtx (t = seconds since the animation began). It runs every",
+    "frame and automatically cancels any previous animation; call `stageStop()` to end it. This keeps the",
+    "animation on the canvas that `look` sees.",
+    "After each visible change, call the `look` tool to SEE the current stage — a vision model describes it",
+    "back to you — then use what you observe to refine. Work in small steps: draw, look, adjust.",
     "When the stage matches the request, stop and briefly say what you made. Keep each eval_js focused.",
 ].join(" ");
 
@@ -659,7 +697,7 @@ window.__makerDebug = {
     },
     prompt(text) { const s = ensureSession(); if (!s) throw new Error("no backend configured"); return s.prompt(text); },
     look, captureStage, clearStage,
-    reset() { invalidateSession(); },
+    reset() { stageStop(); invalidateSession(); },
 };
 
 (function boot() {
