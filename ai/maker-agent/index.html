@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Maker Agent</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <div class="title-row">
+            <h1>Maker Agent</h1>
+            <div id="status" class="status">choose a backend to begin</div>
+            <div id="ctx-meter" class="ctx-meter" style="display:none" title="context window used this conversation">
+                <div class="ctx-bar"><div class="ctx-fill"></div></div>
+                <span class="ctx-nums">0 / 8k ctx</span>
+            </div>
+        </div>
+
+        <!-- Backend + model controls. OpenRouter is the default/primary; Local
+             (brolm) is the offline fallback. -->
+        <div class="controls">
+            <label class="ctl">
+                Backend
+                <select id="backend">
+                    <option value="openrouter" selected>OpenRouter (cloud)</option>
+                    <option value="brolm">Local (brolm)</option>
+                </select>
+            </label>
+
+            <div id="or-controls" class="ctl-group">
+                <label class="ctl grow">
+                    API key
+                    <input type="password" id="or-key" spellcheck="false" placeholder="sk-or-…">
+                </label>
+                <button id="btn-refresh" title="Fetch the free-model list from OpenRouter">Load models</button>
+                <label class="ctl">
+                    Brain
+                    <select id="or-brain"><option value="">—</option></select>
+                </label>
+                <label class="ctl">
+                    Eyes (look)
+                    <select id="or-vision"><option value="">—</option></select>
+                </label>
+            </div>
+
+            <div id="brolm-controls" class="ctl-group" style="display:none">
+                <label class="ctl grow">
+                    Model path
+                    <input type="text" id="brolm-path" spellcheck="false" placeholder="path to Qwen3 GGUF…">
+                </label>
+                <button id="btn-load-local">Load</button>
+            </div>
+
+            <label class="approve-toggle">
+                <input type="checkbox" id="auto-approve" checked>
+                Auto-approve tools
+            </label>
+        </div>
+    </header>
+
+    <main>
+        <!-- Left: the scrolling conversation. Right: the live stage the agent
+             renders into and looks at. -->
+        <section class="left">
+            <div id="transcript" class="transcript">
+                <div class="hint">Pick OpenRouter, paste your key, load models, then ask the agent to make something —
+                    e.g. "draw a calm sunset over mountains". It renders into the stage, looks at it, and refines.</div>
+            </div>
+            <div class="input-bar">
+                <textarea id="prompt" rows="2" placeholder="Ask the agent to make something…  (Enter to send, Shift+Enter for newline)"></textarea>
+                <div class="input-buttons">
+                    <button id="btn-send" disabled>Send</button>
+                    <button id="btn-stop" disabled>Stop</button>
+                </div>
+            </div>
+        </section>
+
+        <section class="right">
+            <div class="stage-head"><span>Stage</span><span id="stage-note"></span></div>
+            <div id="stage" class="stage"><canvas id="stage-canvas" width="640" height="480"></canvas></div>
+        </section>
+    </main>
+
+    <script type="module" src="/app/main.js"></script>
+</body>
+</html>
