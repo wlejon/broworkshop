@@ -68,6 +68,19 @@ function emptyUsage(): Usage {
 	};
 }
 
+// Report the turn's token counts so the UI can show context-window pressure.
+// `input` is the full re-encoded prompt length (the live context size).
+function mkUsage(input: number, output: number): Usage {
+	return {
+		input,
+		output,
+		cacheRead: 0,
+		cacheWrite: 0,
+		totalTokens: input + output,
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+	};
+}
+
 // ---------------------------------------------------------------------------
 // createBrolmParser — the pure tool-call state machine (also used by tests)
 // ---------------------------------------------------------------------------
@@ -401,6 +414,7 @@ function makeAssistantMessage(
 	content: AssistantMessage["content"],
 	stopReason: AssistantMessage["stopReason"],
 	errorMessage?: string,
+	usage?: Usage,
 ): AssistantMessage {
 	return {
 		role: "assistant",
@@ -408,7 +422,7 @@ function makeAssistantMessage(
 		api: (model && (model as any).api) || "brolm",
 		provider: (model && (model as any).provider) || "brolm",
 		model: (model && model.id) || "brolm",
-		usage: emptyUsage(),
+		usage: usage || emptyUsage(),
 		stopReason,
 		errorMessage,
 		timestamp: Date.now(),
@@ -425,6 +439,9 @@ export function brolmStreamFn(brolm: Brolm): StreamFn {
 		(async () => {
 			try {
 				const prompt = buildPrompt(brolm, context);
+				// Token-array prompts (qwen3/mistral3) expose their length as the
+				// live context size; the qwen35 string path has no count here.
+				const inputTokens = typeof prompt === "string" ? 0 : (prompt as any).length || 0;
 				const acc: number[] = [];
 				let settled = false;
 
@@ -457,19 +474,20 @@ export function brolmStreamFn(brolm: Brolm): StreamFn {
 						parser.push(decodeFull(finalIds));
 						parser.finish();
 						const content = parser.blocks() as AssistantMessage["content"];
+						const usage = mkUsage(inputTokens, (finalIds as any).length || acc.length || 0);
 
 						if (info && info.cancelled) {
-							const msg = makeAssistantMessage(model, content, "aborted", "Request was aborted");
+							const msg = makeAssistantMessage(model, content, "aborted", "Request was aborted", usage);
 							finishStream({ type: "error", reason: "aborted", error: msg }, msg);
 							return;
 						}
 						if (info && info.error) {
-							const msg = makeAssistantMessage(model, content, "error", String(info.error));
+							const msg = makeAssistantMessage(model, content, "error", String(info.error), usage);
 							finishStream({ type: "error", reason: "error", error: msg }, msg);
 							return;
 						}
 						const reason = parser.sawToolCall() ? "toolUse" : "stop";
-						const msg = makeAssistantMessage(model, content, reason);
+						const msg = makeAssistantMessage(model, content, reason, undefined, usage);
 						finishStream({ type: "done", reason, message: msg }, msg);
 					},
 				};

@@ -11,6 +11,7 @@ import { installSystemMenu } from "/lib/system-menu.js";
 import { createAgentSession } from "/app/pi.bundle.js";
 import { renderMarkdown } from "/lib/markdown.js";
 import { lineDiff } from "/lib/linediff.js";
+import { runDemoSession, fillTranscript } from "/app/demo.js";
 
 const fs = require('fs');
 const $ = (s) => document.querySelector(s);
@@ -46,6 +47,44 @@ function firstExisting(list) {
     for (const p of list) { try { if (fs.existsSync(p)) return p; } catch (e) {} }
     return list[0];
 }
+
+// ── context meter ────────────────────────────────────────────────────────────
+// How much of the model's context window the running conversation occupies. The
+// pi assistant message carries a Usage {input, output}; `input` is the full
+// re-encoded prompt for that turn — i.e. the live context size, which grows as
+// history accumulates. As it nears the window the model degrades (dropped
+// quotes, hallucinated tool names like `read__file`); the meter turns amber then
+// red so that pressure is visible instead of a silent mystery.
+let contextWindow = 8192;   // overwritten from the model on load if it reports one
+let ctxUsed = 0;
+
+function fmtTokens(n) {
+    if (n >= 1000) return (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'k';
+    return String(Math.round(n));
+}
+
+function updateContextMeter(usage) {
+    if (usage && typeof usage.input === 'number') {
+        ctxUsed = usage.input + (typeof usage.output === 'number' ? usage.output : 0);
+    }
+    const meter = $('#ctx-meter');
+    if (!meter) return;
+    meter.style.display = ctxUsed > 0 ? '' : 'none';
+    const frac = contextWindow > 0 ? Math.min(1, ctxUsed / contextWindow) : 0;
+    const fill = meter.querySelector('.ctx-fill');
+    if (fill) fill.style.width = Math.round(frac * 100) + '%';
+    const nums = meter.querySelector('.ctx-nums');
+    if (nums) nums.textContent = fmtTokens(ctxUsed) + ' / ' + fmtTokens(contextWindow) + ' ctx';
+    meter.classList.toggle('warn', frac >= 0.75 && frac < 0.9);
+    meter.classList.toggle('crit', frac >= 0.9);
+}
+
+function setContextWindow(n) {
+    if (typeof n === 'number' && n > 0) contextWindow = n;
+    updateContextMeter(null);
+}
+
+function resetContextMeter() { ctxUsed = 0; updateContextMeter(null); }
 
 // ── transcript helpers ──────────────────────────────────────────────────────
 const transcript = () => $('#transcript');
@@ -210,6 +249,17 @@ function finalizeBubble() {
     curThinking = null;
 }
 
+// Wipe the transcript back to an empty conversation (used by the demo harness).
+function resetTranscript() {
+    const t = transcript();
+    t.innerHTML = '';
+    curBubble = null;
+    curThinking = null;
+    toolCards.clear();
+    stuckToBottom = true;
+    resetContextMeter();
+}
+
 // Reasoning fold — a collapsible "💭 Thinking" disclosure placed above the
 // current agent bubble. Collapsed by default; click the header to expand.
 function setThinking(row, text) {
@@ -369,6 +419,8 @@ function onEvent(event) {
                     }
                     finalizeBubble();
                 }
+                // The final message carries token usage — refresh the meter.
+                if (msg && msg.usage) updateContextMeter(msg.usage);
                 break;
             }
 
@@ -500,6 +552,9 @@ function loadModel() {
                     onEvent,
                     approve,
                 });
+                // Size the context meter to the model's window if it reports
+                // one (field name varies by loader); otherwise keep the default.
+                setContextWindow(model.maxSeqLen || model.contextLength || model.nCtx || contextWindow);
                 $('#btn-load').disabled = false;
                 $('#btn-send').disabled = false;
                 setStatus('ready (' + model.numLayers + ' layers)', 'ready');
@@ -559,8 +614,38 @@ $('#prompt').addEventListener('keydown', (e) => {
     }
 });
 
+// ── demo harness ──────────────────────────────────────────────────────────────
+// Drives the real renderer with a scripted AgentEvent stream so the UI can be
+// developed without a 20 GB model loaded. Exposed on window.__piDebug for
+// headless scripts and the console; also wired to the Debug/View menu below.
+const demoApi = {
+    onEvent,
+    approve,
+    addUserRow: (text) => addRow('You', 'you', text),
+    setUsage: (usage) => updateContextMeter(usage),
+    setStatus,
+    reset: resetTranscript,
+};
+window.__piDebug = {
+    runDemo: (opts) => runDemoSession(demoApi, opts || { live: true }),
+    fill: (opts) => fillTranscript(demoApi, opts || { turns: 6 }),
+    reset: resetTranscript,
+};
+
 (function boot() {
-    installSystemMenu();
+    installSystemMenu({
+        view: [
+            { id: 'demo.run', label: 'Simulate demo session' },
+            { id: 'demo.fill', label: 'Fill transcript (scroll test)' },
+            { separator: true },
+            { id: 'demo.reset', label: 'Clear transcript' },
+        ],
+        handlers: {
+            'demo.run': () => runDemoSession(demoApi, { live: true }),
+            'demo.fill': () => fillTranscript(demoApi, { turns: 6 }),
+            'demo.reset': resetTranscript,
+        },
+    });
     $('#model-path').value = firstExisting(MODEL_CANDIDATES);
     const t = transcript();
     t.addEventListener('scroll', () => {

@@ -16,7 +16,13 @@
                 Auto-approve tools
             </label>
         </div>
-        <div id="status" class="status">load a model to begin</div>
+        <div class="status-row">
+            <div id="status" class="status">load a model to begin</div>
+            <div id="ctx-meter" class="ctx-meter" style="display:none" title="context window used this conversation">
+                <div class="ctx-bar"><div class="ctx-fill"></div></div>
+                <span class="ctx-nums">0 / 8k ctx</span>
+            </div>
+        </div>
     </header>
 
     <main>

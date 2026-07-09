@@ -67,6 +67,12 @@ button {
 button:hover { background: #233248; }
 button:disabled { opacity: 0.45; cursor: default; }
 
+.status-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
 .status {
     font-size: 13px;
     padding: 4px 10px;
@@ -75,6 +81,33 @@ button:disabled { opacity: 0.45; cursor: default; }
     color: #a8adb5;
     align-self: flex-start;
 }
+
+/* context-window meter — grows amber then red as the conversation fills up */
+.ctx-meter {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    color: #8a9099;
+}
+.ctx-bar {
+    width: 120px;
+    height: 6px;
+    border-radius: 4px;
+    background: #23272e;
+    overflow: hidden;
+}
+.ctx-fill {
+    height: 100%;
+    width: 0%;
+    background: #4f7a4f;
+    transition: width 0.2s ease;
+}
+.ctx-meter.warn .ctx-fill { background: #c7a94a; }
+.ctx-meter.crit .ctx-fill { background: #d16060; }
+.ctx-meter.warn .ctx-nums { color: #d8c273; }
+.ctx-meter.crit .ctx-nums { color: #f0a0a0; }
+.ctx-nums { font-family: ui-monospace, Consolas, monospace; white-space: nowrap; }
 .status.loading { background: #3a3320; color: #e6c66b; }
 .status.ready   { background: #1f2a1f; color: #7bc47f; }
 .status.running { background: #1f2a3a; color: #6fb0ff; }
