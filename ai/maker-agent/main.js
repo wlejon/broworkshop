@@ -13,6 +13,7 @@ import { installSystemMenu } from "/lib/system-menu.js";
 import { createAgentSession } from "/app/maker.bundle.js";
 import { renderMarkdown } from "/lib/markdown.js";
 import { lineDiff } from "/lib/linediff.js";
+import { fetchModels, filterModels, priceOf, hasTools, hasVision, formatPrice, openModelPicker } from "/lib/openrouter.js";
 
 const $ = (s) => document.querySelector(s);
 const OR_BASE = "https://openrouter.ai/api/v1";
@@ -498,21 +499,30 @@ async function look(instruction) {
     }
 }
 
-// ── model catalog (OpenRouter /models, filtered to free) ──────────────────────
+// ── model catalog (OpenRouter /models) ────────────────────────────────────────
+// The full catalog, cached once loaded, so the Browse explorer never refetches.
+let catalog = null;
+
+// "openai/gpt-4o · $2.50/M" or "nvidia/nemotron… · free".
+function optText(m) {
+    const pr = priceOf(m);
+    return m.id.replace(/:free$/, "") + " · " + (pr.isFree ? "free" : formatPrice(pr.promptPerM));
+}
+
+// Load models keeps the two dropdowns short and safe: the free tool-callers and
+// free vision models, cheapest/largest first. Everything else (paid, niche) is a
+// click away under Browse…, which searches the full cached catalog with pricing.
 async function refreshModels() {
     const key = $("#or-key").value.trim();
     setStatus("loading model list…", "loading");
     try {
-        const headers = key ? { Authorization: "Bearer " + key } : {};
-        const resp = await fetch(OR_BASE + "/models", { headers });
-        const j = await resp.json();
-        const models = (j && j.data) || [];
-        const free = models.filter((m) => m.pricing && m.pricing.prompt === "0" && m.pricing.completion === "0");
-        const tools = free.filter((m) => (m.supported_parameters || []).includes("tools"));
-        const vision = free.filter((m) => ((m.architecture && m.architecture.input_modalities) || []).includes("image"));
+        catalog = await fetchModels(key);
+        const tools = filterModels(catalog, { free: true, tools: true });
+        const vision = filterModels(catalog, { free: true, vision: true });
         fillSelect($("#or-brain"), tools, store.get("brain", "nvidia/nemotron-3-super-120b-a12b:free"));
         fillSelect($("#or-vision"), vision, store.get("vision", "google/gemma-4-31b-it:free"));
-        setStatus("models loaded — " + tools.length + " tool-callers, " + vision.length + " vision", "ready");
+        setStatus("models loaded — " + tools.length + " free tool-callers, " + vision.length + " free vision · Browse for all "
+            + catalog.length, "ready");
         updateSendEnabled();
     } catch (e) {
         setStatus("model list failed: " + (e && e.message ? e.message : e), "error");
@@ -520,15 +530,54 @@ async function refreshModels() {
 }
 function fillSelect(sel, models, preferred) {
     sel.innerHTML = "";
-    models.sort((a, b) => (b.context_length || 0) - (a.context_length || 0));
+    models.slice().sort((a, b) => (b.context_length || 0) - (a.context_length || 0));
     for (const m of models) {
         const opt = document.createElement("option");
         opt.value = m.id;
-        opt.textContent = m.id.replace(/:free$/, "");
+        opt.textContent = optText(m);
         sel.appendChild(opt);
     }
     if (models.some((m) => m.id === preferred)) sel.value = preferred;
     else if (models.length) sel.value = models[0].id;
+}
+
+// Ensure `id` is a selectable option (Browse can pick a model outside the free
+// quick-list), labeled with its price from the catalog when we have it.
+function ensureOption(sel, id) {
+    let opt = Array.from(sel.options).find((o) => o.value === id);
+    if (!opt) {
+        opt = document.createElement("option");
+        opt.value = id;
+        const m = catalog && catalog.find((x) => x.id === id);
+        opt.textContent = m ? optText(m) : id.replace(/:free$/, "");
+        sel.appendChild(opt);
+    }
+    sel.value = id;
+}
+
+// Open the full-catalog explorer for one selector. brain → tool-callers,
+// vision → image-input models (the chip is pre-set but the user can toggle it).
+async function browseModels(kind) {
+    const key = $("#or-key").value.trim();
+    if (!catalog) {
+        setStatus("loading model list…", "loading");
+        try { catalog = await fetchModels(key); setStatus("ready", "ready"); }
+        catch (e) { setStatus("model list failed: " + (e && e.message ? e.message : e), "error"); return; }
+    }
+    const isBrain = kind === "brain";
+    const sel = isBrain ? $("#or-brain") : $("#or-vision");
+    const picked = await openModelPicker({
+        key,
+        models: catalog,
+        filter: isBrain ? { tools: true } : { vision: true },
+        initial: sel.value || undefined,
+        title: isBrain ? "Choose a brain (tool-calling)" : "Choose eyes (vision)",
+    });
+    if (!picked) return;
+    ensureOption(sel, picked);
+    store.set(isBrain ? "brain" : "vision", picked);
+    invalidateSession();
+    updateSendEnabled();
 }
 
 // ── backend / session ─────────────────────────────────────────────────────────
@@ -656,6 +705,8 @@ $("#or-brain").addEventListener("change", () => { store.set("brain", $("#or-brai
 $("#or-vision").addEventListener("change", () => store.set("vision", $("#or-vision").value));
 $("#brolm-path").addEventListener("change", () => store.set("brolmPath", $("#brolm-path").value.trim()));
 $("#btn-refresh").addEventListener("click", refreshModels);
+$("#btn-browse-brain").addEventListener("click", () => browseModels("brain"));
+$("#btn-browse-vision").addEventListener("click", () => browseModels("vision"));
 $("#btn-load-local").addEventListener("click", loadLocal);
 $("#btn-send").addEventListener("click", send);
 $("#btn-stop").addEventListener("click", stop);
