@@ -23,6 +23,7 @@ import type {
 	Model,
 	SimpleStreamOptions,
 	TextContent,
+	ThinkingContent,
 	Tool,
 	ToolCall,
 	ToolResultMessage,
@@ -49,6 +50,8 @@ export interface Brolm {
 
 const OPEN_TAG = "<tool_call>";
 const CLOSE_TAG = "</tool_call>";
+const THINK_OPEN = "<think>";
+const THINK_CLOSE = "</think>";
 
 // A shared, monotonic tool-call id counter. Deliberately NOT crypto/Date/random
 // so the pure parser stays deterministic for tests.
@@ -79,7 +82,7 @@ function emptyUsage(): Usage {
 // by brolmStreamFn, NOT the parser. The parser DOES emit the closing text_end
 // for a trailing text block when `finish()` is called at stream end.
 
-type ParserBlock = TextContent | ToolCall;
+type ParserBlock = TextContent | ThinkingContent | ToolCall;
 
 export function createBrolmParser(emit: (event: AssistantMessageEvent) => void) {
 	const blocks: ParserBlock[] = [];
@@ -87,7 +90,7 @@ export function createBrolmParser(emit: (event: AssistantMessageEvent) => void) 
 	let started = false;
 	let lastFull = "";
 	let pos = 0; // how far into lastFull we have consumed
-	let mode: "text" | "tool" = "text";
+	let mode: "text" | "tool" | "think" = "text";
 	let toolStart = 0; // offset just past the OPEN tag when mode === "tool"
 	let sawTool = false;
 
@@ -95,6 +98,12 @@ export function createBrolmParser(emit: (event: AssistantMessageEvent) => void) 
 	let textOpen = false;
 	let textIdx = -1;
 	let textBlock: TextContent | null = null;
+
+	// Current open thinking block (Qwen3 <think>…</think> reasoning), streamed
+	// live like text so the UI's reasoning fold updates during generation.
+	let thinkOpen = false;
+	let thinkIdx = -1;
+	let thinkBlock: ThinkingContent | null = null;
 
 	function makePartial(): AssistantMessage {
 		return {
@@ -129,6 +138,28 @@ export function createBrolmParser(emit: (event: AssistantMessageEvent) => void) 
 		textOpen = false;
 		textBlock = null;
 		emit({ type: "text_end", contentIndex: idx, content, partial: makePartial() });
+	}
+
+	function emitThinkDelta(str: string) {
+		if (!str) return;
+		if (!thinkOpen) {
+			thinkIdx = blocks.length;
+			thinkBlock = { type: "thinking", thinking: "" } as ThinkingContent;
+			blocks.push(thinkBlock);
+			thinkOpen = true;
+			emit({ type: "thinking_start", contentIndex: thinkIdx, partial: makePartial() });
+		}
+		(thinkBlock as any).thinking += str;
+		emit({ type: "thinking_delta", contentIndex: thinkIdx, delta: str, partial: makePartial() });
+	}
+
+	function closeThink() {
+		if (!thinkOpen) return;
+		const content = (thinkBlock as any).thinking;
+		const idx = thinkIdx;
+		thinkOpen = false;
+		thinkBlock = null;
+		emit({ type: "thinking_end", contentIndex: idx, content, partial: makePartial() });
 	}
 
 	// Number of chars at the end of `text` (from `from`) that form a proper
@@ -184,11 +215,45 @@ export function createBrolmParser(emit: (event: AssistantMessageEvent) => void) 
 				continue;
 			}
 
-			// mode === "text"
-			const i = text.indexOf(OPEN_TAG, pos);
-			if (i === -1) {
-				// No (complete) open tag — emit up to a possible partial tag suffix.
-				const k = partialTagHoldback(text, OPEN_TAG, pos);
+			if (mode === "think") {
+				const j = text.indexOf(THINK_CLOSE, pos);
+				if (j === -1) {
+					// No close yet — stream reasoning up to a possible partial close tag.
+					const k = partialTagHoldback(text, THINK_CLOSE, pos);
+					const safeEnd = Math.max(pos, text.length - k);
+					if (safeEnd > pos) {
+						emitThinkDelta(text.slice(pos, safeEnd));
+						pos = safeEnd;
+					}
+					return;
+				}
+				if (j > pos) emitThinkDelta(text.slice(pos, j));
+				closeThink();
+				mode = "text";
+				pos = j + THINK_CLOSE.length;
+				continue;
+			}
+
+			// mode === "text" — advance to whichever of <tool_call>/<think> is next.
+			const iTool = text.indexOf(OPEN_TAG, pos);
+			const iThink = text.indexOf(THINK_OPEN, pos);
+			let next = -1;
+			let kind: "tool" | "think" | null = null;
+			if (iTool !== -1 && (iThink === -1 || iTool <= iThink)) {
+				next = iTool;
+				kind = "tool";
+			} else if (iThink !== -1) {
+				next = iThink;
+				kind = "think";
+			}
+
+			if (next === -1) {
+				// No complete open tag — hold back a partial suffix of EITHER tag
+				// (they share the "<t" prefix, so the larger holdback is safe for both).
+				const k = Math.max(
+					partialTagHoldback(text, OPEN_TAG, pos),
+					partialTagHoldback(text, THINK_OPEN, pos),
+				);
 				const safeEnd = Math.max(pos, text.length - k);
 				if (safeEnd > pos) {
 					emitTextDelta(text.slice(pos, safeEnd));
@@ -196,12 +261,18 @@ export function createBrolmParser(emit: (event: AssistantMessageEvent) => void) 
 				}
 				return;
 			}
-			// Flush the normal text before the tag, then open a buffered tool block.
-			if (i > pos) emitTextDelta(text.slice(pos, i));
+
+			// Flush the normal text before the tag, then enter the tag's mode.
+			if (next > pos) emitTextDelta(text.slice(pos, next));
 			closeText();
-			mode = "tool";
-			toolStart = i + OPEN_TAG.length;
-			pos = toolStart;
+			if (kind === "tool") {
+				mode = "tool";
+				toolStart = next + OPEN_TAG.length;
+				pos = toolStart;
+			} else {
+				mode = "think";
+				pos = next + THINK_OPEN.length;
+			}
 		}
 	}
 
@@ -219,6 +290,11 @@ export function createBrolmParser(emit: (event: AssistantMessageEvent) => void) 
 		finish() {
 			if (mode === "tool") {
 				emitTextDelta(OPEN_TAG + lastFull.slice(toolStart));
+				mode = "text";
+			} else if (mode === "think") {
+				// Flush any reasoning held back for a partial close tag, then close.
+				if (lastFull.length > pos) emitThinkDelta(lastFull.slice(pos));
+				closeThink();
 				mode = "text";
 			}
 			closeText();
