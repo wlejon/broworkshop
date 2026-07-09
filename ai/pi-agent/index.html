@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Pi Agent</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <h1>Pi Agent</h1>
+        <div class="load-bar">
+            <input type="text" id="model-path" spellcheck="false" placeholder="path to Qwen3 GGUF…">
+            <button id="btn-load">Load</button>
+            <label class="approve-toggle">
+                <input type="checkbox" id="auto-approve" checked>
+                Auto-approve tools
+            </label>
+        </div>
+        <div id="status" class="status">load a model to begin</div>
+    </header>
+
+    <main>
+        <!-- The scrolling conversation. Rows, tool cards and approval prompts
+             are all appended here by main.js. -->
+        <div id="transcript" class="transcript">
+            <div class="hint">Load a local LLM, then ask the agent to do something. It can read/write files, run bash, and eval JS against the engine.</div>
+        </div>
+
+        <div class="input-bar">
+            <textarea id="prompt" rows="2" placeholder="Ask the agent to do something…  (Enter to send, Shift+Enter for newline)"></textarea>
+            <div class="input-buttons">
+                <button id="btn-send" disabled>Send</button>
+                <button id="btn-stop" disabled>Stop</button>
+            </div>
+        </div>
+    </main>
+
+    <script type="module" src="/app/main.js"></script>
+</body>
+</html>

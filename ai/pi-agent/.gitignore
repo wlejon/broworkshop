@@ -1,0 +1,10 @@
+# Generated agent bundle — 1.4 MB esbuild artifact, not source. Regenerate with
+# `npm run build` in bundler/ (see bundler/README.md). Kept out of the repo.
+pi.bundle.js
+
+# Author-time bundler deps — restored with `npm install` in bundler/.
+bundler/node_modules/
+
+# Test-run artifacts (screenshots, captured logs).
+tests/*.png
+tests/*.txt

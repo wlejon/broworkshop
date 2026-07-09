@@ -1,0 +1,7 @@
+{
+    "app": ".",
+    "title": "Pi Agent",
+    "width": 1000,
+    "height": 720,
+    "lib": "../../lib"
+}
