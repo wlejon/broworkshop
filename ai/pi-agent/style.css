@@ -120,7 +120,10 @@ main {
     text-transform: uppercase;
     margin-bottom: 4px;
 }
-.row .body { white-space: pre-wrap; word-break: break-word; }
+.row .body { word-break: break-word; }
+/* User text is verbatim (preserve their newlines); assistant text is Markdown,
+   which supplies its own block structure. */
+.row.you .body { white-space: pre-wrap; }
 
 .row.you   { background: #232730; }
 .row.you   .who { color: #c08bff; }
@@ -249,4 +252,141 @@ main {
     background: #2a1f1f;
     border-color: #503636;
     color: #ff9b9b;
+}
+
+/* ─── markdown in assistant messages ─────────────────────────────────────── */
+.row.agent .body h1,
+.row.agent .body h2,
+.row.agent .body h3,
+.row.agent .body h4,
+.row.agent .body h5,
+.row.agent .body h6 {
+    margin: 10px 0 6px;
+    line-height: 1.3;
+    font-weight: 600;
+}
+.row.agent .body h1 { font-size: 20px; }
+.row.agent .body h2 { font-size: 18px; }
+.row.agent .body h3 { font-size: 16px; }
+.row.agent .body h4,
+.row.agent .body h5,
+.row.agent .body h6 { font-size: 14px; color: #c3c9d2; }
+.row.agent .body > :first-child { margin-top: 0; }
+.row.agent .body p { margin: 0 0 8px; }
+.row.agent .body p:last-child { margin-bottom: 0; }
+.row.agent .body ul,
+.row.agent .body ol { margin: 6px 0; padding-left: 22px; }
+.row.agent .body li { margin: 2px 0; }
+.row.agent .body blockquote {
+    margin: 8px 0;
+    padding: 2px 12px;
+    border-left: 3px solid #3a4658;
+    color: #b3bac4;
+}
+.row.agent .body a { color: #8fb7ff; text-decoration: none; }
+.row.agent .body a:hover { text-decoration: underline; }
+.row.agent .body hr { border: none; border-top: 1px solid #2a2d33; margin: 12px 0; }
+
+.md-inline {
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 0.9em;
+    background: #12151b;
+    border: 1px solid #262b34;
+    border-radius: 4px;
+    padding: 1px 5px;
+}
+.md-code {
+    position: relative;
+    margin: 8px 0;
+    padding: 10px 12px;
+    background: #12151b;
+    border: 1px solid #262b34;
+    border-radius: 8px;
+    overflow-x: auto;
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 12.5px;
+    line-height: 1.45;
+}
+.md-code code {
+    font: inherit;
+    color: #d7dde6;
+    white-space: pre;
+}
+.code-copy {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    padding: 2px 9px;
+    font-size: 11px;
+    background: #1b2029;
+    color: #9aa4b2;
+    border: 1px solid #2c333f;
+    border-radius: 5px;
+    opacity: 0;
+    transition: opacity 0.12s;
+}
+.md-code:hover .code-copy { opacity: 1; }
+.code-copy:hover { background: #232b36; color: #cfe0ff; }
+
+/* ─── edit_file diff view ─────────────────────────────────────────────────── */
+.tool-path {
+    padding: 6px 12px 0;
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 11px;
+    color: #97a1b2;
+}
+.diff {
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.45;
+    padding: 8px 0;
+}
+.diff-line {
+    padding: 0 12px;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.diff-line.add { background: #10240f; color: #93d68a; }
+.diff-line.del { background: #2a1414; color: #e79a9a; }
+.diff-line.ctx { color: #8a9099; }
+
+/* ─── collapsible tool cards ──────────────────────────────────────────────── */
+.tool-card .tool-head { cursor: pointer; user-select: none; }
+.tool-caret { color: #6c7683; font-size: 11px; width: 10px; }
+.tool-card.collapsed .tool-body { display: none; }
+
+/* ─── reasoning fold (💭 Thinking) ────────────────────────────────────────── */
+.thinking {
+    margin-bottom: 12px;
+    border: 1px solid #262b34;
+    border-radius: 8px;
+    background: #171b21;
+    overflow: hidden;
+}
+.thinking-head {
+    padding: 6px 11px;
+    font-size: 12px;
+    color: #8a9099;
+    cursor: pointer;
+    user-select: none;
+}
+.thinking-head:hover { color: #aab1bb; }
+.thinking-body {
+    padding: 8px 11px;
+    border-top: 1px solid #23272e;
+    font-size: 12px;
+    font-style: italic;
+    color: #8a9099;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 220px;
+    overflow-y: auto;
+}
+.thinking.collapsed .thinking-body { display: none; }
+
+/* ─── approval: third (Approve all) button ────────────────────────────────── */
+.approve-card .approve-all {
+    background: #1e2633;
+    border-color: #33465e;
+    color: #9dc0ff;
 }

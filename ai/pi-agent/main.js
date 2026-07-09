@@ -9,6 +9,8 @@
 
 import { installSystemMenu } from "/lib/system-menu.js";
 import { createAgentSession } from "/app/pi.bundle.js";
+import { renderMarkdown } from "/lib/markdown.js";
+import { lineDiff } from "/lib/linediff.js";
 
 const fs = require('fs');
 const $ = (s) => document.querySelector(s);
@@ -30,6 +32,9 @@ function agentCwd() {
 let session = null;      // pi agent session (created once the model is ready)
 let running = false;     // a turn is in flight
 
+// Tool names the user chose to always allow for this session (Approve all).
+const sessionAllow = new Set();
+
 // ── status helper ──────────────────────────────────────────────────────────
 function setStatus(text, cls) {
     const el = $('#status');
@@ -45,7 +50,12 @@ function firstExisting(list) {
 // ── transcript helpers ──────────────────────────────────────────────────────
 const transcript = () => $('#transcript');
 
+// Auto-scroll only while the user is parked at the bottom; if they scroll up to
+// read, don't yank them back down. The scroll listener (wired in boot) keeps
+// `stuckToBottom` current; a fresh prompt re-pins it.
+let stuckToBottom = true;
 function scrollToBottom() {
+    if (!stuckToBottom) return;
     const t = transcript();
     t.scrollTop = t.scrollHeight;
 }
@@ -85,7 +95,7 @@ function assistantText(message) {
     return out;
 }
 
-// Concatenate the thinking blocks (rendered as a subtle status line).
+// Concatenate the thinking blocks (rendered as a collapsible reasoning fold).
 function thinkingText(message) {
     const content = message && message.content;
     if (!Array.isArray(content)) return '';
@@ -118,6 +128,67 @@ function stringifyArgs(args) {
     try { return JSON.stringify(args, null, 2); } catch (e) { return String(args); }
 }
 
+// ── markdown rendering ───────────────────────────────────────────────────────
+// Assistant replies are Markdown. Rendering is coalesced to one paint per frame
+// so streaming a long reply isn't an O(n²) reparse-on-every-token.
+const raf = (typeof requestAnimationFrame === 'function')
+    ? requestAnimationFrame
+    : (cb) => setTimeout(cb, 16);
+
+let mdPending = null;   // { body, text } — latest deferred render
+let mdScheduled = false;
+
+function renderInto(body, text) {
+    mdPending = { body, text };
+    if (mdScheduled) return;
+    mdScheduled = true;
+    raf(() => {
+        mdScheduled = false;
+        const p = mdPending;
+        mdPending = null;
+        if (p && p.body) {
+            p.body.innerHTML = renderMarkdown(p.text);
+            enhanceCodeBlocks(p.body);
+        }
+        scrollToBottom();
+    });
+}
+
+// Final, synchronous commit (message_end) — never left deferred.
+function renderNow(body, text) {
+    if (!body) return;
+    body.innerHTML = renderMarkdown(text);
+    enhanceCodeBlocks(body);
+}
+
+// Give each rendered code block a Copy button (idempotent within a render pass).
+function enhanceCodeBlocks(container) {
+    let blocks;
+    try { blocks = container.querySelectorAll('pre.md-code'); } catch (e) { return; }
+    for (let i = 0; i < blocks.length; i++) {
+        const pre = blocks[i];
+        if (pre.querySelector('.code-copy')) continue;
+        const btn = document.createElement('button');
+        btn.className = 'code-copy';
+        btn.textContent = 'Copy';
+        btn.addEventListener('click', () => {
+            const code = pre.querySelector('code');
+            copyText(code ? code.textContent : '');
+            btn.textContent = 'Copied';
+            setTimeout(() => { btn.textContent = 'Copy'; }, 1200);
+        });
+        pre.appendChild(btn);
+    }
+}
+
+function copyText(text) {
+    try {
+        if (navigator && navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text);
+        }
+    } catch (e) { /* best-effort */ }
+}
+
 // ── event rendering ─────────────────────────────────────────────────────────
 // The "current" streaming assistant bubble; reset at each message boundary so a
 // new assistant step (after interleaved tool cards) starts a fresh bubble.
@@ -139,15 +210,48 @@ function finalizeBubble() {
     curThinking = null;
 }
 
+// Reasoning fold — a collapsible "💭 Thinking" disclosure placed above the
+// current agent bubble. Collapsed by default; click the header to expand.
 function setThinking(row, text) {
     if (!text) return;
     if (!curThinking) {
         curThinking = document.createElement('div');
-        curThinking.className = 'thinking-line';
-        // Place the thinking line just before the current agent bubble.
+        curThinking.className = 'thinking collapsed';
+        const head = document.createElement('div');
+        head.className = 'thinking-head';
+        head.textContent = '💭 Thinking';
+        head.addEventListener('click', () => curThinking.classList.toggle('collapsed'));
+        const bodyEl = document.createElement('div');
+        bodyEl.className = 'thinking-body';
+        curThinking.appendChild(head);
+        curThinking.appendChild(bodyEl);
+        // Place the fold just before the current agent bubble.
         transcript().insertBefore(curThinking, row);
     }
-    curThinking.textContent = '💭 ' + text;
+    const bodyEl = curThinking.querySelector('.thinking-body');
+    if (bodyEl) bodyEl.textContent = text;
+}
+
+function setCardCollapsed(card, collapsed) {
+    card.classList.toggle('collapsed', collapsed);
+    const caret = card.querySelector('.tool-caret');
+    if (caret) caret.textContent = collapsed ? '▸' : '▾';
+}
+
+// Build a red/green line-diff element from edit_file's old_text/new_text.
+function buildDiffEl(oldText, newText) {
+    const wrap = document.createElement('div');
+    wrap.className = 'diff';
+    const ops = lineDiff(oldText, newText);
+    for (let i = 0; i < ops.length; i++) {
+        const op = ops[i];
+        const ln = document.createElement('div');
+        ln.className = 'diff-line ' + op.type;
+        const sign = op.type === 'add' ? '+' : op.type === 'del' ? '-' : ' ';
+        ln.textContent = sign + ' ' + op.text;
+        wrap.appendChild(ln);
+    }
+    return wrap;
 }
 
 function addToolCard(toolCallId, toolName, args) {
@@ -157,21 +261,42 @@ function addToolCard(toolCallId, toolName, args) {
 
     const head = document.createElement('div');
     head.className = 'tool-head';
+    const caret = document.createElement('span');
+    caret.className = 'tool-caret';
+    caret.textContent = '▾';
     const name = document.createElement('span');
     name.className = 'tool-name';
     name.textContent = toolName || 'tool';
     const state = document.createElement('span');
     state.className = 'tool-state';
     state.textContent = 'running…';
+    head.appendChild(caret);
     head.appendChild(name);
     head.appendChild(state);
+    head.addEventListener('click', () => setCardCollapsed(card, !card.classList.contains('collapsed')));
 
-    const argsPre = document.createElement('pre');
-    argsPre.className = 'tool-args';
-    argsPre.textContent = stringifyArgs(args);
+    const body = document.createElement('div');
+    body.className = 'tool-body';
+
+    // edit_file renders a red/green diff of its change instead of raw JSON args.
+    if (toolName === 'edit_file' && args && typeof args === 'object' &&
+        (typeof args.old_text === 'string' || typeof args.new_text === 'string')) {
+        if (args.path) {
+            const pathLine = document.createElement('div');
+            pathLine.className = 'tool-path';
+            pathLine.textContent = args.path;
+            body.appendChild(pathLine);
+        }
+        body.appendChild(buildDiffEl(args.old_text || '', args.new_text || ''));
+    } else {
+        const argsPre = document.createElement('pre');
+        argsPre.className = 'tool-args';
+        argsPre.textContent = stringifyArgs(args);
+        body.appendChild(argsPre);
+    }
 
     card.appendChild(head);
-    card.appendChild(argsPre);
+    card.appendChild(body);
     transcript().appendChild(card);
     if (toolCallId != null) toolCards.set(toolCallId, card);
 
@@ -181,16 +306,31 @@ function addToolCard(toolCallId, toolName, args) {
     return card;
 }
 
+// Ensure a card has a .tool-result <pre> under its body, returning it.
+function ensureResultPre(card) {
+    let resPre = card.querySelector('.tool-result');
+    if (!resPre) {
+        resPre = document.createElement('pre');
+        resPre.className = 'tool-result';
+        (card.querySelector('.tool-body') || card).appendChild(resPre);
+    }
+    return resPre;
+}
+
 function finishToolCard(toolCallId, result, isError) {
     const card = toolCallId != null ? toolCards.get(toolCallId) : null;
     if (!card) return;
     card.classList.add(isError ? 'error' : 'done');
     const state = card.querySelector('.tool-state');
     if (state) state.textContent = isError ? 'error' : 'done';
-    const resPre = document.createElement('pre');
-    resPre.className = 'tool-result';
-    resPre.textContent = resultText(result);
-    card.appendChild(resPre);
+    const text = resultText(result);
+    ensureResultPre(card).textContent = text;
+
+    // Auto-collapse a long, successful result to keep the transcript scannable;
+    // errors stay open, and edit_file stays open (its diff is the whole point).
+    const isEdit = card.querySelector('.diff') != null;
+    const longResult = text.length > 500 || text.split('\n').length > 8;
+    if (!isError && !isEdit && longResult) setCardCollapsed(card, true);
     scrollToBottom();
 }
 
@@ -214,9 +354,8 @@ function onEvent(event) {
                 if (!msg || (msg.role && msg.role !== 'assistant')) break;
                 const row = ensureBubble();
                 const body = row.querySelector('.body');
-                if (body) body.textContent = assistantText(msg);
+                if (body) renderInto(body, assistantText(msg));
                 setThinking(row, thinkingText(msg));
-                scrollToBottom();
                 break;
             }
 
@@ -226,7 +365,7 @@ function onEvent(event) {
                     // Commit the final assistant text, then close the bubble.
                     if (curBubble) {
                         const body = curBubble.querySelector('.body');
-                        if (body) body.textContent = assistantText(msg);
+                        if (body) renderNow(body, assistantText(msg));
                     }
                     finalizeBubble();
                 }
@@ -243,13 +382,7 @@ function onEvent(event) {
                 if (event.partialResult != null) {
                     const card = toolCards.get(event.toolCallId);
                     if (card) {
-                        let resPre = card.querySelector('.tool-result');
-                        if (!resPre) {
-                            resPre = document.createElement('pre');
-                            resPre.className = 'tool-result';
-                            card.appendChild(resPre);
-                        }
-                        resPre.textContent = resultText(event.partialResult);
+                        ensureResultPre(card).textContent = resultText(event.partialResult);
                         scrollToBottom();
                     }
                 }
@@ -277,10 +410,11 @@ function onEvent(event) {
 }
 
 // ── tool-approval gate ──────────────────────────────────────────────────────
-// Auto-approve checked → resolve true immediately. Unchecked → render inline
-// Approve/Deny buttons and resolve the promise when one is clicked.
+// Auto-approve checked (or the tool is on the session allow-list) → resolve true
+// immediately. Otherwise render inline Approve / Approve-all / Deny buttons and
+// resolve the promise when one is clicked.
 function approve(toolName, args) {
-    if ($('#auto-approve').checked) return Promise.resolve(true);
+    if ($('#auto-approve').checked || sessionAllow.has(toolName)) return Promise.resolve(true);
 
     return new Promise((resolve) => {
         clearHint();
@@ -306,10 +440,14 @@ function approve(toolName, args) {
         const yes = document.createElement('button');
         yes.className = 'approve';
         yes.textContent = 'Approve';
+        const all = document.createElement('button');
+        all.className = 'approve-all';
+        all.textContent = 'Approve all ' + (toolName || 'tool');
         const no = document.createElement('button');
         no.className = 'deny';
         no.textContent = 'Deny';
         btns.appendChild(yes);
+        btns.appendChild(all);
         btns.appendChild(no);
 
         card.appendChild(ask);
@@ -318,14 +456,18 @@ function approve(toolName, args) {
         transcript().appendChild(card);
         scrollToBottom();
 
-        const settle = (ok) => {
+        const settle = (ok, label) => {
             card.classList.add('resolved');
-            ask.textContent = ok ? 'Approved ' : 'Denied ';
+            ask.textContent = label + ' ';
             ask.appendChild(code);
             resolve(ok);
         };
-        yes.addEventListener('click', () => settle(true));
-        no.addEventListener('click', () => settle(false));
+        yes.addEventListener('click', () => settle(true, 'Approved'));
+        all.addEventListener('click', () => {
+            sessionAllow.add(toolName);
+            settle(true, 'Approving all');
+        });
+        no.addEventListener('click', () => settle(false, 'Denied'));
     });
 }
 
@@ -382,6 +524,7 @@ async function send() {
     const text = $('#prompt').value.trim();
     if (!text) return;
 
+    stuckToBottom = true; // a fresh prompt re-pins the transcript to the bottom
     addRow('You', 'you', text);
     $('#prompt').value = '';
     setRunning(true);
@@ -419,4 +562,8 @@ $('#prompt').addEventListener('keydown', (e) => {
 (function boot() {
     installSystemMenu();
     $('#model-path').value = firstExisting(MODEL_CANDIDATES);
+    const t = transcript();
+    t.addEventListener('scroll', () => {
+        stuckToBottom = t.scrollHeight - t.scrollTop - t.clientHeight < 40;
+    });
 })();
