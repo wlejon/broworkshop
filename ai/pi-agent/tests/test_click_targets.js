@@ -44,4 +44,31 @@ if (toggleAt(Math.floor(t.scrollHeight / 2), "scrolled-mid")) tested++;
 if (toggleAt(t.scrollHeight, "at-bottom")) tested++;
 assert(tested >= 2, "exercised clicks at multiple scroll offsets (" + tested + ")");
 
+// A "💭 Thinking" fold must toggle when its header is clicked — including a
+// past fold, whose handler must target its own element (not a shared var).
+(function thinkingFoldToggles() {
+    t.scrollTop = 0;
+    flush();
+    const tRect = t.getBoundingClientRect();
+    const heads = document.querySelectorAll(".thinking .thinking-head");
+    for (let i = 0; i < heads.length; i++) {
+        const r = heads[i].getBoundingClientRect();
+        if (r.height > 0 && r.top >= tRect.top + 4 && r.bottom <= tRect.bottom - 4) {
+            const fold = heads[i].closest(".thinking");
+            const before = fold.classList.contains("collapsed");
+            click(r.left + r.width / 2, r.top + r.height / 2);
+            flush();
+            assert(before !== fold.classList.contains("collapsed"),
+                "clicking a thinking header toggled its own fold (" + before + " -> " + !before + ")");
+            // Toggle back to confirm it works both directions.
+            click(r.left + r.width / 2, r.top + r.height / 2);
+            flush();
+            assert(before === fold.classList.contains("collapsed"),
+                "clicking again restored the fold state");
+            return;
+        }
+    }
+    assert(false, "no thinking fold visible to click");
+})();
+
 console.log("test_click_targets: all assertions passed");

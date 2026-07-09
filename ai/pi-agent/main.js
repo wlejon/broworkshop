@@ -265,18 +265,23 @@ function resetTranscript() {
 function setThinking(row, text) {
     if (!text) return;
     if (!curThinking) {
-        curThinking = document.createElement('div');
-        curThinking.className = 'thinking collapsed';
+        // Bind the toggle to THIS fold, not the mutable `curThinking` — that
+        // gets reset to null at message_end and reassigned each turn, so a
+        // closure over it would toggle the wrong fold (or throw) once this
+        // message finished streaming.
+        const fold = document.createElement('div');
+        fold.className = 'thinking collapsed';
         const head = document.createElement('div');
         head.className = 'thinking-head';
         head.textContent = '💭 Thinking';
-        head.addEventListener('click', () => curThinking.classList.toggle('collapsed'));
+        head.addEventListener('click', () => fold.classList.toggle('collapsed'));
         const bodyEl = document.createElement('div');
         bodyEl.className = 'thinking-body';
-        curThinking.appendChild(head);
-        curThinking.appendChild(bodyEl);
+        fold.appendChild(head);
+        fold.appendChild(bodyEl);
         // Place the fold just before the current agent bubble.
-        transcript().insertBefore(curThinking, row);
+        transcript().insertBefore(fold, row);
+        curThinking = fold;
     }
     const bodyEl = curThinking.querySelector('.thinking-body');
     if (bodyEl) bodyEl.textContent = text;
