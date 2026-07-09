@@ -311,6 +311,7 @@ export function makeTools(env, cwd, opts = {}) {
 			label: "Look at the preview",
 			description:
 				"Reload the live preview from the app files you have written and get a view of what actually rendered. " +
+				"Write `index.html` FIRST — looking before any file exists just reports an empty preview. " +
 				"Pass `instruction` to focus the observation (e.g. 'is the horizon level and is the sun warm-colored?'). " +
 				"This is how you SEE your own work: write files, then look, then decide what to change. Call it after " +
 				"each set of edits and let what you see guide the next step.",
