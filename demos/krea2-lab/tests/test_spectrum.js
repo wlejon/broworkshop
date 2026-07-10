@@ -1,8 +1,8 @@
 // Spectrum-panel test: load the real checkpoint and drive the model-nominated
-// affect axes through the ACTUAL UI — the hostility slider, then the
-// valence×arousal pad via real hit-tested mouse input, then stacked with an
-// expression word field, then on a Chinese prompt (the axes are baked pooled
-// directions from lab/spectrum.json — no words or language at runtime).
+// affect axes through the ACTUAL UI — the hostility slider, then valence +
+// arousal stacked on top, then stacked with an expression word field, then on
+// a Chinese prompt (the axes are baked pooled directions from
+// lab/spectrum.json — no words or language at runtime).
 //
 //   bro-headless ../broworkshop/demos/krea2-lab tests/test_spectrum.js
 
@@ -14,10 +14,19 @@ function pumpUntil(pred, budgetMs) {
   return pred();
 }
 
-assert($('spec-pad'), 'spectrum pad exists');
-assert($('spec-dot'), 'spectrum dot exists');
-assert($('spec-rows').querySelectorAll('.ctl-row').length === 2,
-       'hostility + surprise rows built');
+assert($('spec-rows').querySelectorAll('.ctl-row').length === 4,
+       'valence + arousal + hostility + surprise rows built');
+function specRange(name) {
+  const rows = $('spec-rows').querySelectorAll('.ctl-row');
+  for (let i = 0; i < rows.length; i++) {
+    if (rows[i].querySelector('.ctl-name').textContent === name)
+      return rows[i].querySelector('input[type=range]');
+  }
+  return null;
+}
+assert(specRange('valence') && specRange('arousal') &&
+       specRange('hostility') && specRange('surprise'),
+       'all four axes present by name');
 
 console.log('waiting for the model to load…');
 assert(pumpUntil(() => !$('btn-generate').disabled ||
@@ -76,7 +85,7 @@ const base = generateAndGrab(180000);
 
 // ── hostility slider (baked axes — no mint, instant) ─────────────────────
 console.log('hostility = 2 render…');
-const hostRange = $('spec-rows').querySelectorAll('.ctl-row')[0].querySelector('input[type=range]');
+const hostRange = specRange('hostility');
 setRange(hostRange, 2);
 const hostile = generateAndGrab(180000);
 assert($('timing').textContent.indexOf('spectrum') >= 0,
@@ -87,35 +96,19 @@ const dHost = meanDiff(base, hostile);
 console.log('mean |hostility-base| per channel: ' + dHost.toFixed(2));
 assert(dHost > 5, 'hostility changed the render (mean diff ' + dHost.toFixed(2) + ' > 5)');
 
-// ── the pad, via real hit-tested input: valence +2, arousal +2 ────────────
-// Scroll the rail so the pad is on screen, then press at the pad point that
-// maps to (nx, ny) for the target values.
-const pad = $('spec-pad');
-let r = pad.getBoundingClientRect();
-if (r.top < 0 || r.bottom > window.innerHeight) {
-  $('rail').scrollTop += r.top - 120;
-  flush();
-  r = pad.getBoundingClientRect();
-}
-assert(r.top >= 0 && r.bottom <= window.innerHeight, 'pad scrolled into view');
-const px = r.left + ((2 / 3 + 1) / 2) * r.width;    // valence +2 -> nx 5/6
-const py = r.top + ((1 - 2 / 3) / 2) * r.height;    // arousal +2 -> ny 1/6
-mouseDown(px, py);
-mouseUp(px, py);
-const vVal = +$('spec-valence-val').textContent;
-const aVal = +$('spec-arousal-val').textContent;
-console.log('pad set valence ' + vVal + ', arousal ' + aVal);
-assert(Math.abs(vVal - 2) < 0.2 && Math.abs(aVal - 2) < 0.2,
-       'pad drag landed near (+2, +2), got (' + vVal + ', ' + aVal + ')');
-
+// ── valence + arousal sliders, stacked on hostility ───────────────────────
+const valRange = specRange('valence');
+const aroRange = specRange('arousal');
+setRange(valRange, 2);
+setRange(aroRange, 2);
 console.log('valence+arousal (stacked on hostility) render…');
 const elated = generateAndGrab(180000);
 assert($('timing').textContent.indexOf('valence') >= 0 &&
        $('timing').textContent.indexOf('hostility') >= 0,
        'timing shows the stacked axes: ' + $('timing').textContent);
-const dPad = meanDiff(hostile, elated);
-console.log('mean |pad-hostility| per channel: ' + dPad.toFixed(2));
-assert(dPad > 5, 'pad axes changed the render (mean diff ' + dPad.toFixed(2) + ' > 5)');
+const dStack = meanDiff(hostile, elated);
+console.log('mean |valence+arousal-hostility| per channel: ' + dStack.toFixed(2));
+assert(dStack > 5, 'stacked axes changed the render (mean diff ' + dStack.toFixed(2) + ' > 5)');
 
 // ── stacking with an expression word field (same token grid) ─────────────
 console.log('adding expression anger = 1.5 on top…');
@@ -127,7 +120,7 @@ assert($('timing').textContent.indexOf('field vs') >= 0,
 assert($('timing').textContent.indexOf('spectrum') >= 0,
        'spectrum still active: ' + $('timing').textContent);
 const dComb = meanDiff(elated, combined);
-console.log('mean |combined-pad| per channel: ' + dComb.toFixed(2));
+console.log('mean |combined-stack| per channel: ' + dComb.toFixed(2));
 assert(dComb > 5, 'word field stacked onto the spectrum (mean diff ' + dComb.toFixed(2) + ' > 5)');
 
 // ── language-agnostic: the same baked axes on a Chinese prompt ────────────
@@ -136,8 +129,7 @@ setRange(angerRange, 0);
 $('btn-reset-spec').click();
 $('prompt').value = '一位棕色齐肩发女子的摄影棚人像，纯灰色背景，柔和的光线';
 const zhBase = generateAndGrab(180000);
-mouseDown(px, 0.5 * (r.top + r.bottom));           // valence +2, arousal 0
-mouseUp(px, 0.5 * (r.top + r.bottom));
+setRange(valRange, 2);                             // valence +2, arousal 0
 const zhVal = generateAndGrab(180000);
 assert($('timing').textContent.indexOf('valence') >= 0,
        'zh render used the spectrum: ' + $('timing').textContent);
@@ -147,7 +139,7 @@ assert(dZh > 5, 'spectrum drove a non-English prompt (mean diff ' + dZh.toFixed(
 
 // reset leaves a clean state for whoever runs the app next
 $('btn-reset-spec').click();
-assert(+$('spec-valence-val').textContent === 0 && +hostRange.value === 0,
+assert(+valRange.value === 0 && +hostRange.value === 0,
        'reset zeroed the spectrum');
 
 console.log('PASS: baked spectrum stacks and drives the render end to end, any language');

@@ -151,19 +151,6 @@
             <span class="grow"></span>
             <button id="btn-reset-spec" class="link" title="Zero the whole spectrum">reset</button>
           </h2>
-          <div class="row spec-pad-wrap">
-            <div id="spec-pad" title="drag — double-click to center">
-              <span class="spec-pad-lab n">activated</span>
-              <span class="spec-pad-lab s">flat</span>
-              <span class="spec-pad-lab w">sad</span>
-              <span class="spec-pad-lab e">happy</span>
-              <div id="spec-dot"></div>
-            </div>
-            <div class="spec-pad-side">
-              <div class="spec-pad-read">valence <span id="spec-valence-val" class="ctl-val">0.00</span></div>
-              <div class="spec-pad-read">arousal <span id="spec-arousal-val" class="ctl-val">0.00</span></div>
-            </div>
-          </div>
           <div id="spec-rows"></div>
           <p class="hint" id="spec-hint" title="The encoder’s own affect axes, pre-baked from ~100 expression-word fields (tools/mint_spectrum.js) — no words at runtime, works in any language. Axes stack with each other, the expression word, and image-as-prompt. Compound emotions are mixes: rage ≈ hostility + arousal − valence.">
             baked concept axes · instant · any language · axes stack</p>

@@ -7,7 +7,7 @@
 // dictionary.py technique on Krea 2's taps seam): named emotion sliders plus
 // a custom-word slider, one field per render, exclusive by design.
 // The spectrum panel sits on top of that: the four model-nominated affect
-// axes (valence×arousal pad + hostility/surprise sliders) from the round-6
+// axes (valence/arousal/hostility/surprise sliders) from the round-6
 // probe's SVD of ~100 farmed word fields — minted per prompt in the worker,
 // and stackable with each other and the expression word.
 // Plus LoRA adapters (brodiffusion's Krea 2 runtime-adapter path): attach
@@ -256,7 +256,7 @@ function init() {
       specState[k] = Math.max(-SPEC_RANGE, Math.min(SPEC_RANGE, v));
     });
   }
-  let specRows = {};   // hostility/surprise -> {range, refresh}
+  let specRows = {};   // valence/arousal/hostility/surprise -> {range, refresh}
 
   // ── LoRA adapters ──────────────────────────────────────────────────────
   // {path, scale} per applied LoRA, in pipeline group order. This list is
@@ -678,25 +678,15 @@ function init() {
     return best;
   }
 
-  // ── spectrum panel — valence×arousal pad + hostility/surprise sliders ────
+  // ── spectrum panel — valence/arousal/hostility/surprise sliders ──────────
   // The four model-nominated affect axes stack (they share one carrier in the
   // worker), so unlike the expression rows there is no exclusivity here.
-  function specPadRefresh() {
-    const dot = $('spec-dot');
-    dot.style.left = (((specState.valence / SPEC_RANGE) + 1) / 2 * 100) + '%';
-    dot.style.top = ((1 - ((specState.arousal / SPEC_RANGE) + 1) / 2) * 100) + '%';
-    ['valence', 'arousal'].forEach((k) => {
-      const el = $('spec-' + k + '-val');
-      el.textContent = specState[k].toFixed(2);
-      el.classList.toggle('off', specState[k] === 0);
-    });
-  }
   function buildSpectrumRow(key, host) {
     const row = document.createElement('div');
     row.className = 'ctl-row stepped';
     const nm = document.createElement('span');
     nm.className = 'ctl-name'; nm.textContent = key;
-    nm.title = 'model-nominated affect axis — stacks with the pad and the expression word';
+    nm.title = 'model-nominated affect axis — stacks with the other axes and the expression word';
     const range = document.createElement('input');
     range.type = 'range';
     range.min = String(-SPEC_RANGE); range.max = String(SPEC_RANGE); range.step = '0.05';
@@ -724,33 +714,7 @@ function init() {
     specRows[key] = { range: range, refresh: refresh };
   }
   function buildSpectrumPanel() {
-    const pad = $('spec-pad');
-    let padDown = false;
-    function setFromEvent(e) {
-      const r = pad.getBoundingClientRect();
-      const nx = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
-      const ny = Math.max(0, Math.min(1, (e.clientY - r.top) / r.height));
-      // snap the dead zone around 0 so "back to center" is a true no-op
-      const snap = (v) => Math.abs(v) < 0.1 ? 0 : Math.round(v * 100) / 100;
-      specState.valence = snap((nx * 2 - 1) * SPEC_RANGE);
-      specState.arousal = snap((1 - ny * 2) * SPEC_RANGE);
-      specPadRefresh();
-    }
-    pad.addEventListener('mousedown', (e) => { padDown = true; setFromEvent(e); });
-    window.addEventListener('mousemove', (e) => { if (padDown) setFromEvent(e); });
-    window.addEventListener('mouseup', () => {
-      if (!padDown) return;
-      padDown = false;
-      persist();
-      if (live) schedule('full');
-    });
-    pad.addEventListener('dblclick', () => {
-      specState.valence = 0; specState.arousal = 0;
-      specPadRefresh(); persist();
-      if (live) schedule('full');
-    });
-    buildSpectrumRow('hostility', $('spec-rows'));
-    buildSpectrumRow('surprise', $('spec-rows'));
+    SPECTRUM_KEYS.forEach((k) => buildSpectrumRow(k, $('spec-rows')));
     $('btn-reset-spec').addEventListener('click', () => {
       const any = SPECTRUM_KEYS.some((k) => specState[k] !== 0);
       SPECTRUM_KEYS.forEach((k) => { specState[k] = 0; });
@@ -759,10 +723,9 @@ function init() {
         specRows[k].range.value = '0';
         specRows[k].refresh();
       }
-      specPadRefresh(); persist();
+      persist();
       if (any && live) schedule('full');
     });
-    specPadRefresh();
   }
   buildSpectrumPanel();
   // The baked axes ship as lab/spectrum.json; without it the worker rejects
