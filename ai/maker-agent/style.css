@@ -128,10 +128,21 @@ main { flex: 1 1 auto; display: flex; min-height: 0; }
 .tool-card { border: 1px solid var(--line); border-radius: 7px; background: var(--panel); margin: 8px 0; overflow: hidden; }
 .tool-card.done { border-color: #2f5a44; }
 .tool-card.error { border-color: #5a3030; }
+/* consecutive tool calls fuse into one stacked group */
+.tool-stack { margin: 8px 0; }
+.tool-stack .tool-card { margin: 0; border-radius: 0; }
+.tool-stack .tool-card + .tool-card { border-top: none; }
+.tool-stack .tool-card:first-child { border-radius: 7px 7px 0 0; }
+.tool-stack .tool-card:last-child { border-radius: 0 0 7px 7px; }
+.tool-stack .tool-card:only-child { border-radius: 7px; }
 .tool-head { display: flex; align-items: center; gap: 7px; padding: 6px 10px; cursor: pointer; user-select: none; }
 .tool-caret { color: var(--ink-dim); font-size: 11px; }
 .tool-name { font-family: ui-monospace, monospace; font-size: 12.5px; color: var(--accent); }
-.tool-state { margin-left: auto; font-size: 11px; color: var(--ink-dim); }
+.tool-sum {
+    flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-family: ui-monospace, monospace; font-size: 11.5px; color: var(--ink-dim);
+}
+.tool-state { margin-left: auto; font-size: 11px; color: var(--ink-dim); flex-shrink: 0; }
 .tool-body { padding: 0 10px 8px; }
 .tool-card.collapsed .tool-body { display: none; }
 .tool-args, .tool-result {

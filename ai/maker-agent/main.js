@@ -237,6 +237,18 @@ function buildDiffEl(oldText, newText) {
     }
     return wrap;
 }
+// One-line summary of a tool call's defining argument, shown in the card head
+// so collapsed/stacked cards still say what they touched.
+function argsSummary(toolName, args) {
+    if (!args || typeof args !== "object") return "";
+    let s = "";
+    if (typeof args.path === "string") s = args.path;
+    else if (typeof args.command === "string") s = args.command;
+    else if (typeof args.code === "string") s = args.code;
+    else if (typeof args.instruction === "string") s = args.instruction;
+    s = s.replace(/\s+/g, " ").trim();
+    return s.length > 80 ? s.slice(0, 79) + "…" : s;
+}
 function addToolCard(toolCallId, toolName, args) {
     clearHint();
     const card = document.createElement("div");
@@ -245,8 +257,9 @@ function addToolCard(toolCallId, toolName, args) {
     head.className = "tool-head";
     const caret = document.createElement("span"); caret.className = "tool-caret"; caret.textContent = "▾";
     const name = document.createElement("span"); name.className = "tool-name"; name.textContent = toolName || "tool";
+    const sum = document.createElement("span"); sum.className = "tool-sum"; sum.textContent = argsSummary(toolName, args);
     const state = document.createElement("span"); state.className = "tool-state"; state.textContent = "running…";
-    head.appendChild(caret); head.appendChild(name); head.appendChild(state);
+    head.appendChild(caret); head.appendChild(name); head.appendChild(sum); head.appendChild(state);
     head.addEventListener("click", () => setCardCollapsed(card, !card.classList.contains("collapsed")));
     const body = document.createElement("div"); body.className = "tool-body";
     if (toolName === "edit_file" && args && typeof args === "object" &&
@@ -257,7 +270,15 @@ function addToolCard(toolCallId, toolName, args) {
         const pre = document.createElement("pre"); pre.className = "tool-args"; pre.textContent = stringifyArgs(args); body.appendChild(pre);
     }
     card.appendChild(head); card.appendChild(body);
-    transcript().appendChild(card);
+    // Consecutive tool calls (no assistant text or user message between them)
+    // stack into one visual group instead of a column of separate blocks.
+    let stack = transcript().lastElementChild;
+    if (!stack || !stack.classList || !stack.classList.contains("tool-stack")) {
+        stack = document.createElement("div");
+        stack.className = "tool-stack";
+        transcript().appendChild(stack);
+    }
+    stack.appendChild(card);
     if (toolCallId != null) toolCards.set(toolCallId, card);
     finalizeBubble();
     scrollToBottom();
@@ -290,10 +311,15 @@ function onEvent(event) {
             case "message_update": {
                 const msg = event.message;
                 if (!msg || (msg.role && msg.role !== "assistant")) break;
+                const text = assistantText(msg);
+                const think = thinkingText(msg);
+                // Tool-call-only turns have no text: don't emit an empty
+                // "Agent" label row between every pair of tool cards.
+                if (!text && !think && !curBubble) break;
                 const row = ensureBubble();
                 const body = row.querySelector(".body");
-                if (body) renderInto(body, assistantText(msg));
-                setThinking(row, thinkingText(msg));
+                if (body) renderInto(body, text);
+                setThinking(row, think);
                 break;
             }
             case "message_end": {
@@ -735,6 +761,7 @@ window.__makerDebug = {
     },
     prompt(text) { const s = ensureSession(); if (!s) throw new Error("no backend configured"); return s.prompt(text); },
     look, capturePreview, renderPreview,
+    onEvent, // synthetic AgentEvent injection for transcript-rendering tests
     reset() { invalidateSession(); },
 };
 
