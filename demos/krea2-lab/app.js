@@ -3,6 +3,10 @@
 // control krea-research (../krea-research) discovered: AdaLN dials, the deep-
 // tap band dial, an 18-axis conditioning-space control bank (+ user-minted
 // axes), attention-gate scale/mask, and per-region spatial-paint compositing.
+// Plus LoRA adapters (brodiffusion's Krea 2 runtime-adapter path): attach
+// .safetensors LoRAs, rescale each live (strengths ride every generate as
+// `loraScales`), remove without reloading; the list persists and re-applies
+// on every model load.
 //
 // Krea 2 is a 12.9B flow-matching DiT conditioned on tapped Qwen3-VL-4B hidden
 // states, decoded by the Qwen-Image VAE (vae_scale_factor() == 8, patch_size
@@ -213,6 +217,17 @@ function init() {
   // gallery can badge the picked cells. null = a browsed file (no history id).
   let mintSelId = { a: null, b: null };
 
+  // ── LoRA adapters ──────────────────────────────────────────────────────
+  // {path, scale} per applied LoRA, in pipeline group order. This list is
+  // authoritative (persisted here); the worker rebuilds the pipeline's
+  // runtime groups from it after every model load. Strengths ride each
+  // generate message as `loraScales` (synced worker-side per generation),
+  // so a strength slider needs no worker round-trip of its own.
+  let loras = Array.isArray(prefs.loras)
+    ? prefs.loras.filter((l) => l && l.path)
+        .map((l) => ({ path: l.path, scale: typeof l.scale === 'number' ? l.scale : 1 }))
+    : [];
+
   // ── gate paint state ───────────────────────────────────────────────────
   let gateCapture = null;     // {rows,cols,text_seq,img_len,gridW,gridH,heatNorm,msgUsed}
   let gateMaskValues = null;  // Float32Array(gridW*gridH), 1.0 = untouched
@@ -288,6 +303,7 @@ function init() {
       spPrompt: $('sp-prompt').value, spSeed: $('sp-seed').value, spSteps: $('sp-steps').value,
       spAxis: $('sp-axis').value, spStrength: $('sp-strength').value,
       randSeed: $('rand-seed').checked, seedHistory: seedHistory,
+      loras: loras.map((l) => ({ path: l.path, scale: +l.scale })),
     });
   }
 
@@ -527,6 +543,121 @@ function init() {
       if (v) out[m.name] = (out[m.name] || 0) + v;
     });
     return out;
+  }
+
+  // ── LoRA panel ───────────────────────────────────────────────────────────
+  // One row per applied LoRA: filename, a strength slider (0 = off, dblclick
+  // the value to zero it), and × to remove. Strength changes are free (they
+  // ride the next generate message); add/remove are worker requests because
+  // they read the safetensors file / rebuild the group list.
+  function loraStatus(msg, kind) {
+    const el = $('lora-status');
+    el.textContent = msg;
+    el.className = 'hint' + (kind === 'err' ? ' err' : kind === 'ok' ? ' ok' : '');
+  }
+  function loraBasename(p) {
+    return String(p).replace(/[\\/]+$/, '').split(/[\\/]/).pop();
+  }
+  function renderLoraList() {
+    const host = $('lora-list');
+    host.innerHTML = '';
+    loras.forEach((l, i) => {
+      const row = document.createElement('div');
+      row.className = 'axis-mine-row';
+      const nm = document.createElement('span');
+      nm.className = 'axis-mine-name';
+      nm.textContent = loraBasename(l.path);
+      nm.title = l.path;
+      const range = document.createElement('input');
+      range.type = 'range'; range.min = '-2'; range.max = '2'; range.step = '0.05';
+      range.value = String(l.scale);
+      const val = document.createElement('span');
+      val.className = 'ctl-val';
+      function refresh() {
+        const v = +range.value;
+        val.textContent = (v > 0 ? '+' : '') + v.toFixed(2);
+        val.classList.toggle('off', v === 0);
+      }
+      refresh();
+      range.addEventListener('input', () => { l.scale = +range.value; refresh(); persist(); });
+      range.addEventListener('change', () => { if (live) schedule('full'); });
+      val.addEventListener('dblclick', () => {
+        range.value = '0'; l.scale = 0; refresh(); persist(); if (live) schedule('full');
+      });
+      const onStep = () => { l.scale = +range.value; refresh(); persist(); };
+      const onSettle = () => { if (live) schedule('full'); };
+      const minus = makeStepper(range, -1, onStep, onSettle);
+      const plus = makeStepper(range, +1, onStep, onSettle);
+      const del = document.createElement('button');
+      del.type = 'button'; del.className = 'axis-mine-del';
+      del.textContent = '×'; del.title = 'remove "' + loraBasename(l.path) + '"';
+      del.addEventListener('click', () => removeLora(i));
+      row.appendChild(nm); row.appendChild(minus); row.appendChild(range);
+      row.appendChild(plus); row.appendChild(val); row.appendChild(del);
+      host.appendChild(row);
+    });
+  }
+  function reportLoraOutcome(resp, okMsg) {
+    if (resp && resp.errors && resp.errors.length) {
+      loraStatus(resp.errors.map((e) => loraBasename(e.path) + ': ' + e.message).join(' · '), 'err');
+    } else {
+      loraStatus(okMsg, 'ok');
+    }
+  }
+  function addLora() {
+    if (!loaded || busy) return;
+    if (typeof window.showOpenFileDialog !== 'function') {
+      loraStatus('file dialog unavailable in this build', 'err'); return;
+    }
+    const files = window.showOpenFileDialog('LoRA safetensors|safetensors');
+    if (!files || !files.length) return;
+    const path = files[0];
+    setBusy(true);
+    loraStatus('applying ' + loraBasename(path) + '…');
+    client.send({ type: 'applyLora', path: path, scale: 1.0 }, (err) => {
+      setBusy(false);
+      if (err) { loraStatus(String(err.message || err), 'err'); pump(); return; }
+      loras.push({ path: path, scale: 1.0 });
+      renderLoraList();
+      persist();
+      loraStatus('applied ' + loraBasename(path), 'ok');
+      if (live) schedule('full');
+      pump();
+    });
+  }
+  // Remove-one rebuilds the whole group list (group indices are apply-order,
+  // so dropping one from the middle shifts the rest — the worker re-applies
+  // the remaining files and reports back what actually stuck).
+  function removeLora(i) {
+    if (!loaded || busy) return;
+    const next = loras.filter((_, j) => j !== i);
+    setBusy(true);
+    loraStatus('rebuilding LoRA set…');
+    client.send({ type: 'setLoras', loras: next }, (err, resp) => {
+      setBusy(false);
+      if (err) { loraStatus(String(err.message || err), 'err'); pump(); return; }
+      loras = resp.applied || [];
+      renderLoraList();
+      persist();
+      reportLoraOutcome(resp, 'removed');
+      if (live) schedule('full');
+      pump();
+    });
+  }
+  // Re-apply the persisted list after a model load (the pipeline's groups
+  // die with the old model). Missing/bad files are skipped and reported;
+  // the list shrinks to what actually applied.
+  function restoreLoras(done) {
+    if (!loras.length) { renderLoraList(); done(); return; }
+    loraStatus('re-applying ' + loras.length + ' LoRA' + (loras.length === 1 ? '' : 's') + '…');
+    client.send({ type: 'setLoras', loras: loras }, (err, resp) => {
+      if (err) { loraStatus(String(err.message || err), 'err'); done(); return; }
+      loras = resp.applied || [];
+      renderLoraList();
+      persist();
+      reportLoraOutcome(resp, loras.length + ' LoRA' + (loras.length === 1 ? '' : 's') + ' re-applied');
+      done();
+    });
   }
 
   // ── render (Render tab) ──────────────────────────────────────────────────
@@ -824,6 +955,7 @@ function init() {
     const busyOrUnloaded = busy || !loaded;
     $('btn-generate').disabled = busyOrUnloaded;
     $('btn-load').disabled = busy;
+    $('btn-lora-add').disabled = busyOrUnloaded;
     $('btn-mint-text').disabled = busyOrUnloaded;
     $('btn-mint-image').disabled = busyOrUnloaded || !mintImgA || !mintImgB;
     $('btn-axis-sweep').disabled = busyOrUnloaded || !lastMinted;
@@ -895,7 +1027,9 @@ function init() {
       const cls = (msg.config && msg.config.modelClass) || 'model';
       const card = msg.backend === 'cpu' ? '' : ' · ' + cardName();
       status(cls + ' ready · ' + (msg.axes || []).length + ' axes' + card, 'ok');
-      rebuildMintedAxes();   // re-mint any axes saved from a prior session
+      // Chain the two sequential restore passes (the client serializes one
+      // request at a time): saved LoRAs first, then saved minted axes.
+      restoreLoras(() => rebuildMintedAxes());
     });
   }
 
@@ -928,6 +1062,7 @@ function init() {
       dial: { pregate: +$('dial-pregate').value, prescale: +$('dial-prescale').value },
       gate: { txtScale: +$('gate-txt').value, imgScale: +$('gate-img').value },
       axisControls: collectAxisControls(),
+      loraScales: loras.map((l) => +l.scale),
     };
   }
 
@@ -1438,6 +1573,7 @@ function init() {
       type: 'generate', prompt: prompt, negPrompt: opts.negativePrompt, opts: opts,
       band: 1.0, dial: { pregate: 1.0, prescale: 1.0 }, gate: { txtScale: 1.0, imgScale: 1.0 },
       axisControls: {},
+      loraScales: loras.map((l) => +l.scale),
     }, (err, resp) => {
       setBusy(false);
       if (err) { spStatus(String(err.message || err), 'err'); return; }
@@ -1487,6 +1623,7 @@ function init() {
     client.send({
       type: 'spatialRender', basePrompt: spBasePrompt, opts: spBaseOpts,
       axisName: axisName, alpha: strength, maskW: W_lat, maskH: H_lat, maskData: maskData,
+      loraScales: loras.map((l) => +l.scale),
     }, (err, resp) => {
       setBusy(false);
       if (err) { spStatus(String(err.message || err), 'err'); return; }
@@ -1626,6 +1763,8 @@ function init() {
     if (live) schedule('full');
   });
 
+  $('btn-lora-add').addEventListener('click', addLora);
+
   $('btn-mint-text').addEventListener('click', doMintText);
   $('btn-mint-image').addEventListener('click', doMintImage);
   $('btn-mint-pick-a').addEventListener('click', () => pickMintImage('a'));
@@ -1645,6 +1784,7 @@ function init() {
 
   // ── boot ─────────────────────────────────────────────────────────────────
   renderAxisManager();
+  renderLoraList();   // persisted entries show immediately; applied on load
   refreshButtons();
   canvas.style.display = 'none';   // no empty canvas box until the first render
   fetch('assets/axes_meta.json').then((r) => r.json()).then((meta) => {

@@ -50,7 +50,17 @@
 //        <- axisRegistered{name, components, residual}
 //   main -> removeControl {name}
 //        <- removed       {name}
+//   main -> applyLora     {path, scale}      (attach one runtime LoRA group)
+//        <- loraApplied   {index, path}
+//   main -> setLoras      {loras: [{path, scale}]}   (rebuild all groups —
+//        <- lorasSet      {applied: [{path, scale}], errors: [{path, message}]}
+//                          used for remove-one and restore-after-load; bad
+//                          files are skipped and reported, the rest apply)
 //   errors come back as   <- error {stage, message}
+//
+// Per-LoRA strengths ride each generate message as opts-level `loraScales`
+// (index-aligned with the applied groups) and are synced via setLoraScale at
+// the top of every generation — no extra round-trip for a slider drag.
 //
 // axisMinted's `components` explain WHAT the minted direction is made of:
 // its cosine against each of the dictionary's 18 named axes (sorted by
@@ -208,6 +218,15 @@ function gateMaskTensor(flat) {
   return { rows: flat.length, cols: 1, data: flat };
 }
 
+// Sync per-LoRA-group strengths from a generate message's `loraScales` array
+// (index-aligned with the applied groups). Cheap native calls — no file IO.
+// Messages without the field leave the scales as last set.
+function syncLoraScales(scales) {
+  if (!scales || !pipeline.setLoraScale) return;
+  var n = Math.min(scales.length, pipeline.numLoras ? pipeline.numLoras() : 0);
+  for (var i = 0; i < n; i++) pipeline.setLoraScale(i, +scales[i] || 0);
+}
+
 // ── the shared manual generation loop ───────────────────────────────────
 // Every technique but spatial compositing funnels through this: prime from
 // either a plain prompt or caller-supplied raw taps, optionally rebuild a
@@ -215,6 +234,7 @@ function gateMaskTensor(flat) {
 // decode once. Gate scale/mask are per-forward (not sigma-dependent) so they
 // are set once before priming and left in effect for the whole loop.
 function runGeneration(msg, onDone) {
+  syncLoraScales(msg.loraScales);
   applyAxisControls(msg.axisControls || {});
 
   var gate = msg.gate;
@@ -293,6 +313,7 @@ function handleSpatialRender(msg) {
     if (!pipeline) throw new Error('no model loaded');
     var t0 = now();
 
+    syncLoraScales(msg.loraScales);
     pipeline.clearControl();
     var stateBase = pipeline.prime(msg.basePrompt, msg.opts);
     pipeline.setControl(msg.axisName, msg.alpha);
@@ -568,6 +589,47 @@ function handleRemoveControl(msg) {
   }
 }
 
+// ── LoRA adapters ────────────────────────────────────────────────────────
+// The main thread's {path, scale} list is authoritative (it persists it);
+// the pipeline's runtime groups are rebuilt from it. applyLora appends one
+// group; setLoras rebuilds them all (remove-one, restore-after-load).
+
+function handleApplyLora(msg) {
+  try {
+    if (!pipeline) throw new Error('no model loaded');
+    if (!pipeline.applyLora) throw new Error('this engine build has no LoRA support');
+    pipeline.applyLora(msg.path, msg.scale == null ? 1.0 : +msg.scale);
+    self.postMessage({ type: 'loraApplied',
+                       index: pipeline.numLoras ? pipeline.numLoras() - 1 : 0,
+                       path: msg.path });
+  } catch (e) {
+    fail('applyLora', e);
+  }
+}
+
+function handleSetLoras(msg) {
+  try {
+    if (!pipeline) throw new Error('no model loaded');
+    if (!pipeline.clearLoras) throw new Error('this engine build has no LoRA support');
+    pipeline.clearLoras();
+    var applied = [], errors = [];
+    (msg.loras || []).forEach(function (l) {
+      try {
+        pipeline.applyLora(l.path, l.scale == null ? 1.0 : +l.scale);
+        applied.push({ path: l.path, scale: l.scale == null ? 1.0 : +l.scale });
+      } catch (e) {
+        errors.push({ path: l.path,
+                      message: (e && e.message) ? e.message : String(e) });
+      }
+    });
+    // `applied` is the new group order — a skipped file shifts later indices
+    // down, so the main thread replaces its list with exactly this.
+    self.postMessage({ type: 'lorasSet', applied: applied, errors: errors });
+  } catch (e) {
+    fail('setLoras', e);
+  }
+}
+
 self.onmessage = function (e) {
   var msg = e.data || {};
   switch (msg.type) {
@@ -578,6 +640,8 @@ self.onmessage = function (e) {
     case 'mintImageAxis':  handleMintImageAxis(msg); break;
     case 'registerAxis':   handleRegisterAxis(msg); break;
     case 'removeControl':  handleRemoveControl(msg); break;
+    case 'applyLora':      handleApplyLora(msg); break;
+    case 'setLoras':       handleSetLoras(msg); break;
     default: fail('dispatch', new Error('unknown message: ' + msg.type));
   }
 };

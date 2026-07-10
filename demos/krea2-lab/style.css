@@ -131,6 +131,7 @@ button.link:hover { color: #eeb277; background: none; }
 .hint.inline { font-weight: 400; letter-spacing: 0; text-transform: none; }
 .hint.err { color: #ff8e8e; }
 .hint.warn { color: #e8c97a; }
+.hint.ok { color: #7fd1a6; }
 .hint code {
   color: #d4914a; background: #1c140c; border-radius: 3px;
   padding: 0 3px; font-size: 10px;
@@ -203,6 +204,11 @@ details[open] > .ctl-cat::before { content: '▾ '; }
   color: #4d5562; font-size: 15px; line-height: 1; text-align: center;
 }
 .axis-mine-del:hover { color: #e0674a; }
+
+/* LoRA rows reuse the minted-axes row layout, but the name isn't clickable */
+#lora-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+#lora-list .axis-mine-name { cursor: default; }
+#lora-list .axis-mine-name:hover { color: #aeb6c2; text-decoration: none; }
 
 /* mint sub-panels */
 .mint-sub {

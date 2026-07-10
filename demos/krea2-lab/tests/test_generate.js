@@ -43,7 +43,8 @@ assert(!$('status-text').classList.contains('err'),
 console.log('load status: ' + $('status-text').textContent + ' · backend: ' + $('backend').textContent);
 
 // ── drive a plain-prompt generation through the real UI ─────────────────────
-$('size').value = '512';
+$('width').value = '512';
+$('height').value = '512';
 $('steps').value = '4';
 $('seed').value = '0';
 $('guidance').value = '1.0';
