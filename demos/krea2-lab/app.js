@@ -6,6 +6,10 @@
 // and the expression panel — contextual per-token fields (sana-research's
 // dictionary.py technique on Krea 2's taps seam): named emotion sliders plus
 // a custom-word slider, one field per render, exclusive by design.
+// The spectrum panel sits on top of that: the four model-nominated affect
+// axes (valence×arousal pad + hostility/surprise sliders) from the round-6
+// probe's SVD of ~100 farmed word fields — minted per prompt in the worker,
+// and stackable with each other and the expression word.
 // Plus LoRA adapters (brodiffusion's Krea 2 runtime-adapter path): attach
 // .safetensors LoRAs, rescale each live (strengths ride every generate as
 // `loraScales`), remove without reloading; the list persists and re-applies
@@ -242,6 +246,18 @@ function init() {
     ? Object.assign({}, prefs.exprStrengths) : {};
   let exprRows = {};   // key -> {range, refresh} incl. 'custom'
 
+  // ── spectrum state (model-nominated affect axes; worker mints per prompt) ─
+  const SPECTRUM_KEYS = ['valence', 'arousal', 'hostility', 'surprise'];
+  const SPEC_RANGE = 3;
+  const specState = { valence: 0, arousal: 0, hostility: 0, surprise: 0 };
+  if (prefs.specState && typeof prefs.specState === 'object') {
+    SPECTRUM_KEYS.forEach((k) => {
+      const v = +prefs.specState[k] || 0;
+      specState[k] = Math.max(-SPEC_RANGE, Math.min(SPEC_RANGE, v));
+    });
+  }
+  let specRows = {};   // hostility/surprise -> {range, refresh}
+
   // ── LoRA adapters ──────────────────────────────────────────────────────
   // {path, scale} per applied LoRA, in pipeline group order. This list is
   // authoritative (persisted here); the worker rebuilds the pipeline's
@@ -323,6 +339,7 @@ function init() {
       axisStrengths: axisStrengths,
       exprStrengths: exprStrengths,
       exprCustomAdj: $('expr-custom-adj').value,
+      specState: specState,
       mintedAxes: mintedAxes.map((m) => ({
         name: m.name, kind: m.kind, pos: m.pos, neg: m.neg, aPath: m.aPath, bPath: m.bPath,
         dir: m.dir, consistency: m.consistency,
@@ -659,6 +676,99 @@ function init() {
     const cadj = $('expr-custom-adj').value.trim();
     if (ca > bestA && cadj) best = { adj: cadj, alpha: ca };
     return best;
+  }
+
+  // ── spectrum panel — valence×arousal pad + hostility/surprise sliders ────
+  // The four model-nominated affect axes stack (they share one carrier in the
+  // worker), so unlike the expression rows there is no exclusivity here.
+  function specPadRefresh() {
+    const dot = $('spec-dot');
+    dot.style.left = (((specState.valence / SPEC_RANGE) + 1) / 2 * 100) + '%';
+    dot.style.top = ((1 - ((specState.arousal / SPEC_RANGE) + 1) / 2) * 100) + '%';
+    ['valence', 'arousal'].forEach((k) => {
+      const el = $('spec-' + k + '-val');
+      el.textContent = specState[k].toFixed(2);
+      el.classList.toggle('off', specState[k] === 0);
+    });
+  }
+  function buildSpectrumRow(key, host) {
+    const row = document.createElement('div');
+    row.className = 'ctl-row stepped';
+    const nm = document.createElement('span');
+    nm.className = 'ctl-name'; nm.textContent = key;
+    nm.title = 'model-nominated affect axis — stacks with the pad and the expression word';
+    const range = document.createElement('input');
+    range.type = 'range';
+    range.min = String(-SPEC_RANGE); range.max = String(SPEC_RANGE); range.step = '0.05';
+    range.value = String(specState[key] || 0);
+    const val = document.createElement('span');
+    val.className = 'ctl-val';
+    function refresh() {
+      const v = +range.value;
+      val.textContent = v.toFixed(2);
+      val.classList.toggle('off', v === 0);
+    }
+    refresh();
+    function commit() { specState[key] = +range.value; refresh(); persist(); }
+    range.addEventListener('input', commit);
+    range.addEventListener('change', () => { if (live) schedule('full'); });
+    val.addEventListener('dblclick', () => {
+      range.value = '0'; commit(); if (live) schedule('full');
+    });
+    const onSettle = () => { if (live) schedule('full'); };
+    const minus = makeStepper(range, -1, commit, onSettle);
+    const plus = makeStepper(range, +1, commit, onSettle);
+    row.appendChild(nm); row.appendChild(minus); row.appendChild(range);
+    row.appendChild(plus); row.appendChild(val);
+    host.appendChild(row);
+    specRows[key] = { range: range, refresh: refresh };
+  }
+  function buildSpectrumPanel() {
+    const pad = $('spec-pad');
+    let padDown = false;
+    function setFromEvent(e) {
+      const r = pad.getBoundingClientRect();
+      const nx = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+      const ny = Math.max(0, Math.min(1, (e.clientY - r.top) / r.height));
+      // snap the dead zone around 0 so "back to center" is a true no-op
+      const snap = (v) => Math.abs(v) < 0.1 ? 0 : Math.round(v * 100) / 100;
+      specState.valence = snap((nx * 2 - 1) * SPEC_RANGE);
+      specState.arousal = snap((1 - ny * 2) * SPEC_RANGE);
+      specPadRefresh();
+    }
+    pad.addEventListener('mousedown', (e) => { padDown = true; setFromEvent(e); });
+    window.addEventListener('mousemove', (e) => { if (padDown) setFromEvent(e); });
+    window.addEventListener('mouseup', () => {
+      if (!padDown) return;
+      padDown = false;
+      persist();
+      if (live) schedule('full');
+    });
+    pad.addEventListener('dblclick', () => {
+      specState.valence = 0; specState.arousal = 0;
+      specPadRefresh(); persist();
+      if (live) schedule('full');
+    });
+    buildSpectrumRow('hostility', $('spec-rows'));
+    buildSpectrumRow('surprise', $('spec-rows'));
+    $('btn-reset-spec').addEventListener('click', () => {
+      const any = SPECTRUM_KEYS.some((k) => specState[k] !== 0);
+      SPECTRUM_KEYS.forEach((k) => { specState[k] = 0; });
+      for (const k in specRows) {
+        if (!specRows.hasOwnProperty(k)) continue;
+        specRows[k].range.value = '0';
+        specRows[k].refresh();
+      }
+      specPadRefresh(); persist();
+      if (any && live) schedule('full');
+    });
+    specPadRefresh();
+  }
+  buildSpectrumPanel();
+  function activeSpectrum() {
+    if (!SPECTRUM_KEYS.some((k) => specState[k] !== 0)) return null;
+    return { valence: specState.valence, arousal: specState.arousal,
+             hostility: specState.hostility, surprise: specState.surprise };
   }
 
   // ── LoRA panel ───────────────────────────────────────────────────────────
@@ -1179,6 +1289,7 @@ function init() {
       gate: { txtScale: +$('gate-txt').value, imgScale: +$('gate-img').value },
       axisControls: collectAxisControls(),
       expression: activeExpression(),
+      spectrum: activeSpectrum(),
       loraScales: loras.map((l) => +l.scale),
     };
   }
@@ -1226,6 +1337,7 @@ function init() {
       status(quality === 'preview' ? 'preview' : 'done', 'ok');
       $('timing').textContent = (resp.ms ? resp.ms + ' ms' : '') +
         (resp.exprNeutral ? ' · field vs “' + resp.exprNeutral + '”' : '') +
+        (resp.spectrumNote ? ' · ' + resp.spectrumNote : '') +
         (quality === 'preview' ? ' · preview' : '');
       pump();
     });
@@ -1267,7 +1379,10 @@ function init() {
     el.className = 'hint' + (kind === 'err' ? ' err' : kind === 'warn' ? ' warn' : '');
   }
   // Interim minting progress (the worker posts a message before each encode).
+  // Spectrum minting rides a generate request, so its progress belongs in the
+  // main status line, not the mint panel.
   client.onProgress((p) => {
+    if (p.spectrum) { status(p.label); return; }
     $('mint-progress').classList.add('show');
     $('mint-progress-fill').style.width =
       Math.round((p.done / Math.max(1, p.total)) * 100) + '%';

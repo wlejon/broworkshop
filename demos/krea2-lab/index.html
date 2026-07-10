@@ -148,6 +148,31 @@
             article (“a woman”, “the chef”).</p>
         </section>
 
+        <!-- 3c. spectrum — model-nominated affect axes -->
+        <section class="panel">
+          <h2>spectrum <span class="hint inline">the model’s own affect axes · stack freely</span>
+            <span class="grow"></span>
+            <button id="btn-reset-spec" class="link" title="Zero the whole spectrum">reset</button>
+          </h2>
+          <div class="row spec-pad-wrap">
+            <div id="spec-pad" title="x: valence · y: arousal — drag; double-click to center">
+              <div id="spec-dot"></div>
+            </div>
+            <div class="spec-pad-side">
+              <div class="spec-pad-read">valence <span id="spec-valence-val" class="ctl-val">0.00</span></div>
+              <div class="spec-pad-read">arousal <span id="spec-arousal-val" class="ctl-val">0.00</span></div>
+              <div class="hint">← sad · happy →<br>↑ activated · flat ↓</div>
+            </div>
+          </div>
+          <div id="spec-rows"></div>
+          <p class="hint">Principal axes of ~70 expression-word fields spliced into
+            your prompt — the encoder’s own affect space, not a word list. Minted on
+            first use per prompt (~15 s), then cached. Axes stack with each other
+            and with an expression word when token grids align. ±3 ≈ three average
+            words; compound emotions live in the mixes (rage ≈ hostility + arousal
+            − valence).</p>
+        </section>
+
         <!-- 4. axis bank -->
         <section class="panel">
           <h2>axis bank <span class="hint inline">18 perceptual axes</span>

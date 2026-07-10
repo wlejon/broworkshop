@@ -34,9 +34,10 @@
 //   main -> load          {modelDir, dictPath}
 //        <- loaded        {config, axes, hiddenSize, numLayers, backend}
 //   main -> generate      {prompt, negPrompt, opts, band, dial, gate, gateMask,
-//                           axisControls, expression, imagePixels, imageH,
-//                           imageW, captureGates}
-//        <- done          {bitmap, width, height, ms, gates?, exprNeutral?}
+//                           axisControls, expression, spectrum, imagePixels,
+//                           imageH, imageW, captureGates}
+//        <- done          {bitmap, width, height, ms, gates?, exprNeutral?,
+//                           spectrumNote?}
 //
 // `expression` is {adj, alpha} — the contextual per-token field (ported from
 // sana-research/dictionary.py, validated on Krea 2 in the emotion-axes probes):
@@ -47,6 +48,17 @@
 // extremes). One field per generation — the splice fixes the tokenization —
 // so the main thread sends at most one. Ignored when imagePixels is present
 // (image-as-prompt has no text to splice).
+//
+// `spectrum` is {valence, arousal, hostility, surprise} in mean-word units —
+// the MODEL-NOMINATED affect axes (round-6 emotion probe): ~100 expression
+// words are spliced into the live prompt on a 'calm' carrier, their per-token
+// fields centered and eigendecomposed, and each UI axis bound to the
+// principal component that best separates its anchor words (rank order is
+// prompt-dependent; anchors are not). The axes are orthogonal fields on ONE
+// shared carrier, so unlike word fields they stack — with each other, and
+// with the expression word when its token grid matches the carrier's. Minted
+// lazily per prompt (~20-30 s, mintProgress messages with spectrum:true ride
+// the generate request) and cached for the prompt. Ignored with imagePixels.
 //   main -> spatialRender {basePrompt, opts, axisName, alpha, maskW, maskH,
 //                           maskData}
 //        <- spatialDone   {bitmap, width, height, ms}
@@ -130,6 +142,10 @@ function handleLoad(msg) {
       try { if (pipeline.dispose) pipeline.dispose(); } catch (e) { /* ignore */ }
       pipeline = null;
     }
+    // Encoder-output caches belong to the old pipeline — a different model
+    // would silently serve its predecessor's taps.
+    fieldCache = {}; fieldCacheCount = 0;
+    spectrumCache = null;
     // Krea 2's FP16 total (DiT ~25GB + Qwen3-VL-4B text/vision ~8.3GB) doesn't
     // fit a single 24GB card. INT8 quantizes BOTH components (loadModel's
     // opts.quantizeWeights, see brodiffusion::Pipeline::ModelDirOptions) down
@@ -277,17 +293,266 @@ function expressionTaps(prompt, adj, alpha) {
   };
 }
 
+// ── model-nominated affect spectrum ──────────────────────────────────────
+// C++-speed vector helpers (bro.image kernels) — the mint does ~2600 dot
+// products over ~900K-float fields; plain JS loops took 148 s in the probe.
+var dotScratch = null;
+function dotf(a, b) {
+  if (!dotScratch || dotScratch.length !== a.length) dotScratch = new Float32Array(a.length);
+  bro.image.combine(dotScratch, a, b, { op: 'mul' });
+  return bro.image.reduce(dotScratch, 'sum');
+}
+function axpy(dst, src, w) {                        // dst += w * src
+  bro.image.combine(dst, dst, src, { op: 'wsum', wa: 1, wb: w });
+}
+
+// The probe's word list: ~100 facial-expression words spanning the affect
+// space, with intensity ladders. Words whose tokenization doesn't match the
+// carrier's are skipped per prompt (typically ~30).
+var SPECTRUM_WORDS = [
+  'happy', 'joyful', 'cheerful', 'gleeful', 'delighted', 'elated', 'ecstatic',
+  'euphoric', 'content', 'serene', 'peaceful', 'smiling', 'laughing',
+  'grinning', 'beaming', 'amused', 'playful', 'mischievous', 'smirking',
+  'winking', 'flirtatious', 'proud', 'confident', 'smug', 'hopeful',
+  'excited', 'thrilled', 'surprised', 'astonished', 'amazed', 'shocked',
+  'startled', 'awestruck', 'curious', 'confused', 'puzzled', 'bewildered',
+  'skeptical', 'suspicious', 'doubtful', 'bored', 'tired', 'sleepy',
+  'exhausted', 'weary', 'sad', 'unhappy', 'gloomy', 'melancholy',
+  'sorrowful', 'mournful', 'grieving', 'crying', 'tearful', 'weeping',
+  'heartbroken', 'devastated', 'disappointed', 'hurt', 'lonely', 'wistful',
+  'pensive', 'thoughtful', 'worried', 'anxious', 'nervous', 'tense',
+  'stressed', 'afraid', 'scared', 'fearful', 'terrified', 'horrified',
+  'panicked', 'annoyed', 'irritated', 'frustrated', 'angry', 'furious',
+  'enraged', 'livid', 'outraged', 'bitter', 'resentful', 'contemptuous',
+  'scornful', 'disgusted', 'revolted', 'nauseated', 'embarrassed',
+  'ashamed', 'guilty', 'shy', 'bashful', 'pained', 'agonized', 'defiant',
+  'determined', 'fierce', 'stern', 'grim', 'solemn',
+];
+
+// Each UI axis binds to the top-8 PC that best separates its anchor words
+// (mean coordinate of pos minus neg), oriented so pos is positive. Eigen
+// RANK is prompt-dependent (on the probe carrier: valence=PC0, surprise=PC1,
+// hostility=PC2, arousal=PC3) — the anchors are what stay meaningful.
+var SPECTRUM_AXES = [
+  { key: 'valence',
+    pos: ['happy', 'cheerful', 'joyful', 'smiling'],
+    neg: ['sad', 'crying', 'grieving', 'devastated'] },
+  { key: 'arousal',
+    pos: ['excited', 'ecstatic', 'enraged', 'terrified'],
+    neg: ['bored', 'tired', 'sleepy', 'weary'] },
+  { key: 'hostility',
+    pos: ['angry', 'furious', 'outraged', 'fierce'],
+    neg: ['crying', 'grieving', 'hurt', 'peaceful'] },
+  { key: 'surprise',
+    pos: ['surprised', 'astonished', 'shocked', 'amazed'],
+    neg: ['grim', 'stern', 'solemn', 'bitter'] },
+];
+
+function spectrumProgress(label, done, total) {
+  self.postMessage({ type: 'mintProgress', spectrum: true,
+                     label: label, done: done, total: total });
+}
+
+// Cyclic Jacobi eigendecomposition of a symmetric N×N (N ~ 70, trivial).
+function jacobiEigen(A, n) {
+  var V = [];
+  for (var i = 0; i < n; i++) { V.push(new Float64Array(n)); V[i][i] = 1; }
+  for (var sweep = 0; sweep < 30; sweep++) {
+    var off = 0;
+    for (var p = 0; p < n; p++) for (var q = p + 1; q < n; q++) off += A[p][q] * A[p][q];
+    if (off < 1e-9) break;
+    for (var p = 0; p < n; p++) for (var q = p + 1; q < n; q++) {
+      if (Math.abs(A[p][q]) < 1e-12) continue;
+      var theta = (A[q][q] - A[p][p]) / (2 * A[p][q]);
+      var t = (theta >= 0 ? 1 : -1) / (Math.abs(theta) + Math.sqrt(theta * theta + 1));
+      var c = 1 / Math.sqrt(t * t + 1), s = t * c;
+      for (var k = 0; k < n; k++) {
+        var akp = A[k][p], akq = A[k][q];
+        A[k][p] = c * akp - s * akq; A[k][q] = s * akp + c * akq;
+      }
+      for (var k = 0; k < n; k++) {
+        var apk = A[p][k], aqk = A[q][k];
+        A[p][k] = c * apk - s * aqk; A[q][k] = s * apk + c * aqk;
+      }
+      for (var k = 0; k < n; k++) {
+        var vkp = V[k][p], vkq = V[k][q];
+        V[k][p] = c * vkp - s * vkq; V[k][q] = s * vkp + c * vkq;
+      }
+    }
+  }
+  var order = [];
+  for (var i = 0; i < n; i++) order.push(i);
+  order.sort(function (a, b) { return A[b][b] - A[a][a]; });
+  var values = [], vectors = [];
+  for (var oi = 0; oi < n; oi++) {
+    var idx = order[oi];
+    values.push(Math.max(0, A[idx][idx]));
+    var v = new Float64Array(n);
+    for (var k = 0; k < n; k++) v[k] = V[k][idx];
+    vectors.push(v);
+  }
+  return { values: values, vectors: vectors };
+}
+
+// One prompt's spectrum at a time (~80 MB: full carrier taps + 4 compact
+// axis fields). The ~260 MB of farmed word fields are transient.
+var spectrumCache = null;
+function spectrumFor(prompt) {
+  if (spectrumCache && spectrumCache.prompt === prompt) return spectrumCache;
+  spectrumCache = null;                              // free the old before farming
+  var carrier = pipeline.krea2EncodePromptTaps(spliceAdjective(prompt, 'calm'));
+  var cols = carrier.embeds.cols;
+  var validSlots = [];
+  for (var t = 0; t < carrier.mask.rows; t++) {
+    if (carrier.mask.data[t] !== 0) validSlots.push(t);
+  }
+  var span = 12 * cols;                              // one slot's 12 tapped layers
+  var D = validSlots.length * span;
+  function compactOf(full) {
+    var out = new Float32Array(D);
+    for (var vi = 0; vi < validSlots.length; vi++) {
+      var src = validSlots[vi] * span;
+      out.set(full.subarray(src, src + span), vi * span);
+    }
+    return out;
+  }
+  var carrierC = compactOf(carrier.embeds.data);
+
+  var total = SPECTRUM_WORDS.length;
+  var fields = [], words = [], normSum = 0;
+  for (var i = 0; i < total; i++) {
+    var w = SPECTRUM_WORDS[i];
+    spectrumProgress('spectrum · "' + w + '" (' + (i + 1) + '/' + total + ')', i, total + 6);
+    var te = pipeline.krea2EncodePromptTaps(spliceAdjective(prompt, w));
+    if (!masksEqual(te.mask, carrier.mask)) continue;
+    var f = compactOf(te.embeds.data);
+    axpy(f, carrierC, -1);
+    normSum += Math.sqrt(dotf(f, f));
+    fields.push(f); words.push(w);
+  }
+  var N = fields.length;
+  if (N < 24) {
+    throw new Error('spectrum: only ' + N + ' of ' + total + ' probe words ' +
+                    'token-align with this prompt — cannot mint a stable spectrum');
+  }
+  var meanNorm = normSum / N;
+
+  spectrumProgress('spectrum · centering ' + N + ' fields', total, total + 6);
+  var mean = new Float32Array(D);
+  for (var i = 0; i < N; i++) axpy(mean, fields[i], 1 / N);
+  for (var i = 0; i < N; i++) axpy(fields[i], mean, -1);
+
+  spectrumProgress('spectrum · gram matrix (' + N + '×' + N + ')', total + 1, total + 6);
+  var G = [];
+  for (var i = 0; i < N; i++) G.push(new Float64Array(N));
+  for (var i = 0; i < N; i++) {
+    for (var j = 0; j <= i; j++) {
+      var s = dotf(fields[i], fields[j]);
+      G[i][j] = s; G[j][i] = s;
+    }
+  }
+  spectrumProgress('spectrum · eigendecomposition', total + 3, total + 6);
+  var eig = jacobiEigen(G, N);
+
+  spectrumProgress('spectrum · binding axes', total + 4, total + 6);
+  var wordIndex = {};
+  for (var i = 0; i < N; i++) wordIndex[words[i]] = i;
+  var TOP = Math.min(8, N);
+  function anchorScore(k, ax) {
+    var sv = Math.sqrt(eig.values[k]);
+    function meanCoord(list) {
+      var s = 0, n = 0;
+      for (var i = 0; i < list.length; i++) {
+        var wi = wordIndex[list[i]];
+        if (wi == null) continue;
+        s += eig.vectors[k][wi] * sv; n++;
+      }
+      return n ? s / n : 0;
+    }
+    return meanCoord(ax.pos) - meanCoord(ax.neg);
+  }
+  var taken = {}, axes = {}, binding = [];
+  for (var ai = 0; ai < SPECTRUM_AXES.length; ai++) {
+    var ax = SPECTRUM_AXES[ai];
+    var bestK = -1, bestS = 0;
+    for (var k = 0; k < TOP; k++) {
+      if (taken[k]) continue;
+      var sc = anchorScore(k, ax);
+      if (Math.abs(sc) > Math.abs(bestS)) { bestS = sc; bestK = k; }
+    }
+    taken[bestK] = true;
+    var f = new Float32Array(D);
+    var v = eig.vectors[bestK];
+    for (var i = 0; i < N; i++) if (v[i]) axpy(f, fields[i], v[i]);
+    var inv = (bestS < 0 ? -1 : 1) / (Math.sqrt(dotf(f, f)) || 1e-9);
+    bro.image.map(f, f, { op: 'affine', a: inv, b: 0 });
+    axes[ax.key] = f;
+    binding.push(ax.key + '=PC' + bestK);
+  }
+  console.log('spectrum minted for prompt: ' + N + ' words, ' + binding.join(' '));
+
+  spectrumCache = {
+    prompt: prompt, carrier: carrier, validSlots: validSlots, cols: cols,
+    span: span, meanNorm: meanNorm, axes: axes, words: N,
+  };
+  return spectrumCache;
+}
+
+// The active {axisKey: alpha} subset of a generate message's spectrum, or
+// null when every axis is zero/absent.
+function activeSpectrum(msg) {
+  if (!msg.spectrum) return null;
+  var out = null;
+  for (var i = 0; i < SPECTRUM_AXES.length; i++) {
+    var k = SPECTRUM_AXES[i].key;
+    var a = +msg.spectrum[k] || 0;
+    if (a) { if (!out) out = {}; out[k] = a; }
+  }
+  return out;
+}
+
 // Raw taps for this generation, or null to let prime(prompt) do the encode
 // (+ auto cond_control) internally. Image-as-prompt, the expression field,
-// and the band dial all need the raw-taps path; the plain axis bank alone
-// does not.
+// the spectrum, and the band dial all need the raw-taps path; the plain axis
+// bank alone does not.
 function buildTaps(msg) {
   var band = (msg.band == null) ? 1.0 : +msg.band;
   var expr = (msg.expression && msg.expression.adj && +msg.expression.alpha)
     ? msg.expression : null;
+  var spec = msg.imagePixels ? null : activeSpectrum(msg);
   var taps;
   if (msg.imagePixels) {
     taps = pipeline.krea2EncodeImagePrompt(msg.imagePixels, msg.imageH, msg.imageW);
+  } else if (spec) {
+    // spectrum axes stack on the shared 'calm' carrier; the expression word
+    // field rides along when its token grid matches the carrier's.
+    var sc = spectrumFor(msg.prompt);
+    var edited = new Float32Array(sc.carrier.embeds.data);
+    var parts = [];
+    for (var key in spec) {
+      if (!spec.hasOwnProperty(key)) continue;
+      var s = spec[key] * sc.meanNorm, f = sc.axes[key];
+      for (var vi = 0; vi < sc.validSlots.length; vi++) {
+        var dst = sc.validSlots[vi] * sc.span, src = vi * sc.span;
+        axpy(edited.subarray(dst, dst + sc.span), f.subarray(src, src + sc.span), s);
+      }
+      parts.push(key + (spec[key] > 0 ? ' +' : ' ') + spec[key].toFixed(2));
+    }
+    var note = 'spectrum ' + parts.join(', ') + ' (' + sc.words + ' words)';
+    var neutral = null;
+    if (expr) {
+      var fe = expressionField(msg.prompt, String(expr.adj));
+      if (fe.rows === sc.carrier.embeds.rows && masksEqual(fe.mask, sc.carrier.mask)) {
+        axpy(edited, fe.field, +expr.alpha);
+        neutral = fe.neutral;
+      } else {
+        note += ' · word field skipped (different token grid)';
+      }
+    }
+    taps = {
+      embeds: { rows: sc.carrier.embeds.rows, cols: sc.carrier.embeds.cols, data: edited },
+      mask: sc.carrier.mask, neutral: neutral, note: note,
+    };
   } else if (expr) {
     taps = expressionTaps(msg.prompt, String(expr.adj), +expr.alpha);
   } else if (band !== 1.0) {
@@ -361,7 +626,7 @@ function runGeneration(msg, onDone) {
 
   var gates = msg.captureGates ? pipeline.krea2Gates() : null;
   var img = state.decode({});
-  onDone(img, gates, taps && taps.neutral ? taps.neutral : null);
+  onDone(img, gates, taps);
 }
 
 function respondImage(type, img, ms, extra) {
@@ -379,10 +644,11 @@ function handleGenerate(msg) {
     if (!pipeline) throw new Error('no model loaded');
     var t0 = now();
     var opts = Object.assign({}, msg.opts || {}, { negativePrompt: msg.negPrompt || '' });
-    runGeneration(Object.assign({}, msg, { opts: opts }), function (img, gates, exprNeutral) {
+    runGeneration(Object.assign({}, msg, { opts: opts }), function (img, gates, taps) {
       var extra = {};
       if (gates) extra.gates = gates;
-      if (exprNeutral) extra.exprNeutral = exprNeutral;
+      if (taps && taps.neutral) extra.exprNeutral = taps.neutral;
+      if (taps && taps.note) extra.spectrumNote = taps.note;
       respondImage('done', img, Math.round(now() - t0), extra);
     });
   } catch (e) {

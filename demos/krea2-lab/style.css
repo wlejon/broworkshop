@@ -536,3 +536,26 @@ details[open] > .ctl-cat::before { content: '▾ '; }
 .hist-seed { color: #9aa3b0; cursor: pointer; }
 .hist-seed:hover { color: #f0a860; }
 .hist-actions { display: flex; gap: 10px; }
+
+/* spectrum pad — valence (x) × arousal (y) */
+.spec-pad-wrap { align-items: center; gap: 12px; }
+#spec-pad {
+  position: relative; width: 132px; height: 132px; flex: none;
+  background: #0b0e13; border: 1px solid #242b37; border-radius: 6px;
+  cursor: crosshair;
+}
+#spec-pad::before, #spec-pad::after { content: ''; position: absolute; background: #1a212c; }
+#spec-pad::before { left: 50%; top: 5px; bottom: 5px; width: 1px; }
+#spec-pad::after  { top: 50%; left: 5px; right: 5px; height: 1px; }
+#spec-dot {
+  position: absolute; width: 11px; height: 11px; border-radius: 50%;
+  left: 50%; top: 50%; transform: translate(-50%, -50%);
+  background: #c9822f; border: 1px solid #f0a860;
+  box-shadow: 0 0 6px rgba(240, 168, 96, .45);
+  pointer-events: none;
+}
+.spec-pad-side { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.spec-pad-read {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 8px; font-size: 11px; color: #9aa3b0;
+}
