@@ -567,3 +567,4 @@ details[open] > .ctl-cat::before { content: '▾ '; }
 .spec-pad-lab.s { bottom: 3px; left: 50%; transform: translateX(-50%); }
 .spec-pad-lab.w { left: 5px; top: 50%; transform: translateY(-50%); }
 .spec-pad-lab.e { right: 5px; top: 50%; transform: translateY(-50%); }
+.spec-disabled #spec-pad, .spec-disabled #spec-rows { opacity: .35; pointer-events: none; }

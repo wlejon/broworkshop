@@ -765,6 +765,12 @@ function init() {
     specPadRefresh();
   }
   buildSpectrumPanel();
+  // The baked axes ship as lab/spectrum.json; without it the worker rejects
+  // spectrum renders, so gray the panel out instead of surfacing the error.
+  function setSpectrumAvailable(ok) {
+    $('spec-panel').classList.toggle('spec-disabled', !ok);
+    if (!ok) $('spec-hint').textContent = 'no lab/spectrum.json — bake it with tools/mint_spectrum.js';
+  }
   function activeSpectrum() {
     if (!SPECTRUM_KEYS.some((k) => specState[k] !== 0)) return null;
     return { valence: specState.valence, arousal: specState.arousal,
@@ -1242,10 +1248,12 @@ function init() {
     backend('loading…');
     startLoadOverlay();
     status('loading model — this reads ~26GB of weights, give it a moment');
-    client.send({ type: 'load', modelDir: modelDir, dictPath: 'assets/axes_turbo.bcd1' }, (err, msg) => {
+    client.send({ type: 'load', modelDir: modelDir, dictPath: 'assets/axes_turbo.bcd1',
+                  spectrumPath: 'lab/spectrum.json' }, (err, msg) => {
       stopLoadOverlay();
       if (err) { setBusy(false); backend('error', 'err'); status(String(err.message || err), 'err'); return; }
       loaded = true;
+      setSpectrumAvailable(!!msg.spectrum);
       setBusy(false);
       backend(msg.backend === 'cpu' ? 'CPU' : (msg.backend || 'gpu').toUpperCase(),
               msg.backend === 'cpu' ? 'warn' : 'ok');
@@ -1379,10 +1387,7 @@ function init() {
     el.className = 'hint' + (kind === 'err' ? ' err' : kind === 'warn' ? ' warn' : '');
   }
   // Interim minting progress (the worker posts a message before each encode).
-  // Spectrum minting rides a generate request, so its progress belongs in the
-  // main status line, not the mint panel.
   client.onProgress((p) => {
-    if (p.spectrum) { status(p.label); return; }
     $('mint-progress').classList.add('show');
     $('mint-progress-fill').style.width =
       Math.round((p.done / Math.max(1, p.total)) * 100) + '%';

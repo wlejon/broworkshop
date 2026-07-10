@@ -1,8 +1,8 @@
 // Spectrum-panel test: load the real checkpoint and drive the model-nominated
 // affect axes through the ACTUAL UI — the hostility slider, then the
 // valence×arousal pad via real hit-tested mouse input, then stacked with an
-// expression word field. The first spectrum render mints the axes in the
-// worker (~100 encodes + SVD); later renders reuse the per-prompt cache.
+// expression word field, then on a Chinese prompt (the axes are baked pooled
+// directions from lab/spectrum.json — no words or language at runtime).
 //
 //   bro-headless ../broworkshop/demos/krea2-lab tests/test_spectrum.js
 
@@ -74,11 +74,11 @@ function setRange(range, value) {
 console.log('baseline render…');
 const base = generateAndGrab(180000);
 
-// ── hostility slider: first spectrum render, includes the in-worker mint ──
-console.log('hostility = 2 render (mints the spectrum — ~100 encodes + SVD)…');
+// ── hostility slider (baked axes — no mint, instant) ─────────────────────
+console.log('hostility = 2 render…');
 const hostRange = $('spec-rows').querySelectorAll('.ctl-row')[0].querySelector('input[type=range]');
 setRange(hostRange, 2);
-const hostile = generateAndGrab(300000);
+const hostile = generateAndGrab(180000);
 assert($('timing').textContent.indexOf('spectrum') >= 0,
        'timing reports the spectrum: ' + $('timing').textContent);
 assert($('timing').textContent.indexOf('hostility') >= 0,
@@ -89,7 +89,7 @@ assert(dHost > 5, 'hostility changed the render (mean diff ' + dHost.toFixed(2) 
 
 // ── the pad, via real hit-tested input: valence +2, arousal +2 ────────────
 // Scroll the rail so the pad is on screen, then press at the pad point that
-// maps to (nx, ny) for the target values. Cache hit — no second mint.
+// maps to (nx, ny) for the target values.
 const pad = $('spec-pad');
 let r = pad.getBoundingClientRect();
 if (r.top < 0 || r.bottom > window.innerHeight) {
@@ -130,10 +130,24 @@ const dComb = meanDiff(elated, combined);
 console.log('mean |combined-pad| per channel: ' + dComb.toFixed(2));
 assert(dComb > 5, 'word field stacked onto the spectrum (mean diff ' + dComb.toFixed(2) + ' > 5)');
 
-// reset leaves a clean state for whoever runs the app next
+// ── language-agnostic: the same baked axes on a Chinese prompt ────────────
+console.log('zh prompt, valence +2…');
 setRange(angerRange, 0);
+$('btn-reset-spec').click();
+$('prompt').value = '一位棕色齐肩发女子的摄影棚人像，纯灰色背景，柔和的光线';
+const zhBase = generateAndGrab(180000);
+mouseDown(px, 0.5 * (r.top + r.bottom));           // valence +2, arousal 0
+mouseUp(px, 0.5 * (r.top + r.bottom));
+const zhVal = generateAndGrab(180000);
+assert($('timing').textContent.indexOf('valence') >= 0,
+       'zh render used the spectrum: ' + $('timing').textContent);
+const dZh = meanDiff(zhBase, zhVal);
+console.log('mean |zh valence - zh base| per channel: ' + dZh.toFixed(2));
+assert(dZh > 5, 'spectrum drove a non-English prompt (mean diff ' + dZh.toFixed(2) + ' > 5)');
+
+// reset leaves a clean state for whoever runs the app next
 $('btn-reset-spec').click();
 assert(+$('spec-valence-val').textContent === 0 && +hostRange.value === 0,
        'reset zeroed the spectrum');
 
-console.log('PASS: spectrum panel mints, stacks, and drives the render end to end');
+console.log('PASS: baked spectrum stacks and drives the render end to end, any language');
