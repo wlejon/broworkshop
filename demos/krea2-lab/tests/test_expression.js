@@ -25,6 +25,17 @@ assert(pumpUntil(() => !$('btn-generate').disabled ||
 assert(!$('status-text').classList.contains('err'),
        'model loaded without error: ' + $('status-text').textContent);
 
+// Neutralize persisted control state — the lab shares its prefs with real
+// use, so a manual session's spectrum/axis/dial values would leak into the
+// fixed-seed baselines (and live mode would race the test's own generates).
+$('live').checked = false;
+$('live').dispatchEvent(new Event('change'));
+['btn-reset-expr', 'btn-reset-spec', 'btn-reset-axes'].forEach((id) => $(id).click());
+[['band', '1.0'], ['dial-pregate', '1.0'], ['dial-prescale', '1.0'],
+ ['gate-txt', '1.0'], ['gate-img', '1.0']].forEach(([id, v]) => {
+  $(id).value = v; $(id).dispatchEvent(new Event('input'));
+});
+
 // Deterministic setup through the form.
 $('prompt').value = 'a studio portrait of a woman with shoulder-length brown hair looking at the camera, plain gray background, soft light';
 $('neg-prompt').value = '';

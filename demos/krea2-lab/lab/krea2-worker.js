@@ -221,16 +221,23 @@ function scaleBand(embeds, band) {
 }
 
 // ── contextual per-token expression field ────────────────────────────────
-// Splice an adjective as a modifier before the subject: after the last
-// article in the first clause (sana dictionary.py's validated
-// "a … {adj} woman" form). Falls back to a leading modifier.
+// Splice an adjective as a modifier before the SUBJECT noun (sana
+// dictionary.py's validated "a … {adj} woman" form). The subject is the
+// article phrase after the last "of" in the first clause ("a studio portrait
+// of a woman with…" → the woman, not the portrait — and never a later
+// article like "…looking at the camera"), else the first article phrase
+// ("the chef in a kitchen" → the chef). Falls back to a leading modifier.
 function spliceAdjective(prompt, adj) {
   var head = prompt.split(',')[0];
-  var re = /\b(?:a|an|the)\s+/gi;
-  var m, last = null;
-  while ((m = re.exec(head)) !== null) last = m;
-  if (!last) return adj + ' ' + prompt;
-  var at = last.index + last[0].length;
+  var re = /\b(?:of\s+)?(a|an|the)\s+/gi;
+  var m, first = null, lastOf = null;
+  while ((m = re.exec(head)) !== null) {
+    if (!first) first = m;
+    if (/^of\s/i.test(m[0])) lastOf = m;
+  }
+  var pick = lastOf || first;
+  if (!pick) return adj + ' ' + prompt;
+  var at = pick.index + pick[0].length;
   return prompt.slice(0, at) + adj + ' ' + prompt.slice(at);
 }
 

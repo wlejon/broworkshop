@@ -559,3 +559,11 @@ details[open] > .ctl-cat::before { content: '▾ '; }
   display: flex; align-items: baseline; justify-content: space-between;
   gap: 8px; font-size: 11px; color: #9aa3b0;
 }
+.spec-pad-lab {
+  position: absolute; font-size: 9px; letter-spacing: .4px; color: #4d5562;
+  pointer-events: none; user-select: none;
+}
+.spec-pad-lab.n { top: 3px; left: 50%; transform: translateX(-50%); }
+.spec-pad-lab.s { bottom: 3px; left: 50%; transform: translateX(-50%); }
+.spec-pad-lab.w { left: 5px; top: 50%; transform: translateY(-50%); }
+.spec-pad-lab.e { right: 5px; top: 50%; transform: translateY(-50%); }
