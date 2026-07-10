@@ -2,7 +2,10 @@
 // lab/krea2-worker.js) as a comprehensive showcase of every research-hook
 // control krea-research (../krea-research) discovered: AdaLN dials, the deep-
 // tap band dial, an 18-axis conditioning-space control bank (+ user-minted
-// axes), attention-gate scale/mask, and per-region spatial-paint compositing.
+// axes), attention-gate scale/mask, per-region spatial-paint compositing,
+// and the expression panel — contextual per-token fields (sana-research's
+// dictionary.py technique on Krea 2's taps seam): named emotion sliders plus
+// a custom-word slider, one field per render, exclusive by design.
 // Plus LoRA adapters (brodiffusion's Krea 2 runtime-adapter path): attach
 // .safetensors LoRAs, rescale each live (strengths ride every generate as
 // `loraScales`), remove without reloading; the list persists and re-applies
@@ -217,6 +220,28 @@ function init() {
   // gallery can badge the picked cells. null = a browsed file (no history id).
   let mintSelId = { a: null, b: null };
 
+  // ── expression field state ─────────────────────────────────────────────
+  // The contextual per-token field (worker's `expression` message field):
+  // splice the adjective into the live prompt, diff against a mask-aligned
+  // neutral, extrapolate. One field per render (the splice fixes the
+  // tokenization), so the sliders are EXCLUSIVE — moving one zeroes the rest.
+  // alpha 1 == what saying the word does; identity drifts at the top end.
+  const EXPRESSIONS = [
+    { key: 'happiness', label: 'happiness', adj: 'joyfully smiling' },
+    { key: 'laughter',  label: 'laughter',  adj: 'laughing' },
+    { key: 'sadness',   label: 'sadness',   adj: 'sad' },
+    { key: 'crying',    label: 'crying',    adj: 'crying' },
+    { key: 'anger',     label: 'anger',     adj: 'furious' },
+    { key: 'fear',      label: 'fear',      adj: 'terrified' },
+    { key: 'surprise',  label: 'surprise',  adj: 'astonished' },
+    { key: 'disgust',   label: 'disgust',   adj: 'disgusted' },
+    { key: 'smirk',     label: 'smirk',     adj: 'smirking' },
+    { key: 'wink',      label: 'wink',      adj: 'winking' },
+  ];
+  let exprStrengths = (prefs.exprStrengths && typeof prefs.exprStrengths === 'object')
+    ? Object.assign({}, prefs.exprStrengths) : {};
+  let exprRows = {};   // key -> {range, refresh} incl. 'custom'
+
   // ── LoRA adapters ──────────────────────────────────────────────────────
   // {path, scale} per applied LoRA, in pipeline group order. This list is
   // authoritative (persisted here); the worker rebuilds the pipeline's
@@ -296,6 +321,8 @@ function init() {
       gateTxt: $('gate-txt').value, gateImg: $('gate-img').value,
       axisBank: axisBank,
       axisStrengths: axisStrengths,
+      exprStrengths: exprStrengths,
+      exprCustomAdj: $('expr-custom-adj').value,
       mintedAxes: mintedAxes.map((m) => ({
         name: m.name, kind: m.kind, pos: m.pos, neg: m.neg, aPath: m.aPath, bPath: m.bPath,
         dir: m.dir, consistency: m.consistency,
@@ -543,6 +570,95 @@ function init() {
       if (v) out[m.name] = (out[m.name] || 0) + v;
     });
     return out;
+  }
+
+  // ── expression panel ─────────────────────────────────────────────────────
+  function zeroOtherExpressions(activeKey) {
+    for (const k in exprRows) {
+      if (!exprRows.hasOwnProperty(k) || k === activeKey) continue;
+      if (+exprRows[k].range.value !== 0) {
+        exprRows[k].range.value = '0';
+        exprRows[k].refresh();
+      }
+      if (k === 'custom') delete exprStrengths.custom;
+      else delete exprStrengths[k];
+    }
+  }
+  function buildExpressionRow(key, label, host) {
+    const row = document.createElement('div');
+    row.className = 'ctl-row stepped';
+    const nm = document.createElement('span');
+    nm.className = 'ctl-name'; nm.textContent = label;
+    nm.title = key === 'custom' ? 'your word, spliced into the prompt'
+      : 'field for "' + EXPRESSIONS.find((e) => e.key === key).adj + '"';
+    const range = document.createElement('input');
+    range.type = 'range'; range.min = '0'; range.max = '5'; range.step = '0.05';
+    range.value = String(+exprStrengths[key] || 0);
+    const val = document.createElement('span');
+    val.className = 'ctl-val';
+    function refresh() {
+      const v = +range.value;
+      val.textContent = v.toFixed(2);
+      val.classList.toggle('off', v === 0);
+    }
+    refresh();
+    function commit() {
+      const v = +range.value;
+      if (v) { exprStrengths[key] = v; zeroOtherExpressions(key); }
+      else delete exprStrengths[key];
+      refresh(); persist();
+    }
+    range.addEventListener('input', commit);
+    range.addEventListener('change', () => { if (live) schedule('full'); });
+    val.addEventListener('dblclick', () => {
+      range.value = '0'; commit(); if (live) schedule('full');
+    });
+    const onStep = commit;
+    const onSettle = () => { if (live) schedule('full'); };
+    const minus = makeStepper(range, -1, onStep, onSettle);
+    const plus = makeStepper(range, +1, onStep, onSettle);
+    row.appendChild(nm); row.appendChild(minus); row.appendChild(range);
+    row.appendChild(plus); row.appendChild(val);
+    host.appendChild(row);
+    exprRows[key] = { range: range, refresh: refresh };
+  }
+  function buildExpressionPanel() {
+    const host = $('expr-rows');
+    host.innerHTML = '';
+    exprRows = {};
+    EXPRESSIONS.forEach((e) => buildExpressionRow(e.key, e.label, host));
+    buildExpressionRow('custom', 'custom', $('expr-custom-row'));
+    if (prefs.exprCustomAdj) $('expr-custom-adj').value = prefs.exprCustomAdj;
+    $('expr-custom-adj').addEventListener('change', () => {
+      persist();
+      if ((+exprStrengths.custom || 0) && live) schedule('full');
+    });
+    $('btn-reset-expr').addEventListener('click', () => {
+      let any = false;
+      for (const k in exprRows) {
+        if (!exprRows.hasOwnProperty(k)) continue;
+        if (+exprRows[k].range.value !== 0) any = true;
+        exprRows[k].range.value = '0';
+        exprRows[k].refresh();
+      }
+      exprStrengths = {};
+      persist();
+      if (any && live) schedule('full');
+    });
+  }
+  buildExpressionPanel();
+  // The single active expression for a generate message (exclusivity makes
+  // "strongest wins" trivial, but stay robust to hand-edited prefs).
+  function activeExpression() {
+    let best = null, bestA = 0;
+    EXPRESSIONS.forEach((e) => {
+      const a = +exprStrengths[e.key] || 0;
+      if (a > bestA) { bestA = a; best = { adj: e.adj, alpha: a }; }
+    });
+    const ca = +exprStrengths.custom || 0;
+    const cadj = $('expr-custom-adj').value.trim();
+    if (ca > bestA && cadj) best = { adj: cadj, alpha: ca };
+    return best;
   }
 
   // ── LoRA panel ───────────────────────────────────────────────────────────
@@ -1062,6 +1178,7 @@ function init() {
       dial: { pregate: +$('dial-pregate').value, prescale: +$('dial-prescale').value },
       gate: { txtScale: +$('gate-txt').value, imgScale: +$('gate-img').value },
       axisControls: collectAxisControls(),
+      expression: activeExpression(),
       loraScales: loras.map((l) => +l.scale),
     };
   }
@@ -1107,7 +1224,9 @@ function init() {
                         { seed: usedSeed, steps: msg.opts.steps, width: resp.width, height: resp.height });
       }
       status(quality === 'preview' ? 'preview' : 'done', 'ok');
-      $('timing').textContent = (resp.ms ? resp.ms + ' ms' : '') + (quality === 'preview' ? ' · preview' : '');
+      $('timing').textContent = (resp.ms ? resp.ms + ' ms' : '') +
+        (resp.exprNeutral ? ' · field vs “' + resp.exprNeutral + '”' : '') +
+        (quality === 'preview' ? ' · preview' : '');
       pump();
     });
   }

@@ -128,6 +128,26 @@
           <p class="hint">1.0 = off. Higher pushes toward stylized.</p>
         </section>
 
+        <!-- 3b. expression — contextual per-token field -->
+        <section class="panel">
+          <h2>expression <span class="hint inline">per-token field · one at a time</span>
+            <span class="grow"></span>
+            <button id="btn-reset-expr" class="link" title="Zero every expression slider">reset</button>
+          </h2>
+          <div id="expr-rows"></div>
+          <div class="subhead">custom word</div>
+          <div class="row">
+            <input id="expr-custom-adj" type="text" placeholder="mischievous, awestruck, exhausted…"
+                   title="any adjective — it is spliced into your prompt as the expression">
+          </div>
+          <div id="expr-custom-row"></div>
+          <p class="hint">Splices the word into your prompt before the subject and
+            extrapolates its per-token effect: 1 ≈ saying the word, higher intensifies
+            (identity drifts at the extremes). One expression renders at a time —
+            moving a slider zeroes the others. The prompt needs a subject after an
+            article (“a woman”, “the chef”).</p>
+        </section>
+
         <!-- 4. axis bank -->
         <section class="panel">
           <h2>axis bank <span class="hint inline">18 perceptual axes</span>

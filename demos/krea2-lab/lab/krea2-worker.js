@@ -34,9 +34,19 @@
 //   main -> load          {modelDir, dictPath}
 //        <- loaded        {config, axes, hiddenSize, numLayers, backend}
 //   main -> generate      {prompt, negPrompt, opts, band, dial, gate, gateMask,
-//                           axisControls, imagePixels, imageH, imageW,
-//                           captureGates}
-//        <- done          {bitmap, width, height, ms, gates?}
+//                           axisControls, expression, imagePixels, imageH,
+//                           imageW, captureGates}
+//        <- done          {bitmap, width, height, ms, gates?, exprNeutral?}
+//
+// `expression` is {adj, alpha} — the contextual per-token field (ported from
+// sana-research/dictionary.py, validated on Krea 2 in the emotion-axes probes):
+// splice `adj` into the live prompt, splice a MASK-ALIGNED neutral adjective
+// into the same slot, diff the raw per-token taps, and prime from
+// neutral_taps + alpha * field. alpha 1 == what saying the word does; higher
+// extrapolates along the encoder's own displacement (identity drifts at the
+// extremes). One field per generation — the splice fixes the tokenization —
+// so the main thread sends at most one. Ignored when imagePixels is present
+// (image-as-prompt has no text to splice).
 //   main -> spatialRender {basePrompt, opts, axisName, alpha, maskW, maskH,
 //                           maskData}
 //        <- spatialDone   {bitmap, width, height, ms}
@@ -194,14 +204,92 @@ function scaleBand(embeds, band) {
   }
 }
 
+// ── contextual per-token expression field ────────────────────────────────
+// Splice an adjective as a modifier before the subject: after the last
+// article in the first clause (sana dictionary.py's validated
+// "a … {adj} woman" form). Falls back to a leading modifier.
+function spliceAdjective(prompt, adj) {
+  var head = prompt.split(',')[0];
+  var re = /\b(?:a|an|the)\s+/gi;
+  var m, last = null;
+  while ((m = re.exec(head)) !== null) last = m;
+  if (!last) return adj + ' ' + prompt;
+  var at = last.index + last[0].length;
+  return prompt.slice(0, at) + adj + ' ' + prompt.slice(at);
+}
+
+// Neutral candidates tried in order until one tokenizes to the same mask as
+// the expression splice (the row-alignment requirement). Multi-word entries
+// at the end catch longer adjectives.
+var NEUTRAL_POOL = ['calm', 'neutral', 'serious', 'relaxed', 'placid',
+                    'composed', 'expressionless', 'unsmiling', 'stoic',
+                    'blank', 'plain', 'quiet', 'still', 'very calm',
+                    'quite calm', 'calm and still', 'perfectly calm and still'];
+
+function masksEqual(a, b) {
+  if (a.rows !== b.rows || a.cols !== b.cols || a.data.length !== b.data.length) return false;
+  for (var i = 0; i < a.data.length; i++) if (a.data[i] !== b.data[i]) return false;
+  return true;
+}
+
+// Cache of built fields keyed by prompt+adj — a field costs 2+ encodes
+// (~0.2-1 s), a slider drag re-uses it for free. Cleared wholesale when it
+// grows past a handful of entries (each is ~125 MB of taps at 512 slots).
+var fieldCache = {};
+var fieldCacheCount = 0;
+function expressionField(prompt, adj) {
+  var key = prompt + ' ' + adj;
+  if (fieldCache[key]) return fieldCache[key];
+  var te = pipeline.krea2EncodePromptTaps(spliceAdjective(prompt, adj));
+  var tn = null, neutral = null;
+  for (var i = 0; i < NEUTRAL_POOL.length; i++) {
+    var cand = pipeline.krea2EncodePromptTaps(spliceAdjective(prompt, NEUTRAL_POOL[i]));
+    if (masksEqual(cand.mask, te.mask)) { tn = cand; neutral = NEUTRAL_POOL[i]; break; }
+  }
+  if (!tn) {
+    throw new Error('expression "' + adj + '": no token-aligned neutral found — ' +
+                    'try a different word for it');
+  }
+  var base = tn.embeds.data;
+  var field = new Float32Array(base.length);
+  var ed = te.embeds.data;
+  for (var c = 0; c < base.length; c++) field[c] = ed[c] - base[c];
+  if (fieldCacheCount >= 4) { fieldCache = {}; fieldCacheCount = 0; }
+  fieldCacheCount++;
+  fieldCache[key] = {
+    rows: tn.embeds.rows, cols: tn.embeds.cols,
+    base: base, field: field, mask: tn.mask, neutral: neutral,
+  };
+  return fieldCache[key];
+}
+
+// The neutral-carrier taps with the field applied at `alpha`. Fresh buffer
+// every call — scaleBand mutates its input in place and must not corrupt the
+// cached base.
+function expressionTaps(prompt, adj, alpha) {
+  var f = expressionField(prompt, adj);
+  var edited = new Float32Array(f.base.length);
+  for (var c = 0; c < f.base.length; c++) edited[c] = f.base[c] + alpha * f.field[c];
+  return {
+    embeds: { rows: f.rows, cols: f.cols, data: edited },
+    mask: f.mask,
+    neutral: f.neutral,
+  };
+}
+
 // Raw taps for this generation, or null to let prime(prompt) do the encode
-// (+ auto cond_control) internally. Image-as-prompt and the band dial both
-// need the raw-taps path; the plain axis bank alone does not.
+// (+ auto cond_control) internally. Image-as-prompt, the expression field,
+// and the band dial all need the raw-taps path; the plain axis bank alone
+// does not.
 function buildTaps(msg) {
   var band = (msg.band == null) ? 1.0 : +msg.band;
+  var expr = (msg.expression && msg.expression.adj && +msg.expression.alpha)
+    ? msg.expression : null;
   var taps;
   if (msg.imagePixels) {
     taps = pipeline.krea2EncodeImagePrompt(msg.imagePixels, msg.imageH, msg.imageW);
+  } else if (expr) {
+    taps = expressionTaps(msg.prompt, String(expr.adj), +expr.alpha);
   } else if (band !== 1.0) {
     taps = pipeline.krea2EncodePromptTaps(msg.prompt);
   } else {
@@ -273,7 +361,7 @@ function runGeneration(msg, onDone) {
 
   var gates = msg.captureGates ? pipeline.krea2Gates() : null;
   var img = state.decode({});
-  onDone(img, gates);
+  onDone(img, gates, taps && taps.neutral ? taps.neutral : null);
 }
 
 function respondImage(type, img, ms, extra) {
@@ -291,8 +379,11 @@ function handleGenerate(msg) {
     if (!pipeline) throw new Error('no model loaded');
     var t0 = now();
     var opts = Object.assign({}, msg.opts || {}, { negativePrompt: msg.negPrompt || '' });
-    runGeneration(Object.assign({}, msg, { opts: opts }), function (img, gates) {
-      respondImage('done', img, Math.round(now() - t0), gates ? { gates: gates } : null);
+    runGeneration(Object.assign({}, msg, { opts: opts }), function (img, gates, exprNeutral) {
+      var extra = {};
+      if (gates) extra.gates = gates;
+      if (exprNeutral) extra.exprNeutral = exprNeutral;
+      respondImage('done', img, Math.round(now() - t0), extra);
     });
   } catch (e) {
     fail('generate', e);
