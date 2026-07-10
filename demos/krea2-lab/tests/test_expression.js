@@ -68,10 +68,17 @@ const angry = generateAndGrab();
 assert($('timing').textContent.indexOf('field vs') >= 0,
        'worker reported the field neutral: ' + $('timing').textContent);
 
-// Exclusivity: pushing another slider zeroes anger.
-setExpression(0, 1);                         // happiness
+// Switching to a SECOND emotion builds a second field on top of the first
+// one's cache — this is the sequence that OOM'd the worker's 256 MB QuickJS
+// heap (each raw-taps buffer is a 63 MB Float32Array; the engine limit is
+// now 4 GB). Exclusivity rides along: moving happiness must zero anger.
+console.log('happiness = 2 render (second field)…');
+setExpression(0, 2);                         // happiness
 const angerRange = $('expr-rows').querySelectorAll('.ctl-row')[4].querySelector('input[type=range]');
 assert(+angerRange.value === 0, 'moving happiness zeroed anger (exclusive sliders)');
+const happy = generateAndGrab();
+assert($('timing').textContent.indexOf('field vs') >= 0,
+       'second field reported its neutral: ' + $('timing').textContent);
 setExpression(0, 0);                         // back to none
 
 // The two frames must differ substantially — the field engaged.
@@ -86,5 +93,16 @@ for (let i = 0; i < n; i += 4) {
 const meanDiff = sum / (n / 4) / 3;
 console.log('mean |diff| per channel: ' + meanDiff.toFixed(2));
 assert(meanDiff > 5, 'expression changed the render (mean diff ' + meanDiff.toFixed(2) + ' > 5)');
+
+// And the second field must differ from the first — both engaged.
+let sum2 = 0;
+for (let i = 0; i < n; i += 4) {
+  sum2 += Math.abs(happy.data[i] - angry.data[i]) +
+          Math.abs(happy.data[i + 1] - angry.data[i + 1]) +
+          Math.abs(happy.data[i + 2] - angry.data[i + 2]);
+}
+const meanDiff2 = sum2 / (n / 4) / 3;
+console.log('mean |happy-angry| per channel: ' + meanDiff2.toFixed(2));
+assert(meanDiff2 > 5, 'second expression changed the render (mean diff ' + meanDiff2.toFixed(2) + ' > 5)');
 
 console.log('PASS: expression panel drives the per-token field end to end');
