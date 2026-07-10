@@ -77,7 +77,10 @@ function openrouterModelDescriptor(cfg, visionCapable) {
 		input: visionCapable ? ["text", "image"] : ["text"],
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		contextWindow: 131072,
-		maxTokens: 2048,
+		// Whole-file write_file calls plus the model's reasoning tokens (which
+		// providers count against completion_tokens) must fit in one completion.
+		// 2048 starved reasoning models into truncated tool JSON.
+		maxTokens: 16384,
 	};
 }
 

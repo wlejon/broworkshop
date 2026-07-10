@@ -275,7 +275,7 @@ export function openrouterStreamFn(cfg, visionCapable) {
 				const payload = {
 					model: cfg.model,
 					messages: buildMessages(context, visionCapable),
-					max_tokens: options?.maxTokens ?? 1024,
+					max_tokens: options?.maxTokens ?? (model && model.maxTokens) ?? 8192,
 					temperature: options?.temperature ?? 0.7,
 					stream: false,
 				};
@@ -309,11 +309,19 @@ export function openrouterStreamFn(cfg, visionCapable) {
 				const toolCalls = Array.isArray(msg.tool_calls) ? msg.tool_calls : [];
 				for (const tc of toolCalls) {
 					const fn = tc.function || {};
+					// Strict parse, no recovery: truncated/malformed tool JSON must fail
+					// the turn visibly (typically finish_reason "length" — the completion
+					// ran out of max_tokens mid-call), not turn into a bogus call with
+					// empty args that the loop retries forever.
 					let args = {};
 					try {
 						args = fn.arguments ? JSON.parse(fn.arguments) : {};
 					} catch {
-						args = {};
+						throw new Error(
+							`tool call '${fn.name || "unknown"}' arguments are not valid JSON` +
+							` (finish_reason=${finish || "unknown"}` +
+							`${finish === "length" ? ", completion truncated by max_tokens" : ""})`,
+						);
 					}
 					const idx = blocks.length;
 					const toolCall = {
