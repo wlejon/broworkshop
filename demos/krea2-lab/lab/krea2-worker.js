@@ -31,12 +31,12 @@
 //     (512, 1) row validity)
 //
 // Message protocol:
-//   main -> load          {modelDir, dictPath, spectrumPath}
+//   main -> load          {modelDir, dictPath, spectrumPath, mouthPath}
 //        <- loaded        {config, axes, hiddenSize, numLayers, backend,
-//                           spectrum}
+//                           spectrum, mouth}
 //   main -> generate      {prompt, negPrompt, opts, band, dial, gate, gateMask,
-//                           axisControls, expression, spectrum, imagePixels,
-//                           imageH, imageW, captureGates}
+//                           axisControls, expression, spectrum, mouth,
+//                           imagePixels, imageH, imageW, captureGates}
 //        <- done          {bitmap, width, height, ms, gates?, exprNeutral?,
 //                           spectrumNote?}
 //
@@ -61,6 +61,14 @@
 // Chinese prompt), and it stacks unconditionally with the expression word
 // field, the band dial, and image-as-prompt. Calibration: slider 3 ≈ probe
 // alpha 5 (full expression); off-manifold drift starts past ~6.
+//
+// `mouth` is {open, round, teeth} — the same baked-bank mechanism over
+// lab/mouth.json (tools/mint_mouth.js farms ~36 mouth-state phrase fields per
+// mint prompt across human AND animal subjects, contrasts anchor-pole means,
+// pools, averages, orthogonalizes). open = jaw drop, round = pursed<->spread
+// lip corners, teeth = bared<->covered; open x round spans the viseme plane.
+// mouth.json's gain is calibrated so equal sliders push as hard as the
+// spectrum's, and both banks stack on the same carrier.
 //   main -> spatialRender {basePrompt, opts, axisName, alpha, maskW, maskH,
 //                           maskData}
 //        <- spatialDone   {bitmap, width, height, ms}
@@ -174,11 +182,15 @@ function handleLoad(msg) {
     }
     dictAxes = axes.slice();
 
-    // Baked affect axes — optional; the panel is disabled without them.
-    try { loadSpectrumDict(msg.spectrumPath); }
-    catch (e) {
-      spectrumDict = null;
-      console.log('spectrum dict unavailable: ' + ((e && e.message) || e));
+    // Baked axis banks — each optional; its panel is disabled without it.
+    var bankPaths = { spectrum: msg.spectrumPath, mouth: msg.mouthPath };
+    for (var bankName in bankPaths) {
+      if (!bankPaths.hasOwnProperty(bankName)) continue;
+      try { loadBankDict(bankName, bankPaths[bankName]); }
+      catch (e) {
+        BAKED_BANKS[bankName].dict = null;
+        console.log(bankName + ' dict unavailable: ' + ((e && e.message) || e));
+      }
     }
 
     var tensor = (typeof bro !== 'undefined' && bro.tensor) ? bro.tensor : null;
@@ -189,7 +201,8 @@ function handleLoad(msg) {
       hiddenSize: hiddenSize,
       numLayers: numLayers,
       backend: tensor && tensor.available ? (tensor.backend || 'gpu') : 'cpu',
-      spectrum: !!spectrumDict,
+      spectrum: !!BAKED_BANKS.spectrum.dict,
+      mouth: !!BAKED_BANKS.mouth.dict,
     });
   } catch (e) {
     pipeline = null;
@@ -309,98 +322,120 @@ function expressionTaps(prompt, adj, alpha) {
   };
 }
 
-// ── model-nominated affect spectrum (baked) ──────────────────────────────
+// ── model-nominated baked axis banks (affect spectrum + mouth) ────────────
 // dst += w * src at C++ speed (bro.image kernel).
 function axpy(dst, src, w) {
   bro.image.combine(dst, dst, src, { op: 'wsum', wa: 1, wb: w });
 }
 
-// Baked axes from lab/spectrum.json (written by tools/mint_spectrum.js):
-// { span, gain, axes: {key: [span floats]} }. Each axis is a unit per-layer
-// direction pooled from ~100 word fields and averaged over three mint
-// prompts; `gain` is the calibrated per-row push (mean word-field norm /
-// sqrt(token count) of the mint prompts).
-var SPECTRUM_KEYS = ['valence', 'arousal', 'hostility', 'surprise'];
+// Each bank's JSON (lab/spectrum.json from tools/mint_spectrum.js,
+// lab/mouth.json from tools/mint_mouth.js) is { span, gain, axes: {key:
+// [span floats]} }. Each axis is a unit per-layer direction pooled from a
+// farmed word/phrase field cloud and averaged across diverse mint prompts;
+// `gain` is the calibrated per-row push (mean field norm / sqrt(token count)
+// of the mint prompts). A generate message carries one {key: slider} object
+// per bank, under the bank's name.
+var BAKED_BANKS = {
+  spectrum: { keys: ['valence', 'arousal', 'hostility', 'surprise'], dict: null },
+  mouth:    { keys: ['open', 'round', 'teeth'], dict: null },
+};
 // Slider→alpha calibration: full deflection (3) lands at the probe-verified
 // full-expression point (pooled alpha ~5); off-manifold drift starts past ~6.
-var SPECTRUM_SLIDER_GAIN = 5 / 3;
-var spectrumDict = null;   // {span, gain, axes: {key: Float32Array}}
+var BAKED_SLIDER_GAIN = 5 / 3;
 
-function loadSpectrumDict(path) {
-  spectrumDict = null;
+function loadBankDict(name, path) {
+  var bank = BAKED_BANKS[name];
+  bank.dict = null;
   if (!path) return;
   var raw = JSON.parse(require('fs').readFileSync(path, 'utf8'));
   var axes = {};
-  for (var i = 0; i < SPECTRUM_KEYS.length; i++) {
-    var k = SPECTRUM_KEYS[i];
+  for (var i = 0; i < bank.keys.length; i++) {
+    var k = bank.keys[i];
     if (!raw.axes[k] || raw.axes[k].length !== raw.span) {
-      throw new Error('spectrum dict: bad axis "' + k + '"');
+      throw new Error(name + ' dict: bad axis "' + k + '"');
     }
     axes[k] = new Float32Array(raw.axes[k]);
   }
-  spectrumDict = { span: raw.span, gain: raw.gain, axes: axes };
+  bank.dict = { span: raw.span, gain: raw.gain, axes: axes };
 }
 
-// Add the active axes to every valid token row of `taps`, in place, and
-// return the timing-bar note. The pooled directions are per-row uniform, so
-// this works on ANY token grid — prompt taps, an expression-field carrier,
+// Add one bank's active axes to every valid token row of `taps`, in place,
+// and return the timing-bar note. The pooled directions are per-row uniform,
+// so this works on ANY token grid — prompt taps, an expression-field carrier,
 // or image-as-prompt taps — with no words or language involved.
-function applySpectrum(taps, spec) {
-  var span = spectrumDict.span;
+function applyBank(taps, name, values) {
+  var dict = BAKED_BANKS[name].dict;
+  var span = dict.span;
   var slots = taps.mask.rows;
   var parts = [];
-  for (var i = 0; i < SPECTRUM_KEYS.length; i++) {
-    var key = SPECTRUM_KEYS[i];
-    if (!spec.hasOwnProperty(key)) continue;
-    var s = spec[key] * SPECTRUM_SLIDER_GAIN * spectrumDict.gain;
-    var vec = spectrumDict.axes[key];
+  var bankKeys = BAKED_BANKS[name].keys;
+  for (var i = 0; i < bankKeys.length; i++) {
+    var key = bankKeys[i];
+    if (!values.hasOwnProperty(key)) continue;
+    var s = values[key] * BAKED_SLIDER_GAIN * dict.gain;
+    var vec = dict.axes[key];
     for (var t = 0; t < slots; t++) {
       if (taps.mask.data[t] === 0) continue;
       axpy(taps.embeds.data.subarray(t * span, (t + 1) * span), vec, s);
     }
-    parts.push(key + (spec[key] > 0 ? ' +' : ' ') + spec[key].toFixed(2));
+    parts.push(key + (values[key] > 0 ? ' +' : ' ') + values[key].toFixed(2));
   }
-  return 'spectrum ' + parts.join(', ');
+  return name + ' ' + parts.join(', ');
 }
 
-// The active {axisKey: alpha} subset of a generate message's spectrum, or
-// null when every axis is zero/absent.
-function activeSpectrum(msg) {
-  if (!msg.spectrum) return null;
+// The active {bankName: {axisKey: alpha}} subset of a generate message's
+// baked-bank fields (msg.spectrum / msg.mouth), or null when every axis of
+// every bank is zero/absent.
+function activeBaked(msg) {
   var out = null;
-  for (var i = 0; i < SPECTRUM_KEYS.length; i++) {
-    var k = SPECTRUM_KEYS[i];
-    var a = +msg.spectrum[k] || 0;
-    if (a) { if (!out) out = {}; out[k] = a; }
-  }
-  if (out && !spectrumDict) {
-    throw new Error('spectrum axes need lab/spectrum.json — run tools/mint_spectrum.js');
+  for (var name in BAKED_BANKS) {
+    if (!BAKED_BANKS.hasOwnProperty(name) || !msg[name]) continue;
+    var bank = BAKED_BANKS[name];
+    var act = null;
+    for (var i = 0; i < bank.keys.length; i++) {
+      var k = bank.keys[i];
+      var a = +msg[name][k] || 0;
+      if (a) { if (!act) act = {}; act[k] = a; }
+    }
+    if (!act) continue;
+    if (!bank.dict) {
+      throw new Error(name + ' axes need lab/' + name + '.json — run tools/mint_' + name + '.js');
+    }
+    if (!out) out = {};
+    out[name] = act;
   }
   return out;
 }
 
 // Raw taps for this generation, or null to let prime(prompt) do the encode
 // (+ auto cond_control) internally. Image-as-prompt, the expression field,
-// the spectrum, and the band dial all need the raw-taps path; the plain axis
-// bank alone does not.
+// the baked banks, and the band dial all need the raw-taps path; the plain
+// axis bank alone does not.
 function buildTaps(msg) {
   var band = (msg.band == null) ? 1.0 : +msg.band;
   var expr = (msg.expression && msg.expression.adj && +msg.expression.alpha)
     ? msg.expression : null;
-  var spec = activeSpectrum(msg);
+  var baked = activeBaked(msg);
   var taps;
   if (msg.imagePixels) {
     taps = pipeline.krea2EncodeImagePrompt(msg.imagePixels, msg.imageH, msg.imageW);
   } else if (expr) {
     taps = expressionTaps(msg.prompt, String(expr.adj), +expr.alpha);
-  } else if (spec || band !== 1.0) {
+  } else if (baked || band !== 1.0) {
     taps = pipeline.krea2EncodePromptTaps(msg.prompt);
   } else {
     return null;
   }
-  // Baked spectrum axes are per-row uniform: they stack on whatever taps this
-  // generation uses — plain prompt, expression carrier, or image-as-prompt.
-  if (spec) taps.note = applySpectrum(taps, spec);
+  // Baked axes are per-row uniform: they stack on whatever taps this
+  // generation uses — plain prompt, expression carrier, or image-as-prompt —
+  // and every active bank stacks on the same carrier.
+  if (baked) {
+    var notes = [];
+    for (var name in baked) {
+      if (baked.hasOwnProperty(name)) notes.push(applyBank(taps, name, baked[name]));
+    }
+    taps.note = notes.join(' · ');
+  }
   scaleBand(taps.embeds, band);
   return taps;
 }

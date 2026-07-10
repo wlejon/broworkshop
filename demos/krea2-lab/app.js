@@ -10,6 +10,10 @@
 // axes (valence/arousal/hostility/surprise sliders) from the round-6
 // probe's SVD of ~100 farmed word fields — minted per prompt in the worker,
 // and stackable with each other and the expression word.
+// The mouth panel is the same baked-bank machinery over lab/mouth.json
+// (tools/mint_mouth.js): open/round/teeth articulation axes minted by
+// anchor-pole contrast from ~36 mouth-state phrase fields across human AND
+// animal subjects, orthogonalized so each slider moves one articulation.
 // Plus LoRA adapters (brodiffusion's Krea 2 runtime-adapter path): attach
 // .safetensors LoRAs, rescale each live (strengths ride every generate as
 // `loraScales`), remove without reloading; the list persists and re-applies
@@ -258,6 +262,17 @@ function init() {
   }
   let specRows = {};   // valence/arousal/hostility/surprise -> {range, refresh}
 
+  // ── mouth state (model-nominated articulation axes; baked lab/mouth.json) ─
+  const MOUTH_KEYS = ['open', 'round', 'teeth'];
+  const mouthState = { open: 0, round: 0, teeth: 0 };
+  if (prefs.mouthState && typeof prefs.mouthState === 'object') {
+    MOUTH_KEYS.forEach((k) => {
+      const v = +prefs.mouthState[k] || 0;
+      mouthState[k] = Math.max(-SPEC_RANGE, Math.min(SPEC_RANGE, v));
+    });
+  }
+  let mouthRows = {};  // open/round/teeth -> {range, refresh}
+
   // ── LoRA adapters ──────────────────────────────────────────────────────
   // {path, scale} per applied LoRA, in pipeline group order. This list is
   // authoritative (persisted here); the worker rebuilds the pipeline's
@@ -340,6 +355,7 @@ function init() {
       exprStrengths: exprStrengths,
       exprCustomAdj: $('expr-custom-adj').value,
       specState: specState,
+      mouthState: mouthState,
       mintedAxes: mintedAxes.map((m) => ({
         name: m.name, kind: m.kind, pos: m.pos, neg: m.neg, aPath: m.aPath, bPath: m.bPath,
         dir: m.dir, consistency: m.consistency,
@@ -678,19 +694,21 @@ function init() {
     return best;
   }
 
-  // ── spectrum panel — valence/arousal/hostility/surprise sliders ──────────
-  // The four model-nominated affect axes stack (they share one carrier in the
-  // worker), so unlike the expression rows there is no exclusivity here.
-  function buildSpectrumRow(key, host) {
+  // ── baked-axes panels (spectrum + mouth) — slider rows over lab/*.json ────
+  // Model-nominated baked axes stack freely (each generation applies every
+  // active bank to the same carrier in the worker), so unlike the expression
+  // rows there is no exclusivity here. One row per axis; `label` names the
+  // negative/positive poles where the key alone doesn't say them.
+  function buildBakedRow(cfg, key, label) {
     const row = document.createElement('div');
     row.className = 'ctl-row stepped';
     const nm = document.createElement('span');
-    nm.className = 'ctl-name'; nm.textContent = key;
-    nm.title = 'model-nominated affect axis — stacks with the other axes and the expression word';
+    nm.className = 'ctl-name'; nm.textContent = label || key;
+    nm.title = cfg.rowTitle;
     const range = document.createElement('input');
     range.type = 'range';
     range.min = String(-SPEC_RANGE); range.max = String(SPEC_RANGE); range.step = '0.05';
-    range.value = String(specState[key] || 0);
+    range.value = String(cfg.state[key] || 0);
     const val = document.createElement('span');
     val.className = 'ctl-val';
     function refresh() {
@@ -699,7 +717,7 @@ function init() {
       val.classList.toggle('off', v === 0);
     }
     refresh();
-    function commit() { specState[key] = +range.value; refresh(); persist(); }
+    function commit() { cfg.state[key] = +range.value; refresh(); persist(); }
     range.addEventListener('input', commit);
     range.addEventListener('change', () => { if (live) schedule('full'); });
     val.addEventListener('dblclick', () => {
@@ -710,35 +728,52 @@ function init() {
     const plus = makeStepper(range, +1, commit, onSettle);
     row.appendChild(nm); row.appendChild(minus); row.appendChild(range);
     row.appendChild(plus); row.appendChild(val);
-    host.appendChild(row);
-    specRows[key] = { range: range, refresh: refresh };
+    $(cfg.rowsId).appendChild(row);
+    cfg.rows[key] = { range: range, refresh: refresh };
   }
-  function buildSpectrumPanel() {
-    SPECTRUM_KEYS.forEach((k) => buildSpectrumRow(k, $('spec-rows')));
-    $('btn-reset-spec').addEventListener('click', () => {
-      const any = SPECTRUM_KEYS.some((k) => specState[k] !== 0);
-      SPECTRUM_KEYS.forEach((k) => { specState[k] = 0; });
-      for (const k in specRows) {
-        if (!specRows.hasOwnProperty(k)) continue;
-        specRows[k].range.value = '0';
-        specRows[k].refresh();
+  function buildBakedPanel(cfg) {
+    cfg.keys.forEach((k) => buildBakedRow(cfg, k, cfg.labels && cfg.labels[k]));
+    $(cfg.resetId).addEventListener('click', () => {
+      const any = cfg.keys.some((k) => cfg.state[k] !== 0);
+      cfg.keys.forEach((k) => { cfg.state[k] = 0; });
+      for (const k in cfg.rows) {
+        if (!cfg.rows.hasOwnProperty(k)) continue;
+        cfg.rows[k].range.value = '0';
+        cfg.rows[k].refresh();
       }
       persist();
       if (any && live) schedule('full');
     });
   }
-  buildSpectrumPanel();
-  // The baked axes ship as lab/spectrum.json; without it the worker rejects
-  // spectrum renders, so gray the panel out instead of surfacing the error.
+  buildBakedPanel({
+    keys: SPECTRUM_KEYS, state: specState, rows: specRows,
+    rowsId: 'spec-rows', resetId: 'btn-reset-spec',
+    rowTitle: 'model-nominated affect axis — stacks with the other axes and the expression word',
+  });
+  buildBakedPanel({
+    keys: MOUTH_KEYS, state: mouthState, rows: mouthRows,
+    rowsId: 'mouth-rows', resetId: 'btn-reset-mouth',
+    labels: { open: 'closed ↔ open', round: 'spread ↔ pursed', teeth: 'hidden ↔ bared' },
+    rowTitle: 'model-nominated mouth articulation axis — stacks with the other axes and the expression word',
+  });
+  // Each baked bank ships as lab/<name>.json; without it the worker rejects
+  // that bank's renders, so gray the panel out instead of surfacing the error.
   function setSpectrumAvailable(ok) {
     $('spec-panel').classList.toggle('spec-disabled', !ok);
     if (!ok) $('spec-hint').textContent = 'no lab/spectrum.json — bake it with tools/mint_spectrum.js';
   }
-  function activeSpectrum() {
-    if (!SPECTRUM_KEYS.some((k) => specState[k] !== 0)) return null;
-    return { valence: specState.valence, arousal: specState.arousal,
-             hostility: specState.hostility, surprise: specState.surprise };
+  function setMouthAvailable(ok) {
+    $('mouth-panel').classList.toggle('spec-disabled', !ok);
+    if (!ok) $('mouth-hint').textContent = 'no lab/mouth.json — bake it with tools/mint_mouth.js';
   }
+  function activeBakedValues(keys, state) {
+    if (!keys.some((k) => state[k] !== 0)) return null;
+    const out = {};
+    keys.forEach((k) => { out[k] = state[k]; });
+    return out;
+  }
+  function activeSpectrum() { return activeBakedValues(SPECTRUM_KEYS, specState); }
+  function activeMouth() { return activeBakedValues(MOUTH_KEYS, mouthState); }
 
   // ── LoRA panel ───────────────────────────────────────────────────────────
   // One row per applied LoRA: filename, a strength slider (0 = off, dblclick
@@ -1212,11 +1247,12 @@ function init() {
     startLoadOverlay();
     status('loading model — this reads ~26GB of weights, give it a moment');
     client.send({ type: 'load', modelDir: modelDir, dictPath: 'assets/axes_turbo.bcd1',
-                  spectrumPath: 'lab/spectrum.json' }, (err, msg) => {
+                  spectrumPath: 'lab/spectrum.json', mouthPath: 'lab/mouth.json' }, (err, msg) => {
       stopLoadOverlay();
       if (err) { setBusy(false); backend('error', 'err'); status(String(err.message || err), 'err'); return; }
       loaded = true;
       setSpectrumAvailable(!!msg.spectrum);
+      setMouthAvailable(!!msg.mouth);
       setBusy(false);
       backend(msg.backend === 'cpu' ? 'CPU' : (msg.backend || 'gpu').toUpperCase(),
               msg.backend === 'cpu' ? 'warn' : 'ok');
@@ -1261,6 +1297,7 @@ function init() {
       axisControls: collectAxisControls(),
       expression: activeExpression(),
       spectrum: activeSpectrum(),
+      mouth: activeMouth(),
       loraScales: loras.map((l) => +l.scale),
     };
   }
