@@ -63,6 +63,13 @@ h1 { font-size: 15px; margin: 0; font-weight: 650; letter-spacing: .2px; }
     border-radius: 6px; padding: 5px 8px; min-width: 130px;
 }
 .ctl.grow input { width: 100%; }
+/* read-only model name set by Browse… — same footprint as an input */
+.model-display {
+    font-size: 13px; color: var(--ink);
+    background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 6px; padding: 5px 8px; min-width: 130px; max-width: 260px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .approve-toggle { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--ink-dim); }
 
 button {

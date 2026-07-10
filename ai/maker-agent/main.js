@@ -13,7 +13,7 @@ import { installSystemMenu } from "/lib/system-menu.js";
 import { createAgentSession } from "/app/maker.bundle.js";
 import { renderMarkdown } from "/lib/markdown.js";
 import { lineDiff } from "/lib/linediff.js";
-import { fetchModels, filterModels, priceOf, hasTools, hasVision, formatPrice, openModelPicker } from "/lib/openrouter.js";
+import { fetchModels, priceOf, formatPrice, openModelPicker } from "/lib/openrouter.js";
 
 const $ = (s) => document.querySelector(s);
 const OR_BASE = "https://openrouter.ai/api/v1";
@@ -500,7 +500,7 @@ async function orVisionCall(key, model, dataUri, instruction) {
 async function visionDescribe(dataUri, instruction) {
     const key = $("#or-key").value.trim();
     if (!key) throw new Error("no OpenRouter key set for the vision model");
-    const selected = $("#or-vision").value;
+    const selected = visionModel();
     const tries = [selected, ...VISION_FALLBACKS].filter((m, i, a) => m && a.indexOf(m) === i);
     if (!tries.length) throw new Error("no 'Eyes' vision model selected");
     let lastErr = null;
@@ -525,63 +525,30 @@ async function look(instruction) {
     }
 }
 
-// ── model catalog (OpenRouter /models) ────────────────────────────────────────
+// ── model selection (Browse… is the single picker; store is the truth) ───────
 // The full catalog, cached once loaded, so the Browse explorer never refetches.
 let catalog = null;
+
+const DEFAULT_BRAIN = "nvidia/nemotron-3-super-120b-a12b:free";
+const DEFAULT_VISION = "google/gemma-4-31b-it:free";
+function brainModel() { return store.get("brain", DEFAULT_BRAIN); }
+function visionModel() { return store.get("vision", DEFAULT_VISION); }
 
 // "openai/gpt-4o · $2.50/M" or "nvidia/nemotron… · free".
 function optText(m) {
     const pr = priceOf(m);
     return m.id.replace(/:free$/, "") + " · " + (pr.isFree ? "free" : formatPrice(pr.promptPerM));
 }
-
-// Load models keeps the two dropdowns short and safe: the free tool-callers and
-// free vision models, cheapest/largest first. Everything else (paid, niche) is a
-// click away under Browse…, which searches the full cached catalog with pricing.
-async function refreshModels() {
-    const key = $("#or-key").value.trim();
-    setStatus("loading model list…", "loading");
-    try {
-        catalog = await fetchModels(key);
-        const tools = filterModels(catalog, { free: true, tools: true });
-        const vision = filterModels(catalog, { free: true, vision: true });
-        fillSelect($("#or-brain"), tools, store.get("brain", "nvidia/nemotron-3-super-120b-a12b:free"));
-        fillSelect($("#or-vision"), vision, store.get("vision", "google/gemma-4-31b-it:free"));
-        setStatus("models loaded — " + tools.length + " free tool-callers, " + vision.length + " free vision · Browse for all "
-            + catalog.length, "ready");
-        updateSendEnabled();
-    } catch (e) {
-        setStatus("model list failed: " + (e && e.message ? e.message : e), "error");
-    }
+function modelLabel(id) {
+    const m = catalog && catalog.find((x) => x.id === id);
+    return m ? optText(m) : id.replace(/:free$/, "");
 }
-function fillSelect(sel, models, preferred) {
-    sel.innerHTML = "";
-    models.slice().sort((a, b) => (b.context_length || 0) - (a.context_length || 0));
-    for (const m of models) {
-        const opt = document.createElement("option");
-        opt.value = m.id;
-        opt.textContent = optText(m);
-        sel.appendChild(opt);
-    }
-    if (models.some((m) => m.id === preferred)) sel.value = preferred;
-    else if (models.length) sel.value = models[0].id;
+function updateModelDisplays() {
+    $("#brain-display").textContent = modelLabel(brainModel());
+    $("#vision-display").textContent = modelLabel(visionModel());
 }
 
-// Ensure `id` is a selectable option (Browse can pick a model outside the free
-// quick-list), labeled with its price from the catalog when we have it.
-function ensureOption(sel, id) {
-    let opt = Array.from(sel.options).find((o) => o.value === id);
-    if (!opt) {
-        opt = document.createElement("option");
-        opt.value = id;
-        const m = catalog && catalog.find((x) => x.id === id);
-        opt.textContent = m ? optText(m) : id.replace(/:free$/, "");
-        sel.appendChild(opt);
-    }
-    sel.value = id;
-}
-
-// Open the full-catalog explorer for one selector. brain → tool-callers,
+// Open the full-catalog explorer for one slot. brain → tool-callers,
 // vision → image-input models (the chip is pre-set but the user can toggle it).
 async function browseModels(kind) {
     const key = $("#or-key").value.trim();
@@ -591,18 +558,17 @@ async function browseModels(kind) {
         catch (e) { setStatus("model list failed: " + (e && e.message ? e.message : e), "error"); return; }
     }
     const isBrain = kind === "brain";
-    const sel = isBrain ? $("#or-brain") : $("#or-vision");
     const picked = await openModelPicker({
         key,
         models: catalog,
         filter: isBrain ? { tools: true } : { vision: true },
-        initial: sel.value || undefined,
+        initial: isBrain ? brainModel() : visionModel(),
         title: isBrain ? "Choose a brain (tool-calling)" : "Choose eyes (vision)",
     });
     if (!picked) return;
-    ensureOption(sel, picked);
     store.set(isBrain ? "brain" : "vision", picked);
-    invalidateSession();
+    updateModelDisplays();
+    if (isBrain) invalidateSession();
     updateSendEnabled();
 }
 
@@ -621,7 +587,7 @@ function currentBackend() {
         };
     }
     const key = $("#or-key").value.trim();
-    const model = $("#or-brain").value;
+    const model = brainModel();
     if (!key || !model) return null;
     return {
         kind: "openrouter",
@@ -727,10 +693,7 @@ function applyBackendVisibility() {
 
 $("#backend").addEventListener("change", () => { store.set("backend", $("#backend").value); invalidateSession(); applyBackendVisibility(); });
 $("#or-key").addEventListener("change", () => { store.set("orKey", $("#or-key").value.trim()); invalidateSession(); updateSendEnabled(); });
-$("#or-brain").addEventListener("change", () => { store.set("brain", $("#or-brain").value); invalidateSession(); updateSendEnabled(); });
-$("#or-vision").addEventListener("change", () => store.set("vision", $("#or-vision").value));
 $("#brolm-path").addEventListener("change", () => store.set("brolmPath", $("#brolm-path").value.trim()));
-$("#btn-refresh").addEventListener("click", refreshModels);
 $("#btn-browse-brain").addEventListener("click", () => browseModels("brain"));
 $("#btn-browse-vision").addEventListener("click", () => browseModels("vision"));
 $("#btn-load-local").addEventListener("click", loadLocal);
@@ -745,17 +708,9 @@ window.__makerDebug = {
     configure({ key, brain, vision, backend } = {}) {
         if (backend) $("#backend").value = backend;
         if (key != null) $("#or-key").value = key;
-        const setSel = (sel, id) => {
-            if (!id) return;
-            if (!Array.from(sel.querySelectorAll("option")).some((o) => o.value === id)) {
-                const o = document.createElement("option");
-                o.value = id; o.textContent = id.replace(/:free$/, "");
-                sel.appendChild(o);
-            }
-            sel.value = id;
-        };
-        setSel($("#or-brain"), brain);
-        setSel($("#or-vision"), vision);
+        if (brain) store.set("brain", brain);
+        if (vision) store.set("vision", vision);
+        updateModelDisplays();
         invalidateSession();
         applyBackendVisibility();
     },
@@ -776,8 +731,6 @@ window.__makerDebug = {
     applyBackendVisibility();
     const t = transcript();
     t.addEventListener("scroll", () => { stuckToBottom = t.scrollHeight - t.scrollTop - t.clientHeight < 40; });
-    // Pre-select saved model ids even before a live list loads.
-    if (store.get("brain", "")) { const o = document.createElement("option"); o.value = store.get("brain"); o.textContent = store.get("brain").replace(/:free$/, ""); $("#or-brain").appendChild(o); $("#or-brain").value = store.get("brain"); }
-    if (store.get("vision", "")) { const o = document.createElement("option"); o.value = store.get("vision"); o.textContent = store.get("vision").replace(/:free$/, ""); $("#or-vision").appendChild(o); $("#or-vision").value = store.get("vision"); }
+    updateModelDisplays();
     updateSendEnabled();
 })();

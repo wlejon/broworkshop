@@ -175,8 +175,23 @@ function readRetryAfter(resp) {
 	}
 }
 
-function sleep(ms) {
-	return new Promise((r) => setTimeout(r, ms));
+// Abort-aware sleep: a rate-limit backoff can be 30s — Stop must not wait it
+// out. Resolves early (and unhooks its listener) when the signal aborts; the
+// caller's `signal?.aborted` check then exits the retry loop.
+function sleep(ms, signal) {
+	return new Promise((resolve) => {
+		if (signal?.aborted) return resolve();
+		let timer = null;
+		const onAbort = () => {
+			if (timer != null) clearTimeout(timer);
+			resolve();
+		};
+		timer = setTimeout(() => {
+			signal?.removeEventListener?.("abort", onAbort);
+			resolve();
+		}, ms);
+		signal?.addEventListener?.("abort", onAbort);
+	});
 }
 
 async function postCompletion(cfg, payload, signal) {
@@ -211,7 +226,7 @@ async function postCompletion(cfg, payload, signal) {
 			lastErr = e;
 			if (signal?.aborted) throw new Error("aborted");
 			if (attempt < maxRetries) {
-				await sleep(backoffMs(attempt, null, null));
+				await sleep(backoffMs(attempt, null, null), signal);
 				continue;
 			}
 			throw e;
@@ -225,7 +240,7 @@ async function postCompletion(cfg, payload, signal) {
 			if (typeof cfg.onRateLimit === "function" && status === 429) {
 				try { cfg.onRateLimit({ model: cfg.model, waitMs: wait, attempt }); } catch {}
 			}
-			await sleep(wait);
+			await sleep(wait, signal);
 			continue;
 		}
 		break;

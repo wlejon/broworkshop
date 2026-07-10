@@ -32,15 +32,14 @@
                     API key
                     <input type="password" id="or-key" spellcheck="false" placeholder="sk-or-…">
                 </label>
-                <button id="btn-refresh" title="Load the free tool-caller / vision lists from OpenRouter">Load models</button>
                 <label class="ctl">
                     Brain
-                    <select id="or-brain"><option value="">—</option></select>
+                    <span id="brain-display" class="model-display">—</span>
                 </label>
                 <button id="btn-browse-brain" title="Browse every tool-capable model with pricing">Browse…</button>
                 <label class="ctl">
                     Eyes (look)
-                    <select id="or-vision"><option value="">—</option></select>
+                    <span id="vision-display" class="model-display">—</span>
                 </label>
                 <button id="btn-browse-vision" title="Browse every vision model with pricing">Browse…</button>
             </div>
@@ -65,7 +64,7 @@
              renders into and looks at. -->
         <section class="left">
             <div id="transcript" class="transcript">
-                <div class="hint">Pick OpenRouter, paste your key, load models, then ask the agent to make something —
+                <div class="hint">Pick OpenRouter, paste your key, choose models with Browse…, then ask the agent to make something —
                     e.g. "a calm sunset over mountains" or "a bouncing-ball demo". It writes the app's files,
                     previews them, looks at what rendered, and refines.</div>
             </div>
