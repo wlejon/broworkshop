@@ -279,6 +279,7 @@
         <div id="tabbar">
           <button class="tabbtn active" data-tab="render">Render</button>
           <button class="tabbtn" data-tab="imgaxis">Image Axis</button>
+          <button class="tabbtn" data-tab="idsearch">Identity Search</button>
           <button class="tabbtn" data-tab="gate">Gate Paint</button>
           <button class="tabbtn" data-tab="spatial">Spatial Paint</button>
         </div>
@@ -374,6 +375,43 @@
           <div class="status-bar">
             <span id="imgaxis-status-text">pick a toward + away image to mint an axis</span>
             <span class="grow"></span>
+          </div>
+        </div>
+
+        <!-- tab: identity search — find where in seed space the character
+             lives at the current conditions. The identity is a model built
+             across seeds: exemplar renders whose embedding centroid defines
+             the character; candidates are random seeds rendered at the full
+             current state, ranked by figure-targeted similarity. -->
+        <div class="tabpanel" id="tab-idsearch">
+          <div class="tab-toolbar">
+            <button id="btn-ids-add" disabled
+                    title="Embed the render on the canvas and add it to the identity model">+ exemplar from current render</button>
+            <label class="field inline-field">candidates
+              <input id="ids-count" type="number" value="12" min="2" max="64" step="1">
+            </label>
+            <button id="btn-ids-search" class="primary" disabled
+                    title="Render N random seeds at the current conditions, ranked by identity score">Search seeds</button>
+            <button id="btn-ids-stop" disabled
+                    title="Finish the current candidate, then stop">Stop</button>
+            <span class="grow"></span>
+            <button id="btn-ids-clear" class="link" disabled
+                    title="Drop every exemplar — start a new identity">clear identity</button>
+          </div>
+          <div class="ids-body">
+            <div class="imgaxis-gallery-head">identity model
+              <span class="pane-sub">exemplars — each accepted scene makes the identity more scene-proof</span>
+            </div>
+            <div id="ids-exemplars" class="ids-exemplars"></div>
+            <div class="imgaxis-gallery-head">candidates
+              <span class="pane-sub">random seeds at the current conditions · click to view · accept to adopt the seed</span>
+            </div>
+            <div id="ids-grid" class="mint-gallery ids-grid"></div>
+          </div>
+          <div class="status-bar">
+            <span id="ids-status">render the character · add it as an exemplar · shift the scene · search</span>
+            <span class="grow"></span>
+            <span id="ids-timing" class="meta"></span>
           </div>
         </div>
 
