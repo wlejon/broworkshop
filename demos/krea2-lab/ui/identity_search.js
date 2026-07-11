@@ -1,23 +1,37 @@
 // Identity Search tab: find where in seed space the character lives at the
 // CURRENT conditions. The identity is a model built across seeds — a set of
-// accepted exemplar renders whose embedding centroid defines "who this is";
-// every scene you accept it in makes the centroid more scene-invariant.
+// accepted exemplar renders whose embeddings define "who this is"; every NEW
+// scene you accept it in makes the identity more scene-invariant.
 //
 // Scoring pipeline (humanoid-targeted): BiRefNet cuts the figure out of the
 // frame (composited on neutral gray, cropped to the matte bbox, so the
-// background can't contaminate the descriptor), DINOv3 ViT-H embeds the
-// cutout, and a candidate's score is the cosine of its CLS embedding against
-// the exemplar centroid. Frames with no discernible figure fall back to a
-// full-frame embedding.
+// background can't contaminate the descriptor) and DINOv3 ViT-H embeds the
+// cutout. Frames with no discernible figure fall back to a full-frame
+// embedding.
+//
+// Scoring is CONDITION-RELATIVE once the model has search-born exemplars:
+// the mean embedding of a search batch is what these conditions generically
+// render — the scene/shift concept itself — so each candidate is scored on
+// its RESIDUAL (embedding minus batch mean): the part the seed contributes.
+// Matching residuals against the exemplars' residuals separates "same
+// character" from "same scene", which absolute cosine cannot do (an early
+// build scored absolutely, and a model built in one scene captured the scene
+// — every same-scene candidate scored 0.9+ regardless of who was in it).
+// The final score blends absolute and residual similarity 50/50: the
+// absolute half still carries "same figure", the residual half is blind to
+// the conditions. Residuals need a batch to subtract, so scores land
+// provisionally during the search and re-rank when the batch completes.
 //
 // Search: N random seeds rendered sequentially through the worker at the FULL
 // current state (prompt, axis walk, banks, dials, transport — exactly what
-// Generate would send), ranked live as scores land. Accepting a candidate
-// adopts its seed (pinned), shows it on the render tab, files it in history,
-// and adds it to the identity model. The workflow the panel is built for:
-// render the character, add it as the first exemplar, shift the scene hard,
-// search, accept the best match — repeat, and the identity model comes to
-// span the walk.
+// Generate would send). Accepting a candidate adopts its seed (pinned), shows
+// it on the render tab, and files it in history. ONE exemplar per search:
+// accepting a second candidate from the same batch REPLACES the first —
+// near-duplicate exemplars from one scene teach the model nothing and used to
+// let it degenerate into a scene detector. The workflow the panel is built
+// for: render the character, add it as the first exemplar, SHIFT the scene,
+// search, accept the best match — repeat, one accept per scene, and the
+// identity model comes to span the walk.
 //
 // Candidates always render at the CURRENT size: Krea 2's seed noise is drawn
 // per-latent-size, so a low-res probe of seed k is a DIFFERENT noise field
@@ -38,11 +52,19 @@ const REMBG_SIZE = 512;
 export function initIdentitySearch(ctx) {
   const prefs = ctx.prefs;
   const scorer = { dino: null, rembg: null, ready: false, loading: false };
-  let exemplars = [];      // {id, canvas, w, h, emb (unit Float32Array)}
-  let exSeq = 0;
-  let centroid = null;     // unit Float32Array, or null with no exemplars
-  let results = [];        // current search: {seed, canvas, w, h, emb, score, accepted}
+  // Exemplars: emb is the unit absolute embedding; resid is the unit
+  // batch-residual for search-born exemplars (null for "+ current render" —
+  // there is no batch to subtract); batch tags which search it came from
+  // (one exemplar per search — accept replaces within a batch).
+  let exemplars = [];      // {id, canvas, w, h, emb, resid, batch}
+  let exSeq = 0, batchSeq = 0;
+  let centroidAbs = null;  // unit mean of exemplar embs, or null with none
+  let centroidResid = null; // unit mean of non-null resids, or null with none
+  let results = [];        // current search: {seed, canvas, w, h, emb, resid,
+                           //                  score, batch, accepted}
   let searching = false, stopRequested = false;
+  // Residual scoring needs a batch mean worth trusting.
+  const RESID_MIN_BATCH = 4;
 
   if (prefs.idsCount != null) $('ids-count').value = prefs.idsCount;
 
@@ -146,28 +168,48 @@ export function initIdentitySearch(ctx) {
     return unit(r.features.subarray(0, r.dim));   // row 0 = CLS
   }
 
-  // ── the identity model (exemplars + centroid) ─────────────────────────────
-  function recomputeCentroid() {
-    if (!exemplars.length) { centroid = null; return; }
+  // ── the identity model (exemplars + centroids) ────────────────────────────
+  function recomputeCentroids() {
+    centroidAbs = null;
+    centroidResid = null;
+    if (!exemplars.length) return;
     const dim = exemplars[0].emb.length;
     const m = new Float32Array(dim);
     exemplars.forEach((e) => { for (let i = 0; i < dim; i++) m[i] += e.emb[i]; });
-    centroid = unit(m);
+    centroidAbs = unit(m);
+    const resids = exemplars.filter((e) => e.resid);
+    if (resids.length) {
+      const r = new Float32Array(dim);
+      resids.forEach((e) => { for (let i = 0; i < dim; i++) r[i] += e.resid[i]; });
+      centroidResid = unit(r);
+    }
   }
 
-  function addExemplar(canvas, w, h, emb) {
+  // One exemplar per search batch: a second accept from the same batch
+  // REPLACES the first (near-duplicates from one scene teach nothing and
+  // would collapse the identity into a scene detector). batch null (the
+  // "+ current render" path) always appends.
+  function addExemplar(canvas, w, h, emb, resid, batch) {
     const c = document.createElement('canvas');
     c.width = w; c.height = h;
     c.getContext('2d').drawImage(canvas, 0, 0);
-    exemplars.push({ id: ++exSeq, canvas: c, w: w, h: h, emb: emb });
-    recomputeCentroid();
+    const entry = { id: ++exSeq, canvas: c, w: w, h: h, emb: emb,
+                    resid: resid || null, batch: batch == null ? null : batch };
+    let replaced = false;
+    if (entry.batch != null) {
+      const at = exemplars.findIndex((e) => e.batch === entry.batch);
+      if (at >= 0) { exemplars[at] = entry; replaced = true; }
+    }
+    if (!replaced) exemplars.push(entry);
+    recomputeCentroids();
     renderExemplars();
     ctx.refreshButtons();
+    return replaced;
   }
 
   function removeExemplar(id) {
     exemplars = exemplars.filter((e) => e.id !== id);
-    recomputeCentroid();
+    recomputeCentroids();
     renderExemplars();
     ctx.refreshButtons();
   }
@@ -218,7 +260,7 @@ export function initIdentitySearch(ctx) {
         status('embed failed: ' + (e.message || e), 'err');
         return;
       }
-      addExemplar(view, view.width, view.height, emb);
+      addExemplar(view, view.width, view.height, emb, null, null);
       ctx.setBusy(false);
       status('exemplar added (' + exemplars.length + ') — shift the scene, then search', 'ok');
     });
@@ -269,8 +311,10 @@ export function initIdentitySearch(ctx) {
 
   function acceptResult(res) {
     if (res.accepted) return;
+    // One exemplar per scene: a new accept from this batch takes the slot.
+    results.forEach((r) => { r.accepted = false; });
     res.accepted = true;
-    addExemplar(res.canvas, res.w, res.h, res.emb);
+    const replaced = addExemplar(res.canvas, res.w, res.h, res.emb, res.resid, res.batch);
     $('seed').value = String(res.seed);
     $('rand-seed').checked = false;
     ctx.recordSeed(res.seed);
@@ -281,8 +325,10 @@ export function initIdentitySearch(ctx) {
     ctx.drawBitmap(res.canvas, res.w, res.h);
     ctx.persist();
     renderGrid();
-    status('accepted seed ' + res.seed + ' → exemplar ' + exemplars.length +
-           ' · the identity now spans this scene', 'ok');
+    status('accepted seed ' + res.seed +
+           (replaced ? ' — replaced this scene\'s exemplar'
+                     : ' → exemplar ' + exemplars.length +
+                       ' · the identity now spans this scene'), 'ok');
   }
 
   function doSearch() {
@@ -297,7 +343,7 @@ export function initIdentitySearch(ctx) {
           return;
         }
         ctx.setBusy(true);
-        try { addExemplar(view, view.width, view.height, embedIdentity(view)); }
+        try { addExemplar(view, view.width, view.height, embedIdentity(view), null, null); }
         catch (e) {
           ctx.setBusy(false);
           status('embed failed: ' + (e.message || e), 'err');
@@ -320,23 +366,49 @@ export function initIdentitySearch(ctx) {
     results = [];
     renderGrid();
     const t0 = Date.now();
+    const batch = ++batchSeq;
     // The exact message Generate would send — the search honors the full
     // current state (prompt, walk, banks, dials, transport), seed swapped
     // per candidate.
     const base = ctx.buildGenerateMsg('full');
     let done = 0;
-    (function next() {
-      if (stopRequested || done >= n) {
-        searching = false;
-        ctx.setBusy(false);
-        ctx.refreshButtons();
-        $('ids-timing').textContent = Math.round((Date.now() - t0) / 1000) + ' s';
-        const best = results.length ? results[0].score.toFixed(3) : '—';
-        status('search done · ' + results.length + ' candidates · best ' + best +
-               (stopRequested ? ' · stopped' : ''), 'ok');
-        ctx.pump();
-        return;
+
+    // Batch-residual pass: the batch mean is what these conditions render
+    // generically (the scene/shift concept); subtracting it leaves each
+    // seed's own contribution. Residuals are stored on every candidate even
+    // when the model can't use them yet (centroidResid null), so the FIRST
+    // accepted search candidate already seeds residual scoring.
+    function finish() {
+      let mode = 'absolute';
+      if (results.length >= RESID_MIN_BATCH) {
+        const dim = results[0].emb.length;
+        const m = new Float32Array(dim);
+        results.forEach((r) => { for (let i = 0; i < dim; i++) m[i] += r.emb[i]; });
+        for (let i = 0; i < dim; i++) m[i] /= results.length;
+        const d = new Float32Array(dim);
+        results.forEach((r) => {
+          for (let i = 0; i < dim; i++) d[i] = r.emb[i] - m[i];
+          r.resid = unit(d);
+          r.score = centroidResid
+            ? 0.5 * dot(r.emb, centroidAbs) + 0.5 * dot(r.resid, centroidResid)
+            : dot(r.emb, centroidAbs);
+        });
+        results.sort((a, b) => b.score - a.score);
+        mode = centroidResid ? 'scene-relative' : 'absolute · residuals stored';
       }
+      searching = false;
+      ctx.setBusy(false);
+      ctx.refreshButtons();
+      renderGrid();
+      $('ids-timing').textContent = Math.round((Date.now() - t0) / 1000) + ' s';
+      const best = results.length ? results[0].score.toFixed(3) : '—';
+      status('search done · ' + results.length + ' candidates · best ' + best +
+             ' · ' + mode + (stopRequested ? ' · stopped' : ''), 'ok');
+      ctx.pump();
+    }
+
+    (function next() {
+      if (stopRequested || done >= n) { finish(); return; }
       const seed = ctx.randomSeed();
       status('search ' + (done + 1) + '/' + n + ' · seed ' + seed + '…');
       const msg = Object.assign({}, base, {
@@ -356,7 +428,7 @@ export function initIdentitySearch(ctx) {
         let emb, score;
         try {
           emb = embedIdentity(c);
-          score = dot(emb, centroid);
+          score = dot(emb, centroidAbs);   // provisional; re-ranked in finish()
         } catch (e) {
           searching = false;
           ctx.setBusy(false);
@@ -365,7 +437,8 @@ export function initIdentitySearch(ctx) {
           return;
         }
         results.push({ seed: seed, canvas: c, w: resp.width, h: resp.height,
-                       emb: emb, score: score, accepted: false });
+                       emb: emb, resid: null, score: score, batch: batch,
+                       accepted: false });
         results.sort((a, b) => b.score - a.score);
         renderGrid();
         done++;
@@ -376,7 +449,7 @@ export function initIdentitySearch(ctx) {
 
   function clearIdentityModel() {
     exemplars = [];
-    recomputeCentroid();
+    recomputeCentroids();
     renderExemplars();
     ctx.refreshButtons();
     status('identity model cleared');
