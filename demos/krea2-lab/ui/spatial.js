@@ -1,22 +1,29 @@
 // ── Spatial Paint tab ─────────────────────────────────────────────────
-// Per-region axis compositing: render a base, paint a region mask over it,
-// pick an axis, and the worker composites base + axis-pushed denoising
-// under the mask (two forwards per step).
+// Per-region axis compositing: capture the CURRENT render (your prompt,
+// seed, and every active control — same message Generate sends), stroke a
+// region on it, pick an axis + strength, and the worker re-renders with two
+// lockstep denoising states — base vs base-with-the-axis-pushed — blending
+// their latents under the painted mask every step. The axis moves only
+// where painted; everywhere else stays the captured render.
+//
+// Interaction mirrors Gate Paint: a stroke re-renders on release, the
+// result pane wipes base against composite, strength/axis changes re-render
+// the current mask.
 
 import { $, VAE_SCALE } from '/app/ui/util.js';
 
 export function initSpatial(ctx) {
   const prefs = ctx.prefs;
 
-  // ── spatial paint state ─────────────────────────────────────────────────
-  let spBaseBitmap = null, spBaseOpts = null, spBasePrompt = '';
-  let spMaskCanvas = null;    // offscreen, full render resolution, white=painted
+  let spCapture = null;        // {msgUsed, baseBitmap, baseW, baseH}
+  let spMaskCanvas = null;     // offscreen at render resolution; ALPHA = mask
   let spDown = false;
+  let spPainted = false;       // any stroke since the last clear
+  let spStrokeDirty = false;   // mask changed since the last composite
+  let spResultBitmap = null;   // last composite (wipes against base)
+  let spWipe = 0.45;           // divider position, 0..1 of result width
+  let spPendingApply = false;
 
-  // restore persisted text fields
-  if (prefs.spPrompt) $('sp-prompt').value = prefs.spPrompt;
-  if (prefs.spSeed != null) $('sp-seed').value = prefs.spSeed;
-  if (prefs.spSteps != null) $('sp-steps').value = prefs.spSteps;
   if (prefs.spStrength != null) $('sp-strength').value = prefs.spStrength;
 
   function spStatus(msg, kind) {
@@ -28,13 +35,18 @@ export function initSpatial(ctx) {
   const spResultCanvas = $('sp-result');
   const spResultCtx = spResultCanvas.getContext('2d');
 
+  // Stroke color — the alpha channel doubles as the region mask, so paint
+  // in a solid accent and overlay it translucently. (The old white 'screen'
+  // overlay vanished on light images.)
+  const SP_BRUSH = 'rgba(240, 168, 96, 1)';
+
   function redrawSpPaint() {
+    if (!spCapture) return;
     const w = spPaintCanvas.width, h = spPaintCanvas.height;
     spPaintCtx.clearRect(0, 0, w, h);
-    spPaintCtx.drawImage(spBaseBitmap, 0, 0, w, h);
+    spPaintCtx.drawImage(spCapture.baseBitmap, 0, 0, w, h);
     spPaintCtx.save();
-    spPaintCtx.globalCompositeOperation = 'screen';
-    spPaintCtx.globalAlpha = 0.65;
+    spPaintCtx.globalAlpha = 0.5;
     spPaintCtx.drawImage(spMaskCanvas, 0, 0, w, h);
     spPaintCtx.restore();
   }
@@ -48,119 +60,167 @@ export function initSpatial(ctx) {
   function spPaintAt(x, y) {
     const r = +$('sp-brush-radius').value;
     const mctx = spMaskCanvas.getContext('2d');
-    mctx.globalCompositeOperation = 'source-over';
-    mctx.fillStyle = '#ffffff';
-    mctx.globalAlpha = 0.85;
+    mctx.fillStyle = SP_BRUSH;
     mctx.beginPath(); mctx.arc(x, y, r, 0, Math.PI * 2); mctx.fill();
+    spPainted = true;
+    spStrokeDirty = true;
     redrawSpPaint();
   }
   spPaintCanvas.addEventListener('pointerdown', (e) => {
-    if (!spBaseBitmap) return;
+    if (!spCapture) return;
     spDown = true;
     if (spPaintCanvas.setPointerCapture) spPaintCanvas.setPointerCapture(e.pointerId);
     const p = spPointerToCanvas(e); spPaintAt(p.x, p.y);
   });
   spPaintCanvas.addEventListener('pointermove', (e) => {
-    if (!spDown || !spBaseBitmap) return;
+    if (!spDown || !spCapture) return;
     const p = spPointerToCanvas(e); spPaintAt(p.x, p.y);
   });
   ['pointerup', 'pointerleave', 'pointercancel'].forEach((ev) => {
-    spPaintCanvas.addEventListener(ev, () => { spDown = false; });
+    spPaintCanvas.addEventListener(ev, () => {
+      if (!spDown) return;
+      spDown = false;
+      // the stroke is the gesture — composite without a separate button
+      if (spStrokeDirty) doSpApply();
+      ctx.refreshButtons();
+    });
   });
 
-  function doSpBase() {
+  // The result pane wipes base (left) against the composite (right).
+  function renderSpResult() {
+    if (!spCapture) return;
+    const w = spCapture.baseW, h = spCapture.baseH;
+    if (spResultCanvas.width !== w || spResultCanvas.height !== h) {
+      spResultCanvas.width = w; spResultCanvas.height = h;
+    }
+    spResultCtx.drawImage(spCapture.baseBitmap, 0, 0);
+    if (!spResultBitmap) return;
+    const wx = Math.round(Math.max(0, Math.min(1, spWipe)) * w);
+    if (wx < w) {
+      spResultCtx.drawImage(spResultBitmap, wx, 0, w - wx, h, wx, 0, w - wx, h);
+    }
+    spResultCtx.fillStyle = 'rgba(255,255,255,0.75)';
+    spResultCtx.fillRect(Math.max(0, wx - 1), 0, 2, h);
+    $('sp-result-hint').style.display = 'none';
+  }
+  let spWipeDown = false;
+  function spWipeTo(e) {
+    const rect = spResultCanvas.getBoundingClientRect();
+    spWipe = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    renderSpResult();
+  }
+  spResultCanvas.addEventListener('pointerdown', (e) => {
+    if (!spResultBitmap) return;
+    spWipeDown = true;
+    if (spResultCanvas.setPointerCapture) spResultCanvas.setPointerCapture(e.pointerId);
+    spWipeTo(e);
+  });
+  spResultCanvas.addEventListener('pointermove', (e) => { if (spWipeDown) spWipeTo(e); });
+  ['pointerup', 'pointerleave', 'pointercancel'].forEach((ev) => {
+    spResultCanvas.addEventListener(ev, () => { spWipeDown = false; });
+  });
+
+  // Capture = one full render of the CURRENT scene (identical message to
+  // Generate — controls, dials, gates, LoRAs, seed). The composite's base
+  // state re-primes from this same message, so what you paint on is exactly
+  // what the un-painted region keeps.
+  function doSpCapture() {
     if (!ctx.loaded || ctx.busy) return;
-    const prompt = $('sp-prompt').value.trim();
-    if (!prompt) { spStatus('enter a prompt', 'err'); return; }
-    const opts = {
-      width: ctx.roundSize($('width').value), height: ctx.roundSize($('height').value),
-      steps: +$('sp-steps').value || 4,
-      guidanceScale: +$('guidance').value || ctx.DEFAULTS.guidance,
-      seed: +$('sp-seed').value || 0,
-      negativePrompt: $('neg-prompt').value.trim(),
-    };
+    const msg = ctx.buildGenerateMsg('full');
     ctx.persist();
     ctx.setBusy(true);
-    spStatus('base render…');
+    spStatus('capturing the current render…');
     $('sp-timing').textContent = '';
-    ctx.client.send({
-      type: 'generate', prompt: prompt, negPrompt: opts.negativePrompt, opts: opts,
-      band: 1.0, dial: { pregate: 1.0, prescale: 1.0 }, gate: { txtScale: 1.0, imgScale: 1.0 },
-      axisControls: {},
-      loraScales: ctx.loraScales(),
-    }, (err, resp) => {
+    ctx.client.send(msg, (err, resp) => {
       ctx.setBusy(false);
       if (err) { spStatus(String(err.message || err), 'err'); return; }
-      spBasePrompt = prompt; spBaseOpts = opts;
-      spBaseBitmap = resp.bitmap;
+      spCapture = { msgUsed: msg, baseBitmap: resp.bitmap,
+                    baseW: resp.width, baseH: resp.height };
       spPaintCanvas.width = resp.width; spPaintCanvas.height = resp.height;
       spMaskCanvas = document.createElement('canvas');
       spMaskCanvas.width = resp.width; spMaskCanvas.height = resp.height;
+      spPainted = false; spStrokeDirty = false;
+      spResultBitmap = null;
       redrawSpPaint();
+      renderSpResult();
       $('sp-hint').style.display = 'none';
       ctx.refreshButtons();
-      spStatus('base rendered · ' + (resp.ms || 0) + ' ms — paint a region, pick an axis, then composite', 'ok');
+      spStatus('captured · stroke a region — the axis will apply only there', 'ok');
     });
   }
   function doSpClear() {
     if (!spMaskCanvas) return;
     spMaskCanvas.getContext('2d').clearRect(0, 0, spMaskCanvas.width, spMaskCanvas.height);
+    spPainted = false; spStrokeDirty = false;
+    spResultBitmap = null;
     redrawSpPaint();
+    renderSpResult();
+    spStatus('paint cleared', 'ok');
   }
+  // Downscale the painted mask to the latent grid; the stroke alpha IS the
+  // blend weight (1 = fully the axis state, 0 = fully base).
   function buildSpatialMask(W_lat, H_lat) {
     const off = document.createElement('canvas');
     off.width = W_lat; off.height = H_lat;
     const octx = off.getContext('2d');
-    octx.drawImage(spMaskCanvas, 0, 0, spBaseOpts.width, spBaseOpts.height, 0, 0, W_lat, H_lat);
+    octx.drawImage(spMaskCanvas, 0, 0, spMaskCanvas.width, spMaskCanvas.height,
+                   0, 0, W_lat, H_lat);
     const id = octx.getImageData(0, 0, W_lat, H_lat);
     const out = new Float32Array(W_lat * H_lat);
-    for (let i = 0; i < out.length; i++) out[i] = id.data[4 * i] / 255;
+    for (let i = 0; i < out.length; i++) out[i] = id.data[4 * i + 3] / 255;
     return out;
   }
-  function drawSpResult(bitmap, w, h) {
-    if (spResultCanvas.width !== w || spResultCanvas.height !== h) {
-      spResultCanvas.width = w; spResultCanvas.height = h;
-    }
-    spResultCtx.drawImage(bitmap, 0, 0);
-    $('sp-result-hint').style.display = 'none';
-  }
-  function doSpGo() {
-    if (!spBaseBitmap || ctx.busy) return;
+  function doSpApply() {
+    if (!spCapture || !spPainted) return;
+    if (ctx.busy) { spPendingApply = true; return; }
     const axisName = $('sp-axis').value;
     if (!axisName) { spStatus('pick an axis', 'err'); return; }
     const strength = +$('sp-strength').value;
-    const W_lat = spBaseOpts.width / VAE_SCALE, H_lat = spBaseOpts.height / VAE_SCALE;
+    if (!strength) { spStatus('strength is 0 — nothing to push', 'err'); return; }
+    const opts = spCapture.msgUsed.opts;
+    const W_lat = opts.width / VAE_SCALE, H_lat = opts.height / VAE_SCALE;
     const maskData = buildSpatialMask(W_lat, H_lat);
+    spStrokeDirty = false;
     ctx.persist();
     ctx.setBusy(true);
-    spStatus('compositing — two forwards per step…');
+    spStatus('compositing — two lockstep renders…');
     ctx.client.send({
-      type: 'spatialRender', basePrompt: spBasePrompt, opts: spBaseOpts,
-      axisName: axisName, alpha: strength, maskW: W_lat, maskH: H_lat, maskData: maskData,
-      loraScales: ctx.loraScales(),
+      type: 'spatialRender', base: spCapture.msgUsed,
+      axisName: axisName, alpha: strength,
+      maskW: W_lat, maskH: H_lat, maskData: maskData,
     }, (err, resp) => {
       ctx.setBusy(false);
       if (err) { spStatus(String(err.message || err), 'err'); return; }
-      drawSpResult(resp.bitmap, resp.width, resp.height);
-      spStatus('done · ' + (resp.ms || 0) + ' ms', 'ok');
+      spResultBitmap = resp.bitmap;
+      renderSpResult();
+      spStatus('done · drag the result divider to compare', 'ok');
       $('sp-timing').textContent = resp.ms ? resp.ms + ' ms' : '';
     });
   }
 
   $('sp-strength').addEventListener('input', () => {
-    $('sp-strength-val').textContent = (+$('sp-strength').value).toFixed(2);
+    const v = +$('sp-strength').value;
+    $('sp-strength-val').textContent = (v > 0 ? '+' : '') + v.toFixed(2);
   });
-  $('btn-sp-base').addEventListener('click', doSpBase);
+  // A settled strength / a different axis re-renders the current mask, so
+  // the sliders read as live controls, not staged inputs.
+  $('sp-strength').addEventListener('change', () => { ctx.persist(); doSpApply(); });
+  $('sp-axis').addEventListener('change', () => { ctx.persist(); doSpApply(); });
+  $('btn-sp-capture').addEventListener('click', doSpCapture);
   $('btn-sp-clear').addEventListener('click', doSpClear);
-  $('btn-sp-go').addEventListener('click', doSpGo);
-  ['sp-prompt', 'sp-seed', 'sp-steps', 'sp-axis', 'sp-strength'].forEach((id) => $(id).addEventListener('change', ctx.persist));
 
   ctx.onRefreshButtons((busyOrUnloaded) => {
-    $('btn-sp-base').disabled = busyOrUnloaded;
-    $('btn-sp-go').disabled = busyOrUnloaded || !spBaseBitmap;
+    $('btn-sp-capture').disabled = busyOrUnloaded;
+  });
+  ctx.onIdle(() => {
+    // a stroke finished while a render was in flight — composite it now
+    if (spPendingApply) { spPendingApply = false; doSpApply(); }
   });
   ctx.onPersist((p) => {
-    p.spPrompt = $('sp-prompt').value; p.spSeed = $('sp-seed').value; p.spSteps = $('sp-steps').value;
     p.spAxis = $('sp-axis').value; p.spStrength = $('sp-strength').value;
   });
+
+  // strength label reflects the restored pref
+  const v0 = +$('sp-strength').value;
+  $('sp-strength-val').textContent = (v0 > 0 ? '+' : '') + v0.toFixed(2);
 }

@@ -20,15 +20,27 @@ export function initMint(ctx) {
     el.className = 'hint' + (kind === 'err' ? ' err' : kind === 'warn' ? ' warn' : '');
   }
   // Interim minting progress (the worker posts a message before each encode).
+  // Shown in BOTH places a mint can be watched from — the rail's mint section
+  // and the Image Axis tab's own bar + status line — so kicking off a mint
+  // never looks stalled from where you actually are.
   ctx.client.onProgress((p) => {
-    $('mint-progress').classList.add('show');
-    $('mint-progress-fill').style.width =
-      Math.round((p.done / Math.max(1, p.total)) * 100) + '%';
+    const pct = Math.round((p.done / Math.max(1, p.total)) * 100) + '%';
+    ['mint-progress', 'imgaxis-progress'].forEach((id) => {
+      const bar = $(id);
+      if (!bar) return;
+      bar.classList.add('show');
+      bar.firstElementChild.style.width = pct;
+    });
     mintStatus('minting · ' + p.label);
+    imgAxisStatus('minting · ' + p.label);
   });
   function mintProgressDone() {
-    $('mint-progress').classList.remove('show');
-    $('mint-progress-fill').style.width = '0%';
+    ['mint-progress', 'imgaxis-progress'].forEach((id) => {
+      const bar = $(id);
+      if (!bar) return;
+      bar.classList.remove('show');
+      bar.firstElementChild.style.width = '0%';
+    });
   }
 
   // ── minted-axis readout: what the direction is made of ──────────────────

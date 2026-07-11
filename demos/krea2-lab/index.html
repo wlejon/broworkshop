@@ -344,6 +344,11 @@
             </div>
           </div>
 
+          <!-- mint progress lives on THIS tab too — the encodes take ~10s and
+               the rail's mint section may not be open -->
+          <div id="imgaxis-progress" class="mint-progress tab-progress">
+            <div id="imgaxis-progress-fill" class="mint-progress-fill"></div>
+          </div>
           <div class="status-bar">
             <span id="imgaxis-status-text">pick a toward + away image to mint an axis</span>
             <span class="grow"></span>
@@ -401,53 +406,45 @@
           </div>
         </div>
 
-        <!-- tab: spatial paint -->
+        <!-- tab: spatial paint — capture the current render, stroke a region,
+             and one axis is pushed only there (dual-state latent compositing;
+             each stroke re-renders on release, like Gate Paint) -->
         <div class="tabpanel" id="tab-spatial">
           <div class="tab-toolbar">
-            <label class="field inline-field grow-field">base prompt
-              <input id="sp-prompt" type="text"
-                value="a red fox sitting in a snowy forest clearing at dawn, cinematic lighting">
-            </label>
-            <label class="field inline-field">seed
-              <input id="sp-seed" type="number" value="0" step="1" style="width:70px">
-            </label>
-            <label class="field inline-field">steps
-              <input id="sp-steps" type="number" value="4" min="1" max="60" step="1" style="width:60px">
-            </label>
-            <button id="btn-sp-base">Base render</button>
-          </div>
-          <div class="tab-toolbar">
+            <button id="btn-sp-capture" disabled
+                    title="Render the current scene (prompt + every active control) as the base to paint on">Capture</button>
             <label class="field inline-field grow-field">axis
               <select id="sp-axis"></select>
             </label>
-            <label class="field inline-field">strength
-              <input id="sp-strength" type="range" min="-6" max="6" step="0.01" value="1.5">
-              <span class="ctl-val" id="sp-strength-val">1.50</span>
+            <label class="field inline-field"><span class="pole-neg">−</span>
+              <input id="sp-strength" type="range" min="-6" max="6" step="0.05" value="3">
+              <span class="pole-pos">+</span>
+              <span class="ctl-val" id="sp-strength-val">+3.00</span>
             </label>
-            <label class="field inline-field">brush radius
-              <input id="sp-brush-radius" type="range" min="4" max="80" step="2" value="24">
+            <label class="field inline-field">brush
+              <input id="sp-brush-radius" type="range" min="8" max="120" step="2" value="48">
             </label>
-            <button id="btn-sp-clear" title="Clear the painted mask">Clear paint</button>
-            <button id="btn-sp-go" class="primary" disabled>Render composite</button>
+            <button id="btn-sp-clear" title="Clear the painted region">Clear paint</button>
           </div>
           <div id="sp-panes" class="panes">
             <section class="pane">
-              <div class="pane-head">paint <span class="pane-sub">freehand — mark where the axis applies</span></div>
+              <div class="pane-head">paint <span class="pane-sub">stroke where the axis should apply · re-renders on release</span></div>
               <div class="pane-canvas">
                 <canvas id="sp-paint" width="512" height="512"></canvas>
-                <div id="sp-hint" class="pane-hint">Base render first.</div>
+                <div id="sp-hint" class="pane-hint">Capture the current render first —
+                  then paint a region and the chosen axis moves only there.</div>
               </div>
             </section>
             <section class="pane">
-              <div class="pane-head">composite <span class="pane-sub" id="sp-result-sub"></span></div>
+              <div class="pane-head">composite <span class="pane-sub">drag the divider · left&nbsp;=&nbsp;base, right&nbsp;=&nbsp;painted</span></div>
               <div class="pane-canvas">
                 <canvas id="sp-result" width="512" height="512"></canvas>
-                <div id="sp-result-hint" class="pane-hint">Paint, pick an axis, then render.</div>
+                <div id="sp-result-hint" class="pane-hint">Paint a stroke to see the axis applied there.</div>
               </div>
             </section>
           </div>
           <div class="status-bar">
-            <span id="sp-status-text">idle</span>
+            <span id="sp-status-text">capture · paint · the axis applies only in the painted region</span>
             <span class="grow"></span>
             <span id="sp-timing" class="meta"></span>
           </div>

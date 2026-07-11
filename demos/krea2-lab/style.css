@@ -318,17 +318,19 @@ details[open] > .ctl-cat::before { content: '▾ '; }
 }
 .imgpick-thumb.filled { border-style: solid; border-color: #2a3550; }
 
-/* mint progress bar (hidden unless .show) */
+/* mint progress bar (hidden unless .show) — one in the rail's mint section,
+   one on the Image Axis tab, driven together */
 .mint-progress {
   display: none; height: 6px; border-radius: 3px;
   background: #0a0d13; border: 1px solid #1c2431; overflow: hidden;
 }
 .mint-progress.show { display: block; }
-#mint-progress-fill {
+.mint-progress > div {
   height: 100%; width: 0%;
   background: linear-gradient(90deg, #b8702c, #f0a860);
   transition: width 0.15s ease-out;
 }
+.tab-progress { flex: none; margin: 0 16px 10px; }
 
 /* minted-axis readout: signed center-zero cosine bars vs the named bank */
 .axis-bars { display: flex; flex-direction: column; gap: 4px; }

@@ -62,6 +62,14 @@ export function initRender(ctx) {
     const wrap = $('canvas-wrap');
     const s = viewScale;
     const dw = viewW * s, dh = viewH * s;
+    // Clamp the pan so at least a sliver of the image always stays inside
+    // the stage — an image dragged (or glitched) fully out of view is
+    // unrecoverable by mouse.
+    const MARGIN = 48;
+    const maxPanX = Math.max(0, (wrap.clientWidth + dw) / 2 - MARGIN);
+    const maxPanY = Math.max(0, (wrap.clientHeight + dh) / 2 - MARGIN);
+    viewPanX = Math.max(-maxPanX, Math.min(maxPanX, viewPanX));
+    viewPanY = Math.max(-maxPanY, Math.min(maxPanY, viewPanY));
     canvas.style.width = dw + 'px';
     canvas.style.height = dh + 'px';
     canvas.style.left = ((wrap.clientWidth - dw) / 2 + viewPanX) + 'px';
@@ -252,13 +260,19 @@ export function initRender(ctx) {
   });
   let panning = false, panStartX = 0, panStartY = 0, panBaseX = 0, panBaseY = 0;
   canvas.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
     panning = true; panStartX = e.clientX; panStartY = e.clientY;
     panBaseX = viewPanX; panBaseY = viewPanY;
     canvas.classList.add('grabbing');
+    // Pointer capture keeps the drag's move/up events coming here even when
+    // the cursor leaves the canvas — without it a release off-canvas left
+    // `panning` latched and every later hover move dragged the image.
     if (canvas.setPointerCapture) { try { canvas.setPointerCapture(e.pointerId); } catch (_) {} }
   });
   canvas.addEventListener('pointermove', (e) => {
     if (!panning) return;
+    // Self-heal: no button held means the release never reached us.
+    if (!(e.buttons & 1)) { endPan(); return; }
     viewPanX = panBaseX + (e.clientX - panStartX);
     viewPanY = panBaseY + (e.clientY - panStartY);
     applyView();

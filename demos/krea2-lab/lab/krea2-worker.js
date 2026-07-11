@@ -69,8 +69,9 @@
 // lip corners, teeth = bared<->covered; open x round spans the viseme plane.
 // mouth.json's gain is calibrated so equal sliders push as hard as the
 // spectrum's, and both banks stack on the same carrier.
-//   main -> spatialRender {basePrompt, opts, axisName, alpha, maskW, maskH,
-//                           maskData}
+//   main -> spatialRender {base: <a full generate-shaped message — the
+//                           captured render's msg, controls and all>,
+//                           axisName, alpha, maskW, maskH, maskData}
 //        <- spatialDone   {bitmap, width, height, ms}
 //   main -> mintTextAxis  {name, pos, neg}
 //        <- mintProgress  {label, done, total}      (interim, several)
@@ -467,22 +468,20 @@ function syncLoraScales(scales) {
 }
 
 // ── the shared manual generation loop ───────────────────────────────────
-// Every technique but spatial compositing funnels through this: prime from
-// either a plain prompt or caller-supplied raw taps, optionally rebuild a
-// fresh AdaLN mod-delta every step from krea2TimeMod(), step to completion,
-// decode once. Gate scale/mask are per-forward (not sigma-dependent) so they
-// are set once before priming and left in effect for the whole loop.
-function runGeneration(msg, onDone) {
-  syncLoraScales(msg.loraScales);
+// Every technique funnels through these pieces: prime from either a plain
+// prompt or caller-supplied raw taps, optionally rebuild a fresh AdaLN
+// mod-delta every step from krea2TimeMod(), step to completion, decode once.
+// Gate scale/mask are per-forward (not sigma-dependent) so they are set once
+// before priming and left in effect for the whole loop.
+
+// Prime one step-wise state for a generate-shaped message: bake its axis
+// controls into the fused conditioning (applied at prime; cleared right
+// after — the state keeps its own copy), and take the raw-taps path when any
+// technique needs it. Since brodiffusion carries the prepared conditioning
+// ON the state (PipelineState.prepared), states primed here can be stepped
+// interleaved — each denoises under its own conditioning.
+function primeState(msg) {
   applyAxisControls(msg.axisControls || {});
-
-  var gate = msg.gate;
-  pipeline.krea2SetGateScale(gate ? gate.txtScale : 1.0, gate ? gate.imgScale : 1.0,
-                             0, numLayers);
-  var maskBlocks = gateMaskBlocks(msg.gateMaskBand);
-  pipeline.krea2SetGateMask(gateMaskTensor(msg.gateMask), maskBlocks[0], maskBlocks[1]);
-  pipeline.krea2CaptureGates(!!msg.captureGates);
-
   var taps = buildTaps(msg);
   // NB: krea2PrimeFromTaps(embeds, mask, opts, uncondEmbeds?, uncondMask?) —
   // opts is the 3rd arg. Passing it 5th (as uncondMask) silently drops width/
@@ -491,25 +490,55 @@ function runGeneration(msg, onDone) {
   var state = taps
     ? pipeline.krea2PrimeFromTaps(taps.embeds, taps.mask, msg.opts)
     : pipeline.prime(msg.prompt, msg.opts);
+  pipeline.clearControl();
+  return { state: state, taps: taps };
+}
 
+// Install this step's AdaLN mod-delta for the dial (pregate/prescale) on the
+// DIAL_BLOCKS band. Model-global: every forward until the next set sees it,
+// which is exactly right for lockstep dual-state stepping too (both states
+// run the same step, hence the same timestep).
+function applyDialDelta(dial, t) {
+  var tm = pipeline.krea2TimeMod(t);
+  var d = new Float32Array(6 * hiddenSize);
+  var mod = tm.mod.data;
+  for (var h = 0; h < hiddenSize; h++) {
+    d[0 * hiddenSize + h] = (dial.prescale - 1.0) * mod[0 * hiddenSize + h];
+    d[2 * hiddenSize + h] = (dial.pregate  - 1.0) * mod[2 * hiddenSize + h];
+  }
+  pipeline.krea2SetModDelta({ rows: 1, cols: 6 * hiddenSize, data: d },
+                            DIAL_BLOCKS[0], DIAL_BLOCKS[1]);
+}
+
+function dialFor(msg) {
   var dial = msg.dial;
-  var dialActive = dial && (dial.pregate !== 1.0 || dial.prescale !== 1.0);
+  return (dial && (dial.pregate !== 1.0 || dial.prescale !== 1.0)) ? dial : null;
+}
+
+// Gate scale/mask + capture flag — per-forward model state, set once before
+// priming and left in effect for the whole loop.
+function applyGateState(msg) {
+  var gate = msg.gate;
+  pipeline.krea2SetGateScale(gate ? gate.txtScale : 1.0, gate ? gate.imgScale : 1.0,
+                             0, numLayers);
+  var maskBlocks = gateMaskBlocks(msg.gateMaskBand);
+  pipeline.krea2SetGateMask(gateMaskTensor(msg.gateMask), maskBlocks[0], maskBlocks[1]);
+  pipeline.krea2CaptureGates(!!msg.captureGates);
+}
+
+function runGeneration(msg, onDone) {
+  syncLoraScales(msg.loraScales);
+  applyGateState(msg);
+
+  var ps = primeState(msg);
+  var state = ps.state, taps = ps.taps;
+
+  var dial = dialFor(msg);
   while (!state.done) {
-    if (dialActive) {
-      var t = state.krea2StepTimestep();
-      var tm = pipeline.krea2TimeMod(t);
-      var d = new Float32Array(6 * hiddenSize);
-      var mod = tm.mod.data;
-      for (var h = 0; h < hiddenSize; h++) {
-        d[0 * hiddenSize + h] = (dial.prescale - 1.0) * mod[0 * hiddenSize + h];
-        d[2 * hiddenSize + h] = (dial.pregate  - 1.0) * mod[2 * hiddenSize + h];
-      }
-      pipeline.krea2SetModDelta({ rows: 1, cols: 6 * hiddenSize, data: d },
-                                DIAL_BLOCKS[0], DIAL_BLOCKS[1]);
-    }
+    if (dial) applyDialDelta(dial, state.krea2StepTimestep());
     state.stepOnce();
   }
-  if (dialActive) pipeline.krea2SetModDelta(null, DIAL_BLOCKS[0], DIAL_BLOCKS[1]);
+  if (dial) pipeline.krea2SetModDelta(null, DIAL_BLOCKS[0], DIAL_BLOCKS[1]);
 
   var gates = msg.captureGates ? pipeline.krea2Gates() : null;
   var img = state.decode({});
@@ -550,19 +579,41 @@ function handleGenerate(msg) {
 // each step the two latents are blended by `maskData` and pushed back into
 // BOTH states — so the next step's forward sees the composited latent under
 // each conditioning, re-synchronizing every step exactly as the shared-`x`
-// reference loop does. `maskData` must already be resized to the state's own
-// (latentHeight, latentWidth) grid — the main thread owns that resize.
+// reference loop does.
+//
+// Full-fidelity: `msg.base` is the tab's captured render message — prompt,
+// seed, LoRAs, dials, gates, band, expression/spectrum/mouth, axis controls,
+// everything Generate sends — so the base state re-renders exactly the image
+// painted on. The alt state is the same message with `axisName` pushed by
+// `alpha` ON TOP of whatever that axis's slider already contributes; the
+// composite is therefore "your render, with one axis moved only where
+// painted". Model-global step state (gate scale/mask, per-step dial delta)
+// applies to both states identically — which is correct, since both run the
+// same step schedule. Per-state conditioning is sound because brodiffusion
+// carries the prepared conditioning on each PipelineState (state.prepared).
+//
+// `maskData` must already be resized to the state's own (latentHeight,
+// latentWidth) grid — the main thread owns that resize.
 function handleSpatialRender(msg) {
   try {
     if (!pipeline) throw new Error('no model loaded');
+    if (!msg.base) throw new Error('spatialRender: missing base message');
     var t0 = now();
 
-    syncLoraScales(msg.loraScales);
-    pipeline.clearControl();
-    var stateBase = pipeline.prime(msg.basePrompt, msg.opts);
-    pipeline.setControl(msg.axisName, msg.alpha);
-    var stateAlt = pipeline.prime(msg.basePrompt, msg.opts);
-    pipeline.clearControl();
+    var baseMsg = Object.assign({}, msg.base, {
+      opts: Object.assign({}, msg.base.opts || {},
+                          { negativePrompt: msg.base.negPrompt || '' }),
+      captureGates: false,
+    });
+    var altControls = Object.assign({}, baseMsg.axisControls || {});
+    altControls[msg.axisName] = (+altControls[msg.axisName] || 0) + (+msg.alpha || 0);
+    var altMsg = Object.assign({}, baseMsg, { axisControls: altControls });
+
+    syncLoraScales(baseMsg.loraScales);
+    applyGateState(baseMsg);
+
+    var stateBase = primeState(baseMsg).state;
+    var stateAlt  = primeState(altMsg).state;
 
     var H = stateBase.latentHeight, W = stateBase.latentWidth;
     var mask = msg.maskData;
@@ -571,7 +622,9 @@ function handleSpatialRender(msg) {
                       H + 'x' + W + ')');
     }
 
+    var dial = dialFor(baseMsg);
     while (!stateBase.done) {
+      if (dial) applyDialDelta(dial, stateBase.krea2StepTimestep());
       stateBase.stepOnce();
       stateAlt.stepOnce();
       var a = stateBase.latent(), b = stateAlt.latent();
@@ -588,6 +641,7 @@ function handleSpatialRender(msg) {
       stateBase.setLatent(blended);
       stateAlt.setLatent(blended);
     }
+    if (dial) pipeline.krea2SetModDelta(null, DIAL_BLOCKS[0], DIAL_BLOCKS[1]);
 
     var img = stateBase.decode({});
     respondImage('spatialDone', img, Math.round(now() - t0));
