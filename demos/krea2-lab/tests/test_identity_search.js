@@ -1,22 +1,19 @@
-// Identity Search test: build an identity model from a render, shift the
-// scene through the AXIS BANK (the real workflow — not just the prompt), and
-// search seed space for the character under the shifted conditions — all
-// through the real UI. Asserts the scorer loads (DINOv3 + BiRefNet), that
-// axis-bank slider values ride the search candidates, that the first search
-// scores absolute + stores residuals, that a search after accepting a
-// search-born exemplar scores scene-relative, and that a second accept from
-// the same batch REPLACES the first (one exemplar per scene). Saves the base
-// render and both searches' ranked candidates to the OS temp dir for eyeball
-// verification (search-1 candidates must all read aerial; search-2 dramatic).
+// Identity Breeding test: render a character, capture two probes (neutral +
+// a dramatic axis-bank shift), breed the identity noise for two generations,
+// and verify — all through the real UI — that the generations grid fills
+// with scored strips, elites are marked, the final identity strip renders at
+// every probe, "use identity" makes Generate start from the bred latent
+// (timing note), and the per-size guard rejects a mismatched render size.
+// Saves the identity strip and identity-on renders for eyeball verification
+// (the same character should appear in both the neutral and dramatic cells).
 //
 //   bro-headless ../broworkshop/demos/krea2-lab tests/test_identity_search.js
 
-const MODEL_DIR = 'D:/projects/brodiffusion/weights/krea-2-turbo';
-const OUT_DIR = require('os').tmpdir().replace(/\\/g, '/') + '/krea2-idsearch-test';
+const OUT_DIR = require('os').tmpdir().replace(/\\/g, '/') + '/krea2-idbreed-test';
 const SEED_A = 12345;
 const PROMPT = 'a young prince with golden hair in an ornate dark coat walking a ' +
                'stone path through an autumn forest, storybook illustration';
-const CANDIDATES = 4;   // == RESID_MIN_BATCH, so residuals compute
+const POP = 3, GENS = 2, PROBES = 2;
 
 function $(id) { return document.getElementById(id); }
 
@@ -41,44 +38,14 @@ function setAxis(key, v) {
   range.dispatchEvent(new Event('change'));
 }
 
-function runSearch(label) {
-  $('ids-count').value = String(CANDIDATES);
-  $('btn-ids-search').click();
-  console.log('searching ' + CANDIDATES + ' seeds (' + label + ')…');
-  assert(pumpUntil(() => $('ids-status').textContent.indexOf('search done') === 0 ||
-                         $('ids-status').classList.contains('err'), 600000),
-         label + ' finished within budget (status: ' + $('ids-status').textContent + ')');
-  assert(!$('ids-status').classList.contains('err'),
-         label + ' ok: ' + $('ids-status').textContent);
-  console.log($('ids-status').textContent + ' · ' + $('ids-timing').textContent);
-
-  const cells = document.querySelectorAll('.ids-cell');
-  assert(cells.length === CANDIDATES,
-         CANDIDATES + ' candidates rendered (got ' + cells.length + ')');
-  const scores = [];
-  for (let i = 0; i < cells.length; i++) {
-    const s = parseFloat(cells[i].querySelector('.ids-score').textContent);
-    assert(!isNaN(s) && s >= -1.001 && s <= 1.001, 'score ' + i + ' is a cosine (got ' + s + ')');
-    scores.push(s);
-  }
-  for (let i = 1; i < scores.length; i++) {
-    assert(scores[i - 1] >= scores[i], 'candidates ranked descending (' + scores.join(', ') + ')');
-  }
-  console.log('scores: ' + scores.join(', '));
-
-  // Save the ranked candidates for eyeball verification (click → view → save).
-  for (let i = 0; i < cells.length; i++) {
-    cells[i].querySelector('canvas').onclick();
-    saveView(label + '_candidate_' + (i + 1) + '_score_' + scores[i].toFixed(3).replace('.', 'p'));
-  }
-  return cells;
-}
-
-function acceptCell(cell) {
-  const btn = cell.querySelector('.ids-cell-meta button');
-  const seed = +cell.querySelector('.ids-cell-meta span').textContent.replace('seed ', '');
-  btn.click();
-  return seed;
+function generateOk(label) {
+  $('status-text').textContent = '';
+  $('btn-generate').click();
+  assert(pumpUntil(() => $('status-text').textContent === 'done' ||
+                         $('status-text').classList.contains('err'), 180000),
+         label + ' finished');
+  assert(!$('status-text').classList.contains('err'),
+         label + ' ok: ' + $('status-text').textContent);
 }
 
 require('fs').mkdirSync(OUT_DIR, { recursive: true });
@@ -89,7 +56,7 @@ assert(pumpUntil(() => !$('btn-generate').disabled || $('status-text').classList
                  600000), 'model load finished within budget');
 assert(!$('status-text').classList.contains('err'),
        'model loaded without error: ' + $('status-text').textContent);
-assert(pumpUntil(() => !!document.querySelector('.ctl[data-key="composition.elevation"]'),
+assert(pumpUntil(() => !!document.querySelector('.ctl[data-key="mood.drama"]'),
                  30000), 'axis bank built');
 
 if ($('live').checked) $('live').click();
@@ -104,15 +71,10 @@ $('prompt').value = PROMPT;
 $('neg-prompt').value = '';
 $('seed').value = String(SEED_A);
 
-// ── base render → first exemplar ─────────────────────────────────────────────
-$('status-text').textContent = '';
-$('btn-generate').click();
+// ── base render → exemplar ───────────────────────────────────────────────────
 console.log('generating the reference character…');
-assert(pumpUntil(() => $('status-text').textContent === 'done' ||
-                       $('status-text').classList.contains('err'), 180000),
-       'base render finished');
-assert(!$('status-text').classList.contains('err'), 'base render ok');
-saveView('base_ground');
+generateOk('base render');
+saveView('base');
 
 $('btn-ids-add').click();
 console.log('loading scorer + embedding exemplar…');
@@ -123,46 +85,89 @@ assert(!$('ids-status').classList.contains('err'),
        'exemplar embed ok: ' + $('ids-status').textContent);
 assert(document.querySelectorAll('.ids-ex').length === 1, 'one exemplar in the model');
 
-// ── shift 1: ground → aerial through the axis bank, then search ──────────────
-// The only exemplar came from "+ current render" (no residual), so this
-// search must score absolute — but still store batch residuals so the accept
-// seeds scene-relative scoring.
-setAxis('composition.elevation', 6);
-const cells1 = runSearch('aerial');
-assert($('ids-status').textContent.indexOf('residuals stored') >= 0,
-       'first search scored absolute with residuals stored: ' + $('ids-status').textContent);
-
-const seed1 = acceptCell(cells1[0]);
-assert($('ids-status').textContent.indexOf('accepted seed ' + seed1) === 0,
-       'accept confirmed: ' + $('ids-status').textContent);
-assert(+$('seed').value === seed1, 'seed field adopted the accepted seed');
-assert(!$('rand-seed').checked, 'seed stays pinned');
-assert(document.querySelectorAll('.ids-ex').length === 2,
-       'identity model grew to two exemplars');
-
-// ── shift 2: back to ground, dramatic — the model now scores scene-relative ──
-setAxis('composition.elevation', 0);
+// ── probes: neutral + a hard dramatic shift through the axis bank ────────────
+$('btn-ids-probe').click();
+assert(document.querySelectorAll('.ids-probe').length === 1, 'neutral probe captured');
 setAxis('mood.drama', 6);
-const cells2 = runSearch('dramatic');
-assert($('ids-status').textContent.indexOf('scene-relative') >= 0,
-       'second search scored scene-relative: ' + $('ids-status').textContent);
+$('btn-ids-probe').click();
+assert(document.querySelectorAll('.ids-probe').length === 2, 'dramatic probe captured');
+setAxis('mood.drama', 0);
 
-// ── one exemplar per scene: a second accept from the same batch replaces ─────
-const seed2a = acceptCell(cells2[0]);
-assert(document.querySelectorAll('.ids-ex').length === 3,
-       'accepting in a new scene appends (three exemplars)');
-// accept re-renders the grid — re-query for live nodes (order is unchanged)
-const seed2b = acceptCell(document.querySelectorAll('.ids-cell')[1]);
-assert(seed2b !== seed2a, 'second accept is a different candidate');
-assert($('ids-status').textContent.indexOf('replaced') >= 0,
-       'second accept replaced, not stacked: ' + $('ids-status').textContent);
-assert(document.querySelectorAll('.ids-ex').length === 3,
-       'identity model still has three exemplars after the replace');
-const cellsAfter = document.querySelectorAll('.ids-cell');
-let acceptedCount = 0;
-for (let i = 0; i < cellsAfter.length; i++) {
-  if (cellsAfter[i].className.indexOf('accepted') >= 0) acceptedCount++;
+// ── breed ────────────────────────────────────────────────────────────────────
+$('ids-pop').value = String(POP);
+$('ids-gens').value = String(GENS);
+$('ids-drift').value = '0.3';
+$('btn-ids-breed').click();
+console.log('breeding ' + GENS + ' generations of ' + POP + ' children over ' +
+            PROBES + ' probes…');
+assert(pumpUntil(() => $('ids-status').textContent.indexOf('breed done') === 0 ||
+                       $('ids-status').classList.contains('err'), 600000),
+       'breed finished within budget (status: ' + $('ids-status').textContent + ')');
+assert(!$('ids-status').classList.contains('err'),
+       'breed ok: ' + $('ids-status').textContent);
+console.log($('ids-status').textContent + ' · ' + $('ids-timing').textContent);
+
+// ── the generations grid ─────────────────────────────────────────────────────
+const gens = document.querySelectorAll('#ids-grid .ids-gen');
+assert(gens.length === GENS, GENS + ' generation blocks (got ' + gens.length + ')');
+for (let g = 0; g < gens.length; g++) {
+  const strips = gens[g].querySelectorAll('.ids-strip');
+  assert(strips.length === POP + 1,
+         'generation has keeper + ' + POP + ' children (got ' + strips.length + ')');
+  for (let s = 0; s < strips.length; s++) {
+    const cells = strips[s].querySelectorAll('canvas');
+    assert(cells.length === PROBES,
+           'strip rendered at every probe (got ' + cells.length + ')');
+    const sc = parseFloat(strips[s].querySelector('.ids-strip-score').textContent);
+    assert(!isNaN(sc) && sc >= -1.001 && sc <= 1.001,
+           'strip score is a cosine (got ' + sc + ')');
+  }
+  const elites = gens[g].querySelectorAll('.ids-strip.elite');
+  assert(elites.length === 2, 'two elites marked per generation (got ' + elites.length + ')');
 }
-assert(acceptedCount === 1, 'exactly one candidate marked accepted (got ' + acceptedCount + ')');
 
-console.log('PASS — identity search works through the real UI · renders in ' + OUT_DIR);
+// ── the bred identity ────────────────────────────────────────────────────────
+assert($('ids-ident-meta').textContent.indexOf(GENS + ' generations bred') >= 0,
+       'identity meta reports the breed: ' + $('ids-ident-meta').textContent);
+assert($('ids-ident-meta').textContent.indexOf('512×512') >= 0,
+       'identity meta reports the size: ' + $('ids-ident-meta').textContent);
+const identStrip = document.querySelectorAll('#ids-identity .ids-strip');
+assert(identStrip.length === 1, 'one pinned identity strip');
+const identCells = identStrip[0].querySelectorAll('canvas');
+assert(identCells.length === PROBES, 'identity strip rendered at every probe');
+const identScore = parseFloat(identStrip[0].querySelector('.ids-strip-score').textContent);
+assert(!isNaN(identScore) && identScore > 0,
+       'identity strip scored (got ' + identScore + ')');
+for (let i = 0; i < identCells.length; i++) {
+  identCells[i].onclick();
+  saveView('identity_probe_' + (i + 1));
+}
+
+// ── "use identity": Generate starts from the bred latent ────────────────────
+assert(!$('ids-use').disabled, 'use-identity toggle enabled after breeding');
+$('ids-use').click();
+assert($('ids-use').checked, 'use identity on');
+console.log('rendering with the bred identity…');
+generateOk('identity render (neutral)');
+assert($('timing').textContent.indexOf('bred identity latent') >= 0,
+       'timing notes the bred latent: ' + $('timing').textContent);
+saveView('identity_on_neutral');
+
+setAxis('mood.drama', 6);
+generateOk('identity render (dramatic)');
+assert($('timing').textContent.indexOf('bred identity latent') >= 0,
+       'dramatic render used the bred latent too');
+saveView('identity_on_dramatic');
+setAxis('mood.drama', 0);
+
+// ── per-size guard: noise is bred at 512×512 ─────────────────────────────────
+$('width').value = '768';
+$('status-text').textContent = '';
+$('btn-generate').click();
+assert(pumpUntil(() => $('status-text').classList.contains('err'), 60000),
+       'mismatched size rejected');
+assert($('status-text').textContent.indexOf('bred at') >= 0,
+       'guard names the bred size: ' + $('status-text').textContent);
+$('width').value = '512';
+
+console.log('PASS — identity breeding works through the real UI · renders in ' + OUT_DIR);

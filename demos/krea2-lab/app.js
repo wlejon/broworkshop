@@ -221,6 +221,7 @@ function init() {
         (resp.exprNeutral ? ' · field vs “' + resp.exprNeutral + '”' : '') +
         (resp.spectrumNote ? ' · ' + resp.spectrumNote : '') +
         (resp.identityNote ? ' · ' + resp.identityNote : '') +
+        (resp.noiseNote ? ' · ' + resp.noiseNote : '') +
         (quality === 'preview' ? ' · preview' : '');
       pump();
     });

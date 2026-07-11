@@ -386,30 +386,51 @@
         <div class="tabpanel" id="tab-idsearch">
           <div class="tab-toolbar">
             <button id="btn-ids-add" disabled
-                    title="Embed the render on the canvas and add it to the identity model">+ exemplar from current render</button>
-            <label class="field inline-field">candidates
-              <input id="ids-count" type="number" value="12" min="2" max="64" step="1">
+                    title="Embed the render on the canvas and add it to the scoring target">+ exemplar</button>
+            <button id="btn-ids-probe" disabled
+                    title="Capture the current conditions (prompt, axes, banks) as a look the identity must survive">+ probe</button>
+            <label class="field inline-field">population
+              <input id="ids-pop" type="number" value="5" min="2" max="12" step="1">
             </label>
-            <button id="btn-ids-search" class="primary" disabled
-                    title="Render N random seeds at the current conditions, ranked by identity score">Search seeds</button>
+            <label class="field inline-field">generations
+              <input id="ids-gens" type="number" value="4" min="1" max="10" step="1">
+            </label>
+            <label class="field inline-field">drift
+              <input id="ids-drift" type="number" value="0.3" min="0.05" max="0.9" step="0.05">
+            </label>
+            <button id="btn-ids-breed" class="primary" disabled
+                    title="Evolve the identity noise: drift children each generation, keep what stays the same character across every probe">Breed</button>
             <button id="btn-ids-stop" disabled
-                    title="Finish the current candidate, then stop">Stop</button>
+                    title="Finish the current render, then stop">Stop</button>
+            <label class="field inline-field" title="Every Generate starts from the bred identity latent — walk the axes, the character carries">
+              <input id="ids-use" type="checkbox" disabled> use identity
+            </label>
             <span class="grow"></span>
+            <button id="btn-ids-save" class="link" disabled title="Save the bred identity latent to a file">save…</button>
+            <button id="btn-ids-load" class="link" title="Load a saved identity latent">load…</button>
             <button id="btn-ids-clear" class="link" disabled
-                    title="Drop every exemplar — start a new identity">clear identity</button>
+                    title="Drop the identity, exemplars, and probes — start over">clear</button>
           </div>
           <div class="ids-body">
-            <div class="imgaxis-gallery-head">identity model
-              <span class="pane-sub">one exemplar per scene — shift the scene BEFORE searching; accepting again replaces this scene's pick</span>
+            <div class="imgaxis-gallery-head">identity
+              <span id="ids-ident-meta" class="pane-sub"></span>
+            </div>
+            <div id="ids-identity" class="ids-identity"></div>
+            <div class="imgaxis-gallery-head">exemplars
+              <span class="pane-sub">what the character looks like — the scoring target</span>
             </div>
             <div id="ids-exemplars" class="ids-exemplars"></div>
-            <div class="imgaxis-gallery-head">candidates
-              <span class="pane-sub">random seeds at the current conditions, scored on what the seed adds beyond the scene · click to view · accept to adopt the seed</span>
+            <div class="imgaxis-gallery-head">probes
+              <span class="pane-sub">condition sets the identity is bred to survive — capture each look before breeding</span>
             </div>
-            <div id="ids-grid" class="mint-gallery ids-grid"></div>
+            <div id="ids-probes" class="ids-probes"></div>
+            <div class="imgaxis-gallery-head">generations
+              <span class="pane-sub">one strip per candidate noise, one cell per probe · elites (green) are mixed into the identity</span>
+            </div>
+            <div id="ids-grid" class="ids-grid"></div>
           </div>
           <div class="status-bar">
-            <span id="ids-status">render the character · add it as an exemplar · shift the scene · search</span>
+            <span id="ids-status">render the character · + exemplar · shift the scene and + probe each look · breed</span>
             <span class="grow"></span>
             <span id="ids-timing" class="meta"></span>
           </div>

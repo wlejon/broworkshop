@@ -509,24 +509,37 @@ details[open] > .ctl-cat::before { content: '▾ '; }
   color: #8b94a3; font-size: 11px; line-height: 1; padding: 0; cursor: pointer;
 }
 .ids-ex-x:hover { color: #e0674a; border-color: #e0674a; }
-.ids-cell { position: relative; }
-.ids-score {
-  position: absolute; top: 4px; left: 4px; padding: 2px 6px;
-  font-size: 11px; font-weight: 700; border-radius: 4px;
-  background: rgba(10, 13, 19, 0.85); color: #f0a860;
+.ids-probes {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start;
+  min-height: 34px; padding: 6px;
+  background: #0a0d13; border: 1px solid #1c2431; border-radius: 6px;
 }
-.ids-cell.accepted { outline: 2px solid #7fbf6a; }
-.ids-cell-meta {
+.ids-probe {
+  position: relative; display: flex; align-items: center; gap: 6px;
+  padding: 4px 10px; font-size: 12px; color: #b8c2d4;
+  background: #12161e; border: 1px solid #2a3550; border-radius: 12px;
+}
+.ids-probe .ids-ex-x { position: static; width: 16px; height: 16px; }
+.ids-identity { display: flex; flex-direction: column; gap: 8px; }
+.ids-identity .ids-strip { border-color: #3a4a70; background: #0d1220; }
+.ids-grid { display: flex; flex-direction: column; gap: 12px; }
+.ids-gen { display: flex; flex-direction: column; gap: 8px; }
+.ids-strip {
+  display: flex; flex-direction: column; gap: 5px; padding: 7px 9px;
+  background: #0a0d13; border: 1px solid #1c2431; border-radius: 6px;
+}
+.ids-strip.elite { border-color: #7fbf6a; }
+.ids-strip-head {
   display: flex; align-items: center; justify-content: space-between;
-  gap: 6px; padding: 5px 7px; font-size: 11px; color: #8b94a3;
-  border-top: 1px solid #141a24;
+  font-size: 11px; color: #8b94a3;
 }
-.ids-cell-meta button {
-  border: none; background: #0e131c; color: #8b94a3;
-  padding: 3px 9px; font-size: 11px; border-radius: 4px; cursor: pointer;
+.ids-strip.elite .ids-strip-head { color: #9fdf8a; }
+.ids-strip-score { font-weight: 700; color: #f0a860; }
+.ids-strip-cells { display: flex; flex-wrap: wrap; gap: 6px; }
+.ids-strip-cells canvas {
+  display: block; border-radius: 4px; cursor: pointer;
+  border: 1px solid #2a3550;
 }
-.ids-cell-meta button:hover:not(:disabled) { background: #1c2e1a; color: #9fdf8a; }
-.ids-cell-meta button:disabled { color: #7fbf6a; cursor: default; }
 
 /* ── stage / tabs ─────────────────────────────────────────────────────── */
 #stage { flex: 1; display: flex; flex-direction: column; min-width: 0; }

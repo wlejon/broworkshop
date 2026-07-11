@@ -1,45 +1,36 @@
-// Identity Search tab: find where in seed space the character lives at the
-// CURRENT conditions. The identity is a model built across seeds — a set of
-// accepted exemplar renders whose embeddings define "who this is"; every NEW
-// scene you accept it in makes the identity more scene-invariant.
+// Identity Breeding tab: the identity IS the initial latent. Research showed
+// each seed carries a character, so instead of searching random seeds and
+// hoping one matches (the old accept-a-candidate flow — at one set of
+// conditions every seed is simply a DIFFERENT character, so there was
+// nothing to pick), the character is made a first-class crafted object: a
+// noise field, seeded from the reference seed's real pipeline noise and
+// REFINED by evolution until it is resilient to condition shifts.
 //
-// Scoring pipeline (humanoid-targeted): BiRefNet cuts the figure out of the
-// frame (composited on neutral gray, cropped to the matte bbox, so the
-// background can't contaminate the descriptor) and DINOv3 ViT-H embeds the
-// cutout. Frames with no discernible figure fall back to a full-frame
-// embedding.
+// The loop (CEM in noise space, buffers live worker-side):
+//   - Each generation samples children: small Gaussian drifts of the current
+//     identity noise (cos to parent = sqrt(1-drift^2)).
+//   - Every child renders at every PROBE — captured condition sets (shift the
+//     scene, click "+ probe"). Resilience is the objective, not a hope: a
+//     child only scores well if its character survives ALL the probes.
+//   - Scores are cosine against the exemplar model (BiRefNet cuts the figure
+//     out on neutral gray, cropped to the matte bbox, DINOv3 ViT-H embeds the
+//     cutout — frames with no discernible figure fall back to full-frame).
+//     Children within a generation render under identical conditions, so
+//     absolute cosine ranks them fairly (the scene term is common to all) —
+//     the failure mode that killed absolute scoring across random seeds
+//     doesn't exist here.
+//   - The identity itself rides along as the "keeper" row each generation —
+//     the baseline a child must beat — and the identity then becomes the
+//     renormed mean of the top scorers (keeper included when it ranks).
+//   - Drift decays each generation: explore, then settle.
 //
-// Scoring is CONDITION-RELATIVE once the model has search-born exemplars:
-// the mean embedding of a search batch is what these conditions generically
-// render — the scene/shift concept itself — so each candidate is scored on
-// its RESIDUAL (embedding minus batch mean): the part the seed contributes.
-// Matching residuals against the exemplars' residuals separates "same
-// character" from "same scene", which absolute cosine cannot do (an early
-// build scored absolutely, and a model built in one scene captured the scene
-// — every same-scene candidate scored 0.9+ regardless of who was in it).
-// The final score blends absolute and residual similarity 50/50: the
-// absolute half still carries "same figure", the residual half is blind to
-// the conditions. Residuals need a batch to subtract, so scores land
-// provisionally during the search and re-rank when the batch completes.
-//
-// Search: N random seeds rendered sequentially through the worker at the FULL
-// current state (prompt, axis walk, banks, dials, transport — exactly what
-// Generate would send). Accepting a candidate adopts its seed (pinned), shows
-// it on the render tab, and files it in history. ONE exemplar per search:
-// accepting a second candidate from the same batch REPLACES the first —
-// near-duplicate exemplars from one scene teach the model nothing and used to
-// let it degenerate into a scene detector. The workflow the panel is built
-// for: render the character, add it as the first exemplar, SHIFT the scene,
-// search, accept the best match — repeat, one accept per scene, and the
-// identity model comes to span the walk.
-//
-// Candidates always render at the CURRENT size: Krea 2's seed noise is drawn
-// per-latent-size, so a low-res probe of seed k is a DIFFERENT noise field
-// than the full-res render — a cheap-screen-then-upscale flow would rank
-// seeds that don't reproduce. Drop the steps field to 4 for faster searches
-// instead; the initial noise (the identity carrier) is unchanged by that.
+// Once bred, "use identity" makes every Generate start from the identity
+// latent (opts.identNoise -> worker resolves to initNoise) — walk the axes
+// freely, the character carries. Noise is drawn per-latent-size, so an
+// identity is bound to the size it was bred at; render at that size or
+// re-breed. Save/load round-trips the buffer through a JSON file.
 
-import { $ } from '/app/ui/util.js';
+import { $, f32ToB64, b64ToF32 } from '/app/ui/util.js';
 
 const DINO_PATH =
   'D:/projects/brovisionml/weights/triposplat/clip_vision/dino_v3_vit_h.safetensors';
@@ -48,25 +39,24 @@ const BIREFNET_PATH =
 // Matting resolution: identity scoring needs the figure region, not
 // reference-grade edges — 512 is ~4x faster than BiRefNet's default 1024.
 const REMBG_SIZE = 512;
+const STRIP_THUMB = 128;
+const EX_THUMB = 88;
 
 export function initIdentitySearch(ctx) {
   const prefs = ctx.prefs;
   const scorer = { dino: null, rembg: null, ready: false, loading: false };
-  // Exemplars: emb is the unit absolute embedding; resid is the unit
-  // batch-residual for search-born exemplars (null for "+ current render" —
-  // there is no batch to subtract); batch tags which search it came from
-  // (one exemplar per search — accept replaces within a batch).
-  let exemplars = [];      // {id, canvas, w, h, emb, resid, batch}
-  let exSeq = 0, batchSeq = 0;
-  let centroidAbs = null;  // unit mean of exemplar embs, or null with none
-  let centroidResid = null; // unit mean of non-null resids, or null with none
-  let results = [];        // current search: {seed, canvas, w, h, emb, resid,
-                           //                  score, batch, accepted}
-  let searching = false, stopRequested = false;
-  // Residual scoring needs a batch mean worth trusting.
-  const RESID_MIN_BATCH = 4;
+  let exemplars = [];      // {id, canvas, w, h, emb} — what "who this is" means
+  let exSeq = 0;
+  let centroid = null;     // unit mean of exemplar embeddings
+  let probes = [];         // {id, label, msg} — captured condition sets
+  let probeSeq = 0;
+  let identity = null;     // {w, h, seed, gens} — the buffer lives in the worker
+  let breeding = false, stopRequested = false;
 
-  if (prefs.idsCount != null) $('ids-count').value = prefs.idsCount;
+  ['idsPop', 'idsGens', 'idsDrift'].forEach((k, i) => {
+    const id = ['ids-pop', 'ids-gens', 'ids-drift'][i];
+    if (prefs[k] != null) $(id).value = prefs[k];
+  });
 
   function status(msg, kind) {
     const el = $('ids-status');
@@ -74,7 +64,7 @@ export function initIdentitySearch(ctx) {
     el.className = kind === 'err' ? 'err' : kind === 'ok' ? 'ok' : '';
   }
 
-  // ── scorer (lazy: ~2.6 GB of VRAM only once identity search is used) ──────
+  // ── scorer (lazy: ~2.6 GB of VRAM only once breeding is used) ─────────────
   function ensureScorer(onReady) {
     if (scorer.ready) { onReady(); return; }
     if (scorer.loading) return;
@@ -168,60 +158,40 @@ export function initIdentitySearch(ctx) {
     return unit(r.features.subarray(0, r.dim));   // row 0 = CLS
   }
 
-  // ── the identity model (exemplars + centroids) ────────────────────────────
-  function recomputeCentroids() {
-    centroidAbs = null;
-    centroidResid = null;
+  // ── the exemplar model (what the scorer matches against) ──────────────────
+  function recomputeCentroid() {
+    centroid = null;
     if (!exemplars.length) return;
     const dim = exemplars[0].emb.length;
     const m = new Float32Array(dim);
     exemplars.forEach((e) => { for (let i = 0; i < dim; i++) m[i] += e.emb[i]; });
-    centroidAbs = unit(m);
-    const resids = exemplars.filter((e) => e.resid);
-    if (resids.length) {
-      const r = new Float32Array(dim);
-      resids.forEach((e) => { for (let i = 0; i < dim; i++) r[i] += e.resid[i]; });
-      centroidResid = unit(r);
-    }
+    centroid = unit(m);
   }
 
-  // One exemplar per search batch: a second accept from the same batch
-  // REPLACES the first (near-duplicates from one scene teach nothing and
-  // would collapse the identity into a scene detector). batch null (the
-  // "+ current render" path) always appends.
-  function addExemplar(canvas, w, h, emb, resid, batch) {
+  function addExemplar(canvas, w, h, emb) {
     const c = document.createElement('canvas');
     c.width = w; c.height = h;
     c.getContext('2d').drawImage(canvas, 0, 0);
-    const entry = { id: ++exSeq, canvas: c, w: w, h: h, emb: emb,
-                    resid: resid || null, batch: batch == null ? null : batch };
-    let replaced = false;
-    if (entry.batch != null) {
-      const at = exemplars.findIndex((e) => e.batch === entry.batch);
-      if (at >= 0) { exemplars[at] = entry; replaced = true; }
-    }
-    if (!replaced) exemplars.push(entry);
-    recomputeCentroids();
+    exemplars.push({ id: ++exSeq, canvas: c, w: w, h: h, emb: emb });
+    recomputeCentroid();
     renderExemplars();
     ctx.refreshButtons();
-    return replaced;
   }
 
   function removeExemplar(id) {
     exemplars = exemplars.filter((e) => e.id !== id);
-    recomputeCentroids();
+    recomputeCentroid();
     renderExemplars();
     ctx.refreshButtons();
   }
 
-  const EX_THUMB = 88;
   function renderExemplars() {
     const host = $('ids-exemplars');
     host.innerHTML = '';
     if (!exemplars.length) {
       const e = document.createElement('div');
       e.className = 'ids-empty';
-      e.textContent = 'No exemplars — render the character, then add it as the first exemplar.';
+      e.textContent = 'No exemplars — render the character, then add it. More exemplars (any scene) sharpen the target.';
       host.appendChild(e);
       return;
     }
@@ -237,7 +207,7 @@ export function initIdentitySearch(ctx) {
       cv.onclick = () => ctx.drawBitmap(ex.canvas, ex.w, ex.h);
       const x = document.createElement('button');
       x.className = 'ids-ex-x'; x.textContent = '×';
-      x.title = 'remove this exemplar from the identity';
+      x.title = 'remove this exemplar';
       x.addEventListener('click', () => removeExemplar(ex.id));
       cell.appendChild(cv); cell.appendChild(x);
       host.appendChild(cell);
@@ -260,90 +230,172 @@ export function initIdentitySearch(ctx) {
         status('embed failed: ' + (e.message || e), 'err');
         return;
       }
-      addExemplar(view, view.width, view.height, emb, null, null);
+      addExemplar(view, view.width, view.height, emb);
       ctx.setBusy(false);
-      status('exemplar added (' + exemplars.length + ') — shift the scene, then search', 'ok');
+      status('exemplar added (' + exemplars.length + ')', 'ok');
     });
   }
 
-  // ── search ────────────────────────────────────────────────────────────────
-  function renderGrid() {
-    const grid = $('ids-grid');
-    grid.innerHTML = '';
-    if (!results.length) {
+  // ── probes (the condition sets resilience is scored against) ──────────────
+  // The exact message Generate would send right now, minus any identity noise
+  // (each breeding render sets its own child id).
+  function captureMsg() {
+    const msg = ctx.buildGenerateMsg('full');
+    if (msg.opts) delete msg.opts.identNoise;
+    return msg;
+  }
+
+  function probeLabel(msg) {
+    const parts = [];
+    const ac = msg.axisControls || {};
+    Object.keys(ac).forEach((k) => {
+      const v = Math.round(ac[k] * 10) / 10;
+      parts.push(k.split('.').pop() + (v > 0 ? '+' : '') + v);
+    });
+    if (msg.expression && msg.expression.adj) parts.push('“' + msg.expression.adj + '”');
+    ['spectrum', 'mouth'].forEach((bank) => {
+      const b = msg[bank] || {};
+      Object.keys(b).forEach((k) => {
+        const v = Math.round(b[k] * 10) / 10;
+        if (v) parts.push(k + (v > 0 ? '+' : '') + v);
+      });
+    });
+    return parts.length ? parts.join(' · ') : 'neutral';
+  }
+
+  function addProbe() {
+    if (!ctx.loaded) return;
+    const msg = captureMsg();
+    probes.push({ id: ++probeSeq, label: probeLabel(msg), msg: msg });
+    renderProbes();
+    ctx.refreshButtons();
+    status('probe captured — breeding scores the identity at every probe', 'ok');
+  }
+
+  function removeProbe(id) {
+    probes = probes.filter((p) => p.id !== id);
+    renderProbes();
+    ctx.refreshButtons();
+  }
+
+  function renderProbes() {
+    const host = $('ids-probes');
+    host.innerHTML = '';
+    if (!probes.length) {
       const e = document.createElement('div');
-      e.className = 'mint-gallery-empty';
-      e.textContent = 'Search renders candidates here, ranked by identity score.';
-      grid.appendChild(e);
+      e.className = 'ids-empty';
+      e.textContent = 'No probes — breeding scores at the current conditions only. ' +
+                      'Shift the scene (axes, prompt), then "+ probe" each look the identity must survive.';
+      host.appendChild(e);
       return;
     }
-    const THUMB = 168;
-    results.forEach((res) => {
-      const cell = document.createElement('div');
-      cell.className = 'mint-cell ids-cell' + (res.accepted ? ' accepted' : '');
-      const cv = document.createElement('canvas');
-      const s = Math.min(THUMB / res.w, THUMB / res.h, 1);
-      cv.width = Math.max(1, Math.round(res.w * s));
-      cv.height = Math.max(1, Math.round(res.h * s));
-      cv.getContext('2d').drawImage(res.canvas, 0, 0, cv.width, cv.height);
-      cv.title = 'seed ' + res.seed + ' · score ' + res.score.toFixed(3) + ' · click to view';
-      cv.onclick = () => {
-        ctx.drawBitmap(res.canvas, res.w, res.h);
-        ctx.status('candidate · seed ' + res.seed + ' · identity ' + res.score.toFixed(3), 'ok');
-      };
-      const badge = document.createElement('div');
-      badge.className = 'ids-score';
-      badge.textContent = res.score.toFixed(3);
-      const meta = document.createElement('div');
-      meta.className = 'ids-cell-meta';
-      const seedEl = document.createElement('span');
-      seedEl.textContent = 'seed ' + res.seed;
-      const acc = document.createElement('button');
-      acc.textContent = res.accepted ? 'accepted ✓' : 'accept';
-      acc.disabled = !!res.accepted;
-      acc.title = 'adopt this seed and add the render to the identity model';
-      acc.addEventListener('click', () => acceptResult(res));
-      meta.appendChild(seedEl); meta.appendChild(acc);
-      cell.appendChild(cv); cell.appendChild(badge); cell.appendChild(meta);
-      grid.appendChild(cell);
+    probes.forEach((p) => {
+      const chip = document.createElement('div');
+      chip.className = 'ids-probe';
+      const label = document.createElement('span');
+      label.textContent = p.label;
+      label.title = p.msg.prompt;
+      const x = document.createElement('button');
+      x.className = 'ids-ex-x'; x.textContent = '×';
+      x.title = 'remove this probe';
+      x.addEventListener('click', () => removeProbe(p.id));
+      chip.appendChild(label); chip.appendChild(x);
+      host.appendChild(chip);
     });
   }
 
-  function acceptResult(res) {
-    if (res.accepted) return;
-    // One exemplar per scene: a new accept from this batch takes the slot.
-    results.forEach((r) => { r.accepted = false; });
-    res.accepted = true;
-    const replaced = addExemplar(res.canvas, res.w, res.h, res.emb, res.resid, res.batch);
-    $('seed').value = String(res.seed);
-    $('rand-seed').checked = false;
-    ctx.recordSeed(res.seed);
-    ctx.addHistoryEntry(res.canvas, res.w, res.h, {
-      seed: res.seed, steps: +$('steps').value || ctx.DEFAULTS.steps,
-      width: res.w, height: res.h,
-    });
-    ctx.drawBitmap(res.canvas, res.w, res.h);
-    ctx.persist();
-    renderGrid();
-    status('accepted seed ' + res.seed +
-           (replaced ? ' — replaced this scene\'s exemplar'
-                     : ' → exemplar ' + exemplars.length +
-                       ' · the identity now spans this scene'), 'ok');
+  // ── identity meta + final strip ────────────────────────────────────────────
+  function renderIdentityMeta() {
+    $('ids-ident-meta').textContent = identity
+      ? 'seed ' + identity.seed + ' · ' + identity.w + '×' + identity.h +
+        ' · ' + identity.gens + ' generation' + (identity.gens === 1 ? '' : 's') + ' bred'
+      : 'none — breeding starts one from the current seed';
+    ctx.refreshButtons();
   }
 
-  function doSearch() {
-    if (searching || !ctx.loaded || ctx.busy) return;
+  // ── strips (one row = one noise candidate across all probes) ──────────────
+  function makeStrip(host, label) {
+    const row = document.createElement('div');
+    row.className = 'ids-strip';
+    const head = document.createElement('div');
+    head.className = 'ids-strip-head';
+    const name = document.createElement('span');
+    name.textContent = label;
+    const score = document.createElement('span');
+    score.className = 'ids-strip-score';
+    head.appendChild(name); head.appendChild(score);
+    const cells = document.createElement('div');
+    cells.className = 'ids-strip-cells';
+    row.appendChild(head); row.appendChild(cells);
+    host.appendChild(row);
+    return {
+      row: row,
+      addCell(canvas, w, h, title) {
+        const cv = document.createElement('canvas');
+        const s = Math.min(STRIP_THUMB / w, STRIP_THUMB / h, 1);
+        cv.width = Math.max(1, Math.round(w * s));
+        cv.height = Math.max(1, Math.round(h * s));
+        cv.getContext('2d').drawImage(canvas, 0, 0, cv.width, cv.height);
+        cv.title = title + ' · click to view';
+        cv.onclick = () => {
+          ctx.drawBitmap(canvas, w, h);
+          ctx.status(title, 'ok');
+        };
+        cells.appendChild(cv);
+      },
+      setScore(v) { score.textContent = v.toFixed(3); },
+      markElite() { row.classList.add('elite'); },
+    };
+  }
+
+  // ── the breeding loop ──────────────────────────────────────────────────────
+  function breedFail(err) {
+    breeding = false;
+    ctx.setBusy(false);
+    ctx.refreshButtons();
+    status('breed failed: ' + (err.message || err), 'err');
+  }
+
+  // Render row.id ('current' or a child id) at every probe, embedding and
+  // scoring each render as it lands. Calls onDone(meanScore | null-on-stop).
+  function scoreRow(strip, rowId, probeSet, onDone) {
+    let pi = 0, sum = 0;
+    (function nextProbe() {
+      if (stopRequested) { onDone(null); return; }
+      if (pi >= probeSet.length) { onDone(sum / probeSet.length); return; }
+      const p = probeSet[pi];
+      const msg = Object.assign({}, p.msg, {
+        opts: Object.assign({}, p.msg.opts, { identNoise: rowId }),
+      });
+      ctx.client.send(msg, (err, resp) => {
+        if (err) { onDone(null, err); return; }
+        const c = document.createElement('canvas');
+        c.width = resp.width; c.height = resp.height;
+        c.getContext('2d').drawImage(resp.bitmap, 0, 0);
+        let s;
+        try { s = dot(embedIdentity(c), centroid); }
+        catch (e) { onDone(null, e); return; }
+        strip.addCell(c, resp.width, resp.height, p.label + ' · identity ' + s.toFixed(3));
+        sum += s;
+        pi++;
+        nextProbe();
+      });
+    })();
+  }
+
+  function doBreed() {
+    if (breeding || !ctx.loaded || ctx.busy) return;
     ensureScorer(() => {
+      const view = $('view');
       if (!exemplars.length) {
-        // Seed the identity from what's on the canvas — the common flow is
-        // "this is my character, now find them elsewhere".
-        const view = $('view');
+        // Seed the identity target from what's on the canvas — the common flow
+        // is "this is my character, make them resilient".
         if (view.style.display === 'none' || !ctx.history.length) {
-          status('no identity yet — render the character and add it as an exemplar', 'err');
+          status('no exemplar — render the character first', 'err');
           return;
         }
         ctx.setBusy(true);
-        try { addExemplar(view, view.width, view.height, embedIdentity(view), null, null); }
+        try { addExemplar(view, view.width, view.height, embedIdentity(view)); }
         catch (e) {
           ctx.setBusy(false);
           status('embed failed: ' + (e.message || e), 'err');
@@ -351,125 +403,240 @@ export function initIdentitySearch(ctx) {
         }
         ctx.setBusy(false);
       }
-      runSearch();
+
+      const P = Math.max(2, Math.min(12, Math.round(+$('ids-pop').value || 5)));
+      const G = Math.max(1, Math.min(10, Math.round(+$('ids-gens').value || 4)));
+      let eps = Math.max(0.05, Math.min(0.9, +$('ids-drift').value || 0.3));
+      $('ids-pop').value = String(P);
+      $('ids-gens').value = String(G);
+      $('ids-drift').value = String(eps);
+      ctx.persist();
+
+      const probeSet = probes.length ? probes.slice()
+        : [{ id: 0, label: 'current conditions', msg: captureMsg() }];
+      const w = +probeSet[0].msg.opts.width, h = +probeSet[0].msg.opts.height;
+      for (const p of probeSet) {
+        if (+p.msg.opts.width !== w || +p.msg.opts.height !== h) {
+          status('probes disagree on size (' + w + '×' + h + ' vs ' +
+                 p.msg.opts.width + '×' + p.msg.opts.height +
+                 ') — noise is per-size, recapture them at one size', 'err');
+          return;
+        }
+      }
+      if (identity && (identity.w !== w || identity.h !== h)) {
+        status('identity is bred at ' + identity.w + '×' + identity.h +
+               ' — breed at that size, or clear the identity to restart here', 'err');
+        return;
+      }
+
+      breeding = true;
+      stopRequested = false;
+      ctx.setBusy(true);
+      ctx.refreshButtons();
+      $('ids-grid').innerHTML = '';
+      $('ids-identity').innerHTML = '';
+      const t0 = Date.now();
+      const perGen = (P + 1) * probeSet.length;
+      const total = G * perGen + probeSet.length;
+      let rendered = 0;
+      const tick = (what) => status('breeding · ' + what + ' · render ' +
+                                    (++rendered) + '/' + total);
+
+      const start = (next) => {
+        if (identity) { next(); return; }
+        const seed = +$('seed').value || 0;
+        status('drawing identity noise from seed ' + seed + '…');
+        ctx.client.send({ type: 'identNoiseInit', prompt: probeSet[0].msg.prompt,
+                          opts: probeSet[0].msg.opts, seed: seed }, (err, resp) => {
+          if (err) { breedFail(err); return; }
+          identity = { w: resp.w, h: resp.h, seed: resp.seed, gens: 0 };
+          renderIdentityMeta();
+          next();
+        });
+      };
+
+      const finish = (aborted) => {
+        // Pin the bred identity as its own strip — what "the character" now
+        // renders as at every probe. Clear the stop flag so the strip itself
+        // isn't skipped by the very stop that got us here.
+        stopRequested = false;
+        const strip = makeStrip($('ids-identity'), 'identity');
+        scoreRow(strip, 'current', probeSet, (score, err) => {
+          breeding = false;
+          ctx.setBusy(false);
+          ctx.refreshButtons();
+          $('ids-timing').textContent = Math.round((Date.now() - t0) / 1000) + ' s';
+          if (err) { status('breed finished but the identity strip failed: ' + (err.message || err), 'err'); return; }
+          if (score != null) strip.setScore(score);
+          status('breed ' + (aborted ? 'stopped' : 'done') + ' · identity scores ' +
+                 (score != null ? score.toFixed(3) : '—') + ' across ' +
+                 probeSet.length + ' probe' + (probeSet.length === 1 ? '' : 's') +
+                 ' — turn on "use identity" and walk the axes', 'ok');
+          ctx.pump();
+        });
+      };
+
+      const generation = (g) => {
+        if (stopRequested || g > G) { finish(stopRequested); return; }
+        const genHost = document.createElement('div');
+        genHost.className = 'ids-gen';
+        const head = document.createElement('div');
+        head.className = 'imgaxis-gallery-head';
+        head.textContent = 'generation ' + g + ' / ' + G + ' · drift ' + eps.toFixed(2);
+        genHost.appendChild(head);
+        $('ids-grid').insertBefore(genHost, $('ids-grid').firstChild);
+
+        // Sample P children, then score keeper + children sequentially.
+        const rows = [{ id: 'current', label: 'keeper' }];
+        let made = 0;
+        const sample = () => {
+          if (made >= P) { score(0); return; }
+          ctx.client.send({ type: 'identNoiseChild', eps: eps, rngSeed: ctx.randomSeed() },
+                          (err, resp) => {
+            if (err) { breedFail(err); return; }
+            rows.push({ id: resp.id, label: 'child ' + (made + 1) });
+            made++;
+            sample();
+          });
+        };
+        const score = (ri) => {
+          if (stopRequested) { finish(true); return; }
+          if (ri >= rows.length) { adopt(); return; }
+          const row = rows[ri];
+          tick('gen ' + g + ' · ' + row.label);
+          rendered += probeSet.length - 1;   // tick counts one; the row renders all probes
+          const strip = makeStrip(genHost, row.label);
+          row.strip = strip;
+          scoreRow(strip, row.id, probeSet, (meanScore, err) => {
+            if (err) { breedFail(err); return; }
+            if (meanScore == null) { finish(true); return; }
+            row.score = meanScore;
+            strip.setScore(meanScore);
+            score(ri + 1);
+          });
+        };
+        const adopt = () => {
+          rows.sort((a, b) => b.score - a.score);
+          const elite = rows.slice(0, Math.max(2, Math.round(rows.length / 3)));
+          elite.forEach((r) => r.strip.markElite());
+          ctx.client.send({ type: 'identNoiseAdopt', ids: elite.map((r) => r.id) },
+                          (err) => {
+            if (err) { breedFail(err); return; }
+            identity.gens++;
+            renderIdentityMeta();
+            head.textContent += ' · best ' + rows[0].score.toFixed(3) +
+                                (rows[0].id === 'current' ? ' (keeper held)' : '');
+            eps *= 0.85;
+            generation(g + 1);
+          });
+        };
+        sample();
+      };
+
+      start(() => generation(1));
     });
   }
 
-  function runSearch() {
-    const n = Math.max(2, Math.min(64, Math.round(+$('ids-count').value || 12)));
-    $('ids-count').value = String(n);
-    ctx.persist();
-    searching = true;
-    stopRequested = false;
-    ctx.setBusy(true);
-    ctx.refreshButtons();
-    results = [];
-    renderGrid();
-    const t0 = Date.now();
-    const batch = ++batchSeq;
-    // The exact message Generate would send — the search honors the full
-    // current state (prompt, walk, banks, dials, transport), seed swapped
-    // per candidate.
-    const base = ctx.buildGenerateMsg('full');
-    let done = 0;
-
-    // Batch-residual pass: the batch mean is what these conditions render
-    // generically (the scene/shift concept); subtracting it leaves each
-    // seed's own contribution. Residuals are stored on every candidate even
-    // when the model can't use them yet (centroidResid null), so the FIRST
-    // accepted search candidate already seeds residual scoring.
-    function finish() {
-      let mode = 'absolute';
-      if (results.length >= RESID_MIN_BATCH) {
-        const dim = results[0].emb.length;
-        const m = new Float32Array(dim);
-        results.forEach((r) => { for (let i = 0; i < dim; i++) m[i] += r.emb[i]; });
-        for (let i = 0; i < dim; i++) m[i] /= results.length;
-        const d = new Float32Array(dim);
-        results.forEach((r) => {
-          for (let i = 0; i < dim; i++) d[i] = r.emb[i] - m[i];
-          r.resid = unit(d);
-          r.score = centroidResid
-            ? 0.5 * dot(r.emb, centroidAbs) + 0.5 * dot(r.resid, centroidResid)
-            : dot(r.emb, centroidAbs);
-        });
-        results.sort((a, b) => b.score - a.score);
-        mode = centroidResid ? 'scene-relative' : 'absolute · residuals stored';
-      }
-      searching = false;
-      ctx.setBusy(false);
-      ctx.refreshButtons();
-      renderGrid();
-      $('ids-timing').textContent = Math.round((Date.now() - t0) / 1000) + ' s';
-      const best = results.length ? results[0].score.toFixed(3) : '—';
-      status('search done · ' + results.length + ' candidates · best ' + best +
-             ' · ' + mode + (stopRequested ? ' · stopped' : ''), 'ok');
-      ctx.pump();
+  // ── save / load (the bred latent as a JSON file) ───────────────────────────
+  function saveIdentity() {
+    if (!identity || ctx.busy) return;
+    if (typeof window.showSaveFileDialog !== 'function') {
+      status('save dialog unavailable in this build', 'err'); return;
     }
-
-    (function next() {
-      if (stopRequested || done >= n) { finish(); return; }
-      const seed = ctx.randomSeed();
-      status('search ' + (done + 1) + '/' + n + ' · seed ' + seed + '…');
-      const msg = Object.assign({}, base, {
-        opts: Object.assign({}, base.opts, { seed: seed }),
-      });
-      ctx.client.send(msg, (err, resp) => {
-        if (err) {
-          searching = false;
-          ctx.setBusy(false);
-          ctx.refreshButtons();
-          status('search failed: ' + (err.message || err), 'err');
-          return;
-        }
-        const c = document.createElement('canvas');
-        c.width = resp.width; c.height = resp.height;
-        c.getContext('2d').drawImage(resp.bitmap, 0, 0);
-        let emb, score;
-        try {
-          emb = embedIdentity(c);
-          score = dot(emb, centroidAbs);   // provisional; re-ranked in finish()
-        } catch (e) {
-          searching = false;
-          ctx.setBusy(false);
-          ctx.refreshButtons();
-          status('scoring failed: ' + (e.message || e), 'err');
-          return;
-        }
-        results.push({ seed: seed, canvas: c, w: resp.width, h: resp.height,
-                       emb: emb, resid: null, score: score, batch: batch,
-                       accepted: false });
-        results.sort((a, b) => b.score - a.score);
-        renderGrid();
-        done++;
-        next();
-      });
-    })();
+    const name = 'identity_' + identity.seed + '_' + identity.w + 'x' + identity.h + '.json';
+    const path = window.showSaveFileDialog('Krea 2 identity|json', name);
+    if (!path) return;
+    ctx.client.send({ type: 'identNoiseExport' }, (err, resp) => {
+      if (err) { status('export failed: ' + err.message, 'err'); return; }
+      try {
+        require('fs').writeFileSync(path, JSON.stringify({
+          kind: 'krea2-identity-noise', w: resp.w, h: resp.h, seed: resp.seed,
+          gens: identity.gens, data: f32ToB64(resp.data),
+        }));
+        status('identity saved → ' + path, 'ok');
+      } catch (e) { status('save failed: ' + (e.message || e), 'err'); }
+    });
   }
 
-  function clearIdentityModel() {
+  function loadIdentity() {
+    if (ctx.busy) return;
+    if (typeof window.showOpenFileDialog !== 'function') {
+      status('file dialog unavailable in this build', 'err'); return;
+    }
+    const files = window.showOpenFileDialog('Krea 2 identity|json');
+    if (!files || !files.length) return;
+    let obj;
+    try { obj = JSON.parse(require('fs').readFileSync(files[0], 'utf8')); }
+    catch (e) { status('load failed: ' + (e.message || e), 'err'); return; }
+    if (!obj || obj.kind !== 'krea2-identity-noise' || !obj.data) {
+      status('not an identity file: ' + files[0], 'err'); return;
+    }
+    ctx.client.send({ type: 'identNoiseImport', data: b64ToF32(obj.data),
+                      w: obj.w, h: obj.h, seed: obj.seed }, (err, resp) => {
+      if (err) { status('import failed: ' + err.message, 'err'); return; }
+      identity = { w: resp.w, h: resp.h, seed: resp.seed, gens: obj.gens || 0 };
+      renderIdentityMeta();
+      status('identity loaded (' + identity.w + '×' + identity.h + ') — turn on "use identity"', 'ok');
+    });
+  }
+
+  function clearAll() {
     exemplars = [];
-    recomputeCentroids();
+    probes = [];
+    recomputeCentroid();
     renderExemplars();
+    renderProbes();
+    $('ids-grid').innerHTML = '';
+    $('ids-identity').innerHTML = '';
+    if (identity) {
+      ctx.client.send({ type: 'identNoiseClear' }, () => {});
+      identity = null;
+    }
+    $('ids-use').checked = false;
+    renderIdentityMeta();
     ctx.refreshButtons();
-    status('identity model cleared');
+    status('identity, exemplars, and probes cleared');
   }
 
   // ── wire up ───────────────────────────────────────────────────────────────
   $('btn-ids-add').addEventListener('click', addFromCurrentRender);
-  $('btn-ids-search').addEventListener('click', doSearch);
+  $('btn-ids-probe').addEventListener('click', addProbe);
+  $('btn-ids-breed').addEventListener('click', doBreed);
   $('btn-ids-stop').addEventListener('click', () => { stopRequested = true; });
-  $('btn-ids-clear').addEventListener('click', clearIdentityModel);
-  $('ids-count').addEventListener('change', ctx.persist);
+  $('btn-ids-save').addEventListener('click', saveIdentity);
+  $('btn-ids-load').addEventListener('click', loadIdentity);
+  $('btn-ids-clear').addEventListener('click', clearAll);
+  $('ids-use').addEventListener('change', () => {
+    ctx.persist();
+    if (ctx.live && ctx.loaded) ctx.schedule('full');
+  });
+  ['ids-pop', 'ids-gens', 'ids-drift'].forEach((id) => {
+    $(id).addEventListener('change', ctx.persist);
+  });
 
-  ctx.onPersist((p) => { p.idsCount = $('ids-count').value; });
+  // Every Generate starts from the bred latent while "use identity" is on —
+  // the whole point: walk the axes, the character carries.
+  ctx.onGenerateMsg((msg) => {
+    if ($('ids-use').checked && identity) msg.opts.identNoise = 'current';
+  });
+  ctx.onPersist((p) => {
+    p.idsPop = $('ids-pop').value;
+    p.idsGens = $('ids-gens').value;
+    p.idsDrift = $('ids-drift').value;
+  });
   ctx.onRefreshButtons((busyOrUnloaded) => {
     $('btn-ids-add').disabled = busyOrUnloaded;
-    $('btn-ids-search').disabled = busyOrUnloaded;
-    $('btn-ids-stop').disabled = !searching;
-    $('btn-ids-clear').disabled = searching || !exemplars.length;
+    $('btn-ids-probe').disabled = busyOrUnloaded;
+    $('btn-ids-breed').disabled = busyOrUnloaded;
+    $('btn-ids-stop').disabled = !breeding;
+    $('btn-ids-save').disabled = !identity || ctx.busy;
+    $('btn-ids-load').disabled = ctx.busy;
+    $('btn-ids-clear').disabled = breeding ||
+      (!identity && !exemplars.length && !probes.length);
+    $('ids-use').disabled = !identity;
   });
 
   renderExemplars();
-  renderGrid();
+  renderProbes();
+  renderIdentityMeta();
 }
