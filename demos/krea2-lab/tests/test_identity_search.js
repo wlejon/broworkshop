@@ -145,8 +145,15 @@ for (let i = 0; i < identCells.length; i++) {
 
 // ── "use identity": Generate starts from the bred latent ────────────────────
 assert(!$('ids-use').disabled, 'use-identity toggle enabled after breeding');
-$('ids-use').click();
-assert($('ids-use').checked, 'use identity on');
+assert($('ids-use').checked, 'use identity AUTO-enabled by the breed');
+assert($('ids-plan').textContent.indexOf('renders') >= 0,
+       'planned render count shown: ' + $('ids-plan').textContent);
+let chipFound = false;
+const chips = document.querySelectorAll('.deck-chip');
+for (let i = 0; i < chips.length; i++) {
+  if (chips[i].textContent.indexOf('bred identity') >= 0) chipFound = true;
+}
+assert(chipFound, 'active-controls deck shows the bred-identity chip');
 console.log('rendering with the bred identity…');
 generateOk('identity render (neutral)');
 assert($('timing').textContent.indexOf('bred identity latent') >= 0,
@@ -169,5 +176,53 @@ assert(pumpUntil(() => $('status-text').classList.contains('err'), 60000),
 assert($('status-text').textContent.indexOf('bred at') >= 0,
        'guard names the bred size: ' + $('status-text').textContent);
 $('width').value = '512';
+
+// ── the one-button flow: clear everything, just press Breed ──────────────────
+// Exemplar comes from the current render, probes from the default set; the
+// scorer reloads after its post-breed dispose. Tiny run: 1 gen × 3 rows ×
+// 3 auto probes + 3 = 12 renders.
+$('btn-ids-clear').click();
+assert(document.querySelectorAll('.ids-ex').length === 0, 'model cleared');
+assert(document.querySelectorAll('.ids-probe').length === 0, 'probes cleared');
+assert(!$('ids-use').checked, 'use identity off after clear');
+$('ids-pop').value = '2';
+$('ids-gens').value = '1';
+$('btn-ids-breed').click();
+console.log('one-button breed (auto exemplar + auto probes)…');
+assert(pumpUntil(() => $('ids-status').textContent.indexOf('breed done') === 0 ||
+                       $('ids-status').classList.contains('err'), 600000),
+       'auto breed finished (status: ' + $('ids-status').textContent + ')');
+assert(!$('ids-status').classList.contains('err'),
+       'auto breed ok: ' + $('ids-status').textContent);
+assert(document.querySelectorAll('.ids-ex').length === 1,
+       'exemplar auto-added from the current render');
+const autoProbes = document.querySelectorAll('.ids-probe');
+assert(autoProbes.length === 3, 'default probe set built (got ' + autoProbes.length + ')');
+let autoLabeled = 0;
+for (let i = 0; i < autoProbes.length; i++) {
+  if (autoProbes[i].textContent.indexOf('auto') >= 0) autoLabeled++;
+}
+assert(autoLabeled === 3, 'auto probes labelled as such');
+assert($('ids-use').checked, 'use identity auto-enabled again');
+const autoCells = document.querySelectorAll('#ids-identity .ids-strip canvas');
+assert(autoCells.length === 3, 'identity strip covers all three auto probes');
+for (let i = 0; i < autoCells.length; i++) {
+  autoCells[i].onclick();
+  saveView('auto_probe_' + (i + 1));
+}
+
+// ── history "exemplar" action feeds the model directly ──────────────────────
+const histBtns = document.querySelectorAll('.hist-actions button');
+let exBtn = null;
+for (let i = 0; i < histBtns.length; i++) {
+  if (histBtns[i].textContent === 'exemplar') { exBtn = histBtns[i]; break; }
+}
+assert(exBtn, 'history cards offer an exemplar action');
+exBtn.click();
+assert(pumpUntil(() => $('ids-status').textContent.indexOf('exemplar added') === 0 ||
+                       $('ids-status').classList.contains('err'), 300000),
+       'history exemplar embedded (status: ' + $('ids-status').textContent + ')');
+assert(document.querySelectorAll('.ids-ex').length === 2,
+       'model grew from the history card');
 
 console.log('PASS — identity breeding works through the real UI · renders in ' + OUT_DIR);

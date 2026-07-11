@@ -393,11 +393,13 @@
               <input id="ids-pop" type="number" value="5" min="2" max="12" step="1">
             </label>
             <label class="field inline-field">generations
-              <input id="ids-gens" type="number" value="4" min="1" max="10" step="1">
+              <input id="ids-gens" type="number" value="3" min="1" max="10" step="1">
             </label>
             <label class="field inline-field">drift
               <input id="ids-drift" type="number" value="0.3" min="0.05" max="0.9" step="0.05">
             </label>
+            <span id="ids-plan" class="meta"
+                  title="generations × (population + 1 keeper) × probes, plus the final identity strip"></span>
             <button id="btn-ids-breed" class="primary" disabled
                     title="Evolve the identity noise: drift children each generation, keep what stays the same character across every probe">Breed</button>
             <button id="btn-ids-stop" disabled
@@ -430,7 +432,7 @@
             <div id="ids-grid" class="ids-grid"></div>
           </div>
           <div class="status-bar">
-            <span id="ids-status">render the character · + exemplar · shift the scene and + probe each look · breed</span>
+            <span id="ids-status">render the character, then just press Breed — exemplar and probes fill in automatically (customize either first if you like)</span>
             <span class="grow"></span>
             <span id="ids-timing" class="meta"></span>
           </div>

@@ -516,9 +516,10 @@ details[open] > .ctl-cat::before { content: '▾ '; }
 }
 .ids-probe {
   position: relative; display: flex; align-items: center; gap: 6px;
-  padding: 4px 10px; font-size: 12px; color: #b8c2d4;
+  padding: 4px 10px 4px 4px; font-size: 12px; color: #b8c2d4;
   background: #12161e; border: 1px solid #2a3550; border-radius: 12px;
 }
+.ids-probe canvas { display: block; border-radius: 8px; }
 .ids-probe .ids-ex-x { position: static; width: 16px; height: 16px; }
 .ids-identity { display: flex; flex-direction: column; gap: 8px; }
 .ids-identity .ids-strip { border-color: #3a4a70; background: #0d1220; }

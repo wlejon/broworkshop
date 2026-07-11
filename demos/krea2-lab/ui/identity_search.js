@@ -101,6 +101,26 @@ export function initIdentitySearch(ctx) {
     } catch (e) { fail(e.message || e); }
   }
 
+  // Breeding runs the 18 GB pipeline and the ~3 GB scorer back-to-back on
+  // the same card — measured peak 23.7/24 GB at 1024², which fits headless
+  // but OOMs windowed once the desktop takes its share. Two disciplines keep
+  // the peak down: trim the allocator between the render and embed phases
+  // (each re-allocates its own scratch instead of both staying cached), and
+  // free the scorer's weights entirely when a breed finishes (it lazy-loads
+  // again in a few seconds on the next use).
+  function gpuTrim() {
+    try { bro.gpu.trim('cuda'); } catch (e) { /* CPU build / no trimmer */ }
+  }
+  function releaseScorer() {
+    if (!scorer.ready) return;
+    try { if (scorer.dino && scorer.dino.dispose) scorer.dino.dispose(); } catch (e) {}
+    try { if (scorer.rembg && scorer.rembg.dispose) scorer.rembg.dispose(); } catch (e) {}
+    scorer.dino = null;
+    scorer.rembg = null;
+    scorer.ready = false;
+    gpuTrim();
+  }
+
   function unit(v) {
     let n = 0;
     for (let i = 0; i < v.length; i++) n += v[i] * v[i];
@@ -214,26 +234,33 @@ export function initIdentitySearch(ctx) {
     });
   }
 
+  // Embed any canvas into the model — the "+ exemplar" button (current view)
+  // and the history cards' "exemplar" action (ctx.addIdentityExemplar) both
+  // land here.
+  function embedAndAddExemplar(canvas, w, h) {
+    ensureScorer(() => {
+      ctx.setBusy(true);
+      status('embedding exemplar…');
+      let emb;
+      try { emb = embedIdentity(canvas); }
+      catch (e) {
+        ctx.setBusy(false);
+        status('embed failed: ' + (e.message || e), 'err');
+        return;
+      }
+      addExemplar(canvas, w, h, emb);
+      ctx.setBusy(false);
+      status('exemplar added (' + exemplars.length + ')', 'ok');
+    });
+  }
+
   function addFromCurrentRender() {
     const view = $('view');
     if (view.style.display === 'none' || !ctx.history.length) {
       status('render something first — the current render becomes the exemplar', 'err');
       return;
     }
-    ensureScorer(() => {
-      ctx.setBusy(true);
-      status('embedding exemplar…');
-      let emb;
-      try { emb = embedIdentity(view); }
-      catch (e) {
-        ctx.setBusy(false);
-        status('embed failed: ' + (e.message || e), 'err');
-        return;
-      }
-      addExemplar(view, view.width, view.height, emb);
-      ctx.setBusy(false);
-      status('exemplar added (' + exemplars.length + ')', 'ok');
-    });
+    embedAndAddExemplar(view, view.width, view.height);
   }
 
   // ── probes (the condition sets resilience is scored against) ──────────────
@@ -263,11 +290,25 @@ export function initIdentitySearch(ctx) {
     return parts.length ? parts.join(' · ') : 'neutral';
   }
 
+  // Thumbnail of what the canvas shows right now — the chip label alone
+  // ("drama+1.5") doesn't say what the look IS.
+  function viewThumb() {
+    const view = $('view');
+    if (view.style.display === 'none' || !ctx.history.length) return null;
+    const thumb = document.createElement('canvas');
+    const s = 40 / view.height;
+    thumb.width = Math.max(1, Math.round(view.width * s));
+    thumb.height = 40;
+    thumb.getContext('2d').drawImage(view, 0, 0, thumb.width, thumb.height);
+    return thumb;
+  }
+
   function addProbe() {
     if (!ctx.loaded) return;
     const msg = captureMsg();
-    probes.push({ id: ++probeSeq, label: probeLabel(msg), msg: msg });
+    probes.push({ id: ++probeSeq, label: probeLabel(msg), msg: msg, thumb: viewThumb() });
     renderProbes();
+    refreshPlan();
     ctx.refreshButtons();
     status('probe captured — breeding scores the identity at every probe', 'ok');
   }
@@ -275,6 +316,7 @@ export function initIdentitySearch(ctx) {
   function removeProbe(id) {
     probes = probes.filter((p) => p.id !== id);
     renderProbes();
+    refreshPlan();
     ctx.refreshButtons();
   }
 
@@ -284,14 +326,15 @@ export function initIdentitySearch(ctx) {
     if (!probes.length) {
       const e = document.createElement('div');
       e.className = 'ids-empty';
-      e.textContent = 'No probes — breeding scores at the current conditions only. ' +
-                      'Shift the scene (axes, prompt), then "+ probe" each look the identity must survive.';
+      e.textContent = 'No probes — Breed builds a default set (this look + closeup + dramatic). ' +
+                      'To choose your own: shift the scene, then "+ probe" each look the identity must survive.';
       host.appendChild(e);
       return;
     }
     probes.forEach((p) => {
       const chip = document.createElement('div');
       chip.className = 'ids-probe';
+      if (p.thumb) chip.appendChild(p.thumb);
       const label = document.createElement('span');
       label.textContent = p.label;
       label.title = p.msg.prompt;
@@ -304,6 +347,15 @@ export function initIdentitySearch(ctx) {
     });
   }
 
+  // Planned render count for the current knobs — breeding cost is the thing
+  // to budget (VRAM headroom and minutes), so say it up front.
+  function refreshPlan() {
+    const P = Math.round(+$('ids-pop').value || 5);
+    const G = Math.round(+$('ids-gens').value || 4);
+    const n = Math.max(1, probes.length);
+    $('ids-plan').textContent = '= ' + (G * (P + 1) * n + n) + ' renders';
+  }
+
   // ── identity meta + final strip ────────────────────────────────────────────
   function renderIdentityMeta() {
     $('ids-ident-meta').textContent = identity
@@ -311,6 +363,7 @@ export function initIdentitySearch(ctx) {
         ' · ' + identity.gens + ' generation' + (identity.gens === 1 ? '' : 's') + ' bred'
       : 'none — breeding starts one from the current seed';
     ctx.refreshButtons();
+    ctx.refreshDeck();   // the "bred identity" chip keys off identity + the toggle
   }
 
   // ── strips (one row = one noise candidate across all probes) ──────────────
@@ -375,6 +428,7 @@ export function initIdentitySearch(ctx) {
         let s;
         try { s = dot(embedIdentity(c), centroid); }
         catch (e) { onDone(null, e); return; }
+        gpuTrim();   // return the embed scratch before the next render allocates
         strip.addCell(c, resp.width, resp.height, p.label + ' · identity ' + s.toFixed(3));
         sum += s;
         pi++;
@@ -412,8 +466,28 @@ export function initIdentitySearch(ctx) {
       $('ids-drift').value = String(eps);
       ctx.persist();
 
-      const probeSet = probes.length ? probes.slice()
-        : [{ id: 0, label: 'current conditions', msg: captureMsg() }];
+      // No probes captured? Build the default set right here, as visible,
+      // removable chips — the current look anchors the identity, and two
+      // canonical hard shifts (a face-filling closeup, a full mood swing)
+      // give the breed something real to survive. Knowing which axes to walk
+      // shouldn't be an entry requirement.
+      if (!probes.length) {
+        const anchor = captureMsg();
+        probes.push({ id: ++probeSeq, label: probeLabel(anchor) + ' · auto',
+                      msg: anchor, thumb: viewThumb() });
+        [{ key: 'composition.proximity', delta: 3.5 },
+         { key: 'mood.drama', delta: 4 }].forEach((shift) => {
+          const msg = captureMsg();
+          msg.axisControls = Object.assign({}, msg.axisControls);
+          msg.axisControls[shift.key] =
+            (+msg.axisControls[shift.key] || 0) + shift.delta;
+          probes.push({ id: ++probeSeq, label: probeLabel(msg) + ' · auto',
+                        msg: msg, thumb: null });
+        });
+        renderProbes();
+        refreshPlan();
+      }
+      const probeSet = probes.slice();
       const w = +probeSet[0].msg.opts.width, h = +probeSet[0].msg.opts.height;
       for (const p of probeSet) {
         if (+p.msg.opts.width !== w || +p.msg.opts.height !== h) {
@@ -436,11 +510,15 @@ export function initIdentitySearch(ctx) {
       $('ids-grid').innerHTML = '';
       $('ids-identity').innerHTML = '';
       const t0 = Date.now();
-      const perGen = (P + 1) * probeSet.length;
-      const total = G * perGen + probeSet.length;
+      const total = G * (P + 1) * probeSet.length + probeSet.length;
       let rendered = 0;
-      const tick = (what) => status('breeding · ' + what + ' · render ' +
-                                    (++rendered) + '/' + total);
+      const tick = (what) => {
+        const elapsed = (Date.now() - t0) / 1000;
+        const eta = rendered > 0 ? Math.round((total - rendered) * (elapsed / rendered)) : 0;
+        status('breeding · ' + what + ' · render ' + (rendered + 1) + '/' + total +
+               (eta ? ' · ~' + (eta > 90 ? Math.round(eta / 60) + ' min' : eta + ' s') +
+                      ' left' : ''));
+      };
 
       const start = (next) => {
         if (identity) { next(); return; }
@@ -463,15 +541,22 @@ export function initIdentitySearch(ctx) {
         const strip = makeStrip($('ids-identity'), 'identity');
         scoreRow(strip, 'current', probeSet, (score, err) => {
           breeding = false;
+          // The scorer's ~3 GB goes back to the card until the next breed —
+          // interactive rendering with "use identity" shouldn't pay for it.
+          releaseScorer();
           ctx.setBusy(false);
           ctx.refreshButtons();
           $('ids-timing').textContent = Math.round((Date.now() - t0) / 1000) + ' s';
           if (err) { status('breed finished but the identity strip failed: ' + (err.message || err), 'err'); return; }
           if (score != null) strip.setScore(score);
+          // Breeding's whole point is to render with the result — arm it.
+          $('ids-use').checked = true;
+          ctx.persist();
           status('breed ' + (aborted ? 'stopped' : 'done') + ' · identity scores ' +
                  (score != null ? score.toFixed(3) : '—') + ' across ' +
                  probeSet.length + ' probe' + (probeSet.length === 1 ? '' : 's') +
-                 ' — turn on "use identity" and walk the axes', 'ok');
+                 ' · "use identity" is ON — walk the axes, the character carries', 'ok');
+          if (ctx.live && ctx.loaded) ctx.schedule('full');
           ctx.pump();
         });
       };
@@ -503,11 +588,11 @@ export function initIdentitySearch(ctx) {
           if (stopRequested) { finish(true); return; }
           if (ri >= rows.length) { adopt(); return; }
           const row = rows[ri];
-          tick('gen ' + g + ' · ' + row.label);
-          rendered += probeSet.length - 1;   // tick counts one; the row renders all probes
+          tick('generation ' + g + '/' + G + ' · ' + row.label);
           const strip = makeStrip(genHost, row.label);
           row.strip = strip;
           scoreRow(strip, row.id, probeSet, (meanScore, err) => {
+            rendered += probeSet.length;
             if (err) { breedFail(err); return; }
             if (meanScore == null) { finish(true); return; }
             row.score = meanScore;
@@ -611,13 +696,33 @@ export function initIdentitySearch(ctx) {
     if (ctx.live && ctx.loaded) ctx.schedule('full');
   });
   ['ids-pop', 'ids-gens', 'ids-drift'].forEach((id) => {
-    $(id).addEventListener('change', ctx.persist);
+    $(id).addEventListener('change', () => { refreshPlan(); ctx.persist(); });
   });
 
   // Every Generate starts from the bred latent while "use identity" is on —
   // the whole point: walk the axes, the character carries.
   ctx.onGenerateMsg((msg) => {
     if ($('ids-use').checked && identity) msg.opts.identNoise = 'current';
+  });
+  // History cards feed the model directly ("exemplar" action in render.js).
+  ctx.addIdentityExemplar = (canvas, w, h) => {
+    if (ctx.busy) return;
+    ctx.switchTab('idsearch');
+    embedAndAddExemplar(canvas, w, h);
+  };
+  // The toggle joins the Active Controls deck like any other shaping control
+  // — "what is forming this image" must include the bred latent.
+  ctx.registerDeckEntry({
+    section: 'idsearch',
+    active: () => $('ids-use').checked && !!identity,
+    chip: () => 'bred identity',
+    chipValue: () => identity ? 'seed ' + identity.seed : '',
+    zero: (opts) => {
+      $('ids-use').checked = false;
+      ctx.persist();
+      if ((!opts || !opts.silent) && ctx.live && ctx.loaded) ctx.schedule('full');
+    },
+    reveal: () => ctx.switchTab('idsearch'),
   });
   ctx.onPersist((p) => {
     p.idsPop = $('ids-pop').value;
@@ -638,5 +743,6 @@ export function initIdentitySearch(ctx) {
 
   renderExemplars();
   renderProbes();
+  refreshPlan();
   renderIdentityMeta();
 }
