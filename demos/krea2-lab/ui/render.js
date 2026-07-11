@@ -163,17 +163,11 @@ export function initRender(ctx) {
       const save = document.createElement('button');
       save.className = 'link'; save.textContent = 'save';
       save.addEventListener('click', () => saveHistoryImage(h));
-      const exemplar = document.createElement('button');
-      exemplar.className = 'link'; exemplar.textContent = 'exemplar';
-      exemplar.title = 'add this render to the identity model (Identity Search tab)';
-      exemplar.addEventListener('click', () => {
-        if (ctx.addIdentityExemplar) ctx.addIdentityExemplar(h.canvas, h.w, h.h);
-      });
       const del = document.createElement('button');
       del.className = 'link hist-del'; del.textContent = 'delete';
       del.title = 'remove this render from history';
       del.addEventListener('click', () => deleteHistoryEntry(h.id));
-      actions.appendChild(save); actions.appendChild(exemplar); actions.appendChild(del);
+      actions.appendChild(save); actions.appendChild(del);
       body.appendChild(metaRow); body.appendChild(actions);
       item.appendChild(h.canvas); item.appendChild(body);
       list.appendChild(item);

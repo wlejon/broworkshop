@@ -49,7 +49,6 @@ import { initMint } from "/app/ui/mint.js";
 import { initLora } from "/app/ui/lora.js";
 import { initGate } from "/app/ui/gate.js";
 import { initSpatial } from "/app/ui/spatial.js";
-import { initIdentitySearch } from "/app/ui/identity_search.js";
 import { initRender } from "/app/ui/render.js";
 import { initModel } from "/app/ui/model.js";
 
@@ -221,7 +220,6 @@ function init() {
         (resp.exprNeutral ? ' · field vs “' + resp.exprNeutral + '”' : '') +
         (resp.spectrumNote ? ' · ' + resp.spectrumNote : '') +
         (resp.identityNote ? ' · ' + resp.identityNote : '') +
-        (resp.noiseNote ? ' · ' + resp.noiseNote : '') +
         (quality === 'preview' ? ' · preview' : '');
       pump();
     });
@@ -247,7 +245,6 @@ function init() {
   initLora(ctx);
   initGate(ctx);
   initSpatial(ctx);
-  initIdentitySearch(ctx);
 
   // character counters (entered / max) for the prompt fields
   function bindCounter(taId, countId) {

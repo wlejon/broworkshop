@@ -277,10 +277,6 @@ export function initControls(ctx) {
   ctx.switchSection = switchSection;
   ctx.switchTab = switchTab;
   ctx.registryLast = () => registry[registry.length - 1];
-  // A deck entry with no slider row behind it (e.g. the bred-identity toggle
-  // lives on a tab, not the rail). Same shape as buildCtl's registry push;
-  // sections outside the rail's five just skip the tab-dot counting.
-  ctx.registerDeckEntry = (entry) => { registry.push(entry); };
   ctx.onDeckRefresh = (fn) => deckHooks.push(fn);
   Object.defineProperty(ctx, 'activeSection', { get: () => activeSection });
   ctx.onPersist((p) => { p.section = activeSection; });

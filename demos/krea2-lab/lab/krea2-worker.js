@@ -44,21 +44,6 @@
 //        <- identitySet   {tokens}           (valid vision-token count)
 //   main -> clearIdentity {}
 //        <- identityCleared {}
-//   main -> identNoiseInit  {prompt, opts, seed}  (identity := that seed's noise)
-//        <- identNoiseReady {seed, w, h, n}
-//   main -> identNoiseChild {eps, rngSeed}   (candidate mixture for one generation)
-//        <- identNoiseChildMade {id}
-//   main -> identNoiseAdopt {ids}            (identity := renormed elite mean;
-//        <- identNoiseAdopted {used}          'current' names the identity itself)
-//   main -> identNoiseExport {}              (buffer out, for save-to-file)
-//        <- identNoiseData  {data, w, h, seed}
-//   main -> identNoiseImport {data, w, h, seed}
-//        <- identNoiseImported {n, w, h, seed}
-//   main -> identNoiseClear {}
-//        <- identNoiseCleared {}
-//   generate/spatialRender opts may carry identNoise: 'current' | <child id> —
-//   resolved worker-side to opts.initNoise (the bred latent); sizes must match
-//   the bred w x h.
 //
 // `expression` is {adj, alpha} — the contextual per-token field (ported from
 // sana-research/dictionary.py, validated on Krea 2 in the emotion-axes probes):
@@ -143,18 +128,6 @@ var dictAxes = [];     // the loaded dictionary's axis names (the named bank
 var identityRef = null; // cached identity-transport reference: {taps: {embeds,
                         // mask}, tokens} from setIdentity's vision-tower encode
                         // (~125 MB — one at a time). Cleared on model load.
-
-// ── bred identity noise (the identity-breeding loop's latent store) ────────
-// The identity IS the initial latent: research showed each seed carries a
-// character, so the character is made a first-class crafted object — a noise
-// field, seeded from a real pipeline seed and refined by mixing in small
-// fresh-Gaussian drifts and keeping the mixtures that score as the same
-// character across probe conditions. ui/identity_search.js runs the loop;
-// this side owns the buffers (nothing large crosses the wire per child).
-// Survives model reloads (it's just math); per-latent-SIZE like any seed.
-var identNoise = null;     // {data: Float32Array, w, h, seed}
-var identChildren = {};    // id -> Float32Array (candidate mixtures, one generation)
-var identChildSeq = 0;
 
 // The 6 fixed scenes krea-research's mint_text_axis() averages a text-pair
 // diff over (axis_factory.py's SCENES[:6]) — robustifies the direction
@@ -577,29 +550,7 @@ function syncLoraScales(scales) {
 // technique needs it. Since brodiffusion carries the prepared conditioning
 // ON the state (PipelineState.prepared), states primed here can be stepped
 // interleaved — each denoises under its own conditioning.
-// Resolve opts.identNoise ('current' or a child id) to a real initNoise
-// buffer. Lives here so EVERY technique that primes a state — generate,
-// spatial paint's dual states — honors the bred identity. Sizes must match:
-// noise is drawn per-latent-size, so an identity bred at 512x512 is a
-// different field (a different character) at any other size.
-function resolveIdentNoise(msg) {
-  var opts = msg.opts || {};
-  if (opts.identNoise == null) return msg;
-  if (!identNoise) throw new Error('identity noise requested but none is set');
-  var buf = opts.identNoise === 'current' ? identNoise.data
-                                          : identChildren[opts.identNoise];
-  if (!buf) throw new Error('identity noise child ' + opts.identNoise + ' not found');
-  if (+opts.width !== identNoise.w || +opts.height !== identNoise.h) {
-    throw new Error('identity noise is bred at ' + identNoise.w + 'x' + identNoise.h +
-                    ' — render at that size or re-breed (noise is drawn per-size)');
-  }
-  var o = Object.assign({}, opts, { initNoise: buf });
-  delete o.identNoise;
-  return Object.assign({}, msg, { opts: o });
-}
-
 function primeState(msg) {
-  msg = resolveIdentNoise(msg);
   applyAxisControls(msg.axisControls || {});
   var taps = buildTaps(msg);
   // NB: krea2PrimeFromTaps(embeds, mask, opts, uncondEmbeds?, uncondMask?) —
@@ -679,14 +630,12 @@ function handleGenerate(msg) {
     if (!pipeline) throw new Error('no model loaded');
     var t0 = now();
     var opts = Object.assign({}, msg.opts || {}, { negativePrompt: msg.negPrompt || '' });
-    var usedIdentNoise = opts.identNoise != null;
     runGeneration(Object.assign({}, msg, { opts: opts }), function (img, gates, taps) {
       var extra = {};
       if (gates) extra.gates = gates;
       if (taps && taps.neutral) extra.exprNeutral = taps.neutral;
       if (taps && taps.note) extra.spectrumNote = taps.note;
       if (taps && taps.identityNote) extra.identityNote = taps.identityNote;
-      if (usedIdentNoise) extra.noiseNote = 'bred identity latent';
       respondImage('done', img, Math.round(now() - t0), extra);
     });
   } catch (e) {
@@ -1025,134 +974,6 @@ function handleClearIdentity() {
   self.postMessage({ type: 'identityCleared' });
 }
 
-// ── bred identity noise ──────────────────────────────────────────────────
-// xorshift128 + Box-Muller. Perturbation directions only need to be white
-// Gaussian — they never have to reproduce a model seed — so a JS RNG is
-// fine. The identity itself starts from a REAL pipeline noise field
-// (identNoiseInit) so it renders exactly the reference seed's character.
-function makeRng(seed) {
-  var x = (seed >>> 0) || 1, y = 0x9e3779b9, z = 0x85ebca6b, w = 0xc2b2ae35;
-  return function () {
-    var t = (x ^ (x << 11)) >>> 0;
-    x = y; y = z; z = w;
-    w = ((w ^ (w >>> 19)) ^ (t ^ (t >>> 8))) >>> 0;
-    return w / 4294967296;
-  };
-}
-function gaussFill(out, seed) {
-  var rnd = makeRng(seed);
-  for (var i = 0; i < out.length; i += 2) {
-    var u = 0;
-    while (u === 0) u = rnd();
-    var r = Math.sqrt(-2 * Math.log(u)), th = 2 * Math.PI * rnd();
-    out[i] = r * Math.cos(th);
-    if (i + 1 < out.length) out[i + 1] = r * Math.sin(th);
-  }
-}
-// Empirical zero-mean/unit-std renorm. Mixing keeps fields near-unit already
-// (sqrt(1-eps^2)^2 + eps^2 == 1) but elite means shrink variance (their
-// shared component doesn't average out); renorming every write stops drift.
-function renormField(f) {
-  var n = f.length, mean = 0, i, d;
-  for (i = 0; i < n; i++) mean += f[i];
-  mean /= n;
-  var varsum = 0;
-  for (i = 0; i < n; i++) { d = f[i] - mean; varsum += d * d; }
-  var inv = 1 / (Math.sqrt(varsum / n) || 1e-9);
-  for (i = 0; i < n; i++) f[i] = (f[i] - mean) * inv;
-  return f;
-}
-
-// Seed the identity from a real pipeline noise field: a just-primed state's
-// latent IS the seed's raw noise (FlowMatch init_noise_sigma == 1); the
-// conditioning encode is throwaway. msg carries prompt + opts (width/height/
-// steps) shaped like a generate message, plus the seed to draw.
-function handleIdentNoiseInit(msg) {
-  try {
-    if (!pipeline) throw new Error('no model loaded');
-    var opts = Object.assign({}, msg.opts || {}, { seed: msg.seed });
-    delete opts.identNoise;
-    delete opts.initNoise;
-    var state = pipeline.prime(msg.prompt || 'seed noise probe', opts);
-    identNoise = { data: new Float32Array(state.latent()),
-                   w: +opts.width, h: +opts.height, seed: msg.seed };
-    identChildren = {};
-    self.postMessage({ type: 'identNoiseReady', seed: msg.seed,
-                       w: identNoise.w, h: identNoise.h, n: identNoise.data.length });
-  } catch (e) {
-    fail('identNoiseInit', e);
-  }
-}
-
-// One candidate mixture: drift the identity toward a fresh Gaussian field.
-// eps is the mixing weight (cos to the parent = sqrt(1-eps^2)).
-function handleIdentNoiseChild(msg) {
-  try {
-    if (!identNoise) throw new Error('no identity noise — start one first');
-    var eps = Math.max(0, Math.min(0.95, +msg.eps || 0.3));
-    var a = Math.sqrt(1 - eps * eps);
-    var g = new Float32Array(identNoise.data.length);
-    gaussFill(g, msg.rngSeed);
-    var C = identNoise.data;
-    for (var i = 0; i < g.length; i++) g[i] = a * C[i] + eps * g[i];
-    renormField(g);
-    var id = ++identChildSeq;
-    identChildren[id] = g;
-    self.postMessage({ type: 'identNoiseChildMade', id: id });
-  } catch (e) {
-    fail('identNoiseChild', e);
-  }
-}
-
-// Adopt: the identity becomes the renormed mean of the given children ('current'
-// names the identity itself, so a generation where the keeper wins is a no-op
-// mathematically). Children die with the generation.
-function handleIdentNoiseAdopt(msg) {
-  try {
-    if (!identNoise) throw new Error('no identity noise');
-    var ids = msg.ids || [];
-    var n = identNoise.data.length;
-    var acc = new Float32Array(n), used = 0;
-    for (var k = 0; k < ids.length; k++) {
-      var buf = ids[k] === 'current' ? identNoise.data : identChildren[ids[k]];
-      if (!buf) continue;
-      for (var i = 0; i < n; i++) acc[i] += buf[i];
-      used++;
-    }
-    if (!used) throw new Error('identNoiseAdopt: no live ids');
-    identNoise.data = renormField(acc);
-    identChildren = {};
-    self.postMessage({ type: 'identNoiseAdopted', used: used });
-  } catch (e) {
-    fail('identNoiseAdopt', e);
-  }
-}
-
-function handleIdentNoiseExport() {
-  if (!identNoise) { fail('identNoiseExport', new Error('no identity noise')); return; }
-  self.postMessage({ type: 'identNoiseData', data: new Float32Array(identNoise.data),
-                     w: identNoise.w, h: identNoise.h, seed: identNoise.seed || 0 });
-}
-
-function handleIdentNoiseImport(msg) {
-  try {
-    if (!msg.data || !msg.data.length) throw new Error('identNoiseImport: empty data');
-    identNoise = { data: new Float32Array(msg.data),
-                   w: +msg.w, h: +msg.h, seed: msg.seed || 0 };
-    identChildren = {};
-    self.postMessage({ type: 'identNoiseImported', n: identNoise.data.length,
-                       w: identNoise.w, h: identNoise.h, seed: identNoise.seed });
-  } catch (e) {
-    fail('identNoiseImport', e);
-  }
-}
-
-function handleIdentNoiseClear() {
-  identNoise = null;
-  identChildren = {};
-  self.postMessage({ type: 'identNoiseCleared' });
-}
-
 function handleRemoveControl(msg) {
   try {
     if (pipeline && msg.name) pipeline.removeControl(msg.name);
@@ -1214,12 +1035,6 @@ self.onmessage = function (e) {
     case 'registerAxis':   handleRegisterAxis(msg); break;
     case 'setIdentity':    handleSetIdentity(msg); break;
     case 'clearIdentity':  handleClearIdentity(); break;
-    case 'identNoiseInit':   handleIdentNoiseInit(msg); break;
-    case 'identNoiseChild':  handleIdentNoiseChild(msg); break;
-    case 'identNoiseAdopt':  handleIdentNoiseAdopt(msg); break;
-    case 'identNoiseExport': handleIdentNoiseExport(); break;
-    case 'identNoiseImport': handleIdentNoiseImport(msg); break;
-    case 'identNoiseClear':  handleIdentNoiseClear(); break;
     case 'removeControl':  handleRemoveControl(msg); break;
     case 'applyLora':      handleApplyLora(msg); break;
     case 'setLoras':       handleSetLoras(msg); break;
