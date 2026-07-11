@@ -4,8 +4,13 @@
 // tap band dial, an 18-axis conditioning-space control bank (+ user-minted
 // axes), attention-gate scale/mask, per-region spatial-paint compositing,
 // and the expression panel — contextual per-token fields (sana-research's
-// dictionary.py technique on Krea 2's taps seam): named emotion sliders plus
-// a custom-word slider, one field per render, exclusive by design.
+// dictionary.py technique on Krea 2's taps seam): a word picker (the field is
+// exclusive by construction — one splice per render) driving one strength
+// slider.
+// The rail is sectioned (scene / face / look / mint / tune) with a pinned
+// "deck" at its foot: one chip per non-neutral control across every section
+// (click → jump to it, × → neutral), plus Generate — the "what is shaping
+// this image" view that a 40-slider instrument otherwise loses.
 // The spectrum panel sits on top of that: the four model-nominated affect
 // axes (valence/arousal/hostility/surprise sliders) from the round-6
 // probe's SVD of ~100 farmed word fields — minted per prompt in the worker,
@@ -232,7 +237,8 @@ function init() {
   // The contextual per-token field (worker's `expression` message field):
   // splice the adjective into the live prompt, diff against a mask-aligned
   // neutral, extrapolate. One field per render (the splice fixes the
-  // tokenization), so the sliders are EXCLUSIVE — moving one zeroes the rest.
+  // tokenization), so the control is EXCLUSIVE by construction — the UI is a
+  // word picker (radio chips + a custom word) driving ONE strength slider.
   // alpha 1 == what saying the word does; identity drifts at the top end.
   const EXPRESSIONS = [
     { key: 'happiness', label: 'happiness', adj: 'joyfully smiling' },
@@ -246,9 +252,31 @@ function init() {
     { key: 'smirk',     label: 'smirk',     adj: 'smirking' },
     { key: 'wink',      label: 'wink',      adj: 'winking' },
   ];
-  let exprStrengths = (prefs.exprStrengths && typeof prefs.exprStrengths === 'object')
-    ? Object.assign({}, prefs.exprStrengths) : {};
-  let exprRows = {};   // key -> {range, refresh} incl. 'custom'
+  let exprSel = null;        // selected word key ('happiness'… | 'custom' | null)
+  let exprCtl = null;        // the strength slider's buildCtl handle
+  if (typeof prefs.exprSel === 'string' &&
+      (prefs.exprSel === 'custom' || EXPRESSIONS.some((e) => e.key === prefs.exprSel))) {
+    exprSel = prefs.exprSel;
+  }
+  let exprStrengthInit = Math.max(0, Math.min(5, +prefs.exprStrength || 0));
+  // Migrate the legacy per-word map (exclusive — at most one non-zero entry).
+  if (!exprSel && prefs.exprStrengths && typeof prefs.exprStrengths === 'object') {
+    for (const k in prefs.exprStrengths) {
+      const v = +prefs.exprStrengths[k] || 0;
+      if (v > exprStrengthInit) { exprStrengthInit = Math.min(5, v); exprSel = k; }
+    }
+  }
+
+  // ── control registry (drives the deck + section badges) ─────────────────
+  // Every scrubbable control registers here. The deck at the rail's foot
+  // shows one chip per non-neutral control — the "what's shaping this
+  // image" view — and each section tab wears its active count.
+  let registry = [];   // {section, group?, chip(), chipValue(), active(), zero(), reveal()}
+  function unregisterGroup(group) {
+    registry = registry.filter((r) => r.group !== group);
+  }
+  let activeSection = ['scene', 'face', 'look', 'mint', 'tune'].indexOf(prefs.section) >= 0
+    ? prefs.section : 'scene';
 
   // ── spectrum state (model-nominated affect axes; worker mints per prompt) ─
   const SPECTRUM_KEYS = ['valence', 'arousal', 'hostility', 'surprise'];
@@ -324,11 +352,7 @@ function init() {
   const legacySize = prefs.size != null ? +prefs.size : null;
   if (prefs.width != null) $('width').value = prefs.width; else if (legacySize) $('width').value = legacySize;
   if (prefs.height != null) $('height').value = prefs.height; else if (legacySize) $('height').value = legacySize;
-  if (prefs.dialPregate != null) $('dial-pregate').value = prefs.dialPregate;
-  if (prefs.dialPrescale != null) $('dial-prescale').value = prefs.dialPrescale;
-  if (prefs.band != null) $('band').value = prefs.band;
-  if (prefs.gateTxt != null) $('gate-txt').value = prefs.gateTxt;
-  if (prefs.gateImg != null) $('gate-img').value = prefs.gateImg;
+  // (dial/band/gate prefs are applied when their rows are built below)
   if (prefs.randSeed != null) $('rand-seed').checked = !!prefs.randSeed;
   if (prefs.spPrompt) $('sp-prompt').value = prefs.spPrompt;
   if (prefs.spSeed != null) $('sp-seed').value = prefs.spSeed;
@@ -352,10 +376,12 @@ function init() {
       gateTxt: $('gate-txt').value, gateImg: $('gate-img').value,
       axisBank: axisBank,
       axisStrengths: axisStrengths,
-      exprStrengths: exprStrengths,
+      exprSel: exprSel,
+      exprStrength: exprCtl ? +exprCtl.range.value : exprStrengthInit,
       exprCustomAdj: $('expr-custom-adj').value,
       specState: specState,
       mouthState: mouthState,
+      section: activeSection,
       mintedAxes: mintedAxes.map((m) => ({
         name: m.name, kind: m.kind, pos: m.pos, neg: m.neg, aPath: m.aPath, bPath: m.bPath,
         dir: m.dir, consistency: m.consistency,
@@ -365,6 +391,9 @@ function init() {
       randSeed: $('rand-seed').checked, seedHistory: seedHistory,
       loras: loras.map((l) => ({ path: l.path, scale: +l.scale })),
     });
+    // persist() runs on every committed control change, so it is the one
+    // choke point where "what's active" can have moved — refresh the deck.
+    refreshDeck();
   }
 
   function status(msg, kind) {
@@ -391,7 +420,204 @@ function init() {
     btn.addEventListener('click', () => switchTab(btn.getAttribute('data-tab')));
   });
 
+  // ── rail sections ────────────────────────────────────────────────────────
+  function switchSection(name) {
+    activeSection = name;
+    document.querySelectorAll('.secbtn').forEach((b) =>
+      b.classList.toggle('active', b.getAttribute('data-sec') === name));
+    document.querySelectorAll('#rail-body .sec').forEach((s) =>
+      s.classList.toggle('active', s.id === 'sec-' + name));
+    persist();
+  }
+  document.querySelectorAll('.secbtn').forEach((btn) => {
+    btn.addEventListener('click', () => switchSection(btn.getAttribute('data-sec')));
+    // per-section active-control count badge (filled by refreshDeck)
+    const dot = document.createElement('span');
+    dot.className = 'sec-dot';
+    dot.id = 'dot-' + btn.getAttribute('data-sec');
+    btn.appendChild(dot);
+  });
+
+  // ── unified control row ──────────────────────────────────────────────────
+  // One builder for every slider in the rail. Two lines: a header — either
+  // "name … value" or, for "a ↔ b" labels, the semantic-differential
+  // "a  …value…  b" with the poles at the track's ends — and the slider
+  // flanked by fine-step buttons. The row carries .on whenever the value is
+  // off-neutral, which is what makes active controls visually loud and
+  // neutral ones quiet.
+  function poleParts(label) {
+    const i = label.indexOf('↔');
+    if (i < 0) return null;
+    return { neg: label.slice(0, i).trim(), pos: label.slice(i + 1).trim() };
+  }
+  // cfg: {label, title?, min, max, step, value?, neutral=0, decimals=2,
+  //       id? (range id), key? (data-key), host? (append target),
+  //       commit(v)   — write app state (persist is handled here),
+  //       nameClick?  — makes the name clickable (minted-axis inspect),
+  //       headBtns?   — extra buttons for the head row (delete ×),
+  //       section?, chip()? — register a deck chip (omit section to skip)}
+  function buildCtl(cfg) {
+    const neutral = cfg.neutral || 0;
+    const decimals = cfg.decimals != null ? cfg.decimals : 2;
+    const row = document.createElement('div');
+    row.className = 'ctl';
+    if (cfg.key) row.setAttribute('data-key', cfg.key);
+
+    const head = document.createElement('div');
+    head.className = 'ctl-head';
+    const val = document.createElement('span');
+    val.className = 'ctl-val';
+    val.title = 'double-click to reset to ' + neutral.toFixed(decimals);
+    const poles = poleParts(cfg.label);
+    if (poles && !cfg.nameClick) {
+      const a = document.createElement('span');
+      a.className = 'ctl-pole'; a.textContent = poles.neg;
+      a.title = cfg.title || ('− pulls toward "' + poles.neg + '"');
+      const b = document.createElement('span');
+      b.className = 'ctl-pole pos'; b.textContent = poles.pos;
+      b.title = cfg.title || ('+ pushes toward "' + poles.pos + '"');
+      head.appendChild(a); head.appendChild(val); head.appendChild(b);
+    } else {
+      const nm = document.createElement(cfg.nameClick ? 'button' : 'span');
+      nm.className = cfg.nameClick ? 'axis-mine-name clickable' : 'ctl-name';
+      if (cfg.nameClick) { nm.type = 'button'; nm.addEventListener('click', cfg.nameClick); }
+      nm.textContent = cfg.label;
+      nm.title = cfg.title || cfg.label;
+      head.appendChild(nm); head.appendChild(val);
+    }
+    (cfg.headBtns || []).forEach((b) => head.appendChild(b));
+
+    const range = document.createElement('input');
+    range.type = 'range';
+    range.min = String(cfg.min); range.max = String(cfg.max); range.step = String(cfg.step);
+    range.value = String(cfg.value != null ? cfg.value : neutral);
+    if (cfg.id) range.id = cfg.id;
+
+    function refresh() {
+      const v = +range.value;
+      const signed = cfg.min < 0 && v > 0 ? '+' : '';
+      val.textContent = signed + v.toFixed(decimals);
+      const on = v !== neutral;
+      val.classList.toggle('off', !on);
+      row.classList.toggle('on', on);
+    }
+    function commit() { refresh(); cfg.commit(+range.value); persist(); }
+    function settle() { if (live) schedule('full'); }
+    function setValue(v, opts) {
+      range.value = String(v);
+      commit();
+      if (!opts || !opts.silent) settle();
+    }
+    range.addEventListener('input', commit);
+    range.addEventListener('change', settle);
+    val.addEventListener('dblclick', () => setValue(neutral));
+    const minus = makeStepper(range, -1, commit, settle);
+    const plus = makeStepper(range, +1, commit, settle);
+
+    const body = document.createElement('div');
+    body.className = 'ctl-body';
+    body.appendChild(minus); body.appendChild(range); body.appendChild(plus);
+    row.appendChild(head); row.appendChild(body);
+    if (cfg.host) cfg.host.appendChild(row);
+    refresh();
+
+    const handle = { row: row, range: range, refresh: refresh, set: setValue };
+    if (cfg.section) {
+      registry.push({
+        group: cfg.group,
+        section: cfg.section,
+        active: () => +range.value !== neutral,
+        value: () => +range.value,
+        chip: cfg.chip || (() => {
+          const v = +range.value;
+          return poles ? (v >= neutral ? poles.pos : poles.neg) : cfg.label;
+        }),
+        chipValue: () => {
+          const v = +range.value;
+          return (cfg.min < 0 && v > 0 ? '+' : '') + v.toFixed(decimals);
+        },
+        zero: (opts) => setValue(neutral, opts),
+        reveal: () => revealControl(cfg.section, row),
+      });
+    }
+    return handle;
+  }
+
+  // Deck chip → jump to the control: switch to its section, scroll its row
+  // into view, flash it.
+  function revealControl(section, row) {
+    switchSection(section);
+    const body = $('rail-body');
+    const rr = row.getBoundingClientRect(), br = body.getBoundingClientRect();
+    body.scrollTop += rr.top - br.top - Math.max(0, (br.height - rr.height) / 2);
+    row.classList.remove('flash');
+    void row.offsetWidth;   // restart the animation on repeat clicks
+    row.classList.add('flash');
+  }
+
+  // ── the deck: chips for every non-neutral control ────────────────────────
+  function refreshDeck() {
+    const host = $('deck-chips');
+    if (!host) return;
+    host.innerHTML = '';
+    const counts = { scene: 0, face: 0, look: 0, mint: 0, tune: 0 };
+    let n = 0;
+    registry.forEach((r) => {
+      if (!r.active()) return;
+      n++;
+      counts[r.section]++;
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'deck-chip';
+      chip.title = 'show this control';
+      const nm = document.createElement('span');
+      nm.textContent = r.chip();
+      const v = document.createElement('span');
+      v.className = 'chip-v'; v.textContent = r.chipValue();
+      const x = document.createElement('span');
+      x.className = 'chip-x'; x.textContent = '×';
+      x.title = 'reset to neutral';
+      x.addEventListener('click', (e) => { e.stopPropagation(); r.zero(); });
+      chip.addEventListener('click', () => r.reveal());
+      chip.appendChild(nm); chip.appendChild(v); chip.appendChild(x);
+      host.appendChild(chip);
+    });
+    if (!n) {
+      const e = document.createElement('div');
+      e.className = 'deck-empty';
+      e.textContent = 'all neutral — the prompt alone shapes the render';
+      host.appendChild(e);
+    }
+    $('deck-count').textContent = n ? String(n) : '';
+    $('btn-deck-clear').disabled = !n;
+    for (const sec in counts) {
+      const dot = $('dot-' + sec);
+      if (!dot) continue;
+      dot.textContent = String(counts[sec]);
+      dot.classList.toggle('show', counts[sec] > 0);
+    }
+    refreshCatCounts();
+  }
+  // "return every control to neutral" — one render at the end, not one per chip
+  $('btn-deck-clear').addEventListener('click', () => {
+    let any = false;
+    registry.forEach((r) => { if (r.active()) { any = true; r.zero({ silent: true }); } });
+    if (any && live) schedule('full');
+  });
+
   // ── axis bank UI (built once from assets/axes_meta.json) ───────────────
+  // Every category opens by default (the bank has a whole section to itself
+  // now); a count badge on each summary flags non-zero axes hiding inside a
+  // collapsed group.
+  let catCounts = [];   // [{el, keys}]
+  function refreshCatCounts() {
+    catCounts.forEach((c) => {
+      const n = c.keys.reduce((acc, k) =>
+        acc + (coreAxisEls[k] && +coreAxisEls[k].range.value !== 0 ? 1 : 0), 0);
+      c.el.textContent = String(n);
+      c.el.classList.toggle('show', n > 0);
+    });
+  }
   function buildAxisBank(meta) {
     const names = Object.keys(meta).sort((a, b) => meta[a].order - meta[b].order);
     const cats = []; const byCat = {};
@@ -403,15 +629,22 @@ function init() {
     const host = $('axis-categories');
     host.innerHTML = '';
     coreAxisEls = {};
+    catCounts = [];
     cats.forEach((cat) => {
       const det = document.createElement('details');
       det.className = 'axis-cat-group';
       // details.open has no IDL reflection binding in bro's DOM — the CSS rule
       // (details:not([open]) > *:not(summary)) reads the attribute, so set that
-      // directly. Matches krea-research ui.py's default-open accordion.
-      if (cat === 'Color') det.setAttribute('open', '');
+      // directly.
+      det.setAttribute('open', '');
       const sum = document.createElement('summary');
-      sum.className = 'ctl-cat'; sum.textContent = cat;
+      sum.className = 'ctl-cat';
+      const catName = document.createElement('span');
+      catName.textContent = cat;
+      const count = document.createElement('span');
+      count.className = 'cat-count';
+      sum.appendChild(catName); sum.appendChild(count);
+      catCounts.push({ el: count, keys: byCat[cat] });
       det.appendChild(sum);
       const body = document.createElement('div');
       body.className = 'axis-cat-body';
@@ -419,6 +652,7 @@ function init() {
       det.appendChild(body);
       host.appendChild(det);
     });
+    refreshDeck();
   }
   // ── press-and-hold ± steppers ──────────────────────────────────────────
   // A single click nudges a range input by its own step (0.01 — the finest,
@@ -476,29 +710,14 @@ function init() {
     return btn;
   }
   function buildAxisRow(key, label) {
-    const row = document.createElement('div');
-    row.className = 'ctl-row stepped';
-    const nm = document.createElement('span');
-    nm.className = 'ctl-name'; nm.textContent = label; nm.title = key;
-    const range = document.createElement('input');
-    range.type = 'range'; range.min = '-6'; range.max = '6'; range.step = '0.01'; range.value = '0';
-    const val = document.createElement('span');
-    val.className = 'ctl-val off'; val.textContent = '0';
-    function refresh() {
-      const v = +range.value;
-      val.textContent = (v > 0 ? '+' : '') + v.toFixed(2);
-      val.classList.toggle('off', v === 0);
-    }
-    range.addEventListener('input', () => { refresh(); persist(); if (live) schedule('preview'); });
-    range.addEventListener('change', () => { if (live) schedule('full'); });
-    val.addEventListener('dblclick', () => { range.value = '0'; refresh(); persist(); if (live) schedule('full'); });
-    const onStep = () => { refresh(); persist(); if (live) schedule('preview'); };
-    const onSettle = () => { if (live) schedule('full'); };
-    const minus = makeStepper(range, -1, onStep, onSettle);
-    const plus = makeStepper(range, +1, onStep, onSettle);
-    row.appendChild(nm); row.appendChild(minus); row.appendChild(range); row.appendChild(plus); row.appendChild(val);
-    coreAxisEls[key] = { range: range, val: val };
-    return row;
+    const ctl = buildCtl({
+      label: label, title: key, key: key,
+      min: -6, max: 6, step: 0.01,
+      section: 'look',
+      commit: () => {},   // collectAxisControls reads coreAxisEls directly
+    });
+    coreAxisEls[key] = ctl;
+    return ctl.row;
   }
 
   // ── "your axes" — a managed list of every minted axis ──────────────────
@@ -509,50 +728,34 @@ function init() {
   function renderAxisManager() {
     const host = $('user-slots');
     host.innerHTML = '';
+    unregisterGroup('minted');   // rows are rebuilt below — drop stale entries
     if (mintedAxes.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'axis-mine-empty';
-      empty.textContent = 'No minted axes yet — mint one below to add your own control.';
+      empty.textContent = 'No minted axes yet — mint one in the mint section, or from an image pair in the Image Axis tab.';
       host.appendChild(empty);
       refreshSpAxisOptions();
+      refreshDeck();
       return;
     }
     mintedAxes.forEach((m) => {
-      const row = document.createElement('div');
-      row.className = 'axis-mine-row';
-      const nm = document.createElement('button');
-      nm.type = 'button'; nm.className = 'axis-mine-name';
-      nm.textContent = m.name;
-      nm.title = 'inspect what "' + m.name + '" is made of';
-      nm.addEventListener('click', () => showAxisInspector(m));
-      const range = document.createElement('input');
-      range.type = 'range'; range.min = '-6'; range.max = '6'; range.step = '0.01';
-      range.value = String(+axisStrengths[m.name] || 0);
-      const val = document.createElement('span');
-      val.className = 'ctl-val';
-      function refresh() {
-        const v = +range.value;
-        val.textContent = (v > 0 ? '+' : '') + v.toFixed(2);
-        val.classList.toggle('off', v === 0);
-      }
-      refresh();
-      range.addEventListener('input', () => { axisStrengths[m.name] = +range.value; refresh(); persist(); });
-      range.addEventListener('change', () => { if (live) schedule('full'); });
-      val.addEventListener('dblclick', () => {
-        range.value = '0'; axisStrengths[m.name] = 0; refresh(); persist(); if (live) schedule('full');
-      });
-      const onStep = () => { axisStrengths[m.name] = +range.value; refresh(); persist(); };
-      const onSettle = () => { if (live) schedule('full'); };
-      const minus = makeStepper(range, -1, onStep, onSettle);
-      const plus = makeStepper(range, +1, onStep, onSettle);
       const del = document.createElement('button');
       del.type = 'button'; del.className = 'axis-mine-del';
       del.textContent = '×'; del.title = 'delete "' + m.name + '"';
       del.addEventListener('click', () => removeMintedAxis(m.name));
-      row.appendChild(nm); row.appendChild(minus); row.appendChild(range); row.appendChild(plus); row.appendChild(val); row.appendChild(del);
-      host.appendChild(row);
+      buildCtl({
+        label: m.name, title: 'inspect what "' + m.name + '" is made of',
+        key: m.name, group: 'minted',
+        min: -6, max: 6, step: 0.01,
+        value: +axisStrengths[m.name] || 0,
+        section: 'look', host: host,
+        nameClick: () => { switchSection('mint'); showAxisInspector(m); },
+        headBtns: [del],
+        commit: (v) => { axisStrengths[m.name] = v; },
+      });
     });
     refreshSpAxisOptions();
+    refreshDeck();
   }
   // Remove a minted axis entirely: drop it from the registry + persisted state,
   // and if it was active, re-render so its effect disappears. The worker's
@@ -605,93 +808,107 @@ function init() {
     return out;
   }
 
-  // ── expression panel ─────────────────────────────────────────────────────
-  function zeroOtherExpressions(activeKey) {
-    for (const k in exprRows) {
-      if (!exprRows.hasOwnProperty(k) || k === activeKey) continue;
-      if (+exprRows[k].range.value !== 0) {
-        exprRows[k].range.value = '0';
-        exprRows[k].refresh();
-      }
-      if (k === 'custom') delete exprStrengths.custom;
-      else delete exprStrengths[k];
-    }
+  // ── expression panel: word picker + one strength slider ─────────────────
+  // The field is exclusive by construction, so the honest UI is a radio:
+  // chips pick THE word (or the custom text field), one slider pushes it.
+  let exprChips = {};   // key -> chip button
+  function exprWordLabel() {
+    if (!exprSel) return 'expression';
+    if (exprSel === 'custom') return $('expr-custom-adj').value.trim() || 'custom';
+    const e = EXPRESSIONS.find((x) => x.key === exprSel);
+    return e ? e.label : 'expression';
   }
-  function buildExpressionRow(key, label, host) {
-    const row = document.createElement('div');
-    row.className = 'ctl-row stepped';
-    const nm = document.createElement('span');
-    nm.className = 'ctl-name'; nm.textContent = label;
-    nm.title = key === 'custom' ? 'your word, spliced into the prompt'
-      : 'field for "' + EXPRESSIONS.find((e) => e.key === key).adj + '"';
-    const range = document.createElement('input');
-    range.type = 'range'; range.min = '0'; range.max = '5'; range.step = '0.05';
-    range.value = String(+exprStrengths[key] || 0);
-    const val = document.createElement('span');
-    val.className = 'ctl-val';
-    function refresh() {
-      const v = +range.value;
-      val.textContent = v.toFixed(2);
-      val.classList.toggle('off', v === 0);
+  function refreshExprUi() {
+    for (const k in exprChips) {
+      if (exprChips.hasOwnProperty(k)) exprChips[k].classList.toggle('sel', k === exprSel);
     }
-    refresh();
-    function commit() {
-      const v = +range.value;
-      if (v) { exprStrengths[key] = v; zeroOtherExpressions(key); }
-      else delete exprStrengths[key];
-      refresh(); persist();
+    $('expr-custom-adj').classList.toggle('flash-err', false);
+    $('expr-custom-adj').style.borderColor = exprSel === 'custom' ? '#c9822f' : '';
+    // no word picked -> the strength slider has nothing to push
+    exprCtl.row.style.opacity = exprSel ? '' : '0.4';
+    exprCtl.row.style.pointerEvents = exprSel ? '' : 'none';
+    exprCtl.refresh();
+  }
+  function selectExpression(key, opts) {
+    const was = exprSel;
+    exprSel = key === exprSel && !(opts && opts.keep) ? null : key;
+    if (exprSel && +exprCtl.range.value === 0) {
+      // picking a word arms it at the "what saying the word does" strength
+      exprCtl.set(1, { silent: true });
     }
-    range.addEventListener('input', commit);
-    range.addEventListener('change', () => { if (live) schedule('full'); });
-    val.addEventListener('dblclick', () => {
-      range.value = '0'; commit(); if (live) schedule('full');
-    });
-    const onStep = commit;
-    const onSettle = () => { if (live) schedule('full'); };
-    const minus = makeStepper(range, -1, onStep, onSettle);
-    const plus = makeStepper(range, +1, onStep, onSettle);
-    row.appendChild(nm); row.appendChild(minus); row.appendChild(range);
-    row.appendChild(plus); row.appendChild(val);
-    host.appendChild(row);
-    exprRows[key] = { range: range, refresh: refresh };
+    if (!exprSel) exprCtl.set(0, { silent: true });
+    refreshExprUi();
+    persist();
+    if (live && (was !== exprSel) && (exprSel || was)) schedule('full');
   }
   function buildExpressionPanel() {
-    const host = $('expr-rows');
+    const host = $('expr-words');
     host.innerHTML = '';
-    exprRows = {};
-    EXPRESSIONS.forEach((e) => buildExpressionRow(e.key, e.label, host));
-    buildExpressionRow('custom', 'custom', $('expr-custom-row'));
+    exprChips = {};
+    EXPRESSIONS.forEach((e) => {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'word-chip';
+      chip.textContent = e.label;
+      chip.title = 'field for "' + e.adj + '"';
+      chip.addEventListener('click', () => selectExpression(e.key));
+      exprChips[e.key] = chip;
+      host.appendChild(chip);
+    });
+    exprCtl = buildCtl({
+      label: 'strength', title: '1 ≈ the word in your prompt · higher extrapolates',
+      key: 'expr-strength',
+      min: 0, max: 5, step: 0.05, value: exprStrengthInit,
+      host: $('expr-strength-row'),
+      section: 'face',
+      chip: () => '“' + exprWordLabel() + '”',
+      commit: () => {},
+    });
+    // the registry entry buildCtl made treats value 0 as neutral — but the
+    // expression is only live when a word is picked too, and zeroing it must
+    // also drop the word.
+    const entry = registry[registry.length - 1];
+    entry.active = () => !!exprSel && +exprCtl.range.value > 0;
+    entry.zero = (opts) => {
+      exprSel = null;
+      exprCtl.set(0, { silent: true });
+      refreshExprUi();
+      persist();
+      if (!(opts && opts.silent) && live) schedule('full');
+    };
     if (prefs.exprCustomAdj) $('expr-custom-adj').value = prefs.exprCustomAdj;
+    // typing IS selecting: the custom word becomes the expression as you edit
+    $('expr-custom-adj').addEventListener('input', () => {
+      const has = !!$('expr-custom-adj').value.trim();
+      if (has && exprSel !== 'custom') selectExpression('custom', { keep: true });
+      else if (!has && exprSel === 'custom') selectExpression(null, { keep: true });
+      else refreshExprUi();
+    });
     $('expr-custom-adj').addEventListener('change', () => {
       persist();
-      if ((+exprStrengths.custom || 0) && live) schedule('full');
+      if (exprSel === 'custom' && +exprCtl.range.value > 0 && live) schedule('full');
     });
     $('btn-reset-expr').addEventListener('click', () => {
-      let any = false;
-      for (const k in exprRows) {
-        if (!exprRows.hasOwnProperty(k)) continue;
-        if (+exprRows[k].range.value !== 0) any = true;
-        exprRows[k].range.value = '0';
-        exprRows[k].refresh();
-      }
-      exprStrengths = {};
+      const had = !!activeExpression();
+      exprSel = null;
+      exprCtl.set(0, { silent: true });
+      refreshExprUi();
       persist();
-      if (any && live) schedule('full');
+      if (had && live) schedule('full');
     });
+    refreshExprUi();
   }
   buildExpressionPanel();
-  // The single active expression for a generate message (exclusivity makes
-  // "strongest wins" trivial, but stay robust to hand-edited prefs).
+  // The single active expression for a generate message.
   function activeExpression() {
-    let best = null, bestA = 0;
-    EXPRESSIONS.forEach((e) => {
-      const a = +exprStrengths[e.key] || 0;
-      if (a > bestA) { bestA = a; best = { adj: e.adj, alpha: a }; }
-    });
-    const ca = +exprStrengths.custom || 0;
-    const cadj = $('expr-custom-adj').value.trim();
-    if (ca > bestA && cadj) best = { adj: cadj, alpha: ca };
-    return best;
+    const a = +exprCtl.range.value;
+    if (!exprSel || !a) return null;
+    if (exprSel === 'custom') {
+      const adj = $('expr-custom-adj').value.trim();
+      return adj ? { adj: adj, alpha: a } : null;
+    }
+    const e = EXPRESSIONS.find((x) => x.key === exprSel);
+    return e ? { adj: e.adj, alpha: a } : null;
   }
 
   // ── baked-axes panels (spectrum + mouth) — slider rows over lab/*.json ────
@@ -700,48 +917,23 @@ function init() {
   // rows there is no exclusivity here. One row per axis; `label` names the
   // negative/positive poles where the key alone doesn't say them.
   function buildBakedRow(cfg, key, label) {
-    const row = document.createElement('div');
-    row.className = 'ctl-row stepped';
-    const nm = document.createElement('span');
-    nm.className = 'ctl-name'; nm.textContent = label || key;
-    nm.title = cfg.rowTitle;
-    const range = document.createElement('input');
-    range.type = 'range';
-    range.min = String(-SPEC_RANGE); range.max = String(SPEC_RANGE); range.step = '0.05';
-    range.value = String(cfg.state[key] || 0);
-    const val = document.createElement('span');
-    val.className = 'ctl-val';
-    function refresh() {
-      const v = +range.value;
-      val.textContent = v.toFixed(2);
-      val.classList.toggle('off', v === 0);
-    }
-    refresh();
-    function commit() { cfg.state[key] = +range.value; refresh(); persist(); }
-    range.addEventListener('input', commit);
-    range.addEventListener('change', () => { if (live) schedule('full'); });
-    val.addEventListener('dblclick', () => {
-      range.value = '0'; commit(); if (live) schedule('full');
+    cfg.rows[key] = buildCtl({
+      label: label || key, title: cfg.rowTitle, key: key,
+      min: -SPEC_RANGE, max: SPEC_RANGE, step: 0.05,
+      value: cfg.state[key] || 0,
+      host: $(cfg.rowsId),
+      section: 'face',
+      commit: (v) => { cfg.state[key] = v; },
     });
-    const onSettle = () => { if (live) schedule('full'); };
-    const minus = makeStepper(range, -1, commit, onSettle);
-    const plus = makeStepper(range, +1, commit, onSettle);
-    row.appendChild(nm); row.appendChild(minus); row.appendChild(range);
-    row.appendChild(plus); row.appendChild(val);
-    $(cfg.rowsId).appendChild(row);
-    cfg.rows[key] = { range: range, refresh: refresh };
   }
   function buildBakedPanel(cfg) {
     cfg.keys.forEach((k) => buildBakedRow(cfg, k, cfg.labels && cfg.labels[k]));
     $(cfg.resetId).addEventListener('click', () => {
       const any = cfg.keys.some((k) => cfg.state[k] !== 0);
-      cfg.keys.forEach((k) => { cfg.state[k] = 0; });
-      for (const k in cfg.rows) {
-        if (!cfg.rows.hasOwnProperty(k)) continue;
-        cfg.rows[k].range.value = '0';
-        cfg.rows[k].refresh();
-      }
-      persist();
+      cfg.keys.forEach((k) => {
+        cfg.state[k] = 0;
+        cfg.rows[k].set(0, { silent: true });
+      });
       if (any && live) schedule('full');
     });
   }
@@ -792,39 +984,20 @@ function init() {
     const host = $('lora-list');
     host.innerHTML = '';
     loras.forEach((l, i) => {
-      const row = document.createElement('div');
-      row.className = 'axis-mine-row';
-      const nm = document.createElement('span');
-      nm.className = 'axis-mine-name';
-      nm.textContent = loraBasename(l.path);
-      nm.title = l.path;
-      const range = document.createElement('input');
-      range.type = 'range'; range.min = '-2'; range.max = '2'; range.step = '0.05';
-      range.value = String(l.scale);
-      const val = document.createElement('span');
-      val.className = 'ctl-val';
-      function refresh() {
-        const v = +range.value;
-        val.textContent = (v > 0 ? '+' : '') + v.toFixed(2);
-        val.classList.toggle('off', v === 0);
-      }
-      refresh();
-      range.addEventListener('input', () => { l.scale = +range.value; refresh(); persist(); });
-      range.addEventListener('change', () => { if (live) schedule('full'); });
-      val.addEventListener('dblclick', () => {
-        range.value = '0'; l.scale = 0; refresh(); persist(); if (live) schedule('full');
-      });
-      const onStep = () => { l.scale = +range.value; refresh(); persist(); };
-      const onSettle = () => { if (live) schedule('full'); };
-      const minus = makeStepper(range, -1, onStep, onSettle);
-      const plus = makeStepper(range, +1, onStep, onSettle);
       const del = document.createElement('button');
       del.type = 'button'; del.className = 'axis-mine-del';
       del.textContent = '×'; del.title = 'remove "' + loraBasename(l.path) + '"';
       del.addEventListener('click', () => removeLora(i));
-      row.appendChild(nm); row.appendChild(minus); row.appendChild(range);
-      row.appendChild(plus); row.appendChild(val); row.appendChild(del);
-      host.appendChild(row);
+      // An adapter isn't a dial — its resting state is applied (1.0), and it
+      // lives in the scene section, so it stays off the deck (no `section`).
+      buildCtl({
+        label: loraBasename(l.path), title: l.path,
+        min: -2, max: 2, step: 0.05, neutral: 0,
+        value: l.scale,
+        host: host,
+        headBtns: [del],
+        commit: (v) => { l.scale = v; },
+      });
     });
   }
   function reportLoraOutcome(resp, okMsg) {
@@ -1237,19 +1410,39 @@ function init() {
     $('load-overlay').classList.remove('show');
   }
 
+  // The model panel is set-and-forget: its <details> summary carries the
+  // status, and the body folds away once a load lands (reopens on error).
+  function modelSum(text, kind) {
+    const el = $('model-sum-status');
+    el.textContent = text;
+    el.className = 'model-sum-status' + (kind ? ' ' + kind : '');
+  }
   function doLoad() {
     const modelDir = $('model-dir').value.trim();
-    if (!modelDir) { status('set a Krea 2 directory first', 'err'); return; }
+    if (!modelDir) {
+      status('set a Krea 2 directory first', 'err');
+      modelSum('no directory set', 'err');
+      $('model-details').setAttribute('open', '');
+      switchSection('scene');
+      return;
+    }
     persist();
     setBusy(true);
     loaded = false;
     backend('loading…');
+    modelSum('loading…');
     startLoadOverlay();
     status('loading model — this reads ~26GB of weights, give it a moment');
     client.send({ type: 'load', modelDir: modelDir, dictPath: 'assets/axes_turbo.bcd1',
                   spectrumPath: 'lab/spectrum.json', mouthPath: 'lab/mouth.json' }, (err, msg) => {
       stopLoadOverlay();
-      if (err) { setBusy(false); backend('error', 'err'); status(String(err.message || err), 'err'); return; }
+      if (err) {
+        setBusy(false); backend('error', 'err');
+        modelSum(String(err.message || err), 'err');
+        $('model-details').setAttribute('open', '');
+        status(String(err.message || err), 'err');
+        return;
+      }
       loaded = true;
       setSpectrumAvailable(!!msg.spectrum);
       setMouthAvailable(!!msg.mouth);
@@ -1259,6 +1452,9 @@ function init() {
       $('backend').title = cardName();
       const cls = (msg.config && msg.config.modelClass) || 'model';
       const card = msg.backend === 'cpu' ? '' : ' · ' + cardName();
+      const dirName = modelDir.replace(/[\\/]+$/, '').split(/[\\/]/).pop();
+      modelSum(dirName + ' · ' + (msg.axes || []).length + ' axes ✓', 'ok');
+      $('model-details').removeAttribute('open');
       status(cls + ' ready · ' + (msg.axes || []).length + ' axes' + card, 'ok');
       // Chain the two sequential restore passes (the client serializes one
       // request at a time): saved LoRAs first, then saved minted axes.
@@ -1357,22 +1553,40 @@ function init() {
     schedule('full');
   }
 
-  // ── AdaLN dials / band / gate scale — shared live-preview wiring ────────
-  function wireLiveSlider(id, valId, fmt, neutral) {
-    const range = $(id), val = $(valId);
-    function refresh() { val.textContent = fmt(+range.value); }
-    range.addEventListener('input', () => { refresh(); persist(); if (live) schedule('preview'); });
-    range.addEventListener('change', () => { if (live) schedule('full'); });
-    val.addEventListener('dblclick', () => { range.value = String(neutral); refresh(); persist(); if (live) schedule('full'); });
-    refresh();
-  }
-  const fmt2 = (v) => v.toFixed(2);
-  const fmt1 = (v) => v.toFixed(1);
-  wireLiveSlider('dial-pregate', 'dial-pregate-val', fmt2, 1.0);
-  wireLiveSlider('dial-prescale', 'dial-prescale-val', fmt2, 1.0);
-  wireLiveSlider('band', 'band-val', fmt1, 1.0);
-  wireLiveSlider('gate-txt', 'gate-txt-val', fmt2, 1.0);
-  wireLiveSlider('gate-img', 'gate-img-val', fmt2, 1.0);
+  // ── AdaLN dials / band / gate scale — the tune section's research dials ──
+  // All neutral at 1.0 (multiplicative scales), built with the shared row
+  // factory so they join the deck like every other control. The range inputs
+  // keep their historical ids: buildGenerateMsg and the tests read them.
+  buildCtl({
+    label: 'detail density', title: 'detail density (AdaLN pregate)',
+    id: 'dial-pregate', min: 0.6, max: 2.0, step: 0.05, neutral: 1.0,
+    value: prefs.dialPregate != null ? +prefs.dialPregate : 1.0,
+    host: $('dial-rows'), section: 'tune', commit: () => {},
+  });
+  buildCtl({
+    label: 'crispness', title: 'crispness (AdaLN prescale)',
+    id: 'dial-prescale', min: 0.7, max: 1.5, step: 0.05, neutral: 1.0,
+    value: prefs.dialPrescale != null ? +prefs.dialPrescale : 1.0,
+    host: $('dial-rows'), section: 'tune', commit: () => {},
+  });
+  buildCtl({
+    label: 'literal ↔ stylized', title: 'deep-tap band dial',
+    id: 'band', min: 0.5, max: 3.5, step: 0.1, neutral: 1.0, decimals: 1,
+    value: prefs.band != null ? +prefs.band : 1.0,
+    host: $('band-rows'), section: 'tune', commit: () => {},
+  });
+  buildCtl({
+    label: 'text gate scale',
+    id: 'gate-txt', min: 0, max: 2, step: 0.05, neutral: 1.0,
+    value: prefs.gateTxt != null ? +prefs.gateTxt : 1.0,
+    host: $('gate-rows'), section: 'tune', commit: () => {},
+  });
+  buildCtl({
+    label: 'image gate scale',
+    id: 'gate-img', min: 0, max: 2, step: 0.05, neutral: 1.0,
+    value: prefs.gateImg != null ? +prefs.gateImg : 1.0,
+    host: $('gate-rows'), section: 'tune', commit: () => {},
+  });
   $('gate-brush-target').addEventListener('input', () => {
     $('gate-brush-target-val').textContent = (+$('gate-brush-target').value).toFixed(2);
   });
@@ -1899,12 +2113,13 @@ function init() {
     persist();
   });
   $('btn-reset-axes').addEventListener('click', () => {
+    let any = false;
     for (const k in coreAxisEls) {
       if (!coreAxisEls.hasOwnProperty(k)) continue;
-      coreAxisEls[k].range.value = '0';
-      coreAxisEls[k].range.dispatchEvent(new Event('input'));
+      if (+coreAxisEls[k].range.value !== 0) any = true;
+      coreAxisEls[k].set(0, { silent: true });
     }
-    persist();
+    if (any && live) schedule('full');
   });
   $('btn-browse-model').addEventListener('click', () => {
     const d = window.showOpenFolderDialog ? window.showOpenFolderDialog($('model-dir').value.trim()) : null;
@@ -2022,6 +2237,7 @@ function init() {
   ['sp-prompt', 'sp-seed', 'sp-steps', 'sp-axis', 'sp-strength'].forEach((id) => $(id).addEventListener('change', persist));
 
   // ── boot ─────────────────────────────────────────────────────────────────
+  switchSection(activeSection);   // restore the last-open rail section
   renderAxisManager();
   renderLoraList();   // persisted entries show immediately; applied on load
   refreshButtons();
@@ -2033,7 +2249,7 @@ function init() {
     // axis-bank sliders now exist — restore any persisted values
     if (prefs.axisBank) {
       for (const k in prefs.axisBank) {
-        if (coreAxisEls[k]) { coreAxisEls[k].range.value = prefs.axisBank[k]; coreAxisEls[k].range.dispatchEvent(new Event('input')); }
+        if (coreAxisEls[k]) coreAxisEls[k].set(+prefs.axisBank[k] || 0, { silent: true });
       }
     }
   }).catch((e) => { status('failed to load axes_meta.json: ' + e.message, 'err'); });

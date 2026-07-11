@@ -15,222 +15,241 @@
     </header>
 
     <div id="body">
-      <!-- ── left rail ────────────────────────────────────────────────── -->
+      <!-- ── left rail: sectioned control surface ─────────────────────────
+           The rail is a flex column: section nav (top, pinned), one section
+           visible at a time (scrolls), and the deck (bottom, pinned) — the
+           active-control chips + Generate, always in reach no matter which
+           section is open. -->
       <aside id="rail">
+        <nav id="rail-nav">
+          <button class="secbtn active" data-sec="scene">scene</button>
+          <button class="secbtn" data-sec="face">face</button>
+          <button class="secbtn" data-sec="look">look</button>
+          <button class="secbtn" data-sec="mint">mint</button>
+          <button class="secbtn" data-sec="tune">tune</button>
+        </nav>
 
-        <!-- 0. model -->
-        <section class="panel">
-          <h2>model</h2>
-          <label class="field">Krea 2 directory
-            <span class="row">
-              <input id="model-dir" type="text"
-                     value="D:/projects/brodiffusion/weights/krea-2-turbo">
-              <button id="btn-browse-model" class="iconbtn"
-                      title="Choose a Krea 2 diffusers directory">📁</button>
-            </span>
-          </label>
-          <p class="hint">Loads with the built-in 18-axis control bank.</p>
-          <button id="btn-load" class="primary">Load model</button>
-        </section>
+        <div id="rail-body">
+          <!-- ═══ scene: what to render ═══════════════════════════════════ -->
+          <div class="sec active" id="sec-scene">
+            <section class="panel">
+              <h2>prompt</h2>
+              <label class="field">
+                <span class="field-head">prompt <span class="counter" id="prompt-count"></span></span>
+                <textarea id="prompt" rows="3" maxlength="1000"
+                  placeholder="a red fox sitting in a snowy forest clearing at dawn, cinematic lighting">a red fox sitting in a snowy forest clearing at dawn, cinematic lighting</textarea>
+              </label>
+              <label class="field">
+                <span class="field-head">negative prompt
+                  <span class="hint inline">— what to avoid</span>
+                  <span class="counter" id="neg-count"></span></span>
+                <textarea id="neg-prompt" rows="2" maxlength="1000"
+                  placeholder="blurry, low quality, deformed, watermark"></textarea>
+              </label>
+            </section>
 
-        <!-- 1. prompt + core settings -->
-        <section class="panel">
-          <h2>prompt</h2>
-          <label class="field">
-            <span class="field-head">prompt <span class="counter" id="prompt-count"></span></span>
-            <textarea id="prompt" rows="3" maxlength="1000"
-              placeholder="a red fox sitting in a snowy forest clearing at dawn, cinematic lighting">a red fox sitting in a snowy forest clearing at dawn, cinematic lighting</textarea>
-          </label>
-          <label class="field">
-            <span class="field-head">negative prompt
-              <span class="hint inline">— what to avoid</span>
-              <span class="counter" id="neg-count"></span></span>
-            <textarea id="neg-prompt" rows="2" maxlength="1000"
-              placeholder="blurry, low quality, deformed, watermark"></textarea>
-          </label>
+            <section class="panel">
+              <h2>settings
+                <span class="grow"></span>
+                <button id="btn-reset-settings" class="link"
+                        title="Restore seed / steps / guidance / size to defaults">reset</button>
+              </h2>
+              <label class="field seed-field">seed
+                <span class="seed-row">
+                  <input id="seed" type="number" value="0" step="1">
+                  <span class="seed-rand" title="roll a fresh random seed on each Generate">
+                    <input id="rand-seed" type="checkbox" checked> randomize
+                  </span>
+                  <select id="seed-recent" class="seed-recent" title="reuse a recent seed"><option value="">recent</option></select>
+                </span>
+              </label>
+              <div class="grid">
+                <label class="field">steps <span class="dim">· 4–12 / 20+</span>
+                  <input id="steps" type="number" value="8" min="1" max="60" step="1"></label>
+                <label class="field">guidance <span class="dim">· def 1.0</span>
+                  <input id="guidance" type="number" value="1.0" step="0.5"></label>
+              </div>
+              <div class="field size-field">size <span class="dim" id="size-note">· 1.05 MP</span>
+                <div class="size-inputs">
+                  <input id="width" type="number" value="1024" min="256" max="2048" step="16">
+                  <span class="size-x">×</span>
+                  <input id="height" type="number" value="1024" min="256" max="2048" step="16">
+                  <button id="btn-swap-size" class="mini-btn" type="button" title="swap width / height (landscape ⇄ portrait)">⇄</button>
+                </div>
+                <div class="ratio-chips" id="ratio-chips">
+                  <button type="button" data-w="1024" data-h="1024">1:1</button>
+                  <button type="button" data-w="1216" data-h="832">3:2</button>
+                  <button type="button" data-w="1152" data-h="896">4:3</button>
+                  <button type="button" data-w="1344" data-h="768">16:9</button>
+                  <button type="button" data-w="1536" data-h="640">21:9</button>
+                </div>
+              </div>
+              <p class="hint">Leave guidance at 1.0 for Turbo's default mode.</p>
+            </section>
 
-          <div class="subhead">settings
-            <button id="btn-reset-settings" class="link"
-                    title="Restore seed / steps / guidance / size to defaults">reset</button>
+            <section class="panel">
+              <h2>LoRA <span class="hint inline">runtime adapters · rescale live</span></h2>
+              <div id="lora-list"></div>
+              <button id="btn-lora-add" class="primary" disabled>Add LoRA…</button>
+              <p id="lora-status" class="hint">Attach a Krea 2 LoRA .safetensors —
+                strength is adjustable per LoRA without reloading; 0 turns one off.</p>
+            </section>
+
+            <!-- model last: it's set-and-forget — the summary line carries the
+                 status, the body auto-collapses once the load lands. -->
+            <section class="panel">
+              <details id="model-details" open>
+                <summary class="model-sum">
+                  <span class="model-sum-label">model</span>
+                  <span id="model-sum-status" class="model-sum-status">not loaded</span>
+                </summary>
+                <div class="model-body">
+                  <label class="field">Krea 2 directory
+                    <span class="row">
+                      <input id="model-dir" type="text"
+                             value="D:/projects/brodiffusion/weights/krea-2-turbo">
+                      <button id="btn-browse-model" class="iconbtn"
+                              title="Choose a Krea 2 diffusers directory">📁</button>
+                    </span>
+                  </label>
+                  <p class="hint">Loads with the built-in 18-axis control bank.</p>
+                  <button id="btn-load" class="primary">Load model</button>
+                </div>
+              </details>
+            </section>
           </div>
-          <label class="field seed-field">seed
-            <span class="seed-row">
-              <input id="seed" type="number" value="0" step="1">
-              <span class="seed-rand" title="roll a fresh random seed on each Generate">
-                <input id="rand-seed" type="checkbox" checked> randomize
-              </span>
-              <select id="seed-recent" class="seed-recent" title="reuse a recent seed"><option value="">recent</option></select>
-            </span>
-          </label>
-          <div class="grid">
-            <label class="field">steps <span class="dim">· 4–12 / 20+</span>
-              <input id="steps" type="number" value="8" min="1" max="60" step="1"></label>
-            <label class="field">guidance <span class="dim">· def 1.0</span>
-              <input id="guidance" type="number" value="1.0" step="0.5"></label>
+
+          <!-- ═══ face: the subject's affect ══════════════════════════════ -->
+          <div class="sec" id="sec-face">
+            <section class="panel">
+              <h2>expression <span class="hint inline">one word · spliced into the prompt</span>
+                <span class="grow"></span>
+                <button id="btn-reset-expr" class="link" title="Clear the expression">reset</button>
+              </h2>
+              <div id="expr-words" class="word-chips"></div>
+              <input id="expr-custom-adj" type="text"
+                     placeholder="custom word — mischievous, awestruck, exhausted…"
+                     title="any adjective — it is spliced into your prompt as the expression">
+              <div id="expr-strength-row"></div>
+              <p class="hint" title="The word is spliced into your prompt before the subject (“a woman”, “the chef”) and its per-token effect extrapolated — identity drifts at the extremes.">
+                pick a word, then push it · 1 ≈ the word in your prompt · higher extrapolates</p>
+            </section>
+
+            <section class="panel" id="spec-panel">
+              <h2>spectrum <span class="hint inline">the model’s own affect axes</span>
+                <span class="grow"></span>
+                <button id="btn-reset-spec" class="link" title="Zero the whole spectrum">reset</button>
+              </h2>
+              <div id="spec-rows"></div>
+              <p class="hint" id="spec-hint" title="The encoder’s own affect axes, pre-baked from ~100 expression-word fields (tools/mint_spectrum.js) — no words at runtime, works in any language. Axes stack with each other, the expression word, and image-as-prompt. Compound emotions are mixes: rage ≈ hostility + arousal − valence.">
+                baked concept axes · instant · any language · axes stack</p>
+            </section>
+
+            <section class="panel" id="mouth-panel">
+              <h2>mouth <span class="hint inline">articulation axes</span>
+                <span class="grow"></span>
+                <button id="btn-reset-mouth" class="link" title="Zero the mouth axes">reset</button>
+              </h2>
+              <div id="mouth-rows"></div>
+              <p class="hint" id="mouth-hint" title="The encoder’s own mouth-articulation axes, pre-baked from ~36 mouth-state phrase fields by anchor-pole contrast and orthogonalized (tools/mint_mouth.js) — minted on humans AND animals, works on any subject with a mouth. open is the jaw, pursed↔spread is the lip corners (the viseme plane: ah = open, oo = pursed, ee = spread), teeth bares or covers the teeth. Axes stack with the spectrum, the expression word, and image-as-prompt.">
+                baked articulation axes · instant · any species · axes stack</p>
+            </section>
           </div>
-          <div class="field size-field">size <span class="dim" id="size-note">· 1.05 MP</span>
-            <div class="size-inputs">
-              <input id="width" type="number" value="1024" min="256" max="2048" step="16">
-              <span class="size-x">×</span>
-              <input id="height" type="number" value="1024" min="256" max="2048" step="16">
-              <button id="btn-swap-size" class="mini-btn" type="button" title="swap width / height (landscape ⇄ portrait)">⇄</button>
+
+          <!-- ═══ look: the image's perceptual axes ═══════════════════════ -->
+          <div class="sec" id="sec-look">
+            <section class="panel">
+              <h2>axis bank <span class="hint inline">18 perceptual axes</span>
+                <span class="grow"></span>
+                <button id="btn-reset-axes" class="link" title="Zero every axis slider">reset</button>
+              </h2>
+              <div id="axis-categories"></div>
+            </section>
+
+            <section class="panel">
+              <h2>your axes <span class="hint inline">minted controls · name → inspect</span></h2>
+              <div id="user-slots"></div>
+            </section>
+          </div>
+
+          <!-- ═══ mint: make new axes ═════════════════════════════════════ -->
+          <div class="sec" id="sec-mint">
+            <section class="panel">
+              <h2>mint your own axis</h2>
+
+              <div class="mint-sub">
+                <div class="mint-sub-head">from a text pair <span class="hint inline">~10s</span></div>
+                <label class="field">name
+                  <input id="mint-text-name" type="text" placeholder="candlelight"></label>
+                <label class="field">toward <span class="hint inline">(slider +)</span>
+                  <textarea id="mint-text-pos" rows="2" placeholder="lit by warm candlelight"></textarea></label>
+                <label class="field">away <span class="hint inline">(slider -)</span>
+                  <textarea id="mint-text-neg" rows="2" placeholder="lit by harsh fluorescent light"></textarea></label>
+                <button id="btn-mint-text" class="primary" disabled>Mint from text</button>
+              </div>
+
+              <div class="mint-sub">
+                <div class="mint-sub-head">from an image pair</div>
+                <p class="hint">Pick a <b>toward</b> and an <b>away</b> image from your
+                  renders in a proper gallery — over in the
+                  <button id="btn-goto-imgaxis" class="link">Image&nbsp;Axis tab&nbsp;&rarr;</button></p>
+              </div>
+
+              <p id="mint-status" class="hint"></p>
+              <div id="mint-progress" class="mint-progress"><div id="mint-progress-fill"></div></div>
+
+              <!-- what the minted direction is made of: cosine vs the 18 named
+                   bank axes + span residual, and an on-demand isolation sweep -->
+              <div class="mint-sub" id="axis-inspect" style="display: none">
+                <div class="mint-sub-head">minted axis · <span id="axis-inspect-name"></span></div>
+                <div id="axis-inspect-bars" class="axis-bars"></div>
+                <p class="hint" id="axis-inspect-note"></p>
+                <button id="btn-axis-sweep" class="link">render a −6…+6 sweep of this axis alone</button>
+                <div id="axis-sweep-strip" class="axis-sweep"></div>
+              </div>
+            </section>
+          </div>
+
+          <!-- ═══ tune: the raw research dials ════════════════════════════ -->
+          <div class="sec" id="sec-tune">
+            <section class="panel">
+              <h2>detail dials <span class="hint inline">AdaLN · 1.00 = off</span></h2>
+              <div id="dial-rows"></div>
+            </section>
+
+            <section class="panel">
+              <h2>band dial <span class="hint inline">deep-tap band · 1.0 = off</span></h2>
+              <div id="band-rows"></div>
+              <p class="hint">Higher pushes toward stylized.</p>
+            </section>
+
+            <section class="panel">
+              <h2>gate controls <span class="hint inline">1.00 = neutral</span></h2>
+              <div id="gate-rows"></div>
+              <p class="hint">Applies to every render. Paint a per-region gate
+                mask in the <b>Gate Paint</b> tab &rarr;</p>
+            </section>
+          </div>
+        </div>
+
+        <!-- ── the deck: what's shaping the image right now + Generate ──── -->
+        <footer id="rail-foot">
+          <div id="deck">
+            <div class="deck-head">
+              <span>active controls</span>
+              <span id="deck-count" class="deck-count"></span>
+              <span class="grow"></span>
+              <button id="btn-deck-clear" class="link" title="Return every control to neutral">reset all</button>
             </div>
-            <div class="ratio-chips" id="ratio-chips">
-              <button type="button" data-w="1024" data-h="1024">1:1</button>
-              <button type="button" data-w="1216" data-h="832">3:2</button>
-              <button type="button" data-w="1152" data-h="896">4:3</button>
-              <button type="button" data-w="1344" data-h="768">16:9</button>
-              <button type="button" data-w="1536" data-h="640">21:9</button>
-            </div>
+            <div id="deck-chips" class="deck-chips"></div>
           </div>
-          <p class="hint">Leave guidance at 1.0 for Turbo's default mode.</p>
-          <div class="row gen-row">
+          <div class="gen-row">
             <button id="btn-generate" class="primary" disabled>Generate</button>
-            <label class="live-toggle" title="Re-render as you drag dial/band/axis/gate sliders">
+            <label class="live-toggle" title="Re-render when a control settles">
               <input id="live" type="checkbox" checked> live
             </label>
           </div>
-        </section>
-
-        <!-- 1b. LoRA adapters -->
-        <section class="panel">
-          <h2>LoRA <span class="hint inline">runtime adapters · rescale live</span></h2>
-          <div id="lora-list"></div>
-          <button id="btn-lora-add" class="primary" disabled>Add LoRA…</button>
-          <p id="lora-status" class="hint">Attach a Krea 2 LoRA .safetensors —
-            strength is adjustable per LoRA without reloading; 0 turns one off.</p>
-        </section>
-
-        <!-- 2. AdaLN dials -->
-        <section class="panel">
-          <h2>detail dials</h2>
-          <div class="ctl-row">
-            <span class="ctl-name" title="detail density (AdaLN pregate)">detail density</span>
-            <input id="dial-pregate" type="range" min="0.6" max="2.0" step="0.05" value="1.0">
-            <span class="ctl-val" id="dial-pregate-val">1.00</span>
-          </div>
-          <div class="ctl-row">
-            <span class="ctl-name" title="crispness (AdaLN prescale)">crispness</span>
-            <input id="dial-prescale" type="range" min="0.7" max="1.5" step="0.05" value="1.0">
-            <span class="ctl-val" id="dial-prescale-val">1.00</span>
-          </div>
-          <p class="hint">1.00 = neutral (off) on both.</p>
-        </section>
-
-        <!-- 3. band dial -->
-        <section class="panel">
-          <h2>band dial</h2>
-          <div class="ctl-row">
-            <span class="ctl-name">literal ↔ stylized</span>
-            <input id="band" type="range" min="0.5" max="3.5" step="0.1" value="1.0">
-            <span class="ctl-val" id="band-val">1.0</span>
-          </div>
-          <p class="hint">1.0 = off. Higher pushes toward stylized.</p>
-        </section>
-
-        <!-- 3b. expression — contextual per-token field -->
-        <section class="panel">
-          <h2>expression <span class="hint inline">per-token field · one at a time</span>
-            <span class="grow"></span>
-            <button id="btn-reset-expr" class="link" title="Zero every expression slider">reset</button>
-          </h2>
-          <div id="expr-rows"></div>
-          <div class="subhead">custom word</div>
-          <div class="row">
-            <input id="expr-custom-adj" type="text" placeholder="mischievous, awestruck, exhausted…"
-                   title="any adjective — it is spliced into your prompt as the expression">
-          </div>
-          <div id="expr-custom-row"></div>
-          <p class="hint" title="The word is spliced into your prompt before the subject (“a woman”, “the chef”) and its per-token effect extrapolated — identity drifts at the extremes. Moving a slider zeroes the others.">
-            1 ≈ the word in your prompt · higher extrapolates · one at a time</p>
-        </section>
-
-        <!-- 3c. spectrum — model-nominated affect axes (baked) -->
-        <section class="panel" id="spec-panel">
-          <h2>spectrum <span class="hint inline">the model’s own affect axes · stack freely</span>
-            <span class="grow"></span>
-            <button id="btn-reset-spec" class="link" title="Zero the whole spectrum">reset</button>
-          </h2>
-          <div id="spec-rows"></div>
-          <p class="hint" id="spec-hint" title="The encoder’s own affect axes, pre-baked from ~100 expression-word fields (tools/mint_spectrum.js) — no words at runtime, works in any language. Axes stack with each other, the expression word, and image-as-prompt. Compound emotions are mixes: rage ≈ hostility + arousal − valence.">
-            baked concept axes · instant · any language · axes stack</p>
-        </section>
-
-        <!-- 3d. mouth — model-nominated articulation axes (baked) -->
-        <section class="panel" id="mouth-panel">
-          <h2>mouth <span class="hint inline">articulation axes · stack freely</span>
-            <span class="grow"></span>
-            <button id="btn-reset-mouth" class="link" title="Zero the mouth axes">reset</button>
-          </h2>
-          <div id="mouth-rows"></div>
-          <p class="hint" id="mouth-hint" title="The encoder’s own mouth-articulation axes, pre-baked from ~36 mouth-state phrase fields by anchor-pole contrast and orthogonalized (tools/mint_mouth.js) — minted on humans AND animals, works on any subject with a mouth. open is the jaw, pursed↔spread is the lip corners (the viseme plane: ah = open, oo = pursed, ee = spread), teeth bares or covers the teeth. Axes stack with the spectrum, the expression word, and image-as-prompt.">
-            baked articulation axes · instant · any species · axes stack</p>
-        </section>
-
-        <!-- 4. axis bank -->
-        <section class="panel">
-          <h2>axis bank <span class="hint inline">18 perceptual axes</span>
-            <span class="grow"></span>
-            <button id="btn-reset-axes" class="link" title="Zero every axis slider">reset</button>
-          </h2>
-          <div id="axis-categories"></div>
-
-          <div class="subhead">your axes <span class="hint inline">click a name to inspect · × to delete</span></div>
-          <div id="user-slots"></div>
-        </section>
-
-        <!-- 5. mint your own axis -->
-        <section class="panel">
-          <h2>mint your own axis</h2>
-
-          <div class="mint-sub">
-            <div class="mint-sub-head">from a text pair <span class="hint inline">~10s</span></div>
-            <label class="field">name
-              <input id="mint-text-name" type="text" placeholder="candlelight"></label>
-            <label class="field">toward <span class="hint inline">(slider +)</span>
-              <textarea id="mint-text-pos" rows="2" placeholder="lit by warm candlelight"></textarea></label>
-            <label class="field">away <span class="hint inline">(slider -)</span>
-              <textarea id="mint-text-neg" rows="2" placeholder="lit by harsh fluorescent light"></textarea></label>
-            <button id="btn-mint-text" class="primary" disabled>Mint from text</button>
-          </div>
-
-          <div class="mint-sub">
-            <div class="mint-sub-head">from an image pair</div>
-            <p class="hint">Pick a <b>toward</b> and an <b>away</b> image from your
-              renders in a proper gallery — over in the
-              <button id="btn-goto-imgaxis" class="link">Image&nbsp;Axis tab&nbsp;&rarr;</button></p>
-          </div>
-
-          <p id="mint-status" class="hint"></p>
-          <div id="mint-progress" class="mint-progress"><div id="mint-progress-fill"></div></div>
-
-          <!-- what the minted direction is made of: cosine vs the 18 named
-               bank axes + span residual, and an on-demand isolation sweep -->
-          <div class="mint-sub" id="axis-inspect" style="display: none">
-            <div class="mint-sub-head">minted axis · <span id="axis-inspect-name"></span></div>
-            <div id="axis-inspect-bars" class="axis-bars"></div>
-            <p class="hint" id="axis-inspect-note"></p>
-            <button id="btn-axis-sweep" class="link">render a −6…+6 sweep of this axis alone</button>
-            <div id="axis-sweep-strip" class="axis-sweep"></div>
-          </div>
-        </section>
-
-        <!-- 6. gate controls (global scale only — the brush workflow lives in the Gate Paint tab) -->
-        <section class="panel">
-          <h2>gate controls</h2>
-          <div class="ctl-row">
-            <span class="ctl-name">text gate scale</span>
-            <input id="gate-txt" type="range" min="0" max="2" step="0.05" value="1.0">
-            <span class="ctl-val" id="gate-txt-val">1.00</span>
-          </div>
-          <div class="ctl-row">
-            <span class="ctl-name">image gate scale</span>
-            <input id="gate-img" type="range" min="0" max="2" step="0.05" value="1.0">
-            <span class="ctl-val" id="gate-img-val">1.00</span>
-          </div>
-          <p class="hint">1.00 = neutral. Applies to every render. Paint a
-            per-region gate mask in the <b>Gate Paint</b> tab &rarr;</p>
-        </section>
+        </footer>
       </aside>
 
       <!-- ── stage ────────────────────────────────────────────────────── -->

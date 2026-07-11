@@ -14,20 +14,16 @@ function pumpUntil(pred, budgetMs) {
   return pred();
 }
 
-assert($('mouth-rows').querySelectorAll('.ctl-row').length === 3,
+assert($('mouth-rows').querySelectorAll('.ctl').length === 3,
        'open + round + teeth rows built');
-function mouthRange(label) {
-  const rows = $('mouth-rows').querySelectorAll('.ctl-row');
-  for (let i = 0; i < rows.length; i++) {
-    if (rows[i].querySelector('.ctl-name').textContent === label)
-      return rows[i].querySelector('input[type=range]');
-  }
-  return null;
+function mouthRange(key) {
+  const row = $('mouth-rows').querySelector('.ctl[data-key="' + key + '"]');
+  return row && row.querySelector('input[type=range]');
 }
-const openRange = mouthRange('closed ↔ open');
-const roundRange = mouthRange('spread ↔ pursed');
-const teethRange = mouthRange('hidden ↔ bared');
-assert(openRange && roundRange && teethRange, 'all three axes present by label');
+const openRange = mouthRange('open');
+const roundRange = mouthRange('round');
+const teethRange = mouthRange('teeth');
+assert(openRange && roundRange && teethRange, 'all three axes present by key');
 
 console.log('waiting for the model to load…');
 assert(pumpUntil(() => !$('btn-generate').disabled ||
@@ -111,14 +107,7 @@ assert(dRound > 5, 'round stacked onto open (mean diff ' + dRound.toFixed(2) + '
 
 // ── stacking with the affect spectrum (two banks, one carrier) ────────────
 console.log('valence = 2 stacked on the mouth axes…');
-const valRange = (() => {
-  const rows = $('spec-rows').querySelectorAll('.ctl-row');
-  for (let i = 0; i < rows.length; i++) {
-    if (rows[i].querySelector('.ctl-name').textContent === 'valence')
-      return rows[i].querySelector('input[type=range]');
-  }
-  return null;
-})();
+const valRange = $('spec-rows').querySelector('.ctl[data-key="valence"] input[type=range]');
 setRange(valRange, 2);
 const combined = generateAndGrab(180000);
 assert($('timing').textContent.indexOf('spectrum') >= 0 &&

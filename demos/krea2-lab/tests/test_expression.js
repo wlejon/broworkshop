@@ -13,10 +13,19 @@ function pumpUntil(pred, budgetMs) {
   return pred();
 }
 
-assert($('expr-rows'), 'expression panel exists');
-const rows = $('expr-rows').querySelectorAll('.ctl-row');
-assert(rows.length === 10, 'ten expression rows built (got ' + rows.length + ')');
-assert($('expr-custom-row').querySelectorAll('.ctl-row').length === 1, 'custom row built');
+assert($('expr-words'), 'expression panel exists');
+const chips = $('expr-words').querySelectorAll('.word-chip');
+assert(chips.length === 10, 'ten expression word chips built (got ' + chips.length + ')');
+assert($('expr-strength-row').querySelectorAll('.ctl').length === 1, 'strength row built');
+function exprChip(label) {
+  for (let i = 0; i < chips.length; i++) {
+    if (chips[i].textContent === label) return chips[i];
+  }
+  return null;
+}
+function exprStrengthRange() {
+  return $('expr-strength-row').querySelector('input[type=range]');
+}
 
 console.log('waiting for the model to load…');
 assert(pumpUntil(() => !$('btn-generate').disabled ||
@@ -58,12 +67,14 @@ function generateAndGrab() {
   return view.getContext('2d').getImageData(0, 0, view.width, view.height);
 }
 
-// Drive the anger slider exactly as a user would: find its row (5th; order
-// matches the EXPRESSIONS table) and set the range through DOM events so the
-// app's own handlers (exclusivity, persist, message build) run.
-function setExpression(rowIndex, value) {
-  const row = $('expr-rows').querySelectorAll('.ctl-row')[rowIndex];
-  const range = row.querySelector('input[type=range]');
+// Drive the expression exactly as a user would: click the word chip (the
+// picker is a radio — the field is exclusive by construction), then set the
+// single strength slider through DOM events so the app's own handlers
+// (selection, persist, message build) run.
+function setExpression(label, value) {
+  const chip = exprChip(label);
+  if (!chip.classList.contains('sel')) chip.click();
+  const range = exprStrengthRange();
   range.value = String(value);
   range.dispatchEvent(new Event('input'));
   // no 'change' dispatch — the test clicks Generate itself (live-mode races
@@ -74,7 +85,7 @@ console.log('baseline render (no expression)…');
 const base = generateAndGrab();
 
 console.log('anger = 2 render…');
-setExpression(4, 2);                         // EXPRESSIONS[4] = anger
+setExpression('anger', 2);
 const angry = generateAndGrab();
 assert($('timing').textContent.indexOf('field vs') >= 0,
        'worker reported the field neutral: ' + $('timing').textContent);
@@ -82,15 +93,16 @@ assert($('timing').textContent.indexOf('field vs') >= 0,
 // Switching to a SECOND emotion builds a second field on top of the first
 // one's cache — this is the sequence that OOM'd the worker's 256 MB QuickJS
 // heap (each raw-taps buffer is a 63 MB Float32Array; the engine limit is
-// now 4 GB). Exclusivity rides along: moving happiness must zero anger.
+// now 4 GB). Exclusivity rides along: picking happiness must drop anger.
 console.log('happiness = 2 render (second field)…');
-setExpression(0, 2);                         // happiness
-const angerRange = $('expr-rows').querySelectorAll('.ctl-row')[4].querySelector('input[type=range]');
-assert(+angerRange.value === 0, 'moving happiness zeroed anger (exclusive sliders)');
+setExpression('happiness', 2);
+assert(!exprChip('anger').classList.contains('sel'),
+       'picking happiness deselected anger (exclusive picker)');
+assert(exprChip('happiness').classList.contains('sel'), 'happiness selected');
 const happy = generateAndGrab();
 assert($('timing').textContent.indexOf('field vs') >= 0,
        'second field reported its neutral: ' + $('timing').textContent);
-setExpression(0, 0);                         // back to none
+$('btn-reset-expr').click();                 // back to none
 
 // The two frames must differ substantially — the field engaged.
 assert(base.width === angry.width && base.height === angry.height, 'same dims');

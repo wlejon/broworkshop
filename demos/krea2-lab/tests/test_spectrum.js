@@ -14,15 +14,11 @@ function pumpUntil(pred, budgetMs) {
   return pred();
 }
 
-assert($('spec-rows').querySelectorAll('.ctl-row').length === 4,
+assert($('spec-rows').querySelectorAll('.ctl').length === 4,
        'valence + arousal + hostility + surprise rows built');
 function specRange(name) {
-  const rows = $('spec-rows').querySelectorAll('.ctl-row');
-  for (let i = 0; i < rows.length; i++) {
-    if (rows[i].querySelector('.ctl-name').textContent === name)
-      return rows[i].querySelector('input[type=range]');
-  }
-  return null;
+  const row = $('spec-rows').querySelector('.ctl[data-key="' + name + '"]');
+  return row && row.querySelector('input[type=range]');
 }
 assert(specRange('valence') && specRange('arousal') &&
        specRange('hostility') && specRange('surprise'),
@@ -112,8 +108,11 @@ assert(dStack > 5, 'stacked axes changed the render (mean diff ' + dStack.toFixe
 
 // ── stacking with an expression word field (same token grid) ─────────────
 console.log('adding expression anger = 1.5 on top…');
-const angerRange = $('expr-rows').querySelectorAll('.ctl-row')[4].querySelector('input[type=range]');
-setRange(angerRange, 1.5);
+const chips = $('expr-words').querySelectorAll('.word-chip');
+for (let i = 0; i < chips.length; i++) {
+  if (chips[i].textContent === 'anger' && !chips[i].classList.contains('sel')) chips[i].click();
+}
+setRange($('expr-strength-row').querySelector('input[type=range]'), 1.5);
 const combined = generateAndGrab(180000);
 assert($('timing').textContent.indexOf('field vs') >= 0,
        'word field rode the spectrum carrier: ' + $('timing').textContent);
@@ -125,7 +124,7 @@ assert(dComb > 5, 'word field stacked onto the spectrum (mean diff ' + dComb.toF
 
 // ── language-agnostic: the same baked axes on a Chinese prompt ────────────
 console.log('zh prompt, valence +2…');
-setRange(angerRange, 0);
+$('btn-reset-expr').click();
 $('btn-reset-spec').click();
 $('prompt').value = '一位棕色齐肩发女子的摄影棚人像，纯灰色背景，柔和的光线';
 const zhBase = generateAndGrab(180000);

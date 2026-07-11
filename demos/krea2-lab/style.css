@@ -9,6 +9,9 @@ body {
   /* This is a control surface, not a document — dragging should scrub sliders
      and pan, never mark text. Editable fields opt back in below. */
   user-select: none;
+  /* Dark UA control chrome (range tracks, checkboxes) — inherited, so one
+     declaration themes every form control in the app. */
+  color-scheme: dark;
 }
 input, textarea { user-select: text; }
 #app { display: flex; flex-direction: column; height: 100vh; }
@@ -35,8 +38,37 @@ input, textarea { user-select: text; }
 #rail {
   width: 420px; flex: none; display: flex; flex-direction: column;
   background: #0f1218; border-right: 1px solid #1a1f27;
-  overflow-y: auto;
+  min-height: 0;
 }
+
+/* section nav — pinned at the rail top */
+#rail-nav {
+  display: flex; gap: 2px; flex: none;
+  padding: 8px 10px 0; background: #0f1218; border-bottom: 1px solid #1a1f27;
+}
+.secbtn {
+  flex: 1; position: relative;
+  background: transparent; border: 1px solid transparent; border-bottom: none;
+  border-radius: 6px 6px 0 0; color: #7c8593; padding: 8px 4px 7px;
+  font-size: 12px; letter-spacing: 0.3px;
+}
+.secbtn:hover { color: #cdd5e0; background: #161b23; }
+.secbtn.active { background: #0c0e12; color: #f0a860; border-color: #1a1f27; }
+/* per-section active-control count */
+.sec-dot {
+  position: absolute; top: 3px; right: 5px;
+  min-width: 13px; height: 13px; padding: 0 3px; border-radius: 7px;
+  background: #63391c; border: 1px solid #c9822f; color: #ffdcb0;
+  font-size: 9px; line-height: 11px; font-weight: 700; text-align: center;
+  display: none;
+}
+.sec-dot.show { display: block; }
+
+/* section body — one section visible, scrolls independently */
+#rail-body { flex: 1; min-height: 0; overflow-y: auto; }
+.sec { display: none; }
+.sec.active { display: block; }
+
 .panel {
   padding: 12px 16px; border-bottom: 1px solid #161b23;
   display: flex; flex-direction: column; gap: 9px;
@@ -137,40 +169,97 @@ button.link:hover { color: #eeb277; background: none; }
   padding: 0 3px; font-size: 10px;
 }
 
-/* ── control sliders (dials / band / gate / axis bank rows) ────────────── */
-.ctl-row {
-  display: grid; grid-template-columns: 96px 1fr 50px;
-  align-items: center; gap: 10px;
+/* ── model panel: a status line that opens into the load form ──────────── */
+#model-details { display: flex; flex-direction: column; gap: 9px; }
+.model-sum {
+  display: flex; align-items: center; gap: 8px; cursor: pointer;
+  list-style: none; user-select: none;
 }
-/* axis-bank rows carry ± steppers flanking the slider */
-.ctl-row.stepped {
-  grid-template-columns: 80px 20px 1fr 20px 46px;
-  gap: 7px;
+.model-sum::-webkit-details-marker { display: none; }
+.model-sum::before { content: '▸ '; color: #5b6470; font-size: 10px; }
+#model-details[open] > .model-sum::before { content: '▾ '; }
+.model-sum-label {
+  font-size: 11px; letter-spacing: 0.6px; text-transform: uppercase;
+  color: #5b6470; font-weight: 700;
 }
-.ctl-row:hover .ctl-name { color: #d6dae0; }
-/* press-and-hold ± steppers flanking a slider */
-.ctl-step {
-  background: #141b26; border: 1px solid #263047; border-radius: 4px;
-  color: #aeb6c2; font-size: 13px; line-height: 1; font-family: inherit;
-  width: 20px; height: 20px; padding: 0; cursor: pointer; user-select: none;
-  display: flex; align-items: center; justify-content: center;
+.model-sum-status {
+  font-size: 11px; color: #8b94a3;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
 }
-.ctl-step:hover { color: #f0a860; border-color: #3a4a63; background: #1a2331; }
-.ctl-step:active { background: #d4914a; border-color: #d4914a; color: #0b0f16; }
+.model-sum-status.ok { color: #7fd1a6; }
+.model-sum-status.err { color: #ff8e8e; }
+.model-body { display: flex; flex-direction: column; gap: 9px; padding-top: 4px; }
+
+/* ── control rows ───────────────────────────────────────────────────────
+   Two lines per control: a header (either "name … value" or the semantic-
+   differential "pole − … value … pole +") and the slider flanked by fine-step
+   buttons. Neutral controls are visually quiet — dim label, gray thumb, no
+   fill (the engine fills signed ranges from their zero point); active ones
+   carry the accent. */
+.ctl { display: flex; flex-direction: column; gap: 1px; }
+.ctl-head {
+  display: flex; align-items: baseline; gap: 8px; min-width: 0;
+  font-size: 11px;
+}
 .ctl-name {
-  color: #aeb6c2; font-size: 11px;
+  color: #8b94a3; flex: 1;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+.ctl-pole { color: #6b7482; flex: none; max-width: 42%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ctl-pole.pos { text-align: right; }
+.ctl-head .ctl-val { flex: 1; text-align: center; }
+.ctl-head .ctl-name + .ctl-val { flex: none; text-align: right; }
+.ctl.on .ctl-name, .ctl.on .ctl-pole { color: #d6dae0; }
+.ctl:hover .ctl-name, .ctl:hover .ctl-pole { color: #d6dae0; }
 .ctl-val {
-  color: #f0a860; font-size: 11px; text-align: right;
+  color: #f0a860; font-size: 11px;
   font-variant-numeric: tabular-nums; cursor: pointer;
 }
 .ctl-val.off { color: #4d5562; }
+.ctl-body { display: flex; align-items: center; gap: 6px; }
+.ctl-body input[type=range] { flex: 1; }
+
+/* quiet accent when neutral, hot when active */
+.ctl input[type=range] { accent-color: #566074; }
+.ctl.on input[type=range], .ctl:hover input[type=range] { accent-color: #d4914a; }
+
+/* a clicked deck chip flashes its row */
+@keyframes ctl-flash {
+  0%   { background: #63391c66; }
+  100% { background: transparent; }
+}
+.ctl.flash { animation: ctl-flash 1.2s ease-out; border-radius: 4px; }
+
+/* header buttons on minted-axis / LoRA rows */
+.ctl-head .axis-mine-name {
+  background: none; border: none; padding: 0; text-align: left; cursor: pointer;
+  color: #8b94a3; font-size: 11px; font-family: inherit; flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ctl.on .axis-mine-name, .ctl:hover .axis-mine-name { color: #d6dae0; }
+.ctl-head .axis-mine-name.clickable:hover { color: #f0a860; text-decoration: underline; }
+.axis-mine-del {
+  background: none; border: none; padding: 0 0 0 4px; cursor: pointer;
+  color: #4d5562; font-size: 14px; line-height: 1; flex: none;
+}
+.axis-mine-del:hover { color: #e0674a; }
+
 input[type=range] {
   -webkit-appearance: none; appearance: none;
-  width: 100%; height: 20px; padding: 0; border: none; margin: 0;
+  width: 100%; height: 18px; padding: 0; border: none; margin: 0;
   background: transparent; accent-color: #d4914a; cursor: pointer;
 }
+
+/* press-and-hold ± steppers flanking a slider */
+.ctl-step {
+  background: #141b26; border: 1px solid #263047; border-radius: 4px;
+  color: #aeb6c2; font-size: 12px; line-height: 1; font-family: inherit;
+  width: 18px; height: 18px; padding: 0; cursor: pointer; user-select: none;
+  display: flex; align-items: center; justify-content: center; flex: none;
+}
+.ctl-step:hover { color: #f0a860; border-color: #3a4a63; background: #1a2331; }
+.ctl-step:active { background: #d4914a; border-color: #d4914a; color: #0b0f16; }
 
 /* axis-bank accordion */
 #axis-categories { display: flex; flex-direction: column; gap: 2px; }
@@ -179,36 +268,36 @@ details.axis-cat-group:last-child { border-bottom: none; }
 .ctl-cat {
   color: #f0a860; font-size: 10px; font-weight: 700; letter-spacing: 0.5px;
   text-transform: uppercase; margin: 6px 0; cursor: pointer; user-select: none;
-  list-style: none;
+  list-style: none; display: flex; align-items: center; gap: 6px;
 }
 .ctl-cat::-webkit-details-marker { display: none; }
 .ctl-cat::before { content: '▸ '; }
 details[open] > .ctl-cat::before { content: '▾ '; }
-.axis-cat-body { display: flex; flex-direction: column; gap: 6px; padding: 2px 0 4px; }
+.ctl-cat .cat-count {
+  font-size: 9px; color: #ffdcb0; background: #63391c; border: 1px solid #c9822f;
+  border-radius: 7px; min-width: 13px; padding: 0 3px; text-align: center;
+  line-height: 11px; display: none;
+}
+.ctl-cat .cat-count.show { display: inline-block; }
+.axis-cat-body { display: flex; flex-direction: column; gap: 7px; padding: 2px 0 4px; }
 
 /* "your axes" — managed minted-axis list */
-#user-slots { display: flex; flex-direction: column; gap: 6px; }
+#user-slots { display: flex; flex-direction: column; gap: 8px; }
 .axis-mine-empty { color: #6b7382; font-size: 11px; padding: 2px 0; }
-.axis-mine-row {
-  display: grid; grid-template-columns: 1fr 20px 60px 20px 40px 18px;
-  align-items: center; gap: 6px;
-}
-.axis-mine-name {
-  background: none; border: none; padding: 0; text-align: left; cursor: pointer;
-  color: #aeb6c2; font-size: 11px; font-family: inherit;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.axis-mine-name:hover { color: #f0a860; text-decoration: underline; }
-.axis-mine-del {
-  background: none; border: none; padding: 0; cursor: pointer;
-  color: #4d5562; font-size: 15px; line-height: 1; text-align: center;
-}
-.axis-mine-del:hover { color: #e0674a; }
 
-/* LoRA rows reuse the minted-axes row layout, but the name isn't clickable */
-#lora-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
-#lora-list .axis-mine-name { cursor: default; }
-#lora-list .axis-mine-name:hover { color: #aeb6c2; text-decoration: none; }
+/* LoRA rows */
+#lora-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
+
+/* ── expression word picker ─────────────────────────────────────────────
+   The per-token field is exclusive by construction (one splice per render),
+   so the UI is a radio: pick ONE word, push ONE strength slider. */
+.word-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.word-chip {
+  padding: 4px 10px; font-size: 11px; border-radius: 12px;
+  background: #12161e; border: 1px solid #20262f; color: #8b94a3;
+}
+.word-chip:hover { background: #1a2030; color: #cdd5e0; }
+.word-chip.sel { background: #63391c; border-color: #c9822f; color: #ffdcb0; }
 
 /* mint sub-panels */
 .mint-sub {
@@ -217,8 +306,6 @@ details[open] > .ctl-cat::before { content: '▾ '; }
   margin-top: 2px;
 }
 .mint-sub-head { color: #cdd5e0; font-size: 11px; font-weight: 600; }
-.imgpair { display: flex; gap: 8px; }
-.imgpick { flex: 1; display: flex; flex-direction: column; gap: 5px; align-items: center; }
 .imgpick-thumb {
   width: 100%; aspect-ratio: 1; border-radius: 5px; background: #07090d;
   border: 1px dashed #263047; overflow: hidden; position: relative;
@@ -230,9 +317,6 @@ details[open] > .ctl-cat::before { content: '▾ '; }
   max-width: 100%; max-height: 100%; display: block;
 }
 .imgpick-thumb.filled { border-style: solid; border-color: #2a3550; }
-.imgpick button { width: 100%; font-size: 10px; }
-.imgpick-label { font-size: 10px; color: #8b94a3; text-align: center; }
-.mint-hist { width: 100%; font-size: 10px; padding: 4px 6px; }
 
 /* mint progress bar (hidden unless .show) */
 .mint-progress {
@@ -292,6 +376,45 @@ details[open] > .ctl-cat::before { content: '▾ '; }
   100% { border-color: #ff6b6b00; box-shadow: 0 0 0 2px #ff6b6b00; transform: translateX(0); }
 }
 .flash-err { animation: flash-err 0.6s ease-out; }
+
+/* ── the deck: active-control chips + Generate, pinned at the rail foot ── */
+#rail-foot {
+  flex: none; display: flex; flex-direction: column; gap: 8px;
+  padding: 9px 14px 12px; background: #11141a; border-top: 1px solid #1e232c;
+}
+.deck-head {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 10px; letter-spacing: 0.5px; text-transform: uppercase;
+  color: #5b6470; font-weight: 700;
+}
+.deck-count { color: #f0a860; font-variant-numeric: tabular-nums; }
+.deck-chips {
+  display: flex; flex-wrap: wrap; gap: 4px;
+  align-items: flex-start; align-content: flex-start;
+  max-height: 88px; overflow-y: auto;
+}
+.deck-chip { flex: none; }
+.deck-empty { color: #3f4652; font-size: 11px; padding: 1px 0; }
+.deck-chip {
+  display: flex; align-items: center; gap: 5px;
+  padding: 2px 4px 2px 8px; font-size: 10px; border-radius: 10px;
+  background: #1a2030; border: 1px solid #2a3550; color: #cdd5e0;
+}
+.deck-chip:hover { border-color: #c9822f; background: #221c14; }
+.deck-chip .chip-v { color: #f0a860; font-variant-numeric: tabular-nums; }
+.deck-chip .chip-x {
+  color: #6b7482; font-size: 12px; line-height: 1; padding: 0 3px;
+  border-radius: 8px;
+}
+.deck-chip .chip-x:hover { color: #ff8e8e; background: #2a1a1a; }
+
+.gen-row { display: flex; gap: 8px; align-items: center; }
+.gen-row .primary { flex: 1; padding: 9px 12px; }
+.live-toggle {
+  display: flex; align-items: center; gap: 5px;
+  color: #9aa3b0; font-size: 12px; user-select: none; cursor: pointer;
+}
+.live-toggle input { accent-color: #d4914a; cursor: pointer; }
 
 /* ── Image Axis tab: pick a toward/away pair from a gallery of renders ──── */
 .imgaxis-body {
@@ -487,15 +610,6 @@ details[open] > .ctl-cat::before { content: '▾ '; }
   border: 1px solid #1c222c; background: #07090d; cursor: crosshair;
 }
 #gate-heatmap { image-rendering: pixelated; }
-
-/* ── live toggle ──────────────────────────────────────────────────────── */
-.gen-row { display: flex; gap: 8px; align-items: center; }
-.gen-row .primary { flex: 1; }
-.live-toggle {
-  display: flex; align-items: center; gap: 5px;
-  color: #9aa3b0; font-size: 12px; user-select: none; cursor: pointer;
-}
-.live-toggle input { accent-color: #d4914a; cursor: pointer; }
 
 /* ── history rail ─────────────────────────────────────────────────────── */
 #history {
