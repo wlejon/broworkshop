@@ -35,8 +35,8 @@
 //        <- loaded        {config, axes, hiddenSize, numLayers, backend,
 //                           spectrum, mouth}
 //   main -> generate      {prompt, negPrompt, opts, band, dial, gate, gateMask,
-//                           axisControls, expression, spectrum, mouth,
-//                           imagePixels, imageH, imageW, captureGates}
+//                           gateMaskBand, axisControls, expression, spectrum,
+//                           mouth, imagePixels, imageH, imageW, captureGates}
 //        <- done          {bitmap, width, height, ms, gates?, exprNeutral?,
 //                           spectrumNote?}
 //
@@ -447,6 +447,16 @@ function gateMaskTensor(flat) {
   return { rows: flat.length, cols: 1, data: flat };
 }
 
+// Which DiT blocks a painted gate mask multiplies. The gate-probe strips
+// found full-depth masking cliffs hard — by ~0.5 the painted region starves
+// to a flat void that contaminates the whole frame — while the DIAL_BLOCKS
+// band stays local, smooth, and monotonic across the 0.5..1.2 range.
+function gateMaskBlocks(band) {
+  if (band === 'early') return [0, 8];
+  if (band === 'all') return [0, numLayers];
+  return DIAL_BLOCKS;                       // 'mid' — the graceful default
+}
+
 // Sync per-LoRA-group strengths from a generate message's `loraScales` array
 // (index-aligned with the applied groups). Cheap native calls — no file IO.
 // Messages without the field leave the scales as last set.
@@ -469,7 +479,8 @@ function runGeneration(msg, onDone) {
   var gate = msg.gate;
   pipeline.krea2SetGateScale(gate ? gate.txtScale : 1.0, gate ? gate.imgScale : 1.0,
                              0, numLayers);
-  pipeline.krea2SetGateMask(gateMaskTensor(msg.gateMask), 0, numLayers);
+  var maskBlocks = gateMaskBlocks(msg.gateMaskBand);
+  pipeline.krea2SetGateMask(gateMaskTensor(msg.gateMask), maskBlocks[0], maskBlocks[1]);
   pipeline.krea2CaptureGates(!!msg.captureGates);
 
   var taps = buildTaps(msg);

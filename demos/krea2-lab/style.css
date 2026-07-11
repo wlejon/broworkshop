@@ -609,7 +609,31 @@ details[open] > .ctl-cat::before { content: '▾ '; }
   image-rendering: auto; box-shadow: 0 6px 30px #0008;
   border: 1px solid #1c222c; background: #07090d; cursor: crosshair;
 }
-#gate-heatmap { image-rendering: pixelated; }
+/* ── gate paint tab ───────────────────────────────────────────────────── */
+.pole-neg { font-size: 11px; color: #7da7d9; }   /* drain = blue tint */
+.pole-pos { font-size: 11px; color: #d4914a; }   /* boost = orange tint */
+.check {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; color: #9aa3b0; cursor: pointer;
+}
+#gate-result { cursor: col-resize; }
+.gate-strip {
+  flex: none; display: none; gap: 10px; align-items: flex-start;
+  padding: 10px 16px; border-top: 1px solid #161b23; overflow-x: auto;
+}
+.gate-strip.show { display: flex; }
+.strip-cell {
+  flex: none; display: flex; flex-direction: column; gap: 3px;
+  align-items: center; cursor: pointer;
+}
+.strip-cell canvas {
+  width: 128px; height: 128px; border: 1px solid #1c222c;
+  border-radius: 3px; background: #07090d;
+}
+.strip-cell:hover canvas { border-color: #566074; }
+.strip-cell.sel canvas { border-color: #c9822f; }
+.strip-label { font-size: 11px; color: #6b7482; }
+.strip-cell.sel .strip-label { color: #ffdcb0; }
 
 /* ── history rail ─────────────────────────────────────────────────────── */
 #history {
