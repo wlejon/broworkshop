@@ -95,9 +95,15 @@ export function initModel(ctx) {
       modelSum(dirName + ' · ' + (msg.axes || []).length + ' axes ✓', 'ok');
       $('model-details').removeAttribute('open');
       ctx.status(cls + ' ready · ' + (msg.axes || []).length + ' axes' + card, 'ok');
-      // Chain the two sequential restore passes (the client serializes one
-      // request at a time): saved LoRAs first, then saved minted axes.
-      ctx.restoreLoras(() => ctx.rebuildMintedAxes());
+      // Chain the sequential restore passes (the client serializes one
+      // request at a time): saved LoRAs first, then saved minted axes, then
+      // the identity reference (its worker-side cache died with the old
+      // pipeline; rebuildMintedAxes only enqueues sends, so the identity
+      // encode queues FIFO behind them).
+      ctx.restoreLoras(() => {
+        ctx.rebuildMintedAxes();
+        ctx.restoreIdentity();
+      });
     });
   }
 

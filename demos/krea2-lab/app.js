@@ -41,6 +41,7 @@ import { $ } from "/app/ui/util.js";
 import { loadPrefs, savePrefs } from "/app/ui/store.js";
 import { createClient } from "/app/ui/client.js";
 import { initControls } from "/app/ui/controls.js";
+import { initIdentity } from "/app/ui/identity.js";
 import { initFace } from "/app/ui/face.js";
 import { initTune } from "/app/ui/tune.js";
 import { initAxes } from "/app/ui/axes.js";
@@ -218,6 +219,7 @@ function init() {
       $('timing').textContent = (resp.ms ? resp.ms + ' ms' : '') +
         (resp.exprNeutral ? ' · field vs “' + resp.exprNeutral + '”' : '') +
         (resp.spectrumNote ? ' · ' + resp.spectrumNote : '') +
+        (resp.identityNote ? ' · ' + resp.identityNote : '') +
         (quality === 'preview' ? ' · preview' : '');
       pump();
     });
@@ -231,9 +233,11 @@ function init() {
 
   // ── feature modules ──────────────────────────────────────────────────────
   // Order matters: controls first (everything builds rows through ctx.buildCtl),
-  // then the panel build order fixes the deck's chip order (expression →
-  // spectrum → mouth → tune dials; the axis bank joins async after boot).
+  // then the panel build order fixes the deck's chip order (identity →
+  // expression → spectrum → mouth → tune dials; the axis bank joins async
+  // after boot).
   initControls(ctx);
+  initIdentity(ctx);
   initFace(ctx);
   initTune(ctx);
   initAxes(ctx);

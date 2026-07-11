@@ -49,6 +49,28 @@
             </section>
 
             <section class="panel">
+              <h2>identity <span class="hint inline">carry a character across renders</span>
+                <span class="grow"></span>
+                <button id="btn-ident-clear" class="link" disabled
+                        title="Drop the identity reference">clear</button>
+              </h2>
+              <div class="ident-row">
+                <div class="imgpick-thumb ident-thumb" id="ident-thumb">
+                  <div class="slot-empty">no reference</div>
+                </div>
+                <div class="ident-btns">
+                  <button id="btn-ident-use-render" class="primary" disabled
+                          title="Use the render on the canvas as the identity reference">Use current render</button>
+                  <button id="btn-ident-browse" class="link" disabled
+                          title="Load an image file as the identity reference">browse a file…</button>
+                </div>
+              </div>
+              <div id="ident-strength-row"></div>
+              <p class="hint" title="The reference is encoded once through the model's own vision tower; its tokens ride alongside your prompt's tokens on every render, so the character carries while the seed, prompt, and axes move the scene.">
+                the reference rides alongside the prompt · change the seed or walk the axes — the character carries</p>
+            </section>
+
+            <section class="panel">
               <h2>settings
                 <span class="grow"></span>
                 <button id="btn-reset-settings" class="link"

@@ -58,13 +58,12 @@ export function tensorFromCanvas(cnv) {
   const id = cnv.getContext('2d').getImageData(0, 0, cnv.width, cnv.height);
   return toChwFp32(capLongSide(id, 1024));
 }
-// Paint the chosen image-pair source into its preview box. Draws into a real
+// Paint a picked image source into a preview box. Draws into a real
 // <canvas> child (faithful in bro) rather than a CSS background-image from a
 // data:/file: URL, which didn't render — the box stayed black. `src` is a
 // canvas or ImageData; it's letterboxed into a small backing store keyed to the
 // box (`.imgpick-thumb` is square via aspect-ratio; object-fit:contain fits it).
-export function paintMintThumb(which, src, sw, sh) {
-  const thumb = $('mint-' + which + '-thumb');
+export function paintThumbInto(thumb, src, sw, sh) {
   let cv = thumb.querySelector('canvas');
   if (!cv) { cv = document.createElement('canvas'); thumb.appendChild(cv); }
   const BOX = 160;
@@ -82,4 +81,8 @@ export function paintMintThumb(which, src, sw, sh) {
     cx.drawImage(src, 0, 0, cv.width, cv.height);
   }
   thumb.classList.add('filled');
+}
+// The Image Axis pair slots address their boxes by slot letter.
+export function paintMintThumb(which, src, sw, sh) {
+  paintThumbInto($('mint-' + which + '-thumb'), src, sw, sh);
 }

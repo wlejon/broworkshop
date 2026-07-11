@@ -36,9 +36,14 @@
 //                           spectrum, mouth}
 //   main -> generate      {prompt, negPrompt, opts, band, dial, gate, gateMask,
 //                           gateMaskBand, axisControls, expression, spectrum,
-//                           mouth, imagePixels, imageH, imageW, captureGates}
+//                           mouth, imagePixels, imageH, imageW, captureGates,
+//                           identity}
 //        <- done          {bitmap, width, height, ms, gates?, exprNeutral?,
-//                           spectrumNote?}
+//                           spectrumNote?, identityNote?}
+//   main -> setIdentity   {pixels, H, W}     (encode + cache the reference)
+//        <- identitySet   {tokens}           (valid vision-token count)
+//   main -> clearIdentity {}
+//        <- identityCleared {}
 //
 // `expression` is {adj, alpha} — the contextual per-token field (ported from
 // sana-research/dictionary.py, validated on Krea 2 in the emotion-axes probes):
@@ -61,6 +66,19 @@
 // Chinese prompt), and it stacks unconditionally with the expression word
 // field, the band dial, and image-as-prompt. Calibration: slider 3 ≈ probe
 // alpha 5 (full expression); off-manifold drift starts past ~6.
+//
+// `identity` is {strength} — identity transport: the cached reference image's
+// vision-tower tap tokens (set once via setIdentity) ride ALONGSIDE this
+// generation's own conditioning tokens. The reference's raw taps are copied,
+// scaled by `strength`, into the free (mask-0) token slots of whatever carrier
+// this generation uses — plain prompt, expression carrier, or image-as-prompt
+// — and the mask is extended, so the DiT cross-attends to prompt AND reference
+// simultaneously (a true multimodal prime, not a pooled direction). strength 1
+// == the reference tokens verbatim; the same tap-magnitude modulation the band
+// dial relies on makes it a working dial. Identity tokens join the carrier
+// BEFORE the baked banks and band dial apply, so those treat them as part of
+// the conditioning like any other token. When the reference has more valid
+// tokens than there are free slots, it is evenly subsampled to fit.
 //
 // `mouth` is {open, round, teeth} — the same baked-bank mechanism over
 // lab/mouth.json (tools/mint_mouth.js farms ~36 mouth-state phrase fields per
@@ -107,6 +125,9 @@ var numLayers = 0;
 var dictAxes = [];     // the loaded dictionary's axis names (the named bank
                        // minted axes are decomposed against — never includes
                        // runtime/minted axes, so the explanation stays stable)
+var identityRef = null; // cached identity-transport reference: {taps: {embeds,
+                        // mask}, tokens} from setIdentity's vision-tower encode
+                        // (~125 MB — one at a time). Cleared on model load.
 
 // The 6 fixed scenes krea-research's mint_text_axis() averages a text-pair
 // diff over (axis_factory.py's SCENES[:6]) — robustifies the direction
@@ -156,6 +177,7 @@ function handleLoad(msg) {
     // Encoder-output caches belong to the old pipeline — a different model
     // would silently serve its predecessor's taps.
     fieldCache = {}; fieldCacheCount = 0;
+    identityRef = null;
     // Krea 2's FP16 total (DiT ~25GB + Qwen3-VL-4B text/vision ~8.3GB) doesn't
     // fit a single 24GB card. INT8 quantizes BOTH components (loadModel's
     // opts.quantizeWeights, see brodiffusion::Pipeline::ModelDirOptions) down
@@ -284,7 +306,7 @@ function masksEqual(a, b) {
 var fieldCache = {};
 var fieldCacheCount = 0;
 function expressionField(prompt, adj) {
-  var key = prompt + ' ' + adj;
+  var key = prompt + '\u0000' + adj;
   if (fieldCache[key]) return fieldCache[key];
   var te = pipeline.krea2EncodePromptTaps(spliceAdjective(prompt, adj));
   var tn = null, neutral = null;
@@ -408,24 +430,72 @@ function activeBaked(msg) {
   return out;
 }
 
+// Identity transport: copy the cached reference's valid vision-token tap
+// blocks (each token is a contiguous 12-layer span of the embeds buffer),
+// scaled by `strength`, into the carrier's free (mask-0) slots, and mark
+// those slots valid. The carrier's mask is replaced with a copy first —
+// expressionTaps hands out its CACHED field mask by reference, and extending
+// that in place would poison every later use of the cached field.
+function mergeIdentity(taps, strength) {
+  if (!identityRef) {
+    throw new Error('no identity reference set — pick one in the identity panel first');
+  }
+  var slots = taps.mask.rows;
+  var span = (taps.embeds.rows / slots) * taps.embeds.cols;   // floats per token
+  var ref = identityRef.taps;
+  var refSpan = (ref.embeds.rows / ref.mask.rows) * ref.embeds.cols;
+  if (refSpan !== span) {
+    throw new Error('identity reference tap shape mismatch — re-set the reference');
+  }
+  taps.mask = { rows: taps.mask.rows, cols: taps.mask.cols, data: taps.mask.data.slice() };
+  var free = [], src = [];
+  for (var t = 0; t < slots; t++) if (taps.mask.data[t] === 0) free.push(t);
+  for (var t = 0; t < ref.mask.rows; t++) if (ref.mask.data[t] !== 0) src.push(t);
+  if (!src.length) throw new Error('identity reference encoded to zero valid tokens');
+  if (!free.length) {
+    throw new Error('the prompt fills all ' + slots + ' token slots — no room for identity tokens');
+  }
+  // More reference tokens than free slots: take an even subsample.
+  var take = Math.min(src.length, free.length);
+  var dstData = taps.embeds.data, refData = ref.embeds.data;
+  for (var i = 0; i < take; i++) {
+    var s = src[Math.floor(i * src.length / take)];
+    var d = free[i];
+    var dstTok = dstData.subarray(d * span, (d + 1) * span);
+    // dstTok = 0*dstTok + strength*refTok — a copy at C++ speed; the filler
+    // rows being overwritten hold garbage, so wa must be 0, not 1.
+    bro.image.combine(dstTok, dstTok, refData.subarray(s * span, (s + 1) * span),
+                      { op: 'wsum', wa: 0, wb: strength });
+    taps.mask.data[d] = 1;
+  }
+  return take;
+}
+
 // Raw taps for this generation, or null to let prime(prompt) do the encode
 // (+ auto cond_control) internally. Image-as-prompt, the expression field,
-// the baked banks, and the band dial all need the raw-taps path; the plain
-// axis bank alone does not.
+// the baked banks, the band dial, and identity transport all need the
+// raw-taps path; the plain axis bank alone does not.
 function buildTaps(msg) {
   var band = (msg.band == null) ? 1.0 : +msg.band;
   var expr = (msg.expression && msg.expression.adj && +msg.expression.alpha)
     ? msg.expression : null;
   var baked = activeBaked(msg);
+  var ident = (msg.identity && +msg.identity.strength) ? msg.identity : null;
   var taps;
   if (msg.imagePixels) {
     taps = pipeline.krea2EncodeImagePrompt(msg.imagePixels, msg.imageH, msg.imageW);
   } else if (expr) {
     taps = expressionTaps(msg.prompt, String(expr.adj), +expr.alpha);
-  } else if (baked || band !== 1.0) {
+  } else if (baked || band !== 1.0 || ident) {
     taps = pipeline.krea2EncodePromptTaps(msg.prompt);
   } else {
     return null;
+  }
+  // Identity tokens join the carrier first, so the banks and band below treat
+  // them as part of the conditioning like any other token.
+  if (ident) {
+    var took = mergeIdentity(taps, +ident.strength);
+    taps.identityNote = 'identity ×' + (+ident.strength).toFixed(2) + ' · ' + took + ' tokens';
   }
   // Baked axes are per-row uniform: they stack on whatever taps this
   // generation uses — plain prompt, expression carrier, or image-as-prompt —
@@ -565,6 +635,7 @@ function handleGenerate(msg) {
       if (gates) extra.gates = gates;
       if (taps && taps.neutral) extra.exprNeutral = taps.neutral;
       if (taps && taps.note) extra.spectrumNote = taps.note;
+      if (taps && taps.identityNote) extra.identityNote = taps.identityNote;
       respondImage('done', img, Math.round(now() - t0), extra);
     });
   } catch (e) {
@@ -878,6 +949,31 @@ function handleRegisterAxis(msg) {
   }
 }
 
+// ── identity transport reference ─────────────────────────────────────────
+// One encode when the reference is picked; every later generate merges the
+// cached taps for free (a strength drag costs no re-encode). The main thread
+// owns the pixels and re-sends after a model load (the cache dies with the
+// old pipeline's encoder).
+function handleSetIdentity(msg) {
+  try {
+    if (!pipeline) throw new Error('no model loaded');
+    if (!msg.pixels || !msg.H || !msg.W) throw new Error('setIdentity: missing pixels/H/W');
+    var taps = pipeline.krea2EncodeImagePrompt(msg.pixels, msg.H, msg.W);
+    var tokens = 0;
+    for (var t = 0; t < taps.mask.rows; t++) if (taps.mask.data[t] !== 0) tokens++;
+    identityRef = { taps: taps, tokens: tokens };
+    self.postMessage({ type: 'identitySet', tokens: tokens });
+  } catch (e) {
+    identityRef = null;
+    fail('setIdentity', e);
+  }
+}
+
+function handleClearIdentity() {
+  identityRef = null;
+  self.postMessage({ type: 'identityCleared' });
+}
+
 function handleRemoveControl(msg) {
   try {
     if (pipeline && msg.name) pipeline.removeControl(msg.name);
@@ -937,6 +1033,8 @@ self.onmessage = function (e) {
     case 'mintTextAxis':   handleMintTextAxis(msg); break;
     case 'mintImageAxis':  handleMintImageAxis(msg); break;
     case 'registerAxis':   handleRegisterAxis(msg); break;
+    case 'setIdentity':    handleSetIdentity(msg); break;
+    case 'clearIdentity':  handleClearIdentity(); break;
     case 'removeControl':  handleRemoveControl(msg); break;
     case 'applyLora':      handleApplyLora(msg); break;
     case 'setLoras':       handleSetLoras(msg); break;
