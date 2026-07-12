@@ -23,6 +23,7 @@
       <aside id="rail">
         <nav id="rail-nav">
           <button class="secbtn active" data-sec="scene">scene</button>
+          <button class="secbtn" data-sec="character">character</button>
           <button class="secbtn" data-sec="face">face</button>
           <button class="secbtn" data-sec="look">look</button>
           <button class="secbtn" data-sec="mint">mint</button>
@@ -46,28 +47,6 @@
                 <textarea id="neg-prompt" rows="2" maxlength="1000"
                   placeholder="blurry, low quality, deformed, watermark"></textarea>
               </label>
-            </section>
-
-            <section class="panel">
-              <h2>identity <span class="hint inline">carry a character across renders</span>
-                <span class="grow"></span>
-                <button id="btn-ident-clear" class="link" disabled
-                        title="Drop the identity reference">clear</button>
-              </h2>
-              <div class="ident-row">
-                <div class="imgpick-thumb ident-thumb" id="ident-thumb">
-                  <div class="slot-empty">no reference</div>
-                </div>
-                <div class="ident-btns">
-                  <button id="btn-ident-use-render" class="primary" disabled
-                          title="Use the render on the canvas as the identity reference">Use current render</button>
-                  <button id="btn-ident-browse" class="link" disabled
-                          title="Load an image file as the identity reference">browse a file…</button>
-                </div>
-              </div>
-              <div id="ident-strength-row"></div>
-              <p class="hint" title="The reference is encoded once through the model's own vision tower; its tokens ride alongside your prompt's tokens on every render, so the character carries while the seed, prompt, and axes move the scene.">
-                the reference rides alongside the prompt · change the seed or walk the axes — the character carries</p>
             </section>
 
             <section class="panel">
@@ -117,60 +96,6 @@
                 strength is adjustable per LoRA without reloading; 0 turns one off.</p>
             </section>
 
-            <section class="panel">
-              <h2>find character <span class="hint inline">seed search · judged by a second process</span></h2>
-              <p class="hint">Set the current render as the reference, change
-                any settings, then Find: a staged beam over init seeds keeps
-                whichever candidates an identity judge (DINOv2 head match +
-                Qwen3-VL questionnaire, on GPU 1) scores closest to the
-                reference character. The winning seed lands in the seed
-                field.</p>
-              <button id="fc-set-ref">Use current render as reference</button>
-              <p id="fc-ref-note" class="hint"></p>
-              <label class="field">
-                <span class="field-head">head box <span class="hint inline">— x0,y0,x1,y1 px on the reference</span></span>
-                <input id="fc-box" type="text" placeholder="210,85,295,175">
-              </label>
-              <span class="row">
-                <label class="field">character type
-                  <select id="fc-schema">
-                    <option value="human">human</option>
-                    <option value="creature">creature</option>
-                  </select>
-                </label>
-                <label class="field">candidates
-                  <input id="fc-n" type="number" min="4" max="64" value="32">
-                </label>
-                <label class="field">search res
-                  <select id="fc-searchmin"
-                          title="Candidates render at this size; the winner is carried to the target size by init-noise expansion. 512 is the judge-validated floor; 256 is ~2× faster.">
-                    <option value="512">512 · validated</option>
-                    <option value="256">256 · fast</option>
-                  </select>
-                </label>
-              </span>
-              <details>
-                <summary class="hint">judge setup</summary>
-                <label class="field">bro-headless path
-                  <input id="fc-headless" type="text"
-                         value="D:/projects/bro/build/Release/bro-headless.exe">
-                </label>
-                <label class="field">Qwen3-VL dir
-                  <input id="fc-qwen" type="text"
-                         value="D:/projects/brolm/weights/Qwen3-VL-4B-Instruct">
-                </label>
-                <label class="field">DINOv2-base dir
-                  <input id="fc-dino" type="text"
-                         value="C:/Users/jonny/.cache/huggingface/hub/models--facebook--dinov2-base/snapshots/f9e44c814b77203eaa57a6bdbbd535f21ede1415">
-                </label>
-              </details>
-              <button id="fc-go" class="primary">Find character</button>
-              <p id="fc-status" class="hint"></p>
-              <img id="fc-refcrop" style="display:none;width:96px;height:96px;object-fit:cover"
-                   title="judge anchor crop">
-              <div id="fc-ladder"></div>
-            </section>
-
             <!-- model last: it's set-and-forget — the summary line carries the
                  status, the body auto-collapses once the load lands. -->
             <section class="panel">
@@ -192,6 +117,31 @@
                   <button id="btn-load" class="primary">Load model</button>
                 </div>
               </details>
+            </section>
+          </div>
+
+          <!-- ═══ character: who is in the picture ════════════════════════ -->
+          <div class="sec" id="sec-character">
+            <section class="panel">
+              <h2>identity <span class="hint inline">carry a character across renders</span>
+                <span class="grow"></span>
+                <button id="btn-ident-clear" class="link" disabled
+                        title="Drop the identity reference">clear</button>
+              </h2>
+              <div class="ident-row">
+                <div class="imgpick-thumb ident-thumb" id="ident-thumb">
+                  <div class="slot-empty">no reference</div>
+                </div>
+                <div class="ident-btns">
+                  <button id="btn-ident-use-render" class="primary" disabled
+                          title="Use the render on the canvas as the identity reference">Use current render</button>
+                  <button id="btn-ident-browse" class="link" disabled
+                          title="Load an image file as the identity reference">browse a file…</button>
+                </div>
+              </div>
+              <div id="ident-strength-row"></div>
+              <p class="hint" title="The reference is encoded once through the model's own vision tower; its tokens ride alongside your prompt's tokens on every render, so the character carries while the seed, prompt, and axes move the scene.">
+                the reference rides alongside the prompt · change the seed or walk the axes — the character carries</p>
             </section>
           </div>
 

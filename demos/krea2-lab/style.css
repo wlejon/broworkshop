@@ -123,14 +123,11 @@ textarea { resize: vertical; }
 .ratio-chips button:hover { background: #1a2030; color: #cdd5e0; }
 .ratio-chips button.active { background: #63391c; border-color: #c9822f; color: #ffdcb0; }
 
-/* identity: reference thumb + pick buttons on one row, strength below */
-.ident-row { display: flex; gap: 10px; align-items: stretch; }
-.ident-row .imgpick-thumb { width: 96px; flex: none; }
-.ident-btns {
-  flex: 1; display: flex; flex-direction: column; gap: 6px;
-  justify-content: center; min-width: 0;
-}
-.ident-btns .link { text-align: left; }
+/* identity (character section): full-width reference thumb, pick buttons
+   below, strength under that */
+.ident-row { display: flex; flex-direction: column; gap: 8px; }
+.ident-btns { display: flex; gap: 10px; align-items: center; }
+.ident-btns .primary { flex: 1; }
 
 /* seed: value + randomize toggle + recent-seed reuse, on one row */
 .seed-field { gap: 5px; }

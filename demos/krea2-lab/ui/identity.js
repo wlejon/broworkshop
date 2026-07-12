@@ -1,4 +1,4 @@
-// Identity panel (scene section): identity transport. Pick a reference image
+// Identity panel (character section): identity transport. Pick a reference image
 // — the current render or a file — and its vision-tower tap tokens ride
 // alongside the prompt's own conditioning tokens on every generation (the
 // worker's `identity` message field + setIdentity cache). The character
@@ -119,7 +119,7 @@ export function initIdentity(ctx) {
     key: 'ident-strength',
     min: 0, max: 2, step: 0.05, value: strengthInit,
     host: $('ident-strength-row'),
-    section: 'scene',
+    section: 'character',
     chip: () => 'identity',
     commit: () => {},
   });
