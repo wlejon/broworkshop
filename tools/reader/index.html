@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Reader</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <header id="topbar">
+      <span id="brand">◈ Reader</span>
+      <span class="tagline">local text-to-speech reading</span>
+      <span class="grow"></span>
+      <span id="backend" class="badge">idle</span>
+      <button id="btn-settings" class="iconbtn" title="Settings">⚙</button>
+    </header>
+
+    <!-- ═══ library ═══ -->
+    <main id="library-view">
+      <section id="lib-toolbar">
+        <button id="btn-import" class="primary">＋ Import document…</button>
+        <span class="meta">txt · md · html — or drop files anywhere</span>
+        <span class="grow"></span>
+        <span id="lib-hint" class="meta"></span>
+      </section>
+      <div id="lib-scroll">
+        <div id="lib-empty">
+          <div class="empty-icon">◈</div>
+          <div>Your library is empty.</div>
+          <div class="meta">Import a .txt, .md, or .html document to start listening.</div>
+        </div>
+        <div id="doc-grid"></div>
+      </div>
+    </main>
+
+    <!-- ═══ reader ═══ -->
+    <main id="reader-view" style="display:none">
+      <section id="reader-head">
+        <button id="btn-back">← Library</button>
+        <span id="doc-title"></span>
+        <span class="grow"></span>
+        <label class="cfg">engine
+          <select id="engine-sel">
+            <option value="kokoro">Kokoro</option>
+            <option value="qwen">Qwen3-TTS</option>
+          </select>
+        </label>
+        <label class="cfg">voice <select id="voice-sel"></select></label>
+        <button id="btn-preview" class="iconbtn" title="Preview this voice">♪</button>
+        <label class="cfg">speed
+          <select id="speed-sel">
+            <option value="0.7">0.7×</option>
+            <option value="0.85">0.85×</option>
+            <option value="1" selected>1×</option>
+            <option value="1.15">1.15×</option>
+            <option value="1.3">1.3×</option>
+            <option value="1.5">1.5×</option>
+            <option value="1.75">1.75×</option>
+            <option value="2">2×</option>
+          </select>
+        </label>
+        <span id="hint" class="meta"></span>
+      </section>
+
+      <div id="reader-scroll">
+        <div id="reader-text"></div>
+      </div>
+
+      <footer id="player-bar">
+        <button id="btn-para" title="Start of paragraph (↑)">¶</button>
+        <button id="btn-prev" title="Previous sentence (←)">◀◀</button>
+        <button id="btn-play" class="playbtn" title="Play (space)">▶</button>
+        <button id="btn-next" title="Next sentence (→)">▶▶</button>
+        <span id="progress" class="meta"></span>
+        <span class="grow"></span>
+        <label class="cfg">sleep
+          <select id="sleep-sel">
+            <option value="off" selected>off</option>
+            <option value="5">5 min</option>
+            <option value="15">15 min</option>
+            <option value="30">30 min</option>
+            <option value="60">60 min</option>
+            <option value="para">end of ¶</option>
+          </select>
+        </label>
+        <span id="sleep-meta" class="meta"></span>
+        <button id="btn-export" title="Export narration from here to a WAV file">⤓ wav</button>
+      </footer>
+    </main>
+  </div>
+
+  <!-- ═══ settings modal ═══ -->
+  <div id="settings-modal" class="modal" style="display:none">
+    <div class="panel">
+      <div class="panel-head">Settings <span class="grow"></span><button id="btn-settings-close" class="iconbtn">✕</button></div>
+      <label class="row">theme
+        <select id="set-theme"><option value="dark">dark</option><option value="light">light</option></select>
+      </label>
+      <label class="row">text size
+        <input id="set-fontsize" type="range" min="14" max="30" step="1">
+        <span id="set-fontsize-val" class="meta"></span>
+      </label>
+      <label class="row">default engine
+        <select id="set-engine"><option value="kokoro">Kokoro</option><option value="qwen">Qwen3-TTS</option></select>
+      </label>
+      <label class="row">default voice (Kokoro) <select id="set-voice"></select></label>
+      <label class="row">default speed
+        <select id="set-speed">
+          <option value="0.7">0.7×</option><option value="0.85">0.85×</option>
+          <option value="1">1×</option><option value="1.15">1.15×</option>
+          <option value="1.3">1.3×</option><option value="1.5">1.5×</option>
+          <option value="1.75">1.75×</option><option value="2">2×</option>
+        </select>
+      </label>
+      <label class="row">weights root
+        <input id="set-dataroot" type="text" placeholder="(auto-detect brosoundml)">
+        <button id="btn-browse-root" class="iconbtn" title="Choose the brosoundml / brosoundml-data folder">📁</button>
+      </label>
+      <pre id="set-paths" class="meta"></pre>
+    </div>
+  </div>
+
+  <!-- ═══ export progress modal ═══ -->
+  <div id="export-modal" class="modal" style="display:none">
+    <div class="panel">
+      <div class="panel-head">Exporting narration</div>
+      <div class="bar"><div id="export-fill" class="fill"></div></div>
+      <div id="export-status" class="meta">…</div>
+      <div class="row right"><button id="btn-export-cancel" class="danger">Cancel</button></div>
+    </div>
+  </div>
+
+  <div id="drop-overlay" style="display:none"><div class="drop-box">Drop documents to import</div></div>
+
+  <script type="module" src="/app/app.js"></script>
+</body>
+</html>
