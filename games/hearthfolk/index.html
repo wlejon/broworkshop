@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Hearthfolk</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <canvas id="game"></canvas>
+
+    <div id="status-bar">
+        <span class="title">HEARTHFOLK</span>
+        <span class="hud-box" id="hud-day">Day 1</span>
+        <span class="hud-box" id="hud-phase">Morning</span>
+        <span class="chip off" id="mind-chip">minds: off</span>
+        <span class="hud-box thinks" id="hud-thinks">✓ 0  ✕ 0</span>
+        <span class="hud-box res" id="hud-res"></span>
+        <span class="spacer"></span>
+        <span class="btn speed" id="btn-pause">⏸</span>
+        <span class="btn speed" id="btn-1x">1×</span>
+        <span class="btn speed" id="btn-4x">4×</span>
+        <span class="btn" id="btn-save">SAVE</span>
+        <span class="btn" id="btn-load">LOAD</span>
+    </div>
+
+    <div id="chronicle">
+        <div class="panel-title">VILLAGE CHRONICLE</div>
+        <div id="chronicle-list"></div>
+    </div>
+
+    <div id="feed"></div>
+
+    <div id="bubbles"></div>
+
+    <div id="mind-panel" style="display:none">
+        <div class="panel-title" id="mp-name"></div>
+        <div class="panel-sub" id="mp-sub"></div>
+        <div class="need-row"><span>hunger</span><div class="bar"><div class="bar-fill" id="bar-hunger"></div></div></div>
+        <div class="need-row"><span>tired</span><div class="bar"><div class="bar-fill" id="bar-energy"></div></div></div>
+        <div class="need-row"><span>lonely</span><div class="bar"><div class="bar-fill" id="bar-social"></div></div></div>
+        <div class="need-row"><span>cold</span><div class="bar"><div class="bar-fill" id="bar-warmth"></div></div></div>
+        <div class="mp-label">GOAL</div>
+        <div id="mp-goal"></div>
+        <div class="mp-label">LAST THINK</div>
+        <pre id="mp-think"></pre>
+        <div class="mp-label">MEMORIES</div>
+        <ul id="mp-memories"></ul>
+    </div>
+
+    <div id="help">
+        Click a villager to read their mind &middot; arrows/WASD pan, wheel zooms
+        &middot; space pauses &middot; the village lives on its own — watch, and listen
+    </div>
+
+    <div id="toast" style="display:none"></div>
+
+    <script type="module" src="/app/app.js"></script>
+</body>
+</html>

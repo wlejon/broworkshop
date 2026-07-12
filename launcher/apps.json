@@ -28,6 +28,7 @@
         { "dir": "games/blastgrid" },
         { "dir": "games/deepdelve" },
         { "dir": "games/tilehaven" },
+        { "dir": "games/hearthfolk" },
         { "dir": "tools/synth" },
         { "dir": "tools/mesh-viewer" },
         { "dir": "tools/scene-editor" },
