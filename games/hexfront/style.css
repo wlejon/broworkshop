@@ -1,0 +1,66 @@
+html, body { margin: 0; padding: 0; overflow: hidden; background: #0a0d12; }
+canvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; user-select: none; }
+
+#hud-top {
+    position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 18px; align-items: center;
+    background: rgba(10, 12, 18, 0.82); border: 1px solid rgba(255,255,255,0.14);
+    border-radius: 8px; padding: 8px 18px;
+    color: #eee; font: bold 15px monospace; letter-spacing: 1px;
+    pointer-events: none;
+}
+#hud-side.side-red  { color: #ff7a66; }
+#hud-side.side-blue { color: #7ab0ff; }
+#hud-ai { color: #7ab0ff; animation: pulse 1s infinite alternate; }
+@keyframes pulse { from { opacity: 0.45; } to { opacity: 1; } }
+
+#unit-panel {
+    position: absolute; top: 70px; left: 12px; width: 210px;
+    background: rgba(10, 12, 18, 0.85); border: 1px solid rgba(255,255,255,0.14);
+    border-radius: 8px; padding: 12px 14px;
+    color: #ccc; font: 13px monospace; pointer-events: none;
+}
+.panel-title { font-weight: bold; font-size: 15px; color: #fff; margin-bottom: 8px; }
+.stat-row { display: flex; justify-content: space-between; line-height: 1.6; }
+.stat-row span:first-child { color: #8a93a5; }
+.panel-hint { margin-top: 8px; color: #b5e853; font-size: 11px; line-height: 1.4; }
+
+#controls {
+    position: absolute; bottom: 14px; right: 14px;
+    display: flex; gap: 8px;
+}
+.btn {
+    padding: 9px 16px; border-radius: 6px; cursor: pointer;
+    background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.18);
+    color: #ddd; font: bold 13px monospace; user-select: none;
+}
+.btn:hover { background: rgba(255,255,255,0.16); color: #fff; }
+.btn.accent { border-color: #b5e853; color: #b5e853; }
+.btn.accent:hover { background: rgba(181,232,83,0.18); }
+.btn .key { opacity: 0.55; font-weight: normal; }
+
+#help {
+    position: absolute; bottom: 14px; left: 14px; max-width: 560px;
+    color: rgba(255,255,255,0.45); font: 11px monospace; line-height: 1.5;
+    pointer-events: none;
+}
+
+#banner {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 14px;
+    background: rgba(5, 6, 10, 0.62); pointer-events: none;
+}
+#banner-text {
+    font: bold 64px monospace; letter-spacing: 6px; color: #fff;
+    text-shadow: 0 4px 24px rgba(0,0,0,0.8);
+}
+#banner.victory #banner-text { color: #ffd75e; }
+#banner.defeat  #banner-text { color: #ff6655; }
+#banner-sub { color: rgba(255,255,255,0.6); font: 13px monospace; }
+
+#toast {
+    position: absolute; top: 70px; left: 50%; transform: translateX(-50%);
+    background: rgba(10, 12, 18, 0.9); border: 1px solid rgba(181,232,83,0.5);
+    color: #b5e853; font: 13px monospace; padding: 8px 16px; border-radius: 6px;
+    pointer-events: none;
+}
