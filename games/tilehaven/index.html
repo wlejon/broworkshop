@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>TileHaven</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <canvas id="game"></canvas>
+
+    <div id="hud-top">
+        <span class="hud-box gold">COINS <b id="hud-coins">0</b></span>
+        <span class="hud-box">POP <b id="hud-pop">0</b></span>
+        <span class="hud-box green">FOOD <b id="hud-food">0</b></span>
+        <span class="hud-box brown">WOOD <b id="hud-wood">0</b></span>
+        <span class="hud-box orange">ORE <b id="hud-ore">0</b></span>
+        <span class="hud-box">CARTS <b id="hud-carts">0</b></span>
+        <span class="hud-box goal" id="hud-goal">GOAL</span>
+    </div>
+
+    <div id="palette">
+        <div class="tool-btn" id="btn-road">
+            <div class="tb-name">ROAD <span class="key">R</span></div>
+            <div class="tb-cost"></div>
+            <div class="tb-desc">Drag to paint. Bridges over water cost 12c.</div>
+        </div>
+        <div class="tool-btn" id="btn-house">
+            <div class="tb-name">HOUSE <span class="key">H</span></div>
+            <div class="tb-cost"></div>
+            <div class="tb-desc">6 residents. Needs food + road.</div>
+        </div>
+        <div class="tool-btn" id="btn-farm">
+            <div class="tb-name">FARM <span class="key">F</span></div>
+            <div class="tb-cost"></div>
+            <div class="tb-desc">Grows food. 2 workers.</div>
+        </div>
+        <div class="tool-btn" id="btn-lumber">
+            <div class="tb-name">LUMBER <span class="key">L</span></div>
+            <div class="tb-cost"></div>
+            <div class="tb-desc">Beside a forest. 2 workers.</div>
+        </div>
+        <div class="tool-btn" id="btn-mine">
+            <div class="tb-name">MINE <span class="key">M</span></div>
+            <div class="tb-cost"></div>
+            <div class="tb-desc">On an ore hill. Ore sells for coins.</div>
+        </div>
+        <div class="tool-btn" id="btn-market">
+            <div class="tb-name">MARKET <span class="key">K</span></div>
+            <div class="tb-cost"></div>
+            <div class="tb-desc">Extra delivery hub.</div>
+        </div>
+        <div class="tool-btn danger" id="btn-dozer">
+            <div class="tb-name">BULLDOZE <span class="key">B</span></div>
+            <div class="tb-cost">50% refund</div>
+            <div class="tb-desc">Remove roads and buildings.</div>
+        </div>
+        <div class="side-btns">
+            <div class="btn" id="btn-save">SAVE</div>
+            <div class="btn" id="btn-load">LOAD</div>
+        </div>
+    </div>
+
+    <div id="info-panel" style="display:none">
+        <div id="ip-name" class="panel-title"></div>
+        <div id="ip-status" class="panel-stats"></div>
+        <div class="panel-hint">Click elsewhere to deselect &middot; route shown in gold</div>
+    </div>
+
+    <div id="help">
+        Paint roads from the golden depot &middot; buildings only work when road-connected
+        &middot; carts haul goods to market &middot; arrows/WASD pan, wheel zooms
+        &middot; goal: 50 population and 500 coins
+    </div>
+
+    <div id="toast" style="display:none"></div>
+
+    <div id="banner" style="display:none">
+        <div id="banner-text"></div>
+        <div id="banner-sub"></div>
+        <div class="btn accent" id="btn-continue">KEEP BUILDING</div>
+    </div>
+
+    <script type="module" src="/app/app.js"></script>
+</body>
+</html>
