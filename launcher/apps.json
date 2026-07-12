@@ -26,6 +26,7 @@
         { "dir": "games/hexfront" },
         { "dir": "games/gridkeep" },
         { "dir": "games/blastgrid" },
+        { "dir": "games/deepdelve" },
         { "dir": "tools/synth" },
         { "dir": "tools/mesh-viewer" },
         { "dir": "tools/scene-editor" },

@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>DeepDelve</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <canvas id="game"></canvas>
+    <div id="vignette"></div>
+
+    <div id="hud-left">
+        <div class="panel">
+            <div class="panel-title">DELVER</div>
+            <div id="hp-row">
+                <div id="hp-bar"><div id="hp-fill"></div></div>
+                <div id="hp-text">26 / 26</div>
+            </div>
+            <div class="stat-row"><span>ATK</span><b id="stat-atk">3</b>
+                <span>DEF</span><b id="stat-def">0</b></div>
+            <div class="stat-row"><span>GOLD</span><b id="stat-gold" class="gold">0</b>
+                <span>TURN</span><b id="stat-turn">0</b></div>
+            <div class="stat-row"><span>FLOOR</span><b id="stat-floor">1 / 3</b></div>
+        </div>
+    </div>
+
+    <div id="hud-right">
+        <div class="panel">
+            <div class="panel-title">PACK</div>
+            <div class="inv-row"><span class="inv-ico wpn"></span><span id="inv-weapon">Rusty Dagger</span></div>
+            <div class="inv-row"><span class="inv-ico arm"></span><span id="inv-armor">Cloth Rags</span></div>
+            <div class="inv-row"><span class="inv-ico pot"></span>Potions ×<b id="inv-potions">1</b>
+                <span id="btn-potion" class="mini-btn">Q&nbsp;quaff</span></div>
+            <div class="hud-btns">
+                <span id="btn-save" class="mini-btn">F5 save</span>
+                <span id="btn-load" class="mini-btn">F9 load</span>
+            </div>
+        </div>
+    </div>
+
+    <div id="log"></div>
+
+    <div id="help">
+        Arrows / WASD move &amp; bump-attack &middot; Space wait &middot; Q potion &middot;
+        E search for traps &middot; walk onto stairs to descend &middot;
+        find the Amulet on floor 3
+    </div>
+
+    <div id="announce" style="display:none"></div>
+
+    <div id="banner" style="display:none">
+        <div id="banner-text"></div>
+        <div id="banner-sub"></div>
+    </div>
+
+    <script type="module" src="/app/app.js"></script>
+</body>
+</html>
