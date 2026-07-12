@@ -141,6 +141,13 @@
                 <label class="field">candidates
                   <input id="fc-n" type="number" min="4" max="64" value="32">
                 </label>
+                <label class="field">search res
+                  <select id="fc-searchmin"
+                          title="Candidates render at this size; the winner is carried to the target size by init-noise expansion. 512 is the judge-validated floor; 256 is ~2× faster.">
+                    <option value="512">512 · validated</option>
+                    <option value="256">256 · fast</option>
+                  </select>
+                </label>
               </span>
               <details>
                 <summary class="hint">judge setup</summary>

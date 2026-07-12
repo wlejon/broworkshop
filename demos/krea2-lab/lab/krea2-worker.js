@@ -1093,12 +1093,36 @@ async function runFindCharacter(msg) {
   applyGateState(base);
   var dial = dialFor(base);
 
+  // Search small, deliver big: candidates render at the search floor
+  // (msg.searchMin — 512 is the judge-validated default, 256 is ~2× faster)
+  // and the winning identity is carried to the target size by init-noise
+  // expansion (bro.diffusion.expandNoise — block-mean-matched; identity
+  // lives in the noise's low frequencies. A seed does NOT transfer across
+  // resolutions). Halve the target dims while both stay >= the floor;
+  // factor 1 = search at target.
+  var floor = msg.searchMin || 512;
+  var tw = base.opts.width || 512, th = base.opts.height || 512;
+  var factor = 1;
+  while (tw % (factor * 2 * 16) === 0 && th % (factor * 2 * 16) === 0 &&
+         tw / (factor * 2) >= floor && th / (factor * 2) >= floor) {
+    factor *= 2;
+  }
+  var sw = tw / factor, sh = th / factor;
+  var searchOpts = { width: sw, height: sh };
+
   // Stage A: prime + one judged preview forward per seed, keep keepA.
   var pool = [];
   for (var i = 0; i < seeds.length; i++) {
     var m = Object.assign({}, base,
-        { opts: Object.assign({}, base.opts, { seed: seeds[i] }) });
+        { opts: Object.assign({}, base.opts, searchOpts, { seed: seeds[i] }) });
     var cand = { seed: seeds[i], state: primeState(m).state };
+    if (factor > 1) {
+      // latent() at prime time is sigma_0 x the raw init noise; keep the raw
+      // field for expansion (krea2's sigma_0 is 1.0, but normalize anyway).
+      cand.noise = cand.state.latent();
+      var s0 = pipeline.sigmas()[0];
+      if (s0 !== 1) for (var j = 0; j < cand.noise.length; j++) cand.noise[j] /= s0;
+    }
     cand.score = await previewStep(cand, 0, pipeline.sigmas(), dial, runDir);
     pool.push(cand);
     progress('A', i + 1, seeds.length,
@@ -1148,6 +1172,29 @@ async function runFindCharacter(msg) {
     tied.sort(function (a, b) { return (b.soft || 0) - (a.soft || 0); });
   }
   var best = tied[0];
+
+  // Carry the winner to the target size: expand its init noise by `factor`
+  // and re-render under the same condition. The delivered image is the same
+  // character the judge scored, at the resolution the user asked for.
+  if (factor > 1) {
+    progress('R', 0, 1, 'render ' + tw + '×' + th);
+    var latH = sh / 8, latW = sw / 8;
+    var big = bro.diffusion.expandNoise(best.noise, {
+      channels: best.noise.length / (latH * latW),
+      height: latH, width: latW, factor: factor, seed: best.seed,
+    });
+    var mBig = Object.assign({}, base,
+        { opts: Object.assign({}, base.opts,
+              { seed: best.seed, initNoise: big, width: tw, height: th }) });
+    var stBig = primeState(mBig).state;
+    while (!stBig.done) {
+      if (dial) applyDialDelta(dial, stBig.krea2StepTimestep());
+      stBig.stepOnce();
+    }
+    if (dial) pipeline.krea2SetModDelta(null, DIAL_BLOCKS[0], DIAL_BLOCKS[1]);
+    best.img = stBig.decode({});
+    progress('R', 1, 1, 'render ' + tw + '×' + th);
+  }
 
   var ladder = pool.map(function (c) {
     return { seed: c.seed, final: c.final, soft: c.soft, path: c.finalPath };

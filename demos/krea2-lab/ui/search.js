@@ -59,6 +59,7 @@ export function initSearch(ctx) {
   if (prefs.fcBox) $('fc-box').value = prefs.fcBox;
   if (prefs.fcSchema) $('fc-schema').value = prefs.fcSchema;
   if (prefs.fcN) $('fc-n').value = prefs.fcN;
+  if (prefs.fcSearchMin) $('fc-searchmin').value = prefs.fcSearchMin;
   ctx.onPersist((p) => {
     p.fcHeadless = $('fc-headless').value;
     p.fcQwen = $('fc-qwen').value;
@@ -66,6 +67,7 @@ export function initSearch(ctx) {
     p.fcBox = $('fc-box').value;
     p.fcSchema = $('fc-schema').value;
     p.fcN = $('fc-n').value;
+    p.fcSearchMin = $('fc-searchmin').value;
   });
 
   // ── state ──────────────────────────────────────────────────────────────
@@ -234,7 +236,8 @@ export function initSearch(ctx) {
       const base = ctx.buildGenerateMsg('full');
       fcStatus('searching ' + n + ' seeds…');
       client.send({ type: 'findCharacter', base: base, seeds: seeds,
-                    runDir: runDir }, (err, resp) => {
+                    runDir: runDir,
+                    searchMin: +$('fc-searchmin').value || 512 }, (err, resp) => {
         ctx.setBusy(false);
         if (err) { fcStatus(String(err.message || err), 'err'); return; }
         ctx.drawBitmap(resp.bitmap, resp.width, resp.height);
