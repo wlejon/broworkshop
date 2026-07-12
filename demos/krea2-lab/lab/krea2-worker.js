@@ -1024,9 +1024,153 @@ function handleSetLoras(msg) {
   }
 }
 
+// ── find character: staged beam over init seeds, judged x̂0 previews ──
+// The identity-research M3 recipe (D:/projects/identity-research FINDINGS):
+// N seeded candidates -> 1 forward each -> keep N/2 by judged x̂0 preview ->
+// 1 more forward -> keep N/4 -> finish -> greedy-score finals -> K-sample
+// soft score picks the winner. Judging happens in the judge child process
+// (judge/judge.js); this worker posts {type:'judgeReq'/'softReq'} and the
+// main thread bridges them over bro.net, answering {type:'judgeRes'}.
+// Previews are decoded from the free x̂0 = x_i - σ_i·v̂ via
+// pipeline.sigmas() + finite difference (the Euler step is exact) on a
+// throwaway clone.
+var judgeWaiters = {};
+var judgeSeq = 0;
+
+function askJudge(kind, path) {
+  return new Promise(function (resolve, reject) {
+    var id = ++judgeSeq;
+    judgeWaiters[id] = { resolve: resolve, reject: reject };
+    self.postMessage({ type: kind, id: id, path: path });
+  });
+}
+
+function handleJudgeRes(msg) {
+  var w = judgeWaiters[msg.id];
+  if (!w) return;
+  delete judgeWaiters[msg.id];
+  if (msg.error) w.reject(new Error(msg.error));
+  else w.resolve(msg.score);
+}
+
+function savePng(img, path) {
+  bro.image.encodePngFile(path, img.data, img.width, img.height, 4,
+                          img.width * 4);
+}
+
+// One judged preview step for a candidate: capture x_i, step (with the
+// dial's per-step delta, like runGeneration), recover x̂0 by finite
+// difference, decode it on a throwaway clone, save + judge.
+function previewStep(cand, stepIdx, sigmas, dial, runDir) {
+  var x0 = cand.state.latent();
+  if (dial) applyDialDelta(dial, cand.state.krea2StepTimestep());
+  cand.state.stepOnce();
+  var x1 = cand.state.latent();
+  var k = sigmas[stepIdx] / (sigmas[stepIdx + 1] - sigmas[stepIdx]);
+  var p = new Float32Array(x0.length);
+  for (var j = 0; j < x0.length; j++) p[j] = x0[j] - k * (x1[j] - x0[j]);
+  var peek = cand.state.clone();
+  peek.setLatent(p);
+  var img = peek.decode({});
+  var path = runDir + '/s' + cand.seed + '_p' + stepIdx + '.png';
+  savePng(img, path);
+  return askJudge('judgeReq', path);
+}
+
+function progress(stage, done, total, note) {
+  self.postMessage({ type: 'searchProgress', stage: stage, done: done,
+                     total: total, note: note || '' });
+}
+
+async function runFindCharacter(msg) {
+  var base = msg.base;
+  var seeds = msg.seeds;
+  var keepA = msg.keepA || (seeds.length >> 1);
+  var keepB = msg.keepB || Math.max(seeds.length >> 2, 1);
+  var runDir = msg.runDir;
+  var t0 = now();
+  syncLoraScales(base.loraScales);
+  applyGateState(base);
+  var dial = dialFor(base);
+
+  // Stage A: prime + one judged preview forward per seed, keep keepA.
+  var pool = [];
+  for (var i = 0; i < seeds.length; i++) {
+    var m = Object.assign({}, base,
+        { opts: Object.assign({}, base.opts, { seed: seeds[i] }) });
+    var cand = { seed: seeds[i], state: primeState(m).state };
+    cand.score = await previewStep(cand, 0, pipeline.sigmas(), dial, runDir);
+    pool.push(cand);
+    progress('A', i + 1, seeds.length,
+             's' + cand.seed + ' ' + cand.score.toFixed(2));
+  }
+  pool.sort(function (a, b) { return b.score - a.score; });
+  pool = pool.slice(0, keepA);
+
+  // Stage B: one more judged preview forward, keep keepB.
+  var sigmas = pipeline.sigmas();
+  for (var i = 0; i < pool.length; i++) {
+    pool[i].score = await previewStep(pool[i], 1, sigmas, dial, runDir);
+    progress('B', i + 1, pool.length,
+             's' + pool[i].seed + ' ' + pool[i].score.toFixed(2));
+  }
+  pool.sort(function (a, b) { return b.score - a.score; });
+  pool = pool.slice(0, keepB);
+
+  // Stage C: finish, greedy-score finals.
+  for (var i = 0; i < pool.length; i++) {
+    var c = pool[i];
+    while (!c.state.done) {
+      if (dial) applyDialDelta(dial, c.state.krea2StepTimestep());
+      c.state.stepOnce();
+    }
+    c.img = c.state.decode({});
+    c.finalPath = runDir + '/s' + c.seed + '_final.png';
+    savePng(c.img, c.finalPath);
+    c.final = await askJudge('judgeReq', c.finalPath);
+    progress('C', i + 1, pool.length,
+             's' + c.seed + ' ' + c.final.toFixed(2));
+  }
+  if (dial) pipeline.krea2SetModDelta(null, DIAL_BLOCKS[0], DIAL_BLOCKS[1]);
+  pool.sort(function (a, b) { return b.final - a.final; });
+
+  // Soft K-sample scoring on the tied leaders picks the winner (the lean
+  // score saturates; soft matching is where the engine judge is validated).
+  var tied = pool.filter(function (c) {
+    return c.final >= pool[0].final - 1e-9;
+  });
+  if (tied.length > 1) {
+    for (var i = 0; i < tied.length; i++) {
+      tied[i].soft = await askJudge('softReq', tied[i].finalPath);
+      progress('T', i + 1, tied.length,
+               's' + tied[i].seed + ' soft ' + tied[i].soft.toFixed(3));
+    }
+    tied.sort(function (a, b) { return (b.soft || 0) - (a.soft || 0); });
+  }
+  var best = tied[0];
+
+  var ladder = pool.map(function (c) {
+    return { seed: c.seed, final: c.final, soft: c.soft, path: c.finalPath };
+  });
+  var img = best.img;
+  var data = new ImageData(img.data, img.width, img.height);
+  createImageBitmap(data).then(function (bitmap) {
+    self.postMessage({ type: 'found', bitmap: bitmap, width: img.width,
+                       height: img.height, seed: best.seed,
+                       score: best.final, soft: best.soft, ladder: ladder,
+                       ms: Math.round(now() - t0) }, [bitmap]);
+  });
+}
+
+function handleFindCharacter(msg) {
+  runFindCharacter(msg).catch(function (e) { fail('findCharacter', e); });
+}
+
 self.onmessage = function (e) {
   var msg = e.data || {};
   switch (msg.type) {
+    case 'judgeRes':       handleJudgeRes(msg); return;
+    case 'findCharacter':  handleFindCharacter(msg); break;
     case 'load':           handleLoad(msg); break;
     case 'generate':       handleGenerate(msg); break;
     case 'spatialRender':  handleSpatialRender(msg); break;

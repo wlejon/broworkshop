@@ -50,6 +50,7 @@ import { initLora } from "/app/ui/lora.js";
 import { initGate } from "/app/ui/gate.js";
 import { initSpatial } from "/app/ui/spatial.js";
 import { initRender } from "/app/ui/render.js";
+import { initSearch } from "/app/ui/search.js";
 import { initModel } from "/app/ui/model.js";
 
 function init() {
@@ -273,6 +274,7 @@ function init() {
   });
 
   initRender(ctx);
+  initSearch(ctx);   // after initRender: uses ctx.drawBitmap/randomSeed
   initModel(ctx);
 
   // ── boot ─────────────────────────────────────────────────────────────────

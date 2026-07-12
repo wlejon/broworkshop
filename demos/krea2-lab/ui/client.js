@@ -8,6 +8,13 @@ export function createClient() {
   const worker = new Worker('lab/krea2-worker.js');
   const queue = [];
   let pending = null, readyCb = null, ready = false, progressCb = null;
+  let sideCb = null;
+
+  // Mid-request side traffic — reported while a request is in flight, must
+  // NOT consume the pending response callback: interim mint progress, plus
+  // the character search's progress and judge callouts (the worker awaits a
+  // sendAux'd judgeRes for each).
+  const SIDE = { mintProgress: 1, searchProgress: 1, judgeReq: 1, softReq: 1 };
 
   worker.onmessage = function (e) {
     const msg = e.data || {};
@@ -16,10 +23,9 @@ export function createClient() {
       if (readyCb) { const r = readyCb; readyCb = null; r(); }
       return;
     }
-    // Interim progress — reported mid-request, must NOT consume the pending
-    // response callback.
-    if (msg.type === 'mintProgress') {
-      if (progressCb) progressCb(msg);
+    if (SIDE[msg.type]) {
+      if (msg.type === 'mintProgress') { if (progressCb) progressCb(msg); }
+      else if (sideCb) sideCb(msg);
       return;
     }
     const cb = pending; pending = null;
@@ -40,9 +46,14 @@ export function createClient() {
     pending = cb;
     worker.postMessage(message);
   }
+  // Out-of-band post straight to the worker — answers to its mid-request
+  // callouts (judgeRes). Never touches the FIFO.
+  function sendAux(message) { worker.postMessage(message); }
   return {
     onReady: (cb) => { if (ready) cb(); else readyCb = cb; },
     onProgress: (cb) => { progressCb = cb; },
+    onSide: (cb) => { sideCb = cb; },
     send: send,
+    sendAux: sendAux,
   };
 }
