@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>BlastGrid</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <canvas id="game"></canvas>
+
+    <div id="hud-top">
+        <div id="chips"></div>
+        <div id="timer">2:00</div>
+        <div id="round">ROUND 1</div>
+    </div>
+
+    <div id="powers"></div>
+
+    <div id="help">
+        Arrows / WASD move &middot; Space drops a bomb &middot; blasts travel the
+        cross and stop at pillars &middot; grab what the crates hide &middot;
+        last bomber standing wins the round
+    </div>
+
+    <div id="announce" style="display:none"></div>
+    <div id="toast" style="display:none"></div>
+
+    <div id="banner" style="display:none">
+        <div id="banner-text"></div>
+        <div id="banner-sub"></div>
+    </div>
+
+    <script type="module" src="/app/app.js"></script>
+</body>
+</html>
