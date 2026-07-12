@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>GridKeep</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <canvas id="game"></canvas>
+
+    <div id="hud-top">
+        <span class="hud-box" id="hud-gold-box">GOLD <b id="hud-gold">0</b></span>
+        <span class="hud-box" id="hud-lives-box">LIVES <b id="hud-lives">0</b></span>
+        <span class="hud-box" id="hud-wave-box">WAVE <b id="hud-wave">&mdash;</b></span>
+    </div>
+
+    <div id="palette">
+        <div class="tower-btn" id="btn-arrow">
+            <div class="tb-name">ARROW <span class="key">1</span></div>
+            <div class="tb-cost"></div>
+            <div class="tb-desc"></div>
+        </div>
+        <div class="tower-btn" id="btn-cannon">
+            <div class="tb-name">CANNON <span class="key">2</span></div>
+            <div class="tb-cost"></div>
+            <div class="tb-desc"></div>
+        </div>
+        <div class="tower-btn" id="btn-frost">
+            <div class="tb-name">FROST <span class="key">3</span></div>
+            <div class="tb-cost"></div>
+            <div class="tb-desc"></div>
+        </div>
+        <div id="btn-wave" class="btn accent">START WAVE 1&nbsp;&nbsp;[Space]</div>
+    </div>
+
+    <div id="tower-panel" style="display:none">
+        <div id="tp-name" class="panel-title"></div>
+        <div id="tp-stats" class="panel-stats"></div>
+        <div class="panel-buttons">
+            <div id="btn-upgrade" class="btn">UPGRADE</div>
+            <div id="btn-sell" class="btn danger">SELL</div>
+        </div>
+        <div class="panel-hint">U upgrade &middot; S sell &middot; Esc close</div>
+    </div>
+
+    <div id="help">
+        Pick a tower (1/2/3), click grass to build &middot; creeps reroute around your maze
+        &middot; you may not wall them off completely &middot; hilltop towers get +1 range
+        &middot; click a tower to upgrade or sell
+    </div>
+
+    <div id="announce" style="display:none"></div>
+    <div id="toast" style="display:none"></div>
+
+    <div id="banner" style="display:none">
+        <div id="banner-text"></div>
+        <div id="banner-sub"></div>
+    </div>
+
+    <script type="module" src="/app/app.js"></script>
+</body>
+</html>

@@ -24,6 +24,7 @@
         { "dir": "games/fintank" },
         { "dir": "games/stompworld" },
         { "dir": "games/hexfront" },
+        { "dir": "games/gridkeep" },
         { "dir": "tools/synth" },
         { "dir": "tools/mesh-viewer" },
         { "dir": "tools/scene-editor" },
