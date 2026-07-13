@@ -45,6 +45,7 @@ import { initIdentity } from "/app/ui/identity.js";
 import { initFace } from "/app/ui/face.js";
 import { initTune } from "/app/ui/tune.js";
 import { initAxes } from "/app/ui/axes.js";
+import { initExplore } from '/app/ui/explore.js';
 import { initMint } from "/app/ui/mint.js";
 import { initLora } from "/app/ui/lora.js";
 import { initGate } from "/app/ui/gate.js";
@@ -242,6 +243,7 @@ function init() {
   initFace(ctx);
   initTune(ctx);
   initAxes(ctx);
+  initExplore(ctx);
   initMint(ctx);
   initLora(ctx);
   initGate(ctx);
@@ -272,6 +274,10 @@ function init() {
     live = $('live').checked; persist();
     if (live) schedule('full');
   });
+
+  // Test seam: headless tests need to assert that a slider actually reaches the
+  // generate call, not merely that a row appeared in the DOM.
+  window.__ctx = ctx;
 
   initRender(ctx);
   initModel(ctx);

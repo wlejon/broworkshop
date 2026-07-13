@@ -26,6 +26,7 @@
           <button class="secbtn" data-sec="character">character</button>
           <button class="secbtn" data-sec="face">face</button>
           <button class="secbtn" data-sec="look">look</button>
+          <button class="secbtn" data-sec="explore">explore</button>
           <button class="secbtn" data-sec="mint">mint</button>
           <button class="secbtn" data-sec="tune">tune</button>
         </nav>
@@ -197,6 +198,39 @@
               <div id="user-slots"></div>
             </section>
           </div>
+
+          <!-- === explore: every atom the SAE found, unnamed =============== -->
+          <div class="sec" id="sec-explore">
+            <section class="panel">
+              <h2>discovered atoms
+                <span class="hint inline">unnamed &middot; the strip is the description</span>
+                <span class="grow"></span>
+                <span class="hint inline" id="explore-count">&hellip;</span>
+              </h2>
+              <div class="hint" style="margin-bottom:8px">
+                Each strip: three unrelated scenes down, the slider at &minus;6 &middot; neutral &middot; +6
+                across. Click one to take it as a live slider.
+              </div>
+              <div class="row">
+                <input id="explore-filter" type="text" placeholder="atom #" style="width:90px">
+                <label class="hint">moves the image &ge;
+                  <input id="explore-minact" type="range" min="0" max="0.4" step="0.01" value="0">
+                  <span id="explore-minact-val">0.00</span>
+                </label>
+              </div>
+              <div id="explore-grid" class="explore-grid"></div>
+            </section>
+
+            <section class="panel">
+              <h2>taken <span class="hint inline">live sliders</span>
+                <span class="grow"></span>
+                <button id="btn-explore-clear" class="link" title="Drop every taken axis">drop all</button>
+              </h2>
+              <div id="explore-picked"></div>
+              <div class="hint" id="explore-picked-empty">nothing taken yet &mdash; click a strip above.</div>
+            </section>
+          </div>
+
 
           <!-- ═══ mint: make new axes ═════════════════════════════════════ -->
           <div class="sec" id="sec-mint">

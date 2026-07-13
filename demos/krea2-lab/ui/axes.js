@@ -164,6 +164,8 @@ export function initAxes(ctx) {
       const v = +(axisStrengths[m.name] || 0);
       if (v) out[m.name] = (out[m.name] || 0) + v;
     });
+    // Atoms taken from the explore grid are live axes like any other.
+    if (ctx.collectExplore) Object.assign(out, ctx.collectExplore());
     return out;
   }
 
@@ -216,6 +218,7 @@ export function initAxes(ctx) {
   ctx.renderAxisManager = renderAxisManager;
   ctx.rebuildMintedAxes = rebuildMintedAxes;
   ctx.addMintedAxis = addMintedAxis;
+  ctx.collectAxisControls = collectAxisControls;   // what actually goes on the wire
   ctx.applyAxesMeta = (meta) => {
     axesMeta = meta;
     buildAxisBank(meta);

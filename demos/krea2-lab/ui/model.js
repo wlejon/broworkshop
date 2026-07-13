@@ -73,7 +73,8 @@ export function initModel(ctx) {
     startLoadOverlay();
     ctx.status('loading model — this reads ~26GB of weights, give it a moment');
     ctx.client.send({ type: 'load', modelDir: modelDir,
-                  dictPaths: ['assets/axes_turbo.bcd1', 'assets/axes_sae_deck.bcd1'],
+                  dictPaths: ['assets/axes_turbo.bcd1', 'assets/axes_sae_deck.bcd1',
+                              'assets/axes_sae_all.bcd1'],
                   spectrumPath: 'lab/spectrum.json', mouthPath: 'lab/mouth.json' }, (err, msg) => {
       stopLoadOverlay();
       if (err) {
