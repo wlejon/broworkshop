@@ -697,44 +697,11 @@ details[open] > .ctl-cat::before { content: '▾ '; }
 
 .spec-disabled #spec-rows, .spec-disabled #mouth-rows { opacity: .35; pointer-events: none; }
 
-/* ── explore: the contact-sheet grid of discovered atoms ──────────────────── */
-/* The strip IS the label, so the cell is mostly image; the atom number is a
-   handle for talking about it, not a name for what it does. */
-.explore-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
-  gap: 6px;
-  max-height: 46vh;
+/* ── explore: the long list of discovered atoms ──────────────────────────── */
+/* 391 sliders. Scroll it. The only affordances are order (strongest first) and
+   grouping (atoms that move the picture alike sit together). */
+.explore-list {
+  max-height: 62vh;
   overflow-y: auto;
-  padding: 2px;
+  padding-right: 4px;
 }
-.explore-cell {
-  position: relative;
-  cursor: pointer;
-  border: 2px solid transparent;
-  border-radius: 4px;
-  line-height: 0;
-}
-.explore-cell img { width: 100%; border-radius: 3px; display: block; }
-.explore-cell:hover { border-color: var(--accent, #6af); }
-.explore-cell.picked { border-color: var(--accent, #6af); }
-.explore-cell.picked::after {
-  content: '✓';
-  position: absolute; top: 2px; right: 4px;
-  color: #fff; text-shadow: 0 0 3px #000;
-  font-size: 12px; line-height: 1;
-}
-.explore-cap {
-  position: absolute; left: 3px; bottom: 2px;
-  font-size: 10px; line-height: 1;
-  color: #fff; text-shadow: 0 0 3px #000, 0 0 2px #000;
-  font-variant-numeric: tabular-nums;
-}
-.explore-thumb {
-  width: 34px; height: 34px;
-  border-radius: 3px; margin-right: 6px;
-  cursor: pointer; flex: 0 0 auto;
-}
-.explore-picked-row { display: flex; align-items: center; }
-.explore-picked-row .ctl-head,
-.explore-picked-row input[type=range] { flex: 1 1 auto; }

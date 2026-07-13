@@ -1,126 +1,124 @@
 // Explore: every atom the SAE found, unnamed.
 //
 // The axis bank above holds the axes somebody could put a NAME to — 18 built from
-// prompt differences, 8 picked out of a screening sweep by eye. That naming is a
-// filter on our vocabulary, not on the model. The sweep rendered 391 atoms and
-// essentially all of them ACTUATE: only one of the 391 barely moves the picture.
-// The other 390 all do something, whether or not anyone has a word for it.
+// prompt differences, 8 more picked out of a screening sweep by eye. That naming
+// is a filter on our vocabulary, not on the model. The sweep rendered all 391 and
+// essentially every one ACTUATES: exactly 1 of 391 barely moves the picture. The
+// other 390 all do something, whether or not anyone has a word for it.
 //
-// So this panel does not classify, label, or rank by what an atom "is". It shows
-// you what each one DOES — a 3x3 strip rendered offline (three unrelated scenes
-// down, the slider at -6 / neutral / +6 across) — and lets you take any of them
-// as a live slider. You find the interesting ones the way you would in any
-// darkroom: by looking at the contact sheet.
+// So this is just the sliders. Turn one, generate, look. The lab renders live, so
+// the picture on YOUR prompt is the label — no thumbnails, no captions, no names.
 //
-// The strips come from the sweep's own frames, so browsing costs nothing.
+// Two things make 391 sliders scrollable instead of a wall:
+//
+//   ORDER    strongest mover first. `act` is how far the atom pushed the image at
+//            ±6 in the sweep (a cosine distance in CLIP space; 0 = nothing moved).
+//            The ones that do MORE are at the top, of the list and of each group.
+//
+//   GROUPS   atoms clustered by what they DID, not by any name. Similarity is the
+//            mean of two cosines — one on the CLIP change, one on a 15-feature
+//            pixel change — because neither alone is trustworthy: a night photo and
+//            an oil painting are near-identical in pixel statistics, and CLIP is
+//            blind to framing. Requiring BOTH to agree groups atoms that really do
+//            move the picture alike. The group numbers are handles, not meanings.
+//
+// All of that is measurement from the sweep. None of it is a claim about what an
+// atom IS — that is what the slider and your own prompt are for.
 
 import { $ } from '/app/ui/util.js';
 
 export function initExplore(ctx) {
-  let index = [];          // [{atom, act, pres}] from assets/sae_index.json
-  let picked = {};         // atom -> ctl, the ones promoted to live sliders
-  const PREV = 'assets/sae_previews/';
+  const rows = [];   // [{atom, act, row}] — every atom, built once
 
-  // Restore picks from prefs so an exploration survives a reload.
-  const saved = Array.isArray(ctx.prefs.explorePicks) ? ctx.prefs.explorePicks : [];
-
-  function key(a) { return 'sae.' + a; }
-
-  function pickRow(atom) {
-    const ctl = ctx.buildCtl({
-      label: key(atom), title: key(atom) + ' — unnamed; the strip is the description',
-      key: key(atom), min: -6, max: 6, step: 0.01,
-      section: 'explore',
-      commit: () => {},
-    });
-    // A thumbnail beside the slider, so a picked axis stays recognisable once it
-    // is out of the grid and you have five of them stacked.
-    const thumb = document.createElement('img');
-    thumb.className = 'explore-thumb';
-    thumb.src = PREV + 'sae_' + atom + '.jpg';
-    thumb.title = 'drop this axis';
-    thumb.addEventListener('click', () => toggle(atom));
-    ctl.row.insertBefore(thumb, ctl.row.firstChild);
-    ctl.row.classList.add('explore-picked-row');
-    return ctl;
-  }
-
-  function toggle(atom) {
-    if (picked[atom]) {
-      picked[atom].range.value = '0';       // zero it before dropping — a removed
-      ctx.unregister && ctx.unregister(key(atom));   // slider must stop injecting
-      picked[atom].row.remove();
-      delete picked[atom];
-    } else {
-      const ctl = pickRow(atom);
-      $('explore-picked').appendChild(ctl.row);
-      picked[atom] = ctl;
-    }
-    const cell = $('explore-grid').querySelector('[data-atom="' + atom + '"]');
-    if (cell) cell.classList.toggle('picked', !!picked[atom]);
-    $('explore-picked-empty').style.display =
-      Object.keys(picked).length ? 'none' : '';
-    ctx.prefs.explorePicks = Object.keys(picked).map(Number);
-    ctx.persist();
-    ctx.refreshButtons && ctx.refreshButtons();
-  }
-
-  function buildGrid() {
-    const host = $('explore-grid');
+  // Built once and only ever SHOWN or HIDDEN. Rebuilding the list on each filter
+  // keystroke would drop rows out of the control registry, and a slider you had
+  // turned up would either vanish from the deck while still injecting, or stop
+  // injecting without telling you. Neither is acceptable in a tool whose whole job
+  // is knowing what is shaping the image.
+  function build(index) {
+    const host = $('explore-list');
     host.innerHTML = '';
-    const q = ($('explore-filter').value || '').trim();
-    const min = +$('explore-minact').value || 0;
-    let shown = 0;
+    let group = -1, box = null;
+
     index.forEach((e) => {
-      if (e.act < min) return;
-      if (q && String(e.atom).indexOf(q) < 0) return;
-      const cell = document.createElement('div');
-      cell.className = 'explore-cell' + (picked[e.atom] ? ' picked' : '');
-      cell.setAttribute('data-atom', e.atom);
-      const im = document.createElement('img');
-      im.src = PREV + 'sae_' + e.atom + '.jpg';
-      im.loading = 'lazy';
-      const cap = document.createElement('div');
-      cap.className = 'explore-cap';
-      cap.textContent = e.atom;
-      cell.appendChild(im);
-      cell.appendChild(cap);
-      cell.title = 'sae.' + e.atom + '  ·  moves the image ' + e.act.toFixed(2) +
-                   '  ·  keeps the scene ' + e.pres.toFixed(2) + '\nclick to take it as a slider';
-      cell.addEventListener('click', () => toggle(e.atom));
-      host.appendChild(cell);
-      shown++;
+      if (e.group !== group) {
+        group = e.group;
+        const det = document.createElement('details');
+        det.className = 'axis-cat-group';
+        det.setAttribute('open', '');
+        const sum = document.createElement('summary');
+        sum.className = 'ctl-cat';
+        const nm = document.createElement('span');
+        nm.textContent = 'group ' + (group + 1);
+        const hint = document.createElement('span');
+        hint.className = 'hint inline';
+        hint.textContent = 'move the picture alike';
+        sum.appendChild(nm);
+        sum.appendChild(hint);
+        det.appendChild(sum);
+        host.appendChild(det);
+        box = det;
+      }
+      const ctl = ctx.buildCtl({
+        label: 'sae.' + e.atom,
+        title: 'sae.' + e.atom + ' — unnamed. Moves the image ' + e.act.toFixed(2) +
+               ', keeps the scene ' + e.pres.toFixed(2) + '. Turn it and generate.',
+        key: 'sae.' + e.atom,
+        min: -6, max: 6, step: 0.01,
+        section: 'explore',
+        group: 'explore',
+        commit: () => {},
+      });
+      box.appendChild(ctl.row);
+      rows.push({ atom: e.atom, act: e.act, row: ctl.row, ctl: ctl, group: group });
     });
-    $('explore-count').textContent = shown + ' of ' + index.length;
+    $('explore-count').textContent = index.length + ' atoms · ' + (group + 1) + ' groups';
+  }
+
+  function applyFilter() {
+    const min = +$('explore-minact').value || 0;
+    const q = ($('explore-filter').value || '').trim();
+    let shown = 0;
+    rows.forEach((r) => {
+      const hit = r.act >= min && (!q || String(r.atom).indexOf(q) >= 0);
+      // A slider that is turned up stays visible whatever the filter says — it is
+      // shaping the image, so hiding it would be lying about what is on.
+      const on = +r.ctl.range.value !== 0;
+      r.row.style.display = (hit || on) ? '' : 'none';
+      if (hit) shown++;
+    });
+    // Hide a group whose every row is hidden, so scrolling is not all headers.
+    const boxes = $('explore-list').querySelectorAll('.axis-cat-group');
+    boxes.forEach((b) => {
+      const any = Array.prototype.some.call(b.querySelectorAll('.ctl'),
+                                            (c) => c.style.display !== 'none');
+      b.style.display = any ? '' : 'none';
+    });
+    $('explore-shown').textContent = shown === rows.length ? '' : ('showing ' + shown);
   }
 
   fetch('assets/sae_index.json').then((r) => r.json()).then((ix) => {
-    // Strongest movers first — not a quality ranking, just the ones whose strip
-    // has the most to look at.
-    index = ix.slice().sort((a, b) => b.act - a.act);
-    saved.forEach((a) => { if (!picked[a]) toggle(a); });
-    buildGrid();
+    build(ix);            // the asset is already ordered: strongest group, strongest atom
+    applyFilter();
   }).catch((e) => { $('explore-count').textContent = 'no sae_index.json: ' + e.message; });
 
-  $('explore-filter').addEventListener('input', buildGrid);
+  $('explore-filter').addEventListener('input', applyFilter);
   $('explore-minact').addEventListener('input', () => {
     $('explore-minact-val').textContent = (+$('explore-minact').value).toFixed(2);
-    buildGrid();
+    applyFilter();
   });
-  $('btn-explore-clear').addEventListener('click', () => {
-    Object.keys(picked).map(Number).forEach(toggle);
+  $('btn-explore-reset').addEventListener('click', () => {
+    rows.forEach((r) => r.ctl.set(0));
+    applyFilter();
   });
 
-  // The picked sliders are plain ctl rows registered in the 'explore' section, so
-  // the deck, the reset-all button and the section badges already see them. All
-  // that is left is to feed them into the generate call.
+  // What actually goes on the wire.
   ctx.collectExplore = () => {
     const out = {};
-    for (const a in picked) {
-      if (!picked.hasOwnProperty(a)) continue;
-      const v = +picked[a].range.value;
-      if (v) out[key(a)] = v;
-    }
+    rows.forEach((r) => {
+      const v = +r.ctl.range.value;
+      if (v) out['sae.' + r.atom] = v;
+    });
     return out;
   };
 }

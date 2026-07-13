@@ -1,7 +1,7 @@
-// Explore grid — NO model load, no weights needed. The grid is built from
-// assets/sae_index.json and the strips are pre-rendered, so browsing 391 atoms
-// costs nothing; taking one has to produce a live axis that actually reaches the
-// generate call, which is what this checks.
+// Explore list — NO model load, no weights needed. 391 unnamed sliders, ordered
+// strongest-first and grouped by measured effect. What has to be true: every atom
+// is there, a turned slider REACHES the generate call, and filtering never lies
+// about what is shaping the image.
 //
 //   bro-headless ../broworkshop/demos/krea2-lab tests/test_explore.js
 
@@ -18,50 +18,58 @@ function pumpUntil(pred, budgetMs) {
   return pred();
 }
 
-// One cell per atom in the index — every atom the sweep rendered, none dropped.
 let want = 0;
 fetch('assets/sae_index.json').then((r) => r.json()).then((ix) => { want = ix.length; });
 assert(pumpUntil(() => want > 0, 10000), 'sae_index.json fetched');
-assert(pumpUntil(() => document.querySelectorAll('#explore-grid .explore-cell').length === want, 10000),
-       'grid has one cell per discovered atom (' + want + ')');
+
+// One slider per discovered atom — none dropped.
+const sliders = () => document.querySelectorAll('#explore-list .ctl');
+assert(pumpUntil(() => sliders().length === want, 10000),
+       'one slider per discovered atom (' + want + ', got ' + sliders().length + ')');
+assert(document.querySelectorAll('#explore-list .axis-cat-group').length > 1,
+       'atoms are grouped');
 
 document.querySelector('.secbtn[data-sec="explore"]').click();
 flush();
 assert($('sec-explore').classList.contains('active'), 'explore section shows');
 
-// Taking an atom promotes it to a live slider.
-const cell = document.querySelector('#explore-grid .explore-cell');
-const atom = cell.getAttribute('data-atom');
-assert($('explore-picked').querySelectorAll('.ctl').length === 0, 'nothing taken yet');
-cell.click();
-flush();
-assert(cell.classList.contains('picked'), 'cell marks as taken');
-const row = $('explore-picked').querySelector('.ctl[data-key="sae.' + atom + '"]');
-assert(row, 'taking an atom adds its slider');
+// Strongest mover first: the list is pre-sorted, so row 1 must out-actuate row N.
+let ix = null;
+fetch('assets/sae_index.json').then((r) => r.json()).then((j) => { ix = j; });
+assert(pumpUntil(() => ix !== null, 5000), 'index read');
+assert(ix[0].act >= ix[ix.length - 1].act, 'strongest movers are at the top');
 
-// ...and a nonzero slider reaches the generate call. This is the load-bearing
-// assertion: a strip you can look at is useless if turning its knob does nothing.
-const range = row.querySelector('input[type=range]');
+// Turning a slider reaches the generate call. This is the load-bearing one: a
+// list you can scroll is useless if the knobs do not go on the wire.
+const first = sliders()[0];
+const key = first.getAttribute('data-key');
+const range = first.querySelector('input[type=range]');
 range.value = '3.5';
 range.dispatchEvent(new Event('input'));
 flush();
-const ac = window.__ctx ? window.__ctx.collectAxisControls() : null;
-assert(ac, 'ctx exposed for the test');
-assert(ac['sae.' + atom] === 3.5,
-       'taken axis reaches the generate call (got ' + JSON.stringify(ac) + ')');
+const ac = window.__ctx.collectAxisControls();
+assert(ac[key] === 3.5, 'a turned slider reaches generate (got ' + JSON.stringify(ac) + ')');
 
-// Dropping it takes it back out of the stack — a removed slider must stop injecting.
-cell.click();
+// Filtering must not hide a slider that is currently ON — that would be lying
+// about what is shaping the image.
+$('explore-minact').value = '0.4';
+$('explore-minact').dispatchEvent(new Event('input'));
 flush();
-assert(!$('explore-picked').querySelector('.ctl[data-key="sae.' + atom + '"]'), 'dropped');
-const ac2 = window.__ctx.collectAxisControls();
-assert(ac2['sae.' + atom] === undefined, 'dropped axis no longer injects');
+assert(first.style.display !== 'none', 'a turned-up slider stays visible through a filter');
+assert(window.__ctx.collectAxisControls()[key] === 3.5, 'and keeps injecting');
 
-// Filtering by atom number narrows the grid without losing the taken ones.
-$('explore-filter').value = String(atom);
-$('explore-filter').dispatchEvent(new Event('input'));
+// Zeroed, it may be filtered away — and then it must stop injecting.
+range.value = '0';
+range.dispatchEvent(new Event('input'));
+$('explore-minact').dispatchEvent(new Event('input'));
 flush();
-const shown = document.querySelectorAll('#explore-grid .explore-cell').length;
-assert(shown > 0 && shown < want, 'filter narrows the grid (' + shown + ' of ' + want + ')');
+assert(window.__ctx.collectAxisControls()[key] === undefined, 'a zeroed slider injects nothing');
 
-console.log('PASS: explore grid, take/drop, and the taken axis reaches generate');
+// reset zeroes the whole discovered bank.
+const r2 = sliders()[0].querySelector('input[type=range]');
+r2.value = '2'; r2.dispatchEvent(new Event('input')); flush();
+$('btn-explore-reset').click();
+flush();
+assert(Object.keys(window.__ctx.collectAxisControls()).length === 0, 'reset zeroes every atom');
+
+console.log('PASS: 391 unnamed sliders, grouped, sorted, and they reach generate');

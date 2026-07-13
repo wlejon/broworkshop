@@ -199,17 +199,18 @@
             </section>
           </div>
 
-          <!-- === explore: every atom the SAE found, unnamed =============== -->
+          <!-- === explore: every atom the SAE found, unnamed ================ -->
           <div class="sec" id="sec-explore">
             <section class="panel">
               <h2>discovered atoms
-                <span class="hint inline">unnamed &middot; the strip is the description</span>
-                <span class="grow"></span>
                 <span class="hint inline" id="explore-count">&hellip;</span>
+                <span class="grow"></span>
+                <span class="hint inline" id="explore-shown"></span>
+                <button id="btn-explore-reset" class="link" title="Zero every discovered slider">reset</button>
               </h2>
               <div class="hint" style="margin-bottom:8px">
-                Each strip: three unrelated scenes down, the slider at &minus;6 &middot; neutral &middot; +6
-                across. Click one to take it as a live slider.
+                Unnamed. Strongest movers first; atoms grouped by what they DO, not by
+                any label. Turn one and generate &mdash; the picture is the description.
               </div>
               <div class="row">
                 <input id="explore-filter" type="text" placeholder="atom #" style="width:90px">
@@ -218,19 +219,9 @@
                   <span id="explore-minact-val">0.00</span>
                 </label>
               </div>
-              <div id="explore-grid" class="explore-grid"></div>
-            </section>
-
-            <section class="panel">
-              <h2>taken <span class="hint inline">live sliders</span>
-                <span class="grow"></span>
-                <button id="btn-explore-clear" class="link" title="Drop every taken axis">drop all</button>
-              </h2>
-              <div id="explore-picked"></div>
-              <div class="hint" id="explore-picked-empty">nothing taken yet &mdash; click a strip above.</div>
+              <div id="explore-list" class="explore-list"></div>
             </section>
           </div>
-
 
           <!-- ═══ mint: make new axes ═════════════════════════════════════ -->
           <div class="sec" id="sec-mint">
