@@ -216,6 +216,7 @@ function init() {
                             { seed: usedSeed, steps: msg.opts.steps, width: resp.width, height: resp.height });
       }
       status(quality === 'preview' ? 'preview' : 'done', 'ok');
+      if (ctx.setStackMeter) ctx.setStackMeter(resp.stack);
       $('timing').textContent = (resp.ms ? resp.ms + ' ms' : '') +
         (resp.exprNeutral ? ' · field vs “' + resp.exprNeutral + '”' : '') +
         (resp.spectrumNote ? ' · ' + resp.spectrumNote : '') +

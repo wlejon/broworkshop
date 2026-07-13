@@ -235,12 +235,31 @@ function handleLoad(msg) {
 
 // ── shared helpers ───────────────────────────────────────────────────────
 
+// The stack budget, in alpha units — how much TOTAL axis injection the scene
+// can absorb before the injection, rather than the prompt, is what gets drawn.
+// Every axis is added to every token row, so what reaches the denoiser is the
+// SUM of the stack: ten sliders at +2 push twice as hard as one at +10, and the
+// deck happily lets you do it. Probe strips (a person-free sunset-cliff prompt,
+// ten axes stacked, the sum renormalized and swept) put the cliff at roughly
+//   |v| ~ 13*band - 1     alpha units
+// — past it any scene turns into dramatic crowds. The band dial belongs in the
+// rule because it scales the PROMPT's own deep taps: at band 0.5 the cliff is
+// ~5.5, at 1.0 it is ~12. Above 1.0 the headroom stops growing, so the factor
+// is capped. Hold the stack at 90% of the measured cliff.
+function controlBudget(band) {
+  var b = Math.min(+band || 1.0, 1.0);
+  return 0.9 * Math.max(2.0, 13 * b - 1);
+}
+
 // Apply the {axisName: alpha} control map from scratch (mirrors sana-lab):
 // clear, then set the nonzero axes, so a slider at 0/absent is a true no-op.
 // Baked into the state's fused conditioning at prime() time (task C's wiring)
-// — safe to clear again right after priming.
-function applyAxisControls(map) {
+// — safe to clear again right after priming. The engine holds the stack to the
+// budget by scaling every active axis by one common factor, so the dialled-in
+// mix survives; we return what it cost so the deck can show a meter.
+function applyAxisControls(map, band) {
   pipeline.clearControl();
+  pipeline.setControlBudget(controlBudget(band));
   var any = false, active = {};
   for (var name in map) {
     if (!map.hasOwnProperty(name)) continue;
@@ -248,6 +267,7 @@ function applyAxisControls(map) {
     if (a) { active[name] = a; any = true; }
   }
   if (any) pipeline.setControl(active);
+  return pipeline.controlNorm();   // {norm, budget, clamped, scale}
 }
 
 // Scale the 4 deep-tap band layers across every token slot of a raw-taps
@@ -551,7 +571,7 @@ function syncLoraScales(scales) {
 // ON the state (PipelineState.prepared), states primed here can be stepped
 // interleaved — each denoises under its own conditioning.
 function primeState(msg) {
-  applyAxisControls(msg.axisControls || {});
+  var stack = applyAxisControls(msg.axisControls || {}, msg.band);
   var taps = buildTaps(msg);
   // NB: krea2PrimeFromTaps(embeds, mask, opts, uncondEmbeds?, uncondMask?) —
   // opts is the 3rd arg. Passing it 5th (as uncondMask) silently drops width/
@@ -561,7 +581,7 @@ function primeState(msg) {
     ? pipeline.krea2PrimeFromTaps(taps.embeds, taps.mask, msg.opts)
     : pipeline.prime(msg.prompt, msg.opts);
   pipeline.clearControl();
-  return { state: state, taps: taps };
+  return { state: state, taps: taps, stack: stack };
 }
 
 // Install this step's AdaLN mod-delta for the dial (pregate/prescale) on the
@@ -612,7 +632,7 @@ function runGeneration(msg, onDone) {
 
   var gates = msg.captureGates ? pipeline.krea2Gates() : null;
   var img = state.decode({});
-  onDone(img, gates, taps);
+  onDone(img, gates, taps, ps.stack);
 }
 
 function respondImage(type, img, ms, extra) {
@@ -630,12 +650,13 @@ function handleGenerate(msg) {
     if (!pipeline) throw new Error('no model loaded');
     var t0 = now();
     var opts = Object.assign({}, msg.opts || {}, { negativePrompt: msg.negPrompt || '' });
-    runGeneration(Object.assign({}, msg, { opts: opts }), function (img, gates, taps) {
+    runGeneration(Object.assign({}, msg, { opts: opts }), function (img, gates, taps, stack) {
       var extra = {};
       if (gates) extra.gates = gates;
       if (taps && taps.neutral) extra.exprNeutral = taps.neutral;
       if (taps && taps.note) extra.spectrumNote = taps.note;
       if (taps && taps.identityNote) extra.identityNote = taps.identityNote;
+      if (stack) extra.stack = stack;   // {norm, budget, clamped, scale}
       respondImage('done', img, Math.round(now() - t0), extra);
     });
   } catch (e) {

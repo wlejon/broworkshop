@@ -268,6 +268,17 @@
               <button id="btn-deck-clear" class="link" title="Return every control to neutral">reset all</button>
             </div>
             <div id="deck-chips" class="deck-chips"></div>
+            <!-- How hard the axis stack pushes, against what the scene can take.
+                 Every axis is added to every token, so the model sees the SUM —
+                 ten sliders at +2 push harder than one at +10. Past the budget
+                 the injection outweighs the prompt (the scene turns into whatever
+                 the injection itself means), so the engine scales the whole stack
+                 back by one factor and the mix is kept. -->
+            <div id="deck-stack" class="deck-stack"
+                 title="Total axis push vs what this scene can absorb. Over budget the whole stack is scaled back proportionally — the mix you dialled in is kept.">
+              <div class="ds-track"><div id="ds-fill" class="ds-fill"></div></div>
+              <span id="ds-text" class="ds-text"></span>
+            </div>
           </div>
           <div class="gen-row">
             <button id="btn-generate" class="primary" disabled>Generate</button>

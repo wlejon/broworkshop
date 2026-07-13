@@ -403,6 +403,18 @@ details[open] > .ctl-cat::before { content: '▾ '; }
 }
 .deck-chip { flex: none; }
 .deck-empty { color: #3f4652; font-size: 11px; padding: 1px 0; }
+/* stack meter — total axis push against what the scene can absorb */
+.deck-stack { display: none; align-items: center; gap: 7px; }
+.deck-stack.show { display: flex; }
+.ds-track {
+  flex: 1; height: 3px; border-radius: 2px; background: #1e232c; overflow: hidden;
+}
+.ds-fill { height: 100%; width: 0; background: #4a7fbf; transition: width 120ms linear; }
+.ds-text {
+  flex: none; font-size: 10px; color: #5b6470; font-variant-numeric: tabular-nums;
+}
+.deck-stack.over .ds-fill { background: #c9822f; }
+.deck-stack.over .ds-text { color: #f0a860; }
 .deck-chip {
   display: flex; align-items: center; gap: 5px;
   padding: 2px 4px 2px 8px; font-size: 10px; border-radius: 10px;

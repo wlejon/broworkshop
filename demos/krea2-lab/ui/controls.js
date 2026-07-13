@@ -200,6 +200,7 @@ export function initControls(ctx) {
     }
     $('deck-count').textContent = n ? String(n) : '';
     $('btn-deck-clear').disabled = !n;
+    if (!n) setStackMeter(null);
     for (const sec in counts) {
       const dot = $('dot-' + sec);
       if (!dot) continue;
@@ -208,6 +209,31 @@ export function initControls(ctx) {
     }
     deckHooks.forEach((fn) => fn());
   }
+  // ── the stack meter ──────────────────────────────────────────────────────
+  // Axis sliders are individually bounded, but the model sees their SUM, and the
+  // scene only absorbs so much before the injection — not the prompt — is what
+  // gets drawn. The worker reports what the stack spent and what it was allowed
+  // (brodiffusion's CondControl budget, which scales an over-spent stack back by
+  // one common factor). Fed from each render's response, so the number shown is
+  // always the one the picture was made with.
+  function setStackMeter(stack) {
+    const box = $('deck-stack');
+    if (!box) return;
+    if (!stack || !stack.norm || !stack.budget) {
+      box.classList.remove('show', 'over');
+      return;
+    }
+    box.classList.add('show');
+    box.classList.toggle('over', !!stack.clamped);
+    $('ds-fill').style.width =
+      Math.min(100, (stack.norm / stack.budget) * 100).toFixed(0) + '%';
+    $('ds-text').textContent = stack.clamped
+      ? 'push ' + stack.norm.toFixed(1) + ' — held at ' + stack.budget.toFixed(1) +
+        ' (all axes ×' + stack.scale.toFixed(2) + ')'
+      : 'push ' + stack.norm.toFixed(1) + ' / ' + stack.budget.toFixed(1);
+  }
+  ctx.setStackMeter = setStackMeter;
+
   // "return every control to neutral" — one render at the end, not one per chip
   $('btn-deck-clear').addEventListener('click', () => {
     let any = false;
