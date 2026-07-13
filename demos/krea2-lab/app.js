@@ -1,7 +1,7 @@
 // Krea 2 Lab — main thread. Drives the Krea 2 Turbo pipeline (in a worker,
 // lab/krea2-worker.js) as a comprehensive showcase of every research-hook
 // control krea-research (../krea-research) discovered: AdaLN dials, the deep-
-// tap band dial, an 18-axis conditioning-space control bank (+ user-minted
+// tap band dial, a conditioning-space control bank (+ user-minted
 // axes), attention-gate scale/mask, per-region spatial-paint compositing,
 // and the expression panel — contextual per-token fields (sana-research's
 // dictionary.py technique on Krea 2's taps seam): a word picker (the field is

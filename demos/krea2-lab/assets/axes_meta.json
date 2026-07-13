@@ -88,5 +88,45 @@
   "category": "Mood",
   "label": "mundane \u2194 epic",
   "order": 17
+ },
+ "sae.4571": {
+  "category": "Discovered",
+  "label": "wide + cluttered \u2194 tight decluttered close-up",
+  "order": 18
+ },
+ "sae.7129": {
+  "category": "Discovered",
+  "label": "flat daylight \u2194 low-key night",
+  "order": 19
+ },
+ "sae.8077": {
+  "category": "Discovered",
+  "label": "cool \u2194 warm (white balance)",
+  "order": 20
+ },
+ "sae.1807": {
+  "category": "Discovered",
+  "label": "muted \u2194 hyper-saturated",
+  "order": 21
+ },
+ "sae.8039": {
+  "category": "Discovered",
+  "label": "photo \u2192 dark Old Master oil",
+  "order": 22
+ },
+ "sae.4957": {
+  "category": "Discovered",
+  "label": "photo \u2192 bright impressionist oil",
+  "order": 23
+ },
+ "sae.2250": {
+  "category": "Discovered",
+  "label": "photo \u2192 pale watercolour wash",
+  "order": 24
+ },
+ "sae.4359": {
+  "category": "Discovered",
+  "label": "photo \u2192 pencil / ink sketch",
+  "order": 25
  }
 }

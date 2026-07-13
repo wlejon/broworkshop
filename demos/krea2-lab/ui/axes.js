@@ -1,4 +1,5 @@
-// Axis bank (the 18 named conditioning-space axes from assets/axes_meta.json)
+// Axis bank (the conditioning-space axes from assets/axes_meta.json — word-derived
+// named axes plus the SAE-discovered deck)
 // plus the managed list of user-minted axes: per-axis use strengths, the
 // spatial-tab axis dropdown, and the per-generation axisControls collection.
 // Minting itself (text/image mint, inspector, sweep, gallery) lives in

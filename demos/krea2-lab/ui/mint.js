@@ -44,7 +44,8 @@ export function initMint(ctx) {
   }
 
   // ── minted-axis readout: what the direction is made of ──────────────────
-  // Signed cosine bars against the 18 named bank axes + the span residual
+  // Signed cosine bars against the loaded bank axes (word-derived + SAE-discovered)
+  // + the span residual
   // ("how much of it is genuinely its own"), computed by the worker at mint
   // time. Answers "what did the mint actually pick out of these images?"
   // without guessing from slider sweeps.
@@ -74,12 +75,15 @@ export function initMint(ctx) {
         row.appendChild(nm); row.appendChild(track); row.appendChild(val);
         bars.appendChild(row);
       });
-      // residual² is the energy fraction outside the whole 18-axis span —
-      // the honest "not any named thing" number (the axes aren't orthogonal,
-      // so per-axis cosines alone would overcount).
+      // residual² is the energy fraction outside the whole bank's span — the
+      // honest "not any named thing" number (the axes aren't orthogonal, so
+      // per-axis cosines alone would overcount). The bank spans both banks the
+      // worker loaded (word-derived + SAE-discovered), so read its size from the
+      // decomposition rather than hard-coding it.
       const own = Math.round(def.residual * def.residual * 100);
-      note.textContent = 'overlap with the named axes (top 6 of 18) · ' + own +
-        '% of it is new, outside all 18' +
+      const nBank = def.components.length;
+      note.textContent = 'overlap with the bank axes (top 6 of ' + nBank + ') · ' + own +
+        '% of it is new, outside all ' + nBank +
         (def.kind === 'text' && def.consistency != null
           ? ' · consistency ' + def.consistency.toFixed(2) : '');
     } else {

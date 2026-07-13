@@ -198,11 +198,15 @@ function handleLoad(msg) {
     hiddenSize = pipeline.krea2HiddenSize();
     numLayers  = pipeline.krea2NumLayers();
 
+    // The axis bank is stacked from several dictionaries of different provenance:
+    // the word-derived named axes, and the SAE-discovered deck. The first load
+    // replaces, the rest merge, so every axis ends up on one slider list.
     var axes = [];
-    if (msg.dictPath) {
-      pipeline.loadControlDictionary(msg.dictPath);
-      axes = pipeline.controlAxes();
+    var dicts = msg.dictPaths || (msg.dictPath ? [msg.dictPath] : []);
+    for (var d = 0; d < dicts.length; d++) {
+      pipeline.loadControlDictionary(dicts[d], { merge: d > 0 });
     }
+    if (dicts.length) axes = pipeline.controlAxes();
     dictAxes = axes.slice();
 
     // Baked axis banks — each optional; its panel is disabled without it.

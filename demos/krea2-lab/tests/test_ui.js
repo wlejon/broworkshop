@@ -21,9 +21,16 @@ function pumpUntil(pred, budgetMs) {
   while (!pred() && (Date.now() - start) < budgetMs) sleep(20);
   return pred();
 }
-// the axis bank builds when the axes_meta.json fetch lands
-assert(pumpUntil(() => document.querySelectorAll('#axis-categories .ctl').length === 18, 10000),
-       'axis bank built');
+// The axis bank builds when the axes_meta.json fetch lands: one slider per axis
+// in the file. Read the expected count from the file rather than hard-coding it —
+// the bank grows as banks of new provenance are added (the word-derived axes, the
+// SAE-discovered deck), and a literal here just goes stale.
+let axisCount = 0;
+fetch('assets/axes_meta.json').then((r) => r.json())
+  .then((m) => { axisCount = Object.keys(m).length; });
+assert(pumpUntil(() => axisCount > 0, 10000), 'axes_meta.json fetched');
+assert(pumpUntil(() => document.querySelectorAll('#axis-categories .ctl').length === axisCount, 10000),
+       'axis bank built: one slider per axis in axes_meta.json (' + axisCount + ')');
 
 // Neutralize persisted control state — the lab shares its prefs with real
 // use. One click: the deck's "reset all" returns every registered control
@@ -67,7 +74,7 @@ val.value = '2'; val.dispatchEvent(new Event('input')); flush();
 
 sec('look').click(); flush();
 const bank = document.querySelectorAll('#axis-categories .ctl input[type=range]');
-assert(bank.length === 18, '18 bank axes (got ' + bank.length + ')');
+assert(bank.length === axisCount, axisCount + ' bank axes (got ' + bank.length + ')');
 bank[0].value = '4.5'; bank[0].dispatchEvent(new Event('input')); flush();
 
 const deckChips = () => document.querySelectorAll('.deck-chip');
