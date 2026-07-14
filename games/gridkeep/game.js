@@ -10,7 +10,8 @@ let canvas = null;
 let scene = null;
 let wired = false;
 /** @type {object|null} */
-let G = null;
+/** @type {object|null} Latest run (wiring + HUD). */
+let activeRun = null;
 
 const REFUSE_TEXT = {
     blocks: "That would wall off the path!",
@@ -74,7 +75,7 @@ export const game = {
             toastTimer: null,
             hudCache: "",
         };
-        G = run;
+        activeRun = run;
         frameCamera(sim.world);
 
         sim.onSplash = (x, y) => {
@@ -127,7 +128,7 @@ export const game = {
     },
 
     update(run, dt, input) {
-        G = run;
+        activeRun = run;
         if (!run || !run.sim) return;
 
         if (run.pendingOver !== null && run.pendingOver !== undefined) {
@@ -258,7 +259,7 @@ function ensureScene() {
         intensity: 2.05,
     });
     window.addEventListener("resize", () => {
-        if (G && G.sim) frameCamera(G.sim.world);
+        if (activeRun && activeRun.sim) frameCamera(activeRun.sim.world);
     });
 }
 
@@ -478,8 +479,8 @@ function setPlaceType(run, type) {
 function pickCell(e) {
     const rect = canvas.getBoundingClientRect();
     const ray = scene.unprojectLocal(e.clientX - rect.left, e.clientY - rect.top);
-    if (!ray || !G) return null;
-    const hit = G.sim.world.raycastCell(ray.origin, ray.dir, 500);
+    if (!ray || !activeRun) return null;
+    const hit = activeRun.sim.world.raycastCell(ray.origin, ray.dir, 500);
     return hit ? { x: hit.x, y: hit.y } : null;
 }
 
@@ -520,41 +521,41 @@ function ensureWiring() {
     ensureScene();
 
     canvas.addEventListener("mousemove", (e) => {
-        if (!G) return;
+        if (!activeRun) return;
         const c = pickCell(e);
-        if (c) refreshHover(G, c.x, c.y, false);
-        else if (G.hoverCell) { G.hoverCell = null; applyTints(G); }
+        if (c) refreshHover(activeRun, c.x, c.y, false);
+        else if (activeRun.hoverCell) { activeRun.hoverCell = null; applyTints(activeRun); }
     });
     canvas.addEventListener("mousedown", (e) => {
-        if (!G) return;
+        if (!activeRun) return;
         if (e.button === 2) {
-            G.placeType = null; G.selectedTower = null;
-            applyTints(G);
+            activeRun.placeType = null; activeRun.selectedTower = null;
+            applyTints(activeRun);
             return;
         }
         if (e.button !== 0) return;
         const c = pickCell(e);
         if (!c) return;
-        actOnCell(G, c.x, c.y);
+        actOnCell(activeRun, c.x, c.y);
     });
     canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 
     for (const type of Object.keys(TOWER_TYPES)) {
         const btn = document.getElementById("btn-" + type);
-        if (btn) btn.addEventListener("click", () => { if (G) setPlaceType(G, type); });
+        if (btn) btn.addEventListener("click", () => { if (activeRun) setPlaceType(activeRun, type); });
     }
     const waveBtn = document.getElementById("btn-wave");
-    if (waveBtn) waveBtn.addEventListener("click", () => { if (G) G.sim.startNextWave(); });
+    if (waveBtn) waveBtn.addEventListener("click", () => { if (activeRun) activeRun.sim.startNextWave(); });
     const upBtn = document.getElementById("btn-upgrade");
     if (upBtn) upBtn.addEventListener("click", () => {
-        if (G && G.selectedTower) G.sim.upgradeTower(G.selectedTower);
+        if (activeRun && activeRun.selectedTower) activeRun.sim.upgradeTower(activeRun.selectedTower);
     });
     const sellBtn = document.getElementById("btn-sell");
     if (sellBtn) sellBtn.addEventListener("click", () => {
-        if (G && G.selectedTower) {
-            G.sim.sellTower(G.selectedTower);
-            G.selectedTower = null;
-            applyTints(G);
+        if (activeRun && activeRun.selectedTower) {
+            activeRun.sim.sellTower(activeRun.selectedTower);
+            activeRun.selectedTower = null;
+            applyTints(activeRun);
         }
     });
 }
@@ -562,8 +563,8 @@ function ensureWiring() {
 // ── Debug ──────────────────────────────────────────────────────────────────
 
 function projectCell(x, y) {
-    if (!G || !scene) return { x: 0, y: 0 };
-    const world = G.sim.world;
+    if (!activeRun || !scene) return { x: 0, y: 0 };
+    const world = activeRun.sim.world;
     const c = world.cellCenterWorldXZ(x, y);
     let topY = world.sampleHeight(c.x, c.z);
     if (topY === null) topY = 0;

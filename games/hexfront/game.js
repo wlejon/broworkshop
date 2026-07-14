@@ -7,7 +7,8 @@ let canvas = null;
 let scene = null;
 let wired = false;
 /** @type {object|null} */
-let G = null; // active run
+/** @type {object|null} Latest run (wiring + HUD). */
+let activeRun = null;
 
 export const game = {
     id: "hexfront",
@@ -37,7 +38,7 @@ export const game = {
             pendingOver: null,
             toastTimer: null,
         };
-        G = run;
+        activeRun = run;
         frameCamera();
 
         battle.onCombat = (info) => {
@@ -63,7 +64,7 @@ export const game = {
     },
 
     update(run, dt, input) {
-        G = run;
+        activeRun = run;
         if (!run || !run.battle) return;
 
         if (run.pendingOver) {
@@ -170,8 +171,8 @@ function ensureScene() {
 }
 
 function frameCamera() {
-    if (!G || !G.battle || !scene) return;
-    const world = G.battle.world;
+    if (!activeRun || !activeRun.battle || !scene) return;
+    const world = activeRun.battle.world;
     const b = world.worldBounds();
     const cx = (b.minX + b.maxX) / 2, cz = (b.minZ + b.maxZ) / 2;
     const spanX = b.maxX - b.minX, spanZ = b.maxZ - b.minZ;
@@ -378,21 +379,21 @@ function ensureWiring() {
     ensureScene();
 
     canvas.addEventListener("mousedown", (e) => {
-        if (e.button !== 0 || !G) return;
+        if (e.button !== 0 || !activeRun) return;
         const rect = canvas.getBoundingClientRect();
         const ray = scene.unprojectLocal(e.clientX - rect.left, e.clientY - rect.top);
         if (!ray) return;
-        const hit = G.battle.world.raycastCell(ray.origin, ray.dir, 500);
+        const hit = activeRun.battle.world.raycastCell(ray.origin, ray.dir, 500);
         if (!hit) {
-            if (G.sel && G.sel.phase === "move") deselect(G);
+            if (activeRun.sel && activeRun.sel.phase === "move") deselect(activeRun);
             return;
         }
-        actOnCell(G, hit.x, hit.y);
+        actOnCell(activeRun, hit.x, hit.y);
     });
 
     const bindBtn = (id, fn) => {
         const n = el(id);
-        if (n) n.addEventListener("click", () => { if (G) fn(G); });
+        if (n) n.addEventListener("click", () => { if (activeRun) fn(activeRun); });
     };
     bindBtn("btn-endturn", endTurn);
     bindBtn("btn-save", saveGame);
@@ -402,8 +403,8 @@ function ensureWiring() {
 // ── Debug / test surface ───────────────────────────────────────────────────
 
 function projectCell(x, y) {
-    if (!G || !scene) return { x: 0, y: 0 };
-    const world = G.battle.world;
+    if (!activeRun || !scene) return { x: 0, y: 0 };
+    const world = activeRun.battle.world;
     const c = world.cellCenterWorldXZ(x, y);
     let topY = world.sampleHeight(c.x, c.z);
     if (topY === null) topY = 0;

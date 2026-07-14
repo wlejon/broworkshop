@@ -17,7 +17,8 @@ let sun = null;
 let fireLight = null;
 let wired = false;
 /** @type {object|null} */
-let G = null;
+/** @type {object|null} Latest run (wiring + HUD). */
+let activeRun = null;
 
 const MODEL_PATH = "D:/projects/brolm/weights/Qwen3-32B-GGUF/Qwen3-32B-Q4_K_M.gguf";
 const MAX_THINK_TOKENS = 200;
@@ -76,7 +77,7 @@ export const game = {
             audioCtx: null,
             engineRate: 44100,
         };
-        G = run;
+        activeRun = run;
 
         // Centre camera on the plaza.
         const b = sim.world.worldBounds();
@@ -114,7 +115,7 @@ export const game = {
     },
 
     update(run, dt, input) {
-        G = run;
+        activeRun = run;
         if (!run || !run.sim) return;
 
         const dtSec = Math.min(0.06, Math.max(0, dt / 1000));
@@ -206,16 +207,16 @@ function ensureScene() {
         range: 7,
     });
     window.addEventListener("resize", () => {
-        if (!G) return;
-        const b = G.sim.world.worldBounds();
-        G.baseCX = (b.minX + b.maxX) / 2;
-        G.baseCZ = (b.minZ + b.maxZ) / 2;
+        if (!activeRun) return;
+        const b = activeRun.sim.world.worldBounds();
+        activeRun.baseCX = (b.minX + b.maxX) / 2;
+        activeRun.baseCZ = (b.minZ + b.maxZ) / 2;
         const rect = canvas.getBoundingClientRect();
         const aspect = rect.width > 0 && rect.height > 0 ? rect.width / rect.height : 16 / 10;
         const spanZ = b.maxZ - b.minZ;
         const diag = Math.hypot(b.maxX - b.minX, spanZ);
-        G.baseSize = Math.max(spanZ * 0.72 + 2.0, (diag * 0.72 + 1.5) / aspect);
-        applyCamera(G, aspect);
+        activeRun.baseSize = Math.max(spanZ * 0.72 + 2.0, (diag * 0.72 + 1.5) / aspect);
+        applyCamera(activeRun, aspect);
     });
 }
 
@@ -740,21 +741,21 @@ function ensureWiring() {
     ensureScene();
 
     canvas.addEventListener("mousedown", (e) => {
-        if (e.button !== 0 || !G) return;
-        const v = pickVillager(G, e);
-        G.selected = (v && v !== G.selected) ? v : null;
-        applyTints(G);
-        G.hudCache = "";
+        if (e.button !== 0 || !activeRun) return;
+        const v = pickVillager(activeRun, e);
+        activeRun.selected = (v && v !== activeRun.selected) ? v : null;
+        applyTints(activeRun);
+        activeRun.hudCache = "";
     });
     canvas.addEventListener("wheel", (e) => {
-        if (!G) return;
-        G.camera.zoom = Math.max(0.28, Math.min(1.4, G.camera.zoom * (1 + e.deltaY * 0.06)));
-        applyCamera(G);
+        if (!activeRun) return;
+        activeRun.camera.zoom = Math.max(0.28, Math.min(1.4, activeRun.camera.zoom * (1 + e.deltaY * 0.06)));
+        applyCamera(activeRun);
     });
 
     const bind = (id, fn) => {
         const n = $(id);
-        if (n) n.addEventListener("click", () => { if (G) fn(G); });
+        if (n) n.addEventListener("click", () => { if (activeRun) fn(activeRun); });
     };
     bind("btn-pause", (r) => setSpeed(r, 0));
     bind("btn-1x", (r) => setSpeed(r, 1));

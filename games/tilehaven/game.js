@@ -14,7 +14,8 @@ let canvas = null;
 let scene = null;
 let wired = false;
 /** @type {object|null} */
-let G = null;
+/** @type {object|null} Latest run (wiring + HUD). */
+let activeRun = null;
 
 const REFUSE_TEXT = {
     coins: "Not enough coins",
@@ -78,7 +79,7 @@ export const game = {
             toastTimer: null,
             victoryShown: false,
         };
-        G = run;
+        activeRun = run;
         frameCamera(run);
         fillPaletteCosts();
 
@@ -98,7 +99,7 @@ export const game = {
     },
 
     update(run, dt, input) {
-        G = run;
+        activeRun = run;
         if (!run || !run.sim) return;
 
         if (run.victoryShown && run.sim.victory && !run.sim.sandbox) {
@@ -216,7 +217,7 @@ function ensureScene() {
         color: [1.0, 0.96, 0.87],
         intensity: 2.0,
     });
-    window.addEventListener("resize", () => { if (G) frameCamera(G); });
+    window.addEventListener("resize", () => { if (activeRun) frameCamera(activeRun); });
 }
 
 function frameCamera(run) {
@@ -432,11 +433,11 @@ function setTool(run, t) {
 }
 
 function pickCell(e) {
-    if (!G || !scene) return null;
+    if (!activeRun || !scene) return null;
     const rect = canvas.getBoundingClientRect();
     const ray = scene.unprojectLocal(e.clientX - rect.left, e.clientY - rect.top);
     if (!ray) return null;
-    const hit = G.sim.world.raycastCell(ray.origin, ray.dir, 500);
+    const hit = activeRun.sim.world.raycastCell(ray.origin, ray.dir, 500);
     return hit ? { x: hit.x, y: hit.y } : null;
 }
 
@@ -482,51 +483,51 @@ function ensureWiring() {
     ensureScene();
 
     canvas.addEventListener("mousedown", (e) => {
-        if (!G) return;
-        if (e.button === 2) { setTool(G, null); return; }
+        if (!activeRun) return;
+        if (e.button === 2) { setTool(activeRun, null); return; }
         if (e.button !== 0) return;
         const c = pickCell(e);
         if (!c) return;
-        actOnCell(G, c.x, c.y);
-        if (G.tool === "road" || G.tool === "dozer") G.painting = true;
+        actOnCell(activeRun, c.x, c.y);
+        if (activeRun.tool === "road" || activeRun.tool === "dozer") activeRun.painting = true;
     });
-    canvas.addEventListener("mouseup", () => { if (G) G.painting = false; });
+    canvas.addEventListener("mouseup", () => { if (activeRun) activeRun.painting = false; });
     canvas.addEventListener("mousemove", (e) => {
-        if (!G) return;
+        if (!activeRun) return;
         const c = pickCell(e);
         if (!c) {
-            if (G.hoverCell) { G.hoverCell = null; applyTints(G); }
+            if (activeRun.hoverCell) { activeRun.hoverCell = null; applyTints(activeRun); }
             return;
         }
-        const changed = !G.hoverCell || G.hoverCell.x !== c.x || G.hoverCell.y !== c.y;
-        G.hoverCell = c;
-        if (G.painting && changed && (G.tool === "road" || G.tool === "dozer")) {
-            actOnCell(G, c.x, c.y);
+        const changed = !activeRun.hoverCell || activeRun.hoverCell.x !== c.x || activeRun.hoverCell.y !== c.y;
+        activeRun.hoverCell = c;
+        if (activeRun.painting && changed && (activeRun.tool === "road" || activeRun.tool === "dozer")) {
+            actOnCell(activeRun, c.x, c.y);
         }
-        if (changed) applyTints(G);
+        if (changed) applyTints(activeRun);
     });
     canvas.addEventListener("contextmenu", (e) => e.preventDefault());
     canvas.addEventListener("wheel", (e) => {
-        if (!G) return;
-        G.camera.zoom = Math.max(0.45, Math.min(1.6, G.camera.zoom * (1 + e.deltaY * 0.06)));
-        applyCamera(G);
+        if (!activeRun) return;
+        activeRun.camera.zoom = Math.max(0.45, Math.min(1.6, activeRun.camera.zoom * (1 + e.deltaY * 0.06)));
+        applyCamera(activeRun);
     });
 
     for (const t of ["road", "house", "farm", "lumber", "mine", "market", "dozer"]) {
         const btn = document.getElementById("btn-" + t);
-        if (btn) btn.addEventListener("click", () => { if (G) setTool(G, t); });
+        if (btn) btn.addEventListener("click", () => { if (activeRun) setTool(activeRun, t); });
     }
     const saveBtn = document.getElementById("btn-save");
     if (saveBtn) saveBtn.addEventListener("click", () => {
-        if (G && G.sim.saveCity()) toast(G, "City saved");
+        if (activeRun && activeRun.sim.saveCity()) toast(activeRun, "City saved");
     });
     const loadBtn = document.getElementById("btn-load");
-    if (loadBtn) loadBtn.addEventListener("click", () => { if (G) doLoad(G); });
+    if (loadBtn) loadBtn.addEventListener("click", () => { if (activeRun) doLoad(activeRun); });
 }
 
 function projectCell(x, y) {
-    if (!G || !scene) return { x: 0, y: 0 };
-    const world = G.sim.world;
+    if (!activeRun || !scene) return { x: 0, y: 0 };
+    const world = activeRun.sim.world;
     const c = world.cellCenterWorldXZ(x, y);
     let topY = world.sampleHeight(c.x, c.z);
     if (topY === null) topY = 0;
