@@ -10,32 +10,56 @@
     <canvas id="view"></canvas>
 
     <div id="hud" hidden>
+        <!-- Primary objective — always answers "what am I doing?" -->
+        <div id="hud-objective">
+            <div class="obj-kicker">Objective</div>
+            <div id="hud-objective-text">Get a marble from the gold spout into the green cup.</div>
+        </div>
+
         <div id="hud-top">
             <div id="hud-level">Level 1</div>
             <div id="hud-mode">BUILD</div>
             <div id="hud-timer">—</div>
         </div>
 
+        <div id="hud-mission">
+            <div class="mission-step" id="mission-1"><span class="ms-num">1</span> Place pieces under the <b class="gold">gold spout</b></div>
+            <div class="mission-step" id="mission-2"><span class="ms-num">2</span> Build a path toward the <b class="green">green cup</b></div>
+            <div class="mission-step" id="mission-3"><span class="ms-num">3</span> Press <b>Space</b> to drop marbles</div>
+        </div>
+
         <div id="hud-pieces">
-            <div class="hud-pieces-title">Pieces <span id="hud-budget">0 / 0</span></div>
+            <div class="hud-pieces-title">Your pieces <span id="hud-budget">0 / 0</span></div>
             <div id="hud-palette"></div>
+            <div id="hud-piece-desc" class="piece-desc">Select a piece, then click the board to place it.</div>
             <div class="hud-hint">
-                <b>1–7</b> select &nbsp; <b>R</b> rotate &nbsp; <b>Q/E</b> layer ↓/↑<br>
-                <b>Click</b> place &nbsp; <b>Right-click</b> remove<br>
-                <b>Space</b> run / reset &nbsp; <b>Esc</b> menu
+                <b>Click</b> place · <b>Right-click</b> remove · <b>R</b> rotate<br>
+                <b>Q / E</b> height layer · <b>Space</b> run / rebuild · <b>Esc</b> menu<br>
+                <span class="cam-hint">Camera: right-drag look · wheel zoom · middle pan</span>
             </div>
         </div>
 
         <div id="hud-goal">
+            <div class="hud-panel-title">This level</div>
             <div class="hud-goal-tag" id="hud-tagline">Catch the marble.</div>
-            <div>Par <span id="hud-par">—</span></div>
-            <div>Best <span id="hud-best">—</span></div>
-            <div>Marbles <span id="hud-marbles">0</span></div>
+            <div class="stat-row">Par <span id="hud-par">—</span></div>
+            <div class="stat-row">Best <span id="hud-best">—</span></div>
+            <div class="stat-row">Marbles <span id="hud-marbles">0</span></div>
+            <div class="legend">
+                <div class="leg"><i class="dot gold"></i> Spout drops marbles</div>
+                <div class="leg"><i class="dot green"></i> Cup = goal</div>
+                <div class="leg"><i class="dot path"></i> Dashed path = build here</div>
+            </div>
+        </div>
+
+        <div id="hud-action">
+            <span id="hud-action-text">Click the glowing pads under the spout to place pieces.</span>
         </div>
 
         <div id="hud-coach" hidden>
-            <div class="coach-kicker">Tip</div>
+            <div class="coach-kicker"><span id="coach-step-label">Tip</span></div>
             <div id="hud-coach-text"></div>
+            <div class="coach-foot" id="coach-foot">Follow the gold → green path on the board.</div>
         </div>
 
         <div id="hud-toast-area"></div>
@@ -44,7 +68,11 @@
     <div id="overlay">
         <section id="screen-title" class="screen">
             <h1 class="overlay-title">TUMBLE</h1>
-            <p class="overlay-sub tagline">Eight levels. Build a marble run. Beat the clock.</p>
+            <p class="overlay-sub tagline">Build a path. Drop a marble. Hit the cup.</p>
+            <p class="title-blurb">
+                Gold spout drops marbles. Green cup is the finish.<br>
+                Place pieces to connect them, then press <b>Space</b>.
+            </p>
             <p id="title-progress" class="title-progress"></p>
             <div class="menu-items">
                 <div class="menu-item selected" data-action="play" id="title-play">Play</div>
@@ -68,13 +96,12 @@
         <section id="screen-howto" class="screen" hidden>
             <h1 class="overlay-title">How to Play</h1>
             <div class="overlay-sub howto">
-                <p>Gold spout drops marbles. Green cup is the goal. Spend your piece budget so a marble lands in the cup.</p>
-                <p><b>Camera:</b> right-drag orbit · middle-drag pan · wheel zoom.</p>
-                <p><b>Build:</b> <b>1–7</b> piece · click place · right-click remove · <b>R</b> rotate · <b>Q/E</b> layer.</p>
-                <p><b>Run:</b> <b>Space</b> drops marbles (again to rebuild). Timer stops on first cup hit.</p>
-                <p><b>Pieces:</b> Block · Ramp · Wall · Bumper · Spinner · Booster · Chute — later levels introduce each tool.</p>
-                <p><b>Aim:</b> Booster arrow = shove direction. Ramp slope runs downhill from the high end — use <b>R</b>.</p>
-                <p><b>Medals:</b> gold / silver / bronze pars. Clear a level to unlock the next. Eight levels total.</p>
+                <p><b>Goal:</b> Get any marble from the <b class="gold">gold spout</b> into the <b class="green">green cup</b>.</p>
+                <p><b>Build:</b> Pick a piece on the left, click the board to place it under / between spout and cup. Right-click removes. <b>R</b> rotates.</p>
+                <p><b>Run:</b> <b>Space</b> drops marbles. Timer stops when the first marble enters the cup. Space again rebuilds.</p>
+                <p><b>Pieces:</b> Block (floor) · Ramp (slope) · Wall · Bumper (bounce) · Spinner · Booster (arrow = shove) · Chute (funnel).</p>
+                <p><b>Camera:</b> right-drag orbit · middle pan · wheel zoom.</p>
+                <p>Clear levels to unlock the next. Beat gold / silver / bronze pars for medals.</p>
             </div>
             <div class="menu-items">
                 <div class="menu-item selected" data-action="back">Back</div>

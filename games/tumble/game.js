@@ -15,16 +15,16 @@ const session = {
 
 /** Coach tips — Drop-In (idx 0) until coachDone. */
 const COACH_TIPS_DROPIN = [
-    "Press Space to drop a marble into the green cup.",
-    "Optional: place Blocks (1) or Ramps (2) for fun — R rotates ramps.",
-    "Clear Drop-In to unlock Plank Walk — the first real puzzle.",
+    "Gold spout drops marbles. Green cup is the goal. Press Space to drop one in.",
+    "See the path on the board? You can also place Blocks/Ramps for fun — R rotates.",
+    "Space again rebuilds. Clear this level to unlock real path-building puzzles.",
 ];
 
 /** Coach tips — Plank Walk (idx 1) until plankCoachDone. */
 const COACH_TIPS_PLANK = [
-    "Select Booster (6). Place under the spout — arrow points shove direction.",
-    "Aim arrows toward the green cup (+X here). R rotates. Need a short runway.",
-    "Press Space to run. Missed? Space again rebuilds. Empty runs always fail.",
+    "Empty board fails — you must build. Gold pads mark a proven path. Select Booster (6).",
+    "Click each gold pad (or under the spout). Arrow on booster = shove direction (R rotates).",
+    "When pads form a runway to the cup, press Space. Rebuild with Space if it misses.",
 ];
 
 /** Module scene + sim state (rebuilt in create). */
@@ -45,6 +45,9 @@ const SCENE = {
     ghostCellKey: null,
     outOfBoundsGhost: false,
     staticDecor: [],
+    /** UX guides (path, drop zone, suggestions) — hidden while running. */
+    guides: [],
+    suggestPads: [],
 };
 
 /** @type {object|null} Latest run (input wiring + palette read this). */
@@ -180,12 +183,14 @@ export const game = {
             return {
                 level: "—", mode: "BUILD", timer: "—", par: "—", best: "—",
                 marbles: "0", budget: "0 / 0", tagline: "",
+                "objective-text": "Get a marble into the green cup.",
+                "action-text": "Loading…",
             };
         }
         const bestMap = run.save.get("best") || {};
         const modeEl = document.getElementById("hud-mode");
         if (modeEl) {
-            modeEl.textContent = run.mode === "run" ? "RUN" : "BUILD";
+            modeEl.textContent = run.mode === "run" ? "RUNNING" : "BUILD";
             modeEl.classList.toggle("run", run.mode === "run");
         }
         let used = 0, limit = 0;
@@ -196,10 +201,17 @@ export const game = {
         const timer =
             run.mode === "run"
                 ? ((run.resultMs != null ? run.resultMs / 1000 : run.runtime / 1000).toFixed(2) + "s")
-                : "—";
+                : "ready";
+
+        refreshMissionSteps(run);
+        refreshActionStrip(run);
+        refreshPieceDesc(run);
+        updateSuggestPads(run);
+        setBuildGuidesVisible(run.mode === "build");
+
         return {
             level: "Level " + (run.levelIdx + 1) + " — " + run.level.name,
-            mode: run.mode === "run" ? "RUN" : "BUILD",
+            mode: run.mode === "run" ? "RUNNING" : "BUILD",
             timer,
             par: "gold " + fmt(run.level.par.gold) + " · bronze " + fmt(run.level.par.bronze),
             best: fmt(bestMap[run.level.id]),
@@ -208,6 +220,7 @@ export const game = {
                 (run.marblesRemoved ? "  (" + run.marblesRemoved + " cleared)" : ""),
             budget: used + " / " + limit,
             tagline: run.level.tagline || "",
+            "objective-text": "Get a marble from the gold spout into the green cup.",
         };
     },
 
@@ -484,6 +497,8 @@ function teardownScene(run) {
     }
 
     try { destroyGhost(); } catch (e) { /* ignore */ }
+    try { destroySuggestPads(); } catch (e) { /* ignore */ }
+    SCENE.guides.length = 0;
 
     // Environment meshes (ground, goal, spout, lights under root)
     try {
@@ -590,6 +605,25 @@ function buildEnvironment(level) {
         color: "#ffd466", emissive: 2.0, emissiveColor: [1.0, 0.85, 0.4],
         metallic: 0.0, roughness: 1.0,
     }));
+    // Bright drop column so the spout is impossible to miss.
+    SCENE.guides.push(scene.createMesh({
+        mesh: "cylinder", radius: 0.06, halfHeight: Math.max(0.8, sp.y * 0.45),
+        segments: 10,
+        x: sp.x, y: sp.y * 0.5, z: sp.z,
+        color: "#ffd466",
+        emissive: 1.2, emissiveColor: [1.0, 0.8, 0.3],
+        metallic: 0.0, roughness: 1.0,
+        name: "drop-column",
+    }));
+    // Landing ring under the spout — "place pieces here".
+    SCENE.guides.push(scene.createMesh({
+        mesh: "cylinder", radius: 0.55, halfHeight: 0.03, segments: 28,
+        x: sp.x, y: 0.04, z: sp.z,
+        color: "#ffc166",
+        emissive: 2.4, emissiveColor: [1.0, 0.75, 0.25],
+        metallic: 0.05, roughness: 0.5,
+        name: "drop-zone",
+    }));
 
     const g = level.goal;
     const gcx = (g.min[0] + g.max[0]) * 0.5;
@@ -651,6 +685,29 @@ function buildEnvironment(level) {
             metallic: 0.05, roughness: 0.7,
         }));
     }
+    // Goal beacon — tall green marker above the cup.
+    SCENE.guides.push(scene.createMesh({
+        mesh: "cylinder", radius: 0.08, halfHeight: 0.9, segments: 12,
+        x: gcx, y: g.max[1] + 1.1, z: gcz,
+        color: "#4eff8f",
+        emissive: 2.5, emissiveColor: [0.25, 1.0, 0.5],
+        metallic: 0.0, roughness: 0.4,
+        name: "goal-beacon",
+    }));
+    SCENE.guides.push(scene.createMesh({
+        mesh: "sphere", radius: 0.22, segments: 16, rings: 12,
+        x: gcx, y: g.max[1] + 2.15, z: gcz,
+        color: "#7dffb0",
+        emissive: 3.0, emissiveColor: [0.3, 1.0, 0.55],
+        metallic: 0.1, roughness: 0.3,
+        name: "goal-orb",
+    }));
+
+    // Path dashes on the ground: spout XZ → cup XZ (where to build).
+    addPathGuides(sp.x, sp.z, gcx, gcz);
+
+    // Build grid so the play field feels like a placeable board.
+    addBuildGrid(level);
 
     SCENE.layerPlane = scene.createMesh({
         mesh: "plane",
@@ -658,11 +715,14 @@ function buildEnvironment(level) {
         halfD: (bz[1] - bz[0] + 1) * 0.5,
         x: cx, y: 0, z: cz,
         color: "#2a3458",
-        emissive: 0.15, emissiveColor: [0.4, 0.5, 0.9],
+        emissive: 0.22, emissiveColor: [0.4, 0.55, 1.0],
         metallic: 0.0, roughness: 1.0,
         name: "layer-plane",
     });
     SCENE.layerPlane.visible = false;
+
+    // Prefab suggestion pads for verified solution cells (empty board only).
+    buildSuggestPads(level);
 
     const diag = Math.sqrt(
         (bx[1] - bx[0]) * (bx[1] - bx[0]) +
@@ -673,6 +733,177 @@ function buildEnvironment(level) {
         [cx, (level.bounds.y[0] + level.bounds.y[1]) * 0.35, cz],
         Math.max(10, diag * 1.4)
     );
+}
+
+function pushGuide(mesh) {
+    SCENE.guides.push(mesh);
+    return mesh;
+}
+
+/** Ground dashes from spout to cup — the "build along this" affordance. */
+function addPathGuides(sx, sz, gx, gz) {
+    const dx = gx - sx;
+    const dz = gz - sz;
+    const len = Math.sqrt(dx * dx + dz * dz) || 1;
+    const steps = Math.max(3, Math.min(12, Math.round(len * 1.4)));
+    for (let i = 1; i < steps; i++) {
+        const t = i / steps;
+        const x = sx + dx * t;
+        const z = sz + dz * t;
+        pushGuide(scene.createMesh({
+            mesh: "box",
+            halfW: 0.18, halfH: 0.02, halfD: 0.08,
+            x, y: 0.05, z,
+            ry: Math.atan2(dx, dz) * (180 / Math.PI),
+            color: "#6ec8ff",
+            emissive: 1.8, emissiveColor: [0.35, 0.75, 1.0],
+            metallic: 0.0, roughness: 0.5,
+            name: "path-dash-" + i,
+        }));
+    }
+    // Arrow head near the cup.
+    pushGuide(scene.createMesh({
+        mesh: "box",
+        halfW: 0.28, halfH: 0.025, halfD: 0.1,
+        x: gx - dx / len * 0.7,
+        y: 0.06,
+        z: gz - dz / len * 0.7,
+        ry: Math.atan2(dx, dz) * (180 / Math.PI),
+        color: "#4eff8f",
+        emissive: 2.2, emissiveColor: [0.3, 1.0, 0.55],
+        metallic: 0.0, roughness: 0.4,
+        name: "path-arrow",
+    }));
+}
+
+function addBuildGrid(level) {
+    const bx = level.bounds.x, bz = level.bounds.z;
+    for (let x = bx[0]; x <= bx[1] + 1; x++) {
+        const z0 = bz[0], z1 = bz[1] + 1;
+        const midZ = (z0 + z1) * 0.5;
+        const half = (z1 - z0) * 0.5;
+        pushGuide(scene.createMesh({
+            mesh: "box",
+            halfW: 0.015, halfH: 0.008, halfD: half,
+            x: x, y: 0.01, z: midZ,
+            color: "#3a4a70",
+            emissive: 0.25, emissiveColor: [0.4, 0.5, 0.85],
+            metallic: 0.0, roughness: 1.0,
+        }));
+    }
+    for (let z = bz[0]; z <= bz[1] + 1; z++) {
+        const x0 = bx[0], x1 = bx[1] + 1;
+        const midX = (x0 + x1) * 0.5;
+        const half = (x1 - x0) * 0.5;
+        pushGuide(scene.createMesh({
+            mesh: "box",
+            halfW: half, halfH: 0.008, halfD: 0.015,
+            x: midX, y: 0.01, z: z,
+            color: "#3a4a70",
+            emissive: 0.25, emissiveColor: [0.4, 0.5, 0.85],
+            metallic: 0.0, roughness: 1.0,
+        }));
+    }
+}
+
+/** Soft glowing pads on solution cells so first-time builders see where to click. */
+function buildSuggestPads(level) {
+    destroySuggestPads();
+    const idx = LEVELS.indexOf(level);
+    const sol = SOLUTIONS[idx];
+    if (!sol || !sol.pieces || !sol.pieces.length) return;
+    for (const p of sol.pieces) {
+        const pad = scene.createMesh({
+            mesh: "box",
+            halfW: 0.42, halfH: 0.035, halfD: 0.42,
+            x: p.x + 0.5, y: (p.y || 0) + 0.06, z: p.z + 0.5,
+            color: "#ffc166",
+            emissive: 1.6, emissiveColor: [1.0, 0.7, 0.2],
+            metallic: 0.05, roughness: 0.45,
+            name: "suggest-" + p.x + "-" + p.z,
+        });
+        pad.visible = true;
+        SCENE.suggestPads.push(pad);
+    }
+}
+
+function destroySuggestPads() {
+    for (const p of SCENE.suggestPads) {
+        try { if (p) scene.destroyNode(p); } catch (e) { /* ignore */ }
+    }
+    SCENE.suggestPads.length = 0;
+}
+
+function updateSuggestPads(run) {
+    if (!SCENE.suggestPads.length) return;
+    const show = run && run.mode === "build" && run.placed && run.placed.size === 0;
+    for (const p of SCENE.suggestPads) {
+        try { p.visible = !!show; } catch (e) { /* ignore */ }
+    }
+}
+
+function setBuildGuidesVisible(on) {
+    for (const g of SCENE.guides) {
+        try { if (g) g.visible = !!on; } catch (e) { /* ignore */ }
+    }
+    // Keep goal beacon mildly visible while running.
+    if (!on) {
+        for (const g of SCENE.guides) {
+            try {
+                if (g && (g.name === "goal-beacon" || g.name === "goal-orb")) g.visible = true;
+            } catch (e) { /* ignore */ }
+        }
+    }
+}
+
+function refreshMissionSteps(run) {
+    const s1 = document.getElementById("mission-1");
+    const s2 = document.getElementById("mission-2");
+    const s3 = document.getElementById("mission-3");
+    if (!s1 || !s2 || !s3) return;
+    const placed = run.placed ? run.placed.size : 0;
+    const running = run.mode === "run";
+    s1.classList.toggle("done", placed > 0 || running);
+    s1.classList.toggle("active", !running && placed === 0);
+    s2.classList.toggle("done", placed >= 2 || running);
+    s2.classList.toggle("active", !running && placed > 0 && placed < 2);
+    s3.classList.toggle("done", running || run.resultMs != null);
+    s3.classList.toggle("active", !running && placed >= 1);
+}
+
+function refreshActionStrip(run) {
+    const el = document.getElementById("hud-action");
+    const text = document.getElementById("hud-action-text");
+    if (!el || !text) return;
+    el.classList.toggle("run-mode", run.mode === "run");
+    if (run.mode === "run") {
+        text.textContent = "Marbles dropping — first into the green cup wins. Space rebuilds.";
+        return;
+    }
+    const placed = run.placed ? run.placed.size : 0;
+    const def = PIECES[run.build.selected];
+    const name = def ? def.label : "piece";
+    if (placed === 0) {
+        text.textContent = "Click a gold glowing pad (or under the spout) to place your first " + name + ".";
+    } else if (placed < 3) {
+        text.textContent = "Keep placing toward the green cup. Press Space when ready to drop.";
+    } else {
+        text.textContent = "Looks like a path — press Space to drop marbles. Right-click removes mistakes.";
+    }
+}
+
+function refreshPieceDesc(run) {
+    const el = document.getElementById("hud-piece-desc");
+    if (!el) return;
+    const def = PIECES[run.build.selected];
+    if (!def) {
+        el.textContent = "Select a piece, then click the board to place it.";
+        return;
+    }
+    const rot = def.rotatable
+        ? " Press R to rotate."
+        : "";
+    el.textContent = def.label + " — " + (def.describe || "Place on the board.") + rot;
 }
 
 // ΓöÇΓöÇ Placement ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
@@ -890,6 +1121,8 @@ function enterBuildMode(run) {
         SCENE.layerPlane.visible = true;
         SCENE.layerPlane.y = run.build.layer + 0.001;
     }
+    setBuildGuidesVisible(true);
+    updateSuggestPads(run);
     rebuildGhost(run);
 }
 
@@ -908,6 +1141,8 @@ function enterRunMode(run) {
     }
     if (SCENE.layerPlane) SCENE.layerPlane.visible = false;
     setGhostVisible(false);
+    setBuildGuidesVisible(false);
+    updateSuggestPads(run);
     run.play("drop");
     advanceCoach(run, "run");
 }
@@ -1393,9 +1628,15 @@ function advanceCoach(run, event) {
 function setCoach(text) {
     const el = document.getElementById("hud-coach");
     const body = document.getElementById("hud-coach-text");
+    const step = document.getElementById("coach-step-label");
     if (!el || !body) return;
     body.textContent = text || "";
     el.hidden = !text;
+    if (step && activeRun) {
+        const tips = coachTipsFor(activeRun);
+        const n = tips ? Math.min(tips.length, (activeRun.coachStep | 0) + 1) : 1;
+        step.textContent = tips ? ("Tip " + n + " / " + tips.length) : "Tip";
+    }
 }
 
 function setCoachVisible(on) {
