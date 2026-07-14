@@ -92,12 +92,14 @@ try { screenshot("games/tumble/tests/out-2-complete-dropin.png"); } catch (e) { 
 
 // ── L2 Plank Walk: empty fails, booster path wins ────────────────────────
 
-log("--- L2 Plank Walk empty fail ---");
+log("--- L2 Plank Walk coach + empty fail ---");
 T.startLevel(1);
 advanceTime(80);
 flush();
 assert(T.run.level.id === "plank", "plank loaded");
-assert(document.getElementById("hud-coach").hidden, "coach done");
+// Fresh L2 after Drop-In shows booster-aim coach.
+assert(!document.getElementById("hud-coach").hidden, "Plank coach visible");
+assert(document.getElementById("hud-coach-text").textContent.indexOf("Booster") >= 0, "Plank coach aims boosters");
 
 T.enterRun();
 var sawRun = false;
@@ -110,13 +112,14 @@ assert(failed && sawRun, "empty Plank fails back to build (no soft-lock)");
 log("L2 empty fail ok");
 
 log("--- L2 Plank Walk booster runway win ---");
+// After empty run, coach is dismissed (plankCoachDone). Re-open clean.
+T.save.set("plankCoachDone", true);
+T.save.save();
 T.startLevel(1);
 advanceTime(80);
 flush();
-// Boosters aim +X with rot 0 (arrow direction).
-assert(T.place("booster", -3, 0, 0, 0), "booster 1");
-assert(T.place("booster", -2, 0, 0, 0), "booster 2");
-assert(T.place("booster", -1, 0, 0, 0), "booster 3");
+var applied = T.applySolution(1);
+assert(applied.placed === 3 && applied.skipped === 0, "solution places 3 boosters");
 assert(T.snapshot().placed >= 3, "runway placed");
 
 try { screenshot("games/tumble/tests/out-5-sideways-build.png"); } catch (e) { /* optional */ }

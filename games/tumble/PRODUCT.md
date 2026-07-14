@@ -30,12 +30,16 @@
 ```bash
 bro-headless games/tumble games/tumble/tests/test_smoke.js
 bro-headless games/tumble games/tumble/tests/test_gameplay.js
+bro-headless games/tumble games/tumble/tests/test_campaign.js
 ```
+
+Verified solution layouts live in `solutions.js` (also `window.__tumble.applySolution(i)`).
 
 ## Known design notes
 
 - **Booster rot 0** faces +X (follow the arrow). **Ramp rot 2** drains downhill +X (slope low-end). R to cycle.
-- Drop-In is intentionally free with Space; Plank Walk is the first skill check.
+- Drop-In is intentionally free with Space; Plank Walk is the first skill check (coach teaches booster aim).
+- Funnel Vision free-falls; other mid/late levels have a fair booster runway that still leaves room for clever routes.
 - Goal uses a low lip (not tall walls) so runways can roll into the cup.
 
 ## Out of scope (later)

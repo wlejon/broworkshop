@@ -4,6 +4,7 @@
 
 import "/lib/camera.js";
 import { TumbleLevels } from "/app/levels.js";
+import { SOLUTIONS, applySolutionPieces } from "/app/solutions.js";
 
 const { PIECES, PIECE_ORDER, LEVELS, medalFor, fmt, quatY, rotY } = TumbleLevels;
 
@@ -12,11 +13,18 @@ const session = {
     levelIdx: null,
 };
 
-/** Coach tips for the first level only (until save.coachDone). */
-const COACH_TIPS = [
+/** Coach tips — Drop-In (idx 0) until coachDone. */
+const COACH_TIPS_DROPIN = [
     "Press Space to drop a marble into the green cup.",
     "Optional: place Blocks (1) or Ramps (2) for fun — R rotates ramps.",
-    "Esc opens the menu. Clear Drop-In to unlock the real puzzles.",
+    "Clear Drop-In to unlock Plank Walk — the first real puzzle.",
+];
+
+/** Coach tips — Plank Walk (idx 1) until plankCoachDone. */
+const COACH_TIPS_PLANK = [
+    "Select Booster (6). Place under the spout — arrow points shove direction.",
+    "Aim arrows toward the green cup (+X here). R rotates. Need a short runway.",
+    "Press Space to run. Missed? Space again rebuilds. Empty runs always fail.",
 ];
 
 /** Module scene + sim state (rebuilt in create). */
@@ -69,6 +77,7 @@ export const game = {
         lastLevel: 0,
         unlocked: 1,
         coachDone: false,
+        plankCoachDone: false,
     },
 
     create(ctx) {
@@ -220,6 +229,7 @@ export const game = {
             api.save.set("unlocked", 1);
             api.save.set("lastLevel", 0);
             api.save.set("coachDone", false);
+            api.save.set("plankCoachDone", false);
             api.save.save();
             session.levelIdx = 0;
             refreshTitleScreen(api);
@@ -1110,9 +1120,8 @@ function onLevelCompleted(run) {
     // Invert time into a "score" for shell highScore (higher better)
     run.score = Math.max(0, Math.floor(100000 / Math.max(0.01, t)));
     run.save.maybeHighScore(run.score);
-    if (run.levelIdx === 0) {
-        run.save.set("coachDone", true);
-    }
+    if (run.levelIdx === 0) run.save.set("coachDone", true);
+    if (run.levelIdx === 1) run.save.set("plankCoachDone", true);
     run.save.save();
     pulseGoal();
     run.play("goal");
@@ -1335,37 +1344,48 @@ function renderLevelTiles(api) {
     }).join("");
 }
 
+function coachTipsFor(run) {
+    if (run.levelIdx === 0 && !run.save.get("coachDone")) return COACH_TIPS_DROPIN;
+    if (run.levelIdx === 1 && !run.save.get("plankCoachDone")) return COACH_TIPS_PLANK;
+    return null;
+}
+
 function beginLevelCoach(run) {
-    if (run.levelIdx !== 0 || run.save.get("coachDone")) {
+    const tips = coachTipsFor(run);
+    if (!tips) {
         setCoachVisible(false);
-        run.coachStep = COACH_TIPS.length;
+        run.coachStep = 99;
         return;
     }
     run.coachStep = 0;
-    setCoach(COACH_TIPS[0]);
+    setCoach(tips[0]);
 }
 
 function advanceCoach(run, event) {
-    if (run.levelIdx !== 0 || run.save.get("coachDone")) return;
+    const tips = coachTipsFor(run);
+    if (!tips) return;
     if (event === "place" && run.coachStep === 0) {
         run.coachStep = 1;
-        setCoach(COACH_TIPS[1]);
+        setCoach(tips[1]);
         return;
     }
     if (event === "place" && run.coachStep === 1) {
-        // After a few placements, nudge toward run
         let used = 0;
         for (const t of PIECE_ORDER) used += (budget[t] && budget[t].used) || 0;
         if (used >= 2) {
             run.coachStep = 2;
-            setCoach(COACH_TIPS[2]);
+            setCoach(tips[2]);
         }
         return;
     }
     if (event === "run" && run.coachStep <= 2) {
         run.coachStep = 3;
         setCoachVisible(false);
-        run.save.set("coachDone", true);
+        if (run.levelIdx === 0) {
+            run.save.set("coachDone", true);
+        } else if (run.levelIdx === 1) {
+            run.save.set("plankCoachDone", true);
+        }
         run.save.save();
     }
 }
@@ -1430,6 +1450,7 @@ export function installTestHooks(shell) {
         LEVELS,
         PIECES,
         PIECE_ORDER,
+        SOLUTIONS,
         medalFor,
         fmt,
         get run() {
@@ -1449,8 +1470,18 @@ export function installTestHooks(shell) {
             save.set("unlocked", 1);
             save.set("lastLevel", 0);
             save.set("coachDone", false);
+            save.set("plankCoachDone", false);
             save.save();
             session.levelIdx = 0;
+        },
+
+        /**
+         * Place the verified solution for a level on the current run.
+         * Call after startLevel(idx). Does not auto-run.
+         */
+        applySolution(levelIdx) {
+            const idx = levelIdx != null ? levelIdx : (this.run && this.run.levelIdx);
+            return applySolutionPieces(idx, (type, x, y, z, rot) => this.place(type, x, y, z, rot));
         },
 
         /** Start (or restart) a run on level index. */
