@@ -1,34 +1,87 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="utf-8">
     <title>BlastGrid</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="/lib/arcade/arcade.css">
+    <link rel="stylesheet" href="theme.css">
 </head>
 <body>
-    <canvas id="game"></canvas>
+    <canvas id="view"></canvas>
 
-    <div id="hud-top">
-        <div id="chips"></div>
-        <div id="timer">2:00</div>
-        <div id="round">ROUND 1</div>
+    <div id="hud" hidden>
+        <div id="hud-top">
+            <div id="hud-chips"></div>
+            <div id="hud-timer">2:00</div>
+            <div id="hud-round">ROUND 1</div>
+        </div>
+        <div id="hud-powers">BOMBS 1 · RANGE 2 · SPEED 1</div>
+        <div id="help">
+            Arrows / WASD move &middot; Space drops a bomb &middot; blasts travel the
+            cross and stop at pillars &middot; grab what the crates hide &middot;
+            last bomber standing wins the round &middot; Esc pause
+        </div>
+        <div id="announce" style="display:none"></div>
+        <div id="toast" style="display:none"></div>
     </div>
 
-    <div id="powers"></div>
+    <div id="overlay">
+        <section id="screen-title" class="screen">
+            <h1 class="overlay-title">BLAST GRID</h1>
+            <p class="overlay-sub tagline">Last bomber standing. First to three.</p>
+            <div class="menu-items">
+                <div class="menu-item selected" data-action="play">Play</div>
+                <div class="menu-item" data-action="howto">How to Play</div>
+                <div class="menu-item" data-action="quit">Quit</div>
+            </div>
+        </section>
 
-    <div id="help">
-        Arrows / WASD move &middot; Space drops a bomb &middot; blasts travel the
-        cross and stop at pillars &middot; grab what the crates hide &middot;
-        last bomber standing wins the round
+        <section id="screen-howto" class="screen" hidden>
+            <h1 class="overlay-title">How to Play</h1>
+            <div class="overlay-sub howto">
+                <p>Drop bombs to blast soft crates and rival bombers. Fire travels in a
+                cross and stops at pillars.</p>
+                <p><b>Move:</b> Arrows / WASD. Hold to glide; buffer a side key for
+                classic corner turns.</p>
+                <p><b>Space</b> drops a bomb (up to your bomb cap). Pick up blue (+bomb),
+                orange (+range), and teal (+speed) power-ups from destroyed crates.</p>
+                <p>Last bomber standing wins the round. First to <b>3</b> round wins
+                takes the match. When the timer hits zero, sudden death closes the walls.</p>
+                <p><b>Esc</b> pause</p>
+            </div>
+            <div class="menu-items">
+                <div class="menu-item selected" data-action="back">Back</div>
+            </div>
+        </section>
+
+        <section id="screen-pause" class="screen" hidden>
+            <h1 class="overlay-title">Paused</h1>
+            <div class="menu-items">
+                <div class="menu-item selected" data-action="resume">Resume</div>
+                <div class="menu-item" data-action="restart">New Match</div>
+                <div class="menu-item" data-action="title">Main Menu</div>
+            </div>
+        </section>
+
+        <section id="screen-roundover" class="screen" hidden>
+            <h1 class="overlay-title" id="round-title">Round Over</h1>
+            <p id="round-sub" class="overlay-sub tagline"></p>
+            <div class="menu-items">
+                <div class="menu-item selected" data-action="continue">Next Round</div>
+                <div class="menu-item" data-action="title">Main Menu</div>
+            </div>
+        </section>
+
+        <section id="screen-gameover" class="screen" hidden>
+            <h1 class="overlay-title">Match Over</h1>
+            <div id="gameover-stats" class="stats-block"></div>
+            <div class="menu-items">
+                <div class="menu-item selected" data-action="restart">Rematch</div>
+                <div class="menu-item" data-action="title">Main Menu</div>
+            </div>
+        </section>
     </div>
 
-    <div id="announce" style="display:none"></div>
-    <div id="toast" style="display:none"></div>
-
-    <div id="banner" style="display:none">
-        <div id="banner-text"></div>
-        <div id="banner-sub"></div>
-    </div>
-
-    <script type="module" src="/app/app.js"></script>
+    <script type="module" src="/app/main.js"></script>
 </body>
 </html>

@@ -1,0 +1,53 @@
+/* 2048 — cream board palette over shared arcade chrome. */
+
+:root {
+    --arcade-bg: #faf8ef;
+    --arcade-accent: #f65e3b;
+    --arcade-text: #776e65;
+    --arcade-muted: #8f7a66;
+    --arcade-faint: #bbada0;
+    --arcade-overlay: rgba(250, 248, 239, 0.94);
+    --arcade-hud-bg: rgba(187, 173, 160, 0.95);
+    --arcade-hud-border: #bbada0;
+    --arcade-menu-hover: rgba(187, 173, 160, 0.15);
+    --arcade-menu-selected: rgba(143, 122, 102, 0.35);
+    --arcade-font: "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
+.overlay-title {
+    color: #776e65;
+    letter-spacing: 0;
+}
+
+.win-title {
+    color: #edc22e !important;
+}
+
+.overlay-sub strong {
+    color: #f65e3b;
+}
+
+.overlay-hint.credits {
+    margin-top: 28px;
+    font-size: 11px;
+    color: #bbada0;
+}
+
+#hud {
+    min-width: 90px;
+    color: #fff;
+}
+
+#hud .hud-label {
+    color: #eee4da;
+}
+
+#hud .hud-value {
+    color: #fff;
+}
+
+.menu-item.selected {
+    color: #f9f6f2;
+    background: #8f7a66;
+    box-shadow: inset 3px 0 0 #f65e3b;
+}

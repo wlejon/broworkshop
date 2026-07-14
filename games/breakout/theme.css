@@ -1,0 +1,21 @@
+/* Breakout theme — orange arcade feel over shared chrome. */
+
+:root {
+    --arcade-bg: #06060a;
+    --arcade-accent: #ff9100;
+    --arcade-text: #ffffff;
+    --arcade-muted: #666666;
+    --arcade-faint: #444444;
+    --arcade-overlay: rgba(6, 6, 10, 0.88);
+    --arcade-hud-border: #333333;
+    --arcade-menu-hover: rgba(255, 145, 0, 0.08);
+    --arcade-menu-selected: rgba(255, 145, 0, 0.2);
+}
+
+#view {
+    cursor: none;
+}
+
+.overlay-sub strong {
+    color: var(--arcade-accent);
+}

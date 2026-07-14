@@ -1,13 +1,15 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="utf-8">
     <title>Farm</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="/lib/arcade/arcade.css">
+    <link rel="stylesheet" href="theme.css">
 </head>
 <body>
-    <canvas id="game"></canvas>
+    <canvas id="view"></canvas>
 
-    <div id="hud" style="display:none">
+    <div id="hud" hidden>
         <div id="hud-clock" class="hud-clock">Day 1 · 06:00</div>
         <div id="hud-env" class="hud-env"></div>
 
@@ -38,8 +40,7 @@
         </div>
     </div>
 
-    <!-- Click-to-inspect stat sheet: a live panel bound to the clicked worker
-         or the Foreman. Hidden until a person is clicked on the board. -->
+    <!-- Click-to-inspect stat sheet (left dock). Hidden until a person is clicked. -->
     <div id="statsheet" class="statsheet" style="display:none">
         <div class="ss-head">
             <span class="ss-swatch" id="ss-swatch"></span>
@@ -56,23 +57,22 @@
     </div>
 
     <div id="overlay">
-        <!-- TITLE -->
-        <div id="screen-title" class="screen">
-            <div class="overlay-title">FARM</div>
-            <div class="overlay-sub">
+        <section id="screen-title" class="screen">
+            <h1 class="overlay-title">FARM</h1>
+            <p class="overlay-sub tagline">
                 A farm run by talking NPC workers and their foreman.<br>
                 Lend a hand — or just watch it run itself.
-            </div>
+            </p>
             <div class="menu-items">
-                <div class="menu-item selected" data-action="play">START</div>
-                <div class="menu-item" data-action="howto">HOW TO PLAY</div>
+                <div class="menu-item selected" data-action="play">Start</div>
+                <div class="menu-item" data-action="howto">How to Play</div>
+                <div class="menu-item" data-action="quit">Quit</div>
             </div>
-            <div class="overlay-hint">Up/Down to navigate · Enter to select</div>
-        </div>
+            <p class="overlay-hint">Up/Down navigate · Enter select</p>
+        </section>
 
-        <!-- HOW TO PLAY -->
-        <div id="screen-howto" class="screen">
-            <div class="overlay-title">HOW TO PLAY</div>
+        <section id="screen-howto" class="screen" hidden>
+            <h1 class="overlay-title">How to Play</h1>
             <div class="overlay-sub htp-body">
                 <p>The foreman watches the farm and assigns Mara, Tom and Lily to
                 feed the animals, water and harvest the crops, and gather produce.
@@ -88,21 +88,29 @@ Esc / P           Pause</pre>
                 4 harvest+collect · 5 plant · 6 resupply · O log observe()</p>
             </div>
             <div class="menu-items">
-                <div class="menu-item selected" data-action="back">BACK</div>
+                <div class="menu-item selected" data-action="back">Back</div>
             </div>
-        </div>
+        </section>
 
-        <!-- PAUSE -->
-        <div id="screen-pause" class="screen">
-            <div class="overlay-title">PAUSED</div>
+        <section id="screen-pause" class="screen" hidden>
+            <h1 class="overlay-title">Paused</h1>
             <div class="menu-items">
-                <div class="menu-item selected" data-action="resume">RESUME</div>
-                <div class="menu-item" data-action="howto">HOW TO PLAY</div>
-                <div class="menu-item" data-action="quit">QUIT TO TITLE</div>
+                <div class="menu-item selected" data-action="resume">Resume</div>
+                <div class="menu-item" data-action="howto">How to Play</div>
+                <div class="menu-item" data-action="title">Title Menu</div>
             </div>
-        </div>
+        </section>
+
+        <section id="screen-gameover" class="screen" hidden>
+            <h1 class="overlay-title">Session Over</h1>
+            <div id="gameover-stats" class="stats-block"></div>
+            <div class="menu-items">
+                <div class="menu-item selected" data-action="restart">Play Again</div>
+                <div class="menu-item" data-action="title">Main Menu</div>
+            </div>
+        </section>
     </div>
 
-    <script type="module" src="/app/app.js"></script>
+    <script type="module" src="/app/main.js"></script>
 </body>
 </html>

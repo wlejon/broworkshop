@@ -1,0 +1,29 @@
+/* Blockfall theme — cool cyan blocks over shared arcade chrome. */
+
+:root {
+    --arcade-bg: #06060a;
+    --arcade-accent: #4fc3f7;
+    --arcade-text: #e8f4fc;
+    --arcade-muted: #5a7a8a;
+    --arcade-faint: #3a4a55;
+    --arcade-overlay: rgba(6, 6, 10, 0.9);
+    --arcade-hud-border: #1e2a35;
+    --arcade-menu-hover: rgba(79, 195, 247, 0.08);
+    --arcade-menu-selected: rgba(79, 195, 247, 0.18);
+}
+
+/* Toast for line-clear callouts (lib/fx toast → #action-text) */
+#action-text {
+    position: absolute;
+    top: 45%;
+    left: 0;
+    width: 100%;
+    text-align: center;
+    font-family: var(--arcade-font);
+    font-size: 32px;
+    font-weight: bold;
+    color: var(--arcade-accent);
+    pointer-events: none;
+    display: none;
+    z-index: 6;
+}

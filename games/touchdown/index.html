@@ -1,36 +1,28 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="utf-8">
     <title>Touchdown</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="/lib/arcade/arcade.css">
+    <link rel="stylesheet" href="theme.css">
 </head>
 <body>
-    <canvas id="game"></canvas>
+    <canvas id="view"></canvas>
 
-    <div id="hud" style="display:none">
-        <div class="hud-row">
-            <span class="hud-label">SCORE</span>
-            <span id="hud-score" class="hud-value">0</span>
-        </div>
-        <div class="hud-row">
-            <span class="hud-label">HI</span>
-            <span id="hud-hi" class="hud-value">0</span>
-        </div>
-        <div class="hud-row">
-            <span class="hud-label">LEVEL</span>
-            <span id="hud-level" class="hud-value">1</span>
-        </div>
-        <div class="hud-row">
-            <span class="hud-label">LANDED</span>
-            <span id="hud-landed" class="hud-value">0</span>
-        </div>
-        <div class="hud-row">
-            <span class="hud-label">FUEL</span>
-            <span id="hud-fuel" class="hud-value">1000</span>
-        </div>
+    <div id="hud" hidden>
+        <div class="hud-label">SCORE</div>
+        <div id="hud-score" class="hud-value">0</div>
+        <div class="hud-label">HI</div>
+        <div id="hud-hi" class="hud-value">0</div>
+        <div class="hud-label">LEVEL</div>
+        <div id="hud-level" class="hud-value">1</div>
+        <div class="hud-label">LANDED</div>
+        <div id="hud-landed" class="hud-value">0</div>
+        <div class="hud-label">FUEL</div>
+        <div id="hud-fuel" class="hud-value">1000</div>
     </div>
 
-    <div id="telemetry" style="display:none">
+    <div id="telemetry" hidden>
         <div class="tel-row">
             <span class="tel-label">ALT</span>
             <span id="tel-alt" class="tel-value">0</span>
@@ -46,27 +38,26 @@
     </div>
 
     <div id="overlay">
-        <!-- TITLE -->
-        <div id="screen-title" class="screen">
-            <div class="overlay-title">TOUCHDOWN</div>
+        <section id="screen-title" class="screen">
+            <h1 class="overlay-title">TOUCHDOWN</h1>
             <div class="overlay-sub">A gravity landing game</div>
             <div class="menu-items">
                 <div class="menu-item selected" data-action="play">PLAY</div>
-                <div class="menu-item" data-action="howtoplay">HOW TO PLAY</div>
+                <div class="menu-item" data-action="howto">HOW TO PLAY</div>
                 <div class="menu-item" data-action="quit">QUIT</div>
             </div>
-            <div class="overlay-hint">Arrow keys to navigate, Enter to select</div>
-        </div>
+            <p class="overlay-hint">Arrow keys to navigate, Enter to select</p>
+        </section>
 
-        <!-- HOW TO PLAY -->
-        <div id="screen-howtoplay" class="screen">
-            <div class="overlay-title">HOW TO PLAY</div>
+        <section id="screen-howto" class="screen" hidden>
+            <h1 class="overlay-title">HOW TO PLAY</h1>
             <div class="overlay-sub htp-body">
                 <p>Gravity is pulling you down. Burn fuel to slow your descent and steer toward a flat landing pad.</p>
                 <p>Land gently, upright, and on a flat pad to score. Narrow pads are worth more.</p>
                 <p><strong>Controls</strong></p>
                 <pre>Up / Space    Thrust
 Left / Right  Rotate
+R-Click       Mouse thrust + aim
 Esc / P       Pause</pre>
                 <p><strong>Safe landing requires</strong><br>
                 Low vertical speed, low horizontal speed,<br>
@@ -75,39 +66,36 @@ Esc / P       Pause</pre>
             <div class="menu-items">
                 <div class="menu-item selected" data-action="back">BACK</div>
             </div>
-        </div>
+        </section>
 
-        <!-- PAUSE -->
-        <div id="screen-pause" class="screen">
-            <div class="overlay-title">PAUSED</div>
+        <section id="screen-pause" class="screen" hidden>
+            <h1 class="overlay-title">PAUSED</h1>
             <div class="menu-items">
                 <div class="menu-item selected" data-action="resume">RESUME</div>
                 <div class="menu-item" data-action="restart">RESTART</div>
-                <div class="menu-item" data-action="quit">QUIT TO MENU</div>
+                <div class="menu-item" data-action="title">QUIT TO MENU</div>
             </div>
-        </div>
+        </section>
 
-        <!-- LANDED (between levels) -->
-        <div id="screen-landed" class="screen">
-            <div class="overlay-title">TOUCHDOWN!</div>
-            <div class="overlay-sub stats-block" id="landed-stats"></div>
+        <section id="screen-landed" class="screen" hidden>
+            <h1 class="overlay-title">TOUCHDOWN!</h1>
+            <div id="landed-stats" class="overlay-sub stats-block"></div>
             <div class="menu-items">
                 <div class="menu-item selected" data-action="next">NEXT LEVEL</div>
             </div>
-            <div class="overlay-hint">Press Enter to continue</div>
-        </div>
+            <p class="overlay-hint">Press Enter to continue</p>
+        </section>
 
-        <!-- GAME OVER -->
-        <div id="screen-gameover" class="screen">
-            <div class="overlay-title" id="gameover-title">CRASHED</div>
-            <div class="overlay-sub stats-block" id="gameover-stats"></div>
+        <section id="screen-gameover" class="screen" hidden>
+            <h1 class="overlay-title">CRASHED</h1>
+            <div id="gameover-stats" class="stats-block"></div>
             <div class="menu-items">
                 <div class="menu-item selected" data-action="restart">PLAY AGAIN</div>
-                <div class="menu-item" data-action="quit">MAIN MENU</div>
+                <div class="menu-item" data-action="title">MAIN MENU</div>
             </div>
-        </div>
+        </section>
     </div>
 
-    <script type="module" src="/app/app.js"></script>
+    <script type="module" src="/app/main.js"></script>
 </body>
 </html>

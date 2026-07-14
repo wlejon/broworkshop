@@ -1,61 +1,107 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="utf-8">
     <title>GridKeep</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="/lib/arcade/arcade.css">
+    <link rel="stylesheet" href="theme.css">
 </head>
 <body>
-    <canvas id="game"></canvas>
+    <canvas id="view"></canvas>
 
-    <div id="hud-top">
-        <span class="hud-box" id="hud-gold-box">GOLD <b id="hud-gold">0</b></span>
-        <span class="hud-box" id="hud-lives-box">LIVES <b id="hud-lives">0</b></span>
-        <span class="hud-box" id="hud-wave-box">WAVE <b id="hud-wave">&mdash;</b></span>
-    </div>
-
-    <div id="palette">
-        <div class="tower-btn" id="btn-arrow">
-            <div class="tb-name">ARROW <span class="key">1</span></div>
-            <div class="tb-cost"></div>
-            <div class="tb-desc"></div>
+    <div id="hud" hidden>
+        <div id="hud-top">
+            <span class="hud-box" id="hud-gold-box">GOLD <b id="hud-gold">0</b></span>
+            <span class="hud-box" id="hud-lives-box">LIVES <b id="hud-lives">0</b></span>
+            <span class="hud-box" id="hud-wave-box">WAVE <b id="hud-wave">&mdash;</b></span>
         </div>
-        <div class="tower-btn" id="btn-cannon">
-            <div class="tb-name">CANNON <span class="key">2</span></div>
-            <div class="tb-cost"></div>
-            <div class="tb-desc"></div>
+
+        <div id="palette">
+            <div class="tower-btn" id="btn-arrow">
+                <div class="tb-name">ARROW <span class="key">1</span></div>
+                <div class="tb-cost"></div>
+                <div class="tb-desc"></div>
+            </div>
+            <div class="tower-btn" id="btn-cannon">
+                <div class="tb-name">CANNON <span class="key">2</span></div>
+                <div class="tb-cost"></div>
+                <div class="tb-desc"></div>
+            </div>
+            <div class="tower-btn" id="btn-frost">
+                <div class="tb-name">FROST <span class="key">3</span></div>
+                <div class="tb-cost"></div>
+                <div class="tb-desc"></div>
+            </div>
+            <div id="btn-wave" class="btn accent">START WAVE 1&nbsp;&nbsp;[Space]</div>
         </div>
-        <div class="tower-btn" id="btn-frost">
-            <div class="tb-name">FROST <span class="key">3</span></div>
-            <div class="tb-cost"></div>
-            <div class="tb-desc"></div>
+
+        <div id="tower-panel" style="display:none">
+            <div id="tp-name" class="panel-title"></div>
+            <div id="tp-stats" class="panel-stats"></div>
+            <div class="panel-buttons">
+                <div id="btn-upgrade" class="btn">UPGRADE</div>
+                <div id="btn-sell" class="btn danger">SELL</div>
+            </div>
+            <div class="panel-hint">U upgrade &middot; X sell &middot; Esc pause</div>
         </div>
-        <div id="btn-wave" class="btn accent">START WAVE 1&nbsp;&nbsp;[Space]</div>
-    </div>
 
-    <div id="tower-panel" style="display:none">
-        <div id="tp-name" class="panel-title"></div>
-        <div id="tp-stats" class="panel-stats"></div>
-        <div class="panel-buttons">
-            <div id="btn-upgrade" class="btn">UPGRADE</div>
-            <div id="btn-sell" class="btn danger">SELL</div>
+        <div id="help">
+            Pick a tower (1/2/3), click grass to build &middot; creeps reroute around your maze
+            &middot; you may not wall them off completely &middot; hilltop towers get +1 range
+            &middot; click a tower to upgrade or sell
         </div>
-        <div class="panel-hint">U upgrade &middot; S sell &middot; Esc close</div>
+
+        <div id="announce" style="display:none"></div>
+        <div id="toast" style="display:none"></div>
     </div>
 
-    <div id="help">
-        Pick a tower (1/2/3), click grass to build &middot; creeps reroute around your maze
-        &middot; you may not wall them off completely &middot; hilltop towers get +1 range
-        &middot; click a tower to upgrade or sell
+    <div id="overlay">
+        <section id="screen-title" class="screen">
+            <h1 class="overlay-title">GRIDKEEP</h1>
+            <p class="overlay-sub">Open-field maze tower defense. Hold the keep.</p>
+            <div class="menu-items">
+                <div class="menu-item selected" data-action="play">Play</div>
+                <div class="menu-item" data-action="howto">How to Play</div>
+                <div class="menu-item" data-action="quit">Quit</div>
+            </div>
+            <p class="overlay-hint">Up/Down navigate · Enter select</p>
+        </section>
+
+        <section id="screen-howto" class="screen" hidden>
+            <h1 class="overlay-title">How to Play</h1>
+            <div class="overlay-sub howto">
+                <p>Build towers to stop creeps reaching the golden keep. There is
+                <b>no fixed path</b> — creeps route around your maze.</p>
+                <p><b>1 / 2 / 3</b> arm Arrow, Cannon, or Frost. Click grass to place.
+                You cannot fully wall off the path. Hilltops give +1 range.</p>
+                <p>Click a tower to upgrade (<b>U</b>) or sell (<b>X</b>).
+                <b>Space</b> starts the next wave. Survive all 10 waves.</p>
+                <p><b>Esc / P</b> pause. Right-click cancels placement.</p>
+            </div>
+            <div class="menu-items">
+                <div class="menu-item selected" data-action="back">Back</div>
+            </div>
+        </section>
+
+        <section id="screen-pause" class="screen" hidden>
+            <h1 class="overlay-title">Paused</h1>
+            <div class="menu-items">
+                <div class="menu-item selected" data-action="resume">Resume</div>
+                <div class="menu-item" data-action="restart">Restart</div>
+                <div class="menu-item" data-action="title">Title Menu</div>
+            </div>
+        </section>
+
+        <section id="screen-gameover" class="screen" hidden>
+            <h1 class="overlay-title" id="gameover-title">Game Over</h1>
+            <div id="gameover-stats" class="stats-block"></div>
+            <div class="menu-items">
+                <div class="menu-item selected" data-action="restart">Play Again</div>
+                <div class="menu-item" data-action="title">Main Menu</div>
+            </div>
+        </section>
     </div>
 
-    <div id="announce" style="display:none"></div>
-    <div id="toast" style="display:none"></div>
-
-    <div id="banner" style="display:none">
-        <div id="banner-text"></div>
-        <div id="banner-sub"></div>
-    </div>
-
-    <script type="module" src="/app/app.js"></script>
+    <script type="module" src="/app/main.js"></script>
 </body>
 </html>

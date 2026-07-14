@@ -1,0 +1,27 @@
+/* Chomper theme — classic yellow arcade feel over shared chrome. */
+
+:root {
+    --arcade-bg: #000000;
+    --arcade-accent: #ffff00;
+    --arcade-text: #ffffee;
+    --arcade-muted: #888866;
+    --arcade-faint: #444422;
+    --arcade-overlay: rgba(0, 0, 0, 0.9);
+    --arcade-hud-border: #2121ff;
+    --arcade-menu-hover: rgba(255, 255, 0, 0.08);
+    --arcade-menu-selected: rgba(255, 255, 0, 0.18);
+}
+
+.overlay-title {
+    color: var(--arcade-accent);
+    letter-spacing: 0.12em;
+    text-shadow: 0 0 12px rgba(255, 255, 0, 0.45);
+}
+
+.overlay-sub strong {
+    color: var(--arcade-accent);
+}
+
+.hud-value {
+    color: var(--arcade-accent);
+}

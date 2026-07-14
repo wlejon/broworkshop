@@ -1,14 +1,15 @@
 // board.js — letter-grid word-builder. Grid, chain, pop, settle, burning tiles.
+// Audio via _play(name); settings via _settings; word log via _onWord.
 'use strict';
-import { Hud } from "/lib/hud.js";
 import { Dictionary } from "/app/dictionary.js";
-import { Audio } from "/app/audio.js";
 import { Particles } from "/app/particles.js";
 import { Scoring } from "/app/scoring.js";
-import { Storage } from "/app/storage.js";
 import { Text } from "/app/text.js";
 
 export const Board = (function () {
+    var _play = function (/* name */) {};
+    var _settings = { difficulty: 1 };
+    var _onWord = null;
     // ---- Constants ------------------------------------------------------
     var COLS = 7;
     var ROWS = 8;
@@ -331,19 +332,19 @@ export const Board = (function () {
     // ---- Submit chain ---------------------------------------------------
     function submitChain() {
         if (currentChain.length < 3) {
-            Audio.submitFail();
+            _play("submit_fail");
             Particles.showAction('TOO SHORT');
             resetChain();
             return false;
         }
         if (!isValidPath(currentChain, grid)) {
-            Audio.submitFail();
+            _play("submit_fail");
             resetChain();
             return false;
         }
         var word = pathToWord(currentChain, grid);
         if (!Dictionary.isWord(word)) {
-            Audio.submitFail();
+            _play("submit_fail");
             Particles.showAction('NOT A WORD');
             streak = 0;
             updateCombo();
@@ -386,7 +387,7 @@ export const Board = (function () {
             if (rnd() < burnChance) {
                 var howMany = 1 + (wordsPlayed > 12 ? 1 : 0);
                 sprinkleBurning(grid, Math.min(howMany, 2));
-                Audio.sizzle();
+                _play("sizzle");
             }
         }
 
@@ -396,21 +397,23 @@ export const Board = (function () {
         if (word.length > longestWord.length) longestWord = word;
         if (pts > bestWordScore) { bestWordScore = pts; bestWordText = word; }
 
-        // Top-word persistence.
-        try {
-            Storage.addWord({
-                word: word,
-                score: pts,
-                length: word.length,
-                mode: mode,
-                date: (new Date()).toISOString().slice(0, 10)
-            });
-        } catch (e) {}
+        // Top-word persistence (shell/save via callback).
+        if (_onWord) {
+            try {
+                _onWord({
+                    word: word,
+                    score: pts,
+                    length: word.length,
+                    mode: mode,
+                    date: (new Date()).toISOString().slice(0, 10)
+                });
+            } catch (e) {}
+        }
 
         // Audio/visual feedback.
-        Audio.submitOk(word.length);
+        _play("submit@" + word.length);
         if (word.length >= 7) {
-            Audio.fanfare();
+            _play("fanfare");
             Particles.showAction(word.toUpperCase() + '!  +' + pts);
         } else {
             Particles.showAction(word.toUpperCase() + '  +' + pts);
@@ -438,7 +441,7 @@ export const Board = (function () {
 
     function burnChancePerWord() {
         // 0 = easy, 1 = normal, 2 = hard
-        var d = Storage.settings.difficulty | 0;
+        var d = (_settings && _settings.difficulty) | 0;
         if (d === 0) return 0.18;
         if (d === 2) return 0.55;
         return 0.32;
@@ -467,7 +470,7 @@ export const Board = (function () {
         if (!grid[c][r]) return false;
         if (currentChain.length === 0) {
             currentChain.push([c, r]);
-            Audio.tileAdd(1);
+            _play("tile@1");
             return true;
         }
         var last = currentChain[currentChain.length - 1];
@@ -491,20 +494,20 @@ export const Board = (function () {
             if (currentChain[i][0] === c && currentChain[i][1] === r) return false;
         }
         currentChain.push([c, r]);
-        Audio.tileAdd(currentChain.length);
+        _play("tile@" + currentChain.length);
         return true;
     }
 
     function removeLastTile() {
         if (currentChain.length === 0) return;
         currentChain.pop();
-        Audio.tileRemove();
+        _play("tile_remove");
     }
 
     function clearChain() {
         if (currentChain.length === 0) return;
         currentChain = [];
-        Audio.clearChain();
+        _play("clear_chain");
     }
 
     function updateCombo() {
@@ -592,30 +595,35 @@ export const Board = (function () {
 
     function triggerGameOver() {
         gameOver = true;
-        Audio.gameover();
+        _play("gameover");
         Particles.shake(500, 12);
     }
 
     // ---- HUD ------------------------------------------------------------
+    function setText(id, v) {
+        var el = document.getElementById(id);
+        if (el) el.textContent = String(v);
+    }
+
     function updateHUD() {
-        Hud.text('#hud-score', String(score));
-        Hud.text('#hud-level', String(level));
+        setText('hud-score', score);
+        setText('hud-level', level);
         var label = document.getElementById('hud-extra-label');
         if (mode === 'timed') {
             if (label) label.textContent = 'TIME';
             var sec = Math.max(0, Math.ceil(timedRemaining / 1000));
             var m = Math.floor(sec / 60);
             var s = sec % 60;
-            Hud.text('#hud-extra', m + ':' + (s < 10 ? '0' : '') + s);
+            setText('hud-extra', m + ':' + (s < 10 ? '0' : '') + s);
         } else if (mode === 'puzzle') {
             if (label) label.textContent = 'PUZZLE';
-            Hud.text('#hud-extra', (puzzleSolved + 1) + '/' + puzzleTotal);
+            setText('hud-extra', (puzzleSolved + 1) + '/' + puzzleTotal);
         } else {
             if (label) label.textContent = 'WORDS';
-            Hud.text('#hud-extra', String(wordsPlayed));
+            setText('hud-extra', wordsPlayed);
         }
-        Hud.text('#hud-longest', longestWord ? longestWord.toUpperCase() : '-');
-        Hud.text('#hud-best', bestWordText ? (bestWordText.toUpperCase() + ' (' + bestWordScore + ')') : '-');
+        setText('hud-longest', longestWord ? longestWord.toUpperCase() : '-');
+        setText('hud-best', bestWordText ? (bestWordText.toUpperCase() + ' (' + bestWordScore + ')') : '-');
 
         // Burning warning (classic): any burning tile in bottom 2 rows?
         var warn = false;
@@ -955,6 +963,10 @@ export const Board = (function () {
         COLS: COLS, ROWS: ROWS,
         MULT_GILDED: MULT_GILDED, MULT_JEWELED: MULT_JEWELED,
         MULT_SAPPHIRE: MULT_SAPPHIRE, MULT_RUBY: MULT_RUBY,
+
+        setPlay: function (fn) { _play = fn || function () {}; },
+        setSettings: function (s) { _settings = s || { difficulty: 1 }; },
+        setOnWord: function (fn) { _onWord = fn; },
 
         // Lifecycle
         startGame: startGame,

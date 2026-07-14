@@ -4,6 +4,7 @@
         { "dir": "games/gemswap" },
         { "dir": "games/pegbounce" },
         { "dir": "games/snake" },
+        { "dir": "games/arcade-template" },
         { "dir": "games/breakout" },
         { "dir": "games/asteroids" },
         { "dir": "games/chomper" },

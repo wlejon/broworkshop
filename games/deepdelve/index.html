@@ -1,57 +1,95 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="utf-8">
     <title>DeepDelve</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="/lib/arcade/arcade.css">
+    <link rel="stylesheet" href="theme.css">
 </head>
 <body>
-    <canvas id="game"></canvas>
+    <canvas id="view"></canvas>
     <div id="vignette"></div>
 
-    <div id="hud-left">
-        <div class="panel">
+    <div id="hud" hidden>
+        <div id="hud-left" class="panel">
             <div class="panel-title">DELVER</div>
             <div id="hp-row">
                 <div id="hp-bar"><div id="hp-fill"></div></div>
-                <div id="hp-text">26 / 26</div>
+                <div id="hud-hp">26 / 26</div>
             </div>
-            <div class="stat-row"><span>ATK</span><b id="stat-atk">3</b>
-                <span>DEF</span><b id="stat-def">0</b></div>
-            <div class="stat-row"><span>GOLD</span><b id="stat-gold" class="gold">0</b>
-                <span>TURN</span><b id="stat-turn">0</b></div>
-            <div class="stat-row"><span>FLOOR</span><b id="stat-floor">1 / 3</b></div>
+            <div class="stat-row"><span>ATK</span><b id="hud-atk">3</b>
+                <span>DEF</span><b id="hud-def">0</b></div>
+            <div class="stat-row"><span>GOLD</span><b id="hud-gold" class="gold">0</b>
+                <span>TURN</span><b id="hud-turn">0</b></div>
+            <div class="stat-row"><span>FLOOR</span><b id="hud-floor">1 / 3</b></div>
         </div>
-    </div>
 
-    <div id="hud-right">
-        <div class="panel">
+        <div id="hud-right" class="panel">
             <div class="panel-title">PACK</div>
-            <div class="inv-row"><span class="inv-ico wpn"></span><span id="inv-weapon">Rusty Dagger</span></div>
-            <div class="inv-row"><span class="inv-ico arm"></span><span id="inv-armor">Cloth Rags</span></div>
-            <div class="inv-row"><span class="inv-ico pot"></span>Potions ×<b id="inv-potions">1</b>
+            <div class="inv-row"><span class="inv-ico wpn"></span><span id="hud-weapon">Rusty Dagger</span></div>
+            <div class="inv-row"><span class="inv-ico arm"></span><span id="hud-armor">Cloth Rags</span></div>
+            <div class="inv-row"><span class="inv-ico pot"></span>Potions ×<b id="hud-potions">1</b>
                 <span id="btn-potion" class="mini-btn">Q&nbsp;quaff</span></div>
             <div class="hud-btns">
                 <span id="btn-save" class="mini-btn">F5 save</span>
                 <span id="btn-load" class="mini-btn">F9 load</span>
             </div>
         </div>
+
+        <div id="log"></div>
+        <div id="help">
+            Arrows / WASD move &amp; bump-attack &middot; Space wait &middot; Q potion &middot;
+            E search for traps &middot; walk onto stairs to descend &middot;
+            find the Amulet on floor 3 &middot; Esc pause
+        </div>
+        <div id="announce" style="display:none"></div>
     </div>
 
-    <div id="log"></div>
+    <div id="overlay">
+        <section id="screen-title" class="screen">
+            <h1 class="overlay-title">DEEP DELVE</h1>
+            <p class="overlay-sub tagline">Retrieve the Amulet from the depths.</p>
+            <div class="menu-items">
+                <div class="menu-item selected" data-action="play">Delve</div>
+                <div class="menu-item" data-action="howto">How to Play</div>
+                <div class="menu-item" data-action="quit">Quit</div>
+            </div>
+        </section>
 
-    <div id="help">
-        Arrows / WASD move &amp; bump-attack &middot; Space wait &middot; Q potion &middot;
-        E search for traps &middot; walk onto stairs to descend &middot;
-        find the Amulet on floor 3
+        <section id="screen-howto" class="screen" hidden>
+            <h1 class="overlay-title">How to Play</h1>
+            <div class="overlay-sub howto">
+                <p>You are a delver. Three floors down waits the <b>Amulet of Delving</b>.</p>
+                <p><b>Move:</b> Arrows / WASD — bump monsters to attack, bump doors to open.</p>
+                <p><b>Space</b> waits a turn. <b>Q</b> quaffs a potion. <b>E</b> searches for traps.</p>
+                <p>Fog of war hides the unknown. Gold, gear, and potions litter the halls.
+                Spikes are deadly. Walk the down-stairs to descend.</p>
+                <p><b>F5</b> save &middot; <b>F9</b> load &middot; <b>Esc</b> pause</p>
+            </div>
+            <div class="menu-items">
+                <div class="menu-item selected" data-action="back">Back</div>
+            </div>
+        </section>
+
+        <section id="screen-pause" class="screen" hidden>
+            <h1 class="overlay-title">Paused</h1>
+            <div class="menu-items">
+                <div class="menu-item selected" data-action="resume">Resume</div>
+                <div class="menu-item" data-action="restart">New Delve</div>
+                <div class="menu-item" data-action="title">Main Menu</div>
+            </div>
+        </section>
+
+        <section id="screen-gameover" class="screen" hidden>
+            <h1 class="overlay-title">Run Over</h1>
+            <div id="gameover-stats" class="stats-block"></div>
+            <div class="menu-items">
+                <div class="menu-item selected" data-action="restart">New Delve</div>
+                <div class="menu-item" data-action="title">Main Menu</div>
+            </div>
+        </section>
     </div>
 
-    <div id="announce" style="display:none"></div>
-
-    <div id="banner" style="display:none">
-        <div id="banner-text"></div>
-        <div id="banner-sub"></div>
-    </div>
-
-    <script type="module" src="/app/app.js"></script>
+    <script type="module" src="/app/main.js"></script>
 </body>
 </html>

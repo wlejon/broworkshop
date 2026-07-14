@@ -2,9 +2,11 @@
 'use strict';
 import { Puzzles } from "/app/puzzles.js";
 import { Particles } from "/app/particles.js";
-import { AppAudio } from "/app/audio.js";
 
 export const Board = (function () {
+    // Injected by game.js: play("cueName") → arcade shell cues.
+    var _play = function (/* name */) {};
+    var _matchCue = null;
     var ROWS = 8;
     var COLS = 8;
     var COLORS_N = 7;
@@ -763,7 +765,7 @@ export const Board = (function () {
         if (!grid[r][c] || grid[r][c].frozen) return;
         if (!sel) {
             sel = { r: r, c: c };
-            if (AppAudio) AppAudio.pick();
+            _play("pick");
             return;
         }
         if (sel.r === r && sel.c === c) {
@@ -774,7 +776,7 @@ export const Board = (function () {
             sel = null;
         } else {
             sel = { r: r, c: c };
-            if (AppAudio) AppAudio.pick();
+            _play("pick");
         }
     }
 
@@ -792,7 +794,7 @@ export const Board = (function () {
             }
         }
         cursor.r = nr; cursor.c = nc;
-        if (AppAudio) AppAudio.cursor();
+        _play("cursor");
     }
 
     function cursorConfirm() {
@@ -860,7 +862,7 @@ export const Board = (function () {
                 hint = findAnyMove(grid);
                 if (!hint) {
                     // deadlock detected: shuffle
-                    if (AppAudio) AppAudio.shuffle();
+                    _play("shuffle");
                     shuffleBoard();
                 }
             }
@@ -873,7 +875,7 @@ export const Board = (function () {
                 var a = swapPair.a, b = swapPair.b;
                 if (swapPair._commit) {
                     // grid already swapped during beginSwap
-                    if (AppAudio) AppAudio.swap(true);
+                    _play("swap_ok");
                     stats.swaps++;
                     moves++;
                     chain = 0;
@@ -893,7 +895,7 @@ export const Board = (function () {
                             if (gg === h || gg.color === targetColor) toClear.push({ r: r, c: c });
                         }
                     }
-                    if (AppAudio) AppAudio.hyper();
+                    _play("hyper");
                     clearTiles(toClear, targetColor);
                     stats.swaps++;
                     moves++;
@@ -901,7 +903,7 @@ export const Board = (function () {
                     swapPair = null;
                     scheduleCollapse();
                 } else if (swapPair.back) {
-                    if (AppAudio) AppAudio.swap(false);
+                    _play("swap_bad");
                     swapPair = null;
                     animating = false;
                 } else {
@@ -1001,7 +1003,7 @@ export const Board = (function () {
                         var threshold = level * 1000;
                         if (score >= threshold) {
                             level++;
-                            if (AppAudio) AppAudio.levelUp();
+                            _play("levelup");
                         }
                     }
                     // check deadlock
@@ -1037,8 +1039,12 @@ export const Board = (function () {
         var delta = scoreChain(sizes, chain - 1);
         score += delta;
 
-        // sound pitch step on cascade
-        if (AppAudio) AppAudio.match(chain, groups[0].size);
+        // Pitch climbs with cascade depth / group size (wired by game.js).
+        if (typeof _matchCue === "function") {
+            _matchCue(chain, groups[0].size);
+        } else {
+            _play("match");
+        }
 
         // Collect all cells to clear; also determine upgrade cells (special gen).
         var cellsToClear = [];
@@ -1238,6 +1244,10 @@ export const Board = (function () {
         SPECIAL_STAR: SPECIAL_STAR,
         SPECIAL_HYPER: SPECIAL_HYPER,
         PALETTE: PALETTE,
+
+        // audio injection
+        setPlay: function (fn) { _play = fn || function () {}; },
+        setMatchCue: function (fn) { _matchCue = fn || null; },
 
         // game
         startGame: startGame,

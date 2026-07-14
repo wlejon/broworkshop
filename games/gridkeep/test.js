@@ -6,6 +6,14 @@
 
 advanceTime(400);
 
+// Arcade shell boots on title — Enter starts a run (Play is selected).
+function pressKey(key) {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+    window.dispatchEvent(new KeyboardEvent('keyup', { key, bubbles: true }));
+}
+pressKey('Enter');
+advanceTime(200);
+
 const G = window.GRIDKEEP;
 assert(G, 'GRIDKEEP debug surface exposed');
 const { game, world } = G;

@@ -1,0 +1,80 @@
+/* Fintank theme — deep aquarium over shared arcade chrome. */
+
+:root {
+    --arcade-bg: #020e1a;
+    --arcade-accent: #f2c95b;
+    --arcade-text: #f0e8c4;
+    --arcade-muted: #6fa8c8;
+    --arcade-faint: #4a6a80;
+    --arcade-overlay: rgba(2, 15, 28, 0.85);
+    --arcade-hud-bg: rgba(5, 20, 35, 0.88);
+    --arcade-hud-border: #144060;
+    --arcade-menu-hover: rgba(242, 201, 91, 0.08);
+    --arcade-menu-selected: rgba(242, 201, 91, 0.18);
+}
+
+#view {
+    cursor: crosshair;
+}
+
+#hud {
+    top: 12px;
+    left: 12px;
+    min-width: 180px;
+    padding: 10px 14px;
+}
+
+.hud-row {
+    display: flex;
+    justify-content: space-between;
+    margin: 4px 0;
+    gap: 16px;
+}
+
+.hud-row .hud-label {
+    margin-top: 0;
+    font-size: 12px;
+    color: var(--arcade-muted);
+    letter-spacing: 0.1em;
+}
+
+.hud-row .hud-value {
+    font-size: 16px;
+    color: var(--arcade-text);
+}
+
+.overlay-title {
+    letter-spacing: 0.08em;
+    text-shadow: 0 0 25px rgba(242, 201, 91, 0.35);
+}
+
+.overlay-sub strong { color: #f2c95b; }
+
+.htp-body {
+    text-align: center;
+    max-width: 720px;
+    margin-left: auto;
+    margin-right: auto;
+    padding: 0 20px;
+}
+
+.stats-block {
+    white-space: pre-wrap;
+    color: #bcd4e4;
+    margin: 0 auto 18px;
+    max-width: 420px;
+    line-height: 1.5;
+}
+
+.menu-item.disabled {
+    color: #33475a;
+    cursor: default;
+    pointer-events: none;
+    opacity: 0.5;
+}
+
+.credits-sub {
+    color: var(--arcade-faint);
+    font-size: 12px;
+    margin-top: 20px;
+}

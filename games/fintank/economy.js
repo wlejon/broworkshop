@@ -1,21 +1,50 @@
 // economy.js — fintank storage, save slots, shop catalogue, high-scores.
+// Uses localStorage directly (no /lib/storage dependency).
 'use strict';
-import { Storage } from "/lib/storage.js";
 
 export const Economy = (function () {
-    var store = Storage.create('fintank');
     var defaults = {
         sfxVol: 80,
         musicVol: 60,
         difficulty: 1,   // 0=easy, 1=normal, 2=hard
         activeSlot: 1
     };
-    var settings = store.load(defaults);
-    var hs = Storage.highscores('fintank:days', 10, { field: 'day' });
+    var settings = loadSettings();
+    var hsKey = "fintank:days";
+
+    function loadSettings() {
+        var data = Object.assign({}, defaults);
+        try {
+            var raw = localStorage.getItem("fintank:settings");
+            if (raw) {
+                var parsed = JSON.parse(raw);
+                for (var k in parsed) if (Object.prototype.hasOwnProperty.call(parsed, k)) data[k] = parsed[k];
+            }
+        } catch (e) {}
+        return data;
+    }
+    function saveSettings() {
+        try { localStorage.setItem("fintank:settings", JSON.stringify(settings)); } catch (e) {}
+    }
+
+    function listHS() {
+        try {
+            var raw = localStorage.getItem(hsKey);
+            if (!raw) return [];
+            var list = JSON.parse(raw);
+            return Array.isArray(list) ? list : [];
+        } catch (e) { return []; }
+    }
+    function addHS(entry) {
+        var list = listHS();
+        list.push(entry);
+        list.sort(function (a, b) { return (b.day || 0) - (a.day || 0); });
+        list = list.slice(0, 10);
+        try { localStorage.setItem(hsKey, JSON.stringify(list)); } catch (e) {}
+        return list;
+    }
 
     // ---- Fish tier catalogue (original breeds) ----
-    // coinTier: which coin tier they drop.
-    // feedTimeMs: how long between coin drops after eating.
     var FISH_TIERS = [
         { id: 1, name: 'GLIMFIN',    price: 100,  coinTier: 1, feedMs: 5500,  color: '#f8c85a', size: 14, speed: 50 },
         { id: 2, name: 'BLUEWISP',   price: 250,  coinTier: 2, feedMs: 7200,  color: '#5ecdf5', size: 17, speed: 44 },
@@ -25,10 +54,8 @@ export const Economy = (function () {
         { id: 6, name: 'PEARLSCALE', price: 7000, coinTier: 6, feedMs: 15500, color: '#e8e0ff', size: 30, speed: 28, diamondDrop: true }
     ];
 
-    // Coin tier -> value
     var COIN_VALUES = { 1: 5, 2: 12, 3: 30, 4: 60, 5: 120, 6: 500 };
 
-    // ---- Pellet (food) tiers ----
     var PELLET_TIERS = [
         { id: 1, name: 'BASIC PELLET', price: 0,    coinBoost: 1.0,  restore: 60 },
         { id: 2, name: 'RICH PELLET',  price: 400,  coinBoost: 1.25, restore: 75 },
@@ -36,14 +63,12 @@ export const Economy = (function () {
         { id: 4, name: 'AMBROSIA',     price: 5000, coinBoost: 2.0,  restore: 110 }
     ];
 
-    // ---- Tank upgrades ----
     var TANK_UPGRADES = [
         { id: 'cap',   name: 'FISH CAPACITY', levels: [10, 14, 18, 22, 26], prices: [0, 300, 800, 2000, 5000] },
         { id: 'filter',name: 'FILTER (SLOW HUNGER)', levels: [1.0, 0.85, 0.72, 0.6, 0.5], prices: [0, 500, 1400, 3500, 8000] },
         { id: 'light', name: 'TANK LIGHTING',        levels: [1.0, 1.1, 1.2, 1.35, 1.5], prices: [0, 250, 700, 1800, 4000] }
     ];
 
-    // ---- Pet catalogue ----
     var PETS = [
         { id: 'bubbler',    name: 'BUBBLER',    price: 800,  desc: 'AUTO-FEEDS HUNGRY FISH' },
         { id: 'coinkeeper', name: 'COINKEEPER', price: 1200, desc: 'AUTO-COLLECTS OLD COINS' },
@@ -57,8 +82,8 @@ export const Economy = (function () {
             slot: n,
             day: 1,
             coins: 200,
-            fish: [],              // [{tier}]
-            pets: [],              // [petId]
+            fish: [],
+            pets: [],
             activePet: null,
             pelletTier: 1,
             upgrades: { cap: 1, filter: 1, light: 1 },
@@ -73,10 +98,8 @@ export const Economy = (function () {
             var raw = localStorage.getItem(slotKey(n));
             if (!raw) return freshSlot(n);
             var parsed = JSON.parse(raw);
-            // Merge with a fresh slot to backfill missing fields.
             var base = freshSlot(n);
             for (var k in parsed) if (parsed.hasOwnProperty(k)) base[k] = parsed[k];
-            // Defensive: make sure nested structures exist.
             if (!base.upgrades) base.upgrades = { cap: 1, filter: 1, light: 1 };
             if (!base.fish) base.fish = [];
             if (!base.pets) base.pets = [];
@@ -127,7 +150,7 @@ export const Economy = (function () {
 
     function buyPelletNext(slot) {
         if (slot.pelletTier >= PELLET_TIERS.length) return { ok: false, reason: 'MAXED' };
-        var next = PELLET_TIERS[slot.pelletTier]; // 0-indexed: slot.pelletTier is current tier id (1..), next index = slot.pelletTier
+        var next = PELLET_TIERS[slot.pelletTier];
         if (slot.coins < next.price) return { ok: false, reason: 'NOT ENOUGH COINS' };
         slot.coins -= next.price;
         slot.pelletTier = next.id;
@@ -164,20 +187,16 @@ export const Economy = (function () {
         return { ok: true, pet: petId };
     }
 
-    // Catalog entries for the shop screen
     function shopCatalog(slot) {
         var items = [];
-        // Pellet upgrade (if any remains)
         if (slot.pelletTier < PELLET_TIERS.length) {
             var next = PELLET_TIERS[slot.pelletTier];
             items.push({ kind: 'pellet', label: 'PELLET: ' + next.name, price: next.price });
         }
-        // Fish (all six tiers)
         for (var i = 0; i < FISH_TIERS.length; i++) {
             var f = FISH_TIERS[i];
             items.push({ kind: 'fish', id: f.id, label: 'FISH: ' + f.name, price: f.price });
         }
-        // Tank upgrades
         for (var j = 0; j < TANK_UPGRADES.length; j++) {
             var u = TANK_UPGRADES[j];
             if (upgradeMaxed(slot, u.id)) {
@@ -187,7 +206,6 @@ export const Economy = (function () {
                              price: upgradeNextPrice(slot, u.id) });
             }
         }
-        // Pets
         for (var k = 0; k < PETS.length; k++) {
             var p = PETS[k];
             if (slot.pets.indexOf(p.id) !== -1) {
@@ -207,12 +225,11 @@ export const Economy = (function () {
         COIN_VALUES: COIN_VALUES,
 
         settings: settings,
-        saveSettings: function () { store.save(); },
+        saveSettings: saveSettings,
         difficultyLabel: difficultyLabel,
 
-        hs: hs,
-        addHS: function (entry) { hs.add(entry); },
-        listHS: function () { return hs.list(); },
+        addHS: addHS,
+        listHS: listHS,
 
         freshSlot: freshSlot,
         loadSlot: loadSlot,

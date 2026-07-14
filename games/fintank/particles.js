@@ -1,13 +1,18 @@
 // particles.js — bubbles, splash drops, hit sparks, floating text.
+// Inline shake (no /lib/fx dependency).
 'use strict';
-import { FX } from "/lib/fx.js";
 import { Text } from "/app/text.js";
 
 export const Particles = (function () {
     var items = [];
     var bubbles = [];
+    var shakeTimer = 0, shakeDur = 1, shakeMag = 0;
 
-    function reset() { items.length = 0; bubbles.length = 0; FX.reset(); }
+    function reset() {
+        items.length = 0;
+        bubbles.length = 0;
+        shakeTimer = 0;
+    }
 
     function add(p) { items.push(p); }
 
@@ -75,12 +80,11 @@ export const Particles = (function () {
             if (p.kind === 'spark' || p.kind === 'drop') {
                 p.x += p.vx * s;
                 p.y += p.vy * s;
-                if (p.kind === 'drop') p.vy += 400 * s; // gravity
+                if (p.kind === 'drop') p.vy += 400 * s;
             } else if (p.kind === 'text') {
                 p.y += p.vy * s;
             }
         }
-        // bubble spawn
         if (Math.random() < dt / 300 && bubbles.length < 40) addBubble(Wd, Hd);
         for (var j = bubbles.length - 1; j >= 0; j--) {
             var b = bubbles[j];
@@ -89,11 +93,10 @@ export const Particles = (function () {
             b.y += b.vy * s;
             if (b.y < 20) bubbles.splice(j, 1);
         }
-        FX.tick(dt);
+        if (shakeTimer > 0) shakeTimer -= dt;
     }
 
     function draw(ctx) {
-        // bubbles
         ctx.save();
         for (var i = 0; i < bubbles.length; i++) {
             var b = bubbles[i];
@@ -105,7 +108,6 @@ export const Particles = (function () {
             ctx.stroke();
         }
         ctx.globalAlpha = 1;
-        // items
         for (var j = 0; j < items.length; j++) {
             var p = items[j];
             var t = 1 - (p.age / p.life);
@@ -126,8 +128,19 @@ export const Particles = (function () {
         ctx.restore();
     }
 
-    function shake(mag) { FX.shake(180, mag || 6); }
-    function shakeOffset() { return FX.shakeOffset(); }
+    function shake(mag) {
+        shakeTimer = 180;
+        shakeDur = 180;
+        shakeMag = mag || 6;
+    }
+    function shakeOffset() {
+        if (shakeTimer <= 0) return { x: 0, y: 0 };
+        var intensity = (shakeTimer / shakeDur) * shakeMag;
+        return {
+            x: (Math.random() - 0.5) * intensity,
+            y: (Math.random() - 0.5) * intensity
+        };
+    }
 
     return {
         reset: reset, add: add, update: update, draw: draw,

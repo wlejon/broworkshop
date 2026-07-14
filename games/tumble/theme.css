@@ -1,0 +1,241 @@
+/* Tumble theme over shared arcade chrome. 3D scene + custom HUD layout. */
+
+:root {
+    --arcade-bg: #05060a;
+    --arcade-accent: #ffc166;
+    --arcade-text: #e8e8ee;
+    --arcade-muted: #8cb7ff;
+    --arcade-faint: #26304b;
+    --arcade-overlay: rgba(4, 6, 12, 0.84);
+    --arcade-hud-bg: rgba(8, 11, 22, 0.82);
+    --arcade-hud-border: #26304b;
+    --arcade-menu-hover: rgba(77, 122, 199, 0.2);
+    --arcade-menu-selected: rgba(37, 55, 90, 1);
+    --arcade-font: "Segoe UI", system-ui, sans-serif;
+}
+
+#view {
+    display: block;
+    width: 100vw;
+    height: 100vh;
+    background: #05060a;
+    cursor: crosshair;
+}
+
+/* Custom multi-panel HUD (overrides default left stack) */
+#hud {
+    position: fixed;
+    inset: 0;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: transparent;
+    border: none;
+    padding: 0;
+    min-width: 0;
+    pointer-events: none;
+    font-size: 13px;
+}
+
+#hud-top {
+    position: absolute;
+    top: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 26px;
+    padding: 8px 18px;
+    background: rgba(8, 11, 22, 0.82);
+    border: 1px solid #26304b;
+    border-radius: 6px;
+    align-items: center;
+    pointer-events: none;
+}
+#hud-level { font-size: 16px; font-weight: 600; letter-spacing: 0.02em; color: #ffd691; }
+#hud-mode {
+    font-size: 12px;
+    letter-spacing: 0.2em;
+    padding: 4px 10px;
+    background: #1b2b4a;
+    border-radius: 3px;
+    color: #8cb7ff;
+}
+#hud-mode.run { background: #3a1c1c; color: #ff9f7b; }
+#hud-timer { font-family: Consolas, monospace; font-size: 16px; color: #eef; min-width: 64px; text-align: right; }
+
+#hud-pieces {
+    position: absolute;
+    left: 10px;
+    top: 60px;
+    width: 210px;
+    background: rgba(8, 11, 22, 0.82);
+    border: 1px solid #26304b;
+    border-radius: 6px;
+    padding: 10px 12px;
+    pointer-events: auto;
+}
+.hud-pieces-title {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    opacity: 0.7;
+    margin-bottom: 8px;
+    display: flex;
+    justify-content: space-between;
+}
+#hud-palette { display: flex; flex-direction: column; gap: 4px; }
+.palette-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    background: #0e1424;
+    border: 1px solid #1f2a44;
+    border-radius: 4px;
+    cursor: pointer;
+}
+.palette-item:hover { background: #14203a; }
+.palette-item.selected { background: #25375a; border-color: #4d7ac7; }
+.palette-item.disabled { opacity: 0.45; }
+.palette-swatch { width: 14px; height: 14px; border-radius: 3px; flex-shrink: 0; }
+.palette-key {
+    font-family: Consolas, monospace;
+    font-size: 11px;
+    opacity: 0.6;
+    min-width: 14px;
+    text-align: center;
+}
+.palette-name  { flex: 1; font-size: 13px; }
+.palette-count { font-family: Consolas, monospace; font-size: 11px; opacity: 0.7; }
+.hud-hint {
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid #1f2a44;
+    font-size: 11px;
+    opacity: 0.75;
+    line-height: 1.5;
+}
+
+#hud-goal {
+    position: absolute;
+    right: 10px;
+    top: 60px;
+    min-width: 180px;
+    background: rgba(8, 11, 22, 0.82);
+    border: 1px solid #26304b;
+    border-radius: 6px;
+    padding: 10px 12px;
+    font-size: 13px;
+    line-height: 1.6;
+}
+#hud-goal span {
+    font-family: Consolas, monospace;
+    color: #8cb7ff;
+    float: right;
+}
+
+#hud-toast-area {
+    position: absolute;
+    top: 110px;
+    left: 50%;
+    transform: translateX(-50%);
+    pointer-events: none;
+}
+
+.overlay-title {
+    letter-spacing: 0.08em;
+    color: #ffc166;
+}
+
+.big-time {
+    font-family: Consolas, monospace;
+    font-size: 40px;
+    margin: 6px 0;
+    color: #9be3ff;
+}
+.medal {
+    font-size: 20px;
+    letter-spacing: 0.16em;
+    margin: 0 0 10px 0;
+    color: #ffd691;
+}
+.medal.gold   { color: #ffd84a; text-shadow: 0 0 10px rgba(255,210,80,0.35); }
+.medal.silver { color: #d8dce4; }
+.medal.bronze { color: #c88a5a; }
+
+.howto { text-align: left; max-width: 520px; margin: 0 auto; }
+.howto p { line-height: 1.5; margin: 8px 0; opacity: 0.88; }
+.howto b { color: #ffd691; }
+
+#levels-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    margin: 12px auto 18px;
+    max-width: 520px;
+}
+.level-tile {
+    padding: 14px 10px;
+    background: #131a2c;
+    border: 1px solid #1f2a44;
+    border-radius: 6px;
+    cursor: pointer;
+    text-align: center;
+}
+.level-tile:hover { background: #1b2b4a; border-color: #4d7ac7; }
+.level-tile.locked { opacity: 0.36; cursor: not-allowed; }
+.level-tile .level-num {
+    font-size: 11px;
+    opacity: 0.6;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+}
+.level-tile .level-name {
+    font-size: 15px;
+    font-weight: 600;
+    color: #ffd691;
+    margin-top: 4px;
+}
+.level-tile .level-best {
+    font-family: Consolas, monospace;
+    font-size: 12px;
+    margin-top: 6px;
+    color: #9be3ff;
+    min-height: 14px;
+}
+
+.tumble-toast {
+    padding: 8px 14px;
+    background: rgba(8, 11, 22, 0.92);
+    border: 1px solid #26304b;
+    color: #ffd691;
+    border-radius: 4px;
+    font-size: 13px;
+    margin: 2px auto;
+    pointer-events: none;
+    max-width: 400px;
+}
+
+.stats-block {
+    white-space: pre-wrap;
+    color: var(--arcade-muted);
+    margin-bottom: 16px;
+}
+
+/* Overlay card style for 3D game chrome */
+#overlay {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding-top: 0;
+}
+#overlay > .screen:not([hidden]) {
+    width: 520px;
+    max-width: 92vw;
+    padding: 28px 36px;
+    background: #0f1523;
+    border: 1px solid #263148;
+    border-radius: 10px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+}

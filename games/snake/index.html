@@ -1,72 +1,74 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="utf-8">
     <title>Snake</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="/lib/arcade/arcade.css">
+    <link rel="stylesheet" href="theme.css">
 </head>
 <body>
-    <canvas id="game"></canvas>
+    <canvas id="view"></canvas>
 
-    <div id="hud" style="display:none">
-        <div class="hud-label">SCORE</div>
-        <div id="hud-score" class="hud-value">0</div>
-        <div class="hud-label">BEST</div>
-        <div id="hud-best" class="hud-value">0</div>
-        <div class="hud-label">LENGTH</div>
-        <div id="hud-length" class="hud-value">3</div>
+    <div id="hud" hidden>
+        <div class="hud-stat">
+            <div class="hud-label">Score</div>
+            <div id="hud-score" class="hud-value">0</div>
+        </div>
+        <div class="hud-stat">
+            <div class="hud-label">Best</div>
+            <div id="hud-best" class="hud-value">0</div>
+        </div>
+        <div class="hud-stat">
+            <div class="hud-label">Length</div>
+            <div id="hud-length" class="hud-value">3</div>
+        </div>
     </div>
 
     <div id="overlay">
-        <!-- TITLE -->
-        <div id="screen-title" class="screen">
-            <div class="overlay-title">SNAKE</div>
+        <section id="screen-title" class="screen">
+            <h1 class="overlay-title">Snake</h1>
+            <p class="overlay-sub">Eat, grow, don't crash.</p>
             <div class="menu-items">
-                <div class="menu-item selected" data-action="play">PLAY</div>
-                <div class="menu-item" data-action="howtoplay">HOW TO PLAY</div>
-                <div class="menu-item" data-action="quit">QUIT</div>
+                <div class="menu-item selected" data-action="play">Play</div>
+                <div class="menu-item" data-action="howto">How to Play</div>
+                <div class="menu-item" data-action="quit">Quit</div>
             </div>
-            <div class="overlay-hint">Up/Down to navigate, Enter to select</div>
-        </div>
+            <p class="overlay-hint">Up / Down navigate · Enter select</p>
+        </section>
 
-        <!-- GAME OVER -->
-        <div id="screen-gameover" class="screen">
-            <div class="overlay-title">GAME OVER</div>
-            <div class="overlay-sub stats-block" id="gameover-stats"></div>
-            <div class="menu-items">
-                <div class="menu-item selected" data-action="restart">PLAY AGAIN</div>
-                <div class="menu-item" data-action="quit">MAIN MENU</div>
-            </div>
-        </div>
-
-        <!-- PAUSE -->
-        <div id="screen-pause" class="screen">
-            <div class="overlay-title">PAUSED</div>
-            <div class="menu-items">
-                <div class="menu-item selected" data-action="resume">RESUME</div>
-                <div class="menu-item" data-action="restart">RESTART</div>
-                <div class="menu-item" data-action="quit">QUIT TO MENU</div>
-            </div>
-        </div>
-
-        <!-- HOW TO PLAY -->
-        <div id="screen-howtoplay" class="screen">
-            <div class="overlay-title">HOW TO PLAY</div>
+        <section id="screen-howto" class="screen" hidden>
+            <h1 class="overlay-title">How to Play</h1>
             <div class="overlay-sub htp-body">
-                <p>Eat the red food to grow longer and score points.<br>
-                Don't run into the walls or yourself.</p>
-                <p><strong>Controls:</strong></p>
-                <pre>Arrow Keys / WASD   Turn
-Esc / P             Pause
-Enter               Confirm</pre>
-                <p>Each snack is worth 10 points.<br>
-                The snake speeds up as you grow.</p>
+                <p>Eat the red food to grow and score. Avoid walls and your own tail.</p>
+                <pre>Arrows / WASD    Turn
+Esc / P          Pause
+Enter            Confirm</pre>
+                <p>Each snack is worth 10 points. Speed rises as you grow.</p>
             </div>
             <div class="menu-items">
-                <div class="menu-item selected" data-action="back">BACK</div>
+                <div class="menu-item selected" data-action="back">Back</div>
             </div>
-        </div>
+        </section>
+
+        <section id="screen-pause" class="screen" hidden>
+            <h1 class="overlay-title">Paused</h1>
+            <div class="menu-items">
+                <div class="menu-item selected" data-action="resume">Resume</div>
+                <div class="menu-item" data-action="restart">Restart</div>
+                <div class="menu-item" data-action="title">Title Menu</div>
+            </div>
+        </section>
+
+        <section id="screen-gameover" class="screen" hidden>
+            <h1 class="overlay-title">Game Over</h1>
+            <div id="gameover-stats" class="stats-block"></div>
+            <div class="menu-items">
+                <div class="menu-item selected" data-action="restart">Play Again</div>
+                <div class="menu-item" data-action="title">Main Menu</div>
+            </div>
+        </section>
     </div>
 
-    <script type="module" src="/app/app.js"></script>
+    <script type="module" src="/app/main.js"></script>
 </body>
 </html>

@@ -1,12 +1,14 @@
 // board.js — Fluffshuffle board state, wrap-drag mechanics, match detection,
 // cascades, scoring, and rendering.
+// Audio via _play(name); settings via _settings (dragDead, eyeTrack, showCursor).
 'use strict';
 import { Puffs } from "/app/puffs.js";
 import { Particles } from "/app/particles.js";
-import { AppAudio } from "/app/audio.js";
-import { Screens } from "/app/screens.js";
 
 export const Board = (function () {
+    var _play = function (/* name */) {};
+    var _settings = { dragDead: 6, eyeTrack: true, showCursor: true };
+
     var ROWS = 6;
     var COLS = 6;
     var COLORS_N = 6;
@@ -717,8 +719,7 @@ export const Board = (function () {
 
     function drawPuffAt(ctx, puff, cx, cy, cell, held, popOpts) {
         if (!puff) return;
-        var lookAt = (Screens && Screens.settings && Screens.settings().eyeTrack)
-            ? pointer : null;
+        var lookAt = (_settings && _settings.eyeTrack) ? pointer : null;
         var state = held ? 'held' : 'idle';
         var pulse = 0;
         var popProgress = 0;
@@ -777,7 +778,7 @@ export const Board = (function () {
             offsetPx: 0,
             moved: false,
         };
-        if (AppAudio) AppAudio.grab();
+        _play("grab");
     }
 
     function handleMouseMove(px, py) {
@@ -786,14 +787,14 @@ export const Board = (function () {
         var dx = px - drag.startX;
         var dy = py - drag.startY;
         if (drag.axis === null) {
-            var dead = (Screens && Screens.settings && Screens.settings().dragDead) || 6;
+            var dead = (_settings && _settings.dragDead) || 6;
             if (Math.abs(dx) >= dead || Math.abs(dy) >= dead) {
                 drag.axis  = Math.abs(dx) >= Math.abs(dy) ? 'h' : 'v';
                 drag.index = drag.axis === 'h' ? drag.startR : drag.startC;
                 // Lock check: if this row/column contains a locked puff,
                 // cancel the drag with a thud.
                 if (rowOrColLocked(drag.axis, drag.index)) {
-                    if (AppAudio) AppAudio.thud();
+                    _play("thud");
                     drag = null;
                     return;
                 }
@@ -831,7 +832,7 @@ export const Board = (function () {
             cells: cells,
         };
         drag = null;
-        if (AppAudio) AppAudio.snap();
+        _play("snap");
     }
 
     function applySnap() {
@@ -859,7 +860,7 @@ export const Board = (function () {
         cursor.active = true;
         cursor.r = ((cursor.r + dr) % rows + rows) % rows;
         cursor.c = ((cursor.c + dc) % cols + cols) % cols;
-        if (AppAudio) AppAudio.cursor();
+        _play("cursor");
     }
 
     // Space to grab/release; when grabbed, arrow keys slide.
@@ -881,7 +882,7 @@ export const Board = (function () {
             offsetPx: 0,
             moved: false,
         };
-        if (AppAudio) AppAudio.grab();
+        _play("grab");
     }
 
     function cursorSlide(dr, dc) {
@@ -891,7 +892,7 @@ export const Board = (function () {
             if (dc !== 0) { drag.axis = 'h'; drag.index = drag.startR; }
             else          { drag.axis = 'v'; drag.index = drag.startC; }
             if (rowOrColLocked(drag.axis, drag.index)) {
-                if (AppAudio) AppAudio.thud();
+                _play("thud");
                 drag = null;
                 return;
             }
@@ -927,7 +928,7 @@ export const Board = (function () {
         popped += count;
         stats.popped += count;
 
-        if (AppAudio) AppAudio.match(chain, groups[0].color, groups[0].size);
+        _play("match@" + chain + "@" + groups[0].color + "@" + groups[0].size);
         shakeAmp = Math.min(6, chain * 1.5);
         shakeT = 180;
 
@@ -1120,7 +1121,7 @@ export const Board = (function () {
                 var c = Math.floor(Math.random() * cols);
                 if (grid[r][c] && !grid[r][c].locked) {
                     grid[r][c].locked = true;
-                    if (AppAudio) AppAudio.lock();
+                    _play("lock");
                     return;
                 }
             }
@@ -1209,7 +1210,7 @@ export const Board = (function () {
                     var threshold = level * 15;
                     if (popped >= threshold) {
                         level++;
-                        if (AppAudio) AppAudio.levelUp();
+                        _play("levelup");
                     }
                     if (!hasAnyMatchingShift(grid)) {
                         // Deadlock = game over in classic.
@@ -1273,6 +1274,15 @@ export const Board = (function () {
         ROWS: ROWS, COLS: COLS, COLORS_N: COLORS_N,
         SPECIAL_NONE: SPECIAL_NONE, SPECIAL_JUMBO: SPECIAL_JUMBO,
         SPECIAL_ARROW: SPECIAL_ARROW, SPECIAL_PRISM: SPECIAL_PRISM,
+
+        setPlay: function (fn) { _play = fn || function () {}; },
+        setSettings: function (s) {
+            if (!s) return;
+            if (s.dragDead != null) _settings.dragDead = s.dragDead;
+            if (s.eyeTrack != null) _settings.eyeTrack = s.eyeTrack;
+            if (s.showCursor != null) _settings.showCursor = s.showCursor;
+        },
+        getSettings: function () { return _settings; },
 
         // lifecycle
         startGame: startGame,

@@ -1,74 +1,85 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="utf-8">
     <title>Chomper</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="/lib/arcade/arcade.css">
+    <link rel="stylesheet" href="theme.css">
 </head>
 <body>
-    <canvas id="game"></canvas>
+    <canvas id="view"></canvas>
 
-    <div id="hud" style="display:none">
-        <div class="hud-row">
-            <div class="hud-cell">
-                <div class="hud-label">SCORE</div>
-                <div id="hud-score" class="hud-value">0</div>
-            </div>
-            <div class="hud-cell">
-                <div class="hud-label">HIGH</div>
-                <div id="hud-high" class="hud-value">0</div>
-            </div>
-            <div class="hud-cell">
-                <div class="hud-label">LIVES</div>
-                <div id="hud-lives" class="hud-value">3</div>
-            </div>
-            <div class="hud-cell">
-                <div class="hud-label">LEVEL</div>
-                <div id="hud-level" class="hud-value">1</div>
-            </div>
-        </div>
+    <div id="hud" hidden>
+        <div class="hud-label">SCORE</div>
+        <div id="hud-score" class="hud-value">0</div>
+        <div class="hud-label">HIGH</div>
+        <div id="hud-high" class="hud-value">0</div>
+        <div class="hud-label">LIVES</div>
+        <div id="hud-lives" class="hud-value">3</div>
+        <div class="hud-label">LEVEL</div>
+        <div id="hud-level" class="hud-value">1</div>
     </div>
 
-    <div id="center-text"></div>
-
     <div id="overlay">
-        <div id="screen-title" class="screen">
-            <div class="overlay-title">CHOMPER</div>
+        <section id="screen-title" class="screen">
+            <h1 class="overlay-title">CHOMPER</h1>
             <div class="overlay-sub">
-                <p>Arrow keys to move</p>
-                <p>Eat all the pellets to win</p>
-                <p>Power pellets make ghosts edible</p>
-                <p>Avoid ghosts or lose a life</p>
+                <p>Eat every pellet. Power pellets turn the tables.<br>
+                Don't get caught by the ghosts.</p>
             </div>
             <div class="menu-items">
                 <div class="menu-item selected" data-action="play">PLAY</div>
+                <div class="menu-item" data-action="howto">HOW TO PLAY</div>
                 <div class="menu-item" data-action="quit">QUIT</div>
             </div>
-            <div class="overlay-hint">Press ENTER to start</div>
-            <div class="hs-line">High Score: <span id="title-high">0</span></div>
-        </div>
+            <p class="overlay-hint">Up/Down navigate · Enter select</p>
+        </section>
 
-        <div id="screen-gameover" class="screen">
-            <div class="overlay-title" id="gameover-title">GAME OVER</div>
-            <div class="overlay-sub">
-                <p>Score: <span id="go-score">0</span></p>
-                <p>High Score: <span id="go-high">0</span></p>
-                <p id="go-new" style="display:none; color:#ffff00">NEW HIGH SCORE!</p>
+        <section id="screen-howto" class="screen" hidden>
+            <h1 class="overlay-title">HOW TO PLAY</h1>
+            <div class="overlay-sub htp-body">
+                <p>Guide Chomper through the maze and eat all the pellets.</p>
+                <p><strong>Controls</strong></p>
+                <pre>Arrows / WASD   Move
+Esc / P         Pause
+Enter           Confirm</pre>
+                <p><strong>Pellets</strong> are worth 10 points.<br>
+                <strong>Power pellets</strong> (large dots) are worth 50 and frighten ghosts.</p>
+                <p>Eat frightened ghosts for 200 → 400 → 800 → 1600 points.</p>
+                <p>You start with 3 lives. Touching a normal ghost costs a life.</p>
             </div>
             <div class="menu-items">
-                <div class="menu-item selected" data-action="play">PLAY AGAIN</div>
-                <div class="menu-item" data-action="title">MAIN MENU</div>
+                <div class="menu-item selected" data-action="back">BACK</div>
             </div>
-        </div>
+        </section>
 
-        <div id="screen-paused" class="screen">
-            <div class="overlay-title">PAUSED</div>
+        <section id="screen-pause" class="screen" hidden>
+            <h1 class="overlay-title">PAUSED</h1>
             <div class="menu-items">
                 <div class="menu-item selected" data-action="resume">RESUME</div>
+                <div class="menu-item" data-action="restart">RESTART</div>
                 <div class="menu-item" data-action="title">QUIT TO MENU</div>
             </div>
-        </div>
+        </section>
+
+        <section id="screen-gameover" class="screen" hidden>
+            <h1 class="overlay-title">GAME OVER</h1>
+            <div id="gameover-stats" class="stats-block"></div>
+            <div class="menu-items">
+                <div class="menu-item selected" data-action="restart">PLAY AGAIN</div>
+                <div class="menu-item" data-action="title">MAIN MENU</div>
+            </div>
+        </section>
+
+        <section id="screen-levelclear" class="screen" hidden>
+            <h1 class="overlay-title">LEVEL CLEAR!</h1>
+            <div id="levelclear-stats" class="overlay-sub stats-block"></div>
+            <div class="menu-items">
+                <div class="menu-item selected" data-action="nextlevel">NEXT LEVEL</div>
+            </div>
+        </section>
     </div>
 
-    <script type="module" src="/app/app.js"></script>
+    <script type="module" src="/app/main.js"></script>
 </body>
 </html>

@@ -5,10 +5,15 @@
 // destruction + power-up reveal + walk-over pickup, chain reactions, death by
 // blast, AI danger avoidance, round-over / rematch, and sudden death.
 
+advanceTime(200);
 const G = window.BLAST;
 assert(G, 'BLAST debug surface exposed');
 const { game, world, debug } = G;
 const T = G.TILE;
+
+// Arcade shell starts on title; enter a run so keyboard hits update().
+if (G.shell && !G.shell.getRun()) G.shell.startRun();
+advanceTime(200);
 
 // SDL keycodes for the headless keyDown/keyUp helpers.
 // Arrows are 0x40000000 | scancode; printable keys are their ASCII code.
@@ -273,10 +278,10 @@ advanceTime(400);
     assert(game.state === 'roundover', 'last man standing ends the round');
     assert(game.winner === game.contenders[1], 'RUBY won the round');
     assert(game.contenders[1].wins === 1, 'win recorded');
-    const banner = document.getElementById('banner');
-    assert(banner.style.display !== 'none', 'round-over banner shown');
-    assert(document.getElementById('banner-text').textContent.includes('RUBY'),
-        'banner names the winner');
+    advanceTime(100);
+    const roundTitle = document.getElementById('round-title');
+    assert(roundTitle && roundTitle.textContent.includes('RUBY'),
+        'round-over screen names the winner');
     screenshot('test-4-roundover.png');
 
     keyDown(KEY.ENTER); keyUp(KEY.ENTER);
@@ -303,7 +308,7 @@ advanceTime(400);
     debug.setTimeLeft(0.2);
     advanceTime(400);
     assert(game.sd.active, 'sudden death armed at 0:00');
-    assert(document.getElementById('timer').textContent === 'SUDDEN DEATH',
+    assert(document.getElementById('hud-timer').textContent === 'SUDDEN DEATH',
         'HUD flips to sudden death');
     advanceTime(2600);                      // first drop at +0.5s, then every 1s
     assert(world.getTile(1, 1, 0) === T.SDWALL && world.hasFlag(1, 1, G.FLAG_SOLID),
@@ -323,8 +328,9 @@ advanceTime(400);
     advanceTime(1300);
     assert(game.state === 'matchover', 'third win ends the match');
     assert(game.contenders[1].wins === 3, 'RUBY at 3 wins');
-    assert(document.getElementById('banner-text').textContent.includes('MATCH'),
-        'match banner shown');
+    advanceTime(100);
+    const stats = document.getElementById('gameover-stats');
+    assert(stats && stats.textContent.includes('MATCH'), 'match gameover text shown');
     screenshot('test-6-matchover.png');
 
     keyDown(KEY.ENTER); keyUp(KEY.ENTER);

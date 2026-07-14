@@ -1,8 +1,7 @@
-// board.js — Tetris game logic, piece data, layout, drawing helpers
+// board.js — Tetris domain: pieces, board state, scoring, layout, draw helpers.
+// No screens / storage / audio / input modules — cues go through Board._play.
+
 import { FX } from "/app/particles.js";
-import { Audio } from "/app/audio.js";
-import { Storage } from "/app/storage.js";
-import { Input } from "/app/input.js";
 
 // Piece shapes: [type 1-7][4 rotations][cells as [row,col]]
 export const PIECES = [
@@ -55,6 +54,15 @@ export const Board = {
     COLS: 10, ROWS: 20,
     CELL: 0, BOARD_W: 0, BOARD_H: 0, BOARD_X: 0, BOARD_Y: 0,
 
+    // Optional cue hook set by game plugin (name → shell play)
+    _play: null,
+
+    settings: {
+        startLevel: 1,
+        ghostPiece: true,
+        gridLines: true,
+    },
+
     // Game state
     board: [],
     cur: null,
@@ -87,6 +95,10 @@ export const Board = {
 
     // Bag
     bag: [],
+
+    cue: function(name) {
+        if (typeof this._play === "function") this._play(name);
+    },
 
     calcLayout: function(W, H) {
         this.CELL = Math.floor(Math.min(H / (this.ROWS + 4), W / (this.COLS + 10)));
@@ -175,7 +187,7 @@ export const Board = {
             }
         }
         this.piecesPlaced++;
-        Audio.sfxLock();
+        this.cue("lock");
         if (lockedOut) return -1; // piece locked above the board — top out
         return this.clearLines();
     },
@@ -195,13 +207,11 @@ export const Board = {
         this.combo++;
         if (this.combo > this.stats.maxCombo) this.stats.maxCombo = this.combo;
 
-        // Track stats
         if (cleared.length === 1) this.stats.singles++;
         else if (cleared.length === 2) this.stats.doubles++;
         else if (cleared.length === 3) this.stats.triples++;
         else if (cleared.length === 4) this.stats.tetrises++;
 
-        // Scoring
         var pts = [0, 100, 300, 500, 800];
         var baseScore = pts[cleared.length] * this.level;
         var isTetris = (cleared.length === 4);
@@ -213,40 +223,36 @@ export const Board = {
         }
         if (this.combo > 0) {
             baseScore += 50 * this.combo * this.level;
-            Audio.sfxCombo(this.combo);
+            this.cue("combo");
         }
         this.score += baseScore;
         this.totalLines += cleared.length;
 
-        // Level up
-        var newLevel = Math.floor(this.totalLines / 10) + Storage.settings.startLevel;
+        var startLevel = this.settings.startLevel || 1;
+        var newLevel = Math.floor(this.totalLines / 10) + startLevel;
         if (newLevel !== this.level) {
             this.level = newLevel;
-            Audio.sfxLevelUp();
+            this.cue("levelup");
             FX.showText("LEVEL " + this.level);
-            Audio.checkSongChange(this.level);
-            Audio.updateMusicBPM(this.level);
         }
 
-        // SFX + effects
         if (cleared.length === 4) {
-            Audio.sfxTetris();
+            this.cue("tetris");
             FX.showText("QUAD!");
             FX.shake(300, 8);
         } else if (cleared.length === 3) {
-            Audio.sfxClear3();
+            this.cue("clear3");
             FX.showText("TRIPLE");
         } else if (cleared.length === 2) {
-            Audio.sfxClear2();
+            this.cue("clear2");
             FX.showText("DOUBLE");
         } else {
-            Audio.sfxClear1();
+            this.cue("clear1");
         }
         if (this.combo > 1) FX.showText(this.combo + "x COMBO!");
 
         FX.startLineClear(cleared);
 
-        // Particles
         for (var ri = 0; ri < cleared.length; ri++) {
             var row = cleared[ri];
             for (var c = 0; c < this.COLS; c++) {
@@ -259,7 +265,6 @@ export const Board = {
             }
         }
 
-        // Remove lines
         for (var ri = 0; ri < cleared.length; ri++) {
             this.board.splice(cleared[ri], 1);
             var emptyRow = [];
@@ -273,11 +278,10 @@ export const Board = {
         return cleared.length;
     },
 
-    // Movement
     moveLeft: function() {
         if (!this.cur) return false;
         if (this.canPlace(this.cur.type, this.cur.x - 1, this.cur.y, this.cur.rot)) {
-            this.cur.x--; this.resetLockTimer(); Audio.sfxMove(); return true;
+            this.cur.x--; this.resetLockTimer(); this.cue("move"); return true;
         }
         return false;
     },
@@ -285,7 +289,7 @@ export const Board = {
     moveRight: function() {
         if (!this.cur) return false;
         if (this.canPlace(this.cur.type, this.cur.x + 1, this.cur.y, this.cur.rot)) {
-            this.cur.x++; this.resetLockTimer(); Audio.sfxMove(); return true;
+            this.cur.x++; this.resetLockTimer(); this.cue("move"); return true;
         }
         return false;
     },
@@ -317,7 +321,7 @@ export const Board = {
                 this.cur.y += dy;
                 this.cur.rot = newRot;
                 this.resetLockTimer();
-                Audio.sfxRotate();
+                this.cue("rotate");
                 return;
             }
         }
@@ -329,7 +333,6 @@ export const Board = {
         var dropDist = gy - this.cur.y;
         this.score += dropDist * 2;
 
-        // Trail particles
         var cells = PIECES[this.cur.type][this.cur.rot & 3];
         for (var i = 0; i < cells.length; i++) {
             var c = this.cur.x + cells[i][1];
@@ -340,7 +343,6 @@ export const Board = {
             }
         }
 
-        // Impact particles at landing
         for (var i = 0; i < cells.length; i++) {
             FX.spawn(
                 this.BOARD_X + (this.cur.x + cells[i][1]) * this.CELL + this.CELL / 2,
@@ -351,7 +353,7 @@ export const Board = {
         if (dropDist > 4) FX.shake(120, 3);
 
         this.cur.y = gy;
-        Audio.sfxDrop();
+        this.cue("drop");
         var lockResult = this.lockPiece();
         if (lockResult === -1) return false;
         if (!this.spawnPiece()) return false;
@@ -360,7 +362,7 @@ export const Board = {
 
     doHold: function() {
         if (!this.cur || this.holdUsed) return;
-        Audio.sfxHold();
+        this.cue("hold");
         var type = this.cur.type;
         if (this.holdType === 0) {
             this.holdType = type;
@@ -387,7 +389,7 @@ export const Board = {
         this.mode = mode || "marathon";
         this.resetBoard();
         this.score = 0;
-        this.level = Storage.settings.startLevel;
+        this.level = this.settings.startLevel || 1;
         this.totalLines = 0;
         this.combo = -1;
         this.backToBack = false;
@@ -404,14 +406,12 @@ export const Board = {
         this.lockTimer = 0;
         this.lockMoves = 0;
         FX.clear();
-        Input.resetDAS();
         this.refillBag();
         this.ensureNextTypes();
         this.spawnPiece();
         this.dropInterval = this.getDropInterval();
     },
 
-    // Check mode-specific end conditions; returns true if game should end
     checkModeEnd: function() {
         if (this.mode === "sprint" && this.totalLines >= 40) {
             this.finished = true;
@@ -424,7 +424,6 @@ export const Board = {
         return false;
     },
 
-    // Drawing helpers
     drawCell: function(ctx, col, row, color, alpha) {
         ctx.globalAlpha = alpha !== undefined ? alpha : 1.0;
         ctx.fillStyle = color;
@@ -473,18 +472,15 @@ export const Board = {
 
     drawBoard: function(ctx) {
         var B = this;
-        // Background
         ctx.fillStyle = "#08080e";
         ctx.fillRect(B.BOARD_X, B.BOARD_Y, B.BOARD_W, B.BOARD_H);
 
-        // Grid
-        if (Storage.settings.gridLines) {
+        if (B.settings.gridLines) {
             ctx.strokeStyle = "#181822";
             for (var c = 0; c <= B.COLS; c++) ctx.strokeRect(B.BOARD_X + c * B.CELL, B.BOARD_Y, 0, B.BOARD_H);
             for (var r = 0; r <= B.ROWS; r++) ctx.strokeRect(B.BOARD_X, B.BOARD_Y + r * B.CELL, B.BOARD_W, 0);
         }
 
-        // Filled cells
         for (var r = 0; r < B.ROWS; r++) {
             if (!B.board[r]) continue;
             for (var c = 0; c < B.COLS; c++) {
@@ -492,12 +488,10 @@ export const Board = {
             }
         }
 
-        // FX layers
         FX.drawFlashCells(ctx, B.BOARD_X, B.BOARD_Y, B.CELL);
         FX.drawLineClearFlash(ctx, B.BOARD_X, B.BOARD_Y, B.BOARD_W, B.CELL);
 
-        // Ghost
-        if (B.cur && Storage.settings.ghostPiece) {
+        if (B.cur && B.settings.ghostPiece) {
             var gy = B.ghostY();
             if (gy !== B.cur.y) {
                 var cells = PIECES[B.cur.type][B.cur.rot & 3];
@@ -516,7 +510,6 @@ export const Board = {
             }
         }
 
-        // Current piece
         if (B.cur) {
             var lockAlpha = 1.0;
             if (!B.canPlace(B.cur.type, B.cur.x, B.cur.y + 1, B.cur.rot) && B.lockTimer > 0) {
@@ -525,7 +518,6 @@ export const Board = {
             B.drawPiece(ctx, B.cur.type, B.cur.x, B.cur.y, B.cur.rot, lockAlpha);
         }
 
-        // Border
         ctx.strokeStyle = "#444";
         ctx.strokeRect(B.BOARD_X - 1, B.BOARD_Y - 1, B.BOARD_W + 2, B.BOARD_H + 2);
     },
@@ -534,7 +526,6 @@ export const Board = {
         var B = this;
         var pvCell = Math.floor(B.CELL * 0.7);
 
-        // Hold
         var hx = B.BOARD_X - pvCell * 5 - 10, hy = B.BOARD_Y;
         ctx.fillStyle = "#0c0c14";
         ctx.fillRect(hx, hy, pvCell * 4 + 8, pvCell * 3 + 8);
@@ -546,7 +537,6 @@ export const Board = {
             ctx.globalAlpha = 1.0;
         }
 
-        // Next + queue
         var nx = B.BOARD_X + B.BOARD_W + 10, ny = B.BOARD_Y;
         ctx.fillStyle = "#0c0c14";
         ctx.fillRect(nx, ny, pvCell * 4 + 8, pvCell * 3 + 8);
@@ -564,55 +554,6 @@ export const Board = {
             ctx.globalAlpha = 0.6;
             B.drawMiniPiece(ctx, B.nextTypes[qi], nx + 4, qy + 4, pvCell);
             ctx.globalAlpha = 1.0;
-        }
-    },
-
-    updateHUD: function() {
-        var B = this;
-        var el;
-        el = document.getElementById("hud-score");
-        if (el) el.textContent = String(B.score);
-        el = document.getElementById("hud-level");
-        if (el) el.textContent = String(B.level);
-        el = document.getElementById("hud-lines");
-        if (el) el.textContent = String(B.totalLines);
-
-        // Combo
-        var comboLabel = document.getElementById("hud-combo-label");
-        var comboVal = document.getElementById("hud-combo");
-        if (comboLabel && comboVal) {
-            if (B.combo > 0) {
-                comboLabel.style.display = "block";
-                comboVal.style.display = "block";
-                comboVal.textContent = String(B.combo);
-            } else {
-                comboLabel.style.display = "none";
-                comboVal.style.display = "none";
-            }
-        }
-
-        // Mode-specific extra info
-        var extraLabel = document.getElementById("hud-extra-label");
-        var extraVal = document.getElementById("hud-extra");
-        if (extraLabel && extraVal) {
-            if (B.mode === "sprint") {
-                extraLabel.style.display = "block";
-                extraVal.style.display = "block";
-                var remaining = Math.max(0, 40 - B.totalLines);
-                extraLabel.textContent = "LEFT";
-                extraVal.textContent = String(remaining);
-            } else if (B.mode === "ultra") {
-                extraLabel.style.display = "block";
-                extraVal.style.display = "block";
-                var remain = Math.max(0, Math.ceil(B.modeTimer / 1000));
-                var mins = Math.floor(remain / 60);
-                var secs = remain % 60;
-                extraLabel.textContent = "TIME";
-                extraVal.textContent = mins + ":" + (secs < 10 ? "0" : "") + secs;
-            } else {
-                extraLabel.style.display = "none";
-                extraVal.style.display = "none";
-            }
         }
     },
 

@@ -1,0 +1,90 @@
+/* Blockpop theme over shared arcade chrome. */
+
+:root {
+    --arcade-bg: #050810;
+    --arcade-accent: #8ae0ff;
+    --arcade-text: #e8eef2;
+    --arcade-muted: #7ea0c5;
+    --arcade-faint: #4a5a75;
+    --arcade-overlay: rgba(5, 8, 16, 0.9);
+    --arcade-hud-bg: rgba(6, 10, 20, 0.85);
+    --arcade-hud-border: #253a55;
+    --arcade-menu-hover: rgba(138, 224, 255, 0.08);
+    --arcade-menu-selected: rgba(138, 224, 255, 0.2);
+}
+
+#hud {
+    top: 20px;
+    left: auto;
+    right: 20px;
+    border-radius: 4px;
+}
+
+.overlay-title {
+    text-shadow: 0 0 24px rgba(100, 180, 255, 0.6);
+}
+
+.stats-block {
+    white-space: pre-wrap;
+    font-family: var(--arcade-font);
+    color: var(--arcade-muted);
+    margin: 0 auto 18px;
+    max-width: 420px;
+    line-height: 1.6;
+}
+
+#action-text {
+    position: absolute;
+    top: 30%;
+    left: 0;
+    width: 100%;
+    text-align: center;
+    font-size: 40px;
+    font-weight: bold;
+    color: #8ff0ff;
+    text-shadow: 0 0 18px rgba(120, 220, 255, 0.7);
+    pointer-events: none;
+    display: none;
+    z-index: 6;
+}
+
+#cascade-text {
+    position: absolute;
+    top: 22%;
+    left: 0;
+    width: 100%;
+    text-align: center;
+    font-size: 24px;
+    font-weight: bold;
+    color: #ffd873;
+    text-shadow: 0 0 14px rgba(255, 200, 80, 0.8);
+    pointer-events: none;
+    display: none;
+    z-index: 6;
+}
+
+.hs-tabs {
+    display: flex;
+    justify-content: center;
+    gap: 16px;
+    margin-bottom: 12px;
+}
+.hs-tab {
+    font-size: 14px;
+    color: var(--arcade-faint);
+    letter-spacing: 0.08em;
+}
+.hs-tab.active {
+    color: var(--arcade-accent);
+}
+
+.credits-sub {
+    font-size: 14px;
+    color: var(--arcade-faint);
+}
+
+.mode-descriptions p {
+    font-size: 12px;
+    color: var(--arcade-faint);
+    margin: 4px 0;
+}

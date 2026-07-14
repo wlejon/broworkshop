@@ -1,0 +1,36 @@
+/* Missile Command theme — amber / red CRT over shared arcade chrome. */
+
+:root {
+    --arcade-bg: #05050c;
+    --arcade-accent: #ff3030;
+    --arcade-text: #ffef7a;
+    --arcade-muted: #ffd27a;
+    --arcade-faint: #775522;
+    --arcade-overlay: rgba(0, 0, 0, 0.82);
+    --arcade-hud-border: #553300;
+    --arcade-menu-hover: rgba(255, 128, 0, 0.1);
+    --arcade-menu-selected: rgba(255, 128, 0, 0.22);
+}
+
+#view {
+    cursor: crosshair;
+}
+
+.menu-item.selected::before {
+    content: "> ";
+}
+
+.menu-item.selected::after {
+    content: " <";
+}
+
+#hi-display {
+    margin-top: 24px;
+    color: var(--arcade-muted);
+    letter-spacing: 0.08em;
+}
+
+#title-hi {
+    color: var(--arcade-text);
+    font-weight: bold;
+}

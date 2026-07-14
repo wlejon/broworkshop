@@ -93,7 +93,8 @@ export const FX = {
             ctx.globalAlpha = flashAlpha;
             ctx.fillStyle = "#ffffff";
             for (var i = 0; i < this.lineClearAnim.rows.length; i++) {
-                ctx.fillRect(BOARD_X, BOARD_Y, BOARD_W, CELL);
+                var row = this.lineClearAnim.rows[i];
+                ctx.fillRect(BOARD_X, BOARD_Y + row * CELL, BOARD_W, CELL);
             }
             ctx.globalAlpha = 1.0;
         }

@@ -1,0 +1,16 @@
+:root {
+    --arcade-bg: #0a0e14;
+    --arcade-accent: #5b8def;
+    --arcade-text: #e8eef8;
+    --arcade-muted: #6a7a96;
+    --arcade-faint: #3a4558;
+    --arcade-overlay: rgba(8, 12, 20, 0.92);
+    --arcade-hud-border: #1e2a40;
+    --arcade-menu-hover: rgba(91, 141, 239, 0.08);
+    --arcade-menu-selected: rgba(91, 141, 239, 0.18);
+}
+
+.hud-status {
+    font-size: 14px !important;
+    letter-spacing: 0.08em;
+}

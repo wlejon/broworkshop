@@ -13,6 +13,13 @@ if (!fs.existsSync(GGUF)) {
     console.log('LIVE: model not found at ' + GGUF + ' — skipping (this is the gate, not a failure)');
 } else {
     advanceTime(400);
+    // Arcade shell boots on title — Enter starts a run.
+    function pressKey(key) {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+        window.dispatchEvent(new KeyboardEvent('keyup', { key, bubbles: true }));
+    }
+    pressKey('Enter');
+    advanceTime(200);
     const H = window.HEARTH;
     assert(H, 'HEARTH debug surface exposed');
     const { game } = H;

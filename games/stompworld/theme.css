@@ -1,0 +1,48 @@
+/* Stompworld — sky-blue pixel platformer over shared arcade chrome. */
+
+:root {
+    --arcade-bg: #6cb0f0;
+    --arcade-accent: #ffd84d;
+    --arcade-text: #ffffff;
+    --arcade-muted: #aac;
+    --arcade-faint: #666;
+    --arcade-overlay: rgba(6, 8, 14, 0.86);
+    --arcade-hud-bg: rgba(0, 0, 0, 0.6);
+    --arcade-hud-border: #222;
+    --arcade-menu-hover: rgba(255, 216, 77, 0.08);
+    --arcade-menu-selected: rgba(255, 216, 77, 0.18);
+}
+
+#view {
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+}
+
+.overlay-title {
+    letter-spacing: 6px;
+    text-shadow: 0 4px 0 #b8902a;
+}
+
+.overlay-sub {
+    color: #cfd6e0;
+}
+
+#hud {
+    display: flex;
+    flex-direction: row;
+    gap: 18px;
+    flex-wrap: wrap;
+    min-width: 0;
+    top: 16px;
+    left: 16px;
+    padding: 10px 16px;
+}
+
+#hud .hud-label {
+    margin-top: 0;
+}
+
+#hud > .hud-label,
+#hud > .hud-value {
+    /* shell stacks labels/values; keep pairs tight */
+}

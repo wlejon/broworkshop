@@ -1,138 +1,108 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="utf-8">
     <title>Serpcoil</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="/lib/arcade/arcade.css">
+    <link rel="stylesheet" href="theme.css">
 </head>
 <body>
-    <canvas id="game"></canvas>
+    <canvas id="view"></canvas>
 
-    <div id="hud" style="display:none">
+    <div id="hud" hidden>
         <div class="hud-row"><span class="hud-label">SCORE</span><span id="hud-score" class="hud-value">0</span></div>
         <div class="hud-row"><span class="hud-label">LEVEL</span><span id="hud-level" class="hud-value">1</span></div>
         <div class="hud-row"><span class="hud-label">COMBO</span><span id="hud-combo" class="hud-value">x1</span></div>
         <div class="hud-row"><span class="hud-label">LEFT</span><span id="hud-left" class="hud-value">0</span></div>
         <div id="hud-progress"><div id="hud-progress-fill"></div></div>
-        <div id="hud-danger" class="hud-danger" style="display:none">DANGER</div>
+        <div id="hud-danger" class="hud-danger" hidden>DANGER</div>
     </div>
 
-    <div id="toast" class="toast" style="display:none"></div>
-
     <div id="overlay">
-        <!-- TITLE -->
-        <div id="screen-title" class="screen">
-            <div class="overlay-title">SERPCOIL</div>
+        <section id="screen-title" class="screen">
+            <h1 class="overlay-title">SERPCOIL</h1>
             <div class="overlay-sub">Weave the runes. Break the coil.</div>
             <div class="menu-items">
                 <div class="menu-item selected" data-action="play">PLAY</div>
                 <div class="menu-item" data-action="levelselect">LEVEL SELECT</div>
-                <div class="menu-item" data-action="highscores">HIGH SCORES</div>
-                <div class="menu-item" data-action="howtoplay">HOW TO PLAY</div>
-                <div class="menu-item" data-action="settings">SETTINGS</div>
+                <div class="menu-item" data-action="howto">HOW TO PLAY</div>
                 <div class="menu-item" data-action="credits">CREDITS</div>
+                <div class="menu-item" data-action="quit">QUIT</div>
             </div>
-            <div class="overlay-hint">Arrow keys / mouse to navigate, Enter to select</div>
-        </div>
+            <p class="overlay-hint">Arrow keys / mouse to navigate, Enter to select</p>
+        </section>
 
-        <!-- LEVEL SELECT -->
-        <div id="screen-levelselect" class="screen">
-            <div class="overlay-title">LEVEL SELECT</div>
+        <section id="screen-levelselect" class="screen" hidden>
+            <h1 class="overlay-title">LEVEL SELECT</h1>
             <div id="level-grid" class="level-grid"></div>
             <div class="menu-items">
                 <div class="menu-item selected" data-action="back">BACK</div>
             </div>
-            <div class="overlay-hint">Click a rune, or Esc to go back</div>
-        </div>
+            <p class="overlay-hint">Click a rune, or Esc to go back</p>
+        </section>
 
-        <!-- PAUSE -->
-        <div id="screen-pause" class="screen">
-            <div class="overlay-title">PAUSED</div>
-            <div class="menu-items">
-                <div class="menu-item selected" data-action="resume">RESUME</div>
-                <div class="menu-item" data-action="restart">RESTART LEVEL</div>
-                <div class="menu-item" data-action="settings">SETTINGS</div>
-                <div class="menu-item" data-action="quit">QUIT TO MENU</div>
-            </div>
-        </div>
-
-        <!-- LEVEL CLEAR -->
-        <div id="screen-levelclear" class="screen">
-            <div class="overlay-title">LEVEL CLEAR</div>
-            <div id="clear-stars" class="stars">★ ★ ★</div>
-            <div class="overlay-sub stats-block" id="clear-stats"></div>
-            <div class="menu-items">
-                <div class="menu-item selected" data-action="next">NEXT LEVEL</div>
-                <div class="menu-item" data-action="retry">RETRY</div>
-                <div class="menu-item" data-action="quit">MAIN MENU</div>
-            </div>
-        </div>
-
-        <!-- GAME OVER -->
-        <div id="screen-gameover" class="screen">
-            <div class="overlay-title">COIL DEVOURED</div>
-            <div class="overlay-sub stats-block" id="gameover-stats"></div>
-            <div class="menu-items">
-                <div class="menu-item selected" data-action="retry">TRY AGAIN</div>
-                <div class="menu-item" data-action="quit">MAIN MENU</div>
-            </div>
-        </div>
-
-        <!-- HIGH SCORES -->
-        <div id="screen-highscores" class="screen">
-            <div class="overlay-title">HIGH SCORES</div>
-            <div class="overlay-sub stats-block" id="hs-list">No scores yet</div>
-            <div class="menu-items">
-                <div class="menu-item selected" data-action="back">BACK</div>
-            </div>
-        </div>
-
-        <!-- HOW TO PLAY -->
-        <div id="screen-howtoplay" class="screen">
-            <div class="overlay-title">HOW TO PLAY</div>
+        <section id="screen-howto" class="screen" hidden>
+            <h1 class="overlay-title">HOW TO PLAY</h1>
             <div class="overlay-sub htp-body">
                 <p>A serpent of colored runes marches toward the maw.<br>
                 Fire runes from the eye at its center. Match three<br>
                 or more of the same color to break the chain.</p>
                 <p><strong>Controls:</strong></p>
-                <pre id="htp-controls">Aim        Mouse move / Arrow keys
+                <pre>Aim        Mouse move / Arrow keys
 Fire       Left click / Space
 Swap       Right click / Shift
-Pause      Esc</pre>
+Pause      Esc / P</pre>
                 <p><strong>Powerups:</strong><br>
                 Backtrack · Blaster · Colorshift · Slowmo</p>
             </div>
             <div class="menu-items">
                 <div class="menu-item selected" data-action="back">BACK</div>
             </div>
-        </div>
+        </section>
 
-        <!-- SETTINGS -->
-        <div id="screen-settings" class="screen">
-            <div class="overlay-title">SETTINGS</div>
-            <div class="menu-items">
-                <div class="menu-item selected" data-setting="sfxVol">SFX Volume: <span id="opt-sfxVol">80</span>%</div>
-                <div class="menu-item" data-setting="musicVol">Music Volume: <span id="opt-musicVol">70</span>%</div>
-                <div class="menu-item" data-setting="showTrails">Particle Trails: <span id="opt-showTrails">ON</span></div>
-                <div class="menu-item" data-action="back">BACK</div>
-            </div>
-            <div class="overlay-hint">Left/Right to change, Esc to go back</div>
-        </div>
-
-        <!-- CREDITS -->
-        <div id="screen-credits" class="screen">
-            <div class="overlay-title">CREDITS</div>
+        <section id="screen-credits" class="screen" hidden>
+            <h1 class="overlay-title">CREDITS</h1>
             <div class="overlay-sub">
                 <p>Built with the <strong>bro</strong> app runtime</p>
-                <p>Audio powered by <strong>broaudio</strong></p>
+                <p>Audio powered by arcade audio</p>
                 <p>Original design and code</p>
                 <p class="credits-sub">Inspired by classic chain-shooter puzzlers</p>
             </div>
             <div class="menu-items">
                 <div class="menu-item selected" data-action="back">BACK</div>
             </div>
-        </div>
+        </section>
+
+        <section id="screen-pause" class="screen" hidden>
+            <h1 class="overlay-title">PAUSED</h1>
+            <div class="menu-items">
+                <div class="menu-item selected" data-action="resume">RESUME</div>
+                <div class="menu-item" data-action="restart">RESTART LEVEL</div>
+                <div class="menu-item" data-action="title">QUIT TO MENU</div>
+            </div>
+        </section>
+
+        <section id="screen-levelclear" class="screen" hidden>
+            <h1 class="overlay-title">LEVEL CLEAR</h1>
+            <div id="clear-stars" class="stars">★ ★ ★</div>
+            <div id="levelclear-stats" class="overlay-sub stats-block"></div>
+            <div class="menu-items">
+                <div class="menu-item selected" data-action="nextlevel">NEXT LEVEL</div>
+                <div class="menu-item" data-action="restart">RETRY</div>
+                <div class="menu-item" data-action="title">MAIN MENU</div>
+            </div>
+        </section>
+
+        <section id="screen-gameover" class="screen" hidden>
+            <h1 class="overlay-title">COIL DEVOURED</h1>
+            <div id="gameover-stats" class="stats-block"></div>
+            <div class="menu-items">
+                <div class="menu-item selected" data-action="restart">TRY AGAIN</div>
+                <div class="menu-item" data-action="title">MAIN MENU</div>
+            </div>
+        </section>
     </div>
 
-    <script type="module" src="/app/app.js"></script>
+    <script type="module" src="/app/main.js"></script>
 </body>
 </html>

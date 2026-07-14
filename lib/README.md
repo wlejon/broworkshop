@@ -1,51 +1,49 @@
-# apps/lib — shared game kernel
+# lib — shared modules for bro workshop apps
 
-Reusable modules for bro arcade apps. Each file defines a single global
-namespace (IIFE style — same as `camera.js`) and has no cross-file
-dependencies unless noted. Include only the ones you need:
+## Arcade foundation (preferred for new 2D games)
 
-There is no manifest or bundler — every app's `index.html` lists the
-modules it wants directly. Order matters when one file uses another's
-global (e.g. `screens.js` after the SFX wrapper, `storage.js` before
-any per-app `storage.js` that wraps it).
+**Start here for classic single-player canvas arcade games:**
 
-```html
-<script src="/lib/loop.js"></script>
-<script src="/lib/canvas.js"></script>
-<script src="/lib/math.js"></script>
-<script src="/lib/input.js"></script>
-<script src="/lib/audio.js"></script>
-<script src="/lib/storage.js"></script>
-<script src="/lib/fx.js"></script>
-<script src="/lib/particles.js"></script>
-<script src="/lib/hud.js"></script>
-<script src="/lib/screens.js"></script>
-<script src="/lib/netroom.js"></script>
+→ [`arcade/README.md`](arcade/README.md)
+
+| Path | Purpose |
+|------|---------|
+| `arcade/shell.js` | Boot a game plugin (screens, HUD, session, loop) |
+| `arcade/loop.js` `view.js` `input.js` `audio.js` `save.js` | Kernel |
+| `arcade/arcade.css` | Shared chrome; theme via CSS variables |
+| `games/arcade-template/` | Copy-this skeleton |
+| `games/snake/` | Filled reference game |
+
+```js
+import { boot } from "/lib/arcade/shell.js";
+import { game } from "/app/game.js";
+boot(game);
 ```
 
-| Module         | Global      | Purpose                                                          |
-|----------------|-------------|------------------------------------------------------------------|
-| `loop.js`      | `GameLoop`  | `rAF` wrapper, clamped dt, start/stop/pause                      |
-| `canvas.js`    | `Canvas`    | `Canvas.w/h/size(ctx, fallback)` — engine-aware size with fallback |
-| `math.js`      | `MathX`     | `clamp`, `lerp`, `randRange/Int/Pick`, `vecFromAngle`, `angleNorm` |
-| `input.js`     | `Input`     | keyboard + `bro.settings` action bindings, pressed/down          |
-| `audio.js`     | `SFX`       | one-shot tones + bus setup; optional, silent if no AudioContext  |
-| `storage.js`   | `Storage`   | namespaced JSON persistence + high-score tables (asc or desc)    |
-| `fx.js`        | `FX`        | screen shake (`shake`/`shakeOffset`) + DOM toast (`toast`)       |
-| `particles.js` | `Particles` | 2D particle pool — `createSystem`/`burst`/`step`/`draw` (sec-based) |
-| `hud.js`       | `Hud`       | DOM text/show/hide                                               |
-| `screens.js`   | `Screens`   | overlay state machine, menu nav, optional shared bg + HUD toggle |
-| `netroom.js`   | `NetRoom`   | lobby + turn helpers over `bro.net`                              |
-| `camera.js`    | `Camera`    | 3D orbit/fly camera                                              |
-| `camera2d.js`  | `Camera2D`  | 2D follow camera with deadzone + level-bounds clamping           |
-| `tilemap.js`   | `Tilemap`   | fixed-size tile grid, atlas blit, AABB queries (`solidAtPx`)     |
-| `platformer.js`| `Platformer`| AABB body + tile collision + jump feel (coyote/buffer/cut)       |
+Older top-level modules (`loop.js`, `screens.js`, `input.js`, …) remain for
+games that have not been migrated. New arcade titles should use `lib/arcade/`
+only — do not treat pre-template games as architectural examples.
 
-Conventions:
-- All modules are safe to load without calling `init()` — lazy by default.
-- Audio and network modules degrade silently when unavailable (no `AudioContext`, no `bro.net`).
-- DOM selectors use IDs the caller provides; no hard-coded element names.
-- `Storage.create("myapp")` → scoped `localStorage` prefix, so apps can't collide.
+## Other modules
 
-See `apps/crater/` for a complete reference implementation that exercises
-every module.
+Reusable helpers beyond the arcade shell. Prefer ES `export` when adding new
+files. There is no bundler; apps import what they need.
+
+| Module | Purpose |
+|--------|---------|
+| `math.js` | clamp, lerp, random helpers |
+| `fx.js` | screen shake, toast |
+| `particles.js` | 2D particle pool |
+| `camera.js` / `camera2d.js` | 3D orbit and 2D follow cameras |
+| `tilemap.js` / `platformer.js` | tile grid + platformer body (future foundation) |
+| `physics2d.js` | 2D physics helpers |
+| `netroom.js` | lobby / turn helpers over `bro.net` |
+| `project.js` / `history.js` / `sketch.js` | tool / editor plumbing |
+| `system-menu.js` | windowed app menu bar |
+| `dialogs.js` | file/folder browse |
+| `openrouter.js` / `markdown.js` | AI tooling UI helpers |
+
+Conventions for new modules:
+- ES modules (`export`)
+- Safe when optional engine features are missing
+- No multi-line application chrome as HTML strings when a static template will do

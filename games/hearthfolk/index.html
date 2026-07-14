@@ -1,58 +1,107 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="utf-8">
     <title>Hearthfolk</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="/lib/arcade/arcade.css">
+    <link rel="stylesheet" href="theme.css">
 </head>
 <body>
-    <canvas id="game"></canvas>
+    <canvas id="view"></canvas>
 
-    <div id="status-bar">
-        <span class="title">HEARTHFOLK</span>
-        <span class="hud-box" id="hud-day">Day 1</span>
-        <span class="hud-box" id="hud-phase">Morning</span>
-        <span class="chip off" id="mind-chip">minds: off</span>
-        <span class="hud-box thinks" id="hud-thinks">✓ 0  ✕ 0</span>
-        <span class="hud-box res" id="hud-res"></span>
-        <span class="spacer"></span>
-        <span class="btn speed" id="btn-pause">⏸</span>
-        <span class="btn speed" id="btn-1x">1×</span>
-        <span class="btn speed" id="btn-4x">4×</span>
-        <span class="btn" id="btn-save">SAVE</span>
-        <span class="btn" id="btn-load">LOAD</span>
+    <div id="hud" hidden>
+        <div id="status-bar">
+            <span class="title">HEARTHFOLK</span>
+            <span class="hud-box" id="hud-day">Day 1</span>
+            <span class="hud-box" id="hud-phase">Morning</span>
+            <span class="chip off" id="mind-chip">minds: off</span>
+            <span class="hud-box thinks" id="hud-thinks">✓ 0  ✕ 0</span>
+            <span class="hud-box res" id="hud-res"></span>
+            <span class="spacer"></span>
+            <span class="btn speed" id="btn-pause">⏸</span>
+            <span class="btn speed" id="btn-1x">1×</span>
+            <span class="btn speed" id="btn-4x">4×</span>
+            <span class="btn" id="btn-save">SAVE</span>
+            <span class="btn" id="btn-load">LOAD</span>
+        </div>
+
+        <div id="chronicle">
+            <div class="panel-title">VILLAGE CHRONICLE</div>
+            <div id="chronicle-list"></div>
+        </div>
+
+        <div id="feed"></div>
+        <div id="bubbles"></div>
+
+        <div id="mind-panel" style="display:none">
+            <div class="panel-title" id="mp-name"></div>
+            <div class="panel-sub" id="mp-sub"></div>
+            <div class="need-row"><span>hunger</span><div class="bar"><div class="bar-fill" id="bar-hunger"></div></div></div>
+            <div class="need-row"><span>tired</span><div class="bar"><div class="bar-fill" id="bar-energy"></div></div></div>
+            <div class="need-row"><span>lonely</span><div class="bar"><div class="bar-fill" id="bar-social"></div></div></div>
+            <div class="need-row"><span>cold</span><div class="bar"><div class="bar-fill" id="bar-warmth"></div></div></div>
+            <div class="mp-label">GOAL</div>
+            <div id="mp-goal"></div>
+            <div class="mp-label">LAST THINK</div>
+            <pre id="mp-think"></pre>
+            <div class="mp-label">MEMORIES</div>
+            <ul id="mp-memories"></ul>
+        </div>
+
+        <div id="help">
+            Click a villager to read their mind &middot; arrows/WASD pan, wheel zooms
+            &middot; space pauses sim &middot; Esc pauses menu &middot; the village lives on its own
+        </div>
+
+        <div id="toast" style="display:none"></div>
     </div>
 
-    <div id="chronicle">
-        <div class="panel-title">VILLAGE CHRONICLE</div>
-        <div id="chronicle-list"></div>
+    <div id="overlay">
+        <section id="screen-title" class="screen">
+            <h1 class="overlay-title">HEARTHFOLK</h1>
+            <p class="overlay-sub">A living village. Watch, listen, read their minds.</p>
+            <div class="menu-items">
+                <div class="menu-item selected" data-action="play">Enter Village</div>
+                <div class="menu-item" data-action="howto">How to Play</div>
+                <div class="menu-item" data-action="quit">Quit</div>
+            </div>
+            <p class="overlay-hint">Up/Down navigate · Enter select</p>
+        </section>
+
+        <section id="screen-howto" class="screen" hidden>
+            <h1 class="overlay-title">How to Play</h1>
+            <div class="overlay-sub howto">
+                <p>Hearthfolk is an observatory sim. Five villagers live by their needs —
+                work, eat, sleep, talk, tend the fire — through day and night.</p>
+                <p><b>Click</b> a villager to open their mind panel (goals, thoughts, memories).
+                <b>Arrows / WASD</b> pan, <b>wheel</b> zooms.</p>
+                <p><b>Space</b> pauses the sim. <b>1</b> / <b>4</b> set speed.
+                Save and load from the status bar. <b>Esc / P</b> open the pause menu.</p>
+            </div>
+            <div class="menu-items">
+                <div class="menu-item selected" data-action="back">Back</div>
+            </div>
+        </section>
+
+        <section id="screen-pause" class="screen" hidden>
+            <h1 class="overlay-title">Paused</h1>
+            <div class="menu-items">
+                <div class="menu-item selected" data-action="resume">Resume</div>
+                <div class="menu-item" data-action="restart">New Village</div>
+                <div class="menu-item" data-action="title">Title Menu</div>
+            </div>
+        </section>
+
+        <section id="screen-gameover" class="screen" hidden>
+            <h1 class="overlay-title">Session</h1>
+            <div id="gameover-stats" class="stats-block"></div>
+            <div class="menu-items">
+                <div class="menu-item selected" data-action="restart">New Village</div>
+                <div class="menu-item" data-action="title">Main Menu</div>
+            </div>
+        </section>
     </div>
 
-    <div id="feed"></div>
-
-    <div id="bubbles"></div>
-
-    <div id="mind-panel" style="display:none">
-        <div class="panel-title" id="mp-name"></div>
-        <div class="panel-sub" id="mp-sub"></div>
-        <div class="need-row"><span>hunger</span><div class="bar"><div class="bar-fill" id="bar-hunger"></div></div></div>
-        <div class="need-row"><span>tired</span><div class="bar"><div class="bar-fill" id="bar-energy"></div></div></div>
-        <div class="need-row"><span>lonely</span><div class="bar"><div class="bar-fill" id="bar-social"></div></div></div>
-        <div class="need-row"><span>cold</span><div class="bar"><div class="bar-fill" id="bar-warmth"></div></div></div>
-        <div class="mp-label">GOAL</div>
-        <div id="mp-goal"></div>
-        <div class="mp-label">LAST THINK</div>
-        <pre id="mp-think"></pre>
-        <div class="mp-label">MEMORIES</div>
-        <ul id="mp-memories"></ul>
-    </div>
-
-    <div id="help">
-        Click a villager to read their mind &middot; arrows/WASD pan, wheel zooms
-        &middot; space pauses &middot; the village lives on its own — watch, and listen
-    </div>
-
-    <div id="toast" style="display:none"></div>
-
-    <script type="module" src="/app/app.js"></script>
+    <script type="module" src="/app/main.js"></script>
 </body>
 </html>

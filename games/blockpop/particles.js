@@ -1,10 +1,11 @@
 // particles.js — shatter particles, flash overlays, screen shake, toast text.
-'use strict';
-import { FX } from "/lib/fx.js";
+// Self-contained (no /lib/fx dependency) for the arcade foundation.
 
 export const Particles = (function () {
     var parts = [];
     var flashes = []; // { x, y, w, h, color, timer, life }
+    var shakeTimer = 0;
+    var shakeMag = 0;
 
     function spawn(x, y, count, color, opts) {
         opts = opts || {};
@@ -25,10 +26,32 @@ export const Particles = (function () {
         flashes.push({ x: x, y: y, w: w, h: h, color: color, timer: life || 250, life: life || 250 });
     }
 
-    function shake(duration, magnitude) { FX.shake(duration, magnitude); }
-    function shakeOffset() { return FX.shakeOffset(); }
-    function showAction(text)  { FX.toast(text, { selector: '#action-text',  duration: 900 }); }
-    function showCascade(text) { FX.toast(text, { selector: '#cascade-text', duration: 700 }); }
+    function shake(duration, magnitude) {
+        shakeTimer = duration || 160;
+        shakeMag = magnitude || 3;
+    }
+
+    function shakeOffset() {
+        if (shakeTimer <= 0) return { x: 0, y: 0 };
+        return {
+            x: (Math.random() - 0.5) * 2 * shakeMag,
+            y: (Math.random() - 0.5) * 2 * shakeMag,
+        };
+    }
+
+    function toast(sel, text, duration) {
+        var el = document.querySelector(sel);
+        if (!el) return;
+        el.textContent = text;
+        el.style.display = "block";
+        clearTimeout(el._toastT);
+        el._toastT = setTimeout(function () {
+            el.style.display = "none";
+        }, duration || 900);
+    }
+
+    function showAction(text) { toast("#action-text", text, 900); }
+    function showCascade(text) { toast("#cascade-text", text, 700); }
 
     function update(dt) {
         for (var i = parts.length - 1; i >= 0; i--) {
@@ -43,13 +66,14 @@ export const Particles = (function () {
             flashes[j].timer -= dt;
             if (flashes[j].timer <= 0) flashes.splice(j, 1);
         }
-        FX.tick(dt);
+        if (shakeTimer > 0) shakeTimer = Math.max(0, shakeTimer - dt);
     }
 
     function clear() {
         parts.length = 0;
         flashes.length = 0;
-        FX.reset();
+        shakeTimer = 0;
+        shakeMag = 0;
     }
 
     function drawParticles(ctx) {

@@ -1,13 +1,15 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="utf-8">
     <title>Fintank</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="/lib/arcade/arcade.css">
+    <link rel="stylesheet" href="theme.css">
 </head>
 <body>
-    <canvas id="game"></canvas>
+    <canvas id="view"></canvas>
 
-    <div id="hud" style="display:none">
+    <div id="hud" hidden>
         <div class="hud-row"><span class="hud-label">COINS</span><span id="hud-coins" class="hud-value">0</span></div>
         <div class="hud-row"><span class="hud-label">DAY</span><span id="hud-day" class="hud-value">1</span></div>
         <div class="hud-row"><span class="hud-label">TIME</span><span id="hud-time" class="hud-value">120</span></div>
@@ -16,123 +18,112 @@
     </div>
 
     <div id="overlay">
-        <!-- TITLE -->
-        <div id="screen-title" class="screen">
-            <div class="overlay-title">FINTANK</div>
+        <section id="screen-title" class="screen">
+            <h1 class="overlay-title">FINTANK</h1>
             <div class="overlay-sub">TEND YOUR FISH. FIGHT OFF INTRUDERS.</div>
             <div class="menu-items">
-                <div class="menu-item selected" data-action="play">PLAY</div>
+                <div class="menu-item selected" data-action="slots">PLAY</div>
                 <div class="menu-item" data-action="highscores">HIGH SCORES</div>
-                <div class="menu-item" data-action="howtoplay">HOW TO PLAY</div>
+                <div class="menu-item" data-action="howto">HOW TO PLAY</div>
                 <div class="menu-item" data-action="settings">SETTINGS</div>
                 <div class="menu-item" data-action="credits">CREDITS</div>
                 <div class="menu-item" data-action="quit">QUIT</div>
             </div>
-            <div class="overlay-hint">ARROWS NAVIGATE. ENTER TO SELECT.</div>
-        </div>
+            <p class="overlay-hint">ARROWS NAVIGATE. ENTER TO SELECT.</p>
+        </section>
 
-        <!-- SLOT SELECT -->
-        <div id="screen-slots" class="screen">
-            <div class="overlay-title">SELECT SAVE SLOT</div>
+        <section id="screen-slots" class="screen" hidden>
+            <h1 class="overlay-title">SELECT SAVE SLOT</h1>
             <div class="menu-items">
-                <div class="menu-item selected" data-slot="1">SLOT 1</div>
-                <div class="menu-item" data-slot="2">SLOT 2</div>
-                <div class="menu-item" data-slot="3">SLOT 3</div>
-                <div class="menu-item" data-action="back">BACK</div>
+                <div class="menu-item selected" data-action="slot-1">SLOT 1</div>
+                <div class="menu-item" data-action="slot-2">SLOT 2</div>
+                <div class="menu-item" data-action="slot-3">SLOT 3</div>
+                <div class="menu-item" data-action="erase-1">ERASE SLOT 1</div>
+                <div class="menu-item" data-action="erase-2">ERASE SLOT 2</div>
+                <div class="menu-item" data-action="erase-3">ERASE SLOT 3</div>
+                <div class="menu-item" data-action="title">BACK</div>
             </div>
-            <div class="overlay-hint">DEL TO ERASE SELECTED SLOT</div>
-        </div>
+        </section>
 
-        <!-- SHOP -->
-        <div id="screen-shop" class="screen">
-            <div class="overlay-title">SHOP</div>
+        <section id="screen-shop" class="screen" hidden>
+            <h1 class="overlay-title">SHOP</h1>
             <div class="overlay-sub" id="shop-subtitle">DAY 1 - SPEND YOUR COINS</div>
             <div class="menu-items" id="shop-items"></div>
-            <div class="overlay-hint">ARROWS NAVIGATE. ENTER TO BUY. N TO START NEXT DAY.</div>
-        </div>
+            <p class="overlay-hint">ARROWS NAVIGATE. ENTER TO BUY. START DAY TO PLAY.</p>
+        </section>
 
-        <!-- PAUSE -->
-        <div id="screen-pause" class="screen">
-            <div class="overlay-title">PAUSED</div>
+        <section id="screen-pause" class="screen" hidden>
+            <h1 class="overlay-title">PAUSED</h1>
             <div class="menu-items">
                 <div class="menu-item selected" data-action="resume">RESUME</div>
-                <div class="menu-item" data-action="settings">SETTINGS</div>
-                <div class="menu-item" data-action="quit">QUIT TO MENU</div>
+                <div class="menu-item" data-action="title">QUIT TO MENU</div>
             </div>
-        </div>
+        </section>
 
-        <!-- DAY CLEAR -->
-        <div id="screen-dayclear" class="screen">
-            <div class="overlay-title">DAY COMPLETE</div>
-            <div class="overlay-sub stats-block" id="dayclear-stats">-</div>
+        <section id="screen-dayclear" class="screen" hidden>
+            <h1 class="overlay-title">DAY COMPLETE</h1>
+            <div id="dayclear-stats" class="stats-block">-</div>
             <div class="menu-items">
                 <div class="menu-item selected" data-action="shop">VISIT SHOP</div>
                 <div class="menu-item" data-action="next">NEXT DAY</div>
-                <div class="menu-item" data-action="quit">QUIT TO MENU</div>
+                <div class="menu-item" data-action="title">QUIT TO MENU</div>
             </div>
-        </div>
+        </section>
 
-        <!-- GAME OVER -->
-        <div id="screen-gameover" class="screen">
-            <div class="overlay-title">GAME OVER</div>
-            <div class="overlay-sub stats-block" id="gameover-stats">-</div>
+        <section id="screen-gameover" class="screen" hidden>
+            <h1 class="overlay-title">GAME OVER</h1>
+            <div id="gameover-stats" class="stats-block">-</div>
             <div class="menu-items">
-                <div class="menu-item selected" data-action="restart">TRY AGAIN</div>
+                <div class="menu-item selected" data-action="tryagain">TRY AGAIN</div>
                 <div class="menu-item" data-action="highscores">HIGH SCORES</div>
-                <div class="menu-item" data-action="quit">MAIN MENU</div>
+                <div class="menu-item" data-action="title">MAIN MENU</div>
             </div>
-        </div>
+        </section>
 
-        <!-- HIGH SCORES -->
-        <div id="screen-highscores" class="screen">
-            <div class="overlay-title">HIGH SCORES</div>
-            <div class="overlay-sub stats-block" id="hs-list">NO SCORES YET</div>
+        <section id="screen-highscores" class="screen" hidden>
+            <h1 class="overlay-title">HIGH SCORES</h1>
+            <div id="hs-list" class="overlay-sub stats-block">NO SCORES YET</div>
             <div class="menu-items">
-                <div class="menu-item selected" data-action="back">BACK</div>
+                <div class="menu-item selected" data-action="title">BACK</div>
             </div>
-        </div>
+        </section>
 
-        <!-- HOW TO PLAY -->
-        <div id="screen-howtoplay" class="screen">
-            <div class="overlay-title">HOW TO PLAY</div>
+        <section id="screen-howto" class="screen" hidden>
+            <h1 class="overlay-title">HOW TO PLAY</h1>
             <div class="overlay-sub htp-body">
                 <p><strong>TEND:</strong> click water to drop pellets. Fish eat pellets and drop coins. Click coins to collect.</p>
                 <p><strong>DEFEND:</strong> click intruders to damage them. Larger ones take more hits.</p>
                 <p><strong>SHOP:</strong> between days, buy more fish, upgrades, and pet eggs.</p>
                 <p><strong>SURVIVE:</strong> a day lasts 2 minutes. Keep your fish alive across 20+ days.</p>
-                <p><strong>CONTROLS:</strong> Click to feed/collect/attack. Space to drop pellets. 1-5 to buy. P to pause.</p>
+                <p><strong>CONTROLS:</strong> Click to feed/collect/attack. Space to drop pellets. 1-5 to buy. Esc / P to pause.</p>
             </div>
             <div class="menu-items">
                 <div class="menu-item selected" data-action="back">BACK</div>
             </div>
-        </div>
+        </section>
 
-        <!-- CREDITS -->
-        <div id="screen-credits" class="screen">
-            <div class="overlay-title">CREDITS</div>
+        <section id="screen-credits" class="screen" hidden>
+            <h1 class="overlay-title">CREDITS</h1>
             <div class="overlay-sub">
                 <p>Built on the <strong>BRO</strong> app runtime</p>
-                <p>Audio via <strong>BROAUDIO</strong></p>
                 <p class="credits-sub">AN ORIGINAL AQUARIUM TEND-AND-DEFEND</p>
             </div>
             <div class="menu-items">
-                <div class="menu-item selected" data-action="back">BACK</div>
+                <div class="menu-item selected" data-action="title">BACK</div>
             </div>
-        </div>
+        </section>
 
-        <!-- SETTINGS -->
-        <div id="screen-settings" class="screen">
-            <div class="overlay-title">SETTINGS</div>
+        <section id="screen-settings" class="screen" hidden>
+            <h1 class="overlay-title">SETTINGS</h1>
             <div class="menu-items">
-                <div class="menu-item selected" data-setting="sfxVol">SFX VOLUME: <span id="opt-sfxVol">80</span>%</div>
-                <div class="menu-item" data-setting="musicVol">MUSIC VOLUME: <span id="opt-musicVol">60</span>%</div>
-                <div class="menu-item" data-setting="difficulty">DIFFICULTY: <span id="opt-difficulty">NORMAL</span></div>
-                <div class="menu-item" data-action="back">BACK</div>
+                <div class="menu-item selected" data-action="cycle-sfx">SFX VOLUME: <span id="opt-sfxVol">80</span>%</div>
+                <div class="menu-item" data-action="cycle-difficulty">DIFFICULTY: <span id="opt-difficulty">NORMAL</span></div>
+                <div class="menu-item" data-action="title">BACK</div>
             </div>
-            <div class="overlay-hint">LEFT/RIGHT TO ADJUST. ESC TO GO BACK.</div>
-        </div>
+            <p class="overlay-hint">ENTER TO CHANGE</p>
+        </section>
     </div>
 
-    <script type="module" src="/app/app.js"></script>
+    <script type="module" src="/app/main.js"></script>
 </body>
 </html>

@@ -3,13 +3,22 @@
 // array of blocks from BOTTOM (index 0) to TOP. A block is null for empty
 // or { color, special } where color is 1..NUM_COLORS and special is one
 // of SPECIAL_* constants.
+// No screens / storage / audio modules — cues go through Board._play;
+// prefs via Board._settings (set by game.js from arcade save).
 'use strict';
-import { Hud } from "/lib/hud.js";
 import { Particles } from "/app/particles.js";
-import { Audio } from "/app/audio.js";
-import { Storage } from "/app/storage.js";
 
 export const Board = (function () {
+    /** @type {((name: string) => void)|null} */
+    var _play = null;
+    var _settings = {
+        riseSpeed: 10,
+        colorBlind: false,
+    };
+
+    function play(name) {
+        if (typeof _play === "function") _play(name);
+    }
     var COLS = 8;
     var ROWS = 16;
     var NUM_COLORS = 7;
@@ -351,7 +360,7 @@ export const Board = (function () {
         }
 
         Particles.clear();
-        updateHUD();
+        updateHUDLabels();
     }
 
     // Procedurally build a puzzle from a numeric idx. Each puzzle seeds a
@@ -396,7 +405,7 @@ export const Board = (function () {
         if (col >= COLS) col = COLS - 1;
         if (col === carrier.col) return;
         carrier.col = col;
-        Audio.move();
+        play("move");
     }
     function moveLeft()  { moveTo(carrier.col - 1); }
     function moveRight() { moveTo(carrier.col + 1); }
@@ -414,7 +423,7 @@ export const Board = (function () {
         if (!col.length) return false;
         var b = col.pop();
         carrier.heldStack.push(b);
-        Audio.pick();
+        play("pick");
         return true;
     }
 
@@ -424,7 +433,7 @@ export const Board = (function () {
         if (board[carrier.col].length >= ROWS) return false;
         var b = carrier.heldStack.pop();
         board[carrier.col].push(b);
-        Audio.drop();
+        play("drop");
         if (mode === 'puzzle') puzzleMovesLeft--;
         resolveChains();
         return true;
@@ -439,14 +448,14 @@ export const Board = (function () {
     function shuffleHeld() {
         if (carrier.heldStack.length < 2) return;
         carrier.heldStack.reverse();
-        Audio.shuffle();
+        play("shuffle");
     }
 
     function emergencyBrake() {
         if (brakeCooldown > 0) return;
         brakeActive = 3000;
         brakeCooldown = 10000;
-        Audio.brake();
+        play("brake");
         Particles.showAction('BRAKE');
     }
 
@@ -498,8 +507,8 @@ export const Board = (function () {
                         layout.cell, layout.cell, '#ffffff', 200);
                 }
             }
-            Audio.pop(groups[0].color, depth - 1);
-            for (var sk = 0; sk < specialKinds.length; sk++) Audio.special(specialKinds[sk]);
+            play("pop@" + groups[0].color + "@" + (depth - 1));
+            for (var sk = 0; sk < specialKinds.length; sk++) play("special@" + specialKinds[sk]);
 
             // Cascade bonus text
             if (depth >= 2) {
@@ -508,7 +517,7 @@ export const Board = (function () {
             }
             if (popped >= 5) {
                 Particles.showAction(popped + ' POP!');
-                Audio.big(popped);
+                play("big@" + popped);
             }
             // Apply pop
             var res = popChains(board, groups);
@@ -531,7 +540,7 @@ export const Board = (function () {
         var wantLevel = 1 + Math.floor(score / 5000);
         if (wantLevel > level) {
             level = wantLevel;
-            Audio.levelUp();
+            play("levelup");
             Particles.showAction('LEVEL ' + level);
         }
         chainDepth = 0;
@@ -539,7 +548,6 @@ export const Board = (function () {
             // Out of moves, puzzle failed.
             gameOver = true;
         }
-        updateHUD();
     }
 
     function isBoardCleared() {
@@ -556,7 +564,7 @@ export const Board = (function () {
         // Top-out check runs every tick (columns at ROWS = game over).
         if (isToppedOut()) {
             gameOver = true;
-            Audio.gameover();
+            play("gameover");
             return;
         }
 
@@ -566,7 +574,7 @@ export const Board = (function () {
 
         // Rising speed: base px/sec * level acceleration * user rise multiplier.
         if (mode !== 'puzzle') {
-            var userMul = (Storage.settings.riseSpeed || 10) / 10;
+            var userMul = (_settings.riseSpeed || 10) / 10;
             var levelMul = 1 + (level - 1) * 0.12;
             var speed = riseSpeedPx * levelMul * userMul;
             if (brakeActive > 0) speed *= 0.2;
@@ -579,14 +587,14 @@ export const Board = (function () {
                 // Check top-out.
                 if (isToppedOut()) {
                     gameOver = true;
-                    Audio.gameover();
+                    play("gameover");
                 }
                 // Low-buzz warn when nearly full
                 var nearTop = false;
                 for (var c = 0; c < COLS; c++) {
                     if (board[c].length >= ROWS - 2) { nearTop = true; break; }
                 }
-                if (nearTop) Audio.warn();
+                if (nearTop) play("warn");
             }
             // Compute time until next rise for HUD.
             var pxPerSec = speed;
@@ -594,7 +602,6 @@ export const Board = (function () {
         } else {
             nextRiseAccum = puzzleMovesLeft;
         }
-        updateHUD();
     }
 
     function isToppedOut() {
@@ -607,25 +614,19 @@ export const Board = (function () {
         return false;
     }
 
-    // ---- HUD ----------------------------------------------------------------
+    // ---- HUD helpers (labels; values via game.hud) ---------------------------
 
-    function updateHUD() {
-        Hud.text('#hud-score', String(score));
-        Hud.text('#hud-level', String(level));
-        var ex = document.getElementById('hud-extra');
+    function updateHUDLabels() {
         var lb = document.getElementById('hud-extra-label');
-        if (mode === 'sprint') {
-            if (lb) lb.textContent = 'LEFT';
-            if (ex) ex.textContent = String(Math.max(0, sprintTarget - blocksPopped));
-        } else if (mode === 'puzzle') {
-            if (lb) lb.textContent = 'MOVES';
-            if (ex) ex.textContent = String(puzzleMovesLeft);
-        } else {
-            if (lb) lb.textContent = 'NEXT RISE';
-            if (ex) ex.textContent = (nextRiseAccum != null ? nextRiseAccum.toFixed(1) : '0') + 's';
-        }
         var cl = document.getElementById('hud-combo-label');
         var cv = document.getElementById('hud-combo');
+        if (mode === 'sprint') {
+            if (lb) lb.textContent = 'LEFT';
+        } else if (mode === 'puzzle') {
+            if (lb) lb.textContent = 'MOVES';
+        } else {
+            if (lb) lb.textContent = 'NEXT RISE';
+        }
         if (maxChain >= 2) {
             if (cl) cl.style.display = 'block';
             if (cv) { cv.style.display = 'block'; cv.textContent = 'x' + maxChain; }
@@ -634,6 +635,8 @@ export const Board = (function () {
             if (cv) cv.style.display = 'none';
         }
     }
+
+    function updateHUD() { updateHUDLabels(); }
 
     // ---- Drawing ------------------------------------------------------------
 
@@ -742,7 +745,7 @@ export const Board = (function () {
 
         // Blocks. Each block r (bottom-first) draws at
         // y = oy + h - (r+1)*cell  shifted up by riseProgress.
-        var colorblind = !!Storage.settings.colorBlind;
+        var colorblind = !!_settings.colorBlind;
         for (var cc = 0; cc < COLS; cc++) {
             var col = board[cc];
             for (var r = 0; r < col.length; r++) {
@@ -802,7 +805,7 @@ export const Board = (function () {
             var hx = cx + (w / 2) + 8 + i * (layout.cell * 0.5);
             var hy = top - h / 2;
             drawBlockShape(ctx, hx, hy, layout.cell * 0.5, COLORS[hb.color], hb.special,
-                !!Storage.settings.colorBlind);
+                !!_settings.colorBlind);
         }
     }
 
@@ -853,6 +856,11 @@ export const Board = (function () {
         COLORS: COLORS, SHAPES: SHAPES,
         HOLD_MAX: HOLD_MAX,
 
+        get _play() { return _play; },
+        set _play(fn) { _play = fn; },
+        get _settings() { return _settings; },
+        set _settings(s) { _settings = s || _settings; },
+
         // pure helpers (tested)
         makeEmptyBoard: makeEmptyBoard,
         cloneBoard: cloneBoard,
@@ -871,6 +879,7 @@ export const Board = (function () {
         calcLayout: calcLayout,
         draw: drawBoard,
         updateHUD: updateHUD,
+        updateHUDLabels: updateHUDLabels,
 
         // input
         moveLeft: moveLeft,
@@ -894,6 +903,11 @@ export const Board = (function () {
         isFinished: isFinished,
         getMode: getMode,
         getStats: getStats,
+        getExtraHud: function () {
+            if (mode === 'sprint') return String(Math.max(0, sprintTarget - blocksPopped));
+            if (mode === 'puzzle') return String(puzzleMovesLeft);
+            return (nextRiseAccum != null ? nextRiseAccum.toFixed(1) : '0') + 's';
+        },
 
         // test setters
         setBoard: setBoard,

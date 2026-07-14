@@ -1,70 +1,76 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="utf-8">
     <title>Echo</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="/lib/arcade/arcade.css">
+    <link rel="stylesheet" href="theme.css">
 </head>
 <body>
-    <canvas id="game"></canvas>
+    <canvas id="view"></canvas>
 
-    <div id="hud">
-        <div class="hud-row">
-            <div class="hud-cell">
-                <div class="hud-label">ROUND</div>
-                <div id="hud-round" class="hud-value">0</div>
-            </div>
-            <div class="hud-cell">
-                <div class="hud-label">BEST</div>
-                <div id="hud-best" class="hud-value">0</div>
-            </div>
+    <div id="hud" hidden>
+        <div class="hud-stat">
+            <div class="hud-label">Round</div>
+            <div id="hud-round" class="hud-value">0</div>
         </div>
-        <div id="hud-status">WATCH</div>
+        <div class="hud-stat">
+            <div class="hud-label">Best</div>
+            <div id="hud-best" class="hud-value">0</div>
+        </div>
+        <div class="hud-stat">
+            <div class="hud-label">Status</div>
+            <div id="hud-status" class="hud-value hud-status">—</div>
+        </div>
     </div>
 
     <div id="overlay">
-        <!-- TITLE -->
-        <div id="screen-title" class="screen">
-            <div class="overlay-title">ECHO</div>
-            <div class="overlay-sub">A Simon-style memory game</div>
+        <section id="screen-title" class="screen">
+            <h1 class="overlay-title">Echo</h1>
+            <p class="overlay-sub">A Simon-style memory game.</p>
             <div class="menu-items">
-                <div class="menu-item" data-action="play">PLAY</div>
-                <div class="menu-item" data-action="howto">HOW TO PLAY</div>
+                <div class="menu-item selected" data-action="play">Play</div>
+                <div class="menu-item" data-action="howto">How to Play</div>
+                <div class="menu-item" data-action="quit">Quit</div>
             </div>
-            <div class="overlay-hint">Click a pad, or press 1/2/3/4 (or Q/W/A/S)</div>
-        </div>
+            <p class="overlay-hint">Up / Down navigate · Enter select</p>
+        </section>
 
-        <!-- HOW TO PLAY -->
-        <div id="screen-howto" class="screen">
-            <div class="overlay-title">HOW TO PLAY</div>
+        <section id="screen-howto" class="screen" hidden>
+            <h1 class="overlay-title">How to Play</h1>
             <div class="overlay-sub htp-body">
-                <p>Watch the sequence of pads light up.</p>
-                <p>Repeat the sequence by clicking the pads<br>in the same order.</p>
-                <p>Each round adds one more step.</p>
-                <p>One wrong pad ends the game.</p>
-                <p><strong>Controls</strong></p>
-                <p class="htp-controls">
-                    1 or Q &nbsp;&middot;&nbsp; Red (top-left)<br>
-                    2 or W &nbsp;&middot;&nbsp; Green (top-right)<br>
-                    3 or A &nbsp;&middot;&nbsp; Yellow (bottom-left)<br>
-                    4 or S &nbsp;&middot;&nbsp; Blue (bottom-right)
-                </p>
+                <p>Watch the pads, then repeat the sequence. Each round adds one step.</p>
+                <pre>1 / Q            Red (top-left)
+2 / W            Green (top-right)
+3 / A            Yellow (bottom-left)
+4 / S            Blue (bottom-right)
+Click            Pads also accept mouse
+Esc / P          Pause</pre>
             </div>
             <div class="menu-items">
-                <div class="menu-item" data-action="back">BACK</div>
+                <div class="menu-item selected" data-action="back">Back</div>
             </div>
-        </div>
+        </section>
 
-        <!-- GAME OVER -->
-        <div id="screen-gameover" class="screen">
-            <div class="overlay-title">GAME OVER</div>
-            <div class="overlay-sub" id="gameover-stats"></div>
+        <section id="screen-pause" class="screen" hidden>
+            <h1 class="overlay-title">Paused</h1>
             <div class="menu-items">
-                <div class="menu-item" data-action="play">PLAY AGAIN</div>
-                <div class="menu-item" data-action="title">MAIN MENU</div>
+                <div class="menu-item selected" data-action="resume">Resume</div>
+                <div class="menu-item" data-action="restart">Restart</div>
+                <div class="menu-item" data-action="title">Title Menu</div>
             </div>
-        </div>
+        </section>
+
+        <section id="screen-gameover" class="screen" hidden>
+            <h1 class="overlay-title">Game Over</h1>
+            <div id="gameover-stats" class="stats-block"></div>
+            <div class="menu-items">
+                <div class="menu-item selected" data-action="restart">Play Again</div>
+                <div class="menu-item" data-action="title">Main Menu</div>
+            </div>
+        </section>
     </div>
 
-    <script type="module" src="/app/app.js"></script>
+    <script type="module" src="/app/main.js"></script>
 </body>
 </html>

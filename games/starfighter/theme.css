@@ -1,0 +1,153 @@
+/* Nova Squadron theme — citadel trench-run over shared arcade chrome. */
+
+:root {
+    --arcade-bg: #000000;
+    --arcade-accent: #ffde4a;
+    --arcade-text: #e8e8e8;
+    --arcade-muted: #668;
+    --arcade-faint: #445;
+    --arcade-overlay: rgba(0, 0, 0, 0.88);
+    --arcade-hud-bg: transparent;
+    --arcade-hud-border: transparent;
+    --arcade-menu-hover: rgba(255, 222, 74, 0.08);
+    --arcade-menu-selected: rgba(255, 222, 74, 0.14);
+}
+
+/* Hide cursor only while the yoke owns the mouse. */
+body.playing #view {
+    cursor: none;
+}
+
+/* Full-frame dual-column HUD (overrides default left box). */
+#hud {
+    inset: 0;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: auto;
+    min-width: 0;
+    background: transparent;
+    border: none;
+    padding: 0;
+    pointer-events: none;
+    z-index: 5;
+}
+
+.hud-col {
+    position: absolute;
+    padding: 14px 20px;
+    font-size: 16px;
+    line-height: 1.5;
+}
+
+.hud-left  { top: 0; left: 0;  text-align: left;  }
+.hud-right { top: 0; right: 0; text-align: right; }
+
+.hud-row {
+    display: block;
+    white-space: nowrap;
+}
+
+.hud-label {
+    display: inline;
+    color: #669;
+    margin: 0 10px 0 0;
+    letter-spacing: 0.1em;
+    font-size: 12px;
+}
+
+.hud-value {
+    display: inline;
+    color: #aef;
+    font-size: 16px;
+    font-weight: bold;
+    letter-spacing: 0.1em;
+}
+
+#hud-shields {
+    color: #f88;
+    letter-spacing: 0.15em;
+}
+
+.hud-lock {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, 40px);
+    color: #f44;
+    font-size: 14px;
+    letter-spacing: 0.2em;
+    text-align: center;
+    opacity: 0;
+    transition: opacity 0.12s linear;
+    text-shadow: 0 0 6px #f44;
+}
+.hud-lock.active { opacity: 1; }
+
+.hud-radio {
+    position: absolute;
+    left: 50%;
+    bottom: 40px;
+    transform: translateX(-50%);
+    color: #cfc;
+    font-size: 14px;
+    letter-spacing: 0.1em;
+    opacity: 0;
+    transition: opacity 0.3s linear;
+    text-align: center;
+    min-width: 400px;
+    text-shadow: 0 0 4px #4f4;
+}
+.hud-radio.active { opacity: 1; }
+
+/* Menu polish */
+.overlay-title {
+    letter-spacing: 0.2em;
+    text-shadow: 0 0 14px #d99a0a;
+}
+
+.overlay-sub .subtitle {
+    color: #f88;
+    letter-spacing: 0.35em;
+    font-size: 18px;
+    margin-bottom: 8px;
+}
+
+.htp-body {
+    text-align: left;
+    max-width: 600px;
+    margin: 0 auto 22px auto;
+}
+
+.htp-body p { margin: 10px 0; }
+
+.htp-body pre {
+    background: #0a0a18;
+    padding: 10px 14px;
+    border: 1px solid #334;
+    color: #aef;
+    font-size: 14px;
+    margin: 10px 0;
+    text-align: left;
+    display: block;
+}
+
+.htp-body em {
+    color: #ffde4a;
+    font-style: normal;
+}
+
+.menu-item.selected {
+    text-shadow: 0 0 8px #d99a0a;
+}
+
+.menu-item.selected::before { content: "> "; }
+.menu-item.selected::after  { content: " <"; }
+
+.stats-block {
+    white-space: pre;
+    font-size: 16px;
+    text-align: center;
+    color: #aef;
+}

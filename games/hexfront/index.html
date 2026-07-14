@@ -1,44 +1,92 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="utf-8">
     <title>HexFront</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="/lib/arcade/arcade.css">
+    <link rel="stylesheet" href="theme.css">
 </head>
 <body>
-    <canvas id="game"></canvas>
+    <canvas id="view"></canvas>
 
-    <div id="hud-top">
-        <span id="hud-turn">TURN 1</span>
-        <span id="hud-side" class="side-red">RED MOVES</span>
-        <span id="hud-ai" style="display:none">BLUE IS MOVING&hellip;</span>
+    <div id="hud" hidden>
+        <div id="hud-top">
+            <span id="hud-turn">TURN 1</span>
+            <span id="hud-side" class="side-red">RED MOVES</span>
+            <span id="hud-ai" style="display:none">BLUE IS MOVING&hellip;</span>
+        </div>
+
+        <div id="unit-panel" style="display:none">
+            <div id="unit-name" class="panel-title"></div>
+            <div class="stat-row"><span>HP</span><span id="unit-hp"></span></div>
+            <div class="stat-row"><span>ATK</span><span id="unit-atk"></span></div>
+            <div class="stat-row"><span>MOVE</span><span id="unit-move"></span></div>
+            <div class="stat-row"><span>RANGE</span><span id="unit-range"></span></div>
+            <div class="stat-row"><span>TERRAIN</span><span id="unit-terrain"></span></div>
+            <div id="unit-hint" class="panel-hint"></div>
+        </div>
+
+        <div id="controls">
+            <div id="btn-endturn" class="btn accent">END TURN&nbsp;<span class="key">E</span></div>
+            <div id="btn-save" class="btn">SAVE&nbsp;<span class="key">S</span></div>
+            <div id="btn-load" class="btn">LOAD&nbsp;<span class="key">L</span></div>
+        </div>
+
+        <div id="help">
+            Click a red unit to select &middot; blue cells = move &middot; red-tinted enemies = attack
+            &middot; forests/hills slow movement &middot; high ground hits +25%
+        </div>
+
+        <div id="toast" style="display:none"></div>
     </div>
 
-    <div id="unit-panel" style="display:none">
-        <div id="unit-name" class="panel-title"></div>
-        <div class="stat-row"><span>HP</span><span id="unit-hp"></span></div>
-        <div class="stat-row"><span>ATK</span><span id="unit-atk"></span></div>
-        <div class="stat-row"><span>MOVE</span><span id="unit-move"></span></div>
-        <div class="stat-row"><span>RANGE</span><span id="unit-range"></span></div>
-        <div class="stat-row"><span>TERRAIN</span><span id="unit-terrain"></span></div>
-        <div id="unit-hint" class="panel-hint"></div>
+    <div id="overlay">
+        <section id="screen-title" class="screen">
+            <h1 class="overlay-title">HEXFRONT</h1>
+            <p class="overlay-sub">Turn-based hex tactics. Command red. Crush blue.</p>
+            <div class="menu-items">
+                <div class="menu-item selected" data-action="play">Play</div>
+                <div class="menu-item" data-action="howto">How to Play</div>
+                <div class="menu-item" data-action="quit">Quit</div>
+            </div>
+            <p class="overlay-hint">Up/Down navigate · Enter select</p>
+        </section>
+
+        <section id="screen-howto" class="screen" hidden>
+            <h1 class="overlay-title">How to Play</h1>
+            <div class="overlay-sub howto">
+                <p>You command the <b>red</b> army. Destroy every blue unit.</p>
+                <p><b>Click</b> a red unit to select. Blue cells show move range;
+                red-lit enemies can be attacked. After moving, pick a target or
+                click elsewhere to hold position.</p>
+                <p><b>E</b> ends your turn (blue AI acts). <b>S</b>/<b>L</b> save and load.
+                Forests and hills cost more movement; high ground deals +25% damage.</p>
+                <p><b>Esc / P</b> pause.</p>
+            </div>
+            <div class="menu-items">
+                <div class="menu-item selected" data-action="back">Back</div>
+            </div>
+        </section>
+
+        <section id="screen-pause" class="screen" hidden>
+            <h1 class="overlay-title">Paused</h1>
+            <div class="menu-items">
+                <div class="menu-item selected" data-action="resume">Resume</div>
+                <div class="menu-item" data-action="restart">Restart</div>
+                <div class="menu-item" data-action="title">Title Menu</div>
+            </div>
+        </section>
+
+        <section id="screen-gameover" class="screen" hidden>
+            <h1 class="overlay-title" id="gameover-title">Battle Over</h1>
+            <div id="gameover-stats" class="stats-block"></div>
+            <div class="menu-items">
+                <div class="menu-item selected" data-action="restart">Play Again</div>
+                <div class="menu-item" data-action="title">Main Menu</div>
+            </div>
+        </section>
     </div>
 
-    <div id="controls">
-        <div id="btn-endturn" class="btn accent">END TURN&nbsp;<span class="key">E</span></div>
-        <div id="btn-save" class="btn">SAVE&nbsp;<span class="key">S</span></div>
-        <div id="btn-load" class="btn">LOAD&nbsp;<span class="key">L</span></div>
-    </div>
-
-    <div id="help">
-        Click a red unit to select &middot; blue cells = move &middot; red-tinted enemies = attack
-        &middot; forests/hills slow movement &middot; high ground hits +25%
-    </div>
-
-    <div id="banner" style="display:none">
-        <div id="banner-text"></div>
-        <div id="banner-sub">Press L to reload a save, or restart the app</div>
-    </div>
-
-    <script type="module" src="/app/app.js"></script>
+    <script type="module" src="/app/main.js"></script>
 </body>
 </html>

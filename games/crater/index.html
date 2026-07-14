@@ -1,18 +1,18 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <meta charset="utf-8">
     <title>Crater</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="/lib/arcade/arcade.css">
+    <link rel="stylesheet" href="theme.css">
 </head>
 <body>
     <canvas id="view"></canvas>
 
-    <!-- HUD (shown during match) -->
-    <div id="hud" style="display:none;">
+    <!-- Match HUD (custom layout; fields updated by game plugin) -->
+    <div id="hud" hidden>
         <div id="hud-top">
-            <div id="hud-turn"></div>
-            <div id="hud-wind"></div>
+            <div id="hud-turn">Waiting…</div>
         </div>
         <div id="hud-players"></div>
         <div id="hud-aim">
@@ -20,81 +20,78 @@
             <div>Power: <span id="hud-power">50</span>%</div>
             <div>Dir: <span id="hud-dir">→</span></div>
         </div>
-        <div id="hud-hint">← → aim yaw &nbsp; ↑ ↓ angle &nbsp; Q/E power &nbsp; Space FIRE &nbsp; Esc menu</div>
+        <div id="hud-hint">← → aim · ↑ ↓ angle · Q/E power · Space FIRE · Esc menu</div>
     </div>
 
-    <!-- Screen overlay (lobby, menus, end screens) -->
     <div id="overlay">
-
-        <!-- Title / connect -->
-        <div id="screen-title">
-            <h1>CRATER</h1>
-            <p class="tagline">Turn-based artillery on destructible terrain.</p>
+        <section id="screen-title" class="screen">
+            <h1 class="overlay-title">Crater</h1>
+            <p class="overlay-sub tagline">Turn-based artillery on destructible terrain.</p>
             <div class="panel">
                 <div class="field">
-                    <label>Name</label>
-                    <input id="in-name" type="text" maxlength="14" value="Player">
+                    <label for="in-name">Name</label>
+                    <input id="in-name" type="text" maxlength="14" value="Player" autocomplete="off">
                 </div>
                 <div class="field">
-                    <label>Server</label>
-                    <input id="in-address" type="text" value="127.0.0.1:27100">
+                    <label for="in-address">Server</label>
+                    <input id="in-address" type="text" value="127.0.0.1:27100" autocomplete="off">
                 </div>
                 <div class="menu-items">
-                    <div class="menu-item" data-action="connect">Connect</div>
+                    <div class="menu-item selected" data-action="connect">Connect</div>
                     <div class="menu-item" data-action="howto">How to Play</div>
                     <div class="menu-item" data-action="quit">Quit</div>
                 </div>
                 <div id="title-error"></div>
             </div>
-        </div>
+            <p class="overlay-hint">Up/Down navigate · Enter select · type name/server above</p>
+        </section>
 
-        <!-- Lobby -->
-        <div id="screen-lobby" style="display:none;">
-            <h1>Lobby</h1>
+        <section id="screen-howto" class="screen" hidden>
+            <h1 class="overlay-title">How to Play</h1>
+            <div class="overlay-sub htp-body">
+                <p>2–6 player turn-based artillery. Destroy every other tank to win.</p>
+                <p><strong>Aim:</strong> ↑/↓ pitch, ←/→ direction, <strong>Q/E</strong> power down/up.</p>
+                <p><strong>Fire:</strong> Space. Projectile physics carves craters; tanks lose ground and fall.</p>
+                <p>All clients share a seeded heightmap — explosions look identical for everyone.</p>
+                <p>Host a match from the launcher (server auto-starts), then Connect.</p>
+            </div>
+            <div class="menu-items">
+                <div class="menu-item selected" data-action="back">Back</div>
+            </div>
+        </section>
+
+        <section id="screen-lobby" class="screen" hidden>
+            <h1 class="overlay-title">Lobby</h1>
             <div id="lobby-players"></div>
             <div class="menu-items">
-                <div class="menu-item" data-action="ready">Ready</div>
+                <div class="menu-item selected" data-action="ready">Ready</div>
                 <div class="menu-item" data-action="bot">Add Bot (host)</div>
                 <div class="menu-item" data-action="start">Start Match (host)</div>
                 <div class="menu-item" data-action="leave">Leave</div>
             </div>
-            <p class="hint">Host starts the match when at least 2 players/bots are in and all humans are ready.</p>
-        </div>
+            <p class="overlay-hint lobby-hint">Host starts when ≥2 players/bots and all humans are ready.</p>
+        </section>
 
-        <!-- In-match menu -->
-        <div id="screen-pause" style="display:none;">
-            <h2>Paused</h2>
+        <section id="screen-pause" class="screen" hidden>
+            <h1 class="overlay-title">Paused</h1>
             <div class="menu-items">
-                <div class="menu-item" data-action="resume">Resume</div>
+                <div class="menu-item selected" data-action="resume">Resume</div>
                 <div class="menu-item" data-action="leave">Leave Match</div>
             </div>
-        </div>
+        </section>
 
-        <!-- Post-match -->
-        <div id="screen-gameover" style="display:none;">
-            <h1 id="go-title">Victory</h1>
-            <p id="go-subtitle"></p>
+        <section id="screen-gameover" class="screen" hidden>
+            <h1 class="overlay-title" id="gameover-title">Victory</h1>
+            <div id="gameover-stats" class="stats-block"></div>
             <div class="menu-items">
-                <div class="menu-item" data-action="lobby">Back to Lobby</div>
+                <div class="menu-item selected" data-action="lobby">Back to Lobby</div>
                 <div class="menu-item" data-action="leave">Disconnect</div>
             </div>
-        </div>
-
-        <!-- How to play -->
-        <div id="screen-howto" style="display:none;">
-            <h1>How to Play</h1>
-            <div class="howto">
-                <p>2–6 player turn-based artillery. Destroy every other tank to win.</p>
-                <p><b>Aim:</b> ↑/↓ pitch, ←/→ direction, <b>Q/E</b> power down/up.</p>
-                <p><b>Fire:</b> Space. Projectile physics carves craters; tanks lose ground and fall.</p>
-                <p>All clients share a seeded voxel world — your explosions look identical to everyone.</p>
-            </div>
-            <div class="menu-items">
-                <div class="menu-item" data-action="back">Back</div>
-            </div>
-        </div>
+        </section>
     </div>
 
-    <script type="module" src="/app/client.js"></script>
+    <div id="crater-toast" hidden></div>
+
+    <script type="module" src="/app/main.js"></script>
 </body>
 </html>

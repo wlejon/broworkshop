@@ -1,0 +1,30 @@
+/* Asteroids — classic white-on-black chrome over shared arcade shell. */
+
+:root {
+    --arcade-bg: #000000;
+    --arcade-accent: #ffffff;
+    --arcade-text: #ffffff;
+    --arcade-muted: #888888;
+    --arcade-faint: #444444;
+    --arcade-overlay: rgba(0, 0, 0, 0.85);
+    --arcade-hud-border: #333333;
+    --arcade-menu-hover: rgba(255, 255, 255, 0.05);
+    --arcade-menu-selected: rgba(255, 255, 255, 0.12);
+}
+
+.overlay-title {
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+}
+
+.htp-body {
+    text-align: center;
+    max-width: 520px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.htp-body pre {
+    text-align: left;
+    display: inline-block;
+}

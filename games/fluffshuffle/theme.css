@@ -1,0 +1,103 @@
+/* Fluffshuffle theme — soft pastel puffs over shared arcade chrome. */
+
+:root {
+    --arcade-bg: #0d1326;
+    --arcade-accent: #ffb9d8;
+    --arcade-text: #fff;
+    --arcade-muted: #8ea0c5;
+    --arcade-faint: #5a6a85;
+    --arcade-overlay: rgba(16, 22, 42, 0.92);
+    --arcade-hud-bg: rgba(16, 22, 42, 0.85);
+    --arcade-hud-border: #3a4a70;
+    --arcade-menu-hover: rgba(255, 185, 216, 0.08);
+    --arcade-menu-selected: rgba(255, 185, 216, 0.2);
+}
+
+#hud {
+    left: auto;
+    right: 20px;
+    min-width: 120px;
+    border-radius: 6px;
+}
+
+.overlay-title {
+    text-shadow: 0 0 24px rgba(255, 130, 190, 0.6);
+    letter-spacing: 4px;
+}
+
+.overlay-sub strong { color: #ffd880; }
+.overlay-sub em { color: #8ee0ff; font-style: normal; }
+
+.mode-descriptions { margin-bottom: 20px; }
+.mode-desc {
+    font-size: 12px;
+    color: #7080a0;
+    margin-bottom: 4px;
+}
+
+.htp-body {
+    text-align: center;
+    max-width: 580px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.stats-block {
+    white-space: pre-wrap;
+    color: #d0dae8;
+    margin: 0 auto 18px;
+    max-width: 420px;
+    line-height: 1.5;
+}
+
+.hs-tabs {
+    display: flex;
+    justify-content: center;
+    gap: 16px;
+    margin-bottom: 12px;
+}
+.hs-tab {
+    font-size: 14px;
+    color: var(--arcade-faint);
+    letter-spacing: 0.08em;
+}
+.hs-tab.active {
+    color: var(--arcade-accent);
+    border-bottom: 2px solid var(--arcade-accent);
+}
+
+.credits-sub {
+    color: var(--arcade-faint);
+    font-size: 12px;
+    margin-top: 20px;
+}
+
+#action-text {
+    position: absolute;
+    top: 30%;
+    left: 0;
+    width: 100%;
+    text-align: center;
+    font-size: 40px;
+    font-weight: bold;
+    color: #ffd3a0;
+    text-shadow: 0 0 18px rgba(255, 180, 120, 0.7);
+    pointer-events: none;
+    display: none;
+    z-index: 6;
+}
+
+#cascade-text {
+    position: absolute;
+    top: 22%;
+    left: 0;
+    width: 100%;
+    text-align: center;
+    font-size: 24px;
+    font-weight: bold;
+    color: #fff0a0;
+    text-shadow: 0 0 14px rgba(255, 220, 80, 0.8);
+    pointer-events: none;
+    display: none;
+    z-index: 6;
+}

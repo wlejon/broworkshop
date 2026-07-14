@@ -1,0 +1,227 @@
+/* Arcade shell — shared chrome layout.
+   Games override appearance only via CSS variables in theme.css. */
+
+:root {
+    --arcade-bg: #0a0a0c;
+    --arcade-overlay: rgba(8, 8, 12, 0.92);
+    --arcade-accent: #7ec8e3;
+    --arcade-text: #e8eef2;
+    --arcade-muted: #6a7a86;
+    --arcade-faint: #3a4550;
+    --arcade-hud-bg: rgba(0, 0, 0, 0.82);
+    --arcade-hud-border: #2a3540;
+    --arcade-menu-hover: rgba(126, 200, 227, 0.08);
+    --arcade-menu-selected: rgba(126, 200, 227, 0.2);
+    --arcade-font: Consolas, "Cascadia Mono", ui-monospace, monospace;
+    --arcade-title-size: 52px;
+    --arcade-hud-radius: 4px;
+}
+
+html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    background: var(--arcade-bg);
+    overflow: hidden;
+    font-family: var(--arcade-font);
+    color: var(--arcade-text);
+    -webkit-font-smoothing: antialiased;
+}
+
+#view {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+/* ── HUD ─────────────────────────────────────────────────────────────── */
+
+#hud {
+    position: absolute;
+    top: 16px;
+    left: 16px;
+    background: var(--arcade-hud-bg);
+    border: 1px solid var(--arcade-hud-border);
+    border-radius: var(--arcade-hud-radius);
+    padding: 12px 16px;
+    min-width: 108px;
+    pointer-events: none;
+    z-index: 5;
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+}
+
+#hud[hidden] {
+    display: none !important;
+}
+
+/* Preferred structure:
+     <div class="hud-stat">
+       <div class="hud-label">SCORE</div>
+       <div id="hud-score" class="hud-value">0</div>
+     </div>
+   Flat label/value siblings still work. */
+.hud-stat {
+    margin-top: 10px;
+}
+
+.hud-stat:first-child {
+    margin-top: 0;
+}
+
+.hud-label {
+    font-size: 11px;
+    color: var(--arcade-muted);
+    margin-top: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.hud-stat .hud-label,
+.hud-label:first-child {
+    margin-top: 0;
+}
+
+.hud-value {
+    font-size: 22px;
+    font-weight: bold;
+    color: var(--arcade-text);
+    line-height: 1.2;
+    margin-top: 2px;
+}
+
+/* Horizontal strip of stats (optional) */
+.hud-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px 20px;
+}
+
+.hud-row .hud-stat {
+    margin-top: 0;
+}
+
+/* ── Overlay screens ─────────────────────────────────────────────────── */
+
+#overlay {
+    position: absolute;
+    inset: 0;
+    background: var(--arcade-overlay);
+    text-align: center;
+    padding: 72px 24px 48px;
+    overflow-y: auto;
+    z-index: 10;
+    box-sizing: border-box;
+}
+
+#overlay[hidden] {
+    display: none !important;
+}
+
+.screen {
+    display: none;
+    width: 100%;
+    max-width: 560px;
+    margin: 0 auto;
+}
+
+/* visible screen is toggled by the shell via display / hidden */
+#overlay > .screen:not([hidden]) {
+    display: block;
+}
+
+.overlay-title {
+    font-size: var(--arcade-title-size);
+    font-weight: bold;
+    color: var(--arcade-accent);
+    margin: 0 0 20px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    line-height: 1.1;
+}
+
+.overlay-sub {
+    font-size: 14px;
+    color: var(--arcade-muted);
+    margin: 0 auto 20px;
+    max-width: 480px;
+    line-height: 1.65;
+}
+
+.overlay-sub p {
+    margin: 8px 0;
+}
+
+.overlay-sub strong {
+    color: var(--arcade-accent);
+}
+
+.overlay-hint {
+    font-size: 12px;
+    color: var(--arcade-faint);
+    margin-top: 28px;
+    letter-spacing: 0.04em;
+}
+
+.stats-block {
+    font-size: 16px;
+    color: var(--arcade-text);
+    white-space: pre;
+    line-height: 1.7;
+    margin: 0 auto 28px;
+}
+
+.htp-body {
+    text-align: center;
+    max-width: 480px;
+    margin: 0 auto;
+}
+
+.htp-body pre {
+    font-family: var(--arcade-font);
+    font-size: 13px;
+    color: var(--arcade-text);
+    text-align: left;
+    display: inline-block;
+    margin: 12px 0 4px;
+    padding: 12px 16px;
+    background: rgba(0, 0, 0, 0.28);
+    border: 1px solid var(--arcade-hud-border);
+    border-radius: var(--arcade-hud-radius);
+    line-height: 1.55;
+}
+
+/* ── Menu ────────────────────────────────────────────────────────────── */
+
+.menu-items {
+    margin: 12px 0 8px;
+}
+
+.menu-item {
+    font-size: 17px;
+    color: var(--arcade-muted);
+    padding: 8px 28px;
+    margin: 0 auto 4px;
+    max-width: 300px;
+    cursor: pointer;
+    box-sizing: border-box;
+    user-select: none;
+    border-radius: 2px;
+    transition: color 0.08s ease, background 0.08s ease;
+}
+
+.menu-item:hover {
+    color: var(--arcade-text);
+    background: var(--arcade-menu-hover);
+}
+
+.menu-item.selected {
+    color: #fff;
+    background: var(--arcade-menu-selected);
+    box-shadow: inset 3px 0 0 var(--arcade-accent);
+}
+
+.menu-item.disabled {
+    opacity: 0.35;
+    pointer-events: none;
+}

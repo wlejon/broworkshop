@@ -1,0 +1,158 @@
+/* HexFront theme over shared arcade chrome. 3D scene + custom HUD. */
+
+:root {
+    --arcade-bg: #0a0d12;
+    --arcade-accent: #b5e853;
+    --arcade-text: #eee;
+    --arcade-muted: #8a93a5;
+    --arcade-faint: #3a4550;
+    --arcade-overlay: rgba(5, 6, 10, 0.88);
+    --arcade-hud-bg: rgba(10, 12, 18, 0.82);
+    --arcade-hud-border: rgba(255, 255, 255, 0.14);
+    --arcade-menu-hover: rgba(181, 232, 83, 0.08);
+    --arcade-menu-selected: rgba(181, 232, 83, 0.18);
+    --arcade-font: Consolas, "Cascadia Mono", ui-monospace, monospace;
+}
+
+#view {
+    display: block;
+    width: 100vw;
+    height: 100vh;
+    cursor: crosshair;
+    user-select: none;
+    background: #0a0d12;
+}
+
+/* Full-viewport transparent HUD host */
+#hud {
+    position: fixed;
+    inset: 0;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: transparent;
+    border: none;
+    padding: 0;
+    min-width: 0;
+    pointer-events: none;
+    z-index: 5;
+}
+
+#hud-top {
+    position: absolute;
+    top: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 18px;
+    align-items: center;
+    background: rgba(10, 12, 18, 0.82);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 8px;
+    padding: 8px 18px;
+    color: #eee;
+    font: bold 15px monospace;
+    letter-spacing: 1px;
+}
+#hud-side.side-red  { color: #ff7a66; }
+#hud-side.side-blue { color: #7ab0ff; }
+#hud-ai { color: #7ab0ff; animation: pulse 1s infinite alternate; }
+@keyframes pulse { from { opacity: 0.45; } to { opacity: 1; } }
+
+#unit-panel {
+    position: absolute;
+    top: 70px;
+    left: 12px;
+    width: 210px;
+    background: rgba(10, 12, 18, 0.85);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 8px;
+    padding: 12px 14px;
+    color: #ccc;
+    font: 13px monospace;
+}
+.panel-title { font-weight: bold; font-size: 15px; color: #fff; margin-bottom: 8px; }
+.stat-row { display: flex; justify-content: space-between; line-height: 1.6; }
+.stat-row span:first-child { color: #8a93a5; }
+.panel-hint { margin-top: 8px; color: #b5e853; font-size: 11px; line-height: 1.4; }
+
+#controls {
+    position: absolute;
+    bottom: 14px;
+    right: 14px;
+    display: flex;
+    gap: 8px;
+    pointer-events: auto;
+}
+.btn {
+    padding: 9px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    color: #ddd;
+    font: bold 13px monospace;
+    user-select: none;
+}
+.btn:hover { background: rgba(255, 255, 255, 0.16); color: #fff; }
+.btn.accent { border-color: #b5e853; color: #b5e853; }
+.btn.accent:hover { background: rgba(181, 232, 83, 0.18); }
+.btn .key { opacity: 0.55; font-weight: normal; }
+
+#help {
+    position: absolute;
+    bottom: 14px;
+    left: 14px;
+    max-width: 560px;
+    color: rgba(255, 255, 255, 0.45);
+    font: 11px monospace;
+    line-height: 1.5;
+}
+
+#toast {
+    position: absolute;
+    top: 70px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(10, 12, 18, 0.9);
+    border: 1px solid rgba(181, 232, 83, 0.5);
+    color: #b5e853;
+    font: 13px monospace;
+    padding: 8px 16px;
+    border-radius: 6px;
+}
+
+.overlay-title.victory { color: #ffd75e; }
+.overlay-title.defeat { color: #ff6655; }
+
+.howto {
+    text-align: left;
+    max-width: 480px;
+    margin: 0 auto 16px;
+    line-height: 1.5;
+}
+.howto p { margin: 8px 0; opacity: 0.9; }
+.howto b { color: #b5e853; }
+
+.stats-block {
+    white-space: pre-wrap;
+    color: var(--arcade-muted);
+    margin-bottom: 16px;
+}
+
+#overlay {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding-top: 0;
+}
+#overlay > .screen:not([hidden]) {
+    width: 480px;
+    max-width: 92vw;
+    padding: 28px 36px;
+    background: #0f1523;
+    border: 1px solid #263148;
+    border-radius: 10px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+}

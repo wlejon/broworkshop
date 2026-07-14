@@ -1,96 +1,82 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="utf-8">
     <title>2048</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="/lib/arcade/arcade.css">
+    <link rel="stylesheet" href="theme.css">
 </head>
 <body>
-    <div id="game-root" style="display:none">
-        <div class="title-banner">2048</div>
-        <div id="board">
-            <div class="cells">
-                <div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div>
-                <div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div>
-                <div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div>
-                <div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div>
-            </div>
-            <div id="tiles"></div>
-        </div>
-    </div>
+    <canvas id="view"></canvas>
 
-    <div id="hud" style="display:none">
-        <div class="score-box">
-            <div class="score-label">SCORE</div>
-            <div id="hud-score" class="score-value">0</div>
+    <div id="hud" hidden>
+        <div class="hud-stat">
+            <div class="hud-label">Score</div>
+            <div id="hud-score" class="hud-value">0</div>
         </div>
-        <div class="score-box">
-            <div class="score-label">BEST</div>
-            <div id="hud-best" class="score-value">0</div>
+        <div class="hud-stat">
+            <div class="hud-label">Best</div>
+            <div id="hud-best" class="hud-value">0</div>
         </div>
-        <div class="hud-hint">Arrow keys or WASD to slide. U to undo. R to restart.</div>
     </div>
 
     <div id="overlay">
-        <!-- TITLE -->
-        <div id="screen-title" class="screen" style="display:block">
-            <div class="overlay-title">2048</div>
-            <div class="overlay-sub">
-                <p>Join the tiles, get to <strong>2048</strong>!</p>
-                <p>Slide tiles with arrow keys or WASD.<br>
-                Matching tiles merge and double in value.</p>
-            </div>
+        <section id="screen-title" class="screen">
+            <h1 class="overlay-title">2048</h1>
+            <p class="overlay-sub">Join the tiles. Reach <strong>2048</strong>.</p>
             <div class="menu-items">
-                <div class="menu-item selected" data-action="play">PLAY</div>
-                <div class="menu-item" data-action="howtoplay">HOW TO PLAY</div>
+                <div class="menu-item selected" data-action="play">Play</div>
+                <div class="menu-item" data-action="howto">How to Play</div>
+                <div class="menu-item" data-action="quit">Quit</div>
             </div>
-            <div class="overlay-hint">Enter or click to select</div>
-            <div class="credits-sub">Inspired by 2048 by Gabriele Cirulli (MIT licensed)</div>
-        </div>
+            <p class="overlay-hint">Up / Down navigate · Enter select</p>
+            <p class="overlay-hint credits">Inspired by 2048 by Gabriele Cirulli (MIT)</p>
+        </section>
 
-        <!-- HOW TO PLAY -->
-        <div id="screen-howtoplay" class="screen">
-            <div class="overlay-title">HOW TO PLAY</div>
-            <div class="overlay-sub">
-                <p>Slide all tiles in a direction using<br>
-                <strong>arrow keys</strong> or <strong>WASD</strong>.</p>
-                <p>When two tiles of the same number touch,<br>
-                they <strong>merge</strong> into one tile with double the value.</p>
-                <p>You score points equal to the merged value.</p>
-                <p>Reach the <strong>2048</strong> tile to win!<br>
-                Keep playing for a higher score if you like.</p>
-                <p>Press <strong>U</strong> to undo one move.<br>
-                Press <strong>R</strong> to restart. <strong>Esc</strong> to menu.</p>
+        <section id="screen-howto" class="screen" hidden>
+            <h1 class="overlay-title">How to Play</h1>
+            <div class="overlay-sub htp-body">
+                <p>Slide tiles with arrows or WASD. Matching numbers merge and double.</p>
+                <pre>Arrows / WASD    Slide
+U                Undo
+R                Restart board
+Esc / P          Pause</pre>
             </div>
             <div class="menu-items">
-                <div class="menu-item selected" data-action="back">BACK</div>
+                <div class="menu-item selected" data-action="back">Back</div>
             </div>
-        </div>
+        </section>
 
-        <!-- GAME OVER -->
-        <div id="screen-gameover" class="screen">
-            <div class="overlay-title">GAME OVER</div>
-            <div class="overlay-sub" id="gameover-stats"></div>
+        <section id="screen-pause" class="screen" hidden>
+            <h1 class="overlay-title">Paused</h1>
             <div class="menu-items">
-                <div class="menu-item selected" data-action="restart">PLAY AGAIN</div>
-                <div class="menu-item" data-action="quit">MAIN MENU</div>
+                <div class="menu-item selected" data-action="resume">Resume</div>
+                <div class="menu-item" data-action="restart">Restart</div>
+                <div class="menu-item" data-action="title">Title Menu</div>
             </div>
-        </div>
+        </section>
 
-        <!-- WIN -->
-        <div id="screen-win" class="screen">
-            <div class="overlay-title win-title">YOU WIN!</div>
-            <div class="overlay-sub">
-                <p>You built a <strong>2048</strong> tile!</p>
-                <p id="win-stats"></p>
-            </div>
+        <section id="screen-win" class="screen" hidden>
+            <h1 class="overlay-title">You Win</h1>
+            <p class="overlay-sub">You built a <strong>2048</strong> tile.</p>
+            <div id="win-stats" class="stats-block"></div>
             <div class="menu-items">
-                <div class="menu-item selected" data-action="keepplaying">KEEP PLAYING</div>
-                <div class="menu-item" data-action="restart">NEW GAME</div>
-                <div class="menu-item" data-action="quit">MAIN MENU</div>
+                <div class="menu-item selected" data-action="keepplaying">Keep Playing</div>
+                <div class="menu-item" data-action="restart">New Game</div>
+                <div class="menu-item" data-action="title">Main Menu</div>
             </div>
-        </div>
+        </section>
+
+        <section id="screen-gameover" class="screen" hidden>
+            <h1 class="overlay-title">Game Over</h1>
+            <div id="gameover-stats" class="stats-block"></div>
+            <div class="menu-items">
+                <div class="menu-item selected" data-action="restart">Play Again</div>
+                <div class="menu-item" data-action="title">Main Menu</div>
+            </div>
+        </section>
     </div>
 
-    <script type="module" src="/app/app.js"></script>
+    <script type="module" src="/app/main.js"></script>
 </body>
 </html>

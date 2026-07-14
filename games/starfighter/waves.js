@@ -6,7 +6,6 @@
 // enemy lists, projectiles, collisions, and HUD.
 import { Enemies } from "/app/enemies.js";
 import { Render } from "/app/render.js";
-import { Audio } from "/app/audio.js";
 
 export const Waves = (function() {
     "use strict";
@@ -96,7 +95,7 @@ export const Waves = (function() {
                 game.addEnemy(a);
                 ws.aceAnnounced = true;
                 if (game.radio) game.radio("!! BLACK ACE INBOUND !!", 2000);
-                Audio.sfxAceEngine();
+                if (game.play) game.play("ace");
             }
         }
     }
@@ -382,7 +381,7 @@ export const Waves = (function() {
             if (inLock) {
                 ws._lockTonePulse -= dt;
                 if (ws._lockTonePulse <= 0) {
-                    Audio.sfxLockTone();
+                    if (game.play) game.play("lock");
                     // Pulse faster as port approaches.
                     var tt = (pz - 10) / 75; // 0..1, 0=closest
                     ws._lockTonePulse = 90 + tt * 260;

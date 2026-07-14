@@ -7,7 +7,7 @@
 // inventory, stairs descent across all floors, save->load round trip (with
 // the load() kind re-registration workaround), death and victory.
 
-advanceTime(400);
+advanceTime(200);
 const G = window.DELVE;
 assert(G, 'DELVE debug surface exposed');
 const { game, world } = G;
@@ -15,6 +15,10 @@ const dbg = G.debug;
 const T = G.TILE, F = G.FLAG;
 const W = G.MAP_W, H = G.MAP_H;
 const idx = (x, y) => y * W + x;
+
+// Arcade shell starts on title; enter a run so keyboard hits update().
+if (G.shell && !G.shell.getRun()) G.shell.startRun();
+advanceTime(200);
 
 // SDL keycodes for the headless keyDown/keyUp helpers.
 const KEY = {
@@ -457,18 +461,17 @@ advanceTime(200);
         'boss dropped the amulet');
     tap(KEY[dirKey]);          // step onto the drop
     assert(game.won === true && game.over === true, 'amulet pickup wins the run');
-    advanceTime(100);
-    const banner = document.getElementById('banner');
-    assert(banner.style.display !== 'none', 'victory banner shown');
-    assert(document.getElementById('banner-text').textContent.includes('AMULET'), 'banner names the amulet');
+    advanceTime(200);
+    const stats = document.getElementById('gameover-stats');
+    assert(stats && stats.textContent.includes('AMULET'), 'victory gameover text names the amulet');
     screenshot('test-6-victory.png');
 }
 
 // --- 13. Death: permadeath run-over + restart ---------------------------------------
 
 {
-    tap(KEY.ENTER);            // victory banner -> fresh run
-    advanceTime(100);
+    tap(KEY.ENTER);            // gameover Restart -> fresh run
+    advanceTime(200);
     assert(!game.over && game.floor === 1, 'Enter started a fresh run');
     assert(game.player.hp === G.PLAYER_BASE.hp, 'fresh run at full HP');
 
@@ -482,19 +485,18 @@ advanceTime(200);
     tap(KEY.SPACE);            // rat swings: 2 damage into 1 hp
     assert(game.over === true && game.won === false, 'player died — run over');
     assert(game.player.hp === 0, 'hp floored at 0');
-    advanceTime(100);
-    const banner = document.getElementById('banner');
-    assert(banner.style.display !== 'none' &&
-        document.getElementById('banner-text').textContent.includes('DIED'), 'death banner shown');
-    assert(document.getElementById('banner-sub').textContent.includes('turns'), 'death stats shown');
+    advanceTime(200);
+    const stats = document.getElementById('gameover-stats');
+    assert(stats && stats.textContent.includes('DIED'), 'death gameover text shown');
+    assert(stats.textContent.includes('turns'), 'death stats include turns');
     screenshot('test-7-death.png');
 
-    // No zombie turns.
+    // No zombie turns (domain rejects acts when over; avoid Space — shell menus treat it as confirm).
     const t0 = game.turn;
-    tap(KEY.SPACE);
+    assert(game.playerAct({ type: 'wait' }) === false, 'playerAct ignored after death');
     assert(game.turn === t0, 'no actions after death');
     tap(KEY.ENTER);
-    advanceTime(100);
+    advanceTime(200);
     assert(!game.over && game.player.hp === G.PLAYER_BASE.hp && game.floor === 1,
         'restart after death works');
 }

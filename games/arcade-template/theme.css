@@ -1,0 +1,13 @@
+/* Per-game look only. Layout lives in /lib/arcade/arcade.css. */
+
+:root {
+    --arcade-bg: #0a0a0c;
+    --arcade-accent: #7ec8e3;
+    --arcade-text: #e8eef2;
+    --arcade-muted: #6a7a86;
+    --arcade-faint: #3a4550;
+    --arcade-overlay: rgba(8, 8, 12, 0.92);
+    --arcade-hud-border: #2a3540;
+    --arcade-menu-hover: rgba(126, 200, 227, 0.08);
+    --arcade-menu-selected: rgba(126, 200, 227, 0.2);
+}

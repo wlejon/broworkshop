@@ -1,0 +1,17 @@
+/* Invaders theme — green CRT feel over shared arcade chrome. */
+
+:root {
+    --arcade-bg: #000000;
+    --arcade-accent: #4fff6a;
+    --arcade-text: #e8ffe8;
+    --arcade-muted: #4a7a54;
+    --arcade-faint: #2a4a32;
+    --arcade-overlay: rgba(0, 0, 0, 0.9);
+    --arcade-hud-border: #1e3a25;
+    --arcade-menu-hover: rgba(79, 255, 106, 0.08);
+    --arcade-menu-selected: rgba(79, 255, 106, 0.18);
+}
+
+.overlay-title {
+    letter-spacing: 0.12em;
+}

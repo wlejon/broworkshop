@@ -1,0 +1,182 @@
+/* BlastGrid theme over shared arcade chrome. 3D arena + custom HUD. */
+
+:root {
+    --arcade-bg: #0a0d12;
+    --arcade-accent: #ffd75e;
+    --arcade-text: #dde3ee;
+    --arcade-muted: #9aa3b5;
+    --arcade-faint: #2a3040;
+    --arcade-overlay: rgba(5, 6, 10, 0.88);
+    --arcade-hud-bg: rgba(10, 12, 18, 0.82);
+    --arcade-hud-border: rgba(255, 255, 255, 0.14);
+    --arcade-menu-hover: rgba(255, 215, 94, 0.12);
+    --arcade-menu-selected: rgba(255, 215, 94, 0.2);
+    --arcade-font: Consolas, "Cascadia Mono", ui-monospace, monospace;
+}
+
+#view {
+    display: block;
+    width: 100vw;
+    height: 100vh;
+    background: #0a0d12;
+}
+
+#hud {
+    position: fixed;
+    inset: 0;
+    background: transparent;
+    border: none;
+    padding: 0;
+    min-width: 0;
+    pointer-events: none;
+    font-size: 13px;
+    z-index: 5;
+}
+
+#hud-top {
+    position: absolute;
+    top: 10px;
+    left: 0;
+    right: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    pointer-events: none;
+}
+#hud-chips { display: flex; gap: 10px; }
+.chip {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    background: rgba(10, 12, 18, 0.82);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 8px;
+    padding: 6px 12px;
+    color: #dde3ee;
+    font: bold 13px var(--arcade-font);
+    letter-spacing: 1px;
+}
+.chip.dead { opacity: 0.38; }
+.chip.dead .cname { text-decoration: line-through; }
+.dot { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
+.cwins { color: #ffd75e; letter-spacing: 2px; }
+
+#hud-timer {
+    color: #fff;
+    font: bold 26px var(--arcade-font);
+    letter-spacing: 2px;
+    text-shadow: 0 2px 10px rgba(0, 0, 0, 0.8);
+}
+#hud-timer.low { color: #ff8a75; }
+#hud-timer.sudden {
+    color: #ff4b3a;
+    animation: throb 0.8s infinite;
+    font-size: 22px;
+}
+@keyframes throb { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+
+#hud-round {
+    color: rgba(255, 255, 255, 0.45);
+    font: 11px var(--arcade-font);
+    letter-spacing: 2px;
+}
+
+#hud-powers {
+    position: absolute;
+    bottom: 14px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(10, 12, 18, 0.82);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 8px;
+    padding: 7px 16px;
+    color: #9aa3b5;
+    font: bold 12px var(--arcade-font);
+    letter-spacing: 1px;
+    pointer-events: none;
+}
+
+#help {
+    position: absolute;
+    bottom: 14px;
+    left: 14px;
+    max-width: 250px;
+    color: rgba(255, 255, 255, 0.42);
+    font: 10px var(--arcade-font);
+    line-height: 1.5;
+    pointer-events: none;
+}
+
+#announce {
+    position: absolute;
+    top: 26%;
+    left: 50%;
+    transform: translateX(-50%);
+    color: #ff6b4a;
+    font: bold 34px var(--arcade-font);
+    letter-spacing: 3px;
+    text-shadow: 0 3px 18px rgba(0, 0, 0, 0.85);
+    pointer-events: none;
+    white-space: nowrap;
+}
+#announce.pop { animation: pop 2.4s ease-out; }
+@keyframes pop {
+    0% { opacity: 0; transform: translateX(-50%) scale(0.7); }
+    12% { opacity: 1; transform: translateX(-50%) scale(1.06); }
+    20% { transform: translateX(-50%) scale(1.0); }
+    80% { opacity: 1; }
+    100% { opacity: 0; }
+}
+
+#toast {
+    position: absolute;
+    top: 108px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(10, 12, 18, 0.9);
+    border: 1px solid rgba(255, 215, 94, 0.5);
+    color: #ffd75e;
+    font: bold 14px var(--arcade-font);
+    padding: 7px 16px;
+    border-radius: 6px;
+    pointer-events: none;
+}
+
+.howto { text-align: left; max-width: 520px; margin: 0 auto; }
+.howto p { line-height: 1.5; margin: 8px 0; opacity: 0.88; }
+.howto b { color: #ffd75e; }
+
+.stats-block {
+    white-space: pre-wrap;
+    color: var(--arcade-muted);
+    margin-bottom: 16px;
+    font: 14px var(--arcade-font);
+    line-height: 1.55;
+}
+
+.overlay-title {
+    letter-spacing: 0.1em;
+    color: #ffd75e;
+}
+
+#overlay {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding-top: 0;
+}
+#overlay > .screen:not([hidden]) {
+    width: 520px;
+    max-width: 92vw;
+    padding: 28px 36px;
+    background: #0f121a;
+    border: 1px solid #2a3040;
+    border-radius: 10px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+}
+
+#round-title {
+    font-size: 36px;
+    margin-bottom: 8px;
+}

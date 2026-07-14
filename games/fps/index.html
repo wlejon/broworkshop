@@ -1,63 +1,97 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <meta charset="utf-8">
     <title>FPS Arena</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="/lib/arcade/arcade.css">
+    <link rel="stylesheet" href="theme.css">
 </head>
 <body>
-    <!-- Connect screen -->
-    <div id="connect-screen">
-        <h1>FPS Arena</h1>
-        <div class="form">
-            <div class="field">
-                <label>Name</label>
-                <input id="name-input" type="text" placeholder="Your name" maxlength="16" value="Player">
-            </div>
-            <div class="field">
-                <label>Server</label>
-                <input id="address-input" type="text" placeholder="127.0.0.1:27015" value="127.0.0.1:27015">
-            </div>
-            <button id="connect-btn">Connect</button>
-            <div id="error-msg"></div>
-        </div>
-        <div class="controls-info">
-            <p>WASD Move | Mouse Look | Click Shoot</p>
-        </div>
-    </div>
+    <canvas id="view"></canvas>
 
-    <!-- Game canvas -->
-    <canvas id="game"></canvas>
-
-    <!-- HUD overlay -->
-    <div id="hud" class="hidden">
-        <!-- Health bar -->
+    <div id="hud" hidden>
         <div id="health-bar">
             <div id="health-fill"></div>
             <span id="health-text">100</span>
         </div>
 
-        <!-- Score -->
         <div id="score-display">
             <span id="kills-count">0</span> kills
         </div>
 
-        <!-- Kill feed -->
         <div id="kill-feed"></div>
-
-        <!-- Connection info -->
         <div id="net-info"></div>
 
-        <!-- Death screen -->
         <div id="death-screen" class="hidden">
             <div class="death-text">YOU DIED</div>
             <div class="death-sub">Respawning...</div>
         </div>
 
-        <!-- Click to play prompt -->
         <div id="click-prompt" class="hidden">Click to play</div>
     </div>
 
-    <script type="module" src="/app/client.js"></script>
+    <div id="overlay">
+        <section id="screen-title" class="screen">
+            <h1 class="overlay-title">FPS Arena</h1>
+            <p class="overlay-sub tagline">Server-authoritative deathmatch with AI bots.</p>
+            <div class="connect-form">
+                <div class="field">
+                    <label for="name-input">Name</label>
+                    <input id="name-input" type="text" placeholder="Your name" maxlength="16" value="Player">
+                </div>
+                <div class="field">
+                    <label for="address-input">Server</label>
+                    <input id="address-input" type="text" placeholder="127.0.0.1:27015" value="127.0.0.1:27015">
+                </div>
+                <div id="error-msg"></div>
+            </div>
+            <div class="menu-items">
+                <div class="menu-item selected" data-action="play">Connect</div>
+                <div class="menu-item" data-action="howto">How to Play</div>
+                <div class="menu-item" data-action="quit">Quit</div>
+            </div>
+            <p class="overlay-hint">Up/Down navigate · Enter select · Run server first</p>
+        </section>
+
+        <section id="screen-howto" class="screen" hidden>
+            <h1 class="overlay-title">How to Play</h1>
+            <div class="overlay-sub htp-body">
+                <p>Connect to a local or remote <strong>FPS Arena</strong> server.
+                Fight other players and AI bots in a small arena.</p>
+                <pre>WASD / Arrows   Move
+Mouse           Look
+Click / Fire    Shoot
+Esc / P         Pause (releases mouse)
+Click canvas    Capture mouse</pre>
+                <p>Start the server with:</p>
+                <pre>bro-server games/fps server.js --tickrate 60</pre>
+                <p>Default address: <strong>127.0.0.1:27015</strong></p>
+            </div>
+            <div class="menu-items">
+                <div class="menu-item selected" data-action="back">Back</div>
+            </div>
+        </section>
+
+        <section id="screen-pause" class="screen" hidden>
+            <h1 class="overlay-title">Paused</h1>
+            <p class="overlay-sub tagline">Mouse released. Resume or disconnect.</p>
+            <div class="menu-items">
+                <div class="menu-item selected" data-action="resume">Resume</div>
+                <div class="menu-item" data-action="howto">How to Play</div>
+                <div class="menu-item" data-action="title">Disconnect</div>
+            </div>
+        </section>
+
+        <section id="screen-gameover" class="screen" hidden>
+            <h1 class="overlay-title">Disconnected</h1>
+            <div id="gameover-stats" class="stats-block"></div>
+            <div class="menu-items">
+                <div class="menu-item selected" data-action="restart">Reconnect</div>
+                <div class="menu-item" data-action="title">Main Menu</div>
+            </div>
+        </section>
+    </div>
+
+    <script type="module" src="/app/main.js"></script>
 </body>
 </html>
