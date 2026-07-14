@@ -97,9 +97,11 @@ T.startLevel(1);
 advanceTime(80);
 flush();
 assert(T.run.level.id === "plank", "plank loaded");
-// Fresh L2 after Drop-In shows booster-aim coach.
-assert(!document.getElementById("hud-coach").hidden, "Plank coach visible");
-assert(document.getElementById("hud-coach-text").textContent.indexOf("Booster") >= 0, "Plank coach aims boosters");
+// Fresh L2 after Drop-In shows booster-aim coach on the action strip.
+const action = document.getElementById("hud-action-text").textContent || "";
+assert(action.indexOf("Booster") >= 0 || action.indexOf("place") >= 0, "Plank coach on action strip: " + action);
+assert(document.getElementById("hud-action").classList.contains("coach-mode") || action.length > 10,
+    "action strip teaching build");
 
 T.enterRun();
 var sawRun = false;

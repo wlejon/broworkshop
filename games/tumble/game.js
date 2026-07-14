@@ -15,16 +15,16 @@ const session = {
 
 /** Coach tips — Drop-In (idx 0) until coachDone. */
 const COACH_TIPS_DROPIN = [
-    "Gold spout drops marbles. Green cup is the goal. Press Space to drop one in.",
-    "See the path on the board? You can also place Blocks/Ramps for fun — R rotates.",
-    "Space again rebuilds. Clear this level to unlock real path-building puzzles.",
+    "Gold spout drops marbles · green pad is the cup. Press Space to drop one in.",
+    "Optional: click a green cell to place Blocks. Space rebuilds anytime.",
+    "Clear this level to unlock puzzles that need a path.",
 ];
 
 /** Coach tips — Plank Walk (idx 1) until plankCoachDone. */
 const COACH_TIPS_PLANK = [
-    "Empty board fails — you must build. Gold pads mark a proven path. Select Booster (6).",
-    "Click each gold pad (or under the spout). Arrow on booster = shove direction (R rotates).",
-    "When pads form a runway to the cup, press Space. Rebuild with Space if it misses.",
+    "You must place pieces. Select Booster (key 6). Gold pads show a working path.",
+    "Move mouse over a gold pad — green floor square means click to place.",
+    "Place 2–3 boosters toward the cup, then press Space to drop.",
 ];
 
 /** Module scene + sim state (rebuilt in create). */
@@ -40,12 +40,13 @@ const SCENE = {
     goalFill: null,
     spoutNode: null,
     layerPlane: null,
+    cellHighlight: null,
     ghostParts: [],
     ghostIds: new Set(),
     ghostCellKey: null,
     outOfBoundsGhost: false,
     staticDecor: [],
-    /** UX guides (path, drop zone, suggestions) — hidden while running. */
+    /** UX guides — mostly hidden while running. */
     guides: [],
     suggestPads: [],
 };
@@ -203,7 +204,6 @@ export const game = {
                 ? ((run.resultMs != null ? run.resultMs / 1000 : run.runtime / 1000).toFixed(2) + "s")
                 : "ready";
 
-        refreshMissionSteps(run);
         refreshActionStrip(run);
         refreshPieceDesc(run);
         updateSuggestPads(run);
@@ -220,7 +220,7 @@ export const game = {
                 (run.marblesRemoved ? "  (" + run.marblesRemoved + " cleared)" : ""),
             budget: used + " / " + limit,
             tagline: run.level.tagline || "",
-            "objective-text": "Get a marble from the gold spout into the green cup.",
+            "objective-text": "Drop a marble from the gold spout into the green cup.",
         };
     },
 
@@ -388,15 +388,28 @@ function ensureInputWiring(ctx) {
         if (e.button !== 0) return;
         if (!activeRun || activeRun.mode !== "build" || overlayOpen()) return;
         const c = cellUnderCursor(activeRun, e);
-        if (!c) return;
+        if (!c) {
+            toast("Aim at the blue floor grid, then click.");
+            return;
+        }
+        const key = cellKey(c.cx, c.cy, c.cz);
+        const valid = inBounds(activeRun, c.cx, c.cy, c.cz)
+            && !cellReserved(activeRun, c.cx, c.cy, c.cz)
+            && !activeRun.placed.has(key);
+        if (!valid) {
+            toast("That cell is blocked — try a green-highlighted cell.");
+            return;
+        }
         const placed = placePiece(activeRun, activeRun.build.selected, c.cx, c.cy, c.cz, activeRun.build.rot);
         if (placed) {
             activeRun.play("place");
             refreshPalette(activeRun);
+            updateSuggestPads(activeRun);
             updateGhost(activeRun, e);
             advanceCoach(activeRun, "place");
+            refreshActionStrip(activeRun);
         } else {
-            toast("Cannot place there.");
+            toast("Out of that piece — pick another on the left.");
         }
     });
     canvas.addEventListener("mousemove", (e) => {
@@ -434,13 +447,14 @@ function loadLevel(run, idx) {
         const lim = run.level.budget[t] || 0;
         budget[t] = { used: 0, limit: lim };
     }
-    // Prefer ramps first — most tutorial/path levels want a slope selected.
-    const pickOrder = ["ramp", "booster", "chute", "bumper", "spinner", "wall", "block"];
+    // Prefer booster on path levels, else ramp, else first available.
+    const pickOrder = ["booster", "ramp", "chute", "bumper", "spinner", "wall", "block"];
     run.build.selected =
         pickOrder.find((t) => budget[t] && (budget[t].limit || 0) > 0) ||
         PIECE_ORDER.find((t) => budget[t] && (budget[t].limit || 0) > 0) ||
         "block";
-    run.build.rot = 0;
+    // Default rotation: aim boosters/ramps toward the cup on the XZ plane.
+    run.build.rot = defaultRotTowardCup(run.level, run.build.selected);
     run.build.layer = Math.max(0, run.level.bounds.y[0]);
 
     for (const f of run.level.furniture || []) {
@@ -523,6 +537,7 @@ function teardownScene(run) {
     SCENE.goalFill = null;
     SCENE.spoutNode = null;
     SCENE.layerPlane = null;
+    SCENE.cellHighlight = null;
     SCENE.ghostParts.length = 0;
     SCENE.ghostIds.clear();
     SCENE.staticDecor.length = 0;
@@ -605,23 +620,13 @@ function buildEnvironment(level) {
         color: "#ffd466", emissive: 2.0, emissiveColor: [1.0, 0.85, 0.4],
         metallic: 0.0, roughness: 1.0,
     }));
-    // Bright drop column so the spout is impossible to miss.
+    // Soft landing disc under spout (place near here).
     SCENE.guides.push(scene.createMesh({
-        mesh: "cylinder", radius: 0.06, halfHeight: Math.max(0.8, sp.y * 0.45),
-        segments: 10,
-        x: sp.x, y: sp.y * 0.5, z: sp.z,
-        color: "#ffd466",
-        emissive: 1.2, emissiveColor: [1.0, 0.8, 0.3],
-        metallic: 0.0, roughness: 1.0,
-        name: "drop-column",
-    }));
-    // Landing ring under the spout — "place pieces here".
-    SCENE.guides.push(scene.createMesh({
-        mesh: "cylinder", radius: 0.55, halfHeight: 0.03, segments: 28,
-        x: sp.x, y: 0.04, z: sp.z,
+        mesh: "cylinder", radius: 0.48, halfHeight: 0.025, segments: 24,
+        x: sp.x, y: 0.03, z: sp.z,
         color: "#ffc166",
-        emissive: 2.4, emissiveColor: [1.0, 0.75, 0.25],
-        metallic: 0.05, roughness: 0.5,
+        emissive: 1.8, emissiveColor: [1.0, 0.75, 0.25],
+        metallic: 0.05, roughness: 0.55,
         name: "drop-zone",
     }));
 
@@ -685,43 +690,43 @@ function buildEnvironment(level) {
             metallic: 0.05, roughness: 0.7,
         }));
     }
-    // Goal beacon — tall green marker above the cup.
+    // Compact goal beacon (not a tall pole).
     SCENE.guides.push(scene.createMesh({
-        mesh: "cylinder", radius: 0.08, halfHeight: 0.9, segments: 12,
-        x: gcx, y: g.max[1] + 1.1, z: gcz,
-        color: "#4eff8f",
-        emissive: 2.5, emissiveColor: [0.25, 1.0, 0.5],
-        metallic: 0.0, roughness: 0.4,
-        name: "goal-beacon",
-    }));
-    SCENE.guides.push(scene.createMesh({
-        mesh: "sphere", radius: 0.22, segments: 16, rings: 12,
-        x: gcx, y: g.max[1] + 2.15, z: gcz,
+        mesh: "sphere", radius: 0.18, segments: 14, rings: 10,
+        x: gcx, y: g.max[1] + 0.55, z: gcz,
         color: "#7dffb0",
-        emissive: 3.0, emissiveColor: [0.3, 1.0, 0.55],
-        metallic: 0.1, roughness: 0.3,
+        emissive: 2.4, emissiveColor: [0.3, 1.0, 0.55],
+        metallic: 0.05, roughness: 0.35,
         name: "goal-orb",
     }));
 
-    // Path dashes on the ground: spout XZ → cup XZ (where to build).
-    addPathGuides(sp.x, sp.z, gcx, gcz);
-
-    // Build grid so the play field feels like a placeable board.
-    addBuildGrid(level);
-
+    // Subtle playable board tint (no dense grid lines).
     SCENE.layerPlane = scene.createMesh({
         mesh: "plane",
         halfW: (bx[1] - bx[0] + 1) * 0.5,
         halfD: (bz[1] - bz[0] + 1) * 0.5,
-        x: cx, y: 0, z: cz,
-        color: "#2a3458",
-        emissive: 0.22, emissiveColor: [0.4, 0.55, 1.0],
+        x: cx, y: 0.001, z: cz,
+        color: "#243356",
+        emissive: 0.35, emissiveColor: [0.35, 0.5, 0.95],
         metallic: 0.0, roughness: 1.0,
         name: "layer-plane",
     });
-    SCENE.layerPlane.visible = false;
+    SCENE.layerPlane.visible = true;
 
-    // Prefab suggestion pads for verified solution cells (empty board only).
+    // Cursor cell highlight (green = placeable, red = blocked).
+    SCENE.cellHighlight = scene.createMesh({
+        mesh: "box",
+        halfW: 0.48, halfH: 0.04, halfD: 0.48,
+        x: 0, y: 0.08, z: 0,
+        color: "#4eff8f",
+        emissive: 2.0, emissiveColor: [0.25, 1.0, 0.45],
+        metallic: 0.0, roughness: 0.4,
+        name: "cell-highlight",
+    });
+    SCENE.cellHighlight.visible = false;
+    SCENE.guides.push(SCENE.cellHighlight);
+
+    // Soft gold pads on verified solution cells (empty board only).
     buildSuggestPads(level);
 
     const diag = Math.sqrt(
@@ -735,95 +740,36 @@ function buildEnvironment(level) {
     );
 }
 
-function pushGuide(mesh) {
-    SCENE.guides.push(mesh);
-    return mesh;
-}
-
-/** Ground dashes from spout to cup — the "build along this" affordance. */
-function addPathGuides(sx, sz, gx, gz) {
-    const dx = gx - sx;
-    const dz = gz - sz;
-    const len = Math.sqrt(dx * dx + dz * dz) || 1;
-    const steps = Math.max(3, Math.min(12, Math.round(len * 1.4)));
-    for (let i = 1; i < steps; i++) {
-        const t = i / steps;
-        const x = sx + dx * t;
-        const z = sz + dz * t;
-        pushGuide(scene.createMesh({
-            mesh: "box",
-            halfW: 0.18, halfH: 0.02, halfD: 0.08,
-            x, y: 0.05, z,
-            ry: Math.atan2(dx, dz) * (180 / Math.PI),
-            color: "#6ec8ff",
-            emissive: 1.8, emissiveColor: [0.35, 0.75, 1.0],
-            metallic: 0.0, roughness: 0.5,
-            name: "path-dash-" + i,
-        }));
-    }
-    // Arrow head near the cup.
-    pushGuide(scene.createMesh({
-        mesh: "box",
-        halfW: 0.28, halfH: 0.025, halfD: 0.1,
-        x: gx - dx / len * 0.7,
-        y: 0.06,
-        z: gz - dz / len * 0.7,
-        ry: Math.atan2(dx, dz) * (180 / Math.PI),
-        color: "#4eff8f",
-        emissive: 2.2, emissiveColor: [0.3, 1.0, 0.55],
-        metallic: 0.0, roughness: 0.4,
-        name: "path-arrow",
-    }));
-}
-
-function addBuildGrid(level) {
-    const bx = level.bounds.x, bz = level.bounds.z;
-    for (let x = bx[0]; x <= bx[1] + 1; x++) {
-        const z0 = bz[0], z1 = bz[1] + 1;
-        const midZ = (z0 + z1) * 0.5;
-        const half = (z1 - z0) * 0.5;
-        pushGuide(scene.createMesh({
-            mesh: "box",
-            halfW: 0.015, halfH: 0.008, halfD: half,
-            x: x, y: 0.01, z: midZ,
-            color: "#3a4a70",
-            emissive: 0.25, emissiveColor: [0.4, 0.5, 0.85],
-            metallic: 0.0, roughness: 1.0,
-        }));
-    }
-    for (let z = bz[0]; z <= bz[1] + 1; z++) {
-        const x0 = bx[0], x1 = bx[1] + 1;
-        const midX = (x0 + x1) * 0.5;
-        const half = (x1 - x0) * 0.5;
-        pushGuide(scene.createMesh({
-            mesh: "box",
-            halfW: half, halfH: 0.008, halfD: 0.015,
-            x: midX, y: 0.01, z: z,
-            color: "#3a4a70",
-            emissive: 0.25, emissiveColor: [0.4, 0.5, 0.85],
-            metallic: 0.0, roughness: 1.0,
-        }));
-    }
-}
-
 /** Soft glowing pads on solution cells so first-time builders see where to click. */
 function buildSuggestPads(level) {
     destroySuggestPads();
     const idx = LEVELS.indexOf(level);
     const sol = SOLUTIONS[idx];
     if (!sol || !sol.pieces || !sol.pieces.length) return;
-    for (const p of sol.pieces) {
+    for (let i = 0; i < sol.pieces.length; i++) {
+        const p = sol.pieces[i];
         const pad = scene.createMesh({
             mesh: "box",
-            halfW: 0.42, halfH: 0.035, halfD: 0.42,
-            x: p.x + 0.5, y: (p.y || 0) + 0.06, z: p.z + 0.5,
+            halfW: 0.44, halfH: 0.04, halfD: 0.44,
+            x: p.x + 0.5, y: (p.y || 0) + 0.07, z: p.z + 0.5,
             color: "#ffc166",
-            emissive: 1.6, emissiveColor: [1.0, 0.7, 0.2],
-            metallic: 0.05, roughness: 0.45,
-            name: "suggest-" + p.x + "-" + p.z,
+            emissive: 2.0, emissiveColor: [1.0, 0.72, 0.2],
+            metallic: 0.05, roughness: 0.4,
+            name: "suggest-" + i,
         });
         pad.visible = true;
         SCENE.suggestPads.push(pad);
+        // Small number-ish marker (stacked dots)
+        const mark = scene.createMesh({
+            mesh: "sphere", radius: 0.1, segments: 10, rings: 8,
+            x: p.x + 0.5, y: (p.y || 0) + 0.28, z: p.z + 0.5,
+            color: "#fff0c8",
+            emissive: 2.5, emissiveColor: [1.0, 0.9, 0.5],
+            metallic: 0.0, roughness: 0.5,
+            name: "suggest-mark-" + i,
+        });
+        mark.visible = true;
+        SCENE.suggestPads.push(mark);
     }
 }
 
@@ -844,52 +790,66 @@ function updateSuggestPads(run) {
 
 function setBuildGuidesVisible(on) {
     for (const g of SCENE.guides) {
-        try { if (g) g.visible = !!on; } catch (e) { /* ignore */ }
+        try {
+            if (!g) continue;
+            if (g.name === "cell-highlight") continue; // driven by cursor
+            if (g.name === "goal-orb") { g.visible = true; continue; }
+            g.visible = !!on;
+        } catch (e) { /* ignore */ }
     }
-    // Keep goal beacon mildly visible while running.
-    if (!on) {
-        for (const g of SCENE.guides) {
-            try {
-                if (g && (g.name === "goal-beacon" || g.name === "goal-orb")) g.visible = true;
-            } catch (e) { /* ignore */ }
-        }
+    if (SCENE.layerPlane) {
+        try { SCENE.layerPlane.visible = !!on; } catch (e) { /* ignore */ }
+    }
+    if (!on && SCENE.cellHighlight) {
+        try { SCENE.cellHighlight.visible = false; } catch (e) { /* ignore */ }
     }
 }
 
-function refreshMissionSteps(run) {
-    const s1 = document.getElementById("mission-1");
-    const s2 = document.getElementById("mission-2");
-    const s3 = document.getElementById("mission-3");
-    if (!s1 || !s2 || !s3) return;
-    const placed = run.placed ? run.placed.size : 0;
-    const running = run.mode === "run";
-    s1.classList.toggle("done", placed > 0 || running);
-    s1.classList.toggle("active", !running && placed === 0);
-    s2.classList.toggle("done", placed >= 2 || running);
-    s2.classList.toggle("active", !running && placed > 0 && placed < 2);
-    s3.classList.toggle("done", running || run.resultMs != null);
-    s3.classList.toggle("active", !running && placed >= 1);
-}
-
+/**
+ * Single bottom bar: coach tips when active, otherwise plain build/run help.
+ */
 function refreshActionStrip(run) {
     const el = document.getElementById("hud-action");
     const text = document.getElementById("hud-action-text");
+    const kicker = document.getElementById("hud-action-kicker");
     if (!el || !text) return;
+
     el.classList.toggle("run-mode", run.mode === "run");
+
     if (run.mode === "run") {
-        text.textContent = "Marbles dropping — first into the green cup wins. Space rebuilds.";
+        el.classList.remove("coach-mode");
+        if (kicker) kicker.textContent = "Running";
+        text.textContent = "First marble in the green cup wins. Press Space to rebuild.";
         return;
     }
+
+    const tips = coachTipsFor(run);
+    const coachActive = tips && (run.coachStep | 0) < tips.length;
+    if (coachActive) {
+        el.classList.add("coach-mode");
+        const step = Math.min(tips.length, (run.coachStep | 0) + 1);
+        if (kicker) kicker.textContent = "Tip " + step + " / " + tips.length;
+        text.textContent = tips[run.coachStep | 0] || tips[0];
+        // Mirror into hidden coach node for tests
+        const ct = document.getElementById("hud-coach-text");
+        if (ct) ct.textContent = text.textContent;
+        const coachEl = document.getElementById("hud-coach");
+        if (coachEl) coachEl.hidden = false;
+        return;
+    }
+
+    el.classList.remove("coach-mode");
+    if (kicker) kicker.textContent = "How to build";
     const placed = run.placed ? run.placed.size : 0;
     const def = PIECES[run.build.selected];
     const name = def ? def.label : "piece";
     if (placed === 0) {
-        text.textContent = "Click a gold glowing pad (or under the spout) to place your first " + name + ".";
-    } else if (placed < 3) {
-        text.textContent = "Keep placing toward the green cup. Press Space when ready to drop.";
+        text.textContent = "Click a grid cell (green highlight) under the spout to place a " + name + ".";
     } else {
-        text.textContent = "Looks like a path — press Space to drop marbles. Right-click removes mistakes.";
+        text.textContent = "Green cell = can place. Right-click removes. Space drops marbles.";
     }
+    const coachEl2 = document.getElementById("hud-coach");
+    if (coachEl2) coachEl2.hidden = true;
 }
 
 function refreshPieceDesc(run) {
@@ -897,16 +857,37 @@ function refreshPieceDesc(run) {
     if (!el) return;
     const def = PIECES[run.build.selected];
     if (!def) {
-        el.textContent = "Select a piece, then click the board to place it.";
+        el.textContent = "Pick a piece, then click a green cell on the floor.";
         return;
     }
-    const rot = def.rotatable
-        ? " Press R to rotate."
-        : "";
-    el.textContent = def.label + " — " + (def.describe || "Place on the board.") + rot;
+    const rot = def.rotatable ? " R rotates." : "";
+    el.textContent = def.label + ": click a green cell to place." + rot;
 }
 
 // ΓöÇΓöÇ Placement ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+
+/**
+ * Pick a default facing so the piece generally points spout → cup.
+ * Booster: rot 0=+X, 1=+Z, 2=-X, 3=-Z.
+ * Ramp downhill uses the same compass after our assist mapping for rot 2 = +X.
+ */
+function defaultRotTowardCup(level, type) {
+    if (!level || !level.spawner || !level.goal) return 0;
+    const sx = level.spawner.x, sz = level.spawner.z;
+    const gx = (level.goal.min[0] + level.goal.max[0]) * 0.5;
+    const gz = (level.goal.min[2] + level.goal.max[2]) * 0.5;
+    const dx = gx - sx, dz = gz - sz;
+    if (type === "booster") {
+        if (Math.abs(dx) >= Math.abs(dz)) return dx >= 0 ? 0 : 2;
+        return dz >= 0 ? 1 : 3;
+    }
+    if (type === "ramp") {
+        // Ramp downhill: rot 2 → +X, 0 → -X, 1 → -Z, 3 → +Z
+        if (Math.abs(dx) >= Math.abs(dz)) return dx >= 0 ? 2 : 0;
+        return dz >= 0 ? 3 : 1;
+    }
+    return 0;
+}
 
 function cellKey(cx, cy, cz) { return cx + "," + cy + "," + cz; }
 
@@ -1012,78 +993,87 @@ function setGhostEmissive(em) {
     }
 }
 
+/**
+ * Ghost is a simple translucent block so placement reads as "this cell",
+ * not a confusing full-piece wireframe.
+ */
 function rebuildGhost(run) {
     destroyGhost();
     const def = PIECES[run.build.selected];
     if (!def) return;
-    const built = def.build(scene, { x: 0, y: 0, z: 0 }, run.build.rot | 0);
-    if (built.body != null) Physics.destroyBody(built.body);
-    for (const eb of built.extraBodies || []) Physics.destroyBody(eb);
-    const visuals = [built.node, ...(built.extras || [])].filter(Boolean);
-    for (const n of visuals) {
-        const bx = n.x, by = n.y, bz = n.z;
-        try { n.emissive = 1.6; } catch (e) { /* ignore */ }
-        try { n.roughness = 0.4; } catch (e) { /* ignore */ }
-        n.visible = false;
-        SCENE.ghostParts.push({ node: n, bx, by, bz });
-        SCENE.ghostIds.add(n.id);
-    }
+    // Lightweight cube ghost (not full piece mesh — those looked like floating junk).
+    const node = scene.createMesh({
+        mesh: "box",
+        halfW: 0.42, halfH: 0.42, halfD: 0.42,
+        x: 0, y: 0, z: 0,
+        color: def.color || "#8cb7ff",
+        emissive: 1.4, emissiveColor: [0.5, 0.85, 1.0],
+        metallic: 0.05, roughness: 0.35,
+        name: "place-ghost",
+    });
+    node.visible = false;
+    SCENE.ghostParts.push({ node, bx: 0, by: 0, bz: 0 });
+    SCENE.ghostIds.add(node.id);
 }
 
+/**
+ * Build placement: always snap to the current floor layer under the cursor.
+ * (Surface stacking was unreadable for new players.)
+ */
 function cellUnderCursor(run, e) {
+    if (!canvas || !scene) return null;
     const rect = canvas.getBoundingClientRect();
     const mx = (e.clientX - rect.left) * (canvas.width / rect.width);
     const my = (e.clientY - rect.top) * (canvas.height / rect.height);
     const ray = scene.unprojectLocal(mx, my);
     if (!ray) return null;
 
-    const wasVisible = SCENE.ghostParts.length > 0 &&
-        SCENE.ghostParts[0].node && SCENE.ghostParts[0].node.visible;
-    if (wasVisible) setGhostVisible(false);
-    const hit = scene.raycast(ray.origin, ray.dir, 200);
-    if (wasVisible) setGhostVisible(true);
-
-    if (hit && hit.node) {
-        const key = run.meshToCell.get(hit.node.id);
-        if (key) {
-            const rec = run.placed.get(key);
-            if (rec && hit.normal) {
-                const n = hit.normal;
-                let ax = 0, ay = 0, az = 0;
-                const bx = Math.abs(n[0]), by = Math.abs(n[1]), bz = Math.abs(n[2]);
-                if (bx >= by && bx >= bz) ax = Math.sign(n[0]);
-                else if (by >= bz) ay = Math.sign(n[1]);
-                else az = Math.sign(n[2]);
-                if (ax === 0 && ay === 0 && az === 0) ay = 1;
-                return {
-                    cx: rec.cell[0] + ax,
-                    cy: rec.cell[1] + ay,
-                    cz: rec.cell[2] + az,
-                };
-            }
-        }
-    }
-
     const y = run.build.layer;
     const o = ray.origin, d = ray.dir;
-    function planeHit(py) {
-        if (Math.abs(d[1]) < 1e-6) return null;
-        const t = (py - o[1]) / d[1];
-        if (t < 0) return null;
-        return { wx: o[0] + d[0] * t, wz: o[2] + d[2] * t };
-    }
-    const h = planeHit(y + 1) || planeHit(y + 0.5) || planeHit(y);
-    if (!h) return null;
-    return { cx: Math.floor(h.wx), cy: y, cz: Math.floor(h.wz) };
+    if (Math.abs(d[1]) < 1e-6) return null;
+    // Hit the top of the active layer's cells.
+    const planeY = y + 0.08;
+    const t = (planeY - o[1]) / d[1];
+    if (t < 0) return null;
+    const wx = o[0] + d[0] * t;
+    const wz = o[2] + d[2] * t;
+    return { cx: Math.floor(wx), cy: y, cz: Math.floor(wz) };
+}
+
+function updateCellHighlight(cx, cy, cz, valid) {
+    const h = SCENE.cellHighlight;
+    if (!h) return;
+    h.visible = true;
+    h.x = cx + 0.5;
+    h.y = cy + 0.08;
+    h.z = cz + 0.5;
+    try {
+        if (valid) {
+            h.emissive = 2.4;
+            h.emissiveColor = [0.25, 1.0, 0.45];
+            h.color = "#4eff8f";
+        } else {
+            h.emissive = 1.6;
+            h.emissiveColor = [1.0, 0.3, 0.25];
+            h.color = "#ff6b5a";
+        }
+    } catch (e) { /* ignore */ }
 }
 
 function updateGhost(run, e) {
-    if (run.mode !== "build" || SCENE.ghostParts.length === 0) {
+    if (run.mode !== "build") {
         setGhostVisible(false);
+        if (SCENE.cellHighlight) SCENE.cellHighlight.visible = false;
         return;
     }
+    if (SCENE.ghostParts.length === 0) rebuildGhost(run);
+
     const c = cellUnderCursor(run, e);
-    if (!c) { setGhostVisible(false); return; }
+    if (!c) {
+        setGhostVisible(false);
+        if (SCENE.cellHighlight) SCENE.cellHighlight.visible = false;
+        return;
+    }
     const key = cellKey(c.cx, c.cy, c.cz);
     const inb = inBounds(run, c.cx, c.cy, c.cz);
     const reserved = cellReserved(run, c.cx, c.cy, c.cz);
@@ -1093,9 +1083,11 @@ function updateGhost(run, e) {
     const valid = inb && !reserved && !occupied && !noBudget;
     SCENE.ghostCellKey = key;
     SCENE.outOfBoundsGhost = !valid;
+
+    updateCellHighlight(c.cx, c.cy, c.cz, valid);
     moveGhost(c.cx, c.cy, c.cz);
     setGhostVisible(true);
-    setGhostEmissive(valid ? 1.6 : 0.2);
+    setGhostEmissive(valid ? 1.8 : 0.35);
 }
 
 // ΓöÇΓöÇ Modes / marbles ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
@@ -1626,22 +1618,19 @@ function advanceCoach(run, event) {
 }
 
 function setCoach(text) {
-    const el = document.getElementById("hud-coach");
+    // Coach content is shown on the single bottom action strip.
     const body = document.getElementById("hud-coach-text");
-    const step = document.getElementById("coach-step-label");
-    if (!el || !body) return;
-    body.textContent = text || "";
-    el.hidden = !text;
-    if (step && activeRun) {
-        const tips = coachTipsFor(activeRun);
-        const n = tips ? Math.min(tips.length, (activeRun.coachStep | 0) + 1) : 1;
-        step.textContent = tips ? ("Tip " + n + " / " + tips.length) : "Tip";
-    }
+    if (body) body.textContent = text || "";
+    if (activeRun) refreshActionStrip(activeRun);
 }
 
 function setCoachVisible(on) {
-    const el = document.getElementById("hud-coach");
-    if (el) el.hidden = !on;
+    if (!on && activeRun) {
+        // Force action strip off coach mode next frame
+        const tips = coachTipsFor(activeRun);
+        if (!tips) refreshActionStrip(activeRun);
+    }
+    if (activeRun) refreshActionStrip(activeRun);
 }
 
 function pulseGoal() {

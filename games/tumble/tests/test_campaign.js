@@ -109,11 +109,9 @@ T.save.save();
 T.startLevel(1);
 advanceTime(80);
 flush();
-assert(!document.getElementById("hud-coach").hidden, "Plank coach shown");
-var tip = document.getElementById("hud-coach-text").textContent;
+var tip = document.getElementById("hud-action-text").textContent || "";
 assert(
-    tip.indexOf("Booster") >= 0 || tip.indexOf("booster") >= 0 ||
-    tip.indexOf("pad") >= 0 || tip.indexOf("build") >= 0,
+    tip.indexOf("Booster") >= 0 || tip.indexOf("pad") >= 0 || tip.indexOf("place") >= 0,
     "Plank coach teaches build/aim: " + tip
 );
 log("Plank coach:", tip);
