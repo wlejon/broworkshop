@@ -1,5 +1,6 @@
 // Pegbounce — arcade foundation plugin.
 // Domain: physics.js, levels.js, guides.js. Shell owns screens / loop / pause.
+// Layout: plugin → level/shot → input → draw → screens DOM → test hooks.
 
 import { Particles } from "/lib/particles.js";
 import { Physics } from "/app/physics.js";
@@ -22,6 +23,11 @@ const session = {
     guideId: "wingtip",
 };
 
+/** @type {object|null} Shell api from boot / create. */
+let shellRef = null;
+/** @type {object|null} Latest play run (for test hooks). */
+let activeRun = null;
+
 export const game = {
     id: "pegbounce",
     clearColor: "#04060c",
@@ -37,6 +43,7 @@ export const game = {
     },
 
     create(ctx) {
+        shellRef = ctx;
         session.guideId = ctx.save.get("selectedGuide") || session.guideId || "wingtip";
 
         const run = {
@@ -76,10 +83,12 @@ export const game = {
 
         loadLevel(run, run.levelIdx);
         attachPointer(run);
+        activeRun = run;
         return run;
     },
 
     update(run, dt, input) {
+        activeRun = run;
         if (!run.world) return;
 
         if (run.pending === "clear") {
@@ -921,4 +930,129 @@ function lighten(h, f) {
 function darken(h, f) {
     const c = hexToRgb(h);
     return rgbToHex(c.r * (1 - f), c.g * (1 - f), c.b * (1 - f));
+}
+
+// ── Test hooks ────────────────────────────────────────────────────────────
+
+/** Pure headless shot against a seeded level build (does not touch live run). */
+function simulateShot(angle, seed) {
+    const idx = activeRun ? activeRun.levelIdx : session.levelIdx;
+    const w = Levels.buildLevel(idx, seed | 0);
+    Physics.launchBall(w, angle, 820, FIELD_W / 2, 64);
+    const dt = 1 / 180;
+    let elapsed = 0;
+    let shotScore = 0;
+    let comboMultSeen = 1;
+    let shotOrangeCount = 0;
+    let shotComboCount = 0;
+    const startOrange = Physics.countRemainingOrange(w);
+    while (Physics.hasActiveBall(w) && elapsed < 12) {
+        Physics.step(w, dt);
+        const ev = w.scoreEvents;
+        Physics.markLitFromEvents(w, ev);
+        for (const e of ev) {
+            if (e.kind !== "peg-hit") continue;
+            const peg = e.peg;
+            if (peg._testScored) continue;
+            peg._testScored = true;
+            shotComboCount++;
+            let pts = 10;
+            if (peg.type === Physics.PEG.ORANGE) {
+                pts = 100;
+                shotOrangeCount++;
+            } else if (peg.type === Physics.PEG.PURPLE) {
+                pts = 500;
+            }
+            const m = comboMult(shotOrangeCount, shotComboCount);
+            comboMultSeen = Math.max(comboMultSeen, m);
+            shotScore += pts * m;
+        }
+        ev.length = 0;
+        elapsed += dt;
+    }
+    Physics.sweepLit(w);
+    const orangeCleared = startOrange - Physics.countRemainingOrange(w);
+    Physics.destroyWorld(w);
+    return { orangeCleared, shotScore, comboMult: comboMultSeen, elapsed, startOrange };
+}
+
+export function installTestHooks(shell) {
+    shellRef = shell;
+
+    const screens = {
+        switchTo: function (name) {
+            if (name === "playing" || name === "play") {
+                if (!shell.getRun()) shell.startRun();
+                else shell.switchTo("playing");
+            } else if (name === "clear") {
+                shell.switchTo("clear");
+            } else if (name === "title") {
+                shell.switchTo("title");
+            } else {
+                shell.switchTo(name);
+            }
+        },
+        name: function () { return shell.getScreen(); },
+    };
+
+    // Save facade used by tests as PB.store (shell.api.save is the real store).
+    const saveApi = shell.api && shell.api.save;
+    const store = {
+        get: function (k) { return saveApi ? saveApi.get(k) : undefined; },
+        set: function (k, v) { if (saveApi) saveApi.set(k, v); },
+        save: function () { if (saveApi) saveApi.save(); },
+    };
+
+    // Live state surface — prefer active run fields, fall back to session.
+    const S = {
+        get guideId() { return activeRun ? activeRun.guideId : session.guideId; },
+        set guideId(v) {
+            session.guideId = v;
+            if (activeRun) activeRun.guideId = v;
+        },
+        get levelIdx() { return activeRun ? activeRun.levelIdx : session.levelIdx; },
+        get world() { return activeRun ? activeRun.world : null; },
+        get score() { return activeRun ? activeRun.score : 0; },
+        get shotScore() { return activeRun ? activeRun.shotScore : 0; },
+    };
+
+    window.__pegbounce = {
+        S,
+        store,
+        Physics,
+        Levels,
+        Guides,
+        Particles,
+        screens,
+        shell,
+        loadLevel: function (idx) {
+            session.levelIdx = idx;
+            if (activeRun) loadLevel(activeRun, idx);
+            else if (shell.getRun()) loadLevel(shell.getRun(), idx);
+        },
+        simulateShot,
+        findPegs: function () {
+            return activeRun && activeRun.world ? activeRun.world.pegs : [];
+        },
+        remainingOrange: function () {
+            return activeRun && activeRun.world
+                ? Physics.countRemainingOrange(activeRun.world)
+                : 0;
+        },
+        setGuide: function (id) {
+            session.guideId = id;
+            if (activeRun) activeRun.guideId = id;
+            if (saveApi) {
+                saveApi.set("selectedGuide", id);
+                saveApi.save();
+            }
+        },
+        forceClear: function () {
+            if (activeRun) {
+                activeRun.levelClearTriggered = true;
+                persistClear(activeRun);
+            }
+            shell.switchTo("clear");
+        },
+    };
 }

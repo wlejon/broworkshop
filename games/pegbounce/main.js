@@ -1,4 +1,5 @@
 import { boot } from "/lib/arcade/shell.js";
-import { game } from "/app/game.js";
+import { game, installTestHooks } from "/app/game.js";
 
-boot(game);
+const shell = boot(game);
+installTestHooks(shell);
