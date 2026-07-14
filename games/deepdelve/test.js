@@ -10,11 +10,10 @@
 advanceTime(200);
 const G = window.DELVE;
 assert(G, 'DELVE debug surface exposed');
-const { game, world } = G;
-const dbg = G.debug;
 const T = G.TILE, F = G.FLAG;
 const W = G.MAP_W, H = G.MAP_H;
 const idx = (x, y) => y * W + x;
+const dbg = G.debug;
 
 // Arcade shell starts on title; enter a run so keyboard hits update().
 if (G.shell && !G.shell.getRun()) G.shell.startRun();
@@ -28,8 +27,12 @@ const KEY = {
 };
 function tap(k) { keyDown(k); keyUp(k); advanceTime(40); }
 
+// Seeded run — ensure() happens inside newRun (lazy scene).
 dbg.newRun(12345);
 advanceTime(200);
+const game = G.game;
+const world = G.world;
+assert(game && world, 'core ready after newRun');
 
 // --- 1. Generation: rooms, connectivity, elevation, autotile ------------------
 
@@ -488,7 +491,7 @@ advanceTime(200);
     advanceTime(200);
     const stats = document.getElementById('gameover-stats');
     assert(stats && stats.textContent.includes('DIED'), 'death gameover text shown');
-    assert(stats.textContent.includes('turns'), 'death stats include turns');
+    assert(/turns/i.test(stats.textContent), 'death stats include turns');
     screenshot('test-7-death.png');
 
     // No zombie turns (domain rejects acts when over; avoid Space — shell menus treat it as confirm).

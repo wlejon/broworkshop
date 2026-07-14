@@ -8,12 +8,16 @@
 advanceTime(200);
 const G = window.BLAST;
 assert(G, 'BLAST debug surface exposed');
-const { game, world, debug } = G;
 const T = G.TILE;
 
 // Arcade shell starts on title; enter a run so keyboard hits update().
+// ensure() builds scene+core (lazy; not at module load).
 if (G.shell && !G.shell.getRun()) G.shell.startRun();
-advanceTime(200);
+else G.ensure();
+const game = G.game;
+const world = G.world;
+const debug = G.debug;
+assert(game && world && debug, 'core ready after startRun/ensure');
 
 // SDL keycodes for the headless keyDown/keyUp helpers.
 // Arrows are 0x40000000 | scancode; printable keys are their ASCII code.
@@ -23,8 +27,9 @@ const KEY = {
     SPACE: 32, ENTER: 13, W: 119, A: 97, S: 115, D: 100,
 };
 
-debug.freezeAI(true);        // mechanics first; the AI gets its own group
-advanceTime(400);
+// Freeze AI before advancing time so contenders stay on spawn cells.
+debug.freezeAI(true);
+advanceTime(100);
 
 // --- 1. Arena authoring ------------------------------------------------------
 
