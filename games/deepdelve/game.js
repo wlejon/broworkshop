@@ -1161,8 +1161,6 @@ let scene = null;
 let torch = null;
 /** @type {object|null} */
 let core = null; // createGame instance (persists across restarts)
-/** @type {object|null} */
-let activeRun = null;
 let wiredHud = false;
 
 const applied = new Map();
@@ -1570,14 +1568,12 @@ export const game = {
             repeatAt: 0,
             ended: false,
         };
-        activeRun = run;
         run.score = scoreOf(core);
         return run;
     },
 
     update(run, dt, input) {
         if (!core) return;
-        activeRun = run;
         nowMs = performance.now();
         const dtSec = dt / 1000;
         const helpers = cellHelpers(core.world);
@@ -1710,20 +1706,19 @@ export const game = {
 
     gameOverText(run) {
         if (!core) return "";
-        const tag = run && run._newBest ? "  (NEW BEST!)" : "";
+        const tag = run && run._newBest ? "  ·  NEW BEST" : "";
         return (
             (core.won ? "YOU ESCAPED WITH THE AMULET" : "YOU HAVE DIED") + "\n\n" +
-            "Floor " + core.floor + " of " + FLOORS + "\n" +
-            core.kills + " monsters slain  ·  " + core.goldTotal + " gold\n" +
-            core.turn + " turns\n" +
-            "Score: " + scoreOf(core) + tag
+            "Floor     " + core.floor + " of " + FLOORS + "\n" +
+            "Slain     " + core.kills + "  ·  Gold  " + core.goldTotal + "\n" +
+            "Turns     " + core.turn + "\n" +
+            "Score     " + scoreOf(core) + tag
         );
     },
 
+    // Game SFX only — menu move/select are shell-owned.
     cue(name, audio) {
-        if (name === "menu") audio.tone(440, 0.03, "sine", 0.3);
-        else if (name === "select") audio.tone(620, 0.06, "square", 0.35);
-        else if (name === "win") {
+        if (name === "win") {
             audio.sequence([
                 [523, 0.1, "square", 0.5],
                 [659, 0.1, "square", 0.55],

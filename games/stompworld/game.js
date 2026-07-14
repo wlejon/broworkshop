@@ -291,8 +291,8 @@ export const game = {
     gameOverText(run) {
         const score = run ? run.score : 0;
         const best = run ? run.highScore() : 0;
-        const tag = run && run._newBest ? "  (NEW BEST!)" : "";
-        return "Score:  " + score + tag + "\nBest:   " + best;
+        const tag = run && run._newBest ? "  ·  NEW BEST" : "";
+        return "Score    " + score + tag + "\nBest     " + best;
     },
 
     onEnterScreen(name, run) {
@@ -335,9 +335,7 @@ export const game = {
     },
 
     cue(name, audio) {
-        if (name === "menu") audio.tone(400, 0.04, "sine", 0.3);
-        else if (name === "select") audio.tone(660, 0.08, "square", 0.4);
-        else if (name === "jump") {
+        if (name === "jump") {
             audio.sequence([
                 [520, 0.06, "square", 0.35],
                 [720, 0.08, "square", 0.3],

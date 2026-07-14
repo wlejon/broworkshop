@@ -275,9 +275,7 @@ export const game = {
     },
 
     cue(name, audio) {
-        if (name === "menu") audio.tone(440, 0.04, "sine", 0.3);
-        else if (name === "select") audio.tone(660, 0.07, "square", 0.4);
-        else if (name === "hit") audio.tone(200, 0.08, "sawtooth", 0.45);
+        if (name === "hit") audio.tone(200, 0.08, "sawtooth", 0.45);
         else if (name === "kill") {
             audio.sequence([
                 [520, 0.06, "square", 0.4],

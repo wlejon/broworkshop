@@ -152,9 +152,9 @@ export const game = {
         if (name === "playing") updateHUD();
     },
 
+    // Game SFX only — menu move/select are shell-owned.
     cue(name, audio) {
-        if (name === "menu") audio.tone(440, 0.04, "sine", 0.3);
-        else if (name === "select") audio.tone(660, 0.07, "square", 0.4);
+        if (name === "tick") audio.tone(440, 0.04, "sine", 0.3);
         else if (name === "splash") audio.tone(170, 0.16, "sawtooth", 0.35);
         else if (name === "feed") audio.tone(320, 0.12, "triangle", 0.30);
         else if (name === "harvest") {
@@ -279,7 +279,7 @@ function ensureWiring(ctx) {
     if (closeBtn) {
         closeBtn.addEventListener("click", (ev) => {
             ev.stopPropagation();
-            if (ctx && ctx.play) ctx.play("menu");
+            if (ctx && ctx.play) ctx.play("tick");
             closeStatPanel();
         });
     }

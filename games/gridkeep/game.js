@@ -221,9 +221,7 @@ export const game = {
     },
 
     cue(name, audio) {
-        if (name === "menu") audio.tone(440, 0.04, "sine", 0.3);
-        else if (name === "select") audio.tone(660, 0.07, "square", 0.4);
-        else if (name === "wave") audio.tone(300, 0.12, "sawtooth", 0.4);
+        if (name === "wave") audio.tone(300, 0.12, "sawtooth", 0.4);
         else if (name === "clear") audio.tone(720, 0.1, "triangle", 0.4);
         else if (name === "leak") audio.tone(140, 0.15, "square", 0.45);
         else if (name === "refuse") audio.tone(200, 0.06, "square", 0.35);

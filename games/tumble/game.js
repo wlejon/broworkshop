@@ -112,7 +112,7 @@ export const game = {
                 const available = PIECE_ORDER.filter((t) => (budget[t] || { limit: 0 }).limit > 0);
                 if (i - 1 < available.length) {
                     run.build.selected = available[i - 1];
-                    run.play("select");
+                    run.play("pick");
                     refreshPalette(run);
                     rebuildGhost(run);
                 }
@@ -122,7 +122,7 @@ export const game = {
             const def = PIECES[run.build.selected];
             if (def && def.rotatable) {
                 run.build.rot = (run.build.rot + 1) & 3;
-                run.play("menu");
+                run.play("tick");
                 rebuildGhost(run);
             }
         }
@@ -130,13 +130,13 @@ export const game = {
             const b = run.level.bounds.y;
             run.build.layer = Math.max(b[0], run.build.layer - 1);
             if (SCENE.layerPlane) SCENE.layerPlane.y = run.build.layer + 0.001;
-            run.play("menu");
+            run.play("tick");
         }
         if (input.pressed("layer_up") && run.mode === "build") {
             const b = run.level.bounds.y;
             run.build.layer = Math.min(b[1], run.build.layer + 1);
             if (SCENE.layerPlane) SCENE.layerPlane.y = run.build.layer + 0.001;
-            run.play("menu");
+            run.play("tick");
         }
         if (input.pressed("primary")) {
             toggleMode(run);
@@ -253,9 +253,11 @@ export const game = {
         return null;
     },
 
+    // Game SFX only — menu move/select are shell-owned.
+    // "tick" / "pick" are build-UI feedback (not shell chrome).
     cue(name, audio) {
-        if (name === "menu") audio.tone(440, 0.03, "sine", 0.3);
-        else if (name === "select") audio.tone(620, 0.06, "square", 0.35);
+        if (name === "tick") audio.tone(440, 0.03, "sine", 0.3);
+        else if (name === "pick") audio.tone(620, 0.06, "square", 0.35);
         else if (name === "place") audio.tone(540, 0.04, "triangle", 0.3);
         else if (name === "remove") audio.tone(200, 0.06, "square", 0.3);
         else if (name === "drop") audio.tone(320, 0.04, "sine", 0.25);
@@ -1003,7 +1005,7 @@ function refreshPalette(run) {
     for (const item of el.querySelectorAll(".palette-item")) {
         item.addEventListener("click", () => {
             run.build.selected = item.getAttribute("data-piece");
-            run.play("select");
+            run.play("pick");
             refreshPalette(run);
             rebuildGhost(run);
         });

@@ -1190,9 +1190,7 @@ export const game = {
     },
 
     cue(name, audio) {
-        if (name === "menu") audio.tone(440, 0.04, "sine", 0.3);
-        else if (name === "select") audio.tone(660, 0.07, "square", 0.4);
-        else if (name === "refuse") audio.tone(200, 0.06, "square", 0.35);
+        if (name === "refuse") audio.tone(200, 0.06, "square", 0.35);
         else if (name === "win") {
             audio.sequence([
                 [523, 0.1, "square", 0.5],

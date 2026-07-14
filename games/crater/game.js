@@ -13,9 +13,6 @@ let pendingJoin = null;
 /** @type {object|null} Last shell api (for net callbacks when run is mid-flight). */
 let shellApi = null;
 
-/** @type {object|null} */
-let activeRun = null;
-
 let toastTimer = 0;
 
 export const game = {
@@ -66,13 +63,11 @@ export const game = {
             _result: null,
         };
 
-        activeRun = run;
         connectRun(run, join);
         return run;
     },
 
     update(run, dt, input) {
-        activeRun = run;
         shellApi = run.api || shellApi;
 
         // Join failed before a lobby state arrived — bounce to title with error.
@@ -195,9 +190,7 @@ export const game = {
     },
 
     cue(name, audio) {
-        if (name === "menu") audio.tone(420, 0.04, "sine", 0.3);
-        else if (name === "select") audio.tone(660, 0.08, "square", 0.35);
-        else if (name === "aim") audio.tone(280, 0.02, "sine", 0.15);
+        if (name === "aim") audio.tone(280, 0.02, "sine", 0.15);
         else if (name === "fire") {
             audio.sequence([
                 [200, 0.07, "sawtooth", 0.5],

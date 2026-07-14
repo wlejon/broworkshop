@@ -1181,7 +1181,7 @@ export const game = {
     gameOverText(run) {
         if (!core) return "";
         const w = core.winner;
-        const tag = run && run._newBest ? "  (NEW BEST!)" : "";
+        const tag = run && run._newBest ? "  ·  NEW BEST" : "";
         const lines = [];
         if (w) lines.push(w.name + " WINS THE MATCH");
         else lines.push("MATCH OVER");
@@ -1217,9 +1217,7 @@ export const game = {
     },
 
     cue(name, audio) {
-        if (name === "menu") audio.tone(440, 0.03, "sine", 0.3);
-        else if (name === "select") audio.tone(620, 0.06, "square", 0.35);
-        else if (name === "bomb") audio.tone(180, 0.05, "square", 0.35);
+        if (name === "bomb") audio.tone(180, 0.05, "square", 0.35);
         else if (name === "round") {
             audio.sequence([
                 [523, 0.08, "square", 0.45],
