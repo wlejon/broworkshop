@@ -1,7 +1,7 @@
 // Farm — arcade foundation plugin (3D NPC farm sim).
-// Domain modules preserved: world, orchestrator, tasks, player, render3d,
-// stations, voice, defs, env, market, knowledge.
-// Shell owns menus / pause / session; scene lives on #view.
+// Domain modules: world, orchestrator, tasks, player, render3d, stations,
+// voice, defs, env, market, knowledge. Shell owns menus / pause / session.
+// Scene on #view; hidden shell canvas in main.js.
 
 import { createWorld } from "/app/world.js";
 import { createRenderer } from "/app/render3d.js";
@@ -58,7 +58,8 @@ let hudAccum = 0;
 let statOpen = false;
 
 /** @type {object|null} */
-let G = null;
+/** @type {object|null} Latest run (wiring + HUD). */
+let activeRun = null;
 
 export const game = {
     id: "farm",
@@ -85,13 +86,13 @@ export const game = {
             save: ctx.save,
             audio: ctx.audio,
         };
-        G = run;
+        activeRun = run;
         updateHUD();
         return run;
     },
 
     update(run, dt, input) {
-        G = run;
+        activeRun = run;
         if (!world || !renderer) return;
 
         if (input.pressed("primary")) doInteract(run);
@@ -215,8 +216,8 @@ function ensureSim(ctx) {
     globalThis.world = world;
     globalThis.player = world.player;
     globalThis.orchestrator = orchestrator;
-    globalThis.farmInteract = () => doInteract(G);
-    globalThis.farmBuyFeed = () => doBuyFeed(G);
+    globalThis.farmInteract = () => doInteract(activeRun);
+    globalThis.farmBuyFeed = () => doBuyFeed(activeRun);
     globalThis.farmStart = () => { /* shell owns start via Play */ };
 
     function speakerPos(id) {

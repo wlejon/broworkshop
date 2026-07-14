@@ -1,6 +1,7 @@
 // Crater — multiplayer artillery client on the arcade foundation.
-// Server (server.js) + shared math (shared.js) are unchanged.
-// Screens / loop / pause chrome: /lib/arcade. Match + net: this plugin.
+// Unchanged: server.js (authoritative), shared.js (height / crater math).
+// This file: shell plugin + net client + local aim / trajectory draw.
+// Layout: plugin → connect/net → helpers/HUD → match sim → draw.
 
 import { NetRoom } from "/lib/netroom.js";
 import { CraterShared } from "/app/shared.js";

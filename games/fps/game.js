@@ -1,6 +1,7 @@
-// FPS Arena — arcade foundation plugin (multiplayer client).
-// Server remains server.js (authoritative). Shell owns title/pause/howto;
-// scene + combat HUD live on #view / #hud. Netplay protocol unchanged.
+// FPS Arena — multiplayer client on the arcade foundation.
+// Server: server.js (authoritative, protocol unchanged).
+// This file: shell plugin + scene + local predict + net interpolate + combat HUD.
+// Layout: constants → session state → plugin → scene → remotes → input → net → HUD.
 
 import { crosshair } from "/lib/crosshair.js";
 
@@ -97,7 +98,8 @@ let pendingDisconnect = false;
 let connectError = "";
 
 /** @type {object|null} */
-let G = null;
+/** @type {object|null} Latest run (wiring + HUD). */
+let activeRun = null;
 
 export const game = {
     id: "fps",
@@ -133,7 +135,7 @@ export const game = {
             connecting: true,
             connected: false,
         };
-        G = run;
+        activeRun = run;
 
         try {
             bro.net.init();
@@ -149,7 +151,7 @@ export const game = {
     },
 
     update(run, dt, input) {
-        G = run;
+        activeRun = run;
 
         if (pendingDisconnect) {
             pendingDisconnect = false;
@@ -577,9 +579,9 @@ function ensureNetWiring() {
         buildScene();
         sendName(session.name);
 
-        if (G) {
-            G.connected = true;
-            G.connecting = false;
+        if (activeRun) {
+            activeRun.connected = true;
+            activeRun.connecting = false;
         }
 
         try {
@@ -598,7 +600,7 @@ function ensureNetWiring() {
 
     bro.net.ondisconnect = () => {
         connectError = connectError || "Lost connection to server";
-        if (G) G.connecting = false;
+        if (activeRun) activeRun.connecting = false;
         // Defer teardown to update so we can return gameover status cleanly.
         pendingDisconnect = true;
         releasePointer();
@@ -685,7 +687,7 @@ function handleBinaryMessage(data) {
                     localHealth = health;
                     localAlive = alive;
                     localKills = kills;
-                    if (G) G.score = kills;
+                    if (activeRun) activeRun.score = kills;
                 } else {
                     const r = getOrCreateRemote(id);
                     r.states.push({ t: now, x, y, z, yaw, health, alive, kills });
@@ -718,12 +720,12 @@ function handleBinaryMessage(data) {
                 const killerId = v.getUint16(2, true);
                 const victimId = v.getUint16(4, true);
                 addKillFeed(killerId, victimId);
-                if (G && G.play && killerId === myId) G.play("kill");
+                if (activeRun && activeRun.play && killerId === myId) activeRun.play("kill");
             } else if (evtType === EVT_HIT) {
                 const victimId = v.getUint16(4, true);
                 if (victimId === myId) {
                     flashDamage();
-                    if (G && G.play) G.play("hit");
+                    if (activeRun && activeRun.play) activeRun.play("hit");
                 }
             } else if (evtType === EVT_SPAWN) {
                 const sx = v.getFloat32(2, true);
