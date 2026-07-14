@@ -1,18 +1,24 @@
-// board.js — Gemswap board state, match detection, cascades, rendering.
+// board.js — Gemswap domain (no shell / screens / storage).
+// Sections: constants → state → pure helpers → game flow → layout/draw →
+//           input → update/cascades → HUD → public API.
+// game.js injects audio via setPlay / setMatchCue.
 'use strict';
 import { Puzzles } from "/app/puzzles.js";
 import { Particles } from "/app/particles.js";
 
 export const Board = (function () {
-    // Injected by game.js: play("cueName") → arcade shell cues.
+    // --- Injected hooks -----------------------------------------------------
+    // play("cueName") → arcade shell cues (wired by game.js).
     var _play = function (/* name */) {};
     var _matchCue = null;
+
+    // --- Constants ----------------------------------------------------------
     var ROWS = 8;
     var COLS = 8;
     var COLORS_N = 7;
 
-    // Gem type constants. 1..7 are the normal colors. Specials are bit flags
-    // applied on top of a base color (except HYPER which is a standalone neutral).
+    // Gem type constants. 1..7 are normal colors. Specials sit on a base
+    // color (except HYPER, which is a standalone neutral).
     var SPECIAL_NONE  = 0;
     var SPECIAL_FLAME = 1;   // match-4: 3x3 burst
     var SPECIAL_STAR  = 2;   // L/T match: row+column
@@ -30,7 +36,7 @@ export const Board = (function () {
         { name: 'onyx',     core: '#7a90b0', rim: '#c0cce0', dark: '#2a3448' },
     ];
 
-    // State
+    // --- Mutable state ------------------------------------------------------
     var grid = [];             // [r][c] = { color:1..7, special:0..3, frozen:bool } or null
     var rows = ROWS, cols = COLS;
     var layout = { ox: 0, oy: 0, cell: 64, boardW: 0, boardH: 0 };
@@ -49,14 +55,14 @@ export const Board = (function () {
     var finished = false;
     var gameOverFlag = false;
 
-    // Selection / animation state.
+    // Selection / hint
     var sel = null;            // {r,c} first pick
     var cursor = { r: 4, c: 4, active: false };
     var idleTimer = 0;
     var hint = null;           // {r,c,dr,dc} highlighted valid move
     var hintDelay = 5000;
 
-    // Animations
+    // Animation drivers
     var animating = false;
     var anims = [];            // active animation list
     var pendingFalls = null;   // after match clear, enqueue falls

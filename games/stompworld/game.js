@@ -1,6 +1,11 @@
-// Stompworld — arcade foundation plugin.
+// Stompworld — arcade foundation plugin (human play + train/demo entry).
 // Play mode: create/update/draw/hud. Train / AI Demo via onMenuAction.
-// Domain physics: sim.js; level layout: level.js; sprites: art.js.
+//
+// File roles:
+//   game.js   this plugin — live input, combat, draw, modes
+//   sim.js    headless env for agents / MCTS (SwSim.create)
+//   level.js  tilemap layout    art.js  sprites
+//   train.js / demo.js / agent*  learning pipeline (not the live loop)
 
 'use strict';
 

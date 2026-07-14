@@ -1,14 +1,17 @@
-// board.js — Fluffshuffle board state, wrap-drag mechanics, match detection,
-// cascades, scoring, and rendering.
-// Audio via _play(name); settings via _settings (dragDead, eyeTrack, showCursor).
+// board.js — Fluffshuffle domain (no shell / screens / storage).
+// Sections: constants → state → pure helpers → game flow → layout → draw →
+//           wrap-drag input → keyboard → cascades → HUD → public API.
+// Audio via setPlay; prefs via setSettings (dragDead, eyeTrack, showCursor).
 'use strict';
 import { Puffs } from "/app/puffs.js";
 import { Particles } from "/app/particles.js";
 
 export const Board = (function () {
+    // --- Injected hooks -----------------------------------------------------
     var _play = function (/* name */) {};
     var _settings = { dragDead: 6, eyeTrack: true, showCursor: true };
 
+    // --- Constants ----------------------------------------------------------
     var ROWS = 6;
     var COLS = 6;
     var COLORS_N = 6;
@@ -19,15 +22,16 @@ export const Board = (function () {
     var SPECIAL_ARROW  = 2;   // match 5 line: row or column clear
     var SPECIAL_PRISM  = 3;   // L/T shape: clear all of matched color
 
-    // Grid state: grid[r][c] = { color:1..6, special:0..3, locked:bool,
-    //                            phase:<rad>, blinkOffset:<ms>, arrowDir?:'h'|'v' }
+    // --- Mutable state ------------------------------------------------------
+    // grid[r][c] = { color:1..6, special:0..3, locked:bool,
+    //                phase:<rad>, blinkOffset:<ms>, arrowDir?:'h'|'v' }
     var grid = [];
     var rows = ROWS, cols = COLS;
 
-    // Layout / rendering anchors set once per frame by calcLayout().
+    // Layout anchors set once per frame by calcLayout().
     var layout = { ox: 0, oy: 0, cell: 96, boardW: 0, boardH: 0 };
 
-    // Gameplay state.
+    // Scoring / mode
     var score = 0;
     var level = 1;
     var mode = 'classic';

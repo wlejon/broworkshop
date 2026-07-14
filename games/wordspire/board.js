@@ -1,5 +1,7 @@
-// board.js — letter-grid word-builder. Grid, chain, pop, settle, burning tiles.
-// Audio via _play(name); settings via _settings; word log via _onWord.
+// board.js — Wordspire domain: letter grid, chain, pop, settle, burning tiles.
+// Sections: constants → RNG → state → grid helpers → path → settle/burn →
+//           pop/submit → chain → lifecycle → HUD → tick/draw → input → tests.
+// Audio via setPlay; prefs via setSettings; word log via setOnWord.
 'use strict';
 import { Dictionary } from "/app/dictionary.js";
 import { Particles } from "/app/particles.js";
@@ -7,10 +9,12 @@ import { Scoring } from "/app/scoring.js";
 import { Text } from "/app/text.js";
 
 export const Board = (function () {
+    // --- Injected hooks -----------------------------------------------------
     var _play = function (/* name */) {};
     var _settings = { difficulty: 1 };
     var _onWord = null;
-    // ---- Constants ------------------------------------------------------
+
+    // --- Constants ----------------------------------------------------------
     var COLS = 7;
     var ROWS = 8;
 

@@ -1,14 +1,15 @@
-// board.js — Blockpop board: rising columns, carrier, pop logic, specials.
-// Convention: board is a 2D array of column-major stacks. board[col] is an
-// array of blocks from BOTTOM (index 0) to TOP. A block is null for empty
-// or { color, special } where color is 1..NUM_COLORS and special is one
-// of SPECIAL_* constants.
-// No screens / storage / audio modules — cues go through Board._play;
-// prefs via Board._settings (set by game.js from arcade save).
+// board.js — Blockpop domain: rising columns, carrier, pop logic, specials.
+// Sections: constants → state → grid helpers → rise/carrier → pop/specials →
+//           input → update → draw → HUD → public API.
+//
+// Board layout: column-major stacks. board[col] is blocks from BOTTOM
+// (index 0) to TOP. A block is null or { color, special }.
+// Cues via setPlay; prefs via setSettings (riseSpeed, colorBlind).
 'use strict';
 import { Particles } from "/app/particles.js";
 
 export const Board = (function () {
+    // --- Injected hooks -----------------------------------------------------
     /** @type {((name: string) => void)|null} */
     var _play = null;
     var _settings = {
@@ -19,6 +20,8 @@ export const Board = (function () {
     function play(name) {
         if (typeof _play === "function") _play(name);
     }
+
+    // --- Constants ----------------------------------------------------------
     var COLS = 8;
     var ROWS = 16;
     var NUM_COLORS = 7;

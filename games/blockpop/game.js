@@ -370,3 +370,52 @@ function dateISO() {
     try { return new Date().toISOString().slice(0, 10); }
     catch (e) { return "----"; }
 }
+
+// ── Test hooks ───────────────────────────────────────────────────────────
+
+/** @type {object|null} */
+let shellRef = null;
+
+export function installTestHooks(shell) {
+    shellRef = shell;
+
+    const Screens = {
+        switchTo: function (name) {
+            if (name === "playing" || name === "play") {
+                if (!shell.getRun()) {
+                    pendingMode = pendingMode || "classic";
+                    shell.startRun();
+                } else {
+                    shell.switchTo("playing");
+                }
+            } else if (name === "title") {
+                shell.switchTo("title");
+            } else if (name === "gameOver" || name === "gameover") {
+                shell.switchTo("gameover");
+            } else {
+                shell.switchTo(name);
+            }
+        },
+        manager: function () {
+            return {
+                name: function () { return shell.getScreen(); },
+                current: function () { return null; },
+            };
+        },
+    };
+
+    window.__blockpop = {
+        G: {
+            Board: Board,
+            Particles: Particles,
+            Screens: Screens,
+        },
+        board: Board,
+        particles: Particles,
+        screens: Screens,
+        shell: shell,
+        // Convenience for tests (also on Board).
+        pick: function () { return Board.pick(); },
+        place: function () { return Board.place(); },
+    };
+}

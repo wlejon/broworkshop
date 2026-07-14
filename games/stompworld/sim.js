@@ -1,6 +1,6 @@
-// sim.js — headless, snapshot/restorable wrapper around the stompworld
-// physics. Used both by the live game (when driven by an AI agent) and as
-// the MCTS rollout substrate.
+// sim.js — headless, snapshot/restorable stompworld env (SwSim).
+// Used by AI play, training, and MCTS rollouts — not by the human play loop
+// in game.js (that drives Platformer + combat directly for full control).
 //
 // Action space — single head, 6 movement actions:
 //   0 idle, 1 left, 2 right, 3 jump, 4 jump-left, 5 jump-right
@@ -51,7 +51,7 @@ import { Platformer } from "/lib/platformer.js";
     const PER_HEAD_TOTAL    = 6;
     const FLAT_NUM_ACTIONS  = 6;
 
-    // Player stomp impulse; mirrors app.js handleStompers.
+    // Player stomp impulse; mirrors game.js handleStompers.
     const STOMP_BOUNCE_VY = -380;
 
     // Reward shaping.
