@@ -9,9 +9,7 @@ const COLOR_PITCH = [0, 440, 494, 523, 587, 659, 784];
 
 let preferredMode = "classic";
 let hsMode = "classic";
-let mouseWired = false;
 let shellRef = null;
-let activeRun = null;
 
 export const game = {
     id: "fluffshuffle",
@@ -43,8 +41,6 @@ export const game = {
         Board.startGame(preferredMode);
         if (Particles.clear) Particles.clear();
 
-        wireMouse(ctx.view);
-
         const run = {
             score: 0,
             mode: preferredMode,
@@ -54,14 +50,12 @@ export const game = {
             view: ctx.view,
             ended: false,
         };
-        activeRun = run;
+        attachPointer(run);
         syncScore(run);
         return run;
     },
 
     update(run, dt, input) {
-        activeRun = run;
-
         if (input.pressed("up")) Board.cursorSlide(-1, 0);
         else if (input.pressed("down")) Board.cursorSlide(1, 0);
         else if (input.pressed("left")) Board.cursorSlide(0, -1);
@@ -125,17 +119,17 @@ export const game = {
         const modeLabel = m.charAt(0).toUpperCase() + m.slice(1);
         const title = document.querySelector("#screen-gameover .overlay-title");
         if (title) title.textContent = finished ? (modeLabel + " Complete!") : "Game Over";
-        const tag = run && run._newBest ? "\n  NEW HIGH SCORE!" : "";
-        return [
-            "Score: " + score,
-            "Level: " + Board.getLevel() + "    Moves: " + Board.getMoves(),
-            "Popped: " + (stats.popped || 0),
-            "Max Chain: x" + Board.getMaxChain(),
-            "Specials: J" + (stats.jumboMade || 0) +
+        const tag = run && run._newBest ? "  ·  NEW BEST" : "";
+        return (
+            "Score      " + score + tag + "\n" +
+            "Level      " + Board.getLevel() + "    Moves  " + Board.getMoves() + "\n" +
+            "Popped     " + (stats.popped || 0) + "\n" +
+            "Max Chain  x" + Board.getMaxChain() + "\n" +
+            "Specials   J" + (stats.jumboMade || 0) +
                 " A" + (stats.arrowMade || 0) +
-                " P" + (stats.prismMade || 0),
-            "Unlocks: " + (stats.unlocks || 0) + tag,
-        ].join("\n");
+                " P" + (stats.prismMade || 0) + "\n" +
+            "Unlocks    " + (stats.unlocks || 0)
+        );
     },
 
     onEnterScreen(name, run, api) {
@@ -220,10 +214,9 @@ export const game = {
         return null;
     },
 
+    // Game SFX only — menu move/select are shell-owned.
     cue(name, audio) {
-        if (name === "menu") audio.tone(420, 0.04, "sine", 0.3);
-        else if (name === "select") audio.tone(660, 0.08, "triangle", 0.45);
-        else if (name === "grab") audio.tone(520, 0.05, "sine", 0.35);
+        if (name === "grab") audio.tone(520, 0.05, "sine", 0.35);
         else if (name === "snap") audio.tone(880, 0.04, "square", 0.3);
         else if (name === "cursor") audio.tone(380, 0.04, "sine", 0.22);
         else if (name === "thud") audio.tone(120, 0.16, "sawtooth", 0.4);
@@ -277,38 +270,46 @@ function syncScore(run) {
     if (run) run.score = Board.getScore();
 }
 
-function wireMouse(view) {
-    if (!view || !view.canvas || mouseWired) return;
-    mouseWired = true;
-    const canvas = view.canvas;
+/** One listener set per canvas; always targets the latest run on that canvas. */
+function attachPointer(run) {
+    const canvas = run.view && run.view.canvas;
+    if (!canvas) return;
+    canvas._fluffshuffleRun = run;
+    if (canvas._fluffshufflePointer) return;
+    canvas._fluffshufflePointer = true;
 
     function localXY(e) {
-        const rect = canvas.getBoundingClientRect ? canvas.getBoundingClientRect() : null;
-        const W = view.width();
-        const H = view.height();
+        const r = canvas._fluffshuffleRun;
+        if (!r || !r.view) return null;
+        const rect = canvas.getBoundingClientRect
+            ? canvas.getBoundingClientRect()
+            : null;
+        const W = r.view.width();
+        const H = r.view.height();
         if (rect) {
             return {
                 x: (e.clientX - rect.left) * (W / (rect.width || W)),
                 y: (e.clientY - rect.top) * (H / (rect.height || H)),
             };
         }
-        return { x: e.offsetX || e.clientX, y: e.offsetY || e.clientY };
+        if (typeof e.offsetX === "number") return { x: e.offsetX, y: e.offsetY };
+        return { x: e.clientX, y: e.clientY };
     }
 
     canvas.addEventListener("mousedown", function (e) {
         if (!shellRef || shellRef.getScreen() !== "playing") return;
         const p = localXY(e);
-        Board.handleMouseDown(p.x, p.y);
+        if (p) Board.handleMouseDown(p.x, p.y);
     });
     canvas.addEventListener("mousemove", function (e) {
         if (!shellRef || shellRef.getScreen() !== "playing") return;
         const p = localXY(e);
-        Board.handleMouseMove(p.x, p.y);
+        if (p) Board.handleMouseMove(p.x, p.y);
     });
     canvas.addEventListener("mouseup", function (e) {
         if (!shellRef || shellRef.getScreen() !== "playing") return;
         const p = localXY(e);
-        Board.handleMouseUp(p.x, p.y);
+        if (p) Board.handleMouseUp(p.x, p.y);
     });
 }
 

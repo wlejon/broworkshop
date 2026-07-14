@@ -28,7 +28,6 @@ var tankTop = 70, tankBottom = 760, tankLeft = 40, tankRight = 1160;
 var viewW = 1200, viewH = 800;
 
 var _play = function (/* name */) {};
-var mouseWired = false;
 var shellRef = null;
 var bgT = 0;
 
@@ -530,21 +529,29 @@ function rebuildShop() {
     if (title) title.textContent = "DAY " + slot.day + " - " + slot.coins + " COINS";
 }
 
-function wireMouse(view) {
-    if (!view || !view.canvas || mouseWired) return;
-    mouseWired = true;
+/** One listener set per canvas; always targets the latest view on that canvas. */
+function attachPointer(view) {
+    if (!view || !view.canvas) return;
     var canvas = view.canvas;
+    canvas._fintankView = view;
+    if (canvas._fintankPointer) return;
+    canvas._fintankPointer = true;
     canvas.addEventListener("mousedown", function (e) {
         if (!shellRef || shellRef.getScreen() !== "playing") return;
+        var v = canvas._fintankView;
+        if (!v) return;
         var rect = canvas.getBoundingClientRect ? canvas.getBoundingClientRect() : null;
-        var W = view.width(), H = view.height();
+        var W = v.width(), H = v.height();
         var x, y;
         if (rect) {
             x = (e.clientX - rect.left) * (W / (rect.width || W));
             y = (e.clientY - rect.top) * (H / (rect.height || H));
+        } else if (typeof e.offsetX === "number") {
+            x = e.offsetX;
+            y = e.offsetY;
         } else {
-            x = e.offsetX || e.clientX;
-            y = e.offsetY || e.clientY;
+            x = e.clientX;
+            y = e.clientY;
         }
         clickAt(x, y);
     });
@@ -631,7 +638,7 @@ export const game = {
         }
         if (!slot) startGame(Economy.settings.activeSlot || 1);
         enterPlayScreen();
-        wireMouse(ctx.view);
+        attachPointer(ctx.view);
         viewW = ctx.view.width();
         viewH = ctx.view.height();
 
@@ -720,12 +727,13 @@ export const game = {
     gameOverText(run) {
         if (!slot) return "ALL YOUR FISH WERE LOST";
         var st = gameOverStats();
-        return [
-            "ALL YOUR FISH WERE LOST",
-            "BEST DAY: " + st.bestDay,
-            "TOTAL COINS: " + st.totalCoins,
-            "SLOT: " + st.slot,
-        ].join("\n");
+        var tag = run && run._newBest ? "  ·  NEW BEST" : "";
+        return (
+            "ALL YOUR FISH WERE LOST\n\n" +
+            "Best Day     " + st.bestDay + tag + "\n" +
+            "Total Coins  " + st.totalCoins + "\n" +
+            "Slot         " + st.slot
+        );
     },
 
     onEnterScreen(name, run, api) {
@@ -848,10 +856,9 @@ export const game = {
         return null;
     },
 
+    // Game SFX only — menu move/select are shell-owned.
     cue(name, audio) {
-        if (name === "menu") audio.tone(420, 0.03, "sine", 0.3);
-        else if (name === "select") audio.tone(620, 0.07, "square", 0.45);
-        else if (name === "feed") audio.tone(280, 0.06, "triangle", 0.4);
+        if (name === "feed") audio.tone(280, 0.06, "triangle", 0.4);
         else if (name === "splash") audio.tone(180, 0.05, "sine", 0.3);
         else if (name === "chomp") audio.tone(220, 0.04, "square", 0.35);
         else if (name === "hit") audio.tone(140, 0.05, "sawtooth", 0.5);

@@ -11,11 +11,6 @@ const MAX_SAFE_TILT = 0.22;
 const LANDER_W = 14;
 const LANDER_H = 16;
 
-/** @type {object|null} */
-let activeRun = null;
-let mouseWired = false;
-const pointer = { x: 450, y: 400 };
-
 // Persistent thrust voice (one-shot tones don't sustain).
 let thrustVoice = -1;
 let thrustOn = false;
@@ -234,27 +229,6 @@ function stopThrust(audio) {
     thrustOn = false;
 }
 
-// ── Mouse ────────────────────────────────────────────────────────────────
-
-function wireMouse(view) {
-    if (mouseWired || !view || !view.canvas) return;
-    mouseWired = true;
-    const canvas = view.canvas;
-    canvas.addEventListener("mousemove", (ev) => {
-        const rect = canvas.getBoundingClientRect();
-        if (!rect.width || !rect.height) return;
-        const W = view.width();
-        const H = view.height();
-        pointer.x = (ev.clientX - rect.left) * (W / rect.width);
-        pointer.y = (ev.clientY - rect.top) * (H / rect.height);
-        if (activeRun) {
-            activeRun.mouse.x = pointer.x;
-            activeRun.mouse.y = pointer.y;
-        }
-    });
-    canvas.addEventListener("contextmenu", (ev) => ev.preventDefault());
-}
-
 // ── Plugin ───────────────────────────────────────────────────────────────
 
 export const game = {
@@ -272,7 +246,6 @@ export const game = {
 
     create(ctx) {
         const { w, h } = ctx.view.size();
-        wireMouse(ctx.view);
         stopThrust(ctx.audio);
 
         const level = 1;
@@ -300,14 +273,11 @@ export const game = {
             view: ctx.view,
         };
 
-        activeRun = run;
-        pointer.x = w / 2;
-        pointer.y = h / 2;
+        attachPointer(run);
         return run;
     },
 
     update(run, dt, input) {
-        activeRun = run;
         if (run.gameOver) {
             stopThrust(run.audio);
             return { status: "gameover", score: run.score };
@@ -322,8 +292,6 @@ export const game = {
         run.H = size.h;
 
         run.mouse.held = input.down("secondary");
-        run.mouse.x = pointer.x;
-        run.mouse.y = pointer.y;
 
         stepSim(run, dt, input);
 
@@ -368,13 +336,12 @@ export const game = {
         const level = run ? run.level : 1;
         const landed = run ? run.landings : 0;
         const best = run ? run.highScore() : 0;
-        const tag = run && run._newBest ? "\n\nNEW HIGH SCORE!" : "";
+        const tag = run && run._newBest ? "  ·  NEW BEST" : "";
         return (
-            "SCORE     " + score + "\n" +
-            "LEVEL     " + level + "\n" +
-            "LANDED    " + landed + "\n" +
-            "HI        " + best +
-            tag
+            "Score     " + score + tag + "\n" +
+            "Level     " + level + "\n" +
+            "Landed    " + landed + "\n" +
+            "Best      " + best
         );
     },
 
@@ -408,10 +375,9 @@ export const game = {
         }
     },
 
+    // Game SFX only — menu move/select are shell-owned.
     cue(name, audio) {
-        if (name === "menu") audio.tone(400, 0.03, "sine", 0.3);
-        else if (name === "select") audio.tone(600, 0.08, "square", 0.4);
-        else if (name === "landed") {
+        if (name === "landed") {
             audio.sequence([
                 [523, 0.09, "square", 0.6],
                 [659, 0.09, "square", 0.6],
@@ -426,6 +392,31 @@ export const game = {
         }
     },
 };
+
+// ── Pointer ──────────────────────────────────────────────────────────────
+
+/** One listener set per canvas; always targets the latest run on that canvas. */
+function attachPointer(run) {
+    const canvas = run.view && run.view.canvas;
+    if (!canvas) return;
+    canvas._touchdownRun = run;
+    if (canvas._touchdownPointer) return;
+    canvas._touchdownPointer = true;
+
+    canvas.addEventListener("mousemove", (ev) => {
+        const r = canvas._touchdownRun;
+        if (!r || !r.view) return;
+        const rect = canvas.getBoundingClientRect
+            ? canvas.getBoundingClientRect()
+            : null;
+        if (!rect || !rect.width || !rect.height) return;
+        const W = r.view.width();
+        const H = r.view.height();
+        r.mouse.x = (ev.clientX - rect.left) * (W / rect.width);
+        r.mouse.y = (ev.clientY - rect.top) * (H / rect.height);
+    });
+    canvas.addEventListener("contextmenu", (ev) => ev.preventDefault());
+}
 
 // ── Simulation ───────────────────────────────────────────────────────────
 

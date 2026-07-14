@@ -9,7 +9,6 @@ const LADDER = [261.63, 293.66, 329.63, 349.23, 392.0, 440.0, 493.88, 523.25];
 /** Mode selected on mode-select screen before a run starts. */
 let pendingMode = "classic";
 let hsMode = "classic";
-let mouseWired = false;
 
 export const game = {
     id: "blockpop",
@@ -37,35 +36,17 @@ export const game = {
         };
         Board.startGame(pendingMode || "classic");
 
-        const canvas = ctx.view && ctx.view.canvas;
-        if (canvas && !mouseWired) {
-            mouseWired = true;
-            canvas.addEventListener("click", (e) => {
-                const rect = canvas.getBoundingClientRect
-                    ? canvas.getBoundingClientRect()
-                    : null;
-                let x = e.clientX, y = e.clientY;
-                if (rect) {
-                    const scaleX = ctx.view.width() / (rect.width || ctx.view.width());
-                    const scaleY = ctx.view.height() / (rect.height || ctx.view.height());
-                    x = (e.clientX - rect.left) * scaleX;
-                    y = (e.clientY - rect.top) * scaleY;
-                }
-                Board.mouseClick(x, y);
-            });
-            canvas.addEventListener("wheel", (e) => {
-                Board.mouseWheel(e.deltaY || 0);
-            }, { passive: true });
-        }
-
-        return {
+        const run = {
             score: 0,
             play: ctx.play,
             highScore: ctx.highScore,
             save: ctx.save,
+            view: ctx.view,
             alive: true,
             ended: false,
         };
+        attachPointer(run);
+        return run;
     },
 
     update(run, dt, input) {
@@ -112,16 +93,17 @@ export const game = {
     gameOverText(run, result) {
         const st = Board.getStats();
         const fin = st.finished || (result && result.finished);
-        const tag = run && run._newBest ? "  (NEW BEST!)" : "";
-        const lines = [];
-        lines.push(fin ? (st.mode.toUpperCase() + " COMPLETE!") : "GAME OVER");
-        lines.push("");
-        lines.push("Mode: " + st.mode.toUpperCase());
-        lines.push("Score: " + st.score + tag + "   Level: " + st.level);
-        lines.push("Blocks Popped: " + st.blocksPopped);
-        lines.push("Best Chain: x" + st.bestChain);
-        lines.push("Time: " + formatTime(st.gameTime));
-        return lines.join("\n");
+        const tag = run && run._newBest ? "  ·  NEW BEST" : "";
+        const header = fin ? (st.mode.toUpperCase() + " COMPLETE!") : "GAME OVER";
+        return (
+            header + "\n\n" +
+            "Mode     " + st.mode.toUpperCase() + "\n" +
+            "Score    " + st.score + tag + "\n" +
+            "Level    " + st.level + "\n" +
+            "Popped   " + st.blocksPopped + "\n" +
+            "Chain    x" + st.bestChain + "\n" +
+            "Time     " + formatTime(st.gameTime)
+        );
     },
 
     onEnterScreen(name, run, api) {
@@ -197,10 +179,9 @@ export const game = {
         return null;
     },
 
+    // Game SFX only — menu move/select are shell-owned.
     cue(name, audio) {
-        if (name === "menu") audio.tone(420, 0.03, "sine", 0.3);
-        else if (name === "select") audio.tone(620, 0.08, "square", 0.5);
-        else if (name === "pick") audio.tone(660, 0.05, "triangle", 0.35);
+        if (name === "pick") audio.tone(660, 0.05, "triangle", 0.35);
         else if (name === "drop") audio.tone(220, 0.08, "triangle", 0.5);
         else if (name === "move") audio.tone(440, 0.02, "square", 0.15);
         else if (name === "shuffle") audio.tone(320, 0.04, "sine", 0.25);
@@ -267,6 +248,41 @@ export const game = {
 
 // Title "PLAY" uses data-action="modeselect" so shell doesn't start a run.
 // Restart reuses pendingMode via create().
+
+// ── Pointer ──────────────────────────────────────────────────────────────
+
+/** One listener set per canvas; always targets the latest run on that canvas. */
+function attachPointer(run) {
+    const canvas = run.view && run.view.canvas;
+    if (!canvas) return;
+    canvas._blockpopRun = run;
+    if (canvas._blockpopPointer) return;
+    canvas._blockpopPointer = true;
+
+    canvas.addEventListener("click", (e) => {
+        const r = canvas._blockpopRun;
+        if (!r || !r.view) return;
+        const rect = canvas.getBoundingClientRect
+            ? canvas.getBoundingClientRect()
+            : null;
+        let x = e.clientX, y = e.clientY;
+        if (rect) {
+            const scaleX = r.view.width() / (rect.width || r.view.width());
+            const scaleY = r.view.height() / (rect.height || r.view.height());
+            x = (e.clientX - rect.left) * scaleX;
+            y = (e.clientY - rect.top) * scaleY;
+        } else if (typeof e.offsetX === "number") {
+            x = e.offsetX;
+            y = e.offsetY;
+        }
+        Board.mouseClick(x, y);
+    });
+    canvas.addEventListener("wheel", (e) => {
+        Board.mouseWheel(e.deltaY || 0);
+    }, { passive: true });
+}
+
+// ── High scores / settings ───────────────────────────────────────────────
 
 function persistHighScore(run) {
     if (!run || !run.save) return;

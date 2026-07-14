@@ -11,9 +11,7 @@ const LADDER = [261.63, 293.66, 329.63, 349.23, 392.0, 440.0, 493.88, 523.25, 58
 
 let preferredMode = "classic";
 let hsTab = "classic";
-let mouseWired = false;
 let shellRef = null;
-let activeRun = null;
 let bgT = 0;
 
 export const game = {
@@ -49,8 +47,6 @@ export const game = {
         Board.startGame(preferredMode);
         Particles.clear && Particles.clear();
 
-        wireMouse(ctx.view);
-
         const run = {
             score: 0,
             mode: preferredMode,
@@ -60,14 +56,12 @@ export const game = {
             view: ctx.view,
             ended: false,
         };
-        activeRun = run;
+        attachPointer(run);
         syncScore(run);
         return run;
     },
 
     update(run, dt, input) {
-        activeRun = run;
-
         if (input.pressed("left")) Board.moveCursor(-1, 0);
         else if (input.pressed("right")) Board.moveCursor(1, 0);
         else if (input.pressed("up")) Board.moveCursor(0, -1);
@@ -137,16 +131,15 @@ export const game = {
                 ? st.mode.toUpperCase() + " COMPLETE!"
                 : "GAME OVER";
         }
-        const tag = run && run._newBest ? "\n* NEW HIGH SCORE *" : "";
-        const lines = [
-            "Mode: " + st.mode.toUpperCase(),
-            "Score: " + st.score,
-            "Words Played: " + st.words,
-            "Longest: " + (st.longest ? st.longest.toUpperCase() : "-"),
-            "Best: " + (st.bestWord ? (st.bestWord.toUpperCase() + " +" + st.bestWordScore) : "-"),
-            "Time: " + formatTime(st.gameTime) + tag,
-        ];
-        return lines.join("\n");
+        const tag = run && run._newBest ? "  ·  NEW BEST" : "";
+        return (
+            "Mode     " + st.mode.toUpperCase() + "\n" +
+            "Score    " + st.score + tag + "\n" +
+            "Words    " + st.words + "\n" +
+            "Longest  " + (st.longest ? st.longest.toUpperCase() : "-") + "\n" +
+            "Best     " + (st.bestWord ? (st.bestWord.toUpperCase() + " +" + st.bestWordScore) : "-") + "\n" +
+            "Time     " + formatTime(st.gameTime)
+        );
     },
 
     onEnterScreen(name, run, api) {
@@ -214,10 +207,9 @@ export const game = {
         return null;
     },
 
+    // Game SFX only — menu move/select are shell-owned.
     cue(name, audio) {
-        if (name === "menu") audio.tone(420, 0.03, "sine", 0.3);
-        else if (name === "select") audio.tone(620, 0.08, "square", 0.5);
-        else if (name === "submit_fail") {
+        if (name === "submit_fail") {
             audio.sequence([
                 [220, 0.07, "sawtooth", 0.5],
                 [160, 0.12, "sawtooth", 0.5],
@@ -286,33 +278,41 @@ function drawBg(ctx, Wd, Hd) {
     ctx.globalAlpha = 1.0;
 }
 
-function wireMouse(view) {
-    if (!view || !view.canvas || mouseWired) return;
-    mouseWired = true;
-    const canvas = view.canvas;
+/** One listener set per canvas; always targets the latest run on that canvas. */
+function attachPointer(run) {
+    const canvas = run.view && run.view.canvas;
+    if (!canvas) return;
+    canvas._wordspireRun = run;
+    if (canvas._wordspirePointer) return;
+    canvas._wordspirePointer = true;
 
     function localXY(e) {
-        const rect = canvas.getBoundingClientRect ? canvas.getBoundingClientRect() : null;
-        const W = view.width();
-        const H = view.height();
+        const r = canvas._wordspireRun;
+        if (!r || !r.view) return null;
+        const rect = canvas.getBoundingClientRect
+            ? canvas.getBoundingClientRect()
+            : null;
+        const W = r.view.width();
+        const H = r.view.height();
         if (rect) {
             return {
                 x: (e.clientX - rect.left) * (W / (rect.width || W)),
                 y: (e.clientY - rect.top) * (H / (rect.height || H)),
             };
         }
-        return { x: e.offsetX || e.clientX, y: e.offsetY || e.clientY };
+        if (typeof e.offsetX === "number") return { x: e.offsetX, y: e.offsetY };
+        return { x: e.clientX, y: e.clientY };
     }
 
     canvas.addEventListener("click", function (e) {
         if (!shellRef || shellRef.getScreen() !== "playing") return;
         const p = localXY(e);
-        Board.mouseClick(p.x, p.y);
+        if (p) Board.mouseClick(p.x, p.y);
     });
     canvas.addEventListener("dblclick", function (e) {
         if (!shellRef || shellRef.getScreen() !== "playing") return;
         const p = localXY(e);
-        Board.mouseDblClick(p.x, p.y);
+        if (p) Board.mouseDblClick(p.x, p.y);
     });
 }
 
