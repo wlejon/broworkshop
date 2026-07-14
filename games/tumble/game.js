@@ -42,6 +42,9 @@ const SCENE = {
 /** @type {object|null} Latest run (input wiring + palette read this). */
 let activeRun = null;
 
+/** Bumped on teardown so deferred goal-pulse timeouts never touch freed nodes. */
+let goalPulseGen = 0;
+
 export const game = {
     id: "tumble",
     clearColor: "#05060a",
@@ -424,12 +427,67 @@ function loadLevel(run, idx) {
 
 function teardownScene(run) {
     if (!scene) return;
-    const rootChildren = scene.root.children.slice();
-    for (const n of rootChildren) scene.destroyNode(n);
-    const all = Physics.getAllTransforms();
-    for (let i = 0; i < all.length; i += 8) {
-        Physics.destroyBody(all[i] | 0);
+
+    // Cancel deferred fail from a previous run before touching bodies.
+    if (run && run.pendingFail) {
+        clearTimeout(run.pendingFail);
+        run.pendingFail = null;
     }
+
+    // Prefer structured teardown (marbles → pieces → ghost) so we never
+    // double-free through getAllTransforms after a partial destroy.
+    if (run && run.marbles && run.marbles.length) {
+        for (const m of run.marbles.slice()) {
+            try {
+                if (m.body != null) Physics.destroyBody(m.body);
+            } catch (e) { /* already gone */ }
+            try {
+                if (m.node) scene.destroyNode(m.node);
+            } catch (e) { /* already gone */ }
+        }
+        run.marbles.length = 0;
+    }
+
+    if (run && run.placed && run.placed.size) {
+        for (const key of Array.from(run.placed.keys())) {
+            const rec = run.placed.get(key);
+            if (!rec) continue;
+            try {
+                if (rec.node) scene.destroyNode(rec.node);
+            } catch (e) { /* ignore */ }
+            for (const ex of rec.extras || []) {
+                try { scene.destroyNode(ex); } catch (e) { /* ignore */ }
+            }
+            try {
+                if (rec.body != null) Physics.destroyBody(rec.body);
+            } catch (e) { /* ignore */ }
+            for (const eb of rec.extraBodies || []) {
+                try { Physics.destroyBody(eb); } catch (e) { /* ignore */ }
+            }
+        }
+        run.placed.clear();
+    }
+
+    try { destroyGhost(); } catch (e) { /* ignore */ }
+
+    // Environment meshes (ground, goal, spout, lights under root)
+    try {
+        const rootChildren = scene.root.children.slice();
+        for (const n of rootChildren) {
+            try { scene.destroyNode(n); } catch (e) { /* ignore */ }
+        }
+    } catch (e) { /* ignore */ }
+
+    // Sweep any leftover default-world bodies (environment colliders, strays).
+    try {
+        const all = Physics.getAllTransforms();
+        const tags = [];
+        for (let i = 0; i < all.length; i += 8) tags.push(all[i] | 0);
+        for (let t = 0; t < tags.length; t++) {
+            try { Physics.destroyBody(tags[t]); } catch (e) { /* ignore */ }
+        }
+    } catch (e) { /* ignore */ }
+
     SCENE.groundNode = null;
     SCENE.goalMarker = null;
     SCENE.goalFill = null;
@@ -438,21 +496,18 @@ function teardownScene(run) {
     SCENE.ghostParts.length = 0;
     SCENE.ghostIds.clear();
     SCENE.staticDecor.length = 0;
+    goalPulseGen += 1; // invalidate any pending pulseGoal timeout
     if (run) {
-        run.placed.clear();
         run.meshToCell.clear();
         run.bodyToCell.clear();
         run.animatedCells.length = 0;
-        run.marbles.length = 0;
         run.marblesSpawned = 0;
         run.marblesRemoved = 0;
         run.resultMs = null;
         run.runtime = 0;
         run.pending = null;
-        if (run.pendingFail) {
-            clearTimeout(run.pendingFail);
-            run.pendingFail = null;
-        }
+        run.newBest = false;
+        run.failAfter = null;
     }
 }
 
@@ -800,10 +855,15 @@ function enterBuildMode(run) {
     run.mode = "build";
     run.resultMs = null;
     run.runtime = 0;
+    run.failAfter = null;
     if (run.pendingFail) { clearTimeout(run.pendingFail); run.pendingFail = null; }
     for (const m of run.marbles) {
-        if (m.body != null) Physics.destroyBody(m.body);
-        if (m.node) scene.destroyNode(m.node);
+        try {
+            if (m.body != null) Physics.destroyBody(m.body);
+        } catch (e) { /* ignore */ }
+        try {
+            if (m.node) scene.destroyNode(m.node);
+        } catch (e) { /* ignore */ }
     }
     run.marbles.length = 0;
     run.marblesSpawned = 0;
@@ -823,6 +883,11 @@ function enterRunMode(run) {
     run.nextSpawnAt = run.startMs;
     run.marblesSpawned = 0;
     run.marblesRemoved = 0;
+    run.failAfter = null;
+    if (run.pendingFail) {
+        clearTimeout(run.pendingFail);
+        run.pendingFail = null;
+    }
     if (SCENE.layerPlane) SCENE.layerPlane.visible = false;
     setGhostVisible(false);
     run.play("drop");
@@ -889,7 +954,15 @@ function simTick(run, dt) {
             run.resultMs = run.runtime;
             onLevelCompleted(run);
         }
-        if (p.y < -6) {
+        // Cull marbles that fell off the world OR drifted far outside the
+        // place bounds (failed runs used to soft-lock: marbles rest on the
+        // ground forever and never hit y < -6).
+        const b = run.level.bounds;
+        const oob =
+            p.y < -4 ||
+            p.x < b.x[0] - 3 || p.x > b.x[1] + 3 ||
+            p.z < b.z[0] - 3 || p.z > b.z[1] + 3;
+        if (oob) {
             destroyMarble(run, m);
             run.marbles.splice(i, 1);
         }
@@ -934,15 +1007,25 @@ function simTick(run, dt) {
         }
     }
 
-    if (run.resultMs == null &&
-        run.marblesSpawned >= run.level.maxMarbles &&
-        run.marblesRemoved >= run.marblesSpawned &&
-        run.pendingFail == null) {
-        run.pendingFail = setTimeout(() => {
-            if (run.resultMs == null && run.mode === "run") {
+    // Fail conditions:
+    // 1) Every marble has been culled (fell off) — short grace, then fail.
+    // 2) All marbles have been spawned and none scored for a few seconds —
+    //    covers the common case of marbles resting on the ground outside the cup.
+    if (run.resultMs == null && run.mode === "run") {
+        if (run.marblesSpawned >= run.level.maxMarbles &&
+            run.marbles.length === 0 &&
+            run.pendingFail == null) {
+            run.pendingFail = setTimeout(() => {
+                if (run.resultMs == null && run.mode === "run") onLevelFailed(run);
+            }, 400);
+        } else if (run.marblesSpawned >= run.level.maxMarbles && run.marbles.length > 0) {
+            if (run.failAfter == null) {
+                // Grace after the final marble drops so a late bounce can still score.
+                run.failAfter = run.runtime + 3500;
+            } else if (run.runtime >= run.failAfter) {
                 onLevelFailed(run);
             }
-        }, 900);
+        }
     }
 }
 
@@ -973,6 +1056,28 @@ function onLevelCompleted(run) {
     pulseGoal();
     run.play("goal");
     setCoachVisible(false);
+
+    // Freeze the playfield: stop fail timers and remove live marbles so the
+    // complete overlay is not sitting on a still-simulating physics world
+    // (restarting mid-sim was crashing headless / Jolt).
+    if (run.pendingFail) {
+        clearTimeout(run.pendingFail);
+        run.pendingFail = null;
+    }
+    for (const m of run.marbles.slice()) {
+        try {
+            if (m.body != null) {
+                run.bodyToCell.delete(m.body);
+                Physics.destroyBody(m.body);
+            }
+        } catch (e) { /* ignore */ }
+        try {
+            if (m.node) scene.destroyNode(m.node);
+        } catch (e) { /* ignore */ }
+    }
+    run.marbles.length = 0;
+    run.mode = "complete";
+
     run.pending = "complete";
 }
 
@@ -1219,17 +1324,21 @@ function setCoachVisible(on) {
 
 function pulseGoal() {
     if (!SCENE.goalMarker && !SCENE.goalFill) return;
-    const nodes = [];
-    if (SCENE.goalFill) nodes.push(SCENE.goalFill);
+    const gen = goalPulseGen;
+    const fill = SCENE.goalFill;
+    const rimKids = [];
     if (SCENE.goalMarker) {
         try {
-            for (const c of SCENE.goalMarker.children || []) nodes.push(c);
+            for (const c of SCENE.goalMarker.children || []) rimKids.push(c);
         } catch (e) { /* ignore */ }
     }
+    const nodes = fill ? [fill].concat(rimKids) : rimKids.slice();
     for (const n of nodes) {
         try { n.emissive = 4.5; } catch (e) { /* ignore */ }
     }
     setTimeout(() => {
+        // Scene may have been torn down / rebuilt since the pulse started.
+        if (gen !== goalPulseGen) return;
         for (const n of nodes) {
             try {
                 if (n === SCENE.goalFill) n.emissive = 0.6;
@@ -1246,4 +1355,179 @@ function toast(text, ms) {
     el.textContent = text;
     area.appendChild(el);
     setTimeout(() => { if (el.parentNode) el.parentNode.removeChild(el); }, ms || 1600);
+}
+
+// ── Test hooks (window.__tumble) ─────────────────────────────────────────
+
+/**
+ * Headless / harness surface for bro-headless gameplay tests.
+ * Wired from main.js via installTestHooks(shell).
+ */
+export function installTestHooks(shell) {
+    window.__tumble = {
+        shell,
+        LEVELS,
+        PIECES,
+        PIECE_ORDER,
+        medalFor,
+        fmt,
+        get run() {
+            return activeRun || (shell.getRun && shell.getRun()) || null;
+        },
+        get scene() { return scene; },
+        get cam() { return cam; },
+        get budget() { return budget; },
+        get save() { return shell.api && shell.api.save; },
+        get screen() { return shell.getScreen ? shell.getScreen() : null; },
+
+        /** Wipe progress to defaults. */
+        resetProgress() {
+            const save = this.save;
+            if (!save) return;
+            save.set("best", {});
+            save.set("unlocked", 1);
+            save.set("lastLevel", 0);
+            save.set("coachDone", false);
+            save.save();
+            session.levelIdx = 0;
+        },
+
+        /** Start (or restart) a run on level index. */
+        startLevel(idx) {
+            // Tear down any live playfield before shell.create rebuilds it.
+            const prev = activeRun || (shell.getRun && shell.getRun());
+            if (prev) {
+                try { teardownScene(prev); } catch (e) { /* ignore */ }
+            }
+            session.levelIdx = idx | 0;
+            if (shell.startRun) shell.startRun();
+            return this.run;
+        },
+
+        place(type, cx, cy, cz, rot) {
+            const run = this.run;
+            if (!run) return false;
+            const ok = placePiece(run, type, cx, cy, cz, rot | 0);
+            if (ok) {
+                if (run.play) run.play("place");
+                refreshPalette(run);
+                advanceCoach(run, "place");
+            }
+            return ok;
+        },
+
+        removeAt(cx, cy, cz) {
+            const run = this.run;
+            if (!run) return false;
+            const ok = removePiece(run, cellKey(cx, cy, cz));
+            if (ok) {
+                if (run.play) run.play("remove");
+                refreshPalette(run);
+            }
+            return ok;
+        },
+
+        select(type) {
+            const run = this.run;
+            if (!run || !PIECES[type]) return false;
+            run.build.selected = type;
+            rebuildGhost(run);
+            refreshPalette(run);
+            return true;
+        },
+
+        rotate() {
+            const run = this.run;
+            if (!run) return false;
+            const def = PIECES[run.build.selected];
+            if (!def || !def.rotatable) return false;
+            run.build.rot = (run.build.rot + 1) & 3;
+            rebuildGhost(run);
+            return true;
+        },
+
+        setLayer(y) {
+            const run = this.run;
+            if (!run || !run.level) return false;
+            const b = run.level.bounds.y;
+            run.build.layer = Math.max(b[0], Math.min(b[1], y | 0));
+            if (SCENE.layerPlane) SCENE.layerPlane.y = run.build.layer + 0.001;
+            return true;
+        },
+
+        enterRun() {
+            const run = this.run;
+            if (!run) return false;
+            enterRunMode(run);
+            return true;
+        },
+
+        enterBuild() {
+            const run = this.run;
+            if (!run) return false;
+            enterBuildMode(run);
+            refreshPalette(run);
+            return true;
+        },
+
+        /** Snapshot of live run for assertions / logging. */
+        snapshot() {
+            const run = this.run;
+            if (!run || !run.level) {
+                return {
+                    screen: this.screen,
+                    hasRun: !!run,
+                };
+            }
+            let used = 0, limit = 0;
+            const budgetSnap = {};
+            for (const t of PIECE_ORDER) {
+                const b = budget[t] || { used: 0, limit: 0 };
+                budgetSnap[t] = { used: b.used, limit: b.limit };
+                used += b.used;
+                limit += b.limit;
+            }
+            const marbles = (run.marbles || []).map((m) => {
+                if (m.body == null) return null;
+                const tf = Physics.getTransform(m.body);
+                return tf ? {
+                    x: +tf.position.x.toFixed(3),
+                    y: +tf.position.y.toFixed(3),
+                    z: +tf.position.z.toFixed(3),
+                } : null;
+            }).filter(Boolean);
+            return {
+                screen: this.screen,
+                levelIdx: run.levelIdx,
+                levelId: run.level.id,
+                levelName: run.level.name,
+                mode: run.mode,
+                placed: run.placed.size,
+                budgetUsed: used,
+                budgetLimit: limit,
+                budget: budgetSnap,
+                marblesSpawned: run.marblesSpawned,
+                marblesAlive: run.marbles.length,
+                marblesRemoved: run.marblesRemoved,
+                runtimeMs: run.runtime,
+                resultMs: run.resultMs,
+                newBest: !!run.newBest,
+                coachStep: run.coachStep,
+                score: run.score,
+                marbles,
+                unlocked: this.save ? this.save.get("unlocked") : null,
+                best: this.save ? this.save.get("best") : null,
+                coachDone: this.save ? this.save.get("coachDone") : null,
+            };
+        },
+
+        /** Force complete UI path (skips physics). */
+        forceComplete(timeMs) {
+            const run = this.run;
+            if (!run) return false;
+            run.resultMs = timeMs != null ? timeMs : 2500;
+            onLevelCompleted(run);
+            return true;
+        },
+    };
 }

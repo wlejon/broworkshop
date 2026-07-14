@@ -28,4 +28,14 @@
 - [x] Level tagline toast on load  
 - [x] Goal pulse + stronger complete cue  
 - [x] How-to tightened  
-- [ ] Optional later: more levels, replay ghost, accessibility  
+- [x] Headless gameplay harness (`tests/test_gameplay.js`)  
+- [x] Fail soft-lock fix (ground-rest timeout after last marble)  
+- [x] Restart-after-complete stability (teardown + goal-pulse gen)  
+- [ ] Optional later: more levels, replay ghost, accessibility, harder Drop-In  
+
+## Headless verification
+
+```bash
+bro-headless games/tumble games/tumble/tests/test_smoke.js
+bro-headless games/tumble games/tumble/tests/test_gameplay.js
+```

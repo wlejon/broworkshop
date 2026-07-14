@@ -345,7 +345,8 @@ import "/lib/camera.js";
             id:      'drop-in',
             name:    'Drop-In',
             tagline: 'Catch the marble. That\'s all.',
-            // First product level: blocks only, spout over cup — teach place + Space.
+            // Tutorial: spout sits over the cup so Space alone scores — teaches
+            // run/build. Budget is there for optional decoration / coach place tip.
             spawner: { x: 0.5, y: 6.5, z: 0.5 },
             goal:    { min: [-0.5, 0, -0.5], max: [1.5, 1, 1.5], center: [0.5, 0.5, 0.5] },
             bounds:  { x: [-2, 3], y: [0, 5], z: [-2, 3] },
