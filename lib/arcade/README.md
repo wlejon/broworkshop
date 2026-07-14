@@ -134,6 +134,18 @@ boot(game, { canvas: shellCanvas, width: 1280, height: 800 });
 Create the scene **inside `create()`**, not at module load, so headless
 title screens still boot under `--no-gpu`.
 
+### Large 3D titles — `sim.js` + plugin
+
+When rules grow past a few hundred lines, split the file:
+
+```
+sim.js    createGame(scene, seed) + constants  (pure domain)
+game.js   thin plugin: ensureScene, syncRender, HUD, cue, tests
+```
+
+Examples: `deepdelve`, `blastgrid`, `tilehaven`, `hearthfolk`.  
+Do not call `getContext("scene")` or touch the DOM from `sim.js`.
+
 ## Theme tokens
 
 ```css
