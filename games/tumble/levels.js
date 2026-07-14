@@ -88,7 +88,8 @@ import "/lib/camera.js";
                     shape: 'box', static: true,
                     halfExtents: { x: 0.5, y: 0.5, z: 0.5 },
                     position: { x: cw.x, y: cw.y, z: cw.z },
-                    friction: 0.55, restitution: 0.15,
+                    // Slightly slick so marbles keep rolling across tops.
+                    friction: 0.22, restitution: 0.18,
                 });
                 return { node, body };
             },
@@ -114,7 +115,8 @@ import "/lib/camera.js";
                 // invisible. Instead, compose the desired quaternion in
                 // body-local order (tilt first, then yaw) and extract the
                 // engine-equivalent Euler angles.
-                const tilt  = 28 * Math.PI / 180;
+                // Steeper + slicker: marbles pick up downhill speed instead of parking.
+                const tilt  = 34 * Math.PI / 180;
                 const yaw   = rotY(rot);
                 const qTilt = quatFromAxis(0, 0, 1, tilt);
                 const qYaw  = quatFromAxis(0, 1, 0, yaw);
@@ -133,9 +135,10 @@ import "/lib/camera.js";
                     halfExtents: { x: 0.58, y: 0.04, z: 0.45 },
                     position: { x: cw.x, y: cw.y, z: cw.z },
                     rotation: quatArrToObj(q),
-                    friction: 0.28, restitution: 0.12,
+                    friction: 0.06, restitution: 0.2,
                 });
-                return { node, body };
+                // anim.kind 'ramp' lets the sim nudge marbles downhill each contact.
+                return { node, body, anim: { kind: 'ramp', rot: rot | 0 } };
             },
         },
 
@@ -254,7 +257,7 @@ import "/lib/camera.js";
                     halfExtents: { x: 0.45, y: 0.05, z: 0.45 },
                     position: { x: cw.x, y: cw.y - 0.42, z: cw.z },
                     rotation: quatY(rotY(rot)),
-                    friction: 0.9, restitution: 0.05,
+                    friction: 0.35, restitution: 0.08,
                 });
                 // Add a small arrow on top to show direction
                 const arrow = scene.createMesh({
@@ -340,99 +343,124 @@ import "/lib/camera.js";
         }, def);
     }
 
+    // Campaign arc (8 levels) — each stage introduces a tool, then Grand Tour.
+    // Furniture = immovable level geometry the player cannot remove.
     const LEVELS = [
+        // 1. Tutorial — spout over cup. Space alone scores; budget teaches placing.
         mkLevel({
             id:      'drop-in',
             name:    'Drop-In',
-            tagline: 'Catch the marble. That\'s all.',
-            // Tutorial: spout sits over the cup so Space alone scores — teaches
-            // run/build. Budget is there for optional decoration / coach place tip.
-            spawner: { x: 0.5, y: 6.5, z: 0.5 },
-            goal:    { min: [-0.5, 0, -0.5], max: [1.5, 1, 1.5], center: [0.5, 0.5, 0.5] },
-            bounds:  { x: [-2, 3], y: [0, 5], z: [-2, 3] },
-            budget:  { block: 4 },
-            par:     { gold: 2.5, silver: 3.5, bronze: 5.0 },
+            tagline: 'Press Space. Catch optional. Feel the drop.',
+            spawner: { x: 0.5, y: 5.8, z: 0.5 },
+            goal:    { min: [-0.5, 0, -0.5], max: [1.5, 1.3, 1.5], center: [0.5, 0.5, 0.5] },
+            bounds:  { x: [-2, 3], y: [0, 4], z: [-2, 2] },
+            budget:  { block: 3, ramp: 2 },
+            par:     { gold: 1.8, silver: 2.8, bronze: 4.5 },
+            maxMarbles: 5,
+            spawnInterval: 700,
         }),
 
+        // 2. First real puzzle — short lateral hop. Spout west, cup east.
         mkLevel({
-            id:      'offset',
-            name:    'Sideways',
-            tagline: 'Spout above, cup to the side. Plank it.',
-            spawner: { x: -2.5, y: 6.5, z: 0.5 },
-            goal:    { min: [2.5, 0, -0.5], max: [4.5, 1, 1.5], center: [3.5, 0.5, 0.5] },
-            bounds:  { x: [-3, 5], y: [0, 5], z: [-2, 3] },
-            budget:  { block: 5, ramp: 3 },
-            par:     { gold: 3.0, silver: 4.5, bronze: 7.0 },
+            id:      'plank',
+            name:    'Plank Walk',
+            tagline: 'Bridge the gap. Aim ramps or a booster east.',
+            spawner: { x: -2.5, y: 5.5, z: 0.5 },
+            // Cup stays east of placeable runway cells (-4..-1 free; goal x>=0.4).
+            goal:    { min: [0.05, 0, -0.6], max: [2.0, 1.5, 1.6], center: [1.0, 0.5, 0.5] },
+            bounds:  { x: [-4, 3], y: [0, 4], z: [-2, 2] },
+            budget:  { block: 2, ramp: 3, booster: 3 },
+            par:     { gold: 2.6, silver: 4.2, bronze: 7.5 },
+            maxMarbles: 8,
+            spawnInterval: 600,
+            failGraceMs: 5500,
         }),
 
+        // 3. Introduce walls — corner route.
         mkLevel({
             id:      'bank',
             name:    'Bank Shot',
             tagline: 'Wall it, ramp it, drop it home.',
-            spawner: { x: -2.5, y: 7.5, z: -2.5 },
-            goal:    { min: [2.5, 0, 2.5], max: [4.5, 1, 4.5], center: [3.5, 0.5, 3.5] },
-            bounds:  { x: [-3, 5], y: [0, 6], z: [-3, 5] },
-            budget:  { block: 6, ramp: 4, wall: 2 },
-            par:     { gold: 4.0, silver: 6.0, bronze: 9.0 },
+            spawner: { x: -2.5, y: 7.0, z: -2.5 },
+            goal:    { min: [1.5, 0, 1.5], max: [3.5, 1.2, 3.5], center: [2.5, 0.5, 2.5] },
+            bounds:  { x: [-3, 4], y: [0, 6], z: [-3, 4] },
+            budget:  { block: 6, ramp: 4, wall: 3 },
+            par:     { gold: 3.5, silver: 5.5, bronze: 9.0 },
+            furniture: [
+                { type: 'block', cell: [-3, 0, -3], rot: 0 },
+            ],
         }),
 
+        // 4. Bumpers — lively bounce.
         mkLevel({
             id:      'bounce',
             name:    'Springboard',
             tagline: 'Bumpers hate ground control.',
-            spawner: { x: 0.5, y: 8.5, z: 0.5 },
-            goal:    { min: [3.5, 0, -0.5], max: [5.5, 1, 1.5], center: [4.5, 0.5, 0.5] },
-            bounds:  { x: [-3, 6], y: [0, 7], z: [-3, 3] },
-            budget:  { block: 4, ramp: 3, bumper: 2, wall: 2 },
-            par:     { gold: 4.5, silver: 6.5, bronze: 10.0 },
+            spawner: { x: -1.5, y: 7.5, z: 0.5 },
+            goal:    { min: [2.5, 0, -0.5], max: [4.5, 1.2, 1.5], center: [3.5, 0.5, 0.5] },
+            bounds:  { x: [-3, 5], y: [0, 6], z: [-2, 3] },
+            budget:  { block: 4, ramp: 3, bumper: 3, wall: 2 },
+            par:     { gold: 3.8, silver: 6.0, bronze: 10.0 },
         }),
 
+        // 5. Chute funnel.
         mkLevel({
             id:      'chute',
             name:    'Funnel Vision',
             tagline: 'Wide mouth, narrow target.',
-            spawner: { x: 0.5, y: 9.5, z: 0.5 },
-            goal:    { min: [-0.5, 0, -0.5], max: [1.5, 1, 1.5], center: [0.5, 0.5, 0.5] },
-            bounds:  { x: [-3, 4], y: [0, 8], z: [-3, 4] },
-            budget:  { chute: 2, block: 3, ramp: 2 },
-            par:     { gold: 5.0, silver: 7.0, bronze: 10.0 },
+            spawner: { x: 0.5, y: 8.5, z: 0.5 },
+            goal:    { min: [-0.5, 0, -0.5], max: [1.5, 1.2, 1.5], center: [0.5, 0.5, 0.5] },
+            bounds:  { x: [-3, 4], y: [0, 7], z: [-3, 4] },
+            budget:  { chute: 2, block: 4, ramp: 2 },
+            par:     { gold: 4.0, silver: 6.5, bronze: 10.0 },
+            // Spout is over the cup but high — marbles scatter without a funnel.
+            // Empty free-fall can still score slowly; chute makes gold reliable.
         }),
 
+        // 6. Boosters for distance.
         mkLevel({
             id:      'conveyor',
             name:    'Long Haul',
             tagline: 'Boosters do the talking.',
-            spawner: { x: -4.5, y: 6.5, z: 0.5 },
-            goal:    { min: [4.5, 0, -0.5], max: [6.5, 1, 1.5], center: [5.5, 0.5, 0.5] },
-            bounds:  { x: [-5, 7], y: [0, 5], z: [-2, 3] },
-            budget:  { block: 8, ramp: 2, booster: 3 },
-            par:     { gold: 6.0, silver: 8.5, bronze: 12.0 },
+            spawner: { x: -4.5, y: 6.0, z: 0.5 },
+            goal:    { min: [3.5, 0, -0.5], max: [5.5, 1.2, 1.5], center: [4.5, 0.5, 0.5] },
+            bounds:  { x: [-5, 6], y: [0, 5], z: [-2, 3] },
+            budget:  { block: 6, ramp: 3, booster: 4 },
+            par:     { gold: 4.5, silver: 7.0, bronze: 11.0 },
+            furniture: [
+                { type: 'block', cell: [-5, 0, 0], rot: 0 },
+            ],
         }),
 
+        // 7. Spinners.
         mkLevel({
             id:      'spin',
             name:    'Helicopters',
             tagline: 'Time the spinners, feed the cup.',
-            spawner: { x: -3.5, y: 8.5, z: 0.5 },
-            goal:    { min: [2.5, 0, -0.5], max: [4.5, 1, 1.5], center: [3.5, 0.5, 0.5] },
-            bounds:  { x: [-4, 5], y: [0, 7], z: [-3, 3] },
-            budget:  { block: 6, ramp: 3, wall: 2, spinner: 2 },
-            par:     { gold: 6.0, silver: 9.0, bronze: 13.0 },
-            spawnInterval: 450,
+            spawner: { x: -3.5, y: 7.5, z: 0.5 },
+            goal:    { min: [1.5, 0, -0.5], max: [3.5, 1.2, 1.5], center: [2.5, 0.5, 0.5] },
+            bounds:  { x: [-4, 4], y: [0, 6], z: [-2, 3] },
+            budget:  { block: 5, ramp: 3, wall: 2, spinner: 2 },
+            par:     { gold: 5.0, silver: 8.0, bronze: 12.0 },
+            spawnInterval: 500,
             maxMarbles: 10,
         }),
 
+        // 8. Finale — full kit, compact board.
         mkLevel({
             id:      'gauntlet',
             name:    'Grand Tour',
-            tagline: 'Every piece on the table. Use them.',
-            spawner: { x: -4.5, y: 9.5, z: -3.5 },
-            goal:    { min: [4.5, 0, 3.5], max: [6.5, 1, 5.5], center: [5.5, 0.5, 4.5] },
-            bounds:  { x: [-5, 7], y: [0, 8], z: [-4, 6] },
-            budget:  { block: 8, ramp: 5, wall: 3, bumper: 2, booster: 2, spinner: 1, chute: 1 },
-            par:     { gold: 9.0, silver: 13.0, bronze: 20.0 },
-            spawnInterval: 500,
-            maxMarbles: 12,
+            tagline: 'Every piece on the table. Finish the run.',
+            spawner: { x: -3.5, y: 8.0, z: -2.5 },
+            goal:    { min: [2.5, 0, 1.5], max: [4.5, 1.2, 3.5], center: [3.5, 0.5, 2.5] },
+            bounds:  { x: [-4, 5], y: [0, 7], z: [-3, 4] },
+            budget:  { block: 7, ramp: 4, wall: 2, bumper: 2, booster: 2, spinner: 1, chute: 1 },
+            par:     { gold: 6.5, silver: 10.0, bronze: 16.0 },
+            spawnInterval: 550,
+            maxMarbles: 10,
+            furniture: [
+                { type: 'block', cell: [-4, 0, -3], rot: 0 },
+            ],
         }),
     ];
 

@@ -14,9 +14,9 @@ const session = {
 
 /** Coach tips for the first level only (until save.coachDone). */
 const COACH_TIPS = [
-    "Click a cell under the gold spout to place a Block.",
-    "Stack or path pieces so the marble can reach the green cup.",
-    "Press Space to drop a marble. Esc opens the menu.",
+    "Press Space to drop a marble into the green cup.",
+    "Optional: place Blocks (1) or Ramps (2) for fun — R rotates ramps.",
+    "Esc opens the menu. Clear Drop-In to unlock the real puzzles.",
 ];
 
 /** Module scene + sim state (rebuilt in create). */
@@ -411,7 +411,12 @@ function loadLevel(run, idx) {
         const lim = run.level.budget[t] || 0;
         budget[t] = { used: 0, limit: lim };
     }
-    run.build.selected = PIECE_ORDER.find((t) => (budget[t].limit || 0) > 0) || "block";
+    // Prefer ramps first — most tutorial/path levels want a slope selected.
+    const pickOrder = ["ramp", "booster", "chute", "bumper", "spinner", "wall", "block"];
+    run.build.selected =
+        pickOrder.find((t) => budget[t] && (budget[t].limit || 0) > 0) ||
+        PIECE_ORDER.find((t) => budget[t] && (budget[t].limit || 0) > 0) ||
+        "block";
     run.build.rot = 0;
     run.build.layer = Math.max(0, run.level.bounds.y[0]);
 
@@ -556,7 +561,8 @@ function buildEnvironment(level) {
         shape: "box", static: true,
         halfExtents: { x: w * 0.5, y: 0.02, z: d * 0.5 },
         position: { x: cx, y: -0.02, z: cz },
-        friction: 0.6, restitution: 0.12,
+        // Low friction so failed marbles slide instead of gluing to the floor.
+        friction: 0.18, restitution: 0.15,
     });
 
     const sp = level.spawner;
@@ -611,25 +617,27 @@ function buildEnvironment(level) {
         position: { x: gcx, y: g.min[1] + 0.02, z: gcz },
         friction: 0.8, restitution: 0.1,
     });
-    const wallH = (g.max[1] - g.min[1]) * 0.8;
-    const walls = [
-        { x: g.min[0], y: g.min[1] + wallH * 0.5, z: gcz, hw: 0.04, hh: wallH * 0.5, hd: ghd },
-        { x: g.max[0], y: g.min[1] + wallH * 0.5, z: gcz, hw: 0.04, hh: wallH * 0.5, hd: ghd },
-        { x: gcx, y: g.min[1] + wallH * 0.5, z: g.min[2], hw: ghw, hh: wallH * 0.5, hd: 0.04 },
-        { x: gcx, y: g.min[1] + wallH * 0.5, z: g.max[2], hw: ghw, hh: wallH * 0.5, hd: 0.04 },
+    // Low visual lip only — full-height physics walls blocked lateral entries
+    // (marbles rolling in from a runway never entered the cup AABB).
+    const lipH = 0.1;
+    const lips = [
+        { x: g.min[0], y: g.min[1] + lipH * 0.5, z: gcz, hw: 0.035, hh: lipH * 0.5, hd: ghd + 0.03 },
+        { x: g.max[0], y: g.min[1] + lipH * 0.5, z: gcz, hw: 0.035, hh: lipH * 0.5, hd: ghd + 0.03 },
+        { x: gcx, y: g.min[1] + lipH * 0.5, z: g.min[2], hw: ghw + 0.03, hh: lipH * 0.5, hd: 0.035 },
+        { x: gcx, y: g.min[1] + lipH * 0.5, z: g.max[2], hw: ghw + 0.03, hh: lipH * 0.5, hd: 0.035 },
     ];
-    for (const ww of walls) {
+    for (const ww of lips) {
         Physics.createBody({
             shape: "box", static: true,
             halfExtents: { x: ww.hw, y: ww.hh, z: ww.hd },
             position: { x: ww.x, y: ww.y, z: ww.z },
-            friction: 0.5, restitution: 0.2,
+            friction: 0.35, restitution: 0.15,
         });
         SCENE.staticDecor.push(scene.createMesh({
             mesh: "box", halfW: ww.hw, halfH: ww.hh, halfD: ww.hd,
             x: ww.x, y: ww.y, z: ww.z,
             color: "#1e4a2e",
-            emissive: 0.25, emissiveColor: [0.2, 0.9, 0.5],
+            emissive: 0.35, emissiveColor: [0.2, 0.9, 0.5],
             metallic: 0.05, roughness: 0.7,
         }));
     }
@@ -904,7 +912,9 @@ function spawnMarble(run) {
     const body = Physics.createBody({
         shape: "sphere", radius: 0.17,
         position: { x: sp.x, y: sp.y, z: sp.z },
-        friction: 0.18, restitution: 0.4,
+        // Snappy marble: low friction, lively bounce, light damping.
+        friction: 0.05, restitution: 0.48,
+        linearDamping: 0.02, angularDamping: 0.04,
     });
     const node = scene.createMesh({
         mesh: "sphere", radius: 0.17,
@@ -916,6 +926,51 @@ function spawnMarble(run) {
     run.marbles.push({ body, node });
     run.marblesSpawned += 1;
     run.bodyToCell.set(body, "__marble");
+}
+
+/** World XZ unit vector for ramp downhill (low end) given piece rot 0..3. */
+function rampDownhill(rot) {
+    const r = rot & 3;
+    if (r === 0) return { x: -1, z: 0 };
+    if (r === 1) return { x: 0, z: -1 };
+    if (r === 2) return { x: 1, z: 0 };
+    return { x: 0, z: 1 };
+}
+
+/**
+ * While a marble rests on / near a ramp or booster, keep a shove along the
+ * piece facing so paths feel fair instead of parking mid-slope.
+ */
+function assistPathMarbles(run, dt) {
+    const scale = Math.min(1.2, (dt || 16) / 16);
+    for (const m of run.marbles) {
+        if (m.body == null) continue;
+        const tf = Physics.getTransform(m.body);
+        if (!tf) continue;
+        const p = tf.position;
+        const cx = Math.floor(p.x);
+        const cy = Math.floor(p.y);
+        const cz = Math.floor(p.z);
+        let rec = null;
+        for (let dy = 0; dy >= -1 && !rec; dy--) {
+            const cand = run.placed.get(cellKey(cx, cy + dy, cz));
+            if (cand && (cand.type === "ramp" || cand.type === "booster")) rec = cand;
+        }
+        if (!rec) continue;
+        if (rec.type === "ramp") {
+            const d = rampDownhill(rec.rot | 0);
+            Physics.addImpulse(m.body, d.x * 0.1 * scale, 0.015 * scale, d.z * 0.1 * scale);
+        } else if (rec.type === "booster") {
+            const yaw = rotY(rec.rot || 0);
+            // Continuous conveyor shove while parked on a booster pad.
+            Physics.addImpulse(
+                m.body,
+                Math.cos(yaw) * 0.22 * scale,
+                0.025 * scale,
+                Math.sin(yaw) * 0.22 * scale
+            );
+        }
+    }
 }
 
 function destroyMarble(run, m) {
@@ -968,6 +1023,8 @@ function simTick(run, dt) {
         }
     }
 
+    assistPathMarbles(run, dt);
+
     for (const key of run.animatedCells) {
         const rec = run.placed.get(key);
         if (!rec || !rec.anim) continue;
@@ -996,14 +1053,17 @@ function simTick(run, dt) {
         if (!rec) continue;
         if (rec.type === "booster") {
             const yaw = rotY(rec.rot || 0);
-            Physics.addImpulse(marbleId, Math.cos(yaw) * 0.22, 0.05, Math.sin(yaw) * 0.22);
+            Physics.addImpulse(marbleId, Math.cos(yaw) * 0.38, 0.06, Math.sin(yaw) * 0.38);
             run.play("clink");
         } else if (rec.type === "spinner") {
             const v = Physics.getVelocity(marbleId);
-            if (v) Physics.addImpulse(marbleId, v.linear.x * 0.5, 0.1, v.linear.z * 0.5);
+            if (v) Physics.addImpulse(marbleId, v.linear.x * 0.55, 0.12, v.linear.z * 0.55);
             run.play("clink");
         } else if (rec.type === "bumper") {
             run.play("clink");
+        } else if (rec.type === "ramp") {
+            const d = rampDownhill(rec.rot | 0);
+            Physics.addImpulse(marbleId, d.x * 0.1, 0.03, d.z * 0.1);
         }
     }
 
@@ -1021,7 +1081,8 @@ function simTick(run, dt) {
         } else if (run.marblesSpawned >= run.level.maxMarbles && run.marbles.length > 0) {
             if (run.failAfter == null) {
                 // Grace after the final marble drops so a late bounce can still score.
-                run.failAfter = run.runtime + 3500;
+                const grace = (run.level && run.level.failGraceMs) || 3500;
+                run.failAfter = run.runtime + grace;
             } else if (run.runtime >= run.failAfter) {
                 onLevelFailed(run);
             }

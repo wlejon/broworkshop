@@ -1,37 +1,29 @@
-# Tumble — product brief
+# Tumble — small full game
 
-**Player fantasy:** You’re a tabletop engineer. Build a short marble run with a tight piece budget, drop the marble, and beat the clock into the cup.
+**Player fantasy:** Tabletop engineer. Build a short marble run under a tight piece budget, drop the marble, beat the clock into the cup.
 
-**Success in 15 minutes:** Finish levels 1–3 with any medal. Understand place → Space → cup without reading the full howto.
+**Session goal:** Clear all 8 levels in one sitting (~15–30 minutes). Earn any medal on each; chase gold later.
 
-## Product goals
+## Campaign arc
 
-1. **Obvious first loop** — Drop-In teaches place and run without a wall of text.
-2. **Clear progression** — title shows resume + clears; level select shows medals and what’s next.
-3. **Satisfying finish** — time, medal, new-best, next level name (or tour complete).
-4. **Readable chrome** — BUILD/RUN mode, budget, par, and goal stay scannable while building.
+| # | Level | Teaches |
+|---|--------|---------|
+| 1 | Drop-In | Space / build / run (free-fall tutorial) |
+| 2 | Plank Walk | Lateral path — boosters & ramps |
+| 3 | Bank Shot | Walls + cornering |
+| 4 | Springboard | Bumpers |
+| 5 | Funnel Vision | Chutes |
+| 6 | Long Haul | Boosters over distance |
+| 7 | Helicopters | Spinners |
+| 8 | Grand Tour | Full kit finale |
+
+## Product pillars
+
+1. **Readable first minute** — coach + free Drop-In, then a real puzzle.
+2. **Fair fail** — empty runs return to BUILD; no soft-lock on ground marbles.
+3. **Snappy pieces** — slick ramps, conveyor boosters, open cup lips (lateral entry works).
+4. **Clear progression** — title resume, medals, next-level copy, tour complete.
 5. **Self-contained** — solo, offline, no netplay or models.
-
-## Out of scope (this pass)
-
-- New piece types or major physics retunes  
-- Level editor / user levels  
-- Multiplayer or online leaderboards  
-- Full audio music bed  
-
-## Checklist
-
-- [x] Title: continue label + progress summary  
-- [x] Level select: medals, taglines, current level  
-- [x] First-level coach (in-HUD tips)  
-- [x] Complete: new best, next name, last-level menu  
-- [x] Level tagline toast on load  
-- [x] Goal pulse + stronger complete cue  
-- [x] How-to tightened  
-- [x] Headless gameplay harness (`tests/test_gameplay.js`)  
-- [x] Fail soft-lock fix (ground-rest timeout after last marble)  
-- [x] Restart-after-complete stability (teardown + goal-pulse gen)  
-- [ ] Optional later: more levels, replay ghost, accessibility, harder Drop-In  
 
 ## Headless verification
 
@@ -39,3 +31,13 @@
 bro-headless games/tumble games/tumble/tests/test_smoke.js
 bro-headless games/tumble games/tumble/tests/test_gameplay.js
 ```
+
+## Known design notes
+
+- **Booster rot 0** faces +X (follow the arrow). **Ramp rot 2** drains downhill +X (slope low-end). R to cycle.
+- Drop-In is intentionally free with Space; Plank Walk is the first skill check.
+- Goal uses a low lip (not tall walls) so runways can roll into the cup.
+
+## Out of scope (later)
+
+- Level editor, user levels, music bed, online leaderboards, ghost replays
