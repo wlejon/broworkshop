@@ -1,4 +1,4 @@
-// Tumble — arcade foundation plugin (3D marble-run).
+// Tumble ΓÇö arcade foundation plugin (3D marble-run).
 // Domain: levels.js. Shell owns menus / pause / session; scene lives on #view.
 
 import "/lib/camera.js";
@@ -6,7 +6,7 @@ import { TumbleLevels } from "/app/levels.js";
 
 const { PIECES, PIECE_ORDER, LEVELS, medalFor, fmt, quatY, rotY } = TumbleLevels;
 
-/** Session: last / pending level index for create(). null → use save.lastLevel */
+/** Session: last / pending level index for create(). null ΓåÆ use save.lastLevel */
 const session = {
     levelIdx: null,
 };
@@ -31,8 +31,8 @@ const SCENE = {
     staticDecor: [],
 };
 
-/** @type {object|null} */
-let G = null; // active run alias
+/** @type {object|null} Latest run (input wiring + palette read this). */
+let activeRun = null;
 
 export const game = {
     id: "tumble",
@@ -69,7 +69,7 @@ export const game = {
         const idx = Math.min(Math.max(0, rawIdx | 0), LEVELS.length - 1);
 
         const run = {
-            score: 0, // time-based; lower is better — shell highScore is secondary
+            score: 0, // time-based; lower is better ΓÇö shell highScore is secondary
             play: ctx.play,
             highScore: ctx.highScore,
             save: ctx.save,
@@ -92,13 +92,13 @@ export const game = {
             build: { selected: "block", rot: 0, layer: 0 },
         };
 
-        G = run;
+        activeRun = run;
         loadLevel(run, idx);
         return run;
     },
 
     update(run, dt, input) {
-        G = run;
+        activeRun = run;
         if (!run.level) return;
 
         if (run.pending === "complete") {
@@ -153,7 +153,7 @@ export const game = {
 
     hud(run) {
         if (!run || !run.level) {
-            return { level: "—", mode: "BUILD", timer: "—", par: "—", best: "—", marbles: "0", budget: "0 / 0" };
+            return { level: "ΓÇö", mode: "BUILD", timer: "ΓÇö", par: "ΓÇö", best: "ΓÇö", marbles: "0", budget: "0 / 0" };
         }
         const bestMap = run.save.get("best") || {};
         const modeEl = document.getElementById("hud-mode");
@@ -169,9 +169,9 @@ export const game = {
         const timer =
             run.mode === "run"
                 ? ((run.resultMs != null ? run.resultMs / 1000 : run.runtime / 1000).toFixed(2) + "s")
-                : "—";
+                : "ΓÇö";
         return {
-            level: "Level " + (run.levelIdx + 1) + " — " + run.level.name,
+            level: "Level " + (run.levelIdx + 1) + " ΓÇö " + run.level.name,
             mode: run.mode === "run" ? "RUN" : "BUILD",
             timer,
             par: fmt(run.level.par.bronze) + " / " + fmt(run.level.par.gold),
@@ -185,7 +185,7 @@ export const game = {
 
     gameOverText(run) {
         if (!run || !run.level) return "";
-        return run.level.name + "\nTime: " + (run.resultMs != null ? fmt(run.resultMs / 1000) : "—");
+        return run.level.name + "\nTime: " + (run.resultMs != null ? fmt(run.resultMs / 1000) : "ΓÇö");
     },
 
     onEnterScreen(name, run, api) {
@@ -197,9 +197,9 @@ export const game = {
             const title = document.getElementById("complete-title");
             if (title) {
                 title.textContent =
-                    (medal === "gold" ? "Gold — " :
-                     medal === "silver" ? "Silver — " :
-                     medal === "bronze" ? "Bronze — " : "Complete — ") + level.name;
+                    (medal === "gold" ? "Gold ΓÇö " :
+                     medal === "silver" ? "Silver ΓÇö " :
+                     medal === "bronze" ? "Bronze ΓÇö " : "Complete ΓÇö ") + level.name;
             }
             const timeEl = document.getElementById("complete-time");
             if (timeEl) timeEl.textContent = fmt(t);
@@ -213,9 +213,9 @@ export const game = {
             if (detail) {
                 detail.textContent =
                     "Par: gold " + fmt(level.par.gold) +
-                    " · silver " + fmt(level.par.silver) +
-                    " · bronze " + fmt(level.par.bronze) +
-                    "  —  Best " + fmt(bestMap[level.id]);
+                    " ┬╖ silver " + fmt(level.par.silver) +
+                    " ┬╖ bronze " + fmt(level.par.bronze) +
+                    "  ΓÇö  Best " + fmt(bestMap[level.id]);
             }
         }
         if (name === "title" || name === "levels" || name === "howto") {
@@ -249,11 +249,11 @@ export const game = {
         if (action === "retry") {
             return { startRun: true };
         }
-        // Title "Play" uses data-action="play" → shell startRun with session.levelIdx
+        // Title "Play" uses data-action="play" ΓåÆ shell startRun with session.levelIdx
         return null;
     },
 
-    // Game SFX only — menu move/select are shell-owned.
+    // Game SFX only ΓÇö menu move/select are shell-owned.
     // "tick" / "pick" are build-UI feedback (not shell chrome).
     cue(name, audio) {
         if (name === "tick") audio.tone(440, 0.03, "sine", 0.3);
@@ -278,7 +278,7 @@ export const game = {
     },
 };
 
-// ── Scene bootstrap ───────────────────────────────────────────────────────
+// ΓöÇΓöÇ Scene bootstrap ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 function ensureScene() {
     if (scene) return;
@@ -323,7 +323,7 @@ function ensureInputWiring(ctx) {
     window.addEventListener("mouseup", () => { dragging = null; });
     window.addEventListener("mousemove", (e) => {
         if (!dragging) {
-            if (G) updateGhost(G, e);
+            if (activeRun) updateGhost(activeRun, e);
             return;
         }
         const dx = e.clientX - lastX;
@@ -339,7 +339,7 @@ function ensureInputWiring(ctx) {
     }, { passive: true });
     canvas.addEventListener("contextmenu", (e) => {
         e.preventDefault();
-        if (!G || G.mode !== "build") return;
+        if (!activeRun || activeRun.mode !== "build") return;
         if (overlayOpen()) return;
         const rect = canvas.getBoundingClientRect();
         const mx = (e.clientX - rect.left) * (canvas.width / rect.width);
@@ -348,38 +348,38 @@ function ensureInputWiring(ctx) {
         if (!ray) return;
         const hit = scene.raycast(ray.origin, ray.dir, 200);
         if (hit && hit.node) {
-            const key = G.meshToCell.get(hit.node.id);
-            if (key && removePiece(G, key)) {
-                G.play("remove");
-                refreshPalette(G);
+            const key = activeRun.meshToCell.get(hit.node.id);
+            if (key && removePiece(activeRun, key)) {
+                activeRun.play("remove");
+                refreshPalette(activeRun);
                 return;
             }
         }
-        const c = cellUnderCursor(G, e);
+        const c = cellUnderCursor(activeRun, e);
         if (c) {
             const key = cellKey(c.cx, c.cy, c.cz);
-            if (removePiece(G, key)) {
-                G.play("remove");
-                refreshPalette(G);
+            if (removePiece(activeRun, key)) {
+                activeRun.play("remove");
+                refreshPalette(activeRun);
             }
         }
     });
     canvas.addEventListener("click", (e) => {
         if (e.button !== 0) return;
-        if (!G || G.mode !== "build" || overlayOpen()) return;
-        const c = cellUnderCursor(G, e);
+        if (!activeRun || activeRun.mode !== "build" || overlayOpen()) return;
+        const c = cellUnderCursor(activeRun, e);
         if (!c) return;
-        const placed = placePiece(G, G.build.selected, c.cx, c.cy, c.cz, G.build.rot);
+        const placed = placePiece(activeRun, activeRun.build.selected, c.cx, c.cy, c.cz, activeRun.build.rot);
         if (placed) {
-            G.play("place");
-            refreshPalette(G);
-            updateGhost(G, e);
+            activeRun.play("place");
+            refreshPalette(activeRun);
+            updateGhost(activeRun, e);
         } else {
             toast("Cannot place there.");
         }
     });
     canvas.addEventListener("mousemove", (e) => {
-        if (G) updateGhost(G, e);
+        if (activeRun) updateGhost(activeRun, e);
     });
 }
 
@@ -393,7 +393,7 @@ function overlayOpen() {
     return el && !el.hidden && el.style.display !== "none";
 }
 
-// ── Level load ────────────────────────────────────────────────────────────
+// ΓöÇΓöÇ Level load ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 function loadLevel(run, idx) {
     teardownScene(run);
@@ -605,7 +605,7 @@ function buildEnvironment(level) {
     );
 }
 
-// ── Placement ─────────────────────────────────────────────────────────────
+// ΓöÇΓöÇ Placement ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 function cellKey(cx, cy, cz) { return cx + "," + cy + "," + cz; }
 
@@ -680,7 +680,7 @@ function removePiece(run, key) {
     return true;
 }
 
-// ── Ghost ─────────────────────────────────────────────────────────────────
+// ΓöÇΓöÇ Ghost ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 function destroyGhost() {
     for (const p of SCENE.ghostParts) {
@@ -797,7 +797,7 @@ function updateGhost(run, e) {
     setGhostEmissive(valid ? 1.6 : 0.2);
 }
 
-// ── Modes / marbles ───────────────────────────────────────────────────────
+// ΓöÇΓöÇ Modes / marbles ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 function enterBuildMode(run) {
     run.mode = "build";
@@ -977,7 +977,7 @@ function onLevelFailed(run) {
     refreshPalette(run);
 }
 
-// ── UI helpers ────────────────────────────────────────────────────────────
+// ΓöÇΓöÇ UI helpers ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 function refreshPalette(run) {
     const el = document.getElementById("hud-palette");
@@ -1022,7 +1022,7 @@ function renderLevelTiles(api) {
         const locked = i >= unlocked;
         const best = bestMap[lv.id];
         const medal = best != null ? medalFor(best, lv) : "none";
-        const medalGlyph = medal === "none" ? "☆" : "★";
+        const medalGlyph = medal === "none" ? "Γÿå" : "Γÿà";
         const color =
             medal === "gold" ? "#ffd84a" :
             medal === "silver" ? "#d8dce4" :
