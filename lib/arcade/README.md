@@ -173,7 +173,7 @@ none — full workshop coverage.
 | Classic 2D | snake, breakout, invaders, asteroids, hopper, missile-command, echo, chomper, blockfall, 2048 |
 | Arcade+ modes | pegbounce, blockpop, serpcoil, gemswap, wordspire, fluffshuffle, fintank, starfighter, touchdown, stompworld |
 | 3D / scene | tumble, deepdelve, blastgrid, hexfront, gridkeep, tilehaven, hearthfolk, farm |
-| Netplay client | crater, fps *(servers unchanged)* |
+| Netplay client | crater (`shared.js` + server), fps (`protocol.js` + server) |
 
 ## HTML conventions (polished chrome)
 

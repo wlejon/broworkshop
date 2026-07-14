@@ -8,6 +8,9 @@
 // health/respawn. Clients send inputs; server resolves all game state.
 // AI bots use bro.ai.game for pathfinding and steering, and the shared
 // BotAim system (apps/lib/bot_aim.js) for human-like aim tracking.
+//
+// Wire layout is documented (and decoded) in protocol.js on the client —
+// keep MSG_*/EVT_*/IN_* and packet field order in sync when either side changes.
 
 // ─── BotAim — copy of apps/lib/bot_aim.js (keep in sync) ────────────────────
 // Server scripts can't <script src=...> a shared lib, so the canonical file
@@ -94,19 +97,17 @@ const HIT_DAMAGE = 25;
 const RESPAWN_SECS = 3.0;
 const SHOOT_COOLDOWN = 0.15; // seconds between shots
 
-// --- Protocol message types ---
+// --- Protocol (mirror protocol.js MSG / EVT / IN) ---
 const MSG_INPUT   = 0x01;
 const MSG_STATE   = 0x02;
 const MSG_WELCOME = 0x03;
 const MSG_EVENT   = 0x04;
 const MSG_NAMES   = 0x05;
 
-// --- Event subtypes ---
 const EVT_KILL  = 0;
 const EVT_HIT   = 1;
 const EVT_SPAWN = 2;
 
-// --- Input bits ---
 const IN_FWD   = 1;
 const IN_BACK  = 2;
 const IN_LEFT  = 4;

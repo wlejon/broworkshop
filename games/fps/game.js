@@ -1,11 +1,12 @@
 // FPS Arena — multiplayer client on the arcade foundation.
-// Server: server.js (authoritative, protocol unchanged).
-// This file: shell plugin + scene + local predict + net interpolate + combat HUD.
-// Layout: constants → session state → plugin → scene → remotes → input → net → HUD.
+// Server: server.js (authoritative). Wire format: protocol.js.
+// This file: shell plugin + scene + local predict + remotes + combat HUD.
+// Layout: arena → session → plugin → scene → remotes → input → net → HUD.
 
 import { crosshair } from "/lib/crosshair.js";
+import { EVT, IN, encodeInput, encodeSetName, decodeMessage } from "/app/protocol.js";
 
-// ── Constants (must match server) ────────────────────────────────────────
+// ── Arena (must match server.js) ─────────────────────────────────────────
 
 const ARENA_HALF = 20;
 const WALL_H = 3;
@@ -13,22 +14,6 @@ const WALL_THICK = 0.5;
 const PLAYER_RADIUS = 0.4;
 const EYE_HEIGHT = 1.6;
 const MOVE_SPEED = 6.0;
-
-const MSG_INPUT = 0x01;
-const MSG_STATE = 0x02;
-const MSG_WELCOME = 0x03;
-const MSG_EVENT = 0x04;
-const MSG_NAMES = 0x05;
-
-const EVT_KILL = 0;
-const EVT_HIT = 1;
-const EVT_SPAWN = 2;
-
-const IN_FWD = 1;
-const IN_BACK = 2;
-const IN_LEFT = 4;
-const IN_RIGHT = 8;
-const IN_SHOOT = 16;
 
 const OBSTACLES = [
     { x: -8, z: -8, hw: 1.5, hd: 1.5, hh: 1.5 },
@@ -97,7 +82,6 @@ let damageFlashTimer = 0;
 let pendingDisconnect = false;
 let connectError = "";
 
-/** @type {object|null} */
 /** @type {object|null} Latest run (wiring + HUD). */
 let activeRun = null;
 
@@ -185,10 +169,10 @@ export const game = {
         if (localAlive) moveLocal(dtSec, input);
 
         const bits = getInputBits(input);
-        const isMoving = (bits & (IN_FWD | IN_BACK | IN_LEFT | IN_RIGHT)) !== 0;
+        const isMoving = (bits & (IN.FWD | IN.BACK | IN.LEFT | IN.RIGHT)) !== 0;
         try {
             crosshair.setMoving(isMoving);
-            if ((bits & IN_SHOOT) && localAlive) crosshair.addBloom(dtSec * 40);
+            if ((bits & IN.SHOOT) && localAlive) crosshair.addBloom(dtSec * 40);
         } catch (e) { /* crosshair optional */ }
 
         if (hasServerPos) {
@@ -465,30 +449,22 @@ function getInputBits(input) {
     let bits = 0;
     if (!pointerLocked) return bits;
     if (!input) return bits;
-    if (input.down("up")) bits |= IN_FWD;
-    if (input.down("down")) bits |= IN_BACK;
-    if (input.down("left")) bits |= IN_LEFT;
-    if (input.down("right")) bits |= IN_RIGHT;
-    if (input.down("primary")) bits |= IN_SHOOT;
+    if (input.down("up")) bits |= IN.FWD;
+    if (input.down("down")) bits |= IN.BACK;
+    if (input.down("left")) bits |= IN.LEFT;
+    if (input.down("right")) bits |= IN.RIGHT;
+    if (input.down("primary")) bits |= IN.SHOOT;
     return bits;
 }
 
 function sendInput(input) {
     if (serverConn == null) return;
-    const buf = new ArrayBuffer(14);
-    const v = new DataView(buf);
-    v.setUint8(0, MSG_INPUT);
-    v.setUint32(1, clientTick, true);
-    v.setUint8(5, getInputBits(input));
-    v.setFloat32(6, localYaw, true);
-    v.setFloat32(10, localPitch, true);
-    bro.net.send(serverConn, buf, false);
+    bro.net.send(serverConn, encodeInput(clientTick, getInputBits(input), localYaw, localPitch), false);
 }
 
 function sendName(name) {
     if (serverConn == null) return;
-    const data = new TextEncoder().encode(JSON.stringify({ type: "set_name", name }));
-    bro.net.send(serverConn, data.buffer);
+    bro.net.send(serverConn, encodeSetName(name));
 }
 
 function moveLocal(dtSec, input) {
@@ -497,10 +473,10 @@ function moveLocal(dtSec, input) {
     const rightX = Math.cos(localYaw), rightZ = Math.sin(localYaw);
 
     let mx = 0, mz = 0;
-    if (bits & IN_FWD) { mx += fwdX; mz += fwdZ; }
-    if (bits & IN_BACK) { mx -= fwdX; mz -= fwdZ; }
-    if (bits & IN_LEFT) { mx -= rightX; mz -= rightZ; }
-    if (bits & IN_RIGHT) { mx += rightX; mz += rightZ; }
+    if (bits & IN.FWD) { mx += fwdX; mz += fwdZ; }
+    if (bits & IN.BACK) { mx -= fwdX; mz -= fwdZ; }
+    if (bits & IN.LEFT) { mx -= rightX; mz -= rightZ; }
+    if (bits & IN.RIGHT) { mx += rightX; mz += rightZ; }
 
     const len = Math.sqrt(mx * mx + mz * mz);
     if (len > 0.001) {
@@ -647,50 +623,38 @@ function teardownConnection() {
 }
 
 function handleBinaryMessage(data) {
-    const v = new DataView(data);
-    const type = v.getUint8(0);
+    const msg = decodeMessage(data);
+    if (!msg) return;
 
-    switch (type) {
-        case MSG_WELCOME: {
-            myId = v.getUint16(1, true);
-            lastServerTick = v.getUint32(3, true);
+    switch (msg.type) {
+        case "welcome": {
+            myId = msg.id;
+            lastServerTick = msg.serverTick;
             console.log("Welcome! id=" + myId + " serverTick=" + lastServerTick);
             break;
         }
 
-        case MSG_STATE: {
-            const sTick = v.getUint32(1, true);
-            const count = v.getUint8(9);
-            lastServerTick = sTick;
-
+        case "state": {
+            lastServerTick = msg.serverTick;
             const now = Date.now();
             const idsInState = new Set();
 
-            let off = 10;
-            for (let i = 0; i < count; i++) {
-                const id = v.getUint16(off, true); off += 2;
-                const x = v.getFloat32(off, true); off += 4;
-                const y = v.getFloat32(off, true); off += 4;
-                const z = v.getFloat32(off, true); off += 4;
-                const yaw = v.getFloat32(off, true); off += 4;
-                const health = v.getUint8(off); off += 1;
-                const flags = v.getUint8(off); off += 1;
-                const kills = v.getUint16(off, true); off += 2;
-
-                const alive = !!(flags & 1);
-                idsInState.add(id);
-
-                if (id === myId) {
-                    serverX = x;
-                    serverZ = z;
+            for (const p of msg.players) {
+                idsInState.add(p.id);
+                if (p.id === myId) {
+                    serverX = p.x;
+                    serverZ = p.z;
                     hasServerPos = true;
-                    localHealth = health;
-                    localAlive = alive;
-                    localKills = kills;
-                    if (activeRun) activeRun.score = kills;
+                    localHealth = p.health;
+                    localAlive = p.alive;
+                    localKills = p.kills;
+                    if (activeRun) activeRun.score = p.kills;
                 } else {
-                    const r = getOrCreateRemote(id);
-                    r.states.push({ t: now, x, y, z, yaw, health, alive, kills });
+                    const r = getOrCreateRemote(p.id);
+                    r.states.push({
+                        t: now, x: p.x, y: p.y, z: p.z, yaw: p.yaw,
+                        health: p.health, alive: p.alive, kills: p.kills,
+                    });
                 }
             }
 
@@ -700,40 +664,26 @@ function handleBinaryMessage(data) {
             break;
         }
 
-        case MSG_NAMES: {
-            const count = v.getUint8(1);
+        case "names": {
             playerNames.clear();
-            let off = 2;
-            for (let i = 0; i < count; i++) {
-                const id = v.getUint16(off, true); off += 2;
-                const nameLen = v.getUint8(off); off += 1;
-                const name = new TextDecoder().decode(new Uint8Array(data, off, nameLen));
-                off += nameLen;
-                playerNames.set(id, name);
-            }
+            for (const e of msg.entries) playerNames.set(e.id, e.name);
             break;
         }
 
-        case MSG_EVENT: {
-            const evtType = v.getUint8(1);
-            if (evtType === EVT_KILL) {
-                const killerId = v.getUint16(2, true);
-                const victimId = v.getUint16(4, true);
-                addKillFeed(killerId, victimId);
-                if (activeRun && activeRun.play && killerId === myId) activeRun.play("kill");
-            } else if (evtType === EVT_HIT) {
-                const victimId = v.getUint16(4, true);
-                if (victimId === myId) {
+        case "event": {
+            if (msg.evt === EVT.KILL) {
+                addKillFeed(msg.killerId, msg.victimId);
+                if (activeRun && activeRun.play && msg.killerId === myId) activeRun.play("kill");
+            } else if (msg.evt === EVT.HIT) {
+                if (msg.victimId === myId) {
                     flashDamage();
                     if (activeRun && activeRun.play) activeRun.play("hit");
                 }
-            } else if (evtType === EVT_SPAWN) {
-                const sx = v.getFloat32(2, true);
-                const sz = v.getFloat32(6, true);
-                localX = sx;
-                localZ = sz;
-                serverX = sx;
-                serverZ = sz;
+            } else if (msg.evt === EVT.SPAWN) {
+                localX = msg.x;
+                localZ = msg.z;
+                serverX = msg.x;
+                serverZ = msg.z;
                 hasServerPos = true;
                 localAlive = true;
                 localHealth = 100;
