@@ -1,15 +1,23 @@
-// Tumble ΓÇö arcade foundation plugin (3D marble-run).
+// Tumble — arcade foundation plugin (3D marble-run).
 // Domain: levels.js. Shell owns menus / pause / session; scene lives on #view.
+// Product brief: PRODUCT.md
 
 import "/lib/camera.js";
 import { TumbleLevels } from "/app/levels.js";
 
 const { PIECES, PIECE_ORDER, LEVELS, medalFor, fmt, quatY, rotY } = TumbleLevels;
 
-/** Session: last / pending level index for create(). null ΓåÆ use save.lastLevel */
+/** Session: last / pending level index for create(). null → use save.lastLevel */
 const session = {
     levelIdx: null,
 };
+
+/** Coach tips for the first level only (until save.coachDone). */
+const COACH_TIPS = [
+    "Click a cell under the gold spout to place a Block.",
+    "Stack or path pieces so the marble can reach the green cup.",
+    "Press Space to drop a marble. Esc opens the menu.",
+];
 
 /** Module scene + sim state (rebuilt in create). */
 let canvas = null;
@@ -57,6 +65,7 @@ export const game = {
         best: {},
         lastLevel: 0,
         unlocked: 1,
+        coachDone: false,
     },
 
     create(ctx) {
@@ -66,10 +75,11 @@ export const game = {
         const rawIdx = session.levelIdx != null
             ? session.levelIdx
             : (ctx.save.get("lastLevel") || 0);
+        session.levelIdx = null; // consume one-shot override from level select / next
         const idx = Math.min(Math.max(0, rawIdx | 0), LEVELS.length - 1);
 
         const run = {
-            score: 0, // time-based; lower is better ΓÇö shell highScore is secondary
+            score: 0, // time-based; lower is better — shell highScore is secondary
             play: ctx.play,
             highScore: ctx.highScore,
             save: ctx.save,
@@ -89,6 +99,8 @@ export const game = {
             runtime: 0,
             pendingFail: null,
             pending: null, // "complete"
+            newBest: false,
+            coachStep: 0,
             build: { selected: "block", rot: 0, layer: 0 },
         };
 
@@ -153,7 +165,10 @@ export const game = {
 
     hud(run) {
         if (!run || !run.level) {
-            return { level: "ΓÇö", mode: "BUILD", timer: "ΓÇö", par: "ΓÇö", best: "ΓÇö", marbles: "0", budget: "0 / 0" };
+            return {
+                level: "—", mode: "BUILD", timer: "—", par: "—", best: "—",
+                marbles: "0", budget: "0 / 0", tagline: "",
+            };
         }
         const bestMap = run.save.get("best") || {};
         const modeEl = document.getElementById("hud-mode");
@@ -169,58 +184,30 @@ export const game = {
         const timer =
             run.mode === "run"
                 ? ((run.resultMs != null ? run.resultMs / 1000 : run.runtime / 1000).toFixed(2) + "s")
-                : "ΓÇö";
+                : "—";
         return {
-            level: "Level " + (run.levelIdx + 1) + " ΓÇö " + run.level.name,
+            level: "Level " + (run.levelIdx + 1) + " — " + run.level.name,
             mode: run.mode === "run" ? "RUN" : "BUILD",
             timer,
-            par: fmt(run.level.par.bronze) + " / " + fmt(run.level.par.gold),
+            par: "gold " + fmt(run.level.par.gold) + " · bronze " + fmt(run.level.par.bronze),
             best: fmt(bestMap[run.level.id]),
             marbles:
                 run.marblesSpawned + "/" + run.level.maxMarbles +
                 (run.marblesRemoved ? "  (" + run.marblesRemoved + " cleared)" : ""),
             budget: used + " / " + limit,
+            tagline: run.level.tagline || "",
         };
     },
 
     gameOverText(run) {
         if (!run || !run.level) return "";
-        return run.level.name + "\nTime: " + (run.resultMs != null ? fmt(run.resultMs / 1000) : "ΓÇö");
+        return run.level.name + "\nTime: " + (run.resultMs != null ? fmt(run.resultMs / 1000) : "—");
     },
 
     onEnterScreen(name, run, api) {
+        if (name === "title") refreshTitleScreen(api);
         if (name === "levels") renderLevelTiles(api);
-        if (name === "complete" && run) {
-            const t = (run.resultMs || 0) / 1000;
-            const level = run.level;
-            const medal = medalFor(t, level);
-            const title = document.getElementById("complete-title");
-            if (title) {
-                title.textContent =
-                    (medal === "gold" ? "Gold ΓÇö " :
-                     medal === "silver" ? "Silver ΓÇö " :
-                     medal === "bronze" ? "Bronze ΓÇö " : "Complete ΓÇö ") + level.name;
-            }
-            const timeEl = document.getElementById("complete-time");
-            if (timeEl) timeEl.textContent = fmt(t);
-            const medalEl = document.getElementById("complete-medal");
-            if (medalEl) {
-                medalEl.textContent = medal === "none" ? "Complete" : medal.toUpperCase();
-                medalEl.className = "medal " + (medal === "none" ? "" : medal);
-            }
-            const bestMap = run.save.get("best") || {};
-            const detail = document.getElementById("complete-detail");
-            if (detail) {
-                detail.textContent =
-                    "Par: gold " + fmt(level.par.gold) +
-                    " ┬╖ silver " + fmt(level.par.silver) +
-                    " ┬╖ bronze " + fmt(level.par.bronze) +
-                    "  ΓÇö  Best " + fmt(bestMap[level.id]);
-            }
-        }
-        if (name === "title" || name === "levels" || name === "howto") {
-            // Keep scene if any; hide is shell's job
-        }
+        if (name === "complete" && run) fillCompleteScreen(run);
     },
 
     onMenuAction(action, run, api) {
@@ -229,7 +216,10 @@ export const game = {
             api.save.set("best", {});
             api.save.set("unlocked", 1);
             api.save.set("lastLevel", 0);
+            api.save.set("coachDone", false);
             api.save.save();
+            session.levelIdx = 0;
+            refreshTitleScreen(api);
             toast("Progress reset.");
             return null;
         }
@@ -243,17 +233,20 @@ export const game = {
             return null;
         }
         if (action === "next" && run) {
-            session.levelIdx = Math.min(run.levelIdx + 1, LEVELS.length - 1);
+            if (run.levelIdx >= LEVELS.length - 1) {
+                return "title";
+            }
+            session.levelIdx = run.levelIdx + 1;
             return { startRun: true };
         }
         if (action === "retry") {
             return { startRun: true };
         }
-        // Title "Play" uses data-action="play" ΓåÆ shell startRun with session.levelIdx
+        // Title "Play" uses data-action="play" → shell startRun with session.levelIdx
         return null;
     },
 
-    // Game SFX only ΓÇö menu move/select are shell-owned.
+    // Game SFX only — menu move/select are shell-owned.
     // "tick" / "pick" are build-UI feedback (not shell chrome).
     cue(name, audio) {
         if (name === "tick") audio.tone(440, 0.03, "sine", 0.3);
@@ -267,7 +260,8 @@ export const game = {
                 [523, 0.09, "square", 0.55],
                 [659, 0.09, "square", 0.6],
                 [784, 0.1, "square", 0.65],
-                [1047, 0.22, "square", 0.7],
+                [1047, 0.18, "square", 0.7],
+                [1319, 0.28, "triangle", 0.55],
             ]);
         } else if (name === "fail") {
             audio.sequence([
@@ -374,6 +368,7 @@ function ensureInputWiring(ctx) {
             activeRun.play("place");
             refreshPalette(activeRun);
             updateGhost(activeRun, e);
+            advanceCoach(activeRun, "place");
         } else {
             toast("Cannot place there.");
         }
@@ -423,6 +418,8 @@ function loadLevel(run, idx) {
 
     enterBuildMode(run);
     refreshPalette(run);
+    beginLevelCoach(run);
+    if (run.level.tagline) toast(run.level.tagline, 1800);
 }
 
 function teardownScene(run) {
@@ -829,6 +826,7 @@ function enterRunMode(run) {
     if (SCENE.layerPlane) SCENE.layerPlane.visible = false;
     setGhostVisible(false);
     run.play("drop");
+    advanceCoach(run, "run");
 }
 
 function toggleMode(run) {
@@ -953,20 +951,28 @@ function onLevelCompleted(run) {
     const level = run.level;
     const bestMap = Object.assign({}, run.save.get("best") || {});
     const prev = bestMap[level.id];
-    if (prev == null || t < prev) {
+    run.newBest = prev == null || t < prev;
+    if (run.newBest) {
         bestMap[level.id] = t;
         run.save.set("best", bestMap);
     }
     const nextIdx = run.levelIdx + 1;
     const unlocked = run.save.get("unlocked") || 1;
-    if (nextIdx + 1 > unlocked && nextIdx < LEVELS.length) {
+    if (nextIdx < LEVELS.length && nextIdx + 1 > unlocked) {
         run.save.set("unlocked", nextIdx + 1);
+    } else if (nextIdx >= LEVELS.length && unlocked < LEVELS.length) {
+        run.save.set("unlocked", LEVELS.length);
     }
-    // Invert time into a "score" for shell highScore (higher better): use inverse-ish
+    // Invert time into a "score" for shell highScore (higher better)
     run.score = Math.max(0, Math.floor(100000 / Math.max(0.01, t)));
     run.save.maybeHighScore(run.score);
+    if (run.levelIdx === 0) {
+        run.save.set("coachDone", true);
+    }
     run.save.save();
+    pulseGoal();
     run.play("goal");
+    setCoachVisible(false);
     run.pending = "complete";
 }
 
@@ -1012,39 +1018,232 @@ function refreshPalette(run) {
     }
 }
 
+function progressSummary(save) {
+    const bestMap = save.get("best") || {};
+    let cleared = 0;
+    let gold = 0;
+    let silver = 0;
+    let bronze = 0;
+    for (let i = 0; i < LEVELS.length; i++) {
+        const lv = LEVELS[i];
+        const best = bestMap[lv.id];
+        if (best == null) continue;
+        cleared += 1;
+        const m = medalFor(best, lv);
+        if (m === "gold") gold += 1;
+        else if (m === "silver") silver += 1;
+        else if (m === "bronze") bronze += 1;
+    }
+    const unlocked = Math.min(save.get("unlocked") || 1, LEVELS.length);
+    return { cleared, gold, silver, bronze, unlocked, bestMap };
+}
+
+function refreshTitleScreen(api) {
+    const sum = progressSummary(api.save);
+    const last = Math.min(Math.max(0, (api.save.get("lastLevel") || 0) | 0), LEVELS.length - 1);
+    const lv = LEVELS[last];
+
+    const progress = document.getElementById("title-progress");
+    if (progress) {
+        if (sum.cleared === 0) {
+            progress.textContent = LEVELS.length + " levels · clear one to unlock the next";
+        } else {
+            const bits = [sum.cleared + " / " + LEVELS.length + " cleared"];
+            if (sum.gold) bits.push(sum.gold + " gold");
+            if (sum.silver) bits.push(sum.silver + " silver");
+            if (sum.bronze) bits.push(sum.bronze + " bronze");
+            progress.textContent = bits.join(" · ");
+        }
+    }
+
+    const play = document.getElementById("title-play");
+    if (play) {
+        if (sum.cleared > 0 || last > 0) {
+            play.textContent = "Continue — " + lv.name;
+        } else {
+            play.textContent = "Play — " + lv.name;
+        }
+    }
+}
+
+function fillCompleteScreen(run) {
+    const t = (run.resultMs || 0) / 1000;
+    const level = run.level;
+    const medal = medalFor(t, level);
+    const isLast = run.levelIdx >= LEVELS.length - 1;
+
+    const title = document.getElementById("complete-title");
+    if (title) {
+        const prefix =
+            medal === "gold" ? "Gold — " :
+            medal === "silver" ? "Silver — " :
+            medal === "bronze" ? "Bronze — " : "Complete — ";
+        title.textContent = prefix + level.name;
+    }
+    const timeEl = document.getElementById("complete-time");
+    if (timeEl) timeEl.textContent = fmt(t);
+    const medalEl = document.getElementById("complete-medal");
+    if (medalEl) {
+        medalEl.textContent = medal === "none" ? "Complete" : medal.toUpperCase();
+        medalEl.className = "medal " + (medal === "none" ? "" : medal);
+    }
+    const newBest = document.getElementById("complete-newbest");
+    if (newBest) {
+        newBest.hidden = !run.newBest;
+    }
+    const bestMap = run.save.get("best") || {};
+    const detail = document.getElementById("complete-detail");
+    if (detail) {
+        detail.textContent =
+            "Par  gold " + fmt(level.par.gold) +
+            " · silver " + fmt(level.par.silver) +
+            " · bronze " + fmt(level.par.bronze) +
+            "   ·   Best " + fmt(bestMap[level.id]);
+    }
+    const nextLine = document.getElementById("complete-next");
+    const primary = document.getElementById("complete-primary");
+    const titleItem = document.getElementById("complete-title-item");
+    if (isLast) {
+        if (nextLine) nextLine.textContent = "Tour complete — every level unlocked.";
+        if (primary) {
+            primary.textContent = "Main Menu";
+            primary.setAttribute("data-action", "title");
+        }
+        if (titleItem) titleItem.hidden = true;
+    } else {
+        const next = LEVELS[run.levelIdx + 1];
+        if (nextLine) nextLine.textContent = "Next up: " + next.name + " — " + (next.tagline || "");
+        if (primary) {
+            primary.textContent = "Next Level";
+            primary.setAttribute("data-action", "next");
+        }
+        if (titleItem) titleItem.hidden = true;
+    }
+}
+
 function renderLevelTiles(api) {
     const grid = document.getElementById("levels-grid");
     if (!grid) return;
-    const bestMap = api.save.get("best") || {};
-    const unlocked = api.save.get("unlocked") || 1;
+    const sum = progressSummary(api.save);
+    const unlocked = sum.unlocked;
+    const current = Math.min(Math.max(0, (api.save.get("lastLevel") || 0) | 0), LEVELS.length - 1);
+
+    const levelsProgress = document.getElementById("levels-progress");
+    if (levelsProgress) {
+        levelsProgress.textContent =
+            sum.cleared + " / " + LEVELS.length + " cleared · " +
+            unlocked + " unlocked" +
+            (sum.gold ? " · " + sum.gold + " gold" : "");
+    }
+
     // Tiles are .menu-item so shell click/keyboard activates data-action="level-N".
     grid.innerHTML = LEVELS.map((lv, i) => {
         const locked = i >= unlocked;
-        const best = bestMap[lv.id];
+        const best = sum.bestMap[lv.id];
         const medal = best != null ? medalFor(best, lv) : "none";
-        const medalGlyph = medal === "none" ? "Γÿå" : "Γÿà";
         const color =
             medal === "gold" ? "#ffd84a" :
             medal === "silver" ? "#d8dce4" :
-            medal === "bronze" ? "#c88a5a" : "#444";
-        const cls = "level-tile menu-item" + (locked ? " locked disabled" : "");
+            medal === "bronze" ? "#c88a5a" : "#5a6478";
+        const medalLabel =
+            medal === "gold" ? "Gold" :
+            medal === "silver" ? "Silver" :
+            medal === "bronze" ? "Bronze" :
+            locked ? "Locked" : "Open";
+        const cls = [
+            "level-tile",
+            "menu-item",
+            locked ? "locked disabled" : "",
+            i === current && !locked ? "current" : "",
+        ].filter(Boolean).join(" ");
         const action = locked ? "" : ' data-action="level-' + i + '"';
         return (
             '<div class="' + cls + '"' + action + ">" +
             '<div class="level-num">Level ' + (i + 1) + "</div>" +
             '<div class="level-name">' + lv.name + "</div>" +
-            '<div class="level-best">' + (best != null ? fmt(best) : locked ? "locked" : "") + "</div>" +
-            '<div class="level-medal" style="color:' + color + '">' + medalGlyph + "</div>" +
+            '<div class="level-tag">' + (lv.tagline || "") + "</div>" +
+            '<div class="level-best">' + (best != null ? fmt(best) : locked ? "—" : "—") + "</div>" +
+            '<div class="level-medal" style="color:' + color + '">' + medalLabel + "</div>" +
             "</div>"
         );
     }).join("");
 }
 
-function toast(text) {
+function beginLevelCoach(run) {
+    if (run.levelIdx !== 0 || run.save.get("coachDone")) {
+        setCoachVisible(false);
+        run.coachStep = COACH_TIPS.length;
+        return;
+    }
+    run.coachStep = 0;
+    setCoach(COACH_TIPS[0]);
+}
+
+function advanceCoach(run, event) {
+    if (run.levelIdx !== 0 || run.save.get("coachDone")) return;
+    if (event === "place" && run.coachStep === 0) {
+        run.coachStep = 1;
+        setCoach(COACH_TIPS[1]);
+        return;
+    }
+    if (event === "place" && run.coachStep === 1) {
+        // After a few placements, nudge toward run
+        let used = 0;
+        for (const t of PIECE_ORDER) used += (budget[t] && budget[t].used) || 0;
+        if (used >= 2) {
+            run.coachStep = 2;
+            setCoach(COACH_TIPS[2]);
+        }
+        return;
+    }
+    if (event === "run" && run.coachStep <= 2) {
+        run.coachStep = 3;
+        setCoachVisible(false);
+        run.save.set("coachDone", true);
+        run.save.save();
+    }
+}
+
+function setCoach(text) {
+    const el = document.getElementById("hud-coach");
+    const body = document.getElementById("hud-coach-text");
+    if (!el || !body) return;
+    body.textContent = text || "";
+    el.hidden = !text;
+}
+
+function setCoachVisible(on) {
+    const el = document.getElementById("hud-coach");
+    if (el) el.hidden = !on;
+}
+
+function pulseGoal() {
+    if (!SCENE.goalMarker && !SCENE.goalFill) return;
+    const nodes = [];
+    if (SCENE.goalFill) nodes.push(SCENE.goalFill);
+    if (SCENE.goalMarker) {
+        try {
+            for (const c of SCENE.goalMarker.children || []) nodes.push(c);
+        } catch (e) { /* ignore */ }
+    }
+    for (const n of nodes) {
+        try { n.emissive = 4.5; } catch (e) { /* ignore */ }
+    }
+    setTimeout(() => {
+        for (const n of nodes) {
+            try {
+                if (n === SCENE.goalFill) n.emissive = 0.6;
+                else n.emissive = 2.2;
+            } catch (e) { /* ignore */ }
+        }
+    }, 450);
+}
+
+function toast(text, ms) {
     const area = document.getElementById("hud-toast-area") || document.body;
     const el = document.createElement("div");
     el.className = "tumble-toast";
     el.textContent = text;
     area.appendChild(el);
-    setTimeout(() => { if (el.parentNode) el.parentNode.removeChild(el); }, 1200);
+    setTimeout(() => { if (el.parentNode) el.parentNode.removeChild(el); }, ms || 1600);
 }

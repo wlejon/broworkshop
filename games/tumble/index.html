@@ -13,7 +13,7 @@
         <div id="hud-top">
             <div id="hud-level">Level 1</div>
             <div id="hud-mode">BUILD</div>
-            <div id="hud-timer">0.00s</div>
+            <div id="hud-timer">—</div>
         </div>
 
         <div id="hud-pieces">
@@ -27,9 +27,15 @@
         </div>
 
         <div id="hud-goal">
+            <div class="hud-goal-tag" id="hud-tagline">Catch the marble.</div>
             <div>Par <span id="hud-par">—</span></div>
             <div>Best <span id="hud-best">—</span></div>
             <div>Marbles <span id="hud-marbles">0</span></div>
+        </div>
+
+        <div id="hud-coach" hidden>
+            <div class="coach-kicker">Tip</div>
+            <div id="hud-coach-text"></div>
         </div>
 
         <div id="hud-toast-area"></div>
@@ -39,17 +45,20 @@
         <section id="screen-title" class="screen">
             <h1 class="overlay-title">TUMBLE</h1>
             <p class="overlay-sub tagline">Build a marble run. Beat the clock.</p>
+            <p id="title-progress" class="title-progress"></p>
             <div class="menu-items">
-                <div class="menu-item selected" data-action="play">Play</div>
+                <div class="menu-item selected" data-action="play" id="title-play">Play</div>
                 <div class="menu-item" data-action="levels">Select Level</div>
                 <div class="menu-item" data-action="howto">How to Play</div>
                 <div class="menu-item" data-action="resetprogress">Reset Progress</div>
                 <div class="menu-item" data-action="quit">Quit</div>
             </div>
+            <p class="menu-hint">Up / Down navigate · Enter select</p>
         </section>
 
         <section id="screen-levels" class="screen" hidden>
             <h1 class="overlay-title">Select Level</h1>
+            <p id="levels-progress" class="title-progress"></p>
             <div id="levels-grid"></div>
             <div class="menu-items">
                 <div class="menu-item selected" data-action="title">Back</div>
@@ -59,17 +68,11 @@
         <section id="screen-howto" class="screen" hidden>
             <h1 class="overlay-title">How to Play</h1>
             <div class="overlay-sub howto">
-                <p>You have a marble spout and a goal cup. Your job: place pieces so a marble
-                released from the spout ends up in the cup.</p>
-                <p><b>Camera:</b> right-drag orbit, middle-drag pan, wheel zoom.</p>
-                <p><b>Build:</b> select a piece (<b>1–7</b>), click a cell to place it,
-                right-click to remove. <b>R</b> rotates, <b>Q/E</b> change layer height.</p>
-                <p><b>Run:</b> press <b>Space</b>. Marbles drop from the spout; the timer
-                starts on release and stops when the first marble lands in the cup.</p>
-                <p><b>Pieces:</b> Block is solid ground. Ramp slopes. Wall blocks lanes.
-                Bumper bounces. Spinner rotates and flings. Booster pushes marbles along
-                its facing direction. Chute funnels marbles toward its center.</p>
-                <p>Each level has a piece budget and a par time. Beat par for gold.</p>
+                <p>Gold spout drops marbles. Green cup is the goal. Place pieces so a marble reaches the cup.</p>
+                <p><b>Camera:</b> right-drag orbit · middle-drag pan · wheel zoom.</p>
+                <p><b>Build:</b> <b>1–7</b> piece · click place · right-click remove · <b>R</b> rotate · <b>Q/E</b> layer.</p>
+                <p><b>Run:</b> <b>Space</b> drops marbles. Timer stops when the first marble lands in the cup.</p>
+                <p><b>Medals:</b> beat gold / silver / bronze par times. Clear a level to unlock the next.</p>
             </div>
             <div class="menu-items">
                 <div class="menu-item selected" data-action="back">Back</div>
@@ -90,11 +93,14 @@
             <h1 class="overlay-title" id="complete-title">Level Complete</h1>
             <p id="complete-time" class="big-time">0.00s</p>
             <p id="complete-medal" class="medal">Bronze</p>
+            <p id="complete-newbest" class="new-best" hidden>New best time</p>
             <p id="complete-detail" class="overlay-sub tagline"></p>
-            <div class="menu-items">
-                <div class="menu-item selected" data-action="next">Next Level</div>
+            <p id="complete-next" class="complete-next"></p>
+            <div class="menu-items" id="complete-menu">
+                <div class="menu-item selected" data-action="next" id="complete-primary">Next Level</div>
                 <div class="menu-item" data-action="retry">Retry</div>
                 <div class="menu-item" data-action="levels">Level Select</div>
+                <div class="menu-item" data-action="title" id="complete-title-item" hidden>Main Menu</div>
             </div>
         </section>
 

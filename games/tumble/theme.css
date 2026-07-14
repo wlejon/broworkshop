@@ -51,6 +51,7 @@
     border-radius: 6px;
     align-items: center;
     pointer-events: none;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
 }
 #hud-level { font-size: 16px; font-weight: 600; letter-spacing: 0.02em; color: #ffd691; }
 #hud-mode {
@@ -60,6 +61,7 @@
     background: #1b2b4a;
     border-radius: 3px;
     color: #8cb7ff;
+    transition: background 0.15s ease, color 0.15s ease;
 }
 #hud-mode.run { background: #3a1c1c; color: #ff9f7b; }
 #hud-timer { font-family: Consolas, monospace; font-size: 16px; color: #eef; min-width: 64px; text-align: right; }
@@ -74,6 +76,7 @@
     border-radius: 6px;
     padding: 10px 12px;
     pointer-events: auto;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
 }
 .hud-pieces-title {
     font-size: 12px;
@@ -94,6 +97,7 @@
     border: 1px solid #1f2a44;
     border-radius: 4px;
     cursor: pointer;
+    transition: background 0.1s ease, border-color 0.1s ease;
 }
 .palette-item:hover { background: #14203a; }
 .palette-item.selected { background: #25375a; border-color: #4d7ac7; }
@@ -121,18 +125,59 @@
     position: absolute;
     right: 10px;
     top: 60px;
-    min-width: 180px;
+    min-width: 200px;
+    max-width: 240px;
     background: rgba(8, 11, 22, 0.82);
     border: 1px solid #26304b;
     border-radius: 6px;
     padding: 10px 12px;
     font-size: 13px;
     line-height: 1.6;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+.hud-goal-tag {
+    color: #ffd691;
+    font-size: 12px;
+    line-height: 1.35;
+    margin-bottom: 8px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #1f2a44;
+    opacity: 0.95;
 }
 #hud-goal span {
     font-family: Consolas, monospace;
     color: #8cb7ff;
     float: right;
+}
+
+/* First-run coach card */
+#hud-coach {
+    position: absolute;
+    left: 50%;
+    bottom: 28px;
+    transform: translateX(-50%);
+    min-width: 320px;
+    max-width: min(520px, 92vw);
+    padding: 12px 16px;
+    background: rgba(12, 18, 34, 0.94);
+    border: 1px solid #3a5280;
+    border-radius: 8px;
+    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 193, 102, 0.08);
+    pointer-events: none;
+}
+#hud-coach[hidden] { display: none !important; }
+.coach-kicker {
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: #ffc166;
+    margin-bottom: 4px;
+    opacity: 0.9;
+}
+#hud-coach-text {
+    font-size: 14px;
+    line-height: 1.45;
+    color: #e8e8ee;
 }
 
 #hud-toast-area {
@@ -141,11 +186,30 @@
     left: 50%;
     transform: translateX(-50%);
     pointer-events: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
 }
 
 .overlay-title {
     letter-spacing: 0.08em;
     color: #ffc166;
+}
+
+.title-progress {
+    min-height: 1.2em;
+    margin: 4px 0 14px;
+    font-size: 13px;
+    color: #8cb7ff;
+    opacity: 0.95;
+}
+
+.menu-hint {
+    margin-top: 14px;
+    font-size: 11px;
+    opacity: 0.45;
+    letter-spacing: 0.04em;
 }
 
 .big-time {
@@ -157,12 +221,33 @@
 .medal {
     font-size: 20px;
     letter-spacing: 0.16em;
-    margin: 0 0 10px 0;
+    margin: 0 0 6px 0;
     color: #ffd691;
 }
 .medal.gold   { color: #ffd84a; text-shadow: 0 0 10px rgba(255,210,80,0.35); }
 .medal.silver { color: #d8dce4; }
 .medal.bronze { color: #c88a5a; }
+
+.new-best {
+    display: inline-block;
+    margin: 0 0 10px;
+    padding: 4px 10px;
+    font-size: 12px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: #1a1208;
+    background: linear-gradient(90deg, #ffd84a, #ffc166);
+    border-radius: 3px;
+    font-weight: 700;
+}
+.new-best[hidden] { display: none !important; }
+
+.complete-next {
+    min-height: 1.2em;
+    margin: 0 0 14px;
+    font-size: 14px;
+    color: #8cb7ff;
+}
 
 .howto { text-align: left; max-width: 520px; margin: 0 auto; }
 .howto p { line-height: 1.5; margin: 8px 0; opacity: 0.88; }
@@ -172,19 +257,28 @@
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     gap: 10px;
-    margin: 12px auto 18px;
-    max-width: 520px;
+    margin: 8px auto 18px;
+    max-width: 540px;
 }
 .level-tile {
-    padding: 14px 10px;
+    padding: 12px 10px 10px;
     background: #131a2c;
     border: 1px solid #1f2a44;
     border-radius: 6px;
     cursor: pointer;
     text-align: center;
+    transition: background 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
 }
-.level-tile:hover { background: #1b2b4a; border-color: #4d7ac7; }
-.level-tile.locked { opacity: 0.36; cursor: not-allowed; }
+.level-tile:hover:not(.locked) { background: #1b2b4a; border-color: #4d7ac7; }
+.level-tile.locked { opacity: 0.4; cursor: not-allowed; }
+.level-tile.current {
+    border-color: #ffc166;
+    box-shadow: 0 0 0 1px rgba(255, 193, 102, 0.25);
+}
+.level-tile.selected {
+    background: #25375a;
+    border-color: #4d7ac7;
+}
 .level-tile .level-num {
     font-size: 11px;
     opacity: 0.6;
@@ -197,12 +291,26 @@
     color: #ffd691;
     margin-top: 4px;
 }
+.level-tile .level-tag {
+    font-size: 11px;
+    line-height: 1.3;
+    margin-top: 4px;
+    opacity: 0.65;
+    min-height: 2.6em;
+}
 .level-tile .level-best {
     font-family: Consolas, monospace;
     font-size: 12px;
     margin-top: 6px;
     color: #9be3ff;
     min-height: 14px;
+}
+.level-tile .level-medal {
+    margin-top: 4px;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-weight: 600;
 }
 
 .tumble-toast {
@@ -214,7 +322,13 @@
     font-size: 13px;
     margin: 2px auto;
     pointer-events: none;
-    max-width: 400px;
+    max-width: 420px;
+    text-align: center;
+    animation: toast-in 0.18s ease-out;
+}
+@keyframes toast-in {
+    from { opacity: 0; transform: translateY(-6px); }
+    to   { opacity: 1; transform: translateY(0); }
 }
 
 .stats-block {
@@ -231,11 +345,15 @@
     padding-top: 0;
 }
 #overlay > .screen:not([hidden]) {
-    width: 520px;
+    width: 540px;
     max-width: 92vw;
     padding: 28px 36px;
     background: #0f1523;
     border: 1px solid #263148;
     border-radius: 10px;
     box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+}
+
+#screen-levels:not([hidden]) {
+    width: 580px;
 }
