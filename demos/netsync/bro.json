@@ -1,0 +1,7 @@
+{
+    "app": ".",
+    "title": "Net Sync Arena",
+    "width": 1280,
+    "height": 800,
+    "lib": "../../lib"
+}

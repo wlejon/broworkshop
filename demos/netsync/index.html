@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Net Sync Arena</title>
+    <style>
+        html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+        canvas#stage { display: block; width: 100vw; height: 100vh; }
+
+        /* --- Lobby overlay --- */
+        #lobby {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: radial-gradient(ellipse at center, #1c2230 0%, #0b0e14 75%);
+        }
+        #lobby.hidden { display: none; }
+        #lobby .panel {
+            background: rgba(18, 22, 32, 0.92);
+            border: 1px solid #2c3548;
+            border-radius: 12px;
+            padding: 32px 40px;
+            width: 340px;
+            color: #dfe6f0;
+            font: 14px system-ui, sans-serif;
+            text-align: center;
+        }
+        #lobby h1 { margin: 0 0 4px 0; font-size: 22px; color: #fff; letter-spacing: 0.5px; }
+        #lobby p.sub { margin: 0 0 22px 0; color: #8d99ad; font-size: 12px; }
+        #lobby button {
+            font: 600 14px system-ui, sans-serif;
+            border: none;
+            border-radius: 7px;
+            padding: 10px 0;
+            cursor: pointer;
+        }
+        #hostBtn {
+            display: block;
+            width: 100%;
+            background: #3d7bfd;
+            color: #fff;
+            margin-bottom: 18px;
+        }
+        #hostBtn:hover { background: #5089ff; }
+        #lobby .or { color: #55607a; font-size: 11px; margin-bottom: 14px; }
+        #lobby .joinrow { display: flex; gap: 8px; }
+        #address {
+            flex: 1;
+            min-width: 0;
+            background: #0d1119;
+            border: 1px solid #2c3548;
+            border-radius: 7px;
+            color: #dfe6f0;
+            font: 13px monospace;
+            padding: 9px 10px;
+        }
+        #joinBtn { background: #2e9e6b; color: #fff; padding: 10px 22px; }
+        #joinBtn:hover { background: #35b57b; }
+        #lobbyStatus { margin-top: 16px; min-height: 16px; font-size: 12px; color: #8d99ad; }
+        #lobbyStatus.error { color: #ff7b72; }
+
+        /* --- In-game HUD --- */
+        #hud {
+            position: absolute;
+            top: 12px; left: 12px;
+            background: rgba(10, 13, 20, 0.72);
+            border: 1px solid #2c3548;
+            border-radius: 8px;
+            padding: 10px 14px;
+            color: #dfe6f0;
+            font: 12px system-ui, sans-serif;
+            min-width: 190px;
+        }
+        #hud.hidden { display: none; }
+        #status { color: #8d99ad; margin-bottom: 6px; }
+        #scores .row { display: flex; align-items: center; gap: 7px; margin: 3px 0; }
+        #scores .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+        #scores .pts { margin-left: auto; color: #ffd54f; font-weight: 600; }
+        #controls {
+            position: absolute;
+            bottom: 12px; left: 12px;
+            color: #55607a;
+            font: 11px system-ui, sans-serif;
+        }
+        #controls.hidden { display: none; }
+    </style>
+</head>
+<body>
+    <canvas id="stage"></canvas>
+
+    <div id="hud" class="hidden">
+        <div id="status"></div>
+        <div id="scores"></div>
+    </div>
+    <div id="controls" class="hidden">WASD / arrows to move &mdash; grab the gold pickups</div>
+
+    <div id="lobby">
+        <div class="panel">
+            <h1>Net Sync Arena</h1>
+            <p class="sub">bro.net.sync &mdash; high-level multiplayer demo</p>
+            <button id="hostBtn">Host game</button>
+            <div class="or">&mdash; or join a host &mdash;</div>
+            <div class="joinrow">
+                <input id="address" value="127.0.0.1" spellcheck="false">
+                <button id="joinBtn">Join</button>
+            </div>
+            <div id="lobbyStatus"></div>
+        </div>
+    </div>
+
+    <script type="module" src="/app/app.js"></script>
+</body>
+</html>
