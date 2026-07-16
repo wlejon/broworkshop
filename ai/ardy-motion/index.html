@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>ARDY Motion</title>
+  <link rel="stylesheet" href="/app/style.css">
+</head>
+<body>
+  <div id="app">
+    <canvas id="view"></canvas>
+
+    <div id="panel">
+      <div class="title">ARDY Motion</div>
+      <div class="sub">text → G1 humanoid motion</div>
+
+      <label class="lbl">Prompt</label>
+      <input id="prompt" type="text" value="a person walks forward and waves"
+             placeholder="describe a motion…" autocomplete="off">
+
+      <div class="chips">
+        <span class="chip">a person walks forward and waves</span>
+        <span class="chip">a person runs quickly</span>
+        <span class="chip">a person jumps</span>
+        <span class="chip">a person turns around and sits down</span>
+        <span class="chip">a person kicks with the right leg</span>
+      </div>
+
+      <div class="row">
+        <div class="field">
+          <label class="lbl">Frames</label>
+          <input id="frames" type="number" value="104" min="52" max="520" step="52">
+        </div>
+        <div class="field">
+          <label class="lbl">Guidance</label>
+          <input id="cfg" type="number" value="2.5" min="1" max="8" step="0.5">
+        </div>
+      </div>
+
+      <button id="gen" disabled>Generate</button>
+
+      <div class="controls">
+        <button id="playToggle" disabled>Pause</button>
+        <label class="check"><input id="autoRotate" type="checkbox" checked> auto-orbit</label>
+        <span id="frame" class="frame">—</span>
+      </div>
+
+      <div id="status">starting…</div>
+      <div class="hint">drag to orbit · scroll to zoom</div>
+    </div>
+  </div>
+  <script type="module" src="/app/app.js"></script>
+</body>
+</html>

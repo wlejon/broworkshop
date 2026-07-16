@@ -1,0 +1,64 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 100%; height: 100%; overflow: hidden; }
+body {
+  font: 13px/1.4 -apple-system, "Segoe UI", system-ui, sans-serif;
+  color: #e7e9ee;
+  background: radial-gradient(120% 120% at 50% 0%, #202533 0%, #12141b 60%, #0b0c10 100%);
+}
+
+#app { position: relative; width: 100vw; height: 100vh; }
+#view { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+#panel {
+  position: absolute; top: 18px; left: 18px; width: 300px;
+  padding: 16px 16px 14px; border-radius: 14px;
+  background: rgba(18, 20, 28, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(14px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+}
+.title { font-size: 17px; font-weight: 700; letter-spacing: 0.2px; }
+.sub { font-size: 11px; color: #8b93a7; margin-bottom: 14px; }
+
+.lbl { display: block; font-size: 10px; text-transform: uppercase;
+       letter-spacing: 0.7px; color: #838aa0; margin: 10px 0 5px; }
+
+input[type=text], input[type=number] {
+  width: 100%; padding: 8px 10px; border-radius: 9px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  color: #eef0f6; font: inherit; outline: none;
+}
+input[type=text]:focus, input[type=number]:focus {
+  border-color: #f2913a; background: rgba(255, 255, 255, 0.09);
+}
+
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+.chip {
+  font-size: 11px; padding: 4px 9px; border-radius: 999px; cursor: pointer;
+  background: rgba(255, 255, 255, 0.055);
+  border: 1px solid rgba(255, 255, 255, 0.09); color: #c3c9d8;
+  transition: background 0.12s, border-color 0.12s;
+}
+.chip:hover { background: rgba(242, 145, 58, 0.18); border-color: rgba(242, 145, 58, 0.5); color: #fff; }
+
+.row { display: flex; gap: 10px; }
+.field { flex: 1; }
+
+button {
+  width: 100%; margin-top: 14px; padding: 10px; border: none; border-radius: 10px;
+  font: 600 14px/1 inherit; color: #1a1206; cursor: pointer;
+  background: linear-gradient(180deg, #ffb057, #f2913a);
+}
+button:hover:not(:disabled) { filter: brightness(1.06); }
+button:disabled { opacity: 0.45; cursor: default; }
+
+.controls { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+.controls #playToggle { width: auto; margin: 0; padding: 6px 14px; font-size: 12px;
+  background: rgba(255, 255, 255, 0.08); color: #e7e9ee; }
+.check { display: flex; align-items: center; gap: 5px; font-size: 12px; color: #b6bccd; cursor: pointer; }
+.frame { margin-left: auto; font-variant-numeric: tabular-nums; color: #9aa2b6; font-size: 12px; }
+
+#status { margin-top: 12px; padding-top: 10px; font-size: 12px; color: #9aa2b6;
+  border-top: 1px solid rgba(255, 255, 255, 0.07); min-height: 18px; }
+.hint { margin-top: 6px; font-size: 10.5px; color: #667; }

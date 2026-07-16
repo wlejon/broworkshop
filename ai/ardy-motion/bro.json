@@ -1,0 +1,7 @@
+{
+    "app": ".",
+    "title": "ARDY Motion — text to G1 humanoid motion",
+    "lib": "../../lib",
+    "width": 1280,
+    "height": 820
+}
