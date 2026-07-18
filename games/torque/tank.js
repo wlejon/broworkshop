@@ -21,7 +21,7 @@
 // counter-rotating. The smoke test measures exactly that: heading changes by
 // more than a radian while the hull moves less than its own length.
 
-import { held, setHeld, setRespawnHandler, makeSteering, rollDegrees } from "/app/input.js";
+import { held, strength, setHeld, setRespawnHandler, makeSteering, rollDegrees } from "/app/input.js";
 
 // The hull is narrower than the track centreline on purpose, and it is the same
 // trap the car hit: at halfW 1.5 against a 1.42 track the road wheels and the
@@ -254,16 +254,20 @@ export function createTank(scene, spawn) {
         }
         neutralTurn = false;
 
+        // Analog on the tracks too: a tank driver's throttle is a foot pedal,
+        // and half a trigger is a genuinely useful creeping pace for something
+        // that has to place itself on a ramp.
         const speed = vehicle.speed;
-        let forward = held.throttle ? 1 : 0;
+        let forward = strength('throttle');
         let brake = 0;
         if (held.brake) {
-            if (speed > 0.6) { brake = 1; forward = 0; }
-            else { forward = -1; }
+            const pedal = strength('brake');
+            if (speed > 0.6) { brake = pedal; forward = 0; }
+            else { forward = -pedal; }
         }
         // Same creep problem as the car's automatic, and a 7.8 t vehicle
         // creeping is worse. Stand on the brake when stopped and unattended.
-        if (!held.throttle && !held.brake && Math.abs(speed) < 0.5) brake = 1;
+        if (forward === 0 && brake === 0 && Math.abs(speed) < 0.5) brake = 1;
         // Holding the handbrake with no steer input is just a parking brake.
         if (held.handbrake) { brake = 1; forward = 0; }
 

@@ -28,7 +28,7 @@
 // PhysicsNode is bound to a body tag and the old chassis body dies with the old
 // constraint), which is why the garage detaches the cameras around a rebuild.
 
-import { held, setHeld, setRespawnHandler, makeSteering } from "/app/input.js";
+import { held, strength, setHeld, setRespawnHandler, makeSteering } from "/app/input.js";
 
 // Narrower than the wheel track on purpose: at halfW 0.9 against a 0.85
 // half-track the wheels sat INSIDE the body and were invisible from every
@@ -264,25 +264,36 @@ export function createCar(scene, spawn) {
         // One pedal does brake-then-reverse, the way an automatic behaves:
         // press it while rolling forward and it slows the car, press it at a
         // standstill and the box picks reverse off the sign of `forward`.
+        //
+        // The MAGNITUDES are analog (chunk 3) and the DECISIONS are not: how
+        // much throttle and how much brake come from strength(), while whether
+        // this pedal press means "slow down" or "go backwards" is a genuine
+        // either/or and reads the digital state. A key gives strength 1.0, so
+        // on the keyboard this is exactly the chunk-1 behaviour.
         const speed = vehicle.speed;
-        let forward = held.throttle ? 1 : 0;
+        let forward = strength('throttle');
         let brake = 0;
         if (held.brake) {
-            if (speed > 0.8) { brake = 1; forward = 0; }
-            else { forward = -1; }
+            const pedal = strength('brake');
+            if (speed > 0.8) { brake = pedal; forward = 0; }
+            else { forward = -pedal; }
         }
         // An automatic creeps: the clutch stays partly engaged at idle, so with
         // no pedal at all the car walks forward on its own and never actually
         // comes to rest. Hold the brake when stopped and unattended — which is
         // what the driver's left foot is doing anyway — so the car sits still
         // on the grid and on hills.
-        if (!held.throttle && !held.brake && !held.handbrake && Math.abs(speed) < 0.6) {
+        // Tested on the analog demands rather than the digital flags: a trigger
+        // held at 30% through a respawn leaves the digital flag stale (it only
+        // moves on edges), and reading the flag here would stand on the brake
+        // while the driver was asking for throttle.
+        if (forward === 0 && brake === 0 && !held.handbrake && Math.abs(speed) < 0.6) {
             brake = 1;
         }
 
         vehicle.setInput({
             forward, right: steer, brake,
-            handBrake: held.handbrake ? 1 : 0,
+            handBrake: strength('handbrake'),
         });
     }
 
@@ -389,9 +400,10 @@ export function createCar(scene, spawn) {
     /** True while a respawn is still spinning the drivetrain down. */
     function isSettling() { return settle > 0; }
 
-    // CHUNK 3: spatial audio — attach an engine-note emitter to chassisNode and
-    // drive its playbackRate from telemetry().rpm; scene.bindAudioListenerToCamera
-    // then gives Doppler on the trackside camera for free.
+    // Spatial audio hangs off chassisNode from audio.js — the emitters are
+    // attached there rather than here for the same reason the cameras are:
+    // this node does not survive a tyre rebuild, and the garage is the thing
+    // that knows to let go and re-attach around one.
 
     return {
         kind: 'car',

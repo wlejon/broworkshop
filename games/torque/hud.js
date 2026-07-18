@@ -30,7 +30,32 @@ const el = {
     leanPanel: $('leanPanel'), leanDeg: $('leanDeg'), leanBar: $('leanBar'),
     leanState: $('leanState'), leanToggle: $('leanToggle'),
     tirePanel: $('tirePanel'), tireHint: $('tireHint'),
+    // Chunk 3: pad, rumble, audio
+    padState: $('padState'), inputTable: $('inputTable'),
+    rumbleBar: $('rumbleBar'), rumbleSrc: $('rumbleSrc'),
+    rumbleStrong: $('rumbleStrong'), rumbleWeak: $('rumbleWeak'),
+    rumbleSlip: $('rumbleSlip'), rumbleImpact: $('rumbleImpact'),
+    rumbleToggle: $('rumbleToggle'),
+    audioTone: $('audioTone'), audioRate: $('audioRate'), audioDoppler: $('audioDoppler'),
+    audioSoft: $('audioSoft'), audioHard: $('audioHard'),
+    audioSqueal: $('audioSqueal'), audioRoll: $('audioRoll'),
+    dopplerRange: $('dopplerRange'), dopplerVal: $('dopplerVal'),
 };
+
+// Same discipline as the wheel table: the four input rows are declared in the
+// markup and only their text and classes move. Rebuilding this block's HTML
+// every frame renders it torn, and it is a per-frame readout by nature.
+const inputRows = {};
+if (el.inputTable) {
+    for (const tr of el.inputTable.querySelectorAll('tbody tr')) {
+        inputRows[tr.dataset.in] = {
+            row: tr,
+            dg: tr.querySelector('.dg'),
+            an: tr.querySelector('.an'),
+            bar: tr.querySelector('.ab i'),
+        };
+    }
+}
 
 const TOP_KMH = 240;
 const REDLINE = 7000;
@@ -165,6 +190,81 @@ export function drawLaps(state) {
 
 export function setFps(v) { el.fps.textContent = `${v.toFixed(0)} fps`; }
 
+/**
+ * Driver input, digital beside analog.
+ *
+ * A row lights its ANALOG cell only when the two disagree — which is exactly
+ * when a pad is doing something a keyboard cannot. On the keyboard the whole
+ * column sits at 1.00 and nothing highlights, which is the honest reading.
+ *
+ * @param {Object} snap   inputSnapshot() from input.js
+ * @param {number} rack   where the steering integrator has actually got to
+ */
+export function drawInput(snap, rack) {
+    if (!el.inputTable) return;
+    if (el.padState) {
+        el.padState.textContent = snap.pad ? snap.pad.id : 'no pad';
+    }
+    const steerDigital = (snap.digital.steerRight ? 1 : 0) - (snap.digital.steerLeft ? 1 : 0);
+    const rows = [
+        ['throttle', snap.digital.throttle, snap.analog.throttle, snap.analog.throttle],
+        ['brake', snap.digital.brake, snap.analog.brake, snap.analog.brake],
+        ['steer', steerDigital !== 0, snap.steer, Math.abs(snap.steer)],
+        ['rack', Math.abs(rack) > 0.01, rack, Math.abs(rack)],
+    ];
+    for (const [name, on, value, mag] of rows) {
+        const r = inputRows[name];
+        if (!r) continue;
+        r.row.classList.toggle('on', !!on);
+        r.dg.textContent = on ? (value < 0 ? 'LEFT' : 'DOWN') : 'off';
+        r.an.textContent = value.toFixed(2);
+        // "Partial" means analog and digital disagree: pressed, but not by 1.
+        r.row.classList.toggle('partial', !!on && Math.abs(value) < 0.985);
+        r.bar.style.width = `${Math.min(100, mag * 100).toFixed(0)}%`;
+    }
+}
+
+/** Rumble meter — what the pad is being asked for, and which term is winning. */
+export function drawRumble(s) {
+    if (!el.rumbleBar) return;
+    el.rumbleBar.style.width = `${Math.min(100, s.intensity * 100).toFixed(0)}%`;
+    el.rumbleStrong.textContent = s.strong.toFixed(2);
+    el.rumbleWeak.textContent = s.weak.toFixed(2);
+    el.rumbleSlip.textContent = s.slip.toFixed(2);
+    el.rumbleImpact.textContent = s.impact.toFixed(2);
+    el.rumbleSrc.textContent = s.padConnected ? s.source : `${s.source} (no pad)`;
+    el.rumbleStrong.classList.toggle('hot', s.strong > 0.5);
+    el.rumbleWeak.classList.toggle('hot', s.weak > 0.5);
+}
+
+/** Reflect the rumble master switch. */
+export function setRumbleToggle(on) {
+    if (!el.rumbleToggle) return;
+    el.rumbleToggle.classList.toggle('on', !!on);
+    el.rumbleToggle.textContent = on ? 'Rumble: ON' : 'Rumble: OFF';
+}
+
+/** Per-source audio levels and the live Doppler ratio. */
+export function drawAudio(a) {
+    if (!el.audioRate) return;
+    el.audioRate.textContent = `${a.rate.toFixed(2)}×`;
+    el.audioDoppler.textContent = a.doppler.toFixed(3);
+    // Approaching and receding are the two things worth seeing at a glance.
+    el.audioDoppler.classList.toggle('hot', Math.abs(a.doppler - 1) > 0.01);
+    el.audioSoft.textContent = a.soft.toFixed(2);
+    el.audioHard.textContent = a.hard.toFixed(2);
+    el.audioSqueal.textContent = a.squeal.toFixed(2);
+    el.audioSqueal.classList.toggle('hot', a.squeal > 0.05);
+    el.audioRoll.textContent = a.roll.toFixed(2);
+    el.audioTone.textContent = a.tone;
+}
+
+/** Reflect the Doppler slider (used at startup and on external changes). */
+export function setDopplerFactor(v) {
+    if (el.dopplerRange) el.dopplerRange.value = String(v);
+    if (el.dopplerVal) el.dopplerVal.textContent = Number(v).toFixed(1);
+}
+
 /** Highlight the active camera button. */
 export function setCameraButtons(activeIndex) {
     for (const b of document.querySelectorAll('button.cam')) {
@@ -200,7 +300,8 @@ export function setLeanToggle(on) {
 }
 
 /** Wire the HUD's buttons. Every handler goes through app.js's entry points. */
-export function bindHud({ onCamera, onRespawn, onVehicle, onTire, onLean }) {
+export function bindHud({ onCamera, onRespawn, onVehicle, onTire, onLean,
+                          onRumble, onDoppler }) {
     for (const b of document.querySelectorAll('button.cam')) {
         b.addEventListener('click', () => onCamera(Number(b.dataset.cam)));
     }
@@ -211,5 +312,15 @@ export function bindHud({ onCamera, onRespawn, onVehicle, onTire, onLean }) {
         b.addEventListener('click', () => onTire(b.dataset.tire));
     }
     if (el.leanToggle) el.leanToggle.addEventListener('click', onLean);
+    if (el.rumbleToggle && onRumble) {
+        el.rumbleToggle.addEventListener('click', () => setRumbleToggle(onRumble()));
+    }
+    if (el.dopplerRange && onDoppler) {
+        el.dopplerRange.addEventListener('input', () => {
+            const v = Number(el.dopplerRange.value);
+            onDoppler(v);
+            if (el.dopplerVal) el.dopplerVal.textContent = v.toFixed(1);
+        });
+    }
     $('respawn').addEventListener('click', onRespawn);
 }

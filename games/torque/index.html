@@ -99,6 +99,78 @@
             </p>
         </section>
 
+        <!-- Pad: the digital column and the analog column, side by side. On the
+             keyboard they read identically; on a pad the analog one is a
+             continuum and that contrast is the whole point of the section. -->
+        <section>
+            <h2>Driver input <span id="padState" class="fps">no pad</span></h2>
+            <table id="inputTable">
+                <thead><tr><th></th><th>digital</th><th>analog</th><th></th></tr></thead>
+                <tbody>
+                    <tr data-in="throttle"><th class="il">throttle</th><td class="dg">—</td><td class="an">0.00</td><td class="ab"><i></i></td></tr>
+                    <tr data-in="brake"><th class="il">brake</th><td class="dg">—</td><td class="an">0.00</td><td class="ab"><i></i></td></tr>
+                    <tr data-in="steer"><th class="il">steer</th><td class="dg">—</td><td class="an">0.00</td><td class="ab"><i></i></td></tr>
+                    <tr data-in="rack"><th class="il">rack</th><td class="dg">—</td><td class="an">0.00</td><td class="ab"><i></i></td></tr>
+                </tbody>
+            </table>
+            <p class="hint">
+                <b>RT</b> throttle &nbsp; <b>LT</b> brake &nbsp; <b>left stick</b> steer<br>
+                <b>A</b> handbrake &nbsp; <b>Y</b> respawn &nbsp; <b>LB/RB</b> vehicle / camera<br>
+                A key is always strength <b>1.00</b>; a trigger reports its real
+                deflection and a stick its deflection past the deadzone. The same
+                <b>getActionStrength</b> call serves both, so half a trigger is
+                genuinely half throttle. <b>rack</b> is where the steering
+                integrator has actually got to.
+            </p>
+        </section>
+
+        <!-- Rumble: magnitudes computed from telemetry, not from event types. -->
+        <section>
+            <h2>Rumble <span id="rumbleSrc" class="fps">idle</span></h2>
+            <div class="bar"><i id="rumbleBar"></i></div>
+            <div class="stats" style="margin-top:6px">
+                <div><span>strong</span><b id="rumbleStrong">0.00</b></div>
+                <div><span>weak</span><b id="rumbleWeak">0.00</b></div>
+                <div><span>slip</span><b id="rumbleSlip">0.00</b></div>
+                <div><span>impact</span><b id="rumbleImpact">0.00</b></div>
+            </div>
+            <button id="rumbleToggle" class="wide on">Rumble: ON</button>
+            <p class="hint">
+                Every magnitude is scaled from a measured value — wheel slip off
+                the same telemetry the table below draws, impacts off the
+                chassis' own deceleration, the buzz off how far into the last
+                12% of the rev range the engine is, and the tank's low hum off
+                track speed. Strong motor carries mass, weak motor carries
+                texture.
+            </p>
+        </section>
+
+        <!-- Audio: synthesized, attached to the chassis, heard from the camera. -->
+        <section>
+            <h2>Engine audio <span id="audioTone" class="fps">—</span></h2>
+            <div class="stats">
+                <div><span>note</span><b id="audioRate">1.00×</b></div>
+                <div><span>doppler</span><b id="audioDoppler">1.000</b></div>
+                <div><span>overrun</span><b id="audioSoft">0.00</b></div>
+                <div><span>on load</span><b id="audioHard">0.00</b></div>
+                <div><span>squeal</span><b id="audioSqueal">0.00</b></div>
+                <div><span>roll</span><b id="audioRoll">0.00</b></div>
+            </div>
+            <label class="slider">
+                <span>Doppler factor <b id="dopplerVal">1.0</b></span>
+                <input type="range" id="dopplerRange" min="0" max="4" step="0.1" value="1">
+            </label>
+            <p class="hint">
+                The note is a synthesized waveform whose playback rate <b>is</b>
+                the tachometer, crossfaded between an overrun timbre and a
+                loaded one by the analog throttle. All three sources are
+                attached to the chassis with <b>attachAudioEmitter</b>, and the
+                listener follows the active camera — so pick <b>Trackside</b>,
+                drive past the post, and watch the Doppler ratio cross 1.0.
+                Drag this to 0 and the pass goes flat.
+            </p>
+        </section>
+
         <section>
             <h2>Camera</h2>
             <div class="camRow">
@@ -156,7 +228,9 @@
             <p class="hint keys">
                 <b>W / ↑</b> throttle &nbsp; <b>S / ↓</b> brake, then reverse<br>
                 <b>A D / ← →</b> steer &nbsp; <b>Space</b> handbrake / neutral turn<br>
-                <b>R</b> respawn &nbsp; <b>1 2 3</b> camera &nbsp; <b>Tab</b> next vehicle
+                <b>R</b> respawn &nbsp; <b>1 2 3</b> camera &nbsp; <b>Tab</b> next vehicle<br>
+                A gamepad drives all of it, with analog pedals and steering —
+                see <b>Driver input</b> above.
             </p>
             <button id="respawn" class="wide">Respawn on track</button>
         </section>

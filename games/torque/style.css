@@ -235,6 +235,82 @@ button.wide { width: 100%; margin-top: 8px; }
     outline: 1px solid rgba(255, 255, 255, 0.10);
 }
 
+/* --- Driver input table --------------------------------------------------- */
+/* Two columns of the same four demands: what a switch would say, and what the
+   analog reading actually is. They only differ when a pad is driving. */
+
+#inputTable {
+    width: 100%;
+    border-collapse: collapse;
+    font: 11px ui-monospace, monospace;
+}
+
+#inputTable thead th {
+    font-size: 10px;
+    font-weight: 600;
+    color: #6d7885;
+    text-align: right;
+    padding: 2px 4px;
+}
+
+#inputTable tbody th {
+    text-align: left;
+    color: #9aa6b4;
+    font-weight: 600;
+    padding: 2px 4px;
+}
+
+#inputTable td {
+    padding: 2px 4px;
+    text-align: right;
+    color: #dfe6ee;
+}
+
+/* The digital column is a switch, so it is drawn as one: dim when off, lit
+   when on, never a number. */
+#inputTable td.dg { color: #4d565f; }
+#inputTable tr.on td.dg { color: #f5a623; font-weight: 700; }
+
+/* Lit only when the analog reading DISAGREES with the digital one — i.e. when
+   a pad is giving something a keyboard could not. */
+#inputTable tr.partial td.an { color: #59c2f0; font-weight: 700; }
+
+#inputTable td.ab { width: 54px; padding-right: 0; }
+
+#inputTable td.ab i {
+    display: block;
+    height: 7px;
+    width: 0%;
+    background: linear-gradient(90deg, #2f7fb8, #59c2f0);
+    border-radius: 2px;
+    outline: 1px solid rgba(255, 255, 255, 0.10);
+}
+
+/* --- Rumble meter --------------------------------------------------------- */
+
+#rumbleBar {
+    background: linear-gradient(90deg, #3f9c6d 0%, #f5a623 55%, #d9412f 90%);
+}
+
+#hud .bar { margin-top: 0; }
+
+/* --- Sliders -------------------------------------------------------------- */
+
+.slider {
+    display: block;
+    margin-top: 9px;
+    font: 11px ui-monospace, monospace;
+    color: #6d7885;
+}
+
+.slider span { display: block; margin-bottom: 3px; }
+.slider b { color: #dfe6ee; float: right; }
+
+.slider input[type=range] {
+    width: 100%;
+    accent-color: #f5a623;
+}
+
 /* --- Instrument cluster --------------------------------------------------- */
 
 #cluster {

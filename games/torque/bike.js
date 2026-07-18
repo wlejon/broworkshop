@@ -16,7 +16,7 @@
 // (5000/1000) assume that sample's offset centre of mass and will shake a
 // uniform-density chassis to pieces. `lean.maxAngle` is the only knob touched.
 
-import { held, setHeld, setRespawnHandler, makeSteering, rollDegrees } from "/app/input.js";
+import { held, strength, setHeld, setRespawnHandler, makeSteering, rollDegrees } from "/app/input.js";
 
 // A slim chassis at a high density: ≈ 240 kg over 0.30 m³, which is a big road
 // bike with a rider on it. The box is small because the mass should sit low and
@@ -188,20 +188,23 @@ export function createBike(scene, spawn) {
         }
         const steer = steering.step(dt);
 
+        // Analog throttle and brake, same rule as the car: strength() for the
+        // amount, the digital state for the brake-or-reverse decision.
         const speed = vehicle.speed;
-        let forward = held.throttle ? 1 : 0;
+        let forward = strength('throttle');
         let brake = 0;
         if (held.brake) {
-            if (speed > 0.8) { brake = 1; forward = 0; }
-            else { forward = -1; }
+            const pedal = strength('brake');
+            if (speed > 0.8) { brake = pedal; forward = 0; }
+            else { forward = -pedal; }
         }
-        if (!held.throttle && !held.brake && !held.handbrake && Math.abs(speed) < 0.6) {
+        if (forward === 0 && brake === 0 && !held.handbrake && Math.abs(speed) < 0.6) {
             brake = 1;
         }
 
         vehicle.setInput({
             forward, right: steer, brake,
-            handBrake: held.handbrake ? 1 : 0,
+            handBrake: strength('handbrake'),
         });
     }
 

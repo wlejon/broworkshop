@@ -1,4 +1,29 @@
-// Torque — a driving showcase for bro's Jolt vehicle support.
+// Torque — a driving game built on bro's Jolt vehicle support.
+//
+// Three real Jolt vehicle CONTROLLERS on one circuit, driven with a keyboard or
+// an analog gamepad, with haptics and spatialised procedural engine audio. In
+// one sentence per system:
+//
+//   * a wheeled car with sprung suspension per corner, a torque-limited engine,
+//     a self-shifting five-speed box, a limited-slip diff, and per-wheel tyre
+//     friction you can change between four presets while driving;
+//   * a tracked vehicle that steers by running its two tracks at different
+//     rates and can spin on its own centre, which no steered vehicle can;
+//   * a motorcycle held up by a lean spring you can switch off mid-corner;
+//   * a parametric circuit with banking derived from curvature, an elevation
+//     change, three friction surfaces including an ice patch, and barriers;
+//   * cameras as scene NODES — two parented to the chassis and never touched
+//     again, one fixed trackside post aimed by hand;
+//   * analog input through the engine's action system, so a trigger at 40%
+//     is 40% throttle and the same code path still gives a key a flat 1.0;
+//   * rumble whose magnitudes are scaled from measured telemetry — wheel slip,
+//     chassis deceleration, revs against redline, track speed;
+//   * engine, tyre and road audio synthesized from scratch, attached to the
+//     chassis as scene emitters, and heard from whichever camera is live —
+//     so a car passing the trackside post Dopplers, measurably.
+//
+// Everything the app exists to demonstrate is switchable from the HUD, and the
+// smoke test asserts against the same telemetry the HUD draws.
 //
 // bro ships a full Jolt VehicleConstraint: sprung suspension per corner, an
 // engine with a torque ceiling, a self-shifting gearbox with a clutch, a
@@ -31,6 +56,10 @@
 //               node aimed by hand.
 //   hud.js      Cluster + per-wheel telemetry, adapting to the active vehicle,
 //               drawn from the same snapshot the smoke test asserts against.
+//   rumble.js   Haptics computed from telemetry rather than from event types,
+//               committed to the pad on a fixed cadence.
+//   audio.js    Procedural engine/squeal/roll synthesis, attached to the
+//               chassis node so the scene does the 3D audio work.
 //
 // app.js owns the environment, the frame loop, lap timing, and the respawn
 // logic, and exports the handles the test drives.
@@ -39,10 +68,13 @@ import { installSystemMenu } from "/lib/system-menu.js";
 import { buildTrack } from "/app/track.js";
 import { createGarage } from "/app/garage.js";
 import { createCameras } from "/app/cameras.js";
-import { setRespawnHandler } from "/app/input.js";
+import { setRespawnHandler, setNavHandlers, strength, inputSnapshot } from "/app/input.js";
+import { createRumble } from "/app/rumble.js";
+import { createEngineAudio } from "/app/audio.js";
 import {
     drawTelemetry, drawLaps, setFps, setCameraButtons, bindHud,
     setVehicle, setTirePreset, setLeanToggle,
+    drawInput, drawRumble, drawAudio, setRumbleToggle, setDopplerFactor,
 } from "/app/hud.js";
 
 installSystemMenu();
@@ -98,9 +130,12 @@ const world = buildTrack(scene);
 // The garage builds all three vehicles and tells us whenever the cameras need
 // to move — on a vehicle switch, and also after a tyre change, which rebuilds
 // the car's constraint and with it the chassis node the cameras hang off.
+// The cameras and the audio emitters hang off the same thing — the active
+// vehicle's chassis node — and both have to let go before a tyre rebuild
+// destroys it, so they move together on the garage's two hooks.
 const garage = createGarage(scene, world, {
-    onAttach: (v) => cameras.attachTo(v),
-    onDetach: () => cameras.detach(),
+    onAttach: (v) => { cameras.attachTo(v); audio.attachTo(v); },
+    onDetach: () => { cameras.detach(); audio.detach(); },
     onChange: (v) => {
         setVehicle(v);
         if (v.kind === 'bike') setLeanToggle(v.leanEnabled);
@@ -110,6 +145,14 @@ const garage = createGarage(scene, world, {
 
 const cameras = createCameras(scene, garage.active, world);
 const cam = cameras.chase;
+
+// Audio and haptics. Both are built after the garage because both need a
+// chassis node to hang off, and both are re-pointed by the hooks above on every
+// vehicle change. bindAudioListenerToCamera happens inside createEngineAudio,
+// so the listener is already following whichever camera is live.
+const audio = createEngineAudio(scene);
+audio.attachTo(garage.active);
+const rumble = createRumble({ enabled: true });
 
 // Chunk 1's handle name, kept because the whole app and the smoke test refer to
 // "the car". It is now one of three, and `garage.active` is what is being driven.
@@ -175,12 +218,29 @@ bindHud({
         if (garage.setTirePreset(name)) setTirePreset(name, garage.TIRE_PRESETS);
     },
     onLean: () => setLeanToggle(garage.bike.setLean(!garage.bike.leanEnabled)),
+    onRumble: () => rumble.setEnabled(!rumble.enabled),
+    onDoppler: (v) => audio.setDopplerFactor(v),
+});
+
+/** Cycle to the next vehicle in the garage's order. Tab and the pad's LB. */
+export function nextVehicle() {
+    const order = garage.KINDS;
+    return selectVehicle(order[(order.indexOf(garage.activeKind) + 1) % order.length]);
+}
+
+// The pad's shoulder buttons reach the same two entry points the number keys
+// and Tab do, rather than duplicating any of the logic.
+setNavHandlers({
+    onCamera: () => { cameras.cycle(); setCameraButtons(cameras.activeIndex); },
+    onSwap: nextVehicle,
 });
 
 setCameraButtons(cameras.activeIndex);
 setVehicle(garage.active);
 setTirePreset(garage.car.tirePreset, garage.TIRE_PRESETS);
 setLeanToggle(garage.bike.leanEnabled);
+setRumbleToggle(rumble.enabled);
+setDopplerFactor(audio.dopplerFactor);
 
 // Number keys switch cameras, Tab cycles vehicles. These are direct key
 // handlers rather than actions on purpose: camera and vehicle choice are
@@ -189,11 +249,7 @@ setLeanToggle(garage.bike.leanEnabled);
 document.addEventListener('keydown', (e) => {
     const i = ['1', '2', '3'].indexOf(e.key);
     if (i >= 0) { cameras.select(i); setCameraButtons(cameras.activeIndex); }
-    if (e.key === 'Tab') {
-        e.preventDefault();
-        const order = garage.KINDS;
-        selectVehicle(order[(order.indexOf(garage.activeKind) + 1) % order.length]);
-    }
+    if (e.key === 'Tab') { e.preventDefault(); nextVehicle(); }
 });
 
 // --- Frame loop --------------------------------------------------------------
@@ -245,6 +301,13 @@ export function tick(dt) {
     state.surface = fl && fl.contact ? world.surfaceName(fl.contactBody) : 'air';
     state.onIce = telem.wheels.some(w => w.contact && world.isIce(w.contactBody));
     state.vehicle = garage.activeKind;
+
+    // Haptics and audio are simulation consumers, not HUD decoration, so they
+    // run inside tick() — which means the smoke test's stepped frames drive
+    // them exactly as a real one does.
+    const settling = active.isSettling ? active.isSettling() : false;
+    rumble.update(dt, telem, settling);
+    audio.update(active, telem, state.surface, strength('throttle'));
     return telem;
 }
 
@@ -256,6 +319,9 @@ function frame() {
     const telem = tick(dt);
     drawTelemetry(telem, state.surface);
     drawLaps(state);
+    drawInput(inputSnapshot(), telem.steer);
+    drawRumble(rumble.state);
+    drawAudio(audio.levels);
 
     fpsAccum += dt;
     if (++fpsFrames >= 20) {
@@ -266,8 +332,4 @@ function frame() {
 }
 requestAnimationFrame(frame);
 
-// CHUNK 3: gamepad bindings on the torque_* actions, analog throttle/steer
-// strength, rumble from wheel slip, and engine audio via a scene emitter on
-// the chassis with Doppler from bindAudioListenerToCamera.
-
-export { scene, canvas, cam, car, world, cameras, garage };
+export { scene, canvas, cam, car, world, cameras, garage, audio, rumble };
