@@ -194,3 +194,79 @@ button.danger { border-color: #5a2b2b; color: #e0a0a0; }
 .ahead .s3 { width: 34px; flex: none; text-align: right; }
 
 #shipReadout { margin-top: 8px; }
+
+/* ── pointer / touch ─────────────────────────────────────────────────────── */
+
+.subhead {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 6px;
+}
+.subhead .tag { margin-left: 0; }
+
+#ptrTable { margin-top: 8px; min-height: 96px; }
+.prow { display: flex; align-items: center; gap: 8px; height: 16px; }
+.prow .swatch {
+    width: 9px; height: 9px; flex: none; border-radius: 2px; background: transparent;
+}
+.prow b { font-weight: 500; color: #9fb0c8; }
+
+/* The event stream. Fixed row count and fixed row height so appending never
+   reflows the panel — the log is a window, not a growing list. */
+.evlog {
+    margin-top: 6px; padding: 7px 9px;
+    background: #0b0e14; border: 1px solid #1a2130; border-radius: 4px;
+    font: 10.5px/1.5 ui-monospace, Consolas, monospace;
+    white-space: pre;
+    overflow: hidden;
+}
+.lrow { height: 16px; color: #5d6678; }
+.lrow.ptr    { color: #7fb3ff; }
+.lrow.touch  { color: #6ee79a; }
+.lrow.compat { color: #ffd479; }   /* synthesized from touch */
+.lrow.mouse  { color: #9aa4b8; }
+.lrow.cancel { color: #e08a8a; }
+
+.check {
+    display: flex; align-items: center; gap: 7px;
+    font-size: 12px; color: #8b93a5; margin: 6px 0 8px;
+}
+
+#capTrack {
+    position: relative;
+    height: 96px;
+    background: #0b0e14;
+    border: 1px dashed #2a3345;
+    border-radius: 5px;
+    overflow: visible;      /* the box must be draggable past the border */
+}
+#capBox {
+    position: absolute; left: 14px; top: 26px;
+    width: 46px; height: 46px;
+    display: flex; align-items: center; justify-content: center;
+    background: #1b3350; border: 1px solid #3d7dd6; border-radius: 5px;
+    color: #cfe4ff; font: 11px ui-monospace, Consolas, monospace;
+    cursor: grab; touch-action: none; user-select: none;
+}
+
+/* ── gestures ────────────────────────────────────────────────────────────── */
+
+#gestCanvas { touch-action: none; }
+#gestPhase { display: block; margin: 6px 0; }
+#gestReadout { margin-top: 4px; }
+
+/* ── IME ─────────────────────────────────────────────────────────────────── */
+
+#imeInput {
+    width: 100%;
+    padding: 7px 9px;
+    background: #0b0e14; color: #d6dae3;
+    border: 1px solid #2b3444; border-radius: 4px;
+    font: 15px ui-monospace, Consolas, monospace;
+}
+#imeInput:focus { outline: none; border-color: #3d7dd6; }
+#imeBanner { margin-top: 8px; display: block; }
+#imeBanner.capture { display: block; background: #12161f; border-color: #262f40; color: #6d7688; }
+#imeBanner.capture.on { background: #16263c; border-color: #3d7dd6; color: #cfe4ff; }
+#imeReadout { margin-top: 10px; }
+#imeSeamNote { display: block; margin-top: 6px; }
+button:disabled { opacity: .4; cursor: default; }

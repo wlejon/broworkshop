@@ -14,6 +14,8 @@
 import {
     padState, currentPad, actionState, ACTIONS, ship, strength,
     commitBinding, restoreDefaults, tickShip, rumblePlay, rumbleStop, rumbleLog,
+    pointerState, captureState, gestureState, resetGesture,
+    imeState, driveCJK, driveAccent, driveCancel, resetIme,
 } from '/app/app.js';
 
 const near = (a, b, eps) => Math.abs(a - b) <= (eps === undefined ? 1e-3 : eps);
@@ -328,6 +330,378 @@ flush(); advanceTime(32);
 assert(navigator.getGamepads().filter((x) => x).length === 0, 'all pads gone');
 assert(document.getElementById('padEmpty').style.display === 'block',
        'empty state returned when the last pad left');
+
+// ── pointers: several at once ───────────────────────────────────────────────
+//
+// The dashboard is three panels wide, so the pointer/gesture/IME row sits below
+// a 1080-tall viewport and nothing there is hit-testable. Grow the viewport
+// instead of scrolling: injection coordinates are viewport-relative, so a taller
+// viewport is the deterministic way to put a panel under the finger.
+
+resize(1920, 3400);
+advanceTime(32);
+flush();
+
+const ptrCanvas = document.getElementById('ptrCanvas');
+let pc = ptrCanvas.getBoundingClientRect();
+assert(pc.width === 560 && pc.height === 300, 'pointer canvas laid out at its intrinsic size');
+assert(pc.bottom < 3400, 'pointer panel is inside the viewport, got bottom ' + pc.bottom);
+const P = (fx, fy) => [pc.left + fx, pc.top + fy];
+
+// Two fingers land at once. This is the assertion nothing else in the workshop
+// can make: two INDEPENDENT contacts, distinct ids, both tracked.
+touchDown(41, ...P(80, 80));
+touchDown(42, ...P(400, 200));
+flush(); advanceTime(16);
+
+assert(pointerState.pointers.size === 2,
+       'two simultaneous contacts tracked, got ' + pointerState.pointers.size);
+const ids = Array.from(pointerState.pointers.keys());
+assert(ids.length === 2 && ids[0] !== ids[1],
+       'the two contacts have DISTINCT pointerIds: ' + JSON.stringify(ids));
+assert(ids.every((i) => i >= 2), 'touch pointerIds start at 2 (the mouse owns 1): ' + ids);
+assert(pointerState.maxConcurrent >= 2, 'the panel recorded a two-pointer peak');
+assert(pointerState.lastTouchList === 2,
+       'TouchEvent.touches agrees with our map, got ' + pointerState.lastTouchList);
+
+// Both are in the VISUALISER's state, at their own coordinates, with their own
+// trail and colour — not one record being overwritten by the other.
+const recs = Array.from(pointerState.pointers.values());
+const a = recs.find((r) => Math.round(r.x) === 80);
+const b = recs.find((r) => Math.round(r.x) === 400);
+assert(a && b, 'both contacts are at their own canvas-local coordinates: ' +
+       JSON.stringify(recs.map((r) => [Math.round(r.x), Math.round(r.y)])));
+assert(Math.round(a.y) === 80 && Math.round(b.y) === 200, 'and their own y');
+assert(a.color !== b.color, 'each contact drew in its own colour');
+assert(a.primary === true && b.primary === false,
+       'the first finger of the set is primary, the second is not');
+assert(a.type === 'touch' && b.type === 'touch', 'both report pointerType "touch"');
+
+// Moves are routed per pointer: moving one must not disturb the other.
+const bBefore = { x: b.x, y: b.y };
+touchMove(41, ...P(140, 120));
+flush(); advanceTime(16);
+assert(Math.round(a.x) === 140 && Math.round(a.y) === 120, 'the moved contact followed');
+assert(b.x === bBefore.x && b.y === bBefore.y, 'the other contact did not move');
+assert(a.trail.length >= 2, 'the moved contact accumulated a trail: ' + a.trail.length);
+assert(b.trail.length === 1, 'the still contact did not');
+
+touchUp(41, ...P(140, 120));
+flush();
+assert(pointerState.pointers.size === 1, 'lifting one finger leaves the other tracked');
+touchUp(42, ...P(400, 200));
+flush();
+assert(pointerState.pointers.size === 0, 'both gone');
+
+// ── a touch produces its compat mouse event too ─────────────────────────────
+
+document.getElementById('ptrClear').click();
+flush();
+
+touchDown(50, ...P(300, 150));
+touchUp(50, ...P(300, 150));       // a clean tap: no travel past the slop
+flush(); advanceTime(16);
+
+const seq = pointerState.log.map((e) => e.type);
+assert(seq.indexOf('pointerdown') >= 0, 'the tap produced a pointer event');
+assert(seq.indexOf('touchstart') >= 0, 'and a touch event');
+assert(seq.indexOf('mousedown') >= 0, 'and its COMPAT mouse event');
+assert(seq.indexOf('mouseup') >= 0 && seq.indexOf('click') >= 0, 'and mouseup + click');
+assert(seq.indexOf('pointerdown') < seq.indexOf('mousedown'),
+       'the compat mouse event arrives AFTER the pointer stream: ' + seq.join(' > '));
+assert(seq.indexOf('touchend') < seq.indexOf('mousedown'),
+       'and specifically after touchend: ' + seq.join(' > '));
+const compat = pointerState.log.filter((e) => e.kind === 'compat');
+assert(compat.length === 3, 'three synthesized events flagged as compat, got ' + compat.length);
+
+// A DRAG past the ~10px slop synthesizes nothing — same finger, no mouse.
+document.getElementById('ptrClear').click();
+touchDown(51, ...P(100, 100));
+touchMove(51, ...P(300, 220));
+touchUp(51, ...P(300, 220));
+flush(); advanceTime(16);
+const dragMouse = pointerState.log.filter(
+    (e) => e.type === 'mousedown' || e.type === 'click');
+assert(dragMouse.length === 0,
+       'a drag synthesizes no compat mouse events, got ' + JSON.stringify(dragMouse));
+
+// ── pointer capture keeps the stream after leaving the element ──────────────
+//
+// The real proof is not that capture was granted, it is that moves outside the
+// element's own rect still arrive at it.
+
+const capBox = document.getElementById('capBox');
+let cb = capBox.getBoundingClientRect();
+const gotBefore = captureState.gotEvents;
+
+touchDown(60, cb.left + 20, cb.top + 20);
+flush();
+assert(captureState.captured === true, 'gotpointercapture fired on the holder');
+assert(captureState.gotEvents === gotBefore + 1, 'exactly one capture acquired');
+assert(capBox.hasPointerCapture(captureState.pointerId) === true,
+       'hasPointerCapture agrees');
+
+// Walk the pointer far outside the box — a different panel entirely.
+touchMove(60, cb.left + 300, cb.top + 260);
+touchMove(60, cb.left + 500, cb.top + 400);
+flush(); advanceTime(16);
+
+assert(captureState.movesTotal >= 2,
+       'the captured element still received the moves, got ' + captureState.movesTotal);
+assert(captureState.movesOutsideBounds >= 2,
+       'and those moves were delivered while the pointer was OUTSIDE its bounds, got ' +
+       captureState.movesOutsideBounds);
+
+const lostBefore = captureState.lostEvents;
+touchUp(60, cb.left + 500, cb.top + 400);
+flush();
+assert(captureState.lostEvents === lostBefore + 1,
+       'lostpointercapture fired — capture auto-releases on pointerup');
+assert(captureState.captured === false, 'the holder no longer holds it');
+
+// The control: same drag with capture switched off delivers nothing outside.
+const capEnable = document.getElementById('capEnable');
+capEnable.checked = false;
+capEnable.dispatchEvent(new Event('change'));
+flush();
+assert(captureState.enabled === false, 'the HUD toggle disabled capture');
+
+cb = capBox.getBoundingClientRect();
+touchDown(61, cb.left + 20, cb.top + 20);
+flush();
+assert(captureState.pointerId !== null && captureState.movesOutsideBounds === 0,
+       'the uncaptured drag really started on the box (counters reset)');
+assert(captureState.captured === false, 'and no capture was taken');
+touchMove(61, cb.left + 300, cb.top + 260);
+touchMove(61, cb.left + 500, cb.top + 400);
+flush(); advanceTime(16);
+assert(captureState.movesOutsideBounds === 0,
+       'WITHOUT capture, no out-of-bounds move reaches the element, got ' +
+       captureState.movesOutsideBounds);
+touchUp(61, cb.left + 500, cb.top + 400);
+flush();
+
+capEnable.checked = true;
+capEnable.dispatchEvent(new Event('change'));
+flush();
+
+// ── touchCancel clears the tracked contacts ─────────────────────────────────
+
+pc = ptrCanvas.getBoundingClientRect();
+const cancelsBefore = pointerState.cancelCount;
+touchDown(70, ...P(120, 120));
+touchDown(71, ...P(420, 220));
+flush();
+assert(pointerState.pointers.size === 2, 'two contacts down before the cancel');
+
+touchCancel(70, ...P(120, 120));
+touchCancel(71, ...P(420, 220));
+flush(); advanceTime(16);
+assert(pointerState.pointers.size === 0,
+       'touchCancel cleared every tracked pointer, got ' + pointerState.pointers.size);
+assert(pointerState.cancelCount === cancelsBefore + 2, 'both cancels were counted');
+assert(pointerState.log.filter((e) => e.type === 'pointercancel').length >= 2,
+       'pointercancel reached the log');
+
+// ── gestures: pinch scales, twist rotates ───────────────────────────────────
+
+const gestCanvas = document.getElementById('gestCanvas');
+const gc = gestCanvas.getBoundingClientRect();
+const G = (fx, fy) => [gc.left + fx, gc.top + fy];
+
+resetGesture();
+assert(gestureState.scale === 1 && gestureState.rotation === 0, 'view reset');
+
+// Two fingers 100 px apart, spread to 300 px: e.scale must be 3, and the view
+// scale must follow it upward.
+touchDown(80, ...G(180, 160));
+touchDown(81, ...G(280, 160));
+flush(); advanceTime(16);
+assert(gestureState.active === true, 'the second finger started a gesture');
+
+touchMove(80, ...G(80, 160));
+touchMove(81, ...G(380, 160));
+flush(); advanceTime(16);
+
+assert(near(gestureState.lastEventScale, 3, 1e-3),
+       'e.scale is distance-now / distance-at-start = 3, got ' + gestureState.lastEventScale);
+assert(near(gestureState.scale, 3, 1e-3),
+       'the viewer scaled UP with the pinch, got ' + gestureState.scale);
+assert(gestureState.scale > 1, 'pinch-out zoomed in, not out');
+assert(gestureState.changes >= 1, 'gesturechange fired');
+
+// Now pinch back IN from here — the direction must reverse.
+const scaleAtPeak = gestureState.scale;
+touchMove(80, ...G(155, 160));
+touchMove(81, ...G(305, 160));
+flush(); advanceTime(16);
+assert(gestureState.scale < scaleAtPeak,
+       `pinch-in zoomed out again: ${gestureState.scale} < ${scaleAtPeak}`);
+
+touchUp(80, ...G(155, 160));
+touchUp(81, ...G(305, 160));
+flush(); advanceTime(16);
+assert(gestureState.active === false, 'lifting a founding finger ended the gesture');
+assert(gestureState.gestures === 1, 'one completed gesture');
+
+// Rotation: a horizontal pair swung to vertical is 90° CLOCKWISE in screen
+// coordinates (y grows downward), and bro reports clockwise as positive.
+resetGesture();
+touchDown(90, ...G(180, 160));
+touchDown(91, ...G(280, 160));
+flush(); advanceTime(16);
+touchMove(90, ...G(230, 110));
+touchMove(91, ...G(230, 210));
+flush(); advanceTime(16);
+
+assert(near(gestureState.lastEventRotation, 90, 0.5),
+       'e.rotation is +90 (clockwise positive), got ' + gestureState.lastEventRotation);
+assert(near(gestureState.rotation, 90, 0.5),
+       'the viewer rotated with it, got ' + gestureState.rotation);
+assert(Math.abs(gestureState.rotation) > 1, 'rotation is a real change, not noise');
+
+touchUp(90, ...G(230, 110));
+touchUp(91, ...G(230, 210));
+flush(); advanceTime(16);
+
+// The gesture is applied on top of the view's existing state, not assigned to
+// it — a second gesture must accumulate rather than snap back.
+touchDown(92, ...G(180, 160));
+touchDown(93, ...G(280, 160));
+flush(); advanceTime(16);
+touchMove(92, ...G(230, 110));
+touchMove(93, ...G(230, 210));
+flush(); advanceTime(16);
+assert(near(gestureState.rotation, 180, 1),
+       'a second +90 gesture accumulated onto the first, got ' + gestureState.rotation);
+touchUp(92, ...G(230, 110));
+touchUp(93, ...G(230, 210));
+flush(); advanceTime(16);
+resetGesture();
+
+// Gesture recognition is DOCUMENT-WIDE. Two fingers already resting on the
+// visualiser panel are the founding pair, so a two-finger pinch on the map
+// founds nothing and moves nothing — the events went to the other panel.
+touchDown(94, ...P(100, 100));
+touchDown(95, ...P(300, 200));
+flush(); advanceTime(16);
+const changesBefore = gestureState.changes;
+touchDown(96, ...G(180, 160));
+touchDown(97, ...G(280, 160));
+flush(); advanceTime(16);
+touchMove(96, ...G(80, 160));
+touchMove(97, ...G(380, 160));
+flush(); advanceTime(16);
+assert(gestureState.changes === changesBefore,
+       'a pinch on the map is inert while an older pair holds the gesture, got ' +
+       (gestureState.changes - changesBefore) + ' changes');
+assert(gestureState.scale === 1, 'and the view did not move');
+touchUp(96, ...G(80, 160)); touchUp(97, ...G(380, 160));
+touchUp(94, ...P(100, 100)); touchUp(95, ...P(300, 200));
+flush(); advanceTime(16);
+assert(pointerState.pointers.size === 0, 'all contacts lifted');
+resetGesture();
+
+// ── IME composition ─────────────────────────────────────────────────────────
+
+const imeInput = document.getElementById('imeInput');
+assert(imeState.headless === true, 'the IME seams are available under bro-headless');
+
+resetIme();
+flush();
+assert(imeInput.value === '', 'field starts empty');
+
+assert(driveCJK() === true, 'the CJK driver ran');
+flush(); advanceTime(16);
+
+// The three composition events, in spec order, with the right payloads.
+const comp = imeState.events.filter((e) => e.type.indexOf('composition') === 0);
+assert(comp[0].type === 'compositionstart', 'compositionstart came first');
+assert(comp[comp.length - 1].type === 'compositionend', 'compositionend came last');
+const middles = comp.slice(1, -1);
+assert(middles.length >= 3, 'one compositionupdate per preedit revision, got ' + middles.length);
+assert(middles.every((e) => e.type === 'compositionupdate'),
+       'everything between start and end is an update: ' +
+       JSON.stringify(comp.map((e) => e.type)));
+assert(comp[1].data === 'n', 'the first update carried the first preedit "n", got ' + comp[1].data);
+assert(comp[comp.length - 1].data === '你好',
+       'compositionend carried the committed string, got ' + comp[comp.length - 1].data);
+
+assert(imeInput.value === '你好', 'the committed text is in the field, got ' + imeInput.value);
+assert(imeState.committed === '你好', 'the panel recorded the commit');
+assert(imeState.composing === false, 'composition finished');
+assert(imeState.compositions === 1, 'one completed composition');
+assert(document.getElementById('ival5').textContent === '"你好"',
+       'the readout shows the field value, got ' + document.getElementById('ival5').textContent);
+
+// `input` fired for the composition revisions too, tagged so an app can tell
+// them apart from a finished edit.
+const comps = imeState.events.filter((e) => e.type === 'input (insertCompositionText)');
+assert(comps.length >= 4, 'each revision raised input/insertCompositionText, got ' + comps.length);
+
+// The preedit was visible in .value mid-composition, and its range was derived.
+resetIme();
+imeInput.focus();
+imeCompose('ni');
+flush();
+assert(imeState.composing === true, 'composing');
+assert(imeInput.value === 'ni', 'the preedit is provisionally in .value: ' + imeInput.value);
+assert(imeState.preedit === 'ni', 'the panel shows the preedit');
+assert(imeState.rangeStart === 0 && imeState.rangeEnd === 2,
+       `composition range is [0,2), got [${imeState.rangeStart},${imeState.rangeEnd})`);
+imeCommit('你');
+flush();
+assert(imeInput.value === '你', 'commit replaced the preedit, got ' + imeInput.value);
+
+// A second composition appends and its range starts after the existing text.
+imeCompose('ha');
+flush();
+assert(imeState.rangeStart === 1,
+       'the next composition starts after the committed text, got ' + imeState.rangeStart);
+imeCommit('好');
+flush();
+assert(imeInput.value === '你好', 'two commits accumulate, got ' + imeInput.value);
+
+// ── cancel restores rather than clears ──────────────────────────────────────
+
+resetIme();
+flush();
+assert(imeInput.value === '', 'field cleared');
+assert(driveCancel() === true, 'the cancel driver ran');
+flush(); advanceTime(16);
+
+assert(imeInput.value === '',
+       'a cancelled composition leaves an empty field empty, got ' + imeInput.value);
+assert(imeState.composing === false, 'composition ended');
+assert(imeState.cancelled === 1, 'the panel counted it as cancelled, not committed');
+const cend = imeState.events.filter((e) => e.type === 'compositionend').pop();
+assert(cend.data === '', 'compositionend carried "" for the cancel, got ' + JSON.stringify(cend.data));
+
+// …but cancel is a RESTORE, not a clear: pre-existing text must survive it.
+resetIme();
+imeInput.focus();
+imeCompose('ab');
+imeCommit('kept');
+flush();
+assert(imeInput.value === 'kept', 'committed some text first');
+imeCompose('か');
+imeCompose('かん');
+flush();
+assert(imeInput.value === 'keptかん', 'the preedit is appended provisionally: ' + imeInput.value);
+imeCancel();
+flush();
+assert(imeInput.value === 'kept',
+       'cancel restored the pre-composition value rather than clearing, got ' + imeInput.value);
+
+// The dead-key path lands the accented letter.
+resetIme();
+assert(driveAccent() === true, 'the accent driver ran');
+flush();
+assert(imeInput.value === 'é', 'the dead-key composition committed é, got ' + imeInput.value);
+
+resetIme();
+resize(1920, 1080);
+flush();
 
 // ── the frame loop actually ran ─────────────────────────────────────────────
 

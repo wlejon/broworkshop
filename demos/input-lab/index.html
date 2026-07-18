@@ -7,7 +7,7 @@
 <body>
     <header id="topbar">
         <h1>Input Lab</h1>
-        <div class="sub">gamepad · action bindings · analog strength<span id="padSummary" class="tag">no pad</span></div>
+        <div class="sub">gamepad · action bindings · analog strength · pointers &amp; multi-touch · gestures · IME<span id="padSummary" class="tag">no pad</span></div>
     </header>
 
     <div id="grid">
@@ -108,12 +108,120 @@ gamepadAxis(0, "leftx", 0.5);</pre>
             <div id="shipReadout" class="ro"></div>
         </section>
 
-        <!-- CHUNK 2: touch / pointer / gesture panel goes here — pointerdown
-             trails per pointerId, TouchList inspector, pinch/pan/rotate
-             gesture readout, and the compat-mouse-synthesis timeline. -->
+        <!-- ── Pointer / touch ──────────────────────────────────────────── -->
+        <section class="panel" id="panelPointer">
+            <h2>Pointers &amp; touch <span class="hint">W3C Pointer Events + Touch Events</span></h2>
 
-        <!-- CHUNK 2: IME panel — imeCompose / imeCommit / imeCancel against an
-             <input> and a contenteditable host, showing the preedit inline. -->
+            <p class="note">Every contact is tracked independently by
+            <code>pointerId</code> — touch ids are minted from 2 and never
+            reused, the mouse permanently owns 1. Two fingers draw two trails.
+            The heavier ring is <code>isPrimary</code>.</p>
+
+            <div class="subhead">
+                <span class="hint">multi-touch visualiser</span>
+                <span id="ptrSummary" class="tag">0 live</span>
+            </div>
+            <canvas id="ptrCanvas" width="560" height="300"></canvas>
+            <div id="ptrTable" class="ro"></div>
+
+            <!-- ── Capture ─────────────────────────────────────────────── -->
+            <div class="sub-panel">
+                <h3>Pointer capture <span class="hint">setPointerCapture(pointerId)</span></h3>
+                <p class="note">Drag the square. With capture on, the moves keep
+                arriving at the square after the pointer leaves it — the
+                <b>outside-bounds move count</b> below is that, measured. Turn
+                capture off and the drag dies at the border.</p>
+                <label class="check">
+                    <input type="checkbox" id="capEnable" checked>
+                    call setPointerCapture on pointerdown
+                </label>
+                <div id="capTrack"><div id="capBox">drag</div></div>
+                <div id="capPhase" class="hint">idle</div>
+                <div class="ro">
+                    <div class="row"><span>capture held</span><b id="capHeld">no</b></div>
+                    <div class="row"><span>captured pointer</span><b id="capId">—</b></div>
+                    <div class="row"><span>moves delivered</span><b id="capMoves">0</b></div>
+                    <div class="row"><span>…of those, outside bounds</span><b id="capOutside">0</b></div>
+                    <div class="row"><span>pointer is</span><b id="capWhere">inside</b></div>
+                </div>
+            </div>
+
+            <!-- ── Event stream ────────────────────────────────────────── -->
+            <div class="sub-panel">
+                <h3>Event stream <span class="hint">raw pointer/touch vs. compat mouse</span></h3>
+                <p class="note">A clean TAP of the primary finger synthesizes the
+                classic sequence <i>after</i> touchend:
+                <code>pointerdown → touchstart → pointerup → touchend →
+                mousedown → mouseup → click</code>. A <b>drag</b> past the ~10 px
+                slop synthesizes nothing — the amber rows below are the
+                synthesized ones.</p>
+                <div id="ptrLog" class="evlog"></div>
+                <div class="btnrow"><button id="ptrClear">clear log</button></div>
+            </div>
+        </section>
+
+        <!-- ── Gestures ─────────────────────────────────────────────────── -->
+        <section class="panel" id="panelGesture">
+            <h2>Gestures <span class="hint">gesturestart / gesturechange / gestureend</span></h2>
+
+            <p class="note">Pinch to zoom, two-finger drag to pan, two-finger
+            twist to rotate. SDL3 has no gesture subsystem, so bro recognises
+            these engine-side from the two oldest live contacts and dispatches
+            WebKit-style gesture events alongside the untouched pointer stream.
+            <code>e.scale</code> and <code>e.rotation</code> are relative to
+            <code>gesturestart</code>, so the viewer multiplies onto a base
+            captured there.</p>
+
+            <canvas id="gestCanvas" width="560" height="320"></canvas>
+            <div id="gestPhase" class="hint">idle</div>
+            <div id="gestReadout" class="ro"></div>
+            <div class="btnrow"><button id="gestReset">reset view</button></div>
+            <p class="note">No touchscreen? Drag to pan, wheel to zoom,
+            <kbd>Shift</kbd>+drag to rotate — a separate mouse path, not
+            synthesized gestures.</p>
+
+            <p class="note warn"><b>Document-wide recognition:</b> the founding
+            pair is the two oldest live contacts <i>anywhere in the document</i>,
+            and the events go to the hit target of their centroid. Leave two
+            fingers resting on the visualiser panel and this map goes inert —
+            those contacts founded the gesture, so it was delivered there. There
+            is no per-element gesture arena.</p>
+        </section>
+
+        <!-- ── IME ──────────────────────────────────────────────────────── -->
+        <section class="panel" id="panelIme">
+            <h2>IME composition <span class="hint">compositionstart / update / end</span></h2>
+
+            <p class="note">An IME composes rather than types. The
+            <b>preedit</b> is provisional text that is already in
+            <code>.value</code> but is not real input yet — only
+            <code>compositionend</code> is. Note bro dispatches composition
+            events <i>after</i> the mutation, so the value shown by
+            <code>compositionstart</code> already carries the first chunk.</p>
+
+            <input type="text" id="imeInput" placeholder="compose here…">
+            <div id="imeBanner" class="capture">not composing</div>
+
+            <div class="btnrow">
+                <button id="imeCJK">compose 你好 (pinyin)</button>
+                <button id="imeAccent">compose é (dead key)</button>
+                <button id="imeAbort" class="danger">compose then cancel</button>
+                <button id="imeClear">clear</button>
+            </div>
+            <div id="imeSeamNote" class="hint">Buttons drive the
+            <code>imeCompose</code> / <code>imeCommit</code> /
+            <code>imeCancel</code> headless seams.</div>
+
+            <div id="imeReadout" class="ro"></div>
+
+            <h3>Event log</h3>
+            <div id="imeLog" class="evlog"></div>
+
+            <p class="note warn">A cancel is <b>not</b> a commit of <code>""</code>:
+            it restores the value and selection from before
+            <code>compositionstart</code> and leaves no undo entry. A field that
+            already held text keeps it.</p>
+        </section>
 
     </div>
 
