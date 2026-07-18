@@ -20,6 +20,15 @@
 //                               every call resets BOTH modes; setFog({}) = off
 //   setToneMap({mode, exposure, gamma})
 //   setAmbient([r, g, b])
+//   setSSR({enabled, maxDistance, steps, thickness, intensity, edgeFade})
+//
+// Reflection probes and decals are scene NODES rather than render state, so
+// they live in their own modules; this file only owns their HUD state and
+// calls the appliers those modules export. The dependency runs one way
+// (hud -> reflections/decals) on purpose — neither module reads `state`.
+
+import { applySSR, applyProbe, recaptureProbe } from "/app/reflections.js";
+import { applyDecals, clearDecals, decalCount } from "/app/decals.js";
 
 const el = (id) => document.getElementById(id);
 const num = (id) => parseFloat(el(id).value);
@@ -47,6 +56,25 @@ export const state = {
 
     tonemap: { mode: 'aces', exposure: 1.0 },
     ambient: 0.035,
+
+    // Screen-space reflections. Defaults are the documented ones except for a
+    // longer maxDistance: the courtyard is ~24 units deep, and 30 units of ray
+    // is barely enough to reach the back wall from the mirror strip.
+    ssr: {
+        enabled: true,
+        maxDistance: 45, steps: 64, thickness: 0.35,
+        intensity: 1.0, edgeFade: 0.10,
+    },
+
+    // Local reflection probe over the courtyard interior. `resolution` is the
+    // only field that costs a recapture to change.
+    probes: {
+        enabled: true,
+        intensity: 1.0, interior: 1.5, resolution: 256,
+        boxProjection: true, showBounds: false,
+    },
+
+    decals: { enabled: true, kind: 'impact', opacity: 1.0, sizeScale: 1.0 },
 };
 
 // LUT strips are baked by tools/gen_luts.js — setColorLUT takes a file path,
@@ -144,10 +172,13 @@ export function applyPost(scene) {
     });
     scene.setAmbient([state.ambient, state.ambient, state.ambient * 1.08]);
 
-    // CHUNK 2: SSR (scene.setSSR({enabled, maxDistance, steps, thickness,
-    // intensity, edgeFade})) and reflection-probe intensity belong in this
-    // function, gated on the same `on` flag so they join the A/B toggle.
-    // Add their state under `state.ssr` / `state.probes`.
+    // Reflections and decals join the same A/B gate. The probe one is the
+    // most dramatic member of the stack: with `on` false the metals lose
+    // their only specular ambient source and go near-black, which is exactly
+    // what "no post" honestly looks like in a scene with no IBL environment.
+    applySSR(scene, state.ssr, on);
+    applyProbe(scene, state.probes, on);
+    applyDecals(state.decals, on);
 }
 
 // --- DOM binding -------------------------------------------------------------
@@ -162,6 +193,9 @@ const DECIMALS = {
     renderScale: 2,
     fogStart: 1, fogEnd: 0, fogDensity: 3, fogHeight: 2, fogStartDist: 1,
     tmExposure: 2, ambient: 3,
+    ssrDistance: 0, ssrSteps: 0, ssrThickness: 2, ssrIntensity: 2, ssrEdgeFade: 2,
+    probeIntensity: 2, probeInterior: 1,
+    decalOpacity: 2, decalSize: 2,
 };
 
 function readControls() {
@@ -200,6 +234,25 @@ function readControls() {
     state.tonemap.mode     = el('tmMode').value;
     state.tonemap.exposure = num('tmExposure');
     state.ambient = num('ambient');
+
+    state.ssr.enabled     = el('ssrOn').checked;
+    state.ssr.maxDistance = num('ssrDistance');
+    state.ssr.steps       = parseInt(el('ssrSteps').value, 10);
+    state.ssr.thickness   = num('ssrThickness');
+    state.ssr.intensity   = num('ssrIntensity');
+    state.ssr.edgeFade    = num('ssrEdgeFade');
+
+    state.probes.enabled       = el('probeOn').checked;
+    state.probes.intensity     = num('probeIntensity');
+    state.probes.interior      = num('probeInterior');
+    state.probes.resolution    = parseInt(el('probeRes').value, 10);
+    state.probes.boxProjection = el('probeBoxProj').checked;
+    state.probes.showBounds    = el('probeBounds').checked;
+
+    state.decals.enabled   = el('decalsOn').checked;
+    state.decals.kind      = el('decalKind').value;
+    state.decals.opacity   = num('decalOpacity');
+    state.decals.sizeScale = num('decalSize');
 }
 
 function refreshLabels() {
@@ -215,7 +268,7 @@ function refreshLabels() {
 
     el('masterHint').textContent = el('masterPost').checked
         ? 'on: your settings · off: raw forward render'
-        : 'OFF — SSAO/DoF/bloom/LUT/FXAA/MSAA/fog bypassed';
+        : 'OFF — SSAO/DoF/bloom/LUT/FXAA/MSAA/fog/SSR/probe/decals bypassed';
 }
 
 /** Wire every control to `readControls -> applyPost -> refreshLabels`. */
@@ -230,6 +283,10 @@ export function bindHud(scene) {
         'fogMode', 'fogColor', 'fogStart', 'fogEnd',
         'fogDensity', 'fogHeight', 'fogStartDist',
         'tmMode', 'tmExposure', 'ambient',
+        'ssrOn', 'ssrDistance', 'ssrSteps', 'ssrThickness', 'ssrIntensity', 'ssrEdgeFade',
+        'probeOn', 'probeIntensity', 'probeInterior', 'probeRes',
+        'probeBoxProj', 'probeBounds',
+        'decalsOn', 'decalKind', 'decalOpacity', 'decalSize',
     ];
     const onChange = () => { readControls(); applyPost(scene); refreshLabels(); };
     for (const id of ids) {
@@ -238,6 +295,18 @@ export function bindHud(scene) {
         node.addEventListener('input', onChange);
         node.addEventListener('change', onChange);
     }
+
+    // Two buttons rather than sliders: a recapture is an event, not a value,
+    // and clearing decals destroys nodes.
+    el('probeRecapture').addEventListener('click', () => {
+        recaptureProbe();
+        const n = el('probeStatus');
+        if (n) n.textContent = 're-captured';
+    });
+    el('decalClear').addEventListener('click', () => {
+        clearDecals();
+        onChange();
+    });
     // Seed state FROM the markup so the HTML defaults are the single source of
     // truth for the initial look.
     onChange();

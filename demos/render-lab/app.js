@@ -8,6 +8,8 @@
 import "/lib/camera.js";
 import { installSystemMenu } from "/lib/system-menu.js";
 import { buildScene } from "/app/scene_setup.js";
+import { buildReflectionRig } from "/app/reflections.js";
+import { initDecals } from "/app/decals.js";
 import { state, applyPost, bindHud, setFps } from "/app/hud.js";
 
 installSystemMenu();
@@ -27,18 +29,21 @@ const cam = Camera.createOrbit({
 
 const handles = buildScene(scene);
 
+// Both reflection and decal rigs are scene GEOMETRY plus node state, so they
+// must exist before the HUD's first applyPost — bindHud pushes every control
+// immediately, and applyPost expects real nodes on the other end.
+buildReflectionRig(scene, handles);
+initDecals(scene, canvas);
+
 // The HUD seeds itself from index.html's control defaults and immediately
 // pushes them, so the first rendered frame already matches the panel.
 bindHud(scene);
 
-// CHUNK 2: build decals + reflection probes here, after buildScene, and add
-// their HUD sections. `handles.floorSlab`, `handles.metals` and
-// `handles.spheres` are the intended targets.
 // CHUNK 3: LOD / custom shaders / asTexture / cullStats attach here too;
 // `handles.depthMarkers` already spans the full depth range.
 
 // --- Camera input (right = orbit, middle = pan, wheel = zoom) -----------------
-// Left mouse is left free on purpose: chunk 2 wants it for placing decals.
+// Left mouse belongs to decals.js, which binds its own mousedown on the canvas.
 
 let rightDown = false, middleDown = false;
 function updatePointerLock() {
@@ -99,3 +104,8 @@ function frame() {
 requestAnimationFrame(frame);
 
 export { scene, cam, canvas, state, handles, applyPost };
+
+// Re-exported for tests: driving decal placement and probe capture through the
+// same entry points the HUD uses keeps the test honest about the real path.
+export { placeAt, placeFromRay, placeAtPixel, clearDecals, decalCount } from "/app/decals.js";
+export { recaptureProbe, probeActive, probeNode } from "/app/reflections.js";

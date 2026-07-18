@@ -81,6 +81,77 @@
                 <span class="v" id="renderScaleV"></span></label>
         </section>
 
+        <!-- Reflections ------------------------------------------------------ -->
+        <section>
+            <h2>Screen-space reflections</h2>
+            <label><input type="checkbox" id="ssrOn" checked> SSR</label>
+            <label>Max distance <input type="range" id="ssrDistance" min="1" max="80" step="1" value="45">
+                <span class="v" id="ssrDistanceV"></span></label>
+            <label>Steps <input type="range" id="ssrSteps" min="4" max="256" step="4" value="64">
+                <span class="v" id="ssrStepsV"></span></label>
+            <label>Thickness <input type="range" id="ssrThickness" min="0.02" max="2" step="0.01" value="0.35">
+                <span class="v" id="ssrThicknessV"></span></label>
+            <label>Intensity <input type="range" id="ssrIntensity" min="0" max="2" step="0.02" value="1">
+                <span class="v" id="ssrIntensityV"></span></label>
+            <label>Edge fade <input type="range" id="ssrEdgeFade" min="0" max="0.5" step="0.01" value="0.10">
+                <span class="v" id="ssrEdgeFadeV"></span></label>
+            <div class="hint">Mirror strip at the front of the courtyard is the
+                test surface. Tilt down until the spheres leave the frame — their
+                reflection dies with them. That is the screen-space limit.</div>
+        </section>
+
+        <section>
+            <h2>Reflection probe <span class="v" id="probeStatus"></span></h2>
+            <label><input type="checkbox" id="probeOn" checked> Probe (box 26×12×22 @ y 5)</label>
+            <label>Intensity <input type="range" id="probeIntensity" min="0" max="3" step="0.05" value="1">
+                <span class="v" id="probeIntensityV"></span></label>
+            <label>Interior fade <input type="range" id="probeInterior" min="0" max="6" step="0.1" value="1.5">
+                <span class="v" id="probeInteriorV"></span></label>
+            <label>Resolution
+                <select id="probeRes">
+                    <option value="64">64</option>
+                    <option value="128">128</option>
+                    <option value="256" selected>256</option>
+                    <option value="512">512</option>
+                </select>
+            </label>
+            <label><input type="checkbox" id="probeBoxProj" checked> Box projection (parallax)</label>
+            <label><input type="checkbox" id="probeBounds"> Show probe bounds</label>
+            <button id="probeRecapture">Re-capture probe</button>
+            <div class="hint">The chrome sphere is near-black with the probe off:
+                this courtyard has no IBL environment, so a metal has nothing to
+                reflect until a probe gives it one.</div>
+        </section>
+
+        <div class="note">
+            <b>SSR vs probe.</b> SSR is accurate but screen-bound — only what is
+            on screen reflects, and hits fade at the borders. The probe is stable
+            and works off-screen, but it is a static box-projected cubemap. SSR
+            wins where its ray hits; the probe is the miss fallback. Toggle each
+            alone to see where one gives up and the other takes over.
+        </div>
+
+        <!-- Decals ----------------------------------------------------------- -->
+        <section>
+            <h2>Projected decals <span class="v" id="decalCount"></span></h2>
+            <label><input type="checkbox" id="decalsOn" checked> Decals</label>
+            <label>Type
+                <select id="decalKind">
+                    <option value="impact" selected>impact splat</option>
+                    <option value="grime">grime patch</option>
+                    <option value="blob">blob shadow</option>
+                </select>
+            </label>
+            <label>Opacity <input type="range" id="decalOpacity" min="0" max="1" step="0.02" value="1">
+                <span class="v" id="decalOpacityV"></span></label>
+            <label>Size <input type="range" id="decalSize" min="0.25" max="3" step="0.05" value="1">
+                <span class="v" id="decalSizeV"></span></label>
+            <button id="decalClear">Clear decals</button>
+            <div class="hint"><b>Left-click</b> the scene to stamp one. It
+                raycasts to the surface and orients the projection to the hit
+                normal — walls take them sideways, floors top-down.</div>
+        </section>
+
         <!-- Fog -------------------------------------------------------------- -->
         <section>
             <h2>Fog</h2>
@@ -132,7 +203,8 @@
         </section>
 
         <div class="hint foot">
-            <b>Right-drag</b> orbit · <b>Middle-drag</b> pan · <b>Wheel</b> zoom<br>
+            <b>Left-click</b> place decal · <b>Right-drag</b> orbit ·
+            <b>Middle-drag</b> pan · <b>Wheel</b> zoom<br>
             The avenue runs to z&nbsp;=&nbsp;-60; the sphere row sweeps roughness 0.03→0.95.
         </div>
     </div>

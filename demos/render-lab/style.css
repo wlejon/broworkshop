@@ -63,5 +63,31 @@ canvas#stage { display: block; width: 100vw; height: 100vh; }
 #hud .sub { padding-left: 8px; border-left: 2px solid rgba(255,255,255,0.10); }
 #hud .sub.off { display: none; }
 
+#hud button {
+    background: #1b222c;
+    color: #cfe;
+    border: 1px solid #34404e;
+    border-radius: 4px;
+    padding: 3px 8px;
+    font: 11px system-ui, sans-serif;
+    margin-top: 4px;
+    cursor: pointer;
+}
+#hud button:hover { background: #253040; border-color: #4a5b6e; }
+
+/* The SSR-vs-probe explainer is a teaching note, not a control — it gets its
+   own emphasis so it does not read as another section header. */
+#hud .note {
+    margin: 8px 0 0 0;
+    padding: 6px 7px;
+    background: rgba(255, 224, 138, 0.07);
+    border: 1px solid rgba(255, 224, 138, 0.22);
+    border-radius: 5px;
+    color: #b9c4d1;
+    font-size: 11px;
+    line-height: 1.35;
+}
+#hud .note b { color: #ffe08a; }
+
 #hud .hint { color: #8b97a6; font-size: 11px; margin-top: 3px; }
 #hud .foot { margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.10); padding-top: 7px; }
