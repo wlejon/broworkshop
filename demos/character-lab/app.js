@@ -7,16 +7,55 @@
 // possible movement loop on top, and puts the controller's own state on
 // screen so you can watch it decide.
 //
-//   course.js     The course. Steps whose risers cross the step-up limit,
-//                 ramps whose angles cross the slope limit, a tunnel that
-//                 gates on stance, a gap, a terrace stack, pushable crates,
-//                 and a kinematic platform. Visual and collision are authored
-//                 as one object so they cannot desync.
+// WHAT IS DEMONSTRATED, and where the proof lives
+// -----------------------------------------------
+//
+//   step-up limit          stairs, risers 0.15 -> 0.65 m. The controller walks
+//                          up every riser under `stepUp` and stops dead at the
+//                          first one over it. Move the slider, move the cutoff.
+//   slope limit            five ramps at 15/30/42/52/65 degrees. Under the
+//                          limit the ground reports "onGround"; over it,
+//                          "onSteepGround" and gravity slides you back with no
+//                          JS involved.
+//   stance / setShape      a tunnel with 1.10 m of clearance. Standing is 1.80
+//                          m, crouched 0.80 m. Past the exit, setShape REFUSES
+//                          to stand you up — one boolean, the whole "can I
+//                          stand here" query.
+//   ground detection       a 2.5 m gap: grounded goes true -> false -> true.
+//   floor snap             six 0.30 m terraces under a 0.50 m stickToFloor.
+//   pushing rigid bodies   crates and barrels, shoved up to `maxStrength` N.
+//   moving platforms       a kinematic slab; you ride it at groundVelocity +
+//                          your own desire, for free.
+//   sensing                shape casts, overlaps and rays run BEFORE a move,
+//                          drawn in the world, with their filters as live
+//                          checkboxes. One ray, three filters, three bodies.
+//   character vs character 32 real character controllers in a plaza. Nothing
+//                          in the app resolves a collision; shouldering through
+//                          the crowd costs you two thirds of your speed and
+//                          the HUD measures it.
+//   innerBody              one checkbox decides whether the rest of the physics
+//                          world can SEE the character. A thrown ball either
+//                          bounces off you or passes through; an overlapShape
+//                          either finds you or does not.
+//   heightfield terrain    the far half of the world is a 64x64 heightfield.
+//                          Same controller, same slope limit, non-primitive
+//                          ground — and the engine's reported slope is checked
+//                          against the derivative of the height function that
+//                          built it.
+//
+// MODULES
+//
+//   course.js     The obstacle course. Visual and collision are authored as one
+//                 object so they cannot desync.
 //   character.js  The controller. ~60 lines of actual logic — set a desired
 //                 velocity, read the state back. No collision response, no
 //                 ground probe, no step sweep. Those are Jolt's.
+//   queries.js    The sensing layer: four queries, drawn in the world.
+//   crowd.js      The NPC crowd. Steering only; the physics is the engine's.
+//   innerbody.js  The ball launcher and the self-visibility query.
+//   terrain.js    The heightfield. One height function, two consumers.
 //   hud.js        Sliders for every tunable the API exposes, plus the live
-//                 readout of getState().
+//                 readouts every section above is measured by.
 //
 // app.js wires them together, runs the follow camera, converts WASD into a
 // camera-relative direction, projects the world labels into the DOM, and
@@ -35,6 +74,19 @@ import {
     pickAlongRay, sense, qState, bodyName,
     forwardCast, ledgeProbe, proximity, lookRay,
 } from "/app/queries.js";
+import {
+    buildCrowd, tickCrowd, sampleThrough, crowd, crowdState, npcs,
+    setCrowdSize, setCrowdPhysical, resetCrowd, placeNpc, npcPosition,
+    crowdBodies, isNpcBody, PLAZA,
+} from "/app/crowd.js";
+import {
+    buildBallLab, tickBallLab, launchBall, clearBall, selfOverlap,
+    ballLab, ballState, ballPosition, ballBody, BALL_LAB,
+} from "/app/innerbody.js";
+import {
+    buildTerrain, tickTerrain, regenerateTerrain, heightAt, slopeAt,
+    onTerrain, probeGround, terrain, terrainState, TERRAIN_WALK, SEAM_Z,
+} from "/app/terrain.js";
 import { bindHud, updateReadout, setFps, view } from "/app/hud.js";
 
 installSystemMenu();
@@ -72,6 +124,13 @@ createCharacter(scene);
 nameBodies(world);
 buildQueryVis(scene);
 
+// The three late additions. Terrain first: it is static geometry that the
+// crowd and the ball lab never touch, but the HUD's "walk me to the hills"
+// button needs its height function available the moment the panel binds.
+buildTerrain(scene);
+buildCrowd(scene);
+buildBallLab(scene);
+
 const applyPendingRebuild = bindHud(scene);
 
 // --- Input -------------------------------------------------------------------
@@ -86,7 +145,8 @@ document.addEventListener('keydown', (e) => {
     const k = e.key.length === 1 ? e.key.toLowerCase() : e.key.toLowerCase();
     keys[k] = true;
     if (k === ' ') { input.jump = true; e.preventDefault(); }
-    if (k === 'r') resetToSpawn();
+    if (k === 'r') { resetToSpawn(); resetCrowd(); }
+    if (k === 'b') launchBall();
     if (MOVE_KEYS[k] || k === 'c' || k === 'control') e.preventDefault();
 });
 document.addEventListener('keyup', (e) => {
@@ -235,6 +295,17 @@ function frame() {
     readMoveInput();
     tickCharacter();
     tickCourse(world, dt);
+    // The crowd steers after the player has been driven so an NPC's velocity
+    // for this step is chosen against the player's current position, and the
+    // ball lab after the crowd so its verdict reads the settled world.
+    tickCrowd(dt);
+    // How much of the commanded direction the player is actually making
+    // progress along. Sampled here, while this frame's command is still live.
+    const cmdLen = Math.hypot(input.x, input.z);
+    if (cmdLen > 1e-6) sampleThrough(input.x / cmdLen, input.z / cmdLen, tune.moveSpeed, dt);
+    else sampleThrough(0, 0, 0, dt);
+    tickBallLab(dt);
+    tickTerrain();
 
     // Sensors run last, after the controller has settled and after the
     // kinematic platform has moved, so every query sees the frame's final
@@ -261,10 +332,25 @@ requestAnimationFrame(frame);
 
 // The character handle is recreated by rebuild(), so it is exported through a
 // live getter rather than a bound value.
-export const state = { view, tune, charState, input, keys, sense, qState };
+export const state = {
+    view, tune, charState, input, keys, sense, qState,
+    crowd, crowdState, ballLab, ballState, terrain, terrainState,
+};
 export {
     sense, qState, setFacing, getFacing, bodyName, tickQueries, pickAlongRay,
     forwardCast, ledgeProbe, proximity, lookRay,
+};
+export {
+    crowd, crowdState, npcs, setCrowdSize, setCrowdPhysical, resetCrowd,
+    placeNpc, npcPosition, crowdBodies, isNpcBody, PLAZA, tickCrowd,
+};
+export {
+    ballLab, ballState, launchBall, clearBall, selfOverlap, ballPosition,
+    ballBody, BALL_LAB,
+};
+export {
+    terrain, terrainState, regenerateTerrain, heightAt, slopeAt, onTerrain,
+    probeGround, TERRAIN_WALK, SEAM_Z,
 };
 export { scene, cam, canvas, world, tune, charState, input, SPAWN };
 export { resetToSpawn, teleport, rebuild, tickCharacter, isCrouched, characterVisual };

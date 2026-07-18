@@ -104,8 +104,17 @@ export function buildCourse(scene) {
     // --- Ground -------------------------------------------------------------
     // One slab, top face exactly at y = 0 so every height in this file is a
     // literal world height and the numbers on the labels mean what they say.
-    solid(scene, { x: 0, y: -1, z: 0, hx: 46, hy: 1, hz: 46,
+    //
+    // It stops at z = -20. Everything beyond that seam is the heightfield in
+    // terrain.js, and the two meet at exactly y = 0 because the terrain's
+    // height function is tapered to zero at this line. Extending the slab past
+    // the seam would bury the near hills, so the flat world genuinely ends
+    // here rather than merely being hidden.
+    const GROUND_FAR_Z = -20;
+    solid(scene, { x: 0, y: -1, z: (46 + GROUND_FAR_Z) / 2,
+                   hx: 46, hy: 1, hz: (46 - GROUND_FAR_Z) / 2,
                    color: COL.ground, roughness: 0.95 });
+    course.groundFarZ = GROUND_FAR_Z;
 
     // --- Stairs (x = -17) ---------------------------------------------------
     // Risers grow monotonically. Whichever one first exceeds `stepUp` is where
@@ -289,11 +298,12 @@ export function buildCourse(scene) {
     // proximity sensor's population and the `ignoreBodies` array that proves
     // the ray filter filters.
     //
-    // CHUNK 3: an NPC crowd (character-vs-character) has room on the open
-    // ground around z = 4, the inner rigid body demo hangs off
-    // character.innerBody, and a heightfield can replace the ground slab
-    // above (Physics.createBody({ shape: 'heightfield' })) for the far half
-    // of the world, z < -20.
+    // The three zones added last live outside this file but are labelled from
+    // here, because app.js builds the DOM label layer once from course.labels
+    // and anything appended later would never get an element.
+    label(28, 3.4, 10.5, 'CROWD · character vs character', 'zone');
+    label(28, 2.6, -6.0, 'BALL LAB · innerBody', 'zone');
+    label(0, 5.0, -22.0, 'TERRAIN · heightfield', 'zone');
 
     return course;
 }

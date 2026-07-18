@@ -118,6 +118,88 @@
                 straight through the crates to whatever is behind them.</div>
         </section>
 
+        <!-- Character-vs-character. Every NPC is a real Physics.createCharacter,
+             not a rigid body and not a sensor volume. Nothing in crowd.js
+             resolves a collision — the jostling is Jolt's world-level
+             character-vs-character checker doing it. -->
+        <section>
+            <h2>Crowd <span class="ghint">character vs character</span></h2>
+            <label>Crowd size <input type="range" id="cCount" min="0" max="32" step="1" value="18">
+                <span class="v" id="cCountV"></span></label>
+            <label>Wander speed <input type="range" id="cSpeed" min="0" max="4" step="0.1" value="1.3">
+                <span class="v" id="cSpeedV"></span></label>
+            <label><input type="checkbox" id="cPhysical" checked>
+                Real character controllers</label>
+            <div class="readout">
+                <div class="row"><span>live NPCs</span><b id="coCount">—</b></div>
+                <div class="row"><span>mean NPC speed</span><b id="coSpeed">—</b></div>
+                <div class="row"><span>within 1.2 m</span><b id="coTouch">—</b></div>
+                <div class="row"><span>player throughput</span><b id="coThrough">—</b></div>
+            </div>
+            <button id="btnGoCrowd">Walk me to the crowd</button>
+            <div class="hint">Hold W into the group. You keep almost all of your
+                speed — the controller just slides you along the capsules you
+                cannot pass, so the progress you make in the direction you
+                asked for collapses. That is the throughput row. Uncheck the box
+                and the NPCs become pure visuals on the same steering: they walk
+                straight through you, and through each other.</div>
+        </section>
+
+        <!-- innerBody: the one option that decides whether the rest of the
+             physics world can see the character at all. -->
+        <section>
+            <h2>Inner rigid body <span class="ghint">rebuilds the character</span></h2>
+            <label><input type="checkbox" id="cInner" checked>
+                <code>innerBody: true</code></label>
+            <label>Ball speed <input type="range" id="bSpeed" min="3" max="24" step="0.5" value="11">
+                <span class="v" id="bSpeedV"></span></label>
+            <div class="readout">
+                <div class="row"><span>innerBody tag</span><b id="boTag">—</b></div>
+                <div class="row"><span>in overlapShape</span><b id="boSeen">—</b></div>
+                <div class="row"><span>ball verdict</span><b id="boVerdict">—</b></div>
+                <div class="row"><span>ball past you</span><b id="boPast">—</b></div>
+                <div class="row"><span>closest approach</span><b id="boMin">—</b></div>
+            </div>
+            <button id="btnLaunch">Throw a ball at me (B)</button>
+            <button id="btnGoBall">Walk me to the ball lab</button>
+            <div class="hint">On: an <code>overlapShape</code> standing exactly
+                where you stand returns you. Off: the same query finds nothing,
+                and every ray in the Sensing section stops hitting SELF. The
+                controller still walks the course either way — the world just
+                cannot see it.</div>
+            <div class="hint">The ball is a separate lesson, and a correction to
+                the docs. It is <b>not</b> affected by this checkbox: measured
+                both ways, the trajectory is identical, because
+                CharacterVirtual resolves its own contacts with dynamic bodies
+                whether or not the broadphase can see it. What DOES change the
+                ball is <b>Push strength</b> in the Controller section — drop it
+                to 0&nbsp;N and the same throw sails clean through you.</div>
+        </section>
+
+        <!-- Heightfield: the same slope limit, applied to terrain instead of
+             to a rotated box. Collision body and visual mesh are generated in
+             one pass from one Float32Array. -->
+        <section>
+            <h2>Terrain <span class="ghint">heightfield, z &lt; -20</span></h2>
+            <label>Amplitude <input type="range" id="tAmp" min="0" max="7" step="0.1" value="3.4">
+                <span class="v" id="tAmpV"></span></label>
+            <label>Frequency <input type="range" id="tFreq" min="0.02" max="0.25" step="0.005" value="0.085">
+                <span class="v" id="tFreqV"></span></label>
+            <div class="readout">
+                <div class="row"><span>on terrain</span><b id="toOn">—</b></div>
+                <div class="row"><span>slope (engine)</span><b id="toMeas">—</b></div>
+                <div class="row"><span>slope (analytic)</span><b id="toAna">—</b></div>
+                <div class="row"><span>disagreement</span><b id="toErr">—</b></div>
+                <div class="row"><span>terrain height</span><b id="toY">—</b></div>
+            </div>
+            <button id="btnRegen">Regenerate terrain</button>
+            <button id="btnGoTerrain">Walk me to the hills</button>
+            <div class="hint">The engine's slope comes from
+                <code>groundNormal</code>; the analytic one is the derivative of
+                the function the heightfield was built from. They agree because
+                there is only one height function.</div>
+        </section>
+
         <section>
             <h2>View</h2>
             <label><input type="checkbox" id="optLabels" checked> World labels</label>
@@ -136,9 +218,12 @@
                 <div><i class="sw c-gap"></i>Gap + terraces (fall, land, floor-snap)</div>
                 <div><i class="sw c-prop"></i>Crates &amp; barrels (push dynamic bodies)</div>
                 <div><i class="sw c-plat"></i>Kinematic platform (ride ground velocity)</div>
+                <div><i class="sw c-npc"></i>Crowd — 32 character controllers (char vs char)</div>
+                <div><i class="sw c-ball"></i>Ball lab — <code>innerBody</code> on/off</div>
+                <div><i class="sw c-terr"></i>Terrain — heightfield hills (z &lt; -20)</div>
             </div>
             <div class="hint">WASD move · Space jump · C / Ctrl crouch ·
-                right-drag orbit · wheel zoom · R reset</div>
+                B throw a ball · right-drag orbit · wheel zoom · R reset</div>
         </section>
     </div>
 </body>

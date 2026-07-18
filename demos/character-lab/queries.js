@@ -107,6 +107,21 @@ export function nameBodies(world) {
     if (world.platform) names.set(world.platform.tag, 'platform');
 }
 
+/** Name a single body after startup. The crowd uses this: NPC inner bodies do
+ *  not exist when nameBodies() runs, and an overlap list full of bare integers
+ *  would defeat the point of the sensor readout. */
+export function nameBody(tag, name) {
+    if (tag != null && tag > 0) names.set(tag, name);
+}
+
+/** The character's own inner body tag, or undefined when it has none. Passing
+ *  `ignoreBody: undefined` is a no-op filter, which is exactly right: with
+ *  `innerBody: false` the character is not in the broadphase at all, so there
+ *  is nothing to exclude. */
+function selfBody() {
+    return character && character.innerBody > 0 ? character.innerBody : undefined;
+}
+
 /** Human name for a body tag. Falls back to a tag literal so an unnamed body
  *  is still identifiable — that matters when the ray hits course scenery. */
 export function bodyName(tag) {
@@ -287,7 +302,7 @@ export function forwardCast(dir, distance) {
         position: { x: p.x, y: p.y, z: p.z },
         direction: { x: dir.x, y: 0, z: dir.z },
         maxDistance: distance,
-        ignoreBody: character.innerBody,
+        ignoreBody: selfBody(),
     });
     if (!hit) return null;
     return {
@@ -321,7 +336,7 @@ export function ledgeProbe(dir, ahead, threshold) {
         position: { x: ox, y: startY, z: oz },
         direction: { x: 0, y: -1, z: 0 },
         maxDistance: REACH,
-        ignoreBody: character.innerBody,
+        ignoreBody: selfBody(),
     });
     // Drop is measured from the FEET, not from the probe start, so flat ground
     // reads ~0.00 and the readout is a number the user can sanity-check.
@@ -349,7 +364,7 @@ export function proximity(radius, movingOnly) {
     const opts = {
         shape: 'sphere', radius,
         position: { x: p.x, y: p.y, z: p.z },
-        ignoreBody: character.innerBody,
+        ignoreBody: selfBody(),
     };
     if (movingOnly) opts.layers = ['moving'];
     const hits = Physics.overlapShape(opts);
@@ -384,7 +399,7 @@ export function lookRay(dir, length, opts) {
     const p = charState.position;
     const oy = p.y + (opts && opts.height != null ? opts.height : sense.rayHeight);
     const filt = {};
-    if (opts && opts.ignoreSelf) filt.ignoreBody = character.innerBody;
+    if (opts && opts.ignoreSelf) filt.ignoreBody = selfBody();
     if (opts && opts.ignoreProps && opts.propTags) filt.ignoreBodies = opts.propTags;
     if (opts && opts.layers) filt.layers = opts.layers;
     const hit = Physics.raycastClosest(p.x, oy, p.z, dir.x, 0, dir.z, length, filt);
@@ -404,7 +419,7 @@ export function lookRay(dir, length, opts) {
  */
 export function pickAlongRay(ox, oy, oz, dx, dy, dz, maxDist) {
     const hit = Physics.raycastClosest(ox, oy, oz, dx, dy, dz, maxDist || 200,
-                                       { ignoreBody: character ? character.innerBody : undefined });
+                                       { ignoreBody: selfBody() });
     if (!hit) { qState.pick = null; return null; }
     // Step a hair past the surface along the ray so the point is genuinely
     // inside the solid rather than exactly on its boundary.

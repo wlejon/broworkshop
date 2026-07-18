@@ -39,6 +39,11 @@ export const tune = {
     stepUp: 0.4,
     stickToFloor: 0.5,
     maxStrength: 400,
+    /** Create the inner rigid body? Construction-time, like the rest of this
+     *  block, so the HUD's checkbox rebuilds. See innerbody.js — with this off
+     *  the character stops existing as far as every query and every dynamic
+     *  body in the world is concerned. */
+    innerBody: true,
     // per-frame (free)
     moveSpeed: 4.5,
     jumpSpeed: 6.0,
@@ -96,8 +101,10 @@ export function createCharacter(scene, restore) {
         layer: 'moving',
         // The inner body is what makes the character visible to the rest of the
         // physics world. Chunk 2's shape casts need it as an ignoreBody, and
-        // chunk 3 leans on it for contact events, so it is on from the start.
-        innerBody: true,
+        // innerbody.js turns it into the demo, so it is on from the start —
+        // but it is a tunable, and turning it off is a real experiment rather
+        // than a config change.
+        innerBody: tune.innerBody,
     });
     crouched = !!(restore && restore.crouched);
     if (restore) character.setVelocity(restore.velocity.x, restore.velocity.y, restore.velocity.z);

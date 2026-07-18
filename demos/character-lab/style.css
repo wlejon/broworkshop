@@ -119,6 +119,10 @@ html, body {
     cursor: pointer;
 }
 #hud button:hover { background: #263041; }
+/* The lower sections carry two buttons each; let them wrap rather than
+   stretching the panel. */
+#hud button { margin-right: 6px; }
+#hud section .readout { margin: 6px 0 2px; }
 
 /* Readout rows: label left, monospace value right, so the numbers form a
    stable column that is readable while it changes 60 times a second. */
@@ -150,6 +154,9 @@ html, body {
 .c-gap    { background: #a07fb8; }
 .c-prop   { background: #c07a5a; }
 .c-plat   { background: #d2b45a; }
+.c-npc    { background: #c9705f; }
+.c-ball   { background: #f0d27a; }
+.c-terr   { background: #4a5a44; }
 
 #hud .hint { margin-top: 6px; color: #66738a; line-height: 1.5; }
 #hud code { font: 11px ui-monospace, monospace; color: #a8c0e0; }

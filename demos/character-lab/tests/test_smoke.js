@@ -20,6 +20,13 @@ import {
     RADIUS, STAND_HALF, CROUCH_HALF, isCrouched,
     sense, qState, setFacing, bodyName,
     forwardCast, ledgeProbe, proximity, lookRay, pickAlongRay,
+    // chunk 3
+    crowd, crowdState, npcs, setCrowdSize, setCrowdPhysical, resetCrowd,
+    placeNpc, npcPosition, PLAZA,
+    ballLab, ballState, launchBall, clearBall, selfOverlap, ballPosition,
+    BALL_LAB,
+    terrain, terrainState, regenerateTerrain, heightAt, slopeAt, onTerrain,
+    probeGround, TERRAIN_WALK, SEAM_Z,
 } from "/app/app.js";
 
 // Let module evaluation, layout and the first frame settle.
@@ -592,6 +599,425 @@ assert(carried > 0.15, `carried ${carried.toFixed(3)} m by the platform`);
         `PhysicsNode tracks its body without an explicit sync ` +
         `(node ${n.x.toFixed(2)},${n.z.toFixed(2)} vs body ${t.x.toFixed(2)},${t.z.toFixed(2)})`);
 }
+
+// =============================================================================
+// CROWD — character vs character
+// =============================================================================
+//
+// docs/physics-api.js claims characters collide with each other. These are the
+// two measurements that make that a fact rather than a sentence: two capsules
+// dropped on top of each other separate, and a player walking a fixed distance
+// through a packed group covers measurably less ground than the same walk on
+// open floor.
+
+// Freeze the wander for every crowd assertion. The steering is the only
+// non-determinism in the app and none of these tests are about it — what is
+// under test is what happens when characters are told to occupy the same space.
+const wanderSpeed = crowd.speed;
+crowd.speed = 0;
+
+// --- 12. two overlapping characters push apart -------------------------------
+
+{
+    setCrowdPhysical(true);
+    setCrowdSize(2);
+    advanceTime(64);
+    assert(crowdState.active === 2, `two NPC controllers live (${crowdState.active})`);
+    assert(npcs[0].ch && npcs[1].ch, 'both NPCs are real Physics.createCharacter handles');
+
+    // Keep the player well clear so it is not a third party to the push.
+    teleport(PLAZA.x - 14, RADIUS + STAND_HALF, PLAZA.z);
+    advanceTime(96);
+
+    // Place them 0.20 m apart — deep inside each other, since each capsule is
+    // 0.60 m across. Nothing in the app resolves this.
+    const cx = PLAZA.x, cz = PLAZA.z;
+    placeNpc(0, cx - 0.10, cz);
+    placeNpc(1, cx + 0.10, cz);
+
+    const sep = () => {
+        const a = npcPosition(0), b = npcPosition(1);
+        return Math.hypot(a.x - b.x, a.z - b.z);
+    };
+    const sep0 = sep();
+    assert(sep0 < 0.35, `started interpenetrating (${sep0.toFixed(3)} m apart)`);
+
+    // Sample the separation as it grows, so the assertion is about a trend and
+    // not about one lucky frame.
+    const track = [];
+    advanceTime(16);
+    const sepFirstStep = sep();
+    track.push(sepFirstStep);
+    for (let t = 16; t < 900; t += 16) { advanceTime(16); track.push(sep()); }
+    const sep1 = sep();
+
+    assert(sep1 > sep0 + 0.15,
+        `characters pushed each other apart: ${sep0.toFixed(3)} -> ${sep1.toFixed(3)} m`);
+    assert(sep1 > 0.5,
+        `separation reached most of a capsule diameter (0.60 m): ${sep1.toFixed(3)} m`);
+    // Monotone-ish: separation never collapses back to the overlap it started
+    // from, which is what a real contact resolution looks like.
+    assert(Math.min(...track.slice(10)) > sep0 * 0.9,
+        'separation never fell back to the initial overlap');
+    console.log(`  char-vs-char — two capsules placed 0.20 m apart ` +
+        `(0.60 m diameter, so deeply overlapping):\n` +
+        `    after one fixed step : ${sepFirstStep.toFixed(3)} m\n` +
+        `    after 0.9 s          : ${sep1.toFixed(3)} m\n` +
+        `    collision code in the app: none`);
+}
+
+// --- 13. the player is measurably slowed walking into the crowd --------------
+//
+// Same command, same duration, same start; the only difference is whether
+// twenty character controllers are standing in the way.
+
+{
+    const START_Z = PLAZA.z + 7.0;
+    const WALK_MS = 2600;
+
+    tune.moveSpeed = 4.5;
+    rebuild(scene);
+    advanceTime(32);
+
+    // Control arm: nobody on the floor.
+    setCrowdSize(0);
+    advanceTime(64);
+    teleport(PLAZA.x, RADIUS + STAND_HALF, START_Z);
+    advanceTime(200);
+    const openZ0 = charState.position.z;
+    hold(WALK_MS, 'w');
+    const openDist = Math.abs(charState.position.z - openZ0);
+    assert(openDist > 8, `open-ground walk covered ${openDist.toFixed(2)} m`);
+
+    // Test arm: a packed 5 x 4 block of characters directly in the path.
+    // Spacing 0.62 m against a 0.60 m capsule diameter — shoulder to shoulder.
+    setCrowdPhysical(true);
+    setCrowdSize(20);
+    advanceTime(32);
+    let k = 0;
+    for (let row = 0; row < 4; ++row) {
+        for (let col = 0; col < 5; ++col) {
+            placeNpc(k++, PLAZA.x + (col - 2) * 0.62, PLAZA.z + 1.2 - row * 0.62);
+        }
+    }
+    advanceTime(200);
+    assert(crowdState.active === 20, `twenty characters in the block (${crowdState.active})`);
+
+    teleport(PLAZA.x, RADIUS + STAND_HALF, START_Z);
+    advanceTime(200);
+    const crowdZ0 = charState.position.z;
+    let minThrough = 1, maxTouch = 0;
+    clearKeys();
+    keys['w'] = true;
+    for (let t = 0; t < WALK_MS; t += 16) {
+        advanceTime(16);
+        maxTouch = Math.max(maxTouch, crowdState.touchingPlayer);
+        if (crowdState.touchingPlayer > 0)
+            minThrough = Math.min(minThrough, crowdState.playerThrough);
+    }
+    clearKeys();
+    advanceTime(16);
+    const crowdDist = Math.abs(charState.position.z - crowdZ0);
+
+    assert(crowdDist < openDist * 0.75,
+        `the crowd cost real ground: ${crowdDist.toFixed(2)} m vs ` +
+        `${openDist.toFixed(2)} m on open floor ` +
+        `(${(100 * crowdDist / openDist).toFixed(0)}% of the free walk)`);
+    assert(maxTouch > 0, `the player made contact with the group (${maxTouch} at once)`);
+    // Note the units: the player keeps almost all of its SPEED inside the crowd
+    // — Jolt slides it along the capsules it cannot pass — so this is progress
+    // along the commanded direction, not raw speed. See sampleThrough().
+    assert(minThrough < 0.8,
+        `throughput dropped to ${(minThrough * 100).toFixed(0)}% of commanded ` +
+        `while inside the group`);
+    console.log(`  crowd resistance — ${WALK_MS} ms of held W at ` +
+        `${tune.moveSpeed} m/s:\n` +
+        `    open ground : ${openDist.toFixed(2)} m\n` +
+        `    through 20 characters : ${crowdDist.toFixed(2)} m ` +
+        `(min throughput ${(minThrough * 100).toFixed(0)}%)`);
+
+    // And the ghosts are the control: the SAME twenty markers with no
+    // controllers behind them cost nothing at all.
+    setCrowdPhysical(false);
+    advanceTime(32);
+    k = 0;
+    for (let row = 0; row < 4; ++row)
+        for (let col = 0; col < 5; ++col)
+            placeNpc(k++, PLAZA.x + (col - 2) * 0.62, PLAZA.z + 1.2 - row * 0.62);
+    teleport(PLAZA.x, RADIUS + STAND_HALF, START_Z);
+    advanceTime(200);
+    const ghostZ0 = charState.position.z;
+    hold(WALK_MS, 'w');
+    const ghostDist = Math.abs(charState.position.z - ghostZ0);
+    assert(ghostDist > crowdDist + 2,
+        `the same twenty as visual ghosts cost nothing: ${ghostDist.toFixed(2)} m ` +
+        `(vs ${crowdDist.toFixed(2)} m as characters)`);
+
+    setCrowdPhysical(true);
+    setCrowdSize(0);
+    advanceTime(32);
+}
+
+crowd.speed = wanderSpeed;
+
+// =============================================================================
+// INNER RIGID BODY — the character's visibility to the rest of the world
+// =============================================================================
+//
+// One construction option, two clean binaries: does an overlapShape standing
+// where the character stands return the character, and does a ball thrown at
+// it bounce or pass through. Both are measured with everything else held fixed.
+
+{
+    // --- 14a. the query binary ---------------------------------------------
+    teleport(BALL_LAB.x, RADIUS + STAND_HALF, BALL_LAB.z);
+    advanceTime(200);
+
+    tune.innerBody = true;
+    rebuild(scene);
+    advanceTime(64);
+    const onTag = character.innerBody;
+    const onSeen = selfOverlap();
+    assert(onTag > 0, `innerBody: true creates a real body (tag ${onTag})`);
+    assert(onSeen.visible,
+        `overlapShape at the character's own position RETURNS it (ids ${onSeen.ids.join(',')})`);
+
+    tune.innerBody = false;
+    rebuild(scene);
+    advanceTime(64);
+    const offTag = character.innerBody;
+    const offSeen = selfOverlap();
+    assert(offTag === -1, `innerBody: false leaves no body (tag ${offTag})`);
+    assert(!offSeen.visible,
+        `the same overlapShape now finds nothing (ids [${offSeen.ids.join(',')}])`);
+    // The character is still there and still walks — it is only INVISIBLE.
+    const invisibleY = charState.position.y;
+    hold(500, 'w');
+    assert(charState.isGrounded,
+        'the invisible character is still supported by the floor');
+    assert(Math.abs(charState.position.y - invisibleY) < 0.2,
+        'and still standing at the same height');
+    assert(Math.abs(charState.position.z - BALL_LAB.z) > 1.0,
+        `and still moves under the same controls ` +
+        `(walked to z ${charState.position.z.toFixed(2)})`);
+
+    console.log(`  innerBody — overlapShape at the character's own position:\n` +
+        `    innerBody: true  -> tag ${onTag}, found: yes\n` +
+        `    innerBody: false -> tag ${offTag}, found: no`);
+
+    // --- 14b. the ball, and what actually moves it ---------------------------
+    //
+    // The ball is launched from 4.5 m out with gravity disabled, so the only
+    // thing that can change where it ends up is whether something stopped it.
+    // Four shots: the full 2x2 of innerBody and maxStrength.
+    //
+    // The docs imply innerBody is what makes a character solid to a thrown
+    // body. It is not — CharacterVirtual resolves its own dynamic-body contacts
+    // during its sweep regardless of the broadphase. `maxStrength` is the real
+    // knob. Both halves of that are asserted, the null result included, so this
+    // test fails loudly if the engine ever changes.
+    const FLIGHT_MS = 1500;
+
+    function shoot(inner, strength) {
+        tune.innerBody = inner;
+        tune.maxStrength = strength;
+        rebuild(scene);
+        advanceTime(64);
+        teleport(BALL_LAB.x, RADIUS + STAND_HALF, BALL_LAB.z);
+        clearKeys();
+        advanceTime(240);
+        launchBall({ x: 0, z: -1 });
+        for (let t = 0; t < FLIGHT_MS; t += 16) advanceTime(16);
+        const r = { past: ballState.past, verdict: ballState.verdict,
+                    minDist: ballState.minDist };
+        clearBall();
+        advanceTime(32);
+        return r;
+    }
+
+    const strongSeen   = shoot(true,  400);
+    const strongUnseen = shoot(false, 400);
+    const weakSeen     = shoot(true,  0);
+    const weakUnseen   = shoot(false, 0);
+
+    console.log(`  ball vs character — 4.5 m standoff at ${ballLab.speed} m/s, ` +
+        `${FLIGHT_MS} ms of flight, metres past the character:\n` +
+        `                     innerBody: true      innerBody: false\n` +
+        `    maxStrength 400  ${strongSeen.past.toFixed(2)} (${strongSeen.verdict})` +
+        `${' '.repeat(Math.max(1, 12 - strongSeen.verdict.length))}` +
+        `${strongUnseen.past.toFixed(2)} (${strongUnseen.verdict})\n` +
+        `    maxStrength   0  ${weakSeen.past.toFixed(2)} (${weakSeen.verdict})` +
+        `${' '.repeat(Math.max(1, 12 - weakSeen.verdict.length))}` +
+        `${weakUnseen.past.toFixed(2)} (${weakUnseen.verdict})`);
+
+    // The real effect: push strength decides the ball's fate.
+    assert(weakSeen.past > 6,
+        `at maxStrength 0 the ball sailed ${weakSeen.past.toFixed(2)} m past the character`);
+    assert(weakSeen.verdict === 'PASSED THROUGH',
+        `...and the demo calls it "${weakSeen.verdict}"`);
+    assert(strongSeen.past < 1.0,
+        `at maxStrength 400 the same throw got only ${strongSeen.past.toFixed(2)} m`);
+    assert(strongSeen.verdict === 'BLOCKED',
+        `...and the demo calls it "${strongSeen.verdict}"`);
+    assert(weakSeen.past > strongSeen.past + 5,
+        `push strength changed the trajectory by ` +
+        `${(weakSeen.past - strongSeen.past).toFixed(2)} m`);
+    assert(strongSeen.minDist >= RADIUS + ballLab.radius - 0.12,
+        `the blocked ball never got inside the capsule (closest ` +
+        `${strongSeen.minDist.toFixed(3)} m vs a ` +
+        `${(RADIUS + ballLab.radius).toFixed(2)} m contact distance)`);
+
+    // The NULL result: innerBody does not decide the ball's fate. Asserted so
+    // it is a claim about the engine rather than an omission in the test.
+    //
+    // The verdicts must MATCH across the innerBody column, and the residual
+    // difference in distance must be an order of magnitude smaller than the
+    // effect maxStrength has. (It is not exactly zero: each shot rebuilds the
+    // character and re-settles it, so the launch geometry differs by a
+    // centimetre or two, and a 1.5 s flight amplifies that.)
+    const strengthEffect = weakSeen.past - strongSeen.past;
+    const innerEffectBlocked = Math.abs(strongSeen.past - strongUnseen.past);
+    const innerEffectPassing = Math.abs(weakSeen.past - weakUnseen.past);
+
+    assert(strongSeen.verdict === strongUnseen.verdict,
+        `innerBody does not change a blocked ball's verdict ` +
+        `(${strongSeen.verdict} both ways)`);
+    assert(weakSeen.verdict === weakUnseen.verdict,
+        `innerBody does not change a passing ball's verdict ` +
+        `(${weakSeen.verdict} both ways)`);
+    assert(innerEffectBlocked < 0.1,
+        `innerBody moved the blocked ball by only ${innerEffectBlocked.toFixed(3)} m`);
+    assert(innerEffectPassing * 10 < strengthEffect,
+        `innerBody is not what stops the ball: it shifts the trajectory ` +
+        `${innerEffectPassing.toFixed(2)} m, while maxStrength shifts it ` +
+        `${strengthEffect.toFixed(2)} m — ` +
+        `${(strengthEffect / Math.max(0.01, innerEffectPassing)).toFixed(0)}x more`);
+
+    tune.maxStrength = 400;
+    tune.innerBody = true;
+    rebuild(scene);
+    advanceTime(32);
+}
+
+// =============================================================================
+// HEIGHTFIELD TERRAIN
+// =============================================================================
+//
+// The far half of the world is a 64x64 Jolt heightfield built from terrain.js's
+// height function. The visual mesh is triangulated from the SAME Float32Array,
+// so the two cannot disagree — and the assertions below check that claim from
+// both ends: a raycast against the collision body versus the function, and the
+// engine's groundNormal versus the function's derivative.
+
+{
+    assert(terrainState.tag > 0, `heightfield body exists (tag ${terrainState.tag})`);
+
+    // --- 15a. the collision surface IS the height function -------------------
+    let worstProbe = 0;
+    for (const [x, z] of [[0, -30], [8, -40], [-11, -52], [4, -66], [-6, -25]]) {
+        assert(onTerrain(x, z), `sample (${x}, ${z}) is inside the patch`);
+        const got = probeGround(x, z);
+        const want = heightAt(x, z);
+        assert(got !== null, `raycast found the heightfield at (${x}, ${z})`);
+        worstProbe = Math.max(worstProbe, Math.abs(got - want));
+    }
+    // The heightfield quantizes its samples and interpolates between them, so
+    // a bilinear miss of a few centimetres is expected; a metre would mean the
+    // body was built from different numbers than the mesh.
+    assert(worstProbe < 0.25,
+        `collision surface matches the height function within ` +
+        `${worstProbe.toFixed(3)} m at every probe`);
+
+    // --- 15b. the character walks the hills ---------------------------------
+    tune.maxSlopeAngle = 50;
+    tune.moveSpeed = 4.5;
+    tune.innerBody = true;
+    rebuild(scene);
+    advanceTime(32);
+
+    const sx = TERRAIN_WALK.x, sz = TERRAIN_WALK.z;
+    teleport(sx, heightAt(sx, sz) + 0.6 + RADIUS + STAND_HALF, sz);
+    advanceTime(400);
+    assert(charState.isGrounded, 'landed on the heightfield');
+    assert(onTerrain(charState.position.x, charState.position.z),
+        'standing on the terrain patch');
+    assert(terrainState.onTerrain, 'the terrain readout agrees');
+
+    // Walk toward -Z, sampling on every frame the controller reports grounded.
+    let maxSlope = 0, worstErr = 0, samples = 0, climbed = 0;
+    let runMin = charState.position.y;
+    clearKeys();
+    keys['w'] = true;
+    for (let t = 0; t < 3600; t += 16) {
+        advanceTime(16);
+        const p = charState.position;
+        if (!charState.isGrounded || !onTerrain(p.x, p.z)) { runMin = p.y; continue; }
+        runMin = Math.min(runMin, p.y);
+        climbed = Math.max(climbed, p.y - runMin);
+        const measured = charState.slopeDeg;
+        const analytic = slopeAt(p.x, p.z);
+        maxSlope = Math.max(maxSlope, measured);
+        // Only compare where the terrain is smooth relative to the capsule: on
+        // a ridge line the capsule bridges two faces and the contact normal is
+        // legitimately neither one's.
+        if (analytic < 40) { worstErr = Math.max(worstErr, Math.abs(measured - analytic)); samples++; }
+    }
+    clearKeys();
+    advanceTime(64);
+
+    assert(samples > 60, `sampled the walk on ${samples} grounded frames`);
+    assert(maxSlope > 8,
+        `the reported ground slope is genuinely non-zero on the hills ` +
+        `(peak ${maxSlope.toFixed(1)}°)`);
+    assert(climbed > 0.5,
+        `the character climbed ${climbed.toFixed(2)} m of hill without leaving the ground`);
+    assert(worstErr < 12,
+        `the engine's groundNormal agrees with the terrain gradient to within ` +
+        `${worstErr.toFixed(1)}° across the whole walk`);
+    console.log(`  heightfield — ${samples} grounded frames walking the hills:\n` +
+        `    peak reported slope        : ${maxSlope.toFixed(1)}°\n` +
+        `    worst engine-vs-analytic   : ${worstErr.toFixed(1)}°\n` +
+        `    height climbed in one run  : ${climbed.toFixed(2)} m\n` +
+        `    collision-vs-function probe: ${worstProbe.toFixed(3)} m`);
+
+    screenshot('character-lab-terrain.png');
+
+    // --- 15c. regenerating rebuilds body AND mesh from one pass --------------
+    const ampBefore = terrain.amplitude;
+    const rebuildsBefore = terrainState.rebuilds;
+    const hBefore = probeGround(sx, sz);
+    terrain.amplitude = ampBefore * 2;
+    regenerateTerrain();
+    advanceTime(64);
+    assert(terrainState.rebuilds === rebuildsBefore + 1, 'terrain regeneration counted');
+    const hAfter = probeGround(sx, sz);
+    assert(hAfter !== null, 'the regenerated body is still there to hit');
+    assert(Math.abs(hAfter - heightAt(sx, sz)) < 0.25,
+        `the new collision surface matches the new height function ` +
+        `(${hAfter.toFixed(3)} vs ${heightAt(sx, sz).toFixed(3)})`);
+    assert(Math.abs(hAfter - hBefore) > 0.3,
+        `doubling the amplitude actually changed the terrain ` +
+        `(${hBefore.toFixed(2)} -> ${hAfter.toFixed(2)} m)`);
+    terrain.amplitude = ampBefore;
+    regenerateTerrain();
+    advanceTime(64);
+
+    // --- 15d. the seam ------------------------------------------------------
+    // The flat course and the terrain meet at z = SEAM_Z with no step, which is
+    // what makes the hills walkable-to rather than teleport-only.
+    assert(Math.abs(heightAt(0, SEAM_Z)) < 0.01,
+        `the height function is tapered to zero at the seam ` +
+        `(${heightAt(0, SEAM_Z).toFixed(4)} m)`);
+    assert(world.groundFarZ === SEAM_Z,
+        `the course's ground slab ends at the same line (${world.groundFarZ})`);
+}
+
+// Put the crowd back on the plaza so the final screenshot has one.
+setCrowdSize(18);
+setCrowdPhysical(true);
+resetCrowd();
+advanceTime(400);
+assert(crowdState.active === 18, `crowd restored (${crowdState.active} NPCs)`);
 
 // --- wrap up -----------------------------------------------------------------
 
