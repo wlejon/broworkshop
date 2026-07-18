@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Scene Audio</title>
+    <link rel="stylesheet" href="/app/style.css">
+</head>
+<body>
+    <canvas id="stage"></canvas>
+
+    <!-- Left column: the scene-integration controls (listener binding, sources). -->
+    <div id="hud">
+        <h1>Scene Audio</h1>
+        <div class="sub">bro.scene emitters &rarr; broaudio, synced by the engine</div>
+
+        <section>
+            <h2>Listener</h2>
+            <label class="chk">
+                <input id="bindListener" type="checkbox" checked>
+                bind to camera <span class="hint">(scene.bindAudioListenerToCamera)</span>
+            </label>
+            <div class="row">pos <span class="v" id="listenerPos">—</span></div>
+            <div class="row">fwd <span class="v" id="listenerFwd">—</span></div>
+            <div class="note" id="listenerNote">Orbit with right-drag: the mix follows the camera.</div>
+        </section>
+
+        <section>
+            <h2>Sources</h2>
+            <div class="note">Each mesh node carries an attached emitter — the
+                engine pushes world position and velocity every frame.</div>
+            <div id="sourceList"></div>
+            <label class="chk">
+                <input id="showPaths" type="checkbox" checked> show motion paths
+            </label>
+        </section>
+
+        <section>
+            <h2>Transport <span class="hint">seekPlayback / seconds</span></h2>
+            <div class="row">
+                <button id="musicToggle" class="btn">pause</button>
+                <span class="v" id="musicTime">0.00 / 0.00 s</span>
+            </div>
+            <input id="musicSeek" type="range" min="0" max="1000" step="1" value="0" class="wide">
+            <div class="note">Drag to seek; the readout is
+                getPlaybackPositionSeconds, not a JS-side timer.</div>
+        </section>
+    </div>
+
+    <!-- Right column: Doppler (the showpiece) and the bus mixer. -->
+    <div id="side">
+        <section>
+            <h2>Doppler</h2>
+            <label>factor
+                <input id="dopplerFactor" type="range" min="0" max="4" step="0.05" value="1">
+                <span class="v" id="dopplerFactorVal">1.00</span>
+            </label>
+            <label>flyby speed
+                <input id="flybySpeed" type="range" min="20" max="200" step="5" value="90">
+                <span class="v" id="flybySpeedVal">90 u/s</span>
+            </label>
+            <div class="row">
+                <button id="flybyRun" class="btn wide-btn">run flyby</button>
+            </div>
+            <div class="row big">ratio <span class="v big" id="dopplerRatio">1.000</span></div>
+            <canvas id="dopplerGraph" width="260" height="90"></canvas>
+            <div class="note" id="dopplerNote">&gt;1 approaching, &lt;1 receding.
+                factor 0 pins it to exactly 1.000.</div>
+        </section>
+
+        <section>
+            <h2>Mixer <span class="hint">setBusSolo / getBusSolo</span></h2>
+            <div id="mixerStrips"></div>
+            <div class="row">output latency <span class="v" id="outLatency">—</span></div>
+            <div class="note">tools/synth ships a full mixer UI but never uses
+                bus solo — this is the same bus API with solo wired up.</div>
+        </section>
+    </div>
+
+    <script type="module" src="/app/app.js"></script>
+</body>
+</html>

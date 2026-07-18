@@ -1,0 +1,63 @@
+html, body { margin: 0; padding: 0; height: 100%; background: #06080c; overflow: hidden; }
+canvas#stage { display: block; width: 100vw; height: 100vh; }
+
+#hud, #side {
+    position: absolute;
+    top: 10px;
+    background: rgba(6, 10, 16, 0.78);
+    color: #cfe;
+    font: 12px system-ui, sans-serif;
+    padding: 10px 14px;
+    border-radius: 6px;
+    width: 268px;
+}
+#hud  { left: 10px; }
+#side { right: 10px; }
+
+#hud h1 { margin: 0; font-size: 14px; color: #fff; letter-spacing: 0.3px; }
+#hud .sub { color: #7a8ba0; font-size: 10px; margin: 2px 0 4px 0; }
+
+section { border-top: 1px solid #1d2836; margin-top: 8px; padding-top: 6px; }
+section:first-of-type { border-top: none; }
+h2 { margin: 0 0 4px 0; font-size: 11px; color: #8fd8ff; text-transform: uppercase; letter-spacing: 0.6px; }
+
+label { display: block; margin: 3px 0; }
+label.chk { color: #b9c9dc; }
+input[type=range] { width: 120px; vertical-align: middle; }
+input[type=range].wide { width: 240px; }
+
+.row { display: block; margin: 3px 0; color: #b9c9dc; }
+.row.big { font-size: 13px; }
+.v { color: #7bed9f; display: inline-block; min-width: 40px; text-align: right; }
+.v.big { font-size: 18px; min-width: 70px; color: #ffd97b; }
+.hint { color: #5d6e83; font-size: 9px; text-transform: none; letter-spacing: 0; }
+.note { color: #64798f; font-size: 10px; line-height: 1.35; margin: 4px 0 2px 0; }
+
+.btn {
+    background: #17222f; color: #cfe; border: 1px solid #2b3a4d;
+    border-radius: 4px; padding: 2px 8px; font: 11px system-ui; cursor: pointer;
+}
+.btn:hover  { background: #1f2f41; }
+.btn.on     { background: #2a6b45; border-color: #3d9463; color: #eaffef; }
+.btn.solo   { background: #6b5a1f; border-color: #a08a33; color: #fff4d0; }
+.btn.wide-btn { width: 100%; padding: 4px 0; margin: 2px 0; }
+
+/* One line per moving source: swatch, name, pause toggle, gain. */
+.src { display: block; margin: 3px 0; white-space: nowrap; }
+.src .dot { display: inline-block; width: 8px; height: 8px; border-radius: 4px; vertical-align: middle; margin-right: 5px; }
+.src .nm  { display: inline-block; width: 62px; color: #cfe; }
+.src input[type=range] { width: 78px; }
+
+/* Mixer strips: bus name, mute, solo, meter. */
+.strip { display: block; margin: 3px 0; white-space: nowrap; }
+.strip .nm { display: inline-block; width: 62px; color: #cfe; }
+.strip .meter {
+    display: inline-block; width: 70px; height: 8px; vertical-align: middle;
+    background: #101a26; border-radius: 2px; overflow: hidden; margin-left: 5px;
+}
+.strip .meter i { display: block; height: 100%; width: 0%; background: #4bd6a0; }
+
+#dopplerGraph {
+    display: block; width: 260px; height: 90px; margin: 4px 0;
+    background: #0a121b; border: 1px solid #1d2836; border-radius: 4px;
+}
