@@ -126,5 +126,90 @@ canvas#stage { display: block; width: 100vw; height: 100vh; }
     border-radius: 2px;
 }
 
+/* --- blend mix bars --------------------------------------------------------
+   The base-track composition, one bar per contributing clip. Bars rather than
+   numbers because the thing worth seeing is weight moving BETWEEN clips as an
+   axis sweeps, and two numbers trading places is much harder to read at a
+   glance than two bars trading length. */
+#hud .mixList { margin: 4px 0 2px 0; }
+#hud .mix { display: flex; align-items: center; gap: 5px; margin: 2px 0; }
+#hud .mixName {
+    width: 78px; flex: none;
+    color: #cfe; font-size: 10px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+#hud .mixTrack {
+    flex: 1; height: 7px;
+    background: rgba(255,255,255,0.07);
+    border-radius: 3px; overflow: hidden;
+}
+#hud .mixFill {
+    height: 100%; width: 0;
+    background: linear-gradient(90deg, #2f7d5a, #7bed9f);
+}
+#hud .mixVal {
+    width: 30px; flex: none;
+    color: #7bed9f; font-size: 10px; text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+/* --- 2D blend pad ---------------------------------------------------------- */
+#hud .padWrap { display: flex; gap: 8px; align-items: flex-start; margin: 5px 0 3px 0; }
+#hud .pad {
+    position: relative;
+    width: 132px; height: 132px; flex: none;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid #34404e;
+    border-radius: 5px;
+    cursor: crosshair;
+    touch-action: none;          /* or a drag scrolls the panel instead */
+}
+#hud .padAxis { position: absolute; background: rgba(159,214,255,0.18); }
+#hud .padAxisH { left: 0; right: 0; top: 50%; height: 1px; }
+#hud .padAxisV { top: 0; bottom: 0; left: 50%; width: 1px; }
+#hud .padDot {
+    position: absolute;
+    width: 11px; height: 11px;
+    margin: -6px 0 0 -6px;
+    border-radius: 50%;
+    background: #7bed9f;
+    box-shadow: 0 0 7px rgba(123,237,159,0.85);
+    pointer-events: none;
+}
+#hud .padPresets {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 2px;
+    flex: 1;
+}
+#hud .padPresets button {
+    margin-top: 0; padding: 3px 0;
+    font-size: 12px; line-height: 1;
+}
+
+#hud #spaceRow button.active {
+    background: #1d4f3a; border-color: #7bed9f; color: #d9ffe8;
+}
+
+/* --- layer rows ------------------------------------------------------------ */
+#hud .layer {
+    margin: 4px 0;
+    padding: 4px 6px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.07);
+    border-left: 2px solid #34404e;
+    border-radius: 4px;
+}
+#hud .layer.on { border-left-color: #7bed9f; background: rgba(123,237,159,0.06); }
+#hud .layer label { margin: 2px 0; font-size: 11px; }
+#hud .layerHead { color: #9fd6ff; font-weight: 600; }
+#hud .layer select { max-width: 104px; }
+#hud .layer input[type=range].lw { width: 86px; }
+#hud .layer .bones {
+    color: #6f7d8c; font-size: 10px; margin-top: 2px;
+    font-family: ui-monospace, Consolas, monospace;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
 #hud .hint { color: #8b97a6; font-size: 11px; margin-top: 3px; line-height: 1.35; }
 #hud .foot { margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.10); padding-top: 7px; }

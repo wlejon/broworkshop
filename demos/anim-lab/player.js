@@ -20,8 +20,15 @@
 // behaviour of its own beyond remembering the loop flag and speed the user
 // last chose, so a later play() reuses them.
 
-export function createPlayer(node, clips) {
+export function createPlayer(node, clips, masks) {
     const state = { loop: true, speed: 1.0, lastClip: '' };
+
+    // Layer bookkeeping. The engine owns the layers themselves — blendState()
+    // reports them and is the truth — but the HUD needs to remember the user's
+    // INTENT for an inactive slot too: which clip and mask a disabled row will
+    // use when it is switched back on. That is a UI concern, so it lives here
+    // rather than being inferred from the engine.
+    const layers = new Map();
 
     const facade = {
         node,
@@ -99,14 +106,135 @@ export function createPlayer(node, clips) {
 
         /** The live blend composition — base clips, weights, layers. */
         blendState() { return node.blendState(); },
+
+        // ── Blend spaces ─────────────────────────────────────────────────────
+        //
+        // A blend space is a named set of clips pinned at parameter positions;
+        // one scalar (1D) or point (2D) picks the mix, and the engine blends
+        // the neighbours. Crucially it is a BASE-TRACK citizen: play('speed')
+        // and play('walk') are the same call, crossfade included, so a space
+        // can replace a clip anywhere without the surrounding code caring.
+        //
+        // All three spaces are registered up front. They cost nothing while
+        // not playing, and registering them together keeps the parameter
+        // ranges — which the HUD's sliders have to agree with — in one place.
+        defineSpaces() {
+            // 1D: a pure speed axis. The positions are the speeds in m/s at
+            // which each gait looks right, which is what makes the parameter
+            // meaningful rather than an arbitrary 0..1 — feed it a character's
+            // actual planar speed and the gait matches the ground.
+            node.addBlendSpace1D('locomotion', [
+                { clip: 'idle', pos: 0.0 },
+                { clip: 'walk', pos: 1.6 },
+                { clip: 'run',  pos: 5.0 },
+            ]);
+
+            // The crouch pair on the same axis, so switching spaces mid-stride
+            // is a crossfade between two mixes rather than a pose snap.
+            node.addBlendSpace1D('locomotionCrouch', [
+                { clip: 'crouchIdle', pos: 0.0 },
+                { clip: 'crouchWalk', pos: 1.6 },
+            ]);
+
+            // 2D: the locomotion square. X is strafe (+1 = the character's
+            // right), Y is forward/back. idle sits at the centre so easing off
+            // the pad settles to a stand instead of marching in place.
+            //
+            // The 2D blend takes the THREE nearest points by inverse-squared
+            // distance, so the corners of this layout are genuine three-way
+            // mixes (e.g. forward-right = walk + walkStrafeR + idle) rather
+            // than interpolations along an authored triangle edge. Keeping the
+            // five points sparse and well separated is what keeps that stable:
+            // weights jump a little whenever the nearest-3 set changes.
+            node.addBlendSpace2D('directional', [
+                { clip: 'idle',        pos: [ 0,  0] },
+                { clip: 'walk',        pos: [ 0,  1] },
+                { clip: 'walkBack',    pos: [ 0, -1] },
+                { clip: 'walkStrafeL', pos: [-1,  0] },
+                { clip: 'walkStrafeR', pos: [ 1,  0] },
+            ]);
+            return facade;
+        },
+
+        /** Make a blend space the base track (crossfading in, like any clip). */
+        playSpace(name, fade = 0.25) {
+            state.lastClip = name;
+            node.play(name, { speed: state.speed, fadeTime: fade });
+            return facade;
+        },
+
+        /**
+         * Drive the 1D speed axis. Instant — the engine does no smoothing of
+         * its own, deliberately, so gameplay code owns the easing. The HUD
+         * slider IS the smoothing here; a real character would low-pass its
+         * measured speed into this call.
+         */
+        setLocomotion(speed, space = 'locomotion') {
+            node.setBlendPos(space, speed);
+            return facade;
+        },
+
+        /** Drive the 2D directional axis. x = strafe, y = forward/back. */
+        setDirection(x, y) {
+            node.setBlendPos('directional', x, y);
+            return facade;
+        },
+
+        // ── Layers ───────────────────────────────────────────────────────────
+        //
+        // Up to 8 masked tracks blend over the base in ascending slot order,
+        // each independently weighted and fadeable. This is what lets the legs
+        // come from a blend space while the arms come from a gesture, with no
+        // special-casing on either side.
+
+        /**
+         * Start (or replace) a layer. `mask` is a preset NAME — resolving it
+         * here means the HUD and the tests both talk in preset names and only
+         * this module knows about Uint8Arrays.
+         */
+        playLayer(slot, name, mask, opts = {}) {
+            if (!clips.animations[name]) throw new Error(`no such clip: ${name}`);
+            layers.set(slot, { slot, name, mask, weight: opts.weight === undefined ? 1 : opts.weight });
+            node.playLayer(slot, name, {
+                mask: masks.get(mask),
+                weight: opts.weight === undefined ? 1 : opts.weight,
+                fadeTime: opts.fadeTime === undefined ? 0.2 : opts.fadeTime,
+                speed: opts.speed === undefined ? 1 : opts.speed,
+                loop: true,
+            });
+            return facade;
+        },
+
+        /** Fade a layer out and free its slot. */
+        stopLayer(slot, fade = 0.2) {
+            const e = layers.get(slot);
+            if (e) e.active = false;
+            node.stopLayer(slot, { fadeTime: fade });
+            return facade;
+        },
+
+        /** Live weight for an already-running layer (throws on an empty slot). */
+        setLayerWeight(slot, weight) {
+            const e = layers.get(slot);
+            if (e) e.weight = weight;
+            node.setLayerWeight(slot, weight);
+            return facade;
+        },
+
+        /** The user's remembered intent for a slot, active or not. */
+        layerIntent(slot) { return layers.get(slot); },
+
+        /** Slots the ENGINE currently reports as live. */
+        activeLayers() {
+            return facade.blendState().layers || [];
+        },
     };
 
     return facade;
 }
 
-// CHUNK 2: blend-space control belongs on this facade —
-// `setLocomotion(speed)` wrapping node.setBlendPos('locomotion', speed), and
-// `playLayer(slot, name, mask)` wrapping the layer API, so the HUD keeps
-// talking to one object.
 // CHUNK 3: `travel(state)` wrapping node.travel(), plus a consumeRootMotion()
-// pump that moves the node — both belong here for the same reason.
+// pump that moves the node — both belong here for the same reason. The spaces
+// registered in defineSpaces() are ready to be state SOURCES as they stand:
+// 'locomotion' and 'locomotionCrouch' share an axis, so a move ↔ moveCrouch
+// transition with syncPhase: true stays foot-aligned.

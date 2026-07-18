@@ -65,6 +65,69 @@
                 makes.</div>
         </section>
 
+        <div class="group">Blending</div>
+
+        <!-- The live mix, read straight out of blendState(). Every control
+             below moves these bars; if a bar does not move, the control did
+             not do what it claims. -->
+        <section>
+            <h2>Base mix <span class="v" id="mixSum"></span></h2>
+            <div id="baseMix" class="mixList"></div>
+            <div class="hint" id="mixPhase"></div>
+        </section>
+
+        <section>
+            <h2>Blend space on the base track</h2>
+            <div class="row" id="spaceRow"></div>
+            <div class="hint">A blend space is a base-track citizen: these are
+                <code>play(spaceName)</code>, the same call the clip grid makes.
+                Clip buttons above take the base back.</div>
+        </section>
+
+        <section>
+            <h2>1D — speed axis</h2>
+            <label>Speed <input type="range" id="speedAxis" min="0" max="5" step="0.02" value="0">
+                <span class="v" id="speedAxisV"></span></label>
+            <div class="hint">One scalar picks the mix of
+                <code>idle@0</code> → <code>walk@1.6</code> →
+                <code>run@5.0</code>. The two neighbouring clips blend by
+                position, and all members share one normalized phase, so the
+                feet stay aligned at any mix rather than sliding.</div>
+        </section>
+
+        <section>
+            <h2>2D — direction <span class="v" id="dirV"></span></h2>
+            <div class="padWrap">
+                <div id="pad" class="pad">
+                    <div class="padAxis padAxisH"></div>
+                    <div class="padAxis padAxisV"></div>
+                    <div id="padDot" class="padDot"></div>
+                </div>
+                <div id="padPresets" class="padPresets"></div>
+            </div>
+            <div class="hint"><b>Drag the pad</b> — or hit a preset. X is strafe,
+                Y is forward/back, with <code>idle</code> at the centre. The
+                three nearest sample points blend by inverse-squared distance,
+                so a corner is a genuine three-way mix, not a lerp along an
+                edge.</div>
+        </section>
+
+        <div class="group">Layers</div>
+
+        <section>
+            <h2>Masked layers <span class="v" id="layerSlots">0/3</span></h2>
+            <div id="layerRows"></div>
+            <div class="hint" id="layerCount"></div>
+            <div class="hint"><b>Walk and wave at once.</b> Put the 2D or 1D
+                space on the base, push the speed up, then switch on slot 1 —
+                the legs keep coming from the blend space while the arms come
+                from the layer. The three rows default to disjoint masks (right
+                arm / left arm / head), so all three can run over the gait
+                simultaneously. Change a <b>mask</b> to <code>full body</code>
+                and the layer swallows the walk entirely: that is the mask
+                doing its job, in reverse.</div>
+        </section>
+
         <div class="group">Rig</div>
 
         <section>
@@ -80,8 +143,9 @@
         <div class="hint foot">
             <b>Right-drag</b> orbit · <b>Middle-drag</b> pan · <b>Wheel</b> zoom ·
             <b>Space</b> play/pause<br>
-            Clips: idle · walk · run · wave · jump — all procedurally authored
-            keyframe data, none of it posed from JavaScript.
+            Twelve procedurally authored clips, three blend spaces and eight
+            layer slots — all of it keyframe data evaluated in C++, none of it
+            posed from JavaScript.
         </div>
     </div>
 

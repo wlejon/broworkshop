@@ -8,17 +8,22 @@
 //               from bromesh capsules, with per-vertex weights derived from
 //               distance to the bone segments. Real SkinData, real
 //               createSkinnedMesh, GPU skinning, deforming shadow.
-//   clips.js    idle / walk / run / wave / jump, authored as plain keyframe
+//   clips.js    Twelve clips — idle, the four compass gaits, run, the crouch
+//               pair, jump and three gestures — authored as plain keyframe
 //               DATA from phase-driven curves and compiled to bromesh
 //               Animations. No JavaScript poses a bone per frame.
+//   masks.js    Named bone-mask presets (upper body / arms / one arm / head),
+//               packed to the per-bone 0/1 arrays playLayer wants.
 //   player.js   A facade over the skinned mesh's built-in player, which owns
-//               evaluate → blend → skinning-palette natively.
+//               evaluate → blend → skinning-palette natively — single clips,
+//               crossfades, 1D/2D blend spaces and eight masked layers.
 //   stage.js    Ground, pad, marker run, and a shadow-casting key light — the
 //               shadow is the cue that ties a foot to the floor.
 //   overlay.js  getBoneWorldMatrix() per bone into a marker rig, so the pose
 //               the app can read is visibly the pose the GPU is skinning with.
 //   hud.js      The switchboard: clip selector, transport, speed, loop,
-//               scrubber, crossfade.
+//               scrubber, crossfade, the blend-space axes (a speed slider and
+//               a draggable 2D pad) and a row per masked layer.
 //
 // app.js wires those together, runs the camera and the frame loop, and exports
 // the handles the smoke test asserts against.
@@ -28,6 +33,7 @@ import { installSystemMenu } from "/lib/system-menu.js";
 import { buildStage } from "/app/stage.js";
 import { buildCharacter } from "/app/rig.js";
 import { buildClips } from "/app/clips.js";
+import { buildMasks } from "/app/masks.js";
 import { createPlayer } from "/app/player.js";
 import { createBoneOverlay } from "/app/overlay.js";
 import { state, bindHud, updateReadout, setFps, selectClip, crossfade } from "/app/hud.js";
@@ -58,10 +64,17 @@ for (const name of clips.names) {
     character.node.addClip(name, clips.animations[name]);
 }
 
-const player = createPlayer(character.node, clips);
+// Blend spaces are registered ONCE, after the clips exist and before anything
+// plays. They are cheap while idle and they capture their member clips at
+// registration time, so this is the natural place for them: from here on
+// "locomotion" and "walk" are interchangeable arguments to play().
+const masks = buildMasks(character.rig);
+const player = createPlayer(character.node, clips, masks);
+player.defineSpaces();
+
 const overlay = createBoneOverlay(scene, character);
 
-bindHud(player, overlay, character);
+bindHud(player, overlay, character, masks);
 
 // A one-shot clip would strand the character in its final pose, so anything
 // non-looping falls back to idle. Even though every clip here currently loops,
@@ -157,6 +170,9 @@ function frame() {
 }
 requestAnimationFrame(frame);
 
-export { scene, cam, canvas, character, player, clips, state,
+export { scene, cam, canvas, character, player, clips, masks, state,
          stage, overlay, stagePlayer };
-export { selectClip, crossfade, updateReadout } from "/app/hud.js";
+export { selectClip, crossfade, updateReadout,
+         selectSpace, setSpeedAxis, setDirection,
+         setLayerEnabled, setLayerWeight, setLayerMask, setLayerClip,
+         LAYER_ROWS } from "/app/hud.js";

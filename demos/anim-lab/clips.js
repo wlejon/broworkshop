@@ -150,7 +150,8 @@ export function buildClips(rig) {
     // that bobs the body has to start from the bind-pose value rather than
     // from zero — a translation channel REPLACES the bone's local offset.
     const hipsBase = rig.worldPos[rig.index.hips];
-    const hipsAt = (dy, dz = 0) => [hipsBase[0], hipsBase[1] + dy, hipsBase[2] + dz];
+    const hipsAt = (dy, dz = 0, dx = 0) =>
+        [hipsBase[0] + dx, hipsBase[1] + dy, hipsBase[2] + dz];
 
     const defs = {};
 
@@ -184,70 +185,195 @@ export function buildClips(rig) {
     };
 
     // --- walk / run ----------------------------------------------------------
-    // One generator, two tunings. Keeping them structurally identical is what
-    // lets a blend space (chunk 2) mix them without the gait falling apart —
-    // matching curve SHAPES blend far better than matching key counts.
-    const gait = (o) => ({
-        hips: {
-            rot: (p) => [o.lean * 0.35,
-                          o.twist * 0.5 * Math.sin(TAU * p),
-                          o.roll * Math.sin(TAU * p)],
-            // Two bobs per stride: the body rises over each support leg.
-            pos: (p) => hipsAt(-o.crouch + o.bob * Math.cos(TAU * p * 2)),
-        },
-        spine: { rot: (p) => [o.lean * 0.3, -o.twist * Math.sin(TAU * p), 0] },
-        chest: { rot: (p) => [o.lean * 0.4, -o.twist * 1.4 * Math.sin(TAU * p), 0] },
-        head:  { rot: (p) => [-o.lean * 0.6, o.twist * 0.8 * Math.sin(TAU * p), 0] },
+    // ONE generator, many tunings, and that is the load-bearing decision in this
+    // file. A blend space mixes clips key-for-key at whatever weights the
+    // parameter asks for, so two clips only blend into something coherent if
+    // their curves have the same SHAPE — same number of strides, the same limb
+    // in front at the same phase, the same bones driven. Authoring walk, run,
+    // the strafes, the backward walk and the crouch variants as one function
+    // with different constants guarantees that structurally instead of hoping
+    // for it. It also means a half-mix of walk and run is a real intermediate
+    // gait rather than two skeletons fighting.
+    //
+    // Two extra axes on top of chunk 1's tuning, both defaulting to the
+    // straight-ahead walk so `walk` and `run` are byte-identical to before:
+    //   dir     +1 strides forward, -1 reverses the swing so the legs reach
+    //           BACKWARD — a real backpedal, not `walk` played at speed -1
+    //           (which would also reverse the arm counter-swing and the bob).
+    //   strafe  -1 / +1 leans and abducts the legs sideways, and yaws the
+    //           chest against the travel direction the way a sidestep does.
+    const gait = (o) => {
+        const dir = o.dir === undefined ? 1 : o.dir;
+        const st  = o.strafe || 0;
 
-        // Hip flexion is -X (forward), so the leading leg reaches toward +Z.
-        hip_L:  { rot: (p) => [-o.hip * Math.sin(TAU * p), 0,  0.02] },
-        hip_R:  { rot: (p) => [-o.hip * Math.sin(TAU * p + Math.PI), 0, -0.02] },
-        // Knees only fold backward (+X). Phase-shifted off the hip so the knee
-        // folds as the leg comes through, not while it is planted.
-        knee_L: { rot: (p) => [o.kneeMin + o.knee * clamp01(Math.sin(TAU * p + 1.7)), 0, 0] },
-        knee_R: { rot: (p) => [o.kneeMin + o.knee * clamp01(Math.sin(TAU * p + 1.7 + Math.PI)), 0, 0] },
-        ankle_L: { rot: (p) => [-o.ankle * Math.sin(TAU * p + 2.6), 0, 0] },
-        ankle_R: { rot: (p) => [-o.ankle * Math.sin(TAU * p + 2.6 + Math.PI), 0, 0] },
+        // Abduction envelopes: the trailing leg pushes off while the leading
+        // one reaches out, half a cycle apart. clamp01 on the sine keeps each
+        // leg's contribution one-sided, so the legs scissor sideways rather
+        // than both drifting the same way.
+        const outL = (p) => st * o.spread * clamp01(Math.sin(TAU * p));
+        const outR = (p) => st * o.spread * clamp01(Math.sin(TAU * p + Math.PI));
 
-        // Arms counter-swing against the same-side leg.
-        shoulder_L: { rot: (p) => [-o.arm * Math.sin(TAU * p + Math.PI), 0,  0.08] },
-        shoulder_R: { rot: (p) => [-o.arm * Math.sin(TAU * p), 0, -0.08] },
-        elbow_L:    { rot: (p) => [-(o.elbow + o.elbowSwing * Math.sin(TAU * p + Math.PI)), 0, 0] },
-        elbow_R:    { rot: (p) => [-(o.elbow + o.elbowSwing * Math.sin(TAU * p)), 0, 0] },
-    });
+        return {
+            hips: {
+                rot: (p) => [o.lean * 0.35 * dir,
+                             o.twist * 0.5 * Math.sin(TAU * p) * dir,
+                             o.roll * Math.sin(TAU * p) + st * 0.12],
+                // Two bobs per stride: the body rises over each support leg.
+                pos: (p) => hipsAt(-o.crouch + o.bob * Math.cos(TAU * p * 2),
+                                   0, st * 0.035),
+            },
+            spine: { rot: (p) => [o.lean * 0.3 * dir,
+                                  -o.twist * Math.sin(TAU * p) * dir,
+                                  st * 0.06] },
+            // A sidestep leads with the shoulders, so the chest carries a
+            // constant yaw toward the travel direction on top of its swing.
+            chest: { rot: (p) => [o.lean * 0.4 * dir,
+                                  -o.twist * 1.4 * Math.sin(TAU * p) * dir - st * 0.26,
+                                  st * 0.05] },
+            head:  { rot: (p) => [-o.lean * 0.6 * dir,
+                                  o.twist * 0.8 * Math.sin(TAU * p) * dir + st * 0.18, 0] },
+
+            // Hip flexion is -X (forward), so the leading leg reaches toward
+            // +Z; negating with `dir` makes it reach toward -Z instead.
+            hip_L:  { rot: (p) => [-o.hip * dir * Math.sin(TAU * p), 0,  0.02 + outL(p)] },
+            hip_R:  { rot: (p) => [-o.hip * dir * Math.sin(TAU * p + Math.PI), 0, -0.02 + outR(p)] },
+            // Knees only fold backward (+X). Phase-shifted off the hip so the
+            // knee folds as the leg comes through, not while it is planted.
+            knee_L: { rot: (p) => [o.kneeMin + o.knee * clamp01(Math.sin(TAU * p + 1.7)), 0, 0] },
+            knee_R: { rot: (p) => [o.kneeMin + o.knee * clamp01(Math.sin(TAU * p + 1.7 + Math.PI)), 0, 0] },
+            ankle_L: { rot: (p) => [-o.ankle * dir * Math.sin(TAU * p + 2.6), 0, 0] },
+            ankle_R: { rot: (p) => [-o.ankle * dir * Math.sin(TAU * p + 2.6 + Math.PI), 0, 0] },
+
+            // Arms counter-swing against the same-side leg. Strafing pushes
+            // them outward so they clear the hips.
+            shoulder_L: { rot: (p) => [-o.arm * dir * Math.sin(TAU * p + Math.PI), 0,
+                                        0.08 + st * 0.16] },
+            shoulder_R: { rot: (p) => [-o.arm * dir * Math.sin(TAU * p), 0,
+                                       -0.08 + st * 0.16] },
+            elbow_L:    { rot: (p) => [-(o.elbow + o.elbowSwing * dir * Math.sin(TAU * p + Math.PI)), 0, 0] },
+            elbow_R:    { rot: (p) => [-(o.elbow + o.elbowSwing * dir * Math.sin(TAU * p)), 0, 0] },
+        };
+    };
+
+    // The straight-ahead walk tuning, reused as the base for every variant so
+    // the differences between clips stay readable as a short override list.
+    const WALK = {
+        hip: 0.52, knee: 0.72, kneeMin: 0.08, ankle: 0.18,
+        arm: 0.40, elbow: 0.30, elbowSwing: 0.12,
+        bob: 0.030, crouch: 0.015, lean: 0.10, twist: 0.09, roll: 0.045,
+        spread: 0.34,
+    };
+    const tune = (over) => Object.assign({}, WALK, over);
 
     defs.walk = {
         name: 'walk', duration: 1.0, loop: 'loop',
-        tracks: sampleTracks(1.0, gait({
-            hip: 0.52, knee: 0.72, kneeMin: 0.08, ankle: 0.18,
-            arm: 0.40, elbow: 0.30, elbowSwing: 0.12,
-            bob: 0.030, crouch: 0.015, lean: 0.10, twist: 0.09, roll: 0.045,
-        }), 24),
+        tracks: sampleTracks(1.0, gait(WALK), 24),
     };
 
     // Faster cycle, longer stride, deeper knee fold, real forward lean.
+    const RUN = tune({
+        hip: 0.72, knee: 1.15, kneeMin: 0.20, ankle: 0.28,
+        arm: 0.65, elbow: 0.95, elbowSwing: 0.30,
+        bob: 0.050, crouch: 0.045, lean: 0.26, twist: 0.15, roll: 0.055,
+    });
     defs.run = {
         name: 'run', duration: 0.62, loop: 'loop',
-        tracks: sampleTracks(0.62, gait({
-            hip: 0.72, knee: 1.15, kneeMin: 0.20, ankle: 0.28,
-            arm: 0.65, elbow: 0.95, elbowSwing: 0.30,
-            bob: 0.050, crouch: 0.045, lean: 0.26, twist: 0.15, roll: 0.055,
-        }), 24),
+        tracks: sampleTracks(0.62, gait(RUN), 24),
     };
 
-    // --- wave ----------------------------------------------------------------
-    // Right arm up and waving over an idle-ish body. Authored as a full-body
-    // clip so it stands alone in the selector; chunk 2 masks it to the upper
-    // body and layers it over the gait, which is the same data used two ways.
+    // --- directional variants ------------------------------------------------
+    // The four compass points of the classic locomotion square, feeding the 2D
+    // blend space. All four share `walk`'s duration on purpose: the space
+    // phase-syncs its members anyway, but equal durations mean the blended
+    // cycle length stays constant as the parameter sweeps, so the cadence does
+    // not audibly change while the direction does.
+    //
+    // A backpedal is NOT walk at negative speed. Negative speed reverses
+    // everything — the arm counter-swing, the vertical bob, the ankle roll —
+    // and reads as a film running backward. Reversing only the hip/arm SWING
+    // keeps the bob and the knee fold going forward in time, which is what a
+    // person actually does walking backward.
+    defs.walkBack = {
+        name: 'walkBack', duration: 1.0, loop: 'loop',
+        tracks: sampleTracks(1.0, gait(tune({
+            dir: -1, hip: 0.40, knee: 0.62, arm: 0.30, lean: 0.06, bob: 0.026,
+        })), 24),
+    };
+
+    // Strafes: shorter stride, wide abduction, chest yawed into the travel
+    // direction. `strafe` sign follows the 2D space's X axis (+1 = the
+    // character's right, which is -X in world space since it faces +Z).
+    defs.walkStrafeR = {
+        name: 'walkStrafeR', duration: 1.0, loop: 'loop',
+        tracks: sampleTracks(1.0, gait(tune({
+            strafe: 1, hip: 0.20, knee: 0.46, arm: 0.16, spread: 0.38,
+            bob: 0.024, twist: 0.04,
+        })), 24),
+    };
+    defs.walkStrafeL = {
+        name: 'walkStrafeL', duration: 1.0, loop: 'loop',
+        tracks: sampleTracks(1.0, gait(tune({
+            strafe: -1, hip: 0.20, knee: 0.46, arm: 0.16, spread: 0.38,
+            bob: 0.024, twist: 0.04,
+        })), 24),
+    };
+
+    // --- crouch pair ---------------------------------------------------------
+    // A second 1D space (idle → walk, crouched) so the HUD can show that a
+    // blend space is an ordinary base-track citizen: swapping which SPACE is
+    // playing crossfades exactly like swapping a clip would.
+    //
+    // `crouch` drops the hips and `kneeMin` keeps the knees loaded through the
+    // whole cycle; a still crouch is the same generator with the stride at
+    // zero, which is what keeps the pair blendable with each other.
+    const CROUCH = tune({
+        crouch: 0.30, kneeMin: 0.62, lean: 0.42, bob: 0.016,
+        hip: 0.26, knee: 0.40, arm: 0.18, elbow: 0.75, elbowSwing: 0.06,
+    });
+    defs.crouchIdle = {
+        name: 'crouchIdle', duration: 3.0, loop: 'loop',
+        tracks: sampleTracks(3.0, gait(Object.assign({}, CROUCH, {
+            hip: 0.0, knee: 0.0, arm: 0.0, elbowSwing: 0.0,
+            bob: 0.006, twist: 0.015, roll: 0.010,
+        })), 16),
+    };
+    defs.crouchWalk = {
+        name: 'crouchWalk', duration: 1.25, loop: 'loop',
+        tracks: sampleTracks(1.25, gait(CROUCH), 24),
+    };
+
+    // --- layer clips: wave / point / nod --------------------------------------
+    //
+    // These three exist to be MASKED and stacked on top of a locomotion blend,
+    // and they are authored as a set with deliberately DISJOINT default masks:
+    // wave owns the right arm, point owns the left arm, nod owns the head. Run
+    // all three at once over a walk and nothing fights, which is the clearest
+    // possible demonstration that layers compose — three independent actions
+    // and a gait, from four clips and zero per-frame JS.
+    //
+    // Every one of them drives the whole upper-body bone set (chest, neck,
+    // head, both shoulder/elbow/wrist chains), even where the motion is
+    // nominally one-sided. That is not padding: a mask entry with no
+    // corresponding track leaves that bone at its BIND transform inside the
+    // layer, so a bone that is masked IN but not animated would snap to the
+    // T-pose and stomp the base. Covering the superset of every mask preset in
+    // masks.js means any preset is safe on any of these clips.
+    const upperFiller = (side, lift) => ({
+        ['shoulder_' + side]: { rot: (p) => [0.04 * Math.sin(TAU * p), 0, lift] },
+        ['elbow_' + side]:    { rot: () => [-0.18, 0, lift * 0.5] },
+        ['wrist_' + side]:    { rot: () => [0, 0, 0] },
+    });
+
     defs.wave = {
         name: 'wave',
         duration: 1.8,
         loop: 'loop',
-        tracks: sampleTracks(1.8, {
+        tracks: sampleTracks(1.8, Object.assign({
             hips:  { rot: (p) => [0, -0.06 * envelope(p), 0],
                      pos: (p) => hipsAt(0.010 * Math.sin(TAU * p)) },
             spine: { rot: (p) => [0.02, -0.05 * envelope(p), 0] },
             chest: { rot: (p) => [-0.03, -0.12 * envelope(p), 0] },
+            neck:  { rot: (p) => [-0.02 * envelope(p), -0.08 * envelope(p), 0] },
             head:  { rot: (p) => [-0.06 * envelope(p), -0.22 * envelope(p), 0] },
 
             // Raise to roughly overhead-outward, then oscillate at the elbow.
@@ -255,14 +381,55 @@ export function buildClips(rig) {
             elbow_R:    { rot: (p) => [-0.20 * envelope(p), 0,
                                        -0.35 * envelope(p)
                                        - 0.50 * envelope(p) * Math.sin(TAU * p * 3)] },
-            shoulder_L: { rot: (p) => [0.04 * Math.sin(TAU * p), 0, 0.10] },
-            elbow_L:    { rot: (p) => [-0.18, 0, 0.05] },
+            wrist_R:    { rot: (p) => [0, 0, -0.25 * envelope(p) * Math.sin(TAU * p * 3)] },
 
             hip_L:  { rot: () => [0, 0,  0.02] },
             hip_R:  { rot: () => [0, 0, -0.02] },
             knee_L: { rot: () => [0.05, 0, 0] },
             knee_R: { rot: () => [0.05, 0, 0] },
-        }, 40),
+        }, upperFiller('L', 0.10)), 40),
+    };
+
+    // --- point ---------------------------------------------------------------
+    // The LEFT arm comes up and forward and holds, with a small settle. Mirror
+    // side to wave on purpose, so `wave` on one layer and `point` on another
+    // coexist rather than overwriting each other's shoulder.
+    const settle = (p) => envelope(p, 0.22, 0.86);
+    defs.point = {
+        name: 'point',
+        duration: 2.4,
+        loop: 'loop',
+        tracks: sampleTracks(2.4, Object.assign({
+            chest: { rot: (p) => [-0.02, 0.14 * settle(p), 0] },
+            neck:  { rot: (p) => [0.03 * settle(p), 0.10 * settle(p), 0] },
+            head:  { rot: (p) => [0.05 * settle(p), 0.18 * settle(p), 0] },
+
+            // -X on a hanging arm swings it forward; the small +Z lifts the
+            // whole arm away from the hip so the point clears the body.
+            shoulder_L: { rot: (p) => [-1.35 * settle(p)
+                                       - 0.05 * settle(p) * Math.sin(TAU * p * 2),
+                                       0, 0.10 + 0.16 * settle(p)] },
+            // The elbow STRAIGHTENS as the arm comes up — a bent point reads
+            // as a shrug. The idle bend is -0.18, so this cancels it out.
+            elbow_L:    { rot: (p) => [-0.18 + 0.16 * settle(p), 0, 0.05] },
+            wrist_L:    { rot: (p) => [-0.12 * settle(p), 0, 0] },
+        }, upperFiller('R', -0.10)), 32),
+    };
+
+    // --- nod -----------------------------------------------------------------
+    // Head and neck only, twice per cycle. Tiny, and that is the point: masked
+    // to head-only it should be invisible everywhere except the head, which
+    // makes it the cheapest possible read on whether masking works at all.
+    defs.nod = {
+        name: 'nod',
+        duration: 1.5,
+        loop: 'loop',
+        tracks: sampleTracks(1.5, Object.assign({
+            chest: { rot: () => [-0.03, 0, 0] },
+            // +X tips the upward-pointing neck/head chain forward.
+            neck:  { rot: (p) => [0.16 * envelope(p) * (1 - Math.cos(TAU * p * 2)) * 0.5, 0, 0] },
+            head:  { rot: (p) => [0.30 * envelope(p) * (1 - Math.cos(TAU * p * 2)) * 0.5, 0, 0] },
+        }, upperFiller('L', 0.10), upperFiller('R', -0.10)), 32),
     };
 
     // --- jump ----------------------------------------------------------------
@@ -313,18 +480,12 @@ export function buildClips(rig) {
         }, 36),
     };
 
-    // CHUNK 2: `walk` and `run` share the `gait` generator, so
-    //   addBlendSpace1D('locomotion', [{clip:'idle',pos:0},
-    //                                  {clip:'walk',pos:1.6},
-    //                                  {clip:'run',pos:5.0}])
-    // mixes cleanly. Add strafe variants here (gait({...}) with a lateral hip
-    // offset and a yawed chest) to feed addBlendSpace2D. `wave` is already
-    // authored to sit on the upper body only — mask it to
-    // chest/neck/head/shoulder_*/elbow_*/wrist_* for playLayer.
     // CHUNK 3: `jump` starts and ends standing, which is exactly the shape a
-    // one-shot state-machine state with autoAdvance wants. For root motion,
-    // add a variant whose `hips` translation track advances in +Z across the
-    // cycle — setRootMotion({ bone: 'hips' }) then extracts it.
+    // one-shot state-machine state with autoAdvance wants — and `crouchIdle` /
+    // `crouchWalk` are already a phase-compatible second locomotion space, so
+    // move ↔ moveCrouch with syncPhase: true works out of the box. For root
+    // motion, add a variant whose `hips` translation track advances in +Z
+    // across the cycle — setRootMotion({ bone: 'hips' }) then extracts it.
 
     const animations = {};
     for (const name of Object.keys(defs)) animations[name] = compileClip(defs[name], rig);
