@@ -170,6 +170,22 @@ export function setScale(v) {
     refreshTimeReadout();
 }
 
+/**
+ * Set the scale WITHOUT re-zeroing the divergence baseline.
+ *
+ * The measured-ratio readout compares scaled elapsed against wall elapsed since
+ * the last rebase, so anything that changes the scale every frame — the game's
+ * slow-mo ramp — must not rebase, or the window being measured over is never
+ * more than one frame long and the ratio reads as noise. The ramp wants the
+ * ratio to sag and recover; that IS the measurement.
+ */
+export function rampScale(v) {
+    bro.time.scale = v;
+    scaleEl.value = String(Math.round(v * 100));
+    scaleVEl.textContent = v.toFixed(2) + '×';
+    refreshTimeReadout();
+}
+
 export function setPaused(p) {
     bro.time.paused = p;
     pauseBtn.textContent = p ? 'Resume' : 'Pause';

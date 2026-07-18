@@ -140,12 +140,87 @@ window.addEventListener('message', (ev) => {
         // Round-trip probe. We echo the parent's stamp untouched; the parent
         // does the arithmetic against its own wall clock.
         toParent({ type: 'pong', stamp: d.stamp, ticks: state.ticks });
+    } else if (d.type === 'winctl') {
+        // The parent's handle owns geometry, title and focus — but NOT resize
+        // limits or window state. Those live on the child realm's own
+        // bro.window, scoped to this window. So per-child min/max is done by
+        // asking the child to do it to itself, and the reply carries the values
+        // read straight back out of SDL.
+        applyWinCtl(d);
+    } else if (d.type === 'probeWindow') {
+        const surf = {};
+        for (const k of ['state', 'borderless', 'alwaysOnTop', 'getPosition',
+                         'setPosition', 'getMinSize', 'setMinSize', 'getMaxSize',
+                         'setMaxSize', 'minimize', 'maximize', 'restore',
+                         'moveToDisplay', 'getDisplays', 'parent', 'open'])
+            surf[k] = typeof bro.window[k];
+        toParent({ type: 'probe', surf });
+    } else if (d.type === 'blob') {
+        // Transfer-list receipt: report the bytes we actually got, so the
+        // parent can prove the payload survived a zero-copy handoff.
+        reportBlob(d);
     } else if (d.type === 'hello') {
         subEl.textContent = 'window id ' + d.id + ' · own realm';
         log('parent -> hello (id ' + d.id + ')');
         toParent({ type: 'ready', id: d.id, size: [window.innerWidth, window.innerHeight] });
     }
 });
+
+// --- window control from inside this realm -----------------------------------
+//
+// A secondary window's handle (parent side) covers geometry, title, focus,
+// capture and close. Resize LIMITS and window STATE are not on the handle at
+// all — they live on this realm's own bro.window, which is scoped to this
+// window. So the parent drives them by proxy: it posts a winctl, we apply it
+// here, and we send back what SDL reports afterwards rather than what was asked
+// for. A limit the platform refused would therefore show up as a mismatch.
+
+function winReadout() {
+    const min = bro.window.getMinSize();
+    const max = bro.window.getMaxSize();
+    return {
+        state: bro.window.state,
+        borderless: bro.window.borderless,
+        alwaysOnTop: bro.window.alwaysOnTop,
+        min: [min.width, min.height],
+        max: [max.width, max.height],
+        size: [window.innerWidth, window.innerHeight],
+    };
+}
+
+function applyWinCtl(d) {
+    switch (d.op) {
+        case 'minSize':   bro.window.setMinSize(d.width, d.height); break;
+        case 'maxSize':   bro.window.setMaxSize(d.width, d.height); break;
+        case 'borderless': bro.window.borderless = !!d.value; break;
+        case 'alwaysOnTop': bro.window.alwaysOnTop = !!d.value; break;
+        case 'maximize':  bro.window.maximize(); break;
+        case 'restore':   bro.window.restore(); break;
+    }
+    log('winctl ' + d.op);
+    toParent({ type: 'winstate', op: d.op, ...winReadout() });
+}
+
+// --- transfer-list receipt ---------------------------------------------------
+//
+// The parent hands us an ArrayBuffer through postMessage's transfer list, which
+// DETACHES it on the sending side — the parent's buffer goes to byteLength 0
+// while ours arrives with the bytes intact. We checksum what landed here so the
+// parent can assert the handoff was zero-copy AND lossless, not just one or the
+// other.
+
+function reportBlob(d) {
+    const view = new Uint8Array(d.buf);
+    let sum = 0;
+    for (let i = 0; i < view.length; i++) sum = (sum + view[i] * (i + 1)) >>> 0;
+    log(`blob ${view.length} bytes, checksum ${sum}`);
+    toParent({
+        type: 'blobAck', tag: d.tag,
+        bytes: view.length, checksum: sum,
+        first: view.length ? view[0] : -1,
+        last: view.length ? view[view.length - 1] : -1,
+    });
+}
 
 // --- child → parent ----------------------------------------------------------
 

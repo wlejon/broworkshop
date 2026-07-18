@@ -148,12 +148,38 @@ export function closeAll() {
 
 // --- messaging ---------------------------------------------------------------
 
-export function post(rec, msg) {
+/**
+ * Post to one child. `transfer` is postMessage's optional transfer list —
+ * ArrayBuffers named there are handed over rather than copied, and are DETACHED
+ * on this side once the call returns. See transfer.js.
+ */
+export function post(rec, msg, transfer) {
     msgStats.sent++;
-    rec.win.postMessage(msg);
+    if (transfer) rec.win.postMessage(msg, transfer);
+    else rec.win.postMessage(msg);
     log('out', `-> ${rec.id} ${describe(msg)}`);
     refreshCounts();
     return msg;
+}
+
+// Other panels (transfer.js) need to see child traffic without windows.js
+// having to import them back — which would be a cycle. A plain observer list
+// keeps the dependency one-way.
+const observers = [];
+export function observeChildMessages(fn) { observers.push(fn); return fn; }
+
+/**
+ * Drive one of the child's own window properties BY PROXY.
+ *
+ * The parent-side handle covers geometry, title, focus, capture and close — but
+ * resize limits and window state are not on it at all. Those live on the child
+ * realm's own `bro.window`, scoped to that window. So the parent asks and the
+ * child applies, and the child answers with what SDL reports afterwards rather
+ * than with an echo of the request. `rec.winState` therefore holds measured
+ * values: a limit the platform refused would read back wrong here.
+ */
+export function winctl(rec, op, extra) {
+    return post(rec, Object.assign({ type: 'winctl', op }, extra || {}));
 }
 
 export function broadcast(msg) {
@@ -177,8 +203,20 @@ const pendingPings = new Map();
 
 function onChildMessage(rec, d) {
     if (!d || typeof d !== 'object') return;
+    for (const fn of observers) fn(rec, d);
 
     switch (d.type) {
+        case 'winstate':
+            // The child applied a window op to itself and read the result back
+            // out of SDL. Store what it actually got, not what we asked for.
+            rec.winState = d;
+            log('in', `<- ${rec.id} ${d.op}: min ${d.min[0]}x${d.min[1]}  ` +
+                      `max ${d.max[0]}x${d.max[1]}  state ${d.state}`);
+            updateRow(rec);
+            break;
+        case 'blobAck':
+            // transfer.js logs this one in its own panel.
+            break;
         case 'pong': {
             const p = pendingPings.get(d.stamp);
             const ms = Date.now() - d.stamp;
@@ -351,6 +389,52 @@ function buildRow(rec) {
     ctl.appendChild(capBtn); ctl.appendChild(focusBtn); ctl.appendChild(closeBtn);
     body.appendChild(ctl);
 
+    // Second control row: the surface that is NOT on the parent handle and has
+    // to be driven through the child's own bro.window (see winctl).
+    const ctl2 = el('div', 'ctl');
+    const tag = el('span', 'sublbl', 'in-child:');
+    ctl2.appendChild(tag);
+
+    const mnW = document.createElement('input'); mnW.type = 'number'; mnW.value = 260;
+    const mnH = document.createElement('input'); mnH.type = 'number'; mnH.value = 300;
+    const minBtn = el('button', 'tiny', 'min size');
+    minBtn.addEventListener('click', () =>
+        winctl(rec, 'minSize', { width: +mnW.value | 0, height: +mnH.value | 0 }));
+
+    const mxW = document.createElement('input'); mxW.type = 'number'; mxW.value = 900;
+    const mxH = document.createElement('input'); mxH.type = 'number'; mxH.value = 700;
+    const maxBtn = el('button', 'tiny', 'max size');
+    maxBtn.addEventListener('click', () =>
+        winctl(rec, 'maxSize', { width: +mxW.value | 0, height: +mxH.value | 0 }));
+
+    const clearLim = el('button', 'tiny', 'clear');
+    clearLim.addEventListener('click', () => {
+        winctl(rec, 'minSize', { width: 0, height: 0 });
+        winctl(rec, 'maxSize', { width: 0, height: 0 });
+    });
+
+    const blBtn = el('button', 'tiny', 'borderless');
+    blBtn.addEventListener('click', () => {
+        rec.borderless = !rec.borderless;
+        winctl(rec, 'borderless', { value: rec.borderless });
+    });
+    const topBtn = el('button', 'tiny', 'on top');
+    topBtn.addEventListener('click', () => {
+        rec.onTop = !rec.onTop;
+        winctl(rec, 'alwaysOnTop', { value: rec.onTop });
+    });
+    const maxiBtn = el('button', 'tiny', 'maximize');
+    maxiBtn.addEventListener('click', () => winctl(rec, 'maximize'));
+    const restBtn = el('button', 'tiny', 'restore');
+    restBtn.addEventListener('click', () => winctl(rec, 'restore'));
+
+    ctl2.appendChild(mnW); ctl2.appendChild(mnH); ctl2.appendChild(minBtn);
+    ctl2.appendChild(mxW); ctl2.appendChild(mxH); ctl2.appendChild(maxBtn);
+    ctl2.appendChild(clearLim);
+    ctl2.appendChild(blBtn); ctl2.appendChild(topBtn);
+    ctl2.appendChild(maxiBtn); ctl2.appendChild(restBtn);
+    body.appendChild(ctl2);
+
     row.appendChild(body);
     listEl.appendChild(row);
     rec.row = row;
@@ -372,9 +456,17 @@ function updateRow(rec) {
     const cap = rec.lastCapture
         ? `cap ${rec.lastCapture.width}x${rec.lastCapture.height}`
         : 'cap —';
+    // The second line only appears once the child has actually reported its own
+    // window state back, so an absent line means "never asked", not "unknown".
+    const ws = rec.winState;
     rec.geoEl.textContent =
         `${size.width}x${size.height} @ ${pos.x},${pos.y}   ` +
-        `ticks ${rec.ticks}  clicks ${rec.clicks}  msgs ${rec.received}  ${cap}`;
+        `ticks ${rec.ticks}  clicks ${rec.clicks}  msgs ${rec.received}  ${cap}` +
+        (ws ? `\nchild reports: min ${ws.min[0]}x${ws.min[1]}  ` +
+              `max ${ws.max[0]}x${ws.max[1]}  ${ws.state}` +
+              `${ws.borderless ? '  borderless' : ''}` +
+              `${ws.alwaysOnTop ? '  on-top' : ''}`
+            : '');
 }
 
 /** Poll geometry for every live row — windows can be dragged and resized by

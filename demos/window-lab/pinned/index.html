@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden;
+               font: 12px system-ui, sans-serif;
+               background: #171a21; color: #e6ebf3; }
+  #wrap { position: absolute; inset: 0; padding: 10px 12px;
+          display: flex; flex-direction: column; gap: 6px;
+          border: 1px solid #f59e0b; border-radius: 10px; box-sizing: border-box; }
+  h1 { margin: 0; font-size: 12px; letter-spacing: 1.1px;
+       text-transform: uppercase; color: #f59e0b; }
+  .sub { font: 10px ui-monospace, monospace; opacity: 0.6; }
+  pre { margin: 0; flex: 1; font: 10px ui-monospace, monospace;
+        color: #b9c4d4; white-space: pre-wrap; overflow: auto; }
+  footer { display: flex; gap: 6px; }
+  button { flex: 1; font: 11px system-ui; padding: 5px; border: 0;
+           border-radius: 5px; background: #2b323d; color: #e6ebf3; cursor: pointer; }
+  button:hover { background: #3a4351; }
+</style>
+</head>
+<body>
+  <div id="wrap">
+    <h1>Pinned Card</h1>
+    <div class="sub">every property below came from <b>pinned/bro.json</b></div>
+    <pre id="state">reading…</pre>
+    <footer>
+      <button id="report">Report to host</button>
+      <button id="bye">Close</button>
+    </footer>
+  </div>
+  <script src="pinned.js"></script>
+</body>
+</html>

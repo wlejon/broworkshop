@@ -1,0 +1,14 @@
+{
+    "title": "Pinned Card",
+    "width": 320,
+    "height": 190,
+    "borderless": true,
+    "alwaysOnTop": true,
+    "minWidth": 240,
+    "minHeight": 150,
+    "maxWidth": 520,
+    "maxHeight": 340,
+    "resizable": true,
+    "windowX": 40,
+    "windowY": 40
+}

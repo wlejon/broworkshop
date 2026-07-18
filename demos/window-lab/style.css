@@ -163,3 +163,69 @@ input[type=checkbox] { vertical-align: middle; }
     border: 1px solid rgba(255,255,255,0.08);
     margin-bottom: 8px;
 }
+
+/* ── the mini-game ───────────────────────────────────────────────────────── */
+
+/* The lander panel spans the full row: it is the thesis of the app, and a
+   560px stage plus its telemetry does not fit in a half-width column. */
+.panel.wide { width: 100%; }
+/* A full-width panel would otherwise run its prose to 1900px, which is
+   unreadable — cap the measure, not the panel. */
+.panel.wide .note { max-width: 108ch; }
+
+.gamewrap { display: flex; gap: 10px; align-items: flex-start; }
+#gameStage {
+    display: block; flex: none;
+    border-radius: 6px; background: #05070a;
+    border: 1px solid rgba(255,255,255,0.08);
+}
+#gameHud { flex: 1; min-width: 0; padding-top: 2px; }
+
+.keys { color: #55606f; font: 10.5px ui-monospace, monospace; margin-left: 8px; }
+.v.good { color: #7bed9f; }
+.v.bad  { color: #ff8080; }
+
+b.thesis { color: #ffd479; font-weight: 600; }
+b.warn   { color: #ffab70; font-weight: 600; }
+
+/* ── key tables (declared vs live) ───────────────────────────────────────── */
+
+.ktable {
+    margin: 6px 0 2px; border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 6px; overflow: hidden;
+}
+.krow {
+    display: flex; align-items: center;
+    font: 10.5px ui-monospace, monospace;
+    padding: 3px 8px; gap: 8px;
+    border-top: 1px solid rgba(255,255,255,0.05);
+}
+.krow:first-child { border-top: 0; }
+.krow span:nth-child(1) { flex: 1.5; color: #9fd6ff; }
+.krow span:nth-child(2) { flex: 1; color: #cfd8e6; text-align: right; }
+.krow span:nth-child(3) { flex: 1; color: #cfd8e6; text-align: right; }
+.krow span:nth-child(4) { flex: 1.2; text-align: right; color: #76839a; }
+.krow.khead {
+    background: rgba(255,255,255,0.05); color: #6b7789;
+}
+.krow.khead span { color: #6b7789 !important; }
+.krow .good  { color: #7bed9f !important; }
+.krow .warn  { color: #ffd479 !important; }
+.krow .muted { color: #55606f !important; }
+
+.snippet {
+    margin: 6px 0 2px; padding: 8px 10px; max-height: 210px; overflow: auto;
+    background: rgba(0,0,0,0.40); border-radius: 6px;
+    border: 1px solid rgba(255,255,255,0.07);
+    font: 10.5px ui-monospace, monospace; color: #b9c4d4;
+    white-space: pre; user-select: text;
+}
+
+/* ── per-child second control row ────────────────────────────────────────── */
+
+.item .sublbl { color: #55606f; font-size: 10px; margin-right: 2px; }
+.item .ctl + .ctl { margin-top: 4px; }
+
+button.danger { background: #5c2020; border-color: #a03a3a; color: #ffd9d9; }
+button.danger:hover { background: #7a2a2a; }
+button[disabled] { opacity: 0.4; cursor: not-allowed; }

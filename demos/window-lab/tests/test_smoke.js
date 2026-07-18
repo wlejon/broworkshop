@@ -24,11 +24,29 @@
 // windows, focus() no-ops, and minimize/maximize/restore no-op so a test can
 // never disturb the window the pipeline renders through.
 
+//
+// Chunk 2 adds the measurements the app was really built to make:
+//
+//   - the lander's serialized state is CHARACTER-IDENTICAL across a paused
+//     advanceTime(4000) — not "close enough", not "barely moved", identical.
+//     That is the clean proof that a game with no pause flag is fully frozen
+//   - the same state advances at scale 1 and roughly a quarter as fast at 0.25
+//   - the slow-mo powerup measurably drives bro.time.scale down and back
+//   - an ArrayBuffer sent with a transfer list leaves the sender DETACHED
+//     (byteLength 0) and arrives with a matching checksum in the child
+//   - per-child resize limits set through the child realm read back
+//   - bro.json's launch-only keys line up with live window state, and a second
+//     app opened with no options at all takes its shape from its own manifest
+
 import {
-    children, msgStats, openChild, closeAll, post, broadcast, pingAll,
+    children, msgStats, openChild, closeAll, post, broadcast, pingAll, winctl,
     captureChild, captureAll,
     visibility, refreshHost, refreshDisplays,
     clocks, setScale, setPaused, rebase, refreshTimeReadout,
+    game, slowmo, snapshot, resetShip, triggerSlowmo, cancelSlowmo,
+    manifest, pinned, liveWindowKeys, buildSnippet, refreshSnippet,
+    refreshStartupTable, refreshPinnedTable, openPinned, closePinned, pollPinned,
+    transferState, shellState, sendBlob, shellOpen,
 } from "/app/app.js";
 
 // Let module evaluation, layout and the first frame settle.
@@ -319,5 +337,401 @@ navigator.getBattery().then((bat) => {
 flush();
 advanceTime(16);
 flush();
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ── the pause-aware lander ──────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// game.js contains no pause flag and no scale-aware line. Everything below is
+// therefore a measurement of the ENGINE's behaviour, not of the game's.
+
+setScale(1);
+setPaused(false);
+resetShip(true);
+advanceTime(64);
+
+// --- it advances at scale 1 -------------------------------------------------
+
+const gBefore = snapshot();
+const simBefore = game.simMs;
+const framesBefore = game.frames;
+advanceTime(1000);
+assert(snapshot() !== gBefore, 'lander state advanced under advanceTime at scale 1');
+assert(game.frames > framesBefore,
+    `sim frames advanced (${framesBefore} -> ${game.frames})`);
+
+const simAt1 = game.simMs - simBefore;
+assert(Math.abs(simAt1 - 1000) < 60,
+    `scale 1: 1000 ms of advanceTime integrated ${simAt1.toFixed(1)} scaled ms`);
+
+// --- paused: BIT-IDENTICAL --------------------------------------------------
+//
+// rAF callbacks are skipped entirely while paused, so tickGame is never called
+// — not called with dt 0, not called and early-returned. Nothing in the game
+// can drift, including the counters its own scaled setTimeout and setInterval
+// would otherwise move. Character equality of the full serialization is the
+// strongest statement available and it holds exactly.
+
+setPaused(true);
+const frozen = snapshot();
+const frozenScaled = bro.time.now;
+const frozenFrames = game.frames;
+const frozenBeacon = game.beacon;
+const frozenSim = game.simMs;
+advanceTime(4000);
+flush();
+advanceTime(4000);
+flush();
+
+assert(snapshot() === frozen,
+    'PAUSED: lander state is character-identical after 8000 ms of advanceTime');
+assert(game.frames === frozenFrames,
+    `PAUSED: not one simulation frame ran (${game.frames})`);
+assert(game.simMs === frozenSim,
+    'PAUSED: not one microsecond of sim time accrued');
+assert(bro.time.now === frozenScaled,
+    'PAUSED: the scaled clock itself did not move');
+
+// The scaled setInterval driving the pad beacon is frozen too — it would have
+// fired 16 times over 8 seconds if the clock had been running.
+assert(game.beacon === frozenBeacon,
+    `PAUSED: the game's setInterval beacon did not tick (${game.beacon})`);
+
+setPaused(false);
+advanceTime(64);
+assert(snapshot() !== frozen, 'resuming moves the lander again');
+
+// --- scale 0.25 advances proportionally less --------------------------------
+
+setScale(1);
+advanceTime(200);
+const s1a = game.simMs;
+advanceTime(2000);
+const fullRate = game.simMs - s1a;
+
+setScale(0.25);
+advanceTime(200);
+const s2a = game.simMs;
+advanceTime(2000);
+const quarterRate = game.simMs - s2a;
+
+assert(quarterRate > 0, 'the lander still simulates at 0.25x, just slower');
+assert(quarterRate < fullRate,
+    `0.25x integrated less sim time than 1x (${quarterRate.toFixed(0)} < ${fullRate.toFixed(0)} ms)`);
+const ratio = fullRate / quarterRate;
+assert(ratio > 3.5 && ratio < 4.5,
+    `0.25x ran the lander at 1/${ratio.toFixed(2)} speed (expected ~1/4)`);
+
+// The FRAME cadence is unaffected — timescale changes the timestamp a callback
+// receives, never how often it fires. This is why the powerup ramp below can be
+// clocked off frames and stay a fixed wall duration.
+setScale(1);
+const fA = game.frames; advanceTime(1000); const fFull = game.frames - fA;
+setScale(0.25);
+const fB = game.frames; advanceTime(1000); const fQuarter = game.frames - fB;
+assert(fFull === fQuarter,
+    `rAF fired the same number of times at 1x and 0.25x (${fFull} === ${fQuarter})`);
+setScale(1);
+
+// --- the slow-mo powerup ramps the timescale --------------------------------
+
+setScale(1);
+assert(slowmo.active === false, 'powerup idle to begin with');
+assert(bro.time.scale === 1, 'timescale at 1 before the powerup');
+
+const fired = triggerSlowmo();
+assert(fired === true, 'powerup triggered');
+assert(slowmo.active === true, 'powerup reports active');
+assert(triggerSlowmo() === false, 'a second trigger while active is refused');
+
+// Sample the ramp rather than trusting one endpoint: the point of the feature
+// is that the dial moves smoothly, so record the trajectory.
+const samples = [];
+let minScale = 1;
+for (let i = 0; i < 14; i++) {
+    advanceTime(280);
+    samples.push(+bro.time.scale.toFixed(3));
+    minScale = Math.min(minScale, bro.time.scale);
+}
+
+assert(minScale < 0.999,
+    `the powerup drove bro.time.scale below 1 (min ${minScale.toFixed(3)})`);
+assert(minScale <= 0.31,
+    `the ramp reached its 0.30x target (min ${minScale.toFixed(3)})`);
+assert(samples.some((s) => s > minScale + 0.02 && s < 0.999),
+    'the ramp passed through intermediate values — it eased, it did not snap');
+assert(new Set(samples).size >= 4,
+    `the timescale took at least four distinct values during the ramp ` +
+    `(${new Set(samples).size} of ${samples.length} samples)`);
+
+// It comes back on its own.
+advanceTime(4000);
+assert(slowmo.active === false, 'the powerup finished and released the timescale');
+assert(Math.abs(bro.time.scale - 1) < 1e-9,
+    `timescale restored exactly to 1 (${bro.time.scale})`);
+assert(slowmo.uses === 1, 'one use recorded');
+
+// And it can be cancelled mid-ramp, restoring the scale it captured.
+triggerSlowmo();
+advanceTime(400);
+assert(bro.time.scale < 1, 'ramp under way before the cancel');
+assert(cancelSlowmo() === true, 'cancel accepted');
+assert(bro.time.scale === 1, 'cancel restored the pre-powerup timescale exactly');
+assert(cancelSlowmo() === false, 'cancelling an idle powerup is a no-op');
+
+// A powerup running when the pause lands stops with everything else.
+triggerSlowmo();
+advanceTime(200);
+const midScale = bro.time.scale;
+const midLeft = slowmo.framesLeft;
+setPaused(true);
+advanceTime(3000);
+assert(bro.time.scale === midScale, 'PAUSED: the ramp stopped moving the timescale');
+assert(slowmo.framesLeft === midLeft, 'PAUSED: the ramp did not consume frames');
+setPaused(false);
+cancelSlowmo();
+setScale(1);
+resetShip(true);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ── transfer list: zero-copy proven by detachment ───────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+
+const xr = openChild({ width: 320, height: 260 });
+flush();
+assert(xr.loaded === true, 'transfer target window loaded');
+
+// A copy first, as the control: our buffer must survive.
+const copyRes = sendBlob(xr, 8192, false);
+assert(copyRes.before === 8192, 'copy: payload built at the requested size');
+assert(copyRes.after === 8192, 'copy: the sender still owns its buffer afterwards');
+assert(copyRes.detached === false, 'copy: nothing was detached');
+flush();
+assert(transferState.lastAck !== null, 'copy: the child acknowledged the bytes');
+assert(transferState.intact === true,
+    `copy: the child's checksum matched (${transferState.lastAck.checksum})`);
+
+// Now the real thing.
+const res = sendBlob(xr, 65536, true);
+assert(res.before === 65536, `transfer: 65536-byte payload before sending`);
+assert(res.after === 0,
+    `transfer: THE SENDER'S BUFFER IS DETACHED (byteLength ${res.after})`);
+assert(res.detached === true, 'transfer: panel recorded the detachment');
+assert(transferState.senderByteLengthBefore === 65536 &&
+       transferState.senderByteLengthAfter === 0,
+    'transfer: before/after byteLengths recorded as 65536 -> 0');
+assert(transferState.lastMode === 'transfer', 'transfer: mode recorded');
+
+flush();
+assert(transferState.lastAck.bytes === 65536,
+    `transfer: the child received all 65536 bytes (${transferState.lastAck.bytes})`);
+assert(transferState.lastAck.checksum === transferState.lastChecksum,
+    `transfer: the child's checksum matches the one taken before sending ` +
+    `(${transferState.lastAck.checksum})`);
+assert(transferState.intact === true,
+    'transfer: bytes arrived intact AND the sender was emptied — zero-copy');
+
+// The first byte of the deterministic pattern is 0 and the last of a 65536-byte
+// run is (65535*31 + 255*7) & 0xff; assert the child saw the real edges rather
+// than a zero-filled buffer of the right length.
+assert(transferState.lastAck.last === ((65535 * 31 + 255 * 7) & 0xff),
+    `transfer: the child's last byte is the expected pattern value ` +
+    `(${transferState.lastAck.last})`);
+
+// Detachment is observable on the view too, not just the buffer — the usual
+// way this bites real code.
+const probe = new Uint8Array(64);
+const probeBuf = probe.buffer;
+xr.win.postMessage({ type: 'blob', tag: 999, buf: probeBuf }, [probeBuf]);
+assert(probeBuf.byteLength === 0, 'transfer: raw handle postMessage detaches too');
+assert(probe.length === 0,
+    `transfer: the Uint8Array VIEW is detached as well (length ${probe.length})`);
+flush();
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ── per-child window limits, driven through the child realm ─────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// The parent handle has no setMinSize/setMaxSize (confirmed: they are
+// undefined on it). Resize limits live on the child realm's own bro.window, so
+// the parent drives them by proxy and the child answers with what it read back.
+
+assert(typeof xr.win.setMinSize === 'undefined',
+    'the parent handle deliberately exposes no resize-limit setters');
+
+winctl(xr, 'minSize', { width: 280, height: 240 });
+flush();
+assert(xr.winState, 'the child reported its window state back');
+assert(xr.winState.min[0] === 280 && xr.winState.min[1] === 240,
+    `per-child min size reads back from the child realm ` +
+    `(${xr.winState.min[0]}x${xr.winState.min[1]})`);
+
+winctl(xr, 'maxSize', { width: 900, height: 720 });
+flush();
+assert(xr.winState.max[0] === 900 && xr.winState.max[1] === 720,
+    `per-child max size reads back (${xr.winState.max[0]}x${xr.winState.max[1]})`);
+
+winctl(xr, 'borderless', { value: true });
+flush();
+assert(xr.winState.borderless === true, 'per-child borderless round-trips');
+winctl(xr, 'borderless', { value: false });
+flush();
+assert(xr.winState.borderless === false, 'per-child borderless clears');
+
+winctl(xr, 'alwaysOnTop', { value: true });
+flush();
+assert(xr.winState.alwaysOnTop === true, 'per-child alwaysOnTop round-trips');
+winctl(xr, 'alwaysOnTop', { value: false });
+flush();
+
+winctl(xr, 'minSize', { width: 0, height: 0 });
+winctl(xr, 'maxSize', { width: 0, height: 0 });
+flush();
+assert(xr.winState.min[0] === 0 && xr.winState.max[0] === 0,
+    'per-child limits clear to unconstrained');
+
+xr.win.close();
+flush();
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ── bro.json startup keys: declared vs live ─────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+
+// The manifests are fetched over the /app mount; pump until they land.
+for (let i = 0; i < 8 && !manifest.loaded; i++) { flush(); advanceTime(40); flush(); }
+assert(manifest.loaded === true, "this app's bro.json was read over the /app mount");
+assert(manifest.keys.title === 'Window Lab',
+    `manifest title parsed ("${manifest.keys.title}")`);
+assert(manifest.keys.minWidth === 900 && manifest.keys.minHeight === 600,
+    'manifest declares minWidth 900 / minHeight 600');
+
+// Live side. Apply the declared limits and the row must go from drifted to
+// match — which is the whole demonstration: these keys are launch-time
+// defaults, and bro.window is the runtime truth.
+bro.window.setMinSize(0, 0);
+let rows = refreshStartupTable();
+assert(rows !== null && rows.length > 0, `declared-vs-live table rendered (${rows.length} rows)`);
+let minRow = rows.find((r) => r.key === 'minWidth');
+assert(minRow.declared === 900, 'minWidth row shows the declared 900');
+assert(minRow.live === 0 && minRow.verdict === 'drifted',
+    'with limits cleared at runtime, the minWidth row reports drift');
+
+bro.window.setMinSize(900, 600);
+rows = refreshStartupTable();
+minRow = rows.find((r) => r.key === 'minWidth');
+assert(minRow.live === 900 && minRow.verdict === 'match',
+    'restoring the declared limit flips the row back to match');
+
+const blRow = rows.find((r) => r.key === 'borderless');
+assert(blRow.declared === undefined && blRow.verdict === 'not declared',
+    'a key this app never declared is reported as such, not as false');
+
+// liveWindowKeys is the single source both the table and the snippet read.
+const live = liveWindowKeys();
+assert(live.minWidth === 900 && live.minHeight === 600,
+    'liveWindowKeys reports the limits bro.window actually holds');
+assert(live.title === document.title, 'liveWindowKeys reports the live title');
+assert(Number.isFinite(live.display) && live.display >= 0,
+    `display resolved to an index (${live.display}), not an SDL id`);
+
+// --- the generated snippet --------------------------------------------------
+
+bro.window.setMinSize(640, 480);
+bro.window.setMaxSize(0, 0);
+bro.window.alwaysOnTop = true;
+const snip = buildSnippet();
+assert(snip.minWidth === 640 && snip.minHeight === 480,
+    'the snippet picked up the live min size');
+assert(snip.alwaysOnTop === true, 'the snippet picked up alwaysOnTop');
+assert(!('maxWidth' in snip),
+    'an unconstrained max size is omitted from the snippet rather than emitted as 0');
+assert(!('borderless' in snip), 'a false borderless is omitted, not emitted');
+assert(!('windowX' in snip), 'position is omitted unless explicitly asked for');
+assert(snip.lib === manifest.keys.lib,
+    `keys the panel does not own are carried through ("${snip.lib}")`);
+assert(snip.app === '.', 'the app key is preserved');
+
+const withPos = buildSnippet({ includePosition: true });
+assert(Number.isFinite(withPos.windowX) && Number.isFinite(withPos.windowY),
+    `position included on request (${withPos.windowX},${withPos.windowY})`);
+
+const snipText = refreshSnippet();
+assert(snipText.length > 20 && JSON.parse(snipText).title === document.title,
+    'the rendered snippet is valid JSON describing this window');
+assert(document.getElementById('startupSnippet').textContent === snipText,
+    'the snippet is what the panel shows');
+
+bro.window.alwaysOnTop = false;
+bro.window.setMinSize(900, 600);
+
+// --- the pinned card takes its shape from its own manifest ------------------
+
+assert(pinned.manifest !== null, 'pinned/bro.json was read');
+assert(pinned.manifest.borderless === true && pinned.manifest.alwaysOnTop === true,
+    'the pinned card declares borderless + alwaysOnTop in its manifest');
+
+const pwin = openPinned();
+flush();
+assert(pinned.open === true, 'pinned card opened');
+
+// Opened with NO options at all, so its size can only come from its manifest.
+const psize = pwin.getSize();
+assert(psize.width === pinned.manifest.width && psize.height === pinned.manifest.height,
+    `bare open() took its size from the child's bro.json ` +
+    `(${psize.width}x${psize.height})`);
+
+flush();
+assert(pinned.reported !== null, 'the card reported its own window state back');
+assert(pinned.reported.borderless === true,
+    'bro.json "borderless": true reached the real window');
+assert(pinned.reported.alwaysOnTop === true,
+    'bro.json "alwaysOnTop": true reached the real window');
+assert(pinned.reported.minWidth === pinned.manifest.minWidth &&
+       pinned.reported.minHeight === pinned.manifest.minHeight,
+    `bro.json min limits reached the real window ` +
+    `(${pinned.reported.minWidth}x${pinned.reported.minHeight})`);
+assert(pinned.reported.maxWidth === pinned.manifest.maxWidth,
+    `bro.json max limits reached the real window (${pinned.reported.maxWidth})`);
+
+const prows = refreshPinnedTable();
+assert(prows !== null && prows.length > 0, `pinned table rendered (${prows.length} rows)`);
+assert(prows.filter((r) => r.verdict === 'match').length >= 6,
+    'most declared keys match what the card reports');
+// Documented: a child manifest's placement keys are the opener's business.
+const pxRow = prows.find((r) => r.key === 'windowX');
+assert(pxRow && pxRow.verdict === 'ignored by design',
+    'windowX in a child manifest is flagged as ignored, per the docs');
+
+pollPinned();
+flush();
+assert(pinned.reported !== null, 're-polling the card returns fresh state');
+
+closePinned();
+flush();
+assert(pinned.open === false, 'pinned card closed');
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ── window.open(url): the shell handoff ─────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Safe to call: headless never shells out — it logs and returns null. Nothing
+// here can launch a browser.
+
+assert(typeof window.open === 'function', 'window.open is installed');
+const shellRes = shellOpen('mailto:nobody@example.invalid');
+assert(shellRes === null,
+    'window.open always returns null — there is no popup Window object');
+assert(shellState.calls === 1 && shellState.lastUrl === 'mailto:nobody@example.invalid',
+    'the panel recorded the handoff');
+assert(document.getElementById('shellGo').disabled === true,
+    'the leave-the-app button is disarmed by default');
+
+// ── final state ──────────────────────────────────────────────────────────────
+
+closeAll();
+flush();
+assert(children.length === 0, 'every window closed at the end of the run');
+setScale(1);
+setPaused(false);
 
 console.log('window-lab smoke: all assertions passed');

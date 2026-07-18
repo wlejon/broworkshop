@@ -11,6 +11,7 @@
     <h1>Window Lab</h1>
     <div class="crumbs">
         secondary OS windows &middot; runtime window control &middot; global time
+        &middot; startup keys &middot; zero-copy transfer
     </div>
     <div class="live">
         <span>host <b id="hostState">normal</b></span>
@@ -146,6 +147,127 @@
             transitions, physics and audio — across every window and iframe at
             once — and <code>bro.time.scale</code> gives slow-motion for free.
         </p>
+    </section>
+
+    <!-- ── Panel 5: the pause-aware mini-game ─────────────────────────────── -->
+    <section class="panel wide" id="p-game">
+        <h2>Lunar lander <span class="hint">a real game with no pause flag in it</span></h2>
+        <p class="note">
+            <b class="thesis">There is no pause flag in this game.</b>
+            Its flight integrator, its fuel burn, its respawn
+            <code>setTimeout</code> and its pad-beacon <code>setInterval</code>
+            all read the engine's scaled clock, so
+            <code>bro.time.paused = true</code> — one assignment, nowhere near
+            this game's code — freezes every one of them together, and
+            <code>bro.time.scale = 0.3</code> gives bullet-time landings for
+            free. All 32 games in <code>../../games</code> gate their loops on
+            hand-rolled run-state flags instead, and none of them touches
+            <code>bro.time</code> at all.
+        </p>
+        <div class="gamewrap">
+            <canvas id="gameStage" width="560" height="230"></canvas>
+            <div id="gameHud" class="mono"></div>
+        </div>
+        <div class="row">
+            <span class="lbl">status</span>
+            <span class="v wide" id="gameStatus">flying</span>
+            <button id="gameSlowmo" class="primary">Slow-mo powerup</button>
+            <button id="gameReset">Reset run</button>
+            <span class="keys">&larr;&rarr; tilt &middot; &uarr; thrust &middot;
+                R reset &middot; Q slow-mo &middot; Space pause</span>
+        </div>
+        <p class="note">
+            The powerup ramps <code>bro.time.scale</code> down to 0.30&times;,
+            holds, then eases it back — timescale is a continuously drivable
+            dial, not a toggle. The ramp is clocked off the frame count rather
+            than the scaled clock on purpose: a ramp timed in scaled time slows
+            its own recovery down as it works.
+        </p>
+    </section>
+
+    <!-- ── Panel 6: bro.json startup keys ─────────────────────────────────── -->
+    <section class="panel" id="p-startup">
+        <h2>bro.json startup keys <span class="hint">launch-only, made explorable</span></h2>
+        <p class="note">
+            <code>borderless</code>, <code>alwaysOnTop</code>,
+            <code>minWidth/minHeight/maxWidth/maxHeight</code>,
+            <code>windowX/windowY</code> and <code>display</code> are read once
+            at engine construction and never again. Left column: what this app's
+            <code>bro.json</code> declared. Right column: what
+            <code>bro.window</code> reports this instant. Change anything in the
+            host panel and watch a row drift — these keys are defaults, not
+            bindings.
+        </p>
+        <div id="startupTable" class="ktable"></div>
+        <div class="row">
+            <button id="refreshStartup">Re-read live state</button>
+        </div>
+
+        <h3>Save this window as startup defaults</h3>
+        <p class="note">
+            The other direction: arrange the window with the live controls, then
+            generate the <code>bro.json</code> that would launch it that way.
+            Keys sitting at their default are omitted, and keys this panel does
+            not own are carried through, so the result is a drop-in replacement.
+        </p>
+        <div class="row">
+            <button id="genSnippet" class="primary">Generate bro.json</button>
+            <label class="inline"><input type="checkbox" id="snipPos"> pin position too</label>
+        </div>
+        <pre id="startupSnippet" class="snippet"></pre>
+
+        <h3>Proof: a second app with its own manifest</h3>
+        <div class="row">
+            <button id="openPinned" class="primary">Open pinned card</button>
+            <button id="pollPinned">Re-poll it</button>
+            <button id="closePinned">Close</button>
+        </div>
+        <p class="note" id="pinnedNote">Open the card to compare.</p>
+        <div id="pinnedTable" class="ktable"></div>
+    </section>
+
+    <!-- ── Panel 7: transfer list + shell handoff ─────────────────────────── -->
+    <section class="panel" id="p-xfer">
+        <h2>Zero-copy transfer <span class="hint">and the exit door</span></h2>
+        <p class="note">
+            <code>postMessage(msg, transfer)</code> hands an
+            <code>ArrayBuffer</code>'s memory to the child instead of copying
+            it. The proof is the <b class="thesis">detachment</b>: our buffer
+            comes back <code>byteLength 0</code> and every view onto it goes to
+            length 0, which a copy could never do — while the child's checksum
+            of the arrived bytes matches the one we took before sending. Send
+            the same payload as a plain clone to see our buffer survive instead.
+        </p>
+        <div class="row">
+            <span class="lbl">payload</span>
+            <input type="number" id="xferSize" value="65536" min="16" max="4194304">
+            <span class="lbl">bytes</span>
+        </div>
+        <div class="row">
+            <button id="xferSend" class="primary">Transfer (detaches)</button>
+            <button id="xferCopy">Send as copy</button>
+            <button id="xferAll">Transfer to all windows</button>
+        </div>
+        <div id="xferReadout" class="mono"></div>
+        <div id="xferLog" class="log short"></div>
+
+        <h3>window.open(url) <span class="hint">hands off to the OS</span></h3>
+        <p class="note">
+            Passes the URL to the default browser or mail client via
+            <code>SDL_OpenURL</code> and always returns <code>null</code> —
+            there is no popup window object. <b class="warn">This leaves the
+            app.</b> Arm the checkbox first; headless never shells out.
+        </p>
+        <div class="row" id="shellPresets">
+            <button data-url="https://example.com">https</button>
+            <button data-url="mailto:someone@example.com">mailto</button>
+        </div>
+        <div class="row">
+            <input type="text" id="shellUrl" value="https://example.com">
+            <label class="inline"><input type="checkbox" id="shellArm"> arm</label>
+            <button id="shellGo" disabled>Leave the app</button>
+        </div>
+        <div id="shellReadout" class="mono"></div>
     </section>
 
 </main>
