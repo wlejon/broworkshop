@@ -16,10 +16,19 @@
             <div><span>interp</span><b id="stInterp">off</b></div>
         </div>
 
+        <!-- The world is three bays 36 m apart; hunting for the crane with a
+             mouse orbit is nobody's idea of a demo. -->
+        <div class="btnrow" id="viewRow">
+            <button data-view="sandbox" class="sel">sandbox</button>
+            <button data-view="machines">machines</button>
+            <button data-view="bench">bench</button>
+            <button data-view="bridge">bridge</button>
+        </div>
+
         <!-- Step rate + interpolation. These two belong together: the slider
              exists so the checkbox has something to prove. -->
         <section>
-            <h2>Simulation</h2>
+            <h2 data-collapsible>Simulation</h2>
             <label class="row">
                 <span>step rate</span>
                 <input id="stepHz" type="range" min="15" max="120" step="1" value="60">
@@ -42,7 +51,7 @@
 
         <!-- Spawning -->
         <section>
-            <h2>Spawn</h2>
+            <h2 data-collapsible>Spawn</h2>
             <div class="btnrow" id="shapeRow">
                 <button data-shape="box" class="sel">box</button>
                 <button data-shape="sphere">sphere</button>
@@ -74,7 +83,7 @@
 
         <!-- Ragdolls: articulated bodies, per-part impulses, pose drives -->
         <section>
-            <h2>Ragdolls</h2>
+            <h2 data-collapsible data-start="closed">Ragdolls</h2>
             <div class="stats">
                 <div><span>ragdolls</span><b id="stRagdolls">0</b></div>
                 <div><span>parts</span><b id="stParts">0</b></div>
@@ -124,7 +133,7 @@
 
         <!-- Soft bodies: cloth + a pressurized volume -->
         <section>
-            <h2>Soft bodies</h2>
+            <h2 data-collapsible data-start="closed">Soft bodies</h2>
             <div class="btnrow" id="pinRow">
                 <button data-pin="corners" class="sel">corners</button>
                 <button data-pin="edge">one edge</button>
@@ -162,13 +171,13 @@
 
         <!-- Area field overrides -->
         <section>
-            <h2>Area fields</h2>
+            <h2 data-collapsible data-start="closed">Area fields</h2>
             <div id="areaList"></div>
         </section>
 
         <!-- Live material tuning on the selected body -->
         <section>
-            <h2>Selected body</h2>
+            <h2 data-collapsible data-start="closed">Selected body</h2>
             <div class="sel-info" id="selInfo">nothing selected — click a body</div>
             <div id="selControls" class="disabled">
                 <label class="row"><span>mass</span>
@@ -198,7 +207,7 @@
                     friction, max(r1,r2) for restitution.
                 </p>
                 <div class="btnrow">
-                    <button id="btnPoke">poke (impulse)</button>
+                    <button id="btnPokeBody">poke (impulse)</button>
                     <button id="btnDelete" class="danger">delete</button>
                 </div>
             </div>
@@ -206,7 +215,7 @@
 
         <!-- Collision layer matrix -->
         <section>
-            <h2>Collision layers</h2>
+            <h2 data-collapsible data-start="closed">Collision layers</h2>
             <p class="hint">
                 Row/column = layer. A cleared box means that pair is rejected in
                 the broadphase — the two never touch. Changes apply to bodies
@@ -217,9 +226,200 @@
             <div class="btnrow"><button id="btnResetLayers">reset matrix</button></div>
         </section>
 
+        <!-- ================= CHUNK 3 ================= -->
+
+        <!-- SixDOF machines: motors + per-axis lock/limit/free -->
+        <section>
+            <h2 data-collapsible>Machines (SixDOF)</h2>
+            <div class="stats">
+                <div><span>slew</span><b id="mCrane">—</b></div>
+                <div><span>winch</span><b id="mWinch">—</b></div>
+                <div><span>piston</span><b id="mPiston">—</b></div>
+            </div>
+            <p class="hint">
+                A SixDOF constraint is six independent switches — three
+                translations, three rotations — each <b>locked</b>, <b>limited</b>
+                to a range, or <b>free</b>, and each able to carry a motor. That
+                is not a joint, that is a machine tool.
+            </p>
+
+            <h3>Motors</h3>
+            <label class="row">
+                <span>crane slew</span>
+                <input id="craneSlew" type="range" min="-1.5" max="1.5" step="0.05" value="0">
+                <b id="craneSlewVal">0.00 rad/s</b>
+            </label>
+            <label class="row">
+                <span>winch</span>
+                <input id="winchTarget" type="range" min="-4" max="0" step="0.05" value="-2">
+                <b id="winchTargetVal">-2.00 m</b>
+            </label>
+            <label class="row">
+                <span>piston</span>
+                <input id="pistonTarget" type="range" min="0" max="4.5" step="0.05" value="0">
+                <b id="pistonTargetVal">0.00 m</b>
+            </label>
+            <p class="hint">
+                Slew is a <b>velocity</b> motor: set a rate and the crane turns
+                forever. Winch and piston are <b>position</b> motors: set a place
+                and the machine goes there and <em>holds</em> it — load the
+                platform and it still holds it.
+            </p>
+            <div class="btnrow">
+                <button id="btnCraneLoad">hook a pallet</button>
+                <button id="btnPistonLoad">load piston</button>
+            </div>
+
+            <h3>Turret</h3>
+            <div class="stats"><div><span>aim yaw / pitch</span><b id="mTurret">—</b></div></div>
+            <label class="check">
+                <input id="turretTrack" type="checkbox" checked>
+                <span>track the drone (re-aims both motors every frame)</span>
+            </label>
+            <div class="btnrow"><button id="btnFireTurret">fire</button></div>
+
+            <h3>Axis configuration</h3>
+            <label class="check">
+                <input id="showAxes" type="checkbox" checked>
+                <span>draw axis indicators at each pivot</span>
+            </label>
+            <p class="hint">
+                Bars at the pivot, X <b style="color:#ff5a5a">red</b> /
+                Y <b style="color:#7bed9f">green</b> / Z <b style="color:#5aa9ff">blue</b>:
+                a short dark stub is <b>locked</b>, a medium bar is <b>limited</b>,
+                a long glowing bar is <b>free</b>. Rotation axes wear a collar of
+                pips. Flip <em>tY</em> on the piston to <b>free</b> and the
+                platform falls off its own lift.
+            </p>
+            <div id="axisGrid"></div>
+            <div class="btnrow">
+                <button id="btnResetMachines">reset machines</button>
+                <button id="btnClearMachines" class="danger">clear debris</button>
+            </div>
+        </section>
+
+        <!-- collideConnected -->
+        <section>
+            <h2 data-collapsible>collideConnected</h2>
+            <div class="stats"><div><span>centre separation</span><b id="ccSep">—</b></div></div>
+            <label class="check">
+                <input id="collideConnected" type="checkbox">
+                <span>jointed pair collides with itself</span>
+            </label>
+            <p class="hint" id="ccHint">—</p>
+            <p class="hint">
+                Two 0.5 m spheres on a rope capped at <b>0.4 m</b> — shorter than
+                the sum of their radii, so the flag decides which wins. Off (the
+                default) the pair is excluded from collision for the constraint's
+                lifetime and the spheres merge; on, contact survives the joint and
+                pushes them apart past the rope's own limit.
+            </p>
+        </section>
+
+        <!-- The mechanism bench: gear / rackAndPinion / pulley -->
+        <section>
+            <h2 data-collapsible>Mechanism bench</h2>
+            <p class="hint">
+                <b>gear</b>, <b>rackAndPinion</b> and <b>pulley</b> all shipped in
+                bro's binding layer and nothing had ever called them. Note the
+                shape of the first two: they couple two <em>existing constraint
+                handles</em> rather than building their own joints.
+            </p>
+            <label class="row">
+                <span>gear drive</span>
+                <input id="gearSpeed" type="range" min="-5" max="5" step="0.1" value="2.5">
+                <b id="gearSpeedVal">2.5 rad/s</b>
+            </label>
+            <label class="row">
+                <span>gear ratio</span>
+                <input id="gearRatio" type="range" min="0.5" max="4" step="0.1" value="2">
+                <b id="gearRatioVal">2.0:1</b>
+            </label>
+            <label class="row">
+                <span>rack drive</span>
+                <input id="rackSpeed" type="range" min="-4" max="4" step="0.1" value="1.6">
+                <b id="rackSpeedVal">1.6 rad/s</b>
+            </label>
+            <div class="stats"><div><span>rack travel</span><b id="mRack">—</b></div></div>
+            <div class="btnrow"><button id="btnResetRack">reset rack</button><button id="btnResetPulley">reset pulley</button></div>
+            <p class="hint">
+                The pulley needs no motor at all: 120 kg on one end, 25 kg on the
+                other, one rope of fixed total length over two pivots.
+            </p>
+        </section>
+
+        <!-- Breakable constraints -->
+        <section>
+            <h2 data-collapsible>Breakable joints</h2>
+            <div class="stats">
+                <div><span>broken / total</span><b id="stBroken">—</b></div>
+            </div>
+            <label class="row">
+                <span>breaking</span>
+                <input id="breakThresh" type="range" min="60" max="30000" step="20" value="900">
+                <b id="breakThreshVal">900</b>
+            </label>
+            <p class="hint" id="breakHint">—</p>
+            <div class="btnrow">
+                <button id="btnSmash">drop wrecking ball</button>
+                <button id="btnShoot">fire a shell</button>
+            </div>
+            <div class="btnrow">
+                <button id="btnRebuild">rebuild bridge</button>
+                <button id="btnClearRubble" class="danger">clear rubble</button>
+            </div>
+            <div id="breakLog" class="loglist"></div>
+            <p class="hint">
+                Every joint in the bridge carries a <b>breakingImpulse</b> in N·s.
+                When the impulse the solver needed to hold that joint closed
+                exceeds it in one step, Jolt disables the constraint and
+                <b>getBrokenConstraints()</b> reports its handle — a whole
+                destruction system for one number per joint. The hangers go first,
+                their load transfers to their neighbours, and the deck unzips.
+            </p>
+        </section>
+
+        <!-- Contact manifolds -->
+        <section>
+            <h2 data-collapsible>Contacts &amp; impacts</h2>
+            <div class="stats">
+                <div><span>events/frame</span><b id="stContacts">0</b></div>
+            </div>
+            <div class="meter"><div id="impactBar"></div></div>
+            <div class="meterval">impact force <b id="impactVal">0 N·s</b></div>
+
+            <label class="check"><input id="cEnabled" type="checkbox" checked>
+                <span>process the contact stream</span></label>
+            <label class="check"><input id="cDraw" type="checkbox" checked>
+                <span>draw manifold points + normals</span></label>
+            <label class="check"><input id="cDrawAll" type="checkbox">
+                <span>all bodies (else: the selected one)</span></label>
+            <label class="check"><input id="cEffects" type="checkbox" checked>
+                <span>sparks, flash and camera shake</span></label>
+            <label class="row">
+                <span>fx above</span>
+                <input id="cMinImp" type="range" min="0" max="120" step="1" value="6">
+                <b id="cMinImpVal">6.0</b>
+            </label>
+            <div id="contactList" class="loglist"></div>
+            <div class="btnrow"><button id="btnContactClear">clear log</button></div>
+            <p class="hint">
+                An <b>added</b> event carries the solver's own manifold: up to
+                four world-space points, the contact normal, penetration depth,
+                and an <b>impulse</b> estimate in kg·m/s. A <em>negative</em>
+                penetration is a speculative contact — Jolt predicted a touch it
+                has not solved yet — and the list labels those <i>spec</i>.
+                The impulse is the interesting one: it scales with mass and
+                closing speed, so it is the natural input for impact sounds,
+                damage and particles. Here it drives all three effects above.
+                Turn the drawing off and the sparks still fire; turn the effects
+                off and the data is still drawn. Same stream, read two ways.
+            </p>
+        </section>
+
         <!-- Material legend -->
         <section>
-            <h2>Lanes</h2>
+            <h2 data-collapsible data-start="closed">Lanes</h2>
             <div id="laneLegend"></div>
         </section>
     </div>

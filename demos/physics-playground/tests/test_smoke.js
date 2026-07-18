@@ -391,8 +391,12 @@ reset();
     const far  = app.PART_NAMES.indexOf('lowerLegL');
     const n0 = at(near), f0 = at(far);
 
+    // A short window on purpose. An impulse on a forearm reaches the far leg
+    // through the joint chain within a few hundred milliseconds — correct
+    // physics, useless as a measurement of WHERE the impulse landed. 150 ms is
+    // while "this limb and not that one" is still true.
     app.punchPart(e, near, { x: 0.2, y: 1, z: 0 }, 30);
-    advanceTime(300);
+    advanceTime(150);
 
     const n1 = at(near), f1 = at(far);
     const dNear = Math.hypot(n1.x - n0.x, n1.y - n0.y, n1.z - n0.z);
@@ -593,6 +597,388 @@ reset();
           app.ragdollCount() === 0 && app.softBodies.size === 0 && app.bodyCount() === 0);
 }
 
+console.log('--- sixdof: locked axes vs free axes --------------------------');
+// The cleanest binary in the file after the cloth pins. A SixDOF axis that is
+// LOCKED does not move approximately — it holds to the bit, exactly like an
+// invMass-0 vertex. So the assertion is exact equality on the locked axes while
+// the free one travels metres under the same motor.
+reset();
+{
+    const off = (a) => app.machineOffset('piston', a);
+    // Defaults: translationY limited 0..4.5, everything else locked.
+    app.driveMotor('piston', 'translationY', 3.0, { maxForce: 120000, frequency: 5, damping: 1 });
+    advanceTime(2500);
+    const y = off('translationY');
+    check('a sixdof position motor drives its axis to the target',
+          Math.abs(y - 3.0) < 0.12,
+          `translationY offset ${y.toFixed(4)} m, target 3.000 m`);
+
+    check('the locked axes did not move AT ALL while the free one travelled 3 m',
+          off('translationX') === 0 && off('translationZ') === 0,
+          `tX ${off('translationX')} · tZ ${off('translationZ')} (exact zeros) vs tY ${y.toFixed(3)}`);
+
+    // ...and the motor HOLDS. Load the 120 kg platform with 3 crates of 40 kg
+    // each and it must still be at the target a second later.
+    app.loadPiston(3);
+    advanceTime(2500);
+    const loaded = off('translationY');
+    check('the position motor holds its target against gravity under load',
+          Math.abs(loaded - 3.0) < 0.20,
+          `still at ${loaded.toFixed(4)} m carrying 3 x 40 kg crates`);
+
+    // Freeing a locked axis has to change the outcome, or "locked" meant
+    // nothing. translationX freed, the loaded platform slides off its own lift.
+    app.setAxis('piston', 'translationX', 'free');
+    Physics.addImpulse(app.machines.get('piston').body, 900, 0, 0);
+    advanceTime(1000);
+    const freed = off('translationX');
+    check('freeing a locked axis lets the same body move along it',
+          Math.abs(freed) > 0.4,
+          `translationX travelled ${freed.toFixed(3)} m once freed (was exactly 0 locked)`);
+
+    // Re-locking pins the axis WHERE IT IS, not back at zero — a rebuilt
+    // constraint takes its frames from the bodies' current transforms, so a
+    // displaced body stays displaced and simply stops moving. That is the
+    // honest behaviour, so the assertion is "frozen", not "recentred".
+    app.setAxis('piston', 'translationX', 'locked');
+    advanceTime(200);
+    const pinned = app.machineOffset('piston', 'translationX');
+    Physics.addImpulse(app.machines.get('piston').body, 900, 0, 0);
+    advanceTime(900);
+    const held = app.machineOffset('piston', 'translationX');
+    // NOT bit-exact: a locked SixDOF axis is a solved constraint, not a
+    // welded one, so a hard impulse buys a few millimetres of drift. What
+    // matters is the ratio — the same shove moves the free axis metres and the
+    // locked one centimetres.
+    check('re-locking pins the axis where it is — frozen, not recentred',
+          Math.abs(held - pinned) < Math.abs(freed) * 0.02,
+          `held at ${pinned.toFixed(4)} m through the same shove that moved it ` +
+          `${Math.abs(freed).toFixed(2)} m when free (drift ${((held - pinned) * 1000).toFixed(3)} mm)`);
+    app.driveMotor('piston', 'translationY', 0.0);
+    app.clearMachineDebris();
+}
+
+console.log('--- sixdof: velocity motor + rebuild ---------------------------');
+// The other motor kind. A velocity motor on the crane's free rotationY has to
+// turn the mast continuously, and reversing the target has to reverse it.
+reset();
+{
+    const yaw = () => app.machineOffset('crane', 'rotationY');
+    app.setMotor('crane', 'rotationY', { type: 'velocity', target: 0.8, maxTorque: 40000 });
+    advanceTime(400);
+    const a0 = yaw();
+    advanceTime(600);
+    const a1 = yaw();
+    app.setMotor('crane', 'rotationY', { type: 'velocity', target: -0.8, maxTorque: 40000 });
+    advanceTime(400);
+    const a2 = yaw();
+    advanceTime(600);
+    const a3 = yaw();
+    check('a velocity motor turns the crane, and reversing the target reverses it',
+          a1 - a0 > 0.2 && a3 - a2 < -0.2,
+          `+${(a1 - a0).toFixed(3)} rad forward, ${(a3 - a2).toFixed(3)} rad reversed`);
+
+    // Locking the driven axis has to stop it dead, which also proves the
+    // destroy-and-rebuild path the axis grid runs on every click.
+    app.setAxis('crane', 'rotationY', 'locked');
+    const b0 = yaw();
+    advanceTime(800);
+    check('locking the driven axis stops the motor (constraint rebuild path)',
+          Math.abs(yaw() - b0) < 0.02,
+          `moved ${(yaw() - b0).toFixed(5)} rad in 0.8 s with the axis locked`);
+    app.setAxis('crane', 'rotationY', 'free');
+    app.setMotor('crane', 'rotationY', { type: 'velocity', target: 0, maxTorque: 40000 });
+}
+
+console.log('--- collideConnected -------------------------------------------');
+// Two 0.5 m spheres on a rope capped at 0.4 m. The flag decides whether the
+// rope or the contact wins, and the centre separation says which.
+reset();
+{
+    app.setCollideConnected(false);
+    advanceTime(1500);
+    const off = app.collideSeparation();
+    app.setCollideConnected(true);
+    advanceTime(1500);
+    const on = app.collideSeparation();
+    check('collideConnected OFF lets the jointed pair interpenetrate',
+          Math.abs(off - 0.4) < 0.02,
+          `centres ${off.toFixed(4)} m apart — the rope's 0.4 m cap, well inside the 1.0 m of radii`);
+    check('collideConnected ON pushes them apart past the rope\'s own limit',
+          on - off > 0.15,
+          `${off.toFixed(4)} m off vs ${on.toFixed(4)} m on — contact beat the constraint`);
+    app.setCollideConnected(false);
+}
+
+console.log('--- gear / rackAndPinion / pulley -------------------------------');
+// Three constraint types that shipped in the binding layer and that no
+// broworkshop app had ever called. All three measured, none faked.
+reset();
+{
+    const g = app.mechanisms.get('gears');
+
+    /**
+     * Mean signed spin rate of each gear about its axle, rad/s.
+     *
+     * Angular velocity, not integrated quaternion deltas. Two reasons, both
+     * learned the hard way. An unsigned quaternion angle cannot tell a gear
+     * turning forwards from one ringing back and forth, so integrating |dq|
+     * over a window silently counts the spin-up oscillation as travel and
+     * reports a driven gear turning 19% FASTER than its driver at ratio 1:1.
+     * And the axle here is +Z, so the one component that matters is readable
+     * directly and exactly.
+     *
+     * The 2.5 s spin-up matters too: the coupling is solved, not machined, so
+     * the driven gear rings for a second or so after the motor starts before
+     * settling onto the exact ratio.
+     */
+    function gearRates(ratio) {
+        // Dead stop first. The gears carry gravityFactor 0 and no damping, so
+        // they coast forever, and a gear constraint locks the two hinge angles
+        // as they are when it is CREATED — re-coupling mid-spin would bake the
+        // current transient into the measurement.
+        app.resetGears();
+        advanceTime(100);
+        app.setGearRatio(ratio);
+        app.setGearDrive(1.0);
+        advanceTime(2500);                      // spin up AND let the ringing die
+        let wa = 0, wb = 0;
+        for (let i = 0; i < 20; i++) {
+            advanceTime(50);
+            wa += Physics.getVelocity(g.driver.tag).angular.z;
+            wb += Physics.getVelocity(g.driven.tag).angular.z;
+        }
+        return [wa / 20, wb / 20];
+    }
+
+    const [wA, wB] = gearRates(1.0);
+    check('a gear constraint couples two hinges 1:1',
+          Math.abs(wA) > 0.5 && Math.abs(Math.abs(wA) - Math.abs(wB)) < 0.02,
+          `driver ${wA.toFixed(4)} rad/s, driven ${wB.toFixed(4)} rad/s — ` +
+          `equal and opposite, as meshing gears must be`);
+
+    const [wA2, wB2] = gearRates(2.0);
+    check('the gear ratio is exactly rate(A)/rate(B)',
+          Math.abs(Math.abs(wA2 / wB2) - 2.0) < 0.02,
+          `ratio 2.0 measured ${Math.abs(wA2 / wB2).toFixed(4)} ` +
+          `(${wA2.toFixed(3)} vs ${wB2.toFixed(3)} rad/s)`);
+
+    const [wA3, wB3] = gearRates(0.5);
+    check('and it follows the ratio the other way too',
+          Math.abs(Math.abs(wA3 / wB3) - 0.5) < 0.02,
+          `ratio 0.5 measured ${Math.abs(wA3 / wB3).toFixed(4)}`);
+
+    app.resetGears();
+    app.setGearRatio(2.0);
+    app.setGearDrive(0);
+
+    // Rack & pinion: drive the pinion, the rack translates. Park it at the
+    // centre of its travel first — a rack driven at a constant rate reaches its
+    // slider limit in a couple of seconds and then measures nothing.
+    app.resetRack();
+    advanceTime(200);
+    app.setRackDrive(2.0);
+    const r0 = app.rackOffset();
+    advanceTime(900);
+    const r1 = app.rackOffset();
+    app.setRackDrive(-2.0);
+    advanceTime(1400);
+    const r2 = app.rackOffset();
+    // Sign-agnostic: which way a positive pinion rate pushes the rack is a
+    // convention of the axis pair, and the demo only claims that the pinion
+    // MOVES the rack and that reversing the pinion reverses the rack.
+    check('a rackAndPinion constraint turns pinion rotation into rack travel',
+          Math.abs(r1 - r0) > 0.4 && Math.sign(r2 - r1) === -Math.sign(r1 - r0) &&
+          Math.abs(r2 - r1) > 0.4,
+          `rack ${r0.toFixed(3)} -> ${r1.toFixed(3)} -> ${r2.toFixed(3)} m ` +
+          `(${(r1 - r0).toFixed(3)} m driven, ${(r2 - r1).toFixed(3)} m reversed)`);
+    app.setRackDrive(0);
+
+    // Pulley: no motor at all. 120 kg one side, 25 kg the other, one rope.
+    app.resetPulley();
+    const p = app.mechanisms.get('pulley');
+    const hy = () => Physics.getTransform(p.heavy.tag).position.y;
+    const ly = () => Physics.getTransform(p.light.tag).position.y;
+    const h0 = hy(), l0 = ly();
+    advanceTime(2000);
+    check('a pulley hauls the light side up as the heavy side descends',
+          hy() < h0 - 0.5 && ly() > l0 + 0.5,
+          `heavy ${h0.toFixed(2)} -> ${hy().toFixed(2)} m, light ${l0.toFixed(2)} -> ${ly().toFixed(2)} m`);
+}
+
+console.log('--- breakable constraints ---------------------------------------');
+// The identical impact, twice, with only the threshold changed. That is the
+// whole feature and it is the whole test.
+reset();
+function smashAt(threshold) {
+    app.rebuildBridge();
+    app.setBreakThreshold(threshold);
+    advanceTime(600);                          // let the deck settle first
+    const settled = app.brokenCount();
+    app.dropWreckingBall(900, 12);
+    advanceTime(3000);
+    return { settled, broken: app.brokenCount(), joints: app.jointCount() };
+}
+{
+    const tough = smashAt(30000);
+    check('a high breakingImpulse survives the impact intact',
+          tough.broken === 0,
+          `0 of ${tough.joints} joints broke under a 900 kg ball at 30000 N·s`);
+
+    const fragile = smashAt(400);
+    check('the identical impact at a low threshold snaps joints',
+          fragile.broken > 0,
+          `${fragile.broken} of ${fragile.joints} joints broke at 400 N·s`);
+    check('the threshold is what changed the outcome',
+          fragile.broken > tough.broken,
+          `${tough.broken} broken at 30000 N·s vs ${fragile.broken} at 400 N·s`);
+    check('getBrokenConstraints reported the handles, and they are bridge joints',
+          app.bridge.log.length === fragile.broken &&
+          app.bridge.log.every(o => app.bridge.joints.some(j => j.handle === o.handle)),
+          `${app.bridge.log.length} logged: ` +
+          app.bridge.log.slice(0, 4).map(o => `${o.kind}#${o.index}`).join(', '));
+    check('the deck actually fell where its joints let go',
+          (() => {
+              // At least one plank has to be below the deck line; a "broken"
+              // structure that never moved would mean the report is cosmetic.
+              const y = app.bridge.planks.map(p => Physics.getTransform(p.tag).position.y);
+              return Math.min(...y) < app.BRIDGE.y - 1.0;
+          })(),
+          `lowest plank y=${Math.min(...app.bridge.planks.map(p => Physics.getTransform(p.tag).position.y)).toFixed(2)} ` +
+          `(deck line ${app.BRIDGE.y})`);
+
+    // Rebuild has to be a real reset, not a repaint.
+    app.rebuildBridge();
+    app.setBreakThreshold(30000);
+    advanceTime(600);
+    check('rebuild restores an unbroken bridge at the deck line',
+          app.brokenCount() === 0 && app.rubble.size === 0 &&
+          Math.abs(Physics.getTransform(app.bridge.planks[6].tag).position.y - app.BRIDGE.y) < 0.4,
+          `${app.jointCount()} joints, 0 broken, ${app.rubble.size} rubble bodies`);
+    app.setBreakThreshold(900);
+}
+
+console.log('--- contact manifolds -------------------------------------------');
+// getContacts() is drained by app.js's frame loop and fanned out from there, so
+// the test reads the same log the HUD reads — which means it exercises the real
+// path rather than a private drain of its own.
+reset();
+{
+    app.setContactDrawAll(true);
+    app.setContactFocus(null);
+    app.clearContacts();
+
+    // A three-box stack settling onto the concrete lane.
+    const stack = [];
+    for (let i = 0; i < 3; i++) {
+        stack.push(app.spawn('box', { x: 0, y: 0.42 + i * 0.85, z: 0 },
+            { layer: 'player', friction: 0.9, restitution: 0.0 }));
+    }
+    advanceTime(2000);
+
+    const tags = new Set(stack.map(s => s.tag));
+    const mine = app.contactLog.filter(c => tags.has(c.body1) || tags.has(c.body2));
+    check('resting-stack contacts carry a non-empty manifold',
+          mine.length > 0 && mine.every(c => c.n > 0),
+          `${mine.length} events, ${mine.map(c => c.n).join('/')} points each`);
+    check('every manifold normal is a unit vector',
+          mine.every(c => c.normal &&
+              Math.abs(Math.hypot(c.normal.x, c.normal.y, c.normal.z) - 1) < 1e-3),
+          `e.g. (${mine[0].normal.x.toFixed(3)}, ${mine[0].normal.y.toFixed(3)}, ${mine[0].normal.z.toFixed(3)})`);
+    check('a stack on a flat lane reports a near-vertical normal',
+          mine.some(c => Math.abs(c.normal.y) > 0.95),
+          `max |n.y| = ${Math.max(...mine.map(c => Math.abs(c.normal.y))).toFixed(4)}`);
+    check('penetration is a plausible sub-centimetre depth (or a speculative negative)',
+          mine.every(c => Math.abs(c.penetration) < 0.1),
+          `worst |penetration| ${(Math.max(...mine.map(c => Math.abs(c.penetration))) * 1000).toFixed(2)} mm; ` +
+          `${mine.filter(c => c.penetration < 0).length} speculative`);
+}
+
+console.log('--- contact impulse scales with impact ---------------------------');
+// The number the effects hang off. Same sphere, same mass, same lane — only
+// the closing speed differs, and the estimate has to follow it.
+function impactImpulse(speed) {
+    reset();
+    app.setContactDrawAll(true);
+    app.clearContacts();
+    const b = app.spawn('sphere', { x: 0, y: 3.0, z: 0 },
+        { layer: 'player', mass: 20, restitution: 0.0, linearDamping: 0 });
+    Physics.setLinearVelocity(b.tag, 0, -speed, 0);
+    Physics.activate(b.tag);
+    advanceTime(1600);
+    const mine = app.contactLog.filter(c => c.body1 === b.tag || c.body2 === b.tag);
+    return mine.length ? Math.max(...mine.map(c => c.impulse)) : 0;
+}
+{
+    const slow = impactImpulse(2);
+    const fast = impactImpulse(40);
+    check('the impulse estimate is measurably larger for a fast impact',
+          fast > slow * 2.5 && slow > 0,
+          `${slow.toFixed(1)} kg·m/s at 2 m/s vs ${fast.toFixed(1)} at 40 m/s ` +
+          `(x${(fast / slow).toFixed(2)})`);
+
+    // Camera shake is derived from it too. Sampled frame by frame during the
+    // impact, because the shake decays ~14% per frame by design — read it a
+    // second later and it is legitimately back to zero.
+    reset();
+    app.setContactDrawAll(true);
+    app.clearContacts();
+    const hammer = app.spawn('sphere', { x: 0, y: 3.0, z: 0 },
+        { layer: 'player', mass: 40, restitution: 0.0, linearDamping: 0 });
+    Physics.setLinearVelocity(hammer.tag, 0, -45, 0);
+    Physics.activate(hammer.tag);
+    let peakShake = 0, peakMeter = 0;
+    for (let i = 0; i < 40; i++) {
+        advanceTime(16);
+        peakShake = Math.max(peakShake, Math.hypot(...app.shakeOffset(i * 0.016)));
+        peakMeter = Math.max(peakMeter, app.contactState.peakImpulse);
+    }
+    // The HUD meter reads the same estimate the effects are scaled by, so a
+    // 40 kg mass arriving at 45 m/s has to register as a large number on it.
+    check('the HUD impact meter tracks the same impulse estimate',
+          peakMeter > 200,
+          `meter peaked at ${peakMeter.toFixed(1)} N·s for a 40 kg body at 45 m/s`);
+    advanceTime(3000);
+    const shakenLater = Math.hypot(...app.shakeOffset(0.25));
+    check('contact-driven camera shake fires on impact and decays to rest',
+          peakShake > 0.002 && shakenLater === 0,
+          `peak |shake| ${peakShake.toFixed(4)} during the hit, ${shakenLater.toFixed(4)} once settled`);
+
+    app.setContactDrawAll(false);
+}
+
+console.log('--- chunk 3 cleanup ---------------------------------------------');
+// "Clear all" has to mean all three chunks. The machines themselves are
+// fixtures like the lanes, but everything they PRODUCE is the user's mess.
+{
+    app.rain(20);
+    app.spawnRagdoll({ x: 0, y: 4, z: 0 });
+    app.buildCloth('corners');
+    app.craneLoad();
+    app.loadPiston(2);
+    app.fireTurret();
+    app.setBreakThreshold(300);
+    app.dropWreckingBall(900, 10);
+    advanceTime(2000);
+    check('chunk 3 produced debris, rubble and broken joints to clean up',
+          app.machineDebris.size >= 4 && app.rubble.size >= 1 && app.brokenCount() > 0,
+          `${app.machineDebris.size} machine debris, ${app.rubble.size} rubble, ${app.brokenCount()} broken joints`);
+
+    app.clearAll();
+    advanceTime(200);
+    check('clearAll sweeps every chunk-3 object and repairs the bridge',
+          app.bodyCount() === 0 && app.ragdollCount() === 0 && app.softBodies.size === 0 &&
+          app.machineDebris.size === 0 && app.rubble.size === 0 &&
+          app.brokenCount() === 0 && app.contactLog.length === 0,
+          `bodies ${app.bodyCount()} · debris ${app.machineDebris.size} · rubble ${app.rubble.size} · ` +
+          `broken ${app.brokenCount()} · contact log ${app.contactLog.length}`);
+    check('the machines themselves survive clear all (they are fixtures)',
+          app.machines.size === 4 && app.mechanisms.size === 3 &&
+          Physics.getBodyProperties(app.machines.get('piston').body) !== undefined,
+          `${app.machines.size} sixdof machines, ${app.mechanisms.size} bench mechanisms`);
+    app.setBreakThreshold(900);
+}
+
 // A frame for the record — the sandbox as a human first sees it. Zones back
 // on, because their translucent hulls are half of what the picture is for.
 reset();
@@ -606,6 +992,30 @@ advanceTime(2500);
 app.scene.syncPhysics();
 advanceTime(100);
 screenshot('physics_playground.png');
+
+// ...and one per bay, because the three chunks live 36 m apart and a single
+// frame of the sandbox says nothing about the crane or the bridge.
+// The axis-grid tests above deliberately left the piston displaced off its own
+// lift; the screenshots are meant to show the app as a human meets it.
+app.resetMachines();
+advanceTime(800);
+
+app.focusView('machines');
+app.craneLoad();
+app.loadPiston(2);
+advanceTime(1500);
+screenshot('physics_playground_machines.png');
+
+app.focusView('bench');
+advanceTime(600);
+screenshot('physics_playground_bench.png');
+
+app.focusView('bridge');
+app.setBreakThreshold(400);
+app.dropWreckingBall(900, 12);
+advanceTime(2200);
+screenshot('physics_playground_bridge.png');
+app.focusView('sandbox');
 
 console.log('==============================================================');
 console.log(failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`);

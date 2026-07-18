@@ -3,7 +3,20 @@
 // broworkshop's physics footprint before this app was entirely 2D arcade, so
 // the whole rigid-body layer was dark. This demo lights up the parts that are
 // hard to appreciate from a doc comment — the ones where the API is one line
-// but the BEHAVIOUR is the point:
+// but the BEHAVIOUR is the point.
+//
+// THE TOUR. Three bays, and the camera-focus buttons in the HUD fly between
+// them:
+//
+//   z = 0    the main sandbox — material lanes, spawning, areas, layers,
+//            ragdolls, soft bodies
+//   z = -18  the machine yard — SixDOF machines, motors, and the gear /
+//            rack-and-pinion / pulley bench
+//   z = +18  the breakyard — a suspension bridge held together by constraints
+//            with a breaking threshold you can drag from indestructible to
+//            fragile
+//
+// WHAT IS DEMONSTRATED, by module:
 //
 //   stage.js   Three material lanes fed by three identical ramps. Friction and
 //              restitution stop being numbers and become "how far did it go"
@@ -22,6 +35,23 @@
 //   softbody.js A pinned cloth and a pressurized ball. Pinned vertices are
 //              exactly immovable while the sheet between them sags; pressure
 //              turns the ball from a wet bag into a drum.
+//   machines.js SixDOF constraints as machine tools. A slewing crane with a
+//              motorised winch, a piston lift, and a turret whose two position
+//              motors are re-aimed at a moving drone every frame. Every axis of
+//              every machine is switchable locked / limited / free live, drawn
+//              as colour-coded bars at the pivot. Plus a collideConnected
+//              toggle, and the mechanism bench: `gear`, `rackAndPinion` and
+//              `pulley` — three constraint types that existed in the binding
+//              layer and that no broworkshop app had ever called.
+//   breakables.js A suspension bridge whose every joint carries a
+//              `breakingImpulse`. Drag the threshold, drop a wrecking ball or
+//              fire a shell down the deck, and watch getBrokenConstraints()
+//              report the unzip joint by joint.
+//   contacts.js The contact manifold from Physics.getContacts(), drawn as
+//              quills and listed with penetration and impulse — and then USED:
+//              the impulse estimate drives spark bursts, impact flashes, a
+//              force meter and camera shake. Diagnostic data and gameplay
+//              input are the same stream read two ways.
 //   hud.js     The switchboard. Every feature here is toggleable live.
 //
 // The headline control is the step-rate slider next to the interpolation
@@ -41,7 +71,10 @@ import { buildAreas } from "/app/areas.js";
 import { initSpawn, bodies, spawn, rain, materialRace, clearAll, despawn, bodyCount, onClearAll } from "/app/spawn.js";
 import { initRagdolls, findPart, updateRagdolls, clearRagdolls } from "/app/ragdoll.js";
 import { initSoftBodies, updateSoftBodies, clearSoftBodies } from "/app/softbody.js";
-import { state, bindHud, select, setFps, refreshCount, spawnCurrent, dropOne, selectRagdollPart, refreshRagdollHud } from "/app/hud.js";
+import { initMachines, buildMachines, updateMachines, clearMachineDebris } from "/app/machines.js";
+import { initBreakables, buildBridge, noteBroken, rebuildBridge, clearRubble } from "/app/breakables.js";
+import { initContacts, consume as consumeContacts, updateContacts, shakeOffset, clearContacts, setFocus as setContactFocus } from "/app/contacts.js";
+import { state, bindHud, select, setFps, refreshCount, spawnCurrent, dropOne, selectRagdollPart, refreshRagdollHud, refreshChunk3Hud } from "/app/hud.js";
 
 installSystemMenu();
 
@@ -106,6 +139,11 @@ buildAreas(scene);
 initSpawn(scene);
 initRagdolls(scene);
 initSoftBodies(scene);
+initMachines(scene);
+initBreakables(scene);
+initContacts(scene);
+buildMachines();
+buildBridge();
 
 // "Clear all" has to mean all. Ragdolls and soft bodies are not rigid bodies in
 // spawn.js's tag registry — a ragdoll's bodies and joints live and die as one
@@ -114,11 +152,36 @@ initSoftBodies(scene);
 onClearAll(() => { clearRagdolls(); refreshRagdollHud(); });
 onClearAll(() => clearSoftBodies());
 
+// Chunk 3's teardown. The MACHINES themselves are fixtures, like the lanes and
+// the ramps — "clear all" that deleted the crane would leave a HUD full of dead
+// handles, exactly the trap spawn.js's clearAll() comment warns about. What it
+// does sweep is everything the machines and the bridge PRODUCE: payloads,
+// shells, wrecking balls, rubble, and the contact viewer's accumulated state.
+// The bridge is rebuilt rather than removed, so "clear all" also means "undo
+// the damage" — which is what a user pressing it after a collapse wants.
+onClearAll(() => clearMachineDebris());
+onClearAll(() => { rebuildBridge(); });
+onClearAll(() => { clearContacts(); setContactFocus(null); });
+
 const world = { stage, sun };
 
 // bindHud builds the cloth and the ball, so the soft-body module must be
 // initialised above it.
 bindHud(stage);
+
+// The bay buttons live here rather than in hud.js: the camera belongs to
+// app.js, and hud.js importing app.js would close the module cycle.
+{
+    const row = document.getElementById('viewRow');
+    if (row) {
+        for (const b of row.querySelectorAll('button')) {
+            b.addEventListener('click', () => {
+                focusView(b.dataset.view);
+                for (const o of row.querySelectorAll('button')) o.classList.toggle('sel', o === b);
+            });
+        }
+    }
+}
 
 // --- Picking ----------------------------------------------------------------
 //
@@ -161,6 +224,9 @@ export function pickAt(lx, ly) {
 
     if (bodies.has(hit.bodyId)) {
         select(hit.bodyId);
+        // The contact viewer follows the selection: picking a body is also how
+        // you ask "show me THIS body's contacts".
+        setContactFocus(hit.bodyId);
         return { kind: 'select', tag: hit.bodyId, point: hit.position };
     }
     // Static geometry — spawn just above the surface so the new body drops
@@ -240,6 +306,25 @@ document.addEventListener('keydown', (ev) => {
 let fpsAccum = 0, fpsFrames = 0, fpsLast = performance.now();
 let lastFrameTime = performance.now();
 
+/**
+ * Drain the two global physics event streams, exactly once per frame, and fan
+ * them out to their consumers.
+ *
+ * Both Physics.getContacts() and Physics.getBrokenConstraints() DRAIN on read:
+ * whatever you get, nobody else will. So the drain cannot live inside the
+ * module that wants the data — breakables.js and contacts.js would each see
+ * roughly half the stream and both would be quietly wrong. The frame loop owns
+ * the call and hands the arrays out; that is the whole reason this function
+ * exists rather than each module reading for itself.
+ *
+ * Exported so tests can pump the streams without a rendered frame.
+ */
+export function pumpPhysicsStreams(dt = 1 / 60) {
+    noteBroken(Physics.getBrokenConstraints() || []);
+    consumeContacts(Physics.getContacts(), (tag) => bodies.has(tag));
+    updateContacts(dt);
+}
+
 function frame() {
     const now = performance.now();
     const dt = Math.min(0.1, Math.max(0.001, (now - lastFrameTime) / 1000));
@@ -247,8 +332,19 @@ function frame() {
 
     updateRagdolls(dt);
     updateSoftBodies();
+    updateMachines(dt);
+    pumpPhysicsStreams(dt);
 
-    scene.setCamera(Camera.orbitViewOpts(cam, canvas));
+    // Camera shake is contact-driven: the offset is derived from the impulse
+    // the solver estimated this frame, so a wrecking ball jolts the view and a
+    // drifting box does not. Applied to the view's POSITION only — shaking the
+    // orbit pivot would fight the user's own mouse input.
+    const view = Camera.orbitViewOpts(cam, canvas);
+    const sh = shakeOffset(now / 1000);
+    if (sh[0] || sh[1] || sh[2]) {
+        view.position = [view.position[0] + sh[0], view.position[1] + sh[1], view.position[2] + sh[2]];
+    }
+    scene.setCamera(view);
 
     fpsAccum += now - fpsLast;
     fpsLast = now;
@@ -257,16 +353,40 @@ function frame() {
         fpsAccum = 0; fpsFrames = 0;
         refreshCount();
         refreshRagdollHud();
+        refreshChunk3Hud();
     }
 
     requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
 
-// CHUNK 3: SixDOF constraints and motors, shape casts (castShape /
-// castShapeClosest), overlap queries (overlapShape / overlapPoint), contact
-// manifolds + impulses from getContacts(), and breakable constraints
-// (setConstraintBreakingImpulse / getBrokenConstraints).
+// --- Camera focus -----------------------------------------------------------
+//
+// The world is 60 m wide across three bays, and hunting for the crane with a
+// mouse orbit is nobody's idea of a demo. Each bay gets a button.
+
+// Yaw matters more than it looks. The orbit camera sits at pivot + rot*(0,0,d),
+// so yaw 0 puts the eye on the pivot's +Z side. The machine yard is at z=-18
+// with the whole sandbox between it and +Z — viewed from the front the crane is
+// behind a translucent water tank and a gravity well. Viewing the yard from
+// BEHIND (yaw ~ pi) puts empty space at its back instead. The bridge at z=+18
+// has the opposite geometry and keeps a near-zero yaw.
+export const VIEWS = {
+    sandbox:  { pivot: [2, 2, 0],     dist: 46, yaw: -0.55,             pitch: -0.42 },
+    machines: { pivot: [-6, 3.5, -18], dist: 24, yaw: Math.PI - 0.40,   pitch: -0.34 },
+    bench:    { pivot: [20, 3, -18],  dist: 15, yaw: Math.PI - 0.30,    pitch: -0.30 },
+    bridge:   { pivot: [0, 4.5, 18],  dist: 24, yaw:  0.30,             pitch: -0.22 },
+};
+
+export function focusView(name) {
+    const v = VIEWS[name];
+    if (!v) return false;
+    cam.rot = Camera.quatMul(
+        Camera.quatFromAxis(0, 1, 0, v.yaw),
+        Camera.quatFromAxis(1, 0, 0, v.pitch));
+    Camera.orbitReframe(cam, v.pivot, v.dist);
+    return true;
+}
 
 export { scene, cam, canvas, world, stage, state };
 export { bodies, spawn, rain, materialRace, clearAll, despawn, bodyCount, spawnCurrent, dropOne };
@@ -289,3 +409,27 @@ export {
     setPressure, dropBall, pokeBall,
 } from "/app/hud.js";
 export { LAYER_NAMES, SPAWN_LAYERS, LAYER_COLORS, setPair, togglePair, collides, getMatrix, resetLayers } from "/app/layers.js";
+export {
+    machines, mechanisms, machineDebris, AXIS_NAMES, AXIS_MODES, modeOf,
+    setAxisMode, setMotor, setMotorTarget, rebuildConstraint, machineOffset,
+    setCollideConnected, getCollideConnected, collideSeparation,
+    setGearDrive, setGearRatio, resetGears, setRackDrive, rackOffset, resetRack, resetPulley,
+    resetMachines,
+    fireTurret, craneLoad, loadPiston, spawnDebris, clearMachineDebris,
+    setShowAxes, setShowAllAxes, setTurretTracking, updateMachines, YARD_Z,
+} from "/app/machines.js";
+export {
+    BRIDGE, bridge, buildBridge, rebuildBridge, destroyBridge, setThreshold,
+    noteBroken, brokenCount, jointCount, dropWreckingBall, fireProjectile,
+    rubble, clearRubble,
+} from "/app/breakables.js";
+export {
+    state as contactState, recent as contactLog, consume as consumeContacts,
+    setFocus as setContactFocus, getFocus as getContactFocus,
+    shakeOffset, clearContacts, updateContacts,
+} from "/app/contacts.js";
+export {
+    setAxis, driveMotor, setBreakThreshold, smashBridge, shootBridge,
+    setContactsEnabled, setContactDraw, setContactEffects, setContactDrawAll,
+    setContactThreshold, refreshChunk3Hud,
+} from "/app/hud.js";

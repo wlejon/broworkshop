@@ -25,6 +25,21 @@ import {
     buildCloth, buildBall, setBallPressure, setPinSet, getCloth, getBall,
     gust, poke, clearSoftBodies, CLOTH, PIN_SETS,
 } from '/app/softbody.js';
+import {
+    machines, mechanisms, AXIS_NAMES, AXIS_MODES, modeOf, setAxisMode, setMotor,
+    machineOffset, setCollideConnected, getCollideConnected, collideSeparation,
+    setGearDrive, setGearRatio, resetGears, setRackDrive, rackOffset, resetRack, resetPulley,
+    fireTurret, craneLoad, loadPiston, clearMachineDebris, setShowAllAxes, resetMachines,
+    setTurretTracking,
+} from '/app/machines.js';
+import {
+    bridge, setThreshold, brokenCount, jointCount, dropWreckingBall,
+    fireProjectile, rebuildBridge, clearRubble,
+} from '/app/breakables.js';
+import {
+    state as cstate, recent as contactLog, setFocus as setContactFocus,
+    clearContacts,
+} from '/app/contacts.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -44,6 +59,22 @@ export const state = {
     motorFreq: 12,
     pinSet: 'corners',
     ballPressure: 2500,
+    // Chunk 3 — machines, breakables, contacts
+    craneSlew: 0.0,
+    winchTarget: -2.0,
+    pistonTarget: 0.0,
+    turretTracking: true,
+    collideConnected: false,
+    gearSpeed: 2.5,
+    gearRatio: 2.0,
+    rackSpeed: 1.6,
+    showAxes: true,
+    breakThreshold: 900,
+    contactsEnabled: true,
+    contactDraw: true,
+    contactDrawAll: false,
+    contactEffects: true,
+    contactMinImpulse: 6.0,
 };
 
 let stageRef = null;
@@ -338,6 +369,182 @@ export function pokeBall(depth = 0.35) {
     return b ? poke(b, depth) : [];
 }
 
+// --- Machines: the axis grid -------------------------------------------------
+//
+// One row per axis per machine, three buttons per row. This grid IS the SixDOF
+// demo: it is the only place in broworkshop where a user can take a joint apart
+// one degree of freedom at a time and watch the machine change behaviour.
+//
+// Flipping a button destroys and rebuilds the constraint (Jolt bakes the DoF
+// layout at construction). The bodies are untouched, so a crane mid-slew keeps
+// its momentum through the rebuild.
+
+export function setAxis(key, axis, mode) {
+    const ok = setAxisMode(key, axis, mode);
+    syncAxisGrid();
+    return ok;
+}
+
+/** Point one machine's motor at a target. The HUD's only motor entry point. */
+export function driveMotor(key, axis, target, extra = {}) {
+    const m = machines.get(key);
+    if (!m) return false;
+    const cur = m.motors[axis] || {};
+    return setMotor(key, axis, { type: 'position', maxForce: 60000, maxTorque: 40000,
+                                 frequency: 4, damping: 1, ...cur, ...extra, target });
+}
+
+function buildAxisGrid() {
+    const host = $('axisGrid');
+    if (!host) return;
+    host.innerHTML = '';
+    for (const m of machines.values()) {
+        const box = document.createElement('div');
+        box.className = 'machine';
+
+        const h = document.createElement('div');
+        h.className = 'mtitle';
+        h.textContent = m.label;
+        box.appendChild(h);
+
+        const hint = document.createElement('div');
+        hint.className = 'area-hint';
+        hint.textContent = m.hint;
+        box.appendChild(hint);
+
+        for (const axis of AXIS_NAMES) {
+            const row = document.createElement('div');
+            row.className = 'axisrow';
+            const lbl = document.createElement('span');
+            // "translationY" -> "tY"; the grid is six rows deep per machine and
+            // the full names would triple its height for no information.
+            lbl.textContent = (axis.startsWith('translation') ? 't' : 'r') + axis.slice(-1);
+            lbl.className = 'ax ax' + axis.slice(-1);
+            row.appendChild(lbl);
+            for (const mode of AXIS_MODES) {
+                const b = document.createElement('button');
+                b.textContent = mode === 'limited' ? 'lim' : mode;
+                b.dataset.key = m.key; b.dataset.axis = axis; b.dataset.mode = mode;
+                b.addEventListener('click', () => setAxis(m.key, axis, mode));
+                row.appendChild(b);
+            }
+            box.appendChild(row);
+        }
+        host.appendChild(box);
+    }
+    syncAxisGrid();
+}
+
+function syncAxisGrid() {
+    const host = $('axisGrid');
+    if (!host) return;
+    for (const b of host.querySelectorAll('button')) {
+        const m = machines.get(b.dataset.key);
+        b.classList.toggle('sel', !!m && modeOf(m.axes[b.dataset.axis]) === b.dataset.mode);
+    }
+}
+
+// --- Breakables ---------------------------------------------------------------
+
+export function setBreakThreshold(n) {
+    state.breakThreshold = n;
+    setThreshold(n);
+    if ($('breakThresh')) $('breakThresh').value = String(n);
+    if ($('breakThreshVal')) $('breakThreshVal').textContent = n >= 20000 ? '∞' : String(Math.round(n));
+    if ($('breakHint')) {
+        $('breakHint').textContent = n < 300
+            ? 'fragile — the deck cannot even hold itself up'
+            : n < 1500 ? 'realistic — a heavy impact tears it open'
+            : n < 20000 ? 'tough — takes a full-speed shell'
+            : 'indestructible — breakingImpulse this high never trips';
+    }
+    return true;
+}
+
+export function smashBridge() { return dropWreckingBall(900, 12); }
+export function shootBridge() { return fireProjectile(70, 140); }
+
+// --- Contacts ------------------------------------------------------------------
+
+export function setContactsEnabled(on) { cstate.enabled = state.contactsEnabled = !!on; return true; }
+export function setContactDraw(on)     { cstate.draw    = state.contactDraw    = !!on; return true; }
+export function setContactDrawAll(on)  { cstate.drawAll = state.contactDrawAll = !!on; return true; }
+export function setContactEffects(on)  { cstate.effects = state.contactEffects = !!on; return true; }
+export function setContactThreshold(v) {
+    cstate.minImpulse = state.contactMinImpulse = v;
+    if ($('cMinImp')) $('cMinImp').value = String(v);
+    if ($('cMinImpVal')) $('cMinImpVal').textContent = v.toFixed(1);
+    return true;
+}
+
+/**
+ * The chunk-3 readouts, refreshed on the same cadence as the fps counter —
+ * three times a second, which is fast enough to feel live and slow enough that
+ * rebuilding a table of contact rows costs nothing.
+ */
+export function refreshChunk3Hud() {
+    // Machine offsets.
+    const put = (id, txt) => { const el = $(id); if (el) el.textContent = txt; };
+    put('mCrane', `${(machineOffset('crane', 'rotationY') * 180 / Math.PI).toFixed(0)}°`);
+    put('mWinch', `${machineOffset('winch', 'translationY').toFixed(2)} m`);
+    put('mPiston', `${machineOffset('piston', 'translationY').toFixed(2)} m`);
+    const t = machines.get('turret');
+    put('mTurret', t && t.aim ? `${(t.aim.yaw * 180 / Math.PI).toFixed(0)}° / ${(t.aim.pitch * 180 / Math.PI).toFixed(0)}°` : '—');
+
+    // collideConnected: the measured separation IS the proof, so it is a live
+    // number rather than a checkbox state echoed back.
+    const sep = collideSeparation();
+    put('ccSep', `${sep.toFixed(3)} m`);
+    const ccHintEl = $('ccHint');
+    if (ccHintEl) {
+        ccHintEl.textContent = getCollideConnected()
+            ? 'ON — contact wins: the spheres are pushed apart past the rope\'s own 0.4 m cap.'
+            : 'OFF — the pair is excluded from collision, so the rope wins and the spheres merge to 0.40 m.';
+    }
+
+    put('mRack', `${rackOffset().toFixed(2)} m`);
+
+    // Breakables.
+    put('stBroken', `${brokenCount()} / ${jointCount()}`);
+    const log = $('breakLog');
+    if (log) {
+        log.innerHTML = bridge.log.length
+            ? bridge.log.slice(-6).reverse()
+                .map(o => `<div>#${o.handle} <b>${o.kind}</b> ${o.index}</div>`).join('')
+            : '<div class="dim">no joints broken</div>';
+    }
+
+    // Contacts.
+    put('stContacts', String(cstate.lastCount));
+    const meter = $('impactBar');
+    if (meter) {
+        const pct = Math.min(100, (cstate.peakImpulse / 600) * 100);
+        meter.style.width = `${pct.toFixed(1)}%`;
+    }
+    put('impactVal', `${cstate.peakImpulse.toFixed(0)} N·s`);
+
+    const list = $('contactList');
+    if (list) {
+        list.innerHTML = contactLog.length
+            ? contactLog.slice(0, 6).map(c => {
+                const n = c.normal
+                    ? `${c.normal.x.toFixed(2)},${c.normal.y.toFixed(2)},${c.normal.z.toFixed(2)}` : '—';
+                // Negative penetration is a SPECULATIVE contact — Jolt predicted
+                // a touch it has not solved yet. Labelling it beats printing a
+                // negative depth and letting the reader think it is a bug.
+                const pen = c.penetration < 0
+                    ? `<i>spec ${(c.penetration * 1000).toFixed(1)}mm</i>`
+                    : `${(c.penetration * 1000).toFixed(1)}mm`;
+                return `<div class="crow${c.focused ? ' hot' : ''}">` +
+                       `<span>#${c.body1}·#${c.body2}</span>` +
+                       `<span>${c.n}pt</span><span>${pen}</span>` +
+                       `<span class="imp">${c.impulse.toFixed(0)}</span>` +
+                       `<span class="nrm">n ${n}</span></div>`;
+            }).join('')
+            : '<div class="dim">no contacts yet — drop something</div>';
+    }
+}
+
 // --- Readouts ---------------------------------------------------------------
 
 export function setFps(v) { if ($('fps')) $('fps').textContent = `${v.toFixed(0)} fps`; }
@@ -515,6 +722,8 @@ export function bindHud(stage) {
     buildLayerMatrix();
     buildCombineButtons();
     buildLaneLegend();
+    buildAxisGrid();
+    bindCollapsibles();
 
     $('stepHz').addEventListener('input', (e) => setStepRate(parseInt(e.target.value, 10)));
     $('interp').addEventListener('change', (e) => setInterpolation(e.target.checked));
@@ -561,7 +770,11 @@ export function bindHud(stage) {
     bindProp('pAngDamp', 'angularDamping');
     bindProp('pGravFactor', 'gravityFactor');
 
-    $('btnPoke').addEventListener('click', () => {
+    // Two different pokes live in this panel — an impulse on the selected rigid
+    // body and a setVertex dent on the soft ball. They had the same element id,
+    // so getElementById resolved both bindings onto the soft-body button and
+    // the rigid poke never fired at all.
+    $('btnPokeBody').addEventListener('click', () => {
         if (state.selected == null) return;
         const p = Physics.getBodyProperties(state.selected);
         const k = Math.max(1, p ? p.mass : 1) * 6;
@@ -621,6 +834,79 @@ export function bindHud(stage) {
     $('btnPoke').addEventListener('click', () => pokeBall(0.35));
     $('btnSoftClear').addEventListener('click', () => clearSoftBodies());
 
+    // --- Machines ---
+    const bindMachineSlider = (id, fn, digits = 2, suffix = '') => {
+        const el = $(id);
+        if (!el) return;
+        el.addEventListener('input', () => {
+            const v = parseFloat(el.value);
+            const lbl = $(id + 'Val');
+            if (lbl) lbl.textContent = v.toFixed(digits) + suffix;
+            fn(v);
+        });
+    };
+    // Slew is a VELOCITY motor and the winch/piston are POSITION motors, which
+    // is the contrast the two kinds of slider are here to make: one sets a rate
+    // the machine holds forever, the others set a place it goes and stays.
+    bindMachineSlider('craneSlew', (v) => {
+        state.craneSlew = v;
+        setMotor('crane', 'rotationY', { type: 'velocity', target: v, maxTorque: 40000 });
+    }, 2, ' rad/s');
+    bindMachineSlider('winchTarget', (v) => {
+        state.winchTarget = v;
+        setMotor('winch', 'translationY', { type: 'position', target: v, maxForce: 60000, frequency: 4, damping: 1 });
+    }, 2, ' m');
+    bindMachineSlider('pistonTarget', (v) => {
+        state.pistonTarget = v;
+        setMotor('piston', 'translationY', { type: 'position', target: v, maxForce: 120000, frequency: 5, damping: 1 });
+    }, 2, ' m');
+    bindMachineSlider('gearSpeed', (v) => { state.gearSpeed = v; setGearDrive(v); }, 1, ' rad/s');
+    // Re-datum before re-coupling: a gear constraint locks the two hinge
+    // angles as they are at creation, so changing the ratio mid-spin would
+    // otherwise bake the current transient into the new coupling.
+    bindMachineSlider('gearRatio', (v) => {
+        state.gearRatio = v;
+        resetGears(); setGearRatio(v); setGearDrive(state.gearSpeed);
+    }, 1, ':1');
+    bindMachineSlider('rackSpeed', (v) => { state.rackSpeed = v; setRackDrive(v); }, 1, ' rad/s');
+
+    $('btnCraneLoad').addEventListener('click', () => craneLoad());
+    $('btnPistonLoad').addEventListener('click', () => loadPiston(3));
+    $('btnFireTurret').addEventListener('click', () => fireTurret(34));
+    $('btnResetPulley').addEventListener('click', () => resetPulley());
+    $('btnResetRack').addEventListener('click', () => { resetRack(); setRackDrive(state.rackSpeed); });
+    $('btnClearMachines').addEventListener('click', () => clearMachineDebris());
+    // The axis grid is a loaded gun by design: free the piston's tX and the
+    // platform slides off its own lift. This is the way back.
+    $('btnResetMachines').addEventListener('click', () => { resetMachines(); syncAxisGrid(); });
+    $('turretTrack').addEventListener('change', (e) => {
+        state.turretTracking = e.target.checked;
+        setTurretTracking(e.target.checked);
+    });
+    $('showAxes').addEventListener('change', (e) => {
+        state.showAxes = e.target.checked;
+        setShowAllAxes(e.target.checked);
+    });
+    $('collideConnected').addEventListener('change', (e) => {
+        state.collideConnected = e.target.checked;
+        setCollideConnected(e.target.checked);
+    });
+
+    // --- Breakables ---
+    $('breakThresh').addEventListener('input', (e) => setBreakThreshold(parseFloat(e.target.value)));
+    $('btnSmash').addEventListener('click', () => smashBridge());
+    $('btnShoot').addEventListener('click', () => shootBridge());
+    $('btnRebuild').addEventListener('click', () => { rebuildBridge(); setBreakThreshold(state.breakThreshold); });
+    $('btnClearRubble').addEventListener('click', () => clearRubble());
+
+    // --- Contacts ---
+    $('cEnabled').addEventListener('change', (e) => setContactsEnabled(e.target.checked));
+    $('cDraw').addEventListener('change', (e) => setContactDraw(e.target.checked));
+    $('cDrawAll').addEventListener('change', (e) => setContactDrawAll(e.target.checked));
+    $('cEffects').addEventListener('change', (e) => setContactEffects(e.target.checked));
+    $('cMinImp').addEventListener('input', (e) => setContactThreshold(parseFloat(e.target.value)));
+    $('btnContactClear').addEventListener('click', () => { clearContacts(); setContactFocus(null); });
+
     // Push the panel's defaults at the engine before the first step.
     setStepRate(state.stepHz);
     setInterpolation(state.interpolation);
@@ -633,6 +919,36 @@ export function bindHud(stage) {
     setClothPins(state.pinSet);
     setPressure(state.ballPressure);
     refreshRagdollHud();
+
+    // Chunk 3's defaults, pushed the same way: the machines' motors are already
+    // running from buildMachines(), so this is about making the panel agree
+    // with them rather than about starting anything.
+    setBreakThreshold(state.breakThreshold);
+    setContactThreshold(state.contactMinImpulse);
+    setContactsEnabled(state.contactsEnabled);
+    setContactDraw(state.contactDraw);
+    setContactDrawAll(state.contactDrawAll);
+    setContactEffects(state.contactEffects);
+    setCollideConnected(state.collideConnected);
+    refreshChunk3Hud();
+}
+
+// --- Collapsible sections ------------------------------------------------------
+//
+// The panel now has eleven sections and a human opening the app should not have
+// to scroll past a 36-cell layer matrix to find the crane. Every <section>
+// carrying a data-collapsible <h2> folds on click, and the ones marked
+// data-start="closed" in the markup begin folded — so the default view is the
+// three or four controls that make the demo make sense, with everything else
+// one click away.
+
+function bindCollapsibles() {
+    for (const h of document.querySelectorAll('#hud h2[data-collapsible]')) {
+        const sec = h.parentElement;
+        const toggle = () => sec.classList.toggle('folded');
+        h.addEventListener('click', toggle);
+        if (h.dataset.start === 'closed') sec.classList.add('folded');
+    }
 }
 
 export { COMBINE_MODES, syncLayerMatrix };
