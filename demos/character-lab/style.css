@@ -1,0 +1,154 @@
+/* Character Lab — HUD chrome.
+   The panel is deliberately narrow and dense: the readout block is meant to be
+   watched while walking, so every line has to stay on screen at once. */
+
+html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #0a0c10;
+    color: #d8dee8;
+    font: 12px system-ui;
+}
+
+#stage {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+}
+
+/* World-space label layer: never eats clicks, children are placed absolutely
+   in pixel coordinates by app.js. */
+#labels {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+}
+
+#labels .wl {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: rgba(8, 10, 14, 0.72);
+    border: 1px solid rgba(150, 170, 200, 0.28);
+    color: #e6ecf6;
+    font: 11px system-ui;
+    white-space: nowrap;
+}
+
+#labels .wl.warn { border-color: rgba(230, 110, 90, 0.75); color: #ffbdae; }
+#labels .wl.ok   { border-color: rgba(110, 210, 150, 0.6); }
+#labels .wl.zone { font: 600 13px system-ui; letter-spacing: 0.04em; }
+
+#hud {
+    position: absolute;
+    left: 12px;
+    top: 12px;
+    width: 292px;
+    max-height: calc(100% - 24px);
+    overflow-y: auto;
+    padding: 10px 12px 14px;
+    box-sizing: border-box;
+    background: rgba(10, 13, 18, 0.86);
+    border: 1px solid rgba(120, 140, 170, 0.22);
+    border-radius: 6px;
+}
+
+#hud h1 {
+    margin: 0;
+    font: 600 15px system-ui;
+    letter-spacing: 0.02em;
+}
+
+#hud .sub {
+    margin: 2px 0 8px;
+    color: #7d8a9c;
+    font-size: 11px;
+}
+
+#hud .fps {
+    float: right;
+    color: #8fc7a0;
+    font: 12px ui-monospace, monospace;
+}
+
+#hud section {
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(120, 140, 170, 0.16);
+}
+
+#hud h2 {
+    margin: 0 0 6px;
+    font: 600 12px system-ui;
+    color: #9fb2c8;
+}
+
+#hud h2 .ghint {
+    float: right;
+    font: 10px system-ui;
+    color: #66738a;
+}
+
+#hud label {
+    display: block;
+    margin: 4px 0;
+    color: #b6c2d2;
+}
+
+#hud input[type=range] { width: 128px; vertical-align: middle; }
+#hud .v { display: inline-block; min-width: 42px; color: #e6ecf6;
+          font: 11px ui-monospace, monospace; text-align: right; }
+
+#hud button {
+    margin-top: 6px;
+    padding: 5px 10px;
+    background: #1d2531;
+    color: #d8dee8;
+    border: 1px solid rgba(140, 160, 190, 0.35);
+    border-radius: 4px;
+    font: 12px system-ui;
+    cursor: pointer;
+}
+#hud button:hover { background: #263041; }
+
+/* Readout rows: label left, monospace value right, so the numbers form a
+   stable column that is readable while it changes 60 times a second. */
+.readout .row {
+    display: flex;
+    justify-content: space-between;
+    line-height: 1.55;
+}
+.readout .row span { color: #7d8a9c; }
+.readout .row b {
+    font: 11px ui-monospace, monospace;
+    font-weight: 400;
+    color: #e6ecf6;
+}
+.readout .row b.hot  { color: #ffbdae; }
+.readout .row b.good { color: #8fe0b0; }
+
+.legend div { line-height: 1.7; color: #b6c2d2; }
+.legend .sw {
+    display: inline-block;
+    width: 9px; height: 9px;
+    margin-right: 6px;
+    border-radius: 2px;
+    vertical-align: baseline;
+}
+.c-stair  { background: #7f95b8; }
+.c-ramp   { background: #b8925a; }
+.c-tunnel { background: #7fb8a4; }
+.c-gap    { background: #a07fb8; }
+.c-prop   { background: #c07a5a; }
+.c-plat   { background: #d2b45a; }
+
+#hud .hint { margin-top: 6px; color: #66738a; line-height: 1.5; }

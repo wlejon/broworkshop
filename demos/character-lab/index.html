@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Character Lab</title>
+    <link rel="stylesheet" href="/app/style.css">
+</head>
+<body>
+    <canvas id="stage"></canvas>
+
+    <!-- World-space labels are DOM nodes positioned every frame by projecting
+         their anchor through the same camera the scene renders with. The
+         engine has no 3D text node, so this is how the step risers and ramp
+         angles get numbers printed on them. -->
+    <div id="labels"></div>
+
+    <div id="hud">
+        <h1>Character Lab <span id="fps" class="fps">—</span></h1>
+        <div class="sub">Physics.createCharacter — Jolt CharacterVirtual</div>
+
+        <!-- Everything in this block is read straight off character.getState()
+             once per frame. It is the whole reason the app exists: the
+             controller's internal decisions, made legible. -->
+        <section class="readout">
+            <h2>State</h2>
+            <div class="row"><span>position</span><b id="roPos">—</b></div>
+            <div class="row"><span>velocity</span><b id="roVel">—</b></div>
+            <div class="row"><span>speed</span><b id="roSpeed">—</b></div>
+            <div class="row"><span>groundState</span><b id="roGround">—</b></div>
+            <div class="row"><span>isGrounded</span><b id="roGrounded">—</b></div>
+            <div class="row"><span>groundNormal</span><b id="roNormal">—</b></div>
+            <div class="row"><span>slope</span><b id="roSlope">—</b></div>
+            <div class="row"><span>groundBodyId</span><b id="roBody">—</b></div>
+            <div class="row"><span>platform vel</span><b id="roPlatform">—</b></div>
+            <div class="row"><span>stance</span><b id="roStance">—</b></div>
+            <div class="row"><span>move blocked</span><b id="roBlocked">—</b></div>
+            <div class="row"><span>stand blocked</span><b id="roStandBlocked">—</b></div>
+        </section>
+
+        <!-- Jolt's CharacterVirtual takes these at construction and the JS
+             binding exposes no runtime setters, so moving one of these sliders
+             rebuilds the character in place (position + velocity + stance are
+             carried over). That is invisible to the user and lets every knob
+             be felt live. -->
+        <section>
+            <h2>Controller <span class="ghint">rebuilds the character</span></h2>
+            <label>Max slope <input type="range" id="tMaxSlope" min="5" max="85" step="1" value="50">
+                <span class="v" id="tMaxSlopeV"></span></label>
+            <label>Step up <input type="range" id="tStepUp" min="0" max="1.2" step="0.01" value="0.4">
+                <span class="v" id="tStepUpV"></span></label>
+            <label>Stick to floor <input type="range" id="tStick" min="0" max="1.5" step="0.01" value="0.5">
+                <span class="v" id="tStickV"></span></label>
+            <label>Push strength <input type="range" id="tStrength" min="0" max="1200" step="10" value="400">
+                <span class="v" id="tStrengthV"></span></label>
+        </section>
+
+        <section>
+            <h2>Movement</h2>
+            <label>Move speed <input type="range" id="tSpeed" min="0.5" max="14" step="0.1" value="4.5">
+                <span class="v" id="tSpeedV"></span></label>
+            <label>Jump speed <input type="range" id="tJump" min="0" max="14" step="0.1" value="6">
+                <span class="v" id="tJumpV"></span></label>
+            <label>Gravity <input type="range" id="tGravity" min="0" max="30" step="0.1" value="9.81">
+                <span class="v" id="tGravityV"></span></label>
+        </section>
+
+        <section>
+            <h2>View</h2>
+            <label><input type="checkbox" id="optLabels" checked> World labels</label>
+            <label><input type="checkbox" id="optInterp" checked> Physics interpolation</label>
+            <button id="btnReset">Reset to spawn</button>
+        </section>
+
+        <!-- The course legend doubles as the test plan: each row names a
+             capability and the geometry that proves it. -->
+        <section>
+            <h2>Course</h2>
+            <div class="legend">
+                <div><i class="sw c-stair"></i>Stairs — risers 0.15 → 0.65 m (step-up limit)</div>
+                <div><i class="sw c-ramp"></i>Ramps — 15° 30° 42° 52° 65° (slope limit)</div>
+                <div><i class="sw c-tunnel"></i>Tunnel — 1.10 m clearance (crouch only)</div>
+                <div><i class="sw c-gap"></i>Gap + terraces (fall, land, floor-snap)</div>
+                <div><i class="sw c-prop"></i>Crates &amp; barrels (push dynamic bodies)</div>
+                <div><i class="sw c-plat"></i>Kinematic platform (ride ground velocity)</div>
+            </div>
+            <div class="hint">WASD move · Space jump · C / Ctrl crouch ·
+                right-drag orbit · wheel zoom · R reset</div>
+        </section>
+    </div>
+</body>
+</html>
