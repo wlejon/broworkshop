@@ -1,0 +1,7 @@
+{
+    "app": ".",
+    "title": "Navigation Lab",
+    "width": 1920,
+    "height": 1080,
+    "lib": "../../lib"
+}

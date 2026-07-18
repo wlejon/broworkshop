@@ -1,0 +1,97 @@
+html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+canvas#stage { display: block; width: 100vw; height: 100vh; }
+
+#hud {
+    position: absolute;
+    top: 10px; left: 10px;
+    width: 282px;
+    max-height: calc(100vh - 20px);
+    overflow-y: auto;
+    background: rgba(8, 10, 14, 0.74);
+    color: #cfe;
+    font: 12px system-ui, sans-serif;
+    padding: 10px 12px 12px 12px;
+    border-radius: 7px;
+    border: 1px solid rgba(255,255,255,0.08);
+}
+
+#hud h1 {
+    margin: 0 0 6px 0;
+    font-size: 13px;
+    color: #fff;
+    letter-spacing: 0.4px;
+}
+#hud h1 .fps { float: right; color: #7bed9f; font-weight: normal; font-size: 11px; }
+
+#hud p.lede {
+    margin: 0 0 4px 0;
+    color: #8fa3b5;
+    line-height: 1.4;
+}
+
+#hud section {
+    margin: 8px 0 0 0;
+    padding: 6px 0 2px 0;
+    border-top: 1px solid rgba(255,255,255,0.10);
+}
+#hud h2 {
+    margin: 0 0 4px 0;
+    font-size: 12px;
+    color: #9fd6ff;
+    font-weight: 600;
+}
+#hud h2 label { display: inline; margin: 0; }
+
+#hud label { display: block; margin: 3px 0; }
+#hud input[type=range] { width: 108px; vertical-align: middle; }
+#hud span.v {
+    color: #7bed9f;
+    display: inline-block;
+    min-width: 44px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+#hud button {
+    background: #1b2530;
+    color: #cfe;
+    border: 1px solid rgba(255,255,255,0.16);
+    border-radius: 4px;
+    font: 11px system-ui, sans-serif;
+    padding: 4px 8px;
+    margin: 4px 4px 2px 0;
+    cursor: pointer;
+}
+#hud button:hover { background: #253444; border-color: #4a7fa8; }
+#hud button:active { background: #16202a; }
+#hud .row { margin: 2px 0; }
+
+#hud .stats { margin: 5px 0 3px 0; }
+#hud .stats div {
+    display: flex;
+    justify-content: space-between;
+    padding: 1px 0;
+}
+#hud .stats span { color: #7f92a4; }
+#hud .stats b {
+    color: #ffd166;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+#hud .hint {
+    color: #77899a;
+    font-size: 11px;
+    line-height: 1.4;
+    margin: 3px 0 1px 0;
+}
+#hud .hint b { color: #9fd6ff; font-weight: 600; }
+#hud .hint code {
+    font: 10px ui-monospace, monospace;
+    color: #9fd6ff;
+    background: rgba(255,255,255,0.06);
+    padding: 0 3px;
+    border-radius: 3px;
+}
+#hud .hint.bad { color: #ff8f8f; }
+#hud .hint.good { color: #7bed9f; }

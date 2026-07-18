@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Navigation Lab</title>
+    <link rel="stylesheet" href="/app/style.css">
+</head>
+<body>
+    <canvas id="stage"></canvas>
+
+    <div id="hud">
+        <h1>Navigation Lab <span id="fps" class="fps">—</span></h1>
+
+        <p class="lede">A polygon navmesh baked from this level's physics
+        geometry. Stacked floors, ramps and stairs — the geometry a flat
+        NavGrid cannot represent.</p>
+
+        <!-- Bake ------------------------------------------------------------ -->
+        <section>
+            <h2>Bake parameters</h2>
+            <label>Agent radius <input type="range" id="pRadius" min="0.2" max="2.0" step="0.05" value="0.5">
+                <span class="v" id="pRadiusV"></span></label>
+            <label>Agent height <input type="range" id="pHeight" min="0.5" max="4.0" step="0.1" value="2.0">
+                <span class="v" id="pHeightV"></span></label>
+            <label>Max slope° <input type="range" id="pSlope" min="15" max="80" step="1" value="45">
+                <span class="v" id="pSlopeV"></span></label>
+            <label>Step height <input type="range" id="pClimb" min="0.1" max="1.0" step="0.05" value="0.4">
+                <span class="v" id="pClimbV"></span></label>
+            <label>Cell size <input type="range" id="pCell" min="0.1" max="0.6" step="0.025" value="0.25">
+                <span class="v" id="pCellV"></span></label>
+            <button id="btnBake">Re-bake navmesh</button>
+            <div class="hint" id="bakeHint">—</div>
+        </section>
+
+        <!-- Overlay --------------------------------------------------------- -->
+        <section>
+            <h2><label><input type="checkbox" id="ovOn" checked> Walkable surface overlay</label></h2>
+            <label>Probe step <input type="range" id="ovStep" min="0.35" max="1.2" step="0.05" value="0.6">
+                <span class="v" id="ovStepV"></span></label>
+            <div class="stats">
+                <div><span>walkable samples</span><b id="stSamples">—</b></div>
+                <div><span>overlay quads</span><b id="stQuads">—</b></div>
+                <div><span>bake / blob</span><b id="stBake">—</b></div>
+            </div>
+            <div class="hint">bro exposes no polygon read-back, so this samples
+                the baked surface via <code>nearestPoint</code>. Raise the agent
+                radius and re-bake: the surface pulls back from every wall.</div>
+        </section>
+
+        <!-- Path query ------------------------------------------------------ -->
+        <section>
+            <h2>Path query</h2>
+            <div class="hint">Left-click the level to set the <b>start</b>,
+                shift-click to set the <b>goal</b>.</div>
+            <div class="row">
+                <button id="btnSameFloor">Same floor</button>
+                <button id="btnCrossFloor">Cross floor</button>
+                <button id="btnToRoof">To roof</button>
+            </div>
+            <div class="stats">
+                <div><span>waypoints</span><b id="stWp">—</b></div>
+                <div><span>path length</span><b id="stLen">—</b></div>
+                <div><span>elevation change</span><b id="stRise">—</b></div>
+            </div>
+            <div class="hint" id="pathHint">—</div>
+        </section>
+
+        <!-- NavGrid comparison ---------------------------------------------- -->
+        <section>
+            <h2><label><input type="checkbox" id="gridOn"> Compare against NavGrid</label></h2>
+            <div class="stats">
+                <div><span>grid waypoints</span><b id="stGwp">—</b></div>
+                <div><span>grid length</span><b id="stGlen">—</b></div>
+            </div>
+            <div class="hint" id="gridHint">The 2D grid is baked from the same
+                static bodies, clamped to the ground slab — a NavGrid stores one
+                walkability bit per XZ cell, so a storey has to be chosen at
+                bake time. Its answer is always drawn flat at y = 0.</div>
+        </section>
+
+        <!-- Agents ---------------------------------------------------------- -->
+        <section>
+            <h2>Agents</h2>
+            <label>Speed <input type="range" id="aSpeed" min="0.5" max="10" step="0.1" value="3.5">
+                <span class="v" id="aSpeedV"></span></label>
+            <div class="row">
+                <button id="btnSend">Send agents to goal</button>
+            </div>
+            <div class="hint">Ctrl-click the level to retarget every walker.</div>
+            <div class="stats">
+                <div><span>walking</span><b id="stWalking">—</b></div>
+            </div>
+        </section>
+
+        <!-- Cache ----------------------------------------------------------- -->
+        <section>
+            <h2>Save / load round trip</h2>
+            <div class="row">
+                <button id="btnSave">Save</button>
+                <button id="btnLoad">Load + verify</button>
+            </div>
+            <div class="hint" id="cacheHint">Bake once, cache to disk, memcpy
+                back at startup.</div>
+        </section>
+
+        <section>
+            <h2><label><input type="checkbox" id="shellOn" checked> Draw the level</label></h2>
+            <div class="hint">Turn it off to see the baked surface alone.</div>
+        </section>
+    </div>
+
+    <script type="module" src="/app/app.js"></script>
+</body>
+</html>
