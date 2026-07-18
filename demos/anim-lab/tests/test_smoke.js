@@ -8,8 +8,11 @@
 
 import {
     scene, character, player, clips, masks, state, overlay,
+    machine, cameras, motion, MARKER_SPACING,
     selectClip, crossfade, selectSpace, setSpeedAxis, setDirection,
     setLayerEnabled, setLayerWeight, setLayerMask, LAYER_ROWS,
+    travelTo, trigger, setStateSpeed, setCrouch,
+    setRootMotion, resetJourney, selectCamera,
 } from "/app/app.js";
 
 let failures = 0;
@@ -84,7 +87,7 @@ check('the skinned character casts a shadow', stats.shadowDrawn > 0, stats.shado
 
 console.log('--- clips ---');
 
-check('the full clip library is authored', clips.names.length === 12, clips.names.join(','));
+check('the full clip library is authored', clips.names.length === 14, clips.names.join(','));
 for (const name of ['idle', 'walk', 'run', 'wave', 'jump',
                     'walkBack', 'walkStrafeL', 'walkStrafeR',
                     'crouchIdle', 'crouchWalk', 'point', 'nod']) {
@@ -517,10 +520,331 @@ check('and the space is gone from blendState',
       player.blendState().pos === undefined,
       JSON.stringify(player.blendState().pos));
 
-// Leave the app in the state that best shows what it does: walking at a
-// two-clip mix with a masked wave on top.
-selectSpace('locomotion', 0.2);
-setSpeedAxis(2.6);
+console.log('--- state machine: re-entry after suspension ---');
+
+// Everything above drove the base track directly with play(), which SUSPENDS
+// the machine. That is a real state worth asserting on before re-entering:
+// the definition survives, node.state is null, and the driver stays silent.
+check('a manual play() suspends the machine', character.node.state === null,
+      character.node.state);
+advanceTime(200);
+check('a suspended machine does not travel on its own',
+      character.node.state === null, character.node.state);
+
+travelTo('idle');
+advanceTime(100);
+check('travel() re-enters a suspended machine', machine.state === 'idle',
+      machine.state);
+
+console.log('--- state machine: parameters fire transitions ---');
+
+// Record every transition from here on, straight off onStateChanged, so the
+// assertions are about what the ENGINE reported rather than what the app asked
+// for. These are different whenever an autoAdvance fires.
+const fired = [];
+machine.onChange((from, to) => fired.push(`${from}→${to}`));
+
+// The parameter driver is the point: no state is named here. Speed crosses the
+// move threshold and the machine works out the rest.
+setStateSpeed(2.0);
+advanceTime(120);
+check('raising speed travels idle → move', machine.state === 'move', machine.state);
+check('onStateChanged reported idle → move', fired.includes('idle→move'),
+      fired.join(','));
+
+// The base track is now the locomotion blend space, driven by the machine's
+// own parameter — proof the state's `source` really is a space, not a clip.
+let sm = player.blendState();
+check('the move state sources a blend space', sm.pos !== undefined,
+      JSON.stringify(sm.pos));
+check('the machine reports its state in blendState', sm.state === 'move', sm.state);
+check('the machine pushed its speed parameter onto the axis',
+      Math.abs(sm.pos[0] - 2.0) < 1e-3, sm.pos[0]);
+
+setCrouch(true);
+advanceTime(400);
+check('crouch travels move → moveCrouch', machine.state === 'moveCrouch', machine.state);
+check('onStateChanged reported move → moveCrouch',
+      fired.includes('move→moveCrouch'), fired.join(','));
+sm = player.blendState();
+check('moveCrouch sources the crouch space',
+      sm.clips.some((c) => c.name === 'crouchWalk' || c.name === 'crouchIdle'),
+      JSON.stringify(sm.clips));
+
+setCrouch(false);
+advanceTime(400);
+check('releasing crouch travels back to move', machine.state === 'move', machine.state);
+
+setStateSpeed(0.0);
+advanceTime(500);
+check('dropping speed travels move → idle', machine.state === 'idle', machine.state);
+check('onStateChanged reported move → idle', fired.includes('move→idle'),
+      fired.join(','));
+
+// A crouched STAND is the crouch space at parameter 0, not a fourth state —
+// which is the payoff of authoring the crouch pair as a blend space.
+setCrouch(true);
+advanceTime(400);
+check('crouching while stopped still travels to moveCrouch',
+      machine.state === 'moveCrouch', machine.state);
+setCrouch(false);
+advanceTime(400);
+
+console.log('--- state machine: manual travel ---');
+
+// The graph's state buttons. travel() follows the same authored transitions,
+// so a manual move is indistinguishable from a parameter-driven one except in
+// who decided.
+const beforeManual = fired.length;
+travelTo('move');
+// Checked BEFORE pumping a frame: travel() takes effect on the call, and the
+// driver has not had a tick to have an opinion yet.
+check('manual travel() reaches the state immediately', machine.state === 'move',
+      machine.state);
+check('manual travel() fires onStateChanged', fired.length > beforeManual,
+      `${beforeManual} -> ${fired.length}`);
+check('the transition it fired was the authored idle → move',
+      fired[fired.length - 1] === 'idle→move', fired[fired.length - 1]);
+
+// travel() to the CURRENT state is documented as a no-op — no restart, no
+// callback — and that matters because the driver calls travel() every frame.
+const beforeNoop = fired.length;
+travelTo('move');
+check('travel() to the current state is a no-op', fired.length === beforeNoop,
+      `${beforeNoop} -> ${fired.length}`);
+
+// And the counterpart: the DRIVER is authoritative. A manual travel that
+// disagrees with the parameters is reconciled away on the next tick, which is
+// what stops the HUD's state buttons from wedging the character in a state its
+// inputs say it should not be in.
+advanceTime(500);
+check('the driver reconciles a manual travel back to what the parameters say',
+      machine.state === 'idle', machine.state);
+
+console.log('--- state machine: one-shots auto-advance ---');
+
+// THE state-machine assertion. `jump` is a non-looping state with an
+// autoAdvance transition out of it, so the engine must leave it BY ITSELF when
+// the clip ends — no timer, no onAnimationFinished handler, no JS at all.
+const beforeJump = fired.length;
+trigger('jump');
+advanceTime(60);
+check('trigger travels into the one-shot', machine.state === 'jump', machine.state);
+check('the wildcard transition into jump fired',
+      fired.slice(beforeJump).some((t) => t.endsWith('→jump')),
+      fired.slice(beforeJump).join(','));
+
+// The jump clip is 1.4 s. Halfway through it must STILL be in the state — if
+// it left early the "auto-advance" would just be a race.
+advanceTime(600);
+check('the one-shot holds its state while the clip runs',
+      machine.state === 'jump', machine.state);
+
+advanceTime(1400);
+check('jump auto-advanced out by itself', machine.state !== 'jump', machine.state);
+check('autoAdvance reported jump → move through onStateChanged',
+      fired.slice(beforeJump).includes('jump→move'),
+      fired.slice(beforeJump).join(','));
+// Speed is 0, so the driver settles the character out of `move` into `idle`
+// on the following tick: the graph returns control, the parameters take it.
+advanceTime(600);
+check('the driver settles the landing into idle', machine.state === 'idle',
+      machine.state);
+
+// A wave started while MOVING has to come back to move, not to the wave
+// transition's authored destination — that is the remembered-return path.
+setStateSpeed(2.0);
+advanceTime(400);
+check('moving again before the wave', machine.state === 'move', machine.state);
+trigger('wave');
+advanceTime(60);
+check('trigger travels into wave', machine.state === 'wave', machine.state);
+advanceTime(2400);
+check('wave auto-advanced out by itself', machine.state !== 'wave', machine.state);
+check('wave returned to the state it was triggered from',
+      machine.state === 'move', machine.state);
+
+setStateSpeed(0.0);
+advanceTime(600);
+
+console.log('--- root motion: the node stays put with it OFF ---');
+
+// The control half of the showpiece. Root motion off, character walking at
+// 1.6 m/s for a full second of virtual time: the pose must move and the NODE
+// must not, to the last bit. This is an exact comparison, not a threshold —
+// nothing writes node.position while extraction is disabled, so any drift at
+// all would mean something else is moving the character.
+setRootMotion(false);
+resetJourney();
+travelTo('move');
+setStateSpeed(1.6);
+advanceTime(400);
+
+const stillStart = character.node.position.slice();
+const stillPose0 = bonePositions();
+
+// 350 ms, not a whole second: the walk clip's cycle is exactly 1.0 s, so
+// sampling the pose one second apart compares a phase against ITSELF and reads
+// as frozen no matter how fast the character is walking. A pose comparison
+// across a periodic clip has to land off the period.
+advanceTime(350);
+check('root motion off: but the character is genuinely walking',
+      maxDelta(stillPose0, bonePositions()) > 0.005,
+      maxDelta(stillPose0, bonePositions()));
+
+advanceTime(650);
+const stillEnd = character.node.position.slice();
+
+check('root motion off: the node does not move on X',
+      stillEnd[0] === stillStart[0], `${stillStart[0]} -> ${stillEnd[0]}`);
+check('root motion off: the node does not move on Z',
+      stillEnd[2] === stillStart[2], `${stillStart[2]} -> ${stillEnd[2]}`);
+check('root motion off: the node is still at the origin', stillEnd[2] === 0, stillEnd[2]);
+check('root motion off: the odometer stays at zero', motion.distance === 0,
+      motion.distance);
+
+console.log('--- root motion: the node traverses with it ON ---');
+
+// THE root-motion assertion. Same state, same speed parameter, same graph —
+// one flag — and now the node must actually travel down the marker run.
+setRootMotion(true);
+resetJourney();
+advanceTime(200);
+check('root motion on: the move state swapped to the RM blend space',
+      player.blendState().clips.some((c) => c.name === 'walkRM' || c.name === 'idle'),
+      JSON.stringify(player.blendState().clips));
+
+const rmStart = character.node.position.slice();
+advanceTime(2000);          // two seconds at 1.6 m/s ≈ 3.2 m ≈ two markers
+const rmEnd = character.node.position.slice();
+const travelled = rmEnd[2] - rmStart[2];
+
+check('root motion on: the node moved down +Z', travelled > 1.0, travelled);
+check('root motion on: it moved roughly the authored distance (1.6 m/s)',
+      travelled > 2.4 && travelled < 4.0, travelled);
+check('root motion on: it did NOT drift sideways',
+      Math.abs(rmEnd[0] - rmStart[0]) < 1e-4, rmEnd[0] - rmStart[0]);
+check('root motion on: the odometer agrees with the node',
+      Math.abs(motion.distance - (rmEnd[2] - 0)) < 1e-3,
+      `${motion.distance} vs ${rmEnd[2]}`);
+check('root motion on: markers were passed', motion.markers >= 1, motion.markers);
+check('the marker count matches the node position',
+      motion.markers === Math.min(7, Math.floor(rmEnd[2] / MARKER_SPACING)),
+      `${motion.markers} vs z ${rmEnd[2]}`);
+
+// Extraction removes the displacement from the POSE, so the character must
+// still be animating in place relative to its node — the feet cycle, they do
+// not stretch away.
+const rmPose0 = bonePositions();
+advanceTime(200);
+check('root motion on: the pose still animates in place',
+      maxDelta(rmPose0, bonePositions()) > 0.005);
+
+// The overlay is parented to the character, so its markers ride the node.
+// Before chunk 3 they were root-level and would have been left behind.
+overlay.setEnabled(true);
+overlay.update();
+const headMat = character.node.getBoneWorldMatrix('head');
+const headMarker = overlay.joints[character.rig.index.head];
+check('the bone overlay tracks the rig in model space',
+      Math.abs(headMarker.z - headMat[14]) < 1e-4, `${headMarker.z} vs ${headMat[14]}`);
+// Read the node position NOW rather than reusing rmEnd — the character has
+// kept walking since that snapshot, which is rather the point.
+const nodeNow = character.node.position.slice();
+const headWorld = headMarker.localToWorld(0, 0, 0);
+check('the bone overlay is composed into world space by the hierarchy',
+      Math.abs(headWorld.z - (headMat[14] + nodeNow[2])) < 1e-3,
+      `${headWorld.z} vs ${headMat[14] + nodeNow[2]}`);
+overlay.setEnabled(false);
+
+// Stopping mid-run must leave the character where it walked to, not snap it
+// home: the node position is the app's, and the engine never writes it.
+const parked = character.node.position.slice();
+setStateSpeed(0.0);
+advanceTime(800);
+check('stopping leaves the character where it walked to',
+      character.node.position[2] > parked[2] - 0.01, character.node.position[2]);
+
+console.log('--- cameras: nodes, not view structs ---');
+
+check('three camera nodes exist',
+      cameras.orbit && cameras.follow && cameras.wide);
+check('a camera node reports as a camera', cameras.orbit.type === 'camera',
+      cameras.orbit.type);
+check('the app opens on the orbit camera', cameras.active === 'orbit', cameras.active);
+check('scene.activeCamera is the orbit node',
+      scene.activeCamera && scene.activeCamera.name === 'orbit', scene.activeCamera && scene.activeCamera.name);
+
+selectCamera('wide');
+advanceTime(50);
+check('setActiveCamera switches scene.activeCamera',
+      scene.activeCamera && scene.activeCamera.name === 'wide', scene.activeCamera && scene.activeCamera.name);
+check('the readout follows the switch', cameras.active === 'wide', cameras.active);
+
+selectCamera('follow');
+advanceTime(50);
+check('switching again lands on the follow camera',
+      scene.activeCamera && scene.activeCamera.name === 'follow', cameras.active);
+
+console.log('--- cameras: the follow cam rides the hierarchy ---');
+
+// THE camera assertion. The follow camera is a CHILD of the character node and
+// is never written to after setup — so if the character moves and the camera
+// moves with it by exactly the same amount, that motion came from the scene
+// graph rather than from any per-frame JS.
+const camBefore = cameras.follow.localToWorld(0, 0, 0);
+const charBefore = character.node.position.slice();
+
+setStateSpeed(2.4);
+advanceTime(1500);
+
+const camAfter = cameras.follow.localToWorld(0, 0, 0);
+const charAfter = character.node.position.slice();
+const charMoved = charAfter[2] - charBefore[2];
+const camMoved = camAfter.z - camBefore.z;
+
+check('the character moved during the follow test', charMoved > 0.5, charMoved);
+check('the follow camera moved with it', camMoved > 0.5, camMoved);
+check('it moved by EXACTLY the same amount (it is a child, not a tracker)',
+      Math.abs(camMoved - charMoved) < 1e-4, `${camMoved} vs ${charMoved}`);
+check('the follow camera keeps its authored offset behind the character',
+      Math.abs((camAfter.z - charAfter[2]) - (-4.0)) < 1e-3,
+      camAfter.z - charAfter[2]);
+check('and its height offset', Math.abs(camAfter.y - 2.05) < 1e-3, camAfter.y);
+
+// The cinematic clip is the node-property tier driving a camera node — tier 3
+// animating tier-3 properties while tier 1 animates the character's bones.
+const wideBefore = cameras.wide.position.slice();
+const fovBefore = cameras.wide.fov;
+cameras.setCinematic(true);
+advanceTime(2000);
+check('the cinematic clip moves the wide camera node',
+      Math.abs(cameras.wide.position[2] - wideBefore[2]) > 0.1,
+      `${wideBefore[2]} -> ${cameras.wide.position[2]}`);
+check('the cinematic clip pulls its fov', Math.abs(cameras.wide.fov - fovBefore) > 0.5,
+      `${fovBefore} -> ${cameras.wide.fov}`);
+check('the character kept animating through the camera move',
+      character.node.isPlaying === true);
+cameras.setCinematic(false);
+
+selectCamera('orbit');
+advanceTime(50);
+check('back on the orbit camera', cameras.active === 'orbit', cameras.active);
+
+console.log('--- the app renders in its showpiece state ---');
+
+setRootMotion(true);
+resetJourney();
+travelTo('move');
+setStateSpeed(2.2);
+advanceTime(1200);
+const showStats = scene.cullStats();
+check('the scene still draws with everything running', showStats.meshDrawn > 0,
+      JSON.stringify(showStats));
+check('and still casts shadows', showStats.shadowDrawn > 0, showStats.shadowDrawn);
+
+// Leave the app in the state that best shows what it does: the character
+// walking down the marker run under root motion, with a masked wave on top.
 setLayerEnabled(1, true, 0.2);
 advanceTime(400);
 

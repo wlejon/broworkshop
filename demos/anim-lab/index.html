@@ -12,22 +12,132 @@
 
         <!-- Live player state. Everything here is read back from the engine's
              skeletal player, not from the HUD's own variables — so it reports
-             what is actually playing, including mid-crossfade. -->
+             what is actually playing, including mid-crossfade and mid-
+             transition. `state` is node.state; `cam` is scene.activeCamera. -->
         <div class="stats">
+            <div><span>state</span><b id="stState">—</b></div>
             <div><span>clip</span><b id="stClip">—</b></div>
+            <div><span>cam</span><b id="stCamera">—</b></div>
+        </div>
+        <div class="stats">
+            <div><span>last transition</span><b id="stLast">—</b></div>
             <div><span>time</span><b id="stTime">—</b></div>
             <div><span>playing</span><b id="stPlaying">—</b></div>
         </div>
 
-        <div class="group">Clips</div>
+        <!-- ═══ STATE MACHINE ═══════════════════════════════════════════════ -->
+
+        <div class="group" data-body="gState">State machine</div>
+        <div id="gState">
+
+        <section>
+            <h2>Graph</h2>
+            <div id="stateNodes" class="stateNodes"></div>
+            <div class="hint">The lit node is <code>node.state</code>. Click any
+                state to <code>travel()</code> to it manually — that follows the
+                same authored transition the parameters below fire
+                automatically.</div>
+            <div id="stateEdges" class="edges"></div>
+            <div class="hint">Every transition carries its own fade;
+                <b>sync</b> is <code>syncPhase</code> (the incoming cycle starts
+                at the outgoing one's phase, so a crouch mid-stride keeps its
+                feet), <b>auto</b> is <code>autoAdvance</code> (the engine
+                leaves the state by itself when its one-shot clip ends).</div>
+        </section>
+
+        <section>
+            <h2>Parameters</h2>
+            <label>Speed <input type="range" id="stateSpeed" min="0" max="5" step="0.02" value="0">
+                <span class="v" id="stateSpeedV"></span></label>
+            <label><input type="checkbox" id="crouchOn"> Crouch</label>
+            <div class="row">
+                <button id="btnJump">jump</button>
+                <button id="btnWave">wave</button>
+            </div>
+            <div class="hint">These name <b>no state at all</b> — they move a
+                number and a boolean. Push speed past 0.05 and watch
+                <code>idle → move</code> fire; tick crouch and watch
+                <code>move → moveCrouch</code>. bro's machine has no condition
+                language by design: the engine owns the graph, the app owns the
+                decision, and this slider is that decision.</div>
+        </section>
+
+        <section>
+            <h2>Transitions <button id="btnClearLog">clear</button></h2>
+            <div id="stateLog" class="log"></div>
+            <div class="hint"><code>onStateChanged(from, to)</code>, timestamped
+                on the virtual clock. A jump logs two lines — the wildcard in,
+                then the auto-advance back out — which is the machine driving
+                itself with no JS in the loop.</div>
+        </section>
+
+        </div>
+
+        <!-- ═══ ROOT MOTION ═════════════════════════════════════════════════ -->
+
+        <div class="group" data-body="gRoot">Root motion</div>
+        <div id="gRoot">
+
+        <section>
+            <h2>Drive the node from the clip</h2>
+            <label><input type="checkbox" id="rootMotionOn"> Root motion</label>
+            <div class="stats">
+                <div><span>travelled</span><b id="rmDist">0.00 m</b></div>
+                <div><span>passed</span><b id="rmMarkers">0/7 markers</b></div>
+            </div>
+            <div class="hint" id="rmZ">node z 0.00</div>
+            <button id="btnResetPos">back to the start</button>
+            <div class="hint"><b>Switch this on with the speed up.</b> Off, the
+                character treadmills on the pad forever: the gait's displacement
+                stays in the pose and the node never moves. On,
+                <code>setRootMotion</code> pulls that displacement out of the
+                blended pose and <code>consumeRootMotion()</code> hands it to the
+                app, which walks the node down the marker run — 1.5 m per
+                block. Same clips, same speed, same state machine. The
+                animation is the source of truth for distance, so the feet
+                never slide.</div>
+        </section>
+
+        </div>
+
+        <!-- ═══ CAMERAS ═════════════════════════════════════════════════════ -->
+
+        <div class="group" data-body="gCam">Cameras</div>
+        <div id="gCam">
+
+        <section>
+            <h2>Camera nodes <span class="v" id="camPos"></span></h2>
+            <div class="row" id="cameraRow"></div>
+            <label><input type="checkbox" id="cineOn"> Cinematic move</label>
+            <div class="hint"><code>scene.createCamera()</code> makes the camera
+                a NODE: only the projection lives on it, the view IS its world
+                transform. <b>follow</b> is parented to the character and never
+                touched again — switch on root motion and it rides the
+                hierarchy down the run with zero per-frame JS, which is the one
+                thing the imperative <code>setCamera</code> path cannot do.
+                <b>Cinematic</b> flies the wide camera from a
+                <code>createAnimationPlayer</code> clip — the node-property
+                tier animating a camera while the skeletal tier animates the
+                character.</div>
+        </section>
+
+        </div>
+
+        <!-- ═══ CLIPS ═══════════════════════════════════════════════════════ -->
+
+        <div class="group" data-body="gClips" data-start="closed">Clips</div>
+        <div id="gClips">
 
         <section>
             <h2>Library <span class="v" id="clipCount"></span></h2>
             <div class="clipgrid" id="clipGrid"></div>
             <div class="hint">Each button is <code>play(name)</code> with the
-                current loop flag and speed — a hard cut, no fade. Every clip
-                is generated keyframe data compiled to a bromesh
-                <code>Animation</code>; the engine evaluates it in C++.</div>
+                current loop flag and speed — a hard cut, no fade. This
+                <b>suspends the state machine</b> (a manual play takes the base
+                track over and <code>node.state</code> goes null); travel to any
+                state above to re-enter. Every clip is generated keyframe data
+                compiled to a bromesh <code>Animation</code>; the engine
+                evaluates it in C++.</div>
         </section>
 
         <section>
@@ -49,7 +159,12 @@
                 while paused.</div>
         </section>
 
-        <div class="group">Crossfade</div>
+        </div>
+
+        <!-- ═══ CROSSFADE ═══════════════════════════════════════════════════ -->
+
+        <div class="group" data-body="gFade" data-start="closed">Crossfade</div>
+        <div id="gFade">
 
         <section>
             <h2>Blend into a clip</h2>
@@ -62,10 +177,16 @@
             <div class="hint">The outgoing clip keeps advancing while it fades,
                 so walk → run stays foot-aligned instead of snapping. Set fade
                 to 0 and hit the button to feel the difference a crossfade
-                makes.</div>
+                makes. A state-machine transition is this same machinery, with
+                the fade authored into the graph instead of picked here.</div>
         </section>
 
-        <div class="group">Blending</div>
+        </div>
+
+        <!-- ═══ BLENDING ════════════════════════════════════════════════════ -->
+
+        <div class="group" data-body="gBlend" data-start="closed">Blending</div>
+        <div id="gBlend">
 
         <!-- The live mix, read straight out of blendState(). Every control
              below moves these bars; if a bar does not move, the control did
@@ -112,7 +233,12 @@
                 edge.</div>
         </section>
 
-        <div class="group">Layers</div>
+        </div>
+
+        <!-- ═══ LAYERS ══════════════════════════════════════════════════════ -->
+
+        <div class="group" data-body="gLayers" data-start="closed">Layers</div>
+        <div id="gLayers">
 
         <section>
             <h2>Masked layers <span class="v" id="layerSlots">0/3</span></h2>
@@ -125,10 +251,16 @@
                 arm / left arm / head), so all three can run over the gait
                 simultaneously. Change a <b>mask</b> to <code>full body</code>
                 and the layer swallows the walk entirely: that is the mask
-                doing its job, in reverse.</div>
+                doing its job, in reverse. Layers survive a state transition —
+                they never suspend.</div>
         </section>
 
-        <div class="group">Rig</div>
+        </div>
+
+        <!-- ═══ RIG ═════════════════════════════════════════════════════════ -->
+
+        <div class="group" data-body="gRig" data-start="closed">Rig</div>
+        <div id="gRig">
 
         <section>
             <h2>Skeleton <span class="v" id="boneCount"></span></h2>
@@ -137,15 +269,22 @@
             <div class="hint">The overlay reads
                 <code>getBoneWorldMatrix()</code> per bone per frame and parks a
                 marker there — the same seam a prop socket or a ragdoll would
-                attach through. Turn the mesh off to watch the rig alone.</div>
+                attach through. Those matrices are MODEL space, so the markers
+                are parented to the character node and the engine composes its
+                transform: the overlay stays glued to the rig even while root
+                motion walks it away. Turn the mesh off to watch the rig
+                alone.</div>
         </section>
+
+        </div>
 
         <div class="hint foot">
             <b>Right-drag</b> orbit · <b>Middle-drag</b> pan · <b>Wheel</b> zoom ·
-            <b>Space</b> play/pause<br>
-            Twelve procedurally authored clips, three blend spaces and eight
-            layer slots — all of it keyframe data evaluated in C++, none of it
-            posed from JavaScript.
+            <b>Space</b> play/pause · <b>1/2/3</b> camera · <b>J</b> jump ·
+            <b>V</b> wave<br>
+            Fourteen procedurally authored clips, four blend spaces, eight layer
+            slots, a five-state machine and three camera nodes — all of it
+            keyframe data evaluated in C++, none of it posed from JavaScript.
         </div>
     </div>
 

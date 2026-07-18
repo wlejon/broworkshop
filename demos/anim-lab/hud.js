@@ -27,7 +27,25 @@ export const state = {
     speedAxis: 0.0,
     dirX: 0.0,
     dirY: 1.0,
+
+    // State machine + root motion. `stateSpeed` is the machine's own parameter
+    // and is deliberately separate from `speedAxis` above: the blend-space
+    // section drives the axis directly with the machine out of the picture,
+    // while this one drives it THROUGH the machine, which also decides whether
+    // the character should be idling, moving or crouch-moving at that speed.
+    stateSpeed: 0.0,
+    crouch: false,
+    rootMotion: false,
+    camera: 'orbit',
+    cinematic: false,
 };
+
+/**
+ * Live root-motion telemetry, owned by the app's frame loop and rendered here.
+ * `distance` is the world-space path length the node has actually travelled;
+ * `markers` counts the stage's 1.5 m blocks the character has passed.
+ */
+export const motion = { distance: 0, markers: 0, z: 0 };
 
 // The three layer slots the HUD exposes. Slot 0 is left free on purpose:
 // play(name, { mask }) is shorthand for layer 0, so leaving it empty means the
@@ -46,20 +64,29 @@ let player = null;
 let overlay = null;
 let character = null;
 let masks = null;
+let machine = null;
+let cameras = null;
 
 const $ = (id) => document.getElementById(id);
 
 /** Wire every control. Called once, after the scene and player exist. */
-export function bindHud(p, o, c, m) {
+export function bindHud(p, o, c, m, sm, cams) {
     player = p;
     overlay = o;
     character = c;
     masks = m;
+    machine = sm;
+    cameras = cams;
 
     buildClipGrid();
     buildFadeTargets();
     buildBlendControls();
     buildLayerRows();
+    buildStateGraph();
+    buildStateControls();
+    buildRootMotion();
+    buildCameraControls();
+    buildCollapsibles();
 
     $('boneCount').textContent = `${character.boneCount} bones`;
     $('clipCount').textContent = `${player.names.length} clips`;
@@ -409,6 +436,236 @@ function syncLayerRow(row) {
         (list.length > 6 ? list.slice(0, 5).join(' ') + ' …' : list.join(' '));
 }
 
+// ── State machine ────────────────────────────────────────────────────────────
+//
+// The graph, drawn. A state machine is the most invisible thing in this app —
+// without a picture, "the character is walking" and "the character is in the
+// `move` state, having arrived from `idle` 0.4 s ago over a 0.25 s fade" look
+// identical. So: a node per state with the active one lit, an edge list, the
+// last transition called out, and a timestamped log. The log in particular is
+// what turns the parameter sliders from "they change the animation" into "they
+// change the STATE, and here is the transition that fired".
+
+const STATE_BLURB = {
+    idle:       'clip · the neutral state',
+    move:       'blend space · speed axis',
+    moveCrouch: 'blend space · crouched, phase-synced with move',
+    jump:       'one-shot · autoAdvance → move',
+    wave:       'one-shot · autoAdvance, returns to the previous state',
+};
+
+function buildStateGraph() {
+    const host = $('stateNodes');
+    host.textContent = '';
+    for (const name of machine.names) {
+        const b = document.createElement('button');
+        b.className = 'stateNode';
+        b.dataset.state = name;
+        b.textContent = name;
+        b.title = `travel('${name}') — ${STATE_BLURB[name] || ''}`;
+        // Every state node is also its own travel button: clicking a state in
+        // the graph is the manual path, and it goes through exactly the same
+        // authored transitions the parameter driver uses.
+        b.addEventListener('click', () => travelTo(name));
+        host.appendChild(b);
+    }
+
+    // The edge list, rendered from the machine's own transition definition
+    // rather than retyped — if the graph changes, this changes with it.
+    const edges = $('stateEdges');
+    edges.textContent = '';
+    for (const t of machine.transitions) {
+        const e = document.createElement('div');
+        e.className = 'edge';
+        const tags = [];
+        if (t.fade) tags.push(`${t.fade.toFixed(2)}s`);
+        if (t.syncPhase) tags.push('sync');
+        if (t.autoAdvance) tags.push('auto');
+        e.innerHTML = '';
+        e.textContent = `${t.from} → ${t.to}` + (tags.length ? `  ${tags.join(' · ')}` : '');
+        e.dataset.from = t.from;
+        e.dataset.to = t.to;
+        if (t.autoAdvance) e.classList.add('auto');
+        edges.appendChild(e);
+    }
+
+    machine.onChange((from, to) => appendLog(from, to));
+}
+
+function buildStateControls() {
+    // The parameter drivers. These do NOT name a state — they move a number
+    // and a boolean, and the machine's driver decides what that implies.
+    bindRange('stateSpeed', (v) => {
+        state.stateSpeed = v;
+        machine.setSpeed(v);
+    }, (v) => v.toFixed(2) + ' m/s');
+
+    bindCheck('crouchOn', (v) => { state.crouch = v; machine.setCrouch(v); });
+
+    $('btnJump').addEventListener('click', () => trigger('jump'));
+    $('btnWave').addEventListener('click', () => trigger('wave'));
+    $('btnClearLog').addEventListener('click', () => {
+        machine.log.length = 0;
+        $('stateLog').textContent = '';
+    });
+}
+
+/** Manual travel from the graph's state buttons. */
+export function travelTo(name) {
+    machine.travel(name);
+    markState();
+    return name;
+}
+
+/** Fire a one-shot from the HUD's trigger buttons. */
+export function trigger(name) {
+    machine.trigger(name);
+    markState();
+    return name;
+}
+
+/** Drive the machine's speed parameter (the automatic-transition path). */
+export function setStateSpeed(v) {
+    state.stateSpeed = v;
+    machine.setSpeed(v);
+    const el = $('stateSpeed');
+    if (el) { el.value = String(v); $('stateSpeedV').textContent = v.toFixed(2) + ' m/s'; }
+    return v;
+}
+
+/** Drive the machine's crouch parameter. */
+export function setCrouch(on) {
+    state.crouch = !!on;
+    machine.setCrouch(state.crouch);
+    const el = $('crouchOn');
+    if (el) el.checked = state.crouch;
+    return state.crouch;
+}
+
+function appendLog(from, to, note) {
+    const host = $('stateLog');
+    if (!host) return;
+    const line = document.createElement('div');
+    line.className = 'logLine';
+    const t = machine.lastChange.at;
+    line.textContent = note
+        ? `${t.toFixed(2)}s  ${note}`
+        : `${t.toFixed(2)}s  ${from === null ? '(resumed)' : from} → ${to}`;
+    if (note) line.classList.add('note');
+    host.appendChild(line);
+    while (host.children.length > 24) host.removeChild(host.firstChild);
+    // Newest line stays in view; the log is a tail, not an archive.
+    host.scrollTop = host.scrollHeight;
+}
+
+function markState() {
+    const cur = machine.state;
+    for (const b of $('stateNodes').children) {
+        b.classList.toggle('active', b.dataset.state === cur);
+    }
+    const last = machine.lastChange;
+    for (const e of $('stateEdges').children) {
+        e.classList.toggle('fired', e.dataset.from === last.from && e.dataset.to === last.to);
+    }
+}
+
+// ── Root motion ──────────────────────────────────────────────────────────────
+//
+// The app's showpiece, and the control that matters most is a single checkbox.
+// Off: the gait's displacement stays in the pose, the node never moves, and
+// the character treadmills between the markers forever. On: the engine pulls
+// that displacement out of the pose and hands it to the app, which walks the
+// node down the run. Same clips, same speed parameter, same state machine —
+// one flag, and the character starts actually going somewhere.
+
+function buildRootMotion() {
+    bindCheck('rootMotionOn', (v) => {
+        state.rootMotion = v;
+        machine.setRootMotion(v);
+        if (!v) resetJourney();
+    });
+    $('btnResetPos').addEventListener('click', () => resetJourney());
+}
+
+/** Send the character back to the start of the run and zero the odometer. */
+export function resetJourney() {
+    player.resetTransform();
+    motion.distance = 0;
+    motion.markers = 0;
+    motion.z = 0;
+    return motion;
+}
+
+/** Toggle root motion from code (the HUD checkbox routes through here too). */
+export function setRootMotion(on) {
+    state.rootMotion = !!on;
+    machine.setRootMotion(state.rootMotion);
+    const el = $('rootMotionOn');
+    if (el) el.checked = state.rootMotion;
+    if (!state.rootMotion) resetJourney();
+    return state.rootMotion;
+}
+
+// ── Cameras ──────────────────────────────────────────────────────────────────
+
+function buildCameraControls() {
+    const row = $('cameraRow');
+    row.textContent = '';
+    for (const [key, label] of [['orbit', 'orbit'], ['follow', 'follow'], ['wide', 'wide']]) {
+        const b = document.createElement('button');
+        b.textContent = label;
+        b.dataset.camera = key;
+        b.addEventListener('click', () => selectCamera(key));
+        row.appendChild(b);
+    }
+    bindCheck('cineOn', (v) => {
+        state.cinematic = v;
+        cameras.setCinematic(v);
+        // A cinematic that nobody is looking through is a waste, so arming it
+        // also cuts to the camera it flies.
+        if (v && cameras.active !== 'wide') selectCamera('wide');
+    });
+    markCamera();
+}
+
+/** Cut to a camera node. `scene.activeCamera` is the truth the readout shows. */
+export function selectCamera(key) {
+    state.camera = key;
+    cameras.select(key);
+    markCamera();
+    return key;
+}
+
+function markCamera() {
+    for (const b of $('cameraRow').children) {
+        b.classList.toggle('active', b.dataset.camera === cameras.active);
+    }
+}
+
+// ── Collapsible groups ───────────────────────────────────────────────────────
+//
+// The panel now carries six groups and does not fit on a laptop screen. Each
+// group header toggles its body, and the ones this chunk adds start OPEN while
+// the earlier ones start collapsed — so the app opens showing what is new
+// without hiding the rest behind a scroll.
+
+function buildCollapsibles() {
+    for (const head of document.querySelectorAll('#hud .group')) {
+        const body = document.getElementById(head.dataset.body);
+        if (!body) continue;
+        const apply = () => {
+            const open = !head.classList.contains('closed');
+            body.style.display = open ? '' : 'none';
+        };
+        head.addEventListener('click', () => {
+            head.classList.toggle('closed');
+            apply();
+        });
+        if (head.dataset.start === 'closed') head.classList.add('closed');
+        apply();
+    }
+}
+
 function bindRange(id, apply, fmt) {
     const el = $(id);
     const out = $(id + 'V');
@@ -448,6 +705,43 @@ export function updateReadout() {
     }
 
     renderBlendMix();
+    renderState();
+    renderMotion();
+    renderCamera();
+}
+
+/**
+ * The machine's live state. Read from `node.state` rather than from the last
+ * thing the HUD asked for, because they differ in exactly the interesting
+ * cases: while a one-shot is auto-advancing, and after a manual play() has
+ * SUSPENDED the machine (node.state goes null and the definition survives).
+ */
+function renderState() {
+    const cur = machine.state;
+    $('stState').textContent = cur === null ? '(suspended)' : cur;
+    const last = machine.lastChange;
+    $('stLast').textContent = last.to
+        ? `${last.from === null ? '(resumed)' : last.from} → ${last.to}`
+        : '—';
+    markState();
+}
+
+function renderMotion() {
+    $('rmDist').textContent = `${motion.distance.toFixed(2)} m`;
+    $('rmMarkers').textContent = `${motion.markers}/7 markers`;
+    $('rmZ').textContent = `node z ${motion.z.toFixed(2)}`;
+}
+
+function renderCamera() {
+    // scene.activeCamera, not the button that was last clicked — those come
+    // apart the moment anything calls setCamera().
+    const active = cameras.active;
+    $('stCamera').textContent = active || '(imperative view)';
+    const p = cameras.activePosition();
+    $('camPos').textContent = p
+        ? `[${p.map((v) => v.toFixed(1)).join(', ')}]`
+        : '—';
+    markCamera();
 }
 
 /**
@@ -512,8 +806,3 @@ function renderBlendMix() {
 export function setFps(fps) {
     $('fps').textContent = fps.toFixed(0) + ' fps';
 }
-
-// CHUNK 3: a state-machine group with one travel() button per state plus a
-// live `node.state` readout, and a root-motion toggle with a consumed-distance
-// counter next to the stage's marker run. `renderBlendMix` already surfaces
-// blendState().state's neighbours, so a `state` line belongs in that readout.

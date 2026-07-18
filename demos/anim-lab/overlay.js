@@ -9,6 +9,16 @@
 //
 // It is per-frame JS by nature (it is a debug view, not the animation), and it
 // is off by default so the normal path stays zero-JS-per-frame.
+//
+// Model space vs world space: `getBoneWorldMatrix` is MODEL space, i.e. the
+// character node's local frame. Once root motion drives the node down the
+// marker run those two frames stop agreeing, and markers placed at raw model
+// coordinates would stay behind on the pad while the character walked away.
+// The fix is to PARENT the markers to the character node rather than to
+// compose its transform into every marker by hand: model space is then exactly
+// the space the markers live in, the composition is the engine's own hierarchy
+// walk, and the overlay stays correct under any node translation, rotation or
+// scale the app later applies — including ones this module never hears about.
 
 export function createBoneOverlay(scene, character) {
     const rig = character.rig;
@@ -27,6 +37,7 @@ export function createBoneOverlay(scene, character) {
             emissive: 2.0, emissiveColor: [1.0, 0.85, 0.35],
         });
         j.visible = false;
+        character.node.add(j);          // see the module note: model space
         joints.push(j);
     }
 
@@ -41,6 +52,7 @@ export function createBoneOverlay(scene, character) {
             emissive: 1.2, emissiveColor: [0.40, 0.80, 1.0],
         });
         node.visible = false;
+        character.node.add(node);
         bones.push({ child: i, parent: p, node });
     });
 
@@ -56,9 +68,10 @@ export function createBoneOverlay(scene, character) {
     function update() {
         if (!enabled) return;
 
-        // Model space equals world space here: the character node sits at the
-        // origin with no rotation or scale. Chunk 3 moves the node under root
-        // motion, at which point this needs the node transform composed in.
+        // Every marker is a CHILD of the character node, so writing a bone's
+        // model-space translation straight onto a marker's local position is
+        // already correct — the engine composes the node transform on its way
+        // to world space. No node position is read anywhere in this function.
         for (let i = 0; i < rig.names.length; ++i) {
             const m = character.node.getBoneWorldMatrix(i);
             if (!m) { pos[i] = null; continue; }

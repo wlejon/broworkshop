@@ -77,6 +77,13 @@ export function createPlayer(node, clips, masks) {
 
         get loop()  { return state.loop; },
         set loop(v) {
+            // No-op when nothing changes. This matters more than it looks:
+            // the restart below is a play(), and a play() SUSPENDS the state
+            // machine. The HUD pushes every default through these setters at
+            // bind time, so without this guard simply wiring up the panel
+            // would knock the machine out of the state it had just entered and
+            // the app would open suspended.
+            if (state.loop === !!v) return;
             state.loop = !!v;
             // loop is a play() option, so changing it only takes effect on the
             // next start — restart in place, preserving the playhead, so the
@@ -134,6 +141,19 @@ export function createPlayer(node, clips, masks) {
             node.addBlendSpace1D('locomotionCrouch', [
                 { clip: 'crouchIdle', pos: 0.0 },
                 { clip: 'crouchWalk', pos: 1.6 },
+            ]);
+
+            // The root-motion twin of `locomotion`: same axis, same positions,
+            // same gait curves — the members just carry a `root` translation
+            // track as well. Keeping it a SEPARATE space (rather than swapping
+            // clips inside one) is what lets the HUD toggle between travelling
+            // and treadmilling with the parameter and the phase both intact:
+            // the two spaces are structurally identical, so a switch mid-stride
+            // lands on the same mix of the same poses.
+            node.addBlendSpace1D('locomotionRM', [
+                { clip: 'idle',   pos: 0.0 },
+                { clip: 'walkRM', pos: 1.6 },
+                { clip: 'runRM',  pos: 5.0 },
             ]);
 
             // 2D: the locomotion square. X is strafe (+1 = the character's
@@ -228,13 +248,75 @@ export function createPlayer(node, clips, masks) {
         activeLayers() {
             return facade.blendState().layers || [];
         },
+
+        // ── State machine passthrough ────────────────────────────────────────
+        //
+        // states.js owns the graph; the facade just forwards, so the HUD and
+        // the tests keep talking to one object. `travel` is deliberately NOT
+        // play(): it follows an AUTHORED transition (with that transition's
+        // fade and phase-sync), where play() would take the base track over
+        // and suspend the machine entirely.
+
+        travel(name)   { node.travel(name); return facade; },
+        get state()    { return node.state; },
+
+        // ── Root motion ──────────────────────────────────────────────────────
+        //
+        // Opt-in extraction of the root bone's authored displacement. With it
+        // ON the engine removes that displacement from the pose (so the
+        // character animates in place) and accumulates it for the app, which
+        // moves the NODE — animation stays the source of truth for distance.
+        // With it OFF the displacement stays in the pose and the mesh would
+        // slide away from its node, which is why the in-place clips (`walk`,
+        // `run`) and the travelling ones (`walkRM`, `runRM`) are separate: the
+        // toggle swaps which blend space is playing, not just this flag.
+
+        /**
+         * Enable/disable extraction. `bone: 'root'` is explicit rather than
+         * relying on auto-detect — it is the parentless bone auto-detect would
+         * pick anyway, and naming it documents which bone the clips author.
+         * extractY stays false so the jump's vertical arc renders as authored.
+         */
+        setRootMotion(on) {
+            node.setRootMotion({ enabled: !!on, bone: 'root', extractY: false });
+            return facade;
+        },
+
+        /**
+         * Drain the accumulated delta and apply it to the node.
+         *
+         * The delta is MODEL space, so it is rotated by the heading the app
+         * owns before being added to the node position — that is the seam
+         * where a turn clip's yaw would steer a character. Here the heading
+         * stays 0 (the rig faces +Z and the marker run is down +Z), but the
+         * rotation is written out rather than assumed so the wiring is the
+         * real one.
+         *
+         * Returns the world-space distance travelled this call, which is what
+         * the HUD's odometer sums.
+         */
+        pumpRootMotion(heading = 0) {
+            const d = node.consumeRootMotion();
+            if (!d) return 0;
+            const [dx, dy, dz] = d.translation;
+            const c = Math.cos(heading), s = Math.sin(heading);
+            const wx = c * dx + s * dz;
+            const wz = -s * dx + c * dz;
+            const p = node.position;
+            node.position = [p[0] + wx, p[1] + dy, p[2] + wz];
+            return Math.hypot(wx, wz);
+        },
+
+        /** Park the character back at the origin (the odometer's zero). */
+        resetTransform() {
+            node.position = [0, 0, 0];
+            node.quaternion = [0, 0, 0, 1];
+            // Drain whatever accumulated during the frames before the reset,
+            // or the next pump would teleport the character back out again.
+            node.consumeRootMotion();
+            return facade;
+        },
     };
 
     return facade;
 }
-
-// CHUNK 3: `travel(state)` wrapping node.travel(), plus a consumeRootMotion()
-// pump that moves the node — both belong here for the same reason. The spaces
-// registered in defineSpaces() are ready to be state SOURCES as they stand:
-// 'locomotion' and 'locomotionCrouch' share an axis, so a move ↔ moveCrouch
-// transition with syncPhase: true stays foot-aligned.

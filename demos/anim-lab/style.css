@@ -211,5 +211,93 @@ canvas#stage { display: block; width: 100vw; height: 100vh; }
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
+/* --- collapsible groups ----------------------------------------------------
+   The group header is the toggle. A caret rendered from the class keeps the
+   markup free of state — the header only ever carries `closed` or not. */
+#hud .group { cursor: pointer; user-select: none; }
+#hud .group:hover { color: #fff2b8; }
+#hud .group::before {
+    content: '▾ ';
+    display: inline-block;
+    font-size: 9px;
+    color: #9fd6ff;
+}
+#hud .group.closed::before { content: '▸ '; }
+
+/* --- state machine graph ---------------------------------------------------
+   A state is a chip; the active one is lit. Wrapping rather than a drawn
+   digraph on purpose: with five states the useful information is WHICH one is
+   live and what fired last, and a wrapped row of chips shows that at a glance
+   without any layout maths. */
+#hud .stateNodes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+    margin: 5px 0 4px 0;
+}
+#hud .stateNodes .stateNode {
+    margin-top: 0;
+    padding: 4px 7px;
+    border-radius: 10px;
+    font-size: 11px;
+}
+#hud .stateNodes .stateNode.active {
+    background: #1d4f3a;
+    border-color: #7bed9f;
+    color: #d9ffe8;
+    box-shadow: 0 0 8px rgba(123, 237, 159, 0.45);
+}
+
+#hud .edges {
+    margin: 5px 0 2px 0;
+    padding: 4px 6px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 4px;
+}
+#hud .edge {
+    font: 10px ui-monospace, Consolas, monospace;
+    color: #7d8a99;
+    padding: 1px 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+#hud .edge.auto { color: #c8a0e8; }
+/* The transition that actually fired last, so the graph shows the EDGE
+   travelled and not just the node arrived at. */
+#hud .edge.fired {
+    color: #ffe08a;
+    background: rgba(255, 224, 138, 0.10);
+    border-radius: 2px;
+}
+
+/* --- transition log --------------------------------------------------------
+   A tail, not an archive: fixed height, newest at the bottom, scrolled into
+   view on append. */
+#hud .log {
+    height: 88px;
+    overflow-y: auto;
+    margin: 4px 0 2px 0;
+    padding: 4px 6px;
+    background: rgba(0, 0, 0, 0.30);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 4px;
+    font: 10px ui-monospace, Consolas, monospace;
+}
+#hud .logLine { color: #9fd6ff; padding: 1px 0; white-space: nowrap; }
+#hud .logLine.note { color: #ffe08a; }
+
+#hud #cameraRow button.active {
+    background: #1d4f3a; border-color: #7bed9f; color: #d9ffe8;
+}
+
+#hud h2 button {
+    float: right;
+    margin-top: -1px;
+    padding: 1px 6px;
+    font-size: 10px;
+}
+
 #hud .hint { color: #8b97a6; font-size: 11px; margin-top: 3px; line-height: 1.35; }
 #hud .foot { margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.10); padding-top: 7px; }

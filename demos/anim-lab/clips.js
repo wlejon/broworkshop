@@ -480,12 +480,41 @@ export function buildClips(rig) {
         }, 36),
     };
 
-    // CHUNK 3: `jump` starts and ends standing, which is exactly the shape a
-    // one-shot state-machine state with autoAdvance wants — and `crouchIdle` /
-    // `crouchWalk` are already a phase-compatible second locomotion space, so
-    // move ↔ moveCrouch with syncPhase: true works out of the box. For root
-    // motion, add a variant whose `hips` translation track advances in +Z
-    // across the cycle — setRootMotion({ bone: 'hips' }) then extracts it.
+    // --- root-motion variants ------------------------------------------------
+    //
+    // The same two gaits with ONE extra track: the `root` bone translating
+    // steadily down +Z across the cycle. That track is the entire difference
+    // between a clip that treadmills and a clip that travels.
+    //
+    // `root` is the right bone for it. It is parentless, it sits at the origin,
+    // and rig.js deliberately excludes it from the skin weights — so it moves
+    // the whole hierarchy and deforms nothing, which is exactly what a root
+    // bone is for. setRootMotion({ bone: 'root' }) then extracts that
+    // displacement out of the pose each tick and hands it to the app.
+    //
+    // The distances are the blend-space positions the clips sit at multiplied
+    // by their durations, so each clip travels at the speed its axis position
+    // CLAIMS: walkRM covers 1.6 m in its 1.0 s cycle, runRM 3.1 m in 0.62 s.
+    // That is what makes the marker run a fair ruler — the character crosses a
+    // 1.5 m marker gap in the time the parameter says it should, and mixing the
+    // two mid-axis yields a speed between the two rather than a foot-slide.
+    //
+    // The ramp is linear and its last key equals the full distance. The engine
+    // corrects loop wraps with the clip's net-loop root displacement, so
+    // summing consumeRootMotion() over exactly one cycle returns exactly this
+    // number — no drift accumulates over a long walk.
+    const withRoot = (curves, distance) => Object.assign({}, curves, {
+        root: { pos: (p) => [0, 0, p * distance] },
+    });
+
+    defs.walkRM = {
+        name: 'walkRM', duration: 1.0, loop: 'loop',
+        tracks: sampleTracks(1.0, withRoot(gait(WALK), 1.6), 24),
+    };
+    defs.runRM = {
+        name: 'runRM', duration: 0.62, loop: 'loop',
+        tracks: sampleTracks(0.62, withRoot(gait(RUN), 3.1), 24),
+    };
 
     const animations = {};
     for (const name of Object.keys(defs)) animations[name] = compileClip(defs[name], rig);
