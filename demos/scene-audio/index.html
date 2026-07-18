@@ -36,12 +36,33 @@
         <section>
             <h2>Transport <span class="hint">seekPlayback / seconds</span></h2>
             <div class="row">
+                <button id="srcRam" class="btn on">RAM clip</button>
+                <button id="srcStream" class="btn">disk stream</button>
+            </div>
+            <div class="row">
                 <button id="musicToggle" class="btn">pause</button>
                 <span class="v" id="musicTime">0.00 / 0.00 s</span>
             </div>
             <input id="musicSeek" type="range" min="0" max="1000" step="1" value="0" class="wide">
             <div class="note">Drag to seek; the readout is
-                getPlaybackPositionSeconds, not a JS-side timer.</div>
+                getPlaybackPositionSeconds, not a JS-side timer. The same seek
+                call drives both sources — but on the stream it seeks the
+                <em>codec</em>, and the refill gap shows up as underrun.</div>
+        </section>
+
+        <section>
+            <h2>Loading <span class="hint">async decode vs sync</span></h2>
+            <div class="row">ogg clip <span class="v" id="oggState">loading…</span></div>
+            <div class="row">decoded <span class="v" id="oggInfo">—</span></div>
+            <div class="row">
+                <button id="oggPlay" class="btn">audition</button>
+                <span class="hint" id="oggPath"></span>
+            </div>
+            <div class="note">createClipFromFileAsync decodes and resamples on a
+                background thread — this HUD kept animating while it ran. Every
+                other workshop app decodes inline on the JS thread, where a big
+                file is a dropped frame. The synthesized clips beside it cost no
+                decode at all.</div>
         </section>
     </div>
 
@@ -72,6 +93,46 @@
             <div class="row">output latency <span class="v" id="outLatency">—</span></div>
             <div class="note">tools/synth ships a full mixer UI but never uses
                 bus solo — this is the same bus API with solo wired up.</div>
+        </section>
+
+        <section>
+            <h2>Disk stream <span class="hint">createStreamFromFile</span></h2>
+            <div class="row">state <span class="v" id="streamState">—</span></div>
+            <div class="row">buffer
+                <span class="meter"><i id="streamBufferBar"></i></span>
+                <span class="v" id="streamBuffer">—</span>
+            </div>
+            <div class="row">decoded <span class="v" id="streamDecoded">—</span></div>
+            <div class="row">played <span class="v" id="streamPlayed">—</span></div>
+            <div class="row">underrun <span class="v" id="streamUnderrun">—</span></div>
+            <div class="row">last seek <span class="v" id="streamSeekCost">—</span></div>
+            <label>bed gain
+                <input id="streamGain" type="range" min="0" max="1" step="0.05" value="0">
+            </label>
+            <div class="note">96 s Ogg bed. <b>RAM</b>: whole file decoded up
+                front — instant seek, megabytes resident, a stall at load.
+                <b>Stream</b>: ~2 s ring resident whatever the length, opens
+                immediately, and pays for each seek with a refill gap.</div>
+        </section>
+
+        <section>
+            <h2>MIDI <span class="hint">createMidiInput</span></h2>
+            <div class="row">port <span class="v dim" id="midiStatus">—</span>
+                <button id="midiRescan" class="btn">rescan</button>
+            </div>
+            <div id="midiPorts"></div>
+            <div id="midiPadRow"></div>
+            <div class="row">notes <span class="v" id="midiNotes">0</span></div>
+            <div class="row">bend
+                <span class="bendtrack"><i id="midiBendBar"></i></span>
+                <span class="v" id="midiBend">0</span>
+            </div>
+            <pre id="midiLog" class="log">waiting for events…</pre>
+            <div class="note">Each pitch class owns a pad node in a ring around
+                you, with its own attached emitter — so a note is a position,
+                not just a pitch. Octave lifts the pad; CC1 pushes the whole
+                ring out. tools/synth has an on-screen keyboard and never opens
+                a hardware port; this is that missing half.</div>
         </section>
     </div>
 

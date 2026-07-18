@@ -51,11 +51,48 @@ input[type=range].wide { width: 240px; }
 /* Mixer strips: bus name, mute, solo, meter. */
 .strip { display: block; margin: 3px 0; white-space: nowrap; }
 .strip .nm { display: inline-block; width: 62px; color: #cfe; }
-.strip .meter {
+
+.v.dim { color: #96a8bd; }
+.v.err { color: #ff8a8a; text-align: left; }
+
+/* Shared meter shape, used by the mixer strips and the stream buffer. */
+.meter {
     display: inline-block; width: 70px; height: 8px; vertical-align: middle;
-    background: #101a26; border-radius: 2px; overflow: hidden; margin-left: 5px;
+    background: #101a26; border-radius: 2px; overflow: hidden; margin: 0 5px;
 }
-.strip .meter i { display: block; height: 100%; width: 0%; background: #4bd6a0; }
+.meter i { display: block; height: 100%; width: 0%; background: #4bd6a0; }
+
+/* MIDI port rows: name plus an open/close button. */
+.port { display: block; margin: 3px 0; white-space: nowrap; }
+.port .nm {
+    display: inline-block; width: 170px; color: #cfe; overflow: hidden;
+    text-overflow: ellipsis; vertical-align: middle;
+}
+
+/* The twelve pitch-class pads, lit by their envelopes and clickable. */
+#midiPadRow { display: block; margin: 6px 0 4px 0; white-space: nowrap; }
+.pad {
+    display: inline-block; width: 16px; height: 16px; padding: 0; margin-right: 3px;
+    border: 1px solid #2b3a4d; border-radius: 3px; background: transparent;
+    cursor: pointer; transition: opacity 0.08s linear;
+}
+
+/* Pitch bend, drawn as a marker on a track centred at zero. */
+.bendtrack {
+    position: relative; display: inline-block; width: 70px; height: 8px;
+    vertical-align: middle; background: #101a26; border-radius: 2px; margin: 0 5px;
+}
+.bendtrack i {
+    position: absolute; top: -1px; left: 50%; width: 3px; height: 10px;
+    margin-left: -1.5px; background: #ffd97b; border-radius: 1px;
+}
+
+.log {
+    margin: 4px 0 2px 0; padding: 5px 6px; max-height: 84px; overflow: hidden;
+    background: #0a121b; border: 1px solid #1d2836; border-radius: 4px;
+    color: #7fd0ff; font: 10px ui-monospace, monospace; line-height: 1.4;
+    white-space: pre;
+}
 
 #dopplerGraph {
     display: block; width: 260px; height: 90px; margin: 4px 0;
