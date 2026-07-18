@@ -29,6 +29,12 @@
 
 import { applySSR, applyProbe, recaptureProbe } from "/app/reflections.js";
 import { applyDecals, clearDecals, decalCount } from "/app/decals.js";
+import {
+    setLodDebugColors, setLodDistanceScale, setVisibilityCutoff,
+    setPopFieldEnabled, lodProps,
+} from "/app/lod.js";
+import { applyShaders, clearAllShaders } from "/app/shaders.js";
+import { setMonitorLinked, setSubRenderScale, monitorLinked } from "/app/monitor.js";
 
 const el = (id) => document.getElementById(id);
 const num = (id) => parseFloat(el(id).value);
@@ -75,6 +81,31 @@ export const state = {
     },
 
     decals: { enabled: true, kind: 'impact', opacity: 1.0, sizeScale: 1.0 },
+
+    // --- geometry detail ------------------------------------------------------
+    // Deliberately OUTSIDE the A/B gate. LOD, visibility gating, frustum
+    // culling and the shadow cache are performance mechanisms whose whole
+    // contract is that they do not change the picture (LOD changes it by
+    // design, but only at a distance you chose); folding them into a
+    // "post on/off" comparison would be dishonest about what the A/B shows.
+    lod: { debugColors: false, distanceScale: 1.0 },
+    pop: { enabled: true, cutoff: 46, margin: 3 },
+
+    // --- custom shaders -------------------------------------------------------
+    // These DO join the A/B: a custom chunk is a look, and switching the stack
+    // off should show what the same three props are without it.
+    shaders: {
+        dissolve: { enabled: true, amount: 0.35, edge: 0.07, scale: 9, sweep: false },
+        wave:     { enabled: true, amp: 0.42, freq: 2.1, speed: 1.4 },
+        rim:      { enabled: true, power: 3.2, gain: 2.2, scanFreq: 64, scanGain: 0.9 },
+    },
+
+    // The sub-scene feed joins the A/B too — with the stack off the monitor
+    // drops its texture and shows a blank panel.
+    monitor: { enabled: true, renderScale: 1.0 },
+
+    // Debug switches. Not part of the A/B (see above).
+    debug: { frustumCulling: true, shadowCache: true },
 };
 
 // LUT strips are baked by tools/gen_luts.js — setColorLUT takes a file path,
@@ -179,6 +210,23 @@ export function applyPost(scene) {
     applySSR(scene, state.ssr, on);
     applyProbe(scene, state.probes, on);
     applyDecals(state.decals, on);
+
+    // Custom shaders and the sub-scene feed are looks, so they follow the A/B.
+    applyShaders(state.shaders, on);
+    setMonitorLinked(on && state.monitor.enabled);
+    setSubRenderScale(state.monitor.renderScale);
+    const mon = el('monitorStatus');
+    if (mon) mon.textContent = monitorLinked() ? 'live' : 'unlinked';
+
+    // Geometry detail and the culling switches do NOT — they are performance
+    // mechanisms, and the A/B is a picture comparison.
+    setLodDebugColors(state.lod.debugColors);
+    setLodDistanceScale(state.lod.distanceScale);
+    setPopFieldEnabled(state.pop.enabled);
+    setVisibilityCutoff(state.pop.cutoff, state.pop.margin);
+
+    scene.setFrustumCulling(state.debug.frustumCulling);
+    scene.setShadowCache({ enabled: state.debug.shadowCache });
 }
 
 // --- DOM binding -------------------------------------------------------------
@@ -196,6 +244,10 @@ const DECIMALS = {
     ssrDistance: 0, ssrSteps: 0, ssrThickness: 2, ssrIntensity: 2, ssrEdgeFade: 2,
     probeIntensity: 2, probeInterior: 1,
     decalOpacity: 2, decalSize: 2,
+    lodScale: 2, popCutoff: 0, popMargin: 2,
+    dissolveAmount: 2, dissolveEdge: 3, dissolveScale: 1,
+    waveAmp: 2, waveFreq: 2, waveSpeed: 2,
+    rimPower: 1, rimGain: 2, rimScanFreq: 0, rimScanGain: 2,
 };
 
 function readControls() {
@@ -253,6 +305,39 @@ function readControls() {
     state.decals.kind      = el('decalKind').value;
     state.decals.opacity   = num('decalOpacity');
     state.decals.sizeScale = num('decalSize');
+
+    state.lod.debugColors   = el('lodDebug').checked;
+    state.lod.distanceScale = num('lodScale');
+
+    state.pop.enabled = el('popOn').checked;
+    state.pop.cutoff  = num('popCutoff');
+    state.pop.margin  = num('popMargin');
+
+    const sh = state.shaders;
+    sh.dissolve.enabled = el('dissolveOn').checked;
+    sh.dissolve.edge    = num('dissolveEdge');
+    sh.dissolve.scale   = num('dissolveScale');
+    sh.dissolve.sweep   = el('dissolveSweep').checked;
+    // The auto-sweep writes `amount` from the frame loop, so the slider only
+    // owns it while the sweep is parked — otherwise the two fight every frame.
+    if (!sh.dissolve.sweep) sh.dissolve.amount = num('dissolveAmount');
+
+    sh.wave.enabled = el('waveOn').checked;
+    sh.wave.amp     = num('waveAmp');
+    sh.wave.freq    = num('waveFreq');
+    sh.wave.speed   = num('waveSpeed');
+
+    sh.rim.enabled  = el('rimOn').checked;
+    sh.rim.power    = num('rimPower');
+    sh.rim.gain     = num('rimGain');
+    sh.rim.scanFreq = num('rimScanFreq');
+    sh.rim.scanGain = num('rimScanGain');
+
+    state.monitor.enabled     = el('monitorOn').checked;
+    state.monitor.renderScale = parseFloat(el('subScale').value);
+
+    state.debug.frustumCulling = el('frustumOn').checked;
+    state.debug.shadowCache    = el('shadowCacheOn').checked;
 }
 
 function refreshLabels() {
@@ -268,7 +353,18 @@ function refreshLabels() {
 
     el('masterHint').textContent = el('masterPost').checked
         ? 'on: your settings · off: raw forward render'
-        : 'OFF — SSAO/DoF/bloom/LUT/FXAA/MSAA/fog/SSR/probe/decals bypassed';
+        : 'OFF — post/SSR/probe/decals/custom shaders/monitor feed bypassed';
+}
+
+/**
+ * Mirror the auto-swept dissolve value back onto its slider, so the control
+ * never disagrees with what the shader is actually doing.
+ */
+export function setDissolveReadout(v) {
+    const s = el('dissolveAmount');
+    if (s) s.value = String(v);
+    const span = el('dissolveAmountV');
+    if (span) span.textContent = v.toFixed(2);
 }
 
 /** Wire every control to `readControls -> applyPost -> refreshLabels`. */
@@ -287,6 +383,13 @@ export function bindHud(scene) {
         'probeOn', 'probeIntensity', 'probeInterior', 'probeRes',
         'probeBoxProj', 'probeBounds',
         'decalsOn', 'decalKind', 'decalOpacity', 'decalSize',
+        'lodDebug', 'lodScale',
+        'popOn', 'popCutoff', 'popMargin',
+        'dissolveOn', 'dissolveAmount', 'dissolveEdge', 'dissolveScale', 'dissolveSweep',
+        'waveOn', 'waveAmp', 'waveFreq', 'waveSpeed',
+        'rimOn', 'rimPower', 'rimGain', 'rimScanFreq', 'rimScanGain',
+        'monitorOn', 'subScale',
+        'frustumOn', 'shadowCacheOn',
     ];
     const onChange = () => { readControls(); applyPost(scene); refreshLabels(); };
     for (const id of ids) {
@@ -307,12 +410,87 @@ export function bindHud(scene) {
         clearDecals();
         onChange();
     });
+
+    // "Back to standard PBR" — clears all three programs and unticks the
+    // boxes, so the panel does not claim an effect that is no longer installed.
+    el('shaderClear').addEventListener('click', () => {
+        clearAllShaders();
+        for (const id of ['dissolveOn', 'waveOn', 'rimOn']) el(id).checked = false;
+        onChange();
+    });
+
+    buildLodGrid();
+    bindFolding();
+
     // Seed state FROM the markup so the HTML defaults are the single source of
     // truth for the initial look.
     onChange();
+}
 
-    // CHUNK 3: cullStats() readout (scene.cullStats() -> meshDrawn/meshCulled,
-    // shadowTiles*) wants a row next to the FPS counter in the header.
+// --- folding -----------------------------------------------------------------
+
+/**
+ * Fold a section by clicking its heading. Clicks that land on an actual
+ * control inside the heading (the several `<h2><label><input>` toggles) must
+ * still toggle the control and NOT the fold, or the SSAO checkbox becomes
+ * unusable.
+ */
+function bindFolding() {
+    for (const h of document.querySelectorAll('#hud section > h2')) {
+        h.addEventListener('click', (ev) => {
+            if (ev.target.closest('label, input, select, button')) return;
+            h.parentElement.classList.toggle('folded');
+        });
+    }
+}
+
+// --- live readouts -----------------------------------------------------------
+
+let _lodCells = [];
+
+/** One cell per LOD prop, filled in by refreshLodReadout each frame. */
+function buildLodGrid() {
+    const grid = el('lodGrid');
+    if (!grid) return;
+    _lodCells = [];
+    for (let i = 0; i < lodProps().length; ++i) {
+        const cell = document.createElement('i');
+        cell.textContent = '-';
+        grid.appendChild(cell);
+        _lodCells.push(cell);
+    }
+}
+
+/**
+ * Push the per-frame LOD readback into the panel. `levels`/`counts` come
+ * straight from `node.lodLevel`, i.e. from what the renderer picked last
+ * frame — the HUD never predicts a switch, it reports one.
+ */
+export function setLodReadout(levels, counts) {
+    for (let i = 0; i < _lodCells.length && i < levels.length; ++i) {
+        const lv = Math.max(0, Math.min(2, levels[i]));
+        const cell = _lodCells[i];
+        if (cell._lv === lv) continue;
+        cell._lv = lv;
+        cell.textContent = String(lv);
+        cell.className = 'l' + lv;
+    }
+    const n = el('lodCounts');
+    if (n) n.textContent = `${counts[0]}/${counts[1]}/${counts[2]}`;
+}
+
+/**
+ * The cullStats() block. Everything here is from the last RENDERED frame, so
+ * flipping frustum culling off makes `drawn` jump to the full graph, and
+ * holding the camera still makes the shadow cache's `cached` tile count climb
+ * while `rendered` falls away.
+ */
+export function setCullReadout(s) {
+    const set = (id, text) => { const n = el(id); if (n) n.textContent = text; };
+    set('stMesh',  `${s.meshDrawn} / ${s.meshDrawn + s.meshCulled}`);
+    set('stDecal', `${s.decalsDrawn} / ${s.decalsDrawn + s.decalsCulled}`);
+    set('stTiles', `${s.shadowTilesRendered}r ${s.shadowTilesCached}c ` +
+                   `/ ${s.shadowTilesTotal}`);
 }
 
 /** Update the little FPS readout in the HUD header. */

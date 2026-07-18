@@ -10,11 +10,22 @@
     <div id="hud">
         <h1>Render Lab <span id="fps" class="fps">—</span></h1>
 
+        <!-- Live cullStats() readout. Every number here comes from the last
+             RENDERED frame, which is why it is the honest place to watch the
+             frustum-culling and shadow-cache toggles do their work. -->
+        <div class="stats" id="statsRow">
+            <div><span>meshes</span><b id="stMesh">—</b></div>
+            <div><span>decals</span><b id="stDecal">—</b></div>
+            <div><span>shadow tiles</span><b id="stTiles">—</b></div>
+        </div>
+
         <div class="master">
             <label><input type="checkbox" id="masterPost" checked>
                 <b>A/B — whole post stack</b></label>
             <div class="hint" id="masterHint">on: your settings · off: raw forward render</div>
         </div>
+
+        <div class="group">Post-processing<span class="ghint">click a heading to fold</span></div>
 
         <!-- SSAO ------------------------------------------------------------ -->
         <section>
@@ -80,6 +91,8 @@
             <label>Render scale <input type="range" id="renderScale" min="0.5" max="2" step="0.05" value="1">
                 <span class="v" id="renderScaleV"></span></label>
         </section>
+
+        <div class="group">Reflections &amp; decals</div>
 
         <!-- Reflections ------------------------------------------------------ -->
         <section>
@@ -152,6 +165,8 @@
                 normal — walls take them sideways, floors top-down.</div>
         </section>
 
+        <div class="group">Atmosphere &amp; grade</div>
+
         <!-- Fog -------------------------------------------------------------- -->
         <section>
             <h2>Fog</h2>
@@ -200,6 +215,133 @@
                 <span class="v" id="tmExposureV"></span></label>
             <label>Ambient <input type="range" id="ambient" min="0" max="0.25" step="0.005" value="0.035">
                 <span class="v" id="ambientV"></span></label>
+        </section>
+
+        <div class="group">Geometry detail</div>
+
+        <!-- LOD chains ------------------------------------------------------- -->
+        <section>
+            <h2>LOD chains <span class="v" id="lodCounts"></span></h2>
+            <label><input type="checkbox" id="lodDebug"> Debug colours
+                (<span class="sw l0"></span>0 <span class="sw l1"></span>1
+                 <span class="sw l2"></span>2)</label>
+            <label>Threshold ×<input type="range" id="lodScale" min="0.15" max="3" step="0.05" value="1">
+                <span class="v" id="lodScaleV"></span></label>
+            <div class="lodgrid" id="lodGrid"></div>
+            <div class="hint">Twelve props, one chain each: 32×24 sphere →
+                10×7 sphere → box, switching at 30 / 55 units. The multiplier
+                scales both thresholds, so you can force every switch from
+                here instead of flying the camera. Levels come from
+                <code>lodLevel</code>, read back per frame — the renderer
+                decides, this panel only reports.</div>
+        </section>
+
+        <!-- Visibility range -------------------------------------------------- -->
+        <section>
+            <h2>Visibility range</h2>
+            <label><input type="checkbox" id="popOn" checked> Detail / imposter pairs</label>
+            <label>Cutoff <input type="range" id="popCutoff" min="10" max="90" step="1" value="46">
+                <span class="v" id="popCutoffV"></span></label>
+            <label>Margin <input type="range" id="popMargin" min="0" max="10" step="0.25" value="3">
+                <span class="v" id="popMarginV"></span></label>
+            <div class="hint">Eight obelisks, each paired with a flat imposter
+                at the same spot: detail is gated 0→cutoff, imposter
+                cutoff→∞. Unlike LOD this is a hard on/off — drag the cutoff
+                and watch the swap walk down the avenue. Set margin to 0 and
+                park the camera on a boundary to see the strobe the hysteresis
+                exists to prevent.</div>
+        </section>
+
+        <div class="group">Custom shaders</div>
+
+        <!-- Dissolve ---------------------------------------------------------- -->
+        <section>
+            <h2><label><input type="checkbox" id="dissolveOn" checked> Dissolve / burn</label></h2>
+            <label>Amount <input type="range" id="dissolveAmount" min="0" max="1" step="0.01" value="0.35">
+                <span class="v" id="dissolveAmountV"></span></label>
+            <label>Edge <input type="range" id="dissolveEdge" min="0.01" max="0.3" step="0.005" value="0.07">
+                <span class="v" id="dissolveEdgeV"></span></label>
+            <label>Noise <input type="range" id="dissolveScale" min="1" max="24" step="0.5" value="9">
+                <span class="v" id="dissolveScaleV"></span></label>
+            <label><input type="checkbox" id="dissolveSweep"> Auto-sweep the front</label>
+            <div class="hint">Fragment hook: value-noise threshold +
+                <code>discard</code>, with an emissive band riding the front.
+                Its shadow stays solid — the fragment chunk never reaches the
+                shared depth-only shadow program.</div>
+        </section>
+
+        <!-- Wave -------------------------------------------------------------- -->
+        <section>
+            <h2><label><input type="checkbox" id="waveOn" checked> Vertex wave</label></h2>
+            <label>Amplitude <input type="range" id="waveAmp" min="0" max="1.5" step="0.02" value="0.42">
+                <span class="v" id="waveAmpV"></span></label>
+            <label>Frequency <input type="range" id="waveFreq" min="0.2" max="6" step="0.05" value="2.1">
+                <span class="v" id="waveFreqV"></span></label>
+            <label>Speed <input type="range" id="waveSpeed" min="0" max="4" step="0.05" value="1.4">
+                <span class="v" id="waveSpeedV"></span></label>
+            <div class="hint">Vertex hook on an 88×60 plane hung off the right
+                back wall. Normals are rebuilt from the analytic derivative, so
+                the ripple SHADES; the shadow pass runs the same hook, so the
+                shadow ripples too. <code>cullMargin = 1.6</code> keeps the
+                billow from being culled outside the flat plane's AABB.</div>
+        </section>
+
+        <!-- Rim / scanline ----------------------------------------------------- -->
+        <section>
+            <h2><label><input type="checkbox" id="rimOn" checked> Fresnel rim + scanlines</label></h2>
+            <label>Rim power <input type="range" id="rimPower" min="0.5" max="8" step="0.1" value="3.2">
+                <span class="v" id="rimPowerV"></span></label>
+            <label>Rim gain <input type="range" id="rimGain" min="0" max="6" step="0.05" value="2.2">
+                <span class="v" id="rimGainV"></span></label>
+            <label>Scan freq <input type="range" id="rimScanFreq" min="0" max="200" step="2" value="64">
+                <span class="v" id="rimScanFreqV"></span></label>
+            <label>Scan gain <input type="range" id="rimScanGain" min="0" max="2" step="0.02" value="0.9">
+                <span class="v" id="rimScanGainV"></span></label>
+            <button id="shaderClear">clearShader() on all three</button>
+            <div class="hint">The button strips every custom program; the three
+                props snap back to plain PBR, unchanged in every other respect.
+                The same chunks compile for skinned and instanced meshes too —
+                see demos/anim-lab for the skinned case.</div>
+        </section>
+
+        <div class="group">Scene as texture</div>
+
+        <!-- Monitor ------------------------------------------------------------ -->
+        <section>
+            <h2>Live sub-scene <span class="v" id="monitorStatus"></span></h2>
+            <canvas id="subscene"></canvas>
+            <label><input type="checkbox" id="monitorOn" checked> Feed the monitor</label>
+            <label>Sub render scale
+                <select id="subScale">
+                    <option value="0.25">0.25×</option>
+                    <option value="0.5">0.5×</option>
+                    <option value="1" selected>1×</option>
+                    <option value="2">2×</option>
+                </select>
+            </label>
+            <div class="hint">That thumbnail is a second scene graph on its own
+                canvas with its own camera, lights and post stack.
+                <code>sub.asTexture()</code> → <code>setBaseColorTexture()</code>
+                puts it on the screen bolted to the back wall, live. Its
+                context is created at module scope so it renders BEFORE the
+                courtyard — otherwise the monitor would show last frame.</div>
+        </section>
+
+        <div class="group">Culling &amp; debug</div>
+
+        <!-- Culling ------------------------------------------------------------ -->
+        <section>
+            <h2>Culling</h2>
+            <label><input type="checkbox" id="frustumOn" checked> Frustum culling</label>
+            <label><input type="checkbox" id="shadowCacheOn" checked> Static shadow-tile cache</label>
+            <div class="hint">Both are strictly conservative — pixels are
+                identical either way, only the counters move. Turn frustum
+                culling off and the drawn count jumps to the whole graph. Hold
+                the camera still and the shadow cache reuses tiles
+                (<i>cached</i> climbs, <i>rendered</i> falls to 0); orbit and
+                the directional cascades go back to re-rendering. These two sit
+                OUTSIDE the A/B toggle: they are performance mechanisms, not
+                looks.</div>
         </section>
 
         <div class="hint foot">
