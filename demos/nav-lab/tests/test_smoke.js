@@ -13,6 +13,12 @@ import {
     crowdState, setAvoidance, clearCrowd, overlapMean,
     scenarioFunnel, scenarioVip, scenarioFactions, scenarioStacked,
     deviationOf, findRole, snapshot, setAvoidHeight, STACK_LANE, refreshOverlay,
+    linkState, LINK_DEFS, linkMarks, linkIsLive, linkSegmentsOf, sendLinkWalkers,
+    comparePartial, setSealed, activeLinkDefs,
+    gridState, gridWalkable, setGridOverlayVisible, walkTheRamp, resetFollowers,
+    followerSpread, followerOf,
+    steerState, setSteeringVisible, simulateShot, agentSpeed, distanceToTarget,
+    agentOf, ARRIVE_SLOWING, HIT_RADIUS, TURRET, trackAt, aimDir,
 } from "/app/app.js";
 
 let checks = 0;
@@ -686,6 +692,305 @@ check('widening the avoidance height DOES make the levels interact',
       mergedDelta > 0.1,
       'worst position delta ' + mergedDelta.toFixed(3) + ' m — so the identical '
       + 'trajectories above were the elevation filter, not an absent crowd');
+
+// --- 16. Off-mesh links: a route that is not walking --------------------------
+//
+// The link yard's east pad touches nothing. If a route reaches it, the route
+// used the jump link — there is no other explanation available, and this
+// section spends its first three checks establishing exactly that before it
+// claims anything about links at all.
+
+console.log('[16] off-mesh links');
+clearCrowd(scene);
+setAvoidance(false);
+
+check('the static bake carries the off-mesh links', navmesh.linksBaked === 3,
+      navmesh.linksBaked + ' links');
+check('links and dynamic obstacles cannot be combined (documented, enforced)',
+      (() => {
+          try {
+              bro.ai.game.bakeNavMesh({
+                  fromPhysics: Physics, dynamicObstacles: true,
+                  offMeshLinks: [{ start: { x: 0, y: 0, z: 0 }, end: { x: 1, y: 0, z: 0 } }],
+              });
+              return false;
+          } catch (e) { return /offMeshLinks/.test(e.message); }
+      })(), 'bakeNavMesh throws rather than silently dropping them');
+
+// Each link, probed the only way the API allows: ask for a route from its own
+// takeoff to its own landing and see whether the mesh answers.
+for (const def of LINK_DEFS) {
+    check(`the ${def.id} link survived the bake`, linkIsLive(def) === true,
+          `${def.start.x},${def.start.y},${def.start.z} -> `
+        + `${def.end.x},${def.end.y},${def.end.z}`);
+}
+
+// The gap really is a gap: nothing walkable between the two pads.
+let gapSamples = 0;
+for (let x = 11.2; x <= 15.3; x += 0.25) {
+    const q = navmesh.mesh.nearestPoint({ x, y: 3, z: -10.5 }, { x: 0.15, y: 0.5, z: 0.15 });
+    if (q && Math.abs(q.x - x) < 0.12) gapSamples++;
+}
+check('there is no walkable surface across the 4.5 m gap', gapSamples === 0,
+      gapSamples + ' walkable samples between the pads');
+
+setStart(marks.eastRoom);
+setGoal(linkMarks.padEast);
+const jumped = state.path;
+check('a route to the island pad exists', !!jumped && jumped.partial === false,
+      jumped ? jumped.points.length + ' waypoints' : 'no path');
+const segs = linkSegmentsOf(jumped);
+check('the route carries link information', segs.length >= 1,
+      'wp.links = ' + JSON.stringify(jumped.links));
+check('the marked link segment is the one that spans the gap',
+      segs.length >= 1 && Math.hypot(segs[0].to.x - segs[0].from.x,
+                                     segs[0].to.z - segs[0].from.z) > 4.0
+      && segs[0].from.x < 11.5 && segs[0].to.x > 15.0,
+      segs.length ? `takeoff x=${segs[0].from.x.toFixed(2)} -> landing `
+                  + `x=${segs[0].to.x.toFixed(2)}` : 'no link segment');
+check('the route ends on the island pad', jumped
+      && jumped.points[jumped.points.length - 1].x > 15.4,
+      'final x ' + jumped.points[jumped.points.length - 1].x.toFixed(2));
+
+// Now the strong proof: an AGENT crossing. Not "the query mentioned a link" —
+// a body that was on the west side of a 4.5 m hole and is now on the east side.
+const walkersBefore = linkState.walkers.map(w => ({ x: w.agent.x, z: w.agent.z }));
+check('the link walkers start west of the gap',
+      walkersBefore.every(w => w.x < 11.0),
+      'max start x ' + Math.max(...walkersBefore.map(w => w.x)).toFixed(2));
+
+const startedRoutes = sendLinkWalkers(linkMarks.padEast);
+check('every link walker got a route', startedRoutes === linkState.walkers.length,
+      `${startedRoutes}/${linkState.walkers.length}`);
+
+// Poll for onLink across the traversal. It is true for only the fraction of a
+// second the agent spends between takeoff and landing, so sample often.
+let onLinkTicks = 0, sawOnLink = false;
+for (let i = 0; i < 120; i++) {
+    advanceTime(120);
+    if (linkState.onLinkNow > 0) { sawOnLink = true; onLinkTicks++; }
+    // Both conditions, because they land one frame apart: crossedGap trips as
+    // soon as a walker is over the pad, which can still be the last frame of
+    // the link, while the traversal only counts once onLink has gone false.
+    if (linkState.crossedGap >= linkState.walkers.length
+        && linkState.traversals >= linkState.walkers.length) break;
+}
+advanceTime(500);   // let them settle on the pad before measuring positions
+check('navigationInfo().onLink fired during the traversal', sawOnLink === true,
+      onLinkTicks + ' sampled frames with a walker mid-link');
+check('the traversal counter moved', linkState.traversals >= linkState.walkers.length,
+      linkState.traversals + ' completed link crossings');
+check('the last link entered was the jump', linkState.lastLink === 'jump',
+      linkState.lastLink);
+
+const walkersAfter = linkState.walkers.map(w => ({ x: w.agent.x, z: w.agent.z, y: w.node.y }));
+check('every walker physically crossed the gap',
+      walkersAfter.every(w => w.x > 15.4),
+      walkersBefore.map((b, i) => `x ${b.x.toFixed(1)} -> ${walkersAfter[i].x.toFixed(1)}`).join('; '));
+check('...and is standing on the island pad, three metres up',
+      walkersAfter.every(w => w.y > 3.4 && w.y < 4.4),
+      'node y ' + walkersAfter.map(w => w.y.toFixed(2)).join(', '));
+check('linkState counted them onto the island',
+      linkState.crossedGap === linkState.walkers.length,
+      linkState.crossedGap + '/' + linkState.walkers.length);
+
+// --- 17. Partial paths: walled in --------------------------------------------
+//
+// Seal the pad (drop ONLY the jump link from the bake) and the island is
+// unreachable. The same query, on the same mesh, in the same tick, answers two
+// different ways depending on requireFullPath — which is the point.
+
+console.log('[17] partial paths');
+setSealed(true);
+rebake();
+check('sealing removed one link from the bake', navmesh.linksBaked === 2,
+      navmesh.linksBaked + ' links');
+check('the jump link is gone from the mesh',
+      linkIsLive(LINK_DEFS.find(l => l.id === 'jump')) === false);
+check('the other two links are untouched',
+      LINK_DEFS.filter(l => l.id !== 'jump').every(linkIsLive));
+
+const sealedCmp = comparePartial({ ...marks.eastRoom }, { ...linkMarks.padEast });
+check('requireFullPath:false still returns a route', sealedCmp.looseFound === true);
+check('...and marks it partial', sealedCmp.loosePartial === true);
+check('...clamped short of the goal', sealedCmp.shortfall > 2.0,
+      'stops ' + sealedCmp.shortfall.toFixed(2) + ' m from the island');
+check('...at the closest reachable point, which is the ground under the pad',
+      sealedCmp.clampedAt.y < 1.0 && Math.abs(sealedCmp.clampedAt.x - linkMarks.padEast.x) < 3.0,
+      `clamped at ${sealedCmp.clampedAt.x.toFixed(2)}, `
+    + `${sealedCmp.clampedAt.y.toFixed(2)}, ${sealedCmp.clampedAt.z.toFixed(2)}`);
+check('requireFullPath:true returns NO path for the identical query',
+      sealedCmp.strictFound === false,
+      'same mesh, same endpoints, one flag apart');
+
+// And it is genuinely the seal doing it, not the query: restore the link.
+setSealed(false);
+rebake();
+const openCmp = comparePartial({ ...marks.eastRoom }, { ...linkMarks.padEast });
+check('restoring the jump makes both flags agree on a complete route',
+      openCmp.looseFound && !openCmp.loosePartial && openCmp.strictFound,
+      `loose partial=${openCmp.loosePartial}, strict found=${openCmp.strictFound}`);
+
+// --- 18. The NavGrid, baked from the same physics ----------------------------
+
+console.log('[18] NavGrid physics bake');
+setGridOverlayVisible(true);
+check('the grid overlay drew cells', gridState.cells > 1000,
+      `${gridState.cells} walkable of ${gridState.tested} probed`);
+check('the grid is not simply all-walkable', gridState.cells < gridState.tested * 0.9,
+      `${(100 * gridState.cells / gridState.tested).toFixed(0)}% walkable`);
+
+// Cells this app can name from the level descriptor, with no reference to the
+// grid's internals: solid geometry must be blocked, open floor must not be.
+for (const [label, x, z] of [
+    ['the divider wall', 4, -10],
+    ['a pillar', 10, -6],
+    ['the inner chamber wall', 12, -18],
+]) {
+    check(`${label} is blocked in the grid`, gridWalkable(x, z) === false, `(${x}, ${z})`);
+}
+for (const [label, x, z] of [
+    ['the open west hall', -17, -17],
+    ['the open east room', 19, -10],
+]) {
+    check(`${label} is walkable in the grid`, gridWalkable(x, z) === true, `(${x}, ${z})`);
+}
+
+// The headline difference, measured: a NavGrid obstacle is the body's AABB
+// projected to XZ, so a ramp blocks its whole footprint. The navmesh walks up
+// the very same ramp.
+const RAMP_D_ON = { x: 14, y: 1.5, z: -1.0 };
+const onRampMesh = navmesh.mesh.nearestPoint(RAMP_D_ON, { x: 0.6, y: 1.2, z: 0.6 });
+check('the navmesh is walkable on ramp D', !!onRampMesh
+      && Math.abs(onRampMesh.x - RAMP_D_ON.x) < 0.4 && onRampMesh.y > 0.8,
+      onRampMesh ? 'snapped to y ' + onRampMesh.y.toFixed(2) : 'off the mesh');
+check('the NavGrid blocks the same ramp — its AABB is the obstacle',
+      gridWalkable(RAMP_D_ON.x, RAMP_D_ON.z) === false,
+      `(${RAMP_D_ON.x}, ${RAMP_D_ON.z}) walkable on the mesh, blocked on the grid`);
+
+// --- 19. groundFollow --------------------------------------------------------
+//
+// Two agents, identical except for the groundFollow probe, steered in a
+// straight line up the link-yard ramp. Neither has a navmesh or a nav grid, so
+// the probe is the only variable in the experiment.
+
+console.log('[19] ground follow');
+resetFollowers();
+advanceTime(200);
+walkTheRamp();
+advanceTime(9000);
+
+const gfSpread = followerSpread(true), flatSpread = followerSpread(false);
+const gfRec = followerOf(true), flatRec = followerOf(false);
+console.log(`      groundFollow node Y ${gfRec.yMin.toFixed(2)}..${gfRec.yMax.toFixed(2)}; `
+          + `plain node Y ${flatRec.yMin.toFixed(2)}..${flatRec.yMax.toFixed(2)}`);
+check('both agents actually walked', Math.abs(gfRec.agent.z - flatRec.agent.z) < 1.5
+      && gfRec.agent.z < -6, `z ${gfRec.agent.z.toFixed(2)} / ${flatRec.agent.z.toFixed(2)}`);
+check('the groundFollow agent climbed the ramp', gfSpread > 2.5,
+      'Y varied by ' + gfSpread.toFixed(2) + ' m');
+check('the plain agent kept a constant height', flatSpread === 0,
+      'Y varied by ' + flatSpread.toFixed(3) + ' m');
+check('the groundFollow agent ended up on the pad', gfRec.node.y > 3.4,
+      'node y ' + gfRec.node.y.toFixed(2));
+check('the plain agent is still at its spawn height, inside the ramp',
+      Math.abs(flatRec.node.y - 0.76) < 1e-3, 'node y ' + flatRec.node.y.toFixed(3));
+
+// --- 20. Steering kernels and lead aim ---------------------------------------
+
+console.log('[20] steer.* kernels');
+
+// The kernels first, as pure functions, so a live measurement that agrees with
+// them means something.
+const seekF = bro.ai.game.steer.seek(0, 0, 10, 0);
+check('steer.seek returns a unit direction',
+      Math.abs(Math.hypot(seekF.fx, seekF.fz) - 1) < 1e-3,
+      `|f| = ${Math.hypot(seekF.fx, seekF.fz).toFixed(4)}`);
+const far = bro.ai.game.steer.arrive(0, 0, 10, 0, 3.0);
+const near = bro.ai.game.steer.arrive(8.5, 0, 10, 0, 3.0);
+const nearer = bro.ai.game.steer.arrive(9.5, 0, 10, 0, 3.0);
+check('steer.arrive is at full magnitude outside the slowing radius',
+      Math.abs(Math.hypot(far.fx, far.fz) - 1) < 1e-3);
+check('steer.arrive shrinks inside the slowing radius, monotonically',
+      Math.hypot(nearer.fx, nearer.fz) < Math.hypot(near.fx, near.fz)
+      && Math.hypot(near.fx, near.fz) < 1.0,
+      `1.5 m out: ${Math.hypot(near.fx, near.fz).toFixed(3)}, `
+    + `0.5 m out: ${Math.hypot(nearer.fx, nearer.fz).toFixed(3)}`);
+
+// And live, on the pad: the two agents chase the same orbiting target and only
+// one of them slows down for it.
+setSteeringVisible(true);
+advanceTime(3000);
+let arriveSum = 0, seekSum = 0, samples = 0, insideSlowing = 0;
+for (let i = 0; i < 50; i++) {
+    advanceTime(100);
+    const d = distanceToTarget('arrive');
+    if (d < ARRIVE_SLOWING) insideSlowing++;
+    arriveSum += agentSpeed('arrive');
+    seekSum += agentSpeed('seek');
+    samples++;
+}
+const arriveMean = arriveSum / samples, seekMean = seekSum / samples;
+console.log(`      mean speed — arrive ${arriveMean.toFixed(2)} m/s, seek `
+          + `${seekMean.toFixed(2)} m/s over ${samples} samples `
+          + `(${insideSlowing} inside the slowing radius)`);
+check('the arrive agent settled inside its slowing radius', insideSlowing > samples * 0.8,
+      `${insideSlowing}/${samples} samples within ${ARRIVE_SLOWING} m`);
+check('arrive decelerates near the target', arriveMean < seekMean * 0.8,
+      `${arriveMean.toFixed(2)} vs ${seekMean.toFixed(2)} m/s`);
+check('seek never slows down — it is at the agent speed throughout',
+      Math.abs(seekMean - agentOf('seek').speed) < 0.02,
+      `${seekMean.toFixed(3)} vs speed ${agentOf('seek').speed}`);
+check('flee and evade both moved away from the target',
+      distanceToTarget('flee') > 3.0 && distanceToTarget('evade') > 3.0,
+      `flee ${distanceToTarget('flee').toFixed(1)} m, `
+    + `evade ${distanceToTarget('evade').toFixed(1)} m`);
+
+// computeLeadAim: the same turret, the same target, the same instant — the only
+// difference is whether the solver was told the target is moving.
+console.log('[20b] computeLeadAim');
+const SAMPLE_T = 1.0;          // mid-sweep, well away from a direction reversal
+const direct = simulateShot(SAMPLE_T, false);
+const lead = simulateShot(SAMPLE_T, true);
+console.log(`      direct aim closest approach ${direct.closest.toFixed(3)} m; `
+          + `lead aim ${lead.closest.toFixed(3)} m (hit radius ${HIT_RADIUS} m)`);
+check('the lead solution is valid', lead.valid === true);
+check('aiming straight at the target MISSES a crossing target',
+      direct.closest > HIT_RADIUS * 2, 'closest approach ' + direct.closest.toFixed(2) + ' m');
+check('computeLeadAim HITS the same target', lead.closest <= HIT_RADIUS,
+      'closest approach ' + lead.closest.toFixed(3) + ' m');
+check('lead aim is at least five times more accurate here',
+      lead.closest * 5 < direct.closest,
+      `${direct.closest.toFixed(2)} m -> ${lead.closest.toFixed(3)} m`);
+check('the two solutions differ in yaw, which is where the miss comes from',
+      Math.abs(lead.yaw - direct.yaw) > 0.05,
+      `yaw ${direct.yaw.toFixed(3)} -> ${lead.yaw.toFixed(3)} rad`);
+
+// The miss is systematic, not one unlucky sample. Sweep the launch time — but
+// split the sweep, because computeLeadAim solves for a target moving at a
+// CONSTANT velocity, and this track reverses direction every 2.4 s. A shot
+// whose ~0.6 s flight spans a reversal is aimed at a future the target never
+// visits, and it should miss. Asserting both halves is the difference between
+// testing the solver and testing a hand-picked sample.
+const REVERSAL = 2.4, FLIGHT = 0.65;
+const spansReversal = t => Math.floor(t / REVERSAL) !== Math.floor((t + FLIGHT) / REVERSAL);
+
+let leadWins = 0, clean = 0, dirty = 0, dirtyWorse = 0;
+for (const t of [0.4, 0.8, 1.2, 1.6, 2.0, 2.8, 3.2, 3.6, 4.0, 4.4]) {
+    const a = simulateShot(t, false), b = simulateShot(t, true);
+    if (spansReversal(t)) {
+        dirty++;
+        if (b.closest > HIT_RADIUS) dirtyWorse++;
+    } else {
+        clean++;
+        if (b.closest < a.closest && b.closest <= HIT_RADIUS) leadWins++;
+    }
+}
+check('lead aim hits at every launch time with a constant-velocity flight',
+      leadWins === clean, `${leadWins}/${clean} launch times`);
+check('...and honestly misses when the flight spans a direction reversal',
+      dirty > 0 && dirtyWorse === dirty,
+      `${dirtyWorse}/${dirty} — the solver assumes constant target velocity, `
+    + 'and says so; it is not a magic tracker');
 
 // Leave the app on a scenario worth looking at in the screenshot.
 scenarioFunnel(scene, 24);

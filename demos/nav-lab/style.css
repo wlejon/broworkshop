@@ -29,6 +29,63 @@ canvas#stage { display: block; width: 100vw; height: 100vh; }
     line-height: 1.4;
 }
 
+/* Group headings split the (now large) HUD into five readable blocks. */
+#hud h3.group {
+    margin: 10px 0 0 0;
+    padding: 3px 0 2px 0;
+    font-size: 10px;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+    color: #6d829a;
+    border-bottom: 1px solid rgba(255,255,255,0.14);
+    font-weight: 700;
+}
+
+/* The live mode banner: which of the two mutually exclusive bakes is up. */
+#hud .mode {
+    margin: 5px 0 2px 0;
+    padding: 4px 6px;
+    border-radius: 4px;
+    background: rgba(90, 210, 244, 0.12);
+    border: 1px solid rgba(90, 210, 244, 0.30);
+    color: #9fd6ff;
+    line-height: 1.35;
+}
+#hud .mode.tiled {
+    background: rgba(232, 131, 58, 0.12);
+    border-color: rgba(232, 131, 58, 0.35);
+    color: #ffbe86;
+}
+
+/* Collapsing. The caret is drawn by the heading itself so there is no extra
+   markup per section, and the checkbox in a heading still has to be clickable —
+   hence the label carve-out in the click handler. */
+#hud h2 { cursor: pointer; }
+/* Plain ASCII for the fold marker. A border-drawn triangle and the usual
+   ▾/▸ glyphs both render as a smudge at 12 px in this panel's font; "-" and
+   "+" always read correctly, which is the whole job. */
+#hud h2::before {
+    content: '- ';
+    color: #6d829a;
+    font: 11px ui-monospace, monospace;
+}
+#hud section.collapsed h2::before { content: '+ '; }
+#hud section.collapsed .body { display: none; }
+
+#hud .legend div {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 1px 0;
+    color: #8fa3b5;
+}
+#hud .legend i {
+    display: inline-block;
+    width: 9px; height: 9px;
+    border-radius: 2px;
+    flex: none;
+}
+
 #hud section {
     margin: 8px 0 0 0;
     padding: 6px 0 2px 0;

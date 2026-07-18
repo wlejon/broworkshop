@@ -57,9 +57,17 @@ export const bakeParams = {
 // dialogs block a headless run forever, so this app never opens one.
 export const CACHE_PATH = 'nav-lab.navmesh';
 
+// Off-mesh links, injected by links.js through the setter below rather than
+// imported, so navmesh.js and links.js do not form an import cycle. null = a
+// plain bake with no links at all.
+let offMeshLinks = null;
+export function setOffMeshLinks(defs) { offMeshLinks = defs && defs.length ? defs : null; }
+export function currentOffMeshLinks() { return offMeshLinks; }
+
 export const navState = {
     mesh: null,
     grid: null,
+    linksBaked: 0,        // links handed to the last successful bake
     walkableSamples: 0,   // overlay proxy for the poly count the API lacks
     overlayQuads: 0,
     bakeMs: 0,
@@ -89,10 +97,24 @@ export function bake() {
             cellSize: bakeParams.cellSize,
             cellHeight: 0.2,
         };
+        // The two exclusive modes. bakeNavMesh THROWS when offMeshLinks and
+        // dynamicObstacles are combined — tile rebuilds would drop the links —
+        // so the tiled bake wins and the links are left out rather than
+        // letting a mode switch blow up the app. links.js's HUD says which
+        // mode is live and why the other half is unavailable.
         if (bakeParams.dynamicObstacles) {
             opts.dynamicObstacles = true;
             opts.tileSize = bakeParams.tileSize;
             opts.maxObstacles = bakeParams.maxObstacles;
+            navState.linksBaked = 0;
+        } else if (offMeshLinks) {
+            opts.offMeshLinks = offMeshLinks.map(l => ({
+                start: l.start, end: l.end,
+                radius: l.radius, bidirectional: l.bidirectional, userId: l.userId,
+            }));
+            navState.linksBaked = offMeshLinks.length;
+        } else {
+            navState.linksBaked = 0;
         }
         const mesh = bro.ai.game.bakeNavMesh(opts);
         navState.bakeMs = performance.now() - t0;
@@ -262,7 +284,9 @@ export function findPath(from, to, opts) {
         if (p.y > maxY) maxY = p.y;
         if (i) length += Math.hypot(p.x - pts[i - 1].x, p.y - pts[i - 1].y, p.z - pts[i - 1].z);
     }
-    // `links` is always present (empty until chunk 3 bakes off-mesh links).
+    // `links` holds the POINT indices whose following segment is an off-mesh
+    // link traversal rather than a walk across the surface. Empty on a mesh
+    // baked without links, or on a route that happened not to use one.
     return { points: pts, length, minY, maxY, rise: maxY - minY,
              partial: !!wp.partial, links: wp.links || [] };
 }
@@ -329,8 +353,6 @@ export function loadMesh(probeFrom, probeTo) {
 // Dynamic obstacles live in obstacles.js and the ORCA crowd in crowd.js; both
 // build on the bake configured above (`bakeParams.dynamicObstacles`).
 
-// CHUNK 3: off-mesh links (jump the mezzanine rail, drop from the roof) go into
-// bakeNavMesh's `offMeshLinks` — static bakes only, so they cannot combine with
-// the chunk 2 dynamic-obstacle mesh. Also: partial-path demos via
-// requireFullPath, a NavGrid physics bake with groundFollow agents, and the
-// steer.* / computeLeadAim kernels.
+// Off-mesh links live in links.js (they are handed to bake() through
+// setOffMeshLinks above), the NavGrid overlay and groundFollow demo in grid.js,
+// and the steer.* / computeLeadAim kernels in steering.js.

@@ -1,26 +1,62 @@
 // Navigation Lab — bro's polygon navmesh, on a level built to break a grid.
 //
 // bro ships a full Recast/Detour navmesh (bakeNavMesh / loadNavMesh, dynamic
-// obstacles, off-mesh links, ORCA avoidance) and, until this app, nothing used
-// it: every game in the workshop pathfinds on the flat `NavGrid`. That is fine
-// for a single-storey arena and hopeless the moment a level has height. This
-// app is the argument, made visible.
+// obstacles, off-mesh links, ORCA avoidance, ground-follow agents, a pile of
+// steering kernels) and, until this app, nothing used it: every game in the
+// workshop pathfinds on the flat `NavGrid`. That is fine for a single-storey
+// arena and hopeless the moment a level has height. This app is the argument,
+// made visible — and then the rest of the surface, made falsifiable.
 //
-//   level.js    The building. Stacked floors, three ramps, a staircase, a
-//               2.6 m choke point — one descriptor list driving both the
-//               visual meshes and the Jolt static bodies.
-//   navmesh.js  The bake (from the physics geometry, not a hand-written
-//               triangle list), the sampled walkable-surface overlay, the
-//               path queries, and the save/load cache.
-//   agents.js   Walkers that follow the routes, so a path is something that
-//               gets traversed rather than a line on the floor.
-//   app.js      Wiring: camera, HUD, picking, the frame loop, exports.
+//   level.js     The building. Stacked floors, three ramps, a staircase, a
+//                2.6 m choke point — one descriptor list driving both the
+//                visual meshes and the Jolt static bodies.
+//   navmesh.js   The bake (from the physics geometry, not a hand-written
+//                triangle list), the sampled walkable-surface overlay, the
+//                path queries, and the save/load cache.
+//   agents.js    Walkers that follow the routes, so a path is something that
+//                gets traversed rather than a line on the floor.
+//   obstacles.js Runtime holes: a tiled dtTileCache bake, crates that carve
+//                the surface, and the incremental tile rebuilds behind them.
+//   crowd.js     ORCA local avoidance, scored by a counter rather than by
+//                vibes: priority, layers/mask, and the elevation filter.
+//   links.js     Off-mesh links — a jump across a gap, a one-way drop off the
+//                mezzanine, a ladder — plus the link yard they need and the
+//                partial-path "walled in" demonstration.
+//   grid.js      The NavGrid baked from the same physics, drawn as an overlay
+//                next to the mesh, and the groundFollow contrast.
+//   steering.js  The five steer.* kernels with their force vectors drawn, and
+//                a turret that proves computeLeadAim by missing without it.
+//   app.js       Wiring: camera, HUD, picking, the frame loop, exports.
 //
-// The two things worth doing first: raise "Agent radius" and re-bake to watch
-// the walkable surface pull back from every wall until the corridor closes, and
-// hit "Cross floor" to route from the ground hall up onto the mezzanine — then
-// tick "Compare against NavGrid" and watch the grid answer stay pinned at
-// y = 0, because one bit per XZ cell is all it has.
+// ─── A tour, in the order the HUD is laid out ────────────────────────────────
+//
+//  1. Raise "Agent radius" and re-bake. The walkable surface pulls back from
+//     every wall until the 2.6 m corridor closes outright.
+//  2. Tick the NavGrid overlay next to the mesh overlay. One flat magenta sheet
+//     at y = 0 against four stacked cyan storeys — and a square hole under every
+//     ramp, because a grid obstacle is a body's AABB.
+//  3. "Cross floor" routes the hall up onto the mezzanine; "Compare against
+//     NavGrid" shows the grid's answer pinned at y = 0.
+//  4. "Send over the gap" walks an agent onto an island pad that touches
+//     nothing. It gets there by jumping — the HUD's "on a link now" lights up
+//     mid-air and the traversal counter ticks.
+//  5. "Seal the pad" drops that jump link from the bake, and "Run the
+//     comparison" asks for the same route twice: requireFullPath false clamps
+//     to the lip of the gap and reports partial, true returns nothing at all.
+//  6. "Walk the ramp" sends two identical agents up a slope. One has a
+//     groundFollow raycast probe and climbs; the other does not and slides
+//     through the geometry at a constant height.
+//  7. The crowd and obstacle sections are chunk 2's; the steering pad and the
+//     turret are the raw kernels with nothing between them and the screen.
+//
+// ─── The one thing the engine will not let this app do at once ───────────────
+//
+// Off-mesh links and dynamic obstacles are mutually exclusive: `bakeNavMesh`
+// throws when both are asked for, because a dtTileCache rebuilds tiles at
+// runtime and would silently drop bake-time link connections. Rather than
+// hiding half of the engine behind whichever default was chosen, the mode
+// switch is a first-class control with a banner at the top of the HUD saying
+// which bake is live and what it costs.
 
 import "/lib/camera.js";
 import { installSystemMenu } from "/lib/system-menu.js";
@@ -43,6 +79,23 @@ import {
     deviationOf, findRole, snapshot, resetPositions, resetStats, setAvoidHeight,
     STACK_LANE,
 } from "/app/crowd.js";
+import {
+    linkState, LINK_DEFS, linkMarks, buildLinkYard, rebuildLinkVisuals,
+    spawnLinkWalker, sendLinkWalkers, clearLinkWalkers, tickLinkWalkers,
+    comparePartial, setLinksEnabled, setSealed, syncLinksToBake, linkIsLive,
+    linkSegmentsOf, activeLinkDefs,
+} from "/app/links.js";
+import {
+    gridState, rebuildGridOverlay, setGridOverlayVisible, gridWalkable,
+    spawnFollowers, clearFollowers, walkTheRamp, resetFollowers, tickFollowers,
+    followerSpread, followerOf, FOLLOW_START, FOLLOW_END,
+} from "/app/grid.js";
+import {
+    steerState, kernelInfo, buildSteering, clearSteering, setSteeringVisible,
+    tickSteering, simulateShot, trackAt, aimDir, setLead, resetTurretStats,
+    agentSpeed, agentOf, distanceToTarget, bindScene as bindSteerScene,
+    HIT_RADIUS, PROJECTILE_SPEED, TURRET, ARRIVE_SLOWING,
+} from "/app/steering.js";
 
 installSystemMenu();
 
@@ -61,7 +114,13 @@ const cam = Camera.createOrbit({
 });
 
 const levelNodes = buildLevel(scene);
+// The link yard's slabs are Jolt static bodies too, and they go in BEFORE the
+// first bake — `fromPhysics` collects whatever is in the world at bake time, so
+// geometry added afterwards would simply not exist to the navmesh.
+const yardNodes = buildLinkYard(scene);
+for (const n of yardNodes) levelNodes.push(n);
 const lights = buildEnvironment(scene);
+bindSteerScene(scene);
 
 // --- Shared app state --------------------------------------------------------
 
@@ -73,6 +132,7 @@ const state = {
     showGrid: false,
     showOverlay: true,
     showShell: true,
+    requireFullPath: false,   // hard-fail semantics on every HUD query
 };
 
 let pathNode = null, gridNode = null;
@@ -91,6 +151,9 @@ function makeMarker(color) {
 }
 const startMarker = makeMarker('#7bed9f');
 const goalMarker = makeMarker('#ff6b6b');
+// Where a partial route gives up. Distinct on purpose — see refreshPath().
+const clampMarker = makeMarker('#ff8f5a');
+clampMarker.visible = false;
 
 // Waypoint pips. Pre-allocated and parked out of sight rather than created and
 // destroyed per query — a click-to-path app re-queries constantly, and churning
@@ -118,7 +181,8 @@ function refreshPath() {
     if (pathNode) { scene.destroyNode(pathNode); pathNode = null; }
     if (gridNode) { scene.destroyNode(gridNode); gridNode = null; }
 
-    state.path = findPath(state.start, state.goal);
+    state.path = findPath(state.start, state.goal,
+                          { requireFullPath: state.requireFullPath });
 
     placeMarker(startMarker, state.start);
     placeMarker(goalMarker, state.goal);
@@ -138,6 +202,18 @@ function refreshPath() {
         for (const p of pips) p.visible = false;
     }
 
+    // A clamped route needs a mark of its own: the last waypoint of a partial
+    // path is NOT the goal, and drawing it in the same yellow as every other
+    // pip is how a demo quietly lies about what it found.
+    const pts = state.path && state.path.points;
+    if (state.path && state.path.partial && pts && pts.length) {
+        const end = pts[pts.length - 1];
+        clampMarker.visible = true;
+        clampMarker.x = end.x; clampMarker.y = end.y + 0.7; clampMarker.z = end.z;
+    } else {
+        clampMarker.visible = false;
+    }
+
     // The grid answer is computed whenever the comparison is on, even if it
     // ends up unreachable — "the grid could not do this" is the interesting
     // result, and it needs to be shown rather than hidden.
@@ -155,12 +231,23 @@ function refreshPath() {
 // --- Bake pipeline -----------------------------------------------------------
 
 function rebake() {
+    // Every live route was planned against the mesh that is about to be
+    // replaced. The binding takes shared ownership so nothing dangles, but a
+    // walker still following the old surface is a walker walking a lie.
+    for (const rec of linkState.walkers) {
+        try { rec.carrier.stopNavigation(); } catch (e) { /* no active route */ }
+    }
+    syncLinksToBake();
     const mesh = bake();
     bakeGrid();
     rebuildOverlay(scene);
     setOverlayVisible(state.showOverlay);
+    rebuildGridOverlay(scene);
+    rebuildLinkVisuals(scene);
     refreshPath();
     updateBakeReadout();
+    updateLinkReadout();
+    updateModeBanner();
     return mesh;
 }
 
@@ -384,6 +471,229 @@ $('btnLoad').addEventListener('click', () => {
     }
 });
 
+// --- Collapsible HUD ---------------------------------------------------------
+//
+// The HUD grew past a screen once every feature had a home. Each <section>
+// folds on a click of its heading — except when the click landed on the
+// checkbox that heading contains, which has to keep toggling the feature.
+
+for (const h of document.querySelectorAll('#hud section h2')) {
+    h.addEventListener('click', (e) => {
+        const t = e.target;
+        if (t && (t.tagName === 'INPUT' || t.tagName === 'LABEL')) return;
+        const sec = h.parentNode;
+        sec.className = sec.className.indexOf('collapsed') >= 0 ? 'sec' : 'sec collapsed';
+    });
+}
+
+// --- Mode: static + links, or tiled + obstacles ------------------------------
+//
+// One re-bake either way. `dynOn` stays the source of truth for the obstacle
+// half (chunk 2's code and its tests drive bakeParams.dynamicObstacles
+// directly), and these buttons drive it plus the link flag together so the two
+// controls can never disagree about which bake is up.
+
+function applyMode(tiled) {
+    clearObstacles(scene);
+    obstacleState.placed.length = 0;
+    bakeParams.dynamicObstacles = !!tiled;
+    setLinksEnabled(!tiled);
+    $('dynOn').checked = !!tiled;
+    stale = false;
+    rebake();
+    updateObstacleReadout();
+}
+
+$('btnModeLinks').addEventListener('click', () => applyMode(false));
+$('btnModeTiled').addEventListener('click', () => applyMode(true));
+
+function updateModeBanner() {
+    const bar = $('modeBar'), hint = $('modeHint');
+    const tiled = !!(navState.mesh && navState.mesh.supportsObstacles);
+    bar.className = tiled ? 'mode tiled' : 'mode';
+    bar.textContent = tiled
+        ? 'Tiled + obstacles — crates carve the surface at runtime. Off-mesh '
+        + 'links are dropped and save() throws in this mode.'
+        : `Static + links — ${navState.linksBaked} off-mesh link(s) in the bake, `
+        + 'save() works. No runtime obstacle API on a static mesh.';
+    hint.className = 'hint';
+    hint.textContent = 'bakeNavMesh throws outright if you ask for both: a '
+        + 'dtTileCache rebuilds tiles and would silently drop bake-time links. '
+        + 'Two bakes, one switch, nothing hidden.';
+}
+
+// --- Off-mesh links ----------------------------------------------------------
+
+$('btnLinkJump').addEventListener('click', () => {
+    const n = sendLinkWalkers(linkMarks.padEast);
+    linkHint(n, 'the island pad — the 4.5 m gap has no walkable route across it, '
+              + 'so every one of these routes goes through the jump link.');
+});
+$('btnLinkDrop').addEventListener('click', () => {
+    const n = sendLinkWalkers(linkMarks.hallBelow);
+    linkHint(n, 'the hall floor below the mezzanine. The one-way drop is the '
+              + 'short way down; walking would mean the whole ramp.');
+});
+$('btnLinkLadder').addEventListener('click', () => {
+    const n = sendLinkWalkers(linkMarks.ladderTop);
+    linkHint(n, 'the mezzanine, via the ladder at its south-east corner.');
+});
+$('btnLinkHome').addEventListener('click', () => {
+    for (const rec of linkState.walkers) {
+        try { rec.carrier.stopNavigation(); } catch (e) { /* none */ }
+        rec.agent.setPosition(rec.startedAt.x, rec.startedAt.z);
+        rec.visitedEast = false;
+    }
+    linkState.traversals = 0;
+    linkState.crossedGap = 0;
+    linkState.lastLink = '—';
+    updateLinkReadout();
+});
+
+function linkHint(started, where) {
+    const h = $('linkHint');
+    if (!started) {
+        h.className = 'hint bad';
+        h.textContent = 'No route: either the links are not in the current bake '
+                      + '(check the mode) or the pad is sealed.';
+        return;
+    }
+    h.className = 'hint good';
+    h.textContent = `${started} walker(s) routed to ${where}`;
+}
+
+function updateLinkReadout() {
+    const defs = activeLinkDefs() || [];
+    $('stLinks').textContent = navState.linksBaked;
+    // No link read-back exists, so "live" is inferred: ask for a route from
+    // each link's takeoff to its landing and see whether the mesh answers.
+    let live = 0;
+    for (const d of defs) if (linkIsLive(d)) live++;
+    $('stLinksLive').textContent = `${live} / ${defs.length}`;
+    $('stOnLink').textContent = linkState.onLinkNow;
+    $('stLastLink').textContent = linkState.lastLink;
+    $('stTraversals').textContent = linkState.traversals;
+    $('stCrossed').textContent = linkState.crossedGap;
+}
+
+// --- Partial paths -----------------------------------------------------------
+
+$('btnSeal').addEventListener('click', () => { setSealed(true);  stale = false; rebake(); runPartial(); });
+$('btnUnseal').addEventListener('click', () => { setSealed(false); stale = false; rebake(); runPartial(); });
+$('btnPartial').addEventListener('click', runPartial);
+
+$('reqFull').addEventListener('change', e => {
+    state.requireFullPath = e.target.checked;
+    refreshPath();
+});
+
+function runPartial() {
+    const from = { ...marks.eastRoom }, to = { ...linkMarks.padEast };
+    const r = comparePartial(from, to);
+    // Draw the loose answer, so the clamp point is on screen next to the goal
+    // it never reached.
+    state.requireFullPath = false;
+    $('reqFull').checked = false;
+    setStart(from);
+    setGoal(to);
+
+    $('stLoose').textContent = r.looseFound
+        ? (r.loosePartial ? 'partial' : 'complete') : 'none';
+    $('stStrict').textContent = r.strictFound ? 'complete' : 'none';
+    $('stShort').textContent = isFinite(r.shortfall) ? r.shortfall.toFixed(2) + ' m' : '—';
+
+    const h = $('partialHint');
+    if (r.loosePartial && !r.strictFound) {
+        h.className = 'hint good';
+        h.textContent = `Sealed. requireFullPath:false walks to the lip of the gap `
+                      + `and stops ${r.shortfall.toFixed(1)} m short with partial=true `
+                      + `(orange marker); requireFullPath:true returns nothing at all. `
+                      + `Same mesh, same query, one flag.`;
+    } else if (r.looseFound && r.strictFound) {
+        h.className = 'hint';
+        h.textContent = 'The jump link is in the bake, so the pad is reachable and '
+                      + 'both flags agree on a complete route. Seal it to see them split.';
+    } else {
+        h.className = 'hint bad';
+        h.textContent = 'Neither query found a route — the start point did not snap '
+                      + 'onto the surface.';
+    }
+}
+
+// --- NavGrid overlay ---------------------------------------------------------
+
+$('gridOverlayOn').addEventListener('change', e => {
+    setGridOverlayVisible(e.target.checked);
+    updateGridReadout();
+});
+
+function updateGridReadout() {
+    $('stGridCells').textContent = gridState.cells;
+    $('stGridTested').textContent = gridState.tested;
+}
+
+// --- Ground follow -----------------------------------------------------------
+
+$('btnWalkRamp').addEventListener('click', () => { walkTheRamp(); updateFollowReadout(); });
+$('btnFollowReset').addEventListener('click', () => { resetFollowers(); updateFollowReadout(); });
+$('followOn').addEventListener('change', e => {
+    gridState.followOn = e.target.checked;
+    for (const rec of gridState.followers) rec.node.visible = gridState.followOn;
+});
+
+function updateFollowReadout() {
+    const fmt = f => {
+        const s = followerSpread(f);
+        return s > 0 ? s.toFixed(2) + ' m' : '—';
+    };
+    $('stFollowY').textContent = fmt(true);
+    $('stFlatY').textContent = fmt(false);
+}
+
+// --- Steering kernels --------------------------------------------------------
+
+const legend = $('steerLegend');
+for (const k of kernelInfo) {
+    const row = document.createElement('div');
+    const swatch = document.createElement('i');
+    swatch.style.background = k.color;
+    row.appendChild(swatch);
+    const text = document.createElement('span');
+    text.textContent = k.label;
+    row.appendChild(text);
+    legend.appendChild(row);
+}
+
+$('steerOn').addEventListener('change', e => setSteeringVisible(e.target.checked));
+$('leadOn').addEventListener('change', e => { setLead(e.target.checked); updateAimReadout(); });
+
+// The measured version of the turret claim, run off-screen at a fixed sample
+// time so the two numbers are comparable rather than whatever the frame happened
+// to catch.
+$('btnMeasureAim').addEventListener('click', () => {
+    const t = 1.0;                       // mid-sweep, away from a direction change
+    const direct = simulateShot(t, false);
+    const lead = simulateShot(t, true);
+    const h = $('aimHint');
+    h.className = 'hint good';
+    h.textContent = `Straight aim passes ${direct.closest.toFixed(2)} m behind the `
+                  + `target; computeLeadAim comes within ${lead.closest.toFixed(2)} m `
+                  + `(hit radius ${HIT_RADIUS} m). Same turret, same target, same tick.`;
+});
+
+function updateSteerReadout() {
+    $('stSeekV').textContent = agentSpeed('seek').toFixed(2) + ' m/s';
+    $('stArriveV').textContent = agentSpeed('arrive').toFixed(2) + ' m/s';
+    $('stArriveD').textContent = distanceToTarget('arrive').toFixed(2) + ' m';
+}
+
+function updateAimReadout() {
+    $('stShots').textContent = steerState.fired;
+    $('stHits').textContent = `${steerState.hits} / ${steerState.misses}`;
+    $('stClosest').textContent = steerState.fired
+        ? steerState.lastClosest.toFixed(2) + ' m' : '—';
+}
+
 // --- Readouts ----------------------------------------------------------------
 
 function updateBakeReadout() {
@@ -402,18 +712,33 @@ function updateBakeReadout() {
 
 function updatePathReadout() {
     const p = state.path, h = $('pathHint');
+    const segs = linkSegmentsOf(p);
+    $('stLinkSegs').textContent = p ? segs.length : '—';
+    $('stPartial').textContent = p ? String(!!p.partial) : '—';
+
     if (!p) {
         $('stWp').textContent = '—';
         $('stLen').textContent = 'no path';
         $('stRise').textContent = '—';
         h.className = 'hint bad';
-        h.textContent = 'No route: an endpoint did not snap onto the baked surface. '
-                      + 'Re-bake with a smaller agent radius, or pick a point on the mesh.';
+        h.textContent = state.requireFullPath
+            ? 'No route. requireFullPath is on, so an unreachable goal returns '
+            + 'nothing rather than a clamped path — untick it to see how far the '
+            + 'route would have got.'
+            : 'No route: an endpoint did not snap onto the baked surface. '
+            + 'Re-bake with a smaller agent radius, or pick a point on the mesh.';
     } else {
         $('stWp').textContent = p.points.length;
         $('stLen').textContent = p.length.toFixed(2) + ' m';
         $('stRise').textContent = p.rise.toFixed(2) + ' m';
-        if (p.partial) {
+        if (segs.length) {
+            h.className = 'hint good';
+            const s = segs[0];
+            h.textContent = `This route uses ${segs.length} off-mesh link`
+                + `${segs.length === 1 ? '' : 's'} — waypoint ${s.index} is a takeoff, `
+                + `and the segment after it is a jump/drop/climb rather than a walk. `
+                + `Detour routed through it with no special-case code in this app.`;
+        } else if (p.partial) {
             h.className = 'hint bad';
             h.textContent = 'Partial route — the goal is unreachable, so the path clamps '
                           + 'to the closest reachable point.';
@@ -462,7 +787,13 @@ function updatePathReadout() {
 
 const annotationNodes = () => [
     ...pips, ...markerNodes, ...agentState.agents.map(a => a.node),
-].concat(pathNode ? [pathNode] : [], gridNode ? [gridNode] : []);
+    ...linkState.nodes, ...linkState.walkers.map(w => w.node),
+    ...gridState.followers.map(f => f.node),
+    ...steerState.agents.map(a => a.node), ...steerState.agents.map(a => a.arrow),
+    ...steerState.shots.map(s => s.node),
+].concat(pathNode ? [pathNode] : [], gridNode ? [gridNode] : [],
+         gridState.overlay ? [gridState.overlay] : [],
+         steerState.target ? [steerState.target] : []);
 
 function pickLevel(px, py) {
     const ray = scene.unprojectLocal(px, py);
@@ -551,9 +882,14 @@ canvas.addEventListener('wheel', (e) => {
 // --- Boot --------------------------------------------------------------------
 
 createAgentWorld();
+// Links are in the default bake: they are the headline of this section, and
+// baking them in means the app opens in the mode where the most of the engine
+// is reachable (links + save/load; the tiled obstacle bake is one click away).
+syncLinksToBake();
 rebake();
 updateObstacleReadout();
 updateCrowdReadout();
+updateGridReadout();
 
 // Spawn on the walkable surface rather than at nominal coordinates: after a
 // wide-radius bake the nominal spawn may be inside the eroded margin.
@@ -567,6 +903,27 @@ for (let i = 0; i < 4; i++) {
         z: spawnBase.z + Math.floor(i / 2) * 1.6 - 0.8,
     }, i);
 }
+
+// Link walkers start at the foot of the yard ramp, on the ground, so the first
+// "Send over the gap" is a complete journey: up the ramp, across the west pad,
+// and off the edge.
+for (let i = 0; i < 2; i++) {
+    spawnLinkWalker(scene, {
+        x: linkMarks.yardFoot.x + (i - 0.5) * 1.4,
+        y: 0,
+        z: linkMarks.yardFoot.z + 1.0,
+    }, i);
+}
+
+// The groundFollow pair and the steering pad exist from boot but the steering
+// pad starts hidden: five capsules chasing a ball is a distraction until the
+// user asks for it, and the navmesh is what the app opens on.
+spawnFollowers(scene);
+buildSteering(scene);
+setSteeringVisible(false);
+updateLinkReadout();
+updateFollowReadout();
+updateAimReadout();
 
 // --- Frame loop --------------------------------------------------------------
 //
@@ -613,8 +970,18 @@ function frame() {
         // waypoints and measures. Stepping twice would double every velocity.
         tickAgents(AI_STEP);
         tickCrowd(AI_STEP);
+        // The steering pad integrates the raw kernels itself and touches no AI
+        // world at all, so it rides the same fixed step purely for
+        // reproducibility — the smoke test asserts on its speeds.
+        tickSteering(AI_STEP);
         aiAccum -= AI_STEP;
     }
+
+    // These two read state the ENGINE wrote (the agent binding's transforms and
+    // its onLink flag), so they run once per frame after the bindings have been
+    // stepped, not once per fixed AI step.
+    tickLinkWalkers();
+    tickFollowers();
 
     // The surface can change without anybody in this file asking — the engine
     // pumps queued obstacle rebuilds once per frame on its own. Watch the
@@ -629,6 +996,10 @@ function frame() {
             `${agentState.agents.filter(a => !a.done).length} / ${agentState.agents.length}`;
         updateObstacleReadout();
         updateCrowdReadout();
+        updateLinkReadout();
+        updateFollowReadout();
+        updateSteerReadout();
+        updateAimReadout();
         fpsAccum = 0; fpsFrames = 0;
     }
 
@@ -656,3 +1027,20 @@ export {
     STACK_LANE,
 };
 export { afterObstacleChange, updateObstacleReadout, updateCrowdReadout, refreshOverlay };
+
+// Chunk 3: off-mesh links, partial paths, the NavGrid overlay + groundFollow,
+// and the steering kernels.
+export {
+    linkState, LINK_DEFS, linkMarks, rebuildLinkVisuals, spawnLinkWalker,
+    sendLinkWalkers, clearLinkWalkers, tickLinkWalkers, comparePartial,
+    setLinksEnabled, setSealed, syncLinksToBake, linkIsLive, linkSegmentsOf,
+    activeLinkDefs, yardNodes,
+    gridState, rebuildGridOverlay, setGridOverlayVisible, gridWalkable,
+    spawnFollowers, clearFollowers, walkTheRamp, resetFollowers, tickFollowers,
+    followerSpread, followerOf, FOLLOW_START, FOLLOW_END,
+    steerState, kernelInfo, buildSteering, setSteeringVisible, tickSteering,
+    simulateShot, trackAt, aimDir, setLead, resetTurretStats, agentSpeed,
+    agentOf, distanceToTarget, HIT_RADIUS, PROJECTILE_SPEED, TURRET,
+    ARRIVE_SLOWING,
+    applyMode, runPartial,
+};
