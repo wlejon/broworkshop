@@ -152,3 +152,19 @@ html, body {
 .c-plat   { background: #d2b45a; }
 
 #hud .hint { margin-top: 6px; color: #66738a; line-height: 1.5; }
+#hud code { font: 11px ui-monospace, monospace; color: #a8c0e0; }
+#hud .ghint2 { color: #66738a; font-size: 10px; }
+
+/* The live overlap list: one line per body inside the proximity sphere. It is
+   allowed to grow, so it is capped and scrolls rather than pushing the rest of
+   the panel off screen. */
+.prox-list {
+    margin: 2px 0 4px;
+    max-height: 86px;
+    overflow-y: auto;
+    font: 11px ui-monospace, monospace;
+    color: #ffd166;
+    line-height: 1.5;
+}
+.prox-list div { display: flex; justify-content: space-between; }
+.prox-list div span { color: #8a7a4a; }

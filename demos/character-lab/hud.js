@@ -13,6 +13,7 @@
 // parameter change.
 
 import { tune, charState, rebuild, resetToSpawn } from "/app/character.js";
+import { sense, qState } from "/app/queries.js";
 
 export const view = { labels: true, interpolation: true };
 
@@ -38,6 +39,27 @@ export function bindHud(scene) {
         // it is unsupported, so this changes both fall and slide behaviour.
         Physics.setGravity(0, -v, 0);
     }, (v) => v.toFixed(2));
+
+    // --- sensing -------------------------------------------------------------
+    // None of these rebuild anything: a query is a stateless call against the
+    // physics world, so every switch here takes effect on the very next frame.
+    check('qForward',  (on) => { sense.forwardCast = on; });
+    check('qLedge',    (on) => { sense.ledgeProbe = on; });
+    check('qProx',     (on) => { sense.proximity = on; });
+    check('qRay',      (on) => { sense.lookRay = on; });
+    check('qDraw',     (on) => { sense.drawVolumes = on; });
+    slider('qCastDist', (v) => { sense.castDistance = v; }, (v) => v.toFixed(1) + ' m');
+    slider('qProxR',    (v) => { sense.proxRadius = v; },   (v) => v.toFixed(1) + ' m');
+    slider('qAhead',    (v) => { sense.ledgeAhead = v; },   (v) => v.toFixed(2) + ' m');
+    slider('qRayH',     (v) => { sense.rayHeight = v; },
+           (v) => (v >= 0 ? '+' : '') + v.toFixed(2) + ' m');
+
+    // The filter switches. These are the app's argument: the readout shows the
+    // same ray with and without them, so flipping one changes a number on
+    // screen and nothing else.
+    check('qIgnoreSelf',  (on) => { sense.ignoreSelf = on; });
+    check('qIgnoreProps', (on) => { sense.ignoreProps = on; });
+    check('qMovingOnly',  (on) => { sense.movingOnly = on; });
 
     check('optLabels', (on) => { view.labels = on; });
     check('optInterp', (on) => {
@@ -102,6 +124,69 @@ export function updateReadout() {
     set('roStance', s.stance, s.stance === 'crouching' ? 'good' : '');
     set('roBlocked', s.blocked ? 'YES' : 'no', s.blocked ? 'hot' : '');
     set('roStandBlocked', s.standBlocked ? 'YES' : 'no', s.standBlocked ? 'hot' : '');
+    updateSensors();
+}
+
+// --- sensor readout ----------------------------------------------------------
+// Every line here is a field off a query result. Nothing is derived, smoothed
+// or debounced: if the number flickers, the query flickers, and that is worth
+// seeing.
+
+let proxSig = '';   // last rendered overlap list, to avoid rebuilding the DOM
+
+function updateSensors() {
+    // Forward sweep. "clear" is a real answer, not a missing one — it means the
+    // character can walk the full cast distance without touching anything.
+    const sw = qState.sweep;
+    set('qoSweep', sense.forwardCast ? (sw ? sw.name : 'clear') : 'off',
+        sense.forwardCast ? (sw ? 'hot' : 'good') : '');
+    set('qoSweepD', sw ? sw.dist.toFixed(2) + ' m'
+                       : (sense.forwardCast ? '> ' + sense.castDistance.toFixed(1) + ' m' : '—'));
+
+    // Ledge probe. An infinite drop means the probe found no floor at all
+    // within its reach, which off the side of the platform is the honest answer.
+    const l = qState.ledge;
+    set('qoLedge', !sense.ledgeProbe ? 'off' : (l && l.isLedge ? 'LEDGE' : 'flat'),
+        !sense.ledgeProbe ? '' : (l && l.isLedge ? 'hot' : 'good'));
+    set('qoDrop', !l ? '—'
+        : (l.drop === Infinity ? 'no floor' : l.drop.toFixed(2) + ' m'),
+        l && l.isLedge ? 'hot' : '');
+
+    // Proximity. The count is the headline; the list under it is who.
+    const prox = qState.prox;
+    set('qoProxN', sense.proximity ? String(prox.length) : 'off',
+        sense.proximity && prox.length ? 'good' : '');
+    const sig = prox.map((o) => o.bodyId + ':' + o.dist.toFixed(1)).join(',');
+    if (sig !== proxSig) {
+        proxSig = sig;
+        const host = $('qoProxList');
+        if (host) {
+            host.textContent = '';
+            for (const o of prox) {
+                const row = document.createElement('div');
+                const nm = document.createElement('span');
+                nm.textContent = o.name;
+                const d = document.createElement('b');
+                d.textContent = o.dist.toFixed(2) + ' m';
+                row.appendChild(nm);
+                row.appendChild(d);
+                host.appendChild(row);
+            }
+        }
+    }
+
+    // The two ray rows. Read them together: with ignoreBody off, "filtered"
+    // collapses onto "no filter" and both say SELF at 0.00 m.
+    const r = qState.ray, raw = qState.rayUnfiltered;
+    set('qoRay', !sense.lookRay ? 'off' : (r ? r.name : 'nothing'),
+        r && r.name.startsWith('SELF') ? 'hot' : (r ? 'good' : ''));
+    set('qoRayD', r ? r.dist.toFixed(2) + ' m' : '—');
+    set('qoRayRaw', !sense.lookRay ? 'off' : (raw ? raw.name : 'nothing'),
+        raw && raw.name.startsWith('SELF') ? 'hot' : '');
+    set('qoRayRawD', raw ? raw.dist.toFixed(2) + ' m' : '—');
+
+    const pk = qState.pick;
+    set('qoPick', pk ? pk.name : 'click a body', pk ? 'good' : '');
 }
 
 export function setFps(fps) {

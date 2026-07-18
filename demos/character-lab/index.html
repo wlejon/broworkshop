@@ -36,6 +36,22 @@
             <div class="row"><span>stand blocked</span><b id="roStandBlocked">—</b></div>
         </section>
 
+        <section class="readout">
+            <h2>Sensors</h2>
+            <div class="row"><span>sweep</span><b id="qoSweep">—</b></div>
+            <div class="row"><span>sweep dist</span><b id="qoSweepD">—</b></div>
+            <div class="row"><span>ledge ahead</span><b id="qoLedge">—</b></div>
+            <div class="row"><span>drop</span><b id="qoDrop">—</b></div>
+            <div class="row"><span>overlapping</span><b id="qoProxN">—</b></div>
+            <div class="prox-list" id="qoProxList"></div>
+            <div class="row"><span>ray (filtered)</span><b id="qoRay">—</b></div>
+            <div class="row"><span>ray dist</span><b id="qoRayD">—</b></div>
+            <div class="row"><span>ray (no filter)</span><b id="qoRayRaw">—</b></div>
+            <div class="row"><span>raw dist</span><b id="qoRayRawD">—</b></div>
+            <div class="row"><span>picked</span><b id="qoPick">—</b></div>
+            <div class="hint">Left-click any body to <code>overlapPoint</code> it.</div>
+        </section>
+
         <!-- Jolt's CharacterVirtual takes these at construction and the JS
              binding exposes no runtime setters, so moving one of these sliders
              rebuilds the character in place (position + velocity + stance are
@@ -61,6 +77,45 @@
                 <span class="v" id="tJumpV"></span></label>
             <label>Gravity <input type="range" id="tGravity" min="0" max="30" step="0.1" value="9.81">
                 <span class="v" id="tGravityV"></span></label>
+        </section>
+
+        <!-- Sensing: the queries a game asks BEFORE it moves. Each row is one
+             engine call; the readout below is that call's return value. The
+             filter checkboxes are the point of the section — the two ray rows
+             show the same ray with and without them, so the filter's effect is
+             two numbers side by side rather than an assertion. -->
+        <section>
+            <h2>Sensing <span class="ghint">shape casts · overlaps · rays</span></h2>
+            <label><input type="checkbox" id="qForward" checked> Forward shape cast</label>
+            <label><input type="checkbox" id="qLedge" checked> Ledge probe</label>
+            <label><input type="checkbox" id="qProx" checked> Proximity sensor</label>
+            <label><input type="checkbox" id="qRay" checked> Look ray</label>
+            <label><input type="checkbox" id="qDraw" checked> Draw query volumes</label>
+            <label>Cast dist <input type="range" id="qCastDist" min="0.5" max="10" step="0.1" value="3">
+                <span class="v" id="qCastDistV"></span></label>
+            <label>Sensor radius <input type="range" id="qProxR" min="0.5" max="10" step="0.1" value="3">
+                <span class="v" id="qProxRV"></span></label>
+            <label>Ledge ahead <input type="range" id="qAhead" min="0.2" max="3" step="0.05" value="0.9">
+                <span class="v" id="qAheadV"></span></label>
+            <!-- Offset from the capsule centre. It starts low because the
+                 crates are 0.70 m tall: a ray from the capsule's middle flies
+                 straight over them and the ignoreBodies switch would have
+                 nothing to exclude. -->
+            <label>Ray height <input type="range" id="qRayH" min="-0.85" max="0.7" step="0.05" value="-0.55">
+                <span class="v" id="qRayHV"></span></label>
+        </section>
+
+        <section>
+            <h2>Query filters <span class="ghint">watch the two ray rows</span></h2>
+            <label><input type="checkbox" id="qIgnoreSelf" checked>
+                <code>ignoreBody: innerBody</code></label>
+            <label><input type="checkbox" id="qIgnoreProps">
+                <code>ignoreBodies: props</code></label>
+            <label><input type="checkbox" id="qMovingOnly" checked>
+                <code>layers: ['moving']</code> <span class="ghint2">(sensor)</span></label>
+            <div class="hint">Uncheck the first and the look ray hits your own
+                inner rigid body at zero distance. Check the second and it walks
+                straight through the crates to whatever is behind them.</div>
         </section>
 
         <section>

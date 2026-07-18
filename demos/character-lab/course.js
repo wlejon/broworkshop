@@ -91,6 +91,7 @@ export function buildCourse(scene) {
         stairs: [],      // { riser, topY, z, x }
         ramps: [],       // { deg, x, entryZ }
         props: [],       // dynamic body tags
+        propNodes: [],   // the PhysicsNode bound to each of those tags
         labels: [],      // { at:[x,y,z], text, cls }
         tunnel: null,
         platform: null,
@@ -220,6 +221,7 @@ export function buildCourse(scene) {
         node.add(scene.createMesh({ mesh: 'box', halfW: 0.35, halfH: 0.35, halfD: 0.35,
                                     color: COL.prop, roughness: 0.7 }));
         course.props.push(tag);
+        course.propNodes.push(node);
     }
     for (const [x, z] of [[6.6, 10.6], [7.6, 9.6]]) {
         const tag = Physics.createBody({
@@ -231,6 +233,7 @@ export function buildCourse(scene) {
         node.add(scene.createMesh({ mesh: 'cylinder', radius: 0.4, halfHeight: 0.55,
                                     segments: 20, color: COL.barrel, roughness: 0.6 }));
         course.props.push(tag);
+        course.propNodes.push(node);
     }
     label(4.4, 1.5, 11.2, 'PUSH · dynamic bodies', 'zone');
 
@@ -280,11 +283,12 @@ export function buildCourse(scene) {
         color: [0.55, 0.68, 0.9], intensity: 30, range: 40, name: 'fill',
     });
 
-    // CHUNK 2: shape casts and overlap queries belong here — a downward
-    // castShapeClosest from the capsule with ignoreBody set to
-    // character.innerBody is the ledge/step probe; overlapShape over the
-    // tunnel volume (course.tunnel) is the headroom test; raycast exclude
-    // lists want course.props as the ignoreBodies array.
+    // The sensing layer (queries.js) reads this course rather than adding to
+    // it: the gap's near edge is the ledge probe's test case, the tunnel jambs
+    // are what the forward sweep stops against, and `props` above is both the
+    // proximity sensor's population and the `ignoreBodies` array that proves
+    // the ray filter filters.
+    //
     // CHUNK 3: an NPC crowd (character-vs-character) has room on the open
     // ground around z = 4, the inner rigid body demo hangs off
     // character.innerBody, and a heightfield can replace the ground slab

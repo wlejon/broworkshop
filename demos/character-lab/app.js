@@ -30,6 +30,11 @@ import {
     tune, charState, input, SPAWN,
     RADIUS, STAND_HALF, CROUCH_HALF, isCrouched, characterVisual,
 } from "/app/character.js";
+import {
+    buildQueryVis, tickQueries, nameBodies, setFacing, getFacing,
+    pickAlongRay, sense, qState, bodyName,
+    forwardCast, ledgeProbe, proximity, lookRay,
+} from "/app/queries.js";
 import { bindHud, updateReadout, setFps, view } from "/app/hud.js";
 
 installSystemMenu();
@@ -59,6 +64,13 @@ Physics.setGravity(0, -tune.gravity, 0);
 
 const world = buildCourse(scene);
 createCharacter(scene);
+
+// The sensing layer needs the character to exist first — the ghost capsule it
+// draws for the forward sweep is sized from the character's real dimensions —
+// and it needs the course's body tags so query results can be named rather than
+// printed as bare integers.
+nameBodies(world);
+buildQueryVis(scene);
 
 const applyPendingRebuild = bindHud(scene);
 
@@ -94,6 +106,39 @@ document.addEventListener('mousemove', (e) => {
     if (rightDown) Camera.orbitLook(cam, e.movementX, e.movementY);
 });
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+/**
+ * Turn a pixel on the canvas into a world-space ray. This is projectLabels()
+ * run backwards through the same focal length and camera rotation, so the ray
+ * provably matches what is on screen — a pick that used a second, independent
+ * projection would be a pick that silently drifts.
+ */
+export function screenRay(sx, sy) {
+    const W = canvas.clientWidth, H = canvas.clientHeight;
+    const aspect = W / H;
+    const focal = 1 / Math.tan((cam.fov * Math.PI / 180) / 2);
+    const ndcX = (sx / W - 0.5) * 2;
+    const ndcY = (0.5 - sy / H) * 2;
+    // Undo the divide-by-depth: at depth 1 the camera-space point is this.
+    const local = [ndcX * aspect / focal, ndcY / focal, -1];
+    const d = Camera.quatRotVec(cam.rot, local);
+    const len = Math.hypot(d[0], d[1], d[2]) || 1;
+    return {
+        origin: [cam.pos[0], cam.pos[1], cam.pos[2]],
+        dir: [d[0] / len, d[1] / len, d[2] / len],
+    };
+}
+
+/** Left-click picks whatever solid is under the cursor via overlapPoint. */
+export function pickAtScreen(sx, sy) {
+    const r = screenRay(sx, sy);
+    return pickAlongRay(r.origin[0], r.origin[1], r.origin[2],
+                        r.dir[0], r.dir[1], r.dir[2], 300);
+}
+
+canvas.addEventListener('mousedown', (e) => {
+    if (e.button === 0) pickAtScreen(e.offsetX, e.offsetY);
+});
 canvas.addEventListener('wheel', (e) => {
     cam.dist = Math.max(2.5, Math.min(40, cam.dist * Math.exp(e.deltaY * 0.001)));
     e.preventDefault();
@@ -117,7 +162,15 @@ function readMoveInput() {
     input.x = x;
     input.z = z;
     input.crouch = !!(keys['c'] || keys['control']);
+
+    // The sensors look where the player is about to walk. While a move key is
+    // held that is the commanded direction; standing still, it stays on the
+    // last one, so releasing W does not swing every probe around.
+    if (x || z) setFacing(x, z);
+    else if (!facingInitialised) { setFacing(f[0] / fl, f[2] / fl); facingInitialised = true; }
 }
+
+let facingInitialised = false;
 
 // --- World-space labels ------------------------------------------------------
 // The engine has no 3D text node, so the step risers and ramp angles are DOM
@@ -183,11 +236,10 @@ function frame() {
     tickCharacter();
     tickCourse(world, dt);
 
-    // PhysicsNode's per-frame auto-sync does not fire in this build, so every
-    // body-backed visual is pulled here through the public entry point. It
-    // honours Physics.setInterpolation, so the interpolation checkbox still
-    // does what it says. (demos/physics-playground carries the same note.)
-    scene.syncPhysics();
+    // Sensors run last, after the controller has settled and after the
+    // kinematic platform has moved, so every query sees the frame's final
+    // world rather than a half-stepped one.
+    tickQueries(world);
 
     // Follow: keep the orbit pivot on the character's head height and preserve
     // the user's current orbit orientation and zoom.
@@ -209,7 +261,11 @@ requestAnimationFrame(frame);
 
 // The character handle is recreated by rebuild(), so it is exported through a
 // live getter rather than a bound value.
-export const state = { view, tune, charState, input, keys };
+export const state = { view, tune, charState, input, keys, sense, qState };
+export {
+    sense, qState, setFacing, getFacing, bodyName, tickQueries, pickAlongRay,
+    forwardCast, ledgeProbe, proximity, lookRay,
+};
 export { scene, cam, canvas, world, tune, charState, input, SPAWN };
 export { resetToSpawn, teleport, rebuild, tickCharacter, isCrouched, characterVisual };
 export { RADIUS, STAND_HALF, CROUCH_HALF };

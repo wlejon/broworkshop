@@ -18,6 +18,8 @@ import {
     scene, cam, canvas, world, state, character,
     tune, charState, keys, teleport, resetToSpawn, rebuild,
     RADIUS, STAND_HALF, CROUCH_HALF, isCrouched,
+    sense, qState, setFacing, bodyName,
+    forwardCast, ledgeProbe, proximity, lookRay, pickAlongRay,
 } from "/app/app.js";
 
 // Let module evaluation, layout and the first frame settle.
@@ -250,7 +252,263 @@ assert(peak > groundY + 0.8, `jumped (peak +${(peak - groundY).toFixed(3)} m)`);
 for (let t = 0; t < 1400; t += 16) advanceTime(16);
 assert(charState.isGrounded, 'landed after the jump');
 
-// --- 7. pushing a dynamic body -----------------------------------------------
+// =============================================================================
+// SENSING — shape casts, overlap queries, and the filters
+// =============================================================================
+//
+// These are the chunk-2 assertions. Each one calls the query directly rather
+// than reading qState, so a failure names the engine call that broke. The
+// numbers are MEASURED against the real runtime, not derived from the docs.
+
+const self = character.innerBody;
+assert(self > 0, `inner body tag for ignoreBody filters (${self})`);
+
+// --- 7a. forward shape cast: hit vs clear ------------------------------------
+// The tunnel's right-hand jamb is a 0.7 m-thick post at x = 10.4, spanning
+// z = -3..3. Standing at the tunnel entry and sweeping toward -Z runs the
+// capsule straight into it; the same sweep on the open spawn pad hits nothing.
+
+{
+    const tunl = world.tunnel;
+    place(tunl.x + 1.9, 0.02, tunl.entryZ);
+    setFacing(0, -1);
+    const into = forwardCast({ x: 0, z: -1 }, 5);
+    assert(into, 'forward sweep hit the tunnel jamb');
+    // Capsule radius 0.3 starting at z = entryZ (4.5); the jamb's near face is
+    // at z = 3.0, so the sweep travels 4.5 - 3.0 - 0.3 = 1.2 m.
+    assert(Math.abs(into.dist - 1.2) < 0.25,
+        `sweep stopped 1.2 m short of the jamb face (got ${into.dist.toFixed(3)} m)`);
+    assert(into.normal.z > 0.8,
+        `contact normal points back at the caster (z ${into.normal.z.toFixed(3)})`);
+
+    // Open ground: the spawn pad has nothing within 5 m toward +Z.
+    place(0, 0.02, 12);
+    const clear = forwardCast({ x: 0, z: 1 }, 5);
+    assert(clear === null, 'forward sweep over open ground reports no hit');
+}
+
+// --- 7b. ledge probe: drop at the gap edge, flat on the slab -----------------
+// The near platform's top is at y = 2 and it ends at z = 1.0. Probing ahead of
+// the edge finds the ground 2 m below; probing from the middle of the slab
+// finds the slab itself, essentially level with the feet.
+
+{
+    const g = world.gap;
+    // Stand at the lip facing the hole. `ledgeAhead` of 0.9 m puts the probe
+    // out over open air.
+    place(g.x, g.topY, g.nearEdgeZ + 0.4);
+    const atEdge = ledgeProbe({ x: 0, z: -1 }, 0.9, 0.45);
+    assert(atEdge, 'ledge probe returned a result at the edge');
+    assert(atEdge.isLedge, `probe at the gap lip reports a ledge (drop ${atEdge.drop.toFixed(2)} m)`);
+    assert(atEdge.drop > 1.7 && atEdge.drop < 2.4,
+        `drop measures the 2 m platform height (${atEdge.drop.toFixed(3)} m)`);
+
+    // Middle of the slab, facing back the way we came: flat.
+    place(g.x, g.topY, g.nearEdgeZ + 1.8);
+    const onSlab = ledgeProbe({ x: 0, z: 1 }, 0.9, 0.45);
+    assert(onSlab && !onSlab.isLedge,
+        `probe on flat platform reports no ledge (drop ${onSlab.drop.toFixed(3)} m)`);
+    assert(Math.abs(onSlab.drop) < 0.12,
+        `flat ground drop is ~0 (${onSlab.drop.toFixed(3)} m)`);
+}
+
+// --- 7c. overlapShape: exactly the bodies inside a known radius --------------
+// The five crates sit at x/z (3.0,9.5) (4.6,9.5) (3.8,8.2) (5.6,8.4) (2.2,8.3)
+// and the two barrels at (6.6,10.6) (7.6,9.6). Park the character on the first
+// crate's spot and count what a sphere of a known radius sees.
+
+{
+    // Stand a few metres clear of the pile: teleporting INTO it would shove the
+    // crates apart and the count would be measuring the push, not the sensor.
+    place(4.0, 0.02, 12.5);
+    advanceTime(200);
+    const p = charState.position;
+
+    // Count the expected members ourselves from the live body transforms, so
+    // the assertion is "the query agrees with the geometry" rather than a
+    // hand-copied constant that rots the moment the course moves.
+    const R = 5.0;
+    const expected = world.props.filter((tag) => {
+        const t = Physics.getTransform(tag).position;
+        return Math.hypot(t.x - p.x, t.y - p.y, t.z - p.z) <= R - 0.5;
+    });
+    assert(expected.length >= 3, `at least three props within ${R} m (${expected.length})`);
+
+    const got = proximity(R, /*movingOnly*/ true);
+    const gotIds = got.map((o) => o.bodyId);
+    for (const tag of expected) {
+        assert(gotIds.includes(tag),
+            `overlapShape found ${bodyName(tag)} inside the ${R} m sensor`);
+    }
+    // Layer filter: every hit is a 'moving'-layer body, so no static course
+    // geometry and no ground slab leaked in.
+    for (const id of gotIds) {
+        assert(world.props.includes(id) || id === world.platform.tag,
+            `layers:['moving'] kept static geometry out (saw ${bodyName(id)})`);
+    }
+    assert(!gotIds.includes(self), 'ignoreBody kept the character out of its own sensor');
+
+    // And without the layer filter the SAME sphere also sees the ground slab —
+    // which is the filter demonstrably doing something.
+    const unfiltered = proximity(R, /*movingOnly*/ false);
+    assert(unfiltered.length > got.length,
+        `dropping layers:['moving'] widened the sensor ` +
+        `(${got.length} -> ${unfiltered.length} bodies)`);
+
+    // --- 7d. overlapPoint picks the right body --------------------------------
+    const c1 = Physics.getTransform(world.props[1]).position;
+    const at = Physics.overlapPoint(c1.x, c1.y, c1.z);
+    assert(at.length >= 1, 'overlapPoint found a body at the crate centre');
+    assert(at.some((o) => o.bodyId === world.props[1]),
+        `overlapPoint picked ${bodyName(world.props[1])} at its own centre`);
+    // A point in clear air between the crates and the sky picks nothing.
+    assert(Physics.overlapPoint(c1.x, c1.y + 6, c1.z).length === 0,
+        'overlapPoint in open air picks nothing');
+
+    // The click path: a ray from above straight down onto a crate, then
+    // overlapPoint just inside the surface it found.
+    const picked = pickAlongRay(c1.x, c1.y + 8, c1.z, 0, -1, 0, 20);
+    assert(picked && picked.bodyId === world.props[1],
+        `click-pick resolved to ${bodyName(world.props[1])} ` +
+        `(got ${picked ? picked.name : 'null'})`);
+    assert(picked.viaOverlap, 'the pick was resolved by overlapPoint, not by the ray alone');
+}
+
+// --- 7e. THE FILTER PROOF ----------------------------------------------------
+// One ray, three filter configurations, three different bodies. This is the
+// assertion the whole sensing layer exists to earn.
+//
+// Standing 3 m in +Z of the first crate at crate height and looking toward -Z:
+//   no filter                 -> the character's own inner body, at 0.00 m
+//   ignoreBody: innerBody     -> the crate, ~2.6 m out
+//   + ignoreBodies: props     -> the ramp slab behind it, ~11 m out
+
+{
+    const c0 = Physics.getTransform(world.props[0]).position;
+    place(c0.x, 0.02, c0.z + 3.0);
+    advanceTime(200);
+    const p = charState.position;
+    const dir = { x: 0, z: -1 };
+    setFacing(0, -1);
+
+    // Crate height: the crates are only 0.70 m tall, so a ray from the capsule
+    // centre would fly over them and there would be nothing for ignoreBodies
+    // to exclude. This is the default the HUD ships with.
+    const H = { height: -0.55 };
+
+    const raw    = lookRay(dir, 40, { ...H });
+    const noSelf = lookRay(dir, 40, { ...H, ignoreSelf: true });
+    const noProps = lookRay(dir, 40,
+        { ...H, ignoreSelf: true, ignoreProps: true, propTags: world.props });
+
+    assert(raw && raw.bodyId === self,
+        `unfiltered ray hits the character's OWN inner body (${bodyName(raw && raw.bodyId)})`);
+    assert(raw.dist < 0.05,
+        `...at zero distance, because the origin is inside it (${raw.dist.toFixed(4)} m)`);
+
+    assert(noSelf, 'ignoreBody ray hit something');
+    assert(noSelf.bodyId !== raw.bodyId,
+        `ignoreBody CHANGED the result: ${bodyName(raw.bodyId)} -> ${bodyName(noSelf.bodyId)}`);
+    assert(world.props.includes(noSelf.bodyId),
+        `ignoreBody ray reaches past self to ${bodyName(noSelf.bodyId)}`);
+    assert(noSelf.dist > 2.0 && noSelf.dist < 3.2,
+        `crate is ~2.6 m away (${noSelf.dist.toFixed(3)} m)`);
+
+    assert(noProps, 'ignoreBodies ray hit something');
+    assert(noProps.bodyId !== noSelf.bodyId,
+        `ignoreBodies CHANGED the result again: ${bodyName(noSelf.bodyId)} -> ${bodyName(noProps.bodyId)}`);
+    assert(!world.props.includes(noProps.bodyId),
+        'ignoreBodies excluded every prop from the ray');
+    // The headline result, printed so a passing run leaves the evidence behind
+    // rather than just a green tick.
+    console.log('  filter proof — one ray from ' +
+        `(${p.x.toFixed(2)}, ${p.z.toFixed(2)}) toward -Z:\n` +
+        `    no filter                : ${bodyName(raw.bodyId)} @ ${raw.dist.toFixed(2)} m\n` +
+        `    ignoreBody: innerBody    : ${bodyName(noSelf.bodyId)} @ ${noSelf.dist.toFixed(2)} m\n` +
+        `    + ignoreBodies: props    : ${bodyName(noProps.bodyId)} @ ${noProps.dist.toFixed(2)} m`);
+
+    assert(noProps.dist > noSelf.dist + 5,
+        `the ray passed through the crates to something ${noProps.dist.toFixed(2)} m out ` +
+        `(vs ${noSelf.dist.toFixed(2)} m)`);
+
+    // Three distinct bodies from one ray. State it as one assertion so the log
+    // line is the proof.
+    const ids = new Set([raw.bodyId, noSelf.bodyId, noProps.bodyId]);
+    assert(ids.size === 3,
+        `one ray, three filters, three different bodies: ` +
+        `${bodyName(raw.bodyId)} / ${bodyName(noSelf.bodyId)} / ${bodyName(noProps.bodyId)}`);
+
+    // The layers filter reaches the same conclusion by a different route: a
+    // static-only ray cannot see the crates or the character at all.
+    const staticOnly = lookRay(dir, 40, { ...H, layers: ['static'] });
+    assert(staticOnly && staticOnly.bodyId === noProps.bodyId,
+        `layers:['static'] lands on the same wall as ignoreBodies ` +
+        `(${bodyName(staticOnly && staticOnly.bodyId)})`);
+    const movingOnly = lookRay(dir, 40, { ...H, layers: ['moving'] });
+    assert(movingOnly && movingOnly.bodyId === self,
+        `layers:['moving'] still sees the character's inner body (${bodyName(movingOnly && movingOnly.bodyId)})`);
+}
+
+// --- 7f. the per-frame driver populates qState -------------------------------
+// Everything above called the queries directly. This checks the wiring the HUD
+// actually reads.
+
+{
+    resetToSpawn();
+    advanceTime(200);
+    sense.forwardCast = true;
+    sense.ledgeProbe = true;
+    sense.proximity = true;
+    sense.lookRay = true;
+    sense.ignoreSelf = true;
+    sense.ignoreProps = false;
+    sense.movingOnly = true;
+    setFacing(0, -1);
+    advanceTime(64);
+
+    assert(qState.ledge, 'frame driver produced a ledge result');
+    assert(Array.isArray(qState.prox), 'frame driver produced an overlap list');
+    assert(qState.rayUnfiltered && qState.rayUnfiltered.bodyId === self,
+        'the control ray in qState is the unfiltered one and hits self');
+    assert(qState.ray && qState.ray.bodyId !== self,
+        `the filtered ray in qState is not self (${qState.ray && qState.ray.name})`);
+
+    // Toggling a filter through `sense` — exactly what the HUD checkbox does —
+    // changes the live result on the next frame.
+    sense.ignoreSelf = false;
+    advanceTime(64);
+    assert(qState.ray && qState.ray.bodyId === self,
+        'unchecking ignoreBody in the HUD collapses the look ray onto the character');
+    sense.ignoreSelf = true;
+    advanceTime(64);
+    assert(qState.ray.bodyId !== self, 'rechecking it restores the useful ray');
+
+    // Debug geometry is toggleable, and toggling it actually changes what the
+    // renderer draws — otherwise "draw query volumes" would be a checkbox
+    // wired to nothing.
+    sense.drawVolumes = false;
+    advanceTime(64);
+    const drawnOff = scene.cullStats().meshDrawn;
+    sense.drawVolumes = true;
+    advanceTime(64);
+    const drawnOn = scene.cullStats().meshDrawn;
+    assert(drawnOn > drawnOff,
+        `query volumes are real geometry (${drawnOff} -> ${drawnOn} meshes drawn)`);
+
+    // Walk the character to the crate pile with every sensor live and capture
+    // it, so the screenshot shows the sensing layer doing its job rather than
+    // an empty spawn pad.
+    const c = Physics.getTransform(world.props[0]).position;
+    place(c.x, 0.02, c.z + 2.6);
+    setFacing(0, -1);
+    sense.proxRadius = 3.5;
+    advanceTime(96);
+    assert(qState.prox.length > 0,
+        `proximity sensor sees the crate pile (${qState.prox.map((o) => o.name).join(', ')})`);
+    screenshot('character-lab-sensing.png');
+}
+
+// --- 8. pushing a dynamic body -----------------------------------------------
 // The crate at world.props[0] sits at (3.0, 0.36, 9.5). Approach from +Z and
 // shove it. maxStrength is the cap on how hard the character may push.
 
@@ -269,7 +527,7 @@ assert(moved > 0.25,
     `character pushed the crate ${moved.toFixed(3)} m ` +
     `(z ${crateBefore.z.toFixed(2)} -> ${crateAfter.z.toFixed(2)})`);
 
-// --- 8. HUD tunables round-trip ----------------------------------------------
+// --- 9. HUD tunables round-trip ----------------------------------------------
 // Every construction-time slider goes through rebuild(); prove the handle
 // survives and the character keeps its place.
 
@@ -301,7 +559,7 @@ clearKeys();
 Physics.setGravity(0, -9.81, 0);
 assert(fastFallFrames > 0, 'fell through the gap under raised gravity');
 
-// --- 9. riding the kinematic platform ----------------------------------------
+// --- 10. riding the kinematic platform ----------------------------------------
 // Standing on a moving kinematic body, groundVelocity is non-zero and the
 // character is carried: supported motion is groundVelocity + desired velocity.
 
@@ -321,6 +579,19 @@ assert(charState.groundBodyId === plat.tag || charState.isGrounded,
     `standing on the platform (groundBodyId ${charState.groundBodyId}, tag ${plat.tag})`);
 assert(sawGroundVel, 'groundVelocity reported the platform motion');
 assert(carried > 0.15, `carried ${carried.toFixed(3)} m by the platform`);
+
+// --- 11. PhysicsNode auto-sync ------------------------------------------------
+// app.js no longer calls scene.syncPhysics() per frame. Prove the engine keeps
+// body-backed visuals on their bodies by itself: the crate was just shoved, so
+// its node must be sitting where its body is.
+
+{
+    const t = Physics.getTransform(world.props[0]).position;
+    const n = world.propNodes[0];
+    assert(Math.hypot(n.x - t.x, n.y - t.y, n.z - t.z) < 0.12,
+        `PhysicsNode tracks its body without an explicit sync ` +
+        `(node ${n.x.toFixed(2)},${n.z.toFixed(2)} vs body ${t.x.toFixed(2)},${t.z.toFixed(2)})`);
+}
 
 // --- wrap up -----------------------------------------------------------------
 
