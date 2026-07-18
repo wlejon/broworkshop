@@ -16,6 +16,15 @@ import {
 } from '/app/layers.js';
 import { AREA_DEFS, areas, setAreaEnabled, setAreaParam } from '/app/areas.js';
 import { bodies, bodyCount, spawn, rain, materialRace, clearAll, despawn } from '/app/spawn.js';
+import {
+    ragdolls, ragdollCount, totalPartCount, spawnRagdoll, ragdollRain,
+    driveRagdoll, stopDrive, poseError, punchPart, selectPart, selection,
+    selectionLabel, clearRagdolls, PART_NAMES, POSE_NAMES,
+} from '/app/ragdoll.js';
+import {
+    buildCloth, buildBall, setBallPressure, setPinSet, getCloth, getBall,
+    gust, poke, clearSoftBodies, CLOTH, PIN_SETS,
+} from '/app/softbody.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -29,6 +38,12 @@ export const state = {
     selected: null,          // body tag or null
     frictionCombine: 'default',
     restitutionCombine: 'default',
+    // Ragdoll / soft-body controls
+    drivePose: 'stand',
+    driveKinematic: false,
+    motorFreq: 12,
+    pinSet: 'corners',
+    ballPressure: 2500,
 };
 
 let stageRef = null;
@@ -168,6 +183,159 @@ function syncCombineButtons() {
             b.classList.toggle('sel', b.dataset.mode === cur);
         }
     }
+}
+
+// --- Ragdolls ----------------------------------------------------------------
+//
+// One ragdoll is "the" ragdoll for the purposes of the panel: whichever one
+// owns the selected part, falling back to the most recently spawned. Every
+// control below acts on that one, which keeps the panel to three buttons
+// instead of a list widget nobody would read.
+
+function activeRagdoll() {
+    if (selection.entry && ragdolls.has(selection.entry.id)) return selection.entry;
+    let last = null;
+    for (const e of ragdolls.values()) last = e;
+    return last;
+}
+
+/** Drop a ragdoll above the middle of the stage, gently spun. */
+export function dropRagdoll(pos) {
+    const e = spawnRagdoll(pos || { x: -2 + Math.random() * 6, y: 5.5, z: -2 + Math.random() * 4 });
+    refreshRagdollHud();
+    return e;
+}
+
+export function dropRagdollRain(n = 5) {
+    const out = ragdollRain(n);
+    refreshRagdollHud();
+    return out;
+}
+
+/**
+ * Select one part of one ragdoll — the click-to-punch path, called from
+ * app.js's raycast when the hit body turns out to belong to a ragdoll.
+ */
+export function selectRagdollPart(entry, index) {
+    const r = selectPart(entry, index);
+    // A part and a loose rigid body are mutually exclusive selections; leaving
+    // both lit would make the two "poke" buttons ambiguous.
+    if (r) { state.selected = null; refreshSelection(); }
+    refreshRagdollHud();
+    return r;
+}
+
+/**
+ * Punch the selected part (or the head, if nothing is selected, because an
+ * unaimed punch to the head is the most satisfying default there is).
+ */
+export function punchSelected(dir, strength = 12) {
+    const e = activeRagdoll();
+    if (!e) return false;
+    const idx = selection.entry === e && selection.index >= 0 ? selection.index : PART_NAMES.indexOf('head');
+    const ok = punchPart(e, idx, dir || { x: 1, y: 0.35, z: 0 }, strength);
+    refreshRagdollHud();
+    return ok;
+}
+
+export function driveSelected(poseName, kinematic) {
+    const e = activeRagdoll();
+    if (!e) return false;
+    const pose = poseName || state.drivePose;
+    const kin = kinematic == null ? state.driveKinematic : !!kinematic;
+    state.drivePose = pose;
+    state.driveKinematic = kin;
+    const ok = driveRagdoll(e, pose, kin, { frequency: state.motorFreq, damping: 1.0 });
+    refreshRagdollHud();
+    return ok;
+}
+
+export function limpSelected() {
+    const e = activeRagdoll();
+    if (!e) return false;
+    stopDrive(e);
+    refreshRagdollHud();
+    return true;
+}
+
+export function refreshRagdollHud() {
+    if ($('stRagdolls')) $('stRagdolls').textContent = String(ragdollCount());
+    if ($('stParts')) $('stParts').textContent = String(totalPartCount());
+
+    const info = $('partInfo');
+    if (info) {
+        const sel = selectionLabel();
+        info.textContent = sel
+            ? `ragdoll #${sel.id} · part ${sel.index} of ${PART_NAMES.length} — ${sel.name}`
+            : 'no part selected — click a limb';
+    }
+
+    const di = $('driveInfo');
+    if (di) {
+        const e = activeRagdoll();
+        if (!e) di.textContent = 'no ragdoll';
+        else if (e.drive.mode === 'off') di.textContent = `ragdoll #${e.id} — limp`;
+        else {
+            // Pose error is the only honest progress readout for a motorised
+            // drive: the motors chase joint ANGLES, not world positions.
+            const err = poseError(e, e.drive.pose);
+            di.textContent =
+                `#${e.id} — ${e.drive.mode === 'kinematic' ? 'kinematic' : 'motorised'} ` +
+                `→ ${e.drive.pose} · pose error ${(err * 180 / Math.PI).toFixed(1)}°`;
+        }
+    }
+}
+
+// --- Soft bodies -------------------------------------------------------------
+
+export function setClothPins(set) {
+    state.pinSet = set;
+    setPinSet(set);
+    const row = $('pinRow');
+    if (row) for (const b of row.querySelectorAll('button')) b.classList.toggle('sel', b.dataset.pin === set);
+    if ($('pinHint') && PIN_SETS[set]) {
+        $('pinHint').innerHTML =
+            `<b>${set}</b> — ${PIN_SETS[set]}. Pinned vertices carry invMass 0: ` +
+            `they do not move at all while the sheet between them sags.`;
+    }
+    return true;
+}
+
+/** Rain a few boxes into the middle of the cloth so it visibly deforms. */
+export function dropOntoCloth(n = 5) {
+    const c = getCloth();
+    if (!c) return [];
+    const out = [];
+    for (let i = 0; i < n; i++) {
+        out.push(spawn('box', {
+            x: CLOTH.position.x + (Math.random() - 0.5) * 1.4,
+            y: CLOTH.position.y + 3 + i * 0.6,
+            z: CLOTH.position.z + (Math.random() - 0.5) * 1.4,
+        }, { layer: 'player', friction: 0.8, restitution: 0.1, mass: 4 }));
+    }
+    refreshCount();
+    return out;
+}
+
+export function gustCloth(strength = 6) {
+    const c = getCloth();
+    return c ? gust(c, strength) : [];
+}
+
+export function setPressure(p) {
+    state.ballPressure = p;
+    if ($('ballPressure')) $('ballPressure').value = String(p);
+    if ($('ballPressureVal')) $('ballPressureVal').textContent = String(Math.round(p));
+    return setBallPressure(p);
+}
+
+export function dropBall(pressure) {
+    return setPressure(pressure == null ? state.ballPressure : pressure);
+}
+
+export function pokeBall(depth = 0.35) {
+    const b = getBall();
+    return b ? poke(b, depth) : [];
 }
 
 // --- Readouts ---------------------------------------------------------------
@@ -408,11 +576,63 @@ export function bindHud(stage) {
 
     $('btnResetLayers').addEventListener('click', () => { resetLayers(); syncLayerMatrix(); });
 
+    // --- Ragdolls ---
+    $('btnRagdoll').addEventListener('click', () => dropRagdoll());
+    $('btnRagdollRain').addEventListener('click', () => dropRagdollRain(5));
+    $('btnPunch').addEventListener('click', () => punchSelected({ x: 1, y: 0.3, z: 0 }, 14));
+    $('btnUppercut').addEventListener('click', () => punchSelected({ x: 0.15, y: 1, z: 0 }, 20));
+    $('btnClearRagdolls').addEventListener('click', () => { clearRagdolls(); refreshRagdollHud(); });
+
+    const poseRow = $('poseRow');
+    for (const b of poseRow.querySelectorAll('button')) {
+        b.addEventListener('click', () => {
+            state.drivePose = b.dataset.pose;
+            for (const o of poseRow.querySelectorAll('button')) o.classList.toggle('sel', o === b);
+        });
+    }
+    $('driveKinematic').addEventListener('change', (e) => {
+        state.driveKinematic = e.target.checked;
+        // Re-issue immediately if a drive is already running, so the checkbox
+        // switches modes live rather than at the next button press — that
+        // mid-drive switch is the clearest way to feel the difference.
+        const r = activeRagdoll();
+        if (r && r.drive.mode !== 'off') driveSelected();
+    });
+    const mf = $('motorFreq');
+    mf.addEventListener('input', () => {
+        state.motorFreq = parseFloat(mf.value);
+        $('motorFreqVal').textContent = state.motorFreq.toFixed(1);
+        const r = activeRagdoll();
+        if (r && r.drive.mode === 'motor') driveSelected();
+    });
+    $('btnDrive').addEventListener('click', () => driveSelected());
+    $('btnLimp').addEventListener('click', () => limpSelected());
+
+    // --- Soft bodies ---
+    const pinRow = $('pinRow');
+    for (const b of pinRow.querySelectorAll('button')) {
+        b.addEventListener('click', () => setClothPins(b.dataset.pin));
+    }
+    $('btnClothDrop').addEventListener('click', () => dropOntoCloth(5));
+    $('btnGust').addEventListener('click', () => gustCloth(6));
+    const bp = $('ballPressure');
+    bp.addEventListener('input', () => setPressure(parseFloat(bp.value)));
+    $('btnBallDrop').addEventListener('click', () => dropBall());
+    $('btnPoke').addEventListener('click', () => pokeBall(0.35));
+    $('btnSoftClear').addEventListener('click', () => clearSoftBodies());
+
     // Push the panel's defaults at the engine before the first step.
     setStepRate(state.stepHz);
     setInterpolation(state.interpolation);
     refreshSelection();
     refreshCount();
+
+    // The cloth and the ball are permanent fixtures rather than spawned on
+    // demand — an empty "Soft bodies" panel would say nothing about what soft
+    // bodies look like.
+    setClothPins(state.pinSet);
+    setPressure(state.ballPressure);
+    refreshRagdollHud();
 }
 
 export { COMBINE_MODES, syncLayerMatrix };

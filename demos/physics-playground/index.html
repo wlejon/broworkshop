@@ -72,6 +72,94 @@
             <p class="hint">Left-click the floor to spawn there; left-click a body to select it.</p>
         </section>
 
+        <!-- Ragdolls: articulated bodies, per-part impulses, pose drives -->
+        <section>
+            <h2>Ragdolls</h2>
+            <div class="stats">
+                <div><span>ragdolls</span><b id="stRagdolls">0</b></div>
+                <div><span>parts</span><b id="stParts">0</b></div>
+            </div>
+            <div class="btnrow">
+                <button id="btnRagdoll">drop ragdoll</button>
+                <button id="btnRagdollRain">ragdoll rain</button>
+            </div>
+            <div class="sel-info" id="partInfo">no part selected — click a limb</div>
+            <div class="btnrow">
+                <button id="btnPunch">punch part</button>
+                <button id="btnUppercut">uppercut</button>
+                <button id="btnClearRagdolls" class="danger">clear</button>
+            </div>
+
+            <h3>Pose drive</h3>
+            <div class="btnrow" id="poseRow">
+                <button data-pose="stand" class="sel">stand</button>
+                <button data-pose="reach">reach</button>
+                <button data-pose="tuck">tuck</button>
+            </div>
+            <label class="check">
+                <input id="driveKinematic" type="checkbox">
+                <span>kinematic drive (hard tracking)</span>
+            </label>
+            <label class="row">
+                <span>motor Hz</span>
+                <input id="motorFreq" type="range" min="1" max="40" step="0.5" value="12">
+                <b id="motorFreqVal">12.0</b>
+            </label>
+            <div class="btnrow">
+                <button id="btnDrive">drive to pose</button>
+                <button id="btnLimp">go limp</button>
+            </div>
+            <div class="sel-info" id="driveInfo">not driving</div>
+            <p class="hint">
+                <b>driveToPose</b> puts position motors on every swing-twist
+                joint and lets gravity keep working — the ragdoll develops
+                muscle tone but still falls, sags and gets pushed around. Set it
+                once; the motors persist until <em>go limp</em>.
+                <b>Kinematic drive</b> instead sets part velocities so each part
+                reaches its target transform every step: it stands the figure up
+                and shoves whatever is in the way. Drop a ragdoll, punch it
+                over, then drive it with the checkbox off and on.
+            </p>
+        </section>
+
+        <!-- Soft bodies: cloth + a pressurized volume -->
+        <section>
+            <h2>Soft bodies</h2>
+            <div class="btnrow" id="pinRow">
+                <button data-pin="corners" class="sel">corners</button>
+                <button data-pin="edge">one edge</button>
+                <button data-pin="none">unpinned</button>
+            </div>
+            <div class="btnrow">
+                <button id="btnClothDrop">drop onto cloth</button>
+                <button id="btnGust">gust (setVertexVelocity)</button>
+            </div>
+            <p class="hint" id="pinHint">
+                Pinned vertices carry invMass 0 — they do not move at all while
+                the sheet between them sags. Drop boxes into the hammock, then
+                switch to <b>one edge</b> and watch the same sheet drape.
+            </p>
+
+            <h3>Pressurized ball</h3>
+            <label class="row">
+                <span>pressure</span>
+                <input id="ballPressure" type="range" min="0" max="7000" step="50" value="2500">
+                <b id="ballPressureVal">2500</b>
+            </label>
+            <div class="btnrow">
+                <button id="btnBallDrop">drop ball</button>
+                <button id="btnPoke">poke (setVertex)</button>
+                <button id="btnSoftClear" class="danger">clear soft</button>
+            </div>
+            <p class="hint">
+                The gas coefficient of a closed mesh. At <b>300</b> the ball is
+                a wet bag that slaps the lane and stays there; at <b>6000</b> it
+                is a drum and rebounds most of the way back. There is no runtime
+                setter, so moving the slider rebuilds and re-drops the ball —
+                which is what you want for an A/B anyway.
+            </p>
+        </section>
+
         <!-- Area field overrides -->
         <section>
             <h2>Area fields</h2>

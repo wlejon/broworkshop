@@ -6,16 +6,23 @@
 // makes click-to-select, the live property editor and "clear all" possible:
 // a raycast gives you a tag and nothing else, so there has to be a tag -> {
 // node, layer, kind } map somewhere.
-//
-// Note on the sync: PhysicsNode's per-frame auto-sync does not fire in this
-// build, so app.js calls scene.syncPhysics() once per frame. That is the
-// documented public entry point (SceneGraph.syncPhysics) and it honours
-// Physics.setInterpolation, so the interpolation demo still works through it.
 
 import { LAYER_COLORS } from '/app/layers.js';
 
 /** tag -> { tag, node, mesh, kind, layer } */
 export const bodies = new Map();
+
+/**
+ * Extra teardown to run on "clear all".
+ *
+ * Ragdolls and soft bodies are not rigid bodies in `bodies` — a ragdoll is a
+ * joint set that lives and dies as one unit, a soft body is a particle cloud —
+ * so neither can be despawned through this module's tag registry. Rather than
+ * teach spawn.js about them (and invert the dependency), they register their
+ * own cleanup here at import time.
+ */
+export const cleanupHooks = [];
+export function onClearAll(fn) { cleanupHooks.push(fn); }
 
 let sceneRef = null;
 export function initSpawn(scene) { sceneRef = scene; }
@@ -172,4 +179,5 @@ export function despawn(tag) {
  */
 export function clearAll() {
     for (const tag of [...bodies.keys()]) despawn(tag);
+    for (const fn of cleanupHooks) fn();
 }

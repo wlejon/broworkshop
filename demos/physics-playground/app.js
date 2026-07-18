@@ -16,6 +16,12 @@
 //   layers.js  A six-layer collision matrix, editable live from a checkbox grid.
 //              Spawned bodies are colour-coded by layer, so untick a pair and
 //              the effect is immediate and obvious.
+//   ragdoll.js Thirteen-part humanoids: joints that hold, limbs you can punch
+//              individually, and BOTH pose drives side by side — motorised
+//              (muscle tone, still falls) versus kinematic (stands up, shoves).
+//   softbody.js A pinned cloth and a pressurized ball. Pinned vertices are
+//              exactly immovable while the sheet between them sags; pressure
+//              turns the ball from a wet bag into a drum.
 //   hud.js     The switchboard. Every feature here is toggleable live.
 //
 // The headline control is the step-rate slider next to the interpolation
@@ -32,8 +38,10 @@ import { installSystemMenu } from "/lib/system-menu.js";
 import "/app/layers.js";
 import { buildStage } from "/app/stage.js";
 import { buildAreas } from "/app/areas.js";
-import { initSpawn, bodies, spawn, rain, materialRace, clearAll, despawn, bodyCount } from "/app/spawn.js";
-import { state, bindHud, select, setFps, refreshCount, spawnCurrent, dropOne } from "/app/hud.js";
+import { initSpawn, bodies, spawn, rain, materialRace, clearAll, despawn, bodyCount, onClearAll } from "/app/spawn.js";
+import { initRagdolls, findPart, updateRagdolls, clearRagdolls } from "/app/ragdoll.js";
+import { initSoftBodies, updateSoftBodies, clearSoftBodies } from "/app/softbody.js";
+import { state, bindHud, select, setFps, refreshCount, spawnCurrent, dropOne, selectRagdollPart, refreshRagdollHud } from "/app/hud.js";
 
 installSystemMenu();
 
@@ -96,9 +104,20 @@ scene.createLight({
 const stage = buildStage(scene);
 buildAreas(scene);
 initSpawn(scene);
+initRagdolls(scene);
+initSoftBodies(scene);
+
+// "Clear all" has to mean all. Ragdolls and soft bodies are not rigid bodies in
+// spawn.js's tag registry — a ragdoll's bodies and joints live and die as one
+// unit, and a soft body is a particle cloud — so each registers its own
+// teardown rather than spawn.js growing knowledge of both.
+onClearAll(() => { clearRagdolls(); refreshRagdollHud(); });
+onClearAll(() => clearSoftBodies());
 
 const world = { stage, sun };
 
+// bindHud builds the cloth and the ball, so the soft-body module must be
+// initialised above it.
 bindHud(stage);
 
 // --- Picking ----------------------------------------------------------------
@@ -122,7 +141,7 @@ function rayFromPixel(lx, ly) {
 /**
  * Resolve a canvas-local pixel to an action. Exported so the smoke test can
  * drive selection and click-spawn through the same path the mouse uses.
- * @returns {{kind:'select'|'spawn'|'miss', tag?:number, point?:{x,y,z}}}
+ * @returns {{kind:'select'|'part'|'spawn'|'miss', tag?:number, point?:{x,y,z}}}
  */
 export function pickAt(lx, ly) {
     const ray = rayFromPixel(lx, ly);
@@ -130,6 +149,16 @@ export function pickAt(lx, ly) {
     const hit = Physics.raycastClosest(
         ray.o[0], ray.o[1], ray.o[2], ray.d[0], ray.d[1], ray.d[2], 400);
     if (!hit) return { kind: 'miss' };
+
+    // Ragdoll parts are ORDINARY bodies, so a raycast reports one as a plain
+    // body tag with nothing to say it belongs to a joint set — the part lookup
+    // has to happen before the loose-body registry is consulted.
+    const part = findPart(hit.bodyId);
+    if (part) {
+        selectRagdollPart(part.entry, part.index);
+        return { kind: 'part', tag: hit.bodyId, part: part.index, point: hit.position };
+    }
+
     if (bodies.has(hit.bodyId)) {
         select(hit.bodyId);
         return { kind: 'select', tag: hit.bodyId, point: hit.position };
@@ -198,40 +227,42 @@ document.addEventListener('keydown', (ev) => {
 
 // --- Frame loop -------------------------------------------------------------
 //
-// scene.syncPhysics() is the one non-obvious line in this app. PhysicsNode is
-// documented as auto-syncing once per frame, and the engine does have that
-// call in its frame path — but in this build it does not reach graphs created
-// through canvas.getContext('scene'), so every PhysicsNode sits at the origin.
-// SceneGraph.syncPhysics() is the public entry point for the same work and it
-// behaves correctly, including honouring Physics.setInterpolation (it reads
-// through getRenderTransform, so the interpolation demo is unaffected).
+// Rigid bodies need nothing here: a PhysicsNode auto-syncs from its body once
+// per frame, honouring Physics.setInterpolation, so the whole rigid sandbox
+// (including every ragdoll part, which is an ordinary body under an ordinary
+// PhysicsNode) renders itself.
 //
-// It is called before setCamera so the camera is submitted against poses from
-// this frame rather than the last one.
+// The two things that DO need a tick are the two that have no single transform
+// to sync. Kinematic pose drive is incremental pursuit and must be re-issued
+// every step; a soft body's state IS its geometry, so its vertices have to be
+// streamed into its mesh.
 
 let fpsAccum = 0, fpsFrames = 0, fpsLast = performance.now();
+let lastFrameTime = performance.now();
 
 function frame() {
-    scene.syncPhysics();
+    const now = performance.now();
+    const dt = Math.min(0.1, Math.max(0.001, (now - lastFrameTime) / 1000));
+    lastFrameTime = now;
+
+    updateRagdolls(dt);
+    updateSoftBodies();
+
     scene.setCamera(Camera.orbitViewOpts(cam, canvas));
 
-    const now = performance.now();
     fpsAccum += now - fpsLast;
     fpsLast = now;
     if (++fpsFrames >= 20) {
         setFps(1000 / (fpsAccum / fpsFrames));
         fpsAccum = 0; fpsFrames = 0;
         refreshCount();
+        refreshRagdollHud();
     }
 
     requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
 
-// CHUNK 2: ragdolls (swingTwist chains + compound torsos) and soft bodies go
-// here — they want their own modules (ragdoll.js / softbody.js) and a HUD
-// section alongside "Spawn".
-//
 // CHUNK 3: SixDOF constraints and motors, shape casts (castShape /
 // castShapeClosest), overlap queries (overlapShape / overlapPoint), contact
 // manifolds + impulses from getContacts(), and breakable constraints
@@ -242,4 +273,19 @@ export { bodies, spawn, rain, materialRace, clearAll, despawn, bodyCount, spawnC
 export { select, refreshCount } from "/app/hud.js";
 export { setStepRate, setInterpolation, setSelectedProp, setCombine, refreshSelection } from "/app/hud.js";
 export { areas, setAreaEnabled, setAreaParam, getArea, AREA_DEFS } from "/app/areas.js";
+export {
+    ragdolls, ragdollCount, totalPartCount, spawnRagdoll, ragdollRain, driveRagdoll,
+    stopDrive, poseError, jointResidual, punchPart, selectPart, selection, findPart, despawnRagdoll,
+    clearRagdolls, updateRagdolls, buildPose, PARTS, PART_NAMES, POSES, POSE_NAMES,
+} from "/app/ragdoll.js";
+export {
+    softBodies, buildCloth, buildBall, setBallPressure, setPinSet, getCloth, getBall,
+    gust, poke, regionCentroid, regionRadius, meanHeight, pinIndices, togglePin, updateSoftBodies,
+    clearSoftBodies, destroySoft, CLOTH, BALL, PIN_SETS,
+} from "/app/softbody.js";
+export {
+    dropRagdoll, dropRagdollRain, selectRagdollPart, punchSelected, driveSelected,
+    limpSelected, refreshRagdollHud, setClothPins, dropOntoCloth, gustCloth,
+    setPressure, dropBall, pokeBall,
+} from "/app/hud.js";
 export { LAYER_NAMES, SPAWN_LAYERS, LAYER_COLORS, setPair, togglePair, collides, getMatrix, resetLayers } from "/app/layers.js";

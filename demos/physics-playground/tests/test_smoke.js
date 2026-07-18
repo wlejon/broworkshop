@@ -330,12 +330,278 @@ reset();
     check('cleanup', app.bodyCount() === 0);
 }
 
+console.log('--- ragdolls: joints hold ------------------------------------');
+// A ragdoll dropped limp has to do two things at once: end up on the floor,
+// and stay ASSEMBLED. The second is the interesting one — every parent/child
+// distance is owned by a swing-twist constraint, so if the joints were not
+// really there the parts would simply fall as thirteen independent capsules
+// and the distances would scatter.
+reset();
+{
+    const SPAWN_Y = 4;
+    const e = app.spawnRagdoll({ x: 0, y: SPAWN_Y, z: 0 });
+    check('ragdoll has the full humanoid part set',
+          e.rd.partCount === app.PART_NAMES.length && e.rd.partCount === 12,
+          `${e.rd.partCount} parts`);
+    check('part bodies are ordinary bodies',
+          typeof Physics.getBodyProperties(e.rd.partBody(0)).mass === 'number',
+          `pelvis mass ${Physics.getBodyProperties(e.rd.partBody(0)).mass.toFixed(2)} kg`);
+    check('findPart maps a part body tag back to its ragdoll',
+          app.findPart(e.rd.partBody(5)).index === 5 && app.findPart(e.rd.partBody(5)).entry === e);
+
+    const partPos = (i) => Physics.getTransform(e.rd.partBody(i)).position;
+    const restBind = app.jointResidual(e);
+    check('the rig starts with its joints exactly closed',
+          restBind < 1e-3, `worst pivot residual ${(restBind * 1000).toFixed(3)} mm at spawn`);
+
+    advanceTime(4000);
+
+    let maxY = -Infinity;
+    for (let i = 0; i < e.rd.partCount; i++) maxY = Math.max(maxY, partPos(i).y);
+    check('a dropped ragdoll comes to rest below its spawn height',
+          maxY < SPAWN_Y - 1.0,
+          `highest part rests at y=${maxY.toFixed(3)} (spawned at y=${SPAWN_Y})`);
+
+    // Joints hold: every constraint's shared pivot, reconstructed from the
+    // parent and from the child, still agrees to within millimetres after a
+    // 4 m drop and a landing. Centre-to-centre distance would be the wrong
+    // measure — a rotating hip changes it legitimately.
+    const worst = app.jointResidual(e);
+    check('joints still hold every part pair after the landing',
+          worst < 0.02,
+          `worst pivot residual ${(worst * 1000).toFixed(2)} mm across ${e.rd.partCount - 1} joints`);
+
+    // ...and the parts really did move relative to each other, so the residual
+    // above is not just measuring a rigid body that never articulated.
+    const headBend = app.poseError(e, 'stand');
+    check('the ragdoll articulated rather than falling as one rigid lump',
+          headBend > 0.1, `mean joint angle off bind ${(headBend * 180 / Math.PI).toFixed(1)}°`);
+}
+
+console.log('--- ragdolls: per-part impulse -------------------------------');
+// An impulse on ONE part is the whole reason part bodies are exposed. It has
+// to move that part far more than a part at the other end of the joint chain —
+// if it moved everything equally the impulse landed on the ragdoll, not a limb.
+reset();
+{
+    const e = app.spawnRagdoll({ x: 0, y: 4, z: 0 });
+    advanceTime(3000);                            // let it settle, limp
+    const at = (i) => Physics.getTransform(e.rd.partBody(i)).position;
+    const near = app.PART_NAMES.indexOf('lowerArmR');
+    const far  = app.PART_NAMES.indexOf('lowerLegL');
+    const n0 = at(near), f0 = at(far);
+
+    app.punchPart(e, near, { x: 0.2, y: 1, z: 0 }, 30);
+    advanceTime(300);
+
+    const n1 = at(near), f1 = at(far);
+    const dNear = Math.hypot(n1.x - n0.x, n1.y - n0.y, n1.z - n0.z);
+    const dFar  = Math.hypot(f1.x - f0.x, f1.y - f0.y, f1.z - f0.z);
+    check('an impulse moves the struck part far more than a distant one',
+          dNear > dFar * 3 && dNear > 0.1,
+          `lowerArmR moved ${dNear.toFixed(3)} m, lowerLegL moved ${dFar.toFixed(3)} m`);
+}
+
+console.log('--- ragdolls: pose drive -------------------------------------');
+// driveToPose powers the JOINTS toward a pose's parent-relative rotations. It
+// does not move the ragdoll anywhere, so the measurement is the joint-angle
+// error against the target — the exact quantity the motors are solving.
+reset();
+{
+    const e = app.spawnRagdoll({ x: 0, y: 4, z: 0 });
+    advanceTime(3000);                            // land, limp, joints splayed
+    const before = app.poseError(e, 'stand');
+    app.driveRagdoll(e, 'stand', false, { frequency: 20, damping: 1 });
+    advanceTime(2000);
+    const after = app.poseError(e, 'stand');
+    check('motorised driveToPose measurably closes the joint-angle error',
+          after < before * 0.6 && before > 0.05,
+          `mean joint error ${(before * 180 / Math.PI).toFixed(1)}° -> ` +
+          `${(after * 180 / Math.PI).toFixed(1)}°`);
+
+    // Motors persist, so going limp has to be observable too: released, the
+    // ragdoll sags back out of the pose under its own weight.
+    app.stopDrive(e);
+    advanceTime(1500);
+    check('stopDrive releases the motors and the pose decays',
+          app.poseError(e, 'stand') > after,
+          `error back to ${(app.poseError(e, 'stand') * 180 / Math.PI).toFixed(1)}°`);
+}
+
+// Kinematic drive is the other half of the pair, and it IS positional: it sets
+// part velocities to reach the target transforms, so a heap on the floor
+// genuinely stands up. That is the difference the HUD checkbox is showing.
+reset();
+{
+    const e = app.spawnRagdoll({ x: 0, y: 4, z: 0 });
+    advanceTime(3000);
+    const head = app.PART_NAMES.indexOf('head');
+    const headY = () => Physics.getTransform(e.rd.partBody(head)).position.y;
+    const down = headY();
+
+    app.driveRagdoll(e, 'stand', true);
+    // Kinematic tracking is incremental pursuit — it must be re-issued every
+    // step, which is what app.js's updateRagdolls does per frame. advanceTime
+    // pumps that loop for us.
+    advanceTime(2000);
+    const up = headY();
+    check('kinematic drive stands a fallen ragdoll up',
+          up > down + 0.8 && up > 1.4,
+          `head y ${down.toFixed(3)} -> ${up.toFixed(3)}`);
+    app.stopDrive(e);
+}
+
+console.log('--- cloth: pinning ------------------------------------------');
+// The cleanest proof in this whole file. A pinned vertex carries invMass 0, so
+// it does not move approximately — it does not move AT ALL. Exact equality is
+// the assertion; anything looser would also pass on a merely stiff cloth.
+reset();
+{
+    const c = app.buildCloth('corners');
+    const pins = app.pinIndices('corners');
+    const v0 = c.sb.vertices().slice();
+    advanceTime(2500);
+    const v1 = c.sb.vertices();
+
+    let moved = 0;
+    for (const i of pins) {
+        if (v0[i * 3] !== v1[i * 3] || v0[i * 3 + 1] !== v1[i * 3 + 1] || v0[i * 3 + 2] !== v1[i * 3 + 2]) moved++;
+    }
+    check('pinned cloth vertices are EXACTLY unchanged',
+          moved === 0, `${pins.length} pinned corners, ${moved} moved`);
+
+    // ...while the sheet between them sags under gravity.
+    const mid = Math.floor(app.CLOTH.gridZ / 2) * app.CLOTH.gridX + Math.floor(app.CLOTH.gridX / 2);
+    const sag = v0[mid * 3 + 1] - v1[mid * 3 + 1];
+    check('the unpinned sheet sags under gravity',
+          sag > 0.15, `centre dropped ${sag.toFixed(3)} m`);
+
+    check('cloth topology matches the requested grid',
+          c.topo.gridX === app.CLOTH.gridX && c.sb.vertexCount === app.CLOTH.gridX * app.CLOTH.gridZ,
+          `${c.sb.vertexCount} vertices, grid ${c.topo.gridX}x${c.topo.gridZ}`);
+
+    // Releasing the pins has to change the outcome, or 'pinned' meant nothing.
+    const free = app.buildCloth('none');
+    const f0 = free.sb.vertices().slice();
+    advanceTime(1200);
+    const f1 = free.sb.vertices();
+    const fell = f0[1] - f1[1];
+    check('an unpinned cloth falls as a whole instead of hanging',
+          fell > 1.5, `corner fell ${fell.toFixed(3)} m`);
+}
+
+console.log('--- cloth: setVertexVelocity --------------------------------');
+// Direct vertex control: kick the +X half of the sheet and nothing else. The
+// untouched half staying put is what makes this a proof rather than a nudge.
+reset();
+{
+    const c = app.buildCloth('corners');
+    // Settle first, and settle properly: at 4 s the sheet is still swinging
+    // ~3 cm per 250 ms, which would drown the signal. By 10 s it is dead still.
+    advanceTime(10000);
+    const before = c.sb.vertices().slice();
+    const hit = new Set(app.gustCloth(9));
+    check('gust targets a region, not the whole sheet',
+          hit.size > 8 && hit.size < c.sb.vertexCount - 8,
+          `${hit.size} of ${c.sb.vertexCount} vertices kicked`);
+
+    // A short window on purpose. The cloth's edges are rigid, so momentum from
+    // the kicked half reaches the far corners within about 100 ms and after
+    // that the whole sheet is swinging — which is correct physics and useless
+    // as a measurement. The first 50 ms is where "this region and not that one"
+    // is still true.
+    advanceTime(50);
+    const after = c.sb.vertices();
+    const meanDisp = (pred) => {
+        let s = 0, n = 0;
+        for (let i = 0; i < c.sb.vertexCount; i++) {
+            if (!pred(i)) continue;
+            s += Math.hypot(after[i * 3] - before[i * 3],
+                            after[i * 3 + 1] - before[i * 3 + 1],
+                            after[i * 3 + 2] - before[i * 3 + 2]);
+            n++;
+        }
+        return n ? s / n : 0;
+    };
+    const pins = new Set(app.pinIndices('corners'));
+    const dHit  = meanDisp(i => hit.has(i));
+    const dRest = meanDisp(i => !hit.has(i) && !pins.has(i));
+    check('setVertexVelocity displaces the targeted region far more',
+          dHit > dRest * 3 && dHit > 0.1,
+          `in 50 ms the kicked region moved ${dHit.toFixed(3)} m, ` +
+          `the untouched half ${dRest.toFixed(3)} m`);
+}
+
+console.log('--- pressurized soft body ------------------------------------');
+// One closed icosphere, one drop height, one variable: the gas coefficient.
+// Rebound is measured as the mean vertex height after the first contact — a
+// soft body has no single "position" worth trusting while it is squashing.
+reset();
+{
+    function rebound(pressure) {
+        app.destroySoft('ball');
+        const b = app.buildBall(pressure, { position: { x: 15, y: 6, z: 0 } });
+        let apex = 0;
+        for (let i = 0; i < 190; i++) {
+            advanceTime(16);
+            if (i > 85) apex = Math.max(apex, app.meanHeight(b));   // past first contact
+        }
+        return apex;
+    }
+    const limp = rebound(300);
+    const firm = rebound(6000);
+    check('higher pressure measurably increases rebound height',
+          firm > limp * 1.25 && firm - limp > 0.15,
+          `apex ${limp.toFixed(3)} m at p=300 vs ${firm.toFixed(3)} m at p=6000`);
+
+    // setVertex is the other half of per-vertex control: a hard teleport of one
+    // cap toward the centre, i.e. a dent.
+    // The dent is measured as the cap's mean RADIUS from the ball's own
+    // centroid. Height would be the wrong measure twice over: the ball is
+    // settling onto the lane, and it is rolling, so a fixed vertex set drifts
+    // away from the top. Radius is invariant to both.
+    const b = app.buildBall(3000, { position: { x: 15, y: 6, z: 0 } });
+    advanceTime(1600);
+
+    const cap = app.poke(b, 0.0);            // zero depth: selects the cap only
+    const before = app.regionRadius(b, cap);
+    const dented = app.poke(b, 0.35);
+    const after = app.regionRadius(b, dented);
+    check('poke dents a cap of vertices with setVertex',
+          dented.length > 4 && before - after > 0.15,
+          `${dented.length} vertices pushed in; cap radius ` +
+          `${before.toFixed(3)} m -> ${after.toFixed(3)} m`);
+    check('the dent recovers as pressure pushes back', (() => {
+        advanceTime(800);
+        return app.regionRadius(b, dented) > after + 0.05;
+    })(), `cap radius recovers to ${app.regionRadius(b, dented).toFixed(3)} m`);
+}
+
+console.log('--- soft/ragdoll cleanup -------------------------------------');
+reset();
+{
+    app.spawnRagdoll({ x: 0, y: 4, z: 0 });
+    app.spawnRagdoll({ x: 2, y: 5, z: 0 });
+    app.buildCloth('corners');
+    app.buildBall(2500);
+    check('ragdoll + soft registries populated',
+          app.ragdollCount() === 2 && app.totalPartCount() === 2 * app.PART_NAMES.length &&
+          app.softBodies.size === 2,
+          `${app.ragdollCount()} ragdolls / ${app.totalPartCount()} parts / ${app.softBodies.size} soft`);
+    app.clearAll();
+    check('clearAll sweeps ragdolls and soft bodies too',
+          app.ragdollCount() === 0 && app.softBodies.size === 0 && app.bodyCount() === 0);
+}
+
 // A frame for the record — the sandbox as a human first sees it. Zones back
 // on, because their translucent hulls are half of what the picture is for.
 reset();
 for (const k of ['lowgrav', 'water', 'well']) app.setAreaEnabled(k, true);
 app.materialRace(app.stage);
 app.rain(30);
+app.setClothPins('corners');
+app.setPressure(2500);
+app.dropRagdollRain(3);
 advanceTime(2500);
 app.scene.syncPhysics();
 advanceTime(100);
