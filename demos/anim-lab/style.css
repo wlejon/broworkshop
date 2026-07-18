@@ -1,0 +1,130 @@
+html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+canvas#stage { display: block; width: 100vw; height: 100vh; }
+
+#hud {
+    position: absolute;
+    top: 10px; left: 10px;
+    width: 268px;
+    max-height: calc(100vh - 20px);
+    overflow-y: auto;
+    background: rgba(8, 10, 14, 0.72);
+    color: #cfe;
+    font: 12px system-ui, sans-serif;
+    padding: 10px 12px 12px 12px;
+    border-radius: 7px;
+    border: 1px solid rgba(255,255,255,0.08);
+}
+
+#hud h1 {
+    margin: 0 0 8px 0;
+    font-size: 13px;
+    color: #fff;
+    letter-spacing: 0.4px;
+}
+#hud h1 .fps { float: right; color: #7bed9f; font-weight: normal; font-size: 11px; }
+
+#hud section {
+    margin: 8px 0 0 0;
+    padding: 6px 0 2px 0;
+    border-top: 1px solid rgba(255,255,255,0.10);
+}
+#hud h2 {
+    margin: 0 0 4px 0;
+    font-size: 12px;
+    color: #9fd6ff;
+    font-weight: 600;
+}
+#hud h2 label { display: inline; margin: 0; }
+
+#hud label { display: block; margin: 3px 0; }
+#hud input[type=range] { width: 116px; vertical-align: middle; }
+#hud span.v {
+    color: #7bed9f;
+    display: inline-block;
+    min-width: 42px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+#hud select {
+    background: #12161c;
+    color: #cfe;
+    border: 1px solid #2a323c;
+    padding: 1px 3px;
+}
+
+#hud button {
+    background: #1b222c;
+    color: #cfe;
+    border: 1px solid #34404e;
+    border-radius: 4px;
+    padding: 3px 8px;
+    font: 11px system-ui, sans-serif;
+    margin-top: 4px;
+    cursor: pointer;
+}
+#hud button:hover { background: #253040; border-color: #4a5b6e; }
+
+#hud .row { display: flex; gap: 4px; }
+#hud .row button { flex: 1; padding: 3px 2px; }
+
+#hud .group {
+    margin: 12px 0 0 0;
+    padding: 4px 0 3px 0;
+    border-bottom: 1px solid rgba(159, 214, 255, 0.35);
+    color: #ffe08a;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1.1px;
+    text-transform: uppercase;
+}
+
+/* --- live player readout --------------------------------------------------- */
+#hud .stats {
+    display: flex;
+    gap: 6px;
+    margin: 0 0 8px 0;
+    padding: 5px 6px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 5px;
+    font-size: 10px;
+}
+#hud .stats > div { flex: 1; min-width: 0; }
+#hud .stats span { display: block; color: #7d8a99; letter-spacing: 0.3px; }
+#hud .stats b {
+    color: #7bed9f;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: block;
+    white-space: nowrap;
+}
+
+/* --- clip selector ---------------------------------------------------------
+   A grid rather than a <select>: with five clips, one click to any of them
+   beats two, and the ACTIVE clip stays visible while you reach for the next
+   one — which is what you want when comparing two gaits. */
+#hud .clipgrid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 3px;
+    margin: 5px 0 3px 0;
+}
+#hud .clipgrid button { margin-top: 0; padding: 4px 2px; }
+#hud .clipgrid button.active {
+    background: #1d4f3a;
+    border-color: #7bed9f;
+    color: #d9ffe8;
+}
+
+#hud code {
+    font: 10px ui-monospace, Consolas, monospace;
+    color: #9fd6ff;
+    background: rgba(159,214,255,0.10);
+    padding: 0 3px;
+    border-radius: 2px;
+}
+
+#hud .hint { color: #8b97a6; font-size: 11px; margin-top: 3px; line-height: 1.35; }
+#hud .foot { margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.10); padding-top: 7px; }

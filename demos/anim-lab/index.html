@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Animation Lab</title>
+    <link rel="stylesheet" href="/app/style.css">
+</head>
+<body>
+    <canvas id="stage"></canvas>
+
+    <div id="hud">
+        <h1>Animation Lab <span id="fps" class="fps">—</span></h1>
+
+        <!-- Live player state. Everything here is read back from the engine's
+             skeletal player, not from the HUD's own variables — so it reports
+             what is actually playing, including mid-crossfade. -->
+        <div class="stats">
+            <div><span>clip</span><b id="stClip">—</b></div>
+            <div><span>time</span><b id="stTime">—</b></div>
+            <div><span>playing</span><b id="stPlaying">—</b></div>
+        </div>
+
+        <div class="group">Clips</div>
+
+        <section>
+            <h2>Library <span class="v" id="clipCount"></span></h2>
+            <div class="clipgrid" id="clipGrid"></div>
+            <div class="hint">Each button is <code>play(name)</code> with the
+                current loop flag and speed — a hard cut, no fade. Every clip
+                is generated keyframe data compiled to a bromesh
+                <code>Animation</code>; the engine evaluates it in C++.</div>
+        </section>
+
+        <section>
+            <h2>Transport</h2>
+            <div class="row">
+                <button id="btnPlay">play / resume</button>
+                <button id="btnPause">pause</button>
+                <button id="btnStop">stop</button>
+            </div>
+            <label><input type="checkbox" id="loopOn" checked> Loop</label>
+            <label>Speed <input type="range" id="speed" min="-2" max="3" step="0.05" value="1">
+                <span class="v" id="speedV"></span></label>
+            <label>Scrub <input type="range" id="scrub" min="0" max="1" step="0.001" value="0">
+                <span class="v" id="scrubV"></span></label>
+            <div class="hint"><b>stop</b> fades the player out to bind pose and
+                deactivates it — that is the T-pose you see, not a bug. Speed
+                goes negative: the gait runs backward. Scrubbing writes
+                <code>animationTime</code>, which re-poses immediately even
+                while paused.</div>
+        </section>
+
+        <div class="group">Crossfade</div>
+
+        <section>
+            <h2>Blend into a clip</h2>
+            <label>Fade <input type="range" id="fade" min="0" max="2" step="0.02" value="0.35">
+                <span class="v" id="fadeV"></span></label>
+            <label>Target
+                <select id="fadeTarget"></select>
+            </label>
+            <button id="btnFade">crossfade to clip</button>
+            <div class="hint">The outgoing clip keeps advancing while it fades,
+                so walk → run stays foot-aligned instead of snapping. Set fade
+                to 0 and hit the button to feel the difference a crossfade
+                makes.</div>
+        </section>
+
+        <div class="group">Rig</div>
+
+        <section>
+            <h2>Skeleton <span class="v" id="boneCount"></span></h2>
+            <label><input type="checkbox" id="bonesOn"> Show bone overlay</label>
+            <label><input type="checkbox" id="skinOn" checked> Show skinned mesh</label>
+            <div class="hint">The overlay reads
+                <code>getBoneWorldMatrix()</code> per bone per frame and parks a
+                marker there — the same seam a prop socket or a ragdoll would
+                attach through. Turn the mesh off to watch the rig alone.</div>
+        </section>
+
+        <div class="hint foot">
+            <b>Right-drag</b> orbit · <b>Middle-drag</b> pan · <b>Wheel</b> zoom ·
+            <b>Space</b> play/pause<br>
+            Clips: idle · walk · run · wave · jump — all procedurally authored
+            keyframe data, none of it posed from JavaScript.
+        </div>
+    </div>
+
+    <script type="module" src="/app/app.js"></script>
+</body>
+</html>
