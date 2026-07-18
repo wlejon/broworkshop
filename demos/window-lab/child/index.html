@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden;
+               font: 12px system-ui, sans-serif;
+               background: #12151b; color: #dfe4ec; }
+  #wrap { position: absolute; inset: 0; display: flex; flex-direction: column; }
+  header { padding: 8px 10px 6px; border-bottom: 1px solid rgba(255,255,255,0.08); }
+  header h1 { margin: 0; font-size: 12px; letter-spacing: 1.2px;
+              text-transform: uppercase; color: #9fd6ff; }
+  header .sub { font: 11px ui-monospace, monospace; opacity: 0.55; margin-top: 2px; }
+  #face { display: block; margin: 8px auto 0; border-radius: 8px;
+          background: #0b0d12; cursor: crosshair; }
+  #stats { padding: 6px 10px; font: 11px ui-monospace, monospace; opacity: 0.75;
+           white-space: pre-line; }
+  #log { flex: 1; margin: 0 10px 6px; padding: 6px 8px; overflow-y: auto;
+         background: rgba(0,0,0,0.30); border-radius: 6px;
+         font: 10px ui-monospace, monospace; white-space: pre-wrap;
+         line-height: 1.45; color: #b8c2d0; }
+  footer { padding: 0 10px 10px; display: flex; gap: 6px; }
+  button { flex: 1; font: 11px system-ui; padding: 6px 8px; border: 0;
+           border-radius: 6px; background: #2a303b; color: #dfe4ec; cursor: pointer; }
+  button:hover { background: #38414f; }
+</style>
+</head>
+<body>
+  <div id="wrap">
+    <header>
+      <h1 id="title">Satellite</h1>
+      <div class="sub" id="sub">independent realm &middot; own timers</div>
+    </header>
+    <canvas id="face" width="240" height="150"></canvas>
+    <div id="stats"></div>
+    <div id="log"></div>
+    <footer>
+      <button id="ping">Ping parent</button>
+      <button id="bye">Close me</button>
+    </footer>
+  </div>
+  <script src="child.js"></script>
+</body>
+</html>

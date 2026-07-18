@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Window Lab</title>
+    <link rel="stylesheet" href="/app/style.css">
+</head>
+<body>
+
+<header id="topbar">
+    <h1>Window Lab</h1>
+    <div class="crumbs">
+        secondary OS windows &middot; runtime window control &middot; global time
+    </div>
+    <div class="live">
+        <span>host <b id="hostState">normal</b></span>
+        <span>windows <b id="winCount">0</b></span>
+        <span>time <b id="timeMode">1.00&times;</b></span>
+        <span>fps <b id="fps">--</b></span>
+    </div>
+</header>
+
+<main id="grid">
+
+    <!-- ── Panel 1: child windows ─────────────────────────────────────────── -->
+    <section class="panel" id="p-windows">
+        <h2>Secondary windows</h2>
+        <p class="note">
+            Each row is a real OS window running <code>child/</code> as its own
+            app: own realm, own DOM, own timers, own input routing. The
+            thumbnail is <code>capture()</code> — the child's actual
+            framebuffer, not a mock.
+        </p>
+        <div class="row">
+            <button id="openWin" class="primary">Open window</button>
+            <button id="openThree">Open 3</button>
+            <button id="closeAll">Close all</button>
+            <label class="inline">at
+                <input type="number" id="newW" value="360" min="200" max="1200"> &times;
+                <input type="number" id="newH" value="420" min="200" max="1200">
+            </label>
+        </div>
+        <div id="winList" class="list"></div>
+        <div id="winEmpty" class="empty">No secondary windows open.</div>
+    </section>
+
+    <!-- ── Panel 2: messaging ─────────────────────────────────────────────── -->
+    <section class="panel" id="p-msg">
+        <h2>postMessage round trip</h2>
+        <p class="note">
+            Structured clones across the realm boundary, delivered at the
+            engine's idle drain. Children are delivered first, so a reply posted
+            from a child handler lands in the <em>same</em> drain.
+        </p>
+        <div class="row">
+            <span class="lbl">accent</span>
+            <span id="swatches"></span>
+        </div>
+        <div class="row">
+            <span class="lbl">label</span>
+            <input type="text" id="labelInput" value="Satellite" maxlength="24">
+            <button id="sendLabel">Send</button>
+        </div>
+        <div class="row">
+            <span class="lbl">spin</span>
+            <input type="range" id="spin" min="0" max="400" value="100">
+            <span class="v" id="spinV">1.00&times;</span>
+        </div>
+        <div class="row">
+            <button id="ping">Ping all</button>
+            <span class="v wide" id="pingV">latency --</span>
+            <span class="v wide" id="msgCounts">0 out / 0 in</span>
+        </div>
+        <div id="msgLog" class="log"></div>
+    </section>
+
+    <!-- ── Panel 3: the host window ───────────────────────────────────────── -->
+    <section class="panel" id="p-host">
+        <h2>Host window</h2>
+        <div class="row">
+            <label class="inline"><input type="checkbox" id="borderless"> borderless</label>
+            <label class="inline"><input type="checkbox" id="alwaysOnTop"> always on top</label>
+        </div>
+        <div class="row">
+            <button id="minimize">Minimize</button>
+            <button id="maximize">Maximize</button>
+            <button id="restore">Restore</button>
+        </div>
+        <div class="row">
+            <span class="lbl">position</span>
+            <input type="number" id="posX" value="100">
+            <input type="number" id="posY" value="100">
+            <button id="setPos">Move</button>
+            <button id="nudge">Nudge +40</button>
+        </div>
+        <div class="row">
+            <span class="lbl">min size</span>
+            <input type="number" id="minW" value="900">
+            <input type="number" id="minH" value="600">
+            <button id="setMin">Apply</button>
+            <button id="clearMin">Clear</button>
+        </div>
+        <div class="row">
+            <span class="lbl">max size</span>
+            <input type="number" id="maxW" value="1600">
+            <input type="number" id="maxH" value="1000">
+            <button id="setMax">Apply</button>
+            <button id="clearMax">Clear</button>
+        </div>
+
+        <h3>Displays</h3>
+        <div id="displays" class="list tight"></div>
+
+        <h3>Live readout</h3>
+        <div id="hostReadout" class="mono"></div>
+
+        <h3>Page visibility <span class="hint">games should pause here</span></h3>
+        <div id="visReadout" class="mono"></div>
+        <div id="visLog" class="log short"></div>
+
+        <h3>Battery</h3>
+        <div id="battery" class="mono">querying…</div>
+    </section>
+
+    <!-- ── Panel 4: bro.time ──────────────────────────────────────────────── -->
+    <section class="panel" id="p-time">
+        <h2>bro.time <span class="hint">one engine clock, globally scaled</span></h2>
+        <canvas id="timeStage" width="560" height="200"></canvas>
+        <div class="row">
+            <button id="pause" class="primary">Pause</button>
+            <span class="lbl">scale</span>
+            <input type="range" id="scale" min="10" max="400" value="100">
+            <span class="v" id="scaleV">1.00&times;</span>
+        </div>
+        <div class="row presets">
+            <button data-scale="0.1">0.1&times; freeze-frame</button>
+            <button data-scale="0.25">0.25&times; bullet time</button>
+            <button data-scale="1">1&times; normal</button>
+            <button data-scale="2">2&times;</button>
+            <button data-scale="4">4&times; fast</button>
+        </div>
+        <div id="timeReadout" class="mono"></div>
+        <p class="note">
+            Every arcade game in this tree hand-rolls its own pause flag.
+            <code>bro.time.paused</code> already freezes timers, rAF, CSS
+            transitions, physics and audio — across every window and iframe at
+            once — and <code>bro.time.scale</code> gives slow-motion for free.
+        </p>
+    </section>
+
+</main>
+
+<script type="module" src="/app/app.js"></script>
+</body>
+</html>
