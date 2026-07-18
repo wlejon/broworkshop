@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Input Lab</title>
+    <link rel="stylesheet" href="/app/style.css">
+</head>
+<body>
+    <header id="topbar">
+        <h1>Input Lab</h1>
+        <div class="sub">gamepad · action bindings · analog strength<span id="padSummary" class="tag">no pad</span></div>
+    </header>
+
+    <div id="grid">
+
+        <!-- ── Gamepad ──────────────────────────────────────────────────── -->
+        <section class="panel" id="panelGamepad">
+            <h2>Gamepad <span class="hint">W3C Gamepad API — SDL3 standard mapping</span></h2>
+
+            <!-- Slot chips. One per slot navigator.getGamepads() has ever
+                 reported; a disconnected slot stays listed but greys out, which
+                 is exactly what the API's null-hole behaviour looks like. -->
+            <div id="padList" class="chips"></div>
+
+            <div id="padEmpty" class="empty">
+                <b>No controller connected.</b>
+                <p>Plug in any SDL-recognised pad — it arrives as a
+                <code>gamepadconnected</code> event and shows up here with the
+                standard 17-button / 4-axis mapping.</p>
+                <p>No hardware? This whole panel is driven by the headless
+                injection seams, so <code>bro-headless</code> can exercise it:</p>
+                <pre>gamepadConnect("Test Pad");
+gamepadButton(0, "south", true);
+gamepadAxis(0, "leftx", 0.5);</pre>
+            </div>
+
+            <div id="padBody">
+                <canvas id="padCanvas" width="560" height="320"></canvas>
+                <div class="readouts">
+                    <div class="ro-col">
+                        <h3>Buttons</h3>
+                        <div id="btnReadout" class="ro"></div>
+                    </div>
+                    <div class="ro-col">
+                        <h3>Axes</h3>
+                        <div id="axisReadout" class="ro"></div>
+                        <h3>Snapshot</h3>
+                        <div id="metaReadout" class="ro"></div>
+                    </div>
+                </div>
+
+                <!-- ── Rumble ──────────────────────────────────────────── -->
+                <div class="sub-panel">
+                    <h3>Rumble <span class="hint">vibrationActuator.playEffect()</span></h3>
+                    <label>strong <input type="range" id="rumStrong" min="0" max="1" step="0.05" value="0.8">
+                        <span class="v" id="rumStrongV">0.80</span></label>
+                    <label>weak <input type="range" id="rumWeak" min="0" max="1" step="0.05" value="0.4">
+                        <span class="v" id="rumWeakV">0.40</span></label>
+                    <label>ms <input type="range" id="rumDur" min="20" max="1500" step="20" value="200">
+                        <span class="v" id="rumDurV">200</span></label>
+                    <div class="btnrow">
+                        <button id="rumPlay">play</button>
+                        <button id="rumTick">light tick</button>
+                        <button id="rumThud">heavy thud</button>
+                        <button id="rumRamp">ramp</button>
+                        <button id="rumStop" class="danger">reset()</button>
+                    </div>
+                    <div id="rumStatus" class="hint">idle</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ── Actions ──────────────────────────────────────────────────── -->
+        <section class="panel" id="panelActions">
+            <h2>Action bindings <span class="hint">bro.settings.defineAction / rebindAction</span></h2>
+
+            <p class="note">Click any binding chip to rebind it, then press a
+            key, a mouse button, a gamepad button, or push a stick past 60%.
+            <kbd>Esc</kbd> cancels. All three binding kinds —
+            <code>"a"</code>, <code>"mouse:left"</code>,
+            <code>"gamepad:righttrigger"</code>,
+            <code>"gamepad:leftx+"</code> — live in the same list.</p>
+
+            <div id="capture" class="capture">Press an input to bind <b id="captureFor"></b> …</div>
+
+            <div id="actionRows"></div>
+
+            <div class="btnrow">
+                <button id="resetBinds">restore default bindings</button>
+            </div>
+
+            <p class="note warn"><b>Known gap:</b> <code>lib/input.js</code>
+            (which most of the arcade games build on) hand-rolls its own mouse
+            handling with <code>"Mouse0"</code>/<code>"Mouse2"</code> strings
+            instead of the engine's native <code>"mouse:left"</code> /
+            <code>"mouse:right"</code> bindings shown here. Porting it is a
+            follow-up.</p>
+        </section>
+
+        <!-- ── Playable target ──────────────────────────────────────────── -->
+        <section class="panel" id="panelShip">
+            <h2>Analog proof <span class="hint">the same actions, driving something</span></h2>
+            <p class="note">Thrust and turn are read with
+            <code>getActionStrength()</code>, not
+            <code>isActionPressed()</code>. On a keyboard they are 0 or 1 and
+            the ship snaps; on a stick or trigger they are continuous and it
+            eases. Same action, same code path.</p>
+            <canvas id="shipCanvas" width="560" height="300"></canvas>
+            <div id="shipReadout" class="ro"></div>
+        </section>
+
+        <!-- CHUNK 2: touch / pointer / gesture panel goes here — pointerdown
+             trails per pointerId, TouchList inspector, pinch/pan/rotate
+             gesture readout, and the compat-mouse-synthesis timeline. -->
+
+        <!-- CHUNK 2: IME panel — imeCompose / imeCommit / imeCancel against an
+             <input> and a contenteditable host, showing the preedit inline. -->
+
+    </div>
+
+    <script type="module" src="/app/app.js"></script>
+</body>
+</html>

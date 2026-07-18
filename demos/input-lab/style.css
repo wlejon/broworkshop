@@ -1,0 +1,196 @@
+/* Input Lab — diagnostic dashboard styling.
+   Dark, dense, monospace-for-numbers. Everything that moves at frame rate
+   (readouts, bars) is a fixed-width element so live updates never reflow the
+   page around them. */
+
+* { box-sizing: border-box; }
+
+body {
+    margin: 0;
+    background: #0d1016;
+    color: #d6dae3;
+    font: 13px/1.45 system-ui, sans-serif;
+}
+
+#topbar {
+    padding: 14px 20px 12px;
+    border-bottom: 1px solid #1e2531;
+    background: #11151d;
+}
+#topbar h1 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: .3px; }
+#topbar .sub { color: #6d7688; font-size: 12px; margin-top: 3px; }
+
+.tag {
+    display: inline-block;
+    margin-left: 10px;
+    padding: 1px 8px;
+    border-radius: 9px;
+    background: #1b2230;
+    color: #8d97ab;
+    font: 11px ui-monospace, Consolas, monospace;
+}
+.tag.live { background: #14361f; color: #6ee79a; }
+
+#grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    padding: 14px 20px 40px;
+    align-items: flex-start;
+}
+
+.panel {
+    background: #11151d;
+    border: 1px solid #1e2531;
+    border-radius: 7px;
+    padding: 14px 16px 16px;
+    width: 600px;
+}
+.panel h2 {
+    margin: 0 0 10px;
+    font-size: 14px;
+    font-weight: 600;
+    color: #cfd6e4;
+}
+.panel h3 {
+    margin: 10px 0 5px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .8px;
+    color: #6d7688;
+}
+.hint {
+    text-transform: none;
+    font-weight: 400;
+    font-size: 11px;
+    color: #5c6577;
+    margin-left: 8px;
+}
+
+.note { color: #8b93a5; font-size: 12px; margin: 0 0 10px; }
+.note.warn {
+    margin-top: 12px;
+    padding: 8px 10px;
+    border-left: 3px solid #b7791f;
+    background: #1a1710;
+    color: #b6a37c;
+}
+code, kbd, pre { font-family: ui-monospace, Consolas, monospace; }
+code { color: #8fd0ff; font-size: 11.5px; }
+kbd {
+    background: #1c2331; border: 1px solid #2b3444; border-radius: 3px;
+    padding: 0 4px; font-size: 11px;
+}
+
+canvas { display: block; background: #080a0f; border-radius: 5px; }
+
+/* ── gamepad ─────────────────────────────────────────────────────────────── */
+
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.padchip {
+    padding: 3px 9px; border-radius: 4px;
+    background: #1a2130; border: 1px solid #262f40;
+    font: 11px ui-monospace, Consolas, monospace; color: #9aa4b8;
+    cursor: pointer;
+}
+.padchip.sel { border-color: #3d7dd6; color: #cfe4ff; background: #16263c; }
+.padchip.gone { opacity: .4; text-decoration: line-through; cursor: default; }
+
+.empty {
+    padding: 16px; border: 1px dashed #2a3345; border-radius: 6px;
+    color: #7b8498; font-size: 12px;
+}
+.empty b { color: #b9c2d4; }
+.empty p { margin: 8px 0 0; }
+.empty pre {
+    margin: 8px 0 0; padding: 8px 10px; background: #0b0e14;
+    border-radius: 4px; color: #7fc4a0; font-size: 11px; white-space: pre;
+}
+
+.readouts { display: flex; gap: 18px; margin-top: 10px; }
+.ro-col { flex: 1; min-width: 0; }
+.ro { font: 11px/1.55 ui-monospace, Consolas, monospace; color: #808a9d; }
+.ro .row { display: flex; justify-content: space-between; gap: 8px; }
+.ro .row.on { color: #7ee0a0; }
+.ro .row b { font-weight: 500; color: inherit; }
+
+.sub-panel {
+    margin-top: 12px; padding-top: 10px; border-top: 1px solid #1e2531;
+}
+.sub-panel label {
+    display: flex; align-items: center; gap: 8px; margin: 4px 0;
+    font-size: 12px; color: #8b93a5;
+}
+.sub-panel label input[type=range] { flex: 1; }
+.v { width: 42px; text-align: right; font: 11px ui-monospace, Consolas, monospace; color: #9fb0c8; }
+
+.btnrow { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+button {
+    background: #1b2331; color: #b9c2d4; border: 1px solid #2b3444;
+    border-radius: 4px; padding: 4px 11px; font: 12px system-ui, sans-serif;
+    cursor: pointer;
+}
+button:hover { background: #232d3f; }
+button.danger { border-color: #5a2b2b; color: #e0a0a0; }
+
+/* ── action rows ─────────────────────────────────────────────────────────── */
+
+.capture {
+    display: none;
+    margin: 0 0 10px; padding: 8px 10px; border-radius: 5px;
+    background: #16263c; border: 1px solid #3d7dd6; color: #cfe4ff;
+    font-size: 12px;
+}
+.capture.on { display: block; }
+.capture b { font-family: ui-monospace, Consolas, monospace; }
+
+.arow {
+    display: flex; align-items: center; gap: 10px;
+    padding: 5px 0; border-top: 1px solid #171d28;
+}
+.arow .name {
+    width: 76px; flex: none;
+    font: 12px ui-monospace, Consolas, monospace; color: #b9c2d4;
+}
+.arow .binds { flex: 1; display: flex; flex-wrap: wrap; gap: 4px; }
+.bind {
+    padding: 1px 7px; border-radius: 3px;
+    background: #1a2130; border: 1px solid #262f40;
+    font: 11px ui-monospace, Consolas, monospace; color: #9aa4b8;
+    cursor: pointer;
+}
+.bind:hover { border-color: #3d7dd6; color: #cfe4ff; }
+.bind.kb   { border-left: 3px solid #6f8fd6; }
+.bind.mouse{ border-left: 3px solid #d69a6f; }
+.bind.pad  { border-left: 3px solid #6fd6a4; }
+.bind.add  { color: #5c6577; border-style: dashed; }
+.bind.arming { border-color: #ffd479; color: #ffd479; }
+
+/* digital dot vs analog bar, side by side — the whole point of the panel */
+.arow .dot {
+    width: 9px; height: 9px; flex: none; border-radius: 50%;
+    background: #232b3a; border: 1px solid #303a4c;
+}
+.arow .dot.on { background: #6ee79a; border-color: #6ee79a; }
+.arow .bar {
+    width: 110px; height: 9px; flex: none; border-radius: 2px;
+    background: #171d28; overflow: hidden;
+}
+.arow .bar i { display: block; height: 100%; width: 0; background: #4d9de0; }
+.arow .num {
+    width: 34px; flex: none; text-align: right;
+    font: 11px ui-monospace, Consolas, monospace; color: #7f8a9e;
+}
+.ahead {
+    display: flex; gap: 10px; padding-bottom: 4px;
+    font: 10px system-ui; text-transform: uppercase; letter-spacing: .7px;
+    color: #4e5666;
+}
+.ahead .name { width: 76px; flex: none; }
+.ahead .binds { flex: 1; }
+.ahead .s1 { width: 9px; flex: none; }
+.ahead .s2 { width: 110px; flex: none; }
+.ahead .s3 { width: 34px; flex: none; text-align: right; }
+
+#shipReadout { margin-top: 8px; }
