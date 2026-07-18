@@ -18,18 +18,24 @@
 // that in mind, which is why it exists at all for what is currently a handful
 // of independent walkers.
 
-import { findPath } from '/app/navmesh.js';
+import { findPath, navState } from '/app/navmesh.js';
 
 export const agentState = {
     world: null,
     agents: [],          // { agent, node, route, leg, speed, done }
     speed: 3.5,
     arriveEps: 0.55,     // XZ distance at which a waypoint counts as reached
+    lastGeneration: -1,  // navmesh surface version these routes were planned on
+    repaths: 0,          // how many times an obstacle change forced a re-plan
 };
 
+// One world for the whole app: the route-walkers here and crowd.js's scenario
+// agents share it, because there is exactly one ORCA solve per tick and it has
+// to see every body. They are kept apart by avoidance LAYER instead (see
+// spawnAgent), which is cheaper and more honest than two worlds that could not
+// avoid each other at all.
 export function createAgentWorld() {
     agentState.world = bro.ai.game.createWorld();
-    // CHUNK 2: agentState.world.setAvoidance({ ... }) — ORCA through the choke.
     return agentState.world;
 }
 
@@ -40,7 +46,11 @@ export function spawnAgent(scene, at, index) {
         x: at.x, z: at.z,
         speed: agentState.speed,
         radius: 0.4,
-        elevation: at.y,     // ORCA-only today; chunk 2 makes it matter
+        elevation: at.y,     // feeds the ORCA elevation filter; movement is XZ
+        // Avoidance layer 8, which no crowd scenario's mask includes. These
+        // four walkers are a route demo, not part of the crowd, and letting
+        // them wander into the choke would corrupt the crowd's overlap counter.
+        avoidance: { layers: 8, mask: 8 },
     });
     agentState.world.addAgent(agent);
 
@@ -67,10 +77,12 @@ export function retarget(rec, to) {
     const res = findPath(from, to);
     if (!res || res.points.length < 2) {
         rec.route = null; rec.done = true;
+        rec.goal = { ...to };
         rec.agent.clearTarget();
         return null;
     }
     rec.route = res;
+    rec.goal = { ...to };            // kept so an obstacle change can re-plan
     rec.leg = 1;                     // points[0] is the snapped start
     rec.done = false;
     rec.agent.setTarget(res.points[1].x, res.points[1].z);
@@ -84,9 +96,40 @@ export function retargetAll(to) {
 // Advance every agent one fixed step and write the results onto the scene.
 // The world tick does the steering; this function only decides when a waypoint
 // has been consumed and what height the walker should be at.
+// Re-plan every live route against the current surface. Called when the
+// navmesh's `generation` moves, which happens once per applied obstacle batch
+// and once per re-bake.
+//
+// node.navigateTo() does this natively — the binding snapshots `generation` at
+// plan time and re-plans itself. This app owns its routes on purpose (the route
+// is the thing being demonstrated), so it also owns the repath, and this is
+// what that costs: eight lines and one integer comparison.
+export function repathAll() {
+    let n = 0;
+    for (const rec of agentState.agents) {
+        if (rec.done || !rec.goal) continue;
+        retarget(rec, rec.goal);
+        n++;
+    }
+    agentState.repaths++;
+    return n;
+}
+
 export function tickAgents(dt) {
     const world = agentState.world;
     if (!world) return;
+
+    // An obstacle dropped into the corridor these agents are walking makes
+    // their route a lie. Detect the surface change before stepping, so nobody
+    // takes a stride toward a waypoint that is now inside a crate.
+    const gen = navState.mesh ? navState.mesh.generation : 0;
+    if (agentState.lastGeneration < 0) {
+        agentState.lastGeneration = gen;
+    } else if (gen !== agentState.lastGeneration) {
+        agentState.lastGeneration = gen;
+        repathAll();
+    }
+
     world.tick(dt);
 
     for (const rec of agentState.agents) {

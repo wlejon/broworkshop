@@ -91,6 +91,51 @@
             </div>
         </section>
 
+        <!-- Dynamic obstacles ----------------------------------------------- -->
+        <section>
+            <h2><label><input type="checkbox" id="dynOn"> Dynamic-obstacle bake</label></h2>
+            <div class="hint">Re-bakes tiled (<code>dtTileCache</code>) so crates
+                and doors can carve the surface at runtime. Alt-click the level
+                to drop or pick up a crate.</div>
+            <div class="row">
+                <button id="btnBlock">Block the corridor</button>
+                <button id="btnClearObs">Clear obstacles</button>
+            </div>
+            <div class="stats">
+                <div><span>generation</span><b id="stGen">—</b></div>
+                <div><span>obstacles</span><b id="stObs">—</b></div>
+                <div><span>pending</span><b id="stPending">—</b></div>
+                <div><span>tiles rebuilt</span><b id="stTiles">—</b></div>
+                <div><span>agent repaths</span><b id="stRepath">—</b></div>
+            </div>
+            <div class="hint" id="obsHint">Tiled bakes cannot be serialised, so
+                Save is unavailable in this mode.</div>
+        </section>
+
+        <!-- ORCA crowd ------------------------------------------------------ -->
+        <section>
+            <h2><label><input type="checkbox" id="avoidOn"> Local avoidance (ORCA)</label></h2>
+            <label>Crowd size <input type="range" id="cCount" min="4" max="40" step="2" value="16">
+                <span class="v" id="cCountV"></span></label>
+            <div class="row">
+                <button id="btnFunnel">Funnel</button>
+                <button id="btnVip">VIP</button>
+            </div>
+            <div class="row">
+                <button id="btnFactions">Factions</button>
+                <button id="btnStacked">Stacked</button>
+                <button id="btnClearCrowd">Clear</button>
+            </div>
+            <div class="stats">
+                <div><span>scenario</span><b id="stScenario">—</b></div>
+                <div><span>crowd agents</span><b id="stCrowd">—</b></div>
+                <div><span>overlapping pairs</span><b id="stOverlap">—</b></div>
+                <div><span>mean overlaps</span><b id="stOverlapMean">—</b></div>
+            </div>
+            <div class="hint" id="crowdHint">Pick a scenario, then toggle
+                avoidance and watch the overlapping-pair count move.</div>
+        </section>
+
         <!-- Cache ----------------------------------------------------------- -->
         <section>
             <h2>Save / load round trip</h2>

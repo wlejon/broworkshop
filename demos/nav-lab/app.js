@@ -30,8 +30,19 @@ import {
     findPath, findGridPath, buildRibbon, saveMesh, loadMesh, CACHE_PATH,
 } from "/app/navmesh.js";
 import {
-    agentState, createAgentWorld, spawnAgent, retargetAll, tickAgents,
+    agentState, createAgentWorld, spawnAgent, retargetAll, tickAgents, repathAll,
 } from "/app/agents.js";
+import {
+    obstacleState, obstaclesEnabled, toggleObstacleAt, blockCorridor,
+    clearObstacles, pumpObstacles, obstacleCount, obstaclesPending, CHOKE,
+    placeObstacle, removeObstacle,
+} from "/app/obstacles.js";
+import {
+    crowdState, setAvoidance, clearCrowd, tickCrowd, overlapMean,
+    scenarioFunnel, scenarioVip, scenarioFactions, scenarioStacked,
+    deviationOf, findRole, snapshot, resetPositions, resetStats, setAvoidHeight,
+    STACK_LANE,
+} from "/app/crowd.js";
 
 installSystemMenu();
 
@@ -229,6 +240,120 @@ $('btnToRoof').addEventListener('click', () => {
 
 $('btnSend').addEventListener('click', () => retargetAll(state.goal));
 
+// --- Dynamic obstacles -------------------------------------------------------
+//
+// Switching modes is a re-bake, not a toggle: static and tiled are two
+// different Detour builds. Every obstacle is dropped on the way through,
+// because their handles belong to the mesh that is about to be thrown away.
+
+$('dynOn').addEventListener('change', e => {
+    clearObstacles(scene);
+    obstacleState.placed.length = 0;
+    bakeParams.dynamicObstacles = e.target.checked;
+    stale = false;
+    rebake();
+    updateObstacleReadout();
+});
+
+$('btnBlock').addEventListener('click', () => {
+    const r = blockCorridor(scene);
+    afterObstacleChange(r && r.action === 'blocked'
+        ? 'Corridor blocked. Every route through the doorway re-planned; the '
+        + 'overlay hole is the mesh, not a decal.'
+        : 'Corridor reopened — the surface came back exactly as it was.');
+});
+
+$('btnClearObs').addEventListener('click', () => {
+    const n = clearObstacles(scene);
+    afterObstacleChange(`Removed ${n} obstacle${n === 1 ? '' : 's'}; the walkable `
+                      + 'surface is restored.');
+});
+
+// One place where an obstacle change lands: pump the tile rebuilds, refresh the
+// overlay so the hole is visible, re-plan every live route, and re-query the
+// HUD's own path so the drawn ribbon is not stale either.
+function afterObstacleChange(message) {
+    const h = $('obsHint');
+    if (!obstaclesEnabled()) {
+        h.className = 'hint bad';
+        h.textContent = 'Tick "Dynamic-obstacle bake" first — a static mesh has '
+                      + 'no runtime obstacle API.';
+        return;
+    }
+    pumpObstacles();
+    rebuildOverlay(scene);
+    setOverlayVisible(state.showOverlay);
+    repathAll();
+    refreshPath();
+    updateBakeReadout();
+    updateObstacleReadout();
+    if (message) { h.className = 'hint good'; h.textContent = message; }
+    if (obstacleState.lastError) {
+        h.className = 'hint bad';
+        h.textContent = obstacleState.lastError;
+    }
+}
+
+function updateObstacleReadout() {
+    $('stGen').textContent = navState.mesh ? navState.mesh.generation : '—';
+    $('stObs').textContent = obstaclesEnabled() ? obstacleCount() : '—';
+    $('stPending').textContent = obstaclesEnabled()
+        ? (obstaclesPending() ? 'draining' : 'idle') : '—';
+    $('stTiles').textContent = obstacleState.applyCalls;
+    $('stRepath').textContent = agentState.repaths;
+}
+
+// --- ORCA crowd --------------------------------------------------------------
+
+$('avoidOn').addEventListener('change', e => {
+    setAvoidance(e.target.checked);
+    updateCrowdReadout();
+});
+
+bindRange('cCount', v => v.toFixed(0), v => { crowdState.count = v | 0; });
+
+function runScenario(fn, blurb) {
+    fn(scene, crowdState.count);
+    setAvoidance($('avoidOn').checked);
+    const h = $('crowdHint');
+    h.className = 'hint';
+    h.textContent = blurb;
+    updateCrowdReadout();
+}
+
+$('btnFunnel').addEventListener('click', () => runScenario(scenarioFunnel,
+    'Both halves are ordered through the 2.6 m doorway at once. Toggle '
+  + 'avoidance: with it off they walk through each other and the overlapping-'
+  + 'pair count sits high; with it on they queue and sidestep.'));
+
+$('btnVip').addEventListener('click', () => runScenario(scenarioVip,
+    'Gold VIP at priority 1.0 and grey control at priority 0.0 make the same '
+  + 'trip into the same oncoming crowd. The pair splits the avoidance effort by '
+  + 'priority, so the control is shoved three times as far off its line.'));
+
+$('btnFactions').addEventListener('click', () => runScenario(scenarioFactions,
+    'Two factions cross one junction. Each masks only its own layer, so it '
+  + 'queues against its own kind and walks straight through the other — '
+  + 'layers/mask, doing something you can see.'));
+
+$('btnStacked').addEventListener('click', () => runScenario(scenarioStacked,
+    'The same lane on the hall floor and on the mezzanine 4 m above it. Agents '
+  + 'carry an elevation and a 2 m avoidance height; the spans do not overlap, '
+  + 'so the solver skips every cross-level pair and the two crowds ignore each '
+  + 'other. A flat 2D solver would have them fighting through a floor.'));
+
+$('btnClearCrowd').addEventListener('click', () => {
+    clearCrowd(scene);
+    updateCrowdReadout();
+});
+
+function updateCrowdReadout() {
+    $('stScenario').textContent = crowdState.scenario;
+    $('stCrowd').textContent = crowdState.agents.length;
+    $('stOverlap').textContent = crowdState.overlapNow;
+    $('stOverlapMean').textContent = overlapMean().toFixed(2);
+}
+
 $('btnSave').addEventListener('click', () => {
     const h = $('cacheHint');
     try {
@@ -375,7 +500,21 @@ canvas.addEventListener('mousedown', (e) => {
     const r = canvas.getBoundingClientRect();
     const p = pickLevel(e.clientX - r.left, e.clientY - r.top);
     if (!p) return;
-    if (e.ctrlKey)      retargetAll(p);
+    // Alt-click drops a crate where you clicked, or picks up the one already
+    // there. Everything after that is the same code the "Block the corridor"
+    // button runs, so a click and the button cannot drift apart.
+    if (e.altKey) {
+        const r = toggleObstacleAt(scene, p);
+        afterObstacleChange(r
+            ? (r.action === 'added'
+                ? 'Crate dropped — the overlay hole is a real gap in the baked '
+                + 'surface, carved by rebuilding only the tiles it touches.'
+                : 'Crate removed; those tiles rebuilt back to their original '
+                + 'walkable surface.')
+            : null);
+        return;
+    }
+    if (e.ctrlKey)       retargetAll(p);
     else if (e.shiftKey) setGoal(p);
     else                 setStart(p);
 });
@@ -413,6 +552,8 @@ canvas.addEventListener('wheel', (e) => {
 
 createAgentWorld();
 rebake();
+updateObstacleReadout();
+updateCrowdReadout();
 
 // Spawn on the walkable surface rather than at nominal coordinates: after a
 // wide-radius bake the nominal spawn may be inside the eroded margin.
@@ -433,6 +574,26 @@ for (let i = 0; i < 4; i++) {
 // delta: steering that varies with frame time is not reproducible, and the
 // smoke test asserts on exact agent positions after advanceTime().
 
+// Re-probe the walkable-surface overlay against the current mesh. Cheap to say,
+// ~20k nearestPoint calls to do, which is why it is only ever driven by an
+// explicit change rather than per frame.
+function refreshOverlay() {
+    rebuildOverlay(scene);
+    setOverlayVisible(state.showOverlay);
+    updateBakeReadout();
+}
+
+let lastSeenGeneration = -1;
+function watchGeneration() {
+    const gen = navState.mesh ? navState.mesh.generation : 0;
+    if (gen === lastSeenGeneration) return;
+    lastSeenGeneration = gen;
+    rebuildOverlay(scene);
+    setOverlayVisible(state.showOverlay);
+    updateBakeReadout();
+    updateObstacleReadout();
+}
+
 const AI_STEP = 1 / 60;
 let aiAccum = 0;
 let last = performance.now();
@@ -447,13 +608,27 @@ function frame() {
 
     aiAccum += dt;
     let steps = 0;
-    while (aiAccum >= AI_STEP && steps++ < 8) { tickAgents(AI_STEP); aiAccum -= AI_STEP; }
+    while (aiAccum >= AI_STEP && steps++ < 8) {
+        // One world, one tick: tickAgents steps it, tickCrowd only consumes
+        // waypoints and measures. Stepping twice would double every velocity.
+        tickAgents(AI_STEP);
+        tickCrowd(AI_STEP);
+        aiAccum -= AI_STEP;
+    }
+
+    // The surface can change without anybody in this file asking — the engine
+    // pumps queued obstacle rebuilds once per frame on its own. Watch the
+    // generation and refresh the overlay when it moves, so the hole under a
+    // freshly dropped crate appears without a manual redraw.
+    watchGeneration();
 
     fpsAccum += dt;
     if (++fpsFrames >= 20) {
         $('fps').textContent = (fpsFrames / fpsAccum).toFixed(0) + ' fps';
         $('stWalking').textContent =
             `${agentState.agents.filter(a => !a.done).length} / ${agentState.agents.length}`;
+        updateObstacleReadout();
+        updateCrowdReadout();
         fpsAccum = 0; fpsFrames = 0;
     }
 
@@ -469,4 +644,15 @@ export {
 };
 export const world = agentState.world;
 export const agents = agentState.agents;
-export { agentState, retargetAll, tickAgents };
+export { agentState, retargetAll, tickAgents, repathAll };
+
+export {
+    obstacleState, obstaclesEnabled, toggleObstacleAt, blockCorridor,
+    clearObstacles, pumpObstacles, obstacleCount, obstaclesPending, CHOKE,
+    placeObstacle, removeObstacle,
+    crowdState, setAvoidance, clearCrowd, tickCrowd, overlapMean,
+    scenarioFunnel, scenarioVip, scenarioFactions, scenarioStacked,
+    deviationOf, findRole, snapshot, resetPositions, resetStats, setAvoidHeight,
+    STACK_LANE,
+};
+export { afterObstacleChange, updateObstacleReadout, updateCrowdReadout, refreshOverlay };

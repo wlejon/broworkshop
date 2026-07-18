@@ -42,6 +42,15 @@ export const bakeParams = {
     agentMaxClimb: 0.4,
     agentMaxSlopeDeg: 45,
     cellSize: 0.25,
+
+    // Tiled dtTileCache bake, which is what makes the runtime obstacle API
+    // available (see obstacles.js). Off by default: the tiled build cannot be
+    // serialised, so the save/load section of this app only works on a static
+    // bake, and starting in the mode that supports MORE of the app is the
+    // honest default.
+    dynamicObstacles: false,
+    tileSize: 16,
+    maxObstacles: 128,
 };
 
 // Cache path for the save/load round trip. Hardcoded on purpose — native file
@@ -57,6 +66,8 @@ export const navState = {
     blobBytes: 0,
     lastError: '',
     probeStep: 0.6,
+    dynamic: false,       // did the last bake produce an obstacle-capable mesh?
+    generation: 0,        // mesh.generation at the last bake
 };
 
 // --- Bake --------------------------------------------------------------------
@@ -68,7 +79,7 @@ export const navState = {
 export function bake() {
     const t0 = performance.now();
     try {
-        const mesh = bro.ai.game.bakeNavMesh({
+        const opts = {
             fromPhysics: Physics,
             physicsLayers: ['static'],
             agentRadius: bakeParams.agentRadius,
@@ -77,11 +88,21 @@ export function bake() {
             agentMaxSlopeDeg: bakeParams.agentMaxSlopeDeg,
             cellSize: bakeParams.cellSize,
             cellHeight: 0.2,
-        });
+        };
+        if (bakeParams.dynamicObstacles) {
+            opts.dynamicObstacles = true;
+            opts.tileSize = bakeParams.tileSize;
+            opts.maxObstacles = bakeParams.maxObstacles;
+        }
+        const mesh = bro.ai.game.bakeNavMesh(opts);
         navState.bakeMs = performance.now() - t0;
         navState.mesh = mesh;
         navState.lastError = '';
-        navState.blobBytes = mesh.save().byteLength;
+        navState.dynamic = !!mesh.supportsObstacles;
+        navState.generation = mesh.generation;
+        // save() THROWS on a tiled mesh — dtTileCache has no serialisation in
+        // bro. Report 0 rather than guessing or swallowing the exception.
+        navState.blobBytes = navState.dynamic ? 0 : mesh.save().byteLength;
         return mesh;
     } catch (e) {
         navState.bakeMs = performance.now() - t0;
@@ -305,11 +326,8 @@ export function loadMesh(probeFrom, probeTo) {
     };
 }
 
-// CHUNK 2: dynamic obstacles live here — re-bake with `dynamicObstacles: true`
-// (tiled dtTileCache), then addObstacle/removeObstacle for doors and crates,
-// plus the ORCA crowd through the x=4 choke point: world.setAvoidance(true),
-// per-agent priority / layers / mask, and the `height` elevation filter so the
-// mezzanine crowd and the hall crowd ignore each other.
+// Dynamic obstacles live in obstacles.js and the ORCA crowd in crowd.js; both
+// build on the bake configured above (`bakeParams.dynamicObstacles`).
 
 // CHUNK 3: off-mesh links (jump the mezzanine rail, drop from the roof) go into
 // bakeNavMesh's `offMeshLinks` — static bakes only, so they cannot combine with
