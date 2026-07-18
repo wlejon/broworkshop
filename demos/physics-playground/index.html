@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Physics Playground</title>
+    <link rel="stylesheet" href="/app/style.css">
+</head>
+<body>
+    <canvas id="stage"></canvas>
+
+    <div id="hud">
+        <h1>Physics Playground <span id="fps" class="fps">—</span></h1>
+
+        <div class="stats">
+            <div><span>bodies</span><b id="stBodies">0</b></div>
+            <div><span>step</span><b id="stStep">—</b></div>
+            <div><span>interp</span><b id="stInterp">off</b></div>
+        </div>
+
+        <!-- Step rate + interpolation. These two belong together: the slider
+             exists so the checkbox has something to prove. -->
+        <section>
+            <h2>Simulation</h2>
+            <label class="row">
+                <span>step rate</span>
+                <input id="stepHz" type="range" min="15" max="120" step="1" value="60">
+                <b id="stepHzVal">60 Hz</b>
+            </label>
+            <label class="check">
+                <input id="interp" type="checkbox">
+                <span>render interpolation</span>
+            </label>
+            <p class="hint">
+                Physics steps at a fixed rate; rendering does not. Drag the step
+                rate down to <b>15–20 Hz</b> and watch a falling object: with
+                interpolation <b>off</b> it teleports once per step. Turn it
+                <b>on</b> and the same simulation glides, because the render
+                side blends the previous and current step poses by the frame's
+                accumulator fraction. The simulation is identical either way —
+                only what you SEE changes.
+            </p>
+        </section>
+
+        <!-- Spawning -->
+        <section>
+            <h2>Spawn</h2>
+            <div class="btnrow" id="shapeRow">
+                <button data-shape="box" class="sel">box</button>
+                <button data-shape="sphere">sphere</button>
+                <button data-shape="capsule">capsule</button>
+                <button data-shape="compound">compound</button>
+            </div>
+            <div class="btnrow" id="layerRow"></div>
+            <label class="row">
+                <span>friction</span>
+                <input id="spawnFriction" type="range" min="0" max="2" step="0.01" value="0.5">
+                <b id="spawnFrictionVal">0.50</b>
+            </label>
+            <label class="row">
+                <span>restitution</span>
+                <input id="spawnRestitution" type="range" min="0" max="1" step="0.01" value="0.35">
+                <b id="spawnRestitutionVal">0.35</b>
+            </label>
+            <div class="btnrow">
+                <button id="btnDrop">drop one</button>
+                <button id="btnRace">material race</button>
+            </div>
+            <div class="btnrow">
+                <button id="btnRain">rain 40</button>
+                <button id="btnRain200">rain 200</button>
+                <button id="btnClear" class="danger">clear all</button>
+            </div>
+            <p class="hint">Left-click the floor to spawn there; left-click a body to select it.</p>
+        </section>
+
+        <!-- Area field overrides -->
+        <section>
+            <h2>Area fields</h2>
+            <div id="areaList"></div>
+        </section>
+
+        <!-- Live material tuning on the selected body -->
+        <section>
+            <h2>Selected body</h2>
+            <div class="sel-info" id="selInfo">nothing selected — click a body</div>
+            <div id="selControls" class="disabled">
+                <label class="row"><span>mass</span>
+                    <input id="pMass" type="range" min="0.2" max="400" step="0.1" value="1"><b id="pMassVal">—</b></label>
+                <label class="row"><span>friction</span>
+                    <input id="pFriction" type="range" min="0" max="2" step="0.01" value="0.5"><b id="pFrictionVal">—</b></label>
+                <label class="row"><span>restitution</span>
+                    <input id="pRestitution" type="range" min="0" max="1" step="0.01" value="0.3"><b id="pRestitutionVal">—</b></label>
+                <label class="row"><span>lin damp</span>
+                    <input id="pLinDamp" type="range" min="0" max="10" step="0.05" value="0.05"><b id="pLinDampVal">—</b></label>
+                <label class="row"><span>ang damp</span>
+                    <input id="pAngDamp" type="range" min="0" max="10" step="0.05" value="0.05"><b id="pAngDampVal">—</b></label>
+                <label class="row"><span>gravity x</span>
+                    <input id="pGravFactor" type="range" min="-2" max="3" step="0.05" value="1"><b id="pGravFactorVal">—</b></label>
+
+                <h3>Combine modes</h3>
+                <div class="btnrow small" id="fricCombineRow"></div>
+                <div class="btnrow small" id="restCombineRow"></div>
+                <p class="hint">
+                    Two touching bodies each carry their own friction and
+                    restitution, but a contact needs ONE of each. The combine
+                    mode decides. Drop a high-restitution ball on the
+                    <b>rubber</b> lane (0.92) and on the <b>ice</b> lane (0.05),
+                    then switch between <b>min</b> and <b>max</b>: under max the
+                    ball bounces on both, under min it dies on the ice.
+                    <em>default</em> is Jolt's own rule — sqrt(f1·f2) for
+                    friction, max(r1,r2) for restitution.
+                </p>
+                <div class="btnrow">
+                    <button id="btnPoke">poke (impulse)</button>
+                    <button id="btnDelete" class="danger">delete</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Collision layer matrix -->
+        <section>
+            <h2>Collision layers</h2>
+            <p class="hint">
+                Row/column = layer. A cleared box means that pair is rejected in
+                the broadphase — the two never touch. Changes apply to bodies
+                that already exist, so untick <b>projectile / scenery</b> and
+                watch pink objects fall straight through the ramps and walls.
+            </p>
+            <div id="layerMatrix"></div>
+            <div class="btnrow"><button id="btnResetLayers">reset matrix</button></div>
+        </section>
+
+        <!-- Material legend -->
+        <section>
+            <h2>Lanes</h2>
+            <div id="laneLegend"></div>
+        </section>
+    </div>
+
+    <script type="module" src="/app/app.js"></script>
+</body>
+</html>
