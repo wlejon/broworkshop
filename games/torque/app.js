@@ -5,27 +5,45 @@
 // limited-slip differential, and slip-curve tire friction that can be tuned
 // per wheel. This app exists because none of that had ever been driven.
 //
+// Jolt ships THREE vehicle controllers and bro binds all three. They are not
+// variations on a theme — they disagree about what steering even is — so the
+// app drives one circuit with all three and lets you swap between them live:
+//
 //   track.js    One parametric closed centerline, meshed into three separate
 //               friction surfaces — tarmac, gravel runoff, and a low-grip ice
 //               patch — plus barriers, kerbs, tyre stacks and roadside posts.
 //               Banking is derived from curvature and masked off across one
 //               corner, so the circuit has a banked corner and a flat one.
-//   car.js      The vehicle constraint, the visual chassis, and four wheel
-//               meshes driven from the constraint's own per-wheel state.
-//               Input goes through the action-binding system.
-//   cameras.js  Camera NODES. Chase and bonnet are parented to the chassis and
-//               never touched again; trackside is a root node aimed by hand.
-//   hud.js      Cluster + per-wheel telemetry, drawn from the same snapshot
-//               the smoke test asserts against.
+//   input.js    One driver: the shared action set, held-key state, and the
+//               steering integrator all three vehicles read.
+//   car.js      WheeledVehicleController — the constraint, the visual chassis,
+//               four wheel meshes driven from the constraint's own per-wheel
+//               state, and the live per-wheel tire-friction presets.
+//   tank.js     TrackedVehicleController — two skid-steered tracks, animated
+//               belts, and a neutral turn no wheeled vehicle can do. Plus a
+//               small proving ground of ramps and crates off the start line.
+//   bike.js     MotorcycleController — two wheels held up by a lean spring
+//               that can be switched off mid-corner, which is the point.
+//   garage.js   Owns all three, parks the two you are not driving, and moves
+//               the cameras and the start point between them.
+//   cameras.js  Camera NODES. Chase and bonnet are parented to whichever
+//               chassis is active and never touched again; trackside is a root
+//               node aimed by hand.
+//   hud.js      Cluster + per-wheel telemetry, adapting to the active vehicle,
+//               drawn from the same snapshot the smoke test asserts against.
 //
 // app.js owns the environment, the frame loop, lap timing, and the respawn
 // logic, and exports the handles the test drives.
 
 import { installSystemMenu } from "/lib/system-menu.js";
 import { buildTrack } from "/app/track.js";
-import { createCar } from "/app/car.js";
+import { createGarage } from "/app/garage.js";
 import { createCameras } from "/app/cameras.js";
-import { drawTelemetry, drawLaps, setFps, setCameraButtons, bindHud } from "/app/hud.js";
+import { setRespawnHandler } from "/app/input.js";
+import {
+    drawTelemetry, drawLaps, setFps, setCameraButtons, bindHud,
+    setVehicle, setTirePreset, setLeanToggle,
+} from "/app/hud.js";
 
 installSystemMenu();
 
@@ -76,9 +94,26 @@ scene.createLight({
 // --- World -------------------------------------------------------------------
 
 const world = buildTrack(scene);
-const car = createCar(scene, world.spawn);
-const cameras = createCameras(scene, car.chassisNode, world);
+
+// The garage builds all three vehicles and tells us whenever the cameras need
+// to move — on a vehicle switch, and also after a tyre change, which rebuilds
+// the car's constraint and with it the chassis node the cameras hang off.
+const garage = createGarage(scene, world, {
+    onAttach: (v) => cameras.attachTo(v),
+    onDetach: () => cameras.detach(),
+    onChange: (v) => {
+        setVehicle(v);
+        if (v.kind === 'bike') setLeanToggle(v.leanEnabled);
+        if (v.kind === 'car') setTirePreset(v.tirePreset, garage.TIRE_PRESETS);
+    },
+});
+
+const cameras = createCameras(scene, garage.active, world);
 const cam = cameras.chase;
+
+// Chunk 1's handle name, kept because the whole app and the smoke test refer to
+// "the car". It is now one of three, and `garage.active` is what is being driven.
+const car = garage.car;
 
 // --- State -------------------------------------------------------------------
 // Lap timing is derived from progress along the centerline rather than a
@@ -96,16 +131,18 @@ export const state = {
     surface: 'tarmac',
     respawns: 0,
     onIce: false,
+    vehicle: 'car',
 };
 
 let lapClock = 0;
 let prevIndex = 0;
 
 function respawnAtNearest() {
-    const t = Physics.getTransform(car.vehicle.chassisBody);
+    const active = garage.active;
+    const t = Physics.getTransform(active.vehicle.chassisBody);
     const i = world.nearestIndex(t.position.x, t.position.z);
     const p = world.edge(i, 0);
-    car.respawn({ x: p.x, y: p.y + 1.4, z: p.z }, world.quatYaw(world.yawAt(i)));
+    active.respawn({ x: p.x, y: p.y + 1.4, z: p.z }, world.quatYaw(world.yawAt(i)));
     state.respawns++;
     // Restarting the lap clock is the honest thing to do — a lap you were
     // teleported through is not a lap time.
@@ -115,20 +152,48 @@ function respawnAtNearest() {
     prevIndex = i;
 }
 
-car.setRespawnHandler(respawnAtNearest);
+// One respawn handler for the app's lifetime; it always acts on whatever is
+// currently being driven, so switching vehicles does not have to rebind it.
+setRespawnHandler(respawnAtNearest);
+
+/** Switch vehicles and reset the lap in progress — a lap is per vehicle. */
+export function selectVehicle(kind) {
+    const v = garage.select(kind);
+    state.vehicle = garage.activeKind;
+    state.currentLap = null;
+    state.started = false;
+    lapClock = 0;
+    prevIndex = world.nearestIndex(world.spawn.position.x, world.spawn.position.z);
+    return v;
+}
 
 bindHud({
     onCamera: (i) => { cameras.select(i); setCameraButtons(cameras.activeIndex); },
     onRespawn: respawnAtNearest,
+    onVehicle: selectVehicle,
+    onTire: (name) => {
+        if (garage.setTirePreset(name)) setTirePreset(name, garage.TIRE_PRESETS);
+    },
+    onLean: () => setLeanToggle(garage.bike.setLean(!garage.bike.leanEnabled)),
 });
-setCameraButtons(cameras.activeIndex);
 
-// Number keys switch cameras. These are direct key handlers rather than
-// actions on purpose: camera choice is a viewing preference, not a game
-// binding, and it should not appear in the rebindable action list.
+setCameraButtons(cameras.activeIndex);
+setVehicle(garage.active);
+setTirePreset(garage.car.tirePreset, garage.TIRE_PRESETS);
+setLeanToggle(garage.bike.leanEnabled);
+
+// Number keys switch cameras, Tab cycles vehicles. These are direct key
+// handlers rather than actions on purpose: camera and vehicle choice are
+// viewing/staging preferences, not game bindings, and they should not appear
+// in the rebindable action list.
 document.addEventListener('keydown', (e) => {
     const i = ['1', '2', '3'].indexOf(e.key);
     if (i >= 0) { cameras.select(i); setCameraButtons(cameras.activeIndex); }
+    if (e.key === 'Tab') {
+        e.preventDefault();
+        const order = garage.KINDS;
+        selectVehicle(order[(order.indexOf(garage.activeKind) + 1) % order.length]);
+    }
 });
 
 // --- Frame loop --------------------------------------------------------------
@@ -141,10 +206,10 @@ let fpsAccum = 0, fpsFrames = 0, last = performance.now();
 
 /** One simulation-facing frame. Split out so the smoke test can step it. */
 export function tick(dt) {
-    car.applyInput(dt);
-    car.syncWheels();
+    // The garage drives the active vehicle and holds the brakes on the others.
+    const active = garage.update(dt);
 
-    const t = Physics.getTransform(car.vehicle.chassisBody);
+    const t = Physics.getTransform(active.vehicle.chassisBody);
     cameras.update(t.position);
 
     // Fell off the world — put it back rather than letting it drift forever.
@@ -173,12 +238,13 @@ export function tick(dt) {
     if (state.started) lapClock += dt;
     state.currentLap = state.started ? lapClock : null;
 
-    const telem = car.telemetry();
-    // The surface reading comes from whatever body the front-left wheel is
-    // touching, which is how the ice patch announces itself.
+    const telem = active.telemetry();
+    // The surface reading comes from whatever body the first wheel is touching,
+    // which is how the ice patch announces itself.
     const fl = telem.wheels[0];
     state.surface = fl && fl.contact ? world.surfaceName(fl.contactBody) : 'air';
     state.onIce = telem.wheels.some(w => w.contact && world.isIce(w.contactBody));
+    state.vehicle = garage.activeKind;
     return telem;
 }
 
@@ -200,14 +266,8 @@ function frame() {
 }
 requestAnimationFrame(frame);
 
-// CHUNK 2: a vehicle picker — the same track, driven by a tracked tank
-// (Physics.createVehicle({ type:'tracked' }), skid steering via leftRatio /
-// rightRatio) and a self-balancing motorcycle ({ type:'motorcycle' } + lean
-// spring) — plus live per-wheel longitudinalFriction / lateralFriction tuning
-// against the ice patch this track already carries.
-//
 // CHUNK 3: gamepad bindings on the torque_* actions, analog throttle/steer
 // strength, rumble from wheel slip, and engine audio via a scene emitter on
 // the chassis with Doppler from bindAudioListenerToCamera.
 
-export { scene, canvas, cam, car, world, cameras };
+export { scene, canvas, cam, car, world, cameras, garage };

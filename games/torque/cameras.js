@@ -14,6 +14,12 @@
 // The trackside camera is the deliberate contrast: it is a root-level node, so
 // it does NOT ride anything, and it has to be aimed at the car by hand each
 // frame with node.lookAt(). Two mechanisms, side by side, switchable live.
+//
+// With a garage in front of it (chunk 2) the parented pair also has to MOVE
+// between chassis nodes — and each vehicle wants a different rig, because a
+// chase distance that frames a motorcycle puts a tank's own hull across the
+// whole screen. attachTo() does both at once: re-parent, then re-place. It is
+// still a one-shot placement — nothing here runs per frame.
 
 /** Hamilton product, [x,y,z,w]. */
 function qmul(a, b) {
@@ -37,30 +43,66 @@ const qYawPitch = (yawDeg, pitchDeg) => qmul(qYaw(yawDeg), qPitch(pitchDeg));
 
 /**
  * @param {Object} scene
- * @param {Object} chassisNode  the car's PhysicsNode — cameras parent under it
- * @param {Object} track        track handle, for placing the fixed camera
+ * @param {Object} vehicle  the vehicle to start on — cameras parent under its
+ *                          chassisNode and take its camRig
+ * @param {Object} track    track handle, for placing the fixed camera
  */
-export function createCameras(scene, chassisNode, track) {
-    // Chase: behind and above the car, nose-down a little. Parented — this is
-    // the whole demonstration, so resist any urge to nudge it per frame.
+export function createCameras(scene, vehicle, track) {
+    // Chase: behind and above the vehicle, nose-down a little. Parented — this
+    // is the whole demonstration, so resist any urge to nudge it per frame.
     const chase = scene.createCamera({
         name: 'chase',
         fov: 62, near: 0.2, far: 900,
-        position: [0, 3.1, -8.4],
-        quaternion: qYawPitch(180, -11),
     });
-    chassisNode.add(chase);
 
     // Bonnet: driver's eyeline, just ahead of the windscreen. Also parented,
     // so it inherits the chassis' roll — which is exactly what makes a banked
-    // corner read as banked.
+    // corner read as banked, and what makes the bike's lean angle visceral.
     const bonnet = scene.createCamera({
         name: 'bonnet',
         fov: 74, near: 0.12, far: 900,
-        position: [0, 1.02, 0.55],
-        quaternion: qYawPitch(180, -3),
     });
-    chassisNode.add(bonnet);
+
+    // Which chassis the parented pair currently hangs off. A camera can only
+    // have one parent, so switching vehicles means removing before adding —
+    // add() alone would leave the node listed under the vehicle you just left.
+    let mount = null;
+
+    /**
+     * Re-parent the chase and bonnet cameras onto a vehicle and place them
+     * using that vehicle's own rig. Called once at startup and again on every
+     * vehicle switch (and after a tire-preset rebuild, which replaces the car's
+     * chassis node underneath us).
+     *
+     * @param {Object} v  vehicle handle — needs .chassisNode and .camRig
+     */
+    /**
+     * Let go of the current chassis. Must be called BEFORE anything destroys
+     * that node — a destroyed SceneNode cannot be removed from, so re-parenting
+     * after the fact throws. The car's tire-preset rebuild is exactly that case.
+     */
+    function detach() {
+        if (!mount) return;
+        mount.remove(chase);
+        mount.remove(bonnet);
+        mount = null;
+    }
+
+    function attachTo(v) {
+        const rig = v.camRig;
+        detach();
+        mount = v.chassisNode;
+        mount.add(chase);
+        mount.add(bonnet);
+        // A camera node looks down its own local -Z, and every chassis here has
+        // local +Z forward, so the 180° yaw is what points it down the road.
+        chase.position = rig.chase;
+        chase.quaternion = qYawPitch(180, rig.chasePitch);
+        bonnet.position = rig.bonnet;
+        bonnet.quaternion = qYawPitch(180, rig.bonnetPitch);
+    }
+
+    attachTo(vehicle);
 
     // Trackside: a fixed marshal's post overlooking the flat corner, high
     // enough to see the entry and exit. Root-level and hand-aimed.
@@ -94,7 +136,8 @@ export function createCameras(scene, chassisNode, track) {
     }
 
     return {
-        chase, bonnet, trackside, list, update, select,
+        chase, bonnet, trackside, list, update, select, attachTo, detach,
+        get mount() { return mount; },
         get activeIndex() { return active; },
         get activeName() { return list[active].name; },
         label: (i) => labels[list[i].name],

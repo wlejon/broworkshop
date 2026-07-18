@@ -333,6 +333,359 @@ advanceTime(400);
 screenshot('torque.png');
 car.setHeld('throttle', false);
 
+// =============================================================================
+// Chunk 2 — the garage: three controllers, one circuit.
+// =============================================================================
+//
+// Everything below measures a difference that only the RIGHT controller can
+// produce. A tracked vehicle that merely drives has proved nothing — plenty of
+// wheeled vehicles drive. The proof is the neutral turn: heading swinging
+// through more than a radian while the hull stays inside its own length, which
+// no steered vehicle in the world can do. Likewise the lean controller is only
+// demonstrated by running the identical manoeuvre twice and showing that the
+// only thing changed — one boolean — is what decides whether the bike stays up.
+
+const { garage } = app;
+
+/** Unwrapped heading (radians) from the chassis' own forward vector. */
+function headingOf(v) {
+    const o = v.chassisNode.localToWorld(0, 0, 0);
+    const f = v.chassisNode.localToWorld(0, 0, 1);
+    return Math.atan2(f.x - o.x, f.z - o.z);
+}
+const originOf = (v) => v.chassisNode.localToWorld(0, 0, 0);
+
+/**
+ * Hold a set of actions on the ACTIVE vehicle for `ms`, sampling as it goes.
+ *
+ * Heading is accumulated as wrapped per-sample deltas rather than read as an
+ * end-to-end difference. That is not fussiness: a pivoting tank sweeps several
+ * radians, atan2 wraps at ±π, and a naive end-minus-start reading of a 2.7 rad
+ * pivot comes back as -3.6 rad — the wrong magnitude AND the wrong sign. It
+ * cost a full round of confused probing to notice, so it is done properly here.
+ *
+ * @returns {{turned, travelled, maxSideslip, samples}} turned = signed radians
+ */
+function manoeuvre(actions, ms, slice = 100) {
+    const v = garage.active;
+    for (const k in car.held) car.setHeld(k, false);
+    for (const a of actions) car.setHeld(a, true);
+
+    const start = { ...originOf(v) };
+    let prevHeading = headingOf(v);
+    let prev = { ...start };
+    let turned = 0, maxSideslip = 0, samples = 0;
+
+    for (let t = 0; t < ms; t += slice) {
+        advanceTime(slice);
+        const h = headingOf(v);
+        let d = h - prevHeading;
+        while (d > Math.PI) d -= 2 * Math.PI;      // unwrap
+        while (d < -Math.PI) d += 2 * Math.PI;
+        turned += d;
+        prevHeading = h;
+
+        // Sideslip: the angle between where the vehicle is POINTING and where
+        // it is actually going. It is the direct measure of lateral grip — a
+        // tyre that has let go sends the car somewhere other than where the
+        // nose is aimed — so it is what the friction presets are judged on.
+        const p = originOf(v);
+        const dx = p.x - prev.x, dz = p.z - prev.z;
+        const step = Math.hypot(dx, dz);
+        if (step > 0.15) {
+            const o = v.chassisNode.localToWorld(0, 0, 0);
+            const f = v.chassisNode.localToWorld(0, 0, 1);
+            const fx = f.x - o.x, fz = f.z - o.z;
+            const ang = Math.abs(Math.atan2(fx * dz - fz * dx, fx * dx + fz * dz));
+            maxSideslip = Math.max(maxSideslip, ang * 180 / Math.PI);
+            samples++;
+        }
+        prev = { ...p };
+    }
+    for (const k in car.held) car.setHeld(k, false);
+
+    const end = originOf(v);
+    return {
+        turned,
+        travelled: Math.hypot(end.x - start.x, end.z - start.z),
+        maxSideslip, samples,
+    };
+}
+
+/** Put the ACTIVE vehicle back on the start line, at rest and settled. */
+function resetActive() {
+    for (const k in car.held) car.setHeld(k, false);
+    garage.toStart(garage.active);
+    advanceTime(1000);
+}
+
+/**
+ * Guided version of manoeuvre() for the active vehicle — the same centerline
+ * autopilot the car's tests use, so a run that lasts several seconds is still
+ * on the road at the end of it. Straight-line running is not an option for
+ * anything longer than about three seconds: the circuit curves, and a vehicle
+ * held straight ploughs into the gravel and then into the tank's own ramps.
+ */
+function guideActive(actions, ms, slice = 100) {
+    const v = garage.active;
+    for (const k in car.held) car.setHeld(k, false);
+    for (const a of actions) car.setHeld(a, true);
+    for (let t = 0; t < ms; t += slice) {
+        const o = v.chassisNode.localToWorld(0, 0, 0);
+        const f = v.chassisNode.localToWorld(0, 0, 1);
+        const aim = world.edge(world.nearestIndex(o.x, o.z) + 10, 0);
+        const fx = f.x - o.x, fz = f.z - o.z;
+        const dx = aim.x - o.x, dz = aim.z - o.z;
+        const err = Math.atan2(fx * dz - fz * dx, fx * dx + fz * dz);
+        car.setHeld('steerRight', err > 0.10);
+        car.setHeld('steerLeft', err < -0.10);
+        advanceTime(slice);
+    }
+    for (const k in car.held) car.setHeld(k, false);
+}
+
+console.log('--- the garage ----------------------------------------------');
+{
+    check('three vehicles, three controllers',
+          garage.car.vehicle.type === 'wheeled' &&
+          garage.tank.vehicle.type === 'tracked' &&
+          garage.bike.vehicle.type === 'motorcycle',
+          `${garage.car.vehicle.type} / ${garage.tank.vehicle.type} / ${garage.bike.vehicle.type}`);
+    check('each reports the expected wheel count',
+          garage.car.vehicle.wheelCount === 4 &&
+          garage.tank.vehicle.wheelCount === 10 &&
+          garage.bike.vehicle.wheelCount === 2,
+          `car ${garage.car.vehicle.wheelCount}, tank ${garage.tank.vehicle.wheelCount}` +
+          ` (2 tracks x 5), bike ${garage.bike.vehicle.wheelCount}`);
+    check('the tank has exactly two tracks',
+          garage.tank.telemetry().wheels.filter(w => w.track === 0).length === 5 &&
+          garage.tank.telemetry().wheels.filter(w => w.track === 1).length === 5,
+          '5 road wheels per side');
+
+    // Switching must move the parented cameras onto the new chassis — otherwise
+    // you drive the tank while watching the car.
+    app.selectVehicle('tank');
+    check('switching vehicles switches the active handle',
+          garage.activeKind === 'tank' && garage.active.kind === 'tank',
+          garage.activeKind);
+    check('the chase camera re-parents onto the new chassis',
+          cameras.mount === garage.tank.chassisNode, 'mounted on the tank hull');
+    const cw = cameras.chase.localToWorld(0, 0, 0);
+    const tw = originOf(garage.tank);
+    check('and follows it in world space',
+          Math.hypot(cw.x - tw.x, cw.z - tw.z) < 14,
+          `${Math.hypot(cw.x - tw.x, cw.z - tw.z).toFixed(2)} m astern of the hull`);
+}
+
+console.log('--- the tank pivots on the spot -----------------------------');
+// THE tracked-vehicle proof. Same held actions a human uses; the only thing
+// that makes this possible is that the two tracks are commanded to equal and
+// opposite rates, so the hull rotates about its own centre.
+{
+    app.selectVehicle('tank');
+    resetActive();
+    {
+        // Ten independently sprung road wheels, all of them carrying load. A
+        // tank riding on two of them would still pivot, so this is what says
+        // the suspension geometry is real rather than incidentally working.
+        const t = garage.tank.telemetry();
+        const down = t.wheels.filter(w => w.contact).length;
+        check('the tank rides on all ten road wheels', down === 10, `${down}/10 in contact`);
+        check('and the suspension is evenly loaded across them',
+              t.wheels.every(w => w.compression > 0.1 && w.compression < 0.9),
+              t.wheels.map(w => w.compression.toFixed(2)).join(' '));
+    }
+    const pivot = manoeuvre(['steerRight', 'handbrake'], 4000);
+    check('neutral turn swings the hull through a large angle',
+          Math.abs(pivot.turned) > 1.2,
+          `${(pivot.turned * 180 / Math.PI).toFixed(0)}° of heading change`);
+    check('...while the hull barely moves',
+          pivot.travelled < 3.0,
+          `${pivot.travelled.toFixed(2)} m of travel (hull is 5.2 m long)`);
+    // The ratio is the headline: degrees turned per metre travelled. A steered
+    // vehicle cannot get this number off the floor.
+    check('pivot is rotation without translation',
+          Math.abs(pivot.turned) / Math.max(0.05, pivot.travelled) > 1.0,
+          `${(Math.abs(pivot.turned) / Math.max(0.05, pivot.travelled)).toFixed(2)} rad/m`);
+
+    resetActive();
+    const straight = manoeuvre(['throttle'], 4000);
+    check('equal track input drives the tank straight',
+          Math.abs(straight.turned) < 0.35 && straight.travelled > 12,
+          `${straight.travelled.toFixed(1)} m, ${(straight.turned * 180 / Math.PI).toFixed(1)}° of drift`);
+
+    const tt = garage.tank.telemetry();
+    check('and both tracks report the same speed when going straight',
+          Math.abs(tt.tracks.split) < Math.max(0.8, Math.abs(tt.tracks.left) * 0.15),
+          `left ${tt.tracks.left.toFixed(2)}, right ${tt.tracks.right.toFixed(2)} m/s`);
+
+    // Per-track telemetry during a pivot: the two tracks must run OPPOSITE ways.
+    // Sampled at 2.5 s rather than immediately — 7.8 tonnes on a 27:1 first gear
+    // takes about a second and a half to spin up, and reading the tracks before
+    // then measures the drivetrain still loading, not the turn.
+    resetActive();
+    car.setHeld('steerRight', true); car.setHeld('handbrake', true);
+    for (let t = 0; t < 2500; t += 100) advanceTime(100);
+    const tp = garage.tank.telemetry();
+    car.setHeld('steerRight', false); car.setHeld('handbrake', false);
+    check('in a neutral turn the tracks counter-rotate',
+          tp.tracks.left * tp.tracks.right < 0 && Math.abs(tp.tracks.split) > 1.0,
+          `left ${tp.tracks.left.toFixed(2)}, right ${tp.tracks.right.toFixed(2)} m/s`);
+    check('the HUD reports the neutral turn', tp.neutralTurn === true, 'neutralTurn flag set');
+
+    // The handling contrast the app claims: the tank is much slower than the
+    // car. Both get the identical run — throttle only, three seconds, straight
+    // off the same line — because that is the only way the comparison is fair.
+    // Deliberately NOT the guided autopilot: for a tank "steer" means slowing a
+    // track, so a car-tuned autopilot correcting every 100 ms scrubs its speed
+    // to nothing and would have measured the test harness rather than the tank.
+    resetActive();
+    manoeuvre(['throttle'], 3000);
+    const tankTop = Math.abs(garage.tank.telemetry().speed);
+    app.selectVehicle('car');
+    resetActive();
+    manoeuvre(['throttle'], 3000);
+    const carTop = Math.abs(garage.car.telemetry().speed);
+    check('the tank is markedly slower than the car', tankTop < carTop * 0.8 && tankTop > 3,
+          `tank ${tankTop.toFixed(1)} m/s vs car ${carTop.toFixed(1)} m/s over the same 3 s`);
+}
+
+console.log('--- the lean controller holds the bike up -------------------');
+// The showpiece, run as a controlled experiment: the SAME corner, twice, with
+// one boolean changed between the runs and nothing else touched.
+{
+    // Entry speed is kept low and the corner is taken off the throttle on
+    // purpose. Driven hard, the bike runs wide across the gravel and hits the
+    // armco inside two seconds — and a bike knocked over by a barrier proves
+    // nothing about a lean spring. At walking-pace entry both runs stay on the
+    // road for the whole manoeuvre, so the ONLY difference between them is the
+    // boolean.
+    function corner(leanOn) {
+        garage.bike.setLean(leanOn);
+        resetActive();
+        manoeuvre(['throttle'], 600);                 // gather a little speed
+        const v = garage.bike;
+        let peak = 0;
+        for (const k in car.held) car.setHeld(k, false);
+        car.setHeld('steerRight', true);              // coast through the corner
+        for (let t = 0; t < 2200; t += 100) {
+            advanceTime(100);
+            peak = Math.max(peak, Math.abs(v.telemetry().leanDeg));
+        }
+        for (const k in car.held) car.setHeld(k, false);
+        return { peak, final: Math.abs(v.telemetry().leanDeg) };
+    }
+
+    app.selectVehicle('bike');
+    check('the bike is the active vehicle', garage.activeKind === 'bike', garage.activeKind);
+
+    const on = corner(true);
+    const off = corner(false);
+
+    check('lean controller ON: the bike stays upright through the corner',
+          on.peak < 15,
+          `peak roll ${on.peak.toFixed(1)}°, ending at ${on.final.toFixed(1)}°`);
+    check('lean controller OFF: the same corner puts it down',
+          off.peak > 45,
+          `peak roll ${off.peak.toFixed(1)}°, ending at ${off.final.toFixed(1)}°`);
+    check('the contrast is decisive, not marginal',
+          off.peak > on.peak * 3,
+          `${off.peak.toFixed(1)}° without the spring vs ${on.peak.toFixed(1)}° with it`);
+    check('and the telemetry flags the fall',
+          garage.bike.telemetry().fallen === true, 'fallen flag set with lean off');
+
+    // Switching it back on is a live recovery, not a rebuild.
+    garage.bike.setLean(true);
+    resetActive();
+    advanceTime(600);
+    check('re-enabling the controller restores the bike',
+          Math.abs(garage.bike.telemetry().leanDeg) < 12 &&
+          garage.bike.leanEnabled === true,
+          `${garage.bike.telemetry().leanDeg.toFixed(1)}° after re-enabling`);
+}
+
+console.log('--- per-wheel tire friction changes the car -----------------');
+// Same corner, same entry, four sets of numbers. `drift` is the interesting
+// comparison because it does not reduce grip overall — it moves it off the rear
+// axle — so a car that merely got slower would NOT reproduce this result.
+{
+    function corner(preset) {
+        app.selectVehicle('car');
+        garage.setTirePreset(preset);
+        resetActive();
+        manoeuvre(['throttle'], 2200);                // same entry speed each run
+        const entry = Math.abs(garage.car.telemetry().speed);
+        const r = manoeuvre(['throttle', 'steerRight'], 2600);
+        const t = garage.car.telemetry();
+        const rearSlip = (Math.abs(t.wheels[2].slip) + Math.abs(t.wheels[3].slip)) / 2;
+        return { ...r, entry, rearSlip, preset };
+    }
+
+    const tarmac = corner('tarmac');
+    const drift = corner('drift');
+    const ice = corner('ice');
+
+    check('the preset actually reaches the wheels',
+          garage.car.telemetry().wheels[3].grip.lateral === 0.20 &&
+          garage.car.tirePreset === 'ice',
+          `ice rear lateralFriction = ${garage.car.telemetry().wheels[3].grip.lateral}`);
+
+    check('all three runs enter the corner at a comparable speed',
+          Math.abs(tarmac.entry - drift.entry) < tarmac.entry * 0.25,
+          `tarmac ${tarmac.entry.toFixed(1)}, drift ${drift.entry.toFixed(1)} m/s`);
+
+    // Less rear lateral grip = the rear axle lets go = the car points further
+    // away from where it is travelling. That is oversteer, measured.
+    check('cutting rear lateral grip increases sideslip through the corner',
+          drift.maxSideslip > tarmac.maxSideslip * 1.3,
+          `tarmac ${tarmac.maxSideslip.toFixed(1)}°, drift ${drift.maxSideslip.toFixed(1)}° of sideslip`);
+    check('...and rotates the car further through the same corner',
+          Math.abs(drift.turned) > Math.abs(tarmac.turned) * 1.15,
+          `tarmac ${(tarmac.turned * 180 / Math.PI).toFixed(0)}°, ` +
+          `drift ${(drift.turned * 180 / Math.PI).toFixed(0)}° of yaw`);
+
+    // Ice cuts BOTH directions, so unlike drift it also destroys traction —
+    // the longitudinal slip readout is what separates the two presets.
+    check('ice tyres spin up far more than tarmac does',
+          ice.rearSlip > tarmac.rearSlip * 2,
+          `tarmac ${tarmac.rearSlip.toFixed(2)}, ice ${ice.rearSlip.toFixed(2)} rear slip`);
+    check('and ice cannot carry the corner speed tarmac can',
+          ice.entry < tarmac.entry * 0.8,
+          `tarmac ${tarmac.entry.toFixed(1)}, ice ${ice.entry.toFixed(1)} m/s at turn-in`);
+
+    // Back to a sane setup, and confirm the rebuild left a working car behind.
+    garage.setTirePreset('tarmac');
+    resetActive();
+    const back = manoeuvre(['throttle'], 2500);
+    check('the car still drives after four tyre rebuilds',
+          back.travelled > 12 && garage.car.vehicle.type === 'wheeled',
+          `${back.travelled.toFixed(1)} m on rebuilt tarmac tyres`);
+    check('the cameras survived the rebuilds',
+          cameras.mount === garage.car.chassisNode, 're-parented onto the new chassis');
+}
+
+// Portraits of the two new vehicles, for the record.
+app.selectVehicle('tank');
+resetActive();
+cameras.select(0);
+manoeuvre(['throttle'], 2500);
+car.setHeld('steerRight', true); car.setHeld('handbrake', true);
+advanceTime(700);
+screenshot('torque-tank.png');
+car.setHeld('steerRight', false); car.setHeld('handbrake', false);
+
+app.selectVehicle('bike');
+garage.bike.setLean(true);
+resetActive();
+manoeuvre(['throttle'], 1500);
+car.setHeld('throttle', true); car.setHeld('steerRight', true);
+advanceTime(1200);
+screenshot('torque-bike.png');
+car.setHeld('throttle', false); car.setHeld('steerRight', false);
+
+app.selectVehicle('car');
+resetActive();
+
 console.log('==============================================================');
 console.log(failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`);
 assert(failures === 0, `${failures} check(s) failed`);

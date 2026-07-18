@@ -32,6 +32,73 @@
     <div id="hud">
         <h1>Torque <span id="fps" class="fps">—</span></h1>
 
+        <!-- The picker leads the panel: it is the first choice a visitor makes,
+             and each option is a different Jolt vehicle CONTROLLER, not a
+             re-skin of the same one. -->
+        <section class="lead">
+            <h2>Vehicle</h2>
+            <div class="vehRow">
+                <button class="veh" data-veh="car">Car</button>
+                <button class="veh" data-veh="tank">Tank</button>
+                <button class="veh" data-veh="bike">Bike</button>
+            </div>
+            <p class="hint" id="vehicleHint">—</p>
+        </section>
+
+        <!-- Tank only: the two track speeds are the tank's real instrument. -->
+        <section id="trackPanel">
+            <h2>Tracks</h2>
+            <div class="stats">
+                <div><span>left</span><b id="trackL">0.0</b></div>
+                <div><span>right</span><b id="trackR">0.0</b></div>
+                <div><span>split</span><b id="trackSplit">0.0</b></div>
+                <div><span>mode</span><b id="trackMode">—</b></div>
+            </div>
+            <p class="hint">
+                Track speeds in m/s. Steering IS the difference between these two
+                numbers — there is no steered wheel anywhere on the vehicle.
+                Hold <b>Space</b> with a steer key and the tracks go equal and
+                opposite: the hull spins on its own centre without going anywhere.
+            </p>
+        </section>
+
+        <!-- Bike only: the lean controller, on one switch. -->
+        <section id="leanPanel">
+            <h2>Lean</h2>
+            <div class="leanReadout">
+                <b id="leanDeg">0.0°</b>
+                <span id="leanState">upright</span>
+            </div>
+            <div class="leanTrack"><i id="leanBar"></i></div>
+            <button id="leanToggle" class="wide on">Lean controller: ON</button>
+            <p class="hint">
+                Jolt's <b>MotorcycleController</b> adds a spring that torques the
+                chassis toward the lean angle the corner actually needs. Switch it
+                off and nothing else about the bike changes — same chassis, same
+                wheels, same input — but the next corner lays it on its side.
+                Turn it off, take a corner, turn it back on, take it again.
+            </p>
+        </section>
+
+        <!-- Car only: per-wheel tire friction, live. -->
+        <section id="tirePanel">
+            <h2>Tyres</h2>
+            <div class="tireRow">
+                <button class="tire" data-tire="tarmac">Tarmac</button>
+                <button class="tire" data-tire="wet">Wet</button>
+                <button class="tire" data-tire="ice">Ice</button>
+                <button class="tire" data-tire="drift">Drift</button>
+            </div>
+            <p class="hint" id="tireHint">—</p>
+            <p class="hint">
+                Each preset is nothing but a pair of numbers per axle —
+                <b>longitudinalFriction</b> and <b>lateralFriction</b> — scaling
+                Jolt's slip curves. They multiply against the friction of the
+                body underneath, so the same tyres behave differently again on
+                the circuit's ice patch. Watch the <b>slip</b> column light up.
+            </p>
+        </section>
+
         <section>
             <h2>Camera</h2>
             <div class="camRow">
@@ -41,8 +108,9 @@
             </div>
             <p class="hint">
                 Chase and Bonnet are camera <b>nodes parented to the chassis</b> —
-                they are positioned once and never moved again; the scene graph
-                carries them. Trackside is a root node aimed by hand each frame.
+                they are re-parented onto whichever vehicle you pick and then
+                never moved again; the scene graph carries them. Trackside is a
+                root node aimed by hand each frame.
             </p>
         </section>
 
@@ -60,28 +128,35 @@
             <h2>Wheels</h2>
             <table id="wheels">
                 <thead>
-                    <tr><th></th><th>susp</th><th>steer</th><th>ω</th><th>slip</th></tr>
+                    <tr><th></th><th>susp</th><th>steer</th><th>ω</th><th>slip</th><th>lat</th></tr>
                 </thead>
-                <tbody>
-                    <tr data-w="0"><th>FL</th><td class="susp"><i></i></td><td class="st">—</td><td class="av">—</td><td class="sl">—</td></tr>
-                    <tr data-w="1"><th>FR</th><td class="susp"><i></i></td><td class="st">—</td><td class="av">—</td><td class="sl">—</td></tr>
-                    <tr data-w="2"><th>RL</th><td class="susp"><i></i></td><td class="st">—</td><td class="av">—</td><td class="sl">—</td></tr>
-                    <tr data-w="3"><th>RR</th><td class="susp"><i></i></td><td class="st">—</td><td class="av">—</td><td class="sl">—</td></tr>
+                <!-- Ten rows, declared statically and shown/hidden per vehicle.
+                     Building them with innerHTML on the tbody instead renders
+                     every row stacked on the same line — dynamically inserted
+                     <tr> elements do not get laid out. Ten is the most any
+                     vehicle here needs (the tank's two tracks of five). -->
+                <tbody id="wheelsBody">
+                    <tr data-w="0"><th class="wl">FL</th><td class="susp"><i></i></td><td class="st">—</td><td class="av">—</td><td class="sl">—</td><td class="lat">—</td></tr>
+                    <tr data-w="1"><th class="wl">FR</th><td class="susp"><i></i></td><td class="st">—</td><td class="av">—</td><td class="sl">—</td><td class="lat">—</td></tr>
+                    <tr data-w="2"><th class="wl">RL</th><td class="susp"><i></i></td><td class="st">—</td><td class="av">—</td><td class="sl">—</td><td class="lat">—</td></tr>
+                    <tr data-w="3"><th class="wl">RR</th><td class="susp"><i></i></td><td class="st">—</td><td class="av">—</td><td class="sl">—</td><td class="lat">—</td></tr>
+                    <tr data-w="4"><th class="wl">—</th><td class="susp"><i></i></td><td class="st">—</td><td class="av">—</td><td class="sl">—</td><td class="lat">—</td></tr>
+                    <tr data-w="5"><th class="wl">—</th><td class="susp"><i></i></td><td class="st">—</td><td class="av">—</td><td class="sl">—</td><td class="lat">—</td></tr>
+                    <tr data-w="6"><th class="wl">—</th><td class="susp"><i></i></td><td class="st">—</td><td class="av">—</td><td class="sl">—</td><td class="lat">—</td></tr>
+                    <tr data-w="7"><th class="wl">—</th><td class="susp"><i></i></td><td class="st">—</td><td class="av">—</td><td class="sl">—</td><td class="lat">—</td></tr>
+                    <tr data-w="8"><th class="wl">—</th><td class="susp"><i></i></td><td class="st">—</td><td class="av">—</td><td class="sl">—</td><td class="lat">—</td></tr>
+                    <tr data-w="9"><th class="wl">—</th><td class="susp"><i></i></td><td class="st">—</td><td class="av">—</td><td class="sl">—</td><td class="lat">—</td></tr>
                 </tbody>
             </table>
-            <p class="hint">
-                <b>susp</b> is normalised suspension compression, <b>ω</b> the
-                wheel's angular velocity in rad/s, <b>slip</b> the longitudinal
-                slip ratio. A row that goes dim has left the ground.
-            </p>
+            <p class="hint" id="wheelHint"></p>
         </section>
 
         <section>
             <h2>Controls</h2>
             <p class="hint keys">
                 <b>W / ↑</b> throttle &nbsp; <b>S / ↓</b> brake, then reverse<br>
-                <b>A D / ← →</b> steer &nbsp; <b>Space</b> handbrake<br>
-                <b>R</b> respawn &nbsp; <b>1 2 3</b> camera
+                <b>A D / ← →</b> steer &nbsp; <b>Space</b> handbrake / neutral turn<br>
+                <b>R</b> respawn &nbsp; <b>1 2 3</b> camera &nbsp; <b>Tab</b> next vehicle
             </p>
             <button id="respawn" class="wide">Respawn on track</button>
         </section>

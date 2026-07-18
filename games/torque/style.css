@@ -107,10 +107,87 @@ button.on {
     color: #ffd58a;
 }
 
-.camRow { display: flex; gap: 5px; }
-.camRow button { flex: 1; }
+.camRow, .vehRow, .tireRow { display: flex; gap: 5px; }
+.camRow button, .vehRow button, .tireRow button { flex: 1; }
+
+.tireRow button { padding: 5px 4px; }
 
 button.wide { width: 100%; margin-top: 8px; }
+
+/* The vehicle picker leads the panel, so it gets a heavier treatment than the
+   other button rows — it is the control everything else in the HUD follows. */
+#hud section.lead {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: none;
+}
+
+.vehRow button {
+    padding: 7px 8px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+/* --- Tank track readout --------------------------------------------------- */
+
+.stats b.hot, #trackMode.hot, #leanState.hot {
+    color: #ffb347;
+}
+
+/* --- Bike lean readout ---------------------------------------------------- */
+
+.leanReadout {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 5px;
+}
+
+.leanReadout b {
+    font: 700 26px/1 ui-monospace, monospace;
+    color: #dfe6ee;
+    font-variant-numeric: tabular-nums;
+}
+
+.leanReadout span {
+    font: 11px ui-monospace, monospace;
+    color: #6d7885;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+}
+
+/* Centre-anchored: the fill grows out of the middle toward whichever side the
+   bike is leaning, with a tick marking upright. */
+.leanTrack {
+    position: relative;
+    height: 9px;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.leanTrack::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: rgba(255, 255, 255, 0.35);
+}
+
+.leanTrack i {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    width: 0%;
+    background: linear-gradient(90deg, #3f9c6d, #59c2f0);
+}
+
+.leanTrack i.fallen {
+    background: linear-gradient(90deg, #d9412f, #f5a623);
+}
 
 /* --- Wheel table ---------------------------------------------------------- */
 
@@ -137,6 +214,10 @@ button.wide { width: 100%; margin-top: 8px; }
 }
 
 #wheels tr.airborne td, #wheels tr.airborne th { color: #4d565f; }
+
+/* Past the peak of the friction curve the tyre is sliding rather than
+   gripping — the one reading the friction presets exist to change. */
+#wheels tr.sliding td.sl { color: #ffb347; font-weight: 700; }
 
 /* Suspension compression as a small filled bar — the shape of the trace
    matters more than the number when you are watching it move. */
