@@ -1,0 +1,67 @@
+html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+canvas#stage { display: block; width: 100vw; height: 100vh; }
+
+#hud {
+    position: absolute;
+    top: 10px; left: 10px;
+    width: 268px;
+    max-height: calc(100vh - 20px);
+    overflow-y: auto;
+    background: rgba(8, 10, 14, 0.72);
+    color: #cfe;
+    font: 12px system-ui, sans-serif;
+    padding: 10px 12px 12px 12px;
+    border-radius: 7px;
+    border: 1px solid rgba(255,255,255,0.08);
+}
+
+#hud h1 {
+    margin: 0 0 8px 0;
+    font-size: 13px;
+    color: #fff;
+    letter-spacing: 0.4px;
+}
+#hud h1 .fps { float: right; color: #7bed9f; font-weight: normal; font-size: 11px; }
+
+#hud section {
+    margin: 8px 0 0 0;
+    padding: 6px 0 2px 0;
+    border-top: 1px solid rgba(255,255,255,0.10);
+}
+#hud h2 {
+    margin: 0 0 4px 0;
+    font-size: 12px;
+    color: #9fd6ff;
+    font-weight: 600;
+}
+#hud h2 label { display: inline; margin: 0; }
+
+#hud label { display: block; margin: 3px 0; }
+#hud input[type=range] { width: 116px; vertical-align: middle; }
+#hud span.v {
+    color: #7bed9f;
+    display: inline-block;
+    min-width: 42px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+#hud select {
+    background: #12161c;
+    color: #cfe;
+    border: 1px solid #2a323c;
+    padding: 1px 3px;
+}
+
+#hud .master {
+    background: rgba(120, 200, 255, 0.10);
+    border: 1px solid rgba(120, 200, 255, 0.28);
+    border-radius: 5px;
+    padding: 5px 7px;
+}
+#hud .master b { color: #ffe08a; }
+
+#hud .sub { padding-left: 8px; border-left: 2px solid rgba(255,255,255,0.10); }
+#hud .sub.off { display: none; }
+
+#hud .hint { color: #8b97a6; font-size: 11px; margin-top: 3px; }
+#hud .foot { margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.10); padding-top: 7px; }

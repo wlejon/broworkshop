@@ -1,0 +1,7 @@
+{
+    "app": ".",
+    "title": "Render Lab",
+    "width": 1920,
+    "height": 1080,
+    "lib": "../../lib"
+}

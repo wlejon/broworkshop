@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Render Lab</title>
+    <link rel="stylesheet" href="/app/style.css">
+</head>
+<body>
+    <canvas id="stage"></canvas>
+
+    <div id="hud">
+        <h1>Render Lab <span id="fps" class="fps">—</span></h1>
+
+        <div class="master">
+            <label><input type="checkbox" id="masterPost" checked>
+                <b>A/B — whole post stack</b></label>
+            <div class="hint" id="masterHint">on: your settings · off: raw forward render</div>
+        </div>
+
+        <!-- SSAO ------------------------------------------------------------ -->
+        <section>
+            <h2><label><input type="checkbox" id="ssaoOn" checked> SSAO</label></h2>
+            <label>Radius <input type="range" id="ssaoRadius" min="0.05" max="3" step="0.05" value="0.7">
+                <span class="v" id="ssaoRadiusV"></span></label>
+            <label>Intensity <input type="range" id="ssaoIntensity" min="0" max="3" step="0.05" value="1.3">
+                <span class="v" id="ssaoIntensityV"></span></label>
+            <label>Bias <input type="range" id="ssaoBias" min="0" max="0.2" step="0.002" value="0.025">
+                <span class="v" id="ssaoBiasV"></span></label>
+        </section>
+
+        <!-- Depth of field -------------------------------------------------- -->
+        <section>
+            <h2><label><input type="checkbox" id="dofOn"> Depth of field</label></h2>
+            <label>Focus dist <input type="range" id="dofDistance" min="1" max="80" step="0.5" value="14">
+                <span class="v" id="dofDistanceV"></span></label>
+            <label>Focus range <input type="range" id="dofRange" min="0.5" max="30" step="0.5" value="4">
+                <span class="v" id="dofRangeV"></span></label>
+            <label>Max blur <input type="range" id="dofBlur" min="0" max="12" step="0.25" value="5">
+                <span class="v" id="dofBlurV"></span></label>
+        </section>
+
+        <!-- Bloom ----------------------------------------------------------- -->
+        <section>
+            <h2><label><input type="checkbox" id="bloomOn" checked> Bloom</label></h2>
+            <label>Threshold <input type="range" id="bloomThreshold" min="0.1" max="4" step="0.05" value="1.1">
+                <span class="v" id="bloomThresholdV"></span></label>
+            <label>Intensity <input type="range" id="bloomIntensity" min="0" max="2" step="0.02" value="0.7">
+                <span class="v" id="bloomIntensityV"></span></label>
+            <label>Blur <input type="range" id="bloomStrength" min="0.5" max="6" step="0.1" value="2.0">
+                <span class="v" id="bloomStrengthV"></span></label>
+        </section>
+
+        <!-- Color LUT ------------------------------------------------------- -->
+        <section>
+            <h2>Color LUT <span class="v" id="lutStatus"></span></h2>
+            <label>Grade
+                <select id="lutName">
+                    <option value="">— off —</option>
+                    <option value="neutral">neutral (identity)</option>
+                    <option value="warm">warm / teal-orange</option>
+                    <option value="cool">cool moonlight</option>
+                    <option value="noir">noir</option>
+                </select>
+            </label>
+            <label>Amount <input type="range" id="lutAmount" min="0" max="1" step="0.02" value="1">
+                <span class="v" id="lutAmountV"></span></label>
+        </section>
+
+        <!-- Antialiasing / resolution --------------------------------------- -->
+        <section>
+            <h2>Antialiasing &amp; resolution</h2>
+            <label><input type="checkbox" id="fxaaOn" checked> FXAA (LDR, last pass)</label>
+            <label>MSAA
+                <select id="msaa">
+                    <option value="0">off</option>
+                    <option value="2">2x</option>
+                    <option value="4" selected>4x</option>
+                    <option value="8">8x</option>
+                </select>
+            </label>
+            <label>Render scale <input type="range" id="renderScale" min="0.5" max="2" step="0.05" value="1">
+                <span class="v" id="renderScaleV"></span></label>
+        </section>
+
+        <!-- Fog -------------------------------------------------------------- -->
+        <section>
+            <h2>Fog</h2>
+            <label>Mode
+                <select id="fogMode">
+                    <option value="off" selected>off</option>
+                    <option value="linear">linear ramp</option>
+                    <option value="exp2">exponential² + height</option>
+                </select>
+            </label>
+            <label>Color
+                <select id="fogColor">
+                    <option value="0.55,0.60,0.70">cold haze</option>
+                    <option value="0.78,0.72,0.62">warm dust</option>
+                    <option value="0.10,0.12,0.18">night murk</option>
+                    <option value="0.85,0.88,0.92">white-out</option>
+                </select>
+            </label>
+            <div id="fogLinear" class="sub">
+                <label>Start <input type="range" id="fogStart" min="0" max="60" step="0.5" value="8">
+                    <span class="v" id="fogStartV"></span></label>
+                <label>End <input type="range" id="fogEnd" min="1" max="140" step="1" value="60">
+                    <span class="v" id="fogEndV"></span></label>
+            </div>
+            <div id="fogExp2" class="sub">
+                <label>Density <input type="range" id="fogDensity" min="0" max="0.12" step="0.001" value="0.028">
+                    <span class="v" id="fogDensityV"></span></label>
+                <label>Height falloff <input type="range" id="fogHeight" min="0" max="1" step="0.01" value="0.22">
+                    <span class="v" id="fogHeightV"></span></label>
+                <label>Clear radius <input type="range" id="fogStartDist" min="0" max="40" step="0.5" value="6">
+                    <span class="v" id="fogStartDistV"></span></label>
+            </div>
+        </section>
+
+        <!-- Tonemap ---------------------------------------------------------- -->
+        <section>
+            <h2>Tonemap</h2>
+            <label>Curve
+                <select id="tmMode">
+                    <option value="aces" selected>ACES</option>
+                    <option value="reinhard">Reinhard</option>
+                    <option value="linear">Linear</option>
+                </select>
+            </label>
+            <label>Exposure <input type="range" id="tmExposure" min="0.1" max="4" step="0.05" value="1">
+                <span class="v" id="tmExposureV"></span></label>
+            <label>Ambient <input type="range" id="ambient" min="0" max="0.25" step="0.005" value="0.035">
+                <span class="v" id="ambientV"></span></label>
+        </section>
+
+        <div class="hint foot">
+            <b>Right-drag</b> orbit · <b>Middle-drag</b> pan · <b>Wheel</b> zoom<br>
+            The avenue runs to z&nbsp;=&nbsp;-60; the sphere row sweeps roughness 0.03→0.95.
+        </div>
+    </div>
+
+    <script type="module" src="/app/app.js"></script>
+</body>
+</html>
