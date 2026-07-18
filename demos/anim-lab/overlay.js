@@ -25,18 +25,16 @@ export function createBoneOverlay(scene, character) {
     const joints = [];
     const bones = [];
 
-    // Joint markers: one small emissive sphere per bone origin.
-    //
-    // Note: `visible: false` passed to createMesh is ignored by the engine —
-    // the node comes back visible regardless — so visibility is set on the
-    // node after creation everywhere in this module.
+    // Joint markers: one small emissive sphere per bone origin. The overlay is
+    // off by default, so every node here is created with `visible: false` and
+    // only setEnabled() ever turns it on.
     for (let i = 0; i < rig.names.length; ++i) {
         const j = scene.createMesh({
             mesh: 'sphere', radius: 0.028, segments: 10, rings: 7,
             color: '#ffffff', unlit: true,
             emissive: 2.0, emissiveColor: [1.0, 0.85, 0.35],
+            visible: false,
         });
-        j.visible = false;
         character.node.add(j);          // see the module note: model space
         joints.push(j);
     }
@@ -50,8 +48,8 @@ export function createBoneOverlay(scene, character) {
             mesh: 'box', halfW: 0.012, halfH: 0.5, halfD: 0.012,
             color: '#ffffff', unlit: true,
             emissive: 1.2, emissiveColor: [0.40, 0.80, 1.0],
+            visible: false,
         });
-        node.visible = false;
         character.node.add(node);
         bones.push({ child: i, parent: p, node });
     });

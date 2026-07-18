@@ -120,12 +120,10 @@ export function createCharacter(scene, restore) {
             mesh: 'capsule', radius: RADIUS, halfHeight: CROUCH_HALF,
             segments: 20, rings: 12,
             color: '#d8a24f', metallic: 0.1, roughness: 0.45,
+            visible: false,
         });
         visual.add(standMesh);
         visual.add(crouchMesh);
-        // `visible: false` at creation is silently ignored by createMesh, so
-        // the initial stance has to be applied after the fact.
-        crouchMesh.visible = false;
     }
     applyStanceVisual();
     return character;

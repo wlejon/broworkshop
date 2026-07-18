@@ -118,15 +118,14 @@ export function createCameras(scene, character, orbitRig) {
         /**
          * The key of the active camera, or '' if an imperative view took over.
          *
-         * Matched by NAME rather than by identity: `scene.activeCamera` hands
-         * back a fresh JS wrapper around the native node on every read, so
-         * `scene.activeCamera === myCameraNode` is false even when it is
-         * unambiguously the same camera. Names are the stable handle.
+         * Matched by node IDENTITY: `scene.activeCamera` hands back the same JS
+         * object as the node it was set from, so `===` is the comparison, and a
+         * camera that is not one of ours falls through to ''.
          */
         get active() {
             const a = scene.activeCamera;
             if (!a) return '';
-            for (const k of ctl.names) if (nodes[k].name === a.name) return k;
+            for (const k of ctl.names) if (nodes[k] === a) return k;
             return '';
         },
 

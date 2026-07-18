@@ -142,7 +142,17 @@ export function createCameras(scene, vehicle, track) {
         get activeName() { return list[active].name; },
         label: (i) => labels[list[i].name],
         cycle: () => select(active + 1),
-        /** Which camera the SCENE thinks is active — compare by name, never ===. */
-        sceneActiveName: () => (scene.activeCamera ? scene.activeCamera.name : null),
+        /** The camera node the SCENE thinks is active. */
+        sceneActive: () => scene.activeCamera,
+        /**
+         * Which of our cameras the SCENE thinks is active. Node identity is
+         * stable, so this is an indexOf against the list rather than a name
+         * comparison — a camera the scene picked up from somewhere else reads
+         * as null instead of masquerading as one of ours.
+         */
+        sceneActiveName: () => {
+            const i = list.indexOf(scene.activeCamera);
+            return i >= 0 ? list[i].name : null;
+        },
     };
 }

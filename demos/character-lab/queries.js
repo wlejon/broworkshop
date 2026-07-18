@@ -151,10 +151,13 @@ const halfNow = () => (isCrouched() ? CROUCH_HALF : STAND_HALF);
 
 // --- debug geometry ----------------------------------------------------------
 //
-// Node colours cannot be changed after creation (the MeshNode `color` setter is
-// a silent no-op), so anything that needs to signal hit-vs-miss is built as a
-// PAIR of identical meshes in two colours and the pair is toggled. It costs a
-// handful of nodes and buys an unambiguous red/green read at a glance.
+// Anything that needs to signal hit-vs-miss is built as a PAIR of identical
+// meshes in two colours and the pair is toggled. `MeshNode.color` is settable
+// now, so the base tint alone could be flipped in place — but every node here
+// is emissive, and `emissiveColor` is still a construction-time field with no
+// setter. Flipping only the base colour would leave the glow the wrong hue and
+// the two states would read as muddy variations of one colour instead of red
+// vs green. The pair costs a handful of nodes and buys an unambiguous read.
 
 const COL = {
     miss:  '#5fd39a',   // nothing in the way
@@ -174,8 +177,8 @@ function makeLine(scene, color, thickness) {
     const n = scene.createMesh({
         mesh: 'cylinder', radius: thickness, halfHeight: 0.5, segments: 8,
         color, metallic: 0, roughness: 0.4, emissive: 0.5, emissiveColor: color,
+        visible: false,
     });
-    n.visible = false;
     return n;
 }
 
@@ -183,8 +186,8 @@ function makeBall(scene, color, radius) {
     const n = scene.createMesh({
         mesh: 'sphere', radius, segments: 14, rings: 10,
         color, emissive: 0.8, emissiveColor: color, roughness: 0.3,
+        visible: false,
     });
-    n.visible = false;
     return n;
 }
 
@@ -200,8 +203,8 @@ export function buildQueryVis(scene) {
             segments: 16, rings: 10,
             color: [...cssRgb(color), 0.32], twoSided: true,
             emissive: 0.35, emissiveColor: color, roughness: 0.5,
+            visible: false,
         });
-        n.visible = false;
         return n;
     };
 
@@ -229,8 +232,8 @@ export function buildQueryVis(scene) {
                 mesh: 'sphere', radius: 1, segments: 28, rings: 18,
                 color: [...cssRgb(COL.prox), 0.05], twoSided: true,
                 emissive: 0.10, emissiveColor: COL.prox, roughness: 0.9,
+                visible: false,
             });
-            n.visible = false;
             return n;
         })(),
         halos: Array.from({ length: 12 }, () => {
@@ -238,8 +241,8 @@ export function buildQueryVis(scene) {
                 mesh: 'sphere', radius: 1, segments: 16, rings: 12,
                 color: [...cssRgb(COL.halo), 0.30], twoSided: true,
                 emissive: 0.7, emissiveColor: COL.halo, roughness: 0.4,
+                visible: false,
             });
-            n.visible = false;
             return n;
         }),
         // look ray
@@ -517,14 +520,12 @@ function drawQueries(p, dir) {
     // --- proximity: the shell, plus a halo on every body inside it.
     if (sense.proximity) {
         place(vis.proxShell, p.x, p.y, p.z);
-        vis.proxShell.scaleX = sense.proxRadius;
-        vis.proxShell.scaleY = sense.proxRadius;
-        vis.proxShell.scaleZ = sense.proxRadius;
+        vis.proxShell.scale = sense.proxRadius;
         const n = Math.min(qState.prox.length, vis.halos.length);
         for (let i = 0; i < n; ++i) {
             const h = vis.halos[i], o = qState.prox[i];
             place(h, o.at.x, o.at.y, o.at.z);
-            h.scaleX = 0.62; h.scaleY = 0.62; h.scaleZ = 0.62;
+            h.scale = 0.62;
         }
     }
 

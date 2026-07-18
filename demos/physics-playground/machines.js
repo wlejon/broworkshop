@@ -141,9 +141,10 @@ export function makeRod(sc, color, radius = 0.035, emissive = 0) {
 // A rotation axis gets a ring of four pips around it so it is distinguishable
 // from the translation bar sharing the same colour.
 //
-// MeshNode.color is a silent no-op in this build, so "recolour on change" is
-// off the table — the indicator set is destroyed and rebuilt when the axis
-// config changes. Config changes come from HUD clicks, so that is free.
+// A mode change is not just a recolour: bar length, radius, emissive and the
+// presence of the rotation pip collar all move with it, and `emissiveColor` is
+// a construction-time field. So the indicator set is destroyed and rebuilt when
+// the axis config changes. Config changes come from HUD clicks, so that is free.
 
 function buildIndicators(m) {
     for (const n of m.indicatorNodes) n.destroy();

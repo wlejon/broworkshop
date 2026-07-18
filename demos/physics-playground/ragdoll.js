@@ -291,6 +291,7 @@ export function spawnRagdoll(pos = { x: 0, y: 3, z: 0 }, opts = {}) {
     });
 
     const nodes = [];
+    const meshes = [];
     for (let i = 0; i < rd.partCount; i++) {
         const spec = PARTS[i];
         const tag = rd.partBody(i);
@@ -301,11 +302,12 @@ export function spawnRagdoll(pos = { x: 0, y: 3, z: 0 }, opts = {}) {
             : sceneRef.createMesh({ mesh: 'capsule', radius: spec.radius, halfHeight: spec.halfHeight, segments: 14, color, roughness: 0.75 });
         node.add(mesh);
         nodes.push(node);
+        meshes.push(mesh);
     }
 
     const entry = {
         id: nextId++,
-        rd, nodes,
+        rd, nodes, meshes,
         // Kinematic drive is incremental pursuit, not a teleport — it has to be
         // re-issued every step, so the mode is stored and replayed in update().
         drive: { mode: 'off', pose: 'stand', kinematic: false },
@@ -462,23 +464,29 @@ export function punchPart(entry, index, dir = { x: 0, y: 1, z: 0 }, strength = 1
 
 // --- Selection marker --------------------------------------------------------
 //
-// MeshNode.color is a silent no-op in this build, so a selected part cannot be
-// recoloured in place. A small emissive pip parented to the selected part's
-// node reads just as well and costs one mesh.
+// The selected part is recoloured in place. `MeshNode.color` reads the current
+// tint back as [r,g,b,a], so the part's own colour is stashed on select and put
+// back on deselect — no extra geometry, and the whole limb lights up rather
+// than a pip sitting somewhere on it. Parts carry no emissive, so the base
+// colour is the entire visual and swapping it is an unambiguous read.
 
-let marker = null;
+const SELECT_COLOR = '#7bed9f';
+
+let markedMesh = null;      // the mesh currently wearing SELECT_COLOR
+let markedColor = null;     // its original [r,g,b,a]
 export const selection = { entry: null, index: -1 };
 
 export function selectPart(entry, index) {
-    if (marker) { marker.destroy(); marker = null; }
+    if (markedMesh) { markedMesh.color = markedColor; markedMesh = null; markedColor = null; }
     selection.entry = entry || null;
     selection.index = entry ? index : -1;
     if (!entry || !sceneRef) return null;
-    marker = sceneRef.createMesh({
-        mesh: 'sphere', radius: 0.05, segments: 10, rings: 8,
-        y: 0.0, color: '#7bed9f', emissive: 3.0, emissiveColor: '#7bed9f', roughness: 1.0,
-    });
-    entry.nodes[index].add(marker);
+    const mesh = entry.meshes && entry.meshes[index];
+    if (mesh) {
+        markedColor = mesh.color;
+        markedMesh = mesh;
+        mesh.color = SELECT_COLOR;
+    }
     return { entry, index, name: PART_NAMES[index] };
 }
 

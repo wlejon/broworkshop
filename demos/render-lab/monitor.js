@@ -150,9 +150,9 @@ function buildMonitorSurface(scene) {
  * which drops the mesh back to its plain `color` — the flat white panel it was
  * created as. "Monitor off" is therefore visibly the same object with its feed
  * pulled, not a hidden node, which is the distinction the toggle exists to
- * show. (The panel cannot be re-tinted on the fly to make that prettier:
- * `color` is a LightNode property, and writing it on a mesh is a silent no-op.
- * The practical light in front dims instead.)
+ * show. The panel is deliberately left white either way — re-tinting it to
+ * fake a dark screen would blur exactly that point — so the practical light in
+ * front dims instead and the panel stays the same object throughout.
  */
 export function setMonitorLinked(on) {
     if (!_monitor) return false;
