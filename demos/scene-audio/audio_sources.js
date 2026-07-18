@@ -150,25 +150,14 @@ export function buildClips(ctx) {
 
 // --- Files on disk -------------------------------------------------------------
 //
-// PATH GOTCHA, established by probing the runtime: the broaudio file APIs
-// (createClipFromFile / createClipFromFileAsync / createStreamFromFile) take
-// REAL filesystem paths. They do not understand the "/app/..." mount that
-// module imports, <link href> and brokit's fs all resolve — passing
-// "/app/assets/pad-chime.ogg" fails with "cannot open file". brokit's fs DOES
-// understand the mount, so realpathSync('/app') is the bridge, and it keeps
-// the app relocatable instead of hardcoding an absolute path.
+// The audio file APIs (createClipFromFile / createClipFromFileAsync /
+// createStreamFromFile) take the same "/app/..." mount path that module
+// imports, <link href> and brokit's fs resolve, so an asset is named the same
+// way here as anywhere else in the app and the app stays relocatable.
 
-// require(), not `import` — brokit's Node-compatible built-ins are served
-// through require() only (docs/brokit-api.js:8); an ESM `import ... from 'fs'`
-// fails to resolve even inside an ES module like this one.
-const { realpathSync } = require('fs');
-const { join } = require('path');
-
-const APP_DIR = realpathSync('/app');
-
-/** Absolute OS path to a file under the app's assets/ directory. */
+/** Mount path to a file under the app's assets/ directory. */
 export function assetPath(name) {
-    return join(APP_DIR, 'assets', name);
+    return `/app/assets/${name}`;
 }
 
 export const OGG_CLIP = 'pad-chime.ogg';

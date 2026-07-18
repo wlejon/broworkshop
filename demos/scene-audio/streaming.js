@@ -13,15 +13,13 @@
 // numbers. Watching bufferedFrames sit near the ring size while playedFrames
 // climbs is what "streaming is keeping up" actually looks like.
 //
-// The seek is the part worth staring at. audio-api.js:784 still claims
-// createStreamFromFile has no seek; it is stale — the doc for seekPlayback
-// forty lines above describes exactly what really happens, and it is what this
-// module does. Seeking a stream is a genuinely different operation from seeking
-// a RAM clip: the clip just moves a cursor inside a buffer that is already
-// there, while the stream seeks the CODEC, throws away everything buffered, and
-// goes silent until the worker refills from the new file position. That gap is
-// not a bug — it is counted, in underrunFrames, and you can watch the counter
-// jump on every seek.
+// The seek is the part worth staring at. Seeking a stream is a genuinely
+// different operation from seeking a RAM clip: the clip just moves a cursor
+// inside a buffer that is already there, while the stream seeks the CODEC,
+// throws away everything buffered, and goes silent until the worker refills
+// from the new file position. That gap is not a bug — it is counted, in
+// underrunFrames. Whether any given seek actually costs a gap is a race with
+// the decode worker, so watch the counter rather than expecting it to move.
 
 import { assetPath, OGG_BED } from '/app/audio_sources.js';
 
