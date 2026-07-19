@@ -51,6 +51,12 @@ import {
     metricsState, measure, surfaceReport, consistencyRow, inkSensitivityReport,
     alignReport, baselineReport, scalingReport, domAgreementReport, wordSplitProbe,
     METRIC_KEYS,
+    // selection
+    roundTripReport, surrogateSplitReport, containerReport, selectionApiReport,
+    geometryReport, editableSelectionReport,
+    // editing
+    CAN_DRIVE, steppingReportAll, boundaryReport, emptyHostReport, rtlReportAll,
+    caretGeometryReport,
     // app
     stats, refreshAll, panelVerdicts, knownLimitations,
 } from '/app/app.js';
@@ -952,7 +958,119 @@ console.log('  ✓ Cluster map, astral text, caret stepping');
 console.log('  ✓ TextMetrics — complete surface, mutual consistency, DOM agreement');
 
 // =============================================================================
-// 6. THE APP ITSELF
+// 6. SELECTION & RANGE
+// =============================================================================
+//
+// The offsets crossing the JS boundary are UTF-16 code units; the engine stores
+// UTF-8 bytes. A binding that forgot to convert passes every ASCII test ever
+// written, so the fixture is deliberately astral, combining and reversed.
+
+{
+    const rt = roundTripReport();
+    assert(rt.ok,
+        `all ${rt.pairs} ordered offset pairs round-trip through Range — startOffset, ` +
+        'endOffset, collapsed and toString() against the JS slice. failures: ' +
+        JSON.stringify(rt.failures.slice(0, 4)));
+    // Exhaustive, not sampled: an off-by-one-byte conversion survives a spot
+    // check and cannot survive every pair.
+    assert(rt.pairs > 100, `and that is an exhaustive sweep, not a sample (${rt.pairs} pairs)`);
+    assert(rt.bytes > rt.utf16,
+        `the fixture really does have multi-byte characters — ${rt.bytes} UTF-8 bytes ` +
+        `against ${rt.utf16} UTF-16 units, so the two domains cannot be confused for one`);
+
+    const su = surrogateSplitReport();
+    assert(su.ok,
+        'no offset inside a surrogate pair produces a U+FFFD downstream. The DOM permits ' +
+        'such offsets because JS string indices do; manufacturing a replacement character ' +
+        'out of one is what must not happen. rows: ' + JSON.stringify(su.rows));
+
+    for (const [name, rep] of [['containers', containerReport()],
+                               ['selection API', selectionApiReport()],
+                               ['range geometry', geometryReport()],
+                               ['editable selection', editableSelectionReport()]]) {
+        const bad = rep.rows.filter((r) => !r.ok);
+        assert(bad.length === 0,
+            `${name}: all ${rep.rows.length} checks pass. failed: ` +
+            bad.map((r) => `${r.what} (want ${r.want}, got ${r.got})`).join('; '));
+    }
+}
+
+console.log('  ✓ Selection — UTF-16 round trip, containers, geometry, editable');
+
+// =============================================================================
+// 7. EDITING
+// =============================================================================
+//
+// Driven through the headless injection surface — keyDown/textInput/mouseDown —
+// so the engine's key handler, hit test, focus resolution and contenteditable
+// mutation path are all under test. A synthesised DOM event would skip all four.
+
+if (!CAN_DRIVE) {
+    console.log('  – Editing — injection unavailable in this run, skipped');
+} else {
+    // Arrow stepping must land exactly where the shaper says a caret may sit.
+    for (const r of steppingReportAll()) {
+        assert(r.monotonic && r.reachedEnd && r.reachedStart,
+            `${r.label}: RIGHT makes progress to the end and LEFT back to the start — ` +
+            `forward [${r.forward}]`);
+        assert(r.symmetric,
+            `${r.label}: LEFT retraces the RIGHT walk exactly — forward [${r.forward}] ` +
+            `backward [${r.backward}]`);
+        assert(r.noSplitSurrogates && r.onCodePointBoundaries,
+            `${r.label}: no stop lands inside a character — forward [${r.forward}]`);
+        assert(r.matchesShaper,
+            `${r.label}: the key handler's stops ARE the shaper's cluster stops. ` +
+            `A caret that stops somewhere the shaper says is inside one indivisible unit ` +
+            `puts it inside a letter the user sees as one thing. ` +
+            `handler [${r.forward}] vs shaper [${r.shaperStops}]`);
+    }
+
+    for (const b of boundaryReport()) {
+        assert(b.ok, `${b.label}: ${b.why}. failed: ` +
+            b.checks.filter((c) => !c.ok)
+                .map((c) => `${c.name} want ${JSON.stringify(c.want)} got ${JSON.stringify(c.got)}`)
+                .join('; '));
+    }
+
+    for (const r of emptyHostReport()) {
+        assert(r.ok, `${r.label} (${r.why}): ${r.want} — got rangeCount ${r.rangeCount}, ` +
+            `caret on host ${r.onHost}, typed ${JSON.stringify(r.typed)}`);
+    }
+
+    for (const r of rtlReportAll()) {
+        assert(r.symmetric && r.matchesShaper && r.rightIncreases && r.reachedEnd,
+            `${r.label}: RIGHT always increases the logical offset, inside the reversed ` +
+            `run too, and LEFT retraces it — forward [${r.forward}] shaper [${r.shaperStops}]`);
+        assert(r.rtlStopCount === r.wantRtlStopCount,
+            `${r.label}: every letter in the reversed run is its own stop ` +
+            `(${r.rtlStopCount} of ${r.wantRtlStopCount})`);
+        assert(r.backspaceOk && r.typeOk && r.wellFormed,
+            `${r.label}: Backspace removes one whole letter and typing lands at the logical ` +
+            `offset — after backspace ${JSON.stringify(r.afterBackspace)} ` +
+            `(want ${JSON.stringify(r.wantBackspace)}), after typing ` +
+            `${JSON.stringify(r.afterType)} (want ${JSON.stringify(r.wantType)})`);
+    }
+
+    const g = caretGeometryReport();
+    assert(g.ltrHeadRises && g.ltrTailRises,
+        'caret x increases through the left-to-right runs');
+    assert(g.rtlFalls,
+        'and DECREASES through the reversed run — inside it, logically-next is visually ' +
+        'leftward, so a caret that keeps moving right is stepping in display order rather ' +
+        'than logical order');
+    assert(g.noOriginRects,
+        'every collapsed Range reports its rect AT the caret rather than at {0,0}: ' +
+        JSON.stringify(g.originRects));
+    assert(g.noCollisions,
+        'no two distinct caret offsets share one x — at a direction boundary the two ' +
+        'positions are the primary and the secondary, not one position claimed twice: ' +
+        JSON.stringify(g.collisions));
+
+    console.log('  ✓ Editing — arrow stepping, boundaries, empty hosts, RTL, caret geometry');
+}
+
+// =============================================================================
+// 8. THE APP ITSELF
 // =============================================================================
 
 // Panels are idempotent: running every driver a second time must not change

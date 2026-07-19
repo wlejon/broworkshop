@@ -260,8 +260,9 @@
         <!-- Load-bearing: metrics.js measures every span in here against its own
              getBoundingClientRect. Each span is shrink-wrapped (inline) with a
              pinned font, so its box width IS the shaped advance width. -->
-        <!-- SINGLE WORDS only. The multi-word case is measured separately
-             below because layout gets it wrong — see #metricsWordProbe. -->
+        <!-- SINGLE WORDS only. Strings with a space are measured separately
+             below, because a space is where the two candidate implementations
+             diverge — see #metricsWordProbe. -->
         <div id="metricsDomProbe">
             <span>Hamburgefonstiv</span>
             <span>AVWaToLT</span>
@@ -280,6 +281,113 @@
         </p>
         <div id="metricsWordProbe"><span>AV Wa To LT</span><span>A V</span></div>
         <div id="metricsWords" class="result"></div>
+    </section>
+
+    <!-- ── 6. Selection ───────────────────────────────────────────────── -->
+    <section class="panel wide" id="panelSelection">
+        <h2>Selection &amp; Range
+            <span class="hint">UTF-16 offsets at the JS boundary, UTF-8 bytes underneath</span></h2>
+
+        <p class="lede">
+            Everything above this point only <i>read</i> text. A Selection is where the
+            reading stops being free: <code>anchorOffset</code> and
+            <code>Range.startOffset</code> are UTF-16 code units per spec, the engine
+            stores UTF-8 bytes, and a caret may only sit on a cluster edge. A binding
+            that forgot to convert between the first two passes every ASCII test ever
+            written, so the fixture here is deliberately full of astral characters,
+            combining marks and reversed text.
+        </p>
+
+        <!-- The fixture, drawn code point by code point by selection.js, so the
+             UTF-16 and UTF-8 offset of every character is readable before any
+             claim is made about them. -->
+        <div id="selFixture" class="cprow"></div>
+        <!-- Scratch: every driven scenario rebuilds its own nodes in here and
+             clears up after itself. Kept in the document (not detached) because
+             getClientRects on a detached node is meaningless. -->
+        <div id="selStage"></div>
+
+        <h3>Every offset pair round-trips</h3>
+        <p class="note">
+            Exhaustive rather than sampled: every ordered pair of legal offsets in the
+            fixture, each checked for startOffset, endOffset, collapsed and toString()
+            against the JS string slice. A conversion that is off by one byte survives
+            a spot check and cannot survive this.
+        </p>
+        <div id="selRoundTrip" class="result"></div>
+
+        <h3>Offsets inside a surrogate pair</h3>
+        <p class="note">
+            The DOM permits them, because JS string indices do. The claim is not that
+            they are rejected — it is that nothing downstream turns one into U+FFFD.
+        </p>
+        <div id="selSurrogate" class="result"></div>
+
+        <h3>Containers and boundary points</h3>
+        <div id="selContainers"></div>
+
+        <h3>The Selection API surface</h3>
+        <div id="selApi"></div>
+
+        <h3>Range geometry — LTR, astral, and reversed</h3>
+        <div id="selGeometry"></div>
+
+        <h3>Selection inside a contenteditable</h3>
+        <div id="selEditable"></div>
+    </section>
+
+    <!-- ── 7. Editing ─────────────────────────────────────────────────── -->
+    <section class="panel wide" id="panelEditing">
+        <h2>Editing
+            <span class="hint">contenteditable, driven through the real input path</span></h2>
+
+        <p class="lede">
+            An editor has to hold three coordinate systems in agreement at once — UTF-8
+            bytes, UTF-16 code units and clusters — and every bug worth finding here is
+            a place where two of them were confused. Everything below is driven through
+            the headless injection surface (<code>keyDown</code>, <code>textInput</code>,
+            <code>mouseDown</code>) rather than through synthesised DOM events, because
+            the engine's key handler, hit test, focus resolution and contenteditable
+            mutation path are exactly what is under test and
+            <code>dispatchEvent</code> would skip all four.
+        </p>
+
+        <div id="editInject" class="tag"></div>
+        <div id="editStage"></div>
+
+        <h3>Arrow stepping lands where the shaper says it may</h3>
+        <p class="note">
+            The caret's stops walking RIGHT through a string must be the shaper's own
+            cluster stops, must be symmetric with walking back LEFT, and must never
+            land between the halves of a surrogate pair.
+        </p>
+        <div id="editStepping"></div>
+        <div id="editSteppingNote" class="note"></div>
+
+        <h3>Boundary cases</h3>
+        <div id="editBoundary"></div>
+
+        <h3>The caret in an emptied host</h3>
+        <p class="note">
+            Deleting the last character is the case that loses the caret: the text node
+            it was anchored in no longer exists, and the host must still be typeable.
+        </p>
+        <div id="editEmpty"></div>
+
+        <h3>Editing inside reversed text</h3>
+        <div id="editRtl"></div>
+
+        <h3>Caret geometry agrees with the shaper</h3>
+        <div id="editGeometry"></div>
+
+        <h3>Playground</h3>
+        <p class="note">
+            Not a test — a demonstration, and the part of this panel a human can drive.
+            Click in, type an emoji, arrow over it, and watch the three coordinate
+            systems move together in the readout.
+        </p>
+        <div id="editLive" contenteditable="true" class="edit-host">Type here — אבג 😀 और भी</div>
+        <div id="editLiveReadout" class="result"></div>
     </section>
 
     </div>

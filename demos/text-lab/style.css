@@ -351,3 +351,72 @@ canvas.hidden { position: absolute; left: -9999px; top: -9999px; }
     letter-spacing: normal;
     word-spacing: normal;
 }
+
+/* ── The editing half ───────────────────────────────────────────────────── */
+
+/* A live contenteditable target. The font is pinned for the same reason the
+   probes above pin theirs: caret geometry is asserted against the shaper's
+   own numbers, and an inherited body font would compare two different faces.
+   min-height keeps an EMPTIED host clickable — the empty-host caret case
+   cannot be driven at all if the box collapses to nothing when its last
+   character is deleted. */
+.edit-host {
+    min-height: 30px;
+    padding: 6px 9px;
+    border-radius: 5px;
+    background: #141a25;
+    border: 1px solid #2c3849;
+    color: #e8edf7;
+    font-family: Arial;
+    font-size: 20px;
+    outline: none;
+}
+.edit-host:focus { border-color: #3d6fb5; }
+
+/* One driven scenario: what was set up, what came back, and a line per check.
+   Laid out as a block rather than a table row because the input and output
+   HTML are the evidence and need room to be read. */
+.case {
+    margin: 6px 0;
+    padding: 8px 11px;
+    border-radius: 5px;
+    background: #141a25;
+    border-left: 3px solid #2c3849;
+}
+.case.ok  { border-left-color: #22c55e; }
+.case.bad { border-left-color: #ef4444; }
+
+.case-head {
+    font-size: 12px;
+    font-weight: 600;
+    color: #e8edf7;
+}
+.case-why {
+    margin: 2px 0 5px;
+    font-size: 11px;
+    color: #6c7a93;
+    max-width: 105ch;
+}
+.case-io {
+    /* pre-wrap: the in/out HTML is written with a newline between the two and
+       leading spaces that align them. Collapsing that loses the alignment
+       which is the only thing making a one-character difference visible. */
+    white-space: pre-wrap;
+    font-family: Consolas, "Cascadia Mono", monospace;
+    font-size: 11px;
+    color: #93b8f0;
+    margin-bottom: 4px;
+    word-break: break-all;
+}
+.case-check, .checkline {
+    font-family: Consolas, "Cascadia Mono", monospace;
+    font-size: 11px;
+    line-height: 1.5;
+}
+.case-check.ok,  .checkline.ok  { color: #6ee7a8; }
+.case-check.bad, .checkline.bad { color: #f3bdbd; }
+
+/* want/got sit inline after a check's name, so the two numbers that disagree
+   read as one sentence rather than as two columns to scan between. */
+.want { color: #6c7a93; }
+.got  { color: #fbbf24; }

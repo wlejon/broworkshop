@@ -41,12 +41,13 @@
 //   - Anything a test measures (Range rects, getBoundingClientRect) has a
 //     pinned font and no transition, transform or animation on it.
 //
-// STRUCTURED FOR A SECOND FEATURE AREA. The editing half — contenteditable,
-// IME, selection — lands as sibling modules (editing.js, ime.js, selection.js)
-// and new <section class="panel"> blocks, with their exports appended to the
-// re-export block at the bottom of this file. Nothing above needs to change:
-// no module imports another except through the two genuinely shared seams,
-// textutil.js (the UTF-16↔UTF-8 boundary) and shaping.js's shape() wrapper.
+// TWO HALVES. The first five panels only READ text — they shape, measure and
+// compare, and never change a character. selection.js and editing.js are the
+// other half, where the engine has to keep UTF-8 bytes, UTF-16 code units and
+// cluster edges in agreement while text is being mutated. They are sibling
+// modules on the same terms as the rest: no module imports another except
+// through the two genuinely shared seams, textutil.js (the UTF-16↔UTF-8
+// boundary) and shaping.js's shape() wrapper.
 
 import { installSystemMenu } from '/lib/system-menu.js';
 
@@ -85,6 +86,20 @@ import {
     drawMetrics, METRIC_KEYS, METRIC_SAMPLES, INK_KEYS,
 } from '/app/metrics.js';
 
+import {
+    initSelection, refreshSelection, selectionState,
+    roundTripReport, surrogateSplitReport, containerReport, selectionApiReport,
+    geometryReport, editableSelectionReport, BOUNDARIES, S as SEL_FIXTURE,
+} from '/app/selection.js';
+
+import {
+    initEditing, refreshEditing, editState,
+    steppingReportAll, boundaryReport, emptyHostReport, rtlReportAll,
+    caretGeometryReport, arrowSteppingReport, typeText, press, clickInto,
+    selectionSnapshot, freshHost, freshPlain, caretAt,
+    CAN_DRIVE, K, MOD, STEP_SAMPLES, BOUNDARY_CASES, RTL_SAMPLES,
+} from '/app/editing.js';
+
 installSystemMenu();
 
 export const stats = { frames: 0 };
@@ -108,6 +123,11 @@ initBidi();
 initScripts();
 initClusters();
 initMetrics();
+// Last, and in this order: selection.js and editing.js both build fixtures in
+// their own stage and drive the real input path, so they must not run until
+// every read-only panel has taken its measurements off an undisturbed DOM.
+initSelection();
+initEditing();
 
 // ── Frame loop ──────────────────────────────────────────────────────────────
 //
@@ -145,6 +165,8 @@ export function refreshAll() {
     selectSample(CLUSTER_SAMPLES.indexOf(clusterState.current));
     refreshAstral();
     refreshMetrics();
+    refreshSelection();
+    refreshEditing();
 }
 
 /**
@@ -162,6 +184,15 @@ export function panelVerdicts() {
     const sc = scriptState;
     const c = clusterState;
     const m = metricsState;
+    const sl = selectionState;
+    const e = editState;
+    // Every row-based report is a list of {ok} checks; a panel is green when
+    // every row in every one of its reports is. A report that is null has not
+    // run — for the editing panel that is the windowed case, where the
+    // injection globals do not exist and the panel says so rather than
+    // claiming a pass it did not earn.
+    const allRows = (...reports) =>
+        reports.every((r) => r !== null && r.rows.every((x) => x.ok));
     return {
         shaping:
             s.ligatures.some((r) => r.ligated) &&
@@ -200,6 +231,23 @@ export function panelVerdicts() {
             m.scaling.allScale &&
             m.domAgreement.every((d) => d.agrees) &&
             m.wordSplit !== null && m.wordSplit.every((w) => w.matchesWholeShaped),
+        selection:
+            sl.roundTrip !== null && sl.roundTrip.ok &&
+            sl.surrogate !== null && sl.surrogate.ok &&
+            allRows(sl.containers, sl.api, sl.geometry, sl.editable),
+        editing:
+            e.available &&
+            e.stepping !== null && e.stepping.every((r) =>
+                r.symmetric && r.matchesShaper && r.monotonic &&
+                r.onCodePointBoundaries && r.noSplitSurrogates &&
+                r.reachedEnd && r.reachedStart) &&
+            e.boundary !== null && e.boundary.every((b) => b.ok) &&
+            e.emptyHost !== null && e.emptyHost.every((r) => r.ok) &&
+            e.rtl !== null && e.rtl.every((r) =>
+                r.symmetric && r.matchesShaper && r.rightIncreases && r.reachedEnd &&
+                r.rtlStopCount === r.wantRtlStopCount &&
+                r.backspaceOk && r.typeOk && r.wellFormed) &&
+            e.caretGeometry !== null && e.caretGeometry.ok,
     };
 }
 
@@ -285,4 +333,14 @@ export {
     measure, surfaceReport, consistencyRow, inkSensitivityReport,
     alignReport, baselineReport, scalingReport, domAgreementReport, wordSplitProbe,
     drawMetrics, METRIC_KEYS, METRIC_SAMPLES, INK_KEYS,
+    // selection
+    selectionState, refreshSelection,
+    roundTripReport, surrogateSplitReport, containerReport, selectionApiReport,
+    geometryReport, editableSelectionReport, BOUNDARIES, SEL_FIXTURE,
+    // editing
+    editState, refreshEditing,
+    steppingReportAll, boundaryReport, emptyHostReport, rtlReportAll,
+    caretGeometryReport, arrowSteppingReport, typeText, press, clickInto,
+    selectionSnapshot, freshHost, freshPlain, caretAt,
+    CAN_DRIVE, K, MOD, STEP_SAMPLES, BOUNDARY_CASES, RTL_SAMPLES,
 };
