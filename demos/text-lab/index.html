@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Text Lab</title>
+    <link rel="stylesheet" href="/app/style.css">
+</head>
+<body>
+    <header id="topbar">
+        <h1>Text Lab</h1>
+        <div class="sub">
+            HarfBuzz shaping · UAX&nbsp;#9 bidi · complex scripts · cluster map · TextMetrics
+            <span id="bidiAvailable" class="tag">—</span>
+            <span id="statFrames" class="tag">0 frames</span>
+        </div>
+    </header>
+
+    <div id="grid">
+
+    <!-- ── 1. Shaping ─────────────────────────────────────────────────── -->
+    <section class="panel wide" id="panelShaping">
+        <h2>HarfBuzz shaping
+            <span class="hint">bro.text.shape() — ligatures, kerning, spacing, the cache</span></h2>
+
+        <p class="lede">
+            Every string in bro goes through HarfBuzz and comes back as a
+            <code>ShapedRun</code>: a glyph array plus a <b>cluster map</b> from source
+            bytes to glyphs. The map is the whole public contract — glyph ids never
+            leave <code>bro::render</code> — and it is what makes the difference between
+            shaping and a per-character lookup <i>measurable</i> rather than merely
+            visible. The header of <code>src/render/shaped_run.h</code> puts it bluntly:
+            with shaping, "prefix measurement is wrong by construction".
+        </p>
+
+        <h3>Font families found on this machine</h3>
+        <p class="note">
+            There is no font-enumeration API in bro, so presence is inferred by
+            measuring: a family that resolves to the same face as a deliberately
+            nonexistent name was not found. Reported, never silently skipped.
+        </p>
+        <div id="shapeFamilies" class="tagrow"></div>
+
+        <h3>Ligatures — <i>n</i> characters, one glyph</h3>
+        <p class="note">
+            A cluster spanning more than one byte and producing exactly <b>one</b>
+            glyph is a ligature by definition. Calibri is used here because, measured
+            across the six families above, it is the only one that forms f-ligatures at
+            default settings — an assertion written against Arial would prove nothing.
+        </p>
+        <div id="shapeLigatures"></div>
+
+        <h3>Kerning — the width of a pair is not the sum of its parts</h3>
+        <p class="note">
+            The cheapest possible proof that shaping ran: kerning is a property of the
+            <b>pair</b>, so any implementation that measures characters independently
+            and adds gets a delta of exactly zero on every row.
+        </p>
+        <div id="shapeKerning"></div>
+
+        <h3>Prefix measurement is wrong by construction</h3>
+        <div id="shapePrefix" class="result"></div>
+
+        <h3>letter-spacing suppresses ligatures; word-spacing hits only spaces</h3>
+        <p class="note">
+            CSS letter-spacing inserts space <i>between characters</i>, and a ligature
+            has fused several into one indivisible glyph — so a non-zero letter-spacing
+            must turn ligatures off. It is a shaping <b>input</b> (it changes which
+            glyphs exist) and lives in the cache key; the spacing <i>amount</i> does
+            not, because it only repositions already-shaped output.
+        </p>
+        <div id="shapeSpacing" class="result"></div>
+
+        <h3>Style axes are shaping inputs</h3>
+        <div id="shapeStyles"></div>
+
+        <h3>Subpixel advances</h3>
+        <div id="shapeSubpixel" class="result"></div>
+
+        <h3>Shaped-run cache</h3>
+        <div id="shapeCache" class="result"></div>
+    </section>
+
+    <!-- ── 2. Bidi ────────────────────────────────────────────────────── -->
+    <section class="panel wide" id="panelBidi">
+        <h2>Bidi — UAX&nbsp;#9
+            <span class="hint">bro.text.bidi() / bidiReorder(), cross-checked against shape() and against layout</span></h2>
+
+        <p class="lede">
+            Three things must agree for RTL text to be right: level resolution
+            (<code>bro.text.bidi</code>), reordering (<code>bro.text.bidiReorder</code>,
+            rule&nbsp;L2), and the shaper, which runs both internally and emits its
+            cluster map <b>already in visual order</b>. This panel checks each against
+            the others rather than against a hardcoded expectation — and then checks all
+            three against the live layout with <code>Range.getBoundingClientRect()</code>.
+        </p>
+
+        <h3>Resolved embedding levels, per code point</h3>
+        <p class="note">
+            The glyph on top, the level it resolved to underneath. Levels come back one
+            per <b>code point</b>; runs come back in <b>UTF-8 bytes</b>. Confusing the
+            two is the easiest way to write a bidi test that passes on ASCII and fails
+            on everything else.
+        </p>
+        <div id="bidiSamples"></div>
+
+        <h3>Rule L2 vs what the shaper actually did</h3>
+        <div id="bidiPermutation" class="result"></div>
+
+        <h3>Caret geometry across a direction boundary</h3>
+        <p class="note">
+            Inside an LTR run <code>x</code> rises with the byte offset; inside an RTL
+            run it <b>falls</b>, because logically-next is visually-leftward. That sign
+            flip is the whole of bidi caret behaviour.
+        </p>
+        <div id="bidiCarets"></div>
+        <div id="bidiCaretNote" class="note"></div>
+
+        <h3>unicode-bidi: bidi-override (rule X6)</h3>
+        <div id="bidiOverride" class="result"></div>
+
+        <h3>The same reordering, seen through layout</h3>
+        <!-- Load-bearing: bidi.js reads this node's text and takes Range rects
+             over sub-spans of it. The font is pinned in CSS so the shaped
+             comparison uses the same descriptor layout did. Do not change the
+             text without updating bidi.js's UTF-16 span indices. -->
+        <div id="bidiDomProbe">abc אבג def</div>
+        <div id="bidiDomResult" class="result"></div>
+
+        <h3>Range geometry inside an RTL run — a bug this lab found</h3>
+        <p class="note">
+            Measured live every run, so it turns green by itself when the engine is
+            fixed. This lab does not route around it: the cross-check above uses the
+            per-character rects that <i>are</i> correct and states plainly which case is
+            not.
+        </p>
+        <div id="bidiRangeBug" class="result"></div>
+    </section>
+
+    <!-- ── 3. Complex scripts ─────────────────────────────────────────── -->
+    <section class="panel wide" id="panelScripts">
+        <h2>Complex scripts
+            <span class="hint">contextual forms, mandatory ligatures, reordering, zero-advance marks</span></h2>
+
+        <p class="lede">
+            Each script here breaks a different assumption that Latin text lets you get
+            away with. None of them renders at all under a 1:1 codepoint→glyph mapping,
+            and several are <i>wrong</i> rather than merely ugly without shaping —
+            Arabic lam-alef is a mandatory ligature, not a typographic nicety.
+        </p>
+
+        <div id="scriptSpecimens"></div>
+
+        <h3>Coverage — which scripts actually have a font on this machine</h3>
+        <p class="note">
+            .notdef is not directly observable (glyph ids do not escape
+            <code>bro::render</code>), so tofu is detected by its signature: every
+            cluster carrying the same advance, equal to the width the engine gives a
+            character it certainly has no font for.
+        </p>
+        <div id="scriptCoverage"></div>
+
+        <h3>Arabic contextual joining</h3>
+        <p class="note">
+            The same letter in four positions, forced with U+0640 TATWEEL. Because
+            <code>bro.text.shape()</code> exports a glyph <b>count</b> and never glyph
+            <b>ids</b>, the observable proxy for "a different glyph was chosen" is the
+            letter cluster's advance — a strictly weaker signal, and one this lab flags
+            rather than hides.
+        </p>
+        <div id="scriptJoining"></div>
+
+        <h3>Lam-alef — a mandatory ligature</h3>
+        <div id="scriptLamAlef" class="result"></div>
+
+        <h3>Devanagari — reordering and conjuncts</h3>
+        <div id="scriptDevanagari" class="result"></div>
+
+        <h3>Thai — zero-advance marks</h3>
+        <div id="scriptThai" class="result"></div>
+
+        <h3>Canonical equivalence — NFC and NFD shape identically</h3>
+        <div id="scriptNormalization" class="result"></div>
+    </section>
+
+    <!-- ── 4. Cluster map ─────────────────────────────────────────────── -->
+    <section class="panel wide" id="panelClusters">
+        <h2>The cluster map, drawn
+            <span class="hint">bro.text.clusterRange() / byteOffsetToX() over canvas fillText</span></h2>
+
+        <p class="lede">
+            Canvas <code>fillText</code> and <code>bro.text.shape</code> go through the
+            same <code>ShapedRun</code>, so the boxes below — drawn purely from the
+            cluster map — land exactly on the glyphs <code>fillText</code> painted. If
+            they ever drift, two shaping paths exist. Orange outlines are clusters that
+            fused several glyphs; purple ones are RTL. Green ticks on the baseline are
+            the byte offsets a caret may actually occupy.
+        </p>
+
+        <label class="ctl">sample
+            <select id="clusterSample"></select>
+        </label>
+        <canvas id="clusterCanvas" width="1200" height="180"></canvas>
+        <div id="clusterCodePoints" class="cprow"></div>
+        <div id="clusterSummary" class="result"></div>
+        <div id="clusterTable"></div>
+
+        <h3>Astral text and grapheme clusters</h3>
+        <p class="note">
+            An emoji is 1 grapheme, 1 code point, 2 UTF-16 units and 4 UTF-8 bytes —
+            all four numbers are the right answer to some question. The cluster map is
+            what reconciles them: a caret may sit at a cluster's start or end and
+            <b>never</b> inside it. bro steps by <i>cluster</i>, not by <i>grapheme</i>
+            (this build has no UAX&nbsp;#29 data — see the comment in
+            <code>shaped_run.h</code>), so sequences the font does not fuse show up here
+            as more than one stop.
+        </p>
+        <div id="clusterAstral"></div>
+        <div id="clusterStepping" class="result"></div>
+
+        <h3>canvas measureText vs bro.text.shape</h3>
+        <div id="clusterAlignment" class="result"></div>
+    </section>
+
+    <!-- ── 5. TextMetrics ─────────────────────────────────────────────── -->
+    <section class="panel wide" id="panelMetrics">
+        <h2>TextMetrics
+            <span class="hint">canvas measureText — all twelve spec members, checked for mutual consistency</span></h2>
+
+        <p class="lede">
+            The interesting property is not that the members exist but that they are
+            mutually consistent, because they all derive from two sources: the shaped
+            run's ink bounds and the face's <code>SkFontMetrics</code>. So this panel
+            checks <i>relationships</i> — the only kind of check that survives a machine
+            with different fonts.
+        </p>
+
+        <canvas id="metricsCanvas" width="1200" height="230"></canvas>
+        <!-- Off-layout scratch canvas: every measureText() in metrics.js runs on
+             this one so the drawn canvas above keeps its own font state. -->
+        <canvas id="metricsProbe" width="8" height="8" class="hidden"></canvas>
+
+        <h3>Surface completeness</h3>
+        <div id="metricsSurface" class="result"></div>
+
+        <h3>Per-sample self-consistency</h3>
+        <div id="metricsTable"></div>
+
+        <h3>The ink box follows the glyphs, the font box does not</h3>
+        <div id="metricsInk" class="result"></div>
+
+        <h3>textAlign moves the alignment point, not the text</h3>
+        <div id="metricsAlign" class="result"></div>
+
+        <h3>textBaseline translates every vertical metric rigidly</h3>
+        <div id="metricsBaseline" class="result"></div>
+
+        <h3>Linearity in the font size</h3>
+        <div id="metricsScaling" class="result"></div>
+
+        <h3>Canvas and layout agree</h3>
+        <!-- Load-bearing: metrics.js measures every span in here against its own
+             getBoundingClientRect. Each span is shrink-wrapped (inline) with a
+             pinned font, so its box width IS the shaped advance width. -->
+        <!-- SINGLE WORDS only. The multi-word case is measured separately
+             below because layout gets it wrong — see #metricsWordProbe. -->
+        <div id="metricsDomProbe">
+            <span>Hamburgefonstiv</span>
+            <span>AVWaToLT</span>
+            <span>שלום</span>
+            <span>हिन्दी</span>
+        </div>
+        <div id="metricsDom" class="result"></div>
+
+        <h3>Multi-word strings — a second bug this lab found</h3>
+        <p class="note">
+            Layout measures a text node <b>word by word</b> and adds the pieces, so every
+            kern pair that straddles a space is lost. That is the same "prefix measurement
+            is wrong by construction" failure <code>shaped_run.h</code> warns about,
+            reappearing one layer up at word granularity. Measured live, with the
+            decomposition that proves the mechanism rather than just the delta.
+        </p>
+        <div id="metricsWordProbe"><span>AV Wa To LT</span><span>A V</span></div>
+        <div id="metricsWords" class="result"></div>
+    </section>
+
+    </div>
+
+    <script type="module" src="/app/app.js"></script>
+</body>
+</html>

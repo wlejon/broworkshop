@@ -1,0 +1,353 @@
+/* Text Lab — dark, dense, table-heavy.
+ *
+ * Two rules govern everything here:
+ *
+ *  1. NOTHING sets a font-family on a text specimen except deliberately. Every
+ *     specimen and every DOM probe pins its own family and size, because the
+ *     panels compare layout's measurement of a string against the shaper's
+ *     measurement of the same string with an EXPLICIT descriptor. An inherited
+ *     family would make the two descriptors differ and the comparison
+ *     meaningless.
+ *
+ *  2. No transitions, no animations, no transforms on anything a test reads.
+ *     Range rects and getBoundingClientRect are load-bearing in bidi.js and
+ *     metrics.js; an in-flight transition would make them non-deterministic.
+ */
+
+* { box-sizing: border-box; }
+
+body {
+    margin: 0;
+    background: #0b0d12;
+    color: #cdd6e6;
+    font-family: "Segoe UI", system-ui, sans-serif;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+#topbar {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    padding: 14px 22px 12px;
+    background: linear-gradient(180deg, #141a26 0%, #10141d 100%);
+    border-bottom: 1px solid #232c3d;
+}
+#topbar h1 {
+    margin: 0;
+    font-size: 19px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    color: #eaf0fb;
+}
+#topbar .sub {
+    margin-top: 3px;
+    color: #7d8aa3;
+    font-size: 12px;
+}
+
+.tag {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 1px 8px;
+    border-radius: 9px;
+    background: #1c2433;
+    border: 1px solid #2c3849;
+    color: #9fb0c9;
+    font-size: 11px;
+}
+.tag.ok { color: #4ade80; border-color: #1f4b31; background: #10231a; }
+.tag.bad { color: #f87171; border-color: #5a2222; background: #241012; }
+
+#grid {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    padding: 18px 22px 60px;
+}
+
+.panel {
+    background: #10141d;
+    border: 1px solid #1e2635;
+    border-radius: 8px;
+    padding: 16px 18px 20px;
+}
+.panel h2 {
+    margin: 0 0 4px;
+    font-size: 15px;
+    font-weight: 600;
+    color: #eaf0fb;
+}
+.panel h2 .hint {
+    margin-left: 10px;
+    font-size: 11px;
+    font-weight: 400;
+    color: #64738c;
+}
+.panel h3 {
+    margin: 20px 0 6px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.7px;
+    color: #7f8fab;
+}
+
+.lede {
+    margin: 6px 0 4px;
+    max-width: 105ch;
+    color: #9aa8c0;
+}
+.note {
+    margin: 4px 0 8px;
+    max-width: 105ch;
+    color: #6c7a93;
+    font-size: 12px;
+}
+.note.ok { color: #6ee7a8; }
+.note.warn { color: #fbbf24; }
+
+code {
+    font-family: Consolas, "Cascadia Mono", monospace;
+    font-size: 12px;
+    color: #93b8f0;
+    background: #161d29;
+    padding: 0 4px;
+    border-radius: 3px;
+}
+
+/* ── Result strips ───────────────────────────────────────────────────────── */
+
+.result {
+    margin: 6px 0 4px;
+    padding: 9px 12px;
+    border-radius: 5px;
+    background: #141a25;
+    border-left: 3px solid #2c3849;
+    font-family: Consolas, "Cascadia Mono", monospace;
+    font-size: 12px;
+    color: #a9b8d0;
+    max-width: 130ch;
+}
+.result.ok  { border-left-color: #22c55e; color: #b9e6cb; }
+.result.bad { border-left-color: #ef4444; color: #f3bdbd; }
+
+/* ── Tables ──────────────────────────────────────────────────────────────── */
+
+table.grid {
+    border-collapse: collapse;
+    margin: 4px 0 6px;
+    font-family: Consolas, "Cascadia Mono", monospace;
+    font-size: 12px;
+}
+table.grid th {
+    text-align: left;
+    padding: 4px 12px 4px 8px;
+    border-bottom: 1px solid #2a3446;
+    color: #64738c;
+    font-weight: 600;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    white-space: nowrap;
+}
+table.grid td {
+    padding: 3px 12px 3px 8px;
+    border-bottom: 1px solid #171e2a;
+    color: #a9b8d0;
+    white-space: nowrap;
+}
+table.grid tr:hover td { background: #151c28; }
+td.ok { color: #4ade80; }
+td.bad { color: #f87171; }
+td.neutral { color: #5d6b83; }
+
+/* ── Shaping panel ───────────────────────────────────────────────────────── */
+
+.tagrow { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; }
+.famtag {
+    padding: 2px 9px;
+    border-radius: 4px;
+    background: #161d29;
+    border: 1px solid #263043;
+    font-family: Consolas, monospace;
+    font-size: 11px;
+}
+.famtag.ok  { color: #6ee7a8; border-color: #1f4b31; }
+.famtag.bad { color: #f87171; border-color: #5a2222; }
+
+/* ── Bidi panel ──────────────────────────────────────────────────────────── */
+
+.bidi-sample {
+    margin: 8px 0 14px;
+    padding: 8px 10px;
+    background: #131924;
+    border: 1px solid #1e2735;
+    border-radius: 5px;
+}
+.bidi-label {
+    color: #64738c;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
+}
+/* Specimen line: pinned font so the shaped comparison matches layout's. */
+.bidi-text {
+    font-family: Arial;
+    font-size: 22px;
+    color: #e8edf7;
+    margin-bottom: 6px;
+}
+.bidi-bar { display: flex; flex-wrap: wrap; gap: 3px; margin-bottom: 5px; }
+.lvl {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 26px;
+    padding: 2px 3px;
+    border-radius: 3px;
+    background: #1a2130;
+    border: 1px solid #26314400;
+}
+.lvl b { font-family: Arial; font-size: 16px; color: #e8edf7; font-weight: 400; }
+.lvl i {
+    font-style: normal;
+    font-family: Consolas, monospace;
+    font-size: 10px;
+    color: #64738c;
+}
+/* Level colouring: even levels LTR (blue), odd levels RTL (purple), deeper
+   embeddings brighter. Reading the level off the picture is the point. */
+.lvl0 { background: #16202f; }
+.lvl1 { background: #2a1b33; }
+.lvl1 i { color: #c084fc; }
+.lvl2 { background: #16283a; }
+.lvl2 i { color: #60a5fa; }
+.lvl3 { background: #351f3f; }
+.lvl3 i { color: #e879f9; }
+
+.bidi-runs {
+    font-family: Consolas, monospace;
+    font-size: 11px;
+    color: #7d8aa3;
+}
+
+#bidiDomProbe {
+    font-family: Arial;
+    font-size: 24px;
+    color: #e8edf7;
+    padding: 6px 0;
+    /* Shrink-wrapped and unstyled otherwise: Range rects over this node are
+       compared against shape()'s pen positions, so any padding, letter-spacing
+       or transform here would corrupt the comparison. */
+    display: inline-block;
+}
+
+/* ── Scripts panel ───────────────────────────────────────────────────────── */
+
+#scriptSpecimens {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 10px;
+    margin: 8px 0 4px;
+}
+.specimen {
+    padding: 8px 12px 10px;
+    background: #131924;
+    border: 1px solid #1e2735;
+    border-radius: 5px;
+}
+.spec-head { display: flex; align-items: baseline; gap: 8px; }
+.spec-name {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #8fa0bb;
+}
+.spec-gloss { font-size: 11px; color: #5d6b83; }
+.spec-text {
+    margin-top: 4px;
+    font-family: Arial;
+    font-size: 30px;
+    line-height: 1.5;
+    color: #e8edf7;
+}
+
+/* ── Cluster panel ───────────────────────────────────────────────────────── */
+
+.ctl {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin: 4px 0 8px;
+    color: #7d8aa3;
+    font-size: 12px;
+}
+.ctl select {
+    background: #161d29;
+    color: #cdd6e6;
+    border: 1px solid #2a3446;
+    border-radius: 4px;
+    padding: 3px 6px;
+    font-size: 12px;
+}
+
+canvas#clusterCanvas, canvas#metricsCanvas {
+    display: block;
+    margin: 6px 0 8px;
+    border: 1px solid #1e2735;
+    border-radius: 5px;
+    background: #12151c;
+}
+canvas.hidden { position: absolute; left: -9999px; top: -9999px; }
+
+.cprow { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0 8px; }
+.cp {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 46px;
+    padding: 3px 5px;
+    border-radius: 4px;
+    background: #161d29;
+    border: 1px solid #232c3d;
+}
+.cp b { font-family: Arial; font-size: 18px; color: #e8edf7; font-weight: 400; }
+.cp i {
+    font-style: normal;
+    font-family: Consolas, monospace;
+    font-size: 10px;
+    color: #5d6b83;
+}
+.cp.astral    { border-color: #7c4a12; background: #1e1710; }
+.cp.astral i  { color: #f59e0b; }
+.cp.combining { border-color: #1f4b31; background: #101c17; }
+.cp.combining i { color: #4ade80; }
+.cp.rtlchar   { border-color: #4a2a63; background: #1a1220; }
+.cp.rtlchar i { color: #c084fc; }
+
+/* ── Metrics panel ───────────────────────────────────────────────────────── */
+
+#metricsDomProbe, #metricsWordProbe { margin: 4px 0 6px; }
+/* The word-split probe MUST pin its font. Inheriting the 13px body font hid
+   the bug entirely: at that size the per-word pieces happen to sum to the same
+   1/64px grid value as the whole run, so the defect only appears at larger
+   sizes where the lost kerns exceed the grid. */
+/* Each probe span is inline and shrink-wrapped so its border box width IS the
+   shaped advance width — that equality is exactly what metrics.js asserts. */
+#metricsWordProbe span,
+#metricsDomProbe span {
+    display: inline-block;
+    margin-right: 18px;
+    font-family: Arial;
+    font-size: 28px;
+    color: #e8edf7;
+    /* No padding, no border, no letter-spacing: all of them would add width
+       that measureText() correctly does not know about. */
+    padding: 0;
+    border: 0;
+    letter-spacing: normal;
+    word-spacing: normal;
+}
