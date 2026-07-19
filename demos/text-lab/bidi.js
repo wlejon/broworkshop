@@ -194,16 +194,12 @@ export function permutationCheck(text, base, opts) {
  * "next character" is visually leftward. That sign flip is the whole of
  * bidi caret behaviour and it is directly observable here.
  *
- * KNOWN GAP — see the header of shaped_run.h: `CaretPositions` carries a
- * `secondary` for the two-visual-positions case at a direction boundary, and
- * the comment says it is "always false until bidi reordering lands". Bidi
- * reordering HAS landed (the permutation check above passes) but the secondary
- * is still never filled, and `isLeadingEdge` is hardwired true. The
- * consequence is measurable and this walk exposes it: the trailing edge of the
- * LTR run is UNREACHABLE — no offset in the string returns it — and the two
- * distinct logical offsets at the two ends of the RTL run return the SAME x.
- * The panel and the test both assert the CORRECT behaviour and report the gap
- * rather than asserting the current behaviour.
+ * THE CASE THIS EXISTS FOR — at a direction boundary one logical offset sits
+ * at TWO places on the line: the trailing edge of the run that ends there and
+ * the leading edge of the one that begins. `CaretPositions` carries both, and
+ * the walk records both, because counting only the primary makes a real
+ * cluster edge look unreachable — no offset appears to return it — which is
+ * how a caret ends up unable to reach one end of a reversed run.
  */
 export function caretWalk(text, opts) {
     const o = opts || { family: 'Arial', size: 32 };
@@ -262,7 +258,15 @@ export function caretSummary(text, opts) {
         edges.add(Math.round(c.x * 100));
         edges.add(Math.round((c.x + c.advance) * 100));
     }
-    const reachable = new Set(walk.map((w) => Math.round(w.x * 100)));
+    // Both positions an offset can name. At a direction boundary one logical
+    // offset sits at two places on the line — the trailing edge of the run
+    // that ends there and the leading edge of the one that begins — and only
+    // counting the primary would call the other one unreachable.
+    const reachable = new Set();
+    for (const w of walk) {
+        reachable.add(Math.round(w.x * 100));
+        if (w.secondaryX !== null) reachable.add(Math.round(w.secondaryX * 100));
+    }
     const unreachable = [...edges].filter((e) => !reachable.has(e)).map((e) => e / 100);
 
     return {
@@ -355,10 +359,10 @@ export function overrideReport(text) {
  * per-character Range rect states that directly, and it comes from layout, not
  * from the shaper — so it is genuinely independent evidence of reordering.
  *
- * WHAT IT DELIBERATELY DOES NOT CHECK: a Range spanning the WHOLE RTL run.
- * That path is broken in the engine today (see rangeBugProbe below) and the
- * bug is reported rather than routed around silently — the probe measures it,
- * names it, and the limitation report prints it every run.
+ * WHAT IT DELIBERATELY DOES NOT CHECK: a Range spanning the WHOLE RTL run, or
+ * the run's last logical character. Those are the two cases a pair of caret
+ * positions cannot describe, and they get their own probe (rtlRangeProbe
+ * below) rather than being folded in here where a pass would be ambiguous.
  */
 export function domReorderProbe() {
     const host = document.getElementById('bidiDomProbe');
@@ -429,35 +433,25 @@ export function domReorderProbe() {
 }
 
 /**
- * ENGINE BUG PROBE — Range geometry inside an RTL run.
+ * Range geometry INSIDE an RTL run — the case a caret-difference gets wrong.
  *
- * Root cause, confirmed by walking byteOffsetToX over the same string: the
- * function only ever returns the LEADING edge of the cluster an offset names,
- * never the trailing one, and never a secondary position. For "abc אבג def"
- * at 24px Arial the Hebrew run occupies x 45.36–81.46 and its three letters
- * sit at 67.95 (א), 54.94 (ב), 45.36 (ג) — yet the caret walk produces:
+ * Every rect above came from spans that happen to sit on one direction run.
+ * These two do not, and they are where the obvious implementation fails:
  *
- *     byte  4 → 81.46      byte  6 → 67.95      byte  8 → 54.94
- *     byte 10 → 81.46
+ *   1. A Range over the LAST logical character of the RTL run (utf16 6–7, ג).
+ *      Its box is the run's LEFTMOST one, because the run is reversed — so an
+ *      implementation that only ever resolves an offset to its cluster's
+ *      leading edge reports the union of the two OTHER letters instead.
+ *   2. A Range over the WHOLE RTL run (utf16 4–7). Both endpoints name the
+ *      same visual edge if you ask for leading edges only, so the rect
+ *      collapses to zero width — and a collapsed rect that is not even placed
+ *      at the collapse point loses the last clue that anything happened.
  *
- * so x = 45.36 — the caret position AFTER the whole Hebrew run, which is the
- * left edge of ג — is returned by NO offset at all. It is unreachable.
- *
- * Range.getBoundingClientRect() is built on those caret positions, so it
- * inherits the hole, with two visible symptoms:
- *
- *   1. A Range over the LAST logical character of the RTL run (utf16 6–7, ג)
- *      reports the union of the two OTHER letters instead: 54.94–81.46 rather
- *      than 45.36–54.94.
- *   2. A Range over the WHOLE RTL run (utf16 4–7) has both endpoints resolve
- *      to 81.46, and the resulting zero-width rect is reported as the all-zero
- *      rect {0,0,0,0} rather than a zero-width rect AT 81.46 — so it does not
- *      even locate the collapse.
- *
- * Everything here is measured live, so when byteOffsetToX starts returning
- * trailing edges and secondaries these flip to `false` on the next run.
+ * The fix both cases want is the same one: a range's extent is the sum of the
+ * advances it covers, not the distance between two caret positions. This
+ * checks the engine agrees, against the shaper's own cluster boxes.
  */
-export function rangeBugProbe() {
+export function rtlRangeProbe() {
     const host = document.getElementById('bidiDomProbe');
     if (!host) return null;
     const node = host.firstChild;
@@ -480,23 +474,39 @@ export function rangeBugProbe() {
 
     const gimel = rectFor(6, 7);
     const wholeRtl = rectFor(4, 7);
-    const carets = [4, 5, 6, 7, 8, 9, 10].map((b) => ({
-        byte: b, x: bro.text.byteOffsetToX(MIXED, { family: 'Arial', size }, b).x,
-    }));
-    const reachable = new Set(carets.map((c) => Math.round(c.x * 100)));
+    const carets = [4, 5, 6, 7, 8, 9, 10].map((b) => {
+        const c = bro.text.byteOffsetToX(MIXED, { family: 'Arial', size }, b);
+        return { byte: b, x: c.x, secondaryX: c.secondary ? c.secondary.x : null };
+    });
+    // An offset at a direction boundary names two positions, so both count.
+    const reachable = new Set();
+    for (const c of carets) {
+        reachable.add(Math.round(c.x * 100));
+        if (c.secondaryX !== null) reachable.add(Math.round(c.secondaryX * 100));
+    }
+
+    // The island's own width, as the shaper reports it: the extent from the
+    // leftmost cluster's left edge to the rightmost's right edge.
+    const heb = vis.run.clusters.filter((c) => c.start >= 4 && c.start < 10);
+    const hebLeft = Math.min(...heb.map((c) => c.x));
+    const hebRight = Math.max(...heb.map((c) => c.x + c.advance));
 
     return {
-        // Symptom 1: the last logical RTL character's rect is wrong.
+        // 1. The last logical RTL character sits at the run's LEFT end, and
+        //    its box is that one letter rather than the union of the others.
         gimelExpected: { left: cGimel.x, right: cGimel.x + cGimel.advance },
         gimelActual: { left: gimel.left, right: gimel.right },
-        lastCharRectWrong: Math.abs(gimel.left - cGimel.x) > 0.5,
-        // Symptom 2: a range over the whole RTL run collapses to the zero rect.
+        lastCharRectMatches: Math.abs(gimel.left - cGimel.x) < 0.5 &&
+            Math.abs(gimel.right - (cGimel.x + cGimel.advance)) < 0.5,
+        // 2. A range over the whole RTL run spans the whole run.
         wholeRtlRect: { left: wholeRtl.left, right: wholeRtl.right, width: wholeRtl.width },
-        wholeRunCollapses: wholeRtl.width === 0,
-        wholeRunRectIsOrigin: wholeRtl.raw.left === 0 && wholeRtl.raw.right === 0,
-        // Root cause: the trailing edge of the RTL run is unreachable.
+        wholeRunExpected: { left: hebLeft, right: hebRight },
+        wholeRunMatches: Math.abs(wholeRtl.left - hebLeft) < 0.5 &&
+            Math.abs(wholeRtl.right - hebRight) < 0.5,
+        // Both edges of the run are reachable from some byte offset — the
+        // property the two rects above are built on.
         rtlTrailingEdge: cGimel.x,
-        trailingEdgeUnreachable: !reachable.has(Math.round(cGimel.x * 100)),
+        trailingEdgeReachable: reachable.has(Math.round(cGimel.x * 100)),
         carets,
     };
 }
@@ -640,23 +650,23 @@ export function refreshBidi() {
                 ? 'ok' : 'bad');
     }
 
-    // The Range bug, stated on screen rather than left to the console.
-    const bug = rangeBugProbe();
-    bidiState.rangeBug = bug;
-    const bugHost = document.getElementById('bidiRangeBug');
-    if (bug && bugHost) {
-        const broken = bug.lastCharRectWrong || bug.wholeRunCollapses;
-        bugHost.textContent = broken
-            ? `ENGINE BUG — byteOffsetToX only ever returns a cluster's LEADING edge, so the ` +
-              `trailing edge of the RTL run (x ${n2(bug.rtlTrailingEdge)}) is reachable from no byte ` +
-              `offset at all: ${bug.trailingEdgeUnreachable ? 'confirmed' : 'no longer'}. ` +
-              `Range geometry inherits the hole. A Range over the LAST logical RTL character ` +
-              `should be [${n2(bug.gimelExpected.left)}–${n2(bug.gimelExpected.right)}] but reports ` +
-              `[${n2(bug.gimelActual.left)}–${n2(bug.gimelActual.right)}]. A Range over the WHOLE RTL run ` +
-              `collapses to width ${n2(bug.wholeRtlRect.width)}` +
-              (bug.wholeRunRectIsOrigin ? ' and is reported at the origin {0,0} rather than at the collapse point' : '') +
-              `. Caret x for bytes 4–10: ${bug.carets.map((c) => `${c.byte}:${n2(c.x)}`).join(' ')}.`
-            : 'Resolved — Range geometry inside the RTL run now matches the shaper.';
-        bugHost.className = 'result ' + (broken ? 'bad' : 'ok');
+    // The two cases a caret-difference gets wrong, stated on screen.
+    const rr = rtlRangeProbe();
+    bidiState.rtlRange = rr;
+    const rrHost = document.getElementById('bidiRtlRange');
+    if (rr && rrHost) {
+        const ok = rr.lastCharRectMatches && rr.wholeRunMatches && rr.trailingEdgeReachable;
+        rrHost.textContent =
+            `The LAST logical Hebrew letter ג is drawn at the run's LEFT end: Range reports ` +
+            `[${n2(rr.gimelActual.left)}–${n2(rr.gimelActual.right)}], the shaper's cluster box is ` +
+            `[${n2(rr.gimelExpected.left)}–${n2(rr.gimelExpected.right)}] — ` +
+            `${rr.lastCharRectMatches ? 'identical' : 'MISMATCH'}. ` +
+            `A Range over the WHOLE RTL run spans [${n2(rr.wholeRtlRect.left)}–${n2(rr.wholeRtlRect.right)}] ` +
+            `against the run's own [${n2(rr.wholeRunExpected.left)}–${n2(rr.wholeRunExpected.right)}]: ` +
+            `${rr.wholeRunMatches ? 'identical' : 'MISMATCH — the collapse this case is famous for'}. ` +
+            `The run's left edge x ${n2(rr.rtlTrailingEdge)} is reachable from a byte offset: ` +
+            `${rr.trailingEdgeReachable ? 'yes' : 'NO — no offset resolves to it'}. ` +
+            `Caret x for bytes 4–10: ${rr.carets.map((c) => `${c.byte}:${n2(c.x)}`).join(' ')}.`;
+        rrHost.className = 'result ' + (ok ? 'ok' : 'bad');
     }
 }

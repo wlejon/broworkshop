@@ -25,9 +25,10 @@
 //   - Astral text is asserted as "one cluster, one caret stop, and stepping
 //     never lands between the surrogates".
 //
-// Where the engine falls short, the assertion states the CORRECT behaviour and
-// the shortfall is reported at the bottom rather than the bar being lowered.
-// Anything deliberately not asserted is called out inline with the reason.
+// Assertions state the CORRECT behaviour, never the current one, so the bar is
+// never quietly lowered to whatever the engine happens to do. APIs the text
+// surface does not expose at all are printed at the bottom rather than
+// asserted. Anything deliberately not asserted is called out inline with why.
 
 import {
     // shaping
@@ -38,7 +39,7 @@ import {
     // bidi
     bidiState, analyze, reorderFor, visualOrderOf, permutationCheck,
     caretWalk, caretSummary, hitTestRoundTrip, overrideReport, domReorderProbe,
-    rangeBugProbe, MIXED, MIXED_RTL_FIRST, ARABIC_NUMBERS,
+    rtlRangeProbe, MIXED, MIXED_RTL_FIRST, ARABIC_NUMBERS,
     // scripts
     scriptState, coverageOf, joiningReport, lamAlefReport, devanagariReport,
     thaiReport, normalizationReport, SCRIPT_SAMPLES,
@@ -438,33 +439,36 @@ console.log('  ✓ HarfBuzz shaping — ligatures, kerning, spacing, cache');
         d.hebClusterStarts + ']');
 }
 
-// ── Range geometry inside an RTL run — an engine bug, measured not asserted ─
+// ── Range geometry inside an RTL run ────────────────────────────────────────
 //
-// The probe below is NOT asserted to be broken: asserting a bug is still
-// present makes fixing bro break this test, which is backwards. It is measured
-// so the limitation report at the bottom carries live numbers, and so this
-// block turns into a green assertion the day byteOffsetToX learns to return
-// trailing edges. What IS asserted here is the invariant that must hold either
-// way — that the engine's answer is self-consistent with its OWN caret walk,
-// so the failure is localised to one function rather than smeared.
+// The two cases that separate "a range's extent is the sum of the advances it
+// covers" from "a range's extent is the distance between two caret positions".
+// Both implementations agree on left-to-right text; only these disagree.
 {
-    const b = rangeBugProbe();
-    assert(b, 'the Range-geometry probe ran');
-    // Root cause: byteOffsetToX only returns leading edges, so one real caret
-    // position in the run has no offset that names it. Stated as a measurement.
+    const b = rtlRangeProbe();
+    assert(b, 'the RTL Range-geometry probe ran');
+    // Every cluster edge is nameable by some byte offset — the property the
+    // two rects below are built on. A trailing edge that no offset returns is
+    // a hole the geometry silently inherits.
     const s = caretSummary(MIXED);
-    assert(s.unreachable.length === 0 || b.trailingEdgeUnreachable,
-        'if any cluster edge is unreachable, it is the RTL run\'s trailing edge — the ' +
-        'probe and the caret walk agree on which position is missing, so the defect is ' +
-        'localised to byteOffsetToX rather than being two independent bugs. unreachable: [' +
-        s.unreachable.map((x) => x.toFixed(2)) + ']');
-    // Whatever Range reports, it must at least be consistent with the caret
-    // positions the engine itself hands out — a rect built from two carets.
-    const caretXs = b.carets.map((c) => Math.round(c.x * 100));
-    assert(b.wholeRunCollapses === (caretXs[0] === caretXs[caretXs.length - 1]),
-        'the whole-run Range collapses exactly when its two endpoint carets share an x — ' +
-        'Range is faithfully reporting what byteOffsetToX told it, which is where the fix ' +
-        'belongs. carets 4–10: [' + b.carets.map((c) => c.x.toFixed(2)) + ']');
+    assert(s.unreachable.length === 0,
+        'every cluster edge in "' + MIXED + '" is reachable from some byte offset. ' +
+        'unreachable: [' + s.unreachable.map((x) => x.toFixed(2)) + ']');
+    assert(b.trailingEdgeReachable,
+        'including the RTL run\'s left edge x=' + b.rtlTrailingEdge.toFixed(2) +
+        ', carets 4–10: [' + b.carets.map((c) => c.x.toFixed(2)) + ']');
+    // The last LOGICAL character of the run is its leftmost box, not the union
+    // of the letters that precede it.
+    assert(b.lastCharRectMatches,
+        'a Range over the last logical Hebrew letter is that letter\'s box: expected [' +
+        b.gimelExpected.left.toFixed(2) + '–' + b.gimelExpected.right.toFixed(2) +
+        '], got [' + b.gimelActual.left.toFixed(2) + '–' + b.gimelActual.right.toFixed(2) + ']');
+    // A range over the whole run spans the whole run rather than collapsing.
+    assert(b.wholeRunMatches,
+        'a Range over the whole RTL run spans it: expected [' +
+        b.wholeRunExpected.left.toFixed(2) + '–' + b.wholeRunExpected.right.toFixed(2) +
+        '], got [' + b.wholeRtlRect.left.toFixed(2) + '–' + b.wholeRtlRect.right.toFixed(2) +
+        '] (width ' + b.wholeRtlRect.width.toFixed(2) + ')');
 }
 
 console.log('  ✓ Bidi — levels, rule L2, shaper cross-check, layout cross-check');
@@ -915,34 +919,34 @@ console.log('  ✓ Cluster map, astral text, caret stepping');
         'every probe in this block is a single word — see the word-split probe below');
 }
 
-// ── Layout measures multi-word text per word — an engine bug, with mechanism ─
+// ── Multi-word text is measured with its kerning intact ────────────────────
 //
-// Same policy as the RTL Range bug: the defect is measured, its MECHANISM is
-// proven, and it is reported rather than asserted-as-present. What is asserted
-// is the decomposition — that layout's number is exactly the sum of
-// independently-shaped words plus space advances — because that is what turns
-// "these two numbers differ" into an actionable bug report naming the cause.
+// Line breaking splits text at word boundaries, so the widths it produces have
+// to carry their neighbours' context. Asserted against the whole string shaped
+// once, with the isolated-word sum named explicitly as the wrong answer — the
+// two only differ by the kerns that straddle a space, which is exactly the
+// quantity a per-word implementation drops.
 {
     const rows = wordSplitProbe();
     assert(rows && rows.length === 2, 'the two multi-word probes were measured');
     for (const w of rows) {
-        if (w.matchesWholeShaped) continue;   // resolved — nothing to explain
-        assert(w.matchesPieceSum,
-            `"${w.text}" (${w.size}px ${w.family}): layout reported ${w.domWidth.toFixed(4)}px, which is ` +
-            `EXACTLY Σ word widths + ${w.words - 1}×space = ${w.pieceSum.toFixed(4)}px. That decomposition ` +
-            'is the mechanism: each word was shaped in isolation, so every kern pair ' +
-            `straddling a space was lost (${w.lostKerning.toFixed(4)}px here). Shaping the whole ` +
-            `string at once gives ${w.wholeShaped.toFixed(4)}px, which is the correct answer`);
+        assert(w.matchesWholeShaped,
+            `"${w.text}" (${w.size}px ${w.family}): layout reported ${w.domWidth.toFixed(4)}px and ` +
+            `shaping the whole string at once gives ${w.wholeShaped.toFixed(4)}px (Δ${w.delta.toFixed(4)})`);
+        // The control that gives the assertion its teeth: the isolated-word sum
+        // is a DIFFERENT number, so passing above is not vacuous.
         assert(w.lostKerning > 0,
-            `and the loss is positive — dropping kerns can only make text WIDER, which is ` +
-            'how this shows up in the wild as a line that overflows its measured box');
+            `and shaping each word alone would have given ${w.pieceSum.toFixed(4)}px instead — ` +
+            `${w.lostKerning.toFixed(4)}px wider, since dropping kerns can only widen text. ` +
+            'That is the line that would have overflowed the box measured for it');
+        assert(!w.matchesPieceSum,
+            `so layout's number is NOT the per-word sum ${w.pieceSum.toFixed(4)}px`);
     }
-    // The single-word control: with no space to split at, the two agree exactly.
-    // This is what proves the cause is the SPLIT and not a general disagreement.
+    // With no space to split at, layout and canvas agree exactly — so the
+    // spaced cases above are testing the split, not two divergent text paths.
     const control = domAgreementReport().find((d) => d.text === 'AVWaToLT');
     assert(control && control.agrees,
-        'the same characters with the spaces removed agree exactly between layout and ' +
-        'canvas — so the disagreement is caused by the word split, not by two text paths');
+        'the same characters with the spaces removed agree exactly between layout and canvas');
 }
 
 console.log('  ✓ TextMetrics — complete surface, mutual consistency, DOM agreement');
@@ -1000,15 +1004,16 @@ console.log('  ✓ TextMetrics — complete surface, mutual consistency, DOM agr
 console.log('  ✓ App drivers, idempotence, resize stability');
 
 // =============================================================================
-// FINDINGS — engine limitations this run actually observed
+// SURFACE GAPS — what the text APIs do not expose
 // =============================================================================
 //
-// Printed, not asserted. Asserting that a limitation is STILL PRESENT would
-// make fixing bro break this test, which is exactly backwards. Each entry is
-// computed live, so a fix flips it to "resolved" on the next run.
+// Absent APIs rather than wrong answers: everything this test measures has to
+// agree with the shaper or with canvas, and does. Printed, not asserted — each
+// entry is computed live, so an entry that gains an API flips to "resolved" on
+// the next run instead of silently going stale.
 
 console.log('');
-console.log('  engine limitations observed by this run:');
+console.log('  text surface gaps observed by this run:');
 for (const lim of knownLimitations()) {
     console.log(`    [${lim.stillPresent ? 'PRESENT ' : 'resolved'}] ${lim.id}`);
     console.log(`        ${lim.what}`);

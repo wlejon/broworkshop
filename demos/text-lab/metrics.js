@@ -366,26 +366,25 @@ export function domAgreementReport() {
 }
 
 /**
- * ENGINE BUG PROBE — layout measures multi-word text WORD BY WORD.
+ * Kerning does not stop at a space — so layout must not either.
  *
- * The single-word probes above agree with canvas exactly. Add a space and they
- * stop agreeing, and the decomposition says why: layout's width for a
- * multi-word string is exactly
+ * The single-word probes above agree with canvas exactly. A space is the case
+ * that separates two implementations that both look right on one word: line
+ * breaking has to split text at word boundaries, and the tempting way to
+ * measure the result is
  *
  *     Σ width(word_i)  +  (n−1) × width(" ")
  *
- * i.e. each word is shaped on its own and the pieces are added. Every kern
- * pair that straddles a space is therefore lost. For "A V" in 28px Arial that
- * is 1.54px on three characters; for "AV Wa To LT" it is 0.51px.
+ * which shapes every word in isolation and loses every kern pair that
+ * straddles a space. For "A V" in 28px Arial that is 1.54px on three
+ * characters; for "AV Wa To LT" it is 0.51px — enough for text to overflow a
+ * box measured for it. It is the same "prefix measurement is wrong by
+ * construction" failure `shaped_run.h` warns about, one layer up at word
+ * granularity instead of character granularity.
  *
- * This is the same failure `shaped_run.h` warns about in its header — "prefix
- * measurement is wrong by construction" — reappearing one layer up, at word
- * granularity instead of character granularity. Splitting at word boundaries
- * is presumably for line breaking, but the pieces must be measured with their
- * neighbours' context (or the whole run measured once and only BROKEN at word
- * boundaries) rather than shaped in isolation.
- *
- * Everything is computed live, so this turns green by itself when fixed.
+ * So this checks layout's width against the WHOLE string shaped once, and
+ * reports the isolated-word sum alongside it — naming the number layout must
+ * not be, not just the one it must be.
  */
 export function wordSplitProbe() {
     const host = document.getElementById('metricsWordProbe');
@@ -616,15 +615,13 @@ export function refreshMetrics(text, font) {
     metricsState.wordSplit = words;
     if (words && wordHost) {
         const broken = words.filter((w) => !w.matchesWholeShaped);
-        wordHost.textContent = broken.length === 0
-            ? 'Resolved — layout now shapes multi-word text as one run.'
-            : 'ENGINE BUG — ' + broken.map((w) =>
-                `"${w.text}" (${w.size}px ${w.family}): layout says ${n2(w.domWidth)}px, shaping the ` +
-                `whole string says ${n2(w.wholeShaped)}px (Δ${n2(w.delta)}). Layout's number is ` +
-                `exactly Σ word widths + ${w.words - 1}×space = ${n2(w.pieceSum)}px ` +
-                `(${w.matchesPieceSum ? 'confirmed' : 'does not match — different cause'}), so each word ` +
-                `was shaped in isolation and ${n2(w.lostKerning)}px of cross-space kerning was lost`
-              ).join(' · ');
+        wordHost.textContent = words.map((w) =>
+            `"${w.text}" (${w.size}px ${w.family}): layout ${n2(w.domWidth)}px vs the whole string ` +
+            `shaped once ${n2(w.wholeShaped)}px — ${w.matchesWholeShaped ? 'identical' : `MISMATCH (Δ${n2(w.delta)})`}. ` +
+            `Shaping each word alone would give ${n2(w.pieceSum)}px instead, ` +
+            `losing ${n2(w.lostKerning)}px of kerning across the ${w.words - 1} space(s)` +
+            (w.matchesPieceSum ? ' — which is exactly what layout reports' : '')
+          ).join(' · ');
         wordHost.className = 'result ' + (broken.length === 0 ? 'ok' : 'bad');
     }
 }

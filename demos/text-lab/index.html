@@ -125,14 +125,14 @@
         <div id="bidiDomProbe">abc אבג def</div>
         <div id="bidiDomResult" class="result"></div>
 
-        <h3>Range geometry inside an RTL run — a bug this lab found</h3>
+        <h3>Range geometry inside an RTL run</h3>
         <p class="note">
-            Measured live every run, so it turns green by itself when the engine is
-            fixed. This lab does not route around it: the cross-check above uses the
-            per-character rects that <i>are</i> correct and states plainly which case is
-            not.
+            The cases a pair of caret positions cannot describe: the run's <i>last</i>
+            logical character, whose box is the run's leftmost, and a Range over the
+            whole run, whose endpoints name the same visual edge. Both are checked
+            against the shaper's own cluster boxes.
         </p>
-        <div id="bidiRangeBug" class="result"></div>
+        <div id="bidiRtlRange" class="result"></div>
     </section>
 
     <!-- ── 3. Complex scripts ─────────────────────────────────────────── -->
@@ -270,13 +270,13 @@
         </div>
         <div id="metricsDom" class="result"></div>
 
-        <h3>Multi-word strings — a second bug this lab found</h3>
+        <h3>Multi-word strings — kerning does not stop at a space</h3>
         <p class="note">
-            Layout measures a text node <b>word by word</b> and adds the pieces, so every
-            kern pair that straddles a space is lost. That is the same "prefix measurement
-            is wrong by construction" failure <code>shaped_run.h</code> warns about,
-            reappearing one layer up at word granularity. Measured live, with the
-            decomposition that proves the mechanism rather than just the delta.
+            Line breaking splits text at word boundaries, so the widths must still carry
+            their neighbours' context: measuring each word alone drops every kern pair
+            that straddles a space. Layout's width is checked against the whole string
+            shaped once, with the isolated-word sum shown alongside — the number it must
+            <i>not</i> be.
         </p>
         <div id="metricsWordProbe"><span>AV Wa To LT</span><span>A V</span></div>
         <div id="metricsWords" class="result"></div>

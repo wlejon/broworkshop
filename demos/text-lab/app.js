@@ -61,7 +61,7 @@ import {
     initBidi, refreshBidi, bidiState,
     analyze, reorderFor, visualOrderOf, permutationCheck,
     caretWalk, caretSummary, hitTestRoundTrip, overrideReport, domReorderProbe,
-    rangeBugProbe,
+    rtlRangeProbe,
     MIXED, MIXED_RTL_FIRST, ARABIC_NUMBERS, SAMPLES as BIDI_SAMPLES,
 } from '/app/bidi.js';
 
@@ -176,7 +176,9 @@ export function panelVerdicts() {
             b.overrides.ltrAllZero && b.overrides.rtlAllOne &&
             b.dom !== null && b.dom.wholeMatchesShaped && b.dom.latin1Matches &&
             b.dom.latin2Matches && b.dom.alefRightOfBet && b.dom.alefMatches &&
-            b.dom.betMatches && b.dom.hebrewReversed,
+            b.dom.betMatches && b.dom.hebrewReversed &&
+            b.rtlRange !== null && b.rtlRange.lastCharRectMatches &&
+            b.rtlRange.wholeRunMatches && b.rtlRange.trailingEdgeReachable,
         scripts:
             sc.ligature.oneGlyph && sc.ligature.narrower &&
             sc.joining.initialDiffers && sc.joining.joinedNarrower &&
@@ -196,69 +198,22 @@ export function panelVerdicts() {
             m.align.widthStable && m.align.centerShift &&
             m.baseline.rigid && m.baseline.alphaIsZero &&
             m.scaling.allScale &&
-            m.domAgreement.every((d) => d.agrees),
+            m.domAgreement.every((d) => d.agrees) &&
+            m.wordSplit !== null && m.wordSplit.every((w) => w.matchesWholeShaped),
     };
 }
 
 /**
- * The limitations this lab FOUND, as data rather than as prose.
+ * What the text surface does NOT expose, as data rather than as prose.
  *
- * Every entry is computed live from the engine's actual behaviour, not
- * hardcoded — so when one of these is fixed in bro, the corresponding entry
- * flips to `false` on the next run rather than silently going stale. The
- * smoke test prints this list; it does not assert the limitations are still
- * present, because the correct future is that they are not.
+ * These are absent APIs rather than wrong answers — every behaviour this lab
+ * measures is checked against the shaper or against canvas and has to agree.
+ * Each entry is still computed live, so an entry that gains an API flips to
+ * `false` on the next run rather than silently going stale.
  */
 export function knownLimitations() {
-    const cs = bidiState.caretSummary;
     const astral = clusterState.astral;
     return [
-        {
-            id: 'no-secondary-caret',
-            what: 'ShapedRun::CaretPositions.secondary is never filled, even at a ' +
-                  'bidi direction boundary, and isLeadingEdge is hardwired true.',
-            stillPresent: !cs.anySecondary || cs.unreachable.length > 0,
-            evidence: `byteOffsetToX over "${MIXED}" returned a secondary at ` +
-                      `${cs.walk.filter((w) => w.hasSecondary).length} of ${cs.walk.length} offsets; ` +
-                      `${cs.duplicates.length} boundary/boundaries have two logical offsets ` +
-                      `sharing one x; ${cs.unreachable.length} cluster edge(s) unreachable.`,
-        },
-        {
-            id: 'rtl-range-geometry',
-            what: 'Range.getBoundingClientRect() is wrong inside an RTL run, because it ' +
-                  'is built on byteOffsetToX and inherits the leading-edge-only hole ' +
-                  'above. A Range over the LAST logical character of the run reports the ' +
-                  'union of the other characters instead; a Range over the WHOLE run ' +
-                  'collapses to zero width AND is reported at the origin {0,0} rather ' +
-                  'than at the point of collapse.',
-            stillPresent: bidiState.rangeBug !== null &&
-                (bidiState.rangeBug.lastCharRectWrong || bidiState.rangeBug.wholeRunCollapses),
-            evidence: bidiState.rangeBug
-                ? `"${MIXED}" at 24px Arial: the last Hebrew letter's box should be ` +
-                  `[${bidiState.rangeBug.gimelExpected.left.toFixed(2)}–${bidiState.rangeBug.gimelExpected.right.toFixed(2)}] ` +
-                  `but Range reports [${bidiState.rangeBug.gimelActual.left.toFixed(2)}–${bidiState.rangeBug.gimelActual.right.toFixed(2)}]; ` +
-                  `a Range over utf16 4–7 (the whole run) has width ${bidiState.rangeBug.wholeRtlRect.width} ` +
-                  `at raw origin ${bidiState.rangeBug.wholeRunRectIsOrigin ? '{0,0}' : 'the collapse point'}; ` +
-                  `the run's trailing edge x=${bidiState.rangeBug.rtlTrailingEdge.toFixed(2)} is ` +
-                  `${bidiState.rangeBug.trailingEdgeUnreachable ? 'unreachable from any byte offset' : 'reachable'}.`
-                : 'probe unavailable',
-        },
-        {
-            id: 'layout-measures-per-word',
-            what: 'Layout measures a multi-word text node WORD BY WORD and adds the ' +
-                  'pieces, so every kern pair straddling a space is lost. Layout and ' +
-                  'canvas measureText therefore disagree on any string containing a ' +
-                  'space, despite sharing one TextShapingEngine. Same failure ' +
-                  'shaped_run.h warns about, one layer up at word granularity.',
-            stillPresent: metricsState.wordSplit !== null &&
-                metricsState.wordSplit.some((w) => !w.matchesWholeShaped),
-            evidence: metricsState.wordSplit
-                ? metricsState.wordSplit.map((w) =>
-                    `"${w.text}" @${w.size}px ${w.family}: layout ${w.domWidth.toFixed(4)} vs ` +
-                    `whole-run shaping ${w.wholeShaped.toFixed(4)} (Δ${w.delta.toFixed(4)}); ` +
-                    `layout === Σpieces ${w.pieceSum.toFixed(4)}: ${w.matchesPieceSum}`).join(' | ')
-                : 'probe unavailable',
-        },
         {
             id: 'no-glyph-ids',
             what: 'bro.text.shape() reports a glyph COUNT but no glyph ids, so ' +
@@ -314,7 +269,7 @@ export {
     bidiState, refreshBidi,
     analyze, reorderFor, visualOrderOf, permutationCheck,
     caretWalk, caretSummary, hitTestRoundTrip, overrideReport, domReorderProbe,
-    rangeBugProbe,
+    rtlRangeProbe,
     MIXED, MIXED_RTL_FIRST, ARABIC_NUMBERS, BIDI_SAMPLES,
     // scripts
     scriptState, refreshScripts,
