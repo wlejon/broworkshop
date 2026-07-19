@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Platform Lab</title>
+    <link rel="stylesheet" href="/app/style.css">
+</head>
+<body>
+    <header id="topbar">
+        <h1>Platform Lab</h1>
+        <div class="sub">
+            Web Animations · matchMedia &amp; @media · CSS border-image · Compression Streams
+            <span id="mqViewport" class="tag">—</span>
+            <span id="mqDark" class="tag">light</span>
+        </div>
+    </header>
+
+    <!-- ── border-image pixel probe ────────────────────────────────────────
+         A fixed-position, fixed-size nine-slice box whose only job is to make
+         the painter's output ADDRESSABLE. Its viewport coordinates are stable
+         (position:fixed, px units, box-sizing:border-box, z-index above
+         everything), so the smoke test can call getPixel() at nine known points
+         — one per slice region — and assert which slice of the fixture landed
+         there. Every region of assets/nine.png is a distinct flat colour
+         precisely so that read is unambiguous.
+
+         This is the only element in the app whose position is load-bearing.
+         Do not move it without updating tests/test_smoke.js. -->
+    <div id="biProbe" title="border-image pixel probe (fixed coords for the smoke test)"></div>
+
+    <div id="grid">
+
+    <!-- ── Web Animations ─────────────────────────────────────────────── -->
+    <section class="panel wide" id="panelAnim">
+        <h2>Web Animations <span class="hint">element.animate() — same interpolator as CSS transitions, same bro.time clock</span></h2>
+
+        <p class="lede">
+            A script animation in bro is not a separate clock: it rides the engine's
+            scaled <code>bro.time</code> clock, composites like a CSS animation, and is
+            driven deterministically by <code>advanceTime(ms)</code> in headless. The two
+            columns below are the point — the <b>stated</b> time on the left comes from
+            the <code>Animation</code> object, the <b>measured</b> style on the right comes
+            from <code>getComputedStyle()</code>. Nothing in the app computes either one.
+        </p>
+
+        <div class="anim-stage">
+            <div id="animRunner"></div>
+        </div>
+
+        <div class="controls">
+            <button id="animPlay">play()</button>
+            <button id="animPause">pause()</button>
+            <button id="animReverse">reverse()</button>
+            <button id="animFinish">finish()</button>
+            <button id="animCancel">cancel()</button>
+            <label class="ctl">playbackRate
+                <select id="animRateSelect">
+                    <option value="-2">-2</option>
+                    <option value="-1">-1</option>
+                    <option value="0">0 (frozen)</option>
+                    <option value="0.25">0.25</option>
+                    <option value="0.5">0.5</option>
+                    <option value="1" selected>1</option>
+                    <option value="2">2</option>
+                    <option value="4">4</option>
+                </select>
+            </label>
+        </div>
+
+        <label class="ctl wide-ctl">currentTime
+            <input type="range" id="animScrub" min="0" max="4000" value="0" step="10">
+        </label>
+
+        <div class="cols">
+            <div class="col">
+                <h3>Animation object <span class="hint">stated</span></h3>
+                <dl class="ro">
+                    <dt>playState</dt><dd id="animPlayState" class="mono">idle</dd>
+                    <dt>currentTime</dt><dd id="animTime" class="mono">0</dd>
+                    <dt>playbackRate</dt><dd id="animRate" class="mono">1</dd>
+                    <dt>onfinish fired</dt><dd id="animFinishCount" class="mono">0</dd>
+                    <dt>oncancel fired</dt><dd id="animCancelCount" class="mono">0</dd>
+                    <dt>finished promise</dt><dd id="animPromise" class="mono">—</dd>
+                    <dt>last event</dt><dd id="animLastEvent" class="mono">—</dd>
+                </dl>
+            </div>
+            <div class="col">
+                <h3>getComputedStyle <span class="hint">measured</span></h3>
+                <dl class="ro">
+                    <dt>left</dt><dd id="animComputedLeft" class="mono">—</dd>
+                    <dt>background-color</dt><dd id="animComputedColor" class="mono">—</dd>
+                    <dt>transform</dt><dd id="animComputedTransform" class="mono">—</dd>
+                </dl>
+                <p class="note">
+                    The keyframes mix a <b>length</b>, a <b>colour</b> and a
+                    <b>transform function list</b> on purpose: those are three separate
+                    interpolators behind one animation, so a regression in any of them
+                    shows up here rather than needing three demos.
+                </p>
+            </div>
+        </div>
+
+        <h3>playbackRate ladder <span class="hint">five identical animations, five rates, one start frame</span></h3>
+        <p class="note">
+            Same keyframes, same duration, differing only in <code>playbackRate</code>.
+            Because they started together their <code>currentTime</code>s stay in exact
+            ratio forever — which is a far stronger statement than “the fast one looks
+            faster”, and it is what the smoke test asserts numerically.
+        </p>
+        <div id="animLadder" class="ladder"></div>
+        <div class="controls"><button id="animLadderRestart">restart ladder</button></div>
+
+        <h3>document.getAnimations() <span class="hint">live registry — <span id="animRegCount">0</span> entries</span></h3>
+        <p class="note">
+            The engine's own idea of what is running. Entries are
+            <b>identity-preserving</b> — the objects here are the objects
+            <code>animate()</code> returned, which is why the transport row can be found
+            by <code>===</code> rather than by id. A finished animation stays listed only
+            while it is still holding a <code>fill: forwards</code> value; cancel it and
+            it leaves immediately.
+        </p>
+        <div id="animRegistry" class="registry"></div>
+
+        <h3>Event log</h3>
+        <pre id="animLog" class="log mono"></pre>
+    </section>
+
+    <!-- ── matchMedia ─────────────────────────────────────────────────── -->
+    <section class="panel wide" id="panelMedia">
+        <h2>matchMedia &amp; @media <span class="hint">one evaluator, two front ends — they cannot disagree</span></h2>
+
+        <p class="lede">
+            <code>matchMedia()</code> and the cascade's <code>@media</code> blocks run the
+            <b>same</b> evaluator against the <b>same</b> MediaContext. That is a claim,
+            so this table checks it: every query is evaluated once through the JS binding
+            and once through a hidden probe element that <code>style.css</code> styles
+            from an identical <code>@media</code> rule. Agreements
+            <b id="mqAgree">0</b> · disagreements <b id="mqDisagree" class="bad">0</b>.
+        </p>
+
+        <div class="controls">
+            <button id="mqNarrow">resize 700 × 900</button>
+            <button id="mqWide">resize 1600 × 1000</button>
+            <span class="sep"></span>
+            <button id="mqSchemeLight">colorScheme: light</button>
+            <button id="mqSchemeDark">colorScheme: dark</button>
+            <button id="mqSchemeSystem">colorScheme: system</button>
+            <span class="tag">setting: <b id="mqScheme">system</b></span>
+        </div>
+
+        <div class="mq-head mono">
+            <span>query</span><span>matchMedia</span><span>@media</span><span></span>
+        </div>
+        <div id="mqTable" class="mq-table"></div>
+
+        <!-- The probes. Each is styled by an @media rule in style.css that
+             matches the JS query on the same row of QUERIES in mediaquery.js.
+             They report through `order`, which is an integer nothing else in the
+             app touches — reading a colour back would work but invites format
+             and rounding arguments about what "the same" means. -->
+        <div id="mqProbes" aria-hidden="true">
+            <i id="mqProbeWide"></i><i id="mqProbeNarrow"></i>
+            <i id="mqProbeLandscape"></i><i id="mqProbePortrait"></i>
+            <i id="mqProbeRange"></i><i id="mqProbeGt"></i>
+            <i id="mqProbeScreen"></i><i id="mqProbePrint"></i>
+            <i id="mqProbeDark"></i>
+        </div>
+
+        <h3>Listener surface <span class="hint">six registrations, one query, independent counts</span></h3>
+        <p class="note">
+            All six watch <code>(min-width: 900px)</code>. After <i>k</i> flips the
+            expected counts are plain&nbsp;=&nbsp;<i>k</i>, once&nbsp;=&nbsp;1,
+            capture&nbsp;=&nbsp;<i>k</i>, legacy&nbsp;=&nbsp;<i>k</i>,
+            onchange&nbsp;=&nbsp;<i>k</i>, and signal&nbsp;=&nbsp;flips&nbsp;before&nbsp;abort.
+            <code>plain</code> is registered <b>twice</b> with the same function — per
+            spec that must count as one, so if it ever ran at double the capture rate the
+            de-duplication is broken.
+        </p>
+        <div class="counters">
+            <div class="counter"><b id="mqPlainCount">0</b><span>plain</span></div>
+            <div class="counter"><b id="mqOnceCount">0</b><span>{once:true}</span></div>
+            <div class="counter"><b id="mqCaptureCount">0</b><span>{capture:true}</span></div>
+            <div class="counter"><b id="mqSignalCount">0</b><span>{signal}</span></div>
+            <div class="counter"><b id="mqLegacyCount">0</b><span>addListener</span></div>
+            <div class="counter"><b id="mqOnChangeCount">0</b><span>onchange</span></div>
+        </div>
+        <div class="controls">
+            <button id="mqAbort">controller.abort()</button>
+            <button id="mqRemovePlain">removeEventListener(plain)</button>
+        </div>
+        <div class="ro-line">last event <span id="mqLastEvent" class="mono">—</span></div>
+        <p class="note">
+            The change event is a MediaQueryListEvent-<b>shaped plain object</b>, not a
+            real <code>Event</code>: <code>{type, matches, media, target, currentTarget}</code>
+            and nothing else — no <code>preventDefault</code>, no bubbling. A
+            MediaQueryList is not a node, so there is no propagation path for it to have.
+        </p>
+
+        <h3>Event log</h3>
+        <pre id="mqLog" class="log mono"></pre>
+    </section>
+
+    <!-- ── border-image ───────────────────────────────────────────────── -->
+    <section class="panel wide" id="panelBorder">
+        <h2>CSS border-image <span class="hint">Backgrounds-3 §6 nine-slice</span></h2>
+
+        <p class="lede">
+            Nine-slice borders have no JS API, so “it looks right” is the only thing a
+            screenshot can tell you. Two seams make it actually verifiable. First, every
+            sample below is declared with the <b>shorthand</b> —
+            <code>source || slice [/ width]? [/ outset]? || repeat</code>, a grammar
+            where token class rather than position decides meaning — and the five
+            expanded longhands are read straight back out of
+            <code>getComputedStyle()</code> underneath it. Second, the fixture
+            (<code>assets/nine.png</code>, generated by <code>tools/make_frames.js</code>)
+            is nine flat 16×16 blocks in nine distinct colours, so the fixed probe box in
+            the corner of the window can be sampled with <code>getPixel()</code> to
+            confirm <i>which</i> slice the painter put <i>where</i>.
+            Shorthands expanded: <b id="biExpansions">0</b>.
+        </p>
+
+        <div class="controls live-ctl">
+            <label class="ctl">source
+                <select id="biLiveSource">
+                    <option value="nine.png">nine.png</option>
+                    <option value="nine-striped.png">nine-striped.png</option>
+                </select>
+            </label>
+            <label class="ctl">slice <input type="range" id="biLiveSlice" min="1" max="24" value="16"></label>
+            <label class="ctl">width <input type="range" id="biLiveWidth" min="4" max="48" value="24"></label>
+            <label class="ctl">outset <input type="range" id="biLiveOutset" min="0" max="20" value="0"></label>
+            <label class="ctl">repeat
+                <select id="biLiveRepeat">
+                    <option>stretch</option><option>repeat</option>
+                    <option>round</option><option>space</option>
+                </select>
+            </label>
+        </div>
+        <div class="bi-live">
+            <div id="biLiveBox"></div>
+            <code id="biLiveCss" class="bi-code"></code>
+        </div>
+
+        <div id="biGrid" class="bi-grid"></div>
+
+        <pre id="biLog" class="log mono"></pre>
+    </section>
+
+    <!-- ── Compression Streams ────────────────────────────────────────── -->
+    <section class="panel wide" id="panelCompress">
+        <h2>Compression Streams <span class="hint">brokit, miniz-backed — <span id="cmpAvailable">?</span></span></h2>
+
+        <p class="lede">
+            <code>CompressionStream</code> and <code>DecompressionStream</code> are
+            transform streams, not functions, and demonstrating them as one-shot calls
+            would hide everything that makes them streams. So the bench pipes data
+            through with <code>pipeThrough</code>, counts chunks in <b>both</b>
+            directions, and includes a 256 KB incompressible payload written in 4 KB
+            pieces — a codec that buffered everything would emit one chunk and still
+            pass a naive round-trip test.
+        </p>
+
+        <div class="controls">
+            <button id="cmpRun">run bench</button>
+            <button id="cmpErrorsRun">probe error surface</button>
+            <button id="cmpStorageRun">compressed localStorage</button>
+        </div>
+
+        <div id="cmpTable" class="cmp-table">
+            <div class="cmp-row cmp-head mono">
+                <span>payload</span><span>format</span><span>in</span><span>out</span>
+                <span>ratio</span><span>chunks</span><span>round-trip</span>
+            </div>
+        </div>
+
+        <h3>Container bytes <span class="hint">the only thing distinguishing the three formats on the wire</span></h3>
+        <p class="note">
+            All three formats round-trip against themselves even if they were secretly
+            the same codec — so the bench also checks the wire format:
+            <code>gzip</code> must start <code>1f 8b 08</code> and carry a little-endian
+            uncompressed size in its final four bytes; <code>deflate</code> must open with
+            a zlib CMF/FLG pair whose big-endian value is a multiple of 31; and
+            <code>deflate-raw</code> must be neither.
+        </p>
+
+        <h3>Error surface</h3>
+        <p class="note">
+            Failure modes are part of the API and the easiest part to get quietly wrong —
+            a decoder that “recovers” from truncated input is worse than one that throws.
+            Unknown formats reject at construction; corrupt, truncated, cross-format and
+            trailing-garbage input errors the stream.
+        </p>
+        <pre id="cmpErrors" class="log mono"></pre>
+
+        <h3>Practical: compressed localStorage</h3>
+        <p class="note">
+            Storage is a string store, so persisting compressed bytes needs a base64 hop —
+            which is exactly the shape every real “compress before you persist” path has,
+            and worth showing to scale (base64 gives back a third of what gzip saved).
+        </p>
+        <div class="ro-line" id="cmpStorage">—</div>
+
+        <h3>Bench log</h3>
+        <pre id="cmpLog" class="log mono"></pre>
+    </section>
+
+    </div>
+
+    <script type="module" src="/app/app.js"></script>
+</body>
+</html>

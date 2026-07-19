@@ -1,0 +1,332 @@
+/* Platform Lab styling.
+ *
+ * Two blocks in this file are not decoration and must not be "tidied":
+ *
+ *   1. The #mqProbe* rules. Each probe is styled by an @media rule whose query
+ *      is a character-for-character copy of a query in mediaquery.js's QUERIES
+ *      table. The probes report through `order` because it is an integer no
+ *      other rule in the app touches, so getComputedStyle().order === '1' is an
+ *      unambiguous "this @media block applied". Change a query here and you
+ *      must change it there — that coupling IS the experiment.
+ *
+ *   2. #biProbe. Fixed position, fixed px size, box-sizing:border-box, above
+ *      everything. The smoke test reads nine specific viewport pixels out of
+ *      it. Moving or resizing it breaks the test on purpose.
+ */
+
+:root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --panel-2: #1e222b;
+    --line: #2b313d;
+    --text: #d7dce5;
+    --dim: #8b94a5;
+    --accent: #6ea8fe;
+    --ok: #3ddc84;
+    --bad: #ff6b81;
+    --warn: #ffb648;
+}
+
+/* prefers-color-scheme drives the whole page, not a token demo corner: this is
+ * the same media evaluator the JS panel is testing, applied to real styling, so
+ * flipping appearance.colorScheme visibly moves the app rather than one swatch. */
+@media (prefers-color-scheme: light) {
+    :root {
+        --bg: #f4f6fa;
+        --panel: #ffffff;
+        --panel-2: #eef1f7;
+        --line: #d3d9e4;
+        --text: #1a1e26;
+        --dim: #5b6474;
+        --accent: #2563eb;
+    }
+}
+
+* { box-sizing: border-box; }
+
+body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.5 -apple-system, "Segoe UI", system-ui, sans-serif;
+}
+
+.mono { font-family: "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace; font-size: 12px; }
+
+#topbar {
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel);
+    position: sticky;
+    top: 0;
+    z-index: 20;
+}
+#topbar h1 { margin: 0; font-size: 18px; letter-spacing: 0.3px; }
+#topbar .sub { color: var(--dim); font-size: 12px; margin-top: 3px; }
+
+.tag {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 1px 7px;
+    border-radius: 9px;
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    font-size: 11px;
+}
+
+#grid {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 16px 20px 60px;
+    max-width: 1520px;
+}
+
+.panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 16px 18px 18px;
+}
+.panel h2 { margin: 0 0 4px; font-size: 15px; }
+.panel h3 { margin: 18px 0 6px; font-size: 13px; color: var(--accent); }
+.hint { color: var(--dim); font-weight: 400; font-size: 11px; margin-left: 6px; }
+
+.lede { color: var(--dim); font-size: 12.5px; margin: 6px 0 12px; max-width: 105ch; }
+.note { color: var(--dim); font-size: 11.5px; margin: 4px 0 8px; max-width: 105ch; }
+code { background: var(--panel-2); padding: 0 4px; border-radius: 3px; font-family: "Cascadia Mono", Consolas, monospace; font-size: 11.5px; }
+
+.controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0; }
+.controls .sep { width: 14px; }
+button {
+    background: var(--panel-2);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 5px 11px;
+    font-size: 12px;
+    cursor: pointer;
+}
+button:hover { border-color: var(--accent); }
+.ctl { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--dim); }
+.ctl select, .ctl input[type=range] { accent-color: var(--accent); }
+.wide-ctl { display: flex; }
+.wide-ctl input[type=range] { flex: 1; }
+
+.log {
+    background: #0a0c10;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 8px 10px;
+    margin: 6px 0 0;
+    max-height: 200px;
+    overflow: auto;
+    white-space: pre;
+    color: #a9b4c6;
+}
+@media (prefers-color-scheme: light) { .log { background: #f0f2f7; color: #3a4252; } }
+
+.cols { display: flex; gap: 22px; flex-wrap: wrap; }
+.col { flex: 1; min-width: 320px; }
+
+dl.ro { display: grid; grid-template-columns: 150px 1fr; gap: 2px 10px; margin: 4px 0; }
+dl.ro dt { color: var(--dim); font-size: 12px; }
+dl.ro dd { margin: 0; }
+.ro-line { font-size: 12px; color: var(--dim); margin: 6px 0; }
+
+.ok  { color: var(--ok); }
+.bad { color: var(--bad); }
+
+/* ── Web Animations ──────────────────────────────────────────────────────── */
+
+.anim-stage {
+    position: relative;
+    height: 110px;
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    overflow: hidden;
+}
+/* `left` is animated, so it must be positioned and must have a base value the
+ * interpolator can read a unit from. */
+#animRunner {
+    position: absolute;
+    left: 0px;
+    top: 30px;
+    width: 48px;
+    height: 48px;
+    border-radius: 10px;
+    background: #3b82f6;
+}
+
+.ladder { display: flex; flex-direction: column; gap: 5px; margin: 6px 0; }
+.ladder-row { display: flex; align-items: center; gap: 10px; }
+.ladder-label { width: 42px; text-align: right; color: var(--dim); font-size: 12px; }
+.ladder-track {
+    position: relative;
+    flex: 1;
+    height: 16px;
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    overflow: hidden;
+}
+.ladder-dot {
+    position: absolute;
+    left: 0; top: 2px;
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: var(--accent);
+}
+.ladder-time { width: 70px; text-align: right; color: var(--dim); }
+
+.registry {
+    background: #0a0c10;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 6px 10px;
+    min-height: 40px;
+    max-height: 180px;
+    overflow: auto;
+}
+@media (prefers-color-scheme: light) { .registry { background: #f0f2f7; } }
+.reg-row { white-space: pre; color: #a9b4c6; }
+
+/* ── matchMedia ──────────────────────────────────────────────────────────── */
+
+.mq-head, .mq-row {
+    display: grid;
+    grid-template-columns: 1fr 110px 110px 110px;
+    gap: 8px;
+    align-items: center;
+    padding: 3px 6px;
+}
+.mq-head { color: var(--dim); border-bottom: 1px solid var(--line); font-size: 11px; }
+.mq-row:nth-child(odd) { background: var(--panel-2); }
+.mq-q { color: var(--text); }
+.pill {
+    display: inline-block;
+    text-align: center;
+    padding: 1px 0;
+    border-radius: 8px;
+    font-size: 11px;
+    font-family: "Cascadia Mono", Consolas, monospace;
+    border: 1px solid var(--line);
+}
+.pill.yes { background: rgba(61, 220, 132, 0.16); color: var(--ok); }
+.pill.no  { background: rgba(255, 107, 129, 0.12); color: var(--dim); }
+.pill.na  { color: var(--dim); }
+.mq-verdict { font-size: 11px; }
+.mq-verdict.ok { color: var(--ok); }
+.mq-verdict.bad { color: var(--bad); font-weight: 700; }
+
+.counters { display: flex; gap: 10px; flex-wrap: wrap; margin: 8px 0; }
+.counter {
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 7px 14px;
+    text-align: center;
+    min-width: 92px;
+}
+.counter b { display: block; font-size: 19px; color: var(--accent); }
+.counter span { font-size: 10.5px; color: var(--dim); }
+
+/* The probes. Hidden from view but NOT display:none — a display:none element
+ * still resolves style in bro, but keeping them laid out (1px, clipped) means
+ * the comparison is against a genuinely styled element, which is closer to what
+ * a real @media consumer looks like. */
+#mqProbes { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; pointer-events: none; }
+/* No `order` here on purpose. `#mqProbes i` is (id + type) specificity, which
+ * OUTRANKS the id-only `#mqProbeWide` rules below — writing the initial value
+ * here would silently defeat every @media rule and make the comparison table
+ * report a false disagreement on every query. `order`'s initial value is
+ * already 0, so the probes are correctly off by default with no rule at all. */
+#mqProbes i { display: block; }
+
+/* Each rule below mirrors one entry of QUERIES in mediaquery.js verbatim. */
+@media (min-width: 800px)                  { #mqProbeWide      { order: 1; } }
+@media (max-width: 700px)                  { #mqProbeNarrow    { order: 1; } }
+@media (orientation: landscape)            { #mqProbeLandscape { order: 1; } }
+@media (orientation: portrait)             { #mqProbePortrait  { order: 1; } }
+@media (400px <= width <= 1200px)          { #mqProbeRange     { order: 1; } }
+@media (width > 500px)                     { #mqProbeGt        { order: 1; } }
+@media screen and (min-width: 500px)       { #mqProbeScreen    { order: 1; } }
+@media print                               { #mqProbePrint     { order: 1; } }
+@media (prefers-color-scheme: dark)        { #mqProbeDark      { order: 1; } }
+
+/* ── border-image ────────────────────────────────────────────────────────── */
+
+/* The pixel probe. Coordinates are contracted with tests/test_smoke.js:
+ *   box       400..600 x 400..520   (border-box, 24px borders)
+ *   corners   24x24 at each end     tl(410,410) tr(590,410) bl(410,506) br(590,506)
+ *   edges     tc(500,410) bc(500,506) ml(410,460) mr(590,460)
+ *   middle    mc(500,460)           (only painted because of `fill`)
+ * 400/400 keeps it inside even the narrow 700x900 test viewport. */
+#biProbe {
+    position: fixed;
+    left: 400px;
+    top: 400px;
+    width: 200px;
+    height: 120px;
+    z-index: 9999;
+    /* A transparent border of the right width is what gives border-image an
+     * area to paint into; the shorthand does not create border width itself. */
+    border: 24px solid transparent;
+    border-image: url(assets/nine.png) 16 fill / 24px / 0 stretch;
+    background: transparent;
+}
+
+.bi-live { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin: 6px 0 14px; }
+#biLiveBox {
+    width: 220px;
+    height: 120px;
+    border: 24px solid transparent;
+    border-image: url(assets/nine.png) 16 / 24px / 0 stretch;
+    background: var(--panel-2);
+}
+
+.bi-grid { display: flex; flex-wrap: wrap; gap: 14px; }
+.bi-cell {
+    width: 340px;
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 10px;
+}
+.bi-title { font-size: 12px; font-weight: 600; margin-bottom: 6px; }
+/* The two fallback samples (gradient source, missing file) fall back to THIS
+ * border, which is why it is a visible dashed line rather than none. */
+.bi-box {
+    width: 300px;
+    height: 100px;
+    margin: 0 auto 8px;
+    border: 24px dashed #55607a;
+    background: var(--panel);
+}
+.bi-code { display: block; font-size: 10.5px; color: var(--dim); word-break: break-all; background: none; padding: 0; }
+.bi-note { font-size: 10.5px; color: var(--dim); margin: 5px 0; }
+.bi-longhands { margin: 4px 0 0; color: #7f8aa0; white-space: pre; font-size: 10.5px; }
+
+/* ── Compression ─────────────────────────────────────────────────────────── */
+
+.cmp-table { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.cmp-row {
+    display: grid;
+    grid-template-columns: 1.6fr 1fr 0.8fr 0.8fr 0.7fr 1fr 1.2fr;
+    gap: 8px;
+    padding: 4px 8px;
+}
+.cmp-row:nth-child(even) { background: var(--panel-2); }
+.cmp-head { color: var(--dim); border-bottom: 1px solid var(--line); font-size: 11px; }
+
+/* ── Narrow layout — a REAL responsive rule, so the resize buttons visibly do
+ * something beyond flipping numbers in the table. ───────────────────────── */
+@media (max-width: 700px) {
+    #grid { padding: 10px; }
+    .panel { padding: 10px; }
+    .cols { flex-direction: column; }
+    .bi-cell { width: 100%; }
+    .counters { gap: 5px; }
+    .counter { min-width: 70px; padding: 5px 8px; }
+}
