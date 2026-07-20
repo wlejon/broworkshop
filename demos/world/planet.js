@@ -88,3 +88,63 @@ export function chartSize(radius, cellSize) {
     const w = Math.max(8, Math.round((2 * Math.PI * radius) / cellSize));
     return { width: w, height: Math.max(4, Math.round(w / 2)) };
 }
+
+// -----------------------------------------------------------------------------
+// Closing the chart's two edges.
+//
+// These live here rather than in the bake tool because they define what the
+// chart MEANS: any consumer that resamples or re-bakes the field has to close it
+// the same way, and a test can exercise them without loading a 250 M parameter
+// generator.
+// -----------------------------------------------------------------------------
+
+/// Fold `band` extra generated columns onto the first `band`, producing a field
+/// of width `srcW - band` whose left and right edges are continuous.
+///
+/// THE EXTRA COLUMNS ARE THE POINT. Blending column 0 toward some other column
+/// of the same field cannot close the seam, because the two are unrelated
+/// places in the generator — the first attempt did exactly that and left a
+/// 249 m step. Generating past the meridian and folding back means out[0] is
+/// literally the sample that FOLLOWS out[W-1] in the generator, so the join is
+/// continuous by construction rather than by averaging. Same reason
+/// setDetailExemplar crops a band instead of blending in place.
+///
+/// Cosine weights rather than linear: a linear fold is C0 but kinks at both ends
+/// of the band, and a kink in elevation across 1500 km reads as a ridge running
+/// pole to pole.
+export function foldLongitude(src, srcW, H, band = CHART.wrapBand) {
+    const b = Math.min(band, Math.floor(srcW / 4));
+    const W = srcW - b;
+    const out = new Float32Array(W * H);
+    for (let r = 0; r < H; r++) {
+        const s = r * srcW, d = r * W;
+        for (let c = 0; c < W; c++) out[d + c] = src[s + c];
+        for (let k = 0; k < b; k++) {
+            // t is 0 at the seam and 1 where the band ends, so the wrapped
+            // continuation hands over to the body smoothly.
+            const t = 0.5 - 0.5 * Math.cos(Math.PI * (k / b));
+            out[d + k] = src[s + W + k] * (1 - t) + src[s + k] * t;
+        }
+    }
+    return out;
+}
+
+/// Converge each polar band to its own row mean. Every cell in row 0 maps to the
+/// same point, so a varying row is not a surface; this makes the pole
+/// single-valued by construction rather than by hoping the generator agrees
+/// with itself all the way around.
+export function closePoles(field, W, H, band = CHART.poleBand) {
+    const b = Math.min(band, Math.floor(H / 4));
+    for (let k = 0; k < b; k++) {
+        const t = 0.5 - 0.5 * Math.cos(Math.PI * (k / b));   // 0 at pole, 1 inside
+        for (const r of [k, H - 1 - k]) {
+            const row = r * W;
+            let sum = 0;
+            for (let c = 0; c < W; c++) sum += field[row + c];
+            const mean = sum / W;
+            for (let c = 0; c < W; c++) {
+                field[row + c] = mean * (1 - t) + field[row + c] * t;
+            }
+        }
+    }
+}

@@ -27,4 +27,4 @@ node_modules/
 /bin/
 bro.log
 *.png
-*.log
+*.logdemos/world/planet-coarse.bin
