@@ -101,12 +101,15 @@ const MESH_REACH  = 12800;   // one ring: loadRadius 10 * 1.28 km chunks
 
 const horizon = createHorizon(scene, {
     radius: DOME_RADIUS,
+    meshReach: MESH_REACH,
     // Start marching inside the mesh's reach rather than at its edge. The two
     // overlap for a few km and the depth buffer picks the winner per pixel —
     // the mesh is nearer than the dome everywhere it exists, so it always wins.
     // Butting them together exactly would instead leave a seam wherever a chunk
     // had not loaded.
-    start: 8000,
+    // Inside the water's 8.6 km edge, so the dome is already marching where the
+    // sea stops and there is no band that neither surface owns.
+    start: 7000,
 });
 
 // ============================================================================
@@ -245,38 +248,41 @@ function createTerrain() {
         // against its neighbours — which, for a coherent source, looks entirely
         // correct and simply fails to line up.
         const out = new Float32Array(pw * ph);
+        let usedCoarse = false;
         for (let pz = 0; pz < ph; pz++) {
             for (let px = 0; px < pw; px++) {
-                const h = elevationAt(wx0 + px * cellSize, wz0 + pz * cellSize);
+                const wx = wx0 + px * cellSize, wz = wz0 + pz * cellSize;
+                const h = elevationAt(wx, wz);
                 if (h === null) {
-                    // No tile here yet. Do NOT return null: that falls back to
-                    // the built-in FBm, and with heightAmplitude set to describe
-                    // a 2800 m elevation range the noise erupts into kilometre
-                    // -high spikes along the horizon. The coarse LOD rings reach
-                    // ~86 km, well past the resident tiles, so this is the
-                    // common case rather than an edge one.
+                    // No 30 m tile here yet — so fall back to the 7.68 km coarse
+                    // field, which is the same data the horizon dome is drawing
+                    // just past this chunk. The terrain is smooth rather than
+                    // detailed until the tile lands, and then it sharpens.
                     //
-                    // Sea floor instead: flat, below the water plane, and
-                    // therefore invisible until the real tile lands and
-                    // onTileArrived rebuilds it.
-                    declinedChunks++;
-                    // -3000 m, not just under the waterline: the depth buffer
-                    // is conventional GL_LESS, so a placeholder 50 m below the
-                    // water plane z-fights it into stipple across the whole
-                    // ocean at altitude. This is also below the deepest real
-                    // seabed (-1550 m), so it can never poke through terrain.
-                    out.fill(SEA_LEVEL - 3000);
-                    return out;
+                    // Do NOT return null: that falls back to the built-in FBm,
+                    // and with heightAmplitude describing a 2800 m range the
+                    // noise erupts into kilometre-high spikes.
+                    //
+                    // The previous placeholder was flat seabed at -3000 m, on
+                    // the theory that being under the waterline made it
+                    // invisible. It did the opposite: the water plane drew ocean
+                    // over it, so an unloaded mountain became a circular lake
+                    // sitting on top of the range the dome was correctly drawing
+                    // behind it. A placeholder has to be plausible terrain, not
+                    // hidden terrain, because nothing here is ever truly hidden.
+                    usedCoarse = true;
+                    out[pz * pw + px] = coarseAt(wx, wz);
+                    continue;
                 }
                 out[pz * pw + px] = h;
             }
         }
-        servedChunks++;
+        if (usedCoarse) declinedChunks++; else servedChunks++;
         return out;
     });
 }
 
-// A chunk built before its tile existed is showing placeholder seabed and will
+// A chunk built before its tile existed is showing coarse terrain and will
 // never re-ask on its own, so an arriving tile has to invalidate it.
 //
 // This used to call terrain.configure(), which destroys every chunk and
@@ -310,10 +316,13 @@ function onTileArrived(ti, tj) {
 // on the JS thread — acceptable for a one-off during the load screen, and the
 // reason the far field is not re-centred as you fly.
 const COARSE_HALF = 64;
+let coarse = null, coarseOrigin = 0;
 
 function loadHorizonField() {
     const c = world.coarse(-COARSE_HALF, -COARSE_HALF, COARSE_HALF, COARSE_HALF);
     const origin = -COARSE_HALF * c.cellSize;
+    coarse = c;
+    coarseOrigin = origin;
     horizon.setField(c, origin, origin, c.cellSize);
     console.log('horizon field: ' + c.width + 'x' + c.height + ' at ' +
                 c.cellSize + ' m => ' + (c.width * c.cellSize / 1000).toFixed(0) + ' km');
@@ -360,6 +369,24 @@ function chooseSpawn(c, origin) {
     spawnAt(bx, bz, bh);
     console.log('spawn: ' + (bx / 1000).toFixed(0) + ', ' + (bz / 1000).toFixed(0) +
                 ' km  coarse height ' + Math.round(bh) + ' m');
+}
+
+// Bilinear elevation from the coarse field — the same 7.68 km data the horizon
+// dome raymarches, sampled on the CPU. It is the low-frequency prior for the
+// entire world and it is resident from the moment the model loads, so it can
+// always answer, anywhere, for free.
+function coarseAt(wx, wz) {
+    if (!coarse) return SEA_LEVEL;
+    const fx = (wx - coarseOrigin) / coarse.cellSize;
+    const fz = (wz - coarseOrigin) / coarse.cellSize;
+    const x0 = Math.max(0, Math.min(coarse.width  - 2, Math.floor(fx)));
+    const z0 = Math.max(0, Math.min(coarse.height - 2, Math.floor(fz)));
+    const tx = Math.max(0, Math.min(1, fx - x0));
+    const tz = Math.max(0, Math.min(1, fz - z0));
+    const d = coarse.data, w = coarse.width;
+    const a = d[z0 * w + x0],       b = d[z0 * w + x0 + 1];
+    const c = d[(z0 + 1) * w + x0], e = d[(z0 + 1) * w + x0 + 1];
+    return (a * (1 - tx) + b * tx) * (1 - tz) + (c * (1 - tx) + e * tx) * tz;
 }
 
 function spawnAt(wx, wz, h) {
@@ -548,7 +575,7 @@ function frame() {
         '  |  ' + fps + ' fps' +
         '  |  tiles ' + generatedTiles + (pendingCount ? ' (+' + pendingCount + ')' : '') +
         '  |  chunks ' + (terrain ? terrain.chunkCount : 0) +
-        (declinedChunks ? '  |  awaiting tile ' + declinedChunks : '');
+        (declinedChunks ? '  |  coarse ' + declinedChunks : '');
 
     if (terrain && status.textContent) status.textContent = '';
     requestAnimationFrame(frame);

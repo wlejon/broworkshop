@@ -214,10 +214,15 @@ void userFragment(inout vec3 baseColor, inout vec3 normal, inout float metallic,
     // most of the way to the dome so the join sits near the horizon rather than
     // cutting across the middle of the view, and it runs oceanColor rather than
     // a PBR material so there is nothing for the join to reveal.
-    // 16 km radius against a 20 km dome. The margin matters: a grazing ray can
-    // reach y=0 at a range approaching the dome itself, and a water plane that
-    // nearly touched the dome would z-fight it all along the join.
-    const waterSpan = RADIUS * 1.6;
+    // The near water must stay INSIDE the terrain mesh, not merely inside the
+    // dome. Anywhere it reaches past the mesh there is no terrain geometry to
+    // occlude it, so it paints sea over ground — which showed up as a jagged
+    // blue band biting into a mountain range, following the chunk edges.
+    //
+    // "Inside the mesh" means the inscribed circle, not the reach: loadRadius is
+    // a Manhattan radius, so the mesh covers a diamond and only extends
+    // reach/sqrt(2) along the diagonals.
+    const waterSpan = 2 * (opts.meshReach || RADIUS * 0.6) / Math.SQRT2 * 0.95;
     const water = scene.createMesh({
         data: Mesh.plane(waterSpan, waterSpan, 1, 1),
         position: [0, 0, 0],
