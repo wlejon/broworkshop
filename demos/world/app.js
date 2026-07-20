@@ -148,7 +148,11 @@ let coarse = null, coarseOriginX = 0, coarseOriginZ = 0;
 let coarseCellI = null, coarseCellJ = null;   // window centre, in coarse cells
 
 // i is north-south (z), j is west-east (x) — the decoder's convention.
+const COARSE_COOLDOWN = 20;   // frames between re-cuts, whatever asks for one
+let coarseCooldown = 0;
+
 function loadCoarse(camX, camZ) {
+    if (coarseCooldown > 0) coarseCooldown--;
     const cell = coarse ? coarse.cellSize : 7680;
     const ci = Math.round(camZ / cell);
     const cj = Math.round(camX / cell);
@@ -163,6 +167,16 @@ function loadCoarse(camX, camZ) {
     if (coarseCellI !== null && half <= coarseHalf && half > coarseHalf * 0.6 &&
         Math.abs(ci - coarseCellI) < restep &&
         Math.abs(cj - coarseCellJ) < restep) return false;
+
+    // A COOLDOWN, because generating the field is not what a re-cut costs.
+    // world.coarse returns a 1212-square window in well under a millisecond;
+    // setHeightLayer then copies six megabytes, uploads it and builds a mip
+    // pyramid. Doing that on consecutive frames locks the window, so the rate
+    // is capped here rather than hoping the trigger never fires twice. Missing
+    // data for a few frames costs a clamped rim on the outermost ring; missing
+    // the cap costs the whole app.
+    if (coarseCooldown > 0) return false;
+    coarseCooldown = COARSE_COOLDOWN;
     coarseHalf = half;
 
     // Synchronous: the coarse UNet is small enough that this has always been a
@@ -377,4 +391,5 @@ export { cam, terrain, elevationAt, toggleMode, sun, scene };
 export const coarseField = () => ({ data: coarse, originX: coarseOriginX,
                                     originZ: coarseOriginZ });
 export const exemplar = () => exemplarPatch;
+export const worldgen = () => world;
 export const ready = () => exemplarReady;
