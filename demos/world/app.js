@@ -172,7 +172,10 @@ function terrainOpts() {
         // 220 m/s. Each ring is 3x coarser, so this reaches ~86 km for a
         // handful more chunks — and the height source is handed the ring's own
         // cellSize, so coarse rings sample the same tiles correctly.
-        lodLevels: 4,
+        // Five rings at 3x: 640 m / 1.9 / 5.8 / 17 / 52 km chunks. The outer
+        // ring reaches ~155 km, which is what puts a 2800 m range on the
+        // horizon when you are standing at sea level.
+        lodLevels: 5,
         lodScaleFactor: 3,
         seaLevel: SEA_LEVEL,
         meshMode: 0,                      // smooth — the data is already smooth
@@ -211,7 +214,12 @@ function createTerrain() {
                     // therefore invisible until the real tile lands and
                     // onTileArrived rebuilds it.
                     declinedChunks++;
-                    out.fill(SEA_LEVEL - 50);
+                    // -3000 m, not just under the waterline: the depth buffer
+                    // is conventional GL_LESS, so a placeholder 50 m below the
+                    // water plane z-fights it into stipple across the whole
+                    // ocean at altitude. This is also below the deepest real
+                    // seabed (-1550 m), so it can never poke through terrain.
+                    out.fill(SEA_LEVEL - 3000);
                     return out;
                 }
                 out[pz * pw + px] = h;
@@ -227,6 +235,7 @@ function createTerrain() {
 // heavy, but it happens once per ~30 km of travel.
 function onTileArrived() {
     if (!terrain) { createTerrain(); return; }
+    declinedChunks = 0;   // the rebuild re-asks for every chunk
     terrain.configure(terrainOpts());
 }
 
@@ -315,8 +324,19 @@ function streamTiles() {
     // can be reached in a couple of minutes of flight, so the neighbours need
     // to be in flight well before they're needed.
     if (!tileAt(ti, tj)) { requestTile(ti, tj); return; }
-    for (const [di, dj] of [[0,1],[1,0],[0,-1],[-1,0],[1,1],[1,-1],[-1,1],[-1,-1]]) {
-        if (!tileAt(ti + di, tj + dj)) { requestTile(ti + di, tj + dj); return; }
+    // Then outward in rings. The horizon at sea level reaches ~155 km, so a
+    // single ring of neighbours (92 km) still ends in empty seabed where
+    // mountains should be; RINGS=2 covers 153 km. Each tile is ~4.6 s and only
+    // one runs at a time, so this fills in over a couple of minutes rather
+    // than all at once.
+    const RINGS = 2;
+    for (let r = 1; r <= RINGS; r++) {
+        for (let di = -r; di <= r; di++) {
+            for (let dj = -r; dj <= r; dj++) {
+                if (Math.max(Math.abs(di), Math.abs(dj)) !== r) continue;
+                if (!tileAt(ti + di, tj + dj)) { requestTile(ti + di, tj + dj); return; }
+            }
+        }
     }
 }
 
@@ -354,13 +374,23 @@ function frame() {
     streamTiles();
     if (terrain) terrain.update(cam.pos[0], cam.pos[1], cam.pos[2]);
 
-    // far has to clear the horizon: at 3.4 km up that is ~208 km, and a
-    // nearer far plane slices the ocean off in a hard straight line that
-    // reads as a rendering bug rather than a horizon.
-    cam.fov = 70; cam.near = 1.0; cam.far = 400000;
-    scene.setCamera(Camera.flyViewOptsQuat(cam, canvas));
-
     const g = elevationAt(cam.pos[0], cam.pos[2]);
+
+    // Depth here is a conventional GL_LESS buffer with no reversed-Z, so
+    // precision is set entirely by the far/near RATIO. A fixed near of 1 m
+    // against a horizon-clearing far of 400 km is 400000:1, which stipples
+    // terrain against water and makes geometry flicker in and out with small
+    // camera moves. Scale near with height above ground — at 4 km up nothing
+    // is within 200 m of the eye anyway — and keep the ratio near 1000.
+    // far must clear the far LOD ring even at sea level, or distant mountains
+    // are simply not drawn. near then rises to hold the ratio down: at eye
+    // height that costs a 1.3 m near plane, which is invisible in first person
+    // and is the price of a 160 km horizon on a conventional depth buffer.
+    const agl = Math.max(1, cam.pos[1] - (g === null ? SEA_LEVEL : g));
+    cam.far  = 160000;
+    cam.near = Math.max(cam.far / 120000, Math.min(agl * 0.05, 400));
+    cam.fov  = 70;
+    scene.setCamera(Camera.flyViewOptsQuat(cam, canvas));
     hud.textContent =
         mode.toUpperCase() +
         '  |  ' + (cam.pos[0] / 1000).toFixed(2) + ', ' + (cam.pos[2] / 1000).toFixed(2) + ' km' +
