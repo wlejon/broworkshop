@@ -1,32 +1,57 @@
-// Reproduce the shingled/banded overlay seen on close mountainsides, and
-// bisect it: shadows on vs off.
-import { cam, terrain, sun, ready } from '/app/app.js';
+// Bisect the shingled overlay on close mountainsides.
+//
+// Ruled out: shadows (byte-identical with the light's shadows off and with one
+// cascade) and aerial perspective (unchanged with the atmosphere off). Dropping
+// the detail exemplar DOES remove it, so this walks the config around the
+// exemplar tap — the question is whether the shingle footprint tracks the ring
+// cell size (geometry) or the exemplar's own repeat (the tap).
+import { cam, terrain, scene, coarseField, exemplar, ready } from '/app/app.js';
 
 for (let i = 0; i < 900; i++) { wallSleep(100); advanceTime(16); if (ready()) break; }
 assert(ready(), 'terrain never became ready');
+assert(exemplar(), 'no exemplar patch');
 
-// The vantage from the close-up screenshot.
-cam.pos = [-75570, 3063, 103510];
-cam.vel = [0, 0, 0];
-cam.rot = Camera.quatNorm(Camera.quatMul(
+const POS = [-75570, 3063, 103510];
+const ROT = Camera.quatNorm(Camera.quatMul(
     Camera.quatFromAxis(0, 1, 0, 2.6),
     Camera.quatFromAxis(1, 0, 0, -0.30)));
 
-const settle = (n) => { for (let i = 0; i < (n || 90); i++) advanceTime(16); };
+function shoot(t, name) {
+    cam.pos = POS.slice(); cam.vel = [0, 0, 0]; cam.rot = ROT;
+    for (let i = 0; i < 90; i++) {
+        advanceTime(16);
+        t.update(cam.pos[0], cam.pos[1], cam.pos[2]);
+    }
+    screenshot(name);
+    console.log(name + '  (' + (t.triangleCount / 1000).toFixed(0) + 'k tris, ' +
+                t.layerCount + ' layer)');
+}
 
-settle();
-screenshot('artifact-shadows-on.png');
-console.log('shadows ON  -> artifact-shadows-on.png');
+const cf = coarseField();
+const ex = exemplar();
 
-sun.castsShadow = false;
-settle();
-screenshot('artifact-shadows-off.png');
-console.log('shadows OFF -> artifact-shadows-off.png');
+function variant(cfg, name) {
+    const t = scene.createClipmapTerrain(Object.assign({
+        levels: 11, resolution: 128, cellSize: 8, heightScale: 1, seaLevel: 0,
+        detailWavelength: 48, detailRelief: 0.35, detailOctaves: 7, snowLine: 1700,
+    }, cfg));
+    t.setHeightLayer(0, {
+        data: cf.data.data, width: cf.data.width, height: cf.data.height,
+        originX: cf.origin, originZ: cf.origin, metresPerCell: cf.data.cellSize,
+    });
+    t.setDetailExemplar(ex);
+    shoot(t, name);
+    t.destroy();
+}
 
-sun.castsShadow = true;
-sun.cascadeCount = 1;
-settle();
-screenshot('artifact-one-cascade.png');
-console.log('one cascade -> artifact-one-cascade.png');
+shoot(terrain, 'bisect-0-baseline.png');
+terrain.destroy();
 
-console.log('ARTIFACT OK');
+// Same everything, half the ring resolution => every quad is twice as wide.
+// If the shingles are the mesh, their footprint doubles with it.
+variant({ resolution: 64 },  'bisect-1-res64.png');
+variant({ resolution: 256 }, 'bisect-2-res256.png');
+// Same rings, no procedural noise — isolates the exemplar tap on its own.
+variant({ detailRelief: 0 }, 'bisect-3-exemplar-only.png');
+
+console.log('BISECT OK');

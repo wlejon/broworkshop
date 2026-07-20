@@ -94,6 +94,7 @@ const terrain = scene.createClipmapTerrain({
 
 let world = null;
 let exemplarReady = false;
+let exemplarPatch = null;
 
 // Decoder cell (i, j) -> world (z, x). i is north-south, j is west-east.
 const cellI = (wz) => wz / METRES;
@@ -104,10 +105,9 @@ function requestExemplar(camX, camZ) {
     const j0 = Math.round(cellJ(camX)) - EXEMPLAR_CELLS / 2;
     world.elevation(i0, j0, i0 + EXEMPLAR_CELLS, j0 + EXEMPLAR_CELLS, {
         onDone: (r) => {
-            terrain.setDetailExemplar({
-                data: r.data, width: r.width, height: r.height,
-                metresPerCell: METRES,
-            });
+            exemplarPatch = { data: r.data, width: r.width, height: r.height,
+                              metresPerCell: METRES };
+            terrain.setDetailExemplar(exemplarPatch);
             exemplarReady = true;
         },
         onError: (e) => { console.log('exemplar: ' + e); exemplarReady = true; },
@@ -330,4 +330,8 @@ function frame() {
 requestAnimationFrame(frame);
 
 export { cam, terrain, elevationAt, toggleMode, sun, scene };
+// Diagnostics: enough to rebuild the terrain with a different config and
+// re-install the same height data, so tests can bisect config against artifact.
+export const coarseField = () => ({ data: coarse, origin: coarseOrigin });
+export const exemplar = () => exemplarPatch;
 export const ready = () => exemplarReady;
