@@ -13,7 +13,8 @@ import { installSystemMenu } from "/lib/system-menu.js";
 //
 // THE SHAPE OF THE APP.  ONE height layer, everywhere:
 //
-//   layer 0   7.68 km  a coarse window that follows the camera    (1106 km)
+//   layer 0   7.68 km  a coarse window that follows the camera, sized to
+//                       whatever the clipmap currently reaches
 //
 // The 30 m decoder field is DELIBERATELY GONE. It bought a crisp 30.7 km disc
 // around the camera and left the other 470 km to a fallback — a resolution
@@ -31,8 +32,7 @@ import { installSystemMenu } from "/lib/system-menu.js";
 
 const WEIGHTS   = 'D:/projects/brodiffusion/weights/terrain-diffusion-30m-bro';
 const SEA_LEVEL = 0;      // the model already puts sea level at 0 m
-const COARSE_HALF = 72;   // coarse cells each way => 1106 km at 7.68 km/cell,
-                          // past the clipmap's 1049 km ring span (see loadCoarse)
+const SPAWN_HALF = 72;    // coarse cells searched for a start position
 
 // The detail exemplar is still ONE decoder tile, and it is not a height layer:
 // it is a 61 km sample of what ridges and drainage LOOK like, reused as the
@@ -75,10 +75,15 @@ scene.setAtmosphere({
     seaLevel: SEA_LEVEL,
 });
 
-// 11 levels of 128 quads at 8 m reach 64 * 8 * 2^10 = 524 km. The coarse
-// window is cut wider than that (553 km each way) and re-cut as the camera
-// travels, so every ring has real data under it at any position in the world. Heights arrive in metres, so heightScale stays 1; detail synthesises the
-// decades below the 30 m data floor.
+// 11 levels of 128 quads at 8 m reach 64 * 8 * 2^10 = 524 km on the ground, and
+// the stack zooms with altitude up to maxCellScale, so from orbit it reaches
+// 4194 km. The coarse window is re-cut to cover whatever it currently claims.
+//
+// maxCellScale is capped at 8 because the app has to SERVE that footprint: the
+// window is a single coarse request, and 4194 km at 7.68 km/cell is already a
+// 1206-square field. The engine's own cap is far higher; this is the app saying
+// what it can feed. Heights arrive in metres, so heightScale stays 1; detail
+// synthesises the decades below the data floor.
 const terrain = scene.createClipmapTerrain({
     levels: 11,
     resolution: 128,
@@ -89,6 +94,7 @@ const terrain = scene.createClipmapTerrain({
     detailRelief: 0.35,
     detailOctaves: 7,
     snowLine: 1700,
+    maxCellScale: 8,
 });
 
 // --- The detail exemplar — one decoder tile, used as structure, not as data ---
@@ -131,11 +137,12 @@ function requestExemplar(camX, camZ) {
 // terrain: the request is in CELL indices, so every texel lands on the same
 // cell it would have had from any other vantage.
 //
-// The window is sized past the ring reach on purpose. 72 cells each way is
-// 1106 km across against the clipmap's 1049 km span, so there is real data
-// under the outermost ring rather than a clamped rim at the horizon.
-
-const COARSE_RESTEP = 24;   // re-cut once the camera drifts this many cells
+// The reach is NOT a constant any more: the clipmap zooms its ring stack with
+// altitude, so from orbit it asks for a footprint tens of times wider than it
+// does on foot. Sizing the window from terrain.farDistance every time is what
+// keeps data under the outermost ring at any altitude — a fixed 72 cells was
+// correct only for the ground-level stack.
+let coarseHalf = 0;
 
 let coarse = null, coarseOriginX = 0, coarseOriginZ = 0;
 let coarseCellI = null, coarseCellJ = null;   // window centre, in coarse cells
@@ -145,19 +152,24 @@ function loadCoarse(camX, camZ) {
     const cell = coarse ? coarse.cellSize : 7680;
     const ci = Math.round(camZ / cell);
     const cj = Math.round(camX / cell);
-    if (coarseCellI !== null &&
-        Math.abs(ci - coarseCellI) < COARSE_RESTEP &&
-        Math.abs(cj - coarseCellJ) < COARSE_RESTEP) return false;
+
+    // Cover the ring span with a margin, and let the camera drift a quarter of
+    // that margin before paying for a re-cut.
+    const half = Math.ceil((terrain.farDistance * 1.1) / cell) + 2;
+    const restep = Math.max(4, Math.floor(half * 0.08));
+    if (coarseCellI !== null && half <= coarseHalf &&
+        Math.abs(ci - coarseCellI) < restep &&
+        Math.abs(cj - coarseCellJ) < restep) return false;
+    coarseHalf = half;
 
     // Synchronous: the coarse UNet is small enough that this has always been a
     // load-screen call. Now that it also fires mid-flight, the cost is a hitch,
     // so it is reported rather than hidden.
     const t0 = performance.now();
-    coarse = world.coarse(ci - COARSE_HALF, cj - COARSE_HALF,
-                          ci + COARSE_HALF, cj + COARSE_HALF);
+    coarse = world.coarse(ci - half, cj - half, ci + half, cj + half);
     const ms = performance.now() - t0;
-    coarseOriginZ = (ci - COARSE_HALF) * coarse.cellSize;
-    coarseOriginX = (cj - COARSE_HALF) * coarse.cellSize;
+    coarseOriginZ = (ci - half) * coarse.cellSize;
+    coarseOriginX = (cj - half) * coarse.cellSize;
     coarseCellI = ci; coarseCellJ = cj;
     console.log('coarse window re-cut at ' + (camX / 1000).toFixed(0) + ', ' +
                 (camZ / 1000).toFixed(0) + ' km: ' + coarse.width + 'x' +
@@ -189,7 +201,7 @@ function chooseSpawn() {
             const h = c.data[i * w + j];
             if (h < 200) continue;                       // want to stand on land
             const d = Math.hypot(i - c.height / 2, j - w / 2);
-            if (d > COARSE_HALF * 0.5) continue;         // room to fly any way
+            if (d > SPAWN_HALF * 0.5) continue;         // room to fly any way
             let lo = Infinity;                           // ocean nearby?
             for (let di = -1; di <= 1; di++)
                 for (let dj = -1; dj <= 1; dj++)
