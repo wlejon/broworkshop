@@ -107,6 +107,16 @@ function requestTile(ti, tj) {
         onDone: (r) => {
             tiles.set(k, r); pendingCount--; generatedTiles++;
             fineOriginI = null;         // force a recomposite with the new data
+            // The first tile is also the DETAIL EXEMPLAR: the same decoder
+            // output that describes 61 km here describes what ridges and
+            // drainage look like everywhere, so the terrain reuses its
+            // structure for the scales no data covers. One tile, two jobs.
+            if (generatedTiles === 1) {
+                terrain.setDetailExemplar({
+                    data: r.data, width: r.width, height: r.height,
+                    metresPerCell: METRES,
+                });
+            }
         },
         // Drop it so a later frame retries rather than wedging 'pending'.
         onError: (e) => { tiles.delete(k); pendingCount--; console.log('tile ' + k + ': ' + e); },
@@ -221,9 +231,12 @@ function chooseSpawn() {
         }
     }
     if (best === -Infinity) return;                      // all ocean; origin will do
-    // Well above the coarse height: it is a 7.68 km average and the real 30 m
-    // terrain under it can be considerably higher.
-    cam.pos = [bx, bh + 900, bz];
+    // Start in the air, not on the ground. From 25 km the whole world is in
+    // frame at once — coastline, range and horizon — which is the view that
+    // says what this is; walking up to it afterwards is the reveal, not the
+    // introduction. (Well above the coarse height regardless: it is a 7.68 km
+    // average and the real 30 m terrain under it can be considerably higher.)
+    cam.pos = [bx, bh + 25000, bz];
     cam.vel = [0, 0, 0];
     console.log('spawn: ' + (bx / 1000).toFixed(0) + ', ' + (bz / 1000).toFixed(0) + ' km');
 }

@@ -46,4 +46,22 @@ console.log('relief over 20 km  (data band): ' + data.toFixed(1) + ' m');
 assert(fine > 8, 'sub-cell detail missing outside the fine layer: ' + fine.toFixed(1) + ' m');
 assert(mid > fine, 'relief must grow with scale, not shrink');
 assert(data > mid, 'procedural detail is drowning the model terrain');
+// Camera independence. The detail exemplar is applied at a FIXED repeat length;
+// deriving it from the local data floor instead would stretch the patch as the
+// fine layer travels with the camera, and terrain at a fixed world point would
+// morph continuously underfoot. Some settling is inherent — the exemplar fades
+// out as real data fades in over the same ground — but the STRUCTURE must not
+// slide. Sampling one point from two camera positions catches it either way.
+const PX = -60000, PZ = 120000;
+cam.pos = [PX, 30000, PZ];
+for (let i = 0; i < 30; i++) advanceTime(16);
+const near = elevationAt(PX, PZ);
+cam.pos = [PX + 90000, 30000, PZ + 90000];
+for (let i = 0; i < 30; i++) advanceTime(16);
+const far = elevationAt(PX, PZ);
+console.log('height at a fixed point, camera 127 km apart: ' +
+            near.toFixed(1) + ' vs ' + far.toFixed(1) + ' m');
+assert(Math.abs(near - far) < 120,
+       'terrain moves with the camera: ' + Math.abs(near - far).toFixed(1) + ' m');
+
 console.log('ALT OK');
