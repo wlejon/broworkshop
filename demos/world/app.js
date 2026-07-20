@@ -214,7 +214,24 @@ if (!bro.worldgen || !bro.worldgen.available) {
 let mode = 'fly';           // 'fly' | 'walk'
 const EYE = 1.7;            // metres, walking
 const WALK_SPEED = 6;       // m/s (a jog)
-const FLY_SPEED = 220;      // m/s
+
+// Flying speed is ALTITUDE-PROPORTIONAL. A fixed rate cannot serve a world that
+// is 983 km across and also has metre-scale relief: 220 m/s is reckless at
+// treetop height and a 75-minute crossing from orbit. Tying it to height above
+// ground keeps the screen-space flow rate roughly constant, which is the thing
+// that actually feels controllable — you cover ground when there is ground to
+// cover and slow down as you close on it.
+const FLY_BASE   = 60;      // m/s at zero altitude
+const FLY_PER_M  = 0.55;    // + this much per metre above ground
+const FLY_MAX    = 90000;   // m/s ceiling: 983 km in ~11 s
+const BOOST      = 6;       // shift
+let   speedTrim  = 1;       // mouse wheel, 1/16x .. 16x
+
+canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    speedTrim = Math.min(16, Math.max(1 / 16,
+                speedTrim * (e.deltaY < 0 ? 1.25 : 0.8)));
+});
 
 const cam = Camera.createFly({
     pos: [0, 1200, 0],
@@ -266,8 +283,12 @@ function frame() {
 
     if (mouseX || mouseY) { Camera.flyLook(cam, mouseX, mouseY); mouseX = mouseY = 0; }
 
-    let speed = (mode === 'fly') ? FLY_SPEED : WALK_SPEED;
-    if (keys['shift']) speed *= 3;
+    const gNow = elevationAt(cam.pos[0], cam.pos[2]);
+    const aglNow = Math.max(0, cam.pos[1] - (gNow === null ? SEA_LEVEL : gNow));
+    let speed = (mode === 'fly')
+        ? Math.min(FLY_MAX, FLY_BASE + aglNow * FLY_PER_M) * speedTrim
+        : WALK_SPEED;
+    if (keys['shift']) speed *= BOOST;
     Camera.flyIntegrate(cam, Camera.flyThrustFromKeys(cam, keys), dt, speed);
 
     if (mode === 'walk') {
@@ -295,6 +316,10 @@ function frame() {
         '  |  alt ' + Math.round(cam.pos[1]) + ' m' +
         (g === null ? '' : '  |  ground ' + Math.round(g) + ' m') +
         '  |  ' + fps + ' fps' +
+        (mode === 'fly'
+            ? '  |  ' + (speed / 1000 * 3600).toFixed(0) + ' km/h' +
+              (speedTrim !== 1 ? ' (trim ' + speedTrim.toFixed(2) + 'x)' : '')
+            : '') +
         '  |  ' + terrain.layerCount + ' layer, ' +
         (terrain.triangleCount / 1000).toFixed(0) + 'k tris';
 
@@ -304,5 +329,5 @@ function frame() {
 
 requestAnimationFrame(frame);
 
-export { cam, terrain, elevationAt, toggleMode };
+export { cam, terrain, elevationAt, toggleMode, sun, scene };
 export const ready = () => exemplarReady;
