@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>World</title>
+<style>
+    html, body {
+        margin: 0; padding: 0; width: 100%; height: 100%;
+        overflow: hidden; background: #05070c;
+        font-family: -apple-system, "Segoe UI", sans-serif;
+    }
+    #c { display: block; width: 100%; height: 100%; }
+
+    #hud {
+        position: absolute; left: 12px; top: 10px;
+        color: #dce6f2; font-size: 12px; font-variant-numeric: tabular-nums;
+        text-shadow: 0 1px 3px rgba(0,0,0,0.9);
+        pointer-events: none;
+    }
+
+    #status {
+        position: absolute; left: 50%; top: 50%;
+        transform: translate(-50%, -50%);
+        color: #eaf0f8; font-size: 15px;
+        background: rgba(8, 12, 20, 0.82);
+        padding: 14px 22px; border-radius: 8px;
+        pointer-events: none;
+    }
+    #status:empty { display: none; }
+
+    #help {
+        position: absolute; left: 12px; bottom: 10px;
+        color: #93a4bb; font-size: 11px; line-height: 1.6;
+        text-shadow: 0 1px 3px rgba(0,0,0,0.9);
+        pointer-events: none;
+    }
+    #help b { color: #cfdaea; font-weight: 600; }
+</style>
+</head>
+<body>
+    <canvas id="c"></canvas>
+    <div id="hud"></div>
+    <div id="status"></div>
+    <div id="help">
+        <b>drag</b> look &nbsp; <b>WASD</b> move &nbsp; <b>Q/E</b> roll &nbsp;
+        <b>shift</b> boost &nbsp; <b>F</b> fly / walk
+    </div>
+    <script type="module" src="app.js"></script>
+</body>
+</html>
