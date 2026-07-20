@@ -11,29 +11,35 @@ import { installSystemMenu } from "/lib/system-menu.js";
 // flowing downhill. The world is a pure function of (seed, position), so there
 // is nothing to save.
 //
-// THE SHAPE OF THE APP.  The model gives two scales — a 30 m decoder field that
-// costs seconds per tile, and a 7.68 km coarse field that costs a fraction of
-// one and covers a thousand kilometres. That is a two-level height pyramid,
-// which is what scene.createClipmapTerrain() consumes:
+// THE SHAPE OF THE APP.  ONE height layer, everywhere:
 //
-//   layer 0   30 m     decoder tiles composited around the camera   (30.7 km)
-//   layer 1   7.68 km  one coarse request, made once                 (983 km)
+//   layer 0   7.68 km  one coarse request, made once                 (983 km)
+//
+// The 30 m decoder field is DELIBERATELY GONE. It bought a crisp 30.7 km disc
+// around the camera and left the other 470 km to a fallback — a resolution
+// cliff you could see from the air, and a quality the rest of the world could
+// not reach. The bar is that the world reads as vast and detailed from the
+// coarse field ALONE, at every altitude, with no privileged spot. Decoder tiles
+// come back later as a higher detail tier ON TOP of a surface that already
+// works, not as the only place the surface works.
 //
 // The clipmap is ONE mesh, built once, parked on the camera and displaced on
 // the GPU. No chunks, no LOD rings to crack and no horizon dome — the rings
 // reach 500 km, so what is under your feet and what you see at the horizon are
-// the same surface, and everything that used to bridge them is gone.
-//
-// Decoder requests are sized generously — cost is fixed overhead, not area
-// (1024^2 1.1 s, 2048^2 1.3 s, 3072^2 4.3 s) — so tiles are 2048 cells / 61 km.
+// the same surface.
 // =============================================================================
 
 const WEIGHTS   = 'D:/projects/brodiffusion/weights/terrain-diffusion-30m-bro';
-const TILE      = 2048;   // decoder cells per tile edge (61.4 km)
-const METRES    = 30;     // metres per decoder cell (the checkpoint's native res)
 const SEA_LEVEL = 0;      // the model already puts sea level at 0 m
-const FINE_N    = 1024;   // layer-0 texels per axis => 30.7 km around the camera
 const COARSE_HALF = 64;   // coarse cells each way => 983 km at 7.68 km/cell
+
+// The detail exemplar is still ONE decoder tile, and it is not a height layer:
+// it is a 61 km sample of what ridges and drainage LOOK like, reused as the
+// structure of every scale the coarse field cannot resolve. That is the whole
+// mechanism by which mesh-level detail becomes global. Generated once at load;
+// it wants to become a baked asset so the decoder leaves the runtime entirely.
+const EXEMPLAR_CELLS = 2048;   // 61.4 km at 30 m
+const METRES         = 30;     // metres per decoder cell (checkpoint native res)
 
 const canvas = document.getElementById('c');
 const scene  = canvas.getContext('scene');
@@ -84,88 +90,31 @@ const terrain = scene.createClipmapTerrain({
     snowLine: 1700,
 });
 
-// --- Tile cache — the async half ---
+// --- The detail exemplar — one decoder tile, used as structure, not as data ---
 
 let world = null;
-const tiles = new Map();          // "ti,tj" -> { data, width, height } | 'pending'
-let pendingCount = 0, generatedTiles = 0;
-
-const tileKey = (ti, tj) => ti + ',' + tj;
+let exemplarReady = false;
 
 // Decoder cell (i, j) -> world (z, x). i is north-south, j is west-east.
 const cellI = (wz) => wz / METRES;
 const cellJ = (wx) => wx / METRES;
 
-function requestTile(ti, tj) {
-    const k = tileKey(ti, tj);
-    // One request at a time per world: the pipeline's tile cache is not
-    // thread-safe and elevation() throws rather than racing it.
-    if (!world || world.generating || tiles.has(k)) return;
-    tiles.set(k, 'pending');
-    pendingCount++;
-    world.elevation(ti * TILE, tj * TILE, (ti + 1) * TILE, (tj + 1) * TILE, {
+function requestExemplar(camX, camZ) {
+    const i0 = Math.round(cellI(camZ)) - EXEMPLAR_CELLS / 2;
+    const j0 = Math.round(cellJ(camX)) - EXEMPLAR_CELLS / 2;
+    world.elevation(i0, j0, i0 + EXEMPLAR_CELLS, j0 + EXEMPLAR_CELLS, {
         onDone: (r) => {
-            tiles.set(k, r); pendingCount--; generatedTiles++;
-            fineOriginI = null;         // force a recomposite with the new data
-            // The first tile is also the DETAIL EXEMPLAR: the same decoder
-            // output that describes 61 km here describes what ridges and
-            // drainage look like everywhere, so the terrain reuses its
-            // structure for the scales no data covers. One tile, two jobs.
-            if (generatedTiles === 1) {
-                terrain.setDetailExemplar({
-                    data: r.data, width: r.width, height: r.height,
-                    metresPerCell: METRES,
-                });
-            }
+            terrain.setDetailExemplar({
+                data: r.data, width: r.width, height: r.height,
+                metresPerCell: METRES,
+            });
+            exemplarReady = true;
         },
-        // Drop it so a later frame retries rather than wedging 'pending'.
-        onError: (e) => { tiles.delete(k); pendingCount--; console.log('tile ' + k + ': ' + e); },
+        onError: (e) => { console.log('exemplar: ' + e); exemplarReady = true; },
     });
 }
 
-function tileAt(ti, tj) {
-    const t = tiles.get(tileKey(ti, tj));
-    return (t && t !== 'pending') ? t : null;
-}
-
-// --- Layer 0 — the 30 m field, composited around the camera ---
-//
-// A height layer is ONE contiguous texture with ONE origin, so the per-tile Map
-// has to be flattened into a layer-sized array around the camera. Snapping that
-// origin to the 30 m cell grid puts every texel exactly on a decoder cell, so
-// the composite is a copy rather than a resample and cannot introduce a seam.
-
-const fine = new Float32Array(FINE_N * FINE_N);
-let fineOriginI = null, fineOriginJ = null;
-
-function composeFine(camX, camZ) {
-    const i0 = Math.round(cellI(camZ)) - FINE_N / 2;
-    const j0 = Math.round(cellJ(camX)) - FINE_N / 2;
-    if (fineOriginI !== null &&
-        Math.abs(i0 - fineOriginI) < FINE_N / 8 &&
-        Math.abs(j0 - fineOriginJ) < FINE_N / 8) return;
-    if (!tileAt(Math.floor(cellI(camZ) / TILE), Math.floor(cellJ(camX) / TILE))) return;
-
-    for (let r = 0; r < FINE_N; r++) {
-        const gi = i0 + r, ti = Math.floor(gi / TILE);
-        for (let c = 0; c < FINE_N; c++) {
-            const gj = j0 + c, tj = Math.floor(gj / TILE);
-            const t = tileAt(ti, tj);
-            // No tile here yet: leave the coarse layer to cover it. NaN would
-            // poison the texture, so fall through to the coarse sample.
-            fine[r * FINE_N + c] = t
-                ? t.data[(gi - ti * TILE) * t.width + (gj - tj * TILE)]
-                : coarseAt(j0 * METRES + c * METRES, i0 * METRES + r * METRES);
-        }
-    }
-    fineOriginI = i0; fineOriginJ = j0;
-    terrain.setHeightLayer(0, {
-        data: fine, width: FINE_N, height: FINE_N,
-        originX: j0 * METRES, originZ: i0 * METRES, metresPerCell: METRES,
-    });
-}
-
-// --- Layer 1 — the coarse field, one request, once ---
+// --- Layer 0 — the coarse field, one request, once ---
 //
 // 128 coarse cells at 7.68 km is 983 km across: the whole visible world from any
 // altitude a player reaches, in a single 64 KB texture. The 2.8M-param coarse
@@ -176,7 +125,7 @@ let coarse = null, coarseOrigin = 0;
 function loadCoarse() {
     coarse = world.coarse(-COARSE_HALF, -COARSE_HALF, COARSE_HALF, COARSE_HALF);
     coarseOrigin = -COARSE_HALF * coarse.cellSize;
-    terrain.setHeightLayer(1, {
+    terrain.setHeightLayer(0, {
         data: coarse.data, width: coarse.width, height: coarse.height,
         originX: coarseOrigin, originZ: coarseOrigin, metresPerCell: coarse.cellSize,
     });
@@ -198,10 +147,9 @@ function coarseAt(wx, wz) {
 }
 
 // The clipmap is the drawn surface AND the collision surface — it carries the
-// procedural detail the layers do not. Before the first decoder tile lands there
-// is nothing worth standing on, so this reports null and walk mode declines.
+// procedural detail the layer does not. Valid as soon as the coarse field is in.
 function elevationAt(wx, wz) {
-    return generatedTiles ? terrain.elevationAt(wx, wz) : null;
+    return coarse ? terrain.elevationAt(wx, wz) : null;
 }
 
 // Spawn somewhere worth looking at. The origin is not neutral — for seed 42 it is
@@ -254,9 +202,8 @@ if (!bro.worldgen || !bro.worldgen.available) {
             world = w;
             loadCoarse();
             chooseSpawn();
-            status.textContent = 'Generating terrain (61 km across)...';
-            requestTile(Math.floor(cellI(cam.pos[2]) / TILE),
-                        Math.floor(cellJ(cam.pos[0]) / TILE));
+            status.textContent = 'Sampling detail structure...';
+            requestExemplar(cam.pos[0], cam.pos[2]);
         },
         onError: (e) => { status.textContent = 'Model load failed: ' + e; },
     });
@@ -305,30 +252,6 @@ function toggleMode() {
     }
 }
 
-// --- Streaming — the tile under the camera, then the ring around it ---
-
-function streamTiles() {
-    if (!world || world.generating) return;
-    const ti = Math.floor(cellI(cam.pos[2]) / TILE);
-    const tj = Math.floor(cellJ(cam.pos[0]) / TILE);
-
-    // A 2048^2 tile is 16 MB, so the cache cannot just grow. Anything beyond
-    // two tiles is 120+ km off and regenerates in ~1.3 s, and the world is a
-    // pure function of (seed, position), so dropping one loses nothing.
-    if (tiles.size > 12) {
-        for (const [k, v] of tiles) {
-            if (v === 'pending') continue;   // would desync pendingCount
-            const [ki, kj] = k.split(',').map(Number);
-            if (Math.max(Math.abs(ki - ti), Math.abs(kj - tj)) > 2) tiles.delete(k);
-        }
-    }
-
-    if (!tileAt(ti, tj)) { requestTile(ti, tj); return; }
-    for (let di = -1; di <= 1; di++)
-        for (let dj = -1; dj <= 1; dj++)
-            if (!tileAt(ti + di, tj + dj)) { requestTile(ti + di, tj + dj); return; }
-}
-
 // --- Frame ---
 
 let last = performance.now(), frames = 0, acc = 0, fps = 0;
@@ -355,8 +278,6 @@ function frame() {
         if (g !== null) { cam.pos[1] = Math.max(SEA_LEVEL, g) + EYE; cam.vel[1] = 0; }
     }
 
-    streamTiles();
-    composeFine(cam.pos[0], cam.pos[2]);
     terrain.update(cam.pos[0], cam.pos[1], cam.pos[2]);
 
     const g = elevationAt(cam.pos[0], cam.pos[2]);
@@ -374,14 +295,14 @@ function frame() {
         '  |  alt ' + Math.round(cam.pos[1]) + ' m' +
         (g === null ? '' : '  |  ground ' + Math.round(g) + ' m') +
         '  |  ' + fps + ' fps' +
-        '  |  tiles ' + generatedTiles + (pendingCount ? ' (+' + pendingCount + ')' : '') +
-        '  |  ' + terrain.layerCount + ' layers, ' +
+        '  |  ' + terrain.layerCount + ' layer, ' +
         (terrain.triangleCount / 1000).toFixed(0) + 'k tris';
 
-    if (generatedTiles && status.textContent) status.textContent = '';
+    if (exemplarReady && status.textContent) status.textContent = '';
     requestAnimationFrame(frame);
 }
 
 requestAnimationFrame(frame);
 
-export { cam, tiles, terrain, elevationAt, toggleMode };
+export { cam, terrain, elevationAt, toggleMode };
+export const ready = () => exemplarReady;
