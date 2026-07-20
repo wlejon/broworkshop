@@ -1,6 +1,6 @@
 import "/lib/camera.js";
 import { installSystemMenu } from "/lib/system-menu.js";
-import { PLANET } from "/app/planet.js";
+import { PLANET, loadChart } from "/app/planet.js";
 
 // =============================================================================
 // World — a playable learned planet
@@ -128,7 +128,31 @@ function requestExemplar(camX, camZ) {
     });
 }
 
-// --- Layer 0 — the coarse field, a window that follows the camera ---
+// --- Layer 0 — the whole planet, baked, or a window that follows the camera ---
+//
+// PREFERRED PATH: the entire globe, once, from tools/bake-planet.js. 5212 x 2606
+// cells at 7.68 km is 52 MB, which is a texture rather than a problem, and it
+// makes the coarse field a READ instead of a computation. That removes the
+// re-cut hitch outright — not shortens it: from 400 km up the window was over
+// 1200 cells square and measured 36 s of synchronous generation, a hard lock of
+// the whole app that no window tuning could remove because the cost was real
+// work the camera had to wait for.
+//
+// It also removes the last edge. A camera-following window is unbounded but
+// always finite, so coverage is a race against how fast you fly; the baked chart
+// simply contains every place there is.
+//
+// The world is still FLAT here, and the chart is laid out as its own grid:
+// cell (i, j) sits at world (x = j * cell, z = i * cell), so x runs one
+// circumference and z runs pole to pole. Longitude therefore does not yet wrap
+// on screen — walk far enough east and you reach the chart's edge, where
+// GL_CLAMP_TO_EDGE smears the last column. That edge is what the cube-sphere
+// removes, by sampling this same field BY DIRECTION instead of by XZ. The data
+// is already global and already closed at both seams; only the geometry's
+// addressing is still flat.
+//
+// FALLBACK: generate a window live. The binary is gitignored, so a fresh clone
+// has no bake, and the app has to work before someone has run the tool.
 //
 // This USED to be one request centred on the origin, and that was a hard edge
 // on the world. The clipmap's rings are camera-centred and reach 524 km in
@@ -151,6 +175,7 @@ function requestExemplar(camX, camZ) {
 // correct only for the ground-level stack.
 let coarseHalf = 0;
 
+let baked = false;
 let coarse = null, coarseOriginX = 0, coarseOriginZ = 0;
 let coarseCellI = null, coarseCellJ = null;   // window centre, in coarse cells
 
@@ -162,6 +187,7 @@ let coarseCooldown = 0;
 // one caller needs it: the spawn search, which reads SPAWN_HALF cells looking
 // for somewhere worth standing before there is a camera to have a horizon.
 function loadCoarse(camX, camZ, eyeAboveSeaLevel, minHalf = 0) {
+    if (baked) return false;          // the whole planet is already resident
     if (coarseCooldown > 0) coarseCooldown--;
     const cell = coarse ? coarse.cellSize : 7680;
     const ci = Math.round(camZ / cell);
@@ -230,13 +256,20 @@ function elevationAt(wx, wz) {
 // COAST puts sea, shoreline and a range in one frame.
 function chooseSpawn() {
     const c = coarse, w = c.width;
+    // Search a box around the chart's middle, not the whole field. With a
+    // camera-following window those were the same thing; with the whole planet
+    // resident they are 5000 cells apart, and scanning 13.6 M cells to pick a
+    // spawn inside a 36-cell radius is work with no result attached.
+    const ci = c.height / 2, cj = w / 2, r = SPAWN_HALF * 0.5;
+    const i0 = Math.max(1, Math.floor(ci - r)), i1 = Math.min(c.height - 1, Math.ceil(ci + r));
+    const j0 = Math.max(1, Math.floor(cj - r)), j1 = Math.min(w - 1, Math.ceil(cj + r));
     let best = -Infinity, bx = 0, bz = 0, bh = 0;
-    for (let i = 1; i < c.height - 1; i++) {
-        for (let j = 1; j < w - 1; j++) {
+    for (let i = i0; i < i1; i++) {
+        for (let j = j0; j < j1; j++) {
             const h = c.data[i * w + j];
             if (h < 200) continue;                       // want to stand on land
-            const d = Math.hypot(i - c.height / 2, j - w / 2);
-            if (d > SPAWN_HALF * 0.5) continue;         // room to fly any way
+            const d = Math.hypot(i - ci, j - cj);
+            if (d > r) continue;                         // room to fly any way
             let lo = Infinity;                           // ocean nearby?
             for (let di = -1; di <= 1; di++)
                 for (let dj = -1; dj <= 1; dj++)
@@ -262,6 +295,25 @@ function chooseSpawn() {
 
 // --- Load ---
 
+// The chart goes in FIRST, before the decoder loads. It costs a file read, and
+// it means there is a planet to look at during the seconds the model takes —
+// the surface is complete from the first frame and detail arrives on top of it,
+// rather than the app showing a flat plane until a generator answers.
+const chart = loadChart('D:/projects/broworkshop/demos/world/');
+if (chart) {
+    baked = true;
+    coarse = { data: chart.data, width: chart.width, height: chart.height,
+               cellSize: chart.cellSize };
+    coarseOriginX = 0;
+    coarseOriginZ = 0;
+    terrain.setHeightLayer(0, {
+        data: chart.data, width: chart.width, height: chart.height,
+        originX: 0, originZ: 0, metresPerCell: chart.cellSize,
+    });
+    console.log('planet: baked chart ' + chart.width + 'x' + chart.height +
+                ' at ' + (chart.cellSize / 1000).toFixed(2) + ' km');
+}
+
 status.textContent = 'Loading terrain model...';
 if (!bro.worldgen || !bro.worldgen.available) {
     status.textContent = 'bro.worldgen unavailable — build with BRO_WITH_DIFFUSION.';
@@ -271,8 +323,7 @@ if (!bro.worldgen || !bro.worldgen.available) {
         seed: PLANET.seed,   // the world's identity; see planet.js
         onReady: (w) => {
             world = w;
-            loadCoarse(0, 0, 2, SPAWN_HALF);
-            chooseSpawn();
+            if (!baked) { loadCoarse(0, 0, 2, SPAWN_HALF); chooseSpawn(); }
             status.textContent = 'Sampling detail structure...';
             requestExemplar(cam.pos[0], cam.pos[2]);
         },
@@ -311,6 +362,12 @@ const cam = Camera.createFly({
         Camera.quatFromAxis(1, 0, 0, -0.55))),
     accel: 14.0, damping: 7.0, rollSpeed: 2.0, lookSpeed: 0.003,
 });
+
+// With a baked chart the spawn can be picked immediately — the field is already
+// there. It waits until here only because chooseSpawn writes to `cam`, which is
+// declared above; the un-baked path still picks its spawn from the model's
+// onReady, since there is nothing to search until the first window lands.
+if (baked) chooseSpawn();
 
 const keys = {};
 let mouseX = 0, mouseY = 0, looking = false;

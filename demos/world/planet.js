@@ -129,6 +129,38 @@ export function foldLongitude(src, srcW, H, band = CHART.wrapBand) {
     return out;
 }
 
+/// Read the baked chart, or return null if there is not one for THIS planet.
+///
+/// The refusal is the reason this exists. A field baked for a different seed or
+/// radius is not detectably wrong to the renderer — the terrain just quietly
+/// stops agreeing with the horizon, and the failure looks like a rendering bug
+/// rather than a stale asset. Every mismatch here is a hard null, so the app
+/// falls back to generating rather than drawing the wrong world.
+///
+/// Null is a normal outcome: the binary is 52 MB and gitignored, so a fresh
+/// clone has no bake until someone runs tools/bake-planet.js.
+export function loadChart(dir) {
+    let meta, buf;
+    try {
+        const fs = require('fs');
+        meta = JSON.parse(fs.readFileSync(dir + 'planet-coarse.json', 'utf8'));
+        buf  = fs.readFileSync(dir + 'planet-coarse.bin');
+    } catch (e) {
+        return null;                     // no bake on disk
+    }
+    if (meta.seed !== PLANET.seed || meta.radius !== PLANET.radius) return null;
+    const want = chartSize(PLANET.radius, meta.cellSize);
+    if (want.width !== meta.width || want.height !== meta.height) return null;
+    if (buf.byteLength !== meta.width * meta.height * 4) return null;
+
+    return {
+        data:   new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4),
+        width:  meta.width,
+        height: meta.height,
+        cellSize: meta.cellSize,
+    };
+}
+
 /// Converge each polar band to its own row mean. Every cell in row 0 maps to the
 /// same point, so a varying row is not a surface; this makes the pole
 /// single-valued by construction rather than by hoping the generator agrees
