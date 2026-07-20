@@ -119,9 +119,10 @@ scene.setAtmosphere({
 // Reach is a fixed triangle budget, so it is nearly free.
 //
 // What is NOT free is COVERING it with data, and that is bounded by the planet
-// rather than by the rings: terrain.coverageDistance is min(reach, 2 x horizon).
-// Past it the layer's coverage fades and the surface drops to sea level, which
-// is safe precisely because that ground has already bent below the eye ray.
+// rather than by the rings: terrain.coverageDistance is min(reach, horizon(eye)
+// + horizon(highest ground)) — two tangent lengths, so a peak beyond the eye's
+// own horizon still shows. Past it the layer fades and the surface drops to sea
+// level, which is safe because that ground has already bent below the eye ray.
 //
 // Everything here that describes the WORLD rather than the mesh comes from
 // PLANET. levels/resolution/cellSize/maxCellScale describe the mesh: they are a
@@ -198,7 +199,7 @@ let coarseCooldown = 0;
 // minHalf forces a wider window than visibility alone would justify. Exactly
 // one caller needs it: the spawn search, which reads SPAWN_HALF cells looking
 // for somewhere worth standing before there is a camera to have a horizon.
-function loadCoarse(camX, camZ, eyeAboveGround, minHalf = 0) {
+function loadCoarse(camX, camZ, eyeAboveSeaLevel, minHalf = 0) {
     if (coarseCooldown > 0) coarseCooldown--;
     const cell = coarse ? coarse.cellSize : 7680;
     const ci = Math.round(camZ / cell);
@@ -214,7 +215,7 @@ function loadCoarse(camX, camZ, eyeAboveGround, minHalf = 0) {
     // that was going behind the planet.
     const half = Math.max(
         minHalf,
-        Math.ceil((terrain.coverageDistance(eyeAboveGround) * 1.1) / cell) + 2);
+        Math.ceil((terrain.coverageDistance(eyeAboveSeaLevel) * 1.1) / cell) + 2);
     const restep = Math.max(4, Math.floor(half * 0.08));
     // Re-cut when the window is too small, when it is much too big (descending
     // shrinks the ring stack, and holding a 1206-square field to fly at ground
@@ -409,12 +410,15 @@ function frame() {
 
     // The world has no edge: re-cut the coarse window when the camera has
     // travelled far enough that the ring stack would otherwise reach past it.
-    // The window is sized from eye height above ground, because that is what
-    // sets the horizon and therefore how much of the reach is actually visible.
+    // Sized from eye height above SEA LEVEL, which is what sets the horizon.
+    // Height above the ground underfoot is a different quantity and using it
+    // here cut the world off 30 km out while standing on a 3.7 km massif, where
+    // the true horizon is 219 km — the terrain ended in a wall.
     const gCoarse = elevationAt(cam.pos[0], cam.pos[2]);
     const aglCoarse = Math.max(1, cam.pos[1] -
                                (gCoarse === null ? PLANET.seaLevel : gCoarse));
-    if (world && !world.generating) loadCoarse(cam.pos[0], cam.pos[2], aglCoarse);
+    const aslCoarse = Math.max(1, cam.pos[1] - PLANET.seaLevel);
+    if (world && !world.generating) loadCoarse(cam.pos[0], cam.pos[2], aslCoarse);
     terrain.update(cam.pos[0], cam.pos[1], cam.pos[2]);
 
     const g = gCoarse;
