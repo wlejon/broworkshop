@@ -31,8 +31,47 @@ import { installSystemMenu } from "/lib/system-menu.js";
 // =============================================================================
 
 const WEIGHTS   = 'D:/projects/brodiffusion/weights/terrain-diffusion-30m-bro';
-const SEA_LEVEL = 0;      // the model already puts sea level at 0 m
 const SPAWN_HALF = 72;    // coarse cells searched for a start position
+
+// =============================================================================
+// THE PLANET DESCRIPTOR
+//
+// Everything that makes this world THIS world, in one object. Not a set of
+// scattered constants: a planet is a thing you author, and worlds of different
+// size and composition are the point — a moon is not a small Earth, it is a
+// different radius, a different sea level and no snow line at all.
+//
+// So nothing below is allowed to be hard-coded downstream. This object is what
+// the world builder will edit and serialise; the app is already written as its
+// consumer so that the builder has something real to drive rather than a
+// parallel implementation to keep in sync.
+//
+// RADIUS IS THE LOAD-BEARING FIELD. It sets the horizon, sqrt(2Rh+h^2), and
+// therefore how far the world must be generated, held and drawn at every
+// altitude. Earth's 6371 km shows 5 km of ground from a 2 m eye height; a
+// 600 km moon shows 1.5 km and feels correspondingly small to stand on, which
+// is the effect rather than a limitation. 0 means a flat, endless world.
+//
+// The elevation model was trained on Earth, so its landforms carry an implied
+// scale. Putting them on a smaller planet is a deliberate choice (they read as
+// oversized, which is what a small dense world SHOULD look like), not an
+// accident to be corrected — but it is the reason radius and metresPerCell are
+// separate knobs.
+// =============================================================================
+const PLANET = {
+    name:   'earthlike',
+    radius: 6371000,      // metres; 0 = flat world
+
+    seaLevel:    0,       // metres; the model already puts sea level at 0
+    heightScale: 1,       // sampled metres -> world metres; >1 exaggerates relief
+    snowLine:    1700,    // metres; Infinity for a world with no snow
+
+    // Structure below the data floor. detailRelief is a SLOPE, so it needs no
+    // retuning when heightScale changes — see ClipmapConfig.
+    detailWavelength: 48,
+    detailRelief:     0.35,
+    detailOctaves:    7,
+};
 
 // The detail exemplar is still ONE decoder tile, and it is not a height layer:
 // it is a 61 km sample of what ridges and drainage LOOK like, reused as the
@@ -72,29 +111,34 @@ scene.setShadowQuality(4096, 3);
 scene.setAtmosphere({
     enabled: true,
     sunDirection: [-SUN_DIR[0], -SUN_DIR[1], -SUN_DIR[2]],
-    seaLevel: SEA_LEVEL,
+    seaLevel: PLANET.seaLevel,
 });
 
-// 11 levels of 128 quads at 8 m reach 64 * 8 * 2^10 = 524 km on the ground, and
-// the stack zooms with altitude up to maxCellScale, so from orbit it reaches
-// 4194 km. The coarse window is re-cut to cover whatever it currently claims.
+// 11 levels of 128 quads at 8 m REACH 64 * 8 * 2^10 = 524 km, and the stack
+// zooms with altitude up to maxCellScale, so from orbit the rings reach 4194 km.
+// Reach is a fixed triangle budget, so it is nearly free.
 //
-// maxCellScale is capped at 8 because the app has to SERVE that footprint: the
-// window is a single coarse request, and 4194 km at 7.68 km/cell is already a
-// 1206-square field. The engine's own cap is far higher; this is the app saying
-// what it can feed. Heights arrive in metres, so heightScale stays 1; detail
-// synthesises the decades below the data floor.
+// What is NOT free is COVERING it with data, and that is bounded by the planet
+// rather than by the rings: terrain.coverageDistance is min(reach, 2 x horizon).
+// Past it the layer's coverage fades and the surface drops to sea level, which
+// is safe precisely because that ground has already bent below the eye ray.
+//
+// Everything here that describes the WORLD rather than the mesh comes from
+// PLANET. levels/resolution/cellSize/maxCellScale describe the mesh: they are a
+// performance budget and are the same on any planet.
 const terrain = scene.createClipmapTerrain({
     levels: 11,
     resolution: 128,
     cellSize: 8,
-    heightScale: 1,
-    seaLevel: SEA_LEVEL,
-    detailWavelength: 48,
-    detailRelief: 0.35,
-    detailOctaves: 7,
-    snowLine: 1700,
     maxCellScale: 8,
+
+    planetRadius:     PLANET.radius,
+    seaLevel:         PLANET.seaLevel,
+    heightScale:      PLANET.heightScale,
+    snowLine:         PLANET.snowLine,
+    detailWavelength: PLANET.detailWavelength,
+    detailRelief:     PLANET.detailRelief,
+    detailOctaves:    PLANET.detailOctaves,
 });
 
 // --- The detail exemplar — one decoder tile, used as structure, not as data ---
@@ -151,15 +195,26 @@ let coarseCellI = null, coarseCellJ = null;   // window centre, in coarse cells
 const COARSE_COOLDOWN = 20;   // frames between re-cuts, whatever asks for one
 let coarseCooldown = 0;
 
-function loadCoarse(camX, camZ) {
+// minHalf forces a wider window than visibility alone would justify. Exactly
+// one caller needs it: the spawn search, which reads SPAWN_HALF cells looking
+// for somewhere worth standing before there is a camera to have a horizon.
+function loadCoarse(camX, camZ, eyeAboveGround, minHalf = 0) {
     if (coarseCooldown > 0) coarseCooldown--;
     const cell = coarse ? coarse.cellSize : 7680;
     const ci = Math.round(camZ / cell);
     const cj = Math.round(camX / cell);
 
-    // Cover the ring span with a margin, and let the camera drift a quarter of
-    // that margin before paying for a re-cut.
-    const half = Math.ceil((terrain.farDistance * 1.1) / cell) + 2;
+    // Cover what can actually be SEEN, with a margin, and let the camera drift
+    // a quarter of that margin before paying for a re-cut.
+    //
+    // coverageDistance, not farDistance. The rings reach 524 km from the deck
+    // and the horizon is 5 km; sizing from the rings meant generating a
+    // 137,000 sq km field to render 79 of them. On the ground this is now a
+    // 4-cell radius instead of 70 — three orders of magnitude of generator work
+    // that was going behind the planet.
+    const half = Math.max(
+        minHalf,
+        Math.ceil((terrain.coverageDistance(eyeAboveGround) * 1.1) / cell) + 2);
     const restep = Math.max(4, Math.floor(half * 0.08));
     // Re-cut when the window is too small, when it is much too big (descending
     // shrinks the ring stack, and holding a 1206-square field to fly at ground
@@ -253,7 +308,7 @@ if (!bro.worldgen || !bro.worldgen.available) {
         seed: 42,
         onReady: (w) => {
             world = w;
-            loadCoarse(0, 0);
+            loadCoarse(0, 0, 2, SPAWN_HALF);
             chooseSpawn();
             status.textContent = 'Sampling detail structure...';
             requestExemplar(cam.pos[0], cam.pos[2]);
@@ -317,7 +372,7 @@ function toggleMode() {
         // Never below sea level — walking the seabed is a worse failure than
         // hovering.
         const g = elevationAt(cam.pos[0], cam.pos[2]);
-        cam.pos[1] = Math.max(SEA_LEVEL, g === null ? cam.pos[1] : g) + EYE;
+        cam.pos[1] = Math.max(PLANET.seaLevel, g === null ? cam.pos[1] : g) + EYE;
         cam.vel = [0, 0, 0];
     }
 }
@@ -337,7 +392,7 @@ function frame() {
     if (mouseX || mouseY) { Camera.flyLook(cam, mouseX, mouseY); mouseX = mouseY = 0; }
 
     const gNow = elevationAt(cam.pos[0], cam.pos[2]);
-    const aglNow = Math.max(0, cam.pos[1] - (gNow === null ? SEA_LEVEL : gNow));
+    const aglNow = Math.max(0, cam.pos[1] - (gNow === null ? PLANET.seaLevel : gNow));
     let speed = (mode === 'fly')
         ? Math.min(FLY_MAX, FLY_BASE + aglNow * FLY_PER_M) * speedTrim
         : WALK_SPEED;
@@ -349,16 +404,21 @@ function frame() {
         // the GPU draws, so a character controller would add nothing but a
         // collision shape to keep in sync.
         const g = elevationAt(cam.pos[0], cam.pos[2]);
-        if (g !== null) { cam.pos[1] = Math.max(SEA_LEVEL, g) + EYE; cam.vel[1] = 0; }
+        if (g !== null) { cam.pos[1] = Math.max(PLANET.seaLevel, g) + EYE; cam.vel[1] = 0; }
     }
 
     // The world has no edge: re-cut the coarse window when the camera has
     // travelled far enough that the ring stack would otherwise reach past it.
-    if (world && !world.generating) loadCoarse(cam.pos[0], cam.pos[2]);
+    // The window is sized from eye height above ground, because that is what
+    // sets the horizon and therefore how much of the reach is actually visible.
+    const gCoarse = elevationAt(cam.pos[0], cam.pos[2]);
+    const aglCoarse = Math.max(1, cam.pos[1] -
+                               (gCoarse === null ? PLANET.seaLevel : gCoarse));
+    if (world && !world.generating) loadCoarse(cam.pos[0], cam.pos[2], aglCoarse);
     terrain.update(cam.pos[0], cam.pos[1], cam.pos[2]);
 
-    const g = elevationAt(cam.pos[0], cam.pos[2]);
-    const agl = Math.max(1, cam.pos[1] - (g === null ? SEA_LEVEL : g));
+    const g = gCoarse;
+    const agl = aglCoarse;
     // Depth is reversed-Z, so a 500 km far plane costs nothing. Near still
     // scales with altitude: at 4 km up nothing is within 200 m anyway.
     cam.far  = terrain.farDistance * 1.05;
