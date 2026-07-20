@@ -1,0 +1,11 @@
+{
+  "name": "earthlike",
+  "seed": 42,
+  "radius": 6371000,
+  "width": 5212,
+  "height": 2606,
+  "cellSize": 7680,
+  "chart": "equirectangular",
+  "wrapBand": 200,
+  "poleBand": 72
+}

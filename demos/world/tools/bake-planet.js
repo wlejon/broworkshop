@@ -21,28 +21,34 @@
 // =============================================================================
 import { PLANET, CHART, chartSize, foldLongitude, closePoles }
     from '/app/planet.js';
+import { worldgen, ready } from '/app/app.js';
 
 const fs = require('fs');
 
-const WEIGHTS = 'D:/projects/brodiffusion/weights/terrain-diffusion-30m-bro';
-const OUT_BIN = '/app/planet-coarse.bin';
-const OUT_JSON = '/app/planet-coarse.json';
+const OUT_BIN  = 'D:/projects/broworkshop/demos/world/planet-coarse.bin';
+const OUT_JSON = 'D:/projects/broworkshop/demos/world/planet-coarse.json';
 
 // Tile the generation. Cost is dominated by fixed overhead rather than area
-// (156^2 measured 1.3 s, 1212^2 measured 36 s — roughly 25x the cells for 28x
-// the time), so tiles want to be large. 1024 keeps each call's working set
-// sane while staying deep in the efficient regime.
+// (156^2 measured 1.3 s, 1212^2 measured 36 s — roughly 60x the cells for 28x
+// the time), so tiles want to be large. 1024 keeps each call's working set sane
+// while staying deep in the efficient regime.
 const TILE = 1024;
 
-if (!bro.worldgen || !bro.worldgen.available) {
-    console.log('BAKE SKIPPED: this build has no bro.worldgen');
+// DRIVEN FROM THE TOP LEVEL, not from an onReady callback. bro-headless tears
+// the runtime down once the script's top level finishes, so a bake that lived
+// in a callback got ~39 s into its first tile and was killed mid-call with no
+// error and a zero exit code. The wait loop is what keeps the script alive.
+//
+// It also reuses the app's world rather than loading its own. Two copies of a
+// 250 M parameter pipeline is a needless VRAM risk, and the app is already
+// holding one — the tool runs inside the app's realm, so there is no reason to
+// duplicate it.
+for (let i = 0; i < 1800; i++) { wallSleep(100); advanceTime(16); if (ready()) break; }
+const world = worldgen();
+if (!world) {
+    console.log('BAKE FAILED: the app never produced a world');
 } else {
-    bro.worldgen.init();
-    bro.worldgen.loadWorld(WEIGHTS, {
-        seed: PLANET.seed,
-        onReady: (world) => { bake(world); },
-        onError: (m) => { console.log('BAKE FAILED: ' + m); },
-    });
+    bake(world);
 }
 
 function bake(world) {
