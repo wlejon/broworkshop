@@ -157,7 +157,10 @@ function loadCoarse(camX, camZ) {
     // that margin before paying for a re-cut.
     const half = Math.ceil((terrain.farDistance * 1.1) / cell) + 2;
     const restep = Math.max(4, Math.floor(half * 0.08));
-    if (coarseCellI !== null && half <= coarseHalf &&
+    // Re-cut when the window is too small, when it is much too big (descending
+    // shrinks the ring stack, and holding a 1206-square field to fly at ground
+    // level is pure waste), or when the camera has drifted far enough.
+    if (coarseCellI !== null && half <= coarseHalf && half > coarseHalf * 0.6 &&
         Math.abs(ci - coarseCellI) < restep &&
         Math.abs(cj - coarseCellJ) < restep) return false;
     coarseHalf = half;
