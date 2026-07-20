@@ -15,14 +15,25 @@ import { createHorizon } from "./horizon.js";
 // THE ARCHITECTURE THAT MAKES THIS PLAYABLE.  A single elevation request costs
 // seconds, which would be fatal if it happened per terrain chunk. It doesn't:
 //
-//   - Generation happens at TILE scale (1024 cells = 30.7 km), asynchronously,
-//     on a background thread. Cost is dominated by fixed overhead rather than
-//     area, so one big tile is ~25x cheaper per cell than many small ones.
+//   - Generation happens at TILE scale, asynchronously, on a background thread.
 //   - Chunk streaming then samples an already-resident tile, which is a cheap
 //     array read, so terrain.setHeightSource stays synchronous and simple.
 //
-// Flying at 100 m/s crosses a tile in five minutes, so generation runs far
-// ahead of the camera.
+// SIZE THE REQUEST GENEROUSLY. Cost is dominated by fixed overhead, not area.
+// Measured on this checkpoint:
+//
+//     1024^2   1.1 s    30.7 km across     880 km2/s
+//     2048^2   1.3 s    61.4 km across    2986 km2/s     <-- 3.4x
+//     3072^2   4.3 s    92.2 km across    1973 km2/s
+//
+// So 2048 is the knee: four times the area of 1024 for twenty percent more
+// time, while 3072 falls off again. Asking for small tiles as you need them is
+// the single most expensive thing this app could do — the first version paid
+// ~4.6 s per 30 km tile and stopped dead every time one was needed.
+//
+// One tile is 61 km, and the near mesh only reaches 12.8 km, so the tile under
+// you covers minutes of flight in any direction. At 220 m/s the ring around it
+// is prefetched long before you can reach its edge.
 //
 // DISTANCE IS THREE MECHANISMS, NOT ONE METRIC.  Nothing spans 1 m to 1000 km.
 // The model's own three stages are already a hierarchy, and each one gets the
@@ -42,7 +53,7 @@ import { createHorizon } from "./horizon.js";
 // =============================================================================
 
 const WEIGHTS   = 'D:/projects/brodiffusion/weights/terrain-diffusion-30m-bro';
-const TILE      = 1024;   // elevation cells per tile edge (30.7 km)
+const TILE      = 2048;   // elevation cells per tile edge (61.4 km)
 const METRES    = 30;     // metres per elevation cell (the checkpoint's native res)
 const CELL      = 10;     // metres per TERRAIN cell — 3x finer than the data
 const CHUNK     = 128;    // terrain cells per chunk edge (1.28 km)
@@ -127,7 +138,7 @@ function requestTile(ti, tj) {
             tiles.set(k, r);
             pendingCount--;
             generatedTiles++;
-            onTileArrived();
+            onTileArrived(ti, tj);
         },
         onError: (e) => {
             // Drop it so a later frame retries rather than leaving a hole
@@ -265,13 +276,25 @@ function createTerrain() {
     });
 }
 
-// A chunk built while its tile was missing fell back to noise and will never
-// re-ask on its own, so a newly arrived tile has to force a rebuild. This is
-// heavy, but it happens once per ~30 km of travel.
-function onTileArrived() {
+// A chunk built before its tile existed is showing placeholder seabed and will
+// never re-ask on its own, so an arriving tile has to invalidate it.
+//
+// This used to call terrain.configure(), which destroys every chunk and
+// rebuilds from nothing. The comment here claimed that was affordable because
+// it happened "once per ~30 km of travel" — which was simply wrong.
+// streamTiles() requests a 25-tile neighbourhood, so early on a tile lands
+// every few seconds, and each one wiped 221 chunks that the 3-per-frame load
+// budget needed ~74 frames to restore. The terrain appeared, vanished, partly
+// rebuilt somewhere else, and vanished again, on repeat, at 20 fps.
+//
+// invalidateRegion regenerates in place instead: nothing is destroyed, the work
+// is spread across frames, and chunks whose heights come back unchanged skip
+// remeshing entirely. Terrain refines rather than blinking.
+function onTileArrived(ti, tj) {
     if (!terrain) { createTerrain(); return; }
-    declinedChunks = 0;   // the rebuild re-asks for every chunk
-    terrain.configure(terrainOpts());
+    declinedChunks = 0;
+    terrain.invalidateRegion(tj * TILE * METRES, ti * TILE * METRES,
+                             (tj + 1) * TILE * METRES, (ti + 1) * TILE * METRES);
 }
 
 // ============================================================================
@@ -361,7 +384,7 @@ if (!bro.worldgen || !bro.worldgen.available) {
         onReady: (w) => {
             world = w;
             loadHorizonField();      // also picks the spawn
-            status.textContent = 'Generating first tile (30.7 km)...';
+            status.textContent = 'Generating terrain (61 km across)...';
             // The tile under the spawn, not the origin's — chooseSpawn has
             // usually moved us a long way from there by now.
             requestTile(Math.floor(worldToCellI(cam.pos[2]) / TILE),
@@ -432,16 +455,27 @@ function streamTiles() {
     const ci = worldToCellI(cam.pos[2]), cj = worldToCellJ(cam.pos[0]);
     const ti = Math.floor(ci / TILE),    tj = Math.floor(cj / TILE);
 
+    // A 2048^2 tile is 16 MB, so the cache cannot just grow. Anything more than
+    // two tiles away is 120+ km off and can be regenerated in ~1.3 s if we ever
+    // go back — the world is a pure function of (seed, position), so dropping a
+    // tile loses nothing.
+    if (tiles.size > 12) {
+        for (const [k, v] of tiles) {
+            if (v === 'pending') continue;   // evicting this would desync pendingCount
+            const [ki, kj] = k.split(',').map(Number);
+            if (Math.max(Math.abs(ki - ti), Math.abs(kj - tj)) > 2) tiles.delete(k);
+        }
+    }
+
     // The tile we're standing on first, then the ring around it — a tile edge
     // can be reached in a couple of minutes of flight, so the neighbours need
     // to be in flight well before they're needed.
     if (!tileAt(ti, tj)) { requestTile(ti, tj); return; }
-    // Then outward in rings. The horizon at sea level reaches ~155 km, so a
-    // single ring of neighbours (92 km) still ends in empty seabed where
-    // mountains should be; RINGS=2 covers 153 km. Each tile is ~4.6 s and only
-    // one runs at a time, so this fills in over a couple of minutes rather
-    // than all at once.
-    const RINGS = 2;
+    // Then the ring around it. One ring of 61 km tiles is 184 km of terrain,
+    // which is more than the 12.8 km mesh can ever ask for and further than the
+    // camera can fly in ten minutes. A second ring would cost 16 more tiles and
+    // 256 MB to cover ground the raymarched horizon is already drawing.
+    const RINGS = 1;
     for (let r = 1; r <= RINGS; r++) {
         for (let di = -r; di <= r; di++) {
             for (let dj = -r; dj <= r; dj++) {
@@ -523,3 +557,4 @@ function frame() {
 requestAnimationFrame(frame);
 
 export { cam, tiles, elevationAt, toggleMode };
+export const chunkCount = () => (terrain ? terrain.chunkCount : 0);
