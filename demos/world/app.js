@@ -1,6 +1,5 @@
 import "/lib/camera.js";
 import { installSystemMenu } from "/lib/system-menu.js";
-import { createHorizon } from "./horizon.js";
 
 // =============================================================================
 // World — a playable learned planet
@@ -10,54 +9,31 @@ import { createHorizon } from "./horizon.js";
 // elevation in METRES at 30 m per cell, with drainage networks, coastlines and
 // mountain ranges that FBm cannot produce because FBm has no notion of water
 // flowing downhill. The world is a pure function of (seed, position), so there
-// is no generation order to preserve and nothing to save.
+// is nothing to save.
 //
-// THE ARCHITECTURE THAT MAKES THIS PLAYABLE.  A single elevation request costs
-// seconds, which would be fatal if it happened per terrain chunk. It doesn't:
+// THE SHAPE OF THE APP.  The model gives two scales — a 30 m decoder field that
+// costs seconds per tile, and a 7.68 km coarse field that costs a fraction of
+// one and covers a thousand kilometres. That is a two-level height pyramid,
+// which is what scene.createClipmapTerrain() consumes:
 //
-//   - Generation happens at TILE scale, asynchronously, on a background thread.
-//   - Chunk streaming then samples an already-resident tile, which is a cheap
-//     array read, so terrain.setHeightSource stays synchronous and simple.
+//   layer 0   30 m     decoder tiles composited around the camera   (30.7 km)
+//   layer 1   7.68 km  one coarse request, made once                 (983 km)
 //
-// SIZE THE REQUEST GENEROUSLY. Cost is dominated by fixed overhead, not area.
-// Measured on this checkpoint:
+// The clipmap is ONE mesh, built once, parked on the camera and displaced on
+// the GPU. No chunks, no LOD rings to crack and no horizon dome — the rings
+// reach 500 km, so what is under your feet and what you see at the horizon are
+// the same surface, and everything that used to bridge them is gone.
 //
-//     1024^2   1.1 s    30.7 km across     880 km2/s
-//     2048^2   1.3 s    61.4 km across    2986 km2/s     <-- 3.4x
-//     3072^2   4.3 s    92.2 km across    1973 km2/s
-//
-// So 2048 is the knee: four times the area of 1024 for twenty percent more
-// time, while 3072 falls off again. Asking for small tiles as you need them is
-// the single most expensive thing this app could do — the first version paid
-// ~4.6 s per 30 km tile and stopped dead every time one was needed.
-//
-// One tile is 61 km, and the near mesh only reaches 12.8 km, so the tile under
-// you covers minutes of flight in any direction. At 220 m/s the ring around it
-// is prefetched long before you can reach its edge.
-//
-// DISTANCE IS THREE MECHANISMS, NOT ONE METRIC.  Nothing spans 1 m to 1000 km.
-// The model's own three stages are already a hierarchy, and each one gets the
-// mechanism that suits it:
-//
-//   near   0-13 km   30 m decoder    mesh        you collide with it
-//   far    13 km+    7.7 km coarse   raymarch    you only look at it
-//   sky                              gradient
-//
-// A mesh has to exist before you can see it, so the far field cannot be one:
-// covering what is visible from orbit would mean generating and meshing
-// millions of km2. The raymarcher draws whatever the heightfield says is
-// there for a texture fetch per step, with no generation, streaming or LOD.
-// That is also why the LOD cracks and the z-fighting are gone rather than
-// tuned: the near mesh needs no LOD rings at all now, and the depth buffer
-// spans 26 km instead of 160.
+// Decoder requests are sized generously — cost is fixed overhead, not area
+// (1024^2 1.1 s, 2048^2 1.3 s, 3072^2 4.3 s) — so tiles are 2048 cells / 61 km.
 // =============================================================================
 
 const WEIGHTS   = 'D:/projects/brodiffusion/weights/terrain-diffusion-30m-bro';
-const TILE      = 2048;   // elevation cells per tile edge (61.4 km)
-const METRES    = 30;     // metres per elevation cell (the checkpoint's native res)
-const CELL      = 10;     // metres per TERRAIN cell — 3x finer than the data
-const CHUNK     = 128;    // terrain cells per chunk edge (1.28 km)
+const TILE      = 2048;   // decoder cells per tile edge (61.4 km)
+const METRES    = 30;     // metres per decoder cell (the checkpoint's native res)
 const SEA_LEVEL = 0;      // the model already puts sea level at 0 m
+const FINE_N    = 1024;   // layer-0 texels per axis => 30.7 km around the camera
+const COARSE_HALF = 64;   // coarse cells each way => 983 km at 7.68 km/cell
 
 const canvas = document.getElementById('c');
 const scene  = canvas.getContext('scene');
@@ -66,19 +42,15 @@ const status = document.getElementById('status');
 
 installSystemMenu();
 
-// ============================================================================
-// Sky, sun, water
-// ============================================================================
+// --- Sky, sun, terrain ---
 
 scene.setToneMap({ mode: 'aces', exposure: 0.9, gamma: 2.2 });
-scene.setEnvironment({
-    hdr: '../lighting-demo/hdri/kloofendal_43d_clear_puresky_2k.hdr',
-    intensity: 1.0,
-});
+
+const SUN_DIR = [-0.4, -0.85, -0.35];
 
 const sun = scene.createLight({
     type: 'directional',
-    direction: [-0.4, -0.85, -0.35],
+    direction: SUN_DIR,
     color: [1.0, 0.95, 0.86],
     intensity: 3.2,
 });
@@ -87,69 +59,57 @@ sun.cascadeCount = 4;
 sun.cascadeSplitLambda = 0.85;
 scene.setShadowQuality(4096, 3);
 
-// ============================================================================
-// Horizon — everything past the near mesh, plus the sea
-// ============================================================================
-//
-// The sea belongs to the horizon rather than to the app. It has to exist in two
-// forms — near geometry that depth-sorts against terrain, and dome fragments
-// beyond that — and the only way to keep those from showing a join is for one
-// piece of code to own both.
-
-const DOME_RADIUS = 20000;   // between the mesh's reach and the far plane
-const MESH_REACH  = 12800;   // one ring: loadRadius 10 * 1.28 km chunks
-
-const horizon = createHorizon(scene, {
-    radius: DOME_RADIUS,
-    meshReach: MESH_REACH,
-    // Start marching inside the mesh's reach rather than at its edge. The two
-    // overlap for a few km and the depth buffer picks the winner per pixel —
-    // the mesh is nearer than the dome everywhere it exists, so it always wins.
-    // Butting them together exactly would instead leave a seam wherever a chunk
-    // had not loaded.
-    // Inside the water's 8.6 km edge, so the dome is already marching where the
-    // sea stops and there is no band that neither surface owns.
-    start: 7000,
+// Analytic single-scattering sky + aerial perspective. sunDirection points
+// TOWARDS the sun, so it is the negation of the light's travel direction. No
+// setFog: aerial perspective is the air, and running both double-counts it.
+scene.setAtmosphere({
+    enabled: true,
+    sunDirection: [-SUN_DIR[0], -SUN_DIR[1], -SUN_DIR[2]],
+    seaLevel: SEA_LEVEL,
 });
 
-// ============================================================================
-// Tile cache — the async half
-// ============================================================================
+// 11 levels of 128 quads at 8 m reach 64 * 8 * 2^10 = 524 km, containing the
+// coarse field's 491 km half-extent, so geometry exists everywhere there is
+// data. Heights arrive in metres, so heightScale stays 1; detail synthesises the
+// decades below the 30 m data floor.
+const terrain = scene.createClipmapTerrain({
+    levels: 11,
+    resolution: 128,
+    cellSize: 8,
+    heightScale: 1,
+    seaLevel: SEA_LEVEL,
+    detailWavelength: 48,
+    detailRelief: 0.35,
+    detailOctaves: 7,
+    snowLine: 1700,
+});
+
+// --- Tile cache — the async half ---
 
 let world = null;
 const tiles = new Map();          // "ti,tj" -> { data, width, height } | 'pending'
-let pendingCount = 0;
-let generatedTiles = 0;
+let pendingCount = 0, generatedTiles = 0;
 
 const tileKey = (ti, tj) => ti + ',' + tj;
 
-// Elevation cell (i, j) -> world (z, x). i is north-south, j is west-east.
-const worldToCellI = (wz) => wz / METRES;
-const worldToCellJ = (wx) => wx / METRES;
+// Decoder cell (i, j) -> world (z, x). i is north-south, j is west-east.
+const cellI = (wz) => wz / METRES;
+const cellJ = (wx) => wx / METRES;
 
 function requestTile(ti, tj) {
     const k = tileKey(ti, tj);
-    if (!world || tiles.has(k)) return;
     // One request at a time per world: the pipeline's tile cache is not
     // thread-safe and elevation() throws rather than racing it.
-    if (world.generating) return;
-
+    if (!world || world.generating || tiles.has(k)) return;
     tiles.set(k, 'pending');
     pendingCount++;
     world.elevation(ti * TILE, tj * TILE, (ti + 1) * TILE, (tj + 1) * TILE, {
         onDone: (r) => {
-            tiles.set(k, r);
-            pendingCount--;
-            generatedTiles++;
-            onTileArrived(ti, tj);
+            tiles.set(k, r); pendingCount--; generatedTiles++;
+            fineOriginI = null;         // force a recomposite with the new data
         },
-        onError: (e) => {
-            // Drop it so a later frame retries rather than leaving a hole
-            // wedged 'pending' forever.
-            tiles.delete(k);
-            pendingCount--;
-            console.log('tile ' + k + ' failed: ' + e);
-        },
+        // Drop it so a later frame retries rather than wedging 'pending'.
+        onError: (e) => { tiles.delete(k); pendingCount--; console.log('tile ' + k + ': ' + e); },
     });
 }
 
@@ -158,248 +118,117 @@ function tileAt(ti, tj) {
     return (t && t !== 'pending') ? t : null;
 }
 
-// ============================================================================
-// Elevation sampling — the synchronous half
-// ============================================================================
+// --- Layer 0 — the 30 m field, composited around the camera ---
+//
+// A height layer is ONE contiguous texture with ONE origin, so the per-tile Map
+// has to be flattened into a layer-sized array around the camera. Snapping that
+// origin to the 30 m cell grid puts every texel exactly on a decoder cell, so
+// the composite is a copy rather than a resample and cannot introduce a seam.
 
-// Bilinear-sample the resident tiles at a world position. Returns null if the
-// covering tile is not loaded yet, which is what tells the height source to
-// decline the whole chunk rather than emit a half-real one.
-function elevationAt(wx, wz) {
-    const ci = worldToCellI(wz);
-    const cj = worldToCellJ(wx);
-    const i0 = Math.floor(ci), j0 = Math.floor(cj);
-    const fi = ci - i0,        fj = cj - j0;
+const fine = new Float32Array(FINE_N * FINE_N);
+let fineOriginI = null, fineOriginJ = null;
 
-    // The four corners can straddle a tile boundary, so each is resolved
-    // independently. Tiles agree exactly where they meet (worldgen crops a
-    // margin off every request), so this cannot produce a seam.
-    let acc = 0;
-    for (let dz = 0; dz < 2; dz++) {
-        for (let dx = 0; dx < 2; dx++) {
-            const gi = i0 + dz, gj = j0 + dx;
-            const ti = Math.floor(gi / TILE), tj = Math.floor(gj / TILE);
+function composeFine(camX, camZ) {
+    const i0 = Math.round(cellI(camZ)) - FINE_N / 2;
+    const j0 = Math.round(cellJ(camX)) - FINE_N / 2;
+    if (fineOriginI !== null &&
+        Math.abs(i0 - fineOriginI) < FINE_N / 8 &&
+        Math.abs(j0 - fineOriginJ) < FINE_N / 8) return;
+    if (!tileAt(Math.floor(cellI(camZ) / TILE), Math.floor(cellJ(camX) / TILE))) return;
+
+    for (let r = 0; r < FINE_N; r++) {
+        const gi = i0 + r, ti = Math.floor(gi / TILE);
+        for (let c = 0; c < FINE_N; c++) {
+            const gj = j0 + c, tj = Math.floor(gj / TILE);
             const t = tileAt(ti, tj);
-            if (!t) return null;
-            const li = gi - ti * TILE, lj = gj - tj * TILE;
-            const w = (dz ? fi : 1 - fi) * (dx ? fj : 1 - fj);
-            acc += w * t.data[li * t.width + lj];
+            // No tile here yet: leave the coarse layer to cover it. NaN would
+            // poison the texture, so fall through to the coarse sample.
+            fine[r * FINE_N + c] = t
+                ? t.data[(gi - ti * TILE) * t.width + (gj - tj * TILE)]
+                : coarseAt(j0 * METRES + c * METRES, i0 * METRES + r * METRES);
         }
     }
-    return acc;
-}
-
-// ============================================================================
-// Terrain
-// ============================================================================
-
-let terrain = null;
-let servedChunks = 0, declinedChunks = 0;
-
-function terrainOpts() {
-    return {
-        chunkSize: [CHUNK, 600, CHUNK],   // y bounds the height range, in cells
-        cellSize: CELL,
-        // heightAmplitude does NOT shape anything here — the height source has
-        // already replaced the noise generator. It survives only because
-        // colorizeByHeight bands the palette over [seaLevel, seaLevel +
-        // heightAmplitude], so it has to describe the real elevation range or
-        // every slope above 13.6 m comes out as snow.
-        heightAmplitude: 2800,
-        loadRadius: 10,
-        unloadRadius: 14,
-        maxLoadsPerUpdate: 3,
-        // NO LOD RINGS AT ALL. One resolution, 1.28 km chunks, reaching 12.8 km.
-        //
-        // This used to be five rings reaching 155 km, because the mesh was the
-        // only thing drawing distance. That is also where the cracks came from:
-        // a ring boundary is a place two resolutions have to agree along an
-        // edge, and where they don't you see a step with sky or ocean through
-        // it. Cutting to three rings shrank the artifact but left one visible,
-        // because one boundary is all it takes.
-        //
-        // Once the dome draws everything past 8 km the mesh only has to reach
-        // 12.8 km, and at that range a single resolution is affordable — 221
-        // chunks, same frame rate as 98 was. A single resolution has no
-        // boundaries, so the artifact is not reduced, it is unreachable.
-        //
-        // (The engine's ring stitching is still worth fixing for apps that do
-        // need the range. It is just not this app's problem any more.)
-        lodLevels: 1,
-        seaLevel: SEA_LEVEL,
-        meshMode: 0,                      // smooth — the data is already smooth
-        palette: new Float32Array([
-            0, 0, 0, 0,                   // 0: air
-            0.20, 0.34, 0.12, 1,          // 1: lowland green
-            0.36, 0.30, 0.18, 1,          // 2: slope
-            0.42, 0.40, 0.38, 1,          // 3: rock
-            0.90, 0.92, 0.95, 1,          // 4: snow
-            0.76, 0.70, 0.48, 1,          // 5: shore sand
-        ]),
-    };
-}
-
-function createTerrain() {
-    terrain = scene.createTerrain(terrainOpts());
-    terrain.setHeightSource((cx, cz, lod, pw, ph, cellSize, wx0, wz0) => {
-        // Use wx0/wz0 as given. The padded grid reaches one sample beyond the
-        // chunk on every side and those positions already carry that offset;
-        // re-deriving it and dropping the skirt would shift each chunk one cell
-        // against its neighbours — which, for a coherent source, looks entirely
-        // correct and simply fails to line up.
-        const out = new Float32Array(pw * ph);
-        let usedCoarse = false;
-        for (let pz = 0; pz < ph; pz++) {
-            for (let px = 0; px < pw; px++) {
-                const wx = wx0 + px * cellSize, wz = wz0 + pz * cellSize;
-                const h = elevationAt(wx, wz);
-                if (h === null) {
-                    // No 30 m tile here yet — so fall back to the 7.68 km coarse
-                    // field, which is the same data the horizon dome is drawing
-                    // just past this chunk. The terrain is smooth rather than
-                    // detailed until the tile lands, and then it sharpens.
-                    //
-                    // Do NOT return null: that falls back to the built-in FBm,
-                    // and with heightAmplitude describing a 2800 m range the
-                    // noise erupts into kilometre-high spikes.
-                    //
-                    // The previous placeholder was flat seabed at -3000 m, on
-                    // the theory that being under the waterline made it
-                    // invisible. It did the opposite: the water plane drew ocean
-                    // over it, so an unloaded mountain became a circular lake
-                    // sitting on top of the range the dome was correctly drawing
-                    // behind it. A placeholder has to be plausible terrain, not
-                    // hidden terrain, because nothing here is ever truly hidden.
-                    usedCoarse = true;
-                    out[pz * pw + px] = coarseAt(wx, wz);
-                    continue;
-                }
-                out[pz * pw + px] = h;
-            }
-        }
-        if (usedCoarse) declinedChunks++; else servedChunks++;
-        return out;
+    fineOriginI = i0; fineOriginJ = j0;
+    terrain.setHeightLayer(0, {
+        data: fine, width: FINE_N, height: FINE_N,
+        originX: j0 * METRES, originZ: i0 * METRES, metresPerCell: METRES,
     });
 }
 
-// A chunk built before its tile existed is showing coarse terrain and will
-// never re-ask on its own, so an arriving tile has to invalidate it.
+// --- Layer 1 — the coarse field, one request, once ---
 //
-// This used to call terrain.configure(), which destroys every chunk and
-// rebuilds from nothing. The comment here claimed that was affordable because
-// it happened "once per ~30 km of travel" — which was simply wrong.
-// streamTiles() requests a 25-tile neighbourhood, so early on a tile lands
-// every few seconds, and each one wiped 221 chunks that the 3-per-frame load
-// budget needed ~74 frames to restore. The terrain appeared, vanished, partly
-// rebuilt somewhere else, and vanished again, on repeat, at 20 fps.
-//
-// invalidateRegion regenerates in place instead: nothing is destroyed, the work
-// is spread across frames, and chunks whose heights come back unchanged skip
-// remeshing entirely. Terrain refines rather than blinking.
-function onTileArrived(ti, tj) {
-    if (!terrain) { createTerrain(); return; }
-    declinedChunks = 0;
-    terrain.invalidateRegion(tj * TILE * METRES, ti * TILE * METRES,
-                             (tj + 1) * TILE * METRES, (ti + 1) * TILE * METRES);
-}
+// 128 coarse cells at 7.68 km is 983 km across: the whole visible world from any
+// altitude a player reaches, in a single 64 KB texture. The 2.8M-param coarse
+// UNet alone, so it is a blocking call cheap enough for the load screen.
 
-// ============================================================================
-// The horizon's heightfield — one coarse request, once
-// ============================================================================
-
-// 128 coarse cells at 7.68 km is 983 km across, centred on the origin. That is
-// the whole visible world from any altitude a player reaches, in a single 64 KB
-// texture, so it is fetched once at load and never streamed.
-//
-// This is the coarse UNet alone (2.80M params against the latent stage's
-// 253.69M), so it costs a fraction of an elevation tile. It is a blocking call
-// on the JS thread — acceptable for a one-off during the load screen, and the
-// reason the far field is not re-centred as you fly.
-const COARSE_HALF = 64;
 let coarse = null, coarseOrigin = 0;
 
-function loadHorizonField() {
-    const c = world.coarse(-COARSE_HALF, -COARSE_HALF, COARSE_HALF, COARSE_HALF);
-    const origin = -COARSE_HALF * c.cellSize;
-    coarse = c;
-    coarseOrigin = origin;
-    horizon.setField(c, origin, origin, c.cellSize);
-    console.log('horizon field: ' + c.width + 'x' + c.height + ' at ' +
-                c.cellSize + ' m => ' + (c.width * c.cellSize / 1000).toFixed(0) + ' km');
-    chooseSpawn(c, origin);
+function loadCoarse() {
+    coarse = world.coarse(-COARSE_HALF, -COARSE_HALF, COARSE_HALF, COARSE_HALF);
+    coarseOrigin = -COARSE_HALF * coarse.cellSize;
+    terrain.setHeightLayer(1, {
+        data: coarse.data, width: coarse.width, height: coarse.height,
+        originX: coarseOrigin, originZ: coarseOrigin, metresPerCell: coarse.cellSize,
+    });
+    console.log('coarse field: ' + coarse.width + 'x' + coarse.height + ' at ' +
+                coarse.cellSize + ' m => ' +
+                (coarse.width * coarse.cellSize / 1000).toFixed(0) + ' km');
 }
 
-// Spawn somewhere worth looking at.
-//
-// The origin is not a neutral starting point — for seed 42 it is 941 m under
-// water with the nearest land tens of km away, so the opening view is empty
-// ocean and none of this is visible. Which spot the origin lands on is a
-// property of the seed, so tuning a hardcoded position would only move the
-// problem to the next seed.
-//
-// The coarse field is already resident and covers 983 km, so it can answer
-// "where is high ground near the middle of the world" directly. Preferring
-// height near a coast rather than the single highest cell puts the sea, the
-// shoreline and a range in the same frame.
-function chooseSpawn(c, origin) {
-    let bestScore = -Infinity, bx = 0, bz = 0, bh = 0;
-    for (let i = 1; i < c.height - 1; i++) {
-        for (let j = 1; j < c.width - 1; j++) {
-            const h = c.data[i * c.width + j];
-            if (h < 200) continue;                  // want to stand on land
-            // Distance from the middle, in cells — staying near the centre
-            // leaves room to fly in any direction before running off the field.
-            const d = Math.hypot(i - c.height / 2, j - c.width / 2);
-            if (d > COARSE_HALF * 0.5) continue;
-            // Is there ocean nearby? Cheapest proxy: the lowest neighbour.
-            let lo = Infinity;
-            for (let di = -1; di <= 1; di++)
-                for (let dj = -1; dj <= 1; dj++)
-                    lo = Math.min(lo, c.data[(i + di) * c.width + (j + dj)]);
-            const coastal = lo < 0 ? 1200 : 0;
-            const score = h + coastal - d * 40;
-            if (score > bestScore) {
-                bestScore = score; bh = h;
-                bx = origin + j * c.cellSize;
-                bz = origin + i * c.cellSize;
-            }
-        }
-    }
-    if (bestScore === -Infinity) return;            // all ocean; origin will do
-    spawnAt(bx, bz, bh);
-    console.log('spawn: ' + (bx / 1000).toFixed(0) + ', ' + (bz / 1000).toFixed(0) +
-                ' km  coarse height ' + Math.round(bh) + ' m');
-}
-
-// Bilinear elevation from the coarse field — the same 7.68 km data the horizon
-// dome raymarches, sampled on the CPU. It is the low-frequency prior for the
-// entire world and it is resident from the moment the model loads, so it can
-// always answer, anywhere, for free.
 function coarseAt(wx, wz) {
     if (!coarse) return SEA_LEVEL;
     const fx = (wx - coarseOrigin) / coarse.cellSize;
     const fz = (wz - coarseOrigin) / coarse.cellSize;
     const x0 = Math.max(0, Math.min(coarse.width  - 2, Math.floor(fx)));
     const z0 = Math.max(0, Math.min(coarse.height - 2, Math.floor(fz)));
-    const tx = Math.max(0, Math.min(1, fx - x0));
-    const tz = Math.max(0, Math.min(1, fz - z0));
+    const tx = Math.max(0, Math.min(1, fx - x0)), tz = Math.max(0, Math.min(1, fz - z0));
     const d = coarse.data, w = coarse.width;
-    const a = d[z0 * w + x0],       b = d[z0 * w + x0 + 1];
-    const c = d[(z0 + 1) * w + x0], e = d[(z0 + 1) * w + x0 + 1];
-    return (a * (1 - tx) + b * tx) * (1 - tz) + (c * (1 - tx) + e * tx) * tz;
+    return (d[z0 * w + x0] * (1 - tx) + d[z0 * w + x0 + 1] * tx) * (1 - tz) +
+           (d[(z0 + 1) * w + x0] * (1 - tx) + d[(z0 + 1) * w + x0 + 1] * tx) * tz;
 }
 
-function spawnAt(wx, wz, h) {
-    // Well above the coarse height: it is a 7.68 km average, so the real 30 m
-    // terrain underneath can be considerably higher, and starting inside a
-    // mountain is a worse first impression than starting slightly too high.
-    cam.pos = [wx, h + 900, wz];
+// The clipmap is the drawn surface AND the collision surface — it carries the
+// procedural detail the layers do not. Before the first decoder tile lands there
+// is nothing worth standing on, so this reports null and walk mode declines.
+function elevationAt(wx, wz) {
+    return generatedTiles ? terrain.elevationAt(wx, wz) : null;
+}
+
+// Spawn somewhere worth looking at. The origin is not neutral — for seed 42 it is
+// 941 m under water — and where it lands is a property of the seed, so a
+// hardcoded position would only move the problem. The coarse field answers
+// "where is high ground near the middle" directly; preferring height NEAR A
+// COAST puts sea, shoreline and a range in one frame.
+function chooseSpawn() {
+    const c = coarse, w = c.width;
+    let best = -Infinity, bx = 0, bz = 0, bh = 0;
+    for (let i = 1; i < c.height - 1; i++) {
+        for (let j = 1; j < w - 1; j++) {
+            const h = c.data[i * w + j];
+            if (h < 200) continue;                       // want to stand on land
+            const d = Math.hypot(i - c.height / 2, j - w / 2);
+            if (d > COARSE_HALF * 0.5) continue;         // room to fly any way
+            let lo = Infinity;                           // ocean nearby?
+            for (let di = -1; di <= 1; di++)
+                for (let dj = -1; dj <= 1; dj++)
+                    lo = Math.min(lo, c.data[(i + di) * w + (j + dj)]);
+            const score = h + (lo < 0 ? 1200 : 0) - d * 40;
+            if (score > best) {
+                best = score; bh = h;
+                bx = coarseOrigin + j * c.cellSize;
+                bz = coarseOrigin + i * c.cellSize;
+            }
+        }
+    }
+    if (best === -Infinity) return;                      // all ocean; origin will do
+    // Well above the coarse height: it is a 7.68 km average and the real 30 m
+    // terrain under it can be considerably higher.
+    cam.pos = [bx, bh + 900, bz];
     cam.vel = [0, 0, 0];
+    console.log('spawn: ' + (bx / 1000).toFixed(0) + ', ' + (bz / 1000).toFixed(0) + ' km');
 }
 
-// ============================================================================
-// Load
-// ============================================================================
+// --- Load ---
 
 status.textContent = 'Loading terrain model...';
 if (!bro.worldgen || !bro.worldgen.available) {
@@ -410,20 +239,17 @@ if (!bro.worldgen || !bro.worldgen.available) {
         seed: 42,
         onReady: (w) => {
             world = w;
-            loadHorizonField();      // also picks the spawn
+            loadCoarse();
+            chooseSpawn();
             status.textContent = 'Generating terrain (61 km across)...';
-            // The tile under the spawn, not the origin's — chooseSpawn has
-            // usually moved us a long way from there by now.
-            requestTile(Math.floor(worldToCellI(cam.pos[2]) / TILE),
-                        Math.floor(worldToCellJ(cam.pos[0]) / TILE));
+            requestTile(Math.floor(cellI(cam.pos[2]) / TILE),
+                        Math.floor(cellJ(cam.pos[0]) / TILE));
         },
         onError: (e) => { status.textContent = 'Model load failed: ' + e; },
     });
 }
 
-// ============================================================================
-// Camera — fly and walk
-// ============================================================================
+// --- Camera — fly and walk ---
 
 let mode = 'fly';           // 'fly' | 'walk'
 const EYE = 1.7;            // metres, walking
@@ -435,10 +261,7 @@ const cam = Camera.createFly({
     rot: Camera.quatNorm(Camera.quatMul(
         Camera.quatFromAxis(0, 1, 0, -Math.PI / 4),
         Camera.quatFromAxis(1, 0, 0, -0.55))),
-    accel: 14.0,
-    damping: 7.0,
-    rollSpeed: 2.0,
-    lookSpeed: 0.003,
+    accel: 14.0, damping: 7.0, rollSpeed: 2.0, lookSpeed: 0.003,
 });
 
 const keys = {};
@@ -451,71 +274,49 @@ document.addEventListener('keydown', (e) => {
 });
 document.addEventListener('keyup', (e) => { keys[e.key.toLowerCase()] = false; });
 
-canvas.addEventListener('mousedown', (e) => {
-    if (e.button === 2 || e.button === 0) { looking = true; canvas.requestPointerLock(); }
-});
+canvas.addEventListener('mousedown', () => { looking = true; canvas.requestPointerLock(); });
 document.addEventListener('mouseup', () => { looking = false; document.exitPointerLock(); });
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 document.addEventListener('mousemove', (e) => {
-    if (!looking) return;
-    mouseX += e.movementX;
-    mouseY += e.movementY;
+    if (looking) { mouseX += e.movementX; mouseY += e.movementY; }
 });
 
 function toggleMode() {
     mode = (mode === 'fly') ? 'walk' : 'fly';
     if (mode === 'walk') {
-        // Drop to the surface, but never below sea level — walking on the
-        // seabed is a worse failure than hovering.
+        // Never below sea level — walking the seabed is a worse failure than
+        // hovering.
         const g = elevationAt(cam.pos[0], cam.pos[2]);
         cam.pos[1] = Math.max(SEA_LEVEL, g === null ? cam.pos[1] : g) + EYE;
         cam.vel = [0, 0, 0];
     }
 }
 
-// ============================================================================
-// Streaming — keep the tile under the camera, and the one being approached
-// ============================================================================
+// --- Streaming — the tile under the camera, then the ring around it ---
 
 function streamTiles() {
     if (!world || world.generating) return;
-    const ci = worldToCellI(cam.pos[2]), cj = worldToCellJ(cam.pos[0]);
-    const ti = Math.floor(ci / TILE),    tj = Math.floor(cj / TILE);
+    const ti = Math.floor(cellI(cam.pos[2]) / TILE);
+    const tj = Math.floor(cellJ(cam.pos[0]) / TILE);
 
-    // A 2048^2 tile is 16 MB, so the cache cannot just grow. Anything more than
-    // two tiles away is 120+ km off and can be regenerated in ~1.3 s if we ever
-    // go back — the world is a pure function of (seed, position), so dropping a
-    // tile loses nothing.
+    // A 2048^2 tile is 16 MB, so the cache cannot just grow. Anything beyond
+    // two tiles is 120+ km off and regenerates in ~1.3 s, and the world is a
+    // pure function of (seed, position), so dropping one loses nothing.
     if (tiles.size > 12) {
         for (const [k, v] of tiles) {
-            if (v === 'pending') continue;   // evicting this would desync pendingCount
+            if (v === 'pending') continue;   // would desync pendingCount
             const [ki, kj] = k.split(',').map(Number);
             if (Math.max(Math.abs(ki - ti), Math.abs(kj - tj)) > 2) tiles.delete(k);
         }
     }
 
-    // The tile we're standing on first, then the ring around it — a tile edge
-    // can be reached in a couple of minutes of flight, so the neighbours need
-    // to be in flight well before they're needed.
     if (!tileAt(ti, tj)) { requestTile(ti, tj); return; }
-    // Then the ring around it. One ring of 61 km tiles is 184 km of terrain,
-    // which is more than the 12.8 km mesh can ever ask for and further than the
-    // camera can fly in ten minutes. A second ring would cost 16 more tiles and
-    // 256 MB to cover ground the raymarched horizon is already drawing.
-    const RINGS = 1;
-    for (let r = 1; r <= RINGS; r++) {
-        for (let di = -r; di <= r; di++) {
-            for (let dj = -r; dj <= r; dj++) {
-                if (Math.max(Math.abs(di), Math.abs(dj)) !== r) continue;
-                if (!tileAt(ti + di, tj + dj)) { requestTile(ti + di, tj + dj); return; }
-            }
-        }
-    }
+    for (let di = -1; di <= 1; di++)
+        for (let dj = -1; dj <= 1; dj++)
+            if (!tileAt(ti + di, tj + dj)) { requestTile(ti + di, tj + dj); return; }
 }
 
-// ============================================================================
-// Frame
-// ============================================================================
+// --- Frame ---
 
 let last = performance.now(), frames = 0, acc = 0, fps = 0;
 
@@ -534,39 +335,26 @@ function frame() {
     Camera.flyIntegrate(cam, Camera.flyThrustFromKeys(cam, keys), dt, speed);
 
     if (mode === 'walk') {
+        // No physics body: the ground is a direct lookup into the same surface
+        // the GPU draws, so a character controller would add nothing but a
+        // collision shape to keep in sync.
         const g = elevationAt(cam.pos[0], cam.pos[2]);
-        if (g !== null) {
-            // Stick to the surface. No physics body: the terrain is a height
-            // field, so the ground is a direct lookup and a character
-            // controller would only add a collision shape to keep in sync.
-            cam.pos[1] = Math.max(SEA_LEVEL, g) + EYE;
-            cam.vel[1] = 0;
-        }
+        if (g !== null) { cam.pos[1] = Math.max(SEA_LEVEL, g) + EYE; cam.vel[1] = 0; }
     }
 
     streamTiles();
-    if (terrain) terrain.update(cam.pos[0], cam.pos[1], cam.pos[2]);
-
-    // The dome and the sea are skybox-like: fly 20 km and a dome left at the
-    // origin is behind you. Both also need the true world position, because the
-    // vWorldPos varying is camera-relative and the raymarch works in world
-    // space.
-    horizon.follow(cam.pos, SEA_LEVEL);
+    composeFine(cam.pos[0], cam.pos[2]);
+    terrain.update(cam.pos[0], cam.pos[1], cam.pos[2]);
 
     const g = elevationAt(cam.pos[0], cam.pos[2]);
-
-    // Depth is a conventional GL_LESS buffer with no reversed-Z, so precision is
-    // set entirely by the far/near RATIO. Nothing in the depth buffer is further
-    // than the dome now — distance is drawn INSIDE a dome fragment rather than
-    // by putting geometry out there — so far is 26 km rather than 160, and the
-    // ratio at eye height drops from 120000:1 to 20000:1. That is the structural
-    // fix for the stipple; near still scales with altitude on top of it, since
-    // at 4 km up nothing is within 200 m of the eye anyway.
     const agl = Math.max(1, cam.pos[1] - (g === null ? SEA_LEVEL : g));
-    cam.far  = DOME_RADIUS * 1.3;
-    cam.near = Math.max(cam.far / 20000, Math.min(agl * 0.05, 400));
+    // Depth is reversed-Z, so a 500 km far plane costs nothing. Near still
+    // scales with altitude: at 4 km up nothing is within 200 m anyway.
+    cam.far  = terrain.farDistance * 1.05;
+    cam.near = Math.max(0.5, Math.min(agl * 0.05, 400));
     cam.fov  = 70;
     scene.setCamera(Camera.flyViewOptsQuat(cam, canvas));
+
     hud.textContent =
         mode.toUpperCase() +
         '  |  ' + (cam.pos[0] / 1000).toFixed(2) + ', ' + (cam.pos[2] / 1000).toFixed(2) + ' km' +
@@ -574,14 +362,13 @@ function frame() {
         (g === null ? '' : '  |  ground ' + Math.round(g) + ' m') +
         '  |  ' + fps + ' fps' +
         '  |  tiles ' + generatedTiles + (pendingCount ? ' (+' + pendingCount + ')' : '') +
-        '  |  chunks ' + (terrain ? terrain.chunkCount : 0) +
-        (declinedChunks ? '  |  coarse ' + declinedChunks : '');
+        '  |  ' + terrain.layerCount + ' layers, ' +
+        (terrain.triangleCount / 1000).toFixed(0) + 'k tris';
 
-    if (terrain && status.textContent) status.textContent = '';
+    if (generatedTiles && status.textContent) status.textContent = '';
     requestAnimationFrame(frame);
 }
 
 requestAnimationFrame(frame);
 
-export { cam, tiles, elevationAt, toggleMode };
-export const chunkCount = () => (terrain ? terrain.chunkCount : 0);
+export { cam, tiles, terrain, elevationAt, toggleMode };
