@@ -142,14 +142,18 @@ function requestExemplar(camX, camZ) {
 // always finite, so coverage is a race against how fast you fly; the baked chart
 // simply contains every place there is.
 //
-// The world is still FLAT here, and the chart is laid out as its own grid:
-// cell (i, j) sits at world (x = j * cell, z = i * cell), so x runs one
-// circumference and z runs pole to pole. Longitude therefore does not yet wrap
-// on screen — walk far enough east and you reach the chart's edge, where
-// GL_CLAMP_TO_EDGE smears the last column. That edge is what the cube-sphere
-// removes, by sampling this same field BY DIRECTION instead of by XZ. The data
-// is already global and already closed at both seams; only the geometry's
-// addressing is still flat.
+// The chart is laid out as its own grid: cell (i, j) sits at world
+// (x = j * cell, z = i * cell), so x runs one full circumference and z runs pole
+// to pole. LONGITUDE WRAPS — the layer is marked periodic, so flying east past
+// the meridian arrives back at the start over the band the bake blended, and
+// there is no edge to reach any more.
+//
+// Latitude does not, and cannot: an equirectangular chart's polar rows are
+// single points. Flying over a pole is the remaining case the geometry cannot
+// express, because the ring stack is still laid out in CHART metres rather than
+// true arc — near the poles a cell of longitude is much shorter on the ground
+// than at the equator, and at the pole itself it is zero. That is what a
+// camera-centred spherical chart fixes.
 //
 // FALLBACK: generate a window live. The binary is gitignored, so a fresh clone
 // has no bake, and the app has to work before someone has run the tool.
@@ -176,6 +180,7 @@ function requestExemplar(camX, camZ) {
 let coarseHalf = 0;
 
 let baked = false;
+let EAST_SPAN = 0;      // metres of longitude before the world repeats
 let coarse = null, coarseOriginX = 0, coarseOriginZ = 0;
 let coarseCellI = null, coarseCellJ = null;   // window centre, in coarse cells
 
@@ -306,9 +311,14 @@ if (chart) {
                cellSize: chart.cellSize };
     coarseOriginX = 0;
     coarseOriginZ = 0;
+    EAST_SPAN = chart.width * chart.cellSize;
     terrain.setHeightLayer(0, {
         data: chart.data, width: chart.width, height: chart.height,
         originX: 0, originZ: 0, metresPerCell: chart.cellSize,
+        // Longitude is periodic. Without this the chart had an east-west edge
+        // where GL_CLAMP_TO_EDGE smeared the last column outward forever — the
+        // one place left in the world you could reach the end of.
+        wrapX: true,
     });
     console.log('planet: baked chart ' + chart.width + 'x' + chart.height +
                 ' at ' + (chart.cellSize / 1000).toFixed(2) + ' km');
@@ -426,6 +436,12 @@ function frame() {
         const g = elevationAt(cam.pos[0], cam.pos[2]);
         if (g !== null) { cam.pos[1] = Math.max(PLANET.seaLevel, g) + EYE; cam.vel[1] = 0; }
     }
+
+        // Longitude wraps, so keep the camera on the chart. Left unwrapped, x grows
+    // without bound and the elevation lookup stays correct (the sampler is
+    // periodic) while the HUD reports a position off the map and fp32 slowly
+    // loses the sub-cell offset the detail taps depend on.
+    if (baked) cam.pos[0] -= EAST_SPAN * Math.floor(cam.pos[0] / EAST_SPAN);
 
     // The world has no edge: re-cut the coarse window when the camera has
     // travelled far enough that the ring stack would otherwise reach past it.
