@@ -1,5 +1,6 @@
 import "/lib/camera.js";
 import { installSystemMenu } from "/lib/system-menu.js";
+import { createHorizon } from "./horizon.js";
 
 // =============================================================================
 // World — a playable learned planet
@@ -22,6 +23,22 @@ import { installSystemMenu } from "/lib/system-menu.js";
 //
 // Flying at 100 m/s crosses a tile in five minutes, so generation runs far
 // ahead of the camera.
+//
+// DISTANCE IS THREE MECHANISMS, NOT ONE METRIC.  Nothing spans 1 m to 1000 km.
+// The model's own three stages are already a hierarchy, and each one gets the
+// mechanism that suits it:
+//
+//   near   0-13 km   30 m decoder    mesh        you collide with it
+//   far    13 km+    7.7 km coarse   raymarch    you only look at it
+//   sky                              gradient
+//
+// A mesh has to exist before you can see it, so the far field cannot be one:
+// covering what is visible from orbit would mean generating and meshing
+// millions of km2. The raymarcher draws whatever the heightfield says is
+// there for a texture fetch per step, with no generation, streaming or LOD.
+// That is also why the LOD cracks and the z-fighting are gone rather than
+// tuned: the near mesh is now two rings deep and the depth buffer spans 26 km
+// instead of 400.
 // =============================================================================
 
 const WEIGHTS   = 'D:/projects/brodiffusion/weights/terrain-diffusion-30m-bro';
@@ -59,15 +76,38 @@ sun.cascadeCount = 4;
 sun.cascadeSplitLambda = 0.85;
 scene.setShadowQuality(4096, 3);
 
-// A big flat plane at y=0. The model already puts sea level at 0 m, so this
-// needs no tuning — wherever the terrain goes negative, this is the surface
-// above it, and ~70% of a generated region is typically ocean.
+// Local water at y=0. The model already puts sea level at 0 m, so this needs no
+// tuning — wherever terrain goes negative this is the surface above it, and
+// ~70% of a generated region is typically ocean.
+//
+// It is 24 km across and follows the camera rather than being a 1000 km slab.
+// The horizon dome draws distant ocean itself (in the same colour, so the
+// handover is invisible), and a plane that reached past the dome would either
+// be occluded by it or punch through it.
+const WATER_SPAN = 24000;
 const water = scene.createMesh({
-    data: Mesh.plane(1000000, 1000000, 1, 1),
+    data: Mesh.plane(WATER_SPAN, WATER_SPAN, 1, 1),
     position: [0, SEA_LEVEL, 0],
     color: [0.02, 0.10, 0.20],
     metallic: 0.1,
     roughness: 0.08,
+});
+
+// ============================================================================
+// Horizon — everything past the near mesh
+// ============================================================================
+
+const DOME_RADIUS = 20000;   // between the mesh's reach and the far plane
+const MESH_REACH  = 12800;   // lodLevels 3 at 2x, loadRadius 5: 5 * 2560 m
+
+const horizon = createHorizon(scene, {
+    radius: DOME_RADIUS,
+    // Start marching inside the mesh's reach rather than at its edge. The two
+    // overlap for a few km and the depth buffer picks the winner per pixel —
+    // the mesh is nearer than the dome everywhere it exists, so it always wins.
+    // Butting them together exactly would instead leave a seam wherever a chunk
+    // had not loaded.
+    start: 8000,
 });
 
 // ============================================================================
@@ -167,16 +207,17 @@ function terrainOpts() {
         loadRadius: 5,
         unloadRadius: 8,
         maxLoadsPerUpdate: 3,
-        // Without LOD rings the world ends in a visible polygon a few km out:
-        // a 640 m chunk at loadRadius 5 reaches 3.2 km, which is nothing at
-        // 220 m/s. Each ring is 3x coarser, so this reaches ~86 km for a
-        // handful more chunks — and the height source is handed the ring's own
-        // cellSize, so coarse rings sample the same tiles correctly.
-        // Five rings at 3x: 640 m / 1.9 / 5.8 / 17 / 52 km chunks. The outer
-        // ring reaches ~155 km, which is what puts a 2800 m range on the
-        // horizon when you are standing at sea level.
-        lodLevels: 5,
-        lodScaleFactor: 3,
+        // Three rings at 2x: 640 / 1280 / 2560 m chunks, reaching 12.8 km.
+        //
+        // This used to be five rings at 3x reaching 155 km, because the mesh was
+        // the only thing drawing distance. It was also where the LOD cracks and
+        // the depth stipple came from — a ring boundary is a place two
+        // resolutions have to agree, and a 155 km far plane is a place the depth
+        // buffer runs out of bits. The dome draws past 8 km now, so those rings
+        // are not doing work anyone can see, and deleting them removes both
+        // failure modes rather than tuning around them.
+        lodLevels: 3,
+        lodScaleFactor: 2,
         seaLevel: SEA_LEVEL,
         meshMode: 0,                      // smooth — the data is already smooth
         palette: new Float32Array([
@@ -240,6 +281,28 @@ function onTileArrived() {
 }
 
 // ============================================================================
+// The horizon's heightfield — one coarse request, once
+// ============================================================================
+
+// 128 coarse cells at 7.68 km is 983 km across, centred on the origin. That is
+// the whole visible world from any altitude a player reaches, in a single 64 KB
+// texture, so it is fetched once at load and never streamed.
+//
+// This is the coarse UNet alone (2.80M params against the latent stage's
+// 253.69M), so it costs a fraction of an elevation tile. It is a blocking call
+// on the JS thread — acceptable for a one-off during the load screen, and the
+// reason the far field is not re-centred as you fly.
+const COARSE_HALF = 64;
+
+function loadHorizonField() {
+    const c = world.coarse(-COARSE_HALF, -COARSE_HALF, COARSE_HALF, COARSE_HALF);
+    const origin = -COARSE_HALF * c.cellSize;
+    horizon.setField(c, origin, origin, c.cellSize);
+    console.log('horizon field: ' + c.width + 'x' + c.height + ' at ' +
+                c.cellSize + ' m => ' + (c.width * c.cellSize / 1000).toFixed(0) + ' km');
+}
+
+// ============================================================================
 // Load
 // ============================================================================
 
@@ -252,6 +315,7 @@ if (!bro.worldgen || !bro.worldgen.available) {
         seed: 42,
         onReady: (w) => {
             world = w;
+            loadHorizonField();
             status.textContent = 'Generating first tile (30.7 km)...';
             requestTile(0, 0);
         },
@@ -374,21 +438,25 @@ function frame() {
     streamTiles();
     if (terrain) terrain.update(cam.pos[0], cam.pos[1], cam.pos[2]);
 
+    // Both of these are skybox-like: fly 20 km and a dome left at the origin is
+    // behind you. The dome also needs the true world position, because the
+    // shader's vWorldPos varying is camera-relative and the raymarch works in
+    // world space.
+    horizon.follow(cam.pos);
+    water.position = [cam.pos[0], SEA_LEVEL, cam.pos[2]];
+
     const g = elevationAt(cam.pos[0], cam.pos[2]);
 
-    // Depth here is a conventional GL_LESS buffer with no reversed-Z, so
-    // precision is set entirely by the far/near RATIO. A fixed near of 1 m
-    // against a horizon-clearing far of 400 km is 400000:1, which stipples
-    // terrain against water and makes geometry flicker in and out with small
-    // camera moves. Scale near with height above ground — at 4 km up nothing
-    // is within 200 m of the eye anyway — and keep the ratio near 1000.
-    // far must clear the far LOD ring even at sea level, or distant mountains
-    // are simply not drawn. near then rises to hold the ratio down: at eye
-    // height that costs a 1.3 m near plane, which is invisible in first person
-    // and is the price of a 160 km horizon on a conventional depth buffer.
+    // Depth is a conventional GL_LESS buffer with no reversed-Z, so precision is
+    // set entirely by the far/near RATIO. Nothing in the depth buffer is further
+    // than the dome now — distance is drawn INSIDE a dome fragment rather than
+    // by putting geometry out there — so far is 26 km rather than 160, and the
+    // ratio at eye height drops from 120000:1 to 20000:1. That is the structural
+    // fix for the stipple; near still scales with altitude on top of it, since
+    // at 4 km up nothing is within 200 m of the eye anyway.
     const agl = Math.max(1, cam.pos[1] - (g === null ? SEA_LEVEL : g));
-    cam.far  = 160000;
-    cam.near = Math.max(cam.far / 120000, Math.min(agl * 0.05, 400));
+    cam.far  = DOME_RADIUS * 1.3;
+    cam.near = Math.max(cam.far / 20000, Math.min(agl * 0.05, 400));
     cam.fov  = 70;
     scene.setCamera(Camera.flyViewOptsQuat(cam, canvas));
     hud.textContent =
