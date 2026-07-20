@@ -37,15 +37,15 @@ import { createHorizon } from "./horizon.js";
 // millions of km2. The raymarcher draws whatever the heightfield says is
 // there for a texture fetch per step, with no generation, streaming or LOD.
 // That is also why the LOD cracks and the z-fighting are gone rather than
-// tuned: the near mesh is now two rings deep and the depth buffer spans 26 km
-// instead of 400.
+// tuned: the near mesh needs no LOD rings at all now, and the depth buffer
+// spans 26 km instead of 160.
 // =============================================================================
 
 const WEIGHTS   = 'D:/projects/brodiffusion/weights/terrain-diffusion-30m-bro';
 const TILE      = 1024;   // elevation cells per tile edge (30.7 km)
 const METRES    = 30;     // metres per elevation cell (the checkpoint's native res)
 const CELL      = 10;     // metres per TERRAIN cell — 3x finer than the data
-const CHUNK     = 64;     // terrain cells per chunk edge (640 m)
+const CHUNK     = 128;    // terrain cells per chunk edge (1.28 km)
 const SEA_LEVEL = 0;      // the model already puts sea level at 0 m
 
 const canvas = document.getElementById('c');
@@ -76,29 +76,17 @@ sun.cascadeCount = 4;
 sun.cascadeSplitLambda = 0.85;
 scene.setShadowQuality(4096, 3);
 
-// Local water at y=0. The model already puts sea level at 0 m, so this needs no
-// tuning — wherever terrain goes negative this is the surface above it, and
-// ~70% of a generated region is typically ocean.
+// ============================================================================
+// Horizon — everything past the near mesh, plus the sea
+// ============================================================================
 //
-// It is 24 km across and follows the camera rather than being a 1000 km slab.
-// The horizon dome draws distant ocean itself (in the same colour, so the
-// handover is invisible), and a plane that reached past the dome would either
-// be occluded by it or punch through it.
-const WATER_SPAN = 24000;
-const water = scene.createMesh({
-    data: Mesh.plane(WATER_SPAN, WATER_SPAN, 1, 1),
-    position: [0, SEA_LEVEL, 0],
-    color: [0.02, 0.10, 0.20],
-    metallic: 0.1,
-    roughness: 0.08,
-});
-
-// ============================================================================
-// Horizon — everything past the near mesh
-// ============================================================================
+// The sea belongs to the horizon rather than to the app. It has to exist in two
+// forms — near geometry that depth-sorts against terrain, and dome fragments
+// beyond that — and the only way to keep those from showing a join is for one
+// piece of code to own both.
 
 const DOME_RADIUS = 20000;   // between the mesh's reach and the far plane
-const MESH_REACH  = 12800;   // lodLevels 3 at 2x, loadRadius 5: 5 * 2560 m
+const MESH_REACH  = 12800;   // one ring: loadRadius 10 * 1.28 km chunks
 
 const horizon = createHorizon(scene, {
     radius: DOME_RADIUS,
@@ -204,20 +192,26 @@ function terrainOpts() {
         // heightAmplitude], so it has to describe the real elevation range or
         // every slope above 13.6 m comes out as snow.
         heightAmplitude: 2800,
-        loadRadius: 5,
-        unloadRadius: 8,
+        loadRadius: 10,
+        unloadRadius: 14,
         maxLoadsPerUpdate: 3,
-        // Three rings at 2x: 640 / 1280 / 2560 m chunks, reaching 12.8 km.
+        // NO LOD RINGS AT ALL. One resolution, 1.28 km chunks, reaching 12.8 km.
         //
-        // This used to be five rings at 3x reaching 155 km, because the mesh was
-        // the only thing drawing distance. It was also where the LOD cracks and
-        // the depth stipple came from — a ring boundary is a place two
-        // resolutions have to agree, and a 155 km far plane is a place the depth
-        // buffer runs out of bits. The dome draws past 8 km now, so those rings
-        // are not doing work anyone can see, and deleting them removes both
-        // failure modes rather than tuning around them.
-        lodLevels: 3,
-        lodScaleFactor: 2,
+        // This used to be five rings reaching 155 km, because the mesh was the
+        // only thing drawing distance. That is also where the cracks came from:
+        // a ring boundary is a place two resolutions have to agree along an
+        // edge, and where they don't you see a step with sky or ocean through
+        // it. Cutting to three rings shrank the artifact but left one visible,
+        // because one boundary is all it takes.
+        //
+        // Once the dome draws everything past 8 km the mesh only has to reach
+        // 12.8 km, and at that range a single resolution is affordable — 221
+        // chunks, same frame rate as 98 was. A single resolution has no
+        // boundaries, so the artifact is not reduced, it is unreachable.
+        //
+        // (The engine's ring stitching is still worth fixing for apps that do
+        // need the range. It is just not this app's problem any more.)
+        lodLevels: 1,
         seaLevel: SEA_LEVEL,
         meshMode: 0,                      // smooth — the data is already smooth
         palette: new Float32Array([
@@ -300,6 +294,57 @@ function loadHorizonField() {
     horizon.setField(c, origin, origin, c.cellSize);
     console.log('horizon field: ' + c.width + 'x' + c.height + ' at ' +
                 c.cellSize + ' m => ' + (c.width * c.cellSize / 1000).toFixed(0) + ' km');
+    chooseSpawn(c, origin);
+}
+
+// Spawn somewhere worth looking at.
+//
+// The origin is not a neutral starting point — for seed 42 it is 941 m under
+// water with the nearest land tens of km away, so the opening view is empty
+// ocean and none of this is visible. Which spot the origin lands on is a
+// property of the seed, so tuning a hardcoded position would only move the
+// problem to the next seed.
+//
+// The coarse field is already resident and covers 983 km, so it can answer
+// "where is high ground near the middle of the world" directly. Preferring
+// height near a coast rather than the single highest cell puts the sea, the
+// shoreline and a range in the same frame.
+function chooseSpawn(c, origin) {
+    let bestScore = -Infinity, bx = 0, bz = 0, bh = 0;
+    for (let i = 1; i < c.height - 1; i++) {
+        for (let j = 1; j < c.width - 1; j++) {
+            const h = c.data[i * c.width + j];
+            if (h < 200) continue;                  // want to stand on land
+            // Distance from the middle, in cells — staying near the centre
+            // leaves room to fly in any direction before running off the field.
+            const d = Math.hypot(i - c.height / 2, j - c.width / 2);
+            if (d > COARSE_HALF * 0.5) continue;
+            // Is there ocean nearby? Cheapest proxy: the lowest neighbour.
+            let lo = Infinity;
+            for (let di = -1; di <= 1; di++)
+                for (let dj = -1; dj <= 1; dj++)
+                    lo = Math.min(lo, c.data[(i + di) * c.width + (j + dj)]);
+            const coastal = lo < 0 ? 1200 : 0;
+            const score = h + coastal - d * 40;
+            if (score > bestScore) {
+                bestScore = score; bh = h;
+                bx = origin + j * c.cellSize;
+                bz = origin + i * c.cellSize;
+            }
+        }
+    }
+    if (bestScore === -Infinity) return;            // all ocean; origin will do
+    spawnAt(bx, bz, bh);
+    console.log('spawn: ' + (bx / 1000).toFixed(0) + ', ' + (bz / 1000).toFixed(0) +
+                ' km  coarse height ' + Math.round(bh) + ' m');
+}
+
+function spawnAt(wx, wz, h) {
+    // Well above the coarse height: it is a 7.68 km average, so the real 30 m
+    // terrain underneath can be considerably higher, and starting inside a
+    // mountain is a worse first impression than starting slightly too high.
+    cam.pos = [wx, h + 900, wz];
+    cam.vel = [0, 0, 0];
 }
 
 // ============================================================================
@@ -315,9 +360,12 @@ if (!bro.worldgen || !bro.worldgen.available) {
         seed: 42,
         onReady: (w) => {
             world = w;
-            loadHorizonField();
+            loadHorizonField();      // also picks the spawn
             status.textContent = 'Generating first tile (30.7 km)...';
-            requestTile(0, 0);
+            // The tile under the spawn, not the origin's — chooseSpawn has
+            // usually moved us a long way from there by now.
+            requestTile(Math.floor(worldToCellI(cam.pos[2]) / TILE),
+                        Math.floor(worldToCellJ(cam.pos[0]) / TILE));
         },
         onError: (e) => { status.textContent = 'Model load failed: ' + e; },
     });
@@ -438,12 +486,11 @@ function frame() {
     streamTiles();
     if (terrain) terrain.update(cam.pos[0], cam.pos[1], cam.pos[2]);
 
-    // Both of these are skybox-like: fly 20 km and a dome left at the origin is
-    // behind you. The dome also needs the true world position, because the
-    // shader's vWorldPos varying is camera-relative and the raymarch works in
-    // world space.
-    horizon.follow(cam.pos);
-    water.position = [cam.pos[0], SEA_LEVEL, cam.pos[2]];
+    // The dome and the sea are skybox-like: fly 20 km and a dome left at the
+    // origin is behind you. Both also need the true world position, because the
+    // vWorldPos varying is camera-relative and the raymarch works in world
+    // space.
+    horizon.follow(cam.pos, SEA_LEVEL);
 
     const g = elevationAt(cam.pos[0], cam.pos[2]);
 
