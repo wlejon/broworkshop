@@ -1,5 +1,6 @@
 import "/lib/camera.js";
 import { installSystemMenu } from "/lib/system-menu.js";
+import { PLANET } from "/app/planet.js";
 
 // =============================================================================
 // World — a playable learned planet
@@ -33,45 +34,6 @@ import { installSystemMenu } from "/lib/system-menu.js";
 const WEIGHTS   = 'D:/projects/brodiffusion/weights/terrain-diffusion-30m-bro';
 const SPAWN_HALF = 72;    // coarse cells searched for a start position
 
-// =============================================================================
-// THE PLANET DESCRIPTOR
-//
-// Everything that makes this world THIS world, in one object. Not a set of
-// scattered constants: a planet is a thing you author, and worlds of different
-// size and composition are the point — a moon is not a small Earth, it is a
-// different radius, a different sea level and no snow line at all.
-//
-// So nothing below is allowed to be hard-coded downstream. This object is what
-// the world builder will edit and serialise; the app is already written as its
-// consumer so that the builder has something real to drive rather than a
-// parallel implementation to keep in sync.
-//
-// RADIUS IS THE LOAD-BEARING FIELD. It sets the horizon, sqrt(2Rh+h^2), and
-// therefore how far the world must be generated, held and drawn at every
-// altitude. Earth's 6371 km shows 5 km of ground from a 2 m eye height; a
-// 600 km moon shows 1.5 km and feels correspondingly small to stand on, which
-// is the effect rather than a limitation. 0 means a flat, endless world.
-//
-// The elevation model was trained on Earth, so its landforms carry an implied
-// scale. Putting them on a smaller planet is a deliberate choice (they read as
-// oversized, which is what a small dense world SHOULD look like), not an
-// accident to be corrected — but it is the reason radius and metresPerCell are
-// separate knobs.
-// =============================================================================
-const PLANET = {
-    name:   'earthlike',
-    radius: 6371000,      // metres; 0 = flat world
-
-    seaLevel:    0,       // metres; the model already puts sea level at 0
-    heightScale: 1,       // sampled metres -> world metres; >1 exaggerates relief
-    snowLine:    1700,    // metres; Infinity for a world with no snow
-
-    // Structure below the data floor. detailRelief is a SLOPE, so it needs no
-    // retuning when heightScale changes — see ClipmapConfig.
-    detailWavelength: 48,
-    detailRelief:     0.35,
-    detailOctaves:    7,
-};
 
 // The detail exemplar is still ONE decoder tile, and it is not a height layer:
 // it is a 61 km sample of what ridges and drainage LOOK like, reused as the
@@ -306,7 +268,7 @@ if (!bro.worldgen || !bro.worldgen.available) {
 } else {
     bro.worldgen.init();
     bro.worldgen.loadWorld(WEIGHTS, {
-        seed: 42,
+        seed: PLANET.seed,   // the world's identity; see planet.js
         onReady: (w) => {
             world = w;
             loadCoarse(0, 0, 2, SPAWN_HALF);
