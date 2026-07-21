@@ -99,7 +99,7 @@ button:disabled { opacity:.5; cursor:default; }
 .pipe-body .card { flex:1 1 auto; }
 .stage-strip { display:flex; gap:8px; flex:0 0 auto; }
 .thumb { display:flex; flex-direction:column; gap:3px; align-items:center; cursor:pointer; }
-.thumb canvas { width:120px; height:120px; background:#05070a; border:1px solid var(--line);
+.thumb canvas { width:150px; height:75px; background:#05070a; border:1px solid var(--line);
   border-radius:4px; image-rendering:pixelated; }
 .thumb-lbl { font-size:10px; color:var(--dim); }
 .thumb-lbl.on { color:var(--accent); }

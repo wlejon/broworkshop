@@ -12,11 +12,23 @@ import { state, STAGE, cellDiv, rampFor, status, luts } from "/app/lib/core.js";
 import { el, plane, drawField, fieldStats, mkSelect, fitContain } from "/app/lib/helpers.js";
 import { registerProbe } from "/app/lib/registry.js";
 
-// Legible cell counts per scale: the elevation window in native cells, floored so
-// the coarse and latent stages show CONTEXT rather than a 3x3 block, capped so a
-// big extent still generates quickly.
-function stageCells(name) {
+// The VERTICAL span, in this stage's own cells: floored so coarse/latent show
+// context not a 3×3 block, capped so a big extent still generates quickly.
+const WCAP = 384;              // horizontal cell cap — bound a very wide window
+function stageCellsV(name) {
     return Math.max(48, Math.min(160, Math.round(state.region.extent / cellDiv(name))));
+}
+// Horizontal span to fill the main card at the field's own scale, rather than
+// letterboxing a square: the vertical span times the card's aspect, bounded to
+// WCAP. All stages share ONE aspect (captured per regen from the card) so the
+// strip still reads as a single window sampled at several scales.
+function stageCellsH(vcells, aspect) {
+    return Math.max(vcells, Math.min(WCAP, Math.round(vcells * aspect)));
+}
+function mainAspect(h) {
+    const wrap = h.main.parentElement;
+    const cw = wrap.clientWidth | 0, ch = wrap.clientHeight | 0;
+    return (cw > 4 && ch > 4) ? cw / ch : 2;
 }
 
 registerProbe({
@@ -73,17 +85,20 @@ registerProbe({
     regen(h) {
         const w = state.world;
         if (!w) return;
+        const aspect = mainAspect(h);          // one aspect for the whole strip
         const queue = STAGE.order.slice();
         const c = { ci: state.region.i + state.region.extent / 2,
                     cj: state.region.j + state.region.extent / 2 };
         const next = () => {
             if (!queue.length) { status('pipeline ready — seed ' + state.seed); return; }
             const name = queue.shift();
-            const cells = stageCells(name), div = cellDiv(name);
-            const oi = Math.round(c.ci / div - cells / 2);
-            const oj = Math.round(c.cj / div - cells / 2);
+            const div = cellDiv(name);
+            const nv = stageCellsV(name);              // rows (N→S, height)
+            const nh = stageCellsH(nv, aspect);        // cols (W→E, width) — fills the card
+            const oi = Math.round(c.ci / div - nv / 2);
+            const oj = Math.round(c.cj / div - nh / 2);
             status('generating ' + name + '… (' + (STAGE.order.length - queue.length) + '/' + STAGE.order.length + ')');
-            w.stage(name, oi, oj, oi + cells, oj + cells, {
+            w.stage(name, oi, oj, oi + nv, oj + nh, {
                 onDone: (r) => { h.results[name] = r; paintThumb(h, name); if (name === h.stage) { syncChannels(h); paintMain(h); } next(); },
                 onError: (m) => status(name + ': ' + m, true),
             });
@@ -112,10 +127,15 @@ function highlight(h) {
         h.thumbs[name].label.classList.toggle('on', name === h.stage);
 }
 
+const THUMB_W = 150;           // strip thumb display width; height follows the aspect
 function paintThumb(h, name) {
     const res = h.results[name];
     if (!res) return;
-    drawField(h.thumbs[name].canvas, plane(res, 0), res.width, res.height, rampFor(res, 0));
+    const c = h.thumbs[name].canvas;
+    c.width = res.width; c.height = res.height;           // native backing store (wide)
+    c.style.width = THUMB_W + 'px';
+    c.style.height = Math.max(1, Math.round(THUMB_W * res.height / res.width)) + 'px';
+    drawField(c, plane(res, 0), res.width, res.height, rampFor(res, 0));
     highlight(h);
 }
 
