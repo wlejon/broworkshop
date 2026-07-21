@@ -84,6 +84,45 @@ function meshWithFlatColor(mesh, rgb) {
     return out;
 }
 
+// Edge-bleed (dilate) opaque RGB outward into transparent (alpha==0) texels of
+// ONE cell buffer, in place. The atlas texture samples with mipmaps + bilinear
+// (GL_LINEAR_MIPMAP_LINEAR), which pulls the transparent-black background
+// (RGBA 0,0,0,0) into cutout-edge texels and paints a dark fringe. Bleeding the
+// silhouette colour a few px into the border means interpolation never samples
+// pure black, so the cutout edge stays clean green. Alpha is LEFT at 0 on
+// filled texels, so the shader's alpha cutout still trims at the true
+// silhouette (filled texels only contribute colour to the bilinear blend).
+// Operates on a single cell buffer so it can never bleed across cell borders.
+function dilateEdgesRGBA(data, w, h, passes) {
+    const opaque = new Uint8Array(w * h);
+    for (let i = 0; i < w * h; i++) opaque[i] = data[i * 4 + 3] > 0 ? 1 : 0;
+    const nbr = [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [-1, 1], [1, -1], [1, 1]];
+    for (let p = 0; p < passes; p++) {
+        const filled = [];
+        for (let y = 0; y < h; y++) {
+            for (let x = 0; x < w; x++) {
+                const idx = y * w + x;
+                if (opaque[idx]) continue;
+                let r = 0, g = 0, b = 0, n = 0;
+                for (const [dx, dy] of nbr) {
+                    const nx = x + dx, ny = y + dy;
+                    if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+                    const ni = ny * w + nx;
+                    if (!opaque[ni]) continue;
+                    const s = ni * 4;
+                    r += data[s]; g += data[s + 1]; b += data[s + 2]; n++;
+                }
+                if (n > 0) {
+                    const d = idx * 4;
+                    data[d] = r / n; data[d + 1] = g / n; data[d + 2] = b / n; // alpha stays 0
+                    filled.push(idx);
+                }
+            }
+        }
+        for (const idx of filled) opaque[idx] = 1;   // grow the source set
+    }
+}
+
 // Combined axis-aligned bounds over one or more meshes' positions.
 function combinedBounds(meshes) {
     let minX = Infinity, minY = Infinity, minZ = Infinity;
@@ -137,16 +176,18 @@ export function bakeImpostorAtlas(scene, master, opts) {
     const near = Math.max(0.001, radius * 0.1);
     const far = radius * 6 + distance;
 
-    // Flat, neutral lighting: ambient-dominant albedo, linear tonemap, no fog/IBL.
-    // The goal is an evenly-lit silhouette + albedo, consistent across all angles.
+    // UNLIT bake: capture ~linear albedo, no scene lighting/tonemap baked in.
+    // The billboard feeds the atlas back as `emissive`, where the LIVE scene's
+    // ACES tonemap runs once. If we baked LIT (ACES here) AND emitted it, the
+    // tree got tonemapped twice -> washed-out/pale. Unlit meshes output
+    // baseColor x texture x vertex color directly (bypassing this scene's
+    // tonemap), so the atlas holds the raw albedo and the round-trip is a
+    // single tonemap. No env/fog; ambient + lights are irrelevant to unlit
+    // draws but left neutral for the transparent background clear.
     scene.setEnvironment(null);
-    scene.setAmbient([0.55, 0.55, 0.55]);
-    scene.setToneMap({ mode: 'aces', exposure: 1.0, gamma: 2.2 });
+    scene.setAmbient([0.0, 0.0, 0.0]);
+    scene.setToneMap({ mode: 'linear', exposure: 1.0, gamma: 1.0 });
     if (scene.setFog) scene.setFog(null);
-    // A pair of soft fills (from above + below) keeps both leaf-card faces lit
-    // without a strong directional key that would shade sides inconsistently.
-    scene.createLight({ type: 'directional', direction: [0.2, -1.0, 0.3], color: [1, 1, 1], intensity: 1.6 });
-    scene.createLight({ type: 'directional', direction: [-0.2, 1.0, -0.3], color: [1, 1, 1], intensity: 1.0 });
 
     // Wood branches. Bake albedo into vertex colors (see meshWithFlatColor).
     if (master.branchMesh && master.branchMesh.triangleCount > 0) {
@@ -155,6 +196,7 @@ export function bakeImpostorAtlas(scene, master, opts) {
             color: [1, 1, 1],
             metallic: 0.0,
             roughness: 0.9,
+            unlit: true,
             castsShadow: false,
             receivesShadow: false,
         });
@@ -167,6 +209,7 @@ export function bakeImpostorAtlas(scene, master, opts) {
             metallic: 0.0,
             roughness: 0.85,
             doubleSided: true,
+            unlit: true,
             castsShadow: false,
             receivesShadow: false,
         });
@@ -220,6 +263,10 @@ export function bakeImpostorAtlas(scene, master, opts) {
             const cellIdx = row * cols + col;
             if (!img || !img.data) { coverage[cellIdx] = 0; continue; }
             const data = img.data;
+
+            // Bleed silhouette colour into the transparent border of THIS cell
+            // so bilinear/mip sampling can't pull black into cutout edges.
+            dilateEdgesRGBA(data, cell, cell, 4);
 
             // Blit cell into the atlas (both are top-down row order).
             let nonEmpty = 0;

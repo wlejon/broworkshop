@@ -10,8 +10,9 @@
 // its exact inverse, which the vertex shader below reproduces):
 //   - Instances carry IDENTITY rotation + uniform scale, so the per-instance
 //     basis R is pure scale. The billboard geometry is rebuilt in the vertex
-//     shader (userVertex) as a Y-LOCKED (upright) camera-facing quad, using
-//     only uCameraEye, the per-instance translation, and world up.
+//     shader (userVertex) as a SPHERICAL (fully view-facing, pitch included)
+//     camera-facing quad, using only uCameraEye, the per-instance translation,
+//     and world up.
 //   - The per-instance tree->camera direction runs through the octahedral
 //     INVERSE to pick one atlas cell; its uv sub-rect is passed to the
 //     fragment stage as `flat` varyings so the whole quad samples one cell.
@@ -55,17 +56,26 @@ void userVertex(inout vec3 pos, inout vec3 normal, inout vec2 uv) {
     // to u_center later via R is negligible for a normalized direction).
     vec3 centerWorld = instPos + u_center;
 
-    // Y-locked upright billboard basis: horizontal right, vertical world-up.
+    // SPHERICAL (fully view-facing) billboard basis: the quad faces the camera
+    // on ALL axes including pitch. At steep top-down views (a flyover's main
+    // angle) a Y-locked quad foreshortens to a thin streak; a spherical quad
+    // keeps its face toward the eye and presents the octahedral top-down cell
+    // as a proper crown. Basis: f = view dir (eye->center); right is horizontal
+    // (perp to world-up and f); up completes the frame and tilts with pitch.
     vec3 worldUp = vec3(0.0, 1.0, 0.0);
-    vec3 toEye = uCameraEye - centerWorld;
-    vec3 right = cross(worldUp, toEye);
+    vec3 toEye = uCameraEye - centerWorld;          // tree -> camera (cell pick)
+    vec3 f = normalize(centerWorld - uCameraEye);   // view direction eye->center
+    vec3 right = cross(worldUp, f);
     float rl = length(right);
+    // Degenerate only when looking straight down the world-up axis; a stable
+    // fallback keeps the quad well-formed there.
     right = (rl > 1e-4) ? right / rl : vec3(1.0, 0.0, 0.0);
+    vec3 up = cross(f, right);
 
     // Rebuild the camera-facing quad. pos.xy carry corner signs in [-1,1].
     float qx = pos.x;
     float qy = pos.y;
-    vec3 offset = u_center + right * (qx * u_half) + worldUp * (qy * u_half);
+    vec3 offset = u_center + right * (qx * u_half) + up * (qy * u_half);
     // R * offset + trans (R = scale*I) places it in world.
     pos = offset;
 
@@ -108,10 +118,13 @@ void userFragment(inout vec3 baseColor, inout vec3 normal,
     vec2 uv = v_uvMin + cellUV * (v_uvMax - v_uvMin);
     vec4 tex = texture(uBaseColorTex, uv);
     if (tex.a < 0.5) discard;   // alpha cutout against the transparent bake
-    // The atlas already holds a shaded albedo (baked under flat neutral light),
-    // so re-lighting it with the scene's PBR/IBL blows it out. Emit it directly
-    // (baseColor 0, color into emissive) for the baked look; standard PBR then
-    // adds nothing on top. CHUNK 3 can reintroduce cheap directional shading.
+    // The atlas is baked UNLIT (impostor.js), so tex.rgb is ~linear albedo, NOT
+    // an already-tonemapped image. Emitting it (baseColor 0, color into
+    // emissive) lets the scene's single ACES tonemap map it once — matching the
+    // natural saturation/contrast of the source. (The old lit bake was ACES'd
+    // in the capture and then ACES'd AGAIN here, reading washed-out/pale.)
+    // The card is flat-shaded as a result; per-view form shading would need a
+    // baked normal map (a later item), not a re-light of this flat albedo.
     baseColor = vec3(0.0);
     emissive = tex.rgb;
     alpha = 1.0;

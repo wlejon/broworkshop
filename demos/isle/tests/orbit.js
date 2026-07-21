@@ -89,4 +89,6 @@ shoot(270, 12, 'orbit_az270.png');
 shoot(45,  12, 'orbit_az045.png');
 shoot(45,  40, 'orbit_el40.png');
 shoot(45,  75, 'orbit_el75.png');
+// Near-ground, eye-level side view (on-foot look).
+shoot(90,  10, 'orbit_el10.png');
 console.log('[orbit] done');
