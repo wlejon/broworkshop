@@ -91,7 +91,6 @@ uniform float u_radius;      // planet radius, metres — the noise domain's sca
 uniform float u_cell0;       // chart metres per texel at mip 0 (~7.68 km)
 uniform float u_snowLine;
 uniform float u_seaLevel;
-uniform float u_relief;      // fBm height roughness, dimensionless (per octave slope)
 uniform float u_bump;        // relief-shading strength
 uniform float u_limb;
 uniform vec3  u_limbColor;
@@ -150,15 +149,11 @@ float gbNoise(vec3 p) {
 float gbBand(float lambda, float foot) {
     return 1.0 - smoothstep(0.22 * lambda, 0.50 * lambda, foot);
 }
-float gbHeight(vec3 P, float foot) {
-    float h = 0.0, lambda = 6000.0;   // start just under the 7.68 km chart cell
-    for (int o = 0; o < 6; ++o) {
-        float w = gbBand(lambda, foot);
-        if (w > 0.0) h += u_relief * lambda * w * gbNoise(P / lambda);
-        lambda *= 0.5;
-    }
-    return h;
-}
+// HEIGHT is no longer faked. The old build added an fBm relief here to invent
+// terrain below the 7.68 km chart; it read as procedural noise, not mountains.
+// The chart already carries the mountains (a massif reads ~3800 m at 7.68 km),
+// so the surface's elevation IS the chart value and the relief SHADING (below)
+// comes from the chart's own gradient. gbNoise survives only for colour mottle.
 // Band-limited scalar mottle in ~[-1,1] at one scale (fades below the pixel).
 float gbMottle(vec3 P, float foot, float scale) {
     float w = gbBand(scale, foot);
@@ -190,9 +185,8 @@ void userFragment(inout vec3 baseColor, inout vec3 normal, inout float metallic,
 
     // Detail below the 7.68 km chart: ragged coasts and terrain relief. Held off
     // the open ocean (landness) so deep water stays a smooth sheet, not noise.
-    float landness = smoothstep(u_seaLevel - 600.0, u_seaLevel + 200.0, eChart);
-    float relief = gbHeight(P, foot) * mix(0.25, 1.0, landness);
-    float e = eChart + relief;
+    // Elevation IS the model's chart value — no procedural height added.
+    float e = eChart;
 
     float coarse = gbMottle(P, foot, 2800.0);   // breaks the large colour washes
     float fine   = gbMottle(P, foot, 520.0);    // the grain you read up close
@@ -237,7 +231,10 @@ void userFragment(inout vec3 baseColor, inout vec3 normal, inout float metallic,
     // terminator rake across ridges instead of sliding over a smooth ball. ---
     vec3 N = normalize(normal);
     vec3 dpx = dFdx(vWorldPos), dpy = dFdy(vWorldPos);
-    float dhx = dFdx(relief),   dhy = dFdy(relief);
+    // Slope from the REAL chart relief (mipped per footprint, so it is alias-free
+    // and fades to average as the ball shrinks). This is what rakes the
+    // terminator across mountain ranges — real height, not fBm.
+    float dhx = dFdx(eChart),   dhy = dFdy(eChart);
     vec3 r1 = cross(dpy, N), r2 = cross(N, dpx);
     float det = dot(dpx, r1);
     if (abs(det) > 1e-8) {
@@ -322,8 +319,7 @@ export function createGlobe(scene, chart, opts = {}) {
             u_cell0:       cell0,
             u_snowLine:    PLANET.snowLine,
             u_seaLevel:    PLANET.seaLevel,
-            u_relief:      opts.relief2 ?? 0.018,   // fBm slope per octave
-            u_bump:        opts.bump ?? 0.5,        // relief-shading strength
+            u_bump:        opts.bump ?? 0.05,       // relief-shading strength (chart slope)
             u_limb:        opts.limb ?? 0.4,
             u_limbColor:   opts.limbColor ?? [0.35, 0.55, 0.90],
             u_alpha:       1.0,
