@@ -67,6 +67,11 @@ scene.setAtmosphere({
     seaLevel: PLANET.seaLevel,
 });
 
+// Stars, additive over the sky: the daylit air swamps them near the ground and
+// they emerge as the sky darkens on the way up. Fixed to the celestial sphere,
+// so they hold still as you fly and only wheel as you look around.
+scene.setStarfield({ enabled: true, intensity: 1.4, density: 1.1 });
+
 // 11 levels of 128 quads at 8 m REACH 64 * 8 * 2^10 = 524 km, and the stack
 // zooms with altitude up to maxCellScale, so from orbit the rings reach 4194 km.
 // Reach is a fixed triangle budget, so it is nearly free.
