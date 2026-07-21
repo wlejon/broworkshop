@@ -100,7 +100,12 @@ const terrain = scene.createClipmapTerrain({
 let world = null;
 let modelReady = false;
 
-// --- Layer 0 — the whole planet, baked, or a window that follows the camera ---
+// --- Layer 1 — the whole planet, baked, or a window that follows the camera ---
+//
+// The COARSEST layer is the base of the blend and must cover everything, so it
+// sits at the highest used slot (1), leaving slot 0 — the finest — for the 30 m
+// detail window that streams in near the ground. With no fine window installed,
+// slot 0 is empty and contributes zero weight, so the coarse field shows alone.
 //
 // PREFERRED PATH: the entire globe, once, from tools/bake-planet.js. 5212 x 2606
 // cells at 7.68 km is 52 MB, which is a texture rather than a problem, and it
@@ -212,12 +217,69 @@ function loadCoarse(camX, camZ, eyeAboveSeaLevel, minHalf = 0) {
     console.log('coarse window re-cut at ' + (camX / 1000).toFixed(0) + ', ' +
                 (camZ / 1000).toFixed(0) + ' km: ' + coarse.width + 'x' +
                 coarse.height + ' in ' + ms.toFixed(0) + ' ms');
-    terrain.setHeightLayer(0, {
+    terrain.setHeightLayer(1, {
         data: coarse.data, width: coarse.width, height: coarse.height,
         originX: coarseOriginX, originZ: coarseOriginZ,
         metresPerCell: coarse.cellSize,
     });
     return true;
+}
+
+// --- Layer 0 — streamed 30 m detail, near the ground and moving slowly ---
+//
+// The coarse chart resolves 7.68 km; the decoder resolves 30 m, with real
+// drainage and broken faces the fBm floor only approximates. But a full decoder
+// tile is SECONDS of work (a 1024^2 tile is ~4.6 s), so it cannot keep up with
+// fast flight — and it does not have to. It is a BONUS tier on top of a surface
+// that already works: streamed only when the eye is low and slow, where a
+// 30.7 km tile stays relevant for a long time, with the fBm floor covering
+// until it lands and after it is released. Never a wait, never a repeat.
+const METRES        = 30;      // metres per decoder cell (checkpoint native res)
+const FINE_N        = 1024;    // decoder cells per window edge (30.7 km)
+const FINE_REQ_AGL  = 3000;    // request a window only below this height AGL
+const FINE_HOLD_AGL = 6000;    // release it once climbing past this
+const FINE_REQ_SPD  = 250;     // m/s of actual motion; above this, skip
+
+let fineCellI = null, fineCellJ = null, finePending = false;
+
+function loadFine(camX, camZ, agl, speed) {
+    if (!world || !modelReady) return;
+    // Climbed out of the regime the fine tier serves: drop to coarse + fBm so a
+    // stale patch does not hang under a distant view.
+    if (agl > FINE_HOLD_AGL) {
+        if (fineCellI !== null) {
+            terrain.setHeightLayer(0, null);
+            fineCellI = fineCellJ = null;
+        }
+        return;
+    }
+    // Low, but too high or too fast to be worth a tile, or one is already in
+    // flight (the pipeline serves one request at a time): keep what we have.
+    if (agl > FINE_REQ_AGL || speed > FINE_REQ_SPD) return;
+    if (world.generating || finePending) return;
+
+    // Decoder cell (i, j) -> world (z = i*METRES, x = j*METRES).
+    const ci = Math.round(camZ / METRES);
+    const cj = Math.round(camX / METRES);
+    // Re-cut only after drifting a quarter of the window from its centre.
+    if (fineCellI !== null &&
+        Math.abs(ci - fineCellI) < FINE_N / 4 &&
+        Math.abs(cj - fineCellJ) < FINE_N / 4) return;
+
+    const i0 = ci - FINE_N / 2, j0 = cj - FINE_N / 2;
+    finePending = true;
+    world.elevation(i0, j0, i0 + FINE_N, j0 + FINE_N, {
+        onDone: (r) => {
+            finePending = false;
+            terrain.setHeightLayer(0, {
+                data: r.data, width: r.width, height: r.height,
+                originX: j0 * METRES, originZ: i0 * METRES,
+                metresPerCell: METRES,
+            });
+            fineCellI = ci; fineCellJ = cj;
+        },
+        onError: (e) => { finePending = false; console.log('fine: ' + e); },
+    });
 }
 
 // The clipmap is the drawn surface AND the collision surface — it carries the
@@ -284,7 +346,7 @@ if (chart) {
     coarseOriginX = 0;
     coarseOriginZ = 0;
     EAST_SPAN = chart.width * chart.cellSize;
-    terrain.setHeightLayer(0, {
+    terrain.setHeightLayer(1, {
         data: chart.data, width: chart.width, height: chart.height,
         originX: 0, originZ: 0, metresPerCell: chart.cellSize,
         // Longitude is periodic. Without this the chart had an east-west edge
@@ -425,6 +487,8 @@ function frame() {
                                (gCoarse === null ? PLANET.seaLevel : gCoarse));
     const aslCoarse = Math.max(1, cam.pos[1] - PLANET.seaLevel);
     if (world && !world.generating) loadCoarse(cam.pos[0], cam.pos[2], aslCoarse);
+    loadFine(cam.pos[0], cam.pos[2], aglCoarse,
+             Math.hypot(cam.vel[0], cam.vel[1], cam.vel[2]));
     terrain.update(cam.pos[0], cam.pos[1], cam.pos[2]);
 
     const g = gCoarse;
