@@ -3,6 +3,27 @@
 import { bakeImpostorAtlas } from '/app/lib/impostor.js';
 import { createImpostorLayer } from '/app/lib/impostorLayer.js';
 
+// Per-cell tree-species probabilities from the control atlas. Factored out of
+// the placement loop so the L1 canopy-height field (buildIslandCanopyField)
+// tests the EXACT same biome rule populateFlora uses to place trees.
+function treeProbs(biome, moisture) {
+    let pine = 0.0, decid = 0.0, shrub = 0.0;
+    if (biome === 2) {
+        shrub = 0.10;
+    } else if (biome === 3) {
+        pine = 0.05; shrub = 0.08;
+    } else if (biome === 4) {
+        pine = 0.20; shrub = 0.05;
+    } else if (biome === 6 || biome === 9) {
+        decid = 0.06 * moisture; shrub = 0.08;
+    } else if (biome === 7 || biome === 10 || biome === 11) {
+        decid = 0.25 * (biome === 11 ? 1.5 : 1.0); shrub = 0.05;
+    } else if (biome === 5 || biome === 8) {
+        shrub = 0.012; // sparse desert shrub
+    }
+    return { pine, decid, shrub };
+}
+
 // Grows a single prototype in a dedicated flora world with full light.
 export function growPrototype(name, whorlArms, whorlSpread, speciesProps) {
     const world = bro.flora.createWorld({
@@ -153,27 +174,8 @@ export function populateFlora(scene, floraData, atlas, clipmap) {
             const biome = atlas.biomes[idx];
             const moisture = atlas.surfaceData[idx * 3 + 1]; // 0..1
 
-            let pineProb = 0.0;
-            let decidProb = 0.0;
-            let shrubProb = 0.0;
-
-            if (biome === 2) {
-                shrubProb = 0.10;
-            } else if (biome === 3) {
-                pineProb = 0.05;
-                shrubProb = 0.08;
-            } else if (biome === 4) {
-                pineProb = 0.20;
-                shrubProb = 0.05;
-            } else if (biome === 6 || biome === 9) {
-                decidProb = 0.06 * moisture;
-                shrubProb = 0.08;
-            } else if (biome === 7 || biome === 10 || biome === 11) {
-                decidProb = 0.25 * (biome === 11 ? 1.5 : 1.0);
-                shrubProb = 0.05;
-            } else if (biome === 5 || biome === 8) {
-                shrubProb = 0.012; // sparse desert shrub
-            }
+            const { pine: pineProb, decid: decidProb, shrub: shrubProb } =
+                treeProbs(biome, moisture);
 
             const r = rand();
             let selectedType = null;
@@ -206,82 +208,72 @@ export function populateFlora(scene, floraData, atlas, clipmap) {
     }
 
     const nodes = [];
+    // Kept for season.js, which guards on null: leaf recolour is a no-op now
+    // that every species is an impostor (the atlas albedo is baked at boot).
     const leafNodes = { pine: null, decid: null, shrub: null };
 
-    // Bake the decid octahedral impostor atlas ONCE from the grown master
-    // (CHUNK 1). The decid species is then drawn as one billboard layer below
-    // instead of its branch + ~365k-tri leaf instanced meshes (CHUNK 2).
-    let decidImpostor = null;
-    if (decidXf.length > 0) {
-        const dInfo = floraData.types.decid;
+    // ---- Part A: bake ONE octahedral impostor atlas per species, ONCE -------
+    // Every species (pine, decid, shrub) is drawn as a single camera-facing
+    // billboard batch sampling its baked atlas — N quads per species instead of
+    // the raw branch + leaf instanced meshes (the ~280M-tri/frame residual that
+    // pinned isle at 8 FPS). Each atlas is baked once here at boot and cached.
+    const xfByType = { pine: pineXf, decid: decidXf, shrub: shrubXf };
+    const impostors = { pine: null, decid: null, shrub: null };
+    for (const type of ['pine', 'decid', 'shrub']) {
+        const xfData = xfByType[type];
+        if (xfData.length === 0) continue;
+        const info = floraData.types[type];
         const capCvs = document.createElement('canvas');
         capCvs.width = 256; capCvs.height = 256;
         const capScene = capCvs.getContext('scene');
-        decidImpostor = bakeImpostorAtlas(
+        impostors[type] = bakeImpostorAtlas(
             capScene,
-            { branchMesh: dInfo.branchMesh, leafMesh: dInfo.leafMesh },
-            { leafColor: dInfo.leafColor }
+            { branchMesh: info.branchMesh, leafMesh: info.leafMesh },
+            { leafColor: info.leafColor, cols: 8, rows: 8, cell: 192 }
         );
     }
 
-    const createInst = (type, xfData) => {
-        if (xfData.length === 0) return;
+    // ---- draw each species as one camera-facing impostor billboard layer ----
+    // No canopy shell, no per-pixel crossfade: the old full-screen screen-door
+    // dither (shell fragment + impostor fragment, one discarded per pixel) was
+    // ~2x full-viewport fragment overdraw of an expensive fbm shader — the real
+    // frame cost, and the flat green "membrane" look. The aerial/far forest read
+    // now comes from the terrain material's forest tint (near-free), not a shell.
+    const layers = { pine: null, decid: null, shrub: null };
+    let totalQuads = 0, oldLeafTris = 0, oldBranchTris = 0;
+    for (const type of ['pine', 'decid', 'shrub']) {
+        const xfData = xfByType[type];
+        const imp = impostors[type];
+        if (xfData.length === 0 || !imp) continue;
         const info = floraData.types[type];
+        const count = xfData.length / 9;
 
-        // Deciduous: ONE octahedral impostor billboard layer (CHUNK 2). This
-        // REPLACES the raw branch + leaf instanced meshes (the ~365k-tri leaf
-        // mesh) with a single camera-facing quad per tree sampling the baked
-        // atlas — N quads instead of a huge leaf-card batch.
-        // NOTE: pine + shrub still use full geometry; they route through
-        // impostors in a later chunk (full-island FPS recovery is CHUNK 5).
-        if (type === 'decid') {
-            if (!decidImpostor) return;
-            const layer = createImpostorLayer(scene, decidImpostor, xfData);
-            nodes.push(layer.node);
-            console.log(`[flora] decid impostor layer: ${layer.quadCount} billboard quads ` +
-                        `(replaces branch+leaf mesh, was ~${info.leafMesh ? info.leafMesh.triangleCount : 0} leaf tris/tree)`);
-            return;
-        }
+        const layer = createImpostorLayer(scene, imp, xfData);
+        nodes.push(layer.node);
+        layers[type] = layer;
+        totalQuads += layer.quadCount;
 
-        // 1. Create wood branches batch (PBR brown wood material)
-        const branchInst = scene.createInstancedMesh({
-            mesh: info.branchMesh,
-            instancesFromTransforms: new Float32Array(xfData),
-            color: [0.26, 0.18, 0.12],
-            metallic: 0.0,
-            roughness: 0.9,
-            castsShadow: true,
-            receivesShadow: true
-        });
-        nodes.push(branchInst);
+        oldLeafTris += (info.leafMesh ? info.leafMesh.triangleCount : 0) * count;
+        oldBranchTris += (info.branchMesh ? info.branchMesh.triangleCount : 0) * count;
+    }
 
-        // 2. Create foliage batch
-        if (info.leafMesh && info.leafMesh.triangleCount > 0) {
-            const leafInst = scene.createInstancedMesh({
-                mesh: info.leafMesh,
-                instancesFromTransforms: new Float32Array(xfData),
-                color: info.leafColor,
-                metallic: 0.0,
-                roughness: 0.85,
-                doubleSided: true,
-                alphaCutoff: 0.5,
-                castsShadow: true,
-                receivesShadow: true
-            });
-            nodes.push(leafInst);
-            leafNodes[type] = leafInst;
-        }
-    };
-
-    createInst('pine', pineXf);
-    createInst('decid', decidXf);
-    createInst('shrub', shrubXf);
-
-    console.log(`[flora] Spawned ${pineXf.length/9} pines, ${decidXf.length/9} decid, ${shrubXf.length/9} shrubs`);
+    const oldTris = oldLeafTris + oldBranchTris;
+    console.log(`[flora] Spawned ${pineXf.length/9} pines, ${decidXf.length/9} decid, ` +
+                `${shrubXf.length/9} shrubs — ${totalQuads} impostor quads ` +
+                `(${totalQuads * 2} tris) REPLACE ~${oldTris} raw tris`);
 
     return {
         nodes,
         leafNodes,
+        layers,
+        impostors,
+        stats: { totalQuads, oldLeafTris, oldBranchTris, oldTris, treeCanopyH: 0,
+                 forestTexels: 0 },
+
+        // Crossfade is gone; kept as a harmless no-op so app.js/tests that call it
+        // don't need to guard. (A horizontal distance-LOD fade is a later item.)
+        updateCanopy() { return 0; },
+
         destroy() {
             nodes.forEach(n => scene.destroyNode ? scene.destroyNode(n) : n.destroy && n.destroy());
         }
