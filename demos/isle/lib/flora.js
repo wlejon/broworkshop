@@ -1,7 +1,7 @@
 // flora.js — grow plant prototypes and instance them across the island by biome.
 
 // Grows a single prototype in a dedicated flora world with full light.
-function growPrototype(name, whorlArms, whorlSpread, speciesProps) {
+export function growPrototype(name, whorlArms, whorlSpread, speciesProps) {
     const world = bro.flora.createWorld({
         rngSeed: 0xBAADF00D,
         climate: { annualTempBase: 14, annualPrecip: 1000 },
