@@ -1,6 +1,7 @@
 import "/lib/camera.js";
 import { installSystemMenu } from "/lib/system-menu.js";
 import { PLANET, loadChart } from "/app/planet.js";
+import { createZoom } from "/app/zoom.js";
 
 // =============================================================================
 // World — a playable learned planet
@@ -61,11 +62,12 @@ scene.setShadowQuality(4096, 3);
 // Analytic single-scattering sky + aerial perspective. sunDirection points
 // TOWARDS the sun, so it is the negation of the light's travel direction. No
 // setFog: aerial perspective is the air, and running both double-counts it.
-scene.setAtmosphere({
+const ATMOSPHERE = {
     enabled: true,
     sunDirection: [-SUN_DIR[0], -SUN_DIR[1], -SUN_DIR[2]],
     seaLevel: PLANET.seaLevel,
-});
+};
+scene.setAtmosphere(ATMOSPHERE);
 
 // Stars, additive over the sky: the daylit air swamps them near the ground and
 // they emerge as the sky darkens on the way up. Fixed to the celestial sphere,
@@ -363,6 +365,22 @@ if (chart) {
                 ' at ' + (chart.cellSize / 1000).toFixed(2) + ' km');
 }
 
+// The whole-planet-in-space representation and the virtual-altitude zoom that
+// cross-fades into it. Only meaningful with the baked full-planet chart resident
+// (the globe is shaded from the entire chart); the un-baked fallback keeps plain
+// free flight. See zoom.js.
+let zoom = null;
+if (baked) zoom = createZoom(scene, terrain, coarse, {
+    canvas, fov: 70,
+    // Beyond the ceiling the ball hangs in bare space; the near-field sky would
+    // otherwise sit behind it as a second planet. The globe covers the frame at
+    // the switch, so it is invisible.
+    onSpaceChange: (inSpace) => {
+        ATMOSPHERE.enabled = !inSpace;
+        scene.setAtmosphere(ATMOSPHERE);
+    },
+});
+
 status.textContent = 'Loading terrain model...';
 if (!bro.worldgen || !bro.worldgen.available) {
     status.textContent = 'bro.worldgen unavailable — build with BRO_WITH_DIFFUSION.';
@@ -465,7 +483,8 @@ function frame() {
         ? Math.min(FLY_MAX, FLY_BASE + aglNow * FLY_PER_M) * speedTrim
         : WALK_SPEED;
     if (keys['shift']) speed *= BOOST;
-    Camera.flyIntegrate(cam, Camera.flyThrustFromKeys(cam, keys), dt, speed);
+    const thrust = Camera.flyThrustFromKeys(cam, keys);
+    Camera.flyIntegrate(cam, thrust, dt, speed);
 
     if (mode === 'walk') {
         // No physics body: the ground is a direct lookup into the same surface
@@ -480,6 +499,13 @@ function frame() {
     // periodic) while the HUD reports a position off the map and fp32 slowly
     // loses the sub-cell offset the detail taps depend on.
     if (baked) cam.pos[0] -= EAST_SPAN * Math.floor(cam.pos[0] / EAST_SPAN);
+
+    // Virtual altitude, the ceiling and the surface<->globe cross-fade. Runs after
+    // integration (it clamps cam.y at the ceiling) and before terrain.update /
+    // setCamera see the position. Only in fly mode — walking never leaves the deck.
+    if (zoom && mode === 'fly') {
+        zoom.update(cam, thrust[1], dt);
+    }
 
     // The world has no edge: re-cut the coarse window when the camera has
     // travelled far enough that the ring stack would otherwise reach past it.
@@ -505,10 +531,15 @@ function frame() {
     cam.fov  = 70;
     scene.setCamera(Camera.flyViewOptsQuat(cam, canvas));
 
+    // In space the camera altitude is frozen at the ceiling; the virtual altitude
+    // is what "flying out" changes, so report it instead.
+    const altStr = (zoom && zoom.inSpace())
+        ? 'ZOOM ' + (zoom.avirt() / 1000).toFixed(0) + ' km (virtual)'
+        : 'alt ' + Math.round(cam.pos[1]) + ' m';
     hud.textContent =
         mode.toUpperCase() +
         '  |  ' + (cam.pos[0] / 1000).toFixed(2) + ', ' + (cam.pos[2] / 1000).toFixed(2) + ' km' +
-        '  |  alt ' + Math.round(cam.pos[1]) + ' m' +
+        '  |  ' + altStr +
         (g === null ? '' : '  |  ground ' + Math.round(g) + ' m') +
         '  |  ' + fps + ' fps' +
         (mode === 'fly'
@@ -525,6 +556,9 @@ function frame() {
 requestAnimationFrame(frame);
 
 export { cam, terrain, elevationAt, toggleMode, sun, scene };
+// The zoom controller, exported so tests can drive the pull-back past the ceiling
+// without synthesising key events.
+export const zoomController = () => zoom;
 // Diagnostics: enough to rebuild the terrain with a different config and
 // re-install the same height data, so tests can bisect config against artifact.
 export const coarseField = () => ({ data: coarse, originX: coarseOriginX,
