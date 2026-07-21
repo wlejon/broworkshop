@@ -166,12 +166,22 @@ export function createSeasonController(scene, terrain, flora, sky, atlas) {
                 // Golden hour at sunset/sunrise
                 const sunsetFactor = clamp(1.0 - Math.abs(sunAltitude), 0.0, 1.0);
                 sky.sun.color = lerpColor([1.0, 0.95, 0.85], [1.0, 0.45, 0.15], sunsetFactor);
-                scene.setAmbient(lerpColor([0.10, 0.15, 0.22], [0.35, 0.45, 0.55], sunAltitude));
+                
+                if (!sky.haveHDR) {
+                    scene.setAmbient(lerpColor([0.10, 0.15, 0.22], [0.35, 0.45, 0.55], sunAltitude));
+                } else {
+                    scene.setAmbient([0.0, 0.0, 0.0]); // Let IBL handle ambient
+                }
             } else {
                 // Nighttime
                 sky.sun.intensity = 0.05; // moonlight
                 sky.sun.color = [0.4, 0.5, 0.7];
-                scene.setAmbient([0.02, 0.03, 0.06]);
+                
+                if (!sky.haveHDR) {
+                    scene.setAmbient([0.02, 0.03, 0.06]);
+                } else {
+                    scene.setAmbient([0.0, 0.0, 0.0]);
+                }
             }
         }
     }

@@ -38,15 +38,14 @@ export function getAtlas() { return atlas; }
 // ---- fixed scene: sky + sea (built immediately, before the model lands) ----
 const sky = createSky(scene, {});
 
-// ---- freefly camera --------------------------------------------------------
-// High and to the south, looking down at the island centred on the origin.
+// Start the camera at a beautiful ground vantage point (near the coast and trees)
 const cam = Camera.createFly({
-    pos:   [0, 4200, 9000],
-    rot:   Camera.quatFromAxis(1, 0, 0, -0.42),   // pitch down ~24°
-    fov:   58, near: 3, far: 220000,
+    pos:   [1000, 150, 1000],
+    rot:   Camera.quatFromAxis(0, 1, 0, 2.35),   // facing NW towards the island peak
+    fov:   58, near: 1, far: 120000,
     accel: 14, damping: 6, rollSpeed: 2.2, lookSpeed: 0.0022,
 });
-let moveSpeed = 900;                     // m/s; scroll wheel scales it
+let moveSpeed = 120;                     // m/s; scroll wheel scales it
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 
 // ---- input -----------------------------------------------------------------
