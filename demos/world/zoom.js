@@ -119,9 +119,6 @@ export function createZoom(scene, terrain, chart, opts = {}) {
     const D_g    = opts.depth      ?? 30000;      // world units — constant globe depth
     const ZOOM_RATE = opts.zoomRate ?? 0.9;       // 1/s at full up-thrust past the ceiling
     const EAST_SPAN = chart.width * chart.cellSize;   // 2*pi*R
-    const CELL0 = EAST_SPAN / 2048;               // metres per texel of the globe chart, mip 0
-    const FOV = (opts.fov ?? 70) * Math.PI / 180;
-    const canvas = opts.canvas || null;
     const lnFade = Math.log(Z_FADE), lnCeil = Math.log(Z_CEIL);
 
     const globe = createGlobe(scene, chart, opts.globe);
@@ -187,17 +184,10 @@ export function createZoom(scene, terrain, chart, opts = {}) {
             globe.setShaderUniform('u_alpha', a);
             const r_g = D_g * R / (R + Avirt);     // angular-size match to the real limb
             globe.scale = r_g;
-
-            // Resolve the chart at the level that matches the globe's on-screen
-            // size: sharp (near mip 0) when it fills the frame during the dissolve,
-            // coarse when it has receded to a small ball. Fixed-LOD would be blurry
-            // up close and speckly far away; this tracks one texel per pixel.
-            const screenH = (canvas && canvas.height) || 1080;
-            const angR = Math.asin(Math.min(0.999, r_g / D_g));      // globe angular radius
-            const pxR = Math.max(1, angR / (0.5 * FOV) * (screenH / 2));
-            const mPerPx = (Math.PI * R) / (2 * pxR);                // half-circumference / diameter px
-            const lod = clamp(Math.log2(mPerPx / CELL0), 0, 5);
-            globe.setShaderUniform('u_chartLod', lod);
+            // The globe fragment picks its own chart mip and detail band per pixel
+            // from the on-screen footprint (fwidth), so there is no LOD to drive
+            // from here — it stays crisp at the near point and fades to average as
+            // the ball shrinks, without this loop knowing the screen size.
 
             // Place the globe at the NADIR (straight down toward the planet centre),
             // not along the view forward. Its silhouette is then the same circle as

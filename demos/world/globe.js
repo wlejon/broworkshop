@@ -87,21 +87,83 @@ void userVertex(inout vec3 pos, inout vec3 normal, inout vec2 uv) {
 const FRAG = `
 in vec3 v_dir;
 uniform sampler2D u_chart;
-uniform float u_chartLod;    // fixed mip level to sample the chart at (see below)
+uniform float u_radius;      // planet radius, metres — the noise domain's scale
+uniform float u_cell0;       // chart metres per texel at mip 0 (~7.68 km)
 uniform float u_snowLine;
 uniform float u_seaLevel;
+uniform float u_relief;      // fBm height roughness, dimensionless (per octave slope)
+uniform float u_bump;        // relief-shading strength
 uniform float u_limb;
 uniform vec3  u_limbColor;
 uniform float u_alpha;       // cross-fade opacity, driven by the zoom controller
-const float GB_PI = 3.14159265358979;
+const float GB_PI  = 3.14159265358979;
 const float GB_TAU = 6.28318530717959;
 
-// WHY A FIXED LOD, NOT texture(). Auto-LOD is useless here on three counts: the
-// R32F auto-mip select is stuck at level 0 on this driver, the icosphere's tris
-// are sub-pixel so the 2x2-quad derivatives are noise, and the equirect uv wraps
-// at the longitude seam so dFdx spikes there. A single resolved level dodges all
-// three; the controller can raise it as the globe grows to fill the frame.
-float chartElev(vec2 uv) { return textureLod(u_chart, uv, u_chartLod).r; }
+// --- 3D gradient noise on an INTEGER-hashed lattice. -------------------------
+// Not fract(sin(dot(...))): the noise domain is the planet surface in metres, so
+// the coordinate reaches ~6.4e6, where fp32 sin() is stripes. The bit-mix hash
+// (same idea as the clipmap's cmHashU) resolves every cell. 3D, keyed off the
+// surface point itself, so there is no equirect seam and no polar pinch to dodge
+// — the two problems that forced the old fixed-LOD, texture-only material.
+uint gbHash(ivec3 c) {
+    uvec3 v = uvec3(c + 0x1000000);
+    uint h = v.x * 0x8da6b343u + v.y * 0xd8163841u + v.z * 0xcb1ab31fu;
+    h ^= h >> 15; h *= 0x2c1b3c6du;
+    h ^= h >> 13; h *= 0x297a2d39u;
+    h ^= h >> 15;
+    return h;
+}
+vec3 gbGrad(ivec3 c) {
+    uint h = gbHash(c);
+    float a = float(h & 0xffffu) * (GB_TAU / 65536.0);
+    float z = float((h >> 16) & 0xffffu) * (2.0 / 65536.0) - 1.0;
+    float r = sqrt(max(0.0, 1.0 - z * z));
+    return vec3(r * cos(a), r * sin(a), z);
+}
+float gbNoise(vec3 p) {
+    vec3 fl = floor(p); ivec3 i = ivec3(fl); vec3 f = p - fl;
+    vec3 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+    float v000 = dot(gbGrad(i + ivec3(0,0,0)), f - vec3(0,0,0));
+    float v100 = dot(gbGrad(i + ivec3(1,0,0)), f - vec3(1,0,0));
+    float v010 = dot(gbGrad(i + ivec3(0,1,0)), f - vec3(0,1,0));
+    float v110 = dot(gbGrad(i + ivec3(1,1,0)), f - vec3(1,1,0));
+    float v001 = dot(gbGrad(i + ivec3(0,0,1)), f - vec3(0,0,1));
+    float v101 = dot(gbGrad(i + ivec3(1,0,1)), f - vec3(1,0,1));
+    float v011 = dot(gbGrad(i + ivec3(0,1,1)), f - vec3(0,1,1));
+    float v111 = dot(gbGrad(i + ivec3(1,1,1)), f - vec3(1,1,1));
+    float x00 = mix(v000, v100, u.x), x10 = mix(v010, v110, u.x);
+    float x01 = mix(v001, v101, u.x), x11 = mix(v011, v111, u.x);
+    return mix(mix(x00, x10, u.y), mix(x01, x11, u.y), u.z);
+}
+
+// Band-limited fBm relief in metres. Every octave whose wavelength drops toward
+// the pixel footprint \`foot\` fades out — the same Nyquist window the clipmap's
+// cmDetail uses — so the far, small ball loses its detail to its average instead
+// of boiling into speckle. Amplitude is proportional to wavelength (scale-free),
+// matching cmDetail so the two surfaces roughen the same way through the fade.
+// The fade dies EARLY — an octave is gone by the time the pixel footprint reaches
+// half its wavelength (2 px per feature, Nyquist). Letting octaves live nearer
+// the pixel gave the land a harsh 2-px stipple ("static"); this keeps the finest
+// visible feature several pixels wide, so the surface reads as gentle terrain,
+// the way the clipmap does from altitude (its metre-scale mottle is long dead by
+// the time you are looking at a whole continent).
+float gbBand(float lambda, float foot) {
+    return 1.0 - smoothstep(0.22 * lambda, 0.50 * lambda, foot);
+}
+float gbHeight(vec3 P, float foot) {
+    float h = 0.0, lambda = 6000.0;   // start just under the 7.68 km chart cell
+    for (int o = 0; o < 6; ++o) {
+        float w = gbBand(lambda, foot);
+        if (w > 0.0) h += u_relief * lambda * w * gbNoise(P / lambda);
+        lambda *= 0.5;
+    }
+    return h;
+}
+// Band-limited scalar mottle in ~[-1,1] at one scale (fades below the pixel).
+float gbMottle(vec3 P, float foot, float scale) {
+    float w = gbBand(scale, foot);
+    return w > 0.0 ? w * gbNoise(P / scale) : 0.0;
+}
 
 void userFragment(inout vec3 baseColor, inout vec3 normal, inout float metallic,
                   inout float roughness, inout vec3 emissive, inout float alpha) {
@@ -110,54 +172,85 @@ void userFragment(inout vec3 baseColor, inout vec3 normal, inout float metallic,
     float lon = atan(d.x, d.z);
     vec2 uv = vec2(lon / GB_TAU + 0.5, 0.5 - lat / GB_PI);
 
-    float e = chartElev(uv);
+    // Planet-fixed surface point in metres — the domain for all the procedural
+    // detail. It is object-space (before the node's per-frame reorientation), so
+    // terrain stays pinned to the planet as the ball turns under the camera.
+    vec3 P = u_radius * d;
+    // One pixel's footprint on that surface, from the derivative of P. This is
+    // what makes the detail self-regulate: near the sub-camera point it is a few
+    // hundred metres (fine detail alive), toward the foreshortened limb and when
+    // the ball has shrunk to a dot it blows up (all detail fades to average).
+    float foot = max(length(fwidth(P)), 1.0);
 
-    // Land is coloured by ELEVATION and LATITUDE only — no per-pixel slope term.
-    // On the ground the clipmap keys rock off slope, but a globe pixel spans
-    // ~150 km, where the slope between neighbouring chart cells is noise, not a
-    // feature (it reads as radial fur). The baked relief still gives the
-    // terminator ridges to rake across; here we just paint the biome bands. The
-    // clipmap's rock/snow/sand/grass palette (clipmap_material.glsl) is kept so
-    // the ball reads as the same planet as the ground.
-    vec3 cRock  = vec3(0.291, 0.272, 0.254);
-    vec3 cSnow  = vec3(0.760, 0.790, 0.830);
-    vec3 cSand  = vec3(0.520, 0.470, 0.365);
-    vec3 cGrass = vec3(0.224, 0.278, 0.149);
+    // Chart at the mip that matches the footprint: crisp at the near point,
+    // minified toward the limb. Computed, not auto-selected — R32F auto-mip is
+    // stuck at level 0 on this driver.
+    float clod = max(0.0, log2(foot / u_cell0));
+    float eChart = textureLod(u_chart, uv, clod).r;
 
-    // Grass in the lowlands giving way to bare rock on the high ground. Wide,
-    // gentle bands: a globe texel is hundreds of km, so hard thresholds on the
-    // elevation turn every stray high or low cell into a speck.
-    float highland = smoothstep(u_snowLine * 0.30, u_snowLine * 0.95, e);
+    // Detail below the 7.68 km chart: ragged coasts and terrain relief. Held off
+    // the open ocean (landness) so deep water stays a smooth sheet, not noise.
+    float landness = smoothstep(u_seaLevel - 600.0, u_seaLevel + 200.0, eChart);
+    float relief = gbHeight(P, foot) * mix(0.25, 1.0, landness);
+    float e = eChart + relief;
+
+    float coarse = gbMottle(P, foot, 2800.0);   // breaks the large colour washes
+    float fine   = gbMottle(P, foot, 520.0);    // the grain you read up close
+
+    // --- Material bands: the clipmap's rock/snow/sand/grass palette verbatim
+    // (clipmap_material.glsl), each albedo varied by the fine/coarse mottle so the
+    // colour has grain instead of a flat wash. The BANDS themselves key off the
+    // SMOOTH chart elevation (eChart), not the relief-perturbed e: snow caps and
+    // highlands read as coherent regions like the ground does, while the relief
+    // still ragges the coast (below) and lights the terrain (bump, below). Keying
+    // the bands off e instead turned every fBm bump into a fleck of snow. ---
+    vec3 cRock  = mix(vec3(0.246,0.232,0.221), vec3(0.336,0.313,0.288), 0.5 + 0.35*fine);
+    vec3 cSnow  = vec3(0.760,0.790,0.830) * (1.0 + 0.04*fine);
+    vec3 cSand  = mix(vec3(0.480,0.430,0.330), vec3(0.560,0.510,0.400), 0.5 + 0.35*fine);
+    vec3 cGrass = mix(vec3(0.180,0.235,0.128), vec3(0.268,0.322,0.170),
+                      clamp(0.5 + 0.5*coarse + 0.14*fine, 0.0, 1.0));
+
+    float highland = smoothstep(u_snowLine * 0.28, u_snowLine * 0.92, eChart + 180.0*coarse);
     vec3 land = mix(cGrass, cRock, highland);
-    // A thin tan shore hugging the coast; the lowlands stay grass, not desert.
-    float sand = 1.0 - smoothstep(u_seaLevel + 20.0, u_seaLevel + 180.0, e);
+    float sand = 1.0 - smoothstep(u_seaLevel + 15.0, u_seaLevel + 160.0, eChart + 50.0*coarse);
     land = mix(land, cSand, sand * 0.5);
-    // Snow only on genuinely high massifs (a raised, wide threshold keeps single
-    // high cells from flecking white) plus the latitude ice caps.
-    float snow = max(smoothstep(u_snowLine + 300.0, u_snowLine + 1400.0, e),
-                     smoothstep(1.13, 1.34, abs(lat)));   // ~65 to ~77 deg
+    float snowLine = u_snowLine + 260.0*coarse;
+    float snow = max(smoothstep(snowLine + 350.0, snowLine + 1500.0, eChart),
+                     smoothstep(1.15, 1.36, abs(lat)));   // coherent caps + latitude ice
     land = mix(land, cSnow, snow);
-    float landRough = mix(0.95, 0.62, snow);
+    float landRough = mix(0.94, 0.62, snow);
 
-    // Ocean below sea level: deep in the basins, lighter over the shelves. A wide
-    // shoreline band keeps coasts soft. The globe shows seas the clipmap never draws.
-    float water = 1.0 - smoothstep(u_seaLevel - 250.0, u_seaLevel + 250.0, e);
-    vec3 deep = mix(vec3(0.05, 0.11, 0.20), vec3(0.02, 0.05, 0.12),
+    // Ocean below sea level (not the focus yet — kept simple, coast perturbed by
+    // the same relief so the shoreline is ragged, not a smooth arc).
+    float water = 1.0 - smoothstep(u_seaLevel - 250.0, u_seaLevel + 120.0, e);
+    vec3 deep = mix(vec3(0.05,0.11,0.20), vec3(0.02,0.05,0.12),
                     smoothstep(u_seaLevel - 400.0, u_seaLevel - 3000.0, e));
 
     baseColor = mix(land, deep, water);
-    roughness = mix(landRough, 0.72, water);   // sea is matte, not a mirror
+    roughness = mix(landRough, 0.72, water);
     metallic  = 0.0;
 
-    // Atmospheric limb: a thin rim of sky colour right at the silhouette. A high
-    // power keeps it hugging the true limb, so it does not wash the surface when
-    // the globe fills the frame during the dissolve.
-    float rim = pow(1.0 - max(dot(normalize(normal), normalize(-vWorldPos)), 0.0), 6.0);
+    // --- Relief shading. Bump the normal from the height's screen-space gradient
+    // (Mikkelsen derivative bump — no tangents, correct in the camera-relative
+    // world space \`normal\`/vWorldPos already live in, and self-cancelling because
+    // \`relief\` fades to zero when the ball is small). This is what makes the
+    // terminator rake across ridges instead of sliding over a smooth ball. ---
+    vec3 N = normalize(normal);
+    vec3 dpx = dFdx(vWorldPos), dpy = dFdy(vWorldPos);
+    float dhx = dFdx(relief),   dhy = dFdy(relief);
+    vec3 r1 = cross(dpy, N), r2 = cross(N, dpx);
+    float det = dot(dpx, r1);
+    if (abs(det) > 1e-8) {
+        vec3 g = (dhx * r1 + dhy * r2) / det;   // world-space surface gradient of relief
+        N = normalize(N - u_bump * (1.0 - water) * g);
+        normal = N;
+    }
+
+    // Atmospheric limb: a thin rim of sky colour hugging the silhouette.
+    float rim = pow(1.0 - max(dot(N, normalize(-vWorldPos)), 0.0), 6.0);
     emissive += u_limbColor * (rim * u_limb);
 
-    // Cross-fade: the controller ramps this 0..1 as the surface dissolves into
-    // the globe. The mesh is drawn translucent (colour alpha < 1), so this is the
-    // final coverage — at 1 it fully occludes the clipmap cap behind it.
+    // Cross-fade coverage (mesh is drawn translucent; at 1 it hides the cap).
     alpha = u_alpha;
 }
 `;
@@ -209,37 +302,37 @@ export function createGlobe(scene, chart, opts = {}) {
     });
     node.castsShadow = false;
 
-    // Medium-resolution chart for the fragment material (see setShaderTexture).
-    const mid = downsampleChart(chart, 2048, 1024);
-    closePoles(mid.data, mid.width, mid.height, 128);
-
-    // Resolve the chart at a fixed mip whose cell is ~90 km: fine enough that
-    // coastlines and whole continents survive (heavy averaging drowns land — the
-    // mean elevation is below sea level, so a coarse tap reads as all-ocean),
-    // coarse enough that it does not speckle now that the poles are closed and the
-    // material bands are soft. exp2(lod) = 140 km / cell(level 0).
-    const cell0 = (TAU * PLANET.radius) / mid.width;     // metres per texel, level 0
-    const chartLod = opts.chartLod ?? Math.max(0, Math.log2(140000 / cell0));
+    // The FRAGMENT samples the FULL-resolution chart (7.68 km cells), not a
+    // downsample: soft coastlines were the biggest part of the "blurry ball"
+    // look, and they come straight from the chart resolution. The fragment picks
+    // the right mip per pixel from its own footprint (u_cell0 + fwidth), so this
+    // stays crisp at the near point and mips down toward the limb on its own —
+    // the fixed-LOD blur the old medium chart baked in is gone. Copy first, then
+    // close the poles on the copy so the shared clipmap chart is left untouched.
+    const full = { data: chart.data.slice(), width: chart.width, height: chart.height };
+    closePoles(full.data, full.width, full.height,
+               Math.max(8, Math.round(full.height * 0.12)));   // ~22 deg polar band
+    const cell0 = (TAU * PLANET.radius) / full.width;          // metres per texel, mip 0
 
     node.setShader({
         vertex: VERT,
         fragment: FRAG,
         uniforms: {
-            u_chartLod:    chartLod,
+            u_radius:      PLANET.radius,
+            u_cell0:       cell0,
             u_snowLine:    PLANET.snowLine,
             u_seaLevel:    PLANET.seaLevel,
+            u_relief:      opts.relief2 ?? 0.018,   // fBm slope per octave
+            u_bump:        opts.bump ?? 0.5,        // relief-shading strength
             u_limb:        opts.limb ?? 0.4,
             u_limbColor:   opts.limbColor ?? [0.35, 0.55, 0.90],
             u_alpha:       1.0,
         },
     });
-    // Fragment chart lookup on the MEDIUM-resolution chart (~19 km cells). The
-    // full 7.68 km chart, minified to a screen where the whole planet is ~1000
-    // px, speckles below the pixel even with mips; bounding the frequency here
-    // gives crisp coastlines at every zoom without sub-pixel noise. Periodic in
-    // longitude (repeat S), single-valued at the poles (clamp T), mipmapped.
+    // Periodic in longitude (repeat S), single-valued at the poles (clamp T),
+    // mipmapped so the per-fragment LOD has levels to select.
     node.setShaderTexture('u_chart', {
-        data: mid.data, width: mid.width, height: mid.height,
+        data: full.data, width: full.width, height: full.height,
         mipmap: true, repeat: true, clampT: true,
     });
     return node;
