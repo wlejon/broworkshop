@@ -128,21 +128,21 @@ export function createSeasonController(scene, terrain, flora, sky, atlas) {
             grass: { albedo: grassColor, roughness: basePalette.grass.roughness }
         };
         terrain.clipmap.setMaterials(tempPalette);
-
-        // Color the deciduous flora instances
-        if (flora && flora.nodes) {
-            flora.nodes.forEach(node => {
-                // If it's a deciduous instanced node, set color dynamically
-                if (node.setColor) {
-                    // Decide based on deciduous / pine / shrub color matching
-                    if (node.color[0] === 0.18 || node.color[0] === 0.42) {
-                        // Deciduous
-                        node.setColor(decidColor[0], decidColor[1], decidColor[2]);
-                    }
+        // Color the leaf nodes directly
+        if (flora && flora.leafNodes) {
+            if (flora.leafNodes.decid && flora.leafNodes.decid.setColor) {
+                flora.leafNodes.decid.setColor(decidColor[0], decidColor[1], decidColor[2]);
+            }
+            if (flora.leafNodes.shrub && flora.leafNodes.shrub.setColor) {
+                if (seasonName === 'Winter') {
+                    flora.leafNodes.shrub.setColor(0.24, 0.22, 0.18);
+                } else if (seasonName === 'Autumn') {
+                    flora.leafNodes.shrub.setColor(0.32, 0.28, 0.16);
+                } else {
+                    flora.leafNodes.shrub.setColor(0.25, 0.32, 0.16);
                 }
-            });
+            }
         }
-
         // 2. Resolve Time of Day
         const hour = Math.floor(time);
         const min = Math.floor((time - hour) * 60);

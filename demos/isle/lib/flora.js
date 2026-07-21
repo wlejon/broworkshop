@@ -1,55 +1,120 @@
 // flora.js — grow plant prototypes and instance them across the island by biome.
 
-// Grows N prototypes once on boot.
-export function initFlora(scene, atlas) {
+// Grows a single prototype in a dedicated flora world with full light.
+function growPrototype(name, whorlArms, whorlSpread, speciesProps) {
     const world = bro.flora.createWorld({
-        rngSeed: 0xDEADBEEF,
-        climate: { annualTempBase: 12, annualPrecip: 1000 }
+        rngSeed: 0xBAADF00D,
+        climate: { annualTempBase: 14, annualPrecip: 1000 },
+        shadow: {
+            origin:   [-10, 0, -10],
+            cellSize: 1.0,
+            width: 20, height: 20, depth: 20, fill: 1.0 // Full sun required for growth
+        }
     });
 
-    // 1. Define species prototypes
-    // Tree 1: Pine (Boreal)
-    const protoPine = world.addPrototype(bro.flora.prototypes.whorl(5, 0.4));
-    world.addVoronoiSite(protoPine, 0.15, 0.9);
-    const pineIdx = world.addPlant({
+    const proto = world.addPrototype(bro.flora.prototypes.whorl(whorlArms, whorlSpread));
+    world.addVoronoiSite(proto, 0.3, 0.6);
+
+    const plantIdx = world.addPlant({
         origin: [0, 0, 0],
-        prototypeIndex: protoPine,
-        species: { moduleMatureAge: 0.4, growthScale: 1.2 }
+        prototypeIndex: proto,
+        species: speciesProps
     });
 
-    // Tree 2: Deciduous (Temperate/Rainforest)
-    const protoDecid = world.addPrototype(bro.flora.prototypes.whorl(4, 0.65));
-    world.addVoronoiSite(protoDecid, 0.3, 0.7);
-    const decidIdx = world.addPlant({
-        origin: [10, 0, 0],
-        prototypeIndex: protoDecid,
-        species: { moduleMatureAge: 0.5, growthScale: 1.0 }
-    });
-
-    // Shrub (Tundra/Desert/Undergrowth)
-    const protoShrub = world.addPrototype(bro.flora.prototypes.fork());
-    world.addVoronoiSite(protoShrub, 0.4, 0.5);
-    const shrubIdx = world.addPlant({
-        origin: [20, 0, 0],
-        prototypeIndex: protoShrub,
-        species: { moduleMatureAge: 0.8, growthScale: 0.5 }
-    });
-
-    // Grow them by stepping the simulation
-    for (let i = 0; i < 120; i++) {
+    // Step to grow from seedling to mature tree
+    for (let i = 0; i < 140; i++) {
         world.step(0.1);
     }
 
-    // Emit their meshes (low side count for performance at scale)
-    const pineMesh = world.emitPlantMesh(pineIdx, 4);
-    const decidMesh = world.emitPlantMesh(decidIdx, 5);
-    const shrubMesh = world.emitPlantMesh(shrubIdx, 4);
+    // 1. Emit branches
+    const branchMesh = world.emitPlantMesh(plantIdx, 4);
+
+    // 2. Emit foliage leaf cards
+    const leaf = Mesh.leafCard('oval', {
+        width: 0.14, length: 0.24, bend: 0.45,
+        fullUV: true, shapedSilhouette: true, cup: 0.3,
+        widthSegments: 3, lengthSegments: 6
+    });
+
+    const segs = world.emitPlantSegments(plantIdx);
+    const fol = world.emitPlantFoliage(plantIdx);
+    const densityWeight = [];
+
+    if (segs && segs.length > 0) {
+        for (let k = 0; k < segs.length; k++) {
+            const f = fol && fol[k];
+            const raw = f && f.lightExposure01 !== undefined ? f.lightExposure01 : 1.0;
+            const exposure = 0.15 + 0.85 * raw;
+            const maturity = f ? Math.min(1, f.age01) : 1.0;
+            const alive = f ? (1.0 - f.senescence01) : 1.0;
+            const twig = f && f.twigGrade01 !== undefined ? f.twigGrade01 : 1.0;
+            densityWeight.push(exposure * maturity * alive * twig);
+        }
+    }
+
+    const leafMesh = Mesh.scatterLeaves(segs, leaf, {
+        maxRadius:     0.25,
+        minDepth:      1,
+        perUnitLength: 200,
+        densityWeight: densityWeight,
+        upBias:        0.5,
+        tiltJitter:    0.5,
+        rollJitter:    0.8,
+        baseScale:     1.0,
+        scaleJitter:   0.3,
+        scaleByRadius: 0.25,
+        seed:          0x1eaf
+    });
+
+    return { branchMesh, leafMesh };
+}
+
+// Grows all 3 prototypes on boot.
+export function initFlora(scene, atlas) {
+    // Pine (Boreal/Alpine): 5 arms whorl, narrow spread, orthotropic
+    const pine = growPrototype('pine', 5, 0.45, {
+        shadeTolerance: 0.35, moduleMatureAge: 0.5,
+        tropismG2: 0.12, growthScale: 1.2,
+        orthotropy: 0.38, rootVigorMax: 3.5,
+        apicalControl: 0.4, apicalControlMature: 0.35,
+        individualVariation: 0.1, maxAge: 80
+    });
+
+    // Deciduous (Temperate/Rainforest): 4 arms whorl, wide spreading crown
+    const decid = growPrototype('decid', 4, 0.7, {
+        shadeTolerance: 0.35, moduleMatureAge: 0.6,
+        tropismG2: 0.12, growthScale: 1.0,
+        orthotropy: 0.4, rootVigorMax: 3.0,
+        apicalControl: 0.35, apicalControlMature: 0.3,
+        individualVariation: 0.15, maxAge: 60
+    });
+
+    // Shrub (Tundra/Desert/Undergrowth): 3 arms whorl, compact dome
+    const shrub = growPrototype('shrub', 3, 0.55, {
+        shadeTolerance: 0.8, moduleMatureAge: 0.7,
+        tropismG2: 0.12, growthScale: 0.6,
+        orthotropy: 0.48, rootVigorMax: 2.2,
+        apicalControl: 0.30, apicalControlMature: 0.3,
+        individualVariation: 0.12, maxAge: 50
+    });
 
     return {
         types: {
-            pine: { mesh: pineMesh, color: [0.12, 0.22, 0.16] },
-            decid: { mesh: decidMesh, color: [0.18, 0.32, 0.14] },
-            shrub: { mesh: shrubMesh, color: [0.26, 0.28, 0.18] }
+            pine: {
+                branchMesh: pine.branchMesh,
+                leafMesh: pine.leafMesh,
+                leafColor: [0.10, 0.20, 0.12]
+            },
+            decid: {
+                branchMesh: decid.branchMesh,
+                leafMesh: decid.leafMesh,
+                leafColor: [0.18, 0.35, 0.14]
+            },
+            shrub: {
+                branchMesh: shrub.branchMesh,
+                leafMesh: shrub.leafMesh,
+                leafColor: [0.25, 0.32, 0.16]
+            }
         }
     };
 }
@@ -59,65 +124,54 @@ export function populateFlora(scene, floraData, atlas, clipmap) {
     const W = atlas.width, H = atlas.height;
     const mpc = atlas.metresPerCell;
 
-    // We will collect transforms for each type.
-    // 9 floats per instance: px, py, pz, qx, qy, qz, qw, scale, variantIndex
-    const maxInstances = 8000;
+    // Instanced transforms: px, py, pz, qx, qy, qz, qw, scale, variantIndex
+    const maxInstances = 12000;
     const pineXf = [];
     const decidXf = [];
     const shrubXf = [];
 
-    // Seeded LCG PRNG
     let seed = 1337;
     const rand = () => {
         seed = (seed * 1664525 + 1013904223) % 4294967296;
         return seed / 4294967296;
     };
 
-    // Sample step: don't check every cell, step to make it sparse
+    // Sample terrain cells
     const step = 4;
     for (let z = step; z < H - step; z += step) {
         for (let x = step; x < W - step; x += step) {
             const idx = z * W + x;
             const h = atlas.elevation[idx];
-            if (h <= 2.0) continue; // Skip sea and beach line
+            if (h <= 2.0) continue; // Above ocean and beach
 
             const sl = atlas.slope[idx];
-            if (sl > 0.38) continue; // Too steep for trees
+            if (sl > 0.35) continue; // No trees on steep cliffs
 
             const biome = atlas.biomes[idx];
-            const moisture = atlas.surfaceData[idx * 3 + 1]; // 0..1 moisture
+            const moisture = atlas.surfaceData[idx * 3 + 1]; // 0..1
 
-            // Decide tree density and type based on biome
             let pineProb = 0.0;
             let decidProb = 0.0;
             let shrubProb = 0.0;
 
-            // Biome mappings:
-            // 2 (ice/tundra): only shrubs
-            // 3 (alpine): pine/shrub
-            // 4 (boreal): mostly pines
-            // 6 (grassland), 9 (savanna): scattered deciduous / shrubs
-            // 7 (temperate forest), 10 (seasonal tropical), 11 (rainforest): deciduous
-            // 5, 8 (desert): none or rare desert shrub
             if (biome === 2) {
-                shrubProb = 0.08;
+                shrubProb = 0.10;
             } else if (biome === 3) {
-                pineProb = 0.04;
-                shrubProb = 0.06;
+                pineProb = 0.05;
+                shrubProb = 0.08;
             } else if (biome === 4) {
-                pineProb = 0.18;
-                shrubProb = 0.04;
+                pineProb = 0.20;
+                shrubProb = 0.05;
             } else if (biome === 6 || biome === 9) {
-                decidProb = 0.05 * moisture;
+                decidProb = 0.06 * moisture;
                 shrubProb = 0.08;
             } else if (biome === 7 || biome === 10 || biome === 11) {
-                decidProb = 0.22 * (biome === 11 ? 1.5 : 1.0);
+                decidProb = 0.25 * (biome === 11 ? 1.5 : 1.0);
                 shrubProb = 0.05;
             } else if (biome === 5 || biome === 8) {
-                shrubProb = 0.01; // very sparse desert shrub
+                shrubProb = 0.012; // sparse desert shrub
             }
 
-            // Draw random value
             const r = rand();
             let selectedType = null;
             if (r < pineProb) {
@@ -129,23 +183,17 @@ export function populateFlora(scene, floraData, atlas, clipmap) {
             }
 
             if (selectedType) {
-                // World position
                 const worldX = atlas.originX + x * mpc + (rand() - 0.5) * mpc * step;
                 const worldZ = atlas.originZ + z * mpc + (rand() - 0.5) * mpc * step;
                 
-                // Read exact height from clipmap
                 const worldY = clipmap.elevationAt(worldX, worldZ);
-                if (worldY <= 1.0) continue; // Don't submerge
+                if (worldY <= 1.0) continue;
 
-                // Random yaw
                 const yaw = rand() * Math.PI * 2;
                 const qy = Math.sin(yaw / 2);
                 const qw = Math.cos(yaw / 2);
+                const scale = 0.85 + rand() * 0.7; // Healthy height scaling
 
-                // Scale (slightly random)
-                const scale = 0.7 + rand() * 0.6;
-
-                // Pack transforms
                 const xf = (selectedType === 'pine') ? pineXf : (selectedType === 'decid') ? decidXf : shrubXf;
                 if (xf.length / 9 < maxInstances) {
                     xf.push(worldX, worldY, worldZ, 0, qy, 0, qw, scale, 0);
@@ -154,29 +202,52 @@ export function populateFlora(scene, floraData, atlas, clipmap) {
         }
     }
 
-    // Create instanced meshes
     const nodes = [];
+    const leafNodes = { pine: null, decid: null, shrub: null };
+
     const createInst = (type, xfData) => {
         if (xfData.length === 0) return;
         const info = floraData.types[type];
-        const instMesh = scene.createInstancedMesh({
-            mesh: info.mesh,
+        
+        // 1. Create wood branches batch (PBR brown wood material)
+        const branchInst = scene.createInstancedMesh({
+            mesh: info.branchMesh,
             instancesFromTransforms: new Float32Array(xfData),
-            color: info.color,
+            color: [0.26, 0.18, 0.12],
             metallic: 0.0,
             roughness: 0.9,
             castsShadow: true,
             receivesShadow: true
         });
-        nodes.push(instMesh);
+        nodes.push(branchInst);
+
+        // 2. Create foliage batch
+        if (info.leafMesh && info.leafMesh.triangleCount > 0) {
+            const leafInst = scene.createInstancedMesh({
+                mesh: info.leafMesh,
+                instancesFromTransforms: new Float32Array(xfData),
+                color: info.leafColor,
+                metallic: 0.0,
+                roughness: 0.85,
+                doubleSided: true,
+                alphaCutoff: 0.5,
+                castsShadow: true,
+                receivesShadow: true
+            });
+            nodes.push(leafInst);
+            leafNodes[type] = leafInst;
+        }
     };
 
     createInst('pine', pineXf);
     createInst('decid', decidXf);
     createInst('shrub', shrubXf);
 
+    console.log(`[flora] Spawned ${pineXf.length/9} pines, ${decidXf.length/9} decid, ${shrubXf.length/9} shrubs`);
+
     return {
         nodes,
+        leafNodes,
         destroy() {
             nodes.forEach(n => scene.destroyNode ? scene.destroyNode(n) : n.destroy && n.destroy());
         }
