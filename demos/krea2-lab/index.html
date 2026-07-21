@@ -115,6 +115,21 @@
                     </span>
                   </label>
                   <p class="hint">Loads with the built-in 18-axis control bank.</p>
+                  <label class="field">Text encoder <span class="hint inline">— optional</span>
+                    <span class="row">
+                      <input id="text-encoder" type="text"
+                             placeholder="bundled Qwen3-VL-4B — leave blank to use it"
+                             title="Override the Qwen3-VL-4B text encoder">
+                      <button id="btn-browse-te" class="iconbtn"
+                              title="Choose a .gguf or diffusers text_encoder">📁</button>
+                      <button id="btn-clear-te" class="iconbtn"
+                              title="Clear — use the bundled encoder">✕</button>
+                    </span>
+                  </label>
+                  <p class="hint">Swap the tapped Qwen3-VL-4B backbone — a
+                    <code>.gguf</code> quant (e.g. Q8_0) or another diffusers
+                    <code>text_encoder</code>. The vision tower stays from the
+                    model dir, so image-as-prompt still works.</p>
                   <button id="btn-load" class="primary">Load model</button>
                 </div>
               </details>

@@ -72,7 +72,9 @@ export function initModel(ctx) {
     modelSum('loading…');
     startLoadOverlay();
     ctx.status('loading model — this reads ~26GB of weights, give it a moment');
+    const textEncoder = $('text-encoder').value.trim();
     ctx.client.send({ type: 'load', modelDir: modelDir,
+                  textEncoderPath: textEncoder || undefined,
                   dictPaths: ['assets/axes_turbo.bcd1', 'assets/axes_sae_deck.bcd1',
                               'assets/axes_sae_all.bcd1'],
                   spectrumPath: 'lab/spectrum.json', mouthPath: 'lab/mouth.json' }, (err, msg) => {
@@ -94,7 +96,10 @@ export function initModel(ctx) {
       const cls = (msg.config && msg.config.modelClass) || 'model';
       const card = msg.backend === 'cpu' ? '' : ' · ' + cardName();
       const dirName = modelDir.replace(/[\\/]+$/, '').split(/[\\/]/).pop();
-      modelSum(dirName + ' · ' + (msg.axes || []).length + ' axes ✓', 'ok');
+      const teName = msg.textEncoder
+        ? ' · TE ' + String(msg.textEncoder).replace(/[\\/]+$/, '').split(/[\\/]/).pop()
+        : '';
+      modelSum(dirName + teName + ' · ' + (msg.axes || []).length + ' axes ✓', 'ok');
       $('model-details').removeAttribute('open');
       ctx.status(cls + ' ready · ' + (msg.axes || []).length + ' axes' + card, 'ok');
       // Chain the sequential restore passes (the client serializes one
@@ -113,6 +118,18 @@ export function initModel(ctx) {
   $('btn-browse-model').addEventListener('click', () => {
     const d = window.showOpenFolderDialog ? window.showOpenFolderDialog($('model-dir').value.trim()) : null;
     if (d) { $('model-dir').value = d; ctx.persist(); }
+  });
+
+  // Text-encoder override: pick a .gguf / .safetensors file (the common case).
+  // A diffusers text_encoder directory can be typed/pasted into the field.
+  // Both dialogs return an array of paths (empty on cancel).
+  $('btn-browse-te').addEventListener('click', () => {
+    if (!window.showOpenFileDialog) return;
+    const picked = window.showOpenFileDialog('Text encoder|gguf;safetensors');
+    if (picked && picked.length) { $('text-encoder').value = picked[0]; ctx.persist(); }
+  });
+  $('btn-clear-te').addEventListener('click', () => {
+    $('text-encoder').value = ''; ctx.persist();
   });
 
   ctx.doLoad = doLoad;

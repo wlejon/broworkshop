@@ -31,9 +31,10 @@
 //     (512, 1) row validity)
 //
 // Message protocol:
-//   main -> load          {modelDir, dictPath, spectrumPath, mouthPath}
+//   main -> load          {modelDir, textEncoderPath?, dictPath, spectrumPath,
+//                           mouthPath}
 //        <- loaded        {config, axes, hiddenSize, numLayers, backend,
-//                           spectrum, mouth}
+//                           spectrum, mouth, textEncoder}
 //   main -> generate      {prompt, negPrompt, opts, band, dial, gate, gateMask,
 //                           gateMaskBand, axisControls, expression, spectrum,
 //                           mouth, imagePixels, imageH, imageW, captureGates,
@@ -184,7 +185,13 @@ function handleLoad(msg) {
     // to ~17GB — quantize by default; only skip it if the caller explicitly
     // asks (e.g. a CPU run, or a card with enough VRAM to go FP16).
     var quantize = msg.quantizeWeights !== false;
-    var loadedPipeline = bro.diffusion.loadModel(msg.modelDir, { quantizeWeights: quantize });
+    // Optional text-encoder override: a Qwen3-VL-4B .gguf (e.g. Q8_0) or another
+    // diffusers text_encoder. Empty/absent → the model dir's bundled encoder.
+    // The engine keeps the vision tower from the model dir either way, so
+    // image-as-prompt / identity still work with a text-only gguf swapped in.
+    var teOpts = { quantizeWeights: quantize };
+    if (msg.textEncoderPath) teOpts.textEncoderPath = msg.textEncoderPath;
+    var loadedPipeline = bro.diffusion.loadModel(msg.modelDir, teOpts);
     // loadModel returns { cancelled: true } (not a Pipeline) when the process is
     // shutting down mid-load (window close / Ctrl+C / teardown). Bail silently —
     // there is no window left to receive a reply, and touching it as a Pipeline
@@ -230,6 +237,7 @@ function handleLoad(msg) {
       backend: tensor && tensor.available ? (tensor.backend || 'gpu') : 'cpu',
       spectrum: !!BAKED_BANKS.spectrum.dict,
       mouth: !!BAKED_BANKS.mouth.dict,
+      textEncoder: msg.textEncoderPath || null,
     });
   } catch (e) {
     pipeline = null;

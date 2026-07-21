@@ -77,6 +77,7 @@ function init() {
 
   // restore persisted text fields (feature modules restore their own below)
   if (prefs.modelDir) $('model-dir').value = prefs.modelDir;
+  if (prefs.textEncoder != null) $('text-encoder').value = prefs.textEncoder;
   if (prefs.prompt)   $('prompt').value = prefs.prompt;
   if (prefs.negPrompt != null) $('neg-prompt').value = prefs.negPrompt;
   ['seed', 'steps', 'guidance'].forEach((k) => {
@@ -115,6 +116,7 @@ function init() {
   function persist() {
     const p = {
       modelDir: $('model-dir').value,
+      textEncoder: $('text-encoder').value,
       prompt: $('prompt').value,
       negPrompt: $('neg-prompt').value,
       seed: $('seed').value, steps: $('steps').value,
@@ -265,7 +267,7 @@ function init() {
 
   // ── wire up ──────────────────────────────────────────────────────────────
   $('btn-generate').addEventListener('click', doGenerate);
-  ['model-dir', 'prompt', 'neg-prompt', 'seed', 'steps', 'guidance', 'width', 'height']
+  ['model-dir', 'text-encoder', 'prompt', 'neg-prompt', 'seed', 'steps', 'guidance', 'width', 'height']
     .forEach((id) => $(id).addEventListener('change', persist));
   $('prompt').addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); doGenerate(); }
