@@ -83,12 +83,18 @@ export function plane(res, ch) {
 }
 
 // Draw a Float32 field to a canvas through the GPU colormap path (one draw, no
-// CPU buffer). autoRange scales to the field's own min/max, which matters because
-// these channels span metres, °C, mm/yr and a standardised residual all at once.
+// CPU buffer). Uses an EXPLICIT range — the field's exact min/max, or opts.lo/hi.
+// NOT autoRange: autoRange EMA-smooths the range across frames (ema 0.02), so a
+// static field visibly "evolves" toward its true contrast over many repaints and
+// a stage switch re-converges the shared canvas on every click. Computing the
+// range once renders it right the first time. Pass opts.lo/opts.hi to pin a scale
+// (e.g. when several tiles must share one range), else it is taken from the field.
 export function drawField(canvas, field, srcW, srcH, lut, opts) {
-    bro.image.gpu.colormap(canvas, field, lut, {
-        srcW, srcH, autoRange: true, ...(opts || {}),
-    });
+    let lo = opts && opts.lo != null ? opts.lo : null;
+    let hi = opts && opts.hi != null ? opts.hi : null;
+    if (lo == null || hi == null) { const s = fieldStats(field); lo = s.lo; hi = s.hi; }
+    if (!(hi > lo)) hi = lo + 1e-6;                 // a flat field still draws
+    bro.image.gpu.colormap(canvas, field, lut, { srcW, srcH, lo, hi });
 }
 
 // Size a canvas's DISPLAY box (inline CSS) to the largest rectangle preserving

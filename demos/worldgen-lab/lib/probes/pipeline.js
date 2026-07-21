@@ -147,8 +147,8 @@ function paintMain(h) {
     const box = fitContain(h.main, res.width, res.height);
     if (box) { h.main.width = box.dw; h.main.height = box.dh; }
     const field = plane(res, h.channel);
-    drawField(h.main, field, res.width, res.height, rampFor(res, h.channel));
     const s = fieldStats(field);
+    drawField(h.main, field, res.width, res.height, rampFor(res, h.channel), { lo: s.lo, hi: s.hi });
     const unit = res.units[h.channel] || '';
     const km = (res.cellSize * res.width) / 1000;
     h.overlay.textContent =
