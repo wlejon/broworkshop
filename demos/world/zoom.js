@@ -121,8 +121,21 @@ export function createZoom(scene, terrain, chart, opts = {}) {
     const EAST_SPAN = chart.width * chart.cellSize;   // 2*pi*R
     const lnFade = Math.log(Z_FADE), lnCeil = Math.log(Z_CEIL);
 
-    const globe = createGlobe(scene, chart, opts.globe);
-    globe.visible = false;
+    // Two from-space representations to compare, hotkey-cycled by the app:
+    //   A  chart-displaced icosphere — relief is shaded, the silhouette smooth.
+    //   B  denser mesh displaced from a finer low-pass — mountains as geometry.
+    const MODES = [
+        { name: 'A chart', opts: { subdiv: 6, dispCols: 160, dispRows: 80 } },
+        { name: 'B mesh',  opts: { subdiv: 7, dispCols: 260, dispRows: 130,
+                                   relief: 70, dispClamp: 0.06 } },
+    ];
+    const globes = MODES.map(m => {
+        const g = createGlobe(scene, chart, Object.assign({}, opts.globe, m.opts));
+        g.visible = false;
+        return g;
+    });
+    let active = 0;
+    let globe = globes[active];
 
     let Avirt = 0;
     let clipmapOn = true;
@@ -143,9 +156,18 @@ export function createZoom(scene, terrain, chart, opts = {}) {
     }
 
     return {
-        globe,
+        get globe() { return globe; },
         avirt: () => Avirt,
         inSpace: () => Avirt >= Z_CEIL,
+        globeMode: () => MODES[active].name,
+        // Swap the active from-space representation (hides the others; the next
+        // update() shows and drives whichever is now active).
+        cycleGlobe() {
+            globes.forEach(g => { g.visible = false; });
+            active = (active + 1) % globes.length;
+            globe = globes[active];
+            return MODES[active].name;
+        },
 
         // Call each frame AFTER flyIntegrate, with the world-space vertical thrust
         // intent (thrust[1] from flyThrustFromKeys).

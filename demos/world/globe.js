@@ -74,6 +74,38 @@ function sampleChart(chart, lon, lat) {
     return (e00 * (1 - fx) + e10 * fx) * (1 - fy) + (e01 * (1 - fx) + e11 * fx) * fy;
 }
 
+// Mesh.geodesicSphere caps out near level 6 (~40 k verts, 105 km spacing on this
+// planet) — asking for 7 returns a malformed 43 k-vert blob whose uneven spacing
+// aliases any finer low-pass into radial spikes. So Method B subdivides the level-6
+// icosphere HERE in JS: split every triangle four ways, project the new midpoints
+// back to the unit sphere, dedup shared edges. Each pass quarters the edge length
+// (level 7 ≈ 52 km, level 8 ≈ 26 km) with clean topology and 32-bit indices.
+function subdivideIco(positions, indices) {
+    const pos = Array.from(positions);
+    const mid = new Map();
+    function midpoint(a, b) {
+        const key = a < b ? a * 100000000 + b : b * 100000000 + a;
+        const seen = mid.get(key);
+        if (seen !== undefined) return seen;
+        let mx = (pos[a * 3]     + pos[b * 3]);
+        let my = (pos[a * 3 + 1] + pos[b * 3 + 1]);
+        let mz = (pos[a * 3 + 2] + pos[b * 3 + 2]);
+        const inv = 1.0 / Math.hypot(mx, my, mz);     // back onto the unit sphere
+        mx *= inv; my *= inv; mz *= inv;
+        const m = pos.length / 3;
+        pos.push(mx, my, mz);
+        mid.set(key, m);
+        return m;
+    }
+    const idx = [];
+    for (let t = 0; t < indices.length; t += 3) {
+        const a = indices[t], b = indices[t + 1], c = indices[t + 2];
+        const ab = midpoint(a, b), bc = midpoint(b, c), ca = midpoint(c, a);
+        idx.push(a, ab, ca,  ab, b, bc,  ca, bc, c,  ab, bc, ca);
+    }
+    return { positions: new Float32Array(pos), indices: new Uint32Array(idx) };
+}
+
 // The vertex chunk only forwards the object-space direction; the chart lookup is
 // done per fragment (so coasts/snow are crisp) from this interpolated direction,
 // not from an interpolated UV (which would tear across the longitude seam).
@@ -255,23 +287,33 @@ void userFragment(inout vec3 baseColor, inout vec3 normal, inout float metallic,
 /// Build the globe node (hidden until the zoom controller fades it in). `chart`
 /// is the resident coarse field: { data:Float32Array, width, height, cellSize }.
 export function createGlobe(scene, chart, opts = {}) {
-    const relief = opts.relief ?? 30.0;
+    const relief    = opts.relief    ?? 30.0;
     const dispScale = relief / PLANET.radius;   // metres -> unit-sphere fraction
+    // Method A vs B. A keeps a light icosphere and lets the fragment's shaded
+    // chart slope carry the relief (smooth silhouette). B subdivides harder and
+    // displaces from a FINER low-pass, so mountain ranges become real GEOMETRY
+    // the silhouette shows, not just shading.
+    const subdiv    = opts.subdiv    ?? 6;      // icosphere subdivisions
+    const dispCols  = opts.dispCols  ?? 160;    // low-pass grid for vertex relief
+    const dispRows  = opts.dispRows  ?? 80;
+    const dispClamp = opts.dispClamp ?? 0.08;   // max radial bulge (unit-sphere frac)
 
     // Bake the displacement into a unit icosphere: sample a LOW-PASSED chart per
     // vertex (see downsampleChart) and push the vertex out along its own radius.
-    const base = Mesh.geodesicSphere(1, 6);     // 40962 verts, 81920 tris
+    // geodesicSphere is clean only up to 6; beyond that, subdivide in JS.
+    let base = Mesh.geodesicSphere(1, Math.min(subdiv, 6));
+    for (let k = 6; k < subdiv; k++) base = subdivideIco(base.positions, base.indices);
     // The mesh has ~100 km vertex spacing, so Nyquist wants displacement cells
     // no finer than ~200 km. 160 columns ≈ 250 km cells keeps the relief below
     // that and reads as smooth continental swells; the crisp detail (coasts, the
     // snow line) comes from the full-res chart in the fragment, not the mesh.
-    const lo = downsampleChart(chart, 160, 80);
+    const lo = downsampleChart(chart, dispCols, dispRows);
     // The baked chart is not pole-closed (loadChart skips it), so every column of
     // the polar rows carries its own elevation — on the globe that renders as a
     // pinwheel of radial streaks converging on the pole (every longitude sampled
     // over a few pixels). Converge the polar bands to their row mean so the poles
     // are single-valued, as an equirect sphere requires. ~35 deg on lo, ~22 on mid.
-    closePoles(lo.data, lo.width, lo.height, 16);
+    closePoles(lo.data, lo.width, lo.height, Math.max(4, Math.round(dispRows * 0.2)));
     const src = base.positions;                 // Float32Array, unit sphere
     const pos = new Float32Array(src.length);
     for (let i = 0; i < src.length; i += 3) {
@@ -282,7 +324,7 @@ export function createGlobe(scene, chart, opts = {}) {
         // Land bulges out; the sea is FLAT at radius 1. Displacing the seabed
         // downward gives the ocean a bumpy surface that catches the light as
         // radial fur — real oceans are a smooth sheet at sea level.
-        const s = 1.0 + Math.max(0.0, Math.min(0.08, dispScale * e));
+        const s = 1.0 + Math.max(0.0, Math.min(dispClamp, dispScale * e));
         pos[i] = x * s; pos[i + 1] = y * s; pos[i + 2] = z * s;
     }
 

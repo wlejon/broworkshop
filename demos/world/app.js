@@ -442,6 +442,8 @@ document.addEventListener('keydown', (e) => {
     if (e.target && e.target.tagName === 'INPUT') return;
     keys[e.key.toLowerCase()] = true;
     if (e.key.toLowerCase() === 'f') toggleMode();
+    // Cycle the from-space representation (A chart / B mesh) to compare them.
+    if (e.key.toLowerCase() === 'g' && zoom) console.log('globe mode: ' + zoom.cycleGlobe());
 });
 document.addEventListener('keyup', (e) => { keys[e.key.toLowerCase()] = false; });
 
@@ -534,7 +536,7 @@ function frame() {
     // In space the camera altitude is frozen at the ceiling; the virtual altitude
     // is what "flying out" changes, so report it instead.
     const altStr = (zoom && zoom.inSpace())
-        ? 'ZOOM ' + (zoom.avirt() / 1000).toFixed(0) + ' km (virtual)'
+        ? 'ZOOM ' + (zoom.avirt() / 1000).toFixed(0) + ' km  [globe ' + zoom.globeMode() + ', g]'
         : 'alt ' + Math.round(cam.pos[1]) + ' m';
     hud.textContent =
         mode.toUpperCase() +
