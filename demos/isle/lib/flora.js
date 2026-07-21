@@ -1,5 +1,8 @@
 // flora.js — grow plant prototypes and instance them across the island by biome.
 
+import { bakeImpostorAtlas } from '/app/lib/impostor.js';
+import { createImpostorLayer } from '/app/lib/impostorLayer.js';
+
 // Grows a single prototype in a dedicated flora world with full light.
 export function growPrototype(name, whorlArms, whorlSpread, speciesProps) {
     const world = bro.flora.createWorld({
@@ -205,10 +208,41 @@ export function populateFlora(scene, floraData, atlas, clipmap) {
     const nodes = [];
     const leafNodes = { pine: null, decid: null, shrub: null };
 
+    // Bake the decid octahedral impostor atlas ONCE from the grown master
+    // (CHUNK 1). The decid species is then drawn as one billboard layer below
+    // instead of its branch + ~365k-tri leaf instanced meshes (CHUNK 2).
+    let decidImpostor = null;
+    if (decidXf.length > 0) {
+        const dInfo = floraData.types.decid;
+        const capCvs = document.createElement('canvas');
+        capCvs.width = 256; capCvs.height = 256;
+        const capScene = capCvs.getContext('scene');
+        decidImpostor = bakeImpostorAtlas(
+            capScene,
+            { branchMesh: dInfo.branchMesh, leafMesh: dInfo.leafMesh },
+            { leafColor: dInfo.leafColor }
+        );
+    }
+
     const createInst = (type, xfData) => {
         if (xfData.length === 0) return;
         const info = floraData.types[type];
-        
+
+        // Deciduous: ONE octahedral impostor billboard layer (CHUNK 2). This
+        // REPLACES the raw branch + leaf instanced meshes (the ~365k-tri leaf
+        // mesh) with a single camera-facing quad per tree sampling the baked
+        // atlas — N quads instead of a huge leaf-card batch.
+        // NOTE: pine + shrub still use full geometry; they route through
+        // impostors in a later chunk (full-island FPS recovery is CHUNK 5).
+        if (type === 'decid') {
+            if (!decidImpostor) return;
+            const layer = createImpostorLayer(scene, decidImpostor, xfData);
+            nodes.push(layer.node);
+            console.log(`[flora] decid impostor layer: ${layer.quadCount} billboard quads ` +
+                        `(replaces branch+leaf mesh, was ~${info.leafMesh ? info.leafMesh.triangleCount : 0} leaf tris/tree)`);
+            return;
+        }
+
         // 1. Create wood branches batch (PBR brown wood material)
         const branchInst = scene.createInstancedMesh({
             mesh: info.branchMesh,
