@@ -8,15 +8,15 @@
 // is fixed at load, so changing it reloads the checkpoint.
 
 import { $, state, luts, emit, status, on } from "/app/lib/core.js";
-import { el, mkNumber, mkButton, drawField } from "/app/lib/helpers.js";
+import { el, mkButton, drawField } from "/app/lib/helpers.js";
 import { loadWorld } from "/app/lib/model.js";
 
 const OV_CELLS = 192;          // coarse cells across the overview (~1475 km)
-const OV_PX    = 300;          // overview canvas size in pixels
+const OV_PX    = 288;          // overview canvas size in pixels
 
 let base = null, overlay = null, octx = null;
 let ov = null;                 // { ci0, cj0, cells, cellSize } of the drawn field
-let iInput, jInput, extInput, seedInput;
+let iInput, jInput, extInput, seedInput, readout;
 
 // Native-cell (i, j) of the window CENTRE — what the controls and the map agree on.
 function centre() {
@@ -74,6 +74,18 @@ function syncInputs() {
     jInput.value = state.region.j;
     extInput.value = state.region.extent;
     seedInput.value = state.seed;
+    updateReadout();
+}
+
+// A one-glance readout of what the window actually covers on the ground — the
+// numeric controls are in abstract native cells, so translate to km and metres.
+function updateReadout() {
+    if (!readout) return;
+    const cs = state.world ? state.world.cellSize : 30;
+    const km = (state.region.extent * cs / 1000);
+    const span = km >= 10 ? km.toFixed(0) : km.toFixed(1);
+    readout.textContent = state.region.extent + ' cells → ' + span + ' km across · '
+        + cs + ' m/cell · at (' + state.region.i + ', ' + state.region.j + ')';
 }
 
 // Move the window so its CENTRE is at native cell (ci, cj), then tell the probes.
@@ -92,25 +104,22 @@ function placeCentre(ci, cj) {
     emit('region');
 }
 
+// One labelled numeric field for the control grid — label above a full-width
+// input, so four of them tile cleanly into two columns in the narrow rail.
+function mkField(grid, label, value, step, onChange) {
+    const f = el('label', 'loc-field');
+    f.appendChild(el('span', 'loc-lbl', label));
+    const input = document.createElement('input');
+    input.type = 'number'; input.value = value; input.step = step || 1;
+    input.addEventListener('change', () => onChange(parseFloat(input.value)));
+    f.appendChild(input);
+    grid.appendChild(f);
+    return input;
+}
+
 export function buildRegionBar(host) {
-    // numeric controls
-    const ctrls = el('div', 'region-ctrls');
-    seedInput = mkNumber(ctrls, 'seed', state.seed, 1, (v) => {
-        // seed is fixed at load — a change is a reload at the new identity.
-        const s = v | 0;
-        if (s === state.seed) return;
-        loadWorld(state.dir, s, null);
-    });
-    iInput   = mkNumber(ctrls, 'i (N→S)', state.region.i, 32, (v) => { state.region.i = v | 0; drawWindow(); emit('region'); });
-    jInput   = mkNumber(ctrls, 'j (W→E)', state.region.j, 32, (v) => { state.region.j = v | 0; drawWindow(); emit('region'); });
-    extInput = mkNumber(ctrls, 'extent', state.region.extent, 32, (v) => {
-        state.region.extent = Math.max(16, v | 0); drawWindow(); emit('region');
-    });
-    mkButton(ctrls, '🎲 reseed', () => loadWorld(state.dir, (state.seed + 1) | 0, null),
-             'Load the next seed — a different world');
-    mkButton(ctrls, '⟳ generate', () => emit('region'),
-             'Regenerate the current probe at this region');
-    host.appendChild(ctrls);
+    const panel = el('div', 'loc-panel');
+    panel.appendChild(el('div', 'card-title', 'location'));
 
     // the overview map: a colormap base canvas with a 2D overlay for the window.
     const mapWrap = el('div', 'overview');
@@ -131,7 +140,34 @@ export function buildRegionBar(host) {
         const ci = (ov.ci0 + py * ov.cells) * coarseCell;
         placeCentre(ci, cj);
     });
-    host.appendChild(mapWrap);
+    panel.appendChild(mapWrap);
+    readout = el('div', 'loc-readout');
+    panel.appendChild(readout);
+
+    // seed / extent / i / j as a compact 2×2 grid.
+    const grid = el('div', 'loc-grid');
+    seedInput = mkField(grid, 'seed', state.seed, 1, (v) => {
+        // seed is fixed at load — a change is a reload at the new identity.
+        const s = v | 0;
+        if (s === state.seed) return;
+        loadWorld(state.dir, s, null);
+    });
+    extInput = mkField(grid, 'extent', state.region.extent, 32, (v) => {
+        state.region.extent = Math.max(16, v | 0); syncInputs(); drawWindow(); emit('region');
+    });
+    iInput = mkField(grid, 'i (N→S)', state.region.i, 32, (v) => { state.region.i = v | 0; updateReadout(); drawWindow(); emit('region'); });
+    jInput = mkField(grid, 'j (W→E)', state.region.j, 32, (v) => { state.region.j = v | 0; updateReadout(); drawWindow(); emit('region'); });
+    panel.appendChild(grid);
+
+    const actions = el('div', 'loc-actions');
+    mkButton(actions, '🎲 reseed', () => loadWorld(state.dir, (state.seed + 1) | 0, null),
+             'Load the next seed — a different world');
+    mkButton(actions, '⟳ generate', () => emit('region'),
+             'Regenerate the current probe at this region');
+    panel.appendChild(actions);
+
+    host.appendChild(panel);
+    updateReadout();
 
     on('world', (w) => { if (w) { syncInputs(); drawOverview(); } });
 }

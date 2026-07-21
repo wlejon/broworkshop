@@ -25,13 +25,17 @@
       <span id="status" class="meta"></span>
     </section>
 
-    <!-- LOCATION — the region spine: seed / window / overview map -->
-    <section id="regionbar"></section>
-
-    <!-- SEAMS — one tab per probe; each mounts under #probe -->
-    <nav id="tabs"></nav>
-    <div id="probe-blurb" class="blurb"></div>
-    <main id="probe"></main>
+    <!-- WORKSPACE — a persistent LOCATION rail beside the active probe -->
+    <div id="workspace">
+      <!-- the region spine: seed / window / overview map, visible on every tab -->
+      <aside id="sidebar"></aside>
+      <section id="rightcol">
+        <!-- SEAMS — one tab per probe; each mounts under #probe -->
+        <nav id="tabs"></nav>
+        <div id="probe-blurb" class="blurb"></div>
+        <main id="probe"></main>
+      </section>
+    </div>
   </div>
 
   <script type="module" src="/app/app.js"></script>

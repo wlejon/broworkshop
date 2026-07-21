@@ -15,8 +15,8 @@ const REQ_CAP = 320;           // native cells per axis — keep elevation() tra
 const MESH_N  = 160;           // heightfield grid resolution (downsampled)
 const SPAN    = 200;           // world units the patch spans, for the orbit camera
 
-// A terrain ramp in JS (the GPU LUT object is opaque), matching core.js's stops so
-// the 3D surface and the 2D fields read the same. t is normalised elevation.
+// A terrain ramp in JS (the GPU LUT object is opaque), matching core.js's stops.
+// t is a ramp position in [0,1]; sea level sits at SEA (the ocean→beach break).
 function terrainColor(t) {
     const stops = [
         [0.00,  12,  34,  74], [0.42, 28,  92, 140], [0.48, 232, 220, 156],
@@ -34,6 +34,18 @@ function terrainColor(t) {
         }
     }
     return [1, 1, 1];
+}
+
+// Elevation (metres) → ramp position, ANCHORED at sea level. The old normalisation
+// stretched one ramp across the patch's whole [min,max], so a tile whose floor is
+// deep ocean put 0 m two-thirds up the ramp and painted all its land snow-white.
+// Instead we pin 0 m to the ocean→beach break (SEA) and scale each side to the
+// patch's own depth/height, so the coastline is always right AND relief keeps full
+// contrast — green lowland up to snow on the tallest ridge, whatever the scale.
+const SEA = 0.46;
+function elevT(e, lo, hi) {
+    if (e < 0) return lo < 0 ? SEA * (1 - e / lo) : SEA;   // 0 m→SEA, floor→0
+    return hi > 0 ? SEA + (1 - SEA) * (e / hi) : SEA;      // 0 m→SEA, peak→1
 }
 
 registerProbe({
@@ -140,11 +152,10 @@ function rebuildMesh(h) {
     const nx = Math.min(MESH_N, W), nz = Math.min(MESH_N, H);
     let lo = Infinity, hi = -Infinity;
     for (let i = 0; i < d.length; i++) { if (d[i] < lo) lo = d[i]; if (d[i] > hi) hi = d[i]; }
-    const span = hi - lo || 1;
     const patchM = W * r.cellSize;
     const uPerM = SPAN / patchM;                          // world units per metre (horizontal)
     const positions = new Float32Array(nx * nz * 3);
-    const colors = new Float32Array(nx * nz * 3);
+    const colors = new Float32Array(nx * nz * 4);   // RGBA — the raw path is stride-4
     let p = 0, cptr = 0;
     for (let z = 0; z < nz; z++) {
         const sz = Math.min(H - 1, Math.round(z / (nz - 1) * (H - 1)));
@@ -154,8 +165,8 @@ function rebuildMesh(h) {
             positions[p++] = (x / (nx - 1) - 0.5) * SPAN;
             positions[p++] = e * uPerM * h.vexag;         // sea level (0 m) → y 0
             positions[p++] = (z / (nz - 1) - 0.5) * SPAN;
-            const col = terrainColor((e - lo) / span);
-            colors[cptr++] = col[0]; colors[cptr++] = col[1]; colors[cptr++] = col[2];
+            const col = terrainColor(elevT(e, lo, hi));
+            colors[cptr++] = col[0]; colors[cptr++] = col[1]; colors[cptr++] = col[2]; colors[cptr++] = 1;
         }
     }
     const indices = new Uint32Array((nx - 1) * (nz - 1) * 6);
@@ -185,7 +196,7 @@ function drawHypso(h, r) {
     let peak = 0; for (let i = 0; i < BINS; i++) if (bins[i] > peak) peak = bins[i];
     for (let i = 0; i < BINS; i++) {
         const t = (i + 0.5) / BINS, e = lo + t * span;
-        const col = terrainColor(t);
+        const col = terrainColor(elevT(e, lo, hi));
         ctx.fillStyle = 'rgb(' + (col[0] * 255 | 0) + ',' + (col[1] * 255 | 0) + ',' + (col[2] * 255 | 0) + ')';
         const bh = (bins[i] / peak) * (Ht - 12);
         ctx.fillRect(i / BINS * W, Ht - bh, W / BINS + 1, bh);

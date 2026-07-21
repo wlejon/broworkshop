@@ -19,9 +19,8 @@ html,body { margin:0; height:100%; background:var(--bg); color:var(--ink);
 .meta { color:var(--dim); font-size:11px; white-space:pre; }
 
 /* bars */
-#modelbar, #regionbar { display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+#modelbar { display:flex; align-items:center; gap:10px; flex-wrap:wrap;
   padding:8px 14px; background:var(--panel); border-bottom:1px solid var(--line); }
-#regionbar { align-items:flex-start; }
 .cfg { display:flex; align-items:center; gap:6px; color:var(--dim); }
 .cfg input[type=text] { width:340px; }
 input, select, button { font:inherit; }
@@ -36,11 +35,24 @@ button.on, .btn.on, .btn.primary { background:#2a3550; border-color:#3f5680; col
 .btn.primary { background:#22406a; }
 button:disabled { opacity:.5; cursor:default; }
 
-.region-ctrls { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+/* workspace: a persistent LOCATION rail beside the active probe */
+#workspace { display:flex; flex:1 1 auto; min-height:0; }
+#sidebar { flex:0 0 auto; width:312px; padding:12px; overflow:auto;
+  background:var(--panel); border-right:1px solid var(--line); }
+#rightcol { display:flex; flex-direction:column; flex:1 1 auto; min-width:0; }
+
+.loc-panel { display:flex; flex-direction:column; gap:8px; }
 .overview { position:relative; border:1px solid var(--line); border-radius:4px;
-  overflow:hidden; flex:0 0 auto; margin-left:auto; }
+  overflow:hidden; flex:0 0 auto; }
 .ov-base, .ov-overlay { position:absolute; inset:0; width:100%; height:100%; display:block; }
 .ov-overlay { cursor:crosshair; }
+.loc-readout { font-size:10px; color:var(--dim); line-height:1.5; }
+.loc-grid { display:grid; grid-template-columns:1fr 1fr; gap:6px 8px; }
+.loc-field { display:flex; flex-direction:column; gap:2px; color:var(--dim); }
+.loc-lbl { font-size:10px; text-transform:uppercase; letter-spacing:.4px; }
+.loc-field input[type=number] { width:100%; }
+.loc-actions { display:flex; gap:6px; margin-top:2px; }
+.loc-actions .btn { flex:1 1 auto; text-align:center; }
 
 /* tabs */
 #tabs { display:flex; gap:2px; padding:6px 12px 0; background:var(--bg);

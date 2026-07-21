@@ -32,7 +32,7 @@ function init() {
     $('#btn-load').addEventListener('click', () => loadWorld($('#model-dir').value.trim(), state.seed, null));
     $('#model-dir').addEventListener('change', () => { state.dir = $('#model-dir').value.trim(); });
 
-    buildRegionBar($('#regionbar'));
+    buildRegionBar($('#sidebar'));
     buildTabs($('#tabs'), $('#probe'));
 
     setBadge(availabilityHint(), !window.bro || !bro.worldgen || bro.worldgen.available === false);
