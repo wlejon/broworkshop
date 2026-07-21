@@ -20,9 +20,11 @@ let cuts = 0;
 const realLog = console.log;
 console.log = (m) => { if (String(m).indexOf('re-cut') >= 0) cuts++; else realLog(m); };
 
-// Climb from the deck to orbit and back at the speed the app actually allows,
-// crossing every zoom threshold twice. X moves too, so the ground underneath
-// keeps changing — that is the noise source.
+// Climb from the deck to the swap ceiling and back at the speed the app actually
+// allows, crossing every zoom threshold the clipmap has twice. X moves too, so the
+// ground underneath keeps changing — that is the noise source. (The clipmap only
+// uses cellScale 1 and 2 now: the higher zoom levels served the fly-to-orbit reach
+// the globe replaced, so they are never entered below the ~480 km swap.)
 console.log('=== climb and descend across every zoom step ===');
 let frames = 0, worstRun = 0, run = 0, prevCuts = 0;
 const scales = {};
@@ -55,7 +57,9 @@ console.log('  cellScale occupancy: ' +
 assert(cuts < 30, 'coarse window re-cut ' + cuts + ' times — the scale is thrashing');
 assert(worstRun <= 1, 'layer re-uploaded on ' + worstRun + ' consecutive frames');
 
-// And the zoom must actually have exercised its range, or the test proves
-// nothing about thresholds it never crossed.
-assert(Object.keys(scales).length >= 3, 'never crossed enough zoom steps');
+// And the zoom must actually have exercised its range, or the test proves nothing
+// about thresholds it never crossed. Two occupied scales (1 and 2) means the one
+// threshold in the clipmap's bounded range was crossed both ways — which is what
+// there is to thrash across now.
+assert(Object.keys(scales).length >= 2, 'never crossed a zoom step');
 console.log('THRASH OK');

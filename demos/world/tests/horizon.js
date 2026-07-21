@@ -77,11 +77,11 @@ for (const alt of [2, 500, 5000, 50000, 400000]) {
 }
 
 // Coverage must GROW with altitude — clamping everything to the ground value
-// would satisfy the bounds above and ruin the whole point. Not by a huge
-// factor: the peak allowance is a floor that does not depend on altitude at
-// all, so on a world with 4 km mountains the ground camera already needs a
-// couple of hundred km and orbit only multiplies that by a handful.
-assert(prevCov > terrain.coverageDistance(2) * 4,
+// would satisfy the bounds above and ruin the whole point. Not by a huge factor,
+// and less than it once was: the peak allowance is an altitude-independent floor,
+// and the clipmap now only serves up to the ~480 km swap (the globe owns the rest),
+// so the top of the tested band lifts coverage a few-fold, not the orbit multiple.
+assert(prevCov > terrain.coverageDistance(2) * 2.5,
        'coverage never grew with altitude');
 
 // And on the deck it must be a real saving over the reach, which is the point.
