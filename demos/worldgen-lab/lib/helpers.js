@@ -91,6 +91,22 @@ export function drawField(canvas, field, srcW, srcH, lut, opts) {
     });
 }
 
+// Size a canvas's DISPLAY box (inline CSS) to the largest rectangle preserving
+// srcW:srcH that fits its parent, so a square field in a wide card letterboxes
+// instead of stretching. The parent must be `.canvas-wrap.fit` (flex-centred).
+// Returns { dw, dh } so a GPU-colormap caller can match its backing store 1:1;
+// a putImageData caller keeps its native backing store and only scales on display.
+export function fitContain(canvas, srcW, srcH) {
+    const wrap = canvas.parentElement; if (!wrap) return null;
+    const cw = wrap.clientWidth | 0, ch = wrap.clientHeight | 0;
+    if (cw < 4 || ch < 4) return null;
+    const ar = srcW / srcH;
+    let dw = cw, dh = Math.round(cw / ar);
+    if (dh > ch) { dh = ch; dw = Math.round(ch * ar); }
+    canvas.style.width = dw + 'px'; canvas.style.height = dh + 'px';
+    return { dw, dh };
+}
+
 // Min/max/mean of a field, on the CPU — used for the numeric readouts that an
 // auto-ranged colour alone cannot give ("is this 3 km of relief or 3 cm?").
 export function fieldStats(field) {

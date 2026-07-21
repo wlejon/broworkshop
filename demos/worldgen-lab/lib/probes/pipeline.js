@@ -9,7 +9,7 @@
 // real span in km — the strip is the same centre zooming in, not one patch.
 
 import { state, STAGE, cellDiv, rampFor, status, luts } from "/app/lib/core.js";
-import { el, plane, drawField, fieldStats, mkSelect } from "/app/lib/helpers.js";
+import { el, plane, drawField, fieldStats, mkSelect, fitContain } from "/app/lib/helpers.js";
 import { registerProbe } from "/app/lib/registry.js";
 
 // Legible cell counts per scale: the elevation window in native cells, floored so
@@ -44,7 +44,7 @@ registerProbe({
         const body = el('div', 'pipe-body');
         const mainCard = el('div', 'card grow');
         mainCard.appendChild(el('div', 'card-title', 'stage'));
-        const mwrap = el('div', 'canvas-wrap fill');
+        const mwrap = el('div', 'canvas-wrap fill fit');
         h.main = document.createElement('canvas');
         mwrap.appendChild(h.main);
         h.overlay = el('div', 'field-overlay');
@@ -122,8 +122,10 @@ function paintThumb(h, name) {
 function paintMain(h) {
     const res = h.results[h.stage];
     if (!res) { h.overlay.textContent = ''; return; }
-    const cw = h.main.parentElement.clientWidth | 0, ch = h.main.parentElement.clientHeight | 0;
-    if (cw > 4 && ch > 4) { h.main.width = cw; h.main.height = ch; }
+    // Preserve the field's aspect (it is square, so a wide card would stretch it):
+    // fit a contain-box, and match the backing store to it so the colormap is 1:1.
+    const box = fitContain(h.main, res.width, res.height);
+    if (box) { h.main.width = box.dw; h.main.height = box.dh; }
     const field = plane(res, h.channel);
     drawField(h.main, field, res.width, res.height, rampFor(res, h.channel));
     const s = fieldStats(field);

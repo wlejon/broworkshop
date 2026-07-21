@@ -10,7 +10,7 @@
 // coarse window centred on the region, not the narrow elevation patch.
 
 import { state, rampFor, luts, status } from "/app/lib/core.js";
-import { el, plane, drawField, fieldStats } from "/app/lib/helpers.js";
+import { el, plane, drawField, fieldStats, fitContain } from "/app/lib/helpers.js";
 import { registerProbe } from "/app/lib/registry.js";
 
 const CELLS = 128;             // coarse cells across (~983 km)
@@ -57,7 +57,7 @@ registerProbe({
         const left = el('div', 'climate-left');
         const bcard = el('div', 'card grow');
         bcard.appendChild(el('div', 'card-title', 'biome (Whittaker from T · P · elevation)'));
-        const bwrap = el('div', 'canvas-wrap fill');
+        const bwrap = el('div', 'canvas-wrap fill fit');
         h.biome = document.createElement('canvas');
         bwrap.appendChild(h.biome);
         bcard.appendChild(bwrap);
@@ -144,6 +144,7 @@ function paint(h, res) {
         img.data[o] = rgb[0]; img.data[o + 1] = rgb[1]; img.data[o + 2] = rgb[2]; img.data[o + 3] = 255;
     }
     ctx.putImageData(img, 0, 0);
+    fitContain(bcv, W, H);            // display box preserves the square; backing store stays native
 
     // legend — only biomes actually on screen, by area share
     h.legend.innerHTML = '';
