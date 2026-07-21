@@ -5,6 +5,7 @@
 import { VIZ } from "/app/viz/_registry.js";
 import "/app/viz/pathfinding.js";
 import "/app/viz/noise.js";
+import "/app/viz/worldgen.js";
 import "/app/viz/isosurface.js";
 import { installSystemMenu } from "/lib/system-menu.js";
 
