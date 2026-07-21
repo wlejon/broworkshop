@@ -35,6 +35,9 @@
 //                           mouthPath}
 //        <- loaded        {config, axes, hiddenSize, numLayers, backend,
 //                           spectrum, mouth, textEncoder}
+//   main -> reloadTextEncoder {modelDir, textEncoderPath?}   (swap the tapped
+//                           Qwen3-VL backbone in place; DiT/VAE/axes/LoRAs stay)
+//        <- textEncoderReloaded {textEncoder, backend}
 //   main -> generate      {prompt, negPrompt, opts, band, dial, gate, gateMask,
 //                           gateMaskBand, axisControls, expression, spectrum,
 //                           mouth, imagePixels, imageH, imageW, captureGates,
@@ -242,6 +245,35 @@ function handleLoad(msg) {
   } catch (e) {
     pipeline = null;
     fail('load', e);
+  }
+}
+
+// ── reload just the text encoder ───────────────────────────────────────────
+// Swap the tapped Qwen3-VL-4B backbone in place, keeping the resident DiT/VAE
+// (re-reading the ~26GB checkpoint is what makes a full load slow). The engine
+// reconstructs only the text model; the control axis bank, LoRAs and minted
+// axes ride on the DiT conditioning and survive untouched. Encoder-output
+// caches (per-prompt field taps, the identity reference) belong to the OLD
+// encoder — clear them so the next render re-encodes against the new one.
+function handleReloadTextEncoder(msg) {
+  try {
+    if (!pipeline) throw new Error('no model loaded — load a model first');
+    if (!pipeline.reloadTextEncoder) {
+      throw new Error('this engine build has no reloadTextEncoder (rebuild bro)');
+    }
+    var quantize = msg.quantizeWeights !== false;
+    pipeline.reloadTextEncoder(msg.modelDir, msg.textEncoderPath || '',
+                               { quantizeWeights: quantize });
+    fieldCache = {}; fieldCacheCount = 0;
+    identityRef = null;
+    var tensor = (typeof bro !== 'undefined' && bro.tensor) ? bro.tensor : null;
+    self.postMessage({
+      type: 'textEncoderReloaded',
+      textEncoder: msg.textEncoderPath || null,
+      backend: tensor && tensor.available ? (tensor.backend || 'gpu') : 'cpu',
+    });
+  } catch (e) {
+    fail('reloadTextEncoder', e);
   }
 }
 
@@ -1061,6 +1093,7 @@ self.onmessage = function (e) {
   var msg = e.data || {};
   switch (msg.type) {
     case 'load':           handleLoad(msg); break;
+    case 'reloadTextEncoder': handleReloadTextEncoder(msg); break;
     case 'generate':       handleGenerate(msg); break;
     case 'spatialRender':  handleSpatialRender(msg); break;
     case 'mintTextAxis':   handleMintTextAxis(msg); break;

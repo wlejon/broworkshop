@@ -56,6 +56,11 @@ export function initModel(ctx) {
     el.textContent = text;
     el.className = 'model-sum-status' + (kind ? ' ' + kind : '');
   }
+  // What is currently resident, so "Load model" can swap just the text encoder
+  // when the Krea 2 directory hasn't changed (the DiT/VAE are identical from
+  // the same dir — only the tapped backbone can differ).
+  let loadedModelDir = null, loadedTextEncoder = null, loadedAxes = 0;
+
   function doLoad() {
     const modelDir = $('model-dir').value.trim();
     if (!modelDir) {
@@ -65,6 +70,12 @@ export function initModel(ctx) {
       ctx.switchSection('scene');
       return;
     }
+    const textEncoder = $('text-encoder').value.trim();
+    // Fast path: same dir already resident → reload only the text encoder.
+    if (ctx.loaded && loadedModelDir === modelDir) {
+      doReloadTextEncoder(modelDir, textEncoder);
+      return;
+    }
     ctx.persist();
     ctx.setBusy(true);
     ctx.setLoaded(false);
@@ -72,7 +83,6 @@ export function initModel(ctx) {
     modelSum('loading…');
     startLoadOverlay();
     ctx.status('loading model — this reads ~26GB of weights, give it a moment');
-    const textEncoder = $('text-encoder').value.trim();
     ctx.client.send({ type: 'load', modelDir: modelDir,
                   textEncoderPath: textEncoder || undefined,
                   dictPaths: ['assets/axes_turbo.bcd1', 'assets/axes_sae_deck.bcd1',
@@ -102,6 +112,9 @@ export function initModel(ctx) {
       modelSum(dirName + teName + ' · ' + (msg.axes || []).length + ' axes ✓', 'ok');
       $('model-details').removeAttribute('open');
       ctx.status(cls + ' ready · ' + (msg.axes || []).length + ' axes' + card, 'ok');
+      loadedModelDir = modelDir;
+      loadedTextEncoder = textEncoder;
+      loadedAxes = (msg.axes || []).length;
       // Chain the sequential restore passes (the client serializes one
       // request at a time): saved LoRAs first, then saved minted axes, then
       // the identity reference (its worker-side cache died with the old
@@ -111,6 +124,44 @@ export function initModel(ctx) {
         ctx.rebuildMintedAxes();
         ctx.restoreIdentity();
       });
+    });
+  }
+
+  // Swap just the tapped Qwen3-VL-4B backbone — the engine keeps the ~25GB
+  // DiT/VAE resident, so this is seconds not half a minute. Control axes,
+  // LoRAs and minted axes survive; only the identity reference is re-encoded
+  // (its taps came from the old backbone).
+  function doReloadTextEncoder(modelDir, textEncoder) {
+    ctx.persist();
+    ctx.setBusy(true);
+    backend('swapping…');
+    modelSum('swapping text encoder…');
+    startLoadOverlay();
+    ctx.status('reloading text encoder — the DiT stays resident, this is quick');
+    ctx.client.send({ type: 'reloadTextEncoder', modelDir: modelDir,
+                      textEncoderPath: textEncoder || undefined }, (err, msg) => {
+      stopLoadOverlay();
+      if (err) {
+        ctx.setBusy(false); backend('error', 'err');
+        modelSum(String(err.message || err), 'err');
+        $('model-details').setAttribute('open', '');
+        ctx.status(String(err.message || err), 'err');
+        return;
+      }
+      loadedTextEncoder = textEncoder;
+      ctx.setBusy(false);
+      backend(msg.backend === 'cpu' ? 'CPU' : (msg.backend || 'gpu').toUpperCase(),
+              msg.backend === 'cpu' ? 'warn' : 'ok');
+      $('backend').title = cardName();
+      const dirName = modelDir.replace(/[\\/]+$/, '').split(/[\\/]/).pop();
+      const teName = msg.textEncoder
+        ? ' · TE ' + String(msg.textEncoder).replace(/[\\/]+$/, '').split(/[\\/]/).pop()
+        : ' · bundled TE';
+      modelSum(dirName + teName + ' · ' + loadedAxes + ' axes ✓', 'ok');
+      $('model-details').removeAttribute('open');
+      ctx.status('text encoder swapped' + (msg.textEncoder ? teName : ' · bundled'), 'ok');
+      // The reference image's taps came from the old backbone — re-encode it.
+      ctx.restoreIdentity();
     });
   }
 
