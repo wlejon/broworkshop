@@ -9,6 +9,11 @@
 import { DEFAULT_ISLAND, bakeAtlasAsync } from '/app/lib/atlas.js';
 import { createTerrain } from '/app/lib/terrain.js';
 import { createSky } from '/app/lib/sky.js';
+import { createWater } from '/app/lib/water.js';
+import { initFlora, populateFlora } from '/app/lib/flora.js';
+import { createPlayer } from '/app/lib/player.js';
+import { createMapView } from '/app/lib/mapview.js';
+import { createSeasonController } from '/app/lib/season.js';
 
 const WEIGHTS = 'D:/projects/brodiffusion/weights/terrain-diffusion-30m-bro';
 const Camera = window.Camera;
@@ -20,22 +25,18 @@ const boot   = document.getElementById('boot');
 
 // ---- state / test seam ----------------------------------------------------
 let atlas = null, terrain = null, world = null;
+let water = null, floraData = null, flora = null;
+let player = null, mapview = null, season = null;
 let _ready = false, _bakeMs = 0, _loadMs = 0;
 export function ready() { return _ready; }
+export function getCam() { return cam; }
+export function getPlayer() { return player; }
+export function getMapView() { return mapview; }
+export function getSeason() { return season; }
+export function getAtlas() { return atlas; }
 
 // ---- fixed scene: sky + sea (built immediately, before the model lands) ----
 const sky = createSky(scene, {});
-
-// Minimal flat sea for M1 (a shaded/animated water surface arrives in M2).
-// A huge plane at y = 0; the island's sub-sea terrain is hidden beneath it.
-const sea = scene.createMesh({
-    mesh: 'plane',
-    color: [0.03, 0.16, 0.25],
-    metallic: 0.0, roughness: 0.5,
-    scale: [40000, 1, 40000],           // half-extent ~200 km
-    y: 0,
-});
-sea.castsShadow = false;
 
 // ---- freefly camera --------------------------------------------------------
 // High and to the south, looking down at the island centred on the origin.
@@ -50,8 +51,19 @@ const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 
 // ---- input -----------------------------------------------------------------
 const keys = {};
-addEventListener('keydown', (e) => { keys[e.key.toLowerCase()] = true; });
-addEventListener('keyup',   (e) => { keys[e.key.toLowerCase()] = false; });
+addEventListener('keydown', (e) => {
+    keys[e.key.toLowerCase()] = true;
+    
+    // Toggle first person on-foot camera on 'F'
+    if (e.key === 'f' || e.key === 'F') {
+        if (player) {
+            player.toggleMode();
+            // Slow down moveSpeed for on-foot or speed up for freefly
+            moveSpeed = player.onFoot ? 60 : 900;
+        }
+    }
+});
+addEventListener('keyup', (e) => { keys[e.key.toLowerCase()] = false; });
 canvas.addEventListener('click', () => { if (canvas.requestPointerLock) canvas.requestPointerLock(); });
 addEventListener('mousemove', (e) => {
     if (document.pointerLockElement === canvas) Camera.flyLook(cam, e.movementX, e.movementY);
@@ -64,6 +76,10 @@ addEventListener('wheel', (e) => {
 boot.textContent = 'loading terrain model…';
 const tLoad = performance.now();
 bro.worldgen.init();
+
+// Initialize plant prototypes once on boot
+floraData = initFlora(scene, DEFAULT_ISLAND);
+
 bro.worldgen.loadWorld(WEIGHTS, {
     seed: DEFAULT_ISLAND.seed,
     onReady: (w) => {
@@ -73,7 +89,25 @@ bro.worldgen.loadWorld(WEIGHTS, {
         bakeAtlasAsync(w, DEFAULT_ISLAND, (err, a) => {
             if (err) { boot.textContent = 'bake failed: ' + err; return; }
             atlas = a; _bakeMs = performance.now() - tBake;
+            
+            // Create Terrain
             terrain = createTerrain(scene, atlas, DEFAULT_ISLAND);
+            
+            // Create Water
+            water = createWater(scene, atlas);
+            
+            // Populate flora at scale using grown prototypes
+            flora = populateFlora(scene, floraData, atlas, terrain);
+            
+            // Setup player physics controller
+            player = createPlayer(cam, terrain);
+            
+            // Create maps
+            mapview = createMapView(scene, atlas, cam);
+            
+            // Setup season & time controller
+            season = createSeasonController(scene, terrain, flora, sky, atlas);
+
             boot.classList.add('hidden');
             _ready = true;
         });
@@ -88,21 +122,32 @@ function frame() {
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
 
-    const thrust = Camera.flyThrustFromKeys(cam, keys);
-    Camera.flyIntegrate(cam, thrust, dt, moveSpeed);
+    if (player) {
+        player.update(keys, dt, moveSpeed);
+    } else {
+        const thrust = Camera.flyThrustFromKeys(cam, keys);
+        Camera.flyIntegrate(cam, thrust, dt, moveSpeed);
+    }
+
     if (keys['q']) Camera.flyRoll(cam, dt, +1);
     if (keys['e']) Camera.flyRoll(cam, dt, -1);
 
     if (terrain) terrain.update(cam.pos[0], cam.pos[1], cam.pos[2]);
+    
+    // Update minimap and fullscreen map
+    if (mapview) mapview.update();
+
     scene.setCamera(Camera.flyViewOptsQuat(cam, canvas));
 
     if (hud && _ready) {
+        const modeStr = player && player.onFoot ? 'FIRST PERSON ON-FOOT' : 'FREEFLY';
         hud.textContent =
             `isle · seed ${DEFAULT_ISLAND.seed}\n` +
             `elev ${atlas.min.toFixed(0)}..${atlas.max.toFixed(0)} m  (${(DEFAULT_ISLAND.N * DEFAULT_ISLAND.cellSize / 1000).toFixed(1)} km)\n` +
             `load ${(_loadMs / 1000).toFixed(1)}s  bake ${(_bakeMs / 1000).toFixed(1)}s\n` +
+            `mode ${modeStr} [F to toggle]\n` +
             `alt ${cam.pos[1].toFixed(0)} m  speed ${moveSpeed.toFixed(0)} m/s\n` +
-            `WASD+Space/Ctrl fly · scroll speed · click mouselook`;
+            `WASD+Space/Ctrl fly · scroll speed · click mouselook · [M] full map`;
     }
     requestAnimationFrame(frame);
 }
