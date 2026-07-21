@@ -41,6 +41,7 @@
         { "dir": "demos/vision-lab" },
         { "dir": "demos/terrain" },
         { "dir": "demos/worldgen-lab" },
+        { "dir": "demos/isle" },
         { "dir": "demos/spatial-audio" },
         { "dir": "demos/spatial-hash" },
         { "dir": "demos/image-kernels" },
