@@ -34,15 +34,6 @@ import { PLANET, loadChart } from "/app/planet.js";
 const WEIGHTS   = 'D:/projects/brodiffusion/weights/terrain-diffusion-30m-bro';
 const SPAWN_HALF = 72;    // coarse cells searched for a start position
 
-
-// The detail exemplar is still ONE decoder tile, and it is not a height layer:
-// it is a 61 km sample of what ridges and drainage LOOK like, reused as the
-// structure of every scale the coarse field cannot resolve. That is the whole
-// mechanism by which mesh-level detail becomes global. Generated once at load;
-// it wants to become a baked asset so the decoder leaves the runtime entirely.
-const EXEMPLAR_CELLS = 2048;   // 61.4 km at 30 m
-const METRES         = 30;     // metres per decoder cell (checkpoint native res)
-
 const canvas = document.getElementById('c');
 const scene  = canvas.getContext('scene');
 const hud    = document.getElementById('hud');
@@ -104,29 +95,10 @@ const terrain = scene.createClipmapTerrain({
     detailOctaves:    PLANET.detailOctaves,
 });
 
-// --- The detail exemplar — one decoder tile, used as structure, not as data ---
+// --- Terrain model state ---
 
 let world = null;
-let exemplarReady = false;
-let exemplarPatch = null;
-
-// Decoder cell (i, j) -> world (z, x). i is north-south, j is west-east.
-const cellI = (wz) => wz / METRES;
-const cellJ = (wx) => wx / METRES;
-
-function requestExemplar(camX, camZ) {
-    const i0 = Math.round(cellI(camZ)) - EXEMPLAR_CELLS / 2;
-    const j0 = Math.round(cellJ(camX)) - EXEMPLAR_CELLS / 2;
-    world.elevation(i0, j0, i0 + EXEMPLAR_CELLS, j0 + EXEMPLAR_CELLS, {
-        onDone: (r) => {
-            exemplarPatch = { data: r.data, width: r.width, height: r.height,
-                              metresPerCell: METRES };
-            terrain.setDetailExemplar(exemplarPatch);
-            exemplarReady = true;
-        },
-        onError: (e) => { console.log('exemplar: ' + e); exemplarReady = true; },
-    });
-}
+let modelReady = false;
 
 // --- Layer 0 — the whole planet, baked, or a window that follows the camera ---
 //
@@ -334,8 +306,7 @@ if (!bro.worldgen || !bro.worldgen.available) {
         onReady: (w) => {
             world = w;
             if (!baked) { loadCoarse(0, 0, 2, SPAWN_HALF); chooseSpawn(); }
-            status.textContent = 'Sampling detail structure...';
-            requestExemplar(cam.pos[0], cam.pos[2]);
+            modelReady = true;
         },
         onError: (e) => { status.textContent = 'Model load failed: ' + e; },
     });
@@ -478,7 +449,7 @@ function frame() {
         '  |  ' + terrain.layerCount + ' layer, ' +
         (terrain.triangleCount / 1000).toFixed(0) + 'k tris';
 
-    if (exemplarReady && status.textContent) status.textContent = '';
+    if (modelReady && status.textContent) status.textContent = '';
     requestAnimationFrame(frame);
 }
 
@@ -489,6 +460,5 @@ export { cam, terrain, elevationAt, toggleMode, sun, scene };
 // re-install the same height data, so tests can bisect config against artifact.
 export const coarseField = () => ({ data: coarse, originX: coarseOriginX,
                                     originZ: coarseOriginZ });
-export const exemplar = () => exemplarPatch;
 export const worldgen = () => world;
-export const ready = () => exemplarReady;
+export const ready = () => modelReady;

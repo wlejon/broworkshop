@@ -64,9 +64,10 @@ export const PLANET = {
 // Two edges remain, and both are closed at continental scale rather than hidden:
 //
 //   LONGITUDE. Column 0 and column W meet. A cross-fade WRAP_BAND cells wide
-//   blends one into the other, the same construction setDetailExemplar uses to
-//   make its patch periodic. At 7.68 km per cell a 200-cell band is 1500 km, so
-//   the transition is the width of a continent and reads as geography.
+//   blends one into the other by generating past the meridian and folding back,
+//   so the join is continuous by construction. At 7.68 km per cell a 200-cell
+//   band is 1500 km, so the transition is the width of a continent and reads as
+//   geography.
 //
 //   POLES. An equirectangular chart collapses each polar row to a point, so a
 //   row of varying terrain cannot be consistent there. Over POLE_BAND rows the
@@ -106,8 +107,7 @@ export function chartSize(radius, cellSize) {
 /// places in the generator — the first attempt did exactly that and left a
 /// 249 m step. Generating past the meridian and folding back means out[0] is
 /// literally the sample that FOLLOWS out[W-1] in the generator, so the join is
-/// continuous by construction rather than by averaging. Same reason
-/// setDetailExemplar crops a band instead of blending in place.
+/// continuous by construction rather than by averaging.
 ///
 /// Cosine weights rather than linear: a linear fold is C0 but kinks at both ends
 /// of the band, and a kink in elevation across 1500 km reads as a ridge running
