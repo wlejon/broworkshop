@@ -1,0 +1,7 @@
+{
+    "app": ".",
+    "title": "Worldgen Lab",
+    "width": 1360,
+    "height": 920,
+    "lib": "../../lib"
+}

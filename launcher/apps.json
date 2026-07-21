@@ -40,6 +40,7 @@
         { "dir": "demos/diffusion-lab" },
         { "dir": "demos/vision-lab" },
         { "dir": "demos/terrain" },
+        { "dir": "demos/worldgen-lab" },
         { "dir": "demos/spatial-audio" },
         { "dir": "demos/spatial-hash" },
         { "dir": "demos/image-kernels" },

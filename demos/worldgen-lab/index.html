@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Worldgen Lab</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <header id="toolbar">
+      <span id="brand">◍ Worldgen&nbsp;Lab</span>
+      <span class="tagline">drive the diffusion terrain model through its seams — pipeline · climate · relief · composition</span>
+      <span class="grow"></span>
+      <span id="backend" class="badge">loading…</span>
+    </header>
+
+    <!-- CHECKPOINT — the converted terrain-diffusion directory + the world seed -->
+    <section id="modelbar">
+      <label class="cfg">weights
+        <input id="model-dir" type="text" value="D:/projects/brodiffusion/weights/terrain-diffusion-30m-bro">
+      </label>
+      <button id="btn-browse" class="iconbtn" title="Choose a converted checkpoint directory">📁</button>
+      <button id="btn-load" title="Read the checkpoint (~2 s)">Load</button>
+      <span class="grow"></span>
+      <span id="status" class="meta"></span>
+    </section>
+
+    <!-- LOCATION — the region spine: seed / window / overview map -->
+    <section id="regionbar"></section>
+
+    <!-- SEAMS — one tab per probe; each mounts under #probe -->
+    <nav id="tabs"></nav>
+    <div id="probe-blurb" class="blurb"></div>
+    <main id="probe"></main>
+  </div>
+
+  <script type="module" src="/app/app.js"></script>
+</body>
+</html>
