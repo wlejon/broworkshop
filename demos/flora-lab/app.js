@@ -126,81 +126,29 @@ scene.createMesh({
     receivesShadow: true,
 });
 
-// ─── broflora world ───────────────────────────────────────────────────────
-
-let world = null;
-let rootProto = -1;
-let plants = [];   // { idx, species, color }
+// ─── broflora sim on a worker thread ───────────────────────────────────────
+//
+// The whole ecosystem sim + mesh emit runs in sim-worker.js on its own thread.
+// This thread never steps the sim or scatters a single leaf: it drives the
+// worker with a lightweight `pump {dt}` each frame and, when a frame packet
+// comes back, uploads the compact branch-tube / foliage-scatter buffers (and
+// the bloom meshes) to the GPU and draws. So the render loop pays neither the
+// sim (~85 ms/s) nor the emit (~10 ms/rebuild) — it floats to the display
+// ceiling while the plant keeps growing on the other thread.
 
 const SPECIES = {
-    sun:   {
-        species:  { shadeTolerance: 0.35, moduleMatureAge: 0.6,
-                    tropismG2: 0.12, growthScale: 1.0,
-                    orthotropy: 0.4, rootVigorMax: 2.5,
-                    apicalControl: 0.35, apicalControlMature: 0.3,
-                    individualVariation: 0.18, maxAge: 60,
-                    seedingRadius: 0.0 },
-        color: [0.55, 0.78, 0.32],
-    },
-    shade: {
-        species:  { shadeTolerance: 0.65, moduleMatureAge: 0.7,
-                    tropismG2: 0.12, growthScale: 0.8,
-                    orthotropy: 0.48, rootVigorMax: 2.0,
-                    apicalControl: 0.30, apicalControlMature: 0.3,
-                    individualVariation: 0.16, maxAge: 70,
-                    seedingRadius: 0.0 },
-        color: [0.30, 0.62, 0.45],
-    },
+    sun:   { color: [0.55, 0.78, 0.32] },
+    shade: { color: [0.30, 0.62, 0.45] },
 };
 
-function buildWorld() {
-    world = bro.flora.createWorld({
-        rngSeed: 0xC0FFEE,
-        climate: { annualTempBase: 15, annualPrecip: 1000 },
-        shadow: {
-            origin:   [-WORLD_SIZE * 0.5, 0, -WORLD_SIZE * 0.5],
-            cellSize: GRID_CELL,
-            width:  GRID_RES, height: GRID_HEIGHT, depth: GRID_RES,
-            fill: 1.0,
-        },
-    });
+const sim = new Worker('sim-worker.js');
 
-    // Two whorl variants — both fill the crown volumetrically (a short
-    // trunk topped by arms fanned in 3D) so growth never collapses into a
-    // vertical whip. Module selection drifts between them in (determinacy,
-    // apicalControl) space: vigorous shoots open a broad 5-arm crown, while
-    // suppressed / low-vigor shoots make a smaller, denser 3-arm tuft. Both
-    // sites sit at the plants' apicalControl (~0.3); only determinacy
-    // (which tracks vigor) separates them.
-    rootProto = world.addPrototype(bro.flora.prototypes.whorl(5, 0.8));
-    const protoTuft = world.addPrototype(bro.flora.prototypes.whorl(3, 0.55));
-    world.addVoronoiSite(rootProto, 0.5,  0.3);   // vigorous → broad crown
-    world.addVoronoiSite(protoTuft, 0.12, 0.3);   // suppressed → dense tuft
+// Latest data the worker has sent (the main thread's whole view of the sim).
+let stats = { simTime: 0, plantCount: 0, moduleCount: 0, flowering: 0 };
+let plantsData = new Float32Array(0);   // [x,y,z, speciesFlag] per plant
+let shadowSnap = null;                   // { shadow, gridRes, ... } from a snapshot request
 
-    plants = [];
-    // Initial planting: 2 sun + 2 shade in a row across the patch.
-    const layout = [
-        { x: -4.5, z: -2, sp: 'sun'   },
-        { x: -1.5, z:  1, sp: 'sun'   },
-        { x:  1.5, z: -1, sp: 'shade' },
-        { x:  4.5, z:  2, sp: 'shade' },
-    ];
-    for (const p of layout) plant(p.x, p.z, p.sp);
-}
-
-function plant(x, z, speciesKey) {
-    const def = SPECIES[speciesKey];
-    const idx = world.addPlant({
-        origin: [x, 0, z],
-        species: def.species,
-        prototypeIndex: rootProto,
-    });
-    if (idx >= 0) {
-        plants.push({ origin: [x, 0, z], species: speciesKey, color: def.color });
-    }
-}
-
-buildWorld();
+function pumpWorker(dt) { sim.postMessage({ type: 'pump', dt }); }
 
 // ─── Overlay state ────────────────────────────────────────────────────────
 
@@ -303,76 +251,18 @@ function destroyAllOverlays() {
     plantOriginsNode = null;
 }
 
-function rebuildBranches() {
-    if (!overlays.branches.on || world.moduleCount === 0) {
+// Apply the worker's branch-tube segment buffer — upload it to the GPU tube
+// node (created on first packet). The tube geometry is synthesised in the VS,
+// so this only pushes a compact per-segment buffer (~0.6ms), never a mesh.
+function applyBranches(tube) {
+    if (!tube || tube.segCount === 0) {
         if (branchesNode) branchesNode.visible = false;
         return;
     }
-    // GPU procedural tubes: the whole stem skeleton is synthesised in the
-    // vertex shader from a compact per-segment buffer, so a growing plant
-    // re-uploads a few hundred KB instead of re-baking + re-uploading a
-    // multi-MB merged mesh (branch upload 9ms -> 0.57ms). This is what keeps
-    // the branch rebuild cheap while the plant grows.
-    if (world.emitBranchTubes && scene.createInstancedMesh) {
-        const tube = world.emitBranchTubes({ sides: 6 });
-        if (!tube || tube.segCount === 0) {
-            if (branchesNode) branchesNode.visible = false;
-            return;
-        }
-        const desc = Object.assign({ sides: 6, radiusScale: 1.0 }, tube);
-        if (!branchesNode) {
-            branchesNode = scene.createInstancedMesh({
-                tube: desc,
-                color: overlays.branches.color,
-                metallic: 0.0, roughness: 0.85,
-                castsShadow: true, receivesShadow: true,
-            });
-            overlays.branches.node = branchesNode;
-        } else {
-            branchesNode.visible = true;
-            branchesNode.setTubeSegments(desc);
-        }
-        return;
-    }
-
-    if (world.emitSegmentTransforms && scene.createInstancedMesh) {
-        const transforms = world.emitSegmentTransforms();
-        if (!transforms || transforms.length === 0) {
-            if (branchesNode) branchesNode.visible = false;
-            return;
-        }
-        const cyl = getBranchCylinder();
-        if (!branchesNode) {
-            branchesNode = scene.createInstancedMesh({
-                mesh: cyl,
-                instances: transforms,
-                color: overlays.branches.color,
-                metallic: 0.0, roughness: 0.85,
-                // Branch cylinders are opaque solids: 17k separate instanced
-                // draws hit InstancedMeshNode's fixed per-instance GPU cost
-                // (~3us each -> tens of ms). staticBatch bakes them into one
-                // merged draw (pixel-identical), collapsing that to ~0.1ms. The
-                // trade is an O(verts) CPU rebake when the set changes each
-                // rebuild — cheap here (~245k verts) next to the GPU it saves.
-                staticBatch: true,
-                castsShadow: true, receivesShadow: true,
-            });
-            overlays.branches.node = branchesNode;
-        } else {
-            branchesNode.visible = true;
-            branchesNode.setInstances(transforms);
-        }
-        return;
-    }
-
-    const mesh = world.emitMesh(6);
-    if (!mesh || mesh.triangleCount === 0) {
-        if (branchesNode) branchesNode.visible = false;
-        return;
-    }
+    const desc = Object.assign({ sides: 6, radiusScale: 1.0 }, tube);
     if (!branchesNode) {
-        branchesNode = scene.createMesh({
-            data: mesh,
+        branchesNode = scene.createInstancedMesh({
+            tube: desc,
             color: overlays.branches.color,
             metallic: 0.0, roughness: 0.85,
             castsShadow: true, receivesShadow: true,
@@ -380,285 +270,81 @@ function rebuildBranches() {
         overlays.branches.node = branchesNode;
     } else {
         branchesNode.visible = true;
-        branchesNode.updateMesh(mesh, { transfer: true });
+        branchesNode.setTubeSegments(desc);
     }
 }
 
-function rebuildFoliage() {
-    if (!overlays.foliage.on || world.moduleCount === 0) {
+// Apply the worker's foliage-scatter buffers to the GPU scatter node. The
+// leaves are synthesised in the VS from the per-segment + per-leaf buffers.
+function applyFoliage(s) {
+    if (!s || s.segCount === 0) {
         if (foliageNode) foliageNode.visible = false;
         return;
     }
-
     const leaf = getLeafCard();
-
-    // Foliage placement — shared by the GPU-scatter and CPU paths. Only the
-    // count-shaping fields (maxRadius/minDepth/perUnitLength/densityFalloff)
-    // affect how many leaves a twig gets; the rest shape each leaf's transform.
-    const folOpts = {
-        maxRadius:     0.22,
-        minDepth:      1,
-        perUnitLength: 120,
-        upBias:        0.5,
-        tiltJitter:    0.55,
-        rollJitter:    0.9,
-        baseScale:     1.0,
-        scaleJitter:   0.3,
-        scaleByRadius: 0.25,
-        seed:          0x1eaf,
-    };
-
-    // GPU scatter: emit ONE record per foliage-bearing twig and expand it into
-    // leaves in the vertex shader. No per-leaf CPU scatter, no multi-MB upload —
-    // this is what keeps the frame cheap while the plant grows.
-    if (world.emitScatterSegments && scene.createInstancedMesh) {
-        const s = world.emitScatterSegments(folOpts);
-        if (!s || s.segCount === 0) {
-            if (foliageNode) foliageNode.visible = false;
-            return;
-        }
-        const scatter = Object.assign({}, folOpts, s);
-        if (!foliageNode) {
-            foliageNode = scene.createInstancedMesh({
-                mesh: leaf,
-                scatter,
-                color: SPECIES.sun.color,
-                metallic: 0.0, roughness: 0.92,
-                doubleSided: true, subsurface: 0.5,
-                // Leaf cards carry the base→tip windBend in vertex-colour R.
-                // Keep it as the wind channel only, not an albedo tint.
-                vertexColorTint: false,
-                castsShadow: false, receivesShadow: true,
-            });
-            overlays.foliage.node = foliageNode;
-        } else {
-            foliageNode.visible = true;
-            foliageNode.setScatterSegments(scatter);
-        }
-        return;
-    }
-
-    if (world.emitFoliageTransforms && scene.createInstancedMesh) {
-        const transforms = world.emitFoliageTransforms(folOpts);
-        if (!transforms || transforms.length === 0) {
-            if (foliageNode) foliageNode.visible = false;
-            return;
-        }
-        if (!foliageNode) {
-            foliageNode = scene.createInstancedMesh({
-                mesh: leaf,
-                instances: transforms,
-                color: SPECIES.sun.color,
-                metallic: 0.0, roughness: 0.92,
-                doubleSided: true, subsurface: 0.5,
-                vertexColorTint: false,
-                castsShadow: false, receivesShadow: true,
-            });
-            overlays.foliage.node = foliageNode;
-        } else {
-            foliageNode.visible = true;
-            foliageNode.setInstances(transforms);
-        }
-        return;
-    }
-
-    if (world.emitFoliageMesh) {
-        // Fast native C++ foliage emitter — zero JS object allocations
-        const foliage = world.emitFoliageMesh(leaf, {
-            maxRadius:     0.22,
-            minDepth:      1,
-            perUnitLength: 120,
-            upBias:        0.5,
-            tiltJitter:    0.55,
-            rollJitter:    0.9,
-            baseScale:     1.0,
-            scaleJitter:   0.3,
-            scaleByRadius: 0.25,
-            seed:          0x1eaf,
-        });
-        if (!foliage || foliage.triangleCount === 0) {
-            if (foliageNode) foliageNode.visible = false;
-            return;
-        }
-        if (!foliageNode) {
-            foliageNode = scene.createMesh({
-                data: foliage,
-                color: SPECIES.sun.color,
-                metallic: 0.0, roughness: 0.92,
-                twoSided: true, subsurface: 0.5,
-                vertexColorTint: false, wind: 1,
-                castsShadow: false, receivesShadow: true,
-            });
-            overlays.foliage.node = foliageNode;
-        } else {
-            foliageNode.visible = true;
-            foliageNode.castsShadow = false;
-            foliageNode.updateMesh(foliage, { transfer: true });
-        }
-        return;
-    }
-
-    // Fallback JS path
-    destroyOverlay('foliage');
-    const groups = { sun: { segs: [], w: [] }, shade: { segs: [], w: [] } };
-    for (let i = 0; i < world.plantCount; i++) {
-        const info = world.plantInfo(i);
-        if (!info) continue;
-        const segs = world.emitPlantSegments(i);
-        if (!segs || segs.length === 0) continue;
-        const fol = world.emitPlantFoliage(i);
-        const g = (info.species.shadeTolerance >= 0.6) ? groups.shade : groups.sun;
-        for (let k = 0; k < segs.length; k++) {
-            g.segs.push(segs[k]);
-            const f = fol && fol[k];
-            const raw      = f && f.lightExposure01 !== undefined ? f.lightExposure01 : 1.0;
-            const exposure = 0.12 + 0.88 * raw;
-            const maturity = f ? Math.min(1, f.age01) : 1.0;
-            const alive    = f ? (1.0 - f.senescence01) : 1.0;
-            const twig     = f && f.twigGrade01 !== undefined ? f.twigGrade01 : 1.0;
-            g.w.push(exposure * maturity * alive * twig);
-        }
-    }
-
-    const nodes = [];
-    let seed = 0x1eaf;
-    for (const key of ['sun', 'shade']) {
-        const segs = groups[key].segs;
-        if (segs.length === 0) continue;
-        const foliage = Mesh.scatterLeaves(segs, leaf, {
-            maxRadius:     0.22,
-            minDepth:      1,
-            perUnitLength: 220,
-            densityWeight: groups[key].w,
-            upBias:        0.5,
-            tiltJitter:    0.55,
-            rollJitter:    0.9,
-            baseScale:     1.0,
-            scaleJitter:   0.3,
-            scaleByRadius: 0.25,
-            seed:          seed,
-        });
-        seed = (seed * 2654435761) >>> 0;
-        if (!foliage || foliage.triangleCount === 0) continue;
-        nodes.push(scene.createMesh({
-            data: foliage,
-            color: SPECIES[key].color,
+    // The scatter node needs the same placement params the worker emitted with
+    // (they shape each leaf's transform in the VS); the counts come baked into
+    // the per-leaf buffer.
+    const scatter = Object.assign({
+        maxRadius: 0.22, minDepth: 1, perUnitLength: 120,
+        upBias: 0.5, tiltJitter: 0.55, rollJitter: 0.9,
+        baseScale: 1.0, scaleJitter: 0.3, scaleByRadius: 0.25, seed: 0x1eaf,
+    }, s);
+    if (!foliageNode) {
+        foliageNode = scene.createInstancedMesh({
+            mesh: leaf,
+            scatter,
+            color: SPECIES.sun.color,
             metallic: 0.0, roughness: 0.92,
-            twoSided: true, subsurface: 0.5,
-            vertexColorTint: false, wind: 1,
-            castsShadow: true, receivesShadow: true,
-        }));
-    }
-    overlays.foliage.node = nodes.length ? nodes : null;
-}
-
-const BLOOM_CAP = 120;
-function rebuildBlooms() {
-    if (!overlays.blooms.on || world.moduleCount === 0) {
-        if (bloomPetalsNode) bloomPetalsNode.visible = false;
-        if (bloomCentersNode) bloomCentersNode.visible = false;
-        return;
-    }
-
-    const { base, centerBase } = getBloomBases();
-
-    if (world.emitBloomMesh) {
-        // Fast native C++ bloom mesh emitter — zero JS object allocations
-        const [mergedPetals, mergedCenters] = world.emitBloomMesh(base, centerBase, {
-            bloomCap: BLOOM_CAP,
-            bloomLightMin: 0.18,
+            doubleSided: true, subsurface: 0.5,
+            vertexColorTint: false,
+            castsShadow: false, receivesShadow: true,
         });
-
-        if (mergedPetals && mergedPetals.triangleCount > 0) {
-            if (!bloomPetalsNode) {
-                bloomPetalsNode = scene.createMesh({
-                    data: mergedPetals,
-                    color: overlays.blooms.color,
-                    metallic: 0.0, roughness: 0.55,
-                    twoSided: true, subsurface: 0.4,
-                    castsShadow: false, receivesShadow: true,
-                });
-            } else {
-                bloomPetalsNode.visible = true;
-                bloomPetalsNode.updateMesh(mergedPetals, { transfer: true });
-            }
-        } else if (bloomPetalsNode) {
-            bloomPetalsNode.visible = false;
-        }
-
-        if (mergedCenters && mergedCenters.triangleCount > 0) {
-            if (!bloomCentersNode) {
-                bloomCentersNode = scene.createMesh({
-                    data: mergedCenters,
-                    color: [0.98, 0.80, 0.25],   // golden eye
-                    metallic: 0.0, roughness: 0.6, emissive: 0.3 * bloomEmissiveGain,
-                    castsShadow: false, receivesShadow: true,
-                });
-            } else {
-                bloomCentersNode.visible = true;
-                bloomCentersNode.emissive = 0.3 * bloomEmissiveGain;
-                bloomCentersNode.updateMesh(mergedCenters, { transfer: true });
-            }
-        } else if (bloomCentersNode) {
-            bloomCentersNode.visible = false;
-        }
-        overlays.blooms.node = [bloomPetalsNode, bloomCentersNode].filter(Boolean);
-        return;
+        overlays.foliage.node = foliageNode;
+    } else {
+        foliageNode.visible = true;
+        foliageNode.setScatterSegments(scatter);
     }
-
-    // Fallback JS path
-    destroyOverlay('blooms');
-    const anchors = world.emitBloomAnchors();
-    if (!anchors || anchors.length === 0) return;
-
-    const stride = anchors.length > BLOOM_CAP ? Math.ceil(anchors.length / BLOOM_CAP) : 1;
-    const petalParts = [];
-    const centerParts = [];
-    const BLOOM_LIGHT_MIN = 0.18;
-    for (let i = 0; i < anchors.length; i += stride) {
-        const a = anchors[i];
-        if (a.lightExposure01 !== undefined && a.lightExposure01 < BLOOM_LIGHT_MIN) continue;
-        const s = 0.8 + 0.5 * Math.min(1, a.age01 || 0.5);
-
-        const f = base.clone();
-        orientYTo(f, a.normal);
-        f.scale(s, s, s);
-        f.translate(a.position[0], a.position[1], a.position[2]);
-        petalParts.push(f);
-
-        const c = centerBase.clone();
-        orientYTo(c, a.normal);
-        c.scale(s, s, s);
-        const lift = 0.012 * s;
-        c.translate(a.position[0] + a.normal[0] * lift,
-                    a.position[1] + a.normal[1] * lift,
-                    a.position[2] + a.normal[2] * lift);
-        centerParts.push(c);
-    }
-    if (petalParts.length === 0) return;
-
-    const nodes = [];
-    const mergedPetals = Mesh.merge(petalParts);
-    if (mergedPetals && mergedPetals.triangleCount > 0) {
-        nodes.push(scene.createMesh({
-            data: mergedPetals,
-            color: overlays.blooms.color,
-            metallic: 0.0, roughness: 0.55,
-            twoSided: true, subsurface: 0.4,
-            castsShadow: false, receivesShadow: true,
-        }));
-    }
-    const mergedCenters = Mesh.merge(centerParts);
-    if (mergedCenters && mergedCenters.triangleCount > 0) {
-        nodes.push(scene.createMesh({
-            data: mergedCenters,
-            color: [0.98, 0.80, 0.25],
-            metallic: 0.0, roughness: 0.6, emissive: 0.3 * bloomEmissiveGain,
-            castsShadow: false, receivesShadow: true,
-        }));
-    }
-    overlays.blooms.node = nodes.length ? nodes : null;
 }
+
+// Apply the worker's bloom meshes (transferred zero-copy by pointer).
+function applyBlooms(petals, centers) {
+    if (petals && petals.triangleCount > 0) {
+        if (!bloomPetalsNode) {
+            bloomPetalsNode = scene.createMesh({
+                data: petals,
+                color: overlays.blooms.color,
+                metallic: 0.0, roughness: 0.55,
+                twoSided: true, subsurface: 0.4,
+                castsShadow: false, receivesShadow: true,
+            });
+        } else {
+            bloomPetalsNode.visible = true;
+            bloomPetalsNode.updateMesh(petals, { transfer: true });
+        }
+    } else if (bloomPetalsNode) {
+        bloomPetalsNode.visible = false;
+    }
+
+    if (centers && centers.triangleCount > 0) {
+        if (!bloomCentersNode) {
+            bloomCentersNode = scene.createMesh({
+                data: centers,
+                color: [0.98, 0.80, 0.25],   // golden eye
+                metallic: 0.0, roughness: 0.6, emissive: 0.3 * bloomEmissiveGain,
+                castsShadow: false, receivesShadow: true,
+            });
+        } else {
+            bloomCentersNode.visible = true;
+            bloomCentersNode.emissive = 0.3 * bloomEmissiveGain;
+            bloomCentersNode.updateMesh(centers, { transfer: true });
+        }
+    } else if (bloomCentersNode) {
+        bloomCentersNode.visible = false;
+    }
+    overlays.blooms.node = [bloomPetalsNode, bloomCentersNode].filter(Boolean);
+}
+
 
 // ─── Fast Octahedral Impostor Rendering ────────────────────────────────────
 const atlasCache = { sun: null, shade: null };
@@ -723,39 +409,36 @@ function initImpostorAtlases() {
 function rebuildImpostors() {
     destroyOverlay('impostors');
     overlays.impostors.quadCount = 0;
-    if (!overlays.impostors.on || !world || world.plantCount === 0) return;
+    const nPlants = plantsData.length / 4;
+    if (!overlays.impostors.on || nPlants === 0) return;
     if (!bro.impostor || !bro.impostor.createLayer) return;
 
     if (!atlasCache.sun || !atlasCache.shade) {
         initImpostorAtlases();
     }
 
-    const groups = { sun: { plantIndices: [] }, shade: { plantIndices: [] } };
-    for (let i = 0; i < world.plantCount; i++) {
-        const info = world.plantInfo(i);
-        if (!info) continue;
-        const gKey = (info.species.shadeTolerance >= 0.6) ? 'shade' : 'sun';
-        groups[gKey].plantIndices.push(i);
+    // Group plant origins by species flag (plantsData: [x,y,z, flag] per plant;
+    // flag 1 = shade, 0 = sun).
+    const groups = { sun: [], shade: [] };
+    for (let i = 0; i < nPlants; i++) {
+        const o = i * 4;
+        const key = (plantsData[o + 3] >= 0.5) ? 'shade' : 'sun';
+        groups[key].push([plantsData[o], plantsData[o + 1], plantsData[o + 2]]);
     }
 
     const nodes = [];
     let totalQuads = 0;
 
     for (const key of ['sun', 'shade']) {
-        const pIndices = groups[key].plantIndices;
-        if (pIndices.length === 0) continue;
+        const origins = groups[key];
+        if (origins.length === 0) continue;
         const atlas = atlasCache[key];
         if (!atlas) continue;
 
-        const transforms = new Float32Array(pIndices.length * 9);
-        for (let idx = 0; idx < pIndices.length; idx++) {
-            const pIdx = pIndices[idx];
-            const info = world.plantInfo(pIdx);
+        const transforms = new Float32Array(origins.length * 9);
+        for (let idx = 0; idx < origins.length; idx++) {
             const o = idx * 9;
-            const px = info ? info.origin[0] : 0;
-            const py = info ? info.origin[1] : 0;
-            const pz = info ? info.origin[2] : 0;
-            transforms[o] = px; transforms[o + 1] = py; transforms[o + 2] = pz;
+            transforms[o] = origins[idx][0]; transforms[o + 1] = origins[idx][1]; transforms[o + 2] = origins[idx][2];
             transforms[o + 3] = 0; transforms[o + 4] = 0; transforms[o + 5] = 0; transforms[o + 6] = 1;
             transforms[o + 7] = 1.0;
             transforms[o + 8] = 0;
@@ -780,17 +463,23 @@ function rebuildShadowGrid() {
         return;
     }
 
+    // Shadow occupancy is a worker-side query — request a snapshot and rebuild
+    // when it arrives (this overlay is a dev diagnostic, off the hot path).
+    if (!shadowSnap) {
+        sim.postMessage({ type: 'snapshot', which: { shadowGrid: true } });
+        return;
+    }
     const parts = [];
     const half = GRID_CELL * 0.48;
-    const stride = 1;
-    for (let iy = 0; iy < GRID_HEIGHT; iy += stride) {
-        for (let iz = 0; iz < GRID_RES; iz += stride) {
-            for (let ix = 0; ix < GRID_RES; ix += stride) {
+    let n = 0;
+    for (let iy = 0; iy < GRID_HEIGHT; iy++) {
+        for (let iz = 0; iz < GRID_RES; iz++) {
+            for (let ix = 0; ix < GRID_RES; ix++) {
+                const q = shadowSnap.shadow[n++];
+                if (q == null || q > 0.85) continue;
                 const cx = -WORLD_SIZE * 0.5 + (ix + 0.5) * GRID_CELL;
                 const cy = (iy + 0.5) * GRID_CELL;
                 const cz = -WORLD_SIZE * 0.5 + (iz + 0.5) * GRID_CELL;
-                const q = world.sampleShadow([cx, cy, cz]);
-                if (q == null || q > 0.85) continue;
                 parts.push(wire.translate(wire.box(half, half, half), cx, cy, cz));
             }
         }
@@ -818,39 +507,9 @@ function rebuildShadowGrid() {
 }
 
 function rebuildSeedRings() {
-    if (!overlays.seedRings.on) {
-        if (seedRingsNode) seedRingsNode.visible = false;
-        return;
-    }
-    const parts = [];
-    for (let i = 0; i < world.plantCount; i++) {
-        const info = world.plantInfo(i);
-        if (!info) continue;
-        const r = info.species.seedingRadius;
-        if (!(r > 0)) continue;
-        parts.push(wire.translate(wire.circle(r, 48),
-            info.origin[0], 0.02, info.origin[2]));
-    }
-    if (parts.length === 0) {
-        if (seedRingsNode) seedRingsNode.visible = false;
-        return;
-    }
-    const merged = wire.merge(parts);
-    if (!merged) {
-        if (seedRingsNode) seedRingsNode.visible = false;
-        return;
-    }
-    if (!seedRingsNode) {
-        seedRingsNode = scene.createMesh({
-            positions: merged.positions, indices: merged.indices,
-            drawMode: 'lines', lineWidth: 1,
-            color: overlays.seedRings.color,
-        });
-        overlays.seedRings.node = seedRingsNode;
-    } else {
-        seedRingsNode.visible = true;
-        seedRingsNode.updateMesh({ positions: merged.positions, indices: merged.indices });
-    }
+    // Every species in this app has seedingRadius 0, so this overlay draws
+    // nothing; kept as a hook for when seeding is enabled.
+    if (seedRingsNode) seedRingsNode.visible = false;
 }
 
 function rebuildPlantOrigins() {
@@ -859,16 +518,14 @@ function rebuildPlantOrigins() {
         return;
     }
     const parts = [];
-    for (let i = 0; i < world.plantCount; i++) {
-        const info = world.plantInfo(i);
-        if (!info) continue;
-        parts.push(wire.translate(wire.cross(0.18),
-            info.origin[0], 0.02, info.origin[2]));
-        parts.push(wire.line(
-            [info.origin[0], 0, info.origin[2]],
-            [info.origin[0], 0.6, info.origin[2]]));
+    const n = plantsData.length / 4;
+    for (let i = 0; i < n; i++) {
+        const o = i * 4;
+        const x = plantsData[o], z = plantsData[o + 2];
+        parts.push(wire.translate(wire.cross(0.18), x, 0.02, z));
+        parts.push(wire.line([x, 0, z], [x, 0.6, z]));
     }
-    const merged = wire.merge(parts);
+    const merged = parts.length ? wire.merge(parts) : null;
     if (!merged) {
         if (plantOriginsNode) plantOriginsNode.visible = false;
         return;
@@ -886,14 +543,25 @@ function rebuildPlantOrigins() {
     }
 }
 
-function rebuildAll() {
-    rebuildBranches();
-    rebuildFoliage();
-    rebuildBlooms();
+// The diagnostic overlays read the worker's plant/shadow snapshot, not a live
+// world — rebuilt whenever a fresh packet lands or a toggle flips.
+function rebuildDiagnostics() {
     rebuildImpostors();
     rebuildShadowGrid();
     rebuildSeedRings();
     rebuildPlantOrigins();
+}
+
+// Apply a frame packet from the sim worker: upload the enabled layers' compact
+// buffers, cache stats + plant origins, and refresh the diagnostic overlays.
+function applyFrame(f) {
+    if (f.branches) applyBranches(f.branches); else if (branchesNode) branchesNode.visible = false;
+    if (f.foliage)  applyFoliage(f.foliage);   else if (foliageNode)  foliageNode.visible = false;
+    if (overlays.blooms.on) applyBlooms(f.bloomPetals, f.bloomCenters);
+    else { if (bloomPetalsNode) bloomPetalsNode.visible = false; if (bloomCentersNode) bloomCentersNode.visible = false; }
+    if (f.stats)  stats = f.stats;
+    if (f.plants) plantsData = f.plants;
+    rebuildDiagnostics();
     updateStats(true);
 }
 
@@ -913,16 +581,10 @@ function updateStats(force = false) {
     if (!force && (now - lastStatsTime < 100)) return;
     lastStatsTime = now;
 
-    els.simTime.textContent = world.simTime.toFixed(2);
-    els.plantCt.textContent = world.plantCount;
-    els.moduleCt.textContent = world.moduleCount;
-
-    let flowering = 0;
-    for (let i = 0; i < world.plantCount; i++) {
-        const info = world.plantInfo(i);
-        if (info && info.flowering) flowering++;
-    }
-    els.floweringCt.textContent = flowering;
+    els.simTime.textContent = stats.simTime.toFixed(2);
+    els.plantCt.textContent = stats.plantCount;
+    els.moduleCt.textContent = stats.moduleCount;
+    els.floweringCt.textContent = stats.flowering;
 
     let totalTris = 0;
     if (overlays.branches.on && branchesNode && branchesNode.visible) {
@@ -974,7 +636,18 @@ for (const key of Object.keys(overlays)) {
             overlays.impostors.on = false;
             if (toggleInputs.impostors) toggleInputs.impostors.checked = false;
         }
-        forceRebuild();
+        // Tell the worker which hot layers to emit; refresh diagnostics locally.
+        sim.postMessage({ type: 'layers', flags: {
+            branches: overlays.branches.on, foliage: overlays.foliage.on, blooms: overlays.blooms.on,
+        }});
+        // A layer turned off won't get another packet — hide its node now.
+        if (!overlays.branches.on && branchesNode) branchesNode.visible = false;
+        if (!overlays.foliage.on && foliageNode) foliageNode.visible = false;
+        if (!overlays.blooms.on) {
+            if (bloomPetalsNode) bloomPetalsNode.visible = false;
+            if (bloomCentersNode) bloomCentersNode.visible = false;
+        }
+        rebuildDiagnostics();
     });
     const sw = document.createElement('span');
     sw.className = 'swatch'; sw.style.background = rgbaCss(o.color);
@@ -984,64 +657,39 @@ for (const key of Object.keys(overlays)) {
     togglesRoot.appendChild(row);
 }
 
-// Sim controls
+// Sim controls — every control is a message to the worker (it owns the sim).
 let playing = true;
-let timeScale = 1.0;
-
-// The sim, the render-mesh rebuild, and the display refresh run on three
-// independent clocks (see the main loop). These are the sim + rebuild rates;
-// the display floats free above them.
-const SIM_STEP_DT    = 0.02;         // fixed sim step, in sim-seconds
-const BASE_GROWTH    = 1.0;          // sim-seconds advanced per real second at 1.0× time scale
-const MAX_CATCHUP    = 6;            // clamp steps/frame so a stall can't spiral
-const REBUILD_HZ     = 12;           // cap render-mesh rebuilds; the sim integrates smoothly under this
-const REBUILD_MIN_DT = 1.0 / REBUILD_HZ;
-
-let simAccum   = 0;                  // unspent sim-seconds
-let simDirty   = false;              // has the sim advanced since the last rebuild?
-let lastRebuildT = 0;                // wall-clock of the last rebuild (s)
-let lastFrameT = performance.now() / 1000;
-
-// Rebuild the render meshes now and reset the growth/throttle gates. Used by
-// the manual controls (Step / Seed / Reset / overlay toggles) that must show
-// their effect immediately rather than waiting on the rebuild clock.
-function forceRebuild() {
-    rebuildAll();
-    simDirty = false;
-    lastRebuildT = performance.now() / 1000;
-}
 
 const playBtn = document.getElementById('play');
 playBtn.addEventListener('click', () => {
     playing = !playing;
     playBtn.textContent = playing ? '⏸ Pause' : '▶ Play';
     playBtn.classList.toggle('on', playing);
+    sim.postMessage({ type: 'playing', on: playing });
 });
 
 document.getElementById('step1').addEventListener('click', () => {
-    world.step(SIM_STEP_DT);
-    forceRebuild();
+    sim.postMessage({ type: 'step' });
 });
 
 document.getElementById('seed').addEventListener('click', () => {
     const sp = Math.random() < 0.5 ? 'sun' : 'shade';
     const x = (Math.random() - 0.5) * WORLD_SIZE * 0.8;
     const z = (Math.random() - 0.5) * WORLD_SIZE * 0.8;
-    plant(x, z, sp);
-    forceRebuild();
+    sim.postMessage({ type: 'seed', x, z, species: sp });
 });
 
 document.getElementById('reset').addEventListener('click', () => {
-    destroyAllOverlays();
-    buildWorld();
-    forceRebuild();
+    shadowSnap = null;
+    sim.postMessage({ type: 'reset' });
 });
 
 const tsInp = document.getElementById('timeScale');
 const tsVal = document.getElementById('timeScaleV');
 tsInp.addEventListener('input', () => {
-    timeScale = parseFloat(tsInp.value);
+    const timeScale = parseFloat(tsInp.value);
     tsVal.textContent = timeScale.toFixed(1) + '×';
+    sim.postMessage({ type: 'timeScale', v: timeScale });
 });
 
 const tempInp = document.getElementById('temp');
@@ -1049,18 +697,17 @@ const tempVal = document.getElementById('tempV');
 tempInp.addEventListener('input', () => {
     const t = parseFloat(tempInp.value);
     tempVal.textContent = t.toFixed(1) + ' °C';
-    world.setClimate({ annualTempBase: t });
+    sim.postMessage({ type: 'climate', temp: t });
 });
 
 // Time-of-day selector — one button per lighting preset. Switching re-tints
-// the blooms (their emissive gain rides the preset) so the rebuild picks up
-// the new glow.
+// the blooms; the emissive gain is re-applied to the live bloom node.
 const todRoot = document.getElementById('todButtons');
 const todBtns = {};
 function selectTod(key) {
     lighting.apply(key);
     for (const k in todBtns) todBtns[k].classList.toggle('on', k === key);
-    rebuildBlooms();
+    if (bloomCentersNode) bloomCentersNode.emissive = 0.3 * bloomEmissiveGain;
 }
 for (const key of lighting.order) {
     const b = document.createElement('button');
@@ -1070,47 +717,41 @@ for (const key of lighting.order) {
     todBtns[key] = b;
 }
 
-// ─── Main loop ────────────────────────────────────────────────────────────
+// ─── Sim worker plumbing ───────────────────────────────────────────────────
 //
-// Three independent clocks. (1) The sim advances at a CONSTANT rate —
-// BASE_GROWTH × timeScale sim-seconds per real second — off a wall-clock
-// accumulator, so growth is framerate-INDEPENDENT: a faster GPU draws more
-// frames of the same growth, it doesn't grow the plant faster. (2) Rebuilding
-// the render meshes (the frame's only heavy work) is gated twice — it runs
-// only when the sim has actually advanced since the last rebuild, and no more
-// often than REBUILD_HZ. (3) The display refreshes every rAF frame; a frame
-// that neither steps nor rebuilds costs only a draw, so the framerate floats
-// up to the render ceiling while the plant keeps growing underneath it.
+// The worker owns the sim and does all the heavy work (step + emit) on its own
+// thread. This thread only: (1) pumps it once per rendered frame with the real
+// dt, so growth stays framerate-independent; (2) uploads the compact buffers
+// each frame packet carries and draws. A rendered frame that gets no packet
+// costs only a draw, so the display floats to the render ceiling while the
+// plant grows on the other thread.
 
+sim.onmessage = (e) => {
+    const m = e.data;
+    if (!m || !m.type) return;
+    if (m.type === 'frame') {
+        applyFrame(m);
+    } else if (m.type === 'snapshot') {
+        if (m.shadow) shadowSnap = m;
+        if (m.plants) plantsData = m.plants;
+        rebuildDiagnostics();
+    }
+};
+
+// ─── Main loop ────────────────────────────────────────────────────────────
+
+let lastFrameT = performance.now() / 1000;
 function tick() {
     const nowT = performance.now() / 1000;
     let realDt = nowT - lastFrameT;
     lastFrameT = nowT;
     if (realDt > 0.1) realDt = 0.1;   // swallow long stalls (tab switch / first frame)
 
-    if (playing) {
-        simAccum += realDt * BASE_GROWTH * timeScale;
-        let steps = 0;
-        while (simAccum >= SIM_STEP_DT && steps < MAX_CATCHUP) {
-            world.step(SIM_STEP_DT);
-            simAccum -= SIM_STEP_DT;
-            steps++;
-            simDirty = true;
-        }
-        if (steps === MAX_CATCHUP) simAccum = 0;   // drop the backlog rather than spiral
-    }
-
-    if (simDirty && (nowT - lastRebuildT) >= REBUILD_MIN_DT) {
-        rebuildAll();
-        simDirty = false;
-        lastRebuildT = nowT;
-    } else {
-        updateStats(false);
-    }
-
-    lighting.update(realDt);   // drift the fireflies on the real clock, even while paused
+    if (playing) pumpWorker(realDt);   // the worker steps + emits on its own thread
+    updateStats(false);
+    lighting.update(realDt);           // drift the fireflies on the real clock, even while paused
     requestAnimationFrame(tick);
-}
+};
 
 installSystemMenu();
 // A gentle breeze. Foliage meshes opt in via `wind:1`; the per-vertex
@@ -1118,8 +759,8 @@ installSystemMenu();
 // put. Branches carry no color buffer, so the woody structure holds firm.
 scene.setWind({ direction: [1, 0, 0.35], strength: 0.06, frequency: 1.1 });
 selectTod(START_PRESET);   // light the scene before the first frame
-rebuildAll();
 requestAnimationFrame(tick);
 
 // ─── Debug surface for headless ───────────────────────────────────────────
-globalThis.__lab = { world, plants, overlays, getLeafCard, rebuildAll, rebuildBranches, rebuildFoliage, rebuildBlooms, rebuildImpostors, rebuildShadowGrid, rebuildSeedRings, rebuildPlantOrigins, lighting, selectTod };
+globalThis.__lab = { sim, overlays, getLeafCard, applyFrame, rebuildDiagnostics,
+    lighting, selectTod, getStats: () => stats, getPlants: () => plantsData };
