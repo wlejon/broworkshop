@@ -308,6 +308,33 @@ function rebuildBranches() {
         if (branchesNode) branchesNode.visible = false;
         return;
     }
+    // GPU procedural tubes: the whole stem skeleton is synthesised in the
+    // vertex shader from a compact per-segment buffer, so a growing plant
+    // re-uploads a few hundred KB instead of re-baking + re-uploading a
+    // multi-MB merged mesh (branch upload 9ms -> 0.57ms). This is what keeps
+    // the branch rebuild cheap while the plant grows.
+    if (world.emitBranchTubes && scene.createInstancedMesh) {
+        const tube = world.emitBranchTubes({ sides: 6 });
+        if (!tube || tube.segCount === 0) {
+            if (branchesNode) branchesNode.visible = false;
+            return;
+        }
+        const desc = Object.assign({ sides: 6, radiusScale: 1.0 }, tube);
+        if (!branchesNode) {
+            branchesNode = scene.createInstancedMesh({
+                tube: desc,
+                color: overlays.branches.color,
+                metallic: 0.0, roughness: 0.85,
+                castsShadow: true, receivesShadow: true,
+            });
+            overlays.branches.node = branchesNode;
+        } else {
+            branchesNode.visible = true;
+            branchesNode.setTubeSegments(desc);
+        }
+        return;
+    }
+
     if (world.emitSegmentTransforms && scene.createInstancedMesh) {
         const transforms = world.emitSegmentTransforms();
         if (!transforms || transforms.length === 0) {
