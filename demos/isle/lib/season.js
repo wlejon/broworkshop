@@ -60,7 +60,10 @@ export function createSeasonController(scene, terrain, flora, sky, atlas) {
 
     document.body.appendChild(seasonPanel);
 
-    const baseSnowLine = terrain.snowLine;
+    // Snow line is driven as a fraction of the island's PEAK, per season — not a
+    // multiplier of the climate base (which floors at 300 m for cold seeds and so
+    // could never melt back in summer). Summer -> snow only near the top.
+    const peak = atlas.max;
     const basePalette = terrain.palette;
 
     function lerp(a, b, t) {
@@ -82,7 +85,7 @@ export function createSeasonController(scene, terrain, flora, sky, atlas) {
 
         // 1. Resolve Season names & parameters
         let seasonName = 'Summer';
-        let snowLine = baseSnowLine;
+        let snowLine = peak * 0.72;
         let grassColor = basePalette.grass.albedo;
         let decidColor = [0.18, 0.32, 0.14]; // Green
 
@@ -90,28 +93,28 @@ export function createSeasonController(scene, terrain, flora, sky, atlas) {
             // Winter: cold, low snowline, frosty grass
             seasonName = 'Winter';
             const t = season / 0.2;
-            snowLine = lerp(baseSnowLine * 0.3, baseSnowLine * 0.6, t);
+            snowLine = lerp(peak * 0.22, peak * 0.40, t);
             grassColor = lerpColor([0.38, 0.40, 0.42], [0.26, 0.32, 0.20], t); // frost grey -> pale green
             decidColor = lerpColor([0.22, 0.18, 0.15], [0.24, 0.32, 0.16], t); // bare brown -> budding green
         } else if (season < 0.4) {
             // Spring: warming, melting snow, bright green grass
             seasonName = 'Spring';
             const t = (season - 0.2) / 0.2;
-            snowLine = lerp(baseSnowLine * 0.6, baseSnowLine * 0.9, t);
+            snowLine = lerp(peak * 0.40, peak * 0.72, t);
             grassColor = lerpColor([0.26, 0.32, 0.20], [0.20, 0.35, 0.15], t);
             decidColor = lerpColor([0.24, 0.32, 0.16], [0.18, 0.32, 0.14], t);
         } else if (season < 0.7) {
             // Summer: hot, high snowline, lush grass
             seasonName = 'Summer';
             const t = (season - 0.4) / 0.3;
-            snowLine = lerp(baseSnowLine * 0.9, baseSnowLine * 1.3, t);
+            snowLine = lerp(peak * 0.72, peak * 0.98, t);
             grassColor = lerpColor([0.20, 0.35, 0.15], [0.16, 0.30, 0.12], t);
             decidColor = [0.18, 0.32, 0.14];
         } else {
             // Autumn: cooling, golden grass, orange/red deciduous leaves
             seasonName = 'Autumn';
             const t = (season - 0.7) / 0.3;
-            snowLine = lerp(baseSnowLine * 1.3, baseSnowLine * 0.3, t);
+            snowLine = lerp(peak * 0.98, peak * 0.22, t);
             grassColor = lerpColor([0.16, 0.30, 0.12], [0.38, 0.28, 0.12], t); // green -> gold/orange
             decidColor = lerpColor([0.18, 0.32, 0.14], [0.42, 0.22, 0.08], t); // green -> red/autumn
         }
@@ -128,6 +131,11 @@ export function createSeasonController(scene, terrain, flora, sky, atlas) {
             grass: { albedo: grassColor, roughness: basePalette.grass.roughness }
         };
         terrain.clipmap.setMaterials(tempPalette);
+        // setMaterials does not carry the L0 forest tint — re-apply it so changing
+        // the season/time doesn't wipe the canopy-green ground recolour.
+        if (basePalette.forest && terrain.clipmap.setForest) {
+            terrain.clipmap.setForest(basePalette.forest);
+        }
         // Color the leaf nodes directly
         if (flora && flora.leafNodes) {
             if (flora.leafNodes.decid && flora.leafNodes.decid.setColor) {

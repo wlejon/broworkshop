@@ -37,7 +37,9 @@ export const PALETTES = {
 export function configureMaterials(clipmap, regionalTemp, regionalPrecip, maxElevation) {
     let palette = PALETTES.temperate;
 
-    if (regionalTemp < 5) {
+    // Arctic only for genuinely frigid islands. A cold-but-wet island (e.g. 4-5C,
+    // high precip) is temperate rainforest — lush green in summer, not tundra grey.
+    if (regionalTemp < 1.5) {
         palette = PALETTES.arctic;
     } else if (regionalTemp > 20) {
         if (regionalPrecip < 300) {
