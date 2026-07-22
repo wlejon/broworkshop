@@ -364,19 +364,55 @@ function rebuildFoliage() {
     }
 
     const leaf = getLeafCard();
+
+    // Foliage placement — shared by the GPU-scatter and CPU paths. Only the
+    // count-shaping fields (maxRadius/minDepth/perUnitLength/densityFalloff)
+    // affect how many leaves a twig gets; the rest shape each leaf's transform.
+    const folOpts = {
+        maxRadius:     0.22,
+        minDepth:      1,
+        perUnitLength: 120,
+        upBias:        0.5,
+        tiltJitter:    0.55,
+        rollJitter:    0.9,
+        baseScale:     1.0,
+        scaleJitter:   0.3,
+        scaleByRadius: 0.25,
+        seed:          0x1eaf,
+    };
+
+    // GPU scatter: emit ONE record per foliage-bearing twig and expand it into
+    // leaves in the vertex shader. No per-leaf CPU scatter, no multi-MB upload —
+    // this is what keeps the frame cheap while the plant grows.
+    if (world.emitScatterSegments && scene.createInstancedMesh) {
+        const s = world.emitScatterSegments(folOpts);
+        if (!s || s.segCount === 0) {
+            if (foliageNode) foliageNode.visible = false;
+            return;
+        }
+        const scatter = Object.assign({}, folOpts, s);
+        if (!foliageNode) {
+            foliageNode = scene.createInstancedMesh({
+                mesh: leaf,
+                scatter,
+                color: SPECIES.sun.color,
+                metallic: 0.0, roughness: 0.92,
+                doubleSided: true, subsurface: 0.5,
+                // Leaf cards carry the base→tip windBend in vertex-colour R.
+                // Keep it as the wind channel only, not an albedo tint.
+                vertexColorTint: false,
+                castsShadow: false, receivesShadow: true,
+            });
+            overlays.foliage.node = foliageNode;
+        } else {
+            foliageNode.visible = true;
+            foliageNode.setScatterSegments(scatter);
+        }
+        return;
+    }
+
     if (world.emitFoliageTransforms && scene.createInstancedMesh) {
-        const transforms = world.emitFoliageTransforms({
-            maxRadius:     0.22,
-            minDepth:      1,
-            perUnitLength: 120,
-            upBias:        0.5,
-            tiltJitter:    0.55,
-            rollJitter:    0.9,
-            baseScale:     1.0,
-            scaleJitter:   0.3,
-            scaleByRadius: 0.25,
-            seed:          0x1eaf,
-        });
+        const transforms = world.emitFoliageTransforms(folOpts);
         if (!transforms || transforms.length === 0) {
             if (foliageNode) foliageNode.visible = false;
             return;
@@ -388,9 +424,6 @@ function rebuildFoliage() {
                 color: SPECIES.sun.color,
                 metallic: 0.0, roughness: 0.92,
                 doubleSided: true, subsurface: 0.5,
-                // Leaf cards carry the base→tip windBend in vertex-colour R.
-                // Keep it as the wind channel only (sway) without letting the
-                // gradient wash the green albedo to red.
                 vertexColorTint: false,
                 castsShadow: false, receivesShadow: true,
             });
