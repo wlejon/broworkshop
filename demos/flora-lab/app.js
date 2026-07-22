@@ -321,6 +321,13 @@ function rebuildBranches() {
                 instances: transforms,
                 color: overlays.branches.color,
                 metallic: 0.0, roughness: 0.85,
+                // Branch cylinders are opaque solids: 17k separate instanced
+                // draws hit InstancedMeshNode's fixed per-instance GPU cost
+                // (~3us each -> tens of ms). staticBatch bakes them into one
+                // merged draw (pixel-identical), collapsing that to ~0.1ms. The
+                // trade is an O(verts) CPU rebake when the set changes each
+                // rebuild — cheap here (~245k verts) next to the GPU it saves.
+                staticBatch: true,
                 castsShadow: true, receivesShadow: true,
             });
             overlays.branches.node = branchesNode;
