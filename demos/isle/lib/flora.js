@@ -1,7 +1,10 @@
 // flora.js — grow plant prototypes and instance them across the island by biome.
 
 import { bakeImpostorAtlas } from '/app/lib/impostor.js';
-import { createImpostorLayer } from '/app/lib/impostorLayer.js';
+// Impostor rendering is now an engine feature: bro.impostor.createLayer draws
+// the whole set as ONE merged, camera-facing octahedral-billboard mesh instead
+// of N instances (the instanced path pays a fixed per-instance GPU cost). The
+// app-side lib/impostorLayer.js is superseded.
 
 // Per-cell tree-species probabilities from the control atlas. Factored out of
 // the placement loop so the L1 canopy-height field (buildIslandCanopyField)
@@ -253,7 +256,7 @@ export function populateFlora(scene, floraData, atlas, clipmap) {
         // fade was for million-tree worlds and (without TAA) reads as translucent
         // green streaks across a hillside. Push the cull past the 19 km island so
         // nothing dithers in view; tile-streaming replaces this for huge worlds.
-        const layer = createImpostorLayer(scene, imp, xfData, { cullNear: 24000, cullFar: 30000 });
+        const layer = bro.impostor.createLayer(scene, imp, xfData, { cullNear: 24000, cullFar: 30000 });
         nodes.push(layer.node);
         layers[type] = layer;
         totalQuads += layer.quadCount;

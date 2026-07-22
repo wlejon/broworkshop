@@ -34,6 +34,8 @@ export function getPlayer() { return player; }
 export function getMapView() { return mapview; }
 export function getSeason() { return season; }
 export function getAtlas() { return atlas; }
+export function getTerrain() { return terrain; }
+export function getFlora() { return flora; }
 
 // ---- fixed scene: sky + sea (built immediately, before the model lands) ----
 const sky = createSky(scene, {});
@@ -132,7 +134,7 @@ function frame() {
     if (keys['e']) Camera.flyRoll(cam, dt, -1);
 
     if (terrain) terrain.update(cam.pos[0], cam.pos[1], cam.pos[2]);
-    
+
     // Update minimap and fullscreen map
     if (mapview) mapview.update();
 
