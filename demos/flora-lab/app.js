@@ -947,7 +947,7 @@ for (const key of Object.keys(overlays)) {
             overlays.impostors.on = false;
             if (toggleInputs.impostors) toggleInputs.impostors.checked = false;
         }
-        rebuildAll();
+        forceRebuild();
     });
     const sw = document.createElement('span');
     sw.className = 'swatch'; sw.style.background = rgbaCss(o.color);
@@ -960,9 +960,29 @@ for (const key of Object.keys(overlays)) {
 // Sim controls
 let playing = true;
 let timeScale = 1.0;
-const SIM_DT = 0.02;          // per-step
-const REBUILD_EVERY = 8;      // rebuild render meshes every N frames
-let frameCt = 0;
+
+// The sim, the render-mesh rebuild, and the display refresh run on three
+// independent clocks (see the main loop). These are the sim + rebuild rates;
+// the display floats free above them.
+const SIM_STEP_DT    = 0.02;         // fixed sim step, in sim-seconds
+const BASE_GROWTH    = 1.0;          // sim-seconds advanced per real second at 1.0× time scale
+const MAX_CATCHUP    = 6;            // clamp steps/frame so a stall can't spiral
+const REBUILD_HZ     = 12;           // cap render-mesh rebuilds; the sim integrates smoothly under this
+const REBUILD_MIN_DT = 1.0 / REBUILD_HZ;
+
+let simAccum   = 0;                  // unspent sim-seconds
+let simDirty   = false;              // has the sim advanced since the last rebuild?
+let lastRebuildT = 0;                // wall-clock of the last rebuild (s)
+let lastFrameT = performance.now() / 1000;
+
+// Rebuild the render meshes now and reset the growth/throttle gates. Used by
+// the manual controls (Step / Seed / Reset / overlay toggles) that must show
+// their effect immediately rather than waiting on the rebuild clock.
+function forceRebuild() {
+    rebuildAll();
+    simDirty = false;
+    lastRebuildT = performance.now() / 1000;
+}
 
 const playBtn = document.getElementById('play');
 playBtn.addEventListener('click', () => {
@@ -972,8 +992,8 @@ playBtn.addEventListener('click', () => {
 });
 
 document.getElementById('step1').addEventListener('click', () => {
-    world.step(SIM_DT);
-    rebuildAll();
+    world.step(SIM_STEP_DT);
+    forceRebuild();
 });
 
 document.getElementById('seed').addEventListener('click', () => {
@@ -981,13 +1001,13 @@ document.getElementById('seed').addEventListener('click', () => {
     const x = (Math.random() - 0.5) * WORLD_SIZE * 0.8;
     const z = (Math.random() - 0.5) * WORLD_SIZE * 0.8;
     plant(x, z, sp);
-    rebuildAll();
+    forceRebuild();
 });
 
 document.getElementById('reset').addEventListener('click', () => {
     destroyAllOverlays();
     buildWorld();
-    rebuildAll();
+    forceRebuild();
 });
 
 const tsInp = document.getElementById('timeScale');
@@ -1024,25 +1044,44 @@ for (const key of lighting.order) {
 }
 
 // ─── Main loop ────────────────────────────────────────────────────────────
+//
+// Three independent clocks. (1) The sim advances at a CONSTANT rate —
+// BASE_GROWTH × timeScale sim-seconds per real second — off a wall-clock
+// accumulator, so growth is framerate-INDEPENDENT: a faster GPU draws more
+// frames of the same growth, it doesn't grow the plant faster. (2) Rebuilding
+// the render meshes (the frame's only heavy work) is gated twice — it runs
+// only when the sim has actually advanced since the last rebuild, and no more
+// often than REBUILD_HZ. (3) The display refreshes every rAF frame; a frame
+// that neither steps nor rebuilds costs only a draw, so the framerate floats
+// up to the render ceiling while the plant keeps growing underneath it.
 
 function tick() {
+    const nowT = performance.now() / 1000;
+    let realDt = nowT - lastFrameT;
+    lastFrameT = nowT;
+    if (realDt > 0.1) realDt = 0.1;   // swallow long stalls (tab switch / first frame)
+
     if (playing) {
-        const dtTotal = SIM_DT * timeScale;
-        const steps = Math.min(4, Math.max(1, Math.round(timeScale)));
-        const stepDt = dtTotal / steps;
-        for (let i = 0; i < steps; i++) {
-            world.step(stepDt);
+        simAccum += realDt * BASE_GROWTH * timeScale;
+        let steps = 0;
+        while (simAccum >= SIM_STEP_DT && steps < MAX_CATCHUP) {
+            world.step(SIM_STEP_DT);
+            simAccum -= SIM_STEP_DT;
+            steps++;
+            simDirty = true;
         }
-        frameCt++;
-        if (frameCt % REBUILD_EVERY === 0) {
-            rebuildAll();
-        } else {
-            updateStats(false);
-        }
-    } else {
-        updateStats(true);
+        if (steps === MAX_CATCHUP) simAccum = 0;   // drop the backlog rather than spiral
     }
-    lighting.update(0.016);   // drift the fireflies even while the sim is paused
+
+    if (simDirty && (nowT - lastRebuildT) >= REBUILD_MIN_DT) {
+        rebuildAll();
+        simDirty = false;
+        lastRebuildT = nowT;
+    } else {
+        updateStats(false);
+    }
+
+    lighting.update(realDt);   // drift the fireflies on the real clock, even while paused
     requestAnimationFrame(tick);
 }
 
