@@ -55,7 +55,7 @@ export function growPrototype(name, whorlArms, whorlSpread, speciesProps) {
 
     // 2. Emit foliage leaf cards
     const leaf = Mesh.leafCard('oval', {
-        width: 0.14, length: 0.24, bend: 0.45,
+        width: 0.22, length: 0.36, bend: 0.45,
         fullUV: true, shapedSilhouette: true, cup: 0.3,
         widthSegments: 3, lengthSegments: 6
     });
@@ -77,14 +77,14 @@ export function growPrototype(name, whorlArms, whorlSpread, speciesProps) {
     }
 
     const leafMesh = Mesh.scatterLeaves(segs, leaf, {
-        maxRadius:     0.25,
+        maxRadius:     0.5,
         minDepth:      1,
-        perUnitLength: 200,
+        perUnitLength: 550,
         densityWeight: densityWeight,
         upBias:        0.5,
         tiltJitter:    0.5,
         rollJitter:    0.8,
-        baseScale:     1.0,
+        baseScale:     1.5,
         scaleJitter:   0.3,
         scaleByRadius: 0.25,
         seed:          0x1eaf
@@ -248,7 +248,12 @@ export function populateFlora(scene, floraData, atlas, clipmap) {
         const info = floraData.types[type];
         const count = xfData.length / 9;
 
-        const layer = createImpostorLayer(scene, imp, xfData);
+        // This island carries ~1497 impostor quads total (~3000 tris) — trivial,
+        // so draw every one solid rather than distance-culling. The 450 m dither
+        // fade was for million-tree worlds and (without TAA) reads as translucent
+        // green streaks across a hillside. Push the cull past the 19 km island so
+        // nothing dithers in view; tile-streaming replaces this for huge worlds.
+        const layer = createImpostorLayer(scene, imp, xfData, { cullNear: 24000, cullFar: 30000 });
         nodes.push(layer.node);
         layers[type] = layer;
         totalQuads += layer.quadCount;
@@ -267,6 +272,7 @@ export function populateFlora(scene, floraData, atlas, clipmap) {
         leafNodes,
         layers,
         impostors,
+        transforms: { pine: pineXf, decid: decidXf, shrub: shrubXf },
         stats: { totalQuads, oldLeafTris, oldBranchTris, oldTris, treeCanopyH: 0,
                  forestTexels: 0 },
 

@@ -45,9 +45,16 @@ const VERTEX_CHUNK = `
 uniform vec2  u_grid;    // atlas grid (cols, rows)
 uniform vec3  u_center;  // tree-local bounds center (billboard pivot, pre-scale)
 uniform float u_half;    // billboard half-extent in world units at scale 1
+uniform vec2  u_cull;    // (fadeStart, cullEnd) metres from camera: solid inside
+                         // fadeStart, dither-dissolves to nothing by cullEnd,
+                         // collapsed (zero fragments) beyond. Bounds the drawn
+                         // billboard count by radius, so cost no longer grows
+                         // with world size or camera altitude — the L0 terrain
+                         // forest tint carries the look past the cull radius.
 
 flat out vec2 v_uvMin;
 flat out vec2 v_uvMax;
+out float v_fade;        // 1 = solid, ->0 across the band (dither in fragment)
 
 void userVertex(inout vec3 pos, inout vec3 normal, inout vec2 uv) {
     // Per-instance world translation (node-local; uInstModel is identity here).
@@ -55,6 +62,11 @@ void userVertex(inout vec3 pos, inout vec3 normal, inout vec2 uv) {
     // Approximate tree center in world for the view direction (scale applied
     // to u_center later via R is negligible for a normalized direction).
     vec3 centerWorld = instPos + u_center;
+
+    // Distance cull + fade. 3D distance, so a high camera (all trees far below)
+    // collapses the whole set to zero cost and the terrain tint carries it.
+    float camDist = length(uCameraEye - centerWorld);
+    v_fade = 1.0 - smoothstep(u_cull.x, u_cull.y, camDist);
 
     // SPHERICAL (fully view-facing) billboard basis: the quad faces the camera
     // on ALL axes including pitch. At steep top-down views (a flyover's main
@@ -100,6 +112,11 @@ void userVertex(inout vec3 pos, inout vec3 normal, inout vec2 uv) {
 
     // Quad-local uv in [0,1] for within-cell sampling.
     uv = vec2(qx * 0.5 + 0.5, qy * 0.5 + 0.5);
+
+    // Beyond the cull radius, collapse the quad to its pivot: a degenerate
+    // triangle rasterises to zero fragments, so culled trees cost nothing but
+    // the (negligible) vertex shader.
+    if (v_fade <= 0.001) pos = u_center;
 }
 `;
 
@@ -110,16 +127,7 @@ void userVertex(inout vec3 pos, inout vec3 normal, inout vec2 uv) {
 const FRAGMENT_CHUNK = `
 flat in vec2 v_uvMin;
 flat in vec2 v_uvMax;
-
-// CHUNK 3 crossfade with the L1 canopy shell (lib/canopyShell.js). When
-// u_crossfade > 0.5, L2 keeps only the pixels where hash < t (the COMPLEMENT of
-// the shell's hash >= t), so exactly one layer survives each pixel across the
-// transition band. u_crossfade defaults to 0 -> the CHUNK 2.5 billboard
-// behaviour (spherical, unlit, dilated) is completely unchanged.
-uniform float u_crossfade;    // 0 = off (no crossfade), 1 = on
-uniform float u_canopyTopY;   // reference canopy-top world height (m)
-uniform float u_fadeLow;      // camAbove where t=1 (full trees)
-uniform float u_fadeHigh;     // camAbove where t=0 (full roof)
+in float v_fade;              // distance fade (1 solid, ->0 at the cull edge)
 
 void userFragment(inout vec3 baseColor, inout vec3 normal,
                   inout float metallic, inout float roughness,
@@ -129,16 +137,12 @@ void userFragment(inout vec3 baseColor, inout vec3 normal,
     vec4 tex = texture(uBaseColorTex, uv);
     if (tex.a < 0.5) discard;   // alpha cutout against the transparent bake
 
-    // Part C: complementary screen-door dither vs the L1 canopy shell. uFogCamY
-    // (camera world Y) is a mesh.frag global; the hash mirrors mesh.frag:263 and
-    // MUST be byte-identical to canopyShell's so the two thresholds are exact
-    // complements (keepL1 XOR keepL2). t is screen-uniform (elevation only), so
-    // this L2 fragment and the L1 fragment behind it agree at every pixel.
-    if (u_crossfade > 0.5) {
-        float camAbove = uFogCamY - u_canopyTopY;
-        float t = 1.0 - smoothstep(u_fadeLow, u_fadeHigh, camAbove);  // 1=trees, 0=roof
+    // Distance dissolve: as a tree recedes toward the cull radius, a per-pixel
+    // screen-door hash thins it out so it melts into the L0 terrain forest tint
+    // behind it (same green), instead of popping. No second full-screen layer.
+    if (v_fade < 0.999) {
         float hash = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
-        if (hash >= t) discard;   // keep L2 where hash < t
+        if (hash > v_fade) discard;
     }
     // The atlas is baked UNLIT (impostor.js), so tex.rgb is ~linear albedo, NOT
     // an already-tonemapped image. Emitting it (baseColor 0, color into
@@ -166,18 +170,18 @@ void userFragment(inout vec3 baseColor, inout vec3 normal,
  *   height, cols, rows, bounds:{center,radius} }
  * @param {Float32Array|number[]} transforms  9 floats/instance
  *   (px,py,pz, qx,qy,qz,qw, scale, variantIndex)
- * @param {Object} [opts]  { margin=1.03, crossfade } — margin must match the
- *   bake's margin so the billboard world size equals the ortho frame the atlas
- *   was baked at. `crossfade` (optional) enables the CHUNK 3 dither against the
- *   L1 canopy shell: { canopyTopY, fadeLow, fadeHigh } — pass the SAME values
- *   the canopy shell was created with so the two dither thresholds are exact
- *   complements. Omit it to keep the plain CHUNK 2.5 billboard behaviour.
- * @returns {{ node:SceneNode, quadCount:number }}
+ * @param {Object} [opts]  { margin=1.03, cullNear=450, cullFar=950 } — margin
+ *   must match the bake's margin so the billboard world size equals the ortho
+ *   frame the atlas was baked at. cullNear/cullFar are the distance-fade band in
+ *   metres: billboards are solid within cullNear, dither-dissolve into the L0
+ *   terrain forest tint by cullFar, and cost nothing beyond it.
+ * @returns {{ node:SceneNode, quadCount:number, setCull:(near,far)=>void }}
  */
 export function createImpostorLayer(scene, impostor, transforms, opts) {
     opts = opts || {};
     const margin = opts.margin != null ? opts.margin : 1.03;
-    const xfade = opts.crossfade || null;
+    const cullNear = opts.cullNear != null ? opts.cullNear : 450;
+    const cullFar  = opts.cullFar  != null ? opts.cullFar  : 950;
 
     const src = (transforms instanceof Float32Array) ? transforms : new Float32Array(transforms);
     const count = Math.floor(src.length / 9);
@@ -231,13 +235,13 @@ export function createImpostorLayer(scene, impostor, transforms, opts) {
             u_grid: [impostor.cols, impostor.rows],
             u_center: [bnd.center[0], bnd.center[1], bnd.center[2]],
             u_half: half,
-            // Crossfade defaults OFF (u_crossfade 0) -> CHUNK 2.5 behaviour intact.
-            u_crossfade: xfade ? 1.0 : 0.0,
-            u_canopyTopY: xfade ? xfade.canopyTopY : 0.0,
-            u_fadeLow: xfade ? xfade.fadeLow : 0.0,
-            u_fadeHigh: xfade ? xfade.fadeHigh : 1.0,
+            u_cull: [cullNear, cullFar],
         },
     });
 
-    return { node, quadCount: count };
+    return {
+        node,
+        quadCount: count,
+        setCull(near, far) { node.setShaderUniform('u_cull', [near, far]); },
+    };
 }
