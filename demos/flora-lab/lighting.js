@@ -126,9 +126,9 @@ export const createLighting = (function () {
             intensity: PRESETS.noon.sun.intensity,
             castsShadow: true,
         });
-        sun.cascadeCount = 4;             // tight CSM across the patch
+        sun.cascadeCount = 2;             // 2 CSM cascades across the patch
         sun.cascadeSplitLambda = 0.75;    // log-weighted splits for outdoor depth
-        scene.setShadowQuality(4096, 3);  // crisp atlas + 3×3 PCF
+        scene.setShadowQuality(2048, 1);  // 2048 atlas + 1x1 PCF
 
         function clearFireflies() {
             for (const f of fireflies) { if (f && f.destroy) f.destroy(); }

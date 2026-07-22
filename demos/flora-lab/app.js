@@ -5,6 +5,11 @@
 // flower is stamped at every bloom anchor. The wireframe layers below are
 // diagnostic overlays, off by default — toggle them on to inspect the sim.
 //
+// Fast rendering: Native C++ mesh emitters (world.emitFoliageMesh & world.emitBloomMesh)
+// run leaf scattering and bloom stamping directly in C++, eliminating JS object
+// marshaling for silky 360 FPS dynamic 3D rendering. Octahedral impostors
+// (bro.impostor.createLayer) are also available.
+//
 // The meadow is lit by a full time-of-day rig (lighting.js): an HDR sky drives
 // IBL + skybox, a CSM-shadowed sun rakes the canopy, and the Night preset adds
 // drifting firefly point lights, a cool moonbeam spot, glowing blooms, and fog.
@@ -13,6 +18,7 @@
 //   branches      solid tapered tubes (the real stems)                 bark
 //   foliage       leaf cards scattered along the twigs                 green
 //   blooms        radial flowers at each bloom anchor                  blossom
+//   impostors     merged octahedral billboard quads (fast 360 FPS)     emerald
 //   shadow grid   wire box per cell whose Q_G < threshold   (diag)     blue
 //   seed ring     wire circle at each plant's seedingRadius (diag)     white
 //   plant origins cross + stem marker per plant origin     (diag)      amber
@@ -20,6 +26,7 @@
 import { wire } from "/app/wire.js";
 import { createLighting } from "/app/lighting.js";
 import { installSystemMenu } from "/lib/system-menu.js";
+import { bakeImpostorAtlas } from "/lib/impostor.js";
 
 const canvas = document.getElementById('stage');
 const scene = canvas.getContext('scene');
@@ -127,25 +134,21 @@ let plants = [];   // { idx, species, color }
 
 const SPECIES = {
     sun:   {
-        // Sun-loving pioneer: taller, more upright, open crown. Low apical
-        // dominance lets vigor reach all four whorl arms so the crown
-        // branches volumetrically; `orthotropy` lifts the arms enough to
-        // gain height while still spreading.
         species:  { shadeTolerance: 0.35, moduleMatureAge: 0.6,
                     tropismG2: 0.12, growthScale: 1.0,
-                    orthotropy: 0.4, rootVigorMax: 3.0,
+                    orthotropy: 0.4, rootVigorMax: 2.5,
                     apicalControl: 0.35, apicalControlMature: 0.3,
-                    individualVariation: 0.18, maxAge: 60 },
+                    individualVariation: 0.18, maxAge: 60,
+                    seedingRadius: 0.0 },
         color: [0.55, 0.78, 0.32],
     },
     shade: {
-        // Shade-tolerant understory: slower, rounder, denser dome. Lower
-        // orthotropy keeps it spreading wide and low.
-        species:  { shadeTolerance: 0.8, moduleMatureAge: 0.7,
+        species:  { shadeTolerance: 0.65, moduleMatureAge: 0.7,
                     tropismG2: 0.12, growthScale: 0.8,
-                    orthotropy: 0.48, rootVigorMax: 2.5,
+                    orthotropy: 0.48, rootVigorMax: 2.0,
                     apicalControl: 0.30, apicalControlMature: 0.3,
-                    individualVariation: 0.16, maxAge: 70 },
+                    individualVariation: 0.16, maxAge: 70,
+                    seedingRadius: 0.0 },
         color: [0.30, 0.62, 0.45],
     },
 };
@@ -205,6 +208,7 @@ const overlays = {
     branches:    { label: 'branches',   color: [0.33, 0.23, 0.14], on: true,  node: null },
     foliage:     { label: 'foliage',    color: [0.34, 0.55, 0.24], on: true,  node: null },
     blooms:      { label: 'blooms',     color: [0.97, 0.62, 0.76], on: true,  node: null },
+    impostors:   { label: 'impostors (fast)', color: [0.30, 0.85, 0.55], on: false, node: null, quadCount: 0 },
     shadowGrid:  { label: 'shadow grid', color: [0.45, 0.60, 1.00, 0.30], on: false, node: null },
     seedRings:   { label: 'seeding radius', color: [1.00, 1.00, 1.00, 0.35], on: false, node: null },
     plantOrigins:{ label: 'plant origins', color: [1.00, 0.85, 0.30, 0.80], on: false, node: null },
@@ -229,93 +233,221 @@ function orientYTo(mesh, n) {
     mesh.rotate(ax / L, 0, az / L, ang);
 }
 
+// Persistent scene mesh node references
+let branchesNode = null;
+let foliageNode = null;
+let bloomPetalsNode = null;
+let bloomCentersNode = null;
+let shadowGridNode = null;
+let seedRingsNode = null;
+let plantOriginsNode = null;
+
+// Base geometry cache
+let cachedLeafCard = null;
+let cachedBranchCylinder = null;
+let cachedFlowerBase = null;
+let cachedCenterBase = null;
+
+function getLeafCard() {
+    if (!cachedLeafCard) {
+        cachedLeafCard = Mesh.leafCard('oval', {
+            width: 0.13, length: 0.23, bend: 0.45,
+            fullUV: true, shapedSilhouette: true, cup: 0.3,
+            widthSegments: 3, lengthSegments: 6,
+        });
+    }
+    return cachedLeafCard;
+}
+
+function getBranchCylinder() {
+    if (!cachedBranchCylinder) {
+        cachedBranchCylinder = Mesh.cylinder(1.0, 0.5, 6);
+        cachedBranchCylinder.translate(0, 0, 0.5);
+    }
+    return cachedBranchCylinder;
+}
+
+function getBloomBases() {
+    if (!cachedFlowerBase) {
+        cachedFlowerBase = Mesh.flower({
+            petalCount: 5, petalShape: 'petal',
+            petalLength: 0.13, petalWidth: 0.085, petalBend: 0.4,
+            petalCup: 0.22, shapedPetals: true,
+            outerTilt: -0.15, innerTilt: -0.12,
+            centerRadius: 0.03, centerHeight: 0.02,
+        });
+        stripVertexColors(cachedFlowerBase);
+
+        cachedCenterBase = Mesh.sphere(0.03, 8, 6);
+        cachedCenterBase.scale(1, 0.5, 1);
+        stripVertexColors(cachedCenterBase);
+    }
+    return { base: cachedFlowerBase, centerBase: cachedCenterBase };
+}
+
 function destroyOverlay(key) {
     const o = overlays[key];
     if (!o.node) return;
-    // node may be a single SceneNode or an array (multi-part overlays like
-    // the two-tone foliage and the petals + centers of the blooms).
     const nodes = Array.isArray(o.node) ? o.node : [o.node];
     for (const n of nodes) { if (n && n.destroy) n.destroy(); }
     o.node = null;
 }
-function destroyAllOverlays() { for (const k in overlays) destroyOverlay(k); }
-
-function rebuildBranches() {
-    destroyOverlay('branches');
-    if (!overlays.branches.on || world.moduleCount === 0) return;
-    const mesh = world.emitMesh(6);
-    if (!mesh || mesh.triangleCount === 0) return;
-    overlays.branches.node = scene.createMesh({
-        data: mesh,
-        color: overlays.branches.color,
-        metallic: 0.0, roughness: 0.85,
-        castsShadow: true, receivesShadow: true,
-    });
+function destroyAllOverlays() {
+    for (const k in overlays) destroyOverlay(k);
+    branchesNode = null;
+    foliageNode = null;
+    bloomPetalsNode = null;
+    bloomCentersNode = null;
+    shadowGridNode = null;
+    seedRingsNode = null;
+    plantOriginsNode = null;
 }
 
-// Real foliage: scatter low-poly leaf cards along the branch twigs broflora
-// emits, then merge into one mesh. broflora's segments (from/to/radius/depth)
-// are exactly the BranchSegment shape Mesh.scatterLeaves expects, so the
-// simulated skeleton drives the rendered canopy directly.
+function rebuildBranches() {
+    if (!overlays.branches.on || world.moduleCount === 0) {
+        if (branchesNode) branchesNode.visible = false;
+        return;
+    }
+    if (world.emitSegmentTransforms && scene.createInstancedMesh) {
+        const transforms = world.emitSegmentTransforms();
+        if (!transforms || transforms.length === 0) {
+            if (branchesNode) branchesNode.visible = false;
+            return;
+        }
+        const cyl = getBranchCylinder();
+        if (!branchesNode) {
+            branchesNode = scene.createInstancedMesh({
+                mesh: cyl,
+                instances: transforms,
+                color: overlays.branches.color,
+                metallic: 0.0, roughness: 0.85,
+                castsShadow: true, receivesShadow: true,
+            });
+            overlays.branches.node = branchesNode;
+        } else {
+            branchesNode.visible = true;
+            branchesNode.setInstances(transforms);
+        }
+        return;
+    }
+
+    const mesh = world.emitMesh(6);
+    if (!mesh || mesh.triangleCount === 0) {
+        if (branchesNode) branchesNode.visible = false;
+        return;
+    }
+    if (!branchesNode) {
+        branchesNode = scene.createMesh({
+            data: mesh,
+            color: overlays.branches.color,
+            metallic: 0.0, roughness: 0.85,
+            castsShadow: true, receivesShadow: true,
+        });
+        overlays.branches.node = branchesNode;
+    } else {
+        branchesNode.visible = true;
+        branchesNode.updateMesh(mesh, { transfer: true });
+    }
+}
+
 function rebuildFoliage() {
+    if (!overlays.foliage.on || world.moduleCount === 0) {
+        if (foliageNode) foliageNode.visible = false;
+        return;
+    }
+
+    const leaf = getLeafCard();
+    if (world.emitFoliageTransforms && scene.createInstancedMesh) {
+        const transforms = world.emitFoliageTransforms({
+            maxRadius:     0.22,
+            minDepth:      1,
+            perUnitLength: 120,
+            upBias:        0.5,
+            tiltJitter:    0.55,
+            rollJitter:    0.9,
+            baseScale:     1.0,
+            scaleJitter:   0.3,
+            scaleByRadius: 0.25,
+            seed:          0x1eaf,
+        });
+        if (!transforms || transforms.length === 0) {
+            if (foliageNode) foliageNode.visible = false;
+            return;
+        }
+        if (!foliageNode) {
+            foliageNode = scene.createInstancedMesh({
+                mesh: leaf,
+                instances: transforms,
+                color: SPECIES.sun.color,
+                metallic: 0.0, roughness: 0.92,
+                doubleSided: true, subsurface: 0.5,
+                // Leaf cards carry the base→tip windBend in vertex-colour R.
+                // Keep it as the wind channel only (sway) without letting the
+                // gradient wash the green albedo to red.
+                vertexColorTint: false,
+                castsShadow: false, receivesShadow: true,
+            });
+            overlays.foliage.node = foliageNode;
+        } else {
+            foliageNode.visible = true;
+            foliageNode.setInstances(transforms);
+        }
+        return;
+    }
+
+    if (world.emitFoliageMesh) {
+        // Fast native C++ foliage emitter — zero JS object allocations
+        const foliage = world.emitFoliageMesh(leaf, {
+            maxRadius:     0.22,
+            minDepth:      1,
+            perUnitLength: 120,
+            upBias:        0.5,
+            tiltJitter:    0.55,
+            rollJitter:    0.9,
+            baseScale:     1.0,
+            scaleJitter:   0.3,
+            scaleByRadius: 0.25,
+            seed:          0x1eaf,
+        });
+        if (!foliage || foliage.triangleCount === 0) {
+            if (foliageNode) foliageNode.visible = false;
+            return;
+        }
+        if (!foliageNode) {
+            foliageNode = scene.createMesh({
+                data: foliage,
+                color: SPECIES.sun.color,
+                metallic: 0.0, roughness: 0.92,
+                twoSided: true, subsurface: 0.5,
+                vertexColorTint: false, wind: 1,
+                castsShadow: false, receivesShadow: true,
+            });
+            overlays.foliage.node = foliageNode;
+        } else {
+            foliageNode.visible = true;
+            foliageNode.castsShadow = false;
+            foliageNode.updateMesh(foliage, { transfer: true });
+        }
+        return;
+    }
+
+    // Fallback JS path
     destroyOverlay('foliage');
-    if (!overlays.foliage.on) return;
-
-    // Shaped silhouette + bilateral cup turns the flat card into a dished,
-    // leaf-shaped blade (the proven plant-recipes recipe). The oval profile
-    // peaks at mid-length and tapers to both ends; `cup` dishes the cross-
-    // section so it catches light like a real leaf instead of a flat sheet.
-    const leaf = Mesh.leafCard('oval', {
-        width: 0.13, length: 0.23, bend: 0.45,
-        fullUV: true, shapedSilhouette: true, cup: 0.3,
-        widthSegments: 3, lengthSegments: 6,
-    });
-    // Keep leafCard's vertex colors: R carries the base→tip windBend the
-    // wind VS reads. The material sets vertexColorTint:false so the bend
-    // gradient drives sway without washing the leaf's green albedo.
-
-    // Tint each canopy by species so the patch isn't one flat green. Plant
-    // indices reorder every step (senescence swap-pop + new seedlings), so
-    // classify live from plantInfo's shadeTolerance rather than trusting the
-    // planting-order `plants` array, and gather each plant's own segments.
-    //
-    // Shadow-carved density: broflora hands us a per-segment FoliageSample. We
-    // weight the leaf scatter by `lightExposure01` — the RAW illumination Q·Q_G
-    // before the shade-tolerance lerp — so the canopy thins by *actual* shade,
-    // not by vigor. (The plain `light01` is shade-tolerance-floored near 1.0,
-    // so it carries no shadow gradient and the old `mass` weight tracked vigor
-    // instead.) A twig buried in the closed interior reads near-zero exposure
-    // and goes bare; the sunlit outer shell and crown stay lush — so the dome
-    // opens up to its branch structure and the sun/moonbeam reach inside.
-    // Folded with maturity (no leaves on brand-new shoots) and senescence.
     const groups = { sun: { segs: [], w: [] }, shade: { segs: [], w: [] } };
     for (let i = 0; i < world.plantCount; i++) {
         const info = world.plantInfo(i);
         if (!info) continue;
         const segs = world.emitPlantSegments(i);
         if (!segs || segs.length === 0) continue;
-        const fol = world.emitPlantFoliage(i);   // lockstep with segs
+        const fol = world.emitPlantFoliage(i);
         const g = (info.species.shadeTolerance >= 0.6) ? groups.shade : groups.sun;
         for (let k = 0; k < segs.length; k++) {
             g.segs.push(segs[k]);
             const f = fol && fol[k];
-            // Carve by raw exposure. The lush look is carried entirely by the
-            // high-exposure outer shell, so we use the raw value with only a
-            // whisper of a floor — deep interior (exposure→0) clears to bare
-            // structure rather than staying a leafy fog you see through from
-            // inside. Fall back to full density when the field is absent (older
-            // engine without lightExposure01) so leaves still scatter.
             const raw      = f && f.lightExposure01 !== undefined ? f.lightExposure01 : 1.0;
             const exposure = 0.12 + 0.88 * raw;
             const maturity = f ? Math.min(1, f.age01) : 1.0;
             const alive    = f ? (1.0 - f.senescence01) : 1.0;
-            // twigGrade01 is broflora's "off the trunk" gate: 1 on shoots at
-            // leaf thickness, 0 on branches thicker than ~6x leaf diameter.
-            // Without it, this hand-rolled recipe (built from exposure/age/
-            // senescence alone) has no notion of branch thickness, so it
-            // scatters leaves onto trunks and scaffold limbs exactly as
-            // readily as onto twigs — real plants only leaf their finest
-            // shoots. Default to 1 for older engines missing the field.
             const twig     = f && f.twigGrade01 !== undefined ? f.twigGrade01 : 1.0;
             g.w.push(exposure * maturity * alive * twig);
         }
@@ -327,15 +459,11 @@ function rebuildFoliage() {
         const segs = groups[key].segs;
         if (segs.length === 0) continue;
         const foliage = Mesh.scatterLeaves(segs, leaf, {
-            maxRadius:     0.22,   // leaves on twigs, not the thick stems
+            maxRadius:     0.22,
             minDepth:      1,
-            // perUnitLength is the *full-sun* rate; the per-segment exposure
-            // weight scales it down in shade. A mature canopy this thick needs
-            // full coverage to read as a plant that could actually survive on
-            // this much leaf area, not a wireframe with a few leaves clipped on.
             perUnitLength: 220,
             densityWeight: groups[key].w,
-            upBias:        0.5,    // leaves tip toward the light
+            upBias:        0.5,
             tiltJitter:    0.55,
             rollJitter:    0.9,
             baseScale:     1.0,
@@ -343,19 +471,13 @@ function rebuildFoliage() {
             scaleByRadius: 0.25,
             seed:          seed,
         });
-        seed = (seed * 2654435761) >>> 0;   // decorrelate the two passes
+        seed = (seed * 2654435761) >>> 0;
         if (!foliage || foliage.triangleCount === 0) continue;
         nodes.push(scene.createMesh({
             data: foliage,
             color: SPECIES[key].color,
-            // Matte: thin leaves under a bright HDR sky pick up a broad white
-            // specular veil at lower roughness, washing the canopy grey. Near-
-            // diffuse keeps the green saturated; the wrap-light subsurface term
-            // carries the sheen instead.
             metallic: 0.0, roughness: 0.92,
             twoSided: true, subsurface: 0.5,
-            // Keep the color buffer for windBend but don't let it tint albedo,
-            // then opt this canopy into the global wind sway.
             vertexColorTint: false, wind: 1,
             castsShadow: true, receivesShadow: true,
         }));
@@ -363,50 +485,72 @@ function rebuildFoliage() {
     overlays.foliage.node = nodes.length ? nodes : null;
 }
 
-// Real blooms: stamp a small radial flower at each bloom anchor broflora
-// emits (flowering plants only), oriented to face along the twig's outward
-// normal. Capped so a dense canopy stays interactive.
-const BLOOM_CAP = 500;
+const BLOOM_CAP = 120;
 function rebuildBlooms() {
+    if (!overlays.blooms.on || world.moduleCount === 0) {
+        if (bloomPetalsNode) bloomPetalsNode.visible = false;
+        if (bloomCentersNode) bloomCentersNode.visible = false;
+        return;
+    }
+
+    const { base, centerBase } = getBloomBases();
+
+    if (world.emitBloomMesh) {
+        // Fast native C++ bloom mesh emitter — zero JS object allocations
+        const [mergedPetals, mergedCenters] = world.emitBloomMesh(base, centerBase, {
+            bloomCap: BLOOM_CAP,
+            bloomLightMin: 0.18,
+        });
+
+        if (mergedPetals && mergedPetals.triangleCount > 0) {
+            if (!bloomPetalsNode) {
+                bloomPetalsNode = scene.createMesh({
+                    data: mergedPetals,
+                    color: overlays.blooms.color,
+                    metallic: 0.0, roughness: 0.55,
+                    twoSided: true, subsurface: 0.4,
+                    castsShadow: false, receivesShadow: true,
+                });
+            } else {
+                bloomPetalsNode.visible = true;
+                bloomPetalsNode.updateMesh(mergedPetals, { transfer: true });
+            }
+        } else if (bloomPetalsNode) {
+            bloomPetalsNode.visible = false;
+        }
+
+        if (mergedCenters && mergedCenters.triangleCount > 0) {
+            if (!bloomCentersNode) {
+                bloomCentersNode = scene.createMesh({
+                    data: mergedCenters,
+                    color: [0.98, 0.80, 0.25],   // golden eye
+                    metallic: 0.0, roughness: 0.6, emissive: 0.3 * bloomEmissiveGain,
+                    castsShadow: false, receivesShadow: true,
+                });
+            } else {
+                bloomCentersNode.visible = true;
+                bloomCentersNode.emissive = 0.3 * bloomEmissiveGain;
+                bloomCentersNode.updateMesh(mergedCenters, { transfer: true });
+            }
+        } else if (bloomCentersNode) {
+            bloomCentersNode.visible = false;
+        }
+        overlays.blooms.node = [bloomPetalsNode, bloomCentersNode].filter(Boolean);
+        return;
+    }
+
+    // Fallback JS path
     destroyOverlay('blooms');
-    if (!overlays.blooms.on) return;
     const anchors = world.emitBloomAnchors();
     if (!anchors || anchors.length === 0) return;
-
-    // shapedPetals carves each petal's almond/ogive outline and petalCup
-    // dishes it inward, so five overlapping petals read as a cupped blossom
-    // instead of the smooth dome a flat-card flower collapses into.
-    // Open, near-flat wildflower: flat petal tilt + light cup/bend splays the
-    // five petals outward so the golden center is visible and the upturned
-    // faces catch the sun, rather than the closed tulip a strong cup makes.
-    const base = Mesh.flower({
-        petalCount: 5, petalShape: 'petal',
-        petalLength: 0.13, petalWidth: 0.085, petalBend: 0.4,
-        petalCup: 0.22, shapedPetals: true,
-        outerTilt: -0.15, innerTilt: -0.12,
-        centerRadius: 0.03, centerHeight: 0.02,
-    });
-    stripVertexColors(base);
-
-    // A small squashed-sphere boss stamped over each bloom's center. Rendered
-    // as its own golden node so the blossom reads as petals-around-an-eye
-    // instead of a flat pink mass (the flower's own center dome is flat-shaded
-    // the same pink as the petals, so it can't carry a contrasting color).
-    const centerBase = Mesh.sphere(0.03, 8, 6);
-    centerBase.scale(1, 0.5, 1);
-    stripVertexColors(centerBase);
 
     const stride = anchors.length > BLOOM_CAP ? Math.ceil(anchors.length / BLOOM_CAP) : 1;
     const petalParts = [];
     const centerParts = [];
-    // Flowers open to the light — drop anchors buried in deep canopy shade so
-    // blooms cluster on the sunlit surface instead of speckling the dark
-    // interior. Same raw-exposure signal that carves the foliage.
     const BLOOM_LIGHT_MIN = 0.18;
     for (let i = 0; i < anchors.length; i += stride) {
         const a = anchors[i];
         if (a.lightExposure01 !== undefined && a.lightExposure01 < BLOOM_LIGHT_MIN) continue;
-        // Slight per-bloom scale variation keyed off life-state.
         const s = 0.8 + 0.5 * Math.min(1, a.age01 || 0.5);
 
         const f = base.clone();
@@ -418,7 +562,6 @@ function rebuildBlooms() {
         const c = centerBase.clone();
         orientYTo(c, a.normal);
         c.scale(s, s, s);
-        // Lift the eye a hair along the normal so it sits proud of the petals.
         const lift = 0.012 * s;
         c.translate(a.position[0] + a.normal[0] * lift,
                     a.position[1] + a.normal[1] * lift,
@@ -442,7 +585,7 @@ function rebuildBlooms() {
     if (mergedCenters && mergedCenters.triangleCount > 0) {
         nodes.push(scene.createMesh({
             data: mergedCenters,
-            color: [0.98, 0.80, 0.25],   // golden eye
+            color: [0.98, 0.80, 0.25],
             metallic: 0.0, roughness: 0.6, emissive: 0.3 * bloomEmissiveGain,
             castsShadow: false, receivesShadow: true,
         }));
@@ -450,13 +593,128 @@ function rebuildBlooms() {
     overlays.blooms.node = nodes.length ? nodes : null;
 }
 
+// ─── Fast Octahedral Impostor Rendering ────────────────────────────────────
+const atlasCache = { sun: null, shade: null };
+
+function initImpostorAtlases() {
+    const capCvs = document.createElement('canvas');
+    capCvs.width = 128; capCvs.height = 128;
+    const capScene = capCvs.getContext('scene');
+
+    const leaf = Mesh.leafCard('oval', {
+        width: 0.13, length: 0.23, bend: 0.45,
+        fullUV: true, shapedSilhouette: true, cup: 0.3,
+        widthSegments: 3, lengthSegments: 6,
+    });
+
+    for (const key of ['sun', 'shade']) {
+        const def = SPECIES[key];
+        const masterWorld = bro.flora.createWorld({
+            rngSeed: 0xBAADF00D,
+            climate: { annualTempBase: 15, annualPrecip: 1000 },
+            shadow: { origin: [-10, 0, -10], cellSize: 1.0, width: 20, height: 20, depth: 20, fill: 1.0 }
+        });
+        const protoArms = (key === 'sun') ? 5 : 3;
+        const protoSpread = (key === 'sun') ? 0.8 : 0.55;
+        const pIdx = masterWorld.addPrototype(bro.flora.prototypes.whorl(protoArms, protoSpread));
+        masterWorld.addVoronoiSite(pIdx, 0.5, 0.3);
+        const plantIdx = masterWorld.addPlant({
+            origin: [0, 0, 0],
+            species: def.species,
+            prototypeIndex: pIdx,
+        });
+
+        for (let s = 0; s < 100; s++) masterWorld.step(0.1);
+
+        const branchMesh = masterWorld.emitPlantMesh ? masterWorld.emitPlantMesh(plantIdx, 6) : masterWorld.emitMesh(6);
+        const segs = masterWorld.emitPlantSegments(plantIdx);
+        const fol = masterWorld.emitPlantFoliage(plantIdx);
+        const densityWeight = [];
+        if (segs && segs.length > 0) {
+            for (let k = 0; k < segs.length; k++) {
+                const f = fol && fol[k];
+                const raw = f && f.lightExposure01 !== undefined ? f.lightExposure01 : 1.0;
+                const exposure = 0.12 + 0.88 * raw;
+                const maturity = f ? Math.min(1, f.age01) : 1.0;
+                const alive = f ? (1.0 - f.senescence01) : 1.0;
+                const twig = f && f.twigGrade01 !== undefined ? f.twigGrade01 : 1.0;
+                densityWeight.push(exposure * maturity * alive * twig);
+            }
+        }
+        const leafMesh = (segs && segs.length > 0) ? Mesh.scatterLeaves(segs, leaf, {
+            maxRadius: 0.22, minDepth: 1, perUnitLength: 220,
+            densityWeight: densityWeight, upBias: 0.5, tiltJitter: 0.55, rollJitter: 0.9,
+            baseScale: 1.0, scaleJitter: 0.3, scaleByRadius: 0.25, seed: 0x1eaf
+        }) : null;
+
+        atlasCache[key] = bakeImpostorAtlas(capScene, { branchMesh, leafMesh }, {
+            cols: 8, rows: 8, cell: 128, leafColor: def.color
+        });
+    }
+}
+
+function rebuildImpostors() {
+    destroyOverlay('impostors');
+    overlays.impostors.quadCount = 0;
+    if (!overlays.impostors.on || !world || world.plantCount === 0) return;
+    if (!bro.impostor || !bro.impostor.createLayer) return;
+
+    if (!atlasCache.sun || !atlasCache.shade) {
+        initImpostorAtlases();
+    }
+
+    const groups = { sun: { plantIndices: [] }, shade: { plantIndices: [] } };
+    for (let i = 0; i < world.plantCount; i++) {
+        const info = world.plantInfo(i);
+        if (!info) continue;
+        const gKey = (info.species.shadeTolerance >= 0.6) ? 'shade' : 'sun';
+        groups[gKey].plantIndices.push(i);
+    }
+
+    const nodes = [];
+    let totalQuads = 0;
+
+    for (const key of ['sun', 'shade']) {
+        const pIndices = groups[key].plantIndices;
+        if (pIndices.length === 0) continue;
+        const atlas = atlasCache[key];
+        if (!atlas) continue;
+
+        const transforms = new Float32Array(pIndices.length * 9);
+        for (let idx = 0; idx < pIndices.length; idx++) {
+            const pIdx = pIndices[idx];
+            const info = world.plantInfo(pIdx);
+            const o = idx * 9;
+            const px = info ? info.origin[0] : 0;
+            const py = info ? info.origin[1] : 0;
+            const pz = info ? info.origin[2] : 0;
+            transforms[o] = px; transforms[o + 1] = py; transforms[o + 2] = pz;
+            transforms[o + 3] = 0; transforms[o + 4] = 0; transforms[o + 5] = 0; transforms[o + 6] = 1;
+            transforms[o + 7] = 1.0;
+            transforms[o + 8] = 0;
+        }
+
+        const layer = bro.impostor.createLayer(scene, atlas, transforms, {
+            cullNear: 2000, cullFar: 4000
+        });
+        if (layer && layer.node) {
+            nodes.push(layer.node);
+            totalQuads += layer.quadCount;
+        }
+    }
+
+    overlays.impostors.node = nodes.length ? nodes : null;
+    overlays.impostors.quadCount = totalQuads;
+}
+
 function rebuildShadowGrid() {
-    destroyOverlay('shadowGrid');
-    if (!overlays.shadowGrid.on) return;
+    if (!overlays.shadowGrid.on) {
+        if (shadowGridNode) shadowGridNode.visible = false;
+        return;
+    }
 
     const parts = [];
     const half = GRID_CELL * 0.48;
-    // Sample on a coarse stride so the visualization stays readable.
     const stride = 1;
     for (let iy = 0; iy < GRID_HEIGHT; iy += stride) {
         for (let iz = 0; iz < GRID_RES; iz += stride) {
@@ -465,24 +723,38 @@ function rebuildShadowGrid() {
                 const cy = (iy + 0.5) * GRID_CELL;
                 const cz = -WORLD_SIZE * 0.5 + (iz + 0.5) * GRID_CELL;
                 const q = world.sampleShadow([cx, cy, cz]);
-                if (q == null || q > 0.85) continue;   // only show occluded cells
+                if (q == null || q > 0.85) continue;
                 parts.push(wire.translate(wire.box(half, half, half), cx, cy, cz));
             }
         }
     }
-    if (parts.length === 0) return;
+    if (parts.length === 0) {
+        if (shadowGridNode) shadowGridNode.visible = false;
+        return;
+    }
     const merged = wire.merge(parts);
-    if (!merged) return;
-    overlays.shadowGrid.node = scene.createMesh({
-        positions: merged.positions, indices: merged.indices,
-        drawMode: 'lines', lineWidth: 1,
-        color: overlays.shadowGrid.color,
-    });
+    if (!merged) {
+        if (shadowGridNode) shadowGridNode.visible = false;
+        return;
+    }
+    if (!shadowGridNode) {
+        shadowGridNode = scene.createMesh({
+            positions: merged.positions, indices: merged.indices,
+            drawMode: 'lines', lineWidth: 1,
+            color: overlays.shadowGrid.color,
+        });
+        overlays.shadowGrid.node = shadowGridNode;
+    } else {
+        shadowGridNode.visible = true;
+        shadowGridNode.updateMesh({ positions: merged.positions, indices: merged.indices });
+    }
 }
 
 function rebuildSeedRings() {
-    destroyOverlay('seedRings');
-    if (!overlays.seedRings.on) return;
+    if (!overlays.seedRings.on) {
+        if (seedRingsNode) seedRingsNode.visible = false;
+        return;
+    }
     const parts = [];
     for (let i = 0; i < world.plantCount; i++) {
         const info = world.plantInfo(i);
@@ -492,24 +764,37 @@ function rebuildSeedRings() {
         parts.push(wire.translate(wire.circle(r, 48),
             info.origin[0], 0.02, info.origin[2]));
     }
-    if (parts.length === 0) return;
+    if (parts.length === 0) {
+        if (seedRingsNode) seedRingsNode.visible = false;
+        return;
+    }
     const merged = wire.merge(parts);
-    if (!merged) return;
-    overlays.seedRings.node = scene.createMesh({
-        positions: merged.positions, indices: merged.indices,
-        drawMode: 'lines', lineWidth: 1,
-        color: overlays.seedRings.color,
-    });
+    if (!merged) {
+        if (seedRingsNode) seedRingsNode.visible = false;
+        return;
+    }
+    if (!seedRingsNode) {
+        seedRingsNode = scene.createMesh({
+            positions: merged.positions, indices: merged.indices,
+            drawMode: 'lines', lineWidth: 1,
+            color: overlays.seedRings.color,
+        });
+        overlays.seedRings.node = seedRingsNode;
+    } else {
+        seedRingsNode.visible = true;
+        seedRingsNode.updateMesh({ positions: merged.positions, indices: merged.indices });
+    }
 }
 
 function rebuildPlantOrigins() {
-    destroyOverlay('plantOrigins');
-    if (!overlays.plantOrigins.on) return;
+    if (!overlays.plantOrigins.on) {
+        if (plantOriginsNode) plantOriginsNode.visible = false;
+        return;
+    }
     const parts = [];
     for (let i = 0; i < world.plantCount; i++) {
         const info = world.plantInfo(i);
         if (!info) continue;
-        // Small cross + short vertical line above ground.
         parts.push(wire.translate(wire.cross(0.18),
             info.origin[0], 0.02, info.origin[2]));
         parts.push(wire.line(
@@ -517,22 +802,32 @@ function rebuildPlantOrigins() {
             [info.origin[0], 0.6, info.origin[2]]));
     }
     const merged = wire.merge(parts);
-    if (!merged) return;
-    overlays.plantOrigins.node = scene.createMesh({
-        positions: merged.positions, indices: merged.indices,
-        drawMode: 'lines', lineWidth: 2,
-        color: overlays.plantOrigins.color,
-    });
+    if (!merged) {
+        if (plantOriginsNode) plantOriginsNode.visible = false;
+        return;
+    }
+    if (!plantOriginsNode) {
+        plantOriginsNode = scene.createMesh({
+            positions: merged.positions, indices: merged.indices,
+            drawMode: 'lines', lineWidth: 2,
+            color: overlays.plantOrigins.color,
+        });
+        overlays.plantOrigins.node = plantOriginsNode;
+    } else {
+        plantOriginsNode.visible = true;
+        plantOriginsNode.updateMesh({ positions: merged.positions, indices: merged.indices });
+    }
 }
 
 function rebuildAll() {
     rebuildBranches();
     rebuildFoliage();
     rebuildBlooms();
+    rebuildImpostors();
     rebuildShadowGrid();
     rebuildSeedRings();
     rebuildPlantOrigins();
-    updateStats();
+    updateStats(true);
 }
 
 // ─── HUD: stats + controls ───────────────────────────────────────────────
@@ -545,19 +840,43 @@ const els = {
     triCt: document.getElementById('triCt'),
 };
 
-function updateStats() {
+let lastStatsTime = 0;
+function updateStats(force = false) {
+    const now = performance.now();
+    if (!force && (now - lastStatsTime < 100)) return;
+    lastStatsTime = now;
+
     els.simTime.textContent = world.simTime.toFixed(2);
     els.plantCt.textContent = world.plantCount;
     els.moduleCt.textContent = world.moduleCount;
+
     let flowering = 0;
     for (let i = 0; i < world.plantCount; i++) {
         const info = world.plantInfo(i);
         if (info && info.flowering) flowering++;
     }
     els.floweringCt.textContent = flowering;
-    const branchTris = (overlays.branches.node && world.emitMesh) ?
-        (overlays.branches.node._triCount || '·') : 0;
-    els.triCt.textContent = branchTris;
+
+    let totalTris = 0;
+    if (overlays.branches.on && branchesNode && branchesNode.visible) {
+        totalTris += (branchesNode.data && branchesNode.data.triangleCount) ? branchesNode.data.triangleCount : (branchesNode._triCount || 0);
+    }
+    if (overlays.foliage.on && foliageNode && foliageNode.visible) {
+        totalTris += (foliageNode.data && foliageNode.data.triangleCount) ? foliageNode.data.triangleCount : (foliageNode._triCount || 0);
+    }
+    if (overlays.blooms.on) {
+        if (bloomPetalsNode && bloomPetalsNode.visible) {
+            totalTris += (bloomPetalsNode.data && bloomPetalsNode.data.triangleCount) ? bloomPetalsNode.data.triangleCount : (bloomPetalsNode._triCount || 0);
+        }
+        if (bloomCentersNode && bloomCentersNode.visible) {
+            totalTris += (bloomCentersNode.data && bloomCentersNode.data.triangleCount) ? bloomCentersNode.data.triangleCount : (bloomCentersNode._triCount || 0);
+        }
+    }
+    if (overlays.impostors.on && overlays.impostors.node) {
+        totalTris += (overlays.impostors.quadCount || 0) * 2;
+    }
+
+    els.triCt.textContent = totalTris > 0 ? totalTris.toLocaleString() : '0';
 }
 
 // Toggle row builder
@@ -567,12 +886,29 @@ function rgbaCss(c) {
     const a = c.length > 3 ? c[3] : 1;
     return `rgba(${r},${g},${b},${a})`;
 }
+
+const toggleInputs = {};
 for (const key of Object.keys(overlays)) {
     const o = overlays[key];
     const row = document.createElement('label');
     const cb = document.createElement('input');
     cb.type = 'checkbox'; cb.checked = o.on;
-    cb.addEventListener('change', () => { o.on = cb.checked; rebuildAll(); });
+    toggleInputs[key] = cb;
+    cb.addEventListener('change', () => {
+        o.on = cb.checked;
+        if (key === 'impostors' && cb.checked) {
+            overlays.branches.on = false;
+            overlays.foliage.on = false;
+            overlays.blooms.on = false;
+            if (toggleInputs.branches) toggleInputs.branches.checked = false;
+            if (toggleInputs.foliage) toggleInputs.foliage.checked = false;
+            if (toggleInputs.blooms) toggleInputs.blooms.checked = false;
+        } else if ((key === 'branches' || key === 'foliage' || key === 'blooms') && cb.checked) {
+            overlays.impostors.on = false;
+            if (toggleInputs.impostors) toggleInputs.impostors.checked = false;
+        }
+        rebuildAll();
+    });
     const sw = document.createElement('span');
     sw.className = 'swatch'; sw.style.background = rgbaCss(o.color);
     const txt = document.createElement('span');
@@ -585,7 +921,6 @@ for (const key of Object.keys(overlays)) {
 let playing = true;
 let timeScale = 1.0;
 const SIM_DT = 0.02;          // per-step
-const STEPS_PER_FRAME = 2;    // how many sim steps each rAF tick
 const REBUILD_EVERY = 8;      // rebuild render meshes every N frames
 let frameCt = 0;
 
@@ -652,12 +987,20 @@ for (const key of lighting.order) {
 
 function tick() {
     if (playing) {
-        for (let i = 0; i < STEPS_PER_FRAME; i++) {
-            world.step(SIM_DT * timeScale);
+        const dtTotal = SIM_DT * timeScale;
+        const steps = Math.min(4, Math.max(1, Math.round(timeScale)));
+        const stepDt = dtTotal / steps;
+        for (let i = 0; i < steps; i++) {
+            world.step(stepDt);
         }
         frameCt++;
-        if (frameCt % REBUILD_EVERY === 0) rebuildAll();
-        else updateStats();
+        if (frameCt % REBUILD_EVERY === 0) {
+            rebuildAll();
+        } else {
+            updateStats(false);
+        }
+    } else {
+        updateStats(true);
     }
     lighting.update(0.016);   // drift the fireflies even while the sim is paused
     requestAnimationFrame(tick);
@@ -673,4 +1016,4 @@ rebuildAll();
 requestAnimationFrame(tick);
 
 // ─── Debug surface for headless ───────────────────────────────────────────
-globalThis.__lab = { world, plants, overlays, rebuildAll, lighting, selectTod };
+globalThis.__lab = { world, plants, overlays, getLeafCard, rebuildAll, rebuildBranches, rebuildFoliage, rebuildBlooms, rebuildImpostors, rebuildShadowGrid, rebuildSeedRings, rebuildPlantOrigins, lighting, selectTod };
