@@ -224,13 +224,29 @@
                 <button id="btn-explore-reset" class="link" title="Zero every discovered slider">reset</button>
               </h2>
               <div class="hint" style="margin-bottom:8px">
-                Unnamed and unjudged &mdash; candidates, not verified controls. Strongest
-                movers first; atoms grouped by what they DO, not by any label. Plenty of
-                them hijack the scene rather than restyle it, and no number tells you
-                which. Turn one and generate &mdash; the picture is the description.
+                Unnamed candidates, not verified controls. Strongest movers first; atoms
+                grouped by what they DO, not by any label. Plenty of them hijack the scene
+                rather than restyle it, and no number tells you which &mdash; only the render
+                does. A handful have been rendered and judged by eye already, and carry that
+                verdict as a badge; the rest are yours to try. Turn one and generate &mdash;
+                the picture is the description &mdash; then mark what you found with
+                &check;&nbsp;/&nbsp;&times;.
               </div>
               <div class="row">
                 <input id="explore-filter" type="text" placeholder="atom #" style="width:90px">
+                <select id="explore-verdict" title="Somebody rendered contact sheets for a few of these and judged them by eye. This is that verdict.">
+                  <option value="all">everything</option>
+                  <option value="promising">worth a look</option>
+                  <option value="unjudged">nobody has looked</option>
+                  <option value="rejected">already rejected</option>
+                </select>
+              </div>
+              <div class="hint" style="margin:2px 0 6px">
+                <span id="explore-judged"></span>
+                <button id="btn-marks-clear" class="link" style="display:none"
+                        title="Forget every &check; / &times; you have marked, handing those atoms back to the shipped verdicts">forget my marks</button>
+              </div>
+              <div class="row">
                 <label class="hint">moves the image &ge;
                   <input id="explore-minact" type="range" min="0" max="0.4" step="0.01" value="0">
                   <span id="explore-minact-val">0.00</span>

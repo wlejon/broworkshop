@@ -251,6 +251,33 @@ button.link:hover { color: #eeb277; background: none; }
 }
 .axis-mine-del:hover { color: #e0674a; }
 
+/* Explore verdicts: what somebody learned by rendering this atom and looking.
+   Quiet by default — the badge only appears on an atom that carries one, so a
+   row with no badge reads as "nobody has looked", which is the honest majority
+   state. `keep` is the only warm colour: the rejects are there to be skipped
+   past, not to shout. */
+.atom-verdict {
+  display: none; flex: none; margin-left: 6px; padding: 0 5px;
+  border-radius: 3px; font-size: 9px; line-height: 14px;
+  text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap;
+  cursor: help;
+}
+.atom-verdict.show { display: inline-block; }
+.atom-verdict.v-keep   { background: #2f4536; color: #8fd6a4; }
+.atom-verdict.v-hijack { background: #43292a; color: #dd8e83; }
+.atom-verdict.v-dupe   { background: #33323d; color: #9a97ad; }
+.atom-verdict.v-inert  { background: #2e3238; color: #8b939e; }
+/* Your own mark, so it never passes as somebody else's judgement. */
+.atom-verdict.mine { outline: 1px dotted currentColor; outline-offset: -1px; }
+
+.atom-mark {
+  background: none; border: none; padding: 0 0 0 4px; cursor: pointer;
+  color: #3f4653; font-size: 11px; line-height: 1; flex: none;
+}
+.atom-mark:hover { color: #8a94a3; }
+.atom-mark.keep.on { color: #8fd6a4; }
+.atom-mark.reject.on { color: #dd8e83; }
+
 input[type=range] {
   -webkit-appearance: none; appearance: none;
   width: 100%; height: 18px; padding: 0; border: none; margin: 0;
@@ -703,5 +730,7 @@ details[open] > .ctl-cat::before { content: '▾ '; }
 .explore-list {
   max-height: 62vh;
   overflow-y: auto;
-  padding-right: 4px;
+  /* Room for the scrollbar AND the two mark buttons at the end of every head
+     row — at 4px the ✗ sat under the scrollbar and could not be clicked. */
+  padding-right: 12px;
 }

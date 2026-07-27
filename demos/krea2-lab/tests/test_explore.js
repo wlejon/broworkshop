@@ -1,8 +1,9 @@
 // Explore list — NO model load, no weights needed. One slider per UNNAMED atom,
 // ordered strongest-first and grouped by measured effect. What has to be true:
 // every unnamed atom is there, the atoms the axis bank already names are NOT
-// (one direction, one slider), a turned slider REACHES the generate call, and
-// filtering never lies about what is shaping the image.
+// (one direction, one slider), the shipped verdicts reach the rows that earned
+// them, your own mark overrides one and survives, a turned slider REACHES the
+// generate call, and filtering never lies about what is shaping the image.
 //
 //   bro-headless ../broworkshop/demos/krea2-lab tests/test_explore.js
 
@@ -50,6 +51,95 @@ assert(document.querySelectorAll('#axis-categories .ctl[data-key="' + dupKey + '
 document.querySelectorAll('#explore-list .axis-cat-group').forEach((g) => {
   assert(g.querySelectorAll('.ctl').length > 0, 'every group header has rows under it');
 });
+
+// ── verdicts ──────────────────────────────────────────────────────────────
+// The point of shipping them: atom 214 replaces the subject with a castle and
+// is one of the STRONGEST movers in the file, so ordering alone puts it near the
+// top. A badge is the only thing standing between that and a wasted render.
+// Start from a known state: marks persist across sessions, so whatever the last
+// real session (or the last test run) believed about an atom is still in prefs.
+$('btn-marks-clear').click();
+flush();
+
+let vjson = null;
+fetch('assets/sae_verdicts.json').then((r) => r.json()).then((j) => { vjson = j; });
+assert(pumpUntil(() => vjson !== null, 10000), 'sae_verdicts.json fetched');
+const verdicts = vjson.verdicts;
+const atomRow = (a) => document.querySelector('#explore-list .ctl[data-key="sae.' + a + '"]');
+
+Object.keys(verdicts).forEach((a) => {
+  // Every verdict must land on a row — a typo'd atom id would silently do nothing.
+  const row = atomRow(a);
+  assert(row, 'verdict for sae.' + a + ' has a row to land on');
+  const badge = row.querySelector('.atom-verdict');
+  assert(badge && badge.classList.contains('show'), 'sae.' + a + ' shows a badge');
+  assert(badge.classList.contains('v-' + verdicts[a].v),
+         'sae.' + a + ' badge reads ' + verdicts[a].v);
+  assert(!badge.classList.contains('mine'), 'a shipped verdict is not marked as yours');
+});
+// An unjudged atom carries no badge — silence is the honest majority state.
+const plain = Array.prototype.filter.call(sliders(),
+  (r) => !verdicts[r.getAttribute('data-key').slice(4)]);
+assert(plain.length > 300, 'most atoms are unjudged (' + plain.length + ')');
+assert(!plain[0].querySelector('.atom-verdict').classList.contains('show'),
+       'an unjudged atom shows no badge');
+
+// Filtering by verdict.
+function shownCount() {
+  let n = 0;
+  sliders().forEach((r) => { if (r.style.display !== 'none') n++; });
+  return n;
+}
+function setVerdictFilter(v) {
+  $('explore-verdict').value = v;
+  $('explore-verdict').dispatchEvent(new Event('change'));
+  flush();
+}
+const shipped = Object.keys(verdicts);
+const nKeep = shipped.filter((a) => verdicts[a].v === 'keep').length;
+const nRej = shipped.length - nKeep;
+setVerdictFilter('promising');
+assert(shownCount() === nKeep, 'the keep filter shows exactly the keeps (' + nKeep + ')');
+setVerdictFilter('rejected');
+assert(shownCount() === nRej, 'the reject filter shows exactly the rejects (' + nRej + ')');
+setVerdictFilter('unjudged');
+assert(shownCount() === want - shipped.length, 'the rest are unjudged');
+
+// Your own mark wins over silence, and over a shipped verdict.
+setVerdictFilter('all');
+const mineRow = plain[0], mineAtom = mineRow.getAttribute('data-key').slice(4);
+mineRow.querySelector('.atom-mark.keep').click();
+flush();
+assert(mineRow.querySelector('.atom-verdict').classList.contains('mine'),
+       'your mark is badged as yours, not as somebody else\'s judgement');
+setVerdictFilter('promising');
+assert(shownCount() === nKeep + 1, 'your keep joins the keeps');
+
+// A hijack you disagree with is yours to overrule.
+const hijack = shipped.find((a) => verdicts[a].v === 'hijack');
+setVerdictFilter('all');
+atomRow(hijack).querySelector('.atom-mark.keep').click();
+flush();
+setVerdictFilter('rejected');
+assert(shownCount() === nRej - 1, 'overruling a hijack takes it out of the rejects');
+
+// Clicking the same mark again hands the atom back to the shipped verdict.
+setVerdictFilter('all');
+atomRow(hijack).querySelector('.atom-mark.keep').click();
+flush();
+setVerdictFilter('rejected');
+assert(shownCount() === nRej, 'clearing your mark restores the shipped verdict');
+// And the clear-all path, which is what let this test start from a known state.
+setVerdictFilter('all');
+assert($('btn-marks-clear').style.display !== 'none', 'the clear-marks button shows once you have marks');
+$('btn-marks-clear').click();
+flush();
+assert(atomRow(mineAtom).querySelector('.atom-verdict').classList.contains('show') === false,
+       'forgetting your marks takes the badge back off an unjudged atom');
+assert($('btn-marks-clear').style.display === 'none', 'and the button hides again');
+setVerdictFilter('promising');
+assert(shownCount() === nKeep, 'and the keeps are back to the shipped ones');
+setVerdictFilter('all');
 
 document.querySelector('.secbtn[data-sec="explore"]').click();
 flush();

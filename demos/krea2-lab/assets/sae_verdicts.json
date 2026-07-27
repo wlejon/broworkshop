@@ -1,0 +1,30 @@
+{
+ "_source": "krea-research/FINDINGS_SAE_SWEEP.md — 391 atoms rendered into 3 scenes at ±6, shortlisted, then 39 contact sheets judged BY EYE on 4 scenes (the 3 the screen selected on, plus a held-out portrait it never saw).",
+ "_why": "The sweep's conclusion is that no scalar metric separates a control axis from a content hijack: actuation is useless (the known dud actuates at the 9th percentile), preservation and collapse overlap completely, delta-locality is AUC 0.65. Only the render decides. So these verdicts are the only thing that CAN be shipped — a number would just be another readout that does not know.",
+ "_by": "'eye' = a person judged the contact sheet. 'vlm' = a vision model judged it (runs/sae/vlm.json) and nobody has checked; treat as a hint. The VLM pass called atom 576 — the known dud — 'increases warmth and saturation', so it is not a substitute for looking.",
+ "_v": "keep = a real control. hijack = redraws the scene / inserts content instead of restyling. dupe = the same axis as another atom. inert = moves pixels without moving anything you would want.",
+ "verdicts": {
+  "4787": { "v": "keep", "by": "eye",
+            "note": "subject scale — a real compositional axis the screen buried at rank 216 of 391, because CLIP is trained to be invariant to subject scale" },
+  "1155": { "v": "keep", "by": "eye",
+            "note": "clutter → clean; ranked 190 of 391 for the same reason" },
+
+  "214":  { "v": "hijack", "by": "eye",
+            "note": "replaces the subject with a castle. Passes cleanly on all three screen scenes — only the held-out portrait caught it" },
+  "2811": { "v": "hijack", "by": "eye", "note": "inserts a child" },
+  "8082": { "v": "hijack", "by": "eye", "note": "inserts a man" },
+  "6641": { "v": "hijack", "by": "eye", "note": "inserts a man" },
+  "170":  { "v": "hijack", "by": "eye",
+            "note": "inserts a crowd of different women / market stalls" },
+  "4476": { "v": "hijack", "by": "vlm",
+            "note": "adds trees and people, and the scene identity does not survive — same signature as 214, but nobody has looked at the sheet" },
+
+  "7280": { "v": "dupe", "by": "eye", "of": 8077,
+            "note": "the same cool ↔ warm white-balance axis as the named one" },
+  "4743": { "v": "dupe", "by": "eye", "of": 8039,
+            "note": "the same dark Old Master oil axis as the named one" },
+
+  "576":  { "v": "inert", "by": "eye",
+            "note": "the known dud. Churns pixels hard but incoherently — it is what proved actuation cannot rank anything" }
+ }
+}

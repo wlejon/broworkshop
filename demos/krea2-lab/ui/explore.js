@@ -42,6 +42,36 @@ import { $ } from '/app/ui/util.js';
 export function initExplore(ctx) {
   const rows = [];   // [{atom, act, row}] — every UNNAMED atom, built once
 
+  // ── verdicts: what somebody already learned by looking ───────────────────
+  // assets/sae_verdicts.json carries the judgements the sweep produced —
+  // 39 contact sheets read by eye — and this is the only form that knowledge can
+  // take, because the sweep also established that no NUMBER carries it: the four
+  // metrics it tried (actuation, preservation, collapse, delta-locality) all fail
+  // to separate a control from a content hijack. So the list ships opinions with
+  // provenance rather than another score.
+  //
+  // Without this the ordering actively misleads. Atom 214 — which replaces your
+  // subject with a castle — is one of the strongest movers in the file, so it
+  // sorts high; 2811 and 6641, both of which insert a person, are rows 3 and 4 of
+  // the very first group. Meanwhile 4787, a verified compositional axis, sits at
+  // act 0.10 near the bottom. Sorting by how much an atom moved puts the traps at
+  // eye level and buries the finds.
+  //
+  // Your own marks live alongside them and win, because you are looking at your
+  // own prompt and the person who judged the sheet was not.
+  let verdicts = {};                                  // {atom: {v, by, note, of}}
+  let marks = Object.assign({}, ctx.prefs.atomMarks); // {atom: 'keep'|'reject'}
+  const VERDICT_LABEL = { keep: 'keep', hijack: 'hijack', dupe: 'dupe', inert: 'inert' };
+  // A verdict is only ever "worth a look" or "somebody rejected this".
+  const isReject = (v) => v === 'hijack' || v === 'dupe' || v === 'inert';
+  // What this atom counts as right now: your mark if you made one, else the
+  // shipped verdict, else nothing.
+  function stateOf(atom) {
+    if (marks[atom]) return { v: marks[atom] === 'keep' ? 'keep' : 'hijack', mine: true };
+    const j = verdicts[atom];
+    return j ? { v: j.v, by: j.by, note: j.note, of: j.of, mine: false } : null;
+  }
+
   // Built once and only ever SHOWN or HIDDEN. Rebuilding the list on each filter
   // keystroke would drop rows out of the control registry, and a slider you had
   // turned up would either vanish from the deck while still injecting, or stop
@@ -81,30 +111,97 @@ export function initExplore(ctx) {
         host.appendChild(det);
         box = det;
       }
+      // The badge and the two mark buttons ride in the control's head row.
+      const badge = document.createElement('span');
+      badge.className = 'atom-verdict';
+      const mk = (glyph, want, tip) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'atom-mark ' + want;
+        b.textContent = glyph;
+        b.title = tip;
+        b.addEventListener('click', () => {
+          // Second click on your own mark clears it, handing the atom back to
+          // whatever the sweep said (or to nothing).
+          if (marks[e.atom] === want) delete marks[e.atom]; else marks[e.atom] = want;
+          refreshRow();
+          refreshJudgedLine();
+          ctx.persist();
+          applyFilter();
+        });
+        return b;
+      };
+      const keepBtn = mk('✓', 'keep', 'mark this one worth keeping');
+      const rejBtn = mk('✗', 'reject', 'mark this one a hijack / not worth it');
+
+      function refreshRow() {
+        const s = stateOf(e.atom);
+        badge.textContent = s ? (VERDICT_LABEL[s.v] || s.v) : '';
+        badge.className = 'atom-verdict' + (s ? ' show v-' + s.v + (s.mine ? ' mine' : '') : '');
+        badge.title = !s ? ''
+          : s.mine ? 'your mark — click the button again to clear it'
+          : (s.note || '') + (s.of ? ' (see sae.' + s.of + ')' : '') +
+            ' · judged by ' + (s.by === 'vlm' ? 'a vision model, unchecked' : 'eye');
+        keepBtn.classList.toggle('on', marks[e.atom] === 'keep');
+        rejBtn.classList.toggle('on', marks[e.atom] === 'reject');
+      }
+
       const ctl = ctx.buildCtl({
         label: key,
-        title: key + ' — unnamed and unjudged. Moved the image ' + e.act.toFixed(2) +
+        title: key + ' — unnamed. Moved the image ' + e.act.toFixed(2) +
                ' and kept the scene ' + e.pres.toFixed(2) + ' in the screening sweep; ' +
                'neither number can tell a control from a content hijack. Turn it and generate.',
         key: key,
         min: -6, max: 6, step: 0.01,
         section: 'explore',
         group: 'explore',
+        headBtns: [badge, keepBtn, rejBtn],
         commit: () => {},
       });
       box.appendChild(ctl.row);
-      rows.push({ atom: e.atom, act: e.act, row: ctl.row, ctl: ctl, group: group });
+      rows.push({ atom: e.atom, act: e.act, row: ctl.row, ctl: ctl, group: group,
+                  refresh: refreshRow });
+      refreshRow();
     });
-    $('explore-count').textContent = rows.length + ' unnamed · ' + groups + ' groups' +
-      (skipped ? ' · ' + skipped + ' named ones are in the axis bank' : '');
+    // The h2 stays one line — it sits next to the reset button and wraps badly.
+    // The curation breakdown gets its own line under the filter, where there is
+    // room to say it in words.
+    $('explore-count').textContent = rows.length + ' unnamed · ' + groups + ' groups';
+    $('explore-count').title = skipped
+      ? skipped + ' more atoms carry names and live in the axis bank'
+      : '';
+    refreshJudgedLine();
+  }
+
+  function refreshJudgedLine() {
+    let keeps = 0, rejects = 0;
+    rows.forEach((r) => {
+      const s = stateOf(r.atom);
+      if (!s) return;
+      if (s.v === 'keep') keeps++; else if (isReject(s.v)) rejects++;
+    });
+    const mine = Object.keys(marks).length;
+    $('btn-marks-clear').style.display = mine ? '' : 'none';
+    $('btn-marks-clear').textContent = 'forget my ' + mine + ' mark' + (mine === 1 ? '' : 's');
+    const el = $('explore-judged');
+    el.textContent = (!keeps && !rejects)
+      ? 'nobody has judged any of these yet. '
+      : keeps + ' worth a look · ' + rejects + ' already rejected · ' +
+        (rows.length - keeps - rejects) + ' nobody has looked at ';
   }
 
   function applyFilter() {
     const min = +$('explore-minact').value || 0;
     const q = ($('explore-filter').value || '').trim();
+    const mode = $('explore-verdict').value;   // all | promising | unjudged | rejected
     let shown = 0;
     rows.forEach((r) => {
-      const hit = r.act >= min && (!q || String(r.atom).indexOf(q) >= 0);
+      const s = stateOf(r.atom);
+      let pass = true;
+      if (mode === 'promising') pass = !!s && s.v === 'keep';
+      else if (mode === 'unjudged') pass = !s;
+      else if (mode === 'rejected') pass = !!s && isReject(s.v);
+      const hit = pass && r.act >= min && (!q || String(r.atom).indexOf(q) >= 0);
       // A slider that is turned up stays visible whatever the filter says — it is
       // shaping the image, so hiding it would be lying about what is on.
       const on = +r.ctl.range.value !== 0;
@@ -125,9 +222,14 @@ export function initExplore(ctx) {
   // axes_meta.json, we fetch the index) and the list needs BOTH: without the
   // metadata we cannot tell which atoms the bank already names, and building
   // early would put the duplicates back. Whichever lands second builds.
-  let index = null, named = null;
+  //
+  // The verdicts join them as a third input. They are optional — a missing or
+  // broken file leaves every atom unjudged, which is exactly the state the list
+  // was in before and still a usable one — but they are waited for, so the first
+  // paint already carries the badges rather than flickering them in.
+  let index = null, named = null, judged = false;
   function buildWhenReady() {
-    if (!index || !named) return;
+    if (!index || !named || !judged) return;
     build(index, named);   // the asset is already ordered: strongest group, strongest atom
     applyFilter();
   }
@@ -136,7 +238,11 @@ export function initExplore(ctx) {
     index = ix;
     buildWhenReady();
   }).catch((e) => { $('explore-count').textContent = 'no sae_index.json: ' + e.message; });
+  fetch('assets/sae_verdicts.json').then((r) => r.json()).then((j) => {
+    verdicts = (j && j.verdicts) || {};
+  }).catch(() => { verdicts = {}; }).then(() => { judged = true; buildWhenReady(); });
 
+  $('explore-verdict').addEventListener('change', applyFilter);
   $('explore-filter').addEventListener('input', applyFilter);
   $('explore-minact').addEventListener('input', () => {
     $('explore-minact-val').textContent = (+$('explore-minact').value).toFixed(2);
@@ -144,6 +250,16 @@ export function initExplore(ctx) {
   });
   $('btn-explore-reset').addEventListener('click', () => {
     rows.forEach((r) => r.ctl.set(0));
+    applyFilter();
+  });
+  // Forget every mark. You can mark 383 atoms, so there has to be a way back —
+  // and it must not touch the sliders: what you BELIEVE about an atom and what
+  // you currently have it set to are different things.
+  $('btn-marks-clear').addEventListener('click', () => {
+    marks = {};
+    rows.forEach((r) => r.refresh());
+    refreshJudgedLine();
+    ctx.persist();
     applyFilter();
   });
 
@@ -156,4 +272,8 @@ export function initExplore(ctx) {
     });
     return out;
   };
+
+  // Your marks outlive the session. They are yours, so they are kept apart from
+  // the shipped verdicts and never written back into the asset.
+  ctx.onPersist((p) => { p.atomMarks = marks; });
 }
