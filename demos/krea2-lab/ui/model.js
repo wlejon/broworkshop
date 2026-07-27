@@ -85,8 +85,14 @@ export function initModel(ctx) {
     ctx.status('loading model — this reads ~26GB of weights, give it a moment');
     ctx.client.send({ type: 'load', modelDir: modelDir,
                   textEncoderPath: textEncoder || undefined,
+                  // Every dictionary becomes a live axis; `namedDicts` says which
+                  // of them a person put LABELS on (they are the ones in
+                  // assets/axes_meta.json). The worker decomposes minted axes
+                  // against the named bank only — the 391 unnamed atoms would
+                  // swamp the span and make "how much of this is new" meaningless.
                   dictPaths: ['assets/axes_turbo.bcd1', 'assets/axes_sae_deck.bcd1',
                               'assets/axes_sae_all.bcd1'],
+                  namedDicts: ['assets/axes_turbo.bcd1', 'assets/axes_sae_deck.bcd1'],
                   spectrumPath: 'lab/spectrum.json', mouthPath: 'lab/mouth.json' }, (err, msg) => {
       stopLoadOverlay();
       if (err) {

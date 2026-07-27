@@ -164,8 +164,15 @@ export function initAxes(ctx) {
       const v = +(axisStrengths[m.name] || 0);
       if (v) out[m.name] = (out[m.name] || 0) + v;
     });
-    // Atoms taken from the explore grid are live axes like any other.
-    if (ctx.collectExplore) Object.assign(out, ctx.collectExplore());
+    // Atoms taken from the explore grid are live axes like any other. Summed,
+    // not assigned: an Object.assign here silently DROPPED the bank's value for
+    // any axis both lists carried. The explore list no longer builds a row for
+    // an atom the bank names, so an overlap should be impossible — but if one
+    // ever comes back, two sliders on one direction must both push, not one win.
+    if (ctx.collectExplore) {
+      const ex = ctx.collectExplore();
+      for (const k in ex) if (ex.hasOwnProperty(k)) out[k] = (out[k] || 0) + ex[k];
+    }
     return out;
   }
 
@@ -199,7 +206,8 @@ export function initAxes(ctx) {
         if (!err) addMintedAxis({ name: d.name, kind: d.kind, pos: d.pos, neg: d.neg,
                                   aPath: d.aPath, bPath: d.bPath, dir: d.dir,
                                   consistency: d.consistency,
-                                  components: resp.components, residual: resp.residual });
+                                  components: resp.components, residual: resp.residual,
+                                  atoms: resp.atoms });
         next();
       });
     })();
@@ -219,6 +227,14 @@ export function initAxes(ctx) {
   ctx.rebuildMintedAxes = rebuildMintedAxes;
   ctx.addMintedAxis = addMintedAxis;
   ctx.collectAxisControls = collectAxisControls;   // what actually goes on the wire
+  // Anyone who needs to know which axes the bank names — the explore list skips
+  // the atoms that already have a labelled slider here, so it cannot build until
+  // this has landed.
+  const axesMetaHooks = [];
+  ctx.onAxesMeta = (fn) => {
+    axesMetaHooks.push(fn);
+    if (Object.keys(axesMeta).length) fn(axesMeta);   // late subscriber
+  };
   ctx.applyAxesMeta = (meta) => {
     axesMeta = meta;
     buildAxisBank(meta);
@@ -229,6 +245,7 @@ export function initAxes(ctx) {
         if (coreAxisEls[k]) coreAxisEls[k].set(+ctx.prefs.axisBank[k] || 0, { silent: true });
       }
     }
+    axesMetaHooks.forEach((fn) => fn(meta));
   };
   Object.defineProperty(ctx, 'axesMeta', { get: () => axesMeta });
   ctx.onDeckRefresh(refreshCatCounts);

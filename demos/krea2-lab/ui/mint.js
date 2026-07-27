@@ -44,11 +44,11 @@ export function initMint(ctx) {
   }
 
   // ── minted-axis readout: what the direction is made of ──────────────────
-  // Signed cosine bars against the loaded bank axes (word-derived + SAE-discovered)
-  // + the span residual
-  // ("how much of it is genuinely its own"), computed by the worker at mint
-  // time. Answers "what did the mint actually pick out of these images?"
-  // without guessing from slider sweeps.
+  // Signed cosine bars against the NAMED bank axes (word-derived + the verified
+  // SAE deck — the ones in axes_meta.json), plus the span residual ("how much of
+  // it is genuinely its own") and, separately, the nearest unnamed atom. All
+  // computed by the worker at mint time. Answers "what did the mint actually pick
+  // out of these images?" without guessing from slider sweeps.
   let lastMinted = null;   // the def currently shown in the inspector
   function showAxisInspector(def) {
     lastMinted = def;
@@ -75,15 +75,23 @@ export function initMint(ctx) {
         row.appendChild(nm); row.appendChild(track); row.appendChild(val);
         bars.appendChild(row);
       });
-      // residual² is the energy fraction outside the whole bank's span — the
+      // residual² is the energy fraction outside the NAMED bank's span — the
       // honest "not any named thing" number (the axes aren't orthogonal, so
-      // per-axis cosines alone would overcount). The bank spans both banks the
-      // worker loaded (word-derived + SAE-discovered), so read its size from the
-      // decomposition rather than hard-coding it.
+      // per-axis cosines alone would overcount). The span is only the axes
+      // somebody labelled; the 391 unnamed atoms are reported separately below,
+      // because folding them in spans so much of the neighbourhood that every
+      // mint comes back 0% new. Read the bank's size off the decomposition.
       const own = Math.round(def.residual * def.residual * 100);
       const nBank = def.components.length;
-      note.textContent = 'overlap with the bank axes (top 6 of ' + nBank + ') · ' + own +
-        '% of it is new, outside all ' + nBank +
+      // The nearest unnamed atom, when it is near enough to be worth saying:
+      // "you may have rediscovered atom N" is a different claim from "this is
+      // made of things we have words for", so it gets its own clause.
+      const near = (def.atoms && def.atoms.length && Math.abs(def.atoms[0].cos) >= 0.2)
+        ? ' · nearest unnamed atom ' + def.atoms[0].name + ' ' +
+          (def.atoms[0].cos > 0 ? '+' : '') + def.atoms[0].cos.toFixed(2)
+        : '';
+      note.textContent = 'overlap with the ' + nBank + ' named axes (top 6) · ' + own +
+        '% of it is new, outside all ' + nBank + near +
         (def.kind === 'text' && def.consistency != null
           ? ' · consistency ' + def.consistency.toFixed(2) : '');
     } else {
@@ -172,7 +180,8 @@ export function initMint(ctx) {
       if (err) { mintStatus(String(err.message || err), 'err'); return; }
       const def = { name: resp.name, kind: 'text', pos: pos, neg: neg,
                     consistency: resp.consistency, dir: f32ToB64(resp.axis),
-                    components: resp.components, residual: resp.residual };
+                    components: resp.components, residual: resp.residual,
+                    atoms: resp.atoms };
       ctx.addMintedAxis(def);
       showAxisInspector(def);
       const low = resp.consistency < 0.8;
@@ -318,7 +327,8 @@ export function initMint(ctx) {
       if (err) { mintImgStatus(String(err.message || err), 'err'); return; }
       const def = { name: resp.name, kind: 'image', aPath: mintImgA.path, bPath: mintImgB.path,
                     dir: f32ToB64(resp.axis),
-                    components: resp.components, residual: resp.residual };
+                    components: resp.components, residual: resp.residual,
+                    atoms: resp.atoms };
       ctx.addMintedAxis(def);
       showAxisInspector(def);
       mintImgStatus('minted "' + resp.name + '" — added to the axis bank', 'ok');

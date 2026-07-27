@@ -11,8 +11,8 @@
 //
 //   AdaLN dial (pregate/prescale)  — per-step temb_mod delta on blocks [19,28)
 //   band dial (literal<->stylized)— scale raw tap layers 7-10 pre-fusion
-//   axis bank (18 + user-minted)  — CondControl, already generic (setControl /
-//                                   setControlVector), auto-applied at prime()
+//   axis bank (26 named + 391      — CondControl, already generic (setControl /
+//     unnamed SAE atoms + minted)    setControlVector), auto-applied at prime()
 //   gate scale / gate mask        — attention-gate research hooks
 //   image-as-prompt               — same tap mechanism, fed by the vision tower
 //   spatial paint compositing     — dual state, latent-level per-step blend
@@ -31,8 +31,10 @@
 //     (512, 1) row validity)
 //
 // Message protocol:
-//   main -> load          {modelDir, textEncoderPath?, dictPath, spectrumPath,
-//                           mouthPath}
+//   main -> load          {modelDir, textEncoderPath?, dictPaths, namedDicts?,
+//                           spectrumPath, mouthPath}   (namedDicts: the subset of
+//                           dictPaths whose axes carry a UI label; the rest are
+//                           unnamed discovered atoms. Absent = all named.)
 //        <- loaded        {config, axes, hiddenSize, numLayers, backend,
 //                           spectrum, mouth, textEncoder}
 //   main -> reloadTextEncoder {modelDir, textEncoderPath?}   (swap the tapped
@@ -97,12 +99,12 @@
 //        <- spatialDone   {bitmap, width, height, ms}
 //   main -> mintTextAxis  {name, pos, neg}
 //        <- mintProgress  {label, done, total}      (interim, several)
-//        <- axisMinted    {name, axis, consistency, components, residual}
+//        <- axisMinted    {name, axis, consistency, components, residual, atoms}
 //   main -> mintImageAxis {name, a: {pixels,H,W}, b: {pixels,H,W}}
 //        <- mintProgress  {label, done, total}      (interim, several)
-//        <- axisMinted    {name, axis, components, residual}
+//        <- axisMinted    {name, axis, components, residual, atoms}
 //   main -> registerAxis  {name, axis}       (restore a saved axis — no encodes)
-//        <- axisRegistered{name, components, residual}
+//        <- axisRegistered{name, components, residual, atoms}
 //   main -> removeControl {name}
 //        <- removed       {name}
 //   main -> applyLora     {path, scale}      (attach one runtime LoRA group)
@@ -117,18 +119,26 @@
 // (index-aligned with the applied groups) and are synced via setLoraScale at
 // the top of every generation — no extra round-trip for a slider drag.
 //
-// axisMinted's `components` explain WHAT the minted direction is made of:
-// its cosine against each of the dictionary's 18 named axes (sorted by
-// magnitude), plus `residual` — the fraction of the direction that lies
-// outside the span of all 18 (i.e. genuinely its own). Both are null when
-// the engine build predates pipeline.controlVector().
+// axisMinted's `components` explain WHAT the minted direction is made of: its
+// cosine against each of the NAMED bank axes (the dictionaries listed in the
+// load message's `namedDicts` — sorted by magnitude), plus `residual`, the
+// fraction of the direction lying outside the span of all of them (i.e.
+// genuinely its own). `atoms` is separate: the three nearest UNNAMED discovered
+// atoms by cosine, which say "this mint may have rediscovered atom N" without
+// being counted as things we have a word for. All three are null when the engine
+// build predates pipeline.controlVector().
 
 var pipeline = null;   // native Pipeline handle
 var hiddenSize = 0;
 var numLayers = 0;
-var dictAxes = [];     // the loaded dictionary's axis names (the named bank
-                       // minted axes are decomposed against — never includes
-                       // runtime/minted axes, so the explanation stays stable)
+var dictAxes = [];     // the NAMED bank's axis names — the basis minted axes are
+                       // decomposed against. Never includes runtime/minted axes,
+                       // so the explanation stays stable, and never includes the
+                       // unnamed discovered atoms: solving against 400+ near-
+                       // dependent directions drove the residual to ~0 (so "% of
+                       // it is new" stopped meaning anything) and cost a 400x400
+                       // Gram at 6144-d per mint. Those live in discoveredAxes.
+var discoveredAxes = []; // the unnamed SAE atoms — cosines only, never the solve
 var identityRef = null; // cached identity-transport reference: {taps: {embeds,
                         // mask}, tokens} from setIdentity's vision-tower encode
                         // (~125 MB — one at a time). Cleared on model load.
@@ -209,15 +219,32 @@ function handleLoad(msg) {
     numLayers  = pipeline.krea2NumLayers();
 
     // The axis bank is stacked from several dictionaries of different provenance:
-    // the word-derived named axes, and the SAE-discovered deck. The first load
-    // replaces, the rest merge, so every axis ends up on one slider list.
+    // the word-derived named axes, the verified SAE deck, and the unnamed
+    // discovered atoms. The first load replaces, the rest merge, so every axis
+    // ends up on one slider list.
+    //
+    // `msg.namedDicts` lists the dictionaries whose axes carry a UI label (they
+    // are the ones in assets/axes_meta.json). Everything else is an unnamed atom.
+    // Split here rather than by name prefix: the deck atoms are named sae.NNNN
+    // too, so the prefix says nothing about whether a person labelled it. Absent,
+    // every dictionary counts as named — the pre-split behaviour.
     var axes = [];
     var dicts = msg.dictPaths || (msg.dictPath ? [msg.dictPath] : []);
+    var namedDicts = msg.namedDicts || null;
+    // A null-prototype map: axis names come out of a binary file, and a plain
+    // object would report "constructor" as already seen.
+    var seen = Object.create(null);
+    dictAxes = []; discoveredAxes = [];
     for (var d = 0; d < dicts.length; d++) {
       pipeline.loadControlDictionary(dicts[d], { merge: d > 0 });
+      axes = pipeline.controlAxes();
+      var isNamed = !namedDicts || namedDicts.indexOf(dicts[d]) >= 0;
+      for (var i = 0; i < axes.length; i++) {
+        if (seen[axes[i]]) continue;
+        seen[axes[i]] = true;
+        (isNamed ? dictAxes : discoveredAxes).push(axes[i]);
+      }
     }
-    if (dicts.length) axes = pipeline.controlAxes();
-    dictAxes = axes.slice();
 
     // Baked axis banks — each optional; its panel is disabled without it.
     var bankPaths = { spectrum: msg.spectrumPath, mouth: msg.mouthPath };
@@ -829,16 +856,25 @@ function mintProgress(label, done, total) {
 // Read the calibration off any dictionary axis at runtime; 1.0 only if
 // there's no dictionary or the engine predates controlVector().
 function bankScale() {
-  if (!dictAxes.length || !pipeline.controlVector) return 1.0;
-  return pipeline.controlVector(dictAxes[0]).scale;
+  var any = dictAxes.length ? dictAxes : discoveredAxes;
+  if (!any.length || !pipeline.controlVector) return 1.0;
+  return pipeline.controlVector(any[0]).scale;
 }
 
-// Explain a freshly minted unit direction against the dictionary's named
+// Explain a freshly minted unit direction against the dictionary's NAMED
 // bank: per-axis cosine (the bank directions are unit vectors by the BCD1
 // format), plus how much of the direction lies OUTSIDE the bank's span.
 // The axes aren't orthogonal, so summing squared cosines would overcount —
-// project onto the span properly (solve the 18x18 Gram system) and report
+// project onto the span properly (solve the Gram system) and report
 // residual = |axis - proj| as the honest "genuinely its own" fraction.
+//
+// The span is the ~26 axes a person put a label on, deliberately. The unnamed
+// discovered atoms are reported alongside as plain cosines (the three nearest),
+// never folded into the span: 400+ near-dependent directions span so much of a
+// 6144-d neighbourhood that every mint came back ~0% new, which is not an
+// answer, and the Gram they need is O(n^2 * 6144) — half a billion multiply-adds
+// per mint, paid again for every saved axis at load. Cosines are O(n * 6144).
+//
 // Returns null when the engine build lacks pipeline.controlVector().
 function explainAxis(axis) {
   if (!pipeline.controlVector || !dictAxes.length) return null;
@@ -860,7 +896,9 @@ function explainAxis(axis) {
     b[i] = dot;
   }
   // Gram matrix (symmetric — fill the lower triangle, mirror the upper) +
-  // Gaussian elimination with partial pivoting (n is 18, this is trivial).
+  // Gaussian elimination with partial pivoting. n is the named bank (~26), which
+  // is what keeps this trivial — see the note above on why the discovered atoms
+  // are not in here.
   var M = [];
   for (var i = 0; i < n; i++) M.push(new Float64Array(n));
   for (var i = 0; i < n; i++) {
@@ -900,7 +938,23 @@ function explainAxis(axis) {
   var components = [];
   for (var i = 0; i < n; i++) components.push({ name: keptNames[i], cos: b[i] });
   components.sort(function (x, y) { return Math.abs(y.cos) - Math.abs(x.cos); });
-  return { components: components, residual: Math.sqrt(1 - explained) };
+
+  // The unnamed atoms: cosine only, no solve, no contribution to the residual.
+  // "Your axis is 0.61 of the way to sae.4037" is a real thing to know — the mint
+  // may have rediscovered an atom — but it is a separate statement from "N% of
+  // this is outside everything we have a word for".
+  var atoms = [];
+  for (var i = 0; i < discoveredAxes.length; i++) {
+    var adir = pipeline.controlVector(discoveredAxes[i]).dir;
+    if (adir.length !== dim) continue;
+    var au = unitNormalize(adir), adot = 0;
+    for (var c = 0; c < dim; c++) adot += au[c] * axis[c];
+    atoms.push({ name: discoveredAxes[i], cos: adot });
+  }
+  atoms.sort(function (x, y) { return Math.abs(y.cos) - Math.abs(x.cos); });
+  if (atoms.length > 3) atoms.length = 3;
+
+  return { components: components, residual: Math.sqrt(1 - explained), atoms: atoms };
 }
 
 // Mint a user axis from a text pair, averaged over SCENES for robustness
@@ -951,6 +1005,7 @@ function handleMintTextAxis(msg) {
       type: 'axisMinted', name: name, consistency: consistency, axis: axis,
       components: explain ? explain.components : null,
       residual: explain ? explain.residual : null,
+      atoms: explain ? explain.atoms : null,
     });
   } catch (e) {
     fail('mintTextAxis', e);
@@ -984,6 +1039,7 @@ function handleMintImageAxis(msg) {
       type: 'axisMinted', name: name, axis: axis,
       components: explain ? explain.components : null,
       residual: explain ? explain.residual : null,
+      atoms: explain ? explain.atoms : null,
     });
   } catch (e) {
     fail('mintImageAxis', e);
@@ -1008,6 +1064,7 @@ function handleRegisterAxis(msg) {
       type: 'axisRegistered', name: name,
       components: explain ? explain.components : null,
       residual: explain ? explain.residual : null,
+      atoms: explain ? explain.atoms : null,
     });
   } catch (e) {
     fail('registerAxis', e);
