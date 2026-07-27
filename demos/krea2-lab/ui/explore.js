@@ -15,10 +15,25 @@
 // separates a control from a hijack (krea-research/FINDINGS_SAE_SWEEP.md). Only the
 // render tells you.
 //
-// So this is just the sliders. Turn one, generate, look. The lab renders live, so
-// the picture on YOUR prompt is the label — no thumbnails, no captions, no names.
+// So the label of an unnamed atom can only ever be a PICTURE. This list used to
+// argue that the picture should be the live render on your own prompt, and refuse
+// to show anything else. That was an abdication: it left 383 rows reading
+// `sae.4787` with a number beside them, and finding anything meant turning sliders
+// at random. Meanwhile the screening sweep's own 2,346 renders — every atom, three
+// unalike scenes, both poles — sat on disk unshown.
 //
-// Two things make hundreds of sliders scrollable instead of a wall:
+// They ship now, as six thumbnail atlases (assets/sheets/, ~9 MB for all 391 atoms
+// at every view; one file per view rather than 2,349 fetches, addressed by
+// background-position so a 383-row list costs no decodes). Each row carries its
+// −6 and +6 thumbnail; hovering one flips it to the untouched scene, which is the
+// A/B that actually reads. The scene picker swaps all of them at once, because an
+// atom that looks like a control on a landscape can be a hijack on a still life —
+// that disagreement is the single most useful thing the sweep recorded.
+//
+// The thumbnails are a fixed probe scene, NOT your prompt: they tell you what an
+// atom does, and your own render still tells you what it does for you.
+//
+// Three things make hundreds of sliders scrollable instead of a wall:
 //
 //   ORDER    strongest mover first. `act` is how far the atom pushed the image at
 //            ±6 in the sweep (a cosine distance in CLIP space; 0 = nothing moved).
@@ -41,6 +56,74 @@ import { $ } from '/app/ui/util.js';
 
 export function initExplore(ctx) {
   const rows = [];   // [{atom, act, row}] — every UNNAMED atom, built once
+
+  // ── thumbnails: the sweep's own renders, packed into atlases ─────────────
+  // assets/sheets/sheets.json says how the tiles are laid out and which slot
+  // each atom got. Everything here degrades to the old slider-only list if the
+  // asset is missing — a lab with no sheets is worse, not broken.
+  const TILE = 64;                 // display px; the atlas ships at 128 for retina
+  let sheets = null;               // the manifest
+  let scene = ctx.prefs.exploreScene || 'cliff';
+  const tiles = [];                // [{atom, el, pole}] — repositioned on scene change
+
+  // One atlas tile: background-size scales the whole sheet down to TILE px per
+  // cell, background-position picks the cell. No per-atom image element, so the
+  // list builds 766 thumbnails without 766 requests.
+  function placeTile(el, atom) {
+    if (!sheets) return;
+    const slot = sheets.slot[atom];
+    if (slot == null) { el.classList.add('missing'); return; }
+    el.style.backgroundSize = (sheets.cols * TILE) + 'px ' + (sheets.rows * TILE) + 'px';
+    el.style.backgroundPosition =
+      '-' + ((slot % sheets.cols) * TILE) + 'px -' + (Math.floor(slot / sheets.cols) * TILE) + 'px';
+  }
+
+  // The neutral strip is one tile per scene laid out left to right, so showing
+  // scene i means scaling the strip to N tiles wide and sliding it i tiles over.
+  function placeNeutral(el, px) {
+    if (!sheets) return;
+    const n = sheets.scenes.length;
+    const i = sheets.scenes.map((s) => s.key).indexOf(scene);
+    el.style.backgroundSize = (n * px) + 'px ' + px + 'px';
+    el.style.backgroundPosition = '-' + (Math.max(0, i) * px) + 'px 0px';
+  }
+
+  function applyScene() {
+    // No atlas: fall back to the plain slider list rather than showing an empty
+    // reference frame and three dead scene buttons.
+    const ref = $('explore-neutral'), pick = $('explore-scenes');
+    if (ref) ref.style.display = sheets ? '' : 'none';
+    if (pick && pick.parentNode) pick.parentNode.style.display = sheets ? '' : 'none';
+    if (!sheets) return;
+    const list = $('explore-list');
+    sheets && sheets.scenes.forEach((s) => list.classList.remove('sc-' + s.key));
+    list.classList.add('sc-' + scene);
+    const nt = $('explore-neutral-tile');
+    if (nt) placeNeutral(nt, 96);
+    tiles.forEach((t) => { if (t.hovering) placeNeutral(t.el, TILE); });
+    const cap = $('explore-neutral-cap');
+    const s = sheets && sheets.scenes.filter((x) => x.key === scene)[0];
+    if (cap && s) cap.textContent = 'untouched: ' + s.label;
+    document.querySelectorAll('#explore-scenes .scene-btn').forEach((b) =>
+      b.classList.toggle('on', b.getAttribute('data-scene') === scene));
+    ctx.persist();
+  }
+
+  function buildSceneButtons() {
+    const host = $('explore-scenes');
+    if (!host || !sheets) return;
+    host.innerHTML = '';
+    sheets.scenes.forEach((s) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'scene-btn';
+      b.setAttribute('data-scene', s.key);
+      b.textContent = s.key;
+      b.title = s.label + ' — every thumbnail below switches to this scene';
+      b.addEventListener('click', () => { scene = s.key; applyScene(); });
+      host.appendChild(b);
+    });
+  }
 
   // ── verdicts: what somebody already learned by looking ───────────────────
   // assets/sae_verdicts.json carries the judgements the sweep produced —
@@ -158,8 +241,47 @@ export function initExplore(ctx) {
         headBtns: [badge, keepBtn, rejBtn],
         commit: () => {},
       });
-      box.appendChild(ctl.row);
-      rows.push({ atom: e.atom, act: e.act, row: ctl.row, ctl: ctl, group: group,
+
+      // The card is the filter target, not the slider row: hiding the row alone
+      // would leave its two thumbnails floating with nothing under them.
+      const card = document.createElement('div');
+      card.className = 'atom-card';
+      if (sheets) {
+        const strip = document.createElement('div');
+        strip.className = 'atom-thumbs';
+        sheets.poles.forEach((p) => {
+          const t = document.createElement('button');
+          t.type = 'button';
+          t.className = 'atom-tile t-' + p.key;
+          t.title = key + ' at ' + (p.alpha > 0 ? '+' : '') + p.alpha +
+                    ' — hover to flip back to the untouched scene, click to set the slider';
+          placeTile(t, e.atom);
+          // Clicking a thumbnail dials the slider to the strength that PRODUCED
+          // that picture, so what you saw is what you get. ±6 is the sweep's
+          // extreme, which is the point — you can always walk it back.
+          t.addEventListener('click', () => { ctl.set(p.alpha); });
+          // Hover flips the tile to the untouched scene and back. The swap is
+          // between two different atlases, so it cannot be a :hover rule — the
+          // background-position for the neutral strip is a different geometry.
+          const rec = { atom: e.atom, el: t, hovering: false };
+          t.addEventListener('mouseenter', () => {
+            rec.hovering = true;
+            t.classList.add('flip');
+            placeNeutral(t, TILE);
+          });
+          t.addEventListener('mouseleave', () => {
+            rec.hovering = false;
+            t.classList.remove('flip');
+            placeTile(t, e.atom);
+          });
+          tiles.push(rec);
+          strip.appendChild(t);
+        });
+        card.appendChild(strip);
+      }
+      card.appendChild(ctl.row);
+      box.appendChild(card);
+      rows.push({ atom: e.atom, act: e.act, row: card, ctl: ctl, group: group,
                   refresh: refreshRow });
       refreshRow();
     });
@@ -211,7 +333,7 @@ export function initExplore(ctx) {
     // Hide a group whose every row is hidden, so scrolling is not all headers.
     const boxes = $('explore-list').querySelectorAll('.axis-cat-group');
     boxes.forEach((b) => {
-      const any = Array.prototype.some.call(b.querySelectorAll('.ctl'),
+      const any = Array.prototype.some.call(b.querySelectorAll('.atom-card'),
                                             (c) => c.style.display !== 'none');
       b.style.display = any ? '' : 'none';
     });
@@ -227,10 +349,16 @@ export function initExplore(ctx) {
   // broken file leaves every atom unjudged, which is exactly the state the list
   // was in before and still a usable one — but they are waited for, so the first
   // paint already carries the badges rather than flickering them in.
-  let index = null, named = null, judged = false;
+  //
+  // The sheet manifest joins as a fourth. Also optional and also waited for: a
+  // list built before it lands would have no thumbnails at all, and rebuilding
+  // to add them is exactly the thing this list must never do.
+  let index = null, named = null, judged = false, sheeted = false;
   function buildWhenReady() {
-    if (!index || !named || !judged) return;
+    if (!index || !named || !judged || !sheeted) return;
+    buildSceneButtons();
     build(index, named);   // the asset is already ordered: strongest group, strongest atom
+    applyScene();
     applyFilter();
   }
   ctx.onAxesMeta((meta) => { named = meta; buildWhenReady(); });
@@ -241,6 +369,9 @@ export function initExplore(ctx) {
   fetch('assets/sae_verdicts.json').then((r) => r.json()).then((j) => {
     verdicts = (j && j.verdicts) || {};
   }).catch(() => { verdicts = {}; }).then(() => { judged = true; buildWhenReady(); });
+  fetch('assets/sheets/sheets.json').then((r) => r.json()).then((j) => {
+    sheets = (j && j.slot) ? j : null;
+  }).catch(() => { sheets = null; }).then(() => { sheeted = true; buildWhenReady(); });
 
   $('explore-verdict').addEventListener('change', applyFilter);
   $('explore-filter').addEventListener('input', applyFilter);
@@ -275,5 +406,5 @@ export function initExplore(ctx) {
 
   // Your marks outlive the session. They are yours, so they are kept apart from
   // the shipped verdicts and never written back into the asset.
-  ctx.onPersist((p) => { p.atomMarks = marks; });
+  ctx.onPersist((p) => { p.atomMarks = marks; p.exploreScene = scene; });
 }

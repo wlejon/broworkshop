@@ -32,10 +32,71 @@ const want = index.length - namedAtoms.length;
 
 // One slider per UNNAMED atom — none dropped, and no named atom duplicated.
 const sliders = () => document.querySelectorAll('#explore-list .ctl');
+const cards = () => document.querySelectorAll('#explore-list .atom-card');
+const cardOf = (el) => { while (el && !el.classList.contains('atom-card')) el = el.parentNode; return el; };
 assert(pumpUntil(() => sliders().length === want, 10000),
        'one slider per unnamed atom (' + want + ', got ' + sliders().length + ')');
+assert(cards().length === want, 'one card per slider');
 assert(document.querySelectorAll('#explore-list .axis-cat-group').length > 1,
        'atoms are grouped');
+
+// ── thumbnails ────────────────────────────────────────────────────────────
+// An unnamed atom's only possible label is a picture. Every row carries the
+// sweep's own renders of it at both poles, addressed out of a shared atlas.
+let sheets = null;
+fetch('assets/sheets/sheets.json').then((r) => r.json()).then((j) => { sheets = j; });
+assert(pumpUntil(() => sheets !== null, 10000), 'sheets.json fetched');
+assert(document.querySelectorAll('#explore-list .atom-tile').length === want * 2,
+       'two thumbnails per atom (' + want * 2 + ')');
+assert($('explore-list').classList.contains('sc-' + sheets.scenes[0].key) ||
+       sheets.scenes.some((s) => $('explore-list').classList.contains('sc-' + s.key)),
+       'the list names its probe scene, which is what picks the atlas');
+
+// The tile must point at ITS OWN atom's cell. A manifest/UI disagreement about
+// the grid would silently show every atom the wrong picture — the one failure
+// mode that makes this whole feature worse than no thumbnails at all.
+const atomTile = (a) =>
+  cardOf(document.querySelector('#explore-list .ctl[data-key="sae.' + a + '"]'))
+    .querySelector('.atom-tile');
+const probe = index.find((e) => !meta['sae.' + e.atom] && sheets.slot[e.atom] != null);
+const ptile = atomTile(probe.atom);
+const TILE = 64;
+assert(ptile.style.backgroundPosition ===
+       '-' + ((sheets.slot[probe.atom] % sheets.cols) * TILE) + 'px -' +
+       (Math.floor(sheets.slot[probe.atom] / sheets.cols) * TILE) + 'px',
+       'sae.' + probe.atom + ' shows its own atlas cell (' + ptile.style.backgroundPosition + ')');
+assert(ptile.style.backgroundSize === (sheets.cols * TILE) + 'px ' + (sheets.rows * TILE) + 'px',
+       'the atlas is scaled so one cell is one tile');
+
+// Hover flips to the untouched scene — a different atlas with a different
+// geometry, so both the image and the sizing have to change together.
+const wasPos = ptile.style.backgroundPosition, wasSize = ptile.style.backgroundSize;
+ptile.dispatchEvent(new Event('mouseenter'));
+flush();
+assert(ptile.classList.contains('flip'), 'hovering a thumbnail flips it to the neutral');
+assert(ptile.style.backgroundSize === (sheets.scenes.length * TILE) + 'px ' + TILE + 'px',
+       'the flipped tile is sized for the neutral strip, not the atom atlas');
+ptile.dispatchEvent(new Event('mouseleave'));
+flush();
+assert(!ptile.classList.contains('flip') && ptile.style.backgroundPosition === wasPos &&
+       ptile.style.backgroundSize === wasSize, 'leaving puts the atom back');
+
+// Switching probe scene re-points every tile at a different atlas.
+const other = sheets.scenes[1].key;
+document.querySelector('#explore-scenes .scene-btn[data-scene="' + other + '"]').click();
+flush();
+assert($('explore-list').classList.contains('sc-' + other), 'the scene picker switches atlas');
+assert(ptile.style.backgroundPosition === wasPos, 'and keeps every atom on its own cell');
+document.querySelector('#explore-scenes .scene-btn[data-scene="' + sheets.scenes[0].key + '"]').click();
+flush();
+
+// Clicking a thumbnail dials in the strength that produced it.
+ptile.click();
+flush();
+assert(window.__ctx.collectAxisControls()['sae.' + probe.atom] === sheets.poles[0].alpha,
+       'clicking a thumbnail sets the slider to the alpha that rendered it');
+document.querySelector('#btn-explore-reset').click();
+flush();
 
 // A named atom must have exactly one slider in the whole app — the bank's.
 // Two sliders on one direction is the bug this list used to have: explore's
@@ -86,8 +147,10 @@ assert(!plain[0].querySelector('.atom-verdict').classList.contains('show'),
 
 // Filtering by verdict.
 function shownCount() {
+  // The CARD is what the filter shows and hides — hiding the slider alone would
+  // leave the atom's two thumbnails behind with nothing under them.
   let n = 0;
-  sliders().forEach((r) => { if (r.style.display !== 'none') n++; });
+  cards().forEach((c) => { if (c.style.display !== 'none') n++; });
   return n;
 }
 function setVerdictFilter(v) {
@@ -164,7 +227,7 @@ assert(ac[key] === 3.5, 'a turned slider reaches generate (got ' + JSON.stringif
 $('explore-minact').value = '0.4';
 $('explore-minact').dispatchEvent(new Event('input'));
 flush();
-assert(first.style.display !== 'none', 'a turned-up slider stays visible through a filter');
+assert(cardOf(first).style.display !== 'none', 'a turned-up slider stays visible through a filter');
 assert(window.__ctx.collectAxisControls()[key] === 3.5, 'and keeps injecting');
 
 // Zeroed, it may be filtered away — and then it must stop injecting.

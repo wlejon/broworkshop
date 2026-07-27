@@ -3,6 +3,7 @@
  "_why": "The sweep's conclusion is that no scalar metric separates a control axis from a content hijack: actuation is useless (the known dud actuates at the 9th percentile), preservation and collapse overlap completely, delta-locality is AUC 0.65. Only the render decides. So these verdicts are the only thing that CAN be shipped — a number would just be another readout that does not know.",
  "_by": "'eye' = a person judged the contact sheet. 'vlm' = a vision model judged it (runs/sae/vlm.json) and nobody has checked; treat as a hint. The VLM pass called atom 576 — the known dud — 'increases warmth and saturation', so it is not a substitute for looking.",
  "_v": "keep = a real control. hijack = redraws the scene / inserts content instead of restyling. dupe = the same axis as another atom. inert = moves pixels without moving anything you would want.",
+ "_note": "Verdicts are added by a PERSON looking at the sheets. Do not have an assistant classify the renders: it does not scale to 383 atoms, and a refusal on any given frame reads as a judgement when it is not one. The thumbnails in the explore tab exist to put the pictures in front of you, not to be read on your behalf.",
  "verdicts": {
   "4787": { "v": "keep", "by": "eye",
             "note": "subject scale — a real compositional axis the screen buried at rank 216 of 391, because CLIP is trained to be invariant to subject scale" },

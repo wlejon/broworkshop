@@ -224,13 +224,20 @@
                 <button id="btn-explore-reset" class="link" title="Zero every discovered slider">reset</button>
               </h2>
               <div class="hint" style="margin-bottom:8px">
-                Unnamed candidates, not verified controls. Strongest movers first; atoms
-                grouped by what they DO, not by any label. Plenty of them hijack the scene
-                rather than restyle it, and no number tells you which &mdash; only the render
-                does. A handful have been rendered and judged by eye already, and carry that
-                verdict as a badge; the rest are yours to try. Turn one and generate &mdash;
-                the picture is the description &mdash; then mark what you found with
-                &check;&nbsp;/&nbsp;&times;.
+                Unnamed candidates, not verified controls. Every one was rendered into three
+                probe scenes at both extremes, and those renders are the two thumbnails on
+                each row &mdash; an atom with no name still has a picture. Hover one to flip
+                it back to the untouched scene. Plenty hijack the scene rather than restyle
+                it, and no number tells you which; the pair does. Judge on your own prompt,
+                then mark it with &check;&nbsp;/&nbsp;&times;.
+              </div>
+              <div class="row" style="margin-bottom:6px">
+                <span class="hint">probe scene</span>
+                <span id="explore-scenes" class="scene-pick"></span>
+              </div>
+              <div class="neutral-ref" id="explore-neutral" title="The probe scene with nothing turned on. Every thumbnail below is this picture, moved.">
+                <div class="neutral-tile" id="explore-neutral-tile"></div>
+                <div class="hint" id="explore-neutral-cap">&hellip;</div>
               </div>
               <div class="row">
                 <input id="explore-filter" type="text" placeholder="atom #" style="width:90px">

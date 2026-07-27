@@ -725,8 +725,9 @@ details[open] > .ctl-cat::before { content: '▾ '; }
 .spec-disabled #spec-rows, .spec-disabled #mouth-rows { opacity: .35; pointer-events: none; }
 
 /* ── explore: the long list of discovered atoms ──────────────────────────── */
-/* 391 sliders. Scroll it. The only affordances are order (strongest first) and
-   grouping (atoms that move the picture alike sit together). */
+/* 383 atoms with no names. Order (strongest first) and grouping (atoms that move
+   the picture alike) make it scrollable; the two thumbnails on each row are what
+   make it READABLE — they are the sweep's own renders of that atom at ±6. */
 .explore-list {
   max-height: 62vh;
   overflow-y: auto;
@@ -734,3 +735,55 @@ details[open] > .ctl-cat::before { content: '▾ '; }
      row — at 4px the ✗ sat under the scrollbar and could not be clicked. */
   padding-right: 12px;
 }
+
+/* One row = its thumbnails plus its slider. The card is what the filter shows
+   and hides, so a hidden atom never leaves its pictures behind. */
+.atom-card {
+  display: grid; grid-template-columns: auto 1fr; gap: 8px;
+  align-items: center; margin-bottom: 6px;
+}
+.atom-card .ctl { min-width: 0; margin: 0; }
+.atom-thumbs { display: flex; gap: 2px; flex: none; }
+
+/* Every tile is one cell of a shared atlas — background-position picks it, so a
+   766-thumbnail list costs six image decodes rather than 766. */
+.atom-tile, .neutral-tile {
+  width: 64px; height: 64px; flex: none;
+  border: 1px solid #1c2431; border-radius: 3px;
+  background-repeat: no-repeat; background-color: #0a0d13;
+  padding: 0; cursor: pointer;
+}
+.atom-tile.missing { background-image: none; opacity: .3; cursor: default; }
+.atom-tile:hover { border-color: #f0a860; }
+/* Mid-flip the tile is showing the shared neutral strip, so its per-scene atlas
+   must not win the cascade. */
+.sc-cliff  .atom-tile.flip, .sc-lemons .atom-tile.flip, .sc-alley .atom-tile.flip {
+  background-image: url(assets/sheets/sheet_neutral.jpg);
+}
+
+/* The two poles, per scene. Which atlas a tile shows is a CLASS on the list, not
+   an attribute selector, and every background-size/position is written inline by
+   explore.js — the tile grid is computed from the manifest, so the layout cannot
+   drift from the asset the way two hand-kept copies of a number would.
+   Hovering swaps the tile to that scene's UNTOUCHED render: an A/B in place,
+   which reads better than two pictures side by side, because your eye compares
+   the same rectangle across time rather than across space. */
+.sc-cliff  .atom-tile.t-m { background-image: url(assets/sheets/sheet_cliff_m.jpg); }
+.sc-cliff  .atom-tile.t-p { background-image: url(assets/sheets/sheet_cliff_p.jpg); }
+.sc-lemons .atom-tile.t-m { background-image: url(assets/sheets/sheet_lemons_m.jpg); }
+.sc-lemons .atom-tile.t-p { background-image: url(assets/sheets/sheet_lemons_p.jpg); }
+.sc-alley  .atom-tile.t-m { background-image: url(assets/sheets/sheet_alley_m.jpg); }
+.sc-alley  .atom-tile.t-p { background-image: url(assets/sheets/sheet_alley_p.jpg); }
+
+/* The reference every thumbnail below is read against. */
+.neutral-ref { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.neutral-tile { cursor: default; width: 96px; height: 96px;
+                background-image: url(assets/sheets/sheet_neutral.jpg); }
+
+.scene-pick { display: inline-flex; gap: 4px; }
+.scene-btn {
+  background: #12161e; color: #7f8a99; border: 1px solid #1e2632;
+  border-radius: 3px; padding: 2px 7px; font: inherit; font-size: 11px; cursor: pointer;
+}
+.scene-btn:hover { color: #d6dae0; }
+.scene-btn.on { background: #1e2838; color: #f0a860; border-color: #3a4356; }
