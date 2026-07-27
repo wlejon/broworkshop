@@ -68,27 +68,48 @@ assert(ptile.style.backgroundPosition ===
 assert(ptile.style.backgroundSize === (sheets.cols * TILE) + 'px ' + (sheets.rows * TILE) + 'px',
        'the atlas is scaled so one cell is one tile');
 
-// Hover flips to the untouched scene — a different atlas with a different
-// geometry, so both the image and the sizing have to change together.
+// Which sheet a tile shows and how it is scaled must ALWAYS agree. Asserting
+// only the geometry is what let a real bug ship: hover resized the tile for the
+// neutral strip while a same-specificity CSS rule kept the per-scene atlas
+// winning the image, so the tile drew the whole 20x20 atlas crushed into 64px.
+// Every check below pins image and size together.
+const sheetUrl = (f) => 'url(assets/sheets/' + f + ')';
+const shown = (el) => window.getComputedStyle(el).backgroundImage;
+// The chosen probe scene persists, so start from a known one rather than
+// whatever the last session (or the last test run) was looking at.
+const pickScene = (k) => {
+  document.querySelector('#explore-scenes .scene-btn[data-scene="' + k + '"]').click();
+  flush();
+};
+pickScene(sheets.scenes[0].key);
+assert(shown(ptile) === sheetUrl(sheets.scenes[0].files[sheets.poles[0].key]),
+       'a tile shows its scene+pole atlas (' + shown(ptile) + ')');
+
 const wasPos = ptile.style.backgroundPosition, wasSize = ptile.style.backgroundSize;
 ptile.dispatchEvent(new Event('mouseenter'));
 flush();
 assert(ptile.classList.contains('flip'), 'hovering a thumbnail flips it to the neutral');
+assert(shown(ptile) === sheetUrl(sheets.neutral),
+       'the flipped tile shows the NEUTRAL strip, not the atom atlas (' + shown(ptile) + ')');
 assert(ptile.style.backgroundSize === (sheets.scenes.length * TILE) + 'px ' + TILE + 'px',
-       'the flipped tile is sized for the neutral strip, not the atom atlas');
+       'and is sized for that strip, so image and geometry agree');
 ptile.dispatchEvent(new Event('mouseleave'));
 flush();
 assert(!ptile.classList.contains('flip') && ptile.style.backgroundPosition === wasPos &&
        ptile.style.backgroundSize === wasSize, 'leaving puts the atom back');
+assert(shown(ptile) === sheetUrl(sheets.scenes[0].files[sheets.poles[0].key]),
+       'and puts its atlas back too');
 
 // Switching probe scene re-points every tile at a different atlas.
-const other = sheets.scenes[1].key;
-document.querySelector('#explore-scenes .scene-btn[data-scene="' + other + '"]').click();
-flush();
-assert($('explore-list').classList.contains('sc-' + other), 'the scene picker switches atlas');
+const other = sheets.scenes[1];
+pickScene(other.key);
+assert($('explore-list').classList.contains('sc-' + other.key), 'the scene picker switches atlas');
+assert(shown(ptile) === sheetUrl(other.files[sheets.poles[0].key]),
+       'every tile moves to the new scene (' + shown(ptile) + ')');
 assert(ptile.style.backgroundPosition === wasPos, 'and keeps every atom on its own cell');
-document.querySelector('#explore-scenes .scene-btn[data-scene="' + sheets.scenes[0].key + '"]').click();
-flush();
+assert(shown($('explore-neutral-tile')) === sheetUrl(sheets.neutral),
+       'the reference frame follows the scene too');
+pickScene(sheets.scenes[0].key);
 
 // Clicking a thumbnail dials in the strength that produced it.
 ptile.click();

@@ -66,16 +66,31 @@ export function initExplore(ctx) {
   let scene = ctx.prefs.exploreScene || 'cliff';
   const tiles = [];                // [{atom, el, pole}] — repositioned on scene change
 
+  const SHEETS = 'assets/sheets/';
+  const sceneRec = () => sheets.scenes.filter((s) => s.key === scene)[0] || sheets.scenes[0];
+
+  // Which sheet a tile shows and how that sheet is scaled and offset are ONE
+  // decision, so one function makes all three. Splitting them — filenames in the
+  // stylesheet, geometry here — is what made hover draw the whole atlas at the
+  // neutral strip's scale: the two rules had equal specificity, so resizing for
+  // the neutral never changed the image.
+  function paint(el, url, size, pos) {
+    el.style.backgroundImage = 'url(' + SHEETS + url + ')';
+    el.style.backgroundSize = size;
+    el.style.backgroundPosition = pos;
+  }
+
   // One atlas tile: background-size scales the whole sheet down to TILE px per
   // cell, background-position picks the cell. No per-atom image element, so the
   // list builds 766 thumbnails without 766 requests.
-  function placeTile(el, atom) {
+  function placeTile(el, atom, pole) {
     if (!sheets) return;
     const slot = sheets.slot[atom];
-    if (slot == null) { el.classList.add('missing'); return; }
-    el.style.backgroundSize = (sheets.cols * TILE) + 'px ' + (sheets.rows * TILE) + 'px';
-    el.style.backgroundPosition =
-      '-' + ((slot % sheets.cols) * TILE) + 'px -' + (Math.floor(slot / sheets.cols) * TILE) + 'px';
+    if (slot == null) { el.classList.add('missing'); el.style.backgroundImage = 'none'; return; }
+    paint(el, sceneRec().files[pole],
+          (sheets.cols * TILE) + 'px ' + (sheets.rows * TILE) + 'px',
+          '-' + ((slot % sheets.cols) * TILE) + 'px -' +
+          (Math.floor(slot / sheets.cols) * TILE) + 'px');
   }
 
   // The neutral strip is one tile per scene laid out left to right, so showing
@@ -83,9 +98,8 @@ export function initExplore(ctx) {
   function placeNeutral(el, px) {
     if (!sheets) return;
     const n = sheets.scenes.length;
-    const i = sheets.scenes.map((s) => s.key).indexOf(scene);
-    el.style.backgroundSize = (n * px) + 'px ' + px + 'px';
-    el.style.backgroundPosition = '-' + (Math.max(0, i) * px) + 'px 0px';
+    const i = Math.max(0, sheets.scenes.map((s) => s.key).indexOf(scene));
+    paint(el, sheets.neutral, (n * px) + 'px ' + px + 'px', '-' + (i * px) + 'px 0px');
   }
 
   function applyScene() {
@@ -96,11 +110,15 @@ export function initExplore(ctx) {
     if (pick && pick.parentNode) pick.parentNode.style.display = sheets ? '' : 'none';
     if (!sheets) return;
     const list = $('explore-list');
-    sheets && sheets.scenes.forEach((s) => list.classList.remove('sc-' + s.key));
-    list.classList.add('sc-' + scene);
+    sheets.scenes.forEach((s) => list.classList.remove('sc-' + s.key));
+    list.classList.add('sc-' + scene);   // state marker, for tests and debugging
     const nt = $('explore-neutral-tile');
     if (nt) placeNeutral(nt, 96);
-    tiles.forEach((t) => { if (t.hovering) placeNeutral(t.el, TILE); });
+    // Every tile moves to the new scene's atlas — except the one under the
+    // cursor, which is mid-flip and must land on the NEW scene's neutral.
+    tiles.forEach((t) => {
+      if (t.hovering) placeNeutral(t.el, TILE); else placeTile(t.el, t.atom, t.pole);
+    });
     const cap = $('explore-neutral-cap');
     const s = sheets && sheets.scenes.filter((x) => x.key === scene)[0];
     if (cap && s) cap.textContent = 'untouched: ' + s.label;
@@ -255,7 +273,7 @@ export function initExplore(ctx) {
           t.className = 'atom-tile t-' + p.key;
           t.title = key + ' at ' + (p.alpha > 0 ? '+' : '') + p.alpha +
                     ' — hover to flip back to the untouched scene, click to set the slider';
-          placeTile(t, e.atom);
+          placeTile(t, e.atom, p.key);
           // Clicking a thumbnail dials the slider to the strength that PRODUCED
           // that picture, so what you saw is what you get. ±6 is the sweep's
           // extreme, which is the point — you can always walk it back.
@@ -263,7 +281,7 @@ export function initExplore(ctx) {
           // Hover flips the tile to the untouched scene and back. The swap is
           // between two different atlases, so it cannot be a :hover rule — the
           // background-position for the neutral strip is a different geometry.
-          const rec = { atom: e.atom, el: t, hovering: false };
+          const rec = { atom: e.atom, el: t, pole: p.key, hovering: false };
           t.addEventListener('mouseenter', () => {
             rec.hovering = true;
             t.classList.add('flip');
@@ -272,7 +290,7 @@ export function initExplore(ctx) {
           t.addEventListener('mouseleave', () => {
             rec.hovering = false;
             t.classList.remove('flip');
-            placeTile(t, e.atom);
+            placeTile(t, e.atom, p.key);
           });
           tiles.push(rec);
           strip.appendChild(t);

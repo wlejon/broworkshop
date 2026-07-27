@@ -755,30 +755,19 @@ details[open] > .ctl-cat::before { content: '▾ '; }
 }
 .atom-tile.missing { background-image: none; opacity: .3; cursor: default; }
 .atom-tile:hover { border-color: #f0a860; }
-/* Mid-flip the tile is showing the shared neutral strip, so its per-scene atlas
-   must not win the cascade. */
-.sc-cliff  .atom-tile.flip, .sc-lemons .atom-tile.flip, .sc-alley .atom-tile.flip {
-  background-image: url(assets/sheets/sheet_neutral.jpg);
-}
 
-/* The two poles, per scene. Which atlas a tile shows is a CLASS on the list, not
-   an attribute selector, and every background-size/position is written inline by
-   explore.js — the tile grid is computed from the manifest, so the layout cannot
-   drift from the asset the way two hand-kept copies of a number would.
-   Hovering swaps the tile to that scene's UNTOUCHED render: an A/B in place,
-   which reads better than two pictures side by side, because your eye compares
-   the same rectangle across time rather than across space. */
-.sc-cliff  .atom-tile.t-m { background-image: url(assets/sheets/sheet_cliff_m.jpg); }
-.sc-cliff  .atom-tile.t-p { background-image: url(assets/sheets/sheet_cliff_p.jpg); }
-.sc-lemons .atom-tile.t-m { background-image: url(assets/sheets/sheet_lemons_m.jpg); }
-.sc-lemons .atom-tile.t-p { background-image: url(assets/sheets/sheet_lemons_p.jpg); }
-.sc-alley  .atom-tile.t-m { background-image: url(assets/sheets/sheet_alley_m.jpg); }
-.sc-alley  .atom-tile.t-p { background-image: url(assets/sheets/sheet_alley_p.jpg); }
+/* NO atlas filenames live here. Which sheet a tile shows and how that sheet is
+   scaled and offset have to change together — hovering a tile swaps it to the
+   shared neutral strip, which is a different image AND a different geometry.
+   The first version split them, filenames in CSS and geometry in JS, and the two
+   rules turned out to have equal specificity: hover resized the tile for the
+   neutral strip while the per-scene rule kept winning the image, so the tile
+   drew the whole 20x20 atlas crushed into 64px. explore.js writes image, size
+   and position together from the manifest, so they cannot disagree again. */
 
 /* The reference every thumbnail below is read against. */
 .neutral-ref { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-.neutral-tile { cursor: default; width: 96px; height: 96px;
-                background-image: url(assets/sheets/sheet_neutral.jpg); }
+.neutral-tile { cursor: default; width: 96px; height: 96px; }
 
 .scene-pick { display: inline-flex; gap: 4px; }
 .scene-btn {
