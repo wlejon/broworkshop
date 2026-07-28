@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Proc Watch</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header id="header">
+        <div id="brand">procwatch</div>
+        <div id="filters">
+            <label class="chip"><input type="checkbox" id="f-unix" checked> unix tools</label>
+            <label class="chip"><input type="checkbox" id="f-ddrive" checked> from D:</label>
+            <label class="chip"><input type="checkbox" id="f-other"> everything else</label>
+            <label class="chip"><input type="checkbox" id="f-orphans"> orphans only</label>
+            <input type="text" id="q" placeholder="search name / cmdline&hellip;">
+        </div>
+        <div id="actions">
+            <button id="kill-shown">kill shown</button>
+        </div>
+    </header>
+
+    <section id="gauges">
+        <div class="gauge" id="g-cpu">
+            <div class="g-head"><span class="g-label">cpu</span><span class="g-val" id="cpu-val">&ndash;</span></div>
+            <canvas id="cpu-spark" width="240" height="34"></canvas>
+            <canvas id="cpu-cores" width="240" height="22"></canvas>
+        </div>
+        <div class="gauge" id="g-ram">
+            <div class="g-head"><span class="g-label">ram</span><span class="g-val" id="ram-val">&ndash;</span></div>
+            <div class="bar"><div class="fill" id="ram-fill"></div></div>
+            <div class="g-sub" id="ram-sub"></div>
+        </div>
+        <div id="gpus"></div>
+    </section>
+
+    <section id="reaper">
+        <label class="chip hot"><input type="checkbox" id="reap-on"> auto-kill</label>
+        <span class="r-label">older than</span>
+        <input type="number" id="reap-secs" min="5" step="5" value="30"> s
+        <span class="r-label">names</span>
+        <input type="text" id="reap-names">
+        <span id="reap-log"></span>
+    </section>
+
+    <main id="main">
+        <table id="tbl">
+            <thead>
+                <tr>
+                    <th class="c-name">process</th>
+                    <th class="c-pid">pid</th>
+                    <th class="c-cpu">cpu</th>
+                    <th class="c-mem">mem</th>
+                    <th class="c-age">age</th>
+                    <th class="c-cmd">command line</th>
+                    <th class="c-kill"></th>
+                </tr>
+            </thead>
+            <tbody id="tbody"></tbody>
+        </table>
+        <div id="empty" class="hidden">nothing matches &mdash; agents are behaving, for once</div>
+    </main>
+
+    <footer id="status">scanning&hellip;</footer>
+
+    <script type="module" src="/app/app.js"></script>
+</body>
+</html>
