@@ -1,14 +1,19 @@
 // procwatch — leftover-process monitor + system gauges + auto-reaper.
 //
-// Three data feeds, all via child_process:
-//   1. A PowerShell CIM scan (every 2.5 s) → the process table. CPU per process
-//      is computed here in JS from user+kernel time deltas between scans.
-//   2. A persistent `typeperf` stream (1 s cadence) → CPU total, per-core bars,
-//      available RAM.
-//   3. An `nvidia-smi` poll (every 2.5 s) → GPU utilization/VRAM/temp cards.
-//      Silently absent on machines without the NVIDIA driver.
+// Data feeds:
+//   1. One PERSISTENT PowerShell child (stream.ps1): native-API process ticks
+//      every 1.5 s + WMI create/delete events pushed as they happen, NDJSON.
+//      Per-process CPU is computed here from processor-time deltas.
+//   2. A short-lived enrich.ps1 pass (start + every 60 s): command lines and
+//      paths from WMI, which can take 8+ s per query — never in the tick path.
+//   3. A persistent `typeperf` stream (1 s) → CPU total + per-core bars.
+//   4. An `nvidia-smi` poll (2.5 s) → GPU cards; absent without the driver.
+//
+// The table is the interaction surface: click a row for details + actions
+// (kill, kill tree, open folder, copy command line, add to auto-kill list).
 
 import { installSystemMenu } from "/lib/system-menu.js";
+import { summarize } from "/app/cmdline.js";
 
 const cp = require('child_process');
 
@@ -22,13 +27,12 @@ const REAP_DEFAULT_NAMES =
     'find,grep,egrep,fgrep,rg,sed,awk,gawk,sort,uniq,xargs,cat,tail,head,tr,wc,cut,sleep,less,yes';
 
 const cfg = Object.assign({
-    reapOn: true,
+    reapOn: false,            // opt-in: the list is broad by nature
+    reapOrphansOnly: true,    // parent alive → probably still someone's tool
     reapSecs: 30,
     reapNames: REAP_DEFAULT_NAMES,
     reapNamesCustom: false,
 }, loadCfg());
-// A stored list only sticks if the user actually edited it — otherwise pick
-// up additions to the shipped default.
 if (!cfg.reapNamesCustom) cfg.reapNames = REAP_DEFAULT_NAMES;
 
 function loadCfg() {
@@ -47,9 +51,11 @@ const $ = id => document.getElementById(id);
 const tbodyEl = $('tbody'), emptyEl = $('empty'), statusEl = $('status');
 const qEl = $('q');
 const chips = { unix: $('f-unix'), ddrive: $('f-ddrive'), other: $('f-other'), orphans: $('f-orphans') };
-const reapOnEl = $('reap-on'), reapSecsEl = $('reap-secs'), reapNamesEl = $('reap-names'), reapLogEl = $('reap-log');
+const reapOnEl = $('reap-on'), reapOrphansEl = $('reap-orphans'),
+      reapSecsEl = $('reap-secs'), reapNamesEl = $('reap-names'), reapLogEl = $('reap-log');
 
 reapOnEl.checked = cfg.reapOn;
+reapOrphansEl.checked = cfg.reapOrphansOnly;
 reapSecsEl.value = cfg.reapSecs;
 reapNamesEl.value = cfg.reapNames;
 
@@ -57,10 +63,10 @@ reapNamesEl.value = cfg.reapNames;
 // Classification
 // ---------------------------------------------------------------------------
 
-const UNIX_NAME_RE = /^(bash|sh|dash|zsh|fish|find|grep|egrep|fgrep|rg|fd|sed|awk|gawk|xargs|tail|head|cat|less|tee|sort|uniq|cut|tr|wc|sleep|make|node|python[\d.]*|perl|ruby|curl|wget|git|ssh|scp|diff|patch)(\.exe)?$/i;
+const UNIX_NAME_RE = /^(bash|sh|dash|zsh|fish|find|grep|egrep|fgrep|rg|fd|sed|awk|gawk|xargs|tail|head|cat|less|tee|sort|uniq|cut|tr|wc|sleep|yes|make|node|python[\d.]*|perl|ruby|curl|wget|git|ssh|scp|diff|patch)(\.exe)?$/i;
 const UNIX_PATH_RE = /[\\/](usr[\\/]bin|msys64|cygwin\d*)[\\/]/i;
 
-// Never killable from this app — by us, by "kill shown", or by the reaper.
+// Never killable from this app — by click, "kill shown", or the reaper.
 const PROTECTED_NAMES = new Set([
     'system', 'system idle process', 'secure system', 'registry', 'memory compression',
     'smss.exe', 'csrss.exe', 'wininit.exe', 'winlogon.exe', 'services.exe',
@@ -71,112 +77,204 @@ const baseName = n => (n || '').toLowerCase().replace(/\.exe$/, '');
 
 function isProtected(p) {
     return p.pid <= 4 || PROTECTED_NAMES.has((p.name || '').toLowerCase()) ||
-           p.pid === selfPid || p.pid === scannerPid;
+           p.pid === selfPid || p.pid === streamPid || p.pid === eventsPid;
 }
 
 // ---------------------------------------------------------------------------
-// Process scanner (PowerShell CIM → JSON)
+// The process stream: one persistent PowerShell child running stream.ps1
+// (native-API ticks every 1.5 s + WMI create/delete events), plus a slow
+// enrich.ps1 pass for command lines (WMI can take 8+ s per query, so it never
+// sits in the tick path).
 // ---------------------------------------------------------------------------
 
-// Single argv element, no shell anywhere, deliberately free of double quotes.
-const PS_SCAN =
-    '[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;' +
-    '$cs=@(Get-CimInstance Win32_Process | ForEach-Object { @{' +
-    ' pid=[int64]$_.ProcessId; ppid=[int64]$_.ParentProcessId; name=$_.Name;' +
-    ' path=$_.ExecutablePath; cmd=$_.CommandLine;' +
-    ' start=if($_.CreationDate){([DateTimeOffset]$_.CreationDate).ToUnixTimeMilliseconds()}else{0};' +
-    ' mem=[int64]$_.WorkingSetSize; cpu=[int64]($_.UserModeTime+$_.KernelModeTime) } });' +
-    '$os=Get-CimInstance Win32_OperatingSystem;' +
-    '@{ t=[DateTimeOffset]::Now.ToUnixTimeMilliseconds(); n=[int][Environment]::ProcessorCount;' +
-    ' mt=[int64]$os.TotalVisibleMemorySize*1024; mf=[int64]$os.FreePhysicalMemory*1024; procs=$cs }' +
-    ' | ConvertTo-Json -Compress -Depth 4';
+let selfPid = 0;              // our engine process (parent of the tick child)
+let streamPid = 0;            // tick child
+let eventsPid = 0;            // event-pump child
+let streamLive = false;
+let procs = new Map();        // pid → enriched proc
+let extra = new Map();        // pid → { cmd, path, start, ppid } from enrich/events
+let totalMemBytes = 0, availMemBytes = 0, logicalCores = 0;
+let prevCpu = new Map();      // "pid:name" → { cpu, t }
+let lastSnapT = 0;
+let enrichedOnce = false;
 
-let selfPid = 0;          // our own engine process (parent of the scanner child)
-let scannerPid = 0;       // the currently running scanner powershell
-let snapshot = [];        // enriched procs from the last scan
-let totalMemBytes = 0;
-let logicalCores = 0;
-let prevCpu = new Map();  // "pid:start" → { cpu (100 ns units), t (ms) }
-let scanError = null;
+const PS_ARGS = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File'];
 
-function scan() {
+function startStream() {
     const child = cp.spawn('powershell.exe',
-        ['-NoProfile', '-NonInteractive', '-Command', PS_SCAN],
+        [...PS_ARGS, bro.appDir + '/stream.ps1'],
         { stdio: 'pipe', encoding: 'utf8' });
-    scannerPid = child.pid;
+    streamPid = child.pid;
+    let tail = '';
+    child.stdout.on('data', chunk => {
+        tail += chunk;
+        const lines = tail.split('\n');
+        tail = lines.pop();
+        for (const line of lines) {
+            let msg;
+            try { msg = JSON.parse(line); } catch { continue; }
+            if (msg.e === 'snap') handleSnap(msg);
+            else if (msg.e === 'new') handleNew(msg.p);
+            else if (msg.e === 'del') handleDel(msg.id);
+        }
+    });
+    child.on('close', () => {
+        streamLive = false;
+        render();
+        setTimeout(startStream, 2000);
+    });
+}
+
+function startEvents() {
+    const child = cp.spawn('powershell.exe',
+        [...PS_ARGS, bro.appDir + '/events.ps1'],
+        { stdio: 'pipe', encoding: 'utf8' });
+    eventsPid = child.pid;
+    let tail = '';
+    child.stdout.on('data', chunk => {
+        tail += chunk;
+        const lines = tail.split('\n');
+        tail = lines.pop();
+        for (const line of lines) {
+            let msg;
+            try { msg = JSON.parse(line); } catch { continue; }
+            if (msg.e === 'new') handleNew(msg.p);
+            else if (msg.e === 'del') handleDel(msg.id);
+        }
+    });
+    child.on('close', () => setTimeout(startEvents, 2000));
+}
+
+function runEnrich() {
+    const child = cp.spawn('powershell.exe',
+        [...PS_ARGS, bro.appDir + '/enrich.ps1'],
+        { stdio: 'pipe', encoding: 'utf8' });
     let out = '';
     child.stdout.on('data', c => { out += c; });
     child.on('close', () => {
         try {
-            handleScan(JSON.parse(out));
-            scanError = null;
-        } catch (e) {
-            scanError = String(e);
-        }
-        render();
-        setTimeout(scan, 2500);
+            const msg = JSON.parse(out.trim());
+            for (const e of msg.procs || []) {
+                if (!e.pid) continue;
+                const prev = extra.get(e.pid) || {};
+                extra.set(e.pid, {
+                    cmd: e.cmd || prev.cmd, path: e.path || prev.path,
+                    start: e.start || prev.start, ppid: e.ppid ?? prev.ppid,
+                });
+            }
+            enrichedOnce = true;
+            if (lastSnapT) { mergeExtra(); render(); }
+        } catch {}
+        setTimeout(runEnrich, 60000);
     });
 }
 
-function handleScan(data) {
+function mergeExtra() {
+    for (const p of procs.values()) {
+        const ex = extra.get(p.pid);
+        if (!ex) continue;
+        if (!p.cmd && ex.cmd) { p.cmd = ex.cmd; p.sum = summarize(p.name, p.cmd, p.path); }
+        if (!p.path && ex.path) p.path = ex.path;
+        if (!p.start && ex.start) p.start = ex.start;
+        if (!p.ppid && ex.ppid) p.ppid = ex.ppid;
+    }
+}
+
+function enrichProc(p, now) {
+    const parent = procs.get(p.ppid);
+    p.orphan = p.pid > 4 && p.ppid > 0 &&
+        (!parent || (p.start && parent.start && parent.start > p.start));
+    p.parentName = parent ? parent.name : null;
+    p.isUnix = UNIX_NAME_RE.test(p.name || '') || UNIX_PATH_RE.test(p.path || '');
+    p.isD = /^d:/i.test(p.path || '') || /^"?d:\\/i.test(p.cmd || '');
+    p.ageMs = p.start ? Math.max(0, now - p.start) : 0;
+    p.isSelf = p.pid === selfPid;
+    if (!p.sum) p.sum = summarize(p.name, p.cmd, p.path);
+    if (p.cores === undefined) p.cores = 0;
+    return p;
+}
+
+function handleSnap(data) {
+    streamLive = true;
     totalMemBytes = data.mt;
     availMemBytes = data.mf;
     logicalCores = data.n;
-    drawGauges();
-    const now = data.t;
-    const byPid = new Map();
-    for (const p of data.procs) byPid.set(p.pid, p);
+    lastSnapT = data.t;
 
-    // Our scanner child's parent is us.
-    const scanProc = byPid.get(scannerPid);
-    if (scanProc) selfPid = scanProc.ppid;
+    const next = new Map();
+    for (const p of data.procs) {
+        if (p.pid === 0 || p.pid === streamPid || p.pid === eventsPid) continue;
+        next.set(p.pid, p);
+    }
+    const streamProc = data.procs.find(p => p.pid === streamPid);
+    if (streamProc) selfPid = streamProc.ppid;
 
     const nextCpu = new Map();
-    const enriched = [];
-    for (const p of data.procs) {
-        if (p.pid === 0 || p.pid === scannerPid) continue;
-        const key = p.pid + ':' + p.start;
+    for (const p of next.values()) {
+        const key = p.pid + ':' + p.name;
         const prev = prevCpu.get(key);
         // cpu is cumulative 100 ns units; Δ/(Δt·10000) = fraction of one core.
-        p.cores = prev && now > prev.t ? Math.max(0, (p.cpu - prev.cpu) / ((now - prev.t) * 10000)) : 0;
-        nextCpu.set(key, { cpu: p.cpu, t: now });
-
-        const parent = byPid.get(p.ppid);
-        p.orphan = p.pid > 4 && (!parent || parent.start > p.start);
-        p.isUnix = UNIX_NAME_RE.test(p.name || '') || UNIX_PATH_RE.test(p.path || '');
-        p.isD = /^d:/i.test(p.path || '') || /^"?d:\\/i.test(p.cmd || '');
-        p.ageMs = p.start ? Math.max(0, now - p.start) : 0;
-        p.isSelf = p.pid === selfPid;
-        enriched.push(p);
+        p.cores = prev && data.t > prev.t
+            ? Math.max(0, (p.cpu - prev.cpu) / ((data.t - prev.t) * 10000)) : 0;
+        nextCpu.set(key, { cpu: p.cpu, t: data.t });
     }
     prevCpu = nextCpu;
-    snapshot = enriched;
-    reap(now);
+
+    // Drop enrich data for pids that no longer exist (guards against reuse).
+    for (const pid of extra.keys()) if (!next.has(pid)) extra.delete(pid);
+
+    procs = next;
+    mergeExtra();
+    for (const p of procs.values()) enrichProc(p, data.t);
+    reap();
+    render();
+    drawGauges();
+}
+
+function handleNew(p) {
+    if (!p || !p.pid || p.pid === streamPid || p.pid === eventsPid) return;
+    extra.set(p.pid, { cmd: p.cmd, path: p.path, start: p.start, ppid: p.ppid });
+    const now = lastSnapT || Date.now();
+    if (procs.has(p.pid)) {
+        const cur = procs.get(p.pid);
+        if (!cur.cmd && p.cmd) { cur.cmd = p.cmd; cur.sum = summarize(cur.name, cur.cmd, cur.path); }
+        if (!cur.path && p.path) cur.path = p.path;
+        if (!cur.start && p.start) cur.start = p.start;
+    } else {
+        if (!p.start) p.start = now;
+        procs.set(p.pid, p);
+        enrichProc(p, now);
+    }
+    render();
+}
+
+function handleDel(pid) {
+    extra.delete(pid);
+    if (!procs.delete(pid)) return;
+    if (selectedPid === pid) selectedPid = null;
+    render();
 }
 
 // ---------------------------------------------------------------------------
 // Auto-reaper
 // ---------------------------------------------------------------------------
 
-const reapLog = [];          // { name, pid, at }
+const reapLog = [];
 const reapInFlight = new Set();
 
-function reapSet() {
-    return new Set(cfg.reapNames.split(',').map(s => baseName(s.trim())).filter(Boolean));
-}
-
-function reap(now) {
+function reap() {
     if (!cfg.reapOn) return;
-    const names = reapSet();
+    const names = new Set(cfg.reapNames.split(',').map(s => baseName(s.trim())).filter(Boolean));
     const maxAge = Math.max(5, cfg.reapSecs) * 1000;
-    for (const p of snapshot) {
+    for (const p of procs.values()) {
         if (!names.has(baseName(p.name))) continue;
         if (!p.start || p.ageMs < maxAge) continue;
+        if (cfg.reapOrphansOnly && !p.orphan) continue;
         if (isProtected(p) || reapInFlight.has(p.pid)) continue;
         reapInFlight.add(p.pid);
-        kill(p.pid, () => {
+        kill(p.pid, true, () => {
             reapInFlight.delete(p.pid);
-            reapLog.push({ name: p.name, pid: p.pid, at: now });
+            reapLog.push({ name: p.name, pid: p.pid });
             renderReapLog();
         });
     }
@@ -185,33 +283,47 @@ function reap(now) {
 function renderReapLog() {
     if (!reapLog.length) { reapLogEl.textContent = ''; return; }
     const last = reapLog[reapLog.length - 1];
-    reapLogEl.textContent = `reaped ${reapLog.length}  ·  last: ${last.name} #${last.pid}`;
+    reapLogEl.textContent = `reaped ${reapLog.length}  \u00b7  last: ${last.name} #${last.pid}`;
 }
 
-function kill(pid, done) {
-    cp.execFile('taskkill', ['/PID', String(pid), '/T', '/F'], () => { if (done) done(); });
+function kill(pid, tree, done) {
+    const args = ['/PID', String(pid)];
+    if (tree) args.push('/T');
+    args.push('/F');
+    cp.execFile('taskkill', args, () => { if (done) done(); });
 }
 
 // ---------------------------------------------------------------------------
-// Table rendering
+// Table: keyed rows, click-to-expand details
 // ---------------------------------------------------------------------------
 
-const armed = new Map();  // pid → arm timestamp (two-click confirm)
+const rowMap = new Map();     // pid → { tr, tds, killBtn, detailTr, refs, lastSumHtml }
+let selectedPid = null;
+let sortKey = 'cpu';
+const armed = new Map();      // pid → arm timestamp (two-click confirm)
+
+const SORTERS = {
+    cpu: (a, b) => (Math.round(b.cores * 20) - Math.round(a.cores * 20)) || (a.pid - b.pid),
+    mem: (a, b) => (b.mem - a.mem) || (a.pid - b.pid),
+    age: (a, b) => (a.ageMs - b.ageMs) || (a.pid - b.pid),
+    name: (a, b) => (a.name || '').localeCompare(b.name || '') || (a.pid - b.pid),
+};
 
 function visible() {
     const q = qEl.value.trim().toLowerCase();
-    return snapshot.filter(p => {
+    return [...procs.values()].filter(p => {
         const bucket = (chips.unix.checked && p.isUnix) ||
                        (chips.ddrive.checked && p.isD) ||
                        (chips.other.checked && !p.isUnix && !p.isD);
         if (!bucket) return false;
         if (chips.orphans.checked && !p.orphan) return false;
         if (q) {
-            const hay = ((p.name || '') + ' ' + (p.cmd || '') + ' ' + (p.path || '')).toLowerCase();
+            const hay = ((p.name || '') + ' ' + (p.sum ? p.sum.title : '') + ' ' +
+                         (p.cmd || '') + ' ' + (p.path || '')).toLowerCase();
             if (!hay.includes(q)) return false;
         }
         return true;
-    }).sort((a, b) => (b.cores - a.cores) || (b.mem - a.mem));
+    }).sort(SORTERS[sortKey] || SORTERS.cpu);
 }
 
 const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;')
@@ -225,55 +337,176 @@ function fmtAge(ms) {
     if (s < 86400) return Math.floor(s / 3600) + 'h' + Math.floor((s % 3600) / 60) + 'm';
     return Math.floor(s / 86400) + 'd' + Math.floor((s % 86400) / 3600) + 'h';
 }
-
 const fmtMem = b => b >= 1 << 30 ? (b / (1 << 30)).toFixed(2) + ' GB' : ((b / (1 << 20)) | 0) + ' MB';
+const fmtCpu = cores => logicalCores ? (cores / logicalCores * 100).toFixed(1) + '%' : '\u2013';
+
+function makeRow(pid) {
+    const tr = document.createElement('tr');
+    tr.dataset.pid = pid;
+    tr.innerHTML =
+        '<td class="c-name"></td><td class="c-pid"></td><td class="c-cpu"></td>' +
+        '<td class="c-mem"></td><td class="c-age"></td><td class="c-cmd"></td>' +
+        `<td class="c-kill"><button class="kill" data-pid="${pid}">kill</button></td>`;
+    const tds = tr.children;
+    return {
+        tr,
+        name: tds[0], pid: tds[1], cpu: tds[2], mem: tds[3], age: tds[4], cmd: tds[5],
+        killBtn: tds[6].firstChild,
+        detailTr: null, refs: null, lastSumHtml: '',
+    };
+}
+
+function updateRow(r, p) {
+    const dot = p.isSelf ? '<span class="dot self" title="this app">\u25cf </span>'
+             : p.orphan ? '<span class="dot orphan" title="parent is gone">\u25cf </span>' : '';
+    const nameHtml = dot + esc(p.name);
+    if (r.lastNameHtml !== nameHtml) { r.name.innerHTML = nameHtml; r.lastNameHtml = nameHtml; }
+    r.pid.textContent = p.pid;
+    r.cpu.textContent = fmtCpu(p.cores);
+    r.cpu.className = 'c-cpu' + (p.cores > 3 ? ' pegged' : p.cores > 0.5 ? ' busy' : '');
+    r.mem.textContent = fmtMem(p.mem);
+    r.age.textContent = fmtAge(p.ageMs);
+    // Plain text only: htmlayout mislays mixed inline runs in nowrap/ellipsis
+    // cells (spans shift the following run's origin), so tags are [brackets].
+    const sumText = (p.sum.tags || []).map(t => '[' + t + '] ').join('') + p.sum.title;
+    if (r.lastSumHtml !== sumText) {
+        r.cmd.textContent = sumText;
+        r.cmd.title = p.cmd || p.path || '';
+        r.lastSumHtml = sumText;
+    }
+    const killable = !isProtected(p) && !p.isSelf;
+    r.killBtn.disabled = !killable;
+    const isArmed = armed.has(p.pid);
+    r.killBtn.textContent = isArmed ? 'sure?' : 'kill';
+    r.killBtn.classList.toggle('armed', isArmed);
+    r.tr.classList.toggle('selected', selectedPid === p.pid);
+}
+
+function makeDetail(p) {
+    const tr = document.createElement('tr');
+    tr.className = 'detail';
+    const killable = !isProtected(p) && !p.isSelf;
+    tr.innerHTML = `<td colspan="7"><div class="d-wrap">
+        <div class="d-grid">
+            <span class="d-k">command</span><span class="d-v d-cmd">${esc(p.cmd || '\u2014')}</span>
+            <span class="d-k">path</span><span class="d-v">${esc(p.path || '\u2014')}</span>
+            <span class="d-k">parent</span><span class="d-v d-parent"></span>
+            <span class="d-k">stats</span><span class="d-v d-stats"></span>
+        </div>
+        <div class="d-actions">
+            ${killable ? `<button class="act" data-action="kill" data-pid="${p.pid}">kill</button>
+            <button class="act" data-action="killtree" data-pid="${p.pid}">kill tree</button>` : ''}
+            ${p.path ? `<button class="act" data-action="folder" data-pid="${p.pid}">open folder</button>` : ''}
+            <button class="act" data-action="copy" data-pid="${p.pid}">copy command</button>
+            <button class="act" data-action="reapadd" data-pid="${p.pid}">auto-kill '${esc(baseName(p.name))}'</button>
+        </div>
+    </div></td>`;
+    return {
+        tr,
+        parent: tr.querySelector('.d-parent'),
+        stats: tr.querySelector('.d-stats'),
+    };
+}
+
+function updateDetail(r, p) {
+    r.refs.parent.textContent = p.parentName
+        ? `${p.parentName} #${p.ppid}` : `#${p.ppid} (gone)`;
+    r.refs.stats.textContent =
+        `${p.cores.toFixed(2)} cores \u00b7 ${fmtMem(p.mem)} \u00b7 ${p.th || '?'} threads \u00b7 started ` +
+        (p.start ? new Date(p.start).toLocaleTimeString() : '?');
+}
 
 function render() {
     const rows = visible();
     const nowMs = Date.now();
     for (const [pid, t] of armed) if (nowMs - t > 5000) armed.delete(pid);
 
-    tbodyEl.innerHTML = rows.map(p => {
-        const cores = p.cores.toFixed(2);
-        const cpuCls = p.cores > 3 ? 'pegged' : p.cores > 0.5 ? 'busy' : '';
-        const badges =
-            (p.isSelf ? '<span class="badge self">this app</span>' : '') +
-            (p.orphan ? '<span class="badge orphan">orphan</span>' : '');
-        const killable = !isProtected(p) && !p.isSelf;
-        const armedCls = armed.has(p.pid) ? ' armed' : '';
-        return `<tr data-pid="${p.pid}">
-            <td class="c-name">${esc(p.name)}${badges}</td>
-            <td class="c-pid">${p.pid}</td>
-            <td class="c-cpu ${cpuCls}">${cores}</td>
-            <td class="c-mem">${fmtMem(p.mem)}</td>
-            <td class="c-age">${fmtAge(p.ageMs)}</td>
-            <td class="c-cmd" title="${esc(p.cmd || p.path || '')}">${esc(p.cmd || p.path || '')}</td>
-            <td class="c-kill"><button class="kill${armedCls}" data-pid="${p.pid}" ${killable ? '' : 'disabled'}>${armed.has(p.pid) ? 'sure?' : 'kill'}</button></td>
-        </tr>`;
-    }).join('');
+    const present = new Set();
+    for (const p of rows) {
+        present.add(p.pid);
+        let r = rowMap.get(p.pid);
+        if (!r) { r = makeRow(p.pid); rowMap.set(p.pid, r); }
+        updateRow(r, p);
+        tbodyEl.appendChild(r.tr);
+        if (selectedPid === p.pid) {
+            if (!r.refs) { r.refs = makeDetail(p); r.detailTr = r.refs.tr; }
+            updateDetail(r, p);
+            tbodyEl.appendChild(r.detailTr);
+        } else if (r.detailTr) {
+            r.detailTr.remove(); r.detailTr = null; r.refs = null;
+        }
+    }
+    for (const [pid, r] of rowMap) {
+        if (!present.has(pid)) {
+            r.tr.remove();
+            if (r.detailTr) r.detailTr.remove();
+            rowMap.delete(pid);
+        }
+    }
 
     emptyEl.classList.toggle('hidden', rows.length > 0);
-    statusEl.textContent = scanError
-        ? 'scan error: ' + scanError
-        : `${snapshot.length} processes · showing ${rows.length}` +
-          (reapLog.length ? ` · reaped ${reapLog.length}` : '') +
-          ` · updated ${new Date().toLocaleTimeString()}`;
+    statusEl.textContent =
+        `${procs.size} processes \u00b7 showing ${rows.length} \u00b7 ` +
+        (streamLive ? 'stream live' : 'stream reconnecting\u2026') +
+        (reapLog.length ? ` \u00b7 reaped ${reapLog.length}` : '');
+}
+
+// ---------------------------------------------------------------------------
+// Interaction
+// ---------------------------------------------------------------------------
+
+function handleAction(action, pid) {
+    const p = procs.get(pid);
+    if (!p) return;
+    if (action === 'kill') kill(pid, false);
+    else if (action === 'killtree') kill(pid, true);
+    else if (action === 'folder' && p.path) cp.spawn('explorer.exe', ['/select,' + p.path]);
+    else if (action === 'copy') navigator.clipboard.writeText(p.cmd || p.path || p.name);
+    else if (action === 'reapadd') {
+        const b = baseName(p.name);
+        const names = cfg.reapNames.split(',').map(s => baseName(s.trim()));
+        if (!names.includes(b)) {
+            cfg.reapNames += ',' + b;
+            cfg.reapNamesCustom = true;
+            reapNamesEl.value = cfg.reapNames;
+            saveCfg();
+        }
+    }
 }
 
 tbodyEl.addEventListener('click', e => {
-    const btn = e.target.closest('button.kill');
-    if (!btn || btn.disabled) return;
-    const pid = Number(btn.dataset.pid);
-    if (armed.get(pid)) {
-        armed.delete(pid);
-        kill(pid, () => render());
-        btn.textContent = '…';
-    } else {
-        armed.set(pid, Date.now());
-        btn.textContent = 'sure?';
-        btn.classList.add('armed');
+    const act = e.target.closest('[data-action]');
+    if (act) { handleAction(act.dataset.action, Number(act.dataset.pid)); return; }
+    const killBtn = e.target.closest('button.kill');
+    if (killBtn) {
+        if (killBtn.disabled) return;
+        const pid = Number(killBtn.dataset.pid);
+        if (armed.get(pid)) {
+            armed.delete(pid);
+            kill(pid, false, () => render());
+            killBtn.textContent = '\u2026';
+        } else {
+            armed.set(pid, Date.now());
+            render();
+        }
+        return;
+    }
+    const tr = e.target.closest('tr[data-pid]');
+    if (tr) {
+        const pid = Number(tr.dataset.pid);
+        selectedPid = selectedPid === pid ? null : pid;
+        render();
     }
 });
+
+for (const th of document.querySelectorAll('#tbl th[data-sort]')) {
+    th.addEventListener('click', () => {
+        sortKey = th.dataset.sort;
+        for (const o of document.querySelectorAll('#tbl th[data-sort]'))
+            o.classList.toggle('sorted', o === th);
+        render();
+    });
+}
 
 const killShownBtn = $('kill-shown');
 let killShownArmedAt = 0;
@@ -283,8 +516,7 @@ killShownBtn.addEventListener('click', () => {
         killShownArmedAt = 0;
         killShownBtn.textContent = 'kill shown';
         killShownBtn.classList.remove('armed');
-        for (const p of targets) kill(p.pid);
-        setTimeout(render, 600);
+        for (const p of targets) kill(p.pid, true);
     } else {
         killShownArmedAt = Date.now();
         killShownBtn.textContent = `sure? (${targets.length})`;
@@ -296,6 +528,7 @@ for (const el of Object.values(chips)) el.addEventListener('change', render);
 qEl.addEventListener('input', render);
 
 reapOnEl.addEventListener('change', () => { cfg.reapOn = reapOnEl.checked; saveCfg(); });
+reapOrphansEl.addEventListener('change', () => { cfg.reapOrphansOnly = reapOrphansEl.checked; saveCfg(); });
 reapSecsEl.addEventListener('change', () => { cfg.reapSecs = Number(reapSecsEl.value) || 30; saveCfg(); });
 reapNamesEl.addEventListener('change', () => {
     cfg.reapNames = reapNamesEl.value;
@@ -304,12 +537,11 @@ reapNamesEl.addEventListener('change', () => {
 });
 
 // ---------------------------------------------------------------------------
-// CPU + RAM gauges (persistent typeperf stream, 1 s cadence)
+// CPU gauges (persistent typeperf stream, 1 s cadence)
 // ---------------------------------------------------------------------------
 
-const cpuHist = [];               // last 120 samples of total %
-let coreVals = [];                // current per-core %
-let availMemBytes = 0;
+const cpuHist = [];
+let coreVals = [];
 
 function startPerfStream() {
     const child = cp.spawn('typeperf', [
@@ -318,7 +550,7 @@ function startPerfStream() {
     ], { stdio: 'pipe', encoding: 'utf8' });
 
     let tail = '';
-    let cols = null;              // per column: {core: n} | {total: true} | {mem: true}
+    let cols = null;
     child.stdout.on('data', chunk => {
         tail += chunk;
         const lines = tail.split('\n');
@@ -435,7 +667,7 @@ function renderGpus(rows) {
         fill.style.width = u + '%';
         fill.className = 'fill' + (u > 90 ? ' hot' : u > 60 ? ' warn' : '');
         card.querySelector('.g-sub').textContent =
-            `${esc(name.replace(/^NVIDIA (GeForce )?/, ''))} · ${(memUsed / 1024).toFixed(1)}/${(memTotal / 1024).toFixed(0)} GB · ${esc(temp)}°C`;
+            `${esc(name.replace(/^NVIDIA (GeForce )?/, ''))} \u00b7 ${(memUsed / 1024).toFixed(1)}/${(memTotal / 1024).toFixed(0)} GB \u00b7 ${esc(temp)}\u00b0C`;
     }
 }
 
@@ -443,6 +675,8 @@ function renderGpus(rows) {
 // Go
 // ---------------------------------------------------------------------------
 
-scan();
+startStream();
+startEvents();
+runEnrich();
 startPerfStream();
 pollGpu();

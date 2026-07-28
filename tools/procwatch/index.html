@@ -35,6 +35,7 @@
 
     <section id="reaper">
         <label class="chip hot"><input type="checkbox" id="reap-on"> auto-kill</label>
+        <label class="chip"><input type="checkbox" id="reap-orphans" checked> orphans only</label>
         <span class="r-label">older than</span>
         <input type="number" id="reap-secs" min="5" step="5" value="30"> s
         <span class="r-label">names</span>
@@ -46,18 +47,19 @@
         <table id="tbl">
             <thead>
                 <tr>
-                    <th class="c-name">process</th>
+                    <th class="c-name" data-sort="name">process</th>
                     <th class="c-pid">pid</th>
-                    <th class="c-cpu">cpu</th>
-                    <th class="c-mem">mem</th>
-                    <th class="c-age">age</th>
-                    <th class="c-cmd">command line</th>
+                    <th class="c-cpu sorted" data-sort="cpu">cpu</th>
+                    <th class="c-mem" data-sort="mem">mem</th>
+                    <th class="c-age" data-sort="age">age</th>
+                    <th class="c-cmd">command</th>
                     <th class="c-kill"></th>
                 </tr>
             </thead>
             <tbody id="tbody"></tbody>
         </table>
         <div id="empty" class="hidden">nothing matches &mdash; agents are behaving, for once</div>
+        <div id="hint">click a row for details &amp; actions &mdash; kill, kill tree, open folder, copy command</div>
     </main>
 
     <footer id="status">scanning&hellip;</footer>
