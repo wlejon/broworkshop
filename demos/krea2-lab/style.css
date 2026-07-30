@@ -123,19 +123,15 @@ textarea { resize: vertical; }
 .ratio-chips button:hover { background: #1a2030; color: #cdd5e0; }
 .ratio-chips button.active { background: #63391c; border-color: #c9822f; color: #ffdcb0; }
 
-/* identity (character section): full-width reference thumb, pick buttons
-   below, strength under that */
+/* reference picture: full-width thumb, pick buttons below, share under that */
 .ident-row { display: flex; flex-direction: column; gap: 8px; }
 .ident-btns { display: flex; gap: 10px; align-items: center; }
 .ident-btns .primary { flex: 1; }
 
-/* image-as-prompt: while a picture is the conditioning, the prompt text is not
-   sent. Leave it editable — it is what you come back to — but stop it looking
-   like it is doing something. */
-.prompt-off-note { display: none; color: #f0a860; }
-#sec-scene.prompt-overridden .prompt-off-note { display: block; }
-#sec-scene.prompt-overridden #prompt,
-#sec-scene.prompt-overridden #neg-prompt { opacity: 0.45; }
+/* reference picture at full share with an empty prompt: the picture is the
+   whole conditioning. Only worth saying when it is actually the case. */
+.prompt-quiet-note { display: none; color: #f0a860; }
+#sec-scene.prompt-quiet .prompt-quiet-note { display: block; }
 
 /* seed: value + randomize toggle + recent-seed reuse, on one row */
 .seed-field { gap: 5px; }

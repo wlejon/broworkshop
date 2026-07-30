@@ -14,13 +14,13 @@
 //   axis bank (26 named + 391      — CondControl, already generic (setControl /
 //     unnamed SAE atoms + minted)    setControlVector), auto-applied at prime()
 //   gate scale / gate mask        — attention-gate research hooks
-//   image-as-prompt               — same tap mechanism, fed by the vision tower
+//   reference picture             — same tap mechanism, fed by the vision tower
 //   spatial paint compositing     — dual state, latent-level per-step blend
 //
 // Every technique except the plain axis bank needs a MANUAL step loop (prime
 // -> stepOnce* -> decode) instead of the one-shot generate(): the dial needs a
 // fresh mod-delta built from krea2TimeMod() every step, and the band dial /
-// image-as-prompt need krea2PrimeFromTaps() instead of prime(prompt). So
+// reference picture need krea2PrimeFromTaps() instead of prime(prompt). So
 // runGeneration() below is the one core loop every section (except spatial,
 // which needs two states in lockstep) funnels through.
 //
@@ -42,19 +42,13 @@
 //        <- textEncoderReloaded {textEncoder, backend}
 //   main -> generate      {prompt, negPrompt, opts, band, dial, gate, gateMask,
 //                           gateMaskBand, axisControls, expression, spectrum,
-//                           mouth, imagePrompt, captureGates, identity}
+//                           mouth, reference, captureGates}
 //        <- done          {bitmap, width, height, ms, gates?, exprNeutral?,
-//                           spectrumNote?, identityNote?, imagePromptNote?}
-//   main -> setIdentity   {pixels, H, W}     (encode + cache the reference)
-//        <- identitySet   {tokens}           (valid vision-token count)
-//   main -> clearIdentity {}
-//        <- identityCleared {}
-//   main -> setImagePrompt {pixels, H, W}    (encode + cache the picture that
-//                           REPLACES the prompt; `imagePrompt: true` on a
-//                           generate then uses it)
-//        <- imagePromptSet {tokens}
-//   main -> clearImagePrompt {}
-//        <- imagePromptCleared {}
+//                           spectrumNote?, referenceNote?}
+//   main -> setReference  {pixels, H, W}     (encode + cache the picture)
+//        <- referenceSet  {tokens}           (valid vision-token count)
+//   main -> clearReference {}
+//        <- referenceCleared {}
 //
 // `expression` is {adj, alpha} — the contextual per-token field (ported from
 // sana-research/dictionary.py, validated on Krea 2 in the emotion-axes probes):
@@ -63,8 +57,7 @@
 // neutral_taps + alpha * field. alpha 1 == what saying the word does; higher
 // extrapolates along the encoder's own displacement (identity drifts at the
 // extremes). One field per generation — the splice fixes the tokenization —
-// so the main thread sends at most one. Ignored when an image prompt is in
-// force (image-as-prompt has no text to splice).
+// so the main thread sends at most one.
 //
 // `spectrum` is {valence, arousal, hostility, surprise} — the MODEL-NOMINATED
 // affect axes, loaded PRE-BAKED from lab/spectrum.json (tools/mint_spectrum.js
@@ -75,33 +68,39 @@
 // whatever taps this generation uses — no words, no grammar, no language
 // dependence at runtime (round-7 probes: transfers to unseen subjects and a
 // Chinese prompt), and it stacks unconditionally with the expression word
-// field, the band dial, and image-as-prompt. Calibration: slider 3 ≈ probe
+// field, the band dial, and the reference picture. Calibration: slider 3 ≈ probe
 // alpha 5 (full expression); off-manifold drift starts past ~6.
 //
-// `identity` is {strength} — identity transport: the cached reference image's
-// vision-tower tap tokens (set once via setIdentity) ride ALONGSIDE this
-// generation's own conditioning tokens. The reference's raw taps are copied
-// into the free (mask-0) token slots of whatever carrier this generation uses
-// — plain prompt, expression carrier, or image-as-prompt — and the mask is
-// extended, so the DiT cross-attends to prompt AND reference simultaneously (a
-// true multimodal prime, not a pooled direction). Identity tokens join the
-// carrier BEFORE the baked banks and band dial apply, so those treat them as
-// part of the conditioning like any other token.
+// `reference` is {share} — the reference picture. A picture picked in the UI is
+// encoded ONCE through Krea 2's own Qwen3-VL vision tower (setReference) under
+// the identical fixed "describe the image" template a text prompt gets, tapped
+// at the identical 12 decoder layers. `share` of its tokens are then copied
+// into the free (mask-0) token slots of whatever carrier this generation uses —
+// plain prompt or expression carrier — and the mask is extended, so the DiT
+// cross-attends to prompt AND picture at once. They join the carrier BEFORE the
+// baked banks and band dial, so those treat them as ordinary conditioning rows.
 //
-// `strength` is a TOKEN BUDGET, not a multiplier. Scaling the copied taps —
-// what this used to do — barely moves the conditioning: every fusion block is
-// rmsnorm-first with a residual, and Krea2TextProjection normalizes each row
-// again before the DiT ever sees it, so a 2x multiply survives as cos 0.89 on
-// the fused rows. What DOES set the balance is attention mass: how many of the
-// ~260-490 reference tokens ride against the prompt's ~15-30. Copying all of
-// them (the old behaviour) makes the conditioning ~92% reference, which
-// re-renders the reference with the prompt reduced to a prop — the failure
-// that reads as "identity is not holding" because the picture is nothing the
-// prompt asked for. So the budget is strength * max(IDENT_MIN_BUDGET,
-// IDENT_TOKEN_RATIO * the carrier's own content tokens): enough tokens to
-// depict the reference at all, and more when a long prompt gives it more to
-// compete with.
+// WHAT THIS ACTUALLY TRANSFERS — measured, not assumed. Captioning three
+// references with the same Qwen3-VL family under Krea 2's own instruction and
+// rendering from the caption instead reproduces the ATTRIBUTES (wardrobe,
+// palette, subject type) just as well. What only the picture carries is the
+// ARRANGEMENT: layout correlation with the reference came out 0.69 from the
+// picture vs 0.57 from a 164-token description and 0.25 from a one-line caption
+// (the description drops the cane, the winding path, the rock, the pose). So
+// this is a composition control. It is NOT an identity control: a face does not
+// survive the encode at any share, because a description of a face is not a
+// face. The gap is widest on scenes with a specific layout and nearly closed on
+// a plain portrait, which is exactly where words do the job on their own.
 //
+// `share` is a fraction of the reference's own token count, not a gain. Scaling
+// the copied taps does almost nothing: every fusion block is rmsnorm-first with
+// a residual and Krea2TextProjection normalizes each row again before the DiT
+// sees it, so a 2x multiply survives as cos 0.89 on the fused rows. Attention
+// mass is the only real dial — how many of the reference's ~260-490 tokens ride
+// against the prompt's ~15-30. At share 1.0 with an empty prompt the picture is
+// the entire conditioning, which is "render this picture" with no separate mode
+// to implement or explain.
+
 // `mouth` is {open, round, teeth} — the same baked-bank mechanism over
 // lab/mouth.json (tools/mint_mouth.js farms ~36 mouth-state phrase fields per
 // mint prompt across human AND animal subjects, contrasts anchor-pole means,
@@ -155,11 +154,9 @@ var dictAxes = [];     // the NAMED bank's axis names — the basis minted axes 
                        // it is new" stopped meaning anything) and cost a 400x400
                        // Gram at 6144-d per mint. Those live in discoveredAxes.
 var discoveredAxes = []; // the unnamed SAE atoms — cosines only, never the solve
-var identityRef = null; // cached identity-transport reference: {taps: {embeds,
-                        // mask}, tokens} from setIdentity's vision-tower encode
+var referenceRef = null; // the cached reference picture: {taps: {embeds, mask},
+                        // tokens} from setReference's vision-tower encode
                         // (~125 MB — one at a time). Cleared on model load.
-var imagePromptRef = null; // cached image-as-prompt reference, same shape and
-                        // same lifetime rules as identityRef.
 
 // The 6 fixed scenes krea-research's mint_text_axis() averages a text-pair
 // diff over (axis_factory.py's SCENES[:6]) — robustifies the direction
@@ -209,8 +206,7 @@ function handleLoad(msg) {
     // Encoder-output caches belong to the old pipeline — a different model
     // would silently serve its predecessor's taps.
     fieldCache = {}; fieldCacheCount = 0;
-    identityRef = null;
-    imagePromptRef = null;
+    referenceRef = null;
     // Krea 2's FP16 total (DiT ~25GB + Qwen3-VL-4B text/vision ~8.3GB) doesn't
     // fit a single 24GB card. INT8 quantizes BOTH components (loadModel's
     // opts.quantizeWeights, see brodiffusion::Pipeline::ModelDirOptions) down
@@ -220,7 +216,7 @@ function handleLoad(msg) {
     // Optional text-encoder override: a Qwen3-VL-4B .gguf (e.g. Q8_0) or another
     // diffusers text_encoder. Empty/absent → the model dir's bundled encoder.
     // The engine keeps the vision tower from the model dir either way, so
-    // image-as-prompt / identity still work with a text-only gguf swapped in.
+    // the reference picture still works with a text-only gguf swapped in.
     var teOpts = { quantizeWeights: quantize };
     if (msg.textEncoderPath) teOpts.textEncoderPath = msg.textEncoderPath;
     var loadedPipeline = bro.diffusion.loadModel(msg.modelDir, teOpts);
@@ -299,7 +295,7 @@ function handleLoad(msg) {
 // (re-reading the ~26GB checkpoint is what makes a full load slow). The engine
 // reconstructs only the text model; the control axis bank, LoRAs and minted
 // axes ride on the DiT conditioning and survive untouched. Encoder-output
-// caches (per-prompt field taps, the identity reference) belong to the OLD
+// caches (per-prompt field taps, the reference picture) belong to the OLD
 // encoder — clear them so the next render re-encodes against the new one.
 function handleReloadTextEncoder(msg) {
   try {
@@ -311,8 +307,7 @@ function handleReloadTextEncoder(msg) {
     pipeline.reloadTextEncoder(msg.modelDir, msg.textEncoderPath || '',
                                { quantizeWeights: quantize });
     fieldCache = {}; fieldCacheCount = 0;
-    identityRef = null;
-    imagePromptRef = null;
+    referenceRef = null;
     var tensor = (typeof bro !== 'undefined' && bro.tensor) ? bro.tensor : null;
     self.postMessage({
       type: 'textEncoderReloaded',
@@ -496,7 +491,7 @@ function loadBankDict(name, path) {
 // Add one bank's active axes to every valid token row of `taps`, in place,
 // and return the timing-bar note. The pooled directions are per-row uniform,
 // so this works on ANY token grid — prompt taps, an expression-field carrier,
-// or image-as-prompt taps — with no words or language involved.
+// or a reference picture's taps — with no words or language involved.
 function applyBank(taps, name, values) {
   var dict = BAKED_BANKS[name].dict;
   var span = dict.span;
@@ -541,89 +536,43 @@ function activeBaked(msg) {
   return out;
 }
 
-// ── image as prompt ──────────────────────────────────────────────────────
-// The reference picture IS the conditioning: its vision-tower taps replace the
-// prompt's entirely, rather than riding alongside them the way identity
-// transport does. Same encode, same token grid, opposite proportion — which is
-// why it reproduces a reference where identity transport carries a character.
+// ── the reference picture ──────────────────────────────────────
+// Copy an evenly-spread subsample of the cached reference's vision-token tap
+// blocks (each token is a contiguous 12-layer span of the embeds buffer) into
+// the carrier's free (mask-0) slots, and mark those slots valid. `share` is the
+// fraction of the reference's own tokens that ride: 0.35 means the model is
+// told about roughly a third of the picture, 1.0 means all of it, and with an
+// empty prompt 1.0 IS "render this picture" — there is no separate mode.
 //
-// Cached like the identity reference: the vision tower costs ~350 ms, and a
-// re-render, a seed roll or an axis drag must not pay it again. Every consumer
-// downstream (band dial, baked banks, identity merge) mutates the taps in
-// place, so hand out a private copy of the embeds each time. The mask is
-// shared — applyBank only reads it and mergeIdentity replaces it with a copy,
-// exactly the contract expressionTaps already relies on.
-function imagePromptTaps() {
-  var e = imagePromptRef.taps.embeds;
-  return {
-    embeds: { rows: e.rows, cols: e.cols, data: e.data.slice() },
-    mask: imagePromptRef.taps.mask,
-  };
-}
-
-// Identity tokens per strength unit, per token of the carrier's own content.
-// Calibrated on reference/prompt pairs whose subjects and scenes share nothing
-// (a costumed character into a kitchen, a portrait into a bike ride): below
-// ~1x the prompt's own count the reference stops showing up, around 2-5x the
-// subject arrives while the prompt still owns the scene, and past that a
-// scene-heavy reference starts bringing its own background along.
-var IDENT_TOKEN_RATIO = 2.5;
-// …but a budget that is ONLY a multiple of the prompt starves the reference
-// exactly where there is nothing to protect. "a man" is two content tokens, so
-// the ratio alone buys 5 — and 10 at full strength, which renders the bare
-// prompt's stranger with a hint of reference on him. The reference needs an
-// absolute floor to be depicted at all: ~40 tokens is where a specific face
-// stops being a demographic and starts being a person, and doubling that at
-// full strength still leaves a real prompt's scene standing. The two terms
-// meet at a ~16-token prompt, so the floor governs short prompts and the ratio
-// takes over for long ones, which is the only place it is needed.
-var IDENT_MIN_BUDGET = 40;
-// Past a paragraph the prompt does not get harder to compete with, and the
-// carrier is not always words: an image prompt is a ~260-token carrier, which
-// would send the ratio straight past the free slots and leave the strength
-// dial pinned at "all of it" for its whole travel — inert, which is the exact
-// failure this budget replaced. Capping the ratio's input keeps the dial a
-// dial for every carrier.
-var IDENT_CONTENT_CAP = 64;
-
-// Identity transport: copy an evenly-spread subsample of the cached
-// reference's valid vision-token tap blocks (each token is a contiguous
-// 12-layer span of the embeds buffer) into the carrier's free (mask-0) slots,
-// and mark those slots valid. `strength` sets how many ride — see the header.
+// Even spread, not the first N: a partial share should be a lower-resolution
+// look at the whole picture, not its top strip.
+//
 // The carrier's mask is replaced with a copy first — expressionTaps hands out
 // its CACHED field mask by reference, and extending that in place would poison
 // every later use of the cached field.
-function mergeIdentity(taps, strength) {
-  if (!identityRef) {
-    throw new Error('no identity reference set — pick one in the identity panel first');
+function mergeReference(taps, share) {
+  if (!referenceRef) {
+    throw new Error('no reference picture set — pick one in the reference panel first');
   }
   var slots = taps.mask.rows;
   var span = (taps.embeds.rows / slots) * taps.embeds.cols;   // floats per token
-  var ref = identityRef.taps;
+  var ref = referenceRef.taps;
   var refSpan = (ref.embeds.rows / ref.mask.rows) * ref.embeds.cols;
   if (refSpan !== span) {
-    throw new Error('identity reference tap shape mismatch — re-set the reference');
+    throw new Error('reference tap shape mismatch — re-pick the picture');
   }
   taps.mask = { rows: taps.mask.rows, cols: taps.mask.cols, data: taps.mask.data.slice() };
-  var free = [], src = [], carrier = 0;
-  for (var t = 0; t < slots; t++) {
-    if (taps.mask.data[t] === 0) free.push(t); else carrier++;
-  }
+  var free = [], src = [];
+  for (var t = 0; t < slots; t++) if (taps.mask.data[t] === 0) free.push(t);
   for (var t = 0; t < ref.mask.rows; t++) if (ref.mask.data[t] !== 0) src.push(t);
-  if (!src.length) throw new Error('identity reference encoded to zero valid tokens');
+  if (!src.length) throw new Error('the reference encoded to zero valid tokens');
   if (!free.length) {
-    throw new Error('the prompt fills all ' + slots + ' token slots — no room for identity tokens');
+    throw new Error('the prompt fills all ' + slots + ' token slots — no room for the reference');
   }
-  // The carrier's valid rows are its content plus the 5 fixed chat-template
-  // rows every encode parks at the end; only the content should size the
-  // budget, or an empty prompt would still claim a share.
-  var content = Math.min(Math.max(1, carrier - 5), IDENT_CONTENT_CAP);
-  var want = strength * Math.max(IDENT_MIN_BUDGET, IDENT_TOKEN_RATIO * content);
-  var take = Math.min(Math.max(1, Math.round(want)), src.length, free.length);
+  var take = Math.min(Math.max(1, Math.round(share * src.length)),
+                      src.length, free.length);
   var dstData = taps.embeds.data, refData = ref.embeds.data;
   for (var i = 0; i < take; i++) {
-    // Even spread across the reference's token grid, so a partial budget is a
-    // lower-resolution look at the WHOLE reference rather than its top strip.
     var s = src[Math.floor(i * src.length / take)];
     var d = free[i];
     var dstTok = dstData.subarray(d * span, (d + 1) * span);
@@ -638,34 +587,30 @@ function mergeIdentity(taps, strength) {
 
 // Raw taps for this generation, or null to let prime(prompt) do the encode
 // (+ auto cond_control) internally. Image-as-prompt, the expression field,
-// the baked banks, the band dial, and identity transport all need the
+// the baked banks, the band dial, and the reference picture all need the
 // raw-taps path; the plain axis bank alone does not.
 function buildTaps(msg) {
   var band = (msg.band == null) ? 1.0 : +msg.band;
   var expr = (msg.expression && msg.expression.adj && +msg.expression.alpha)
     ? msg.expression : null;
   var baked = activeBaked(msg);
-  var ident = (msg.identity && +msg.identity.strength) ? msg.identity : null;
+  var refPic = (msg.reference && +msg.reference.share) ? msg.reference : null;
   var taps;
-  if (msg.imagePrompt && imagePromptRef) {
-    taps = imagePromptTaps();
-    taps.imagePromptNote = 'image prompt · ' + imagePromptRef.tokens + ' tokens';
-  } else if (expr) {
+  if (expr) {
     taps = expressionTaps(msg.prompt, String(expr.adj), +expr.alpha);
-  } else if (baked || band !== 1.0 || ident) {
+  } else if (baked || band !== 1.0 || refPic) {
     taps = pipeline.krea2EncodePromptTaps(msg.prompt);
   } else {
     return null;
   }
-  // Identity tokens join the carrier first, so the banks and band below treat
-  // them as part of the conditioning like any other token.
-  if (ident) {
-    var took = mergeIdentity(taps, +ident.strength);
-    taps.identityNote = 'identity ×' + (+ident.strength).toFixed(2) + ' · ' +
-                        took.take + ' of ' + took.of + ' tokens';
+  // The reference's tokens join the carrier first, so the banks and band below
+  // treat them as part of the conditioning like any other token.
+  if (refPic) {
+    var took = mergeReference(taps, +refPic.share);
+    taps.referenceNote = 'reference · ' + took.take + ' of ' + took.of + ' tokens';
   }
   // Baked axes are per-row uniform: they stack on whatever taps this
-  // generation uses — plain prompt, expression carrier, or image-as-prompt —
+  // generation uses — plain prompt or expression carrier —
   // and every active bank stacks on the same carrier.
   if (baked) {
     var notes = [];
@@ -802,8 +747,7 @@ function handleGenerate(msg) {
       if (gates) extra.gates = gates;
       if (taps && taps.neutral) extra.exprNeutral = taps.neutral;
       if (taps && taps.note) extra.spectrumNote = taps.note;
-      if (taps && taps.identityNote) extra.identityNote = taps.identityNote;
-      if (taps && taps.imagePromptNote) extra.imagePromptNote = taps.imagePromptNote;
+      if (taps && taps.referenceNote) extra.referenceNote = taps.referenceNote;
       if (stack) extra.stack = stack;   // {norm, budget, clamped, scale}
       respondImage('done', img, Math.round(now() - t0), extra);
     });
@@ -1090,7 +1034,7 @@ function handleMintTextAxis(msg) {
 }
 
 // Mint a user axis from an image pair (toward minus away), through the same
-// vision-tower tap path image-as-prompt uses (mirrors make_image_axis).
+// vision-tower tap path the reference picture uses (mirrors make_image_axis).
 function handleMintImageAxis(msg) {
   try {
     if (!pipeline) throw new Error('no model loaded');
@@ -1148,53 +1092,30 @@ function handleRegisterAxis(msg) {
   }
 }
 
-// ── identity transport reference ─────────────────────────────────────────
-// One encode when the reference is picked; every later generate merges the
-// cached taps for free (a strength drag costs no re-encode). The main thread
-// owns the pixels and re-sends after a model load (the cache dies with the
-// old pipeline's encoder).
-function handleSetIdentity(msg) {
+// ── the reference picture ────────────────────────────────────────────────
+// One encode when the picture is picked; every later generate merges a share
+// of the cached taps for free, so dragging the share slider costs no re-encode
+// (the vision tower is ~350 ms — a quarter of a frame). The main thread owns
+// the pixels and re-sends after a model or text-encoder load, since the cache
+// dies with the encoder that produced it.
+function handleSetReference(msg) {
   try {
     if (!pipeline) throw new Error('no model loaded');
-    if (!msg.pixels || !msg.H || !msg.W) throw new Error('setIdentity: missing pixels/H/W');
+    if (!msg.pixels || !msg.H || !msg.W) throw new Error('setReference: missing pixels/H/W');
     var taps = pipeline.krea2EncodeImagePrompt(msg.pixels, msg.H, msg.W);
     var tokens = 0;
     for (var t = 0; t < taps.mask.rows; t++) if (taps.mask.data[t] !== 0) tokens++;
-    identityRef = { taps: taps, tokens: tokens };
-    self.postMessage({ type: 'identitySet', tokens: tokens });
+    referenceRef = { taps: taps, tokens: tokens };
+    self.postMessage({ type: 'referenceSet', tokens: tokens });
   } catch (e) {
-    identityRef = null;
-    fail('setIdentity', e);
+    referenceRef = null;
+    fail('setReference', e);
   }
 }
 
-function handleClearIdentity() {
-  identityRef = null;
-  self.postMessage({ type: 'identityCleared' });
-}
-
-// ── image-as-prompt reference ────────────────────────────────────────────
-// Same encode as setIdentity, kept in its own slot because the two are
-// independent: an image prompt can carry an identity reference on top of it,
-// which is the reference's own tokens riding beside a different picture's.
-function handleSetImagePrompt(msg) {
-  try {
-    if (!pipeline) throw new Error('no model loaded');
-    if (!msg.pixels || !msg.H || !msg.W) throw new Error('setImagePrompt: missing pixels/H/W');
-    var taps = pipeline.krea2EncodeImagePrompt(msg.pixels, msg.H, msg.W);
-    var tokens = 0;
-    for (var t = 0; t < taps.mask.rows; t++) if (taps.mask.data[t] !== 0) tokens++;
-    imagePromptRef = { taps: taps, tokens: tokens };
-    self.postMessage({ type: 'imagePromptSet', tokens: tokens });
-  } catch (e) {
-    imagePromptRef = null;
-    fail('setImagePrompt', e);
-  }
-}
-
-function handleClearImagePrompt() {
-  imagePromptRef = null;
-  self.postMessage({ type: 'imagePromptCleared' });
+function handleClearReference() {
+  referenceRef = null;
+  self.postMessage({ type: 'referenceCleared' });
 }
 
 function handleRemoveControl(msg) {
@@ -1257,10 +1178,8 @@ self.onmessage = function (e) {
     case 'mintTextAxis':   handleMintTextAxis(msg); break;
     case 'mintImageAxis':  handleMintImageAxis(msg); break;
     case 'registerAxis':   handleRegisterAxis(msg); break;
-    case 'setIdentity':    handleSetIdentity(msg); break;
-    case 'clearIdentity':  handleClearIdentity(); break;
-    case 'setImagePrompt': handleSetImagePrompt(msg); break;
-    case 'clearImagePrompt': handleClearImagePrompt(); break;
+    case 'setReference':   handleSetReference(msg); break;
+    case 'clearReference': handleClearReference(); break;
     case 'removeControl':  handleRemoveControl(msg); break;
     case 'applyLora':      handleApplyLora(msg); break;
     case 'setLoras':       handleSetLoras(msg); break;

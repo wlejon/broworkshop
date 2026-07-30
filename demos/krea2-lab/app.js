@@ -41,8 +41,7 @@ import { $ } from "/app/ui/util.js";
 import { loadPrefs, savePrefs } from "/app/ui/store.js";
 import { createClient } from "/app/ui/client.js";
 import { initControls } from "/app/ui/controls.js";
-import { initImagePrompt } from "/app/ui/imgprompt.js";
-import { initIdentity } from "/app/ui/identity.js";
+import { initReference } from "/app/ui/reference.js";
 import { initFace } from "/app/ui/face.js";
 import { initTune } from "/app/ui/tune.js";
 import { initAxes } from "/app/ui/axes.js";
@@ -225,8 +224,7 @@ function init() {
       $('timing').textContent = (resp.ms ? resp.ms + ' ms' : '') +
         (resp.exprNeutral ? ' · field vs “' + resp.exprNeutral + '”' : '') +
         (resp.spectrumNote ? ' · ' + resp.spectrumNote : '') +
-        (resp.imagePromptNote ? ' · ' + resp.imagePromptNote : '') +
-        (resp.identityNote ? ' · ' + resp.identityNote : '') +
+        (resp.referenceNote ? ' · ' + resp.referenceNote : '') +
         (quality === 'preview' ? ' · preview' : '');
       pump();
     });
@@ -240,12 +238,11 @@ function init() {
 
   // ── feature modules ──────────────────────────────────────────────────────
   // Order matters: controls first (everything builds rows through ctx.buildCtl),
-  // then the panel build order fixes the deck's chip order (identity →
+  // then the panel build order fixes the deck's chip order (reference →
   // expression → spectrum → mouth → tune dials; the axis bank joins async
   // after boot).
   initControls(ctx);
-  initImagePrompt(ctx);
-  initIdentity(ctx);
+  initReference(ctx);
   initFace(ctx);
   initTune(ctx);
   initAxes(ctx);

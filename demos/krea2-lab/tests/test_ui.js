@@ -41,7 +41,7 @@ assert(document.querySelectorAll('.deck-chip').length === 0, 'deck empty after r
 
 // ── sections ──────────────────────────────────────────────────────────────
 function sec(name) { return document.querySelector('.secbtn[data-sec="' + name + '"]'); }
-['scene', 'character', 'face', 'look', 'mint', 'tune'].forEach((s) => assert(sec(s), 'section tab ' + s));
+['scene', 'face', 'look', 'mint', 'tune'].forEach((s) => assert(sec(s), 'section tab ' + s));
 sec('face').click(); flush();
 assert(document.getElementById('sec-face').classList.contains('active'), 'face section shows');
 assert(!document.getElementById('sec-scene').classList.contains('active'), 'scene section hidden');

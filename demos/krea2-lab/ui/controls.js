@@ -14,7 +14,7 @@ export function initControls(ctx) {
   function unregisterGroup(group) {
     registry = registry.filter((r) => r.group !== group);
   }
-  let activeSection = ['scene', 'character', 'face', 'look', 'explore', 'mint', 'walk', 'tune'].indexOf(ctx.prefs.section) >= 0
+  let activeSection = ['scene', 'face', 'look', 'explore', 'mint', 'walk', 'tune'].indexOf(ctx.prefs.section) >= 0
     ? ctx.prefs.section : 'scene';
   // post-refreshDeck hooks (the axis bank's per-category count badges hang here)
   const deckHooks = [];
@@ -170,12 +170,18 @@ export function initControls(ctx) {
     const host = $('deck-chips');
     if (!host) return;
     host.innerHTML = '';
-    const counts = { scene: 0, face: 0, look: 0, mint: 0, tune: 0 };
+    // Seeded from the nav rather than a literal: the literal silently missed
+    // sections (character, explore, walk), so counts[section]++ made a NaN badge
+    // that could never show.
+    const counts = {};
+    document.querySelectorAll('.secbtn').forEach((b) => {
+      counts[b.getAttribute('data-sec')] = 0;
+    });
     let n = 0;
     registry.forEach((r) => {
       if (!r.active()) return;
       n++;
-      counts[r.section]++;
+      if (counts[r.section] != null) counts[r.section]++;
       const chip = document.createElement('button');
       chip.type = 'button';
       chip.className = 'deck-chip';

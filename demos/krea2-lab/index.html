@@ -23,7 +23,6 @@
       <aside id="rail">
         <nav id="rail-nav">
           <button class="secbtn active" data-sec="scene">scene</button>
-          <button class="secbtn" data-sec="character">character</button>
           <button class="secbtn" data-sec="face">face</button>
           <button class="secbtn" data-sec="look">look</button>
           <button class="secbtn" data-sec="explore">explore</button>
@@ -49,29 +48,33 @@
                 <textarea id="neg-prompt" rows="2" maxlength="1000"
                   placeholder="blurry, low quality, deformed, watermark"></textarea>
               </label>
-              <p class="hint prompt-off-note">not in play — the image below is the prompt</p>
             </section>
 
-            <section class="panel" id="imgp-panel">
-              <h2>image as prompt <span class="hint inline">a picture instead of words</span>
+            <section class="panel" id="ref-panel">
+              <h2>reference picture <span class="hint inline">borrow a picture's arrangement</span>
                 <span class="grow"></span>
-                <button id="btn-imgp-clear" class="link" disabled
-                        title="Drop the image prompt and go back to the prompt text">clear</button>
+                <button id="btn-ref-clear" class="link" disabled
+                        title="Drop the reference picture">clear</button>
               </h2>
               <div class="ident-row">
-                <div class="imgpick-thumb ident-thumb" id="imgp-thumb">
+                <div class="imgpick-thumb ident-thumb" id="ref-thumb">
                   <div class="slot-empty">no picture</div>
                 </div>
                 <div class="ident-btns">
-                  <button id="btn-imgp-use-render" class="primary" disabled
-                          title="Use the render on the canvas as the prompt">Use current render</button>
-                  <button id="btn-imgp-browse" class="link" disabled
-                          title="Load an image file as the prompt">browse a file…</button>
+                  <button id="btn-ref-use-render" class="primary" disabled
+                          title="Use the render on the canvas as the reference">Use current render</button>
+                  <button id="btn-ref-browse" class="link" disabled
+                          title="Load an image file as the reference">browse a file…</button>
                 </div>
               </div>
-              <p class="hint" id="imgp-note"
-                 title="The picture runs through Krea 2's own vision tower under the same template a text prompt gets, and its tokens become the whole conditioning. Identity transport injects a slice of those tokens next to your words; this is all of them, instead of your words.">
-                pick a picture to render from it instead of from words</p>
+              <div id="ref-share-row"></div>
+              <p class="hint" id="ref-note">pick a picture to borrow its arrangement</p>
+              <p class="hint" title="Measured against captioning the same picture with the model's own vision tower and rendering from those words instead: the caption reproduces wardrobe, palette and subject type just as well, but loses the layout. Layout correlation with the reference came out 0.69 from the picture, 0.57 from a 164-token description, 0.25 from a one-line caption.">
+                carries <b>arrangement</b> — where things sit, the crop, the palette. Wardrobe and
+                subject type are said better in words, and a <b>face does not survive</b> at any share.
+                Strongest on scenes with a specific layout; on a plain portrait it adds little.</p>
+              <p class="hint prompt-quiet-note">at 100% with an empty prompt the picture is the
+                whole conditioning — this is “render this picture”</p>
             </section>
 
             <section class="panel">
@@ -157,32 +160,6 @@
                   <button id="btn-load" class="primary">Load model</button>
                 </div>
               </details>
-            </section>
-          </div>
-
-          <!-- ═══ character: who is in the picture ════════════════════════ -->
-          <div class="sec" id="sec-character">
-            <section class="panel">
-              <h2>identity <span class="hint inline">carry a character across renders</span>
-                <span class="grow"></span>
-                <button id="btn-ident-clear" class="link" disabled
-                        title="Drop the identity reference">clear</button>
-              </h2>
-              <div class="ident-row">
-                <div class="imgpick-thumb ident-thumb" id="ident-thumb">
-                  <div class="slot-empty">no reference</div>
-                </div>
-                <div class="ident-btns">
-                  <button id="btn-ident-use-render" class="primary" disabled
-                          title="Use the render on the canvas as the identity reference">Use current render</button>
-                  <button id="btn-ident-browse" class="link" disabled
-                          title="Load an image file as the identity reference">browse a file…</button>
-                </div>
-              </div>
-              <div id="ident-strength-row"></div>
-              <p class="hint" title="The reference is encoded once through the model's own vision tower; strength picks how many of its tokens ride alongside your prompt's tokens on every render. Too many and the reference brings its own scene with it, which is why the dial is sized against your prompt rather than set in absolute tokens.">
-                strength = how much of the reference rides against your prompt · 1 carries the character,
-                2 insists, the top of the slider is as much of it as will fit</p>
             </section>
           </div>
 

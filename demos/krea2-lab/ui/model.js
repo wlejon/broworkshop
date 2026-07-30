@@ -123,20 +123,19 @@ export function initModel(ctx) {
       loadedAxes = (msg.axes || []).length;
       // Chain the sequential restore passes (the client serializes one
       // request at a time): saved LoRAs first, then saved minted axes, then
-      // the identity reference (its worker-side cache died with the old
-      // pipeline; rebuildMintedAxes only enqueues sends, so the identity
+      // the reference picture (its worker-side cache died with the old
+      // pipeline; rebuildMintedAxes only enqueues sends, so the reference
       // encode queues FIFO behind them).
       ctx.restoreLoras(() => {
         ctx.rebuildMintedAxes();
-        ctx.restoreIdentity();
-        ctx.restoreImagePrompt();
+        ctx.restoreReference();
       });
     });
   }
 
   // Swap just the tapped Qwen3-VL-4B backbone — the engine keeps the ~25GB
   // DiT/VAE resident, so this is seconds not half a minute. Control axes,
-  // LoRAs and minted axes survive; only the identity reference is re-encoded
+  // LoRAs and minted axes survive; only the reference picture is re-encoded
   // (its taps came from the old backbone).
   function doReloadTextEncoder(modelDir, textEncoder) {
     ctx.persist();
@@ -167,9 +166,8 @@ export function initModel(ctx) {
       modelSum(dirName + teName + ' · ' + loadedAxes + ' axes ✓', 'ok');
       $('model-details').removeAttribute('open');
       ctx.status('text encoder swapped' + (msg.textEncoder ? teName : ' · bundled'), 'ok');
-      // The reference images' taps came from the old backbone — re-encode them.
-      ctx.restoreIdentity();
-      ctx.restoreImagePrompt();
+      // The reference picture's taps came from the old backbone — re-encode it.
+      ctx.restoreReference();
     });
   }
 
