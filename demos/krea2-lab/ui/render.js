@@ -204,17 +204,26 @@ export function initRender(ctx) {
     const dir = window.showOpenFolderDialog('');
     if (!dir) return;
     const sep = dir.indexOf('\\') >= 0 ? '\\' : '/';
-    let n = 0;
-    for (let i = history.length - 1; i >= 0; i--) {   // oldest first, natural order
+    // Index the names. Control-driven re-renders deliberately reuse the seed
+    // (that's what makes a slider's effect A/B-comparable), so seed+size is NOT
+    // unique across the history — naming by it alone wrote every image to one
+    // path and left only the last one on disk.
+    const pad = String(history.length).length;
+    let n = 0, failed = 0, lastErr = '';
+    for (let i = history.length - 1, k = 0; i >= 0; i--, k++) {   // oldest first, natural order
       const h = history[i];
+      const idx = String(k + 1);
+      const name = 'krea2_' + '0'.repeat(Math.max(0, pad - idx.length)) + idx +
+                   '_' + h.seed + '_' + h.width + 'x' + h.height + '.png';
       try {
         const px = h.canvas.getContext('2d').getImageData(0, 0, h.w, h.h);
-        bro.image.encodePngFile(dir + sep + 'krea2_' + h.seed + '_' + h.width + 'x' + h.height + '.png',
-                                px.data, h.w, h.h, 4);
+        bro.image.encodePngFile(dir + sep + name, px.data, h.w, h.h, 4);
         n++;
-      } catch (e) { /* skip a bad entry, keep going */ }
+      } catch (e) { failed++; lastErr = e.message || String(e); }
     }
-    ctx.status('saved ' + n + ' image' + (n === 1 ? '' : 's') + ' to ' + dir, n ? 'ok' : 'err');
+    ctx.status('saved ' + n + ' image' + (n === 1 ? '' : 's') + ' to ' + dir +
+               (failed ? ' · ' + failed + ' failed: ' + lastErr : ''),
+               failed ? 'err' : (n ? 'ok' : 'err'));
   }
   function deleteHistoryEntry(id) {
     history = history.filter((h) => h.id !== id);
