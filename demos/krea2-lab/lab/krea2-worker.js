@@ -75,16 +75,26 @@
 //
 // `identity` is {strength} — identity transport: the cached reference image's
 // vision-tower tap tokens (set once via setIdentity) ride ALONGSIDE this
-// generation's own conditioning tokens. The reference's raw taps are copied,
-// scaled by `strength`, into the free (mask-0) token slots of whatever carrier
-// this generation uses — plain prompt, expression carrier, or image-as-prompt
-// — and the mask is extended, so the DiT cross-attends to prompt AND reference
-// simultaneously (a true multimodal prime, not a pooled direction). strength 1
-// == the reference tokens verbatim; the same tap-magnitude modulation the band
-// dial relies on makes it a working dial. Identity tokens join the carrier
-// BEFORE the baked banks and band dial apply, so those treat them as part of
-// the conditioning like any other token. When the reference has more valid
-// tokens than there are free slots, it is evenly subsampled to fit.
+// generation's own conditioning tokens. The reference's raw taps are copied
+// into the free (mask-0) token slots of whatever carrier this generation uses
+// — plain prompt, expression carrier, or image-as-prompt — and the mask is
+// extended, so the DiT cross-attends to prompt AND reference simultaneously (a
+// true multimodal prime, not a pooled direction). Identity tokens join the
+// carrier BEFORE the baked banks and band dial apply, so those treat them as
+// part of the conditioning like any other token.
+//
+// `strength` is a TOKEN BUDGET, not a multiplier. Scaling the copied taps —
+// what this used to do — barely moves the conditioning: every fusion block is
+// rmsnorm-first with a residual, and Krea2TextProjection normalizes each row
+// again before the DiT ever sees it, so a 2x multiply survives as cos 0.89 on
+// the fused rows. What DOES set the balance is attention mass: how many of the
+// ~260-490 reference tokens ride against the prompt's ~15-30. Copying all of
+// them (the old behaviour) makes the conditioning ~92% reference, which
+// re-renders the reference with the prompt reduced to a prop — the failure
+// that reads as "identity is not holding" because the picture is nothing the
+// prompt asked for. So the budget is sized RELATIVE to the prompt:
+// IDENT_TOKEN_RATIO * strength * the carrier's own content tokens, which keeps
+// the same balance whether the prompt is three words or thirty.
 //
 // `mouth` is {open, round, teeth} — the same baked-bank mechanism over
 // lab/mouth.json (tools/mint_mouth.js farms ~36 mouth-state phrase fields per
@@ -521,12 +531,27 @@ function activeBaked(msg) {
   return out;
 }
 
-// Identity transport: copy the cached reference's valid vision-token tap
-// blocks (each token is a contiguous 12-layer span of the embeds buffer),
-// scaled by `strength`, into the carrier's free (mask-0) slots, and mark
-// those slots valid. The carrier's mask is replaced with a copy first —
-// expressionTaps hands out its CACHED field mask by reference, and extending
-// that in place would poison every later use of the cached field.
+// Identity tokens per strength unit, per token of the carrier's own content.
+// Calibrated on two reference/prompt pairs whose subjects and scenes share
+// nothing (a costumed character into a kitchen, a portrait into a bike ride):
+// below ~1x the prompt's own count the reference stops showing up at all,
+// around 2-5x the subject arrives while the prompt still owns the scene, and
+// past ~10x the reference's scene takes over. strength 1 lands at 2.5x, so the
+// slider's usable span (0..2) covers "a hint" to "unmistakably the same
+// character" without ever reaching "just re-render the reference" — that is
+// what image-as-prompt is for.
+var IDENT_TOKEN_RATIO = 2.5;
+// A three-word prompt would otherwise budget too few tokens for anything to
+// survive the subsample.
+var IDENT_MIN_TOKENS = 4;
+
+// Identity transport: copy an evenly-spread subsample of the cached
+// reference's valid vision-token tap blocks (each token is a contiguous
+// 12-layer span of the embeds buffer) into the carrier's free (mask-0) slots,
+// and mark those slots valid. `strength` sets how many ride — see the header.
+// The carrier's mask is replaced with a copy first — expressionTaps hands out
+// its CACHED field mask by reference, and extending that in place would poison
+// every later use of the cached field.
 function mergeIdentity(taps, strength) {
   if (!identityRef) {
     throw new Error('no identity reference set — pick one in the identity panel first');
@@ -539,27 +564,36 @@ function mergeIdentity(taps, strength) {
     throw new Error('identity reference tap shape mismatch — re-set the reference');
   }
   taps.mask = { rows: taps.mask.rows, cols: taps.mask.cols, data: taps.mask.data.slice() };
-  var free = [], src = [];
-  for (var t = 0; t < slots; t++) if (taps.mask.data[t] === 0) free.push(t);
+  var free = [], src = [], carrier = 0;
+  for (var t = 0; t < slots; t++) {
+    if (taps.mask.data[t] === 0) free.push(t); else carrier++;
+  }
   for (var t = 0; t < ref.mask.rows; t++) if (ref.mask.data[t] !== 0) src.push(t);
   if (!src.length) throw new Error('identity reference encoded to zero valid tokens');
   if (!free.length) {
     throw new Error('the prompt fills all ' + slots + ' token slots — no room for identity tokens');
   }
-  // More reference tokens than free slots: take an even subsample.
-  var take = Math.min(src.length, free.length);
+  // The carrier's valid rows are its content plus the 5 fixed chat-template
+  // rows every encode parks at the end; only the content should size the
+  // budget, or an empty prompt would still claim a share.
+  var content = Math.max(1, carrier - 5);
+  var want = Math.round(IDENT_TOKEN_RATIO * strength * content);
+  var take = Math.max(IDENT_MIN_TOKENS, want);
+  take = Math.min(take, src.length, free.length);
   var dstData = taps.embeds.data, refData = ref.embeds.data;
   for (var i = 0; i < take; i++) {
+    // Even spread across the reference's token grid, so a partial budget is a
+    // lower-resolution look at the WHOLE reference rather than its top strip.
     var s = src[Math.floor(i * src.length / take)];
     var d = free[i];
     var dstTok = dstData.subarray(d * span, (d + 1) * span);
-    // dstTok = 0*dstTok + strength*refTok — a copy at C++ speed; the filler
-    // rows being overwritten hold garbage, so wa must be 0, not 1.
+    // dstTok = 0*dstTok + 1*refTok — a copy at C++ speed; the filler rows
+    // being overwritten hold garbage, so wa must be 0, not 1.
     bro.image.combine(dstTok, dstTok, refData.subarray(s * span, (s + 1) * span),
-                      { op: 'wsum', wa: 0, wb: strength });
+                      { op: 'wsum', wa: 0, wb: 1 });
     taps.mask.data[d] = 1;
   }
-  return take;
+  return { take: take, of: src.length };
 }
 
 // Raw taps for this generation, or null to let prime(prompt) do the encode
@@ -586,7 +620,8 @@ function buildTaps(msg) {
   // them as part of the conditioning like any other token.
   if (ident) {
     var took = mergeIdentity(taps, +ident.strength);
-    taps.identityNote = 'identity ×' + (+ident.strength).toFixed(2) + ' · ' + took + ' tokens';
+    taps.identityNote = 'identity ×' + (+ident.strength).toFixed(2) + ' · ' +
+                        took.take + ' of ' + took.of + ' tokens';
   }
   // Baked axes are per-row uniform: they stack on whatever taps this
   // generation uses — plain prompt, expression carrier, or image-as-prompt —

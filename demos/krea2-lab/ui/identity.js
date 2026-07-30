@@ -2,8 +2,10 @@
 // — the current render or a file — and its vision-tower tap tokens ride
 // alongside the prompt's own conditioning tokens on every generation (the
 // worker's `identity` message field + setIdentity cache). The character
-// carries across seeds, prompt edits, and axis walks; one strength slider
-// scales the injected tokens (1 = the reference verbatim).
+// carries across seeds, prompt edits, and axis walks; one strength slider sets
+// how many of the reference's tokens ride against the prompt's own (see
+// mergeIdentity in lab/krea2-worker.js — it is attention mass, not a gain,
+// that decides whether the reference contributes a character or a whole scene).
 //
 // The reference is encoded ONCE (setIdentity) and cached in the worker, so a
 // strength drag or a re-render costs no re-encode. The main thread keeps the
@@ -115,7 +117,9 @@ export function initIdentity(ctx) {
   // ── strength slider + deck chip ──────────────────────────────────────────
   const strengthInit = Math.max(0, Math.min(2, prefs.identStrength != null ? +prefs.identStrength : 1));
   strengthCtl = ctx.buildCtl({
-    label: 'strength', title: '1 = the reference tokens verbatim · scales the injected tokens',
+    label: 'strength',
+    title: 'how many of the reference’s tokens ride, relative to your prompt’s own — ' +
+           '1 ≈ 2.5x the prompt (the character carries, the prompt keeps the scene)',
     key: 'ident-strength',
     min: 0, max: 2, step: 0.05, value: strengthInit,
     host: $('ident-strength-row'),

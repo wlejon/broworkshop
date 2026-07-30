@@ -3,8 +3,17 @@
 // "Use current render" to make it the identity reference, then render seed B
 // with the identity riding and again with it cleared. Asserts the mechanics
 // (encode lands, note reaches the timing line, renders complete) and that the
-// injected tokens actually change the seed-B image. Saves all three renders to
-// the OS temp dir for eyeball verification of the actual transport quality.
+// injected tokens actually change the seed-B image.
+//
+// Then the part that matters: the strength dial has to REBALANCE. "The image
+// changed" is too weak an assertion — it passed for a whole release while
+// strength was a tap multiplier the fusion's rmsnorms washed straight out, and
+// while every reference token was injected regardless, which buries the prompt
+// under a re-render of the reference. So the last block drives an unrelated
+// prompt and asserts the budget scales with the slider, stays a minority of the
+// reference, and moves the picture between settings.
+//
+// Renders land in the OS temp dir for eyeball verification of transport quality.
 //
 //   bro-headless ../broworkshop/demos/krea2-lab tests/test_identity.js
 
@@ -76,14 +85,65 @@ assert(!$('status-text').classList.contains('err'),
        'identity encode ok: ' + $('status-text').textContent);
 console.log($('status-text').textContent);
 assert($('ident-thumb').classList.contains('filled'), 'identity thumb shows the reference');
+// Picking a reference arms the dial; the exact value is whatever the session
+// last persisted, so pin it rather than asserting a default this test does not
+// own (an interactive session's strength would otherwise decide the renders).
 const strengthRange = $('ident-strength-row').querySelector('input[type=range]');
-assert(strengthRange && +strengthRange.value === 1, 'strength armed at 1 (got ' +
+assert(strengthRange && +strengthRange.value > 0,
+       'picking a reference arms the strength dial (got ' +
        (strengthRange && strengthRange.value) + ')');
+strengthRange.value = '1';
+strengthRange.dispatchEvent(new Event('input'));
 
 // ── seed B with the identity riding ──────────────────────────────────────────
 const withIdent = generate(SEED_B, 'ident_B');
 assert($('timing').textContent.indexOf('identity ×1.00') >= 0,
        'timing line reports the identity injection: ' + $('timing').textContent);
+
+// "identity ×1.00 · 40 of 263 tokens" — the budget and the reference's total.
+function identTokens() {
+  const m = /identity ×[\d.]+ · (\d+) of (\d+) tokens/.exec($('timing').textContent);
+  assert(m, 'timing line carries an identity token budget: ' + $('timing').textContent);
+  return { took: +m[1], of: +m[2] };
+}
+const refTotal = identTokens().of;
+assert(refTotal > 50, 'the reference encoded to a real token grid (' + refTotal + ')');
+
+// ── the strength dial has to rebalance, not just perturb ─────────────────────
+// An unrelated prompt: with the reference's full token grid injected the render
+// is the reference again wearing a chef's hat, and the dial is what keeps the
+// prompt's scene. Same seed throughout, so any difference is the dial's.
+const strength = $('ident-strength-row').querySelector('input[type=range]');
+function atStrength(v, label) {
+  strength.value = String(v);
+  strength.dispatchEvent(new Event('input'));
+  generate(SEED_B, label);
+  return identTokens().took;
+}
+$('prompt').value = 'a chef in a busy restaurant kitchen at night, holding a pan over a stove';
+const low = atStrength(0.5, 'ident_cross_lo');
+const high = atStrength(2.0, 'ident_cross_hi');
+console.log('identity budget · strength 0.5 -> ' + low + ' tokens · strength 2.0 -> ' +
+            high + ' · reference has ' + refTotal);
+assert(high > low * 2,
+       'the dial scales the token budget (' + low + ' -> ' + high + ')');
+// The regression that made identity unusable: every reference token injected,
+// so the conditioning was ~92% reference and the prompt became a prop.
+assert(high < refTotal / 2,
+       'even at full strength the reference stays a minority of its own grid (' +
+       high + ' of ' + refTotal + ')');
+// Deliberately NOT asserted: that the two renders differ in pixels. They do —
+// but so did the broken dial's, by a mean |Δ| of 47, because any perturbation
+// of the conditioning sends a 4-step sampler somewhere else. A pixel delta
+// measures chaos, not control, and trusting it is how a dial that changed
+// nothing survived. The token budget above is the claim worth testing; the
+// saved renders are for a human to look at.
+console.log('ident_cross_lo / ident_cross_hi saved for eyeball comparison');
+
+// back to the original prompt and strength for the bare comparison below
+$('prompt').value = PROMPT;
+strength.value = '1';
+strength.dispatchEvent(new Event('input'));
 
 // ── seed B bare (reference cleared) ──────────────────────────────────────────
 $('btn-ident-clear').click();
