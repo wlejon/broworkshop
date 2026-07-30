@@ -142,6 +142,9 @@ export function initFace(ctx) {
     });
     $('expr-custom-adj').addEventListener('change', () => {
       ctx.persist();
+      // the custom word is a walkable axis whose KEY carries the adjective, so
+      // committing a new word changes the catalogue the walk picker is built from
+      ctx.refreshDeck();
       if (exprSel === 'custom' && +exprCtl.range.value > 0 && ctx.live) ctx.schedule('full');
     });
     $('btn-reset-expr').addEventListener('click', () => {
@@ -206,13 +209,23 @@ export function initFace(ctx) {
   });
   // Each baked bank ships as lab/<name>.json; without it the worker rejects
   // that bank's renders, so gray the panel out instead of surfacing the error.
+  // Which baked banks the worker actually loaded. Also gates whether the bank's
+  // axes are offered as walkable — hence the deck refresh, which is what
+  // rebuilds the walk picker.
+  let specOk = false, mouthOk = false;
   function setSpectrumAvailable(ok) {
+    const was = specOk;
+    specOk = !!ok;
     $('spec-panel').classList.toggle('spec-disabled', !ok);
     if (!ok) $('spec-hint').textContent = 'no lab/spectrum.json — bake it with tools/mint_spectrum.js';
+    if (was !== specOk && ctx.refreshDeck) ctx.refreshDeck();
   }
   function setMouthAvailable(ok) {
+    const was = mouthOk;
+    mouthOk = !!ok;
     $('mouth-panel').classList.toggle('spec-disabled', !ok);
     if (!ok) $('mouth-hint').textContent = 'no lab/mouth.json — bake it with tools/mint_mouth.js';
+    if (was !== mouthOk && ctx.refreshDeck) ctx.refreshDeck();
   }
   function activeBakedValues(keys, state) {
     if (!keys.some((k) => state[k] !== 0)) return null;
@@ -225,6 +238,83 @@ export function initFace(ctx) {
 
   ctx.setSpectrumAvailable = setSpectrumAvailable;
   ctx.setMouthAvailable = setMouthAvailable;
+
+  // ── walkable face axes ────────────────────────────────────────────────────
+  // The face controls are not `axisControls` entries — they ride their own
+  // message fields (`expression`, `spectrum`, `mouth`), so they need to say for
+  // themselves how a value is applied and how their resting value is set aside.
+  //
+  //   hold(msg)     strip THIS axis' own contribution from the run's constants,
+  //                 leaving every other setting exactly as it is. The constants
+  //                 name the output folder, so an axis' resting value must not
+  //                 be part of its own walk's identity.
+  //   apply(msg, v) put the walked value in, on top of a message hold() already
+  //                 ran over.
+  //
+  // Both must reproduce what onGenerateMsg() would have sent for the same
+  // numbers, zeros included — otherwise a walk's neutral frame would render (and
+  // cache) differently from the same picture made by moving the slider to 0.
+  function bakedRest(cur, keys, key) {
+    const out = {}; let any = false;
+    keys.forEach((k) => {
+      const v = (k === key) ? 0 : (+(cur && cur[k]) || 0);
+      out[k] = v; if (v) any = true;
+    });
+    return any ? out : null;    // activeBakedValues() sends null when all zero
+  }
+  function bakedWith(cur, keys, key, v) {
+    const out = {}; let any = false;
+    keys.forEach((k) => {
+      const x = (k === key) ? v : (+(cur && cur[k]) || 0);
+      out[k] = x; if (x) any = true;
+    });
+    return any ? out : null;
+  }
+  function bakedAxes(field, keys, category, labels) {
+    return keys.map((k) => ({
+      key: 'face.' + field + '.' + k,
+      label: (labels && labels[k]) ? k + ' (' + labels[k] + ')' : k,
+      category: category, kind: 'bank',
+      min: -SPEC_RANGE, max: SPEC_RANGE,
+      hold: (m) => { m[field] = bakedRest(m[field], keys, k); },
+      apply: (m, v) => { m[field] = bakedWith(m[field], keys, k, v); },
+    }));
+  }
+
+  ctx.faceCatalog = () => {
+    const out = [];
+    // The expression field is ONE per render — the adjective is spliced into the
+    // prompt, which fixes the tokenization — so there is nothing to hold: any
+    // resting expression is displaced by the walked one, and hold() says so
+    // rather than letting a stale word ride along invisibly. One entry per word
+    // because the word, not the slider, is what a viewer will call the axis.
+    const exprAxis = (key, label, adj) => ({
+      key: 'face.expr.' + key, label: label, category: 'expression', kind: 'bank',
+      min: 0, max: 5,
+      hold: (m) => { m.expression = null; },
+      apply: (m, v) => { m.expression = v ? { adj: adj, alpha: v } : null; },
+    });
+    EXPRESSIONS.forEach((e) => out.push(exprAxis(e.key, e.label, e.adj)));
+    // The custom word is walkable too, but its adjective has to be part of the
+    // KEY: the key names the output folder and the adjective is not in the
+    // constants, so two different custom words would otherwise write their
+    // frames over each other under identical names.
+    const customAdj = $('expr-custom-adj').value.trim();
+    if (customAdj) {
+      out.push(exprAxis('custom.' + customAdj, '“' + customAdj + '”', customAdj));
+    }
+    // A bank the worker has not loaded would fail every frame of a walk, so it
+    // is not offered rather than offered and broken.
+    if (specOk) {
+      out.push.apply(out, bakedAxes('spectrum', SPECTRUM_KEYS, 'affect (spectrum)', null));
+    }
+    if (mouthOk) {
+      out.push.apply(out, bakedAxes('mouth', MOUTH_KEYS, 'mouth', {
+        open: 'closed ↔ open', round: 'spread ↔ pursed', teeth: 'hidden ↔ bared',
+      }));
+    }
+    return out;
+  };
   ctx.onPersist((p) => {
     p.exprSel = exprSel;
     p.exprStrength = exprCtl ? +exprCtl.range.value : exprStrengthInit;

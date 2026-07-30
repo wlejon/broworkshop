@@ -30,8 +30,37 @@ import { createSweepRunner } from '/lib/sweep-runner.js';
 // The axis sliders' own domain (ui/axes.js builds every one at -6…6 step 0.01).
 // Frame filenames are numbered off this grid rather than off a run's step count,
 // so the same value keeps the same name whether you walked it in 5 steps or 25 —
-// which is what lets a finer re-run reuse the coarser run's frames.
+// which is what lets a finer re-run reuse the coarser run's frames. Face axes are
+// narrower (±3 for a baked bank, 0…5 for an expression) but share the grid, so
+// their names stay unique and sort the same way.
 const AXIS_MIN = -6, AXIS_MAX = 6, AXIS_STEP = 0.01;
+
+// How a catalogue entry that does not say otherwise puts its value into a
+// generate message: as one key of `axisControls`, which is where every axis in
+// the bank, every minted axis and every unnamed atom lives.
+//
+//   hold(msg)     take THIS axis out of the run's constants (its resting value
+//                 must not be part of its own walk's identity — the constants
+//                 hash names the folder).
+//   apply(msg, v) set the walked value, on a message hold() already ran over.
+//
+// A zero is an ABSENT key, exactly as collectAxisControls() sends it, so the
+// mid-walk neutral frame hashes and renders like the same picture made with the
+// slider sitting at 0.
+function defaultHold(key) {
+  return (m) => {
+    const ac = Object.assign({}, m.axisControls || {});
+    delete ac[key];
+    m.axisControls = ac;
+  };
+}
+function defaultApply(key) {
+  return (m, v) => {
+    const ac = Object.assign({}, m.axisControls || {});
+    if (v) ac[key] = v; else delete ac[key];
+    m.axisControls = ac;
+  };
+}
 
 export function initWalk(ctx) {
   const prefs = ctx.prefs;
@@ -39,7 +68,7 @@ export function initWalk(ctx) {
   let rows = [];          // [{key, label, kind, cb, row}]
   let running = false;
   let signal = { cancelled: false };
-  let builtLen = -1;      // catalogue size the current rows were built from
+  let builtLen = '';      // catalogue signature the current rows were built from
 
   if (prefs.walkFrom != null) $('walk-from').value = prefs.walkFrom;
   if (prefs.walkTo != null) $('walk-to').value = prefs.walkTo;
@@ -59,9 +88,16 @@ export function initWalk(ctx) {
   // Inclusive of both ends, snapped to the slider's own 0.01 grid so a walk's
   // values are values a slider could actually hold (and so two runs that mean
   // the same step land on the same filename).
-  function walkValues() {
-    const from = clamp(+$('walk-from').value);
-    const to = clamp(+$('walk-to').value);
+  // `axis` is optional: a face axis carries its own narrower domain (a baked
+  // bank is ±3, an expression 0…5), and walking outside it would ask the worker
+  // for values its slider cannot hold. The run's from/to is clipped INTO the
+  // axis' domain rather than rejected, so one range setting can drive a mixed
+  // selection and each axis walks as much of it as it has.
+  function walkValues(axis) {
+    const lo = axis && isFinite(axis.min) ? axis.min : AXIS_MIN;
+    const hi = axis && isFinite(axis.max) ? axis.max : AXIS_MAX;
+    const from = clamp(+$('walk-from').value, lo, hi);
+    const to = clamp(+$('walk-to').value, lo, hi);
     const n = Math.max(2, Math.min(101, Math.round(+$('walk-steps').value) || 2));
     const out = [];
     for (let i = 0; i < n; i++) {
@@ -72,7 +108,9 @@ export function initWalk(ctx) {
     }
     return out;
   }
-  const clamp = (v) => Math.max(AXIS_MIN, Math.min(AXIS_MAX, isFinite(v) ? v : 0));
+  const clamp = (v, lo, hi) =>
+    Math.max(lo === undefined ? AXIS_MIN : lo,
+             Math.min(hi === undefined ? AXIS_MAX : hi, isFinite(v) ? v : 0));
 
   // Stable, sortable, value-derived frame name. The tick index makes a directory
   // listing read in walk order; the signed decimal keeps it human.
@@ -83,17 +121,29 @@ export function initWalk(ctx) {
   }
 
   // ── the axis picker ───────────────────────────────────────────────────────
-  // The catalogue arrives in three instalments — the bank when axes_meta.json
-  // lands, the 383 unnamed atoms when the explore list finishes its own four
-  // fetches, and a minted axis whenever one is minted — so this rebuilds
-  // whenever the catalogue's SIZE changes and is otherwise a no-op. Rebuilding
-  // is safe here in a way it is not in ui/explore.js: a checkbox's state lives
-  // in `selected`, not in the DOM, so rows come back checked. Filtering only
-  // shows and hides, and never rebuilds.
+  // The catalogue arrives in instalments — the bank when axes_meta.json lands,
+  // the face axes as the worker reports which baked banks it loaded, the 383
+  // unnamed atoms when the explore list finishes its own four fetches, and a
+  // minted axis whenever one is minted — so this rebuilds whenever the
+  // catalogue's CONTENT changes and is otherwise a no-op. Rebuilding is safe
+  // here in a way it is not in ui/explore.js: a checkbox's state lives in
+  // `selected`, not in the DOM, so rows come back checked. Filtering only shows
+  // and hides, and never rebuilds.
   function build() {
     const cat = (ctx.axisCatalog ? ctx.axisCatalog() : [])
+      .concat(ctx.faceCatalog ? ctx.faceCatalog() : [])
       .concat(ctx.exploreCatalog ? ctx.exploreCatalog() : []);
-    if (!cat.length || cat.length === builtLen) return false;
+    // Keys, not count: a bank going unavailable while another arrives leaves the
+    // count alone, and the custom expression word changes its own key as it is
+    // edited. FNV-1a over the keys is cheap enough to run per deck refresh.
+    let sig = 0x811c9dc5;
+    for (const a of cat) {
+      for (let i = 0; i < a.key.length; i++) {
+        sig = ((sig ^ a.key.charCodeAt(i)) * 0x01000193) >>> 0;
+      }
+    }
+    sig = cat.length + ':' + sig;
+    if (!cat.length || sig === builtLen) return false;
     const host = $('walk-list');
     host.innerHTML = '';
     rows = [];
@@ -138,9 +188,13 @@ export function initWalk(ctx) {
       }
       box.appendChild(row);
       rows.push({ key: a.key, label: a.label, kind: a.kind, cb: cb, row: row,
-                  verdict: a.verdict || '' });
+                  verdict: a.verdict || '',
+                  min: isFinite(a.min) ? a.min : AXIS_MIN,
+                  max: isFinite(a.max) ? a.max : AXIS_MAX,
+                  hold: a.hold || defaultHold(a.key),
+                  apply: a.apply || defaultApply(a.key) });
     });
-    builtLen = cat.length;
+    builtLen = sig;
     applyFilter();
     refreshCount();
     return true;
@@ -166,13 +220,23 @@ export function initWalk(ctx) {
 
   function refreshCount() {
     const n = selected.length;
-    const frames = walkValues().length;
+    const picked = rows.filter((r) => selected.indexOf(r.key) >= 0);
+    // Summed, not multiplied: a face axis' narrower domain clips the range, so
+    // the frame count is per axis and the total is the honest number of renders.
+    let total = 0, minF = Infinity, maxF = 0;
+    picked.forEach((r) => {
+      const f = walkValues(r).length;
+      total += f;
+      if (f < minF) minF = f;
+      if (f > maxF) maxF = f;
+    });
     $('walk-count').textContent = n ? String(n) : '';
     $('walk-count').classList.toggle('show', n > 0);
+    const each = maxF === minF ? maxF + ' frames' : minF + '–' + maxF + ' frames';
     $('walk-plan').textContent = !n
       ? 'pick one or more axes to walk'
-      : (n === 1 ? '1 axis' : n + ' axes') + ' × ' + frames + ' frames = ' +
-        (n * frames) + ' renders (already-rendered frames are skipped)';
+      : (n === 1 ? '1 axis' : n + ' axes') + ' × ' + each + ' = ' +
+        total + ' renders (already-rendered frames are skipped)';
     ctx.refreshButtons();
   }
 
@@ -234,7 +298,6 @@ export function initWalk(ctx) {
     try { runner = createSweepRunner({ root: dir }); }
     catch (e) { status(String(e.message || e), 'err'); return; }
 
-    const values = walkValues();
     const ms = Math.max(20, Math.min(5000, Math.round(+$('walk-ms').value) || 200));
     const pingPong = $('walk-pingpong').checked;
     const alsoGif = $('walk-gif').checked;
@@ -243,10 +306,10 @@ export function initWalk(ctx) {
     // every axis, is rendered against this exact message — so the only thing
     // that ever differs is the one number under test.
     const baseMsg = ctx.buildGenerateMsg('full');
-    const baseAxes = Object.assign({}, baseMsg.axisControls || {});
 
     // Ordered so the run is reproducible: the catalogue's order, not click order.
     const axes = rows.filter((r) => selected.indexOf(r.key) >= 0);
+    const grids = axes.map((a) => walkValues(a));
 
     running = true;
     signal = { cancelled: false };
@@ -254,24 +317,26 @@ export function initWalk(ctx) {
     ctx.refreshButtons();
     $('walk-log').innerHTML = '';
     const t0 = Date.now();
-    let totalFrames = axes.length * values.length, doneFrames = 0;
+    let totalFrames = grids.reduce((s, g) => s + g.length, 0), doneFrames = 0;
     let renderedTotal = 0, reusedTotal = 0, failed = 0;
-    logLine(axes.length + ' axes × ' + values.length + ' frames · ' +
-            values[0].toFixed(2) + ' → ' + values[values.length - 1].toFixed(2) +
-            ' · ' + ms + ' ms/frame' + (pingPong ? ' · ping-pong' : ''), 'head');
+    logLine(axes.length + ' axes · ' + totalFrames + ' frames · ' +
+            $('walk-from').value + ' → ' + $('walk-to').value +
+            ' (clipped to each axis’ own range) · ' + ms + ' ms/frame' +
+            (pingPong ? ' · ping-pong' : ''), 'head');
     logLine('into ' + dir, 'dim');
 
     for (let i = 0; i < axes.length; i++) {
       if (signal.cancelled) break;
       const axis = axes[i];
+      const values = grids[i];
       // This axis is the variable, so it must not also sit in the constants —
-      // otherwise its current slider value would be baked into the folder's
+      // otherwise its current resting value would be baked into the folder's
       // identity and a walk of the same axis from a different resting position
-      // would look like different settings.
+      // would look like different settings. How to set it aside is the axis'
+      // own business: an `axisControls` key is deleted, a baked bank drops one
+      // of its keys, an expression is displaced outright.
       const constants = Object.assign({}, baseMsg);
-      const held = Object.assign({}, baseAxes);
-      delete held[axis.key];
-      constants.axisControls = held;
+      axis.hold(constants);
       delete constants.type;
 
       const label = axis.label + (axis.label === axis.key ? '' : ' (' + axis.key + ')');
@@ -300,12 +365,7 @@ export function initWalk(ctx) {
           },
           render: (v) => {
             const msg = Object.assign({ type: 'generate' }, constants);
-            const ac = Object.assign({}, held);
-            // A zero is an ABSENT axis, exactly as collectAxisControls() would
-            // send it — otherwise the mid-walk neutral frame would hash (and
-            // render) differently from the same picture made with the slider at 0.
-            if (v) ac[axis.key] = v; else delete ac[axis.key];
-            msg.axisControls = ac;
+            axis.apply(msg, v);
             return renderMsg(msg);
           },
         });
@@ -412,11 +472,9 @@ export function initWalk(ctx) {
   // the value whose hash names the output folder, so a test can assert that two
   // configurations really are (or are not) the same settings.
   function constantsFor(axisKey) {
-    const baseMsg = ctx.buildGenerateMsg('full');
-    const held = Object.assign({}, baseMsg.axisControls || {});
-    delete held[axisKey];
-    const constants = Object.assign({}, baseMsg);
-    constants.axisControls = held;
+    const row = rows.filter((r) => r.key === axisKey)[0];
+    const constants = Object.assign({}, ctx.buildGenerateMsg('full'));
+    (row ? row.hold : defaultHold(axisKey))(constants);
     delete constants.type;
     return constants;
   }
@@ -426,5 +484,6 @@ export function initWalk(ctx) {
   ctx.walkInternals = { walkValues: walkValues, frameName: frameName,
                         constantsFor: constantsFor,
                         get selected() { return selected.slice(); },
+                        get rows() { return rows.slice(); },
                         rebuild: build };
 }
