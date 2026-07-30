@@ -137,9 +137,20 @@ assert(high < refTotal / 2,
 // renders the bare prompt's stranger with a hint of reference on him.
 $('prompt').value = 'a man';
 const tiny = atStrength(2.0, 'ident_short_hi');
-console.log('"a man" at full strength -> ' + tiny + ' tokens');
+console.log('"a man" at strength 2 -> ' + tiny + ' tokens');
 assert(tiny >= 60, 'a bare prompt still budgets enough tokens to depict the ' +
        'reference (' + tiny + ')');
+
+// The panel promises the top of the slider is "as much of the reference as will
+// fit". With a short prompt nearly all the token slots are free, so that has to
+// mean the whole grid.
+const top = +strength.max;
+assert(top >= 8, 'the strength dial reaches past the balanced range (max ' + top + ')');
+const most = atStrength(top, 'ident_short_max');
+console.log('"a man" at the top of the slider -> ' + most + ' of ' + refTotal + ' tokens');
+assert(most === refTotal,
+       'the top of the slider takes the whole reference (' + most + ' of ' +
+       refTotal + ')');
 
 // Deliberately NOT asserted: that the two renders differ in pixels. They do —
 // but so did the broken dial's, by a mean |Δ| of 47, because any perturbation

@@ -303,6 +303,12 @@ export function initControls(ctx) {
   ctx.switchSection = switchSection;
   ctx.switchTab = switchTab;
   ctx.registryLast = () => registry[registry.length - 1];
+  // A deck entry for a control that isn't a slider — image-as-prompt is on or
+  // off, but it belongs on the deck like everything else that changes what the
+  // model is told. Same shape buildCtl pushes: {section, active, chip,
+  // chipValue, zero, reveal}.
+  ctx.registerEntry = (entry) => { registry.push(entry); return entry; };
+  ctx.revealControl = revealControl;
   ctx.onDeckRefresh = (fn) => deckHooks.push(fn);
   Object.defineProperty(ctx, 'activeSection', { get: () => activeSection });
   ctx.onPersist((p) => { p.section = activeSection; });

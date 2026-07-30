@@ -49,6 +49,29 @@
                 <textarea id="neg-prompt" rows="2" maxlength="1000"
                   placeholder="blurry, low quality, deformed, watermark"></textarea>
               </label>
+              <p class="hint prompt-off-note">not in play — the image below is the prompt</p>
+            </section>
+
+            <section class="panel" id="imgp-panel">
+              <h2>image as prompt <span class="hint inline">a picture instead of words</span>
+                <span class="grow"></span>
+                <button id="btn-imgp-clear" class="link" disabled
+                        title="Drop the image prompt and go back to the prompt text">clear</button>
+              </h2>
+              <div class="ident-row">
+                <div class="imgpick-thumb ident-thumb" id="imgp-thumb">
+                  <div class="slot-empty">no picture</div>
+                </div>
+                <div class="ident-btns">
+                  <button id="btn-imgp-use-render" class="primary" disabled
+                          title="Use the render on the canvas as the prompt">Use current render</button>
+                  <button id="btn-imgp-browse" class="link" disabled
+                          title="Load an image file as the prompt">browse a file…</button>
+                </div>
+              </div>
+              <p class="hint" id="imgp-note"
+                 title="The picture runs through Krea 2's own vision tower under the same template a text prompt gets, and its tokens become the whole conditioning. Identity transport injects a slice of those tokens next to your words; this is all of them, instead of your words.">
+                pick a picture to render from it instead of from words</p>
             </section>
 
             <section class="panel">
@@ -158,7 +181,8 @@
               </div>
               <div id="ident-strength-row"></div>
               <p class="hint" title="The reference is encoded once through the model's own vision tower; strength picks how many of its tokens ride alongside your prompt's tokens on every render. Too many and the reference brings its own scene with it, which is why the dial is sized against your prompt rather than set in absolute tokens.">
-                strength = how much of the reference rides against your prompt · 1 carries the character, 2 insists on it</p>
+                strength = how much of the reference rides against your prompt · 1 carries the character,
+                2 insists, the top of the slider is as much of it as will fit</p>
             </section>
           </div>
 

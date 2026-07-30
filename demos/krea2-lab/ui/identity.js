@@ -115,13 +115,21 @@ export function initIdentity(ctx) {
   }
 
   // ── strength slider + deck chip ──────────────────────────────────────────
-  const strengthInit = Math.max(0, Math.min(2, prefs.identStrength != null ? +prefs.identStrength : 1));
+  // The top of the range is "as much of the reference as will fit alongside the
+  // prompt": at 8 the budget is 320 tokens for a typical prompt, which saturates
+  // most references once it is clamped to what they actually encoded to. Past
+  // that there is nothing left to ask for — a picture with no prompt at all is
+  // image-as-prompt, in the scene section.
+  const STRENGTH_MAX = 8;
+  const strengthInit = Math.max(0, Math.min(STRENGTH_MAX,
+    prefs.identStrength != null ? +prefs.identStrength : 1));
   strengthCtl = ctx.buildCtl({
     label: 'strength',
     title: 'how many of the reference’s tokens ride, relative to your prompt’s own — ' +
-           '1 ≈ 2.5x the prompt (the character carries, the prompt keeps the scene)',
+           '1 ≈ 2.5x the prompt (the character carries, the prompt keeps the scene); ' +
+           'the top of the slider is as much of the reference as will fit',
     key: 'ident-strength',
-    min: 0, max: 2, step: 0.05, value: strengthInit,
+    min: 0, max: STRENGTH_MAX, step: 0.1, value: strengthInit,
     host: $('ident-strength-row'),
     section: 'character',
     chip: () => 'identity',

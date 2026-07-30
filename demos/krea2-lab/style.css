@@ -129,6 +129,14 @@ textarea { resize: vertical; }
 .ident-btns { display: flex; gap: 10px; align-items: center; }
 .ident-btns .primary { flex: 1; }
 
+/* image-as-prompt: while a picture is the conditioning, the prompt text is not
+   sent. Leave it editable — it is what you come back to — but stop it looking
+   like it is doing something. */
+.prompt-off-note { display: none; color: #f0a860; }
+#sec-scene.prompt-overridden .prompt-off-note { display: block; }
+#sec-scene.prompt-overridden #prompt,
+#sec-scene.prompt-overridden #neg-prompt { opacity: 0.45; }
+
 /* seed: value + randomize toggle + recent-seed reuse, on one row */
 .seed-field { gap: 5px; }
 .seed-row { display: flex; align-items: center; gap: 8px; }

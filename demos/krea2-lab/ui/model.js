@@ -129,6 +129,7 @@ export function initModel(ctx) {
       ctx.restoreLoras(() => {
         ctx.rebuildMintedAxes();
         ctx.restoreIdentity();
+        ctx.restoreImagePrompt();
       });
     });
   }
@@ -166,8 +167,9 @@ export function initModel(ctx) {
       modelSum(dirName + teName + ' · ' + loadedAxes + ' axes ✓', 'ok');
       $('model-details').removeAttribute('open');
       ctx.status('text encoder swapped' + (msg.textEncoder ? teName : ' · bundled'), 'ok');
-      // The reference image's taps came from the old backbone — re-encode it.
+      // The reference images' taps came from the old backbone — re-encode them.
       ctx.restoreIdentity();
+      ctx.restoreImagePrompt();
     });
   }
 

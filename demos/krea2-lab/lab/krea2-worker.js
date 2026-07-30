@@ -42,14 +42,19 @@
 //        <- textEncoderReloaded {textEncoder, backend}
 //   main -> generate      {prompt, negPrompt, opts, band, dial, gate, gateMask,
 //                           gateMaskBand, axisControls, expression, spectrum,
-//                           mouth, imagePixels, imageH, imageW, captureGates,
-//                           identity}
+//                           mouth, imagePrompt, captureGates, identity}
 //        <- done          {bitmap, width, height, ms, gates?, exprNeutral?,
-//                           spectrumNote?, identityNote?}
+//                           spectrumNote?, identityNote?, imagePromptNote?}
 //   main -> setIdentity   {pixels, H, W}     (encode + cache the reference)
 //        <- identitySet   {tokens}           (valid vision-token count)
 //   main -> clearIdentity {}
 //        <- identityCleared {}
+//   main -> setImagePrompt {pixels, H, W}    (encode + cache the picture that
+//                           REPLACES the prompt; `imagePrompt: true` on a
+//                           generate then uses it)
+//        <- imagePromptSet {tokens}
+//   main -> clearImagePrompt {}
+//        <- imagePromptCleared {}
 //
 // `expression` is {adj, alpha} — the contextual per-token field (ported from
 // sana-research/dictionary.py, validated on Krea 2 in the emotion-axes probes):
@@ -58,8 +63,8 @@
 // neutral_taps + alpha * field. alpha 1 == what saying the word does; higher
 // extrapolates along the encoder's own displacement (identity drifts at the
 // extremes). One field per generation — the splice fixes the tokenization —
-// so the main thread sends at most one. Ignored when imagePixels is present
-// (image-as-prompt has no text to splice).
+// so the main thread sends at most one. Ignored when an image prompt is in
+// force (image-as-prompt has no text to splice).
 //
 // `spectrum` is {valence, arousal, hostility, surprise} — the MODEL-NOMINATED
 // affect axes, loaded PRE-BAKED from lab/spectrum.json (tools/mint_spectrum.js
@@ -153,6 +158,8 @@ var discoveredAxes = []; // the unnamed SAE atoms — cosines only, never the so
 var identityRef = null; // cached identity-transport reference: {taps: {embeds,
                         // mask}, tokens} from setIdentity's vision-tower encode
                         // (~125 MB — one at a time). Cleared on model load.
+var imagePromptRef = null; // cached image-as-prompt reference, same shape and
+                        // same lifetime rules as identityRef.
 
 // The 6 fixed scenes krea-research's mint_text_axis() averages a text-pair
 // diff over (axis_factory.py's SCENES[:6]) — robustifies the direction
@@ -203,6 +210,7 @@ function handleLoad(msg) {
     // would silently serve its predecessor's taps.
     fieldCache = {}; fieldCacheCount = 0;
     identityRef = null;
+    imagePromptRef = null;
     // Krea 2's FP16 total (DiT ~25GB + Qwen3-VL-4B text/vision ~8.3GB) doesn't
     // fit a single 24GB card. INT8 quantizes BOTH components (loadModel's
     // opts.quantizeWeights, see brodiffusion::Pipeline::ModelDirOptions) down
@@ -304,6 +312,7 @@ function handleReloadTextEncoder(msg) {
                                { quantizeWeights: quantize });
     fieldCache = {}; fieldCacheCount = 0;
     identityRef = null;
+    imagePromptRef = null;
     var tensor = (typeof bro !== 'undefined' && bro.tensor) ? bro.tensor : null;
     self.postMessage({
       type: 'textEncoderReloaded',
@@ -532,6 +541,26 @@ function activeBaked(msg) {
   return out;
 }
 
+// ── image as prompt ──────────────────────────────────────────────────────
+// The reference picture IS the conditioning: its vision-tower taps replace the
+// prompt's entirely, rather than riding alongside them the way identity
+// transport does. Same encode, same token grid, opposite proportion — which is
+// why it reproduces a reference where identity transport carries a character.
+//
+// Cached like the identity reference: the vision tower costs ~350 ms, and a
+// re-render, a seed roll or an axis drag must not pay it again. Every consumer
+// downstream (band dial, baked banks, identity merge) mutates the taps in
+// place, so hand out a private copy of the embeds each time. The mask is
+// shared — applyBank only reads it and mergeIdentity replaces it with a copy,
+// exactly the contract expressionTaps already relies on.
+function imagePromptTaps() {
+  var e = imagePromptRef.taps.embeds;
+  return {
+    embeds: { rows: e.rows, cols: e.cols, data: e.data.slice() },
+    mask: imagePromptRef.taps.mask,
+  };
+}
+
 // Identity tokens per strength unit, per token of the carrier's own content.
 // Calibrated on reference/prompt pairs whose subjects and scenes share nothing
 // (a costumed character into a kitchen, a portrait into a bike ride): below
@@ -549,6 +578,13 @@ var IDENT_TOKEN_RATIO = 2.5;
 // meet at a ~16-token prompt, so the floor governs short prompts and the ratio
 // takes over for long ones, which is the only place it is needed.
 var IDENT_MIN_BUDGET = 40;
+// Past a paragraph the prompt does not get harder to compete with, and the
+// carrier is not always words: an image prompt is a ~260-token carrier, which
+// would send the ratio straight past the free slots and leave the strength
+// dial pinned at "all of it" for its whole travel — inert, which is the exact
+// failure this budget replaced. Capping the ratio's input keeps the dial a
+// dial for every carrier.
+var IDENT_CONTENT_CAP = 64;
 
 // Identity transport: copy an evenly-spread subsample of the cached
 // reference's valid vision-token tap blocks (each token is a contiguous
@@ -581,7 +617,7 @@ function mergeIdentity(taps, strength) {
   // The carrier's valid rows are its content plus the 5 fixed chat-template
   // rows every encode parks at the end; only the content should size the
   // budget, or an empty prompt would still claim a share.
-  var content = Math.max(1, carrier - 5);
+  var content = Math.min(Math.max(1, carrier - 5), IDENT_CONTENT_CAP);
   var want = strength * Math.max(IDENT_MIN_BUDGET, IDENT_TOKEN_RATIO * content);
   var take = Math.min(Math.max(1, Math.round(want)), src.length, free.length);
   var dstData = taps.embeds.data, refData = ref.embeds.data;
@@ -611,8 +647,9 @@ function buildTaps(msg) {
   var baked = activeBaked(msg);
   var ident = (msg.identity && +msg.identity.strength) ? msg.identity : null;
   var taps;
-  if (msg.imagePixels) {
-    taps = pipeline.krea2EncodeImagePrompt(msg.imagePixels, msg.imageH, msg.imageW);
+  if (msg.imagePrompt && imagePromptRef) {
+    taps = imagePromptTaps();
+    taps.imagePromptNote = 'image prompt · ' + imagePromptRef.tokens + ' tokens';
   } else if (expr) {
     taps = expressionTaps(msg.prompt, String(expr.adj), +expr.alpha);
   } else if (baked || band !== 1.0 || ident) {
@@ -766,6 +803,7 @@ function handleGenerate(msg) {
       if (taps && taps.neutral) extra.exprNeutral = taps.neutral;
       if (taps && taps.note) extra.spectrumNote = taps.note;
       if (taps && taps.identityNote) extra.identityNote = taps.identityNote;
+      if (taps && taps.imagePromptNote) extra.imagePromptNote = taps.imagePromptNote;
       if (stack) extra.stack = stack;   // {norm, budget, clamped, scale}
       respondImage('done', img, Math.round(now() - t0), extra);
     });
@@ -1135,6 +1173,30 @@ function handleClearIdentity() {
   self.postMessage({ type: 'identityCleared' });
 }
 
+// ── image-as-prompt reference ────────────────────────────────────────────
+// Same encode as setIdentity, kept in its own slot because the two are
+// independent: an image prompt can carry an identity reference on top of it,
+// which is the reference's own tokens riding beside a different picture's.
+function handleSetImagePrompt(msg) {
+  try {
+    if (!pipeline) throw new Error('no model loaded');
+    if (!msg.pixels || !msg.H || !msg.W) throw new Error('setImagePrompt: missing pixels/H/W');
+    var taps = pipeline.krea2EncodeImagePrompt(msg.pixels, msg.H, msg.W);
+    var tokens = 0;
+    for (var t = 0; t < taps.mask.rows; t++) if (taps.mask.data[t] !== 0) tokens++;
+    imagePromptRef = { taps: taps, tokens: tokens };
+    self.postMessage({ type: 'imagePromptSet', tokens: tokens });
+  } catch (e) {
+    imagePromptRef = null;
+    fail('setImagePrompt', e);
+  }
+}
+
+function handleClearImagePrompt() {
+  imagePromptRef = null;
+  self.postMessage({ type: 'imagePromptCleared' });
+}
+
 function handleRemoveControl(msg) {
   try {
     if (pipeline && msg.name) pipeline.removeControl(msg.name);
@@ -1197,6 +1259,8 @@ self.onmessage = function (e) {
     case 'registerAxis':   handleRegisterAxis(msg); break;
     case 'setIdentity':    handleSetIdentity(msg); break;
     case 'clearIdentity':  handleClearIdentity(); break;
+    case 'setImagePrompt': handleSetImagePrompt(msg); break;
+    case 'clearImagePrompt': handleClearImagePrompt(); break;
     case 'removeControl':  handleRemoveControl(msg); break;
     case 'applyLora':      handleApplyLora(msg); break;
     case 'setLoras':       handleSetLoras(msg); break;

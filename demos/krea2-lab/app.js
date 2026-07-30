@@ -41,6 +41,7 @@ import { $ } from "/app/ui/util.js";
 import { loadPrefs, savePrefs } from "/app/ui/store.js";
 import { createClient } from "/app/ui/client.js";
 import { initControls } from "/app/ui/controls.js";
+import { initImagePrompt } from "/app/ui/imgprompt.js";
 import { initIdentity } from "/app/ui/identity.js";
 import { initFace } from "/app/ui/face.js";
 import { initTune } from "/app/ui/tune.js";
@@ -224,6 +225,7 @@ function init() {
       $('timing').textContent = (resp.ms ? resp.ms + ' ms' : '') +
         (resp.exprNeutral ? ' · field vs “' + resp.exprNeutral + '”' : '') +
         (resp.spectrumNote ? ' · ' + resp.spectrumNote : '') +
+        (resp.imagePromptNote ? ' · ' + resp.imagePromptNote : '') +
         (resp.identityNote ? ' · ' + resp.identityNote : '') +
         (quality === 'preview' ? ' · preview' : '');
       pump();
@@ -242,6 +244,7 @@ function init() {
   // expression → spectrum → mouth → tune dials; the axis bank joins async
   // after boot).
   initControls(ctx);
+  initImagePrompt(ctx);
   initIdentity(ctx);
   initFace(ctx);
   initTune(ctx);
