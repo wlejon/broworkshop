@@ -28,6 +28,7 @@
           <button class="secbtn" data-sec="look">look</button>
           <button class="secbtn" data-sec="explore">explore</button>
           <button class="secbtn" data-sec="mint">mint</button>
+          <button class="secbtn" data-sec="walk">walk</button>
           <button class="secbtn" data-sec="tune">tune</button>
         </nav>
 
@@ -298,6 +299,80 @@
                 <button id="btn-axis-sweep" class="link">render a −6…+6 sweep of this axis alone</button>
                 <div id="axis-sweep-strip" class="axis-sweep"></div>
               </div>
+            </section>
+          </div>
+
+          <!-- ═══ walk: render an axis across its range ═══════════════════
+               One axis at a time, everything else exactly as it stands, so the
+               axis is the only explanation for what moves between frames. Output
+               is a folder of stills plus one animation per axis; re-running skips
+               any frame whose settings already produced one. -->
+          <div class="sec" id="sec-walk">
+            <section class="panel">
+              <h2>walk an axis
+                <span id="walk-count" class="cat-count"></span>
+                <span class="grow"></span>
+                <button id="btn-walk-shown" class="link" title="Select every axis the filter is showing">select shown</button>
+                <button id="btn-walk-none" class="link" title="Clear the selection">none</button>
+              </h2>
+              <p class="hint">Each selected axis is walked <b>on its own</b>, from
+                its current settings — prompt, seed, size, every other control
+                held exactly as they are. Frames land as PNGs plus one WebM;
+                re-running only renders what is missing.</p>
+              <div class="walk-filters">
+                <input id="walk-filter" type="text" placeholder="filter axes…" spellcheck="false">
+                <select id="walk-kind" title="Which axes to list">
+                  <option value="all">all</option>
+                  <option value="bank">named</option>
+                  <option value="minted">yours</option>
+                  <option value="atom">unnamed</option>
+                </select>
+              </div>
+              <div id="walk-list" class="walk-list"></div>
+            </section>
+
+            <section class="panel">
+              <h2>the walk</h2>
+              <div class="walk-grid">
+                <label class="field compact">
+                  <span class="field-head">from</span>
+                  <input id="walk-from" type="number" value="-6" min="-6" max="6" step="0.25">
+                </label>
+                <label class="field compact">
+                  <span class="field-head">to</span>
+                  <input id="walk-to" type="number" value="6" min="-6" max="6" step="0.25">
+                </label>
+                <label class="field compact">
+                  <span class="field-head">frames</span>
+                  <input id="walk-steps" type="number" value="13" min="2" max="101" step="1">
+                </label>
+                <label class="field compact">
+                  <span class="field-head">ms / frame</span>
+                  <input id="walk-ms" type="number" value="200" min="20" max="5000" step="10">
+                </label>
+              </div>
+              <label class="walk-opt" title="Play the walk out and back, so a looping clip has no jump at the ends">
+                <input id="walk-pingpong" type="checkbox"> ping-pong the animation
+              </label>
+              <label class="walk-opt" title="Also write a GIF. Bigger and only 256 colours — the WebM is the quality copy.">
+                <input id="walk-gif" type="checkbox"> also write a GIF
+              </label>
+              <p id="walk-plan" class="hint"></p>
+            </section>
+
+            <section class="panel">
+              <h2>output</h2>
+              <div class="walk-dirrow">
+                <input id="walk-dir" type="text" spellcheck="false" placeholder="output folder">
+                <button id="btn-walk-dir" class="link">choose…</button>
+              </div>
+              <div class="walk-run">
+                <button id="btn-walk-start" class="primary" disabled>Start walk</button>
+                <button id="btn-walk-cancel" disabled>Cancel</button>
+              </div>
+              <div id="walk-progress" class="progress"><div></div></div>
+              <p id="walk-status" class="hint"></p>
+              <div id="walk-log" class="walk-log"></div>
             </section>
           </div>
 

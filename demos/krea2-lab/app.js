@@ -47,6 +47,7 @@ import { initTune } from "/app/ui/tune.js";
 import { initAxes } from "/app/ui/axes.js";
 import { initExplore } from '/app/ui/explore.js';
 import { initMint } from "/app/ui/mint.js";
+import { initWalk } from "/app/ui/walk.js";
 import { initLora } from "/app/ui/lora.js";
 import { initGate } from "/app/ui/gate.js";
 import { initSpatial } from "/app/ui/spatial.js";
@@ -247,6 +248,7 @@ function init() {
   initAxes(ctx);
   initExplore(ctx);
   initMint(ctx);
+  initWalk(ctx);
   initLora(ctx);
   initGate(ctx);
   initSpatial(ctx);

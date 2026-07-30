@@ -14,7 +14,7 @@ export function initControls(ctx) {
   function unregisterGroup(group) {
     registry = registry.filter((r) => r.group !== group);
   }
-  let activeSection = ['scene', 'character', 'face', 'look', 'explore', 'mint', 'tune'].indexOf(ctx.prefs.section) >= 0
+  let activeSection = ['scene', 'character', 'face', 'look', 'explore', 'mint', 'walk', 'tune'].indexOf(ctx.prefs.section) >= 0
     ? ctx.prefs.section : 'scene';
   // post-refreshDeck hooks (the axis bank's per-category count badges hang here)
   const deckHooks = [];

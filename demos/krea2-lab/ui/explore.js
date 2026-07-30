@@ -412,6 +412,16 @@ export function initExplore(ctx) {
     applyFilter();
   });
 
+  // The unnamed atoms as walkable axes. A picture is the only label an unnamed
+  // atom can have, which makes them exactly what the walk section is for — so
+  // they join the catalogue, carrying whatever verdict is known about them.
+  ctx.exploreCatalog = () => rows.map((r) => {
+    const s = stateOf(r.atom);
+    return { key: 'sae.' + r.atom, label: 'sae.' + r.atom, kind: 'atom',
+             category: 'unnamed · group ' + (r.group + 1),
+             verdict: s ? s.v : null, act: r.act };
+  });
+
   // What actually goes on the wire.
   ctx.collectExplore = () => {
     const out = {};

@@ -49,17 +49,17 @@ input, textarea { user-select: text; }
 .secbtn {
   flex: 1; position: relative;
   background: transparent; border: 1px solid transparent; border-bottom: none;
-  border-radius: 6px 6px 0 0; color: #7c8593; padding: 8px 4px 7px;
-  font-size: 12px; letter-spacing: 0.3px;
+  border-radius: 6px 6px 0 0; color: #7c8593; padding: 11px 3px 6px;
+  font-size: 12px; letter-spacing: 0.2px;
 }
 .secbtn:hover { color: #cdd5e0; background: #161b23; }
 .secbtn.active { background: #0c0e12; color: #f0a860; border-color: #1a1f27; }
 /* per-section active-control count */
 .sec-dot {
-  position: absolute; top: 3px; right: 5px;
-  min-width: 13px; height: 13px; padding: 0 3px; border-radius: 7px;
+  position: absolute; top: 1px; right: 1px;
+  min-width: 11px; height: 11px; padding: 0 2px; border-radius: 6px;
   background: #63391c; border: 1px solid #c9822f; color: #ffdcb0;
-  font-size: 9px; line-height: 11px; font-weight: 700; text-align: center;
+  font-size: 8px; line-height: 9px; font-weight: 700; text-align: center;
   display: none;
 }
 .sec-dot.show { display: block; }
@@ -306,12 +306,12 @@ details.axis-cat-group:last-child { border-bottom: none; }
 .ctl-cat::-webkit-details-marker { display: none; }
 .ctl-cat::before { content: '▸ '; }
 details[open] > .ctl-cat::before { content: '▾ '; }
-.ctl-cat .cat-count {
+.cat-count {
   font-size: 9px; color: #ffdcb0; background: #63391c; border: 1px solid #c9822f;
   border-radius: 7px; min-width: 13px; padding: 0 3px; text-align: center;
   line-height: 11px; display: none;
 }
-.ctl-cat .cat-count.show { display: inline-block; }
+.cat-count.show { display: inline-block; }
 .axis-cat-body { display: flex; flex-direction: column; gap: 7px; padding: 2px 0 4px; }
 
 /* "your axes" — managed minted-axis list */
@@ -776,3 +776,73 @@ details[open] > .ctl-cat::before { content: '▾ '; }
 }
 .scene-btn:hover { color: #d6dae0; }
 .scene-btn.on { background: #1e2838; color: #f0a860; border-color: #3a4356; }
+
+/* ── walk section ──────────────────────────────────────────────────────────
+   The axis picker is a checkbox list over the same catalogue the bank and the
+   explore grid build their sliders from, so a walk can target a named axis, one
+   of yours, or one of the 383 unnamed atoms without a second source of truth. */
+.walk-filters { display: flex; gap: 6px; margin-bottom: 8px; }
+.walk-filters input { flex: 1 1 auto; width: 100%; min-width: 0; }
+.walk-filters select { flex: 0 0 82px; width: 82px; min-width: 0; }
+
+.walk-list { max-height: 260px; overflow-y: auto; }
+.walk-row {
+  display: flex; align-items: center; gap: 7px;
+  padding: 3px 4px; border-radius: 3px; cursor: pointer;
+}
+.walk-row:hover { background: #12161e; }
+.walk-name {
+  color: #8b94a3; font-size: 12px; flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.walk-row input:checked ~ .walk-name { color: #f0a860; }
+.walk-tag {
+  flex: none; font-size: 10px; padding: 1px 5px; border-radius: 2px;
+  background: #12161e; border: 1px solid #1e2632; color: #5b6470;
+}
+.walk-tag.minted { color: #8fb4d8; border-color: #2a3646; }
+
+/* from / to / frames / ms — four short numbers that read as one setting. */
+.walk-grid { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px; }
+.walk-grid .field.compact { gap: 3px; }
+.walk-grid input { width: 100%; min-width: 0; }
+
+.walk-opt {
+  display: flex; align-items: center; gap: 7px;
+  color: #8b94a3; font-size: 12px; margin-top: 8px; cursor: pointer;
+}
+
+.walk-dirrow { display: flex; gap: 6px; align-items: center; }
+.walk-dirrow input { flex: 1; min-width: 0; }
+
+.walk-run { display: flex; gap: 8px; margin-top: 10px; }
+.walk-run button { flex: 1; }
+
+/* Same bar as the mint progress — a separate rule rather than reusing that
+   class, because "mint-progress" on a walk would be a lie in the inspector. */
+.progress {
+  display: none; height: 6px; border-radius: 3px; margin-top: 10px;
+  background: #0a0d13; border: 1px solid #1c2431; overflow: hidden;
+}
+.progress.show { display: block; }
+.progress > div {
+  height: 100%; width: 0%;
+  background: linear-gradient(90deg, #b8702c, #f0a860);
+  transition: width 0.15s ease-out;
+}
+
+/* One line per axis, rewritten in place as its frames land, so a long run reads
+   as a list of finished walks rather than a scrolling wall of frame numbers. */
+.walk-log {
+  max-height: 200px; overflow-y: auto; margin-top: 8px;
+  font-size: 11px; line-height: 1.5;
+}
+.walk-log-line { color: #8b94a3; }
+.walk-log-line.head { color: #d6dae0; }
+.walk-log-line.dim { color: #5b6470; }
+.walk-log-line.ok { color: #7fb069; }
+.walk-log-line.err { color: #d9694f; }
+.walk-log-path {
+  color: #5b6470; font-size: 10px; padding-left: 10px; margin-bottom: 4px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}

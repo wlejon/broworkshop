@@ -227,6 +227,19 @@ export function initAxes(ctx) {
   ctx.rebuildMintedAxes = rebuildMintedAxes;
   ctx.addMintedAxis = addMintedAxis;
   ctx.collectAxisControls = collectAxisControls;   // what actually goes on the wire
+  // Every axis that can be walked, in bank order then minted. The walk section
+  // needs the NAMES, not the rows — it sets an axis by key on a generate message
+  // rather than by turning its slider, so a walk never disturbs the live UI.
+  ctx.axisCatalog = () => {
+    const out = [];
+    Object.keys(axesMeta).sort((a, b) => axesMeta[a].order - axesMeta[b].order).forEach((k) => {
+      out.push({ key: k, label: axesMeta[k].label, category: axesMeta[k].category, kind: 'bank' });
+    });
+    mintedAxes.forEach((m) => {
+      out.push({ key: m.name, label: m.name, category: 'yours', kind: 'minted' });
+    });
+    return out;
+  };
   // Anyone who needs to know which axes the bank names — the explore list skips
   // the atoms that already have a labelled slider here, so it cannot build until
   // this has landed.
