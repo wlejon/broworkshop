@@ -132,6 +132,15 @@ assert(high > low * 2,
 assert(high < refTotal / 2,
        'even at full strength the reference stays a minority of its own grid (' +
        high + ' of ' + refTotal + ')');
+// A two-word prompt must not starve the reference. Sizing the budget purely as
+// a multiple of the prompt gave "a man" ten tokens at full strength, which
+// renders the bare prompt's stranger with a hint of reference on him.
+$('prompt').value = 'a man';
+const tiny = atStrength(2.0, 'ident_short_hi');
+console.log('"a man" at full strength -> ' + tiny + ' tokens');
+assert(tiny >= 60, 'a bare prompt still budgets enough tokens to depict the ' +
+       'reference (' + tiny + ')');
+
 // Deliberately NOT asserted: that the two renders differ in pixels. They do —
 // but so did the broken dial's, by a mean |Δ| of 47, because any perturbation
 // of the conditioning sends a 4-step sampler somewhere else. A pixel delta

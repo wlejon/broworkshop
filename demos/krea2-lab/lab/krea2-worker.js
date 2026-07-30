@@ -92,9 +92,10 @@
 // them (the old behaviour) makes the conditioning ~92% reference, which
 // re-renders the reference with the prompt reduced to a prop — the failure
 // that reads as "identity is not holding" because the picture is nothing the
-// prompt asked for. So the budget is sized RELATIVE to the prompt:
-// IDENT_TOKEN_RATIO * strength * the carrier's own content tokens, which keeps
-// the same balance whether the prompt is three words or thirty.
+// prompt asked for. So the budget is strength * max(IDENT_MIN_BUDGET,
+// IDENT_TOKEN_RATIO * the carrier's own content tokens): enough tokens to
+// depict the reference at all, and more when a long prompt gives it more to
+// compete with.
 //
 // `mouth` is {open, round, teeth} — the same baked-bank mechanism over
 // lab/mouth.json (tools/mint_mouth.js farms ~36 mouth-state phrase fields per
@@ -532,18 +533,22 @@ function activeBaked(msg) {
 }
 
 // Identity tokens per strength unit, per token of the carrier's own content.
-// Calibrated on two reference/prompt pairs whose subjects and scenes share
-// nothing (a costumed character into a kitchen, a portrait into a bike ride):
-// below ~1x the prompt's own count the reference stops showing up at all,
-// around 2-5x the subject arrives while the prompt still owns the scene, and
-// past ~10x the reference's scene takes over. strength 1 lands at 2.5x, so the
-// slider's usable span (0..2) covers "a hint" to "unmistakably the same
-// character" without ever reaching "just re-render the reference" — that is
-// what image-as-prompt is for.
+// Calibrated on reference/prompt pairs whose subjects and scenes share nothing
+// (a costumed character into a kitchen, a portrait into a bike ride): below
+// ~1x the prompt's own count the reference stops showing up, around 2-5x the
+// subject arrives while the prompt still owns the scene, and past that a
+// scene-heavy reference starts bringing its own background along.
 var IDENT_TOKEN_RATIO = 2.5;
-// A three-word prompt would otherwise budget too few tokens for anything to
-// survive the subsample.
-var IDENT_MIN_TOKENS = 4;
+// …but a budget that is ONLY a multiple of the prompt starves the reference
+// exactly where there is nothing to protect. "a man" is two content tokens, so
+// the ratio alone buys 5 — and 10 at full strength, which renders the bare
+// prompt's stranger with a hint of reference on him. The reference needs an
+// absolute floor to be depicted at all: ~40 tokens is where a specific face
+// stops being a demographic and starts being a person, and doubling that at
+// full strength still leaves a real prompt's scene standing. The two terms
+// meet at a ~16-token prompt, so the floor governs short prompts and the ratio
+// takes over for long ones, which is the only place it is needed.
+var IDENT_MIN_BUDGET = 40;
 
 // Identity transport: copy an evenly-spread subsample of the cached
 // reference's valid vision-token tap blocks (each token is a contiguous
@@ -577,9 +582,8 @@ function mergeIdentity(taps, strength) {
   // rows every encode parks at the end; only the content should size the
   // budget, or an empty prompt would still claim a share.
   var content = Math.max(1, carrier - 5);
-  var want = Math.round(IDENT_TOKEN_RATIO * strength * content);
-  var take = Math.max(IDENT_MIN_TOKENS, want);
-  take = Math.min(take, src.length, free.length);
+  var want = strength * Math.max(IDENT_MIN_BUDGET, IDENT_TOKEN_RATIO * content);
+  var take = Math.min(Math.max(1, Math.round(want)), src.length, free.length);
   var dstData = taps.embeds.data, refData = ref.embeds.data;
   for (var i = 0; i < take; i++) {
     // Even spread across the reference's token grid, so a partial budget is a
