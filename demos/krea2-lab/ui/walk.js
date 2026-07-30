@@ -7,11 +7,19 @@
 // a walk answers "what is this control worth", at full size, with YOUR prompt
 // and YOUR other settings left exactly as they are.
 //
-// One axis at a time, by construction. Every frame in a walk differs from its
+// One axis at a time by default. Every frame in such a walk differs from its
 // neighbours in exactly one number, so the axis is the only explanation for what
-// moved — which is the whole claim a showcase makes. Walking two axes at once
-// would forfeit it, so selecting N axes runs N independent walks rather than a
-// grid.
+// moved — which is the whole claim a showcase makes. Selecting N axes therefore
+// runs N independent walks rather than a grid.
+//
+// But some concepts are not one axis. The mouth barely opens unless `round`
+// travels against `open`, and reading `open` alone would say the model has no
+// mouth control when it plainly does. So a selection can instead be walked as
+// one RIG: every member moves on every frame, each along its own from/to (set
+// them the other way round to send an axis backwards), all on one shared 0…1
+// parameter. That trades "the axis is the only explanation" for "the rig is",
+// which is the honest claim when the members only mean something together — and
+// it is a choice made in the UI rather than one made for you.
 //
 // Nothing here turns a slider. The walk builds a generate message from the
 // current settings once, at the start, then overrides the one axis per frame.
@@ -68,6 +76,9 @@ export function initWalk(ctx) {
   let rows = [];          // [{key, label, kind, cb, row}]
   let running = false;
   let signal = { cancelled: false };
+  // key -> {from, to}, only for axes given a range of their own
+  let ranges = (prefs.walkRanges && typeof prefs.walkRanges === 'object')
+    ? JSON.parse(JSON.stringify(prefs.walkRanges)) : {};
   let builtLen = '';      // catalogue signature the current rows were built from
 
   if (prefs.walkFrom != null) $('walk-from').value = prefs.walkFrom;
@@ -76,6 +87,8 @@ export function initWalk(ctx) {
   if (prefs.walkMs != null) $('walk-ms').value = prefs.walkMs;
   if (prefs.walkPingPong != null) $('walk-pingpong').checked = !!prefs.walkPingPong;
   if (prefs.walkGif != null) $('walk-gif').checked = !!prefs.walkGif;
+  if (prefs.walkTogether) $('walk-mode-together').checked = true;
+  else $('walk-mode-each').checked = true;
   $('walk-dir').value = prefs.walkDir || (bro.appDir + (bro.appDir.indexOf('\\') >= 0 ? '\\walks' : '/walks'));
 
   function status(msg, kind) {
@@ -88,29 +101,97 @@ export function initWalk(ctx) {
   // Inclusive of both ends, snapped to the slider's own 0.01 grid so a walk's
   // values are values a slider could actually hold (and so two runs that mean
   // the same step land on the same filename).
-  // `axis` is optional: a face axis carries its own narrower domain (a baked
-  // bank is ±3, an expression 0…5), and walking outside it would ask the worker
-  // for values its slider cannot hold. The run's from/to is clipped INTO the
-  // axis' domain rather than rejected, so one range setting can drive a mixed
-  // selection and each axis walks as much of it as it has.
-  function walkValues(axis) {
+  const stepCount = () =>
+    Math.max(2, Math.min(101, Math.round(+$('walk-steps').value) || 2));
+  const snap = (v) => Math.round(Math.round(v / AXIS_STEP) * AXIS_STEP * 100) / 100;
+
+  // The range an axis actually walks. The panel's from/to is the default for
+  // every axis; `ranges[key]` overrides it for one. Either way it is clipped
+  // INTO that axis' own domain (a baked bank is ±3, an expression 0…5), because
+  // walking past it would ask the worker for values its slider cannot hold.
+  //
+  // An override is how an axis is sent the OTHER WAY: from > to just reverses
+  // the interpolation, which is what a rig needs — the mouth barely opens unless
+  // `round` travels against `open`.
+  function effectiveRange(axis) {
     const lo = axis && isFinite(axis.min) ? axis.min : AXIS_MIN;
     const hi = axis && isFinite(axis.max) ? axis.max : AXIS_MAX;
-    const from = clamp(+$('walk-from').value, lo, hi);
-    const to = clamp(+$('walk-to').value, lo, hi);
-    const n = Math.max(2, Math.min(101, Math.round(+$('walk-steps').value) || 2));
+    const own = axis && ranges[axis.key];
+    const from = own ? own.from : +$('walk-from').value;
+    const to = own ? own.to : +$('walk-to').value;
+    return { from: clamp(from, lo, hi), to: clamp(to, lo, hi), lo: lo, hi: hi,
+             set: !!own };
+  }
+
+  function walkValues(axis) {
+    const r = effectiveRange(axis);
+    const n = stepCount();
     const out = [];
     for (let i = 0; i < n; i++) {
-      const v = from + (to - from) * (i / (n - 1));
-      const snapped = Math.round(v / AXIS_STEP) * AXIS_STEP;
-      const r = Math.round(snapped * 100) / 100;
-      if (out.length === 0 || out[out.length - 1] !== r) out.push(r);
+      const v = snap(r.from + (r.to - r.from) * (i / (n - 1)));
+      if (out.length === 0 || out[out.length - 1] !== v) out.push(v);
     }
     return out;
   }
   const clamp = (v, lo, hi) =>
     Math.max(lo === undefined ? AXIS_MIN : lo,
              Math.min(hi === undefined ? AXIS_MAX : hi, isFinite(v) ? v : 0));
+
+  // ── walking several axes as one rig ───────────────────────────────────────
+  // One frame moves EVERY member, each along its own range, all on the same
+  // 0…1 parameter. The step grid is shared; the ranges are not.
+  //
+  // A frame's identity is the whole vector plus its position along the walk, so
+  // the same reuse rule holds as for a single axis: doubling the frame count
+  // re-renders only the steps that fall between the ones already on disk, and
+  // changing any member's range forks new files beside the old ones rather than
+  // overwriting a walk you already made.
+  function comboGrid(members) {
+    const n = stepCount();
+    const rs = members.map(effectiveRange);
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const t = i / (n - 1);
+      const v = {};
+      members.forEach((m, j) => { v[m.key] = snap(rs[j].from + (rs[j].to - rs[j].from) * t); });
+      const sig = JSON.stringify(v);
+      if (out.length && out[out.length - 1].sig === sig) continue;
+      out.push({ t: Math.round(t * 10000) / 10000, v: v, sig: sig });
+    }
+    // `sig` was only for the dedupe — it must not reach the frame hash, or the
+    // key ORDER of a JSON string would quietly become part of a frame's identity.
+    return out.map((e) => ({ t: e.t, v: e.v }));
+  }
+
+  function fnv(s) {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < s.length; i++) h = ((h ^ s.charCodeAt(i)) * 0x01000193) >>> 0;
+    return ('0000000' + h.toString(16)).slice(-8);
+  }
+
+  // Sortable by position first (so a directory listing reads in walk order),
+  // then the vector itself, so two runs that pass through the same point share
+  // the frame. Long rigs fall back to a hash of the vector rather than a
+  // filename the OS would refuse.
+  function comboFrameName(entry) {
+    const head = 't' + String(Math.round(entry.t * 10000)).padStart(5, '0');
+    const parts = Object.keys(entry.v).sort().map((k) => {
+      const v = entry.v[k];
+      return (v < 0 ? 'm' : 'p') + Math.abs(v).toFixed(2);
+    });
+    const tail = parts.join('_');
+    return tail.length <= 56 ? head + '_' + tail : head + '_' + fnv(tail);
+  }
+
+  function comboName(members) {
+    const keys = members.map((m) => m.key).sort();
+    const joined = keys.join('+');
+    // sanitizeName() truncates at 80, which would let two long rigs collide in
+    // one folder — so a long rig names itself by its first member and a hash.
+    return 'rig_' + (joined.length <= 56
+      ? joined
+      : keys[0] + '+' + (keys.length - 1) + 'more_' + fnv(joined));
+  }
 
   // Stable, sortable, value-derived frame name. The tick index makes a directory
   // listing read in walk order; the signed decimal keeps it human.
@@ -191,6 +272,7 @@ export function initWalk(ctx) {
                   verdict: a.verdict || '',
                   min: isFinite(a.min) ? a.min : AXIS_MIN,
                   max: isFinite(a.max) ? a.max : AXIS_MAX,
+                  exclusive: a.exclusive || '',
                   hold: a.hold || defaultHold(a.key),
                   apply: a.apply || defaultApply(a.key) });
     });
@@ -218,25 +300,108 @@ export function initWalk(ctx) {
     });
   }
 
+  const pickedAxes = () => rows.filter((r) => selected.indexOf(r.key) >= 0);
+  const together = () => $('walk-mode-together').checked;
+
+  // ── per-axis range rows ───────────────────────────────────────────────────
+  // Rebuilt from the selection rather than kept in sync, because the selection
+  // is the only state that matters — an override for an axis nobody picked is
+  // harmless and is simply not shown.
+  function buildRanges() {
+    const host = $('walk-ranges');
+    host.innerHTML = '';
+    const picked = pickedAxes();
+    if (picked.length < 1) return;
+    picked.forEach((axis) => {
+      const r = effectiveRange(axis);
+      const row = document.createElement('div');
+      row.className = 'walk-rng' + (r.set ? ' set' : '');
+      row.setAttribute('data-key', axis.key);
+
+      const nm = document.createElement('span');
+      nm.className = 'walk-rng-name';
+      nm.textContent = axis.label;
+      nm.title = axis.key + ' · domain ' + r.lo + '…' + r.hi;
+      row.appendChild(nm);
+
+      const mk = (which) => {
+        const inp = document.createElement('input');
+        inp.type = 'number';
+        inp.step = '0.25';
+        inp.min = String(r.lo); inp.max = String(r.hi);
+        inp.value = String(r[which]);
+        inp.title = which + ' — set from > to to run this axis the other way';
+        inp.addEventListener('change', () => {
+          const cur = effectiveRange(axis);
+          const next = { from: cur.from, to: cur.to };
+          next[which] = clamp(+inp.value, r.lo, r.hi);
+          ranges[axis.key] = next;
+          ctx.persist();
+          refreshCount();
+        });
+        return inp;
+      };
+      row.appendChild(mk('from'));
+      const flip = document.createElement('button');
+      flip.type = 'button';
+      flip.textContent = '↔';
+      flip.title = 'run this axis the other way';
+      flip.addEventListener('click', () => {
+        const cur = effectiveRange(axis);
+        ranges[axis.key] = { from: cur.to, to: cur.from };
+        ctx.persist();
+        refreshCount();
+      });
+      row.appendChild(flip);
+      row.appendChild(mk('to'));
+
+      const clr = document.createElement('button');
+      clr.type = 'button';
+      clr.className = 'clr';
+      clr.textContent = '×';
+      clr.title = 'follow the range above again';
+      clr.addEventListener('click', () => {
+        delete ranges[axis.key];
+        ctx.persist();
+        refreshCount();
+      });
+      row.appendChild(clr);
+      host.appendChild(row);
+    });
+  }
+
   function refreshCount() {
     const n = selected.length;
-    const picked = rows.filter((r) => selected.indexOf(r.key) >= 0);
-    // Summed, not multiplied: a face axis' narrower domain clips the range, so
-    // the frame count is per axis and the total is the honest number of renders.
-    let total = 0, minF = Infinity, maxF = 0;
-    picked.forEach((r) => {
-      const f = walkValues(r).length;
-      total += f;
-      if (f < minF) minF = f;
-      if (f > maxF) maxF = f;
-    });
+    const picked = pickedAxes();
+    buildRanges();
     $('walk-count').textContent = n ? String(n) : '';
     $('walk-count').classList.toggle('show', n > 0);
-    const each = maxF === minF ? maxF + ' frames' : minF + '–' + maxF + ' frames';
-    $('walk-plan').textContent = !n
-      ? 'pick one or more axes to walk'
-      : (n === 1 ? '1 axis' : n + ' axes') + ' × ' + each + ' = ' +
+    if (!n) {
+      $('walk-plan').textContent = 'pick one or more axes to walk';
+      ctx.refreshButtons();
+      return;
+    }
+    if (together()) {
+      const frames = comboGrid(picked).length;
+      $('walk-plan').textContent =
+        (n === 1 ? '1 axis' : n + ' axes moving together') + ' × ' + frames +
+        ' frames = ' + frames + ' renders (already-rendered frames are skipped)';
+    } else {
+      // Summed, not multiplied: each axis walks its own range over its own
+      // domain, so the frame count is per axis and the total is the honest
+      // number of renders.
+      let total = 0, minF = Infinity, maxF = 0;
+      picked.forEach((r) => {
+        const f = walkValues(r).length;
+        total += f;
+        if (f < minF) minF = f;
+        if (f > maxF) maxF = f;
+      });
+      const each = maxF === minF ? maxF + ' frames' : minF + '–' + maxF + ' frames';
+      $('walk-plan').textContent =
+        (n === 1 ? '1 axis' : n + ' axes') + ' × ' + each + ' = ' +
         total + ' renders (already-rendered frames are skipped)';
+    }
     ctx.refreshButtons();
   }
 
@@ -308,8 +473,60 @@ export function initWalk(ctx) {
     const baseMsg = ctx.buildGenerateMsg('full');
 
     // Ordered so the run is reproducible: the catalogue's order, not click order.
-    const axes = rows.filter((r) => selected.indexOf(r.key) >= 0);
-    const grids = axes.map((a) => walkValues(a));
+    const axes = pickedAxes();
+
+    // One job = one sweep = one folder and one animation. Walking axes on their
+    // own makes a job each; walking them together makes exactly one, whose value
+    // is the whole vector rather than a number.
+    let jobs;
+    if (together()) {
+      // Two members of the same exclusive field cannot both be on a frame — the
+      // second would simply overwrite the first and the walk would silently be
+      // of one axis. Say so instead of rendering nonsense.
+      const groups = {};
+      for (const a of axes) {
+        if (!a.exclusive) continue;
+        if (groups[a.exclusive]) {
+          status('“' + groups[a.exclusive] + '” and “' + a.label + '” cannot move ' +
+                 'on the same frame — a render carries one ' + a.exclusive +
+                 ', so walk them separately', 'err');
+          return;
+        }
+        groups[a.exclusive] = a.label;
+      }
+      const grid = comboGrid(axes);
+      const constants = Object.assign({}, baseMsg);
+      axes.forEach((a) => a.hold(constants));
+      delete constants.type;
+      jobs = [{
+        name: comboName(axes),
+        label: axes.length + ' axes together (' + axes.map((a) => a.label).join(', ') + ')',
+        constants: constants,
+        values: grid,
+        frameName: comboFrameName,
+        apply: (msg, entry) => axes.forEach((a) => a.apply(msg, entry.v[a.key])),
+      }];
+    } else {
+      jobs = axes.map((axis) => {
+        // This axis is the variable, so it must not also sit in the constants —
+        // otherwise its current resting value would be baked into the folder's
+        // identity and a walk of the same axis from a different resting position
+        // would look like different settings. How to set it aside is the axis'
+        // own business: an `axisControls` key is deleted, a baked bank drops one
+        // of its keys, an expression is displaced outright.
+        const constants = Object.assign({}, baseMsg);
+        axis.hold(constants);
+        delete constants.type;
+        return {
+          name: axis.key,
+          label: axis.label + (axis.label === axis.key ? '' : ' (' + axis.key + ')'),
+          constants: constants,
+          values: walkValues(axis),
+          frameName: frameName,
+          apply: (msg, v) => axis.apply(msg, v),
+        };
+      });
+    }
 
     running = true;
     signal = { cancelled: false };
@@ -317,31 +534,29 @@ export function initWalk(ctx) {
     ctx.refreshButtons();
     $('walk-log').innerHTML = '';
     const t0 = Date.now();
-    let totalFrames = grids.reduce((s, g) => s + g.length, 0), doneFrames = 0;
+    let totalFrames = jobs.reduce((s, j) => s + j.values.length, 0), doneFrames = 0;
     let renderedTotal = 0, reusedTotal = 0, failed = 0;
-    logLine(axes.length + ' axes · ' + totalFrames + ' frames · ' +
-            $('walk-from').value + ' → ' + $('walk-to').value +
-            ' (clipped to each axis’ own range) · ' + ms + ' ms/frame' +
-            (pingPong ? ' · ping-pong' : ''), 'head');
+    logLine(axes.length + (together() ? ' axes as one rig · ' : ' axes · ') +
+            totalFrames + ' frames · ' + $('walk-from').value + ' → ' +
+            $('walk-to').value + ' (each axis’ own range and domain wins) · ' +
+            ms + ' ms/frame' + (pingPong ? ' · ping-pong' : ''), 'head');
+    if (together()) {
+      axes.forEach((a) => {
+        const r = effectiveRange(a);
+        logLine('  ' + a.label + ': ' + r.from.toFixed(2) + ' → ' + r.to.toFixed(2), 'dim');
+      });
+    }
     logLine('into ' + dir, 'dim');
 
-    for (let i = 0; i < axes.length; i++) {
+    for (let i = 0; i < jobs.length; i++) {
       if (signal.cancelled) break;
-      const axis = axes[i];
-      const values = grids[i];
-      // This axis is the variable, so it must not also sit in the constants —
-      // otherwise its current resting value would be baked into the folder's
-      // identity and a walk of the same axis from a different resting position
-      // would look like different settings. How to set it aside is the axis'
-      // own business: an `axisControls` key is deleted, a baked bank drops one
-      // of its keys, an expression is displaced outright.
-      const constants = Object.assign({}, baseMsg);
-      axis.hold(constants);
-      delete constants.type;
-
-      const label = axis.label + (axis.label === axis.key ? '' : ' (' + axis.key + ')');
+      const job = jobs[i];
+      const values = job.values;
+      const constants = job.constants;
+      const label = job.label;
       const line = logLine('walking ' + label + '…');
-      status('walking ' + label + ' · axis ' + (i + 1) + '/' + axes.length);
+      status('walking ' + label + (jobs.length > 1
+        ? ' · ' + (i + 1) + '/' + jobs.length : ''));
 
       const anims = [{ msPerFrame: ms, pingPong: pingPong, format: 'webm',
                        name: 'walk_' + values.length + 'f_' + ms + 'ms' + (pingPong ? '_pp' : '') }];
@@ -350,10 +565,10 @@ export function initWalk(ctx) {
 
       try {
         const res = await runner.runSweep({
-          name: axis.key,
+          name: job.name,
           baseKey: constants,
           values: values,
-          frameName: frameName,
+          frameName: job.frameName,
           animations: anims,
           signal: signal,
           onProgress: (p) => {
@@ -365,7 +580,7 @@ export function initWalk(ctx) {
           },
           render: (v) => {
             const msg = Object.assign({ type: 'generate' }, constants);
-            axis.apply(msg, v);
+            job.apply(msg, v);
             return renderMsg(msg);
           },
         });
@@ -428,6 +643,9 @@ export function initWalk(ctx) {
   ['walk-pingpong', 'walk-gif'].forEach((id) => {
     $(id).addEventListener('change', ctx.persist);
   });
+  ['walk-mode-each', 'walk-mode-together'].forEach((id) => {
+    $(id).addEventListener('change', () => { refreshCount(); ctx.persist(); });
+  });
   $('btn-walk-none').addEventListener('click', () => {
     selected = [];
     rows.forEach((r) => { r.cb.checked = false; });
@@ -466,6 +684,10 @@ export function initWalk(ctx) {
     p.walkDir = $('walk-dir').value;
     p.walkPingPong = $('walk-pingpong').checked;
     p.walkGif = $('walk-gif').checked;
+    p.walkTogether = together();
+    // Only the axes actually overridden — a range that merely follows the panel
+    // is not state, and persisting it would freeze the panel's own from/to.
+    p.walkRanges = ranges;
   });
 
   // The held constants for one axis, exactly as start() computes them. This is
@@ -483,7 +705,15 @@ export function initWalk(ctx) {
   // their own render function, and need the value grid + naming to assert on.
   ctx.walkInternals = { walkValues: walkValues, frameName: frameName,
                         constantsFor: constantsFor,
+                        comboGrid: comboGrid, comboFrameName: comboFrameName,
+                        comboName: comboName, effectiveRange: effectiveRange,
+                        setRange: (k, from, to) => {
+                          if (from == null) delete ranges[k];
+                          else ranges[k] = { from: from, to: to };
+                          refreshCount();
+                        },
                         get selected() { return selected.slice(); },
                         get rows() { return rows.slice(); },
+                        get picked() { return pickedAxes(); },
                         rebuild: build };
 }

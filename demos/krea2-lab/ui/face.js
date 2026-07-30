@@ -291,6 +291,9 @@ export function initFace(ctx) {
     const exprAxis = (key, label, adj) => ({
       key: 'face.expr.' + key, label: label, category: 'expression', kind: 'bank',
       min: 0, max: 5,
+      // One word per render — so two of these can never move on the same frame,
+      // and a rig that asks for it is refused rather than quietly walking one.
+      exclusive: 'expression',
       hold: (m) => { m.expression = null; },
       apply: (m, v) => { m.expression = v ? { adj: adj, alpha: v } : null; },
     });
