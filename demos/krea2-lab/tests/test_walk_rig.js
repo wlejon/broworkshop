@@ -89,20 +89,22 @@ assert(pick('face.mouth.teeth'), 'picked teeth');
 $('prompt').value = 'walk rig scene ONE';
 $('prompt').dispatchEvent(new Event('change'));
 $('walk-dir').value = OUT;
-$('walk-from').value = '-6'; $('walk-to').value = '6'; $('walk-steps').value = '5';
+$('walk-steps').value = '5';   // each axis walks its own full range
 $('walk-ms').value = '200';
 $('walk-pingpong').checked = false;
 $('walk-gif').checked = false;
-['walk-from', 'walk-to', 'walk-steps', 'walk-ms'].forEach((id) => $(id).dispatchEvent(new Event('change')));
+['walk-steps', 'walk-ms'].forEach((id) => $(id).dispatchEvent(new Event('change')));
 $('walk-mode-together').checked = true;
 $('walk-mode-together').dispatchEvent(new Event('change'));
 flush();
 
-// The panel range is ±6; every mouth axis clamps it to its own ±3.
+// A newly selected axis starts at its OWN full range — there is no run-wide
+// from/to to misread. A baked bank is ±3, not the ±6 an axisControls slider has.
 const R = ctx.walkInternals.effectiveRange;
 const openRow = ctx.walkInternals.picked.filter((r) => r.key === 'face.mouth.open')[0];
 assert(R(openRow).from === -3 && R(openRow).to === 3,
-       'a ±6 panel range lands as ±3 on a baked bank');
+       'a freshly picked baked-bank axis starts at ±3, got ' +
+       R(openRow).from + '…' + R(openRow).to);
 
 // `round` runs against `open`, and `teeth` runs a shorter distance — the two
 // things a rig needs that a shared range cannot express.
@@ -110,11 +112,33 @@ ctx.walkInternals.setRange('face.mouth.round', 3, -3);
 ctx.walkInternals.setRange('face.mouth.teeth', -1.5, 1.5);
 flush();
 
-// One row per selected axis, and the overridden ones say so.
+// One row per selected axis, and the ones given a range of their own say so.
 const rngRows = document.querySelectorAll('#walk-ranges .walk-rng');
 assert(rngRows.length === 3, 'a range row per selected axis, got ' + rngRows.length);
 const setRows = document.querySelectorAll('#walk-ranges .walk-rng.set');
-assert(setRows.length === 2, 'two rows are overridden, got ' + setRows.length);
+assert(setRows.length === 2, 'two rows carry a set range, got ' + setRows.length);
+
+// A configured range survives everything that is not that range. Changing the
+// frame count used to rebuild these rows from a default and silently throw the
+// configuration away, which is the whole reason the run-wide from/to is gone.
+$('walk-steps').value = '7';
+$('walk-steps').dispatchEvent(new Event('input'));
+$('walk-steps').dispatchEvent(new Event('change'));
+$('walk-mode-each').checked = true;
+$('walk-mode-each').dispatchEvent(new Event('change'));
+$('walk-mode-together').checked = true;
+$('walk-mode-together').dispatchEvent(new Event('change'));
+flush();
+const roundRow = ctx.walkInternals.picked.filter((r) => r.key === 'face.mouth.round')[0];
+assert(R(roundRow).from === 3 && R(roundRow).to === -3,
+       'the reversed range survived a frame-count and mode change, got ' +
+       R(roundRow).from + '…' + R(roundRow).to);
+assert(document.querySelectorAll('#walk-ranges .walk-rng.set').length === 2,
+       'and the rows still show it as set');
+// Put the frame count back for the run below.
+$('walk-steps').value = '5';
+$('walk-steps').dispatchEvent(new Event('change'));
+flush();
 
 // ── the grid ──────────────────────────────────────────────────────────────
 const grid = ctx.walkInternals.comboGrid(ctx.walkInternals.picked);

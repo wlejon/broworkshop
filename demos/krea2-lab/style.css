@@ -812,7 +812,7 @@ details[open] > .ctl-cat::before { content: '▾ '; }
 }
 .walk-mode input:checked ~ span { color: #d6dae0; }
 
-.walk-grid { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px; }
+.walk-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .walk-grid .field.compact { gap: 3px; }
 .walk-grid input { width: 100%; min-width: 0; }
 

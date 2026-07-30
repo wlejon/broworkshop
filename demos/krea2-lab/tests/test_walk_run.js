@@ -111,11 +111,18 @@ flush();
 $('prompt').value = 'walk test scene ONE';
 $('prompt').dispatchEvent(new Event('change'));
 $('walk-dir').value = OUT;
-$('walk-from').value = '-6'; $('walk-to').value = '6'; $('walk-steps').value = '5';
+$('walk-steps').value = '5';   // each axis walks its own full range
 $('walk-ms').value = '200';
+// Pin the mode and clear any stored per-axis ranges. The app persists both, so a
+// bare re-run would otherwise inherit whatever the LAST test in the suite left
+// behind — the same trap as the prompt below.
+$('walk-mode-each').checked = true;
+$('walk-mode-each').dispatchEvent(new Event('change'));
+$('btn-walk-full').click();
+flush();
 $('walk-pingpong').checked = false;
 $('walk-gif').checked = false;
-['walk-from', 'walk-to', 'walk-steps', 'walk-ms'].forEach((id) => $(id).dispatchEvent(new Event('change')));
+['walk-steps', 'walk-ms'].forEach((id) => $(id).dispatchEvent(new Event('change')));
 flush();
 assert($('walk-plan').textContent.indexOf('2 axes × 5 frames = 10 renders') >= 0,
        'plan reads 2 axes x 5 frames, got: ' + $('walk-plan').textContent);

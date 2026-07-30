@@ -44,7 +44,7 @@ assert(rowCount >= bankCount,
        'picker lists at least every bank axis (' + rowCount + ' rows, ' + bankCount + ' bank axes)');
 
 // ── the value grid ────────────────────────────────────────────────────────
-$('walk-from').value = '-6'; $('walk-to').value = '6'; $('walk-steps').value = '13';
+$('walk-steps').value = '13';   // each axis walks its own full range
 let vals = W.walkValues();
 assert(vals.length === 13, '13 frames requested gives 13 values (got ' + vals.length + ')');
 assert(vals[0] === -6 && vals[12] === 6, 'grid spans both ends inclusive');

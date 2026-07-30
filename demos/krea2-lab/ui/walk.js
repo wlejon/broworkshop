@@ -81,8 +81,6 @@ export function initWalk(ctx) {
     ? JSON.parse(JSON.stringify(prefs.walkRanges)) : {};
   let builtLen = '';      // catalogue signature the current rows were built from
 
-  if (prefs.walkFrom != null) $('walk-from').value = prefs.walkFrom;
-  if (prefs.walkTo != null) $('walk-to').value = prefs.walkTo;
   if (prefs.walkSteps != null) $('walk-steps').value = prefs.walkSteps;
   if (prefs.walkMs != null) $('walk-ms').value = prefs.walkMs;
   if (prefs.walkPingPong != null) $('walk-pingpong').checked = !!prefs.walkPingPong;
@@ -105,22 +103,28 @@ export function initWalk(ctx) {
     Math.max(2, Math.min(101, Math.round(+$('walk-steps').value) || 2));
   const snap = (v) => Math.round(Math.round(v / AXIS_STEP) * AXIS_STEP * 100) / 100;
 
-  // The range an axis actually walks. The panel's from/to is the default for
-  // every axis; `ranges[key]` overrides it for one. Either way it is clipped
-  // INTO that axis' own domain (a baked bank is ±3, an expression 0…5), because
-  // walking past it would ask the worker for values its slider cannot hold.
+  // Every axis owns its range outright. There used to be one from/to for the
+  // whole run with per-axis overrides layered on top, and that was wrong twice
+  // over: "-6 → 6" meant nothing once a baked bank clipped it to ±3 and an
+  // expression to 0…5, and a range that merely FOLLOWED the panel was recomputed
+  // on every refresh — so nudging the frame count appeared to throw the ranges
+  // away. Now a newly selected axis starts at its own full domain and the number
+  // in the box is the only thing that decides, forever.
   //
-  // An override is how an axis is sent the OTHER WAY: from > to just reverses
-  // the interpolation, which is what a rig needs — the mouth barely opens unless
-  // `round` travels against `open`.
+  // from > to is not an error: it reverses the interpolation, which is what a rig
+  // needs — the mouth barely opens unless `round` travels against `open`.
+  function domainOf(axis) {
+    return { lo: axis && isFinite(axis.min) ? axis.min : AXIS_MIN,
+             hi: axis && isFinite(axis.max) ? axis.max : AXIS_MAX };
+  }
   function effectiveRange(axis) {
-    const lo = axis && isFinite(axis.min) ? axis.min : AXIS_MIN;
-    const hi = axis && isFinite(axis.max) ? axis.max : AXIS_MAX;
+    const d = domainOf(axis);
     const own = axis && ranges[axis.key];
-    const from = own ? own.from : +$('walk-from').value;
-    const to = own ? own.to : +$('walk-to').value;
-    return { from: clamp(from, lo, hi), to: clamp(to, lo, hi), lo: lo, hi: hi,
-             set: !!own };
+    if (!own) return { from: d.lo, to: d.hi, lo: d.lo, hi: d.hi, set: false };
+    // Still clipped: an axis' domain can narrow under a stored range (a bank
+    // reloads, a walk is restored from prefs written against a wider axis).
+    return { from: clamp(own.from, d.lo, d.hi), to: clamp(own.to, d.lo, d.hi),
+             lo: d.lo, hi: d.hi, set: true };
   }
 
   function walkValues(axis) {
@@ -304,14 +308,19 @@ export function initWalk(ctx) {
   const together = () => $('walk-mode-together').checked;
 
   // ── per-axis range rows ───────────────────────────────────────────────────
-  // Rebuilt from the selection rather than kept in sync, because the selection
-  // is the only state that matters — an override for an axis nobody picked is
-  // harmless and is simply not shown.
-  function buildRanges() {
+  // Rebuilt ONLY when the selection changes. Everything else that refreshes the
+  // panel — a frame count, a mode switch — leaves these rows and their DOM alone,
+  // because blowing them away and re-seeding them from a default is exactly how
+  // a configured range used to disappear when you nudged something unrelated.
+  let rangeRowsFor = null;
+  function buildRanges(force) {
+    const picked = pickedAxes();
+    const sig = picked.map((p) => p.key).join('|');
+    if (!force && sig === rangeRowsFor) return;
+    rangeRowsFor = sig;
+
     const host = $('walk-ranges');
     host.innerHTML = '';
-    const picked = pickedAxes();
-    if (picked.length < 1) return;
     picked.forEach((axis) => {
       const r = effectiveRange(axis);
       const row = document.createElement('div');
@@ -321,7 +330,7 @@ export function initWalk(ctx) {
       const nm = document.createElement('span');
       nm.className = 'walk-rng-name';
       nm.textContent = axis.label;
-      nm.title = axis.key + ' · domain ' + r.lo + '…' + r.hi;
+      nm.title = axis.key + ' · can hold ' + r.lo + ' … ' + r.hi;
       row.appendChild(nm);
 
       const mk = (which) => {
@@ -330,15 +339,26 @@ export function initWalk(ctx) {
         inp.step = '0.25';
         inp.min = String(r.lo); inp.max = String(r.hi);
         inp.value = String(r[which]);
-        inp.title = which + ' — set from > to to run this axis the other way';
-        inp.addEventListener('change', () => {
+        inp.title = which + ' (' + r.lo + ' … ' + r.hi + ') — set from above to ' +
+                    'to run this axis backwards';
+        const commit = (live) => {
+          const raw = String(inp.value).trim();
+          // Mid-typing "-" or "" is not a value. Committing it live would write a
+          // 0 and fight the person typing "-3".
+          if (live && (raw === '' || raw === '-' || !isFinite(+raw))) return;
           const cur = effectiveRange(axis);
           const next = { from: cur.from, to: cur.to };
-          next[which] = clamp(+inp.value, r.lo, r.hi);
+          next[which] = clamp(+raw, r.lo, r.hi);
           ranges[axis.key] = next;
+          row.classList.add('set');
           ctx.persist();
-          refreshCount();
-        });
+          refreshPlan();
+        };
+        // Both, because a value typed and left without blurring should still
+        // count — a walk started from a box that never fired `change` would
+        // silently use the old number.
+        inp.addEventListener('input', () => commit(true));
+        inp.addEventListener('change', () => commit(false));
         return inp;
       };
       row.appendChild(mk('from'));
@@ -350,7 +370,7 @@ export function initWalk(ctx) {
         const cur = effectiveRange(axis);
         ranges[axis.key] = { from: cur.to, to: cur.from };
         ctx.persist();
-        refreshCount();
+        refreshCount(true);
       });
       row.appendChild(flip);
       row.appendChild(mk('to'));
@@ -358,22 +378,28 @@ export function initWalk(ctx) {
       const clr = document.createElement('button');
       clr.type = 'button';
       clr.className = 'clr';
-      clr.textContent = '×';
-      clr.title = 'follow the range above again';
+      clr.textContent = '⤢';
+      clr.title = 'back to this axis’ full range (' + r.lo + ' … ' + r.hi + ')';
       clr.addEventListener('click', () => {
         delete ranges[axis.key];
         ctx.persist();
-        refreshCount();
+        refreshCount(true);
       });
       row.appendChild(clr);
       host.appendChild(row);
     });
   }
 
-  function refreshCount() {
+  function refreshCount(force) {
+    buildRanges(force);
+    refreshPlan();
+  }
+
+  // The plan line and the badge, with no DOM rebuilt — safe to call from inside
+  // a range input's own handler.
+  function refreshPlan() {
     const n = selected.length;
     const picked = pickedAxes();
-    buildRanges();
     $('walk-count').textContent = n ? String(n) : '';
     $('walk-count').classList.toggle('show', n > 0);
     if (!n) {
@@ -537,15 +563,14 @@ export function initWalk(ctx) {
     let totalFrames = jobs.reduce((s, j) => s + j.values.length, 0), doneFrames = 0;
     let renderedTotal = 0, reusedTotal = 0, failed = 0;
     logLine(axes.length + (together() ? ' axes as one rig · ' : ' axes · ') +
-            totalFrames + ' frames · ' + $('walk-from').value + ' → ' +
-            $('walk-to').value + ' (each axis’ own range and domain wins) · ' +
-            ms + ' ms/frame' + (pingPong ? ' · ping-pong' : ''), 'head');
-    if (together()) {
-      axes.forEach((a) => {
-        const r = effectiveRange(a);
-        logLine('  ' + a.label + ': ' + r.from.toFixed(2) + ' → ' + r.to.toFixed(2), 'dim');
-      });
-    }
+            totalFrames + ' frames · ' + ms + ' ms/frame' +
+            (pingPong ? ' · ping-pong' : ''), 'head');
+    // Every axis' range, written down: the log is the record of what a walk on
+    // disk actually was, and the ranges are half of that.
+    axes.forEach((a) => {
+      const r = effectiveRange(a);
+      logLine('  ' + a.label + ': ' + r.from.toFixed(2) + ' → ' + r.to.toFixed(2), 'dim');
+    });
     logLine('into ' + dir, 'dim');
 
     for (let i = 0; i < jobs.length; i++) {
@@ -636,15 +661,22 @@ export function initWalk(ctx) {
   $('walk-filter').addEventListener('input', applyFilter);
   $('walk-kind').addEventListener('change', applyFilter);
   $('walk-dir').addEventListener('change', ctx.persist);
-  ['walk-from', 'walk-to', 'walk-steps', 'walk-ms'].forEach((id) => {
-    $(id).addEventListener('change', () => { refreshCount(); ctx.persist(); });
-    $(id).addEventListener('input', refreshCount);
+  ['walk-steps', 'walk-ms'].forEach((id) => {
+    $(id).addEventListener('change', () => { refreshPlan(); ctx.persist(); });
+    $(id).addEventListener('input', refreshPlan);
   });
   ['walk-pingpong', 'walk-gif'].forEach((id) => {
     $(id).addEventListener('change', ctx.persist);
   });
   ['walk-mode-each', 'walk-mode-together'].forEach((id) => {
-    $(id).addEventListener('change', () => { refreshCount(); ctx.persist(); });
+    $(id).addEventListener('change', () => { refreshPlan(); ctx.persist(); });
+  });
+  // Only the axes that have a row: a range stored for an axis you deselected is
+  // not on screen, so wiping it here would be a change you could not see.
+  $('btn-walk-full').addEventListener('click', () => {
+    pickedAxes().forEach((a) => { delete ranges[a.key]; });
+    ctx.persist();
+    refreshCount(true);
   });
   $('btn-walk-none').addEventListener('click', () => {
     selected = [];
@@ -677,8 +709,6 @@ export function initWalk(ctx) {
   });
   ctx.onPersist((p) => {
     p.walkAxes = selected;
-    p.walkFrom = $('walk-from').value;
-    p.walkTo = $('walk-to').value;
     p.walkSteps = $('walk-steps').value;
     p.walkMs = $('walk-ms').value;
     p.walkDir = $('walk-dir').value;
@@ -710,7 +740,7 @@ export function initWalk(ctx) {
                         setRange: (k, from, to) => {
                           if (from == null) delete ranges[k];
                           else ranges[k] = { from: from, to: to };
-                          refreshCount();
+                          refreshCount(true);
                         },
                         get selected() { return selected.slice(); },
                         get rows() { return rows.slice(); },

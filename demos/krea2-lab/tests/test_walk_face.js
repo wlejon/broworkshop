@@ -9,8 +9,8 @@
 //   * a baked-bank axis walks one key and HOLDS its bank-mates at rest
 //   * a zero sends what the panel sends at zero: no expression at all, and a
 //     bank that is null only when every one of its keys is zero
-//   * each axis' own narrower domain clips the run's range (±3 for a bank,
-//     0…5 for an expression) instead of asking for values it cannot hold
+//   * each axis walks its own domain (±3 for a bank, 0…5 for an expression)
+//     rather than a run-wide range that would ask for values it cannot hold
 //   * an unbaked bank is not offered at all, rather than offered and broken
 //
 //   bro-headless ../broworkshop/demos/krea2-lab \
@@ -62,17 +62,23 @@ assert(keysOf().indexOf('face.mouth.teeth') >= 0, 'and the mouth axes too');
 
 // ── each axis' own domain ─────────────────────────────────────────────────
 const rowFor = (k) => ctx.walkInternals.rows.filter((r) => r.key === k)[0];
-$('walk-from').value = '-6'; $('walk-to').value = '6'; $('walk-steps').value = '5';
+$('walk-steps').value = '5';   // each axis walks its own full range
+// Pin the mode and clear any stored per-axis ranges. The app persists both, so a
+// bare re-run would otherwise inherit whatever the LAST test in the suite left
+// behind — the same trap as the prompt further down.
+$('walk-mode-each').checked = true;
+$('walk-mode-each').dispatchEvent(new Event('change'));
+$('btn-walk-full').click();
 flush();
 const exprVals = ctx.walkInternals.walkValues(rowFor('face.expr.happiness'));
 const specVals = ctx.walkInternals.walkValues(rowFor('face.spectrum.valence'));
 const bankVals = ctx.walkInternals.walkValues(rowFor('composition.proximity'));
 assert(exprVals.join(',') === '0,1.25,2.5,3.75,5',
-       'a -6…6 run clips into the expression’s 0…5, got ' + exprVals.join(','));
+       'an expression starts at its own 0…5, got ' + exprVals.join(','));
 assert(specVals.join(',') === '-3,-1.5,0,1.5,3',
-       'and into a baked bank’s ±3, got ' + specVals.join(','));
+       'a baked bank at its own ±3, got ' + specVals.join(','));
 assert(bankVals.join(',') === '-6,-3,0,3,6',
-       'while an axisControls axis keeps the full ±6, got ' + bankVals.join(','));
+       'and an axisControls axis at the full ±6, got ' + bankVals.join(','));
 
 // ── stub the worker ───────────────────────────────────────────────────────
 const sent = [];
@@ -170,7 +176,7 @@ $('walk-dir').value = OUT;
 $('walk-ms').value = '200';
 $('walk-pingpong').checked = false;
 $('walk-gif').checked = false;
-['walk-from', 'walk-to', 'walk-steps', 'walk-ms'].forEach((id) => $(id).dispatchEvent(new Event('change')));
+['walk-steps', 'walk-ms'].forEach((id) => $(id).dispatchEvent(new Event('change')));
 flush();
 assert($('walk-plan').textContent.indexOf('2 axes × 5 frames = 10 renders') >= 0,
        'plan reads 2 axes x 5 frames, got: ' + $('walk-plan').textContent);

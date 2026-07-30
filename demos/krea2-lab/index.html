@@ -331,7 +331,10 @@
             </section>
 
             <section class="panel">
-              <h2>the walk</h2>
+              <h2>the walk
+                <span class="grow"></span>
+                <button id="btn-walk-full" class="link" title="Give every selected axis its full range again">full range</button>
+              </h2>
               <!-- Some concepts only read as movement when several axes move
                    together — the mouth barely opens unless `round` travels
                    against `open` — so a selection can be walked as one rig
@@ -348,14 +351,6 @@
               </div>
               <div class="walk-grid">
                 <label class="field compact">
-                  <span class="field-head">from</span>
-                  <input id="walk-from" type="number" value="-6" min="-6" max="6" step="0.25">
-                </label>
-                <label class="field compact">
-                  <span class="field-head">to</span>
-                  <input id="walk-to" type="number" value="6" min="-6" max="6" step="0.25">
-                </label>
-                <label class="field compact">
                   <span class="field-head">frames</span>
                   <input id="walk-steps" type="number" value="13" min="2" max="101" step="1">
                 </label>
@@ -364,9 +359,10 @@
                   <input id="walk-ms" type="number" value="200" min="20" max="5000" step="10">
                 </label>
               </div>
-              <!-- Per-axis overrides of the range above. This is where an axis
-                   is sent the other way (from > to) or given a shorter run than
-                   the rest of the rig. -->
+              <!-- One row per selected axis, holding the only range that axis
+                   has. A new selection starts at that axis' full domain; from
+                   there the numbers in these boxes are the whole story, and
+                   nothing recomputes them behind your back. -->
               <div id="walk-ranges" class="walk-ranges"></div>
               <label class="walk-opt" title="Play the walk out and back, so a looping clip has no jump at the ends">
                 <input id="walk-pingpong" type="checkbox"> ping-pong the animation
