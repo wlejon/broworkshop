@@ -34,8 +34,8 @@ const SPECIES = {
 // Foliage placement — the count-shaping fields must match what the main thread
 // passes to createInstancedMesh({scatter}) so leaves land on the twigs.
 const folOpts = {
-    maxRadius: 0.22, minDepth: 1, perUnitLength: 120,
-    upBias: 0.5, tiltJitter: 0.55, rollJitter: 0.9,
+    maxRadius: 0.035, minDepth: 2, perUnitLength: 120,
+    upBias: 0.7, tiltJitter: 0.55, rollJitter: 0.9,
     baseScale: 1.0, scaleJitter: 0.3, scaleByRadius: 0.25, seed: 0x1eaf,
 };
 const BLOOM_CAP = 120;

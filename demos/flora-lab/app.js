@@ -286,8 +286,8 @@ function applyFoliage(s) {
     // (they shape each leaf's transform in the VS); the counts come baked into
     // the per-leaf buffer.
     const scatter = Object.assign({
-        maxRadius: 0.22, minDepth: 1, perUnitLength: 120,
-        upBias: 0.5, tiltJitter: 0.55, rollJitter: 0.9,
+        maxRadius: 0.035, minDepth: 2, perUnitLength: 120,
+        upBias: 0.7, tiltJitter: 0.55, rollJitter: 0.9,
         baseScale: 1.0, scaleJitter: 0.3, scaleByRadius: 0.25, seed: 0x1eaf,
     }, s);
     if (!foliageNode) {
@@ -403,8 +403,8 @@ function initImpostorAtlases() {
             }
         }
         const leafMesh = (segs && segs.length > 0) ? Mesh.scatterLeaves(segs, leaf, {
-            maxRadius: 0.22, minDepth: 1, perUnitLength: 220,
-            densityWeight: densityWeight, upBias: 0.5, tiltJitter: 0.55, rollJitter: 0.9,
+            maxRadius: 0.035, minDepth: 2, perUnitLength: 220,
+            densityWeight: densityWeight, upBias: 0.7, tiltJitter: 0.55, rollJitter: 0.9,
             baseScale: 1.0, scaleJitter: 0.3, scaleByRadius: 0.25, seed: 0x1eaf
         }) : null;
 

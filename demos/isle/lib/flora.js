@@ -95,7 +95,7 @@ export function growPrototype(name, protoSpecOrArms, spreadOrProps, maybeProps) 
     }
 
     const leafMesh = Mesh.scatterLeaves(segs, leaf, {
-        maxRadius:     0.22,
+        maxRadius:     0.035,
         minDepth:      1,
         perUnitLength: 550,
         densityWeight: densityWeight,
