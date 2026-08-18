@@ -28,7 +28,19 @@ function treeProbs(biome, moisture) {
 }
 
 // Grows a single prototype in a dedicated flora world with full light.
-export function growPrototype(name, whorlArms, whorlSpread, speciesProps) {
+export function growPrototype(name, protoSpecOrArms, spreadOrProps, maybeProps) {
+    let protoSpec;
+    let speciesProps;
+    if (typeof protoSpecOrArms === 'object' && protoSpecOrArms !== null) {
+        protoSpec = protoSpecOrArms;
+        speciesProps = spreadOrProps || {};
+    } else {
+        const arms = (typeof protoSpecOrArms === 'number') ? protoSpecOrArms : 4;
+        const spread = (typeof spreadOrProps === 'number') ? spreadOrProps : 0.6;
+        protoSpec = bro.flora.prototypes.whorl(arms, spread);
+        speciesProps = maybeProps || {};
+    }
+
     const world = bro.flora.createWorld({
         rngSeed: 0xBAADF00D,
         climate: { annualTempBase: 14, annualPrecip: 1000 },
@@ -39,7 +51,7 @@ export function growPrototype(name, whorlArms, whorlSpread, speciesProps) {
         }
     });
 
-    const proto = world.addPrototype(bro.flora.prototypes.whorl(whorlArms, whorlSpread));
+    const proto = world.addPrototype(protoSpec);
     world.addVoronoiSite(proto, 0.3, 0.6);
 
     const plantIdx = world.addPlant({
@@ -57,8 +69,11 @@ export function growPrototype(name, whorlArms, whorlSpread, speciesProps) {
     const branchMesh = world.emitPlantMesh(plantIdx, 4);
 
     // 2. Emit foliage leaf cards
-    const leaf = Mesh.leafCard('oval', {
-        width: 0.22, length: 0.36, bend: 0.45,
+    const leafShape = (name === 'pine') ? 'needle' : 'oval';
+    const leaf = Mesh.leafCard(leafShape, {
+        width: (name === 'pine') ? 0.08 : 0.20,
+        length: (name === 'pine') ? 0.40 : 0.32,
+        bend: 0.45,
         fullUV: true, shapedSilhouette: true, cup: 0.3,
         widthSegments: 3, lengthSegments: 6
     });
@@ -80,7 +95,7 @@ export function growPrototype(name, whorlArms, whorlSpread, speciesProps) {
     }
 
     const leafMesh = Mesh.scatterLeaves(segs, leaf, {
-        maxRadius:     0.5,
+        maxRadius:     0.22,
         minDepth:      1,
         perUnitLength: 550,
         densityWeight: densityWeight,
@@ -98,8 +113,11 @@ export function growPrototype(name, whorlArms, whorlSpread, speciesProps) {
 
 // Grows all 3 prototypes on boot.
 export function initFlora(scene, atlas) {
-    // Pine (Boreal/Alpine): 5 arms whorl, narrow spread, orthotropic
-    const pine = growPrototype('pine', 5, 0.45, {
+    // Pine (Boreal/Alpine): monopodial leader with lateral tiers, narrow spread, orthotropic
+    const pineProto = (bro.flora.prototypes.monopodial)
+        ? bro.flora.prototypes.monopodial(3, 0.65)
+        : bro.flora.prototypes.whorl(5, 0.45);
+    const pine = growPrototype('pine', pineProto, {
         shadeTolerance: 0.35, moduleMatureAge: 0.5,
         tropismG2: 0.12, growthScale: 1.2,
         orthotropy: 0.38, rootVigorMax: 3.5,
@@ -107,8 +125,11 @@ export function initFlora(scene, atlas) {
         individualVariation: 0.1, maxAge: 80
     });
 
-    // Deciduous (Temperate/Rainforest): 4 arms whorl, wide spreading crown
-    const decid = growPrototype('decid', 4, 0.7, {
+    // Deciduous (Temperate/Rainforest): sympodial forking crown, spreading architecture
+    const decidProto = (bro.flora.prototypes.sympodial)
+        ? bro.flora.prototypes.sympodial(0.3, 0.75)
+        : bro.flora.prototypes.whorl(4, 0.7);
+    const decid = growPrototype('decid', decidProto, {
         shadeTolerance: 0.35, moduleMatureAge: 0.6,
         tropismG2: 0.12, growthScale: 1.0,
         orthotropy: 0.4, rootVigorMax: 3.0,
@@ -117,7 +138,7 @@ export function initFlora(scene, atlas) {
     });
 
     // Shrub (Tundra/Desert/Undergrowth): 3 arms whorl, compact dome
-    const shrub = growPrototype('shrub', 3, 0.55, {
+    const shrub = growPrototype('shrub', bro.flora.prototypes.whorl(3, 0.55), {
         shadeTolerance: 0.8, moduleMatureAge: 0.7,
         tropismG2: 0.12, growthScale: 0.6,
         orthotropy: 0.48, rootVigorMax: 2.2,

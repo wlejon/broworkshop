@@ -75,10 +75,16 @@ function buildWorld() {
             fill: 1.0,
         },
     });
-    rootProto = world.addPrototype(bro.flora.prototypes.whorl(5, 0.8));
+    rootProto = world.addPrototype(bro.flora.prototypes.monopodial
+        ? bro.flora.prototypes.monopodial(3, 0.7)
+        : bro.flora.prototypes.whorl(5, 0.8));
+    const protoSymp = world.addPrototype(bro.flora.prototypes.sympodial
+        ? bro.flora.prototypes.sympodial(0.3, 0.75)
+        : bro.flora.prototypes.whorl(4, 0.7));
     const protoTuft = world.addPrototype(bro.flora.prototypes.whorl(3, 0.55));
     world.addVoronoiSite(rootProto, 0.5, 0.3);
-    world.addVoronoiSite(protoTuft, 0.12, 0.3);
+    world.addVoronoiSite(protoSymp,  0.35, 0.5);
+    world.addVoronoiSite(protoTuft,  0.12, 0.3);
     for (const p of [
         { x: -4.5, z: -2, sp: 'sun' },
         { x: -1.5, z:  1, sp: 'sun' },

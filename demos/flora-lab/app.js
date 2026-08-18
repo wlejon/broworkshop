@@ -367,9 +367,17 @@ function initImpostorAtlases() {
             climate: { annualTempBase: 15, annualPrecip: 1000 },
             shadow: { origin: [-10, 0, -10], cellSize: 1.0, width: 20, height: 20, depth: 20, fill: 1.0 }
         });
-        const protoArms = (key === 'sun') ? 5 : 3;
-        const protoSpread = (key === 'sun') ? 0.8 : 0.55;
-        const pIdx = masterWorld.addPrototype(bro.flora.prototypes.whorl(protoArms, protoSpread));
+        let protoSpec;
+        if (key === 'sun') {
+            protoSpec = (bro.flora.prototypes.monopodial)
+                ? bro.flora.prototypes.monopodial(3, 0.7)
+                : bro.flora.prototypes.whorl(5, 0.8);
+        } else {
+            protoSpec = (bro.flora.prototypes.sympodial)
+                ? bro.flora.prototypes.sympodial(0.3, 0.75)
+                : bro.flora.prototypes.whorl(3, 0.55);
+        }
+        const pIdx = masterWorld.addPrototype(protoSpec);
         masterWorld.addVoronoiSite(pIdx, 0.5, 0.3);
         const plantIdx = masterWorld.addPlant({
             origin: [0, 0, 0],
