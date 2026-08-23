@@ -2,16 +2,17 @@
 // Self-contained: loads Kokoro + the emotion/voice basis directly (own var names,
 // no app-global collisions), builds the neutral centroid voice, then renders the
 // SAME sentence neutral + once per emotion at its calibrated default α and at a
-// stronger push, writing 24 kHz WAVs to D:/projects/_emotion_audit for A/B.
+// stronger push, writing 24 kHz WAVs to ./output for A/B.
 //   bro-headless ../broworkshop/demos/kokoro-lab _emotion_clips.js
 (function () {
+const _path = require('path');
+const _fs = require('fs');
 const _ROOT = 'D:/projects/brosoundml';
 const _MODEL = _ROOT + '/weights/kokoro';
-const _OUT = 'D:/projects/_emotion_audit';
+const _OUT = _path.join(__dirname, 'output');
+if (!_fs.existsSync(_OUT)) { _fs.mkdirSync(_OUT, { recursive: true }); }
 const _TEXT = "I really did not expect this to happen today.";
 const _STRONG = 1.8;            // second pass multiplier on default α
-
-const _fs = require('fs');
 function writeWav16(path, samples, sampleRate) {
   const n = samples.length, buf = new ArrayBuffer(44 + n * 2), dv = new DataView(buf);
   dv.setUint32(0, 0x52494646, false); dv.setUint32(4, 36 + n * 2, true);
