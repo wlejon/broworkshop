@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Range & Selection Lab</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- App Header -->
+    <header class="app-header">
+        <div class="brand-section">
+            <div class="app-title">bro.dom <span>Range & Selection Lab</span></div>
+            <nav class="view-tabs">
+                <button class="tab-btn active" data-tab="range-view">Range & Selection</button>
+                <button class="tab-btn" data-tab="observer-view">MutationObserver Stream</button>
+                <button class="tab-btn" data-tab="parser-view">DOMParser Studio</button>
+                <button class="tab-btn" data-tab="shaper-view">HarfBuzz Text Shaper</button>
+            </nav>
+        </div>
+        <div class="header-badges">
+            <span class="badge active" id="engineBadge">W3C Range L3</span>
+            <span class="badge purple" id="shaperBadge">HarfBuzz Text</span>
+            <span class="badge" id="observerBadge">Observer: Active</span>
+        </div>
+    </header>
+
+    <!-- Main Workspace -->
+    <main class="main-container">
+        <!-- VIEW 1: Range & Selection -->
+        <section id="range-view" class="view-panel active split-column-layout">
+            <div class="left-editor-area">
+                <!-- Document Toolbar -->
+                <div class="doc-toolbar">
+                    <div class="tool-group">
+                        <button class="btn-tool" id="btnBold" title="Wrap with <strong>"><b>B</b></button>
+                        <button class="btn-tool" id="btnItalic" title="Wrap with <em>"><i>I</i></button>
+                        <button class="btn-tool" id="btnCode" title="Wrap with <code>">&lt;/&gt;</button>
+                        <button class="btn-tool accent" id="btnHighlight" title="Surround with <mark>">Mark</button>
+                        <button class="btn-tool" id="btnBadge" title="Wrap with .custom-tag">Badge</button>
+                    </div>
+                    <div class="divider"></div>
+                    <div class="tool-group">
+                        <button class="btn-tool" id="btnExtract" title="Range.extractContents()">✂ Extract</button>
+                        <button class="btn-tool" id="btnClone" title="Range.cloneContents()">📋 Clone</button>
+                        <button class="btn-tool" id="btnInsertNode" title="Range.insertNode()">+ Insert Stamp</button>
+                        <button class="btn-tool" id="btnDelete" title="Range.deleteContents()">🗑 Delete</button>
+                    </div>
+                    <div class="divider"></div>
+                    <div class="tool-group">
+                        <button class="btn-tool" id="btnCollapseStart" title="Range.collapse(true)">|◀ Start</button>
+                        <button class="btn-tool" id="btnCollapseEnd" title="Range.collapse(false)">End ▶|</button>
+                    </div>
+                    <div class="divider"></div>
+                    <div class="tool-group">
+                        <button class="btn-tool" id="btnSelectSentence" title="Select Sentence">Sentence</button>
+                        <button class="btn-tool" id="btnSelectParagraph" title="Select Paragraph">Paragraph</button>
+                        <button class="btn-tool" id="btnSelectAll" title="Select All Document">All</button>
+                    </div>
+                </div>
+
+                <!-- Editable Document Area -->
+                <div class="editor-container">
+                    <div id="editorCanvas" class="editor-canvas" contenteditable="true" spellcheck="false">
+                        <h2 id="heading1">Exploring Modern DOM Range & Selection APIs</h2>
+                        <p id="p1">
+                            The <strong>DOM Range</strong> interface represents a fragment of a document that can contain nodes and parts of text nodes. In combination with the <code>Selection</code> object, web applications can accurately manipulate text spans, track caret positions, and apply rich typography.
+                        </p>
+                        <p id="p2">
+                            Select any segment of this text to observe the <em>live telemetry</em> in the right-hand inspection panel. You can test boundary-crossing operations like <mark>surroundContents</mark>, extract fragments into memory, or insert dynamic stamp nodes.
+                        </p>
+                        <blockquote id="quote1">
+                            "Precision caret tracking and subpixel glyph cluster metrics form the bedrock of native-grade desktop text editors."
+                        </blockquote>
+                        <p id="p3">
+                            Check out the other tabs above to test <strong>MutationObserver</strong> diffs, <strong>DOMParser</strong> trees, and <strong>HarfBuzz</strong> text shaper cluster mappings!
+                        </p>
+                    </div>
+
+                    <!-- Caret HUD Floating Badge -->
+                    <div id="caretHud" class="caret-hud">
+                        Caret: <span id="caretCoords">x: 0, y: 0</span> | Line Height: <span id="caretHeight">0</span>px
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right: Inspector Column -->
+            <div class="right-inspector-area">
+                <!-- Selection Telemetry -->
+                <div class="inspector-card">
+                    <div class="card-title">Selection Object Telemetry</div>
+                    <table class="telemetry-table">
+                        <tr><td>Anchor Node</td><td id="selAnchorNode">—</td></tr>
+                        <tr><td>Anchor Offset</td><td id="selAnchorOffset">—</td></tr>
+                        <tr><td>Focus Node</td><td id="selFocusNode">—</td></tr>
+                        <tr><td>Focus Offset</td><td id="selFocusOffset">—</td></tr>
+                        <tr><td>Direction</td><td><span class="val-tag highlight" id="selDirection">none</span></td></tr>
+                        <tr><td>isCollapsed</td><td><span class="val-tag" id="selCollapsed">true</span></td></tr>
+                        <tr><td>Range Count</td><td id="selRangeCount">0</td></tr>
+                        <tr><td>Selection Type</td><td id="selType">None</td></tr>
+                    </table>
+                </div>
+
+                <!-- Range Telemetry -->
+                <div class="inspector-card">
+                    <div class="card-title">Active Range Diagnostics</div>
+                    <table class="telemetry-table">
+                        <tr><td>Start Container</td><td id="rangeStartContainer">—</td></tr>
+                        <tr><td>Start Offset</td><td id="rangeStartOffset">—</td></tr>
+                        <tr><td>End Container</td><td id="rangeEndContainer">—</td></tr>
+                        <tr><td>End Offset</td><td id="rangeEndOffset">—</td></tr>
+                        <tr><td>Common Ancestor</td><td id="rangeAncestor">—</td></tr>
+                        <tr><td>Selected Length</td><td id="rangeLength">0 chars</td></tr>
+                        <tr><td>Client Rects</td><td id="rangeRectsCount">0 rect(s)</td></tr>
+                        <tr><td>Bounding Box</td><td id="rangeBounding">—</td></tr>
+                    </table>
+                </div>
+
+                <!-- Range Fragment Preview -->
+                <div class="inspector-card">
+                    <div class="card-title">Selected Fragment HTML</div>
+                    <pre class="code-snippet-box" id="rangeFragmentPreview">(No active selection)</pre>
+                </div>
+
+                <!-- Extracted / Cloned Fragment Store -->
+                <div class="inspector-card">
+                    <div class="card-title">Last Extracted / Cloned Fragment</div>
+                    <pre class="code-snippet-box" id="lastFragmentBox">(None)</pre>
+                </div>
+            </div>
+        </section>
+
+        <!-- VIEW 2: MutationObserver Stream -->
+        <section id="observer-view" class="view-panel">
+            <div class="stream-container">
+                <div class="stream-controls">
+                    <div class="filter-group">
+                        <label class="val-tag">Filter:</label>
+                        <select id="obsFilterType" class="select-input">
+                            <option value="all">All Mutation Types</option>
+                            <option value="childList">childList (Nodes +/-)</option>
+                            <option value="attributes">attributes (Attributes Changed)</option>
+                            <option value="characterData">characterData (Text Edits)</option>
+                        </select>
+                        <label class="val-tag">Total Mutations: <b id="obsTotalCount" style="color:var(--text-bright);">0</b></label>
+                    </div>
+                    <div class="filter-group">
+                        <button class="btn-tool" id="obsTogglePause">⏸ Pause</button>
+                        <button class="btn-tool" id="obsClearBtn">🗑 Clear Log</button>
+                        <button class="btn-tool" id="obsExportBtn">💾 Export JSON</button>
+                    </div>
+                </div>
+
+                <div id="mutationLogStream" class="log-stream-list">
+                    <div class="log-entry" style="justify-content:center; color:var(--text-muted);">
+                        Waiting for DOM mutations in the editor canvas... (Type text, format nodes, or modify attributes)
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- VIEW 3: DOMParser Studio -->
+        <section id="parser-view" class="view-panel">
+            <div class="parser-grid">
+                <!-- Left: Source Input -->
+                <div class="parser-col">
+                    <div class="col-header">
+                        <span>Markup Input Source</span>
+                        <div style="display:flex; gap:8px; align-items:center;">
+                            <select id="parserPresetSelect" class="select-input">
+                                <option value="sampleHtml">Sample HTML Fragment</option>
+                                <option value="sampleSvg">Vector SVG Graphic</option>
+                                <option value="sampleXml">Structured XML Document</option>
+                                <option value="sampleError">Malformed XML (Error Test)</option>
+                            </select>
+                            <select id="parserMimeSelect" class="select-input">
+                                <option value="text/html">text/html</option>
+                                <option value="image/svg+xml">image/svg+xml</option>
+                                <option value="application/xml">application/xml</option>
+                            </select>
+                            <button class="btn-tool accent" id="btnRunParser">Parse ▶</button>
+                        </div>
+                    </div>
+                    <textarea id="parserInputText" class="code-editor-area" spellcheck="false"></textarea>
+                </div>
+
+                <!-- Right: Parsed Tree Explorer -->
+                <div class="parser-col">
+                    <div class="col-header">
+                        <span>Parsed DOM AST Hierarchy</span>
+                        <span id="parserStats" class="badge">0 elements, depth 0 (0 ms)</span>
+                    </div>
+                    <div id="parserTreeView" class="tree-view">
+                        <div style="color:var(--text-muted); padding:10px;">Click "Parse" to analyze markup structure.</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- VIEW 4: HarfBuzz Text Shaper -->
+        <section id="shaper-view" class="view-panel">
+            <div class="shaper-container">
+                <div class="shaper-controls">
+                    <label class="val-tag">Text:</label>
+                    <input type="text" id="shaperTextInput" class="text-input" value="office fluffy difficult" style="flex:1; min-width:200px;">
+                    <label class="val-tag">Preset:</label>
+                    <select id="shaperPresetSelect" class="select-input">
+                        <option value="office">Ligatures: "office fluffy"</option>
+                        <option value="difficult">Ligatures: "difficult affine"</option>
+                        <option value="kerning">Kerning: "AV AW To Yo LT"</option>
+                        <option value="astral">Emoji: "a😀b🎉c"</option>
+                        <option value="hindi">Devanagari: "हिन्दी"</option>
+                        <option value="arabic">Arabic (RTL): "العربية"</option>
+                    </select>
+                    <label class="val-tag">Font Family:</label>
+                    <select id="shaperFamilySelect" class="select-input">
+                        <option value="Calibri">Calibri (OpenType Ligatures)</option>
+                        <option value="Arial">Arial</option>
+                        <option value="Segoe UI">Segoe UI</option>
+                        <option value="Cambria">Cambria</option>
+                        <option value="Georgia">Georgia</option>
+                        <option value="Consolas">Consolas</option>
+                    </select>
+                    <label class="val-tag">Size:</label>
+                    <input type="range" id="shaperSizeSlider" min="20" max="72" value="48" style="width:90px;">
+                    <span id="shaperSizeVal" style="font-family:var(--font-mono); font-size:12px;">48px</span>
+                    <button class="btn-tool accent" id="btnRunShaper">Shape Text ▶</button>
+                </div>
+
+                <!-- Visual Shaped Canvas -->
+                <div class="shaper-canvas-wrapper">
+                    <canvas id="shaperCanvas"></canvas>
+                    <div style="font-size:12px; color:var(--text-muted); display:flex; gap:16px;">
+                        <span>Engine: <b id="shaperEngineName" style="color:var(--cyan);">HarfBuzz</b></span>
+                        <span>Total Width: <b id="shaperTotalWidth" style="color:var(--text-bright);">0px</b></span>
+                        <span>Glyph Count: <b id="shaperGlyphCount" style="color:var(--text-bright);">0</b></span>
+                        <span>Cluster Count: <b id="shaperClusterCount" style="color:var(--text-bright);">0</b></span>
+                        <span>Ligatures: <b id="shaperLigaturesCount" style="color:var(--pink);">0</b></span>
+                    </div>
+                </div>
+
+                <!-- Cluster Analysis Table & Kerning Breakdown -->
+                <div class="shaper-results-grid">
+                    <div class="inspector-card" style="background:var(--bg-panel); border-radius:8px;">
+                        <div class="card-title">HarfBuzz Cluster Map</div>
+                        <div style="max-height:220px; overflow-y:auto;">
+                            <table class="clusters-table" id="clustersTable">
+                                <thead>
+                                    <tr><th>#</th><th>Cluster Span</th><th>UTF-8 Bytes</th><th>Glyphs</th><th>Width</th><th>Type</th></tr>
+                                </thead>
+                                <tbody id="clustersTableBody">
+                                    <tr><td colspan="6" style="text-align:center; color:var(--text-muted);">No shaped data.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div class="inspector-card" style="background:var(--bg-panel); border-radius:8px;">
+                        <div class="card-title">Kerning Pair Verification</div>
+                        <div style="max-height:220px; overflow-y:auto;">
+                            <table class="clusters-table" id="kerningTable">
+                                <thead>
+                                    <tr><th>Pair</th><th>Char 1 Width</th><th>Char 2 Width</th><th>Unkerned Sum</th><th>Shaped Pair</th><th>Delta</th></tr>
+                                </thead>
+                                <tbody id="kerningTableBody">
+                                    <!-- Kerning rows populated here -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Status Bar -->
+    <footer class="app-statusbar">
+        <div>
+            Range & Selection API: <span id="statusSelectionActive" style="color:var(--success);">Active</span>
+            | Caret: <span id="statusCaretOffset">Offset 0</span>
+        </div>
+        <div>
+            DOM Level 3 | MutationObserver: <span id="statusMutationCount">0 events</span> | HarfBuzz Shaper: OK
+        </div>
+    </footer>
+
+    <!-- Scripts -->
+    <script type="module" src="app.js"></script>
+</body>
+</html>

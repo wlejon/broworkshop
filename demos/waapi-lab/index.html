@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web Animations API Lab</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- App Header -->
+    <header class="app-header">
+        <div class="brand-row">
+            <div class="logo-text">bro.dom <span>WAAPI Lab</span></div>
+            <select id="presetSelect" class="preset-dropdown">
+                <option value="elastic-pop">Preset: Elastic Pop & Bounce</option>
+                <option value="card-flip-3d">Preset: 3D Card Flip & Elevate</option>
+                <option value="staggered-ripple">Preset: Staggered Wave Ripple</option>
+                <option value="morphing-pulse">Preset: Morphing Organic Pulse</option>
+                <option value="glitch-shake">Preset: Cyberpunk Glitch & Slices</option>
+                <option value="neon-hyperspace">Preset: Neon Hyperspace Orb</option>
+                <option value="comparison-arena">Arena: WAAPI vs CSS vs rAF</option>
+            </select>
+        </div>
+        <div class="header-badges">
+            <span class="badge neon">W3C Web Animations L2</span>
+            <span class="badge" id="stateBadge">State: running</span>
+            <span class="badge" id="rateBadge">1.0x</span>
+        </div>
+    </header>
+
+    <!-- Studio Grid -->
+    <main class="studio-grid">
+        <!-- Interactive Stage Viewport -->
+        <section class="stage-viewport">
+            <div class="stage-grid-floor"></div>
+
+            <div class="stage-target-container" id="stageContainer">
+                <!-- Target elements dynamically shown based on active preset -->
+                <div id="targetBadge" class="elastic-badge" style="display:none;">
+                    <span>⚡ ANTIGRAVITY</span>
+                </div>
+
+                <div id="targetCard" class="anim-card-3d" style="display:none;">
+                    <div class="card-chip"></div>
+                    <div class="card-num">**** **** **** 2026</div>
+                    <div style="display:flex; justify-content:space-between; font-size:12px; font-weight:700;">
+                        <span>BRO PLATFORM</span>
+                        <span>08/28</span>
+                    </div>
+                </div>
+
+                <div id="targetOrb" class="anim-orb" style="display:none;"></div>
+
+                <div id="targetRipple" class="ripple-grid" style="display:none;">
+                    <div class="ripple-dot"></div><div class="ripple-dot"></div><div class="ripple-dot"></div><div class="ripple-dot"></div>
+                    <div class="ripple-dot"></div><div class="ripple-dot"></div><div class="ripple-dot"></div><div class="ripple-dot"></div>
+                    <div class="ripple-dot"></div><div class="ripple-dot"></div><div class="ripple-dot"></div><div class="ripple-dot"></div>
+                    <div class="ripple-dot"></div><div class="ripple-dot"></div><div class="ripple-dot"></div><div class="ripple-dot"></div>
+                </div>
+
+                <div id="targetMorph" class="morph-blob" style="display:none;"></div>
+
+                <div id="targetGlitch" class="glitch-banner" style="display:none;">
+                    SYSTEM CORRUPT // WAAPI
+                </div>
+
+                <!-- Side-by-side comparison arena -->
+                <div id="targetCompare" class="comparison-arena" style="display:none;">
+                    <div class="comp-box">
+                        <div id="compWaapiNode" class="comp-node"></div>
+                        <span class="comp-label">1. WAAPI (.animate)</span>
+                    </div>
+                    <div class="comp-box">
+                        <div id="compCssNode" class="comp-node" style="background:#a855f7;"></div>
+                        <span class="comp-label">2. CSS Keyframes</span>
+                    </div>
+                    <div class="comp-box">
+                        <div id="compRafNode" class="comp-node" style="background:#ff007f;"></div>
+                        <span class="comp-label">3. JS (rAF Loop)</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Timeline Deck -->
+        <section class="timeline-deck">
+            <!-- Scrubber Track -->
+            <div class="timeline-track-container">
+                <div class="timeline-progress-bg">
+                    <div id="progressFill" class="timeline-progress-fill"></div>
+                </div>
+                <div id="keyframeTrack" class="timeline-keyframe-track"></div>
+                <input type="range" id="timelineScrubber" class="timeline-scrubber" min="0" max="100" step="0.1" value="0">
+            </div>
+
+            <!-- Master Playback Controls -->
+            <div class="controls-bar">
+                <div class="btn-group">
+                    <button class="btn-ctrl primary" id="btnPlayPause">⏸ Pause</button>
+                    <button class="btn-ctrl" id="btnReverse">⇄ Reverse</button>
+                    <button class="btn-ctrl" id="btnCancel">✖ Cancel</button>
+                    <button class="btn-ctrl" id="btnFinish">⏭ Finish</button>
+                </div>
+
+                <div class="btn-group">
+                    <button class="btn-ctrl rate-btn" data-rate="0.25">0.25x</button>
+                    <button class="btn-ctrl rate-btn" data-rate="0.5">0.5x</button>
+                    <button class="btn-ctrl rate-btn active" data-rate="1.0">1.0x</button>
+                    <button class="btn-ctrl rate-btn" data-rate="2.0">2.0x</button>
+                </div>
+
+                <div id="timecodeDisplay" class="timecode-display">
+                    00:00.000 / 00:00.000 (0.0%)
+                </div>
+            </div>
+        </section>
+
+        <!-- Right: Inspector Panel -->
+        <aside class="inspector-panel">
+            <!-- Telemetry Section -->
+            <div class="inspector-section">
+                <div class="sec-title">
+                    <span>Animation Telemetry</span>
+                    <span id="activeCountBadge" style="color:var(--accent);">1 Active</span>
+                </div>
+                <div class="telemetry-grid">
+                    <div class="telem-cell">
+                        <div class="telem-lbl">Play State</div>
+                        <div class="telem-val" id="telemState" style="color:var(--green);">running</div>
+                    </div>
+                    <div class="telem-cell">
+                        <div class="telem-lbl">Current Time</div>
+                        <div class="telem-val" id="telemCurrentTime">0 ms</div>
+                    </div>
+                    <div class="telem-cell">
+                        <div class="telem-lbl">Playback Rate</div>
+                        <div class="telem-val" id="telemRate">1.0x</div>
+                    </div>
+                    <div class="telem-cell">
+                        <div class="telem-lbl">Progress</div>
+                        <div class="telem-val" id="telemProgress">0.0%</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Easing Curve Plotter -->
+            <div class="inspector-section">
+                <div class="sec-title">
+                    <span>Easing Curve Plotter</span>
+                    <span id="easingNameLbl" style="color:var(--purple); font-size:11px;">cubic-bezier</span>
+                </div>
+                <canvas id="easingCanvas"></canvas>
+            </div>
+
+            <!-- Timing Configuration -->
+            <div class="inspector-section">
+                <div class="sec-title">Timing Options</div>
+                <div style="display:flex; flex-direction:column; gap:8px; font-size:12px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <span style="color:var(--text-muted);">Duration:</span>
+                        <input type="number" id="timingDuration" value="1200" step="100" min="200" max="10000" style="width:80px; background:var(--bg-surface); border:1px solid var(--border); color:#fff; border-radius:4px; padding:3px 6px;">
+                    </div>
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <span style="color:var(--text-muted);">Iterations:</span>
+                        <select id="timingIterations" style="background:var(--bg-surface); border:1px solid var(--border); color:#fff; border-radius:4px; padding:3px 6px;">
+                            <option value="Infinity">Infinity (Loop)</option>
+                            <option value="1">1 Time</option>
+                            <option value="2">2 Times</option>
+                            <option value="5">5 Times</option>
+                        </select>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <span style="color:var(--text-muted);">Direction:</span>
+                        <select id="timingDirection" style="background:var(--bg-surface); border:1px solid var(--border); color:#fff; border-radius:4px; padding:3px 6px;">
+                            <option value="normal">normal</option>
+                            <option value="reverse">reverse</option>
+                            <option value="alternate">alternate</option>
+                            <option value="alternate-reverse">alternate-reverse</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Keyframes Inspector -->
+            <div class="inspector-section">
+                <div class="sec-title">Keyframes Specification</div>
+                <pre id="keyframeJsonBox" class="keyframe-editor-box"></pre>
+            </div>
+
+            <!-- Comparison Stats (When arena is active) -->
+            <div id="comparisonStatsSec" class="inspector-section" style="display:none;">
+                <div class="sec-title">Engine Performance</div>
+                <div style="font-size:11px; font-family:var(--font-mono); display:flex; flex-direction:column; gap:6px;">
+                    <div style="color:#00f0ff;">WAAPI: Native Compositor (Smooth)</div>
+                    <div style="color:#a855f7;">CSS Keyframes: Browser Engine</div>
+                    <div style="color:#ff007f;">rAF Loop: JS Main Thread</div>
+                </div>
+            </div>
+        </aside>
+    </main>
+
+    <!-- Status Bar -->
+    <footer class="app-statusbar">
+        <div>
+            Web Animations API: <span style="color:var(--green);">Ready</span> | Animation Target: <span id="statusTargetName" style="color:var(--accent);">Badge</span>
+        </div>
+        <div>
+            Composited: <span style="color:var(--accent);">True</span> | Hardware Acceleration: Enabled
+        </div>
+    </footer>
+
+    <!-- Script entry -->
+    <script type="module" src="app.js"></script>
+</body>
+</html>

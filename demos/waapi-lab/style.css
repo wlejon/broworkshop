@@ -1,0 +1,490 @@
+/* demos/waapi-lab/style.css */
+:root {
+    --bg-main: #0a0d14;
+    --bg-panel: #121722;
+    --bg-surface: #1a2232;
+    --bg-hover: #242f44;
+    --border: #263349;
+    --border-light: #3b4c68;
+    --accent: #00f0ff;
+    --accent-glow: rgba(0, 240, 255, 0.2);
+    --pink: #ff007f;
+    --purple: #a855f7;
+    --amber: #f59e0b;
+    --green: #10b981;
+    --text-main: #d1d9e6;
+    --text-bright: #ffffff;
+    --text-muted: #798ba3;
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --font-mono: 'Consolas', 'Cascadia Code', 'Fira Code', monospace;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    background-color: var(--bg-main);
+    color: var(--text-main);
+    font-family: var(--font-sans);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+}
+
+/* ── Header ── */
+.app-header {
+    background: var(--bg-panel);
+    border-bottom: 1px solid var(--border);
+    height: 52px;
+    padding: 0 18px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+}
+
+.brand-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.logo-text {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text-bright);
+}
+
+.logo-text span {
+    color: var(--accent);
+    text-shadow: 0 0 10px var(--accent-glow);
+}
+
+.preset-dropdown {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    color: var(--text-bright);
+    padding: 5px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    outline: none;
+    cursor: pointer;
+}
+
+.preset-dropdown:focus {
+    border-color: var(--accent);
+}
+
+.header-badges {
+    display: flex;
+    gap: 8px;
+}
+
+.badge {
+    padding: 3px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+}
+
+.badge.neon {
+    color: var(--accent);
+    border-color: var(--accent);
+    background: rgba(0, 240, 255, 0.1);
+}
+
+/* ── Main Studio Grid ── */
+.studio-grid {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 1fr 340px;
+    grid-template-rows: 1fr auto;
+    overflow: hidden;
+}
+
+/* ── Interactive Animation Stage ── */
+.stage-viewport {
+    grid-column: 1;
+    grid-row: 1;
+    background: radial-gradient(circle at center, #161f30 0%, #0a0d14 75%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    overflow: hidden;
+    border-right: 1px solid var(--border);
+}
+
+.stage-grid-floor {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 180px;
+    background-size: 32px 32px;
+    background-image:
+        linear-gradient(to right, rgba(38, 51, 73, 0.4) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(38, 51, 73, 0.4) 1px, transparent 1px);
+    transform: perspective(400px) rotateX(65deg);
+    transform-origin: bottom center;
+    pointer-events: none;
+    opacity: 0.6;
+}
+
+/* Stage Elements Showcase */
+.stage-target-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 5;
+    min-height: 280px;
+}
+
+/* 1. 3D Card */
+.anim-card-3d {
+    width: 220px;
+    height: 280px;
+    background: linear-gradient(145deg, #1e293b, #0f172a);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    color: var(--text-bright);
+    will-change: transform, filter, box-shadow;
+    transform-style: preserve-3d;
+}
+
+.card-chip {
+    width: 38px;
+    height: 28px;
+    background: linear-gradient(135deg, #ffd700, #ffaa00);
+    border-radius: 4px;
+}
+
+.card-num {
+    font-family: var(--font-mono);
+    font-size: 14px;
+    letter-spacing: 2px;
+}
+
+/* 2. Hyperspace Orb */
+.anim-orb {
+    width: 140px;
+    height: 140px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 35%, #00f0ff, #3b82f6 45%, #a855f7 70%, #ff007f);
+    will-change: transform, filter, box-shadow;
+}
+
+/* 3. Elastic Badge */
+.elastic-badge {
+    padding: 18px 36px;
+    background: linear-gradient(135deg, #00f0ff, #3b82f6);
+    color: #000;
+    font-weight: 800;
+    font-size: 18px;
+    border-radius: 30px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    will-change: transform, box-shadow;
+}
+
+/* 4. Ripple Grid */
+.ripple-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 42px);
+    gap: 14px;
+}
+
+.ripple-dot {
+    width: 42px;
+    height: 42px;
+    border-radius: 8px;
+    background: linear-gradient(135deg, #00f0ff, #a855f7);
+    will-change: transform, opacity;
+}
+
+/* 5. Morphing Blob */
+.morph-blob {
+    width: 180px;
+    height: 180px;
+    background: linear-gradient(135deg, #00f0ff, #ff007f);
+    will-change: border-radius, transform, filter;
+}
+
+/* 6. Cyberpunk Glitch Banner */
+.glitch-banner {
+    padding: 20px 40px;
+    background: #0f141f;
+    border: 2px solid #00f0ff;
+    color: #00f0ff;
+    font-family: var(--font-mono);
+    font-size: 22px;
+    font-weight: 900;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    will-change: transform, clip-path, filter;
+}
+
+/* 7. Comparison Arena */
+.comparison-arena {
+    display: flex;
+    gap: 40px;
+    align-items: center;
+}
+
+.comp-box {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+}
+
+.comp-node {
+    width: 70px;
+    height: 70px;
+    border-radius: 12px;
+    background: #00f0ff;
+    box-shadow: 0 8px 24px rgba(0, 240, 255, 0.4);
+    will-change: transform;
+}
+
+.comp-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+}
+
+/* CSS Keyframes animation for side-by-side comparison */
+@keyframes cssCompareKeyframes {
+    0% { transform: translateY(0px) rotate(0deg) scale(1); background: #00f0ff; }
+    50% { transform: translateY(-30px) rotate(180deg) scale(1.15); background: #a855f7; }
+    100% { transform: translateY(0px) rotate(360deg) scale(1); background: #00f0ff; }
+}
+
+.animating-compare {
+    animation: cssCompareKeyframes 2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+/* ── Timeline Deck ── */
+.timeline-deck {
+    grid-column: 1;
+    grid-row: 2;
+    background: var(--bg-panel);
+    border-top: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+    padding: 14px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.timeline-track-container {
+    position: relative;
+    height: 24px;
+    display: flex;
+    align-items: center;
+}
+
+.timeline-progress-bg {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 6px;
+    background: var(--bg-surface);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.timeline-progress-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(to right, var(--accent), var(--pink));
+    border-radius: 3px;
+}
+
+.timeline-keyframe-track {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 100%;
+    pointer-events: none;
+}
+
+.kf-marker {
+    position: absolute;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 6px;
+    height: 12px;
+    background: #ffffff;
+    border-radius: 2px;
+    box-shadow: 0 0 6px #ffffff;
+}
+
+.timeline-scrubber {
+    position: absolute;
+    left: 0;
+    right: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    cursor: ew-resize;
+    z-index: 10;
+}
+
+/* Controls Bar */
+.controls-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.btn-group {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+}
+
+.btn-ctrl {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    color: var(--text-bright);
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.12s ease;
+}
+
+.btn-ctrl:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-light);
+}
+
+.btn-ctrl.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #000;
+}
+
+.btn-ctrl.primary:hover {
+    box-shadow: 0 0 12px var(--accent-glow);
+}
+
+.rate-btn.active {
+    background: var(--purple);
+    border-color: var(--purple);
+    color: #fff;
+}
+
+.timecode-display {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--accent);
+    font-weight: 700;
+}
+
+/* ── Right Inspector Panel ── */
+.inspector-panel {
+    grid-column: 2;
+    grid-row: 1 / 3;
+    background: var(--bg-panel);
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+}
+
+.inspector-section {
+    padding: 16px;
+    border-bottom: 1px solid var(--border);
+}
+
+.sec-title {
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: var(--text-muted);
+    margin-bottom: 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.telemetry-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+
+.telem-cell {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+}
+
+.telem-lbl {
+    font-size: 10px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+.telem-val {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-bright);
+    margin-top: 2px;
+}
+
+#easingCanvas {
+    width: 100%;
+    height: 140px;
+    border-radius: 6px;
+    background: #10141d;
+    border: 1px solid var(--border);
+}
+
+.keyframe-editor-box {
+    background: var(--bg-main);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-main);
+    max-height: 150px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+}
+
+/* Status Bar */
+.app-statusbar {
+    background: var(--bg-panel);
+    border-top: 1px solid var(--border);
+    height: 28px;
+    padding: 0 18px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 11px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+}

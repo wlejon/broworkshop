@@ -1,0 +1,9 @@
+{
+    "app": ".",
+    "title": "Desktop Notebook",
+    "width": 1280,
+    "height": 720,
+    "minWidth": 800,
+    "minHeight": 500,
+    "lib": "../../lib"
+}

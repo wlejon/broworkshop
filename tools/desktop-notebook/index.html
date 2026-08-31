@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Desktop Notebook</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Top Menu & Window Bar -->
+    <header class="app-menubar">
+        <div class="menu-left">
+            <div class="menu-brand">📝 <span>Notebook</span></div>
+
+            <!-- In-App Dropdowns (mirrors bro.menu) -->
+            <div class="menu-dropdown" id="menuFile">
+                <button class="menu-btn">File</button>
+                <div class="menu-items">
+                    <div class="menu-item" data-action="newNote"><span>New Note</span><span class="accel">Ctrl+N</span></div>
+                    <div class="menu-item" data-action="openFile"><span>Open File...</span><span class="accel">Ctrl+O</span></div>
+                    <div class="menu-separator"></div>
+                    <div class="menu-item" data-action="saveDoc"><span>Save</span><span class="accel">Ctrl+S</span></div>
+                    <div class="menu-item" data-action="saveAsDoc"><span>Save As...</span><span class="accel">Ctrl+Shift+S</span></div>
+                    <div class="menu-separator"></div>
+                    <div class="menu-item" data-action="exportHtml"><span>Export as HTML...</span><span class="accel">Ctrl+E</span></div>
+                    <div class="menu-item" data-action="exportMd"><span>Export as Markdown...</span></div>
+                </div>
+            </div>
+
+            <div class="menu-dropdown" id="menuEdit">
+                <button class="menu-btn">Edit</button>
+                <div class="menu-items">
+                    <div class="menu-item" data-action="undo"><span>Undo</span><span class="accel">Ctrl+Z</span></div>
+                    <div class="menu-item" data-action="redo"><span>Redo</span><span class="accel">Ctrl+Y</span></div>
+                    <div class="menu-separator"></div>
+                    <div class="menu-item" data-action="toggleFind"><span>Find & Replace...</span><span class="accel">Ctrl+F</span></div>
+                    <div class="menu-item" data-action="selectAll"><span>Select All</span><span class="accel">Ctrl+A</span></div>
+                </div>
+            </div>
+
+            <div class="menu-dropdown" id="menuView">
+                <button class="menu-btn">View</button>
+                <div class="menu-items">
+                    <div class="menu-item" data-action="toggleSidebar"><span>Toggle Sidebar</span><span class="accel">Ctrl+B</span></div>
+                    <div class="menu-item" data-action="togglePreview"><span>Toggle Preview</span><span class="accel">Ctrl+P</span></div>
+                    <div class="menu-separator"></div>
+                    <div class="menu-item" data-action="setViewMode" data-arg="split"><span>Split View</span><span class="accel">Ctrl+1</span></div>
+                    <div class="menu-item" data-action="setViewMode" data-arg="editor"><span>Editor Only</span><span class="accel">Ctrl+2</span></div>
+                    <div class="menu-item" data-action="setViewMode" data-arg="preview"><span>Preview Only</span><span class="accel">Ctrl+3</span></div>
+                    <div class="menu-separator"></div>
+                    <div class="menu-item" data-action="zoom" data-arg="10"><span>Zoom In</span><span class="accel">Ctrl+=</span></div>
+                    <div class="menu-item" data-action="zoom" data-arg="-10"><span>Zoom Out</span><span class="accel">Ctrl+-</span></div>
+                    <div class="menu-item" data-action="zoomReset"><span>Reset Zoom</span><span class="accel">Ctrl+0</span></div>
+                </div>
+            </div>
+
+            <div class="menu-dropdown" id="menuWindow">
+                <button class="menu-btn">Window</button>
+                <div class="menu-items">
+                    <div class="menu-item" data-action="minimizeWindow"><span>Minimize</span><span class="accel">Ctrl+M</span></div>
+                    <div class="menu-item" data-action="togglePinWindow"><span>Always on Top (Pin)</span></div>
+                    <div class="menu-separator"></div>
+                    <div class="menu-item" data-action="showDocInfo"><span>Document Info...</span></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="menu-right-controls">
+            <!-- Theme Picker -->
+            <select id="themeSelector" class="find-input" style="font-size:11px; padding:2px 6px;">
+                <option value="dark">Dark Slate</option>
+                <option value="light">Light Paper</option>
+                <option value="sepia">Warm Sepia</option>
+                <option value="obsidian">Obsidian Cyber</option>
+            </select>
+            <button class="win-btn" id="btnPinWindow" title="Always on Top (Pin)">📌 Pin</button>
+            <button class="win-btn" id="btnMinWindow" title="Minimize Window">🗕</button>
+        </div>
+    </header>
+
+    <!-- Workspace -->
+    <main class="workspace-container">
+        <!-- Sidebar Explorer -->
+        <aside class="sidebar-panel" id="sidebar">
+            <div class="sidebar-top">
+                <input type="text" id="docSearchInput" class="sidebar-search" placeholder="Search notes...">
+                <div class="sidebar-btn-row">
+                    <button class="btn-sidebar-new" id="btnNewNote">+ New Note</button>
+                </div>
+            </div>
+            <div class="doc-list" id="docList">
+                <!-- Dynamically populated document cards -->
+            </div>
+        </aside>
+
+        <!-- Main Editor & Preview Workspace -->
+        <section class="main-workspace">
+            <!-- Formatting Ribbon -->
+            <div class="editor-ribbon">
+                <button class="ribbon-btn" id="fmtBold" title="Bold (Ctrl+B)"><b>B</b></button>
+                <button class="ribbon-btn" id="fmtItalic" title="Italic (Ctrl+I)"><i>I</i></button>
+                <button class="ribbon-btn" id="fmtStrike" title="Strikethrough"><s>S</s></button>
+                <button class="ribbon-btn" id="fmtCode" title="Inline Code">&lt;/&gt;</button>
+                <div class="ribbon-sep"></div>
+                <button class="ribbon-btn" id="fmtH1" title="Heading 1">H1</button>
+                <button class="ribbon-btn" id="fmtH2" title="Heading 2">H2</button>
+                <button class="ribbon-btn" id="fmtH3" title="Heading 3">H3</button>
+                <div class="ribbon-sep"></div>
+                <button class="ribbon-btn" id="fmtUl" title="Bullet List">• List</button>
+                <button class="ribbon-btn" id="fmtOl" title="Numbered List">1. List</button>
+                <button class="ribbon-btn" id="fmtTask" title="Task List Checklist">☑ Task</button>
+                <button class="ribbon-btn" id="fmtQuote" title="Blockquote">” Quote</button>
+                <button class="ribbon-btn" id="fmtTable" title="Insert Table">⊞ Table</button>
+                <button class="ribbon-btn" id="fmtCodeBlock" title="Fenced Code Block">``` Code</button>
+                <button class="ribbon-btn" id="fmtHr" title="Horizontal Rule">— Rule</button>
+                <div class="ribbon-sep"></div>
+                <button class="ribbon-btn" id="btnToggleFindBar" title="Find & Replace (Ctrl+F)">🔍 Find</button>
+            </div>
+
+            <!-- Split Pane: Line Gutter + Editor Textarea + Preview -->
+            <div class="split-pane" id="splitPane">
+                <!-- Editor Pane -->
+                <div class="editor-pane">
+                    <div class="line-gutter" id="lineGutter"><div>1</div></div>
+                    <textarea class="editor-textarea" id="editorTextarea" placeholder="Write your markdown note here..." spellcheck="false"></textarea>
+                </div>
+
+                <!-- Resizable Splitter Handle -->
+                <div class="split-handle" id="splitHandle"></div>
+
+                <!-- Live Preview Pane -->
+                <div class="preview-pane" id="previewPane"></div>
+            </div>
+
+            <!-- Find & Replace Floating Bar -->
+            <div class="find-bar" id="findBar">
+                <input type="text" id="findInput" class="find-input" placeholder="Find text...">
+                <input type="text" id="replaceInput" class="find-input" placeholder="Replace with...">
+                <button class="win-btn" id="btnFindNext">Next ▶</button>
+                <button class="win-btn" id="btnReplace">Replace</button>
+                <button class="win-btn" id="btnReplaceAll">All</button>
+                <span id="findMatchCount" style="font-size:11px; color:var(--text-muted);">0 matches</span>
+                <button class="win-btn" id="btnCloseFind">✖</button>
+            </div>
+        </section>
+    </main>
+
+    <!-- Status Bar -->
+    <footer class="app-statusbar">
+        <div class="status-group">
+            <span id="statusDocTitle" style="font-weight:600; color:var(--text-bright);">Untitled Note</span>
+            <span id="statusSaveState" style="color:var(--success);">● Saved</span>
+            <span id="statusCursorPos">Ln 1, Col 1</span>
+        </div>
+        <div class="status-group">
+            <span id="statusWordCount">0 words</span>
+            <span id="statusCharCount">0 chars</span>
+            <span id="statusReadTime">1 min read</span>
+            <span id="statusZoom">100%</span>
+            <div style="display:flex; gap:2px; margin-left:8px;">
+                <button class="win-btn" id="btnModeSplit" title="Split View">◫</button>
+                <button class="win-btn" id="btnModeEditor" title="Editor Only">📄</button>
+                <button class="win-btn" id="btnModePreview" title="Preview Only">👁</button>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Scripts -->
+    <script type="module" src="app.js"></script>
+</body>
+</html>

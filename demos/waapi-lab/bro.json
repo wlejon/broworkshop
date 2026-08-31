@@ -1,0 +1,9 @@
+{
+    "app": ".",
+    "title": "Web Animations API Lab",
+    "width": 1280,
+    "height": 720,
+    "minWidth": 960,
+    "minHeight": 600,
+    "lib": "../../lib"
+}
