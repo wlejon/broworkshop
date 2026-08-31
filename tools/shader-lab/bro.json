@@ -1,0 +1,12 @@
+{
+    "name": "Shader Lab",
+    "version": "1.0.0",
+    "description": "Interactive WebGL2 GLSL 3.0 ES shader development and procedural visuals laboratory.",
+    "window": {
+        "width": 1280,
+        "height": 840,
+        "minWidth": 900,
+        "minHeight": 600,
+        "resizable": true
+    }
+}
