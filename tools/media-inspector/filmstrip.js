@@ -1,100 +1,342 @@
-// tools/media-inspector/filmstrip.js
-export class FilmstripViewer {
-    constructor(canvas, onSeek) {
+/**
+ * filmstrip.js — Video Filmstrip Thumbnail Strip Visualizer
+ *
+ * Consumes bro.media.thumbnails pixel data and renders an interactive
+ * multi-frame timeline ribbon with timecode badges, frame hover tooltips,
+ * and click-to-seek synchronization.
+ */
+
+export class FilmstripVisualizer {
+    /**
+     * @param {HTMLCanvasElement} canvas
+     * @param {HTMLElement} [container]
+     * @param {Object} [options]
+     */
+    constructor(canvas, container = null, options = {}) {
         this.canvas = canvas;
         this.ctx = canvas.getContext('2d');
-        this.onSeek = onSeek;
-        this.thumbnails = null;
+        this.container = container || canvas.parentElement;
+        this.options = Object.assign({
+            bgColor: '#0e1118',
+            borderColor: '#2b3248',
+            badgeBg: 'rgba(15, 23, 42, 0.85)',
+            badgeTextColor: '#cbd5e1',
+            activeBorderColor: '#38bdf8',
+            hoverBorderColor: '#a78bfa',
+            playheadColor: '#f43f5e',
+            frameMargin: 2,
+            badgeHeight: 16,
+        }, options);
 
-        this.initEvents();
+        this.strip = null;
+        this.duration = 0;
+        this.windowFrom = 0;
+        this.windowTo = 0;
+        this.playheadTime = 0;
+
+        // Hover & interaction
+        this.hoverIndex = -1;
+        this.hoverTime = null;
+        this.tooltipEl = null;
+
+        // Callbacks
+        this.onSeekCallback = null;
+        this.onFrameHoverCallback = null;
+
+        this._createTooltip();
+        this._initEvents();
+        this.resize();
     }
 
-    setThumbnails(thumbs) {
-        this.thumbnails = thumbs;
+    /**
+     * Set thumbnail strip data from bro.media.thumbnails.
+     * @param {Object|null} stripData
+     * @param {number} [totalDuration]
+     */
+    setData(stripData, totalDuration) {
+        this.strip = stripData;
+        this.duration = totalDuration || (stripData ? (stripData.times[stripData.times.length - 1] || 0) : 0);
+        this.hoverIndex = -1;
+        this._hideTooltip();
         this.render();
     }
 
-    initEvents() {
-        this.canvas.addEventListener('click', (e) => {
-            if (!this.thumbnails || !this.thumbnails.times || this.thumbnails.count <= 0) return;
-            const rect = this.canvas.getBoundingClientRect();
-            const clickX = e.clientX - rect.left;
-            const frac = Math.max(0, Math.min(1, clickX / rect.width));
-            const frameIdx = Math.min(
-                this.thumbnails.count - 1,
-                Math.floor(frac * this.thumbnails.count)
-            );
-            const seekTime = this.thumbnails.times[frameIdx] || 0;
-            if (this.onSeek) this.onSeek(seekTime);
-        });
+    /**
+     * Update active playback time to position playhead marker.
+     * @param {number} time
+     */
+    setPlayhead(time) {
+        this.playheadTime = Math.max(0, Math.min(this.duration || 1, time));
+        this.render();
     }
 
+    /**
+     * Set active time window (for zoomed filmstrip).
+     * @param {number} from
+     * @param {number} to
+     */
+    setWindow(from, to) {
+        this.windowFrom = from;
+        this.windowTo = to;
+        this.render();
+    }
+
+    /**
+     * Set seek callback.
+     * @param {(time: number) => void} cb
+     */
+    onSeek(cb) {
+        this.onSeekCallback = cb;
+    }
+
+    /**
+     * Set frame hover callback.
+     * @param {(info: Object|null) => void} cb
+     */
+    onHover(cb) {
+        this.onFrameHoverCallback = cb;
+    }
+
+    /**
+     * Resize canvas to container bounds.
+     */
+    resize() {
+        const rect = this.canvas.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        const w = Math.max(100, Math.floor(rect.width || this.canvas.width || 800));
+        const h = Math.max(40, Math.floor(rect.height || this.canvas.height || 72));
+
+        this.canvas.width = Math.floor(w * dpr);
+        this.canvas.height = Math.floor(h * dpr);
+        this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        this.cssWidth = w;
+        this.cssHeight = h;
+        this.render();
+    }
+
+    /**
+     * Render the filmstrip canvas.
+     */
     render() {
         const ctx = this.ctx;
-        const width = this.canvas.width;
-        const height = this.canvas.height;
+        const w = this.cssWidth || this.canvas.width;
+        const h = this.cssHeight || this.canvas.height;
 
-        ctx.clearRect(0, 0, width, height);
+        ctx.clearRect(0, 0, w, h);
+        ctx.fillStyle = this.options.bgColor;
+        ctx.fillRect(0, 0, w, h);
 
-        if (!this.thumbnails || !this.thumbnails.data || this.thumbnails.count <= 0) {
-            ctx.fillStyle = '#121418';
-            ctx.fillRect(0, 0, width, height);
+        if (!this.strip || !this.strip.count || !this.strip.data) {
             ctx.fillStyle = '#4a5568';
-            ctx.font = '12px monospace';
+            ctx.font = '12px sans-serif';
             ctx.textAlign = 'center';
-            ctx.fillText('No video filmstrip thumbnails extracted (audio-only or format unavailable)', width / 2, height / 2 + 4);
+            ctx.textBaseline = 'middle';
+            ctx.fillText(
+                this.duration ? 'No video frames / audio-only media' : 'Load video file to extract filmstrip',
+                w / 2, h / 2
+            );
             return;
         }
 
-        const count = this.thumbnails.count;
-        const frameW = this.thumbnails.width;
-        const frameH = this.thumbnails.height;
-        const rawData = this.thumbnails.data;
+        const strip = this.strip;
+        const count = strip.count;
+        const srcW = strip.width;
+        const srcH = strip.height;
+        const totalStripSrcW = srcW * count;
 
-        // Create Offscreen canvas / ImageData to blit the full horizontal strip
-        try {
-            const stripW = frameW * count;
-            const imgData = new ImageData(new Uint8ClampedArray(rawData.buffer || rawData), stripW, frameH);
-
-            const tempCanvas = document.createElement('canvas');
-            tempCanvas.width = stripW;
-            tempCanvas.height = frameH;
-            const tempCtx = tempCanvas.getContext('2d');
-            tempCtx.putImageData(imgData, 0, 0);
-
-            // Scale to fit canvas
-            ctx.imageSmoothingEnabled = true;
-            ctx.drawImage(tempCanvas, 0, 0, stripW, frameH, 0, 0, width, height);
-
-            // Draw frame dividers and timestamp overlays
-            const displayFrameW = width / count;
-            ctx.strokeStyle = 'rgba(0, 0, 0, 0.6)';
-            ctx.lineWidth = 1;
-            ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-            ctx.font = '10px monospace';
-            ctx.textAlign = 'left';
-
-            for (let i = 0; i < count; i++) {
-                const x = i * displayFrameW;
-                ctx.beginPath();
-                ctx.moveTo(x, 0);
-                ctx.lineTo(x, height);
-                ctx.stroke();
-
-                const timeVal = this.thumbnails.times ? this.thumbnails.times[i] : (i * 0.5);
-                const timeStr = typeof timeVal === 'number' ? timeVal.toFixed(2) + 's' : '';
-
-                ctx.fillRect(x + 2, height - 16, ctx.measureText(timeStr).width + 6, 14);
-                ctx.fillStyle = '#f0f3f8';
-                ctx.fillText(timeStr, x + 5, height - 5);
-                ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-            }
-        } catch (err) {
-            console.error('Filmstrip render error:', err);
-            ctx.fillStyle = '#e71d36';
-            ctx.font = '12px monospace';
-            ctx.textAlign = 'center';
-            ctx.fillText('Thumbnail decode failed: ' + err.message, width / 2, height / 2);
+        // Render thumbnails via temporary offscreen canvas or putImageData
+        if (!this._offscreenCanvas || this._offscreenCanvas.width !== totalStripSrcW || this._offscreenCanvas.height !== srcH) {
+            this._offscreenCanvas = document.createElement('canvas');
+            this._offscreenCanvas.width = totalStripSrcW;
+            this._offscreenCanvas.height = srcH;
+            const offCtx = this._offscreenCanvas.getContext('2d');
+            const imgData = new ImageData(strip.data, totalStripSrcW, srcH);
+            offCtx.putImageData(imgData, 0, 0);
         }
+
+        // Layout thumbnails across available width
+        const badgeH = this.options.badgeHeight;
+        const frameDisplayH = h - badgeH;
+        const frameDisplayW = w / count;
+
+        for (let i = 0; i < count; i++) {
+            const destX = i * frameDisplayW;
+            const srcX = i * srcW;
+            const time = strip.times[i] || 0;
+
+            // Draw frame image scaled to cell
+            ctx.drawImage(
+                this._offscreenCanvas,
+                srcX, 0, srcW, srcH,
+                destX, 0, frameDisplayW, frameDisplayH
+            );
+
+            // Frame border separator
+            ctx.strokeStyle = (i === this.hoverIndex) ? this.options.hoverBorderColor : this.options.borderColor;
+            ctx.lineWidth = (i === this.hoverIndex) ? 2 : 1;
+            ctx.strokeRect(destX, 0, frameDisplayW, frameDisplayH);
+
+            // Timecode Badge at bottom
+            ctx.fillStyle = (i === this.hoverIndex) ? '#312e81' : this.options.badgeBg;
+            ctx.fillRect(destX, frameDisplayH, frameDisplayW, badgeH);
+
+            ctx.fillStyle = (i === this.hoverIndex) ? '#e0e7ff' : this.options.badgeTextColor;
+            ctx.font = '9px monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(`${time.toFixed(2)}s`, destX + frameDisplayW / 2, frameDisplayH + badgeH / 2);
+
+            // Frame index number in corner
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+            ctx.fillRect(destX + 2, 2, 18, 12);
+            ctx.fillStyle = '#94a3b8';
+            ctx.font = '8px monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(`#${i + 1}`, destX + 11, 8);
+        }
+
+        // Highlight active playhead frame
+        if (this.duration > 0 && strip.times && strip.times.length > 0) {
+            const activeIdx = this._getActiveFrameIndex(this.playheadTime);
+            if (activeIdx >= 0 && activeIdx < count) {
+                const destX = activeIdx * frameDisplayW;
+
+                // Active frame glow outline
+                ctx.strokeStyle = this.options.activeBorderColor;
+                ctx.lineWidth = 2;
+                ctx.strokeRect(destX + 1, 1, frameDisplayW - 2, frameDisplayH - 2);
+
+                // Playhead needle indicator
+                const needleRatio = (this.playheadTime - (strip.times[0] || 0)) / ((strip.times[count - 1] || this.duration) || 1);
+                const needleX = Math.max(0, Math.min(w, needleRatio * w));
+
+                ctx.strokeStyle = this.options.playheadColor;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(needleX, 0);
+                ctx.lineTo(needleX, h);
+                ctx.stroke();
+            }
+        }
+    }
+
+    /**
+     * Find thumbnail frame index closest to given time.
+     * @private
+     */
+    _getActiveFrameIndex(time) {
+        if (!this.strip || !this.strip.times) return -1;
+        const times = this.strip.times;
+        let closest = 0;
+        let minDiff = Infinity;
+        for (let i = 0; i < times.length; i++) {
+            const diff = Math.abs(times[i] - time);
+            if (diff < minDiff) {
+                minDiff = diff;
+                closest = i;
+            }
+        }
+        return closest;
+    }
+
+    /**
+     * Create floating hover tooltip.
+     * @private
+     */
+    _createTooltip() {
+        this.tooltipEl = document.createElement('div');
+        this.tooltipEl.className = 'filmstrip-hover-tooltip';
+        this.tooltipEl.style.display = 'none';
+        this.tooltipEl.style.position = 'absolute';
+        this.tooltipEl.style.pointerEvents = 'none';
+        this.tooltipEl.style.zIndex = '100';
+        if (this.container) {
+            this.container.style.position = 'relative';
+            this.container.appendChild(this.tooltipEl);
+        }
+    }
+
+    /**
+     * Hide hover tooltip.
+     * @private
+     */
+    _hideTooltip() {
+        if (this.tooltipEl) {
+            this.tooltipEl.style.display = 'none';
+        }
+    }
+
+    /**
+     * Setup DOM interaction events.
+     * @private
+     */
+    _initEvents() {
+        const getFrameFromEvent = (e) => {
+            if (!this.strip || !this.strip.count) return null;
+            const rect = this.canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const count = this.strip.count;
+            const frameW = rect.width / count;
+            const idx = Math.floor(x / frameW);
+            if (idx < 0 || idx >= count) return null;
+            return {
+                index: idx,
+                time: this.strip.times[idx] || 0,
+                x: idx * frameW,
+                width: frameW,
+            };
+        };
+
+        this.canvas.addEventListener('mousemove', (e) => {
+            const frame = getFrameFromEvent(e);
+            if (frame) {
+                this.hoverIndex = frame.index;
+                this.hoverTime = frame.time;
+                this.render();
+
+                // Update tooltip
+                if (this.tooltipEl) {
+                    const rect = this.canvas.getBoundingClientRect();
+                    this.tooltipEl.style.display = 'block';
+                    this.tooltipEl.innerHTML = `
+                        <div class="tip-time">${frame.time.toFixed(3)}s</div>
+                        <div class="tip-meta">Frame #${frame.index + 1} / ${this.strip.count}</div>
+                        <div class="tip-dim">${this.strip.width}×${this.strip.height}</div>
+                    `;
+                    const tipX = Math.max(8, Math.min(rect.width - 100, e.clientX - rect.left - 45));
+                    this.tooltipEl.style.left = `${tipX}px`;
+                    this.tooltipEl.style.top = '-48px';
+                }
+
+                if (this.onFrameHoverCallback) {
+                    this.onFrameHoverCallback({
+                        index: frame.index,
+                        time: frame.time,
+                        width: this.strip.width,
+                        height: this.strip.height,
+                    });
+                }
+            } else {
+                this.hoverIndex = -1;
+                this.hoverTime = null;
+                this._hideTooltip();
+                this.render();
+            }
+        });
+
+        this.canvas.addEventListener('mouseleave', () => {
+            this.hoverIndex = -1;
+            this.hoverTime = null;
+            this._hideTooltip();
+            this.render();
+            if (this.onFrameHoverCallback) this.onFrameHoverCallback(null);
+        });
+
+        this.canvas.addEventListener('click', (e) => {
+            const frame = getFrameFromEvent(e);
+            if (frame && this.onSeekCallback) {
+                this.onSeekCallback(frame.time);
+            }
+        });
     }
 }

@@ -1,122 +1,189 @@
-// tools/media-inspector/tests/test_main.js
+// test_main.js — Headless test suite for tools/media-inspector
+//
+// Exercises bro.media.peaks, bro.media.thumbnails, windowed analysis,
+// UI visualizer synchronization, and takes a headless verification screenshot.
 
-let passed = 0;
-let failed = 0;
-
-function check(desc, cond) {
-    if (cond) {
-        console.log("  ok  " + desc);
-        passed++;
-    } else {
-        console.log("  FAIL: " + desc);
-        failed++;
+function resolveSamplePath(samplePath) {
+    if (typeof bro !== 'undefined' && bro.media && bro.media.peaks(samplePath, { buckets: 4 })) {
+        return samplePath;
     }
-}
-
-console.log("\n=== Media Inspector Integration Tests ===\n");
-
-// [1] bro.media API availability
-console.log("[1] Checking bro.media API Availability");
-check("bro namespace exists", typeof bro !== 'undefined');
-check("bro.media namespace exists", typeof bro.media !== 'undefined');
-check("bro.media.available is true", bro.media && bro.media.available === true);
-check("bro.media.peaks is a function", typeof bro.media.peaks === 'function');
-check("bro.media.thumbnails is a function", typeof bro.media.thumbnails === 'function');
-
-// [2] Generate a verified test media clip using VideoEncoder
-console.log("\n[2] Creating Test Media Clip with Audio & Video");
-const testClipPath = "test_clip.webm";
-const W = 64, H = 48, FPS = 10, N = 30;
-const RATE = 48000;
-
-try {
-    const enc = new VideoEncoder({
-        path: testClipPath,
-        width: W,
-        height: H,
-        fps: FPS,
-        quality: 'realtime',
-        audioSampleRate: RATE,
-        audioChannels: 1,
-        audioBitrateKbps: 64,
-    });
-
-    const px = new Uint8Array(W * H * 4);
-    const audioChunk = new Float32Array(RATE / FPS);
-
-    for (let f = 0; f < N; ++f) {
-        const level = Math.round((f / (N - 1)) * 255);
-        for (let i = 0; i < W * H; ++i) {
-            px[i * 4] = level;
-            px[i * 4 + 1] = 120;
-            px[i * 4 + 2] = 200;
-            px[i * 4 + 3] = 255;
-        }
-        enc.addFrameRGBA(px);
-
-        for (let i = 0; i < audioChunk.length; ++i) {
-            audioChunk[i] = 0.5 * Math.sin((f * audioChunk.length + i) * 0.05);
-        }
-        enc.addAudioFramesPCM(audioChunk);
+    if (typeof bro !== 'undefined' && bro.media && bro.media.peaks(`tools/media-inspector/${samplePath}`, { buckets: 4 })) {
+        return `tools/media-inspector/${samplePath}`;
     }
-    enc.finish();
-    check("VideoEncoder successfully generated test_clip.webm", true);
-} catch (e) {
-    check("VideoEncoder generated test_clip: " + e.message, false);
+    if (samplePath.includes('hello.webm')) {
+        return 'demos/video_demo/hello.webm';
+    }
+    return samplePath;
 }
 
-// [3] Audio waveform peaks extraction
-console.log("\n[3] Audio Waveform Peaks Analysis");
-const peaks = bro.media.peaks(testClipPath, { buckets: 256 });
+const path = resolveSamplePath('samples/hello.webm');
+const audioOnlyPath = resolveSamplePath('samples/ambience-bed.ogg');
 
-check("bro.media.peaks returned valid object", peaks !== null && typeof peaks === 'object');
-if (peaks) {
-    check("sampleRate is positive (48000)", peaks.sampleRate === RATE);
-    check("channels is valid (1)", peaks.channels === 1);
-    check("duration is positive (~3s)", Math.abs(peaks.duration - (N / FPS)) < 0.5);
-    check("buckets count matches requested (256)", peaks.buckets === 256 || (peaks.max && peaks.max.length === 256));
-    check("min array is Float32Array", peaks.min instanceof Float32Array);
-    check("max array is Float32Array", peaks.max instanceof Float32Array);
-    check("rms array is Float32Array", peaks.rms instanceof Float32Array);
-    check("min array length is 256", peaks.min.length === 256);
-    check("max array length is 256", peaks.max.length === 256);
-    check("rms array length is 256", peaks.rms.length === 256);
+console.log('=== Running Media Inspector Headless Tests ===');
+
+// ── 1. Assert bro.media availability ─────────────────────────────────────────
+
+assert(typeof bro !== 'undefined', 'global bro object exists');
+assert(bro.media, 'bro.media namespace exists');
+assert(bro.media.available === true, 'bro.media.available is true');
+console.log('✔ bro.media API is available');
+
+// ── 2. Validate bro.media.peaks structure ────────────────────────────────────
+
+const BUCKETS = 256;
+const peaks = bro.media.peaks(path, { buckets: BUCKETS });
+assert(peaks !== null, 'peaks() returned valid object for hello.webm');
+assert(typeof peaks.sampleRate === 'number' && peaks.sampleRate > 0,
+       `peaks.sampleRate (${peaks.sampleRate}) is a positive number`);
+assert(typeof peaks.channels === 'number' && peaks.channels >= 1,
+       `peaks.channels (${peaks.channels}) >= 1`);
+assert(typeof peaks.duration === 'number' && peaks.duration > 0,
+       `peaks.duration (${peaks.duration.toFixed(3)}s) > 0`);
+assert(peaks.buckets === BUCKETS,
+       `peaks.buckets (${peaks.buckets}) === ${BUCKETS}`);
+assert(peaks.from === 0, 'peaks.from starts at 0');
+assert(Math.abs(peaks.to - peaks.duration) < 1e-4, 'peaks.to spans the file duration');
+
+// Check TypedArray outputs
+assert(peaks.min instanceof Float32Array, 'peaks.min is Float32Array');
+assert(peaks.max instanceof Float32Array, 'peaks.max is Float32Array');
+assert(peaks.rms instanceof Float32Array, 'peaks.rms is Float32Array');
+assert(peaks.min.length === BUCKETS, `peaks.min length is ${BUCKETS}`);
+assert(peaks.max.length === BUCKETS, `peaks.max length is ${BUCKETS}`);
+assert(peaks.rms.length === BUCKETS, `peaks.rms length is ${BUCKETS}`);
+
+// Check amplitude bounds
+let minVal = 0, maxVal = 0, rmsSum = 0;
+for (let i = 0; i < BUCKETS; i++) {
+    minVal = Math.min(minVal, peaks.min[i]);
+    maxVal = Math.max(maxVal, peaks.max[i]);
+    rmsSum += peaks.rms[i];
+    assert(peaks.min[i] <= peaks.max[i], `bucket ${i}: min (${peaks.min[i]}) <= max (${peaks.max[i]})`);
+}
+assert(maxVal > 0, `waveform has positive peaks (${maxVal.toFixed(3)})`);
+assert(minVal < 0, `waveform has negative troughs (${minVal.toFixed(3)})`);
+assert(rmsSum > 0, 'waveform has non-zero RMS energy');
+console.log(`✔ bro.media.peaks validated (sr: ${peaks.sampleRate}Hz, ch: ${peaks.channels}, dur: ${peaks.duration.toFixed(2)}s, max: ${maxVal.toFixed(3)}, min: ${minVal.toFixed(3)})`);
+
+// ── 3. Validate windowed bro.media.peaks ─────────────────────────────────────
+
+const halfDur = peaks.duration / 2;
+const windowedPeaks = bro.media.peaks(path, { buckets: 64, from: 0, to: halfDur });
+assert(windowedPeaks !== null, 'windowed peaks() succeeded');
+assert(windowedPeaks.buckets === 64, 'windowed buckets === 64');
+assert(Math.abs(windowedPeaks.from - 0) < 0.01, 'windowed from === 0');
+assert(Math.abs(windowedPeaks.to - halfDur) < 0.1, `windowed to ≈ ${halfDur.toFixed(2)}`);
+assert(Math.abs(windowedPeaks.duration - peaks.duration) < 0.1, 'windowed duration reflects total file');
+
+// Invalid window checks
+assert(bro.media.peaks(path, { buckets: 16, from: 5, to: 1 }) === null,
+       'inverted window returns null');
+assert(bro.media.peaks('non_existent_file.webm', { buckets: 16 }) === null,
+       'missing file returns null');
+console.log('✔ windowed & invalid peaks handling verified');
+
+// ── 4. Validate bro.media.thumbnails structure ───────────────────────────────
+
+const THUMB_COUNT = 8;
+const THUMB_HEIGHT = 48;
+const strip = bro.media.thumbnails(path, { count: THUMB_COUNT, height: THUMB_HEIGHT });
+assert(strip !== null, 'thumbnails() returned valid object for hello.webm');
+assert(strip.count === THUMB_COUNT, `strip.count (${strip.count}) === ${THUMB_COUNT}`);
+assert(strip.height === THUMB_HEIGHT, `strip.height (${strip.height}) === ${THUMB_HEIGHT}`);
+assert(typeof strip.width === 'number' && strip.width > 0, `strip.width (${strip.width}) > 0`);
+assert(typeof strip.rotation === 'number', `strip.rotation (${strip.rotation}) is number`);
+
+// Check times array
+assert(Array.isArray(strip.times), 'strip.times is an array');
+assert(strip.times.length === THUMB_COUNT, `strip.times length === ${THUMB_COUNT}`);
+for (let i = 1; i < strip.times.length; i++) {
+    assert(strip.times[i] >= strip.times[i - 1],
+           `strip timestamps walk forward (${strip.times[i - 1].toFixed(3)} -> ${strip.times[i].toFixed(3)})`);
 }
 
-// [4] Video thumbnail strip extraction
-console.log("\n[4] Video Filmstrip Thumbnails Analysis");
-const thumbs = bro.media.thumbnails(testClipPath, { count: 6, height: 36 });
+// Check pixel buffer data
+assert(strip.data instanceof Uint8ClampedArray, 'strip.data is Uint8ClampedArray');
+const expectedLen = strip.width * strip.count * strip.height * 4;
+assert(strip.data.length === expectedLen,
+       `strip.data length (${strip.data.length}) matches width*count*height*4 (${expectedLen})`);
 
-check("bro.media.thumbnails returned valid object", thumbs !== null && typeof thumbs === 'object');
-if (thumbs) {
-    check("thumbnails count matches requested (6)", thumbs.count === 6);
-    check("thumbnails height is 36", thumbs.height === 36);
-    check("thumbnails width is positive", thumbs.width > 0);
-    check("thumbnails times is an Array", Array.isArray(thumbs.times));
-    check("thumbnails times length is 6", thumbs.times.length === 6);
-    check("thumbnails times are monotonic", thumbs.times[thumbs.times.length - 1] >= thumbs.times[0]);
-    check("thumbnails data buffer has valid length", thumbs.data && thumbs.data.length === (thumbs.width * thumbs.count * thumbs.height * 4));
+// Ensure frames contain actual image pixels (non-zero alpha & rgb)
+let nonZeroAlpha = 0;
+let rgbEnergy = 0;
+for (let i = 0; i < strip.data.length; i += 4) {
+    rgbEnergy += strip.data[i] + strip.data[i + 1] + strip.data[i + 2];
+    if (strip.data[i + 3] > 0) nonZeroAlpha++;
+}
+assert(nonZeroAlpha > (strip.data.length / 4) * 0.9, 'thumbnails have full alpha opacity');
+assert(rgbEnergy > 0, 'thumbnails have color content');
+console.log(`✔ bro.media.thumbnails validated (${strip.count} frames, ${strip.width}x${strip.height}px, ${strip.data.length} bytes)`);
+
+// ── 5. Validate windowed bro.media.thumbnails ────────────────────────────────
+
+const winStrip = bro.media.thumbnails(path, { count: 4, height: 32, from: halfDur });
+assert(winStrip !== null, 'windowed thumbnails() succeeded');
+assert(winStrip.count === 4, 'windowed count === 4');
+for (const t of winStrip.times) {
+    assert(t >= halfDur - 0.25, `thumbnail timestamp ${t.toFixed(3)} >= window start ${halfDur.toFixed(3)}`);
+}
+console.log('✔ windowed thumbnails verified');
+
+// ── 6. Test Audio-Only Peak Extraction ───────────────────────────────────────
+
+const audioPeaks = bro.media.peaks(audioOnlyPath, { buckets: 128 });
+if (audioPeaks) {
+    assert(audioPeaks.sampleRate > 0, 'audio-only sampleRate > 0');
+    assert(audioPeaks.min.length === 128, 'audio-only min length === 128');
+    console.log(`✔ audio-only peaks verified (${audioOnlyPath}, ${audioPeaks.duration.toFixed(2)}s)`);
 }
 
-// [5] DOM Layout & Canvas Inspection
-console.log("\n[5] DOM & Canvas Verification");
-const waveformCanvas = document.getElementById('waveformCanvas');
-const filmstripCanvas = document.getElementById('filmstripCanvas');
-const mediaVideo = document.getElementById('mediaVideo');
+// ── 7. Validate DOM App & UI Visualizers ─────────────────────────────────────
 
-check("waveform canvas element exists in DOM", !!waveformCanvas);
-check("filmstrip canvas element exists in DOM", !!filmstripCanvas);
-check("media video element exists in DOM", !!mediaVideo);
+flush();
 
-// [6] Screenshot
-console.log("\n[6] Capturing Verification Screenshot");
-if (typeof screenshot === 'function') {
-    screenshot("media_inspector_test.png");
-    console.log("  screenshot: media_inspector_test.png");
-}
+// Check DOM elements exist
+const videoEl = document.getElementById('mediaVideo');
+const waveCanvas = document.getElementById('waveformCanvas');
+const stripCanvas = document.getElementById('filmstripCanvas');
+const playBtn = document.getElementById('playBtn');
+const currentTimeEl = document.getElementById('currentTime');
 
-console.log(`\n=== ${passed} passed, ${failed} failed ===\n`);
+assert(videoEl, '<video> element exists in DOM');
+assert(waveCanvas, 'waveform canvas exists in DOM');
+assert(stripCanvas, 'filmstrip canvas exists in DOM');
+assert(playBtn, 'playBtn exists');
 
-if (failed > 0) {
-    throw new Error(`${failed} tests failed in media-inspector integration test suite`);
-}
+// Check app instance
+const app = window.mediaInspectorApp;
+assert(app, 'mediaInspectorApp instance attached to window');
+assert(app.waveform, 'waveform visualizer instance initialized');
+assert(app.filmstrip, 'filmstrip visualizer instance initialized');
+assert(app.player, 'player instance initialized');
+assert(app.metadata, 'metadata inspector instance initialized');
+
+// Test seeking and player clock updates
+app.player.seek(0.5);
+flush();
+assert(Math.abs(app.player.currentTime - 0.5) < 0.1, `player seek landed at ${app.player.currentTime}`);
+assert(Math.abs(app.waveform.playheadTime - 0.5) < 0.1, 'waveform playhead updated on seek');
+assert(Math.abs(app.filmstrip.playheadTime - 0.5) < 0.1, 'filmstrip playhead updated on seek');
+
+// Test zoom actions
+app.waveform.zoom(2.0);
+flush();
+assert(app.waveform.windowTo < app.waveform.duration, 'waveform zoomed in');
+app.waveform.fit();
+flush();
+assert(Math.abs(app.waveform.windowTo - app.waveform.duration) < 0.05, 'waveform fit reset zoom');
+
+console.log('✔ UI visualizers & synchronization verified');
+
+// ── 8. Render & Headless Screenshot ──────────────────────────────────────────
+
+// Force layout and paint
+flush();
+sleep(100);
+screenshot('tests/media_inspector_screenshot.png');
+console.log('✔ Headless screenshot saved: tests/media_inspector_screenshot.png');
+
+console.log('PASS');

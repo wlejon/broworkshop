@@ -1,12 +1,12 @@
 {
-    "name": "Media Inspector",
-    "version": "1.0.0",
-    "description": "Audio waveform analysis, filmstrip thumbnail extraction, and timeline diagnostics using bro.media.",
-    "window": {
-        "width": 1280,
-        "height": 840,
-        "minWidth": 900,
-        "minHeight": 600,
-        "resizable": true
-    }
+  "name": "Media Inspector",
+  "title": "Media Inspector",
+  "default_app": false,
+  "main": "index.html",
+  "lib": "../../lib",
+  "width": 1280,
+  "height": 840,
+  "minWidth": 900,
+  "minHeight": 600,
+  "resizable": true
 }
