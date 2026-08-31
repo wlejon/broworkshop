@@ -40,6 +40,7 @@
         { "dir": "tools/node-forge" },
         { "dir": "tools/procwatch" },
         { "dir": "tools/reader" },
+        { "dir": "tools/media-inspector" },
         { "dir": "demos/ai-arena" },
         { "dir": "demos/anim-lab" },
         { "dir": "demos/character-lab" },

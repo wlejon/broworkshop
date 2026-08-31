@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Media Inspector — bro.media</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header class="app-header">
+        <div class="header-left">
+            <h1 class="logo">bro.media <span>Inspector</span></h1>
+            <div class="source-selector">
+                <label for="sampleSelect">Source:</label>
+                <select id="sampleSelect">
+                    <option value="../../demos/video_demo/hello.webm">hello.webm (Video + Audio)</option>
+                    <option value="../../demos/scene-audio/assets/footstep.wav">footstep.wav (SFX)</option>
+                    <option value="../../demos/scene-audio/assets/ambient.ogg">ambient.ogg (Music/Ambience)</option>
+                    <option value="custom">Custom File Path...</option>
+                </select>
+                <input type="text" id="customPathInput" placeholder="path/to/media.webm" style="display: none;">
+                <button id="loadBtn" class="btn primary">Inspect</button>
+            </div>
+        </div>
+        <div class="header-right">
+            <div class="badge-group">
+                <span id="badgeAvailable" class="badge ok">bro.media: ON</span>
+                <span id="badgeDuration" class="badge">0.00s</span>
+                <span id="badgeSampleRate" class="badge">0 Hz</span>
+                <span id="badgeChannels" class="badge">0 ch</span>
+            </div>
+        </div>
+    </header>
+
+    <main class="workspace">
+        <div class="top-row">
+            <section class="preview-panel">
+                <div class="panel-header">
+                    <h2>Playback Preview</h2>
+                    <span id="previewStatus" class="sub-label">Ready</span>
+                </div>
+                <div class="video-stage">
+                    <video id="mediaVideo" preload="auto" playsinline></video>
+                    <div id="audioVisualizerStage" class="audio-stage" style="display: none;">
+                        <div class="audio-icon">🔊</div>
+                        <div class="audio-filename" id="audioStageName">audio.wav</div>
+                    </div>
+                </div>
+                <div class="transport-bar">
+                    <button id="playBtn" class="btn control">▶ Play</button>
+                    <button id="stopBtn" class="btn control">⏹ Stop</button>
+                    <button id="loopBtn" class="btn control toggle">🔁 Loop</button>
+                    <div class="time-display">
+                        <span id="currentTime">00:00.000</span> / <span id="totalDuration">00:00.000</span>
+                    </div>
+                    <div class="rate-control">
+                        <label for="playbackRate">Speed:</label>
+                        <select id="playbackRate">
+                            <option value="0.5">0.5x</option>
+                            <option value="1" selected>1.0x</option>
+                            <option value="1.5">1.5x</option>
+                            <option value="2">2.0x</option>
+                        </select>
+                    </div>
+                    <div class="volume-control">
+                        <span>🔊</span>
+                        <input type="range" id="volumeSlider" min="0" max="1" step="0.05" value="1">
+                    </div>
+                </div>
+            </section>
+
+            <aside class="metadata-panel">
+                <div class="panel-header">
+                    <h2>Stream Metadata & Diagnostics</h2>
+                </div>
+                <div class="meta-content" id="metaContent">
+                    <div class="meta-section">
+                        <h3>Audio Stream (bro.media.peaks)</h3>
+                        <table class="meta-table">
+                            <tr><td>Sample Rate</td><td id="metaSampleRate">—</td></tr>
+                            <tr><td>Channels</td><td id="metaChannels">—</td></tr>
+                            <tr><td>Duration</td><td id="metaAudioDuration">—</td></tr>
+                            <tr><td>Peak Buckets</td><td id="metaBuckets">—</td></tr>
+                            <tr><td>Peak Max Value</td><td id="metaPeakMax">—</td></tr>
+                            <tr><td>RMS Average</td><td id="metaRmsAvg">—</td></tr>
+                        </table>
+                    </div>
+                    <div class="meta-section">
+                        <h3>Video Filmstrip (bro.media.thumbnails)</h3>
+                        <table class="meta-table">
+                            <tr><td>Thumb Dimensions</td><td id="metaThumbSize">—</td></tr>
+                            <tr><td>Frame Count</td><td id="metaThumbCount">—</td></tr>
+                            <tr><td>Rotation</td><td id="metaRotation">—</td></tr>
+                            <tr><td>Strip Buffer Size</td><td id="metaBufferSize">—</td></tr>
+                        </table>
+                    </div>
+                    <div class="meta-section options-section">
+                        <h3>Analysis Settings</h3>
+                        <div class="field-row">
+                            <label>Buckets:</label>
+                            <input type="number" id="optBuckets" value="1024" min="64" max="8192" step="64">
+                        </div>
+                        <div class="field-row">
+                            <label>Thumbnails:</label>
+                            <input type="number" id="optThumbCount" value="16" min="4" max="64" step="4">
+                        </div>
+                        <button id="reanalyzeBtn" class="btn small">Re-analyze</button>
+                    </div>
+                </div>
+            </aside>
+        </div>
+
+        <section class="timeline-panel">
+            <div class="timeline-header">
+                <h2>Audio Waveform Timeline</h2>
+                <div class="timeline-controls">
+                    <button id="zoomOutBtn" class="btn small">Zoom -</button>
+                    <span id="zoomLabel" class="zoom-label">1.0x</span>
+                    <button id="zoomInBtn" class="btn small">Zoom +</button>
+                    <button id="zoomFitBtn" class="btn small">Fit</button>
+                </div>
+            </div>
+            <div class="waveform-container">
+                <canvas id="waveformCanvas" width="1200" height="150"></canvas>
+            </div>
+
+            <div class="timeline-header sub">
+                <h2>Video Filmstrip Frame Ribbon</h2>
+                <span id="filmstripStatus" class="sub-label">Extracted with bro.media.thumbnails</span>
+            </div>
+            <div class="filmstrip-scroll-wrap">
+                <div id="filmstripContainer" class="filmstrip-container">
+                    <canvas id="filmstripCanvas" width="1200" height="72"></canvas>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <script type="module" src="app.js"></script>
+</body>
+</html>
