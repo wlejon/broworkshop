@@ -86,6 +86,7 @@
         { "dir": "demos/triposplat" },
         { "dir": "demos/video_demo" },
         { "dir": "demos/vision-lab" },
+        { "dir": "demos/vlm-lab" },
         { "dir": "demos/window-lab" },
         { "dir": "demos/worldgen-lab" },
         { "dir": "ai/ardy-motion" },

@@ -1,0 +1,12 @@
+{
+    "name": "Vision-Language Lab",
+    "version": "1.0.0",
+    "description": "Multimodal Vision-Language Model chat, visual reasoning, and object grounding using brolm and bro.lm.",
+    "window": {
+        "width": 1280,
+        "height": 840,
+        "minWidth": 900,
+        "minHeight": 600,
+        "resizable": true
+    }
+}

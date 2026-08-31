@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Vision-Language Lab — brolm</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header class="app-header">
+        <div class="header-left">
+            <h1 class="logo">bro.lm <span>Vision-Language Lab</span></h1>
+            <div class="model-selector">
+                <label for="modelSelect">VLM Architecture:</label>
+                <select id="modelSelect">
+                    <option value="qwen3-vl">Qwen3-VL (Dense M-RoPE + ViT)</option>
+                    <option value="qwen35">Qwen3.5 (Hybrid Linear-Attention)</option>
+                    <option value="clip">CLIP Cross-Modal Scorer</option>
+                </select>
+            </div>
+        </div>
+        <div class="header-right">
+            <div class="badge-group">
+                <span id="badgeBackend" class="badge ok">brolm: Native</span>
+                <span id="badgeTokens" class="badge">0 tok/s</span>
+                <span id="badgeLatency" class="badge">0 ms</span>
+            </div>
+        </div>
+    </header>
+
+    <main class="workspace">
+        <section class="image-pane">
+            <div class="pane-header">
+                <h2>Visual Input &amp; Grounding Canvas</h2>
+                <div class="image-actions">
+                    <select id="sampleImageSelect">
+                        <option value="scenery">Sample: Mountain Scene</option>
+                        <option value="room">Sample: Interior Studio</option>
+                        <option value="objects">Sample: Workshop Desk</option>
+                    </select>
+                    <button id="uploadBtn" class="btn small">Upload File...</button>
+                    <input type="file" id="fileInput" accept="image/*" style="display: none;">
+                </div>
+            </div>
+
+            <div class="canvas-viewport" id="dropZone">
+                <canvas id="imageCanvas" width="640" height="480"></canvas>
+                <canvas id="overlayCanvas" width="640" height="480"></canvas>
+                <div class="drop-hint" id="dropHint">
+                    <span>Drop image here or select a sample above</span>
+                </div>
+            </div>
+
+            <div class="grounding-footer">
+                <span class="grounding-title">Grounded Objects:</span>
+                <div class="tags-row" id="groundedTags">
+                    <span class="tag-pill">Awaiting analysis</span>
+                </div>
+            </div>
+        </section>
+
+        <section class="chat-pane">
+            <div class="pane-header">
+                <h2>Conversational Multimodal Reasoning</h2>
+                <div class="chat-actions">
+                    <button id="clearChatBtn" class="btn small">Clear Chat</button>
+                </div>
+            </div>
+
+            <div class="chat-history" id="chatHistory">
+                <div class="chat-msg assistant">
+                    <div class="msg-avatar">🤖</div>
+                    <div class="msg-body">
+                        <p>Welcome to the <strong>Vision-Language Lab</strong>. I can visually reason about the image on the left, locate objects with coordinates, transcribe text, or answer questions.</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="quick-prompts">
+                <button class="quick-btn" data-prompt="Describe this image in rich detail.">Describe Scene</button>
+                <button class="quick-btn" data-prompt="Locate and list all distinct objects with bounding boxes.">Detect Objects</button>
+                <button class="quick-btn" data-prompt="What are the key colors and lighting conditions in this image?">Lighting & Colors</button>
+            </div>
+
+            <div class="prompt-input-bar">
+                <textarea id="promptInput" placeholder="Ask a question about the image... (Enter to send, Shift+Enter for newline)" rows="2"></textarea>
+                <button id="sendBtn" class="btn primary send-btn">Send</button>
+            </div>
+        </section>
+    </main>
+
+    <script type="module" src="app.js"></script>
+</body>
+</html>
