@@ -1,0 +1,7 @@
+{
+    "app": ".",
+    "title": "Clap Runner",
+    "width": 960,
+    "height": 540,
+    "lib": "../../lib"
+}

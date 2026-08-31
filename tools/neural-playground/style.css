@@ -1,0 +1,350 @@
+/* style.css — Neural Playground Visual Analytics Theme */
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    user-select: none;
+}
+
+body {
+    background-color: #080b12;
+    color: #e2e8f0;
+    font-family: 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    overflow: hidden;
+}
+
+#appWrapper {
+    width: 1280px;
+    height: 720px;
+    background: #0d121f;
+    border: 1px solid #1a263d;
+    border-radius: 8px;
+    box-shadow: 0 0 50px rgba(0, 0, 0, 0.7);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+/* Top Navigation & Global Controls */
+#topBar {
+    height: 60px;
+    background: #090e18;
+    border-bottom: 1px solid #1e2c45;
+    padding: 0 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.brand-section {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.brand-title {
+    font-size: 16px;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    color: #fff;
+    text-shadow: 0 0 10px rgba(0, 229, 255, 0.4);
+}
+
+.badge-gpu {
+    font-size: 10px;
+    background: rgba(0, 229, 255, 0.15);
+    color: #00e5ff;
+    border: 1px solid #00e5ff44;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-weight: bold;
+}
+
+.dataset-picker {
+    display: flex;
+    gap: 6px;
+    background: #0f172a;
+    padding: 4px;
+    border-radius: 6px;
+    border: 1px solid #1e293b;
+}
+
+.btn-ds {
+    background: transparent;
+    border: none;
+    color: #94a3b8;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 6px 14px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.btn-ds:hover {
+    color: #fff;
+    background: #1e293b;
+}
+
+.btn-ds.active {
+    background: #00e5ff;
+    color: #040812;
+    box-shadow: 0 0 12px rgba(0, 229, 255, 0.4);
+}
+
+.playback-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.btn-play {
+    background: linear-gradient(135deg, #00e5ff, #0077ff);
+    color: #020617;
+    border: none;
+    font-size: 13px;
+    font-weight: 700;
+    padding: 8px 18px;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    box-shadow: 0 0 14px rgba(0, 229, 255, 0.35);
+    transition: all 0.15s;
+}
+
+.btn-play.playing {
+    background: linear-gradient(135deg, #ffea00, #ff8800);
+    box-shadow: 0 0 14px rgba(255, 234, 0, 0.35);
+}
+
+.btn-icon {
+    background: #162033;
+    border: 1px solid #273752;
+    color: #cbd5e1;
+    padding: 7px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.btn-icon:hover {
+    background: #22324e;
+    color: #fff;
+    border-color: #00e5ff;
+}
+
+/* 3-Column Dashboard Layout */
+#dashboard {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 270px 420px 1fr;
+    height: calc(720px - 60px);
+}
+
+.col-panel {
+    border-right: 1px solid #1a263d;
+    display: flex;
+    flex-direction: column;
+    padding: 16px;
+    overflow-y: auto;
+}
+
+.col-panel:last-child {
+    border-right: none;
+}
+
+.panel-header {
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #7dd3fc;
+    margin-bottom: 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+/* Left Panel Controls */
+.control-card {
+    background: #0f1626;
+    border: 1px solid #1c2a44;
+    border-radius: 6px;
+    padding: 12px;
+    margin-bottom: 12px;
+}
+
+.param-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+    font-size: 12px;
+}
+
+.param-row:last-child {
+    margin-bottom: 0;
+}
+
+.param-label {
+    color: #94a3b8;
+}
+
+.param-input select, .param-input input[type="number"] {
+    background: #0a0f1c;
+    border: 1px solid #233555;
+    color: #f1f5f9;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    outline: none;
+}
+
+.param-slider {
+    width: 100%;
+    margin-top: 4px;
+    accent-color: #00e5ff;
+}
+
+/* Metric Display Cards */
+.metrics-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-top: 6px;
+}
+
+.metric-box {
+    background: #0a0f1d;
+    border: 1px solid #1b2840;
+    border-radius: 6px;
+    padding: 8px 10px;
+}
+
+.metric-title {
+    font-size: 10px;
+    color: #64748b;
+    text-transform: uppercase;
+}
+
+.metric-val {
+    font-size: 16px;
+    font-weight: 700;
+    font-family: monospace;
+    color: #00e5ff;
+    margin-top: 2px;
+}
+
+/* Center Panel: Canvases */
+#boundaryCanvas {
+    width: 388px;
+    height: 360px;
+    background: #090e1a;
+    border-radius: 6px;
+    border: 1px solid #1e2d47;
+    display: block;
+    margin-bottom: 12px;
+}
+
+#lossCanvas {
+    width: 388px;
+    height: 220px;
+    background: #090e1a;
+    border-radius: 6px;
+    border: 1px solid #1e2d47;
+    display: block;
+}
+
+/* Right Panel: Architecture Graph & Layer Editor */
+.arch-toolbar {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.btn-arch {
+    background: #141f33;
+    border: 1px solid #263857;
+    color: #94a3b8;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 5px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.btn-arch:hover {
+    color: #fff;
+    border-color: #00e5ff;
+}
+
+.layer-chips-container {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+}
+
+.layer-chip {
+    background: #0f172a;
+    border: 1px solid #233452;
+    border-radius: 6px;
+    padding: 6px 10px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 90px;
+}
+
+.layer-chip-title {
+    font-size: 10px;
+    font-weight: bold;
+    color: #7dd3fc;
+    margin-bottom: 4px;
+}
+
+.layer-chip-controls {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: bold;
+    color: #fff;
+}
+
+.btn-chip {
+    background: #1c2b45;
+    border: none;
+    color: #94a3b8;
+    width: 18px;
+    height: 18px;
+    border-radius: 3px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+}
+
+.btn-chip:hover {
+    background: #00e5ff;
+    color: #040812;
+}
+
+#networkCanvas {
+    width: 100%;
+    height: 520px;
+    background: #090e1a;
+    border: 1px solid #1e2d47;
+    border-radius: 6px;
+}

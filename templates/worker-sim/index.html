@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Worker Simulation Template</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="appWrapper">
+        <!-- Main Canvas -->
+        <canvas id="simCanvas" width="1280" height="720"></canvas>
+
+        <!-- Top Status & Performance HUD -->
+        <div id="hudTop">
+            <div class="hud-panel">
+                <div class="stat-item">
+                    <span class="stat-label">Main Thread</span>
+                    <span class="stat-val" id="valFps">60 FPS</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Frame Time</span>
+                    <span class="stat-val green" id="valFrameTime">1.2 ms</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Worker Thread</span>
+                    <span class="stat-val" id="valTps">60 TPS</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Step Compute</span>
+                    <span class="stat-val amber" id="valStepTime">2.4 ms</span>
+                </div>
+            </div>
+
+            <div class="hud-panel">
+                <div class="stat-item">
+                    <span class="stat-label">Entities</span>
+                    <span class="stat-val" id="valEntityCount">4,000</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Transfer</span>
+                    <span class="stat-val green" id="valTransfer">Zero-Copy (0 MB/s GC)</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bottom Controls HUD -->
+        <div id="hudBottom">
+            <!-- Mode Toggle -->
+            <div class="hud-panel">
+                <div class="btn-group">
+                    <button class="btn-mode active" data-mode="boids">Boids Flocking</button>
+                    <button class="btn-mode" data-mode="particles">Elastic Particles</button>
+                    <button class="btn-mode" data-mode="gravity">N-Body Gravity</button>
+                </div>
+            </div>
+
+            <!-- Parameters & Playback -->
+            <div class="hud-panel">
+                <div class="slider-group">
+                    <span>Count:</span>
+                    <input type="range" id="sliderCount" min="1000" max="20000" step="1000" value="4000">
+                    <span id="lblCount">4k</span>
+                </div>
+
+                <div class="slider-group">
+                    <span>Speed:</span>
+                    <input type="range" id="sliderSpeed" min="0.2" max="2.5" step="0.1" value="1.0">
+                </div>
+
+                <button id="btnPause" class="btn-ctrl">⏸ Pause</button>
+                <button id="btnStep" class="btn-ctrl">⏭ Step</button>
+                <button id="btnReset" class="btn-ctrl">↺ Reset</button>
+            </div>
+
+            <div class="hud-panel">
+                <span class="mouse-hint">🖱 Left: Attract | Right: Repel | Shift: Vortex</span>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="app.js"></script>
+</body>
+</html>

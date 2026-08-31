@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clap Runner</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="appContainer">
+        <!-- Top Gameplay HUD -->
+        <div id="hudTop">
+            <div class="hud-group">
+                <div class="hud-card" id="scoreCard">
+                    <span class="hud-label">Score</span>
+                    <span class="hud-val" id="valScore">0</span>
+                </div>
+                <div class="hud-card" id="multiplierCard">
+                    <span class="hud-label">Multiplier</span>
+                    <span class="hud-val" id="valMultiplier">1X</span>
+                </div>
+                <div class="hud-card" id="distCard">
+                    <span class="hud-label">Distance</span>
+                    <span class="hud-val" id="valDist">0 m</span>
+                </div>
+            </div>
+            <div class="hud-group">
+                <div class="hud-card" id="coinsCard">
+                    <span class="hud-label">Coins</span>
+                    <span class="hud-val" id="valCoins">0</span>
+                </div>
+                <div class="hud-card" id="hiScoreCard">
+                    <span class="hud-label">Best</span>
+                    <span class="hud-val" id="valHiScore">0</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Game Viewport -->
+        <canvas id="gameCanvas" width="960" height="540"></canvas>
+
+        <!-- Bottom Acoustic Telemetry Meter -->
+        <div id="telemetryPanel">
+            <div class="telem-section">
+                <div class="telem-badge" title="Voice / Acoustic Activity Detector">
+                    <div class="status-dot" id="vadDot"></div>
+                    <span>VAD</span>
+                </div>
+                <div class="telem-badge">
+                    <span>ENERGY</span>
+                    <div class="vu-meter-wrap">
+                        <div id="vuBar"></div>
+                    </div>
+                </div>
+                <div class="telem-badge" title="Tonal Pitch Detection (Whistle)">
+                    <div class="status-dot" id="toneDot"></div>
+                    <span id="toneHzLabel">TONE: -- Hz</span>
+                </div>
+            </div>
+
+            <div class="telem-section">
+                <div id="gestureBadge">READY</div>
+            </div>
+
+            <div class="telem-section">
+                <button id="btnMicToggle" class="btn-ctrl">🎤 Enable Mic</button>
+                <button id="btnCalibrate" class="btn-ctrl">⚙ Settings</button>
+                <button id="btnAudioMute" class="btn-ctrl">🔊</button>
+            </div>
+        </div>
+
+        <!-- Title Screen Modal -->
+        <div id="modalTitle" class="modal-overlay">
+            <div class="modal-box">
+                <div class="modal-title">⚡ CLAP RUNNER ⚡</div>
+                <div class="modal-desc">
+                    Acoustic gesture-driven cyberpunk runner. Leap, glide, and slide to the rhythm of sound!
+                </div>
+                <div class="controls-guide">
+                    <div class="guide-row">
+                        <span class="guide-action">JUMP</span>
+                        <span class="guide-input">Single Clap / Space / ↑</span>
+                    </div>
+                    <div class="guide-row">
+                        <span class="guide-action">SUPER JUMP</span>
+                        <span class="guide-input">Double Clap / Double Space / W</span>
+                    </div>
+                    <div class="guide-row">
+                        <span class="guide-action">HOVER GLIDE</span>
+                        <span class="guide-input">Whistle (Pitch) / Hold E / ↑</span>
+                    </div>
+                    <div class="guide-row">
+                        <span class="guide-action">SLIDE DASH</span>
+                        <span class="guide-input">Snap / Tap / ↓ / S</span>
+                    </div>
+                </div>
+                <button id="btnPlayGame" class="btn-primary">START RUN</button>
+            </div>
+        </div>
+
+        <!-- Calibration & Settings Modal -->
+        <div id="modalSettings" class="modal-overlay hidden">
+            <div class="modal-box">
+                <div class="modal-title">Acoustic Calibration</div>
+                <div class="modal-desc">
+                    Tune gesture sensitivity for your room microphone and noise floor.
+                </div>
+                <div class="slider-row">
+                    <span>Clap Threshold</span>
+                    <input type="range" id="sliderClapSens" min="0.1" max="0.8" step="0.02" value="0.28">
+                </div>
+                <div class="slider-row">
+                    <span>Whistle Min Hz</span>
+                    <input type="range" id="sliderWhistleHz" min="500" max="1500" step="50" value="700">
+                </div>
+                <div style="margin-top: 18px;">
+                    <button id="btnCloseSettings" class="btn-primary">APPLY</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Game Over Modal -->
+        <div id="modalGameOver" class="modal-overlay hidden">
+            <div class="modal-box">
+                <div class="modal-title" style="color: #ff0055; text-shadow: 0 0 12px #ff0055;">SYSTEM CRASHED</div>
+                <div class="modal-desc" id="goStatsText">
+                    Score: 0 | Distance: 0m | Coins: 0
+                </div>
+                <button id="btnRestartGame" class="btn-primary">PLAY AGAIN</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="app.js"></script>
+</body>
+</html>

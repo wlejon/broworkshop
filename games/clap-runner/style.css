@@ -1,0 +1,326 @@
+/* style.css — Neon Cyberpunk Runner Styling for Clap Runner */
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    user-select: none;
+}
+
+body {
+    background-color: #06060c;
+    color: #e0e6ed;
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+
+#appContainer {
+    position: relative;
+    width: 960px;
+    height: 540px;
+    background: #000;
+    border-radius: 8px;
+    box-shadow: 0 0 40px rgba(0, 229, 255, 0.25), 0 0 80px rgba(255, 0, 127, 0.15);
+    border: 1px solid #1a2233;
+    overflow: hidden;
+}
+
+#gameCanvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+/* Top HUD */
+#hudTop {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 56px;
+    padding: 10px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: linear-gradient(180deg, rgba(6, 6, 14, 0.85) 0%, rgba(6, 6, 14, 0) 100%);
+    pointer-events: none;
+    z-index: 10;
+}
+
+.hud-group {
+    display: flex;
+    gap: 20px;
+    align-items: center;
+}
+
+.hud-card {
+    background: rgba(14, 18, 28, 0.75);
+    border: 1px solid #1f2a40;
+    padding: 4px 12px;
+    border-radius: 6px;
+    backdrop-filter: blur(4px);
+    display: flex;
+    flex-direction: column;
+}
+
+.hud-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #8a99ad;
+}
+
+.hud-val {
+    font-size: 18px;
+    font-weight: 700;
+    font-family: 'Courier New', Courier, monospace;
+    color: #00e5ff;
+    text-shadow: 0 0 8px rgba(0, 229, 255, 0.6);
+}
+
+#multiplierCard .hud-val {
+    color: #ffea00;
+    text-shadow: 0 0 8px rgba(255, 234, 0, 0.6);
+}
+
+/* Bottom Acoustic Telemetry Meter */
+#telemetryPanel {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 50px;
+    background: rgba(10, 12, 18, 0.85);
+    border-top: 1px solid #1d263b;
+    padding: 0 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    backdrop-filter: blur(6px);
+    z-index: 10;
+}
+
+.telem-section {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.telem-badge {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #8a99ad;
+}
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #334155;
+    transition: background 0.15s, box-shadow 0.15s;
+}
+
+.status-dot.active {
+    background: #00ffaa;
+    box-shadow: 0 0 8px #00ffaa;
+}
+
+.vu-meter-wrap {
+    width: 140px;
+    height: 10px;
+    background: #141b29;
+    border-radius: 5px;
+    overflow: hidden;
+    border: 1px solid #23304a;
+}
+
+#vuBar {
+    width: 0%;
+    height: 100%;
+    background: linear-gradient(90deg, #00e5ff, #ff007f);
+    transition: width 0.05s ease-out;
+}
+
+#gestureBadge {
+    background: #162033;
+    border: 1px solid #00e5ff55;
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-family: monospace;
+    font-weight: bold;
+    color: #00e5ff;
+    min-width: 160px;
+    text-align: center;
+    font-size: 11px;
+    box-shadow: 0 0 8px rgba(0, 229, 255, 0.2);
+    transition: all 0.15s;
+}
+
+#gestureBadge.fired {
+    background: #00e5ff;
+    color: #050811;
+    box-shadow: 0 0 16px #00e5ff;
+    transform: scale(1.05);
+}
+
+.btn-ctrl {
+    pointer-events: auto;
+    background: #1a2436;
+    border: 1px solid #2c3c59;
+    color: #cbd5e1;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 6px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.btn-ctrl:hover {
+    background: #25334d;
+    color: #fff;
+    border-color: #00e5ff;
+}
+
+.btn-ctrl.active {
+    background: #00e5ff;
+    color: #080c14;
+    border-color: #00e5ff;
+    box-shadow: 0 0 10px rgba(0, 229, 255, 0.4);
+}
+
+/* Modals & Overlays */
+.modal-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(4, 6, 12, 0.85);
+    backdrop-filter: blur(8px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    transition: opacity 0.2s ease;
+}
+
+.modal-overlay.hidden {
+    display: none;
+    opacity: 0;
+}
+
+.modal-box {
+    background: #0e1322;
+    border: 1px solid #22314d;
+    border-radius: 10px;
+    padding: 24px 32px;
+    width: 440px;
+    text-align: center;
+    box-shadow: 0 0 50px rgba(0, 229, 255, 0.2);
+}
+
+.modal-title {
+    font-size: 24px;
+    font-weight: 800;
+    margin-bottom: 12px;
+    letter-spacing: 1px;
+    color: #fff;
+    text-shadow: 0 0 12px #00e5ff;
+}
+
+.modal-desc {
+    font-size: 13px;
+    color: #94a3b8;
+    line-height: 1.5;
+    margin-bottom: 20px;
+}
+
+.controls-guide {
+    background: #090d18;
+    border: 1px solid #1a253b;
+    border-radius: 6px;
+    padding: 12px;
+    margin-bottom: 20px;
+    text-align: left;
+    font-size: 12px;
+}
+
+.guide-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 4px 0;
+    border-bottom: 1px solid #131b2c;
+}
+
+.guide-row:last-child {
+    border-bottom: none;
+}
+
+.guide-action {
+    font-weight: 700;
+    color: #00e5ff;
+}
+
+.guide-input {
+    color: #cbd5e1;
+    font-family: monospace;
+}
+
+.btn-primary {
+    background: linear-gradient(135deg, #00e5ff, #0077ff);
+    color: #030712;
+    font-size: 14px;
+    font-weight: 700;
+    padding: 10px 24px;
+    border-radius: 6px;
+    border: none;
+    cursor: pointer;
+    box-shadow: 0 0 16px rgba(0, 229, 255, 0.4);
+    transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 0 24px rgba(0, 229, 255, 0.6);
+}
+
+.btn-secondary {
+    background: #1a2438;
+    color: #94a3b8;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 8px 16px;
+    border-radius: 4px;
+    border: 1px solid #283754;
+    cursor: pointer;
+    margin-left: 10px;
+}
+
+.btn-secondary:hover {
+    color: #fff;
+    border-color: #00e5ff;
+}
+
+/* Settings sliders */
+.slider-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 14px;
+    font-size: 12px;
+}
+
+.slider-row span {
+    color: #94a3b8;
+}
+
+.slider-row input[type="range"] {
+    width: 180px;
+    accent-color: #00e5ff;
+}

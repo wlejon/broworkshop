@@ -32,6 +32,7 @@
         { "dir": "games/hearthfolk" },
         { "dir": "games/farm" },
         { "dir": "games/torque" },
+        { "dir": "games/clap-runner" },
         { "dir": "tools/synth" },
         { "dir": "tools/mesh-viewer" },
         { "dir": "tools/scene-editor" },
@@ -45,6 +46,7 @@
         { "dir": "tools/inpainting-studio" },
         { "dir": "tools/csg-sculptor" },
         { "dir": "tools/desktop-notebook" },
+        { "dir": "tools/neural-playground" },
         { "dir": "demos/ai-arena" },
         { "dir": "demos/anim-lab" },
         { "dir": "demos/character-lab" },
@@ -102,6 +104,7 @@
         { "dir": "ai/ardy-motion" },
         { "dir": "ai/maker-agent" },
         { "dir": "ai/pi-agent" },
-        { "dir": "ai/voice-pipeline" }
+        { "dir": "ai/voice-pipeline" },
+        { "dir": "templates/worker-sim" }
     ]
 }
