@@ -44,6 +44,7 @@
         { "dir": "demos/ai-arena" },
         { "dir": "demos/anim-lab" },
         { "dir": "demos/character-lab" },
+        { "dir": "demos/clipmap-terrain" },
         { "dir": "demos/cluster-diar-lab" },
         { "dir": "demos/diffusion-lab" },
         { "dir": "demos/flora-lab" },

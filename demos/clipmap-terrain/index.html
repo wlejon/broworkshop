@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Clipmap Terrain — Geometry Clipmaps</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <canvas id="c"></canvas>
+
+    <div class="hud-overlay">
+        <header class="hud-header">
+            <h1 class="hud-title">Geometry Clipmap <span>Terrain</span></h1>
+            <div class="stats-pills">
+                <span class="pill" id="pillTris">Triangles: 0</span>
+                <span class="pill" id="pillLevels">Levels: 6</span>
+                <span class="pill" id="pillFar">Far: 0m</span>
+                <span class="pill highlight" id="pillAlt">Altitude: 0m AGL</span>
+            </div>
+        </header>
+
+        <div class="hud-center-tip" id="centerTip">
+            Click view to lock mouse and fly • WASD / Shift to move • Space / C for vertical
+        </div>
+    </div>
+
+    <aside class="control-panel" id="panel">
+        <div class="panel-header">
+            <h2>Clipmap Controls</h2>
+            <button id="togglePanelBtn" class="btn-icon">✕</button>
+        </div>
+
+        <div class="panel-scroll">
+            <section class="control-group">
+                <h3>Camera & Flight</h3>
+                <div class="button-grid">
+                    <button class="btn preset-btn" data-preset="peak">Mountain Peak</button>
+                    <button class="btn preset-btn" data-preset="valley">Low Valley</button>
+                    <button class="btn preset-btn" data-preset="orbit">High Orbit</button>
+                    <button class="btn preset-btn" data-preset="ridge">Snow Ridge</button>
+                </div>
+                <div class="slider-row">
+                    <label>Flight Speed</label>
+                    <input type="range" id="camSpeed" min="20" max="1000" step="20" value="250">
+                    <span id="camSpeedVal" class="val">250m/s</span>
+                </div>
+            </section>
+
+            <section class="control-group">
+                <h3>Terrain Surface & Materials</h3>
+                <div class="slider-row">
+                    <label>Snow Line</label>
+                    <input type="range" id="snowLine" min="200" max="3000" step="50" value="1200">
+                    <span id="snowLineVal" class="val">1200m</span>
+                </div>
+                <div class="slider-row">
+                    <label>Detail Relief</label>
+                    <input type="range" id="detailRelief" min="0" max="50" step="1" value="18">
+                    <span id="detailReliefVal" class="val">18m</span>
+                </div>
+                <div class="slider-row">
+                    <label>Detail Wavelength</label>
+                    <input type="range" id="detailWavelength" min="2" max="100" step="2" value="24">
+                    <span id="detailWavelengthVal" class="val">24m</span>
+                </div>
+                <div class="slider-row">
+                    <label>Forest Strength</label>
+                    <input type="range" id="forestStrength" min="0" max="1" step="0.05" value="0.7">
+                    <span id="forestStrengthVal" class="val">0.70</span>
+                </div>
+            </section>
+
+            <section class="control-group">
+                <h3>Sun & Atmosphere</h3>
+                <div class="slider-row">
+                    <label>Sun Pitch</label>
+                    <input type="range" id="sunPitch" min="5" max="85" step="1" value="40">
+                    <span id="sunPitchVal" class="val">40°</span>
+                </div>
+                <div class="slider-row">
+                    <label>Sun Heading</label>
+                    <input type="range" id="sunHeading" min="0" max="360" step="5" value="135">
+                    <span id="sunHeadingVal" class="val">135°</span>
+                </div>
+                <div class="slider-row">
+                    <label>Sun Light Intensity</label>
+                    <input type="range" id="sunIntensity" min="0.5" max="6.0" step="0.1" value="3.2">
+                    <span id="sunIntensityVal" class="val">3.2</span>
+                </div>
+            </section>
+
+            <section class="control-group">
+                <h3>Topology Info</h3>
+                <table class="info-table">
+                    <tr><td>Resolution / Level</td><td id="infoResolution">128 × 128</td></tr>
+                    <tr><td>Finest Cell Size</td><td id="infoCellSize">2.0 m</td></tr>
+                    <tr><td>Total Vertices</td><td id="infoVertices">0</td></tr>
+                    <tr><td>Elevation At Cam</td><td id="infoElevation">0.0 m</td></tr>
+                </table>
+            </section>
+        </div>
+    </aside>
+
+    <button id="reopenPanelBtn" class="reopen-btn">⚙ Controls</button>
+
+    <script type="module" src="app.js"></script>
+</body>
+</html>

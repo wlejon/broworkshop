@@ -1,0 +1,12 @@
+{
+    "name": "Clipmap Terrain",
+    "version": "1.0.0",
+    "description": "Continuous GPU geometry clipmap terrain with multi-resolution height pyramids, planet curvature, and detail relief.",
+    "window": {
+        "width": 1280,
+        "height": 800,
+        "minWidth": 900,
+        "minHeight": 600,
+        "resizable": true
+    }
+}
