@@ -1,0 +1,302 @@
+/* Modern Glassmorphic Dark UI for Instanced Crowd */
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background-color: #07090e;
+    color: #e2e8f0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    user-select: none;
+}
+
+#canvas-container {
+    position: absolute;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+}
+
+canvas#stage {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+/* --- HUD Panel Overlay --- */
+.hud-panel {
+    position: absolute;
+    top: 14px;
+    left: 14px;
+    width: 320px;
+    max-height: calc(100vh - 28px);
+    overflow-y: auto;
+    background: rgba(13, 17, 26, 0.88);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    padding: 16px;
+    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    z-index: 20;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+}
+
+.hud-panel::-webkit-scrollbar {
+    width: 5px;
+}
+.hud-panel::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+}
+
+/* Header */
+.hud-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 14px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.hud-title-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.hud-icon {
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+    background: linear-gradient(135deg, #00f2fe 0%, #4facfe 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    color: #fff;
+}
+
+.hud-title {
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: -0.3px;
+    color: #ffffff;
+}
+
+.hud-tag {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 7px;
+    border-radius: 10px;
+    background: rgba(0, 242, 254, 0.15);
+    color: #38ef7d;
+    border: 1px solid rgba(56, 239, 125, 0.3);
+    text-transform: uppercase;
+}
+
+/* Metrics Grid */
+.metrics-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 14px;
+}
+
+.metric-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 8px;
+    padding: 8px 10px;
+    display: flex;
+    flex-direction: column;
+}
+
+.metric-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #8fa0b5;
+    margin-bottom: 2px;
+}
+
+.metric-val {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 17px;
+    font-weight: 700;
+    color: #00f2fe;
+}
+
+.metric-val.green {
+    color: #38ef7d;
+}
+
+.metric-val.amber {
+    color: #f6d365;
+}
+
+.metric-val.purple {
+    color: #c471ed;
+}
+
+/* Control Sections */
+.hud-section {
+    margin-bottom: 12px;
+}
+
+.hud-section-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: #94a3b8;
+    margin-bottom: 6px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+/* Button Grids */
+.btn-group {
+    display: flex;
+    gap: 5px;
+    margin-bottom: 8px;
+}
+
+.btn-pill {
+    flex: 1;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #cbd5e1;
+    padding: 6px 8px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    text-align: center;
+    transition: all 0.15s ease;
+}
+
+.btn-pill:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+    border-color: rgba(255, 255, 255, 0.2);
+}
+
+.btn-pill.active {
+    background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+    border-color: #00f2fe;
+    color: #ffffff;
+    box-shadow: 0 0 10px rgba(0, 242, 254, 0.25);
+    font-weight: 600;
+}
+
+/* Dropdowns */
+.hud-select {
+    width: 100%;
+    background: #0f172a;
+    color: #f1f5f9;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 6px;
+    padding: 7px 10px;
+    font-size: 12px;
+    font-weight: 500;
+    outline: none;
+    cursor: pointer;
+    transition: border-color 0.15s ease;
+}
+
+.hud-select:hover, .hud-select:focus {
+    border-color: #00f2fe;
+}
+
+/* Slider rows */
+.slider-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.slider-label {
+    font-size: 11px;
+    color: #94a3b8;
+    min-width: 65px;
+}
+
+.slider-input {
+    flex: 1;
+    -webkit-appearance: none;
+    appearance: none;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 2px;
+    outline: none;
+}
+
+.slider-input::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #00f2fe;
+    cursor: pointer;
+    box-shadow: 0 0 6px rgba(0, 242, 254, 0.6);
+}
+
+.slider-val {
+    font-family: ui-monospace, monospace;
+    font-size: 11px;
+    color: #38ef7d;
+    min-width: 32px;
+    text-align: right;
+}
+
+/* Toggle Switches */
+.toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 6px;
+    font-size: 11px;
+    color: #cbd5e1;
+    cursor: pointer;
+}
+
+.toggle-checkbox {
+    accent-color: #00f2fe;
+    width: 14px;
+    height: 14px;
+    cursor: pointer;
+}
+
+/* Hint overlay (bottom center) */
+.hint-bar {
+    position: absolute;
+    bottom: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(13, 17, 26, 0.75);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 20px;
+    padding: 6px 16px;
+    font-size: 11px;
+    color: #94a3b8;
+    pointer-events: none;
+    z-index: 10;
+    white-space: nowrap;
+}
+
+.hint-bar b {
+    color: #f1f5f9;
+}

@@ -1,0 +1,7 @@
+{
+    "app": ".",
+    "title": "Instanced Crowd",
+    "width": 1280,
+    "height": 720,
+    "lib": "../../lib"
+}

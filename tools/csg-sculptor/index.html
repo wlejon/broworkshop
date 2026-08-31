@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CSG Sculptor</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="canvas-container">
+        <canvas id="stage"></canvas>
+    </div>
+
+    <!-- Top Master Toolbar -->
+    <div class="top-toolbar">
+        <div class="brand-title">
+            <span>⬡ CSG Sculptor</span>
+            <span class="brand-badge">CAD 3D</span>
+        </div>
+
+        <!-- History & Actions -->
+        <div class="toolbar-group">
+            <button class="tool-btn" id="btn-undo" title="Undo (Ctrl+Z)">↶ Undo</button>
+            <button class="tool-btn" id="btn-redo" title="Redo (Ctrl+Y)">↷ Redo</button>
+            <div class="divider-v"></div>
+
+            <!-- Operations -->
+            <button class="tool-btn carve active" data-op="carve">✂ Subtract / Carve</button>
+            <button class="tool-btn union" data-op="union">✚ Add / Union</button>
+            <button class="tool-btn intersect" data-op="intersect">∩ Intersect</button>
+            <div class="divider-v"></div>
+
+            <!-- Execute Boolean -->
+            <button class="tool-btn execute" id="btn-execute">⚡ Apply Boolean (Enter)</button>
+        </div>
+
+        <!-- Export -->
+        <div class="toolbar-group">
+            <button class="tool-btn export" id="btn-export">💾 Export OBJ</button>
+        </div>
+    </div>
+
+    <!-- Left Palette: Shapes & Gizmos -->
+    <div class="left-palette">
+        <div class="palette-section-title">Cutter Primitive</div>
+        <div class="shape-grid" id="shape-selector">
+            <button class="shape-btn active" data-shape="box">
+                <span class="icon">🧊</span>
+                <span>Box</span>
+            </button>
+            <button class="shape-btn" data-shape="cylinder">
+                <span class="icon">🥫</span>
+                <span>Cylinder</span>
+            </button>
+            <button class="shape-btn" data-shape="sphere">
+                <span class="icon">🔮</span>
+                <span>Sphere</span>
+            </button>
+            <button class="shape-btn" data-shape="cone">
+                <span class="icon">▲</span>
+                <span>Cone</span>
+            </button>
+            <button class="shape-btn" data-shape="torus">
+                <span class="icon">🍩</span>
+                <span>Torus</span>
+            </button>
+        </div>
+
+        <div class="palette-section-title">Gizmo Mode</div>
+        <div class="gizmo-modes" id="gizmo-modes">
+            <button class="gizmo-btn active" data-mode="translate">Move (W)</button>
+            <button class="gizmo-btn" data-mode="rotate">Rotate (E)</button>
+            <button class="gizmo-btn" data-mode="scale">Scale (R)</button>
+        </div>
+
+        <div class="palette-section-title" style="margin-top: 10px;">Grid & Snapping</div>
+        <label style="font-size: 11px; color: #cbd5e1; display: flex; align-items: center; gap: 6px; cursor: pointer;">
+            <input type="checkbox" id="snap-toggle" style="accent-color: #00f2fe;">
+            <span>Snap to 0.25m Grid</span>
+        </label>
+    </div>
+
+    <!-- Right Inspector Panel -->
+    <div class="right-inspector">
+        <div class="inspector-section">
+            <div class="palette-section-title">Base Workpiece</div>
+            <select class="dropdown-field" id="preset-select">
+                <option value="box" selected>Solid Cube (1.4m)</option>
+                <option value="sphere">Solid Sphere (1.6m)</option>
+                <option value="cylinder">Cylinder Blank</option>
+                <option value="column">Architectural Column</option>
+                <option value="bracket">Mechanical Bracket</option>
+                <option value="torus">Torus Ring</option>
+            </select>
+        </div>
+
+        <div class="inspector-section">
+            <div class="palette-section-title">Cutter Dimensions</div>
+            <div class="slider-control">
+                <label>Radius / W</label>
+                <input type="range" id="cut-w" min="0.2" max="3.0" step="0.05" value="1.2">
+                <span class="val" id="cut-w-val">1.2m</span>
+            </div>
+            <div class="slider-control">
+                <label>Height</label>
+                <input type="range" id="cut-h" min="0.2" max="4.0" step="0.05" value="1.2">
+                <span class="val" id="cut-h-val">1.2m</span>
+            </div>
+            <div class="slider-control">
+                <label>Depth</label>
+                <input type="range" id="cut-d" min="0.2" max="3.0" step="0.05" value="1.2">
+                <span class="val" id="cut-d-val">1.2m</span>
+            </div>
+        </div>
+
+        <div class="inspector-section">
+            <div class="palette-section-title">Material Shading</div>
+            <select class="dropdown-field" id="material-select">
+                <option value="studio" selected>Studio Gray</option>
+                <option value="clay">Sculptor Terracotta Clay</option>
+                <option value="metal">Machined Steel</option>
+                <option value="gold">Polished Gold</option>
+                <option value="jade">Imperial Jade</option>
+            </select>
+        </div>
+
+        <div class="inspector-section">
+            <div class="palette-section-title">Mesh Statistics</div>
+            <div class="stats-grid">
+                <div class="stat-item">
+                    <span class="k">Vertices</span>
+                    <span class="v" id="stat-verts">24</span>
+                </div>
+                <div class="stat-item">
+                    <span class="k">Triangles</span>
+                    <span class="v" id="stat-tris">12</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Status Toast Notification -->
+    <div id="status-toast">Ready to sculpt</div>
+
+    <!-- Bottom Hints -->
+    <div class="bottom-hints">
+        <b>Right-drag</b> Orbit · <b>Middle-drag</b> Pan · <b>Wheel</b> Zoom · <b>W/E/R</b> Gizmo Modes · <b>Enter</b> Apply Cut · <b>Ctrl+Z</b> Undo
+    </div>
+
+    <script src="/lib/camera.js"></script>
+    <script type="module" src="./app.js"></script>
+</body>
+</html>

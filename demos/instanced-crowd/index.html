@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Instanced Crowd</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="canvas-container">
+        <canvas id="stage"></canvas>
+    </div>
+
+    <!-- HUD Control Panel -->
+    <div class="hud-panel" id="hud">
+        <div class="hud-header">
+            <div class="hud-title-wrap">
+                <div class="hud-icon">✦</div>
+                <div class="hud-title">Instanced Crowd</div>
+            </div>
+            <div class="hud-tag">GPU Instanced</div>
+        </div>
+
+        <!-- Metrics Dashboard -->
+        <div class="metrics-grid">
+            <div class="metric-card">
+                <span class="metric-label">Framerate</span>
+                <span class="metric-val green" id="fps-val">60 FPS</span>
+            </div>
+            <div class="metric-card">
+                <span class="metric-label">Frame Time</span>
+                <span class="metric-val" id="frametime-val">16.6 ms</span>
+            </div>
+            <div class="metric-card">
+                <span class="metric-label">Instances</span>
+                <span class="metric-val purple" id="count-val">10,000</span>
+            </div>
+            <div class="metric-card">
+                <span class="metric-label">Draw Calls</span>
+                <span class="metric-val amber" id="drawcalls-val">1 call</span>
+            </div>
+        </div>
+
+        <!-- Instance Count Selection -->
+        <div class="hud-section">
+            <div class="hud-section-label">Instance Count</div>
+            <div class="btn-group" id="count-group">
+                <button class="btn-pill" data-count="1000">1k</button>
+                <button class="btn-pill" data-count="5000">5k</button>
+                <button class="btn-pill active" data-count="10000">10k</button>
+                <button class="btn-pill" data-count="25000">25k</button>
+            </div>
+        </div>
+
+        <!-- Motion Pattern -->
+        <div class="hud-section">
+            <div class="hud-section-label">Motion Pattern</div>
+            <select class="hud-select" id="pattern-select">
+                <option value="swarming" selected>Swarming (Boids Flocking)</option>
+                <option value="vortex">Vortex (Dual Spiral)</option>
+                <option value="wave">3D Wave (Undulating Field)</option>
+                <option value="helix">Double Helix (DNA Flow)</option>
+                <option value="pulsar">Galactic Pulsar (Orbital Clusters)</option>
+            </select>
+        </div>
+
+        <!-- Color Scheme -->
+        <div class="hud-section">
+            <div class="hud-section-label">Color Scheme</div>
+            <select class="hud-select" id="color-select">
+                <option value="cyberpunk" selected>Cyberpunk Neon</option>
+                <option value="solar">Solar Flare</option>
+                <option value="ocean">Bioluminescent Ocean</option>
+                <option value="spectrum">Rainbow Spectrum</option>
+                <option value="velocity">Velocity Heatmap</option>
+            </select>
+        </div>
+
+        <!-- Mesh Shape -->
+        <div class="hud-section">
+            <div class="hud-section-label">Mesh Geometry</div>
+            <select class="hud-select" id="mesh-select">
+                <option value="arrow" selected>Arrow Jet</option>
+                <option value="fish">Boid Fish</option>
+                <option value="biped">Biped Drone</option>
+                <option value="crystal">Diamond Crystal</option>
+                <option value="capsule">Capsule</option>
+                <option value="box">Cube</option>
+            </select>
+        </div>
+
+        <!-- Dynamics Controls -->
+        <div class="hud-section">
+            <div class="hud-section-label">Dynamics & Modifiers</div>
+            <div class="slider-row">
+                <span class="slider-label">Speed</span>
+                <input type="range" class="slider-input" id="speed-slider" min="0.1" max="3.0" step="0.05" value="1.0">
+                <span class="slider-val" id="speed-val">1.0x</span>
+            </div>
+            <div class="slider-row">
+                <span class="slider-label">Scale</span>
+                <input type="range" class="slider-input" id="scale-slider" min="0.2" max="2.5" step="0.05" value="1.0">
+                <span class="slider-val" id="scale-val">1.0x</span>
+            </div>
+            <div class="slider-row">
+                <span class="slider-label">Spread</span>
+                <input type="range" class="slider-input" id="spread-slider" min="0.5" max="3.0" step="0.1" value="1.0">
+                <span class="slider-val" id="spread-val">1.0x</span>
+            </div>
+        </div>
+
+        <!-- Interactive Mouse / Gravity -->
+        <div class="hud-section">
+            <div class="hud-section-label">Interactive Field</div>
+            <select class="hud-select" id="mouse-mode-select">
+                <option value="attract" selected>Mouse Gravitational Attractor</option>
+                <option value="repel">Mouse Repulsion Field</option>
+                <option value="off">Off (Passive Motion)</option>
+            </select>
+        </div>
+
+        <!-- Toggles -->
+        <div class="hud-section">
+            <label class="toggle-row">
+                <span>Orient to Motion Velocity</span>
+                <input type="checkbox" class="toggle-checkbox" id="orient-toggle" checked>
+            </label>
+            <label class="toggle-row">
+                <span>Turbulence / Noise Jitter</span>
+                <input type="checkbox" class="toggle-checkbox" id="noise-toggle" checked>
+            </label>
+            <label class="toggle-row">
+                <span>Auto-Orbit Camera</span>
+                <input type="checkbox" class="toggle-checkbox" id="auto-orbit-toggle">
+            </label>
+        </div>
+    </div>
+
+    <!-- Hint Bar -->
+    <div class="hint-bar">
+        <b>Right-drag</b> Orbit · <b>Middle-drag</b> Pan · <b>Wheel</b> Zoom · <b>Left-drag</b> Attract/Repel · <b>Space</b> Pause
+    </div>
+
+    <script src="/lib/camera.js"></script>
+    <script type="module" src="./app.js"></script>
+</body>
+</html>

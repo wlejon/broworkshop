@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mechanical Sandbox</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="canvas-container">
+        <canvas id="stage"></canvas>
+    </div>
+
+    <!-- Top Contraption Navigation Tabs -->
+    <div class="top-nav-bar" id="contraption-tabs">
+        <button class="tab-btn active" data-type="pendulum">🕰️ Clockwork Pendulum</button>
+        <button class="tab-btn" data-type="gearbox">⚙️ Gearbox & Pulley</button>
+        <button class="tab-btn" data-type="piston">🏎️ Piston & Crankshaft</button>
+        <button class="tab-btn" data-type="cradle">⚪ Newton's Cradle</button>
+        <button class="tab-btn" data-type="bridge">🌉 Suspension Bridge</button>
+    </div>
+
+    <!-- Side Control Panel -->
+    <div class="side-panel" id="control-panel">
+        <div class="panel-header">
+            <div class="panel-title" id="machine-title">Clockwork Pendulum</div>
+            <div class="panel-subtitle" id="machine-desc">
+                High-inertia compound pendulum with harmonic oscillation and escapement gear.
+            </div>
+        </div>
+
+        <!-- Metrics Dashboard -->
+        <div class="metrics-row">
+            <div class="metric-box">
+                <span class="label">Rigid Bodies</span>
+                <span class="val cyan" id="metric-bodies">2</span>
+            </div>
+            <div class="metric-box">
+                <span class="label">Constraints</span>
+                <span class="val" id="metric-constraints">2</span>
+            </div>
+            <div class="metric-box">
+                <span class="label">Framerate</span>
+                <span class="val green" id="metric-fps">60 FPS</span>
+            </div>
+            <div class="metric-box">
+                <span class="label">Broken Joints</span>
+                <span class="val red" id="metric-broken">0</span>
+            </div>
+        </div>
+
+        <!-- Dynamic Controls -->
+        <div class="control-section">
+            <div class="section-label">Motor & Simulation</div>
+            <div class="field-row" id="motor-row">
+                <span class="field-label">Motor Speed</span>
+                <input type="range" class="field-input" id="motor-slider" min="-5.0" max="5.0" step="0.1" value="1.0">
+                <span class="field-val" id="motor-val">1.0x</span>
+            </div>
+            <div class="field-row">
+                <span class="field-label">Gravity</span>
+                <input type="range" class="field-input" id="gravity-slider" min="0.0" max="25.0" step="0.5" value="9.8">
+                <span class="field-val" id="gravity-val">9.8 m/s²</span>
+            </div>
+            <div class="field-row" id="restitution-row">
+                <span class="field-label">Elasticity</span>
+                <input type="range" class="field-input" id="restitution-slider" min="0.5" max="1.0" step="0.01" value="0.99">
+                <span class="field-val" id="restitution-val">0.99</span>
+            </div>
+            <div class="field-row" id="break-row" style="display: none;">
+                <span class="field-label">Joint Strength</span>
+                <input type="range" class="field-input" id="break-slider" min="200" max="5000" step="100" value="1200">
+                <span class="field-val" id="break-val">1200 N</span>
+            </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="control-section">
+            <div class="section-label">Laboratory Actions</div>
+            <div class="action-grid">
+                <button class="action-btn primary" id="btn-reset">🔄 Reset Machine</button>
+                <button class="action-btn" id="btn-nudge">⚡ Apply Nudge Impulse</button>
+                <button class="action-btn danger" id="btn-drop">💣 Drop Heavy Load</button>
+                <button class="action-btn" id="btn-reverse">⇄ Reverse Motor Drive</button>
+            </div>
+        </div>
+
+        <!-- Instructions -->
+        <div class="instructions-card">
+            <b>Interactive Physics:</b><br>
+            • <b>Left-click + Drag</b> dynamic parts to pull with a spring force.<br>
+            • <b>Right-drag</b> to orbit camera.<br>
+            • <b>Middle-drag</b> to pan camera.<br>
+            • <b>Mouse Wheel</b> to zoom.
+        </div>
+    </div>
+
+    <!-- Bottom Hint Bar -->
+    <div class="bottom-bar">
+        <b>Left-click & Drag</b> Grab bodies with physics spring · <b>Right-drag</b> Orbit · <b>Space</b> Pause / Resume
+    </div>
+
+    <script src="/lib/camera.js"></script>
+    <script type="module" src="./app.js"></script>
+</body>
+</html>
