@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NavMesh Carving & Off-Mesh Links</title>
+    <link rel="stylesheet" href="/app/style.css">
+</head>
+<body>
+    <div id="viewport">
+        <canvas id="stage" width="1280" height="720"></canvas>
+
+        <!-- Top Header Panel -->
+        <div id="top-bar" class="hud-panel">
+            <div class="title-group">
+                <h1>NavMesh Carving &amp; Links</h1>
+                <span class="badge">A* / Theta* 3D</span>
+            </div>
+
+            <!-- Dynamic Obstacle Controls -->
+            <div class="btn-group">
+                <button class="hud-btn" id="btn-toggle-gate">🚪 Toggle Gate (Closed)</button>
+                <button class="hud-btn" id="btn-toggle-bridge">🌉 Toggle Bridge (Open)</button>
+                <button class="hud-btn" id="btn-toggle-barricade">📦 Toggle Barricade</button>
+            </div>
+
+            <!-- Elevator Floor Calls -->
+            <div class="btn-group">
+                <span style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;">Elevator:</span>
+                <button class="hud-btn" id="btn-elev-0">F0 (Ground)</button>
+                <button class="hud-btn" id="btn-elev-1">F1 (Mezzanine)</button>
+                <button class="hud-btn" id="btn-elev-2">F2 (Roof)</button>
+            </div>
+        </div>
+
+        <!-- Left Controls Sidebar -->
+        <div id="sidebar-panel" class="hud-panel">
+            <!-- Agent Spawning -->
+            <div class="control-block">
+                <div class="block-title">Agent Spawner &amp; Orders</div>
+                <div style="display: flex; gap: 6px;">
+                    <button class="hud-btn" id="btn-spawn-1" style="flex: 1; padding: 5px;">+1 Agent</button>
+                    <button class="hud-btn" id="btn-spawn-5" style="flex: 1; padding: 5px;">+5 Squad</button>
+                    <button class="hud-btn" id="btn-clear-agents" style="flex: 1; padding: 5px;">Clear</button>
+                </div>
+            </div>
+
+            <hr style="border: 0; border-top: 1px solid rgba(0, 240, 255, 0.15); margin: 2px 0;">
+
+            <!-- Quick Targets -->
+            <div class="control-block">
+                <div class="block-title">Send Agents To:</div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
+                    <button class="hud-btn" id="btn-target-south">South Courtyard</button>
+                    <button class="hud-btn" id="btn-target-north">North Gate Vault</button>
+                    <button class="hud-btn" id="btn-target-mezz">Mezzanine (F1)</button>
+                    <button class="hud-btn" id="btn-target-roof">High Roof (F2)</button>
+                    <button class="hud-btn" id="btn-target-island" style="grid-column: span 2; border-color: var(--neon-green);">🏝️ Isolated Island (Jump!)</button>
+                </div>
+            </div>
+
+            <hr style="border: 0; border-top: 1px solid rgba(0, 240, 255, 0.15); margin: 2px 0;">
+
+            <!-- Overlays -->
+            <div class="control-block">
+                <div class="block-title">Debug Overlays</div>
+                <label class="toggle-item">
+                    <input type="checkbox" id="toggle-nav-nodes" checked>
+                    <span>NavMesh Graph &amp; Carving Overlay</span>
+                </label>
+                <label class="toggle-item">
+                    <input type="checkbox" id="toggle-path-lines" checked>
+                    <span>3D Agent Path Waypoints</span>
+                </label>
+                <label class="toggle-item">
+                    <input type="checkbox" id="toggle-link-arcs" checked>
+                    <span>Off-Mesh Links (Ladder/Jump/Elevator)</span>
+                </label>
+            </div>
+        </div>
+
+        <!-- Bottom Telemetry Panel -->
+        <div id="telemetry-panel" class="hud-panel">
+            <div class="stat-item">
+                <span class="stat-label">FPS</span>
+                <span class="stat-val" id="stat-fps">60</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">Active Agents</span>
+                <span class="stat-val" id="stat-agents">5</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">Link Traversals</span>
+                <span class="stat-val" id="stat-traversals">0</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">Elevator Pos</span>
+                <span class="stat-val" id="stat-elev-floor">F0 (0.0m)</span>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="/app/app.js"></script>
+</body>
+</html>

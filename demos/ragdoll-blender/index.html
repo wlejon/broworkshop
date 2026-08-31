@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ragdoll Blender</title>
+    <link rel="stylesheet" href="/app/style.css">
+</head>
+<body>
+    <div id="viewport">
+        <canvas id="stage" width="1280" height="720"></canvas>
+
+        <!-- Top Header Panel -->
+        <div id="header-panel" class="hud-panel">
+            <div class="title-box">
+                <h1>Ragdoll Blender</h1>
+                <span class="badge animated" id="state-badge">ANIMATED</span>
+            </div>
+
+            <!-- Skeletal Animation Controls -->
+            <div class="btn-group">
+                <span style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;">Animation:</span>
+                <button class="hud-btn active" data-anim="idle">Idle</button>
+                <button class="hud-btn" data-anim="walk">Walk</button>
+                <button class="hud-btn" data-anim="run">Run</button>
+            </div>
+
+            <!-- Main Actions -->
+            <div class="btn-group">
+                <button class="hud-btn danger" id="btn-cannon">🎯 Shoot Cannonball</button>
+                <button class="hud-btn danger" id="btn-ragdoll">💥 Trigger Ragdoll</button>
+                <button class="hud-btn success" id="btn-getup">🔄 Trigger Get-Up</button>
+            </div>
+        </div>
+
+        <!-- Left Controls Panel -->
+        <div id="control-panel" class="hud-panel">
+            <!-- Blend Weight Meter -->
+            <div class="control-section">
+                <div class="section-title">Kinematic / Ragdoll Blend</div>
+                <div class="meter-container">
+                    <div class="slider-info">
+                        <span>Blend Weight</span>
+                        <span class="val" id="blend-weight-val">0 % (Kinematic)</span>
+                    </div>
+                    <div class="meter-bar">
+                        <div class="meter-fill" id="blend-meter-fill"></div>
+                    </div>
+                </div>
+            </div>
+
+            <hr style="border: 0; border-top: 1px solid rgba(255, 255, 255, 0.1); margin: 2px 0;">
+
+            <!-- Motor & Physics Tuning -->
+            <div class="control-section">
+                <div class="section-title">Joint Physics Motors</div>
+                <div class="slider-row">
+                    <div class="slider-info">
+                        <span>Motor Stiffness (Freq)</span>
+                        <span class="val" id="motor-stiff-val">12 Hz</span>
+                    </div>
+                    <input type="range" id="slider-stiffness" min="0" max="30" step="1" value="12">
+                </div>
+                <div class="slider-row">
+                    <div class="slider-info">
+                        <span>Cannon Velocity</span>
+                        <span class="val" id="cannon-spd-val">22 m/s</span>
+                    </div>
+                    <input type="range" id="slider-cannon-spd" min="10" max="40" step="1" value="22">
+                </div>
+            </div>
+
+            <hr style="border: 0; border-top: 1px solid rgba(255, 255, 255, 0.1); margin: 2px 0;">
+
+            <!-- Recovery & Presets -->
+            <div class="control-section">
+                <div class="section-title">Controls &amp; Reset</div>
+                <div style="display: flex; gap: 6px;">
+                    <button class="hud-btn" id="btn-reset-stand" style="flex: 1; padding: 5px;">Reset Stand</button>
+                    <button class="hud-btn" id="btn-toggle-cam" style="flex: 1; padding: 5px;">Reset Cam</button>
+                </div>
+                <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px; line-height: 1.4;">
+                    Left-drag to Orbit camera. Scroll to Zoom. Shift-drag to Pan.
+                </div>
+            </div>
+        </div>
+
+        <!-- Bottom Telemetry Panel -->
+        <div id="status-panel" class="hud-panel">
+            <div class="stat-box">
+                <span class="stat-label">FPS</span>
+                <span class="stat-val" id="stat-fps">60</span>
+            </div>
+            <div class="stat-box">
+                <span class="stat-label">Pelvis Height</span>
+                <span class="stat-val" id="stat-pelvis-y">0.95 m</span>
+            </div>
+            <div class="stat-box">
+                <span class="stat-label">Kinetic Energy</span>
+                <span class="stat-val" id="stat-ke">0.0 J</span>
+            </div>
+            <div class="stat-box">
+                <span class="stat-label">Resting State</span>
+                <span class="stat-val" id="stat-rest">Standing</span>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="/app/app.js"></script>
+</body>
+</html>

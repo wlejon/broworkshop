@@ -1,0 +1,207 @@
+/* style.css — Clean Dark UI for NavMesh Carving & Off-Mesh Links */
+
+:root {
+    --bg-dark: #080b12;
+    --panel-bg: rgba(13, 19, 32, 0.85);
+    --panel-border: rgba(0, 240, 255, 0.2);
+    --neon-cyan: #00f0ff;
+    --neon-green: #39ff14;
+    --neon-amber: #f59e0b;
+    --neon-rose: #f43f5e;
+    --text-main: #f8fafc;
+    --text-muted: #8493a8;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    user-select: none;
+}
+
+body {
+    background: var(--bg-dark);
+    color: var(--text-main);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
+    overflow: hidden;
+    width: 100vw;
+    height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+#viewport {
+    position: relative;
+    width: 1280px;
+    height: 720px;
+    background: #0b0f19;
+    box-shadow: 0 0 50px rgba(0, 0, 0, 0.9);
+    overflow: hidden;
+}
+
+canvas#stage {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 1280px;
+    height: 720px;
+    display: block;
+    cursor: crosshair;
+}
+
+/* Glassmorphic Dark Panels */
+.hud-panel {
+    position: absolute;
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border-radius: 8px;
+    padding: 12px 16px;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6);
+    z-index: 10;
+}
+
+/* Top Control Bar */
+#top-bar {
+    top: 14px;
+    left: 14px;
+    right: 14px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+}
+
+.title-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.title-group h1 {
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    color: var(--neon-cyan);
+    text-transform: uppercase;
+}
+
+.badge {
+    font-size: 11px;
+    font-family: monospace;
+    color: var(--neon-green);
+    background: rgba(57, 255, 20, 0.12);
+    padding: 2px 6px;
+    border-radius: 4px;
+    border: 1px solid rgba(57, 255, 20, 0.3);
+}
+
+.btn-group {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+
+button.hud-btn {
+    background: rgba(22, 33, 52, 0.8);
+    color: var(--text-main);
+    border: 1px solid rgba(0, 240, 255, 0.25);
+    padding: 6px 12px;
+    border-radius: 5px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+button.hud-btn:hover {
+    background: rgba(0, 240, 255, 0.2);
+    border-color: var(--neon-cyan);
+    color: #ffffff;
+    box-shadow: 0 0 10px rgba(0, 240, 255, 0.3);
+}
+
+button.hud-btn.active {
+    background: var(--neon-cyan);
+    color: #080b12;
+    font-weight: bold;
+    border-color: var(--neon-cyan);
+    box-shadow: 0 0 14px rgba(0, 240, 255, 0.6);
+}
+
+button.hud-btn.warning {
+    border-color: rgba(245, 158, 11, 0.4);
+    color: #fde68a;
+}
+button.hud-btn.warning.active {
+    background: var(--neon-amber);
+    color: #080b12;
+    box-shadow: 0 0 12px rgba(245, 158, 11, 0.5);
+}
+
+/* Left Sidebar Controls */
+#sidebar-panel {
+    bottom: 14px;
+    left: 14px;
+    width: 290px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.control-block {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.block-title {
+    font-size: 11px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    font-weight: 600;
+    letter-spacing: 0.8px;
+}
+
+.toggle-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.toggle-item input[type="checkbox"] {
+    accent-color: var(--neon-cyan);
+    cursor: pointer;
+}
+
+/* Bottom Telemetry */
+#telemetry-panel {
+    bottom: 14px;
+    right: 14px;
+    display: flex;
+    gap: 18px;
+    font-family: monospace;
+    font-size: 12px;
+}
+
+.stat-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.stat-label {
+    font-size: 10px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+}
+.stat-val {
+    color: var(--neon-cyan);
+    font-weight: bold;
+}

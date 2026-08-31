@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tactical Flow Field</title>
+    <link rel="stylesheet" href="/app/style.css">
+</head>
+<body>
+    <div id="viewport">
+        <canvas id="stage" width="1280" height="720"></canvas>
+
+        <!-- Top Tactical HUD -->
+        <div id="top-bar" class="hud-panel">
+            <div class="title-group">
+                <h1>Tactical Flow Field</h1>
+                <span class="badge">Eikonal RTS</span>
+            </div>
+
+            <!-- Formation Selection -->
+            <div class="formation-group">
+                <span class="label-title">Formation:</span>
+                <button class="tactical-btn active" data-formation="Box">Box</button>
+                <button class="tactical-btn" data-formation="Wedge">Wedge</button>
+                <button class="tactical-btn" data-formation="Circle">Circle</button>
+                <button class="tactical-btn" data-formation="Flank">Flank</button>
+            </div>
+
+            <!-- Tool Selection -->
+            <div class="tool-group">
+                <span class="label-title">Brush / Action:</span>
+                <button class="tactical-btn active" data-tool="goal">🎯 Set Goal</button>
+                <button class="tactical-btn" data-tool="wall">🧱 Wall</button>
+                <button class="tactical-btn" data-tool="rough">🌾 Mud</button>
+                <button class="tactical-btn" data-tool="erase">🧹 Erase</button>
+                <button class="tactical-btn danger" data-tool="threat">⚠️ Threat</button>
+            </div>
+        </div>
+
+        <!-- Left Controls Panel -->
+        <div id="left-panel" class="hud-panel">
+            <!-- Unit Count Slider -->
+            <div class="slider-control">
+                <div class="slider-header">
+                    <span>ACTIVE AGENTS</span>
+                    <span class="val" id="unit-count-val">1000</span>
+                </div>
+                <input type="range" id="unit-count-slider" min="500" max="5000" step="100" value="1000">
+            </div>
+
+            <!-- Brush Size Slider -->
+            <div class="slider-control">
+                <div class="slider-header">
+                    <span>BRUSH RADIUS</span>
+                    <span class="val" id="brush-size-val">24 px</span>
+                </div>
+                <input type="range" id="brush-size-slider" min="10" max="60" step="2" value="24">
+            </div>
+
+            <hr style="border: 0; border-top: 1px solid rgba(0, 240, 255, 0.15); margin: 2px 0;">
+
+            <!-- Tactical Overlays -->
+            <div class="toggles-group">
+                <span class="label-title" style="margin-bottom: 2px;">Visual Overlays:</span>
+                <label class="toggle-label">
+                    <input type="checkbox" id="toggle-flow" checked>
+                    <span>Flow Vectors (Streamlines)</span>
+                </label>
+                <label class="toggle-label">
+                    <input type="checkbox" id="toggle-influence">
+                    <span>Influence &amp; Threat Map</span>
+                </label>
+                <label class="toggle-label">
+                    <input type="checkbox" id="toggle-integration">
+                    <span>Integration Wave Heatmap</span>
+                </label>
+                <label class="toggle-label">
+                    <input type="checkbox" id="toggle-choke" checked>
+                    <span>Choke Points &amp; Cover</span>
+                </label>
+            </div>
+
+            <hr style="border: 0; border-top: 1px solid rgba(0, 240, 255, 0.15); margin: 2px 0;">
+
+            <!-- Preset Scenarios -->
+            <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                <button class="tactical-btn" id="btn-scenario-choke" style="flex: 1; font-size: 11px; padding: 4px;">Choke Defense</button>
+                <button class="tactical-btn" id="btn-scenario-river" style="flex: 1; font-size: 11px; padding: 4px;">River Bridge</button>
+                <button class="tactical-btn" id="btn-clear-all" style="flex: 1; font-size: 11px; padding: 4px;">Clear All</button>
+            </div>
+        </div>
+
+        <!-- Telemetry Panel -->
+        <div id="telemetry-panel" class="hud-panel">
+            <div class="telemetry-item">
+                <span class="telemetry-label">FPS</span>
+                <span class="telemetry-value" id="stat-fps">60</span>
+            </div>
+            <div class="telemetry-item">
+                <span class="telemetry-label">Wavefront Time</span>
+                <span class="telemetry-value" id="stat-wave-ms">0.4 ms</span>
+            </div>
+            <div class="telemetry-item">
+                <span class="telemetry-label">Choke Points</span>
+                <span class="telemetry-value" id="stat-choke-count">0</span>
+            </div>
+            <div class="telemetry-item">
+                <span class="telemetry-label">Sim Units</span>
+                <span class="telemetry-value" id="stat-units">1000</span>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="/app/app.js"></script>
+</body>
+</html>
