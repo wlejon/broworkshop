@@ -1,0 +1,12 @@
+{
+    "name": "Inpainting Studio",
+    "version": "1.0.0",
+    "description": "Interactive diffusion inpainting, outpainting, mask brush, and ControlNet annotator studio.",
+    "window": {
+        "width": 1280,
+        "height": 840,
+        "minWidth": 900,
+        "minHeight": 600,
+        "resizable": true
+    }
+}

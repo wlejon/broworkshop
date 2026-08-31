@@ -1,0 +1,274 @@
+/* tools/inpainting-studio/style.css */
+:root {
+    --bg-main: #0b0c10;
+    --bg-panel: #13161c;
+    --bg-input: #1a1e27;
+    --border: #262c3a;
+    --accent: #f72585;
+    --accent-hover: #b5179e;
+    --accent-dim: rgba(247, 37, 133, 0.2);
+    --text: #e2e8f0;
+    --text-muted: #8a96a8;
+    --success: #4cc9f0;
+    --mask-color: rgba(247, 37, 133, 0.45);
+    --font-mono: 'Consolas', 'Courier New', monospace;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    background: var(--bg-main);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.app-header {
+    background: var(--bg-panel);
+    border-bottom: 1px solid var(--border);
+    padding: 10px 18px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    height: 54px;
+}
+
+.header-left {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.logo {
+    font-size: 16px;
+    font-weight: 700;
+}
+
+.logo span {
+    color: var(--accent);
+    font-weight: 400;
+}
+
+.badge {
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    padding: 3px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-family: var(--font-mono);
+}
+
+.badge.ok {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--accent-dim);
+}
+
+.btn {
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.btn:hover {
+    background: var(--border);
+}
+
+.btn.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+    font-weight: 600;
+}
+
+.btn.primary:hover {
+    background: var(--accent-hover);
+}
+
+.btn.full {
+    width: 100%;
+}
+
+.btn.small {
+    padding: 3px 6px;
+    font-size: 11px;
+}
+
+/* Workspace */
+.workspace {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 220px 1fr 280px;
+    gap: 10px;
+    padding: 10px;
+    overflow: hidden;
+}
+
+.left-toolbar, .right-params {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    overflow-y: auto;
+}
+
+.tool-section h3, .param-section h3 {
+    font-size: 11px;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 8px;
+    letter-spacing: 0.5px;
+}
+
+.tool-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.tool-btn {
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 6px;
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+}
+
+.tool-btn.active {
+    border-color: var(--accent);
+    background: var(--accent-dim);
+    color: var(--accent);
+    font-weight: 600;
+}
+
+.expand-grid {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+}
+
+.expand-row {
+    display: flex;
+    gap: 4px;
+    width: 100%;
+}
+
+.expand-row button {
+    flex: 1;
+}
+
+.slider-group, .field-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 8px;
+}
+
+.slider-group label, .field-group label {
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+input[type="range"], select, textarea {
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 5px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    outline: none;
+    font-family: inherit;
+}
+
+input[type="range"] {
+    accent-color: var(--accent);
+}
+
+/* Viewport */
+.viewport-stage {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.canvas-container {
+    flex: 1;
+    background: #050608;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+
+#baseCanvas, #maskCanvas, #controlCanvas, #resultCanvas {
+    position: absolute;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
+}
+
+#maskCanvas {
+    cursor: crosshair;
+}
+
+#controlCanvas, #resultCanvas {
+    display: none;
+    pointer-events: none;
+}
+
+.view-mode-bar {
+    background: rgba(255, 255, 255, 0.02);
+    border-top: 1px solid var(--border);
+    padding: 8px 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+}
+
+.view-mode-bar label {
+    color: var(--text-muted);
+    font-size: 11px;
+}
+
+.mode-btn {
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.mode-btn.active {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--accent-dim);
+}

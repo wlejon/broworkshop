@@ -42,6 +42,7 @@
         { "dir": "tools/reader" },
         { "dir": "tools/media-inspector" },
         { "dir": "tools/shader-lab" },
+        { "dir": "tools/inpainting-studio" },
         { "dir": "demos/ai-arena" },
         { "dir": "demos/anim-lab" },
         { "dir": "demos/character-lab" },

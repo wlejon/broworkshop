@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Inpainting Studio — bro.diffusion</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header class="app-header">
+        <div class="header-left">
+            <h1 class="logo">bro.diffusion <span>Inpainting Studio</span></h1>
+            <div class="model-badge">
+                <span class="badge ok">Diffusion 2.1 Inpaint + ControlNet</span>
+            </div>
+        </div>
+        <div class="header-right">
+            <button id="generateBtn" class="btn primary gen-btn">✨ Generate Inpainting</button>
+        </div>
+    </header>
+
+    <main class="workspace">
+        <aside class="left-toolbar">
+            <div class="tool-section">
+                <h3>Brush Tools</h3>
+                <div class="tool-grid">
+                    <button class="tool-btn active" id="toolBrush" title="Paint Mask (B)">🖌️ Mask</button>
+                    <button class="tool-btn" id="toolEraser" title="Erase Mask (E)">🧹 Erase</button>
+                </div>
+                <div class="slider-group">
+                    <label>Brush Size: <span id="brushSizeVal">32px</span></label>
+                    <input type="range" id="brushSize" min="4" max="128" value="32">
+                </div>
+                <div class="slider-group">
+                    <label>Hardness: <span id="brushHardnessVal">80%</span></label>
+                    <input type="range" id="brushHardness" min="0" max="100" value="80">
+                </div>
+            </div>
+
+            <div class="tool-section">
+                <h3>Mask Ops</h3>
+                <button class="btn full" id="invertMaskBtn">Invert Mask</button>
+                <button class="btn full" id="clearMaskBtn">Clear Mask</button>
+                <button class="btn full" id="fillMaskBtn">Fill All</button>
+            </div>
+
+            <div class="tool-section">
+                <h3>Outpainting Expand</h3>
+                <div class="expand-grid">
+                    <button class="btn small" id="expandNorth">▲ +64px N</button>
+                    <div class="expand-row">
+                        <button class="btn small" id="expandWest">◀ +64px W</button>
+                        <button class="btn small" id="expandEast">+64px E ▶</button>
+                    </div>
+                    <button class="btn small" id="expandSouth">▼ +64px S</button>
+                </div>
+            </div>
+
+            <div class="tool-section">
+                <h3>Sample Scene</h3>
+                <select id="presetSelect" class="full">
+                    <option value="portrait">Cyberpunk Portrait</option>
+                    <option value="landscape">Fantasy Island Castle</option>
+                    <option value="room">Sci-Fi Control Room</option>
+                </select>
+                <button id="uploadImgBtn" class="btn full">Upload Image...</button>
+                <input type="file" id="fileInput" accept="image/*" style="display: none;">
+            </div>
+        </aside>
+
+        <section class="viewport-stage">
+            <div class="canvas-container" id="canvasContainer">
+                <canvas id="baseCanvas" width="512" height="512"></canvas>
+                <canvas id="maskCanvas" width="512" height="512"></canvas>
+                <canvas id="controlCanvas" width="512" height="512"></canvas>
+                <canvas id="resultCanvas" width="512" height="512"></canvas>
+            </div>
+
+            <div class="view-mode-bar">
+                <label>View Mode:</label>
+                <button class="mode-btn active" data-mode="composite">Composite Overlay</button>
+                <button class="mode-btn" data-mode="mask-only">Mask Only</button>
+                <button class="mode-btn" data-mode="controlnet">ControlNet Edges</button>
+                <button class="mode-btn" data-mode="result">Inpainted Result</button>
+            </div>
+        </section>
+
+        <aside class="right-params">
+            <div class="param-section">
+                <h3>Prompt &amp; Guidance</h3>
+                <div class="field-group">
+                    <label>Inpainting Prompt</label>
+                    <textarea id="positivePrompt" rows="3" placeholder="What to generate inside the masked area...">hyperdetailed golden glowing dragon crest embroidery, intricate metallic filigree, 8k render</textarea>
+                </div>
+                <div class="field-group">
+                    <label>Negative Prompt</label>
+                    <textarea id="negativePrompt" rows="2" placeholder="Artifacts to suppress...">blurry, low quality, artifacts, distorted, noisy</textarea>
+                </div>
+            </div>
+
+            <div class="param-section">
+                <h3>Diffusion Parameters</h3>
+                <div class="slider-group">
+                    <label>Denoising Strength: <span id="denoiseVal">0.75</span></label>
+                    <input type="range" id="denoiseStrength" min="0.1" max="1.0" step="0.05" value="0.75">
+                </div>
+                <div class="slider-group">
+                    <label>Guidance Scale (CFG): <span id="cfgVal">7.5</span></label>
+                    <input type="range" id="cfgScale" min="1.0" max="15.0" step="0.5" value="7.5">
+                </div>
+                <div class="slider-group">
+                    <label>Sampling Steps: <span id="stepsVal">25</span></label>
+                    <input type="range" id="sampleSteps" min="10" max="50" step="1" value="25">
+                </div>
+                <div class="field-group">
+                    <label>Inpaint Fill Mode</label>
+                    <select id="fillModeSelect">
+                        <option value="original">Original Content</option>
+                        <option value="blur" selected>Gaussian Latent Blur</option>
+                        <option value="noise">Pure Gaussian Noise</option>
+                        <option value="color">Mean Border Color</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="param-section">
+                <h3>ControlNet Guidance</h3>
+                <div class="field-group">
+                    <label>Preprocessor Mode</label>
+                    <select id="controlnetMode">
+                        <option value="none">None (Pure Inpainting)</option>
+                        <option value="canny" selected>Canny Edge Detector</option>
+                        <option value="depth">Depth Gradient Estimation</option>
+                    </select>
+                </div>
+                <div class="slider-group">
+                    <label>Control Weight: <span id="controlWeightVal">0.80</span></label>
+                    <input type="range" id="controlWeight" min="0.0" max="1.5" step="0.05" value="0.80">
+                </div>
+            </div>
+        </aside>
+    </main>
+
+    <script type="module" src="app.js"></script>
+</body>
+</html>
