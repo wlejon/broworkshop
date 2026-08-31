@@ -48,6 +48,7 @@
         { "dir": "demos/clipmap-terrain" },
         { "dir": "demos/cluster-diar-lab" },
         { "dir": "demos/diffusion-lab" },
+        { "dir": "demos/dom-lab" },
         { "dir": "demos/flora-lab" },
         { "dir": "demos/image-kernels" },
         { "dir": "demos/input-lab" },

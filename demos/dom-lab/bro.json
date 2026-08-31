@@ -1,0 +1,12 @@
+{
+    "name": "DOM & Web Standards Lab",
+    "version": "1.0.0",
+    "description": "Showcase of Custom Elements, Shadow DOM, MutationObserver, Range/Selection APIs, and Web Animations API in bro.",
+    "window": {
+        "width": 1280,
+        "height": 840,
+        "minWidth": 900,
+        "minHeight": 600,
+        "resizable": true
+    }
+}
