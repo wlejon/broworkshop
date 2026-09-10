@@ -91,6 +91,8 @@ const QWEN_TTS_DEV = WROOT + '/brosoundml/weights/qwen-tts/0.6B-customvoice';
 const QWEN_TTS_REPO = 'Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice';
 const QWEN_VD_DEV  = WROOT + '/brosoundml/weights/qwen-tts/1.7B-voicedesign';
 const QWEN_VD_REPO = 'Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign';
+const OMNI_DEV  = WROOT + '/brosoundml/weights/omnivoice';
+const OMNI_REPO = 'k2-fsa/OmniVoice';
 
 const GROUPS = [
     {
@@ -191,6 +193,30 @@ const GROUPS = [
               dev: QWEN_VD_DEV + '/speech_tokenizer/model.safetensors', bytes: 682293092 },
         ],
     },
+    // OmniVoice (k2-fsa, Apache-2.0) — 600-language masked-diffusion TTS: a
+    // Qwen3-0.6B trunk with eight audio heads over the HiggsAudio v2 codec.
+    // Zero-shot voice clone from a reference clip (or a fixed-vocabulary voice
+    // instruct), token-grid inpainting through bro.tts.loadOmniVoice. The LM runs
+    // on the GPU only. ~3.5 GB of F32 weights, so not auto-downloaded: a source
+    // checkout loads from the dev sibling, a packaged build streams the files
+    // into the cache on request (demos/omnivoice-lab is the consumer).
+    {
+        key: 'omnivoice', label: 'OmniVoice (600-language TTS)', downloadable: true, optional: true,
+        files: [
+            { repo: OMNI_REPO, kind: 'model', file: 'config.json',
+              dev: OMNI_DEV + '/config.json', bytes: 2339 },
+            { repo: OMNI_REPO, kind: 'model', file: 'tokenizer.json',
+              dev: OMNI_DEV + '/tokenizer.json', bytes: 11423986 },
+            { repo: OMNI_REPO, kind: 'model', file: 'tokenizer_config.json',
+              dev: OMNI_DEV + '/tokenizer_config.json', bytes: 556 },
+            { repo: OMNI_REPO, kind: 'model', file: 'model.safetensors',
+              dev: OMNI_DEV + '/model.safetensors', bytes: 2450344112 },
+            { repo: OMNI_REPO, kind: 'model', file: 'audio_tokenizer/config.json',
+              dev: OMNI_DEV + '/audio_tokenizer/config.json', bytes: 2660 },
+            { repo: OMNI_REPO, kind: 'model', file: 'audio_tokenizer/model.safetensors',
+              dev: OMNI_DEV + '/audio_tokenizer/model.safetensors', bytes: 805665628 },
+        ],
+    },
 ];
 
 // ─── speech-backend showcase catalog ────────────────────────────────────────
@@ -264,6 +290,11 @@ function resolved() {
     const qwenVd = groupBy('ttsvd').files;
     const qwenVdModel = qwenVd.find(f => f.file === 'model.safetensors');
     const qwenVdReady = groupPresent(groupBy('ttsvd'));
+    // OmniVoice: one model dir (config + tokenizer + LM + audio_tokenizer/),
+    // backed out from model.safetensors like the Qwen dirs.
+    const omni = groupBy('omnivoice').files;
+    const omniModel = omni.find(f => f.file === 'model.safetensors');
+    const omniReady = groupPresent(groupBy('omnivoice'));
     const addedPath = resolveFile(added);
     return {
         qwen:         resolveFile(groupBy('llm').files[0]),
@@ -285,6 +316,9 @@ function resolved() {
         qwenTtsReady,
         qwenVdDir:    dirOf(resolveFile(qwenVdModel)),
         qwenVdReady,
+        // OmniVoice model dir + readiness (demos/omnivoice-lab).
+        omniDir:      dirOf(resolveFile(omniModel)),
+        omniReady,
     };
 }
 

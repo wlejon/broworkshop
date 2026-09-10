@@ -71,6 +71,7 @@
         { "dir": "demos/nav-lab" },
         { "dir": "demos/netsync" },
         { "dir": "demos/nllb-lab" },
+        { "dir": "demos/omnivoice-lab" },
         { "dir": "demos/parakeet-lab" },
         { "dir": "demos/physics-playground" },
         { "dir": "demos/pixart-lab" },

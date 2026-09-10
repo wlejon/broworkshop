@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>OmniVoice Lab</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <header id="toolbar">
+      <span id="brand">◍ OmniVoice&nbsp;Lab</span>
+      <span class="tagline">masked-diffusion TTS — pull on its real seams: length, the token grid, the unmask schedule, the voice</span>
+      <span class="grow"></span>
+      <span id="backend" class="badge">loading…</span>
+    </header>
+
+    <!-- which model dir; OmniVoice is one checkpoint, GPU only -->
+    <section id="modelbar">
+      <label class="cfg">model
+        <input id="model-dir" type="text" value="D:/projects/brosoundml/weights/omnivoice">
+      </label>
+      <button id="btn-browse-model" class="iconbtn" title="Choose the OmniVoice model directory (config.json + tokenizer.json + model.safetensors + audio_tokenizer/)">📁</button>
+      <button id="btn-reload" title="Reload the model">↺</button>
+      <span id="model-meta" class="meta"></span>
+      <span class="grow"></span>
+      <span id="gpu-meta" class="meta"></span>
+    </section>
+
+    <div id="cols">
+      <!-- ── LEFT: the inputs (voice · text · length · schedule · transport) ── -->
+      <aside id="left">
+
+        <!-- VOICE — an in-context prompt (a reference clip's codes + transcript),
+             or a fixed-vocabulary instruct, or neither (the model picks). -->
+        <section id="voice" class="panel">
+          <div class="ptitle">voice <span class="psub">— a prompt clones; an instruct designs; neither lets the model choose</span></div>
+          <div class="row">
+            <span class="vlabel">bank</span>
+            <div id="prompt-bank" class="bank"><span class="hint empty">no prompts yet — create one from a clip or a take</span></div>
+          </div>
+          <div class="row">
+            <span class="vlabel">clip</span>
+            <input id="ref-wav" type="text" placeholder="path to a reference clip (wav / flac / mp3 / ogg)"
+                   title="A reference clip; its codec codes + transcript become the in-context prompt">
+            <button id="btn-browse-wav" class="iconbtn" title="Choose a reference clip">📁</button>
+            <button id="btn-transcribe" title="Transcribe the clip with Whisper into the transcript box (editable)">✎ transcribe</button>
+            <button id="btn-prompt-clip" title="Encode the clip + transcript into a prompt and add it to the bank">＋ prompt from clip</button>
+            <button id="btn-load-ovcp" title="Load a saved .ovcp prompt file">⤒ .ovcp</button>
+          </div>
+          <div class="row">
+            <span class="vlabel">transcript</span>
+            <input id="ref-text" type="text" placeholder="what the clip says (empty = text-free reference)"
+                   title="The clip's transcript; the duration rule and the prompt both read it">
+            <label class="lock" title="Prepend the denoise token when a prompt is present (cleaner output from a noisy reference)">
+              <input id="denoise" type="checkbox" checked> denoise
+            </label>
+          </div>
+          <div class="row">
+            <span class="vlabel">design</span>
+            <div id="instruct-picks" class="picks"></div>
+          </div>
+          <div class="row">
+            <span class="vlabel"></span>
+            <span id="instruct-preview" class="meta">instruct: (none)</span>
+            <button id="btn-instruct-clear" class="iconbtn" title="Clear every design pick">○ none</button>
+          </div>
+          <div class="row">
+            <span class="vlabel">language</span>
+            <input id="lang-search" type="text" placeholder="search 600+ languages…" title="Filter the language list">
+            <select id="language" size="4" title="Language hint for the text; None = language-agnostic"></select>
+            <span id="lang-meta" class="meta"></span>
+          </div>
+        </section>
+
+        <!-- TEXT — what to say, with the tokenizer's view of it -->
+        <section id="textpanel" class="panel">
+          <div class="ptitle">text <span class="psub">— tags tokenize standalone · [CMU phonemes] in brackets · pinyin with tone digits (ni3 hao3)</span></div>
+          <textarea id="text" rows="3" placeholder="Type something to speak…">Hello there, this is a test of the OmniVoice pipeline. It speaks six hundred languages.</textarea>
+          <div class="row">
+            <span class="vlabel">tags</span>
+            <div id="tag-chips" class="chips"></div>
+          </div>
+          <div class="row">
+            <span class="vlabel"></span>
+            <span id="tok-meta" class="meta"></span>
+          </div>
+          <div class="row">
+            <label class="lock" title="Split the text into sentences and generate them one after another, each conditioned on the previous segment's output — the long-form chain">
+              <input id="chain-on" type="checkbox"> per-sentence pacing
+            </label>
+            <span class="meta">chain prompt</span>
+            <select id="chain-mode" title="How segment N becomes the voice reference for segment N+1">
+              <option value="encode">re-encode take (createPrompt)</option>
+              <option value="codes">reuse its codes (no codec round trip)</option>
+            </select>
+          </div>
+          <div id="sentences" class="sentences" style="display:none"></div>
+        </section>
+
+        <!-- LENGTH — the first-class knob: the duration rule's estimate, or a fixed length -->
+        <section id="length" class="panel">
+          <div class="ptitle">length <span class="psub">— the model has no duration predictor: a rule estimates frames from the text (and the prompt), or you fix them</span></div>
+          <div class="row">
+            <div class="dial wide" title="0 = let the duration rule decide; otherwise fix the output to this many seconds (frames = seconds × 25)">
+              <label>duration <span id="v-duration">auto</span></label>
+              <input id="duration" type="range" min="0" max="30" step="0.1" value="0">
+            </div>
+            <div class="dial" title="Divides the rule's estimate (ignored when a duration is fixed)">
+              <label>speed <span id="v-speed">1.00</span></label>
+              <input id="speed" type="range" min="0.5" max="2" step="0.05" value="1">
+            </div>
+            <button id="btn-speed-reset" class="iconbtn" title="Back to speed 1, duration auto">○</button>
+          </div>
+          <div class="row">
+            <span class="vlabel"></span>
+            <span id="est-meta" class="est">—</span>
+          </div>
+        </section>
+
+        <!-- SCHEDULE + SAMPLING — the diffusion knobs -->
+        <section id="schedule" class="panel">
+          <div class="ptitle">schedule &amp; sampling <span class="psub">— how the grid unmasks: how many forwards, in what order, how greedy</span></div>
+          <div class="dials">
+            <div class="dial" title="Diffusion forwards (each a full 0.6B forward). 16 is acceptable, 32 the default.">
+              <label>steps <span id="v-steps">32</span></label>
+              <input id="steps" type="range" min="1" max="64" step="1" value="32"></div>
+            <div class="dial" title="Schedule warp t' = s·t / (1 + (s−1)·t): small = many cells early, big = spread out">
+              <label>t-shift <span id="v-tshift">0.10</span></label>
+              <input id="tshift" type="range" min="0.02" max="3" step="0.02" value="0.1"></div>
+            <div class="dial" title="Classifier-free guidance weight; 0 runs the conditional row alone (half the work per step)">
+              <label>guidance <span id="v-guidance">2.0</span></label>
+              <input id="guidance" type="range" min="0" max="6" step="0.1" value="2"></div>
+            <div class="dial" title="Gumbel-noise scale on the unmask ORDER (which cells commit first)">
+              <label>position T <span id="v-postemp">5.0</span></label>
+              <input id="postemp" type="range" min="0" max="20" step="0.25" value="5"></div>
+            <div class="dial" title="&gt; 0: sample each cell's code from its top-10% instead of the argmax">
+              <label>class T <span id="v-classtemp">0.00</span></label>
+              <input id="classtemp" type="range" min="0" max="2" step="0.05" value="0"></div>
+            <div class="dial" title="Confidence −= codebook × penalty, so codebook 0 (semantic) unmasks first">
+              <label>layer penalty <span id="v-penalty">5.0</span></label>
+              <input id="penalty" type="range" min="0" max="20" step="0.5" value="5"></div>
+          </div>
+          <div class="row">
+            <label class="lock" title="Off: no noise, a deterministic argmax unmask order regardless of seed">
+              <input id="gumbel" type="checkbox" checked> gumbel noise
+            </label>
+            <span class="meta">seed</span>
+            <input id="seed" type="number" value="7" min="0" step="1" title="Seed of the counter-based Gumbel RNG — a seed reproduces a take exactly">
+            <button id="btn-seed-rand" class="iconbtn" title="A random seed">🎲</button>
+            <label class="lock" title="Keep the seed across takes (A/B the same draw); unlocked, every take draws a new one">
+              <input id="seed-lock" type="checkbox" checked> lock
+            </label>
+            <button id="btn-sched-reset" title="Back to the upstream defaults">○ defaults</button>
+          </div>
+        </section>
+
+        <!-- TRANSPORT -->
+        <section id="transport" class="panel">
+          <button id="btn-generate" disabled title="Run the LM at the shown frame count, decode the codes, play — the grid-exact path (no post-processing)">▶ Generate</button>
+          <button id="btn-pipeline" disabled title="The full synthesize() pipeline: chunking, cross-fade, silence trim, loudness match, fade + pad">▶ Pipeline</button>
+          <button id="btn-stop" disabled title="Cancel the generation in flight and stop playback">■ Stop</button>
+          <button id="btn-play" disabled title="Replay the current take">♪</button>
+          <button id="btn-save-wav" disabled title="Save the current take as a .wav">⤓ wav</button>
+          <div id="run-meta" class="meta"></div>
+        </section>
+      </aside>
+
+      <!-- ── RIGHT: the output (waveform · grid · unmask heatmap · steps · confidence · takes) ── -->
+      <main id="right">
+        <div id="readout" class="trace-readout">generate a take, then hover the grid to read a cell</div>
+        <div id="stages"></div>
+        <section id="takes">
+          <div class="ptitle">takes <span class="psub">— every generation lands here · ⊞ loads a take into the grid · ◉ makes it the voice</span></div>
+          <div id="take-list" class="take-list"><span class="hint empty">no takes yet</span></div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <script type="module" src="/app/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+{
+    "app": ".",
+    "title": "OmniVoice Lab",
+    "width": 1720,
+    "height": 1000,
+    "lib": "../../lib"
+}
