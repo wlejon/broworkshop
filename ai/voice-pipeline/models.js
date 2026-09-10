@@ -37,9 +37,35 @@ function env(k) {
     catch (_) { return ''; }
 }
 function exists(p) { try { return !!p && fs.existsSync(p); } catch (_) { return false; } }
-// Portable dev-sibling root: BRO_WEIGHTS overrides the default sibling layout
-// (so weights checked out elsewhere — e.g. a WSL D:/ mount — still resolve).
-const WROOT = env('BRO_WEIGHTS') || '..';
+// Portable dev-sibling root: the checkout that holds brosoundml/, brolm/,
+// brosoundml-data/ beside broworkshop/ (D:/projects for
+// D:/projects/broworkshop/demos/omnivoice-lab). BRO_WEIGHTS overrides it (so
+// weights checked out elsewhere — e.g. a WSL D:/ mount — still resolve);
+// otherwise it is found by walking up from the app's real directory
+// (bro.appDir, an absolute native path) to the first ancestor that contains a
+// brosoundml/ sibling, falling back to the parent of the broworkshop checkout
+// (the ancestor holding launcher/apps.json). It has to be an absolute path: a
+// relative '..' goes through brokit's fs resolution, which tries the app dir
+// first and then the process CWD, so it only ever found the siblings when bro
+// was launched from the broworkshop directory itself.
+function devRoot() {
+    const override = env('BRO_WEIGHTS');
+    if (override) return override.replace(/[\\\/]+$/, '');
+    let dir = '';
+    try { dir = (globalThis.bro && globalThis.bro.appDir) || ''; } catch (_) {}
+    dir = dir.replace(/\\/g, '/').replace(/\/+$/, '');
+    let workshop = '';
+    for (let d = dir; d; ) {
+        if (exists(d + '/brosoundml')) return d;
+        if (!workshop && exists(d + '/launcher/apps.json')) workshop = d;
+        const i = d.lastIndexOf('/');
+        if (i <= 0) break;
+        d = d.slice(0, i);
+    }
+    if (workshop) { const i = workshop.lastIndexOf('/'); if (i > 0) return workshop.slice(0, i); }
+    return '..';
+}
+const WROOT = devRoot();
 function sizeOf(p) { try { return fs.statSync(p).size; } catch (_) { return -1; } }
 
 // Per-OS app-data root (mirrors system/projects/app.js userDataDir()).

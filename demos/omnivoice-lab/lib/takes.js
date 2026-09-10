@@ -12,7 +12,8 @@ export function mkTake(f) {
   const id = takeId();
   return Object.assign({
     id, kind: 'generate', name: (KIND_GLYPH[f.kind] || '') + ' take ' + id, text: '', codes: null, numFrames: 0,
-    samples: null, sampleRate: 24000, unmaskStep: null, commitScore: null, stepStats: null, params: {},
+    samples: null, sampleRate: 24000, unmaskStep: null, commitScore: null, commitConfidence: null,
+    stepStats: null, params: {},
     cond: null, promptName: '', changed: null, masked: null, parentId: 0, segments: null,
     lmSeconds: 0, codecSeconds: 0, wallMs: 0, exact: true, createdAt: Date.now(),
   }, f, { id, name: (KIND_GLYPH[f.kind] || '') + ' take ' + id + (f.parentId ? ' ← ' + f.parentId : '') });

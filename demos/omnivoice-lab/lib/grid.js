@@ -60,7 +60,7 @@ export function buildGridTools(host) {
     const l = el('label', 'cbtick');
     const c = document.createElement('input'); c.type = 'checkbox'; c.checked = !!cbs[q];
     c.title = 'codebook ' + q + (q === 0 ? ' (semantic — unmasks first)' : ' (acoustic)');
-    c.addEventListener('change', () => { cbs[q] = c.checked ? 1 : 0; redrawOverlays(); });
+    c.addEventListener('change', () => { cbs[q] = c.checked ? 1 : 0; syncTools(); redrawOverlays(); });
     l.appendChild(c); l.appendChild(el('span', null, 'q' + q));
     host.appendChild(l); ticks.push(c);
   }

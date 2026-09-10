@@ -69,9 +69,19 @@ from `onStep` (colour = step index; grey = kept by an init grid); once it
 lands, the card shows the trace's `unmaskStep` grid with the mean commit step
 per codebook. The **schedule** card draws cells committed per step (the
 t-shift warp's shape) and the mean commit score of those cells, plus the LM /
-codec / wall timings. **Commit confidence** is the score each cell committed
-with, normalised per codebook — the hedged (red) cells are where a re-roll
-roams.
+codec / wall timings.
+
+**Commit confidence** is the model's *raw* confidence at each cell at the step
+it committed: `step.confidence`, the maximum CFG log-probability there, before
+the layer penalty and before the position-temperature Gumbel noise. That is
+deliberately not `step.scores` — a score is the raw confidence minus
+`codebook x layerPenalty` and then noised, so scores live on a different scale
+in every row and are `-Infinity` at every already-fixed cell; the card used to
+normalise per codebook to hide that, which made every row look equally
+uncertain by construction. The raw confidence is comparable across the whole
+grid, so the card uses one global colour scale (red = hedged, green = sure),
+prints its range and its mean per codebook, and shows the exact log-prob on
+hover. The hedged (red) cells are where a re-roll roams.
 
 **Voice** (left). The **bank** holds prompts; the active one (click to
 toggle) is passed as `opts.prompt`, none = the model picks a voice. Make one
@@ -119,4 +129,6 @@ lib/render.js     the cards: waveform, grid, unmask order, schedule, confidence
 lib/takes.js      the take strip
 lib/audio.js      clip publish / play / span / WAV export
 tests/test_smoke.js   headless: load, generate, re-roll a span (only the span changes), chain, voice from a take, pipeline
+tests/test_interaction.js   headless, through input injection: hover readout, drag-select on the grid and the waveform,
+                      codebook ticks + shortcuts, ↻ span from the button + typed seed, ■ Stop mid-run, the take strip's ▶ ◉ ⊞ ✕
 ```

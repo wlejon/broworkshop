@@ -43,6 +43,8 @@ export function playSpan(f0, f1) {
 export function stop() {
   if (playId >= 0 && audioCtx) { try { audioCtx.stopPlayback(playId); } catch (e) {} playId = -1; }
 }
+// The playback in flight (-1 = none), for the transport's state and tests.
+export function playbackId() { return playId; }
 // Publish any buffer (a take from the strip) and play it, without making it current.
 export function playSamples(samples, rate) { setClip(samples, rate); play(); }
 

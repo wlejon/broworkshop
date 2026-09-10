@@ -251,17 +251,56 @@ function renderSteps(take) {
     ' · mean score range ' + lo.toFixed(2) + ' … ' + hi.toFixed(2);
 }
 
+// The raw confidence the model committed each cell with: max CFG log-prob,
+// before the layer penalty and before the position-temperature Gumbel noise.
+// That is the honest "where did it hedge" signal — the unmask *score* is not,
+// because subtracting codebook × layer_penalty makes every row live on its own
+// scale, which the old per-codebook normalisation then papered over (it made
+// each row look equally uncertain by construction). One global scale over the
+// whole grid, and the actual log-prob on hover.
+let confGrid = null, confT = 0;
 function renderConfidence(take) {
-  const c = card('confidence', 'commit confidence', 'the unmask score each cell committed with (per-codebook normalised: red = the model hedged, green = sure) · the re-roll seam: hedged cells are where a re-roll roams');
-  const T = take.numFrames, ctx = size(c, NQ * HEAT_ROW), sc = take.commitScore;
-  if (!sc) { c.note.textContent = 'no per-step scores on this take (the pipeline chunked it differently than the live recorder saw)'; return; }
-  const lo = new Float32Array(NQ).fill(Infinity), hi = new Float32Array(NQ).fill(-Infinity);
-  for (let q = 0; q < NQ; q++) for (let t = 0; t < T; t++) { const v = sc[q * T + t]; if (v === v) { if (v < lo[q]) lo[q] = v; if (v > hi[q]) hi[q] = v; } }
-  drawCells(ctx, T, HEAT_ROW, (q, t) => { const v = sc[q * T + t]; if (v !== v) return [70, 72, 84]; const r = hi[q] - lo[q]; return confColor(r > 0 ? (v - lo[q]) / r : 0.5); });
-  const rng = [];
-  for (let q = 0; q < NQ; q++) rng.push(lo[q] === Infinity ? '—' : lo[q].toFixed(1) + '…' + hi[q].toFixed(1));
-  c.note.textContent = 'score = CFG log-prob − codebook × layer penalty, ÷ position T, + gumbel · per-codebook range: ' + rng.join(' · ');
+  const c = card('confidence', 'commit confidence', 'the model\'s raw confidence at each cell when it committed — max CFG log-prob, no layer penalty, no noise (red = hedged, green = sure; one scale for the whole grid) · hover for the value · the re-roll seam: hedged cells are where a re-roll roams');
+  const T = take.numFrames, ctx = size(c, NQ * HEAT_ROW), cf = take.commitConfidence;
+  confGrid = null; confT = T;
+  if (!cf) { c.note.textContent = 'no confidence grid on this take'; return; }
+  confGrid = cf;
+  let lo = Infinity, hi = -Infinity, n = 0, sum = 0;
+  for (let i = 0; i < NQ * T; i++) { const v = cf[i]; if (v === v) { if (v < lo) lo = v; if (v > hi) hi = v; sum += v; n++; } }
+  const rng = hi - lo;
+  drawCells(ctx, T, HEAT_ROW, (q, t) => {
+    const v = cf[q * T + t];
+    if (v !== v) return [70, 72, 84];
+    return confColor(rng > 0 ? (v - lo) / rng : 0.5);
+  });
+  // per-codebook means, to show that the raw confidence does NOT fall away by
+  // codebook the way the penalised score does
+  const rows = [];
+  for (let q = 0; q < NQ; q++) {
+    let s = 0, k = 0;
+    for (let t = 0; t < T; t++) { const v = cf[q * T + t]; if (v === v) { s += v; k++; } }
+    rows.push(k ? (s / k).toFixed(2) : '—');
+  }
+  c.note.textContent = n
+    ? 'raw max CFG log-prob · scale ' + lo.toFixed(2) + ' (hedged) … ' + hi.toFixed(2) + ' (sure) · mean ' +
+      (sum / n).toFixed(2) + ' · mean per codebook: ' + rows.join(' / ')
+    : 'no finite confidence values on this take';
   if (!c.wired) { wireSelectable(c.canvas, HEAT_ROW); c.wired = true; }
+  // The shared hover readout (grid.js) reports the unmask score; append this
+  // card's own number after it, so the two are never confused.
+  if (!c.confHover) {
+    c.confHover = true;
+    c.canvas.addEventListener('mousemove', (ev) => {
+      if (!confGrid || !current) return;
+      const r = c.canvas.getBoundingClientRect();
+      const x = (ev.clientX - r.left) * (c.canvas.width / (r.width || c.canvas.width));
+      const y = (ev.clientY - r.top) * (c.canvas.height / (r.height || c.canvas.height));
+      if (x < GX) return;
+      const q = clamp((y / HEAT_ROW) | 0, 0, NQ - 1), f = xFrame(x, confT);
+      const v = confGrid[q * confT + f];
+      $('#readout').textContent += ' · confidence ' + (v === v ? v.toFixed(3) : '—');
+    });
+  }
 }
 
 // ── live: the unmask heatmap filling in during a generation ──────────────────
@@ -289,7 +328,11 @@ export function liveStep(rec, s) {
     return st < 0 ? null : stepColor(st / Math.max(1, N - 1));
   });
   const st = g.stats[g.stats.length - 1];
-  const segNote = rec.segs.length > 1 ? 'segment ' + rec.segs.length + ' · ' : '';
+  // A chunked synthesize restarts `step` at 0 per chunk, so the step object's
+  // own chunk index places the boundary exactly — no inferring it from step 0.
+  const nch = s.numChunks || 1;
+  const segNote = nch > 1 ? 'chunk ' + ((s.chunk | 0) + 1) + ' / ' + nch + ' · '
+                          : (rec.segs.length > 1 ? 'segment ' + rec.segs.length + ' · ' : '');
   c.note.textContent = liveLabel + ' · ' + segNote + 'step ' + (s.step + 1) + ' / ' + N + ' · +' + s.unmasked + ' cells · ' + st.masked + ' still masked' +
     (st.meanScore === st.meanScore ? ' · mean commit score ' + st.meanScore.toFixed(2) : '');
   $('#readout').textContent = c.note.textContent;

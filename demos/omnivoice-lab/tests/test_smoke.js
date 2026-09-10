@@ -18,10 +18,9 @@ import { prompts, activePrompt, promptFromTake, languageCount, setLanguage, setI
 import { setText, splitSentences, setSentenceSeconds, sentenceRows, rebuildSentences } from "/app/lib/text.js";
 import { setParam, setLength, frameTarget, currentParams } from "/app/lib/schedule.js";
 import { cards } from "/app/lib/render.js";
+import { resolved } from "../../../ai/voice-pipeline/models.js";
 
-const WROOT = (typeof process !== 'undefined' && process.env && process.env.BRO_WEIGHTS) || 'D:/projects';
-const SHOTS = (typeof process !== 'undefined' && process.env && process.env.OMNI_SHOTS) ||
-              (WROOT + '/broworkshop/demos/omnivoice-lab/tests/out/');
+const SHOTS = (typeof process !== 'undefined' && process.env && process.env.OMNI_SHOTS) || (bro.appDir + '/tests/out/');
 const TEXT = 'Hello there, this is a test of the OmniVoice pipeline.';
 
 function ms(t0) { return ((Date.now() - t0) / 1000).toFixed(2) + 's'; }
@@ -213,7 +212,9 @@ if (!omni) {
   assert(activePrompt() === null && count('#prompt-bank .prompt-entry.active') === 0, 'prompt deselected');
 
   // ── 8b. a reference clip: decode, transcribe with Whisper, encode a prompt ──
-  const CLIP = WROOT + '/brosoundml/weights/whisper/test_audio_en.wav';
+  // (the clip ships beside the Whisper weights the catalog resolves — the dev
+  // sibling found from the app's own path, or BRO_WEIGHTS)
+  const CLIP = resolved().whisperDir + '/test_audio_en.wav';
   if (require('node:fs').existsSync(CLIP)) {
     const { transcribeClip, promptFromClip } = await import('/app/lib/voice.js');
     $('#ref-wav').value = CLIP;

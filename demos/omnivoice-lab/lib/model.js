@@ -1,7 +1,7 @@
 // ═══ model — resolve the model dir, gate on the GPU, load, hand the vocabulary
 // to the panels ═══════════════════════════════════════════════════════════════
 import { $, omni, setOmni, setBusy } from "/app/lib/state.js";
-import { setBadge, pExists, pParent, recall, remember, envVar, _os } from "/app/lib/helpers.js";
+import { setBadge, pExists, pParent, recall, remember } from "/app/lib/helpers.js";
 import { resolved } from "../../../ai/voice-pipeline/models.js";
 import { buildVoicePanel } from "/app/lib/voice.js";
 import { buildTextPanel } from "/app/lib/text.js";
@@ -15,16 +15,13 @@ function catalogDir(key) {
 }
 
 // Probe a sensible model dir for this machine: remembered > catalog > the HTML
-// default > BRO_WEIGHTS / ~/projects siblings.
+// default. The catalog already covers BRO_WEIGHTS, the dev sibling found from
+// the app's own path, and the per-user download cache.
 export function defaultModelDir(htmlDefault) {
-  let home = ''; try { home = _os.homedir(); } catch (e) {}
-  const wroot = envVar('BRO_WEIGHTS');
   const cands = [
     recall('omnivoice-lab.modelDir'),
     catalogDir('omniDir'),
     htmlDefault,
-    wroot && wroot + '/brosoundml/weights/omnivoice',
-    home && home + '/projects/brosoundml/weights/omnivoice',
   ].filter(Boolean);
   for (const c of cands) if (pExists(c + '/config.json') && pExists(c + '/model.safetensors')) return c;
   return recall('omnivoice-lab.modelDir') || htmlDefault;

@@ -65,6 +65,7 @@ export function setCurrent(v) { current = v; }
 // Every generation, oldest first. A take:
 //   { id, kind, name, text, codes: Int32Array(NQ*T), numFrames, samples,
 //     sampleRate, unmaskStep: Int32Array|null, commitScore: Float32Array|null,
+//     commitConfidence: Float32Array|null (the raw max log-prob, no penalty/noise),
 //     stepStats: [{unmasked, meanScore}], params, promptName, changed: Uint8Array|null,
 //     masked: Uint8Array|null, parentId, segments: [{text, frames}]|null,
 //     lmSeconds, codecSeconds, wallMs, exact }

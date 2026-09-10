@@ -64,21 +64,37 @@ export function snapshotParams(o) {
 }
 
 // ── the step recorder ────────────────────────────────────────────────────────
-// One segment per chunk (synthesize restarts `step` at 0 per chunk; generateCodes
-// is one chunk). Per cell: the step it committed at, the score it committed
-// with (this step's unmask score, the value top-k ranked). `keep` marks init
-// cells, which never commit (they report -1 like the trace).
+// One segment per chunk. A chunked synthesize restarts `step` at 0 for every
+// chunk, so the boundary is read off `s.chunk` (0-based, with `s.numChunks`)
+// rather than guessed from `step === 0` — a chained run reuses one recorder
+// across several generateCodes calls, where every call is chunk 0, so the call
+// itself opens the segment.
+//
+// Per cell we keep two things, and they are not the same number:
+//   score       the value top-k ranked this step: the raw confidence minus
+//               codebook × layer penalty, ÷ position temperature + gumbel.
+//               Good for "which cell won", useless as a confidence.
+//   confidence  the model's raw max CFG log-prob at the cell, before the
+//               penalty and before any noise — finite at every cell, every
+//               step, including the ones already fixed.
+// `keep` marks init cells, which never commit (they report -1 like the trace).
 export function makeRecorder(keep) {
-  const rec = { segs: [], cur: null, keep: keep || null, calls: 0 };
+  const rec = { segs: [], cur: null, keep: keep || null, calls: 0, curChunk: -1, numChunks: 1 };
+  // A chained/looped caller opens a fresh segment before each new call.
+  rec.newSegment = () => { rec.cur = null; rec.curChunk = -1; };
   rec.onStep = (s) => {
     rec.calls++;
-    if (!rec.cur || s.step === 0) {
+    const chunk = s.chunk | 0;
+    rec.numChunks = s.numChunks || 1;
+    if (!rec.cur || chunk !== rec.curChunk) {
       const n = s.numCodebooks * s.numFrames;
-      rec.cur = { T: s.numFrames, NQ: s.numCodebooks, numSteps: s.numSteps,
-                  unmask: new Int32Array(n).fill(-1), score: new Float32Array(n).fill(NaN), stats: [] };
+      rec.cur = { T: s.numFrames, NQ: s.numCodebooks, numSteps: s.numSteps, chunk,
+                  unmask: new Int32Array(n).fill(-1), score: new Float32Array(n).fill(NaN),
+                  conf: new Float32Array(n).fill(NaN), stats: [] };
       rec.segs.push(rec.cur);
+      rec.curChunk = chunk;
     }
-    const c = rec.cur, tok = s.tokens, sc = s.scores, n = tok.length;
+    const c = rec.cur, tok = s.tokens, sc = s.scores, cf = s.confidence, n = tok.length;
     let sum = 0, cnt = 0, masked = 0;
     for (let i = 0; i < n; i++) {
       if (tok[i] === MASK) { masked++; continue; }
@@ -87,8 +103,13 @@ export function makeRecorder(keep) {
       c.unmask[i] = s.step;
       const v = sc[i];
       c.score[i] = (v === v && isFinite(v)) ? v : 0;
+      if (cf) { const w = cf[i]; c.conf[i] = (w === w && isFinite(w)) ? w : NaN; }
       sum += c.score[i]; cnt++;
     }
+    // An init grid's kept cells never commit, so on the last step take their
+    // confidence as it stands — the same rule the C++ trace uses.
+    if (cf && rec.keep && rec.segs.length === 1 && s.step === s.numSteps - 1)
+      for (let i = 0; i < n; i++) if (rec.keep[i] && !(c.conf[i] === c.conf[i])) c.conf[i] = cf[i];
     c.stats.push({ step: s.step, unmasked: s.unmasked, committed: cnt, masked, meanScore: cnt ? sum / cnt : NaN });
     liveStep(rec, s);
   };
@@ -96,15 +117,20 @@ export function makeRecorder(keep) {
   rec.finish = () => {
     let T = 0; for (const g of rec.segs) T += g.T;
     const score = new Float32Array(NQ * T).fill(NaN), unmask = new Int32Array(NQ * T).fill(-1);
+    const conf = new Float32Array(NQ * T).fill(NaN);
+    const bounds = [];
     let off = 0;
     for (const g of rec.segs) {
       for (let q = 0; q < NQ; q++) for (let t = 0; t < g.T; t++) {
         score[q * T + off + t] = g.score[q * g.T + t];
         unmask[q * T + off + t] = g.unmask[q * g.T + t];
+        conf[q * T + off + t] = g.conf[q * g.T + t];
       }
       off += g.T;
+      bounds.push(off);
     }
-    return { T, score, unmask, stepStats: rec.segs.map((g) => g.stats), numSteps: rec.segs.length ? rec.segs[0].numSteps : 0 };
+    return { T, score, conf, unmask, bounds, stepStats: rec.segs.map((g) => g.stats),
+             numSteps: rec.segs.length ? rec.segs[0].numSteps : 0 };
   };
   return rec;
 }
@@ -133,7 +159,10 @@ export function generate() {
     const fin = rec.finish();
     const take = mkTake({
       kind: 'generate', text, codes: r.codes, numFrames: r.numFrames, samples: dec.samples, sampleRate: dec.sampleRate,
-      unmaskStep: r.trace ? r.trace.unmaskStep : fin.unmask, commitScore: fin.score, stepStats: fin.stepStats,
+      unmaskStep: r.trace ? r.trace.unmaskStep : fin.unmask, commitScore: fin.score,
+      commitConfidence: r.trace && r.trace.confidence && r.trace.confidence.length === NQ * r.numFrames
+        ? r.trace.confidence : fin.conf,
+      stepStats: fin.stepStats,
       params: snapshotParams(Object.assign({ frames }, opts)), cond, promptName: cond.promptName,
       lmSeconds: r.trace ? r.trace.lmSeconds : 0, codecSeconds: (Date.now() - tc) / 1000, wallMs: Date.now() - t0, exact: true,
     });
@@ -169,7 +198,12 @@ export function pipeline() {
     const segments = tr.chunkFrames.length > 1 ? Array.from(tr.chunkFrames, (f, i) => ({ text: 'chunk ' + (i + 1), frames: f })) : null;
     const take = mkTake({
       kind: 'pipeline', text, codes: tr.codes, numFrames: tr.numFrames, samples: r.samples, sampleRate: r.sampleRate,
-      unmaskStep: tr.unmaskStep, commitScore: fin.T === tr.numFrames ? fin.score : null, stepStats: fin.stepStats,
+      unmaskStep: tr.unmaskStep, commitScore: fin.T === tr.numFrames ? fin.score : null,
+      // The trace's confidence already spans every chunk, so it is the grid to
+      // show even when the live recorder saw a different chunking.
+      commitConfidence: tr.confidence && tr.confidence.length === NQ * tr.numFrames ? tr.confidence
+                        : (fin.T === tr.numFrames ? fin.conf : null),
+      stepStats: fin.stepStats,
       params: snapshotParams(opts), cond, promptName: cond.promptName, segments,
       lmSeconds: tr.lmSeconds, codecSeconds: tr.codecSeconds, wallMs: Date.now() - t0, exact: false,
     });
@@ -224,6 +258,7 @@ export function chain(rowsOverride) {
     } catch (e) { return fail('estimateFrames: ' + e.message); }
     const opts = Object.assign({}, base, { frames, trace: true, seed: base.seed + i, onStep: rec.onStep });
     if (prompt) opts.prompt = prompt; else delete opts.prompt;
+    rec.newSegment();   // every call is its own chunk 0; open a segment for it
     $('#run-meta').textContent = 'chain · sentence ' + (i + 1) + ' / ' + rows.length + ' · ' + frames + ' frames · “' + row.text.slice(0, 40) + '”';
     beginLive(frames, opts.numSteps, 'chain ' + (i + 1) + '/' + rows.length);
     opts.onDone = (r, info) => {
@@ -256,7 +291,8 @@ export function chain(rowsOverride) {
     const take = mkTake({
       kind: 'chain', text: rows.map((r) => r.text).join(' '), codes, numFrames: T,
       samples: concatF32(segs.map((s) => s.samples)), sampleRate: SR,
-      unmaskStep: unmask, commitScore: fin.T === T ? fin.score : null, stepStats: fin.stepStats,
+      unmaskStep: unmask, commitScore: fin.T === T ? fin.score : null,
+      commitConfidence: fin.T === T ? fin.conf : null, stepStats: fin.stepStats,
       params: snapshotParams(base), cond, promptName: cond.promptName,
       segments: segs.map((s) => ({ text: s.text, frames: s.numFrames, seconds: s.seconds, seed: s.seed })),
       chainMode: mode, lmSeconds: lmTotal, codecSeconds: codecTotal, wallMs: Date.now() - t0, exact: true,

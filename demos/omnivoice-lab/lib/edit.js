@@ -56,7 +56,10 @@ export function reroll(preset, seedOverride) {
     const fin = rec.finish();
     const out = mkTake({
       kind: 'reroll', text: take.text, codes: r.codes, numFrames: r.numFrames, samples: dec.samples, sampleRate: dec.sampleRate,
-      unmaskStep: r.trace ? r.trace.unmaskStep : fin.unmask, commitScore: fin.score, stepStats: fin.stepStats,
+      unmaskStep: r.trace ? r.trace.unmaskStep : fin.unmask, commitScore: fin.score,
+      commitConfidence: r.trace && r.trace.confidence && r.trace.confidence.length === n
+        ? r.trace.confidence : fin.conf,
+      stepStats: fin.stepStats,
       params: snapshotParams(Object.assign({ frames: T }, opts)), cond, promptName: take.promptName,
       changed, masked: mask, parentId: take.id, preset, segments: take.segments,
       lmSeconds: r.trace ? r.trace.lmSeconds : 0, codecSeconds, wallMs: Date.now() - t0, exact: true,
