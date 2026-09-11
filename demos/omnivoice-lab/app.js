@@ -7,10 +7,10 @@ import { browseFolder, browseFile, pParent } from "/app/lib/helpers.js";
 import { loadModel, defaultModelDir } from "/app/lib/model.js";
 import { promptFromClip, transcribeClip, loadOvcp, clearInstruct } from "/app/lib/voice.js";
 import { onTextChanged, rebuildSentences } from "/app/lib/text.js";
-import { buildSchedule } from "/app/lib/schedule.js";
+import { buildSchedule, updateEstimate } from "/app/lib/schedule.js";
 import { generate, pipeline, cancel } from "/app/lib/synth.js";
 import { play, saveWav, stop } from "/app/lib/audio.js";
-import { onDocMouseMove, onDocMouseUp } from "/app/lib/grid.js";
+import { onDocMouseMove, onDocMouseUp, clearSelection } from "/app/lib/grid.js";
 
 function init() {
   // ── model bar ─────────────────────────────────────────────────────────────
@@ -23,8 +23,11 @@ function init() {
 
   // ── voice ─────────────────────────────────────────────────────────────────
   $('#btn-browse-wav').addEventListener('click', () => {
-    const f = browseFile('Audio|wav;flac;mp3;ogg;opus'); if (f) $('#ref-wav').value = f;
+    const f = browseFile('Audio|wav;flac;mp3;ogg;opus');
+    if (f) { $('#ref-wav').value = f; updateEstimate(); }
   });
+  $('#ref-wav').addEventListener('input', updateEstimate);
+  $('#ref-text').addEventListener('input', updateEstimate);
   $('#btn-transcribe').addEventListener('click', transcribeClip);
   $('#btn-prompt-clip').addEventListener('click', promptFromClip);
   $('#btn-load-ovcp').addEventListener('click', loadOvcp);
@@ -44,6 +47,17 @@ function init() {
   $('#btn-stop').addEventListener('click', () => { cancel(); stop(); });
   $('#btn-play').addEventListener('click', play);
   $('#btn-save-wav').addEventListener('click', saveWav);
+
+  // keyboard shortcuts (when not typing in inputs/textareas)
+  window.addEventListener('keydown', (e) => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    if (e.code === 'Space') {
+      e.preventDefault();
+      play();
+    } else if (e.code === 'Escape') {
+      clearSelection();
+    }
+  });
 
   // one global mouse pair for the span drag, so re-rendered cards never leak listeners
   window.addEventListener('mousemove', onDocMouseMove);

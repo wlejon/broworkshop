@@ -153,9 +153,10 @@ function buildInstructPicks() {
   try { attrs = omni.instructAttributes() || []; } catch (e) {}
   for (const a of attrs) {
     const cat = el('div', 'pick-cat');
-    cat.appendChild(el('label', null, a.name));
+    const labelText = a.name.toLowerCase() === 'gender' ? 'sex' : a.name;
+    cat.appendChild(el('label', null, labelText));
     const sel = document.createElement('select');
-    sel.title = 'instruct · ' + a.name + ' (at most one value per category)';
+    sel.title = 'instruct · ' + labelText + ' (at most one value per category)';
     const none = document.createElement('option'); none.value = ''; none.textContent = '—'; sel.appendChild(none);
     for (const v of a.values) { const o = document.createElement('option'); o.value = v; o.textContent = v; sel.appendChild(o); }
     sel.addEventListener('change', updateInstructPreview);
@@ -168,7 +169,12 @@ export function currentInstruct() {
   return pickSelects.map((s) => s.value).filter(Boolean).join(', ');
 }
 export function setInstructPick(cat, value) {
-  const s = pickSelects.find((x) => x._cat === cat); if (!s) return;
+  const norm = (c) => (c || '').toLowerCase();
+  const s = pickSelects.find((x) => {
+    const xc = norm(x._cat), tc = norm(cat);
+    return xc === tc || ((xc === 'gender' || xc === 'sex') && (tc === 'gender' || tc === 'sex'));
+  });
+  if (!s) return;
   s.value = value || ''; updateInstructPreview();
 }
 export function clearInstruct() { for (const s of pickSelects) s.value = ''; updateInstructPreview(); }

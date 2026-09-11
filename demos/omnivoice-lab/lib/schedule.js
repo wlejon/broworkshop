@@ -23,9 +23,25 @@ export function currentParams() {
 }
 export function setParam(key, value) {
   const d = DIALS.find((x) => x.key === key);
-  if (d) { $('#' + d.id).value = String(value); $('#' + d.v).textContent = d.fmt(+value); }
+  if (d) {
+    const num = +value;
+    $('#' + d.id).value = String(value);
+    const v = $('#' + d.v);
+    v.textContent = d.fmt(num);
+    v.classList.toggle('modified', Math.abs(num - d.def) > 1e-4);
+  }
   else if (key === 'seed') $('#seed').value = String(value | 0);
   else if (key === 'gumbelNoise') $('#gumbel').checked = !!value;
+}
+export function loadTakeParams(take) {
+  if (!take) return;
+  const p = take.params || {};
+  for (const d of DIALS) {
+    if (p[d.key] != null) setParam(d.key, p[d.key]);
+  }
+  if (p.seed != null) setParam('seed', p.seed);
+  if (p.gumbelNoise != null) setParam('gumbelNoise', p.gumbelNoise);
+  if (p.duration != null || p.speed != null) setLength(p.duration || 0, p.speed || 1);
 }
 export function seedLocked() { return $('#seed-lock').checked; }
 export function randomSeed() { return (Math.random() * 1e9) | 0; }
@@ -78,8 +94,13 @@ export function resetSchedule() {
 export function buildSchedule() {
   for (const d of DIALS) {
     const r = $('#' + d.id), v = $('#' + d.v);
-    v.textContent = d.fmt(+r.value);
-    r.addEventListener('input', () => { v.textContent = d.fmt(+r.value); });
+    const updateDial = () => {
+      const val = +r.value;
+      v.textContent = d.fmt(val);
+      v.classList.toggle('modified', Math.abs(val - d.def) > 1e-4);
+    };
+    updateDial();
+    r.addEventListener('input', updateDial);
   }
   $('#duration').addEventListener('input', () => { refreshLengthLabels(); updateEstimate(); });
   $('#speed').addEventListener('input', () => { refreshLengthLabels(); updateEstimate(); });

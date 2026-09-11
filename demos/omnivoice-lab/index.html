@@ -64,10 +64,10 @@
             <span id="instruct-preview" class="meta">instruct: (none)</span>
             <button id="btn-instruct-clear" class="iconbtn" title="Clear every design pick">○ none</button>
           </div>
-          <div class="row">
+          <div class="row lang-row">
             <span class="vlabel">language</span>
             <input id="lang-search" type="text" placeholder="search 600+ languages…" title="Filter the language list">
-            <select id="language" size="4" title="Language hint for the text; None = language-agnostic"></select>
+            <select id="language" title="Language hint for the text; None = language-agnostic"></select>
             <span id="lang-meta" class="meta"></span>
           </div>
         </section>
@@ -170,8 +170,17 @@
         <div id="readout" class="trace-readout">generate a take, then hover the grid to read a cell</div>
         <div id="stages"></div>
         <section id="takes">
-          <div class="ptitle">takes <span class="psub">— every generation lands here · ⊞ loads a take into the grid · ◉ makes it the voice</span></div>
-          <div id="take-list" class="take-list"><span class="hint empty">no takes yet</span></div>
+          <div class="takes-head">
+            <div class="ptitle">takes <span class="psub">— every generation lands here · ⊞ loads into grid · ◉ makes voice</span></div>
+            <div class="takes-nav">
+              <span id="take-count" class="meta"></span>
+              <button id="btn-takes-left" class="iconbtn" title="Scroll takes left (or use mouse wheel)">◀</button>
+              <button id="btn-takes-right" class="iconbtn" title="Scroll takes right (or use mouse wheel)">▶</button>
+            </div>
+          </div>
+          <div id="take-viewport" class="take-viewport">
+            <div id="take-list" class="take-list"><span class="hint empty">no takes yet</span></div>
+          </div>
         </section>
       </main>
     </div>

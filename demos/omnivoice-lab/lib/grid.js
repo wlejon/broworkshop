@@ -70,9 +70,11 @@ export function buildGridTools(host) {
   quick('0', 'the semantic codebook only', [0]);
   host.appendChild(el('span', 'meta', '·'));
   const preset = (label, title, name, cls) => { const b = el('button', 'mini ' + (cls || ''), label); b.title = title; b.addEventListener('click', () => reroll(name)); host.appendChild(b); return b; };
+  const spanBtns = [];
   preset('↻ acoustics', 'keep codebook 0 everywhere, re-roll codebooks 1..7 (same words, new acoustics)', 'acoustics');
-  preset('↻ span', 'keep everything but the selected span on the ticked codebooks — re-roll that', 'span');
-  preset('↻ around span', 'keep only the selected span (ticked codebooks) and re-roll everything else', 'around');
+  const bSpan = preset('↻ span', 'keep everything but the selected span on the ticked codebooks — re-roll that', 'span', 'span-req');
+  const bAround = preset('↻ around span', 'keep only the selected span (ticked codebooks) and re-roll everything else', 'around', 'span-req');
+  spanBtns.push(bSpan, bAround);
   host.appendChild(el('span', 'meta', 'seed'));
   const seed = document.createElement('input'); seed.type = 'number'; seed.id = 'reroll-seed'; seed.min = '0'; seed.step = '1'; seed.value = '1';
   seed.title = 'the re-roll\'s seed — the same seed over the same init grid reproduces the re-roll';
@@ -84,14 +86,14 @@ export function buildGridTools(host) {
   sc.addEventListener('change', () => setShowChanges(sc.checked));
   show.appendChild(sc); show.appendChild(el('span', null, 'show changes')); show.title = 'dim the re-rolled cells that came back unchanged, so the changed ones stand out';
   host.appendChild(show);
-  const ps = el('button', 'mini', '▶ span'); ps.title = 'play the selected span';
+  const ps = el('button', 'mini span-req', '▶ span'); ps.title = 'play the selected span';
   ps.addEventListener('click', () => { if (sel) playSpan(sel.t0, sel.t1); });
-  host.appendChild(ps);
-  const cl = el('button', 'mini', '✕ span'); cl.title = 'clear the selection';
+  host.appendChild(ps); spanBtns.push(ps);
+  const cl = el('button', 'mini span-req', '✕ span'); cl.title = 'clear the selection';
   cl.addEventListener('click', clearSelection);
-  host.appendChild(cl);
+  host.appendChild(cl); spanBtns.push(cl);
   const note = el('span', 'meta', ''); host.appendChild(note);
-  tools = { ticks, seed, show: sc, note };
+  tools = { ticks, seed, show: sc, note, spanBtns };
   syncTools();
 }
 export function rerollSeed() { return tools ? Math.max(0, +tools.seed.value | 0) : 1; }
@@ -100,6 +102,8 @@ function syncTools() {
   if (!tools) return;
   for (let q = 0; q < NQ; q++) tools.ticks[q].checked = !!cbs[q];
   tools.show.checked = showChanges;
+  const hasSel = !!sel;
+  for (const b of tools.spanBtns) b.classList.toggle('active-sel', hasSel);
   tools.note.textContent = sel ? 'span ' + sel.t0 + '–' + sel.t1 + ' (' + frameTime(sel.t0).toFixed(2) + '–' + frameTime(sel.t1).toFixed(2) + ' s, ' + (sel.t1 - sel.t0) + ' fr) × ' + cbs.reduce((a, b) => a + b, 0) + ' codebooks'
                                 : 'drag on the grid or the waveform to select a span';
 }
