@@ -154,6 +154,7 @@ function pumpWorker(dt) { sim.postMessage({ type: 'pump', dt }); }
 
 const overlays = {
     branches:    { label: 'branches',   color: [0.33, 0.23, 0.14], on: true,  node: null },
+    organicSdf:  { label: 'organic SDF mesh', color: [0.22, 0.65, 0.45], on: false, node: null },
     foliage:     { label: 'foliage',    color: [0.34, 0.55, 0.24], on: true,  node: null },
     blooms:      { label: 'blooms',     color: [0.97, 0.62, 0.76], on: true,  node: null },
     impostors:   { label: 'impostors (fast)', color: [0.30, 0.85, 0.55], on: false, node: null, quadCount: 0 },
@@ -271,6 +272,26 @@ function applyBranches(tube) {
     } else {
         branchesNode.visible = true;
         branchesNode.setTubeSegments(desc);
+    }
+}
+
+let organicSdfNode = null;
+function applyOrganicSdf(mesh) {
+    if (!mesh || mesh.triangleCount === 0) {
+        if (organicSdfNode) organicSdfNode.visible = false;
+        return;
+    }
+    if (!organicSdfNode) {
+        organicSdfNode = scene.createMeshNode({
+            mesh: mesh,
+            color: overlays.organicSdf.color,
+            metallic: 0.0, roughness: 0.8,
+            castsShadow: true, receivesShadow: true,
+        });
+        overlays.organicSdf.node = organicSdfNode;
+    } else {
+        organicSdfNode.visible = true;
+        organicSdfNode.setMesh(mesh);
     }
 }
 
@@ -564,6 +585,7 @@ function rebuildDiagnostics() {
 // buffers, cache stats + plant origins, and refresh the diagnostic overlays.
 function applyFrame(f) {
     if (f.branches) applyBranches(f.branches); else if (branchesNode) branchesNode.visible = false;
+    if (f.organicSdf) applyOrganicSdf(f.organicSdf); else if (organicSdfNode) organicSdfNode.visible = false;
     if (f.foliage)  applyFoliage(f.foliage);   else if (foliageNode)  foliageNode.visible = false;
     if (overlays.blooms.on) applyBlooms(f.bloomPetals, f.bloomCenters);
     else { if (bloomPetalsNode) bloomPetalsNode.visible = false; if (bloomCentersNode) bloomCentersNode.visible = false; }
@@ -647,9 +669,11 @@ for (const key of Object.keys(overlays)) {
         // Tell the worker which hot layers to emit; refresh diagnostics locally.
         sim.postMessage({ type: 'layers', flags: {
             branches: overlays.branches.on, foliage: overlays.foliage.on, blooms: overlays.blooms.on,
+            organicSdf: overlays.organicSdf.on,
         }});
         // A layer turned off won't get another packet — hide its node now.
         if (!overlays.branches.on && branchesNode) branchesNode.visible = false;
+        if (!overlays.organicSdf.on && organicSdfNode) organicSdfNode.visible = false;
         if (!overlays.foliage.on && foliageNode) foliageNode.visible = false;
         if (!overlays.blooms.on) {
             if (bloomPetalsNode) bloomPetalsNode.visible = false;

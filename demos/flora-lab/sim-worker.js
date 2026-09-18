@@ -133,6 +133,15 @@ function emitFrame() {
         if (bm[0] && bm[0].triangleCount > 0) { packet.bloomPetals = bm[0]; transfer.push(bm[0]); }
         if (bm[1] && bm[1].triangleCount > 0) { packet.bloomCenters = bm[1]; transfer.push(bm[1]); }
     }
+    if (layers.organicSdf) {
+        if (typeof world.emitWorldSdfMesh === 'function') {
+            const sm = world.emitWorldSdfMesh({ voxelSize: 0.05, smoothK: 0.03 });
+            if (sm && sm.triangleCount > 0) {
+                packet.organicSdf = sm;
+                transfer.push(sm);
+            }
+        }
+    }
 
     let flowering = 0;
     for (let i = 0; i < world.plantCount; i++) {
