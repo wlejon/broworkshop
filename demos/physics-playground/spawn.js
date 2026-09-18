@@ -64,6 +64,26 @@ const SHAPES = {
             return root;
         },
     }),
+    torus: () => {
+        const t = Mesh.torus(0.42, 0.16, 20, 12);
+        return {
+            body: {
+                shape: 'decomposedMesh',
+                positions: t.positions,
+                indices: t.indices,
+                maxHulls: 16,
+            },
+            mesh: (s, color) => s.createMesh({
+                mesh: 'torus',
+                majorRadius: 0.42,
+                minorRadius: 0.16,
+                majorSegments: 20,
+                minorSegments: 12,
+                color,
+                roughness: 0.45,
+            }),
+        };
+    },
 };
 
 export const SHAPE_KINDS = Object.keys(SHAPES);
