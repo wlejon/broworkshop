@@ -33,8 +33,8 @@ export function buildEnvironment(scene) {
     });
 
     // A ring of pillars at the orbit radius of the car: they give the eye a
-    // fixed frame while the camera swings, and they occlude nothing acoustically
-    // (there is no occlusion model) which is itself worth noticing.
+    // fixed frame while the camera swings, and they acoustically occlude moving
+    // sources via SceneAudioSync's MeshBVH raycasting in real time.
     const pillars = [];
     for (let i = 0; i < 12; i++) {
         const a = (i / 12) * TAU;

@@ -26,7 +26,8 @@
         <section>
             <h2>Sources</h2>
             <div class="note">Each mesh node carries an attached emitter — the
-                engine pushes world position and velocity every frame.</div>
+                engine pushes world position, velocity, and real-time acoustic occlusion (MeshBVH raycasting) every frame.</div>
+            <div class="row">occlusion <span class="v" id="occlusionStatus">active (MeshBVH)</span></div>
             <div id="sourceList"></div>
             <label class="chk">
                 <input id="showPaths" type="checkbox" checked> show motion paths
