@@ -12,7 +12,7 @@
 // stance across, so from the user's side it is indistinguishable from a live
 // parameter change.
 
-import { tune, charState, rebuild, resetToSpawn, teleport,
+import { tune, charState, rebuild, resetToSpawn, teleport, applyStanceVisual,
          RADIUS, STAND_HALF } from "/app/character.js";
 import { sense, qState } from "/app/queries.js";
 import { crowd, crowdState, setCrowdSize, setCrowdPhysical, resetCrowd, PLAZA }
@@ -53,6 +53,11 @@ export function bindHud(scene) {
         // it is unsupported, so this changes both fall and slide behaviour.
         Physics.setGravity(0, -v, 0);
     }, (v) => v.toFixed(2));
+
+    check('cRigged',   (on) => {
+        tune.riggedAvatar = on;
+        applyStanceVisual();
+    });
 
     // --- sensing -------------------------------------------------------------
     // None of these rebuild anything: a query is a stateless call against the

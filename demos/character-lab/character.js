@@ -29,6 +29,8 @@ const RADIUS = 0.3;
 const STAND_HALF = 0.6;    // total standing height = 2*(0.6+0.3) = 1.80 m
 const CROUCH_HALF = 0.1;   // total crouched height = 2*(0.1+0.3) = 0.80 m
 
+import { createAutoRiggedAvatar } from "/app/rigged_avatar.js";
+
 export const SPAWN = { x: 0, y: RADIUS + STAND_HALF, z: 12 };
 
 /** Live tunables. The HUD writes these; `rebuild()` reads the construction
@@ -44,6 +46,8 @@ export const tune = {
      *  the character stops existing as far as every query and every dynamic
      *  body in the world is concerned. */
     innerBody: true,
+    /** Render auto-rigged BBW skinned character instead of primitive capsule. */
+    riggedAvatar: false,
     // per-frame (free)
     moveSpeed: 4.5,
     jumpSpeed: 6.0,
@@ -79,6 +83,7 @@ export let character = null;
 let visual = null;          // parent node the capsule meshes hang off
 let standMesh = null;
 let crouchMesh = null;
+let avatar = null;
 let crouched = false;
 
 function capsuleDesc(half) {
@@ -124,15 +129,32 @@ export function createCharacter(scene, restore) {
         });
         visual.add(standMesh);
         visual.add(crouchMesh);
+
+        try {
+            avatar = createAutoRiggedAvatar(scene);
+            if (avatar && avatar.node) {
+                avatar.node.visible = false;
+                visual.add(avatar.node);
+            }
+        } catch (e) {
+            console.warn('createAutoRiggedAvatar failed:', e.message);
+        }
     }
     applyStanceVisual();
     return character;
 }
 
-function applyStanceVisual() {
+export function applyStanceVisual() {
     if (!standMesh) return;
-    standMesh.visible = !crouched;
-    crouchMesh.visible = crouched;
+    if (tune.riggedAvatar && avatar && avatar.node) {
+        standMesh.visible = false;
+        crouchMesh.visible = false;
+        avatar.node.visible = true;
+    } else {
+        if (avatar && avatar.node) avatar.node.visible = false;
+        standMesh.visible = !crouched;
+        crouchMesh.visible = crouched;
+    }
     charState.stance = crouched ? 'crouching' : 'standing';
 }
 
@@ -262,6 +284,12 @@ export function tickCharacter() {
         visual.x = st.position.x;
         visual.y = st.position.y;
         visual.z = st.position.z;
+        if (avatar && avatar.node && avatar.node.visible) {
+            if (charState.horizontalSpeed > 0.2) {
+                visual.rotationY = Math.atan2(vx, vz);
+            }
+            avatar.update(charState, dt);
+        }
     }
     return charState;
 }

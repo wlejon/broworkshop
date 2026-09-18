@@ -52,6 +52,15 @@
             <div class="hint">Left-click any body to <code>overlapPoint</code> it.</div>
         </section>
 
+        <section>
+            <h2>Avatar Representation</h2>
+            <div class="row">
+                <label for="cRigged" style="cursor: pointer;">Auto-rigged skinned mesh</label>
+                <input id="cRigged" type="checkbox">
+            </div>
+            <div class="hint">Rigged via <code>Rig.autoRig</code> (BBW) and GPU-skinned.</div>
+        </section>
+
         <!-- Jolt's CharacterVirtual takes these at construction and the JS
              binding exposes no runtime setters, so moving one of these sliders
              rebuilds the character in place (position + velocity + stance are
