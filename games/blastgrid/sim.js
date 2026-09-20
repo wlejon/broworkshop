@@ -320,15 +320,7 @@ export function createGame(scene, opts = {}) {
 
     // ---- movement -----------------------------------------------------------------------
 
-    // ENGINE BUG WORKAROUND: TileWorld.isWalkable(x, y, blockMask) tests the
-    // mask with hasFlag() ALL-bits semantics (src/scene/tile_world.cpp:484),
-    // so a multi-bit mask only blocks cells carrying EVERY bit ΓÇö while
-    // findPath/distanceField use the documented ANY-bit test
-    // (src/tile/pathfind.cpp:113). Until that's fixed, test one bit at a time.
-    game.canEnter = (x, y) => inBounds(x, y)
-        && !world.hasFlag(x, y, FLAG_SOLID)
-        && !world.hasFlag(x, y, FLAG_SOFT)
-        && !world.hasFlag(x, y, FLAG_BOMB);
+    game.canEnter = (x, y) => world.isWalkable(x, y, MOVE_MASK);
 
     game.pressDir = function (name) {
         const e = game.human;
@@ -351,10 +343,16 @@ export function createGame(scene, opts = {}) {
             return null;
         }
         const p = e.ai.path;
-        while (p.length && p[0].x === e.cx && p[0].y === e.cy) p.shift();
+        let start = 0;
+        while (start < p.length) {
+            const step = p[start];
+            if (step && step.x === e.cx && step.y === e.cy) start++;
+            else break;
+        }
+        if (start > 0) p.splice(0, start);
         if (!p.length) return null;
         const n = p[0];
-        if (Math.abs(n.x - e.cx) + Math.abs(n.y - e.cy) !== 1 || !game.canEnter(n.x, n.y)) {
+        if (!n || Math.abs(n.x - e.cx) + Math.abs(n.y - e.cy) !== 1 || !game.canEnter(n.x, n.y)) {
             p.length = 0; e.ai.replanNow = true; return null;
         }
         // Never walk INTO danger unless already in it (fleeing crosses danger).
@@ -396,8 +394,10 @@ export function createGame(scene, opts = {}) {
                 e.moving = false;
                 rem -= dist;
                 onCellEnter(e);
-                if (e.isAI && e.ai.path.length && e.ai.path[0].x === e.cx && e.ai.path[0].y === e.cy)
-                    e.ai.path.shift();
+                if (e.isAI && e.ai.path.length > 0) {
+                    const s = e.ai.path[0];
+                    if (s && s.x === e.cx && s.y === e.cy) e.ai.path.shift();
+                }
             } else {
                 e.px += dx / dist * rem;
                 e.py += dy / dist * rem;
@@ -431,7 +431,10 @@ export function createGame(scene, opts = {}) {
         if (onBomb) world.setFlag(e.cx, e.cy, FLAG_BOMB, false);
         const p = world.findPath(e.cx, e.cy, x, y, { blockMask: mask });
         if (onBomb) world.setFlag(e.cx, e.cy, FLAG_BOMB, true);
-        if (p.length && p[0].x === e.cx && p[0].y === e.cy) p.shift();
+        if (p && p.length > 0) {
+            const s = p[0];
+            if (s && s.x === e.cx && s.y === e.cy) p.shift();
+        }
         return p;
     }
 

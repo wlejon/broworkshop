@@ -1,6 +1,11 @@
 // sim.js — DeepDelve domain: map gen, combat, FOV, save/load (createGame).
 // No shell / HUD / scene wiring — that lives in game.js.
 
+import { blobVariantMasks, makeAtlas, ACELL, TILE_ATLAS } from './atlas.js';
+import { registerKinds } from './kinds.js';
+
+export { blobVariantMasks };
+
 export const MAP_W = 40, MAP_H = 30, FLOORS = 3;
 export const CELL = 1.0;      // cellSize
 export const HSTEP = 0.35;    // heightStep
@@ -11,10 +16,7 @@ export const TILE = {
     DOOR: 6, DOOR_OPEN: 7, STAIRS_DOWN: 8, STAIRS_UP: 9, TRAPR: 10,
 };
 
-// One flag bit per concern. ENGINE NOTE: isWalkable(x,y,mask) treats a
-// multi-bit mask as ALL-bits (engine bug, fix scheduled), so movement checks
-// below test one bit at a time; findPath/distanceField blockMask is ANY-bit
-// as documented and safe with a combined mask.
+// One flag bit per concern.
 export const FLAG = { WALL: 1, DOOR: 2, WATER: 4, TRAP: 8, OPEN: 16 };
 export const BLOCK_MOVE = FLAG.WALL | FLAG.DOOR | FLAG.WATER; // pathfind blockers
 
@@ -55,164 +57,6 @@ export function mulberry32(seed) {
     };
 }
 
-// --- blob47 variant table --------------------------------------------------------
-// Mirrors bro/src/tile/autotile.cpp: 8-neighbour mask bits E=1,NE=2,N=4,NW=8,
-// W=16,SW=32,S=64,SE=128; a corner bit only counts when both adjacent edge
-// bits are set; variant index = rank of the normalized mask in increasing
-// order. blobVariantMasks()[i] is the canonical neighbour mask of variant i,
-// which is exactly what the atlas painter needs to draw each variant's art.
-
-const B = { E: 1, NE: 2, N: 4, NW: 8, W: 16, SW: 32, S: 64, SE: 128 };
-
-function normBlob(m) {
-    let out = m & 0x55;
-    if ((m & B.NE) && (m & B.E) && (m & B.N)) out |= B.NE;
-    if ((m & B.NW) && (m & B.N) && (m & B.W)) out |= B.NW;
-    if ((m & B.SW) && (m & B.W) && (m & B.S)) out |= B.SW;
-    if ((m & B.SE) && (m & B.S) && (m & B.E)) out |= B.SE;
-    return out;
-}
-
-export function blobVariantMasks() {
-    const out = [];
-    for (let m = 0; m < 256; m++) if (normBlob(m) === m) out.push(m);
-    return out;   // length 47
-}
-
-// --- Procedural tileset atlas ------------------------------------------------------
-// 16x4 grid of 16px cells (256x64 RGBA). Cells 1..47 are the blob47 wall-top
-// variants (mortar seams trace the wall silhouette); the rest are floors,
-// animated water, doors, stairs, the revealed trap and the cliff face.
-// Atlas orientation: cell-pixel top edge renders on the grid-north (y-1) side.
-
-const APX = 16, ACOLS = 16, AROWS = 4;
-export const ACELL = {
-    FLOOR: 48, MOSS: 49, CRACK: 50, WATER0: 51, WATER1: 52, WATER2: 53,
-    DOOR: 54, DOOR_OPEN: 55, STAIRS_DOWN: 56, STAIRS_UP: 57, TRAPR: 58, CLIFF: 59,
-};
-export const TILE_ATLAS = [
-    0, 1,                                   // 0 empty, 1 wall (autotile overrides)
-    ACELL.FLOOR, ACELL.MOSS, ACELL.CRACK, ACELL.WATER0,
-    ACELL.DOOR, ACELL.DOOR_OPEN, ACELL.STAIRS_DOWN, ACELL.STAIRS_UP, ACELL.TRAPR,
-];
-
-export function makeAtlas() {
-    const w = ACOLS * APX, h = AROWS * APX;
-    const buf = new Uint8Array(w * h * 4);
-    const rng = mulberry32(0xD0E5A11);
-    const clamp = (v) => Math.max(0, Math.min(255, v | 0));
-    function paint(cell, fn) {
-        const cx = (cell % ACOLS) * APX, cy = Math.floor(cell / ACOLS) * APX;
-        for (let py = 0; py < APX; py++) {
-            for (let px = 0; px < APX; px++) {
-                const [r, g, b] = fn(px, py);
-                const i = ((cy + py) * w + cx + px) * 4;
-                buf[i] = clamp(r); buf[i + 1] = clamp(g); buf[i + 2] = clamp(b);
-                buf[i + 3] = 255;
-            }
-        }
-    }
-    const noise = (amt) => (rng() - 0.5) * 2 * amt;
-
-    // Wall-top blob variants at cells 1..47.
-    blobVariantMasks().forEach((m, i) => {
-        paint(1 + i, (x, y) => {
-            const n = noise(8);
-            const blk = (((x >> 2) * 7 + (y >> 2) * 13) % 5) * 3 - 6;
-            let r = 86 + n + blk, g = 88 + n + blk, b = 103 + n + blk;
-            const oE = !(m & B.E), oN = !(m & B.N), oW = !(m & B.W), oS = !(m & B.S);
-            let mul = 1;
-            if ((oE && x >= 14) || (oW && x <= 1) || (oN && y <= 1) || (oS && y >= 14)) mul = 0.40;
-            else if ((oE && x === 13) || (oW && x === 2) || (oN && y === 2)) mul = 1.24;
-            else if (oS && y === 13) mul = 0.78;
-            // inner-corner pips: both edges joined but the diagonal is not
-            if (!oE && !oN && !(m & B.NE) && x >= 13 && y <= 2) mul = 0.40;
-            if (!oN && !oW && !(m & B.NW) && x <= 2 && y <= 2) mul = 0.40;
-            if (!oW && !oS && !(m & B.SW) && x <= 2 && y >= 13) mul = 0.40;
-            if (!oS && !oE && !(m & B.SE) && x >= 13 && y >= 13) mul = 0.40;
-            return [r * mul, g * mul, b * mul];
-        });
-    });
-
-    // Floor flagstones (48), mossy (49), cracked (50).
-    const flag = (x, y, r0, g0, b0) => {
-        const n = noise(6);
-        const seam = (x % 8 === 7 || y % 8 === 7) ? 0.72 : 1;
-        const spark = rng() < 0.02 ? 18 : 0;
-        return [(r0 + n + spark) * seam, (g0 + n + spark) * seam, (b0 + n + spark) * seam];
-    };
-    paint(ACELL.FLOOR, (x, y) => flag(x, y, 60, 58, 68));
-    paint(ACELL.MOSS, (x, y) => {
-        const c = flag(x, y, 56, 60, 62);
-        const blob = Math.hypot(x - 5, y - 9) < 4 || Math.hypot(x - 12, y - 4) < 3;
-        return blob ? [c[0] * 0.7, c[1] * 1.35, c[2] * 0.7] : c;
-    });
-    paint(ACELL.CRACK, (x, y) => {
-        const c = flag(x, y, 60, 58, 68);
-        const on = Math.abs((y - 2) - (x * 0.8)) < 0.9 || (x > 9 && Math.abs(y - x + 4) < 0.9);
-        return on ? [c[0] * 0.45, c[1] * 0.45, c[2] * 0.45] : c;
-    });
-
-    // Water, 3 animated frames (51..53).
-    for (let f = 0; f < 3; f++) {
-        paint(ACELL.WATER0 + f, (x, y) => {
-            const wv = Math.sin((x + f * 5) * 0.55 + y * 0.8) + Math.sin(y * 0.5 - f * 1.9);
-            const n = noise(4);
-            if (wv > 1.3) return [64 + n, 116 + n, 148 + n];
-            return [16 + n + wv * 3, 40 + n + wv * 4, 58 + n + wv * 5];
-        });
-    }
-
-    // Door, closed (54): wood planks + frame + iron bands.
-    paint(ACELL.DOOR, (x, y) => {
-        if (x === 0 || y === 0 || x === 15 || y === 15) return [34, 26, 20];
-        const n = noise(7);
-        if (y === 5 || y === 10) return [72 + n, 72 + n, 80 + n];       // iron bands
-        const plank = (x % 4 === 3) ? 0.6 : 1;
-        return [(104 + n) * plank, (70 + n) * plank, (38 + n) * plank];
-    });
-    // Door, open (55): floor with wooden jambs.
-    paint(ACELL.DOOR_OPEN, (x, y) => {
-        if (x <= 1 || x >= 14) return [88 + noise(6), 60 + noise(5), 34];
-        return flag(x, y, 52, 50, 60);
-    });
-
-    // Stairs down (56): bands darkening; stairs up (57): bands lightening.
-    paint(ACELL.STAIRS_DOWN, (x, y) => {
-        const band = y >> 2;
-        const m = 1 - band * 0.21;
-        const seam = (y % 4 === 0) ? 0.6 : 1;
-        const n = noise(5);
-        return [(78 + n) * m * seam, (76 + n) * m * seam, (88 + n) * m * seam];
-    });
-    paint(ACELL.STAIRS_UP, (x, y) => {
-        const band = y >> 2;
-        const m = 0.55 + band * 0.17;
-        const seam = (y % 4 === 0) ? 0.6 : 1;
-        const n = noise(5);
-        return [(92 + n) * m * seam, (88 + n) * m * seam, (86 + n) * m * seam];
-    });
-
-    // Revealed trap (58): floor + crimson rune diamond.
-    paint(ACELL.TRAPR, (x, y) => {
-        const c = flag(x, y, 56, 52, 60);
-        const d = Math.abs(x - 7.5) + Math.abs(y - 7.5);
-        if (d > 4.4 && d < 6.4) return [168 + noise(10), 34, 44];
-        if (d <= 1.6) return [150, 40, 48];
-        return c;
-    });
-
-    // Cliff strata (59) ΓÇö stretched vertically on tall drops, reads as rock beds.
-    paint(ACELL.CLIFF, (x, y) => {
-        const n = noise(6);
-        const strata = (y % 5 === 0) ? 0.68 : 1;
-        const depth = 1 - y * 0.016;
-        return [(74 + n) * strata * depth, (70 + n) * strata * depth, (82 + n) * strata * depth];
-    });
-
-    return { pixels: buf, width: w, height: h };
-}
-
 // --- Game factory ------------------------------------------------------------------
 
 export function createGame(scene, seed) {
@@ -222,7 +66,7 @@ export function createGame(scene, seed) {
         cellSize: CELL, heightStep: HSTEP, chunkSize: 10,
         baseLevel: -6, aoStrength: 0.55,
         atlasPixels: atlas.pixels, atlasWidth: atlas.width, atlasHeight: atlas.height,
-        atlasColumns: ACOLS, atlasRows: AROWS,
+        atlasColumns: 16, atlasRows: 4,
         tileAtlas: TILE_ATLAS,
         cliffCell: ACELL.CLIFF,
         atlasInset: 0.5,
@@ -233,106 +77,7 @@ export function createGame(scene, seed) {
         animations: [{ id: TILE.WATER, fps: 2, frames: [ACELL.WATER0, ACELL.WATER1, ACELL.WATER2] }],
     });
 
-    // ---- object kinds ---------------------------------------------------------
-    //
-    // ENGINE NOTE / workaround: world.load() drops every registered object kind
-    // and all placed instances (TileWorld::loadGrid() clears objectKinds_), even
-    // though load() docs say rendering config is preserved. registerKinds() is
-    // called once here and again after every world.load(); the per-frame render
-    // sync then re-places all instances.
-
-    const kinds = {};
-    function registerKinds() {
-        const M = Mesh;
-        kinds.player = world.addObjectKind(
-            M.merge([
-                M.cylinder(0.15, 0.04, 10).translate(0, 0.04, 0),
-                M.capsule(0.115, 0.13, 10, 6).translate(0, 0.30, 0),
-                M.sphere(0.085, 10, 8).translate(0, 0.52, 0),
-                M.box(0.03, 0.30, 0.03).rotate(0, 0, 1, 0.5).translate(0.17, 0.36, 0.03),
-            ]), { color: [1, 1, 1, 1], roughness: 0.7 });
-        kinds.rat = world.addObjectKind(
-            M.merge([
-                M.capsule(0.085, 0.09, 8, 6).rotate(1, 0, 0, Math.PI / 2).translate(0, 0.09, 0),
-                M.sphere(0.06, 8, 6).translate(0, 0.12, 0.11),
-                M.cone(0.02, 0.14, 5, 1, true).rotate(1, 0, 0, -Math.PI / 2).translate(0, 0.08, -0.16),
-            ]), { color: [1, 1, 1, 1], roughness: 0.9 });
-        kinds.wolf = world.addObjectKind(
-            M.merge([
-                M.box(0.14, 0.12, 0.34).translate(0, 0.16, 0),
-                M.sphere(0.075, 8, 6).translate(0, 0.24, 0.20),
-                M.cone(0.035, 0.05, 4, 1, true).translate(-0.04, 0.31, 0.22),
-                M.cone(0.035, 0.05, 4, 1, true).translate(0.04, 0.31, 0.22),
-            ]), { color: [1, 1, 1, 1], roughness: 0.9 });
-        kinds.archer = world.addObjectKind(
-            M.merge([
-                M.capsule(0.09, 0.15, 8, 6).translate(0, 0.28, 0),
-                M.sphere(0.075, 8, 6).translate(0, 0.50, 0),
-                M.torus(0.11, 0.014, 10, 6).rotate(0, 1, 0, Math.PI / 2).translate(0.14, 0.32, 0),
-            ]), { color: [1, 1, 1, 1], roughness: 0.85 });
-        kinds.ogre = world.addObjectKind(
-            M.merge([
-                M.box(0.26, 0.26, 0.20).translate(0, 0.26, 0),
-                M.sphere(0.11, 10, 8).translate(0, 0.48, 0.02),
-                M.box(0.08, 0.24, 0.08).translate(-0.20, 0.22, 0),
-                M.box(0.08, 0.24, 0.08).translate(0.20, 0.22, 0),
-            ]), { color: [1, 1, 1, 1], roughness: 0.95 });
-        kinds.potion = world.addObjectKind(
-            M.merge([
-                M.sphere(0.075, 8, 6).translate(0, 0.08, 0),
-                M.cylinder(0.03, 0.07, 6).translate(0, 0.16, 0),
-            ]), { color: [0.85, 0.16, 0.26, 1], roughness: 0.3 });
-        kinds.gold = world.addObjectKind(
-            M.merge([
-                M.sphere(0.07, 8, 6).translate(0, 0.05, 0),
-                M.sphere(0.055, 8, 6).translate(0.09, 0.045, 0.05),
-                M.sphere(0.05, 8, 6).translate(-0.06, 0.04, 0.08),
-            ]), { color: [1.0, 0.82, 0.28, 1], roughness: 0.35, metallic: 0.7 });
-        kinds.weapon = world.addObjectKind(
-            M.merge([
-                M.box(0.035, 0.36, 0.035).translate(0, 0.24, 0),
-                M.box(0.15, 0.03, 0.05).translate(0, 0.12, 0),
-                M.sphere(0.03, 6, 5).translate(0, 0.045, 0),
-            ]).rotate(0, 0, 1, 0.35), { color: [0.80, 0.85, 0.95, 1], roughness: 0.25, metallic: 0.8 });
-        kinds.armor = world.addObjectKind(
-            M.merge([
-                M.box(0.20, 0.20, 0.13).translate(0, 0.14, 0),
-                M.sphere(0.055, 8, 6).translate(-0.12, 0.24, 0),
-                M.sphere(0.055, 8, 6).translate(0.12, 0.24, 0),
-            ]), { color: [0.55, 0.62, 0.75, 1], roughness: 0.35, metallic: 0.75 });
-        kinds.amulet = world.addObjectKind(
-            M.merge([
-                M.cylinder(0.10, 0.06, 8).translate(0, 0.06, 0),
-                M.cylinder(0.045, 0.42, 8).translate(0, 0.28, 0),
-                M.cylinder(0.09, 0.03, 8).translate(0, 0.50, 0),
-                M.torus(0.09, 0.028, 14, 8).translate(0, 0.66, 0),
-            ]), { color: [1.0, 0.80, 0.25, 1], roughness: 0.25, metallic: 0.8 });
-        kinds.door = world.addObjectKind(
-            M.box(0.46, 0.40, 0.05).translate(0, 0.40, 0),   // box() takes half-extents
-            { color: [0.42, 0.28, 0.15, 1], roughness: 0.9 });
-        kinds.spikes = world.addObjectKind(
-            M.merge([
-                M.cone(0.035, 0.16, 5, 1, true).translate(-0.10, 0.08, -0.08),
-                M.cone(0.035, 0.18, 5, 1, true).translate(0.08, 0.09, 0.06),
-                M.cone(0.035, 0.14, 5, 1, true).translate(-0.02, 0.07, 0.12),
-                M.cone(0.035, 0.15, 5, 1, true).translate(0.10, 0.075, -0.10),
-            ]), { color: [0.72, 0.72, 0.78, 1], roughness: 0.3, metallic: 0.6 });
-        kinds.rubble = world.addObjectKind(
-            M.rock(0.13, 8, 2).translate(0, 0.07, 0),
-            { color: [0.45, 0.45, 0.52, 1], roughness: 1.0 });
-        kinds.bone = world.addObjectKind(
-            M.merge([
-                M.cylinder(0.02, 0.22, 5).rotate(0, 0, 1, Math.PI / 2).translate(0, 0.03, 0),
-                M.sphere(0.03, 6, 5).translate(-0.11, 0.03, 0),
-                M.sphere(0.03, 6, 5).translate(0.11, 0.03, 0),
-            ]), { color: [0.85, 0.83, 0.74, 1], roughness: 0.85 });
-        kinds.mushroom = world.addObjectKind(
-            M.merge([
-                M.cylinder(0.022, 0.09, 6).translate(0, 0.045, 0),
-                M.sphere(0.055, 8, 6).translate(0, 0.11, 0),
-            ]), { color: [0.35, 0.95, 0.88, 1], roughness: 0.4 });
-    }
-    registerKinds();
+    const kinds = registerKinds(world);
 
     // ---- state ---------------------------------------------------------------
 
@@ -373,19 +118,11 @@ export function createGame(scene, seed) {
     };
 
     // ---- cell predicates -------------------------------------------------------
-    // Single-bit hasFlag tests only (see ENGINE NOTE at FLAG).
 
     game.blocksLOS = (x, y) =>
         !inB(x, y) || world.hasFlag(x, y, FLAG.WALL) || world.hasFlag(x, y, FLAG.DOOR);
 
-    game.canEnter = function (x, y) {
-        if (!inB(x, y)) return false;
-        if (world.getTile(x, y, 0) === 0) return false;             // chasm
-        if (world.hasFlag(x, y, FLAG.WALL)) return false;
-        if (world.hasFlag(x, y, FLAG.DOOR)) return false;           // closed door: bump opens
-        if (world.hasFlag(x, y, FLAG.WATER)) return false;
-        return true;
-    };
+    game.canEnter = (x, y) => world.isWalkable(x, y, BLOCK_MOVE);
 
     game.monsterAt = (x, y) => game.monsters.find(m => m.hp > 0 && m.x === x && m.y === y) || null;
 
@@ -585,6 +322,7 @@ export function createGame(scene, seed) {
                     for (const c of cells) {
                         world.setTile(c.x, c.y, 0, 0);              // open pit to baseLevel
                         clearCellFlags(c.x, c.y);
+                        world.setFlag(c.x, c.y, FLAG.WALL, true);
                     }
                 })) break;                                          // one chasm per floor
             }
@@ -1086,9 +824,6 @@ export function createGame(scene, seed) {
         try { data = JSON.parse(raw); } catch { return false; }
         if (!data || data.version !== 1) return false;
         if (!world.load(b64ToBytes(data.grid))) return false;
-        // world.load() destroyed all object kinds (ENGINE NOTE above) ΓÇö
-        // re-register them; the per-frame sync re-places every instance.
-        registerKinds();
         game.seed = data.seed; game.floor = data.floor; game.turn = data.turn;
         game.kills = data.kills; game.goldTotal = data.goldTotal;
         game.doorsOpened = data.doorsOpened;
