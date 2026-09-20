@@ -8,10 +8,10 @@
 import { AI } from "/app/ai.js";
 import { Arena } from "/app/arena.js";
 import { Render } from "/app/render.js";
-import { State } from "/app/state.js";
+import { App } from "/app/main.js";
 import "/lib/camera.js";
 
-export const Scene3D = {};
+export var Scene3D = {};
 (function () {
     "use strict";
 
@@ -99,7 +99,7 @@ export const Scene3D = {};
             if (ev.button !== 0 || !armed) return;
             armed = false;
             if (Math.hypot(ev.clientX - downX, ev.clientY - downY) > 6) return;
-            var state = State.current;
+            var state = App.state;
             if (!state) return;
             var rect = canvas.getBoundingClientRect();
             var cx = ev.clientX - rect.left;

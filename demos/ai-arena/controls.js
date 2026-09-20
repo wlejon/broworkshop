@@ -1,12 +1,12 @@
 // controls.js — Button handlers + event-driven selector state. Controls
-// read State.current each time a handler fires (not at bind time), so state
+// read App.state each time a handler fires (not at bind time), so state
 // object swaps from App.rebuild() propagate without rebinding.
+import { App } from "/app/main.js";
 import { Agents } from "/app/agents/registry.js";
 import { Replay } from "/app/replay.js";
-import { State } from "/app/state.js";
 import { Fog } from "/app/fog.js";
 
-export const Controls = {};
+export var Controls = {};
 (function () {
     "use strict";
 
@@ -33,7 +33,7 @@ export const Controls = {};
     // the two can never drift out of sync (each just calls this instead of
     // duplicating the close-recorder/rebuild/button-reset sequence).
     Controls.resetMatch = function (onReset) {
-        var s = State.current;
+        var s = App.state;
         if (s && s.recording && s.recorder) s.recorder.close();
         onReset();
         var btnPause  = document.getElementById("btn-pause");
@@ -48,7 +48,7 @@ export const Controls = {};
     // — keeps bro.menu's checked state and the button text/class in sync
     // regardless of which one the user clicked.
     Controls.togglePause = function () {
-        var s = State.current;
+        var s = App.state;
         s.paused = !s.paused;
         var btn = document.getElementById("btn-pause");
         if (btn) btn.textContent = s.paused ? "Resume" : "Pause";
@@ -84,14 +84,14 @@ export const Controls = {};
         var selFogTeam = document.getElementById("sel-fog-team");
 
         btnPause.addEventListener("click", Controls.togglePause);
-        btnRewind.addEventListener("click", function () { Replay.rewind(State.current); });
-        btnRecord.addEventListener("click", function () { Replay.toggleRecord(State.current, btnRecord); });
-        btnPlay.addEventListener("click",   function () { Replay.togglePlay(State.current, btnPlay); });
+        btnRewind.addEventListener("click", function () { Replay.rewind(App.state); });
+        btnRecord.addEventListener("click", function () { Replay.toggleRecord(App.state, btnRecord); });
+        btnPlay.addEventListener("click",   function () { Replay.togglePlay(App.state, btnPlay); });
         btnReset.addEventListener("click",  function () { Controls.resetMatch(onReset); });
 
-        selRed.addEventListener("change",  function () { State.current.redAi  = selRed.value;  });
-        selBlue.addEventListener("change", function () { State.current.blueAi = selBlue.value; });
-        selFocus.addEventListener("change", function () { State.current.focusId = +selFocus.value; });
+        selRed.addEventListener("change",  function () { App.state.redAi  = selRed.value;  });
+        selBlue.addEventListener("change", function () { App.state.blueAi = selBlue.value; });
+        selFocus.addEventListener("change", function () { App.state.focusId = +selFocus.value; });
 
         Fog.setTeam(+selFogTeam.value);
         btnFog.addEventListener("click", Controls.toggleFog);

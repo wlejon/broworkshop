@@ -22,24 +22,12 @@ let wavRate = 24000;      // its sample rate
 
 function ensureCtx() { audioCtx = audioCtx || new AudioContext(); return audioCtx; }
 
-function resampleTo(samples, inRate, outRate) {
-  if (Math.abs(outRate - inRate) < 1) return samples;
-  const ratio = outRate / inRate, n = Math.floor(samples.length * ratio), out = new Float32Array(n);
-  for (let i = 0; i < n; i++) {
-    const t = i / ratio, j = t | 0, f = t - j;
-    const a = samples[j], b = samples[j + 1] !== undefined ? samples[j + 1] : a;
-    out[i] = a * (1 - f) + b * f;
-  }
-  return out;
-}
-
 // Publish the full utterance as one clip (for ♪ replay), replacing the previous.
 export function setClip(samples, inRate) {
   try {
     const ctx = ensureCtx();
-    const buf = resampleTo(samples, inRate, ctx.sampleRate || 48000);
     if (clipId >= 0) { try { ctx.deleteClip(clipId); } catch (e) {} }
-    clipId = ctx.createClip(buf, 1);
+    clipId = ctx.createClip(samples, 1, inRate);
     wavSamples = samples;   // keep the native-rate buffer for WAV export (pre-resample)
     wavRate = inRate;
     $('#btn-play').disabled = false;
@@ -102,9 +90,9 @@ export function streamReset() {
 export function streamPush(samples) {
   try {
     const ctx = ensureCtx();
-    const buf = resampleTo(samples, lastResult ? lastResult.sampleRate : 24000, ctx.sampleRate || 48000);
-    const clip = ctx.createClip(buf, 1);
-    const dur = buf.length / (ctx.sampleRate || 48000);
+    const inRate = lastResult ? lastResult.sampleRate : 24000;
+    const clip = ctx.createClip(samples, 1, inRate);
+    const dur = samples.length / inRate;
     const now = ctx.currentTime;
     if (_streamNext < now + 0.02) _streamNext = now + 0.12;   // startup / underrun cushion
     const at = _streamNext;

@@ -8,7 +8,6 @@
 // The Red AI / Blue AI selectors pick which registered agent runs for
 // each team's units — see agents/registry.js.
 import { Config } from "/app/config.js";
-import { State } from "/app/state.js";
 import { Scenarios } from "/app/scenarios.js";
 import { Arena } from "/app/arena.js";
 import { AI } from "/app/ai.js";
@@ -37,12 +36,13 @@ import { Loop } from "/app/loop.js";
 import { Controls } from "/app/controls.js";
 import { installSystemMenu } from "/lib/system-menu.js";
 
-export const App = {};
+export var App = {};
 (function () {
     "use strict";
 
     App.canvas = null;
     App.scenario = null;
+    App.state = null;
 
     App.setScenario = function (scenario) {
         App.scenario = scenario;
@@ -50,10 +50,11 @@ export const App = {};
     };
 
     App.rebuild = function () {
-        if (State.current && State.current.world) {
+        var s = App.state;
+        if (s && s.world) {
             Scene3D.scene.detachAIWorld();
-            for (var di = 0; di < State.current.agents.length; di++) {
-                var dn = Scene3D.units[State.current.agents[di].unit.id];
+            for (var di = 0; di < s.agents.length; di++) {
+                var dn = Scene3D.units[s.agents[di].unit.id];
                 if (dn) { try { dn.detachAgent(); } catch (e) {} }
             }
         }
@@ -67,7 +68,7 @@ export const App = {};
             rewardTrackers[a.unit.id] = bro.ai.game.createRewardTracker(a, built.world);
         }
 
-        State.current = {
+        App.state = {
             nav: built.nav,
             world: built.world,
             agents: built.agents,
@@ -101,7 +102,7 @@ export const App = {};
 
         // Ensure shared state is populated before the first think() fires —
         // attachAIWorld/attachAgent immediately schedule a tick.
-        AI.updateShared(State.current);
+        AI.updateShared(App.state);
 
         Scene3D.scene.attachAIWorld(built.world, {
             stepHz: 60, maxStepsPerFrame: Config.MAX_STEPS_PER_FRAME,
@@ -131,7 +132,7 @@ export const App = {};
 
         Render.clearFx();
         UI.rebuildRoster(Arena.ROSTER);
-        Controls.syncFromDom(State.current);
+        Controls.syncFromDom(App.state);
         UI.rewardHistory = { red: [], blue: [] };
         UI.log("arena built - " + built.agents.length + " agents (" +
                App.scenario.name + ")", "");
@@ -145,7 +146,7 @@ export const App = {};
         lastT = now;
         if (dt > 0.1) dt = 0.1;
 
-        var state = State.current;
+        var state = App.state;
         if (!state) return;
 
         if (state.replayPlaying && state.replayReader) {
@@ -186,7 +187,7 @@ export const App = {};
         var handlers = {
             "file.newMatch": function () { Controls.resetMatch(App.rebuild); },
             "file.saveReplay": function () {
-                var s = State.current;
+                var s = App.state;
                 if (s.recording) Replay.toggleRecord(s, document.getElementById("btn-record"));
                 if (!s._recordingPath) { UI.log("no replay to save - record one first"); return; }
                 var dest = showSaveFileDialog("Replay Files|bgar", "arena-replay.bgar");
@@ -197,7 +198,7 @@ export const App = {};
             "file.loadReplay": function () {
                 var files = showOpenFileDialog("Replay Files|bgar");
                 if (!files.length) return;
-                var s = State.current;
+                var s = App.state;
                 if (s.replayPlaying) Replay.stopPlaying(s, "replay stopped");
                 s._recordingPath = files[0];
                 Replay.togglePlay(s, document.getElementById("btn-play"));
@@ -235,43 +236,52 @@ export const App = {};
         });
     }
 
-    App.canvas = document.getElementById("arena");
-    App.scenario = Scenarios.ALL[0];
+    function start() {
+        App.canvas = document.getElementById("arena");
+        App.scenario = Scenarios.ALL[0];
 
-    setupSystemMenu();
-    UI.init();
-    Scene3D.init(App.canvas);
-    Controls.populateSelectors("scripted", "scripted");
-    App.rebuild();
-    Controls.bind(App.rebuild);
+        setupSystemMenu();
+        UI.init();
+        Scene3D.init(App.canvas);
+        Controls.populateSelectors("scripted", "scripted");
+        App.rebuild();
+        Controls.bind(App.rebuild);
 
-    // Debug hooks — expose state + scenario switching globally. Script-file
-    // headless invocations run as plain classic scripts (no ES module
-    // import), so this is the only bridge back into the app's module
-    // graph; also doubles as the scenario-switch primitive Milestone 8's
-    // system menu will call into.
-    window.getState = function () { return State.current; };
-    window.setScenario = function (id) {
-        var scn = Scenarios.byId(id);
-        if (!scn) { console.warn("setScenario: unknown id " + id); return; }
-        App.setScenario(scn);
-    };
-    window.getScene = function () { return Scene3D; };
-    window.getExitNet = function () { return ExitNet; };
-    // fast_eval.js/headless_eval.js need direct access to these module
-    // objects (Arena.build, Agents.resetAll/tickTeams/get, AI.updateShared/
-    // memory, State.current assignment, Scenarios.ALL/byId, App.setScenario)
-    // — bridge them wholesale rather than adding narrower getters one at a
-    // time as each evaluator script grows new needs.
-    window.Agents = Agents;
-    window.Scenarios = Scenarios;
-    window.Arena = Arena;
-    window.AI = AI;
-    window.State = State;
-    window.App = App;
+        // Debug hooks — expose state + scenario switching globally. Script-file
+        // headless invocations run as plain classic scripts (no ES module
+        // import), so this is the only bridge back into the app's module
+        // graph; also doubles as the scenario-switch primitive Milestone 8's
+        // system menu will call into.
+        window.getState = function () { return App.state; };
+        window.setScenario = function (id) {
+            var scn = Scenarios.byId(id);
+            if (!scn) { console.warn("setScenario: unknown id " + id); return; }
+            App.setScenario(scn);
+        };
+        window.getScene = function () { return Scene3D; };
+        window.getExitNet = function () { return ExitNet; };
+        // fast_eval.js/headless_eval.js need direct access to these module
+        // objects (Arena.build, Agents.resetAll/tickTeams/get, AI.updateShared/
+        // memory, State.current assignment, Scenarios.ALL/byId, App.setScenario)
+        // — bridge them wholesale rather than adding narrower getters one at a
+        // time as each evaluator script grows new needs.
+        window.Agents = Agents;
+        window.Scenarios = Scenarios;
+        window.Arena = Arena;
+        window.AI = AI;
+        window.State = { get current() { return App.state; }, set current(v) { App.state = v; } };
+        window.App = App;
 
-    lastT = performance.now();
-    requestAnimationFrame(frame);
+        lastT = performance.now();
+        requestAnimationFrame(frame);
 
-    console.log("ai-arena started");
+        console.log("ai-arena started");
+    }
+
+    App.start = start;
+    if (typeof document !== "undefined" && document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", start);
+    } else {
+        queueMicrotask(start);
+    }
 })();

@@ -17,9 +17,7 @@
 // Register at script-load time; main.js / controls.js / loop.js look up
 // by id each frame so hot-swapping via the UI selector works without
 // re-attaching bindings.
-import { State } from "/app/state.js";
-
-export const Agents = {};
+export var Agents = {};
 (function () {
     "use strict";
 
@@ -48,7 +46,7 @@ export const Agents = {};
     // agent (scripted baseline) so UI and state are never out of sync.
     Agents.thinkFor = function (self, world) {
         var teamId = self.agent.unit.teamId;
-        var state = State.current;
+        var state = typeof getState === "function" ? getState() : (typeof window !== "undefined" && window.State ? window.State.current : null);
         var id = state ? (teamId === 0 ? state.redAi : state.blueAi) : null;
         var def = byId[id] || ordered[0];
         if (def) def.think(self, world);

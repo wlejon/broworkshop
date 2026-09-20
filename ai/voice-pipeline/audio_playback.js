@@ -88,13 +88,12 @@ export function createAudioPlayer({ audioCtx, engineRate, transcriptEl, onPlayba
     function playPresynthCue() { playEarcon(presynthClipId, 0.35); }
 
     function enqueueAudio(samples, sampleRate, meta) {
-        const resampled = resampleLinear(samples, sampleRate, engineRate);
-        const dur = resampled.length / engineRate;
+        const dur = samples.length / sampleRate;
         const now = audioCtx.currentTime;
         const when = Math.max(now + SCHED_LEAD, nextStartSec);
         let clipId, playbackId;
         try {
-            clipId = audioCtx.createClip(resampled, 1);
+            clipId = audioCtx.createClip(samples, 1, sampleRate);
             playbackId = audioCtx.playClip(clipId, 1.0, false, when);
         } catch (e) {
             console.warn('playback failed:', e.message);

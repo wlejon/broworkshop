@@ -67,18 +67,6 @@ function resolveKokoroDir() {
 
 // Linear-interp resample (mono) from inRate → outRate. Same helper the kokoro-lab
 // playback path uses; Kokoro is 24 kHz and broaudio runs at the device rate.
-function resample(samples, inRate, outRate) {
-    if (!outRate || Math.abs(outRate - inRate) < 1) return samples;
-    const ratio = outRate / inRate, n = Math.floor(samples.length * ratio);
-    const buf = new Float32Array(n);
-    for (let i = 0; i < n; i++) {
-        const t = i / ratio, j = t | 0, f = t - j;
-        const a = samples[j], b = (samples[j + 1] !== undefined ? samples[j + 1] : a);
-        buf[i] = a * (1 - f) + b * f;
-    }
-    return buf;
-}
-
 const PLAY_GAIN     = 0.9;   // clip playback gain
 const PLAY_DELAY_FR = 3;     // frames to wait between createClip and playClip (RCU)
 const GAP_MS        = 120;   // small silence between queued utterances
@@ -388,8 +376,7 @@ export function createVoice(opts = {}) {
                     const ctx = getAudioCtx();
                     if (ctx) {
                         try {
-                            const buf = resample(result.samples, result.sampleRate, ctx.sampleRate || 48000);
-                            clipId = ctx.createClip(buf, 1);
+                            clipId = ctx.createClip(result.samples, 1, result.sampleRate);
                             cachePut(key, { clipId, durationSec });
                         } catch (e) { logOnce('clip create failed: ' + (e && e.message || e)); }
                     }

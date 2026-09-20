@@ -29,33 +29,16 @@ function resample(samples, inRate, outRate) {
 }
 
 // Publish a clip (at rave.sampleRate) to a slot, replacing the old one. `samples`
-// is mono, or interleaved when channels === 2 (samples[t*2 + c]). Resamples to
-// the context rate per channel, then hands an interleaved buffer to createClip.
+// is mono, or interleaved when channels === 2 (samples[t*2 + c]). broaudio
+// natively resamples to the AudioContext rate using polyphase sinc.
 // Returns the new clip id, or -1 on failure.
 export function publishClip(prevId, samples, channels) {
   channels = channels || 1;
   try {
     const ctx = ensureCtx();
-    const inRate = rave ? rave.sampleRate : ctx.sampleRate, outRate = ctx.sampleRate || 48000;
-    let buf;
-    if (channels === 1) {
-      buf = resample(samples, inRate, outRate);
-    } else {
-      // de-interleave → resample each channel → re-interleave
-      const nf = Math.floor(samples.length / channels);
-      const planes = [];
-      for (let c = 0; c < channels; c++) {
-        const p = new Float32Array(nf);
-        for (let i = 0; i < nf; i++) p[i] = samples[i * channels + c];
-        planes.push(resample(p, inRate, outRate));
-      }
-      const onf = planes[0].length;
-      buf = new Float32Array(onf * channels);
-      for (let c = 0; c < channels; c++)
-        for (let i = 0; i < onf; i++) buf[i * channels + c] = planes[c][i];
-    }
+    const inRate = rave ? rave.sampleRate : ctx.sampleRate;
     if (prevId >= 0) { try { ctx.deleteClip(prevId); } catch (e) {} }
-    return ctx.createClip(buf, channels);
+    return ctx.createClip(samples, channels, inRate);
   } catch (e) { setBadge('audio: ' + e.message, true); return -1; }
 }
 

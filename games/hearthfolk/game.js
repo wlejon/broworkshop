@@ -479,18 +479,6 @@ function loadVoices(run) {
     } catch (e) { /* voices stay off */ }
 }
 
-function resampleLinear(samples, fromRate, toRate) {
-    if (fromRate === toRate) return samples;
-    const n = Math.max(1, Math.round(samples.length * toRate / fromRate));
-    const out = new Float32Array(n);
-    const step = (samples.length - 1) / (n - 1 || 1);
-    for (let i = 0; i < n; i++) {
-        const p = i * step, i0 = Math.floor(p), f = p - i0;
-        out[i] = samples[i0] * (1 - f) + (samples[Math.min(i0 + 1, samples.length - 1)]) * f;
-    }
-    return out;
-}
-
 function pumpTts(run) {
     const tts = run.tts;
     if (!tts.enabled || tts.busy || tts.queue.length === 0) return;
@@ -507,13 +495,12 @@ function pumpTts(run) {
                 tts.busy = false;
                 if (res && res.samples && res.samples.length && run.audioCtx) {
                     try {
-                        const rs = resampleLinear(res.samples, res.sampleRate, run.engineRate);
-                        const clip = run.audioCtx.createClip(rs, 1);
+                        const clip = run.audioCtx.createClip(res.samples, 1, res.sampleRate);
                         run.audioCtx.playClip(clip, 0.9, false);
                         tts.spoken++;
                         setTimeout(() => {
                             try { run.audioCtx.deleteClip(clip); } catch (e) { /* */ }
-                        }, (rs.length / run.engineRate) * 1000 + 500);
+                        }, (res.samples.length / res.sampleRate) * 1000 + 500);
                     } catch (e) { /* playback best-effort */ }
                 }
                 pumpTts(run);
