@@ -4,8 +4,8 @@
 // autotile config, multi-elevation ramps, fog-of-war transitions with real
 // LOS blocking, exact bump combat, all four monster archetypes, traps
 // (hidden + searched), doors (passability + LOS + autotile restyle), items /
-// inventory, stairs descent across all floors, save->load round trip (with
-// the load() kind re-registration workaround), death and victory.
+// inventory, stairs descent across all floors, save->load round trip,
+// death and victory.
 
 advanceTime(200);
 const G = window.DELVE;

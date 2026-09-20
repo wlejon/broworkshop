@@ -106,14 +106,8 @@ export function createGame(scene) {
     }
 
     // ---- object kinds + decorations ------------------------------------------
-    //
-    // ENGINE NOTE / workaround: world.load() drops every registered object
-    // kind and all placed instances — TileWorld::loadGrid() calls clear(),
-    // which destroys objectKinds_ (bro src/scene/tile_world.cpp:296 + 332),
-    // even though the load() docs say rendering config is preserved. After a
-    // stale-kind addObject the call just returns -1 silently. So kinds are
-    // (re-)registered and decorations re-scattered via this function, called
-    // once at startup and again after every world.load().
+    // TileWorld::loadGrid() preserves objectKinds_ and surviving placements across load().
+    // Kinds and initial decorations are registered once at startup.
 
     const unitKinds = {};   // stable object identity; indices refreshed below
 
@@ -479,9 +473,7 @@ export function createGame(scene) {
         const data = JSON.parse(raw);
         if (!data || data.version !== 1) return false;
         if (!world.load(b64ToBytes(data.grid))) return false;
-        // world.load() cleared all object kinds (see ENGINE NOTE above) —
-        // re-register kinds and re-scatter decorations before syncing units.
-        registerKindsAndDecorations();
+        // TileWorld::loadGrid() preserves objectKinds_ and static decorations.
         Object.assign(game.turn, data.turn);
         units.length = 0;
         for (const u of data.units) units.push({ ...u });

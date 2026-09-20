@@ -224,13 +224,8 @@ export function createGame(scene, seed) {
     });
 
     // ---- object kinds -----------------------------------------------------------
-    //
-    // ENGINE NOTE / workaround: world.load() drops every registered object kind
-    // and all placed instances (known TileWorld bug ΓÇö loadGrid() clears
-    // objectKinds_ even though load() docs say rendering config is preserved).
-    // registerKinds() is called once here and again after every world.load();
-    // scatterDecor() then re-places the static props and the per-frame sync
-    // re-places everything dynamic.
+    // TileWorld::loadGrid() in bro preserves objectKinds_.
+    // registerKinds() is called once here at startup.
 
     const kinds = {};
     function registerKinds() {
@@ -948,10 +943,7 @@ export function createGame(scene, seed) {
         try { data = JSON.parse(raw); } catch { return false; }
         if (!data || data.version !== 1) return false;
         if (!world.load(b64ToBytes(data.grid))) return false;
-        // world.load() destroyed all object kinds + instances (ENGINE NOTE
-        // above) ΓÇö re-register kinds, re-scatter static decor; the per-frame
-        // sync re-places buildings/carts.
-        registerKinds();
+        // TileWorld::loadGrid() preserves objectKinds_. Per-frame sync re-places buildings/carts.
         game.seed = data.seed; game.time = data.time;
         game.coins = data.coins; game.food = data.food;
         game.wood = data.wood; game.ore = data.ore;

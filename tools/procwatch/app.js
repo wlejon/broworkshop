@@ -16,6 +16,7 @@ import { installSystemMenu } from "/lib/system-menu.js";
 import { summarize } from "/app/cmdline.js";
 
 const cp = require('child_process');
+const isWindows = typeof process !== 'undefined' && process.platform === 'win32';
 
 installSystemMenu();
 
@@ -101,6 +102,7 @@ let enrichedOnce = false;
 const PS_ARGS = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File'];
 
 function startStream() {
+    if (!isWindows) return;
     const child = cp.spawn('powershell.exe',
         [...PS_ARGS, bro.appDir + '/stream.ps1'],
         { stdio: 'pipe', encoding: 'utf8' });
@@ -126,6 +128,7 @@ function startStream() {
 }
 
 function startEvents() {
+    if (!isWindows) return;
     const child = cp.spawn('powershell.exe',
         [...PS_ARGS, bro.appDir + '/events.ps1'],
         { stdio: 'pipe', encoding: 'utf8' });
@@ -146,6 +149,7 @@ function startEvents() {
 }
 
 function runEnrich() {
+    if (!isWindows) return;
     const child = cp.spawn('powershell.exe',
         [...PS_ARGS, bro.appDir + '/enrich.ps1'],
         { stdio: 'pipe', encoding: 'utf8' });
@@ -287,10 +291,19 @@ function renderReapLog() {
 }
 
 function kill(pid, tree, done) {
-    const args = ['/PID', String(pid)];
-    if (tree) args.push('/T');
-    args.push('/F');
-    cp.execFile('taskkill', args, () => { if (done) done(); });
+    if (isWindows) {
+        const args = ['/PID', String(pid)];
+        if (tree) args.push('/T');
+        args.push('/F');
+        cp.execFile('taskkill', args, () => { if (done) done(); });
+    } else {
+        try {
+            if (typeof process !== 'undefined' && process.kill) {
+                process.kill(pid, 'SIGKILL');
+            }
+        } catch {}
+        if (done) done();
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -445,10 +458,16 @@ function render() {
     }
 
     emptyEl.classList.toggle('hidden', rows.length > 0);
-    statusEl.textContent =
-        `${procs.size} processes \u00b7 showing ${rows.length} \u00b7 ` +
-        (streamLive ? 'stream live' : 'stream reconnecting\u2026') +
-        (reapLog.length ? ` \u00b7 reaped ${reapLog.length}` : '');
+    if (!isWindows) {
+        emptyEl.textContent = 'Process monitoring requires Windows (PowerShell/WMI). Inactive on Linux/macOS.';
+        statusEl.textContent =
+            `Platform: ${typeof process !== 'undefined' ? process.platform : 'non-Windows'} \u00b7 process monitoring requires Windows (PowerShell/WMI)`;
+    } else {
+        statusEl.textContent =
+            `${procs.size} processes \u00b7 showing ${rows.length} \u00b7 ` +
+            (streamLive ? 'stream live' : 'stream reconnecting\u2026') +
+            (reapLog.length ? ` \u00b7 reaped ${reapLog.length}` : '');
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -460,7 +479,20 @@ function handleAction(action, pid) {
     if (!p) return;
     if (action === 'kill') kill(pid, false);
     else if (action === 'killtree') kill(pid, true);
-    else if (action === 'folder' && p.path) cp.spawn('explorer.exe', ['/select,' + p.path]);
+    else if (action === 'folder' && p.path) {
+        if (isWindows) {
+            cp.spawn('explorer.exe', ['/select,' + p.path]);
+        } else if (typeof process !== 'undefined' && process.platform === 'darwin') {
+            cp.spawn('open', ['-R', p.path]);
+        } else {
+            let dir = p.path;
+            try {
+                const pathMod = require('path');
+                dir = pathMod.dirname(p.path);
+            } catch {}
+            cp.spawn('xdg-open', [dir]);
+        }
+    }
     else if (action === 'copy') navigator.clipboard.writeText(p.cmd || p.path || p.name);
     else if (action === 'reapadd') {
         const b = baseName(p.name);
@@ -544,6 +576,7 @@ const cpuHist = [];
 let coreVals = [];
 
 function startPerfStream() {
+    if (!isWindows) return;
     const child = cp.spawn('typeperf', [
         '\\Processor Information(*)\\% Processor Time',
         '-si', '1',
@@ -615,6 +648,16 @@ function drawGauges() {
         cctx.fillRect(i * bw + 0.5, cv.height * (1 - v), bw - 1, cv.height * v);
     }
 
+    if (!totalMemBytes && typeof require === 'function') {
+        try {
+            const os = require('os');
+            if (typeof os.totalmem === 'function' && typeof os.freemem === 'function') {
+                totalMemBytes = os.totalmem();
+                availMemBytes = os.freemem();
+            }
+        } catch {}
+    }
+
     if (totalMemBytes && availMemBytes) {
         const used = totalMemBytes - availMemBytes;
         const frac = used / totalMemBytes;
@@ -675,8 +718,13 @@ function renderGpus(rows) {
 // Go
 // ---------------------------------------------------------------------------
 
-startStream();
-startEvents();
-runEnrich();
-startPerfStream();
+if (isWindows) {
+    startStream();
+    startEvents();
+    runEnrich();
+    startPerfStream();
+} else {
+    render();
+    drawGauges();
+}
 pollGpu();
