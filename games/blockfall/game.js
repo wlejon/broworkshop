@@ -3,6 +3,7 @@
 
 import { Board } from "/app/board.js";
 import { FX } from "/app/particles.js";
+import { Music } from "/app/music.js";
 
 const DAS_DELAY = 167;
 const DAS_ARR = 33;
@@ -26,6 +27,8 @@ export const game = {
 
     create(ctx) {
         const startLevel = ctx.save.get("startLevel") || 1;
+        Music.init(ctx.audio);
+        Music.stop();
         Board._play = (name) => ctx.play(name);
         Board.settings.startLevel = startLevel;
         Board.settings.ghostPiece = true;
@@ -35,6 +38,7 @@ export const game = {
 
         return {
             score: 0,
+            level: startLevel,
             play: ctx.play,
             highScore: ctx.highScore,
             // Internal countdown while shell screen is already "playing"
@@ -55,7 +59,10 @@ export const game = {
             return;
         }
 
-        if (!run.alive) return { status: "gameover" };
+        if (!run.alive) {
+            Music.stop();
+            return { status: "gameover" };
+        }
 
         const B = Board;
         B.gameTime += dt;
@@ -66,6 +73,7 @@ export const game = {
                 B.cur = null;
                 run.alive = false;
                 syncScore(run);
+                Music.stop();
                 run.play("clear1");
                 return { status: "gameover", result: { finished: true } };
             }
@@ -74,6 +82,7 @@ export const game = {
         handleInput(run, input);
         if (!run.alive) {
             syncScore(run);
+            Music.stop();
             return {
                 status: "gameover",
                 result: B.finished ? { finished: true } : null,
@@ -92,11 +101,18 @@ export const game = {
 
         if (!run.alive) {
             syncScore(run);
+            Music.stop();
             return {
                 status: "gameover",
                 result: B.finished ? { finished: true } : null,
             };
         }
+
+        if (run.level !== B.level) {
+            run.level = B.level;
+            Music.setLevel(run.level);
+        }
+        Music.update();
 
         FX.update(dt);
         syncScore(run);
@@ -185,6 +201,18 @@ export const game = {
             ]);
         }
     },
+
+    onEnterScreen(name, run) {
+        if (name === "pause") {
+            Music.pause();
+        } else if (name === "playing") {
+            if (run && run.phase === "playing") {
+                Music.resume();
+            }
+        } else if (name === "gameover" || name === "title") {
+            Music.stop();
+        }
+    },
 };
 
 // ── Score / end ──────────────────────────────────────────────────────────
@@ -198,6 +226,7 @@ function topOut(run) {
     Board.finished = false;
     run.alive = false;
     syncScore(run);
+    Music.stop();
     run.play("die");
     return { status: "gameover" };
 }
@@ -215,6 +244,8 @@ function updateCountdown(run, dt, input) {
     if (run.countdownTimer < COUNTDOWN_TOTAL) return;
 
     run.phase = "playing";
+    Music.start(Board.level);
+    run.level = Board.level;
     // Drain edges so presses during countdown don't fire on GO
     input.pressed("left");
     input.pressed("right");
