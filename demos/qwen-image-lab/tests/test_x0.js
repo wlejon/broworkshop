@@ -195,6 +195,11 @@ $('btn-sp-clear').click();
 flush();
 
 // ── off again ─────────────────────────────────────────────────────────────
+// Including the brush's arm step, which clicking a thumbnail moved and the
+// prefs remember — a test that leaves the app somewhere else is a test that
+// breaks the next one.
+$('gp-at').value = '4';
+$('gp-at').dispatchEvent(new Event('change'));
 ctx.setSignals(false, false);
 flush();
 msg = ctx.buildGenerateMsg();

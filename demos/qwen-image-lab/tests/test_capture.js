@@ -206,7 +206,13 @@ assert($('sig-gates-legend').textContent.indexOf('lowest single attn·img row') 
        'the legend names it: ' + $('sig-gates-legend').textContent);
 
 // ── off again ─────────────────────────────────────────────────────────────
+// The brush amount and the block band are remembered between sessions, so put
+// them back: a test that leaves the app somewhere else breaks the next one.
 $('btn-gp-clear').click();
+$('gp-amount').value = '1.3';
+$('gp-amount').dispatchEvent(new Event('input'));
+gateRow('gate-lo', 0);
+gateRow('gate-hi', 32);
 ctx.setSignals(false, false);
 flush();
 msg = ctx.buildGenerateMsg();
