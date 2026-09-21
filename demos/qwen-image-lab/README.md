@@ -177,7 +177,8 @@ The post-tanh residual gates.
   its own region **17× more** than the frame's border. Defaults are the screened
   ones — blocks `[16, 32)`, armed at step 4 of 8, on the `attn` sublayer, since
   the MLP half is what drags a late edit's retention from over 100% down to
-  about 30%.
+  about 30%. The arm step is a registered control: it goes into the manifest,
+  the Explore grid can sweep it, and clicking an x̂0 thumbnail sets it.
 
 ### spatial
 Several painted regions at once, each with its own settings, in one denoise —
@@ -274,6 +275,12 @@ one. Every cell is the message *Generate* would send with one or two values
 overridden and the size cut down, which is what makes "click to adopt" honest —
 adopting a frame and rendering it the ordinary way reproduces it exactly.
 
+Any registered control is offerable, armed ones first — including the mask's
+**arm step**, so *fader × the step its mask lands on* is a grid. Painted cells
+are token grids captured at the render size, so they ride along only when the
+grid is rendered at that size; at any other the panel says it left them out
+rather than quietly rendering something else.
+
 The walk carries the retention meter per frame against the first, with round
 3's **0.71** collapse line marked. `light.key` swept 0 → +8 reads 1.000, 0.810,
 0.641, 0.481: the last two are no longer the same picture, which is the failure
@@ -320,12 +327,12 @@ non-zero at the end. Read the log, or `grep -c "ASSERTION FAILED"`.
 | `test_edit.js` | both condition-image routes (canvas pixels, typed path) reach the model, the derived canvas works, and removing the image reproduces the text-only render exactly | yes |
 | `test_gate.js` | the brush paints a region, the mask localises (inside 9.3 against a border of 0.55), and the sublayer selector changes the render | yes |
 | `test_release_te.js` | releasing the encoder frees 8.3 GB, a memoized prompt still primes, an unseen one is refused by name, and the reload restores it | yes |
-| `test_mint.js` | an axis minted from typed words clears the consistency bar, lands on the bank's own scale, drives like a bank axis, zeroes back to the pixel, survives a bank reload, and comes off cleanly — plus an image mint through the vision tower | yes |
+| `test_mint.js` | an axis minted from typed words clears the consistency bar, lands on the bank's own scale, drives like a bank axis, zeroes back to the pixel, survives a bank reload, and comes off cleanly — plus an image mint through the vision tower and a suffix-list mint | yes |
 | `test_prefix.js` | two prompts of equal token length, a slot each; the blend moves the render towards the prompt the cache came from with no re-encode, a zero blend is a no-op to the pixel, and the walk strip renders A→B at the slots' size | yes |
 | `test_schedule.js` | all three lane kinds reach the model; an axis armed late is worth 4.2 against 528.8 armed early, a gate multiplier 132 against 388; every lane zeroed returns to the untouched render to the pixel; a curve resamples with the step count | yes |
 | `test_spatial.js` | two gate regions in one pass hold their own bands (14.5 / 12.4) with the gap between them at 5.8; a per-region axis lands 2.6× harder in its own band at 1.78× the render time; feather is felt at the seam | yes |
 | `test_x0.js` | the last thumbnail is the finished render at mse 0.000000, the preview disturbs nothing, the estimates close monotonically (1417 → 508 → 309 → 178 → 0), and a click arms the chosen control at that step | yes |
-| `test_explore.js` | a 2×2 grid over an axis and a gate, adoption that reproduces the thumbnail at mse 0.000000, and a walk crossing the 0.71 bar between +2.67 and +5.33 | yes |
+| `test_explore.js` | a 2×2 grid over an axis and a gate, a second over a painted mask's arm step and an axis, adoption that reproduces the thumbnail at mse 0.000000, and a walk crossing the 0.71 bar between +2.67 and +5.33 | yes |
 | `test_capture.js` | an armed hook reads back on the blocks, sublayer and row class it named and nowhere else (×0.500 / ×1.000 / ×1.000 / ×1.000), on both sublayers; a brush shows up in the minimum long before the mean | yes |
 | `test_conditioned.js` | conditioning costs 57 ms and re-aims every fader (cos 0.61–0.83 on one prompt, 0.37–0.71 on another), two prompts give two desks, the same prompt gives the same one, and at zero the render is untouched | yes |
 | `test_history.js` | the manifest records 111 controls, the curves and the worker's own message in 9.3 KB, and loading it back reproduces the render to the pixel | yes |

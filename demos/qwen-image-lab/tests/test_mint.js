@@ -174,8 +174,47 @@ console.log('image mint · ' + ((Date.now() - tImg) / 1000).toFixed(1) + ' s · 
 $('btn-cond-clear').click();
 flush();
 
+// ── mint from a suffix list ───────────────────────────────────────────────
+// The other mode: several phrasings of ONE pole against the bare stem. It is
+// the same paired difference with the empty string standing in for the
+// negative pole, which is why there is one implementation and not two — and
+// the test is here because a second code path in the panel would be the thing
+// that rots.
+const SNAME = 'test.suffix';
+document.querySelector('.secbtn[data-sec="mint"]').click();
+$('mint-mode-suffix').checked = true;
+$('mint-mode-suffix').dispatchEvent(new Event('change'));
+flush();
+assert($('mint-pos-field').firstChild.textContent.indexOf('suffixes') === 0,
+       'the panel relabels its fields for the other mode (' +
+       $('mint-pos-field').firstChild.textContent.trim() + ')');
+$('mint-name').value = SNAME;
+$('mint-pos').value = 'in heavy fog\nwreathed in thick mist';
+$('mint-neg').value = '';
+flush();
+console.log('minting ' + SNAME + ' from two suffixes against the bare stems…');
+const tSuf = Date.now();
+$('btn-mint').click();
+assert(pumpUntil(() => $('mint-status').textContent.indexOf('minted ' + SNAME) === 0 ||
+                       $('mint-status').className.indexOf('err') >= 0, 600000),
+       'the suffix mint finished (' + $('mint-status').textContent + ')');
+assert($('mint-status').className.indexOf('err') < 0,
+       'the suffix mint succeeded: ' + $('mint-status').textContent);
+const sdef = ctx.mintedDefs().filter((d) => d.name === SNAME)[0];
+assert(sdef, 'the suffix axis is in the minted set');
+console.log('suffix mint · ' + ((Date.now() - tSuf) / 1000).toFixed(1) + ' s · scale ' +
+            sdef.scale.toFixed(3) + ' · ' + $('mint-status').textContent);
+assert(sdef.scale > 60 && sdef.scale < 200, 'on the bank\'s scale (' + sdef.scale.toFixed(3) + ')');
+assert(sdef.consistency > 0.15,
+       'and consistent across the stems (' + sdef.consistency.toFixed(3) + ')');
+assert(document.querySelector('#mint-rows .ctl[data-key="' + SNAME + '"]'),
+       'it built a control row like any other');
+$('mint-mode-pair').checked = true;
+$('mint-mode-pair').dispatchEvent(new Event('change'));
+flush();
+
 // ── delete ────────────────────────────────────────────────────────────────
-[NAME, INAME].forEach((n) => {
+[NAME, INAME, SNAME].forEach((n) => {
   const r = document.querySelector('#mint-rows .ctl[data-key="' + n + '"]');
   assert(r, 'a row for ' + n);
   r.querySelector('.mine-del').click();

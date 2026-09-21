@@ -17,6 +17,22 @@
 //   scene   prompt, seed, size (512²/8 explore, 1024²/40 final), and the edit
 //           path — condition images through the vision tower AND the 16x
 //           autoencoder, with the prompt saying what to change.
+//   mint    the v2 mint recipe run on words typed into the panel, registered
+//           live as a runtime axis beside the bank.
+//   sched   a curve per armed control: an axis becomes a control schedule, a
+//           fader is scaled before its parameter vector is built, and every
+//           other hook is re-issued per step away from its own neutral.
+//   spatial several painted regions in one denoise — their gate multipliers
+//           are masks the binding keeps a list of; a region that wants an axis
+//           of its own is composited from a second state stepped in lockstep.
+//   prefix  slots for the extracted prefix K/V, and a blend between them: a
+//           prompt crossfade below the text encoder entirely.
+//
+// Three tabs read the render back rather than driving it: Signals (the x̂0
+// estimate decoded at chosen steps, and the captured gates as heat strips),
+// Explore (an N×M grid over two controls and a 1-D walk with the retention
+// meter), and the history's manifest, which records every control that made
+// every render and puts one back.
 //
 // The rail is sectioned with a pinned "deck" at its foot: one chip per
 // non-neutral control across every section (click → jump to it, × → neutral),

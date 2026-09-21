@@ -303,6 +303,29 @@ export function initGate(ctx) {
     }
   });
 
+  // The arm step is a number field rather than a slider, but it is a control
+  // the explore grid should be able to sweep — a fader against the step its
+  // mask lands on is the grid round 3 would have wanted, since a knob armed
+  // late is a different knob rather than a weaker one. Registering it by key
+  // also puts it in the manifest, so a restored rack arms where it did before.
+  // It never wears a chip of its own: an unpainted mask is not armed at all,
+  // and a painted one already has one.
+  ctx.registerEntry({
+    section: 'gate', key: 'gp-at', label: 'mask arm step', lane: null,
+    min: 0, max: 40, step: 1, neutral: 4,
+    set: (v, opts) => {
+      $('gp-at').value = String(Math.max(0, Math.round(+v || 0)));
+      ctx.persist();
+      if ((!opts || !opts.silent) && ctx.live && maskActive()) ctx.schedule('full');
+    },
+    value: () => +$('gp-at').value || 0,
+    active: () => false,
+    chip: () => 'mask arm step',
+    chipValue: () => $('gp-at').value,
+    zero: () => { $('gp-at').value = '4'; ctx.persist(); },
+    reveal: () => { ctx.switchTab('gate'); ctx.switchSection('gate'); },
+  });
+
   // restore the tab's own widgets
   if (prefs.gpWhich) $('gp-which').value = prefs.gpWhich;
   if (prefs.gpAt != null) $('gp-at').value = prefs.gpAt;

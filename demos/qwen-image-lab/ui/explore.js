@@ -58,16 +58,28 @@ export function initExplore(ctx) {
 
   const pick = (id) => ctx.controlByKey($(id).value);
 
+  // A painted mask and a painted region are token grids captured at the render
+  // size. At any other size they are the wrong length and the worker refuses
+  // the render — so they ride along only when the grid is at that same size,
+  // which is also what makes a fader × arm-step grid possible at all.
+  const gridPx = () => ctx.roundSize(+$('ex-size').value || 256);
+  function sameSize() {
+    const px = gridPx();
+    return px === ctx.roundSize($('width').value) && px === ctx.roundSize($('height').value);
+  }
+  function paintedDropped() {
+    if (sameSize()) return false;
+    const probe = ctx.buildGenerateMsg();
+    return !!(probe.gateMask || (probe.regions && probe.regions.length));
+  }
+
   function baseMsg() {
     const msg = ctx.buildGenerateMsg();
-    const px = ctx.roundSize(+$('ex-size').value || 256);
+    const px = gridPx();
     msg.opts.width = px; msg.opts.height = px;
     delete msg.opts.outputResolution;
     msg.opts.steps = Math.max(1, +$('ex-steps').value | 0);
-    // A painted mask and a painted region are token grids captured at the
-    // render size; at the grid's smaller size they would be the wrong length.
-    delete msg.gateMask;
-    delete msg.regions;
+    if (!sameSize()) { delete msg.gateMask; delete msg.regions; }
     delete msg.x0;
     return msg;
   }
@@ -132,12 +144,16 @@ export function initExplore(ctx) {
     const t0 = Date.now();
     let k = 0;
     const total = n * cols;
+    const dropped = paintedDropped();
     const step = () => {
       if (cancelled || k >= total) {
         setRunning(false);
         status(cancelled ? 'stopped after ' + k + ' cells'
                          : 'grid done · ' + total + ' cells in ' +
-                           ((Date.now() - t0) / 1000).toFixed(1) + ' s', cancelled ? '' : 'ok');
+                           ((Date.now() - t0) / 1000).toFixed(1) + ' s' +
+                           (dropped ? ' · painted cells left out — a grid away from the render ' +
+                                      'size cannot carry them' : ''),
+               cancelled ? '' : 'ok');
         return;
       }
       const ri = Math.floor(k / cols), ci = k % cols;
@@ -189,13 +205,15 @@ export function initExplore(ctx) {
     $('ex-hint').style.display = 'none';
     cancelled = false;
     setRunning(true);
+    const dropped = paintedDropped();
     let i = 0;
     const step = () => {
       if (cancelled || i >= n) {
         setRunning(false);
         const collapsed = walkFrames.filter((f) => f.ret < 0.71).length;
         status(cancelled ? 'stopped' :
-          'walk done · ' + n + ' frames · ' + collapsed + ' below the 0.71 bar', 'ok');
+          'walk done · ' + n + ' frames · ' + collapsed + ' below the 0.71 bar' +
+          (dropped ? ' · painted cells left out' : ''), 'ok');
         return;
       }
       const v = lerp(lo, hi, i, n);

@@ -143,6 +143,59 @@ assert(document.querySelectorAll('.deck-chip').length === 2, 'both landed on the
 $('btn-deck-clear').click();
 flush();
 
+// ── a fader against the step its mask lands on ────────────────────────────
+// A painted mask is a token grid captured at the render size, so it can only
+// ride in a grid rendered at that same size — which this one is. That is what
+// makes an axis × arm-step grid possible, and the arm step is registered as a
+// control so it can be one of the two axes.
+const pickerKeys = [];
+for (let i = 0; i < $('ex-row').options.length; i++) pickerKeys.push($('ex-row').options[i].value);
+assert(pickerKeys.indexOf('gp-at') >= 0,
+       'the mask arm step is offered as a grid axis (' + pickerKeys.length + ' controls offered)');
+
+document.querySelector('.tabbtn[data-tab="gate"]').click();
+flush();
+$('btn-gp-capture').click();
+assert(pumpUntil(() => $('gp-status-text').textContent.indexOf('captured') === 0 ||
+                       $('gp-status-text').className === 'err', 300000),
+       'the paint base captured: ' + $('gp-status-text').textContent);
+const pr = $('gp-paint').getBoundingClientRect();
+mouseDown(pr.x + pr.width / 2, pr.y + pr.height / 2);
+for (let i = -2; i <= 2; i++) mouseMove(pr.x + pr.width / 2 + i * 8, pr.y + pr.height / 2 + i * 8);
+mouseUp(pr.x + pr.width / 2, pr.y + pr.height / 2);
+flush();
+assert(waitIdle(), 'the masked render settled');
+const nPainted = ctx.gateCells().filter((v) => v !== 1).length;
+console.log('painted ' + nPainted + ' of ' + ctx.gateCells().length + ' tokens');
+assert(nPainted > 4, 'a mask is painted (' + nPainted + ' tokens)');
+
+document.querySelector('.tabbtn[data-tab="explore"]').click();
+ctx.explorePick('gp-at', ROW);
+$('ex-row-lo').value = '0'; $('ex-row-hi').value = '3';
+$('ex-col-lo').value = '0'; $('ex-col-hi').value = '2';
+flush();
+console.log('rendering a grid of mask arm step × ' + ROW + '…');
+ctx.exploreGrid();
+assert(pumpUntil(() => ctx.exploreCells().length >= 4 || $('ex-status').className === 'err',
+                 600000),
+       'the arm-step grid finished: ' + $('ex-status').textContent);
+assert($('ex-status').className !== 'err', 'without error: ' + $('ex-status').textContent);
+assert($('ex-status').textContent.indexOf('left out') < 0,
+       'and the painted cells rode along, because the grid is at the render size: ' +
+       $('ex-status').textContent);
+const armed = ctx.exploreCells();
+const dArm = mse(cellPixels(armed[0]), cellPixels(armed[2]));
+console.log('same axis value, mask armed at step 0 vs step 3: mse ' + dArm.toFixed(1));
+assert(dArm > 1,
+       'when the mask lands is a grid axis in its own right (' + dArm.toFixed(1) + ')');
+armed[2].click();
+flush();
+assert(+$('gp-at').value === 3, 'adopting a cell moves the arm step (' + $('gp-at').value + ')');
+$('gp-at').value = '4'; $('gp-at').dispatchEvent(new Event('change'));
+$('btn-gp-clear').click();
+$('btn-deck-clear').click();
+flush();
+
 // ── the 1-D walk, with the retention meter ────────────────────────────────
 // Swept well past the bank's safe range, because what the strip is for is
 // seeing the picture stop being the same picture.
