@@ -106,6 +106,13 @@ export function initSpatial(ctx) {
     syncActiveSelect();
   }
 
+  // Pushing the selected region's numbers into the shared rows fires each
+  // row's commit — that is what a control row's set() does, silent or not —
+  // and a commit that re-listed would come straight back here. So the sync is
+  // flagged, and a commit raised BY the sync does not re-enter.
+  let syncing = false;
+  function relist() { if (!syncing) renderList(); }
+
   function renderRegionPanel() {
     const r = sel();
     $('sp-region-panel').style.display = r ? '' : 'none';
@@ -118,7 +125,8 @@ export function initSpatial(ctx) {
         amount: ctx.buildCtl({ label: 'smooth ↔ texture', id: 'sp-amount',
                                title: 'the gate multiplier inside this region — below 1 smooths, above 1 adds texture',
                                min: 0.4, max: 1.6, step: 0.05, neutral: 1, value: r.amount,
-                               host: host, commit: (v) => { const s = sel(); if (s) { s.amount = v; renderList(); } } }),
+                               host: host,
+                               commit: (v) => { const s = sel(); if (s) { s.amount = v; relist(); } } }),
         lo: ctx.buildCtl({ label: 'first block', id: 'sp-lo', min: 0, max: 31, step: 1,
                            neutral: 16, decimals: 0, value: r.lo, host: host,
                            commit: (v) => { const s = sel(); if (s) s.lo = v; } }),
@@ -139,11 +147,16 @@ export function initSpatial(ctx) {
         commit: (v) => { const s = sel(); if (s) s.axisAmount = v; },
       });
     }
-    regionRows.amount.set(r.amount, { silent: true });
-    regionRows.lo.set(r.lo, { silent: true });
-    regionRows.hi.set(r.hi, { silent: true });
-    regionRows.feather.set(r.feather, { silent: true });
-    regionRows.axisAmount.set(r.axisAmount, { silent: true });
+    syncing = true;
+    try {
+      regionRows.amount.set(r.amount, { silent: true });
+      regionRows.lo.set(r.lo, { silent: true });
+      regionRows.hi.set(r.hi, { silent: true });
+      regionRows.feather.set(r.feather, { silent: true });
+      regionRows.axisAmount.set(r.axisAmount, { silent: true });
+    } finally {
+      syncing = false;
+    }
     $('sp-which').value = r.which;
     $('sp-at').value = String(r.at);
     fillAxisSelect(r);
