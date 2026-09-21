@@ -68,18 +68,34 @@ function sinkDims(pop, D, factor) {
 // Mean pairwise cosine of the population — the mint's own bar, answering
 // "does this axis mean the same thing in every scene it was measured in"
 // before a single pixel is rendered.
+//
+// It is O(n^2 d), and an image mint's population is one vector per image ROW:
+// a single 1024-px condition image is 1024 of them, which is half a million
+// pairs of 4096 floats and a hang rather than a number. So the estimate is
+// taken over an evenly spaced sample. A text mint (12 stems x 2 phrasings) is
+// under the cap and is measured exactly.
+var COHERENCE_MAX = 24;
 function coherence(pop) {
   if (pop.length < 2) return 1;
+  var idx = [];
+  if (pop.length <= COHERENCE_MAX) {
+    for (var q = 0; q < pop.length; q++) idx.push(q);
+  } else {
+    for (var k = 0; k < COHERENCE_MAX; k++) {
+      idx.push(Math.round(k * (pop.length - 1) / (COHERENCE_MAX - 1)));
+    }
+  }
   var s = 0, n = 0;
-  for (var i = 0; i < pop.length; i++) {
-    for (var j = i + 1; j < pop.length; j++) {
+  for (var i = 0; i < idx.length; i++) {
+    for (var j = i + 1; j < idx.length; j++) {
+      var A = pop[idx[i]], B = pop[idx[j]];
       var dot = 0, na = 0, nb = 0;
-      for (var c = 0; c < pop[i].length; c++) {
-        var a = pop[i][c], b = pop[j][c];
+      for (var c = 0; c < A.length; c++) {
+        var a = A[c], b = B[c];
         dot += a * b; na += a * a; nb += b * b;
       }
-      na = Math.sqrt(na) * Math.sqrt(nb);
-      if (na) { s += dot / na; n++; }
+      var den = Math.sqrt(na) * Math.sqrt(nb);
+      if (den) { s += dot / den; n++; }
     }
   }
   return n ? s / n : 1;
@@ -109,11 +125,14 @@ function buildAxis(pop, D, sinkFactor) {
 // Signed cosine against every axis already registered — bank or runtime. "What
 // did the mint actually pick out?" answered against the named vocabulary,
 // instead of guessed at from slider sweeps.
-function decompose(pipe, dir, limit) {
+function decompose(pipe, dir, limit, skip) {
   var out = [];
   var names;
   try { names = pipe.controlAxes(); } catch (e) { return out; }
   for (var i = 0; i < names.length; i++) {
+    // A re-mint replaces an axis of the same name, and the axis it replaces is
+    // still registered while this runs — it would report itself at cos 1.000.
+    if (names[i] === skip) continue;
     var v;
     try { v = pipe.controlVector(names[i]); } catch (e) { continue; }
     var dot = 0, nb = 0;
@@ -226,7 +245,7 @@ export function mintImage(pipe, spec, progress) {
 
 function finish(pipe, name, built, scale, D, samples, kind) {
   // Decompose BEFORE registering, or the axis turns up as its own best match.
-  var cos = decompose(pipe, built.dir, 6);
+  var cos = decompose(pipe, built.dir, 6, name);
   pipe.setControlVector(name, built.dir, 0, scale);
   return {
     name: name, scale: scale, dim: D, kind: kind, samples: samples,
