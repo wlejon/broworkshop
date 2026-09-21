@@ -71,7 +71,7 @@ export function initExplore(ctx) {
     delete msg.x0;
     return msg;
   }
-  function override(msg, ctl, value) {
+  function override(ctl, value) {
     // The controls feed the message through their own hooks, so the honest way
     // to override one is to set it, rebuild, and put it back — which is also
     // what makes "adopt this cell" exactly the cell that was rendered.
@@ -199,7 +199,7 @@ export function initExplore(ctx) {
         return;
       }
       const v = lerp(lo, hi, i, n);
-      const msg = override(baseMsg(), ctl, v);
+      const msg = override(ctl, v);
       status('walk · ' + (i + 1) + ' / ' + n + ' · ' + ctl.label + ' ' + v.toFixed(2));
       ctx.renderOffscreen(msg, (err, frame, resp, ms) => {
         if (err) { setRunning(false); status(String(err.message || err), 'err'); return; }
