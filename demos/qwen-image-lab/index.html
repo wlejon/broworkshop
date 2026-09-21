@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Qwen-Image Lab</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <header id="toolbar">
+      <span id="brand">◈ Qwen-Image&nbsp;Lab</span>
+      <span class="tagline">the control surfaces qwen-image-research found in Qwen-Image&nbsp;2.1</span>
+      <span class="grow"></span>
+      <span id="backend" class="badge">loading…</span>
+    </header>
+
+    <div id="body">
+      <!-- ── left rail: sectioned control surface ─────────────────────────
+           Section nav (pinned), one section at a time (scrolls), and the
+           deck at the foot — one chip per non-neutral control, plus
+           Generate, always in reach. -->
+      <aside id="rail">
+        <nav id="rail-nav">
+          <button class="secbtn active" data-sec="scene">scene</button>
+          <button class="secbtn" data-sec="axes">axes</button>
+          <button class="secbtn" data-sec="desk">desk</button>
+          <button class="secbtn" data-sec="gate">gate</button>
+          <button class="secbtn" data-sec="tune">tune</button>
+        </nav>
+
+        <div id="rail-body">
+          <!-- ═══ scene: what to render ═══════════════════════════════════ -->
+          <div class="sec active" id="sec-scene">
+            <section class="panel">
+              <h2>prompt</h2>
+              <label class="field">
+                <span class="field-head">prompt <span class="counter" id="prompt-count"></span></span>
+                <textarea id="prompt" rows="3" maxlength="1000"
+                  placeholder="a stone cottage beside a mountain lake">a stone cottage beside a mountain lake</textarea>
+              </label>
+              <p class="hint">2.1 runs with no CFG — there is no negative prompt to
+                fight with. What the prompt does not say, the axes and the desk do.</p>
+            </section>
+
+            <section class="panel">
+              <h2>settings
+                <span class="grow"></span>
+                <button id="btn-reset-settings" class="link"
+                        title="Restore seed / steps / size to defaults">reset</button>
+              </h2>
+              <div class="preset-chips" id="preset-chips">
+                <button type="button" data-w="512" data-h="512" data-steps="8"
+                        title="512² / 8 steps — the size the research desk was calibrated at, ~2.5 s">explore · 512² / 8</button>
+                <button type="button" data-w="1024" data-h="1024" data-steps="40"
+                        title="1024² / 40 steps — the model's reference recipe, ~28 s. The desk keeps ~65% of its travel here.">final · 1024² / 40</button>
+                <button type="button" data-w="1024" data-h="1024" data-steps="8"
+                        title="1024² / 8 steps — keeps 98% of the desk's calibrated travel">1024² / 8</button>
+              </div>
+              <label class="field seed-field">seed
+                <span class="seed-row">
+                  <input id="seed" type="number" value="7" step="1">
+                  <span class="seed-rand" title="roll a fresh random seed on each Generate">
+                    <input id="rand-seed" type="checkbox"> randomize
+                  </span>
+                  <select id="seed-recent" class="seed-recent" title="reuse a recent seed"><option value="">recent</option></select>
+                </span>
+              </label>
+              <div class="grid">
+                <label class="field">steps <span class="dim">· 8 / 40</span>
+                  <input id="steps" type="number" value="8" min="1" max="60" step="1"></label>
+                <label class="field">guidance <span class="dim">· def 1.0</span>
+                  <input id="guidance" type="number" value="1.0" step="0.5"></label>
+              </div>
+              <div class="field size-field">size <span class="dim" id="size-note">· 0.26 MP</span>
+                <div class="size-inputs">
+                  <input id="width" type="number" value="512" min="256" max="2048" step="32">
+                  <span class="size-x">×</span>
+                  <input id="height" type="number" value="512" min="256" max="2048" step="32">
+                  <button id="btn-swap-size" class="mini-btn" type="button" title="swap width / height">⇄</button>
+                </div>
+                <div class="ratio-chips" id="ratio-chips">
+                  <button type="button" data-w="1024" data-h="1024">1:1</button>
+                  <button type="button" data-w="1216" data-h="832">3:2</button>
+                  <button type="button" data-w="1152" data-h="896">4:3</button>
+                  <button type="button" data-w="1344" data-h="768">16:9</button>
+                </div>
+              </div>
+              <p class="hint">Sides land on a multiple of 32 — the vision tower emits one
+                token per 32 px and the autoencoder one latent per 16.</p>
+            </section>
+
+            <section class="panel" id="cond-panel">
+              <h2>condition images <span class="hint inline">the edit path</span>
+                <span class="grow"></span>
+                <button id="btn-cond-clear" class="link" disabled title="Drop every condition image">clear</button>
+              </h2>
+              <div id="cond-list" class="cond-list">
+                <div class="cond-empty">Text only — add a picture to edit it instead.</div>
+              </div>
+              <div class="row">
+                <input id="cond-path" type="text" spellcheck="false"
+                       placeholder="path to a .png / .jpg — or use the buttons">
+                <button id="btn-cond-add" class="iconbtn" title="Add the typed path">+</button>
+              </div>
+              <div class="row">
+                <button id="btn-cond-browse" class="link">browse a file…</button>
+                <button id="btn-cond-use-render" class="link" disabled
+                        title="Use the render on the canvas as a condition image">use current render</button>
+              </div>
+              <label class="check" title="Width = round(sqrt(area*ratio)/32)*32 from the LAST image's aspect, so both sides land on a multiple of 32.">
+                <input id="cond-derive" type="checkbox"> derive the canvas from the last image's aspect
+              </label>
+              <label class="field">output resolution <span class="dim">· the derived canvas area, as a square side</span>
+                <input id="cond-outres" type="number" value="1024" min="256" max="2048" step="32"></label>
+              <p class="hint">Each image enters twice: through the Qwen3-VL vision tower (so the
+                prompt is <b>about</b> the picture) and through the 16× autoencoder (so the pixels
+                are in the joint sequence). The prompt says what to change.</p>
+            </section>
+
+            <!-- model last: set-and-forget — the summary carries the status. -->
+            <section class="panel">
+              <details id="model-details" open>
+                <summary class="model-sum">
+                  <span class="model-sum-label">model</span>
+                  <span id="model-sum-status" class="model-sum-status">not loaded</span>
+                </summary>
+                <div class="model-body">
+                  <label class="field">Qwen-Image 2.1 directory
+                    <span class="row">
+                      <input id="model-dir" type="text"
+                             value="D:/projects/brodiffusion/weights/qwen-image-2.1">
+                      <button id="btn-browse-model" class="iconbtn"
+                              title="Choose a Qwen-Image 2.1 diffusers directory">📁</button>
+                    </span>
+                  </label>
+                  <label class="check" title="INT8 DiT + INT8 Qwen3-VL-8B — ~17 GiB. BF16 does not fit 1024² on 24 GB.">
+                    <input id="quantize" type="checkbox" checked> quantize weights (INT8)
+                  </label>
+                  <div class="row">
+                    <button id="btn-load" class="primary">Load model</button>
+                    <button id="btn-unload" disabled title="Free the pipeline's VRAM">Unload</button>
+                  </div>
+                  <div class="row">
+                    <button id="btn-release-te" disabled
+                            title="Free the 8.5 GiB Qwen3-VL-8B backbone. Prompts already encoded still prime from the memo.">Release text encoder</button>
+                    <span id="te-state" class="badge">—</span>
+                  </div>
+                  <p class="hint">The text backbone is idle from prime() onwards. Releasing it
+                    buys 8.5 GiB — a rendered prompt stays available through the 8-entry
+                    prompt memo, an unseen one throws until it is reloaded.</p>
+                </div>
+              </details>
+            </section>
+          </div>
+
+          <!-- ═══ axes: the minted conditioning bank ══════════════════════ -->
+          <div class="sec" id="sec-axes">
+            <section class="panel">
+              <h2>axis bank <span class="hint inline" id="axis-count">88 minted axes</span>
+                <span class="grow"></span>
+                <button id="btn-reset-axes" class="link" title="Zero every axis slider">reset</button>
+              </h2>
+              <input id="axis-search" type="text" spellcheck="false"
+                     placeholder="filter — light, texture, mood…">
+              <div class="row">
+                <label class="check" title="Show only the axes that are currently off zero">
+                  <input id="axis-active-only" type="checkbox"> active only
+                </label>
+                <span class="grow"></span>
+                <span id="axis-shown" class="dim"></span>
+              </div>
+              <div id="axis-categories"></div>
+              <p class="hint" title="Measured in round 1 and re-measured on 88 axes in round 3: the best minted text axis moves its readout 25σ where the best in-network dial manages 4.4σ.">
+                These carry the authority: 8–25σ of readout travel against 4.4σ for the
+                best in-network dial. Applied to every token row of the conditioning at
+                prime() time — the model sees the <b>sum</b>, which is what the budget holds.</p>
+            </section>
+            <section class="panel">
+              <h2>stack budget <span class="hint inline">0 = uncapped</span></h2>
+              <div id="budget-rows"></div>
+              <p class="hint">Over budget every active axis is scaled by one common factor,
+                so the mix you dialled in survives and only the overdrive is shed.</p>
+            </section>
+          </div>
+
+          <!-- ═══ desk: the fitted faders ═════════════════════════════════ -->
+          <div class="sec" id="sec-desk">
+            <section class="panel">
+              <h2>the desk <span class="hint inline" id="desk-sub">controller.json</span>
+                <span class="grow"></span>
+                <button id="btn-reset-desk" class="link" title="Zero every fader">reset</button>
+              </h2>
+              <div id="desk-rows"></div>
+              <p class="hint" id="desk-hint" title="A fader is a direction in the 29-parameter scheduled knob space, fitted by ridge against 27 CLIP/pixel readouts. gainCal is the safe box re-drawn by render: the largest amplitude whose ±2 renders still hold their subject.">
+                Each fader moves one perceptual axis and leaves the others alone.
+                1.0 ≈ <span id="desk-tau">tau</span> sigmas of its own readout; the safe range
+                is ±2, and past it pushing harder swaps the picture rather than moving the axis.</p>
+            </section>
+
+            <section class="panel">
+              <h2>travel &amp; retention <span class="hint inline">vs the untouched render</span>
+                <span class="grow"></span>
+                <button id="btn-set-baseline" class="link"
+                        title="Pin the current render as the untouched reference">pin baseline</button>
+              </h2>
+              <div id="retention" class="retention">
+                <div class="ret-track"><div id="ret-fill" class="ret-fill"></div></div>
+                <span id="ret-text" class="ds-text">render with the desk at zero to set a baseline</span>
+              </div>
+              <div id="desk-travel" class="desk-travel"></div>
+              <p class="hint">Retention is a structural-similarity proxy against the baseline
+                (no CLIP in the app). Round 3's bar was 0.71 similarity — below it the fader
+                is replacing the picture, not moving an axis.</p>
+            </section>
+          </div>
+
+          <!-- ═══ gate: the post-tanh residual gates ══════════════════════ -->
+          <div class="sec" id="sec-gate">
+            <section class="panel">
+              <h2>gate multipliers <span class="hint inline">1.00 = neutral</span>
+                <span class="grow"></span>
+                <button id="btn-reset-gate" class="link">reset</button>
+              </h2>
+              <div id="gate-rows"></div>
+              <p class="hint" title="attnImg is the only surface on the model that still works armed at step 6 of 8 — it retains 127% of its step-0 effect. The txt multipliers are prefix-side: moving one re-extracts the prefix cache, about +13% on that step.">
+                <b>img</b> rows are the image being generated and are free to move mid-denoise;
+                <b>txt</b> rows are the cached prefix and re-extract when touched.</p>
+            </section>
+            <section class="panel">
+              <h2>block band <span class="hint inline">half-open [lo, hi)</span></h2>
+              <div id="gate-band-rows"></div>
+              <p class="hint">32 blocks. One modulation vector drives all of them, so a band
+                is realised as a second copy of that vector for the blocks inside it.</p>
+            </section>
+            <section class="panel">
+              <h2>gate delta <span class="hint inline">post-tanh · reaches past ±1</span></h2>
+              <div id="gate-delta-rows"></div>
+              <p class="hint">A mod delta lands before the tanh, where 74% of the gate2
+                channels have tanh′ &lt; 0.05. This one has unit authority on every channel —
+                and a gate above 1 is not otherwise reachable.</p>
+            </section>
+            <section class="panel">
+              <h2>mask brush <span class="hint inline">paint it on the render →</span></h2>
+              <div id="gate-mask-rows"></div>
+              <p class="hint" id="gate-mask-note">Paint a region in the <b>Gate Paint</b> tab.
+                A mask over a centre disc puts 95% of its pixel change inside a region covering
+                28% of the frame, and localisation <i>improves</i> the later it is armed.</p>
+            </section>
+          </div>
+
+          <!-- ═══ tune: modulation and output scale ═══════════════════════ -->
+          <div class="sec" id="sec-tune">
+            <section class="panel">
+              <h2>modulation delta <span class="hint inline">fraction of the model's own vector</span>
+                <span class="grow"></span>
+                <button id="btn-reset-mod" class="link">reset</button>
+              </h2>
+              <div id="mod-rows"></div>
+              <label class="field">rows
+                <select id="mod-target">
+                  <option value="target" selected>target — the image rows (free per step)</option>
+                  <option value="prefix">prefix — the text rows (re-extracts)</option>
+                  <option value="both">both</option>
+                </select>
+              </label>
+              <div id="mod-band-rows"></div>
+              <p class="hint">The delta is a fraction of that chunk's own value at the current
+                step — chunk norms run 21 to 189, so an absolute add would mean four different
+                things in four places.</p>
+            </section>
+            <section class="panel">
+              <h2>norm_out scale <span class="hint inline">one knob on output magnitude</span></h2>
+              <div id="normout-rows"></div>
+            </section>
+            <section class="panel">
+              <h2>prefix K/V <span class="hint inline">free, mid-denoise, survives a re-extract</span>
+                <span class="grow"></span>
+                <button id="btn-reset-pkv" class="link">reset</button>
+              </h2>
+              <div id="pkv-rows"></div>
+              <p class="hint">Attenuating V fades the prompt's contribution while leaving the
+                attention pattern it induces intact; K alone flattens that pattern instead.</p>
+            </section>
+          </div>
+        </div>
+
+        <!-- ── the deck: what's shaping the image right now + Generate ──── -->
+        <footer id="rail-foot">
+          <div id="deck">
+            <div class="deck-head">
+              <span>active controls</span>
+              <span id="deck-count" class="deck-count"></span>
+              <span class="grow"></span>
+              <button id="btn-deck-clear" class="link" title="Return every control to neutral">reset all</button>
+            </div>
+            <div id="deck-chips" class="deck-chips"></div>
+            <div id="deck-stack" class="deck-stack"
+                 title="Total axis push against what the stack may spend. Over budget every active axis is scaled back by one common factor.">
+              <div class="ds-track"><div id="ds-fill" class="ds-fill"></div></div>
+              <span id="ds-text" class="ds-text"></span>
+            </div>
+          </div>
+          <div class="gen-row">
+            <button id="btn-generate" class="primary" disabled>Generate</button>
+            <label class="live-toggle" title="Re-render when a control settles">
+              <input id="live" type="checkbox"> live
+            </label>
+          </div>
+        </footer>
+      </aside>
+
+      <!-- ── stage ────────────────────────────────────────────────────── -->
+      <main id="stage">
+        <div id="tabbar">
+          <button class="tabbtn active" data-tab="render">Render</button>
+          <button class="tabbtn" data-tab="gate">Gate Paint</button>
+        </div>
+
+        <!-- tab: render -->
+        <div class="tabpanel active" id="tab-render">
+          <div id="canvas-wrap">
+            <canvas id="view" width="512" height="512"></canvas>
+            <div id="view-hint" class="pane-hint">Load a model, then Generate.</div>
+            <div id="view-zoom" class="view-zoom"></div>
+
+            <div id="load-overlay">
+              <div class="load-card">
+                <div class="spinner" aria-hidden="true"></div>
+                <div class="load-title">loading Qwen-Image&nbsp;2.1</div>
+                <div class="load-sub">7.1B DiT + Qwen3-VL-8B, quantized to INT8 as it streams in</div>
+                <div class="vram">
+                  <div class="vram-head">
+                    <span id="vram-card" class="vram-card">GPU</span>
+                    <span id="vram-nums" class="vram-nums"></span>
+                  </div>
+                  <div class="vram-track"><div id="vram-fill" class="vram-fill"></div></div>
+                  <div id="vram-note" class="vram-note"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="render-bar">
+            <button id="btn-ab" disabled title="Hold to show the pinned baseline instead">A / B</button>
+            <button id="btn-save" disabled title="Save this render as a PNG">Save PNG</button>
+            <span id="ab-note" class="dim"></span>
+            <span class="grow"></span>
+            <span id="peak-vram" class="dim"></span>
+          </div>
+          <div class="status-bar">
+            <span id="status-text">idle</span>
+            <span class="grow"></span>
+            <span id="timing" class="meta"></span>
+          </div>
+        </div>
+
+        <!-- tab: gate paint — the per-token mask, painted on the render -->
+        <div class="tabpanel" id="tab-gate">
+          <div class="tab-toolbar">
+            <button id="btn-gp-capture" disabled
+                    title="Render the current scene as the base to paint on">Capture</button>
+            <label class="field inline-field">brush
+              <input id="gp-radius" type="range" min="1" max="10" step="1" value="4">
+            </label>
+            <label class="field inline-field"><span class="pole-neg">smooth</span>
+              <input id="gp-amount" type="range" min="0.4" max="1.6" step="0.05" value="1.3">
+              <span class="pole-pos">texture</span>
+              <span class="ctl-val" id="gp-amount-val">1.30</span>
+            </label>
+            <label class="field inline-field">sublayer
+              <select id="gp-which">
+                <option value="attn" selected>attn — restyle, keeps the layout</option>
+                <option value="mlp">mlp — the half that claws an edit back</option>
+                <option value="both">both — blunt</option>
+              </select>
+            </label>
+            <label class="field inline-field">arm at step
+              <input id="gp-at" type="number" value="4" min="0" max="59" step="1">
+            </label>
+            <button id="btn-gp-clear" title="Clear the painted mask">Clear paint</button>
+          </div>
+          <div id="gp-panes" class="panes">
+            <section class="pane">
+              <div class="pane-head">paint <span class="pane-sub">stroke the render · re-renders on release · one cell = 16 px</span></div>
+              <div class="pane-canvas">
+                <canvas id="gp-paint" width="512" height="512"></canvas>
+                <canvas id="gp-base" width="512" height="512" class="offscreen"></canvas>
+                <div id="gp-hint" class="pane-hint">Capture a render first.</div>
+              </div>
+            </section>
+            <section class="pane">
+              <div class="pane-head">result <span class="pane-sub">the same seed with the mask armed</span></div>
+              <div class="pane-canvas">
+                <canvas id="gp-result" width="512" height="512"></canvas>
+                <div id="gp-result-hint" class="pane-hint">Paint a stroke to see its effect.</div>
+              </div>
+            </section>
+          </div>
+          <div class="status-bar">
+            <span id="gp-status-text">capture · paint · the gate moves only where you painted</span>
+            <span class="grow"></span>
+            <span id="gp-timing" class="meta"></span>
+          </div>
+        </div>
+      </main>
+
+      <!-- ── history rail ──────────────────────────────────────────────── -->
+      <aside id="history">
+        <div class="hist-head">
+          <span>history</span>
+          <span class="grow"></span>
+          <button id="btn-hist-save-all" class="link" title="Save every image in the history" disabled>save all</button>
+          <button id="btn-hist-clear" class="link" title="Clear the render history" disabled>clear</button>
+        </div>
+        <div id="hist-list" class="hist-list">
+          <div class="hist-empty">Rendered images collect here.</div>
+        </div>
+      </aside>
+    </div>
+  </div>
+  <script type="module" src="/app/app.js"></script>
+</body>
+</html>

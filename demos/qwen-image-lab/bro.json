@@ -1,0 +1,7 @@
+{
+    "app": ".",
+    "title": "Qwen-Image Lab",
+    "width": 1480,
+    "height": 1000,
+    "lib": "../../lib"
+}
