@@ -77,7 +77,7 @@ export function initAxes(ctx) {
           label: a.name.slice(cat.length + 1) || a.name,
           title: a.name + ' — bank scale ' + a.scale.toFixed(3) +
                  ' (alpha 1.0 ≈ saying it in the prompt)',
-          key: a.name, group: 'bank',
+          key: a.name, group: 'bank', lane: 'axis:' + a.name,
           min: -6, max: 6, step: 0.05,
           value: +saved[a.name] || 0,
           section: 'axes', host: body,

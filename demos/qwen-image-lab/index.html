@@ -23,9 +23,13 @@
         <nav id="rail-nav">
           <button class="secbtn active" data-sec="scene">scene</button>
           <button class="secbtn" data-sec="axes">axes</button>
+          <button class="secbtn" data-sec="mint">mint</button>
           <button class="secbtn" data-sec="desk">desk</button>
+          <button class="secbtn" data-sec="sched">sched</button>
           <button class="secbtn" data-sec="gate">gate</button>
+          <button class="secbtn" data-sec="spatial">spatial</button>
           <button class="secbtn" data-sec="tune">tune</button>
+          <button class="secbtn" data-sec="prefix">prefix</button>
         </nav>
 
         <div id="rail-body">
@@ -183,6 +187,53 @@
             </section>
           </div>
 
+          <!-- ═══ mint: your own axes ═════════════════════════════════════ -->
+          <div class="sec" id="sec-mint">
+            <section class="panel">
+              <h2>mint an axis <span class="hint inline">diff of means · the v2 recipe</span></h2>
+              <label class="field">name
+                <input id="mint-name" type="text" spellcheck="false" placeholder="mine.brass"></label>
+              <div class="row">
+                <label class="check"><input id="mint-mode-pair" type="radio" name="mintmode" checked>
+                  prompt pair</label>
+                <label class="check"><input id="mint-mode-suffix" type="radio" name="mintmode">
+                  prompt + suffixes</label>
+              </div>
+              <label class="field" id="mint-pos-field">positive pole <span class="dim">one phrasing a line</span>
+                <textarea id="mint-pos" rows="2" spellcheck="false"></textarea></label>
+              <label class="field" id="mint-neg-field">negative pole
+                <textarea id="mint-neg" rows="2" spellcheck="false"></textarea></label>
+              <label class="check" title="12 neutral scene stems, the ones lib/axesv2.js mints with. Off uses the poles alone.">
+                <input id="mint-stems" type="checkbox" checked> cross with the 12 scene stems</label>
+              <div class="row">
+                <button id="btn-mint" class="primary" disabled>Mint</button>
+                <button id="btn-mint-image" disabled
+                        title="Mint from the condition images instead — the vision tower's rows against the prompt's">from images</button>
+                <span class="grow"></span>
+                <span id="mint-count" class="dim"></span>
+              </div>
+              <div id="mint-progress" class="mint-progress"><div></div></div>
+              <p class="hint" id="mint-status">A pole difference is pooled per encode, the
+                attention-sink dimensions are zeroed, the mean is unit-normalised and the bank
+                scale is 0.15 × this run's own mean token norm.</p>
+            </section>
+            <section class="panel" id="mint-inspect" style="display:none">
+              <h2>what it is made of <span class="hint inline" id="mint-inspect-name"></span></h2>
+              <div id="mint-inspect-bars" class="axis-bars"></div>
+              <p class="hint" id="mint-inspect-note"></p>
+            </section>
+            <section class="panel">
+              <h2>my axes <span class="hint inline" id="mint-mine-count">none yet</span>
+                <span class="grow"></span>
+                <button id="btn-mint-clear" class="link" title="Zero every minted slider">reset</button>
+              </h2>
+              <div id="mint-rows"></div>
+              <p class="hint">Registered with <code>setControlVector</code>, so they drive through
+                <code>setControl</code>, the stack budget and the control schedule exactly as a bank
+                axis does — and they survive a model reload, because the direction does.</p>
+            </section>
+          </div>
+
           <!-- ═══ desk: the fitted faders ═════════════════════════════════ -->
           <div class="sec" id="sec-desk">
             <section class="panel">
@@ -190,7 +241,15 @@
                 <span class="grow"></span>
                 <button id="btn-reset-desk" class="link" title="Zero every fader">reset</button>
               </h2>
+              <div class="row" id="desk-cond-row">
+                <label class="check" title="Round 3's prompt block: one encode and one matrix product re-derive every fader direction for THIS prompt, through the same regularised pseudo-inverse the global desk is fitted with.">
+                  <input id="desk-conditioned" type="checkbox"> prompt-conditioned
+                </label>
+                <span class="grow"></span>
+                <span id="desk-cond-state" class="dim">global</span>
+              </div>
               <div id="desk-rows"></div>
+              <div id="desk-drift" class="desk-travel"></div>
               <p class="hint" id="desk-hint" title="A fader is a direction in the 29-parameter scheduled knob space, fitted by ridge against 27 CLIP/pixel readouts. gainCal is the safe box re-drawn by render: the largest amplitude whose ±2 renders still hold their subject.">
                 Each fader moves one perceptual axis and leaves the others alone.
                 1.0 ≈ <span id="desk-tau">tau</span> sigmas of its own readout; the safe range
@@ -211,6 +270,28 @@
               <p class="hint">Retention is a structural-similarity proxy against the baseline
                 (no CLIP in the app). Round 3's bar was 0.71 similarity — below it the fader
                 is replacing the picture, not moving an axis.</p>
+            </section>
+          </div>
+
+          <!-- ═══ sched: a curve per armed control ════════════════════════ -->
+          <div class="sec" id="sec-sched">
+            <section class="panel">
+              <h2>schedule <span class="hint inline">one curve per armed control</span>
+                <span class="grow"></span>
+                <button id="btn-sched-clear" class="link" title="Flatten every lane">flatten</button>
+              </h2>
+              <div id="sched-lanes" class="sched-lanes"></div>
+              <p class="hint">Edit the curves on the <b>Schedule</b> tab. A lane at 1.0 means the
+                control is at its full setting on that step; at 0 it is off. An axis lane is armed
+                with <code>qwenImage21AddControlSchedule</code> and is taken out of the prime-time
+                stack, because a schedule <i>composes</i> with <code>setControl</code>.</p>
+            </section>
+            <section class="panel">
+              <h2>cost <span class="hint inline">what a curve pays for</span></h2>
+              <p class="hint" id="sched-cost">Rebuilding the conditioning rows drops the prefix K/V
+                cache, so a step whose alpha MOVED pays one extra prefill and a step whose alpha sat
+                still pays nothing. A flat schedule costs one re-extract for the whole run; a window
+                costs two, entering and leaving.</p>
             </section>
           </div>
 
@@ -248,6 +329,40 @@
             </section>
           </div>
 
+          <!-- ═══ spatial: several painted regions at once ════════════════ -->
+          <div class="sec" id="sec-spatial">
+            <section class="panel">
+              <h2>regions <span class="hint inline" id="sp-count">none</span>
+                <span class="grow"></span>
+                <button id="btn-sp-add" class="link" title="Add an empty region">add</button>
+                <button id="btn-sp-clear" class="link" title="Drop every region">clear</button>
+              </h2>
+              <div id="sp-list" class="sp-list"></div>
+              <p class="hint">Paint them on the <b>Spatial</b> tab. Each region carries a gate
+                multiplier — the model's only per-token hook, armed at the region's own step — and,
+                optionally, axes of its own. Axes are global by construction, so that half is
+                composited: a second state from the same seed, stepped in lockstep and blended back
+                under the region every step, so the join happens inside the denoiser.</p>
+            </section>
+            <section class="panel" id="sp-region-panel" style="display:none">
+              <h2>selected <span class="hint inline" id="sp-sel-name">—</span></h2>
+              <div id="sp-region-rows"></div>
+              <div class="row">
+                <label class="field">sublayer
+                  <select id="sp-which">
+                    <option value="attn" selected>attn — survives a late arm</option>
+                    <option value="mlp">mlp</option>
+                    <option value="both">both</option>
+                  </select></label>
+                <label class="field">arm at step
+                  <input id="sp-at" type="number" value="4" min="0" max="59" step="1"></label>
+              </div>
+              <label class="field">axis for this region
+                <select id="sp-axis"><option value="">— none —</option></select></label>
+              <div id="sp-axis-rows"></div>
+            </section>
+          </div>
+
           <!-- ═══ tune: modulation and output scale ═══════════════════════ -->
           <div class="sec" id="sec-tune">
             <section class="panel">
@@ -282,6 +397,52 @@
                 attention pattern it induces intact; K alone flattens that pattern instead.</p>
             </section>
           </div>
+
+          <!-- ═══ prefix: the cached conditioning, as slots ═══════════════ -->
+          <div class="sec" id="sec-prefix">
+            <section class="panel">
+              <h2>prefix slots <span class="hint inline" id="pfx-slots-note">—</span>
+                <span class="grow"></span>
+                <button id="btn-pfx-clear" class="link" title="Drop every slot and free its VRAM">clear</button>
+              </h2>
+              <div id="pfx-slots" class="pfx-slots"></div>
+              <div class="row">
+                <label class="field">save this prompt into
+                  <select id="pfx-save-slot"></select></label>
+                <button id="btn-pfx-save" disabled>Save prefix</button>
+              </div>
+              <p class="hint">The extracted prefix <i>is</i> the conditioning as far as every step
+                after the first is concerned. Saving one and blending towards it is a prompt
+                crossfade below the text encoder entirely: no re-encoding, no vision tower, no
+                txt_in — a lerp over cached K/V that lands on the very next step.</p>
+            </section>
+            <section class="panel">
+              <h2>blend <span class="hint inline">A → B, no re-encode</span></h2>
+              <div class="row">
+                <label class="field">A <select id="pfx-a"></select></label>
+                <label class="field">B <select id="pfx-b"></select></label>
+              </div>
+              <div id="pfx-blend-rows"></div>
+              <p class="hint">The live prefix is set to A, then blended towards B:
+                <code>(1−t)·A + t·B</code>. Both slots must describe the same layout — same prefix
+                length, same target grid — which in practice means two prompts that tokenize to the
+                same length. A mismatch throws rather than mis-aligning.</p>
+            </section>
+            <section class="panel">
+              <h2>walk <span class="hint inline">N frames from A to B</span>
+                <span class="grow"></span>
+                <button id="btn-pfx-walk" disabled>Render walk</button>
+              </h2>
+              <div id="pfx-walk-rows"></div>
+              <div id="pfx-strip" class="walk-strip"></div>
+              <p class="hint" id="pfx-help">What re-extracts, and what is free: the TEXT half of
+                the prefix is rebuilt whenever the conditioning rows change — a txt gate multiplier,
+                a gate mask, an edited row, a control-schedule alpha that moved — and costs one
+                prefill (+13% on that step). The IMAGE half of a mask, the prefix-K/V dial and a
+                slot blend are all read where the cache is <i>used</i>, so they are free mid-denoise
+                and survive every re-extract.</p>
+            </section>
+          </div>
         </div>
 
         <!-- ── the deck: what's shaping the image right now + Generate ──── -->
@@ -314,6 +475,10 @@
         <div id="tabbar">
           <button class="tabbtn active" data-tab="render">Render</button>
           <button class="tabbtn" data-tab="gate">Gate Paint</button>
+          <button class="tabbtn" data-tab="spatial">Spatial</button>
+          <button class="tabbtn" data-tab="sched">Schedule</button>
+          <button class="tabbtn" data-tab="explore">Explore</button>
+          <button class="tabbtn" data-tab="signals">Signals</button>
         </div>
 
         <!-- tab: render -->
@@ -401,6 +566,153 @@
             <span id="gp-timing" class="meta"></span>
           </div>
         </div>
+
+        <!-- tab: spatial — several regions, each with its own settings -->
+        <div class="tabpanel" id="tab-spatial">
+          <div class="tab-toolbar">
+            <button id="btn-sp-capture" disabled
+                    title="Render the current scene as the base to paint regions on">Capture</button>
+            <label class="field inline-field">brush
+              <input id="sp-radius" type="range" min="1" max="12" step="1" value="4"></label>
+            <label class="field inline-field">region
+              <select id="sp-active"></select></label>
+            <label class="check"><input id="sp-erase" type="checkbox"> erase</label>
+            <button id="btn-sp-render" disabled title="Render every region at once">Render regions</button>
+            <button id="btn-sp-wipe" title="Clear the selected region's paint">Clear region</button>
+          </div>
+          <div id="sp-panes" class="panes">
+            <section class="pane">
+              <div class="pane-head">paint <span class="pane-sub">one colour a region · one cell = 16 px</span></div>
+              <div class="pane-canvas">
+                <canvas id="sp-paint" width="512" height="512"></canvas>
+                <canvas id="sp-base" width="512" height="512" class="offscreen"></canvas>
+                <div id="sp-hint" class="pane-hint">Capture a render first.</div>
+              </div>
+            </section>
+            <section class="pane">
+              <div class="pane-head">result <span class="pane-sub">every region composited in one denoise</span></div>
+              <div class="pane-canvas">
+                <canvas id="sp-result" width="512" height="512"></canvas>
+                <div id="sp-result-hint" class="pane-hint">Paint a region, then render.</div>
+              </div>
+            </section>
+          </div>
+          <div class="status-bar">
+            <span id="sp-status-text">capture · paint a region a colour · give it a gate or an axis</span>
+            <span class="grow"></span>
+            <span id="sp-timing" class="meta"></span>
+          </div>
+        </div>
+
+        <!-- tab: schedule — a curve per armed control, steps on x -->
+        <div class="tabpanel" id="tab-sched">
+          <div class="tab-toolbar">
+            <span class="dim" id="sched-steps-note">steps</span>
+            <label class="field inline-field">lane
+              <select id="sched-lane"></select></label>
+            <label class="field inline-field">preset
+              <select id="sched-preset">
+                <option value="flat">flat — on for every step</option>
+                <option value="early">early only — the first third</option>
+                <option value="late">late only — the last third</option>
+                <option value="ramp">ramp up</option>
+                <option value="fall">ramp down</option>
+                <option value="mid">middle</option>
+                <option value="off">off</option>
+              </select></label>
+            <button id="btn-sched-apply">Apply preset</button>
+            <label class="field inline-field">step
+              <input id="sched-step" type="number" value="0" min="0" step="1"></label>
+            <label class="field inline-field">value
+              <input id="sched-value" type="number" value="1" min="-4" max="4" step="0.05"></label>
+            <button id="btn-sched-set">Set step</button>
+          </div>
+          <div id="sched-wrap" class="sched-wrap">
+            <canvas id="sched-canvas" width="900" height="420"></canvas>
+            <div id="sched-hint" class="pane-hint">Arm a control — a fader, an axis, a gate — and it
+              gets a lane here.</div>
+          </div>
+          <div class="status-bar">
+            <span id="sched-status">drag on a lane to draw its curve · one column per step</span>
+            <span class="grow"></span>
+            <span id="sched-meta" class="meta"></span>
+          </div>
+        </div>
+
+        <!-- tab: explore — a grid over two controls, and a 1-D walk -->
+        <div class="tabpanel" id="tab-explore">
+          <div class="tab-toolbar">
+            <label class="field inline-field">rows
+              <select id="ex-row"></select></label>
+            <label class="field inline-field">from
+              <input id="ex-row-lo" type="number" value="-2" step="0.25"></label>
+            <label class="field inline-field">to
+              <input id="ex-row-hi" type="number" value="2" step="0.25"></label>
+            <label class="field inline-field">cols
+              <select id="ex-col"></select></label>
+            <label class="field inline-field">from
+              <input id="ex-col-lo" type="number" value="-2" step="0.25"></label>
+            <label class="field inline-field">to
+              <input id="ex-col-hi" type="number" value="2" step="0.25"></label>
+            <label class="field inline-field">grid
+              <input id="ex-n" type="number" value="3" min="2" max="6" step="1"></label>
+            <label class="field inline-field">px
+              <input id="ex-size" type="number" value="256" min="128" max="1024" step="32"></label>
+            <label class="field inline-field">steps
+              <input id="ex-steps" type="number" value="4" min="1" max="40" step="1"></label>
+            <button id="btn-ex-grid" disabled>Render grid</button>
+            <button id="btn-ex-walk" disabled title="A 1-D sweep along the row control">Render walk</button>
+            <button id="btn-ex-stop" disabled>Stop</button>
+          </div>
+          <div id="ex-body" class="ex-body">
+            <div id="ex-grid" class="ex-grid"></div>
+            <div id="ex-walk" class="walk-strip"></div>
+            <div id="ex-hint" class="pane-hint">Pick two armed controls and render the grid — click a
+              cell to adopt its settings.</div>
+          </div>
+          <div class="status-bar">
+            <span id="ex-status">a grid over two controls · a walk with the retention meter per frame</span>
+            <span class="grow"></span>
+            <span id="ex-timing" class="meta"></span>
+          </div>
+        </div>
+
+        <!-- tab: signals — what the last render did, read off the model -->
+        <div class="tabpanel" id="tab-signals">
+          <div class="tab-toolbar">
+            <label class="check" title="qwenImage21CaptureGates — one device readback per render">
+              <input id="sig-capture" type="checkbox"> capture gates</label>
+            <label class="check" title="Decode the x̂0 estimate at the chosen steps. The flow-match Euler step is exact, so the estimate is free — only the VAE decode costs.">
+              <input id="sig-x0" type="checkbox"> x̂0 preview</label>
+            <label class="field inline-field">at steps
+              <input id="sig-x0-steps" type="text" spellcheck="false" value="auto"
+                     title="A comma-separated list, or 'auto' for an even spread"></label>
+            <label class="field inline-field">thumbs
+              <input id="sig-x0-n" type="number" value="4" min="1" max="12" step="1"></label>
+            <label class="field inline-field" title="Clicking a thumbnail arms this control at that step">arm
+              <select id="sig-arm"></select></label>
+            <span class="grow"></span>
+            <span id="sig-note" class="dim"></span>
+          </div>
+          <div class="sig-body">
+            <section class="pane">
+              <div class="pane-head">x̂0 timeline
+                <span class="pane-sub">what the render was committed to at that step · click to arm the selected control there</span></div>
+              <div id="sig-x0-strip" class="walk-strip"></div>
+            </section>
+            <section class="pane">
+              <div class="pane-head">gate capture
+                <span class="pane-sub">32 blocks × (attn, mlp) · the mean effective gate per row class</span></div>
+              <div id="sig-gates" class="gate-strip"></div>
+              <div id="sig-gates-legend" class="gate-legend"></div>
+            </section>
+          </div>
+          <div class="status-bar">
+            <span id="sig-status">tick a readout and render</span>
+            <span class="grow"></span>
+            <span id="sig-timing" class="meta"></span>
+          </div>
+        </div>
       </main>
 
       <!-- ── history rail ──────────────────────────────────────────────── -->
@@ -408,7 +720,8 @@
         <div class="hist-head">
           <span>history</span>
           <span class="grow"></span>
-          <button id="btn-hist-save-all" class="link" title="Save every image in the history" disabled>save all</button>
+          <button id="btn-hist-save-all" class="link" title="Save every image in the history, with a manifest of every control that made it" disabled>save all</button>
+          <button id="btn-hist-load" class="link" title="Load a manifest and put its controls back">load…</button>
           <button id="btn-hist-clear" class="link" title="Clear the render history" disabled>clear</button>
         </div>
         <div id="hist-list" class="hist-list">

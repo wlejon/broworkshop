@@ -120,7 +120,12 @@ export function initRender(ctx) {
     const c = document.createElement('canvas');
     c.width = w; c.height = h;
     c.getContext('2d').drawImage(bitmap, 0, 0);
-    history.unshift({ id: ++histSeq, canvas: c, w: w, h: h, seed: meta.seed, steps: meta.steps });
+    history.unshift({ id: ++histSeq, canvas: c, w: w, h: h, seed: meta.seed, steps: meta.steps,
+                      // Every render carries the message that made it and the
+                      // rack that built the message: the manifest is written
+                      // from these, and "load a manifest" puts them back.
+                      msg: meta.msg || null, controls: meta.controls || null,
+                      at: meta.at || Date.now() });
     if (history.length > HISTORY_MAX) history.length = HISTORY_MAX;
     renderHistory();
   }
@@ -188,33 +193,6 @@ export function initRender(ctx) {
       ctx.status('save failed: ' + (e.message || e), 'err');
     }
   }
-  function saveAll() {
-    if (typeof window.showOpenFolderDialog !== 'function') {
-      ctx.status('folder dialog unavailable in this build', 'err'); return;
-    }
-    const dir = window.showOpenFolderDialog('');
-    if (!dir) return;
-    const sep = dir.indexOf('\\') >= 0 ? '\\' : '/';
-    // Control-driven re-renders deliberately reuse the seed, so seed+size is
-    // NOT unique across the history — index the names.
-    const pad = String(history.length).length;
-    let n = 0, failed = 0, lastErr = '';
-    for (let i = history.length - 1, k = 0; i >= 0; i--, k++) {
-      const h = history[i];
-      const idx = String(k + 1);
-      const name = 'qwen21_' + '0'.repeat(Math.max(0, pad - idx.length)) + idx +
-                   '_' + h.seed + '_' + h.w + 'x' + h.h + '.png';
-      try {
-        const px = h.canvas.getContext('2d').getImageData(0, 0, h.w, h.h);
-        bro.image.encodePngFile(dir + sep + name, px.data, h.w, h.h, 4);
-        n++;
-      } catch (e) { failed++; lastErr = e.message || String(e); }
-    }
-    ctx.status('saved ' + n + ' image' + (n === 1 ? '' : 's') + ' to ' + dir +
-               (failed ? ' · ' + failed + ' failed: ' + lastErr : ''),
-               failed ? 'err' : (n ? 'ok' : 'err'));
-  }
-
   // ── A/B against the pinned baseline ─────────────────────────────────────
   // The baseline is the desk's: the last render made with every fader at zero,
   // or whatever "pin baseline" pinned. Toggling swaps the canvas and prints
@@ -245,7 +223,6 @@ export function initRender(ctx) {
     $('seed-recent').value = '';
   });
   $('btn-hist-clear').addEventListener('click', () => { history = []; renderHistory(); });
-  $('btn-hist-save-all').addEventListener('click', saveAll);
   refreshSeedRecent();
   renderHistory();
 
@@ -282,6 +259,27 @@ export function initRender(ctx) {
     if (viewUserZoomed) setScale(viewScale); else resetView();
   });
 
+  // Render one message without touching the main canvas or the history — the
+  // primitive every strip and grid in the lab is built from (the prefix walk,
+  // the explore grid, the spatial composite). It marks the app busy so the
+  // deck's Generate cannot race it, and hands back the decoded frame.
+  function renderOffscreen(msg, cb) {
+    if (!ctx.loaded) { cb(new Error('no model loaded')); return; }
+    ctx.setBusy(true);
+    const t0 = Date.now();
+    ctx.client.send(msg, (err, resp) => {
+      ctx.setBusy(false);
+      if (err) { cb(err); return; }
+      const c = document.createElement('canvas');
+      c.width = resp.width; c.height = resp.height;
+      c.getContext('2d').drawImage(resp.bitmap, 0, 0);
+      cb(null, c.getContext('2d').getImageData(0, 0, resp.width, resp.height),
+         resp, Date.now() - t0);
+    });
+  }
+
+  ctx.renderOffscreen = renderOffscreen;
+  ctx.refreshHistory = renderHistory;
   ctx.drawBitmap = drawBitmap;
   ctx.recordSeed = recordSeed;
   ctx.addHistoryEntry = addHistoryEntry;

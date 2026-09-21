@@ -3,6 +3,24 @@
 
 export function $(id) { return document.getElementById(id); }
 
+// A minted axis direction is 4096 floats; localStorage holds strings, so the
+// bytes go through base64 rather than through a JSON array of numbers (which
+// would be five times the size and lossy at the last decimal).
+export function f32ToB64(f) {
+  const u = new Uint8Array(f.buffer, f.byteOffset, f.byteLength);
+  let s = '';
+  for (let i = 0; i < u.length; i += 8192) {
+    s += String.fromCharCode.apply(null, u.subarray(i, Math.min(i + 8192, u.length)));
+  }
+  return btoa(s);
+}
+export function b64ToF32(s) {
+  const bin = atob(s);
+  const u = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+  return new Float32Array(u.buffer);
+}
+
 // Joint-sequence geometry (docs/diffusion-control-api.js section 7, note (c),
 // and qwen-image-research/lib/masks.js). One gate-mask row covers a 16x16 pixel
 // square: the VAE is 16x and the DiT consumes the latent unpatched, so the

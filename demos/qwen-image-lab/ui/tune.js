@@ -26,7 +26,7 @@ export function initTune(ctx) {
     ['mod-gate2', 'gate2', 'the SwiGLU residual\'s gate, pre-tanh — the model\'s largest modulation direction, and 74% of it sits where tanh\' < 0.05'],
   ];
   const mod = CHUNKS.map(([id, label, title]) => ctx.buildCtl({
-    label: label, title: title, id: id, key: id,
+    label: label, title: title, id: id, key: id, lane: 'mod',
     min: -0.5, max: 0.5, step: 0.005,
     value: T(id, 0),
     host: $('mod-rows'), section: 'tune',
@@ -51,7 +51,7 @@ export function initTune(ctx) {
   // One (1, hidden) knob on the final adaptive scale the target rows pass
   // through on the way to proj_out.
   const normOut = ctx.buildCtl({
-    label: 'norm_out scale delta', id: 'normout', key: 'normout',
+    label: 'norm_out scale delta', id: 'normout', key: 'normout', lane: 'normOut',
     title: 'added to the final adaptive scale before proj_out',
     min: -0.5, max: 0.5, step: 0.005, value: T('normout', 0),
     host: $('normout-rows'), section: 'tune',
@@ -61,11 +61,11 @@ export function initTune(ctx) {
   // The one prefix-side hook that needs no re-extraction: a dial applied where
   // the cached K/V are READ, idempotent, and it survives a cache reset.
   const pkv = {
-    k: ctx.buildCtl({ label: 'K scale', id: 'pkv-k', key: 'pkv-k',
+    k: ctx.buildCtl({ label: 'K scale', id: 'pkv-k', key: 'pkv-k', lane: 'prefixKv',
                       title: 'flattens the attention pattern the prompt induces',
                       min: 0, max: 1.5, step: 0.05, neutral: 1.0, value: T('pkv-k', 1),
                       host: $('pkv-rows'), section: 'tune', commit: () => {} }),
-    v: ctx.buildCtl({ label: 'V scale', id: 'pkv-v', key: 'pkv-v',
+    v: ctx.buildCtl({ label: 'V scale', id: 'pkv-v', key: 'pkv-v', lane: 'prefixKv',
                       title: 'fades the prompt\'s contribution, leaving its attention pattern intact',
                       min: 0, max: 1.5, step: 0.05, neutral: 1.0, value: T('pkv-v', 1),
                       host: $('pkv-rows'), section: 'tune', commit: () => {} }),

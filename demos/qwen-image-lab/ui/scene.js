@@ -187,6 +187,11 @@ export function initScene(ctx) {
       : { pixels: c.pixels, width: c.width, height: c.height, channels: c.channels || 3 }));
   });
 
+  // The same entries the generate message carries, for anything that wants to
+  // run the vision tower over them without rendering — the image mint does.
+  ctx.conditionImageEntries = () => conds.map((c) => (c.path
+    ? { path: c.path }
+    : { pixels: c.pixels, width: c.width, height: c.height, channels: c.channels || 3 }));
   ctx.deriveSize = () => $('cond-derive').checked && conds.length > 0;
   ctx.outputResolution = () => +$('cond-outres').value || 1024;
   ctx.conditionCount = () => conds.length;

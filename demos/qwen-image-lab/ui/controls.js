@@ -5,7 +5,8 @@
 
 import { $ } from '/app/ui/util.js';
 
-const SECTIONS = ['scene', 'axes', 'desk', 'gate', 'tune'];
+const SECTIONS = ['scene', 'axes', 'mint', 'desk', 'sched', 'gate', 'spatial',
+                  'tune', 'prefix'];
 
 export function initControls(ctx) {
   // ── control registry (drives the deck + section badges) ─────────────────
@@ -136,6 +137,15 @@ export function initControls(ctx) {
       registry.push({
         group: cfg.group,
         section: cfg.section,
+        // The schedule editor and the explore grid both address controls
+        // rather than DOM: `key` names one, `lane` says which per-step curve it
+        // rides on (several controls can share a lane — the four gate
+        // multipliers are one hook), and `set` is how a grid cell is adopted.
+        key: cfg.key || cfg.id || cfg.label,
+        lane: cfg.lane || null,
+        label: cfg.label,
+        min: cfg.min, max: cfg.max, step: cfg.step, neutral: neutral,
+        set: (v, opts) => setValue(v, opts),
         active: () => +range.value !== neutral,
         value: () => +range.value,
         chip: cfg.chip || (() => {
@@ -296,6 +306,11 @@ export function initControls(ctx) {
   ctx.switchSection = switchSection;
   ctx.switchTab = switchTab;
   ctx.registryLast = () => registry[registry.length - 1];
+  // Every registered control, and the subset that is off neutral — what the
+  // schedule editor draws lanes for and what the explore grid offers as axes.
+  ctx.controls = () => registry.slice();
+  ctx.armedControls = () => registry.filter((r) => r.active());
+  ctx.controlByKey = (k) => registry.filter((r) => r.key === k)[0] || null;
   // A deck entry for a control that isn't a slider — a painted gate mask is on
   // or off, but it belongs on the deck like everything else that changes what
   // the model is told.

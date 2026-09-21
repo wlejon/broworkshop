@@ -83,9 +83,11 @@ export function initModel(ctx) {
     modelSum('loading…');
     startLoadOverlay();
     ctx.status('loading Qwen-Image 2.1 — 7.1B DiT + Qwen3-VL-8B, quantized as it streams in');
-    ctx.client.send({ type: 'load', modelDir: modelDir,
-                      quantizeWeights: $('quantize').checked,
-                      dictPath: DICT, controllerPath: CONTROLLER }, (err, msg) => {
+    ctx.client.send(ctx.buildLoadMsg({
+      type: 'load', modelDir: modelDir,
+      quantizeWeights: $('quantize').checked,
+      dictPath: DICT, controllerPath: CONTROLLER,
+    }), (err, msg) => {
       stopLoadOverlay();
       if (err) {
         ctx.setBusy(false); backend('error', 'err');
@@ -110,6 +112,7 @@ export function initModel(ctx) {
       loadedModelDir = modelDir;
       ctx.buildAxisBank(msg.axes || []);
       ctx.applyDesk(msg.controller);
+      ctx.announceLoaded(msg);
     });
   }
 

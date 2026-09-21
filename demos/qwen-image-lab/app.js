@@ -39,6 +39,13 @@ import { initAxes } from "/app/ui/axes.js";
 import { initDesk } from "/app/ui/desk.js";
 import { initGate } from "/app/ui/gate.js";
 import { initTune } from "/app/ui/tune.js";
+import { initMint } from "/app/ui/mint.js";
+import { initSchedule } from "/app/ui/schedule.js";
+import { initSpatial } from "/app/ui/spatial.js";
+import { initPrefix } from "/app/ui/prefix.js";
+import { initSignals } from "/app/ui/signals.js";
+import { initExplore } from "/app/ui/explore.js";
+import { initManifest } from "/app/ui/manifest.js";
 import { initRender } from "/app/ui/render.js";
 import { initModel } from "/app/ui/model.js";
 
@@ -72,7 +79,7 @@ function init() {
 
   // ── shared context: state accessors, cores, and feature hook registries ──
   const persistHooks = [], generateMsgHooks = [], refreshButtonsHooks = [],
-        idleHooks = [], renderHooks = [];
+        idleHooks = [], renderHooks = [], loadMsgHooks = [], loadedHooks = [];
   const ctx = {
     client: client, prefs: prefs,
     DEFAULTS: DEFAULTS, roundSize: roundSize, SIZE_MULT: SIZE_MULT,
@@ -91,6 +98,13 @@ function init() {
     // Every full render is announced here: the retention meter, the A/B
     // baseline and the gate tab's result pane all read the same frame.
     onRender: (fn) => renderHooks.push(fn),
+    // A feature that owns state the WORKER has to rebuild after a load (the
+    // minted axes are the only one today) contributes it to the load message
+    // and reads the answer back.
+    onLoadMsg: (fn) => loadMsgHooks.push(fn),
+    onLoaded: (fn) => loadedHooks.push(fn),
+    buildLoadMsg: (msg) => { loadMsgHooks.forEach((fn) => fn(msg)); return msg; },
+    announceLoaded: (resp) => loadedHooks.forEach((fn) => fn(resp)),
   };
 
   function persist() {
@@ -180,7 +194,11 @@ function init() {
       ctx.recordSeed(usedSeed);
       ctx.addHistoryEntry(resp.bitmap, resp.width, resp.height,
                           { seed: usedSeed, steps: msg.opts.steps,
-                            width: resp.width, height: resp.height });
+                            width: resp.width, height: resp.height,
+                            // What made this frame, kept beside it: the
+                            // manifest is written from here and "load a
+                            // manifest" puts the same rack back.
+                            msg: msg, controls: ctx.snapshotControls() });
       status('done', 'ok');
       ctx.setStackMeter(resp.stack);
       $('timing').textContent =
@@ -210,9 +228,15 @@ function init() {
   initControls(ctx);
   initScene(ctx);
   initAxes(ctx);
+  initMint(ctx);
   initDesk(ctx);
   initGate(ctx);
+  initSpatial(ctx);
   initTune(ctx);
+  initPrefix(ctx);
+  // The schedule reads every OTHER control's registry entry, so it builds its
+  // lanes last — by then the rack it schedules exists.
+  initSchedule(ctx);
 
   function bindCounter(taId, countId) {
     const ta = $(taId), out = $(countId);
@@ -244,6 +268,9 @@ function init() {
   window.__ctx = ctx;
 
   initRender(ctx);
+  initManifest(ctx);
+  initSignals(ctx);
+  initExplore(ctx);
   initModel(ctx);
 
   // ── boot ─────────────────────────────────────────────────────────────────

@@ -45,11 +45,13 @@ input, textarea { user-select: text; }
 
 /* section nav — pinned at the rail top */
 #rail-nav {
-  display: flex; gap: 2px; flex: none;
+  display: flex; gap: 2px; flex: none; flex-wrap: wrap;
   padding: 8px 10px 0; background: #0f1218; border-bottom: 1px solid #1a1f27;
 }
 .secbtn {
-  flex: 1; position: relative;
+  /* Nine sections do not fit one row of a 430px rail; they wrap into two and
+     each keeps a legible width rather than shrinking to four characters. */
+  flex: 1 1 60px; position: relative;
   background: transparent; border: 1px solid transparent; border-bottom: none;
   border-radius: 6px 6px 0 0; color: #7c8593; padding: 11px 3px 6px;
   font-size: 12px; letter-spacing: 0.2px;
@@ -550,3 +552,99 @@ details[open] > .ctl-cat::before { content: '▾ '; }
 .hist-seed:hover { color: #f0a860; }
 .hist-actions { display: flex; gap: 10px; }
 .hist-del:hover { color: #e0674a; }
+
+/* ── mint ─────────────────────────────────────────────────────────────── */
+.mint-progress {
+  height: 3px; background: #161b23; border-radius: 2px; margin: 6px 0;
+  overflow: hidden; display: none;
+}
+.mint-progress.show { display: block; }
+.mint-progress > div { height: 100%; width: 0%; background: #c9822f; transition: width 0.1s linear; }
+.axis-bars { display: flex; flex-direction: column; gap: 3px; margin-bottom: 6px; }
+.axis-bar-row {
+  display: flex; align-items: center; gap: 6px; font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.axis-bar-name { width: 120px; color: #9aa3b0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.axis-bar-track { flex: 1; height: 6px; background: #161b23; border-radius: 3px; position: relative; }
+.axis-bar-fill { position: absolute; top: 0; height: 100%; border-radius: 3px; }
+.axis-bar-fill.pos { left: 50%; background: #c9822f; }
+.axis-bar-fill.neg { right: 50%; background: #4a7fb5; }
+.axis-bar-val { width: 40px; text-align: right; color: #6b7482; }
+.mine-del { color: #6b7482; }
+.mine-del:hover { color: #e0674a; }
+
+/* ── prefix slots ─────────────────────────────────────────────────────── */
+.pfx-slots { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.pfx-slot {
+  flex: 1 1 90px; border: 1px solid #1a1f27; border-radius: 6px; background: #0b0e13;
+  padding: 6px 8px; font-size: 10px; color: #4d5562; text-align: left; min-width: 0;
+}
+.pfx-slot.filled { border-color: #3a4757; color: #9aa3b0; }
+.pfx-slot .pfx-slot-name {
+  display: block; color: #cdd5e0; font-size: 11px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pfx-slot.filled:hover { border-color: #c9822f; }
+
+/* ── walk strips (prefix walk, explore walk, x̂0 timeline) ─────────────── */
+.walk-strip {
+  display: flex; gap: 6px; overflow-x: auto; padding: 8px 4px; min-height: 0;
+  align-items: flex-start;
+}
+.walk-cell {
+  flex: none; display: flex; flex-direction: column; gap: 2px; align-items: center;
+  border: 1px solid #1a1f27; border-radius: 6px; padding: 3px; background: #0b0e13;
+}
+.walk-cell.pick { border-color: #c9822f; }
+.walk-cell canvas { display: block; border-radius: 3px; }
+.walk-cell .walk-label {
+  font-size: 9px; color: #6b7482; font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.walk-cell .walk-ret { font-size: 9px; color: #7da7d9; font-variant-numeric: tabular-nums; }
+.walk-cell .walk-ret.under { color: #e0674a; }
+
+/* ── explore grid ─────────────────────────────────────────────────────── */
+.ex-body { flex: 1; overflow: auto; min-height: 0; padding: 10px 16px; position: relative; }
+.ex-grid { display: grid; gap: 6px; justify-content: start; }
+.ex-cell {
+  border: 1px solid #1a1f27; border-radius: 6px; background: #0b0e13; padding: 3px;
+  display: flex; flex-direction: column; gap: 2px; align-items: center;
+}
+.ex-cell:hover { border-color: #c9822f; }
+.ex-cell canvas { display: block; border-radius: 3px; cursor: pointer; }
+.ex-cell .ex-label { font-size: 9px; color: #6b7482; font-variant-numeric: tabular-nums; }
+
+/* ── schedule editor ──────────────────────────────────────────────────── */
+.sched-wrap { flex: 1; overflow: auto; min-height: 0; padding: 10px 16px; position: relative; }
+#sched-canvas { display: block; background: #0b0e13; border: 1px solid #1a1f27; border-radius: 6px; }
+.sched-lanes { display: flex; flex-direction: column; gap: 4px; }
+.sched-lane-row {
+  display: flex; align-items: center; gap: 6px; font-size: 10px;
+  border: 1px solid #1a1f27; border-radius: 6px; padding: 4px 6px; background: #0b0e13;
+}
+.sched-lane-row.sel { border-color: #c9822f; }
+.sched-lane-name { flex: 1; color: #cdd5e0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sched-lane-shape { color: #6b7482; font-variant-numeric: tabular-nums; }
+
+/* ── spatial regions ──────────────────────────────────────────────────── */
+.sp-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }
+.sp-row {
+  display: flex; align-items: center; gap: 6px; font-size: 11px;
+  border: 1px solid #1a1f27; border-radius: 6px; padding: 5px 7px; background: #0b0e13;
+}
+.sp-row.sel { border-color: #c9822f; }
+.sp-swatch { width: 12px; height: 12px; border-radius: 3px; flex: none; }
+.sp-name { flex: 1; color: #cdd5e0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sp-meta { color: #6b7482; font-size: 10px; font-variant-numeric: tabular-nums; }
+
+/* ── gate capture strip ───────────────────────────────────────────────── */
+.sig-body { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: auto; }
+.gate-strip { display: flex; flex-direction: column; gap: 6px; padding: 10px 16px; }
+.gate-strip-row { display: flex; align-items: center; gap: 8px; }
+.gate-strip-label { width: 74px; font-size: 10px; color: #7c8593; text-align: right; }
+.gate-strip-cells { display: flex; gap: 1px; flex: 1; }
+.gate-cell { flex: 1; height: 22px; border-radius: 2px; min-width: 3px; }
+.gate-legend {
+  padding: 0 16px 10px; font-size: 10px; color: #6b7482; font-variant-numeric: tabular-nums;
+}

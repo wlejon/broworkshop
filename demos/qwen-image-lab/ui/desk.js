@@ -52,7 +52,7 @@ export function initDesk(ctx) {
                ' sigma (tau x gainCal ' + f.gain + ')' +
                (f.knobs.length ? ' · spends ' + f.knobs.join(', ') : '') +
                (f.clipped ? ' · clipped at fit time' : ''),
-        key: 'desk.' + f.name, group: 'desk',
+        key: 'desk.' + f.name, group: 'desk', lane: 'desk:' + f.name,
         min: -2, max: 2, step: 0.05,
         value: +saved[f.name] || 0,
         section: 'desk', host: host,
@@ -178,12 +178,112 @@ export function initDesk(ctx) {
   ctx.setFader = (n, v) => { if (faders[n]) faders[n].set(v); };
   ctx.faderNames = () => Object.keys(faders);
   ctx.baselineFrame = () => baseline;
+  // ── the prompt-conditioned desk ─────────────────────────────────────────
+  // Round 2's diagnosis was that a fader's per-image inconsistency is a
+  // shortfall of scene knowledge, and that no per-image gain fixes it: the
+  // forward model has no scene input and structurally cannot know which
+  // picture it is standing in front of. Round 3's `prompt` block gives it one
+  // — the prompt's own conditioning rows, pooled to 4099 numbers, projected to
+  // an 8-dimensional p, which indexes a Jacobian the fader directions are
+  // re-derived from. One encode and one matrix product, no render.
+  //
+  // The FADER POSITIONS do not change when this is switched on. What changes
+  // is where each fader points, so the panel prints the drift: the cosine
+  // between the conditioned direction and the global one, and how much longer
+  // or shorter it got.
+  let conditioned = !!ctx.prefs.deskConditioned;
+  $('desk-conditioned').checked = conditioned;
+
+  function renderDrift(drift, p) {
+    const host = $('desk-drift');
+    host.innerHTML = '';
+    if (!drift) return;
+    drift.forEach((d) => {
+      const line = document.createElement('div');
+      line.className = 'travel-row';
+      const nm = document.createElement('span');
+      nm.className = 'travel-name'; nm.textContent = d.name;
+      const amt = document.createElement('span');
+      amt.className = 'travel-amt';
+      amt.textContent = 'cos ' + d.cos.toFixed(3) + ' · ×' + d.ratio.toFixed(2);
+      amt.title = 'cos 1.00 × 1.00 would mean this prompt asks for exactly the global fader';
+      const note = document.createElement('span');
+      note.className = 'travel-knobs';
+      note.textContent = d.clipped ? 'clipped' : (d.cos < 0.9 ? 're-aimed' : '');
+      line.appendChild(nm); line.appendChild(amt); line.appendChild(note);
+      host.appendChild(line);
+    });
+    if (p && p.length) {
+      const line = document.createElement('div');
+      line.className = 'travel-row';
+      const nm = document.createElement('span');
+      nm.className = 'travel-name'; nm.textContent = 'p';
+      const amt = document.createElement('span');
+      amt.className = 'travel-amt';
+      amt.textContent = p.map((v) => v.toFixed(2)).join(' ');
+      line.appendChild(nm); line.appendChild(amt);
+      host.appendChild(line);
+    }
+  }
+
+  function syncConditioned(refresh) {
+    const has = info && info.conditioned;
+    $('desk-cond-row').style.display = has ? '' : 'none';
+    if (!has) {
+      $('desk-cond-state').textContent = 'global — this file has no prompt block';
+      renderDrift(null);
+      return;
+    }
+    if (!conditioned) {
+      $('desk-cond-state').textContent = 'global';
+      renderDrift(null);
+      return;
+    }
+    if (!refresh || !ctx.loaded) { $('desk-cond-state').textContent = 'conditioned'; return; }
+    ctx.setBusy(true);
+    $('desk-cond-state').textContent = 'encoding the prompt…';
+    ctx.client.send({ type: 'conditionDesk', prompt: $('prompt').value, on: true }, (err, resp) => {
+      ctx.setBusy(false);
+      if (err) {
+        conditioned = false;
+        $('desk-conditioned').checked = false;
+        $('desk-cond-state').textContent = String(err.message || err);
+        return;
+      }
+      $('desk-cond-state').textContent = 'conditioned on this prompt';
+      renderDrift(resp.drift, resp.p);
+    });
+  }
+
+  $('desk-conditioned').addEventListener('change', () => {
+    conditioned = $('desk-conditioned').checked;
+    ctx.persist();
+    syncConditioned(true);
+    if (ctx.live && !deskIsNeutral()) ctx.schedule('full');
+  });
+  $('prompt').addEventListener('change', () => { if (conditioned) syncConditioned(true); });
+
   ctx.onPersist((p) => {
     const d = {};
     for (const k in faders) if (faders.hasOwnProperty(k)) d[k] = faders[k].value;
     p.desk = d;
+    p.deskConditioned = conditioned;
   });
-  ctx.onGenerateMsg((msg) => { msg.desk = ctx.deskValues(); });
+  ctx.onGenerateMsg((msg) => {
+    msg.desk = ctx.deskValues();
+    if (conditioned) msg.conditioned = true;
+  });
+  ctx.onLoaded(() => syncConditioned(false));
+
+  ctx.deskConditioned = () => conditioned;
+  ctx.setDeskConditioned = (on) => {
+    conditioned = !!on;
+    $('desk-conditioned').checked = conditioned;
+    ctx.persist();
+    syncConditioned(true);
+  };
+  ctx.deskDriftText = () => $('desk-drift').textContent;
 
   applyDesk(null);   // the empty state, until a model load brings the file
+  syncConditioned(false);
 }

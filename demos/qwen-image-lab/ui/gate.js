@@ -29,7 +29,7 @@ export function initGate(ctx) {
   // ── the four multipliers ────────────────────────────────────────────────
   const rows = {};
   const mk = (id, label, title) => ctx.buildCtl({
-    label: label, title: title, id: id, key: id,
+    label: label, title: title, id: id, key: id, lane: 'gateRows',
     min: 0, max: 2, step: 0.05, neutral: 1.0,
     value: G(id, 1.0),
     host: $('gate-rows'), section: 'gate',
@@ -57,11 +57,13 @@ export function initGate(ctx) {
 
   // ── the post-tanh delta ─────────────────────────────────────────────────
   const delta = {
-    attn: ctx.buildCtl({ label: 'attn gate delta', id: 'gd-attn',
+    attn: ctx.buildCtl({ label: 'attn gate delta', id: 'gd-attn', key: 'gd-attn',
+                         lane: 'gateDelta',
                          title: 'added to the effective attention gate, after the tanh and after every scale',
                          min: -0.5, max: 0.5, step: 0.01, value: G('gd-attn', 0),
                          host: $('gate-delta-rows'), section: 'gate', commit: () => {} }),
-    mlp: ctx.buildCtl({ label: 'mlp gate delta', id: 'gd-mlp',
+    mlp: ctx.buildCtl({ label: 'mlp gate delta', id: 'gd-mlp', key: 'gd-mlp',
+                        lane: 'gateDelta',
                         title: 'added to the effective SwiGLU gate — the channels a mod delta cannot move',
                         min: -0.5, max: 0.5, step: 0.01, value: G('gd-mlp', 0),
                         host: $('gate-delta-rows'), section: 'gate', commit: () => {} }),
