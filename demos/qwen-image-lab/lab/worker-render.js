@@ -393,5 +393,8 @@ export function savePrefix(env, msg) {
   st.stepOnce();
   pipe.qwenImage21SavePrefixCache(msg.slot | 0);
   clearHooks(pipe);
-  return { slot: msg.slot | 0, prefixRows: geo.prefix, imgLen: geo.imgLen };
+  // The layout a blend has to match is the prefix length AND the target grid,
+  // so the slot is reported with the size it was taken at.
+  return { slot: msg.slot | 0, prefixRows: geo.prefix, imgLen: geo.imgLen,
+           width: opts.width | 0, height: opts.height | 0 };
 }

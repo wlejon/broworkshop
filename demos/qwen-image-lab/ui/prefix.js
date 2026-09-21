@@ -24,7 +24,7 @@ import { $, retention, pixelMse } from '/app/ui/util.js';
 
 export function initPrefix(ctx) {
   const prefs = ctx.prefs;
-  let slots = [];      // [{valid, prompt, rows, imgLen}]
+  let slots = [];      // [{valid, prompt, rows, imgLen, width, height}]
   let capacity = 0;
   let walkFrames = [];
 
@@ -56,11 +56,21 @@ export function initPrefix(ctx) {
     neutral: 5, decimals: 0, value: prefs.pfxWalkN != null ? +prefs.pfxWalkN : 5,
     host: $('pfx-walk-rows'), commit: () => {},
   });
-  const walkPx = ctx.buildCtl({
-    label: 'frame size', id: 'pfx-walk-px', min: 128, max: 768, step: 32,
-    neutral: 256, decimals: 0, value: prefs.pfxWalkPx != null ? +prefs.pfxWalkPx : 256,
-    host: $('pfx-walk-rows'), commit: () => {},
-  });
+  // There is deliberately no frame-size control here. A slot's layout is its
+  // prefix length AND its target grid, so a cache saved at 512² cannot be
+  // blended into a 256² render — the binding throws rather than mis-aligning.
+  // The walk therefore runs at whatever size the slots were saved at, and the
+  // strip scales the thumbnails down for the eye instead.
+
+  // A cache's layout is its prefix length AND its target grid, so a slot taken
+  // at 512² cannot be blended into a render of another size — the binding
+  // throws rather than mis-aligning. The cards say so, and the walk follows the
+  // slot rather than the scene.
+  function sizeMatches(s) {
+    if (!s || !s.width) return true;
+    return s.width === ctx.roundSize($('width').value) &&
+           s.height === ctx.roundSize($('height').value);
+  }
 
   // ── slot cards ──────────────────────────────────────────────────────────
   function renderSlots() {
@@ -76,9 +86,14 @@ export function initPrefix(ctx) {
       nm.textContent = 'slot ' + i;
       const sub = document.createElement('span');
       sub.textContent = s.valid
-        ? (s.rows != null ? s.rows + ' prefix rows' : 'saved')
+        ? ((s.rows != null ? s.rows + ' rows' : 'saved') +
+           (s.width ? ' · ' + s.width + '×' + s.height : ''))
         : 'empty';
-      b.title = s.valid && s.prompt ? s.prompt : 'save a prefix into this slot';
+      b.title = s.valid && s.prompt
+        ? s.prompt + (s.width ? '\ntied to ' + s.width + '×' + s.height +
+                                ' — a blend needs the same target grid' : '')
+        : 'save a prefix into this slot';
+      if (s.valid && s.width && !sizeMatches(s)) b.classList.add('mismatch');
       b.appendChild(nm); b.appendChild(sub);
       b.addEventListener('click', () => {
         if (!s.valid) { $('pfx-save-slot').value = String(i); return; }
@@ -99,8 +114,12 @@ export function initPrefix(ctx) {
       }
       if (keep !== '' && +keep < capacity) sel.value = keep;
     });
-    const n = slots.filter((s) => s && s.valid).length;
-    status(n + ' / ' + capacity + ' saved');
+    const filled = slots.filter((s) => s && s.valid);
+    const n = filled.length;
+    const off = filled.filter((s) => !sizeMatches(s)).length;
+    status(n + ' / ' + capacity + ' saved' +
+           (off ? ' · ' + off + ' taken at another size — render there to blend it' : ''),
+           off ? 'warn' : '');
     $('btn-pfx-walk').disabled = !ctx.loaded || n < 1;
   }
 
@@ -111,6 +130,8 @@ export function initPrefix(ctx) {
       slots[meta.slot].prompt = meta.prompt;
       slots[meta.slot].rows = meta.prefixRows;
       slots[meta.slot].imgLen = meta.imgLen;
+      slots[meta.slot].width = meta.width;
+      slots[meta.slot].height = meta.height;
     }
     renderSlots();
   }
@@ -145,27 +166,35 @@ export function initPrefix(ctx) {
   }
 
   // ── the walk ────────────────────────────────────────────────────────────
-  // N frames from slot A to slot B, at a reduced size so the strip is a
-  // glance rather than a coffee break. Every frame is the same seed and the
-  // same prompt; only the cached prefix moves.
+  // N frames from slot A to slot B. Every frame is the same seed and the same
+  // prompt; only the cached prefix moves. The frames render at the SLOT's
+  // size, not the scene's — a cache carries its target grid, so a smaller
+  // strip is not on offer here; the thumbnails are scaled for the eye instead.
   function doWalk() {
     if (!ctx.loaded) { ctx.status('load a model first', 'err'); return; }
     const a = +$('pfx-a').value || 0, b = +$('pfx-b').value || 0;
     if (!(slots[a] && slots[a].valid)) { ctx.status('slot A is empty', 'err'); return; }
     const n = walkN.value | 0;
-    const px = ctx.roundSize(walkPx.value);
+    const w = slots[a].width || ctx.roundSize($('width').value);
+    const h = slots[a].height || ctx.roundSize($('height').value);
+    if (slots[b] && slots[b].valid && b !== a &&
+        (slots[b].width !== w || slots[b].height !== h)) {
+      ctx.status('slots ' + a + ' and ' + b + ' were taken at different sizes — ' +
+                 'a blend needs the same target grid', 'err');
+      return;
+    }
     walkFrames = [];
     $('pfx-strip').innerHTML = '';
     ctx.switchSection('prefix');
     let i = 0;
     const step = () => {
       if (i >= n) {
-        ctx.status('walk done · ' + n + ' frames', 'ok');
+        ctx.status('walk done · ' + n + ' frames at ' + w + '×' + h, 'ok');
         return;
       }
       const t = n > 1 ? i / (n - 1) : 0;
       const msg = ctx.buildGenerateMsg();
-      msg.opts.width = px; msg.opts.height = px;
+      msg.opts.width = w; msg.opts.height = h;
       delete msg.opts.outputResolution;
       delete msg.gateMask;
       delete msg.regions;
@@ -216,6 +245,7 @@ export function initPrefix(ctx) {
   $('btn-pfx-save').addEventListener('click', doSave);
   $('btn-pfx-clear').addEventListener('click', doClear);
   $('btn-pfx-walk').addEventListener('click', doWalk);
+  ['width', 'height'].forEach((id) => $(id).addEventListener('change', renderSlots));
   ['pfx-a', 'pfx-b'].forEach((id) => $(id).addEventListener('change', () => {
     ctx.persist();
     if (ctx.live && (toA.value || toB.value)) ctx.schedule('full');
@@ -232,7 +262,7 @@ export function initPrefix(ctx) {
   });
   ctx.onPersist((p) => {
     p.pfxA = toA.value; p.pfxB = toB.value;
-    p.pfxWalkN = walkN.value; p.pfxWalkPx = walkPx.value;
+    p.pfxWalkN = walkN.value;
     p.pfxSelA = $('pfx-a').value; p.pfxSelB = $('pfx-b').value;
   });
   ctx.onGenerateMsg((msg) => {

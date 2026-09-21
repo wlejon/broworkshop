@@ -586,6 +586,9 @@ details[open] > .ctl-cat::before { content: '▾ '; }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .pfx-slot.filled:hover { border-color: #c9822f; }
+/* Taken at a size this scene is not rendering at — the grid is part of the
+   layout, so a blend against it would throw. */
+.pfx-slot.filled.mismatch { border-color: #4a4326; color: #e8c97a; }
 
 /* ── walk strips (prefix walk, explore walk, x̂0 timeline) ─────────────── */
 .walk-strip {

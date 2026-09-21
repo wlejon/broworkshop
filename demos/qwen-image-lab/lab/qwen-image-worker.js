@@ -364,6 +364,7 @@ function handleSavePrefix(msg) {
     var out = savePrefix(env(), msg);
     self.postMessage({ type: 'prefixSaved', slot: out.slot, prefixRows: out.prefixRows,
                        imgLen: out.imgLen, prompt: msg.prompt,
+                       width: out.width, height: out.height,
                        slots: prefixSlots(), ms: Math.round(now() - t0) });
   } catch (e) {
     fail('savePrefix', e);
