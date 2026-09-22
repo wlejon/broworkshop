@@ -47,6 +47,7 @@
         { "dir": "tools/csg-sculptor" },
         { "dir": "tools/desktop-notebook" },
         { "dir": "tools/neural-playground" },
+        { "dir": "tools/laya-triage" },
         { "dir": "demos/ai-arena" },
         { "dir": "demos/anim-lab" },
         { "dir": "demos/character-lab" },
