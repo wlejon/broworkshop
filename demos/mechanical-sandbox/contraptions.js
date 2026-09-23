@@ -3,7 +3,7 @@
 import {
     createGearMesh, createPulleyMesh, createCylinderSleeveMesh, createPistonHeadMesh,
     createConnectingRodMesh, createSteelSphereMesh, createBridgePlankMesh,
-    createPedestalMesh, createDynamicRod
+    createPedestalMesh, createDynamicRod, quatYTo
 } from "./visuals.js";
 
 // --- Active machine registry & state ---
@@ -190,7 +190,7 @@ export function buildClockworkPendulum(scene, state) {
         restitution: 0.85
     });
     const bobNode = createSteelSphereMesh(scene, 0.65, '#e2e8f0');
-    registerPart(bobBody, bobNode);
+    const bobEntry = registerPart(bobBody, bobNode);
 
     const pendulumHinge = createHingeConstraint({
         body1: bobBody,
@@ -203,8 +203,8 @@ export function buildClockworkPendulum(scene, state) {
     // Dynamic brass rod visual
     const rodVisual = createDynamicRod(scene, '#d4af37', 0.04);
     activeRods.push(rodVisual);
-    bobBody.rodVisual = rodVisual;
-    bobBody.pivotPos = { x: 0, y: pivotY, z: 0 };
+    bobEntry.rodVisual = rodVisual;
+    bobEntry.pivotPos ={ x: 0, y: pivotY, z: 0 };
 }
 
 // -----------------------------------------------------------------------------
@@ -305,7 +305,7 @@ export function buildGearboxAndPulley(scene, state) {
         color: '#ff8008',
         roughness: 0.5
     });
-    registerPart(crateBody, crateNode);
+    const crateEntry = registerPart(crateBody, crateNode);
 
     const weightX = 5.0;
     const weightBody = Physics.createBody({
@@ -354,7 +354,7 @@ export function buildGearboxAndPulley(scene, state) {
     activeRods.push(r1, r2, rTop);
     rTop.set(fixP1, fixP2);
 
-    crateBody.pulleyVisual = { r1, r2, fixP1, fixP2, weightBody };
+    crateEntry.pulleyVisual ={ r1, r2, fixP1, fixP2, weightBody };
 }
 
 // -----------------------------------------------------------------------------
@@ -388,7 +388,7 @@ export function buildPistonAndCrankshaft(scene, state) {
         roughness: 0.3,
         metalness: 0.8
     });
-    registerPart(crankBody, crankNode);
+    const crankEntry = registerPart(crankBody, crankNode);
 
     const crankHinge = createHingeConstraint({
         body1: crankBody,
@@ -427,7 +427,7 @@ export function buildPistonAndCrankshaft(scene, state) {
     const rodVisual = createConnectingRodMesh(scene, conrodLength, 0.22, '#94a3b8');
     activeMeshes.push(rodVisual);
 
-    crankBody.conrodVisual = {
+    crankEntry.conrodVisual = {
         rodNode: rodVisual,
         crankOrigin,
         crankRadius,
@@ -478,7 +478,7 @@ export function buildNewtonsCradle(scene, state) {
             angularDamping: 0.001
         });
         const ballMesh = createSteelSphereMesh(scene, ballRadius, '#f1f5f9');
-        registerPart(ball, ballMesh);
+        const ballEntry = registerPart(ball, ballMesh);
 
         // V-suspension strings
         const pL = { x, y: frameY, z: -zOffset };
@@ -502,7 +502,7 @@ export function buildNewtonsCradle(scene, state) {
         const rodR = createDynamicRod(scene, '#94a3b8', 0.015);
         activeRods.push(rodL, rodR);
 
-        ball.cradleVisual = { rodL, rodR, pL, pR };
+        ballEntry.cradleVisual ={ rodL, rodR, pL, pR };
     }
 }
 
@@ -548,7 +548,7 @@ export function buildSuspensionBridge(scene, state) {
             angularDamping: 0.2
         });
         const plankMesh = createBridgePlankMesh(scene, plankHw, plankHh, plankHd, '#8b5a2b');
-        registerPart(plankBody, plankMesh);
+        const plankEntry = registerPart(plankBody, plankMesh);
         planks.push(plankBody);
 
         // Hanger cables from overhead catenary
@@ -575,7 +575,7 @@ export function buildSuspensionBridge(scene, state) {
         const rodR = createDynamicRod(scene, '#94a3b8', 0.02);
         activeRods.push(rodL, rodR);
 
-        plankBody.bridgeHanger = { rodL, rodR, topAnchorL, topAnchorR, plankHw };
+        plankEntry.bridgeHanger ={ rodL, rodR, topAnchorL, topAnchorR, plankHw };
     }
 
     // Connect adjacent planks with hinge/distance constraints
@@ -654,7 +654,7 @@ export function updateContraptions(dt) {
 
         if (b.conrodVisual) {
             const { rodNode, crankOrigin, crankRadius, pistonBody } = b.conrodVisual;
-            const pTf = Physics.getTransform(pistonBody.tag);
+            const pTf = Physics.getTransform(pistonBody);
             // Crank pin position
             const angle = Math.atan2(tf.rotation.z, tf.rotation.w) * 2.0;
             const pinX = crankOrigin.x + Math.sin(angle) * crankRadius;
