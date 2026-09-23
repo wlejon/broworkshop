@@ -9,10 +9,11 @@
 <header id="top">
     <div class="brand">
         <span class="brand-title">Laya triage</span>
-        <span class="brand-sub">ModernBERT-large decision model · bro.lm.loadLaya</span>
+        <span class="brand-sub" id="brand-sub">decision model · bro.lm.loadLaya</span>
     </div>
     <div class="ckpt">
-        <label for="model-dir">Checkpoint</label>
+        <label for="ckpt-select">Checkpoint</label>
+        <select id="ckpt-select" title="Members of the Laya family found beside the checkpoint folder"></select>
         <input id="model-dir" type="text" spellcheck="false" placeholder="folder holding model.safetensors">
         <button id="btn-browse">Browse…</button>
         <button id="btn-load" class="primary">Load</button>
@@ -30,6 +31,7 @@
             <span class="panel-note">sent at priority 10, so it cuts ahead of the background traffic</span>
         </div>
         <div id="presets" class="presets"></div>
+        <div id="presets-note" class="presets-note"></div>
         <textarea id="state" spellcheck="false"></textarea>
         <div class="row">
             <button id="btn-run" class="primary" disabled>Decide</button>

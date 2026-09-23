@@ -89,5 +89,39 @@ if (bro.lm.available === false || !bro.gpu.available) {
   assert(b.completed === 64 && b.forwards < 32, 'burst packed into few forwards');
   pumpFor(300);
   screenshot('../broworkshop/tools/laya-triage/tests/out/burst.png');
+
+  // ── 5. switch to the multilingual checkpoint through the picker ──────────
+  const sel = $('#ckpt-select');
+  const ml = [...sel.options].find((o) => /multilingual/i.test(o.textContent));
+  if (!ml) {
+    console.log('SKIP multilingual: no multilingual/ checkpoint beside ' + $('#model-dir').value);
+  } else {
+    assert(session.checkpoint === 'english' || session.checkpoint === 'typed-decisions',
+           'first load was a ModernBERT checkpoint: ' + session.checkpoint);
+    assert(![...document.querySelectorAll('.preset')].some((b) => b.classList.contains('foreign')),
+           'no non-English presets on the English checkpoint');
+    sel.value = ml.value;
+    sel.dispatchEvent(new Event('change'));
+    pumpUntil('multilingual load', () => !session.loading, 120);
+    assert(!session.loadError, 'multilingual loaded: ' + session.loadError);
+    const cfg = session.model.config();
+    assert(cfg.checkpoint === 'multilingual' && session.checkpoint === 'multilingual', 'config().checkpoint');
+    assert(cfg.tokenizer === 'metaspace-bpe' && cfg.max_len === 1024 && cfg.hidden_size === 768,
+           'mmBERT shape: ' + JSON.stringify([cfg.tokenizer, cfg.max_len, cfg.hidden_size]));
+    console.log('switched to ' + cfg.checkpoint + ' (' + cfg.encoder + ') in ' + session.loadMs + ' ms; ' +
+                $('#brand-sub').textContent);
+    const foreign = [...document.querySelectorAll('.preset.foreign')];
+    assert(foreign.length >= 5, 'non-English presets offered: ' + foreign.length);
+    for (const id of ['hi-duplicate', 'es-outage', 'zh-security']) {
+      session.lastResult = null;
+      foreign.find((b) => b.dataset.id === id).click();
+      pumpUntil(id + ' result', () => session.lastResult || session.singleError, 20);
+      assert(!session.singleError, id + ': ' + session.singleError);
+      const d = session.lastResult.answers.department;
+      console.log(id + ': ' + d.choice + ' (' + (100 * d.probabilities[d.choice]).toFixed(0) + '%) | ' +
+                  $('#decision-head').textContent + ' | ' + session.lastResult.timing.totalMs.toFixed(1) + ' ms');
+    }
+    screenshot('../broworkshop/tools/laya-triage/tests/out/multilingual.png');
+  }
   console.log('laya-triage smoke OK');
 }

@@ -35,6 +35,36 @@ export function defaultModelDir() {
   return '';
 }
 
+// The Laya family: the English checkpoint at the root of a checkout, the
+// other two in subfolders. The loader only takes a directory; which model it
+// is comes back from config().checkpoint.
+export const CHECKPOINTS = [
+  { id: 'english', sub: '', label: 'English · ModernBERT-large · 512' },
+  { id: 'multilingual', sub: 'multilingual', label: 'Multilingual · mmBERT-base · 1024' },
+  { id: 'typed-decisions', sub: 'typed-decisions', label: 'Typed decisions · ModernBERT-large · 1024' },
+];
+
+// The family root a checkpoint directory belongs to ('' when it is a lone
+// checkpoint outside a family checkout).
+export function familyRoot(dir) {
+  dir = (dir || '').replace(/\\/g, '/').replace(/\/+$/, '');
+  if (!dir) return '';
+  const hasSubs = (d) => CHECKPOINTS.some((c) => c.sub && isCheckpoint(d + '/' + c.sub));
+  if (isCheckpoint(dir) && hasSubs(dir)) return dir;
+  const slash = dir.lastIndexOf('/');
+  const parent = slash > 0 ? dir.slice(0, slash) : '';
+  const base = dir.slice(slash + 1);
+  if (parent && CHECKPOINTS.some((c) => c.sub === base) && hasSubs(parent)) return parent;
+  return '';
+}
+
+// { id, label, dir } for every family member present under `root`.
+export function familyCheckpoints(root) {
+  if (!root) return [];
+  return CHECKPOINTS.map((c) => ({ id: c.id, label: c.label, dir: c.sub ? root + '/' + c.sub : root }))
+    .filter((c) => isCheckpoint(c.dir));
+}
+
 export function browseFolder(start) {
   if (typeof showOpenFolderDialog !== 'function') return null;   // absent in headless
   const r = showOpenFolderDialog(start || null);

@@ -29,6 +29,11 @@ input[type=range] { width: 140px; vertical-align: middle; }
 .ckpt { display: flex; align-items: center; gap: 6px; flex: 1; }
 .ckpt label { color: var(--muted); }
 .ckpt input { flex: 1; min-width: 200px; }
+.ckpt select {
+    background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 5px;
+    padding: 4px 6px; font: inherit;
+}
+.ckpt select:disabled { opacity: 0.45; }
 .status { padding: 3px 10px; border-radius: 10px; background: var(--card); color: var(--muted); white-space: nowrap; }
 .status.ok { color: var(--ok); }
 .status.busy { color: var(--warn); }
@@ -48,6 +53,8 @@ input[type=range] { width: 140px; vertical-align: middle; }
 .presets { display: flex; flex-wrap: wrap; gap: 6px; }
 .preset { padding: 3px 9px; font-size: 12px; }
 .preset.active { border-color: var(--accent); color: var(--accent); }
+.preset.foreign { border-style: dashed; }
+.presets-note { color: var(--dim); font-size: 11px; }
 #state { height: 130px; resize: vertical; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 5px; padding: 8px; font: 12px var(--mono); }
 
 .decision { border-radius: 6px; padding: 10px 12px; border: 1px solid var(--line); background: var(--card); }

@@ -5,6 +5,7 @@ export const session = {
   loading: false,
   loadError: '',
   loadMs: 0,
+  checkpoint: '',          // config().checkpoint of the loaded model
   lastResult: null,        // last single-request result
   lastObservedMs: 0,
   singleError: '',
