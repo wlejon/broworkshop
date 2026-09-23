@@ -2,310 +2,85 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Laya Decision Triage</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <div id="appWrapper">
-        <!-- Top Toolbar -->
-        <header id="topBar">
-            <div class="brand-section">
-                <span class="brand-icon">⚡</span>
-                <span class="brand-title">LAYA SYSTEM 1 DECISION TRIAGE</span>
-                <span class="badge-model" id="modelBadge">ModernBERT-Large (421M)</span>
-                <span class="badge-backend" id="backendBadge">Checking...</span>
-            </div>
-
-            <div class="checkpoint-control">
-                <label for="checkpointPath">Checkpoint:</label>
-                <input type="text" id="checkpointPath" value="D:/projects/laya" spellcheck="false" title="Laya Model Directory">
-                <button id="btnReloadModel" class="btn-icon" title="Reload Checkpoint">↺ Reload</button>
-            </div>
-        </header>
-
-        <!-- Preset Scenarios Selector -->
-        <div id="presetBar">
-            <span class="preset-label">SCENARIOS:</span>
-            <div class="preset-buttons">
-                <button class="btn-preset active" data-preset="duplicate_charge">Duplicate Charge (Billing/Churn)</button>
-                <button class="btn-preset" data-preset="db_outage">Database Outage (Technical/Critical)</button>
-                <button class="btn-preset" data-preset="enterprise_sales">Enterprise Sales (Pricing/Contracts)</button>
-                <button class="btn-preset" data-preset="hindi_billing">Hindi Billing (Multilingual)</button>
-                <button class="btn-preset" data-preset="credential_stuffing">Credential Stuffing (Security/Escalate)</button>
-            </div>
-        </div>
-
-        <!-- 2-Column Dashboard -->
-        <main id="dashboard">
-            <!-- Left Column: Input State & Questions -->
-            <section class="col-panel col-left">
-                <div class="panel-section state-section">
-                    <div class="panel-header">
-                        <span class="panel-title">State Input (Ticket / Event)</span>
-                        <div class="panel-actions">
-                            <button id="btnFormatJson" class="btn-subtle" title="Format valid JSON">Format JSON</button>
-                            <button id="btnClearState" class="btn-subtle" title="Clear input text">Clear</button>
-                        </div>
-                    </div>
-                    <textarea id="stateInput" spellcheck="false" placeholder="Enter JSON payload or raw support ticket text..."></textarea>
-                </div>
-
-                <div class="panel-section questions-section">
-                    <div class="panel-header">
-                        <span class="panel-title">Active Decision Questions</span>
-                        <span class="badge-counter" id="questionCount">5 Questions</span>
-                    </div>
-
-                    <div class="questions-list" id="questionsList">
-                        <!-- department -->
-                        <div class="question-item">
-                            <div class="q-header">
-                                <span class="q-id">department</span>
-                                <span class="q-type badge-choice">choice</span>
-                            </div>
-                            <div class="q-desc">Which department should handle this request?</div>
-                            <div class="q-criteria">
-                                <span>billing</span><span>technical</span><span>sales</span><span>other</span>
-                            </div>
-                        </div>
-
-                        <!-- urgency -->
-                        <div class="question-item">
-                            <div class="q-header">
-                                <span class="q-id">urgency</span>
-                                <span class="q-type badge-score">score [0 - 2]</span>
-                            </div>
-                            <div class="q-desc">How urgent is this request?</div>
-                            <div class="q-criteria">
-                                <span>0: not urgent</span><span>1: soon</span><span>2: critical deadline</span>
-                            </div>
-                        </div>
-
-                        <!-- churn_threat -->
-                        <div class="question-item">
-                            <div class="q-header">
-                                <span class="q-id">churn_threat</span>
-                                <span class="q-type badge-noul">noul</span>
-                            </div>
-                            <div class="q-desc">Does the customer threaten cancellation or churn?</div>
-                        </div>
-
-                        <!-- refund_requested -->
-                        <div class="question-item">
-                            <div class="q-header">
-                                <span class="q-id">refund_requested</span>
-                                <span class="q-type badge-noul">noul</span>
-                            </div>
-                            <div class="q-desc">Is a financial refund or credit requested?</div>
-                        </div>
-
-                        <!-- escalation -->
-                        <div class="question-item">
-                            <div class="q-header">
-                                <span class="q-id">escalation</span>
-                                <span class="q-type badge-noul">noul</span>
-                            </div>
-                            <div class="q-desc">Does this require immediate human escalation?</div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="panel-footer">
-                    <button id="btnRun" class="btn-run">⚡ RUN DECISION TRIAGE</button>
-                </div>
-            </section>
-
-            <!-- Right Column: Telemetry & Calibrated Answer Cards -->
-            <section class="col-panel col-right">
-                <!-- Telemetry Header -->
-                <div class="telemetry-bar">
-                    <div class="telemetry-item">
-                        <div class="telemetry-label">INFERENCE LATENCY</div>
-                        <div class="telemetry-value"><span id="telemetryLatency">--</span> <span class="unit">ms</span></div>
-                    </div>
-                    <div class="telemetry-item">
-                        <div class="telemetry-label">INPUT TOKENS</div>
-                        <div class="telemetry-value"><span id="telemetryTokens">--</span></div>
-                    </div>
-                    <div class="telemetry-item">
-                        <div class="telemetry-label">MODEL ARCHITECTURE</div>
-                        <div class="telemetry-value" id="telemetryModel">rl-agent</div>
-                    </div>
-                    <div class="telemetry-item">
-                        <div class="telemetry-label">SAFETY GATE</div>
-                        <div class="telemetry-value" id="telemetryGate">--</div>
-                    </div>
-                </div>
-
-                <!-- Answer Cards Container -->
-                <div class="results-container" id="resultsContainer">
-                    <!-- Action vs Escalate Autonomous Decision Card -->
-                    <div class="card card-action" id="cardAction">
-                        <div class="card-header">
-                            <div class="card-title-group">
-                                <span class="card-tag">SYSTEM 1 POLICY GATE</span>
-                                <span class="card-title">Autonomous Action vs Human Escalation</span>
-                            </div>
-                            <div class="badge-act-rate" id="actBadge">Evaluating...</div>
-                        </div>
-                        <div class="card-body">
-                            <div class="action-decision-banner" id="actionBanner">
-                                <div class="decision-icon" id="actionIcon">⏱</div>
-                                <div class="decision-details">
-                                    <div class="decision-headline" id="actionHeadline">Awaiting Triage Run</div>
-                                    <div class="decision-subtext" id="actionSubtext">Click "Run Decision Triage" to execute calibrated System 1 predictions.</div>
-                                </div>
-                            </div>
-                            <div class="act-prob-container">
-                                <div class="act-prob-label">
-                                    <span>Autonomous Action Confidence (`act_probability`):</span>
-                                    <strong id="actProbValue">--%</strong>
-                                </div>
-                                <div class="progress-bar-track">
-                                    <div class="progress-bar-fill" id="actProbBar" style="width: 0%;"></div>
-                                    <div class="threshold-marker" title="Safety Policy Threshold (90%)" style="left: 90%;">
-                                        <span class="threshold-label">90% Safety Cutoff</span>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Department Routing (Choice) -->
-                    <div class="card card-dept">
-                        <div class="card-header">
-                            <div class="card-title-group">
-                                <span class="card-tag">CATEGORICAL ROUTING</span>
-                                <span class="card-title">Department Assignment</span>
-                            </div>
-                            <div class="winner-badge" id="deptWinner">--</div>
-                        </div>
-                        <div class="card-body">
-                            <div class="confidence-row">
-                                <span class="conf-label">Predicted Winner Confidence:</span>
-                                <span class="conf-value" id="deptConfidence">--%</span>
-                            </div>
-                            <div class="prob-distribution" id="deptDistribution">
-                                <div class="dist-row" data-cat="billing">
-                                    <span class="dist-name">billing</span>
-                                    <div class="dist-track"><div class="dist-bar bar-billing" style="width: 0%;"></div></div>
-                                    <span class="dist-val">--%</span>
-                                </div>
-                                <div class="dist-row" data-cat="technical">
-                                    <span class="dist-name">technical</span>
-                                    <div class="dist-track"><div class="dist-bar bar-technical" style="width: 0%;"></div></div>
-                                    <span class="dist-val">--%</span>
-                                </div>
-                                <div class="dist-row" data-cat="sales">
-                                    <span class="dist-name">sales</span>
-                                    <div class="dist-track"><div class="dist-bar bar-sales" style="width: 0%;"></div></div>
-                                    <span class="dist-val">--%</span>
-                                </div>
-                                <div class="dist-row" data-cat="other">
-                                    <span class="dist-name">other</span>
-                                    <div class="dist-track"><div class="dist-bar bar-other" style="width: 0%;"></div></div>
-                                    <span class="dist-val">--%</span>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Urgency (Score) -->
-                    <div class="card card-urgency">
-                        <div class="card-header">
-                            <div class="card-title-group">
-                                <span class="card-tag">ORDINAL REGRESSION</span>
-                                <span class="card-title">Urgency Score</span>
-                            </div>
-                            <div class="score-pill" id="urgencyPill">--</div>
-                        </div>
-                        <div class="card-body">
-                            <div class="score-summary">
-                                <div class="score-number-box">
-                                    <span class="score-num" id="urgencyScore">0.00</span>
-                                    <span class="score-denom">/ 2.00</span>
-                                </div>
-                                <div class="score-meta">
-                                    <div class="conf-row">Confidence: <b id="urgencyConfidence">--%</b></div>
-                                    <div class="level-desc" id="urgencyDesc">Awaiting classification...</div>
-                                </div>
-                            </div>
-                            <div class="prob-distribution" id="urgencyDistribution">
-                                <div class="dist-row" data-tier="0">
-                                    <span class="dist-name">0: Not Urgent</span>
-                                    <div class="dist-track"><div class="dist-bar bar-tier0" style="width: 0%;"></div></div>
-                                    <span class="dist-val">--%</span>
-                                </div>
-                                <div class="dist-row" data-tier="1">
-                                    <span class="dist-name">1: Soon</span>
-                                    <div class="dist-track"><div class="dist-bar bar-tier1" style="width: 0%;"></div></div>
-                                    <span class="dist-val">--%</span>
-                                </div>
-                                <div class="dist-row" data-tier="2">
-                                    <span class="dist-name">2: Critical</span>
-                                    <div class="dist-track"><div class="dist-bar bar-tier2" style="width: 0%;"></div></div>
-                                    <span class="dist-val">--%</span>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- 2-Column Grid for Noul Gauges -->
-                    <div class="noul-grid">
-                        <!-- Churn Threat Gauge -->
-                        <div class="card card-noul">
-                            <div class="card-header">
-                                <div class="card-title-group">
-                                    <span class="card-tag">BINARY RISK</span>
-                                    <span class="card-title">Churn Threat</span>
-                                </div>
-                                <span class="noul-status-badge" id="churnBadge">--</span>
-                            </div>
-                            <div class="card-body noul-body">
-                                <div class="gauge-container">
-                                    <svg class="radial-gauge" viewBox="0 0 120 70">
-                                        <path class="gauge-bg" d="M 15 60 A 45 45 0 0 1 105 60" fill="none" stroke-width="10" />
-                                        <path class="gauge-fill gauge-churn" id="churnGaugeFill" d="M 15 60 A 45 45 0 0 1 105 60" fill="none" stroke-width="10" stroke-dasharray="141.37" stroke-dashoffset="141.37" />
-                                    </svg>
-                                    <div class="gauge-center-text">
-                                        <span class="gauge-val" id="churnPercent">0%</span>
-                                        <span class="gauge-sub">PROBABILITY</span>
-                                    </div>
-                                </div>
-                                <div class="gauge-footer" id="churnAssessment">Awaiting assessment</div>
-                            </div>
-                        </div>
-
-                        <!-- Refund Requested Gauge -->
-                        <div class="card card-noul">
-                            <div class="card-header">
-                                <div class="card-title-group">
-                                    <span class="card-tag">INTENT DETECTION</span>
-                                    <span class="card-title">Refund Requested</span>
-                                </div>
-                                <span class="noul-status-badge" id="refundBadge">--</span>
-                            </div>
-                            <div class="card-body noul-body">
-                                <div class="gauge-container">
-                                    <svg class="radial-gauge" viewBox="0 0 120 70">
-                                        <path class="gauge-bg" d="M 15 60 A 45 45 0 0 1 105 60" fill="none" stroke-width="10" />
-                                        <path class="gauge-fill gauge-refund" id="refundGaugeFill" d="M 15 60 A 45 45 0 0 1 105 60" fill="none" stroke-width="10" stroke-dasharray="141.37" stroke-dashoffset="141.37" />
-                                    </svg>
-                                    <div class="gauge-center-text">
-                                        <span class="gauge-val" id="refundPercent">0%</span>
-                                        <span class="gauge-sub">PROBABILITY</span>
-                                    </div>
-                                </div>
-                                <div class="gauge-footer" id="refundAssessment">Awaiting assessment</div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </section>
-        </main>
+<header id="top">
+    <div class="brand">
+        <span class="brand-title">Laya triage</span>
+        <span class="brand-sub">ModernBERT-large decision model · bro.lm.loadLaya</span>
     </div>
+    <div class="ckpt">
+        <label for="model-dir">Checkpoint</label>
+        <input id="model-dir" type="text" spellcheck="false" placeholder="folder holding model.safetensors">
+        <button id="btn-browse">Browse…</button>
+        <button id="btn-load" class="primary">Load</button>
+    </div>
+    <span id="status" class="status">not loaded</span>
+</header>
 
-    <script type="module" src="app.js"></script>
+<div id="unavailable" class="unavailable hidden"></div>
+
+<main id="main">
+    <!-- Single request -->
+    <section class="panel" id="single">
+        <div class="panel-head">
+            <span class="panel-title">One request</span>
+            <span class="panel-note">sent at priority 10, so it cuts ahead of the background traffic</span>
+        </div>
+        <div id="presets" class="presets"></div>
+        <textarea id="state" spellcheck="false"></textarea>
+        <div class="row">
+            <button id="btn-run" class="primary" disabled>Decide</button>
+            <label class="thresh">Act when routing confidence ≥ <input id="threshold" type="range" min="0.05" max="0.95" step="0.05" value="0.45">
+                <b id="threshold-val">45%</b></label>
+        </div>
+        <div id="decision" class="decision idle">
+            <div id="decision-head" class="decision-head">No decision yet</div>
+            <div id="decision-sub" class="decision-sub">Escalation comes from the calibrated confidence of the routing answer.
+                Five-way routing with short option descriptions is harder for Laya than the benchmarks it is strong on, so expect escalations.
+                The checkpoint's act/escalate head is saturated (about 1.0 for every input), so it is shown but never used.</div>
+        </div>
+        <div id="answers" class="answers"></div>
+        <div id="single-timing" class="timing"></div>
+    </section>
+
+    <!-- Concurrency -->
+    <section class="panel" id="live">
+        <div class="panel-head">
+            <span class="panel-title">Many requests at once</span>
+            <span class="panel-note" id="replicas"></span>
+        </div>
+        <div class="row controls">
+            <button id="btn-traffic" disabled>Start traffic</button>
+            <label>Arrival rate <input id="rate" type="range" min="10" max="600" step="10" value="100">
+                <b id="rate-val">100 req/s</b></label>
+            <button id="btn-burst" disabled>Burst 64</button>
+            <button id="btn-reset" disabled>Reset stats</button>
+        </div>
+        <div class="metrics">
+            <div class="metric"><span class="m-label">in flight</span><span id="m-inflight" class="m-val">0</span></div>
+            <div class="metric"><span class="m-label">queued</span><span id="m-queued" class="m-val">0</span></div>
+            <div class="metric"><span class="m-label">done / s</span><span id="m-rps" class="m-val">0</span></div>
+            <div class="metric"><span class="m-label">p50 ms</span><span id="m-p50" class="m-val">--</span></div>
+            <div class="metric"><span class="m-label">p99 ms</span><span id="m-p99" class="m-val">--</span></div>
+            <div class="metric"><span class="m-label">over deadline</span><span id="m-missed" class="m-val">--</span></div>
+            <div class="metric"><span class="m-label">requests / forward</span><span id="m-batch" class="m-val">--</span></div>
+            <div class="metric"><span class="m-label">occupancy</span><span id="m-occ" class="m-val">--</span></div>
+            <div class="metric"><span class="m-label">frame delivery</span><span id="m-seen" class="m-val">--</span></div>
+        </div>
+        <div class="chart-title">Per-request latency (submit → answer ready, 5 questions each; colour = GPU, red = missed the deadline)</div>
+        <canvas id="latency" class="chart"></canvas>
+        <div class="chart-title">Forwards</div>
+        <canvas id="batches" class="chart short"></canvas>
+        <div id="devices" class="devices"></div>
+        <div id="cost-model" class="timing"></div>
+        <div class="footnote">p50 / p99 / done per second cover the last 3 s. Latency is measured in the engine; "frame delivery"
+            is the extra wait until the page's next frame received the answer.</div>
+    </section>
+</main>
+
+<script type="module" src="app.js"></script>
 </body>
 </html>
