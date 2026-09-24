@@ -9,7 +9,8 @@
 <body>
     <canvas id="view"></canvas>
 
-    <div id="hud" hidden>
+    <!-- HUD slots: game.hud() returns { score, wave }; the shell fills #hud-best. -->
+    <div id="hud" class="hud-row" hidden>
         <div class="hud-stat">
             <div class="hud-label">Score</div>
             <div id="hud-score" class="hud-value">0</div>
@@ -64,7 +65,7 @@ Esc / P          Pause</pre>
 
         <section id="screen-wavecomplete" class="screen" hidden>
             <h1 class="overlay-title">Wave Complete</h1>
-            <div id="wave-stats" class="stats-block"></div>
+            <div id="wave-stats" class="stats-block stats-table"></div>
             <div class="menu-items">
                 <div class="menu-item selected" data-action="continue">Continue</div>
             </div>
@@ -72,7 +73,7 @@ Esc / P          Pause</pre>
 
         <section id="screen-gameover" class="screen" hidden>
             <h1 class="overlay-title">The End</h1>
-            <div id="gameover-stats" class="stats-block"></div>
+            <div id="gameover-stats" class="stats-block stats-table"></div>
             <div class="menu-items">
                 <div class="menu-item selected" data-action="restart">Play Again</div>
                 <div class="menu-item" data-action="title">Main Menu</div>

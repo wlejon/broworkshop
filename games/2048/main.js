@@ -1,4 +1,7 @@
+// Entry point: boot the plugin and expose window.__2048 for the tests.
 import { boot } from "/lib/arcade/shell.js";
+import { exposeHooks } from "/lib/arcade/hooks.js";
 import { game } from "/app/game.js";
+import * as rules from "/app/rules.js";
 
-boot(game, { width: 600, height: 800 });
+exposeHooks(game.id, boot(game, { width: 600, height: 800 }), { rules });

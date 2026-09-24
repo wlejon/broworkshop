@@ -9,8 +9,10 @@
 <body>
     <canvas id="view"></canvas>
 
-    <!-- HUD slots: ids must match keys returned from game.hud() as #hud-<key> -->
-    <div id="hud" hidden>
+    <!-- HUD slots: game.hud() returns { key: value } and the shell writes
+         #hud-<key>; it fills #hud-best itself. class="hud-row" lays the
+         stats out as a strip along the top; drop it for a side column. -->
+    <div id="hud" class="hud-row" hidden>
         <div class="hud-stat">
             <div class="hud-label">Score</div>
             <div id="hud-score" class="hud-value">0</div>
@@ -58,7 +60,7 @@ Enter            Confirm</pre>
 
         <section id="screen-gameover" class="screen" hidden>
             <h1 class="overlay-title">Game Over</h1>
-            <div id="gameover-stats" class="stats-block"></div>
+            <div id="gameover-stats" class="stats-block stats-table"></div>
             <div class="menu-items">
                 <div class="menu-item selected" data-action="restart">Play Again</div>
                 <div class="menu-item" data-action="title">Main Menu</div>

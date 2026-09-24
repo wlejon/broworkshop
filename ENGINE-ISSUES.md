@@ -408,7 +408,48 @@ When a kit side column overflows, its vertical scrollbar draws as a flat
 white bar that ignores the dark theme. The pre-kit nav-lab showed it too.
 Cosmetic.
 
+### A reflection probe's `intensity` cannot be set (2026-09-24)
+`ReflectionProbeNode` has `setIntensity`, but the bronze `SceneNode.intensity`
+accessor (`bro_scene_SceneNode_intensity_get/_set` in
+`native_scene_nodes.cpp`) only handles `Type::Light`: on a probe the getter
+returns 1.0 and the setter drops the value. `createReflectionProbe({ intensity })`
+goes through the same setter, so it is ignored too. (`interior` and `priority`
+work: `scene_extras.js` types them for probes.) Repro:
+`bro-headless demos/render-lab -e "advanceTime(50); const p = document.querySelector('#stage').getContext('scene').createReflectionProbe({ size: 4, intensity: 0.4 }); p.intensity = 2; console.log(p.intensity)"`
+prints 1. demos/render-lab's probe Intensity slider does nothing;
+`demos/render-lab/tests/test_probe_intensity.js` pins it.
+
+### TileWorld `addObject({ color })` per-instance tint is not drawn (2026-09-24)
+tile-api.js documents `opts.color` on `addObject` as a per-instance tint
+(RGB on atlased kinds, RGBA otherwise). games/hexfront places every unit
+from a white kind (`addObjectKind(mesh, { color: [1,1,1,1] })`) with
+`color: [0.88, 0.26, 0.20, 1]` for red and `[0.28, 0.50, 0.95, 1]` for blue.
+All units render white, so the two armies look the same. The HEAD version
+of hexfront shows the same thing. A kind's own `style.color` works (the
+green trees). Repro: `bro-headless games/hexfront games/hexfront/tests/test_main.js`,
+then look at `tests/out/shots/games_hexfront-initial.png`.
+
+### `scene.setFog(null)` throws (2026-09-24)
+`setFog(null)` throws `Cannot read properties of null (reading 'startDistance')`
+from the bronze `scene.js` `setFog` wrapper, which reads fields off the
+argument before checking it. scene-api.js documents `setFog({})` as "fog
+off", so null is only a natural guess, but other scene setters accept null
+(`setEnvironment(null)`) and it should too. lib/impostor.js used null and
+broke flora-lab's impostor toggle; it now passes `{}`. Repro:
+`bro-headless demos/flora-lab -e "document.getElementById('stage').getContext('scene').setFog(null)"`.
+
 ## Notes (not bugs)
+
+- `terrain.setVoxel(x, y, z, v)` on a height-field terrain moves the grid
+  node at `floor(x), floor(z)`, not the nearest one. A sculpt that samples
+  `heightAt` at the raycast hit can therefore see no change when the hit
+  lies in a triangle that does not use that node (demos/terrain's test
+  samples at the floored node). Worth documenting in terrain-api.js.
+- `ClipmapTerrain` `detailRelief` is a unitless slope (each detail octave's
+  amplitude is relief x that octave's wavelength x the ground slope; engine
+  default 0.35), per `clipmap_terrain.h`. clipmap-api.js does not say so,
+  and demos/clipmap-terrain passed 18 "metres", which spiked the surface
+  into km-high walls. Worth a line in the doc.
 
 - `<select>.value` round-trips correctly now (set programmatically, and
   after a keyboard pick + `change`); older app comments claiming otherwise

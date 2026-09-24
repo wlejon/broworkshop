@@ -1,15 +1,35 @@
-// Blockfall — falling-block puzzle on the arcade foundation.
-// Domain: board.js + particles.js. Shell owns screens / loop / pause / HUD.
+// Blockfall — falling-block puzzle, arcade plugin.
+// Shell (/lib/arcade): screens, loop, pause, bindings, HUD plumbing, high
+// score. Here: the 3-2-1 countdown, auto-repeat (DAS) and soft drop over
+// the input, rules events -> sounds, flashes, particles and callouts, the
+// music, and the Settings screen.
+//   rules.js   well, pieces, rotation, gravity, lock, scoring
+//   render.js  drawing
+//   music.js   chiptune tracks that speed up with the level
 
-import { Board } from "/app/board.js";
-import { FX } from "/app/particles.js";
+import { createEffects } from "/lib/arcade/effects.js";
+import { createOptions, sfxVolume, toggle } from "/lib/arcade/options.js";
+import { statsBlock, newBest } from "/lib/arcade/scores.js";
+import { formatClock } from "/lib/arcade/grid.js";
+import {
+    createBlockfall, moveH, softDrop, rotate, hardDrop, hold, step, drainEvents,
+} from "/app/rules.js";
+import {
+    COLORS, CLEAR_MS, layoutFor, cellCenter, drawWell, drawPreviews, drawCountdown,
+} from "/app/render.js";
 import { Music } from "/app/music.js";
 
-const DAS_DELAY = 167;
-const DAS_ARR = 33;
-const SOFT_DROP_RATE = 30;
-const COUNTDOWN_STEP = 700;
-const COUNTDOWN_TOTAL = 3200;
+const DAS_DELAY = 167;         // hold this long before auto-repeat
+const DAS_ARR = 33;            // then one column per this
+const COUNT_STEP = 700;
+const COUNT_TOTAL = 3200;
+const START_LEVELS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+const CLEAR_TEXT = { 2: "DOUBLE", 3: "TRIPLE", 4: "QUAD!" };
+
+const fx = createEffects({ particle: "square" });
+const prefs = { ghost: true, grid: true };
+let api = null;
+let options = null;
 
 export const game = {
     id: "blockfall",
@@ -20,380 +40,245 @@ export const game = {
         { name: "rotate_ccw", label: "Rotate CCW", defaults: ["q", "z"] },
     ],
 
-    defaults: {
-        highScore: 0,
-        startLevel: 1,
+    defaults: { highScore: 0, startLevel: 1, ghost: true, grid: true, sfxVol: 100 },
+
+    init(shellApi) {
+        api = shellApi;
+        options = createOptions(api, [
+            { key: "startLevel", action: "cycle-startlevel", values: START_LEVELS, label: String },
+            toggle("ghost", "toggle-ghost", (v) => { prefs.ghost = v; }),
+            toggle("grid", "toggle-grid", (v) => { prefs.grid = v; }),
+            sfxVolume(),
+        ]);
+        options.applyAll();
+        Music.init(api.audio);
     },
 
-    create(ctx) {
-        const startLevel = ctx.save.get("startLevel") || 1;
-        Music.init(ctx.audio);
+    create(shellApi) {
+        fx.clear();
         Music.stop();
-        Board._play = (name) => ctx.play(name);
-        Board.settings.startLevel = startLevel;
-        Board.settings.ghostPiece = true;
-        Board.settings.gridLines = true;
-        Board.startGame("marathon");
-        ctx.play("countdown");
-
+        shellApi.play("countdown");
         return {
             score: 0,
-            level: startLevel,
-            play: ctx.play,
-            highScore: ctx.highScore,
-            // Internal countdown while shell screen is already "playing"
+            state: createBlockfall({ startLevel: options.get("startLevel") }),
             phase: "countdown",
-            countdownTimer: 0,
-            countdownPhase: 3,
+            count: 0,          // ms into the countdown
+            countN: 3,
             das: { dir: 0, timer: 0, active: false },
-            softDrop: { active: false, timer: 0 },
-            alive: true,
+            softDropping: false,
+            flashes: [],
+            clear: null,
+            play: shellApi.play,
+            highScore: shellApi.highScore,
         };
     },
 
     update(run, dt, input) {
+        tickView(run, dt);
         if (run.phase === "countdown") {
-            updateCountdown(run, dt, input);
-            FX.update(dt);
-            syncScore(run);
+            countdown(run, dt, input);
             return;
         }
-
-        if (!run.alive) {
-            Music.stop();
-            return { status: "gameover" };
-        }
-
-        const B = Board;
-        B.gameTime += dt;
-
-        if (B.mode === "ultra") {
-            B.modeTimer -= dt;
-            if (B.checkModeEnd()) {
-                B.cur = null;
-                run.alive = false;
-                syncScore(run);
-                Music.stop();
-                run.play("clear1");
-                return { status: "gameover", result: { finished: true } };
-            }
-        }
-
+        const s = run.state;
         handleInput(run, input);
-        if (!run.alive) {
-            syncScore(run);
-            Music.stop();
-            return {
-                status: "gameover",
-                result: B.finished ? { finished: true } : null,
-            };
-        }
-
-        if (!B.cur) {
-            syncScore(run);
-            return;
-        }
-
         stepDas(run, dt);
-        stepSoftDrop(run, dt);
-        stepGravity(run, dt);
-        stepLock(run, dt);
-
-        if (!run.alive) {
-            syncScore(run);
-            Music.stop();
-            return {
-                status: "gameover",
-                result: B.finished ? { finished: true } : null,
-            };
-        }
-
-        if (run.level !== B.level) {
-            run.level = B.level;
-            Music.setLevel(run.level);
-        }
-        Music.update();
-
-        FX.update(dt);
-        syncScore(run);
+        step(s, dt, run.softDropping);
+        run.score = s.score;
+        return react(run);
     },
 
     draw(run, ctx, view) {
         const { w, h } = view.size();
-        Board.calcLayout(w, h);
-
-        const shake = FX.getShakeOffset();
+        const L = layoutFor(w, h);
+        const o = fx.shakeOffset();
         ctx.save();
-        ctx.translate(shake.x, shake.y);
-        Board.drawBoard(ctx);
-        Board.drawPreviews(ctx);
-        FX.drawParticles(ctx);
+        ctx.translate(o.x, o.y);
+        drawWell(ctx, run.state, L, { flashes: run.flashes, clear: run.clear, ghost: prefs.ghost, grid: prefs.grid });
+        drawPreviews(ctx, run.state, L);
+        fx.draw(ctx);
         ctx.restore();
-
-        if (run && run.phase === "countdown") {
-            drawCountdown(ctx, w, h, run);
-        }
+        if (run.phase === "countdown") drawCountdown(ctx, w, h, run.countN);
     },
 
     hud(run) {
-        if (!run) {
-            return { score: 0, best: 0, level: 1, lines: 0, combo: "—" };
-        }
+        if (!run) return { score: 0, level: 1, lines: 0, combo: "—" };
+        const s = run.state;
         return {
-            score: Board.score,
-            best: run.highScore(),
-            level: Board.level,
-            lines: Board.totalLines,
-            combo: Board.combo > 0 ? String(Board.combo) : "—",
+            score: s.score,
+            best: Math.max(run.highScore(), s.score),
+            level: s.level,
+            lines: s.lines,
+            combo: s.combo > 0 ? String(s.combo) : "—",
         };
     },
 
     gameOverText(run) {
-        const B = Board;
-        const score = B.score;
-        const best = run ? run.highScore() : 0;
-        const tag = run && run._newBest ? "  ·  NEW BEST" : "";
-        const header = B.finished ? "Complete!" : "Game Over";
-        return (
-            header + "\n\n" +
-            "Score    " + score + tag + "\n" +
-            "Best     " + best + "\n" +
-            "Level    " + B.level + "\n" +
-            "Lines    " + B.totalLines + "\n" +
-            "Time     " + B.formatTime(B.gameTime) + "\n\n" +
-            "Singles  " + B.stats.singles + "  Doubles  " + B.stats.doubles + "\n" +
-            "Triples  " + B.stats.triples + "  Quads    " + B.stats.tetrises + "\n" +
-            "Max Combo  " + B.stats.maxCombo
-        );
+        const s = run.state, st = s.stats;
+        return statsBlock([
+            ["Score", s.score + newBest(run)],
+            ["Best", run.highScore()],
+            ["Level", s.level],
+            ["Lines", s.lines],
+            ["Time", formatClock(s.time)],
+            ["Singles / Doubles", st.singles + " / " + st.doubles],
+            ["Triples / Quads", st.triples + " / " + st.quads],
+            ["Max Combo", st.maxCombo],
+        ]);
+    },
+
+    onEnterScreen(name, run) {
+        if (name === "settings") options.render();
+        if (name === "pause") Music.pause();
+        else if (name === "playing" && run && run.phase === "playing") Music.resume();
+        else if (name === "gameover" || name === "title") Music.stop();
+    },
+
+    onMenuAction(action) {
+        if (options.handle(action)) return null;
+        return action === "settings" ? "settings" : null;
     },
 
     // Game SFX only — menu move/select are shell-owned.
     cue(name, audio) {
-        if (name === "move") audio.tone(200, 0.05, "square", 0.4);
-        else if (name === "rotate") audio.tone(300, 0.06, "square", 0.5);
-        else if (name === "drop") audio.tone(120, 0.12, "triangle", 0.8);
-        else if (name === "lock") audio.tone(160, 0.08, "triangle", 0.5);
-        else if (name === "hold") audio.tone(250, 0.06, "sine", 0.4);
-        else if (name === "clear1") audio.tone(523, 0.15, "square", 0.6);
-        else if (name === "clear2") audio.tone(659, 0.15, "square", 0.7);
-        else if (name === "clear3") audio.tone(784, 0.18, "square", 0.8);
-        else if (name === "tetris") {
-            audio.sequence([
-                [523, 0.1, "square", 0.8],
-                [659, 0.1, "square", 0.8],
-                [784, 0.12, "square", 0.9],
-                [1047, 0.2, "square", 1.0],
-            ]);
-        } else if (name === "levelup") {
-            audio.sequence([
-                [440, 0.08, "sine", 0.6],
-                [554, 0.08, "sine", 0.7],
-                [659, 0.12, "sine", 0.8],
-            ]);
-        } else if (name === "combo") audio.tone(520, 0.1, "square", 0.6);
-        else if (name === "countdown") audio.tone(440, 0.15, "sine", 0.6);
-        else if (name === "go") audio.tone(880, 0.2, "square", 0.8);
-        else if (name === "die") {
-            audio.sequence([
-                [300, 0.2, "sawtooth", 0.5],
-                [250, 0.2, "sawtooth", 0.5],
-                [200, 0.4, "sawtooth", 0.5],
-            ]);
-        }
-    },
-
-    onEnterScreen(name, run) {
-        if (name === "pause") {
-            Music.pause();
-        } else if (name === "playing") {
-            if (run && run.phase === "playing") {
-                Music.resume();
-            }
-        } else if (name === "gameover" || name === "title") {
-            Music.stop();
-        }
+        const seq = CUES[name];
+        if (seq) audio.sequence(seq);
     },
 };
 
-// ── Score / end ──────────────────────────────────────────────────────────
+const CUES = {
+    move: [[200, 0.05, "square", 0.4]],
+    rotate: [[300, 0.06, "square", 0.5]],
+    drop: [[120, 0.12, "triangle", 0.8]],
+    lock: [[160, 0.08, "triangle", 0.5]],
+    hold: [[250, 0.06, "sine", 0.4]],
+    clear1: [[523, 0.15, "square", 0.6]],
+    clear2: [[659, 0.15, "square", 0.7]],
+    clear3: [[784, 0.18, "square", 0.8]],
+    clear4: [[523, 0.1, "square", 0.8], [659, 0.1, "square", 0.8], [784, 0.12, "square", 0.9], [1047, 0.2, "square", 1.0]],
+    levelup: [[440, 0.08, "sine", 0.6], [554, 0.08, "sine", 0.7], [659, 0.12, "sine", 0.8]],
+    combo: [[520, 0.1, "square", 0.6]],
+    countdown: [[440, 0.15, "sine", 0.6]],
+    go: [[880, 0.2, "square", 0.8]],
+    die: [[300, 0.2, "sawtooth", 0.5], [250, 0.2, "sawtooth", 0.5], [200, 0.4, "sawtooth", 0.5]],
+};
 
-function syncScore(run) {
-    run.score = Board.score;
-}
-
-function topOut(run) {
-    Board.cur = null;
-    Board.finished = false;
-    run.alive = false;
-    syncScore(run);
-    Music.stop();
-    run.play("die");
-    return { status: "gameover" };
-}
+// Particle bursts in px/s, tuned to the old per-frame sparks.
+const CLEAR_SPARKS = { speed: 0, speedVar: 150, up: 90, life: 400, lifeVar: 300, size: 2, sizeVar: 3, gravity: 540, drag: 1, spin: 0 };
+const DROP_SPARKS = { speed: 0, speedVar: 90, up: 60, life: 200, lifeVar: 100, size: 2, sizeVar: 3, gravity: 540, drag: 1, spin: 0 };
 
 // ── Countdown ────────────────────────────────────────────────────────────
 
-function updateCountdown(run, dt, input) {
-    run.countdownTimer += dt;
-    const newPhase = 3 - Math.floor(run.countdownTimer / COUNTDOWN_STEP);
-    if (newPhase < run.countdownPhase && newPhase >= 0) {
-        run.countdownPhase = newPhase;
-        if (run.countdownPhase > 0) run.play("countdown");
-        else run.play("go");
+function countdown(run, dt, input) {
+    run.count += dt;
+    const n = 3 - Math.floor(run.count / COUNT_STEP);
+    if (n < run.countN && n >= 0) {
+        run.countN = n;
+        run.play(n > 0 ? "countdown" : "go");
     }
-    if (run.countdownTimer < COUNTDOWN_TOTAL) return;
-
+    if (run.count < COUNT_TOTAL) return;
     run.phase = "playing";
-    Music.start(Board.level);
-    run.level = Board.level;
-    // Drain edges so presses during countdown don't fire on GO
-    input.pressed("left");
-    input.pressed("right");
-    input.pressed("down");
-    input.pressed("up");
-    input.pressed("primary");
-    input.pressed("secondary");
-    input.pressed("rotate_ccw");
-    run.das.dir = 0;
-    run.das.timer = 0;
-    run.das.active = false;
-    run.softDrop.active = false;
-    run.softDrop.timer = 0;
-    // Held keys arm DAS / soft drop without a free one-shot
-    if (input.down("left")) run.das.dir = -1;
-    else if (input.down("right")) run.das.dir = 1;
-    if (input.down("down")) run.softDrop.active = true;
-}
-
-function drawCountdown(ctx, w, h, run) {
-    const label = run.countdownPhase > 0 ? String(run.countdownPhase) : "GO!";
-    const color = run.countdownPhase > 0 ? "#4fc3f7" : "#00e676";
-    ctx.save();
-    ctx.font = "bold 96px Consolas, monospace";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillStyle = color;
-    ctx.globalAlpha = 0.95;
-    ctx.fillText(label, w / 2, h * 0.4);
-    ctx.restore();
+    Music.start(run.state.level);
+    input.clearEdges();                             // presses during the count don't fire on GO
+    // Keys already held arm auto-repeat / soft drop without a free first step.
+    run.das = { dir: input.down("left") ? -1 : input.down("right") ? 1 : 0, timer: 0, active: false };
+    run.softDropping = input.down("down");
 }
 
 // ── Input ────────────────────────────────────────────────────────────────
 
 function handleInput(run, input) {
-    const B = Board;
+    const s = run.state;
+    if (input.pressed("left")) { moveH(s, -1); armDas(run, -1); }
+    if (input.pressed("right")) { moveH(s, 1); armDas(run, 1); }
+    // Releasing ends auto-repeat; the other direction still held takes over.
+    if (run.das.dir === -1 && !input.down("left")) armDas(run, input.down("right") ? 1 : 0);
+    if (run.das.dir === 1 && !input.down("right")) armDas(run, input.down("left") ? -1 : 0);
 
-    if (input.pressed("left")) {
-        B.moveLeft();
-        armDas(run, -1);
-    }
-    if (input.pressed("right")) {
-        B.moveRight();
-        armDas(run, 1);
-    }
-    // Release ends DAS; opposite held re-arms
-    if (run.das.dir === -1 && !input.down("left")) {
-        run.das.dir = 0;
-        run.das.active = false;
-        if (input.down("right")) armDas(run, 1);
-    }
-    if (run.das.dir === 1 && !input.down("right")) {
-        run.das.dir = 0;
-        run.das.active = false;
-        if (input.down("left")) armDas(run, -1);
-    }
-
-    if (input.pressed("down")) {
-        run.softDrop.active = true;
-        run.softDrop.timer = 0;
-        if (B.moveDown()) B.score += 1;
-    }
-    if (!input.down("down")) run.softDrop.active = false;
-
-    if (input.pressed("primary")) {
-        if (!B.hardDrop()) {
-            topOut(run);
-            return;
-        }
-        if (B.checkModeEnd()) {
-            B.cur = null;
-            run.alive = false;
-            syncScore(run);
-        }
-    }
-
-    if (input.pressed("up")) B.rotateCW();
-    if (input.pressed("rotate_ccw")) B.rotateCCW();
-    if (input.pressed("secondary")) B.doHold();
+    if (input.pressed("down")) softDrop(s);
+    run.softDropping = input.down("down");
+    if (input.pressed("primary")) hardDrop(s);
+    if (input.pressed("up")) rotate(s, 1);
+    if (input.pressed("rotate_ccw")) rotate(s, -1);
+    if (input.pressed("secondary")) hold(s);
 }
 
 function armDas(run, dir) {
-    run.das.dir = dir;
-    run.das.timer = 0;
-    run.das.active = false;
+    run.das = { dir, timer: 0, active: false };
 }
-
-// ── Timing ───────────────────────────────────────────────────────────────
 
 function stepDas(run, dt) {
-    if (run.das.dir === 0) return;
-    const B = Board;
-    run.das.timer += dt;
-    if (!run.das.active) {
-        if (run.das.timer >= DAS_DELAY) {
-            run.das.active = true;
-            run.das.timer = 0;
+    const das = run.das;
+    if (!das.dir) return;
+    das.timer += dt;
+    if (!das.active) {
+        if (das.timer < DAS_DELAY) return;
+        das.active = true;
+        das.timer = 0;
+    }
+    while (das.timer >= DAS_ARR) {
+        das.timer -= DAS_ARR;
+        moveH(run.state, das.dir);
+    }
+}
+
+// ── Events -> sound and juice ────────────────────────────────────────────
+
+function react(run) {
+    const s = run.state;
+    const L = layoutFor(api.view.width(), api.view.height());
+    let result;
+    for (const e of drainEvents(s)) {
+        switch (e.type) {
+            case "move": case "rotate": case "hold":
+                run.play(e.type);
+                break;
+            case "drop":
+                run.play("drop");
+                for (const [r, c] of e.cells) {
+                    for (let y = r - e.dist; y <= r; y++) if (y >= 0) run.flashes.push({ r: y, c, t: 120 });
+                    const p = cellCenter(L, r, c);
+                    fx.burst(p.x, p.y, COLORS[e.piece], 2, DROP_SPARKS);
+                }
+                if (e.dist > 4) fx.shake(120, 3);
+                break;
+            case "lock":
+                run.play("lock");
+                for (const [r, c] of e.cells) run.flashes.push({ r, c, t: 200 });
+                break;
+            case "clear":
+                run.play("clear" + e.n);
+                if (CLEAR_TEXT[e.n]) fx.toast("#action-text", CLEAR_TEXT[e.n], 800);
+                if (e.n === 4) fx.shake(300, 8);
+                run.clear = { rows: e.rows, t: 0 };
+                e.rows.forEach((r, i) => e.colors[i].forEach((v, c) => {
+                    const p = cellCenter(L, r, c);
+                    fx.burst(p.x, p.y, COLORS[v] || "#fff", 3, CLEAR_SPARKS);
+                }));
+                break;
+            case "combo":
+                run.play("combo");
+                if (e.n > 1) fx.toast("#action-text", e.n + "x COMBO!", 800);
+                break;
+            case "levelup":
+                run.play("levelup");
+                fx.toast("#action-text", "LEVEL " + e.level, 800);
+                Music.setLevel(e.level);
+                break;
+            case "topout":
+                run.play("die");
+                Music.stop();
+                result = { status: "gameover" };
+                break;
         }
-        return;
     }
-    while (run.das.timer >= DAS_ARR) {
-        run.das.timer -= DAS_ARR;
-        if (run.das.dir === -1) B.moveLeft();
-        else if (run.das.dir === 1) B.moveRight();
-    }
+    Music.update();
+    return result;
 }
 
-function stepSoftDrop(run, dt) {
-    if (!run.softDrop.active) return;
-    const B = Board;
-    run.softDrop.timer += dt;
-    while (run.softDrop.timer >= SOFT_DROP_RATE) {
-        run.softDrop.timer -= SOFT_DROP_RATE;
-        if (B.moveDown()) B.score += 1;
-    }
-}
-
-function stepGravity(run, dt) {
-    if (run.softDrop.active) return;
-    const B = Board;
-    B.dropInterval = B.getDropInterval();
-    B.dropTimer += dt;
-    while (B.dropTimer >= B.dropInterval) {
-        B.dropTimer -= B.dropInterval;
-        B.moveDown();
-    }
-}
-
-function stepLock(run, dt) {
-    const B = Board;
-    if (!B.cur) return;
-    if (B.canPlace(B.cur.type, B.cur.x, B.cur.y + 1, B.cur.rot)) {
-        B.lockTimer = 0;
-        return;
-    }
-    B.lockTimer += dt;
-    if (B.lockTimer < B.lockDelay) return;
-
-    const lockResult = B.lockPiece();
-    if (lockResult === -1) {
-        topOut(run);
-        return;
-    }
-    if (B.checkModeEnd()) {
-        B.cur = null;
-        run.alive = false;
-        syncScore(run);
-        return;
-    }
-    if (!B.spawnPiece()) topOut(run);
+// Flashes, the line strobe and particles run on the game clock.
+function tickView(run, dt) {
+    for (const f of run.flashes) f.t -= dt;
+    run.flashes = run.flashes.filter((f) => f.t > 0);
+    if (run.clear && (run.clear.t += dt) >= CLEAR_MS) run.clear = null;
+    fx.update(dt);
 }

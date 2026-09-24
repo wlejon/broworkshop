@@ -9,15 +9,24 @@
 <body>
     <canvas id="view"></canvas>
 
-    <div id="hud" hidden>
-        <div class="hud-label">SCORE</div>
-        <div id="hud-score" class="hud-value">0</div>
-        <div class="hud-label">HIGH</div>
-        <div id="hud-high" class="hud-value">0</div>
-        <div class="hud-label">LIVES</div>
-        <div id="hud-lives" class="hud-value">3</div>
-        <div class="hud-label">LEVEL</div>
-        <div id="hud-level" class="hud-value">1</div>
+    <!-- HUD slots: game.hud() returns { score, best, lives, level }. -->
+    <div id="hud" class="hud-row" hidden>
+        <div class="hud-stat">
+            <div class="hud-label">SCORE</div>
+            <div id="hud-score" class="hud-value">0</div>
+        </div>
+        <div class="hud-stat">
+            <div class="hud-label">HIGH</div>
+            <div id="hud-best" class="hud-value">0</div>
+        </div>
+        <div class="hud-stat">
+            <div class="hud-label">LIVES</div>
+            <div id="hud-lives" class="hud-value">3</div>
+        </div>
+        <div class="hud-stat">
+            <div class="hud-label">LEVEL</div>
+            <div id="hud-level" class="hud-value">1</div>
+        </div>
     </div>
 
     <div id="overlay">
@@ -64,7 +73,7 @@ Enter           Confirm</pre>
 
         <section id="screen-gameover" class="screen" hidden>
             <h1 class="overlay-title">GAME OVER</h1>
-            <div id="gameover-stats" class="stats-block"></div>
+            <div id="gameover-stats" class="stats-block stats-table"></div>
             <div class="menu-items">
                 <div class="menu-item selected" data-action="restart">PLAY AGAIN</div>
                 <div class="menu-item" data-action="title">MAIN MENU</div>
@@ -73,7 +82,7 @@ Enter           Confirm</pre>
 
         <section id="screen-levelclear" class="screen" hidden>
             <h1 class="overlay-title">LEVEL CLEAR!</h1>
-            <div id="levelclear-stats" class="overlay-sub stats-block"></div>
+            <div id="levelclear-stats" class="stats-block stats-table"></div>
             <div class="menu-items">
                 <div class="menu-item selected" data-action="nextlevel">NEXT LEVEL</div>
             </div>

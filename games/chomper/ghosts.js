@@ -1,322 +1,153 @@
-// ghosts.js — ghost AI
-// 4 ghosts: Blinky (red, chase), Pinky (pink, target ahead), Inky (cyan, random), Clyde (orange, mixed)
-import { Maze } from "/app/maze.js";
+// Chomper ghosts — four personalities as plain objects, stepped against a
+// maze and Chomper's position. No drawing.
+//   scarlet  chases Chomper       rose   aims 4 tiles ahead of him
+//   azure    wanders at random    amber  chases from afar, retreats up close
 
-// Directions: right, left, up, down
+import {
+    COLS, ROWS, GHOST_HOUSE, GHOST_DOOR, wrapCol, passableForGhost,
+} from "/app/maze.js";
+
+/** right, left, up, down */
 export const DIRS = [
-    { dx:  1, dy:  0, name: "right" },
-    { dx: -1, dy:  0, name: "left" },
-    { dx:  0, dy: -1, name: "up" },
-    { dx:  0, dy:  1, name: "down" }
+    { dx: 1, dy: 0 },
+    { dx: -1, dy: 0 },
+    { dx: 0, dy: -1 },
+    { dx: 0, dy: 1 },
 ];
 
-export const opposite = function(d) {
-    if (d === 0) return 1;
-    if (d === 1) return 0;
-    if (d === 2) return 3;
-    return 2;
-};
+export const opposite = (d) => (d === 0 ? 1 : d === 1 ? 0 : d === 2 ? 3 : 2);
 
-export const Ghost = function(name, color, cornerC, cornerR, personality, spawnDelay) {
-    this.name = name;
-    this.color = color;
-    this.corner = { c: cornerC, r: cornerR };
-    this.personality = personality; // "chase","ahead","random","mixed"
-    this.spawnDelay = spawnDelay;   // ms before leaving house
-    this.reset();
-};
+const SPEED = 6.5;             // tiles/s
+const FRIGHT_SPEED = 4.5;
+const LEAVE_SPEED = 3;
+const HOME_SPEED = 8;
 
-Ghost.prototype.reset = function() {
-    // Position in tile coords (float)
-    this.c = Maze.ghostHouse.c;
-    this.r = Maze.ghostHouse.r;
-    this.dir = 2; // up
-    this.mode = "house";        // "house","leaving","chase","scatter","frightened","eaten"
-    this.houseTimer = this.spawnDelay;
-    this.frightenedTimer = 0;
-    this.eatenBonusIdx = 0;
-    this.speed = 1.0; // tiles per second base (scaled in update)
-};
+const ROSTER = [
+    ["scarlet", "#ff0000", COLS - 2, 1, "chase", 0],
+    ["rose", "#ffb8ff", 1, 1, "ahead", 2000],
+    ["azure", "#00ffff", COLS - 2, ROWS - 2, "random", 5000],
+    ["amber", "#ffb852", 1, ROWS - 2, "mixed", 8000],
+];
 
-Ghost.prototype.setFrightened = function(duration) {
-    if (this.mode === "eaten" || this.mode === "house" || this.mode === "leaving") return;
-    this.mode = "frightened";
-    this.frightenedTimer = duration;
-    // reverse direction
-    this.dir = opposite(this.dir);
-};
+export function createGhosts() {
+    return ROSTER.map(([name, color, cc, cr, personality, spawnDelay]) =>
+        resetGhost({ name, color, corner: { c: cc, r: cr }, personality, spawnDelay }));
+}
 
-Ghost.prototype.getTargetTile = function(pac) {
-    if (this.mode === "eaten") {
-        return { c: Maze.ghostHouse.c, r: Maze.ghostHouse.r };
-    }
-    if (this.mode === "scatter") {
-        return this.corner;
-    }
-    // chase-like
-    switch (this.personality) {
-        case "chase":
-            return { c: pac.c, r: pac.r };
-        case "ahead": {
-            var dir = DIRS[pac.dir];
-            return { c: pac.c + dir.dx * 4, r: pac.r + dir.dy * 4 };
-        }
+/** Back in the house, waiting out its spawn delay. */
+export function resetGhost(g) {
+    return Object.assign(g, {
+        c: GHOST_HOUSE.c, r: GHOST_HOUSE.r, dir: 2,
+        mode: "house",         // house · leaving · chase · frightened · eaten
+        houseTimer: g.spawnDelay, frightTimer: 0,
+    });
+}
+
+/** True while it can touch Chomper (roaming or frightened). */
+export const isLoose = (g) => g.mode === "chase" || g.mode === "frightened";
+
+export function frighten(g, ms) {
+    if (!isLoose(g)) return;
+    g.mode = "frightened";
+    g.frightTimer = ms;
+    g.dir = opposite(g.dir);
+}
+
+function target(g, pac) {
+    switch (g.personality) {
+        case "chase": return { c: pac.c, r: pac.r };
+        case "ahead": return { c: pac.c + DIRS[pac.dir].dx * 4, r: pac.r + DIRS[pac.dir].dy * 4 };
         case "mixed": {
-            // if far from pacman chase; if close, go to corner
-            var dc = pac.c - this.c, dr = pac.r - this.r;
-            var dist2 = dc * dc + dr * dr;
-            if (dist2 > 64) return { c: pac.c, r: pac.r };
-            return this.corner;
+            const dc = pac.c - g.c, dr = pac.r - g.r;
+            return dc * dc + dr * dr > 64 ? { c: pac.c, r: pac.r } : g.corner;
         }
-        case "random":
-        default:
-            return null; // random pick
+        default: return null;  // random
     }
-};
+}
 
-// Choose a next direction at a tile intersection.
-// Ghosts can't reverse.
-Ghost.prototype.chooseDir = function(pac) {
-    var ci = Math.round(this.c);
-    var ri = Math.round(this.r);
-    var candidates = [];
-    for (var i = 0; i < 4; i++) {
-        if (i === opposite(this.dir)) continue;
-        var d = DIRS[i];
-        var nc = Maze.wrapCol(ci + d.dx);
-        var nr = ri + d.dy;
-        var allowDoor = (this.mode === "eaten" || this.mode === "leaving");
-        if (Maze.isPassableForGhost(nc, nr, allowDoor)) {
-            candidates.push({ i: i, c: nc, r: nr });
-        }
+// At a tile centre: never reverse; head for the target, or pick at random.
+function chooseDir(m, g, pac, rng) {
+    const ci = Math.round(g.c), ri = Math.round(g.r);
+    const options = [];
+    for (let i = 0; i < 4; i++) {
+        if (i === opposite(g.dir)) continue;
+        const nc = wrapCol(ci + DIRS[i].dx), nr = ri + DIRS[i].dy;
+        if (passableForGhost(m, nc, nr, false)) options.push({ i, c: nc, r: nr });
     }
-    if (candidates.length === 0) {
-        // reverse as fallback
-        return opposite(this.dir);
-    }
-    if (this.mode === "frightened") {
-        return candidates[Math.floor(Math.random() * candidates.length)].i;
-    }
-    var target = this.getTargetTile(pac);
-    if (!target) {
-        return candidates[Math.floor(Math.random() * candidates.length)].i;
-    }
-    // pick candidate with min euclid dist to target
-    var best = candidates[0];
-    var bestD = Infinity;
-    for (var j = 0; j < candidates.length; j++) {
-        var cand = candidates[j];
-        var dc = cand.c - target.c;
-        var dr = cand.r - target.r;
-        var d2 = dc * dc + dr * dr;
-        if (d2 < bestD) { bestD = d2; best = cand; }
+    if (!options.length) return opposite(g.dir);
+    const t = g.mode === "frightened" ? null : target(g, pac);
+    if (!t) return options[Math.floor(rng() * options.length)].i;
+    let best = options[0], bestD = Infinity;
+    for (const o of options) {
+        const d2 = (o.c - t.c) ** 2 + (o.r - t.r) ** 2;
+        if (d2 < bestD) { bestD = d2; best = o; }
     }
     return best.i;
-};
+}
 
-Ghost.prototype.update = function(dt, pac) {
-    var dtS = dt / 1000;
+// Straight-line glide toward (c, r); true on arrival.
+function glide(g, c, r, step) {
+    const dc = c - g.c, dr = r - g.r;
+    const dist = Math.hypot(dc, dr);
+    if (dist < step) { g.c = c; g.r = r; return true; }
+    g.c += (dc / dist) * step;
+    g.r += (dr / dist) * step;
+    return false;
+}
 
-    // Handle house/leaving/eaten transitions
-    if (this.mode === "house") {
-        this.houseTimer -= dt;
-        // bob up and down inside house
-        this.r += Math.sin(this.houseTimer * 0.005) * 0.01;
-        if (this.houseTimer <= 0) {
-            this.mode = "leaving";
-            this.c = Maze.ghostHouse.c;
+export function stepGhost(m, g, dt, pac, rng) {
+    const ds = dt / 1000;
+
+    if (g.mode === "house") {
+        g.houseTimer -= dt;
+        g.r = GHOST_HOUSE.r + Math.sin(g.houseTimer * 0.005) * 0.12;     // bob
+        if (g.houseTimer <= 0) { g.mode = "leaving"; g.c = GHOST_HOUSE.c; }
+        return;
+    }
+    if (g.mode === "leaving") {                     // out through the door, one row past it
+        if (glide(g, GHOST_DOOR.c, GHOST_DOOR.r - 1, LEAVE_SPEED * ds)) {
+            g.mode = "chase";
+            g.dir = rng() < 0.5 ? 1 : 0;
         }
         return;
     }
-
-    if (this.mode === "leaving") {
-        // move toward door, then one tile past it into the corridor, then start roaming
-        var door = Maze.ghostHouseDoor;
-        var exit = { c: door.c, r: door.r - 1 }; // one row above the door
-        var dc = exit.c - this.c;
-        var dr = exit.r - this.r;
-        var dist = Math.sqrt(dc * dc + dr * dr);
-        var spd = 3.0 * dtS;
-        if (dist < spd) {
-            this.c = exit.c;
-            this.r = exit.r;
-            this.mode = "chase";
-            this.dir = (Math.random() < 0.5) ? 1 : 0; // left or right
+    if (g.mode === "eaten") {                       // eyes run home greedily, doors open
+        const home = GHOST_HOUSE;
+        if (Math.hypot(home.c - g.c, home.r - g.r) < 0.2) {
+            g.c = home.c; g.r = home.r;
+            g.mode = "leaving";
             return;
         }
-        this.c += (dc / dist) * spd;
-        this.r += (dr / dist) * spd;
-        return;
-    }
-
-    if (this.mode === "eaten") {
-        // head to ghost house
-        var target = Maze.ghostHouse;
-        var dc = target.c - this.c;
-        var dr = target.r - this.r;
-        var dist = Math.sqrt(dc * dc + dr * dr);
-        var spd = 8.0 * dtS;
-        if (dist < 0.2) {
-            this.c = target.c;
-            this.r = target.r;
-            this.mode = "leaving";
-            this.houseTimer = 0;
-            return;
-        }
-        // To keep it simple, use direct pathfinding - but only through passable tiles + doors
-        // Use greedy nav — pick dir that reduces distance most and is passable
-        var ci = Math.round(this.c);
-        var ri = Math.round(this.r);
-        var best = null, bestD = Infinity;
-        for (var i = 0; i < 4; i++) {
-            var d = DIRS[i];
-            var nc = Maze.wrapCol(ci + d.dx);
-            var nr = ri + d.dy;
-            if (!Maze.isPassableForGhost(nc, nr, true)) continue;
-            var ddc = nc - target.c;
-            var ddr = nr - target.r;
-            var d2 = ddc * ddc + ddr * ddr;
+        const ci = Math.round(g.c), ri = Math.round(g.r);
+        let best = null, bestD = Infinity;
+        for (let i = 0; i < 4; i++) {
+            const nc = wrapCol(ci + DIRS[i].dx), nr = ri + DIRS[i].dy;
+            if (!passableForGhost(m, nc, nr, true)) continue;
+            const d2 = (nc - home.c) ** 2 + (nr - home.r) ** 2;
             if (d2 < bestD) { bestD = d2; best = i; }
         }
-        if (best !== null) this.dir = best;
-        var dd = DIRS[this.dir];
-        this.c = Maze.wrapCol(this.c + dd.dx * spd);
-        this.r += dd.dy * spd;
+        if (best !== null) g.dir = best;
+        g.c = wrapCol(g.c + DIRS[g.dir].dx * HOME_SPEED * ds);
+        g.r += DIRS[g.dir].dy * HOME_SPEED * ds;
         return;
     }
 
-    // frightened timer
-    if (this.mode === "frightened") {
-        this.frightenedTimer -= dt;
-        if (this.frightenedTimer <= 0) this.mode = "chase";
+    if (g.mode === "frightened") {
+        g.frightTimer -= dt;
+        if (g.frightTimer <= 0) g.mode = "chase";
     }
-
-    // Speed
-    var base = (this.mode === "frightened") ? 4.5 : 6.5;
-    var step = base * dtS;
-
-    // At a tile center: choose a new direction
-    var ci = Math.round(this.c);
-    var ri = Math.round(this.r);
-    var centerEps = step * 0.5;
-    var atCenter = Math.abs(this.c - ci) < centerEps && Math.abs(this.r - ri) < centerEps;
-    if (atCenter) {
-        this.c = ci; this.r = ri;
-        this.dir = this.chooseDir(pac);
+    const step = (g.mode === "frightened" ? FRIGHT_SPEED : SPEED) * ds;
+    const ci = Math.round(g.c), ri = Math.round(g.r);
+    if (Math.abs(g.c - ci) < step * 0.5 && Math.abs(g.r - ri) < step * 0.5) {
+        g.c = ci; g.r = ri;
+        g.dir = chooseDir(m, g, pac, rng);
     }
-
-    var d = DIRS[this.dir];
-    // Prevent walking through walls mid-motion
-    var nextC = Maze.wrapCol(ci + d.dx);
-    var nextR = ri + d.dy;
-    if (!Maze.isPassableForGhost(nextC, nextR, false)) {
-        // snap and re-pick
-        this.c = ci; this.r = ri;
-        this.dir = this.chooseDir(pac);
-        d = DIRS[this.dir];
+    let d = DIRS[g.dir];
+    if (!passableForGhost(m, wrapCol(ci + d.dx), ri + d.dy, false)) {   // never mid-wall
+        g.c = ci; g.r = ri;
+        g.dir = chooseDir(m, g, pac, rng);
+        d = DIRS[g.dir];
     }
-    this.c = this.c + d.dx * step;
-    this.r = this.r + d.dy * step;
-    this.c = Maze.wrapCol(this.c);
-};
-
-Ghost.prototype.draw = function(ctx, ox, oy, tile, globalFrightBlink) {
-    var cx = ox + this.c * tile + tile / 2;
-    var cy = oy + this.r * tile + tile / 2;
-    var rad = tile * 0.45;
-
-    if (this.mode === "eaten") {
-        // just eyes
-        this.drawEyes(ctx, cx, cy, rad);
-        return;
-    }
-
-    var body = this.color;
-    if (this.mode === "frightened") {
-        body = globalFrightBlink ? "#ffffff" : "#2121ff";
-    }
-    ctx.fillStyle = body;
-    ctx.beginPath();
-    ctx.arc(cx, cy - rad * 0.1, rad, Math.PI, 0, false);
-    // body rectangle
-    ctx.lineTo(cx + rad, cy + rad * 0.6);
-    // scalloped bottom
-    var waves = 3;
-    for (var i = 0; i < waves; i++) {
-        var sx = cx + rad - (2 * rad / waves) * (i);
-        var ex = cx + rad - (2 * rad / waves) * (i + 1);
-        var mx = (sx + ex) / 2;
-        ctx.quadraticCurveTo(mx, cy + rad * 0.3, ex, cy + rad * 0.6);
-    }
-    ctx.lineTo(cx - rad, cy - rad * 0.1);
-    ctx.closePath();
-    ctx.fill();
-
-    if (this.mode === "frightened") {
-        // scared face
-        ctx.fillStyle = globalFrightBlink ? "#ff0000" : "#ffffff";
-        // eyes
-        ctx.beginPath();
-        ctx.arc(cx - rad * 0.35, cy - rad * 0.15, rad * 0.15, 0, Math.PI * 2);
-        ctx.arc(cx + rad * 0.35, cy - rad * 0.15, rad * 0.15, 0, Math.PI * 2);
-        ctx.fill();
-        // mouth zigzag
-        ctx.strokeStyle = globalFrightBlink ? "#ff0000" : "#ffffff";
-        ctx.lineWidth = Math.max(1, tile * 0.07);
-        ctx.beginPath();
-        var mw = rad * 0.7;
-        ctx.moveTo(cx - mw / 2, cy + rad * 0.2);
-        ctx.lineTo(cx - mw / 4, cy + rad * 0.05);
-        ctx.lineTo(cx, cy + rad * 0.2);
-        ctx.lineTo(cx + mw / 4, cy + rad * 0.05);
-        ctx.lineTo(cx + mw / 2, cy + rad * 0.2);
-        ctx.stroke();
-    } else {
-        this.drawEyes(ctx, cx, cy, rad);
-    }
-};
-
-Ghost.prototype.drawEyes = function(ctx, cx, cy, rad) {
-    var d = DIRS[this.dir];
-    var ex = d.dx * rad * 0.15;
-    var ey = d.dy * rad * 0.15;
-    ctx.fillStyle = "#ffffff";
-    ctx.beginPath();
-    ctx.arc(cx - rad * 0.35, cy - rad * 0.15, rad * 0.22, 0, Math.PI * 2);
-    ctx.arc(cx + rad * 0.35, cy - rad * 0.15, rad * 0.22, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "#2121ff";
-    ctx.beginPath();
-    ctx.arc(cx - rad * 0.35 + ex, cy - rad * 0.15 + ey, rad * 0.1, 0, Math.PI * 2);
-    ctx.arc(cx + rad * 0.35 + ex, cy - rad * 0.15 + ey, rad * 0.1, 0, Math.PI * 2);
-    ctx.fill();
-};
-
-export const Ghosts = {
-    list: [],
-
-    init: function() {
-        this.list = [
-            new Ghost("scarlet", "#ff0000", Maze.COLS - 2, 1, "chase", 0),
-            new Ghost("rose",    "#ffb8ff", 1,               1, "ahead", 2000),
-            new Ghost("azure",   "#00ffff", Maze.COLS - 2, Maze.ROWS - 2, "random", 5000),
-            new Ghost("amber",   "#ffb852", 1,               Maze.ROWS - 2, "mixed", 8000)
-        ];
-    },
-
-    resetAll: function() {
-        for (var i = 0; i < this.list.length; i++) this.list[i].reset();
-    },
-
-    frightenAll: function(duration) {
-        for (var i = 0; i < this.list.length; i++) this.list[i].setFrightened(duration);
-    },
-
-    update: function(dt, pac) {
-        for (var i = 0; i < this.list.length; i++) this.list[i].update(dt, pac);
-    },
-
-    draw: function(ctx, ox, oy, tile, blink) {
-        for (var i = 0; i < this.list.length; i++) this.list[i].draw(ctx, ox, oy, tile, blink);
-    }
-};
+    g.c = wrapCol(g.c + d.dx * step);
+    g.r += d.dy * step;
+}

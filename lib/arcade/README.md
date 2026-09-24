@@ -26,23 +26,69 @@ arcade kernel  (loop, view, input, audio, save)
 | `grid.js` | 2D board games: grids, line matches, gravity `collapse`, `createWave` / `createFalls` animations, `fitBoard` layout, `seededRandom`, `formatClock` |
 | `effects.js` | `createEffects`: particle bursts (full circle or an `angle`/`arc` cone, plus `vx`/`vy` drift), floating score labels, shake, DOM toasts |
 | `pointer.js` | `bindPointer`: canvas mouse (down/move/up/click/dblclick/wheel) in drawing px, only while playing |
-| `scores.js` | `recordScore` per-mode leaderboards (optional `compare`, e.g. fastest time) + `createScoreTabs` High Scores screen |
+| `scores.js` | `recordScore` per-mode leaderboards (optional `compare`, e.g. fastest time) + `createScoreTabs` High Scores screen; `statsBlock(rows)` padded "Label   value" text, `newBest(run)` the `  ·  NEW BEST` tag |
 | `options.js` | `createOptions`: Settings rows that cycle on Enter (`sfxVolume()`, `toggle()`) |
+| `timers.js` | `createTimers`: `after` / `every` on the game clock (step with `dt`), so delays freeze on pause and replay exactly in tests. Use instead of `setTimeout` for anything in a run |
+| `hooks.js` | `exposeHooks(id, shell, extra)`: `window.__<id>` with `shell`, `api`, `screen`, `run`, `save` + your extras, for `tests/test_main.js` |
+| `draw.js` | small canvas helpers: `roundRect` path, `mixColor` hex blend |
 | `arcade.css` | shared chrome; theme via CSS variables |
 
 ## Quick start
 
 1. Copy `games/arcade-template/` to `games/mygame/`.
 2. Set `bro.json` title and size.
-3. Edit `game.js` (`create` / `update` / `draw` / `hud`).
+3. Write the rules in `rules.js`, the drawing in `render.js`, and wire them in
+   `game.js` (see *Game layout* below).
 4. Edit `theme.css` and HTML copy.
-5. Launch with `bro games/mygame`.
+5. Launch with `bro games/mygame`; test with `scripts/validate.sh games/mygame`.
 
 ```js
+// main.js
 import { boot } from "/lib/arcade/shell.js";
+import { exposeHooks } from "/lib/arcade/hooks.js";
 import { game } from "/app/game.js";
-boot(game);
+import * as rules from "/app/rules.js";
+exposeHooks(game.id, boot(game, { width: 800, height: 600 }), { rules });
 ```
+
+## Game layout: rules · render · plugin · test
+
+Every classic game is four small files. **`games/snake`** (grid, fixed
+step), **`games/breakout`** (continuous physics, pointer) and
+**`games/arcade-template`** (the skeleton) are the references; invaders,
+asteroids, hopper, missile-command, echo, 2048, chomper, touchdown and
+blockfall follow the same shape.
+
+| File | Holds | Never |
+|------|-------|-------|
+| `rules.js` | `createX(w, h, rng)` returns plain data; pure functions change it (`step(state, dt, controls)`, `launch`, `turn`, ...); what happened goes on `state.events`, taken with `drainEvents(state)` | DOM, audio, canvas, `Math.random` where a test needs to steer it (take an `rng`) |
+| `render.js` | `layoutFor(W, H)` (usually `fitBoard`), `drawX(ctx, state, layout)` and title backdrops | changes to state |
+| `game.js` | the plugin: input -> rules calls, `react(run)` maps events to `run.play(cue)`, effects, screens; HUD / game-over text | game rules |
+| `main.js` | `boot` + `exposeHooks` | anything else |
+| `tests/test_main.js` | rules tests on seeded state, then the shell flow: title -> play -> pause -> game over with NEW BEST (reset `G.save.set("highScore", 0)` first) | engine sleeps; use `frames` / `simUntil` |
+
+```js
+// game.js update(): input -> rules -> events
+update(run, dt, input) {
+    if (input.pressed("left")) turn(run.board, DIRS.left);
+    step(run.board, dt);
+    run.score = run.board.score;
+    for (const e of drainEvents(run.board)) {
+        if (e.type === "eat") run.play("eat");
+        if (e.type === "die") return { status: "gameover" };
+    }
+},
+```
+
+Anything timed inside a run (sequence playback, AI turns, move animations,
+delayed popups) runs on the game clock: in `rules.step` with `dt`, or
+`createTimers()` stepped from `update`. `setTimeout` keeps firing while
+the game is paused and makes tests depend on wall time.
+
+Put the HUD in a strip across the top (`<div id="hud" class="hud-row">`)
+and lay the board out below it (`fitBoard(..., { minY: 96 })`). Fill stats
+screens with `statsBlock(rows)` into a `class="stats-block stats-table"`
+element so the columns line up.
 
 ## Game plugin contract
 
@@ -57,8 +103,8 @@ export const game = {
   // async loads (may switchTo a loading screen and back)
   init(api) {},
 
-  create(ctx) { return { score: 0 }; },
-  // ctx: { audio, save, input, view, play, highScore, switchTo, getScreen, getRun }
+  create(api) { return { score: 0 }; },
+  // api: { audio, save, input, view, play, highScore, switchTo, getScreen, getRun }
 
   update(run, dt, input) {
     // return { status: "gameover" } to end the run
@@ -66,7 +112,8 @@ export const game = {
   },
 
   draw(run, ctx, view) {},
-  drawTitle(ctx, view) {},   // optional — under title when no run yet
+  drawTitle(ctx, view, o) {},  // optional — under title when no run yet;
+                               // o = { screen, run, dt } (dt in ms, for backdrops)
 
   hud(run) { return { score: run.score, best: /* or omit; shell fills */ }; },
   gameOverText(run, result) {},
@@ -111,7 +158,7 @@ coordinates) · `render.js` · a thin `game.js` that wires `createEffects`,
 | Element | Purpose |
 |---------|---------|
 | `#view` | primary canvas (2D game **or** 3D scene) |
-| `#hud` | live stats; children `#hud-<key>` (also `#hud-high` alias) |
+| `#hud` | live stats; children `#hud-<key>` (also `#hud-high` alias); `class="hud-row"` lays them out as a top strip |
 | `#overlay` | menu host |
 | `#screen-title` `#screen-howto` `#screen-pause` `#screen-gameover` | required |
 | `#gameover-stats` | optional stats text (`class="stats-block stats-table"` keeps padded columns aligned) |
@@ -167,9 +214,10 @@ The stage gives right-drag orbit / middle-drag pan / wheel zoom (kit
 `planeHit(ray, y)`, `pick` (scene raycast) and `onTap`, a press + release
 that did not drag, so right-click actions do not fire at the end of an
 orbit. Rebuild a level with `scene.clear()` + `Physics.createWorld()`
-rather than tracking every node and body. Older scene games
-(hexfront, ...) still paste the hidden-canvas
-block and their own camera; move them over when touched.
+rather than tracking every node and body. Fixed-view board games pass
+`iso` instead of `orbit`; **`games/hexfront`** shows picking a TileWorld
+cell with `stage.rayAt` + `world.raycastCell`, and `stage.toScreen` for
+tests that click a cell.
 
 ### Large 3D titles — `sim.js` + plugin
 
@@ -181,7 +229,8 @@ game.js   thin plugin: ensureScene, syncRender, HUD, cue, tests
 ```
 
 Examples: `tumble` (board / marbles / aids / ui split), `deepdelve`,
-`blastgrid`, `tilehaven`, `hearthfolk`.  
+`blastgrid`, `tilehaven`, `hearthfolk`, `hexfront` (`rules.js` queries the
+TileWorld it is handed; `board.js` owns every scene node).  
 Do not call `getContext("scene")` or touch the DOM from `sim.js`.
 
 ## Theme tokens
@@ -216,7 +265,8 @@ none — full workshop coverage.
 ## HTML conventions (polished chrome)
 
 ```html
-<div id="hud" hidden>
+<!-- HUD slots: game.hud() returns { score }; the shell fills #hud-best. -->
+<div id="hud" class="hud-row" hidden>
   <div class="hud-stat">
     <div class="hud-label">Score</div>
     <div id="hud-score" class="hud-value">0</div>
@@ -228,33 +278,26 @@ Menu labels use title case (`Play`, `How to Play`, `Title Menu`).
 Hints: `Up / Down navigate · Enter select`.  
 How-to controls live in a `<pre>` inside `.htp-body`.
 
-## Gameplay code style (second-pass standard)
+## Gameplay code style
 
-Reference implementations: `games/snake/game.js`, `games/breakout/game.js`.
-
-```
-// Top: plugin purpose + what shell owns
-// Constants
-export const game = { create, update, draw, hud, gameOverText, cue, … }  // thin
-// ── Rules ──
-// ── Draw ──
-// helpers…
-```
+Reference implementations: `games/snake`, `games/breakout`,
+`games/arcade-template` (see *Game layout* above).
 
 | Do | Don't |
 |----|--------|
-| Put session state on `run` | Module-level mutable game state |
-| Section headers for helpers | One 600-line soup with no map |
-| `cue` for game events only | `menu` / `select` in `cue` (shell) |
-| `gameOverText` with ` ·  NEW BEST` | Ad-hoc high-score strings |
-| Pointer listeners keyed on `canvas` | Global `mouseWired` flags |
+| Put session state on `run` (rules state as `run.board` / `run.field` ...) | Module-level mutable game state |
+| Rules emit events; `game.js` turns them into cues and effects | `run.play` / DOM calls inside rules |
+| `cue` for game events only; a `CUES` table of sequences | `menu` / `select` in `cue` (shell) |
+| `gameOverText` via `statsBlock` + `newBest(run)` | Ad-hoc high-score strings |
+| Pointer input through `bindPointer(api, ...)` in `init` | Listeners on the canvas per run, global `mouseWired` flags |
+| `createTimers` / `dt` for delays | `setTimeout` / `setInterval` in a run |
 | Names like `stepBall` / `drawFood` | Opaque one-letter control flow |
 
 ## Design rules
 
 1. **Template first** — shell changes help every game, not one title.
 2. **HTML structure, CSS theme, JS rules** — no multi-line chrome HTML in JS.
-3. **One boot path** — `main.js` only calls `boot(game)`.
+3. **One boot path** — `main.js` only calls `boot(game)` (or `bootScene`) and `exposeHooks`.
 4. **Readable over clever** — score and death should be obvious in `game.js`.
 5. **Lazy scene init** — 3D setup belongs in `create()`, not import time.
 6. **Theme = variables only** — avoid restyling shell layout in `theme.css`.

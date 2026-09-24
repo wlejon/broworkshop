@@ -12,7 +12,7 @@
     --arcade-menu-selected: rgba(79, 195, 247, 0.18);
 }
 
-/* Toast for line-clear callouts (lib/fx toast → #action-text) */
+/* Line-clear callouts: effects.toast("#action-text", ...) in game.js. */
 #action-text {
     position: absolute;
     top: 45%;

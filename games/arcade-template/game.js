@@ -1,130 +1,88 @@
-// =============================================================================
-// Arcade template — game plugin
-// =============================================================================
+// Arcade template — the game plugin: a thin layer between the shell and
+// your rules. Copy this folder to start a game (see README.md).
 //
-// This file is the only place that should grow for a small game.
-// Screens, loop, input rebinding, high scores, and pause are in /lib/arcade.
+// The shell (/lib/arcade) owns screens, the loop, pause, rebindable input,
+// the HUD plumbing and the high score. This file only:
+//   - turns input into rules calls          (update)
+//   - turns rules events into sound/screens (react)
+//   - hands the state to render.js          (draw)
+//   - fills the HUD and game-over text      (hud, gameOverText)
+// Session state lives on `run`; nothing here is module-level game state.
 //
 // Contract: /lib/arcade/README.md
-//
-// Demo behavior (delete when building a real game):
-//   • A square drifts around the board.
-//   • Space (primary) adds score.
-//   • Run ends after 45s so you can exercise game-over + high score.
+
+import { statsBlock, newBest } from "/lib/arcade/scores.js";
+import { createField, tap, step, drainEvents } from "/app/rules.js";
+import { drawField, drawGrid } from "/app/render.js";
 
 export const game = {
-    /** Unique save / high-score namespace. Change this for every new game. */
+    /** Save / high-score namespace. Change it for every new game. */
     id: "arcade-template",
 
-    /** Canvas clear color; usually matches --arcade-bg in theme.css. */
+    /** Canvas clear colour; matches --arcade-bg in theme.css. */
     clearColor: "#0a0a0c",
 
-    // Optional: extra rebindable actions beyond the shell standards
-    // (up/down/left/right/primary/secondary/pause/confirm).
-    // actions: [
-    //     { name: "bomb", label: "Bomb", defaults: ["b"] },
-    // ],
+    // Extra rebindable actions beyond the standard up/down/left/right/
+    // primary/secondary/pause/confirm, e.g.:
+    // actions: [{ name: "bomb", label: "Bomb", defaults: ["b"] }],
 
-    /**
-     * Build a fresh run. Called on Play and Play Again.
-     * @param {object} ctx — { audio, save, input, view, play, highScore, switchTo, getScreen }
-     */
-    create(ctx) {
+    // Optional one-time setup with the shell api: bindPointer, createOptions,
+    // createScoreTabs, async loads. See gemswap / pegbounce.
+    // init(api) {},
+
+    /** A fresh run (Play, Play Again, Restart). */
+    create(api) {
         return {
             score: 0,
-            elapsed: 0,
-            x: 0.5,
-            y: 0.5,
-            vx: 0.00012,
-            vy: 0.00009,
-            play: ctx.play,
-            highScore: ctx.highScore,
+            field: createField(),
+            play: api.play,
+            highScore: api.highScore,
         };
     },
 
     /**
-     * @param {object} run
-     * @param {number} dt — milliseconds
-     * @param {object} input — down(name) / pressed(name)
-     * @returns {void | { status: "gameover" } | { status: "screen", name: string }}
+     * One frame of play. dt is milliseconds. Return { status: "gameover" }
+     * to end the run, or { status: "screen", name } for a mid-run screen.
      */
     update(run, dt, input) {
-        run.elapsed += dt;
-        run.x += run.vx * dt;
-        run.y += run.vy * dt;
-        if (run.x < 0.12 || run.x > 0.88) run.vx *= -1;
-        if (run.y < 0.12 || run.y > 0.88) run.vy *= -1;
+        const field = run.field;
+        if (input.pressed("primary")) tap(field);
+        step(field, dt);
+        run.score = field.score;
 
-        if (input.pressed("primary")) {
-            run.score += 1;
-            run.play("score");
+        let result;
+        for (const e of drainEvents(field)) {
+            if (e.type === "score") run.play("score");
+            if (e.type === "timeup") result = { status: "gameover" };
         }
-
-        if (run.elapsed > 45000) {
-            return { status: "gameover" };
-        }
+        return result;
     },
 
-    /**
-     * @param {object} run
-     * @param {CanvasRenderingContext2D} ctx
-     * @param {{ size: () => { w: number, h: number }, width: Function, height: Function }} view
-     */
     draw(run, ctx, view) {
         const { w, h } = view.size();
-        const size = Math.min(w, h) * 0.08;
-        const x = run.x * w - size / 2;
-        const y = run.y * h - size / 2;
-
-        // Soft grid so the playfield reads as intentional
-        ctx.strokeStyle = "rgba(126, 200, 227, 0.06)";
-        ctx.lineWidth = 1;
-        const step = 48;
-        ctx.beginPath();
-        for (let gx = 0; gx < w; gx += step) {
-            ctx.moveTo(gx + 0.5, 0);
-            ctx.lineTo(gx + 0.5, h);
-        }
-        for (let gy = 0; gy < h; gy += step) {
-            ctx.moveTo(0, gy + 0.5);
-            ctx.lineTo(w, gy + 0.5);
-        }
-        ctx.stroke();
-
-        ctx.fillStyle = "#7ec8e3";
-        ctx.fillRect(x, y, size, size);
-        ctx.fillStyle = "rgba(255, 255, 255, 0.25)";
-        ctx.fillRect(x, y, size, 3);
-
-        ctx.fillStyle = "rgba(232, 238, 242, 0.55)";
-        ctx.font = "14px monospace";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText("Replace game.js with your game", w / 2, h * 0.18);
-        ctx.fillText("Space  +1 score   ·   auto game-over at 45s", w / 2, h * 0.18 + 22);
+        drawField(ctx, run.field, w, h);
     },
 
-    /** Map of field → value; shell writes #hud-<field>. */
+    /** Under the title menu before the first run; o.dt animates a backdrop. */
+    drawTitle(ctx, view) {
+        const { w, h } = view.size();
+        drawGrid(ctx, w, h);
+    },
+
+    /** Field -> value; the shell writes #hud-<field> and fills #hud-best. */
     hud(run) {
-        return {
-            score: run ? run.score : 0,
-            best: run ? run.highScore() : 0,
-        };
+        return { score: run ? run.score : 0 };
     },
 
-    /** Text for #gameover-stats (plain text; newlines ok). */
+    /** #gameover-stats text. The shell has already recorded the high score. */
     gameOverText(run) {
-        const score = run ? run.score : 0;
-        const best = run ? run.highScore() : 0;
-        const tag = run && run._newBest ? "  ·  NEW BEST" : "";
-        return "Score   " + score + tag + "\nBest    " + best;
+        return statsBlock([
+            ["Score", run.score + newBest(run)],
+            ["Best", run.highScore()],
+        ]);
     },
 
-    /**
-     * Game SFX only. Menu move/select tones are provided by the shell.
-     * @param {string} name
-     * @param {{ tone: Function, sequence: Function }} audio
-     */
+    /** Game sounds only; the shell plays the menu move/select tones. */
     cue(name, audio) {
         if (name === "score") audio.tone(720, 0.06, "square", 0.45);
     },

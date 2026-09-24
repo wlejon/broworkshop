@@ -9,7 +9,8 @@
 <body>
     <canvas id="view"></canvas>
 
-    <div id="hud" hidden>
+    <!-- HUD slots: game.hud() returns { score, best } (best counts this board live). -->
+    <div id="hud" class="hud-row" hidden>
         <div class="hud-stat">
             <div class="hud-label">Score</div>
             <div id="hud-score" class="hud-value">0</div>
@@ -59,7 +60,7 @@ Esc / P          Pause</pre>
         <section id="screen-win" class="screen" hidden>
             <h1 class="overlay-title">You Win</h1>
             <p class="overlay-sub">You built a <strong>2048</strong> tile.</p>
-            <div id="win-stats" class="stats-block"></div>
+            <div id="win-stats" class="stats-block stats-table"></div>
             <div class="menu-items">
                 <div class="menu-item selected" data-action="keepplaying">Keep Playing</div>
                 <div class="menu-item" data-action="restart">New Game</div>
@@ -69,7 +70,7 @@ Esc / P          Pause</pre>
 
         <section id="screen-gameover" class="screen" hidden>
             <h1 class="overlay-title">Game Over</h1>
-            <div id="gameover-stats" class="stats-block"></div>
+            <div id="gameover-stats" class="stats-block stats-table"></div>
             <div class="menu-items">
                 <div class="menu-item selected" data-action="restart">Play Again</div>
                 <div class="menu-item" data-action="title">Main Menu</div>

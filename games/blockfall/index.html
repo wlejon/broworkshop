@@ -11,17 +11,28 @@
 
     <div id="action-text"></div>
 
-    <div id="hud" hidden>
-        <div class="hud-label">SCORE</div>
-        <div id="hud-score" class="hud-value">0</div>
-        <div class="hud-label">BEST</div>
-        <div id="hud-best" class="hud-value">0</div>
-        <div class="hud-label">LEVEL</div>
-        <div id="hud-level" class="hud-value">1</div>
-        <div class="hud-label">LINES</div>
-        <div id="hud-lines" class="hud-value">0</div>
-        <div class="hud-label">COMBO</div>
-        <div id="hud-combo" class="hud-value">—</div>
+    <!-- HUD slots: game.hud() returns { score, best, level, lines, combo }. -->
+    <div id="hud" class="hud-row" hidden>
+        <div class="hud-stat">
+            <div class="hud-label">SCORE</div>
+            <div id="hud-score" class="hud-value">0</div>
+        </div>
+        <div class="hud-stat">
+            <div class="hud-label">BEST</div>
+            <div id="hud-best" class="hud-value">0</div>
+        </div>
+        <div class="hud-stat">
+            <div class="hud-label">LEVEL</div>
+            <div id="hud-level" class="hud-value">1</div>
+        </div>
+        <div class="hud-stat">
+            <div class="hud-label">LINES</div>
+            <div id="hud-lines" class="hud-value">0</div>
+        </div>
+        <div class="hud-stat">
+            <div class="hud-label">COMBO</div>
+            <div id="hud-combo" class="hud-value">—</div>
+        </div>
     </div>
 
     <div id="overlay">
@@ -30,9 +41,22 @@
             <div class="menu-items">
                 <div class="menu-item selected" data-action="play">Play</div>
                 <div class="menu-item" data-action="howto">How to Play</div>
+                <div class="menu-item" data-action="settings">Settings</div>
                 <div class="menu-item" data-action="quit">Quit</div>
             </div>
             <p class="overlay-hint">Up/Down navigate · Enter select</p>
+        </section>
+
+        <section id="screen-settings" class="screen" hidden>
+            <h1 class="overlay-title">Settings</h1>
+            <div class="menu-items">
+                <div class="menu-item selected" data-action="cycle-startlevel">Start Level: <span id="opt-startLevel">1</span></div>
+                <div class="menu-item" data-action="toggle-ghost">Ghost Piece: <span id="opt-ghost">ON</span></div>
+                <div class="menu-item" data-action="toggle-grid">Grid Lines: <span id="opt-grid">ON</span></div>
+                <div class="menu-item" data-action="cycle-sfx">SFX Volume: <span id="opt-sfxVol">100</span></div>
+                <div class="menu-item" data-action="title">Back</div>
+            </div>
+            <p class="overlay-hint">Enter to change</p>
         </section>
 
         <section id="screen-howto" class="screen" hidden>
@@ -67,7 +91,7 @@ Esc / P         Pause</pre>
 
         <section id="screen-gameover" class="screen" hidden>
             <h1 class="overlay-title">Game Over</h1>
-            <div id="gameover-stats" class="stats-block"></div>
+            <div id="gameover-stats" class="stats-block stats-table"></div>
             <div class="menu-items">
                 <div class="menu-item selected" data-action="restart">Play Again</div>
                 <div class="menu-item" data-action="title">Main Menu</div>

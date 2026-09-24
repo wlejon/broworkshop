@@ -9,7 +9,8 @@
 <body>
     <canvas id="view"></canvas>
 
-    <div id="hud" hidden>
+    <!-- HUD slots: game.hud() returns { round, status }; the shell fills #hud-best. -->
+    <div id="hud" class="hud-row" hidden>
         <div class="hud-stat">
             <div class="hud-label">Round</div>
             <div id="hud-round" class="hud-value">0</div>
@@ -63,7 +64,7 @@ Esc / P          Pause</pre>
 
         <section id="screen-gameover" class="screen" hidden>
             <h1 class="overlay-title">Game Over</h1>
-            <div id="gameover-stats" class="stats-block"></div>
+            <div id="gameover-stats" class="stats-block stats-table"></div>
             <div class="menu-items">
                 <div class="menu-item selected" data-action="restart">Play Again</div>
                 <div class="menu-item" data-action="title">Main Menu</div>

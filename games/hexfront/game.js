@@ -1,14 +1,28 @@
-// HexFront — arcade foundation plugin (3D hex tactics).
-// Domain: sim.js. Shell owns menus / pause / session; scene lives on #view.
+// HexFront — turn-based hex tactics, arcade plugin on a 3D stage.
+// Shell (/lib/arcade): screens, loop, pause, bindings, high score. Here:
+// picking cells on the stage, the select -> move -> attack flow, the blue
+// AI's turn and move animations on game-clock timers (so pause freezes
+// them), the HUD panels, save / load.
+//   rules.js   map, units, movement, combat, AI
+//   board.js   the TileWorld, unit instances, HP bars, highlights, popups
 
-import { createGame, UNIT_TYPES, FLAG_WATER } from "/app/sim.js";
+import { createStage } from "/lib/arcade/scene3d.js";
+import { createTimers } from "/lib/arcade/timers.js";
+import {
+    UNIT_TYPES, createBattle, aliveUnits, unitAt, tileName, reachable, routeTo,
+    attackTargets, attack, beginBlueTurn, beginRedTurn, aiAct, victoryScore,
+    snapshot, restore, drainEvents,
+} from "/app/rules.js";
+import { createBoard, TINT } from "/app/board.js";
 
-let canvas = null;
-let scene = null;
-let wired = false;
-/** @type {object|null} */
-/** @type {object|null} Latest run (wiring + HUD). */
-let activeRun = null;
+const MOVE_STEP_MS = 70;
+const AI_STEP_MS = 260;
+const TOAST_MS = 1600;
+const SAVE_KEY = "battle";
+
+let api = null;
+let stage = null;
+let board = null;           // the current run's board (one TileWorld at a time)
 
 export const game = {
     id: "hexfront",
@@ -21,429 +35,340 @@ export const game = {
         { name: "load", label: "Load", defaults: ["l"] },
     ],
 
-    create(ctx) {
-        ensureScene();
-        ensureWiring();
+    defaults: { highScore: 0, battle: null },
 
-        const battle = createGame(scene);
+    init(shellApi) {
+        api = shellApi;
+        const bind = (id, fn) => document.getElementById(id).addEventListener("click", () => {
+            const run = api.getRun();
+            if (run && api.getScreen() === "playing") fn(run);
+        });
+        bind("btn-endturn", endTurn);
+        bind("btn-save", saveGame);
+        bind("btn-load", loadGame);
+    },
 
+    create(shellApi) {
+        ensureStage();
+        if (board) board.destroy();                 // Restart / Play Again: drop the old world
+        board = createBoard(stage.scene);
         const run = {
             score: 0,
-            play: ctx.play,
-            highScore: ctx.highScore,
-            battle,
-            sel: null,
-            busy: false,
+            battle: createBattle(board.world),
+            board,
+            timers: createTimers(),
+            sel: null,              // { unit, phase: "move" | "attack", reach, targets }
+            busy: false,            // a move is animating
             aiRunning: false,
-            pendingOver: null,
-            toastTimer: null,
+            result: null,
+            play: shellApi.play,
+            highScore: shellApi.highScore,
         };
-        activeRun = run;
+        board.sync(run.battle);
+        board.clearHighlights();
         frameCamera();
-
-        battle.onCombat = (info) => {
-            damagePopup(battle.world, info.defender, "-" + info.damage, "#ffd75e");
-            if (info.counterDamage > 0) {
-                setTimeout(() => {
-                    damagePopup(battle.world, info.attacker, "-" + info.counterDamage, "#8fd0ff");
-                }, 250);
-            }
-            ctx.play("hit");
-        };
-        battle.onGameOver = (winner) => {
-            run.pendingOver = winner;
-            run.score = winner === "red"
-                ? Math.max(1, 1000 - battle.turn.number * 10)
-                : 0;
-            battle.clearHighlights();
-            ctx.play(winner === "red" ? "win" : "lose");
-        };
-
-        exposeDebug(run);
         return run;
     },
 
     update(run, dt, input) {
-        activeRun = run;
-        if (!run || !run.battle) return;
-
-        if (run.pendingOver) {
-            const w = run.pendingOver;
-            run.pendingOver = null;
-            return {
-                status: "gameover",
-                result: { winner: w, score: run.score },
-            };
-        }
-
+        run.timers.step(dt);
+        run.board.stepPopups(dt);
         if (input.pressed("endturn")) endTurn(run);
         if (input.pressed("save")) saveGame(run);
         if (input.pressed("load")) loadGame(run);
+        react(run);
+        if (run.result) return { status: "gameover", result: run.result };
     },
 
     draw() {
-        // 3D scene is engine-rendered.
+        // The scene renders itself; the 2D shell canvas stays hidden.
     },
 
     hud(run) {
-        if (!run || !run.battle) {
-            return {
-                turn: "TURN —",
-                side: "—",
-                ai: "",
-            };
-        }
-        const b = run.battle;
-        const red = b.turn.side === "red";
-        const sideEl = document.getElementById("hud-side");
-        if (sideEl) {
-            sideEl.textContent = red ? "RED MOVES" : "BLUE MOVES";
-            sideEl.className = red ? "side-red" : "side-blue";
-        }
-        const aiEl = document.getElementById("hud-ai");
-        if (aiEl) aiEl.style.display = run.aiRunning ? "" : "none";
-
-        refreshUnitPanel(run);
-
+        if (!run) return { turn: "TURN —", side: "—", ai: "" };
+        const red = run.battle.turn.side === "red";
+        const side = document.getElementById("hud-side");
+        side.className = red ? "side-red" : "side-blue";
+        document.getElementById("hud-ai").style.display = run.aiRunning ? "" : "none";
+        unitPanel(run);
         return {
-            turn: "TURN " + b.turn.number,
+            turn: "TURN " + run.battle.turn.number,
             side: red ? "RED MOVES" : "BLUE MOVES",
             ai: run.aiRunning ? "BLUE IS MOVING…" : "",
         };
     },
 
-    gameOverText(run, result) {
-        const winner = (result && result.winner) ||
-            (run && run.battle && run.battle.turn.winner) || "blue";
-        const turn = run && run.battle ? run.battle.turn.number : 0;
-        if (winner === "red") {
-            return "VICTORY\nTurn " + turn + "\nBlue forces eliminated";
-        }
-        return "DEFEAT\nTurn " + turn + "\nRed forces eliminated";
+    gameOverText(run) {
+        const won = run.battle.turn.winner === "red";
+        return (won ? "VICTORY" : "DEFEAT") + "\nTurn " + run.battle.turn.number + "\n" +
+            (won ? "Blue forces eliminated" : "Red forces eliminated") +
+            (won ? "\nScore " + run.score + (run._newBest ? "  ·  NEW BEST" : "") : "");
     },
 
     onEnterScreen(name, run) {
-        if (name === "gameover" && run && run.battle) {
+        if (name === "gameover" && run) {
+            const won = run.battle.turn.winner === "red";
             const title = document.getElementById("gameover-title");
-            if (title) {
-                const w = run.battle.turn.winner;
-                title.textContent = w === "red" ? "VICTORY" : "DEFEAT";
-                title.className = "overlay-title " + (w === "red" ? "victory" : "defeat");
-            }
+            title.textContent = won ? "VICTORY" : "DEFEAT";
+            title.className = "overlay-title " + (won ? "victory" : "defeat");
         }
+        if (name !== "playing") hideToast();
     },
 
     cue(name, audio) {
-        if (name === "hit") audio.tone(180, 0.08, "square", 0.45);
-        else if (name === "win") {
-            audio.sequence([
-                [523, 0.1, "square", 0.5],
-                [659, 0.1, "square", 0.55],
-                [784, 0.18, "square", 0.6],
-            ]);
-        } else if (name === "lose") {
-            audio.sequence([
-                [220, 0.12, "sawtooth", 0.4],
-                [160, 0.2, "sawtooth", 0.45],
-            ]);
-        }
+        const seq = CUES[name];
+        if (seq) audio.sequence(seq);
     },
 };
 
-// ── Scene ──────────────────────────────────────────────────────────────────
+const CUES = {
+    hit: [[180, 0.08, "square", 0.45]],
+    win: [[523, 0.1, "square", 0.5], [659, 0.1, "square", 0.55], [784, 0.18, "square", 0.6]],
+    lose: [[220, 0.12, "sawtooth", 0.4], [160, 0.2, "sawtooth", 0.45]],
+};
 
-function ensureScene() {
-    if (scene) return;
-    canvas = document.getElementById("view");
-    if (!canvas) throw new Error("hexfront: #view canvas missing");
-    scene = canvas.getContext("scene");
-    if (!scene) throw new Error("hexfront: scene context unavailable");
+// ── Stage ────────────────────────────────────────────────────────────────
 
+function ensureStage() {
+    if (stage) return;
+    stage = createStage({ iso: { target: [0, 0, 0], offset: [6, 26, 20], size: 12, far: 200 } });
+    const scene = stage.scene;
     scene.setToneMap({ mode: "aces", exposure: 1.05, gamma: 2.2 });
     scene.setAmbient([0.16, 0.17, 0.20]);
-    scene.createLight({
-        type: "directional",
-        direction: [-0.45, -1.0, -0.35],
-        color: [1.0, 0.96, 0.88],
-        intensity: 2.6,
-    });
+    scene.createLight({ type: "directional", direction: [-0.45, -1.0, -0.35], color: [1.0, 0.96, 0.88], intensity: 2.6 });
     window.addEventListener("resize", frameCamera);
+    stage.onTap((p) => {
+        const run = api.getRun();
+        if (!run || api.getScreen() !== "playing") return;
+        const ray = stage.rayAt(p.clientX, p.clientY);
+        const hit = ray && run.board.world.raycastCell(ray.origin, ray.dir, 500);
+        if (hit) actOnCell(run, hit.x, hit.y);
+        else if (run.sel && run.sel.phase === "move") deselect(run);
+    });
 }
 
+// Fit the whole map in view: project the map's box onto the camera's
+// screen axes, centre on it and size the view to the larger span (plus a
+// margin for the HUD strips top and bottom).
 function frameCamera() {
-    if (!activeRun || !activeRun.battle || !scene) return;
-    const world = activeRun.battle.world;
-    const b = world.worldBounds();
-    const cx = (b.minX + b.maxX) / 2, cz = (b.minZ + b.maxZ) / 2;
-    const spanX = b.maxX - b.minX, spanZ = b.maxZ - b.minZ;
-    const rect = canvas.getBoundingClientRect();
-    const aspect = rect.width > 0 && rect.height > 0 ? rect.width / rect.height : 16 / 10;
-    const size = Math.max(spanZ * 0.92 + 2.2, (spanX + 1.5) / aspect);
-    scene.setCamera({
-        mode: "orthographic",
-        size, aspect, near: 0.1, far: 200,
-        position: [cx + 6, 26, cz + 20],
-        target: [cx, 0, cz],
-    });
+    if (!stage || !board) return;
+    const b = board.world.worldBounds();
+    const r = stage.canvas.getBoundingClientRect();
+    const aspect = r.width > 0 && r.height > 0 ? r.width / r.height : 16 / 10;
+    const off = stage.iso.offset;
+    const len = Math.hypot(off[0], off[1], off[2]);
+    const fwd = [-off[0] / len, -off[1] / len, -off[2] / len];
+    const right = norm([-fwd[2], 0, fwd[0]]);                       // fwd x up
+    const up = [right[1] * fwd[2] - right[2] * fwd[1], right[2] * fwd[0] - right[0] * fwd[2], right[0] * fwd[1] - right[1] * fwd[0]];
+    const dot = (a, v) => a[0] * v[0] + a[1] * v[1] + a[2] * v[2];
+    const rs = [], us = [];
+    for (const x of [b.minX, b.maxX]) for (const y of [-1, 1.2]) for (const z of [b.minZ, b.maxZ]) {
+        rs.push(dot([x, y, z], right));
+        us.push(dot([x, y, z], up));
+    }
+    const rMid = (Math.min(...rs) + Math.max(...rs)) / 2, uMid = (Math.min(...us) + Math.max(...us)) / 2;
+    const rSpan = Math.max(...rs) - Math.min(...rs), uSpan = Math.max(...us) - Math.min(...us);
+    // The point at (rMid, uMid) on screen, slid along the view ray to the ground (y = 0).
+    const p = [right[0] * rMid + up[0] * uMid, right[1] * rMid + up[1] * uMid, right[2] * rMid + up[2] * uMid];
+    const s = -p[1] / fwd[1];
+    stage.reframe([p[0] + fwd[0] * s, 0, p[2] + fwd[2] * s], Math.max(uSpan, rSpan / aspect) * 1.06 + 1.2);
+    stage.applyCamera();
 }
 
-// ── UI helpers ─────────────────────────────────────────────────────────────
-
-const el = (id) => document.getElementById(id);
-
-function toast(run, msg) {
-    let t = el("toast");
-    if (!t) return;
-    t.textContent = msg;
-    t.style.display = "";
-    if (run.toastTimer) clearTimeout(run.toastTimer);
-    run.toastTimer = setTimeout(() => { t.style.display = "none"; }, 1600);
+function norm(v) {
+    const l = Math.hypot(v[0], v[1], v[2]) || 1;
+    return [v[0] / l, v[1] / l, v[2] / l];
 }
 
-function damagePopup(world, unit, text, color) {
-    if (!scene || !unit) return;
-    const p = world.cellCenterWorldXZ(unit.x, unit.y);
-    let topY = world.sampleHeight(p.x, p.z);
-    if (topY === null) topY = 0;
-    const node = scene.createHtmlNode({
-        width: 80, height: 30, pxPerUnit: 60,
-        worldAnchor: [p.x, topY + 1.5, p.z], billboard: "full",
-        html: '<div style="color:' + color + ';font:bold 22px monospace;text-align:center;' +
-              'text-shadow:0 1px 3px #000">' + text + "</div>",
-    });
-    let rise = 0;
-    const iv = setInterval(() => {
-        rise += 0.06;
-        node.worldAnchor = [p.x, topY + 1.5 + rise, p.z];
-        if (rise > 0.6) { clearInterval(iv); node.destroy(); }
-    }, 50);
+/** Client pixel over a cell's surface (tests click through this). */
+export function projectCell(x, y) {
+    const p = board.topOf(x, y);
+    return stage.toScreen(p.x, p.y, p.z);
 }
 
-function refreshUnitPanel(run) {
-    const panel = el("unit-panel");
-    if (!panel) return;
-    const u = run.sel ? run.sel.unit : null;
-    panel.style.display = u ? "" : "none";
-    if (!u) return;
-    const t = UNIT_TYPES[u.type];
-    const set = (id, v) => { const n = el(id); if (n) n.textContent = v; };
-    set("unit-name", t.name + " (" + u.side.toUpperCase() + ")");
-    set("unit-hp", u.hp + " / " + t.hp);
-    set("unit-atk", String(t.atk));
-    set("unit-move", String(t.move));
-    set("unit-range", t.rangeMin === t.rangeMax
-        ? String(t.rangeMax) : t.rangeMin + "-" + t.rangeMax);
-    set("unit-terrain", run.battle.tileName(u.x, u.y));
-    set("unit-hint", run.sel.phase === "attack"
-        ? "Pick a target — or click elsewhere to hold position."
-        : "Blue cells: move. Red-lit enemies: attack.");
+// ── Events -> sound, popups, game over ───────────────────────────────────
+
+function react(run) {
+    const b = run.battle;
+    const events = drainEvents(b);
+    if (events.length) run.board.sync(b);
+    for (const e of events) {
+        if (e.type === "combat") {
+            run.play("hit");
+            run.board.popup(e.defender.x, e.defender.y, "-" + e.damage, "#ffd75e");
+            if (e.counterDamage > 0) {
+                const a = e.attacker;
+                run.timers.after(250, () => run.board.popup(a.x, a.y, "-" + e.counterDamage, "#8fd0ff"));
+            }
+        } else if (e.type === "gameover") {
+            const won = e.winner === "red";
+            run.score = won ? victoryScore(b) : 0;
+            run.board.clearHighlights();
+            run.play(won ? "win" : "lose");
+            run.result = { winner: e.winner, score: run.score };
+        }
+    }
 }
 
-// ── Selection / turns ──────────────────────────────────────────────────────
+// ── Selection ────────────────────────────────────────────────────────────
 
 function refreshHighlights(run) {
-    const battle = run.battle;
-    battle.clearHighlights();
-    if (!run.sel) return;
-    const u = run.sel.unit;
-    if (run.sel.phase === "move") {
-        const cells = [];
-        for (const c of run.sel.reach.values())
-            if (!battle.unitAt(c.x, c.y)) cells.push(c);
-        battle.highlight(cells, 0.45, 0.70, 1.55);
-        battle.highlight(run.sel.targets.map(t => ({ x: t.x, y: t.y })), 1.9, 0.30, 0.30);
-    } else {
-        battle.highlight(run.sel.targets.map(t => ({ x: t.x, y: t.y })), 1.9, 0.30, 0.30);
+    const { board: bd, battle: b, sel } = run;
+    bd.clearHighlights();
+    if (!sel) return;
+    if (sel.phase === "move") {
+        bd.highlight([...sel.reach.values()].filter((c) => !unitAt(b, c.x, c.y)), TINT.move);
     }
-    battle.highlight([{ x: u.x, y: u.y }], 1.6, 1.45, 0.45);
+    bd.highlight(sel.targets, TINT.target);
+    bd.highlight([sel.unit], TINT.selected);
 }
 
 function select(run, unit) {
-    run.sel = {
-        unit, phase: "move",
-        reach: run.battle.reachable(unit),
-        targets: run.battle.attackTargets(unit),
-    };
+    run.sel = { unit, phase: "move", reach: reachable(run.battle, unit), targets: attackTargets(run.battle, unit) };
     refreshHighlights(run);
 }
 
 function deselect(run) {
     run.sel = null;
-    run.battle.clearHighlights();
+    run.board.clearHighlights();
 }
 
 function finishUnit(run, unit) {
     unit.acted = true;
-    run.battle.sync();
+    run.board.sync(run.battle);                    // dims the spent unit
     deselect(run);
 }
 
-function doMove(run, unit, tx, ty) {
-    const path = run.battle.routeTo(unit, tx, ty);
+// Walk the A* route a cell per step, then offer targets from the new cell.
+function moveUnit(run, unit, tx, ty) {
+    const path = routeTo(run.battle, unit, tx, ty);
     if (!path.length) return;
     run.busy = true;
-    run.battle.clearHighlights();
-    run.battle.moveUnitAlong(unit, path, 70, () => {
+    run.board.clearHighlights();
+    let i = 0;
+    const stepOnce = () => {
+        unit.x = path[i].x;
+        unit.y = path[i].y;
+        run.board.sync(run.battle);
+        return ++i < path.length;
+    };
+    const arrive = () => {
         run.busy = false;
-        const targets = run.battle.attackTargets(unit);
-        if (targets.length) {
-            run.sel = { unit, phase: "attack", reach: new Map(), targets };
-            refreshHighlights(run);
-        } else {
-            finishUnit(run, unit);
-        }
+        const targets = attackTargets(run.battle, unit);
+        if (!targets.length) { finishUnit(run, unit); return; }
+        run.sel = { unit, phase: "attack", reach: new Map(), targets };
+        refreshHighlights(run);
+    };
+    if (!stepOnce()) { arrive(); return; }
+    run.timers.every(MOVE_STEP_MS, () => {
+        if (stepOnce()) return true;
+        arrive();
+        return false;
     });
 }
 
-function doAttack(run, att, def) {
-    run.battle.attack(att, def);
-    if (att.alive) finishUnit(run, att); else deselect(run);
+function strike(run, att, def) {
+    attack(run.battle, att, def);
+    if (att.alive) finishUnit(run, att);
+    else deselect(run);
 }
 
-function actOnCell(run, x, y) {
-    if (!run || !run.battle) return;
-    const battle = run.battle;
-    if (battle.turn.over || battle.turn.side !== "red" || run.busy || run.aiRunning) return;
-    const u = battle.unitAt(x, y);
-
-    if (!run.sel) {
+/** A click on cell (x, y) during red's turn. */
+export function actOnCell(run, x, y) {
+    const b = run.battle;
+    if (b.turn.over || b.turn.side !== "red" || run.busy || run.aiRunning) return;
+    const u = unitAt(b, x, y);
+    const sel = run.sel;
+    if (!sel) {
         if (u && u.side === "red" && !u.acted) select(run, u);
         return;
     }
-
-    if (run.sel.phase === "move") {
-        if (u === run.sel.unit) { deselect(run); return; }
-        if (u && u.side === "blue" && run.sel.targets.includes(u)) {
-            doAttack(run, run.sel.unit, u); return;
-        }
-        if (u && u.side === "red") {
-            if (!u.acted) select(run, u); else deselect(run);
-            return;
-        }
-        const key = x + "," + y;
-        if (!u && run.sel.reach.has(key)) { doMove(run, run.sel.unit, x, y); return; }
-        deselect(run);
-    } else {
-        if (u && u.side === "blue" && run.sel.targets.includes(u)) {
-            doAttack(run, run.sel.unit, u); return;
-        }
-        finishUnit(run, run.sel.unit);
+    if (u && u.side === "blue" && sel.targets.includes(u)) { strike(run, sel.unit, u); return; }
+    if (sel.phase === "attack") { finishUnit(run, sel.unit); return; }     // hold position
+    if (u === sel.unit) { deselect(run); return; }
+    if (u && u.side === "red") {
+        if (!u.acted) select(run, u); else deselect(run);
+        return;
     }
+    if (!u && sel.reach.has(x + "," + y)) { moveUnit(run, sel.unit, x, y); return; }
+    deselect(run);
 }
 
-function endTurn(run) {
-    if (!run || !run.battle) return;
-    const battle = run.battle;
-    if (battle.turn.over || battle.turn.side !== "red" || run.busy || run.aiRunning) return;
+// ── Turns, save, load ────────────────────────────────────────────────────
+
+/** Hand over to blue: each unit acts in turn, a beat apart, then red again. */
+export function endTurn(run) {
+    const b = run.battle;
+    if (b.turn.over || b.turn.side !== "red" || run.busy || run.aiRunning) return;
     deselect(run);
-    battle.beginBlueTurn();
+    beginBlueTurn(b);
     run.aiRunning = true;
-    const queue = battle.aliveUnits("blue");
+    const queue = aliveUnits(b, "blue");
     let i = 0;
-    const step = () => {
-        if (battle.turn.over) { run.aiRunning = false; return; }
+    run.timers.every(AI_STEP_MS, () => {
+        if (b.turn.over) { run.aiRunning = false; return false; }
         if (i >= queue.length) {
             run.aiRunning = false;
-            battle.beginRedTurn();
-            return;
+            beginRedTurn(b);
+            run.board.sync(b);
+            return false;
         }
         const unit = queue[i++];
-        if (unit.alive) battle.aiAct(unit);
-        setTimeout(step, 260);
-    };
-    setTimeout(step, 260);
+        if (unit.alive) aiAct(b, unit);
+        run.board.sync(b);
+        return true;
+    });
 }
 
 function saveGame(run) {
-    if (!run || !run.battle) return;
-    if (run.battle.save()) toast(run, "Game saved");
+    api.save.set(SAVE_KEY, snapshot(run.battle));
+    api.save.save();
+    toast("Game saved");
 }
 
 function loadGame(run) {
-    if (!run || !run.battle) return;
     if (run.busy || run.aiRunning) return;
-    if (run.battle.load()) {
-        deselect(run);
-        if (run.battle.turn.over) run.pendingOver = run.battle.turn.winner;
-        toast(run, "Game loaded");
-    } else {
-        toast(run, "No save found");
+    if (!restore(run.battle, api.save.get(SAVE_KEY))) { toast("No save found"); return; }
+    deselect(run);
+    run.board.sync(run.battle);
+    toast("Game loaded");
+    if (run.battle.turn.over) {
+        run.score = run.battle.turn.winner === "red" ? victoryScore(run.battle) : 0;
+        run.result = { winner: run.battle.turn.winner, score: run.score };
     }
 }
 
-// ── Input wiring ───────────────────────────────────────────────────────────
+// ── HUD panels ───────────────────────────────────────────────────────────
 
-function ensureWiring() {
-    if (wired) return;
-    wired = true;
-    ensureScene();
+let toastTimer = null;         // cancel() for the pending hide
 
-    canvas.addEventListener("mousedown", (e) => {
-        if (e.button !== 0 || !activeRun) return;
-        const rect = canvas.getBoundingClientRect();
-        const ray = scene.unprojectLocal(e.clientX - rect.left, e.clientY - rect.top);
-        if (!ray) return;
-        const hit = activeRun.battle.world.raycastCell(ray.origin, ray.dir, 500);
-        if (!hit) {
-            if (activeRun.sel && activeRun.sel.phase === "move") deselect(activeRun);
-            return;
-        }
-        actOnCell(activeRun, hit.x, hit.y);
-    });
-
-    const bindBtn = (id, fn) => {
-        const n = el(id);
-        if (n) n.addEventListener("click", () => { if (activeRun) fn(activeRun); });
-    };
-    bindBtn("btn-endturn", endTurn);
-    bindBtn("btn-save", saveGame);
-    bindBtn("btn-load", loadGame);
+function toast(msg) {
+    const t = document.getElementById("toast");
+    t.textContent = msg;
+    t.style.display = "";
+    if (toastTimer) toastTimer();
+    toastTimer = api.getRun().timers.after(TOAST_MS, hideToast);
 }
 
-// ── Debug / test surface ───────────────────────────────────────────────────
-
-function projectCell(x, y) {
-    if (!activeRun || !scene) return { x: 0, y: 0 };
-    const world = activeRun.battle.world;
-    const c = world.cellCenterWorldXZ(x, y);
-    let topY = world.sampleHeight(c.x, c.z);
-    if (topY === null) topY = 0;
-    const V = scene.viewMatrix, P = scene.projectionMatrix;
-    const mul = (m, v) => [
-        m[0] * v[0] + m[4] * v[1] + m[8] * v[2] + m[12] * v[3],
-        m[1] * v[0] + m[5] * v[1] + m[9] * v[2] + m[13] * v[3],
-        m[2] * v[0] + m[6] * v[1] + m[10] * v[2] + m[14] * v[3],
-        m[3] * v[0] + m[7] * v[1] + m[11] * v[2] + m[15] * v[3],
-    ];
-    const clip = mul(P, mul(V, [c.x, topY, c.z, 1]));
-    const rect = canvas.getBoundingClientRect();
-    return {
-        x: rect.left + (clip[0] / clip[3] * 0.5 + 0.5) * rect.width,
-        y: rect.top + (1 - (clip[1] / clip[3] * 0.5 + 0.5)) * rect.height,
-    };
+function hideToast() {
+    toastTimer = null;
+    document.getElementById("toast").style.display = "none";
 }
 
-function exposeDebug(run) {
-    window.HEXFRONT = {
-        game: run.battle,
-        world: run.battle.world,
-        scene,
-        projectCell,
-        actOnCell: (x, y) => actOnCell(run, x, y),
-        endTurn: () => endTurn(run),
-        saveGame: () => saveGame(run),
-        loadGame: () => loadGame(run),
-        get selection() { return run.sel; },
-        get busy() { return run.busy; },
-        get aiRunning() { return run.aiRunning; },
-        FLAG_WATER,
-        debug: {
-            place(unit, x, y) { unit.x = x; unit.y = y; run.battle.sync(); },
-            setHp(unit, hp) { unit.hp = hp; run.battle.sync(); },
-            resetActed(side) {
-                for (const u of run.battle.aliveUnits(side)) u.acted = false;
-                run.battle.sync();
-            },
-        },
-    };
+function unitPanel(run) {
+    const panel = document.getElementById("unit-panel");
+    const u = run.sel ? run.sel.unit : null;
+    panel.style.display = u ? "" : "none";
+    if (!u) return;
+    const t = UNIT_TYPES[u.type];
+    const set = (id, v) => { document.getElementById(id).textContent = v; };
+    set("unit-name", t.name + " (" + u.side.toUpperCase() + ")");
+    set("unit-hp", u.hp + " / " + t.hp);
+    set("unit-atk", String(t.atk));
+    set("unit-move", String(t.move));
+    set("unit-range", t.rangeMin === t.rangeMax ? String(t.rangeMax) : t.rangeMin + "-" + t.rangeMax);
+    set("unit-terrain", tileName(run.battle, u.x, u.y));
+    set("unit-hint", run.sel.phase === "attack"
+        ? "Pick a target — or click elsewhere to hold position."
+        : "Blue cells: move. Red-lit enemies: attack.");
 }

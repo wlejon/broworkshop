@@ -9,19 +9,31 @@
 <body>
     <canvas id="view"></canvas>
 
-    <div id="hud" hidden>
-        <div class="hud-label">SCORE</div>
-        <div id="hud-score" class="hud-value">0</div>
-        <div class="hud-label">HI</div>
-        <div id="hud-hi" class="hud-value">0</div>
-        <div class="hud-label">LEVEL</div>
-        <div id="hud-level" class="hud-value">1</div>
-        <div class="hud-label">LANDED</div>
-        <div id="hud-landed" class="hud-value">0</div>
-        <div class="hud-label">FUEL</div>
-        <div id="hud-fuel" class="hud-value">1000</div>
+    <!-- HUD slots: game.hud() returns { score, best, level, landed, fuel }. -->
+    <div id="hud" class="hud-row" hidden>
+        <div class="hud-stat">
+            <div class="hud-label">SCORE</div>
+            <div id="hud-score" class="hud-value">0</div>
+        </div>
+        <div class="hud-stat">
+            <div class="hud-label">HI</div>
+            <div id="hud-best" class="hud-value">0</div>
+        </div>
+        <div class="hud-stat">
+            <div class="hud-label">LEVEL</div>
+            <div id="hud-level" class="hud-value">1</div>
+        </div>
+        <div class="hud-stat">
+            <div class="hud-label">LANDED</div>
+            <div id="hud-landed" class="hud-value">0</div>
+        </div>
+        <div class="hud-stat">
+            <div class="hud-label">FUEL</div>
+            <div id="hud-fuel" class="hud-value">1000</div>
+        </div>
     </div>
 
+    <!-- Telemetry (filled from game.hud): shown while a run is playing, paused or landed. -->
     <div id="telemetry" hidden>
         <div class="tel-row">
             <span class="tel-label">ALT</span>
@@ -79,7 +91,7 @@ Esc / P       Pause</pre>
 
         <section id="screen-landed" class="screen" hidden>
             <h1 class="overlay-title">TOUCHDOWN!</h1>
-            <div id="landed-stats" class="overlay-sub stats-block"></div>
+            <div id="landed-stats" class="stats-block stats-table"></div>
             <div class="menu-items">
                 <div class="menu-item selected" data-action="next">NEXT LEVEL</div>
             </div>
@@ -88,7 +100,7 @@ Esc / P       Pause</pre>
 
         <section id="screen-gameover" class="screen" hidden>
             <h1 class="overlay-title">CRASHED</h1>
-            <div id="gameover-stats" class="stats-block"></div>
+            <div id="gameover-stats" class="stats-block stats-table"></div>
             <div class="menu-items">
                 <div class="menu-item selected" data-action="restart">PLAY AGAIN</div>
                 <div class="menu-item" data-action="title">MAIN MENU</div>

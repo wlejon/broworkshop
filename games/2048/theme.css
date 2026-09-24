@@ -33,9 +33,17 @@
     color: #bbada0;
 }
 
+/* Top right, clear of the "2048" wordmark drawn over the board's left edge. */
 #hud {
+    left: auto;
+    right: 16px;
     min-width: 90px;
     color: #fff;
+}
+
+/* Padded "Label   value" rows only line up in a fixed-width face. */
+.stats-table {
+    font-family: Consolas, "Courier New", monospace;
 }
 
 #hud .hud-label {
