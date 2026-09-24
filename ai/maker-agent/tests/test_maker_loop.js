@@ -1,85 +1,67 @@
-// Capstone: the author -> preview -> look loop end-to-end, in-engine, via the REAL
-// app path (window.__makerDebug wraps main.js's session + look over the <iframe>
-// preview). Two parts:
-//   (1) Deterministic proof of `look`: write a known index.html into the project,
-//       call look, assert the vision model returned a real description and a capture
-//       thumbnail appeared.
-//   (2) Autonomous proof: the OpenRouter brain authors a page with the file tools and
-//       the turn completes; the final preview is captured. (Whether a small free
-//       model nails the exact picture varies, so content is LOGGED, not asserted.)
-// Requires OPENROUTER_API_KEY. Run:
-//   OPENROUTER_API_KEY=sk-or-... bro-headless ai/maker-agent tests/test_maker_loop.js
-//
-// The preview only repaints on an engine frame. Windowed runs repaint continuously;
-// headless has no render loop, so tick() forces one via screenshot() each poll step
-// (into the gitignored tests/ dir) so look()'s post-reload capture sees fresh pixels.
+// Live capstone (tag: net): the author -> preview -> look loop end-to-end
+// through the app's real surface, against OpenRouter.
+//   1. look over a known page: the vision model returns a real description
+//      and the capture thumbnail lands in the transcript.
+//   2. An autonomous turn: the brain writes a page with the file tools and
+//      the turn reaches idle. What a free model draws varies, so the picture
+//      is saved (shot) rather than graded.
+// Needs OPENROUTER_API_KEY; skips without it.
+//   OPENROUTER_API_KEY=sk-or-... bro-headless ai/maker-agent ai/maker-agent/tests/test_maker_loop.js
+import { check, test, done, frames, pumpUntil, skip, shot } from "/lib/kit/test.js";
+import { maker, PROJECT_DIR } from "/app/app.js";
 
-const KEY = globalThis.process && globalThis.process.env && globalThis.process.env.OPENROUTER_API_KEY;
-assert(KEY, "OPENROUTER_API_KEY must be set");
-assert(window.__makerDebug, "main.js must have booted (window.__makerDebug present)");
+const KEY = process.env.OPENROUTER_API_KEY;
+if (!KEY) skip('OPENROUTER_API_KEY is not set');
 
-const APP = "D:/projects/broworkshop/ai/maker-agent";
-const PROJ = APP + "/project";
-const fs = globalThis.require("fs");
-function tick(n) {
-    for (let i = 0; i < n; i++) { advanceTime(20); try { screenshot(APP + "/tests/maker_tick.png"); } catch (e) {} wallSleep(5); }
+const fs = require('fs');
+const savedPrefs = maker.prefs.snapshot();
+const placeholder = fs.readFileSync(PROJECT_DIR + '/index.html', 'utf-8');
+frames(2);
+maker.configure({ kind: 'openrouter', key: KEY });
+
+async function settle(promise, ms) {
+    let out = null, fin = false;
+    promise.then((v) => { out = { value: v }; fin = true; }, (e) => { out = { error: e }; fin = true; });
+    pumpUntil(() => fin, ms);
+    return fin ? out : { error: new Error('timed out after ' + ms + ' ms') };
 }
 
-advanceTime(100); flush();
-window.__makerDebug.configure({
-    backend: "openrouter",
-    key: KEY,
-    brain: "nvidia/nemotron-3-super-120b-a12b:free",
-    vision: "google/gemma-4-31b-it:free",
-});
+try {
+    fs.writeFileSync(PROJECT_DIR + '/index.html',
+        '<!doctype html><html><head><style>html,body{margin:0;height:100%}' +
+        '#sky{height:60%;background:#87ceeb}#ground{height:40%;background:#3a7d34}</style></head>' +
+        '<body><div id="sky"></div><div id="ground"></div></body></html>');
+    const r = await settle(maker.look('What colors and regions do you see, top to bottom?'), 180000);
 
-// ── Part 1: deterministic look over a known page ──────────────────────────────
-fs.writeFileSync(PROJ + "/index.html",
-    '<!doctype html><html><head><style>html,body{margin:0;height:100%}' +
-    '#sky{height:60%;background:#87ceeb}#ground{height:40%;background:#3a7d34}</style></head>' +
-    '<body><div id="sky"></div><div id="ground"></div></body></html>');
+    test('look describes the preview', () => {
+        check(!r.error, 'look resolved: ' + (r.error && r.error.message));
+        const res = r.value;
+        const txt = (res.content && res.content[0] && res.content[0].text) || '';
+        console.log('look returned: ' + JSON.stringify(txt.slice(0, 220)));
+        check(!(res.details && res.details.error), 'vision model answered: ' + txt.slice(0, 200));
+        check(txt.length > 15, 'a real description');
+    });
 
-let lookRes = null, lookDone = false;
-window.__makerDebug.look("What colors and regions do you see, top to bottom?")
-    .then((r) => { lookRes = r; lookDone = true; })
-    .catch((e) => { lookRes = { error: e }; lookDone = true; });
-for (let i = 0; i < 40000 && !lookDone; i++) tick(1);
+    maker.reset();
+    fs.writeFileSync(PROJECT_DIR + '/index.html', '<!doctype html><html><body></body></html>');
+    const turn = await settle(maker.prompt(
+        'Build a simple web page in index.html: a full-viewport page with a sky-blue background and one big ' +
+        'centered solid yellow circle (a sun). Write the file, then call the look tool once to check it, then ' +
+        'stop and summarize in one sentence. At most 4 tool calls.'), 600000);
+    frames(2);
 
-const lookText = lookRes && lookRes.content && lookRes.content[0] && lookRes.content[0].text || "";
-console.log("look returned:", JSON.stringify(lookText.slice(0, 220)));
-assert(lookDone, "look() resolved");
-assert(!(lookRes && lookRes.details && lookRes.details.error), "look() succeeded (vision model responded)");
-assert(lookText.length > 15, "look() returned a real description");
-console.log("look-shot thumbnails:", document.querySelectorAll(".look-shot").length);
-console.log("PART 1 PASSED: look() reloaded the preview, captured it, and the vision model described it.");
-
-// ── Part 2: autonomous build ──────────────────────────────────────────────────
-window.__makerDebug.reset();
-fs.writeFileSync(PROJ + "/index.html", "<!doctype html><html><body></body></html>"); // blank slate
-let done = false, failErr = null;
-window.__makerDebug.prompt(
-    "Build a simple web page in index.html: a full-viewport page with a sky-blue background and one big " +
-    "centered solid yellow circle (a sun). Write the file, then call the look tool once to check it, then stop " +
-    "and summarize in one sentence. At most 4 tool calls."
-).then(() => { done = true; }).catch((e) => { failErr = (e && e.message) || String(e); done = true; });
-for (let i = 0; i < 200000 && !done; i++) tick(1);
-
-tick(2);
-const img = document.querySelector("#preview").capture();
-let nonSky = 0;
-if (img) for (let p = 0; p < img.data.length; p += 4) {
-    const r = img.data[p], g = img.data[p + 1], b = img.data[p + 2];
-    if (!(b > r && b > 150)) nonSky++;              // anything that isn't sky-blue
+    test('an autonomous turn writes the project and finishes', () => {
+        check(!turn.error, 'turn finished: ' + (turn.error && turn.error.message));
+        check(!maker.session.running, 'session idle');
+        check(document.querySelectorAll('#transcript .chat-tool').length > 0, 'tools were called');
+        check(fs.readFileSync(PROJECT_DIR + '/index.html', 'utf-8').length > 60, 'index.html written');
+        const cap = maker.capturePreview();
+        check(cap.imageData.width > 0, 'final preview captured');
+    });
+    shot('autonomous');
+} finally {
+    fs.writeFileSync(PROJECT_DIR + '/index.html', placeholder);
+    maker.renderPreview();
+    maker.prefs.restore(savedPrefs);
 }
-const frac = img ? nonSky / (img.width * img.height) : 0;
-console.log("\n==== RESULT ====");
-console.log("autonomous done:", done, "err:", failErr);
-console.log("preview non-sky fraction:", frac.toFixed(3), "| look captures:", document.querySelectorAll(".look-shot").length);
-if (img && bro.image && bro.image.encodeJpegFile) {
-    bro.image.encodeJpegFile(APP + "/tests/maker_preview.jpg", img.data, img.width, img.height, 4, 90);
-    console.log("saved preview:", APP + "/tests/maker_preview.jpg");
-}
-assert(done, "the autonomous maker turn reached idle");
-assert(img && img.width > 0, "the final preview was captured");
-console.log("PART 2 PASSED: the OpenRouter brain authored a page and the preview rendered.");
-console.log("\nMAKER LOOP PASSED: author -> preview -> look works end-to-end in-engine.");
+done('maker loop');

@@ -81,9 +81,7 @@ scripts/validate.sh --list               # what would run, with tags
 - **File size:** keep files under ~1k lines; when one grows past that,
   decompose it into sensible modules. Exceptions are allowed, but nothing over
   2k lines.
-- **ES modules, no bundler.** Apps import what they need from `/lib`. (The
-  vendored `*.bundle.js` + `bundler/` in `ai/pi-agent` and `ai/maker-agent`
-  are generated third-party bundles, the one exception.)
+- **ES modules, no bundler.** Apps import what they need from `/lib`.
 - **Apps showcase the engine.** When something does not work in bro, do not
   hack around it in app code: note it in [`ENGINE-ISSUES.md`](ENGINE-ISSUES.md)
   for the engine owner and pick the straightforward design.

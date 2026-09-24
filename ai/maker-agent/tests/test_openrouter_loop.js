@@ -1,63 +1,59 @@
-// Live end-to-end proof: drive pi's real Agent loop through the OpenRouter backend
-// (openrouter.js native tool-calling) + the maker tools, entirely in-engine. Runs a
-// bounded task that must call list_dir, and asserts a tool round-trips and the loop
-// reaches idle. Free models rate-limit intermittently, so it tries a few until one
-// completes. Requires OPENROUTER_API_KEY in the environment. Run:
-//   OPENROUTER_API_KEY=sk-or-... bro-headless ai/maker-agent tests/test_openrouter_loop.js
+// Live (tag: net): the kit agent loop (lib/kit/agent.js) through the
+// OpenRouter provider (lib/kit/agent-llm.js, native tool calling) with the
+// coding tools, entirely in-engine. A bounded task must call list_dir; the
+// tool must round-trip and the loop reach idle. Free models rate-limit, so
+// it tries a few until one completes. Needs OPENROUTER_API_KEY; skips without it.
+//   OPENROUTER_API_KEY=sk-or-... bro-headless ai/maker-agent ai/maker-agent/tests/test_openrouter_loop.js
+import { check, test, done, pumpUntil, skip } from "/lib/kit/test.js";
+import { createAgent } from "/lib/kit/agent.js";
+import { codingTools } from "/lib/kit/agent-tools.js";
+import { openrouterStream } from "/lib/kit/agent-llm.js";
 
-import { createAgentSession } from "/app/maker.bundle.js";
-
-const KEY = globalThis.process && globalThis.process.env && globalThis.process.env.OPENROUTER_API_KEY;
-assert(KEY, "OPENROUTER_API_KEY must be set in the environment");
+const KEY = process.env.OPENROUTER_API_KEY;
+if (!KEY) skip('OPENROUTER_API_KEY is not set');
 
 const MODELS = [
-    "nvidia/nemotron-3-super-120b-a12b:free",
-    "google/gemma-4-31b-it:free",
-    "openai/gpt-oss-120b:free",
-    "meta-llama/llama-3.3-70b-instruct:free",
+    'nvidia/nemotron-3-super-120b-a12b:free',
+    'google/gemma-4-31b-it:free',
+    'openai/gpt-oss-120b:free',
+    'meta-llama/llama-3.3-70b-instruct:free',
 ];
 
 function runOne(model) {
     const events = [];
     let idle = false, failed = null;
-    const session = createAgentSession({
-        backend: { kind: "openrouter", openrouter: { apiKey: KEY, model, maxRetries: 2 } },
-        cwd: "D:/projects/broworkshop/ai/maker-agent",
+    const agent = createAgent({
+        stream: openrouterStream({ apiKey: KEY, model, maxRetries: 2 }),
+        systemPrompt: 'You are a coding agent. Use tools when asked.',
+        tools: codingTools(bro.appDir),
         onEvent: (e) => {
             events.push(e);
-            if (e.type === "tool_execution_start") console.log("  -> tool:", e.toolName, JSON.stringify(e.args || {}));
-            if (e.type === "message_end" && e.message && e.message.role === "assistant" && e.message.stopReason === "error") {
-                failed = e.message.errorMessage || "error";
+            if (e.type === 'tool_execution_start') console.log('  -> tool: ' + e.toolName + ' ' + JSON.stringify(e.args || {}));
+            if (e.type === 'message_end' && e.message.role === 'assistant' && e.message.stopReason === 'error') {
+                failed = e.message.errorMessage || 'error';
             }
         },
-        approve: () => true,
     });
-
-    session
-        .prompt("Call the list_dir tool on '.' and then tell me in one sentence what files are here. Do not call any other tools.")
-        .then(() => { idle = true; })
-        .catch((e) => { failed = (e && e.message) || String(e); idle = true; });
-
-    // Pump: each OpenRouter round-trip is a real network call (seconds).
-    for (let i = 0; i < 60000 && !idle; i++) { advanceTime(20); wallSleep(6); }
-
-    const toolStarts = events.filter((e) => e.type === "tool_execution_start");
-    return { idle, failed, toolStarts, events };
+    agent.prompt("Call the list_dir tool on '.' and then tell me in one sentence what files are here. Do not call any other tools.")
+        .then(() => { idle = true; }, (e) => { failed = (e && e.message) || String(e); idle = true; });
+    pumpUntil(() => idle, 240000);
+    return { idle, failed, tools: events.filter((e) => e.type === 'tool_execution_start').map((e) => e.toolName),
+             results: events.filter((e) => e.type === 'tool_execution_end') };
 }
 
-let passed = false;
+let winner = null;
 for (const model of MODELS) {
-    console.log("\n=== trying", model, "===");
+    console.log('=== trying ' + model);
     const r = runOne(model);
-    if (r.failed && !r.toolStarts.length) { console.log("  (unavailable/failed:", r.failed, "- next model)"); continue; }
-    console.log("  idle:", r.idle, "tool calls:", JSON.stringify(r.toolStarts.map((e) => e.toolName)));
-    assert(r.idle, "the turn reached idle");
-    if (r.toolStarts.some((e) => e.toolName === "list_dir")) {
-        console.log("OPENROUTER LOOP PASSED: list_dir round-tripped via native tool-calling on", model);
-        passed = true;
-        break;
-    } else {
-        console.log("  loop ran but no list_dir this attempt; trying next model");
-    }
+    if (r.failed && !r.tools.length) { console.log('  unavailable: ' + r.failed); continue; }
+    console.log('  idle: ' + r.idle + ' tools: ' + JSON.stringify(r.tools));
+    if (r.idle && r.tools.includes('list_dir')) { winner = r; winner.model = model; break; }
 }
-assert(passed, "at least one free model completed the tool loop");
+
+test('a free model round-trips list_dir through the loop', () => {
+    check(winner, 'at least one free model completed the tool loop');
+    const res = winner.results.find((e) => e.toolName === 'list_dir');
+    check(res && !res.isError, 'list_dir succeeded on ' + winner.model);
+    check(/index\.html/.test(JSON.stringify(res.result)), 'listing shows index.html');
+});
+done('openrouter loop');

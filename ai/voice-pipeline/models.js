@@ -1,395 +1,166 @@
-// Model acquisition for the voice pipeline — app-owned, not an engine API.
+// Model acquisition for the voice pipeline: which files each model needs,
+// where they are, and an on-demand download for the ones that are missing.
 //
-// This app needs a specific, known set of model files. We know exactly where
-// each one lives upstream (Hugging Face) and where a source checkout already
-// has it (the sibling repos). This module resolves each file to a usable path
-// and, when one is missing, downloads it on demand — but only when the user
-// asks (main.js gates behind a button), never automatically.
+// Every file resolves: the download cache (<modelCacheDir>/<hf repo>/<file>)
+// first, then the source checkout's sibling repos (lib/kit/weights.js
+// weightPath, BRO_WEIGHTS aware). A source checkout loads from the siblings
+// and never downloads; a packaged build streams missing files into the shared
+// per-user cache when the user asks (the setup screen's Start button).
 //
-// resolve order for every file:  cache hit  ->  dev sibling  ->  (cache path,
-// not yet present). So a source checkout loads from the siblings and never
-// downloads; a packaged build streams the missing files into a shared per-user
-// cache and loads from there.
+// Groups (what the setup screen gates as a unit):
+//   wake       wake-word weights ("computer")       wlejon/brosoundml-data
+//   llm        Qwen3-8B GGUF                        Qwen/Qwen3-8B-GGUF      ~8.7 GB
+//   stt        Whisper tiny + tokenizer             openai/whisper-tiny     ~150 MB
+//   tts        Kokoro + voice + g2p (optional)      wlejon/brosoundml-data (kokoro/ is published
+//              from brosoundml's converted weights by scripts/publish-kokoro-data.sh; until
+//              then those files 404 and a packaged build stays text-only)
+//   ttsq       Qwen3-TTS CustomVoice 0.6B           not auto-downloaded (~2.5 GB)
+//   ttsvd      Qwen3-TTS VoiceDesign 1.7B           not auto-downloaded (~4.5 GB); fetch
+//              either with brosoundml's scripts/download-qwen-tts.sh
+//   omnivoice  OmniVoice (demos/omnivoice-lab reads omniDir / omniReady / whisperDir)
 //
-// Groups (a "model" the UI gates as a unit):
-//   wake  — wake-word weights        (our wlejon/brosoundml-data dataset)
-//   llm   — Qwen3-8B GGUF            (Qwen/Qwen3-8B-GGUF)            ~8.7 GB
-//   stt   — Whisper tiny + tokenizer (openai/whisper-tiny)          ~150 MB
-//   tts   — Kokoro + voice + g2p     (downloadable, optional — see note)
-//
-// The tts group is downloadable but OPTIONAL: speech is a nicety, so the
-// pipeline runs text-only when it's absent and a missing/unpublished file must
-// never break the required (wake/llm/stt) gate. Its files come from a kokoro/
-// tree in wlejon/brosoundml-data: the *converted* Kokoro synth weights
-// (model.safetensors + raw-f32 voices/af_heart.bin) — produced from upstream's
-// pickled checkpoint + .pt voices by brosoundml's convert-kokoro.py — plus the
-// Kokoro config.json and the same g2p lexicon + POS tagger the wake group
-// already pulls. Those converted artifacts have no upstream URL, so a
-// maintainer publishes them once with brosoundml's scripts/publish-kokoro-data.sh
-// (needs HF write access to the dataset). Until then the tts files 404 and the
-// app stays text-only; a source checkout speaks straight from the dev siblings.
-const fs   = require('fs');
-const path = require('path');
-const os   = require('os');
+// Exports: resolved(), status(), groupStatus(key), downloadKeys(keys, onProgress),
+// missingDownloadable(), download(groups, onProgress), cacheDir().
+
+import { weightPath, modelCacheDir } from "/lib/kit/weights.js";
+
+const fs = require('fs');
 
 function env(k) {
     try { const p = globalThis.process; return (p && p.env && p.env[k]) || ''; }
     catch (_) { return ''; }
 }
 function exists(p) { try { return !!p && fs.existsSync(p); } catch (_) { return false; } }
-// Portable dev-sibling root: the checkout that holds brosoundml/, brolm/,
-// brosoundml-data/ beside broworkshop/ (D:/projects for
-// D:/projects/broworkshop/demos/omnivoice-lab). BRO_WEIGHTS overrides it (so
-// weights checked out elsewhere — e.g. a WSL D:/ mount — still resolve);
-// otherwise it is found by walking up from the app's real directory
-// (bro.appDir, an absolute native path) to the first ancestor that contains a
-// brosoundml/ sibling, falling back to the parent of the broworkshop checkout
-// (the ancestor holding launcher/apps.json). It has to be an absolute path: a
-// relative '..' goes through brokit's fs resolution, which tries the app dir
-// first and then the process CWD, so it only ever found the siblings when bro
-// was launched from the broworkshop directory itself.
-function devRoot() {
-    const override = env('BRO_WEIGHTS');
-    if (override) return override.replace(/[\\\/]+$/, '');
-    let dir = '';
-    try { dir = (globalThis.bro && globalThis.bro.appDir) || ''; } catch (_) {}
-    dir = dir.replace(/\\/g, '/').replace(/\/+$/, '');
-    let workshop = '';
-    for (let d = dir; d; ) {
-        if (exists(d + '/brosoundml')) return d;
-        if (!workshop && exists(d + '/launcher/apps.json')) workshop = d;
-        const i = d.lastIndexOf('/');
-        if (i <= 0) break;
-        d = d.slice(0, i);
-    }
-    if (workshop) { const i = workshop.lastIndexOf('/'); if (i > 0) return workshop.slice(0, i); }
-    return '..';
-}
-const WROOT = devRoot();
-function sizeOf(p) { try { return fs.statSync(p).size; } catch (_) { return -1; } }
+const dirOf = (p) => p.replace(/[\/\\][^\/\\]*$/, '');
 
-// Per-OS app-data root (mirrors system/projects/app.js userDataDir()).
-function userDataDir() {
-    const home = os.homedir(), plat = os.platform();
-    if (plat === 'win32')
-        return path.join(env('APPDATA') || path.join(home, 'AppData', 'Roaming'), 'bro');
-    if (plat === 'darwin')
-        return path.join(home, 'Library', 'Application Support', 'bro');
-    return path.join(env('XDG_DATA_HOME') || path.join(home, '.local', 'share'), 'bro');
-}
-function cacheDir() {
-    return env('BRO_MODELS_DIR') || path.join(userDataDir(), 'models');
-}
+export function cacheDir() { return modelCacheDir(); }
 
-// A file: { repo, kind, file, local?, dev, bytes?, optional? }.
-//   repo/kind/file — Hugging Face source (kind 'dataset' uses the datasets/ URL)
-//   local          — cache subpath if it differs from <repo>/<file> (e.g. a
-//                    rename so a loader that hardcodes a name finds the file)
-//   dev            — sibling-repo path a source checkout already has
-//   bytes          — upstream size, for pre-download size display (not verified;
-//                    download integrity uses the server's content-length)
-//   optional       — absence doesn't make the group incomplete
-function urlFor(f) {
-    let base = 'https://huggingface.co/';
-    if (f.kind === 'dataset') base += 'datasets/';
-    return base + f.repo + '/resolve/main/' + f.file;
-}
-function cachePathFor(f) {
-    if (!f.local && !f.repo) return null;   // dev-only file (no upstream source)
-    const sub = f.local || ((f.kind === 'dataset' ? 'datasets/' : '') + f.repo + '/' + f.file);
-    return path.join(cacheDir(), sub);
-}
-// Where the file is / would be, no download. A dev-only file with no cache
-// location resolves to its dev path even when absent (so dir/voice paths stay
-// sensible rather than "undefined").
-function resolveFile(f) {
-    const cp = cachePathFor(f);
-    if (cp && exists(cp)) return cp;
-    if (exists(f.dev)) return f.dev;
-    return cp || f.dev || '';
-}
-function filePresent(f) { return exists(resolveFile(f)); }
-
-// ─── the catalog ──────────────────────────────────────────────────────────
-const WHISPER_DEV = WROOT + '/brosoundml/weights/whisper';
-const KOKORO_DEV  = WROOT + '/brosoundml/weights/kokoro';
-const QWEN_TTS_DEV = WROOT + '/brosoundml/weights/qwen-tts/0.6B-customvoice';
-const QWEN_TTS_REPO = 'Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice';
-const QWEN_VD_DEV  = WROOT + '/brosoundml/weights/qwen-tts/1.7B-voicedesign';
-const QWEN_VD_REPO = 'Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign';
-const OMNI_DEV  = WROOT + '/brosoundml/weights/omnivoice';
-const OMNI_REPO = 'k2-fsa/OmniVoice';
-
-const GROUPS = [
-    {
-        key: 'wake', label: 'Wake word ("computer")', downloadable: true,
-        files: [
-            { repo: 'wlejon/brosoundml-data', kind: 'dataset', file: 'wake/computer.bw',
-              dev: WROOT + '/brosoundml-data/wake/computer.bw', bytes: 65713 },
-        ],
-    },
-    {
-        key: 'llm', label: 'Language model (Qwen3-8B)', downloadable: true,
-        files: [
-            { repo: 'Qwen/Qwen3-8B-GGUF', kind: 'model', file: 'Qwen3-8B-Q8_0.gguf',
-              dev: WROOT + '/brolm/weights/Qwen3-8B-GGUF/Qwen3-8B-Q8_0.gguf', bytes: 8709518112 },
-        ],
-    },
-    {
-        key: 'stt', label: 'Speech recognition (Whisper)', downloadable: true,
-        files: [
-            { repo: 'openai/whisper-tiny', kind: 'model', file: 'config.json',
-              dev: WHISPER_DEV + '/config.json', bytes: 1983 },
-            { repo: 'openai/whisper-tiny', kind: 'model', file: 'model.safetensors',
-              dev: WHISPER_DEV + '/model.safetensors', bytes: 151061672 },
-            { repo: 'openai/whisper-tiny', kind: 'model', file: 'vocab.json',
-              dev: WHISPER_DEV + '/vocab.json', bytes: 967452 },
-            { repo: 'openai/whisper-tiny', kind: 'model', file: 'merges.txt',
-              dev: WHISPER_DEV + '/merges.txt', bytes: 493869 },
-            // Upstream keeps the "<|...|>" specials here; merged in by the
-            // tokenizer when present (the dev/converted layout may omit it).
-            { repo: 'openai/whisper-tiny', kind: 'model', file: 'added_tokens.json',
-              dev: WHISPER_DEV + '/added_tokens.json', bytes: 34604, optional: true },
-        ],
-    },
-    // Speech: downloadable but optional (see file header). The Kokoro synth
-    // weights live under kokoro/ in wlejon/brosoundml-data, published from the
-    // converted dev artifacts via brosoundml's scripts/publish-kokoro-data.sh;
-    // the g2p lexicon + POS tagger are the same files the wake group pulls. Dev
-    // paths let a source checkout load + speak without any download.
-    {
-        key: 'tts', label: 'Speech synthesis (Kokoro)', downloadable: true, optional: true,
-        files: [
-            { repo: 'wlejon/brosoundml-data', kind: 'dataset', file: 'kokoro/config.json',
-              dev: KOKORO_DEV + '/config.json', bytes: 2351 },
-            { repo: 'wlejon/brosoundml-data', kind: 'dataset', file: 'kokoro/model.safetensors',
-              dev: KOKORO_DEV + '/model.safetensors', bytes: 326979520 },
-            { repo: 'wlejon/brosoundml-data', kind: 'dataset', file: 'kokoro/voices/af_heart.bin',
-              dev: KOKORO_DEV + '/voices/af_heart.bin', bytes: 522240 },
-            { repo: 'wlejon/brosoundml-data', kind: 'dataset', file: 'g2p/lexicon_en_us.bin',
-              dev: WROOT + '/brosoundml-data/g2p/lexicon_en_us.bin', bytes: 7175830 },
-            { repo: 'wlejon/brosoundml-data', kind: 'dataset', file: 'pos_tagger/model.bin',
-              dev: WROOT + '/brosoundml-data/pos_tagger/model.bin', bytes: 7653373 },
-        ],
-    },
-    // Qwen3-TTS (12 Hz multi-codebook) — an alternative, higher-quality speech
-    // backend. Text-driven end-to-end (no phonemizer, no voice pack), so it needs
-    // only its own model dir + the bundled codec. Preferred over Kokoro when its
-    // weights are present, but NOT auto-downloaded: at ~2.5 GB it would double the
-    // speech download for no gain over Kokoro, so it stays a "use it if you have
-    // it" backend — a source checkout loads from the dev sibling, and a packaged
-    // build can drop the weights into the model cache (fetch via brosoundml's
-    // scripts/download-qwen-tts.sh from the public Apache-2.0 repo below).
-    {
-        key: 'ttsq', label: 'Qwen3-TTS · CustomVoice (0.6B)', downloadable: false, optional: true,
-        files: [
-            { repo: QWEN_TTS_REPO, kind: 'model', file: 'config.json',
-              dev: QWEN_TTS_DEV + '/config.json', bytes: 4908 },
-            { repo: QWEN_TTS_REPO, kind: 'model', file: 'model.safetensors',
-              dev: QWEN_TTS_DEV + '/model.safetensors', bytes: 1811626576 },
-            { repo: QWEN_TTS_REPO, kind: 'model', file: 'vocab.json',
-              dev: QWEN_TTS_DEV + '/vocab.json', bytes: 2776833 },
-            { repo: QWEN_TTS_REPO, kind: 'model', file: 'merges.txt',
-              dev: QWEN_TTS_DEV + '/merges.txt', bytes: 1671839 },
-            { repo: QWEN_TTS_REPO, kind: 'model', file: 'speech_tokenizer/config.json',
-              dev: QWEN_TTS_DEV + '/speech_tokenizer/config.json', bytes: 2336 },
-            { repo: QWEN_TTS_REPO, kind: 'model', file: 'speech_tokenizer/model.safetensors',
-              dev: QWEN_TTS_DEV + '/speech_tokenizer/model.safetensors', bytes: 682293092 },
-        ],
-    },
-    // Qwen3-TTS VoiceDesign (1.7B) — natural-language voice control: describe a
-    // voice in words and the model synthesizes it (no preset speaker, no
-    // reference audio). ~4.5 GB, so not auto-downloaded; a source checkout loads
-    // from the dev sibling, a packaged build fetches via
-    // brosoundml's scripts/download-qwen-tts.sh --size 1.7B --variant voicedesign.
-    {
-        key: 'ttsvd', label: 'Qwen3-TTS · VoiceDesign (1.7B)', downloadable: false, optional: true,
-        files: [
-            { repo: QWEN_VD_REPO, kind: 'model', file: 'config.json',
-              dev: QWEN_VD_DEV + '/config.json', bytes: 4421 },
-            { repo: QWEN_VD_REPO, kind: 'model', file: 'model.safetensors',
-              dev: QWEN_VD_DEV + '/model.safetensors', bytes: 3833402552 },
-            { repo: QWEN_VD_REPO, kind: 'model', file: 'vocab.json',
-              dev: QWEN_VD_DEV + '/vocab.json', bytes: 2776833 },
-            { repo: QWEN_VD_REPO, kind: 'model', file: 'merges.txt',
-              dev: QWEN_VD_DEV + '/merges.txt', bytes: 1671839 },
-            { repo: QWEN_VD_REPO, kind: 'model', file: 'speech_tokenizer/config.json',
-              dev: QWEN_VD_DEV + '/speech_tokenizer/config.json', bytes: 2336 },
-            { repo: QWEN_VD_REPO, kind: 'model', file: 'speech_tokenizer/model.safetensors',
-              dev: QWEN_VD_DEV + '/speech_tokenizer/model.safetensors', bytes: 682293092 },
-        ],
-    },
-    // OmniVoice (k2-fsa, Apache-2.0) — 600-language masked-diffusion TTS: a
-    // Qwen3-0.6B trunk with eight audio heads over the HiggsAudio v2 codec.
-    // Zero-shot voice clone from a reference clip (or a fixed-vocabulary voice
-    // instruct), token-grid inpainting through bro.tts.loadOmniVoice. The LM runs
-    // on the GPU only. ~3.5 GB of F32 weights, so not auto-downloaded: a source
-    // checkout loads from the dev sibling, a packaged build streams the files
-    // into the cache on request (demos/omnivoice-lab is the consumer).
-    {
-        key: 'omnivoice', label: 'OmniVoice (600-language TTS)', downloadable: true, optional: true,
-        files: [
-            { repo: OMNI_REPO, kind: 'model', file: 'config.json',
-              dev: OMNI_DEV + '/config.json', bytes: 2339 },
-            { repo: OMNI_REPO, kind: 'model', file: 'tokenizer.json',
-              dev: OMNI_DEV + '/tokenizer.json', bytes: 11423986 },
-            { repo: OMNI_REPO, kind: 'model', file: 'tokenizer_config.json',
-              dev: OMNI_DEV + '/tokenizer_config.json', bytes: 556 },
-            { repo: OMNI_REPO, kind: 'model', file: 'model.safetensors',
-              dev: OMNI_DEV + '/model.safetensors', bytes: 2450344112 },
-            { repo: OMNI_REPO, kind: 'model', file: 'audio_tokenizer/config.json',
-              dev: OMNI_DEV + '/audio_tokenizer/config.json', bytes: 2660 },
-            { repo: OMNI_REPO, kind: 'model', file: 'audio_tokenizer/model.safetensors',
-              dev: OMNI_DEV + '/audio_tokenizer/model.safetensors', bytes: 805665628 },
-        ],
-    },
-];
-
-// ─── speech-backend showcase catalog ────────────────────────────────────────
-// What the setup screen offers. The Qwen3-TTS speaker names + dialect tags are
-// the authoritative ids from the CustomVoice config.json (talker_config.spk_id /
-// spk_is_dialect); a source checkout can confirm them via qwen.speakers(). The
-// languages are the model's codec_language_id keys (dialects excluded). Short
-// labels are ours, for presentation.
-const QWEN_LANGUAGES = [
-    'english', 'chinese', 'german', 'italian', 'portuguese',
-    'spanish', 'japanese', 'korean', 'french', 'russian',
-];
-
-// CustomVoice preset speakers (timbres). Language is selected separately — any
-// speaker can voice any supported language. `dialect` mirrors the config's
-// spk_is_dialect (a Chinese regional accent) and is shown as a badge.
-const QWEN_SPEAKERS = [
-    { id: 'serena',   name: 'Serena',   note: 'female' },
-    { id: 'vivian',   name: 'Vivian',   note: 'female' },
-    { id: 'ryan',     name: 'Ryan',     note: 'male'   },
-    { id: 'aiden',    name: 'Aiden',    note: 'male'   },
-    { id: 'uncle_fu', name: 'Uncle Fu', note: 'male'   },
-    { id: 'ono_anna', name: 'Ono Anna', note: 'female' },
-    { id: 'sohee',    name: 'Sohee',    note: 'female' },
-    { id: 'eric',     name: 'Eric',     note: 'male', dialect: 'Sichuan' },
-    { id: 'dylan',    name: 'Dylan',    note: 'male', dialect: 'Beijing' },
-];
-
-// VoiceDesign starter prompts — one-tap examples of natural-language voice
-// control, to seed the description box. The model accepts any free-form text.
-const QWEN_VD_EXAMPLES = [
-    'A warm, low-pitched elderly storyteller, calm and unhurried.',
-    'An energetic young sports announcer, fast and excited.',
-    'A soft, soothing meditation guide speaking slowly and gently.',
-    'A crisp, authoritative news anchor with a neutral accent.',
-    'A cheerful cartoon character with a bright, bouncy voice.',
-    'A mysterious narrator with a deep, gravelly whisper.',
-];
-
-function groupBy(key) { return GROUPS.find(g => g.key === key); }
-function required(g) { return g.files.filter(f => !f.optional); }
-function groupPresent(g) { return required(g).every(filePresent); }
-function groupBytes(g) {
-    let n = 0;
-    for (const f of required(g)) if (!filePresent(f)) n += (f.bytes || 0);
-    return n;
-}
-
-// Public, resolved paths the loaders consume. dirOf() backs out a model dir
-// from one of its files so dev and cache layouts both work.
-function dirOf(p) { return p.replace(/[\/\\][^\/\\]*$/, ''); }
-function resolved() {
-    const stt = groupBy('stt').files;
-    const model   = stt.find(f => f.file === 'model.safetensors');
-    const vocab   = stt.find(f => f.file === 'vocab.json');
-    const merges  = stt.find(f => f.file === 'merges.txt');
-    const added   = stt.find(f => f.file === 'added_tokens.json');
-    const tts = groupBy('tts').files;
-    // tts files, in catalog order: [0] Kokoro config.json, [1] model.safetensors,
-    // [2] voices/af_heart.bin, [3] g2p lexicon, [4] POS tagger.
-    const kconfig = tts[0], kmodel = tts[1], kvoice = tts[2];
-    const lexicon = tts[3], posTagger = tts[4];
-
-    const speechReady = groupPresent(groupBy('tts'));
-    // Qwen3-TTS: text-driven, so the only resolved path each loader needs is its
-    // model dir (backed out from model.safetensors). Two variants: CustomVoice
-    // (preset speakers) and VoiceDesign (natural-language voice control).
-    const qwenTts = groupBy('ttsq').files;
-    const qwenTtsModel = qwenTts.find(f => f.file === 'model.safetensors');
-    const qwenTtsReady = groupPresent(groupBy('ttsq'));
-    const qwenVd = groupBy('ttsvd').files;
-    const qwenVdModel = qwenVd.find(f => f.file === 'model.safetensors');
-    const qwenVdReady = groupPresent(groupBy('ttsvd'));
-    // OmniVoice: one model dir (config + tokenizer + LM + audio_tokenizer/),
-    // backed out from model.safetensors like the Qwen dirs.
-    const omni = groupBy('omnivoice').files;
-    const omniModel = omni.find(f => f.file === 'model.safetensors');
-    const omniReady = groupPresent(groupBy('omnivoice'));
-    const addedPath = resolveFile(added);
-    return {
-        qwen:         resolveFile(groupBy('llm').files[0]),
-        wake:         resolveFile(groupBy('wake').files[0]),
-        whisperDir:   dirOf(resolveFile(model)),
-        whisperVocab: resolveFile(vocab),
-        whisperMerges: resolveFile(merges),
-        whisperAdded: exists(addedPath) ? addedPath : null,
-        kokoroDir:    dirOf(resolveFile(kmodel)),
-        kokoroVoice:  resolveFile(kvoice),
-        // Explicit phonemizer asset paths for bro.tts.setAssets(): the Kokoro
-        // config.json (phoneme vocab) plus the g2p lexicon + POS tagger.
-        kokoroConfig: resolveFile(kconfig),
-        lexicon:      resolveFile(lexicon),
-        posTagger:    resolveFile(posTagger),
-        speechReady,
-        // Qwen3-TTS model dirs + readiness (CustomVoice + VoiceDesign variants).
-        qwenTtsDir:   dirOf(resolveFile(qwenTtsModel)),
-        qwenTtsReady,
-        qwenVdDir:    dirOf(resolveFile(qwenVdModel)),
-        qwenVdReady,
-        // OmniVoice model dir + readiness (demos/omnivoice-lab).
-        omniDir:      dirOf(resolveFile(omniModel)),
-        omniReady,
-    };
-}
-
-// Downloadable groups still missing one or more required files. Each entry
-// keeps its .files (for download) and carries .bytes (download size) + the
-// group's .optional flag (true = speech; not required for the app to run, so
-// the caller best-efforts it and a 404 just leaves the pipeline text-only).
-function missingDownloadable() {
-    return GROUPS.filter(g => g.downloadable && !groupPresent(g))
-                 .map(g => Object.assign({}, g, { bytes: groupBytes(g) }));
-}
-
-// Status for the gate UI.
-function status() {
-    return GROUPS.map(g => ({
-        key: g.key, label: g.label, downloadable: g.downloadable,
-        optional: !!g.optional,
-        present: groupPresent(g), bytes: groupBytes(g),
+// A file: { repo, kind ('model' | 'dataset'), file, dev, bytes, optional }.
+// `dev` is the sibling checkout's copy: devDir + the repo path minus `strip`
+// (the dataset's kokoro/ tree mirrors brosoundml/weights/kokoro/). `bytes` is
+// the upstream size, for the download estimate.
+function files(repo, kind, devDir, list, strip) {
+    return list.map(([file, bytes, optional]) => ({
+        repo, kind, file, bytes, optional: !!optional,
+        dev: weightPath(devDir + '/' + (strip && file.startsWith(strip) ? file.slice(strip.length) : file)),
     }));
 }
 
-// ─── download ───────────────────────────────────────────────────────────────
+const WHISPER = 'brosoundml/weights/whisper';
+const KOKORO = 'brosoundml/weights/kokoro';
+const DATA = 'brosoundml-data';
+const QWEN_TTS = ['Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice', 'brosoundml/weights/qwen-tts/0.6B-customvoice'];
+const QWEN_VD = ['Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign', 'brosoundml/weights/qwen-tts/1.7B-voicedesign'];
+const qwenTtsFiles = (repo, dev, weights) => files(repo, 'model', dev, [
+    ['config.json', 4908], ['model.safetensors', weights], ['vocab.json', 2776833], ['merges.txt', 1671839],
+    ['speech_tokenizer/config.json', 2336], ['speech_tokenizer/model.safetensors', 682293092],
+]);
+
+const GROUPS = [
+    { key: 'wake', label: 'Wake word ("computer")', downloadable: true,
+      files: files('wlejon/brosoundml-data', 'dataset', DATA, [['wake/computer.bw', 65713]]) },
+    { key: 'llm', label: 'Language model (Qwen3-8B)', downloadable: true,
+      files: files('Qwen/Qwen3-8B-GGUF', 'model', 'brolm/weights/Qwen3-8B-GGUF', [['Qwen3-8B-Q8_0.gguf', 8709518112]]) },
+    { key: 'stt', label: 'Speech recognition (Whisper)', downloadable: true,
+      files: files('openai/whisper-tiny', 'model', WHISPER, [
+          ['config.json', 1983], ['model.safetensors', 151061672], ['vocab.json', 967452], ['merges.txt', 493869],
+          // Upstream keeps the "<|...|>" specials here; the converted layout may omit it.
+          ['added_tokens.json', 34604, true],
+      ]) },
+    // Order matters: resolved() reads config, model, voice, lexicon, POS tagger by index.
+    { key: 'tts', label: 'Speech synthesis (Kokoro)', downloadable: true, optional: true,
+      files: files('wlejon/brosoundml-data', 'dataset', KOKORO, [
+          ['kokoro/config.json', 2351], ['kokoro/model.safetensors', 326979520], ['kokoro/voices/af_heart.bin', 522240],
+      ], 'kokoro/').concat(files('wlejon/brosoundml-data', 'dataset', DATA, [
+          ['g2p/lexicon_en_us.bin', 7175830], ['pos_tagger/model.bin', 7653373],
+      ])) },
+    { key: 'ttsq', label: 'Qwen3-TTS · CustomVoice (0.6B)', downloadable: false, optional: true,
+      files: qwenTtsFiles(QWEN_TTS[0], QWEN_TTS[1], 1811626576) },
+    { key: 'ttsvd', label: 'Qwen3-TTS · VoiceDesign (1.7B)', downloadable: false, optional: true,
+      files: qwenTtsFiles(QWEN_VD[0], QWEN_VD[1], 3833402552) },
+    // OmniVoice (k2-fsa, Apache-2.0): ~3.5 GB of F32 weights, downloadable on request.
+    { key: 'omnivoice', label: 'OmniVoice (600-language TTS)', downloadable: true, optional: true,
+      files: files('k2-fsa/OmniVoice', 'model', 'brosoundml/weights/omnivoice', [
+          ['config.json', 2339], ['tokenizer.json', 11423986], ['tokenizer_config.json', 556],
+          ['model.safetensors', 2450344112], ['audio_tokenizer/config.json', 2660],
+          ['audio_tokenizer/model.safetensors', 805665628],
+      ]) },
+];
+
+const urlFor = (f) => 'https://huggingface.co/' + (f.kind === 'dataset' ? 'datasets/' : '') + f.repo + '/resolve/main/' + f.file;
+const cachePathFor = (f) => cacheDir() + '/' + (f.kind === 'dataset' ? 'datasets/' : '') + f.repo + '/' + f.file;
+
+/** Where the file is: the cache copy, else the sibling checkout, else where a download would put it. */
+function resolveFile(f) {
+    const cp = cachePathFor(f);
+    if (exists(cp)) return cp;
+    if (exists(f.dev)) return f.dev;
+    return cp;
+}
+const filePresent = (f) => exists(resolveFile(f));
+const groupBy = (key) => GROUPS.find((g) => g.key === key);
+const required = (g) => g.files.filter((f) => !f.optional);
+const groupPresent = (g) => required(g).every(filePresent);
+const groupBytes = (g) => required(g).reduce((n, f) => n + (filePresent(f) ? 0 : f.bytes || 0), 0);
+const describe = (g) => ({ key: g.key, label: g.label, downloadable: g.downloadable, optional: !!g.optional,
+                           present: groupPresent(g), bytes: groupBytes(g) });
+const fileOf = (key, name) => groupBy(key).files.find((f) => f.file === name);
+
+/** Resolved paths every loader consumes (and readiness flags). */
+export function resolved() {
+    const tts = groupBy('tts').files;
+    const added = resolveFile(fileOf('stt', 'added_tokens.json'));
+    return {
+        qwen:          resolveFile(groupBy('llm').files[0]),
+        wake:          resolveFile(groupBy('wake').files[0]),
+        whisperDir:    dirOf(resolveFile(fileOf('stt', 'model.safetensors'))),
+        whisperVocab:  resolveFile(fileOf('stt', 'vocab.json')),
+        whisperMerges: resolveFile(fileOf('stt', 'merges.txt')),
+        whisperAdded:  exists(added) ? added : null,
+        kokoroDir:     dirOf(resolveFile(tts[1])),
+        kokoroVoice:   resolveFile(tts[2]),
+        kokoroConfig:  resolveFile(tts[0]),        // phonemizer assets for bro.tts.setAssets
+        lexicon:       resolveFile(tts[3]),
+        posTagger:     resolveFile(tts[4]),
+        speechReady:   groupPresent(groupBy('tts')),
+        qwenTtsDir:    dirOf(resolveFile(fileOf('ttsq', 'model.safetensors'))),
+        qwenTtsReady:  groupPresent(groupBy('ttsq')),
+        qwenVdDir:     dirOf(resolveFile(fileOf('ttsvd', 'model.safetensors'))),
+        qwenVdReady:   groupPresent(groupBy('ttsvd')),
+        omniDir:       dirOf(resolveFile(fileOf('omnivoice', 'model.safetensors'))),
+        omniReady:     groupPresent(groupBy('omnivoice')),
+    };
+}
+
+/** Every group: { key, label, downloadable, optional, present, bytes (still to download) }. */
+export function status() { return GROUPS.map(describe); }
+
+/** One group's status by key, or null. */
+export function groupStatus(key) { const g = groupBy(key); return g ? describe(g) : null; }
+
+/** Downloadable groups still missing a required file, each with .bytes. */
+export function missingDownloadable() {
+    return GROUPS.filter((g) => g.downloadable && !groupPresent(g))
+                 .map((g) => Object.assign({}, g, { bytes: groupBytes(g) }));
+}
+
+// Stream one file to <cache>/<repo>/<file> (via a .part file: the GGUF is
+// multi-GB and must never sit in memory). A missing optional file resolves null.
 async function downloadFile(f, onProgress) {
-    const dest = cachePathFor(f);
-    fs.mkdirSync(path.dirname(dest), { recursive: true });
-    const part = dest + '.part';
+    const dest = cachePathFor(f), part = dest + '.part';
+    fs.mkdirSync(dirOf(dest), { recursive: true });
     try { fs.unlinkSync(part); } catch (_) {}
-
     const headers = {};
-    const tok = env('HF_TOKEN');
-    if (tok) headers['Authorization'] = 'Bearer ' + tok;
-
+    if (env('HF_TOKEN')) headers['Authorization'] = 'Bearer ' + env('HF_TOKEN');
     const res = await fetch(urlFor(f), { headers });
     if (!res.ok) {
-        if (f.optional && res.status === 404) return null;  // tolerate a missing optional
+        if (f.optional && res.status === 404) return null;
         throw new Error('HTTP ' + res.status + ' for ' + urlFor(f));
     }
-
     let total = f.bytes || 0;
     try { total = parseInt(res.headers.get('content-length') || '0', 10) || total; } catch (_) {}
-
     let received = 0;
     if (res.body && typeof res.body.getReader === 'function') {
-        // Stream straight to disk — the GGUF is multi-GB and must never sit in
-        // memory.
         const reader = res.body.getReader();
         for (;;) {
             const r = await reader.read();
@@ -405,56 +176,35 @@ async function downloadFile(f, onProgress) {
         received = all.byteLength;
         if (onProgress) onProgress(received, total || received);
     }
-
     if (total > 0 && received < total) {
         try { fs.unlinkSync(part); } catch (_) {}
-        throw new Error(path.basename(dest) + ': incomplete (' + received + '/' + total + ' bytes)');
+        throw new Error(f.file + ': incomplete (' + received + '/' + total + ' bytes)');
     }
     fs.renameSync(part, dest);
     return dest;
 }
 
-// Download every missing required (and best-effort optional) file of the given
-// groups, sequentially. onProgress({ groupKey, label, file, received, total })
-// fires throughout; a single HF connection already saturates most links and
-// serial keeps memory + rate-limit pressure low.
-async function download(groups, onProgress) {
+/**
+ * Download every missing file of `groups`, one at a time (one HF connection
+ * already saturates most links). Optional files that fail are skipped.
+ * onProgress({ groupKey, label, file, received, total }).
+ */
+export async function download(groups, onProgress) {
     for (const g of groups) {
         for (const f of g.files) {
             if (filePresent(f)) continue;
-            const report = (received, total) => {
-                if (onProgress) onProgress({ groupKey: g.key, label: g.label,
-                                             file: f.file, received, total });
-            };
-            try {
-                await downloadFile(f, report);
-            } catch (e) {
-                if (f.optional) continue;   // optional file failed — skip it
+            const report = (received, total) => onProgress && onProgress({ groupKey: g.key, label: g.label, file: f.file, received, total });
+            try { await downloadFile(f, report); }
+            catch (e) {
+                if (f.optional) continue;
                 throw new Error(g.label + ': ' + ((e && e.message) || e));
             }
         }
     }
 }
 
-// Look up one group's status (present + download bytes) by key.
-function groupStatus(key) {
-    const g = groupBy(key);
-    if (!g) return null;
-    return { key: g.key, label: g.label, downloadable: g.downloadable,
-             optional: !!g.optional, present: groupPresent(g), bytes: groupBytes(g) };
+/** Download the groups named in `keys` that are downloadable and incomplete. */
+export function downloadKeys(keys, onProgress) {
+    const want = new Set(keys);
+    return download(missingDownloadable().filter((g) => want.has(g.key)), onProgress);
 }
-
-// Download a set of groups by key (only those missing + downloadable are fetched).
-function downloadKeys(keys, onProgress) {
-    const set = new Set(keys);
-    const groups = GROUPS.filter(g => set.has(g.key) && g.downloadable && !groupPresent(g))
-                         .map(g => Object.assign({}, g, { bytes: groupBytes(g) }));
-    return download(groups, onProgress);
-}
-
-export {
-    cacheDir, status, resolved, missingDownloadable, download,
-    groupStatus, downloadKeys,
-    // Showcase catalog for the setup screen.
-    QWEN_SPEAKERS, QWEN_LANGUAGES, QWEN_VD_EXAMPLES,
-};

@@ -1,85 +1,40 @@
-// Live end-to-end proof (best-effort): load a real Qwen3 GGUF, run one agent
-// turn through pi's Agent loop + our brolm provider + tools, and observe a tool
-// call round-trip. Small-model tool-calling is imperfect, so a missing tool call
-// is informational, not a hard failure. Run:
-//   bro-headless ai/pi-agent tests/test_loop.js
+// Live end to end through the real UI (ml): load a local model with the Load
+// button, send a prompt, let the agent run, and check the loop reached idle
+// with a streamed reply. Small models are imperfect tool callers, so a
+// missing tool call is logged, not failed. PI_AGENT_MODEL (a path relative to
+// the weights root, or absolute) picks another model, e.g. the 32B GGUF for a
+// bounded multi-step check.
+import { check, test, done, waitFor, frames, text, clickOn, typeInto, shot } from "/lib/kit/test.js";
+import { findWeights, missingWeights } from "/lib/kit/weights.js";
+import { piAgent } from "/app/app.js";
 
-import { createAgentSession } from "/app/pi.bundle.js";
+const want = (globalThis.process && process.env.PI_AGENT_MODEL) || '';
+const candidates = want ? [want] : ['brolm/weights/Qwen3-1.7B-GGUF/Qwen3-1.7B-Q8_0.gguf',
+                                    'brolm/weights/Qwen3-0.6B-GGUF/Qwen3-0.6B-Q8_0.gguf'];
+const model = findWeights(candidates);
+check(model, missingWeights('a small Qwen3 GGUF', candidates));
 
-const fs = require("fs");
-const candidates = [
-    "D:/projects/brolm/weights/Qwen3-32B-GGUF/Qwen3-32B-Q4_K_M.gguf",
-    "D:/projects/brolm/weights/Qwen3-8B-GGUF/Qwen3-8B-Q8_0.gguf",
-    "D:/projects/brolm/weights/Qwen3-1.7B-GGUF/Qwen3-1.7B-Q8_0.gguf",
-    "D:/projects/brolm/weights/Qwen3-0.6B-GGUF/Qwen3-0.6B-Q8_0.gguf",
-];
-const modelPath = candidates.find((p) => { try { return fs.existsSync(p); } catch (e) { return false; } });
-assert(modelPath, "a Qwen3 GGUF must exist to run the loop test");
-console.log("loading:", modelPath);
+const saved = piAgent.prefs.snapshot();
+piAgent.backend.configure({ path: model });
+clickOn('#btn-load');
+waitFor(() => /ready|failed/.test(text('#status')), 'model load', 600000);
+check(/ready/.test(text('#status')), 'loaded: ' + text('#status'));
 
-// --- load the model (async, pumped) ---------------------------------------
-let loaded = null;
-let loadErr = null;
-bro.lm.loadQwen(modelPath, { onReady: (r) => { loaded = r; }, onError: (e) => { loadErr = e; } });
-for (let i = 0; i < 4000 && !loaded && !loadErr; i++) { advanceTime(20); wallSleep(8); }
-assert(loaded, "model loaded (err=" + loadErr + ")");
-console.log("model ready:", loaded.model.numLayers, "layers");
+typeInto('#prompt', "Use the list_dir tool on '.', then tell me in one sentence what is here. Do not ask for confirmation.");
+clickOn('#btn-send');
+frames(1);
+waitFor(() => !piAgent.session.running, 'the turn to finish', 600000);
+frames(2);
 
-const brolm = {
-    model: loaded.model,
-    tokenizer: loaded.tokenizer,
-    family: "qwen3",
-    decode: (ids) => loaded.tokenizer.decode(Array.from(ids)),
-    eosId: loaded.tokenizer.imEndId,
-};
-
-// --- run one agent turn ----------------------------------------------------
-const events = [];
-let idle = false;
-const session = createAgentSession({
-    brolm,
-    cwd: "D:/projects/broworkshop/ai/pi-agent",
-    onEvent: (e) => {
-        events.push(e);
-        if (e.type === "tool_execution_start") console.log("  → tool_execution_start:", e.toolName, JSON.stringify(e.args || {}));
-        if (e.type === "tool_execution_end") console.log("  → tool_execution_end:", (e.isError ? "ERROR " : "") + "(result received)");
-        if (e.type === "agent_end") console.log("  → agent_end");
-    },
-    approve: () => true, // auto-approve for the test
+test('the loop ran and replied', () => {
+    const rows = document.querySelectorAll('#transcript .chat-row');
+    check(rows.length >= 2, 'user row + a reply (' + rows.length + ')');
+    check(!/error/.test(document.querySelector('#status').className), 'status: ' + text('#status'));
+    check(!document.querySelector('#ctx-meter').hidden, 'context meter shows usage');
 });
 
-session
-    .prompt("Use the list_dir tool to list the files in the current directory, then briefly tell me what you found. Do not ask for confirmation.")
-    .then(() => { idle = true; })
-    .catch((e) => { console.log("prompt error:", e && e.message ? e.message : e); idle = true; });
-
-// Pump: give the background decode real time (wallSleep) and drain deliveries.
-for (let i = 0; i < 12000 && !idle; i++) { advanceTime(20); wallSleep(4); }
-
-// --- report ----------------------------------------------------------------
-const kinds = [...new Set(events.map((e) => e.type))];
-console.log("event kinds:", JSON.stringify(kinds));
-
-const toolStarts = events.filter((e) => e.type === "tool_execution_start");
-const toolEnds = events.filter((e) => e.type === "tool_execution_end");
-
-// Show what the assistant actually produced (last assistant message text).
-const lastAsst = [...events].reverse().find((e) => e.type === "message_end" && e.message && e.message.role === "assistant");
-if (lastAsst) {
-    const text = (lastAsst.message.content || []).filter((b) => b.type === "text").map((b) => b.text).join("");
-    console.log("assistant text (last):", JSON.stringify(text.slice(0, 400)));
-    const calls = (lastAsst.message.content || []).filter((b) => b.type === "toolCall").map((b) => b.name);
-    if (calls.length) console.log("assistant tool calls:", JSON.stringify(calls));
-}
-
-assert(idle, "the turn reached idle within the pump budget");
-assert(kinds.includes("agent_start") || kinds.includes("turn_start"), "the agent loop actually started");
-
-if (toolStarts.length > 0) {
-    console.log("LOOP TEST: tool call executed →", toolStarts.map((e) => e.toolName).join(", "));
-    assert(toolEnds.length > 0, "a tool that started also produced a result");
-    const listed = toolStarts.some((e) => e.toolName === "list_dir");
-    console.log(listed ? "LOOP TEST PASSED (list_dir round-tripped)" : "LOOP TEST PASSED (a tool round-tripped; not list_dir)");
-} else {
-    console.log("LOOP TEST INCONCLUSIVE: loop ran and streamed, but the model emitted no tool call (small-model limitation; informational).");
-}
+const cards = Array.from(document.querySelectorAll('#transcript .chat-tool-name')).map((n) => n.textContent);
+console.log(cards.length ? 'tools called: ' + cards.join(', ') : 'no tool call this run (small-model limitation; informational)');
+shot('live');
+piAgent.prefs.restore(saved);
+done('pi-agent live loop');

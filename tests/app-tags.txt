@@ -37,13 +37,7 @@ demos/triposplat        ml
 demos/vision-lab        ml
 demos/vlm-lab           ml
 ai/ardy-motion          ml
-ai/voice-pipeline       ml
 tools/laya-triage       ml
-
-# --- bronze has not finished compiling the 40k-line vendored bundles in 300 s
-# (see ENGINE-ISSUES.md); keep the known timeout cheap -------------------------
-ai/pi-agent             timeout=90
-ai/maker-agent          timeout=90
 
 # --- ML only in some tests ---------------------------------------------------
 tools/node-forge/tests/test_kokoro_node.js  ml
@@ -51,3 +45,9 @@ tools/node-forge/tests/test_qwen_node.js    ml
 tools/node-forge/tests/test_rave_node.js    ml
 games/hearthfolk/tests/test_live.js         ml
 ai/maker-agent/tests/test_openrouter_loop.js net
+ai/maker-agent/tests/test_maker_loop.js     net
+ai/pi-agent/tests/test_loop.js              ml
+ai/voice-pipeline/tests/test_e2e.js         ml
+ai/voice-pipeline/tests/test_main.js        ml
+ai/voice-pipeline/tests/test_stream.js      ml
+ai/voice-pipeline/tests/test_concurrent.js  ml

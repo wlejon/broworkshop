@@ -1,30 +1,33 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <meta charset="utf-8">
-    <title>Voice Pipeline</title>
-    <link rel="stylesheet" href="style.css">
+<meta charset="utf-8">
+<title>Voice Pipeline</title>
+<link rel="stylesheet" href="/lib/kit/kit.css">
+<link rel="stylesheet" href="/lib/kit/chat.css">
+<link rel="stylesheet" href="style.css">
 </head>
-<body>
-    <header>
-        <h1>Voice Pipeline</h1>
-        <div id="status" class="status">choose a voice</div>
-    </header>
-    <main>
-        <!-- Setup: choose what to load. Nothing is loaded until "Start". -->
-        <section id="setup" class="setup"></section>
-
-        <!-- Conversation: shown once models are loaded. -->
-        <section id="convo" class="convo" hidden>
-            <div id="transcript" class="transcript">
-                <div class="hint">Say &ldquo;computer&rdquo; to activate, or hold the button (Space) to talk manually.</div>
-            </div>
-            <div class="meter-wrap">
-                <div id="meter" class="meter"></div>
-            </div>
-            <button id="talk" class="talk" disabled>loading models…</button>
-        </section>
+<body class="k-app">
+  <header class="k-header">
+    <h1>Voice Pipeline</h1>
+    <span class="k-sub">mic → Whisper → Qwen3 → Kokoro / Qwen3-TTS → speaker</span>
+    <div class="k-spacer"></div>
+    <span id="status" class="idle">choose a voice</span>
+  </header>
+  <div class="k-body">
+    <main class="k-main pad">
+      <!-- Setup: choose what to load. Nothing loads until Start. -->
+      <section id="setup" class="setup"></section>
+      <!-- Conversation: shown once Start is pressed. -->
+      <section id="convo" class="convo" hidden>
+        <div id="transcript" class="chat">
+          <div class="chat-hint">Say “computer” to activate, or hold the button (Space) to talk manually.</div>
+        </div>
+        <div class="vp-meter"><div id="meter"></div></div>
+        <button id="talk" class="talk" disabled>loading models…</button>
+      </section>
     </main>
-    <script type="module" src="/app/main.js"></script>
+  </div>
+  <script type="module" src="/app/main.js"></script>
 </body>
 </html>

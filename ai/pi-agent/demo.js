@@ -1,15 +1,15 @@
 // demo.js — scripted transcripts for developing the Pi Agent UI without a model.
 //
-// The real agent brain needs a ~20 GB local LLM loaded to produce any UI state,
+// The real agent needs a multi-GB local LLM loaded to produce any UI state,
 // which makes iterating on the transcript rendering painfully slow. This module
-// synthesizes the exact same pi AgentEvent stream the live session emits, so the
-// whole UI (markdown, thinking folds, tool cards, diffs, approval palette, the
-// context meter, error states) can be exercised from a menu click or a headless
-// script.
+// synthesizes the same lib/kit/agent.js event stream a live session emits, so
+// the whole UI (markdown, thinking folds, tool cards, diffs, approval palette,
+// the context meter, error states) can be exercised from a menu click or a
+// headless script.
 //
-// It talks to main.js only through a small handler bundle so it stays decoupled
+// It talks to app.js only through a small handler bundle so it stays decoupled
 // from the live wiring:
-//   api.onEvent(event)      — feed a pi AgentEvent to the real renderer
+//   api.onEvent(event)      — feed an agent event to the real renderer
 //   api.approve(name, args) — render the real approval palette (returns a Promise)
 //   api.addUserRow(text)    — append a "You" row
 //   api.setUsage(usage)     — drive the context meter
@@ -84,7 +84,7 @@ export async function runDemoSession(api, opts) {
     const wait = sleeper(live);
 
     api.reset();
-    if (api.setStatus) api.setStatus("demo session (simulated)", "running");
+    if (api.setStatus) api.setStatus("demo session (simulated)", "busy");
     api.addUserRow("Explore this project and add a doc comment to the add() function.");
     api.onEvent({ type: "agent_start" });
 
@@ -175,7 +175,7 @@ export async function runDemoSession(api, opts) {
     api.onEvent({ type: "message_end", message: msg([{ type: "text", text: done }]) });
     api.onEvent({ type: "agent_end" });
     bump(40);
-    if (api.setStatus) api.setStatus("demo complete", "ready");
+    if (api.setStatus) api.setStatus("demo complete", "ok");
 }
 
 // ── synchronous bulk fill (for scroll/click tests) ────────────────────────────
@@ -216,7 +216,7 @@ export function fillTranscript(api, opts) {
     // Leave one thinking fold expanded so a fits-content nested scroller is
     // present at the top (the case that used to swallow the wheel).
     try {
-        const firstFold = document.querySelector(".thinking");
+        const firstFold = document.querySelector(".chat-think");
         if (firstFold) firstFold.classList.remove("collapsed");
     } catch (e) { /* headless DOM quirk — ignore */ }
 }

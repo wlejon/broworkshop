@@ -1,88 +1,55 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <meta charset="utf-8">
-    <title>Maker Agent</title>
-    <link rel="stylesheet" href="style.css">
+<meta charset="utf-8">
+<title>Maker Agent</title>
+<link rel="stylesheet" href="/lib/kit/kit.css">
+<link rel="stylesheet" href="/lib/kit/chat.css">
+<style>
+  /* vw, not %: a percentage-width column flex box stretches its children to
+     that percentage of itself (ENGINE-ISSUES.md, 2026-09-24). */
+  .k-side.right { width: 46vw; padding: 0; gap: 0; background: #0e1014; }
+  .stage-head { display: flex; justify-content: space-between; padding: 6px 12px; color: var(--k-dim);
+                border-bottom: 1px solid var(--k-border); }
+  .stage { flex: 1; display: flex; padding: 16px; min-height: 0; }
+  #preview { width: 100%; height: 100%; border: 0; background: #fff; border-radius: 4px; }
+  .look-shot { display: block; margin: 0 0 10px; border: 1px solid var(--k-border); border-radius: 5px; }
+  .chat-stack + .look-shot { margin-top: -4px; }
+</style>
 </head>
-<body>
-    <header>
-        <div class="title-row">
-            <h1>Maker Agent</h1>
-            <div id="status" class="status">choose a backend to begin</div>
-            <div id="ctx-meter" class="ctx-meter" style="display:none" title="context window used this conversation">
-                <div class="ctx-bar"><div class="ctx-fill"></div></div>
-                <span class="ctx-nums">0 / 8k ctx</span>
-            </div>
+<body class="k-app">
+  <header class="k-header">
+    <h1>Maker Agent</h1>
+    <span class="k-sub">an agent that writes a web app, looks at how it renders, and refines it</span>
+    <div class="k-spacer"></div>
+    <span id="ctx-meter"></span>
+  </header>
+  <div class="k-toolbar">
+    <span class="k-row" id="backend"><!-- agentBackend() builds the model controls here --></span>
+    <span class="k-sep"></span>
+    <label class="k-field"><input type="checkbox" id="auto-approve" checked> auto-approve tools</label>
+  </div>
+  <div class="k-body">
+    <main class="k-main">
+      <div id="transcript" class="chat">
+        <div class="chat-hint">Pick OpenRouter, paste your key, choose models with Browse…, then ask the agent to make
+          something, e.g. "a calm sunset over mountains" or "a bouncing-ball demo". It writes the app's files,
+          previews them, looks at what rendered, and refines.</div>
+      </div>
+      <div class="chat-input">
+        <textarea id="prompt" rows="2" placeholder="Ask the agent to make something…  (Enter to send, Shift+Enter for a newline)"></textarea>
+        <div class="k-col">
+          <button id="btn-send" class="primary" disabled>Send</button>
+          <button id="btn-stop" class="danger" disabled>Stop</button>
         </div>
-
-        <!-- Backend + model controls. OpenRouter is the default/primary; Local
-             (brolm) is the offline fallback. -->
-        <div class="controls">
-            <label class="ctl">
-                Backend
-                <select id="backend">
-                    <option value="openrouter" selected>OpenRouter (cloud)</option>
-                    <option value="brolm">Local (brolm)</option>
-                </select>
-            </label>
-
-            <div id="or-controls" class="ctl-group">
-                <label class="ctl grow">
-                    API key
-                    <input type="password" id="or-key" spellcheck="false" placeholder="sk-or-…">
-                </label>
-                <label class="ctl">
-                    Brain
-                    <span id="brain-display" class="model-display">—</span>
-                </label>
-                <button id="btn-browse-brain" title="Browse every tool-capable model with pricing">Browse…</button>
-                <label class="ctl">
-                    Eyes (look)
-                    <span id="vision-display" class="model-display">—</span>
-                </label>
-                <button id="btn-browse-vision" title="Browse every vision model with pricing">Browse…</button>
-            </div>
-
-            <div id="brolm-controls" class="ctl-group" style="display:none">
-                <label class="ctl grow">
-                    Model path
-                    <input type="text" id="brolm-path" spellcheck="false" placeholder="path to Qwen3 GGUF…">
-                </label>
-                <button id="btn-load-local">Load</button>
-            </div>
-
-            <label class="approve-toggle">
-                <input type="checkbox" id="auto-approve" checked>
-                Auto-approve tools
-            </label>
-        </div>
-    </header>
-
-    <main>
-        <!-- Left: the scrolling conversation. Right: the live stage the agent
-             renders into and looks at. -->
-        <section class="left">
-            <div id="transcript" class="transcript">
-                <div class="hint">Pick OpenRouter, paste your key, choose models with Browse…, then ask the agent to make something —
-                    e.g. "a calm sunset over mountains" or "a bouncing-ball demo". It writes the app's files,
-                    previews them, looks at what rendered, and refines.</div>
-            </div>
-            <div class="input-bar">
-                <textarea id="prompt" rows="2" placeholder="Ask the agent to make something…  (Enter to send, Shift+Enter for newline)"></textarea>
-                <div class="input-buttons">
-                    <button id="btn-send" disabled>Send</button>
-                    <button id="btn-stop" disabled>Stop</button>
-                </div>
-            </div>
-        </section>
-
-        <section class="right">
-            <div class="stage-head"><span>Preview</span><span id="stage-note"></span></div>
-            <div id="stage" class="stage"><iframe id="preview" src="project/" width="640" height="480"></iframe></div>
-        </section>
+      </div>
     </main>
-
-    <script type="module" src="/app/main.js"></script>
+    <aside class="k-side right">
+      <div class="stage-head"><span>Preview</span><span class="dim">project/</span></div>
+      <div class="stage"><iframe id="preview" src="project/" width="640" height="480"></iframe></div>
+    </aside>
+  </div>
+  <footer class="k-statusbar"><span id="status">choose a backend to begin</span></footer>
+  <script type="module" src="/app/main.js"></script>
 </body>
 </html>

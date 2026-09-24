@@ -1,134 +1,69 @@
-// Smoke test for the new streaming bindings:
-//   - whisper.transcribe(...) sync overload with { onToken, timestampBeginId }
-//   - bro.stt.transcribe(...)  async with onToken streaming
-//   - bro.tts.synthesizeStream(kokoro, phonemeChunks, voice, { onChunk, onDone })
-//
-// Run from the bro build dir (GPU):
-//   ./build/Release/bro-headless.exe ../broworkshop/ai/voice-pipeline _stream_smoke.js
-const FS = require('node:fs');
-const WROOT = (typeof process !== 'undefined' && process.env && process.env.BRO_WEIGHTS) || '..';
+// The streaming bindings the pipeline is built on (tag: ml):
+//   whisper.transcribe sync overload with { onToken, timestampBeginId }
+//   bro.stt.transcribe async with onToken streaming
+//   bro.tts.synthesizeStream(kokoro, phonemeChunks, voice, { onChunk, onDone })
+import { check, eq, test, done, pumpUntil, needWeights } from "/lib/kit/test.js";
+import { readWav } from "/lib/kit/audio.js";
+import { useKokoroAssets, kokoroVoicePath } from "/lib/kit/kokoro.js";
 
-function readWav16(path) {
-    const buf = FS.readFileSync(path);
-    const ab  = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
-    const dv  = new DataView(ab);
-    const numChannels = dv.getUint16(22, true);
-    let offset = 12;
-    while (offset < ab.byteLength) {
-        const id = String.fromCharCode(dv.getUint8(offset), dv.getUint8(offset+1),
-                                       dv.getUint8(offset+2), dv.getUint8(offset+3));
-        const size = dv.getUint32(offset + 4, true);
-        if (id === 'data') {
-            const pcm = new Int16Array(ab, offset + 8, size / 2);
-            const frames = pcm.length / numChannels;
-            const samples = new Float32Array(frames);
-            for (let i = 0; i < frames; i++) {
-                let s = 0;
-                for (let c = 0; c < numChannels; c++) s += pcm[i * numChannels + c];
-                samples[i] = (s / numChannels) / 32768;
-            }
-            return { samples, sampleRate: dv.getUint32(24, true) };
-        }
-        offset += 8 + size;
-    }
-    throw new Error('no data chunk');
-}
+const WHISPER = needWeights('Whisper', ['brosoundml/weights/whisper'], { probe: 'test_audio_en.wav' });
+const KOKORO = needWeights('Kokoro', ['brosoundml/weights/kokoro'], { probe: 'config.json' });
 
-let failures = 0;
-function check(cond, msg) {
-    console.log((cond ? '  PASS  ' : '  FAIL  ') + msg);
-    if (!cond) failures++;
-}
+const wav = readWav(WHISPER + '/test_audio_en.wav');
+const audio = { samples: wav.pcm, sampleRate: wav.rate };
+const whisper = bro.stt.loadWhisper(WHISPER);
+const tok = bro.stt.loadTokenizer({ vocabPath: WHISPER + '/vocab.json', mergesPath: WHISPER + '/merges.txt' });
+const prompt = tok.buildPrompt('en', 'transcribe', true);     // timestamps on (long-form)
 
-// Async jobs run on a real background thread, so we must let WALL-CLOCK time
-// pass for them to finish — sleep()/advanceTime only moves virtual time and
-// returns instantly. Burn ~20 ms of real time per spin, then advanceTime() to
-// pump tickAsync (which drives the job's poll/done callbacks).
-function pump(predicate, timeoutMs) {
-    const t0 = Date.now();
-    while (!predicate() && Date.now() - t0 < timeoutMs) {
-        const s = Date.now();
-        while (Date.now() - s < 20) { /* burn real time for the worker thread */ }
-        advanceTime(20);
-    }
-}
-
-// ─── Whisper streaming (sync + async) ─────────────────────────────────────────
-console.log('── Whisper streaming ──');
-const wav = readWav16(WROOT + '/brosoundml/weights/whisper/test_audio_en.wav');
-const whisper = bro.stt.loadWhisper(WROOT + '/brosoundml/weights/whisper');
-const tok = bro.stt.loadTokenizer({
-    vocabPath:  WROOT + '/brosoundml/weights/whisper/vocab.json',
-    mergesPath: WROOT + '/brosoundml/weights/whisper/merges.txt',
+test('Whisper sync transcribe streams tokens', () => {
+    let n = 0;
+    const ids = whisper.transcribe(audio, prompt, { maxNewTokens: 128, timestampBeginId: tok.firstTimestampId, onToken: () => { n++; } });
+    const text = tok.decode(ids, true).trim();
+    console.log('sync: "' + text + '"');
+    check(n > 0 && text.length > 0, n + ' tokens');
 });
-const prompt = tok.buildPrompt('en', 'transcribe', true);  // timestamps on for long-form
 
-// Sync overload with onToken + timestampBeginId.
-let syncTokens = 0;
-const syncIds = whisper.transcribe(wav, prompt, {
-    maxNewTokens: 128,
-    timestampBeginId: tok.firstTimestampId,
-    onToken: () => { syncTokens++; },
+let asyncN = 0, asyncIds = null, asyncErr = null;
+bro.stt.transcribe(whisper, audio, prompt, {
+    maxNewTokens: 128, timestampBeginId: tok.firstTimestampId,
+    onToken: () => { asyncN++; },
+    onDone: (ids, info) => { asyncIds = ids; asyncErr = info && info.error; },
 });
-const syncText = tok.decode(syncIds, true).trim();
-check(syncTokens > 0, 'sync onToken fired ' + syncTokens + ' times');
-check(syncText.length > 0, 'sync long-form transcript: "' + syncText + '"');
-
-// Async streaming — pumped with sleep().
-let asyncTokens = 0, asyncDone = false, asyncIds = null;
-bro.stt.transcribe(whisper, wav, prompt, {
-    maxNewTokens: 128,
-    timestampBeginId: tok.firstTimestampId,
-    onToken: () => { asyncTokens++; },
-    onDone: (ids, info) => { asyncDone = true; asyncIds = ids; if (info.error) console.log('  async err: ' + info.error); },
+pumpUntil(() => asyncIds, 20000);
+test('Whisper async transcribe streams tokens', () => {
+    check(asyncIds && !asyncErr, 'finished: ' + asyncErr);
+    check(asyncN > 0 && tok.decode(asyncIds, true).trim().length > 0, asyncN + ' tokens');
 });
-pump(() => asyncDone, 20000);
-check(asyncDone, 'async transcribe completed');
-check(asyncTokens > 0, 'async onToken fired ' + asyncTokens + ' times');
-check(asyncIds && tok.decode(asyncIds, true).trim().length > 0,
-      'async transcript: "' + (asyncIds ? tok.decode(asyncIds, true).trim() : '') + '"');
 
-// ─── Kokoro streaming ─────────────────────────────────────────────────────────
-console.log('── Kokoro streaming ──');
-bro.tts.setAssetRoot(WROOT + '/brosoundml');
-const kokoro = bro.tts.loadKokoro(WROOT + '/brosoundml/weights/kokoro');
-const voice  = kokoro.loadVoice(WROOT + '/brosoundml/weights/kokoro/voices/af_aoede.bin');
+useKokoroAssets(KOKORO);
+const kokoro = bro.tts.loadKokoro(KOKORO);
+const pack = kokoro.loadVoice(kokoroVoicePath(KOKORO, 'af_aoede'));
 const spaceId = (kokoro.vocab() || {})[' '] || 16;
 
-// Split a multi-clause phoneme stream into chunks at the space token.
+// Three roughly even word chunks, re-joined with the space token.
 const ids = bro.tts.phonemize('Hello there. How are you doing today? I am doing just fine.');
-const words = [];
+const wordsP = [];
 let cur = [];
-for (const id of ids) {
-    if (id === spaceId) { if (cur.length) { words.push(cur); cur = []; } }
-    else cur.push(id);
-}
-if (cur.length) words.push(cur);
-// Group words into 3 roughly-even chunks (re-inserting the space token between words).
+for (const id of ids) { if (id === spaceId) { if (cur.length) { wordsP.push(cur); cur = []; } } else cur.push(id); }
+if (cur.length) wordsP.push(cur);
 const chunks = [[], [], []];
-for (let i = 0; i < words.length; i++) {
-    const c = chunks[Math.floor(i * 3 / words.length)];
-    if (c.length) c.push(spaceId);
-    for (const id of words[i]) c.push(id);
-}
+wordsP.forEach((w, i) => { const c = chunks[Math.floor(i * 3 / wordsP.length)]; if (c.length) c.push(spaceId); c.push(...w); });
 
-let chunkCount = 0, chunkSamples = 0, ttsDone = false, fullLen = 0, durOk = true;
-bro.tts.synthesizeStream(kokoro, chunks, voice, {
+let chunkCount = 0, chunkSamples = 0, durOk = true, full = null, ttsErr = null;
+bro.tts.synthesizeStream(kokoro, chunks, pack, {
     speed: 1.0,
     onChunk: (samples, durations) => {
-        // durations = this chunk's per-phoneme frame counts, BOS/EOS-wrapped.
-        const expect = chunks[chunkCount].length + 2;
-        if (!durations || durations.length !== expect) durOk = false;
+        // durations: this chunk's per-phoneme frames, BOS/EOS-wrapped.
+        if (!durations || durations.length !== chunks[chunkCount].length + 2) durOk = false;
         chunkCount++; chunkSamples += samples.length;
     },
-    onDone: (res, info) => { ttsDone = true; fullLen = res.samples.length; if (info.error) console.log('  tts err: ' + info.error); },
+    onDone: (res, info) => { full = res; ttsErr = info && info.error; },
 });
-pump(() => ttsDone, 20000);
-check(ttsDone, 'synthesizeStream completed');
-check(chunkCount === chunks.length, 'onChunk fired once per chunk (' + chunkCount + '/' + chunks.length + ')');
-check(durOk, 'each chunk delivered per-phoneme durations (length = chunk + 2)');
-check(fullLen > 0 && fullLen === chunkSamples,
-      'full buffer (' + fullLen + ') == concatenated chunks (' + chunkSamples + ')');
-
-console.log(failures === 0 ? '\nALL STREAMING SMOKE TESTS PASSED'
-                           : '\n' + failures + ' CHECK(S) FAILED');
+pumpUntil(() => full, 20000);
+test('Kokoro synthesizeStream', () => {
+    check(full && !ttsErr, 'finished: ' + ttsErr);
+    eq(chunkCount, chunks.length, 'one onChunk per chunk');
+    check(durOk, 'per-phoneme durations per chunk');
+    eq(full.samples.length, chunkSamples, 'full buffer = concatenated chunks');
+});
+done('streaming bindings');

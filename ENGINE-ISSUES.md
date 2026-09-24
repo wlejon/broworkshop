@@ -56,6 +56,14 @@ bro-headless logs the page manifest and then produces nothing for 300 s
 bundle used to load under QuickJS. Looks like bronze compile time on large
 single modules. Tagged `timeout=90` in `tests/app-tags.txt` so the known
 timeout stays cheap.
+Update (same day): no longer blocks the apps. The bundles were pi's
+`@mariozechner/pi-agent-core` + `pi-ai` (plus their provider SDKs) and the apps
+used only the agent loop from them. That loop is now `lib/kit/agent.js`
+(~240 lines), both apps boot in about 1 s, and the `timeout=90` tags are gone.
+The engine question is still open and still unreproduced: why bronze does
+not finish a single ~41k-line module in 300 s. The bundles were build output
+and never tracked. To get one back, run `npm i && node build.mjs` in
+`ai/pi-agent/bundler/` from git history (the commit before the kit rebuild).
 
 ### No `CSS` global (2026-09-24)
 `CSS.supports(...)` / `CSS.escape(...)` throw ReferenceError.
@@ -571,6 +579,20 @@ on the change event; `target` is the list but `currentTarget` is
 Repro: `const m = matchMedia('(min-width: 900px)'); m.onchange = e =>
 console.log(e.currentTarget === m); resize(700, 900)` → `false`.
 demos/platform-lab's smoke test logs it.
+
+### bronze: a NaN typed as a number is truthy in conditions (2026-09-24)
+When the compiler knows a value is a number (unary `+`, `0/0`, a `NaN`
+literal), `||`, `&&`, `?:` and `!` treat NaN as truthy: the test looks like
+`d != 0` with no NaN check. Values of unknown type are fine (`Number(x) || 3`
+and a function parameter `v || 9` both give the right answer), and so is
+`Boolean(NaN)`.
+Repro: `bro-headless tools/synth -e "const d = {}; const n = NaN; console.log(+d.x || 120, n || 1, !n, n ? 1 : 2, n && 1)"`
+prints `NaN NaN false 1 1`; the correct output is `120 1 true 2 NaN`.
+The idiom `+opts.x || def` is common in app code, and each use gets NaN
+instead of the default (tools/synth's tempo came out as NaN). The synth now
+validates with `Number.isFinite`, which it should do anyway. Other apps
+probably have the same pattern:
+`grep -rn "(+[a-zA-Z_.]* ||" games demos tools ai lib`.
 
 ## Notes (not bugs)
 

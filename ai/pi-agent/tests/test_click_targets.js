@@ -1,74 +1,51 @@
-// test_click_targets.js — regression for click hit-testing inside the
-// #transcript overflow scroller. Collapsing a tool card by clicking its header
-// must work no matter how far the transcript is internally scrolled (a hit-test
-// that ignored the overflow scroll offset would land on the wrong element once
-// scrolled — the "clicking is only sometimes effective" symptom).
-//
-//   bro-headless ai/pi-agent tests/test_click_targets.js
+// Click hit-testing inside the #transcript overflow scroller: collapsing a
+// tool card by clicking its header must work however far the transcript is
+// scrolled (a hit test that ignored the scroll offset would land on the wrong
+// element once scrolled), and a reasoning fold's header toggles its own fold.
+import { check, test, done, frames } from "/lib/kit/test.js";
+import { piAgent } from "/app/app.js";
 
-const api = window.__piDebug;
-assert(api && typeof api.fill === "function", "__piDebug.fill present");
-api.fill({ turns: 8 });
-flush();
+piAgent.fill({ turns: 8 });
+frames(2);
 
-const t = document.querySelector("#transcript");
-assert(t.scrollHeight > t.clientHeight + 50, "transcript overflows");
+const t = document.querySelector('#transcript');
+check(t.scrollHeight > t.clientHeight + 50, 'transcript overflows');
 
-// Click the first tool-card header fully inside the viewport at a given scroll
-// offset and assert the card's collapsed state flips.
-function toggleAt(scrollTop, label) {
-    t.scrollTop = scrollTop;
-    flush();
-    const tRect = t.getBoundingClientRect();
-    const heads = document.querySelectorAll(".tool-card .tool-head");
-    for (let i = 0; i < heads.length; i++) {
-        const r = heads[i].getBoundingClientRect();
-        if (r.height > 0 && r.top >= tRect.top + 4 && r.bottom <= tRect.bottom - 4) {
-            const card = heads[i].closest(".tool-card");
-            const before = card.classList.contains("collapsed");
+// Click the first header fully inside the viewport; returns whether it flipped
+// `cls` on its container (null when nothing is in view at this offset).
+function toggleFirstVisible(headSel, boxSel, cls) {
+    const tr = t.getBoundingClientRect();
+    for (const head of document.querySelectorAll(headSel)) {
+        const r = head.getBoundingClientRect();
+        if (r.height > 0 && r.top >= tr.top + 4 && r.bottom <= tr.bottom - 4) {
+            const box = head.closest(boxSel);
+            const before = box.classList.contains(cls);
             click(r.left + r.width / 2, r.top + r.height / 2);
             flush();
-            const after = card.classList.contains("collapsed");
-            assert(before !== after,
-                label + ": clicking the tool header toggled collapse (" + before + " -> " + after + ")");
-            return true;
+            return before !== box.classList.contains(cls);
         }
     }
-    return false; // nothing in view at this offset — not a failure
+    return null;
 }
 
-let tested = 0;
-if (toggleAt(0, "at-top")) tested++;
-if (toggleAt(400, "scrolled-400")) tested++;
-if (toggleAt(Math.floor(t.scrollHeight / 2), "scrolled-mid")) tested++;
-if (toggleAt(t.scrollHeight, "at-bottom")) tested++;
-assert(tested >= 2, "exercised clicks at multiple scroll offsets (" + tested + ")");
-
-// A "💭 Thinking" fold must toggle when its header is clicked — including a
-// past fold, whose handler must target its own element (not a shared var).
-(function thinkingFoldToggles() {
-    t.scrollTop = 0;
-    flush();
-    const tRect = t.getBoundingClientRect();
-    const heads = document.querySelectorAll(".thinking .thinking-head");
-    for (let i = 0; i < heads.length; i++) {
-        const r = heads[i].getBoundingClientRect();
-        if (r.height > 0 && r.top >= tRect.top + 4 && r.bottom <= tRect.bottom - 4) {
-            const fold = heads[i].closest(".thinking");
-            const before = fold.classList.contains("collapsed");
-            click(r.left + r.width / 2, r.top + r.height / 2);
-            flush();
-            assert(before !== fold.classList.contains("collapsed"),
-                "clicking a thinking header toggled its own fold (" + before + " -> " + !before + ")");
-            // Toggle back to confirm it works both directions.
-            click(r.left + r.width / 2, r.top + r.height / 2);
-            flush();
-            assert(before === fold.classList.contains("collapsed"),
-                "clicking again restored the fold state");
-            return;
-        }
+test('tool header toggles at every scroll offset', () => {
+    let tried = 0;
+    for (const top of [0, 400, Math.floor(t.scrollHeight / 2), t.scrollHeight]) {
+        t.scrollTop = top;
+        frames(1);
+        const r = toggleFirstVisible('.chat-tool-head', '.chat-tool', 'collapsed');
+        if (r === null) continue;
+        check(r, 'toggled at scrollTop ' + t.scrollTop);
+        tried++;
     }
-    assert(false, "no thinking fold visible to click");
-})();
+    check(tried >= 2, 'exercised clicks at ' + tried + ' offsets');
+});
 
-console.log("test_click_targets: all assertions passed");
+test('thinking header toggles its own fold, both ways', () => {
+    t.scrollTop = 0;
+    frames(1);
+    check(toggleFirstVisible('.chat-think-head', '.chat-think', 'collapsed') === true, 'first click toggles');
+    check(toggleFirstVisible('.chat-think-head', '.chat-think', 'collapsed') === true, 'second click toggles back');
+});
+
+done('click targets');

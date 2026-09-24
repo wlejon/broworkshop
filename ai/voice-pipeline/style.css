@@ -1,352 +1,92 @@
-* { box-sizing: border-box; }
+/* Voice Pipeline: what kit.css + chat.css don't cover. */
+:root { --vp-accent: #c08bff; --vp-accent-bg: #2a2236; --vp-card: #161a22; }
 
-body {
-    margin: 0;
-    font-family: -apple-system, "Segoe UI", sans-serif;
-    background: #15171b;
-    color: #e6e8eb;
-    height: 100vh;
-    display: flex;
-    flex-direction: column;
+/* ---- phase pill (header) ---------------------------------------------------- */
+#status {
+    font-family: var(--k-font-ui); font-size: 13px; padding: 4px 12px; border-radius: 12px;
+    background: var(--k-btn); color: var(--k-muted);
 }
+#status.loading   { background: #3a3320; color: #e6c66b; }
+#status.idle      { background: #1f2a1f; color: #7bc47f; }
+#status.listening { background: var(--vp-accent-bg); color: var(--vp-accent); }
+#status.transcribing, #status.thinking, #status.speaking { background: #1f2a3a; color: #6fb0ff; }
+#status.err       { background: #3a1f1f; color: var(--k-err); }
 
-header {
-    padding: 14px 20px;
-    border-bottom: 1px solid #2a2d33;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-}
+/* ---- conversation ----------------------------------------------------------- */
+.convo { flex: 1; display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+.convo[hidden], .setup[hidden] { display: none; }
+.convo .chat { border: 1px solid var(--k-border); border-radius: 8px; font-size: 15px; }
+.chat-row .pending { color: var(--k-muted); }
+.chat-row .word { border-radius: 4px; padding: 0 2px; transition: background-color 80ms linear, color 80ms linear; }
+.chat-row .word.speaking { background: var(--chat-agent); color: #10151b; }
 
-header h1 {
-    margin: 0;
-    font-size: 18px;
-    font-weight: 600;
-    letter-spacing: 0.2px;
-}
-
-.status {
-    font-size: 13px;
-    padding: 4px 10px;
-    border-radius: 12px;
-    background: #2a2d33;
-    color: #a8adb5;
-}
-.status.loading   { background: #3a3320; color: #e6c66b; }
-.status.idle      { background: #1f2a1f; color: #7bc47f; }
-.status.listening { background: #2a1f3a; color: #c08bff; }
-.status.transcribing,
-.status.thinking,
-.status.speaking  { background: #1f2a3a; color: #6fb0ff; }
-.status.error     { background: #3a1f1f; color: #ff8b8b; }
-
-main {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    padding: 16px 20px;
-    gap: 12px;
-    min-height: 0;
-}
-
-.transcript {
-    flex: 1;
-    overflow-y: auto;
-    background: #1c1f24;
-    border: 1px solid #2a2d33;
-    border-radius: 8px;
-    padding: 14px;
-    font-size: 15px;
-    line-height: 1.5;
-    min-height: 0;
-}
-
-.transcript .hint {
-    color: #6a6f78;
-    font-style: italic;
-}
-
-.turn {
-    margin-bottom: 10px;
-    padding: 8px 12px;
-    border-radius: 6px;
-}
-.turn .who {
-    font-weight: 600;
-    margin-right: 6px;
-    text-transform: lowercase;
-}
-.turn.you  { background: #232730; }
-.turn.you  .who { color: #c08bff; }
-.turn.bro  { background: #1e252e; }
-.turn.bro  .who { color: #6fb0ff; }
-
-/* The still-streaming, not-yet-spoken tail of a reply. */
-.turn.bro .pending { color: #aeb4bd; }
-
-/* Each spoken word; the one currently being voiced is highlighted. */
-.turn.bro .word {
-    border-radius: 4px;
-    padding: 0 2px;
-    transition: background-color 80ms linear, color 80ms linear;
-}
-.turn.bro .word.speaking {
-    background: #6fb0ff;
-    color: #10151b;
-}
-
-.meter-wrap {
-    height: 6px;
-    background: #1c1f24;
-    border-radius: 3px;
-    overflow: hidden;
-}
-.meter {
-    height: 100%;
-    width: 0%;
-    background: linear-gradient(90deg, #7bc47f, #e6c66b, #ff8b8b);
-    transition: width 60ms linear;
-}
-
-/* Indeterminate "working" bar shown between end-of-capture and the first reply
-   token (set by startLoadingIndicator). A fixed-width chunk scans back and
-   forth inside the overflow-hidden track. */
-.meter.thinking {
-    width: 34%;
-    transition: none;
-    background: linear-gradient(90deg, #1f2a3a, #6fb0ff, #1f2a3a);
+.vp-meter { height: 6px; flex: none; background: var(--k-input); border-radius: 3px; overflow: hidden; }
+#meter { height: 100%; width: 0%; background: linear-gradient(90deg, #7bc47f, #e6c66b, #ff8b8b); transition: width 60ms linear; }
+/* Between end of capture and the transcript: a chunk scanning the track. */
+#meter.thinking {
+    width: 34%; transition: none; background: linear-gradient(90deg, #1f2a3a, #6fb0ff, #1f2a3a);
     animation: meter-scan 1.15s ease-in-out infinite;
 }
-@keyframes meter-scan {
-    0%   { transform: translateX(-105%); }
-    50%  { transform: translateX(296%); }
-    100% { transform: translateX(-105%); }
-}
+@keyframes meter-scan { 0% { transform: translateX(-105%); } 50% { transform: translateX(296%); } 100% { transform: translateX(-105%); } }
 
-/* ─── conversation view ──────────────────────────────────────────────────── */
-/* [hidden] must win over the display:flex below (attribute selectors don't, on
-   their own, beat a class rule), so spell it out for both swappable sections. */
-.setup[hidden], .convo[hidden] { display: none; }
+.talk, .start {
+    flex: none; padding: 16px; font-family: var(--k-font-ui); font-size: 15px; font-weight: 600;
+    background: var(--vp-accent); color: #1a1224; border: none; border-radius: 8px; cursor: pointer; user-select: none;
+}
+.talk:disabled, .start:disabled { background: #3a3d44; color: #6a6f78; cursor: not-allowed; }
+.talk.recording { background: #ff6b6b; color: #2a0e0e; }
 
-.convo {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    min-height: 0;
-}
+/* ---- setup screen ----------------------------------------------------------- */
+/* Block flow for the vertical stacks: htmlayout doesn't grow a flex-column
+   item to multi-line content, so siblings would overlap. */
+.setup { flex: 1; display: block; overflow-y: auto; min-height: 0; font-family: var(--k-font-ui); font-size: 13px; }
+.setup > * { margin: 0 0 14px; }
+.setup .intro { color: var(--k-muted); line-height: 1.55; }
+.section-label { font-size: 11px; font-weight: 700; letter-spacing: .8px; text-transform: uppercase; color: var(--k-dim); }
 
-/* ─── setup screen (model selection) ─────────────────────────────────────── */
-/* Block flow (not flex-column) for vertical stacks: htmlayout doesn't grow a
-   flex-column item to its multi-line content height, so siblings overlap. Block
-   flow sizes to content. `gap` doesn't apply to block, so space with margins. */
-.setup {
-    flex: 1;
-    overflow-y: auto;
-    display: block;
-    min-height: 0;
-    padding-right: 4px;
+/* Rows of inline-block cells: N cells of calc(100/N% - g) plus (N-1) gutters fill a row. */
+.card-line, .spk-line, .lang-line { display: block; margin-bottom: 8px; }
+.card-line:last-child, .spk-line:last-child, .lang-line:last-child { margin-bottom: 0; }
+.voice-card, .spk, .lang {
+    display: inline-block; vertical-align: top; cursor: pointer; color: var(--k-text);
+    border: 1.5px solid var(--k-border-hi); border-radius: 8px;
 }
-.setup > * { margin-bottom: 14px; }
-.setup > *:last-child { margin-bottom: 0; }
-.setup .intro { margin: 0 0 14px; font-size: 13px; color: #a8adb5; line-height: 1.55; }
-.section-label {
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.8px;
-    text-transform: uppercase;
-    color: #7a8089;
-    margin-top: 2px;
-}
-
-/* voice cards — explicit rows of 2 (.card-line); see .spk-grid note on heights */
-.voice-cards { display: flex; flex-direction: column; gap: 10px; }
-/* inline-block cells, not flex: htmlayout doesn't grow a flex item's cross-axis
-   (height) to multi-line content, so stacked children overflow. inline-block
-   sizes to content. Gutters come from margin-right (zeroed on the last cell of a
-   row, so N cells of calc(100/N% - g) + (N-1)·margin fill the row exactly). */
-.card-line { display: block; margin-bottom: 10px; }
-.card-line:last-child { margin-bottom: 0; }
-.voice-card {
-    display: inline-block;
-    vertical-align: top;
-    box-sizing: border-box;
-    width: calc(50% - 5px);
-    margin-right: 10px;
-    text-align: left;
-    padding: 13px 14px;
-    background: #1c1f24;
-    border: 1.5px solid #2a2d33;
-    border-radius: 9px;
-    cursor: pointer;
-    color: #e6e8eb;
-    transition: border-color 90ms, background 90ms;
-}
-.voice-card:last-child { margin-right: 0; }
-.voice-card:hover { border-color: #3a4150; }
-.voice-card.on { border-color: #c08bff; background: #221b2e; }
-.voice-card.disabled { opacity: 0.5; cursor: not-allowed; }
+.voice-card:last-child, .spk:last-child, .lang:last-child { margin-right: 0; }
+.voice-card { width: calc(50% - 5px); margin-right: 10px; padding: 12px 14px; background: var(--vp-card); }
+.voice-card:hover { border-color: #3a4a66; }
+.voice-card.on { border-color: var(--vp-accent); background: #221b2e; }
+.voice-card.disabled { opacity: .5; cursor: not-allowed; }
 .vc-title { display: block; font-size: 14px; font-weight: 600; }
-.vc-sub { display: block; font-size: 12px; color: #9097a0; margin-top: 2px; }
-.tag {
-    display: inline-block;
-    margin-top: 7px;
-    font-size: 11px;
-    padding: 2px 8px;
-    border-radius: 10px;
-    font-variant-numeric: tabular-nums;
-}
-.tag.ready { background: #1f2a1f; color: #7bc47f; }
-.tag.dl    { background: #3a3320; color: #e6c66b; }
-.tag.need  { background: #3a1f1f; color: #ff8b8b; }
-.tag.none  { background: #2a2d33; color: #8a9099; }
+.vc-sub { display: block; margin: 2px 0 7px; font-size: 12px; color: var(--k-muted); }
 
-/* per-backend options */
-.voice-opts {
-    background: #191c21;
-    border: 1px solid #24272d;
-    border-radius: 9px;
-    padding: 13px 14px;
-    display: block;
-}
-.voice-opts > * { margin-bottom: 11px; }
+.voice-opts { display: block; padding: 12px 14px; background: var(--k-surface); border: 1px solid var(--k-border); border-radius: 8px; }
+.voice-opts > * { margin: 0 0 10px; }
 .voice-opts > *:last-child { margin-bottom: 0; }
-.opt-label { font-size: 12px; font-weight: 600; color: #c5cad2; }
-.opt-note  { margin: 0; font-size: 12.5px; color: #9097a0; line-height: 1.5; }
+.opt-label { font-size: 12px; font-weight: 600; color: var(--k-text); }
+.opt-note, .opt-sub { color: var(--k-muted); line-height: 1.5; }
 
-.spk-grid { display: block; }
-.spk-line { display: block; margin-bottom: 8px; }
-.spk-line:last-child { margin-bottom: 0; }
-.spk {
-    display: inline-block;
-    vertical-align: top;
-    box-sizing: border-box;
-    width: calc(33.333% - 6px);
-    margin-right: 9px;
-    text-align: left;
-    padding: 8px 10px;
-    background: #232730;
-    border: 1.5px solid transparent;
-    border-radius: 7px;
-    cursor: pointer;
-    color: #e6e8eb;
-}
-.spk:last-child { margin-right: 0; }
-.spk:hover { background: #272c36; }
-.spk[aria-selected="true"] { border-color: #c08bff; background: #2a2236; }
-.spk-name { display: block; font-size: 13px; font-weight: 600; }
-.spk-note { display: block; font-size: 11px; color: #8a9099; text-transform: capitalize; }
+.spk { width: calc(33.333% - 6px); margin-right: 9px; padding: 7px 10px; background: var(--k-input); border-color: transparent; }
+.spk-name { display: block; font-weight: 600; }
+.spk-note { display: block; font-size: 11px; color: var(--k-muted); text-transform: capitalize; }
+.lang { width: calc(20% - 5px); margin-right: 6px; padding: 6px 8px; text-align: center; font-size: 12px;
+        background: var(--k-input); color: var(--k-muted); border-color: transparent; }
+.spk:hover, .lang:hover { background: #1c2230; color: var(--k-text); }
+.spk[aria-selected="true"], .lang[aria-selected="true"] { border-color: var(--vp-accent); background: var(--vp-accent-bg); color: var(--k-text); }
 
-.lang-grid { display: block; }
-.lang-line { display: block; margin-bottom: 6px; }
-.lang-line:last-child { margin-bottom: 0; }
-.lang {
-    display: inline-block;
-    vertical-align: top;
-    box-sizing: border-box;
-    width: calc(20% - 5px);
-    margin-right: 6px;
-    text-align: center;
-    font-size: 12px;
-    padding: 6px 8px;
-    background: #232730;
-    color: #aeb4bd;
-    border: 1.5px solid transparent;
-    border-radius: 8px;
-    cursor: pointer;
-}
-.lang:last-child { margin-right: 0; }
-.lang:hover { background: #2a2f39; color: #e6e8eb; }
-.lang[aria-selected="true"] { border-color: #c08bff; background: #2a2236; color: #e6e8eb; }
-.vd-desc {
-    width: 100%;
-    box-sizing: border-box;
-    padding: 10px 11px;
-    background: #232730;
-    color: #e6e8eb;
-    border: 1px solid #2f343c;
-    border-radius: 7px;
-    font-size: 13px;
-    font-family: inherit;
-}
-.opt-sub { font-size: 12px; color: #8a9099; }
+.vd-desc { width: 100%; padding: 9px 11px; font-family: inherit; font-size: 13px; }
 .ex-list { display: block; }
-.ex {
-    display: block;
-    margin-bottom: 6px;
-    text-align: left;
-    font-size: 12px;
-    padding: 7px 11px;
-    background: #232730;
-    color: #aeb4bd;
-    border: 1px solid #2f343c;
-    border-radius: 7px;
-    cursor: pointer;
-}
-.ex:hover { background: #2a2f39; color: #e6e8eb; border-color: #c08bff; }
+.ex { display: block; margin-bottom: 6px; padding: 7px 11px; font-size: 12px; cursor: pointer; color: var(--k-muted);
+      background: var(--k-input); border: 1px solid var(--k-border-hi); border-radius: 7px; }
+.ex:hover { color: var(--k-text); border-color: var(--vp-accent); }
 
-/* pipeline / core rows */
-.core-rows { display: flex; flex-direction: column; gap: 7px; }
-.core-row, .wake-toggle {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 13px;
-    padding: 9px 11px;
-    background: #1c1f24;
-    border: 1px solid #24272d;
-    border-radius: 7px;
-    color: #d4d8de;
-}
-.core-row { justify-content: space-between; }
-.core-row > span:first-child { color: #c5cad2; }
+.core-rows { display: block; }
+.core-row { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; padding: 9px 11px;
+            background: var(--vp-card); border: 1px solid var(--k-border); border-radius: 7px; }
 .wake-toggle { cursor: pointer; }
-.wake-toggle input { width: 15px; height: 15px; accent-color: #c08bff; }
+.wake-toggle input { accent-color: var(--vp-accent); }
 
-/* start bar */
-.start-bar { display: flex; flex-direction: column; gap: 8px; margin-top: 2px; }
-.start {
-    padding: 14px 18px;
-    font-size: 15px;
-    font-weight: 600;
-    background: #c08bff;
-    color: #1a1224;
-    border: none;
-    border-radius: 8px;
-    cursor: pointer;
-}
-.start:disabled { background: #3a3d44; color: #6a6f78; cursor: not-allowed; }
-.start-prog {
-    height: 6px;
-    background: #1c1f24;
-    border-radius: 3px;
-    overflow: hidden;
-}
-.start-bar-fill {
-    height: 100%;
-    width: 0%;
-    background: linear-gradient(90deg, #7bc47f, #c08bff);
-    transition: width 120ms linear;
-}
-.start-note { font-size: 12px; color: #8a9099; min-height: 15px; }
-
-.talk {
-    padding: 18px;
-    font-size: 16px;
-    font-weight: 600;
-    background: #c08bff;
-    color: #1a1224;
-    border: none;
-    border-radius: 8px;
-    cursor: pointer;
-    user-select: none;
-}
-.talk:disabled {
-    background: #3a3d44;
-    color: #6a6f78;
-    cursor: not-allowed;
-}
-.talk.recording {
-    background: #ff6b6b;
-    color: #2a0e0e;
-}
+.start-bar { display: block; }
+.start-bar > * { margin-bottom: 8px; }
+.start { width: 100%; }
+.start-bar .k-progress { display: block; height: 6px; }
+.start-note { font-size: 12px; color: var(--k-muted); min-height: 15px; }
