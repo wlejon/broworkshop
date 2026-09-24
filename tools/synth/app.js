@@ -1,245 +1,169 @@
-// ---------------------------------------------------------------------------
-// Synth App — thin module entry. Boots the engine + shared widgets, mounts the
-// view modules, then wires view switching + the clip editor.
-// ---------------------------------------------------------------------------
+// app.js — builds the synth: the engine side (song, player, sequencer, mic,
+// MIDI, recorder), the two views, the undo history and the project file.
+//
+// Layout of the code:
+//   audio/   broaudio glue, no DOM: sounds on buses + allocators, the global
+//            LFO, sequencing + arpeggios, offline loop render, mic, MIDI
+//   model/   the song document (layers, steps, automation) and presets
+//   ui/      synth view: sidebar sound editor, scopes, layer grid,
+//            automation lanes, piano, header + sequencer bar
+//   clip/    clip editor: sample ops, the clip document, its canvas, its panel
+//
+// Undo: every song edit (song.onEdit) records a before/after snapshot in a
+// History; consecutive edits of one control within a second merge, so a
+// slider drag is one step. Files: File > New / Open / Save (lib/project.js
+// bundles, `<name>.synth/project.json`) through the kit's documentCommands.
+// The clip editor keeps its own history (its undo/redo act in that view).
 
-import { $, $$, on } from "/std/dom.js";
-import { engine } from "/app/lib/synth-engine.js";
-import { Keyboard } from "/app/lib/keyboard.js";
-import { Visualizer } from "/app/lib/visualizer.js";
-import { Layers } from "/app/lib/layers.js";
-import { Presets } from "/app/lib/presets.js";
-import { ClipEditor } from "/app/lib/clip-editor.js";
-import { showVal } from "/app/views/shared.js";
-import { refreshActive } from "/app/views/state.js";
-import { initSidebar } from "/app/views/sidebar.js";
-import { initLayersGrid, rebuild } from "/app/views/layers-grid.js";
-import { initPresetsUI } from "/app/views/presets-ui.js";
-import { initMic } from "/app/views/mic.js";
-import { installSystemMenu } from "/lib/system-menu.js";
+import "/lib/history.js";
+import "/lib/project.js";
+import { boot } from "/lib/kit/app.js";
+import { $ } from "/lib/kit/dom.js";
+import { stats as statsLine, tabs, frameLoop, fpsMeter } from "/lib/kit/ui.js";
+import { audioContext } from "/lib/kit/audio.js";
+import { documentCommands } from "/lib/kit/editor.js";
+import { Song } from "./model/song.js";
+import { presetStore } from "./model/presets.js";
+import { createPlayer } from "./audio/player.js";
+import { createSequencer } from "./audio/sequencer.js";
+import { createRecorder } from "./audio/recorder.js";
+import { createMic } from "./audio/mic.js";
+import { createMidi } from "./audio/midi.js";
+import { midiToHz, noteName } from "./audio/notes.js";
+import { sidebar } from "./ui/sidebar.js";
+import { scopes as scopeStack } from "./ui/scopes.js";
+import { grid as layerGrid } from "./ui/grid.js";
+import { piano as pianoKeys } from "./ui/piano.js";
+import { presetControls, headerControls, seqControls } from "./ui/controls.js";
+import { createClipDoc } from "./clip/doc.js";
+import { clipPanel } from "./clip/panel.js";
 
-// Init system menu
-installSystemMenu();
+/** Live handles (tests read state through this object). */
+export const synth = {};
 
-// Init audio engine
-engine.init();
+function openContext() {
+    try {
+        const ctx = audioContext();
+        // the master bus stays clean: effects live on the layer buses
+        ctx.setBusCompressorEnabled(0, false);
+        ctx.setBusDelayEnabled(0, false);
+        ctx.setBusReverbEnabled(0, false);
+        ctx.setBusChorusEnabled(0, false);
+        ctx.setBusEqEnabled(0, false);
+        return ctx;
+    } catch (e) {
+        console.warn('AudioContext unavailable: ' + e.message);
+        return null;
+    }
+}
 
-// Init keyboard
-Keyboard.init($('#keyboard'), $('#octave-display'));
+/** Snapshot undo over song.serialize(), merged per control while it is dragged. */
+function songHistory(song, sequencer) {
+    const history = new History({ limit: 200 });
+    history.coalesce((a, b) => !!(a.meta && b.meta) && a.meta.key === b.meta.key && b.time - a.time < 1000);
+    let snap = song.serialize(), text = JSON.stringify(snap);
+    const restore = (d) => {
+        song.load(d);
+        snap = d; text = JSON.stringify(d);
+        sequencer.invalidate();
+    };
+    song.onEdit = (label, key) => {
+        sequencer.invalidate();
+        const next = song.serialize(), nextText = JSON.stringify(next);
+        if (nextText === text) return;
+        const prev = snap;
+        snap = next; text = nextText;
+        history.record(label, () => restore(next), () => restore(prev), { key });
+    };
+    return { history, resync() { snap = song.serialize(); text = JSON.stringify(snap); } };
+}
 
-// Init visualizer
-Visualizer.init($('#viz-stack'));
-Visualizer.rebuild();
-Visualizer.draw();
+export function start() {
+    const ctx = openContext();
+    const song = new Song(ctx);
+    const player = createPlayer(ctx, song);
+    const sequencer = createSequencer(ctx, song);
+    const recorder = createRecorder(ctx);
+    const mic = createMic(ctx);
+    const midi = createMidi(ctx, player);
+    const presets = presetStore();
+    const undo = songHistory(song, sequencer);
+    song.on((what) => { if (what === 'tempo') sequencer.tempoChanged(); });
 
-// Init layers — create first layer, then apply preset to it
-Layers.init();
-Presets.load('Init');
+    const project = new Project({
+        app: 'synth', schema: 1, fileExt: 'synth', history: undo.history,
+        serialize: () => song.serialize(),
+        deserialize: (d) => { sequencer.stop(); song.load(d); undo.resync(); },
+        onNew: () => { sequencer.stop(); song.reset(); undo.resync(); },
+    });
 
-// Mount view modules (sidebar installs the activeVersion -> syncUIToSignal seam)
-initSidebar();
-initLayersGrid();
-initPresetsUI();
-initMic();
+    let view = 'synth';
+    const docCommands = documentCommands({
+        history: undo.history, project,
+        canRun: () => view === 'synth',
+        undoButton: '#undo', redoButton: '#redo',
+    });
+    const { status } = boot({ menu: docCommands.menu });
+    const docName = () => project.name + (project.isDirty() ? ' *' : '');
+    project.on('change', () => { document.title = 'Synth - ' + docName(); });
 
-// Respond to layer selection changes: bump the reactive seam + rebuild the grid
-Layers.onSelect(function() {
-    refreshActive();
-    rebuild();
-});
+    // --- views ------------------------------------------------------------------
+    const clip = createClipDoc({ ctx, player, recorder });
+    const clipUi = clipPanel(clip, { active: () => view === 'editor' });
+    clip.on((what, text) => { if (what === 'status') status.set(text); });
 
-// -----------------------------------------------------------------------
-// View switching
-// -----------------------------------------------------------------------
-var currentView = 'synth';
+    const scopes = scopeStack($('#scopes'), { song, mic, ctx });
+    const side = sidebar($('#sidebar'), { song });
+    const grid = layerGrid($('#grid'), { song, player, sequencer, ctx });
+    const presetUi = presetControls({ song, presets, status });
+    const header = headerControls({ ctx, song, mic, midi, scopes, status });
+    const seqBar = seqControls({ ctx, song, sequencer, recorder, status });
+    const piano = pianoKeys($('#piano'), { player, octaveLabel: $('#octave-name'), handleKey: clipUi.handleKey });
 
-$$('#view-tabs .btn').forEach(function(btn) {
-    on(btn, 'click', function() {
-        var view = btn.getAttribute('data-view');
-        if (view === currentView) return;
-        currentView = view;
-        $$('#view-tabs .btn').forEach(function(b) { b.classList.remove('active'); });
-        btn.classList.add('active');
+    const viewTabs = tabs('#views', {
+        onChange: (name) => {
+            view = name;
+            if (name === 'editor') clipUi.invalidate();
+        },
+    });
 
-        $('#synth-view').style.display = view === 'synth' ? 'flex' : 'none';
-        $('#editor-view').style.display = view === 'editor' ? 'flex' : 'none';
+    // --- status line -----------------------------------------------------------------
+    const stats = statsLine('#stats', { note: 'note', freq: 'freq', mic: 'mic', clip: 'clip', fps: 'fps' });
+    stats.set({ note: '--', freq: '--', mic: '--', clip: 'none', fps: '--' });
+    player.on(() => {
+        const held = player.heldNotes;
+        const m = held.length ? held[held.length - 1] : null;
+        stats.set({ note: m == null ? '--' : noteName(m), freq: m == null ? '--' : midiToHz(m).toFixed(1) + ' Hz' });
+    });
+    clip.on((what) => { if (what === 'change') stats.set('clip', clipUi.summary()); });
+    status.set(ctx ? 'ready: play the keys A-; (Tab shifts the octave), click steps to write notes'
+                   : 'no audio device: the synth is silent');
 
-        if (view === 'editor') {
-            Visualizer.pause();
-            ClipEditor.draw();
-        } else {
-            ClipEditor.clear();
-            Visualizer.resume();
+    // --- frame loop --------------------------------------------------------------------
+    const fps = fpsMeter();
+    let frame = 0;
+    const loop = frameLoop(() => {
+        frame++;
+        midi.pump();
+        sequencer.update();
+        header.update();
+        grid.update();
+        if (view === 'synth') scopes.draw();
+        else clipUi.update();
+        if (frame % 6 === 0) {
+            const p = mic.pitch();
+            stats.set('mic', p ? p.name + ' ' + (p.cents >= 0 ? '+' : '') + p.cents + 'c, ' + p.hz.toFixed(1) + ' Hz' : '--');
         }
+        if (frame % 30 === 0) stats.set('fps', Math.round(fps.tick()));
+        else fps.tick();
     });
-});
 
-// -----------------------------------------------------------------------
-// Clip Editor init & wiring
-// -----------------------------------------------------------------------
-ClipEditor.init($('#editor-canvas'));
-
-var isRecording = false;
-
-// Transport
-on($('#ed-play'), 'click', function() { ClipEditor.play(); });
-on($('#ed-stop'), 'click', function() { ClipEditor.stop(); });
-on($('#ed-loop'), 'click', function() {
-    var onState = ClipEditor.toggleLoop();
-    $('#ed-loop').classList.toggle('active', onState);
-});
-
-// Record
-on($('#ed-record'), 'click', function() {
-    var btn = $('#ed-record');
-    if (!isRecording) {
-        ClipEditor.record();
-        isRecording = true;
-        btn.classList.add('recording');
-        btn.textContent = 'Stop';
-    } else {
-        ClipEditor.stopRecording();
-        isRecording = false;
-        btn.classList.remove('recording');
-        btn.textContent = 'Rec';
-    }
-});
-
-// File I/O
-on($('#ed-load'), 'click', function() {
-    var files = showOpenFileDialog('Audio Files|wav;flac;mp3;ogg;opus');
-    if (files && files.length > 0) {
-        try { ClipEditor.loadFromFile(files[0]); }
-        catch (e) { console.error('Load failed:', e.message); }
-    }
-});
-
-on($('#ed-save'), 'click', function() {
-    var path = showSaveFileDialog('WAV Files|wav', 'clip.wav');
-    if (path) {
-        if (path.indexOf('.wav') < 0 && path.indexOf('.WAV') < 0) path += '.wav';
-        try { ClipEditor.saveToFile(path); }
-        catch (e) { console.error('Save failed:', e.message); }
-    }
-});
-
-// Edit operations
-on($('#ed-undo'), 'click', function() { ClipEditor.undo(); });
-on($('#ed-redo'), 'click', function() { ClipEditor.redo(); });
-on($('#ed-cut'), 'click', function() { ClipEditor.cut(); });
-on($('#ed-copy'), 'click', function() { ClipEditor.copy(); });
-on($('#ed-paste'), 'click', function() { ClipEditor.paste(); });
-on($('#ed-delete'), 'click', function() { ClipEditor.deleteSelection(); });
-on($('#ed-silence'), 'click', function() { ClipEditor.silenceSelection(); });
-on($('#ed-trim'), 'click', function() { ClipEditor.trimToSelection(); });
-on($('#ed-select-all'), 'click', function() { ClipEditor.selectAll(); });
-
-// Zoom
-on($('#ed-zoom-in'), 'click', function() { ClipEditor.zoomIn(); });
-on($('#ed-zoom-out'), 'click', function() { ClipEditor.zoomOut(); });
-on($('#ed-zoom-fit'), 'click', function() { ClipEditor.zoomToFit(); });
-on($('#ed-zoom-sel'), 'click', function() { ClipEditor.zoomToSelection(); });
-
-// Process
-on($('#ed-normalize'), 'click', function() { ClipEditor.normalize(); });
-on($('#ed-reverse'), 'click', function() { ClipEditor.reverse(); });
-on($('#ed-fade-in'), 'click', function() { ClipEditor.fadeIn(); });
-on($('#ed-fade-out'), 'click', function() { ClipEditor.fadeOut(); });
-
-on($('#ed-gain'), 'input', function(e) {
-    showVal('ed-gain-val', e.target.value + 'dB');
-});
-on($('#ed-gain-apply'), 'click', function() {
-    ClipEditor.adjustGain(parseInt($('#ed-gain').value));
-    $('#ed-gain').value = 0;
-    showVal('ed-gain-val', '0dB');
-});
-
-// Pitch
-on($('#ed-pitch'), 'input', function(e) {
-    var v = parseInt(e.target.value);
-    showVal('ed-pitch-val', (v >= 0 ? '+' : '') + v);
-});
-on($('#ed-pitch-apply'), 'click', function() {
-    var semi = parseInt($('#ed-pitch').value);
-    if (semi !== 0) ClipEditor.pitchShift(semi);
-    $('#ed-pitch').value = 0;
-    showVal('ed-pitch-val', '0');
-});
-$$('.ed-pitch-btn').forEach(function(btn) {
-    on(btn, 'click', function() {
-        ClipEditor.pitchShift(parseInt(btn.getAttribute('data-semi')));
+    Object.assign(synth, {
+        ctx, song, player, sequencer, recorder, mic, midi, presets, project,
+        history: undo.history, docCommands, clip, clipUi, scopes, sidebar: side, grid,
+        presetUi, header, seqBar, piano, viewTabs, status, loop,
     });
-});
-
-// Speed / Time stretch
-on($('#ed-speed'), 'input', function(e) {
-    showVal('ed-speed-val', e.target.value + '%');
-});
-on($('#ed-speed-apply'), 'click', function() {
-    var pct = parseInt($('#ed-speed').value);
-    if (pct !== 100) ClipEditor.timeStretch(100 / pct);
-    $('#ed-speed').value = 100;
-    showVal('ed-speed-val', '100%');
-});
-$$('.ed-speed-btn').forEach(function(btn) {
-    on(btn, 'click', function() {
-        var pct = parseInt(btn.getAttribute('data-speed'));
-        ClipEditor.timeStretch(100 / pct);
-    });
-});
-
-// Insert silence
-on($('#ed-silence-dur'), 'input', function(e) {
-    var ms = parseInt(e.target.value);
-    showVal('ed-silence-dur-val', ms >= 1000 ? (ms / 1000).toFixed(1) + 's' : ms + 'ms');
-});
-on($('#ed-insert-silence'), 'click', function() {
-    ClipEditor.insertSilence(parseInt($('#ed-silence-dur').value));
-});
-
-// Generate
-var genWaveform = 'sine';
-on($('#ed-gen-freq'), 'input', function(e) {
-    showVal('ed-gen-freq-val', e.target.value + 'Hz');
-});
-on($('#ed-gen-dur'), 'input', function(e) {
-    var ms = parseInt(e.target.value);
-    showVal('ed-gen-dur-val', ms >= 1000 ? (ms / 1000).toFixed(1) + 's' : ms + 'ms');
-});
-$$('#ed-gen-wave-btns .btn').forEach(function(btn) {
-    on(btn, 'click', function() {
-        $$('#ed-gen-wave-btns .btn').forEach(function(b) { b.classList.remove('active'); });
-        btn.classList.add('active');
-        genWaveform = btn.getAttribute('data-wave');
-    });
-});
-on($('#ed-generate'), 'click', function() {
-    ClipEditor.generateTone(
-        parseInt($('#ed-gen-freq').value),
-        parseInt($('#ed-gen-dur').value),
-        genWaveform
-    );
-});
-on($('#ed-gen-noise'), 'click', function() {
-    ClipEditor.generateNoise(parseInt($('#ed-gen-dur').value));
-});
-
-// Synth integration
-on($('#ed-use-clip'), 'click', function() {
-    ClipEditor.useAsInstrument();
-    $('#ed-use-clip').classList.add('active');
-});
-on($('#ed-clear-clip'), 'click', function() {
-    ClipEditor.clearInstrument();
-    $('#ed-use-clip').classList.remove('active');
-});
-
-// Keyboard shortcuts for editor view
-on(document.documentElement, 'keydown', function(e) {
-    if (currentView === 'editor') {
-        if (ClipEditor.handleKey(e)) {
-            e.preventDefault();
-        }
-    }
-});
+    // (a getter: Object.assign would copy its value once)
+    Object.defineProperty(synth, 'view', { get: () => view, enumerable: true });
+    return synth;
+}

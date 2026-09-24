@@ -594,6 +594,66 @@ validates with `Number.isFinite`, which it should do anyway. Other apps
 probably have the same pattern:
 `grep -rn "(+[a-zA-Z_.]* ||" games demos tools ai lib`.
 
+### A canvas drag selects text, including text in `hidden` panes (2026-09-24)
+Related to the canvas double-click entry above. Pressing on a `<canvas>`
+whose `mousedown` handler calls `preventDefault()` and then dragging still
+starts a text selection. The selection runs through text inside a `hidden`
+(display: none) sibling pane: `getSelection().toString()` returns the
+hidden synth sidebar's labels. The engine also paints blue highlight boxes
+for that hidden text, at phantom positions over the visible canvas.
+Chromium starts no selection when `mousedown` is default-prevented, and it
+never selects or paints display: none text.
+Repro: in tools/synth, remove `user-select: none` from
+`[data-pane=editor] .k-viewport` in style.css. Open the Clip Editor tab,
+generate a tone, drag across the waveform with
+`mouseDown`/`mouseMove`/`mouseUp`, then read `String(getSelection())`
+(it prints "FilterLPHPBPNotchcutoff...") and take a screenshot (it shows
+blue boxes). The synth keeps `user-select: none` on its waveform viewport,
+which an editor canvas wants anyway.
+
+### brovisionml loaders call `to()` before `load()` on CUDA (2026-09-24)
+Every bro.vision loader except `loadBirefnet` throws on the default (CUDA)
+device: `loadDepth failed: dinov2::Backbone: to() called before load()`,
+and the same for loadNormal (dsine::EncoderB5), loadHed, loadLineart, loadMlsd,
+loadOpenpose, loadSegformer and loadSam (sam::ImageEncoder). With
+`{ device: 'cpu' }` the same loaders succeed, so the binding
+(brovisionml `src/api/native_vision_models.cpp`) moves the module to the
+device before loading its weights. Repro:
+`bro-headless demos/nllb-lab -e "bro.vision.loadDepth('<weights>/brovisionml/weights/Depth-Anything-V2-Small', {})"`.
+Separately, the loaders ignore `onReady` / `onError`: they always load
+synchronously and return the model, and the callbacks never fire (the old
+vision-lab passed `onReady` and so hung forever). demos/vision-lab loads
+synchronously and shows the error; its test logs each failure as KNOWN and
+fails on any other message.
+
+### TripoSplat clouds come back upside down (2026-09-24)
+docs/triposplat-api.js says generate() returns positions in the scene's
+Y-up convention (the binding rotates the sampler's Z-up output). They come
+back with the subject inverted: for demos/triposplat's portrait sample (a
+figure in a green cap and blue overalls), the green splats' mean y is -0.25
+and the blue ones' +0.18 (cloud y in -0.46..0.50), and the viewport shows
+the figure head-down from its default camera. The Z-up to Y-up rotation
+probably has the wrong sign. demos/triposplat renders the cloud as returned.
+
+### No `Option` constructor (2026-09-24)
+`typeof Option` is `'undefined'`, so `select.appendChild(new Option(text, value))`
+throws a ReferenceError. `Image` exists. The apps use
+`document.createElement('option')` (kit `h('option', { value }, text)`).
+Repro: `bro-headless demos/nllb-lab -e "console.log(typeof Option)"`.
+
+### A tab inside `<pre>` renders as a missing-glyph box (2026-09-24)
+A U+0009 in preformatted text (Markdown code blocks via lib/markdown.js)
+paints as a tofu box instead of advancing to the next tab stop. Seen in
+demos/vlm-lab when Qwen3-VL answers a grounding prompt with a tab-indented
+JSON list (tests/out/shots/demos_vlm-lab-detect.png).
+
+### docs/diar-api.js has `loadClusterDiarizer`'s arguments wrong (2026-09-24)
+The doc says `loadClusterDiarizer(embeddingDir, vadDir, opts)`. The binding
+takes `(sortformerDir, speakerEncoderDir, opts)`: Sortformer's activity is
+the VAD and the Qwen-TTS speaker encoder gives the embeddings. The doc and
+the generated bin/docs copy should say so. demos/cluster-diar-lab calls
+it the binding's way.
+
 ## Notes (not bugs)
 
 - WAAPI gaps are documented in docs/web-animations-api.js and demos/waapi-lab

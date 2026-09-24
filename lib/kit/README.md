@@ -31,6 +31,8 @@ Ported examples: `demos/kws-lab` and `demos/lm-playground` (ML labs),
 | `text.js` | `bro.text` from JS: UTF-16 ↔ UTF-8 offsets, caret stops, cluster maps (data + drawn on a canvas) |
 | `audio.js` | PCM plumbing (no DOM): shared `AudioContext`, resample/concat/gain/peak/dB, `clipPlayer`, `saveWav`, `micRecorder`, `signal` test-audio generators |
 | `audio-ui.js` | audio widgets: `levelMeter`, `peakScope`, `historyPlot`, `waveView` (trim), `sourcePicker` (bro.listen sources), `transport`, `mixerStrips`, `fitCanvas` |
+| `ml.js` | ML lab pieces: `deviceBadge`, `modelRow` (weights path fields prefilled from weights.js + Load; says clearly when weights are missing), `pickFolder` / `pickFile` / `pickSaveFile`, `appPath`, `imageDataFromFile`, `baseName` |
+| `speech.js` + `speech.css` | the speech labs' shared view: `clipInput` (record / open / play / autorun), `liveInput` (bro.listen source + level), `transcriptView`, `timelineView` (waveform + token pins), `tokenTable`, `speakerView` (speaker cards + activity lanes), `diarFrames` |
 | `worker-rpc.js` | request/response over a module worker: `workerClient(url)` (page) + `serveWorker(handlers)` / `emit` (worker) |
 | `prefs.js` | `prefStore(key, defaults)`: one localStorage JSON record with `set` / `snapshot` / `restore` |
 | `imagegen.js` | `bro.diffusion` lab pieces: model picker, backend badge, prompt + settings panel, run bar, step-wise `runGeneration` with cancel, `imageView`, gallery `imageStrip`, `wordAxes` |
@@ -130,15 +132,19 @@ Returns `{ status }`.
 - `frameLoop(fn(dt, t))` → `pause() resume() step() stop() running`
 
 **params.js**
-- `bindControl(input, { out, fmt, onChange })` wires one existing control:
+- `bindControl(input, { out, fmt, onChange, map, reset })` wires one existing control:
   typed values (number / boolean / string), a formatted readout, `input`
-  events for ranges and text, `change` for the rest.
+  events for ranges and text, `change` for the rest. `map: { to, from }`
+  maps a numeric control's position to its value (`logMap(min, max)` gives
+  a log slider running 0..1000); right-clicking restores `reset` and fires
+  onChange.
 - `params(container, state, spec, { onChange(key, value, state) })` builds
   labelled rows for `state`'s fields. Spec entries: `{ min, max, step }` →
   slider, `{ options }` (array, `[value, label]` pairs, or object) → select,
   boolean value → checkbox, `{ type: 'number' | 'text' | 'color' }` (color
   rows show the hex beside the swatch), plus `label`,
-  `fmt`, `hint`. Returns `{ set(key, v, silent), refresh(), rows }`.
+  `fmt`, `hint`, `log: true` (log slider over min..max) and `reset`
+  (right-click value). Returns `{ set(key, v, silent), refresh(), rows }`.
 
 **weights.js** — never hardcode `D:/projects`. Candidates are paths relative
 to the weights root (the directory holding the `bro*` sibling repos):
@@ -295,18 +301,22 @@ small handle (see the doc comment on each export for opts):
 - `levelMeter(target, { min, max, curve, mark, needle })` -> `set(v)`,
   `mark(v)`, `color(css)`; renders a `.k-meter`.
 - `peakScope(canvas, { history, color })` scrolling peak columns;
-  `historyPlot(canvas, { size, min, max, ref, fmt })` line plot of recent values.
+  `historyPlot(canvas, { size, min, max, ref, fmt })` line plot of recent values;
+  `oscilloscope(canvas, { color, bg, autoscale, glow })` -> `draw(samples)`
+  (returns `{ peak, rms }`), a triggered time-domain trace.
 - `waveView(canvas, { height, trim, onTrim })` -> `set({ clip, gain,
   analysis, sel })`: min/max waveform, `bro.sense.analyze` tonal/onset
   overlay, draggable trim selection.
 - `sourcePicker(select, { refresh })` -> `rebuild()`, `spec()`: mic / system
   loopback / per-app `bro.listen` sources.
 - `transport({ toggle, seek, time }, src)`: play/pause + seek + clock over
-  any `{ duration, position, seek, setPlaying }` source.
+  any `{ duration, position, seek, setPlaying, playing? }` source; with
+  `playing()` the button follows playback that ends or starts elsewhere.
 - `mixerStrips(host, rows, { onMute, onSolo, level })` -> `update()`,
   `paint(key, state)`: per-bus M/S + meter rows (`.k-strip`).
 - `fitCanvas(canvas)` -> `{ ctx, w, h }` in CSS pixels at devicePixelRatio.
-Used by demos/listen-lab, mic-chunks, scene-audio and spatial-audio.
+Used by demos/listen-lab, mic-chunks, scene-audio and spatial-audio, and
+tools/synth (meters, scopes, oscilloscope, transport).
 
 **worker-rpc.js** — `workerClient(url)` wraps `new Worker(url, { type:
 'module' })`: `request(msg, transfer)` -> Promise of the reply (requests

@@ -1,34 +1,17 @@
-// Headless audio verification tests for broaudio through the synth app.
-// Run: bro-headless apps/synth apps/synth/tests/test_audio_headless.js
+// Headless checks of broaudio itself, the engine under the synth (the synth's
+// own UI is covered by test_synth_ui.js and test_clip_editor.js).
+// Run: scripts/validate.sh tools/synth
 //
 // Since we can't hear audio, we verify numerically via:
 //   - Bus metering (peak/RMS levels)
 //   - FFT spectrum analysis (frequency content)
 //   - Recording buffer inspection (waveform capture)
 
-var passed = 0;
-var failed = 0;
+import { check, near, test, done } from "/lib/kit/test.js";
 
-function test(name, fn) {
-    try {
-        fn();
-        passed++;
-        console.log('PASS: ' + name);
-    } catch (e) {
-        failed++;
-        console.log('FAIL: ' + name + ' - ' + e.message);
-    }
-}
-
-function assertGt(a, b, msg) {
-    if (!(a > b)) throw new Error((msg || '') + ' expected ' + a + ' > ' + b);
-}
-function assertLt(a, b, msg) {
-    if (!(a < b)) throw new Error((msg || '') + ' expected ' + a + ' < ' + b);
-}
-function assertNear(a, b, tol, msg) {
-    if (Math.abs(a - b) > tol) throw new Error((msg || '') + ' expected ' + a + ' near ' + b + ' (tol=' + tol + ')');
-}
+function assertGt(a, b, msg) { check(a > b, (msg || '') + ' expected ' + a + ' > ' + b); }
+function assertLt(a, b, msg) { check(a < b, (msg || '') + ' expected ' + a + ' < ' + b); }
+function assertNear(a, b, tol, msg) { near(a, b, tol, msg); }
 
 // Helper: play a voice and immediately read metering
 function playAndMeasure(waveform, noteNum, durationMs, busId) {
@@ -66,8 +49,8 @@ function cleanup(alloc, noteNum) {
 // ---------------------------------------------------------------------------
 
 var ctx = new AudioContext();
-assert(ctx, 'AudioContext should be constructable in headless');
-assert(ctx.sampleRate > 0, 'sampleRate should be positive');
+check(ctx, 'AudioContext should be constructable in headless');
+check(ctx.sampleRate > 0, 'sampleRate should be positive');
 
 // ---------------------------------------------------------------------------
 // Test 1: Basic voice output - sine wave produces signal
@@ -237,7 +220,7 @@ test('recording captures non-zero samples', function() {
     advanceTime(100);
     var samples = ctx.stopRecording();
 
-    assert(samples.length > 0, 'recording should capture samples');
+    check(samples.length > 0, 'recording should capture samples');
 
     var maxSample = 0;
     for (var i = 0; i < samples.length; i++) {
@@ -488,7 +471,7 @@ test('audio clip plays back correctly', function() {
     }
 
     var clipId = ctx.createClip(clipData, 1);
-    assert(clipId > 0, 'clip should be created');
+    check(clipId > 0, 'clip should be created');
 
     var playId = ctx.playClip(clipId, 1.0, false);
     advanceTime(50);
@@ -519,7 +502,7 @@ test('offline processing applies bus effects to buffer', function() {
     }
 
     var output = ctx.processEffectsOffline(busId, input);
-    assert(output.length > 0, 'offline processing should return samples');
+    check(output.length > 0, 'offline processing should return samples');
 
     var diffSum = 0;
     var len = Math.min(input.length, output.length);
@@ -625,12 +608,4 @@ test('440Hz sine shows peak at correct frequency bin', function() {
     advanceTime(200);
 });
 
-// ---------------------------------------------------------------------------
-// Summary
-// ---------------------------------------------------------------------------
-console.log('');
-console.log('Results: ' + passed + ' passed, ' + failed + ' failed out of ' + (passed + failed));
-
-if (failed > 0) {
-    assert(false, failed + ' test(s) failed');
-}
+done('broaudio');
