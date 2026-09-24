@@ -1,101 +1,82 @@
-// Node Forge — nodes/kokoro-node.js: mount, model+basis load, async live
-// synth (voice slider, duration-cell edit with pinned-edit retention), exec()
-// sync path, collapse/delete. Gated on the real Kokoro data root being
-// present on this machine (D:/projects/brosoundml-data); GPU headless only.
-advanceTime(50);
-flush();
+// Kokoro Voice card: the data root resolves without a hardcoded path, the
+// first async synth + trace land, exec() matches the live path, a voice
+// slider re-synthesizes, a duration edit re-decodes and pins the prosody,
+// VAD emotion re-decodes, and collapse / delete work.
 
-const app = window.LabApp;
-assert(app, 'LabApp handle missing');
+import { check, eq, test, done, frames, needWeights, waitFor, q, shot } from "/lib/kit/test.js";
 
-const node = app.graph.addNode('kokoro');
-node.params.dataRoot = 'D:/projects/brosoundml-data';
-app.editor.placeNew(node);
-app.editor.draw(0);
-advanceTime(16);
-flush();
+needWeights('Kokoro data (brosoundml-data)', ['brosoundml-data'], { probe: 'kokoro/voice_basis.json' });
+frames(3);
+const F = globalThis.nodeForge;
+const node = F.view.addAtCentre('kokoro');
+frames(2);
+const card = () => F.view.card(node).root;
+// A dialog section by summary text, opened the way a user does (a summary click).
+function section(name) {
+    const d = [...q('.ng-dialog-body').querySelectorAll('details')].find((x) => x.querySelector('summary').textContent.includes(name));
+    if (!d.hasAttribute('open')) { d.querySelector('summary').click(); frames(1); }
+    return d;
+}
+const changed = (prev) => () => node._out && node._out[0].samples !== prev;
 
-let card = document.querySelector('.node-card');
-assert(card, 'no .node-card rendered');
-console.log('card built, waiting for load+first synth...');
+test('loads and speaks', () => {
+    check(/brosoundml-data$/.test(node.params.dataRoot), 'data root: ' + node.params.dataRoot);
+    waitFor(() => (node._out && node._out[0]) || node.error, 'first synth', 120000, 16);
+    check(!node.error, 'error: ' + node.error);
+    check(node._out[0].samples.length > 0, 'samples');
+    check(node._basis && node._lastTrace, 'basis + trace');
+    eq(node.params.coords.length, node._basis.k, 'coords sized to the basis');
+    card().querySelector('.ng-gear').click();
+    check(section('Voice design').querySelectorAll('.pc input[type=range]').length === node._basis.k, 'voice sliders');
+});
 
-// Model/voice/emotion/prosody/trace controls live in the full-controls
-// dialog now, not the mini card.
-const gearBtn = card.querySelector('.node-gear');
-assert(gearBtn, 'no full-controls gear button on the card');
-gearBtn.click();
-flush();
-let dialogBody = document.querySelector('.node-dialog-body');
-assert(dialogBody, 'full-controls dialog did not open');
+test('exec() matches the live path', () => {
+    const first = node._out[0].samples;
+    eq(F.run(), 1, 'ran');
+    eq(node._out[0].samples.length, first.length, 'length');
+    for (let i = 0; i < first.length; i += 97) check(Math.abs(node._out[0].samples[i] - first[i]) < 1e-5, 'sample ' + i);
+});
 
-// the model load + first async synth/trace pass happens off-thread; poll
-// virtual time in small 16ms ticks (matches kokoro-lab's own async tests —
-// each tick gives the background thread a real scheduling opportunity, a
-// handful of large ticks does not).
-let _w = 0;
-while (!(node._out && node._out[0]) && !node.error && _w++ < 60000) advanceTime(16);
-assert(!node.error, 'node reported an error: ' + node.error);
-assert(node._out && node._out[0] && node._out[0].samples.length > 0, 'no audio produced after waiting');
-console.log('OK: first synth landed, samples=' + node._out[0].samples.length);
-assert(node._basis, 'voice basis not loaded');
-assert(node._lastTrace, 'no trace captured');
-console.log('basis k=' + node._basis.k + ', trace stages=' + node._lastTrace.stages.length +
-  ', emotionBasis=' + !!node._emotionBasis + ', mascFemBasis=' + !!node._mascFemBasis);
+test('a voice slider re-synthesizes', () => {
+    const sec = section('Voice design');
+    const slider = sec.querySelector('.pc input[type=range]');
+    slider.value = String(+slider.max * 0.6);
+    slider.dispatchEvent(new Event('input'));
+    waitFor(changed(node._out[0].samples), 're-synth', 120000, 16);
+    check(node.params.coords[0] !== 0, 'coord set');
+});
 
-// exec() sync path determinism against the same voice/text (greedy — Kokoro
-// has no sampling temperature, so this should be bit-identical every Run).
-const first = node._out[0].samples;
-app.runner.reset();
-const n = app.runner.run();
-assert(n === 1, 'expected 1 node to run');
-assert(node._out[0].samples.length === first.length, 'exec() produced a different-length buffer');
-let same = true;
-for (let i = 0; i < first.length; i += 97) if (Math.abs(node._out[0].samples[i] - first[i]) > 1e-5) { same = false; break; }
-assert(same, 'exec() sync path is not deterministic against the live-path result');
-console.log('OK: exec() sync path matches the live-path result (Run/save-load determinism)');
+test('a duration edit re-decodes and pins the prosody', () => {
+    const sec = section('Prosody');
+    waitFor(() => sec.querySelector('.acell'), 'duration cells', 60000, 16);
+    const num = sec.querySelector('.acell-num');
+    const prev = node._out[0].samples;
+    num.value = String(+num.value + 5);
+    num.dispatchEvent(new Event('change'));
+    waitFor(changed(prev), 're-decode', 120000, 16);
+    waitFor(() => node._pinnedEdit, 'pinned edit', 60000, 16);
+    check(sec.querySelector('.axis-note').style.display !== 'none', 'pin label shown');
+});
 
-// drag a voice slider (via its DOM input) and confirm a re-synth eventually lands
-const voiceDetails = [...dialogBody.querySelectorAll('details')].find((d) => d.querySelector('summary').textContent.indexOf('Voice design') !== -1);
-assert(voiceDetails, 'Voice design details missing');
-voiceDetails.open = true;
-const firstSlider = voiceDetails.querySelector('.pc input[type=range]');
-assert(firstSlider, 'no voice sliders rendered');
-const prevSamples = node._out[0].samples;
-firstSlider.value = String(+firstSlider.max * 0.6);
-firstSlider.dispatchEvent(new Event('input'));
-_w = 0;
-while ((!node._out || node._out[0].samples === prevSamples) && _w++ < 60000) advanceTime(16);
-assert(node._out && node._out[0].samples !== prevSamples, 'voice slider drag did not trigger a re-synth');
-console.log('OK: voice slider drag re-synthesized');
+test('VAD emotion re-decodes', () => {
+    const sec = section('prosody (VAD)');
+    const arousal = sec.querySelectorAll('input[type=range]')[1];
+    const prev = node._out[0].samples;
+    arousal.value = '0.8';
+    arousal.dispatchEvent(new Event('input'));
+    waitFor(changed(prev), 'emotion decode', 120000, 16);
+    eq(node.params.emo.a, 0.8, 'arousal');
+    shot('kokoro-dialog');
+});
 
-// duration-cell edit (Prosody & alignment) — pins a prosody edit that
-// should ride across the change (capturePin/reapplyPin).
-const prosodyDetails = [...dialogBody.querySelectorAll('details')].find((d) => d.querySelector('summary').textContent.indexOf('Prosody') !== -1);
-prosodyDetails.open = true;
-const cell = prosodyDetails.querySelector('.acell');
-assert(cell, 'no duration cells rendered');
-const beforeDurSamples = node._out[0].samples;
-const numInput = cell.querySelector('.acell-num');
-numInput.value = String(+numInput.value + 5);
-numInput.dispatchEvent(new Event('change'));
-_w = 0;
-while ((!node._out || node._out[0].samples === beforeDurSamples) && _w++ < 60000) advanceTime(16);
-assert(node._out && node._out[0].samples !== beforeDurSamples, 'duration-cell edit did not trigger a re-decode');
-assert(node._pinnedEdit, 'duration-cell edit should capture a pinned prosody edit');
-console.log('OK: duration-cell edit re-decoded, pinned=' + !!node._pinnedEdit);
+test('close, collapse, delete', () => {
+    q('.ng-dialog-close').click();
+    eq(q('.ng-dialog-backdrop').style.display, 'none', 'closed');
+    card().querySelector('.ng-collapse').click();
+    check(node.collapsed, 'collapsed');
+    card().querySelector('.ng-collapse').click();
+    card().querySelector('.ng-del').click();
+    eq([F.graph.nodes.length, document.querySelectorAll('.ng-card').length], [0, 0], 'gone');
+});
 
-document.querySelector('.node-dialog-close').click();
-assert(document.querySelector('.node-dialog-backdrop').style.display === 'none', 'dialog did not close');
-
-// collapse / delete
-const collapseBtn = card.querySelector('.node-collapse');
-collapseBtn.click();
-assert(node.collapsed === true, 'collapse failed');
-collapseBtn.click();
-
-const delBtn = card.querySelector('.node-del');
-delBtn.click();
-assert(app.graph.nodes.length === 0, 'node not removed');
-assert(document.querySelectorAll('.node-card').length === 0, 'card DOM not removed');
-
-console.log('ALL KOKORO NODE CHECKS PASSED');
+done('node-forge kokoro');

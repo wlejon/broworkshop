@@ -1,219 +1,129 @@
-// Node Forge — generalized multi-curve painter panel widget.
+// A multi-curve painter: N editable contours, each a live plain number[]
+// the widget mutates in place (RAVE latent dims, Kokoro's F0 / energy).
 //
-// Generalizes rave-lab/lib/curves.js (one draggable contour per latent dim)
-// to N curves driven entirely by a panelConfig accessor contract, so this
-// file has zero knowledge of RAVE, Kokoro, or any other domain. Kokoro's
-// 2-curve F0/energy editor (kokoro-lab/lib/curves.js) is just the N=2 case,
-// including its "pitch can't go negative" rule, generalized here into a
-// per-curve `clamp` config function instead of a hardcoded name check.
+// cfg (all take (node) or (node, i)):
+//   count(node)            number of curves
+//   label(node, i)         caption
+//   color(node, i)         css color (optional; a default palette)
+//   get(node, i)           the LIVE plain number[] for curve i (edited in place;
+//                          a plain array so it survives a JSON save)
+//   original(node, i)      a ghost baseline number[], or null
+//   range(node, i)         fixed [min, max] (optional; else fitted around the
+//                          baseline with 1.8x headroom)
+//   clamp(node, i, v)      constrain a painted value (optional)
+// ctx.onEdit() fires on every drag tick and button op.
 //
-// panelConfig contract — all functions take (node) or (node, i):
-//   count(node)              -> number of curves
-//   label(node, i)            -> string
-//   color(node, i)            -> css color string (optional; default palette)
-//   get(node, i)              -> the LIVE plain number[] for curve i. Painted
-//                                 and button-op edits mutate this array IN
-//                                 PLACE (matching rave-lab's row()/origRow()
-//                                 pattern) — no separate setter needed. Per
-//                                 the save/load contract (plan: widget-owned
-//                                 params must be plain arrays, converted
-//                                 to/from Float32Array only at the exec
-//                                 boundary), this must return a plain array,
-//                                 typically node.params.<key>[i].
-//   original(node, i)          -> plain number[] ghost baseline, or
-//                                 null/undefined to skip drawing one.
-//   range(node, i)             -> [mn, mx] fixed vertical frame. If omitted,
-//                                 auto-computed from original(node,i) (falling
-//                                 back to get(node,i)) with 1.8x headroom
-//                                 around the center, same as rave-lab.
-//   clamp(node, i, value)      -> optionally constrain a painted value (e.g.
-//                                 Kokoro's F0 curve: Math.max(0, value)).
-//                                 Optional; identity if omitted.
-//
-// Every mutation (drag tick or button op) calls ctx.onEdit() — a node's
-// api.invalidate(node), i.e. the debounced invalidateFrom(node) +
-// runner.continue() path. A curve edit only ever changes this node's own
-// output; there is no structural reason for a full graph clearRun(), and
-// doing one on every brush stroke would defeat incremental invalidation.
-//
-// mount(node, cfg, ctx) is called directly by a node type's own mount() —
-// there is no generic panel-widget registry to route through.
+// Each cell exposes _testMouseDown / _testMouseMove / _testMouseUp so a
+// headless test can paint without real mouse events.
 
-  const CURVE_W = 1100, CURVE_H = 96, CURVE_PAD = 6;
-  const DEFAULT_HUES = [42, 198, 150, 280, 16, 100, 320, 222];
+import { h, trackDrag } from "/lib/kit/dom.js";
 
-  function el(tag, cls, html) {
-    const e = document.createElement(tag);
-    if (cls) e.className = cls;
-    if (html != null) e.innerHTML = html;
-    return e;
-  }
+const CURVE_W = 1100, CURVE_H = 96, PAD = 6;
+const HUES = [42, 198, 150, 280, 16, 100, 320, 222];
 
-  function defaultColor(i) {
-    const h = DEFAULT_HUES[i % DEFAULT_HUES.length];
-    return `hsl(${h},70%,64%)`;
-  }
-
-  function autoRange(cfg, node, i) {
-    const baseline = (cfg.original ? cfg.original(node, i) : null) || cfg.get(node, i);
+function fitRange(cfg, node, i) {
+    const base = (cfg.original && cfg.original(node, i)) || cfg.get(node, i);
     let mn = Infinity, mx = -Infinity;
-    for (let t = 0; t < baseline.length; t++) {
-      const v = baseline[t];
-      if (v < mn) mn = v;
-      if (v > mx) mx = v;
-    }
+    for (let t = 0; t < base.length; t++) { if (base[t] < mn) mn = base[t]; if (base[t] > mx) mx = base[t]; }
     if (mn === Infinity) { mn = 0; mx = 1; }
-    const ctr = (mn + mx) / 2, half = Math.max((mx - mn) / 2, 0.5) * 1.8;
-    return [ctr - half, ctr + half];
-  }
+    const c = (mn + mx) / 2, half = Math.max((mx - mn) / 2, 0.5) * 1.8;
+    return [c - half, c + half];
+}
 
-  function clampVal(cfg, node, i, v) {
-    return cfg.clamp ? cfg.clamp(node, i, v) : v;
-  }
-
-  export function mountCurvePainter(node, cfg, ctx) {
-    const root = el('div', 'curve-panel');
+export function mountCurvePainter(node, cfg, ctx) {
+    const root = h('div.curve-panel');
     const count = cfg.count(node);
-    const ranges = [];
+    const clamp = (i, v) => (cfg.clamp ? cfg.clamp(node, i, v) : v);
     const cells = [];
 
     function drawCell(i) {
-      const cell = cells[i];
-      const cv = cell.cv, c2 = cv.getContext('2d'), W = cv.width, H = cv.height, pad = CURVE_PAD;
-      const [mn, mx] = ranges[i], range = (mx - mn) || 1;
-      c2.clearRect(0, 0, W, H);
-      if (mn < 0 && mx > 0) {
-        const zy = H - pad - ((0 - mn) / range) * (H - 2 * pad);
-        c2.strokeStyle = '#1b2330';
-        c2.beginPath(); c2.moveTo(0, zy); c2.lineTo(W, zy); c2.stroke();
-      }
-      const plot = (d, style, w) => {
-        if (!d) return;
-        const n = d.length;
-        c2.strokeStyle = style; c2.lineWidth = w; c2.beginPath();
-        for (let x = 0; x < W; x++) {
-          const idx = Math.floor(x * n / W);
-          const y = H - pad - ((d[idx] - mn) / range) * (H - 2 * pad);
-          x === 0 ? c2.moveTo(x, y) : c2.lineTo(x, y);
+        const cell = cells[i], cv = cell.cv, c2 = cv.getContext('2d'), W = cv.width, H = cv.height;
+        const [mn, mx] = cell.range, span = (mx - mn) || 1;
+        const yOf = (v) => H - PAD - ((v - mn) / span) * (H - 2 * PAD);
+        c2.clearRect(0, 0, W, H);
+        if (mn < 0 && mx > 0) {
+            c2.strokeStyle = '#1b2330';
+            c2.beginPath(); c2.moveTo(0, yOf(0)); c2.lineTo(W, yOf(0)); c2.stroke();
         }
-        c2.stroke();
-      };
-      const orig = cfg.original ? cfg.original(node, i) : null;
-      if (orig) plot(orig, '#39414f', 1);
-      plot(cfg.get(node, i), cell.color, 1.6);
-
-      const d = cfg.get(node, i);
-      let mn2 = Infinity, mx2 = -Infinity, delta = 0;
-      for (let t = 0; t < d.length; t++) {
-        const v = d[t];
-        if (v < mn2) mn2 = v;
-        if (v > mx2) mx2 = v;
-        if (orig) delta += Math.abs(v - orig[t]);
-      }
-      cell.statsEl.textContent = mn2.toFixed(2) + ' … ' + mx2.toFixed(2) +
-        (orig && delta > 1e-4 ? '  ·  Δ' + delta.toFixed(1) : '');
+        const plot = (d, style, w) => {
+            if (!d || !d.length) return;
+            c2.strokeStyle = style; c2.lineWidth = w; c2.beginPath();
+            for (let x = 0; x < W; x++) {
+                const y = yOf(d[Math.floor(x * d.length / W)]);
+                if (x === 0) c2.moveTo(x, y); else c2.lineTo(x, y);
+            }
+            c2.stroke();
+        };
+        const orig = cfg.original ? cfg.original(node, i) : null, d = cfg.get(node, i);
+        if (orig) plot(orig, '#39414f', 1);
+        plot(d, cell.color, 1.6);
+        let lo = Infinity, hi = -Infinity, delta = 0;
+        for (let t = 0; t < d.length; t++) {
+            if (d[t] < lo) lo = d[t];
+            if (d[t] > hi) hi = d[t];
+            if (orig) delta += Math.abs(d[t] - orig[t]);
+        }
+        cell.stats.textContent = lo.toFixed(2) + ' … ' + hi.toFixed(2) + (orig && delta > 1e-4 ? '  ·  Δ' + delta.toFixed(1) : '');
     }
 
-    function applyOp(i, fn) {
-      fn();
-      drawCell(i);
-      ctx.onEdit();
+    const mean = (d) => { let m = 0; for (let t = 0; t < d.length; t++) m += d[t]; return m / (d.length || 1); };
+    const OPS = [
+        ['↺', 'reset to original', (i, d) => { const o = cfg.original && cfg.original(node, i); if (o) for (let t = 0; t < d.length; t++) d[t] = o[t]; }],
+        ['∼', 'smooth', (i, d) => {
+            const s = d.slice(), n = d.length;
+            for (let t = 0; t < n; t++) d[t] = (s[Math.max(0, t - 1)] + 2 * s[t] + s[Math.min(n - 1, t + 1)]) / 4;
+        }],
+        ['─', 'flatten to mean', (i, d) => { const m = mean(d); for (let t = 0; t < d.length; t++) d[t] = m; }],
+        ['⤨', 'invert around mean', (i, d) => { const m = mean(d); for (let t = 0; t < d.length; t++) d[t] = clamp(i, 2 * m - d[t]); }],
+        ['▲', 'nudge up (+0.5)', (i, d) => { for (let t = 0; t < d.length; t++) d[t] = clamp(i, d[t] + 0.5); }],
+        ['▼', 'nudge down (−0.5)', (i, d) => { for (let t = 0; t < d.length; t++) d[t] = clamp(i, d[t] - 0.5); }],
+    ];
+
+    function paintAt(i, e, p) {
+        if (!p) return;
+        const cv = cells[i].cv, rect = cv.getBoundingClientRect();
+        const xf = Math.max(0, Math.min(0.99999, (e.clientX - rect.left) / (rect.width || 1)));
+        const yPix = ((e.clientY - rect.top) / (rect.height || 1)) * CURVE_H;
+        const [mn, mx] = cells[i].range;
+        const d = cfg.get(node, i), idx = Math.floor(xf * d.length);
+        const v = clamp(i, mn + ((CURVE_H - PAD - yPix) / (CURVE_H - 2 * PAD)) * ((mx - mn) || 1));
+        if (p.lastI >= 0 && p.lastI !== idx) {
+            const a = Math.min(p.lastI, idx), b = Math.max(p.lastI, idx);
+            const va = p.lastI < idx ? p.lastV : v, vb = p.lastI < idx ? v : p.lastV;
+            for (let k = a; k <= b; k++) d[k] = va + (vb - va) * ((k - a) / ((b - a) || 1));
+        } else {
+            d[idx] = v;
+        }
+        p.lastI = idx; p.lastV = v;
+        drawCell(i);
+        ctx.onEdit();
     }
 
     for (let i = 0; i < count; i++) {
-      ranges.push(cfg.range ? cfg.range(node, i) : autoRange(cfg, node, i));
-      const color = cfg.color ? cfg.color(node, i) : defaultColor(i);
+        const stats = h('span.curve-stats');
+        const tools = h('span.curve-tools', null, OPS.map(([label, title, fn]) => h('button.small', {
+            title, onclick: () => { fn(i, cfg.get(node, i)); drawCell(i); ctx.onEdit(); },
+        }, label)));
+        const cv = h('canvas.curve-canvas', { width: CURVE_W, height: CURVE_H });
+        const cell = h('div.curve-cell', null, h('div.curve-head', null, h('span.curve-name', null, cfg.label(node, i)), stats, tools), cv);
+        root.appendChild(cell);
+        cells.push({
+            cv, stats,
+            color: cfg.color ? cfg.color(node, i) : 'hsl(' + HUES[i % HUES.length] + ',70%,64%)',
+            range: cfg.range ? cfg.range(node, i) : fitRange(cfg, node, i),
+        });
+        drawCell(i);
 
-      const cell = el('div', 'curve-cell');
-      const head = el('div', 'curve-head');
-      head.appendChild(el('span', 'curve-name', cfg.label(node, i)));
-      const stat = el('span', 'curve-stats', '');
-      head.appendChild(stat);
-
-      const tools = el('span', 'curve-tools');
-      const btn = (label, title, fn) => {
-        const b = el('button', 'tinybtn', label);
-        b.title = title;
-        b.addEventListener('click', () => applyOp(i, fn));
-        tools.appendChild(b);
-      };
-      const origFor = () => cfg.original ? cfg.original(node, i) : null;
-      btn('↺', 'reset to original', () => {
-        const o = origFor(), d = cfg.get(node, i);
-        if (o) for (let t = 0; t < d.length; t++) d[t] = o[t];
-      });
-      btn('∼', 'smooth', () => {
-        const d = cfg.get(node, i), n = d.length, s = d.slice();
-        for (let t = 0; t < n; t++) {
-          const a = s[Math.max(0, t - 1)], b = s[t], e = s[Math.min(n - 1, t + 1)];
-          d[t] = (a + 2 * b + e) / 4;
-        }
-      });
-      btn('─', 'flatten to mean', () => {
-        const d = cfg.get(node, i);
-        let m = 0; for (let t = 0; t < d.length; t++) m += d[t]; m /= d.length;
-        for (let t = 0; t < d.length; t++) d[t] = m;
-      });
-      btn('⤨', 'invert around mean', () => {
-        const d = cfg.get(node, i);
-        let m = 0; for (let t = 0; t < d.length; t++) m += d[t]; m /= d.length;
-        for (let t = 0; t < d.length; t++) d[t] = clampVal(cfg, node, i, 2 * m - d[t]);
-      });
-      btn('▲', 'nudge up (+0.5)', () => {
-        const d = cfg.get(node, i);
-        for (let t = 0; t < d.length; t++) d[t] = clampVal(cfg, node, i, d[t] + 0.5);
-      });
-      btn('▼', 'nudge down (−0.5)', () => {
-        const d = cfg.get(node, i);
-        for (let t = 0; t < d.length; t++) d[t] = clampVal(cfg, node, i, d[t] - 0.5);
-      });
-      head.appendChild(tools);
-      cell.appendChild(head);
-
-      const cv = document.createElement('canvas');
-      cv.width = CURVE_W; cv.height = CURVE_H; cv.className = 'curve-canvas';
-      cell.appendChild(cv);
-      root.appendChild(cell);
-
-      cells.push({ cv: cv, statsEl: stat, color: color });
-      drawCell(i);
-
-      let paint = null;   // in-progress drag: {lastI, lastV}
-      cv.addEventListener('mousedown', (e) => {
-        e.preventDefault();
-        paint = { lastI: -1, lastV: 0 };
-        paintAt(i, cv, e, paint);
-      });
-      // Test seam: drive a synthetic drag without real mouse events.
-      cell._testMouseDown = (e) => { paint = { lastI: -1, lastV: 0 }; paintAt(i, cv, e, paint); };
-      cell._testMouseMove = (e) => paintAt(i, cv, e, paint);
-      cell._testMouseUp = () => { paint = null; };
-
-      window.addEventListener('mousemove', (e) => { if (paint) paintAt(i, cv, e, paint); });
-      window.addEventListener('mouseup', () => { paint = null; });
+        let paint = null;
+        cv.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            paint = { lastI: -1, lastV: 0 };
+            paintAt(i, e, paint);
+            trackDrag((ev) => paintAt(i, ev, paint), () => { paint = null; });
+        });
+        cell._testMouseDown = (e) => { paint = { lastI: -1, lastV: 0 }; paintAt(i, e, paint); };
+        cell._testMouseMove = (e) => paintAt(i, e, paint);
+        cell._testMouseUp = () => { paint = null; };
     }
-
-    function paintAt(i, cv, e, p) {
-      if (!p) return;
-      const rect = cv.getBoundingClientRect();
-      const xf = Math.max(0, Math.min(0.99999, (e.clientX - rect.left) / rect.width));
-      const yPix = ((e.clientY - rect.top) / rect.height) * CURVE_H;
-      const [mn, mx] = ranges[i];
-      const d = cfg.get(node, i), n = d.length, idx = Math.floor(xf * n);
-      let v = mn + ((CURVE_H - CURVE_PAD - yPix) / (CURVE_H - 2 * CURVE_PAD)) * ((mx - mn) || 1);
-      v = clampVal(cfg, node, i, v);
-      if (p.lastI >= 0 && p.lastI !== idx) {
-        const a = Math.min(p.lastI, idx), b = Math.max(p.lastI, idx);
-        const va = (p.lastI < idx) ? p.lastV : v, vb = (p.lastI < idx) ? v : p.lastV;
-        for (let k = a; k <= b; k++) d[k] = va + (vb - va) * ((b === a) ? 0 : (k - a) / (b - a));
-      } else {
-        d[idx] = v;
-      }
-      p.lastI = idx; p.lastV = v;
-      drawCell(i);
-      ctx.onEdit();
-    }
-
-    root._cells = cells;   // test seam
     return root;
-  }
+}

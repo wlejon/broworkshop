@@ -1,106 +1,77 @@
-// Node Forge — nodes/rave-node.js: mount, full-controls dialog, curve-paint
-// live decode (mini card + dialog grid stay in sync), collapse/delete. Gated
-// on the real converted RAVE checkpoint being present on this machine
-// (D:/projects/brosoundml-data/rave/magnets_z8); GPU headless only.
-advanceTime(50);
-flush();
+// RAVE Morph card: model load from the dialog, the initial decode, every
+// latent dim in the dialog's curve grid, exec() matching the live path,
+// card and dialog curve views staying in sync, a paint re-decoding, and
+// delete / undo keeping the model. Needs the magnets_z8 RAVE checkpoint.
 
-const app = window.LabApp;
-assert(app, 'LabApp handle missing');
+import { check, eq, test, done, frames, needWeights, q, setValue, shot } from "/lib/kit/test.js";
 
-const node = app.graph.addNode('rave');
-app.editor.placeNew(node);
-app.editor.draw(0);
-advanceTime(16);
-flush();
+const dir = needWeights('RAVE magnets_z8', ['brosoundml-data/rave/magnets_z8'], { probe: 'config.json' });
+frames(3);
+const F = globalThis.nodeForge;
+const node = F.view.addAtCentre('rave');
+frames(2);
+const card = () => F.view.card(node).root;
 
-let card = document.querySelector('.node-card');
-assert(card, 'no .node-card rendered after addNode');
+test('the card starts empty and asks for a model', () => {
+    check(/set a model directory/.test(card().querySelector('.curve-stats').textContent), 'empty caption');
+    check(node.params.dir === '' && node.params.kind === 'harm', 'defaults');
+});
 
-// Model dir / source live in the full-controls dialog now, not the mini card.
-const gearBtn = card.querySelector('.node-gear');
-assert(gearBtn, 'no full-controls gear button on the card');
-gearBtn.click();
-let dialogBody = document.querySelector('.node-dialog-body');
-assert(dialogBody, 'full-controls dialog did not open');
-assert(document.querySelector('.node-dialog-backdrop').style.display === 'flex', 'dialog backdrop not shown');
+test('model dir from the dialog: load, encode, decode', () => {
+    card().querySelector('.ng-gear').click();
+    eq(q('.ng-dialog-backdrop').style.display, 'flex', 'dialog open');
+    setValue(q('.ng-dialog-body input[type=text]'), dir);
+    frames(3);
+    check(!node.error, 'error: ' + node.error);
+    check(node._out && node._out[0].samples.length > 0, 'audio out');
+    check(/latent/.test(card().querySelector('.ng-badge').textContent), 'badge: ' + card().querySelector('.ng-badge').textContent);
+    eq(document.querySelectorAll('.ng-dialog-body .curve-cell').length, node._enc.nLatent, 'one curve per latent dim');
+    check(F.project.isDirty(), 'project dirty');
+});
 
-const dirInput = dialogBody.querySelectorAll('input[type=text]')[0];
-dirInput.value = 'D:/projects/brosoundml-data/rave/magnets_z8';
-dirInput.dispatchEvent(new Event('change'));
-advanceTime(50);
-flush();
+test('exec() matches the live path', () => {
+    const first = node._out[0].samples;
+    eq(F.run(), 1, 'ran one node');
+    const again = node._out[0].samples;
+    eq(again.length, first.length, 'length');
+    for (let i = 0; i < first.length; i += 97) check(Math.abs(again[i] - first[i]) < 1e-5, 'sample ' + i);
+});
 
-assert(!node.error, 'node reported an error: ' + node.error);
-assert(node._out && node._out[0] && node._out[0].samples.length > 0, 'no audio produced');
-console.log('OK: model+source load, initial decode, samples=' + node._out[0].samples.length);
+test('dialog edits show on the card', () => {
+    const cell = document.querySelectorAll('.ng-dialog-body .curve-cell')[1];
+    const r = cell.querySelector('canvas').getBoundingClientRect();
+    cell._testMouseDown({ clientX: r.left + 5, clientY: r.top + 10 });
+    cell._testMouseMove({ clientX: r.left + 40, clientY: r.top + 70 });
+    cell._testMouseUp();
+    frames(6);
+    q('.ng-dialog-close').click();
+    eq(q('.ng-dialog-backdrop').style.display, 'none', 'dialog closed');
+    setValue(card().querySelector('select'), '1');
+    check(/Δ/.test(card().querySelector('.curve-cell .curve-stats').textContent), 'card shows the dim-1 edit');
+});
 
-const nLatent = node._enc.nLatent;
-assert(nLatent > 0, 'no latent dims reported');
-const dialogCells = document.querySelectorAll('.node-dialog-body .curve-cell');
-assert(dialogCells.length === nLatent, 'dialog curve grid does not show all ' + nLatent + ' latent dims (got ' + dialogCells.length + ')');
-console.log('OK: full-controls dialog shows all ' + nLatent + ' latent-dim curve editors');
+test('painting on the card re-decodes', () => {
+    const prev = node._out[0].samples;
+    const cell = card().querySelector('.curve-cell');
+    const r = cell.querySelector('canvas').getBoundingClientRect();
+    cell._testMouseDown({ clientX: r.left + 5, clientY: r.top + 10 });
+    cell._testMouseMove({ clientX: r.left + 40, clientY: r.top + 60 });
+    cell._testMouseUp();
+    frames(6);
+    check(node._out[0].samples !== prev, 're-decoded');
+    check(/s · \d+Hz/.test(card().querySelector('.audio-preview .curve-stats').textContent), 'output caption');
+    shot('rave');
+});
 
-// exec() sync path determinism: same model/source/curves -> bit-identical output
-const first = node._out[0].samples;
-app.runner.reset();
-const n = app.runner.run();
-assert(n === 1, 'expected 1 node to run');
-assert(node._out[0].samples.length === first.length, 'exec() sync path produced a different-length buffer');
-let same = true;
-for (let i = 0; i < first.length; i += 97) if (Math.abs(node._out[0].samples[i] - first[i]) > 1e-5) { same = false; break; }
-assert(same, 'exec() sync path is not deterministic against the live-path result for identical inputs');
-console.log('OK: exec() sync path matches the live-path result (Run/save-load determinism)');
+test('delete, undo: the card comes back with its model', () => {
+    const rave = node._rave;
+    card().querySelector('.ng-del').click();
+    eq(F.graph.nodes.length, 0, 'deleted');
+    F.history.undo();
+    frames(2);
+    eq(F.graph.nodes.length, 1, 'restored');
+    check(node._rave === rave, 'model kept');
+    check(F.view.card(node).root.querySelectorAll('.curve-cell').length === 1, 'card curve rebuilt');
+});
 
-// paint dim 1 in the DIALOG grid, close, switch the mini card's dim picker to
-// dim 1, and confirm it shows the edited curve — the onDialogToggle cross-
-// refresh (mini card <-> dialog share the same node.params.curves arrays).
-const dialogCell1 = dialogCells[1];
-const dcv = dialogCell1.querySelector('canvas');
-const drect = dcv.getBoundingClientRect();
-dialogCell1._testMouseDown({ clientX: drect.left + 5, clientY: drect.top + 10 });
-dialogCell1._testMouseMove({ clientX: drect.left + 40, clientY: drect.top + 70 });
-dialogCell1._testMouseUp();
-advanceTime(80);
-flush();
-const editedDim1 = node.params.curves[1].slice();
-
-document.querySelector('.node-dialog-close').click();
-assert(document.querySelector('.node-dialog-backdrop').style.display === 'none', 'dialog did not close');
-
-const dimSel = card.querySelectorAll('select')[0];
-assert(dimSel, 'no latent-dim picker on the mini card');
-dimSel.value = '1';
-dimSel.dispatchEvent(new Event('change'));
-
-let cell1 = card.querySelectorAll('.curve-cell')[0];
-assert(node.params.curves[1].every((v, i) => v === editedDim1[i]), 'underlying curve data changed unexpectedly');
-const cell1Stats = cell1.querySelector('.curve-stats');
-assert(cell1Stats && cell1Stats.textContent.includes('Δ'), 'mini card curve cell (dim 1) does not show the dialog edit (no delta from original)');
-console.log('OK: mini card and dialog curve views stay in sync across open/close');
-
-// curve paint on the MINI CARD's own curve cell (dim 1 selected above)
-// triggers a live re-decode.
-const prevSamples = node._out[0].samples;
-const cv = cell1.querySelector('canvas');
-const rect = cv.getBoundingClientRect();
-cell1._testMouseDown({ clientX: rect.left + 5, clientY: rect.top + 10 });
-cell1._testMouseMove({ clientX: rect.left + 40, clientY: rect.top + 60 });
-cell1._testMouseUp();
-advanceTime(80);
-flush();
-assert(node._out && node._out[0].samples !== prevSamples, 'curve paint did not re-decode');
-console.log('OK: curve paint re-decoded, samples=' + node._out[0].samples.length);
-
-// collapse / delete
-const collapseBtn = card.querySelector('.node-collapse');
-collapseBtn.click();
-assert(node.collapsed === true, 'collapse did not set node.collapsed');
-collapseBtn.click();
-
-const delBtn = card.querySelector('.node-del');
-delBtn.click();
-assert(app.graph.nodes.length === 0, 'node not removed from graph');
-assert(document.querySelectorAll('.node-card').length === 0, 'card DOM not removed');
-
-console.log('ALL RAVE NODE CHECKS PASSED');
+done('node-forge rave');

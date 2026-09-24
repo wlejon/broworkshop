@@ -5,7 +5,10 @@ one stylesheet for the dark lab look and the standard layout, a handful of
 small ES modules for the things every app was hand-rolling, and helpers for
 headless tests. No bundler, no framework; pages stay static HTML.
 
-Start from [`templates/kit-app/`](../../templates/kit-app/) (copy the folder).
+Start from [`templates/kit-app/`](../../templates/kit-app/) (copy the folder),
+or [`templates/worker-sim/`](../../templates/worker-sim/) when the work runs
+on a worker thread (the same layout plus a `worker-rpc.js` worker streaming
+transferred buffers).
 Ported examples: `demos/kws-lab` and `demos/lm-playground` (ML labs),
 `demos/spatial-hash` (canvas demo), `demos/lighting-demo` (3D viewport),
 `tools/shader-lab` (tool).
@@ -15,7 +18,7 @@ Ported examples: `demos/kws-lab` and `demos/lm-playground` (ML labs),
 | `kit.css` | design tokens, base controls, layout + component classes |
 | `index.js` | re-exports app, dom, ui, params, weights (one import line) |
 | `app.js` | `boot()`: menu bar, status line, error display |
-| `dom.js` | `$`, `$$`, `h` element builder, `ids`, formatters |
+| `dom.js` | `$`, `$$`, `h` element builder, `ids`, formatters, `trackDrag(onMove, onUp)` (window mousemove/mouseup for one drag, detached on release) |
 | `ui.js` | status line, progress, log, stats, `readout` rows, fps, toggle, tabs, frame loop, `fixedStep(h)` accumulator, `foldPanels()` (click a `.k-panel` caption to fold; ticking a caption checkbox unfolds) |
 | `params.js` | controls bound to values / objects |
 | `weights.js` | model weight resolution (BRO_WEIGHTS, sibling repos, cache) |
@@ -24,6 +27,8 @@ Ported examples: `demos/kws-lab` and `demos/lm-playground` (ML labs),
 | `sky.js` | HDRI sky (`skyEnvironment`), sun direction + sun sliders (`sunControls`), a time-of-day rig (`daylight`: studio / dawn / noon / golden / night) |
 | `nav3d.js` | `bro.ai.game` navmesh labs: slab/ramp level geometry, walkable-surface overlay sampling, route ribbons, markers, pooled pips, capsule agents, `startRoute`/`followRoute` waypoint walking, off-mesh link beads, surface picking (nav-lab, nav-carving) |
 | `editor.js` | document editors: tool switcher, undo/redo/save/open commands |
+| `nodegraph.js` | node graphs (no DOM): `NodeTypes` registry (typed ports + compat table), `Graph` (nodes/edges, cycle-checked `connect`, topo order, serialize with stable ids, `change` events), `graphEdits(graph, history)` undoable structural edits, `Runner` (run / step / continue, per-node errors) |
+| `nodegraph-view.js` + `nodegraph.css` | the canvas for a `Graph`: DOM cards (collapse, badge, gear-opened full-controls dialog, delete), port-dot wiring + rewiring, pan/zoom grid, header drags through `graphEdits`, Delete/Escape keys; `nodePalette` sidebar (node-forge) |
 | `skeletal.js` | clip authoring for skinned meshes: bone frames, keyframe compile, bone overlay |
 | `humanoid.js` | a shared humanoid clip library (idle/walk/run/crouch/...) + the autoRig bone map |
 | `physics3d.js` | Jolt + scene plumbing: body+visual pairs, body groups, rods, the event drain, pick rays, a mouse grabber |

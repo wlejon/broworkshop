@@ -56,7 +56,6 @@ files. There is no bundler; apps import what they need.
 | `netroom.js` | lobby / turn helpers over `bro.net` |
 | `project.js` / `history.js` / `sketch.js` | tool / editor plumbing |
 | `system-menu.js` | windowed app menu bar (kit apps get it from `kit/app.js` `boot()`) |
-| `dialogs.js` | file/folder browse |
 | `openrouter.js` / `markdown.js` | AI tooling UI helpers |
 
 Conventions for new modules:

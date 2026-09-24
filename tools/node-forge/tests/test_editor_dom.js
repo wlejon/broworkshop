@@ -1,226 +1,211 @@
-// Node Forge — generic DOM-card editor mechanics: card build/collapse/drag/
-// delete, wire connect + reject through the real port-dot DOM elements, and
-// a graph serialize()/deserialize() round trip. Uses two tiny test-only node
-// types (registered here, not in nodes/) so this suite never depends on a
-// real model/asset being present — it's exercising lab/editor.js and
-// lab/graph.js, not any particular audio lab.
-import { def } from "/app/lab/node-registry.js";
+// The graph canvas without models: cards, collapse, the full-controls dialog,
+// header drags, wiring through the real port dots (and refusing a type
+// mismatch), re-routing, delete, undo / redo of all of it, save/load round
+// trips and the runner. Uses test-only node types, so no weights are needed.
 
-def({
-  type: 'test-src', label: 'Test Source', cat: 'Test', color: '#34d399',
-  ins: [], outs: [{ name: 'out', type: 'audio-buffer' }],
-  exec() { return [{ samples: new Float32Array([1, 2, 3]), sampleRate: 100, channels: 1 }]; },
-  mount(body) { body.textContent = 'test source'; },
+import { check, eq, test, done, frames, q, shot, press } from "/lib/kit/test.js";
+import { types } from "/app/nodes/types.js";
+
+types.define({
+    type: 'test-src', label: 'Test Source', cat: 'Test', color: '#34d399',
+    outs: [{ name: 'out', type: 'audio-buffer' }],
+    exec() { return [{ samples: new Float32Array([1, 2, 3]), sampleRate: 100, channels: 1 }]; },
+    mount(body) { body.textContent = 'test source'; },
 });
-def({
-  type: 'test-sink', label: 'Test Sink', cat: 'Test', color: '#f472b6',
-  ins: [{ name: 'in', type: 'audio-buffer' }], outs: [],
-  exec(ins) { return []; },
-  mount(body) { body.textContent = 'test sink'; },
+types.define({
+    type: 'test-sink', label: 'Test Sink', cat: 'Test', color: '#f472b6',
+    ins: [{ name: 'in', type: 'audio-buffer' }],
+    exec(ins) { return [ins[0].samples.length]; },
+    mount(body) { body.textContent = 'test sink'; },
 });
-def({
-  type: 'test-wrong', label: 'Test Wrong Type', cat: 'Test', color: '#f97316',
-  ins: [{ name: 'in', type: 'not-audio' }], outs: [],
-  exec() { return []; },
-  mount(body) { body.textContent = 'test wrong-type sink'; },
+types.define({
+    type: 'test-wrong', label: 'Test Wrong Type', cat: 'Test', color: '#f97316',
+    ins: [{ name: 'in', type: 'not-audio' }],
+    exec() { return []; },
+    mount(body) { body.textContent = 'wrong-type sink'; },
 });
-def({
-  type: 'test-dialog', label: 'Test Dialog', cat: 'Test', color: '#a78bfa',
-  ins: [], outs: [],
-  exec() { return []; },
-  mount(body, node, graph, api) {
-    body.textContent = 'mini card';
-    const advanced = document.createElement('div');
-    advanced.className = 'test-advanced-marker';
-    advanced.textContent = 'full controls content';
-    api.dialogBody.appendChild(advanced);
-  },
+let unmounted = 0;
+types.define({
+    type: 'test-dialog', label: 'Test Dialog', cat: 'Test', color: '#a78bfa',
+    exec() { return []; },
+    mount(body, node, graph, api) {
+        body.textContent = 'mini card';
+        api.dialogBody.appendChild(Object.assign(document.createElement('div'), { className: 'test-advanced', textContent: 'full controls' }));
+        api.onUnmount(() => { unmounted++; });
+    },
 });
 
-advanceTime(50);
-flush();
-const app = window.LabApp;
-assert(app, 'LabApp handle missing');
+frames(5);
+const F = globalThis.nodeForge;
+check(F, 'main.js publishes nodeForge');
+const { graph, history, view } = F;
 
-const src = app.graph.addNode('test-src');
-const sink = app.graph.addNode('test-sink');
-const wrong = app.graph.addNode('test-wrong');
-src.x = 100; src.y = 100;
-sink.x = 500; sink.y = 100;
-wrong.x = 500; wrong.y = 260;
-app.editor.draw(0);
-advanceTime(16);
-flush();
-
-const cards = document.querySelectorAll('.node-card');
-assert(cards.length === 3, 'expected 3 cards, got ' + cards.length);
-
-// ── collapse / expand ──────────────────────────────────────────────────────
-const srcCard = [...cards].find((c) => c.querySelector('.node-title').textContent === 'Test Source');
-const collapseBtn = srcCard.querySelector('.node-collapse');
-const body = srcCard.querySelector('.node-body');
-assert(body.style.display !== 'none', 'body should start expanded');
-collapseBtn.click();
-assert(src.collapsed === true, 'collapse did not set node.collapsed');
-assert(body.style.display === 'none', 'body should be hidden once collapsed');
-collapseBtn.click();
-assert(src.collapsed === false, 'expand did not clear node.collapsed');
-assert(body.style.display !== 'none', 'body should be visible once expanded');
-console.log('OK: collapse/expand toggles node.collapsed + body visibility');
-
-// ── full-controls dialog: hidden gear when api.dialogBody is untouched,
-//    shown + working when a node type populates it ─────────────────────────
-{
-  const srcGear = srcCard.querySelector('.node-gear');
-  assert(srcGear && srcGear.style.display === 'none', 'gear button should stay hidden when mount() never touches api.dialogBody');
-
-  const dlg = app.graph.addNode('test-dialog');
-  dlg.x = 100; dlg.y = 400;
-  app.editor.draw(0);
-  advanceTime(16); flush();
-  const dlgCard = findCardByTitle('Test Dialog');
-  const dlgGear = dlgCard.querySelector('.node-gear');
-  assert(dlgGear && dlgGear.style.display !== 'none', 'gear button should show once mount() appends into api.dialogBody');
-
-  dlgGear.click();
-  const backdrop = document.querySelector('.node-dialog-backdrop');
-  const dialogHost = document.querySelector('.node-dialog-body');
-  assert(backdrop.style.display === 'flex', 'dialog should be visible after clicking the gear button');
-  assert(document.querySelector('.node-dialog-title').textContent.includes('Test Dialog'), 'dialog title should name the open node');
-  assert(dialogHost.querySelector('.test-advanced-marker'), 'dialog body should contain the moved dialogBody content');
-  assert(!dlgCard.querySelector('.test-advanced-marker'), 'advanced content must not remain on the mini card once moved into the dialog');
-
-  // backdrop click (not on the panel itself) closes it
-  backdrop.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: 2, clientY: 2 }));
-  assert(backdrop.style.display === 'none', 'clicking the backdrop should close the dialog');
-
-  // Escape closes it too
-  dlgGear.click();
-  assert(backdrop.style.display === 'flex', 'dialog should reopen');
-  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
-  assert(backdrop.style.display === 'none', 'Escape should close the dialog');
-  console.log('OK: full-controls dialog opens/closes (gear, backdrop click, Escape) and hosts the node-owned dialogBody');
-
-  dlgCard.querySelector('.node-del').click();
+const card = (node) => view.card(node).root;
+const center = (el) => { const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; };
+const mouse = (target, type, p) => target.dispatchEvent(new MouseEvent(type, { bubbles: true, clientX: p ? p.x : 0, clientY: p ? p.y : 0 }));
+function drag(fromEl, to) {
+    mouse(fromEl, 'mousedown', center(fromEl));
+    mouse(window, 'mousemove', to);
+    mouse(window, 'mouseup', to);
+    frames(1);
 }
+const outDot = (n) => card(n).querySelector('.ng-port[data-dir=out]');
+const inDot = (n) => card(n).querySelector('.ng-port[data-dir=in]');
 
-// ── header drag repositions the node in world space ────────────────────────
-const header = srcCard.querySelector('.node-header');
-const x0 = src.x, y0 = src.y;
-const hr = header.getBoundingClientRect();
-header.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: hr.left + 10, clientY: hr.top + 8 }));
-window.dispatchEvent(new MouseEvent('mousemove', { clientX: hr.left + 10 + 120, clientY: hr.top + 8 + 40 }));
-window.dispatchEvent(new MouseEvent('mouseup', {}));
-app.editor.draw(0);
-assert(src.x !== x0 || src.y !== y0, 'header drag did not move the node');
-console.log('OK: header drag moves the node (' + x0.toFixed(0) + ',' + y0.toFixed(0) + ') -> (' + src.x.toFixed(0) + ',' + src.y.toFixed(0) + ')');
+const src = F.edits.add('test-src', 100, 100);
+const sink = F.edits.add('test-sink', 700, 100);
+const wrong = F.edits.add('test-wrong', 700, 300);
+frames(2);
 
-// ── wire connect: drag from src's out dot to sink's in dot ─────────────────
-function findCardByTitle(title) { return [...document.querySelectorAll('.node-card')].find((c) => c.querySelector('.node-title').textContent === title); }
-const outDot = findCardByTitle('Test Source').querySelector('.port-dot[data-dir=out]');
-const sinkInDot = findCardByTitle('Test Sink').querySelector('.port-dot[data-dir=in]');
-assert(outDot && sinkInDot, 'expected port dots on both cards');
-const outR = outDot.getBoundingClientRect(), inR = sinkInDot.getBoundingClientRect();
-outDot.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: outR.left + 5, clientY: outR.top + 5 }));
-window.dispatchEvent(new MouseEvent('mousemove', { clientX: inR.left + 5, clientY: inR.top + 5 }));
-window.dispatchEvent(new MouseEvent('mouseup', { clientX: inR.left + 5, clientY: inR.top + 5 }));
-assert(app.graph.edges.length === 1, 'expected 1 edge after a valid wire drag, got ' + app.graph.edges.length);
-assert(app.graph.edges[0].from.node === src && app.graph.edges[0].to.node === sink, 'edge endpoints wrong');
-console.log('OK: dragging out-dot -> in-dot creates an edge through the real DOM');
+test('palette lists every audio node type', () => {
+    for (const t of ['rave', 'kokoro', 'qwen']) check(q('#palette').querySelector('.ng-pal-op[data-type="' + t + '"]'), 'palette button ' + t);
+});
 
-// ── wire reject: incompatible port type refuses the connection ─────────────
-assert(!app.graph.canConnect(src, 0, wrong, 0), 'canConnect should refuse audio-buffer -> not-audio');
-const beforeEdgeCount = app.graph.edges.length;
-const wrongInDot = findCardByTitle('Test Wrong Type').querySelector('.port-dot[data-dir=in]');
-const wrongR = wrongInDot.getBoundingClientRect();
-outDot.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: outR.left + 5, clientY: outR.top + 5 }));
-window.dispatchEvent(new MouseEvent('mousemove', { clientX: wrongR.left + 5, clientY: wrongR.top + 5 }));
-window.dispatchEvent(new MouseEvent('mouseup', { clientX: wrongR.left + 5, clientY: wrongR.top + 5 }));
-assert(app.graph.edges.length === beforeEdgeCount, 'a type-incompatible drag should not add an edge');
-console.log('OK: a type-incompatible wire drag is rejected (edge count unchanged)');
+test('cards follow the graph', () => {
+    eq(document.querySelectorAll('.ng-card').length, 3, 'three cards');
+    eq(q('#stat-nodes').textContent, '3 nodes', 'status count');
+    eq(card(src).querySelector('.ng-title').textContent, 'Test Source', 'title');
+});
 
-// ── serialize()/deserialize() round trip preserves nodes + the edge ────────
-const saved = app.graph.serialize();
-assert(saved.nodes.length === 3 && saved.edges.length === 1, 'serialize() should capture 3 nodes + 1 edge');
-app.graph.nodes.length = 0; app.graph.edges.length = 0;
-const res = app.graph.deserialize(saved);
-assert(res.skipped.length === 0, 'deserialize() unexpectedly skipped known node types');
-assert(app.graph.nodes.length === 3, 'deserialize() should restore 3 nodes');
-assert(app.graph.edges.length === 1, 'deserialize() should restore 1 edge');
-console.log('OK: serialize()/deserialize() round trip preserves nodes + edges');
+test('collapse / expand, undoable', () => {
+    const btn = card(src).querySelector('.ng-collapse'), body = card(src).querySelector('.ng-body');
+    btn.click();
+    check(src.collapsed && body.style.display === 'none', 'collapsed');
+    history.undo();
+    check(!src.collapsed && body.style.display !== 'none', 'undo expands');
+    history.redo();
+    check(src.collapsed, 'redo collapses');
+    btn.click();
+    check(!src.collapsed, 'expanded again');
+});
 
-// ── Run: exec() sync path across a wired pair. test-wrong's required input
-// port was never wired (its only wiring attempt was correctly rejected
-// above), so it can never become topologically "ready" — run() should
-// execute exactly the connected src->sink pair and leave it un-run, not
-// throw. ─────────────────────────────────────────────────────────────────
-const n = app.runner.run();
-assert(n === 2, 'expected 2 nodes to run (the wired pair), got ' + n);
-const srcNode = app.graph.nodes.find((x) => x.type === 'test-src');
-const wrongNode = app.graph.nodes.find((x) => x.type === 'test-wrong');
-assert(srcNode._ran && srcNode._out && srcNode._out[0].samples.length === 3, 'test-src did not produce its exec() output');
-assert(!wrongNode._ran, 'test-wrong has an unconnected required input — it should never become ready to run');
-console.log('OK: runner.run() executes the wired pair and correctly stalls a node with an unconnected required input');
+test('full-controls dialog', () => {
+    check(card(src).querySelector('.ng-gear').style.display === 'none', 'no gear without dialog content');
+    const dn = F.edits.add('test-dialog', 100, 420);
+    frames(1);
+    const gear = card(dn).querySelector('.ng-gear');
+    check(gear.style.display !== 'none', 'gear shown');
+    gear.click();
+    const backdrop = q('.ng-dialog-backdrop');
+    eq(backdrop.style.display, 'flex', 'dialog open');
+    check(q('.ng-dialog-title').textContent.includes('Test Dialog'), 'dialog title');
+    check(q('.ng-dialog-body .test-advanced'), 'dialog hosts the card content');
+    check(!card(dn).querySelector('.test-advanced'), 'not on the card');
+    mouse(backdrop, 'mousedown', { x: 2, y: 2 });
+    eq(backdrop.style.display, 'none', 'backdrop click closes');
+    gear.click();
+    eq(backdrop.style.display, 'flex', 'reopens');
+    press('Escape');
+    eq(backdrop.style.display, 'none', 'Escape closes');
+    card(dn).querySelector('.ng-del').click();
+    eq(unmounted, 1, 'onUnmount ran');
+    check(graph.nodes.indexOf(dn) < 0, 'deleted');
+});
 
-// ── widget-owned params must survive a real JSON round trip (the footgun a
-// node's own mount() must avoid: a raw typed array in node.params serializes
-// via JSON.stringify as a numeric-keyed plain object and silently corrupts
-// on reload — every widget in nodes/ stores plain number[]/number[][], e.g.
-// rave-node.js's params.curves, kokoro-node.js's params.coords/emo/timbre,
-// qwen-node.js's params.coords/emoAlpha/steer). ─────────────────────────────
-{
-  const t = app.graph.addNode('test-src');
-  t.params.__curve = [0.1, 0.2, 0.3, -0.4];
-  const snap = app.graph.serialize();
-  const wire = JSON.parse(JSON.stringify(snap));   // exactly what Project.saveTo/openPath do
-  const restored = wire.nodes.find((x) => x.id === t.id);
-  assert(Array.isArray(restored.params.__curve) && restored.params.__curve.length === 4 && restored.params.__curve[3] === -0.4,
-    'plain-array param must survive a JSON round trip: ' + JSON.stringify(restored.params.__curve));
+test('header drag moves a card; undo puts it back', () => {
+    const header = card(src).querySelector('.ng-header');
+    const p = center(header);
+    drag(header, { x: p.x + 120, y: p.y + 40 });
+    check(Math.abs(src.x - 220) < 1 && Math.abs(src.y - 140) < 1, 'moved to ' + src.x + ',' + src.y);
+    history.undo();
+    eq([src.x, src.y], [100, 100], 'undo move');
+    check(card(src).style.left === '100px', 'card follows undo');
+    history.redo();
+    check(Math.abs(src.x - 220) < 1, 'redo move');
+});
 
-  t.params.__badCurve = new Float32Array([0.1, 0.2, 0.3]);
-  const snap2 = app.graph.serialize();
-  const wire2 = JSON.parse(JSON.stringify(snap2));
-  const restored2 = wire2.nodes.find((x) => x.id === t.id);
-  assert(!Array.isArray(restored2.params.__badCurve),
-    'documenting the footgun: a typed-array param round-trips as a plain {0:..,1:..} object, ' +
-    'NOT an array — this is why widget code must store plain number[] in node.params');
-  console.log('OK: plain-array params survive JSON round trip; typed-array params demonstrably do not (by design constraint)');
-}
+test('wire through the port dots; a type mismatch is refused', () => {
+    drag(outDot(src), center(inDot(sink)));
+    eq(graph.edges.length, 1, 'one edge');
+    check(graph.edges[0].from.node === src && graph.edges[0].to.node === sink, 'endpoints');
+    check(!graph.canConnect(src, 0, wrong, 0), 'canConnect refuses');
+    drag(outDot(src), center(inDot(wrong)));
+    eq(graph.edges.length, 1, 'mismatch refused');
+    history.undo();
+    eq(graph.edges.length, 0, 'undo connect');
+    history.redo();
+    eq(graph.edges.length, 1, 'redo connect');
+});
 
-// ── dragging (pan/card/wire) suppresses text selection page-wide ───────────
-// Fresh DOM lookups throughout: deserialize() above rebuilt every card from
-// scratch, so the src/sink/header/outDot bindings from earlier in this file
-// point at detached elements no longer tracked by editor.js's card map.
-{
-  assert(!document.body.classList.contains('nf-dragging'), 'should not be dragging yet');
-  const liveHeader = findCardByTitle('Test Source').querySelector('.node-header');
-  const hr2 = liveHeader.getBoundingClientRect();
-  liveHeader.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: hr2.left + 10, clientY: hr2.top + 8 }));
-  assert(document.body.classList.contains('nf-dragging'), 'nf-dragging should be set during a card drag');
-  window.dispatchEvent(new MouseEvent('mouseup', {}));
-  assert(!document.body.classList.contains('nf-dragging'), 'nf-dragging should clear on mouseup');
+test('dragging an input dot off drops the wire (undoable)', () => {
+    drag(inDot(sink), { x: 5, y: 5 });
+    eq(graph.edges.length, 0, 'wire dropped');
+    history.undo();
+    eq(graph.edges.length, 1, 'undo restores it');
+});
 
-  const stage = document.getElementById('stage');
-  stage.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: 20, clientY: 20 }));
-  assert(document.body.classList.contains('nf-dragging'), 'nf-dragging should be set during a stage pan');
-  window.dispatchEvent(new MouseEvent('mouseup', {}));
-  assert(!document.body.classList.contains('nf-dragging'), 'nf-dragging should clear after a pan');
+test('delete restores node, card and wires on undo', () => {
+    card(sink).querySelector('.ng-del').click();
+    check(graph.nodes.indexOf(sink) < 0 && graph.edges.length === 0, 'node and wire gone');
+    eq(document.querySelectorAll('.ng-card').length, 2, 'card gone');
+    history.undo();
+    check(graph.nodes.indexOf(sink) >= 0 && graph.edges.length === 1, 'node and wire back');
+    eq(document.querySelectorAll('.ng-card').length, 3, 'card back');
+});
 
-  const liveOutDot = findCardByTitle('Test Source').querySelector('.port-dot[data-dir=out]');
-  const outR2 = liveOutDot.getBoundingClientRect();
-  liveOutDot.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: outR2.left + 5, clientY: outR2.top + 5 }));
-  assert(document.body.classList.contains('nf-dragging'), 'nf-dragging should be set during a wire drag');
-  window.dispatchEvent(new MouseEvent('mouseup', {}));
-  assert(!document.body.classList.contains('nf-dragging'), 'nf-dragging should clear after a wire drag');
-  console.log('OK: pan/card/wire drags all toggle body.nf-dragging (suppresses text selection)');
-}
+test('Delete key removes the focused card', () => {
+    mouse(card(wrong).querySelector('.ng-body'), 'mousedown', center(card(wrong)));
+    check(view.focused === wrong && card(wrong).classList.contains('focused'), 'focused');
+    press('Delete');
+    check(graph.nodes.indexOf(wrong) < 0, 'removed');
+    history.undo();
+    check(graph.nodes.indexOf(wrong) >= 0, 'undo');
+});
 
-// ── delete removes both the node and its card ───────────────────────────────
-app.editor.draw(0);
-const delTargets = [...document.querySelectorAll('.node-card')];
-for (const c of delTargets) c.querySelector('.node-del').click();
-assert(app.graph.nodes.length === 0, 'all nodes should be removed');
-assert(document.querySelectorAll('.node-card').length === 0, 'all cards should be removed from the DOM');
-console.log('OK: delete removes node + card for every node');
+test('run: the wired pair runs, a node with an open input waits', () => {
+    const n = F.run();
+    eq(n, 2, 'nodes run');
+    check(src._out[0].samples.length === 3 && sink._out[0] === 3, 'values flowed');
+    check(!wrong._ran, 'open input never runs');
+    check(/^last run/.test(q('#stat-time').textContent), 'time shown');
+    F.reset();
+    check(!src._ran, 'reset');
+});
 
-console.log('ALL EDITOR DOM CHECKS PASSED');
+test('serialize / deserialize round trip', () => {
+    const saved = JSON.parse(JSON.stringify(graph.serialize()));
+    eq([saved.nodes.length, saved.edges.length], [3, 1], 'saved');
+    graph.deserialize(saved);
+    frames(1);
+    eq([graph.nodes.length, graph.edges.length], [3, 1], 'restored');
+    eq(document.querySelectorAll('.ng-card').length, 3, 'cards rebuilt');
+    eq(graph.nodes.map((n) => n.id), saved.nodes.map((n) => n.id), 'ids kept');
+    const res = graph.deserialize({ nodes: saved.nodes.concat([{ id: 'zz', type: 'gone', x: 0, y: 0, params: {} }]), edges: saved.edges });
+    eq(res.skipped, ['zz'], 'unknown type skipped');
+});
+
+test('params must be plain arrays to survive a save', () => {
+    const t = graph.nodes[0];
+    t.params.curve = [0.1, 0.2, -0.4];
+    t.params.bad = new Float32Array([1, 2]);
+    const back = JSON.parse(JSON.stringify(graph.serialize())).nodes[0].params;
+    eq(back.curve, [0.1, 0.2, -0.4], 'plain array');
+    check(!Array.isArray(back.bad), 'a typed array does not come back as an array');
+    delete t.params.curve; delete t.params.bad;
+});
+
+test('drags suppress text selection', () => {
+    const [a] = graph.nodes;
+    const header = card(a).querySelector('.ng-header');
+    mouse(header, 'mousedown', center(header));
+    check(document.body.classList.contains('ng-dragging'), 'during card drag');
+    mouse(window, 'mouseup', center(header));
+    check(!document.body.classList.contains('ng-dragging'), 'after');
+    mouse(q('#stage'), 'mousedown', { x: 400, y: 700 });
+    check(document.body.classList.contains('ng-dragging'), 'during pan');
+    mouse(window, 'mouseup', { x: 400, y: 700 });
+    check(!document.body.classList.contains('ng-dragging'), 'after pan');
+});
+
+test('clear, and undo it', () => {
+    F.view.frameAll();
+    frames(2);
+    shot('graph');
+    F.clear();
+    eq([graph.nodes.length, document.querySelectorAll('.ng-card').length], [0, 0], 'cleared');
+    history.undo();
+    eq([graph.nodes.length, graph.edges.length], [3, 1], 'undo clear');
+    eq(document.querySelectorAll('.ng-card').length, 3, 'cards back');
+});
+
+done('node-forge editor');

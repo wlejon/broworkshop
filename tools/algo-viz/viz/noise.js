@@ -1,430 +1,224 @@
-// FBm decomposition. FBm = sum_i (gain^i) * noise(lacunarity^i * x).
+// FBm decomposition. FBm = sum_i gain^i * noise(lacunarity^i * x).
 //
-// LEFT  The full FBm sum.  Driven by bro.image.gpu.fbm2D for type='Simplex'
-//       (one GPU draw — no CPU buffer, no upload), and by the CPU FastNoise
-//       gen + bro.image.gpu.colormap path for the other types. Either way,
-//       the underlying tile is regenerated only at TILE_REGEN_MS, and every
-//       frame in between is a cheap colormap pass with a sliding viewRect —
-//       so the field scrolls smoothly at frame-rate while the expensive
-//       generation runs at 1Hz.
-//
-// RIGHT One thumbnail per octave, showing the BASE noise at that octave's
-//       frequency (×lacunarityⁱ). Thumbnails are tiny (96×96) and refresh at
-//       1Hz; labels are diffed so we only touch innerHTML on actual changes.
+// LEFT  The full FBm sum. For 'Simplex' it is one GPU draw
+//       (bro.image.gpu.fbm2D: no CPU buffer, no upload); the other types
+//       generate on the CPU with FastNoise2 in a Worker (noise-worker.js)
+//       and upload through bro.image.gpu.colormap. Either way a tile wider
+//       than the view is generated at most once a second (or when the
+//       params change / the scroll runs off it), and every frame between is
+//       a cheap colormap pass over a sliding viewRect, so the field scrolls
+//       at frame rate while generation runs at 1 Hz.
+// RIGHT One thumbnail per octave: the BASE noise at that octave's frequency
+//       (x lacunarity^i), refreshed at 1 Hz.
 
-import { VIZ } from "/app/viz/_registry.js";
-import { AVUI } from "/app/viz/pathfinding.js";
+import { h } from "/lib/kit/dom.js";
+import { register } from "./registry.js";
+import { controls, toggle, overlay, lifetime } from "./ui.js";
 
-(function () {
-    const TYPES = ['Simplex', 'SuperSimplex', 'Perlin', 'Value',
-                   'CellularValue', 'CellularDistance'];
+const TYPES = ['Simplex', 'SuperSimplex', 'Perlin', 'Value', 'CellularValue', 'CellularDistance'];
+const THUMB = 96;
+const EXTRA_BUFFER_PX = 512;     // scroll buffer beyond the visible width
+const TILE_REGEN_MS = 1000;
+const THUMB_REGEN_MS = 1000;
 
-    const THUMB_RES = 96;
+register({
+    id: 'noise',
+    name: 'FastNoise2 — FBm decomposition',
+    category: 'Noise',
+    subtitle: 'Fractional Brownian motion (FBm) = sum of octaves. Each octave is the base noise at frequency × lacunarityⁱ scaled by gainⁱ. Watch the sum (left) build from the octaves (right).',
 
-    // Tile sizing for the main view's pre-render-wide + slide-window pattern.
-    // EXTRA_BUFFER_PX is the horizontal scroll buffer beyond the visible
-    // canvas; TILE_REGEN_MS is how often we re-run the gen pass at minimum
-    // (we'll also regen any time we exhaust the buffer or params change).
-    const EXTRA_BUFFER_PX = 512;
-    const TILE_REGEN_MS = 1000;
-    const THUMB_REGEN_MS = 1000;
+    init({ stage, params }) {
+        const life = lifetime();
+        const mainCanvas = h('canvas.av-fill');
+        const mainBox = h('div.av-box.av-grow', null, mainCanvas);
+        const label = overlay(mainBox);
+        const formula = h('div.av-formula');
+        const octCol = h('div.av-octaves', null, h('div.k-cap', null, 'Octaves (base × gainⁱ)'));
+        stage.appendChild(h('div.av-split', null,
+            h('div.av-col.av-grow', null, mainBox, formula), octCol));
 
-    VIZ.push({
-        id: 'noise',
-        name: 'FastNoise2 — FBm decomposition',
-        category: 'Noise',
-        subtitle: 'Fractional Brownian motion (FBm) = sum of octaves. Each octave is the base noise at frequency × lacunarityⁱ scaled by gainⁱ. Watch the sum (left) build from the octaves (right).',
+        const gl = mainCanvas.getContext('webgl2');
+        if (!gl) throw new Error('noise: webgl2 is not available on this canvas');
 
-        init({ stage, params }) {
-            // --- layout -----------------------------------------------------------
-            const wrap = document.createElement('div');
-            wrap.style.cssText = 'position:absolute;inset:0;display:flex;gap:8px;padding:8px;box-sizing:border-box';
-            stage.appendChild(wrap);
+        const state = {
+            type: 'Simplex', frequency: 0.008, octaves: 4, gain: 0.5, lacunarity: 2.0,
+            speed: 6, seed: 1337, running: true,
+            ox: 0, oy: 0, animTime: 0, lastT: 0,
+            tileOx: 0, tileW: 0, tileH: 0, tileRegenT: 0, dirty: true,
+            thumbsRegenT: 0, thumbsDirty: true,
+        };
+        const cpu = { busy: false, ready: false, ox: 0, w: 0, h: 0, spare: null };
 
-            const leftCol = document.createElement('div');
-            leftCol.style.cssText = 'flex:1 1 auto;display:flex;flex-direction:column;gap:6px;min-width:0';
-            wrap.appendChild(leftCol);
+        const colorLut = bro.image.gradient([
+            [0.00, 10, 30, 80], [0.45, 230, 220, 150], [0.55, 100, 170, 90], [0.75, 250, 250, 250],
+        ], 256);
+        const octaveLut = bro.image.gradient([
+            [0.00, 30, 30, 60], [0.50, 130, 130, 150], [1.00, 240, 240, 240],
+        ], 256);
 
-            const mainBox = document.createElement('div');
-            mainBox.style.cssText = 'position:relative;flex:1 1 auto;background:#080808;border:1px solid #222;overflow:hidden';
-            leftCol.appendChild(mainBox);
-
-            const mainCanvas = document.createElement('canvas');
-            mainCanvas.style.cssText = 'background:#000;display:block;position:absolute;inset:0;width:100%;height:100%';
-            mainBox.appendChild(mainCanvas);
-
-            const mainLabel = document.createElement('div');
-            mainLabel.style.cssText = 'position:absolute;left:8px;top:8px;'
-                + 'padding:4px 8px;background:rgba(0,0,0,0.6);color:#ddd;'
-                + 'font:11px monospace;white-space:pre;pointer-events:none';
-            mainBox.appendChild(mainLabel);
-
-            const formula = document.createElement('div');
-            formula.style.cssText = 'flex:0 0 auto;padding:6px 10px;background:#0c0c0c;border:1px solid #1c1c1c;font:11px monospace;color:#bbb;line-height:1.5';
-            leftCol.appendChild(formula);
-
-            const rightCol = document.createElement('div');
-            rightCol.style.cssText = 'flex:0 0 ' + (THUMB_RES + 130) + 'px;display:flex;flex-direction:column;gap:4px;overflow:auto';
-            wrap.appendChild(rightCol);
-
-            const octHeader = document.createElement('div');
-            octHeader.style.cssText = 'font:10px monospace;color:#666;letter-spacing:1px;text-transform:uppercase;padding:2px 0';
-            octHeader.textContent = 'Octaves (base × gainⁱ)';
-            rightCol.appendChild(octHeader);
-
-            // --- state -------------------------------------------------------------
-            const state = {
-                type: 'Simplex',
-                octaves: 4,
-                gain: 0.5,
-                lacunarity: 2.0,
-                frequency: 0.008,
-                seed: 1337,
-                running: true,
-                scrollSpeed: 6,    // grid units / sec (matches FastNoise2 GenUniformGrid2D semantics)
-                ox: 0, oy: 0,
-                animTime: 0,
-                lastT: 0,
-                animFrame: null,
-
-                // Main tile state for the pre-render-wide + slide pattern.
-                tileOx: 0,           // grid origin of the current tile (Simplex GPU path)
-                tileRegenT: 0,       // ms of last full regen (rAF clock)
-                tileW: 0, tileH: 0,  // last allocated tile dims
-                tileDirty: true,     // structural params changed → force regen
-
-                // CPU/worker path: the heavy FastNoise2 gen runs off-thread, so
-                // the main loop never spikes on regen. cpuTileReady flips true
-                // once the first worker tile has been uploaded; until then we
-                // skip rendering rather than block.
-                cpuWorker: null,
-                cpuWorkerBusy: false,
-                cpuTileReady: false,
-                cpuTileOx: 0, cpuOy: 0,
-                cpuTileW: 0, cpuTileH: 0,
-                cpuSpareBuf: null,   // owned by main while worker is idle
-
-                // Thumbnails refresh at 1Hz; track last regen and whether
-                // any structural param changed.
-                thumbsRegenT: 0,
-                thumbsDirty: true,
-
-                // innerHTML diff caches so we only touch the DOM when text
-                // actually changed.
-                formulaCache: '',
-                lastMainLabel: '',
-            };
-
-            const octThumbs = [];           // {row, canvas, ctx, img, lbl, buf, lblCache}
-            const mainCtx2D = mainCanvas.getContext('webgl2');
-            if (!mainCtx2D) {
-                // Fall back gracefully — the engine path needs webgl2.
-                throw new Error('algo-viz noise.js: webgl2 not supported on this canvas');
+        // Thumbnails sample the base noise here (tiny 96x96 reads at 1 Hz);
+        // the FBm tile's own nodes live in the worker.
+        // Feature Scale 1: `frequency` is features per unit, as in the GPU
+        // shader (FastNoise2's default scale is ~100 units per feature).
+        const makeBase = (type) => { const n = FastNoise.create(type); n.set('Feature Scale', 1); return n; };
+        let baseNode = makeBase(state.type);
+        const thumbs = [];
+        function rebuildOctaves() {
+            while (thumbs.length > state.octaves) thumbs.pop().row.remove();
+            while (thumbs.length < state.octaves) {
+                const cv = h('canvas.av-thumb', { width: THUMB, height: THUMB });
+                const ctx = cv.getContext('2d');
+                const name = h('div.av-octname'), info = h('div');
+                const row = h('div.av-octave', null, cv, h('div.av-octinfo', null, name, info));
+                octCol.appendChild(row);
+                thumbs.push({ row, ctx, img: ctx.createImageData(THUMB, THUMB), name, info,
+                              buf: bro.image.alloc(THUMB, THUMB, 1), text: '' });
             }
+        }
+        rebuildOctaves();
+        const markDirty = () => { state.dirty = true; state.thumbsDirty = true; };
 
-            const colorLut = bro.image.gradient([
-                [0.00,  10,  30,  80],
-                [0.45, 230, 220, 150],
-                [0.55, 100, 170,  90],
-                [0.75, 250, 250, 250],
-            ], 256);
-            const octaveLut = bro.image.gradient([
-                [0.00,  30,  30,  60],
-                [0.50, 130, 130, 150],
-                [1.00, 240, 240, 240],
-            ], 256);
+        // --- CPU tile worker -------------------------------------------------
+        const worker = new Worker('viz/noise-worker.js');
+        worker.onmessage = (e) => {
+            const r = e.data;
+            cpu.busy = false;
+            if (!life.alive) return;
+            const buf = new Float32Array(r.buffer);
+            bro.image.gpu.colormap(mainCanvas, buf, colorLut, {
+                srcW: r.tileW, srcH: r.tileH, autoRange: true,
+                viewRect: { x: state.ox - r.tileOx, y: 0, w: mainCanvas.width | 0, h: mainCanvas.height | 0 },
+            });
+            Object.assign(cpu, { ready: true, ox: r.tileOx, w: r.tileW, h: r.tileH, spare: buf });
+        };
+        function dispatchCpuTile(tileW, tileH) {
+            if (!cpu.spare || cpu.spare.length < tileW * tileH) cpu.spare = new Float32Array(tileW * tileH);
+            const buf = cpu.spare;
+            cpu.spare = null;                       // ownership moves to the worker
+            cpu.busy = true;
+            worker.postMessage({
+                type: state.type, octaves: state.octaves, gain: state.gain,
+                lacunarity: state.lacunarity, frequency: state.frequency, seed: state.seed,
+                tileOx: state.ox, oy: state.oy, tileW, tileH, buffer: buf.buffer,
+            }, [buf.buffer]);
+        }
 
-            // Thumbnails sample the BASE noise on the main thread (small
-            // 96×96 reads, refreshes at 1Hz — negligible cost). The main
-            // tile's FBm sum is generated off-thread inside the Worker,
-            // which keeps its own pair of FastNoise nodes.
-            let baseNode = null;
-            function rebuildNodes() {
-                baseNode = FastNoise.create(state.type);
+        function renderMain(now) {
+            const cw = mainCanvas.clientWidth | 0, ch = mainCanvas.clientHeight | 0;
+            if (cw < 4 || ch < 4) return;
+            let sized = false;
+            if (mainCanvas.width !== cw || mainCanvas.height !== ch) {
+                mainCanvas.width = cw; mainCanvas.height = ch; sized = true;
             }
-            rebuildNodes();
+            const tileW = cw + EXTRA_BUFFER_PX, tileH = ch;
+            const stale = (ox, w, hh) => sized || state.dirty
+                || state.ox - ox < 0 || state.ox - ox > tileW - cw
+                || tileW !== w || tileH !== hh
+                || now - state.tileRegenT >= TILE_REGEN_MS;
 
-            function rebuildOctaves() {
-                for (let i = state.octaves; i < octThumbs.length; i++) {
-                    octThumbs[i].row.remove();
-                }
-                octThumbs.length = state.octaves;
-                for (let i = 0; i < state.octaves; i++) {
-                    if (!octThumbs[i]) {
-                        const row = document.createElement('div');
-                        row.style.cssText = 'display:flex;gap:6px;align-items:center';
-                        const cv = document.createElement('canvas');
-                        cv.width = THUMB_RES; cv.height = THUMB_RES;
-                        cv.style.cssText = 'image-rendering:pixelated;background:#000;border:1px solid #1f1f1f;position:static;flex:0 0 auto';
-                        cv.style.width = THUMB_RES + 'px'; cv.style.height = THUMB_RES + 'px';
-                        const ctx = cv.getContext('2d');
-                        const img = ctx.createImageData(THUMB_RES, THUMB_RES);
-                        const lbl = document.createElement('div');
-                        lbl.style.cssText = 'font:10px monospace;color:#bbb;line-height:1.4';
-                        row.appendChild(cv); row.appendChild(lbl);
-                        rightCol.appendChild(row);
-                        octThumbs[i] = {
-                            row, cv, ctx, img, lbl,
-                            buf: bro.image.alloc(THUMB_RES, THUMB_RES, 1),
-                            lblCache: '',
-                        };
-                    }
-                }
-            }
-            rebuildOctaves();
-
-            // Bumped whenever structural params change so the next frame
-            // forces both a tile regen and a thumbnail refresh.
-            function markDirty() {
-                state.tileDirty = true;
-                state.thumbsDirty = true;
-            }
-
-            // --- CPU tile worker -------------------------------------------------
-            // The non-Simplex path generates a tile-wide field via FastNoise2 on
-            // the CPU; at the screen dimensions used here that's ~1–2M samples
-            // per regen and was producing a once-per-second main-thread spike.
-            // We push the gen onto a Worker and keep rendering the previously
-            // uploaded tile through the cheap viewRect-slide colormap path
-            // until the next tile lands.
-
-            state.cpuWorker = new Worker('viz/noise-worker.js');
-            state.cpuWorker.onmessage = (e) => {
-                const r = e.data;
-                state.cpuWorkerBusy = false;
-                const buf = new Float32Array(r.buffer);
-                // Upload the new field. The viewRect points the cheap path
-                // back to wherever state.ox has drifted to during the gen.
-                const cw = mainCanvas.width | 0;
-                const ch = mainCanvas.height | 0;
-                bro.image.gpu.colormap(mainCanvas, buf, colorLut, {
-                    srcW: r.tileW, srcH: r.tileH,
-                    autoRange: true,
-                    viewRect: { x: state.ox - r.tileOx, y: 0, w: cw, h: ch },
-                });
-                state.cpuTileReady = true;
-                state.cpuTileOx = r.tileOx;
-                state.cpuOy = r.oy;
-                state.cpuTileW = r.tileW;
-                state.cpuTileH = r.tileH;
-                state.cpuSpareBuf = buf;  // recycle for the next request
-            };
-
-            function dispatchCpuTile(tileW, tileH) {
-                // Resize the reusable buffer if dims grew (or first call).
-                if (!state.cpuSpareBuf || state.cpuSpareBuf.length < tileW * tileH) {
-                    state.cpuSpareBuf = new Float32Array(tileW * tileH);
-                }
-                const buf = state.cpuSpareBuf;
-                state.cpuSpareBuf = null;  // ownership transferred to worker
-                state.cpuWorkerBusy = true;
-                state.cpuWorker.postMessage({
-                    type: state.type,
-                    octaves: state.octaves,
-                    gain: state.gain,
-                    lacunarity: state.lacunarity,
-                    frequency: state.frequency,
-                    seed: state.seed,
-                    tileOx: state.ox,
-                    oy: state.oy,
-                    tileW, tileH,
-                    buffer: buf.buffer,
-                }, [buf.buffer]);
-            }
-
-            function renderMain(now) {
-                // Sync canvas backing-store to display size.
-                const cw = mainCanvas.clientWidth | 0;
-                const ch = mainCanvas.clientHeight | 0;
-                if (cw < 4 || ch < 4) return;
-                let sized = false;
-                if (mainCanvas.width !== cw || mainCanvas.height !== ch) {
-                    mainCanvas.width = cw;
-                    mainCanvas.height = ch;
-                    sized = true;
-                }
-
-                const tileW = cw + EXTRA_BUFFER_PX;
-                const tileH = ch;
-
-                if (state.type === 'Simplex') {
-                    // GPU FBm: gen + colormap both happen on-thread but the
-                    // shader is fast enough to regen every frame would be fine
-                    // — we still tile-cache it because autoRange's EMA likes
-                    // a stable input.
-                    const scrollPx = state.ox - state.tileOx;
-                    const needRegen = sized || state.tileDirty
-                        || scrollPx < 0
-                        || scrollPx > tileW - cw
-                        || tileW !== state.tileW || tileH !== state.tileH
-                        || (now - state.tileRegenT) >= TILE_REGEN_MS;
-                    if (needRegen) {
-                        state.tileOx = state.ox;
-                        state.tileRegenT = now;
-                        state.tileDirty = false;
-                        state.tileW = tileW;
-                        state.tileH = tileH;
-                        bro.image.gpu.fbm2D(mainCanvas, colorLut, {
-                            type: 'Simplex',
-                            frequency: state.frequency,
-                            octaves: state.octaves,
-                            gain: state.gain,
-                            lacunarity: state.lacunarity,
-                            seed: state.seed,
-                            ox: state.tileOx, oy: state.oy,
-                            srcW: tileW, srcH: tileH,
-                            autoRange: true,
-                            viewRect: { x: 0, y: 0, w: cw, h: ch },
-                        });
-                    } else {
-                        bro.image.gpu.fbm2D(mainCanvas, colorLut, {
-                            regenerate: false,
-                            autoRange: true,
-                            viewRect: { x: scrollPx, y: 0, w: cw, h: ch },
-                        });
-                    }
+            if (state.type === 'Simplex') {
+                // GPU FBm. Still tile-cached: autoRange's EMA wants a stable input.
+                if (stale(state.tileOx, state.tileW, state.tileH)) {
+                    Object.assign(state, { tileOx: state.ox, tileRegenT: now, dirty: false, tileW, tileH });
+                    bro.image.gpu.fbm2D(mainCanvas, colorLut, {
+                        type: 'Simplex', frequency: state.frequency, octaves: state.octaves,
+                        gain: state.gain, lacunarity: state.lacunarity, seed: state.seed,
+                        ox: state.tileOx, oy: state.oy, srcW: tileW, srcH: tileH,
+                        autoRange: true, viewRect: { x: 0, y: 0, w: cw, h: ch },
+                    });
                 } else {
-                    // CPU/worker path. Dispatch a fresh tile when needed, then
-                    // always cheap-render the previously-uploaded one — the
-                    // worker thread does the FastNoise2 gen in the background.
-                    const cpuScroll = state.cpuTileReady
-                        ? state.ox - state.cpuTileOx : 0;
-                    const needNew = !state.cpuTileReady || state.tileDirty
-                        || sized
-                        || cpuScroll < 0
-                        || cpuScroll > tileW - cw
-                        || tileW !== state.cpuTileW || tileH !== state.cpuTileH
-                        || (now - state.tileRegenT) >= TILE_REGEN_MS;
-                    if (needNew && !state.cpuWorkerBusy) {
-                        state.tileDirty = false;
-                        state.tileRegenT = now;
-                        dispatchCpuTile(tileW, tileH);
-                    }
-                    if (state.cpuTileReady) {
-                        bro.image.gpu.colormap(mainCanvas, null, colorLut, {
-                            regenerate: false,
-                            autoRange: true,
-                            viewRect: { x: state.ox - state.cpuTileOx,
-                                        y: 0, w: cw, h: ch },
-                        });
-                    }
+                    bro.image.gpu.fbm2D(mainCanvas, colorLut, {
+                        regenerate: false, autoRange: true,
+                        viewRect: { x: state.ox - state.tileOx, y: 0, w: cw, h: ch },
+                    });
                 }
-
-                // Main label updated only when octave count / type changes
-                // (autoRange means the live min/max isn't on CPU anymore).
-                const newLabel = 'FBm sum  (' + state.octaves + ' octaves)\n'
-                    + 'type     ' + state.type + '\n'
-                    + 'range    auto (GPU EMA)';
-                if (newLabel !== state.lastMainLabel) {
-                    mainLabel.textContent = newLabel;
-                    state.lastMainLabel = newLabel;
+            } else {
+                if ((!cpu.ready || stale(cpu.ox, cpu.w, cpu.h)) && !cpu.busy) {
+                    state.dirty = false;
+                    state.tileRegenT = now;
+                    dispatchCpuTile(tileW, tileH);
+                }
+                if (cpu.ready) {
+                    bro.image.gpu.colormap(mainCanvas, null, colorLut, {
+                        regenerate: false, autoRange: true,
+                        viewRect: { x: state.ox - cpu.ox, y: 0, w: cw, h: ch },
+                    });
                 }
             }
+            label.set('FBm sum  (' + state.octaves + ' octaves)\ntype     ' + state.type + '\nrange    auto (GPU EMA)');
+        }
 
-            function renderThumbnails(now) {
-                if (!state.thumbsDirty &&
-                    (now - state.thumbsRegenT) < THUMB_REGEN_MS) return;
-                state.thumbsRegenT = now;
-                state.thumbsDirty = false;
-
-                const cw = mainCanvas.width || mainCanvas.clientWidth || 1;
-                let amp = 1, totalAmp = 0;
-                for (let i = 0; i < state.octaves; i++) { totalAmp += amp; amp *= state.gain; }
-
-                let lac = 1; amp = 1;
-                for (let i = 0; i < state.octaves; i++) {
-                    const t = octThumbs[i];
-                    const f = state.frequency * lac;
-                    baseNode.genUniformGrid2DInto(
-                        t.buf, state.ox, state.oy,
-                        THUMB_RES, THUMB_RES,
-                        f * (cw / THUMB_RES),
-                        state.seed);
-                    const { min: tmn, max: tmx } = bro.image.reduce(t.buf, 'minmax', { stride: 4 });
-                    const tlo = tmn, thi = (tmx - tmn) > 1e-6 ? tmx : tmn + 1e-6;
-                    bro.image.lookup(t.img.data, t.buf, octaveLut, { lo: tlo, hi: thi });
-                    t.ctx.putImageData(t.img, 0, 0);
-
-                    const contribution = (amp / totalAmp) * 100;
-                    const lblText =
-                        '<div style="color:#74b9ff;font-weight:bold">octave ' + (i + 1) + '</div>' +
-                        'freq  ' + f.toFixed(4) + '<br>' +
-                        'amp   ' + amp.toFixed(4) + '<br>' +
-                        '<span style="color:#888">' + contribution.toFixed(1) + '% of FBm</span>';
-                    if (lblText !== t.lblCache) {
-                        t.lbl.innerHTML = lblText;
-                        t.lblCache = lblText;
-                    }
-                    lac *= state.lacunarity;
-                    amp *= state.gain;
+        function renderThumbnails(now) {
+            if (!state.thumbsDirty && now - state.thumbsRegenT < THUMB_REGEN_MS) return;
+            state.thumbsRegenT = now;
+            state.thumbsDirty = false;
+            const cw = mainCanvas.width || mainCanvas.clientWidth || 1;
+            let totalAmp = 0;
+            for (let i = 0, a = 1; i < state.octaves; i++, a *= state.gain) totalAmp += a;
+            let lac = 1, amp = 1;
+            for (const t of thumbs) {
+                const f = state.frequency * lac;
+                // Offsets are world space: the view's origin at this octave's frequency.
+                baseNode.genUniformGrid2DInto(t.buf, state.ox * f, state.oy * f, THUMB, THUMB, f * (cw / THUMB), state.seed);
+                const { min, max } = bro.image.reduce(t.buf, 'minmax', { stride: 4 });
+                bro.image.lookup(t.img.data, t.buf, octaveLut, { lo: min, hi: max - min > 1e-6 ? max : min + 1e-6 });
+                t.ctx.putImageData(t.img, 0, 0);
+                const text = 'freq  ' + f.toFixed(4) + '\namp   ' + amp.toFixed(4) + '\n'
+                    + (amp / totalAmp * 100).toFixed(1) + '% of FBm';
+                if (text !== t.text) {
+                    t.text = text;
+                    t.name.textContent = 'octave ' + (thumbs.indexOf(t) + 1);
+                    t.info.textContent = text;
                 }
+                lac *= state.lacunarity;
+                amp *= state.gain;
             }
+        }
 
-            function renderFormula() {
-                const text =
-                    '<span style="color:#74b9ff">FBm(x,y)</span> = ' +
-                    '(1 / Σ aᵢ) · Σ aᵢ · noise(fᵢ · x, fᵢ · y) ' +
-                    '<span style="color:#666">where</span> ' +
-                    '<span style="color:#eee">aᵢ = ' + state.gain + 'ⁱ</span>, ' +
-                    '<span style="color:#eee">fᵢ = ' + state.frequency + ' · ' + state.lacunarity + 'ⁱ</span>, ' +
-                    '<span style="color:#eee">i = 0..' + (state.octaves - 1) + '</span> ' +
-                    '&nbsp;&nbsp;<span style="color:#888">(' + state.type + ')</span>';
-                if (text !== state.formulaCache) {
-                    formula.innerHTML = text;
-                    state.formulaCache = text;
-                }
-            }
+        let formulaKey = '';
+        function renderFormula() {
+            const key = [state.gain, state.frequency, state.lacunarity, state.octaves, state.type].join('|');
+            if (key === formulaKey) return;
+            formulaKey = key;
+            formula.replaceChildren(
+                h('span.av-accent', null, 'FBm(x,y)'), ' = (1 / Σ aᵢ) · Σ aᵢ · noise(fᵢ · x, fᵢ · y)  ',
+                h('span.dim', null, 'where'), '  aᵢ = ' + state.gain + 'ⁱ,  fᵢ = ' + state.frequency
+                    + ' · ' + state.lacunarity + 'ⁱ,  i = 0..' + (state.octaves - 1) + '  ',
+                h('span.dim', null, '(' + state.type + ')'));
+        }
 
-            function loop(now) {
-                if (state.lastT === 0) state.lastT = now;
-                const dt = Math.min(0.1, (now - state.lastT) / 1000);
-                state.lastT = now;
-                if (state.running) {
-                    state.animTime += dt * state.scrollSpeed;
-                    state.ox = state.animTime;
-                }
-                renderMain(now);
-                renderThumbnails(now);
-                renderFormula();
-                state.animFrame = requestAnimationFrame(loop);
-            }
+        life.loop((now) => {
+            if (state.lastT === 0) state.lastT = now;
+            const dt = Math.min(0.1, (now - state.lastT) / 1000);
+            state.lastT = now;
+            if (state.running) { state.animTime += dt * state.speed; state.ox = state.animTime; }
+            renderMain(now);
+            renderThumbnails(now);
+            renderFormula();
+        });
 
-            // --- params ----------------------------------------------------------
+        controls(params, state, {
+            type:       { options: TYPES },
+            frequency:  { min: 0.001, max: 0.05, step: 0.001, label: 'freq' },
+            octaves:    { min: 1, max: 8, step: 1 },
+            gain:       { min: 0.1, max: 0.9, step: 0.05 },
+            lacunarity: { min: 1.5, max: 4.0, step: 0.1, label: 'lacun' },
+            speed:      { min: 0, max: 40, step: 1, fmt: (v) => (v | 0) + '/s' },
+            seed:       { type: 'number', step: 1 },
+        }, (key) => {
+            if (key === 'speed') return;
+            if (key === 'seed') state.seed |= 0;
+            if (key === 'type') baseNode = makeBase(state.type);
+            if (key === 'octaves') rebuildOctaves();
+            markDirty();
+        });
+        toggle(params, 'Animate', state.running, (on) => { state.running = on; });
 
-            AVUI.mkSelect(params, 'type', TYPES, state.type, v => {
-                state.type = v; rebuildNodes(); markDirty();
-            });
-            AVUI.mkRange(params, 'freq', state.frequency, 0.001, 0.05, 0.001,
-                v => { state.frequency = v; markDirty(); }, v => v.toFixed(3));
-            AVUI.mkRange(params, 'octaves', state.octaves, 1, 8, 1, v => {
-                state.octaves = v | 0; rebuildOctaves(); rebuildNodes(); markDirty();
-            }, v => `${v|0}`);
-            AVUI.mkRange(params, 'gain', state.gain, 0.1, 0.9, 0.05,
-                v => { state.gain = v; rebuildNodes(); markDirty(); }, v => v.toFixed(2));
-            AVUI.mkRange(params, 'lacun', state.lacunarity, 1.5, 4.0, 0.1,
-                v => { state.lacunarity = v; rebuildNodes(); markDirty(); }, v => v.toFixed(2));
-            AVUI.mkRange(params, 'speed', state.scrollSpeed, 0, 40, 1,
-                v => { state.scrollSpeed = v; }, v => `${v|0}/s`);
-            AVUI.mkNumber(params, 'seed', state.seed, 1, v => {
-                state.seed = v | 0; markDirty();
-            });
-            const animBtn = AVUI.mkButton(params, 'Animate', () => {
-                state.running = !state.running;
-                animBtn.classList.toggle('toggled', state.running);
-            });
-            animBtn.classList.add('toggled');
+        return { life, worker, state, cpu };
+    },
 
-            state.animFrame = requestAnimationFrame(loop);
-            return { state, wrap };
-        },
-
-        destroy(handle) {
-            if (handle.state.animFrame) cancelAnimationFrame(handle.state.animFrame);
-            if (handle.state.cpuWorker) {
-                handle.state.cpuWorker.terminate();
-                handle.state.cpuWorker = null;
-            }
-            if (handle.wrap) handle.wrap.remove();
-        },
-    });
-})();
+    destroy(handle) {
+        handle.life.dispose();
+        handle.worker.terminate();
+    },
+});

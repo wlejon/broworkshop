@@ -1,52 +1,36 @@
-// FBm tile generator. Runs on a Worker so the main thread never blocks on
-// a multi-million-sample FastNoise2 call (which is what was producing the
-// ~1Hz JS spike on Perlin/Value/Cellular). The main thread keeps rendering
-// the previously-uploaded tile via the cheap viewRect-slide path while we
-// fill the next one here.
+// FBm tile generator for viz/noise.js. A multi-million-sample FastNoise2
+// call on the main thread was a ~1 Hz frame spike; here it runs off-thread
+// while the page keeps sliding its viewRect over the previous tile.
 
-let baseNode = null, fbmNode = null;
-let lastType = null, lastOctaves = -1, lastGain = NaN, lastLacunarity = NaN;
+let node = null, key = '';
 
-function ensureNodes(type, octaves, gain, lacunarity) {
-    if (type === lastType && octaves === lastOctaves
-        && gain === lastGain && lacunarity === lastLacunarity) {
-        return;
-    }
-    baseNode = FastNoise.create(type);
-    if (octaves > 1) {
-        fbmNode = FastNoise.FractalFBm();
-        fbmNode.set('Source', baseNode);
-        fbmNode.set('Octaves', octaves | 0);
-        fbmNode.set('Gain', gain);
-        fbmNode.set('Lacunarity', lacunarity);
+function ensureNode(m) {
+    const k = [m.type, m.octaves, m.gain, m.lacunarity].join('|');
+    if (k === key) return;
+    const base = FastNoise.create(m.type);
+    // FastNoise2 generators default to a feature scale of ~100 units; 1
+    // makes `frequency` mean features per unit, like the GPU fbm2D shader.
+    base.set('Feature Scale', 1);
+    if (m.octaves > 1) {
+        node = FastNoise.FractalFBm();
+        node.set('Source', base);
+        node.set('Octaves', m.octaves | 0);
+        node.set('Gain', m.gain);
+        node.set('Lacunarity', m.lacunarity);
     } else {
-        fbmNode = baseNode;
+        node = base;
     }
-    lastType = type;
-    lastOctaves = octaves;
-    lastGain = gain;
-    lastLacunarity = lacunarity;
+    key = k;
 }
 
 self.onmessage = (e) => {
     const m = e.data;
-    ensureNodes(m.type, m.octaves, m.gain, m.lacunarity);
-
+    ensureNode(m);
     const buf = new Float32Array(m.buffer);
-    // Match the Simplex GPU shader's (px + uOrigin) * uFrequency convention:
-    // scroll offset is in pixel units, so scale by frequency to feed
-    // FastNoise2's world-space xOffset.
-    fbmNode.genUniformGrid2DInto(
-        buf,
-        m.tileOx * m.frequency,
-        m.oy * m.frequency,
-        m.tileW, m.tileH,
-        m.frequency, m.seed);
-
-    self.postMessage({
-        id: m.id,
-        buffer: buf.buffer,
-        tileW: m.tileW, tileH: m.tileH,
-        tileOx: m.tileOx, oy: m.oy,
-    }, [buf.buffer]);
+    // Scroll offsets are in pixels, like the Simplex GPU shader's
+    // (px + origin) * frequency, so scale them into FastNoise's world space.
+    node.genUniformGrid2DInto(buf, m.tileOx * m.frequency, m.oy * m.frequency,
+                              m.tileW, m.tileH, m.frequency, m.seed);
+    self.postMessage({ buffer: buf.buffer, tileW: m.tileW, tileH: m.tileH, tileOx: m.tileOx, oy: m.oy },
+                     [buf.buffer]);
 };

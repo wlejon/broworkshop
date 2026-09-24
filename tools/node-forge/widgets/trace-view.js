@@ -1,7 +1,7 @@
-// Node Forge — generalized AR-trace probe widget (code raster + confidence +
-// waveform, frame-aligned, with a shared hover-crosshair cross-highlight).
+// An autoregressive-trace probe (code raster + confidence + waveform,
+// frame-aligned, with a shared hover crosshair).
 //
-// Generalizes qwen-tts-lab/lib/render.js's persistent-card pattern: each
+// qwen-tts-lab's persistent-card pattern: each
 // named card owns ONE canvas, reused (resized + redrawn in place) across
 // renders rather than rebuilt, plus a transparent overlay canvas for the
 // hover highlight so the base raster is never re-rasterized on mousemove.
@@ -25,12 +25,9 @@
 //     no stale frame-aligned overlay from a previous trace lingers.
 //   view.clear(exceptNames)   drop any card not in exceptNames
 
-  function el(tag, cls, text) {
-    const e = document.createElement(tag);
-    if (cls) e.className = cls;
-    if (text != null) e.textContent = text;
-    return e;
-  }
+import { h } from "/lib/kit/dom.js";
+
+  const el = (tag, cls, text) => h(tag + (cls ? '.' + cls : ''), null, text);
 
   // A sequential colormap (dark -> blue -> green -> amber -> white-ish) for code ids.
   function seqColor(t) {

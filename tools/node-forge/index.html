@@ -1,39 +1,50 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="utf-8">
-  <title>Node Forge</title>
-  <link rel="stylesheet" href="style.css">
+    <meta charset="UTF-8">
+    <title>Node Forge</title>
+    <link rel="stylesheet" href="/lib/kit/kit.css">
+    <link rel="stylesheet" href="/lib/kit/nodegraph.css">
+    <link rel="stylesheet" href="/app/style.css">
 </head>
-<body>
-  <div id="app">
-    <header id="toolbar">
-      <span id="brand">⬡ Node&nbsp;Forge</span>
-      <span class="tagline">generative + 3D authoring, one graph</span>
-      <span class="grow"></span>
-      <button id="btn-new" title="New graph">New</button>
-      <button id="btn-open" title="Open a saved graph">Open…</button>
-      <button id="btn-save" title="Save">Save</button>
-      <button id="btn-save-as" title="Save As…">Save As…</button>
-      <button id="btn-run" title="Deterministically recompute every node (Run/Step/tests use this path; a card's own live edits don't)">▶ Run</button>
-      <button id="btn-reset" title="Clear computed values">↺ Reset</button>
-      <button id="btn-clear" title="Remove every node">✕ Clear</button>
-      <span id="backend" class="badge">…</span>
-      <span id="file-status" class="badge"></span>
+<body class="k-app">
+    <header class="k-header">
+        <h1>⬡ Node Forge</h1>
+        <span class="k-sub">whole audio labs as cards on one graph</span>
+        <span class="k-spacer"></span>
+        <span class="k-badge" id="file-status"></span>
+        <span class="k-badge" id="backend">…</span>
     </header>
-    <main>
-      <aside id="palette"></aside>
-      <section id="stage">
-        <div id="toast"></div>
-      </section>
-    </main>
-    <footer id="status">
-      <span id="stat-nodes">0 nodes</span>
-      <span class="grow"></span>
-      <span id="stat-time">not run</span>
-    </footer>
-  </div>
 
-  <script type="module" src="/app/app.js"></script>
+    <div class="k-toolbar">
+        <button id="btn-undo" title="Undo (Ctrl+Z)">↶ Undo</button>
+        <button id="btn-redo" title="Redo (Ctrl+Shift+Z)">↷ Redo</button>
+        <span class="k-sep"></span>
+        <button id="btn-new" title="New graph (Ctrl+N)">New</button>
+        <button id="btn-open" title="Open a saved graph (Ctrl+O)">Open…</button>
+        <button id="btn-save" title="Save (Ctrl+S)">Save</button>
+        <button id="btn-save-as" title="Save As… (Ctrl+Shift+S)">Save As…</button>
+        <span class="k-sep"></span>
+        <button id="btn-run" class="primary" title="Recompute every node through its deterministic path (a card's own live edits don't need this)">▶ Run</button>
+        <button id="btn-reset" title="Clear computed values">↺ Reset</button>
+        <button id="btn-clear" title="Remove every node">✕ Clear</button>
+        <button id="btn-fit" title="Fit every card in view">⤢ Fit</button>
+    </div>
+
+    <div class="k-body">
+        <aside class="k-side nf-palette" id="palette"></aside>
+        <main class="k-main">
+            <div class="k-viewport" id="stage"></div>
+        </main>
+    </div>
+
+    <footer class="k-statusbar">
+        <span id="status"></span>
+        <span class="k-spacer"></span>
+        <span id="stat-nodes">0 nodes</span>
+        <span id="stat-time" class="nf-time">not run</span>
+    </footer>
+
+    <script type="module" src="/app/main.js"></script>
 </body>
 </html>
