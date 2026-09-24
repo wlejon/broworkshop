@@ -9,92 +9,126 @@
 <body>
     <canvas id="view"></canvas>
 
-    <div id="action-text"></div>
-    <div id="burning-warn"></div>
+    <div id="action-text" class="arcade-toast"></div>
+    <div id="burning-warn">! Burning tile danger !</div>
 
     <div id="hud" hidden>
-        <div class="hud-label">SCORE</div>
-        <div id="hud-score" class="hud-value">0</div>
-        <div class="hud-label">LEVEL</div>
-        <div id="hud-level" class="hud-value">1</div>
-        <div class="hud-label" id="hud-extra-label">WORDS</div>
-        <div id="hud-extra" class="hud-value">0</div>
-        <div class="hud-label">LONGEST</div>
-        <div id="hud-longest" class="hud-value">-</div>
-        <div class="hud-label">BEST</div>
-        <div id="hud-best" class="hud-value">-</div>
-        <div class="hud-label" id="hud-combo-label" style="display:none">COMBO</div>
-        <div id="hud-combo" class="hud-value" style="display:none">0</div>
+        <div class="hud-stat">
+            <div class="hud-label">Score</div>
+            <div id="hud-score" class="hud-value">0</div>
+        </div>
+        <div class="hud-stat">
+            <div class="hud-label">Best</div>
+            <div id="hud-best" class="hud-value">0</div>
+        </div>
+        <div class="hud-stat">
+            <div class="hud-label">Level</div>
+            <div id="hud-level" class="hud-value">1</div>
+        </div>
+        <div class="hud-stat">
+            <div class="hud-label" id="hud-extra-label">Words</div>
+            <div id="hud-extra" class="hud-value">0</div>
+        </div>
+        <div class="hud-stat">
+            <div class="hud-label">Longest</div>
+            <div id="hud-longest" class="hud-value">-</div>
+        </div>
+        <div class="hud-stat">
+            <div class="hud-label">Best Word</div>
+            <div id="hud-bestword" class="hud-value">-</div>
+        </div>
+        <div class="hud-stat" id="hud-combo-stat" style="display: none">
+            <div class="hud-label">Combo</div>
+            <div id="hud-combo" class="hud-value">x1</div>
+        </div>
     </div>
 
     <div id="overlay">
         <section id="screen-title" class="screen">
-            <h1 class="overlay-title">WORDSPIRE</h1>
+            <h1 class="overlay-title">Wordspire</h1>
             <div class="overlay-sub">Chain letters. Build the spire.</div>
             <div class="menu-items">
-                <div class="menu-item selected" data-action="modeselect">PLAY</div>
-                <div class="menu-item" data-action="highscores">HIGH SCORES</div>
-                <div class="menu-item" data-action="howto">HOW TO PLAY</div>
-                <div class="menu-item" data-action="settings">SETTINGS</div>
-                <div class="menu-item" data-action="credits">CREDITS</div>
-                <div class="menu-item" data-action="quit">QUIT</div>
+                <div class="menu-item selected" data-action="modeselect">Play</div>
+                <div class="menu-item" data-action="highscores">High Scores</div>
+                <div class="menu-item" data-action="howto">How to Play</div>
+                <div class="menu-item" data-action="settings">Settings</div>
+                <div class="menu-item" data-action="credits">Credits</div>
+                <div class="menu-item" data-action="quit">Quit</div>
             </div>
-            <p class="overlay-hint">Arrow keys to navigate, Enter to select</p>
+            <p class="overlay-hint">Up / Down navigate · Enter select</p>
+        </section>
+
+        <section id="screen-loading" class="screen" hidden>
+            <h1 class="overlay-title">Loading…</h1>
+            <div class="overlay-sub" id="loading-status">Reading dictionary...</div>
         </section>
 
         <section id="screen-modeselect" class="screen" hidden>
-            <h1 class="overlay-title">SELECT MODE</h1>
+            <h1 class="overlay-title">Select Mode</h1>
             <div class="mode-descriptions">
-                <div class="mode-desc">CLASSIC — Endless. Burning tiles drop each turn — don't let one reach the bottom.</div>
-                <div class="mode-desc">TIMED — Score as much as you can in 3 minutes. No hazards.</div>
-                <div class="mode-desc">PUZZLE — 20 crafted boards, each with a hidden target word.</div>
+                <div class="mode-desc">Classic — endless; burning tiles sink each turn, don't let one reach the bottom.</div>
+                <div class="mode-desc">Timed — score all you can in 3 minutes; no hazards.</div>
+                <div class="mode-desc">Puzzle — 20 boards, each hiding a target word.</div>
             </div>
             <div class="menu-items">
-                <div class="menu-item selected" data-action="mode-classic">CLASSIC</div>
-                <div class="menu-item" data-action="mode-timed">TIMED</div>
-                <div class="menu-item" data-action="mode-puzzle">PUZZLE</div>
-                <div class="menu-item" data-action="title">BACK</div>
+                <div class="menu-item selected" data-action="mode-classic">Classic</div>
+                <div class="menu-item" data-action="mode-timed">Timed</div>
+                <div class="menu-item" data-action="mode-puzzle">Puzzle</div>
+                <div class="menu-item" data-action="back">Back</div>
+            </div>
+        </section>
+
+        <section id="screen-howto" class="screen" hidden>
+            <h1 class="overlay-title">How to Play</h1>
+            <div class="overlay-sub htp-body">
+                <p>Chain touching letter tiles (sideways or diagonal) into
+                <strong>English words of 3+ letters</strong>. Submit to pop them;
+                the tiles above fall and new letters drop in at the top.</p>
+                <p><strong>Scoring:</strong> each letter has a Scrabble-style value (E/A = 1, Q/Z = 10).
+                Length bonus: 3 = 10 · 4 = 20 · 5 = 40 · 6 = 80 · 7 = 160 · 8+ = 320+.
+                Valid words in a row build a combo multiplier.</p>
+                <p><strong>Hazards (classic):</strong> red <strong>burning</strong> tiles sink a
+                row every turn. Use them in a word to put them out; if one reaches
+                the bottom, the spire collapses.</p>
+                <p><strong>Rewards:</strong> 5-letter words gild a tile (<em>2x</em>), 6 jewel one
+                (<em>3x</em>), 7 make a <em>sapphire</em> (4x), 8+ a <em>ruby</em> (5x).</p>
+                <pre>Mouse     click tiles in order; click again to back up
+          double-click the last tile, or Submit
+Keyboard  arrows move · Space add · Enter submit
+          Backspace remove last · Esc / P pause</pre>
+            </div>
+            <div class="menu-items">
+                <div class="menu-item selected" data-action="back">Back</div>
+            </div>
+        </section>
+
+        <section id="screen-highscores" class="screen" hidden>
+            <h1 class="overlay-title">High Scores</h1>
+            <div class="hs-tabs">
+                <span id="hs-tab-classic" class="hs-tab active">Classic</span>
+                <span id="hs-tab-timed" class="hs-tab">Timed</span>
+                <span id="hs-tab-puzzle" class="hs-tab">Puzzle</span>
+                <span id="hs-tab-words" class="hs-tab">Top Words</span>
+            </div>
+            <div id="hs-list" class="stats-block">No scores yet</div>
+            <div class="menu-items">
+                <div class="menu-item selected" data-action="hs-next">Next Tab</div>
+                <div class="menu-item" data-action="back">Back</div>
             </div>
         </section>
 
         <section id="screen-settings" class="screen" hidden>
-            <h1 class="overlay-title">SETTINGS</h1>
+            <h1 class="overlay-title">Settings</h1>
             <div class="menu-items">
                 <div class="menu-item selected" data-action="cycle-sfx">SFX Volume: <span id="opt-sfxVol">80</span>%</div>
                 <div class="menu-item" data-action="cycle-difficulty">Difficulty: <span id="opt-difficulty">Normal</span></div>
-                <div class="menu-item" data-action="title">BACK</div>
+                <div class="menu-item" data-action="back">Back</div>
             </div>
-            <p class="overlay-hint">Enter to change</p>
-        </section>
-
-        <section id="screen-howto" class="screen" hidden>
-            <h1 class="overlay-title">HOW TO PLAY</h1>
-            <div class="overlay-sub htp-body">
-                <p>Chain adjacent letter tiles (orthogonal or diagonal) into
-                <strong>valid English words of 3+ letters</strong>. Submit to pop them —
-                the column above each popped tile falls, and new letters spawn at the top.</p>
-                <p><strong>Scoring:</strong> each letter has a Scrabble-ish value (E/A=1, Q/Z=10).
-                Length bonus: 3=10 · 4=20 · 5=40 · 6=80 · 7=160 · 8+=320+.
-                Consecutive valid submissions build a combo multiplier.</p>
-                <p><strong>Hazards (classic):</strong> red <strong>burning</strong> tiles drop one
-                row every turn. Include them in a word to extinguish them — if one reaches
-                the bottom, the spire collapses.</p>
-                <p><strong>Rewards:</strong> 5+ letter words spawn <em>gilded</em> (2x) or
-                <em>jeweled</em> (3x) tiles. 7+ letter words spawn <em>sapphire</em> (4x);
-                8+ letter words spawn <em>ruby</em> (5x).</p>
-                <p><strong>Controls:</strong><br>
-                Mouse: click tiles in sequence; click again to backtrack; double-click last tile
-                or the Submit button to submit.<br>
-                Keyboard: arrows move cursor, Space adds the current tile, Enter submits,
-                Backspace removes last. Esc / P to pause.</p>
-            </div>
-            <div class="menu-items">
-                <div class="menu-item selected" data-action="back">BACK</div>
-            </div>
+            <p class="overlay-hint">Enter to change · difficulty applies to the next game</p>
         </section>
 
         <section id="screen-credits" class="screen" hidden>
-            <h1 class="overlay-title">CREDITS</h1>
+            <h1 class="overlay-title">Credits</h1>
             <div class="overlay-sub">
                 <p>Built on the <strong>bro</strong> app runtime</p>
                 <p>Word list: <strong>dwyl/english-words</strong> filtered against
@@ -102,47 +136,27 @@
                 <p class="credits-sub">An original letter-grid word builder</p>
             </div>
             <div class="menu-items">
-                <div class="menu-item selected" data-action="title">BACK</div>
+                <div class="menu-item selected" data-action="back">Back</div>
             </div>
         </section>
 
         <section id="screen-pause" class="screen" hidden>
-            <h1 class="overlay-title">PAUSED</h1>
+            <h1 class="overlay-title">Paused</h1>
             <div class="menu-items">
-                <div class="menu-item selected" data-action="resume">RESUME</div>
-                <div class="menu-item" data-action="restart">RESTART</div>
-                <div class="menu-item" data-action="title">QUIT TO MENU</div>
+                <div class="menu-item selected" data-action="resume">Resume</div>
+                <div class="menu-item" data-action="restart">Restart</div>
+                <div class="menu-item" data-action="title">Title Menu</div>
             </div>
         </section>
 
         <section id="screen-gameover" class="screen" hidden>
-            <h1 class="overlay-title">GAME OVER</h1>
-            <div id="gameover-stats" class="stats-block"></div>
+            <h1 class="overlay-title" id="gameover-title">Game Over</h1>
+            <div id="gameover-stats" class="stats-block stats-table"></div>
             <div class="menu-items">
-                <div class="menu-item selected" data-action="restart">PLAY AGAIN</div>
-                <div class="menu-item" data-action="highscores">HIGH SCORES</div>
-                <div class="menu-item" data-action="title">MAIN MENU</div>
+                <div class="menu-item selected" data-action="restart">Play Again</div>
+                <div class="menu-item" data-action="highscores">High Scores</div>
+                <div class="menu-item" data-action="title">Title Menu</div>
             </div>
-        </section>
-
-        <section id="screen-highscores" class="screen" hidden>
-            <h1 class="overlay-title">HIGH SCORES</h1>
-            <div class="hs-tabs">
-                <span id="hs-tab-classic" class="hs-tab active">CLASSIC</span>
-                <span id="hs-tab-timed" class="hs-tab">TIMED</span>
-                <span id="hs-tab-puzzle" class="hs-tab">PUZZLE</span>
-                <span id="hs-tab-words" class="hs-tab">TOP WORDS</span>
-            </div>
-            <div id="hs-list" class="overlay-sub stats-block">No scores yet</div>
-            <div class="menu-items">
-                <div class="menu-item selected" data-action="hs-next">NEXT TAB</div>
-                <div class="menu-item" data-action="title">BACK</div>
-            </div>
-        </section>
-
-        <section id="screen-loading" class="screen" hidden>
-            <h1 class="overlay-title">LOADING...</h1>
-            <div class="overlay-sub" id="loading-status">Reading dictionary</div>
         </section>
     </div>
 

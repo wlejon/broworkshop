@@ -1,173 +1,253 @@
-// test.js — headless harness for wordspire.
-'use strict';
+// Wordspire: dictionary, scoring and path rules, mouse + keyboard chains,
+// burning tiles, the three modes, high scores and settings.
+// Run: scripts/validate.sh games/wordspire
+import { test, done, check, eq, frames, simUntil, press, clickOn, q, text, shot } from "/lib/kit/test.js";
 
-// Give scripts and dictionary load a chance to finish.
-advanceTime(500);
-// Dictionary load is async (fetch). Pump more time until loaded.
-for (var w = 0; w < 40 && !window.__wordspire; w++) advanceTime(100);
-assert(typeof window.__wordspire === 'object' && window.__wordspire, '__wordspire exposed');
-var H = window.__wordspire;
-var B = H.board;
-var D = H.dictionary;
-var S = H.scoring;
+frames(4);
+const W = window.__wordspire;
+check(W, "__wordspire hooks exposed");
+const L = W.letters, S = W.scoring, D = W.dictionary;
+check(simUntil(() => D.loaded() && W.screen === "title", 8000, 50), "dictionary loads, then the title");
 
-// Pump until dictionary resolves.
-for (var w2 = 0; w2 < 60 && !D.loaded(); w2++) advanceTime(100);
-assert(D.loaded(), 'dictionary eventually loaded');
-assert(D.count() > 5000, 'dictionary has thousands of words, got ' + D.count());
-// Basic common-word presence.
-var common = ['hello','world','test','game','word','play','board','tower','stone'];
-for (var i = 0; i < common.length; i++) {
-    assert(D.isWord(common[i]), 'dictionary contains ' + common[i]);
+// CAT across the top row, the rest filler that spells nothing useful.
+const CAT = ["catxqzj", "xqzjvxq", "zjvxqzj", "vxqzjvx", "qzjvxqz", "jvxqzjv", "xqzjvxq", "zjvxqzj"];
+
+function startMode(mode) {
+    W.shell.switchTo("title");
+    frames(1);
+    clickOn('#screen-title [data-action="modeselect"]');
+    clickOn('[data-action="mode-' + mode + '"]');
+    frames(2);
+    check(W.screen === "playing" && W.board.mode === mode, mode + " run started");
 }
 
-// --- Title screenshot ----
-H.screens.switchTo('title');
-advanceTime(100);
-screenshot('games/wordspire/screenshot-title.png');
+/** Viewport px of a canvas point (the canvas may be scaled to the window). */
+function toViewport(x, y) {
+    const view = W.shell.api.view;
+    const rect = view.canvas.getBoundingClientRect();
+    return { x: rect.left + x * rect.width / view.width(), y: rect.top + y * rect.height / view.height() };
+}
+function cellPoint(r, c) {
+    const lay = W.run.layout;
+    return toViewport(lay.ox + (c + 0.5) * lay.cell, lay.oy + (r + 0.5) * lay.cell);
+}
+function clickCell(r, c) {
+    const p = cellPoint(r, c);
+    click(p.x, p.y);
+    frames(1);
+}
+function clickSubmit() {
+    const lay = W.run.layout;
+    const p = toViewport(lay.ox + lay.boardW + 80, lay.oy + 22);
+    click(p.x, p.y);
+    frames(1);
+}
+function setRows(rows) {
+    W.board.setGrid(L.gridFromRows(rows, Math.random));
+    frames(1);
+}
 
-// --- Scoring unit tests -------------------------------------------------
-// Per-letter values: CAT = 3+1+1 = 5 + length-bonus(3) = 10 = 15
-assert(S.letterValue('a') === 1, 'A = 1');
-assert(S.letterValue('q') === 10, 'Q = 10');
-assert(S.letterValue('z') === 10, 'Z = 10');
-assert(S.letterValue('e') === 1, 'E = 1');
-assert(S.lengthBonus(3) === 10, 'length bonus 3 = 10');
-assert(S.lengthBonus(5) === 40, 'length bonus 5 = 40');
-assert(S.lengthBonus(7) === 160, 'length bonus 7 = 160');
+test("dictionary, scoring, paths", () => {
+    check(D.count() > 5000, "thousands of words: " + D.count());
+    for (const w of ["hello", "world", "game", "board", "tower", "stone"]) check(D.isWord(w), "has " + w);
+    check(D.isPrefix("sto") && !D.isWord("zxq"), "prefixes; junk rejected");
 
-var scoreCat = S.computeWordScore('cat', null);
-assert(scoreCat === (3 + 1 + 1) + 10, 'computeWordScore CAT = 15, got ' + scoreCat);
+    eq([S.letterValue("a"), S.letterValue("q"), S.letterValue("z")], [1, 10, 10], "letter values");
+    eq([S.lengthBonus(3), S.lengthBonus(5), S.lengthBonus(7)], [10, 40, 160], "length bonus");
+    eq(S.computeWordScore("cat"), 15, "CAT = 5 + 10");
+    eq(S.computeWordScore("stone"), 45, "STONE = 5 + 40");
+    eq(S.computeWordScore("cat", [{ mult: 1 }, { mult: 3 }, { mult: 1 }]), 37, "x3 tile: 7 + 10x3");
+    eq([S.comboMultiplier(1), S.comboMultiplier(3), S.comboMultiplier(20)], [1, 2, 5], "combo multiplier");
 
-var scoreStone = S.computeWordScore('stone', null);
-// S+T+O+N+E = 1+1+1+1+1 = 5; length bonus(5) = 40 => 45.
-assert(scoreStone === 45, 'computeWordScore STONE = 45, got ' + scoreStone);
+    const g = L.fillGrid(L.emptyGrid(), Math.random);
+    check(L.isValidPath([[0, 0], [1, 1], [2, 2]], g), "diagonal path");
+    check(!L.isValidPath([[0, 0], [2, 0]], g), "gap rejected");
+    check(!L.isValidPath([[0, 0], [1, 0], [0, 0]], g), "revisit rejected");
 
-// With multiplier tiles: give 'a' a 3x tile in CAT.
-var scoreCatMult = S.computeWordScore('cat', [
-    { letter: 'c', mult: 1 },
-    { letter: 'a', mult: 3 },
-    { letter: 't', mult: 1 }
-]);
-// letter sum: 3*1 + 1*3 + 1*1 = 7. length bonus: 10 * max(1,3,1)=3 => 30. Total 37.
-assert(scoreCatMult === 37, 'CAT with x3 on A = 37, got ' + scoreCatMult);
+    const cat = L.gridFromRows(CAT, Math.random);
+    const found = L.findWords(cat, D, 50).map((f) => f.word);
+    check(found.includes("cat"), "findWords sees CAT");
+    eq(L.rewardFor(4), 0, "4 letters: no reward");
+    eq([L.rewardFor(5), L.rewardFor(7), L.rewardFor(9)], [2, 4, 5], "reward tiers");
+});
 
-// --- isValidPath tests ---------------------------------------------------
-var g = B.makeEmptyGrid();
-B.fillGrid(g);
-assert(B.isValidPath([[0,0],[1,1],[2,2]], g), 'diagonal 3-path is valid');
-assert(B.isValidPath([[0,0],[0,1]], g), 'orthogonal adj valid');
-assert(!B.isValidPath([[0,0],[2,0]], g), 'non-adjacent path invalid');
-assert(!B.isValidPath([[0,0],[1,0],[0,0]], g), 'repeat cell invalid');
-assert(!B.isValidPath([[0,0]], g) || B.isValidPath([[0,0]], g), 'single-cell is valid for 1-len');
+test("burning tiles sink and collapse", () => {
+    const g = L.gridFromRows(CAT, Math.random);
+    g[5][2].burning = true;
+    const sink = L.descendBurning(g);
+    check(!sink.collapsed && g[6][2].burning && !g[5][2].burning, "sinks one row");
+    check(L.burningDanger(g), "row 6 is danger");
+    L.descendBurning(g);
+    check(L.descendBurning(g).collapsed, "bottom row collapses");
+});
 
-// --- Seeded board + play a word -----------------------------------------
-// We'll start a game, set the grid to a known layout, choose a path that
-// spells a real word, and verify the side effects.
-B.startGame('classic');
-advanceTime(50);
-H.screens.switchTo('playing');
-advanceTime(50);
+test("menus: title, how to play, mode select", () => {
+    eq(W.screen, "title", "title");
+    shot("title");
+    clickOn('#screen-title [data-action="howto"]');
+    eq(W.screen, "howto", "how to play");
+    clickOn('#screen-howto [data-action="back"]');
+    clickOn('#screen-title [data-action="modeselect"]');
+    eq(W.screen, "modeselect", "mode select");
+    press("Escape");
+    frames(1);
+    eq(W.screen, "title", "Esc backs out");
+});
 
-// Set a board with CAT in the top row at cols 0,1,2.
-// Remaining letters are harmless.
-// 7 cols wide, 8 rows deep (COLS=7, ROWS=8).
-H.setGrid([
-    'cate xyz',
-    'rotaxyz',
-    'pirxxyz',
-    'gelxxyz',
-    'donxxyz',
-    'blmxxyz',
-    'nuvxxyz',
-    'asizxyz'
-]);
-// Drop any chain.
-B.clearChain();
-B.setScore(0);
+test("classic: mouse chain + Submit scores and pops", () => {
+    startMode("classic");
+    check(!q("#hud").hidden, "HUD visible");
+    eq(text("#hud-extra-label"), "Words", "classic counts words");
+    setRows(CAT);
+    W.save.set("topWords", []);     // storage persists between runs
+    clickCell(0, 0); clickCell(0, 1); clickCell(0, 2);
+    eq(W.board.chain.length, 3, "three tiles chained");
+    eq(W.board.preview().word, "cat", "preview spells CAT");
+    shot("chain");
+    clickSubmit();
+    eq(W.board.words, 1, "one word");
+    check(W.board.score >= 15, "CAT scored: " + W.board.score);
+    eq(W.board.chain.length, 0, "chain cleared");
+    check(W.board.grid.every((row) => row.every((t) => t)), "board refilled");
+    eq(text("#hud-score"), String(W.board.score), "HUD score");
+    eq(text("#hud-longest"), "CAT", "HUD longest");
+    check(q("#action-text").style.display !== "none" && /CAT/.test(text("#action-text")), "toast shows the word");
+    const top = W.save.get("topWords");
+    eq([top.length, top[0].word, top[0].mode], [1, "cat", "classic"], "top words recorded");
+});
 
-// Build chain = [[0,0],[1,0],[2,0]] spelling "c","a","t" = CAT.
-var priorScore = B.getScore();
-var priorGridTop0 = H.board.getGrid()[0][0].letter;
-var priorGridTop1 = H.board.getGrid()[1][0].letter;
-var priorGridTop2 = H.board.getGrid()[2][0].letter;
-assert(priorGridTop0 === 'c', 'col 0 top is C, got ' + priorGridTop0);
-assert(priorGridTop1 === 'a', 'col 1 top is A, got ' + priorGridTop1);
-assert(priorGridTop2 === 't', 'col 2 top is T, got ' + priorGridTop2);
+test("classic: tapping back and non-words", () => {
+    setRows(CAT);
+    clickCell(0, 0); clickCell(0, 1);
+    clickCell(0, 0);
+    eq(W.board.chain.length, 1, "tapping the previous tile backs up");
+    clickCell(2, 2);
+    eq(W.board.chain.length, 1, "non-adjacent tile ignored");
+    W.board.clearChain();
 
-var ok = H.playPath([[0,0],[1,0],[2,0]]);
-assert(ok, 'CAT was a valid play');
-assert(B.getScore() > priorScore, 'score rose after CAT, got ' + B.getScore());
+    const score = W.board.score;
+    clickCell(1, 0); clickCell(1, 1); clickCell(1, 2);
+    check(!W.board.submit(), "XQZ is not a word");
+    eq(W.board.score, score, "no points");
+    eq(W.board.streak, 0, "streak broken");
+    eq(text("#action-text"), "NOT A WORD", "told why");
+});
 
-// After popping + settle, top of cols 0,1,2 should still exist (refilled at top)
-// but will likely differ from c/a/t.
-var g2 = B.getGrid();
-assert(g2[0][B.ROWS - 1] !== null, 'col 0 bottom tile exists after settle');
-assert(g2[0][0] !== null, 'col 0 top tile exists (refill)');
+test("classic: double-click the last tile submits", () => {
+    setRows(CAT);
+    const words = W.board.words;
+    clickCell(0, 0); clickCell(0, 1);
+    const p = cellPoint(0, 2);
+    click(p.x, p.y);
+    click(p.x, p.y);
+    frames(2);
+    eq(W.board.words, words + 1, "CAT submitted by double-click");
+    eq(W.board.chain.length, 0, "chain cleared");
+    // Not asserted: String(getSelection()) should be "" here, but the engine
+    // selects the toast's text (ENGINE-ISSUES.md, "Double-clicking a canvas").
+    window.getSelection().removeAllRanges();
+});
 
-// --- Dictionary rejection ----------------------------------------------
-// Set a grid with a non-word sequence and try to play it.
-H.setGrid([
-    'zxqjvwk',
-    'rotayzn',
-    'pirxmxn',
-    'gelxynm',
-    'donxxnm',
-    'blmxxxn',
-    'nuvxxyz',
-    'asizxyz'
-]);
-B.clearChain();
-var priorScore2 = B.getScore();
-var ok2 = H.playPath([[0,0],[1,0],[2,0]]); // "zxq" — not a word
-assert(!ok2, 'non-word rejected');
-assert(B.getScore() === priorScore2, 'score unchanged on rejection');
+test("classic: keyboard cursor, Space, Backspace, Enter", () => {
+    setRows(CAT);
+    W.board.cursor = { r: 1, c: 0 };
+    press("ArrowUp"); frames(1);
+    eq([W.board.cursor.r, W.board.cursor.c], [0, 0], "cursor up");
+    press(" "); frames(1);
+    press("ArrowRight"); frames(1);
+    press(" "); frames(1);
+    press("ArrowRight"); frames(1);
+    press(" "); frames(1);
+    eq(W.board.preview().word, "cat", "chained by keyboard");
+    press("Backspace"); frames(1);
+    eq(W.board.chain.length, 2, "Backspace drops the last tile");
+    press(" "); frames(1);
+    const words = W.board.words;
+    press("Enter"); frames(1);
+    eq(W.board.words, words + 1, "Enter submits");
+    check(W.board.streak >= 2, "valid words build a streak");
+    check(q("#hud-combo-stat").style.display !== "none", "combo shows");
+});
 
-// --- Burning tile reaches bottom => GAME OVER ---------------------------
-B.startGame('classic');
-advanceTime(50);
-// Force a burning tile at the bottom row, then descendBurning should detect
-// collapse -> trigger GAME OVER via submit path.
-H.forceBurn(0, B.ROWS - 1);
-// Submit any valid word so descendBurning runs.
-// Construct a known valid arrangement first.
-H.setGrid([
-    'cate xyz',
-    'rotaxyz',
-    'pirxxyz',
-    'gelxxyz',
-    'donxxyz',
-    'blmxxyz',
-    'nuvxxyz',
-    'asi zxy'
-]);
-H.forceBurn(0, B.ROWS - 1);
-// Burn tile is now at col 0 bottom. The game checks descendBurning after a
-// successful word submission; since it's already at the bottom, it collapses.
-var played = H.playPath([[0,0],[1,0],[2,0]]);
-assert(played, 'CAT submission attempted');
-assert(B.isGameOver(), 'game over triggered by burning tile at bottom');
+test("classic: burning tile on the bottom ends the game", () => {
+    setRows(CAT);
+    W.board.grid[6][4].burning = true;
+    frames(1);
+    check(q("#burning-warn").style.display === "block", "danger warning up");
+    shot("burning");
+    W.board.grid[7][4].burning = true;
+    clickCell(0, 0); clickCell(0, 1); clickCell(0, 2);
+    clickSubmit();
+    check(simUntil(() => W.screen === "gameover", 500, 16), "spire collapsed");
+    eq(text("#gameover-title"), "Game Over", "collapse title");
+    check(/Doused/.test(text("#gameover-stats")) && /CAT/.test(text("#gameover-stats")), "stats");
+    check(q("#burning-warn").style.display === "none", "warning hidden off the board");
+    check(W.save.get("hsClassic").some((e) => e.score === W.board.score), "classic score recorded");
+    shot("gameover");
+});
 
-// --- findMatches sanity -------------------------------------------------
-// With a solved grid, findMatches returns at least one real word.
-B.startGame('classic');
-advanceTime(50);
-// startGame already tried to guarantee a match; either way, explicitly search.
-var matches = H.findMatches(5);
-// Accept 0 too (rare) but assert dictionary is consulted (no throw).
-assert(Array.isArray(matches), 'findMatches returned an array');
+test("timed: clock runs out", () => {
+    startMode("timed");
+    eq(text("#hud-extra-label"), "Time", "timed shows the clock");
+    eq(text("#hud-extra"), "3:00", "three minutes");
+    W.board.timeLeft = 200;
+    check(simUntil(() => W.screen === "gameover", 1000, 16), "time up");
+    eq(text("#gameover-title"), "Timed Complete!", "timed finish");
+});
 
-// --- Gameplay screenshot -----------------------------------------------
-// Play a clean game screenshot with a visible chain.
-B.startGame('classic');
-advanceTime(50);
-H.screens.switchTo('playing');
-advanceTime(50);
-// Pick any three adjacent tiles — no need for a valid word, just visual.
-B.tryAddTile(2, 3);
-B.tryAddTile(3, 4);
-B.tryAddTile(4, 4);
-advanceTime(50);
-screenshot('games/wordspire/screenshot-play.png');
+test("puzzle: target shown, solving it loads the next board", () => {
+    startMode("puzzle");
+    eq(text("#hud-extra"), "1/20", "puzzle 1 of 20");
+    const b = W.board;
+    check(b.target.length >= 3, "has a target: " + b.target);
+    const hit = L.findWords(b.grid, D, 400, 12).find((f) => f.word === b.target);
+    check(hit, "target is on the board");
+    shot("puzzle");
+    for (const [r, c] of hit.path) clickCell(r, c);
+    clickSubmit();
+    eq(b.puzzleSolved, 1, "solved one");
+    eq(b.puzzleIndex, 1, "next board");
+    eq(text("#hud-extra"), "2/20", "HUD advances");
+});
 
-console.log('wordspire tests passed.');
+test("pause keeps the chain; menu Enter does not leak", () => {
+    const b = W.board;
+    b.clearChain();
+    press("Escape"); frames(1);
+    eq(W.screen, "pause", "paused");
+    press("Enter"); frames(2);
+    eq(W.screen, "playing", "resumed");
+    eq(b.chain.length, 0, "resume Enter did not add or submit");
+    eq(b.words, 1, "no word played by the menu key");
+});
+
+test("high scores: tabs incl. top words", () => {
+    W.shell.switchTo("highscores");
+    frames(1);
+    clickOn('#screen-highscores [data-action="hs-next"]');
+    const seen = [];
+    for (let i = 0; i < 4; i++) {
+        seen.push(q(".hs-tab.active").id);
+        if (q(".hs-tab.active").id === "hs-tab-words") check(/CAT/.test(text("#hs-list")), "top words lists CAT");
+        clickOn('#screen-highscores [data-action="hs-next"]');
+    }
+    eq(new Set(seen).size, 4, "four tabs cycle");
+    shot("highscores");
+});
+
+test("settings: difficulty and volume cycle and persist", () => {
+    W.shell.switchTo("settings");
+    frames(1);
+    const d = W.save.get("difficulty");
+    clickOn('[data-action="cycle-difficulty"]');
+    check(W.save.get("difficulty") !== d, "difficulty changed");
+    eq(text("#opt-difficulty"), ["Easy", "Normal", "Hard"][W.save.get("difficulty")], "label follows");
+    const v = W.save.get("sfxVol");
+    clickOn('[data-action="cycle-sfx"]');
+    check(W.save.get("sfxVol") !== v, "volume changed");
+    eq(text("#opt-sfxVol"), String(W.save.get("sfxVol")), "volume label");
+    // Leave Normal difficulty for the next run.
+    while (W.save.get("difficulty") !== 1) clickOn('[data-action="cycle-difficulty"]');
+});
+
+done("wordspire");

@@ -1,22 +1,41 @@
-// Fluffshuffle — wrap-drag match-3 on the arcade foundation.
-// Domain: board.js, puffs.js, particles.js.
+// Fluffshuffle — wrap-drag match-3 with puff creatures, on the arcade shell.
+// Shell owns screens, loop, pause, HUD plumbing and the high score.
+// Rules: rules.js · session: board.js · drawing: render.js, puffs.js
 
+import { fitBoard, cellAt, cellCenter, formatClock } from "/lib/arcade/grid.js";
+import { createEffects } from "/lib/arcade/effects.js";
+import { bindPointer } from "/lib/arcade/pointer.js";
+import { recordScore, createScoreTabs, today } from "/lib/arcade/scores.js";
+import { createOptions, sfxVolume, toggle } from "/lib/arcade/options.js";
+import { ROWS, COLS } from "/app/rules.js";
 import { Board } from "/app/board.js";
-import { Particles } from "/app/particles.js";
-import { Puffs } from "/app/puffs.js";
+import { drawBackground, drawBoard } from "/app/render.js";
 
+const MODES = ["classic", "timed", "puzzle"];
+const HS_KEY = { classic: "hsClassic", timed: "hsTimed", puzzle: "hsPuzzle" };
+const EXTRA_LABEL = { classic: "Popped", timed: "Time", puzzle: "Moves" };
+const SCREENS = ["modeselect", "highscores", "settings", "credits"];
 const COLOR_PITCH = [0, 440, 494, 523, 587, 659, 784];
 
-let preferredMode = "classic";
-let hsMode = "classic";
-let shellRef = null;
+const fx = createEffects({
+    particle: "tuft",
+    burst: { speed: 60, speedVar: 180, up: 40, life: 650, lifeVar: 450, size: 2, sizeVar: 3, gravity: 260, drag: 0.92, spin: 6 },
+    label: { small: 20 },
+});
+
+// Menu-level choices and screens that need the api (not session state).
+let nextMode = "classic";
+let scoreTabs = null;
+let options = null;
+const settings = { dragDead: 6, eyeTrack: true, showCursor: true };
 
 export const game = {
     id: "fluffshuffle",
     clearColor: "#0d1326",
 
+    // Mouse drags go through the canvas pointer, so primary is keyboard-only.
     actions: [
-        { name: "primary", label: "Grab / release", defaults: [" ", "Enter"] },
+        { name: "primary", label: "Grab / Release", defaults: [" ", "Enter"] },
     ],
 
     defaults: {
@@ -30,392 +49,188 @@ export const game = {
         hsPuzzle: [],
     },
 
-    create(ctx) {
-        Board.setPlay(function (name) { ctx.play(name); });
-        Board.setSettings({
-            dragDead: ctx.save.get("dragDead") != null ? ctx.save.get("dragDead") : 6,
-            showCursor: ctx.save.get("showCursor") !== false,
-            eyeTrack: ctx.save.get("eyeTrack") !== false,
+    init(api) {
+        scoreTabs = createScoreTabs(api.save, MODES.map((m) => ({
+            id: m,
+            key: HS_KEY[m],
+            format: (e) => pad(e.score, 7) + "  Lv" + (e.level || 1) + "  x" + (e.chain || 1),
+        })));
+        const DRAG = [];
+        for (let px = 2; px <= 20; px++) DRAG.push(px);
+        options = createOptions(api, [
+            sfxVolume(),
+            { key: "dragDead", action: "cycle-drag", values: DRAG, apply: (v) => { settings.dragDead = v; } },
+            toggle("showCursor", "toggle-cursor", (v) => { settings.showCursor = v; }),
+            toggle("eyeTrack", "toggle-eyes", (v) => { settings.eyeTrack = v; }),
+        ]);
+        options.applyAll();
+        bindPointer(api, {
+            down(p) {
+                const run = api.getRun();
+                const cell = run && cellAt(run.layout, p.x, p.y);
+                if (cell) run.board.press(cell.r, cell.c, p.x, p.y);
+            },
+            move(p) { const run = api.getRun(); if (run) run.board.move(p.x, p.y, run.layout.cell); },
+            up(p) { const run = api.getRun(); if (run) run.board.release(p.x, p.y); },
         });
+    },
 
-        Board.startGame(preferredMode);
-        if (Particles.clear) Particles.clear();
-
+    create(api) {
+        fx.clear();
         const run = {
             score: 0,
-            mode: preferredMode,
-            play: ctx.play,
-            highScore: ctx.highScore,
-            save: ctx.save,
-            view: ctx.view,
-            ended: false,
+            save: api.save,
+            play: api.play,
+            layout: layoutFor(api.view),
+            board: null,
         };
-        attachPointer(run);
-        syncScore(run);
+        run.board = new Board({ mode: nextMode, settings, fx: boardFx(api, () => run.layout) });
         return run;
     },
 
     update(run, dt, input) {
-        if (input.pressed("up")) Board.cursorSlide(-1, 0);
-        else if (input.pressed("down")) Board.cursorSlide(1, 0);
-        else if (input.pressed("left")) Board.cursorSlide(0, -1);
-        else if (input.pressed("right")) Board.cursorSlide(0, 1);
+        const b = run.board;
+        if (input.pressed("up")) b.cursorSlide(-1, 0);
+        else if (input.pressed("down")) b.cursorSlide(1, 0);
+        else if (input.pressed("left")) b.cursorSlide(0, -1);
+        else if (input.pressed("right")) b.cursorSlide(0, 1);
+        if (input.pressed("primary")) b.cursorAction();
 
-        if (input.pressed("primary")) Board.cursorAction();
+        b.step(dt);
+        fx.update(dt);
+        run.score = b.score;
 
-        Board.update(dt);
-        if (Particles) Particles.update(dt);
-        syncScore(run);
-
-        const done = Board.isGameOver() ||
-            (Board.getMode() === "puzzle" && Board.isFinished());
-        if (done && !run.ended) {
-            run.ended = true;
-            persistHighScore(run);
+        if (b.ended()) {
+            if (b.score > 0) {
+                recordScore(run.save, HS_KEY[b.mode], { score: b.score, level: b.level, chain: b.maxChain, date: today() });
+            }
             run.play("gameover");
             return { status: "gameover" };
         }
     },
 
     draw(run, ctx, view) {
-        const { w: W, h: H } = view.size();
-        Board.calcLayout(W, H);
-        Board.drawBackground(ctx, W, H);
-        Board.drawBoard(ctx);
-        if (Particles) Particles.draw(ctx);
+        const { w, h } = view.size();
+        run.layout = layoutFor(view);
+        drawBackground(ctx, w, h, run.board.time);
+        drawBoard(ctx, run.board, run.layout, fx.shakeOffset());
+        fx.draw(ctx);
     },
 
     drawTitle(ctx, view) {
-        const { w: W, h: H } = view.size();
-        const g = ctx.createLinearGradient(0, 0, 0, H);
-        g.addColorStop(0, "#0d1326");
-        g.addColorStop(1, "#231a38");
-        ctx.fillStyle = g;
-        ctx.fillRect(0, 0, W, H);
+        const { w, h } = view.size();
+        drawBackground(ctx, w, h, 0);
     },
 
     hud(run) {
-        if (!run) {
-            return { score: 0, level: 1, extra: 0 };
-        }
-        Board.updateHUD();
-        const mode = Board.getMode();
-        let extra = Board.getPopped();
-        if (mode === "timed") extra = Board.formatTime(Board.getModeTimer());
-        else if (mode === "puzzle") extra = Board.getPuzzleMovesLeft();
+        if (!run) return { score: 0, level: 1, extra: 0 };
+        const b = run.board;
+        const extra = b.mode === "timed" ? formatClock(b.timeLeft)
+            : b.mode === "puzzle" ? b.puzzleMovesLeft
+            : b.popped;
+        const combo = document.getElementById("hud-combo-stat");
+        if (combo) combo.style.display = b.chain > 1 ? "" : "none";
         return {
-            score: Board.getScore(),
-            level: Board.getLevel(),
-            extra: extra,
-            best: run.highScore(),
+            score: b.score,
+            level: b.mode === "puzzle" ? b.puzzleIndex + 1 : b.level,
+            "level-label": b.mode === "puzzle" ? "Puzzle" : "Level",
+            extra,
+            "extra-label": EXTRA_LABEL[b.mode],
+            goal: b.mode === "puzzle" ? b.popped + " / " + b.puzzleTarget : "",
+            combo: "x" + b.chain,
         };
     },
 
     gameOverText(run) {
-        const m = Board.getMode();
-        const score = Board.getScore();
-        const stats = Board.getStats() || {};
-        const finished = Board.isFinished();
-        const modeLabel = m.charAt(0).toUpperCase() + m.slice(1);
-        const title = document.querySelector("#screen-gameover .overlay-title");
-        if (title) title.textContent = finished ? (modeLabel + " Complete!") : "Game Over";
-        const tag = run && run._newBest ? "  ·  NEW BEST" : "";
+        const b = run.board;
+        const title = document.getElementById("gameover-title");
+        if (title) title.textContent = b.finished ? cap(b.mode) + " Complete!" : "Game Over";
+        const s = b.stats;
         return (
-            "Score      " + score + tag + "\n" +
-            "Level      " + Board.getLevel() + "    Moves  " + Board.getMoves() + "\n" +
-            "Popped     " + (stats.popped || 0) + "\n" +
-            "Max Chain  x" + Board.getMaxChain() + "\n" +
-            "Specials   J" + (stats.jumboMade || 0) +
-                " A" + (stats.arrowMade || 0) +
-                " P" + (stats.prismMade || 0) + "\n" +
-            "Unlocks    " + (stats.unlocks || 0)
+            "Score      " + b.score + (run._newBest ? "  ·  NEW BEST" : "") + "\n" +
+            "Level      " + b.level + "    Moves  " + b.moves + "\n" +
+            "Popped     " + s.popped + "\n" +
+            "Max Chain  x" + b.maxChain + "\n" +
+            "Specials   Jumbo " + s.jumboMade + " · Arrow " + s.arrowMade + " · Prism " + s.prismMade + "\n" +
+            "Unlocks    " + s.unlocks
         );
     },
 
-    onEnterScreen(name, run, api) {
-        if (name === "highscores") {
-            hsMode = "classic";
-            renderHighScores(api);
-        }
-        if (name === "settings") {
-            renderSettings(api);
-        }
+    onEnterScreen(name, run) {
+        if (name === "highscores") scoreTabs.show(run ? run.board.mode : nextMode);
+        if (name === "settings") options.render();
+        const goal = document.getElementById("hud-goal-stat");
+        if (goal) goal.style.display = run && run.board.mode === "puzzle" ? "" : "none";
     },
 
-    onMenuAction(action, run, api) {
-        if (action === "modeselect" || action === "play") return "modeselect";
-        if (action === "highscores") return "highscores";
-        if (action === "settings") return "settings";
-        if (action === "credits") return "credits";
-
-        if (action === "mode-classic") {
-            preferredMode = "classic";
+    onMenuAction(action) {
+        const mode = /^mode-(\w+)$/.exec(action);
+        if (mode) {
+            nextMode = mode[1];
             return { startRun: true };
         }
-        if (action === "mode-timed") {
-            preferredMode = "timed";
-            return { startRun: true };
-        }
-        if (action === "mode-puzzle") {
-            preferredMode = "puzzle";
-            return { startRun: true };
-        }
-
-        if (action === "hs-next") {
-            const modes = ["classic", "timed", "puzzle"];
-            const i = modes.indexOf(hsMode);
-            hsMode = modes[(i + 1) % 3];
-            renderHighScores(api);
-            return null;
-        }
-
-        if (action === "cycle-sfx") {
-            let v = api.save.get("sfxVol");
-            if (v == null) v = 80;
-            v = (v + 10) % 110;
-            api.save.set("sfxVol", v);
-            api.save.save();
-            if (api.audio && api.audio.setSfxVol) api.audio.setSfxVol(v / 100);
-            renderSettings(api);
-            return null;
-        }
-        if (action === "cycle-drag") {
-            let d = api.save.get("dragDead");
-            if (d == null) d = 6;
-            d += 1;
-            if (d > 20) d = 2;
-            api.save.set("dragDead", d);
-            api.save.save();
-            Board.setSettings({ dragDead: d });
-            renderSettings(api);
-            return null;
-        }
-        if (action === "toggle-cursor") {
-            const v = api.save.get("showCursor") === false ? true : false;
-            // Toggle: if currently false → true, else false. Default is true.
-            const cur = api.save.get("showCursor");
-            const next = cur === false;
-            api.save.set("showCursor", next);
-            api.save.save();
-            Board.setSettings({ showCursor: next });
-            renderSettings(api);
-            return null;
-        }
-        if (action === "toggle-eyes") {
-            const cur = api.save.get("eyeTrack");
-            const next = cur === false;
-            api.save.set("eyeTrack", next);
-            api.save.save();
-            Board.setSettings({ eyeTrack: next });
-            renderSettings(api);
-            return null;
-        }
-
-        return null;
+        if (action === "hs-next") { scoreTabs.next(); return null; }
+        if (options.handle(action)) return null;
+        return SCREENS.includes(action) ? action : null;
     },
 
     // Game SFX only — menu move/select are shell-owned.
     cue(name, audio) {
-        if (name === "grab") audio.tone(520, 0.05, "sine", 0.35);
-        else if (name === "snap") audio.tone(880, 0.04, "square", 0.3);
-        else if (name === "cursor") audio.tone(380, 0.04, "sine", 0.22);
-        else if (name === "thud") audio.tone(120, 0.16, "sawtooth", 0.4);
-        else if (name === "lock") {
-            audio.sequence([
-                [260, 0.06, "triangle", 0.35],
-                [180, 0.10, "triangle", 0.35],
-            ]);
-        } else if (name === "levelup") {
-            audio.sequence([
-                [523, 0.1, "triangle", 0.5],
-                [659, 0.1, "triangle", 0.5],
-                [784, 0.1, "triangle", 0.5],
-                [1047, 0.18, "sine", 0.5],
-            ]);
-        } else if (name === "gameover") {
-            audio.sequence([
-                [440, 0.15, "triangle", 0.45],
-                [330, 0.15, "triangle", 0.45],
-                [220, 0.25, "triangle", 0.45],
-            ]);
-        } else if (name.indexOf("match@") === 0) {
-            const parts = name.split("@");
-            const chain = parseInt(parts[1], 10) || 1;
-            const color = parseInt(parts[2], 10) || 1;
-            const size = parseInt(parts[3], 10) || 3;
-            const base = COLOR_PITCH[color] || 520;
-            const step = Math.min(chain, 8);
-            const freq = base * Math.pow(1.0595, step);
-            const vol = Math.min(1.0, 0.35 + size * 0.05);
-            audio.tone(freq, 0.12, "triangle", vol);
-            audio.tone(freq * 1.5, 0.06, "sine", 0.25 * vol);
-            if (size >= 4) {
-                audio.sequence([
-                    [freq * 1.5, 0.08, "triangle", vol * 0.7],
-                    [freq * 2.0, 0.12, "sine", vol * 0.55],
-                ]);
-            }
-            if (chain >= 3) {
-                audio.sequence([
-                    [600 + chain * 50, 0.06, "square", 0.3],
-                    [760 + chain * 50, 0.06, "square", 0.3],
-                    [960 + chain * 50, 0.10, "square", 0.3],
-                ]);
-            }
-        }
+        const seq = CUES[name];
+        if (seq) audio.sequence(seq);
     },
 };
 
-function syncScore(run) {
-    if (run) run.score = Board.getScore();
-}
+// ── Sound ─────────────────────────────────────────────────────────────────
 
-/** One listener set per canvas; always targets the latest run on that canvas. */
-function attachPointer(run) {
-    const canvas = run.view && run.view.canvas;
-    if (!canvas) return;
-    canvas._fluffshuffleRun = run;
-    if (canvas._fluffshufflePointer) return;
-    canvas._fluffshufflePointer = true;
+const CUES = {
+    grab: [[520, 0.05, "sine", 0.35]],
+    snap: [[880, 0.04, "square", 0.3]],
+    cursor: [[380, 0.04, "sine", 0.22]],
+    thud: [[120, 0.16, "sawtooth", 0.4]],
+    lock: [[260, 0.06, "triangle", 0.35], [180, 0.1, "triangle", 0.35]],
+    levelup: [[523, 0.1, "triangle", 0.5], [659, 0.1, "triangle", 0.5], [784, 0.1, "triangle", 0.5], [1047, 0.18, "sine", 0.5]],
+    gameover: [[440, 0.15, "triangle", 0.45], [330, 0.15, "triangle", 0.45], [220, 0.25, "triangle", 0.45]],
+};
 
-    function localXY(e) {
-        const r = canvas._fluffshuffleRun;
-        if (!r || !r.view) return null;
-        const rect = canvas.getBoundingClientRect
-            ? canvas.getBoundingClientRect()
-            : null;
-        const W = r.view.width();
-        const H = r.view.height();
-        if (rect) {
-            return {
-                x: (e.clientX - rect.left) * (W / (rect.width || W)),
-                y: (e.clientY - rect.top) * (H / (rect.height || H)),
-            };
-        }
-        if (typeof e.offsetX === "number") return { x: e.offsetX, y: e.offsetY };
-        return { x: e.clientX, y: e.clientY };
+/** Each puff color has its own note; cascades climb a semitone per step. */
+function matchCue(audio, chain, color, size) {
+    const freq = (COLOR_PITCH[color] || 520) * Math.pow(1.0595, Math.min(chain, 8));
+    const vol = Math.min(1, 0.35 + size * 0.05);
+    audio.tone(freq, 0.12, "triangle", vol);
+    audio.tone(freq * 1.5, 0.06, "sine", 0.25 * vol);
+    if (size >= 4) audio.sequence([[freq * 1.5, 0.08, "triangle", vol * 0.7], [freq * 2, 0.12, "sine", vol * 0.55]]);
+    if (chain >= 3) {
+        audio.sequence([
+            [600 + chain * 50, 0.06, "square", 0.3],
+            [760 + chain * 50, 0.06, "square", 0.3],
+            [960 + chain * 50, 0.1, "square", 0.3],
+        ]);
     }
-
-    canvas.addEventListener("mousedown", function (e) {
-        if (!shellRef || shellRef.getScreen() !== "playing") return;
-        const p = localXY(e);
-        if (p) Board.handleMouseDown(p.x, p.y);
-    });
-    canvas.addEventListener("mousemove", function (e) {
-        if (!shellRef || shellRef.getScreen() !== "playing") return;
-        const p = localXY(e);
-        if (p) Board.handleMouseMove(p.x, p.y);
-    });
-    canvas.addEventListener("mouseup", function (e) {
-        if (!shellRef || shellRef.getScreen() !== "playing") return;
-        const p = localXY(e);
-        if (p) Board.handleMouseUp(p.x, p.y);
-    });
 }
 
-function hsKey(mode) {
-    if (mode === "timed") return "hsTimed";
-    if (mode === "puzzle") return "hsPuzzle";
-    return "hsClassic";
-}
+// ── Wiring ────────────────────────────────────────────────────────────────
 
-function persistHighScore(run) {
-    if (!run || !run.save) return;
-    const m = Board.getMode();
-    const score = Board.getScore();
-    if (score <= 0) return;
-    const entry = {
-        score: score,
-        level: Board.getLevel(),
-        chain: Board.getMaxChain(),
-        date: dateISO(),
-    };
-    const key = hsKey(m);
-    const list = (run.save.get(key) || []).slice();
-    list.push(entry);
-    list.sort(function (a, b) { return (b.score || 0) - (a.score || 0); });
-    run.save.set(key, list.slice(0, 10));
-    run.save.maybeHighScore(score);
-    run.save.save();
-}
-
-function renderHighScores(api) {
-    const tabs = { classic: "hs-tab-classic", timed: "hs-tab-timed", puzzle: "hs-tab-puzzle" };
-    for (const k in tabs) {
-        const el = document.getElementById(tabs[k]);
-        if (el) el.className = k === hsMode ? "hs-tab active" : "hs-tab";
-    }
-    const list = api.save.get(hsKey(hsMode)) || [];
-    const elList = document.getElementById("hs-list");
-    if (!elList) return;
-    if (!list.length) { elList.textContent = "No scores yet"; return; }
-    const lines = [];
-    for (let i = 0; i < list.length; i++) {
-        const s = list[i];
-        const rank = (i + 1 < 10 ? " " : "") + (i + 1) + ".";
-        lines.push(rank + " " + s.score + "  Lv" + (s.level || 1) + "  x" + (s.chain || 1));
-    }
-    elList.textContent = lines.join("\n");
-}
-
-function renderSettings(api) {
-    const el = function (id, v) {
-        const n = document.getElementById(id);
-        if (n) n.textContent = String(v);
-    };
-    const sfx = api.save.get("sfxVol");
-    const drag = api.save.get("dragDead");
-    el("opt-sfxVol", sfx != null ? sfx : 80);
-    el("opt-dragDead", drag != null ? drag : 6);
-    el("opt-showCursor", api.save.get("showCursor") === false ? "OFF" : "ON");
-    el("opt-eyeTrack", api.save.get("eyeTrack") === false ? "OFF" : "ON");
-}
-
-function dateISO() {
-    try { return new Date().toISOString().slice(0, 10); }
-    catch (e) { return "----"; }
-}
-
-export function installTestHooks(shell) {
-    shellRef = shell;
-
-    const Screens = {
-        switchTo: function (name) {
-            if (name === "playing" || name === "play") {
-                if (!shell.getRun()) {
-                    preferredMode = preferredMode || "classic";
-                    shell.startRun();
-                } else {
-                    shell.switchTo("playing");
-                }
-            } else if (name === "gameOver" || name === "gameover") {
-                shell.switchTo("gameover");
-            } else if (name === "modeSelect" || name === "mode-select") {
-                shell.switchTo("modeselect");
-            } else {
-                shell.switchTo(name);
-            }
-        },
-        manager: function () {
-            return {
-                name: function () { return shell.getScreen(); },
-                current: function () { return null; },
-            };
-        },
-        settings: function () { return Board.getSettings(); },
-    };
-
-    window.__fluffshuffle = {
-        G: {
-            Puffs: Puffs,
-            Particles: Particles,
-            Board: Board,
-            Screens: Screens,
-        },
-        board: Board,
-        puffs: Puffs,
-        particles: Particles,
-        screens: Screens,
-        shell: shell,
+function boardFx(api, layout) {
+    const at = (r, c) => cellCenter(layout(), r, c);
+    return {
+        cue: (name) => api.play(name),
+        matchCue: (chain, color, size) => matchCue(api.audio, chain, color, size),
+        burst(r, c, color, n) { const p = at(r, c); fx.burst(p.x, p.y, color, n); },
+        label(r, c, text, color, big) { const p = at(r, c); fx.label(p.x, p.y - (big ? 0 : 10), text, color, { big }); },
+        shake: (ms, amp) => fx.shake(ms, amp),
     };
 }
+
+export function layoutFor(view) {
+    const { w, h } = view.size();
+    return fitBoard(w, h, ROWS, COLS, { minCell: 48, maxCell: 100, padX: 200, padY: 80, biasX: -60, minX: 30, minY: 40 });
+}
+
+/** Mode for the next run (make_video.js and tests start runs directly). */
+export function setNextMode(mode) {
+    nextMode = mode;
+}
+
+function pad(n, w) { const s = String(n); return s.length >= w ? s : " ".repeat(w - s.length) + s; }
+function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }

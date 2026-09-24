@@ -1,246 +1,249 @@
-// test.js — headless harness for Fluffshuffle.
-'use strict';
+// Fluffshuffle: slide/match rules, mouse wrap-drag, keyboard grab/slide,
+// locks, cascades, the three modes, high scores and settings.
+// Run: scripts/validate.sh games/fluffshuffle
+import { test, done, check, eq, frames, simUntil, press, clickOn, q, text, shot } from "/lib/kit/test.js";
 
-advanceTime(200);
+frames(6);
+const F = window.__fluffshuffle;
+check(F, "__fluffshuffle hooks exposed");
+const R = F.rules;
+const { SPECIAL, makePuff } = R;
 
-assert(typeof window.__fluffshuffle === 'object' && window.__fluffshuffle, '__fluffshuffle exposed');
-var hooks = window.__fluffshuffle;
-var G = hooks.G;
-var B = hooks.board;
-assert(B && typeof B.findMatches === 'function', 'board exposes findMatches');
-assert(typeof B.slideRow === 'function', 'slideRow present');
-assert(typeof B.slideCol === 'function', 'slideCol present');
-assert(typeof B.hasAnyMatchingShift === 'function', 'hasAnyMatchingShift present');
+/** Grid from rows of color digits; "L" before a digit locks that puff. */
+function grid(rows) {
+    return rows.map((row) => {
+        const out = [];
+        for (let i = 0; i < row.length; i++) {
+            const locked = row[i] === "L";
+            if (locked) i++;
+            out.push(makePuff(+row[i], 0, locked));
+        }
+        return out;
+    });
+}
+const colors = (g) => g.map((row) => row.map((p) => (p ? p.color : 0)).join(""));
 
-// Title screenshot.
-screenshot('games/fluffshuffle/screenshot-title.png');
+// Each row a rotation of 1..6: no line ever holds a color twice, so no slide can match.
+const DEAD = ["123456", "234561", "345612", "456123", "561234", "612345"];
 
-// ---------- Unit tests: pure slide-with-wrap ----------
-var g = B.makeEmptyGrid();
-for (var r = 0; r < B.ROWS; r++) for (var c = 0; c < B.COLS; c++) {
-    g[r][c] = B.makePuff(1 + ((r + c) % 6), 0, false);
+// Slide row 2 right by one: its 5 lands between (1,2) and (3,2) -> vertical 5-5-5.
+const SLIDE_ME = ["123123", "235131", "456464", "315232", "123123", "231231"];
+
+const settle = () => simUntil(() => !F.board.busy(), 6000, 16);
+
+function startMode(mode) {
+    F.shell.switchTo("title");
+    frames(1);
+    clickOn('#screen-title [data-action="modeselect"]');
+    clickOn('[data-action="mode-' + mode + '"]');
+    frames(2);
+    check(F.screen === "playing" && F.board.mode === mode, mode + " run started");
 }
 
-// Slide row 2 by +1: every col c should now hold what was at col (c-1).
-var orig = B.copyGrid(g);
-var g1 = B.slideRow(g, 2, 1);
-for (var cc = 0; cc < B.COLS; cc++) {
-    var src = (cc - 1 + B.COLS) % B.COLS;
-    assert(g1[2][cc].color === orig[2][src].color,
-        'slideRow +1: col ' + cc + ' should hold col ' + src + ' color');
-}
-// Source grid must be untouched (pure).
-for (var cc2 = 0; cc2 < B.COLS; cc2++) {
-    assert(g[2][cc2].color === orig[2][cc2].color, 'slideRow does not mutate input');
-}
-// Sliding row by COLS = identity.
-var gLoop = B.slideRow(g, 2, B.COLS);
-for (var cc3 = 0; cc3 < B.COLS; cc3++) {
-    assert(gLoop[2][cc3].color === g[2][cc3].color, 'slideRow by COLS is identity');
-}
-// Negative shift wraps correctly.
-var gNeg = B.slideRow(g, 2, -1);
-for (var cc4 = 0; cc4 < B.COLS; cc4++) {
-    var src2 = (cc4 + 1) % B.COLS;
-    assert(gNeg[2][cc4].color === g[2][src2].color, 'slideRow -1 wraps');
+/** Viewport px of a cell centre (the canvas may be scaled to the window). */
+function cellPoint(r, c) {
+    const L = F.run.layout, view = F.shell.api.view;
+    const rect = view.canvas.getBoundingClientRect();
+    const sx = rect.width / view.width(), sy = rect.height / view.height();
+    return { x: rect.left + (L.ox + (c + 0.5) * L.cell) * sx, y: rect.top + (L.oy + (r + 0.5) * L.cell) * sy, sx, sy };
 }
 
-// slideCol same pattern.
-var g2 = B.slideCol(g, 3, 2);
-for (var rr = 0; rr < B.ROWS; rr++) {
-    var src3 = (rr - 2 + B.ROWS) % B.ROWS;
-    assert(g2[rr][3].color === g[src3][3].color, 'slideCol +2: row ' + rr + ' sources row ' + src3);
+/** Real mouse drag from a cell by (dc, dr) cells. */
+function drag(r, c, dr, dc) {
+    const p = cellPoint(r, c), cell = F.run.layout.cell;
+    mouseDown(p.x, p.y);
+    frames(1);
+    for (let i = 1; i <= 6; i++) {
+        mouseMove(p.x + dc * cell * p.sx * i / 6, p.y + dr * cell * p.sy * i / 6);
+        frames(1);
+    }
+    mouseUp(p.x + dc * cell * p.sx, p.y + dr * cell * p.sy);
+    frames(1);
 }
 
-// ---------- Match detection ----------
-// Fresh non-matching board.
-var mg = B.makeEmptyGrid();
-for (var mr = 0; mr < B.ROWS; mr++) for (var mc = 0; mc < B.COLS; mc++) {
-    // Stripe: color = 1 + ((r*3+c) % 6). Avoids immediate 3-in-rows/cols.
-    mg[mr][mc] = B.makePuff(1 + ((mr * 3 + mc) % 6), 0, false);
-}
-var baseMatches = B.findMatches(mg);
-assert(baseMatches.length === 0, 'striped grid has no matches, got ' + baseMatches.length);
+test("rules: slides wrap and do not mutate", () => {
+    const g = grid(DEAD);
+    eq(colors(R.slideRow(g, 2, 1))[2], "234561", "345612 >> 1 = 234561");
+    eq(colors(g)[2], "345612", "input untouched");
+    eq(colors(R.slideRow(g, 2, -1))[2], "456123", "<< 1 wraps the other way");
+    eq(colors(R.slideRow(g, 2, 6))[2], "345612", "a full turn is identity");
+    const down = R.slideCol(g, 0, 2);
+    eq(colors(down).map((row) => row[0]).join(""), "561234", "column slides down with wrap");
+});
 
-// Force a 3-in-a-row on row 0.
-mg[0][0].color = 1; mg[0][1].color = 1; mg[0][2].color = 1;
-// clear any accidentally-matching neighbors on row 1 cols 0-2
-for (var kc = 0; kc < 3; kc++) if (mg[1][kc].color === 1) mg[1][kc].color = 2;
-var m1 = B.findMatches(mg);
-assert(m1.length === 1, 'one 3-match group, got ' + m1.length);
-assert(m1[0].size === 3, '3 cells');
-assert(m1[0].maxLine === 3, 'maxLine=3');
-assert(m1[0].special === B.SPECIAL_NONE, 'no special for 3-match');
+test("rules: matches, specials, legal shifts, dead boards", () => {
+    const dead = grid(DEAD);
+    eq(R.findMatches(dead).length, 0, "no standing match");
+    check(!R.hasAnyMatchingShift(dead), "rotation board is dead");
 
-// 4-in-a-row → jumbo.
-mg[0][3].color = 1;
-if (mg[1][3].color === 1) mg[1][3].color = 2;
-var m2 = B.findMatches(mg);
-assert(m2[0].special === B.SPECIAL_JUMBO, 'jumbo special for 4 in a row');
+    const g = grid(DEAD);
+    g[0][0].color = g[0][1].color = g[0][2].color = 6;
+    let m = R.findMatches(g).filter((x) => x.color === 6);
+    eq([m.length, m[0].special], [1, SPECIAL.NONE], "3-line plain");
+    g[0][3].color = 6;
+    eq(R.findMatches(g).find((x) => x.color === 6).special, SPECIAL.JUMBO, "4 = jumbo");
+    g[0][4].color = 6;
+    const five = R.findMatches(g).find((x) => x.color === 6);
+    eq([five.special, five.arrowDir], [SPECIAL.ARROW, "h"], "5 = horizontal arrow");
 
-// 5 → arrow.
-mg[0][4].color = 1;
-if (mg[1][4].color === 1) mg[1][4].color = 2;
-var m3 = B.findMatches(mg);
-assert(m3[0].special === B.SPECIAL_ARROW, 'arrow special for 5 in a row');
-assert(m3[0].arrowDir === 'h', 'horizontal arrow dir');
+    const l = grid(DEAD);
+    l[0][0].color = l[0][1].color = l[0][2].color = 5;
+    l[1][0].color = l[2][0].color = 5;
+    const lm = R.findMatches(l).filter((x) => x.color === 5);
+    eq([lm.length, lm[0].special], [1, SPECIAL.PRISM], "L = prism");
 
-// L-shape → prism.
-var lg = B.makeEmptyGrid();
-for (var lr = 0; lr < B.ROWS; lr++) for (var lc = 0; lc < B.COLS; lc++) {
-    lg[lr][lc] = B.makePuff(1 + ((lr * 5 + lc * 3 + 2) % 6), 0, false);
-}
-lg[0][0].color = 2; lg[0][1].color = 2; lg[0][2].color = 2;
-lg[1][0].color = 2; lg[2][0].color = 2;
-// wipe cross-contamination
-if (lg[0][3].color === 2) lg[0][3].color = 3;
-if (lg[3][0].color === 2) lg[3][0].color = 3;
-if (lg[1][1].color === 2) lg[1][1].color = 3;
-if (lg[2][1].color === 2) lg[2][1].color = 3;
-if (lg[1][2].color === 2) lg[1][2].color = 3;
-var m4 = B.findMatches(lg);
-assert(m4.length === 1, 'L fuses to one group, got ' + m4.length);
-assert(m4[0].special === B.SPECIAL_PRISM, 'prism special for L/T');
+    const s = grid(SLIDE_ME);
+    eq(R.findMatches(s).length, 0, "slide board is quiet");
+    check(R.findMatches(R.slideRow(s, 2, 1)).some((x) => x.color === 5 && x.hasV), "slide makes a vertical 5-line");
+    check(R.legalShifts(s).some((x) => x.axis === "h" && x.index === 2), "legalShifts lists row 2");
+    s[2][0].locked = true;
+    check(!R.legalShifts(s).some((x) => x.axis === "h" && x.index === 2), "a locked row cannot shift");
 
-// ---------- Slide creates match + hasAnyMatchingShift ----------
-// Shifting a row rotates it, so no NEW horizontal 3-in-a-row can appear in
-// that row that wasn't already there. Instead, a slide creates a match by
-// aligning a colored cell with matching cells in adjacent rows (vertical
-// 3-in-a-column). Set that up precisely.
-//
-// Target vertical match at column c=2, color 5. Place (1,2)=5 and (3,2)=5.
-// In pre-shift row 2, put color 5 at col 1, NOT col 2. After shift +1,
-// (2,2) = old (2,1) = 5 → column 2 reads 5,5,5.
-var sg = B.makeEmptyGrid();
-// Start every cell a "safe" color that never creates cross-matches. Use
-// a mosaic where no two orthogonal neighbors share a color and row 2 is
-// rebuilt explicitly below.
-for (var sr = 0; sr < B.ROWS; sr++) for (var sc = 0; sc < B.COLS; sc++) {
-    // Use color = 1 + ((sr + sc * 2) % 3) from {1,2,3} — never equals 4/5/6.
-    sg[sr][sc] = B.makePuff(1 + ((sr + sc * 2) % 3), 0, false);
-}
-// Now plant the vertical-match setup at column 2 using color 5.
-sg[1][2] = B.makePuff(5, 0, false);
-sg[3][2] = B.makePuff(5, 0, false);
-// Row 2: every cell color 4, except (2,1)=5 (will slide into col 2).
-for (var rc = 0; rc < B.COLS; rc++) sg[2][rc] = B.makePuff(4, 0, false);
-sg[2][1] = B.makePuff(5, 0, false);
-// Pre-shift board must have no existing match.
-// Row 2 is all color 4 except col 1 — that's 4,5,4,4,4,4 which has
-// no 3-in-a-row. Column 2 is [...,5,4,5,...] — no match.
-// But row 2 has 4,4,4,4 at cols 2..5 which IS a horizontal 4-match! Fix.
-sg[2][2] = B.makePuff(6, 0, false);
-sg[2][4] = B.makePuff(6, 0, false);
-// Row 2 is now: [4, 5, 6, 4, 6, 4] — no run of 3.
-// Column 4 now reads [sr=0..5 col 4]. Make sure no accidental vert match.
-// We'll validate via findMatches.
-var preCheck = B.findMatches(sg);
-assert(preCheck.length === 0, 'pre-shift has no match, got ' + preCheck.length);
-// Post-shift +1 on row 2 → row 2 becomes [4, 4, 5, 6, 4, 6].
-// Column 2 becomes [sg[0][2], sg[1][2]=5, 5 (from shift), sg[3][2]=5, ...].
-var sgShifted = B.slideRow(sg, 2, 1);
-var postM = B.findMatches(sgShifted);
-assert(postM.length >= 1, 'post-shift produces a match, got ' + postM.length);
-// Verify it's specifically a vertical 5-run at column 2.
-var foundVert = false;
-for (var pm = 0; pm < postM.length; pm++) {
-    if (postM[pm].color === 5 && postM[pm].hasV) { foundVert = true; break; }
-}
-assert(foundVert, 'vertical 5-color match at column 2 after shift');
+    eq(R.scoreChain(3, 0), 150, "3 puffs = 150");
+    eq(R.scoreChain(3, 1), 300, "doubled on the second step");
+    eq(R.scoreChain(4, 2), 600, "tripled on the third");
+});
 
-// legalShifts / hasAnyMatchingShift detect this.
-assert(B.hasAnyMatchingShift(sg), 'hasAnyMatchingShift true on board with a legal move');
-var shifts = B.legalShifts(sg);
-var found = false;
-for (var si = 0; si < shifts.length; si++) {
-    if (shifts[si].axis === 'h' && shifts[si].index === 2) { found = true; break; }
-}
-assert(found, 'legalShifts lists row 2 as a legal move');
+test("rules: specials chain their blasts", () => {
+    const g = grid(DEAD);
+    g[1][0].special = SPECIAL.ARROW; g[1][0].arrowDir = "h";   // row 1
+    g[1][4].special = SPECIAL.JUMBO;                            // caught -> 3x3 around (1,4)
+    const cells = R.expandClears(g, [[1, 0]], []);
+    const has = (r, c) => cells.some(([y, x]) => y === r && x === c);
+    check(has(1, 5) && has(0, 3) && has(2, 5), "arrow row then jumbo burst");
+    check(!R.expandClears(g, [[1, 0]], [[1, 0]]).some(([y, x]) => y === 1 && x === 0), "keep cell survives");
+});
 
-// Deadlock: construct a board with no 3-in-a-row achievable by a single
-// row/column shift. With 6 colors and 6x6, "each row is a rotation of 1..6"
-// gives no same-color adjacencies and no line shift produces three in a row.
-var dead = B.makeEmptyGrid();
-for (var dr = 0; dr < B.ROWS; dr++) for (var dc = 0; dc < B.COLS; dc++) {
-    dead[dr][dc] = B.makePuff(1 + ((dr + dc) % 6), 0, false);
-}
-// Every row/column is a rotation of 1..6 — no single-axis wrap shift can
-// produce three same-color cells in a line. (Shifting a row k just rotates
-// it; it still contains one of each color.)
-assert(B.findMatches(dead).length === 0, 'deadlock board has no existing match');
-assert(!B.hasAnyMatchingShift(dead), 'hasAnyMatchingShift false for deadlocked rotation board');
+test("menus: title, mode select, how to play", () => {
+    eq(F.screen, "title", "boots to title");
+    shot("title");
+    clickOn('#screen-title [data-action="howto"]');
+    eq(F.screen, "howto", "how to play");
+    clickOn('#screen-howto [data-action="back"]');
+    eq(F.screen, "title", "back");
+});
 
-// ---------- Scoring / cascade multiplier ----------
-assert(B.scoreChain(3, 0) === 150, '3 puffs at chain depth 0 = 150');
-assert(B.scoreChain(3, 1) === 300, '3 puffs at chain depth 1 (x2) = 300');
-assert(B.scoreChain(4, 2) === 600, '4 puffs at chain depth 2 (x3) = 600');
+test("classic: mouse wrap-drag pops a line and scores", () => {
+    startMode("classic");
+    eq(text("#hud-extra-label"), "Popped", "classic shows popped");
+    F.board.setGrid(grid(SLIDE_ME));
+    frames(2);
+    drag(2, 3, 0, 1);
+    check(settle(), "cascade settles");
+    eq(F.board.moves, 1, "one move");
+    check(F.board.score >= 150, "scored: " + F.board.score);
+    check(F.board.popped >= 3, "popped: " + F.board.popped);
+    eq(text("#hud-score"), String(F.board.score), "HUD score");
+    shot("classic");
+});
 
-// ---------- Integration: enter classic, force a match, score goes up ----------
-B.startGame('classic');
-advanceTime(50);
-G.Screens.switchTo('playing');
-advanceTime(50);
-flush();
-advanceTime(100);
+test("classic: dragging a locked row thuds; keyboard grab-slide-release moves", () => {
+    const g = grid(SLIDE_ME);
+    g[2][5].locked = true;
+    F.board.setGrid(g);
+    const moves = F.board.moves;
+    drag(2, 3, 0, 1);
+    frames(10);
+    eq(F.board.moves, moves, "locked row did not move");
+    eq(colors(F.board.grid)[2], "456464", "row unchanged");
 
-// Install our crafted board and verify score increases after slide.
-B.setGrid(sg);
-B.setScore(0);
-assert(B.getScore() === 0, 'score reset');
+    F.board.setGrid(grid(SLIDE_ME));
+    F.board.cursor = { r: 2, c: 1, active: true };
+    press(" ");
+    frames(1);
+    check(F.board.drag, "Space grabs");
+    press("ArrowRight");
+    frames(1);
+    eq(F.board.drag.axis, "h", "first arrow picks the row");
+    press(" ");
+    frames(1);
+    check(F.board.snap, "Space releases into a snap");
+    check(settle(), "released line settles");
+    eq(F.board.moves, moves + 1, "keyboard slide counted");
+    check(F.board.score > 0, "and scored");
+});
 
-// Force a resolve by sliding row 2 by 1.
-B.setGrid(B.slideRow(B.getGrid(), 2, 1));
-B.resolveMatchesNow();
-// Let flash + collapse + any cascade complete.
-advanceTime(2500);
-assert(B.getScore() > 0, 'score increased after forced slide+match, got ' + B.getScore());
+test("pause: Enter on Resume does not grab a puff", () => {
+    press("Escape");
+    eq(F.screen, "pause", "paused");
+    press("Enter");
+    frames(2);
+    eq(F.screen, "playing", "resumed");
+    eq(F.board.drag, null, "the Enter that resumed did not grab");
+});
 
-// ---------- Cascade escalation ----------
-// Build a grid with TWO independent matches so findMatches returns >=2 groups,
-// plus a setup where the collapse triggers a second cascade.
-B.startGame('classic');
-advanceTime(50);
+test("classic: a dead board ends the run", () => {
+    F.board.setGrid(grid(DEAD));
+    F.board.resolving = true;         // as if a slide just settled here
+    simUntil(() => F.screen === "gameover", 2000, 16);
+    eq(F.screen, "gameover", "game over");
+    eq(text("#gameover-title"), "Game Over", "title");
+    check(/Unlocks/.test(text("#gameover-stats")), "stats block");
+});
 
-// Row 0 cols 0-2: color 1; Row 1 cols 0-2: color 2; Row 2 cols 0-2: color 3.
-// Drop two more of color 1 at (1,3),(2,3) and a color 1 at (3,3) and (3,2),(3,1),
-// so that once row 0 pops and gravity pulls down, a new match can form.
-var cg = B.makeEmptyGrid();
-for (var cr = 0; cr < B.ROWS; cr++) for (var cc5 = 0; cc5 < B.COLS; cc5++) {
-    cg[cr][cc5] = B.makePuff(1 + ((cr * 5 + cc5 * 3 + 2) % 6), 0, false);
-}
-// Two simultaneous matches → chain 1 first resolve.
-cg[0][0].color = 1; cg[0][1].color = 1; cg[0][2].color = 1;
-cg[5][3].color = 2; cg[5][4].color = 2; cg[5][5].color = 2;
-// scrub neighbors
-if (cg[1][0].color === 1) cg[1][0].color = 3;
-if (cg[1][1].color === 1) cg[1][1].color = 3;
-if (cg[1][2].color === 1) cg[1][2].color = 3;
-if (cg[4][3].color === 2) cg[4][3].color = 4;
-if (cg[4][4].color === 2) cg[4][4].color = 4;
-if (cg[4][5].color === 2) cg[4][5].color = 4;
+test("timed: clock counts down and pops add time", () => {
+    startMode("timed");
+    eq(text("#hud-extra-label"), "Time", "timed shows time");
+    const t0 = F.board.timeLeft;
+    frames(30);
+    check(F.board.timeLeft < t0, "clock runs");
+    F.board.timeLeft = 10000;
+    const start = F.board.time;
+    F.board.setGrid(grid(SLIDE_ME));
+    drag(2, 3, 0, 1);
+    check(settle(), "settles");
+    const noBonus = 10000 - (F.board.time - start);
+    check(F.board.timeLeft >= noBonus + 3 * 150, "pops added time: " + F.board.timeLeft + " vs " + noBonus);
+    F.board.timeLeft = 30;
+    simUntil(() => F.screen === "gameover", 2000, 16);
+    eq(text("#gameover-title"), "Timed Complete!", "time up completes the mode");
+});
 
-B.setGrid(cg);
-B.setScore(0);
-var pre = B.getScore();
-B.resolveMatchesNow();
-advanceTime(2500);
-var afterOne = B.getScore() - pre;
-// Expected at least scoreChain(6, 0) = 300.
-assert(afterOne >= 300, 'two 3-matches at chain 1 yield >=300, got ' + afterOne);
+test("puzzle: goal, move budget, next board", () => {
+    startMode("puzzle");
+    eq(text("#hud-extra-label"), "Moves", "puzzle shows moves left");
+    check(q("#hud-goal-stat").style.display !== "none", "goal visible");
+    eq(text("#hud-goal"), "0 / " + F.board.puzzleTarget, "goal text");
+    check(F.board.grid.some((row) => row.some((p) => p.locked)), "puzzle has locks");
+    const left = F.board.puzzleMovesLeft;
+    F.board.setGrid(grid(SLIDE_ME));
+    drag(2, 3, 0, 1);
+    check(settle(), "settles");
+    eq(F.board.puzzleMovesLeft, left - 1, "a move spent");
+    F.board.popped = F.board.puzzleTarget;
+    F.board.resolving = true;
+    check(settle(), "settles");
+    eq(F.board.puzzleIndex, 1, "goal met -> puzzle 2");
+    eq(text("#hud-level"), "2", "HUD shows puzzle 2");
+    shot("puzzle");
+});
 
-// Now simulate a 2-chain manually: after resolve, chain state is tracked
-// internally. Resolve a fresh grid, then immediately resolve again before
-// reset (verifies scoreChain formula reacts to chain depth).
-assert(B.scoreChain(3, 0) < B.scoreChain(3, 1), 'chain 2 scores more than chain 1');
-assert(B.scoreChain(3, 1) < B.scoreChain(3, 2), 'chain 3 scores more than chain 2');
+test("high scores record per mode", () => {
+    press("Escape");
+    clickOn('#screen-pause [data-action="title"]');
+    clickOn('#screen-title [data-action="highscores"]');
+    check(q("#hs-tab-puzzle").className.indexOf("active") >= 0, "opens on the last mode's tab");
+    clickOn('[data-action="hs-next"]');
+    check(q("#hs-tab-classic").className.indexOf("active") >= 0, "cycles to classic");
+    check(/\d/.test(text("#hs-list")), "classic run listed: " + text("#hs-list"));
+    clickOn('#screen-highscores [data-action="back"]');
+});
 
-// ---------- Mid-play screenshot ----------
-// Seed fresh classic game and let a few frames render.
-B.startGame('classic');
-G.Screens.switchTo('playing');
-advanceTime(100);
-flush();
-advanceTime(300);
-screenshot('games/fluffshuffle/screenshot-play.png');
+test("settings: toggles reach the board", () => {
+    clickOn('#screen-title [data-action="settings"]');
+    eq(text("#opt-eyeTrack"), "ON", "eyes on by default");
+    clickOn('[data-action="toggle-eyes"]');
+    eq(text("#opt-eyeTrack"), "OFF", "eyes off");
+    const b = F.startRun("classic");
+    eq(b.settings.eyeTrack, false, "board sees it");
+    F.shell.switchTo("settings");
+    clickOn('[data-action="toggle-eyes"]');
+    eq(text("#opt-eyeTrack"), "ON", "eyes back on");
+    const dead = +text("#opt-dragDead");
+    clickOn('[data-action="cycle-drag"]');
+    const next = dead >= 20 ? 2 : dead + 1;
+    eq(text("#opt-dragDead"), String(next), "drag threshold cycles");
+    eq(F.board.settings.dragDead, next, "live setting");
+});
 
-console.log('fluffshuffle tests passed.');
+done("fluffshuffle");

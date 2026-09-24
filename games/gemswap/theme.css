@@ -5,7 +5,7 @@
     --arcade-accent: #c78aff;
     --arcade-text: #fff;
     --arcade-muted: #8b7aa5;
-    --arcade-faint: #5a4a70;
+    --arcade-faint: #6a5a85;
     --arcade-overlay: rgba(10, 6, 18, 0.9);
     --arcade-hud-border: #3a2a55;
     --arcade-menu-hover: rgba(199, 138, 255, 0.08);
@@ -20,32 +20,12 @@
 
 .overlay-title {
     text-shadow: 0 0 24px rgba(180, 100, 230, 0.6);
-    letter-spacing: 4px;
 }
 
 .overlay-sub strong {
     color: #ffe873;
 }
 
-.mode-descriptions {
-    margin-bottom: 20px;
-}
-
-.mode-desc {
-    font-size: 12px;
-    color: #6a5a85;
-    margin-bottom: 4px;
-}
-
 .htp-body {
-    text-align: center;
     max-width: 560px;
-    margin-left: auto;
-    margin-right: auto;
-}
-
-.credits-sub {
-    color: #5a4a70;
-    font-size: 12px;
-    margin-top: 20px;
 }

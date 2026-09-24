@@ -1,18 +1,41 @@
-// Wordspire — letter-grid word builder on the arcade foundation.
-// Domain: board.js, dictionary.js, scoring.js, particles.js, text.js.
+// Wordspire — letter-grid word builder with three modes, on the arcade shell.
+// Shell owns screens, loop, pause, HUD plumbing and the high score.
+// Tiles + paths: letters.js · session: board.js · drawing: render.js
+// · words: dictionary.js · points: scoring.js
 
-import { Board } from "/app/board.js";
+import { cellAt, cellCenter, formatClock } from "/lib/arcade/grid.js";
+import { createEffects } from "/lib/arcade/effects.js";
+import { bindPointer } from "/lib/arcade/pointer.js";
+import { recordScore, createScoreTabs, today } from "/lib/arcade/scores.js";
+import { createOptions, sfxVolume } from "/lib/arcade/options.js";
+import { Board, PUZZLE_COUNT } from "/app/board.js";
 import { Dictionary } from "/app/dictionary.js";
-import { Particles } from "/app/particles.js";
-import { Scoring } from "/app/scoring.js";
-import { Text } from "/app/text.js";
+import { burningDanger } from "/app/letters.js";
+import { layoutFor, buttons, hit, drawBackground, drawBoard } from "/app/render.js";
 
-const LADDER = [261.63, 293.66, 329.63, 349.23, 392.0, 440.0, 493.88, 523.25, 587.33, 659.25, 783.99, 880.0];
+const MODES = ["classic", "timed", "puzzle"];
+const HS_KEY = { classic: "hsClassic", timed: "hsTimed", puzzle: "hsPuzzle" };
+const EXTRA_LABEL = { classic: "Words", timed: "Time", puzzle: "Puzzle" };
+const SCREENS = ["modeselect", "highscores", "settings", "credits"];
+const DIFFICULTY = ["Easy", "Normal", "Hard"];
 
-let preferredMode = "classic";
-let hsTab = "classic";
-let shellRef = null;
-let bgT = 0;
+// Used when words.txt cannot be read, so the game still plays.
+const FALLBACK_WORDS = [
+    "cat", "dog", "eat", "run", "sun", "moon", "star", "stone", "word", "play",
+    "game", "hello", "world", "tile", "chain", "board", "spire", "tower",
+    "test", "type", "tone", "crate", "rate", "hate", "late", "plate",
+];
+
+const fx = createEffects({
+    particle: "square",
+    burst: { speed: 180, speedVar: 180, up: 0, life: 450, lifeVar: 300, size: 2, sizeVar: 3, gravity: 500, drag: 1, spin: 0 },
+});
+
+// Menu-level choices (not session state).
+let nextMode = "classic";
+let scoreTabs = null;
+let options = null;
+let titleTime = 0;
 
 export const game = {
     id: "wordspire",
@@ -20,7 +43,7 @@ export const game = {
 
     actions: [
         { name: "primary", label: "Add tile", defaults: [" "] },
-        { name: "secondary", label: "Remove / clear", defaults: ["Backspace"] },
+        { name: "secondary", label: "Remove last", defaults: ["Backspace"] },
         { name: "confirm", label: "Submit", defaults: ["Enter"] },
     ],
 
@@ -28,440 +51,234 @@ export const game = {
         highScore: 0,
         difficulty: 1,
         sfxVol: 80,
-        musicVol: 60,
         hsClassic: [],
         hsTimed: [],
         hsPuzzle: [],
         topWords: [],
     },
 
-    create(ctx) {
-        Board.setPlay(function (name) { ctx.play(name); });
-        Board.setSettings({
-            difficulty: ctx.save.get("difficulty") != null ? ctx.save.get("difficulty") : 1,
+    init(api) {
+        scoreTabs = createScoreTabs(api.save, [
+            ...MODES.map((m) => ({
+                id: m,
+                key: HS_KEY[m],
+                format: (e) => pad(e.score, 6) + "  Words " + pad(e.words || 0, 3) + "  Best " + (e.best || "-").toUpperCase(),
+            })),
+            {
+                id: "words",
+                key: "topWords",
+                empty: "No words yet",
+                format: (e) => (e.word || "").toUpperCase() + "  +" + (e.score || 0) + "  (" + (e.mode || "?") + ")",
+            },
+        ]);
+        options = createOptions(api, [
+            sfxVolume(),
+            { key: "difficulty", action: "cycle-difficulty", values: [1, 2, 0], label: (v) => DIFFICULTY[v] || "Normal" },
+        ]);
+        options.applyAll();
+        bindPointer(api, {
+            click: (p) => clickAt(api, p),
+            dblclick: (p) => dblclickAt(api, p),
         });
-        Board.setOnWord(function (entry) {
-            addTopWord(ctx.save, entry);
-        });
+        loadDictionary(api);
+    },
 
-        Board.startGame(preferredMode);
-        Particles.clear && Particles.clear();
-
+    create(api) {
+        fx.clear();
         const run = {
             score: 0,
-            mode: preferredMode,
-            play: ctx.play,
-            highScore: ctx.highScore,
-            save: ctx.save,
-            view: ctx.view,
-            ended: false,
+            save: api.save,
+            play: api.play,
+            layout: layoutFor(api.view.width(), api.view.height()),
+            board: null,
         };
-        attachPointer(run);
-        syncScore(run);
+        run.board = new Board({
+            mode: nextMode,
+            difficulty: options ? options.get("difficulty") : 1,
+            fx: boardFx(api, () => run.layout),
+        });
         return run;
     },
 
     update(run, dt, input) {
-        if (input.pressed("left")) Board.moveCursor(-1, 0);
-        else if (input.pressed("right")) Board.moveCursor(1, 0);
-        else if (input.pressed("up")) Board.moveCursor(0, -1);
-        else if (input.pressed("down")) Board.moveCursor(0, 1);
+        const b = run.board;
+        if (input.pressed("up")) b.moveCursor(-1, 0);
+        else if (input.pressed("down")) b.moveCursor(1, 0);
+        else if (input.pressed("left")) b.moveCursor(0, -1);
+        else if (input.pressed("right")) b.moveCursor(0, 1);
+        if (input.pressed("primary")) b.tapCursor();
+        if (input.pressed("confirm")) b.submit();
+        if (input.pressed("secondary")) b.removeLast();
 
-        if (input.pressed("primary")) Board.keyAddAtCursor();
-        if (input.pressed("confirm")) Board.submitChain();
-        if (input.pressed("secondary")) Board.removeLastTile();
+        b.step(dt);
+        fx.update(dt);
+        run.score = b.score;
 
-        Board.tick(dt);
-        syncScore(run);
-
-        if ((Board.isGameOver() || Board.isFinished()) && !run.ended) {
-            run.ended = true;
-            persistHighScore(run);
-            if (Board.isFinished()) run.play("win");
+        if (b.ended()) {
+            recordScore(run.save, HS_KEY[b.mode], {
+                score: b.score, words: b.words, longest: b.longest, best: b.bestWord,
+                bestScore: b.bestWordScore, time: Math.floor(b.time), date: today(),
+            });
+            if (b.finished) run.play("win");    // a collapse already cued "gameover"
             return { status: "gameover" };
         }
     },
 
     draw(run, ctx, view) {
-        const { w: W, h: H } = view.size();
-        drawBg(ctx, W, H);
-        const sh = Particles.shakeOffset ? Particles.shakeOffset() : { x: 0, y: 0 };
+        const { w, h } = view.size();
+        run.layout = layoutFor(w, h);
+        drawBackground(ctx, w, h, run.board.time);
+        const o = fx.shakeOffset();
         ctx.save();
-        ctx.translate(sh.x, sh.y);
-        Board.draw(ctx, W, H, performance.now());
+        ctx.translate(o.x, o.y);
+        drawBoard(ctx, run.board, run.layout, w, h, run.board.preview());
+        fx.draw(ctx);
         ctx.restore();
     },
 
     drawTitle(ctx, view) {
-        const { w: W, h: H } = view.size();
-        drawBg(ctx, W, H);
+        const { w, h } = view.size();
+        titleTime += 16;
+        drawBackground(ctx, w, h, titleTime);
     },
 
     hud(run) {
-        if (!run) {
-            return { score: 0, level: 1, extra: 0, longest: "-", best: "-" };
-        }
-        Board.updateHUD();
-        const st = Board.getStats();
-        let extra = st.words;
-        if (st.mode === "timed") {
-            // Board.updateHUD already wrote the clock into #hud-extra
-            const el = document.getElementById("hud-extra");
-            extra = el ? el.textContent : "0:00";
-        } else if (st.mode === "puzzle") {
-            const el = document.getElementById("hud-extra");
-            extra = el ? el.textContent : "1/20";
-        }
+        const warn = document.getElementById("burning-warn");
+        const combo = document.getElementById("hud-combo-stat");
+        const b = run && run.board;
+        if (warn) warn.style.display = b && b.mode === "classic" && !b.ended() && burningDanger(b.grid) ? "block" : "none";
+        if (combo) combo.style.display = b && b.streak >= 2 ? "" : "none";
+        if (!b) return { score: 0, level: 1, extra: 0, longest: "-", bestword: "-" };
+        const extra = b.mode === "timed" ? formatClock(b.timeLeft, true)
+            : b.mode === "puzzle" ? Math.min(PUZZLE_COUNT, b.puzzleSolved + 1) + "/" + PUZZLE_COUNT
+            : b.words;
         return {
-            score: st.score,
-            level: st.level,
-            extra: extra,
-            longest: st.longest ? st.longest.toUpperCase() : "-",
-            best: st.bestWord
-                ? (st.bestWord.toUpperCase() + " (" + st.bestWordScore + ")")
-                : "-",
+            score: b.score,
+            level: b.level,
+            extra,
+            "extra-label": EXTRA_LABEL[b.mode],
+            longest: b.longest ? b.longest.toUpperCase() : "-",
+            bestword: b.bestWord ? b.bestWord.toUpperCase() + " (" + b.bestWordScore + ")" : "-",
+            combo: "x" + b.streak,
         };
     },
 
     gameOverText(run) {
-        const st = Board.getStats();
-        const title = document.querySelector("#screen-gameover .overlay-title");
-        if (title) {
-            title.textContent = st.finished
-                ? st.mode.toUpperCase() + " COMPLETE!"
-                : "GAME OVER";
-        }
-        const tag = run && run._newBest ? "  ·  NEW BEST" : "";
+        const b = run.board;
+        const title = document.getElementById("gameover-title");
+        if (title) title.textContent = b.finished ? cap(b.mode) + " Complete!" : "Game Over";
         return (
-            "Mode     " + st.mode.toUpperCase() + "\n" +
-            "Score    " + st.score + tag + "\n" +
-            "Words    " + st.words + "\n" +
-            "Longest  " + (st.longest ? st.longest.toUpperCase() : "-") + "\n" +
-            "Best     " + (st.bestWord ? (st.bestWord.toUpperCase() + " +" + st.bestWordScore) : "-") + "\n" +
-            "Time     " + formatTime(st.gameTime)
+            "Mode     " + cap(b.mode) + "\n" +
+            "Score    " + b.score + (run._newBest ? "  ·  NEW BEST" : "") + "\n" +
+            "Words    " + b.words + (b.mode === "classic" ? "    Doused  " + b.doused : "") + "\n" +
+            "Longest  " + (b.longest ? b.longest.toUpperCase() : "-") + "\n" +
+            "Best     " + (b.bestWord ? b.bestWord.toUpperCase() + " +" + b.bestWordScore : "-") + "\n" +
+            "Time     " + formatClock(b.time)
         );
     },
 
-    onEnterScreen(name, run, api) {
-        if (name === "highscores") {
-            hsTab = "classic";
-            renderHighScores(api);
-        }
-        if (name === "settings") {
-            renderSettings(api);
-        }
-        if (name === "loading") {
-            const el = document.getElementById("loading-status");
-            if (el && !Dictionary.loaded()) el.textContent = "Reading dictionary...";
-        }
+    onEnterScreen(name, run) {
+        if (name === "highscores") scoreTabs.show(run ? run.board.mode : nextMode);
+        if (name === "settings") options.render();
     },
 
-    onMenuAction(action, run, api) {
-        if (action === "modeselect" || action === "play") return "modeselect";
-        if (action === "highscores") return "highscores";
-        if (action === "settings") return "settings";
-        if (action === "credits") return "credits";
-
-        if (action === "mode-classic") {
-            preferredMode = "classic";
+    onMenuAction(action) {
+        const mode = /^mode-(\w+)$/.exec(action);
+        if (mode) {
+            nextMode = mode[1];
             return { startRun: true };
         }
-        if (action === "mode-timed") {
-            preferredMode = "timed";
-            return { startRun: true };
-        }
-        if (action === "mode-puzzle") {
-            preferredMode = "puzzle";
-            return { startRun: true };
-        }
-
-        if (action === "hs-next") {
-            const tabs = ["classic", "timed", "puzzle", "words"];
-            const i = tabs.indexOf(hsTab);
-            hsTab = tabs[(i + 1) % tabs.length];
-            renderHighScores(api);
-            return null;
-        }
-
-        if (action === "cycle-difficulty") {
-            let d = api.save.get("difficulty");
-            if (d == null) d = 1;
-            d = (d + 1) % 3;
-            api.save.set("difficulty", d);
-            api.save.save();
-            Board.setSettings({ difficulty: d });
-            renderSettings(api);
-            return null;
-        }
-        if (action === "cycle-sfx") {
-            let v = api.save.get("sfxVol");
-            if (v == null) v = 80;
-            v = (v + 10) % 110;
-            api.save.set("sfxVol", v);
-            api.save.save();
-            if (api.audio && api.audio.setSfxVol) api.audio.setSfxVol(v / 100);
-            renderSettings(api);
-            return null;
-        }
-
-        return null;
+        if (action === "hs-next") { scoreTabs.next(); return null; }
+        if (options.handle(action)) return null;
+        return SCREENS.includes(action) ? action : null;
     },
 
     // Game SFX only — menu move/select are shell-owned.
     cue(name, audio) {
-        if (name === "submit_fail") {
-            audio.sequence([
-                [220, 0.07, "sawtooth", 0.5],
-                [160, 0.12, "sawtooth", 0.5],
-            ]);
-        } else if (name === "sizzle") audio.tone(90, 0.18, "sawtooth", 0.55);
-        else if (name === "fanfare") {
-            audio.sequence([
-                [523.25, 0.08, "square", 0.7],
-                [659.25, 0.08, "square", 0.7],
-                [783.99, 0.08, "square", 0.8],
-                [1046.5, 0.18, "square", 0.95],
-            ]);
-        } else if (name === "tile_remove") audio.tone(180, 0.04, "triangle", 0.3);
-        else if (name === "clear_chain") audio.tone(130, 0.08, "sine", 0.3);
-        else if (name === "gameover") {
-            audio.sequence([
-                [440, 0.18, "sawtooth", 0.6],
-                [330, 0.18, "sawtooth", 0.55],
-                [220, 0.30, "sawtooth", 0.6],
-                [165, 0.40, "sawtooth", 0.55],
-            ]);
-        } else if (name === "win") {
-            audio.sequence([
-                [523, 0.08, "square", 0.7],
-                [659, 0.08, "square", 0.7],
-                [784, 0.08, "square", 0.7],
-                [1047, 0.22, "square", 0.95],
-            ]);
-        } else if (name.indexOf("tile@") === 0) {
-            const n = parseInt(name.slice(5), 10) || 1;
-            const i = Math.min(LADDER.length - 1, Math.max(0, n));
-            audio.tone(LADDER[i], 0.06, "triangle", 0.45);
-        } else if (name.indexOf("submit@") === 0) {
-            const length = parseInt(name.slice(7), 10) || 3;
-            const base = Math.min(7, Math.max(0, length - 3));
+        const at = /^(tile|submit)@(\d+)$/.exec(name);
+        if (at && at[1] === "tile") {
+            audio.tone(LADDER[Math.min(LADDER.length - 1, +at[2])], 0.06, "triangle", 0.45);
+        } else if (at) {
+            const base = Math.min(7, Math.max(0, +at[2] - 3));
             audio.sequence([
                 [LADDER[base], 0.06, "square", 0.55],
                 [LADDER[base + 2], 0.06, "square", 0.55],
-                [LADDER[base + 4] || LADDER[LADDER.length - 1], 0.10, "square", 0.65],
+                [LADDER[base + 4], 0.1, "square", 0.65],
             ]);
+        } else if (CUES[name]) {
+            audio.sequence(CUES[name]);
         }
     },
 };
 
-function syncScore(run) {
-    if (run) run.score = Board.getScore();
-}
+// ── Sound ─────────────────────────────────────────────────────────────────
 
-function drawBg(ctx, Wd, Hd) {
-    bgT += 16;
-    const g = ctx.createLinearGradient(0, 0, 0, Hd);
-    g.addColorStop(0, "#120a24");
-    g.addColorStop(1, "#050210");
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, Wd, Hd);
+const LADDER = [261.63, 293.66, 329.63, 349.23, 392.0, 440.0, 493.88, 523.25, 587.33, 659.25, 783.99, 880.0];
+const CUES = {
+    submit_fail: [[220, 0.07, "sawtooth", 0.5], [160, 0.12, "sawtooth", 0.5]],
+    sizzle: [[90, 0.18, "sawtooth", 0.55]],
+    fanfare: [[523.25, 0.08, "square", 0.7], [659.25, 0.08, "square", 0.7], [783.99, 0.08, "square", 0.8], [1046.5, 0.18, "square", 0.95]],
+    tile_remove: [[180, 0.04, "triangle", 0.3]],
+    clear_chain: [[130, 0.08, "sine", 0.3]],
+    gameover: [[440, 0.18, "sawtooth", 0.6], [330, 0.18, "sawtooth", 0.55], [220, 0.3, "sawtooth", 0.6], [165, 0.4, "sawtooth", 0.55]],
+    win: [[523, 0.08, "square", 0.7], [659, 0.08, "square", 0.7], [784, 0.08, "square", 0.7], [1047, 0.22, "square", 0.95]],
+};
 
-    const glyphs = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    for (let i = 0; i < 22; i++) {
-        const x = ((i * 97 + bgT * 0.04) % (Wd + 120)) - 60;
-        const y = ((i * 151 + bgT * 0.03) % (Hd + 60));
-        ctx.globalAlpha = 0.05 + (i % 5) * 0.015;
-        const col = i % 3 === 0 ? "#e8c168" : (i % 3 === 1 ? "#8cdff6" : "#c8b8e8");
-        Text.drawCentered(ctx, glyphs.charAt(i % glyphs.length),
-            Math.floor(x), Math.floor(y), 6, col);
-    }
-    ctx.globalAlpha = 1.0;
-}
+// ── Wiring ────────────────────────────────────────────────────────────────
 
-/** One listener set per canvas; always targets the latest run on that canvas. */
-function attachPointer(run) {
-    const canvas = run.view && run.view.canvas;
-    if (!canvas) return;
-    canvas._wordspireRun = run;
-    if (canvas._wordspirePointer) return;
-    canvas._wordspirePointer = true;
-
-    function localXY(e) {
-        const r = canvas._wordspireRun;
-        if (!r || !r.view) return null;
-        const rect = canvas.getBoundingClientRect
-            ? canvas.getBoundingClientRect()
-            : null;
-        const W = r.view.width();
-        const H = r.view.height();
-        if (rect) {
-            return {
-                x: (e.clientX - rect.left) * (W / (rect.width || W)),
-                y: (e.clientY - rect.top) * (H / (rect.height || H)),
-            };
-        }
-        if (typeof e.offsetX === "number") return { x: e.offsetX, y: e.offsetY };
-        return { x: e.clientX, y: e.clientY };
-    }
-
-    canvas.addEventListener("click", function (e) {
-        if (!shellRef || shellRef.getScreen() !== "playing") return;
-        const p = localXY(e);
-        if (p) Board.mouseClick(p.x, p.y);
-    });
-    canvas.addEventListener("dblclick", function (e) {
-        if (!shellRef || shellRef.getScreen() !== "playing") return;
-        const p = localXY(e);
-        if (p) Board.mouseDblClick(p.x, p.y);
+/** Show the loading screen until words.txt is indexed (or falls back). */
+function loadDictionary(api) {
+    if (Dictionary.loaded()) return;
+    const status = document.getElementById("loading-status");
+    const say = (s) => { if (status) status.textContent = s; };
+    api.switchTo("loading");
+    say("Reading dictionary...");
+    Dictionary.load("words.txt").then((n) => {
+        say(n + " words loaded.");
+    }).catch((err) => {
+        console.error("wordspire: dictionary load failed:", err);
+        Dictionary.setWords(FALLBACK_WORDS);
+        say("Dictionary unavailable; using a short word list.");
+    }).then(() => {
+        if (api.getScreen() === "loading") api.switchTo("title");
     });
 }
 
-function hsKey(mode) {
-    if (mode === "timed") return "hsTimed";
-    if (mode === "puzzle") return "hsPuzzle";
-    return "hsClassic";
-}
-
-function persistHighScore(run) {
-    if (!run || !run.save) return;
-    const st = Board.getStats();
-    const entry = {
-        score: st.score,
-        words: st.words,
-        longest: st.longest,
-        best: st.bestWord,
-        bestScore: st.bestWordScore,
-        time: Math.floor(st.gameTime),
-        date: dateISO(),
-    };
-    const key = hsKey(st.mode);
-    const list = (run.save.get(key) || []).slice();
-    list.push(entry);
-    list.sort(function (a, b) { return (b.score || 0) - (a.score || 0); });
-    run.save.set(key, list.slice(0, 10));
-    run.save.maybeHighScore(st.score);
-    run.save.save();
-}
-
-function addTopWord(save, entry) {
-    if (!save || !entry) return;
-    const list = (save.get("topWords") || []).slice();
-    list.push(entry);
-    list.sort(function (a, b) { return (b.score || 0) - (a.score || 0); });
-    save.set("topWords", list.slice(0, 10));
-    save.save();
-}
-
-function renderHighScores(api) {
-    const tabs = ["classic", "timed", "puzzle", "words"];
-    for (let i = 0; i < tabs.length; i++) {
-        const t = document.getElementById("hs-tab-" + tabs[i]);
-        if (t) t.className = tabs[i] === hsTab ? "hs-tab active" : "hs-tab";
-    }
-    const out = document.getElementById("hs-list");
-    if (!out) return;
-    if (hsTab === "words") {
-        const tw = api.save.get("topWords") || [];
-        if (!tw.length) { out.textContent = "No words yet"; return; }
-        out.textContent = tw.map(function (e, i) {
-            let rank = (i + 1) + ".";
-            if (i < 9) rank = " " + rank;
-            return rank + " " + (e.word || "").toUpperCase() +
-                "  +" + (e.score || 0) + " (" + (e.mode || "?") + ")";
-        }).join("\n");
-        return;
-    }
-    const list = api.save.get(hsKey(hsTab)) || [];
-    if (!list.length) { out.textContent = "No scores yet"; return; }
-    out.textContent = list.map(function (e, i) {
-        let rank = (i + 1) + ".";
-        if (i < 9) rank = " " + rank;
-        return rank + " " + (e.score || 0) +
-            "  Words:" + (e.words || 0) +
-            "  Best:" + ((e.best || "-").toUpperCase());
-    }).join("\n");
-}
-
-function renderSettings(api) {
-    const labels = ["Easy", "Normal", "Hard"];
-    const d = api.save.get("difficulty");
-    const sfx = api.save.get("sfxVol");
-    const elD = document.getElementById("opt-difficulty");
-    const elS = document.getElementById("opt-sfxVol");
-    if (elD) elD.textContent = labels[d != null ? d : 1] || "Normal";
-    if (elS) elS.textContent = String(sfx != null ? sfx : 80);
-}
-
-function formatTime(ms) {
-    const s = Math.floor(ms / 1000);
-    const m = Math.floor(s / 60);
-    const sec = s % 60;
-    return m + ":" + (sec < 10 ? "0" : "") + sec;
-}
-
-function dateISO() {
-    try { return new Date().toISOString().slice(0, 10); }
-    catch (e) { return "----"; }
-}
-
-export function installTestHooks(shell) {
-    shellRef = shell;
-
-    const Screens = {
-        switchTo: function (name) {
-            if (name === "playing" || name === "play") {
-                if (!shell.getRun()) {
-                    preferredMode = preferredMode || "classic";
-                    shell.startRun();
-                } else {
-                    shell.switchTo("playing");
-                }
-            } else if (name === "gameOver" || name === "gameover") {
-                shell.switchTo("gameover");
-            } else if (name === "modeSelect" || name === "mode-select") {
-                shell.switchTo("modeselect");
-            } else {
-                shell.switchTo(name);
-            }
-        },
-        manager: function () {
-            return {
-                name: function () { return shell.getScreen(); },
-                current: function () { return null; },
-            };
-        },
-    };
-
-    window.__wordspire = {
-        W: {
-            Board: Board,
-            Dictionary: Dictionary,
-            Scoring: Scoring,
-            Particles: Particles,
-            Text: Text,
-            Screens: Screens,
-        },
-        board: Board,
-        dictionary: Dictionary,
-        scoring: Scoring,
-        storage: {
-            settings: {},
-            qualifies: function () { return true; },
-            add: function () {},
-            list: function () { return []; },
-            topWords: function () { return shell.api.save.get("topWords") || []; },
-        },
-        screens: Screens,
-        particles: Particles,
-        shell: shell,
-        step: function (dt) { Board.tick(dt || 16); },
-        setGrid: function (letters) { Board.setGridTest(letters); },
-        playPath: function (path) { return Board.playWordByPath(path); },
-        forceBurn: function (c, r) { Board.forceBurnAt(c, r); },
-        isValidPath: Board.isValidPath,
-        computeWordScore: Scoring.computeWordScore,
-        dictLookup: function (w) { return Dictionary.isWord(w); },
-        settle: Board.settle,
-        findMatches: function (n) { return Board.findMatches(n); },
+/** Board effects in cell coordinates -> pixels through the current layout. */
+function boardFx(api, layout) {
+    return {
+        cue: (name) => api.play(name),
+        toast: (text) => fx.toast("#action-text", text, 1100),
+        burst(r, c, color) { const p = cellCenter(layout(), r, c); fx.burst(p.x, p.y, color, 14); },
+        shake: (ms, amp) => fx.shake(ms, amp),
+        word: (entry) => recordScore(api.save, "topWords", entry),
     };
 }
+
+function clickAt(api, p) {
+    const run = api.getRun();
+    if (!run) return;
+    const b = buttons(run.layout, api.view.width());
+    if (b && hit(b.submit, p.x, p.y)) { run.board.submit(); return; }
+    if (b && hit(b.clear, p.x, p.y)) { run.board.clearChain(); return; }
+    const cell = cellAt(run.layout, p.x, p.y);
+    if (cell) run.board.tap(cell.r, cell.c);
+}
+
+/**
+ * Double-click a tile submits the chain ending on it. Its two clicks have
+ * already toggled that tile (added then dropped, or dropped then re-added),
+ * so put it back on the end first.
+ */
+function dblclickAt(api, p) {
+    const run = api.getRun();
+    const cell = run && cellAt(run.layout, p.x, p.y);
+    if (!cell) return;
+    const ch = run.board.chain;
+    const last = ch[ch.length - 1];
+    if (!last || last[0] !== cell.r || last[1] !== cell.c) run.board.tap(cell.r, cell.c);
+    run.board.submit();
+}
+
+function pad(n, w) { const s = String(n); return s.length >= w ? s : " ".repeat(w - s.length) + s; }
+function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }

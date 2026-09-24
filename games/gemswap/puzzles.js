@@ -1,103 +1,101 @@
-// puzzles.js — Puzzle mode layouts. 'F' prefix = frozen cell.
-// Each puzzle is an 8-row 8-col array of strings. Empty string = random fill.
-'use strict';
-export const Puzzles = (function () {
-    // Helper to generate a puzzle with a random pattern of frozen cells.
-    function gen(seed, density) {
-        var rows = 8, cols = 8;
-        var out = [];
-        // tiny LCG
-        var s = seed;
-        function rand() { s = (s * 1103515245 + 12345) & 0x7fffffff; return (s >>> 8) / 0xffffff; }
-        for (var r = 0; r < rows; r++) {
-            var row = [];
-            for (var c = 0; c < cols; c++) {
-                var color = 1 + Math.floor(rand() * 7);
-                if (rand() < density) row.push('F' + color);
-                else row.push(String(color));
-            }
-            out.push(row);
+// Gemswap puzzle layouts: 8 rows x 8 codes. "F3" = frozen color 3,
+// "3" = color 3, "" = random. Clear every frozen gem to advance.
+// Six hand-drawn patterns, then procedural boards up to PUZZLE_COUNT.
+
+import { seededRandom } from "/lib/arcade/grid.js";
+
+const PUZZLE_COUNT = 20;
+const _ = "";
+
+const HAND = [
+    // 1 — frame
+    [
+        ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F1"],
+        ["F2", _, _, _, _, _, _, "F2"],
+        ["F3", _, _, _, _, _, _, "F3"],
+        ["F4", _, _, _, _, _, _, "F4"],
+        ["F5", _, _, _, _, _, _, "F5"],
+        ["F6", _, _, _, _, _, _, "F6"],
+        ["F7", _, _, _, _, _, _, "F7"],
+        ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F1"],
+    ],
+    // 2 — diagonal
+    [
+        ["F1", _, _, _, _, _, _, _],
+        [_, "F2", _, _, _, _, _, _],
+        [_, _, "F3", _, _, _, _, _],
+        [_, _, _, "F4", _, _, _, _],
+        [_, _, _, _, "F5", _, _, _],
+        [_, _, _, _, _, "F6", _, _],
+        [_, _, _, _, _, _, "F7", _],
+        [_, _, _, _, _, _, _, "F1"],
+    ],
+    // 3 — checker
+    [
+        ["F1", _, "F2", _, "F3", _, "F4", _],
+        [_, "F5", _, "F6", _, "F7", _, "F1"],
+        ["F2", _, "F3", _, "F4", _, "F5", _],
+        [_, "F6", _, "F7", _, "F1", _, "F2"],
+        ["F3", _, "F4", _, "F5", _, "F6", _],
+        [_, "F7", _, "F1", _, "F2", _, "F3"],
+        ["F4", _, "F5", _, "F6", _, "F7", _],
+        [_, "F1", _, "F2", _, "F3", _, "F4"],
+    ],
+    // 4 — middle box
+    [
+        [_, _, _, _, _, _, _, _],
+        [_, _, _, _, _, _, _, _],
+        [_, _, "F1", "F2", "F3", "F4", _, _],
+        [_, _, "F2", _, _, "F5", _, _],
+        [_, _, "F3", _, _, "F6", _, _],
+        [_, _, "F4", "F5", "F6", "F7", _, _],
+        [_, _, _, _, _, _, _, _],
+        [_, _, _, _, _, _, _, _],
+    ],
+    // 5 — corners
+    [
+        ["F1", "F2", _, _, _, _, "F3", "F4"],
+        ["F2", _, _, _, _, _, _, "F5"],
+        [_, _, _, _, _, _, _, _],
+        [_, _, _, _, _, _, _, _],
+        [_, _, _, _, _, _, _, _],
+        [_, _, _, _, _, _, _, _],
+        ["F6", _, _, _, _, _, _, "F7"],
+        ["F7", "F1", _, _, _, _, "F2", "F3"],
+    ],
+    // 6 — plus
+    [
+        [_, _, _, "F1", "F2", _, _, _],
+        [_, _, _, "F3", "F4", _, _, _],
+        [_, _, _, "F5", "F6", _, _, _],
+        ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F1"],
+        ["F2", "F3", "F4", "F5", "F6", "F7", "F1", "F2"],
+        [_, _, _, "F7", "F1", _, _, _],
+        [_, _, _, "F2", "F3", _, _, _],
+        [_, _, _, "F4", "F5", _, _, _],
+    ],
+];
+
+/** Scattered frozen gems; density rises in steps of 5%. */
+function procedural(i) {
+    const rand = seededRandom(1000 + i);
+    const density = 0.15 + (i % 4) * 0.05;
+    const rows = [];
+    for (let r = 0; r < 8; r++) {
+        const row = [];
+        for (let c = 0; c < 8; c++) {
+            const color = 1 + Math.floor(rand() * 7);
+            row.push(rand() < density ? "F" + color : String(color));
         }
-        return out;
+        rows.push(row);
     }
+    return rows;
+}
 
-    // Hand-seeded patterns with frozen tiles in evocative layouts.
-    var P = [
-        // 1 — edges
-        [
-            ['F1','F2','F3','F4','F5','F6','F7','F1'],
-            ['F2','','','','','','','F2'],
-            ['F3','','','','','','','F3'],
-            ['F4','','','','','','','F4'],
-            ['F5','','','','','','','F5'],
-            ['F6','','','','','','','F6'],
-            ['F7','','','','','','','F7'],
-            ['F1','F2','F3','F4','F5','F6','F7','F1'],
-        ],
-        // 2 — diagonal stripe
-        [
-            ['F1','','','','','','',''],
-            ['','F2','','','','','',''],
-            ['','','F3','','','','',''],
-            ['','','','F4','','','',''],
-            ['','','','','F5','','',''],
-            ['','','','','','F6','',''],
-            ['','','','','','','F7',''],
-            ['','','','','','','','F1'],
-        ],
-        // 3 — checker
-        [
-            ['F1','','F2','','F3','','F4',''],
-            ['','F5','','F6','','F7','','F1'],
-            ['F2','','F3','','F4','','F5',''],
-            ['','F6','','F7','','F1','','F2'],
-            ['F3','','F4','','F5','','F6',''],
-            ['','F7','','F1','','F2','','F3'],
-            ['F4','','F5','','F6','','F7',''],
-            ['','F1','','F2','','F3','','F4'],
-        ],
-        // 4 — middle box
-        [
-            ['','','','','','','',''],
-            ['','','','','','','',''],
-            ['','','F1','F2','F3','F4','',''],
-            ['','','F2','','','F5','',''],
-            ['','','F3','','','F6','',''],
-            ['','','F4','F5','F6','F7','',''],
-            ['','','','','','','',''],
-            ['','','','','','','',''],
-        ],
-        // 5 — corners
-        [
-            ['F1','F2','','','','','F3','F4'],
-            ['F2','','','','','','','F5'],
-            ['','','','','','','',''],
-            ['','','','','','','',''],
-            ['','','','','','','',''],
-            ['','','','','','','',''],
-            ['F6','','','','','','','F7'],
-            ['F7','F1','','','','','F2','F3'],
-        ],
-        // 6 — plus sign
-        [
-            ['','','','F1','F2','','',''],
-            ['','','','F3','F4','','',''],
-            ['','','','F5','F6','','',''],
-            ['F1','F2','F3','F4','F5','F6','F7','F1'],
-            ['F2','F3','F4','F5','F6','F7','F1','F2'],
-            ['','','','F7','F1','','',''],
-            ['','','','F2','F3','','',''],
-            ['','','','F4','F5','','',''],
-        ],
-        // 7-20: procedural variants.
-    ];
+const ALL = HAND.slice();
+for (let i = ALL.length; i < PUZZLE_COUNT; i++) ALL.push(procedural(i));
 
-    for (var i = P.length; i < 20; i++) {
-        P.push(gen(1000 + i, 0.15 + (i % 4) * 0.05));
-    }
-
-    return {
-        count: function () { return P.length; },
-        get: function (i) { return P[i % P.length]; },
-    };
-})();
+export const Puzzles = {
+    count: () => ALL.length,
+    get: (i) => ALL[i % ALL.length],
+};

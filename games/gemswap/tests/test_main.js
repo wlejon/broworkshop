@@ -1,187 +1,254 @@
-// test.js — headless harness for gemswap.
-'use strict';
+// Gemswap: rules, menus, mouse + keyboard swaps, specials, cascades, the
+// three modes, high scores and settings. Run: scripts/validate.sh games/gemswap
+import { test, done, check, eq, frames, simUntil, press, clickOn, q, text, shot } from "/lib/kit/test.js";
+import { collapse, makeGrid } from "/lib/arcade/grid.js";
 
-// Give app scripts a chance to boot.
-advanceTime(200);
+frames(6);
+const G = window.__gemswap;
+check(G, "__gemswap hooks exposed");
+const R = G.rules;
+const { SPECIAL, makeGem } = R;
 
-// Sanity: globals wired up.
-assert(typeof window.__gemswap === 'object' && window.__gemswap, '__gemswap exposed');
-var hooks = window.__gemswap;
-var G = hooks.G;
-var B = hooks.board;
-assert(B && typeof B.findMatches === 'function', 'board exposes findMatches');
+/** Grid from strings of color digits; "F" before a digit freezes it, "." = empty. */
+function grid(rows) {
+    return rows.map((row) => {
+        const out = [];
+        for (let i = 0; i < row.length; i++) {
+            if (row[i] === ".") { out.push(null); continue; }
+            const frozen = row[i] === "F";
+            if (frozen) i++;
+            out.push(makeGem(+row[i], 0, frozen));
+        }
+        return out;
+    });
+}
 
-// -------- Title screenshot --------
-screenshot('games/gemswap/screenshot-title.png');
-
-// -------- Pure-function tests --------
-
-// findMatches on a hand-seeded board.
-var g = B.makeEmptyGrid();
-for (var r = 0; r < B.ROWS; r++) {
-    for (var c = 0; c < B.COLS; c++) {
-        g[r][c] = { color: 1 + ((r + c) % 7), special: 0, frozen: false };
+// A match-free board: every row is a rotation of 1..7 shifted by 3.
+function quietRows() {
+    const rows = [];
+    for (let r = 0; r < 8; r++) {
+        let s = "";
+        for (let c = 0; c < 8; c++) s += 1 + ((r * 3 + c) % 7);
+        rows.push(s);
     }
+    return rows;
 }
-// No matches in a diagonal-stripe checker.
-var m0 = B.findMatches(g);
-assert(m0.length === 0, 'diagonal-stripe grid has no matches, got ' + m0.length);
 
-// Force a horizontal 3-match in row 0, cols 0..2.
-g[0][0].color = 1; g[0][1].color = 1; g[0][2].color = 1;
-var m1 = B.findMatches(g);
-assert(m1.length === 1, 'one match found, got ' + m1.length);
-assert(m1[0].cells.length === 3, 'match has 3 cells');
-assert(m1[0].maxLine === 3, 'maxLine=3');
-assert(m1[0].special === B.SPECIAL_NONE, 'no special for 3-match');
-
-// 4-match → flame special.
-g[0][3].color = 1;
-var m2 = B.findMatches(g);
-assert(m2[0].special === B.SPECIAL_FLAME, 'flame special for 4 in a row');
-
-// 5-match → hyper.
-g[0][4].color = 1;
-var m3 = B.findMatches(g);
-assert(m3[0].special === B.SPECIAL_HYPER, 'hyper special for 5 in a row');
-
-// L/T shape → star.
-var g2 = B.makeEmptyGrid();
-for (var r2 = 0; r2 < B.ROWS; r2++) for (var c2 = 0; c2 < B.COLS; c2++) {
-    g2[r2][c2] = { color: 1 + ((r2 * 3 + c2 * 5 + 1) % 7), special: 0, frozen: false };
+function startMode(mode) {
+    G.shell.switchTo("title");
+    frames(1);
+    clickOn('#screen-title [data-action="modeselect"]');
+    clickOn('[data-action="mode-' + mode + '"]');
+    frames(2);
+    check(G.screen === "playing" && G.board.mode === mode, mode + " run started");
 }
-g2[0][0].color = 2; g2[0][1].color = 2; g2[0][2].color = 2;
-g2[1][0].color = 2; g2[2][0].color = 2;
-// Make sure neighbours don't collide
-if (g2[3][0].color === 2) g2[3][0].color = 3;
-if (g2[0][3].color === 2) g2[0][3].color = 3;
-if (g2[1][1] && g2[1][1].color === 2) g2[1][1].color = 3;
-var m4 = B.findMatches(g2);
-assert(m4.length === 1, 'L shape fuses to one group, got ' + m4.length);
-assert(m4[0].special === B.SPECIAL_STAR, 'star special for L/T');
 
-// swapMakesMatch returns true when the swap creates a match.
-var g3 = B.makeEmptyGrid();
-for (var rr = 0; rr < 8; rr++) for (var cc = 0; cc < 8; cc++) {
-    g3[rr][cc] = { color: 1 + ((rr * 7 + cc * 3) % 7), special: 0, frozen: false };
+function clickCell(r, c) {
+    const L = G.run.layout;
+    const rect = G.shell.api.view.canvas.getBoundingClientRect();
+    const sx = rect.width / G.shell.api.view.width(), sy = rect.height / G.shell.api.view.height();
+    click(rect.left + (L.ox + (c + 0.5) * L.cell) * sx, rect.top + (L.oy + (r + 0.5) * L.cell) * sy);
+    flush();
 }
-// Set up near-match: row0: [5, 5, X, 5]  where X is (0,2). Swap (0,2) with (1,2) where (1,2).color=5 → makes row0 = 5,5,5.
-g3[0][0].color = 5; g3[0][1].color = 5; g3[0][3].color = 5;
-g3[0][2].color = 3;
-g3[1][2].color = 5;
-assert(B.swapMakesMatch(g3, 0, 2, 1, 2), 'swap creates a match');
-// Make sure original unchanged
-assert(g3[0][2].color === 3, 'grid unchanged after swapMakesMatch');
 
-// Deadlock detection: grid with no valid moves.
-var dead = B.makeEmptyGrid();
-// Build a non-matching pattern with no swap able to produce a run.
-// Using the repeating 1234567 pattern rotated per row works (no two neighbors same;
-// swapping any two adjacent cells either does nothing or still no 3-in-a-row).
-for (var dr = 0; dr < 8; dr++) for (var dc = 0; dc < 8; dc++) {
-    dead[dr][dc] = { color: 1 + ((dr * 3 + dc) % 7), special: 0, frozen: false };
-}
-// Actually this pattern does have swaps that create matches sometimes; instead
-// build from a valid stripe and verify findAnyMove returns null only if truly dead.
-// So instead check the helper returns *something reasonable* on a known live board.
-var live = B.seedGrid();
-assert(B.findAnyMove(live) !== null, 'seeded board has at least one valid move');
-assert(B.findMatches(live).length === 0, 'seeded board has no starting matches');
+const settle = () => simUntil(() => !G.board.busy(), 6000, 16);
 
-// scoreChain formula: 3-match on chain depth 0 = 50 * (0+1) = 50.
-assert(B.scoreChain([3], 0) === 50, '3-match base 50');
-assert(B.scoreChain([3], 1) === 100, '3-match chain x2 = 100');
-assert(B.scoreChain([4], 0) === 100, '4-match base 100');
-assert(B.scoreChain([5], 0) === 150, '5-match base 150');
-assert(B.scoreChain([3, 3], 2) === 300, 'double-3 chain x3 = 300');
+test("rules: line matches classify into specials", () => {
+    const g = grid(quietRows());
+    eq(R.findMatches(g).length, 0, "quiet board");
+    g[0][0].color = g[0][1].color = g[0][2].color = 1;
+    let m = R.findMatches(g).filter((x) => x.color === 1);
+    eq(m.length, 1, "one group of 1s");
+    eq([m[0].size, m[0].special], [3, SPECIAL.NONE], "3-line plain");
+    g[0][3].color = 1;
+    eq(R.findMatches(g).find((x) => x.color === 1).special, SPECIAL.FLAME, "4-line = flame");
+    g[0][4].color = 1;
+    eq(R.findMatches(g).find((x) => x.color === 1).special, SPECIAL.HYPER, "5-line = hyper");
 
-// -------- Integration: start classic and force a swap that produces a match --------
-B.startGame('classic');
-advanceTime(100);
+    const l = grid(quietRows());
+    l[0][0].color = l[0][1].color = l[0][2].color = 4;
+    l[1][0].color = l[2][0].color = 4;
+    l[0][3].color = 7;                        // keep the arm at 3
+    const lm = R.findMatches(l).filter((x) => x.color === 4);
+    eq(lm.length, 1, "L fuses to one group");
+    eq([lm[0].size, lm[0].special], [5, SPECIAL.STAR], "L = star");
+});
 
-// Seed a deterministic pre-match state: put color 1 at (4,4) and (4,5) and (4,7),
-// then swap (4,6) with (5,6) where we place color 1.
-var gg = B.getGrid();
-// Clear and rebuild
-var stripeGrid = B.makeEmptyGrid();
-for (var r3 = 0; r3 < 8; r3++) for (var c3 = 0; c3 < 8; c3++) {
-    stripeGrid[r3][c3] = { color: 1 + ((r3 * 2 + c3 * 5) % 7), special: 0, frozen: false };
-    // avoid accidental matches
-}
-// Handcraft: row 4 → 2,3,4,5,1,1,2,1 and row 5 col 6 = 1 so swapping (4,6)<->(5,6) → row 4 becomes ...,1,1,1,1
-stripeGrid[4][0] = { color: 2, special: 0, frozen: false };
-stripeGrid[4][1] = { color: 3, special: 0, frozen: false };
-stripeGrid[4][2] = { color: 4, special: 0, frozen: false };
-stripeGrid[4][3] = { color: 5, special: 0, frozen: false };
-stripeGrid[4][4] = { color: 1, special: 0, frozen: false };
-stripeGrid[4][5] = { color: 1, special: 0, frozen: false };
-stripeGrid[4][6] = { color: 2, special: 0, frozen: false };
-stripeGrid[4][7] = { color: 1, special: 0, frozen: false };
-stripeGrid[5][6] = { color: 1, special: 0, frozen: false };
-// Make sure row 3 / row 5 adjacent don't cause matches spontaneously.
-stripeGrid[3][4] = { color: 2, special: 0, frozen: false };
-stripeGrid[3][5] = { color: 3, special: 0, frozen: false };
-stripeGrid[3][6] = { color: 4, special: 0, frozen: false };
-stripeGrid[5][5] = { color: 3, special: 0, frozen: false };
-stripeGrid[5][7] = { color: 4, special: 0, frozen: false };
+test("rules: swaps, frozen gems, dead boards, seeding", () => {
+    const g = grid(quietRows());
+    g[0][0].color = g[0][1].color = g[0][3].color = 5;
+    g[0][2].color = 3; g[1][2].color = 5;
+    check(R.swapMakesMatch(g, 0, 2, 1, 2), "vertical swap completes the row");
+    eq(g[0][2].color, 3, "swapMakesMatch leaves the grid alone");
+    g[1][2].frozen = true;
+    check(!R.swapMakesMatch(g, 0, 2, 1, 2), "frozen gems do not swap");
 
-// Verify no pre-existing match in the crafted board.
-var preM = B.findMatches(stripeGrid);
-assert(preM.length === 0, 'crafted board has no starting match, got ' + preM.length);
+    const seeded = R.seedGrid(Math.random);
+    eq(R.findMatches(seeded).length, 0, "seeded board has no standing match");
+    check(R.findAnyMove(seeded), "seeded board has a move");
 
-// Switch into playing mode so input is routed to the board.
-G.Screens.switchTo('playing');
-advanceTime(50);
+    eq(R.scoreChain([3], 0), 50, "3 = 50");
+    eq(R.scoreChain([3], 1), 100, "second cascade step doubles");
+    eq(R.scoreChain([4], 0), 100, "4 = 100");
+    eq(R.scoreChain([5], 0), 150, "5 = 150");
+    eq(R.scoreChain([3, 3], 2), 300, "two groups on the third step");
+});
 
-B.setGrid(stripeGrid);
-B.setScore(0);
-assert(B.getScore() === 0, 'score reset to 0');
+test("rules: detonations chain; ice holds the column", () => {
+    const g = grid(quietRows());
+    g[3][0].special = SPECIAL.STAR;          // clearing (3,0) fires row 3 + column 0
+    g[3][5].special = SPECIAL.FLAME;         // ...which catches a flame at (3,5)
+    const cells = R.expandClears(g, [[3, 0]], null);
+    const has = (r, c) => cells.some(([y, x]) => y === r && x === c);
+    check(has(3, 7) && has(7, 0), "star clears its row and column");
+    check(has(2, 6) && has(4, 4), "caught flame bursts 3x3");
+    check(!R.expandClears(g, [[3, 0]], [3, 0]).some(([y, x]) => y === 3 && x === 0), "kept cell survives");
 
-// Swap creates a match.
-assert(B.swapMakesMatch(B.getGrid(), 4, 6, 5, 6), 'crafted swap creates match');
+    // A hole under a frozen gem refills from the ice instead of staying empty.
+    const col = makeGrid(4, 1, (r) => makeGem(r + 1, 0, r === 1));
+    col[3][0] = null;
+    const moves = collapse(col, { isFixed: (gem) => gem.frozen, spawn: () => makeGem(6) });
+    check(col.every((row) => row[0]), "no holes after collapse");
+    check(col[1][0].frozen, "ice stays put");
+    check(moves.length > 0, "fall moves for the animation");
+});
 
-// Drive via coordinate clicks: compute canvas coords for (4,6) and (5,6).
-// Force a draw pass so calcLayout runs with real W/H.
-flush();
-advanceTime(100);
-var layout = B.getLayout();
-function cellCenter(r, c) {
-    return { x: layout.ox + c * layout.cell + layout.cell / 2,
-             y: layout.oy + r * layout.cell + layout.cell / 2 };
-}
-var a = cellCenter(4, 6);
-var b = cellCenter(5, 6);
-click(a.x, a.y);
-advanceTime(80);
-assert(B.getSelection() !== null, 'first click selected a gem, got ' + JSON.stringify(B.getSelection()));
-click(b.x, b.y);
-// Wait for swap + cascade to resolve.
-advanceTime(3000);
+test("menus: title, mode select, how to play", () => {
+    eq(G.screen, "title", "boots to title");
+    shot("title");
+    clickOn('#screen-title [data-action="howto"]');
+    eq(G.screen, "howto", "how to play");
+    clickOn('#screen-howto [data-action="back"]');
+    clickOn('#screen-title [data-action="modeselect"]');
+    eq(G.screen, "modeselect", "mode select");
+    press("Escape");
+    eq(G.screen, "title", "Esc backs out");
+});
 
-assert(B.getScore() > 0, 'score increased after valid swap, got ' + B.getScore());
+test("classic: mouse swap scores, 4-line spawns a flame gem", () => {
+    startMode("classic");
+    check(!q("#hud").hidden, "HUD visible");
+    eq(text("#hud-extra-label"), "Moves", "classic shows moves");
+    const rows = quietRows();
+    const g = grid(rows);
+    // Row 4: _ 1 1 X 1 with a 1 below X at (5,3): swapping (4,3)<->(5,3) makes 1 1 1 1.
+    g[4][1].color = g[4][2].color = g[4][4].color = 1;
+    g[4][3].color = 2; g[5][3].color = 1;
+    g[3][1].color = 3; g[3][2].color = 4; g[5][2].color = 6; g[5][4].color = 6; g[4][0].color = 7; g[4][5].color = 5;
+    eq(R.findMatches(g).length, 0, "crafted board is quiet");
+    G.board.setGrid(g);
+    frames(2);
+    clickCell(4, 3);
+    check(G.board.sel && G.board.sel.r === 4 && G.board.sel.c === 3, "first click selects");
+    clickCell(5, 3);
+    check(settle(), "cascade settles");
+    check(G.board.score >= 100, "4-line scored: " + G.board.score);
+    eq(G.board.moves, 1, "one move");
+    check(G.board.stats.flameMade >= 1, "flame gem made");
+    let flames = 0;
+    for (const row of G.board.grid) for (const gem of row) if (gem && gem.special === SPECIAL.FLAME) flames++;
+    check(flames >= 1, "flame gem on the board");
+    eq(text("#hud-score"), String(G.board.score), "HUD score");
+    shot("classic");
+});
 
-// Mid-game screenshot.
-screenshot('games/gemswap/screenshot.png');
+test("classic: bad swap bounces back; keyboard swap works", () => {
+    const g = grid(quietRows());
+    G.board.setGrid(g);
+    const before = G.board.grid[0][0];
+    const moves = G.board.moves;
+    G.board.pick(0, 0);
+    G.board.pick(0, 1);
+    check(G.board.swap && G.board.swap.kind === "back", "swap plays out and back");
+    check(settle(), "bounce finishes");
+    check(G.board.grid[0][0] === before, "gems back in place");
+    eq(G.board.moves, moves, "a bounce is not a move");
 
-// Puzzle count sanity.
-assert(hooks.puzzles.count() >= 20, 'at least 20 puzzles');
+    const k = grid(quietRows());
+    k[2][0].color = k[2][1].color = 6; k[2][2].color = 1; k[3][2].color = 6;
+    k[1][2].color = 2; k[3][1].color = 3; k[3][3].color = 4; k[2][3].color = 5;
+    eq(R.findMatches(k).length, 0, "keyboard board quiet");
+    G.board.setGrid(k);
+    G.board.cursor = { r: 3, c: 2, active: true };
+    press(" ");
+    frames(1);
+    check(G.board.sel && G.board.sel.r === 3, "Space picks under the cursor");
+    press("ArrowUp");
+    frames(1);
+    check(G.board.swap, "arrow swaps the picked gem");
+    check(settle(), "keyboard swap settles");
+    eq(G.board.moves, moves + 1, "keyboard swap counted");
+});
 
-// Special-gen integration: build a row of 4 same color and cascade.
-B.startGame('classic');
-advanceTime(50);
-var flameBoard = B.makeEmptyGrid();
-for (var rr2 = 0; rr2 < 8; rr2++) for (var cc2 = 0; cc2 < 8; cc2++) {
-    flameBoard[rr2][cc2] = { color: 1 + ((rr2 * 3 + cc2) % 7), special: 0, frozen: false };
-}
-flameBoard[0][0].color = 3; flameBoard[0][1].color = 3; flameBoard[0][2].color = 3; flameBoard[0][3].color = 3;
-// prevent adjacency collisions
-if (flameBoard[1][0].color === 3) flameBoard[1][0].color = 2;
-if (flameBoard[1][1].color === 3) flameBoard[1][1].color = 2;
-if (flameBoard[1][2].color === 3) flameBoard[1][2].color = 2;
-if (flameBoard[1][3].color === 3) flameBoard[1][3].color = 2;
-if (flameBoard[0][4].color === 3) flameBoard[0][4].color = 2;
-var fm = B.findMatches(flameBoard);
-assert(fm.length === 1, '4-in-a-row produces one group');
-assert(fm[0].special === B.SPECIAL_FLAME, 'produces flame special');
+test("pause: Enter on Resume does not pick a gem", () => {
+    press("Escape");
+    eq(G.screen, "pause", "paused");
+    press("Enter");
+    frames(2);
+    eq(G.screen, "playing", "resumed");
+    eq(G.board.sel, null, "the Enter that resumed did not select");
+});
 
-console.log('gemswap tests passed.');
+test("classic: dead board shuffles", () => {
+    // In the quiet board no color repeats within 2 cells along a line, so no swap can match.
+    const g = grid(quietRows());
+    eq(R.findAnyMove(g), null, "quiet board is dead");
+    G.board.setGrid(g);
+    G.board.resolving = true;     // as if a cascade just ended here
+    check(settle(), "settles");
+    check(R.findAnyMove(G.board.grid), "shuffled into a live board");
+    check(!G.board.over, "run continues");
+});
+
+test("timed: clock in HUD, time-up ends the run with a high score", () => {
+    startMode("timed");
+    eq(text("#hud-extra-label"), "Time", "timed shows time");
+    check(/^\d:\d\d$/.test(text("#hud-extra")), "clock format: " + text("#hud-extra"));
+    G.board.score = 1234;
+    G.board.timeLeft = 50;
+    simUntil(() => G.screen === "gameover", 2000, 16);
+    eq(G.screen, "gameover", "time up -> game over");
+    eq(text("#gameover-title"), "Timed Complete!", "complete title");
+    check(/1234/.test(text("#gameover-stats")), "stats show the score");
+    clickOn('#screen-gameover [data-action="highscores"]');
+    eq(G.screen, "highscores", "high scores");
+    check(q("#hs-tab-timed").className.indexOf("active") >= 0, "opens on the timed tab");
+    check(/1234/.test(text("#hs-list")), "timed list has the run");
+    clickOn('[data-action="hs-next"]');
+    check(q("#hs-tab-puzzle").className.indexOf("active") >= 0, "next tab");
+    shot("highscores");
+});
+
+test("puzzle: frozen gems crack and count down", () => {
+    startMode("puzzle");
+    eq(text("#hud-extra-label"), "Frozen", "puzzle shows frozen");
+    check(G.board.frozenLeft > 0, "puzzle 1 has ice");
+    const g = grid(quietRows());
+    g[6][0].color = g[6][1].color = g[6][2].color = 2;
+    g[5][0].color = 5; g[5][1].color = 6; g[5][2].color = 7; g[7][0].color = 4; g[7][1].color = 5; g[7][2].color = 6; g[6][3].color = 3;
+    g[6][1].frozen = true;
+    g[0][7].frozen = true;
+    eq(R.findMatches(g).length, 1, "one standing match through the ice");
+    G.board.setGrid(g);
+    eq(G.board.frozenLeft, 2, "two frozen");
+    G.board.resolving = true;
+    check(settle(), "settles");
+    check(G.board.frozenLeft <= 1, "ice cracked: " + G.board.frozenLeft);
+    eq(text("#hud-extra"), String(G.board.frozenLeft), "HUD counts it");
+    shot("puzzle");
+});
+
+test("settings: cycle hint delay and volume", () => {
+    press("Escape");
+    clickOn('#screen-pause [data-action="title"]');
+    clickOn('#screen-title [data-action="settings"]');
+    const before = text("#opt-hintDelay");
+    clickOn('[data-action="cycle-hint"]');
+    check(text("#opt-hintDelay") !== before, "hint delay cycles");
+    const vol = text("#opt-sfxVol");
+    clickOn('[data-action="cycle-sfx"]');
+    check(text("#opt-sfxVol") !== vol, "volume cycles");
+    eq(G.save.get("sfxVol") + "", text("#opt-sfxVol"), "saved");
+});
+
+done("gemswap");

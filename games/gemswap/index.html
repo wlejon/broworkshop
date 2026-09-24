@@ -10,94 +10,133 @@
     <canvas id="view"></canvas>
 
     <div id="hud" hidden>
-        <div class="hud-label">SCORE</div>
-        <div id="hud-score" class="hud-value">0</div>
-        <div class="hud-label">BEST</div>
-        <div id="hud-best" class="hud-value">0</div>
-        <div class="hud-label">LEVEL</div>
-        <div id="hud-level" class="hud-value">1</div>
-        <div class="hud-label" id="hud-extra-label">MOVES</div>
-        <div id="hud-extra" class="hud-value">0</div>
-        <div class="hud-label" id="hud-combo-label" hidden>CHAIN</div>
-        <div id="hud-combo" class="hud-value" hidden>0</div>
+        <div class="hud-stat">
+            <div class="hud-label">Score</div>
+            <div id="hud-score" class="hud-value">0</div>
+        </div>
+        <div class="hud-stat">
+            <div class="hud-label">Best</div>
+            <div id="hud-best" class="hud-value">0</div>
+        </div>
+        <div class="hud-stat">
+            <div class="hud-label" id="hud-level-label">Level</div>
+            <div id="hud-level" class="hud-value">1</div>
+        </div>
+        <div class="hud-stat">
+            <div class="hud-label" id="hud-extra-label">Moves</div>
+            <div id="hud-extra" class="hud-value">0</div>
+        </div>
+        <div class="hud-stat" id="hud-combo-stat" style="display: none">
+            <div class="hud-label">Chain</div>
+            <div id="hud-combo" class="hud-value">x1</div>
+        </div>
     </div>
 
     <div id="overlay">
         <section id="screen-title" class="screen">
-            <h1 class="overlay-title">GEMSWAP</h1>
+            <h1 class="overlay-title">Gemswap</h1>
             <div class="overlay-sub">Swap. Match. Cascade.</div>
             <div class="menu-items">
-                <div class="menu-item selected" data-action="modeselect">PLAY</div>
-                <div class="menu-item" data-action="howto">HOW TO PLAY</div>
-                <div class="menu-item" data-action="credits">CREDITS</div>
-                <div class="menu-item" data-action="quit">QUIT</div>
+                <div class="menu-item selected" data-action="modeselect">Play</div>
+                <div class="menu-item" data-action="highscores">High Scores</div>
+                <div class="menu-item" data-action="howto">How to Play</div>
+                <div class="menu-item" data-action="settings">Settings</div>
+                <div class="menu-item" data-action="credits">Credits</div>
+                <div class="menu-item" data-action="quit">Quit</div>
             </div>
-            <p class="overlay-hint">Arrow keys to navigate, Enter to select</p>
+            <p class="overlay-hint">Up / Down navigate · Enter select</p>
         </section>
 
         <section id="screen-modeselect" class="screen" hidden>
-            <h1 class="overlay-title">SELECT MODE</h1>
+            <h1 class="overlay-title">Select Mode</h1>
             <div class="mode-descriptions">
-                <div class="mode-desc">CLASSIC — Endless. Play until no moves remain.</div>
-                <div class="mode-desc">TIMED — Score as much as you can in 2 minutes.</div>
-                <div class="mode-desc">PUZZLE — Clear frozen tiles in 20 crafted layouts.</div>
+                <div class="mode-desc">Classic — endless; play until no moves remain.</div>
+                <div class="mode-desc">Timed — score all you can in 2 minutes; every gem cleared adds time.</div>
+                <div class="mode-desc">Puzzle — crack the frozen gems in 20 layouts.</div>
             </div>
             <div class="menu-items">
-                <div class="menu-item selected" data-action="mode-classic">CLASSIC</div>
-                <div class="menu-item" data-action="mode-timed">TIMED</div>
-                <div class="menu-item" data-action="mode-puzzle">PUZZLE</div>
-                <div class="menu-item" data-action="back">BACK</div>
+                <div class="menu-item selected" data-action="mode-classic">Classic</div>
+                <div class="menu-item" data-action="mode-timed">Timed</div>
+                <div class="menu-item" data-action="mode-puzzle">Puzzle</div>
+                <div class="menu-item" data-action="back">Back</div>
             </div>
         </section>
 
         <section id="screen-howto" class="screen" hidden>
-            <h1 class="overlay-title">HOW TO PLAY</h1>
+            <h1 class="overlay-title">How to Play</h1>
             <div class="overlay-sub htp-body">
-                <p>Swap two adjacent gems to line up <strong>3 or more</strong> of the same kind.<br>
-                Matched gems clear; gems above fall to fill the gaps.</p>
-                <p><strong>Scoring:</strong> 3=50 · 4=100 · 5+=150<br>
-                Each cascade multiplies the next: x1, x2, x3...</p>
-                <p><strong>Special gems:</strong><br>
-                Match 4 in a line → <strong>Flame Gem</strong> (3x3 burst)<br>
-                Match 5 in L/T shape → <strong>Starlight Gem</strong> (row + column)<br>
-                Match 5 in a line → <strong>Hypergem</strong> (clears one color)</p>
-                <p><strong>Controls:</strong><br>
-                Click a gem, then click an adjacent gem to swap.<br>
-                Or use arrow keys + Space/Enter to pick up and swap.<br>
-                Esc / P to pause.</p>
+                <p>Swap two neighbouring gems to line up <strong>3 or more</strong> of a kind.
+                Matched gems shatter and the gems above fall into the gaps.</p>
+                <p><strong>Scoring:</strong> 3 = 50 · 4 = 100 · 5+ = 150.
+                Each cascade step multiplies: x1, x2, x3…</p>
+                <p><strong>Special gems</strong><br>
+                4 in a line → <strong>Flame Gem</strong> (3x3 burst)<br>
+                L or T shape → <strong>Starlight Gem</strong> (row + column)<br>
+                5 in a line → <strong>Hypergem</strong> (swap it to clear one color)</p>
+                <p><strong>Frozen gems</strong> can't be swapped and hold the gems above them.
+                A match next to or through them cracks the ice.</p>
+                <pre>Mouse     click a gem, then a neighbour
+          (or drag onto the neighbour)
+Keyboard  arrows move · Space / Enter pick
+          arrows swap the picked gem
+Esc / P   pause</pre>
             </div>
             <div class="menu-items">
-                <div class="menu-item selected" data-action="back">BACK</div>
+                <div class="menu-item selected" data-action="back">Back</div>
             </div>
         </section>
 
+        <section id="screen-highscores" class="screen" hidden>
+            <h1 class="overlay-title">High Scores</h1>
+            <div class="hs-tabs">
+                <span id="hs-tab-classic" class="hs-tab active">Classic</span>
+                <span id="hs-tab-timed" class="hs-tab">Timed</span>
+                <span id="hs-tab-puzzle" class="hs-tab">Puzzle</span>
+            </div>
+            <div id="hs-list" class="stats-block">No scores yet</div>
+            <div class="menu-items">
+                <div class="menu-item selected" data-action="hs-next">Next Mode</div>
+                <div class="menu-item" data-action="back">Back</div>
+            </div>
+        </section>
+
+        <section id="screen-settings" class="screen" hidden>
+            <h1 class="overlay-title">Settings</h1>
+            <div class="menu-items">
+                <div class="menu-item selected" data-action="cycle-sfx">SFX Volume: <span id="opt-sfxVol">80</span>%</div>
+                <div class="menu-item" data-action="cycle-hint">Hint Delay: <span id="opt-hintDelay">5s</span></div>
+                <div class="menu-item" data-action="back">Back</div>
+            </div>
+            <p class="overlay-hint">Enter to change</p>
+        </section>
+
         <section id="screen-credits" class="screen" hidden>
-            <h1 class="overlay-title">CREDITS</h1>
+            <h1 class="overlay-title">Credits</h1>
             <div class="overlay-sub">
                 <p>Built on the <strong>bro</strong> app runtime</p>
-                <p>Audio via arcade audio</p>
                 <p class="credits-sub">Inspired by classic gem-swap puzzles</p>
             </div>
             <div class="menu-items">
-                <div class="menu-item selected" data-action="back">BACK</div>
+                <div class="menu-item selected" data-action="back">Back</div>
             </div>
         </section>
 
         <section id="screen-pause" class="screen" hidden>
-            <h1 class="overlay-title">PAUSED</h1>
+            <h1 class="overlay-title">Paused</h1>
             <div class="menu-items">
-                <div class="menu-item selected" data-action="resume">RESUME</div>
-                <div class="menu-item" data-action="restart">RESTART</div>
-                <div class="menu-item" data-action="title">QUIT TO MENU</div>
+                <div class="menu-item selected" data-action="resume">Resume</div>
+                <div class="menu-item" data-action="restart">Restart</div>
+                <div class="menu-item" data-action="title">Title Menu</div>
             </div>
         </section>
 
         <section id="screen-gameover" class="screen" hidden>
-            <h1 class="overlay-title" id="gameover-title">GAME OVER</h1>
-            <div id="gameover-stats" class="stats-block"></div>
+            <h1 class="overlay-title" id="gameover-title">Game Over</h1>
+            <div id="gameover-stats" class="stats-block stats-table"></div>
             <div class="menu-items">
-                <div class="menu-item selected" data-action="restart">PLAY AGAIN</div>
-                <div class="menu-item" data-action="title">MAIN MENU</div>
+                <div class="menu-item selected" data-action="restart">Play Again</div>
+                <div class="menu-item" data-action="highscores">High Scores</div>
+                <div class="menu-item" data-action="title">Title Menu</div>
             </div>
         </section>
     </div>

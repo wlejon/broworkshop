@@ -23,6 +23,11 @@ arcade kernel  (loop, view, input, audio, save)
 | `save.js` | namespaced prefs + high score |
 | `shell.js` | boot, screens, menu, session, frame |
 | `scene3d.js` | 3D games: `bootScene`, `createStage` (scene, orbit camera, picking, taps) |
+| `grid.js` | 2D board games: grids, line matches, gravity `collapse`, `createWave` / `createFalls` animations, `fitBoard` layout, `seededRandom`, `formatClock` |
+| `effects.js` | `createEffects`: particle bursts, floating score labels, shake, DOM toasts |
+| `pointer.js` | `bindPointer`: canvas mouse in drawing px, only while playing |
+| `scores.js` | `recordScore` per-mode leaderboards + `createScoreTabs` High Scores screen |
+| `options.js` | `createOptions`: Settings rows that cycle on Enter (`sfxVolume()`, `toggle()`) |
 | `arcade.css` | shared chrome; theme via CSS variables |
 
 ## Quick start
@@ -48,8 +53,12 @@ export const game = {
   actions: [],            // optional extra input actions
   defaults: {},           // optional save defaults (merged with highScore: 0)
 
+  // optional, once after the title is up: pointer listeners, saved settings,
+  // async loads (may switchTo a loading screen and back)
+  init(api) {},
+
   create(ctx) { return { score: 0 }; },
-  // ctx: { audio, save, input, view, play, highScore, switchTo, getScreen }
+  // ctx: { audio, save, input, view, play, highScore, switchTo, getScreen, getRun }
 
   update(run, dt, input) {
     // return { status: "gameover" } to end the run
@@ -82,7 +91,20 @@ if (input.down("primary")) { /* held */ }
 ```
 
 Standard actions: `up` `down` `left` `right` `primary` `secondary` `pause` `confirm`.  
-Pause (Esc / P) is owned by the shell.
+Pause (Esc / P) is owned by the shell. Entering `playing` clears pending
+presses, so the Enter or click that picked a menu item never reaches the game.
+
+The shell records the high score when a run ends (`run._newBest`); do not
+call `save.maybeHighScore` from the game, or "NEW BEST" never shows.
+
+### Puzzle / board games
+
+`games/gemswap`, `games/fluffshuffle` and `games/wordspire` are the
+references: `rules.js` (pure grid functions) · `board.js` (a `Board` class,
+one session, no DOM, effects out through an `fx` object in cell
+coordinates) · `render.js` · a thin `game.js` that wires `createEffects`,
+`bindPointer`, `createScoreTabs` and `createOptions` in `init` and puts
+`board` and `layout` on `run` · `hooks.js` for the test surface.
 
 ### Screens (HTML)
 
@@ -92,7 +114,7 @@ Pause (Esc / P) is owned by the shell.
 | `#hud` | live stats; children `#hud-<key>` (also `#hud-high` alias) |
 | `#overlay` | menu host |
 | `#screen-title` `#screen-howto` `#screen-pause` `#screen-gameover` | required |
-| `#gameover-stats` | optional stats text |
+| `#gameover-stats` | optional stats text (`class="stats-block stats-table"` keeps padded columns aligned) |
 | `#screen-<custom>` | intermediate screens |
 
 | `data-action` | Effect |
