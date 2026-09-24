@@ -1,11 +1,13 @@
-// editor.js — the Markdown textarea: line-number gutter, undo/redo history,
-// formatting helpers, Tab indent, stats, and the live preview (lib/markdown.js
-// with tables, task lists and callouts; preview checkboxes toggle the source).
+// editor.js — the Markdown textarea: line-number gutter, formatting helpers,
+// Tab indent, stats, and the live preview (lib/markdown.js with tables, task
+// lists and callouts; preview checkboxes toggle the source). Undo/redo is the
+// textarea's own history: every edit goes through setRangeText, which records
+// into it, so typing and formatting undo in one order (Ctrl+Z natively, the
+// Edit menu through execCommand).
 
 import { renderMarkdown } from "/lib/markdown.js";
 
 const MD_OPTS = { tables: true, tasks: true, alerts: true };
-const HISTORY_MAX = 50;
 // A task line, optionally inside blockquotes: the same lines the preview numbers.
 const TASK_LINE = /^((?:\s*>)*\s*[-*+]\s+\[)([ xX])(\]\s+.*)$/gm;
 
@@ -16,8 +18,6 @@ export class NoteEditor {
         this.gutter = els.gutter;
         this.preview = els.preview;
         this.onChange = onChange || (() => {});
-        this.history = [''];
-        this.index = 0;
 
         this.ta.addEventListener('input', () => this.changed());
         this.ta.addEventListener('scroll', () => { this.gutter.scrollTop = this.ta.scrollTop; });
@@ -31,19 +31,14 @@ export class NoteEditor {
     }
 
     onKey(e) {
-        const mod = e.ctrlKey || e.metaKey, k = (e.key || '').toLowerCase();
         if (e.key === 'Tab') { e.preventDefault(); if (e.shiftKey) this.outdent(); else this.indent(); }
-        else if (mod && k === 'z') { e.preventDefault(); if (e.shiftKey) this.redo(); else this.undo(); }
-        else if (mod && k === 'y') { e.preventDefault(); this.redo(); }
     }
 
     get value() { return this.ta.value; }
 
-    /** Load a note: resets history, no onChange. */
+    /** Load a note: assigning value resets the textarea's history; no onChange. */
     setValue(content) {
         this.ta.value = content || '';
-        this.history = [this.ta.value];
-        this.index = 0;
         this.refresh();
     }
 
@@ -58,16 +53,15 @@ export class NoteEditor {
             : '<div class="preview-empty">Start typing to see the live preview…</div>';
     }
 
-    /** After any edit: refresh, record history, tell the app. */
-    changed(record = true) {
+    /** After any edit: refresh and tell the app. */
+    changed() {
         this.refresh();
-        if (record) this.record();
         this.onChange(this.ta.value);
     }
 
     /** Replace the whole text as one undoable edit. */
     replaceAll(text) {
-        this.ta.value = text;
+        this.splice(text, 0, this.ta.value.length, 'preserve');
         this.changed();
     }
 
@@ -153,19 +147,8 @@ export class NoteEditor {
     }
 
     // ── history ──────────────────────────────────────────────────────────────
+    // The textarea's own; stepping it fires `input`, which calls changed().
 
-    record() {
-        if (this.history[this.index] === this.ta.value) return;
-        this.history = this.history.slice(0, this.index + 1);
-        this.history.push(this.ta.value);
-        if (this.history.length > HISTORY_MAX) this.history.shift();
-        this.index = this.history.length - 1;
-    }
-
-    undo() { if (this.index > 0) this.restore(--this.index); }
-    redo() { if (this.index < this.history.length - 1) this.restore(++this.index); }
-    restore(i) {
-        this.ta.value = this.history[i];
-        this.changed(false);
-    }
+    undo() { this.ta.focus(); document.execCommand('undo'); }
+    redo() { this.ta.focus(); document.execCommand('redo'); }
 }

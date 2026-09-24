@@ -24,37 +24,18 @@ except where an entry says "not re-run".
 
 ### Layout and CSS
 
-#### Inline wrapping still whole-node in `pre-wrap`, `break-word`, and mixed block/inline blocks (2026-09-24)
-htmlayout now breaks a text run after an inline element inside the text
-(htmlayout a8d25ed), but two paths keep the old behaviour: text in
-`white-space: pre-wrap` or `overflow-wrap: break-word` is still broken once
-per text node against the full line width, and a block that mixes block-level
-and inline children lays each span out as one box.
-Repro: `<div style="width:300px;font:12px monospace;white-space:pre-wrap"><span>voice</span> <span id=m>recording did not start because the Steam library was not found anywhere</span></div>`:
-`#m` starts on line 2.
+#### `position: fixed` scrolls with the viewport (2026-09-24)
+Fixed-position elements move with the root scroll, both where they paint and
+where clicks land. Surfaced once element rects began honouring the root
+scroll (bro af6c4219).
 
-#### Inline padding on right-to-left text is placed as if left-to-right (2026-09-24)
-A span holding RTL text inside an RTL paragraph gets its start padding on the
-left and end padding on the right; they should mirror. LTR spans inside RTL
-paragraphs are right.
+#### The root scroll range ignores overflowing descendants (2026-09-24)
+`documentHeight_` uses `<html>`'s own box, so content overflowing it is not
+reachable by scrolling and the range can come out short.
 
-### Selection, Range and editing
-
-#### Element rects ignore the root scroller's scroll; `window.scrollTo` targets `<html>` (2026-09-24)
-Element `getBoundingClientRect` does not subtract the viewport's own scroll
-(`scrollY_`), while Range rects now do, so the two disagree once the root has
-scrolled. `window.scrollTo` sets `<html>`'s `scrollTop` (a no-op when `<html>`
-is not a scroller) while `window.scrollY` reads the viewport's scroll.
-
-#### `setRangeText` resets the control's undo history (2026-09-24)
-`setRangeText` (bro 30ee3208) behaves like assigning `value`: the undo stack
-is cleared, so tools/desktop-notebook's formatting commands still have no
-native undo.
-
-#### Range delete/extract leak detached nodes until teardown (2026-09-24)
-`Range.deleteContents` / `extractContents` no longer free nodes a script may
-still hold, but nothing frees them later either, so the contenteditable
-engine paths keep them until the document is torn down.
+#### A `flex: 1` fill does not stretch to a taller card (2026-09-24)
+tools/reader's library cards: the progress fill (`flex: 1`) keeps its
+original height when the card grows taller. Predates the inline rewrite.
 
 ### DOM APIs, events, CSS animations
 
@@ -74,12 +55,10 @@ both layers.
 
 ### Windows, workers, messaging
 
-#### Worker `postMessage` does not keep buffer identity (2026-09-24)
-Two views of one ArrayBuffer posted to a Worker arrive over two separate
-buffers (a write through one is not seen by the other). The window path
-(`structuredClone`) keeps identity, as the web does.
-Repro: `const b = new ArrayBuffer(8); w.postMessage({ a: new Uint8Array(b), c: new Uint8Array(b) })`;
-in the worker `e.data.a.buffer === e.data.c.buffer` is false.
+#### Worker `postMessage` does not keep identity for plain objects (2026-09-24)
+Buffers now keep identity (bro 235dad45), but an object that appears twice
+in a message arrives as two copies, and a cycle cannot be sent;
+`structuredClone` and the window path keep both, as the web does.
 
 ### bronze JS runtime and module loading
 
@@ -184,6 +163,7 @@ from the commit before the kit rebuild.
 - `postMessage({ v: view }, [view.buffer])` clones then detaches — brokit efcb977, bro 04729bdd; verified 2026-09-24. window-lab sends the view transferred.
 - `new Worker(new URL(...), { type: 'module' })` works — bro 06899506; verified 2026-09-24. worker-sim and stompworld use it.
 - Scene, verified 2026-09-24 (bro `tests/scene/` 58/58): `unprojectLocal(x, y)` → `{ origin, dir }` works with `setCamera` and camera nodes, plus the inverse `projectLocal(x, y, z)` (a7347b39; kit `sceneViewport.ray/toScreen`, arcade `rayAt/toScreen` and `pickRay` wrap them); TileWorld `addObject({ color })` tint and the dropped `addObjectKind` style keys (1ada0970); `atlasPixels` takes any byte view (a1136e4d); `setFog(null)` (c3b9f275); sprite `isPlaying` / `currentAnimation` (f5a7b7bb); 2D particle options and `liveCount` (d1bfc7f9); one wrapper per scene node, so `===` works (daec207d); a scene HtmlNode takes clicks only where it shows content and honours `pointer-events: none` (1b4e093b; farm's name tags are `pointer-events: none`).
+- Follow-ups, verified 2026-09-24: `pre-wrap` / `break-word` / mixed block-and-inline blocks wrap inside text after an inline element, and inline padding mirrors on RTL text (htmlayout 72777c7, bro e6a66434); element rects subtract the root scroll, `window.scrollTo` / `scrollY` / `scrollIntoView` move the viewport (af6c4219); `setRangeText` records one undo step and `execCommand('undo'/'redo')` works in inputs and textareas (aed8325b; desktop-notebook drops its JS undo history); `deleteContents` / `surroundContents` free what they remove unless script holds it (ef5aa488); Worker `postMessage` keeps buffer identity (235dad45).
 - Paint and DOM APIs, verified 2026-09-24 (bro `tests/style/`, `tests/dom/`, `tests/shadow_dom/`, `tests/events/`): `linear-gradient()` with `rgb()` stops (625516ac); tabs in `<pre>` advance to 8-column stops (d8f1039b); scrollbars follow the colour scheme and `scrollbar-color` (ea32f7e5); `CSS`, `Option`, `details.open` (bro 4450b38e, htmlayout 5483b87); selector lists split only at top-level commas (htmlayout 2e05b3d); DOMParser parses XML/SVG as XML with `parsererror` (4ca1d817); MutationObserver records for `innerHTML =` / `textContent =` (95402d6a); shadow `<style>` scoped per root, slotted children inherit from the slot (108b7bcb); keydown runs before a control's default action (ead08d78); `animation` shorthand with `cubic-bezier()` and computed longhands (htmlayout 7b0ddbc, bro 38f6d4e3), per-keyframe-interval easing (8c4e7849), removing `animation-name` cancels (35cfe935), animation/transition event fields (70f41130); a paused animation stays held when `currentTime` is written (8abda133); MediaQueryList change `currentTarget` (4033b5e9); each page module script runs as its own module under its own URL (96fb8f99). waapi-lab's CSS keyframes lane passes; the dom-lab, platform-lab, range-selection-lab, character-lab and node-forge tests assert the fixed behaviour. Note: text/comment nodes a script or MutationRecord holds now survive `innerHTML` replacement detached instead of being freed.
 - Animation, media, ML, game AI, verified 2026-09-24 (ML targets run with `--ml` on the GPU): `applySkinning` takes `computeSkinningMatrices` output (bromesh f573ade, bro 5828be0a; mesh-viewer uses joint matrices); `Pose.data` is a copy by design, docs show edit-then-assign (5828be0a); `blendState().pos` absent without a blend space (ba917f37); `bro.image.gpu.colormap` — a webgl2 context now takes its drawing-buffer size from the canvas's width/height attributes at creation (a2881563); `bro.media.thumbnails().data` is a Uint8ClampedArray (f9b54b1c); `<video>` `load()` resets, fires `emptied`, and an unplayable source sets `error` code 4 (1d5fd6b9; media-inspector drops its timeout); brovisionml loaders load before moving to the GPU, docs say they are synchronous (brovisionml d56f93c, bro 3f93a71b); TripoSplat clouds come back upright facing +Z (brodiffusion 90aa215, bro 52e72df2); docs/diar-api.js `loadClusterDiarizer` arguments (923243c9); native `NavGrid.field` flow field, and `setCellCost` now prices A* (brogameagent 6477939, bro 91b1e46d; tactical-flowfield drops its JS wave); terrain `setVoxel`, clipmap `detailRelief` and FastNoise Feature Scale documented (5272b828).
 - Selection, Range and editing, verified 2026-09-24 (bro `tests/dom/`, `tests/events/test_selection_press.js`): Range rects in scrolled-out text and under the menu bar, and per-line rects for wrapped inline elements (htmlayout 73996c8, bro 66aa265e, 8a83b3be); spec clone/extract/delete for partially-contained nodes, `surroundContents` throws InvalidStateError instead of hanging, `insertNode` per spec, `selectionchange` from script, `getRangeAt` returns the live range (8a83b3be); selection paint skips `display:none` and stops at element offsets (73996c8, 66aa265e); a press moves the selection only where a caret can go: a text-less block takes the caret itself, a button's child, a canvas, `pointer-events:none` text and a prevented mousedown start no selection (89a886dd); `setRangeText` (30ee3208). range-selection-lab tests assert the right results, text-lab drops `reveal()` and its ENGINE BUG panel, synth drops `user-select:none` on its viewport, desktop-notebook's `splice` uses `setRangeText`.

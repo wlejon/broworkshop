@@ -81,6 +81,12 @@ try {
         check(t.value.indexOf('**') < 0, 'undo bold');
         run('edit.redo');
         check(t.value.indexOf('**milk**') > 0, 'redo bold');
+        // The keys step the same (native) history the menu does.
+        press('z', CTRL);
+        check(t.value.indexOf('**') < 0, 'Ctrl+Z undoes the bold: ' + JSON.stringify(t.value));
+        check(document.querySelector('#previewPane strong') === null, 'and the preview follows');
+        press('y', CTRL);
+        check(t.value.indexOf('**milk**') > 0, 'Ctrl+Y redoes it');
     });
 
     test('inserting a task list and ticking it in the preview writes the source', () => {
