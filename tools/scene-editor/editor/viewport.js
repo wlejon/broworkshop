@@ -2,7 +2,7 @@
 // controls, editor lighting, the ground grid + axes, and screen -> world
 // rays for picking.
 
-import { orbitControls, orbitRotation, screenRay, Camera } from "/lib/kit/viewport3d.js";
+import { orbitControls, orbitRotation, Camera } from "/lib/kit/viewport3d.js";
 import { SceneAxes } from "../model/scene-axes.js";
 
 /**
@@ -54,10 +54,9 @@ export function createViewport(canvas, opts) {
             const r = canvas.getBoundingClientRect();
             return { cx: e.clientX - r.left, cy: e.clientY - r.top };
         },
-        /** World ray through canvas pixel (cx, cy). */
+        /** World ray through canvas pixel (cx, cy): scene.unprojectLocal (the camera is applied on every change). */
         ray(cx, cy) {
-            const [w, h] = size();
-            return screenRay(view(), w, h, cx, cy);
+            return scene.unprojectLocal(cx, cy);
         },
         /** Unit camera forward. */
         forward() {

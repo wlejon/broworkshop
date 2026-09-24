@@ -47,15 +47,14 @@ file system, a worker) or that every bro app re-derives from engine data.
 
 `camera.js` (orbit and fly camera state), `viewport3d.js` (`orbitControls`,
 `screenRay`, `worldToScreen`, `sceneViewport.toScreen`) and arcade
-`scene3d.js` sit under 23 + 9 apps; every 3D app needs them. The scene
-already owns the camera, the projection and the viewport size, and
-`SceneGraph.unprojectLocal` was meant to be this ray, but its new shape has
-no form for `setCamera` scenes (ENGINE-ISSUES: Scene), so the kit computes
-it in JS from a copy of the camera maths.
-**Promote:** `scene.screenRay(x, y)` and `scene.worldToScreen([x, y, z])`
-that use the live camera (orthographic included), and an optional built-in
-`scene.orbitControls(canvas, opts)` / `flyControls` (right-drag orbit,
-middle pan, wheel zoom, damping). The kit then keeps only layout sugar.
+`scene3d.js` sit under 23 + 9 apps; every 3D app needs them. Projection is
+done: `scene.unprojectLocal(x, y)` / `scene.projectLocal(x, y, z)` work on
+the live camera (bro a7347b39), and `sceneViewport.ray` / `toScreen` and
+arcade `rayAt` / `toScreen` now wrap them. The pure `screenRay` /
+`worldToScreen` remain for view math with no scene (scene-editor snapping).
+**Promote:** an optional built-in `scene.orbitControls(canvas, opts)` /
+`flyControls` (right-drag orbit, middle pan, wheel zoom, damping). The kit
+then keeps only layout sugar.
 
 ### 2. Physics body ↔ scene node pairing and event fan-out → `Physics` / `bro.scene`
 

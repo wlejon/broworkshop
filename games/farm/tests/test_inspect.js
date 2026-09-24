@@ -15,9 +15,10 @@ for (const n of F.world.npcs) {   // spread out at home, clear of the Foreman
     n.x = n.tx = n.home.x;
     n.y = n.ty = n.home.y;
 }
-// The player's name-tag billboard (an HtmlNode) takes clicks over its whole
-// surface, so keep the avatar out from in front of the Foreman (ENGINE-ISSUES.md).
-F.movePlayerTo(12, 14);
+// Stand the avatar just in front of the Foreman: its name-tag billboard (an
+// HtmlNode, pointer-events: none) then covers him, and the click must still
+// reach him through it.
+F.movePlayerTo(22, 14);
 frames(2);
 
 // The kit/arcade projection agrees with the engine's own view * projection.

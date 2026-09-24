@@ -251,12 +251,12 @@ export function placeFromRay(origin, dir, kind, spin) {
 }
 
 /**
- * Place from canvas-local pixel coordinates (the click path). The ray comes
- * from the kit viewport (JS camera math): SceneGraph.unprojectLocal has no
- * working form for setCamera scenes (ENGINE-ISSUES.md).
+ * Place from canvas-local pixel coordinates (the click path); the ray is the
+ * engine's (vp.ray = scene.unprojectLocal).
  */
 export function placeAtPixel(px, py, kind) {
     const ray = _vp.ray(px, py);
+    if (!ray) return null;
     // A pseudo-random roll keeps repeated clicks on the floor from stamping a
     // visibly identical texture every time.
     const spin = (px * 37 + py * 61) % 360;

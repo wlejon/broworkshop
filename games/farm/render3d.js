@@ -227,10 +227,12 @@ export function createRenderer(scene, world) {
             + `font:500 26px sans-serif;line-height:1.15;text-align:center">`
             + `${esc(text)}</div>`;
     }
+    // pointer-events: none (inherited by the pill and bubble): a tag is a
+    // label, so clicks anywhere on it fall through to the scene behind.
     function wrap(inner) {
         return `<div style="display:flex;flex-direction:column;align-items:center;`
             + `justify-content:flex-end;width:${LABEL.w}px;height:${LABEL.h}px;`
-            + `font-family:sans-serif">${inner}</div>`;
+            + `font-family:sans-serif;pointer-events:none">${inner}</div>`;
     }
     // Build the label HTML for a person: a name pill, plus a speech bubble when
     // a line is live, plus a small ⚠ on the pill for a worker in critical need.

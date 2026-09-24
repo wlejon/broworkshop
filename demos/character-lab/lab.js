@@ -26,7 +26,7 @@
 // frame tick, and exports the handles the HUD and the tests share. Tests
 // import this module, never main.js (see ENGINE-ISSUES.md).
 
-import { sceneViewport, screenRay, worldToScreen, Camera } from "/lib/kit/viewport3d.js";
+import { sceneViewport, worldToScreen, Camera } from "/lib/kit/viewport3d.js";
 import { buildCourse, tickCourse } from "/app/course.js";
 import { createCharacter, tickCharacter, rebuild, tune, charState, input, SPAWN } from "/app/character.js";
 import { buildQueryVis, tickQueries, nameBodies, setFacing, pickAlongRay } from "/app/queries.js";
@@ -102,12 +102,10 @@ function readMoveInput() {
 
 // --- picking + world labels ------------------------------------------------------
 
-const viewNow = () => Camera.orbitViewOpts(cam, canvas);
-
 /** Pick whatever solid is under a canvas pixel (ray + overlapPoint). */
 export function pickAtScreen(sx, sy) {
-    const r = canvas.getBoundingClientRect();
-    const ray = screenRay(viewNow(), r.width, r.height, sx, sy);
+    const ray = vp.ray(sx, sy);
+    if (!ray) return null;
     return pickAlongRay(ray.origin[0], ray.origin[1], ray.origin[2], ray.dir[0], ray.dir[1], ray.dir[2], 300);
 }
 

@@ -8,7 +8,7 @@
 // rotation); update() only manages visibility and the per-unit overlays.
 // Replays bypass the bindings and write the recorded frame straight onto the
 // nodes (renderReplayFrame).
-import { sceneViewport, orbitRotation, worldToScreen, Camera } from "/lib/kit/viewport3d.js";
+import { sceneViewport, orbitRotation } from "/lib/kit/viewport3d.js";
 import { BotAim } from "/lib/bot-aim.js";
 import { AI } from "/app/sim/ai.js";
 
@@ -63,9 +63,7 @@ export function resetCamera() {
 
 /** Screen position (canvas CSS px) of a world point under the current camera. */
 export function projectToCanvas(x, y, z) {
-    const c = vp.canvas;
-    const view = Camera.orbitViewOpts(vp.cam, c);
-    return worldToScreen([x, y, z], view, c.clientWidth, c.clientHeight);
+    return vp.toScreen([x, y, z]);
 }
 
 // Left click (≤ 6 px of drag) picks the living unit whose capsule center
@@ -93,7 +91,7 @@ export function unitAt(state, px, py) {
     for (const a of state.agents) {
         if (!a.unit.alive || !units[a.unit.id]) continue;
         const sp = projectToCanvas(a.x, UNIT_Y, a.z);
-        if (sp.behind) continue;
+        if (!sp || sp.behind) continue;
         const d = Math.hypot(sp.x - px, sp.y - py);
         if (d < bestD) { bestD = d; best = a.unit.id; }
     }

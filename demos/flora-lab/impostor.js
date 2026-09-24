@@ -104,7 +104,7 @@ export function bakeImpostorAtlas(scene, master, opts) {
     scene.setEnvironment(null);
     scene.setAmbient([0.0, 0.0, 0.0]);
     scene.setToneMap({ mode: 'linear', exposure: 1.0, gamma: 1.0 });
-    scene.setFog({});   // documented "fog off"; setFog(null) throws (ENGINE-ISSUES.md)
+    scene.setFog(null);
 
     if (master.branchMesh && master.branchMesh.triangleCount > 0) {
         scene.createMesh({

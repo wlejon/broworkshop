@@ -210,8 +210,9 @@ and test scripts.
 `sceneViewport(canvas, { orbit: { target, dist, fov, near, far }, controls })`
 returns `{ canvas, scene, cam, controls, onFrame(fn), onView(fn),
 reframe(pivot, dist, { yaw, pitch }?), ray(px, py), toScreen(world) }` and
-pushes the camera every frame; `ray(px, py)` is `screenRay` through a
-canvas-local pixel of the current view and `toScreen([x, y, z])` its inverse
+pushes the camera every frame; `ray(px, py)` is the engine's
+`scene.unprojectLocal` at a canvas-local pixel of the current view and
+`toScreen([x, y, z])` its inverse (`scene.projectLocal`)
 (`{ x, y, depth, behind }`, canvas-local; tests add the canvas rect to click
 a 3D object); `localPoint(canvas, ev)` gives an event's canvas-local pixel;
 `onView(fn)` may adjust the `setCamera` options before each push (camera

@@ -116,16 +116,13 @@ export function createCameras(scene, character, orbitRig) {
         names: ['orbit', 'follow', 'wide'],
 
         /**
-         * The key of the active camera, or '' if an imperative view took over.
-         *
-         * Matched by node id: `scene.activeCamera` hands back a fresh wrapper,
-         * not the object the node was created as (see ENGINE-ISSUES.md), so
-         * `===` never matches. A camera that is not one of ours falls to ''.
+         * The key of the active camera, or '' if an imperative view took over
+         * (or a camera that is not one of ours is active).
          */
         get active() {
             const a = scene.activeCamera;
             if (!a) return '';
-            for (const k of ctl.names) if (nodes[k].id === a.id) return k;
+            for (const k of ctl.names) if (nodes[k] === a) return k;
             return '';
         },
 

@@ -128,8 +128,7 @@ export function buildAtlas() {
         ctx.stroke();
     }
 
-    const d = ctx.getImageData(0, 0, w, h).data;
-    return { pixels: new Uint8Array(d.buffer, d.byteOffset, d.length), width: w, height: h };
+    return { pixels: ctx.getImageData(0, 0, w, h).data, width: w, height: h };
 }
 
 /** tile id -> atlas cell. Road is left 0: it always resolves through its autotile rule. */

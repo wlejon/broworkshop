@@ -301,7 +301,7 @@ PASS test lib-tests/test_history.js
 PASS test lib-tests/test_physics.js
 PASS test lib-tests/test_polygon.js 
 PASS test lib-tests/test_project.js 
-FAIL test lib-tests/test_scene_anim.js rc=1: evalScriptFileJit: uncaught Error: 4 tests failed
+PASS test lib-tests/test_scene_anim.js
 PASS test lib-tests/test_tot_reasoning.js 
 PASS smoke templates/kit-app 
 PASS test templates/kit-app/tests/test_main.js 
