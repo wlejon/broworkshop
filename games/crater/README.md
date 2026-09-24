@@ -1,87 +1,59 @@
 # Crater
 
-Turn-based 2–6 player artillery on destructible terrain. Authoritative
-server + thin rendering client over `bro.net`.
+Turn-based 2–6 player artillery on destructible terrain. An authoritative
+server plus a thin rendering client over `bro.net`.
 
-## What this app demonstrates
+## Files
 
-Crater is the **reference implementation** of the shared
-[`apps/lib/`](/lib/README.md) game kernel. Every reusable module is
-exercised here:
+| File        | Runs on | What                                                              |
+|-------------|---------|-------------------------------------------------------------------|
+| `shared.js` | both    | constants, seeded heightmap, ballistics, crater carving, damage   |
+| `match.js`  | server  | lobby, ready gate, turn order, shot resolution, bots, win, timeout |
+| `server.js` | server  | `NetRoom.host` on port 27100 wired to `match.js`                  |
+| `game.js`   | client  | arcade-shell plugin: connect, lobby flow, aim, shell animation     |
+| `draw.js`   | client  | canvas rendering (sky, terrain, tanks, shell, blast, dust)        |
+| `ui.js`     | client  | lobby roster, HUD player list, toast                              |
 
-| Module        | Used for                                                       |
-|---------------|----------------------------------------------------------------|
-| `GameLoop`    | dt-clamped render/tick loop (`client.js`)                      |
-| `Input`       | named, rebindable keyboard actions + held / edge-triggered     |
-| `SFX`         | menu beeps, fire/hit/die/win stingers                          |
-| `Storage`     | persisted name, server address, (future: settings)             |
-| `Hud`         | text updates, toast for turn-skip notifications                |
-| `Screens`     | title / lobby / pause / gameover / howto state machine         |
-| `NetRoom`     | client-side lobby + turn messaging over `bro.net`              |
+Shared plumbing comes from `/lib`: the arcade shell (screens, input, audio,
+save), `lib/netroom.js` (hello/welcome handshake, JSON framing, host and
+client), and `lib/arcade/netplay.js` (the name + server form).
 
-On the server side, `server.js` inlines the small bits of `NetRoom` it
-needs (framing + connection lifecycle). A real multi-repo setup could
-share these via a loader; for now the comment at the top of `server.js`
-marks the duplicated block.
-
-## Architecture
+## How it stays in sync
 
 ```
-        ┌─────────────┐      hello         ┌───────────────┐
-        │  client.js  │ ─────────────────▶ │   server.js   │
-        │             │ ◀──── state ────── │ (authoritative│
-        │  renders    │ ─── ready / bot ─▶ │  heightmap +  │
-        │  scene +    │ ◀──── match ────── │  ballistic    │
-        │  HUD; sends │ ───── fire ──────▶ │  sim)         │
-        │  aim intent │ ◀──── shot ─────── │               │
-        └─────────────┘      over          └───────────────┘
-             ▲
-             │ same seeded heightmap, same crater math (shared.js)
-             ▼
-      all clients stay in lockstep without per-frame sync
+  client (game.js)                          server (server.js → match.js)
+  ── hello {name} ───────────────────────▶  accept / deny ("Server full", "Match in progress")
+  ◀─────────────────────────── welcome {id}
+  ── ready / addBot / start ────────────▶   lobby rules
+  ◀── state {phase:"lobby", ...} ──────────
+  ◀── match {seed, hm, players, turn} ─────  heightmap + placement
+  ── fire {angle, power, dir} ──────────▶   simulateShot, carveCrater, blastDamage
+  ◀── shot {path params, craterCols, damages, dead, nextTurn}
+  ◀── over {winnerId} ─── (after the shell lands; lobby returns 5 s later)
 ```
 
-The server owns:
-- player roster + ready-state (lobby)
-- `Float32Array(COLS)` heightmap
-- tank positions, HP, turn order
-- projectile simulation (`simulateShot`)
-- bot decision making
-
-Clients keep a local copy of the heightmap purely for rendering. After
-each shot, the server broadcasts a `craterCols` diff (only the columns
-that changed) and clients apply it verbatim via `applyCraterDiff`.
+The client animates the shell from the same launch parameters and applies
+the server's `craterCols` diff when it lands, so every client's terrain is
+the server's terrain. Physics lives only in `shared.js`, which both sides
+import.
 
 ## Running
 
-From the launcher (preferred — server is auto-spawned):
-1. Launcher lists "Crater".
-2. Open it — the launcher spins up `server.js` as a child process.
-3. Click **Connect** (defaults to `127.0.0.1:27100`).
-4. Share your machine's IP with friends so they can join.
-
+From the launcher, the server starts automatically (`launcher/apps.json`).
 Standalone:
-```
-# terminal 1
-./build/Debug/bro-headless.exe apps/crater server.js
 
-# terminal 2 (and 3, and 4…)
-./build/Debug/bro.exe apps/crater
+```
+bro-server games/crater games/crater/server.js
+bro games/crater
 ```
 
 ## Controls
 
-- **← / →**: flip aim direction
-- **↑ / ↓**: raise / lower angle
-- **Q / E**: power down / up
-- **Space**: fire
-- **Esc**: pause menu
+← / → face, ↑ / ↓ angle, Q / E power, Space fire, Esc menu.
 
-All keys rebind through the standard `bro.settings` actions UI when
-hosted inside `bro.exe`.
+## Tests
 
-## Physics constants
-
-Defined once in `shared.js` and mirrored atop `server.js`. Change both
-together — client and server must agree on gravity, muzzle velocity,
-crater radius, and blast damage curve for simulations to stay in sync.
+- `tests/test_match.js`: physics and the full rule set in-process, with a fake
+  room and a fake clock.
+- `tests/test_netplay.js`: the server in a Worker, the page connecting over
+  loopback through the real menus, a bot, a shot each way, pause, leave.

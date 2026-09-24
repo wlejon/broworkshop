@@ -131,7 +131,7 @@ export function createCameras(scene, vehicle, track) {
      */
     function update(carWorldPos) {
         if (list[active] === trackside) {
-            trackside.lookAt(carWorldPos.x, carWorldPos.y, carWorldPos.z);
+            trackside.lookAt([carWorldPos.x, carWorldPos.y, carWorldPos.z]);
         }
     }
 
@@ -145,14 +145,15 @@ export function createCameras(scene, vehicle, track) {
         /** The camera node the SCENE thinks is active. */
         sceneActive: () => scene.activeCamera,
         /**
-         * Which of our cameras the SCENE thinks is active. Node identity is
-         * stable, so this is an indexOf against the list rather than a name
-         * comparison — a camera the scene picked up from somewhere else reads
-         * as null instead of masquerading as one of ours.
+         * Which of our cameras the SCENE thinks is active. Matched by node id,
+         * not by name — a camera the scene picked up from somewhere else reads
+         * as null instead of masquerading as one of ours — and not by wrapper
+         * identity, which the engine does not keep stable (ENGINE-ISSUES.md).
          */
         sceneActiveName: () => {
-            const i = list.indexOf(scene.activeCamera);
-            return i >= 0 ? list[i].name : null;
+            const a = scene.activeCamera;
+            const c = a ? list.find((n) => n.id === a.id) : null;
+            return c ? c.name : null;
         },
     };
 }

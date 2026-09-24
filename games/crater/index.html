@@ -9,11 +9,9 @@
 <body>
     <canvas id="view"></canvas>
 
-    <!-- Match HUD (custom layout; fields updated by game plugin) -->
+    <!-- Match HUD: fields #hud-<key> are filled from game.hud(). -->
     <div id="hud" hidden>
-        <div id="hud-top">
-            <div id="hud-turn">Waiting…</div>
-        </div>
+        <div id="hud-top"><div id="hud-turn">Waiting…</div></div>
         <div id="hud-players"></div>
         <div id="hud-aim">
             <div>Angle: <span id="hud-angle">45</span>°</div>
@@ -27,7 +25,7 @@
         <section id="screen-title" class="screen">
             <h1 class="overlay-title">Crater</h1>
             <p class="overlay-sub tagline">Turn-based artillery on destructible terrain.</p>
-            <div class="panel">
+            <div class="connect-form">
                 <div class="field">
                     <label for="in-name">Name</label>
                     <input id="in-name" type="text" maxlength="14" value="Player" autocomplete="off">
@@ -36,24 +34,29 @@
                     <label for="in-address">Server</label>
                     <input id="in-address" type="text" value="127.0.0.1:27100" autocomplete="off">
                 </div>
-                <div class="menu-items">
-                    <div class="menu-item selected" data-action="connect">Connect</div>
-                    <div class="menu-item" data-action="howto">How to Play</div>
-                    <div class="menu-item" data-action="quit">Quit</div>
-                </div>
-                <div id="title-error"></div>
             </div>
-            <p class="overlay-hint">Up/Down navigate · Enter select · type name/server above</p>
+            <div class="menu-items">
+                <div class="menu-item selected" data-action="connect">Connect</div>
+                <div class="menu-item" data-action="howto">How to Play</div>
+                <div class="menu-item" data-action="quit">Quit</div>
+            </div>
+            <div id="title-error" class="connect-error"></div>
+            <p class="overlay-hint">Up / Down navigate · Enter select · type name and server above</p>
         </section>
 
         <section id="screen-howto" class="screen" hidden>
             <h1 class="overlay-title">How to Play</h1>
             <div class="overlay-sub htp-body">
                 <p>2–6 player turn-based artillery. Destroy every other tank to win.</p>
-                <p><strong>Aim:</strong> ↑/↓ pitch, ←/→ direction, <strong>Q/E</strong> power down/up.</p>
-                <p><strong>Fire:</strong> Space. Projectile physics carves craters; tanks lose ground and fall.</p>
-                <p>All clients share a seeded heightmap — explosions look identical for everyone.</p>
-                <p>Host a match from the launcher (server auto-starts), then Connect.</p>
+                <pre>↑ / ↓      Barrel angle
+← / →      Face left / right
+Q / E      Power down / up
+Space      Fire
+Esc        Menu</pre>
+                <p>Shells carve craters; tanks ride the new ground. Every client
+                shares the server's seeded terrain, so a blast looks the same for everyone.</p>
+                <p>The launcher starts the server for you. Standalone:</p>
+                <pre>bro-server games/crater games/crater/server.js</pre>
             </div>
             <div class="menu-items">
                 <div class="menu-item selected" data-action="back">Back</div>
@@ -69,11 +72,12 @@
                 <div class="menu-item" data-action="start">Start Match (host)</div>
                 <div class="menu-item" data-action="leave">Leave</div>
             </div>
-            <p class="overlay-hint lobby-hint">Host starts when ≥2 players/bots and all humans are ready.</p>
+            <p class="overlay-hint lobby-hint">The host starts once there are 2+ tanks and every human is ready.</p>
         </section>
 
         <section id="screen-pause" class="screen" hidden>
             <h1 class="overlay-title">Paused</h1>
+            <p class="overlay-sub">The match carries on at the server.</p>
             <div class="menu-items">
                 <div class="menu-item selected" data-action="resume">Resume</div>
                 <div class="menu-item" data-action="leave">Leave Match</div>

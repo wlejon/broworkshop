@@ -207,7 +207,6 @@ PASS smoke games/stompworld
 PASS smoke games/tilehaven 
 FAIL test games/tilehaven/test.js rc=1: [bronze:CANVAS mousedown listener] uncaught TypeError: expected a __bro_native.scene.SceneNode handle, got a non-object
 PASS smoke games/torque 
-FAIL test games/torque/tests/test_smoke.js rc=1: ASSERTION FAILED: 27 check(s) failed
 PASS smoke games/touchdown 
 PASS smoke games/tumble 
 PASS test games/tumble/tests/test_campaign.js 

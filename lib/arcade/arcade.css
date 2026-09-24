@@ -225,3 +225,116 @@ html, body {
     opacity: 0.35;
     pointer-events: none;
 }
+
+/* ── Connect form (networked games, lib/arcade/netplay.js) ───────────── */
+/* <div class="connect-form"><div class="field"><label>..</label><input></div>
+   ...<div class="connect-error" id="..."></div></div>
+   Tint with --arcade-input-bg / --arcade-input-border / --arcade-error. */
+
+.connect-form {
+    text-align: left;
+    max-width: 340px;
+    margin: 0 auto 16px;
+}
+
+.connect-form .field {
+    margin: 10px 0;
+}
+
+.connect-form label {
+    display: block;
+    font-size: 11px;
+    color: var(--arcade-muted);
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+}
+
+.connect-form input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 8px 10px;
+    background: var(--arcade-input-bg, rgba(0, 0, 0, 0.35));
+    border: 1px solid var(--arcade-input-border, var(--arcade-hud-border));
+    border-radius: 4px;
+    color: var(--arcade-text);
+    font-size: 14px;
+    font-family: inherit;
+}
+
+.connect-form input:focus {
+    outline: none;
+    border-color: var(--arcade-accent);
+}
+
+.connect-error {
+    color: var(--arcade-error, #ff7070);
+    font-size: 13px;
+    min-height: 18px;
+    margin-top: 8px;
+    text-align: center;
+}
+
+/* ── Mode select, high-score tabs, credits (lib/arcade/scores.js) ────── */
+
+.mode-descriptions {
+    margin-bottom: 20px;
+}
+
+.mode-desc {
+    font-size: 12px;
+    color: var(--arcade-faint);
+    margin-bottom: 4px;
+}
+
+.hs-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 14px;
+    margin-bottom: 14px;
+}
+
+.hs-tab {
+    font-size: 14px;
+    color: var(--arcade-faint);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding-bottom: 2px;
+}
+
+.hs-tab.active {
+    color: var(--arcade-accent);
+    border-bottom: 2px solid var(--arcade-accent);
+}
+
+#hs-list {
+    text-align: left;
+    display: inline-block;
+    min-width: 260px;
+}
+
+/* A stats-block of padded "Label    value" rows: keep the columns lined up. */
+.stats-block.stats-table {
+    text-align: left;
+    display: inline-block;
+}
+
+.credits-sub {
+    color: var(--arcade-faint);
+    font-size: 12px;
+    margin-top: 20px;
+}
+
+/* In-play toast text over the board (effects.toast). */
+.arcade-toast {
+    position: absolute;
+    left: 0;
+    width: 100%;
+    text-align: center;
+    font-weight: bold;
+    color: var(--arcade-accent);
+    pointer-events: none;
+    display: none;
+    z-index: 6;
+}

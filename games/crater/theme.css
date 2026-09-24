@@ -1,4 +1,4 @@
-/* Crater — desert/artillery palette over shared arcade chrome. */
+/* Crater — desert artillery palette over the shared arcade chrome. */
 
 :root {
     --arcade-bg: #06070b;
@@ -11,60 +11,17 @@
     --arcade-hud-border: #263148;
     --arcade-menu-hover: rgba(255, 193, 102, 0.08);
     --arcade-menu-selected: rgba(255, 193, 102, 0.18);
+    --arcade-input-bg: #0a0f1a;
+    --arcade-input-border: #2b3651;
+    --crater-well: #0a0f1a;
 }
 
 #view {
     background: linear-gradient(180deg, #081228 0%, #0e1a36 55%, #2a1f18 100%);
 }
 
-/* ── Title connect panel ─────────────────────────────────────────────── */
-
 .tagline {
     margin-bottom: 8px;
-}
-
-.panel {
-    text-align: left;
-    max-width: 360px;
-    margin: 0 auto 8px;
-}
-
-.field {
-    margin: 10px 0;
-}
-
-.field label {
-    display: block;
-    font-size: 11px;
-    color: var(--arcade-muted);
-    margin-bottom: 4px;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-}
-
-.field input {
-    width: 100%;
-    box-sizing: border-box;
-    padding: 8px 10px;
-    background: #0a0f1a;
-    border: 1px solid #2b3651;
-    border-radius: 4px;
-    color: var(--arcade-text);
-    font-size: 14px;
-    font-family: var(--arcade-font);
-}
-
-.field input:focus {
-    outline: none;
-    border-color: var(--arcade-accent);
-}
-
-#title-error {
-    color: #ff7070;
-    font-size: 13px;
-    margin-top: 10px;
-    min-height: 18px;
-    text-align: center;
 }
 
 /* ── Lobby ───────────────────────────────────────────────────────────── */
@@ -76,9 +33,9 @@
     overflow-y: auto;
     margin: 0 auto 16px;
     padding: 12px;
-    background: #0a0f1a;
-    border-radius: 6px;
+    background: var(--crater-well);
     border: 1px solid #1f2a44;
+    border-radius: 6px;
 }
 
 .lobby-row {
@@ -97,6 +54,11 @@
     flex-shrink: 0;
 }
 
+.lobby-tag {
+    font-size: 11px;
+    color: var(--arcade-muted);
+}
+
 .lobby-ready {
     margin-left: auto;
     font-size: 12px;
@@ -107,60 +69,52 @@
     color: #e07676;
 }
 
-.lobby-bot {
-    font-size: 11px;
-    color: var(--arcade-muted);
-}
-
 .lobby-hint {
     max-width: 420px;
     margin-left: auto;
     margin-right: auto;
 }
 
-/* ── Match HUD (spread layout, not single column) ────────────────────── */
+/* ── Match HUD: spread around the screen edges ───────────────────────── */
 
 #hud {
+    inset: 0;
     top: 0;
     left: 0;
-    right: 0;
-    bottom: 0;
     min-width: 0;
     padding: 0;
     background: transparent;
     border: none;
-    pointer-events: none;
+    box-shadow: none;
     font-size: 14px;
 }
 
-#hud-top {
+#hud-top,
+#hud-players,
+#hud-aim {
     position: absolute;
+    background: var(--arcade-hud-bg);
+    border: 1px solid var(--arcade-hud-border);
+    border-radius: 6px;
+}
+
+#hud-top {
     top: 10px;
     left: 50%;
     transform: translateX(-50%);
-    display: flex;
-    gap: 30px;
-    background: var(--arcade-hud-bg);
-    border: 1px solid var(--arcade-hud-border);
     padding: 8px 16px;
-    border-radius: 6px;
 }
 
 #hud-turn {
     font-size: 18px;
     font-weight: 600;
-    color: var(--arcade-text);
 }
 
 #hud-players {
-    position: absolute;
     top: 10px;
     left: 10px;
-    background: var(--arcade-hud-bg);
-    border: 1px solid var(--arcade-hud-border);
-    padding: 8px 12px;
-    border-radius: 6px;
     min-width: 180px;
+    padding: 8px 12px;
 }
 
 .hud-player {
@@ -183,13 +137,12 @@
 
 .hp-bar {
     display: inline-block;
+    flex-shrink: 0;
     width: 60px;
     height: 8px;
+    overflow: hidden;
     background: #222;
     border-radius: 3px;
-    vertical-align: middle;
-    overflow: hidden;
-    flex-shrink: 0;
 }
 
 .hp-fill {
@@ -200,16 +153,11 @@
 }
 
 #hud-aim {
-    position: absolute;
     bottom: 40px;
     left: 10px;
-    background: var(--arcade-hud-bg);
-    border: 1px solid var(--arcade-hud-border);
     padding: 10px 14px;
-    border-radius: 6px;
     font-size: 16px;
     line-height: 1.5;
-    color: var(--arcade-text);
 }
 
 #hud-hint {
@@ -217,14 +165,14 @@
     bottom: 10px;
     left: 50%;
     transform: translateX(-50%);
+    padding: 4px 10px;
     background: rgba(0, 0, 0, 0.45);
     border: 1px solid var(--arcade-hud-border);
-    padding: 4px 10px;
     border-radius: 4px;
     font-size: 12px;
-    opacity: 0.85;
     color: var(--arcade-muted);
     white-space: nowrap;
+    opacity: 0.85;
 }
 
 /* ── Toast ───────────────────────────────────────────────────────────── */
@@ -234,13 +182,12 @@
     bottom: 72px;
     left: 50%;
     transform: translateX(-50%);
+    z-index: 20;
+    padding: 8px 16px;
     background: rgba(0, 0, 0, 0.75);
     border: 1px solid var(--arcade-hud-border);
-    color: var(--arcade-text);
-    padding: 8px 16px;
     border-radius: 6px;
     font-size: 14px;
-    z-index: 20;
     pointer-events: none;
 }
 
