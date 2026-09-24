@@ -661,6 +661,57 @@ gradient with hex stops (`#14285a, #dcb450`) paints. Looks like the
 gradient parser splits the stop list on the commas inside `rgb(...)`.
 Seen in tools/algo-viz's pathfinding legend (now hex).
 
+### TileWorld ignores `atlasPixels` given as a Uint8ClampedArray (2026-09-24)
+`scene.createTileWorld({ atlasPixels, atlasWidth, atlasHeight, ... })` with
+the `Uint8ClampedArray` that `getImageData().data` returns silently renders
+untextured (flat grey tiles); a `Uint8Array` view of the same buffer
+textures correctly. It should accept any byte view, or throw.
+tools/tile-editor passes `new Uint8Array(img.data.buffer)` (atlas.js); the
+old tile editor rendered untextured because of this.
+
+### `bro.media.thumbnails().data` is a Uint8Array, docs say Uint8ClampedArray (2026-09-24)
+docs/video-api.js promises a `Uint8ClampedArray` (and shows
+`new ImageData(strip.data, ...)`); the engine returns a `Uint8Array`.
+This failed tools/media-inspector's baseline test. The app now views the
+buffer as clamped bytes itself (filmstrip.js `stripCanvas`), and the test
+asserts only "RGBA bytes of the right length".
+
+### `<video>` load of a missing or unsupported file: no `error`, stale state (2026-09-24)
+Setting `src` to a missing file or an Ogg Vorbis file and calling `load()`
+fires neither `loadedmetadata` nor `error`, and the element keeps the
+PREVIOUS file's `readyState` (4), `duration` and `videoWidth` (a fresh
+element reports `videoWidth` 300 after such a load). Per spec, load()
+resets `readyState` to HAVE_NOTHING and an unplayable source fires `error`
+with MEDIA_ERR_SRC_NOT_SUPPORTED. Repro:
+`v.src = 'demos/video_demo/hello.webm'; v.load(); /* pump */ v.src = 'demos/scene-audio/assets/pad-chime.ogg'; v.load();`
+then `v.readyState` is 4 and `v.duration` 2.008. The old media inspector hung
+on "Analyzing media..." for its Ogg sources; tools/media-inspector/player.js
+now waits for the event with a timeout.
+Related, not a bug: bro.media and `<video>` read WebM (VP9/VP8 + Opus) only,
+so the workshop's Ogg Vorbis clips (demos/scene-audio/assets), which
+AudioContext decodes, cannot be inspected; media-inspector no longer lists them.
+
+### `mesh.applySkinning` applies the inverse bind matrices a second time (2026-09-24)
+bromesh `applySkinning` (src/manipulation/skin.cpp) multiplies each pose
+matrix by the skin's `inverseBindMatrices` itself, but its header,
+`pose.h`'s `computeSkinningMatrices` comment and docs/rigging-api.js all say
+to pass `pose.computeSkinningMatrices(skeleton)` (already world x
+inverseBind). Doing what the docs say moves vertices by the inverse bind
+twice: a 2-bone column bent 90 degrees ends at |x| 0.2 instead of 1.
+World matrices (`pose.computeWorldMatrices`) are what actually works;
+bro's own tests use both (tests/rigging/diag_autorig_locomotion.js vs
+probe_meshy.js). tools/mesh-viewer uses world matrices and its test pins the
+bent shape, so it will flag whichever way this is resolved.
+
+### `<details>` has no `open` property (2026-09-24)
+`HTMLDetailsElement.open` is missing: `d.open = true` only sets an expando
+(no `open` attribute, the section stays closed, `details:not([open])` still
+matches) and reading `d.open` is `undefined` after `setAttribute('open', '')`
+or a click on the `<summary>` (both of which do open it). Repro:
+`bro-headless tools/node-forge -e "const d=document.createElement('details'); d.append(document.createElement('summary')); document.body.append(d); d.open=true; console.log(d.hasAttribute('open'))"`
+prints false. node-forge's old tests set `.open = true` and passed only
+because they queried the hidden content; its tests now click the summary.
+
 ## Notes (not bugs)
 
 - WAAPI gaps are documented in docs/web-animations-api.js and demos/waapi-lab

@@ -1,0 +1,37 @@
+/* Mesh Viewer: only what the kit does not cover. */
+.k-grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; margin-bottom: 6px; }
+.k-panel .k-grid2 { margin-bottom: 6px; }
+#ops-panel[hidden] { display: none; }
+
+#remesh-len { width: 70px; }
+.k-kv > div.bad, .k-kv > div.bad > span, .k-kv > div.bad > b { color: var(--k-err, #ff6b6b); }
+
+.files { display: flex; flex-direction: column; min-height: 0; }
+#dir-status { word-break: break-all; }
+#dir-status.bad { color: var(--k-err, #ff6b6b); }
+#file-list { overflow-y: auto; font-size: 12px; }
+.file-item { display: flex; gap: 8px; padding: 3px 6px; border-radius: 4px; cursor: pointer; }
+.file-item:hover { background: var(--k-btn-hover); }
+.file-item.selected { background: var(--k-btn-hover); color: var(--k-accent); }
+.file-item .dim { width: 22px; text-align: right; }
+.file-item .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.anim-list { max-height: 180px; overflow-y: auto; font-size: 12px; margin-bottom: 6px; }
+.anim-item { padding: 3px 6px; border-radius: 4px; cursor: pointer; }
+.anim-item:hover { background: var(--k-btn-hover); }
+.anim-item.active { color: var(--k-accent); border-left: 2px solid var(--k-accent); }
+.anim-item.blend { color: #ffa502; border-left: 2px solid #ffa502; }
+
+#drop-overlay {
+    display: none; position: absolute; left: 0; top: 0; right: 0; bottom: 0; z-index: 20;
+    align-items: center; justify-content: center; font-size: 18px;
+    background: rgba(40, 120, 220, 0.18); border: 2px dashed var(--k-accent);
+    pointer-events: none;
+}
+#drop-overlay.show { display: flex; }
+
+#uv-inset {
+    position: absolute; right: 10px; bottom: 10px; z-index: 5; padding: 6px;
+    background: rgba(12, 14, 18, 0.86); border: 1px solid var(--k-border); border-radius: 6px;
+}
+#uv-canvas { display: block; width: 200px; height: 200px; }

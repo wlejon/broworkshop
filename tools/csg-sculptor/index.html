@@ -1,153 +1,86 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CSG Sculptor</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="/lib/kit/kit.css">
+    <link rel="stylesheet" href="/app/style.css">
 </head>
-<body>
-    <div id="canvas-container">
-        <canvas id="stage"></canvas>
+<body class="k-app">
+    <header class="k-header">
+        <h1>CSG Sculptor</h1>
+        <span class="k-sub">carve a workpiece with boolean cutters (Mesh.booleanDifference / Union / Intersection)</span>
+        <span class="k-spacer"></span>
+        <span class="k-sub"><b>right-drag</b> orbit · <b>middle-drag</b> pan · <b>wheel</b> zoom · <b>W/E/R</b> gizmo · <b>Enter</b> apply</span>
+    </header>
+
+    <div class="k-toolbar" id="toolbar">
+        <button id="undo" title="Undo (Ctrl+Z)">&#x21B6; Undo</button>
+        <button id="redo" title="Redo (Ctrl+Y / Ctrl+Shift+Z)">&#x21B7; Redo</button>
+        <span class="k-sep"></span>
+        <span class="k-row" id="ops"></span>
+        <button id="apply" class="primary" title="Apply the cutter to the workpiece (Enter)">Apply boolean</button>
+        <span class="k-spacer"></span>
+        <button id="export-obj">Export OBJ</button>
+        <button id="export-stl">Export STL</button>
     </div>
 
-    <!-- Top Master Toolbar -->
-    <div class="top-toolbar">
-        <div class="brand-title">
-            <span>⬡ CSG Sculptor</span>
-            <span class="brand-badge">CAD 3D</span>
-        </div>
-
-        <!-- History & Actions -->
-        <div class="toolbar-group">
-            <button class="tool-btn" id="btn-undo" title="Undo (Ctrl+Z)">↶ Undo</button>
-            <button class="tool-btn" id="btn-redo" title="Redo (Ctrl+Y)">↷ Redo</button>
-            <div class="divider-v"></div>
-
-            <!-- Operations -->
-            <button class="tool-btn carve active" data-op="carve">✂ Subtract / Carve</button>
-            <button class="tool-btn union" data-op="union">✚ Add / Union</button>
-            <button class="tool-btn intersect" data-op="intersect">∩ Intersect</button>
-            <div class="divider-v"></div>
-
-            <!-- Execute Boolean -->
-            <button class="tool-btn execute" id="btn-execute">⚡ Apply Boolean (Enter)</button>
-        </div>
-
-        <!-- Export -->
-        <div class="toolbar-group">
-            <button class="tool-btn export" id="btn-export">💾 Export OBJ</button>
-        </div>
-    </div>
-
-    <!-- Left Palette: Shapes & Gizmos -->
-    <div class="left-palette">
-        <div class="palette-section-title">Cutter Primitive</div>
-        <div class="shape-grid" id="shape-selector">
-            <button class="shape-btn active" data-shape="box">
-                <span class="icon">🧊</span>
-                <span>Box</span>
-            </button>
-            <button class="shape-btn" data-shape="cylinder">
-                <span class="icon">🥫</span>
-                <span>Cylinder</span>
-            </button>
-            <button class="shape-btn" data-shape="sphere">
-                <span class="icon">🔮</span>
-                <span>Sphere</span>
-            </button>
-            <button class="shape-btn" data-shape="cone">
-                <span class="icon">▲</span>
-                <span>Cone</span>
-            </button>
-            <button class="shape-btn" data-shape="torus">
-                <span class="icon">🍩</span>
-                <span>Torus</span>
-            </button>
-        </div>
-
-        <div class="palette-section-title">Gizmo Mode</div>
-        <div class="gizmo-modes" id="gizmo-modes">
-            <button class="gizmo-btn active" data-mode="translate">Move (W)</button>
-            <button class="gizmo-btn" data-mode="rotate">Rotate (E)</button>
-            <button class="gizmo-btn" data-mode="scale">Scale (R)</button>
-        </div>
-
-        <div class="palette-section-title" style="margin-top: 10px;">Grid & Snapping</div>
-        <label style="font-size: 11px; color: #cbd5e1; display: flex; align-items: center; gap: 6px; cursor: pointer;">
-            <input type="checkbox" id="snap-toggle" style="accent-color: #00f2fe;">
-            <span>Snap to 0.25m Grid</span>
-        </label>
-    </div>
-
-    <!-- Right Inspector Panel -->
-    <div class="right-inspector">
-        <div class="inspector-section">
-            <div class="palette-section-title">Base Workpiece</div>
-            <select class="dropdown-field" id="preset-select">
-                <option value="box" selected>Solid Cube (1.4m)</option>
-                <option value="sphere">Solid Sphere (1.6m)</option>
-                <option value="cylinder">Cylinder Blank</option>
-                <option value="column">Architectural Column</option>
-                <option value="bracket">Mechanical Bracket</option>
-                <option value="torus">Torus Ring</option>
-            </select>
-        </div>
-
-        <div class="inspector-section">
-            <div class="palette-section-title">Cutter Dimensions</div>
-            <div class="slider-control">
-                <label>Radius / W</label>
-                <input type="range" id="cut-w" min="0.2" max="3.0" step="0.05" value="1.2">
-                <span class="val" id="cut-w-val">1.2m</span>
+    <div class="k-body">
+        <aside class="k-side">
+            <div class="k-panel">
+                <h2>Cutter</h2>
+                <div class="k-row shapes" id="shapes"></div>
             </div>
-            <div class="slider-control">
-                <label>Height</label>
-                <input type="range" id="cut-h" min="0.2" max="4.0" step="0.05" value="1.2">
-                <span class="val" id="cut-h-val">1.2m</span>
+            <div class="k-panel">
+                <h2>Gizmo</h2>
+                <div class="k-row" id="gizmo-modes"></div>
+                <label class="k-field"><input type="checkbox" id="snap"> snap to 0.25 m grid</label>
+                <button id="reset-cutter" class="small">Reset cutter transform</button>
             </div>
-            <div class="slider-control">
-                <label>Depth</label>
-                <input type="range" id="cut-d" min="0.2" max="3.0" step="0.05" value="1.2">
-                <span class="val" id="cut-d-val">1.2m</span>
+            <div class="k-panel">
+                <h2>Cutter size</h2>
+                <div id="dims"></div>
             </div>
-        </div>
+        </aside>
 
-        <div class="inspector-section">
-            <div class="palette-section-title">Material Shading</div>
-            <select class="dropdown-field" id="material-select">
-                <option value="studio" selected>Studio Gray</option>
-                <option value="clay">Sculptor Terracotta Clay</option>
-                <option value="metal">Machined Steel</option>
-                <option value="gold">Polished Gold</option>
-                <option value="jade">Imperial Jade</option>
-            </select>
-        </div>
+        <main class="k-main">
+            <div class="k-viewport"><canvas id="stage"></canvas></div>
+        </main>
 
-        <div class="inspector-section">
-            <div class="palette-section-title">Mesh Statistics</div>
-            <div class="stats-grid">
-                <div class="stat-item">
-                    <span class="k">Vertices</span>
-                    <span class="v" id="stat-verts">24</span>
-                </div>
-                <div class="stat-item">
-                    <span class="k">Triangles</span>
-                    <span class="v" id="stat-tris">12</span>
-                </div>
+        <aside class="k-side right">
+            <div class="k-panel">
+                <h2>Workpiece</h2>
+                <label class="k-field"><span>blank</span>
+                    <select id="preset">
+                        <option value="box">Cube (2.8 m)</option>
+                        <option value="sphere">Sphere (r 1.6 m)</option>
+                        <option value="cylinder">Cylinder</option>
+                        <option value="column">Column</option>
+                        <option value="bracket">Bracket</option>
+                        <option value="torus">Torus ring</option>
+                    </select>
+                </label>
+                <label class="k-field"><span>material</span>
+                    <select id="material">
+                        <option value="studio">Studio grey</option>
+                        <option value="clay">Terracotta clay</option>
+                        <option value="metal">Machined steel</option>
+                        <option value="gold">Polished gold</option>
+                        <option value="jade">Jade</option>
+                    </select>
+                </label>
             </div>
-        </div>
+            <div class="k-panel">
+                <h2>Mesh</h2>
+                <div id="mesh-stats"></div>
+            </div>
+            <div class="k-panel">
+                <h2>History</h2>
+                <div id="history" class="k-note"></div>
+            </div>
+        </aside>
     </div>
 
-    <!-- Status Toast Notification -->
-    <div id="status-toast">Ready to sculpt</div>
-
-    <!-- Bottom Hints -->
-    <div class="bottom-hints">
-        <b>Right-drag</b> Orbit · <b>Middle-drag</b> Pan · <b>Wheel</b> Zoom · <b>W/E/R</b> Gizmo Modes · <b>Enter</b> Apply Cut · <b>Ctrl+Z</b> Undo
-    </div>
-
-    <script src="/lib/camera.js"></script>
-    <script type="module" src="./app.js"></script>
+    <footer class="k-statusbar"><span id="status"></span></footer>
+    <script type="module" src="/app/main.js"></script>
 </body>
 </html>

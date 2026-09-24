@@ -1,307 +1,168 @@
-// app.js — Main orchestrator for CSG Sculptor tool.
+// app.js — CSG Sculptor: a workpiece (workpiece.js) carved by a gizmo-driven
+// cutter (cutter.js) in a kit 3D viewport. main.js imports this module; tests
+// import it too and drive the exported `sculptor`.
 
-import { CSGEngine } from "./csg.js";
-import { CutterTool } from "./cutter.js";
-import { exportMeshToOBJ } from "./exporter.js";
+import "/lib/history.js";
+import { boot } from "/lib/kit/app.js";
+import { $, h } from "/lib/kit/dom.js";
+import { readout, segmented } from "/lib/kit/ui.js";
+import { params } from "/lib/kit/params.js";
+import { pickSaveFile } from "/lib/kit/ml.js";
+import { documentCommands } from "/lib/kit/editor.js";
+import { sceneViewport, orbitRotation } from "/lib/kit/viewport3d.js";
+import { createWorkpiece, OPS } from "./workpiece.js";
+import { createCutter, SHAPES, GIZMO_MODES, GIZMO_KEYS } from "./cutter.js";
 
-const canvas = document.getElementById('stage');
-const scene = canvas.getContext('scene');
+// --- scene ---------------------------------------------------------------------
 
-// --- Scene Environment & Lighting ---
+const vp = sceneViewport('#stage', {
+    orbit: { target: [0, 0, 0], dist: 8.5, fov: 45, near: 0.1, far: 150, rot: orbitRotation(-0.45, -0.32) },
+    controls: { minDist: 2, maxDist: 60 },
+});
+const scene = vp.scene;
 scene.setAmbient([0.1, 0.12, 0.16]);
 scene.setToneMap({ mode: 'aces', exposure: 1.15 });
+scene.createLight({ type: 'directional', direction: [-0.4, -0.9, -0.4], color: [1.0, 0.98, 0.94],
+    intensity: 2.8, castsShadow: true, name: 'key' });
+scene.createLight({ type: 'directional', direction: [0.6, -0.4, 0.6], color: [0.4, 0.65, 0.95],
+    intensity: 1.2, name: 'fill' });
+scene.createLight({ type: 'directional', direction: [0.0, 0.8, -0.8], color: [0.8, 0.5, 0.4],
+    intensity: 0.6, name: 'rim' });
+// Turntable: a dark disc with a glowing rim.
+scene.createMesh({ mesh: Mesh.cylinder(12.0, 0.05, 32), color: '#0e121a', roughness: 0.8, metallic: 0.2, y: -2.0 });
+scene.createMesh({ mesh: Mesh.torus(12.0, 0.06, 64, 16), color: '#1e293b', emissive: 0.2,
+    emissiveColor: '#00f2fe', y: -1.95 });
 
-// Key Light (Sun with soft shadows)
-const keyLight = scene.createLight({
-    type: 'directional',
-    direction: [-0.4, -0.9, -0.4],
-    color: [1.0, 0.98, 0.94],
-    intensity: 2.8,
-    castsShadow: true,
-    name: 'sun'
-});
+// --- document --------------------------------------------------------------------
 
-// Cool Fill Light
-scene.createLight({
-    type: 'directional',
-    direction: [0.6, -0.4, 0.6],
-    color: [0.4, 0.65, 0.95],
-    intensity: 1.2,
-    name: 'fill'
-});
+const history = new History({ limit: 30 });
+const meshStats = readout('#mesh-stats', { verts: 'vertices', tris: 'triangles', size: 'size (m)' });
+const workpiece = createWorkpiece(scene, { history, onChange: () => refresh() });
+const cutter = createCutter(scene);
 
-// Studio Backlight / Rim
-scene.createLight({
-    type: 'directional',
-    direction: [0.0, 0.8, -0.8],
-    color: [0.8, 0.5, 0.4],
-    intensity: 0.6,
-    name: 'rim'
-});
-
-// Ground Grid Disk
-scene.createMesh({
-    mesh: Mesh.cylinder(12.0, 0.05, 32),
-    color: '#0e121a',
-    roughness: 0.8,
-    metalness: 0.2,
-    y: -2.0
-});
-
-// Outer Accent Ring
-scene.createMesh({
-    mesh: Mesh.torus(12.0, 0.06, 64, 16),
-    color: '#1e293b',
-    emissive: 0.2,
-    emissiveColor: '#00f2fe',
-    y: -1.95
-});
-
-// --- Camera Setup ---
-const startRot = Camera.quatMul(
-    Camera.quatFromAxis(0, 1, 0, -0.45),
-    Camera.quatFromAxis(1, 0, 0, -0.32)
-);
-
-const cam = Camera.createOrbit({
-    target: [0, 0, 0],
-    rot: startRot,
-    dist: 8.5,
-    fov: 45,
-    near: 0.1,
-    far: 150
-});
-
-// --- Instantiate Core Engines ---
-const csg = new CSGEngine(scene);
-const cutter = new CutterTool(scene);
-
-csg.initWorkpiece('box');
-
-// Toast notification helper
-let toastTimeout = null;
-function showToast(msg) {
-    const el = document.getElementById('status-toast');
-    if (!el) return;
-    el.textContent = msg;
-    el.style.opacity = '1';
-    if (toastTimeout) clearTimeout(toastTimeout);
-    toastTimeout = setTimeout(() => {
-        el.style.opacity = '0';
-    }, 2800);
+function refresh() {
+    const s = workpiece.stats();
+    meshStats.set({
+        verts: s.verts.toLocaleString(), tris: s.tris.toLocaleString(),
+        size: s.size.map((v) => v.toFixed(2)).join(' x '),
+    });
+    renderHistory();
 }
 
-function updateStats() {
-    const stats = csg.getStats();
-    const vEl = document.getElementById('stat-verts');
-    const tEl = document.getElementById('stat-tris');
-    if (vEl) vEl.textContent = stats.verts.toLocaleString();
-    if (tEl) tEl.textContent = stats.tris.toLocaleString();
-
-    const undoBtn = document.getElementById('btn-undo');
-    const redoBtn = document.getElementById('btn-redo');
-    if (undoBtn) undoBtn.disabled = csg.undoStack.length === 0;
-    if (redoBtn) redoBtn.disabled = csg.redoStack.length === 0;
+history.on('change', () => renderHistory());
+function renderHistory() {
+    const el = $('#history');
+    const n = history.size();
+    el.textContent = n ? n + ' step' + (n === 1 ? '' : 's') + ' · last: ' + history.entries()[n - 1].label
+                       : 'nothing to undo';
 }
 
-// --- Execute Boolean Cut ---
-function executeBoolean() {
-    const cutterMesh = cutter.getTransformedMesh();
-    const op = cutter.operation;
-    const ok = csg.applyBoolean(cutterMesh, op);
+// --- commands ----------------------------------------------------------------------
 
-    if (ok) {
-        showToast(`Applied ${op.toUpperCase()} successfully`);
-        updateStats();
-    } else {
-        showToast(`Boolean ${op} failed or empty intersection`);
-    }
+const doc = documentCommands({
+    history,
+    canRun: () => !(globalThis.bro && bro.gizmo && bro.gizmo.dragging),
+    undoButton: '#undo', redoButton: '#redo',
+    after: (cmd, ok) => { if (ok) app.status.set(cmd === 'undo' ? 'undone' : 'redone'); refresh(); },
+});
+
+const exportMenu = [
+    { id: 'file.exportObj', label: 'Export OBJ...' },
+    { id: 'file.exportStl', label: 'Export STL...' },
+    { id: 'file.exportPly', label: 'Export PLY...' },
+];
+const app = boot({
+    menu: {
+        file: exportMenu,
+        handlers: {
+            'file.exportObj': () => exportDialog('obj'),
+            'file.exportStl': () => exportDialog('stl'),
+            'file.exportPly': () => exportDialog('ply'),
+        },
+    },
+});
+
+/** Apply the cutter with its current operation; returns whether it changed the workpiece. */
+function applyCut() {
+    const ok = !!workpiece.apply(cutter.transformedMesh(), cutter.op);
+    if (ok) app.status.ok(OPS[cutter.op].label + ' applied');
+    else app.status.warn(OPS[cutter.op].label + ' left nothing (or failed); workpiece unchanged');
+    return ok;
 }
 
-// --- Bind UI Events ---
-function bindUI() {
-    // Operation buttons
-    const opBtns = document.querySelectorAll('.tool-btn[data-op]');
-    opBtns.forEach(btn => {
-        btn.addEventListener('click', () => {
-            opBtns.forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            const op = btn.dataset.op;
-            cutter.setOperation(op);
-            showToast(`Mode: ${op.toUpperCase()}`);
-        });
-    });
+const SAVERS = { obj: 'saveOBJ', stl: 'saveSTL', ply: 'savePLY' };
 
-    // Execute Boolean button
-    document.getElementById('btn-execute')?.addEventListener('click', () => {
-        executeBoolean();
-    });
-
-    // Undo / Redo
-    document.getElementById('btn-undo')?.addEventListener('click', () => {
-        const label = csg.undo();
-        if (label) showToast(`Undo: ${label}`);
-        updateStats();
-    });
-
-    document.getElementById('btn-redo')?.addEventListener('click', () => {
-        const label = csg.redo();
-        if (label) showToast(`Redo: ${label}`);
-        updateStats();
-    });
-
-    // Export OBJ
-    document.getElementById('btn-export')?.addEventListener('click', () => {
-        if (!csg.currentMesh) return;
-        try {
-            const filename = exportMeshToOBJ(csg.currentMesh, 'sculpture');
-            showToast(`Exported ${filename}`);
-        } catch (err) {
-            showToast(`Export failed: ${err.message}`);
-        }
-    });
-
-    // Cutter shape buttons
-    const shapeBtns = document.querySelectorAll('.shape-btn[data-shape]');
-    shapeBtns.forEach(btn => {
-        btn.addEventListener('click', () => {
-            shapeBtns.forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            cutter.setShape(btn.dataset.shape);
-            showToast(`Cutter: ${btn.dataset.shape}`);
-        });
-    });
-
-    // Gizmo mode buttons
-    const gizmoBtns = document.querySelectorAll('.gizmo-btn[data-mode]');
-    gizmoBtns.forEach(btn => {
-        btn.addEventListener('click', () => {
-            gizmoBtns.forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            cutter.setGizmoMode(btn.dataset.mode);
-        });
-    });
-
-    // Snap toggle
-    document.getElementById('snap-toggle')?.addEventListener('change', (e) => {
-        cutter.useSnap = e.target.checked;
-    });
-
-    // Preset selection
-    document.getElementById('preset-select')?.addEventListener('change', (e) => {
-        csg.initWorkpiece(e.target.value);
-        cutter.resetTransform();
-        updateStats();
-        showToast(`Loaded ${e.target.value} blank`);
-    });
-
-    // Material theme selection
-    document.getElementById('material-select')?.addEventListener('change', (e) => {
-        csg.setMaterialTheme(e.target.value);
-    });
-
-    // Cutter dimension sliders
-    const wSl = document.getElementById('cut-w');
-    const hSl = document.getElementById('cut-h');
-    const dSl = document.getElementById('cut-d');
-
-    wSl?.addEventListener('input', (e) => {
-        const v = parseFloat(e.target.value);
-        document.getElementById('cut-w-val').textContent = v.toFixed(2) + 'm';
-        cutter.setDimension('width', v);
-        cutter.setDimension('radius', v * 0.6);
-    });
-
-    hSl?.addEventListener('input', (e) => {
-        const v = parseFloat(e.target.value);
-        document.getElementById('cut-h-val').textContent = v.toFixed(2) + 'm';
-        cutter.setDimension('height', v);
-    });
-
-    dSl?.addEventListener('input', (e) => {
-        const v = parseFloat(e.target.value);
-        document.getElementById('cut-d-val').textContent = v.toFixed(2) + 'm';
-        cutter.setDimension('depth', v);
-    });
-
-    // Camera Navigation Input
-    let isRightDown = false, isMiddleDown = false;
-    canvas.addEventListener('contextmenu', (e) => e.preventDefault());
-
-    canvas.addEventListener('mousedown', (e) => {
-        if (e.button === 2) isRightDown = true;
-        if (e.button === 1) isMiddleDown = true;
-    });
-
-    window.addEventListener('mouseup', (e) => {
-        if (e.button === 2) isRightDown = false;
-        if (e.button === 1) isMiddleDown = false;
-    });
-
-    window.addEventListener('mousemove', (e) => {
-        if (isRightDown && typeof Camera !== 'undefined' && Camera.orbitLook) {
-            Camera.orbitLook(cam, e.movementX, e.movementY);
-        }
-        if (isMiddleDown && typeof Camera !== 'undefined' && Camera.orbitPan) {
-            Camera.orbitPan(cam, e.movementX, e.movementY);
-        }
-    });
-
-    canvas.addEventListener('wheel', (e) => {
-        e.preventDefault();
-        cam.dist = Math.max(2.0, Math.min(60.0, cam.dist * Math.exp(e.deltaY * 0.001)));
-    }, { passive: false });
-
-    // Keyboard shortcuts
-    window.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-            executeBoolean();
-        } else if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) {
-            e.preventDefault();
-            if (e.shiftKey) {
-                const label = csg.redo();
-                if (label) showToast(`Redo: ${label}`);
-            } else {
-                const label = csg.undo();
-                if (label) showToast(`Undo: ${label}`);
-            }
-            updateStats();
-        } else if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || e.key === 'Y')) {
-            e.preventDefault();
-            const label = csg.redo();
-            if (label) showToast(`Redo: ${label}`);
-            updateStats();
-        } else if (e.key === 'w' || e.key === 'W') {
-            cutter.setGizmoMode('translate');
-            updateGizmoActiveBtn('translate');
-        } else if (e.key === 'e' || e.key === 'E') {
-            cutter.setGizmoMode('rotate');
-            updateGizmoActiveBtn('rotate');
-        } else if (e.key === 'r' || e.key === 'R') {
-            cutter.setGizmoMode('scale');
-            updateGizmoActiveBtn('scale');
-        }
-    });
+/** Write the workpiece to `path` as `format` (obj / stl / ply). */
+function exportTo(path, format) {
+    const ok = workpiece.mesh[SAVERS[format]](path);
+    if (ok) app.status.ok('exported ' + path);
+    else app.status.error('export failed: ' + path);
+    return ok;
 }
 
-function updateGizmoActiveBtn(mode) {
-    const btns = document.querySelectorAll('.gizmo-btn[data-mode]');
-    btns.forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+function exportDialog(format) {
+    const path = pickSaveFile(format.toUpperCase() + '|' + format, 'sculpture.' + format);
+    if (path) exportTo(path.replace(/\\/g, '/'), format);
 }
 
-bindUI();
-updateStats();
+// --- panels --------------------------------------------------------------------------
 
-// --- Main Render Loop ---
-function frame() {
-    // Camera view submission
-    if (typeof Camera !== 'undefined' && Camera.orbitViewOpts) {
-        scene.setCamera(Camera.orbitViewOpts(cam, canvas));
-    }
+const ops = segmented('#ops', Object.keys(OPS).map((k) => [k, OPS[k].label]), {
+    value: cutter.op, small: false,
+    onChange: (v) => { cutter.setOp(v); app.status.set('operation: ' + OPS[v].label); },
+});
+const shapes = segmented('#shapes', SHAPES, {
+    value: cutter.shape,
+    onChange: (v) => { cutter.setShape(v); app.status.set('cutter: ' + v); },
+});
+const gizmoModes = segmented('#gizmo-modes', Object.keys(GIZMO_MODES).map((k) => [k, GIZMO_MODES[k]]), {
+    value: cutter.mode, title: (v) => GIZMO_MODES[v] + " (" + GIZMO_KEYS[v] + ")",
+    onChange: (v) => cutter.setGizmoMode(v),
+});
+const setGizmoMode = (m) => { cutter.setGizmoMode(m); gizmoModes.value = m; };
 
-    requestAnimationFrame(frame);
-}
+// Width drives the box width and the round shapes' radius (0.6 x width).
+const dims = { width: cutter.size.width, height: cutter.size.height, depth: cutter.size.depth };
+params('#dims', dims, {
+    width:  { min: 0.2, max: 3.0, step: 0.05, label: 'width / radius', fmt: (v) => v.toFixed(2) + ' m' },
+    height: { min: 0.2, max: 4.0, step: 0.05, fmt: (v) => v.toFixed(2) + ' m' },
+    depth:  { min: 0.2, max: 3.0, step: 0.05, fmt: (v) => v.toFixed(2) + ' m' },
+}, {
+    onChange: (key, v) => {
+        cutter.setSize(key, v);
+        if (key === 'width') cutter.setSize('radius', v * 0.6);
+    },
+});
 
-requestAnimationFrame(frame);
+$('#snap').addEventListener('change', (e) => { cutter.snap = e.target.checked; });
+$('#reset-cutter').addEventListener('click', () => cutter.reset());
+$('#apply').addEventListener('click', applyCut);
+$('#export-obj').addEventListener('click', () => exportDialog('obj'));
+$('#export-stl').addEventListener('click', () => exportDialog('stl'));
+$('#preset').addEventListener('change', (e) => {
+    workpiece.load(e.target.value);
+    cutter.reset();
+    app.status.set('loaded ' + e.target.value + ' blank');
+});
+$('#material').addEventListener('change', (e) => workpiece.setMaterial(e.target.value));
 
-export { scene, cam, csg, cutter };
+const isTyping = (t) => !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT');
+document.addEventListener('keydown', (e) => {
+    if (isTyping(e.target) || e.ctrlKey || e.metaKey) return;
+    const k = (e.key || '').toLowerCase();
+    if (e.key === 'Enter') { applyCut(); e.preventDefault(); }
+    else if (k === 'w') setGizmoMode('translate');
+    else if (k === 'e') setGizmoMode('rotate');
+    else if (k === 'r') setGizmoMode('scale');
+});
+
+workpiece.load('box');
+refresh();
+app.status.set('ready: position the cutter with the gizmo, then Apply (Enter)');
+
+/** Handles for tests. */
+export const sculptor = {
+    vp, scene, workpiece, cutter, history, doc, ops, shapes, gizmoModes,
+    applyCut, exportTo, setGizmoMode, refresh,
+    get status() { return app.status; },
+};

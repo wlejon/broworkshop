@@ -1,187 +1,152 @@
-// cutter.js — Cutter shape generation, ghost preview, and 3D gizmo manipulation.
+// cutter.js — the cutter: a primitive with a size, a transform driven by
+// bro.gizmo, and a coloured preview node. transformedMesh() bakes the
+// transform into a Mesh in world space for the boolean.
 
-export class CutterTool {
-    constructor(scene) {
-        this.scene = scene;
+export const SHAPES = ['box', 'cylinder', 'sphere', 'cone', 'torus'];
+export const GIZMO_MODES = { translate: 'Move', rotate: 'Rotate', scale: 'Scale' };
+export const GIZMO_KEYS = { translate: 'W', rotate: 'E', scale: 'R' };
+export const SNAP = 0.25;
 
-        this.shape = 'box';
-        this.operation = 'carve'; // 'carve' | 'union' | 'intersect'
+const OP_COLORS = { carve: '#ff4757', union: '#2ed573', intersect: '#1e90ff' };
+const HOME = [0.8, 0.8, 0.8];
 
-        this.position = [0.8, 0.8, 0.8];
-        this.rotation = [0, 0, 0]; // Euler angles (radians)
-        this.scale = [1.0, 1.0, 1.0];
+// --- quaternion / matrix helpers ([x, y, z, w]) ----------------------------------
 
-        this.dim = {
-            width: 1.2,
-            height: 1.2,
-            depth: 1.2,
-            radius: 0.7
-        };
+function quatMul(a, b) {
+    return [
+        a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1],
+        a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0],
+        a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3],
+        a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2],
+    ];
+}
+function quatNorm(q) {
+    const l = Math.hypot(q[0], q[1], q[2], q[3]) || 1;
+    return [q[0] / l, q[1] / l, q[2] / l, q[3] / l];
+}
 
-        this.gridSnap = 0.25;
-        this.useSnap = false;
-        this.gizmoMode = 'translate'; // 'translate' | 'rotate' | 'scale'
+/** Column-major 4x4 of translate(t) * rotate(q) * scale(s), as Mesh.transform takes. */
+export function trsMatrix(t, q, s) {
+    const [x, y, z, w] = q;
+    const r = [
+        1 - 2 * (y * y + z * z), 2 * (x * y + z * w),     2 * (x * z - y * w),
+        2 * (x * y - z * w),     1 - 2 * (x * x + z * z), 2 * (y * z + x * w),
+        2 * (x * z + y * w),     2 * (y * z - x * w),     1 - 2 * (x * x + y * y),
+    ];
+    return [
+        r[0] * s[0], r[1] * s[0], r[2] * s[0], 0,
+        r[3] * s[1], r[4] * s[1], r[5] * s[1], 0,
+        r[6] * s[2], r[7] * s[2], r[8] * s[2], 0,
+        t[0], t[1], t[2], 1,
+    ];
+}
 
-        this.previewNode = null;
-        this.initGizmo();
-        this.rebuildPreview();
+const snapped = (v) => Math.round(v / SNAP) * SNAP;
+
+/**
+ * The cutter on `scene`. Returns { shape, op, size, position, quaternion,
+ * scale, snap, setShape, setOp, setSize, setGizmoMode, reset, mesh(),
+ * transformedMesh() }. `size` is { width, height, depth, radius } in metres.
+ */
+export function createCutter(scene) {
+    let shape = 'box', op = 'carve', mode = 'translate', preview = null;
+    const size = { width: 1.2, height: 1.2, depth: 1.2, radius: 0.72 };
+    let position = HOME.slice(), quaternion = [0, 0, 0, 1], scale = [1, 1, 1];
+    // The un-snapped position a drag accumulates into: snapping each small
+    // gizmo delta would round it away and the cutter would never move.
+    let dragPos = null;
+
+    const cutter = {
+        snap: false,
+        get shape() { return shape; },
+        get op() { return op; },
+        get mode() { return mode; },
+        get size() { return size; },
+        get position() { return position.slice(); },
+        get quaternion() { return quaternion.slice(); },
+        get scale() { return scale.slice(); },
+        get node() { return preview; },
+
+        /** The untransformed cutter primitive at the current size. */
+        mesh() {
+            switch (shape) {
+                case 'cylinder': return Mesh.cylinder(size.radius, size.height * 0.5, 24);
+                case 'sphere':   return Mesh.sphere(size.radius, 24, 18);
+                case 'cone':     return Mesh.cone(size.radius, size.height, 24);
+                case 'torus':    return Mesh.torus(size.radius, size.radius * 0.35, 24, 16);
+                default:         return Mesh.box(size.width * 0.5, size.height * 0.5, size.depth * 0.5);
+            }
+        },
+        /** The cutter in world space, ready for the boolean. */
+        transformedMesh() {
+            const m = cutter.mesh();
+            m.transform(trsMatrix(position, quaternion, scale));
+            m.computeNormals();
+            return m;
+        },
+
+        setShape(s) {
+            if (!SHAPES.includes(s)) throw new Error('csg: no cutter shape ' + s);
+            shape = s; rebuild();
+        },
+        setOp(o) { op = o; rebuild(); },
+        /** Set width / height / depth / radius (metres). */
+        setSize(key, v) { size[key] = v; rebuild(); },
+        setGizmoMode(m) {
+            mode = m;
+            if (globalThis.bro && bro.gizmo) bro.gizmo.setMode(m);
+        },
+        /** Move to (x, y, z), snapped when snapping is on. */
+        moveTo(p) {
+            position = cutter.snap ? p.map(snapped) : p.slice();
+            sync();
+        },
+        reset() {
+            position = HOME.slice(); quaternion = [0, 0, 0, 1]; scale = [1, 1, 1];
+            sync();
+        },
+    };
+
+    function sync() {
+        if (!preview) return;
+        preview.position = position.slice();
+        preview.quaternion = quaternion.slice();
+        preview.scale = scale.slice();
     }
-
-    initGizmo() {
-        if (typeof bro !== 'undefined' && bro.gizmo) {
-            bro.gizmo.show();
-            bro.gizmo.setMode(this.gizmoMode);
-            bro.gizmo.attach({
-                position: () => [this.position[0], this.position[1], this.position[2]],
-                translate: (dx, dy, dz) => {
-                    this.position[0] += dx;
-                    this.position[1] += dy;
-                    this.position[2] += dz;
-                    if (this.useSnap && this.gridSnap > 0) {
-                        this.position[0] = Math.round(this.position[0] / this.gridSnap) * this.gridSnap;
-                        this.position[1] = Math.round(this.position[1] / this.gridSnap) * this.gridSnap;
-                        this.position[2] = Math.round(this.position[2] / this.gridSnap) * this.gridSnap;
-                    }
-                    this.syncPreviewTransform();
-                },
-                rotate: (qx, qy, qz, qw) => {
-                    // Approximate rotation increment
-                    this.rotation[1] += qy * 2.0;
-                    this.rotation[0] += qx * 2.0;
-                    this.syncPreviewTransform();
-                },
-                scale: (sx, sy, sz) => {
-                    this.scale[0] = Math.max(0.1, this.scale[0] * sx);
-                    this.scale[1] = Math.max(0.1, this.scale[1] * sy);
-                    this.scale[2] = Math.max(0.1, this.scale[2] * sz);
-                    this.syncPreviewTransform();
-                }
-            });
-        }
-    }
-
-    setShape(shape) {
-        if (this.shape === shape) return;
-        this.shape = shape;
-        this.rebuildPreview();
-    }
-
-    setOperation(op) {
-        this.operation = op;
-        this.rebuildPreview();
-    }
-
-    setGizmoMode(mode) {
-        this.gizmoMode = mode;
-        if (typeof bro !== 'undefined' && bro.gizmo) {
-            bro.gizmo.setMode(mode);
-        }
-    }
-
-    setDimension(key, val) {
-        this.dim[key] = val;
-        this.rebuildPreview();
-    }
-
-    /**
-     * Builds raw cutter mesh based on current shape and dimensions
-     */
-    buildRawMesh() {
-        switch (this.shape) {
-            case 'cylinder':
-                return Mesh.cylinder(this.dim.radius, this.dim.height * 0.5, 24);
-            case 'sphere':
-                return Mesh.sphere(this.dim.radius, 24, 18);
-            case 'cone':
-                return Mesh.cone(this.dim.radius, this.dim.height, 24);
-            case 'torus':
-                return Mesh.torus(this.dim.radius, this.dim.radius * 0.35, 24, 16);
-            case 'box':
-            default:
-                return Mesh.box(this.dim.width * 0.5, this.dim.height * 0.5, this.dim.depth * 0.5);
-        }
-    }
-
-    /**
-     * Creates or updates the translucent preview mesh
-     */
-    rebuildPreview() {
-        if (this.previewNode) {
-            this.previewNode.destroy();
-            this.previewNode = null;
-        }
-
-        const raw = this.buildRawMesh();
-        let color = '#ff4757'; // Carve
-        let emissiveColor = '#ff4757';
-        if (this.operation === 'union') {
-            color = '#2ed573';
-            emissiveColor = '#2ed573';
-        } else if (this.operation === 'intersect') {
-            color = '#1e90ff';
-            emissiveColor = '#1e90ff';
-        }
-
-        this.previewNode = this.scene.createMesh({
-            mesh: raw,
-            color,
-            emissive: 0.45,
-            emissiveColor,
-            roughness: 0.2,
-            metalness: 0.1
+    function rebuild() {
+        if (preview) preview.destroy();
+        const color = OP_COLORS[op] || OP_COLORS.carve;
+        preview = scene.createMesh({
+            mesh: cutter.mesh(), color, emissive: 0.45, emissiveColor: color,
+            roughness: 0.2, metallic: 0.1, castsShadow: false,
         });
-
-        this.syncPreviewTransform();
+        sync();
     }
 
-    syncPreviewTransform() {
-        if (!this.previewNode) return;
-        this.previewNode.position = [this.position[0], this.position[1], this.position[2]];
-        this.previewNode.scale = [this.scale[0], this.scale[1], this.scale[2]];
-
-        // Euler rotation
-        const rx = this.rotation[0], ry = this.rotation[1], rz = this.rotation[2];
-        const cx = Math.cos(rx * 0.5), sx = Math.sin(rx * 0.5);
-        const cy = Math.cos(ry * 0.5), sy = Math.sin(ry * 0.5);
-        const cz = Math.cos(rz * 0.5), sz = Math.sin(rz * 0.5);
-
-        this.previewNode.quaternion = [
-            sx * cy * cz - cx * sy * sz,
-            cx * sy * cz + sx * cy * sz,
-            cx * cy * sz - sx * sy * cz,
-            cx * cy * cz + sx * sy * sz
-        ];
-
-        if (typeof bro !== 'undefined' && bro.gizmo) {
-            bro.gizmo.setPosition(this.position[0], this.position[1], this.position[2]);
-        }
+    if (globalThis.bro && bro.gizmo) {
+        bro.gizmo.show();
+        bro.gizmo.setMode(mode);
+        bro.gizmo.attach({
+            position: () => position.slice(),
+            orientation: () => quaternion.slice(),
+            beginDrag: () => { dragPos = position.slice(); },
+            endDrag: () => { dragPos = null; },
+            translate: (dx, dy, dz) => {
+                const base = dragPos || position;
+                const next = [base[0] + dx, base[1] + dy, base[2] + dz];
+                if (dragPos) dragPos = next;
+                cutter.moveTo(next);
+            },
+            rotate: (qx, qy, qz, qw) => {
+                quaternion = quatNorm(quatMul([qx, qy, qz, qw], quaternion));
+                sync();
+            },
+            scale: (sx, sy, sz) => {
+                scale = [scale[0] * sx, scale[1] * sy, scale[2] * sz].map((v) => Math.max(0.1, v));
+                sync();
+            },
+        });
     }
-
-    /**
-     * Returns a transformed clone of the cutter ready for CSG Boolean operation
-     */
-    getTransformedMesh() {
-        const mesh = this.buildRawMesh();
-
-        // 1. Scale
-        mesh.scale(this.scale[0], this.scale[1], this.scale[2]);
-
-        // 2. Rotate
-        if (this.rotation[0]) mesh.rotate(1, 0, 0, this.rotation[0]);
-        if (this.rotation[1]) mesh.rotate(0, 1, 0, this.rotation[1]);
-        if (this.rotation[2]) mesh.rotate(0, 0, 1, this.rotation[2]);
-
-        // 3. Translate
-        mesh.translate(this.position[0], this.position[1], this.position[2]);
-
-        mesh.computeNormals();
-        return mesh;
-    }
-
-    resetTransform() {
-        this.position = [0.8, 0.8, 0.8];
-        this.rotation = [0, 0, 0];
-        this.scale = [1.0, 1.0, 1.0];
-        this.syncPreviewTransform();
-    }
+    rebuild();
+    return cutter;
 }

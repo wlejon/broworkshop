@@ -1,596 +1,231 @@
+// waveform.js — the bro.media.peaks lane: min/max envelope, mirrored RMS
+// curve, time ruler, hover readout, playhead. Click / drag scrubs,
+// shift-drag selects a region, the wheel zooms the view about the pointer.
+//
+// The view window [from, to] zooms within the analysed data; a region
+// re-analysed at full resolution (app.js "Zoom region") replaces the data.
+
+import { fitCanvas } from "/lib/kit/audio-ui.js";
+
+const C = {
+    bg: '#12151e', ruler: '#2b3248', grid: '#1e2333', text: '#8892b0', center: '#23293d',
+    env: 'rgba(59, 130, 246, 0.75)', envHot: '#38bdf8', rms: '#10b981',
+    playhead: '#f43f5e', hover: 'rgba(255, 255, 255, 0.35)',
+    sel: 'rgba(139, 92, 246, 0.25)', selEdge: '#8b5cf6', selText: '#c4b5fd',
+};
+const RULER = 22, MIN_SPAN = 0.05;
+
+/** A "nice" tick step (1, 2, 5 x 10^n) near `raw`. */
+export function niceStep(raw) {
+    const exp = Math.floor(Math.log10(raw)), f = raw / Math.pow(10, exp);
+    return (f < 1.5 ? 1 : f < 3 ? 2 : f < 7 ? 5 : 10) * Math.pow(10, exp);
+}
+
+function tickLabel(t, span) {
+    if (span < 2) return t.toFixed(2) + 's';
+    if (span < 10) return t.toFixed(1) + 's';
+    const m = Math.floor(t / 60), s = Math.floor(t % 60);
+    return m > 0 ? m + ':' + String(s).padStart(2, '0') : s + 's';
+}
+
 /**
- * waveform.js — Canvas2D Audio Waveform & Energy Visualizer
- *
- * Renders min/max envelope and RMS energy curves from bro.media.peaks data.
- * Supports interactive timeline scrubbing, playhead tracking, zooming/panning,
- * and region selection.
+ * opts: { onSeek(t), onSelect({ from, to }), onView(from, to) }.
+ * Handle: setData(peaks, duration), setPlayhead(t), setView(from, to),
+ * zoom(factor, at 0..1), fit(), selection (get/set { from, to } | null),
+ * view { from, to }, playhead, duration, peaks, timeAt(x), xAt(t), render().
  */
+export function createWaveform(canvas, opts) {
+    const o = opts || {};
+    const s = { peaks: null, duration: 0, from: 0, to: 0, playhead: 0, sel: null, hover: null };
+    let w = 0, hgt = 0, drag = null;
 
-export class WaveformVisualizer {
-    /**
-     * @param {HTMLCanvasElement} canvas
-     * @param {Object} [options]
-     */
-    constructor(canvas, options = {}) {
-        this.canvas = canvas;
-        this.ctx = canvas.getContext('2d');
-        this.options = Object.assign({
-            bgColor: '#12151e',
-            gridColor: '#1e2333',
-            rulerColor: '#2b3248',
-            textColor: '#8892b0',
-            envelopeTopColor: 'rgba(59, 130, 246, 0.75)',
-            envelopeBottomColor: 'rgba(37, 99, 235, 0.45)',
-            envelopeOutlineColor: '#60a5fa',
-            rmsLineColor: '#10b981',
-            rmsGlowColor: 'rgba(16, 185, 129, 0.3)',
-            playheadColor: '#f43f5e',
-            playheadTextColor: '#ffffff',
-            hoverLineColor: 'rgba(255, 255, 255, 0.35)',
-            selectionColor: 'rgba(139, 92, 246, 0.25)',
-            selectionBorderColor: '#8b5cf6',
-            centerLineColor: '#23293d',
-            rulerHeight: 22,
-        }, options);
+    const span = () => s.to - s.from;
+    const xAt = (t) => (span() > 0 ? ((t - s.from) / span()) * w : 0);
+    const timeAt = (x) => s.from + Math.max(0, Math.min(1, x / (w || 1))) * span();
+    /** The span the data covers (a windowed analysis covers less than the file). */
+    const dataSpan = () => {
+        const p = s.peaks;
+        const a = p && typeof p.from === 'number' ? p.from : 0;
+        return [a, p && p.to > a ? p.to : s.duration];
+    };
 
-        this.peaks = null;
-        this.duration = 0;
-        this.windowFrom = 0;
-        this.windowTo = 0;
-        this.playheadTime = 0;
+    function render() {
+        const fit = fitCanvas(canvas);
+        const ctx = fit.ctx;
+        w = fit.w; hgt = fit.h;
+        const waveH = hgt - RULER, mid = RULER + waveH / 2;
+        ctx.fillStyle = C.bg; ctx.fillRect(0, 0, w, hgt);
+        ctx.fillStyle = C.ruler; ctx.fillRect(0, 0, w, RULER);
+        drawRuler(ctx, waveH);
+        ctx.strokeStyle = C.center; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(0, mid); ctx.lineTo(w, mid); ctx.stroke();
 
-        // Interaction state
-        this.isDraggingPlayhead = false;
-        this.isSelectingRegion = false;
-        this.selectionStart = null;
-        this.selectionEnd = null;
-        this.hoverX = null;
-        this.hoverTime = null;
-
-        // Callbacks
-        this.onSeekCallback = null;
-        this.onRegionSelectCallback = null;
-        this.onZoomChangeCallback = null;
-
-        this._initEvents();
-        this.resize();
-    }
-
-    /**
-     * Set waveform data from bro.media.peaks result.
-     * @param {Object} peaksData
-     * @param {number} [totalDuration]
-     */
-    setData(peaksData, totalDuration) {
-        this.peaks = peaksData;
-        if (!peaksData) {
-            this.duration = totalDuration || 0;
-            this.windowFrom = 0;
-            this.windowTo = this.duration;
-            this.render();
-            return;
+        if (s.peaks && s.peaks.buckets > 0) drawPeaks(ctx, waveH, mid);
+        else {
+            ctx.fillStyle = '#4a5568'; ctx.font = '12px sans-serif';
+            ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            ctx.fillText(s.duration ? 'No audio track in this file' : 'Load a media file to see its waveform', w / 2, mid);
         }
-
-        this.duration = totalDuration || peaksData.duration || 0;
-        this.windowFrom = (typeof peaksData.from === 'number') ? peaksData.from : 0;
-        this.windowTo = (typeof peaksData.to === 'number' && peaksData.to > this.windowFrom)
-            ? peaksData.to
-            : (this.duration || 1);
-
-        this.render();
+        if (s.sel) drawSelection(ctx, waveH);
+        if (s.hover != null) drawHover(ctx);
+        if (s.duration > 0 && s.playhead >= s.from && s.playhead <= s.to) drawPlayhead(ctx);
     }
 
-    /**
-     * Update current playhead position in seconds.
-     * @param {number} time
-     */
-    setPlayhead(time) {
-        this.playheadTime = Math.max(0, Math.min(this.duration, time));
-        this.render();
-    }
-
-    /**
-     * Set active time window (for zoom/pan).
-     * @param {number} from
-     * @param {number} to
-     */
-    setWindow(from, to) {
-        const minSpan = 0.05;
-        this.windowFrom = Math.max(0, Math.min(from, this.duration - minSpan));
-        this.windowTo = Math.min(this.duration, Math.max(to, this.windowFrom + minSpan));
-        if (this.onZoomChangeCallback) {
-            this.onZoomChangeCallback(this.windowFrom, this.windowTo);
-        }
-        this.render();
-    }
-
-    /**
-     * Zoom into or out of timeline centered at given normalized position.
-     * @param {number} factor (> 1 zooms in, < 1 zooms out)
-     * @param {number} [centerRatio=0.5]
-     */
-    zoom(factor, centerRatio = 0.5) {
-        if (!this.duration) return;
-        const currentSpan = this.windowTo - this.windowFrom;
-        const newSpan = Math.max(0.05, Math.min(this.duration, currentSpan / factor));
-        const centerTime = this.windowFrom + currentSpan * centerRatio;
-        const newFrom = Math.max(0, centerTime - newSpan * centerRatio);
-        const newTo = Math.min(this.duration, newFrom + newSpan);
-        this.setWindow(newFrom, newTo);
-    }
-
-    /**
-     * Reset zoom to view full file duration.
-     */
-    fit() {
-        this.setWindow(0, this.duration);
-        this.clearSelection();
-    }
-
-    /**
-     * Clear active region selection.
-     */
-    clearSelection() {
-        this.selectionStart = null;
-        this.selectionEnd = null;
-        this.render();
-    }
-
-    /**
-     * Get active region selection in seconds.
-     * @returns {{ from: number, to: number } | null}
-     */
-    getSelection() {
-        if (this.selectionStart === null || this.selectionEnd === null) return null;
-        const from = Math.min(this.selectionStart, this.selectionEnd);
-        const to = Math.max(this.selectionStart, this.selectionEnd);
-        if (Math.abs(to - from) < 0.01) return null;
-        return { from, to };
-    }
-
-    /**
-     * Set seek callback.
-     * @param {(time: number) => void} cb
-     */
-    onSeek(cb) {
-        this.onSeekCallback = cb;
-    }
-
-    /**
-     * Set region select callback.
-     * @param {(from: number, to: number) => void} cb
-     */
-    onRegionSelect(cb) {
-        this.onRegionSelectCallback = cb;
-    }
-
-    /**
-     * Handle canvas resize with device pixel ratio.
-     */
-    resize() {
-        const rect = this.canvas.getBoundingClientRect();
-        const dpr = window.devicePixelRatio || 1;
-        const w = Math.max(100, Math.floor(rect.width || this.canvas.width || 800));
-        const h = Math.max(60, Math.floor(rect.height || this.canvas.height || 140));
-
-        this.canvas.width = Math.floor(w * dpr);
-        this.canvas.height = Math.floor(h * dpr);
-        this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        this.cssWidth = w;
-        this.cssHeight = h;
-        this.render();
-    }
-
-    /**
-     * Convert time (s) to canvas X coordinate.
-     * @param {number} time
-     * @returns {number}
-     */
-    timeToX(time) {
-        const span = this.windowTo - this.windowFrom;
-        if (span <= 0) return 0;
-        return ((time - this.windowFrom) / span) * this.cssWidth;
-    }
-
-    /**
-     * Convert canvas X coordinate to time (s).
-     * @param {number} x
-     * @returns {number}
-     */
-    xToTime(x) {
-        const span = this.windowTo - this.windowFrom;
-        const ratio = Math.max(0, Math.min(1, x / this.cssWidth));
-        return this.windowFrom + ratio * span;
-    }
-
-    /**
-     * Main canvas rendering routine.
-     */
-    render() {
-        const ctx = this.ctx;
-        const w = this.cssWidth || this.canvas.width;
-        const h = this.cssHeight || this.canvas.height;
-        const rulerH = this.options.rulerHeight;
-        const waveH = h - rulerH;
-        const centerY = rulerH + waveH / 2;
-
-        ctx.clearRect(0, 0, w, h);
-
-        // 1. Background
-        ctx.fillStyle = this.options.bgColor;
-        ctx.fillRect(0, 0, w, h);
-
-        // 2. Timeline ruler background
-        ctx.fillStyle = this.options.rulerColor;
-        ctx.fillRect(0, 0, w, rulerH);
-
-        // Ruler bottom border
-        ctx.strokeStyle = this.options.gridColor;
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(0, rulerH - 0.5);
-        ctx.lineTo(w, rulerH - 0.5);
-        ctx.stroke();
-
-        // 3. Grid & Ruler Ticks
-        this._renderRuler(ctx, w, h, rulerH, waveH);
-
-        // 4. Center zero line
-        ctx.strokeStyle = this.options.centerLineColor;
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(0, centerY);
-        ctx.lineTo(w, centerY);
-        ctx.stroke();
-
-        // 5. Waveform Peaks & RMS
-        if (this.peaks && this.peaks.buckets > 0) {
-            this._renderPeaks(ctx, w, rulerH, waveH, centerY);
-        } else {
-            // Placeholder text when no audio data
-            ctx.fillStyle = '#4a5568';
-            ctx.font = '12px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(this.duration ? 'No audio track / peak data' : 'Load media file to view waveform', w / 2, centerY);
-        }
-
-        // 6. Region Selection Highlight
-        if (this.selectionStart !== null && this.selectionEnd !== null) {
-            const x1 = this.timeToX(Math.min(this.selectionStart, this.selectionEnd));
-            const x2 = this.timeToX(Math.max(this.selectionStart, this.selectionEnd));
-            const selW = Math.max(1, x2 - x1);
-
-            ctx.fillStyle = this.options.selectionColor;
-            ctx.fillRect(x1, rulerH, selW, waveH);
-
-            ctx.strokeStyle = this.options.selectionBorderColor;
-            ctx.lineWidth = 1.5;
-            ctx.strokeRect(x1, rulerH, selW, waveH);
-
-            // Selection duration tag
-            const selDur = Math.abs(this.selectionEnd - this.selectionStart);
-            ctx.fillStyle = '#c4b5fd';
-            ctx.font = '10px monospace';
-            ctx.textAlign = 'center';
-            ctx.fillText(`${selDur.toFixed(3)}s`, x1 + selW / 2, rulerH + 14);
-        }
-
-        // 7. Hover Indicator Line
-        if (this.hoverX !== null && this.hoverTime !== null && this.hoverX >= 0 && this.hoverX <= w) {
-            ctx.strokeStyle = this.options.hoverLineColor;
-            ctx.lineWidth = 1;
-            ctx.setLineDash([3, 3]);
-            ctx.beginPath();
-            ctx.moveTo(this.hoverX, 0);
-            ctx.lineTo(this.hoverX, h);
-            ctx.stroke();
-            ctx.setLineDash([]);
-
-            // Hover timestamp pill
-            const hoverTag = `${this.hoverTime.toFixed(3)}s`;
-            ctx.font = '10px monospace';
-            const tagW = ctx.measureText(hoverTag).width + 8;
-            const tagX = Math.max(4, Math.min(w - tagW - 4, this.hoverX - tagW / 2));
-            ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
-            ctx.fillRect(tagX, rulerH + 2, tagW, 14);
+    function drawRuler(ctx, waveH) {
+        if (span() <= 0) return;
+        const step = niceStep(span() / Math.max(4, Math.floor(w / 90)));
+        ctx.font = '10px monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+        for (let t = Math.ceil(s.from / step) * step; t <= s.to; t += step) {
+            const x = xAt(t);
             ctx.strokeStyle = '#475569';
-            ctx.strokeRect(tagX, rulerH + 2, tagW, 14);
-            ctx.fillStyle = '#e2e8f0';
-            ctx.textAlign = 'left';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(hoverTag, tagX + 4, rulerH + 9);
-        }
-
-        // 8. Playhead Indicator
-        if (this.duration > 0 && this.playheadTime >= this.windowFrom && this.playheadTime <= this.windowTo) {
-            const playX = this.timeToX(this.playheadTime);
-
-            // Vertical playhead line
-            ctx.strokeStyle = this.options.playheadColor;
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.moveTo(playX, 0);
-            ctx.lineTo(playX, h);
-            ctx.stroke();
-
-            // Playhead handle triangle at ruler top
-            ctx.fillStyle = this.options.playheadColor;
-            ctx.beginPath();
-            ctx.moveTo(playX - 6, 0);
-            ctx.lineTo(playX + 6, 0);
-            ctx.lineTo(playX, 8);
-            ctx.closePath();
-            ctx.fill();
-
-            // Playhead time badge in ruler
-            const badgeText = `${this.playheadTime.toFixed(2)}s`;
-            ctx.font = 'bold 10px monospace';
-            const badgeW = ctx.measureText(badgeText).width + 6;
-            const badgeX = Math.max(2, Math.min(w - badgeW - 2, playX - badgeW / 2));
-            ctx.fillStyle = this.options.playheadColor;
-            ctx.fillRect(badgeX, 9, badgeW, 12);
-            ctx.fillStyle = this.options.playheadTextColor;
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(badgeText, badgeX + badgeW / 2, 15);
-        }
-    }
-
-    /**
-     * Render ruler ticks and time labels.
-     * @private
-     */
-    _renderRuler(ctx, w, h, rulerH, waveH) {
-        const span = this.windowTo - this.windowFrom;
-        if (span <= 0) return;
-
-        // Choose nice tick interval based on visible span
-        const targetTickCount = Math.max(4, Math.floor(w / 90));
-        const rawStep = span / targetTickCount;
-        const step = this._niceStep(rawStep);
-
-        const firstTick = Math.ceil(this.windowFrom / step) * step;
-        ctx.font = '10px monospace';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'top';
-
-        for (let t = firstTick; t <= this.windowTo; t += step) {
-            const x = this.timeToX(t);
-            if (x < 0 || x > w) continue;
-
-            // Ruler tick mark
-            ctx.strokeStyle = '#475569';
-            ctx.lineWidth = 1;
-            ctx.beginPath();
-            ctx.moveTo(x, rulerH - 6);
-            ctx.lineTo(x, rulerH);
-            ctx.stroke();
-
-            // Grid line through waveform
-            ctx.strokeStyle = this.options.gridColor;
-            ctx.beginPath();
-            ctx.moveTo(x, rulerH);
-            ctx.lineTo(x, h);
-            ctx.stroke();
-
-            // Time label
-            ctx.fillStyle = this.options.textColor;
-            ctx.fillText(this._formatTimeLabel(t, span), x, 4);
-
-            // Sub-ticks
-            const subStep = step / 4;
-            for (let sub = 1; sub < 4; sub++) {
-                const st = t + sub * subStep;
-                if (st > this.windowTo) break;
-                const sx = this.timeToX(st);
-                if (sx >= 0 && sx <= w) {
-                    ctx.strokeStyle = '#334155';
-                    ctx.beginPath();
-                    ctx.moveTo(sx, rulerH - 3);
-                    ctx.lineTo(sx, rulerH);
-                    ctx.stroke();
-                }
+            ctx.beginPath(); ctx.moveTo(x, RULER - 6); ctx.lineTo(x, RULER); ctx.stroke();
+            ctx.strokeStyle = C.grid;
+            ctx.beginPath(); ctx.moveTo(x, RULER); ctx.lineTo(x, RULER + waveH); ctx.stroke();
+            ctx.fillStyle = C.text; ctx.fillText(tickLabel(t, span()), x, 4);
+            ctx.strokeStyle = '#334155';
+            for (let k = 1; k < 4; k++) {
+                const sx = xAt(t + (k * step) / 4);
+                if (sx > w) break;
+                ctx.beginPath(); ctx.moveTo(sx, RULER - 3); ctx.lineTo(sx, RULER); ctx.stroke();
             }
         }
     }
 
-    /**
-     * Render min/max envelope and RMS line.
-     * @private
-     */
-    _renderPeaks(ctx, w, rulerH, waveH, centerY) {
-        const p = this.peaks;
-        const buckets = p.buckets;
-        const halfWaveH = (waveH / 2) * 0.92;
-        const minv = p.min;
-        const maxv = p.max;
-        const rms = p.rms;
-
-        const pFrom = (typeof p.from === 'number') ? p.from : 0;
-        const pTo = (typeof p.to === 'number' && p.to > pFrom) ? p.to : this.duration;
-        const pSpan = pTo - pFrom;
-
-        // Compute screen coordinates for each bucket
+    function drawPeaks(ctx, waveH, mid) {
+        const p = s.peaks, n = p.buckets, half = (waveH / 2) * 0.92;
+        const [a, b] = dataSpan();
+        const tOf = (i) => a + ((i + 0.5) / n) * (b - a);          // bucket centres over [from, to)
+        const barW = Math.max(1, (w * (b - a)) / (n * span()));
         ctx.save();
-        ctx.beginPath();
-        ctx.rect(0, rulerH, w, waveH);
-        ctx.clip();
-
-        // 1. Min/Max Envelope
-        ctx.fillStyle = this.options.envelopeTopColor;
-        ctx.strokeStyle = this.options.envelopeOutlineColor;
-        ctx.lineWidth = 1;
-
-        // Draw vertical bucket bars or filled envelope path
-        for (let i = 0; i < buckets; i++) {
-            const bucketTime = pFrom + (i / (buckets - 1 || 1)) * pSpan;
-            const x = this.timeToX(bucketTime);
-            if (x < -2 || x > w + 2) continue;
-
-            const maxVal = Math.min(1.5, Math.max(0, maxv[i]));
-            const minVal = Math.max(-1.5, Math.min(0, minv[i]));
-
-            const topY = centerY - maxVal * halfWaveH;
-            const botY = centerY - minVal * halfWaveH;
-            const barH = Math.max(1, botY - topY);
-
-            // Gradient per bucket bar
-            ctx.fillStyle = maxVal > 0.8 ? '#38bdf8' : this.options.envelopeTopColor;
-            ctx.fillRect(x - 0.5, topY, 1.2, barH);
+        ctx.beginPath(); ctx.rect(0, RULER, w, waveH); ctx.clip();
+        for (let i = 0; i < n; i++) {
+            const x = xAt(tOf(i));
+            if (x < -barW || x > w + barW) continue;
+            const hi = Math.min(1, Math.max(0, p.max[i])), lo = Math.max(-1, Math.min(0, p.min[i]));
+            ctx.fillStyle = hi > 0.8 ? C.envHot : C.env;
+            ctx.fillRect(x - barW / 2, mid - hi * half, barW, Math.max(1, (hi - lo) * half));
         }
-
-        // 2. RMS Energy Curve
-        if (rms && rms.length === buckets) {
-            ctx.strokeStyle = this.options.rmsLineColor;
-            ctx.lineWidth = 2;
-            ctx.shadowColor = this.options.rmsGlowColor;
-            ctx.shadowBlur = 4;
-
-            // Positive RMS path
+        ctx.strokeStyle = C.rms; ctx.lineWidth = 2;
+        for (const sign of [-1, 1]) {
             ctx.beginPath();
-            let first = true;
-            for (let i = 0; i < buckets; i++) {
-                const bucketTime = pFrom + (i / (buckets - 1 || 1)) * pSpan;
-                const x = this.timeToX(bucketTime);
-                const r = Math.min(1.5, Math.max(0, rms[i]));
-                const y = centerY - r * halfWaveH;
-                if (first) { ctx.moveTo(x, y); first = false; }
-                else { ctx.lineTo(x, y); }
+            for (let i = 0; i < n; i++) {
+                const y = mid + sign * Math.min(1, Math.max(0, p.rms[i])) * half;
+                if (i === 0) ctx.moveTo(xAt(tOf(i)), y); else ctx.lineTo(xAt(tOf(i)), y);
             }
             ctx.stroke();
-
-            // Mirrored negative RMS path
-            ctx.beginPath();
-            first = true;
-            for (let i = 0; i < buckets; i++) {
-                const bucketTime = pFrom + (i / (buckets - 1 || 1)) * pSpan;
-                const x = this.timeToX(bucketTime);
-                const r = Math.min(1.5, Math.max(0, rms[i]));
-                const y = centerY + r * halfWaveH;
-                if (first) { ctx.moveTo(x, y); first = false; }
-                else { ctx.lineTo(x, y); }
-            }
-            ctx.stroke();
-            ctx.shadowBlur = 0;
         }
-
         ctx.restore();
     }
 
-    /**
-     * Compute aesthetic interval step.
-     * @private
-     */
-    _niceStep(val) {
-        const exp = Math.floor(Math.log10(val));
-        const frac = val / Math.pow(10, exp);
-        let niceFrac;
-        if (frac < 1.5) niceFrac = 1;
-        else if (frac < 3) niceFrac = 2;
-        else if (frac < 7) niceFrac = 5;
-        else niceFrac = 10;
-        return niceFrac * Math.pow(10, exp);
+    function drawSelection(ctx, waveH) {
+        const x1 = xAt(Math.min(s.sel.from, s.sel.to)), x2 = xAt(Math.max(s.sel.from, s.sel.to));
+        const sw = Math.max(1, x2 - x1);
+        ctx.fillStyle = C.sel; ctx.fillRect(x1, RULER, sw, waveH);
+        ctx.strokeStyle = C.selEdge; ctx.lineWidth = 1.5; ctx.strokeRect(x1, RULER, sw, waveH);
+        ctx.fillStyle = C.selText; ctx.font = '10px monospace'; ctx.textAlign = 'center';
+        ctx.fillText(Math.abs(s.sel.to - s.sel.from).toFixed(3) + 's', x1 + sw / 2, RULER + 14);
     }
 
-    /**
-     * Format time label for ruler.
-     * @private
-     */
-    _formatTimeLabel(t, span) {
-        if (span < 2) return `${t.toFixed(2)}s`;
-        if (span < 10) return `${t.toFixed(1)}s`;
-        const m = Math.floor(t / 60);
-        const s = Math.floor(t % 60);
-        if (m > 0) return `${m}:${s.toString().padStart(2, '0')}`;
-        return `${s}s`;
+    function drawHover(ctx) {
+        const x = s.hover, label = timeAt(x).toFixed(3) + 's';
+        ctx.strokeStyle = C.hover; ctx.lineWidth = 1; ctx.setLineDash([3, 3]);
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, hgt); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.font = '10px monospace';
+        const tw = ctx.measureText(label).width + 8, tx = Math.max(4, Math.min(w - tw - 4, x - tw / 2));
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.85)'; ctx.fillRect(tx, RULER + 2, tw, 14);
+        ctx.strokeStyle = '#475569'; ctx.strokeRect(tx, RULER + 2, tw, 14);
+        ctx.fillStyle = '#e2e8f0'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+        ctx.fillText(label, tx + 4, RULER + 9);
     }
 
-    /**
-     * Setup DOM mouse/wheel event listeners.
-     * @private
-     */
-    _initEvents() {
-        const getX = (e) => {
-            const rect = this.canvas.getBoundingClientRect();
-            return e.clientX - rect.left;
-        };
-
-        this.canvas.addEventListener('mousedown', (e) => {
-            if (e.button !== 0) return;
-            const x = getX(e);
-            const t = this.xToTime(x);
-
-            if (e.shiftKey) {
-                // Region selection mode
-                this.isSelectingRegion = true;
-                this.selectionStart = t;
-                this.selectionEnd = t;
-                this.render();
-            } else {
-                // Playhead scrub mode
-                this.isDraggingPlayhead = true;
-                this.setPlayhead(t);
-                if (this.onSeekCallback) this.onSeekCallback(t);
-            }
-        });
-
-        window.addEventListener('mousemove', (e) => {
-            const rect = this.canvas.getBoundingClientRect();
-            const inBounds = (
-                e.clientX >= rect.left && e.clientX <= rect.right &&
-                e.clientY >= rect.top && e.clientY <= rect.bottom
-            );
-
-            if (inBounds) {
-                this.hoverX = e.clientX - rect.left;
-                this.hoverTime = this.xToTime(this.hoverX);
-            } else if (!this.isDraggingPlayhead && !this.isSelectingRegion) {
-                this.hoverX = null;
-                this.hoverTime = null;
-            }
-
-            if (this.isDraggingPlayhead) {
-                const x = e.clientX - rect.left;
-                const t = this.xToTime(x);
-                this.setPlayhead(t);
-                if (this.onSeekCallback) this.onSeekCallback(t);
-            } else if (this.isSelectingRegion) {
-                const x = e.clientX - rect.left;
-                this.selectionEnd = this.xToTime(x);
-                this.render();
-            } else if (inBounds) {
-                this.render();
-            }
-        });
-
-        window.addEventListener('mouseup', () => {
-            if (this.isDraggingPlayhead) {
-                this.isDraggingPlayhead = false;
-            }
-            if (this.isSelectingRegion) {
-                this.isSelectingRegion = false;
-                const sel = this.getSelection();
-                if (sel && this.onRegionSelectCallback) {
-                    this.onRegionSelectCallback(sel.from, sel.to);
-                }
-            }
-        });
-
-        this.canvas.addEventListener('wheel', (e) => {
-            e.preventDefault();
-            const x = getX(e);
-            const ratio = Math.max(0, Math.min(1, x / this.cssWidth));
-            const factor = e.deltaY < 0 ? 1.25 : 0.8;
-            this.zoom(factor, ratio);
-        }, { passive: false });
-
-        this.canvas.addEventListener('mouseleave', () => {
-            if (!this.isDraggingPlayhead && !this.isSelectingRegion) {
-                this.hoverX = null;
-                this.hoverTime = null;
-                this.render();
-            }
-        });
+    function drawPlayhead(ctx) {
+        const x = xAt(s.playhead), label = s.playhead.toFixed(2) + 's';
+        ctx.strokeStyle = C.playhead; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, hgt); ctx.stroke();
+        ctx.fillStyle = C.playhead;
+        ctx.beginPath(); ctx.moveTo(x - 6, 0); ctx.lineTo(x + 6, 0); ctx.lineTo(x, 8); ctx.closePath(); ctx.fill();
+        ctx.font = 'bold 10px monospace';
+        const bw = ctx.measureText(label).width + 6, bx = Math.max(2, Math.min(w - bw - 2, x - bw / 2));
+        ctx.fillRect(bx, 9, bw, 12);
+        ctx.fillStyle = '#ffffff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(label, bx + bw / 2, 15);
     }
+
+    // --- input -------------------------------------------------------------------
+
+    const localX = (e) => e.clientX - canvas.getBoundingClientRect().left;
+    const seek = (t) => { api.setPlayhead(t); if (o.onSeek) o.onSeek(t); };
+
+    canvas.addEventListener('mousedown', (e) => {
+        if (e.button !== 0 || span() <= 0) return;
+        const t = timeAt(localX(e));
+        if (e.shiftKey) { drag = 'select'; s.sel = { from: t, to: t }; render(); }
+        else { drag = 'scrub'; seek(t); }
+    });
+    window.addEventListener('mousemove', (e) => {
+        const r = canvas.getBoundingClientRect();
+        const inside = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+        s.hover = inside ? e.clientX - r.left : null;
+        if (drag === 'scrub') seek(timeAt(e.clientX - r.left));
+        else if (drag === 'select') { s.sel.to = timeAt(e.clientX - r.left); render(); }
+        else if (inside || s.hover !== null) render();
+    });
+    window.addEventListener('mouseup', () => {
+        if (drag === 'select') {
+            const sel = api.selection;
+            if (!sel) s.sel = null;
+            render();
+            if (sel && o.onSelect) o.onSelect(sel);
+        }
+        drag = null;
+    });
+    canvas.addEventListener('mouseleave', () => { if (!drag) { s.hover = null; render(); } });
+    canvas.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        api.zoom(e.deltaY < 0 ? 1.25 : 0.8, localX(e) / (w || 1));
+    });
+
+    const api = {
+        setData(peaks, duration) {
+            s.peaks = peaks;
+            s.duration = duration || (peaks && peaks.duration) || 0;
+            s.sel = null;
+            const [a, b] = dataSpan();
+            api.setView(a, b || 1);
+        },
+        setPlayhead(t) { s.playhead = Math.max(0, Math.min(s.duration, t)); render(); },
+        /** Show [from, to] (clamped to the file, at least 50 ms). */
+        setView(from, to) {
+            const d = s.duration || to;
+            s.from = Math.max(0, Math.min(from, d - MIN_SPAN));
+            s.to = Math.min(d, Math.max(to, s.from + MIN_SPAN));
+            render();
+            if (o.onView) o.onView(s.from, s.to);
+        },
+        /** Zoom by `factor` (> 1 in) keeping the time at `at` (0..1 across the lane) fixed. */
+        zoom(factor, at) {
+            if (!s.duration) return;
+            const r = at == null ? 0.5 : Math.max(0, Math.min(1, at));
+            const ns = Math.max(MIN_SPAN, Math.min(s.duration, span() / factor));
+            const pivot = s.from + span() * r;
+            const from = Math.max(0, Math.min(s.duration - ns, pivot - ns * r));
+            api.setView(from, from + ns);
+        },
+        /** Back to the whole analysed span; drops the selection. */
+        fit() { s.sel = null; const [a, b] = dataSpan(); api.setView(a, b); },
+        get selection() {
+            if (!s.sel) return null;
+            const from = Math.min(s.sel.from, s.sel.to), to = Math.max(s.sel.from, s.sel.to);
+            return to - from < 0.01 ? null : { from, to };
+        },
+        set selection(v) { s.sel = v ? { from: v.from, to: v.to } : null; render(); },
+        get view() { return { from: s.from, to: s.to }; },
+        get playhead() { return s.playhead; },
+        get duration() { return s.duration; },
+        get peaks() { return s.peaks; },
+        timeAt, xAt, render,
+    };
+    render();
+    return api;
 }
