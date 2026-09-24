@@ -140,9 +140,9 @@ function stripedPatch() {
     return buf;
 }
 
-// Test scripts run as classic scripts (no import.meta), so the output path is
-// derived from the app directory rather than the module URL.
-const out = 'D:/projects/broworkshop/demos/platform-lab/assets/';
+// The output path is derived from the app directory (bro.appDir), never
+// hardcoded, so the generator runs from any checkout.
+const out = bro.appDir.replace(/[\\/]+$/, '') + '/assets/';
 
 const files = [
     ['nine.png', ninePatch(REGIONS)],

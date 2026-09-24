@@ -3,138 +3,55 @@
 <head>
 <meta charset="utf-8">
 <title>Image Kernels</title>
+<link rel="stylesheet" href="/lib/kit/kit.css">
 <style>
-  :root { color-scheme: dark; }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; height: 100vh; display: flex; flex-direction: column;
-    background: #0c0e12; color: #d7dde6;
-    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  }
-  header {
-    padding: 14px 18px; border-bottom: 1px solid #1d2330;
-    display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
-  }
-  header h1 { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: .3px; }
-  header .sub { color: #6b7686; font-size: 12px; }
-
-  .controls {
-    padding: 10px 18px; display: flex; gap: 18px; align-items: center; flex-wrap: wrap;
-    border-bottom: 1px solid #1d2330;
-  }
-  .controls label { font-size: 12px; color: #97a1b2; display: flex; gap: 7px; align-items: center; }
-  .controls select, .controls input[type=range] { font: inherit; }
-  .controls select {
-    background: #131a26; color: #cfe0ff; border: 1px solid #2c3c57;
-    border-radius: 6px; padding: 5px 8px; font-size: 12px;
-  }
-  .controls input[type=range] { width: 110px; }
-  .controls .val { color: #cfe0ff; min-width: 36px; display: inline-block; }
-  button {
-    background: #1b2638; color: #cfe0ff; border: 1px solid #2c3c57;
-    border-radius: 6px; padding: 7px 14px; font: inherit; font-size: 12px; cursor: pointer;
-  }
-  button:hover { background: #233248; }
-  button.active { background: #2f6f4f; border-color: #3c8c63; color: #eafff2; }
-  .sep { width: 1px; align-self: stretch; background: #1d2330; }
-
-  /* main split: pipeline column + canvas stage */
-  .body { flex: 1; display: flex; min-height: 0; }
-  .pipeline {
-    width: 320px; flex: none; overflow-y: auto; padding: 10px;
-    border-right: 1px solid #1d2330; display: flex; flex-direction: column; gap: 8px;
-  }
-  .pipeline h2 {
-    margin: 0 0 2px; font-size: 11px; letter-spacing: .6px; text-transform: uppercase;
-    color: #6b7686; font-weight: 600;
-  }
-  .stage {
-    border: 1px solid #1d2330; border-radius: 8px; background: #10141c; padding: 7px 9px;
-  }
-  /* OFF stages collapse to just their header row, so the default view is five
-     compact one-liners. Toggling a stage on expands its controls. This is the
-     main fix for the column feeling crowded. */
+  :root { --k-side-w: 330px; }
+  /* stage cards: an OFF stage collapses to its header row */
+  .stage .head { display: flex; align-items: baseline; gap: 7px; }
+  .stage .name { color: var(--k-value); font-weight: 600; }
+  .stage .verb { font-size: 10px; color: var(--k-dim); }
+  .stage .ms { font-size: 10px; color: var(--k-ok); min-width: 44px; text-align: right; }
+  .stage .body { display: flex; flex-direction: column; gap: 5px; }
+  .stage .k-field > span:first-child { width: 56px; }
   .stage.off { opacity: 0.55; }
-  .stage.off .body { display: none; }
-  .stage.off .row.head { margin-bottom: 0; }
-  .stage.off .ms { display: none; }
-  .stage .row { display: flex; align-items: center; gap: 8px; }
-  .stage .row.head { justify-content: space-between; margin-bottom: 7px; }
-  .stage .stitle { display: flex; align-items: baseline; gap: 7px; min-width: 0; }
-  .stage .hright { display: flex; align-items: center; gap: 8px; flex: none; }
-  .stage .name { font-size: 12px; color: #cfe0ff; font-weight: 600; }
-  .stage .verb { font-size: 10px; color: #5f6b7e; }
-  .stage .toggle { font-size: 10px; padding: 3px 9px; border-radius: 5px; }
-  .stage .ms { font-size: 10px; color: #7fe6a8; min-width: 40px; text-align: right; }
-  /* The card's content wrapper is also class="body"; scope a column layout so
-     it doesn't inherit the global `.body { display:flex }` main-split row (which
-     made the stage's labels lay out horizontally and overlap). */
-  .stage .body { display: flex; flex-direction: column; gap: 0; flex: none; min-height: 0; }
-  .stage label {
-    font-size: 11px; color: #8a94a6; display: flex; align-items: center;
-    gap: 8px; margin-top: 5px;
-  }
-  .stage label > span[data-v] {
-    min-width: 38px; text-align: right; color: #cfe0ff; flex: none;
-  }
-  .stage input[type=range] { flex: 1 1 auto; min-width: 0; }
-  .stage select { flex: 1 1 auto; min-width: 0; width: auto; }
+  .stage.off > .body, .stage.off .ms { display: none; }
   .kmat {
-    margin-top: 6px; font-size: 9px; color: #8aa0c8; line-height: 1.35;
-    background: #0b1019; border: 1px solid #1a2233; border-radius: 5px; padding: 4px 6px;
-    white-space: pre; overflow-x: auto;
+    margin: 2px 0 0; font-size: 10px; color: #8aa0c8; line-height: 1.35; white-space: pre;
+    background: #0b1019; border: 1px solid var(--k-border); border-radius: 5px; padding: 4px 6px;
   }
-
-  .stage-wrap { flex: 1; position: relative; min-height: 0; display: flex; flex-direction: column; }
-  .canvases { flex: 1; position: relative; min-height: 0; }
-  canvas#cpu, canvas#gpu { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
-  canvas.hidden { display: none; }
-  .hist-wrap {
-    height: 96px; flex: none; border-top: 1px solid #1d2330; position: relative;
-    display: flex; align-items: stretch;
-  }
-  canvas#hist { width: 100%; height: 100%; display: block; }
-  .hist-label {
-    position: absolute; top: 4px; left: 8px; font-size: 10px; color: #5f6b7e;
-    pointer-events: none;
-  }
-
-  .stats {
-    padding: 8px 18px; border-top: 1px solid #1d2330; font-size: 12px;
-    color: #8a94a6; display: flex; gap: 20px; flex-wrap: wrap;
-  }
-  .stats b { color: #d7dde6; font-weight: 600; }
-  .stats .hot b { color: #7fe6a8; }
-  .stats .cold b { color: #e69a7f; }
+  .hist { height: 96px; flex: none; position: relative; border-top: 1px solid var(--k-border); }
+  #hist { width: 100%; height: 100%; display: block; }
+  .hist-label { position: absolute; top: 4px; left: 8px; font-size: 10px; color: var(--k-dim); }
+  .k-stats .hot b { color: var(--k-ok); }
+  .k-stats .cold b { color: #e69a7f; }
 </style>
 </head>
-<body>
-  <header>
+<body class="k-app">
+  <header class="k-header">
     <h1>Image Kernels</h1>
-    <span class="sub">bro.image — composable typed-array kernels: reduce · map · combine · stencil · resample · lookup + gradient + gpu.colormap/fbm2D</span>
+    <span class="k-sub">bro.image — composable typed-array kernels: reduce · map · combine · stencil · resample · lookup + gradient + gpu.colormap</span>
   </header>
-
-  <div class="controls">
-    <label>source
+  <div class="k-toolbar">
+    <label class="k-field">source
       <select id="source">
-        <option value="fbm">FBm noise (bro.noise)</option>
-        <option value="simplex">Simplex (bro.noise)</option>
+        <option value="fbm">FBm noise (FastNoise)</option>
+        <option value="simplex">Simplex (FastNoise)</option>
         <option value="radial">radial test pattern</option>
         <option value="gradient">gradient test pattern</option>
         <option value="checker">checker + ramp</option>
       </select>
     </label>
-    <label>field
-      <select id="fieldSize">
+    <label class="k-field">field
+      <select id="field-size">
         <option value="256">256²</option>
         <option value="384" selected>384²</option>
         <option value="512">512²</option>
         <option value="768">768²</option>
       </select>
     </label>
-    <div class="sep"></div>
-    <label>colormap
-      <select id="gradientSel">
+    <span class="k-sep"></span>
+    <label class="k-field">colormap
+      <select id="gradient">
         <option value="gray">grayscale</option>
         <option value="viridis" selected>viridis-ish</option>
         <option value="magma">magma-ish</option>
@@ -143,58 +60,51 @@
         <option value="cyclic">cyclic (wrap edge)</option>
       </select>
     </label>
-    <label>range
-      <select id="rangeMode">
+    <label class="k-field">range
+      <select id="range-mode">
         <option value="auto" selected>auto (reduce minmax)</option>
         <option value="manual">manual lo/hi</option>
       </select>
     </label>
-    <label id="loWrap" style="display:none">lo
-      <input type="range" id="lo" min="-1" max="1" step="0.01" value="0">
-      <span class="val" id="loVal">0.00</span>
-    </label>
-    <label id="hiWrap" style="display:none">hi
-      <input type="range" id="hi" min="-1" max="1" step="0.01" value="1">
-      <span class="val" id="hiVal">1.00</span>
-    </label>
-    <div class="sep"></div>
-    <button id="renderer" title="Toggle CPU lookup+putImageData vs GPU gpu.colormap">renderer: GPU</button>
-    <button id="animate" class="active">animate</button>
+    <label class="k-field" id="lo-wrap" hidden>lo <input type="range" id="lo" min="-1" max="1" step="0.01" value="0"><span class="k-val" id="lo-val"></span></label>
+    <label class="k-field" id="hi-wrap" hidden>hi <input type="range" id="hi" min="-1" max="1" step="0.01" value="1"><span class="k-val" id="hi-val"></span></label>
+    <span class="k-sep"></span>
+    <button id="renderer" title="Toggle CPU lookup + putImageData vs GPU gpu.colormap">renderer: GPU</button>
+    <button id="animate">animate</button>
   </div>
-
-  <div class="body">
-    <div class="pipeline" id="pipeline">
+  <div class="k-body">
+    <aside class="k-side">
       <h2>source → pipeline → colorize</h2>
-      <!-- stage cards injected by main.js -->
-    </div>
-
-    <div class="stage-wrap">
-      <div class="canvases">
-        <canvas id="cpu" class="hidden"></canvas>
+      <div class="k-col" id="pipeline"></div>
+    </aside>
+    <main class="k-main">
+      <div class="k-viewport">
+        <canvas id="cpu" hidden></canvas>
         <canvas id="gpu"></canvas>
       </div>
-      <div class="hist-wrap">
-        <span class="hist-label">reduce('histogram') — distribution of the final field</span>
+      <div class="hist">
         <canvas id="hist"></canvas>
+        <span class="hist-label">reduce('histogram') — distribution of the final field</span>
       </div>
-    </div>
+    </main>
   </div>
-
-  <div class="stats">
-    <span>fps <b id="fps">0</b></span>
-    <span>canvas <b id="csize">0</b></span>
-    <span>field <b id="fsize">0</b></span>
-    <span>renderer <b id="rmode">GPU</b></span>
-    <span class="hot">colorize <b id="tcolor">0</b> ms</span>
-    <span>pipeline <b id="tpipe">0</b> ms</span>
-    <span class="cold">CPU lookup <b id="tcpu">—</b></span>
-    <span class="hot">GPU colormap <b id="tgpu">—</b></span>
-    <span>min <b id="rmin">0</b></span>
-    <span>max <b id="rmax">0</b></span>
-    <span>mean <b id="rmean">0</b></span>
-    <span>sum <b id="rsum">0</b></span>
-  </div>
-
+  <footer class="k-statusbar">
+    <span id="status"></span>
+    <span class="k-stats" id="stats">
+      <span>fps <b id="fps">0</b></span>
+      <span>canvas <b id="csize">0</b></span>
+      <span>field <b id="fsize">0</b></span>
+      <span>renderer <b id="rmode">GPU</b></span>
+      <span class="hot">colorize <b id="tcolor">0</b> ms</span>
+      <span>pipeline <b id="tpipe">0</b> ms</span>
+      <span class="cold">CPU lookup <b id="tcpu">—</b></span>
+      <span class="hot">GPU colormap <b id="tgpu">—</b></span>
+      <span>min <b id="rmin">0</b></span>
+      <span>max <b id="rmax">0</b></span>
+      <span>mean <b id="rmean">0</b></span>
+      <span>sum <b id="rsum">0</b></span>
+    </span>
+  </footer>
   <script type="module" src="/app/main.js"></script>
 </body>
 </html>

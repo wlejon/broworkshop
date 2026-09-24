@@ -1,172 +1,162 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="utf-8">
-  <title>StyleGAN3 Lab</title>
-  <link rel="stylesheet" href="style.css">
+<meta charset="utf-8">
+<title>StyleGAN3 Lab</title>
+<link rel="stylesheet" href="/lib/kit/kit.css">
+<link rel="stylesheet" href="/app/style.css">
 </head>
-<body>
-  <div id="app">
-    <header id="toolbar">
-      <span id="brand">◑ StyleGAN3&nbsp;Lab</span>
-      <span class="tagline">drive the latent space through its real seams — sample, walk, mix, browse</span>
-      <span class="grow"></span>
-      <span id="backend" class="badge">loading…</span>
-    </header>
+<body class="k-app">
+  <header class="k-header">
+    <h1>StyleGAN3 Lab</h1>
+    <span class="k-sub">drive the latent space through its real seams: sample, walk, mix, invert, browse</span>
+  </header>
 
-    <!-- which checkpoint -->
-    <section id="modelbar">
-      <label class="cfg">model
-        <input id="model-dir" type="text" value="D:/projects/brovisionml/weights/stylegan3-r-ffhqu-256">
-      </label>
-      <button id="btn-browse-model" class="iconbtn" title="Choose a converted StyleGAN3 checkpoint directory (config-R or config-T)">📁</button>
-      <label class="cfg">res
-        <select id="resolution" title="Must match the checkpoint">
-          <option value="256" selected>256</option>
-          <option value="512">512</option>
-          <option value="1024">1024</option>
-        </select>
-      </label>
-      <label class="cfg">cfg
-        <select id="variant" title="Config family — must match the checkpoint (R: rotation-equivariant, T: translation-equivariant)">
-          <option value="r" selected>R</option>
-          <option value="t">T</option>
-        </select>
-      </label>
-      <label class="cfg">device
-        <select id="device">
-          <option value="cuda" selected>cuda</option>
-          <option value="cpu">cpu</option>
-        </select>
-      </label>
-      <span class="grow"></span>
-      <span id="model-meta" class="meta"></span>
-      <button id="btn-reload" title="Reload this checkpoint">↺</button>
-    </section>
+  <!-- which checkpoint -->
+  <div class="k-toolbar" id="modelbar">
+    <label class="k-field"><span>model</span>
+      <input id="model-dir" type="text" placeholder="converted StyleGAN3 checkpoint directory">
+    </label>
+    <button id="btn-browse-model" title="Choose a converted StyleGAN3 checkpoint directory (config-R or config-T)">browse…</button>
+    <label class="k-field"><span>res</span>
+      <select id="resolution" title="Must match the checkpoint (read from a -256/-512/-1024 directory suffix)">
+        <option value="256" selected>256</option>
+        <option value="512">512</option>
+        <option value="1024">1024</option>
+      </select>
+    </label>
+    <label class="k-field"><span>cfg</span>
+      <select id="variant" title="Config family; must match the checkpoint (R: rotation-equivariant, T: translation-equivariant)">
+        <option value="r" selected>R</option>
+        <option value="t">T</option>
+      </select>
+    </label>
+    <label class="k-field"><span>device</span>
+      <select id="device">
+        <option value="cuda" selected>cuda</option>
+        <option value="cpu">cpu</option>
+      </select>
+    </label>
+    <button id="btn-reload" title="Reload this checkpoint">reload</button>
+  </div>
 
-    <!-- shared generation params -->
-    <section id="parambar">
-      <div class="dial">
-        <label>truncation ψ <span id="psi-val">0.70</span></label>
-        <input id="psi" type="range" min="0" max="1" step="0.01" value="0.7"
-               title="Pull W toward the average face — lower = tamer/more typical">
-      </div>
-      <div class="dial">
-        <label>cutoff <span id="cutoff-val">all</span></label>
-        <input id="cutoff" type="range" min="-1" max="16" step="1" value="-1"
-               title="Truncate only the first N rows (-1 = all). Coarse-only truncation keeps fine detail.">
-      </div>
-      <span class="grow"></span>
-      <nav class="quick">
-        <button id="seam-sample" class="chip" title="z → image">sample</button>
-        <button id="seam-walk"   class="chip" title="interpolate two latents">walk</button>
-        <button id="seam-mix"    class="chip" title="style mixing">mix</button>
-        <button id="seam-invert" class="chip" title="image → latent (inversion)">invert</button>
-        <button id="seam-grid"   class="chip" title="seed browser">grid</button>
-      </nav>
-    </section>
+  <!-- shared generation params + seam tabs -->
+  <div class="k-toolbar" id="parambar">
+    <label class="k-field" title="Pull W toward the average face; lower = tamer, more typical">
+      <span>truncation ψ</span>
+      <input id="psi" type="range" min="0" max="1" step="0.01" value="0.7">
+      <output id="psi-val" class="k-val">0.70</output>
+    </label>
+    <label class="k-field" title="Truncate only the first N rows (-1 = all). Coarse-only truncation keeps fine detail.">
+      <span>cutoff</span>
+      <input id="cutoff" type="range" min="-1" max="16" step="1" value="-1">
+      <output id="cutoff-val" class="k-val">all</output>
+    </label>
+  </div>
+  <div class="k-tabs" id="seams">
+    <button data-tab="sample" id="seam-sample" class="active" title="z → image">sample</button>
+    <button data-tab="walk" id="seam-walk" title="interpolate two latents">walk</button>
+    <button data-tab="mix" id="seam-mix" title="style mixing">mix</button>
+    <button data-tab="invert" id="seam-invert" title="image → latent (inversion)">invert</button>
+    <button data-tab="grid" id="seam-grid" title="seed browser">grid</button>
+  </div>
 
-    <main id="workspace">
+  <div class="k-body">
+    <main class="k-main pad" id="workspace">
       <!-- SAMPLE -->
-      <section id="panel-sample" class="panel">
-        <div class="controls">
-          <label class="cfg seed">seed <input id="seed" type="number" value="42"></label>
-          <button id="btn-rand-seed" title="Random seed">🎲</button>
+      <section id="panel-sample" class="seam" data-pane="sample">
+        <div class="k-row">
+          <label class="k-field"><span>seed</span><input id="seed" type="number" class="seed-in" value="42"></label>
+          <button id="btn-rand-seed" title="Random seed">random</button>
           <button id="btn-render" class="primary">render</button>
-          <span class="grow"></span>
+          <div class="k-spacer"></div>
           <button id="btn-to-a" title="Send this seed to the A anchor (Walk + Mix)">→ A</button>
           <button id="btn-to-b" title="Send this seed to the B anchor (Walk + Mix)">→ B</button>
         </div>
         <div class="stage">
-          <div class="shot big">
-            <div class="canvas-wrap"><canvas id="sample-canvas"></canvas></div>
-            <div class="cap" id="sample-meta"></div>
-          </div>
+          <figure class="shot big"><canvas id="sample-canvas"></canvas><figcaption id="sample-meta"></figcaption></figure>
         </div>
       </section>
 
       <!-- WALK -->
-      <section id="panel-walk" class="panel">
-        <div class="controls">
-          <label class="cfg seed">A <input id="walk-a" type="number" value="1"></label>
-          <button id="btn-walk-rand-a" title="Random A">🎲</button>
-          <label class="cfg seed">B <input id="walk-b" type="number" value="2"></label>
-          <button id="btn-walk-rand-b" title="Random B">🎲</button>
-          <div class="dial wide">
-            <label>t <span id="walk-meta">t = 0.50</span></label>
-            <input id="walk-t" type="range" min="0" max="1" step="0.01" value="0.5">
-          </div>
-          <span class="grow"></span>
-          <label class="cfg">steps <input id="walk-steps" type="number" value="7" min="2" max="12"></label>
+      <section id="panel-walk" class="seam" data-pane="walk">
+        <div class="k-row">
+          <label class="k-field"><span>A</span><input id="walk-a" type="number" class="seed-in" value="1"></label>
+          <button id="btn-walk-rand-a" title="Random A">random</button>
+          <label class="k-field"><span>B</span><input id="walk-b" type="number" class="seed-in" value="2"></label>
+          <button id="btn-walk-rand-b" title="Random B">random</button>
+          <label class="k-field"><span>t</span><input id="walk-t" type="range" class="wide" min="0" max="1" step="0.01" value="0.5"></label>
+          <span id="walk-meta" class="val">t = 0.50</span>
+          <div class="k-spacer"></div>
+          <label class="k-field"><span>steps</span><input id="walk-steps" type="number" value="7" min="2" max="12"></label>
           <button id="btn-walk-strip">render strip</button>
         </div>
         <div class="stage">
-          <div class="shot"><div class="canvas-wrap"><canvas id="walk-a-canvas"></canvas></div><div class="cap">A</div></div>
-          <div class="shot big"><div class="canvas-wrap"><canvas id="walk-mid"></canvas></div><div class="cap">interpolated</div></div>
-          <div class="shot"><div class="canvas-wrap"><canvas id="walk-b-canvas"></canvas></div><div class="cap">B</div></div>
+          <figure class="shot"><canvas id="walk-a-canvas"></canvas><figcaption>A</figcaption></figure>
+          <figure class="shot big"><canvas id="walk-mid"></canvas><figcaption>interpolated</figcaption></figure>
+          <figure class="shot"><canvas id="walk-b-canvas"></canvas><figcaption>B</figcaption></figure>
         </div>
         <div id="walk-strip" class="strip"></div>
       </section>
 
       <!-- MIX -->
-      <section id="panel-mix" class="panel">
-        <div class="controls">
-          <label class="cfg seed">A (coarse) <input id="mix-a" type="number" value="1"></label>
-          <button id="btn-mix-rand-a" title="Random A">🎲</button>
-          <label class="cfg seed">B (fine) <input id="mix-b" type="number" value="2"></label>
-          <button id="btn-mix-rand-b" title="Random B">🎲</button>
-          <div class="dial wide">
-            <label>crossover layer <span id="mix-k-val">8</span></label>
-            <input id="mix-k" type="range" min="0" max="16" step="1" value="8"
-                   title="Rows below this come from A (pose/shape); rows at/above from B (color/texture)">
-          </div>
+      <section id="panel-mix" class="seam" data-pane="mix">
+        <div class="k-row">
+          <label class="k-field"><span>A (coarse)</span><input id="mix-a" type="number" class="seed-in" value="1"></label>
+          <button id="btn-mix-rand-a" title="Random A">random</button>
+          <label class="k-field"><span>B (fine)</span><input id="mix-b" type="number" class="seed-in" value="2"></label>
+          <button id="btn-mix-rand-b" title="Random B">random</button>
+          <label class="k-field" title="Rows below this come from A (pose/shape); rows at/above from B (color/texture)">
+            <span>crossover layer</span>
+            <input id="mix-k" type="range" class="wide" min="0" max="16" step="1" value="8">
+            <output id="mix-k-val" class="k-val">8</output>
+          </label>
         </div>
         <div class="stage">
-          <div class="shot"><div class="canvas-wrap"><canvas id="mix-a-canvas"></canvas></div><div class="cap">A · structure</div></div>
-          <div class="shot big"><div class="canvas-wrap"><canvas id="mix-result"></canvas></div><div class="cap" id="mix-meta"></div></div>
-          <div class="shot"><div class="canvas-wrap"><canvas id="mix-b-canvas"></canvas></div><div class="cap">B · style</div></div>
+          <figure class="shot"><canvas id="mix-a-canvas"></canvas><figcaption>A · structure</figcaption></figure>
+          <figure class="shot big"><canvas id="mix-result"></canvas><figcaption id="mix-meta"></figcaption></figure>
+          <figure class="shot"><canvas id="mix-b-canvas"></canvas><figcaption>B · style</figcaption></figure>
         </div>
       </section>
 
       <!-- INVERT -->
-      <section id="panel-invert" class="panel">
-        <div class="controls">
-          <label class="cfg seed">seed <input id="inv-seed" type="number" value="42"></label>
+      <section id="panel-invert" class="seam" data-pane="invert">
+        <div class="k-row">
+          <label class="k-field"><span>seed</span><input id="inv-seed" type="number" class="seed-in" value="42"></label>
           <button id="btn-inv-from-seed" title="Generate this seed, then invert it back (round-trip)">from seed</button>
           <button id="btn-inv-from-file" title="Load an image file to invert (resized to the model resolution)">load image…</button>
-          <span class="grow"></span>
-          <label class="cfg">steps <input id="inv-steps" type="number" value="200" min="25" max="1000" step="25"></label>
-          <label class="cfg">lr <input id="inv-lr" type="number" value="0.05" step="0.01" min="0.001"></label>
-          <label class="cfg" title="L2 pull toward the average face — higher = more editable, less exact">reg <input id="inv-reg" type="number" value="0" step="0.05" min="0"></label>
+          <div class="k-spacer"></div>
+          <label class="k-field"><span>steps</span><input id="inv-steps" type="number" value="200" min="25" max="1000" step="25"></label>
+          <label class="k-field"><span>lr</span><input id="inv-lr" type="number" value="0.05" step="0.01" min="0.001"></label>
+          <label class="k-field" title="L2 pull toward the average face; higher = more editable, less exact"><span>reg</span><input id="inv-reg" type="number" value="0" step="0.05" min="0"></label>
           <button id="btn-invert" class="primary">invert</button>
         </div>
         <div class="stage">
-          <div class="shot"><div class="canvas-wrap"><canvas id="inv-target"></canvas></div><div class="cap">target</div></div>
-          <div class="shot big"><div class="canvas-wrap"><canvas id="inv-recovered"></canvas></div><div class="cap" id="inv-meta">recovered</div></div>
-          <div class="shot">
-            <div class="canvas-wrap"><canvas id="inv-loss"></canvas></div>
-            <div class="cap">loss (log)</div>
-            <div class="inv-actions">
+          <figure class="shot"><canvas id="inv-target"></canvas><figcaption>target</figcaption></figure>
+          <figure class="shot big"><canvas id="inv-recovered"></canvas><figcaption id="inv-meta">recovered</figcaption></figure>
+          <figure class="shot">
+            <canvas id="inv-loss"></canvas><figcaption>loss (log)</figcaption>
+            <div class="k-row">
               <button id="btn-inv-to-a" title="Pin the recovered latent into the Walk/Mix A anchor">→ A</button>
               <button id="btn-inv-to-b" title="Pin the recovered latent into the Walk/Mix B anchor">→ B</button>
             </div>
-          </div>
+          </figure>
         </div>
       </section>
 
       <!-- GRID -->
-      <section id="panel-grid" class="panel">
-        <div class="controls">
-          <label class="cfg seed">base seed <input id="grid-base" type="number" value="0"></label>
-          <label class="cfg">size
+      <section id="panel-grid" class="seam" data-pane="grid">
+        <div class="k-row">
+          <label class="k-field"><span>base seed</span><input id="grid-base" type="number" class="seed-in" value="0"></label>
+          <label class="k-field"><span>size</span>
             <select id="grid-size">
               <option value="3">3×3</option>
               <option value="4" selected>4×4</option>
               <option value="5">5×5</option>
             </select>
           </label>
-          <button id="btn-grid-regen">↻ render</button>
-          <span class="grow"></span>
+          <button id="btn-grid-regen">render</button>
+          <div class="k-spacer"></div>
           <button id="btn-grid-prev">‹ prev</button>
           <button id="btn-grid-next">next ›</button>
         </div>
@@ -175,6 +165,12 @@
     </main>
   </div>
 
-  <script type="module" src="/app/app.js"></script>
+  <footer class="k-statusbar">
+    <span id="status">loading…</span>
+    <div class="k-spacer"></div>
+    <span id="model-meta" class="dim"></span>
+  </footer>
+
+  <script type="module" src="/app/main.js"></script>
 </body>
 </html>

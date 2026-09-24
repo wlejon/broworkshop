@@ -12,7 +12,7 @@ import { $, S } from "/app/lib/state.js";
 import { curPsi, curCutoff } from "/app/lib/model.js";
 import { runOne, runSeq, buildImg, setBadge } from "/app/lib/engine.js";
 import { drawBitmap } from "/app/lib/helpers.js";
-import { showSeam } from "/app/app.js";
+import { showSeam } from "/app/lib/seams.js";
 
 // invTargetData, invW and invCurve live on the shared state object (state.js)
 // so model.js can reset them when a new checkpoint loads.

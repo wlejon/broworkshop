@@ -1,39 +1,46 @@
-// Headless smoke + timing for StyleGAN3 invert. Generates a face, inverts its
-// own image (synchronously — headless virtual time can't await async onDone),
-// and checks the recovered w+ re-renders close to the target. Also prints the
-// wall-clock per-step cost so we know whether the interactive lab seam needs the
-// cache-pooling perf fix. GPU: bro-headless ../broworkshop/demos/stylegan3-lab _invert_smoke.js
+// StyleGAN3 invert: recover a generated face's own latent and check it
+// re-renders close to the target, plus the input contract (RGBA at model
+// resolution; an ImageBitmap or a wrong size is rejected). Prints per-step
+// cost. Needs the ffhqu-256 checkpoint + GPU (tagged ml).
+import { check, eq, test, done, throws, q, shot } from "/lib/kit/test.js";
+import { requireWeights } from "/lib/kit/weights.js";
+import { toRGBA, drawBitmap } from "/app/lib/helpers.js";
 
-import { drawBitmap } from "/app/lib/helpers.js";
-
-const WROOT = (typeof process !== 'undefined' && process.env.BRO_WEIGHTS) || 'D:/projects';
-const DIR = WROOT + '/brovisionml/weights/stylegan3-r-ffhqu-256';
-
+const DIR = requireWeights('StyleGAN3 ffhqu-256', ['brovisionml/weights/stylegan3-r-ffhqu-256'],
+                           { probe: 'model.safetensors' });
 const g = bro.vision.loadStyleGAN3(DIR, { resolution: 256 });
-assert(g && g.numWs > 0, 'loaded');
-
-// Self-generated target: invert should drive MSE down sharply.
 const tgt = g.generate({ seed: 42, truncation: 0.7, returnLatents: true });
-assert(tgt.image && tgt.width === 256, 'target 256²');
-
 const STEPS = 40;
-const t0 = Date.now();
-const rec = g.invert(tgt.image, { steps: STEPS, lr: 0.1 });
-const dt = Date.now() - t0;
+let rec;
 
-assert(rec.w && rec.w.length === g.numWs * g.wDim, 'recovered w+ length');
-assert(rec.image && rec.image.width === 256, 'recovered image');
-assert(typeof rec.loss === 'number', 'final loss present');
-assert(rec.lossCurve && rec.lossCurve.length === STEPS, 'loss curve length = ' + (rec.lossCurve ? rec.lossCurve.length : 'none'));
+test('input contract', () => {
+    throws(() => g.invert(tgt.image, { steps: 1 }), null, 'an ImageBitmap is rejected');
+    const small = { width: 128, height: 128, data: new Uint8ClampedArray(128 * 128 * 4) };
+    throws(() => g.invert(small, { steps: 1 }), null, 'a non-model-resolution image is rejected');
+});
 
-const first = rec.lossCurve[0], last = rec.lossCurve[rec.lossCurve.length - 1];
-assert(last < first, 'loss decreased: ' + first.toFixed(5) + ' -> ' + last.toFixed(5));
+test('self-inversion drives MSE down', () => {
+    const t0 = Date.now();
+    rec = g.invert(toRGBA(tgt), { steps: STEPS, lr: 0.1 });
+    const dt = Date.now() - t0;
+    eq(rec.w.length, g.numWs * g.wDim);
+    eq(rec.image.width, 256);
+    eq(typeof rec.loss, 'number');
+    eq(rec.lossCurve.length, STEPS);
+    const first = rec.lossCurve[0], last = rec.lossCurve[STEPS - 1];
+    check(last < first * 0.8, 'loss fell: ' + first.toExponential(3) + ' → ' + last.toExponential(3));
+    console.log('  invert ' + STEPS + ' steps: ' + dt + ' ms (' + (dt / STEPS).toFixed(1) + ' ms/step)');
+});
 
-console.log('invert ' + STEPS + ' steps: ' + dt + 'ms  (' + (dt / STEPS).toFixed(1) + ' ms/step)');
-console.log('loss: ' + first.toExponential(3) + ' -> ' + last.toExponential(3) + '  (final ' + rec.loss.toExponential(3) + ')');
+test('the recovered image resembles the target', () => {
+    let err = 0;
+    for (let i = 0; i < tgt.data.length; i++) err += Math.abs(tgt.data[i] - rec.data[i]);
+    const mae = err / tgt.data.length;
+    check(mae < 40, 'mean abs error ' + mae.toFixed(1) + ' / 255');
+});
 
-drawBitmap(document.querySelector('#sample-canvas'), tgt.image);
-drawBitmap(document.querySelector('#walk-mid'), rec.image);
+drawBitmap(q('#sample-canvas'), tgt.image);
+drawBitmap(q('#walk-mid'), rec.image);
 flush();
-screenshot('_invert_smoke.png');
-console.log('OK — StyleGAN3 invert smoke passed');
+shot('invert');
+done('stylegan3-lab invert');

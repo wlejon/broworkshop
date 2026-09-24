@@ -2,7 +2,6 @@
 import { setBadge } from "/app/lib/engine.js";
 
 const _fs = require('fs');
-export const _os = require('os');
 
 export function el(tag, cls, text) {
   const e = document.createElement(tag);
@@ -37,6 +36,19 @@ export function drawBitmap(canvas, bmp) {
   if (canvas.width !== bmp.width) canvas.width = bmp.width;
   if (canvas.height !== bmp.height) canvas.height = bmp.height;
   canvas.getContext('2d').drawImage(bmp, 0, 0);
+}
+
+// A generate()/synthesize() result carries RGB `data` (channels 3), but invert()
+// takes an RGBA { width, height, data } (an ImageBitmap is rejected). Widen it.
+export function toRGBA(r) {
+  const n = r.width * r.height, ch = r.channels || 3, src = r.data;
+  if (ch === 4) return { width: r.width, height: r.height, data: src };
+  const out = new Uint8ClampedArray(n * 4);
+  for (let i = 0; i < n; i++) {
+    out[i * 4] = src[i * ch]; out[i * 4 + 1] = src[i * ch + 1]; out[i * 4 + 2] = src[i * ch + 2];
+    out[i * 4 + 3] = 255;
+  }
+  return { width: r.width, height: r.height, data: out };
 }
 
 // ── W+ math ──────────────────────────────────────────────────────────────────

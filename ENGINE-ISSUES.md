@@ -515,6 +515,63 @@ a div with class `a`, `advanceTime(500)`, read `getComputedStyle(div).transform`
 demos/waapi-lab's arena lane 2 stands still because of it; its test "arena:
 the CSS @keyframes lane moves with the other two" fails until it is fixed.
 
+### MutationObserver: `innerHTML = ''` / `textContent = ''` queue no childList record (2026-09-24)
+Clearing children through the `innerHTML` or `textContent` setters removes
+them but queues no record; `innerHTML = '<b>x</b>'` reports the added node
+and none of the removed ones. `replaceChildren()` and `removeChild` report
+correctly. Repro: a div with two `<i>`, `new MutationObserver(cb).observe(d,
+{ childList: true })`, `d.innerHTML = ''`, flush → `takeRecords()` is `[]`.
+demos/dom-lab's "clear children" logs nothing; its test logs the gap
+instead of asserting it.
+
+### Shadow-root `<style>` is not scoped per shadow root (2026-09-24)
+Two shadow trees whose `<style>` use the same selector resolve to whichever
+sheet was inserted last. Repro: two hosts, each `attachShadow({mode:'open'})`
+with `<style>.x{color:red}</style><b class=x>` and
+`<style>.x{color:blue}</style><b class=x>` → both `<b>` compute blue.
+demos/dom-lab's "ocean" `<card-box>` paints the sunset gradient.
+
+### Slotted children inherit from the host, not from the slot's parent (2026-09-24)
+A light-DOM child assigned to a `<slot>` inherits colour / font-weight from
+the shadow host instead of from its flat-tree parent (the slot's container
+in the shadow tree). In demos/dom-lab the slotted card title gets the body
+colour and weight 400 rather than the accent colour and 700 of the shadow
+`<h3>` around its slot.
+
+### Selection paint overshoots an element-offset end boundary (2026-09-24)
+With `range.setStart(p1.firstChild, 4); range.setEnd(p1, 2)` mirrored into
+`getSelection()`, the highlight runs to the end of the paragraph, though
+`toString()` correctly stops after child 1. demos/dom-lab's Range panel
+shows the long highlight.
+
+### `bro.image.gpu.colormap` samples a sliver of the field (2026-09-24)
+A 64×64 field holding a 0..1 horizontal ramp, colormapped with `lo: 0,
+hi: 1, srcW: 64, srcH: 64` into a 64×64 webgl2 canvas and read back with
+`readPixels`, comes out as 0..6 across the row instead of 0..255 (with
+`hi: 0.05` the right edge reaches ~131). It looks like it samples about 1/40
+of the field width. demos/image-kernels' GPU view looks magnified against
+its CPU (`bro.image.lookup`) path; its test_kernels.js logs the edge value.
+The shader in bro/src/bronze_host/js/image_gpu.js reads correctly, so the
+bug is probably in the upload or UV setup.
+
+### Writing `Animation.currentTime` un-holds a paused animation (2026-09-24)
+After `anim.pause(); anim.currentTime = 0;` the animation keeps advancing:
+`playState` still says `paused`, but `currentTime` grows with virtual time
+(64 after `advanceTime(64)`) while computed style barely moves. `pause()`
+alone holds. Repro: `const a = el.animate([{left:'0px'},{left:'600px'}],
+{duration: 4000}); a.pause(); a.currentTime = 0; advanceTime(500)` →
+`a.currentTime` 500. demos/platform-lab parks its transport this way at
+boot (and the scrubber seeks a paused animation the same way); its smoke
+test logs the drift instead of asserting it.
+
+### MediaQueryList change event has no `currentTarget` (2026-09-24)
+docs/matchmedia-api.js lists `{type, matches, media, target, currentTarget}`
+on the change event; `target` is the list but `currentTarget` is
+`undefined`, for `addEventListener`, `addListener` and `onchange` alike.
+Repro: `const m = matchMedia('(min-width: 900px)'); m.onchange = e =>
+console.log(e.currentTarget === m); resize(700, 900)` → `false`.
+demos/platform-lab's smoke test logs it.
+
 ## Notes (not bugs)
 
 - WAAPI gaps are documented in docs/web-animations-api.js and demos/waapi-lab

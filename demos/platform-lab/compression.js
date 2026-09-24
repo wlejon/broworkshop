@@ -22,6 +22,8 @@
 // against themselves even if they were secretly the same codec. Only the
 // header bytes distinguish them.
 
+import { setText, bind, lineLog } from "/app/util.js";
+
 export const cmpState = {
     runs: [],           // [{ label, format, inBytes, outBytes, ratio, ok, chunksIn, chunksOut }]
     lastError: null,
@@ -34,15 +36,7 @@ const dec = new TextDecoder();
 
 export const FORMATS = ['gzip', 'deflate', 'deflate-raw'];
 
-function logLine(text) {
-    cmpState.log.push(text);
-    if (cmpState.log.length > 60) cmpState.log.shift();
-    const el = document.getElementById('cmpLog');
-    if (el) {
-        el.textContent = cmpState.log.slice(-16).join('\n');
-        el.scrollTop = el.scrollHeight;
-    }
-}
+const logLine = lineLog('cmpLog', cmpState.log, 60, 16);
 
 // ── Stream plumbing ─────────────────────────────────────────────────────────
 
@@ -336,11 +330,6 @@ export async function demoStorage() {
     return { ...stats, ok };
 }
 
-function setText(id, text) {
-    const el = document.getElementById(id);
-    if (el && el.textContent !== text) el.textContent = text;
-}
-
 export function initCompression() {
     bind('cmpRun', () => runBench());
     bind('cmpErrorsRun', () => probeErrors());
@@ -352,9 +341,4 @@ export function initCompression() {
 
     // Kick one bench so the panel is populated on open rather than empty.
     runBench().then(() => probeErrors()).then(() => demoStorage());
-}
-
-function bind(id, fn) {
-    const el = document.getElementById(id);
-    if (el) el.addEventListener('click', fn);
 }

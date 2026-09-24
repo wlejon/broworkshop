@@ -1,188 +1,177 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>DOM & Web Standards Lab</title>
-    <link rel="stylesheet" href="style.css">
+<meta charset="utf-8">
+<title>DOM &amp; Web Standards Lab</title>
+<link rel="stylesheet" href="/lib/kit/kit.css">
+<link rel="stylesheet" href="/app/style.css">
 </head>
-<body>
-    <header class="app-header">
-        <div class="header-left">
-            <h1 class="logo">bro.dom <span>Standards Lab</span></h1>
-            <nav class="nav-tabs">
-                <button class="tab-btn active" data-tab="custom-elements">Custom Elements</button>
-                <button class="tab-btn" data-tab="shadow-dom">Shadow DOM</button>
-                <button class="tab-btn" data-tab="mutations">MutationObserver</button>
-                <button class="tab-btn" data-tab="range-selection">Range & Selection</button>
-                <button class="tab-btn" data-tab="web-animations">Web Animations</button>
-            </nav>
-        </div>
-        <div class="header-right">
-            <div class="badge-group">
-                <span class="badge ok">W3C DOM Level 3</span>
-                <span class="badge">Web Components</span>
-                <span class="badge">WAAPI</span>
-            </div>
-        </div>
-    </header>
+<body class="k-app">
+  <header class="k-header">
+    <h1>DOM &amp; Web Standards Lab</h1>
+    <span class="k-sub">Custom Elements · Shadow DOM · MutationObserver · Range &amp; Selection · Web Animations</span>
+    <div class="k-spacer"></div>
+    <span class="k-chip on">W3C DOM</span>
+    <span class="k-chip">Web Components</span>
+    <span class="k-chip">WAAPI</span>
+  </header>
+  <div class="k-tabs" id="tabs">
+    <button data-tab="custom-elements" class="active">Custom Elements</button>
+    <button data-tab="shadow-dom">Shadow DOM</button>
+    <button data-tab="mutations">MutationObserver</button>
+    <button data-tab="range-selection">Range &amp; Selection</button>
+    <button data-tab="web-animations">Web Animations</button>
+  </div>
 
-    <main class="workspace">
-        <!-- Tab 1: Custom Elements -->
-        <section id="tab-custom-elements" class="tab-content active">
-            <div class="panel-header">
-                <h2>Custom Elements Registry (customElements.define)</h2>
-                <span class="sub-label">Lifecycle: connectedCallback • disconnectedCallback • attributeChangedCallback</span>
-            </div>
-            <div class="split-view">
-                <div class="interactive-stage">
-                    <div class="components-row" id="customComponentsContainer">
-                        <!-- Custom elements will be injected/interacted here -->
-                        <stat-meter label="CPU Load" value="45" unit="%"></stat-meter>
-                        <stat-meter label="Memory" value="72" unit="%"></stat-meter>
-                        <stat-meter label="FPS" value="60" unit=""></stat-meter>
-                    </div>
-                    <div class="controls-row">
-                        <button id="addStatBtn" class="btn primary">+ Add Custom Element</button>
-                        <button id="randomizeStatsBtn" class="btn">Randomize Values</button>
-                        <button id="removeStatBtn" class="btn danger">Remove Last</button>
-                    </div>
-                </div>
-                <div class="inspector-side">
-                    <h3>Lifecycle Event Stream</h3>
-                    <pre id="customLifecycleLog" class="log-box"></pre>
-                </div>
-            </div>
-        </section>
-
-        <!-- Tab 2: Shadow DOM -->
-        <section id="tab-shadow-dom" class="tab-content">
-            <div class="panel-header">
-                <h2>Shadow DOM Encapsulation (attachShadow)</h2>
-                <span class="sub-label">Scoped styling &amp; slotted content projection</span>
-            </div>
-            <div class="split-view">
-                <div class="interactive-stage">
-                    <div id="shadowHostContainer" class="shadow-stage">
-                        <!-- Shadow host instances -->
-                        <card-box theme="ocean">
-                            <span slot="title">Ocean Profile</span>
-                            <p slot="body">Encapsulated shadow root styles cannot leak to document root.</p>
-                        </card-box>
-                        <card-box theme="sunset">
-                            <span slot="title">Sunset Profile</span>
-                            <p slot="body">Slot projection cleanly separates content markup from component presentation.</p>
-                        </card-box>
-                    </div>
-                    <div class="controls-row">
-                        <button id="toggleShadowThemeBtn" class="btn">Toggle Card Themes</button>
-                        <button id="updateShadowContentBtn" class="btn">Update Slotted Content</button>
-                    </div>
-                </div>
-                <div class="inspector-side">
-                    <h3>Shadow Root Inspection</h3>
-                    <pre id="shadowInspectLog" class="log-box"></pre>
-                </div>
-            </div>
-        </section>
-
-        <!-- Tab 3: MutationObserver -->
-        <section id="tab-mutations" class="tab-content">
-            <div class="panel-header">
-                <h2>Live MutationObserver Telemetry</h2>
-                <span class="sub-label">Observing childList additions/removals and attribute mutations</span>
-            </div>
-            <div class="split-view">
-                <div class="interactive-stage">
-                    <div id="mutationTargetBox" class="target-box" data-theme="dark" data-status="idle">
-                        <h4>Observed DOM Target Container</h4>
-                        <ul id="observedList" class="item-list">
-                            <li class="item">Node Item #1</li>
-                            <li class="item">Node Item #2</li>
-                        </ul>
-                    </div>
-                    <div class="controls-row">
-                        <button id="appendItemBtn" class="btn primary">Append Child</button>
-                        <button id="mutateAttrBtn" class="btn">Mutate Attribute</button>
-                        <button id="clearChildrenBtn" class="btn danger">Clear Children</button>
-                    </div>
-                </div>
-                <div class="inspector-side">
-                    <div class="log-header">
-                        <h3>Mutation Records</h3>
-                        <button id="clearMutationLogBtn" class="btn small">Clear Log</button>
-                    </div>
-                    <pre id="mutationLog" class="log-box"></pre>
-                </div>
-            </div>
-        </section>
-
-        <!-- Tab 4: Range & Selection -->
-        <section id="tab-range-selection" class="tab-content">
-            <div class="panel-header">
-                <h2>Range &amp; Selection API (document.createRange)</h2>
-                <span class="sub-label">Precise text boundary ranges, cloning, and surrounding wrappers</span>
-            </div>
-            <div class="split-view">
-                <div class="interactive-stage">
-                    <div id="editableArticle" class="article-box">
-                        <p id="p1">The <strong>Antigravity bro</strong> engine combines custom DOM tree parsing, CSS cascading rules, and layout pipelines.</p>
-                        <p id="p2">Using the <em>Range API</em>, scripts can programmatically highlight phrases, extract document fragments, and measure bounding rects.</p>
-                    </div>
-                    <div class="controls-row">
-                        <button id="selectFirstSentenceBtn" class="btn primary">Select Range (P1 words 2-5)</button>
-                        <button id="surroundSelectionBtn" class="btn">Surround Range with &lt;mark&gt;</button>
-                        <button id="collapseRangeBtn" class="btn">Collapse Range to Start</button>
-                    </div>
-                </div>
-                <div class="inspector-side">
-                    <h3>Range Bounds Diagnostics</h3>
-                    <table class="diag-table">
-                        <tr><td>Start Container</td><td id="rangeStartNode">—</td></tr>
-                        <tr><td>Start Offset</td><td id="rangeStartOffset">—</td></tr>
-                        <tr><td>End Container</td><td id="rangeEndNode">—</td></tr>
-                        <tr><td>End Offset</td><td id="rangeEndOffset">—</td></tr>
-                        <tr><td>Collapsed?</td><td id="rangeCollapsed">—</td></tr>
-                    </table>
-                </div>
-            </div>
-        </section>
-
-        <!-- Tab 5: Web Animations API -->
-        <section id="tab-web-animations" class="tab-content">
-            <div class="panel-header">
-                <h2>Web Animations API (element.animate)</h2>
-                <span class="sub-label">Script-driven keyframe animations with play, pause, reverse, and rate control</span>
-            </div>
-            <div class="split-view">
-                <div class="interactive-stage">
-                    <div class="animation-stage">
-                        <div id="animOrb" class="anim-orb">⚡</div>
-                        <div id="animCard" class="anim-card">Interactive WAAPI Target</div>
-                    </div>
-                    <div class="controls-row">
-                        <button id="animPlayPauseBtn" class="btn primary">⏸ Pause</button>
-                        <button id="animReverseBtn" class="btn">🔁 Reverse</button>
-                        <button id="animCancelBtn" class="btn danger">⏹ Cancel</button>
-                        <select id="animSpeedSelect">
-                            <option value="0.5">0.5x Speed</option>
-                            <option value="1.0" selected>1.0x Normal</option>
-                            <option value="2.0">2.0x Fast</option>
-                        </select>
-                    </div>
-                </div>
-                <div class="inspector-side">
-                    <h3>Animation State Telemetry</h3>
-                    <table class="diag-table">
-                        <tr><td>Play State</td><td id="animPlayState">running</td></tr>
-                        <tr><td>Current Time</td><td id="animCurrentTime">0 ms</td></tr>
-                        <tr><td>Playback Rate</td><td id="animRate">1.0x</td></tr>
-                        <tr><td>Active Animations</td><td id="animCount">2</td></tr>
-                    </table>
-                </div>
-            </div>
-        </section>
+  <!-- Custom Elements -->
+  <div class="k-body" data-pane="custom-elements">
+    <main class="k-main pad">
+      <div class="k-panel">
+        <h2>customElements.define('stat-meter')</h2>
+        <span class="dim">Lifecycle: connectedCallback · disconnectedCallback · attributeChangedCallback (observedAttributes: value, label, unit)</span>
+      </div>
+      <div class="components-row" id="meters">
+        <stat-meter label="CPU Load" value="45" unit="%"></stat-meter>
+        <stat-meter label="Memory" value="72" unit="%"></stat-meter>
+        <stat-meter label="FPS" value="60" unit=""></stat-meter>
+      </div>
+      <div class="k-row">
+        <button id="add-meter" class="primary">+ Add Custom Element</button>
+        <button id="randomize-meters">Randomize Values</button>
+        <button id="remove-meter" class="danger">Remove Last</button>
+      </div>
     </main>
+    <aside class="k-side right">
+      <h2>Lifecycle event stream</h2>
+      <div class="k-log inspector-log" id="lifecycle-log"></div>
+    </aside>
+  </div>
 
-    <script type="module" src="app.js"></script>
+  <!-- Shadow DOM -->
+  <div class="k-body" data-pane="shadow-dom">
+    <main class="k-main pad">
+      <div class="k-panel">
+        <h2>attachShadow({ mode: 'open' })</h2>
+        <span class="dim">Scoped styling inside the shadow root, light-DOM content projected through named slots</span>
+      </div>
+      <div class="shadow-stage" id="cards">
+        <card-box theme="ocean">
+          <span slot="title">Ocean Profile</span>
+          <p slot="body">Encapsulated shadow root styles cannot leak to document root.</p>
+        </card-box>
+        <card-box theme="sunset">
+          <span slot="title">Sunset Profile</span>
+          <p slot="body">Slot projection cleanly separates content markup from component presentation.</p>
+        </card-box>
+      </div>
+      <div class="k-row">
+        <button id="toggle-themes">Toggle Card Themes</button>
+        <button id="update-slot">Update Slotted Content</button>
+      </div>
+    </main>
+    <aside class="k-side right">
+      <h2>Shadow root inspection</h2>
+      <pre class="k-box inspector-pre" id="shadow-inspect"></pre>
+    </aside>
+  </div>
+
+  <!-- MutationObserver -->
+  <div class="k-body" data-pane="mutations">
+    <main class="k-main pad">
+      <div class="k-panel">
+        <h2>MutationObserver</h2>
+        <span class="dim">Observing childList, attributes (with oldValue), characterData, subtree</span>
+      </div>
+      <div id="mutation-target" class="target-box" data-theme="dark" data-status="idle">
+        <h4>Observed DOM target</h4>
+        <ul id="observed-list" class="item-list">
+          <li class="item">Node Item #1</li>
+          <li class="item">Node Item #2</li>
+        </ul>
+      </div>
+      <div class="k-row">
+        <button id="append-item" class="primary">Append Child</button>
+        <button id="mutate-attr">Mutate Attribute</button>
+        <button id="edit-text">Edit Text</button>
+        <button id="clear-children" class="danger">Clear Children</button>
+        <span class="dim">target data-status = <b id="target-status">idle</b></span>
+      </div>
+    </main>
+    <aside class="k-side right">
+      <h2>Mutation records <button id="clear-mutation-log" class="small">clear</button></h2>
+      <div class="k-log inspector-log" id="mutation-log"></div>
+    </aside>
+  </div>
+
+  <!-- Range & Selection -->
+  <div class="k-body" data-pane="range-selection">
+    <main class="k-main pad">
+      <div class="k-panel">
+        <h2>document.createRange() + window.getSelection()</h2>
+        <span class="dim">Boundary points in text and element containers, surroundContents, collapse, and the live Selection</span>
+      </div>
+      <div id="article" class="article-box">
+        <p id="p1">The <strong>Antigravity bro</strong> engine combines custom DOM tree parsing, CSS cascading rules, and layout pipelines.</p>
+        <p id="p2">Using the <em>Range API</em>, scripts can programmatically highlight phrases, extract document fragments, and measure bounding rects.</p>
+      </div>
+      <div class="k-row">
+        <button id="select-range" class="primary">Select Range (text → after &lt;strong&gt;)</button>
+        <button id="surround-range">Surround with &lt;mark&gt;</button>
+        <button id="collapse-range">Collapse to Start</button>
+        <button id="reset-article">Reset Text</button>
+      </div>
+    </main>
+    <aside class="k-side right">
+      <h2>Range boundary diagnostics</h2>
+      <table class="diag-table">
+        <tr><td>Start container</td><td id="range-start-node">—</td></tr>
+        <tr><td>Start offset</td><td id="range-start-offset">—</td></tr>
+        <tr><td>End container</td><td id="range-end-node">—</td></tr>
+        <tr><td>End offset</td><td id="range-end-offset">—</td></tr>
+        <tr><td>Collapsed?</td><td id="range-collapsed">—</td></tr>
+        <tr><td>range.toString()</td><td id="range-text">—</td></tr>
+        <tr><td>Selection rangeCount</td><td id="sel-count">—</td></tr>
+      </table>
+      <span class="dim" id="range-note"></span>
+    </aside>
+  </div>
+
+  <!-- Web Animations -->
+  <div class="k-body" data-pane="web-animations">
+    <main class="k-main pad">
+      <div class="k-panel">
+        <h2>element.animate()</h2>
+        <span class="dim">Script-driven keyframe animations: play, pause, reverse, cancel, playbackRate</span>
+      </div>
+      <div class="animation-stage">
+        <div id="anim-orb" class="anim-orb">⚡</div>
+        <div id="anim-card" class="anim-card">Interactive WAAPI Target</div>
+      </div>
+      <div class="k-row">
+        <button id="anim-play" class="primary">Pause</button>
+        <button id="anim-reverse">Reverse</button>
+        <button id="anim-cancel" class="danger">Cancel</button>
+        <label class="k-field">speed
+          <select id="anim-speed">
+            <option value="0.5">0.5×</option>
+            <option value="1" selected>1.0×</option>
+            <option value="2">2.0×</option>
+          </select>
+        </label>
+      </div>
+    </main>
+    <aside class="k-side right">
+      <h2>Animation state</h2>
+      <table class="diag-table">
+        <tr><td>Play state</td><td id="anim-state">—</td></tr>
+        <tr><td>Current time</td><td id="anim-time">—</td></tr>
+        <tr><td>Playback rate</td><td id="anim-rate">—</td></tr>
+        <tr><td>document.getAnimations()</td><td id="anim-count">—</td></tr>
+      </table>
+    </aside>
+  </div>
+
+  <footer class="k-statusbar"><span id="status">starting…</span></footer>
+  <script type="module" src="/app/main.js"></script>
 </body>
 </html>

@@ -26,6 +26,8 @@
 //                  list only while it is still holding a value) is visible here
 //                  and nowhere else.
 
+import { setText, bind, lineLog } from "/app/util.js";
+
 export const animState = {
     // Transport
     transport: null,          // the Animation object under the buttons
@@ -46,15 +48,7 @@ export const animState = {
 
 const TRANSPORT_MS = 4000;
 
-function logLine(text) {
-    animState.log.push(text);
-    if (animState.log.length > 40) animState.log.shift();
-    const el = document.getElementById('animLog');
-    if (el) {
-        el.textContent = animState.log.slice(-14).join('\n');
-        el.scrollTop = el.scrollHeight;
-    }
-}
+const logLine = lineLog('animLog', animState.log, 40, 14);
 
 // ── Transport ───────────────────────────────────────────────────────────────
 //
@@ -303,11 +297,6 @@ export function tickAnimations() {
     renderRegistry();
 }
 
-function setText(id, text) {
-    const el = document.getElementById(id);
-    if (el && el.textContent !== text) el.textContent = text;
-}
-
 // ── Wiring ──────────────────────────────────────────────────────────────────
 
 export function initAnimations() {
@@ -339,11 +328,6 @@ export function initAnimations() {
     animState.transport.pause();
     animState.transport.currentTime = 0;
     logLine('transport built, paused at 0');
-}
-
-function bind(id, fn) {
-    const el = document.getElementById(id);
-    if (el) el.addEventListener('click', fn);
 }
 
 export { TRANSPORT_MS, LADDER_RATES, LADDER_MS };

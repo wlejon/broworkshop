@@ -7,7 +7,7 @@ import { $, S } from "/app/lib/state.js";
 import { curPsi, curCutoff } from "/app/lib/model.js";
 import { buildImg, runSeq } from "/app/lib/engine.js";
 import { drawBitmap } from "/app/lib/helpers.js";
-import { showSeam } from "/app/app.js";
+import { showSeam } from "/app/lib/seams.js";
 
 export function renderGrid() {
   if (!S.gan) return;

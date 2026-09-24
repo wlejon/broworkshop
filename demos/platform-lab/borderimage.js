@@ -19,6 +19,8 @@
 // have stable coordinates — a flow-relative layout would make the test
 // fragile for no benefit.
 
+import { setText, lineLog } from "/app/util.js";
+
 export const biState = {
     samples: [],       // [{ id, label, longhands }]
     expansions: 0,
@@ -116,12 +118,7 @@ const LONGHANDS = [
     'border-image-outset', 'border-image-repeat',
 ];
 
-function logLine(text) {
-    biState.log.push(text);
-    if (biState.log.length > 30) biState.log.shift();
-    const el = document.getElementById('biLog');
-    if (el) el.textContent = biState.log.slice(-10).join('\n');
-}
+const logLine = lineLog('biLog', biState.log, 30, 10);
 
 export function buildSamples() {
     const host = document.getElementById('biGrid');
@@ -222,11 +219,6 @@ function value(id, dflt) {
 
 export function tickBorderImage() {
     refreshLonghands();
-}
-
-function setText(id, text) {
-    const el = document.getElementById(id);
-    if (el && el.textContent !== text) el.textContent = text;
 }
 
 export function initBorderImage() {

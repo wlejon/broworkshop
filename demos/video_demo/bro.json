@@ -1,5 +1,6 @@
 {
-  "name": "video_demo",
-  "main": "index.html",
-  "lib": "../../lib"
+    "title": "Video Demo",
+    "width": 1180,
+    "height": 820,
+    "lib": "../../lib"
 }

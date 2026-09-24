@@ -1,133 +1,147 @@
-// demos/dom-lab/tests/test_main.js
+// DOM & Web Standards Lab — drive each tab through its buttons and assert on
+// the DOM the platform API produced. Run: scripts/validate.sh demos/dom-lab
+import { check, eq, frames, test, done, q, text, clickOn, setValue, shot } from "/lib/kit/test.js";
+import { ui } from "/app/lab.js";
+import { describeCard } from "/app/shadow-dom.js";
+import { mutationState } from "/app/mutations.js";
+import { rangeState, diagnose } from "/app/range-selection.js";
+import { animState, telemetry } from "/app/web-animations.js";
 
-let passed = 0;
-let failed = 0;
+frames(6);
 
-function check(desc, cond) {
-    if (cond) {
-        console.log("  ok  " + desc);
-        passed++;
-    } else {
-        console.log("  FAIL: " + desc);
-        failed++;
-    }
-}
+const meters = () => q('#meters').querySelectorAll('stat-meter');
+const logText = (sel) => q(sel).textContent;
 
-console.log("\n=== DOM & Web Standards Lab Integration Tests ===\n");
-
-// [1] Custom Elements Registry
-console.log("[1] Custom Elements Verification");
-check("customElements global registry exists", typeof customElements !== 'undefined');
-check("customElements.define is a function", typeof customElements.define === 'function');
-check("customElements.get is a function", typeof customElements.get === 'function');
-
-let statMeterCtr = customElements.get('stat-meter');
-check("stat-meter custom element constructor registered", !!statMeterCtr);
-
-const testMeter = document.createElement('stat-meter');
-testMeter.setAttribute('label', 'TestLoad');
-testMeter.setAttribute('value', '88');
-document.body.appendChild(testMeter);
-
-check("custom element rendered content on connect", testMeter.textContent.includes('TestLoad') && testMeter.textContent.includes('88'));
-
-testMeter.setAttribute('value', '99');
-check("custom element updated on attributeChangedCallback", testMeter.textContent.includes('99'));
-testMeter.remove();
-
-// [2] Shadow DOM Encapsulation
-console.log("\n[2] Shadow DOM Verification");
-const card = document.createElement('card-box');
-check("card-box created", !!card);
-check("attachShadow created shadowRoot", !!card.shadowRoot);
-check("shadowRoot mode is open", card.shadowRoot && card.shadowRoot.mode === 'open');
-
-// [3] MutationObserver
-console.log("\n[3] MutationObserver Verification");
-check("MutationObserver constructor exists", typeof MutationObserver === 'function');
-
-let mutationFired = false;
-let observedType = '';
-const testTarget = document.createElement('div');
-document.body.appendChild(testTarget);
-
-const observer = new MutationObserver((mutations) => {
-    mutationFired = true;
-    if (mutations[0]) observedType = mutations[0].type;
+test('boot: tabs, one visible pane', () => {
+    eq(ui.tabs.current, 'custom-elements');
+    const shown = Array.from(document.querySelectorAll('[data-pane]')).filter((p) => !p.hidden);
+    eq(shown.map((p) => p.dataset.pane), ['custom-elements']);
 });
-observer.observe(testTarget, { attributes: true, childList: true });
 
-testTarget.setAttribute('data-test', 'mutated_val');
+test('custom elements: upgraded meters rendered + lifecycle logged', () => {
+    eq(meters().length, 3);
+    eq(meters()[0].querySelector('.meter-val').textContent, '45%');
+    check(meters()[0] instanceof customElements.get('stat-meter'), 'upgraded instance');
+    check(/connectedCallback/.test(logText('#lifecycle-log')), 'connectedCallback logged');
+});
 
-// Trigger mutation drain
-if (typeof advanceTime === 'function') {
-    advanceTime(20);
-}
+test('custom elements: add, randomize, remove', () => {
+    clickOn('#add-meter');
+    eq(meters().length, 4);
+    const added = meters()[3];
+    eq(added.querySelector('.meter-label').textContent, 'Dynamic Metric');
+    check(/pt$/.test(added.querySelector('.meter-val').textContent), 'unit rendered');
+    const before = ui.lifecycleLog.count;
+    clickOn('#randomize-meters');
+    check(ui.lifecycleLog.count >= before, 'randomize logs (or values repeated)');
+    for (const m of meters()) check(m.querySelector('.meter-val').textContent === m.getAttribute('value') + (m.getAttribute('unit') || ''), 'meter shows its attribute');
+    clickOn('#remove-meter');
+    eq(meters().length, 3);
+    check(/disconnectedCallback/.test(logText('#lifecycle-log')), 'disconnectedCallback logged');
+});
 
-check("MutationObserver captured attribute change", mutationFired || testTarget.getAttribute('data-test') === 'mutated_val');
-observer.disconnect();
-testTarget.remove();
+test('shadow DOM: open roots, slots, theme toggle re-renders shadow only', () => {
+    clickOn('[data-tab=shadow-dom]');
+    const cards = q('#cards').querySelectorAll('card-box');
+    eq(cards.length, 2);
+    eq(cards[0].shadowRoot.mode, 'open');
+    eq(cards[0].shadowRoot.querySelectorAll('slot').length, 2);
+    check(cards[0].querySelector('.card-wrap') === null, 'shadow content is not in the light DOM');
+    check(/theme attribute {3}"ocean"/.test(text('#shadow-inspect')), 'inspector shows ocean');
+    clickOn('#toggle-themes');
+    eq(cards[0].getAttribute('theme'), 'sunset');
+    eq(cards[1].getAttribute('theme'), 'ocean');
+    check(/"sunset"/.test(describeCard(cards[0])), 'describe follows the attribute');
+    check(/theme attribute {3}"sunset"/.test(text('#shadow-inspect')), 'inspector updated');
+    clickOn('#update-slot');
+    check(/^Updated slotted text/.test(cards[0].querySelector('[slot=body]').textContent), 'slotted body replaced');
+});
 
-// [4] Range & Selection API
-console.log("\n[4] Range & Selection API Verification");
-check("document.createRange is a function", typeof document.createRange === 'function');
+test('mutation observer: childList, attributes, characterData records', () => {
+    clickOn('[data-tab=mutations]');
+    const n0 = mutationState.records;
+    clickOn('#append-item');
+    frames(1);
+    eq(q('#observed-list').children.length, 3);
+    check(/childList → added 1, removed 0/.test(logText('#mutation-log')), 'append record');
+    clickOn('#mutate-attr');
+    frames(1);
+    eq(q('#mutation-target').getAttribute('data-status'), 'active');
+    eq(text('#target-status'), 'active');
+    check(/attributes → "data-status" \(old "idle"\)/.test(logText('#mutation-log')), 'attribute record with old value');
+    clickOn('#edit-text');
+    frames(1);
+    check(/characterData → "Node Item #1 \(edited\)"/.test(logText('#mutation-log')), 'characterData record');
+    clickOn('#clear-children');
+    frames(1);
+    eq(q('#observed-list').children.length, 0);
+    // Per spec innerHTML = '' queues one childList record removing every child.
+    // bro queues none (ENGINE-ISSUES.md, "MutationObserver: `innerHTML = ''` /
+    // `textContent = ''` queue no childList record"); flip this to a check once fixed.
+    if (!/added 0, removed/.test(logText('#mutation-log'))) console.log('  (known engine issue: innerHTML = "" queued no childList record)');
+    check(mutationState.records >= n0 + 3, 'records counted');
+    clickOn('#clear-mutation-log');
+    eq(q('#mutation-log').childElementCount, 0);
+});
 
-const range = document.createRange();
-check("range object instantiated", !!range);
+test('range: text → element boundaries, mirrored into the Selection', () => {
+    clickOn('[data-tab=range-selection]');
+    clickOn('#select-range');
+    const d = diagnose(rangeState.range);
+    eq([d.startContainer, d.startOffset, d.endContainer, d.endOffset, d.collapsed],
+       ['#text', 4, 'P', 2, false]);
+    eq(d.text, 'Antigravity bro');
+    eq(text('#range-text'), '"Antigravity bro"');
+    eq(text('#sel-count'), '1');
+    eq(window.getSelection().toString(), 'Antigravity bro');
+});
 
-const p1 = document.getElementById('p1');
-if (p1 && p1.firstChild) {
-    range.setStart(p1.firstChild, 0);
-    range.setEnd(p1.firstChild, Math.min(3, p1.firstChild.textContent.length));
-    check("range.startOffset is 0", range.startOffset === 0);
-    check("range.endOffset is valid", range.endOffset > 0);
-    check("range.collapsed is false", range.collapsed === false);
+test('range: surroundContents wraps the selection in <mark>', () => {
+    clickOn('#surround-range');
+    const mark = q('#p1 mark');
+    eq(mark.textContent, 'Antigravity bro');
+    check(mark.firstElementChild && mark.firstElementChild.tagName === 'STRONG', 'mark wraps the strong');
+    eq(rangeState.range.toString(), 'Antigravity bro');
+});
 
-    range.collapse(true);
-    check("range.collapse(true) collapsed the range", range.collapsed === true);
-}
+test('range: collapse, then reset restores the article', () => {
+    clickOn('#collapse-range');
+    eq(text('#range-collapsed'), 'yes');
+    eq(rangeState.range.toString(), '');
+    clickOn('#reset-article');
+    check(q('#p1').querySelector('mark') === null, 'mark gone after reset');
+    eq(text('#range-collapsed'), 'no');
+});
 
-// [5] Web Animations API (WAAPI)
-console.log("\n[5] Web Animations API (element.animate) Verification");
-const animOrb = document.getElementById('animOrb');
-check("animOrb element exists", !!animOrb);
-check("element.animate is a function", animOrb && typeof animOrb.animate === 'function');
+test('web animations: running, pause/play, rate, cancel', () => {
+    clickOn('[data-tab=web-animations]');
+    frames(10);
+    eq(animState.animations.length, 2);
+    const t = telemetry();
+    eq(t.playState, 'running');
+    check(t.count >= 2, 'getAnimations sees both, got ' + t.count);
+    eq(text('#anim-state'), 'running');
+    clickOn('#anim-play');
+    eq(animState.animations[0].playState, 'paused');
+    eq(text('#anim-play'), 'Play');
+    const held = animState.animations[0].currentTime;
+    frames(10);
+    eq(animState.animations[0].currentTime, held, 'paused time holds');
+    clickOn('#anim-play');
+    eq(animState.animations[0].playState, 'running');
+    setValue('#anim-speed', '2');
+    eq(animState.animations[1].playbackRate, 2);
+    frames(2);
+    eq(text('#anim-rate'), '2.0×');
+    clickOn('#anim-cancel');
+    frames(2);
+    eq(animState.animations[0].playState, 'idle');
+    eq(text('#anim-play'), 'Play');
+    clickOn('#anim-play');
+    eq(animState.animations[0].playState, 'running', 'play after cancel restarts');
+    clickOn('#anim-reverse');
+    check(animState.animations[0].playbackRate < 0, 'reverse flips the rate');
+});
 
-let animInstance = null;
-try {
-    animInstance = animOrb.animate([
-        { opacity: 0.2, transform: 'scale(0.8)' },
-        { opacity: 1.0, transform: 'scale(1.2)' }
-    ], {
-        duration: 500,
-        iterations: 1,
-        fill: 'forwards'
-    });
-    check("element.animate returned valid Animation object", !!animInstance);
-} catch (e) {
-    check("element.animate failed: " + e.message, false);
-}
-
-if (animInstance) {
-    check("animInstance.playState is valid", animInstance.playState === 'running' || animInstance.playState === 'finished');
-    check("animInstance.playbackRate equals 1.0", animInstance.playbackRate === 1.0);
-    animInstance.pause();
-    check("animInstance.pause() set playState to paused", animInstance.playState === 'paused');
-    animInstance.play();
-}
-
-// [6] Screenshot
-console.log("\n[6] Capturing Verification Screenshot");
-if (typeof advanceTime === 'function') {
-    advanceTime(50);
-}
-if (typeof screenshot === 'function') {
-    screenshot("dom_lab_test.png");
-    console.log("  screenshot: dom_lab_test.png");
-}
-
-console.log(`\n=== ${passed} passed, ${failed} failed ===\n`);
-
-if (failed > 0) {
-    throw new Error(`${failed} tests failed in dom-lab integration test suite`);
-}
+shot('main');
+done('dom-lab');

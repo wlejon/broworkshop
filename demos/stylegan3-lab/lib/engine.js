@@ -12,7 +12,7 @@
 // single image is one step; a Walk strip is N). onStep(i, result) places each
 // result; onAll() fires when the whole sequence finishes.
 
-import { $, S, wCache } from "/app/lib/state.js";
+import { S, wCache } from "/app/lib/state.js";
 import { seamHint } from "/app/lib/model.js";
 import { wKey } from "/app/lib/helpers.js";
 
@@ -22,12 +22,14 @@ let curSeq = null;                                // running job sequence
 let pending = null;                               // job to start once the slot frees
 let seqCounter = 0;                               // monotonic id, guards stale onDone
 
+/** Show job/model status in the kit status line (err → error styling). */
 export function setBadge(text, err) {
-  const b = $('#backend');
-  if (!b) return;
-  b.textContent = text;
-  b.classList.toggle('err', !!err);
+  if (!S.status) return;
+  if (err) S.status.error(text); else S.status.set(text);
 }
+
+/** True while an op runs or a job is queued; tests wait on !busy(). */
+export function busy() { return !!(inflight || curSeq || pending); }
 
 export function runSeq(label, steps, onStep, onAll) {
   if (!S.gan) return;

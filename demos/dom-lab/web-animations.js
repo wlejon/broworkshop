@@ -1,82 +1,72 @@
-// demos/dom-lab/web-animations.js
+// Web Animations: two infinite element.animate() loops (a floating orb, a
+// pulsing card) under one transport, with the primary Animation's state read
+// back every frame.
 
-export class WebAnimationsLab {
-    constructor(orbElement, cardElement, onTelemetry) {
-        this.orb = orbElement;
-        this.card = cardElement;
-        this.onTelemetry = onTelemetry;
+import { $ } from "/lib/kit/dom.js";
 
-        this.animations = [];
-        this.init();
-    }
+export const animState = { animations: [] };
 
-    init() {
-        // Orb floating & pulsing animation
-        const orbAnim = this.orb.animate([
-            { transform: 'translateY(0px) scale(1)', opacity: 0.9 },
-            { transform: 'translateY(-30px) scale(1.15)', opacity: 1.0, offset: 0.5 },
-            { transform: 'translateY(0px) scale(1)', opacity: 0.9 }
-        ], {
-            duration: 1800,
-            iterations: Infinity,
-            easing: 'ease-in-out',
-            id: 'orb-float'
-        });
+export function startAnimations() {
+    const orb = $('#anim-orb').animate([
+        { transform: 'translateY(0px) scale(1)', opacity: 0.9 },
+        { transform: 'translateY(-30px) scale(1.15)', opacity: 1.0, offset: 0.5 },
+        { transform: 'translateY(0px) scale(1)', opacity: 0.9 },
+    ], { duration: 1800, iterations: Infinity, easing: 'ease-in-out', id: 'orb-float' });
 
-        // Card glow & shift animation
-        const cardAnim = this.card.animate([
-            { transform: 'rotate(0deg) scale(1)', borderColor: 'rgba(88, 166, 255, 0.2)' },
-            { transform: 'rotate(2deg) scale(1.04)', borderColor: 'rgba(88, 166, 255, 0.8)', offset: 0.5 },
-            { transform: 'rotate(0deg) scale(1)', borderColor: 'rgba(88, 166, 255, 0.2)' }
-        ], {
-            duration: 2400,
-            iterations: Infinity,
-            easing: 'ease-in-out',
-            id: 'card-pulse'
-        });
+    const card = $('#anim-card').animate([
+        { transform: 'rotate(0deg) scale(1)', borderColor: 'rgba(88, 166, 255, 0.2)' },
+        { transform: 'rotate(2deg) scale(1.04)', borderColor: 'rgba(88, 166, 255, 0.8)', offset: 0.5 },
+        { transform: 'rotate(0deg) scale(1)', borderColor: 'rgba(88, 166, 255, 0.2)' },
+    ], { duration: 2400, iterations: Infinity, easing: 'ease-in-out', id: 'card-pulse' });
 
-        this.animations = [orbAnim, cardAnim];
-    }
+    animState.animations = [orb, card];
+}
 
-    play() {
-        for (const anim of this.animations) anim.play();
-    }
+const each = (fn) => { for (const a of animState.animations) fn(a); };
 
-    pause() {
-        for (const anim of this.animations) anim.pause();
-    }
+/** Play if anything is not running (paused, or idle after cancel); else pause. Returns running. */
+export function togglePlay() {
+    const running = animState.animations.every((a) => a.playState === 'running');
+    if (running) each((a) => a.pause());
+    else each((a) => a.play());
+    return !running;
+}
+export function reverse() { each((a) => a.reverse()); }
+export function cancel() { each((a) => a.cancel()); }
+export function setPlaybackRate(rate) {
+    const r = parseFloat(rate) || 1;
+    each((a) => { a.playbackRate = r; });
+}
 
-    togglePlay() {
-        const isPaused = this.animations.some(a => a.playState === 'paused');
-        if (isPaused) this.play();
-        else this.pause();
-        return !isPaused;
-    }
+export function telemetry() {
+    const a = animState.animations[0];
+    return {
+        playState: a ? a.playState : 'idle',
+        currentTime: a && a.currentTime !== null ? Math.round(a.currentTime) : null,
+        playbackRate: a ? a.playbackRate : 1,
+        count: document.getAnimations().length,
+    };
+}
 
-    reverse() {
-        for (const anim of this.animations) anim.reverse();
-    }
+export function initWebAnimations() {
+    startAnimations();
+    const btn = $('#anim-play');
+    const label = () => {
+        const running = animState.animations.every((a) => a.playState === 'running');
+        btn.textContent = running ? 'Pause' : 'Play';
+    };
+    btn.addEventListener('click', () => { togglePlay(); label(); });
+    $('#anim-reverse').addEventListener('click', () => { reverse(); label(); });
+    $('#anim-cancel').addEventListener('click', () => { cancel(); label(); });
+    $('#anim-speed').addEventListener('change', (e) => setPlaybackRate(e.target.value));
+    return label;
+}
 
-    cancel() {
-        for (const anim of this.animations) anim.cancel();
-    }
-
-    setPlaybackRate(rate) {
-        const r = parseFloat(rate) || 1.0;
-        for (const anim of this.animations) anim.playbackRate = r;
-    }
-
-    getTelemetry() {
-        const primary = this.animations[0];
-        const count = (typeof document.getAnimations === 'function')
-            ? document.getAnimations().length
-            : this.animations.length;
-
-        return {
-            playState: primary ? primary.playState : 'idle',
-            currentTime: primary && primary.currentTime !== null ? Math.round(primary.currentTime) : 0,
-            playbackRate: primary ? primary.playbackRate : 1.0,
-            count: count
-        };
-    }
+/** Per-frame readout. */
+export function renderTelemetry() {
+    const t = telemetry();
+    $('#anim-state').textContent = t.playState;
+    $('#anim-time').textContent = t.currentTime === null ? '—' : t.currentTime + ' ms';
+    $('#anim-rate').textContent = t.playbackRate.toFixed(1) + '×';
+    $('#anim-count').textContent = String(t.count);
 }

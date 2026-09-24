@@ -1,10 +1,18 @@
-// ═══ checkpoint load + adapting to the generator's shape ══════════════════════
+// ═══ checkpoint discovery + load, adapting the UI to the generator's shape ═══
 
 import { $, S, wCache } from "/app/lib/state.js";
-import { _os, recall, pExists, remember } from "/app/lib/helpers.js";
+import { recall, pExists, remember } from "/app/lib/helpers.js";
 import { cancelAll, setBadge } from "/app/lib/engine.js";
 import { syncMixLabel } from "/app/lib/mix.js";
-import { syncCutoffLabel, refreshSeam } from "/app/app.js";
+import { syncCutoffLabel, refreshSeam } from "/app/lib/seams.js";
+import { findWeights, missingWeights } from "/lib/kit/weights.js";
+
+/** Converted checkpoints brovisionml/scripts/download-stylegan3.sh produces, in preference order. */
+export const CHECKPOINTS = [
+  'brovisionml/weights/stylegan3-r-ffhqu-256',
+  'brovisionml/weights/stylegan3-t-ffhqu-256',
+  'brovisionml/weights/stylegan3-r-afhqv2-512',
+];
 
 // Shared generation params (the param bar), read live by every seam.
 export function curPsi()    { return parseFloat($('#psi').value); }
@@ -18,51 +26,58 @@ export function seamHint() {
        :                       'click a tile to send it to Sample';
 }
 
-// Probe a sensible default checkpoint for this machine on first run.
-export function defaultModelDir(htmlDefault) {
-  let home = ''; try { home = _os.homedir(); } catch (e) {}
-  const cands = [
-    recall('sg3.modelDir'),
-    htmlDefault,
-    home && home + '/projects/brovisionml/weights/stylegan3-r-ffhqu-256',
-  ].filter(Boolean);
-  for (const c of cands) if (pExists(c + '/model.safetensors')) return c;
-  return recall('sg3.modelDir') || htmlDefault;
+/** The checkpoint to open at boot: the last one used if still present, else the first found. */
+export function defaultModelDir() {
+  const last = recall('sg3.modelDir');
+  if (last && pExists(last + '/model.safetensors')) return last;
+  return findWeights(CHECKPOINTS, { probe: 'model.safetensors' }) || '';
 }
 
-// Load a checkpoint asynchronously; adapt the UI to its shape once ready.
+// Released checkpoint names carry the config family and resolution
+// (stylegan3-{r,t}-<data>-<res>). The binding needs both to match, so trust
+// the directory name when it says so; otherwise honour the dropdowns.
+function syncConfigFromName(dir) {
+  const name = dir.replace(/^.*[\\\/]/, '');
+  const v = /stylegan3-([rt])-/i.exec(name);
+  if (v) $('#variant').value = v[1].toLowerCase();
+  const res = /-(256|512|1024)$/.exec(name);
+  if (res) $('#resolution').value = res[1];
+}
+
+let loadSeq = 0;                                  // a newer request supersedes an older one
+
+// Load a checkpoint and adapt the UI to its shape. loadStyleGAN3 is
+// synchronous (docs/vision-api.js: it returns the generator and takes no
+// onReady), so the load runs one tick later, after the status has painted,
+// and only if no newer request arrived in between.
 export function loadModel(dir) {
   dir = (dir || '').replace(/[\\\/]+$/, '');
+  const seq = ++loadSeq;
   cancelAll();
   S.gan = null; S.lastSample = null; S.walkWA = S.walkWB = S.mixWA = S.mixWB = null;
   S.pinnedA = S.pinnedB = null; S.invTargetData = null; S.invW = null; S.invCurve = [];
   wCache.clear();
+  if (!dir) { setBadge(missingWeights('StyleGAN3 checkpoint', CHECKPOINTS), true); return; }
   if (!pExists(dir + '/model.safetensors')) { setBadge('no model.safetensors in ' + dir, true); return; }
+  syncConfigFromName(dir);
   const res = parseInt($('#resolution').value, 10) || 256;
-  // The config family is part of the released checkpoint name (stylegan3-{r,t}-…),
-  // so trust the directory when it says so; otherwise honor the dropdown.
-  const vSel = $('#variant');
-  if (/stylegan3-t-/i.test(dir)) vSel.value = 't';
-  else if (/stylegan3-r-/i.test(dir)) vSel.value = 'r';
-  const variant = vSel.value || 'r';
+  const variant = $('#variant').value || 'r';
   const device = $('#device').value || 'cuda';
   $('#model-meta').textContent = '';
-  setBadge('loading checkpoint…');
-  try {
-    bro.vision.loadStyleGAN3(dir, {
-      resolution: res, variant: variant, device: device,
-      onReady: function (g) {
-        S.gan = g; remember('sg3.modelDir', dir);
-        S.META = { resolution: g.resolution, variant: g.variant, zDim: g.zDim, numWs: g.numWs, wDim: g.wDim, device: g.device };
-        $('#model-meta').textContent =
-          g.resolution + '² · ' + (g.variant === 't' ? 'config-T' : 'config-R') + ' · ' +
-          g.device + ' · z' + g.zDim + ' · w ' + g.numWs + '×' + g.wDim;
-        onModelReady();
-        setBadge('ready · ' + seamHint());
-      },
-      onError: function (m) { setBadge('load failed: ' + m, true); },
-    });
-  } catch (e) { setBadge('load failed: ' + e.message, true); }
+  setBadge('loading ' + dir.replace(/^.*[\\\/]/, '') + '…');
+  setTimeout(function () {
+    if (seq !== loadSeq) return;                  // superseded before it started
+    let g;
+    try { g = bro.vision.loadStyleGAN3(dir, { resolution: res, variant: variant, device: device }); }
+    catch (e) { setBadge('load failed: ' + e.message, true); return; }
+    S.gan = g; remember('sg3.modelDir', dir);
+    S.META = { resolution: g.resolution, variant: g.variant, zDim: g.zDim, numWs: g.numWs, wDim: g.wDim, device: g.device };
+    $('#model-meta').textContent =
+      g.resolution + '² · ' + (g.variant === 't' ? 'config-T' : 'config-R') + ' · ' +
+      g.device + ' · z' + g.zDim + ' · w ' + g.numWs + '×' + g.wDim;
+    onModelReady();
+    setBadge('ready · ' + seamHint());
+  }, 30);
 }
 
 // Once the generator's numWs is known, size the row-indexed controls (the

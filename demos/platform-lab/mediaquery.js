@@ -15,11 +15,12 @@
 // claim that they agree. The smoke test asserts the agreement numerically.
 //
 // The second thing worth showing is the listener surface. bro honours the
-// {capture, once, signal} options bag — which is NOT what docs/matchmedia-api.js
-// says (it documents them as ignored; commit 3fe38731 added them and the doc
-// was not updated). Since options are real, the panel exercises them: a plain
+// {capture, once, signal} options bag (docs/matchmedia-api.js only says
+// "options object or capture boolean"), so the panel exercises it: a plain
 // listener, a once listener, and a signal-abortable listener all watch the same
 // query, and their differing fire counts after N resizes is the demonstration.
+
+import { setText, bind, lineLog } from "/app/util.js";
 
 export const mqState = {
     // Live evaluation table
@@ -60,15 +61,7 @@ const QUERIES = [
     { query: '(min-width: 3000px), (orientation: landscape)', probeId: null },
 ];
 
-function logLine(text) {
-    mqState.log.push(text);
-    if (mqState.log.length > 40) mqState.log.shift();
-    const el = document.getElementById('mqLog');
-    if (el) {
-        el.textContent = mqState.log.slice(-12).join('\n');
-        el.scrollTop = el.scrollHeight;
-    }
-}
+const logLine = lineLog('mqLog', mqState.log, 40, 12);
 
 // ── The evaluation table ────────────────────────────────────────────────────
 
@@ -154,7 +147,9 @@ export function evaluateAll() {
 
 // Deliberately chosen so a resize between the two demo sizes flips it.
 export const LISTENER_QUERY = '(min-width: 900px)';
-export let listenerMql = null;
+let listenerMql = null;
+/** The list the experiment listeners sit on (a function: a `let` export is a snapshot to test drivers). */
+export function currentListenerMql() { return listenerMql; }
 
 export function installListeners() {
     listenerMql = window.matchMedia(LISTENER_QUERY);
@@ -302,11 +297,6 @@ export function tickMediaQueries() {
     renderListenerCounts();
 }
 
-function setText(id, text) {
-    const el = document.getElementById(id);
-    if (el && el.textContent !== text) el.textContent = text;
-}
-
 export function initMediaQueries() {
     buildQueryTable();
     installListeners();
@@ -330,11 +320,6 @@ export function initMediaQueries() {
 function resizeViewport(w, h) {
     if (bro.window && bro.window.setSize) bro.window.setSize(w, h);
     logLine(`requested viewport ${w}x${h}`);
-}
-
-function bind(id, fn) {
-    const el = document.getElementById(id);
-    if (el) el.addEventListener('click', fn);
 }
 
 export { QUERIES };
