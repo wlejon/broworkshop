@@ -354,8 +354,6 @@ test('transfer: sender DETACHED, child checksum matches', () => {
     flush();
 });
 
-// ENGINE-ISSUES.md: a typed-array view in the payload with its buffer in the
-// transfer list throws DataCloneError (valid on the web).
 test('transfer: a view whose buffer is in the transfer list arrives intact', () => {
     const acks = transferState.acks;
     const v = new Uint8Array(32);
@@ -402,8 +400,7 @@ test('per-child limits and flags read back from the child realm', () => {
     eq([xr.winState.min[0], xr.winState.max[0]], [0, 0], 'cleared');
 });
 
-// ENGINE-ISSUES.md: a secondary realm's bro.window drives the MAIN window, so
-// the per-child limits above land on the host. This is the observable symptom.
+// A child realm's bro.window drives its own window, not the host's.
 test('per-child limits leave the host window alone', () => {
     bro.window.setMinSize(0, 0);
     winctl(xr, 'minSize', { width: 280, height: 240 });
@@ -477,8 +474,6 @@ test('the pinned card takes its size from its own manifest', () => {
     check(pinned.reported !== null, 're-poll');
 });
 
-// ENGINE-ISSUES.md: the card's own bro.window reads the MAIN window, so these
-// read the host's flags and limits instead of the manifest's.
 test("the pinned card's manifest flags and limits reached its window", () => {
     const r = pinned.reported, m = pinned.manifest;
     eq([r.borderless, r.alwaysOnTop], [true, true], 'borderless + alwaysOnTop');

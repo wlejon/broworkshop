@@ -19,20 +19,12 @@ let scene = null;
 const bodies = new Map();       // remote id → { node, color }
 let nextColor = 0;
 
-/**
- * The scene context on #view, the arena built into it. Idempotent. With
- * `optional`, a missing scene context returns null instead of throwing: the
- * title backdrop is decoration, and bro-server evaluates this page too, with
- * no renderer (ENGINE-ISSUES.md), where a throw here takes the server down.
- */
-export function ensureWorld(optional) {
+/** The scene context on #view, the arena built into it. Idempotent. */
+export function ensureWorld() {
     if (scene) return scene;
     const view = document.getElementById("view");
     const ctx = view && view.getContext("scene");
-    if (!ctx) {
-        if (optional) return null;
-        throw new Error(view ? "fps: scene context unavailable" : "fps: #view canvas missing");
-    }
+    if (!ctx) throw new Error(view ? "fps: scene context unavailable" : "fps: #view canvas missing");
     canvas = view;
     scene = ctx;
     const resize = () => {

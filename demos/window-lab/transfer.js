@@ -12,9 +12,8 @@
 //   - the child checksums what arrived and posts the number back
 // Same checksum, empty sender: the bytes moved rather than duplicated.
 //
-// The payload carries the ArrayBuffer itself. Carrying a typed-array VIEW with
-// its buffer in the list (`postMessage({ v }, [v.buffer])`, fine on the web)
-// throws DataCloneError here: see ENGINE-ISSUES.md.
+// The payload carries the typed-array view with its buffer in the list
+// (`postMessage({ v }, [v.buffer])`): the view arrives over the moved bytes.
 
 import { logView, readout } from "/lib/kit/index.js";
 import { children, post, logSys, observeChildMessages } from "/app/windows.js";
@@ -57,8 +56,8 @@ export function sendBlob(rec, bytes, useTransfer) {
     const tag = ++transferState.sends;
     const before = buf.byteLength;
 
-    if (useTransfer) post(rec, { type: 'blob', tag, buf }, [buf]);
-    else post(rec, { type: 'blob', tag, buf });
+    if (useTransfer) post(rec, { type: 'blob', tag, buf: u8 }, [buf]);
+    else post(rec, { type: 'blob', tag, buf: u8 });
     const after = buf.byteLength;
 
     Object.assign(transferState, {

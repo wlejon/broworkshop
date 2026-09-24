@@ -211,7 +211,7 @@ PASS test demos/vlm-lab/tests/test_smoke.js
 PASS smoke demos/waapi-lab 
 FAIL test demos/waapi-lab/tests/test_smoke.js rc=1: evalScriptFileJit: uncaught Error: 1 failed: arena: the CSS @keyframes lane moves with the other two
 PASS smoke demos/window-lab 
-FAIL test demos/window-lab/tests/test_smoke.js rc=1: evalScriptFileJit: uncaught Error: 3 failed: transfer: a view whose buffer is in the transfer list arrives intact, per-child limits leave the host window alone, the pinned card's m
+PASS test demos/window-lab/tests/test_smoke.js
 PASS smoke games/2048 
 PASS test games/2048/tests/test_main.js 
 PASS smoke games/arcade-template 
@@ -298,7 +298,7 @@ PASS smoke launcher
 PASS test launcher/tests/test_launcher.js 
 PASS smoke lib-tests 
 PASS test lib-tests/test_history.js 
-FAIL test lib-tests/test_physics.js rc=1: evalScriptFileJit: uncaught Error: 6 physics tests failed
+PASS test lib-tests/test_physics.js
 PASS test lib-tests/test_polygon.js 
 PASS test lib-tests/test_project.js 
 FAIL test lib-tests/test_scene_anim.js rc=1: evalScriptFileJit: uncaught Error: 4 tests failed

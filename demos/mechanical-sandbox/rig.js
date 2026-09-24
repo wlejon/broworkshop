@@ -56,20 +56,18 @@ export function motorJoint(spec, gain, maxTorque, speed) {
     return m;
 }
 
-// Machine joints hang off a static FRAME body as body1, with the moving part
-// as body2. Jolt measures a constraint as body2 relative to body1, so this way
-// round slider limits and motor targets read as the part's own travel and
-// spin, and gear / rackAndPinion drift correction pushes the right way. The
-// `body2: -1` world form gets all three backwards (ENGINE-ISSUES.md).
+// Machine joints anchor the moving part to the world (`body2: -1`): slider
+// limits and motor targets read as the part's own travel and spin, which is
+// what gear / rackAndPinion drift correction reads too.
 
-/** A hinge carrying `tag` on the static `frame` about `axis` through `at`. */
-export function hinge(frame, tag, at, axis, extra) {
-    return joint({ type: 'hinge', body1: frame, body2: tag, point1: at, point2: at, axis, ...extra });
+/** A hinge carrying `tag` on the world about `axis` through `at`. */
+export function hinge(tag, at, axis, extra) {
+    return joint({ type: 'hinge', body1: tag, point1: at, point2: at, axis, ...extra });
 }
 
-/** A slider letting `tag` travel lo..hi along `axis` from where it stands, on `frame`. */
-export function slider(frame, tag, axis, lo, hi) {
-    return joint({ type: 'slider', body1: frame, body2: tag, axis, limitMin: lo, limitMax: hi });
+/** A slider letting `tag` travel lo..hi along `axis` from where it stands. */
+export function slider(tag, axis, lo, hi) {
+    return joint({ type: 'slider', body1: tag, axis, limitMin: lo, limitMax: hi });
 }
 
 /** A static body with its visual (kit addStatic), destroyed with the machine. */

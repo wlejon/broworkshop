@@ -27,7 +27,7 @@ let pending = null;                       // newest frame not yet drawn
 
 // ---- the worker --------------------------------------------------------------
 
-const rpc = workerClient('sim/worker.js', { type: 'module' });
+const rpc = workerClient(new URL('./sim/worker.js', import.meta.url), { type: 'module' });
 
 rpc.on('frame', (msg) => {
     if (pending) { recycle(pending); state.dropped++; }      // superseded before it was drawn

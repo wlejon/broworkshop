@@ -110,7 +110,7 @@ export const game = {
                 name: "#name-input", address: "#address-input", error: "#error-msg",
                 defaults: { address: DEFAULT_ADDRESS },
             });
-            ensureWorld(true);
+            ensureWorld();
         }
         if (name === "playing") {
             setCrosshair(session.connected);

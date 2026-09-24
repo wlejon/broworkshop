@@ -70,13 +70,13 @@ function attached(tag, local) {
 // --- 1. clockwork pendulum ------------------------------------------------------
 
 function pendulum(s, st) {
-    const frame = fixture({ shape: 'box', halfExtents: { x: 0.4, y: 4.2, z: 0.3 }, position: { x: 0, y: 4.2, z: -0.8 } }, IRON);
+    fixture({ shape: 'box', halfExtents: { x: 0.4, y: 4.2, z: 0.3 }, position: { x: 0, y: 4.2, z: -0.8 } }, IRON);
     prop(slab(s, 2.0, 0.2, 0.4, 0, 8.2, 0.2, '#334155'));           // top beam over the bob
 
     const wheelP = { x: 0, y: 5.5, z: -0.3 };
     const wheel = body({ shape: 'cylinder', radius: 1.2, halfHeight: 0.15, position: wheelP, rotation: AXLE_Z,
         mass: 5, gravityFactor: 0 }, { mesh: gearMesh(1.2, 0.15, 14, '#d4af37') });
-    motorJoint({ type: 'hinge', body1: frame.tag, body2: wheel.tag, point1: wheelP, point2: wheelP, axis: Z }, 2.0, 200, st.motorSpeed);
+    motorJoint({ type: 'hinge', body1: wheel.tag, point1: wheelP, point2: wheelP, axis: Z }, 2.0, 200, st.motorSpeed);
 
     // A 5.2 m arm swinging in the z = 0.6 plane, released 2.2 m out.
     const pivot = { x: 0, y: 7.8, z: 0.6 }, arm = 5.2, out = 2.2;
@@ -94,7 +94,7 @@ function pendulum(s, st) {
 function gearbox(s, st) {
     const y = 3.5;
     // The backplate every axle and the crate guide are mounted on.
-    const frame = fixture({ shape: 'box', halfExtents: { x: 3.4, y: 1.6, z: 0.1 }, position: { x: -1.0, y, z: -0.7 } }, IRON);
+    fixture({ shape: 'box', halfExtents: { x: 3.4, y: 1.6, z: 0.1 }, position: { x: -1.0, y, z: -0.7 } }, IRON);
     // Collision cylinders sit inside the pitch circle so meshing gears do not
     // rub; the gear constraints are what couples them.
     const wheel = (x, r, halfT, mass, mesh) => {
@@ -106,8 +106,8 @@ function gearbox(s, st) {
     const g2 = wheel(-1.2, 1.2, 0.16, 30, gearMesh(1.2, 0.16, 15, '#d4af37'));
     const g3 = wheel(0.9, 0.9, 0.22, 25, pulleyMesh(0.9, 0.22, '#4facfe'));
     // Negative gain: a positive motor speed hoists (see the rack ratio below).
-    const motor = motorJoint({ type: 'hinge', body1: frame.tag, body2: g1.tag, point1: g1.p, point2: g1.p, axis: Z }, -0.6, 5000, st.motorSpeed);
-    const h1 = motor.handle, h2 = hinge(frame.tag, g2.tag, g2.p, Z), h3 = hinge(frame.tag, g3.tag, g3.p, Z);
+    const motor = motorJoint({ type: 'hinge', body1: g1.tag, point1: g1.p, point2: g1.p, axis: Z }, -0.6, 5000, st.motorSpeed);
+    const h1 = motor.handle, h2 = hinge(g2.tag, g2.p, Z), h3 = hinge(g3.tag, g3.p, Z);
     // A gear couples two EXISTING hinges; ratio = r2 / r1 (teeth2 / teeth1).
     joint({ type: 'gear', body1: g1.tag, body2: g2.tag, hingeAxis1: Z, hingeAxis2: Z, ratio: g2.r / g1.r, constraint1: h1, constraint2: h2 });
     joint({ type: 'gear', body1: g2.tag, body2: g3.tag, hingeAxis1: Z, hingeAxis2: Z, ratio: g3.r / g2.r, constraint1: h2, constraint2: h3 });
@@ -118,7 +118,7 @@ function gearbox(s, st) {
     const crateP = { x: 2.5, y: 1.3, z: 0 }, lo = 0, hi = 4.1;       // starts at the bottom
     const crate = body({ shape: 'box', halfExtents: { x: 0.5, y: 0.5, z: 0.5 }, position: crateP, mass: 35, linearDamping: 0.1 },
         { color: '#ff8008', roughness: 0.5 });
-    const guide = slider(frame.tag, crate.tag, Y, lo, hi);
+    const guide = slider(crate.tag, Y, lo, hi);
     joint({ type: 'rackAndPinion', body1: g3.tag, body2: crate.tag, hingeAxis1: Z, sliderAxis: Y,
         ratio: -1 / g3.r, constraint1: h3, constraint2: guide });
     for (const dx of [-0.62, 0.62]) prop(slab(s, 0.06, 3.0, 0.06, crateP.x + dx, 3.2, 0, '#475569'));
@@ -161,11 +161,11 @@ function gearbox(s, st) {
 
 function piston(s, st) {
     const O = { x: 0, y: 2.2, z: 0 }, R = 1.0, L = 3.2, zr = 0.34;   // crank centre, throw, rod length, rod plane
-    const base = fixture({ shape: 'box', halfExtents: { x: 2.0, y: 0.4, z: 1.2 }, position: { x: 0, y: 0.4, z: 0 } }, IRON);
+    fixture({ shape: 'box', halfExtents: { x: 2.0, y: 0.4, z: 1.2 }, position: { x: 0, y: 0.4, z: 0 } }, IRON);
 
     const crank = body({ shape: 'cylinder', radius: 1.3, halfHeight: 0.14, position: O, rotation: AXLE_Z, mass: 40, gravityFactor: 0 },
         { mesh: crankMesh(1.3, 0.14, R, zr, '#c59b27') });
-    motorJoint({ type: 'hinge', body1: base.tag, body2: crank.tag, point1: O, point2: O, axis: Z }, 4.0, 8000, st.motorSpeed);
+    motorJoint({ type: 'hinge', body1: crank.tag, point1: O, point2: O, axis: Z }, 4.0, 8000, st.motorSpeed);
 
     // Assembled at top dead centre: pin straight above the crank centre, rod
     // vertical, piston on top. Each joint is a world-space pivot.
@@ -177,7 +177,7 @@ function piston(s, st) {
         { color: '#cbd5e1', roughness: 0.2, metallic: 0.85 });
     joint({ type: 'hinge', body1: crank.tag, body2: rod.tag, point1: pin, point2: pin, axis: Z });
     joint({ type: 'hinge', body1: rod.tag, body2: head.tag, point1: wrist, point2: wrist, axis: Z });
-    slider(base.tag, head.tag, Y, -2 * R - 0.1, 0.1);
+    slider(head.tag, Y, -2 * R - 0.1, 0.1);
 
     // The bore: two guide rails and a head casting either side of the stroke
     // (an opaque sleeve would hide the piston it is there to show).

@@ -56,11 +56,11 @@ export function createTraining(cue, { ckptDir } = {}) {
         flyerCueCooldown: 0,
     };
 
-    const trainer = new Worker("ai/trainer_worker.js", { type: "module" });
+    const trainer = new Worker(new URL("./trainer_worker.js", import.meta.url), { type: "module" });
     trainer.onmessage = (e) => onTrainer(e.data);
     trainer.postMessage({ type: "init", ckptDir });
     const mcts = MCTS_DEPTHS.map((iterations, i) => {
-        const w = new Worker("ai/mcts_worker.js", { type: "module" });
+        const w = new Worker(new URL("./mcts_worker.js", import.meta.url), { type: "module" });
         w.onmessage = (e) => onMcts(e.data, i);
         w.postMessage({ type: "init", workerId: i + 1, iterations, rolloutDepth: MCTS_ROLLOUT[i] });
         return w;

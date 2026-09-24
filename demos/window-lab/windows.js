@@ -115,7 +115,8 @@ export function closeAll() {
 // --- messaging ---------------------------------------------------------------
 
 function describe(msg) {
-    const bits = Object.keys(msg).filter((k) => k !== 'type').slice(0, 3).map((k) => `${k}=${msg[k]}`);
+    const show = (v) => (ArrayBuffer.isView(v) ? `${v.constructor.name}(${v.length})` : `${v}`);
+    const bits = Object.keys(msg).filter((k) => k !== 'type').slice(0, 3).map((k) => `${k}=${show(msg[k])}`);
     return msg.type + (bits.length ? ' ' + bits.join(' ') : '');
 }
 

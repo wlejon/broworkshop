@@ -140,57 +140,6 @@ With a single clip on the base track, `blendState().pos` is an empty array,
 not `undefined` as docs/animation-api.js implies. Test for `pos && pos.length`.
 Repro: demos/anim-lab, `selectClip('idle')`, `player.blendState().pos` → `[]`.
 
-### Physics
-
-#### World-anchored constraints (`body2: -1`) are mirrored: limits, motors, gear/rack drift correction (2026-09-24)
-`PhysicsWorld::createConstraint` passes the moving body as Jolt body1 and the
-world as body2; Jolt measures body2 relative to body1, so for the documented
-`body2: -1` form everything is measured backwards:
-- a slider's `limitMin/limitMax` apply to the negated travel;
-- a hinge motor's `target` spins the body the other way;
-- `gear` and `rackAndPinion` read those hinge angles / slider positions for
-  their drift correction, which then pushes the wrong way (a motor-driven
-  rack jitters ±0.4 m frame to frame at a steady 0.48 m/s).
-Symmetric limits hide the first two. Likely fix: hand Jolt
-`Body::sFixedToWorld` as body1 and the body as body2 when `body2` is -1.
-Repro: world gravity (0, +9.81, 0), a crate on `{ type: 'slider', body1: crate,
-axis: {x:0,y:1,z:0}, limitMin: -0.9, limitMax: 3.2 }`: it stops at y = 0.9,
-not 3.2.
-Affects: demos/mechanical-sandbox (rig.js `hinge`/`slider` anchor to a static
-frame body as `body1` instead); demos/physics-playground's rack (±2.2 limits).
-
-#### `Physics.createBody` ignores `dofs` (2026-09-24)
-`dofs` is in docs/physics-api.js `PhysicsBodyOptions` and
-`BodyOptions::dofs` feeds `mAllowedDOFs`, but the bronze `readBodyOptions`
-(`native_physics_internal.h`) never reads it, so `dofs: '2d'` (Plane2D) and
-the `'tx,ty,rz'` token form are silently ignored. The QuickJS binding parsed
-`'2d' | 'plane2d' | 'all' | 'tx,ty,...'`.
-Repro: a sphere with `dofs: '2d'` given velocity (1, 0, 5) drifts to
-z ≈ 4.6 in 1 s. Pinned by lib-tests/test_physics.js "2D DOF lock".
-Affects: games/pegbounce (bodies declared `dofs: "2d"`; they stay at z = 0
-only because every contact is in-plane).
-
-#### `shape: 'chain'` never reads its `points` / `depth`, so creation fails (2026-09-24)
-The binding accepts `shape: 'chain'` but reads `points` only for
-`convexHull` and never reads `depth`, so `chainPoints` stays empty and
-`createBody({ shape: 'chain', points: [-10, 0, 10, 0], depth: 4 })` returns -1.
-The engine side (`physics_world.cpp` `ShapeChain`) is intact; the QuickJS
-binding filled `chainPoints` from flat `[x0, y0, x1, y1, ...]`.
-Repro and pinned tests: lib-tests/test_physics.js, the three "chain" cases and
-both "wheel" cases (their chain ground is never created).
-
-#### Wheel constraint: `hertz` / `dampingRatio` do nothing without translation limits (2026-09-24)
-`type: 'wheel'` is a SixDOF whose suspension spring is set on
-`mLimitsSpringSettings[TranslationY]`; with no `lowerTranslation` /
-`upperTranslation` the axis is `MakeFreeAxis`, which has no limits for that
-spring to act on, so the suspension collapses. With limits `0 / 0` the spring
-works (Box2D-style wheel joint behaviour).
-Repro: box floor, chassis box at y 5, sphere wheel at y 4, `{ type: 'wheel',
-body1: chassis, body2: wheel, point1: {x:0,y:4,z:0}, hertz: 4, dampingRatio: 0.9 }`:
-after 4 s the chassis lies on the floor (y 0.30) beside the wheel (y 0.50);
-add `lowerTranslation: 0, upperTranslation: 0` and it rides at y ≈ 1.4.
-No app uses the wheel constraint (vehicles use `createVehicle`).
-
 ### Layout and CSS
 
 #### Column flex container with a percentage width stretches children to the wrong width (2026-09-24)
@@ -461,33 +410,19 @@ Affects: demos/platform-lab's smoke test logs it.
 
 ### Windows, workers, messaging
 
-#### A secondary window's `bro.window` drives the MAIN window (2026-09-24)
-`getWindow()` in `src/bronze_host/native_window.cpp` returns `eng->window()`,
-so every `bro.window.*` call from the realm of a `window.open(dir)` child
-reads and writes the host window. Manifest defaults are applied at creation
-(`applyChildManifestDefaults`) but no child can read them back.
-Repro: `bro-headless demos/window-lab demos/window-lab/tests/test_smoke.js`:
-"per-child limits leave the host window alone" (host min size becomes
-280x240) and "the pinned card's manifest flags and limits reached its
-window" (borderless/alwaysOnTop read false) fail.
+#### Worker `postMessage` does not keep buffer identity (2026-09-24)
+Two views of one ArrayBuffer posted to a Worker arrive over two separate
+buffers (a write through one is not seen by the other). The window path
+(`structuredClone`) keeps identity, as the web does.
+Repro: `const b = new ArrayBuffer(8); w.postMessage({ a: new Uint8Array(b), c: new Uint8Array(b) })`;
+in the worker `e.data.a.buffer === e.data.c.buffer` is false.
 
-#### `postMessage({ v: view }, [view.buffer])` throws DataCloneError (2026-09-24)
-Transferring a buffer while a TypedArray view of it is in the payload is valid
-on the web; bro detaches first and then fails to clone the view: `Cannot clone
-TypedArray with detached buffer`. A transferred buffer with no view in the
-payload works.
-Repro: `const a = new Uint8Array(1024); w.postMessage({ v: a }, [a.buffer])` to
-any child window; window-lab's test "transfer: a view whose buffer is in the
-transfer list arrives intact" fails.
-
-#### `new Worker(new URL(...))` throws (2026-09-24)
-`new Worker(new URL('./w.js', import.meta.url), { type: 'module' })`, the
-standard module-worker form, throws `new Worker(scriptPath) requires a script
-path` (`host_worker.cpp` accepts only a string, resolved against the app
-dir). `import.meta.url` itself is now right (it names main.js). A string path
-works, and module workers load `/lib/...` and relative imports.
-Repro: a page whose entry module runs that line.
-Affects: templates/worker-sim and games/stompworld use the string form.
+#### Page module scripts are compiled as `index.html` (2026-09-24)
+bro joins a page's scripts into one program compiled under `index.html`'s
+name (`engine_init.cpp` `initAppRealm`), so `<script type="module"
+src="sub/main.js">` gets `import.meta.url` = index.html and its relative
+imports resolve from the app root (`import "./lib.js"` fails). An entry at the
+app root hides it; modules imported from the entry get their own URL.
 
 ### Media
 
@@ -628,19 +563,6 @@ does not finish a single ~41k-line module. The bundles were build output and
 never tracked; rebuild with `npm i && node build.mjs` in `ai/pi-agent/bundler/`
 from the commit before the kit rebuild.
 
-### bro-server
-
-#### bro-server runs the app's page scripts, and a page error fails the server script (2026-09-24)
-`bro-server <app> <app>/server.js` loads the manifest and evaluates
-index.html's `<script>`s before the server script, with no renderer. If a page
-script throws, the server script still runs to completion (fps even binds its
-port) and then bro-server reports `failed to evaluate script '.../server.js'`.
-Repro: an app whose index.html script logs and then throws, and a
-`server.js` that logs: both logs appear, then the "failed to evaluate" error.
-Expected: no page scripts under bro-server (or at least not charged to the
-server script). Affects: games/fps (tolerates a missing scene context at boot);
-any app with a server and a page that assumes a renderer.
-
 ### Game AI
 
 #### bro.ai.game has no square-grid flow field (2026-09-24)
@@ -681,4 +603,11 @@ any app with a server and a page that assumes a renderer.
 - `createPhysicsNode({ body: tag })` binds the body again — bro 1d3b8445; verified 2026-09-24 (physics-playground and character-lab `tests/test_physics_node.js` pass).
 - Physics `step()` no longer discards unread contact events (they accumulate until `getContacts()`) — bro 8abffa5a; verified 2026-09-24 (an `added` and a `removed` from two sub-steps both arrive). games/pegbounce can drop its per-sub-step drain.
 - `ReflectionProbe.intensity` is readable and settable, including via `createReflectionProbe({ intensity })` — bro 5d3cedf8; verified 2026-09-24. demos/render-lab's probe Intensity slider works.
-- `import.meta.url` in a page's entry module names that module, not index.html — verified 2026-09-24 (the `new Worker(new URL(...))` half is still open above).
+- `import.meta.url` in a page's entry module names that module, not index.html — verified 2026-09-24.
+- World-anchored constraints (`body2: -1`) measure the right way (limits, motors, gear/rack drift) — bro 747a696a; verified 2026-09-24. mechanical-sandbox anchors joints to the world.
+- `Physics.createBody` reads `dofs`, and `shape: 'chain'` reads `points` / `depth` — bro ad70148b; verified 2026-09-24 (lib-tests/test_physics.js passes).
+- Wheel constraint `hertz` / `dampingRatio` suspend without translation limits — bro bf94f090; verified 2026-09-24. The frequency applies to the joint's effective mass (as in Jolt/Box2D), so a heavy chassis on light wheels sags more than `hertz` alone suggests.
+- A secondary window's `bro.window` acts on its own window — bro a97ca6d4; verified 2026-09-24 (window-lab test_smoke passes).
+- `postMessage({ v: view }, [view.buffer])` clones then detaches — brokit efcb977, bro 04729bdd; verified 2026-09-24. window-lab sends the view transferred.
+- `new Worker(new URL(...), { type: 'module' })` works — bro 06899506; verified 2026-09-24. worker-sim and stompworld use it.
+- bro-server no longer runs the page's scripts (with no script named it runs `server.js`) — bro 80c8ec0f; verified 2026-09-24. games/fps dropped its missing-scene tolerance.

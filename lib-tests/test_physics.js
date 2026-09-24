@@ -1,10 +1,6 @@
 // Tests for the extended Physics binding.
 //
 // Run (from the repo root): bro-headless lib-tests lib-tests/test_physics.js
-//
-// Known engine failures (ENGINE-ISSUES.md, physics): the bronze binding
-// ignores `dofs` and the chain shape's `points`/`depth`, so the Plane2D,
-// chain and wheel (chain-ground) cases fail until those are bound again.
 
 'use strict';
 
@@ -610,33 +606,40 @@ t('wheel: motor drives chassis along the chain', function() {
         friction: 1.0,
     });
     truthy(ground > 0, 'chain ground tag valid');
+    // A two-wheeled cart: one wheel under a chassis just tips it over.
     var chassis = Physics.createBody({
         shape: 'box',
         position: { x: 0, y: 5, z: 0 },
         halfExtents: { x: 1.0, y: 0.3, z: 1.0 },
+        mass: 20,
         dofs: '2d',
         friction: 1.0,
     });
-    var wheel = Physics.createBody({
-        shape: 'sphere', radius: 0.5,
-        position: { x: 0, y: 4, z: 0 },
-        dofs: '2d',
-        friction: 1.0,
+    var ws = [];
+    [-0.8, 0.8].forEach(function(wx) {
+        var wheel = Physics.createBody({
+            shape: 'sphere', radius: 0.5, mass: 5,
+            position: { x: wx, y: 4, z: 0 },
+            dofs: '2d',
+            friction: 1.0,
+        });
+        ws.push(Physics.createConstraint({
+            type: 'wheel',
+            body1: chassis, body2: wheel,
+            point1: { x: wx, y: 4, z: 0 },
+            suspensionAxis: { x: 0, y: 1, z: 0 },
+            hingeAxis:      { x: 0, y: 0, z: 1 },
+            hertz: 4.0, dampingRatio: 0.9,
+            enableMotor: true, motorSpeed: -10.0, maxMotorTorque: 50.0,
+        }));
     });
-    var w = Physics.createConstraint({
-        type: 'wheel',
-        body1: chassis, body2: wheel,
-        point1: { x: 0, y: 4, z: 0 },
-        suspensionAxis: { x: 0, y: 1, z: 0 },
-        hingeAxis:      { x: 0, y: 0, z: 1 },
-        hertz: 4.0, dampingRatio: 0.9,
-        enableMotor: true, motorSpeed: -10.0, maxMotorTorque: 50.0,
-    });
+    truthy(ws[0] > 0 && ws[1] > 0, 'wheel constraints created');
     var x0 = Physics.getTransform(chassis).position.x;
     for (var i = 0; i < 240; i++) advanceTime(16);
     var x1 = Physics.getTransform(chassis).position.x;
-    truthy(Math.abs(x1 - x0) > 1.0, 'chassis moved under motor (Δx=' + (x1-x0).toFixed(3) + ')');
-    Physics.destroyConstraint(w);
+    // Negative spin about +Z rolls toward +X.
+    truthy(x1 - x0 > 1.0, 'chassis moved under motor (Δx=' + (x1-x0).toFixed(3) + ')');
+    ws.forEach(function(w) { Physics.destroyConstraint(w); });
     Physics.destroyAll();
 });
 

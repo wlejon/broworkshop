@@ -284,13 +284,11 @@ function step(w, dt) {
     movePegs(w, dt);
     stepCatchbar(w, dt);
 
-    // Sub-step to 1/120 s so fast balls do not tunnel (CCD helps too). Each
-    // step() replaces the unread contact list, so drain after every one.
+    // Sub-step to 1/120 s so fast balls do not tunnel (CCD helps too).
+    // Contacts accumulate across the sub-steps until read.
     const subs = Math.max(1, Math.ceil(dt * 120));
-    for (let i = 0; i < subs; i++) {
-        w.handle.step(dt / subs);
-        drainContacts(w);
-    }
+    for (let i = 0; i < subs; i++) w.handle.step(dt / subs);
+    drainContacts(w);
 
     for (const b of activeBalls(w)) {
         capSpeed(w, b);
