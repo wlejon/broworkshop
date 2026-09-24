@@ -1,65 +1,65 @@
 // Listen Lab — tier-3 transcript (Qwen3-ASR, voice-gated), one per stream.
-// (load after timeline.js)
-import { LL } from "/app/core.js";
-    const fs = require('fs');
-    const { $txStat, $txLive, $txLiveEn, $txToggle, $txLines,
-            FPS, fusionRow, focusRegion, playRegion, logEvent } = LL;
-
-// ── tier-3 transcript — Qwen3-ASR, voice-gated, rolling realtime ──────────────
+//
 // The heaviest tier, armed by the cheapest one: bro.sense's energy VAD decides
-// WHEN to wake the model. On voice onset we pull the utterance from the stream's
-// retained audio (already 16 kHz, the ASR's rate), re-transcribe a rolling
-// window every ~350 ms for live partial words, and commit a final line on voice
-// end.
+// WHEN to wake the model. On voice onset we pull the utterance from the
+// stream's retained audio (already 16 kHz, the ASR's rate), re-transcribe a
+// rolling window every ~350 ms for live partial words, and commit a final line
+// on voice end.
 //
 // We run Qwen3-ASR (52 languages + language ID) rather than an English-only
 // model: it transcribes non-English speech in its source language AND tells us
 // WHICH language. Its output is the model's native "language <Lang><asr_text>
-// transcript" id stream, so realRun() splits the IDS on asrTextId — the marker
-// detokenizes to "" so a text split won't do — into a detected-language string
-// and the transcript. The language rides the committed line; diarize.js tags the
-// speaker and translate.js renders an English line for non-English speech.
+// transcript" id stream, so realRun() splits the IDS on asrTextId (the marker
+// detokenizes to "", so a text split won't do) into a detected-language string
+// and the transcript. The language rides the committed line; diarize.js tags
+// the speaker and translate.js renders an English line for non-English speech
+// (both through the hook lists below, which lab.js fills).
 //
-// EVERY STREAM transcribes its OWN audio — the mic dashboard and each added
-// source each get a transcript CONTEXT (ctx) with an independent voice-gated
+// EVERY STREAM transcribes its OWN audio: the mic dashboard and each added
+// source get a transcript CONTEXT (ctx) with an independent voice-gated
 // lifecycle. The model is single-op (one decode in flight; a second throws), so
 // all contexts feed ONE serialized queue (TxQueue) and run back-to-back. Each
 // pass fully decodes its window (the ASR is unconditional), so interleaving
 // streams never cross-talk. Only the ACTIVE tab's ctx renders into the shared
 // transcript panel; a background stream still accumulates committed lines.
 
-const ASR_CANDIDATES = [
-    '../../../brosoundml/weights/qwen-asr/0.6B',
-    'D:/projects/brosoundml/weights/qwen-asr/0.6B',
-];
+import { h, clear } from "/lib/kit/dom.js";
+import { findWeights } from "/lib/kit/weights.js";
+import { D, FPS, app, fusionRow } from "/app/state.js";
+import { logEvent, focusRegion } from "/app/ring.js";
+import { playRegion } from "/app/detail.js";
+
+const ASR_WEIGHTS = ['brosoundml/weights/qwen-asr/0.6B'];
 const TX_PREROLL = 20;         // frames of pre-voice audio to include (~200 ms)
 const TX_ROLL    = 35;         // frames between rolling partial passes (~350 ms)
 
-// ── streaming sentence chunker ────────────────────────────────────────────────
-// Continuous speech (a news monologue) never falls silent, so the old "commit on
-// voice-end" design let one utterance's rolling re-transcribe window grow without
-// bound until it blew past the ASR's ~30 s sweet spot and choked. Instead we SEAL
-// sentences mid-utterance: when the partial gains a sentence-final boundary with
-// more text after it (and the prefix is stable across two passes), we commit that
-// sentence as a line and advance the window start past it — so the window stays
-// bounded and a monologue becomes a steady stream of sentence lines.
-const TX_MAXWIN  = 2200;       // frames (~22 s) — hard window cap, force a soft seal
-const TX_SNAP    = 15;         // frames (~150 ms) — radius to snap a cut to a silence dip
+// ── streaming sentence chunker ──────────────────────────────────────────────
+// Continuous speech (a news monologue) never falls silent, so a "commit on
+// voice-end" design lets one utterance's rolling window grow without bound past
+// the ASR's ~30 s sweet spot. Instead we SEAL sentences mid-utterance: when the
+// partial gains a sentence-final boundary with more text after it (and the
+// prefix is stable across two passes), that sentence commits as a line and the
+// window start advances past it, so a monologue becomes a steady stream of lines.
+const TX_MAXWIN  = 2200;       // frames (~22 s): hard window cap, force a soft seal
+const TX_SNAP    = 15;         // frames (~150 ms): radius to snap a cut to a silence dip
 const TX_MINSEAL = 6;          // don't seal a "sentence" shorter than this many chars
-// A run of text ending in sentence-final punctuation (ASCII + CJK + ellipsis).
 const SENT_RE = /[^.!?。！？…]*[.!?。！？…]+/g;
 
-const Transcribe = {
+export const Transcribe = {
     model: null, tok: null, asrTextId: -1,
     ready: false, enabled: true,
-    stubRun: null,             // headless test seam: a synchronous runner for all ctxs
+    stubRun: null,             // test seam: a synchronous runner for all ctxs
 };
 
-// "language Spanish" / "Spanish" → "Spanish"; empty/unknown → "".
-function normLang(raw) { return raw ? raw.replace(/^\s*language\s*/i, '').trim() : ''; }
-function langIsEnglish(lang) { return !lang || /^en$|engl/i.test(lang); }
+/** Hooks lab.js fills: (st, line) on every committed line, (st, partial, lang) on every partial. */
+export const commitHooks = [];
+export const partialHooks = [];
 
-// ── the serialized model queue ────────────────────────────────────────────────
+/** "language Spanish" / "Spanish" -> "Spanish"; empty/unknown -> "". */
+export function normLang(raw) { return raw ? raw.replace(/^\s*language\s*/i, '').trim() : ''; }
+export function langIsEnglish(lang) { return !lang || /^en$|engl/i.test(lang); }
+
+// ── the serialized model queue ──────────────────────────────────────────────
 const TxQueue = { q: [], busy: false };
 
 function txEnqueue(ctx, pcm, isFinal, a, b) {
@@ -88,7 +88,7 @@ function txDrain() {
                 ctx.tx.partial = text;
                 if (info && info.lang) ctx.tx.lang = info.lang;
                 renderPartial(ctx);
-                maybeSealSentences(ctx, text, job.a, job.b);   // chunker: seal completed sentences
+                maybeSealSentences(ctx, text, job.a, job.b);
             }
         }
         txDrain();
@@ -106,29 +106,27 @@ function txDrain() {
     }
 }
 
-// Split a partial into COMPLETE sentences (each ending in sentence punctuation)
-// plus the trailing in-progress fragment. `end` is the char offset just past each
-// sentence — used to anchor the sentence's audio cut proportionally.
+/** COMPLETE sentences (with the char offset just past each) + the trailing fragment. */
 function splitComplete(text) {
     const sentences = [];
     let m;
     SENT_RE.lastIndex = 0;
-    while ((m = SENT_RE.exec(text))) {
-        sentences.push({ text: m[0].trim(), end: SENT_RE.lastIndex });
-    }
+    while ((m = SENT_RE.exec(text))) sentences.push({ text: m[0].trim(), end: SENT_RE.lastIndex });
     const tailStart = sentences.length ? sentences[sentences.length - 1].end : 0;
     return { sentences, tail: text.slice(tailStart).trim() };
 }
 
-// Snap a frame to the lowest-energy (quietest) frame within ±TX_SNAP — sentence
-// boundaries land in prosodic dips/breaths even in gapless speech, so cutting
-// there avoids slicing a word. Energy is read straight off the retained PCM.
+/**
+ * Snap a frame to the quietest frame within ±TX_SNAP: sentence boundaries land
+ * in prosodic dips even in gapless speech, so cutting there avoids slicing a
+ * word. Energy is read straight off the retained PCM.
+ */
 function snapToDip(ctx, a, b, f) {
     const lo = Math.max(a + 1, f - TX_SNAP), hi = Math.min(b - 1, f + TX_SNAP);
     if (hi <= lo) return Math.max(a + 1, Math.min(b, f));
     const pcm = ctx.audio(lo, hi);
     if (!pcm || !pcm.length) return f;
-    const spf = pcm.length / (hi - lo);              // samples per frame
+    const spf = pcm.length / (hi - lo);
     let bestF = f, bestE = Infinity;
     for (let fr = lo; fr < hi; fr++) {
         const s0 = Math.floor((fr - lo) * spf), s1 = Math.floor((fr - lo + 1) * spf);
@@ -140,18 +138,14 @@ function snapToDip(ctx, a, b, f) {
     return bestF;
 }
 
-// Proportional time anchor for a sentence ending at char `endChar` of `total`,
-// over the window [a, b], snapped to the nearest silence dip. Small errors
-// self-correct: the next window re-transcribes from the cut, recapturing overlap.
+/** Proportional time anchor for a sentence ending at char `endChar` of `total`, snapped to a dip. */
 function anchorFrame(ctx, a, b, endChar, total) {
     let f = Math.round(a + (endChar / Math.max(1, total)) * (b - a));
     f = Math.max(a + 1, Math.min(b, f));
     return snapToDip(ctx, a, b, f);
 }
 
-// Force a soft seal when the window has run past TX_MAXWIN with no sentence
-// punctuation (a long unpunctuated run-on): cut at the quietest frame in the
-// latter half of the window and commit the text so far as one line.
+/** Past TX_MAXWIN with no punctuation: cut at the quietest late frame, commit the text so far. */
 function forceSeal(ctx, text, a, b) {
     const T = ctx.tx;
     const mid = Math.round(a + 0.5 * (b - a));
@@ -163,23 +157,22 @@ function forceSeal(ctx, text, a, b) {
     renderPartial(ctx);
 }
 
-// The chunker, run after every rolling partial pass. Seal each COMPLETE sentence
-// that (a) is followed by more text (so the ASR has moved on past it) and (b) was
-// already present in the previous pass (stable across two passes, not a churning
-// tail). Each sealed sentence becomes its own committed line; the window start
-// advances past the last cut so it stays bounded.
-function maybeSealSentences(ctx, text, a, b) {
+/**
+ * The chunker, run after every rolling partial pass. Seal each COMPLETE
+ * sentence that (a) is followed by more text and (b) was already present in
+ * the previous pass. Each becomes its own committed line; the window start
+ * advances past the last cut so it stays bounded.
+ */
+export function maybeSealSentences(ctx, text, a, b) {
     const T = ctx.tx;
     if (!text || text.length < TX_MINSEAL) { T.prevPartial = text; return; }
     const { sentences, tail } = splitComplete(text);
-    if (!sentences.length) {                          // no boundary yet
+    if (!sentences.length) {
         if (b - T.startFrame > TX_MAXWIN) forceSeal(ctx, text, a, b);
         else T.prevPartial = text;
         return;
     }
-    // Sentences are "complete" only if there's trailing text after the last one;
-    // otherwise the final sentence is still the live fragment — leave it for the
-    // next pass (or the voice-end final flush).
+    // Without trailing text the last sentence is still the live fragment.
     const complete = tail ? sentences : sentences.slice(0, -1);
     const prev = T.prevPartial || '';
     let lastCutF = -1, sealedChars = 0;
@@ -192,7 +185,7 @@ function maybeSealSentences(ctx, text, a, b) {
         T.sealedFrame = cutF; lastCutF = cutF; sealedChars = s.end;
     }
     if (lastCutF >= 0) {
-        T.startFrame = lastCutF;                       // bound the window to post-cut audio
+        T.startFrame = lastCutF;
         const remaining = text.slice(sealedChars);
         ctx.tx.partial = remaining;
         T.prevPartial = remaining;
@@ -202,163 +195,120 @@ function maybeSealSentences(ctx, text, a, b) {
     }
 }
 
-// Wrap bro.stt's async Qwen3-ASR decode into the uniform runner interface; calls
-// are serialized by TxQueue so they never overlap. The generated id stream is
-// "language <Lang> <asr_text> transcript…" — split on asrTextId (the marker
-// detokenizes to ""), decode the language prefix and the transcript separately,
-// and stream the post-marker partial as it grows.
+/**
+ * bro.stt's async Qwen3-ASR decode behind the uniform runner interface
+ * (serialized by TxQueue). Split the id stream on asrTextId: the language
+ * prefix and the transcript decode separately, and the post-marker partial
+ * streams as it grows.
+ */
 function realRun(pcm, cb) {
     const ids = [];
-    let cut = -1;                                   // index just past asrTextId in `ids`
-    let liveLang = '';                              // detected language, known once the marker passes
+    let cut = -1, liveLang = '';
     return bro.stt.transcribe(Transcribe.model, pcm, {
         onToken: (id) => {
             ids.push(id);
             if (cut < 0 && id === Transcribe.asrTextId) {
-                cut = ids.length;                   // marker is ids[cut-1]; language is ids[0..cut-2]
+                cut = ids.length;
                 liveLang = cut > 1 ? Transcribe.tok.decode(ids.slice(0, cut - 1)).trim() : '';
             }
-            if (cb.onToken && cut >= 0 && ids.length > cut)
+            if (cb.onToken && cut >= 0 && ids.length > cut) {
                 cb.onToken(Transcribe.tok.decode(ids.slice(cut)).trim(), liveLang);
+            }
         },
         onDone: (res, info) => {
             const arr = res ? Array.from(res) : ids;
             const ci = arr.indexOf(Transcribe.asrTextId);
             const lang = ci > 0 ? Transcribe.tok.decode(arr.slice(0, ci)).trim() : '';
-            const text = ci >= 0 ? Transcribe.tok.decode(arr.slice(ci + 1)).trim()
-                                 : Transcribe.tok.decode(arr).trim();
+            const text = ci >= 0 ? Transcribe.tok.decode(arr.slice(ci + 1)).trim() : Transcribe.tok.decode(arr).trim();
             if (cb.onDone) cb.onDone(text, Object.assign({}, info || {}, { lang }));
         },
     });
 }
 
-function initTxCtx(ctx) {
-    ctx.tx = { active: false, startFrame: 0, lastRunFrame: 0, partial: '', lang: '',
-               sealedFrame: 0, prevPartial: '' };
-    if (!ctx.run) ctx.run = realRun;
-    ctx._prev = ctx._prev || null;
-    ctx._cur = ctx._cur || null;
-    return ctx;
-}
-
-// Build the transcript context for a stream: audio plumbing over the stream's
-// retained buffer + its ring, and UI routing that only touches the shared panel
-// when this stream is the active tab.
-function makeTxCtx(st) {
-    const ctx = {
-        id: 'tx-' + st.id, name: st.label, st, _prev: null, _cur: null,
+/**
+ * The transcript context for a stream: audio plumbing over its retained
+ * buffer + ring, and UI routing that only touches the shared panel when this
+ * stream is the active tab.
+ */
+export function makeTxCtx(st) {
+    return {
+        id: 'tx-' + st.id, name: st.label, st, _prev: null, _cur: null, run: realRun,
+        tx: { active: false, startFrame: 0, lastRunFrame: 0, partial: '', lang: '', sealedFrame: 0, prevPartial: '' },
         audio: (a, b) => st.source.listen.audio(a, b),
         frame: () => st.source.listen.frame(),
         oldest: () => st.ring.oldestFrame(),
         active: () => st.source.listen.info().active,
         onPartial: (partial, lang) => {
-            if (st === LL.active) renderActivePartial(partial);
-            // Live streaming translation: hand the growing partial + its detected
-            // language to the translator, which updates the live English line.
-            if (LL.onLivePartial) LL.onLivePartial(st, partial, lang);
+            if (st === app.active) renderActivePartial(partial);
+            for (const fn of partialHooks) fn(st, partial, lang);
         },
         onCommit: (text, a, b, lang) => commitLine(st, text, a, b, lang),
-        onStatus: (text, err, live) => { if (st === LL.active) txSetStatus(text, err, live); },
+        onStatus: (text, err, live) => { if (st === app.active) txSetStatus(text, err, live); },
     };
-    initTxCtx(ctx);
-    return ctx;
 }
 
-function txSetStatus(text, err, live) {
-    $txStat.textContent = text;
-    $txStat.className = 'txstat' + (err ? ' err' : live ? ' live' : '');
-    $txToggle.disabled = !Transcribe.ready;
-    $txToggle.textContent = Transcribe.enabled ? '⏸' : '▶';
+export function txSetStatus(text, err, live) {
+    D.txStat.textContent = text;
+    D.txStat.className = 'txstat' + (err ? ' err' : live ? ' live' : '');
+    D.txToggle.disabled = !Transcribe.ready;
+    D.txToggle.textContent = Transcribe.enabled ? '⏸' : '▶';
 }
 
 const TX_PARTIAL_MAX = 96;
 
-function renderPartial(ctx) {
-    ctx.onPartial(ctx.tx.partial, ctx.tx.lang);
+function renderPartial(ctx) { ctx.onPartial(ctx.tx.partial, ctx.tx.lang); }
+
+/** The active tab's live English line under the streaming partial ("…" while pending). */
+export function renderActiveLiveEn(text, pending) {
+    clear(D.txLiveEn);
+    if (!text) return;
+    D.txLiveEn.appendChild(document.createTextNode('→ ' + text + ' '));
+    if (pending) D.txLiveEn.appendChild(h('span.tlcur', null, '…'));
 }
 
-// Render the ACTIVE tab's live English translation under the streaming partial.
-// translate.js calls this as coalesced partial translations land; cleared on
-// commit/voice-end. `pending` shows a faint cursor while the first pass runs.
-function renderActiveLiveEn(text, pending) {
-    if (!$txLiveEn) return;
-    if (text) {
-        $txLiveEn.textContent = '→ ' + text + ' ';
-        if (pending) {
-            const c = document.createElement('span');
-            c.className = 'tlcur'; c.textContent = '…';
-            $txLiveEn.appendChild(c);
-        }
-    } else {
-        $txLiveEn.textContent = '';
-    }
-}
-
-// Render the ACTIVE tab's live partial into the shared transcript panel.
-function renderActivePartial(partial) {
-    const ctx = LL.active && LL.active.txCtx;
+/** The active tab's live partial in the shared transcript panel. */
+export function renderActivePartial(partial) {
+    const ctx = app.active && app.active.txCtx;
+    clear(D.txLive);
     if (partial) {
-        let p = partial;
-        if (p.length > TX_PARTIAL_MAX) p = '…' + p.slice(p.length - TX_PARTIAL_MAX);
-        $txLive.textContent = p + ' ';
-        const cur = document.createElement('span');
-        cur.className = 'cur'; cur.textContent = '▌';
-        $txLive.appendChild(cur);
+        const p = partial.length > TX_PARTIAL_MAX ? '…' + partial.slice(partial.length - TX_PARTIAL_MAX) : partial;
+        D.txLive.appendChild(document.createTextNode(p + ' '));
+        D.txLive.appendChild(h('span.cur', null, '▌'));
     } else if (ctx && ctx.tx.active) {
-        $txLive.innerHTML = '<span class="cur">▌</span>';
+        D.txLive.appendChild(h('span.cur', null, '▌'));
     } else {
-        $txLive.innerHTML = '<span class="ph">— speak; words appear here while voice is active —</span>';
+        D.txLive.appendChild(h('span.ph', null, '— speak; words appear here while voice is active —'));
     }
-    if (!partial) renderActiveLiveEn('');     // no live transcript → no live translation
+    if (!partial) renderActiveLiveEn('');
 }
 
 const lineKey = (ln) => ln.a + '-' + ln.b;
 
-// Render the ACTIVE tab's committed lines. Each is a timeline index: clicked, it
-// scrubs the (active) timeline to where it was said and plays it.
-function renderLines() {
-    const st = LL.active;
-    $txLines.innerHTML = '';
+/**
+ * The active tab's committed lines. Each is a timeline index: clicked, it
+ * scrubs the timeline to where it was said and plays it.
+ */
+export function renderLines() {
+    const st = app.active;
+    clear(D.txLines);
     if (!st) return;
     for (const ln of st.txLines) {
-        const row = document.createElement('div');
-        row.className = 'txline' +
-            (st.playback.active && st.playback.key === lineKey(ln) ? ' playing' : '');
-        row.title = 'jump to the timeline and play';
+        const playing = st.playback.active && st.playback.key === lineKey(ln);
         const mm = Math.floor(ln.t / 60), ss = Math.floor(ln.t % 60);
-        const t = document.createElement('span');
-        t.className = 'tt'; t.textContent = mm + ':' + String(ss).padStart(2, '0');
-        row.appendChild(t);
-        if (ln.speaker) {                                  // diarized speaker chip
-            const sp = document.createElement('span');
-            sp.className = 'spk spk' + ((ln.speaker - 1) % 6);
-            sp.textContent = 'S' + ln.speaker;
-            row.appendChild(sp);
-        }
-        if (!langIsEnglish(ln.lang)) {                     // detected-language badge
-            const lg = document.createElement('span');
-            lg.className = 'lang'; lg.textContent = ln.lang;
-            row.appendChild(lg);
-        }
-        const tx = document.createElement('span');
-        tx.className = 'tx'; tx.textContent = ln.text;
-        row.appendChild(tx);
-        if (ln.en) {                                       // English translation line
-            const en = document.createElement('span');
-            en.className = 'txen' + (ln.refined ? ' refined' : '');
-            en.textContent = '→ ' + ln.en;
-            row.appendChild(en);
-        } else if (ln.enPending) {                          // queued for translation
-            const en = document.createElement('span');
-            en.className = 'txen pending'; en.textContent = '→ translating…';
-            row.appendChild(en);
-        }
-        row.addEventListener('click', () => {
-            focusRegion(ln.a, ln.b);
-            playRegion({ a: ln.a, b: ln.b }, lineKey(ln));
-            renderLines();
-        });
-        $txLines.appendChild(row);
+        D.txLines.appendChild(h('div.txline' + (playing ? '.playing' : ''), {
+            title: 'jump to the timeline and play',
+            onclick: () => {
+                focusRegion(ln.a, ln.b);
+                playRegion({ a: ln.a, b: ln.b }, lineKey(ln));
+                renderLines();
+            },
+        },
+            h('span.tt', null, mm + ':' + String(ss).padStart(2, '0')),
+            ln.speaker ? h('span.spk.spk' + ((ln.speaker - 1) % 6), null, 'S' + ln.speaker) : null,
+            !langIsEnglish(ln.lang) ? h('span.lang', null, ln.lang) : null,
+            h('span.tx', null, ln.text),
+            ln.en ? h('span.txen' + (ln.refined ? '.refined' : ''), null, '→ ' + ln.en)
+                : ln.enPending ? h('span.txen.pending', null, '→ translating…') : null));
     }
 }
 
@@ -370,24 +320,20 @@ function finishUtterance(ctx, text, a, b, lang) {
     ctx.onStatus('ready · voice-gated', false, false);
 }
 
-// Commit a finished utterance to a stream: a replayable transcript line, a
-// [heard] fusion row, and a timeline speech marker — all on that stream. The
-// line carries the detected language; diarize.js fills in `speaker` and
-// translate.js fills in `en` (the English translation) asynchronously, each
-// re-rendering when its result lands.
+/**
+ * Commit a finished utterance to a stream: a replayable transcript line, a
+ * [heard] feed row and a timeline speech marker. The commit hooks
+ * (diarization, translation) fill in `speaker` and `en` asynchronously.
+ */
 function commitLine(st, text, a, b, lang) {
     if (!text) return;
-    // Strip whitespace + CJK/ASCII punctuation to gauge real content. Pure-symbol
-    // fragments ("。", "—") are ASR noise between turns — drop them entirely so
-    // they don't get a spurious line, language badge, or translation.
+    // Pure-symbol fragments ("。", "—") are ASR noise between turns: drop them.
     const core = text.replace(/[\s　-〿！-･ -⁯!-\/:-@]+/g, '');
     if (!core) return;
     const meaningful = core.length >= 2;
     let langN = normLang(lang);
-    // Per-stream STICKY language: short/odd utterances otherwise flip-flop (a
-    // one-syllable grunt in a Japanese stream gets tagged Chinese). Vote with
-    // meaningful foreign utterances; once a dominant foreign language is
-    // established (≥2 votes), snap every foreign label on this stream to it.
+    // Per-stream STICKY language: short/odd utterances otherwise flip-flop. Once
+    // a dominant foreign language has 2+ meaningful votes, snap foreign labels to it.
     if (!langIsEnglish(langN)) {
         st.langVotes = st.langVotes || {};
         if (meaningful) st.langVotes[langN] = (st.langVotes[langN] || 0) + 1;
@@ -399,11 +345,9 @@ function commitLine(st, text, a, b, lang) {
     st.txLines.unshift(line);
     while (st.txLines.length > 80) st.txLines.pop();
     fusionRow(st, 'heard', (langIsEnglish(langN) ? '' : '[' + langN + '] ') + '“' + text + '”');
-    logEvent(st, 'speech', text, null, '', null,
-             { startFrame: a, endFrame: b, matchedFrames: b - a });
-    if (LL.assignSpeaker) LL.assignSpeaker(st, line);     // tier-3.5: diarization
-    if (LL.maybeTranslate) LL.maybeTranslate(st, line);   // tier-3.5: translation
-    if (st === LL.active) renderLines();
+    logEvent(st, 'speech', text, null, '', null, { startFrame: a, endFrame: b, matchedFrames: b - a });
+    for (const fn of commitHooks) fn(st, line);
+    if (st === app.active) renderLines();
 }
 
 function txKick(ctx, endFrame, isFinal) {
@@ -416,20 +360,18 @@ function txKick(ctx, endFrame, isFinal) {
     txEnqueue(ctx, pcm, isFinal, a, b);
 }
 
-// Edge-driven from the poll loop, once per context. The driver sets
-// ctx._prev/_cur (the stream's sensor snapshots) before calling.
-function transcribeTick(ctx) {
+/** Edge-driven from the poll loop, once per context (the driver sets ctx._prev/_cur). */
+export function transcribeTick(ctx) {
     if (!Transcribe.ready || !Transcribe.enabled) return;
     const prev = ctx._prev, s = ctx._cur;
-    if (!s) return;
-    if (!ctx.active()) return;
+    if (!s || !ctx.active()) return;
     const T = ctx.tx;
     const rising = s.voice && (!prev || !prev.voice);
     const falling = prev && prev.voice && !s.voice;
     if (rising) {
         T.active = true;
         T.startFrame = Math.max(ctx.oldest(), s.frames - TX_PREROLL);
-        T.sealedFrame = T.startFrame;     // chunker: nothing sealed yet this utterance
+        T.sealedFrame = T.startFrame;
         T.prevPartial = '';
         T.lastRunFrame = s.frames;
         T.partial = '';
@@ -443,7 +385,7 @@ function transcribeTick(ctx) {
     if (falling && T.active) txKick(ctx, s.frames, true);
 }
 
-function txReset(ctx) {
+export function txReset(ctx) {
     ctx.tx.active = false;
     ctx.tx.partial = '';
     ctx.tx.prevPartial = '';
@@ -454,19 +396,16 @@ function txMaybeReady() {
     if (!Transcribe.model || !Transcribe.tok) return;
     Transcribe.asrTextId = Transcribe.model.asrTextId;
     Transcribe.ready = true;
-    fusionRow(LL.active, 'info', 'tier-3 transcript ready — Qwen3-ASR ' +
+    fusionRow(app.active, 'info', 'tier-3 transcript ready — Qwen3-ASR ' +
         (Transcribe.model.sampleRate / 1000) + ' kHz, 52-language + language ID · every stream');
     txSetStatus('ready · voice-gated');
     renderActivePartial('');
 }
 
-function txLoad() {
+/** Load Qwen3-ASR (async) + its BPE tokenizer (sync, small). */
+export function txLoad() {
     if (Transcribe.stubRun) return;
-    let dir = null;
-    for (const p of ASR_CANDIDATES) {
-        try { if (fs.existsSync(p + '/config.json')) { dir = fs.realpathSync(p); break; } }
-        catch (e) { /* next candidate */ }
-    }
+    const dir = findWeights(ASR_WEIGHTS, { probe: 'config.json' });
     if (!dir) { txSetStatus('Qwen3-ASR weights not found — transcript off', true); return; }
     txSetStatus('loading Qwen3-ASR…');
     try {
@@ -474,21 +413,19 @@ function txLoad() {
             onReady: (m) => { Transcribe.model = m; txMaybeReady(); },
             onError: (e) => txSetStatus('Qwen3-ASR load failed: ' + e, true),
         });
-        // The Qwen BPE tokenizer ships with the ASR checkpoint (vocab.json +
-        // merges.txt); bro.lm's loader reads it. It is small — load it sync.
-        Transcribe.tok = bro.lm.loadTokenizer({
-            vocabPath:  dir + '/vocab.json',
-            mergesPath: dir + '/merges.txt',
-        });
+        Transcribe.tok = bro.lm.loadTokenizer({ vocabPath: dir + '/vocab.json', mergesPath: dir + '/merges.txt' });
         txMaybeReady();
     } catch (e) {
         txSetStatus('Qwen3-ASR load failed: ' + (e.message || e), true);
     }
 }
 
-    Object.assign(LL, {
-        Transcribe, makeTxCtx, initTxCtx, realRun, txReset,
-        txSetStatus, renderPartial, renderActivePartial, renderActiveLiveEn, renderLines,
-        finishUtterance, transcribeTick, txMaybeReady, txLoad,
-        normLang, langIsEnglish, maybeSealSentences,
-    });
+/** Test seam: a synchronous runner stands in for the model on every stream. */
+export function installTranscriber(runFn) {
+    Transcribe.stubRun = runFn;
+    Transcribe.ready = true;
+    Transcribe.enabled = true;
+    if (!Transcribe.tok) Transcribe.tok = { decode: () => '' };
+    txSetStatus('ready · voice-gated (stub)');
+    renderActivePartial('');
+}

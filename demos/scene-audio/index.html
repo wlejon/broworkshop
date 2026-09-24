@@ -1,142 +1,114 @@
 <!DOCTYPE html>
 <html>
 <head>
+    <meta charset="utf-8">
     <title>Scene Audio</title>
+    <link rel="stylesheet" href="/lib/kit/kit.css">
     <link rel="stylesheet" href="/app/style.css">
 </head>
 <body>
     <canvas id="stage"></canvas>
 
-    <!-- Left column: the scene-integration controls (listener binding, sources). -->
-    <div id="hud">
-        <h1>Scene Audio</h1>
-        <div class="sub">bro.scene emitters &rarr; broaudio, synced by the engine</div>
+    <!-- Left: the scene integration (listener binding, sources, transport, async load). -->
+    <div class="k-hud" id="hud">
+        <h2>Scene Audio <span class="k-sub">bro.scene emitters &rarr; broaudio, synced by the engine</span></h2>
 
-        <section>
+        <div class="k-panel">
             <h2>Listener</h2>
-            <label class="chk">
-                <input id="bindListener" type="checkbox" checked>
-                bind to camera <span class="hint">(scene.bindAudioListenerToCamera)</span>
-            </label>
-            <div class="row">pos <span class="v" id="listenerPos">—</span></div>
-            <div class="row">fwd <span class="v" id="listenerFwd">—</span></div>
-            <div class="note" id="listenerNote">Orbit with right-drag: the mix follows the camera.</div>
-        </section>
+            <label class="k-field"><input id="bindListener" type="checkbox" checked><span>bind to camera</span></label>
+            <span class="hint">scene.bindAudioListenerToCamera · L toggles</span>
+            <div class="kv">pos <span class="k-val" id="listenerPos">—</span></div>
+            <div class="kv">fwd <span class="k-val" id="listenerFwd">—</span></div>
+            <div class="note" id="listenerNote"></div>
+        </div>
 
-        <section>
+        <div class="k-panel">
             <h2>Sources</h2>
-            <div class="note">Each mesh node carries an attached emitter — the
-                engine pushes world position, velocity, and real-time acoustic occlusion (MeshBVH raycasting) every frame.</div>
-            <div class="row">occlusion <span class="v" id="occlusionStatus">active (MeshBVH)</span></div>
-            <div id="sourceList"></div>
-            <label class="chk">
-                <input id="showPaths" type="checkbox" checked> show motion paths
-            </label>
-        </section>
+            <div class="note">Each mesh node carries an attached emitter: the engine pushes
+                world position, velocity and real-time acoustic occlusion (MeshBVH raycasting)
+                every frame.</div>
+            <div class="kv">occlusion <span class="k-val">active (MeshBVH)</span></div>
+            <div id="sourceList" class="k-col"></div>
+            <label class="k-field"><input id="showPaths" type="checkbox" checked><span>show motion paths</span></label>
+        </div>
 
-        <section>
+        <div class="k-panel">
             <h2>Transport <span class="hint">seekPlayback / seconds</span></h2>
-            <div class="row">
-                <button id="srcRam" class="btn on">RAM clip</button>
-                <button id="srcStream" class="btn">disk stream</button>
-            </div>
-            <div class="row">
-                <button id="musicToggle" class="btn">pause</button>
-                <span class="v" id="musicTime">0.00 / 0.00 s</span>
+            <div class="k-row" id="transportSrc"></div>
+            <div class="k-row">
+                <button id="musicToggle" class="small">pause</button>
+                <span class="k-val" id="musicTime">0.00 / 0.00 s</span>
             </div>
             <input id="musicSeek" type="range" min="0" max="1000" step="1" value="0" class="wide">
-            <div class="note">Drag to seek; the readout is
-                getPlaybackPositionSeconds, not a JS-side timer. The same seek
-                call drives both sources — but on the stream it seeks the
-                <em>codec</em>, and the refill gap shows up as underrun.</div>
-        </section>
+            <div class="note">Drag to seek; the readout is getPlaybackPositionSeconds, not a
+                JS-side timer. The same seek call drives both sources, but on the stream it seeks
+                the <em>codec</em>, and the refill gap shows up as underrun.</div>
+        </div>
 
-        <section>
+        <div class="k-panel">
             <h2>Loading <span class="hint">async decode vs sync</span></h2>
-            <div class="row">ogg clip <span class="v" id="oggState">loading…</span></div>
-            <div class="row">decoded <span class="v" id="oggInfo">—</span></div>
-            <div class="row">
-                <button id="oggPlay" class="btn">audition</button>
-                <span class="hint" id="oggPath"></span>
-            </div>
-            <div class="note">createClipFromFileAsync decodes and resamples on a
-                background thread — this HUD kept animating while it ran. Every
-                other workshop app decodes inline on the JS thread, where a big
-                file is a dropped frame. The synthesized clips beside it cost no
-                decode at all.</div>
-        </section>
+            <div class="kv">ogg clip <span class="k-val" id="oggState">loading…</span></div>
+            <div class="kv">decoded <span class="k-val" id="oggInfo">—</span></div>
+            <div class="k-row"><button id="oggPlay" class="small">audition</button><span class="hint" id="oggPath"></span></div>
+            <div class="note">createClipFromFileAsync decodes and resamples on a background
+                thread; this HUD kept animating while it ran. The synthesized clips beside it
+                cost no decode at all.</div>
+        </div>
     </div>
 
-    <!-- Right column: Doppler (the showpiece) and the bus mixer. -->
-    <div id="side">
-        <section>
+    <!-- Right: Doppler (the showpiece), the bus mixer, the disk stream, MIDI. -->
+    <div class="k-hud right" id="side">
+        <div class="k-panel">
             <h2>Doppler</h2>
-            <label>factor
+            <label class="k-field"><span>factor</span>
                 <input id="dopplerFactor" type="range" min="0" max="4" step="0.05" value="1">
-                <span class="v" id="dopplerFactorVal">1.00</span>
-            </label>
-            <label>flyby speed
+                <span class="k-val" id="dopplerFactorVal"></span></label>
+            <label class="k-field"><span>flyby speed</span>
                 <input id="flybySpeed" type="range" min="20" max="200" step="5" value="90">
-                <span class="v" id="flybySpeedVal">90 u/s</span>
-            </label>
-            <div class="row">
-                <button id="flybyRun" class="btn wide-btn">run flyby</button>
-            </div>
-            <div class="row big">ratio <span class="v big" id="dopplerRatio">1.000</span></div>
-            <canvas id="dopplerGraph" width="260" height="90"></canvas>
-            <div class="note" id="dopplerNote">&gt;1 approaching, &lt;1 receding.
-                factor 0 pins it to exactly 1.000.</div>
-        </section>
+                <span class="k-val" id="flybySpeedVal"></span></label>
+            <button id="flybyRun" class="primary">run flyby (F)</button>
+            <div class="kv big">ratio <span class="k-val big" id="dopplerRatio">1.000</span></div>
+            <canvas id="dopplerGraph"></canvas>
+            <div class="note">&gt;1 approaching, &lt;1 receding. factor 0 pins it to exactly 1.000.</div>
+        </div>
 
-        <section>
+        <div class="k-panel">
             <h2>Mixer <span class="hint">setBusSolo / getBusSolo</span></h2>
-            <div id="mixerStrips"></div>
-            <div class="row">output latency <span class="v" id="outLatency">—</span></div>
-            <div class="note">tools/synth ships a full mixer UI but never uses
-                bus solo — this is the same bus API with solo wired up.</div>
-        </section>
+            <div id="mixerStrips" class="k-col"></div>
+            <div class="kv">output latency <span class="k-val" id="outLatency">—</span></div>
+        </div>
 
-        <section>
+        <div class="k-panel">
             <h2>Disk stream <span class="hint">createStreamFromFile</span></h2>
-            <div class="row">state <span class="v" id="streamState">—</span></div>
-            <div class="row">buffer
-                <span class="meter"><i id="streamBufferBar"></i></span>
-                <span class="v" id="streamBuffer">—</span>
-            </div>
-            <div class="row">decoded <span class="v" id="streamDecoded">—</span></div>
-            <div class="row">played <span class="v" id="streamPlayed">—</span></div>
-            <div class="row">underrun <span class="v" id="streamUnderrun">—</span></div>
-            <div class="row">last seek <span class="v" id="streamSeekCost">—</span></div>
-            <label>bed gain
+            <div class="kv">state <span class="k-val" id="streamState">—</span></div>
+            <div class="kv">buffer <span id="streamBufferBar"></span> <span class="k-val" id="streamBuffer">—</span></div>
+            <div class="kv">decoded <span class="k-val" id="streamDecoded">—</span></div>
+            <div class="kv">played <span class="k-val" id="streamPlayed">—</span></div>
+            <div class="kv">underrun <span class="k-val" id="streamUnderrun">—</span></div>
+            <div class="kv">last seek <span class="k-val" id="streamSeekCost">—</span></div>
+            <label class="k-field"><span>bed gain</span>
                 <input id="streamGain" type="range" min="0" max="1" step="0.05" value="0">
-            </label>
-            <div class="note">96 s Ogg bed. <b>RAM</b>: whole file decoded up
-                front — instant seek, megabytes resident, a stall at load.
-                <b>Stream</b>: ~2 s ring resident whatever the length, opens
-                immediately, and pays for each seek with a refill gap.</div>
-        </section>
+                <span class="k-val" id="streamGainVal"></span></label>
+            <div class="note">96 s Ogg bed. <b>RAM</b>: whole file decoded up front: instant
+                seek, megabytes resident, a stall at load. <b>Stream</b>: ~2 s ring resident
+                whatever the length, opens immediately, pays for each seek with a refill gap.</div>
+        </div>
 
-        <section>
+        <div class="k-panel">
             <h2>MIDI <span class="hint">createMidiInput</span></h2>
-            <div class="row">port <span class="v dim" id="midiStatus">—</span>
-                <button id="midiRescan" class="btn">rescan</button>
-            </div>
-            <div id="midiPorts"></div>
+            <div class="k-row">port <span class="k-val dim" id="midiStatus">—</span>
+                <button id="midiRescan" class="small">rescan</button></div>
+            <div id="midiPorts" class="k-col"></div>
             <div id="midiPadRow"></div>
-            <div class="row">notes <span class="v" id="midiNotes">0</span></div>
-            <div class="row">bend
-                <span class="bendtrack"><i id="midiBendBar"></i></span>
-                <span class="v" id="midiBend">0</span>
-            </div>
+            <div class="kv">notes <span class="k-val" id="midiNotes">0</span></div>
+            <div class="kv">bend <span id="midiBendBar"></span> <span class="k-val" id="midiBend">0</span></div>
             <pre id="midiLog" class="log">waiting for events…</pre>
-            <div class="note">Each pitch class owns a pad node in a ring around
-                you, with its own attached emitter — so a note is a position,
-                not just a pitch. Octave lifts the pad; CC1 pushes the whole
-                ring out. tools/synth has an on-screen keyboard and never opens
-                a hardware port; this is that missing half.</div>
-        </section>
+            <div class="note">Each pitch class owns a pad node in a ring around you, with its own
+                attached emitter, so a note is a position, not just a pitch. Octave lifts the
+                pad; CC1 pushes the ring out. Keys Z..M strike the pads without a controller.</div>
+        </div>
     </div>
 
-    <script type="module" src="/app/app.js"></script>
+    <script type="module" src="/app/main.js"></script>
 </body>
 </html>

@@ -23,6 +23,9 @@
 // and, worse, would need a fresh attachAudioEmitter each time — which would
 // obscure the very thing the app is about, that ONE attach lasts a session.
 
+import { h, clear } from "/lib/kit/dom.js";
+import { levelMeter } from "/lib/kit/audio-ui.js";
+
 const TAU = Math.PI * 2;
 const PAD_COUNT = 12;
 const PAD_RADIUS = 9.0;
@@ -281,23 +284,23 @@ export function bindMidiHud(ctx) {
         ports: document.getElementById('midiPorts'),
         log: document.getElementById('midiLog'),
         bend: document.getElementById('midiBend'),
-        bendBar: document.getElementById('midiBendBar'),
+        // Bend is a needle centred on zero: the sign is the information.
+        bendBar: levelMeter('#midiBendBar', { min: -8192, max: 8192, needle: true }),
         notes: document.getElementById('midiNotes'),
         pads: document.getElementById('midiPadRow'),
     };
+    els.bendBar.set(0);
 
     // A strip of twelve dots, one per pad, lit by the envelope. It doubles as
     // an input: clicking a dot strikes that pad, so the 3D routing can be shown
     // with no hardware in the room.
-    els.pads.innerHTML = '';
+    clear(els.pads);
     for (const pad of midiState.pads) {
-        const dot = document.createElement('button');
-        dot.className = 'pad';
-        dot.title = `${pad.name} — click to strike`;
-        dot.style.borderColor = pad.color;
-        dot.addEventListener('click', () => triggerNote(60 + pad.index, 0.9));
-        els.pads.appendChild(dot);
-        pad.el = dot;
+        pad.el = h('button.pad', {
+            title: pad.name + ' — click to strike', style: { borderColor: pad.color },
+            onclick: () => triggerNote(60 + pad.index, 0.9),
+        });
+        els.pads.appendChild(pad.el);
     }
 
     document.getElementById('midiRescan').addEventListener('click', () => {
@@ -316,48 +319,31 @@ export function bindMidiHud(ctx) {
 export function drawPortList() {
     if (!els) return;
 
+    clear(els.ports);
     if (!midiState.input) {
         els.status.textContent = 'unavailable';
-        els.status.className = 'v err';
-        els.ports.innerHTML = '<div class="note">This build has no MIDI input support.</div>';
+        els.status.className = 'k-val err';
+        els.ports.appendChild(h('div.note', null, 'This build has no MIDI input support.'));
         return;
     }
 
-    els.status.textContent = midiState.openPort >= 0 ? 'open' : 'idle';
-    els.status.className = midiState.openPort >= 0 ? 'v' : 'v dim';
-    els.ports.innerHTML = '';
+    const open = midiState.openPort >= 0;
+    els.status.textContent = open ? 'open' : 'idle';
+    els.status.className = open ? 'k-val' : 'k-val dim';
 
     if (midiState.ports.length === 0) {
-        const empty = document.createElement('div');
-        empty.className = 'note';
-        empty.textContent = 'No MIDI input ports. Plug a controller in and hit '
-            + 'rescan — or click the pads below, which take the same path a '
-            + 'hardware note does.';
-        els.ports.appendChild(empty);
+        els.ports.appendChild(h('div.note', null,
+            'No MIDI input ports. Plug a controller in and hit rescan, or click the pads ' +
+            'below, which take the same path a hardware note does.'));
         return;
     }
-
     for (const port of midiState.ports) {
-        const row = document.createElement('div');
-        row.className = 'port';
-
-        const nm = document.createElement('span');
-        nm.className = 'nm';
-        nm.textContent = port.name;
-        nm.title = port.name;
-        row.appendChild(nm);
-
-        const btn = document.createElement('button');
         const isOpen = midiState.openPort === port.index;
-        btn.className = isOpen ? 'btn on' : 'btn';
-        btn.textContent = isOpen ? 'close' : 'open';
-        btn.addEventListener('click', () => {
-            if (midiState.openPort === port.index) closePort();
-            else openPort(port.index);
-        });
-        row.appendChild(btn);
-
-        els.ports.appendChild(row);
+        els.ports.appendChild(h('div.port', null,
+            h('span.nm', { title: port.name }, port.name),
+            h(isOpen ? 'button.small.active' : 'button.small', {
+                onclick: () => (midiState.openPort === port.index ? closePort() : openPort(port.index)),
+            }, isOpen ? 'close' : 'open')));
     }
 }
 
@@ -375,11 +361,8 @@ export function drawMidi() {
 
     els.notes.textContent = String(midiState.noteCount);
 
-    // Bend is drawn as a bar centred on zero: the sign is the information, and
-    // a bare number makes you read a minus sign to get it.
-    const b = midiState.bend / 8192;                 // -1 .. ~1
-    els.bend.textContent = midiState.bend === 0 ? '0' : midiState.bend.toFixed(0);
-    els.bendBar.style.left = `${(50 + Math.max(-50, Math.min(50, b * 50))).toFixed(1)}%`;
+    els.bend.textContent = midiState.bend.toFixed(0);
+    els.bendBar.set(midiState.bend);
 
     els.log.textContent = midiState.log.length
         ? midiState.log.join('\n')

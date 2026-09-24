@@ -1,0 +1,15 @@
+/* Spatial Audio: only what is specific to this app; kit.css does the rest. */
+body { background: #1a1a2e; overflow: hidden; }
+canvas#stage { display: block; width: 100vw; height: 100vh; }
+
+.k-hud { width: 250px; top: 36px; }
+.k-hud.right { width: 280px; max-height: calc(100% - 46px); }
+.zone { font-size: 18px; font-weight: 600; color: #fff; }
+.pos { text-align: left; }
+#occList > div.hit, #occList > div.hit > span, #occList > div.hit > b { color: var(--k-warn); }
+
+#panelToggle { position: absolute; top: 36px; right: 10px; display: none; }
+.help {
+    position: absolute; left: 12px; bottom: 10px; pointer-events: none;
+    color: #e8eef7; font-size: 11px; opacity: .85; text-shadow: 0 0 4px #000, 0 0 8px #000;
+}

@@ -22,6 +22,8 @@
 // the decode worker, so watch the counter rather than expecting it to move.
 
 import { assetPath, OGG_BED } from '/app/audio_sources.js';
+import { bindControl } from '/lib/kit/params.js';
+import { levelMeter } from '/lib/kit/audio-ui.js';
 
 export const streamState = {
     /** playbackId of the disk stream, or -1 before it opened. */
@@ -115,23 +117,22 @@ export function bindStreamingHud(ctx) {
     els = {
         state: document.getElementById('streamState'),
         buffer: document.getElementById('streamBuffer'),
-        bufferBar: document.getElementById('streamBufferBar'),
+        bufferBar: levelMeter('#streamBufferBar'),
         decoded: document.getElementById('streamDecoded'),
         played: document.getElementById('streamPlayed'),
         underrun: document.getElementById('streamUnderrun'),
         seekCost: document.getElementById('streamSeekCost'),
-        gain: document.getElementById('streamGain'),
     };
 
     if (streamState.error) {
         els.state.textContent = `failed: ${streamState.error}`;
-        els.state.className = 'v err';
+        els.state.className = 'k-val err';
         return;
     }
 
     els.state.textContent = 'streaming';
-    els.gain.addEventListener('input', () => setStreamGain(parseFloat(els.gain.value)));
-    setStreamGain(parseFloat(els.gain.value));
+    const gain = bindControl('#streamGain', { out: '#streamGainVal', onChange: setStreamGain });
+    setStreamGain(gain.value);
 }
 
 /** Repaint the stats readout. Called from the frame loop's slow lane. */
@@ -148,10 +149,10 @@ export function drawStreamStats() {
     // toward zero = the next thing you hear is an underrun.
     const fill = Math.min(1, st.bufferedFrames / streamState.ringFrames);
     els.buffer.textContent = `${(fill * 100).toFixed(0)}%`;
-    els.bufferBar.style.width = `${(fill * 100).toFixed(1)}%`;
+    els.bufferBar.set(fill);
     // Red once the ring is under a quarter full: at that point a scheduler
     // hiccup becomes audible.
-    els.bufferBar.style.background = fill < 0.25 ? '#e06b6b' : '#4bd6a0';
+    els.bufferBar.color(fill < 0.25 ? '#e06b6b' : '#4bd6a0');
 
     const sr = ctxRef.sampleRate;
     els.decoded.textContent = `${(st.decodedFrames / sr).toFixed(1)} s`;

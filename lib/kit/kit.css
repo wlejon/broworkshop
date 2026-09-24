@@ -198,10 +198,48 @@ textarea { resize: vertical; }
 .k-tabs > button:hover { background: var(--k-surface); }
 .k-tabs > button.active { color: var(--k-text); border-bottom-color: var(--k-accent); background: transparent; }
 
+/* Meter bar (audio-ui.js levelMeter): a fill, or a centred needle, plus an optional mark. */
+.k-meter {
+    position: relative; display: inline-block; width: 70px; height: 8px; vertical-align: middle;
+    background: var(--k-input); border: 1px solid var(--k-border); border-radius: 4px; overflow: hidden;
+}
+.k-meter.block { display: block; width: auto; }
+.k-meter > .fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0%; background: var(--k-on-border); }
+.k-meter > .needle { position: absolute; top: 0; bottom: 0; left: 50%; width: 3px; margin-left: -1px; background: var(--k-warn); }
+.k-meter > .mark { position: absolute; top: 0; bottom: 0; left: 0%; width: 2px; background: #5a657a; }
+
+/* Mixer strip (audio-ui.js mixerStrips): name, M, S, meter. */
+.k-strip { display: flex; align-items: center; gap: 6px; }
+.k-strip > .nm { width: 64px; color: var(--k-muted); overflow: hidden; }
+.k-strip > button.solo { background: #6b5a1f; border-color: #a08a33; color: #fff4d0; }
+
 .k-box {                       /* a bordered output area (reply, transcript) */
     background: var(--k-surface); border: 1px solid var(--k-border); border-radius: 8px;
     padding: 12px 14px; overflow-y: auto; line-height: 1.6; white-space: pre-wrap;
 }
+
+/* Dashboard deck: a wrapping row of fixed-width panels inside a .k-main.pad
+ * (window-lab, input-lab). Set --k-card-w on the deck; .wide spans two. */
+.k-deck { display: flex; flex-wrap: wrap; gap: var(--k-gap); align-items: flex-start; align-content: flex-start; }
+.k-deck > .k-panel { width: var(--k-card-w, 560px); flex: none; }
+.k-deck > .k-panel.wide { width: calc(2 * var(--k-card-w, 560px) + var(--k-gap)); }
+.k-panel > h3 {
+    margin: 6px 0 0; padding-top: 6px; border-top: 1px solid var(--k-border);
+    font-size: 11px; font-weight: 600; letter-spacing: .6px; text-transform: uppercase; color: var(--k-dim);
+}
+.k-panel > h2 .dim, .k-panel > h3 .dim { text-transform: none; letter-spacing: 0; font-weight: normal; margin-left: 6px; }
+
+/* Label/value readout rows (ui.js readout): <div class="k-kv"><div><span>label</span><b>value</b></div>... */
+.k-kv { display: flex; flex-direction: column; line-height: 1.55; }
+.k-kv > div { display: flex; justify-content: space-between; gap: 10px; }
+.k-kv > div > span { color: var(--k-muted); }
+.k-kv > div > b { font-weight: normal; color: var(--k-value); white-space: pre; }
+.k-kv > div.on, .k-kv > div.on > span, .k-kv > div.on > b { color: var(--k-ok); }
+
+/* Explanatory prose inside a panel. */
+.k-note { margin: 0; color: var(--k-dim); line-height: 1.5; font-family: var(--k-font-ui); }
+.k-note code, .k-note b { color: var(--k-value); font-family: var(--k-font); font-weight: normal; }
+.k-note.warn { color: var(--k-warn); border-left: 3px solid #7a5a1f; padding: 4px 8px; background: #17140e; }
 
 /* ---- text ------------------------------------------------------------------ */
 .ok   { color: var(--k-ok); }

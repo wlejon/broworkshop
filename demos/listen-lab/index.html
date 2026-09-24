@@ -3,311 +3,29 @@
 <head>
 <meta charset="utf-8">
 <title>Listen Lab</title>
-<style>
-  :root { color-scheme: dark; }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; height: 100vh; display: flex; flex-direction: column;
-    background: #0c0e12; color: #d7dde6;
-    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  }
-  header {
-    padding: 14px 18px; border-bottom: 1px solid #1d2330;
-    display: flex; align-items: baseline; gap: 14px;
-  }
-  header h1 { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: .3px; }
-  header .sub { color: #6b7686; font-size: 12px; }
-  main { flex: 1; display: flex; min-height: 0; }
-
-  /* ── left column: tier-0 sensors + timeline + fusion feed ─────────────── */
-  .left { flex: 1.2; display: flex; flex-direction: column; min-width: 0; }
-  .sensors {
-    display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;
-    padding: 12px 14px;
-  }
-  .card {
-    background: #11141b; border: 1px solid #1d2330; border-radius: 8px;
-    padding: 10px 12px; display: flex; flex-direction: column; gap: 6px;
-  }
-  .card .title { font-size: 11px; color: #6b7686; text-transform: uppercase; letter-spacing: .8px; }
-  .card .big { font-size: 20px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
-  .card .small { font-size: 11px; color: #8a94a6; }
-  .dot { width: 10px; height: 10px; border-radius: 50%; background: #2a3346; transition: background .08s; }
-  .dot.on { background: #54d68a; box-shadow: 0 0 8px #54d68a88; }
-  .dot.onset { background: #2a3346; }
-  .dot.onset.on { background: #ffb454; box-shadow: 0 0 8px #ffb45488; }
-  .dot.tonal.on { background: #6aa6ff; box-shadow: 0 0 8px #6aa6ff88; }
-  .meter {
-    height: 8px; background: #131720; border: 1px solid #1d2330;
-    border-radius: 4px; overflow: hidden; position: relative;
-  }
-  .meter .fill { height: 100%; width: 0%; background: #3c8c63; }
-  .meter .mark { position: absolute; top: -2px; bottom: -2px; width: 2px; background: #5a657a; }
-  /* ── stream tabs: each source is a full, identical dashboard ───────────── */
-  .tabs { display: flex; align-items: center; gap: 8px; padding: 8px 14px 0; flex-wrap: wrap; }
-  .tabstrip { display: flex; align-items: stretch; gap: 4px; flex-wrap: wrap; flex: 1; min-width: 0; }
-  .tab {
-    display: flex; align-items: center; gap: 7px; padding: 6px 12px; font-size: 12px;
-    border: 1px solid #1d2330; border-bottom: none; border-radius: 8px 8px 0 0;
-    background: #11141b; color: #97a1b2; cursor: pointer; max-width: 220px;
-  }
-  .tab:hover { background: #161b24; }
-  .tab.active { background: #0d1016; color: #eaf1fb; border-color: #2c3c57; font-weight: 600; }
-  .tab .tlabel { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .tab.mic { border-top: 2px solid #3c8c63; }
-  .tab.system { border-top: 2px solid #c9a6ff; }
-  .tab.process { border-top: 2px solid #6aa6ff; }
-  .tab .tclose { color: #6b7686; border-radius: 8px; padding: 0 4px; line-height: 1; }
-  .tab .tclose:hover { color: #ff8585; background: #2a1c1c; }
-  .tabadd { display: flex; align-items: center; gap: 6px; padding-bottom: 4px; }
-  .tabadd select.srcSel {
-    background: #1e1828; color: #d7dde6; border: 1px solid #4a3a55; border-radius: 6px;
-    padding: 5px 8px; font: inherit; font-size: 11px; max-width: 200px;
-  }
-  .tabadd .addStream { padding: 5px 11px; font-size: 12px; border-color: #4a3a55; color: #c9a6ff; background: #1e1828; }
-  .tabadd .addStream:hover { background: #2c2238; }
-  .tabadd .addStream:disabled { opacity: .45; cursor: default; }
-  .tabadd .refreshApps { padding: 5px 9px; font-size: 11px; border-color: #4a3a55; color: #c9a6ff; background: #1e1828; }
-  /* ── timeline (scrollable ~10 min stream history) ─────────────────────── */
-  .tlbar { display: flex; align-items: center; gap: 12px; padding: 6px 14px 4px; font-size: 11px; color: #8a94a6; }
-  .tlbar button { padding: 3px 10px; font-size: 11px; }
-  .tlbar button#tlLive.active { background: #2f6f4f; border-color: #3c8c63; color: #eafff2; }
-  .tlbar .tlspan { color: #6b7686; }
-  .tlbar .tlhover { color: #cfe0ff; font-variant-numeric: tabular-nums; margin-left: auto; }
-  .tllegend { display: flex; gap: 8px; align-items: center; color: #6b7686; }
-  .tllegend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 2px; vertical-align: middle; }
-  /* swatch modifier tokens are prefixed (sw-*) so they don't collide with the
-     gesture-row (.gest) / fusion-kind (.spot) selectors elsewhere. */
-  .sw-voice { background: #54d68a; } .sw-tonal { background: #6aa6ff; } .sw-onset { background: #ffb454; }
-  .sw-spot { background: #54d68a; border-radius: 50%; } .sw-gest { background: #c9a6ff; border-radius: 50%; }
-  .sw-speech { background: #36c5d0; border-radius: 50%; }
-  #chart { display: block; margin: 0 14px; border: 1px solid #1d2330; border-radius: 8px; width: calc(100% - 28px); cursor: crosshair; }
-  #overview { display: block; margin: 6px 14px 0; border: 1px solid #1d2330; border-radius: 6px; width: calc(100% - 28px); cursor: pointer; }
-  .tlbar .tlhint { color: #56617a; }
-  /* scratch-pad: a region grabbed off the live timeline, turned into a clip */
-  .scratch {
-    margin: 6px 14px 0; display: flex; align-items: center; gap: 10px;
-    background: #101a14; border: 1px solid #2f6f4f; border-radius: 8px;
-    padding: 6px 10px; font-size: 12px; color: #8be0ae;
-  }
-  .scratch.hidden { display: none; }
-  .scratch .slabel { font-variant-numeric: tabular-nums; }
-  .scratch .slabel b { color: #eafff2; font-weight: 600; }
-  .scratch .sgrow { flex: 1; }
-  .scratch button { padding: 3px 10px; font-size: 11px; }
-  .scratch button.smake { background: #2f6f4f; border-color: #3c8c63; color: #eafff2; }
-  .scratch button.sx { padding: 0 8px; border-radius: 10px; }
-
-  /* ── tier-3 live transcript (bro.stt Qwen3-ASR, voice-gated) ──────────── */
-  .transcript {
-    margin: 8px 14px 0; background: #0b1416; border: 1px solid #1c3a40;
-    border-radius: 8px; padding: 8px 12px;
-  }
-  .transcript .txhdr {
-    display: flex; align-items: center; gap: 8px; font-size: 11px; color: #6b7686;
-    text-transform: uppercase; letter-spacing: .8px; margin-bottom: 6px;
-  }
-  .transcript .txstat { text-transform: none; letter-spacing: 0; color: #4f9aa6; font-size: 11px; }
-  .transcript .txstat.err { color: #ff8585; }
-  .transcript .txstat.live { color: #36c5d0; }
-  /* translator status pill in the header (loading / ready / off) */
-  .transcript .txtl { text-transform: none; letter-spacing: 0; font-size: 10px; border-radius: 4px; padding: 0 6px; line-height: 15px; }
-  .transcript .txtl.load { color: #ffd479; background: #322a17; }
-  .transcript .txtl.ok   { color: #8be0ae; background: #16301f; }
-  .transcript .txtl.err  { color: #ff8585; background: #331a1a; }
-  .transcript .txtoggle { margin-left: auto; padding: 1px 9px; border-radius: 10px; font-size: 11px; }
-  .transcript .txlive {
-    height: 21px; font-size: 14px; color: #9fe7ef; line-height: 21px;
-    font-family: ui-monospace, monospace;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  }
-  .transcript .txlive .cur { color: #36c5d0; animation: blink 1s step-start infinite; }
-  .transcript .txlive .ph { color: #46555c; font-size: 12px; }
-  /* live English translation under the streaming partial — updates as words arrive */
-  .transcript .txliveen {
-    min-height: 18px; font-size: 13px; color: #8be0ae; line-height: 18px;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  }
-  .transcript .txliveen .tlcur { color: #5aa97a; }
-  @keyframes blink { 50% { opacity: 0; } }
-  /* a normal block (NOT a flex column) so rows keep their height and the box
-     scrolls — a flex column with max-height shrinks its children and they stack
-     on top of each other instead of scrolling. */
-  .transcript .txlines { margin-top: 6px; max-height: 132px; overflow-y: auto; }
-  .transcript .txline {
-    display: flex; gap: 8px; font-size: 12px; line-height: 18px; cursor: pointer;
-    padding: 2px 4px; border-radius: 4px; border-left: 2px solid transparent;
-    align-items: baseline;
-  }
-  .transcript .txline:hover { background: #10242a; }
-  .transcript .txline.playing { background: #10303a; border-left-color: #36c5d0; }
-  .transcript .txline { flex-wrap: wrap; }
-  .transcript .txline .tt { color: #4f6066; font-variant-numeric: tabular-nums; flex: none; }
-  .transcript .txline .tx { color: #c8d2dc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
-  .transcript .txline.playing .tx { color: #9fe7ef; }
-  /* diarized speaker chip — six rotating hues so turns are visually distinct */
-  .transcript .txline .spk { font-size: 10px; font-weight: 600; border-radius: 4px; padding: 0 5px; flex: none; line-height: 16px; }
-  .spk0 { background: #1e3a2c; color: #8be0ae; } .spk1 { background: #1e2a3a; color: #6aa6ff; }
-  .spk2 { background: #3a2d1e; color: #ffb454; } .spk3 { background: #332a3e; color: #c9a6ff; }
-  .spk4 { background: #10303a; color: #36c5d0; } .spk5 { background: #3a1e2e; color: #ff8fb0; }
-  /* detected-language badge on a non-English line */
-  .transcript .txline .lang { font-size: 10px; color: #ffd479; background: #322a17; border-radius: 4px; padding: 0 5px; flex: none; line-height: 16px; text-transform: lowercase; }
-  /* the English translation, on its own full-width row under the original */
-  .transcript .txline .txen { flex-basis: 100%; color: #8be0ae; font-size: 12px; padding-left: 38px; }
-  .transcript .txline .txen.pending { color: #5a7a66; font-style: italic; }
-  .transcript .txline .txen.refined { color: #b6f0ce; }   /* beam-search corrected pass */
-
-  /* ── click-to-inspect detail panel ────────────────────────────────────── */
-  .detail { margin: 10px 14px 0; background: #11141b; border: 1px solid #2c3c57; border-radius: 8px; padding: 10px 12px; font-size: 12px; }
-  .detail.hidden { display: none; }
-  .detail .dhdr { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-  .detail .dkind { font-size: 10px; border-radius: 4px; padding: 1px 7px; text-transform: uppercase; letter-spacing: .5px; }
-  .detail .dkind.spot { background: #2f6f4f; color: #eafff2; }
-  .detail .dkind.gesture { background: #332a3e; color: #c9a6ff; }
-  .detail .dkind.arm { background: #332a3e; color: #c9a6ff; }
-  .detail .dkind.speech { background: #10303a; color: #9fe7ef; }
-  .detail .dname { font-weight: 600; flex: 1; }
-  .detail .dconf { color: #cfe0ff; font-variant-numeric: tabular-nums; }
-  .detail .dclose { padding: 0 8px; border-radius: 10px; }
-  .detail .drow { color: #8a94a6; margin: 4px 0; }
-  .detail .drow b { color: #d7dde6; font-weight: 600; }
-  .detail .dplay { padding: 1px 9px; border-radius: 10px; font-size: 11px; margin-left: 4px; }
-  .detail .dchips { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; }
-  .detail .dchip { font-size: 11px; background: #18202e; border: 1px solid #2c3c57; color: #cfe0ff; border-radius: 5px; padding: 2px 6px; }
-  .detail .dchip.gap { background: #2a2330; border-color: #4a3a55; color: #c9a6ff; font-variant-numeric: tabular-nums; }
-  .feedhdr { padding: 10px 18px 4px; font-size: 11px; color: #6b7686; text-transform: uppercase; letter-spacing: .8px; }
-  .feed { flex: 1; overflow-y: auto; padding: 0 18px 8px; font-size: 12px; min-height: 0; }
-  .feed .row { padding: 3px 0; border-bottom: 1px solid #131720; display: flex; gap: 10px; }
-  .feed .row .t { color: #6b7686; }
-  .feed .row .kind { width: 50px; text-align: center; border-radius: 4px; font-size: 10px; padding: 1px 0; align-self: center; }
-  .kind.voice { background: #1e3a2c; color: #8be0ae; }
-  .kind.onset { background: #3a2d1e; color: #ffb454; }
-  .kind.tonal { background: #1e2a3a; color: #6aa6ff; }
-  .kind.arm   { background: #332a3e; color: #c9a6ff; }
-  .kind.spot  { background: #2f6f4f; color: #eafff2; }
-  .kind.heard { background: #10303a; color: #9fe7ef; }
-  .kind.spk   { background: #1e3a2c; color: #8be0ae; }
-  .kind.xlate { background: #173225; color: #8be0ae; }
-  .kind.sys   { background: #2a2335; color: #c9a6ff; }
-  .kind.info  { background: #1d2330; color: #8a94a6; }
-
-  /* ── right column: tier-2 templates ───────────────────────────────────── */
-  .right { width: 400px; border-left: 1px solid #1d2330; display: flex; flex-direction: column; min-height: 0; }
-  .controls { padding: 12px 14px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; border-bottom: 1px solid #1d2330; }
-  .controls label { font-size: 12px; color: #97a1b2; display: flex; gap: 6px; align-items: center; }
-  input[type="text"] {
-    background: #131720; color: #d7dde6; border: 1px solid #2c3c57;
-    border-radius: 6px; padding: 7px 10px; font: inherit; font-size: 12px; flex: 1; min-width: 140px;
-  }
-  input[type="number"] {
-    background: #131720; color: #d7dde6; border: 1px solid #2c3c57;
-    border-radius: 6px; padding: 5px 8px; font: inherit; font-size: 12px; width: 64px;
-  }
-  button {
-    background: #1b2638; color: #cfe0ff; border: 1px solid #2c3c57;
-    border-radius: 6px; padding: 7px 14px; font: inherit; font-size: 12px; cursor: pointer;
-  }
-  button:hover { background: #233248; }
-  button.active { background: #2f6f4f; border-color: #3c8c63; color: #eafff2; }
-  button.rec { background: #6f2f2f; border-color: #8c3c3c; color: #ffeaea; }
-  button:disabled { opacity: .45; cursor: default; }
-  .tmpls { flex: 1; overflow-y: auto; padding: 10px 14px; display: flex; flex-direction: column; gap: 10px; min-height: 0; }
-  .tmpl {
-    background: #11141b; border: 1px solid #1d2330; border-radius: 8px;
-    padding: 8px 10px; display: flex; flex-direction: column; gap: 6px;
-    transition: border-color .12s, background .12s;
-  }
-  .tmpl.fired { background: #16301f; border-color: #54d68a; }
-  .tmpl .trow { display: flex; align-items: center; gap: 8px; font-size: 12px; }
-  .tmpl .tname { font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .tmpl .badge {
-    font-size: 10px; background: #1e2a3a; color: #6aa6ff; border-radius: 4px;
-    padding: 1px 6px;
-  }
-  .tmpl .rm { padding: 0 7px; border-radius: 10px; font-size: 11px; }
-  .tmpl .tmeta { font-size: 11px; color: #8a94a6; }
-  .tbar {
-    height: 10px; background: #131720; border: 1px solid #1d2330;
-    border-radius: 5px; overflow: hidden; position: relative;
-  }
-  .tbar .tfill { height: 100%; width: 0%; background: #3c8c63; transition: width .06s linear; }
-  .noTmpls { color: #6b7686; font-size: 12px; }
-  .tmpl .tok { padding: 0 7px; border-radius: 10px; font-size: 11px; }
-  .tmpl .tok.open { background: #2c3c57; }
-  /* token panel: the decoded phoneme/gap sequence (bro.kws.inspect) */
-  .tokens { display: flex; flex-direction: column; gap: 6px; padding-top: 2px; }
-  .tokens .chips { display: flex; flex-wrap: wrap; gap: 4px; }
-  .tokens .chip {
-    display: inline-flex; align-items: center; gap: 4px; font-size: 11px;
-    background: #18202e; border: 1px solid #2c3c57; color: #cfe0ff;
-    border-radius: 5px; padding: 2px 6px;
-  }
-  .tokens .chip.gap { background: #2a2330; border-color: #4a3a55; color: #c9a6ff; font-variant-numeric: tabular-nums; }
-  .tokens .chip .x { background: none; border: none; color: #8a94a6; padding: 0; font-size: 12px; line-height: 1; cursor: pointer; }
-  .tokens .chip .x:hover { color: #ff8585; }
-  .tokens .tokedit { display: flex; gap: 6px; align-items: center; }
-  .tokens .tokedit button { padding: 4px 10px; font-size: 11px; }
-  .tokens .tokhint { font-size: 10px; color: #6b7686; }
-  /* ── gestures (tier-0, non-speech) ─────────────────────────────────────── */
-  .ghdr { padding: 12px 14px 6px; font-size: 11px; color: #6b7686; text-transform: uppercase; letter-spacing: .8px; border-top: 1px solid #1d2330; }
-  .gestures { padding: 0 14px 12px; display: flex; flex-direction: column; gap: 8px; }
-  .gest {
-    background: #11141b; border: 1px solid #1d2330; border-radius: 8px;
-    padding: 8px 10px; display: flex; flex-direction: column; gap: 8px; font-size: 12px;
-    transition: border-color .12s, background .12s;
-  }
-  .gest.fired { background: #16301f; border-color: #54d68a; }
-  .gest .grow { display: flex; align-items: center; gap: 8px; }
-  .gest .gname { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .gest .gkind { font-size: 10px; border-radius: 4px; padding: 1px 6px; }
-  .gkind.rhythm { background: #3a2d1e; color: #ffb454; }
-  .gkind.tone   { background: #1e2a3a; color: #6aa6ff; }
-  .gest .gmeta { font-size: 11px; color: #8a94a6; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .gest .rm { padding: 0 7px; border-radius: 10px; font-size: 11px; }
-  .gest .edit { padding: 2px 9px; border-radius: 10px; font-size: 11px; }
-  .gest .edit.open { background: #2c3c57; }
-  /* clip editor (expanded under a gesture row) */
-  .geditor:empty { display: none; }
-  .geditor { display: flex; flex-direction: column; gap: 8px; padding-top: 2px; }
-  .gest .gwave { display: block; width: 100%; border: 1px solid #1d2330; border-radius: 6px; cursor: ew-resize; }
-  .gest .ginfo { font-size: 11px; color: #8a94a6; font-variant-numeric: tabular-nums; }
-  .gest .gacts { display: flex; flex-wrap: wrap; gap: 6px; }
-  .gest .gacts button { padding: 4px 10px; font-size: 11px; }
-  .gest .gtol { display: flex; flex-direction: column; gap: 6px; }
-  .gest .gslider { display: flex; align-items: center; gap: 8px; font-size: 11px; color: #97a1b2; }
-  .gest .gslider span { width: 78px; }
-  .gest .gslider input[type="range"] { flex: 1; min-width: 80px; accent-color: #3c8c63; }
-  .gest .gslider b { width: 48px; text-align: right; color: #cfe0ff; font-variant-numeric: tabular-nums; }
-  .gest .ghint { font-size: 11px; color: #6b7686; }
-
-  .statusbar {
-    padding: 8px 18px; border-top: 1px solid #1d2330; font-size: 12px;
-    color: #8a94a6; display: flex; gap: 24px; flex-wrap: wrap;
-  }
-  .statusbar b { color: #d7dde6; font-weight: 600; }
-  .statusbar .err { color: #ff8585; }
-</style>
+<link rel="stylesheet" href="/lib/kit/kit.css">
+<link rel="stylesheet" href="/app/style.css">
 </head>
-<body>
-  <header>
+<body class="k-app">
+  <header class="k-header">
     <h1>Listen Lab</h1>
-    <span class="sub">the listening stack live — bro.sense tier-0 sensors + bro.kws template alignment, fused in one poll loop</span>
+    <span class="k-sub">the listening stack live — bro.sense tier-0 sensors + bro.kws template alignment, fused in one poll loop</span>
   </header>
-  <main>
+  <div class="k-body">
     <div class="left">
       <div class="tabs">
         <div class="tabstrip" id="tabStrip"></div>
         <span class="tabadd">
-          <select class="srcSel" id="srcSel" title="pick a source to add as a new stream"></select>
-          <button class="refreshApps" id="refreshApps" title="rescan apps currently playing audio">⟳</button>
-          <button class="addStream" id="addStream">＋ Add stream</button>
+          <select id="srcSel" title="pick a source to add as a new stream"></select>
+          <button id="refreshApps" class="small" title="rescan apps currently playing audio">⟳</button>
+          <button id="addStream">＋ Add stream</button>
         </span>
       </div>
       <div class="sensors">
         <div class="card">
           <span class="title">level</span>
           <span class="big" id="dbBig">−∞ dB</span>
-          <div class="meter"><div class="fill" id="levelFill"></div><div class="mark" id="floorMark" style="left:0%"></div></div>
+          <span class="k-meter block" id="levelMeter"></span>
           <span class="small" id="levelSmall">floor — · snr —</span>
         </div>
         <div class="card">
@@ -327,7 +45,7 @@
         </div>
       </div>
       <div class="tlbar">
-        <button id="tlLive" class="active" title="follow the live edge">● Live</button>
+        <button id="tlLive" class="small active" title="follow the live edge">● Live</button>
         <span class="tlspan" id="tlSpan">10.0 s</span>
         <span class="tllegend">
           <i class="sw-voice"></i>voice<i class="sw-tonal"></i>tonal<i class="sw-onset"></i>onset
@@ -336,14 +54,14 @@
         <span class="tlhint">shift-drag → clip</span>
         <span class="tlhover" id="tlHover">—</span>
       </div>
-      <canvas id="chart" height="200"></canvas>
+      <canvas id="chart"></canvas>
       <div class="scratch hidden" id="scratch"></div>
-      <canvas id="overview" height="46" title="full ~10 min — drag to scrub"></canvas>
+      <canvas id="overview" title="full ~10 min — drag to scrub"></canvas>
       <div class="transcript" id="transcript">
         <div class="txhdr">live transcript · Qwen3-ASR · diarized · translated
           <span class="txstat" id="txStat">…</span>
           <span class="txtl" id="txTl"></span>
-          <button class="txtoggle" id="txToggle" disabled>⏸</button>
+          <button class="txtoggle small" id="txToggle" disabled>⏸</button>
         </div>
         <div class="txlive" id="txLive"><span class="ph">— speak; words appear here while voice is active —</span></div>
         <div class="txliveen" id="txLiveEn"></div>
@@ -358,22 +76,20 @@
         <input type="text" id="phrase" placeholder="phrase or gesture name">
         <button id="enroll">Enroll</button>
         <button id="record" title="record a sound gesture from the mic, enroll its rhythm (enrollGaps)">● Record</button>
-        <label>threshold <input type="number" id="threshold" min="0.1" max="0.9" step="0.05" value="0.40"></label>
-        <label title="proportional coverage: a phrase must have this fraction of its phonemes actually heard to fire — stops a long phrase firing on a short suffix">coverage <input type="number" id="coverage" min="0" max="1" step="0.05" value="0.40"></label>
+        <label class="k-field">threshold <input type="number" id="threshold" min="0.1" max="0.9" step="0.05" value="0.40"></label>
+        <label class="k-field" title="proportional coverage: a phrase must have this fraction of its phonemes actually heard to fire — stops a long phrase firing on a short suffix">coverage <input type="number" id="coverage" min="0" max="1" step="0.05" value="0.40"></label>
         <button id="listen" disabled>Listen</button>
       </div>
-      <div class="tmpls" id="tmpls"><span class="noTmpls" id="noTmpls">no templates enrolled</span></div>
+      <div class="tmpls" id="tmpls"><span class="k-sub" id="noTmpls">no templates enrolled</span></div>
       <div class="ghdr">gestures — tier-0, non-speech (● Record a click rhythm or a whistle)</div>
-      <div class="gestures" id="gestures"><span class="noTmpls" id="noGest">no gestures — record clicks/taps or a sustained whistle</span></div>
+      <div class="gestures" id="gestures"><span class="k-sub" id="noGest">no gestures — record clicks/taps or a sustained whistle</span></div>
     </div>
-  </main>
-  <div class="statusbar">
+  </div>
+  <footer class="k-statusbar">
     <span id="status">loading…</span>
     <span>stream <b id="streamT">0.0 s</b></span>
     <span>spots <b id="spotCount">0</b></span>
-  </div>
-  <!-- ES modules sharing the exported `LL` object (core.js). main.js imports the
-       sibling modules in load order, then wires + boots. -->
+  </footer>
   <script type="module" src="/app/main.js"></script>
 </body>
 </html>

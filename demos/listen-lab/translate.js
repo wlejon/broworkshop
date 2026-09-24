@@ -1,5 +1,5 @@
 // Listen Lab — tier-3.5 translation (non-English → English), LIVE + per sentence.
-// (load after transcript.js)
+// lab.js registers maybeTranslate / onLivePartial as transcript hooks.
 //
 // TWO models, TWO tiers — a fast one that keeps up with the stream and a slower
 // one that makes it correct:
@@ -32,24 +32,18 @@
 //   • (no slow beam lane — the Qwen correctness tier replaced it.)
 // Committed lines are SEEDED from the last live translation so they don't flash
 // empty, then sharpened by the fast pass and the Qwen correctness pass.
-import { LL } from "/app/core.js";
-    const fs = require('fs');
-    const { fusionRow, langIsEnglish, $txTl } = LL;
+import { findWeights } from "/lib/kit/weights.js";
+import { D, app, fusionRow } from "/app/state.js";
+import { langIsEnglish, normLang, renderActiveLiveEn, renderLines } from "/app/transcript.js";
 
     // NLLB-200 distilled-600M, converted HF layout (config.json + tokenizer.json
     // + model.safetensors). The Translator owns its own tokenizer.
-    const NLLB_CANDIDATES = [
-        '../../../brolm/weights/nllb-200-distilled-600M',
-        'D:/projects/brolm/weights/nllb-200-distilled-600M',
-    ];
+    const NLLB_WEIGHTS = ['brolm/weights/nllb-200-distilled-600M'];
     // Qwen3-1.7B Q8_0 GGUF — the context-aware correctness tier (see
     // brolm/scripts/download_qwen3_translate.sh). 1.7B is the size/quality sweet
     // spot: it recovers the pro-drop meaning NLLB loses and stays a fraction of
     // the 8B's VRAM. DO NOT quant small models below Q6 — they malfunction.
-    const QWEN_CANDIDATES = [
-        '../../../brolm/weights/Qwen3-1.7B-GGUF/Qwen3-1.7B-Q8_0.gguf',
-        'D:/projects/brolm/weights/Qwen3-1.7B-GGUF/Qwen3-1.7B-Q8_0.gguf',
-    ];
+    const QWEN_WEIGHTS = ['brolm/weights/Qwen3-1.7B-GGUF/Qwen3-1.7B-Q8_0.gguf'];
     const MAX_NEW    = 200;  // NLLB beam-search cap (matches NLLB default)
     const FAST_BEAMS = 1;    // live + sentence pass: greedy, lowest latency
 
@@ -101,9 +95,8 @@ import { LL } from "/app/core.js";
     };
 
     function setTlStatus(kind, text) {
-        if (!$txTl) return;
-        $txTl.className = 'txtl ' + kind;       // load | ok | err
-        $txTl.textContent = text;
+        D.txTl.className = 'txtl ' + kind;      // load | ok | err
+        D.txTl.textContent = text;
     }
 
     // NLLB / the LLM return a bare translation; trim whitespace + wrapping quotes.
@@ -127,14 +120,14 @@ import { LL } from "/app/core.js";
 
     // ── LIVE partial (active stream only) ─────────────────────────────────────
     function onLivePartial(st, text, lang) {
-        if (!Translate.enabled || st !== LL.active) return;
+        if (!Translate.enabled || st !== app.active) return;
         if (!text || langIsEnglish(lang)) {      // nothing to translate / English
-            Translate.live = null; st._liveEn = null; LL.renderActiveLiveEn('');
+            Translate.live = null; st._liveEn = null; renderActiveLiveEn('');
             return;
         }
         if (!Translate.ready && !Translate.stub) return;
         // First partial of a new utterance: show a pending cursor immediately.
-        if (!st._liveEn) LL.renderActiveLiveEn('', true);
+        if (!st._liveEn) renderActiveLiveEn('', true);
         Translate.live = { st, text, lang };     // coalesce — keep only the latest
         pump();
     }
@@ -148,7 +141,7 @@ import { LL } from "/app/core.js";
         if (st._liveEn) line.en = st._liveEn;    // seed from the live line (no flash)
         else line.enPending = true;
         Translate.finalQ.push({ st, line, text: line.text, lang: line.lang });
-        if (st === LL.active) LL.renderLines();
+        if (st === app.active) renderLines();
         pump();
     }
 
@@ -177,10 +170,10 @@ import { LL } from "/app/core.js";
                     ctxRefine(task.st, task.line);
                 }
                 task.line.enPending = false;
-                if (task.st === LL.active) LL.renderLines();
-            } else if (en && task.st === LL.active) {     // live: only the visible stream
+                if (task.st === app.active) renderLines();
+            } else if (en && task.st === app.active) {     // live: only the visible stream
                 task.st._liveEn = en;
-                LL.renderActiveLiveEn(en, false);
+                renderActiveLiveEn(en, false);
             }
             pump();                                       // drain the next request
         };
@@ -192,7 +185,7 @@ import { LL } from "/app/core.js";
         const src = floresFor(task.lang);
         if (!src) { cb(''); return; }                     // unmapped language → skip
         try { runNllb(task.text, src, task.beams, cb); }
-        catch (e) { fusionRow(LL.active, 'info', 'translate error: ' + (e.message || e)); cb(''); }
+        catch (e) { fusionRow(app.active, 'info', 'translate error: ' + (e.message || e)); cb(''); }
     }
 
     function runNllb(text, src, beams, cb) {
@@ -200,7 +193,7 @@ import { LL } from "/app/core.js";
             numBeams: beams,
             maxNewTokens: MAX_NEW,
             onDone:  (out) => cb(out || ''),
-            onError: (e)   => { fusionRow(LL.active, 'info', 'translate error: ' + e); cb(''); },
+            onError: (e)   => { fusionRow(app.active, 'info', 'translate error: ' + e); cb(''); },
         });
     }
 
@@ -291,14 +284,14 @@ import { LL } from "/app/core.js";
             const en = cleanRefine(raw);
             if (en && en !== job.line.en) {
                 job.line.en = en; job.line.refined = true;
-                if (job.st === LL.active) LL.renderLines();
+                if (job.st === app.active) renderLines();
             }
             refineDrain();
         });
     }
 
     function runRefine(st, line, cb) {
-        const lang = LL.normLang(line.lang) || line.lang;
+        const lang = normLang(line.lang) || line.lang;
         if (Refine.stub) {                         // headless seam: (text, lang, dialogue) → english
             try { cb(Refine.stub(line.text, lang, buildDialogue(st, line))); }
             catch (e) { cb(null); }
@@ -338,25 +331,19 @@ import { LL } from "/app/core.js";
                 },
             });
         } catch (e) {
-            fusionRow(LL.active, 'info', 'correctness pass error: ' + (e.message || e));
+            fusionRow(app.active, 'info', 'correctness pass error: ' + (e.message || e));
             cb(null);
         }
     }
 
-    // ── load NLLB (fast tier), falling back through the candidate list ─────────
+    // ── load NLLB (fast tier) ──────────────────────────────────────────────────
     function tlLoad() {
         ctxLoad();                                 // bring up the correctness tier alongside
         if (Translate.stub) return;
-        // Resolve to an ABSOLUTE path (like txLoad): brokit's fs reads the relative
-        // candidate against the app mount root, but bro.lm's loader reads it against
-        // the process CWD — so hand the loader the realpath, not the relative string.
-        let dir = null;
-        for (const p of NLLB_CANDIDATES) {
-            try { if (fs.existsSync(p + '/config.json')) { dir = fs.realpathSync(p); break; } } catch (e) {}
-        }
+        const dir = findWeights(NLLB_WEIGHTS, { probe: 'config.json' });
         if (!dir) {
             setTlStatus('err', 'translate off');
-            fusionRow(LL.active, 'info', 'translation off — no NLLB-200 checkpoint found');
+            fusionRow(app.active, 'info', 'translation off — no NLLB-200 checkpoint found');
             return;
         }
         setTlStatus('load', 'translate: loading NLLB-200…');
@@ -366,30 +353,27 @@ import { LL } from "/app/core.js";
                     Translate.model = m; Translate.tag = 'NLLB-200';
                     Translate.ready = true; Translate.flores = {};
                     setTlStatus('ok', 'translate: NLLB-200');
-                    fusionRow(LL.active, 'info',
+                    fusionRow(app.active, 'info',
                         'translation ready (NLLB-200, ' + m.languageCount +
                         ' languages) — non-English speech gets a live + per-sentence English line');
                 },
                 onError: (e) => {
                     setTlStatus('err', 'translate off');
-                    fusionRow(LL.active, 'info', 'NLLB-200 load failed: ' + e);
+                    fusionRow(app.active, 'info', 'NLLB-200 load failed: ' + e);
                 },
             });
         } catch (e) {
             setTlStatus('err', 'translate off');
-            fusionRow(LL.active, 'info', 'NLLB-200 load threw: ' + (e.message || e));
+            fusionRow(app.active, 'info', 'NLLB-200 load threw: ' + (e.message || e));
         }
     }
 
     // ── load Qwen3-1.7B (correctness tier) ─────────────────────────────────────
     function ctxLoad() {
         if (Refine.stub || Refine.ready) return;
-        let path = null;
-        for (const p of QWEN_CANDIDATES) {
-            try { if (fs.existsSync(p)) { path = fs.realpathSync(p); break; } } catch (e) {}
-        }
+        const path = findWeights(QWEN_WEIGHTS);
         if (!path) {
-            fusionRow(LL.active, 'info',
+            fusionRow(app.active, 'info',
                 'correctness tier off — Qwen3-1.7B GGUF not found ' +
                 '(run brolm/scripts/download_qwen3_translate.sh)');
             return;
@@ -399,15 +383,15 @@ import { LL } from "/app/core.js";
                 onReady: ({ model, tokenizer }) => {
                     Refine.model = model; Refine.tok = tokenizer;
                     Refine.cacheN = 0; Refine.ready = true;
-                    fusionRow(LL.active, 'info',
+                    fusionRow(app.active, 'info',
                         'correctness tier ready (Qwen3-1.7B) — translations refine with ' +
                         'speaker-tagged scene context');
                 },
-                onError: (e) => fusionRow(LL.active, 'info', 'Qwen3-1.7B load failed: ' + e),
+                onError: (e) => fusionRow(app.active, 'info', 'Qwen3-1.7B load failed: ' + e),
             });
         } catch (e) {
-            fusionRow(LL.active, 'info', 'Qwen3-1.7B load threw: ' + (e.message || e));
+            fusionRow(app.active, 'info', 'Qwen3-1.7B load threw: ' + (e.message || e));
         }
     }
 
-    Object.assign(LL, { Translate, Refine, maybeTranslate, onLivePartial, tlLoad, ctxLoad, ctxRefine });
+    export { Translate, Refine, maybeTranslate, onLivePartial, tlLoad, ctxLoad, ctxRefine };

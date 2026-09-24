@@ -29,6 +29,8 @@ Ported examples: `demos/kws-lab` and `demos/lm-playground` (ML labs),
 | `physics3d.js` | Jolt + scene plumbing: body+visual pairs, body groups, rods, the event drain, pick rays, a mouse grabber |
 | `ragdoll.js` | a 12-part humanoid `Physics.createRagdoll` rig: poses as per-joint deltas, FK, blend, error metrics |
 | `text.js` | `bro.text` from JS: UTF-16 ↔ UTF-8 offsets, caret stops, cluster maps (data + drawn on a canvas) |
+| `audio.js` | PCM plumbing (no DOM): shared `AudioContext`, resample/concat/gain/peak/dB, `clipPlayer`, `saveWav`, `micRecorder`, `signal` test-audio generators |
+| `audio-ui.js` | audio widgets: `levelMeter`, `peakScope`, `historyPlot`, `waveView` (trim), `sourcePicker` (bro.listen sources), `transport`, `mixerStrips`, `fitCanvas` |
 | `test.js` | headless test helpers (assert, wait, click, type, screenshot) |
 
 ## Page skeleton
@@ -250,6 +252,36 @@ and Range count UTF-16 units. Convert explicitly:
   fillText with a box per cluster at its own pen x (ligatures pink,
   multi-glyph orange, RTL purple), byte-span labels and caret-stop ticks.
   Returns the map. Used by demos/text-lab and demos/range-selection-lab.
+
+**audio.js** — PCM helpers over one lazily created `AudioContext`
+(`audioContext()`); not imported by `index.js`.
+- `resample(pcm, inRate, outRate)` (linear), `concatPcm(parts)`,
+  `gained(pcm, gain, a, b)`, `peakOf(pcm, gain, a, b)`, `toDb(amp)`.
+- `clipPlayer()`: `play(pcm, rate)` replaces the previous clip; `stop()`.
+- `saveWav(pcm, rate, { path, defaultName, channels })`: 16-bit WAV; with
+  no `path` it opens a save dialog (never in tests). Returns the path or null.
+- `micRecorder({ rate, chunkFrames, agc, onChunk })`: `start()` / `stop()` -> Float32Array clip over
+  `bro.mic` (headless has no device; tests feed PCM instead, see
+  games/clap-runner).
+- `signal.silence/tone/sweep/clicks/concat(...)`: deterministic test audio.
+
+**audio-ui.js** — widgets over elements already in the page; each returns a
+small handle (see the doc comment on each export for opts):
+- `levelMeter(target, { min, max, curve, mark, needle })` -> `set(v)`,
+  `mark(v)`, `color(css)`; renders a `.k-meter`.
+- `peakScope(canvas, { history, color })` scrolling peak columns;
+  `historyPlot(canvas, { size, min, max, ref, fmt })` line plot of recent values.
+- `waveView(canvas, { height, trim, onTrim })` -> `set({ clip, gain,
+  analysis, sel })`: min/max waveform, `bro.sense.analyze` tonal/onset
+  overlay, draggable trim selection.
+- `sourcePicker(select, { refresh })` -> `rebuild()`, `spec()`: mic / system
+  loopback / per-app `bro.listen` sources.
+- `transport({ toggle, seek, time }, src)`: play/pause + seek + clock over
+  any `{ duration, position, seek, setPlaying }` source.
+- `mixerStrips(host, rows, { onMute, onSolo, level })` -> `update()`,
+  `paint(key, state)`: per-bus M/S + meter rows (`.k-strip`).
+- `fitCanvas(canvas)` -> `{ ctx, w, h }` in CSS pixels at devicePixelRatio.
+Used by demos/listen-lab, mic-chunks, scene-audio and spatial-audio.
 
 ## Headless tests
 

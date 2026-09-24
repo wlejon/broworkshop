@@ -1,8 +1,6 @@
 // test_smoke.js — headless integration test for Scene Audio.
 //
-// Run:
-//   ./build/Release/bro-headless.exe ../broworkshop/demos/scene-audio \
-//       ../broworkshop/demos/scene-audio/tests/test_smoke.js
+// Run: scripts/validate.sh demos/scene-audio
 //
 // Headless audio is deterministic: advanceTime() syncs scene emitters and the
 // camera-bound listener, then renders exactly that many frames through
@@ -26,7 +24,8 @@ import {
     streamState, seekStream, streamPositionSeconds,
     setTransportSource, transportPosition,
     midiState, triggerNote, tickMidi, scanPorts,
-} from "/app/app.js";
+} from "/app/lab.js";
+import { check as assert, shot } from "/lib/kit/test.js";
 
 advanceTime(64);
 flush();
@@ -156,7 +155,12 @@ const jet = dopplerState.jetNode;
 const jetPb = dopplerState.jetPlayback;
 ctx.setPlaybackGain(jetPb, 0.9);
 
-/** Fly the jet along +X past the listener, sampling the ratio each frame. */
+/**
+ * Fly the jet along +X past the listener, sampling the ratio each frame. The
+ * ratio read after a frame belongs to the velocity synced the frame BEFORE
+ * (doppler.js tickDoppler), so the first frame of motion still reads the
+ * parked jet's 1.0; that sample is dropped.
+ */
 function flySample(speed = 120, stepMs = 16, from = -100, to = 100) {
     const samples = [];
     const dt = stepMs / 1000;
@@ -169,7 +173,7 @@ function flySample(speed = 120, stepMs = 16, from = -100, to = 100) {
         advanceTime(stepMs);
         samples.push({ x, ratio: ctx.getPlaybackDopplerRatio(jetPb) });
     }
-    return samples;
+    return samples.slice(1);
 }
 
 const pass = flySample();
@@ -532,7 +536,30 @@ for (const s of sources) ctx.setPlaybackGain(s.playback, s.gain);
 ctx.setPlaybackGain(musicPlayback, 0.55);
 run(30);
 
-screenshot('scene-audio-smoke.png');
+// --- 13. The HUD drives the same entry points ---------------------------------
+
+assert(document.querySelectorAll('#mixerStrips .k-strip').length === 5, 'one mixer strip per bus');
+assert(document.querySelectorAll('#midiPadRow .pad').length === 12, 'twelve pad buttons');
+assert(document.querySelector('#oggState').textContent === 'ready', 'the HUD shows the async load landed');
+const insectsSolo = document.querySelector('#mixerStrips [data-bus="insects"] button[title="solo"]');
+insectsSolo.click();
+assert(ctx.getBusSolo(busId('insects')) && insectsSolo.classList.contains('solo'),
+    'the S button solos its bus and lights from getBusSolo');
+insectsSolo.click();
+assert(!anySoloedNow(), 'a second click clears it');
+document.querySelector('#transportSrc [data-value="stream"]').click();
+assert(state.transport === 'stream', 'the transport switch drives the stream');
+document.querySelector('#transportSrc [data-value="ram"]').click();
+assert(state.transport === 'ram', 'and back to the RAM clip');
+const notesBefore = midiState.noteCount;
+document.querySelectorAll('#midiPadRow .pad')[4].click();
+assert(midiState.noteCount === notesBefore + 1 && midiState.pads[4].lastNote === 64,
+    'a pad button strikes its pad through triggerNote');
+run(10);
+assert(/^\d+$/.test(document.querySelector('#midiNotes').textContent), 'note counter readout');
+function anySoloedNow() { return mixerState.order.some((k) => ctx.getBusSolo(busId(k))); }
+
+shot('smoke');
 
 // Print the numbers the assertions were made on: a passing test that shows its
 // measurements is far more useful than one that only says "OK", and these are
