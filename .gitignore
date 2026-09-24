@@ -30,5 +30,6 @@ bro.log
 *.log
 demos/world/planet-coarse.bin
 
-# scripts/validate.sh output (logs, screenshots, summary)
+# scripts/validate.sh output (logs, screenshots, summary), and apps' own test output
 /tests/out/
+*/*/tests/out/

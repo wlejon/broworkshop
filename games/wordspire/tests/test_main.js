@@ -143,9 +143,8 @@ test("classic: double-click the last tile submits", () => {
     frames(2);
     eq(W.board.words, words + 1, "CAT submitted by double-click");
     eq(W.board.chain.length, 0, "chain cleared");
-    // Not asserted: String(getSelection()) should be "" here, but the engine
-    // selects the toast's text (ENGINE-ISSUES.md, "Double-clicking a canvas").
-    window.getSelection().removeAllRanges();
+    // A double-click on the board canvas selects no page text (not the toast).
+    eq(String(window.getSelection()), "", "no text selected by the double-click");
 });
 
 test("classic: keyboard cursor, Space, Backspace, Enter", () => {

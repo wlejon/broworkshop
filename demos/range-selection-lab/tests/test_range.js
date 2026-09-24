@@ -21,18 +21,6 @@ function select(node, a, b, focusNode, focusOffset) {
     refreshRange();
 }
 
-/**
- * A check that a logged engine bug currently fails in one EXACT known way:
- * correct passes, the documented wrong answer is reported (not failed), and
- * any other answer fails. A fix therefore turns green on its own, and a
- * different regression still fails.
- */
-function known(ok, isKnownWrong, issue, msg) {
-    if (ok) return;
-    if (isKnownWrong) { console.log(`  KNOWN ENGINE ISSUE (${issue}): ${msg}`); return; }
-    check(false, msg);
-}
-
 /** A fresh copy of the original document, so each case starts from the same text. */
 const ORIGINAL = editor.innerHTML;
 function reset() {
@@ -72,9 +60,8 @@ test('the inspector reads a forward selection', () => {
     check(/<p#p1>/.test(text('#rangeAncestor')), 'common ancestor is the paragraph: ' + text('#rangeAncestor'));
     check(m.range.rects.length >= 1, 'at least one client rect: ' + m.range.rects.length);
     check(m.range.bounding.width > 20, 'bounding box has real width: ' + JSON.stringify(m.range.bounding));
-    const frag = text('#rangeFragment');
-    known(frag === 'The <strong>DOM</strong>', frag === 'DOM', 'Range clone/extract drop partially-contained nodes',
-        'fragment preview clones "The " and the partial <strong>: ' + frag);
+    eq(text('#rangeFragment'), 'The <strong>DOM</strong>',
+        'fragment preview clones "The " and the partial <strong>');
 });
 
 test('a backward selection reports direction backward', () => {
@@ -93,14 +80,22 @@ test('a collapsed caret in text puts the HUD at the caret', () => {
     check(c && c.height > 0, 'caret has geometry: ' + JSON.stringify(c));
     check(c.x > 20 && c.y >= 0, 'caret x is inside the editor, past the padding: ' + JSON.stringify(c));
     check(/^x \d+, y \d+/.test(text('#caretCoords')), 'HUD shows it: ' + text('#caretCoords'));
+    // The caret rect is in the same viewport space as element rects, menu bar
+    // or not: it sits on p2's first line.
+    const p2 = q('#p2').getBoundingClientRect();
+    check(c.viewportY >= p2.top - 1 && c.viewportY < p2.top + 29,
+        `caret viewport y ${c.viewportY} is on p2's first line (top ${p2.top})`);
 });
 
-// Coordinates from the ELEMENT rect: Range rects are shifted by the menu bar
-// (ENGINE-ISSUES.md), element rects and hit-testing are not.
 test('a real mouse drag selects text and the inspector follows', () => {
     reset();
-    const b = q('#p2').getBoundingClientRect();
-    const y = b.top + 14;                               // middle of the first 29px line
+    // Coordinates from a Range rect over the first word — the same viewport
+    // space the mouse uses.
+    const first = document.createRange();
+    first.setStart(textOf('p2'), 0);
+    first.setEnd(textOf('p2'), 6);
+    const b = first.getBoundingClientRect();
+    const y = b.top + b.height / 2;
     mouseDown(b.left + 1, y);
     mouseMove(b.left + 30, y);
     mouseMove(b.left + 60, y);
@@ -111,8 +106,17 @@ test('a real mouse drag selects text and the inspector follows', () => {
     check(rangeState.last.inEditor && !rangeState.last.selection.isCollapsed, 'the inspector saw it (selectionchange)');
 });
 
-// The wrap buttons run over ELEMENT-offset selections (whole child nodes):
-// surroundContents over offsets inside a text node hangs bro (ENGINE-ISSUES.md).
+test('bold wraps a plain text selection, and the toolbar click keeps it', () => {
+    reset();
+    const t = textOf('p2');
+    select(t, 7, 10);                                   // "any"
+    clickOn('#btnBold');                                // lands on the <b> inside the button
+    eq(rangeState.lastSurround, 'surround', 'surroundContents succeeded directly');
+    const s = q('#p2 strong');
+    check(s && s.textContent === 'any', 'the word is wrapped: ' + q('#p2').innerHTML.slice(0, 60));
+    eq(sel.toString(), 'any', 'the selection now spans the new <strong>');
+});
+
 test('bold wraps a whole-node selection with surroundContents', () => {
     reset();
     const first = textOf('p2').data;
@@ -136,32 +140,28 @@ test('italic, code, mark and badge wrap too', () => {
     }
 });
 
-// The spec: surroundContents throws InvalidStateError when the range
-// partially selects an element, and the app then extracts + wraps. bro does
-// not throw, and inserts an empty wrapper (ENGINE-ISSUES.md).
+// surroundContents throws InvalidStateError when the range partially selects
+// an element, and the app then extracts + wraps.
 test('wrapping across an element boundary falls back to extract + wrap', () => {
     reset();
     const em = q('#p2 em').firstChild;                  // "live telemetry"
     select(textOf('p2'), 30, 30, em, 4);                // "…the live" — ends inside <em>
     const want = currentRange().toString();
     clickOn('#btnMark');
+    eq(rangeState.lastSurround, 'extract', 'surroundContents threw, the fallback ran');
     const marks = [...q('#p2').querySelectorAll('mark')];
-    const ok = rangeState.lastSurround === 'extract' && marks.some((m) => m.textContent === want);
-    const knownWrong = rangeState.lastSurround === 'surround' && marks.some((m) => m.textContent === '');
-    known(ok, knownWrong, 'surroundContents never throws',
-        `a <mark> holds exactly ${JSON.stringify(want)} after the extract fallback: ` +
-        `path ${rangeState.lastSurround}, ${q('#p2').innerHTML.slice(0, 120)}`);
+    check(marks.some((m) => m.textContent === want),
+        `a <mark> holds exactly ${JSON.stringify(want)}: ${q('#p2').innerHTML.slice(0, 120)}`);
 });
 
 test('extract across an element boundary', () => {
     reset();
     select(textOf('p1'), 0, 0, q('#p1 strong').firstChild, 3);   // "The DOM"
     clickOn('#btnExtract');
-    const html = rangeState.lastFragment && rangeState.lastFragment.html;
-    const ok = html === 'The <strong>DOM</strong>' && q('#p1').textContent.startsWith(' Range');
-    const knownWrong = html === '' && q('#p1').textContent.startsWith('The DOM Range');
-    known(ok, knownWrong, 'Range clone/extract drop partially-contained nodes',
-        `extract took "The <strong>DOM</strong>" out: got ${JSON.stringify(html)}, p1 now ${JSON.stringify(q('#p1').textContent.slice(0, 20))}`);
+    eq(rangeState.lastFragment && rangeState.lastFragment.html, 'The <strong>DOM</strong>',
+        'extract took "The <strong>DOM</strong>" out');
+    check(q('#p1').textContent.startsWith(' Range'), 'p1 now starts " Range": ' +
+        JSON.stringify(q('#p1').textContent.slice(0, 20)));
 });
 
 test('extract removes the range into a fragment', () => {
@@ -182,10 +182,9 @@ test('clone copies without touching the document', () => {
     clickOn('#btnClone');
     eq(rangeState.lastFragment.kind, 'cloned', 'kind');
     eq(editor.innerHTML, before, 'document unchanged');
-    const html = rangeState.lastFragment.html;
-    known(html === 'The <strong>DOM Range</strong>', html === '', 'Range clone/extract drop partially-contained nodes',
-        'the fragment is "The <strong>DOM Range</strong>", got ' + JSON.stringify(html));
-    // Element offsets clone correctly: the same content as whole child nodes.
+    eq(rangeState.lastFragment.html, 'The <strong>DOM Range</strong>',
+        'text@0 -> end of the <strong> text clones the partial <strong>');
+    // Element offsets give the same content as whole child nodes.
     select(q('#p1'), 0, 0, q('#p1'), 2);
     clickOn('#btnClone');
     eq(rangeState.lastFragment.html, 'The <strong>DOM Range</strong>', 'element-offset clone');
@@ -202,7 +201,10 @@ test('insert stamp replaces the selection and leaves the caret after it', () => 
     check(q('#p3').textContent.startsWith(`[stamp #${n + 1}]out`), 'it replaced "Check ": ' + q('#p3').textContent.slice(0, 30));
     check(sel.isCollapsed, 'caret collapsed');
     const r = currentRange();
-    check(r.startContainer === q('#p3') && r.startOffset === 1, `caret right after the stamp (p3@1), got ${r.startContainer.nodeName}@${r.startOffset}`);
+    // insertNode at text offset 0 splits the text, leaving an empty text node
+    // before the stamp (as Chromium does), so the offset is not fixed.
+    check(r.startContainer === q('#p3') && q('#p3').childNodes[r.startOffset - 1] === stamp,
+        `caret right after the stamp, got ${r.startContainer.nodeName}@${r.startOffset}`);
 });
 
 test('delete removes the selected text', () => {

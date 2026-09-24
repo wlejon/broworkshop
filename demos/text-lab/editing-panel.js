@@ -117,8 +117,7 @@ function renderEmpty(rows) {
         c[1].textContent = r.rangeCount;
         c[2].textContent = r.collapsed === null ? '—' : r.collapsed ? 'yes' : 'no';
         c[3].textContent = r.typed;
-        if (!r.ok && r.engineIssue) verdict(c[4], null, 'ENGINE BUG — ' + r.engineIssue);
-        else verdict(c[4], r.ok, r.ok ? 'as specified' : 'WRONG — want ' + r.want);
+        verdict(c[4], r.ok, r.ok ? 'as specified' : 'WRONG — want ' + r.want);
     });
 }
 

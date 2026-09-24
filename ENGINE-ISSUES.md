@@ -85,108 +85,21 @@ Affects: the kit `.k-side` column (demos/nav-lab and others).
 
 ### Selection, Range and editing
 
-#### Range rects are zero-width outside a scroller's viewport (2026-09-24)
-`Range.getBoundingClientRect()` over text scrolled out of an `overflow:auto`
-container returns the right `top` but `width: 0`. Text below the window fold
-and element rects are fine.
-Repro: `<div style="height:200px;overflow-y:auto;font:20px Arial"><div>near text</div><div style="height:1000px"></div><div id=far>far text</div></div>`,
-a Range over `#far`'s first 4 chars: width 0 (29 once scrolled into view).
-Affects: demos/text-lab scrolls each probe into view first (`reveal()` in input.js).
+#### Element rects ignore the root scroller's scroll; `window.scrollTo` targets `<html>` (2026-09-24)
+Element `getBoundingClientRect` does not subtract the viewport's own scroll
+(`scrollY_`), while Range rects now do, so the two disagree once the root has
+scrolled. `window.scrollTo` sets `<html>`'s `scrollTop` (a no-op when `<html>`
+is not a scroller) while `window.scrollY` reads the viewport's scroll.
 
-#### Range rects are shifted down by the menu bar height (2026-09-24)
-Once `bro.menu` is shown (every kit app's `boot()` installs one), Range
-`getBoundingClientRect()` / `getClientRects()` (collapsed carets included) come
-back 28px too low; element rects and mouse hit-testing stay right.
-Repro: `<p id=c>Select any segment</p>`, Range over the first 6 chars:
-`range.top - p.top` is 0, then 28 after
-`bro.menu.show(); bro.menu.set([{label:'File',items:[{id:'q',label:'Quit'}]}])`.
-Affects: demos/range-selection-lab's caret HUD; anything anchored to a
-selection rect.
+#### `setRangeText` resets the control's undo history (2026-09-24)
+`setRangeText` (bro 30ee3208) behaves like assigning `value`: the undo stack
+is cleared, so tools/desktop-notebook's formatting commands still have no
+native undo.
 
-#### Range clone/extract drop partially-contained nodes; extract removes nothing (2026-09-24)
-`cloneContents()` / `extractContents()` are right only when both boundaries
-are in one text node or are element offsets (`src/dom/range.cpp` has no
-partially-contained-child step). With `<p id=q>Select any <em>live telemetry</em> here</p>`
-and `<p id=p>The <strong>DOM Range</strong> interface</p>`:
-- text@3 → em text@4: clone gives `"ect any live"` (want `ect any <em>live</em>`);
-  extract returns `""` and leaves the document untouched;
-- text@0 → em text@4: clone gives `"live"`;
-- `#p` text@0 → end of `<strong>`'s text: clone gives `""`.
-Affects: demos/range-selection-lab's fragment preview, clone and extract
-buttons; its tests pin the current wrong outputs.
-
-#### `surroundContents` hangs on a text-only range and never throws (2026-09-24)
-`r.setStart(t, 0); r.setEnd(t, 2); r.surroundContents(document.createElement('b'))`
-on a paragraph's text node never returns (killed after 30 s). Over a range that
-partially selects an element (text@3 → inside `<em>`) the spec says throw
-`InvalidStateError`; bro inserts an empty `<mark></mark>` at the start instead
-(`Sel<mark></mark>ect any <em>live</em> here`). Element-offset ranges wrap correctly.
-Affects: demos/range-selection-lab's B / I / </> / mark / badge buttons hang
-the app on a plain text selection; its tests only use element-offset selections.
-
-#### Script changes to the Selection fire no `selectionchange` (2026-09-24)
-`selectionchange` never fires for `getSelection().setBaseAndExtent(...)`,
-`.collapse(...)` or `removeAllRanges()` + `addRange(r)` (count 0 after each,
-with `advanceTime` + `flush`). Chromium queues one per change.
-Affects: demos/range-selection-lab's inspector re-reads after its own operations.
-
-#### Selection paint: shown inside `display:none`, and overshoots an element-offset end (2026-09-24)
-- Select "some" in `<p id=plain>some plain text here</p>`, then
-  `plain.style.display = 'none'`: a blue selection box stays painted (at the
-  top-left of the page in the repro), over whatever is there now.
-  demos/range-selection-lab: a Range-tab selection paints over the text
-  shaper canvas after switching tabs.
-- `<p id=p1>first <b>second</b> tail</p>`, `r.setStart(p1.firstChild, 4); r.setEnd(p1, 2)`
-  mirrored into the selection: `toString()` is `"t second"`, but the highlight
-  runs to the end of the paragraph. demos/dom-lab's Range panel.
-
-#### A click on a text-less block puts the caret in text elsewhere (2026-09-24)
-A click on an empty non-editable block should clear the selection
-(`input_mouse.cpp` has a `removeAllRanges()` branch), but
-`layout::hitTestText` snaps to the nearest text anywhere, so the caret lands
-in another paragraph (possibly a contenteditable one).
-Repro: `<p id=other>some other text</p><div id=plain style="height:40px"></div><p>plain text below</p>`,
-collapse the selection in `#other`, then `mouseDown/mouseUp` 20px into
-`#plain`: the selection collapses in "plain text below" at offset 3.
-Chromium puts the caret in the clicked div.
-Affects: demos/text-lab's editing panel shows it as ENGINE BUG.
-
-#### Clicking inside a `<button>`'s child moves the selection into it (2026-09-24)
-A press on a `<button>` leaves the selection alone; a press on an element
-inside one (`<button><b>Bold</b></button>`, usual toolbar markup) collapses
-the selection into that child's text: `input_mouse.cpp` checks only the hit
-target's own tag, and never reads `defaultPrevented` on mousedown.
-Repro: select "some" in `<p>some plain text</p>`, `mouseDown/mouseUp` on the
-`<b>`: the selection becomes `""` inside the `<b>`.
-Affects: demos/range-selection-lab uses `user-select: none` on its toolbar.
-
-#### Double-clicking a canvas selects nearby `pointer-events: none` text (2026-09-24)
-`Engine::handleMouseDown` runs `layout::hitTestText(docX, docY)` whatever the
-press target is, and the text hit test finds text that is not under the
-pointer and has `pointer-events: none`.
-Repro: a 300x200 `<canvas>` and below it an absolutely positioned
-`pointer-events:none` div "CAT  +15"; two `click()`s on the canvas:
-`String(getSelection())` is `"15"` (Chromium `""`).
-Affects: games/wordspire (double-clicking a tile selects the `#action-text`
-toast). Any canvas game with a DOM overlay; `user-select: none` on the canvas hides it.
-Want: a press on a replaced element (canvas, img, video) starts no text
-selection, and text hit testing skips `pointer-events: none`.
-
-#### A canvas drag with `mousedown` default-prevented still selects text (2026-09-24)
-Pressing on a `<canvas>` whose `mousedown` handler calls `preventDefault()`
-and dragging still starts a text selection. Chromium starts none.
-Repro: `<div hidden>…</div><canvas width=400 height=200></canvas><p>visible after</p>`,
-drag across the canvas: `String(getSelection())` is `"e after"`.
-In tools/synth (with `user-select: none` removed from
-`[data-pane=editor] .k-viewport`) the selection also ran through a `hidden`
-pane's labels and painted phantom highlight boxes over the canvas; the
-minimal repro no longer selects the hidden text (not re-run in the synth).
-Affects: tools/synth keeps `user-select: none` on its waveform viewport.
-
-#### `<textarea>` / `<input>` have no `setRangeText` (2026-09-24)
-`typeof document.createElement('textarea').setRangeText` is `'undefined'`.
-Affects: tools/desktop-notebook (lib/editor.js `splice` rewrites `value` +
-`setSelectionRange`, losing native undo grouping).
+#### Range delete/extract leak detached nodes until teardown (2026-09-24)
+`Range.deleteContents` / `extractContents` no longer free nodes a script may
+still hold, but nothing frees them later either, so the contenteditable
+engine paths keep them until the document is torn down.
 
 ### DOM APIs, events, CSS animations
 
@@ -464,5 +377,6 @@ from the commit before the kit rebuild.
 - `postMessage({ v: view }, [view.buffer])` clones then detaches — brokit efcb977, bro 04729bdd; verified 2026-09-24. window-lab sends the view transferred.
 - `new Worker(new URL(...), { type: 'module' })` works — bro 06899506; verified 2026-09-24. worker-sim and stompworld use it.
 - Scene, verified 2026-09-24 (bro `tests/scene/` 58/58): `unprojectLocal(x, y)` → `{ origin, dir }` works with `setCamera` and camera nodes, plus the inverse `projectLocal(x, y, z)` (a7347b39; kit `sceneViewport.ray/toScreen`, arcade `rayAt/toScreen` and `pickRay` wrap them); TileWorld `addObject({ color })` tint and the dropped `addObjectKind` style keys (1ada0970); `atlasPixels` takes any byte view (a1136e4d); `setFog(null)` (c3b9f275); sprite `isPlaying` / `currentAnimation` (f5a7b7bb); 2D particle options and `liveCount` (d1bfc7f9); one wrapper per scene node, so `===` works (daec207d); a scene HtmlNode takes clicks only where it shows content and honours `pointer-events: none` (1b4e093b; farm's name tags are `pointer-events: none`).
+- Selection, Range and editing, verified 2026-09-24 (bro `tests/dom/`, `tests/events/test_selection_press.js`): Range rects in scrolled-out text and under the menu bar, and per-line rects for wrapped inline elements (htmlayout 73996c8, bro 66aa265e, 8a83b3be); spec clone/extract/delete for partially-contained nodes, `surroundContents` throws InvalidStateError instead of hanging, `insertNode` per spec, `selectionchange` from script, `getRangeAt` returns the live range (8a83b3be); selection paint skips `display:none` and stops at element offsets (73996c8, 66aa265e); a press moves the selection only where a caret can go: a text-less block takes the caret itself, a button's child, a canvas, `pointer-events:none` text and a prevented mousedown start no selection (89a886dd); `setRangeText` (30ee3208). range-selection-lab tests assert the right results, text-lab drops `reveal()` and its ENGINE BUG panel, synth drops `user-select:none` on its viewport, desktop-notebook's `splice` uses `setRangeText`.
 - Layout (htmlayout; bro tests in `tests/layout/`), verified 2026-09-24: column flex with a percentage width (978de23); `min-width` on inline-block and shrink-to-fit max-width (0f195e7, 4be8a38); `grid-column: 1 / -1` (1d72e7f); a text run after an inline element breaks inside the text (a8d25ed; inline elements join their block's lines); flex intrinsics with `letter-spacing` (8b3d5b2) and top-level inline-flex/inline-grid shrink to fit (4be8a38); flex-wrap rows that exactly fit (68c76b6); `table-layout: fixed` (404fe87); `text-overflow: ellipsis` (d6da139); rects of descendants of a newly hidden element (2ec6c57). procwatch styles its tags as chips again, shader-lab's panes are 50/50, nav-lab's test checks the button's own rect.
 - bro-server no longer runs the page's scripts (with no script named it runs `server.js`) — bro 80c8ec0f; verified 2026-09-24. games/fps dropped its missing-scene tolerance.

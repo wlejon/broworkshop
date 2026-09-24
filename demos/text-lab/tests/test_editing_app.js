@@ -53,21 +53,13 @@ test('editing: boundary cases', () => {
     }
 });
 
-// A row that fails on a logged engine bug must say so (engineIssue), and is
-// reported rather than failed; every other row must pass.
 test('editing: empty hosts', () => {
     const rows = emptyHostReport();
     assert(rows.length === 4, 'four empty-host cases, got ' + rows.length);
     for (const r of rows) {
-        if (!r.ok && r.engineIssue) {
-            console.log(`  KNOWN ENGINE ISSUE — ${r.label}: ${r.engineIssue}; got rangeCount ${r.rangeCount}`);
-            continue;
-        }
         assert(r.ok, `${r.label} (${r.why}): ${r.want} — got rangeCount ${r.rangeCount}, ` +
             `caret on host ${r.onHost}, typed ${JSON.stringify(r.typed)}`);
     }
-    assert(rows.filter((r) => r.engineIssue).every((r) => r.id === 'plain'),
-        'only the non-editable control can be excused by an engine issue');
 });
 
 test('editing: inside bidi text', () => {

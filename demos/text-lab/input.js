@@ -28,11 +28,9 @@ export function pump() {
 }
 
 /**
- * Scroll `el` into the visible part of the scrolling #main before measuring
- * or clicking it. Clicks must land on screen anyway; and bro reports a Range
- * over text clipped out of a scroll container's viewport as ZERO wide
- * (ENGINE-ISSUES.md, "Range rects are zero-width outside a scroller's
- * viewport"), so a probe must also be visible when it is measured.
+ * Scroll `el` into the visible part of the scrolling #main before clicking
+ * into it: a real click has to land on screen. (Measuring needs no reveal —
+ * Range rects report text wherever it is, scrolled out of view or not.)
  */
 export function reveal(el) {
     if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView();

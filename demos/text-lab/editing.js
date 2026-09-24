@@ -241,23 +241,18 @@ export function emptyHostReport() {
             ok: r.rangeCount === 1 && r.ed.textContent === 'abc!', want: 'rangeCount 1 and typing appends: "abc!"' });
     }
     {
-        // The control: a NON-editable div that hits no text must still clear
-        // the selection, or the fix is a regression in the other direction.
+        // The control: a NON-editable div that hits no text. The caret goes
+        // into the div the user clicked (Chromium's answer) — never into text
+        // elsewhere, such as the editable host a moment ago.
         const plain = freshPlain('');
         const other = document.getElementById('editLive');
         if (other && other.firstChild) caretAt(other.firstChild, 0);
         clickInto(plain, 20, 10);
-        // Cleared (bro's intent: input_mouse.cpp removeAllRanges) or collapsed
-        // inside the clicked div (Chromium) are both right; a caret in text
-        // OUTSIDE the div the user clicked is not.
         const inPlain = sel.rangeCount > 0 && plain.contains(sel.anchorNode);
-        const ok = sel.rangeCount === 0 || inPlain;
         rows.push({ id: 'plain', label: 'non-editable empty div (control)',
-            why: 'the fix is scoped to editable hosts; a plain div that hits no text still drops the selection',
+            why: 'a plain div that hits no text takes the caret itself; the text elsewhere is not a target',
             rangeCount: sel.rangeCount, onHost: inPlain, collapsed: sel.rangeCount ? sel.isCollapsed : null, typed: '—',
-            ok, want: 'rangeCount 0 (cleared), or a caret inside the clicked div — not in text elsewhere',
-            engineIssue: ok ? null : 'a click on a text-less block snaps the caret to the nearest text ANYWHERE ' +
-                'in the document (ENGINE-ISSUES.md)' });
+            ok: inPlain && sel.isCollapsed, want: 'a collapsed caret inside the clicked div, not in text elsewhere' });
     }
     return rows;
 }

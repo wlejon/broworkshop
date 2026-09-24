@@ -87,13 +87,10 @@ export class NoteEditor {
 
     /**
      * Replace [start, end) with `text`; mode 'select' selects the new text,
-     * 'end' puts the caret after it. (setRangeText's contract; bro's textarea
-     * has no setRangeText, see ENGINE-ISSUES.md.)
+     * 'end' puts the caret after it.
      */
     splice(text, start, end, mode) {
-        const v = this.ta.value;
-        this.ta.value = v.slice(0, start) + text + v.slice(end);
-        this.ta.setSelectionRange(mode === 'select' ? start : start + text.length, start + text.length);
+        this.ta.setRangeText(text, start, end, mode);
     }
 
     /** Wrap the selection (or `placeholder`) in prefix/suffix and select the inner text. */

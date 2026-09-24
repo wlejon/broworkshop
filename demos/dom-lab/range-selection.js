@@ -2,10 +2,10 @@
 // an element offset, show it through window.getSelection(), wrap it with
 // surroundContents(), collapse it. The diagnostics table reads the Range back.
 //
-// The range deliberately ends at an ELEMENT boundary (after <strong>): a range
-// ending partway into a later text node would be spec-legal for
-// surroundContents, but bro drops the partially-contained text (see
-// ENGINE-ISSUES.md, "Range clone/extract drop partially-contained nodes").
+// The range ends at an ELEMENT boundary (after <strong>), so one Range shows
+// both kinds of boundary point — and surroundContents stays legal: a range
+// ending partway into the NEXT element would partially select it, and the
+// spec makes that an InvalidStateError.
 
 import { $ } from "/lib/kit/dom.js";
 

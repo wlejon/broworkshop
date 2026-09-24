@@ -16,7 +16,6 @@ import { codePoints, u16ToU8, u8ToU16, sliceByBytes, codePointLabels, utf8Length
 import { h, clear } from '/lib/kit/dom.js';
 import { shape } from '/app/shaping.js';
 import { n2, table, result, glyphCell } from '/app/report.js';
-import { reveal } from '/app/input.js';
 
 // Latin, Hebrew, Latin: every interesting boundary appears twice.
 //   a(0) b(1) c(2) ␠(3) א(4-5) ב(6-7) ג(8-9) ␠(10) d(11) e(12) f(13)
@@ -245,7 +244,6 @@ function probe() {
     const host = document.getElementById('bidiDomProbe');
     const node = host && host.firstChild;
     if (!node) return null;
-    reveal(host);
     const hostRect = host.getBoundingClientRect();
     const rectFor = (a, b) => {
         const r = document.createRange();

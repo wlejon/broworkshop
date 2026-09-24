@@ -36,7 +36,7 @@
 
 import { utf8Length, codePoints } from '/lib/kit/text.js';
 import { MIXED } from '/app/bidi.js';
-import { pump, reveal } from '/app/input.js';
+import { pump } from '/app/input.js';
 import { n2, result, checkRows, glyphCell } from '/app/report.js';
 
 /** The torture string (the ZWJs between the family members are invisible here). */
@@ -84,7 +84,7 @@ function freshText(s) {
 
 function freshHTML(html) {
     stage.innerHTML = html;
-    reveal(stage);
+    pump();
     return stage;
 }
 

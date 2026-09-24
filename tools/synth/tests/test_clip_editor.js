@@ -54,7 +54,9 @@ test('generate a tone', () => {
 });
 
 test('drag on the waveform selects a region', () => {
+    window.getSelection().removeAllRanges();
     dragSelect(0.25, 0.5);
+    eq(String(window.getSelection()), '', 'the canvas drag selects no page text');
     const sel = clip.selection;
     check(sel, 'selected');
     near(sel.a / rate, 0.25, 0.02, 'from a quarter');

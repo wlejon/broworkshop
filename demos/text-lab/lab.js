@@ -190,8 +190,7 @@ export function panelVerdicts() {
             e.stepping !== null && e.stepping.every((r) => r.symmetric && r.matchesShaper && r.monotonic &&
                 r.onCodePointBoundaries && r.noSplitSurrogates && r.reachedEnd && r.reachedStart) &&
             e.boundary !== null && e.boundary.every((x) => x.ok) &&
-            // A row failing on a logged engine bug is shown as such, not counted against the panel.
-            e.emptyHost !== null && e.emptyHost.every((r) => r.ok || r.engineIssue) &&
+            e.emptyHost !== null && e.emptyHost.every((r) => r.ok) &&
             e.rtl !== null && e.rtl.every((r) => r.symmetric && r.matchesShaper && r.rightIncreases &&
                 r.reachedEnd && r.rtlStopCount === r.wantRtlStopCount && r.backspaceOk && r.typeOk && r.wellFormed) &&
             e.caretGeometry !== null && e.caretGeometry.ok,

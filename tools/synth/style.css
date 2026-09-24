@@ -64,7 +64,7 @@
 #ed-toolbar { gap: 6px; }
 #ed-seek { width: 160px; }
 #ed-time, #ed-zoom, #ed-cursor { min-width: 56px; }
-[data-pane=editor] .k-viewport { margin: 8px var(--k-pad); border: 1px solid var(--k-border); border-radius: 6px; user-select: none; }
+[data-pane=editor] .k-viewport { margin: 8px var(--k-pad); border: 1px solid var(--k-border); border-radius: 6px; }
 [data-pane=editor] .k-side .k-row { gap: 4px; }
 
 /* ---- piano ---------------------------------------------------------------------- */

@@ -6,8 +6,6 @@
 .hint.pad { padding: 8px var(--k-pad) 0; }
 .dim { color: var(--k-dim); }
 code { color: #93b8f0; background: var(--k-input); padding: 0 4px; border-radius: 3px; }
-/* An editor toolbar is chrome, not content: its labels are never selectable. */
-#rangeTools { user-select: none; }
 .group-label { color: var(--k-dim); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }
 .k-side.wide { width: 380px; }
 .k-field.grow { flex: 1; min-width: 220px; }
@@ -76,7 +74,6 @@ textarea.source { flex: 1; margin: 10px var(--k-pad); resize: none; font-family:
 .tree .val { color: var(--k-ok); }
 .tree .text { color: var(--k-muted); }
 .tree .error { color: var(--k-err); background: #2a1414; border-radius: 6px; padding: 10px; white-space: pre-wrap; }
-.parser-note { margin: 10px var(--k-pad) 0; padding: 8px 10px; border-radius: 5px; background: #2a2412; color: var(--k-warn); line-height: 1.5; }
 
 /* --- shaper ------------------------------------------------------------------ */
 .canvas-wrap { overflow-x: auto; border: 1px solid var(--k-border); border-radius: 6px; flex: none; }
