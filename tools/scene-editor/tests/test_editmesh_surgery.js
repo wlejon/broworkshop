@@ -1,12 +1,12 @@
-import { EditMesh } from "/app/edit-mesh.js";
-import { Primitive } from "/app/primitive.js";
+import { EditMesh } from "/app/model/edit-mesh.js";
+import { Primitive } from "/app/model/primitive.js";
 // EditMesh surgery primitives — unit tests.
 //
 // Exercises findFaceGroupBoundary / duplicateBoundary / addBridge against
 // known meshes (box, cylinder) so push/pull's commit path can compose them
 // confidently. No scene/canvas needed.
 //
-// Run: bro-headless apps/scene-editor apps/scene-editor/test_editmesh_surgery.js
+// Run: scripts/validate.sh tools/scene-editor
 
 'use strict';
 

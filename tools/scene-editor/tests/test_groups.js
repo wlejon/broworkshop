@@ -8,7 +8,7 @@
 //   - inserting a second instance yields two positions for the same geometry
 //   - serialize / deserialize round-trips the tree + components
 //
-// Run: bro-headless apps/scene-editor apps/scene-editor/test_groups.js
+// Run: scripts/validate.sh tools/scene-editor
 
 advanceTime(50);
 flush();

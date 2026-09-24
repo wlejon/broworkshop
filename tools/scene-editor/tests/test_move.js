@@ -14,7 +14,7 @@
 //   - delete-during-drag cancels safely
 //   - chained moves compose
 //
-// Run: bro-headless apps/scene-editor apps/scene-editor/test_move.js
+// Run: scripts/validate.sh tools/scene-editor
 
 advanceTime(100);
 flush();

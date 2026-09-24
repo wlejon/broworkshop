@@ -1,6 +1,7 @@
-import { EdgeMesh } from "/app/edge-mesh.js";
+import { EdgeMesh } from "/app/model/edge-mesh.js";
+import { shot } from "/lib/kit/test.js";
 // Headless tests for EdgeMesh + the edges scene node.
-// Run: bro-headless apps/scene-editor apps/scene-editor/test_edges.js
+// Run: scripts/validate.sh tools/scene-editor
 
 advanceTime(100);
 flush();
@@ -171,6 +172,6 @@ assert(E.edgesNode !== before, 'edges node identity replaced on rebuild');
 assert(E.inferenceGeo.edges.length === 12,
     `post-commit pulled-cube has 12 edges (got ${E.inferenceGeo.edges.length})`);
 
-screenshot('tools/scene-editor/_edges_after.png');
+shot('edges-after');
 console.log(`OK — EdgeMesh: orthoBasis ⟂, prism winding outward, diagonal edges supported; ` +
             `edges scene node survives rebuild`);

@@ -1,0 +1,81 @@
+/* Scene editor: only what the kit does not cover. */
+
+:root {
+    --se-accent: #ffa502;     /* SketchUp orange: highlights, previews, VCB */
+    --k-side-w: 270px;
+}
+
+/* ---- toolbar ---------------------------------------------------------- */
+.k-toolbar { gap: 8px; padding-top: 6px; padding-bottom: 6px; }
+.tool-group { display: flex; gap: 3px; }
+.tool-group > button { padding: 5px 10px; display: flex; align-items: center; gap: 5px; }
+.tool-group > button .ico { font-size: 14px; line-height: 1; }
+#toolbar button.active {
+    background: var(--se-accent); border-color: var(--se-accent); color: #1a1a1a; font-weight: 600;
+}
+
+/* ---- side panels ------------------------------------------------------ */
+.hint { color: var(--k-dim); font-size: 11px; line-height: 1.4; font-family: var(--k-font-ui); }
+.hint b { color: var(--k-muted); }
+.k-panel .k-row.ol-add { gap: 4px; flex-wrap: nowrap; }
+.ol-add > button { flex: 1; padding: 2px 4px; white-space: nowrap; }
+
+#context-breadcrumb { color: var(--se-accent); font-size: 11px; }
+#outliner-list {
+    display: flex; flex-direction: column; gap: 1px;
+    max-height: 40vh; overflow-y: auto; font-family: var(--k-font-ui);
+}
+.ol-row {
+    display: flex; align-items: center; gap: 4px;
+    padding: 2px 4px; border-radius: 4px; cursor: pointer; user-select: none;
+}
+.ol-row:hover { background: var(--k-btn); }
+.ol-row.active { background: #2b3a2f; }
+.ol-row.context { outline: 1px solid var(--se-accent); }
+.ol-row.hidden .ol-name { color: var(--k-dim); font-style: italic; }
+.ol-icon {
+    background: transparent; border: none; padding: 0 2px; color: var(--k-muted);
+    font-size: 12px; line-height: 1; min-width: 14px;
+}
+.ol-icon:hover { background: transparent; color: var(--k-text); }
+.ol-twist { font-size: 9px; }
+.ol-kind { color: var(--k-dim); font-size: 10px; width: 10px; }
+.ol-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; outline: none; }
+.ol-name[contenteditable="true"] {
+    background: var(--k-input); padding: 0 4px; border-radius: 2px; outline: 1px solid var(--k-accent);
+}
+
+.insp-title { margin-bottom: 2px; }
+.insp-grid {
+    display: grid; grid-template-columns: 58px 1fr 1fr 1fr; gap: 4px; align-items: center;
+}
+.insp-label { color: var(--k-muted); }
+.insp-grid > input[type=number] { width: 100%; min-width: 0; padding: 3px 5px; }
+
+/* ---- viewport overlays ------------------------------------------------ */
+#canvas { background: #1a1a1a; }
+#snap-marker {
+    position: absolute; z-index: 20; display: none; pointer-events: none;
+    width: 18px; height: 18px; transform: translate(-50%, -50%);
+}
+#snap-marker svg { display: block; }
+
+/* VCB: SketchUp's value box, bottom-right of the viewport. */
+#measure-box {
+    position: absolute; right: 12px; bottom: 12px; z-index: 15; pointer-events: none;
+    min-width: 190px; padding: 8px 14px; border-radius: 8px;
+    background: rgba(12, 14, 18, 0.88); border: 1px solid var(--k-border);
+}
+.vcb-label { color: var(--k-muted); font-size: 11px; font-family: var(--k-font-ui); }
+.vcb-value { color: var(--se-accent); font-size: 16px; font-weight: bold; }
+.vcb-caret {
+    display: inline-block; width: 1px; height: 14px; margin-left: 2px; vertical-align: -3px;
+    background: var(--se-accent); animation: vcb-blink 1s steps(2, start) infinite;
+}
+.vcb-hint { color: var(--k-dim); font-size: 10px; font-family: var(--k-font-ui); margin-top: 2px; }
+.vcb-hint b { color: var(--k-muted); }
+@keyframes vcb-blink { to { visibility: hidden; } }
+
+#pick-info { color: #74b9ff; white-space: pre; }
+#snap-info b { color: var(--k-text); }
+#project-title.dirty { color: var(--se-accent); }

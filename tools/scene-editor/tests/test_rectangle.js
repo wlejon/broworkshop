@@ -1,6 +1,6 @@
 // Integration test: rectangle drawing tool + project/history.
 //
-// Run: bro-headless apps/scene-editor apps/scene-editor/test_rectangle.js
+// Run: scripts/validate.sh tools/scene-editor
 
 'use strict';
 

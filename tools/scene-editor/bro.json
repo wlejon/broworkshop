@@ -1,5 +1,9 @@
 {
-    "app": ".",
-    "title": "Scene Editor (spike)",
+    "title": "Scene Editor",
+    "width": 1440,
+    "height": 900,
+    "minWidth": 1000,
+    "minHeight": 640,
+    "resizable": true,
     "lib": "../../lib"
 }

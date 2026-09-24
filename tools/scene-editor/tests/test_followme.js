@@ -1,6 +1,6 @@
-import { FollowMeTool } from "/app/followme-tool.js";
+import { FollowMeTool } from "/app/tools/followme-tool.js";
 // Headless tests for FollowMeTool + Sketch.sweepProfile + app wiring.
-// Run: bro-headless apps/scene-editor apps/scene-editor/test_followme.js
+// Run: scripts/validate.sh tools/scene-editor
 
 advanceTime(100);
 flush();

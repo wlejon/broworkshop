@@ -1,4 +1,4 @@
-import { EdgePrimitive } from "/app/edge-primitive.js";
+import { EdgePrimitive } from "/app/model/edge-primitive.js";
 // Headless tests for EdgePrimitive (orphan edges).
 //   - Direct creation via registry.createEdgePrimitive
 //   - Inference geo dedups vertices and edges
@@ -6,7 +6,7 @@ import { EdgePrimitive } from "/app/edge-primitive.js";
 //   - Line tool's commitLine path persists orphan polylines
 //   - Undo/redo restores deleted edge primitives
 //
-// Run: bro-headless apps/scene-editor apps/scene-editor/test_orphan_edges.js
+// Run: scripts/validate.sh tools/scene-editor
 
 advanceTime(100);
 flush();

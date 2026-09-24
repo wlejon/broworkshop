@@ -1,8 +1,8 @@
-import { EditMesh } from "/app/edit-mesh.js";
+import { EditMesh } from "/app/model/edit-mesh.js";
 // Smoke test for the new SketchUp-style push/pull (additive surgery, no warp).
 // Verifies the basic flows work without crashing and produce sane geometry.
 //
-// Run: bro-headless apps/scene-editor apps/scene-editor/test_pushpull_smoke.js
+// Run: scripts/validate.sh tools/scene-editor
 
 'use strict';
 

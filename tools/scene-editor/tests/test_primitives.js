@@ -1,7 +1,7 @@
-import { Inference } from "/app/inference.js";
+import { Inference } from "/app/model/inference.js";
 // Headless tests for multi-primitive support.
 //
-// Exercises PrimitiveRegistry + Primitive + multi-primitive inference via
+// Exercises SceneRegistry + Primitive + multi-primitive inference via
 // __editor hooks — no synthetic mouse events. Verifies:
 //   - registry add/remove/setActive/setVisible
 //   - pickAt returns the nearer primitive under a ray
@@ -9,7 +9,7 @@ import { Inference } from "/app/inference.js";
 //   - push/pull on a non-active primitive commits on that primitive
 //   - deleting a primitive removes its snap features from inference
 //
-// Run: bro-headless apps/scene-editor apps/scene-editor/test_primitives.js
+// Run: scripts/validate.sh tools/scene-editor
 
 advanceTime(100);
 flush();

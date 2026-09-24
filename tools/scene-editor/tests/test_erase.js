@@ -5,7 +5,7 @@
 // trash-can button (deletePrimitive), kept around so tests can cover both
 // paths without going through the DOM.
 //
-// Run: bro-headless apps/scene-editor apps/scene-editor/test_erase.js
+// Run: scripts/validate.sh tools/scene-editor
 
 'use strict';
 

@@ -1,4 +1,4 @@
-import { MeasureBox } from "/app/measure-box.js";
+import { MeasureBox } from "/app/tools/measure-box.js";
 // Headless tests for the Measurement Box (VCB).
 //
 // Exercises: parser, mid-drag distance override, post-commit re-apply,
@@ -6,7 +6,7 @@ import { MeasureBox } from "/app/measure-box.js";
 // (feedKey + programmatic pushpull) so nothing depends on real DOM focus
 // or KeyboardEvent dispatch.
 //
-// Run: bro-headless apps/scene-editor apps/scene-editor/test_measurebox.js
+// Run: scripts/validate.sh tools/scene-editor
 
 advanceTime(100);
 flush();

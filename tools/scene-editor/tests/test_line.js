@@ -1,7 +1,7 @@
-import { LineTool } from "/app/line-tool.js";
+import { LineTool } from "/app/tools/line-tool.js";
 // Integration test: line drawing tool + closed-polygon detection.
 //
-// Run: bro-headless apps/scene-editor apps/scene-editor/test_line.js
+// Run: scripts/validate.sh tools/scene-editor
 
 'use strict';
 

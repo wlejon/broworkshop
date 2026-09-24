@@ -80,8 +80,7 @@ scripts/validate.sh --list               # what would run, with tags
 
 - **File size:** keep files under ~1k lines; when one grows past that,
   decompose it into sensible modules. Exceptions are allowed, but nothing over
-  2k lines (today `tools/scene-editor/app.js` is 3.5k and must be split when
-  touched; ~20 others sit between 1k and 2k).
+  2k lines.
 - **ES modules, no bundler.** Apps import what they need from `/lib`. (The
   vendored `*.bundle.js` + `bundler/` in `ai/pi-agent` and `ai/maker-agent`
   are generated third-party bundles, the one exception.)

@@ -1,7 +1,7 @@
-import { TapeTool } from "/app/tape-tool.js";
+import { TapeTool } from "/app/tools/tape-tool.js";
 // Integration test: tape measure tool (two-click distance readout).
 //
-// Run: bro-headless apps/scene-editor apps/scene-editor/test_tape.js
+// Run: scripts/validate.sh tools/scene-editor
 
 'use strict';
 

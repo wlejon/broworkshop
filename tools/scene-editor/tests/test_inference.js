@@ -1,6 +1,6 @@
-import { Inference } from "/app/inference.js";
+import { Inference } from "/app/model/inference.js";
 // Headless tests for the inference engine.
-// Run: bro-headless apps/scene-editor apps/scene-editor/test_inference.js
+// Run: scripts/validate.sh tools/scene-editor
 
 advanceTime(100);
 flush();

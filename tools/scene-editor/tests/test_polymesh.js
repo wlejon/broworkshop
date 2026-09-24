@@ -1,18 +1,12 @@
 // Verify bro.mesh.PolyMesh tessellation against mesh-rendering-bug.bro.
 //
-// Loads Polygon 2 from the saved project, builds a PolyMesh that *collapses*
-// the existing tris into N-gon faces by group, retessellates, and confirms
-// no triangle edge crosses a polygon boundary edge.
-'use strict';
+// Takes Polygon 2 from that saved project (tests/fixtures/polygon2.js),
+// builds a PolyMesh that *collapses* the existing tris into N-gon faces by
+// group, retessellates, and confirms no triangle edge crosses a polygon
+// boundary edge.
+import * as polygon2 from "/app/tests/fixtures/polygon2.js";
 
 advanceTime(0); flush();
-
-// Portable D:-drive root override: BRO_WEIGHTS points at the WSL mount of the
-// Windows D: drive's projects dir (e.g. /mnt/d/projects); strip the trailing
-// "projects" to get the drive root. Defaults to Windows "D:" otherwise.
-const DROOT = (typeof process !== 'undefined' && process.env.BRO_WEIGHTS)
-    ? process.env.BRO_WEIGHTS.replace(/[\/\\]+projects[\/\\]*$/, '')
-    : 'D:';
 
 // `Mesh` is bro.mesh.Mesh; PolyMesh is its sibling under the same surface.
 // In the binding, both are registered as top-level constructors via qjsbind.
@@ -48,11 +42,8 @@ assert(typeof PolyMesh === 'function',
 
 // --- 3. Bug file: collapse fan into N-gon, retessellate, count crossings -
 {
-    const proj = JSON.parse(require('fs').readFileSync(
-        DROOT + '/bro-test/mesh-rendering-bug.bro/project.json', 'utf8'));
-    const poly = proj.data.primitives.find(p => p.name === 'Polygon 2');
-    const P = new Float32Array(poly.positions);
-    const I = new Uint32Array(poly.indices);
+    const P = new Float32Array(polygon2.positions);
+    const I = new Uint32Array(polygon2.indices);
 
     // Use coplanar grouping: tag tris so the top cap (4 tris) becomes one
     // group and the bottom cap becomes another. We can detect via Y-coord

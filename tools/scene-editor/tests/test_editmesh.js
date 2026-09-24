@@ -1,4 +1,4 @@
-import { EditMesh } from "/app/edit-mesh.js";
+import { EditMesh } from "/app/model/edit-mesh.js";
 // EditMesh unit tests. No scene/canvas needed — exercises the half-edge DS
 // directly. Run: bro-headless apps/scene-editor apps/scene-editor/test_editmesh.js
 

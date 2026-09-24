@@ -1,4 +1,4 @@
-import { EditMesh } from "/app/edit-mesh.js";
+import { EditMesh } from "/app/model/edit-mesh.js";
 // Integration test: push/pull on a flat (rectangle-tool) sketch face.
 //
 // SketchUp-style surgery handles this uniformly with all other push/pulls:
@@ -6,7 +6,7 @@ import { EditMesh } from "/app/edit-mesh.js";
 // and the surgery emits a back-face copy in addition to the wall bridges,
 // closing the slab into a manifold.
 //
-// Run: bro-headless apps/scene-editor apps/scene-editor/test_pushpull_flat.js
+// Run: scripts/validate.sh tools/scene-editor
 
 'use strict';
 

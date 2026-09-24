@@ -1,6 +1,6 @@
 // Tests for undo/redo integration in scene-editor.
 //
-// Run: bro-headless apps/scene-editor apps/scene-editor/test_history.js
+// Run: scripts/validate.sh tools/scene-editor
 
 'use strict';
 

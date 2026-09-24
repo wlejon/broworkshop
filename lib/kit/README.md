@@ -19,7 +19,8 @@ Ported examples: `demos/kws-lab` and `demos/lm-playground` (ML labs),
 | `ui.js` | status line, progress, log, stats, fps, toggle, tabs, frame loop |
 | `params.js` | controls bound to values / objects |
 | `weights.js` | model weight resolution (BRO_WEIGHTS, sibling repos, cache) |
-| `viewport3d.js` | `bro.scene` canvas + orbit camera + standard mouse controls |
+| `viewport3d.js` | `bro.scene` canvas + orbit camera + standard mouse controls, pick rays |
+| `editor.js` | document editors: tool switcher, undo/redo/save/open commands |
 | `test.js` | headless test helpers (assert, wait, click, type, screenshot) |
 
 ## Page skeleton
@@ -125,10 +126,27 @@ and test scripts.
 `sceneViewport(canvas, { orbit: { target, dist, fov, near, far }, controls })`
 returns `{ scene, cam, controls, onFrame(fn), reframe(pivot, dist) }` and
 pushes the camera every frame. `orbitControls(canvas, cam, { minDist, maxDist,
-zoomRate, orbitButton = 2, panButton = 1, pointerLock, onChange })` alone
+zoomRate, orbitButton = 2, panButton = 1, pointerLock, onChange, accept })` alone
 wires the standard input: right-drag orbit, middle-drag pan (pointer-locked),
-wheel zoom; left button stays free for picking. Camera math is
-`lib/camera.js` (`Camera.*`).
+wheel zoom; left button stays free for picking; `accept(e)` returning false
+leaves a press to the app. Picking math, on the `scene.setCamera` options
+(`Camera.orbitViewOpts(cam, canvas)`) and the canvas CSS size:
+`screenRay(view, w, h, px, py)` → `{ origin, dir }` and
+`worldToScreen(world, view, w, h)` → `{ x, y, depth, behind }`. Camera math
+is `lib/camera.js` (`Camera.*`).
+
+**editor.js** — plumbing for document editors (`tools/scene-editor`):
+- `toolbox({ tools, initial, buttons, onChange })`: named tools, one
+  current, synced to `[data-tool]` buttons. A tool is any object; the toolbox
+  uses its optional `activate() deactivate() busy() cancel()`. Returns
+  `{ name, tool, get(n), names, set(n), busy(), cancelAll() }`; `set` cancels
+  in-progress gestures first.
+- `documentCommands({ history, project, canRun, after, undoButton, redoButton })`:
+  undo / redo / new / open / save / save-as for a `History` (lib/history.js)
+  and `Project` (lib/project.js), with Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y /
+  Ctrl+S / Ctrl+Shift+S / Ctrl+O / Ctrl+N (ignored while typing in a field)
+  and undo/redo buttons that enable with the history. Returns the commands
+  plus `menu` (`{ file, handlers }`) for `boot({ menu })`.
 
 ## Headless tests
 
@@ -155,7 +173,9 @@ done();                                            // throws if any test() faile
   `test(name, fn)` logs ok/FAIL and continues; `done()` throws at the end.
 - `frames(n)` advances virtual time. `pumpUntil`/`waitFor` budget in wall
   time (model loads and workers run on real threads) while advancing
-  virtual time so callbacks deliver.
+  virtual time so callbacks deliver. `simUntil(pred, virtualMs)` budgets in
+  virtual time instead: deterministic for in-engine simulation (game loops,
+  physics), e.g. `simUntil(() => T.screen === 'complete', 20000)`.
 - `clickOn` refuses a hidden element or one covered by another; `typeInto`
   clicks then types through the engine; `press('Enter')` sends SDL keys.
 - The headless globals (`advanceTime`, `click`, `screenshot`, `getPixel`,

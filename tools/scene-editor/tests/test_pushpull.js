@@ -1,10 +1,11 @@
 // Headless smoke test for the push/pull tool (SketchUp-style surgery).
+import { shot } from "/lib/kit/test.js";
 //
 // Exercises the tool via __editor hooks (not synthetic mouse events) so the
 // test is deterministic — no dependency on screen-space ray math, camera
 // state, or pointer lock.
 //
-// Run: bro-headless apps/scene-editor apps/scene-editor/test_pushpull.js
+// Run: scripts/validate.sh tools/scene-editor
 
 advanceTime(100);
 flush();
@@ -137,6 +138,6 @@ for (let i = 0; i < before.length; i++) {
         `cancel restored positions (idx ${i})`);
 }
 
-screenshot('tools/scene-editor/_pushpull_after.png');
+shot('pushpull-after');
 
 console.log(`OK — push/pull surgery extrudes box top, second pull stacks, cancel reverts cleanly`);

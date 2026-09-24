@@ -1,4 +1,5 @@
 // Repro test for the "errant top-cap triangle" bug.
+import { shot } from "/lib/kit/test.js";
 //
 // Scenario from the bug report:
 //   1. Create a circle.
@@ -9,7 +10,7 @@
 // Expected: the top/bottom caps stay as single face groups; no spurious
 // model edges render across the cap interior.
 //
-// Run: bro-headless apps/scene-editor apps/scene-editor/test_pushpull_circle.js
+// Run: scripts/validate.sh tools/scene-editor
 
 'use strict';
 
@@ -385,16 +386,7 @@ t('render: screenshot of the bug scenario (32 segments, adjacent pulls)', () => 
     }
     console.log(`  top-plane: ${topCnt}  bot-plane: ${botCnt}  vertical: ${vertCnt}  mixed: ${mixedCnt}`);
 
-    // Pitch the camera well down — we want to see the top cap head-on to
-    // catch any errant cap edges.
-    const cam = E.scene && null; // no direct cam handle via __editor
-    // Drive camera via global `E.registry` → scene.setCamera. Simpler: rebuild
-    // view by spinning the orbit cam.
-    for (let i = 0; i < 150; i++) {
-        // Walking it down 1 pixel at a time keeps each rotation in the safe
-        // pitch range (quaternion-based orbit clamps per-step).
-    }
-    // Directly set the scene camera above +Y, looking straight down.
+    // Look straight down at the top cap to catch any errant cap edges.
     E.scene.setCamera({
         position: [0.1, 5, 0.1],
         target:   [0, 0.5, 0],
@@ -404,7 +396,7 @@ t('render: screenshot of the bug scenario (32 segments, adjacent pulls)', () => 
     });
     advanceTime(100);
     flush();
-    screenshot('tools/scene-editor/_pushpull_circle_top.png');
+    shot('pushpull-circle-top');
 
     // Angled view — matches the user's screenshot perspective.
     E.scene.setCamera({
@@ -416,7 +408,7 @@ t('render: screenshot of the bug scenario (32 segments, adjacent pulls)', () => 
     });
     advanceTime(100);
     flush();
-    screenshot('tools/scene-editor/_pushpull_circle_iso.png');
+    shot('pushpull-circle-iso');
 
     // Dump the cap triangulation indices so we can see what manifold chose.
     const I = cyl.indices;

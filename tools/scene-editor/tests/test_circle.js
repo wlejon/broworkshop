@@ -1,6 +1,6 @@
 // Integration test: circle drawing tool + VCB + history.
 //
-// Run: bro-headless apps/scene-editor apps/scene-editor/test_circle.js
+// Run: scripts/validate.sh tools/scene-editor
 
 'use strict';
 
