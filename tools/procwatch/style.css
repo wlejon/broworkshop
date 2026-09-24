@@ -48,6 +48,7 @@ button.armed { background: var(--hot); border-color: var(--hot); color: #fff; }
 #tbody .c-cpu.pegged { color: var(--hot); font-weight: 600; }
 #tbody .c-name { font-weight: 600; }
 #tbody .c-cmd { color: var(--k-dim); }
+#tbody .c-cmd .tag { color: var(--pw-accent); background: var(--k-surface); border-radius: 3px; padding: 0 5px; font-size: 11px; }
 .kill:disabled { opacity: 0.25; }
 
 .dot { font-size: 9px; }

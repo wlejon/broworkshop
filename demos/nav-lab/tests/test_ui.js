@@ -102,9 +102,8 @@ test('panels fold by their caption', () => {
     flush();
     clickOn(cap);
     check(panel.classList.contains('folded'), 'folded class');
-    // The panel's own child, not the button: a descendant of a box that just
-    // became display:none keeps reporting its old rect (ENGINE-ISSUES.md).
-    check(q('#btnSave').parentNode.getBoundingClientRect().height === 0, 'folded body hidden');
+    const btn = q('#btnSave').getBoundingClientRect();
+    check(btn.width === 0 && btn.height === 0, 'folded body hidden, its buttons with it');
     check(panel.getBoundingClientRect().height < 50, 'panel collapsed to its caption');
     clickOn(cap);
     check(!panel.classList.contains('folded'), 'unfolded');

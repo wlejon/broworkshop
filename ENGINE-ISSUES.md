@@ -142,74 +142,19 @@ Repro: demos/anim-lab, `selectClip('idle')`, `player.blendState().pos` → `[]`.
 
 ### Layout and CSS
 
-#### Column flex container with a percentage width stretches children to the wrong width (2026-09-24)
-A `display:flex; flex-direction:column` box with a percentage `width` lays its
-stretched children out at that percentage of its own width. Pixel widths and
-block containers are fine.
-Repro: `<div style="display:flex;width:1000px"><div style="width:40%;display:flex;flex-direction:column"><div id="c">x</div></div></div>`:
-the column is 400px, `#c` 160px.
-Affects: tools/shader-lab (uses `flex: 1`).
+#### Inline wrapping still whole-node in `pre-wrap`, `break-word`, and mixed block/inline blocks (2026-09-24)
+htmlayout now breaks a text run after an inline element inside the text
+(htmlayout a8d25ed), but two paths keep the old behaviour: text in
+`white-space: pre-wrap` or `overflow-wrap: break-word` is still broken once
+per text node against the full line width, and a block that mixes block-level
+and inline children lays each span out as one box.
+Repro: `<div style="width:300px;font:12px monospace;white-space:pre-wrap"><span>voice</span> <span id=m>recording did not start because the Steam library was not found anywhere</span></div>`:
+`#m` starts on line 2.
 
-#### `min-width` is ignored on `display: inline-block` (2026-09-24)
-`<span style="display:inline-block; min-width:96px">lobby id</span>X` measures
-55px (its text); `width: 96px` works. Chromium: 96px.
-Affects: demos/steam-lab `.kv` rows ("lobby id—", "frames0").
-
-#### `grid-column: 1 / -1` does not span; negative grid lines ignored (2026-09-24)
-In `grid-template-columns: 1fr 1fr` (400px), a child with `grid-column: 1 / -1`
-is 200px; `1 / 3` and `span 2` give 400px.
-Affects: demos/steam-lab's Events panel sits in the left column only.
-
-#### A long text run after an inline element wraps whole to the next line (2026-09-24)
-`<div style="width:300px;font:12px monospace"><span>voice</span> <span id=m>recording
-did not start because the Steam library was not found anywhere</span></div>`:
-line 1 holds only "voice"; `#m`'s first Range rect is at x = 0 on line 2,
-although "recording did not start because" fits after "voice". Same with a
-bare text node after the span and with `pre-wrap`. Chromium breaks inside the text.
-Affects: demos/steam-lab's event log (kind tag alone on the first row);
-tools/reader (each sentence is a `<span class="sn">` in a `<p>`; a long
-sentence after a short one leaves a ragged first line).
-
-#### Flex max-content ignores a child span's own `letter-spacing`; a top-level `inline-flex` is viewport-wide (2026-09-24)
-A content-sized flex row inside a centred flex column comes out narrower than
-its items when one item has its own `letter-spacing`, and the shortfall is
-taken from a shrinkable item.
-Repro: `<div style="display:flex;flex-direction:column;align-items:center"><div style="display:flex;gap:7px"><span id=dot style="width:11px;height:11px;display:inline-block;background:red"></span><span>NAME</span><span style="letter-spacing:2px">···</span></div></div>`:
-`#dot` is 5px wide, not 11 (6px = 3 glyphs x 2px); without the inner
-letter-spacing it is 11. Separately, a top-level `<span style="display:inline-flex">chip</span>`
-measures 1920px (the viewport) rather than its content.
-Affects: games/blastgrid contender chips (`.cwins { letter-spacing: 2px }`)
-show their colour dots as thin bars.
-
-#### A shrink-to-fit `flex-wrap: wrap` row wraps items that exactly fit (2026-09-24)
-An absolutely positioned `display:flex; flex-wrap:wrap; column-gap:20px` box
-sizes itself to its max-content width, then breaks the line anyway (looks
-like a float comparison): 43.5177 + 20 + 48.9414 = 112.459 = the content box.
-Repro: lib/arcade/arcade.css `#hud.hud-row` with `font-family: Arial` and two
-`.hud-stat`s ("Score"/"0", "Best"/"2048"): the second stat's top is 54px below
-the first. With Consolas (arcade's default) or other values it stays on one row.
-Affects: games/2048's HUD (echo and missile-command happen not to hit it).
-
-#### `table-layout: fixed` is ignored; a nowrap cell widens a `width:100%` table (2026-09-24)
-A `width:100%` table with `table-layout: fixed` and `<col>` widths sizes its
-columns from content; a `white-space: nowrap` cell pushes it past its
-container, and `text-overflow: ellipsis` on that cell never triggers.
-Repro: a 400px div holding that table, `<col style="width:100px"><col>`, second
-cell 200 x's nowrap: the table measures 1702px, the cell 1602px (want 400/300).
-Affects: tools/procwatch (switched to grid rows).
-
-#### `text-overflow: ellipsis` draws no ellipsis (2026-09-24)
-`white-space: nowrap; overflow: hidden; text-overflow: ellipsis` on a 120px
-block with longer text clips it at the edge with no "…".
-Repro: `<div style="width:120px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">ARDY Motion — text to G1 skeleton motion</div>`,
-screenshot: "ARDY Motion —" and nothing more.
-Affects: launcher/ card titles.
-
-#### `getBoundingClientRect` of a descendant of a newly hidden element keeps its old box (2026-09-24)
-Add a class that sets `display:none` on a panel body: the body reports 0x0 and
-`getComputedStyle` says `none`, but a `<button>` inside it still returns its
-old non-zero rect (33.8px wide), so `clickOn` thinks it is visible.
-Affects: kit `foldPanels()`; demos/nav-lab's tests check the panel's direct child instead.
+#### Inline padding on right-to-left text is placed as if left-to-right (2026-09-24)
+A span holding RTL text inside an RTL paragraph gets its start padding on the
+left and end padding on the right; they should mirror. LTR spans inside RTL
+paragraphs are right.
 
 ### Paint and text rendering
 
@@ -610,4 +555,5 @@ from the commit before the kit rebuild.
 - A secondary window's `bro.window` acts on its own window — bro a97ca6d4; verified 2026-09-24 (window-lab test_smoke passes).
 - `postMessage({ v: view }, [view.buffer])` clones then detaches — brokit efcb977, bro 04729bdd; verified 2026-09-24. window-lab sends the view transferred.
 - `new Worker(new URL(...), { type: 'module' })` works — bro 06899506; verified 2026-09-24. worker-sim and stompworld use it.
+- Layout (htmlayout; bro tests in `tests/layout/`), verified 2026-09-24: column flex with a percentage width (978de23); `min-width` on inline-block and shrink-to-fit max-width (0f195e7, 4be8a38); `grid-column: 1 / -1` (1d72e7f); a text run after an inline element breaks inside the text (a8d25ed; inline elements join their block's lines); flex intrinsics with `letter-spacing` (8b3d5b2) and top-level inline-flex/inline-grid shrink to fit (4be8a38); flex-wrap rows that exactly fit (68c76b6); `table-layout: fixed` (404fe87); `text-overflow: ellipsis` (d6da139); rects of descendants of a newly hidden element (2ec6c57). procwatch styles its tags as chips again, shader-lab's panes are 50/50, nav-lab's test checks the button's own rect.
 - bro-server no longer runs the page's scripts (with no script named it runs `server.js`) — bro 80c8ec0f; verified 2026-09-24. games/fps dropped its missing-scene tolerance.

@@ -53,10 +53,16 @@ export function processTable(list, opts) {
         r.cells.cpu.className = 'c-cpu' + (p.cores > 3 ? ' pegged' : p.cores > 0.5 ? ' busy' : '');
         r.cells.mem.textContent = fmtBytes(p.mem || 0);
         r.cells.age.textContent = fmtAge(p.ageMs);
-        // Plain text: tags as [brackets] (mixed inline runs in a nowrap/ellipsis
-        // cell mislay in htmlayout).
-        const cmd = (p.sum.tags || []).map((t) => '[' + t + '] ').join('') + p.sum.title;
-        if (r.cmdText !== cmd) { r.cells.cmd.textContent = cmd; r.cells.cmd.title = p.cmd || p.path || ''; r.cmdText = cmd; }
+        // Tags as chips ahead of the title; the cell ellipsizes the whole line.
+        const tags = p.sum.tags || [];
+        const cmd = tags.join('\u0001') + '\u0002' + p.sum.title;
+        if (r.cmdText !== cmd) {
+            r.cells.cmd.textContent = '';
+            for (const t of tags) r.cells.cmd.append(h('span.tag', null, t), ' ');
+            r.cells.cmd.append(p.sum.title || '');
+            r.cells.cmd.title = p.cmd || p.path || '';
+            r.cmdText = cmd;
+        }
         const isArmed = armed.has(p.pid);
         r.kill.disabled = !killable(p);
         r.kill.textContent = isArmed ? 'sure?' : 'kill';
