@@ -123,6 +123,7 @@
     font: 13px monospace;
     pointer-events: auto;
 }
+#tower-panel[hidden] { display: none; }
 .panel-title { font-weight: bold; font-size: 14px; color: #fff; margin-bottom: 6px; }
 .panel-stats { color: #9aa3b5; font-size: 11px; line-height: 1.5; margin-bottom: 10px; }
 .panel-buttons { display: flex; gap: 8px; }
@@ -150,7 +151,8 @@
     text-shadow: 0 3px 18px rgba(0, 0, 0, 0.85);
     white-space: nowrap;
 }
-#announce.pop { animation: pop 2.4s ease-out; }
+/* Shown by effects.toast (display none -> block), which restarts the animation. */
+#announce { animation: pop 2.4s ease-out; }
 @keyframes pop {
     0% { opacity: 0; transform: translateX(-50%) scale(0.7); }
     12% { opacity: 1; transform: translateX(-50%) scale(1.06); }

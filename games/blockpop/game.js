@@ -1,26 +1,45 @@
-// Blockpop — arcade foundation plugin.
-// Domain: board.js + particles.js. Shell owns screens / loop / pause / HUD.
+// Blockpop — rising-stack sort-and-pop with three modes, on the arcade shell.
+// Shell owns screens, loop, pause, HUD plumbing and the high score.
+// Rules: rules.js · session: board.js · drawing: render.js
 
+import { createEffects } from "/lib/arcade/effects.js";
+import { bindPointer } from "/lib/arcade/pointer.js";
+import { recordScore, createScoreTabs, today } from "/lib/arcade/scores.js";
+import { createOptions, sfxVolume, toggle } from "/lib/arcade/options.js";
+import { COLORS } from "/app/rules.js";
 import { Board } from "/app/board.js";
-import { Particles } from "/app/particles.js";
+import { layoutFor, cellCenter, columnAt, addFlash, stepFlashes, drawBackground, drawBoard } from "/app/render.js";
 
-const LADDER = [261.63, 293.66, 329.63, 349.23, 392.0, 440.0, 493.88, 523.25];
+const MODES = ["classic", "sprint", "puzzle"];
+const HS_KEY = { classic: "hsClassic", sprint: "hsSprint", puzzle: "hsPuzzle" };
+const EXTRA_LABEL = { classic: "NEXT RISE", sprint: "LEFT", puzzle: "MOVES" };
+const SCREENS = ["modeselect", "highscores", "settings", "credits"];
+const TOASTS = { action: ["#action-text", 900], cascade: ["#cascade-text", 700] };
+const RISE_SPEEDS = [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
 
-/** Mode selected on mode-select screen before a run starts. */
-let pendingMode = "classic";
-let hsMode = "classic";
+const fx = createEffects({
+    particle: "square",
+    burst: { speed: 20, speedVar: 150, up: 60, life: 500, lifeVar: 400, size: 3, sizeVar: 2, gravity: 650, drag: 1, spin: 0 },
+});
+
+// Menu-level choices (not session state).
+let nextMode = "classic";
+let scoreTabs = null;
+let options = null;
+const prefs = { riseSpeed: 10, colorBlind: false };
 
 export const game = {
     id: "blockpop",
     clearColor: "#050810",
 
-    // Space = emergency brake only (not Mouse0 — click places via canvas handler)
+    // Space = emergency brake only; a click picks / drops through the pointer.
     actions: [
         { name: "primary", label: "Brake", defaults: [" "] },
     ],
 
     defaults: {
         highScore: 0,
+        sfxVol: 80,
         riseSpeed: 10,
         colorBlind: false,
         hsClassic: [],
@@ -28,77 +47,109 @@ export const game = {
         hsPuzzle: [],
     },
 
-    create(ctx) {
-        Board._play = (name) => ctx.play(name);
-        Board._settings = {
-            riseSpeed: ctx.save.get("riseSpeed") != null ? ctx.save.get("riseSpeed") : 10,
-            colorBlind: !!ctx.save.get("colorBlind"),
-        };
-        Board.startGame(pendingMode || "classic");
+    init(api) {
+        scoreTabs = createScoreTabs(api.save, MODES.map((m) => ({
+            id: m,
+            key: HS_KEY[m],
+            format: m === "sprint"
+                ? (e) => formatTime(e.time) + "  Lv" + (e.level || 1)
+                : (e) => (e.score || 0) + "  Lv" + (e.level || 1) + "  x" + (e.chain || 1),
+        })));
+        options = createOptions(api, [
+            { key: "riseSpeed", action: "cycle-risespeed", values: RISE_SPEEDS,
+              label: (v) => (v / 10).toFixed(1), apply: (v) => { prefs.riseSpeed = v; } },
+            toggle("colorBlind", "toggle-colorblind", (v) => { prefs.colorBlind = v; }),
+            sfxVolume(),
+        ]);
+        options.applyAll();
+        bindPointer(api, {
+            click(p) {
+                const run = api.getRun();
+                const col = run ? columnAt(run.layout, p.x) : -1;
+                if (col < 0) return;
+                run.board.moveTo(col);
+                run.board.interact();
+            },
+            wheel() {
+                const run = api.getRun();
+                if (run) run.board.shuffleHeld();
+            },
+        });
+    },
 
+    create(api) {
+        fx.clear();
         const run = {
             score: 0,
-            play: ctx.play,
-            highScore: ctx.highScore,
-            save: ctx.save,
-            view: ctx.view,
-            alive: true,
-            ended: false,
+            save: api.save,
+            play: api.play,
+            layout: layoutFor(api.view.width(), api.view.height()),
+            flashes: [],
+            board: null,
         };
-        attachPointer(run);
+        run.board = new Board({ mode: nextMode, riseSpeed: prefs.riseSpeed, fx: boardFx(api, run) });
         return run;
     },
 
     update(run, dt, input) {
-        if (run.ended) return { status: "gameover" };
+        const b = run.board;
+        if (input.pressed("left")) b.moveLeft();
+        if (input.pressed("right")) b.moveRight();
+        if (input.pressed("down")) b.interact();
+        if (input.pressed("up")) b.shuffleHeld();
+        if (input.pressed("primary")) b.emergencyBrake();
 
-        if (input.pressed("left")) Board.moveLeft();
-        if (input.pressed("right")) Board.moveRight();
-        if (input.pressed("down")) Board.interact();
-        if (input.pressed("up")) Board.shuffleHeld();
-        if (input.pressed("primary")) Board.emergencyBrake();
+        b.riseSpeed = prefs.riseSpeed;
+        b.tick(dt);
+        fx.update(dt);
+        stepFlashes(run.flashes, dt);
+        run.score = b.score;
 
-        Board.tick(dt);
-        Particles.update(dt);
-        run.score = Board.getScore();
-
-        if (Board.isGameOver() || Board.isFinished()) {
-            run.ended = true;
-            persistHighScore(run);
-            if (Board.isFinished()) run.play("win");
-            return { status: "gameover", result: { finished: Board.isFinished() } };
+        if (b.ended()) {
+            fx.clear();              // toasts would otherwise freeze behind the overlay
+            run.flashes.length = 0;
+            recordRun(run);
+            if (b.finished) run.play("win");
+            return { status: "gameover" };
         }
     },
 
     draw(run, ctx, view) {
         const { w, h } = view.size();
-        const shake = Particles.shakeOffset();
+        run.layout = layoutFor(w, h);
+        const shake = fx.shakeOffset();
         ctx.save();
         ctx.translate(shake.x, shake.y);
-        Board.draw(ctx, w, h, performance.now());
+        drawBackground(ctx, w, h, run.board.time);
+        drawBoard(ctx, run.board, run.layout, run.flashes, prefs.colorBlind);
+        fx.draw(ctx);
         ctx.restore();
     },
 
     hud(run) {
-        const st = Board.getStats ? Board.getStats() : {};
-        Board.updateHUDLabels && Board.updateHUDLabels();
+        if (!run) return { score: 0, level: 1, extra: "—" };
+        const b = run.board;
+        const chain = b.bestChain >= 2;
+        for (const id of ["hud-combo-label", "hud-combo"]) {
+            const el = document.getElementById(id);
+            if (el) el.style.display = chain ? "block" : "none";
+        }
         return {
-            score: st.score != null ? st.score : 0,
-            level: st.level != null ? st.level : 1,
-            extra: Board.getExtraHud ? Board.getExtraHud() : "—",
-            combo: st.bestChain >= 2 ? ("x" + st.bestChain) : "",
+            score: b.score,
+            level: b.level,
+            extra: b.extraHud(),
+            "extra-label": EXTRA_LABEL[b.mode],
+            combo: chain ? "x" + b.bestChain : "",
         };
     },
 
-    gameOverText(run, result) {
-        const st = Board.getStats();
-        const fin = st.finished || (result && result.finished);
-        const tag = run && run._newBest ? "  ·  NEW BEST" : "";
-        const header = fin ? (st.mode.toUpperCase() + " COMPLETE!") : "GAME OVER";
+    gameOverText(run) {
+        const st = run.board.stats;
+        const title = document.querySelector("#screen-gameover .overlay-title");
+        if (title) title.textContent = st.finished ? st.mode.toUpperCase() + " COMPLETE!" : "GAME OVER";
         return (
-            header + "\n\n" +
             "Mode     " + st.mode.toUpperCase() + "\n" +
-            "Score    " + st.score + tag + "\n" +
+            "Score    " + st.score + (run._newBest ? "  ·  NEW BEST" : "") + "\n" +
             "Level    " + st.level + "\n" +
             "Popped   " + st.blocksPopped + "\n" +
             "Chain    x" + st.bestChain + "\n" +
@@ -106,259 +157,93 @@ export const game = {
         );
     },
 
-    onEnterScreen(name, run, api) {
-        if (name === "modeselect") {
-            // ensure menu items use data-action for shell navigation
-        }
-        if (name === "highscores") {
-            hsMode = "classic";
-            renderHighScores(api);
-        }
-        if (name === "settings") {
-            renderSettings(api);
-        }
-        if (name === "gameover") {
-            const st = Board.getStats();
-            const title = document.querySelector("#screen-gameover .overlay-title");
-            if (title) {
-                title.textContent = st.finished
-                    ? st.mode.toUpperCase() + " COMPLETE!"
-                    : "GAME OVER";
-            }
-        }
+    onEnterScreen(name, run) {
+        if (name === "highscores") scoreTabs.show(run ? run.board.mode : nextMode);
+        if (name === "settings") options.render();
     },
 
-    onMenuAction(action, run, api) {
-        if (action === "modeselect" || action === "play") {
-            // Title PLAY goes to mode select (override default play)
-            return "modeselect";
-        }
-        if (action === "mode-classic") {
-            pendingMode = "classic";
+    onMenuAction(action) {
+        const mode = /^mode-(\w+)$/.exec(action);
+        if (mode) {
+            nextMode = mode[1];
             return { startRun: true };
         }
-        if (action === "mode-sprint") {
-            pendingMode = "sprint";
-            return { startRun: true };
-        }
-        if (action === "mode-puzzle") {
-            pendingMode = "puzzle";
-            return { startRun: true };
-        }
-        if (action === "highscores") return "highscores";
-        if (action === "settings") return "settings";
-        if (action === "credits") return "credits";
-
-        if (action === "hs-next") {
-            const modes = ["classic", "sprint", "puzzle"];
-            const i = modes.indexOf(hsMode);
-            hsMode = modes[(i + 1) % 3];
-            renderHighScores(api);
-            return null;
-        }
-
-        if (action === "toggle-colorblind") {
-            const v = !api.save.get("colorBlind");
-            api.save.set("colorBlind", v);
-            api.save.save();
-            Board._settings.colorBlind = v;
-            renderSettings(api);
-            return null;
-        }
-        if (action === "cycle-risespeed") {
-            let r = api.save.get("riseSpeed") || 10;
-            r += 1;
-            if (r > 20) r = 5;
-            api.save.set("riseSpeed", r);
-            api.save.save();
-            Board._settings.riseSpeed = r;
-            renderSettings(api);
-            return null;
-        }
-
-        return null;
+        if (action === "play") return "modeselect";
+        if (action === "hs-next") { scoreTabs.next(); return null; }
+        if (options.handle(action)) return null;
+        return SCREENS.includes(action) ? action : null;
     },
 
     // Game SFX only — menu move/select are shell-owned.
     cue(name, audio) {
-        if (name === "pick") audio.tone(660, 0.05, "triangle", 0.35);
-        else if (name === "drop") audio.tone(220, 0.08, "triangle", 0.5);
-        else if (name === "move") audio.tone(440, 0.02, "square", 0.15);
-        else if (name === "shuffle") audio.tone(320, 0.04, "sine", 0.25);
-        else if (name === "brake") {
-            audio.sequence([
-                [180, 0.08, "sawtooth", 0.5],
-                [260, 0.08, "sawtooth", 0.4],
-            ]);
-        } else if (name === "warn") audio.tone(90, 0.22, "sawtooth", 0.6);
-        else if (name === "gameover") {
-            audio.sequence([
-                [440, 0.18, "sawtooth", 0.6],
-                [330, 0.18, "sawtooth", 0.55],
-                [220, 0.32, "sawtooth", 0.6],
-            ]);
-        } else if (name === "levelup") {
-            audio.sequence([
-                [392, 0.08, "square", 0.6],
-                [523, 0.08, "square", 0.7],
-                [659, 0.14, "square", 0.8],
-            ]);
-        } else if (name === "win") {
-            audio.sequence([
-                [523, 0.08, "square", 0.7],
-                [659, 0.08, "square", 0.7],
-                [784, 0.08, "square", 0.7],
-                [1047, 0.22, "square", 0.9],
-            ]);
-        } else if (name.indexOf("pop@") === 0) {
-            const parts = name.split("@");
-            const color = parseInt(parts[1], 10) || 1;
-            const depth = parseInt(parts[2], 10) || 0;
-            const c = ((color | 0) - 1) % LADDER.length;
-            const mult = Math.pow(2, Math.min(2, depth));
-            audio.tone(LADDER[c < 0 ? 0 : c] * mult, 0.08, "square", 0.55);
-        } else if (name.indexOf("big@") === 0) {
-            const pops = parseInt(name.slice(4), 10) || 3;
+        const seq = CUES[name];
+        if (seq) { audio.sequence(seq); return; }
+        const [kind, a, b] = name.split("@");
+        if (kind === "pop") {
+            const c = Math.max(0, ((parseInt(a, 10) || 1) - 1) % LADDER.length);
+            audio.tone(LADDER[c] * Math.pow(2, Math.min(2, parseInt(b, 10) || 0)), 0.08, "square", 0.55);
+        } else if (kind === "big") {
+            const pops = parseInt(a, 10) || 3;
             const notes = [];
-            for (let i = 0; i < Math.min(5, pops); i++) {
-                notes.push([LADDER[i % LADDER.length] * 2, 0.06, "square", 0.6]);
-            }
+            for (let i = 0; i < Math.min(5, pops); i++) notes.push([LADDER[i % LADDER.length] * 2, 0.06, "square", 0.6]);
             audio.sequence(notes);
-        } else if (name.indexOf("special@") === 0) {
-            const kind = name.slice(8);
-            if (kind === "star") {
-                audio.sequence([
-                    [784, 0.05, "square", 0.6],
-                    [988, 0.05, "square", 0.6],
-                    [1318, 0.1, "square", 0.7],
-                ]);
-            } else if (kind === "bomb") {
-                audio.tone(60, 0.28, "sawtooth", 0.8);
-            } else if (kind === "rainbow") {
-                audio.sequence([
-                    [523, 0.04, "sine", 0.5],
-                    [659, 0.04, "sine", 0.5],
-                    [784, 0.04, "sine", 0.5],
-                    [988, 0.08, "sine", 0.6],
-                ]);
-            }
+        } else if (kind === "special" && SPECIAL_CUES[a]) {
+            audio.sequence(SPECIAL_CUES[a]);
         }
     },
 };
 
-// Title "PLAY" uses data-action="modeselect" so shell doesn't start a run.
-// Restart reuses pendingMode via create().
+// ── Sound ─────────────────────────────────────────────────────────────────
 
-// ── Pointer ──────────────────────────────────────────────────────────────
+const LADDER = [261.63, 293.66, 329.63, 349.23, 392.0, 440.0, 493.88, 523.25];
 
-/** One listener set per canvas; always targets the latest run on that canvas. */
-function attachPointer(run) {
-    const canvas = run.view && run.view.canvas;
-    if (!canvas) return;
-    canvas._blockpopRun = run;
-    if (canvas._blockpopPointer) return;
-    canvas._blockpopPointer = true;
+const CUES = {
+    pick: [[660, 0.05, "triangle", 0.35]],
+    drop: [[220, 0.08, "triangle", 0.5]],
+    move: [[440, 0.02, "square", 0.15]],
+    shuffle: [[320, 0.04, "sine", 0.25]],
+    brake: [[180, 0.08, "sawtooth", 0.5], [260, 0.08, "sawtooth", 0.4]],
+    warn: [[90, 0.22, "sawtooth", 0.6]],
+    gameover: [[440, 0.18, "sawtooth", 0.6], [330, 0.18, "sawtooth", 0.55], [220, 0.32, "sawtooth", 0.6]],
+    levelup: [[392, 0.08, "square", 0.6], [523, 0.08, "square", 0.7], [659, 0.14, "square", 0.8]],
+    win: [[523, 0.08, "square", 0.7], [659, 0.08, "square", 0.7], [784, 0.08, "square", 0.7], [1047, 0.22, "square", 0.9]],
+};
 
-    canvas.addEventListener("click", (e) => {
-        const r = canvas._blockpopRun;
-        if (!r || !r.view) return;
-        const rect = canvas.getBoundingClientRect
-            ? canvas.getBoundingClientRect()
-            : null;
-        let x = e.clientX, y = e.clientY;
-        if (rect) {
-            const scaleX = r.view.width() / (rect.width || r.view.width());
-            const scaleY = r.view.height() / (rect.height || r.view.height());
-            x = (e.clientX - rect.left) * scaleX;
-            y = (e.clientY - rect.top) * scaleY;
-        } else if (typeof e.offsetX === "number") {
-            x = e.offsetX;
-            y = e.offsetY;
-        }
-        Board.mouseClick(x, y);
-    });
-    canvas.addEventListener("wheel", (e) => {
-        Board.mouseWheel(e.deltaY || 0);
-    }, { passive: true });
-}
+const SPECIAL_CUES = {
+    star: [[784, 0.05, "square", 0.6], [988, 0.05, "square", 0.6], [1318, 0.1, "square", 0.7]],
+    bomb: [[60, 0.28, "sawtooth", 0.8]],
+    rainbow: [[523, 0.04, "sine", 0.5], [659, 0.04, "sine", 0.5], [784, 0.04, "sine", 0.5], [988, 0.08, "sine", 0.6]],
+};
 
-// ── High scores / settings ───────────────────────────────────────────────
+// ── Wiring ────────────────────────────────────────────────────────────────
 
-function persistHighScore(run) {
-    if (!run || !run.save) return;
-    const st = Board.getStats();
-    const entry = {
-        score: st.score,
-        level: st.level,
-        chain: st.bestChain,
-        time: Math.floor(st.gameTime),
-        date: dateISO(),
+/** Session effects in board coordinates -> pixels through the run's layout. */
+function boardFx(api, run) {
+    return {
+        cue: (name) => api.play(name),
+        pop(c, r, color) {
+            const p = cellCenter(run.layout, c, r);
+            fx.burst(p.x, p.y, COLORS[color] || "#fff", 6);
+            addFlash(run.flashes, c, r);
+        },
+        toast(kind, text) { const [sel, ms] = TOASTS[kind]; fx.toast(sel, text, ms); },
+        shake: (ms, amp) => fx.shake(ms, amp),
     };
-    let key = "hsClassic";
+}
+
+/** Per-mode leaderboard; sprint ranks finished runs by time. */
+function recordRun(run) {
+    const st = run.board.stats;
+    const entry = { score: st.score, level: st.level, chain: st.bestChain, time: Math.floor(st.gameTime), date: today() };
     if (st.mode === "sprint") {
-        if (!st.finished) return;
-        key = "hsSprint";
-        entry.score = Math.floor(st.gameTime); // lower is better for display
-    } else if (st.mode === "puzzle") {
-        key = "hsPuzzle";
-    }
-    const list = (run.save.get(key) || []).slice();
-    if (st.mode === "sprint") {
-        list.push(entry);
-        list.sort((a, b) => (a.time || 0) - (b.time || 0));
+        if (st.finished) recordScore(run.save, HS_KEY.sprint, entry, 10, (a, b) => (a.time || 0) - (b.time || 0));
     } else {
-        list.push(entry);
-        list.sort((a, b) => (b.score || 0) - (a.score || 0));
+        recordScore(run.save, HS_KEY[st.mode], entry);
     }
-    run.save.set(key, list.slice(0, 10));
-    if (st.mode !== "sprint") run.save.maybeHighScore(st.score);
-    run.save.save();
 }
 
-function renderHighScores(api) {
-    const modes = ["classic", "sprint", "puzzle"];
-    for (let i = 0; i < modes.length; i++) {
-        const el = document.getElementById("hs-tab-" + modes[i]);
-        if (el) el.className = modes[i] === hsMode ? "hs-tab active" : "hs-tab";
-    }
-    const key =
-        hsMode === "sprint" ? "hsSprint" :
-        hsMode === "puzzle" ? "hsPuzzle" : "hsClassic";
-    const list = api.save.get(key) || [];
-    const out = document.getElementById("hs-list");
-    if (!out) return;
-    if (!list.length) {
-        out.textContent = "No scores yet";
-        return;
-    }
-    const lines = [];
-    for (let i = 0; i < list.length; i++) {
-        const s = list[i];
-        let rank = (i + 1) + ".";
-        if (i < 9) rank = " " + rank;
-        if (hsMode === "sprint") {
-            lines.push(rank + " " + formatTime(s.time) + "  Lv" + (s.level || 1));
-        } else {
-            lines.push(
-                rank + " " + (s.score || 0) + "  Lv" + (s.level || 1) +
-                "  x" + (s.chain || 1)
-            );
-        }
-    }
-    out.textContent = lines.join("\n");
-}
-
-function renderSettings(api) {
-    const rs = document.getElementById("opt-riseSpeed");
-    const cb = document.getElementById("opt-colorBlind");
-    if (rs) {
-        const v = api.save.get("riseSpeed") || 10;
-        rs.textContent = (v / 10).toFixed(1);
-    }
-    if (cb) cb.textContent = api.save.get("colorBlind") ? "ON" : "OFF";
-}
-
-function formatTime(ms) {
+/** m:ss.cc */
+export function formatTime(ms) {
     const s = Math.floor(ms / 1000);
     const m = Math.floor(s / 60);
     const sec = s % 60;
@@ -366,56 +251,4 @@ function formatTime(ms) {
     return m + ":" + (sec < 10 ? "0" : "") + sec + "." + (cs < 10 ? "0" : "") + cs;
 }
 
-function dateISO() {
-    try { return new Date().toISOString().slice(0, 10); }
-    catch (e) { return "----"; }
-}
-
-// ── Test hooks ───────────────────────────────────────────────────────────
-
-/** @type {object|null} */
-let shellRef = null;
-
-export function installTestHooks(shell) {
-    shellRef = shell;
-
-    const Screens = {
-        switchTo: function (name) {
-            if (name === "playing" || name === "play") {
-                if (!shell.getRun()) {
-                    pendingMode = pendingMode || "classic";
-                    shell.startRun();
-                } else {
-                    shell.switchTo("playing");
-                }
-            } else if (name === "title") {
-                shell.switchTo("title");
-            } else if (name === "gameOver" || name === "gameover") {
-                shell.switchTo("gameover");
-            } else {
-                shell.switchTo(name);
-            }
-        },
-        manager: function () {
-            return {
-                name: function () { return shell.getScreen(); },
-                current: function () { return null; },
-            };
-        },
-    };
-
-    window.__blockpop = {
-        G: {
-            Board: Board,
-            Particles: Particles,
-            Screens: Screens,
-        },
-        board: Board,
-        particles: Particles,
-        screens: Screens,
-        shell: shell,
-        // Convenience for tests (also on Board).
-        pick: function () { return Board.pick(); },
-        place: function () { return Board.place(); },
-    };
-}
+export const internals = { prefs, get nextMode() { return nextMode; } };

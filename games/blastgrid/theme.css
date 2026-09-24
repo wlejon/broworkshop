@@ -120,7 +120,8 @@
     pointer-events: none;
     white-space: nowrap;
 }
-#announce.pop { animation: pop 2.4s ease-out; }
+/* Shown by effects.toast (display none -> block), which restarts the animation. */
+#announce { animation: pop 2.4s ease-out; }
 @keyframes pop {
     0% { opacity: 0; transform: translateX(-50%) scale(0.7); }
     12% { opacity: 1; transform: translateX(-50%) scale(1.06); }

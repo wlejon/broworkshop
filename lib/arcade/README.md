@@ -24,9 +24,9 @@ arcade kernel  (loop, view, input, audio, save)
 | `shell.js` | boot, screens, menu, session, frame |
 | `scene3d.js` | 3D games: `bootScene`, `createStage` (scene, orbit camera, picking, taps) |
 | `grid.js` | 2D board games: grids, line matches, gravity `collapse`, `createWave` / `createFalls` animations, `fitBoard` layout, `seededRandom`, `formatClock` |
-| `effects.js` | `createEffects`: particle bursts, floating score labels, shake, DOM toasts |
-| `pointer.js` | `bindPointer`: canvas mouse in drawing px, only while playing |
-| `scores.js` | `recordScore` per-mode leaderboards + `createScoreTabs` High Scores screen |
+| `effects.js` | `createEffects`: particle bursts (full circle or an `angle`/`arc` cone, plus `vx`/`vy` drift), floating score labels, shake, DOM toasts |
+| `pointer.js` | `bindPointer`: canvas mouse (down/move/up/click/dblclick/wheel) in drawing px, only while playing |
+| `scores.js` | `recordScore` per-mode leaderboards (optional `compare`, e.g. fastest time) + `createScoreTabs` High Scores screen |
 | `options.js` | `createOptions`: Settings rows that cycle on Enter (`sfxVolume()`, `toggle()`) |
 | `arcade.css` | shared chrome; theme via CSS variables |
 
@@ -168,7 +168,7 @@ The stage gives right-drag orbit / middle-drag pan / wheel zoom (kit
 that did not drag, so right-click actions do not fire at the end of an
 orbit. Rebuild a level with `scene.clear()` + `Physics.createWorld()`
 rather than tracking every node and body. Older scene games
-(blastgrid, hexfront, ...) still paste the hidden-canvas
+(hexfront, ...) still paste the hidden-canvas
 block and their own camera; move them over when touched.
 
 ### Large 3D titles — `sim.js` + plugin
@@ -209,7 +209,7 @@ none — full workshop coverage.
 |---------|--------|
 | Template | `arcade-template` |
 | Classic 2D | snake, breakout, invaders, asteroids, hopper, missile-command, echo, chomper, blockfall, 2048 |
-| Arcade+ modes | pegbounce, blockpop, serpcoil, gemswap, wordspire, fluffshuffle, fintank, starfighter, touchdown, stompworld |
+| Arcade+ modes | pegbounce, blockpop, serpcoil, gemswap, wordspire, fluffshuffle, fintank, starfighter, touchdown, stompworld, clap-runner (mic-driven) |
 | 3D / scene | tumble, deepdelve, blastgrid, hexfront, gridkeep, tilehaven, hearthfolk, farm |
 | Netplay client | crater (`shared.js` + server), fps (`protocol.js` + server) |
 
