@@ -1,295 +1,225 @@
-// agents.js — Intelligent NPC agents with 3D path following, dynamic repathing, and off-mesh link actions.
+// agents.js — walkers that follow plan.js routes, links included.
+//
+// Each agent is a bro.ai.game Agent in one AI world (ORCA avoidance on, with
+// the elevation filter, so crowds on different storeys ignore each other)
+// plus a capsule. Walk legs run on the kit's route follower (the Agent steers
+// in XZ; the route supplies the height). Link legs take the agent off its
+// steering and move it by hand:
+//
+//   CLIMBING          the ladder, straight up or down at CLIMB_SPEED
+//   JUMPING           a parabola across the gap (kit linkPoint)
+//   WAITING_ELEVATOR  calls the lift to its floor, boards when the doors open
+//   RIDING_ELEVATOR   rides the car, steps out at its floor
+//
+// Repath: a walking agent whose plan predates the surface generation re-plans
+// from where it stands; an agent parked short of an unreachable goal
+// (`blocked`) re-plans too, so opening the gate sends it on its way.
+//
+// Why not node.navigateTo? A link ends in a teleport to another storey, and
+// the binding plans its next route from the height of the route it last
+// walked, not from where the agent now stands (see ENGINE-ISSUES.md).
 
-import { LINK_TYPES } from "./navmesh.js";
-import { FLOORS } from "./environment.js";
+import { capsule, startRoute, followRoute, linkPoint } from "/lib/kit/nav3d.js";
+import { SHAFT, floorOf } from "/app/level.js";
+import { nearest, generation } from "/app/nav.js";
+import { plan, WALK_SPEED, CLIMB_SPEED, JUMP_TIME } from "/app/plan.js";
+import { lift, callLift, boardable } from "/app/elevator.js";
 
-export const AGENT_STATE = {
-    IDLE: 'IDLE',
-    WALKING: 'WALKING',
-    CLIMBING: 'CLIMBING',
-    JUMPING: 'JUMPING',
-    WAITING_ELEVATOR: 'WAITING_ELEVATOR',
-    RIDING_ELEVATOR: 'RIDING_ELEVATOR'
+export const STATE = {
+    IDLE: 'IDLE', WALKING: 'WALKING', CLIMBING: 'CLIMBING', JUMPING: 'JUMPING',
+    WAITING: 'WAITING_ELEVATOR', RIDING: 'RIDING_ELEVATOR',
 };
 
-const AGENT_COLORS = ['#00f0ff', '#39ff14', '#f59e0b', '#ec4899', '#8b5cf6', '#06b6d4'];
+const COLORS = ['#5ad2f4', '#7bed9f', '#ffd166', '#ff8fab', '#a58bff', '#ff8f5a', '#4fd1c5', '#f6e05e'];
+const BODY = 0.76;   // capsule() centre above the feet
 
-export class Agent {
-    constructor(id, x, y, z, scene, color = null) {
-        this.id = id;
-        this.x = x;
-        this.y = y;
-        this.z = z;
-        this.vx = 0;
-        this.vy = 0;
-        this.vz = 0;
-        this.yaw = 0;
+export const agentState = {
+    world: null,
+    agents: [],
+    nextId: 1,
+    traversals: { ladder: 0, jump: 0, lift: 0 },
+    repaths: 0,
+    seen: new Set(),     // every state any agent has been in (tests, HUD)
+};
 
-        this.speed = 3.5; // m/s
-        this.radius = 0.35;
-        this.state = AGENT_STATE.IDLE;
-        this.color = color || AGENT_COLORS[id % AGENT_COLORS.length];
+let sceneRef = null;
 
-        // Path & Waypoint tracking
-        this.path = []; // [{ x, y, z, link }]
-        this.waypointIndex = 0;
-        this.goalPos = null;
-        this.lastNavGen = 0;
+export function createAgentWorld(scene) {
+    sceneRef = scene;
+    agentState.world = bro.ai.game.createWorld();
+    agentState.world.setAvoidance(true);
+    return agentState.world;
+}
 
-        // Off-mesh action state
-        this.actionTimer = 0;
-        this.actionDuration = 1.0;
-        this.linkStart = null;
-        this.linkEnd = null;
+export function spawnAgent(at) {
+    const p = nearest(at) || at;
+    const id = agentState.nextId++;
+    const agent = bro.ai.game.createAgent({
+        x: p.x, z: p.z, speed: WALK_SPEED, radius: 0.35, elevation: p.y,
+        avoidance: { height: 2.0 },
+    });
+    agentState.world.addAgent(agent);
+    const color = COLORS[(id - 1) % COLORS.length];
+    const node = capsule(sceneRef, p, { name: `agent.${id}`, color, radius: 0.32, halfHeight: 0.44 });
+    const rec = {
+        id, agent, node, color, y: p.y, state: STATE.IDLE, goal: null, plan: null, legIdx: 0,
+        route: null, leg: 0, done: true, link: null, blocked: false, onChange: null,
+    };
+    agentState.agents.push(rec);
+    return rec;
+}
 
-        // 3D Visual Mesh
-        this.scene = scene;
-        this.mesh = null;
-        this.initMesh();
+/** A ring of `n` around a point. */
+export function spawnSquad(n, at) {
+    const out = [];
+    for (let i = 0; i < n; i++) {
+        const a = (i / n) * Math.PI * 2;
+        out.push(spawnAgent({ x: at.x + Math.cos(a) * 2.2, y: at.y, z: at.z + Math.sin(a) * 2.2 }));
     }
+    return out;
+}
 
-    initMesh() {
-        if (!this.scene || typeof this.scene.createMesh !== 'function') return;
-        try {
-            this.mesh = this.scene.createMesh({
-                mesh: 'capsule',
-                radius: this.radius,
-                halfHeight: 0.5,
-                color: this.color,
-                roughness: 0.4,
-                x: this.x,
-                y: this.y + 0.5,
-                z: this.z
-            });
-        } catch (_) {}
+export function removeAgent(rec) {
+    const i = agentState.agents.indexOf(rec);
+    if (i < 0) return;
+    agentState.world.removeAgent(rec.agent);
+    rec.node.destroy();
+    agentState.agents.splice(i, 1);
+}
+
+export function clearAgents() {
+    for (const rec of agentState.agents.slice()) removeAgent(rec);
+}
+
+function setState(rec, s) {
+    rec.state = s;
+    agentState.seen.add(s);
+}
+
+/** Plan to `goal` from where the agent stands and start the first leg. */
+export function sendTo(rec, goal) {
+    rec.goal = { ...goal };
+    rec.plan = plan({ x: rec.agent.x, y: rec.y, z: rec.agent.z }, rec.goal);
+    rec.blocked = rec.plan.partial;
+    rec.legIdx = -1;
+    nextLeg(rec);
+    if (rec.onChange) rec.onChange(rec);
+    return rec.plan;
+}
+
+/**
+ * Send everyone to one place, each to its own slot in rings around it (on the
+ * surface, on the goal's storey): a crowd told to stand on one point never
+ * finishes arriving, because avoidance keeps all but one of them off it.
+ */
+export function sendAll(goal) {
+    return agentState.agents.map((rec, i) => sendTo(rec, slotAround(goal, i)));
+}
+
+function slotAround(goal, i) {
+    if (i === 0) return goal;
+    const ring = i <= 6 ? 1 : 2, k = ring === 1 ? i - 1 : i - 7, per = ring === 1 ? 6 : 12;
+    const a = (k / per) * Math.PI * 2, r = ring * 1.1;
+    const p = { x: goal.x + Math.cos(a) * r, y: goal.y, z: goal.z + Math.sin(a) * r };
+    const q = nearest(p, { x: 0.4, y: 0.6, z: 0.4 });
+    return q && Math.hypot(q.x - p.x, q.z - p.z) < 0.35 ? q : goal;
+}
+
+function nextLeg(rec) {
+    rec.legIdx++;
+    const leg = rec.plan && rec.plan.legs[rec.legIdx];
+    if (!leg) {
+        rec.done = true;
+        rec.agent.clearTarget();
+        setState(rec, STATE.IDLE);
+        return;
     }
-
-    setGoal(gx, gy, gz, navGraph) {
-        this.goalPos = { x: gx, y: gy, z: gz };
-        this.recalculatePath(navGraph);
+    if (leg.kind === 'walk') {
+        // A walk leg planned before a carve may cross what is now a hole.
+        if (rec.plan.generation !== generation() && rec.goal) { replan(rec); return; }
+        setState(rec, startRoute(rec, leg.route) ? STATE.WALKING : STATE.IDLE);
+        if (rec.state === STATE.IDLE) nextLeg(rec);
+        return;
     }
+    rec.agent.clearTarget();
+    rec.link = { leg, t: 0, dur: leg.kind === 'ladder' ? Math.abs(leg.to.y - leg.from.y) / CLIMB_SPEED
+                                 : leg.kind === 'jump' ? JUMP_TIME : 0 };
+    setState(rec, leg.kind === 'ladder' ? STATE.CLIMBING : leg.kind === 'jump' ? STATE.JUMPING : STATE.WAITING);
+}
 
-    recalculatePath(navGraph) {
-        if (!this.goalPos) return;
+function replan(rec) {
+    agentState.repaths++;
+    sendTo(rec, rec.goal);
+}
 
-        const path = navGraph.findPath({ x: this.x, y: this.y, z: this.z }, this.goalPos);
-        if (path && path.length > 0) {
-            this.path = path;
-            this.waypointIndex = 0;
-            this.state = AGENT_STATE.WALKING;
-            this.lastNavGen = navGraph.generation;
-        } else {
-            this.path = [];
-            this.state = AGENT_STATE.IDLE;
+function place(rec, p) {
+    rec.agent.setPosition(p.x, p.z);
+    rec.y = p.y;
+    rec.agent.elevation = p.y;
+}
+
+function finishLink(rec) {
+    const leg = rec.link.leg;
+    place(rec, leg.to);
+    agentState.traversals[leg.kind]++;
+    rec.link = null;
+    nextLeg(rec);
+}
+
+/** One fixed step for the world and every agent. */
+export function tickAgents(dt) {
+    const world = agentState.world;
+    if (!world) return;
+    world.tick(dt);
+    const gen = generation();
+    for (const rec of agentState.agents.slice()) {
+        switch (rec.state) {
+        case STATE.WALKING:
+            if (rec.plan.generation !== gen) { replan(rec); break; }
+            if (followRoute(rec)) nextLeg(rec);
+            break;
+        case STATE.IDLE:
+            if (rec.blocked && rec.plan && rec.plan.generation !== gen) replan(rec);
+            break;
+        case STATE.CLIMBING:
+        case STATE.JUMPING: {
+            const L = rec.link;
+            L.t = Math.min(1, L.t + dt / Math.max(0.05, L.dur));
+            const p = linkPoint({ kind: L.leg.kind, start: L.leg.from, end: L.leg.to, arc: L.leg.def.arc }, L.t);
+            place(rec, p);
+            if (L.t >= 1) finishLink(rec);
+            break;
         }
-    }
-
-    update(dt, navGraph, env, stats) {
-        // Check if NavMesh has been re-carved and repath if necessary
-        if (this.state === AGENT_STATE.WALKING && this.goalPos && this.lastNavGen !== navGraph.generation) {
-            this.recalculatePath(navGraph);
-        }
-
-        switch (this.state) {
-            case AGENT_STATE.WALKING:
-                this.updateWalking(dt, navGraph, env, stats);
-                break;
-            case AGENT_STATE.CLIMBING:
-                this.updateClimbing(dt, stats);
-                break;
-            case AGENT_STATE.JUMPING:
-                this.updateJumping(dt, stats);
-                break;
-            case AGENT_STATE.WAITING_ELEVATOR:
-                this.updateWaitingElevator(dt, env, stats);
-                break;
-            case AGENT_STATE.RIDING_ELEVATOR:
-                this.updateRidingElevator(dt, env, stats);
-                break;
-            case AGENT_STATE.IDLE:
-            default:
-                break;
-        }
-
-        // Sync 3D Visual Mesh
-        if (this.mesh) {
-            this.mesh.position = [this.x, this.y + 0.5, this.z];
-            this.mesh.rotation = [0, Math.sin(this.yaw / 2), 0, Math.cos(this.yaw / 2)];
-        }
-    }
-
-    updateWalking(dt, navGraph, env, stats) {
-        if (this.waypointIndex >= this.path.length) {
-            this.state = AGENT_STATE.IDLE;
-            return;
-        }
-
-        const wp = this.path[this.waypointIndex];
-        const dx = wp.x - this.x;
-        const dy = wp.y - this.y;
-        const dz = wp.z - this.z;
-        const dist = Math.hypot(dx, dz);
-
-        // Check if reaching off-mesh link trigger waypoint
-        if (wp.link && dist < 0.6 && Math.abs(dy) < 0.8) {
-            const link = wp.link;
-            stats.traversals++;
-
-            if (link.type === LINK_TYPES.LADDER) {
-                this.state = AGENT_STATE.CLIMBING;
-                this.linkStart = { ...wp.link.startPos };
-                this.linkEnd = { ...wp.link.endPos };
-                const heightDiff = Math.abs(this.linkEnd.y - this.linkStart.y);
-                this.actionDuration = heightDiff / 2.0; // 2 m/s climb speed
-                this.actionTimer = 0;
-                return;
-            } else if (link.type === LINK_TYPES.JUMP) {
-                this.state = AGENT_STATE.JUMPING;
-                this.linkStart = { ...wp.link.startPos };
-                this.linkEnd = { ...wp.link.endPos };
-                this.actionDuration = 1.1; // 1.1s air time
-                this.actionTimer = 0;
-                return;
-            } else if (link.type === LINK_TYPES.ELEVATOR) {
-                this.state = AGENT_STATE.WAITING_ELEVATOR;
-                this.linkStart = { ...wp.link.startPos };
-                this.linkEnd = { ...wp.link.endPos };
-                return;
+        case STATE.WAITING:
+            callLift(rec.link.leg.fromFloor);
+            if (boardable(rec.link.leg.fromFloor)) {
+                setState(rec, STATE.RIDING);
+                callLift(rec.link.leg.toFloor);
             }
+            break;
+        case STATE.RIDING: {
+            // Riders stand in a ring on the car so a full lift is readable.
+            const k = riderSlot(rec);
+            place(rec, { x: SHAFT.x + Math.cos(k) * 0.45, y: lift.y, z: SHAFT.z + Math.sin(k) * 0.45 });
+            if (boardable(rec.link.leg.toFloor)) finishLink(rec);
+            break;
         }
-
-        // Steer towards waypoint
-        if (dist > 0.25) {
-            const dirX = dx / dist;
-            const dirZ = dz / dist;
-            this.x += dirX * this.speed * dt;
-            this.z += dirZ * this.speed * dt;
-            this.y += dy * Math.min(1.0, dt * 5.0); // smooth vertical ramp climb
-            this.yaw = Math.atan2(dirX, dirZ);
-        } else {
-            // Next waypoint
-            this.waypointIndex++;
         }
-    }
-
-    updateClimbing(dt, stats) {
-        this.actionTimer += dt;
-        const p = Math.min(1.0, this.actionTimer / this.actionDuration);
-
-        // Smooth vertical climbing interpolation with subtle rung sway
-        this.x = this.linkStart.x;
-        this.z = this.linkStart.z;
-        this.y = this.linkStart.y + (this.linkEnd.y - this.linkStart.y) * p;
-
-        if (p >= 1.0) {
-            this.x = this.linkEnd.x;
-            this.y = this.linkEnd.y;
-            this.z = this.linkEnd.z;
-            this.waypointIndex++;
-            this.state = AGENT_STATE.WALKING;
-        }
-    }
-
-    updateJumping(dt, stats) {
-        this.actionTimer += dt;
-        const p = Math.min(1.0, this.actionTimer / this.actionDuration);
-
-        // Parabolic ballistic trajectory
-        this.x = this.linkStart.x + (this.linkEnd.x - this.linkStart.x) * p;
-        this.z = this.linkStart.z + (this.linkEnd.z - this.linkStart.z) * p;
-
-        // Parabolic arc height (apex = 3.5m above ground)
-        const arcY = 4.0 * p * (1 - p) * 3.5;
-        this.y = this.linkStart.y + (this.linkEnd.y - this.linkStart.y) * p + arcY;
-
-        if (p >= 1.0) {
-            this.x = this.linkEnd.x;
-            this.y = this.linkEnd.y;
-            this.z = this.linkEnd.z;
-            this.waypointIndex++;
-            this.state = AGENT_STATE.WALKING;
-        }
-    }
-
-    updateWaitingElevator(dt, env, stats) {
-        // Call elevator to agent's current floor if it's not already on the way
-        const curFloor = this.y > 5 ? 2 : (this.y > 2 ? 1 : 0);
-        if (env.elevator.targetFloor !== curFloor && !env.elevator.isMoving) {
-            env.callElevator(curFloor);
-        }
-
-        // Check if elevator has arrived at current floor with doors open
-        const atFloor = Math.abs(env.elevator.y - this.y) < 0.3;
-        if (atFloor && env.elevator.doorOpen > 0.8) {
-            // Board elevator
-            this.state = AGENT_STATE.RIDING_ELEVATOR;
-            const targetFloor = this.linkEnd.y > 5 ? 2 : (this.linkEnd.y > 2 ? 1 : 0);
-            env.callElevator(targetFloor);
-        }
-    }
-
-    updateRidingElevator(dt, env, stats) {
-        // Move with elevator cabin
-        this.x = env.elevator.pos.x;
-        this.z = env.elevator.pos.z;
-        this.y = env.elevator.y + 0.1;
-
-        // Check if destination floor reached
-        const targetFloor = this.linkEnd.y > 5 ? 2 : (this.linkEnd.y > 2 ? 1 : 0);
-        if (env.elevator.currentFloor === targetFloor && !env.elevator.isMoving && env.elevator.doorOpen > 0.8) {
-            // Disembark
-            this.x = this.linkEnd.x;
-            this.y = this.linkEnd.y;
-            this.z = this.linkEnd.z;
-            this.waypointIndex++;
-            this.state = AGENT_STATE.WALKING;
-        }
+        rec.node.x = rec.agent.x; rec.node.y = rec.y + BODY; rec.node.z = rec.agent.z;
     }
 }
 
-export class AgentManager {
-    constructor(scene, navGraph, env) {
-        this.scene = scene;
-        this.navGraph = navGraph;
-        this.env = env;
-        this.agents = [];
-        this.stats = { traversals: 0 };
-    }
+function riderSlot(rec) {
+    const riders = agentState.agents.filter((r) => r.state === STATE.RIDING);
+    return (riders.indexOf(rec) / Math.max(1, riders.length)) * Math.PI * 2;
+}
 
-    spawnAgent(x = 0, y = 0, z = 4.0) {
-        const id = this.agents.length;
-        const agent = new Agent(id, x, y, z, this.scene);
-        this.agents.push(agent);
-        return agent;
-    }
+export function countIn(state) {
+    return agentState.agents.filter((r) => r.state === state).length;
+}
 
-    spawnSquad(count = 5) {
-        for (let i = 0; i < count; i++) {
-            const angle = (i / count) * Math.PI * 2;
-            const sx = Math.cos(angle) * 3.5;
-            const sz = 3.0 + Math.sin(angle) * 3.5;
-            this.spawnAgent(sx, 0, sz);
-        }
-    }
-
-    clearAgents() {
-        for (const a of this.agents) {
-            if (a.mesh && typeof a.mesh.dispose === 'function') {
-                a.mesh.dispose();
-            }
-        }
-        this.agents = [];
-    }
-
-    sendAllTo(gx, gy, gz) {
-        for (const a of this.agents) {
-            a.setGoal(gx, gy, gz, this.navGraph);
-        }
-    }
-
-    update(dt) {
-        for (const a of this.agents) {
-            a.update(dt, this.navGraph, this.env, this.stats);
-        }
-    }
+export function floorCounts() {
+    const c = [0, 0, 0];
+    for (const r of agentState.agents) c[floorOf(r.y)]++;
+    return c;
 }

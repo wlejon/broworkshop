@@ -377,6 +377,37 @@ never wraps a shrink-to-fit flex line against its own max-content width.
 Repro: `lib/arcade/arcade.css` `#hud` plus `.hud-row`, with two `.hud-stat`
 children whose labels are "Score"/"Best" in Helvetica and values "0"/"2048".
 
+### `getBoundingClientRect` of a descendant of a newly hidden element keeps its old box (2026-09-24)
+Fold a panel by adding a class that sets `display:none` on its body. The
+body itself then reports a 0x0 rect, and `getComputedStyle` says
+`display: none`. A button inside that body still returns its old, non-zero
+rect, so `clickOn` believes it is visible and clicks empty space. Seen with
+the kit's `foldPanels()` in demos/nav-lab. The nav-lab tests check the rect
+of the panel's direct child instead.
+
+### bro.ai.game has no square-grid flow field (2026-09-24)
+`HexNav.field` builds an integration/flow field for hex grids only. `NavGrid`
+answers A* (`findPath`, with cell costs) and `hasLineOfSight`, but has no
+equivalent of the field. demos/tactical-flowfield therefore runs its own
+fast-marching wave in JS. With a 128x72 grid that costs 40–75 ms per
+rebuild, and it rebuilds on every terrain edit, so painting stutters. A
+native `NavGrid.field(goal, { costs, extraCost })` would remove the JS wave.
+
+### Per-call overhead dominates tight JS loops (2026-09-24)
+Measured in optimized (boot) bronze: about 70 ns for a trivial call to a
+local function, about 250 ns for a cross-module namespace call (175 ns when
+the import is first bound to a local const), and 14–40 ns for a typed-array
+read. In demos/tactical-flowfield the per-unit steering loop is about
+10 µs per unit per tick, even after inlining every lookup (1000 units come
+to ~10 ms per 60 Hz tick). The flow-field wave takes 40 ms or more over 9k
+cells. Numbers are rough and come from `perf.now()` around loops in `-e`
+scripts.
+
+### The `.k-side` scrollbar paints as a bright white strip (2026-09-24)
+When a kit side column overflows, its vertical scrollbar draws as a flat
+white bar that ignores the dark theme. The pre-kit nav-lab showed it too.
+Cosmetic.
+
 ## Notes (not bugs)
 
 - `<select>.value` round-trips correctly now (set programmatically, and

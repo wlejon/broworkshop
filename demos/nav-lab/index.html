@@ -1,323 +1,201 @@
 <!DOCTYPE html>
 <html>
 <head>
+    <meta charset="utf-8">
     <title>Navigation Lab</title>
+    <link rel="stylesheet" href="/lib/kit/kit.css">
     <link rel="stylesheet" href="/app/style.css">
 </head>
-<body>
-    <canvas id="stage"></canvas>
+<body class="k-app">
+    <header class="k-header">
+        <h1>Navigation Lab</h1>
+        <span class="k-sub">bro.ai.game NavMesh: Recast/Detour baked from this level's physics, with off-mesh links, dynamic obstacles, ORCA avoidance and the steering kernels</span>
+    </header>
 
-    <div id="hud">
-        <h1>Navigation Lab <span id="fps" class="fps">—</span></h1>
-
-        <p class="lede">bro's Recast/Detour navmesh, end to end: baked from this
-        level's physics geometry, with off-mesh links, dynamic obstacles, ORCA
-        avoidance and the steering kernels. Click a heading to fold a section.</p>
-
-        <div class="mode" id="modeBar">—</div>
-
-        <!-- ============ THE SURFACE ====================================== -->
-        <h3 class="group">The surface</h3>
-
-        <section class="sec">
-            <h2>Bake parameters</h2>
-            <div class="body">
-            <label>Agent radius <input type="range" id="pRadius" min="0.2" max="2.0" step="0.05" value="0.5">
-                <span class="v" id="pRadiusV"></span></label>
-            <label>Agent height <input type="range" id="pHeight" min="0.5" max="4.0" step="0.1" value="2.0">
-                <span class="v" id="pHeightV"></span></label>
-            <label>Max slope° <input type="range" id="pSlope" min="15" max="80" step="1" value="45">
-                <span class="v" id="pSlopeV"></span></label>
-            <label>Step height <input type="range" id="pClimb" min="0.1" max="1.0" step="0.05" value="0.4">
-                <span class="v" id="pClimbV"></span></label>
-            <label>Cell size <input type="range" id="pCell" min="0.1" max="0.6" step="0.025" value="0.25">
-                <span class="v" id="pCellV"></span></label>
-            <button id="btnBake">Re-bake navmesh</button>
-            <div class="hint" id="bakeHint">—</div>
-            </div>
-        </section>
-
-        <section class="sec">
-            <h2><label><input type="checkbox" id="ovOn" checked> Walkable surface overlay</label></h2>
-            <div class="body">
-            <label>Probe step <input type="range" id="ovStep" min="0.35" max="1.2" step="0.05" value="0.6">
-                <span class="v" id="ovStepV"></span></label>
-            <div class="stats">
-                <div><span>walkable samples</span><b id="stSamples">—</b></div>
-                <div><span>overlay quads</span><b id="stQuads">—</b></div>
-                <div><span>bake / blob</span><b id="stBake">—</b></div>
-            </div>
-            <div class="hint">bro exposes no polygon read-back, so this samples
-                the baked surface via <code>nearestPoint</code>. Raise the agent
-                radius and re-bake: the surface pulls back from every wall.</div>
-            </div>
-        </section>
-
-        <section class="sec collapsed">
-            <h2><label><input type="checkbox" id="gridOverlayOn"> NavGrid overlay (magenta)</label></h2>
-            <div class="body">
-            <div class="stats">
-                <div><span>walkable grid cells</span><b id="stGridCells">—</b></div>
-                <div><span>of probed</span><b id="stGridTested">—</b></div>
-            </div>
-            <div class="hint">The 2D grid, baked from the same static bodies via
-                <code>createNavGrid({fromPhysics})</code> — no hand-authored
-                rectangles. Show it with the cyan mesh overlay: one flat sheet at
-                y = 0 against four stacked storeys, and a square hole under every
-                ramp, because a grid obstacle is the body's <b>AABB</b>.</div>
-            </div>
-        </section>
-
-        <!-- ============ QUERIES ========================================== -->
-        <h3 class="group">Path queries</h3>
-
-        <section class="sec">
-            <h2>Path query</h2>
-            <div class="body">
-            <div class="hint">Left-click the level to set the <b>start</b>,
-                shift-click to set the <b>goal</b>.</div>
-            <div class="row">
-                <button id="btnSameFloor">Same floor</button>
-                <button id="btnCrossFloor">Cross floor</button>
-                <button id="btnToRoof">To roof</button>
-            </div>
-            <div class="stats">
-                <div><span>waypoints</span><b id="stWp">—</b></div>
-                <div><span>path length</span><b id="stLen">—</b></div>
-                <div><span>elevation change</span><b id="stRise">—</b></div>
-                <div><span>link segments</span><b id="stLinkSegs">—</b></div>
-                <div><span>partial</span><b id="stPartial">—</b></div>
-            </div>
-            <div class="hint" id="pathHint">—</div>
-            </div>
-        </section>
-
-        <section class="sec collapsed">
-            <h2><label><input type="checkbox" id="gridOn"> Compare against NavGrid</label></h2>
-            <div class="body">
-            <div class="stats">
-                <div><span>grid waypoints</span><b id="stGwp">—</b></div>
-                <div><span>grid length</span><b id="stGlen">—</b></div>
-            </div>
-            <div class="hint" id="gridHint">The 2D grid is baked from the same
-                static bodies, clamped to the ground slab — a NavGrid stores one
-                walkability bit per XZ cell, so a storey has to be chosen at
-                bake time. Its answer is always drawn flat at y = 0.</div>
-            </div>
-        </section>
-
-        <!-- ============ OFF-MESH LINKS =================================== -->
-        <h3 class="group">Off-mesh links</h3>
-
-        <section class="sec">
-            <h2>Mode — links or obstacles</h2>
-            <div class="body">
-            <div class="row">
-                <button id="btnModeLinks">Static + links</button>
-                <button id="btnModeTiled">Tiled + obstacles</button>
-            </div>
-            <div class="hint" id="modeHint">—</div>
-            <div class="stats">
-                <div><span>links baked</span><b id="stLinks">—</b></div>
-                <div><span>live in mesh</span><b id="stLinksLive">—</b></div>
-            </div>
-            </div>
-        </section>
-
-        <section class="sec">
-            <h2>Jump, drop, ladder</h2>
-            <div class="body">
-            <div class="hint">The east pad in the link yard touches nothing: the
-                4.5 m jump is the only way onto it. Send the walkers and watch
-                them leave the surface.</div>
-            <div class="row">
-                <button id="btnLinkJump">Send over the gap</button>
-                <button id="btnLinkDrop">Off the mezzanine</button>
-                <button id="btnLinkLadder">Up the ladder</button>
-            </div>
-            <div class="row">
-                <button id="btnLinkHome">Reset walkers</button>
-            </div>
-            <div class="stats">
-                <div><span>on a link now</span><b id="stOnLink">—</b></div>
-                <div><span>last link</span><b id="stLastLink">—</b></div>
-                <div><span>traversals</span><b id="stTraversals">—</b></div>
-                <div><span>reached the island</span><b id="stCrossed">—</b></div>
-            </div>
-            <div class="hint" id="linkHint">—</div>
-            </div>
-        </section>
-
-        <section class="sec">
-            <h2>Partial paths — walled in</h2>
-            <div class="body">
-            <div class="hint">Seal the pad (drop the jump link from the bake) and
-                the island is unreachable. The same query then answers two
-                different ways depending on one flag.</div>
-            <div class="row">
-                <button id="btnSeal">Seal the pad</button>
-                <button id="btnUnseal">Restore the jump</button>
-                <button id="btnPartial">Run the comparison</button>
-            </div>
-            <label><input type="checkbox" id="reqFull"> <code>requireFullPath</code> on every query</label>
-            <div class="stats">
-                <div><span>loose (clamped)</span><b id="stLoose">—</b></div>
-                <div><span>strict</span><b id="stStrict">—</b></div>
-                <div><span>stops short by</span><b id="stShort">—</b></div>
-            </div>
-            <div class="hint" id="partialHint">—</div>
-            </div>
-        </section>
-
-        <!-- ============ AGENTS =========================================== -->
-        <h3 class="group">Agents</h3>
-
-        <section class="sec">
-            <h2>Route walkers</h2>
-            <div class="body">
-            <label>Speed <input type="range" id="aSpeed" min="0.5" max="10" step="0.1" value="3.5">
-                <span class="v" id="aSpeedV"></span></label>
-            <div class="row">
-                <button id="btnSend">Send agents to goal</button>
-            </div>
-            <div class="hint">Ctrl-click the level to retarget every walker.</div>
-            <div class="stats">
-                <div><span>walking</span><b id="stWalking">—</b></div>
-            </div>
-            </div>
-        </section>
-
-        <section class="sec">
-            <h2><label><input type="checkbox" id="followOn" checked> Ground follow</label></h2>
-            <div class="body">
-            <div class="hint">Two agents, identical except for
-                <code>groundFollow: {mode:'raycast'}</code>, steered in a straight
-                line up the link-yard ramp. The grey one keeps a constant Y and
-                slides through the slope; the green one's native down-probe puts
-                it on the surface.</div>
-            <div class="row">
-                <button id="btnWalkRamp">Walk the ramp</button>
-                <button id="btnFollowReset">Reset</button>
-            </div>
-            <div class="stats">
-                <div><span>with follow — Y range</span><b id="stFollowY">—</b></div>
-                <div><span>without — Y range</span><b id="stFlatY">—</b></div>
-            </div>
-            </div>
-        </section>
-
-        <!-- ============ CROWD ============================================ -->
-        <h3 class="group">Crowd &amp; obstacles</h3>
-
-        <section class="sec collapsed">
-            <h2><label><input type="checkbox" id="avoidOn"> Local avoidance (ORCA)</label></h2>
-            <div class="body">
-            <label>Crowd size <input type="range" id="cCount" min="4" max="40" step="2" value="16">
-                <span class="v" id="cCountV"></span></label>
-            <div class="row">
-                <button id="btnFunnel">Funnel</button>
-                <button id="btnVip">VIP</button>
-            </div>
-            <div class="row">
-                <button id="btnFactions">Factions</button>
-                <button id="btnStacked">Stacked</button>
-                <button id="btnClearCrowd">Clear</button>
-            </div>
-            <div class="stats">
-                <div><span>scenario</span><b id="stScenario">—</b></div>
-                <div><span>crowd agents</span><b id="stCrowd">—</b></div>
-                <div><span>overlapping pairs</span><b id="stOverlap">—</b></div>
-                <div><span>mean overlaps</span><b id="stOverlapMean">—</b></div>
-            </div>
-            <div class="hint" id="crowdHint">Pick a scenario, then toggle
-                avoidance and watch the overlapping-pair count move.</div>
-            </div>
-        </section>
-
-        <section class="sec collapsed">
-            <h2><label><input type="checkbox" id="dynOn"> Dynamic-obstacle bake</label></h2>
-            <div class="body">
-            <div class="hint">Re-bakes tiled (<code>dtTileCache</code>) so crates
-                and doors can carve the surface at runtime. Alt-click the level
-                to drop or pick up a crate. <b>Off-mesh links are dropped in this
-                mode</b> — the two are mutually exclusive.</div>
-            <div class="row">
-                <button id="btnBlock">Block the corridor</button>
-                <button id="btnClearObs">Clear obstacles</button>
-            </div>
-            <div class="stats">
-                <div><span>generation</span><b id="stGen">—</b></div>
-                <div><span>obstacles</span><b id="stObs">—</b></div>
-                <div><span>pending</span><b id="stPending">—</b></div>
-                <div><span>tiles rebuilt</span><b id="stTiles">—</b></div>
-                <div><span>agent repaths</span><b id="stRepath">—</b></div>
-            </div>
-            <div class="hint" id="obsHint">Tiled bakes cannot be serialised, so
-                Save is unavailable in this mode.</div>
-            </div>
-        </section>
-
-        <!-- ============ STEERING ========================================= -->
-        <h3 class="group">Steering kernels</h3>
-
-        <section class="sec">
-            <h2><label><input type="checkbox" id="steerOn"> <code>bro.ai.game.steer.*</code></label></h2>
-            <div class="body">
-            <div class="hint">Five stateless kernels against one orbiting target,
-                each drawn with the force vector it returned. These are engine
-                kernels — <code>lib/bot_aim.js</code> in this workshop hand-rolls
-                the same maths, and no longer needs to.</div>
-            <div class="legend" id="steerLegend"></div>
-            <div class="stats">
-                <div><span>seek speed</span><b id="stSeekV">—</b></div>
-                <div><span>arrive speed</span><b id="stArriveV">—</b></div>
-                <div><span>arrive distance</span><b id="stArriveD">—</b></div>
-            </div>
-            </div>
-        </section>
-
-        <section class="sec">
-            <h2><label><input type="checkbox" id="leadOn" checked> Turret — <code>computeLeadAim</code></label></h2>
-            <div class="body">
-            <div class="hint">A turret shooting a crossing target with a 14 m/s
-                projectile. Untick to aim straight at where the target is now and
-                watch every shot pass behind it.</div>
-            <div class="row">
-                <button id="btnMeasureAim">Measure both</button>
-            </div>
-            <div class="stats">
-                <div><span>shots</span><b id="stShots">—</b></div>
-                <div><span>hits / misses</span><b id="stHits">—</b></div>
-                <div><span>last closest approach</span><b id="stClosest">—</b></div>
-            </div>
-            <div class="hint" id="aimHint">—</div>
-            </div>
-        </section>
-
-        <!-- ============ MISC ============================================= -->
-        <h3 class="group">Cache &amp; view</h3>
-
-        <section class="sec collapsed">
-            <h2>Save / load round trip</h2>
-            <div class="body">
-            <div class="row">
-                <button id="btnSave">Save</button>
-                <button id="btnLoad">Load + verify</button>
-            </div>
-            <div class="hint" id="cacheHint">Bake once, cache to disk, memcpy
-                back at startup. Links survive the round trip; a tiled bake
-                cannot be saved at all.</div>
-            </div>
-        </section>
-
-        <section class="sec collapsed">
-            <h2><label><input type="checkbox" id="shellOn" checked> Draw the level</label></h2>
-            <div class="body">
-            <div class="hint">Turn it off to see the baked surface alone.</div>
-            </div>
-        </section>
+    <div class="k-toolbar">
+        <span class="dim">bake</span>
+        <button id="btnModeLinks" class="small" title="Static bake: off-mesh links in, save() works, no runtime obstacles">Static + links</button>
+        <button id="btnModeTiled" class="small" title="Tiled dtTileCache bake: crates carve the surface, links dropped, save() throws">Tiled + obstacles</button>
+        <span id="modeBar" class="mode">—</span>
+        <span class="k-spacer"></span>
+        <label class="k-field"><input type="checkbox" id="shellOn" checked> level</label>
+        <label class="k-field"><input type="checkbox" id="ovOn" checked> walkable surface</label>
+        <label class="k-field"><input type="checkbox" id="gridOverlayOn"> NavGrid cells</label>
     </div>
 
-    <script type="module" src="/app/app.js"></script>
+    <div class="k-body">
+        <aside class="k-side" id="side">
+            <div class="k-panel fold">
+                <h2>Bake parameters</h2>
+                <label class="k-field"><span>Agent radius</span><input type="range" id="pRadius" min="0.2" max="2.0" step="0.05" value="0.5"><span class="k-val" id="pRadiusV"></span></label>
+                <label class="k-field"><span>Agent height</span><input type="range" id="pHeight" min="0.5" max="4.0" step="0.1" value="2.0"><span class="k-val" id="pHeightV"></span></label>
+                <label class="k-field"><span>Max slope</span><input type="range" id="pSlope" min="15" max="80" step="1" value="45"><span class="k-val" id="pSlopeV"></span></label>
+                <label class="k-field"><span>Step height</span><input type="range" id="pClimb" min="0.1" max="1.0" step="0.05" value="0.4"><span class="k-val" id="pClimbV"></span></label>
+                <label class="k-field"><span>Cell size</span><input type="range" id="pCell" min="0.1" max="0.6" step="0.025" value="0.25"><span class="k-val" id="pCellV"></span></label>
+                <div class="k-row"><button id="btnBake" class="small primary">Re-bake navmesh</button></div>
+                <p class="hint" id="bakeHint">—</p>
+            </div>
+
+            <div class="k-panel fold">
+                <h2>Walkable surface</h2>
+                <label class="k-field"><span>Probe step</span><input type="range" id="ovStep" min="0.35" max="1.2" step="0.05" value="0.6"><span class="k-val" id="ovStepV"></span></label>
+                <div class="kv"><span>walkable samples</span><b id="stSamples">—</b></div>
+                <div class="kv"><span>overlay quads</span><b id="stQuads">—</b></div>
+                <div class="kv"><span>bake / blob</span><b id="stBake">—</b></div>
+                <div class="kv"><span>NavGrid walkable cells</span><b id="stGridCells">—</b></div>
+                <div class="kv"><span>of probed</span><b id="stGridTested">—</b></div>
+                <p class="hint">bro exposes no polygon read-back, so the cyan surface samples the bake through <code>nearestPoint</code>. The magenta NavGrid comes from the same bodies via <code>createNavGrid({ fromPhysics })</code>: one flat sheet at y 0, and a square hole under every ramp, because a grid obstacle is the body's AABB.</p>
+            </div>
+
+            <div class="k-panel fold">
+                <h2>Path query</h2>
+                <p class="hint">Left-click the level to set the <b>start</b>, shift-click for the <b>goal</b>.</p>
+                <div class="k-row">
+                    <button id="btnSameFloor" class="small">Same floor</button>
+                    <button id="btnCrossFloor" class="small">Cross floor</button>
+                    <button id="btnToRoof" class="small">To roof</button>
+                </div>
+                <label class="k-field"><input type="checkbox" id="reqFull"> <code>requireFullPath</code> on every query</label>
+                <div class="kv"><span>waypoints</span><b id="stWp">—</b></div>
+                <div class="kv"><span>path length</span><b id="stLen">—</b></div>
+                <div class="kv"><span>elevation change</span><b id="stRise">—</b></div>
+                <div class="kv"><span>link segments</span><b id="stLinkSegs">—</b></div>
+                <div class="kv"><span>partial</span><b id="stPartial">—</b></div>
+                <p class="hint" id="pathHint">—</p>
+            </div>
+
+            <div class="k-panel fold folded">
+                <h2><label><input type="checkbox" id="gridOn"> Compare against NavGrid</label></h2>
+                <div class="kv"><span>grid waypoints</span><b id="stGwp">—</b></div>
+                <div class="kv"><span>grid length</span><b id="stGlen">—</b></div>
+                <p class="hint" id="gridHint">The grid is baked from the same static bodies, clamped to the ground storey: one walkability bit per XZ cell, so the storey is chosen at bake time. Its answer is drawn flat at y 0.</p>
+            </div>
+
+            <div class="k-panel fold">
+                <h2>Off-mesh links</h2>
+                <p class="hint" id="modeHint">—</p>
+                <div class="kv"><span>links baked</span><b id="stLinks">—</b></div>
+                <div class="kv"><span>live in mesh</span><b id="stLinksLive">—</b></div>
+                <p class="hint">The east pad in the link yard touches nothing: the 4.5 m jump is the only way onto it.</p>
+                <div class="k-row">
+                    <button id="btnLinkJump" class="small">Send over the gap</button>
+                    <button id="btnLinkDrop" class="small">Off the mezzanine</button>
+                    <button id="btnLinkLadder" class="small">Up the ladder</button>
+                    <button id="btnLinkHome" class="small">Reset walkers</button>
+                </div>
+                <div class="kv"><span>on a link now</span><b id="stOnLink">—</b></div>
+                <div class="kv"><span>last link</span><b id="stLastLink">—</b></div>
+                <div class="kv"><span>traversals</span><b id="stTraversals">—</b></div>
+                <div class="kv"><span>reached the island</span><b id="stCrossed">—</b></div>
+                <p class="hint" id="linkHint">—</p>
+            </div>
+
+            <div class="k-panel fold">
+                <h2>Partial paths: walled in</h2>
+                <p class="hint">Seal the pad (drop the jump from the bake) and the island is unreachable. The same query then answers two ways depending on one flag.</p>
+                <div class="k-row">
+                    <button id="btnSeal" class="small">Seal the pad</button>
+                    <button id="btnUnseal" class="small">Restore the jump</button>
+                    <button id="btnPartial" class="small">Run the comparison</button>
+                </div>
+                <div class="kv"><span>loose (clamped)</span><b id="stLoose">—</b></div>
+                <div class="kv"><span>strict</span><b id="stStrict">—</b></div>
+                <div class="kv"><span>stops short by</span><b id="stShort">—</b></div>
+                <p class="hint" id="partialHint">—</p>
+            </div>
+
+            <div class="k-panel fold">
+                <h2>Route walkers</h2>
+                <label class="k-field"><span>Speed</span><input type="range" id="aSpeed" min="0.5" max="10" step="0.1" value="3.5"><span class="k-val" id="aSpeedV"></span></label>
+                <div class="k-row"><button id="btnSend" class="small">Send agents to goal</button></div>
+                <p class="hint">Ctrl-click the level to retarget every walker. They re-plan whenever the surface generation moves.</p>
+                <div class="kv"><span>walking</span><b id="stWalking">—</b></div>
+            </div>
+
+            <div class="k-panel fold">
+                <h2><label><input type="checkbox" id="followOn" checked> Ground follow</label></h2>
+                <p class="hint">Two agents, identical except for <code>groundFollow: { mode: 'raycast' }</code>, steered straight up the link-yard ramp. The grey one keeps a constant Y and slides through the slope; the green one's down-probe puts it on the surface.</p>
+                <div class="k-row">
+                    <button id="btnWalkRamp" class="small">Walk the ramp</button>
+                    <button id="btnFollowReset" class="small">Reset</button>
+                </div>
+                <div class="kv"><span>with follow: Y range</span><b id="stFollowY">—</b></div>
+                <div class="kv"><span>without: Y range</span><b id="stFlatY">—</b></div>
+            </div>
+
+            <div class="k-panel fold folded">
+                <h2><label><input type="checkbox" id="avoidOn"> Local avoidance (ORCA)</label></h2>
+                <label class="k-field"><span>Crowd size</span><input type="range" id="cCount" min="4" max="40" step="2" value="16"><span class="k-val" id="cCountV"></span></label>
+                <div class="k-row">
+                    <button id="btnFunnel" class="small">Funnel</button>
+                    <button id="btnVip" class="small">VIP</button>
+                    <button id="btnFactions" class="small">Factions</button>
+                    <button id="btnStacked" class="small">Stacked</button>
+                    <button id="btnClearCrowd" class="small">Clear</button>
+                </div>
+                <div class="kv"><span>scenario</span><b id="stScenario">—</b></div>
+                <div class="kv"><span>crowd agents</span><b id="stCrowd">—</b></div>
+                <div class="kv"><span>overlapping pairs</span><b id="stOverlap">—</b></div>
+                <div class="kv"><span>mean overlaps</span><b id="stOverlapMean">—</b></div>
+                <p class="hint" id="crowdHint">Pick a scenario, then toggle avoidance and watch the overlapping-pair count move.</p>
+            </div>
+
+            <div class="k-panel fold folded">
+                <h2>Dynamic obstacles</h2>
+                <p class="hint">Needs the tiled bake (toolbar). Alt-click the level to drop or pick up a crate. Off-mesh links are dropped in this mode: the two are exclusive.</p>
+                <div class="k-row">
+                    <button id="btnBlock" class="small">Block the corridor</button>
+                    <button id="btnClearObs" class="small">Clear obstacles</button>
+                </div>
+                <div class="kv"><span>generation</span><b id="stGen">—</b></div>
+                <div class="kv"><span>obstacles</span><b id="stObs">—</b></div>
+                <div class="kv"><span>pending</span><b id="stPending">—</b></div>
+                <div class="kv"><span>tiles rebuilt</span><b id="stTiles">—</b></div>
+                <div class="kv"><span>agent repaths</span><b id="stRepath">—</b></div>
+                <p class="hint" id="obsHint">Tiled bakes cannot be serialised, so Save is unavailable in this mode.</p>
+            </div>
+
+            <div class="k-panel fold">
+                <h2><label><input type="checkbox" id="steerOn"> Steering kernels</label></h2>
+                <p class="hint">Five stateless <code>bro.ai.game.steer.*</code> kernels against one orbiting target, each drawn with the force vector it returned.</p>
+                <div class="legend" id="steerLegend"></div>
+                <div class="kv"><span>seek speed</span><b id="stSeekV">—</b></div>
+                <div class="kv"><span>arrive speed</span><b id="stArriveV">—</b></div>
+                <div class="kv"><span>arrive distance</span><b id="stArriveD">—</b></div>
+            </div>
+
+            <div class="k-panel fold">
+                <h2><label><input type="checkbox" id="leadOn" checked> Turret: computeLeadAim</label></h2>
+                <p class="hint">A turret shooting a crossing target with a 14 m/s projectile (shown with the steering kernels). Untick to aim at where the target is now and watch every shot pass behind it.</p>
+                <div class="k-row"><button id="btnMeasureAim" class="small">Measure both</button></div>
+                <div class="kv"><span>shots</span><b id="stShots">—</b></div>
+                <div class="kv"><span>hits / misses</span><b id="stHits">—</b></div>
+                <div class="kv"><span>last closest approach</span><b id="stClosest">—</b></div>
+                <p class="hint" id="aimHint">—</p>
+            </div>
+
+            <div class="k-panel fold folded">
+                <h2>Save / load round trip</h2>
+                <div class="k-row">
+                    <button id="btnSave" class="small">Save</button>
+                    <button id="btnLoad" class="small">Load + verify</button>
+                </div>
+                <p class="hint" id="cacheHint">Bake once, cache to disk, memcpy back at startup. Links survive the round trip; a tiled bake cannot be saved at all.</p>
+            </div>
+        </aside>
+
+        <main class="k-main">
+            <div class="k-viewport"><canvas id="stage"></canvas></div>
+        </main>
+    </div>
+
+    <footer class="k-statusbar">
+        <span id="status">booting</span>
+        <span class="k-spacer"></span>
+        <span>fps <b id="fps">—</b></span>
+        <span class="dim">click: start · shift: goal · ctrl: send walkers · alt: crate · right-drag: orbit · middle-drag: pan · wheel: zoom</span>
+    </footer>
+
+    <script type="module" src="/app/main.js"></script>
 </body>
 </html>

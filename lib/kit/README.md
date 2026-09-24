@@ -16,10 +16,11 @@ Ported examples: `demos/kws-lab` and `demos/lm-playground` (ML labs),
 | `index.js` | re-exports app, dom, ui, params, weights (one import line) |
 | `app.js` | `boot()`: menu bar, status line, error display |
 | `dom.js` | `$`, `$$`, `h` element builder, `ids`, formatters |
-| `ui.js` | status line, progress, log, stats, fps, toggle, tabs, frame loop |
+| `ui.js` | status line, progress, log, stats, fps, toggle, tabs, frame loop, `fixedStep(h)` accumulator, `foldPanels()` (click a `.k-panel` caption to fold; ticking a caption checkbox unfolds) |
 | `params.js` | controls bound to values / objects |
 | `weights.js` | model weight resolution (BRO_WEIGHTS, sibling repos, cache) |
 | `viewport3d.js` | `bro.scene` canvas + orbit camera + standard mouse controls, pick rays |
+| `nav3d.js` | `bro.ai.game` navmesh labs: slab/ramp level geometry, walkable-surface overlay sampling, route ribbons, markers, pooled pips, capsule agents, `startRoute`/`followRoute` waypoint walking, off-mesh link beads, surface picking (nav-lab, nav-carving) |
 | `editor.js` | document editors: tool switcher, undo/redo/save/open commands |
 | `skeletal.js` | clip authoring for skinned meshes: bone frames, keyframe compile, bone overlay |
 | `humanoid.js` | a shared humanoid clip library (idle/walk/run/crouch/...) + the autoRig bone map |

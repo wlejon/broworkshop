@@ -1,105 +1,91 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NavMesh Carving & Off-Mesh Links</title>
+    <meta charset="utf-8">
+    <title>NavMesh Carving &amp; Links</title>
+    <link rel="stylesheet" href="/lib/kit/kit.css">
     <link rel="stylesheet" href="/app/style.css">
 </head>
-<body>
-    <div id="viewport">
-        <canvas id="stage" width="1280" height="720"></canvas>
+<body class="k-app">
+    <header class="k-header">
+        <h1>NavMesh Carving &amp; Links</h1>
+        <span class="k-sub">a tiled bro.ai.game navmesh carved at runtime by a gate, a barricade and a retracting bridge; routes that mix walking with ladder, jump and lift</span>
+    </header>
 
-        <!-- Top Header Panel -->
-        <div id="top-bar" class="hud-panel">
-            <div class="title-group">
-                <h1>NavMesh Carving &amp; Links</h1>
-                <span class="badge">A* / Theta* 3D</span>
-            </div>
-
-            <!-- Dynamic Obstacle Controls -->
-            <div class="btn-group">
-                <button class="hud-btn" id="btn-toggle-gate">🚪 Toggle Gate (Closed)</button>
-                <button class="hud-btn" id="btn-toggle-bridge">🌉 Toggle Bridge (Open)</button>
-                <button class="hud-btn" id="btn-toggle-barricade">📦 Toggle Barricade</button>
-            </div>
-
-            <!-- Elevator Floor Calls -->
-            <div class="btn-group">
-                <span style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;">Elevator:</span>
-                <button class="hud-btn" id="btn-elev-0">F0 (Ground)</button>
-                <button class="hud-btn" id="btn-elev-1">F1 (Mezzanine)</button>
-                <button class="hud-btn" id="btn-elev-2">F2 (Roof)</button>
-            </div>
-        </div>
-
-        <!-- Left Controls Sidebar -->
-        <div id="sidebar-panel" class="hud-panel">
-            <!-- Agent Spawning -->
-            <div class="control-block">
-                <div class="block-title">Agent Spawner &amp; Orders</div>
-                <div style="display: flex; gap: 6px;">
-                    <button class="hud-btn" id="btn-spawn-1" style="flex: 1; padding: 5px;">+1 Agent</button>
-                    <button class="hud-btn" id="btn-spawn-5" style="flex: 1; padding: 5px;">+5 Squad</button>
-                    <button class="hud-btn" id="btn-clear-agents" style="flex: 1; padding: 5px;">Clear</button>
-                </div>
-            </div>
-
-            <hr style="border: 0; border-top: 1px solid rgba(0, 240, 255, 0.15); margin: 2px 0;">
-
-            <!-- Quick Targets -->
-            <div class="control-block">
-                <div class="block-title">Send Agents To:</div>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
-                    <button class="hud-btn" id="btn-target-south">South Courtyard</button>
-                    <button class="hud-btn" id="btn-target-north">North Gate Vault</button>
-                    <button class="hud-btn" id="btn-target-mezz">Mezzanine (F1)</button>
-                    <button class="hud-btn" id="btn-target-roof">High Roof (F2)</button>
-                    <button class="hud-btn" id="btn-target-island" style="grid-column: span 2; border-color: var(--neon-green);">🏝️ Isolated Island (Jump!)</button>
-                </div>
-            </div>
-
-            <hr style="border: 0; border-top: 1px solid rgba(0, 240, 255, 0.15); margin: 2px 0;">
-
-            <!-- Overlays -->
-            <div class="control-block">
-                <div class="block-title">Debug Overlays</div>
-                <label class="toggle-item">
-                    <input type="checkbox" id="toggle-nav-nodes" checked>
-                    <span>NavMesh Graph &amp; Carving Overlay</span>
-                </label>
-                <label class="toggle-item">
-                    <input type="checkbox" id="toggle-path-lines" checked>
-                    <span>3D Agent Path Waypoints</span>
-                </label>
-                <label class="toggle-item">
-                    <input type="checkbox" id="toggle-link-arcs" checked>
-                    <span>Off-Mesh Links (Ladder/Jump/Elevator)</span>
-                </label>
-            </div>
-        </div>
-
-        <!-- Bottom Telemetry Panel -->
-        <div id="telemetry-panel" class="hud-panel">
-            <div class="stat-item">
-                <span class="stat-label">FPS</span>
-                <span class="stat-val" id="stat-fps">60</span>
-            </div>
-            <div class="stat-item">
-                <span class="stat-label">Active Agents</span>
-                <span class="stat-val" id="stat-agents">5</span>
-            </div>
-            <div class="stat-item">
-                <span class="stat-label">Link Traversals</span>
-                <span class="stat-val" id="stat-traversals">0</span>
-            </div>
-            <div class="stat-item">
-                <span class="stat-label">Elevator Pos</span>
-                <span class="stat-val" id="stat-elev-floor">F0 (0.0m)</span>
-            </div>
-        </div>
+    <div class="k-toolbar">
+        <span class="dim">obstacles</span>
+        <button id="btn-toggle-gate" class="small">Gate</button>
+        <button id="btn-toggle-barricade" class="small">Barricade</button>
+        <button id="btn-toggle-bridge" class="small">Bridge</button>
+        <span class="k-sep"></span>
+        <span class="dim">call lift</span>
+        <button id="btn-elev-0" class="small">F0</button>
+        <button id="btn-elev-1" class="small">F1</button>
+        <button id="btn-elev-2" class="small">F2</button>
+        <span class="k-spacer"></span>
+        <label class="k-field"><input type="checkbox" id="toggle-nav-nodes" checked> walkable surface + carves</label>
+        <label class="k-field"><input type="checkbox" id="toggle-path-lines" checked> routes</label>
+        <label class="k-field"><input type="checkbox" id="toggle-link-arcs" checked> links</label>
     </div>
 
-    <script type="module" src="/app/app.js"></script>
+    <div class="k-body">
+        <aside class="k-side" id="side">
+            <div class="k-panel">
+                <h2>Agents</h2>
+                <div class="k-row">
+                    <button id="btn-spawn-1" class="small">+1 agent</button>
+                    <button id="btn-spawn-5" class="small">+5 squad</button>
+                    <button id="btn-clear-agents" class="small">Clear</button>
+                </div>
+                <p class="hint">Click the level to send everyone there; shift-click to spawn one.</p>
+            </div>
+
+            <div class="k-panel">
+                <h2>Send everyone to</h2>
+                <div class="targets" id="targets"></div>
+                <p class="hint" id="planHint">—</p>
+            </div>
+
+            <div class="k-panel">
+                <h2>Roster</h2>
+                <div id="roster" class="roster"></div>
+            </div>
+
+            <div class="k-panel">
+                <h2>Surface</h2>
+                <div class="kv"><span>generation</span><b id="stat-gen">—</b></div>
+                <div class="kv"><span>carved boxes</span><b id="stat-carves">—</b></div>
+                <div class="kv"><span>tiles rebuilt (last change)</span><b id="stat-tiles">—</b></div>
+                <div class="kv"><span>walkable samples</span><b id="stat-samples">—</b></div>
+                <div class="kv"><span>repaths</span><b id="stat-repaths">—</b></div>
+                <p class="hint">The bake is tiled (<code>dynamicObstacles: true</code>): each toggle adds or removes one box obstacle, only the tiles it touches rebuild, and <code>generation</code> moves. Walking agents compare it and re-plan.</p>
+            </div>
+
+            <div class="k-panel">
+                <h2>Links</h2>
+                <div class="kv"><span><i class="sw" style="background:#f5a623"></i>ladder climbs</span><b id="stat-ladder">0</b></div>
+                <div class="kv"><span><i class="sw" style="background:#7bed9f"></i>jumps</span><b id="stat-jump">0</b></div>
+                <div class="kv"><span><i class="sw" style="background:#5ad2f4"></i>lift rides</span><b id="stat-lift">0</b></div>
+                <div class="kv"><span>lift</span><b id="stat-elev-floor">—</b></div>
+                <div class="kv"><span>lift queue</span><b id="stat-elev-queue">—</b></div>
+                <p class="hint">A tiled bake cannot carry off-mesh links (<code>bakeNavMesh</code> refuses both at once), so these live above the mesh: the planner prices each walk with <code>findPath</code> and each link by its time, then takes the cheapest mix.</p>
+            </div>
+        </aside>
+
+        <main class="k-main">
+            <div class="k-viewport"><canvas id="stage"></canvas></div>
+        </main>
+    </div>
+
+    <footer class="k-statusbar">
+        <span id="status">booting</span>
+        <span class="k-spacer"></span>
+        <span>agents <b id="stat-agents">0</b></span>
+        <span>link traversals <b id="stat-traversals">0</b></span>
+        <span>fps <b id="stat-fps">—</b></span>
+        <span class="dim">click: send · shift-click: spawn · right-drag: orbit · middle-drag: pan · wheel: zoom</span>
+    </footer>
+
+    <script type="module" src="/app/main.js"></script>
 </body>
 </html>

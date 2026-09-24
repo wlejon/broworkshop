@@ -129,6 +129,13 @@ body.k-app { display: flex; flex-direction: column; height: 100vh; overflow: hid
 }
 .k-sep { width: 1px; align-self: stretch; background: var(--k-border); }
 
+/* Foldable panel (ui.js foldPanels): the caption toggles .folded. */
+.k-panel.fold > h2 { cursor: pointer; }
+.k-panel.fold > h2::before { content: '- '; color: var(--k-dim); }
+.k-panel.fold.folded > h2::before { content: '+ '; }
+.k-panel.fold.folded > * { display: none; }
+.k-panel.fold.folded > h2 { display: block; }
+
 /* A labelled control: <label class="k-field"><span>name</span><input><output> */
 .k-field { display: flex; align-items: center; gap: 8px; color: var(--k-muted); }
 .k-field > span:first-child { flex: none; }
