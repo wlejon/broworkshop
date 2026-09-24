@@ -1,4 +1,4 @@
-import "/lib/sketch.js";
+import { Sketch } from "../model/sketch.js";
 // =============================================================================
 // Offset tool — SketchUp-style face-boundary offset.
 //

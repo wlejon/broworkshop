@@ -3,7 +3,7 @@
 // adds what only a human run has: lives, the clock, aimed beam shots that
 // carve terrain and fling enemies, the death and flag animations.
 
-import { Platformer } from "/lib/platformer.js";
+import { Platformer } from "/app/platformer.js";
 import { buildLevel, spawnMobs } from "/app/level.js";
 import {
     BEAM_LENGTH, BEAM_THICKNESS, EXPLOSION_R,

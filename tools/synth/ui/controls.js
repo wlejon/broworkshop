@@ -5,7 +5,7 @@
 import { $, h, clear } from "/lib/kit/dom.js";
 import { segmented } from "/lib/kit/ui.js";
 import { bindControl } from "/lib/kit/params.js";
-import { levelMeter } from "/lib/kit/audio-ui.js";
+import { levelMeter } from "/lib/kit/gauges.js";
 import { saveWav } from "/lib/kit/audio.js";
 import { ARP_PATTERNS } from "../model/song.js";
 import { renderLoop } from "../audio/render.js";

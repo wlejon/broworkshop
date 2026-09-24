@@ -5,7 +5,8 @@
 // (and a spark burst where), so the figure goes limp from the limb the ball
 // actually touched.
 
-import { BodyGroup, quatYTo, v3 } from "/lib/kit/physics3d.js";
+import { BodyGroup } from "/lib/kit/physics3d.js";
+import { quatYTo, v3 } from "/lib/kit/math3d.js";
 
 const G = 9.81;
 const BALL = { radius: 0.22, mass: 18, life: 4.0 };

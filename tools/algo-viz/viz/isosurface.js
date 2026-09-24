@@ -21,7 +21,7 @@
 // isosurface/sweep.js, the 2D drawing in isosurface/draw.js.
 
 import { h } from "/lib/kit/dom.js";
-import { orbitControls } from "/lib/kit/viewport3d.js";
+import { orbitControls, Camera } from "/lib/kit/viewport3d.js";
 import { register } from "./registry.js";
 import { controls, button, toggle, overlay, lifetime } from "./ui.js";
 import { ALGOS, FIELDS, buildField } from "./isosurface/field.js";
@@ -29,7 +29,6 @@ import { Sweep } from "./isosurface/sweep.js";
 import { drawSweep, paintField } from "./isosurface/draw.js";
 import { wireMesh } from "./isosurface/wire.js";
 
-const Camera = globalThis.Camera;
 
 register({
     id: 'isosurface',

@@ -24,7 +24,7 @@
 // obscure the very thing the app is about, that ONE attach lasts a session.
 
 import { h, clear } from "/lib/kit/dom.js";
-import { levelMeter } from "/lib/kit/audio-ui.js";
+import { levelMeter } from "/lib/kit/gauges.js";
 
 const TAU = Math.PI * 2;
 const PAD_COUNT = 12;

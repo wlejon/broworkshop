@@ -2,8 +2,8 @@
 // grabbing, and the frame loop. main.js only boots it and binds the panel
 // (tests import this module, never the entry; see ENGINE-ISSUES.md).
 
-import { sceneViewport, orbitRotation } from "/lib/kit/viewport3d.js";
-import { addStatic, physicsEvents, pickRay, raycast, grabber, localPoint } from "/lib/kit/physics3d.js";
+import { sceneViewport, orbitRotation, localPoint } from "/lib/kit/viewport3d.js";
+import { addStatic, physicsEvents, pickRay, raycast, grabber } from "/lib/kit/physics3d.js";
 import { RagdollBlender } from "./blender.js";
 import { Cannon } from "./cannon.js";
 

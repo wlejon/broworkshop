@@ -7,7 +7,7 @@
 // first change, and endStroke() records one History entry swapping the
 // before / after snapshots. Prop placements are their own entries.
 
-import "/lib/history.js";
+import { History } from "/lib/kit/history.js";
 import {
     GROUND_IDS, OVERLAY_IDS, BLOCKING_GROUND, ATLAS_COLS, ATLAS_ROWS, CLIFF_CELL, WATER_FRAMES,
     buildAtlas, tileAtlasTable, roadAutotile,

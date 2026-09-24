@@ -29,7 +29,7 @@
 // Safe to import from workers: the tile art only touches a canvas when the
 // tilemap is drawn.
 
-import { Tilemap } from "/lib/tilemap.js";
+import { Tilemap } from "/app/tilemap.js";
 import { Art } from "/app/art.js";
 import { TILE } from "/app/rules.js";
 

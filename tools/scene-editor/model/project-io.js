@@ -1,4 +1,4 @@
-// Project file format (lib/project.js bundles: my-scene.bro/project.json).
+// Project file format (lib/kit/project.js bundles: my-scene.bro/project.json).
 //
 // Schema 2 stores the whole SceneObject tree: every node's id, name,
 // visibility, kind and local TRS; primitives add their local mesh buffers as

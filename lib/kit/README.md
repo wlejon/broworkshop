@@ -13,44 +13,72 @@ Ported examples: `demos/kws-lab` and `demos/lm-playground` (ML labs),
 `demos/spatial-hash` (canvas demo), `demos/lighting-demo` (3D viewport),
 `tools/shader-lab` (tool).
 
+Widgets take "a selector or an element already in the page" (resolved with
+`$`, which throws on a miss) and return a small handle; none owns layout.
+
+**Core** (re-exported by `index.js`, except `gauges.js`, `worker-rpc.js` and `test.js`)
+
 | File | What |
 |------|------|
-| `kit.css` | design tokens, base controls, layout + component classes |
-| `index.js` | re-exports app, dom, ui, params, weights (one import line) |
-| `app.js` | `boot()`: menu bar, status line, error display |
-| `dom.js` | `$`, `$$`, `h` element builder, `ids`, formatters, `trackDrag(onMove, onUp)` (window mousemove/mouseup for one drag, detached on release) |
-| `ui.js` | status line, progress, log, stats, `readout` rows, fps, toggle, tabs, frame loop, `fixedStep(h)` accumulator, `foldPanels()` (click a `.k-panel` caption to fold; ticking a caption checkbox unfolds) |
-| `params.js` | controls bound to values / objects |
-| `weights.js` | model weight resolution (BRO_WEIGHTS, sibling repos, cache) |
-| `viewport3d.js` | `bro.scene` canvas + orbit camera + standard mouse controls, pick rays |
-| `flycam.js` | free-fly camera (WASD / Space / C / Shift, drag- or pointer-lock look, optional roll, ground clearance) for terrain-scale scenes |
-| `sky.js` | HDRI sky (`skyEnvironment`), sun direction + sun sliders (`sunControls`), a time-of-day rig (`daylight`: studio / dawn / noon / golden / night) |
-| `nav3d.js` | `bro.ai.game` navmesh labs: slab/ramp level geometry, walkable-surface overlay sampling, route ribbons, markers, pooled pips, capsule agents, `startRoute`/`followRoute` waypoint walking, off-mesh link beads, surface picking (nav-lab, nav-carving) |
-| `editor.js` | document editors: tool switcher, undo/redo/save/open commands |
-| `nodegraph.js` | node graphs (no DOM): `NodeTypes` registry (typed ports + compat table), `Graph` (nodes/edges, cycle-checked `connect`, topo order, serialize with stable ids, `change` events), `graphEdits(graph, history)` undoable structural edits, `Runner` (run / step / continue, per-node errors) |
-| `nodegraph-view.js` + `nodegraph.css` | the canvas for a `Graph`: DOM cards (collapse, badge, gear-opened full-controls dialog, delete), port-dot wiring + rewiring, pan/zoom grid, header drags through `graphEdits`, Delete/Escape keys; `nodePalette` sidebar (node-forge) |
-| `skeletal.js` | clip authoring for skinned meshes: bone frames, keyframe compile, bone overlay |
-| `humanoid.js` | a shared humanoid clip library (idle/walk/run/crouch/...) + the autoRig bone map |
-| `physics3d.js` | Jolt + scene plumbing: body+visual pairs, body groups, rods, the event drain, pick rays, a mouse grabber |
-| `ragdoll.js` | a 12-part humanoid `Physics.createRagdoll` rig: poses as per-joint deltas, FK, blend, error metrics |
-| `text.js` | `bro.text` from JS: UTF-16 ↔ UTF-8 offsets, caret stops, cluster maps (data + drawn on a canvas) |
-| `audio.js` | PCM plumbing (no DOM): shared `AudioContext`, resample/concat/gain/peak/dB, `clipPlayer`, `saveWav`, `micRecorder`, `signal` test-audio generators |
-| `audio-ui.js` | audio widgets: `levelMeter`, `peakScope`, `historyPlot`, `waveView` (trim), `sourcePicker` (bro.listen sources), `transport`, `mixerStrips`, `fitCanvas` |
-| `ml.js` | ML lab pieces: `deviceBadge`, `modelRow` (weights path fields prefilled from weights.js + Load; says clearly when weights are missing), `pickFolder` / `pickFile` / `pickSaveFile`, `appPath`, `imageDataFromFile`, `baseName` |
-| `speech.js` + `speech.css` | the speech labs' shared view: `clipInput` (record / open / play / autorun), `liveInput` (bro.listen source + level), `transcriptView`, `timelineView` (waveform + token pins), `tokenTable`, `speakerView` (speaker cards + activity lanes), `diarFrames` |
-| `worker-rpc.js` | request/response over a module worker: `workerClient(url)` (page) + `serveWorker(handlers)` / `emit` (worker) |
+| `kit.css` | design tokens, base controls, layout + component classes (CSS reference below) |
+| `index.js` | one import line for app, dom, ui, params, prefs, weights |
+| `app.js` | `boot()`: menu bar (`../system-menu.js`), status line, error display |
+| `dom.js` | `$` (selector or element), `$$`, `h` element builder, `ids`, `clear`, `trackDrag(onMove, onUp)`; formatters `fmtBytes`, `fmtMs`, `fmtClock` (m:ss.s), `clock` (hh:mm:ss) |
+| `ui.js` | status line, progress, log, stats, `readout` rows, fps, toggle, segmented, tabs, frame loop, `fixedStep(h)` accumulator, `foldPanels()` |
+| `gauges.js` | live values: `levelMeter` (`.k-meter` bar), `historyPlot` (scrolling line plot), `fitCanvas` (HiDPI canvas sizing every canvas widget uses) |
+| `params.js` | controls bound to values / objects (`bindControl`, `params`, `logMap`) |
 | `prefs.js` | `prefStore(key, defaults)`: one localStorage JSON record with `set` / `snapshot` / `restore` |
-| `imagegen.js` | `bro.diffusion` lab pieces: model picker, backend badge, prompt + settings panel, run bar, step-wise `runGeneration` with cancel, `imageView`, gallery `imageStrip`, `wordAxes` |
+| `weights.js` | model weight resolution (BRO_WEIGHTS, sibling repos, model cache); no DOM, works in workers |
+| `worker-rpc.js` | request/response over a module worker: `workerClient(url)` (page) + `serveWorker(handlers)` / `emit` (worker) |
+| `test.js` | headless test helpers (assert, wait, click, type, screenshot, weights skip) |
+
+**3D, physics, animation**
+
+| File | What |
+|------|------|
+| `camera.js` | `Camera`: orbit and fly camera math (quaternion, gimbal-free) → `scene.setCamera` options |
+| `math3d.js` | quaternion / vector helpers: `q`, `v3`, `QI` ({x,y,z,w} objects, for `Physics`), `quatFromEuler`, `quatMul`, `quatYTo` ([x,y,z,w] arrays, for nodes), `toArr` |
+| `viewport3d.js` | `sceneViewport`: `bro.scene` canvas + orbit camera + standard mouse controls, `ray(px, py)` / `toScreen(world)`; `orbitControls`, `orbitRotation`, `screenRay`, `worldToScreen`, `localPoint`; re-exports `Camera` |
+| `flycam.js` | free-fly camera (WASD / Space / C / Shift, drag- or pointer-lock look, optional roll, ground clearance) for terrain-scale scenes |
+| `sky.js` | HDRI sky (`skyEnvironment`), sun direction + sliders (`sunControls`), a time-of-day rig (`daylight`) |
+| `physics3d.js` | Jolt + scene plumbing: body + mesh pairs, `BodyGroup`, `rod`, the contact/break event drain, `pickRay` / `raycast`, a mouse `grabber` |
+| `ragdoll.js` | a 12-part humanoid `Physics.createRagdoll` rig: poses as per-joint deltas, FK, blend, error metrics |
+| `skeletal.js` | clip authoring for skinned meshes: bone frames, keyframe compile, bone overlay |
+| `humanoid.js` | a humanoid clip library (idle/walk/run/crouch/...) + the autoRig bone map |
+| `nav3d.js` | `bro.ai.game` navmesh labs: slab/ramp levels, walkable overlays, route ribbons, markers, capsule agents, waypoint walking, link beads, surface picking |
+
+**Editors**
+
+| File | What |
+|------|------|
+| `history.js` | `History`: undo/redo command stack (do / record / transaction / coalesce / snapshot / marks) |
+| `project.js` | `Project`: directory-bundle save/load with schema migrations, dirty tracking from a `History`, autosave |
+| `editor.js` | `toolbox` (one current tool, `[data-tool]` buttons) + `documentCommands` (undo / redo / new / open / save + shortcuts + File menu) |
+| `nodegraph.js` | node graphs (no DOM): `NodeTypes` registry, `Graph` (cycle-checked, topo order, stable-id serialize), `graphEdits(graph, history)`, `Runner` |
+| `nodegraph-view.js` + `nodegraph.css` | the canvas for a `Graph`: DOM cards, port wiring, pan/zoom, `nodePalette` sidebar |
+| `text.js` | `bro.text` from JS: UTF-16 ↔ UTF-8 offsets, caret stops, cluster maps (data + drawn on a canvas) |
+
+**Audio, speech, ML**
+
+| File | What |
+|------|------|
+| `audio.js` | PCM plumbing (no DOM): shared `AudioContext`, decode/resample/concat/gain/peak/dB, `clipPlayer`, `saveWav`, `micRecorder`, `signal` test-audio generators |
+| `audio-ui.js` | audio widgets: `peakScope`, `oscilloscope`, `waveView` (trim), `pitchColor`, `sourcePicker` (bro.listen sources), `transport`, `mixerStrips` |
+| `speech.js` + `speech.css` | the speech labs' shared view: `clipInput`, `liveInput`, `transcriptView`, `timelineView`, `tokenTable`, `speakerView`, `diarFrames` |
+| `ml.js` | ML lab pieces: `deviceBadge` (device / load state chip), `modelRow` (weights field prefilled from weights.js + Load), `pickFolder` / `pickFile` / `pickSaveFile`, `appPath`, `imageDataFromFile`, `baseName` |
+| `kokoro.js` | find and load Kokoro-82M (`bro.tts`) with its G2P assets |
+| `imagegen.js` | `bro.diffusion` lab pieces: model picker, prompt + settings panel, run bar, step-wise `runGeneration` with cancel, `imageView`, gallery `imageStrip`, `wordAxes` |
 | `imagegen-worker.js` | worker half of imagegen: `loadFamily`, `stepHandlers` (prime / step / reset / search / remove), `wordAxis` |
+
+**Agents**
+
+| File | What |
+|------|------|
 | `agent.js` | tool-calling agent loop (pi-agent-core's event protocol): `createAgent({ stream, tools, systemPrompt, onEvent, approve })`, `textResult` / `errorResult`, `checkArgs` |
 | `agent-tools.js` | agent tools: `codingTools(cwd)` (read/write/edit_file, list_dir, bash, eval_js), `lookTool(fn)` |
-| `agent-llm.js` | agent providers: `brolmStream` (Qwen3 / Qwen3.5 through `bro.lm`, Hermes `<tool_call>` + `<think>` parsing, ChatML) and `openrouterStream` (native tool calls) |
-| `agent-backend.js` | backend picker toolbar row (OpenRouter key + brain/eyes models, or a local model path + Load), persisted in a prefStore; `.stream()` gives the provider |
-| `chat-view.js` + `chat.css` | agent transcript: markdown bubbles, thinking folds, tool cards (args, results, diffs), approval cards, `contextMeter`, `chatSession` (prompt box + Send/Stop) |
-| `test.js` | headless test helpers (assert, wait, click, type, screenshot) |
-
-`../openrouter.js` (outside the kit) is the OpenRouter client: model catalog +
-explorer, and `chatCompletion(cfg, payload, signal)` with rate-limit retries.
+| `agent-llm.js` | providers: `brolmStream` (Qwen3 / Qwen3.5 through `bro.lm`, Hermes `<tool_call>` + `<think>` parsing) and `openrouterStream` (native tool calls, via `../openrouter.js`) |
+| `agent-backend.js` | backend picker toolbar row (OpenRouter key + models, or a local model path + Load), persisted in a prefStore |
+| `chat-view.js` + `chat.css` | agent transcript: markdown bubbles (`../markdown.js`), thinking folds, tool cards with diffs (`../linediff.js`), approvals, `contextMeter`, `chatSession` |
 
 ## Page skeleton
 
@@ -86,12 +114,20 @@ For a full-window 3D canvas use `<canvas>` + a floating `.k-hud` panel
   `button.primary`, `.active` (toggled on), `.danger`, `.small`.
 - **Layout:** `k-app k-header k-sub k-spacer k-toolbar k-body k-side k-main
   k-viewport k-hud k-statusbar`.
-- **Grouping:** `k-row` (wrapping flex row), `k-col`, `k-panel` (card; `h2`
-  is its caption), `k-sep` (vertical divider), `k-grow`.
+- **Grouping:** `k-row` (wrapping flex row; `.k-nowrap`), `k-col`, `k-stack`
+  (caption over a full-width control), `k-grid2` (two columns), `k-panel`
+  (card; `h2` is its caption; `.fold` via `foldPanels()`), `k-sep`
+  (vertical divider), `k-grow`.
 - **Components:** `k-field` (label + control + `k-val` readout), `k-chip`
-  (`.on`), `k-progress`, `k-log`, `k-stats`, `k-tabs`, `k-box` (bordered
-  output area), `k-kv` (label/value rows built by `readout()`; a row's `.on`
-  turns it green), `k-note` (explanatory prose; `.warn` for a caveat).
+  (`.on`), `k-badge` (small status tag; `.ok .warn .err`), `k-cap` (small
+  uppercase caption; a `button.k-link` in it is a text action pushed right),
+  `k-progress`, `k-log`, `k-stats`, `k-tabs`, `k-meter` (`levelMeter`),
+  `k-strip` (`mixerStrips`), `k-box` (bordered output area), `k-kv`
+  (label/value rows built by `readout()`; a row's `.on` turns it green),
+  `k-note` (explanatory prose; `.warn` for a caveat), `k-hint` (a centred
+  note over an empty `.k-viewport`), `k-gallery` of `k-thumb`s (clickable
+  thumbnails; `.active`). Component sheets: `chat.css`, `speech.css`,
+  `nodegraph.css`; the imagegen panel classes sit at the end of `kit.css`.
 - **Dashboards:** `k-deck` inside a `k-main.pad` wraps fixed-width
   `k-panel`s (`--k-card-w`, default 560px; `.wide` spans two); `h3` inside a
   panel is a section heading (window-lab, input-lab).
@@ -102,7 +138,7 @@ For a full-window 3D canvas use `<canvas>` + a floating `.k-hud` panel
 
 ```js
 import { boot, $, h, ids, statusLine, logView, stats, fpsMeter, toggleButton,
-         tabs, frameLoop, progressBar, params, bindControl,
+         tabs, frameLoop, progressBar, params, bindControl, prefStore,
          findWeights, requireWeights, weightPath } from "/lib/kit/index.js";
 ```
 
@@ -112,10 +148,11 @@ wraps `#status` in a `statusLine`, and routes uncaught errors and unhandled
 rejections into it (they still reach the engine log and fail headless runs).
 Returns `{ status }`.
 
-**dom.js** — `$(sel)` throws on a miss; `$$(sel)` returns an array;
+**dom.js** — `$(sel)` throws on a miss and passes an element through;
+`$$(sel)` returns an array;
 `h('button.small#go', { onclick, title, dataset, style }, ...children)`;
 `ids('status', 'model-path')` → `{ status, modelPath }`; `clear(el)`;
-`fmtBytes`, `fmtMs`, `clock`.
+`fmtBytes`, `fmtMs`, `fmtClock(sec, digits)`, `clock`.
 
 **ui.js** (each takes a selector or element already in the page):
 - `statusLine(el)` → `set(text, kind)`, `ok`, `warn`, `busy`, `error(errOrText)`
@@ -172,9 +209,12 @@ and test scripts.
 **viewport3d.js** —
 `sceneViewport(canvas, { orbit: { target, dist, fov, near, far }, controls })`
 returns `{ canvas, scene, cam, controls, onFrame(fn), onView(fn),
-reframe(pivot, dist, { yaw, pitch }?), ray(px, py) }` and pushes the camera
-every frame; `ray(px, py)` is `screenRay` through a canvas-local pixel of the
-current view; `onView(fn)` may adjust the `setCamera` options before each push (camera
+reframe(pivot, dist, { yaw, pitch }?), ray(px, py), toScreen(world) }` and
+pushes the camera every frame; `ray(px, py)` is `screenRay` through a
+canvas-local pixel of the current view and `toScreen([x, y, z])` its inverse
+(`{ x, y, depth, behind }`, canvas-local; tests add the canvas rect to click
+a 3D object); `localPoint(canvas, ev)` gives an event's canvas-local pixel;
+`onView(fn)` may adjust the `setCamera` options before each push (camera
 shake). `orbitRotation(yaw, pitch)` builds an `orbit.rot`. `orbitControls(canvas, cam, { minDist, maxDist,
 zoomRate, orbitButton = 2, panButton = 1, pointerLock, onChange, accept })` alone
 wires the standard input: right-drag orbit, middle-drag pan (pointer-locked),
@@ -183,7 +223,8 @@ leaves a press to the app. Picking math, on the `scene.setCamera` options
 (`Camera.orbitViewOpts(cam, canvas)`) and the canvas CSS size:
 `screenRay(view, w, h, px, py)` → `{ origin, dir }` and
 `worldToScreen(world, view, w, h)` → `{ x, y, depth, behind }`. Camera math
-is `lib/camera.js` (`Camera.*`).
+is `camera.js` (`Camera.createOrbit / orbitLook / orbitPan / orbitViewOpts`,
+`createFly / flyLook / flyIntegrate / flyViewOpts`, ...), re-exported here.
 
 **flycam.js** — `flyCamera(canvas, { pos, yaw, pitch, speed, boost, lookSpeed,
 look: 'drag' | 'lock', lookButton = 2, roll, worldUp, ground(x, z), clearance,
@@ -217,13 +258,17 @@ demos/plant-recipes and demos/flora-lab.
 - `physicsEvents()` → `{ onContacts(fn), onBroken(fn), off(fn), pump() }`:
   the ONE drain of `getContacts` / `getBrokenConstraints` (both drain on
   read); call `pump()` once a frame and subscribe everything else.
-- `pickRay(vp, lx, ly)` (a sceneViewport + canvas-local pixel) →
-  `{ o, d }`; `raycast(ray, maxDist)` → the closest hit plus the ray;
-  `localPoint(canvas, ev)`.
+- `pickRay(vp, lx, ly)` (a sceneViewport + canvas-local pixel, e.g. from
+  `localPoint`) → `{ o, d }` in Physics' {x,y,z} form; `raycast(ray,
+  maxDist)` → the closest hit plus the ray.
 - `grabber(vp, { stiffness, damping, rodColor, onRelease })` →
   `{ begin(hit), end(), setRay(ray), update(dt), grabbed }`: mouse-drag a
   body with a mass-scaled spring; the app decides what to grab.
-- `q` / `v3` ({x,y,z(,w)} math), `QI`, `quatYTo(dx, dy, dz)`, `toArr`.
+
+**math3d.js** — `q` ({x,y,z,w}: `mul conj axis rot angle slerp yaw`), `v3`
+({x,y,z}: `add sub scale lerp len dist`), `QI`, `toArr`; array quaternions
+for nodes and bromesh: `quatFromEuler(x, y, z)`, `quatMul(a, b)`,
+`quatYTo(dx, dy, dz)` (+Y onto a direction: cylinders, rods).
 
 **ragdoll.js** — `PARTS` / `PART_NAMES` / `partIndex(name)`; a pose is
 `{ partName: localDelta }` (`{}` = standing). `buildPose(deltas, rootPos,
@@ -243,7 +288,7 @@ player (`docs/animation-api.js`, `docs/rigging-api.js`) without per-rig code:
   keys: [{ time, euler | value }] }] }`) into a bromesh Animation, rotations
   composed onto each bone's rest pose; unknown bones throw unless `lenient`.
   `sampleTracks(duration, { bone: { rot(p), pos(p) } }, steps)` samples
-  curves of the phase `p` into such tracks. `quatFromEuler`, `quatMul`.
+  curves of the phase `p` into such tracks.
 - `boneOverlay(scene, node, parents)` → `{ setEnabled(on), update(), enabled }`:
   joint spheres + links that follow the skinned node's live pose;
   `skeletonParents(skeleton)` gives `parents`.
@@ -255,6 +300,21 @@ root-motion walkRM/runRM), `compileClips(defs, frames,
 `AUTORIG_HUMANOID` (`{ map, rest }` for the 22-bone `Rig.autoRig` humanoid).
 Used by demos/anim-lab and demos/character-lab (`avatar.js`).
 
+**history.js** — `new History({ limit, onChange })`: `do(label, doFn,
+undoFn)`, `record(...)` (already applied), `transaction(label, fn)` /
+`begin` / `end` / `abort`, `coalesce(pred)` / `endCoalesce()` (a drag is one
+entry), `snapshot(label, get, set, mutation)`, `wrap(obj, prop)`, `mark` /
+`rewindTo`, `undo` / `redo` / `canUndo` / `canRedo` / `entries()`; events
+`change record undo redo`.
+
+**project.js** — `new Project({ app, schema, serialize, deserialize, onNew,
+history, migrations, promptDirty, fileExt })`: a `name.bro/project.json`
+bundle; `save` / `saveAs` / `saveTo(dir)` (tmp-then-rename), `open` /
+`openPath(dir)` (checks the app id, runs migrations, clears history), `new`,
+`autosaveEvery(ms)`, `isDirty` (set by history records); events `dirty
+saved loaded new change`. Used by scene-editor, tile-editor, node-forge,
+synth.
+
 **editor.js** — plumbing for document editors (`tools/scene-editor`):
 - `toolbox({ tools, initial, buttons, onChange })`: named tools, one
   current, synced to `[data-tool]` buttons. A tool is any object; the toolbox
@@ -262,8 +322,8 @@ Used by demos/anim-lab and demos/character-lab (`avatar.js`).
   `{ name, tool, get(n), names, set(n), busy(), cancelAll() }`; `set` cancels
   in-progress gestures first.
 - `documentCommands({ history, project, canRun, after, undoButton, redoButton })`:
-  undo / redo / new / open / save / save-as for a `History` (lib/history.js)
-  and `Project` (lib/project.js), with Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y /
+  undo / redo / new / open / save / save-as for a `History` and a
+  `Project`, with Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y /
   Ctrl+S / Ctrl+Shift+S / Ctrl+O / Ctrl+N (ignored while typing in a field)
   and undo/redo buttons that enable with the history. Returns the commands
   plus `menu` (`{ file, handlers }`) for `boot({ menu })`.
@@ -301,12 +361,17 @@ and Range count UTF-16 units. Convert explicitly:
   games/clap-runner).
 - `signal.silence/tone/sweep/clicks/concat(...)`: deterministic test audio.
 
-**audio-ui.js** — widgets over elements already in the page; each returns a
-small handle (see the doc comment on each export for opts):
+**gauges.js** — generic live-value widgets (audio labs, procwatch,
+laya-triage, media-inspector):
 - `levelMeter(target, { min, max, curve, mark, needle })` -> `set(v)`,
   `mark(v)`, `color(css)`; renders a `.k-meter`.
+- `historyPlot(canvas, { size, min, max, ref, fmt })` line plot of recent values.
+- `fitCanvas(canvas, { width, height })` -> `{ ctx, w, h }` in CSS pixels at
+  devicePixelRatio; resizes the backing store only when the box changes.
+
+**audio-ui.js** — audio widgets over elements already in the page; each
+returns a small handle (see the doc comment on each export for opts):
 - `peakScope(canvas, { history, color })` scrolling peak columns;
-  `historyPlot(canvas, { size, min, max, ref, fmt })` line plot of recent values;
   `oscilloscope(canvas, { color, bg, autoscale, glow })` -> `draw(samples)`
   (returns `{ peak, rms }`), a triggered time-domain trace.
 - `waveView(canvas, { height, trim, onTrim })` -> `set({ clip, gain,
@@ -319,7 +384,6 @@ small handle (see the doc comment on each export for opts):
   `playing()` the button follows playback that ends or starts elsewhere.
 - `mixerStrips(host, rows, { onMute, onSolo, level })` -> `update()`,
   `paint(key, state)`: per-bus M/S + meter rows (`.k-strip`).
-- `fitCanvas(canvas)` -> `{ ctx, w, h }` in CSS pixels at devicePixelRatio.
 Used by demos/listen-lab, mic-chunks, scene-audio and spatial-audio, and
 tools/synth (meters, scopes, oscilloscope, transport).
 

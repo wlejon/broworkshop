@@ -6,7 +6,6 @@
 import { check, eq, near, test, done, frames, setValue, text, clickOn, press, shot } from "/lib/kit/test.js";
 import { state, switchMachine, vp, grab } from "/app/sandbox.js";
 import { rig } from "/app/rig.js";
-import { worldToScreen } from "/lib/kit/viewport3d.js";
 
 frames(10);
 
@@ -112,9 +111,8 @@ test('left-drag grabs a machine part and pulls it; releasing lets go', () => {
     switchMachine('pendulum');
     press(' ');                              // freeze the bob so the click lands on it
     const r = vp.canvas.getBoundingClientRect();
-    const view = Camera.orbitViewOpts(vp.cam, vp.canvas);
     const b = P(rig.probe.bob);
-    const s = worldToScreen([b.x, b.y, b.z], view, r.width, r.height);
+    const s = vp.toScreen([b.x, b.y, b.z]);
     press(' ');
     const x = r.left + s.x, y = r.top + s.y;
     mouseMove(x, y);

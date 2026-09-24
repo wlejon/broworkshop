@@ -14,7 +14,8 @@
 //       games/fluffshuffle games/fluffshuffle/make_video.js
 // Output: tests/out/fluffshuffle.webm (cache: tests/out/fluffshuffle-highlights.json)
 
-import { seededRandom, copyGrid } from "/lib/arcade/grid.js";
+import { copyGrid } from "/lib/arcade/grid.js";
+import { seededRandom } from "/lib/arcade/random.js";
 
 const fs = require("fs");
 

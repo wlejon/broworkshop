@@ -7,7 +7,7 @@
 // follow the cursor. Tools stay selected after a commit, so the next shape
 // can start right away.
 
-import "/lib/sketch.js";
+import { Sketch } from "../model/sketch.js";
 import { RectangleTool } from "../tools/rectangle-tool.js";
 import { CircleTool } from "../tools/circle-tool.js";
 import { groundPlane, sketchPlaneFromRay } from "../model/mesh-ops.js";

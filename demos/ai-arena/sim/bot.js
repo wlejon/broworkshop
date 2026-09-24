@@ -52,6 +52,7 @@
 //
 // Return value: nothing. The robot calls self.moveTo / self.hold directly.
 
+import { BotAim } from "/lib/bot-aim.js";
 import { AI } from "/app/sim/ai.js";
 import { Arena } from "/app/sim/arena.js";
 

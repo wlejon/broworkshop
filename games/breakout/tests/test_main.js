@@ -2,7 +2,7 @@
 // shell flow (mouse paddle, launch, level clear -> next level, game over).
 // Run: scripts/validate.sh games/breakout
 import { test, done, check, eq, near, frames, simUntil, press, clickOn, text, shot } from "/lib/kit/test.js";
-import { seededRandom } from "/lib/arcade/grid.js";
+import { seededRandom } from "/lib/arcade/random.js";
 
 frames(6);
 const G = window.__breakout;

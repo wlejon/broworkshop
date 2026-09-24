@@ -4,7 +4,7 @@
 // Board layout: column-major stacks. board[col] holds blocks from the
 // BOTTOM (index 0) to the TOP. A block is null or { color, special }.
 
-import { seededRandom } from "/lib/arcade/grid.js";
+import { seededRandom } from "/lib/arcade/random.js";
 
 export const COLS = 8;
 export const ROWS = 16;

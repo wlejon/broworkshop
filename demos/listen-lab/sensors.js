@@ -1,7 +1,7 @@
 // Listen Lab — tier-0 sensor cards (level / voice / onset / tonality) for the
 // active stream, and each stream's tier-0 event edges into its fusion feed.
 
-import { levelMeter } from "/lib/kit/audio-ui.js";
+import { levelMeter } from "/lib/kit/gauges.js";
 import { D, fusionRow } from "/app/state.js";
 
 const level = levelMeter(D.levelMeter, { min: -80, max: 0, mark: true });

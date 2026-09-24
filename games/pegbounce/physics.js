@@ -11,7 +11,7 @@
 // pulses (Pulsewave shock fronts) and scoreEvents, the queue Round drains:
 //   { kind: "peg-hit", peg, fire? } | "wall-hit" | "catchbar-hit" | "ball-exit"
 
-import { seededRandom } from "/lib/arcade/grid.js";
+import { seededRandom } from "/lib/arcade/random.js";
 
 // Captured under its own name: this module also exports a `Physics`.
 const Jolt = globalThis.Physics;

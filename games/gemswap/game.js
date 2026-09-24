@@ -2,7 +2,8 @@
 // Shell owns screens, loop, pause, HUD plumbing and the high score.
 // Rules: rules.js · session: board.js · drawing: render.js · layouts: puzzles.js
 
-import { fitBoard, cellAt, cellCenter, formatClock } from "/lib/arcade/grid.js";
+import { fitBoard, cellAt, cellCenter } from "/lib/arcade/grid.js";
+import { formatClock } from "/lib/arcade/timers.js";
 import { createEffects } from "/lib/arcade/effects.js";
 import { bindPointer } from "/lib/arcade/pointer.js";
 import { recordScore, createScoreTabs, today } from "/lib/arcade/scores.js";

@@ -8,7 +8,8 @@
 // rotation); update() only manages visibility and the per-unit overlays.
 // Replays bypass the bindings and write the recorded frame straight onto the
 // nodes (renderReplayFrame).
-import { sceneViewport, orbitRotation, worldToScreen } from "/lib/kit/viewport3d.js";
+import { sceneViewport, orbitRotation, worldToScreen, Camera } from "/lib/kit/viewport3d.js";
+import { BotAim } from "/lib/bot-aim.js";
 import { AI } from "/app/sim/ai.js";
 
 export const UNIT_Y = 0.9;   // capsule center height (radius + halfHeight)
@@ -63,7 +64,7 @@ export function resetCamera() {
 /** Screen position (canvas CSS px) of a world point under the current camera. */
 export function projectToCanvas(x, y, z) {
     const c = vp.canvas;
-    const view = globalThis.Camera.orbitViewOpts(vp.cam, c);
+    const view = Camera.orbitViewOpts(vp.cam, c);
     return worldToScreen([x, y, z], view, c.clientWidth, c.clientHeight);
 }
 

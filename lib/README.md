@@ -1,65 +1,49 @@
-# lib — shared modules for bro workshop apps
+# lib — shared code for the workshop apps
 
-Two foundations: **`kit/`** for tools, demos, labs and ai apps, **`arcade/`**
-for games. Apps import from `/lib/...` (the engine mounts this folder).
+The engine mounts this folder at `/lib`; apps import what they need
+(`import { boot } from "/lib/kit/app.js"`). ES modules, no bundler.
 
-## Kit (tools, demos, labs, ai apps)
+| Folder / file | For | Read |
+|---------------|-----|------|
+| [`kit/`](kit/README.md) | tools, demos, labs, ai apps: theme + layout, DOM and widget helpers, weights lookup, 3D viewport, audio, ML, agent, editor plumbing, headless test helpers | [kit/README.md](kit/README.md), skeleton `templates/kit-app/` |
+| [`arcade/`](arcade/README.md) | games: loop, view, input, audio, save, the screen/HUD shell, 3D stage, boards, effects, scores | [arcade/README.md](arcade/README.md), skeleton `games/arcade-template/` |
 
-→ [`kit/README.md`](kit/README.md) · skeleton: [`templates/kit-app/`](../templates/kit-app/)
+The arcade builds on the kit where they overlap (`arcade/scene3d.js` uses the
+kit's orbit camera and pick rays); the kit never imports the arcade.
 
-| Path | Purpose |
-|------|---------|
-| `kit/kit.css` | theme tokens, styled controls, standard layout (`k-app`, `k-side`, `k-viewport`, `k-statusbar`, ...) |
-| `kit/app.js` | `boot()`: menu bar, status line, error display |
-| `kit/dom.js` `ui.js` `params.js` | element builder, status/log/stats/tabs/toggles, controls bound to values |
-| `kit/weights.js` | model weight resolution (`BRO_WEIGHTS`, sibling repos, model cache) |
-| `kit/viewport3d.js` | `bro.scene` canvas + orbit camera + standard mouse controls |
-| `kit/test.js` | headless test helpers (tests `import` from `/lib` directly) |
+## Domain libraries (top level)
 
-## Arcade foundation (all games)
+Self-contained modules that are not part of either foundation, each with
+its usage in the file's header comment.
 
-**Start here for classic single-player canvas arcade games:**
+| Module | What | Used by |
+|--------|------|---------|
+| `markdown.js` | streaming-safe Markdown → escaped HTML (LLM output) | kit/chat-view, tools/desktop-notebook |
+| `linediff.js` | LCS line diff as `ctx` / `del` / `add` ops | kit/chat-view |
+| `openrouter.js` | OpenRouter model catalog, picker, `chatCompletion` with retries | kit/agent-llm, kit/agent-backend, ai/maker-agent |
+| `tot-reasoning.js` | Tree-of-Thought search over `bro.ai.game.createGenericMcts` | lib-tests only (a library for LLM apps) |
+| `netroom.js` | lobby + tagged-JSON messages over `bro.net` | arcade/netplay, games/crater |
+| `bot-aim.js` | turret aim with reaction lag, turn rate and a fire cone | games/fps, demos/ai-arena |
+| `crosshair.js` | screen-centre reticle overlay (bloom, ADS) | games/fps, demos/terrain |
+| `system-menu.js` | `bro.menu` bar: File, View, Debug (inspector, perf HUD) | kit/app.js `boot()`, games/torque, the hands-off speech/image labs |
+| `sweep-runner.js` | content-addressed parameter sweeps rendered to disk | demos/krea2-lab |
 
-→ [`arcade/README.md`](arcade/README.md)
+`system-menu.js` and `sweep-runner.js` would belong in the kit, but the
+hands-off labs import them by these paths; they move when those labs do.
 
-| Path | Purpose |
-|------|---------|
-| `arcade/shell.js` | Boot a game plugin (screens, HUD, session, loop) |
-| `arcade/loop.js` `view.js` `input.js` `audio.js` `save.js` | Kernel |
-| `arcade/arcade.css` | Shared chrome; theme via CSS variables |
-| `games/arcade-template/` | Copy-this skeleton |
-| `games/snake/` | Filled reference game |
+## Tests
 
-```js
-import { boot } from "/lib/arcade/shell.js";
-import { game } from "/app/game.js";
-boot(game);
-```
+`lib-tests/` is a harness app for unit tests of `lib/` code: `test_*.js`
+there import what they test from `/lib` (`history`, `project`,
+`tot-reasoning`) or exercise engine bindings the kit leans on (`Physics`,
+sprites and particles, polygon triangulation). `scripts/validate.sh
+lib-tests` runs them. Tests for app-owned code live in the app's `tests/`.
 
-Older top-level modules (`loop.js`, `screens.js`, `input.js`, …) remain for
-games that have not been migrated. New arcade titles should use `lib/arcade/`
-only — do not treat pre-template games as architectural examples.
+## Conventions
 
-## Other modules
-
-Reusable helpers beyond the arcade shell. Prefer ES `export` when adding new
-files. There is no bundler; apps import what they need.
-
-| Module | Purpose |
-|--------|---------|
-| `math.js` | clamp, lerp, random helpers |
-| `fx.js` | screen shake, toast |
-| `particles.js` | 2D particle pool |
-| `camera.js` / `camera2d.js` | 3D orbit and 2D follow cameras (kit apps: use `kit/viewport3d.js`) |
-| `tilemap.js` / `platformer.js` | tile grid + platformer body (future foundation) |
-| `physics2d.js` | 2D physics helpers |
-| `netroom.js` | lobby / turn helpers over `bro.net` |
-| `project.js` / `history.js` / `sketch.js` | tool / editor plumbing |
-| `system-menu.js` | windowed app menu bar (kit apps get it from `kit/app.js` `boot()`) |
-| `openrouter.js` / `markdown.js` | AI tooling UI helpers |
-
-Conventions for new modules:
-- ES modules (`export`)
-- Safe when optional engine features are missing
-- No multi-line application chrome as HTML strings when a static template will do
-- Unit tests go in `lib-tests/test_*.js` (or `lib/**/test_*.js`); `scripts/validate.sh lib-tests` runs them
+- ES modules with named exports; no globals.
+- Degrade cleanly when an optional engine feature is compiled out.
+- Static markup stays in the app's HTML; modules build only repeated or
+  data-driven UI.
+- A helper moves here when several apps need it; one caller keeps it in the
+  app. Keep files under ~1k lines.

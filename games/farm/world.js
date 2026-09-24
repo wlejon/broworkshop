@@ -24,7 +24,7 @@ import { createEnv, stepEnv, envObserve, envAlerts } from './env.js';
 import { createMarket, stepMarket, marketObserve, marketAlerts } from './market.js';
 import { stepPerception, SIGHT_RADIUS } from './knowledge.js';
 import { createSpeech } from './speech.js';
-import { seededRandom } from '/lib/arcade/grid.js';
+import { seededRandom } from '/lib/arcade/random.js';
 
 // ---- life-cycle tuning ------------------------------------------------------
 const YOUNG_MS = 45000;     // age below which an animal is 'young' (no produce)

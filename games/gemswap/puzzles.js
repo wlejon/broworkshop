@@ -2,7 +2,7 @@
 // "3" = color 3, "" = random. Clear every frozen gem to advance.
 // Six hand-drawn patterns, then procedural boards up to PUZZLE_COUNT.
 
-import { seededRandom } from "/lib/arcade/grid.js";
+import { seededRandom } from "/lib/arcade/random.js";
 
 const PUZZLE_COUNT = 20;
 const _ = "";

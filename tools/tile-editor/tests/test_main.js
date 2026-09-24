@@ -1,7 +1,6 @@
 // Tile Editor: real clicks pick cells through the kit screen ray, every tool
 // edits the map, strokes undo as one step, and a project round-trips.
 import { check, eq, near, test, done, frames, q, text, clickOn, setValue, press, shot } from "/lib/kit/test.js";
-import { worldToScreen } from "/lib/kit/viewport3d.js";
 import { editor } from "/app/app.js";
 import { GROUND_IDS, OVERLAY_IDS } from "/app/atlas.js";
 import { BLOCK_BIT, LAYER } from "/app/map.js";
@@ -17,8 +16,7 @@ function cellPoint(x, y) {
     const c = world.cellCenterWorldXZ(x, y);
     const top = world.sampleHeight(c.x, c.z) || 0;
     const r = vp.canvas.getBoundingClientRect();
-    const view = Camera.orbitViewOpts(vp.cam, vp.canvas);
-    const s = worldToScreen([c.x, top, c.z], view, r.width, r.height);
+    const s = vp.toScreen([c.x, top, c.z]);
     return { x: r.left + s.x, y: r.top + s.y };
 }
 function clickCell(x, y) {

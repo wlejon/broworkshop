@@ -23,12 +23,14 @@ arcade kernel  (loop, view, input, audio, save)
 | `save.js` | namespaced prefs + high score |
 | `shell.js` | boot, screens, menu, session, frame |
 | `scene3d.js` | 3D games: `bootScene`, `createStage` (scene, orbit camera, picking, taps) |
-| `grid.js` | 2D board games: grids, line matches, gravity `collapse`, `createWave` / `createFalls` animations, `fitBoard` layout, `seededRandom`, `formatClock` |
+| `grid.js` | 2D board games: grids, line matches, gravity `collapse`, `createWave` / `createFalls` animations, `fitBoard` layout |
+| `random.js` | `seededRandom(seed)` → an `rng()` for rules, tests, replays and daily puzzles |
 | `effects.js` | `createEffects`: particle bursts (full circle or an `angle`/`arc` cone, plus `vx`/`vy` drift), floating score labels, shake, DOM toasts |
 | `pointer.js` | `bindPointer`: canvas mouse (down/move/up/click/dblclick/wheel) in drawing px, only while playing |
 | `scores.js` | `recordScore` per-mode leaderboards (optional `compare`, e.g. fastest time) + `createScoreTabs` High Scores screen; `statsBlock(rows)` padded "Label   value" text, `newBest(run)` the `  ·  NEW BEST` tag |
 | `options.js` | `createOptions`: Settings rows that cycle on Enter (`sfxVolume()`, `toggle()`) |
-| `timers.js` | `createTimers`: `after` / `every` on the game clock (step with `dt`), so delays freeze on pause and replay exactly in tests. Use instead of `setTimeout` for anything in a run |
+| `timers.js` | `createTimers`: `after` / `every` on the game clock (step with `dt`), so delays freeze on pause and replay exactly in tests. Use instead of `setTimeout` for anything in a run; `formatClock(ms, countdown)` → `m:ss` (a countdown rounds up) |
+| `netplay.js` | `connectForm`: the Name / Server title-screen form for networked games, remembered between runs, with an error line (crater, fps) |
 | `hooks.js` | `exposeHooks(id, shell, extra)`: `window.__<id>` with `shell`, `api`, `screen`, `run`, `save` + your extras, for `tests/test_main.js` |
 | `draw.js` | small canvas helpers: `roundRect` path, `mixColor` hex blend |
 | `arcade.css` | shared chrome; theme via CSS variables |
@@ -251,8 +253,9 @@ Do not call `getContext("scene")` or touch the DOM from `sim.js`.
 
 ## Games on this foundation
 
-Every folder under `games/` now boots via `main.js` + `boot(game)` except
-none — full workshop coverage.
+Every folder under `games/` boots via `main.js` + `boot(game)` (or
+`bootScene`) except `torque`, a physics driving sandbox with its own chrome.
+Import modules directly; there is no arcade `index.js`.
 
 | Cluster | Games |
 |---------|--------|

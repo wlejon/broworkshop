@@ -14,8 +14,9 @@ import { ids, fmtMs } from "/lib/kit/dom.js";
 import { foldPanels } from "/lib/kit/ui.js";
 import { prefStore } from "/lib/kit/prefs.js";
 import { workerClient } from "/lib/kit/worker-rpc.js";
-import { modelPicker, backendBadge, genPanel, runBar, runGeneration, imageView, imageStrip, wordAxes }
+import { modelPicker, genPanel, runBar, runGeneration, imageView, imageStrip, wordAxes }
     from "/lib/kit/imagegen.js";
+import { deviceBadge } from "/lib/kit/ml.js";
 import { Tokenizer } from "/app/lab/tokenizer.js";
 import { Profiles } from "/app/lab/profiles.js";
 import { createInspector } from "/app/lab/inspector.js";
@@ -34,7 +35,7 @@ const { status } = boot();
 foldPanels();
 const el = ids('model-name', 'scheduler', 'int8', 'trace', 'scrub', 'run', 'timing', 'diff-version');
 const rpc = workerClient('lab/diffusion-worker.js');
-const badge = backendBadge('#backend');
+const badge = deviceBadge('#backend');
 const gpu = !!(typeof bro !== 'undefined' && bro.tensor && bro.tensor.available);
 
 const lab = {

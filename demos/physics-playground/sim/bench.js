@@ -12,7 +12,8 @@
 // couple those constraints' axes. Get that backwards and nothing happens and
 // nothing complains.
 
-import { addBody, addStatic, rod, v3 } from "/lib/kit/physics3d.js";
+import { addBody, addStatic, rod } from "/lib/kit/physics3d.js";
+import { v3 } from "/lib/kit/math3d.js";
 import { ctx } from "./ctx.js";
 import { YARD_Z } from "./machines.js";
 

@@ -3,7 +3,7 @@
 // a left-click pick through the camera, the teleport buttons, world labels.
 
 import { check, eq, frames, test, done, q, text, clickOn, setValue, press, shot } from "/lib/kit/test.js";
-import { worldToScreen } from "/lib/kit/viewport3d.js";
+import { worldToScreen, Camera } from "/lib/kit/viewport3d.js";
 import { canvas, cam, world, tune, charState, sense, qState, crowdState, characterAvatar,
          PLAZA, BALL_LAB, onTerrain, labelEls } from "/app/lab.js";
 

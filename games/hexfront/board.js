@@ -3,7 +3,7 @@
 // highlights and floating damage numbers. Reads the battle, never changes it.
 
 import { MAP_W, MAP_H, TILE, UNIT_TYPES, authorMap } from "/app/rules.js";
-import { seededRandom } from "/lib/arcade/grid.js";
+import { seededRandom } from "/lib/arcade/random.js";
 
 const PALETTE = new Float32Array([
     0, 0, 0, 1,                // 0 empty

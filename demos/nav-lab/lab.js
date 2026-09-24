@@ -23,9 +23,8 @@
 //
 // Tests import this module and the ones above it, never main.js.
 
-import { sceneViewport, orbitRotation } from "/lib/kit/viewport3d.js";
+import { sceneViewport, orbitRotation, localPoint } from "/lib/kit/viewport3d.js";
 import { fixedStep } from "/lib/kit/ui.js";
-import { localPoint } from "/lib/kit/physics3d.js";
 import { ribbon, marker, pipPool, pickSurface } from "/lib/kit/nav3d.js";
 import { buildLevel, buildLights, marks } from "/app/level.js";
 import { bakeParams, navState, bake, bakeGrid, rebuildOverlay, findPath, findGridPath } from "/app/navmesh.js";

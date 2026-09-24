@@ -9,7 +9,7 @@
 // viewport. To draw world content, blit at (worldX - cam.x, worldY - cam.y).
 //
 // Usage:
-//   <script src="/lib/camera2d.js"></script>
+//   import { Camera2D } from "/app/camera2d.js";
 //   const cam = Camera2D.create({
 //       viewW: 800, viewH: 576,
 //       levelW: tm.widthPx, levelH: tm.heightPx,

@@ -1,6 +1,10 @@
 // Tests for the extended Physics binding.
 //
-// Run: bro-headless apps/lib-tests apps/lib-tests/test_physics.js
+// Run (from the repo root): bro-headless lib-tests lib-tests/test_physics.js
+//
+// Known engine failures (ENGINE-ISSUES.md, physics): the bronze binding
+// ignores `dofs` and the chain shape's `points`/`depth`, so the Plane2D,
+// chain and wheel (chain-ground) cases fail until those are bound again.
 
 'use strict';
 
@@ -319,30 +323,37 @@ t('sandbox handle.destroyAll keeps world reusable', function() {
     w.destroy();
 });
 
-t('polyline (capsule segments): ball rests on it', function() {
+t('polyline (rotated static capsule segments): ball rolls into the V and rests', function() {
     Physics.destroyAll();
-    var lib = (typeof Physics2D !== 'undefined') ? Physics2D : null;
-    // Build a flat horizontal polyline directly via Physics2D to exercise
-    // the capsule-per-segment path. (Physics2D coords are canvas-style.)
-    Physics2D.init({ width: 800, height: 600, gravity: 980 });
-    var line = Physics2D.createPolyline([
-        { x: 100, y: 400 }, { x: 700, y: 400 }
-    ], { thickness: 6 });
-    truthy(Array.isArray(line), 'returns array of segment tags');
-    truthy(line.length >= 1, 'at least one segment');
-    var ball = Physics2D.createCircle(400, 200, 12, { restitution: 0.2 });
-    var prevY = -1, stableFrames = 0;
-    for (var i = 0; i < 240; i++) {
-        advanceTime(16);
-        var p = Physics2D.getPosition(ball);
-        if (p.y > 100 && Math.abs(p.y - prevY) < 0.5 && p.y < 410) stableFrames++;
-        else stableFrames = 0;
-        prevY = p.y;
+    Physics.setGravity(0, -9.81, 0);
+    // A V-shaped polyline, one static capsule per segment. A capsule's long
+    // axis is local +Y, so each is rotated about Z onto its segment.
+    var pts = [{ x: -4, y: 1 }, { x: 0, y: 0 }, { x: 4, y: 1 }];
+    var radius = 0.05, segs = [];
+    for (var i = 0; i + 1 < pts.length; i++) {
+        var a = pts[i], b = pts[i + 1];
+        var dx = b.x - a.x, dy = b.y - a.y, len = Math.sqrt(dx * dx + dy * dy);
+        var ang = Math.atan2(dy, dx) - Math.PI / 2;
+        segs.push(Physics.createBody({
+            shape: 'capsule', static: true,
+            radius: radius, halfHeight: len * 0.5 - radius,
+            position: { x: (a.x + b.x) * 0.5, y: (a.y + b.y) * 0.5, z: 0 },
+            rotation: { x: 0, y: 0, z: Math.sin(ang / 2), w: Math.cos(ang / 2) },
+            friction: 0.5,
+        }));
     }
-    truthy(stableFrames > 20, 'ball came to rest on polyline (stableFrames=' + stableFrames + ', y=' + prevY + ')');
-    truthy(prevY < 410, 'ball above polyline: ' + prevY);
-    Physics2D.destroyBody(ball);
-    Physics2D.destroyBody(line);
+    truthy(segs[0] > 0 && segs[1] > 0, 'segment tags valid');
+    var ball = Physics.createBody({
+        shape: 'sphere', radius: 0.3,
+        position: { x: 1.5, y: 3, z: 0 },
+        restitution: 0.0, linearDamping: 1.0, angularDamping: 1.0,
+    });
+    for (var i = 0; i < 400; i++) advanceTime(16);
+    var p = Physics.getTransform(ball).position;
+    var v = Physics.getVelocity(ball).linear;
+    truthy(Math.abs(p.x) < 0.3, 'ball settled at the bottom of the V (x=' + p.x.toFixed(3) + ')');
+    truthy(p.y > 0.2 && p.y < 0.6, 'ball rests on the segments (y=' + p.y.toFixed(3) + ')');
+    truthy(Math.abs(v.x) + Math.abs(v.y) < 0.2, 'ball at rest (|v|=' + (Math.abs(v.x) + Math.abs(v.y)).toFixed(3) + ')');
     Physics.destroyAll();
 });
 
@@ -508,6 +519,8 @@ t('chain: ball from below passes through (one-sided)', function() {
         points: [-10, 0, 10, 0],
         depth: 4,
     });
+    // Without a ground body this case would pass vacuously.
+    truthy(ground > 0, 'ground tag valid');
     var ball = Physics.createBody({
         shape: 'sphere', radius: 0.4,
         position: { x: 0, y: -3, z: 0 },
@@ -531,6 +544,7 @@ t('chain: corner does not snag a sliding body', function() {
         points: [-10, 0, 0, 0, 0, 10],
         depth: 4,
     });
+    truthy(ground > 0, 'ground tag valid');
     var ball = Physics.createBody({
         shape: 'sphere', radius: 0.3,
         position: { x: -5, y: 1, z: 0 },
@@ -559,6 +573,7 @@ t('wheel: suspension oscillation decays', function() {
     var ground = Physics.createBody({
         shape: 'chain', points: [-20, 0, 20, 0], depth: 4,
     });
+    truthy(ground > 0, 'chain ground tag valid');
     var chassis = Physics.createBody({
         shape: 'box',
         position: { x: 0, y: 5, z: 0 },
@@ -594,6 +609,7 @@ t('wheel: motor drives chassis along the chain', function() {
         shape: 'chain', points: [-30, 0, 30, 0], depth: 4,
         friction: 1.0,
     });
+    truthy(ground > 0, 'chain ground tag valid');
     var chassis = Physics.createBody({
         shape: 'box',
         position: { x: 0, y: 5, z: 0 },

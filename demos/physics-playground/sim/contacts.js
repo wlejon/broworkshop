@@ -18,7 +18,7 @@
 // getContacts() drains, so this module never calls it: main.js's event hub
 // (lib/kit/physics3d.js physicsEvents) drains once a frame and calls consume().
 
-import { quatYTo } from "/lib/kit/physics3d.js";
+import { quatYTo } from "/lib/kit/math3d.js";
 import { ctx } from "./ctx.js";
 
 export const state = {

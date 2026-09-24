@@ -2,7 +2,7 @@
 // and the shell flow (aim, fire, wave-complete screen, game over with NEW BEST).
 // Run: scripts/validate.sh games/missile-command
 import { test, done, check, eq, near, frames, simUntil, press, text, shot } from "/lib/kit/test.js";
-import { seededRandom } from "/lib/arcade/grid.js";
+import { seededRandom } from "/lib/arcade/random.js";
 
 frames(6);
 const G = window["__missile-command"];

@@ -12,7 +12,7 @@
 //
 // Offset, Follow Me and Erase highlight the face under the cursor on hover.
 
-import "/lib/sketch.js";
+import { Sketch } from "../model/sketch.js";
 import { OffsetTool } from "../tools/offset-tool.js";
 import { FollowMeTool } from "../tools/followme-tool.js";
 import { TapeTool } from "../tools/tape-tool.js";

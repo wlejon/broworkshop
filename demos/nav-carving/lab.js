@@ -11,9 +11,8 @@
 // restore their navmesh box at the physically honest moment: a closing gate
 // or retracting bridge blocks at once; an opening one only when it is clear.
 
-import { sceneViewport, orbitRotation } from "/lib/kit/viewport3d.js";
+import { sceneViewport, orbitRotation, localPoint } from "/lib/kit/viewport3d.js";
 import { fixedStep } from "/lib/kit/ui.js";
-import { localPoint } from "/lib/kit/physics3d.js";
 import { walkableOverlay, ribbon, linkBeads, pickSurface } from "/lib/kit/nav3d.js";
 import { buildLevel, buildLights, OBSTACLES, LINKS, SHAFT, FLOOR_Y, BRIDGE, SPAWN, TARGETS } from "/app/level.js";
 import { navState, bake, setObstacle, overlayOpts, generation, AGENT_RADIUS } from "/app/nav.js";

@@ -15,8 +15,8 @@
 // bundles, `<name>.synth/project.json`) through the kit's documentCommands.
 // The clip editor keeps its own history (its undo/redo act in that view).
 
-import "/lib/history.js";
-import "/lib/project.js";
+import { History } from "/lib/kit/history.js";
+import { Project } from "/lib/kit/project.js";
 import { boot } from "/lib/kit/app.js";
 import { $ } from "/lib/kit/dom.js";
 import { stats as statsLine, tabs, frameLoop, fpsMeter } from "/lib/kit/ui.js";

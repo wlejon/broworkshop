@@ -3,7 +3,7 @@
 // with NEW BEST).
 // Run: scripts/validate.sh games/echo
 import { test, done, check, eq, frames, simUntil, press, text, shot } from "/lib/kit/test.js";
-import { seededRandom } from "/lib/arcade/grid.js";
+import { seededRandom } from "/lib/arcade/random.js";
 import { padRect } from "/app/render.js";
 
 frames(6);

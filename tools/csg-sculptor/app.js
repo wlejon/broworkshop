@@ -2,7 +2,7 @@
 // cutter (cutter.js) in a kit 3D viewport. main.js imports this module; tests
 // import it too and drive the exported `sculptor`.
 
-import "/lib/history.js";
+import { History } from "/lib/kit/history.js";
 import { boot } from "/lib/kit/app.js";
 import { $, h } from "/lib/kit/dom.js";
 import { readout, segmented } from "/lib/kit/ui.js";

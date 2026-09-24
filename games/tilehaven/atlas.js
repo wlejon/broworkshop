@@ -8,7 +8,7 @@
 //   Row 2 (cells 32..47): terrain: 32 grass, 33 forest floor, 34 ore rock,
 //                         35..37 water frames, 38 cliff, 40..42 crop frames.
 
-import { seededRandom } from "/lib/arcade/grid.js";
+import { seededRandom } from "/lib/arcade/random.js";
 
 export const APX = 16, ACOLS = 16, AROWS = 4;
 

@@ -2,7 +2,7 @@
 //
 // Run: scripts/validate.sh tools/scene-editor
 
-'use strict';
+import { Sketch } from "/app/model/sketch.js";
 
 const E    = window.__editor;
 const reg  = E.registry;

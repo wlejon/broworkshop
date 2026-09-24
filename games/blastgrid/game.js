@@ -6,7 +6,7 @@
 
 import { createStage } from "/lib/arcade/scene3d.js";
 import { createEffects } from "/lib/arcade/effects.js";
-import { formatClock } from "/lib/arcade/grid.js";
+import { formatClock } from "/lib/arcade/timers.js";
 import { createGame, WINS_TARGET, speedLevel } from "/app/sim.js";
 import { registerKinds, applyTints, syncObjects, flashAt } from "/app/render.js";
 import { buildChips, refreshChips, fillRoundScreen, matchSummary } from "/app/ui.js";

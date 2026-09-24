@@ -17,7 +17,8 @@
 // machine's spec; the bodies are untouched and a slewing crane keeps its
 // momentum. Axis indicators (bars beside each pivot) show the layout in-world.
 
-import { addStatic, addBody, BodyGroup, rod, quatYTo, q, v3 } from "/lib/kit/physics3d.js";
+import { addStatic, addBody, BodyGroup, rod } from "/lib/kit/physics3d.js";
+import { quatYTo, q, v3 } from "/lib/kit/math3d.js";
 import { ctx, scene } from "./ctx.js";
 
 /** The yard sits behind the -Z perimeter on its own pad, clear of the sandbox rain. */

@@ -23,8 +23,9 @@ import { boot } from "/lib/kit/app.js";
 import { ids, fmtMs } from "/lib/kit/dom.js";
 import { prefStore } from "/lib/kit/prefs.js";
 import { workerClient } from "/lib/kit/worker-rpc.js";
-import { modelPicker, backendBadge, genPanel, runBar, runGeneration, imageView, imageStrip, wordAxes }
+import { modelPicker, genPanel, runBar, runGeneration, imageView, imageStrip, wordAxes }
     from "/lib/kit/imagegen.js";
+import { deviceBadge } from "/lib/kit/ml.js";
 
 const PREVIEW_STEPS = 8;     // no-anchor preview: fewer steps is fine
 const PREVIEW_SIZE = 512;    // any preview: shrink resolution (summaries are token-count independent)
@@ -42,7 +43,7 @@ const { status } = boot();
 const el = ids('anchor-prompt', 'capture', 'identity-weight', 'identity-weight-val', 'clear-anchor',
                'identity-hint', 'identity', 'ref-pane', 'gen-sub', 'timing', 'zero-axes');
 const rpc = workerClient('lab/sana-worker.js');
-const badge = backendBadge('#backend');
+const badge = deviceBadge('#backend');
 
 const lab = {
     loaded: false, loading: false, busy: false, run: null, error: null, config: null,

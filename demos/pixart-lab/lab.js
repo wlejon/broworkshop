@@ -12,8 +12,9 @@ import { boot } from "/lib/kit/app.js";
 import { fmtMs } from "/lib/kit/dom.js";
 import { prefStore } from "/lib/kit/prefs.js";
 import { workerClient } from "/lib/kit/worker-rpc.js";
-import { modelPicker, backendBadge, genPanel, runBar, runGeneration, imageView, imageStrip }
+import { modelPicker, genPanel, runBar, runGeneration, imageView, imageStrip }
     from "/lib/kit/imagegen.js";
+import { deviceBadge } from "/lib/kit/ml.js";
 
 // PixArt-Sigma's standard recipe: 20 steps, guidance 4.5, 1024² native.
 const FIELDS = [
@@ -27,7 +28,7 @@ export const prefs = prefStore('pixart-lab.v2');
 const { status } = boot();
 const timing = document.getElementById('timing');
 const rpc = workerClient('lab/pixart-worker.js');
-const badge = backendBadge('#backend');
+const badge = deviceBadge('#backend');
 
 const lab = { loaded: false, loading: false, run: null, config: null, error: null };
 

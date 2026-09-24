@@ -1,4 +1,4 @@
-import "/lib/sketch.js";
+import { Sketch } from "../model/sketch.js";
 // =============================================================================
 // Rectangle tool — click-click drawing of an axis-aligned rectangle on the
 // current sketch plane. Produces a triangulated face primitive on commit.

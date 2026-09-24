@@ -3,7 +3,7 @@
 // between them. Fills the tile world and the game's zone lists.
 
 import { MAP_W, MAP_H, L_GROUND, L_OVER, TILE, FLAG, CROP_STAGES } from "/app/defs.js";
-import { seededRandom } from "/lib/arcade/grid.js";
+import { seededRandom } from "/lib/arcade/random.js";
 
 const inB = (x, y) => x >= 0 && y >= 0 && x < MAP_W && y < MAP_H;
 

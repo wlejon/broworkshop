@@ -1,7 +1,7 @@
 // sim.js — DeepDelve domain: map gen, combat, FOV, save/load (createGame).
 // No shell / HUD / camera wiring; that lives in game.js and view.js.
 
-import { seededRandom } from '/lib/arcade/grid.js';
+import { seededRandom } from '/lib/arcade/random.js';
 import { bytesToBase64, base64ToBytes } from '/lib/arcade/save.js';
 import { blobVariantMasks, makeAtlas, ACELL, TILE_ATLAS } from '/app/atlas.js';
 import { registerKinds } from '/app/kinds.js';

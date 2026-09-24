@@ -1,4 +1,5 @@
 import { EditMesh } from "/app/model/edit-mesh.js";
+import { Sketch } from "/app/model/sketch.js";
 // Push/pull regression coverage. Guards against "edges opening up" bugs
 // where vertex-substitution surgery drops twin pairings.
 //

@@ -1,5 +1,9 @@
-// Tests for scene-graph sprite animation, particles, tilemap.
-// Run: bro-headless apps/lib-tests apps/lib-tests/test_scene_anim.js
+// Tests for scene-graph sprite animation and 2D particles.
+// Run (from the repo root): bro-headless lib-tests lib-tests/test_scene_anim.js
+//
+// Known engine failures (ENGINE-ISSUES.md, scene): a sprite's `isPlaying` /
+// `currentAnimation` read false / null, and 2D particle nodes ignore their
+// emitter options and report `liveCount` 0.
 
 'use strict';
 

@@ -13,6 +13,7 @@
 // AI.recordDamage is called from lab.js / sim/headless.js when a DamageEvent
 // fires so a target's mem.threat / mem.threatSourceId / mem.lastHitT latch
 // correctly — scripted's "seek cover under fire" branch reads those.
+import { BotAim } from "/lib/bot-aim.js";
 import { Arena } from "/app/sim/arena.js";
 
 export const AI = {};

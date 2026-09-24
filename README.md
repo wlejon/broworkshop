@@ -43,15 +43,19 @@ Kit references: `demos/kws-lab`, `demos/lm-playground`, `demos/spatial-hash`,
 
 | Path | Contents |
 |------|----------|
-| `lib/` | Shared libraries (see `lib/README.md`) |
+| `lib/` | Shared libraries: `kit/`, `arcade/`, domain modules (see [`lib/README.md`](lib/README.md)) |
+| `lib-tests/` | Unit tests for `lib/` |
 | `games/` | Games |
 | `demos/` | Engine / ML / graphics demos |
 | `tools/` | Editors and utilities |
 | `ai/` | Agent / pipeline experiments |
 | `templates/` | App skeletons |
-| `launcher/` | App grid |
+| `launcher/` | App grid (`apps.json` lists every app) |
 | `scripts/` | `validate.sh` |
 | `tests/` | Validation baseline and tags |
+| `docs/` | [Engine promotion candidates](docs/promotion-candidates.md) |
+
+Engine bugs the apps hit are tracked in [`ENGINE-ISSUES.md`](ENGINE-ISSUES.md).
 
 ## License
 

@@ -1,7 +1,7 @@
 // bots.js — FPS Arena AI players, server side.
 //
 // Movement is bro.ai.game: a nav grid baked from the arena's solids and one
-// steering agent per bot. Aim is lib/bot_aim.js: the desired aim is resampled
+// steering agent per bot. Aim is lib/bot-aim.js: the desired aim is resampled
 // at 15 Hz and the gun turns at a finite rate, so a bot swinging onto a
 // strafing target lags like a person does, and only fires once the gun is
 // inside its cone.
@@ -15,12 +15,10 @@
 //   HEAL   hide and regenerate below HEAL_THRESHOLD
 // Target choice is a small reward score: near, wounded, visible targets win.
 
-import "/lib/bot_aim.js";
+import { BotAim } from "/lib/bot-aim.js";
 import {
     ARENA_HALF, WALL_THICK, PLAYER_RADIUS, EYE_HEIGHT, MOVE_SPEED, OBSTACLES, SOLIDS,
 } from "./arena.js";
-
-const BotAim = globalThis.BotAim;
 
 const MAX_HEALTH = 100;
 const BOT_SPEED = MOVE_SPEED * 0.90;

@@ -2,7 +2,7 @@
 // demo. Everything is in the fixed 800×576 virtual view (game.js letterboxes
 // it into the canvas); world objects draw relative to a Camera2D.
 
-import { Camera2D } from "/lib/camera2d.js";
+import { Camera2D } from "/app/camera2d.js";
 import { Art } from "/app/art.js";
 import { VIEW_W, VIEW_H, BEAM_THICKNESS } from "/app/rules.js";
 

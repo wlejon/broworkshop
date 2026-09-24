@@ -1,4 +1,4 @@
-import "/lib/sketch.js";
+import { Sketch } from "../model/sketch.js";
 // =============================================================================
 // Circle tool — click-center + click-radius drawing. Commit produces a
 // triangulated regular polygon (the approximation SketchUp uses for circles

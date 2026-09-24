@@ -2,7 +2,7 @@
 // own cell with its timestamp, the frame nearest the playhead outlined, a
 // needle at the playhead, a hover tooltip, click to seek to a frame.
 
-import { fitCanvas } from "/lib/kit/audio-ui.js";
+import { fitCanvas } from "/lib/kit/gauges.js";
 import { h } from "/lib/kit/dom.js";
 
 const C = {

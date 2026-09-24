@@ -1,4 +1,4 @@
-import "/lib/sketch.js";
+import { Sketch } from "../model/sketch.js";
 // =============================================================================
 // Follow-me tool — sweep a profile face along a path.
 //

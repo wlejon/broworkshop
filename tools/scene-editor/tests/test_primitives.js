@@ -1,4 +1,5 @@
 import { Inference } from "/app/model/inference.js";
+import { Camera } from "/lib/kit/camera.js";
 // Headless tests for multi-primitive support.
 //
 // Exercises SceneRegistry + Primitive + multi-primitive inference via

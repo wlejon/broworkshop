@@ -23,7 +23,7 @@
 
 import { assetPath, OGG_BED } from '/app/audio_sources.js';
 import { bindControl } from '/lib/kit/params.js';
-import { levelMeter } from '/lib/kit/audio-ui.js';
+import { levelMeter } from '/lib/kit/gauges.js';
 
 export const streamState = {
     /** playbackId of the disk stream, or -1 before it opened. */

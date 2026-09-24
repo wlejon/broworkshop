@@ -1,19 +1,28 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <meta charset="utf-8">
-    <title>Bro</title>
-    <link rel="stylesheet" href="style.css">
+<meta charset="utf-8">
+<title>Bro</title>
+<link rel="stylesheet" href="/lib/kit/kit.css">
+<link rel="stylesheet" href="style.css">
 </head>
-<body>
-    <header>
-        <input id="filter" type="text" placeholder="Filter apps…" autocomplete="off">
-        <div id="running-strip"></div>
-    </header>
-    <main id="grid"></main>
-    <footer>
-        <span id="status"></span>
-    </footer>
-    <script src="app.js"></script>
+<body class="k-app">
+  <header class="k-header">
+    <h1>bro workshop</h1>
+    <span class="k-sub" id="count"></span>
+    <div class="k-spacer"></div>
+    <div class="running" id="running"></div>
+  </header>
+  <div class="k-toolbar">
+    <input id="filter" type="text" placeholder="Filter apps" autocomplete="off">
+    <div class="k-row cats" id="cats"></div>
+  </div>
+  <main class="k-main pad" id="grid"></main>
+  <footer class="k-statusbar">
+    <span id="status"></span>
+    <div class="k-spacer"></div>
+    <span class="dim" id="exe"></span>
+  </footer>
+  <script type="module" src="/app/main.js"></script>
 </body>
 </html>

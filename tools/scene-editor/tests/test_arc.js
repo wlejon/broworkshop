@@ -1,4 +1,5 @@
 import { ArcTool } from "/app/tools/arc-tool.js";
+import { Sketch } from "/app/model/sketch.js";
 // Headless tests for ArcTool + Sketch.arcPolyline + the app's arc wiring.
 // Run: scripts/validate.sh tools/scene-editor
 

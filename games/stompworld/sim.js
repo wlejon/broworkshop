@@ -18,7 +18,7 @@
 //   terminal REW_FLAG / REW_DEATH / REW_TIMEOUT (stall counts as timeout),
 //   plus potential shaping γ·Φ' − Φ with Φ = −dist(hero, flag) × PBRS_SCALE.
 
-import { Platformer } from "/lib/platformer.js";
+import { Platformer } from "/app/platformer.js";
 import { buildLevel, GROUND_ID } from "/app/level.js";
 import {
     TILE, HERO_CFG, BEAM_LENGTH, BEAM_THICKNESS, EXPLOSION_R,

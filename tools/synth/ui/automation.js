@@ -7,7 +7,7 @@
 // The curve drawn here is evaluated in JS with the same interpolation modes
 // the native Sequence uses (linear, smooth = cosine, step = hold).
 
-import { fitCanvas } from "/lib/kit/audio-ui.js";
+import { fitCanvas } from "/lib/kit/gauges.js";
 import { AUTOMATION_TARGETS } from "../model/song.js";
 
 const R = 4;            // point radius

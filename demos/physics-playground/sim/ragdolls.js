@@ -15,7 +15,7 @@
 //                         figure up, and shoves whatever is in the way. Must be
 //                         re-issued every step (updateRagdolls).
 
-import { q } from "/lib/kit/physics3d.js";
+import { q } from "/lib/kit/math3d.js";
 import { spawnRagdoll as spawnRig, buildPose, poseError as rigPoseError, jointResidual as rigResidual,
          PART_NAMES, PELVIS_BIND_Y } from "/lib/kit/ragdoll.js";
 import { ctx } from "./ctx.js";

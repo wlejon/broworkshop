@@ -12,7 +12,7 @@
 //   - jumpCutMul: when input.jumpHeld is released mid-rise, vy *= this
 //
 // Usage:
-//   <script src="/lib/platformer.js"></script>
+//   import { Platformer } from "/app/platformer.js";
 //   const body = Platformer.createBody({ x: 64, y: 0, w: 24, h: 28 });
 //   // each frame:
 //   const events = Platformer.step(body, {

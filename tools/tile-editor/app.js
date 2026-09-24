@@ -10,8 +10,7 @@
 //
 // main.js imports this module; tests import it and drive `editor`.
 
-import "/lib/history.js";
-import "/lib/project.js";
+import { Project } from "/lib/kit/project.js";
 import { boot } from "/lib/kit/app.js";
 import { $, $$, h } from "/lib/kit/dom.js";
 import { segmented, stats } from "/lib/kit/ui.js";

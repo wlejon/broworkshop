@@ -13,7 +13,7 @@
 // Builders add everything they make to `rig` (rig.js) and set rig.nudge and
 // rig.probe (the bodies readouts and tests look at).
 
-import { q } from "/lib/kit/physics3d.js";
+import { q } from "/lib/kit/math3d.js";
 import { rig, body, joint, motorJoint, hinge, slider, fixture, prop, cable, pos, flipMotor } from "./rig.js";
 import { gearMesh, pulleyMesh, crankMesh, conrodMesh, plankMesh, steel, slab } from "./parts.js";
 

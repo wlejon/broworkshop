@@ -5,7 +5,7 @@
 //                   38 cliff, 39 soil, 40 plaza, 41 sprout, 42 young crop,
 //                   43..45 ripe crop frames (sway).
 
-import { seededRandom } from "/lib/arcade/grid.js";
+import { seededRandom } from "/lib/arcade/random.js";
 
 const APX = 16;
 export const ACOLS = 16, AROWS = 4;

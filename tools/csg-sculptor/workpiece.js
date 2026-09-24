@@ -2,7 +2,7 @@
 // the boolean operations that change it. Every change goes through a History
 // entry holding the mesh before and after, so undo / redo swap whole meshes.
 
-import "/lib/history.js";
+import { History } from "/lib/kit/history.js";
 
 /** Blank workpieces. Mesh.box / cylinder take half extents. */
 export const PRESETS = {

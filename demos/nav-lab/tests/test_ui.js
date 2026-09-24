@@ -4,7 +4,6 @@
 //
 //   scripts/validate.sh demos/nav-lab
 import { check, test, done, text, q, clickOn, setValue, shot, frames } from "/lib/kit/test.js";
-import { worldToScreen } from "/lib/kit/viewport3d.js";
 import { marks } from "/app/level.js";
 import { bakeParams, navState } from "/app/navmesh.js";
 import { agentState } from "/app/agents.js";
@@ -74,9 +73,8 @@ test('save + load buttons round-trip the mesh', () => {
 
 test('left-click on the level sets the route start through the camera', () => {
     const r = lab.vp.canvas.getBoundingClientRect();
-    const view = Camera.orbitViewOpts(lab.vp.cam, lab.vp.canvas);
     const target = marks.hallSW;
-    const s = worldToScreen([target.x, target.y, target.z], view, r.width, r.height);
+    const s = lab.vp.toScreen([target.x, target.y, target.z]);
     check(!s.behind && s.x > 0 && s.x < r.width && s.y > 0 && s.y < r.height, 'west hall on screen');
     const expect = pickLevel(s.x, s.y);
     check(expect && Math.hypot(expect.x - target.x, expect.z - target.z) < 1.0 && expect.y < 0.5,

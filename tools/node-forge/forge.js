@@ -5,8 +5,8 @@
 // mountForge() boots the kit shell and returns the handle main.js publishes
 // as globalThis.nodeForge (tests drive the app through it).
 
-import "/lib/history.js";   // global History
-import "/lib/project.js";   // global Project
+import { History } from "/lib/kit/history.js";
+import { Project } from "/lib/kit/project.js";
 import { $ } from "/lib/kit/dom.js";
 import { boot } from "/lib/kit/app.js";
 import { documentCommands } from "/lib/kit/editor.js";

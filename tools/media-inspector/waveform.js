@@ -5,7 +5,7 @@
 // The view window [from, to] zooms within the analysed data; a region
 // re-analysed at full resolution (app.js "Zoom region") replaces the data.
 
-import { fitCanvas } from "/lib/kit/audio-ui.js";
+import { fitCanvas } from "/lib/kit/gauges.js";
 
 const C = {
     bg: '#12151e', ruler: '#2b3248', grid: '#1e2333', text: '#8892b0', center: '#23293d',

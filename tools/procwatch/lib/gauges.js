@@ -1,7 +1,7 @@
 // gauges.js — the CPU / RAM / GPU cards above the table.
 
 import { h } from "/lib/kit/dom.js";
-import { historyPlot, levelMeter, fitCanvas } from "/lib/kit/audio-ui.js";
+import { historyPlot, levelMeter, fitCanvas } from "/lib/kit/gauges.js";
 
 const HOT = '#ff6b5c', WARN = '#ffc857', COOL = '#3a9ad9';
 const heat = (f, warn, hot) => (f > hot ? HOT : f > warn ? WARN : '');

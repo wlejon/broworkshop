@@ -2,7 +2,7 @@
 // planes, polylines <-> edge data, triangle filtering. Pure functions over
 // Primitive / EdgePrimitive state; no scene or DOM access.
 
-import "/lib/sketch.js";
+import { Sketch } from "./sketch.js";
 import { Mat4Lib } from "./mat4.js";
 import { EditMesh } from "./edit-mesh.js";
 

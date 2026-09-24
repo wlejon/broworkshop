@@ -2,7 +2,7 @@
 // (per-request latency, forward occupancy, device load).
 
 import { $, h, clear } from "/lib/kit/dom.js";
-import { levelMeter, fitCanvas } from "/lib/kit/audio-ui.js";
+import { levelMeter, fitCanvas } from "/lib/kit/gauges.js";
 import { QUESTIONS } from "./presets.js";
 import { traffic } from "./traffic.js";
 

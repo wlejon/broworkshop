@@ -2,7 +2,7 @@
 // instanced object meshes. buildWorld(scene) returns an authored TileWorld
 // plus its object kinds; the rules in sim.js only read and flag it.
 
-import { seededRandom } from "/lib/arcade/grid.js";
+import { seededRandom } from "/lib/arcade/random.js";
 
 export const TILE = { GRASS: 1, DIRT: 2, ROCK: 3, WATER: 4, BASE: 5, SPAWN: 6, EGRASS: 7 };
 

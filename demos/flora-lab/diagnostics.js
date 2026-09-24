@@ -1,6 +1,6 @@
 // Overlays built from the worker's plant / shadow snapshots, not a live world:
 //
-//   impostors      octahedral billboard atlases (lib/impostor.js), one quad per
+//   impostors      octahedral billboard atlases (impostor.js), one quad per
 //                  plant through bro.impostor.createLayer; the fast path that
 //                  replaces branches + foliage + blooms
 //   shadowGrid     a wire box per shadow-grid cell whose occupancy Q < 0.85
@@ -10,7 +10,7 @@
 //
 // Rebuilt when a packet lands or a toggle flips.
 
-import { bakeImpostorAtlas } from "/lib/impostor.js";
+import { bakeImpostorAtlas } from "/app/impostor.js";
 import { wire } from "/app/wire.js";
 import { WORLD_SIZE, GRID_RES, GRID_CELL, GRID_HEIGHT, SPECIES, leafCard, prototypes, createWorld } from "/app/shared.js";
 

@@ -1,8 +1,8 @@
-// Tests for apps/lib/sketch.js.
+// Unit tests for model/sketch.js (planar math for the drawing tools).
 //
-// Run: bro-headless apps/lib-tests apps/lib-tests/test_sketch.js
+// Run: scripts/validate.sh tools/scene-editor/tests/test_sketch.js
 
-'use strict';
+import { Sketch } from "/app/model/sketch.js";
 
 let tests = 0, failed = 0;
 function t(name, fn) {

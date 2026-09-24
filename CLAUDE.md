@@ -9,16 +9,17 @@ Guidance for agents working in broworkshop: the showcase apps for the
 
 | Path | Contents |
 |------|----------|
-| `games/` | games, all on the arcade shell (`lib/arcade/`) |
+| `games/` | games on the arcade shell (`lib/arcade/`); `torque` has its own chrome |
 | `demos/` | engine / graphics / ML demos and labs |
 | `tools/` | editors and utilities |
 | `ai/` | agent and pipeline experiments |
 | `templates/` | copy-to-start skeletons: `kit-app/` (tools/demos/labs), `worker-sim/` |
 | `lib/kit/` | shared toolkit for everything that is not a game |
 | `lib/arcade/` | game kernel + shell |
-| `lib/*.js` | older shared modules (camera, system menu, history, sketch, ...) |
+| `lib/*.js` | domain libraries shared by a few apps (markdown, openrouter, netroom, bot-aim, ...); table in [`lib/README.md`](lib/README.md) |
 | `lib-tests/` | harness app for `lib/` unit tests |
-| `launcher/` | the app grid (`launcher/apps.json` lists apps) |
+| `launcher/` | the app grid, a kit app; `launcher/apps.json` lists every app on disk, and `launcher/tests/` checks that |
+| `docs/` | [`promotion-candidates.md`](docs/promotion-candidates.md): workshop code that belongs in bro |
 | `scripts/validate.sh` | boot-smoke + test runner |
 | `tests/` | `baseline.txt`, `app-tags.txt`; runner output lands in `tests/out/` (ignored) |
 | `bin/` | stale engine copy, gitignored; do not use |
@@ -42,7 +43,10 @@ as `<script type="module" src="/app/main.js">` and import `"/lib/kit/..."`.
   (`'brolm/weights/Qwen3.5-0.8B'`). Never write `D:/projects`; `BRO_WEIGHTS`
   names the directory holding the sibling repos.
 - **3D:** `sceneViewport` / `orbitControls` from `lib/kit/viewport3d.js`
-  instead of re-pasting the orbit mouse block.
+  instead of re-pasting the orbit mouse block; camera math in
+  `lib/kit/camera.js`, quaternion/vector helpers in `lib/kit/math3d.js`.
+- **Editors:** undo/redo is `History` (`lib/kit/history.js`), documents are
+  `Project` (`lib/kit/project.js`), wired to menus by `lib/kit/editor.js`.
 
 ## Running and validating
 
@@ -86,7 +90,9 @@ scripts/validate.sh --list               # what would run, with tags
   hack around it in app code: note it in [`ENGINE-ISSUES.md`](ENGINE-ISSUES.md)
   for the engine owner and pick the straightforward design.
 - **Shared code:** a helper moves into `lib/kit/` (or `lib/arcade/`) when
-  several apps need it; otherwise it stays in the app. Keep the kit small.
+  several apps need it; otherwise it stays in the app. A self-contained
+  domain library several apps share goes at `lib/` top level. Keep the kit
+  small, and do not leave a module in two places.
 - **No Python.** Tooling is bash or JS run by bro-headless.
 - **Write files with the file-editing tools**, never through shell
   redirection (`>`, `tee`, heredocs, `sed -i`).

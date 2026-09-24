@@ -1,5 +1,5 @@
-// Test Tree-of-Thought MCTS reasoning.
-import { searchTreeOfThoughts } from "./tot_reasoning.js";
+// Tests for lib/tot-reasoning.js (Tree-of-Thought MCTS reasoning).
+import { searchTreeOfThoughts } from "/lib/tot-reasoning.js";
 
 function assert(cond, msg) {
     if (!cond) throw new Error('Assertion failed: ' + msg);

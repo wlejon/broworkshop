@@ -3,7 +3,7 @@
 // over with NEW BEST).
 // Run: scripts/validate.sh games/2048
 import { test, done, check, eq, frames, simUntil, press, text, shot } from "/lib/kit/test.js";
-import { seededRandom } from "/lib/arcade/grid.js";
+import { seededRandom } from "/lib/arcade/random.js";
 
 frames(6);
 const G = window.__2048;

@@ -12,7 +12,7 @@
 // { prefs, status, running(), onStale(msg) }.
 
 import { h, ids } from "/lib/kit/dom.js";
-import { baseName } from "/lib/kit/imagegen.js";
+import { baseName } from "/lib/kit/ml.js";
 
 const IMAGES = 'Image|png;jpg;jpeg';
 

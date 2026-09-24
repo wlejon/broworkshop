@@ -3,10 +3,9 @@
 // zooms. The scene FBO clears transparent, so the canvas's CSS background
 // shows through (the light / dark toggle is pure CSS).
 
-import { sceneViewport, orbitRotation } from "/lib/kit/viewport3d.js";
+import { sceneViewport, orbitRotation, Camera } from "/lib/kit/viewport3d.js";
 
 const DEFAULT_DIST = 2.2;
-const Camera = globalThis.Camera;
 
 /** Handle: setCloud(cloud), hasCloud(), splatCount(), savePly(path), autoRotate, setScale(s), reset(), vp. */
 export function splatViewport(target) {

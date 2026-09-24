@@ -4,7 +4,6 @@
         { "dir": "games/gemswap" },
         { "dir": "games/pegbounce" },
         { "dir": "games/snake" },
-        { "dir": "games/arcade-template" },
         { "dir": "games/breakout" },
         { "dir": "games/asteroids" },
         { "dir": "games/chomper" },
@@ -33,6 +32,8 @@
         { "dir": "games/farm" },
         { "dir": "games/torque" },
         { "dir": "games/clap-runner" },
+        { "dir": "games/arcade-template" },
+
         { "dir": "tools/synth" },
         { "dir": "tools/mesh-viewer" },
         { "dir": "tools/scene-editor" },
@@ -48,6 +49,7 @@
         { "dir": "tools/desktop-notebook" },
         { "dir": "tools/neural-playground" },
         { "dir": "tools/laya-triage" },
+
         { "dir": "demos/ai-arena" },
         { "dir": "demos/anim-lab" },
         { "dir": "demos/character-lab" },
@@ -78,6 +80,7 @@
         { "dir": "demos/plant-recipes" },
         { "dir": "demos/platform-lab" },
         { "dir": "demos/qwen-asr-lab" },
+        { "dir": "demos/qwen-image-lab" },
         { "dir": "demos/qwen-tts-lab" },
         { "dir": "demos/ragdoll-blender" },
         { "dir": "demos/range-selection-lab" },
@@ -101,10 +104,13 @@
         { "dir": "demos/vlm-lab" },
         { "dir": "demos/waapi-lab" },
         { "dir": "demos/window-lab" },
+
         { "dir": "ai/ardy-motion" },
         { "dir": "ai/maker-agent" },
         { "dir": "ai/pi-agent" },
         { "dir": "ai/voice-pipeline" },
+
+        { "dir": "templates/kit-app" },
         { "dir": "templates/worker-sim" }
     ]
 }

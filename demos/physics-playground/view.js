@@ -1,8 +1,8 @@
 // view.js — the scene canvas: camera, lights, the bay views and mouse picking.
 
 import { segmented } from "/lib/kit/ui.js";
-import { sceneViewport, orbitRotation } from "/lib/kit/viewport3d.js";
-import { pickRay, raycast, grabber, localPoint } from "/lib/kit/physics3d.js";
+import { sceneViewport, orbitRotation, localPoint } from "/lib/kit/viewport3d.js";
+import { pickRay, raycast, grabber } from "/lib/kit/physics3d.js";
 import { bodies } from "./sim/spawn.js";
 import { findPart } from "./sim/ragdolls.js";
 import { select, spawnCurrent } from "./ui/sandbox.js";

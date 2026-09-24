@@ -7,7 +7,7 @@ import { check, eq, near, test, done, frames, text, clickOn, shot } from "/lib/k
 import { state, switchMachine } from "/app/sandbox.js";
 import { rig } from "/app/rig.js";
 import { MACHINES } from "/app/machines.js";
-import { q } from "/lib/kit/physics3d.js";
+import { q } from "/lib/kit/math3d.js";
 
 frames(10);
 

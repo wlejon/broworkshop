@@ -9,9 +9,8 @@ import { bindControl, segmented } from "/lib/kit/index.js";
 import { prefStore } from "/lib/kit/prefs.js";
 import { findWeights } from "/lib/kit/weights.js";
 import { workerClient } from "/lib/kit/worker-rpc.js";
-import { pickFile, imageDataFromFile, baseName } from "/lib/kit/ml.js";
-import { modelPicker, backendBadge, genPanel, runBar, runGeneration, imageStrip } from "/lib/kit/imagegen.js";
-import { Stage, VIEWS } from "./stage.js";
+import { pickFile, imageDataFromFile, baseName, deviceBadge } from "/lib/kit/ml.js";
+import { modelPicker, genPanel, runBar, runGeneration, imageStrip } from "/lib/kit/imagegen.js";import { Stage, VIEWS } from "./stage.js";
 import { SCENES } from "./scenes.js";
 import { MAX_SIDE } from "./mask.js";
 import { FILL_MODES, fillMasked, maskToRgba, coverage } from "./pixels.js";
@@ -249,7 +248,7 @@ function bindGuidance() {
 export function start() {
     status = boot().status;
     rpc = workerClient('lib/worker.js');
-    badge = backendBadge('#backend').set('no model', 'warn');
+    badge = deviceBadge('#backend').set('no model', 'warn');
     stage = new Stage();
     picker = modelPicker('#model', {
         label: 'SD 1.5 directory (diffusers layout)',

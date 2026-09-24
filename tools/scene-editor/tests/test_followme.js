@@ -1,4 +1,5 @@
 import { FollowMeTool } from "/app/tools/followme-tool.js";
+import { Sketch } from "/app/model/sketch.js";
 // Headless tests for FollowMeTool + Sketch.sweepProfile + app wiring.
 // Run: scripts/validate.sh tools/scene-editor
 

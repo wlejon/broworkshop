@@ -10,7 +10,7 @@
 import { createEffects } from "/lib/arcade/effects.js";
 import { createOptions, sfxVolume, toggle } from "/lib/arcade/options.js";
 import { statsBlock, newBest } from "/lib/arcade/scores.js";
-import { formatClock } from "/lib/arcade/grid.js";
+import { formatClock } from "/lib/arcade/timers.js";
 import {
     createBlockfall, moveH, softDrop, rotate, hardDrop, hold, step, drainEvents,
 } from "/app/rules.js";

@@ -10,7 +10,7 @@ import { boot } from "/lib/kit/app.js";
 import { $ } from "/lib/kit/dom.js";
 import { params } from "/lib/kit/params.js";
 import { segmented, fpsMeter } from "/lib/kit/ui.js";
-import { sceneViewport, orbitRotation } from "/lib/kit/viewport3d.js";
+import { sceneViewport, orbitRotation, Camera } from "/lib/kit/viewport3d.js";
 import { Crowd, MESHES } from "./instances.js";
 import { stepPattern, PATTERNS, COLOR_SCHEMES } from "./patterns.js";
 

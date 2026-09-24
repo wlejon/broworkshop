@@ -8,7 +8,7 @@
 // The overview under it shows the whole ring; drag it to jump.
 
 import { h, clear } from "/lib/kit/dom.js";
-import { fitCanvas } from "/lib/kit/audio-ui.js";
+import { fitCanvas } from "/lib/kit/gauges.js";
 import { D, FPS, app, status, exportWav, btn } from "/app/state.js";
 import {
     cur, PH_CONF, SPAN_MIN, SPAN_MAX, viewWindow, setLive, clampScrub, fmtFrame,

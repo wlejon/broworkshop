@@ -4,7 +4,7 @@
 //   fx.label(x, y, text, hex)  fx.ring(x, y, maxR, hex)  fx.puff(x, y)
 // status goes null -> "won" | "lost".
 
-import { seededRandom } from "/lib/arcade/grid.js";
+import { seededRandom } from "/lib/arcade/random.js";
 import { createPath } from "/app/path.js";
 import { Chain, ORB_DIAM } from "/app/chain.js";
 import { Shooter, PU } from "/app/shooter.js";

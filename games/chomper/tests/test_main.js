@@ -3,7 +3,7 @@
 // game over with NEW BEST).
 // Run: scripts/validate.sh games/chomper
 import { test, done, check, eq, near, frames, simUntil, press, text, shot } from "/lib/kit/test.js";
-import { seededRandom } from "/lib/arcade/grid.js";
+import { seededRandom } from "/lib/arcade/random.js";
 
 frames(6);
 const G = window.__chomper;

@@ -1,4 +1,5 @@
 import { OffsetTool } from "/app/tools/offset-tool.js";
+import { Sketch } from "/app/model/sketch.js";
 // Headless tests for OffsetTool + Sketch.offsetPolygon2D + app wiring.
 // Run: scripts/validate.sh tools/scene-editor
 

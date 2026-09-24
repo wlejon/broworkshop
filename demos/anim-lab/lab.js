@@ -34,7 +34,7 @@
 // the machine's parameters, drains root motion onto the node, copies the orbit
 // rig onto its camera node and moves the (off-by-default) bone overlay.
 
-import "/lib/camera.js";
+import { Camera } from "/lib/kit/camera.js";
 import { humanoidClipDefs, compileClips } from "/lib/kit/humanoid.js";
 import { boneFrames, boneOverlay } from "/lib/kit/skeletal.js";
 import { buildStage, MARKER_SPACING, MARKER_COUNT } from "/app/stage.js";

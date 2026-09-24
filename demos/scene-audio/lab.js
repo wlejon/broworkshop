@@ -32,7 +32,7 @@ import { boot } from "/lib/kit/app.js";
 import { h, $ } from "/lib/kit/dom.js";
 import { segmented } from "/lib/kit/ui.js";
 import { transport } from "/lib/kit/audio-ui.js";
-import { sceneViewport } from "/lib/kit/viewport3d.js";
+import { sceneViewport, Camera } from "/lib/kit/viewport3d.js";
 import { buildClips, loadOggClipAsync, OGG_CLIP } from "/app/audio_sources.js";
 import { buildEnvironment, buildSources, tickSources, setPathsVisible } from "/app/scene_setup.js";
 import {

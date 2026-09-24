@@ -14,7 +14,7 @@
 //               with w falling 1 -> 0: the heap on the floor blends into the
 //               get-up clip, which ends standing, which hands back to idle
 
-import { q } from "/lib/kit/physics3d.js";
+import { q } from "/lib/kit/math3d.js";
 import { spawnRagdoll, buildPose, lerpPose, PELVIS_BIND_Y } from "/lib/kit/ragdoll.js";
 import { CLIPS, GETUP_TIME } from "./anim.js";
 

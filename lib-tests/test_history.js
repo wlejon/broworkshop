@@ -1,8 +1,8 @@
-// Tests for apps/lib/history.js.
+// Tests for lib/kit/history.js.
 //
-// Run: bro-headless apps/lib-tests apps/lib-tests/test_history.js
+// Run: scripts/validate.sh lib-tests/test_history.js
 
-'use strict';
+import { History } from "/lib/kit/history.js";
 
 let tests = 0, failed = 0;
 function t(name, fn) {

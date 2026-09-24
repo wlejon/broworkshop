@@ -2,8 +2,8 @@
   "bro_project": 1,
   "app": "synth",
   "schema": 1,
-  "created": "2026-09-24T11:44:54.169Z",
-  "modified": "2026-09-24T11:44:54.169Z",
+  "created": "2026-09-24T14:13:19.247Z",
+  "modified": "2026-09-24T14:13:19.247Z",
   "data": {
     "bpm": 140,
     "lfo": {

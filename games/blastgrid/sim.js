@@ -2,7 +2,7 @@
 // power-ups, rounds and sudden death. Tuning in rules.js, rival bombers in
 // ai.js. No DOM and no rendering: the plugin reads state and on* callbacks.
 
-import { seededRandom } from "/lib/arcade/grid.js";
+import { seededRandom } from "/lib/arcade/random.js";
 import {
     TILE, FLAG_SOLID, FLAG_SOFT, FLAG_BOMB, FLAG_DANGER, MOVE_MASK,
     MAP_W, MAP_H, CELL, HSTEP, FUSE, FIRE_LINGER, SOFT_PROB, DROP_PROB,

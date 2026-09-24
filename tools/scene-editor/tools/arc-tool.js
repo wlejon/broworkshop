@@ -1,4 +1,4 @@
-import "/lib/sketch.js";
+import { Sketch } from "../model/sketch.js";
 // =============================================================================
 // Arc tool — SketchUp-classic 2-point + bulge.
 //

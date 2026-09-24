@@ -2,7 +2,7 @@
 // mesh-rendering-bug.bro (line-drawn polygon → extrude → push a side
 // inward to create a concave cap) and confirm the resulting render mesh
 // has zero T-junctions and zero triangle edges crossing polygon edges.
-'use strict';
+import { Sketch } from "/app/model/sketch.js";
 
 advanceTime(0); flush();
 

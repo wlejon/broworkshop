@@ -9,7 +9,8 @@
 //   concrete  friction 1.10, restitution 0.05 — grips, stops short
 //   rubber    friction 0.85, restitution 0.92 — grips AND bounces
 
-import { addStatic, q } from "/lib/kit/physics3d.js";
+import { addStatic } from "/lib/kit/physics3d.js";
+import { q } from "/lib/kit/math3d.js";
 import { ctx } from "./ctx.js";
 
 // Shared by collider and visual so the two cannot drift apart.

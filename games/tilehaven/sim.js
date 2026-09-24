@@ -3,7 +3,7 @@
 // lives in game.js. The TileWorld is the map: its tiles, flags, components,
 // floodFill and findPath are the rules' data structures.
 
-import { seededRandom } from "/lib/arcade/grid.js";
+import { seededRandom } from "/lib/arcade/random.js";
 import { bytesToBase64, base64ToBytes } from "/lib/arcade/save.js";
 import { makeAtlas, ACELL, ACOLS, AROWS, TILE_ATLAS } from "/app/atlas.js";
 import { registerKinds } from "/app/kinds.js";

@@ -7,7 +7,6 @@
 // is deterministic, so the numbers are reproducible run to run.
 
 import { test, check, done, frames, press, shot } from "/lib/kit/test.js";
-import { worldToScreen } from "/lib/kit/viewport3d.js";
 import { pickRay } from "/lib/kit/physics3d.js";
 import * as app from "/app/view.js";
 import { stage } from "/app/sim/stage.js";
@@ -234,8 +233,7 @@ test('stress rain', () => {
 
 function canvasPoint(world) {
     const r = app.vp.canvas.getBoundingClientRect();
-    const view = globalThis.Camera.orbitViewOpts(app.vp.cam, app.vp.canvas);
-    const s = worldToScreen(world, view, r.width, r.height);
+    const s = app.vp.toScreen(world);
     return { lx: s.x, ly: s.y, cx: r.left + s.x, cy: r.top + s.y, behind: s.behind };
 }
 

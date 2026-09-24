@@ -3,7 +3,7 @@
 // mouse steering, pause, game over).
 // Run: scripts/validate.sh games/asteroids
 import { test, done, check, eq, near, frames, simUntil, press, text, shot } from "/lib/kit/test.js";
-import { seededRandom } from "/lib/arcade/grid.js";
+import { seededRandom } from "/lib/arcade/random.js";
 
 frames(6);
 const G = window.__asteroids;

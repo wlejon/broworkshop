@@ -1,799 +1,684 @@
 # Engine issues found from broworkshop
 
-Things that do not work in bro and that apps should not paper over. Add an
-entry when you hit one (date, what, minimal repro, which apps it affects);
-remove it when the engine fixes it. Engine repo: `../bro`.
+Things that do not work in bro and that apps should not paper over. Engine
+repo: `../bro`.
+
+**Adding an entry.** Put it under the subsystem heading it belongs to (add a
+heading if none fits). Check first that it is not already listed; if it is,
+add your app to that entry's "Affects" line instead of writing a second one.
+Each entry says: what is wrong (and what the web / the docs say should
+happen), a minimal repro that runs against the current build, and which apps
+it affects plus any workaround they carry. Date it.
+
+**Closing an entry.** When the engine fixes one, re-run its repro, then move
+it to "Fixed" at the bottom as one line: title, the bro commit if known, the
+date you verified it. Fix the app workarounds it names.
+
+Repros below assume the repo root as CWD and `bro-headless` =
+`../bro/build/Release/bro-headless.exe`. "A page with X" means any app folder
+whose `index.html` holds X (a scratch folder with just `index.html` works).
+Every open item was last re-run against the bro Release build of 2026-09-24,
+except where an entry says "not re-run".
 
 ## Open
 
-### `SceneGraph.unprojectLocal` signature changed under 13 apps (2026-09-24)
-`scene.unprojectLocal(x, y)` → `{ origin, dir }` is what every app calls; the
-bronze binding is now `unprojectLocal(node, [x, y])` → flat
-`[ox, oy, oz, dx, dy, dz]` with `node` required (the native body treats a
-null node as world space). Every existing call throws
-`expected a __bro_native.scene.SceneNode handle, got a non-object`.
-Repro: `bro-headless demos/lighting-demo -e "advanceTime(50); document.querySelector('#stage').getContext('scene').unprojectLocal(500, 500)"`.
-Broke picking in games/gridkeep, hearthfolk, hexfront, tilehaven (their
-tests fail in the baseline; hearthfolk, tilehaven and gridkeep are ported off it) and demos/lighting-demo light selection, plus
-the other callers (`grep -rn "unprojectLocal(" games demos tools ai lib`).
-Either restore the documented app-facing shape or publish the replacement
-and the apps get ported to it.
-The new form does not work as a replacement yet either: with a camera set
-through `scene.setCamera({...})` (every orbit-camera app),
-`scene.unprojectLocal(scene.root, [640, 500])` returns `[]`, because the
-native body bails when `activeCamera()` is null; and `null` for the node is
-rejected by the binding (`got null`). So there is currently no screen-ray
-at all for setCamera apps. `lib/arcade/scene3d.js` `rayAt()` (games/tumble)
-computes the ray in JS with kit `screenRay` meanwhile; switch it back to
-the engine call once one works. games/farm and games/hearthfolk now pick
-through the same `rayAt()` / `toScreen()` (their orthographic iso cameras
-included; kit `screenRay`/`worldToScreen` handle `mode: 'orthographic'`),
-and so do games/tilehaven and games/gridkeep.
+### Scene: picking, nodes, sprites, particles, TileWorld
 
-### Column flex container with a percentage width stretches children to the wrong width (2026-09-24)
-A `display:flex; flex-direction:column` box whose `width` is a percentage
-lays its stretched children out at *that percentage of its own width*
-(a 40% = 400px column gives its children 160px). Pixel widths and block
-containers are fine. Minimal page:
-```html
-<div style="display:flex;width:1000px"><div style="width:40%;display:flex;flex-direction:column">
-  <div id="c">x</div></div></div>
-<!-- #c measures 160px, expected 400px -->
-```
-Hit while porting tools/shader-lab (switched to `flex: 1`, which is the
-intended 1:1 split anyway).
+#### `SceneGraph.unprojectLocal` changed shape, and the new shape has no ray for `setCamera` apps (2026-09-24)
+Apps call `scene.unprojectLocal(x, y)` → `{ origin, dir }`. The binding is now
+`unprojectLocal(node, [x, y])` → flat `[ox, oy, oz, dx, dy, dz]`, so the old
+call throws `expected a __bro_native.scene.SceneNode handle, got a
+non-object`. The new form is no replacement yet: with a camera set through
+`scene.setCamera({...})` (every orbit-camera app) `unprojectLocal(scene.root,
+[x, y])` returns `[]` (the native body bails when `activeCamera()` is null),
+and `null` for the node is rejected (`got null`). It works only with a camera
+node (`scene.createCamera({ ..., active: true })`).
+Repro: a page with a scene canvas, `scene.setCamera({ eye: [0,10,12], target: [0,0,0] })`,
+then `scene.unprojectLocal(400, 300)` throws and `scene.unprojectLocal(scene.root, [400, 300])` is `[]`.
+Affects: every picking app. games/tumble, farm, hearthfolk, tilehaven and
+gridkeep pick through `lib/arcade/scene3d.js` `rayAt()` / `toScreen()` (kit
+`screenRay` / `worldToScreen`, orthographic included); switch back once the
+engine call works. demos/lighting-demo light selection and the remaining
+callers: `grep -rn "unprojectLocal(" games demos tools ai lib`.
+Want: restore the documented app-facing shape, or make the new one work with
+`setCamera` and publish it.
 
-### Error location misattributed across module imports (2026-09-24)
-A ReferenceError at line 8 of a headless test script that imports
-`/lib/system-menu.js` was reported `at .../lib/system-menu.js ... :8:21`
-(the imported module's name with the script's line). Makes failures in
-test scripts that import kit helpers point at the wrong file.
+#### Scene node wrappers are not identity-stable (2026-09-24)
+`scene.findByName('n') === scene.findByName('n')` is false, and so is
+`scene.activeCamera === scene.activeCamera` with a camera node active: each
+read returns a fresh wrapper. Compare `.id` instead (demos/anim-lab
+`cameras.js` does).
 
-### ai/pi-agent and ai/maker-agent never finish booting (2026-09-24)
-Both import a ~41k-line esbuild bundle (`pi.bundle.js` / `maker.bundle.js`).
-bro-headless logs the page manifest and then produces nothing for 300 s
-(smoke and all 12 of their tests time out); the tests' own header says the
-bundle used to load under QuickJS. Looks like bronze compile time on large
-single modules. Tagged `timeout=90` in `tests/app-tags.txt` so the known
-timeout stays cheap.
-Update (same day): no longer blocks the apps. The bundles were pi's
-`@mariozechner/pi-agent-core` + `pi-ai` (plus their provider SDKs) and the apps
-used only the agent loop from them. That loop is now `lib/kit/agent.js`
-(~240 lines), both apps boot in about 1 s, and the `timeout=90` tags are gone.
-The engine question is still open and still unreproduced: why bronze does
-not finish a single ~41k-line module in 300 s. The bundles were build output
-and never tracked. To get one back, run `npm i && node build.mjs` in
-`ai/pi-agent/bundler/` from git history (the commit before the kit rebuild).
-
-### No `CSS` global (2026-09-24)
-`CSS.supports(...)` / `CSS.escape(...)` throw ReferenceError.
-
-### `createPhysicsNode({ body: tag })` does not bind the body (2026-09-24)
-**FIXED** in bro 7c134014 (the factory maps the tag through `bodyIdForTag`).
-The native factory (`native_scene_factories.cpp`) reads only `bodyId`, as a
-raw Jolt `BodyID`, and ignores the `body: tag` option every app passes
-(the documented shape, and what `Physics.createBody` returns). The node
-never syncs, so every dynamic body's visual sits at the origin: in
-demos/physics-playground the crates, ragdolls, gear wheels and machine
-parts all render in one heap at (0,0,0), and demos/character-lab's props
-likewise. There is no JS accessor for the raw id, so apps cannot work
-around it. Isolated checks that fail until it is fixed:
-demos/physics-playground/tests/test_physics_node.js,
-demos/character-lab/tests/test_physics_node.js. All PhysicsNode creation
-for the physics demos goes through lib/kit/physics3d.js `addBody` and
-lib/kit/ragdoll.js.
-
-### A driver script importing the page's ENTRY module evaluates it again (2026-09-24)
-The module registry (`eval_jit.cpp`, `opts.moduleRegistry`) shares the
-page's module instances with a headless driver script, except the entry
-module named in `<script type="module" src>`: importing that one from a
-test runs it a second time, so the app boots twice into one DOM and one
-physics world (two sets of panels, two copies of every static body, two
-contact drains splitting the event stream). Its dependencies ARE shared.
-Minimal repro: page `main.js` = `import "/app/m.js"; console.log('main')`,
-test = `import "/app/main.js"` logs `main` twice; a test importing
-`/app/m.js` sees one `m.js`. Tests should import the app's non-entry
-modules (kit apps: keep `main.js` a thin boot over importable modules).
-
-### `new Worker(new URL(...))` throws; `import.meta.url` names the page (2026-09-24)
-`new Worker(new URL('./w.js', import.meta.url), { type: 'module' })`, the
-standard module-worker form, throws `new Worker(scriptPath) requires a
-script path` (`host_worker.cpp` accepts only a string, resolved against the
-app dir). And in `/app/main.js` loaded by `<script type="module">`,
-`import.meta.url` is `file:///.../index.html`, not main.js, so even
-`.href` would resolve against the wrong file. Breaks
-templates/worker-sim at boot (the error is inside a DOMContentLoaded
-listener, so its smoke still passes). A string path relative to the app
-dir works, and module workers do load `/lib/...` and relative imports:
-games/stompworld uses `new Worker('ai/trainer_worker.js', { type: 'module' })`.
-Repro: `bro-headless templates/worker-sim -e "advanceTime(100)"`.
-
-### A driver script sees a page module's `let` exports as a snapshot (2026-09-24)
-Beyond the entry-module case above: a test importing a (shared, non-entry)
-page module gets the values its `let` exports held at import time. When the
-page later reassigns one, the test's binding never changes, whether the
-reassignment comes from a page timer or from a page function the test
-calls. The module instance IS shared: objects and functions are the same
-ones, and an accessor function returns the live value. The namespace
-object (`import * as ns`) is stale too. Minimal repro: `live.js` =
-`export let y = 1; export let c = null; export function bump(){ y = y + 1; }
-export function rebuild(){ c = { n: (c ? c.n : 0) + 1 }; } export function readC(){ return c; }`;
-page `main.js` = `import { bump, rebuild } from "/app/live.js"; rebuild(); setTimeout(bump, 50);`.
-The test imports `{ y, c, rebuild, readC }` and `* as ns` from
-`/app/live.js`, then runs `advanceTime(100)`. It sees `y` and `ns.y` still 1,
-though the timer set it to 2. After calling `rebuild()` itself, `c` is still
-the first object, while `readC()` returns the new one. In demos/character-lab the imported
-`character` handle goes stale after every controller rebuild; its tests
-read `ballState.selfTag` / `characterAvatar()` instead.
-
-### Space on a focused checkbox toggles it even when keydown is cancelled (2026-09-24)
-Click a checkbox (it takes focus), then press Space: the checkbox toggles
-during keydown even though a document `keydown` listener called
-`preventDefault()`. In a browser, cancelling the keydown suppresses the
-activation. Apps that use Space for a game action (demos/character-lab's
-jump) therefore also flip whichever panel checkbox was clicked last.
-Minimal page: `<input type=checkbox id=cb>` plus
-`document.addEventListener('keydown', e => { if (e.key === ' ') e.preventDefault(); })`;
-the test does `click()` on #cb, then `keyDown(0x20)`, and `cb.checked` flips.
-character-lab's UI test clicks the viewport first, as a player would.
-
-### Scene node wrappers are not identity-stable (2026-09-24)
-`scene.activeCamera`, `scene.findByName(...)` and similar return a fresh
-wrapper on each call, so `scene.activeCamera === cam` is false for the same
-node. Compare `.id` instead (demos/anim-lab `cameras.js` does).
-
-### `blendState().pos` is `[]` with no blend space (2026-09-24)
-With a single clip (or crossfade) on the base track, the animation player's
-`blendState().pos` is an empty array, not `undefined` as
-`docs/animation-api.js` implies. Test for `pos && pos.length`.
-
-### A scene HtmlNode swallows canvas clicks over its whole surface (2026-09-24)
-A `scene.createHtmlNode({ width, height, ... })` billboard takes pointer
-hits over its full layout rect, transparent areas included, and
-`pointer-events: none` in its html does not let them through: a mousedown
-under the billboard never reaches the canvas (not even a window capture
-listener sees it), although `document.elementFromPoint` there answers the
-canvas. Name tags drawn as mostly-empty 360x150 surfaces above people
-therefore block clicks on whatever stands behind them. Repro: games/farm,
-move the player avatar to (22, 14) (its spawn) and `click()` on the Foreman
-at (22, 12): no mousedown on #view. farm's `tests/test_inspect.js` moves the
-avatar aside before clicking. Want: hit-test HtmlNode content, honour
+#### A scene HtmlNode swallows canvas clicks over its whole surface (2026-09-24)
+A `scene.createHtmlNode({ width, height, ... })` billboard takes pointer hits
+over its full layout rect, transparent areas included, and `pointer-events:
+none` in its html does not let them through. A mousedown under it never
+reaches the canvas (not even a window capture listener sees it), although
+`document.elementFromPoint` there answers the canvas.
+Repro: games/farm, `F.start(); F.setAuto(false); F.movePlayerTo(22, 14)` (the
+player's 360x150 name tag then stands in front of the Foreman), `click()` at
+`F.personScreen('Foreman')`: 0 mousedowns on `#view`, nothing selected.
+Affects: games/farm (its `tests/test_inspect.js` moves the avatar aside first);
+any app with name tags. Want: hit-test HtmlNode content, honour
 `pointer-events: none`, or an option to make a node non-interactive.
 
-### `min-width` is ignored on `display: inline-block` (2026-09-24)
-`<span style="display:inline-block; min-width:96px">lobby id</span>X` lays
-the span out at its text width (55px), so the next inline sits right
-against it; `width: 96px` on the same span works (96px). Chromium gives
-96px for both. Seen in demos/steam-lab's `.kv` key/value rows
-("lobby id—", "frames0"). Repro: a page with the span above,
-`getBoundingClientRect().width` of the span.
+#### TileWorld `addObject({ color })` per-instance tint is ignored (2026-09-24)
+tile-api.js documents `opts.color` on `addObject` as a per-instance tint, but
+every instance renders in the kind's base colour. A kind's own `style.color`
+works.
+Repro: a 4x1 palette TileWorld, `addObjectKind(Mesh.box(0.6,0.6,0.6), { color: [1,1,1,1] })`,
+instances with `color: [1,0,0,1]`, `[0,1,0,1]`, `[0,0,1,1]` and none,
+`rebuild()` + `rebuildObjects()`, screenshot: all white.
+Affects: games/gridkeep (tower/creep colours, slow/hit flashes),
+games/blastgrid (bomber colours, fuse redden, fire fade), games/tilehaven
+(house tints, cargo), games/hexfront (red vs blue armies render identical;
+`tests/out/shots/games_hexfront-initial.png`). All authored white kinds for
+exactly this.
 
-### `grid-column: 1 / -1` does not span; negative grid lines ignored (2026-09-24)
-In `grid-template-columns: 1fr 1fr` (400px wide), a child with
-`grid-column: 1 / -1` is 200px (one column); `1 / 3` and `span 2` are
-400px. demos/steam-lab's Events panel (meant full width under the 2x2
-grid) sits in the left column only; it did before the kit port too.
+#### TileWorld ignores `atlasPixels` given as a Uint8ClampedArray (2026-09-24)
+`scene.createTileWorld({ atlasPixels, atlasWidth, atlasHeight, ... })` with the
+`Uint8ClampedArray` that `getImageData().data` returns renders untextured
+(flat grey); a `Uint8Array` of the same bytes textures correctly. It should
+accept any byte view, or throw.
+Repro: an 8x4 two-cell atlas (red | blue), `atlasColumns: 2, tileAtlas: [0,0,1]`,
+two tiles of each id; clamped → grey strip, Uint8Array → red/blue.
+Affects: tools/tile-editor passes `new Uint8Array(img.data.buffer)` (atlas.js).
 
-### A long text run after an inline element wraps whole to the next line (2026-09-24)
-`<div style="width:300px"><span>voice</span> <span>recording did not
-start because the Steam library was not found anywhere</span></div>`
-(12px monospace): line 1 holds only "voice"; the message starts at x=0 on
-line 2 (Range rects), although "recording did not start because" fits
-after "voice". Same with `white-space: normal` and `pre-wrap`, and with the
-text as a bare text node after the span. Chromium breaks inside the text.
-Seen in demos/steam-lab's event log: a long message leaves its kind tag
-alone on the first row.
+#### `scene.setFog(null)` throws (2026-09-24)
+`setFog(null)` throws `Cannot read properties of null (reading
+'startDistance')` from the bronze `scene.js` wrapper. scene-api.js documents
+`setFog({})` as "fog off", but other setters accept null
+(`setEnvironment(null)`) and this one should too.
+Repro: `bro-headless demos/flora-lab -e "document.getElementById('stage').getContext('scene').setFog(null)"`.
+Affects: lib/impostor.js now passes `{}` (it broke flora-lab's impostor toggle).
 
-### bro-server runs the app's page scripts, and a page error kills the server (2026-09-24)
-`bro-server games/fps games/fps/server.js` loads the app manifest and
-evaluates index.html's `<script>`s (the log shows "AppLoader: loaded
-manifest ... 1 scripts", and page stacks "in games\fps\index.html") before
-the server script, in a process with no renderer. If a page script throws
-(fps's did: `getContext("scene")` is null there), the server script runs to
-completion — it even binds its port — and then bro-server reports
-`failed to evaluate script 'games/fps/server.js'` and exits. Wrapping the
-server in a probe that imports it inside try/catch shows the import itself
-succeeds. Expected: bro-server does not run the page at all (or at least
-does not charge a page error to the server script). games/fps now tolerates
-a missing scene context at boot so its server runs; any app with a server
-and a page that assumes a renderer at load is exposed.
+#### Sprite `isPlaying` / `currentAnimation` read false / null while the sprite animates (2026-09-24)
+`scene.createSprite({ sheet, animations: { walk: { frames: [0,1,2,3], fps: 10, loop: true } }, play: 'walk' })`
+advances `frameIndex` correctly (2 after `advanceTime(250)`), but
+`isPlaying` is `false` and `currentAnimation` `null`: the natives
+(`SceneNode_isPlaying_get` / `_currentAnimation_get` in `native_scene_lights.cpp`)
+answer only skinned meshes. The QuickJS binding handled SpriteNode.
+Repro and pinned test: `bro-headless lib-tests lib-tests/test_scene_anim.js`
+("sprite advances frame index").
 
-### Double-clicking a canvas selects nearby `pointer-events: none` text (2026-09-24)
-A double-click on a `<canvas>` selects a word from some other element's
-text: `Engine::handleMouseDown` (`src/engine/input_mouse.cpp`) runs
-`layout::hitTestText(docX, docY)` whatever the press target is, and that
-text hit test finds text that is not under the pointer and that has
-`pointer-events: none`. In games/wordspire, double-clicking a tile (which
-submits the word) selects the toast `#action-text` ("CAT  +15", a
-`pointer-events: none` overlay 100px lower), and the toast then shows the
-blue selection box. Repro: in a wordspire classic run, `click(x, y)` twice
-on a tile, then `String(getSelection())` is the toast text; Chromium gives
-"". Expected: a press whose target is a replaced element (canvas, img,
-video) starts no text selection, and text hit testing skips
-`pointer-events: none` boxes. Any canvas game with a DOM overlay/toast is
-exposed; `user-select: none` on the canvas would hide it.
+#### 2D particle nodes ignore their emitter options and always report 0 live particles (2026-09-24)
+`scene.createParticles(opts)` forwards only `maxParticles`, `texture`,
+`position`, `visible` (bronze `scene.js`); `rate`, `burst`, `lifetime`,
+`velocity`, `gravity`, `size`, `color`, `blend` are dropped, although
+`ParticleNode` still has every setter (the QuickJS `applyParticleOpts` set
+them). And the `liveCount` / `particleCount` / `rate` natives
+(`native_scene_shaders.cpp`) handle only `Particles3D`, so on a 2D node they
+read 0 and `rate = n` does nothing. `burst(n)` does reach the node.
+docs/scene-api.js `ParticleNodeOptions` lists only the four forwarded keys.
+Repro: `const p = scene.createParticles({ maxParticles: 5 }); p.burst(20); p.liveCount` → 0
+(want 5); `createParticles3D` gives 5. Pinned by lib-tests/test_scene_anim.js
+(three particle cases). No app uses 2D scene particles today.
 
-### TileWorld `addObject({ color })` per-instance tint is ignored (2026-09-24)
-tile-api.js documents `opts.color` on `addObject` as a per-instance tint
-(alpha honoured on non-atlased kinds), but every instance renders in the
-kind's base colour. Minimal page: a 4x1 palette TileWorld, one
-`addObjectKind(Mesh.box(0.3,0.3,0.3), { color: [1,1,1,1] })`, instances
-with `color: [1,0,0,1]`, `[0,1,0,1]`, `[0,0,1,1]` and none, then
-`rebuild()` + `rebuildObjects()`: all four boxes are white. games/gridkeep
-(tower type/level colours, creep colours, slow/hit flashes) and
-games/blastgrid (bomber colours, bomb fuse redden, fire fade) lose their
-colour coding; both authored white kinds for exactly this. games/tilehaven
-house tints and cargo colours are affected too.
+### Animation and rigging
 
-### Physics world `step()` discards contact events nobody has read yet (2026-09-24)
-**FIXED** in bro 5e93be7e (events accumulate until drained, capped at the listener capacity).
-Each `step()` on a `Physics.createWorldHandle()` world (and `stepInline` /
-`consumeStep` on the default world) does `contactsFront_ = listener_->drain()`
-in `src/physics/physics_world.cpp`, replacing the list `getContacts()`
-returns. Stepping twice before reading loses the first step's events, so a
-contact that begins in one sub-step and ends in the next reports only
-`removed`, never `added`. Repro: a static sphere at (0,0), a ball of the
-same radius dropped onto its shoulder from 30 units above, stepped as
-`h.step(dt/2); h.step(dt/2); h.getContacts()` per frame: the ball visibly
-deflects but the only event is `removed`. Expected: events accumulate
-until `getContacts()` swaps them out (it already `swap`s). games/pegbounce
-sub-steps at 1/120 s and lost glancing peg hits (pegs the ball bounced off
-never lit); it now calls `getContacts()` after every sub-step.
+#### `mesh.applySkinning` applies the inverse bind matrices a second time (2026-09-24)
+bromesh `applySkinning` (src/manipulation/skin.cpp) multiplies each matrix
+by the skin's `inverseBindMatrices` itself, but its header, `pose.h`'s
+`computeSkinningMatrices` comment and docs/rigging-api.js say to pass
+`pose.computeSkinningMatrices(skeleton)` (already world x inverseBind).
+Repro: a 2-bone column (y 0..2, bone 1 at y=1) bent 90 degrees at bone 1:
+with `computeSkinningMatrices` the vertices reach max |x| 0.2; with
+`computeWorldMatrices` they reach 1.0 (correct). bro's own tests use both
+(tests/rigging/diag_autorig_locomotion.js vs probe_meshy.js).
+Affects: tools/mesh-viewer uses world matrices and its test pins the bent
+shape, so it flags whichever way this is resolved.
 
-### Flex max-content ignores a child span's own `letter-spacing` (2026-09-24)
-A `display:flex` row sized by content (inside a centred flex column) comes out
-narrower than its items when one item is a `<span style="letter-spacing:2px">`
-that differs from its parent's spacing. The shortfall is then taken from the
-item that can shrink, here an empty `width:11px` dot, which lays out at 5px.
-Repro: `<div style="display:flex;flex-direction:column;align-items:center">
-<div style="display:flex;gap:7px"><span style="width:11px;height:11px;
-display:inline-block;background:red"></span><span>NAME</span><span
-style="letter-spacing:2px">···</span></div></div>`. The dot measures 5 wide
-instead of 11 (6px = 3 glyphs x 2px). Drop the inner letter-spacing and it
-measures 11. Separately, a top-level `display:inline-flex` chip in the same
-page measures the full viewport width (1904) rather than its content.
-games/blastgrid's contender chips show their colour dots as thin bars
-(`.cwins { letter-spacing: 2px }`). The old build showed no dots at all.
+#### `Pose.data` returns a copy; writing into it does nothing (2026-09-24)
+docs/rigging-api.js calls `pose.data` "stride 10 per bone; writable". Writing
+elements of the returned array (`pose.data[13..16] = quat`) leaves the pose
+unchanged; only assigning a whole array back (`const d = pose.data; ...;
+pose.data = d`) takes effect. Either return a live view or document the
+copy-and-assign form.
 
-### Range rects are zero-width outside a scroller's viewport (2026-09-24)
-`Range.getBoundingClientRect()` over text that is scrolled out of an
-`overflow:auto` container's visible area returns the right `top` but
-`width: 0`. Chromium returns the full rect whether the text is visible or not.
-Text below the *window* fold (no inner scroller) measures correctly, and
-element `getBoundingClientRect()` is fine too. Repro:
-`<div id=box style="height:200px;overflow-y:auto;font:20px Arial"><div id=near>near
-text</div><div style="height:1000px"></div><div id=far>far text</div></div>`.
-A Range over the first 4 chars of `#far` gives width 0 (top 1023). After
-`box.scrollTop = 900` it gives 28.9, and `#near`'s Range drops to 0.
-demos/text-lab measures bidi, selection and caret probes inside its scrolling
-`#main`, so it scrolls each probe into view first (`reveal()` in input.js).
+#### `blendState().pos` is `[]` with no blend space (2026-09-24)
+With a single clip on the base track, `blendState().pos` is an empty array,
+not `undefined` as docs/animation-api.js implies. Test for `pos && pos.length`.
+Repro: demos/anim-lab, `selectClip('idle')`, `player.blendState().pos` → `[]`.
 
-### A click on a text-less block puts the caret in text elsewhere (2026-09-24)
-A click on an empty, non-editable block that hits no text should clear the
-selection (`input_mouse.cpp` has a `removeAllRanges()` branch for this). But
-`layout::hitTestText` snaps to the nearest text node anywhere in the
-document, so the branch never runs, and the caret lands in some other
-paragraph. That paragraph can be a contenteditable one. Repro:
-`<p id=other>some other text</p><div id=plain style="height:40px"></div>
-<p>plain text below</p>`. Collapse the selection at `other`'s text offset 5,
-then `mouseDown/mouseUp` 20px into `#plain`. The selection ends up collapsed
-in `#other`'s text at offset 2 (the x-nearest character). Chromium puts a
-collapsed caret inside the clicked div. demos/text-lab's editing panel
-shows the control row "non-editable empty div" as ENGINE BUG.
+### Physics
 
-### Range rects are shifted down by the menu bar height (2026-09-24)
-Once `bro.menu` is shown (every kit app's `boot()` installs one),
-`Range.getBoundingClientRect()` and `getClientRects()` (collapsed carets
-included) come back `contentTop` (28px) too low. Element
-`getBoundingClientRect()` and mouse hit-testing stay right. Repro: a page with
-`<p id=c>Select any segment</p>` gives Range(first 6 chars).top = p.top + 4.
-After `bro.menu.show(); bro.menu.set([{label:'File',items:[{id:'q',label:'Quit'}]}])`,
-`innerHeight` drops 1080→1052 and p.top is unchanged, but range.top becomes
-p.top + 32. So anything that hit-tests at a Range rect (drag-select from a
-word, a caret HUD, a popup anchored at the selection) lands one line low.
-demos/range-selection-lab's caret HUD reads 28px low. Its drag test takes its
-coordinates from element rects.
+#### World-anchored constraints (`body2: -1`) are mirrored: limits, motors, gear/rack drift correction (2026-09-24)
+`PhysicsWorld::createConstraint` passes the moving body as Jolt body1 and the
+world as body2; Jolt measures body2 relative to body1, so for the documented
+`body2: -1` form everything is measured backwards:
+- a slider's `limitMin/limitMax` apply to the negated travel;
+- a hinge motor's `target` spins the body the other way;
+- `gear` and `rackAndPinion` read those hinge angles / slider positions for
+  their drift correction, which then pushes the wrong way (a motor-driven
+  rack jitters ±0.4 m frame to frame at a steady 0.48 m/s).
+Symmetric limits hide the first two. Likely fix: hand Jolt
+`Body::sFixedToWorld` as body1 and the body as body2 when `body2` is -1.
+Repro: world gravity (0, +9.81, 0), a crate on `{ type: 'slider', body1: crate,
+axis: {x:0,y:1,z:0}, limitMin: -0.9, limitMax: 3.2 }`: it stops at y = 0.9,
+not 3.2.
+Affects: demos/mechanical-sandbox (rig.js `hinge`/`slider` anchor to a static
+frame body as `body1` instead); demos/physics-playground's rack (±2.2 limits).
 
-### Range clone/extract drop partially-contained nodes; extract removes nothing (2026-09-24)
-`Range.cloneContents()` and `extractContents()` are only right when both
-boundaries are in the same text node, or are element offsets. With
-`<p id=q>Select any <em>live telemetry</em> here</p>`:
-- start text@3, end inside `<em>`'s text @4: clone gives `"ect any live"`, but
-  the spec wants `ect any <em>live</em>` (the partially-contained `<em>` is
-  cloned shallow around its part). extract returns `""` and leaves the
-  document untouched.
-- start text@**0**, end em text@4: clone gives `"live"`. A start at offset 0
-  is treated as "fully contained" and then never collected.
-- `<p id=p>The <strong>DOM Range</strong> interface</p>`, text@0 to the end
-  of `<strong>`'s text (@9): clone gives `""`.
-(`src/dom/range.cpp` `cloneContents` has no partially-contained-child step.)
-demos/range-selection-lab's "selected fragment" preview, clone and extract
-buttons show these results. Its tests pin the current wrong outputs as known
-engine issues.
+#### `Physics.createBody` ignores `dofs` (2026-09-24)
+`dofs` is in docs/physics-api.js `PhysicsBodyOptions` and
+`BodyOptions::dofs` feeds `mAllowedDOFs`, but the bronze `readBodyOptions`
+(`native_physics_internal.h`) never reads it, so `dofs: '2d'` (Plane2D) and
+the `'tx,ty,rz'` token form are silently ignored. The QuickJS binding parsed
+`'2d' | 'plane2d' | 'all' | 'tx,ty,...'`.
+Repro: a sphere with `dofs: '2d'` given velocity (1, 0, 5) drifts to
+z ≈ 4.6 in 1 s. Pinned by lib-tests/test_physics.js "2D DOF lock".
+Affects: games/pegbounce (bodies declared `dofs: "2d"`; they stay at z = 0
+only because every contact is in-plane).
 
-### `surroundContents` hangs on a text-only range and never throws (2026-09-24)
+#### `shape: 'chain'` never reads its `points` / `depth`, so creation fails (2026-09-24)
+The binding accepts `shape: 'chain'` but reads `points` only for
+`convexHull` and never reads `depth`, so `chainPoints` stays empty and
+`createBody({ shape: 'chain', points: [-10, 0, 10, 0], depth: 4 })` returns -1.
+The engine side (`physics_world.cpp` `ShapeChain`) is intact; the QuickJS
+binding filled `chainPoints` from flat `[x0, y0, x1, y1, ...]`.
+Repro and pinned tests: lib-tests/test_physics.js, the three "chain" cases and
+both "wheel" cases (their chain ground is never created).
+
+#### Wheel constraint: `hertz` / `dampingRatio` do nothing without translation limits (2026-09-24)
+`type: 'wheel'` is a SixDOF whose suspension spring is set on
+`mLimitsSpringSettings[TranslationY]`; with no `lowerTranslation` /
+`upperTranslation` the axis is `MakeFreeAxis`, which has no limits for that
+spring to act on, so the suspension collapses. With limits `0 / 0` the spring
+works (Box2D-style wheel joint behaviour).
+Repro: box floor, chassis box at y 5, sphere wheel at y 4, `{ type: 'wheel',
+body1: chassis, body2: wheel, point1: {x:0,y:4,z:0}, hertz: 4, dampingRatio: 0.9 }`:
+after 4 s the chassis lies on the floor (y 0.30) beside the wheel (y 0.50);
+add `lowerTranslation: 0, upperTranslation: 0` and it rides at y ≈ 1.4.
+No app uses the wheel constraint (vehicles use `createVehicle`).
+
+### Layout and CSS
+
+#### Column flex container with a percentage width stretches children to the wrong width (2026-09-24)
+A `display:flex; flex-direction:column` box with a percentage `width` lays its
+stretched children out at that percentage of its own width. Pixel widths and
+block containers are fine.
+Repro: `<div style="display:flex;width:1000px"><div style="width:40%;display:flex;flex-direction:column"><div id="c">x</div></div></div>`:
+the column is 400px, `#c` 160px.
+Affects: tools/shader-lab (uses `flex: 1`).
+
+#### `min-width` is ignored on `display: inline-block` (2026-09-24)
+`<span style="display:inline-block; min-width:96px">lobby id</span>X` measures
+55px (its text); `width: 96px` works. Chromium: 96px.
+Affects: demos/steam-lab `.kv` rows ("lobby id—", "frames0").
+
+#### `grid-column: 1 / -1` does not span; negative grid lines ignored (2026-09-24)
+In `grid-template-columns: 1fr 1fr` (400px), a child with `grid-column: 1 / -1`
+is 200px; `1 / 3` and `span 2` give 400px.
+Affects: demos/steam-lab's Events panel sits in the left column only.
+
+#### A long text run after an inline element wraps whole to the next line (2026-09-24)
+`<div style="width:300px;font:12px monospace"><span>voice</span> <span id=m>recording
+did not start because the Steam library was not found anywhere</span></div>`:
+line 1 holds only "voice"; `#m`'s first Range rect is at x = 0 on line 2,
+although "recording did not start because" fits after "voice". Same with a
+bare text node after the span and with `pre-wrap`. Chromium breaks inside the text.
+Affects: demos/steam-lab's event log (kind tag alone on the first row);
+tools/reader (each sentence is a `<span class="sn">` in a `<p>`; a long
+sentence after a short one leaves a ragged first line).
+
+#### Flex max-content ignores a child span's own `letter-spacing`; a top-level `inline-flex` is viewport-wide (2026-09-24)
+A content-sized flex row inside a centred flex column comes out narrower than
+its items when one item has its own `letter-spacing`, and the shortfall is
+taken from a shrinkable item.
+Repro: `<div style="display:flex;flex-direction:column;align-items:center"><div style="display:flex;gap:7px"><span id=dot style="width:11px;height:11px;display:inline-block;background:red"></span><span>NAME</span><span style="letter-spacing:2px">···</span></div></div>`:
+`#dot` is 5px wide, not 11 (6px = 3 glyphs x 2px); without the inner
+letter-spacing it is 11. Separately, a top-level `<span style="display:inline-flex">chip</span>`
+measures 1920px (the viewport) rather than its content.
+Affects: games/blastgrid contender chips (`.cwins { letter-spacing: 2px }`)
+show their colour dots as thin bars.
+
+#### A shrink-to-fit `flex-wrap: wrap` row wraps items that exactly fit (2026-09-24)
+An absolutely positioned `display:flex; flex-wrap:wrap; column-gap:20px` box
+sizes itself to its max-content width, then breaks the line anyway (looks
+like a float comparison): 43.5177 + 20 + 48.9414 = 112.459 = the content box.
+Repro: lib/arcade/arcade.css `#hud.hud-row` with `font-family: Arial` and two
+`.hud-stat`s ("Score"/"0", "Best"/"2048"): the second stat's top is 54px below
+the first. With Consolas (arcade's default) or other values it stays on one row.
+Affects: games/2048's HUD (echo and missile-command happen not to hit it).
+
+#### `table-layout: fixed` is ignored; a nowrap cell widens a `width:100%` table (2026-09-24)
+A `width:100%` table with `table-layout: fixed` and `<col>` widths sizes its
+columns from content; a `white-space: nowrap` cell pushes it past its
+container, and `text-overflow: ellipsis` on that cell never triggers.
+Repro: a 400px div holding that table, `<col style="width:100px"><col>`, second
+cell 200 x's nowrap: the table measures 1702px, the cell 1602px (want 400/300).
+Affects: tools/procwatch (switched to grid rows).
+
+#### `text-overflow: ellipsis` draws no ellipsis (2026-09-24)
+`white-space: nowrap; overflow: hidden; text-overflow: ellipsis` on a 120px
+block with longer text clips it at the edge with no "…".
+Repro: `<div style="width:120px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">ARDY Motion — text to G1 skeleton motion</div>`,
+screenshot: "ARDY Motion —" and nothing more.
+Affects: launcher/ card titles.
+
+#### `getBoundingClientRect` of a descendant of a newly hidden element keeps its old box (2026-09-24)
+Add a class that sets `display:none` on a panel body: the body reports 0x0 and
+`getComputedStyle` says `none`, but a `<button>` inside it still returns its
+old non-zero rect (33.8px wide), so `clickOn` thinks it is visible.
+Affects: kit `foldPanels()`; demos/nav-lab's tests check the panel's direct child instead.
+
+### Paint and text rendering
+
+#### `linear-gradient()` with `rgb()` stops paints solid black (2026-09-24)
+`background: linear-gradient(90deg, rgb(20, 40, 90), rgb(220, 180, 80))` (and
+the `background-image` longhand) paints the box black; the same gradient with
+hex stops paints. `getComputedStyle` reports the gradient correctly, so it is
+the paint side (probably splitting the stop list on the commas in `rgb(...)`).
+Affects: tools/algo-viz's pathfinding legend (now hex).
+
+#### A tab inside `<pre>` renders as a missing-glyph box (2026-09-24)
+U+0009 in preformatted text paints as a tofu box instead of advancing to the
+next tab stop. Repro: `<pre>a\tb\t\tc</pre>`, screenshot.
+Affects: demos/vlm-lab (tab-indented JSON in Markdown code blocks via lib/markdown.js).
+
+#### Scrollbars ignore the dark theme: a bright white strip (2026-09-24)
+An overflowing `overflow-y: scroll` box on a dark background draws its
+vertical scrollbar as a flat white bar. Cosmetic.
+Affects: the kit `.k-side` column (demos/nav-lab and others).
+
+### Selection, Range and editing
+
+#### Range rects are zero-width outside a scroller's viewport (2026-09-24)
+`Range.getBoundingClientRect()` over text scrolled out of an `overflow:auto`
+container returns the right `top` but `width: 0`. Text below the window fold
+and element rects are fine.
+Repro: `<div style="height:200px;overflow-y:auto;font:20px Arial"><div>near text</div><div style="height:1000px"></div><div id=far>far text</div></div>`,
+a Range over `#far`'s first 4 chars: width 0 (29 once scrolled into view).
+Affects: demos/text-lab scrolls each probe into view first (`reveal()` in input.js).
+
+#### Range rects are shifted down by the menu bar height (2026-09-24)
+Once `bro.menu` is shown (every kit app's `boot()` installs one), Range
+`getBoundingClientRect()` / `getClientRects()` (collapsed carets included) come
+back 28px too low; element rects and mouse hit-testing stay right.
+Repro: `<p id=c>Select any segment</p>`, Range over the first 6 chars:
+`range.top - p.top` is 0, then 28 after
+`bro.menu.show(); bro.menu.set([{label:'File',items:[{id:'q',label:'Quit'}]}])`.
+Affects: demos/range-selection-lab's caret HUD; anything anchored to a
+selection rect.
+
+#### Range clone/extract drop partially-contained nodes; extract removes nothing (2026-09-24)
+`cloneContents()` / `extractContents()` are right only when both boundaries
+are in one text node or are element offsets (`src/dom/range.cpp` has no
+partially-contained-child step). With `<p id=q>Select any <em>live telemetry</em> here</p>`
+and `<p id=p>The <strong>DOM Range</strong> interface</p>`:
+- text@3 → em text@4: clone gives `"ect any live"` (want `ect any <em>live</em>`);
+  extract returns `""` and leaves the document untouched;
+- text@0 → em text@4: clone gives `"live"`;
+- `#p` text@0 → end of `<strong>`'s text: clone gives `""`.
+Affects: demos/range-selection-lab's fragment preview, clone and extract
+buttons; its tests pin the current wrong outputs.
+
+#### `surroundContents` hangs on a text-only range and never throws (2026-09-24)
 `r.setStart(t, 0); r.setEnd(t, 2); r.surroundContents(document.createElement('b'))`
-on a paragraph's first text node never returns. bro-headless spins until
-killed. Over a range that partially selects an element (start in text, end
-inside `<em>`), the spec says throw `InvalidStateError`. bro doesn't throw:
-it splits the text and inserts an empty `<mark></mark>` at the start,
-extracting nothing (the extract bug above).
-`Range::surroundContents` is `extractContents` + `insertNode` + re-parent,
-with no partial-containment check. Ranges on element offsets
-(`setStart(p, 1); setEnd(p, 2)`) wrap correctly. demos/range-selection-lab's
-B / I / </> / mark / badge buttons call `surroundContents` (falling back to
-extract + wrap when it throws), so they hang the app on a plain text
-selection. Its tests only click them over element-offset selections.
+on a paragraph's text node never returns (killed after 30 s). Over a range that
+partially selects an element (text@3 → inside `<em>`) the spec says throw
+`InvalidStateError`; bro inserts an empty `<mark></mark>` at the start instead
+(`Sel<mark></mark>ect any <em>live</em> here`). Element-offset ranges wrap correctly.
+Affects: demos/range-selection-lab's B / I / </> / mark / badge buttons hang
+the app on a plain text selection; its tests only use element-offset selections.
 
-### Clicking inside a `<button>`'s child moves the selection into it (2026-09-24)
-A press on a `<button>` itself leaves the document selection alone. A press
-on an element inside one (`<button><b>Bold</b></button>`, the usual editor
-toolbar markup) collapses the selection into that child's text:
-`input_mouse.cpp` tests only the hit target's own tag against
-INPUT/TEXTAREA/SELECT/BUTTON/OPTION, not its ancestors. `preventDefault()` on
-`mousedown` does not stop it either, because that path never reads
-`defaultPrevented`. Chromium does neither of these. Repro: select "some" in
-`<p>some plain text</p>`, then `mouseDown/mouseUp` on the centre of the `<b>`
-inside `<button><b>Bold</b></button>`. The selection becomes a caret in the
-`<b>`'s text. demos/range-selection-lab sets `user-select: none` on its
-toolbar (normal for editor chrome), which avoids it there.
+#### Script changes to the Selection fire no `selectionchange` (2026-09-24)
+`selectionchange` never fires for `getSelection().setBaseAndExtent(...)`,
+`.collapse(...)` or `removeAllRanges()` + `addRange(r)` (count 0 after each,
+with `advanceTime` + `flush`). Chromium queues one per change.
+Affects: demos/range-selection-lab's inspector re-reads after its own operations.
 
-### MutationObserver: Range.deleteContents gives a characterData record with a null target (2026-09-24)
-Observe `<p id=q>Select any <em>…</em></p>` with
-`{ childList, characterData, subtree, characterDataOldValue }`. Then
-`r.setStart(text, 0); r.setEnd(text, 6); r.deleteContents()` delivers a
-`characterData` record whose `target` is `null` (oldValue `"Select any "` is
-right). A later `r.insertNode(span)` adds a `childList` record with 0 added
-and 0 removed nodes, next to the real one. demos/range-selection-lab's stream
-shows the null target as "(record.target is null)".
+#### Selection paint: shown inside `display:none`, and overshoots an element-offset end (2026-09-24)
+- Select "some" in `<p id=plain>some plain text here</p>`, then
+  `plain.style.display = 'none'`: a blue selection box stays painted (at the
+  top-left of the page in the repro), over whatever is there now.
+  demos/range-selection-lab: a Range-tab selection paints over the text
+  shaper canvas after switching tabs.
+- `<p id=p1>first <b>second</b> tail</p>`, `r.setStart(p1.firstChild, 4); r.setEnd(p1, 2)`
+  mirrored into the selection: `toString()` is `"t second"`, but the highlight
+  runs to the end of the paragraph. demos/dom-lab's Range panel.
 
-### Script changes to the Selection fire no `selectionchange` (2026-09-24)
-`document.addEventListener('selectionchange', …)` never fires for
-`getSelection().setBaseAndExtent(…)`, `.collapse(…)` or
-`removeAllRanges()` + `addRange(r)`: the count is 0 after each, with
-`advanceTime` + `flush` in between. Chromium queues one event per change,
-script changes included. demos/range-selection-lab's inspector re-reads the
-selection after each of its own operations. A selection made by another
-script is not shown until the next mouse or key event in the editor.
+#### A click on a text-less block puts the caret in text elsewhere (2026-09-24)
+A click on an empty non-editable block should clear the selection
+(`input_mouse.cpp` has a `removeAllRanges()` branch), but
+`layout::hitTestText` snaps to the nearest text anywhere, so the caret lands
+in another paragraph (possibly a contenteditable one).
+Repro: `<p id=other>some other text</p><div id=plain style="height:40px"></div><p>plain text below</p>`,
+collapse the selection in `#other`, then `mouseDown/mouseUp` 20px into
+`#plain`: the selection collapses in "plain text below" at offset 3.
+Chromium puts the caret in the clicked div.
+Affects: demos/text-lab's editing panel shows it as ENGINE BUG.
 
-### A selection inside a `display:none` subtree is still painted (2026-09-24)
-Select "some" in `<p id=plain>some plain text here</p>`, then set
-`plain.style.display = 'none'`. The blue selection highlight stays on screen
-at the paragraph's old position, over whatever is laid out there now. In
-demos/range-selection-lab, a selection made on the Range tab paints over the
-text shaper canvas after switching tabs (the Range pane is `hidden`).
+#### Clicking inside a `<button>`'s child moves the selection into it (2026-09-24)
+A press on a `<button>` leaves the selection alone; a press on an element
+inside one (`<button><b>Bold</b></button>`, usual toolbar markup) collapses
+the selection into that child's text: `input_mouse.cpp` checks only the hit
+target's own tag, and never reads `defaultPrevented` on mousedown.
+Repro: select "some" in `<p>some plain text</p>`, `mouseDown/mouseUp` on the
+`<b>`: the selection becomes `""` inside the `<b>`.
+Affects: demos/range-selection-lab uses `user-select: none` on its toolbar.
 
-### DOMParser parses XML and SVG types with the HTML parser (2026-09-24)
-`new DOMParser().parseFromString(src, 'application/xml' | 'text/xml' |
-'image/svg+xml')` returns an HTML document. `documentElement` is `<HTML>`
-with HEAD/BODY, the markup sits in `<body>`, names are lowercased
-(`<Feature>` → `FEATURE`) and self-closing `<b/>` becomes `<b></b>`.
-Malformed XML (`<xml><unclosed><m>t</m></xml>`) gives no `<parsererror>`.
-`contentType` does report the requested type. `XMLSerializer` then
-serializes `<html><head></head><body>…`. demos/range-selection-lab's
-DOMParser tab shows a note when an XML type comes back as HTML. Its
-"malformed XML" preset cannot demonstrate a parse error.
+#### Double-clicking a canvas selects nearby `pointer-events: none` text (2026-09-24)
+`Engine::handleMouseDown` runs `layout::hitTestText(docX, docY)` whatever the
+press target is, and the text hit test finds text that is not under the
+pointer and has `pointer-events: none`.
+Repro: a 300x200 `<canvas>` and below it an absolutely positioned
+`pointer-events:none` div "CAT  +15"; two `click()`s on the canvas:
+`String(getSelection())` is `"15"` (Chromium `""`).
+Affects: games/wordspire (double-clicking a tile selects the `#action-text`
+toast). Any canvas game with a DOM overlay; `user-select: none` on the canvas hides it.
+Want: a press on a replaced element (canvas, img, video) starts no text
+selection, and text hit testing skips `pointer-events: none`.
 
-### A shrink-to-fit `flex-wrap: wrap` row wraps items that exactly fit (2026-09-24)
-An absolutely positioned `display:flex; flex-wrap:wrap; column-gap:20px`
-box (the arcade `#hud.hud-row`) sizes itself to its max-content width, then
-breaks the line anyway. It looks like a float comparison. games/2048: two
-stats measure 43.5177 + 48.9414 + a 20px gap = 112.459, the content box is
-112.459 wide, and the second stat lands on a second line. With other text
-widths the same HUD stays on one row (echo, missile-command). Chromium
-never wraps a shrink-to-fit flex line against its own max-content width.
-Repro: `lib/arcade/arcade.css` `#hud` plus `.hud-row`, with two `.hud-stat`
-children whose labels are "Score"/"Best" in Helvetica and values "0"/"2048".
+#### A canvas drag with `mousedown` default-prevented still selects text (2026-09-24)
+Pressing on a `<canvas>` whose `mousedown` handler calls `preventDefault()`
+and dragging still starts a text selection. Chromium starts none.
+Repro: `<div hidden>…</div><canvas width=400 height=200></canvas><p>visible after</p>`,
+drag across the canvas: `String(getSelection())` is `"e after"`.
+In tools/synth (with `user-select: none` removed from
+`[data-pane=editor] .k-viewport`) the selection also ran through a `hidden`
+pane's labels and painted phantom highlight boxes over the canvas; the
+minimal repro no longer selects the hidden text (not re-run in the synth).
+Affects: tools/synth keeps `user-select: none` on its waveform viewport.
 
-### `getBoundingClientRect` of a descendant of a newly hidden element keeps its old box (2026-09-24)
-Fold a panel by adding a class that sets `display:none` on its body. The
-body itself then reports a 0x0 rect, and `getComputedStyle` says
-`display: none`. A button inside that body still returns its old, non-zero
-rect, so `clickOn` believes it is visible and clicks empty space. Seen with
-the kit's `foldPanels()` in demos/nav-lab. The nav-lab tests check the rect
-of the panel's direct child instead.
+#### `<textarea>` / `<input>` have no `setRangeText` (2026-09-24)
+`typeof document.createElement('textarea').setRangeText` is `'undefined'`.
+Affects: tools/desktop-notebook (lib/editor.js `splice` rewrites `value` +
+`setSelectionRange`, losing native undo grouping).
 
-### bro.ai.game has no square-grid flow field (2026-09-24)
-`HexNav.field` builds an integration/flow field for hex grids only. `NavGrid`
-answers A* (`findPath`, with cell costs) and `hasLineOfSight`, but has no
-equivalent of the field. demos/tactical-flowfield therefore runs its own
-fast-marching wave in JS. With a 128x72 grid that costs 40–75 ms per
-rebuild, and it rebuilds on every terrain edit, so painting stutters. A
-native `NavGrid.field(goal, { costs, extraCost })` would remove the JS wave.
+### DOM APIs, events, CSS animations
 
-### Per-call overhead dominates tight JS loops (2026-09-24)
-Measured in optimized (boot) bronze: about 70 ns for a trivial call to a
-local function, about 250 ns for a cross-module namespace call (175 ns when
-the import is first bound to a local const), and 14–40 ns for a typed-array
-read. In demos/tactical-flowfield the per-unit steering loop is about
-10 µs per unit per tick, even after inlining every lookup (1000 units come
-to ~10 ms per 60 Hz tick). The flow-field wave takes 40 ms or more over 9k
-cells. Numbers are rough and come from `perf.now()` around loops in `-e`
-scripts.
+#### Missing globals and properties: `CSS`, `Option`, `HTMLDetailsElement.open` (2026-09-24)
+- `typeof CSS` is `'undefined'`: `CSS.supports` / `CSS.escape` throw.
+- `typeof Option` is `'undefined'` (`Image` exists). Apps use
+  `document.createElement('option')`.
+- `<details>` has no `open` property: `d.open = true` sets an expando (no
+  attribute, stays closed); `d.open` is `undefined` after
+  `setAttribute('open', '')`. tools/node-forge's tests click the `<summary>`.
 
-### The `.k-side` scrollbar paints as a bright white strip (2026-09-24)
-When a kit side column overflows, its vertical scrollbar draws as a flat
-white bar that ignores the dark theme. The pre-kit nav-lab showed it too.
-Cosmetic.
+#### `querySelector` splits at a comma inside a quoted attribute value (2026-09-24)
+`document.querySelector('[data-x="1,2"]')` returns `<html>`;
+`querySelectorAll` matches every element. `el.matches(...)` is right.
+Affects: tools/inpainting-studio's outpaint buttons use side names instead.
 
-### A reflection probe's `intensity` cannot be set (2026-09-24)
-**FIXED** in bro 4bb78bc7.
-`ReflectionProbeNode` has `setIntensity`, but the bronze `SceneNode.intensity`
-accessor (`bro_scene_SceneNode_intensity_get/_set` in
-`native_scene_nodes.cpp`) only handles `Type::Light`: on a probe the getter
-returns 1.0 and the setter drops the value. `createReflectionProbe({ intensity })`
-goes through the same setter, so it is ignored too. (`interior` and `priority`
-work: `scene_extras.js` types them for probes.) Repro:
-`bro-headless demos/render-lab -e "advanceTime(50); const p = document.querySelector('#stage').getContext('scene').createReflectionProbe({ size: 4, intensity: 0.4 }); p.intensity = 2; console.log(p.intensity)"`
-prints 1. demos/render-lab's probe Intensity slider does nothing;
-`demos/render-lab/tests/test_probe_intensity.js` pins it.
+#### DOMParser parses XML and SVG types with the HTML parser (2026-09-24)
+`parseFromString(src, 'application/xml' | 'text/xml' | 'image/svg+xml')` gives
+an HTML document (`documentElement` is `HTML`, names lowercased, `<b/>`
+becomes `<b></b>`, no `<parsererror>` for malformed XML); `contentType` does
+report the requested type.
+Affects: demos/range-selection-lab's DOMParser tab (notes it; its "malformed
+XML" preset cannot show a parse error).
 
-### TileWorld `addObject({ color })` per-instance tint is not drawn (2026-09-24)
-tile-api.js documents `opts.color` on `addObject` as a per-instance tint
-(RGB on atlased kinds, RGBA otherwise). games/hexfront places every unit
-from a white kind (`addObjectKind(mesh, { color: [1,1,1,1] })`) with
-`color: [0.88, 0.26, 0.20, 1]` for red and `[0.28, 0.50, 0.95, 1]` for blue.
-All units render white, so the two armies look the same. The HEAD version
-of hexfront shows the same thing. A kind's own `style.color` works (the
-green trees). Repro: `bro-headless games/hexfront games/hexfront/tests/test_main.js`,
-then look at `tests/out/shots/games_hexfront-initial.png`.
+#### MutationObserver: missing and malformed records (2026-09-24)
+- `innerHTML = ''` and `textContent = ''` queue no record;
+  `innerHTML = '<b>x</b>'` reports 1 added / 0 removed.
+  `replaceChildren()` / `removeChild` are right. demos/dom-lab logs the gap.
+- `Range.deleteContents()` over `<p>`'s first text node (0..6), observed with
+  `{ childList, characterData, subtree, characterDataOldValue }`, gives a
+  `characterData` record with `target: null` (oldValue right), then a
+  `childList` record with 1 added node and an empty `childList` record
+  (0 added, 0 removed). demos/range-selection-lab shows "(record.target is null)".
 
-### `scene.setFog(null)` throws (2026-09-24)
-`setFog(null)` throws `Cannot read properties of null (reading 'startDistance')`
-from the bronze `scene.js` `setFog` wrapper, which reads fields off the
-argument before checking it. scene-api.js documents `setFog({})` as "fog
-off", so null is only a natural guess, but other scene setters accept null
-(`setEnvironment(null)`) and it should too. lib/impostor.js used null and
-broke flora-lab's impostor toggle; it now passes `{}`. Repro:
-`bro-headless demos/flora-lab -e "document.getElementById('stage').getContext('scene').setFog(null)"`.
+#### Shadow DOM: `<style>` not scoped per shadow root; slotted children inherit from the host (2026-09-24)
+- Two shadow roots with `<style>.x{color:red}</style><b class=x>` and
+  `<style>.x{color:blue}</style><b class=x>`: both `<b>` compute blue (last
+  sheet wins). demos/dom-lab's "ocean" `<card-box>` paints the sunset gradient.
+- A light-DOM child in a `<slot>` inside a shadow `<h3 style="color:red;font-weight:700">`
+  computes the host's colour and weight 400 instead of the h3's.
+  demos/dom-lab's slotted card title.
 
-### bronze: three.js r160 `new THREE.WebGLRenderer()` throws "a number is not a function" (2026-09-24)
-The vendored three.min.js (r160 UMD) that demos/spatial-audio used failed
-its boot smoke in the baseline: constructing the renderer throws
-`TypeError: a number is not a function` at `Wa` (three.min.js 7:369004),
-called from `Ot` / `new to`. The failing call is `$(1)` in
-`...s.setFunc(3),K(!1),$(1),j(t.CULL_FACE),J(0)...` inside the WebGLState
-factory, where `$` is a nested function declaration (`setCullFace`); the
-compiled code resolves that identifier to a number instead of the hoisted
-function, so it looks like a bronze scoping / function-declaration hoisting
-bug with a `$`-named binding in a large minified function. Repro: an app
-folder holding `git show HEAD:demos/spatial-audio/three.min.js` and a
-module script `import "/app/three.min.js"; new THREE.WebGLRenderer({ canvas })`.
-spatial-audio no longer uses three.js (it was rebuilt on bro.scene); no
-other broworkshop app vendors it.
+#### Space on a focused checkbox toggles it even when keydown is cancelled (2026-09-24)
+Click a checkbox (it takes focus), press Space with a document `keydown`
+listener calling `preventDefault()`: the checkbox still toggles. In a browser,
+cancelling keydown suppresses the activation.
+Repro: `<input type=checkbox id=cb>`, that listener, `click()` on `#cb`,
+`keyDown(0x20)`: `checked` goes true → false.
+Affects: demos/character-lab (Space = jump flips the last clicked checkbox;
+its UI test clicks the viewport first).
 
-### World-anchored constraints (`body2: -1`) are mirrored: limits, motors, gear/rack drift correction (2026-09-24)
-`PhysicsWorld::createConstraint` (physics_world.cpp) passes the moving body
-as Jolt body1 and the world as body2. Jolt measures a constraint as body2
-relative to body1, so for the `body2: -1` form the API documents
-everything is measured backwards:
-- a slider's `limitMin/limitMax` apply to the NEGATED travel of body1
-  (limits `-2.1..0.1` stop a piston 0.1 m down instead of 2.1 m);
-- a hinge motor's `target` spins body1 the other way;
-- `gear` and `rackAndPinion` read those hinge angles / slider positions
-  (via `constraint1/2`) for their position (drift) correction, so the
-  correction pushes the wrong way. A motor-driven rack jitters by ±0.4 m
-  frame to frame while its velocity reads a steady 0.48 m/s.
-Symmetric limits hide the first two (physics-playground's rack uses ±2.2).
-The fix is probably to hand Jolt `Body::sFixedToWorld` as body1 and the
-body as body2 when `body2` is -1 (Jolt's own samples do this). Workaround
-in demos/mechanical-sandbox (rig.js `hinge`/`slider`): anchor to a static
-frame body as `body1` with the moving part as `body2`. Repro: build a crate
-on `{ type: 'slider', body1: crate, axis: {x:0,y:1,z:0}, limitMin: -0.9,
-limitMax: 3.2 }` and it stops 0.9 m UP. For the rack jitter, build
-demos/mechanical-sandbox's gearbox with world-anchored hinges/slider and
-sample the crate's y every 5 frames.
+#### `animation:` shorthand containing `cubic-bezier()` is dropped; shorthand not reflected in computed style (2026-09-24)
+`.a { animation: kk 2s cubic-bezier(0.4, 0, 0.2, 1) infinite }` never animates
+(computed `transform` stays `none`); with `linear` it runs, and the longhands
+work. Separately, `getComputedStyle(el).animationName` /
+`animationTimingFunction` report `none` / `ease` for any animation set through
+the shorthand, including running ones.
+Repro: that rule plus `@keyframes kk { 0% { transform: rotate(0deg) } 100% { transform: rotate(360deg) } }`,
+`advanceTime(500)`: cubic → `none`, linear → `rotate(90deg)`.
+Affects: demos/waapi-lab arena lane 2 (its test "the CSS @keyframes lane
+moves with the other two" fails until fixed).
 
-### A secondary window's `bro.window` drives the MAIN window (2026-09-24)
-`getWindow()` in `src/bronze_host/native_window.cpp` always returns
-`eng->window()`, so every `bro.window.*` call made from the realm of a window
-opened with `window.open(dir)` reads and writes the host window instead of
-its own. Repro: `bro-headless templates/kit-app -e "bro.window.setMinSize(777, 555); open('../../demos/window-lab/pinned')"`
-and the pinned child reports minWidth 777 / minHeight 555 (the host's) and
-`borderless: false` although its bro.json asks for `true`. The manifest
-defaults are applied at creation (`applyChildManifestDefaults`) but no child
-can read them back, and a child's `setMinSize` / `setBorderless` /
-`setAlwaysOnTop` / `maximize` land on the host. demos/window-lab's per-child
-controls and pinned card show it; its tests "per-child limits leave the host
-window alone" and "the pinned card's manifest flags and limits reached its
-window" assert the correct behaviour and fail until this is fixed (they were
-the baseline failure).
+#### Writing `Animation.currentTime` un-holds a paused animation (2026-09-24)
+`const a = el.animate([{left:'0px'},{left:'600px'}], {duration: 4000}); a.pause(); a.currentTime = 0; advanceTime(500)`
+→ `playState` `paused` but `currentTime` 500. `pause()` alone holds.
+Affects: demos/platform-lab parks its transport this way at boot (its smoke
+test logs the drift).
 
-### `postMessage({ v: view }, [view.buffer])` throws DataCloneError (2026-09-24)
-Transferring a buffer while a TypedArray view of it sits in the payload is
-valid on the web (the view arrives backed by the transferred buffer). bro
-detaches first and then fails to clone the view: `DataCloneError: Cannot
-clone TypedArray with detached buffer`. A buffer in the transfer list with
-no view in the payload transfers correctly (and is detached on the sender).
-Repro, in any page with a child window `w`:
-`const a = new Uint8Array(1024); w.postMessage({ v: a }, [a.buffer])`.
-demos/window-lab test "transfer: a view whose buffer is in the transfer list
-arrives intact" asserts the correct behaviour.
+#### MediaQueryList change event has no `currentTarget` (2026-09-24)
+docs/matchmedia-api.js lists `currentTarget` on the change event; `target` is
+the list, `currentTarget` is not.
+Repro: `const m = matchMedia('(min-width: 900px)'); m.onchange = e => console.log(e.currentTarget === m); resize(700, 900)` → false.
+Affects: demos/platform-lab's smoke test logs it.
 
-### `animation:` shorthand containing `cubic-bezier()` is dropped (2026-09-24)
-`.a { animation: kk 2s cubic-bezier(0.4, 0, 0.2, 1) infinite; }` never
-animates (computed `transform` stays `none`), with or without spaces inside
-the parentheses. The same rule with `linear` / `ease-in-out` works, and the
-longhands (`animation-timing-function: cubic-bezier(...)` etc.) work.
-Separately, `getComputedStyle(el).animationName` / `animationTimingFunction`
-report the defaults (`none` / `ease`) for any animation set through the
-shorthand, including the ones that do run. Repro: a `<style>` with the rule
-above plus `@keyframes kk { 0% { transform: rotate(0deg) } 100% { transform: rotate(360deg) } }`,
-a div with class `a`, `advanceTime(500)`, read `getComputedStyle(div).transform`.
-demos/waapi-lab's arena lane 2 stands still because of it; its test "arena:
-the CSS @keyframes lane moves with the other two" fails until it is fixed.
+### Windows, workers, messaging
 
-### MutationObserver: `innerHTML = ''` / `textContent = ''` queue no childList record (2026-09-24)
-Clearing children through the `innerHTML` or `textContent` setters removes
-them but queues no record; `innerHTML = '<b>x</b>'` reports the added node
-and none of the removed ones. `replaceChildren()` and `removeChild` report
-correctly. Repro: a div with two `<i>`, `new MutationObserver(cb).observe(d,
-{ childList: true })`, `d.innerHTML = ''`, flush → `takeRecords()` is `[]`.
-demos/dom-lab's "clear children" logs nothing; its test logs the gap
-instead of asserting it.
+#### A secondary window's `bro.window` drives the MAIN window (2026-09-24)
+`getWindow()` in `src/bronze_host/native_window.cpp` returns `eng->window()`,
+so every `bro.window.*` call from the realm of a `window.open(dir)` child
+reads and writes the host window. Manifest defaults are applied at creation
+(`applyChildManifestDefaults`) but no child can read them back.
+Repro: `bro-headless demos/window-lab demos/window-lab/tests/test_smoke.js`:
+"per-child limits leave the host window alone" (host min size becomes
+280x240) and "the pinned card's manifest flags and limits reached its
+window" (borderless/alwaysOnTop read false) fail.
 
-### Shadow-root `<style>` is not scoped per shadow root (2026-09-24)
-Two shadow trees whose `<style>` use the same selector resolve to whichever
-sheet was inserted last. Repro: two hosts, each `attachShadow({mode:'open'})`
-with `<style>.x{color:red}</style><b class=x>` and
-`<style>.x{color:blue}</style><b class=x>` → both `<b>` compute blue.
-demos/dom-lab's "ocean" `<card-box>` paints the sunset gradient.
+#### `postMessage({ v: view }, [view.buffer])` throws DataCloneError (2026-09-24)
+Transferring a buffer while a TypedArray view of it is in the payload is valid
+on the web; bro detaches first and then fails to clone the view: `Cannot clone
+TypedArray with detached buffer`. A transferred buffer with no view in the
+payload works.
+Repro: `const a = new Uint8Array(1024); w.postMessage({ v: a }, [a.buffer])` to
+any child window; window-lab's test "transfer: a view whose buffer is in the
+transfer list arrives intact" fails.
 
-### Slotted children inherit from the host, not from the slot's parent (2026-09-24)
-A light-DOM child assigned to a `<slot>` inherits colour / font-weight from
-the shadow host instead of from its flat-tree parent (the slot's container
-in the shadow tree). In demos/dom-lab the slotted card title gets the body
-colour and weight 400 rather than the accent colour and 700 of the shadow
-`<h3>` around its slot.
+#### `new Worker(new URL(...))` throws (2026-09-24)
+`new Worker(new URL('./w.js', import.meta.url), { type: 'module' })`, the
+standard module-worker form, throws `new Worker(scriptPath) requires a script
+path` (`host_worker.cpp` accepts only a string, resolved against the app
+dir). `import.meta.url` itself is now right (it names main.js). A string path
+works, and module workers load `/lib/...` and relative imports.
+Repro: a page whose entry module runs that line.
+Affects: templates/worker-sim and games/stompworld use the string form.
 
-### Selection paint overshoots an element-offset end boundary (2026-09-24)
-With `range.setStart(p1.firstChild, 4); range.setEnd(p1, 2)` mirrored into
-`getSelection()`, the highlight runs to the end of the paragraph, though
-`toString()` correctly stops after child 1. demos/dom-lab's Range panel
-shows the long highlight.
+### Media
 
-### `bro.image.gpu.colormap` samples a sliver of the field (2026-09-24)
-A 64×64 field holding a 0..1 horizontal ramp, colormapped with `lo: 0,
-hi: 1, srcW: 64, srcH: 64` into a 64×64 webgl2 canvas and read back with
-`readPixels`, comes out as 0..6 across the row instead of 0..255 (with
-`hi: 0.05` the right edge reaches ~131). It looks like it samples about 1/40
-of the field width. demos/image-kernels' GPU view looks magnified against
-its CPU (`bro.image.lookup`) path; its test_kernels.js logs the edge value.
-The shader in bro/src/bronze_host/js/image_gpu.js reads correctly, so the
-bug is probably in the upload or UV setup.
+#### `bro.image.gpu.colormap` samples a sliver of the field (2026-09-24)
+A 64x64 field holding a 0..1 horizontal ramp, `colormap(cv, f, lut, { lo: 0,
+hi: 1, srcW: 64, srcH: 64 })` into a 64x64 webgl2 canvas, read back with
+`readPixels`: the row reads 0, 0, 2, 4, 6 at x = 0, 16, 32, 48, 63 instead of
+a 0..255 ramp (about 1/40 of the field width). The shader in
+bro/src/bronze_host/js/image_gpu.js reads correctly, so probably the upload or UV setup.
+Affects: demos/image-kernels' GPU view looks magnified against its CPU path
+(its test_kernels.js logs the edge value).
 
-### Writing `Animation.currentTime` un-holds a paused animation (2026-09-24)
-After `anim.pause(); anim.currentTime = 0;` the animation keeps advancing:
-`playState` still says `paused`, but `currentTime` grows with virtual time
-(64 after `advanceTime(64)`) while computed style barely moves. `pause()`
-alone holds. Repro: `const a = el.animate([{left:'0px'},{left:'600px'}],
-{duration: 4000}); a.pause(); a.currentTime = 0; advanceTime(500)` →
-`a.currentTime` 500. demos/platform-lab parks its transport this way at
-boot (and the scrubber seeks a paused animation the same way); its smoke
-test logs the drift instead of asserting it.
+#### `bro.media.thumbnails().data` is a Uint8Array, docs say Uint8ClampedArray (2026-09-24)
+docs/video-api.js promises a `Uint8ClampedArray` (and shows
+`new ImageData(strip.data, ...)`).
+Repro: `bro.media.thumbnails('demos/video_demo/hello.webm', { count: 2 }).data.constructor.name`.
+Affects: tools/media-inspector views the buffer as clamped bytes itself
+(filmstrip.js `stripCanvas`).
 
-### MediaQueryList change event has no `currentTarget` (2026-09-24)
-docs/matchmedia-api.js lists `{type, matches, media, target, currentTarget}`
-on the change event; `target` is the list but `currentTarget` is
-`undefined`, for `addEventListener`, `addListener` and `onchange` alike.
-Repro: `const m = matchMedia('(min-width: 900px)'); m.onchange = e =>
-console.log(e.currentTarget === m); resize(700, 900)` → `false`.
-demos/platform-lab's smoke test logs it.
+#### `<video>` load of a missing or unsupported file: no `error`, stale state (2026-09-24)
+After a good WebM, setting `src` to an Ogg Vorbis file or a missing path and
+calling `load()` fires neither `loadedmetadata` nor `error` (nor `emptied`),
+and the element keeps the previous file's `readyState` 4, `duration` 2.008,
+`videoWidth` 320; `error` stays unset. Per spec `load()` resets to
+HAVE_NOTHING and an unplayable source fires `error` (MEDIA_ERR_SRC_NOT_SUPPORTED).
+Repro: `v.src = 'demos/video_demo/hello.webm'; v.load();` pump, then
+`v.src = 'demos/scene-audio/assets/pad-chime.ogg'; v.load();` pump.
+Affects: tools/media-inspector/player.js waits with a timeout. (Not a bug:
+bro.media and `<video>` read WebM (VP9/VP8 + Opus) only, so the Ogg clips
+AudioContext decodes cannot be inspected.)
 
-### bronze: a NaN typed as a number is truthy in conditions (2026-09-24)
+### ML bindings (brovisionml, triposplat, diar)
+
+#### brovisionml loaders call `to()` before `load()` on CUDA; callbacks never fire (2026-09-24)
+Every bro.vision loader except `loadBirefnet` throws on the default (CUDA)
+device, e.g. `loadDepth failed: dinov2::Backbone: to() called before load()`;
+likewise loadNormal (dsine::EncoderB5), loadHed, loadLineart, loadMlsd,
+loadOpenpose, loadSegformer, loadSam (sam::ImageEncoder). With
+`{ device: 'cpu' }` they succeed, so the binding (brovisionml
+`src/api/native_vision_models.cpp`) moves the module before loading weights.
+The loaders also ignore `onReady` / `onError` (they load synchronously and
+return the model).
+Repro: `bro-headless demos/nllb-lab -e "bro.vision.loadDepth('<weights>/brovisionml/weights/Depth-Anything-V2-Small', {})"`
+(re-run 2026-09-24 for loadDepth only).
+Affects: demos/vision-lab (loads synchronously, shows the error, its test
+logs each as KNOWN); tools/inpainting-studio's Depth-map ControlNet guide
+falls back to a black map (tests/test_generate.js logs KNOWN and wants a real
+map once fixed).
+
+#### TripoSplat clouds come back upside down (2026-09-24, not re-run)
+docs/triposplat-api.js says `generate()` returns Y-up positions; for
+demos/triposplat's portrait sample (green cap, blue overalls) the green
+splats' mean y is -0.25 and the blue ones' +0.18, and the figure shows
+head-down from the default camera. The Z-up → Y-up rotation probably has the
+wrong sign. demos/triposplat renders the cloud as returned.
+
+#### docs/diar-api.js has `loadClusterDiarizer`'s arguments wrong (2026-09-24)
+The doc says `loadClusterDiarizer(embeddingDir, vadDir, opts)`; the binding
+takes `(sortformerDir, speakerEncoderDir, opts)` (Sortformer activity is the
+VAD, the Qwen-TTS speaker encoder gives the embeddings). demos/cluster-diar-lab
+calls it the binding's way.
+
+### bronze JS runtime and module loading
+
+#### A NaN typed as a number is truthy in conditions (2026-09-24)
 When the compiler knows a value is a number (unary `+`, `0/0`, a `NaN`
-literal), `||`, `&&`, `?:` and `!` treat NaN as truthy: the test looks like
-`d != 0` with no NaN check. Values of unknown type are fine (`Number(x) || 3`
-and a function parameter `v || 9` both give the right answer), and so is
-`Boolean(NaN)`.
+literal), `||`, `&&`, `?:` and `!` treat NaN as truthy (the test looks like
+`d != 0`). Values of unknown type and `Boolean(NaN)` are fine.
 Repro: `bro-headless tools/synth -e "const d = {}; const n = NaN; console.log(+d.x || 120, n || 1, !n, n ? 1 : 2, n && 1)"`
-prints `NaN NaN false 1 1`; the correct output is `120 1 true 2 NaN`.
-The idiom `+opts.x || def` is common in app code, and each use gets NaN
-instead of the default (tools/synth's tempo came out as NaN). The synth now
-validates with `Number.isFinite`, which it should do anyway. Other apps
-probably have the same pattern:
+prints `NaN NaN false 1 1`; want `120 1 true 2 NaN`.
+Affects: the `+opts.x || def` idiom everywhere (tools/synth's tempo was NaN;
+it now uses `Number.isFinite`). Find others with
 `grep -rn "(+[a-zA-Z_.]* ||" games demos tools ai lib`.
 
-### A canvas drag selects text, including text in `hidden` panes (2026-09-24)
-Related to the canvas double-click entry above. Pressing on a `<canvas>`
-whose `mousedown` handler calls `preventDefault()` and then dragging still
-starts a text selection. The selection runs through text inside a `hidden`
-(display: none) sibling pane: `getSelection().toString()` returns the
-hidden synth sidebar's labels. The engine also paints blue highlight boxes
-for that hidden text, at phantom positions over the visible canvas.
-Chromium starts no selection when `mousedown` is default-prevented, and it
-never selects or paints display: none text.
-Repro: in tools/synth, remove `user-select: none` from
-`[data-pane=editor] .k-viewport` in style.css. Open the Clip Editor tab,
-generate a tone, drag across the waveform with
-`mouseDown`/`mouseMove`/`mouseUp`, then read `String(getSelection())`
-(it prints "FilterLPHPBPNotchcutoff...") and take a screenshot (it shows
-blue boxes). The synth keeps `user-select: none` on its waveform viewport,
-which an editor canvas wants anyway.
+#### `String.prototype.lastIndexOf` ignores `fromIndex` (2026-09-24)
+`'ab\ncd\nef'.lastIndexOf('\n', 3)` is 5 (want 2), `'abc'.lastIndexOf('c', 1)`
+is 2 (want -1).
+Affects: the textarea line-start idiom `value.lastIndexOf('\n', pos - 1) + 1`;
+tools/desktop-notebook's indent / heading / block insert (its test skips the
+Tab-indent check while `'a\nb\nc'.lastIndexOf('\n', 2) !== 1`).
 
-### brovisionml loaders call `to()` before `load()` on CUDA (2026-09-24)
-Every bro.vision loader except `loadBirefnet` throws on the default (CUDA)
-device: `loadDepth failed: dinov2::Backbone: to() called before load()`,
-and the same for loadNormal (dsine::EncoderB5), loadHed, loadLineart, loadMlsd,
-loadOpenpose, loadSegformer and loadSam (sam::ImageEncoder). With
-`{ device: 'cpu' }` the same loaders succeed, so the binding
-(brovisionml `src/api/native_vision_models.cpp`) moves the module to the
-device before loading its weights. Repro:
-`bro-headless demos/nllb-lab -e "bro.vision.loadDepth('<weights>/brovisionml/weights/Depth-Anything-V2-Small', {})"`.
-Separately, the loaders ignore `onReady` / `onError`: they always load
-synchronously and return the model, and the callbacks never fire (the old
-vision-lab passed `onReady` and so hung forever). demos/vision-lab loads
-synchronously and shows the error; its test logs each failure as KNOWN and
-fails on any other message.
+#### three.js r160 `new THREE.WebGLRenderer()` throws "a number is not a function" (2026-09-24)
+In the r160 UMD build, the WebGLState factory's `$(1)` (a nested function
+declaration, `setCullFace`) resolves to a number instead of the hoisted
+function: a scoping / function-declaration hoisting bug with a `$`-named
+binding in a large minified function.
+Repro: an app folder holding `three.min.js` from
+`git archive 9a7c6aa^ demos/spatial-audio/three.min.js` and a module script
+`import "/app/three.min.js"; new THREE.WebGLRenderer({ canvas })`.
+No broworkshop app vendors three.js now (spatial-audio was rebuilt on bro.scene).
 
-### TripoSplat clouds come back upside down (2026-09-24)
-docs/triposplat-api.js says generate() returns positions in the scene's
-Y-up convention (the binding rotates the sampler's Z-up output). They come
-back with the subject inverted: for demos/triposplat's portrait sample (a
-figure in a green cap and blue overalls), the green splats' mean y is -0.25
-and the blue ones' +0.18 (cloud y in -0.46..0.50), and the viewport shows
-the figure head-down from its default camera. The Z-up to Y-up rotation
-probably has the wrong sign. demos/triposplat renders the cloud as returned.
+#### A driver script importing the page's ENTRY module evaluates it again (2026-09-24)
+The module registry (`eval_jit.cpp`, `opts.moduleRegistry`) shares page
+modules with a headless driver script, except the entry module named in
+`<script type="module" src>`: importing it from a test runs it a second time
+(two boots into one DOM and one physics world). Its dependencies are shared.
+Repro: page `main.js` = `import "/app/m.js"; console.log('main')`; a test
+doing `import "/app/main.js"` logs `main` twice and `m.js` runs once.
+Affects: tests should import non-entry modules (kit apps: keep `main.js` a
+thin boot).
 
-### No `Option` constructor (2026-09-24)
-`typeof Option` is `'undefined'`, so `select.appendChild(new Option(text, value))`
-throws a ReferenceError. `Image` exists. The apps use
-`document.createElement('option')` (kit `h('option', { value }, text)`).
-Repro: `bro-headless demos/nllb-lab -e "console.log(typeof Option)"`.
+#### A driver script sees a page module's `let` exports as a snapshot (2026-09-24)
+A test importing a shared page module gets the values its `let` exports held
+at import time; later reassignments (from a page timer or a page function the
+test calls) never show, in named imports or `import * as ns`. Objects and
+functions are shared; accessor functions return live values.
+Repro: `live.js` = `export let y = 1; export let c = null; export function bump(){ y++ }
+export function rebuild(){ c = { n: (c ? c.n : 0) + 1 } } export function readC(){ return c }`,
+page `main.js` = `import { bump, rebuild } from "/app/live.js"; rebuild(); setTimeout(bump, 50)`;
+the test imports `{ y, c, rebuild, readC }` and `* as ns`, `advanceTime(100)`:
+`y` and `ns.y` are 1; after the test's own `rebuild()`, `c !== readC()`.
+Affects: demos/character-lab (tests read `ballState.selfTag` /
+`characterAvatar()` instead of the stale `character` handle).
 
-### A tab inside `<pre>` renders as a missing-glyph box (2026-09-24)
-A U+0009 in preformatted text (Markdown code blocks via lib/markdown.js)
-paints as a tofu box instead of advancing to the next tab stop. Seen in
-demos/vlm-lab when Qwen3-VL answers a grounding prompt with a tab-indented
-JSON list (tests/out/shots/demos_vlm-lab-detect.png).
+#### Error location misattributed across module imports (2026-09-24)
+A ReferenceError at line 8 of a headless test script that imports
+`/app/m.js` is reported `at .../app/m.js (external module bindings):8:1 (in
+.../test.js)`: the imported module's name with the script's line. Failures in
+test scripts that import kit helpers point at the wrong file first.
+Repro: a script `import { m } from "/app/m.js";` + six `console.log` lines +
+`notDefinedAnywhere(m);`.
 
-### docs/diar-api.js has `loadClusterDiarizer`'s arguments wrong (2026-09-24)
-The doc says `loadClusterDiarizer(embeddingDir, vadDir, opts)`. The binding
-takes `(sortformerDir, speakerEncoderDir, opts)`: Sortformer's activity is
-the VAD and the Qwen-TTS speaker encoder gives the embeddings. The doc and
-the generated bin/docs copy should say so. demos/cluster-diar-lab calls
-it the binding's way.
+#### Per-call and typed-array overhead dominates tight JS loops (2026-09-24)
+Re-measured 2026-09-24 in a headless driver script (20M iterations,
+`Date.now()`): ~13 ns per call to a local function, ~28 ns per method call,
+~26 ns per Float32Array read (a typed-array read costs more than a call).
+Earlier in-page numbers (optimized boot tier): ~70 ns local call, ~250 ns
+cross-module namespace call (175 ns bound to a local const), 14–40 ns
+typed-array read. In demos/tactical-flowfield the per-unit steering loop was
+~10 µs per unit per tick (1000 units ≈ 10 ms per 60 Hz tick).
 
-### `linear-gradient()` with `rgb()` stops paints nothing (2026-09-24)
-`background: linear-gradient(90deg, rgb(20, 40, 90), rgb(220, 180, 80))`
-(and the `background-image` longhand) leaves the box unpainted; the same
-gradient with hex stops (`#14285a, #dcb450`) paints. Looks like the
-gradient parser splits the stop list on the commas inside `rgb(...)`.
-Seen in tools/algo-viz's pathfinding legend (now hex).
+#### ai/pi-agent and ai/maker-agent bundles never finished compiling (2026-09-24, not reproducible from the tree)
+bro-headless produced nothing for 300 s on a ~41k-line esbuild bundle
+(`pi.bundle.js` / `maker.bundle.js`, pi's `@mariozechner/pi-agent-core` +
+`pi-ai`); the bundle loaded under QuickJS. Apps no longer need it (their agent
+loop is `lib/kit/agent.js`, both boot in ~1 s). The open question: why bronze
+does not finish a single ~41k-line module. The bundles were build output and
+never tracked; rebuild with `npm i && node build.mjs` in `ai/pi-agent/bundler/`
+from the commit before the kit rebuild.
 
-### TileWorld ignores `atlasPixels` given as a Uint8ClampedArray (2026-09-24)
-`scene.createTileWorld({ atlasPixels, atlasWidth, atlasHeight, ... })` with
-the `Uint8ClampedArray` that `getImageData().data` returns silently renders
-untextured (flat grey tiles); a `Uint8Array` view of the same buffer
-textures correctly. It should accept any byte view, or throw.
-tools/tile-editor passes `new Uint8Array(img.data.buffer)` (atlas.js); the
-old tile editor rendered untextured because of this.
+### bro-server
 
-### `bro.media.thumbnails().data` is a Uint8Array, docs say Uint8ClampedArray (2026-09-24)
-docs/video-api.js promises a `Uint8ClampedArray` (and shows
-`new ImageData(strip.data, ...)`); the engine returns a `Uint8Array`.
-This failed tools/media-inspector's baseline test. The app now views the
-buffer as clamped bytes itself (filmstrip.js `stripCanvas`), and the test
-asserts only "RGBA bytes of the right length".
+#### bro-server runs the app's page scripts, and a page error fails the server script (2026-09-24)
+`bro-server <app> <app>/server.js` loads the manifest and evaluates
+index.html's `<script>`s before the server script, with no renderer. If a page
+script throws, the server script still runs to completion (fps even binds its
+port) and then bro-server reports `failed to evaluate script '.../server.js'`.
+Repro: an app whose index.html script logs and then throws, and a
+`server.js` that logs: both logs appear, then the "failed to evaluate" error.
+Expected: no page scripts under bro-server (or at least not charged to the
+server script). Affects: games/fps (tolerates a missing scene context at boot);
+any app with a server and a page that assumes a renderer.
 
-### `<video>` load of a missing or unsupported file: no `error`, stale state (2026-09-24)
-Setting `src` to a missing file or an Ogg Vorbis file and calling `load()`
-fires neither `loadedmetadata` nor `error`, and the element keeps the
-PREVIOUS file's `readyState` (4), `duration` and `videoWidth` (a fresh
-element reports `videoWidth` 300 after such a load). Per spec, load()
-resets `readyState` to HAVE_NOTHING and an unplayable source fires `error`
-with MEDIA_ERR_SRC_NOT_SUPPORTED. Repro:
-`v.src = 'demos/video_demo/hello.webm'; v.load(); /* pump */ v.src = 'demos/scene-audio/assets/pad-chime.ogg'; v.load();`
-then `v.readyState` is 4 and `v.duration` 2.008. The old media inspector hung
-on "Analyzing media..." for its Ogg sources; tools/media-inspector/player.js
-now waits for the event with a timeout.
-Related, not a bug: bro.media and `<video>` read WebM (VP9/VP8 + Opus) only,
-so the workshop's Ogg Vorbis clips (demos/scene-audio/assets), which
-AudioContext decodes, cannot be inspected; media-inspector no longer lists them.
+### Game AI
 
-### `mesh.applySkinning` applies the inverse bind matrices a second time (2026-09-24)
-bromesh `applySkinning` (src/manipulation/skin.cpp) multiplies each pose
-matrix by the skin's `inverseBindMatrices` itself, but its header,
-`pose.h`'s `computeSkinningMatrices` comment and docs/rigging-api.js all say
-to pass `pose.computeSkinningMatrices(skeleton)` (already world x
-inverseBind). Doing what the docs say moves vertices by the inverse bind
-twice: a 2-bone column bent 90 degrees ends at |x| 0.2 instead of 1.
-World matrices (`pose.computeWorldMatrices`) are what actually works;
-bro's own tests use both (tests/rigging/diag_autorig_locomotion.js vs
-probe_meshy.js). tools/mesh-viewer uses world matrices and its test pins the
-bent shape, so it will flag whichever way this is resolved.
+#### bro.ai.game has no square-grid flow field (2026-09-24)
+`HexNav.field` builds an integration/flow field for hex grids only; a
+`createNavGrid(...)` object has `findPath` and `hasLineOfSight` but no
+`field`. demos/tactical-flowfield runs its own fast-marching wave in JS
+(40–75 ms per rebuild on 128x72, on every terrain edit). Want a native
+`NavGrid.field(goal, { costs, extraCost })`. Feature request.
 
-### `<details>` has no `open` property (2026-09-24)
-`HTMLDetailsElement.open` is missing: `d.open = true` only sets an expando
-(no `open` attribute, the section stays closed, `details:not([open])` still
-matches) and reading `d.open` is `undefined` after `setAttribute('open', '')`
-or a click on the `<summary>` (both of which do open it). Repro:
-`bro-headless tools/node-forge -e "const d=document.createElement('details'); d.append(document.createElement('summary')); document.body.append(d); d.open=true; console.log(d.hasAttribute('open'))"`
-prints false. node-forge's old tests set `.open = true` and passed only
-because they queried the hidden content; its tests now click the summary.
-
-### `<textarea>` / `<input>` have no `setRangeText` (2026-09-24)
-`HTMLTextAreaElement.prototype.setRangeText` is missing, so
-`ta.setRangeText(text, start, end, 'select')` throws "undefined is not a
-function". tools/desktop-notebook's ribbon (bold, headings, lists) was dead
-because of it; the editor now splices `value` and calls `setSelectionRange`
-(lib/editor.js `splice`), which loses native undo grouping.
-Repro: `bro-headless tools/desktop-notebook -e "console.log(typeof document.createElement('textarea').setRangeText)"`.
-
-### bronze: `String.prototype.lastIndexOf` ignores `fromIndex` (2026-09-24)
-`'ab\ncd\nef'.lastIndexOf('\n', 3)` is 5 (want 2), and `'abc'.lastIndexOf('c', 1)`
-is 2 (want -1): the search always starts from the end. Line-start lookups
-(`value.lastIndexOf('\n', pos - 1) + 1`, the standard textarea idiom) land
-on the last line. tools/desktop-notebook's indent / heading / block insert
-use it; its test skips the Tab-indent check while
-`'a\nb\nc'.lastIndexOf('\n', 2) !== 1`.
-Repro: `bro-headless tools/desktop-notebook -e "console.log('ab\ncd\nef'.lastIndexOf('\n', 3))"`.
-
-### `querySelector` splits at a comma inside a quoted attribute value (2026-09-24)
-`document.querySelector('[data-x="1,2"]')` returns `<html>` and
-`querySelectorAll` of it returns every element: the selector list is split
-at the comma inside the quotes. `el.matches('[data-x="1,2"]')` is right.
-tools/inpainting-studio's outpaint buttons (`data-expand="64,0"`) now use
-side names. Repro: `bro-headless tools/inpainting-studio -e "document.body.innerHTML='<p data-x=\"1,2\"></p>'; console.log(document.querySelector('[data-x=\"1,2\"]').tagName)"` prints HTML.
-
-### `table-layout: fixed` is ignored; a nowrap cell widens a `width:100%` table (2026-09-24)
-A `width: 100%` table with `table-layout: fixed` and `<col>` widths sizes
-its columns from content, and a `white-space: nowrap` cell with a long
-command line pushes the table past its container (horizontal overflow).
-`text-overflow: ellipsis` on that cell never triggers. tools/procwatch's
-process list switched to grid rows (`grid-template-columns`) for this.
-
-### Inline-wrap sighting: tools/reader sentence spans (2026-09-24)
-Same as "A long text run after an inline element wraps whole to the next
-line" above: in tools/reader each sentence is a `<span class="sn">` inside a
-`<p>`; a long sentence after a short one starts at x=0 on the next line,
-leaving a ragged first line. Repro: two spans in a 300px `<p>`, the second
-too long for the rest of line 1; its first Range rect has left = the p's left.
-
-### Worker `new URL(...)` sighting: templates/worker-sim no longer repros (2026-09-24)
-Re the `new Worker(new URL(...))` entry above: templates/worker-sim now uses
-the string form (`workerClient('sim/worker.js', { type: 'module' })`), so its
-repro line boots cleanly. The engine gap is unchanged; any page using
-`new URL('./w.js', import.meta.url)` still throws.
-
-### brovisionml `to()` before `load()` sighting: tools/inpainting-studio depth guide (2026-09-24)
-The Depth-map ControlNet guide calls `bro.vision.loadDepth` in its worker and
-hits the CUDA `to() called before load()` error above; the page shows it and
-falls back to a black map. tools/inpainting-studio/tests/test_generate.js
-logs it as KNOWN and requires a real depth map once the loader is fixed.
-
-## Notes (not bugs)
+## Notes (not bugs; doc gaps worth a line)
 
 - WAAPI gaps are documented in docs/web-animations-api.js and demos/waapi-lab
-  probes them live: `steps()` falls back to `ease` (and
-  `getTiming().easing` then reports `"ease"`, not the string given);
-  `updatePlaybackRate`, `commitStyles`, `persist`, `effect.updateTiming`
-  are absent. Also `document.getAnimations()` lists only script animations,
-  not running CSS animations (the spec includes CSSAnimation objects).
-
-- `terrain.setVoxel(x, y, z, v)` on a height-field terrain moves the grid
-  node at `floor(x), floor(z)`, not the nearest one. A sculpt that samples
-  `heightAt` at the raycast hit can therefore see no change when the hit
-  lies in a triangle that does not use that node (demos/terrain's test
-  samples at the floored node). Worth documenting in terrain-api.js.
-- `ClipmapTerrain` `detailRelief` is a unitless slope (each detail octave's
-  amplitude is relief x that octave's wavelength x the ground slope; engine
-  default 0.35), per `clipmap_terrain.h`. clipmap-api.js does not say so,
-  and demos/clipmap-terrain passed 18 "metres", which spiked the surface
-  into km-high walls. Worth a line in the doc.
-
-- `<select>.value` round-trips correctly now (set programmatically, and
-  after a keyboard pick + `change`); older app comments claiming otherwise
-  are stale.
-- `performance.now()` in headless advances only with virtual time
-  (`advanceTime`), so fps/ms readouts measured with it read as 62.5 fps /
-  0 ms there. Use `Date.now()` for wall-clock budgets.
-- FastNoise2 coherent generators (Simplex, Perlin, Value, Cellular*) have a
-  default "Feature Scale" of about 100 world units per feature, so
+  probes them live: `steps()` falls back to `ease` (and `getTiming().easing`
+  then reports `"ease"`); `updatePlaybackRate`, `commitStyles`, `persist`,
+  `effect.updateTiming` are absent; `document.getAnimations()` lists only
+  script animations, not running CSS animations.
+- `terrain.setVoxel(x, y, z, v)` on a height-field terrain moves the grid node
+  at `floor(x), floor(z)`, not the nearest one, so a sculpt sampling
+  `heightAt` at the raycast hit can see no change (demos/terrain's test samples
+  at the floored node). Worth documenting in terrain-api.js.
+- `ClipmapTerrain` `detailRelief` is a unitless slope (engine default 0.35,
+  per `clipmap_terrain.h`); clipmap-api.js does not say so, and
+  demos/clipmap-terrain once passed 18 "metres" (km-high walls).
+- `<select>.value` round-trips correctly now; older app comments claiming
+  otherwise are stale.
+- `performance.now()` in headless advances only with virtual time, so fps/ms
+  readouts read 62.5 fps / 0 ms there. Use `Date.now()` for wall-clock budgets.
+- FastNoise2 coherent generators (Simplex, Perlin, Value, Cellular*) default to
+  a "Feature Scale" of ~100 world units per feature, so
   `genUniformGrid2D(x, y, w, h, frequency, seed)` with a classic frequency
-  (0.01..0.1) gives an almost flat ramp. `node.set('Feature Scale', 1)`
-  restores the classic "features per unit" meaning (and matches
-  `bro.image.gpu.fbm2D`). noise-api.js should say so next to the grid
-  functions, and that the offsets are world space (not sample indices).
-  tools/algo-viz's CPU noise types and octave thumbnails were ~100x too
+  (0.01..0.1) is almost flat. `node.set('Feature Scale', 1)` restores
+  "features per unit" (matches `bro.image.gpu.fbm2D`). noise-api.js should
+  say so, and that the offsets are world space. tools/algo-viz was ~100x too
   smooth because of it.
+
+## Fixed
+
+- `createPhysicsNode({ body: tag })` binds the body again — bro 1d3b8445; verified 2026-09-24 (physics-playground and character-lab `tests/test_physics_node.js` pass).
+- Physics `step()` no longer discards unread contact events (they accumulate until `getContacts()`) — bro 8abffa5a; verified 2026-09-24 (an `added` and a `removed` from two sub-steps both arrive). games/pegbounce can drop its per-sub-step drain.
+- `ReflectionProbe.intensity` is readable and settable, including via `createReflectionProbe({ intensity })` — bro 5d3cedf8; verified 2026-09-24. demos/render-lab's probe Intensity slider works.
+- `import.meta.url` in a page's entry module names that module, not index.html — verified 2026-09-24 (the `new Worker(new URL(...))` half is still open above).

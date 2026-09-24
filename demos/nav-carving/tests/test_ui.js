@@ -4,7 +4,6 @@
 //
 //   scripts/validate.sh demos/nav-carving
 import { check, test, done, text, q, clickOn, setValue, shot, frames, simUntil } from "/lib/kit/test.js";
-import { worldToScreen } from "/lib/kit/viewport3d.js";
 import { TARGETS } from "/app/level.js";
 import { navState, generation } from "/app/nav.js";
 import { lift } from "/app/elevator.js";
@@ -69,9 +68,8 @@ test('spawn and clear', () => {
 
 test('click the level to send everyone there', () => {
     const r = lab.vp.canvas.getBoundingClientRect();
-    const view3 = Camera.orbitViewOpts(lab.vp.cam, lab.vp.canvas);
     const t = TARGETS.roof;
-    const s = worldToScreen([t.x, t.y, t.z], view3, r.width, r.height);
+    const s = lab.vp.toScreen([t.x, t.y, t.z]);
     const p = pickLevel(s.x, s.y);
     check(p && Math.abs(p.y - 7) < 0.4, 'the roof is under its own projection: ' + JSON.stringify(p));
     click(r.left + s.x, r.top + s.y, 0);

@@ -20,15 +20,12 @@
 // composes from this math.
 //
 // Usage:
-//   <script src="/lib/sketch.js"></script>
+//   import { Sketch } from "/app/model/sketch.js";
 //   const hit = Sketch.rayToPlane(ray, planePt, planeNormal);
 //   const {u, v} = Sketch.planeBasis(planeNormal);
 //   const ccw = Sketch.polygonArea2D(points2d) > 0;
 //   const mesh = Mesh.polygon3D(Sketch.flatten3D(ccw ? pts : pts.reverse()),
 //                               [], planeNormal);
-
-(function (global) {
-    'use strict';
 
     // --- 3D vector helpers --------------------------------------------------
 
@@ -779,7 +776,7 @@
         return out;
     }
 
-    global.Sketch = {
+    export const Sketch = {
         // 3D math
         v3add, v3sub, v3scale, v3dot, v3cross, v3len, v3norm, v3dist,
         // plane / projection
@@ -799,4 +796,3 @@
         // helpers
         flatten3D,
     };
-})(typeof window !== 'undefined' ? window : globalThis);

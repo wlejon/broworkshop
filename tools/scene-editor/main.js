@@ -16,8 +16,8 @@
 // + rightClick(), and an optional `vcb` block (editor/vcb.js). p is
 // { cx, cy, ray, pick } in canvas pixels / world space.
 
-import "/lib/history.js";
-import "/lib/project.js";
+import { History } from "/lib/kit/history.js";
+import { Project } from "/lib/kit/project.js";
 import { boot } from "/lib/kit/app.js";
 import { toolbox, documentCommands } from "/lib/kit/editor.js";
 import { SceneRegistry } from "./model/scene-registry.js";

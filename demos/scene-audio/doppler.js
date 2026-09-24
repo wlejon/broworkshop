@@ -16,7 +16,7 @@
 // S-curve the ear hears.
 
 import { bindControl } from "/lib/kit/params.js";
-import { historyPlot } from "/lib/kit/audio-ui.js";
+import { historyPlot } from "/lib/kit/gauges.js";
 
 const FLYBY_HALF_LENGTH = 150;   // world units either side of the pass point
 const FLYBY_OFFSET_Z = -7;       // lateral miss distance

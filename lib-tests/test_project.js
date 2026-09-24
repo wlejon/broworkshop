@@ -1,11 +1,12 @@
-// Tests for apps/lib/project.js.
+// Tests for lib/kit/project.js.
 //
-// Run: bro-headless apps/lib-tests apps/lib-tests/test_project.js
+// Run: scripts/validate.sh lib-tests/test_project.js
 //
 // Uses os.tmpdir() for scratch directories; each test gets a unique path
 // under there and cleans up after itself.
 
-'use strict';
+import { History } from "/lib/kit/history.js";
+import { Project } from "/lib/kit/project.js";
 
 const fs   = require('fs');
 const path = require('path');

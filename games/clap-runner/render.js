@@ -2,7 +2,7 @@
 // skylines, the grid road, pickups, obstacles and the runner, drawn in 960 x
 // 540 world pixels. Also maps the runner's fx.emit kinds onto particle bursts.
 
-import { seededRandom } from "/lib/arcade/grid.js";
+import { seededRandom } from "/lib/arcade/random.js";
 import { WORLD_W, WORLD_H, GROUND_Y } from "/app/runner.js";
 
 /** Glowing disc particles (radius = size) for createEffects. */

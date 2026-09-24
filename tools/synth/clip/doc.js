@@ -7,7 +7,7 @@
 // History). Loading a new clip (file, recording, generator) starts a fresh
 // history, as opening a document does.
 
-import "/lib/history.js";
+import { History } from "/lib/kit/history.js";
 import { decodeAudioFile, saveWav } from "/lib/kit/audio.js";
 import * as ops from "./ops.js";
 

@@ -3,7 +3,6 @@
 // (exact pinning, per-vertex velocity, pressure, setVertex dents).
 
 import { test, check, done, frames, clickOn, shot } from "/lib/kit/test.js";
-import { worldToScreen } from "/lib/kit/viewport3d.js";
 import * as view from "/app/view.js";
 import { clearAll, bodyCount } from "/app/sim/spawn.js";
 import { setAreaEnabled } from "/app/sim/areas.js";
@@ -114,8 +113,7 @@ test('ragdoll: clicking a limb selects that part', () => {
     advanceTime(3000);
     const i = PART_NAMES.indexOf('chest');
     const p = Physics.getTransform(e.rd.partBody(i)).position;
-    const r = view.vp.canvas.getBoundingClientRect();
-    const s = worldToScreen([p.x, p.y, p.z], globalThis.Camera.orbitViewOpts(view.vp.cam, view.vp.canvas), r.width, r.height);
+    const s = view.vp.toScreen([p.x, p.y, p.z]);
     const hit = view.pickAt(s.x, s.y);
     log(`pick -> ${hit.kind} ${hit.part != null ? PART_NAMES[hit.part] : ''}`);
     check(hit.kind === 'part' && selection.entry === e, 'a part of this ragdoll is selected');

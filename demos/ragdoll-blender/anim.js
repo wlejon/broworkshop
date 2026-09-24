@@ -6,7 +6,7 @@
 // driveToPose() for the motors, so "the animation" and "what the joints are
 // told to hold" can never disagree.
 
-import { q } from "/lib/kit/physics3d.js";
+import { q } from "/lib/kit/math3d.js";
 
 const DEG = Math.PI / 180;
 const X = (a) => q.axis(1, 0, 0, a * DEG);

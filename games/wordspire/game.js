@@ -3,7 +3,8 @@
 // Tiles + paths: letters.js · session: board.js · drawing: render.js
 // · words: dictionary.js · points: scoring.js
 
-import { cellAt, cellCenter, formatClock } from "/lib/arcade/grid.js";
+import { cellAt, cellCenter } from "/lib/arcade/grid.js";
+import { formatClock } from "/lib/arcade/timers.js";
 import { createEffects } from "/lib/arcade/effects.js";
 import { bindPointer } from "/lib/arcade/pointer.js";
 import { recordScore, createScoreTabs, today } from "/lib/arcade/scores.js";

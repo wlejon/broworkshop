@@ -32,7 +32,7 @@
 // at once so the difference is not a claim, it is two numbers.
 
 import { character, charState, RADIUS, STAND_HALF, CROUCH_HALF, isCrouched } from "/app/character.js";
-import { quatYTo } from "/lib/kit/physics3d.js";
+import { quatYTo } from "/lib/kit/math3d.js";
 
 // --- tunables ----------------------------------------------------------------
 // Everything here is bound to a HUD control. The `show*` flags gate only the

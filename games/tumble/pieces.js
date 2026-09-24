@@ -8,9 +8,9 @@
 // build(scene, cellCentre, rot) creates the meshes + static Jolt bodies and
 // returns { node, body, extras?, extraBodies?, anim? }.
 
-import "/lib/camera.js";
+import { Camera } from "/lib/kit/camera.js";
 
-const { quatFromAxis, quatMul } = globalThis.Camera;
+const { quatFromAxis, quatMul } = Camera;
 const RAD2DEG = 180 / Math.PI;
 
 export function rotY(rot) { return rot * Math.PI / 2; }

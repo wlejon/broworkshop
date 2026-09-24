@@ -2,8 +2,7 @@
 // controls, editor lighting, the ground grid + axes, and screen -> world
 // rays for picking.
 
-import "/lib/camera.js";
-import { orbitControls, orbitRotation, screenRay } from "/lib/kit/viewport3d.js";
+import { orbitControls, orbitRotation, screenRay, Camera } from "/lib/kit/viewport3d.js";
 import { SceneAxes } from "../model/scene-axes.js";
 
 /**

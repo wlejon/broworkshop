@@ -11,7 +11,7 @@
 // big interpretable controls (loudness, pitch) and later rows carry timbre.
 
 import { h, clear } from "/lib/kit/dom.js";
-import { fitCanvas } from "/lib/kit/audio-ui.js";
+import { fitCanvas } from "/lib/kit/gauges.js";
 
 const PAD = 6;
 const HUES = [42, 198, 150, 280, 16, 100, 320, 222];

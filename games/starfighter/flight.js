@@ -6,7 +6,7 @@
 // takeDamage, radio, cue, portMissed, lockActive. Feedback leaves through
 // `fx` ({ cue, shake, flash, jitter }); the camera and HUD live elsewhere.
 
-import { seededRandom } from "/lib/arcade/grid.js";
+import { seededRandom } from "/lib/arcade/random.js";
 import { NEAR_Z } from "/app/camera.js";
 import { updateEnemy } from "/app/enemies.js";
 import { WAVES, SPACE, ORDER, sectorOf, nextWave, loopScale } from "/app/waves.js";

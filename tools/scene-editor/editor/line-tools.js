@@ -10,7 +10,7 @@
 // bulge. It is kept as an edge primitive (usable as a Follow Me path).
 // Inference snaps work on every click, so arcs chain off existing geometry.
 
-import "/lib/sketch.js";
+import { Sketch } from "../model/sketch.js";
 import { LineTool } from "../tools/line-tool.js";
 import { ArcTool } from "../tools/arc-tool.js";
 import { groundPlane, sketchPlaneFromRay, polygonMesh } from "../model/mesh-ops.js";

@@ -11,7 +11,7 @@
 // selection dimming everything outside it, and the cursor (red while
 // playing).
 
-import { fitCanvas } from "/lib/kit/audio-ui.js";
+import { fitCanvas } from "/lib/kit/gauges.js";
 import { fmtTime } from "./doc.js";
 
 const RULER = 18;

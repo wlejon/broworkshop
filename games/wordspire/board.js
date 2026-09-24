@@ -4,7 +4,8 @@
 // Effects go out through `fx`: cue(name) · toast(text) · burst(r, c, color)
 // · shake(ms, amp) · word(entry) for the top-words list.
 
-import { createFalls, collapse, seededRandom } from "/lib/arcade/grid.js";
+import { createFalls, collapse } from "/lib/arcade/grid.js";
+import { seededRandom } from "/lib/arcade/random.js";
 import {
     ROWS, COLS, MIN_WORD, newTile, emptyGrid, fillGrid, isValidPath, adjacent, pathWord, pathTiles,
     findWords, descendBurning, sprinkleBurning, rewardFor,

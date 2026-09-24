@@ -10,13 +10,12 @@
 import { boot } from "/lib/kit/app.js";
 import { ids, clear, h } from "/lib/kit/dom.js";
 import { deviceBadge, modelRow } from "/lib/kit/ml.js";
-import { sceneViewport } from "/lib/kit/viewport3d.js";
+import { sceneViewport, Camera } from "/lib/kit/viewport3d.js";
 import { workerClient } from "/lib/kit/worker-rpc.js";
 
 export const ARDY = ['brodiffusion/weights/ardy-g152'];
 export const LLM2VEC = ['brolm/weights/llm2vec-llama3-8b'];
 const BEADS_PER_BONE = 4;
-const Camera = globalThis.Camera;
 
 /** Live app state (tests read it; module `let` exports would be snapshots). */
 export const lab = {

@@ -7,7 +7,7 @@
 // changes; the playhead and meters update in place every frame.
 
 import { h, clear } from "/lib/kit/dom.js";
-import { levelMeter } from "/lib/kit/audio-ui.js";
+import { levelMeter } from "/lib/kit/gauges.js";
 import { NUM_STEPS, AUTOMATION_TARGETS } from "../model/song.js";
 import { noteName } from "../audio/notes.js";
 import { automationLane } from "./automation.js";

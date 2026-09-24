@@ -38,9 +38,10 @@ ones (a session class, `screens.js`, `hooks.js`).
 8. `cue(name, audio)`: game sounds only; menu tones are the shell's.
 9. Anything a run schedules (sequences, AI turns, delays) goes on `createTimers()` from `/lib/arcade/timers.js`, not `setTimeout`, so pause freezes it.
 
-Shared pieces: `/lib/arcade/grid.js` (boards, `fitBoard`, `seededRandom`),
+Shared pieces: `/lib/arcade/grid.js` (boards, `fitBoard`), `random.js`
+(`seededRandom`), `timers.js` (`createTimers`, `formatClock`),
 `effects.js` (particles, labels, shake, toasts), `pointer.js` (canvas
 mouse), `scores.js` (leaderboards, `statsBlock`), `options.js` (Settings
-rows), `timers.js`, `hooks.js`.
+rows), `hooks.js` (test hooks).
 
 Full contract: [`/lib/arcade/README.md`](../../lib/arcade/README.md).

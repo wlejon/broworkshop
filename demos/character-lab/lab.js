@@ -26,8 +26,7 @@
 // frame tick, and exports the handles the HUD and the tests share. Tests
 // import this module, never main.js (see ENGINE-ISSUES.md).
 
-import "/lib/camera.js";
-import { sceneViewport, screenRay, worldToScreen } from "/lib/kit/viewport3d.js";
+import { sceneViewport, screenRay, worldToScreen, Camera } from "/lib/kit/viewport3d.js";
 import { buildCourse, tickCourse } from "/app/course.js";
 import { createCharacter, tickCharacter, rebuild, tune, charState, input, SPAWN } from "/app/character.js";
 import { buildQueryVis, tickQueries, nameBodies, setFacing, pickAlongRay } from "/app/queries.js";

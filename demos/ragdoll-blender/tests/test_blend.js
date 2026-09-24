@@ -4,7 +4,6 @@
 // to idle. Plus the panel: clip buttons, sliders, readouts.
 
 import { test, check, done, frames, clickOn, setValue, simUntil, shot } from "/lib/kit/test.js";
-import { worldToScreen } from "/lib/kit/viewport3d.js";
 import { PART_NAMES, partIndex, poseError } from "/lib/kit/ragdoll.js";
 import { vp, blender, cannon, grab, grabAt } from "/app/lab.js";
 import { CLIPS } from "/app/anim.js";
@@ -125,8 +124,7 @@ test('grabbing a limb triggers the ragdoll and drags it', () => {
     blender.resetToStand('idle');
     advanceTime(500);
     const p = Physics.getTransform(blender.rd.partBody(partIndex('chest'))).position;
-    const r = vp.canvas.getBoundingClientRect();
-    const s = worldToScreen([p.x, p.y, p.z], globalThis.Camera.orbitViewOpts(vp.cam, vp.canvas), r.width, r.height);
+    const s = vp.toScreen([p.x, p.y, p.z]);
     check(grabAt(s.x, s.y), 'grabbed a part');
     check(blender.state === 'IMPACT' && grab.grabbed != null, 'grab went limp from that limb');
     grab.end();

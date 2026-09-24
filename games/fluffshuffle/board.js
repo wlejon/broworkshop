@@ -4,7 +4,8 @@
 // coordinates: fx.cue(name) · fx.matchCue(chain, color, size) ·
 // fx.burst(r, c, color, n) · fx.label(r, c, text, color, big) · fx.shake(ms, amp)
 
-import { collapse, createWave, createFalls, centroid, seededRandom } from "/lib/arcade/grid.js";
+import { collapse, createWave, createFalls, centroid } from "/lib/arcade/grid.js";
+import { seededRandom } from "/lib/arcade/random.js";
 import {
     ROWS, COLS, SPECIAL, PUZZLE_COUNT, makePuff, randomColor, slide, lineLocked, findMatches,
     hasAnyMatchingShift, scoreChain, expandClears, seedGrid, puzzleSpec,

@@ -11,8 +11,8 @@
 import { boot } from "/lib/kit/app.js";
 import { segmented, fpsMeter } from "/lib/kit/ui.js";
 import { bindControl } from "/lib/kit/params.js";
-import { sceneViewport, orbitRotation } from "/lib/kit/viewport3d.js";
-import { physicsEvents, pickRay, raycast, grabber, localPoint } from "/lib/kit/physics3d.js";
+import { sceneViewport, orbitRotation, localPoint } from "/lib/kit/viewport3d.js";
+import { physicsEvents, pickRay, raycast, grabber } from "/lib/kit/physics3d.js";
 import { rig, initRig, clearRig, tickRig, setMotorSpeed, setRestitution, setBreakingImpulse, noteBroken } from "./rig.js";
 import { MACHINES, buildMachine, dropLoad } from "./machines.js";
 

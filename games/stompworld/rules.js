@@ -3,7 +3,7 @@
 // beam hits. Both sides import these so a trained agent plays the same game
 // a human does.
 
-import { Platformer } from "/lib/platformer.js";
+import { Platformer } from "/app/platformer.js";
 
 export const TILE = 32;
 export const VIEW_W = 800;

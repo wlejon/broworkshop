@@ -5,7 +5,7 @@
 
 import { boot } from "/lib/kit/app.js";
 import { ids } from "/lib/kit/dom.js";
-import { backendBadge } from "/lib/kit/imagegen.js";
+import { deviceBadge } from "/lib/kit/ml.js";
 import { Graph } from "/app/lab/graph.js";
 import { Runner } from "/app/lab/runner.js";
 import { Inspector } from "/app/lab/inspector.js";
@@ -206,7 +206,7 @@ for (const p of Presets.list()) {
 }
 el.preset.addEventListener('change', () => loadPreset(el.preset.value));
 
-const badge = backendBadge('#backend');
+const badge = deviceBadge('#backend');
 if (gpu) {
     try { bro.tensor.init(); } catch (_) { /* surfaced on run */ }
     badge.set(String(bro.tensor.backend || 'gpu'));
