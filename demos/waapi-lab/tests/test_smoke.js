@@ -43,7 +43,10 @@ test('engine support is probed, not asserted', () => {
     eq(s.updateTiming, true, 'effect.updateTiming');
     eq(s.cssAnimations, 'yes', 'CSS animations are CSSAnimations in getAnimations()');
     eq(s.cssLayers, 'yes', 'every layer of a comma list runs');
-    eq($('support').children.length, 12, 'support rows');
+    eq(s.cssDisplayNone, 'yes', 'display:none cancels a CSS animation, showing restarts it');
+    eq(s.cssTransitions, 'yes', 'running CSS transitions are CSSTransitions in getAnimations()');
+    eq(s.treeOrder, 'yes', 'document.getAnimations() orders CSS animations by tree order');
+    eq($('support').children.length, 15, 'support rows');
     // Every row lit but `pending`, which is always false by design.
     const keys = Object.keys(s);
     for (let i = 0; i < $('support').children.length; i++) {
@@ -52,7 +55,7 @@ test('engine support is probed, not asserted', () => {
         if (label === 'anim.pending') check(!lit, 'pending row unlit');
         else check(lit, 'row lit: ' + label + ' = ' + val('support', i));
     }
-    check(keys.length === 12, 'twelve probes');
+    check(keys.length === 15, 'fifteen probes');
 });
 
 test('telemetry is the engine progress, and it sits on the requested curve', () => {

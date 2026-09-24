@@ -44,7 +44,43 @@ export function probeSupport(host) {
         css[0].animationName === 'waapiCompare' && document.getAnimations().includes(css[0])
         ? 'yes' : `no (${css.length} listed)`;
     out.cssLayers = css.length === 2 ? 'yes' : `no (${css.length} of 2 layers)`;
+
+    // display:none cancels a CSS animation; shown again, a new one starts
+    // from the beginning.
+    const before = css[0];
+    el.style.display = 'none';
+    const hiddenCount = el.getAnimations().length;
+    const hiddenState = before.playState;
+    el.style.display = '';
+    const after = el.getAnimations()[0];
+    out.cssDisplayNone = hiddenCount === 0 && hiddenState === 'idle' && after && after !== before &&
+        after.currentTime === 0
+        ? 'yes' : `no (${hiddenCount} listed while hidden, ${hiddenState})`;
     el.style.animation = '';
+
+    // A running CSS transition is a CSSTransition.
+    el.style.transition = 'opacity 1s linear';
+    getComputedStyle(el).opacity;
+    el.style.opacity = '0.5';
+    const hasCtor = typeof CSSTransition === 'function';
+    const tr = el.getAnimations().find((x) => hasCtor && x instanceof CSSTransition);
+    out.cssTransitions = tr && tr.transitionProperty === 'opacity' && document.getAnimations().includes(tr)
+        ? 'yes' : `no (${el.getAnimations().length} listed)`;
+    el.style.transition = '';
+    el.style.opacity = '';
+
+    // document.getAnimations() lists CSS animations in tree order, whatever
+    // order they started in.
+    const first = document.createElement('div');
+    const second = document.createElement('div');
+    el.append(first, second);
+    second.style.animation = 'waapiCompare 1s linear infinite';
+    second.getAnimations();
+    first.style.animation = 'waapiCompare 1s linear infinite';
+    const order = document.getAnimations()
+        .map((x) => x.effect && x.effect.target)
+        .filter((t) => t === first || t === second);
+    out.treeOrder = order.length === 2 && order[0] === first ? 'yes' : 'no (creation order)';
 
     el.remove();
     return out;
@@ -63,6 +99,9 @@ export const SUPPORT_LABELS = {
     updateTiming: 'effect.updateTiming()',
     cssAnimations: 'CSS animations in getAnimations()',
     cssLayers: 'comma-list CSS animations',
+    cssDisplayNone: 'display:none cancels CSS animations',
+    cssTransitions: 'CSS transitions in getAnimations()',
+    treeOrder: 'document.getAnimations() tree order',
 };
 
 /** A probe value that reads as supported. */

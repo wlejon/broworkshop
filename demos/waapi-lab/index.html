@@ -114,7 +114,8 @@
         <div id="support"></div>
         <p class="k-note">CSS <code>@keyframes</code> animations are the same objects as
           <code>element.animate()</code> ones: the arena's CSS lane is a <code>CSSAnimation</code> in
-          <code>getAnimations()</code>. <code>pending</code> is always false (play and pause apply at once),
+          <code>getAnimations()</code>, and a running CSS transition is a <code>CSSTransition</code>.
+          <code>pending</code> is always false (play and pause apply at once),
           so <code>updatePlaybackRate()</code> and setting <code>playbackRate</code> behave alike.</p>
       </section>
 
