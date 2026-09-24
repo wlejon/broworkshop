@@ -1,51 +1,42 @@
-// Qwen3-ASR Lab — headless smoke test. Drives the app's own UI: boot loads
-// the model, Open decodes a known clip (auto-transcribing), the language
-// badge and the streamed transcript land in the DOM, and context biasing +
-// cancel stay wired. (The binding's own coverage lives in bro's
-// tests/_qwen_asr_smoke.js.)
+// Qwen3-ASR Lab: boot loads the model, a clip opened through the input bar
+// auto-transcribes (language line + streamed transcript), context biasing
+// and cancel stay wired. Skips without the checkpoint or the test clip.
 //
-//   bro-headless ../broworkshop/demos/qwen-asr-lab ../broworkshop/demos/qwen-asr-lab/test.js
+//   scripts/validate.sh --ml demos/qwen-asr-lab
 
-function assert(cond, msg) { if (!cond) throw new Error('assert: ' + msg); }
-function pumpUntil(pred, budgetMs) {
-    const start = Date.now();
-    while (!pred() && (Date.now() - start) < budgetMs) { sleep(20); }
-    return pred();
-}
-const q = (s) => document.querySelector(s);
+import { check, test, done, waitFor, q, text, clickOn, typeInto, shot, needWeights } from "/lib/kit/test.js";
+import { lab, QWEN_ASR } from "/app/lab.js";
 
-const WROOT = (typeof process !== 'undefined' && process.env && process.env.BRO_WEIGHTS) || 'D:/projects';
-const CLIP = WROOT + '/brosoundml/weights/qwen-tts-hello-there-this-is-a-test-of-th.wav';
+needWeights('Qwen3-ASR 0.6B', QWEN_ASR, { probe: 'config.json' });
+const WAV = needWeights('speech test clip', ['brosoundml/weights/qwen-tts-hello-there-this-is-a-test-of-th.wav']);
 
-// Boot kicks off an async model load.
-assert(pumpUntil(() => /ready|record/i.test(q('#status').textContent), 300000),
-       'model loaded at boot (status: ' + q('#status').textContent + ')');
-assert(!q('#btn-record').disabled, 'record enabled after load');
+waitFor(() => lab.model || lab.error, 'model load', 300000);
+check(!lab.error, 'model loaded: ' + lab.error);
+check(!q('#btn-record').disabled, 'record available');
 
-// Open a clip — setSource auto-runs the transcription.
-q('#src-file').value = CLIP;
-q('#btn-loadfile').click();
-assert(pumpUntil(() => /done/i.test(q('#status').textContent), 300000),
-       'transcription finished (status: ' + q('#status').textContent + ')');
+// open a clip: autorun transcribes it
+typeInto('#src-file', WAV);
+clickOn('#btn-open-file');
+waitFor(() => lab.ids || /error/.test(text('#status')), 'transcription', 300000);
+check(lab.ids, 'transcription finished: ' + text('#status'));
+console.log('[qwen-asr-lab] language="' + text('#lang') + '" transcript="' + text('#transcript') + '"');
+test('language line says English', () => check(/english/i.test(text('#lang')), text('#lang')));
+test('transcript has the spoken words', () => check(/hello/i.test(text('#transcript')) && /test/i.test(text('#transcript'))));
+test('transcript marked final', () => check(!q('#transcript').classList.contains('streaming')));
+test('run meta shows the realtime factor', () => check(/realtime/.test(text('#run-meta'))));
+shot('transcribed');
 
-const lang = q('#lang').textContent;
-const text = q('#transcript').textContent;
-console.log('[qwen-asr-lab] language="' + lang + '" transcript="' + text + '"');
-assert(/english/i.test(lang), 'language badge says English');
-assert(/hello/i.test(text) && /test/i.test(text), 'transcript has the spoken words');
-assert(q('#transcript').className === '', 'transcript marked final');
+// context biasing: re-run with a context phrase
+typeInto('#context', 'pipeline test');
+clickOn('#btn-transcribe');
+waitFor(() => !lab.running, 'context-biased run', 300000);
+test('biased transcript still has the words', () => check(lab.ids && /hello/i.test(text('#transcript'))));
 
-// Context biasing path: re-run with a context phrase; still transcribes.
-q('#context').value = 'pipeline test';
-q('#btn-transcribe').click();
-assert(pumpUntil(() => /done/i.test(q('#status').textContent), 300000),
-       'context-biased transcription finished');
-assert(/hello/i.test(q('#transcript').textContent), 'biased transcript still has the words');
+// cancel
+clickOn('#btn-transcribe');
+check(lab.running && !q('#btn-cancel').disabled, 'cancel armed while running');
+clickOn('#btn-cancel');
+waitFor(() => !lab.running, 'cancelled run settles', 300000);
+test('buttons reset after cancel', () => check(!q('#btn-transcribe').disabled && q('#btn-cancel').disabled));
 
-// Cancel path: start a run and cancel it immediately.
-q('#btn-transcribe').click();
-q('#btn-cancel').click();
-assert(pumpUntil(() => /cancelled|done/i.test(q('#status').textContent), 300000),
-       'cancelled run settles (status: ' + q('#status').textContent + ')');
-
-console.log('[qwen-asr-lab] PASS');
+done('qwen-asr-lab');

@@ -1,100 +1,65 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="utf-8">
-  <title>TripoSplat Lab</title>
-  <link rel="stylesheet" href="style.css">
+<meta charset="utf-8">
+<title>TripoSplat Lab</title>
+<link rel="stylesheet" href="/lib/kit/kit.css">
+<link rel="stylesheet" href="/app/style.css">
 </head>
-<body>
-  <div id="app">
-
-    <header id="topbar">
-      <span id="brand">◆ TripoSplat&nbsp;Lab</span>
-      <span class="tagline">one image → a 3D Gaussian splat, on-device</span>
-      <span class="grow"></span>
-      <span id="device" class="badge">…</span>
-    </header>
-
-    <main>
-      <!-- ── left: source + parameters ─────────────────────────────── -->
-      <aside id="controls">
-        <label class="hdr">Source image</label>
-        <div id="thumb" title="The image fed to the reconstructor"></div>
-        <div class="row">
-          <button id="btn-open" class="grow">Open image…</button>
+<body class="k-app">
+  <header class="k-header">
+    <h1>TripoSplat Lab</h1>
+    <span class="k-sub">bro.triposplat: one image to a 3D Gaussian splat (DINOv3 + Flux.2 VAE, flow-matching DiT, octree decoder), on device</span>
+    <span class="k-spacer"></span>
+    <span id="device"></span>
+  </header>
+  <div class="k-body">
+    <aside class="k-side">
+      <div class="k-panel">
+        <h2>Image</h2>
+        <div class="k-gallery" id="samples"></div>
+        <div class="k-row">
+          <button id="btn-open" title="Open an image (or drop one on the viewport)">Open image…</button>
+          <span class="dim" id="image-meta"></span>
         </div>
-        <label class="sub">Samples</label>
-        <div id="samples" class="samples"></div>
-        <p class="muted small">…or drop an image onto the viewer.</p>
-
-        <label class="check" id="bg-row" title="Isolate the subject with BiRefNet before reconstruction">
-          <input type="checkbox" id="bg-remove"> Remove background
-        </label>
-
-        <label class="hdr">Parameters</label>
-        <div class="field">
-          <label>Steps <span id="vSteps" class="muted">12</span></label>
-          <input id="steps" type="range" min="4" max="30" value="12">
+        <canvas id="thumb" hidden></canvas>
+        <label class="k-field" id="bg-row"><input id="bg-remove" type="checkbox" disabled> remove background (BiRefNet)</label>
+      </div>
+      <div class="k-panel">
+        <h2>Reconstruction</h2>
+        <div id="params" class="k-col"></div>
+        <div class="k-row">
+          <label class="k-field"><span>seed</span><input id="seed" type="number" min="0" value="42"></label>
+          <button id="btn-rand" class="small" title="Random seed">random</button>
         </div>
-        <div class="field">
-          <label>Guidance <span id="vCfg" class="muted">3.0</span></label>
-          <input id="cfg" type="range" min="10" max="70" value="30">
-        </div>
-        <div class="field">
-          <label>Gaussians <span id="vNg" class="muted">131,072</span></label>
-          <input id="ng" type="range" min="32768" max="262144" step="32768" value="131072">
-        </div>
-        <div class="row">
-          <div class="field grow"><label>Seed</label>
-            <input id="seed" type="number" min="0" value="42"></div>
-          <button id="btn-rand" class="icon" title="Random seed">⤮</button>
-        </div>
-
-        <details id="adv" class="accordion">
-          <summary>Advanced</summary>
-          <div class="field">
-            <label>Flow shift <span id="vShift" class="muted">3.0</span></label>
-            <input id="shift" type="range" min="10" max="60" value="30">
-          </div>
-        </details>
-
-        <div class="actions">
+        <div class="k-row">
           <button id="btn-go" class="primary" disabled>Generate</button>
-          <button id="btn-save" disabled title="Export the splat as a .ply">Save .ply…</button>
+          <span class="dim" id="elapsed"></span>
         </div>
-      </aside>
-
-      <!-- ── center: the splat viewport ────────────────────────────── -->
-      <section id="stage">
+      </div>
+      <div class="k-panel">
+        <h2>Weights</h2>
+        <div class="k-kv" id="weights"></div>
+      </div>
+    </aside>
+    <main class="k-main">
+      <div class="k-toolbar">
+        <label class="k-field"><input id="autorotate" type="checkbox" checked> auto-rotate</label>
+        <button id="btn-reset" class="small">reset view</button>
+        <label class="k-field"><span>scale</span><input id="vscale" type="range" min="20" max="300" value="100"><span class="k-val" id="vscale-val">1.00</span></label>
+        <label class="k-field"><input id="vlight" type="checkbox"> light background</label>
+        <span class="k-spacer"></span>
+        <span class="dim" id="splat-meta"></span>
+        <button id="btn-save" disabled title="Export the splat as a .ply">Save .ply…</button>
+      </div>
+      <div class="k-viewport" id="stage">
         <canvas id="view"></canvas>
-        <div id="overlay">
-          <div id="spinner" class="hidden">
-            <div class="ring"></div>
-            <span id="elapsed">0.0s</span>
-          </div>
-          <div id="view-hint">Loading models…</div>
-        </div>
-        <div id="viewer-bar">
-          <label class="vchk"><input type="checkbox" id="autorotate" checked> auto-rotate</label>
-          <button id="btn-reset" class="vbtn">reset view</button>
-          <span class="vsep"></span>
-          <label class="vfield">scale
-            <input id="vscale" type="range" min="20" max="300" value="100"></label>
-          <span class="vsep"></span>
-          <label class="vchk"><input type="checkbox" id="vlight"> light bg</label>
-          <span class="grow"></span>
-          <span class="muted small">drag · scroll</span>
-        </div>
-      </section>
+        <div class="k-hint" id="view-hint">Loading models…</div>
+        <div class="k-hud right dim">left-drag orbit · middle-drag pan · wheel zoom</div>
+      </div>
     </main>
-
-    <footer id="status">
-      <span id="status-text">Loading models…</span>
-      <span class="grow"></span>
-      <span id="stat-info" class="muted"></span>
-    </footer>
   </div>
-
-  <script type="module" src="/app/app.js"></script>
+  <footer class="k-statusbar"><span id="status">loading…</span></footer>
+  <script type="module" src="/app/main.js"></script>
 </body>
 </html>

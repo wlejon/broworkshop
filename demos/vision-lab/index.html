@@ -1,124 +1,98 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="utf-8">
-  <title>Vision Lab</title>
-  <link rel="stylesheet" href="style.css">
+<meta charset="utf-8">
+<title>Vision Lab</title>
+<link rel="stylesheet" href="/lib/kit/kit.css">
+<link rel="stylesheet" href="/app/style.css">
 </head>
-<body>
-  <div id="app">
-
-    <header id="topbar">
-      <span id="brand">◉ Vision&nbsp;Lab</span>
-      <span class="tagline">every bro.vision model on one image</span>
-      <span class="grow"></span>
-      <span id="image-name" class="muted">no image</span>
-      <button id="btn-image" title="Open an input image">Open image…</button>
-      <span id="weights-name" class="muted small" title="Weights root directory">weights: …</span>
-      <button id="btn-weights" title="Pick the brovisionml weights root directory">Weights…</button>
-      <span id="backend" class="badge">…</span>
-    </header>
-
-    <main>
-      <!-- ── left: model picker + params + actions ──────────────────── -->
-      <aside id="controls">
-        <label class="hdr">Model</label>
-        <div id="model-list" class="model-list"></div>
-
-        <div id="param-block" class="panel-block">
-          <label class="hdr"><span id="param-title">Parameters</span></label>
-          <p id="model-tagline" class="muted small"></p>
-          <div id="params"></div>
-        </div>
-
-        <div class="actions" id="load-actions">
-          <button id="btn-load" class="primary" disabled>Load model</button>
-        </div>
-        <p id="load-status" class="muted small">Pick a model and load it.</p>
-
-        <!-- annotator actions -->
-        <div id="annot-actions" class="actions hidden">
-          <button id="btn-run" class="primary" disabled>Run</button>
-          <button id="btn-cancel" disabled>Cancel</button>
-        </div>
-        <div id="runall-actions" class="hidden">
-          <button id="btn-runall" disabled>Run all annotators →contact sheet</button>
-        </div>
-
-        <!-- SAM actions -->
-        <div id="sam-actions" class="hidden">
-          <div class="actions">
-            <button id="btn-setimage" class="primary" disabled>Set image (encode)</button>
-          </div>
-          <p id="sam-hint" class="muted small">
-            After encoding: click to add a <b>foreground</b> point,
-            Shift-click for <b>background</b>, drag for a <b>box</b>.
-          </p>
-          <label class="check">
-            <input type="checkbox" id="sam-multimask" checked> Multimask (3 ranked proposals)
-          </label>
-          <div class="actions">
-            <button id="btn-segment" disabled>Segment</button>
-            <button id="btn-sam-clear" disabled>Clear prompts</button>
-          </div>
-          <details id="amg-section" class="accordion">
-            <summary>Segment everything (automatic)</summary>
-            <div id="amg-params"></div>
-            <button id="btn-everything" class="primary" disabled>Segment everything</button>
-          </details>
-        </div>
-      </aside>
-
-      <!-- ── center: image stage ────────────────────────────────────── -->
-      <section id="stage">
-        <div id="canvas-wrap">
-          <canvas id="view"></canvas>
-          <div id="view-hint">Open an image, pick a model, and Load.</div>
-        </div>
-        <div id="transport">
-          <div id="progress"><div id="progress-bar"></div></div>
-          <span id="view-mode-wrap" class="seg-toggle hidden">
-            <button data-mode="input" class="seg active">Input</button>
-            <button data-mode="output" class="seg">Output</button>
-            <button data-mode="overlay" class="seg">Overlay</button>
-          </span>
-          <span id="opacity-wrap" class="hidden">
-            <input id="opacity" type="range" min="0" max="100" value="70"
-                   title="Overlay opacity">
-          </span>
-          <span class="grow"></span>
-          <span id="stage-label" class="muted">idle</span>
-        </div>
-      </section>
-
-      <!-- ── right: result inspector ────────────────────────────────── -->
-      <aside id="inspect">
-        <label class="hdr">Result</label>
-        <div id="out-wrap">
-          <canvas id="out-thumb"></canvas>
-          <div id="out-hint" class="muted small">No result yet.</div>
-        </div>
-        <table id="meta"><tbody></tbody></table>
-
-        <div id="mask-block" class="panel-block hidden">
-          <label class="hdr">Masks <span id="mask-count" class="muted small"></span></label>
-          <div id="mask-list"></div>
-        </div>
-
-        <div id="contact-block" class="panel-block hidden">
-          <label class="hdr">Contact sheet</label>
-          <div id="contact-grid"></div>
-        </div>
-      </aside>
-    </main>
-
-    <footer id="status">
-      <span id="status-text">Ready.</span>
-      <span class="grow"></span>
-      <span id="vision-version" class="muted"></span>
-    </footer>
+<body class="k-app">
+  <header class="k-header">
+    <h1>Vision Lab</h1>
+    <span class="k-sub">bro.vision: every brovisionml model on one image: SAM, depth, normals, edges, lines, pose, segmentation, matting</span>
+    <span class="k-spacer"></span>
+    <span class="dim" id="vision-version"></span>
+    <span id="device"></span>
+  </header>
+  <div class="k-toolbar">
+    <label class="k-field" title="The brovisionml weights root (one subdirectory per model)"><span>weights</span>
+      <input id="weights-root" type="text" spellcheck="false"></label>
+    <button id="btn-weights" class="small" title="Choose the weights root">…</button>
+    <span class="k-sep"></span>
+    <label class="k-field"><span>image</span>
+      <select id="image-sel">
+        <option value="assets/robot-arm.png">robot-arm.png</option>
+        <option value="assets/scene.png">scene.png</option>
+      </select></label>
+    <button id="btn-image" title="Open an image file">Open…</button>
+    <span class="dim" id="image-meta"></span>
   </div>
-
-  <script type="module" src="/app/app.js"></script>
+  <div class="k-body">
+    <aside class="k-side">
+      <div class="k-panel">
+        <h2>Model</h2>
+        <div id="model-list"></div>
+      </div>
+      <div class="k-panel">
+        <h2 id="param-title">Parameters</h2>
+        <p class="k-note" id="model-tagline"></p>
+        <div id="params" class="k-col"></div>
+        <div class="k-row">
+          <button id="btn-load" class="primary" disabled>Load</button>
+          <span class="dim" id="load-meta"></span>
+        </div>
+      </div>
+      <div class="k-panel" id="annot-panel">
+        <h2>Run</h2>
+        <div class="k-row">
+          <button id="btn-run" class="primary" disabled>Run</button>
+          <button id="btn-runall" disabled title="Load and run every available annotator into a contact sheet">Run all → contact sheet</button>
+        </div>
+      </div>
+      <div class="k-panel" id="sam-panel" hidden>
+        <h2>SAM</h2>
+        <button id="btn-setimage" class="primary" disabled>Set image (encode)</button>
+        <p class="k-note">Click to add a foreground point, Shift+click for background, drag for a box.</p>
+        <label class="k-field"><input id="sam-multimask" type="checkbox" checked> multimask (3 ranked proposals)</label>
+        <div class="k-row">
+          <button id="btn-segment" disabled>Segment</button>
+          <button id="btn-sam-clear" disabled>Clear prompts</button>
+        </div>
+        <h3 class="k-sub-head dim">segment everything</h3>
+        <div id="amg-params" class="k-col"></div>
+        <button id="btn-everything" disabled>Segment everything</button>
+      </div>
+    </aside>
+    <main class="k-main">
+      <div class="k-toolbar">
+        <span class="k-row" id="view-mode"></span>
+        <label class="k-field" id="opacity-wrap"><span>overlay</span>
+          <input id="opacity" type="range" min="0" max="100" value="70"><span class="k-val" id="opacity-val">70%</span></label>
+        <span class="k-spacer"></span>
+        <span class="dim" id="stage-label">idle</span>
+      </div>
+      <div class="k-viewport">
+        <canvas id="view"></canvas>
+      </div>
+    </main>
+    <aside class="k-side right">
+      <div class="k-panel">
+        <h2>Result</h2>
+        <canvas id="out-thumb" hidden></canvas>
+        <p class="k-note" id="out-hint">No result yet.</p>
+        <div class="k-kv" id="meta"></div>
+      </div>
+      <div class="k-panel" id="mask-panel" hidden>
+        <h2>Masks <span class="dim" id="mask-count"></span></h2>
+        <div id="mask-list" class="k-col"></div>
+      </div>
+      <div class="k-panel" id="contact-panel" hidden>
+        <h2>Contact sheet</h2>
+        <div id="contact-grid"></div>
+      </div>
+    </aside>
+  </div>
+  <footer class="k-statusbar"><span id="status">loading…</span></footer>
+  <script type="module" src="/app/main.js"></script>
 </body>
 </html>

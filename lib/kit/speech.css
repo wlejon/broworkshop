@@ -1,0 +1,30 @@
+/* lib/kit/speech.css — styles for lib/kit/speech.js (the speech labs'
+ * shared view). Link after kit.css. */
+
+/* transcript (transcriptView) */
+.k-transcript { min-height: 64px; font-size: 16px; line-height: 1.55; color: #e8ecf2; font-family: var(--k-font-ui); }
+.k-transcript.empty { color: var(--k-dim); font-size: var(--k-size); font-family: var(--k-font); }
+.k-transcript.streaming { border-color: #24503a; color: var(--k-muted); }
+.k-transcript .cursor { color: var(--k-ok); }
+
+/* canvases in the column (timelineView, speakerView lanes) */
+canvas.k-lanes, canvas.k-timeline { display: block; width: 100%; flex: none; border: 1px solid var(--k-border); border-radius: 6px; }
+
+/* token table (tokenTable) */
+.k-tokens { border-collapse: collapse; }
+.k-tokens td { padding: 2px 12px 2px 0; color: #aab4c2; border-bottom: 1px solid #131922; }
+.k-tokens td.t { color: var(--k-dim); width: 70px; }
+.k-tokens td.piece { color: var(--k-value); }
+.k-tokens td.id { color: #4f586a; width: 70px; text-align: right; }
+
+/* speaker cards (speakerView) */
+.k-speakers { display: flex; gap: 10px; flex-wrap: wrap; min-height: 34px; align-items: center; }
+.k-speaker {
+    display: flex; align-items: center; gap: 9px; padding: 6px 12px; min-width: 190px;
+    background: var(--k-surface); border: 1px solid var(--k-border); border-radius: 8px;
+}
+.k-speaker .dot { width: 14px; height: 14px; border-radius: 7px; flex: none; }
+.k-speaker .nm { font-weight: 600; }
+.k-speaker .bar { flex: 1; }
+.k-speaker .val { width: 52px; text-align: right; color: var(--k-muted); }
+.k-speaker.idle .nm, .k-speaker.idle .dot { opacity: 0.45; }

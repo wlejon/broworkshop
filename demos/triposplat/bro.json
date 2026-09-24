@@ -1,6 +1,5 @@
 {
-    "app": ".",
-    "title": "TripoSplat Lab — image to 3D Gaussian Splat",
+    "title": "TripoSplat Lab",
     "lib": "../../lib",
     "width": 1320,
     "height": 860

@@ -1,83 +1,61 @@
-// Headless smoke for Parakeet Lab — drives the app's own globals (the lib/
-// modules share one scope) through the mic/file → transcribe → timeline loop.
-// Run (GPU) against the app dir from the bro repo root:
-//   bro-headless ../broworkshop/demos/parakeet-lab _smoke.js
-// Needs the real checkpoint (PARAKEET_DIR env to override) and bro's test
-// clip ("Hello there. This is a test of the pipeline.").
+// Parakeet Lab: boot autoloads the model, a file load through the input bar
+// auto-transcribes (streamed transcript, timeline pins, token table), the
+// offline mic path (bro.mic.feed) records the same clip, and cancel settles.
+// Skips when the checkpoint or the test clip is not on this machine.
 //
-// (ESM: the app's lib/ modules export their symbols — import the ones this
-// smoke reads/drives. Absolute /app/ mount → the SAME instances the app loaded.)
-import { $, TARGET_RATE } from "/app/lib/state.js";
-import { defaultModelDir, loadModel, model, tok } from "/app/lib/model.js";
-import { recording, startRecording, stopRecording, resample } from "/app/lib/audio.js";
-import { srcSamples, srcClipId, runTranscribe, lastResult } from "/app/lib/transcribe.js";
+//   scripts/validate.sh --ml demos/parakeet-lab
 
-function pumpUntil(pred, budgetMs) {
-  const start = Date.now();
-  while (!pred() && (Date.now() - start) < budgetMs) { sleep(20); }
-  return pred();
-}
+import { check, test, done, waitFor, frames, q, text, clickOn, typeInto, shot, needWeights } from "/lib/kit/test.js";
+import { resample } from "/lib/kit/audio.js";
+import { lab, PARAKEET } from "/app/lab.js";
 
-const env = (typeof process !== 'undefined' && process.env) ? process.env : {};
-const WROOT = env.BRO_WEIGHTS || 'D:/projects';   // override (e.g. /mnt/d/projects under WSL)
-const MODEL_DIR = env.PARAKEET_DIR || defaultModelDir('');
-const WAV = env.PARAKEET_WAV ||
-  (WROOT + '/brosoundml/weights/qwen-tts-hello-there-this-is-a-test-of-th.wav');
+needWeights('Parakeet-TDT 0.6B', PARAKEET, { probe: 'config.json' });
+const WAV = needWeights('speech test clip', ['brosoundml/weights/qwen-tts-hello-there-this-is-a-test-of-th.wav']);
 
-// ── 1. load the model + tokenizer ────────────────────────────────────────────
-$('#model-dir').value = MODEL_DIR;
-loadModel(MODEL_DIR);
-assert(pumpUntil(() => (model && tok) || $('#backend').classList.contains('err'), 300000),
-       'model load finished');
-assert(!$('#backend').classList.contains('err'),
-       'model loaded without error: ' + $('#backend').textContent);
-assert(model.loaded && model.sampleRate === 16000, 'parakeet handle is loaded @ 16 kHz');
-console.log('model: vocab=' + model.vocabSize + ' frameSeconds=' + model.frameSeconds +
-            ' pieces=' + tok.vocabCount);
+// 1. boot loaded model + tokenizer
+waitFor(() => (lab.model && lab.tok) || lab.error, 'model load', 300000);
+check(!lab.error, 'model loaded: ' + lab.error);
+test('parakeet handle is loaded at 16 kHz', () => check(lab.model.loaded && lab.model.sampleRate === 16000));
+test('model meta shown', () => check(/vocab/.test(lab.ui.row.metaEl.textContent)));
 
-// ── 2. decode the test clip through the app's file path ─────────────────────
-$('#autorun').checked = true;   // setSource should kick off the run itself
-$('#src-file').value = WAV;
-$('#btn-loadfile').click();   // app's loadSourceFile handler (decode + autorun)
-assert(srcSamples && srcSamples.length > 16000, 'file decoded to > 1 s of 16 kHz audio');
-assert(srcClipId >= 0, 'source clip published');
+// 2. load the clip through the input bar; autorun transcribes it
+check(q('#autorun').checked, 'autorun on by default');
+typeInto('#src-file', WAV);
+clickOn('#btn-open-file');
+check(lab.ui.input.clip && lab.ui.input.clip.length > 16000, 'file decoded to > 1 s of 16 kHz audio');
+check(!q('#btn-play-src').disabled, 'play enabled for the clip');
+waitFor(() => lab.result || /error/.test(text('#status')), 'transcription', 300000);
+check(lab.result, 'transcription finished: ' + text('#status'));
+const words = text('#transcript');
+test('transcript has the spoken words', () => check(/hello/i.test(words) && /test/i.test(words), words));
+test('transcript marked final', () => check(!q('#transcript').classList.contains('streaming')));
+test('one frame per token', () => check(lab.result.tokenIds.length === lab.result.tokenFrames.length));
+test('token table: one row per emission', () =>
+    check(document.querySelectorAll('#tokens tr').length === lab.result.tokenIds.length));
+test('timeline pins every token', () => check(lab.ui.timeline.tokens.length === lab.result.tokenIds.length));
+test('run meta shows the realtime factor', () => check(/realtime/.test(text('#run-meta'))));
+shot('transcribed');
 
-// ── 3. autorun transcribed it; transcript + timeline + table rendered ────────
-assert(pumpUntil(() => lastResult !== null, 300000), 'transcription finished');
-const text = $('#transcript').textContent;
-assert(/hello/i.test(text) && /test/i.test(text),
-       'transcript contains the spoken words (got "' + text + '")');
-assert(lastResult.tokenIds.length === lastResult.tokenFrames.length,
-       'one frame per token');
-assert($('#timeline').querySelector('canvas'), 'timeline canvas rendered');
-assert($('#tokens').querySelectorAll('tr').length === lastResult.tokenIds.length,
-       'token table has one row per emission');
-assert($('#run-meta').textContent.indexOf('realtime') >= 0, 'run meta shows RTF');
-console.log('transcript: "' + text + '" (' + lastResult.tokenIds.length + ' tokens)');
+// 3. mic path, fed offline (no audio device headless): same tap the live record uses
+q('#autorun').checked = false;
+const clip = lab.ui.input.clip;
+lab.ui.input.startRecording({ live: false });
+check(lab.ui.input.recording && /stop/.test(text('#btn-record')), 'recording state shown');
+const rate = bro.mic.engineRate();
+bro.mic.feed(resample(clip, 16000, rate), rate);
+frames(8);
+const n = lab.ui.input.stopRecording();
+test('mic path captured the fed clip (within 5%)', () => check(Math.abs(n - clip.length) / clip.length < 0.05, n + ' vs ' + clip.length));
+test('recorded take became the source', () => check(/^mic/.test(lab.ui.input.label)));
 
-// ── 4. mic record path via the offline feed (no device in headless) ─────────
-// startRecording({live:false}) installs the same samples:true tap the windowed
-// app uses; bro.mic.feed pushes the clip through resample → chunk → onChunk.
-$('#autorun').checked = false;
-const engineRate = bro.mic.engineRate();
-startRecording({ live: false });
-assert(recording, 'recording state set');
-// Re-rate the 16 kHz source to the engine mic rate so feed accepts it.
-const fed = resample(srcSamples, TARGET_RATE, engineRate);
-bro.mic.feed(fed, engineRate);
-sleep(100);                      // tick the engine so onChunk drains
-const n = stopRecording();
-assert(n > 16000, 'mic path captured > 1 s of audio (' + n + ' samples)');
-assert(Math.abs(n - srcSamples.length) / srcSamples.length < 0.05,
-       'captured length within 5% of the fed clip');
-console.log('mic capture: ' + n + ' samples via feed');
+// 4. transcribe the take via the button, then cancel a run
+clickOn('#btn-transcribe');
+waitFor(() => !lab.running, 'mic transcription', 300000);
+test('mic take transcribes to the same words', () => check(/hello/i.test(text('#transcript')), text('#transcript')));
+clickOn('#btn-transcribe');
+check(lab.running && !q('#btn-cancel').disabled, 'cancel armed while running');
+clickOn('#btn-cancel');
+waitFor(() => !lab.running, 'cancelled run settles', 300000);
+test('buttons reset after cancel', () => check(!q('#btn-transcribe').disabled && q('#btn-cancel').disabled));
 
-// ── 5. transcribe the mic-captured audio — same words ────────────────────────
-runTranscribe();   // resets lastResult=null internally, then transcribes async
-assert(pumpUntil(() => lastResult !== null, 300000), 'mic transcription finished');
-const micText = $('#transcript').textContent;
-assert(/hello/i.test(micText) && /test/i.test(micText),
-       'mic-path transcript contains the spoken words (got "' + micText + '")');
-console.log('mic transcript: "' + micText + '"');
-
-console.log('parakeet-lab smoke: PASS');
+done('parakeet-lab');

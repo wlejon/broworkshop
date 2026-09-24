@@ -654,6 +654,13 @@ the VAD and the Qwen-TTS speaker encoder gives the embeddings. The doc and
 the generated bin/docs copy should say so. demos/cluster-diar-lab calls
 it the binding's way.
 
+### `linear-gradient()` with `rgb()` stops paints nothing (2026-09-24)
+`background: linear-gradient(90deg, rgb(20, 40, 90), rgb(220, 180, 80))`
+(and the `background-image` longhand) leaves the box unpainted; the same
+gradient with hex stops (`#14285a, #dcb450`) paints. Looks like the
+gradient parser splits the stop list on the commas inside `rgb(...)`.
+Seen in tools/algo-viz's pathfinding legend (now hex).
+
 ## Notes (not bugs)
 
 - WAAPI gaps are documented in docs/web-animations-api.js and demos/waapi-lab
@@ -680,3 +687,12 @@ it the binding's way.
 - `performance.now()` in headless advances only with virtual time
   (`advanceTime`), so fps/ms readouts measured with it read as 62.5 fps /
   0 ms there. Use `Date.now()` for wall-clock budgets.
+- FastNoise2 coherent generators (Simplex, Perlin, Value, Cellular*) have a
+  default "Feature Scale" of about 100 world units per feature, so
+  `genUniformGrid2D(x, y, w, h, frequency, seed)` with a classic frequency
+  (0.01..0.1) gives an almost flat ramp. `node.set('Feature Scale', 1)`
+  restores the classic "features per unit" meaning (and matches
+  `bro.image.gpu.fbm2D`). noise-api.js should say so next to the grid
+  functions, and that the offsets are world space (not sample indices).
+  tools/algo-viz's CPU noise types and octave thumbnails were ~100x too
+  smooth because of it.

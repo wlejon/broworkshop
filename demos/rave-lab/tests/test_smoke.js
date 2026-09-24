@@ -1,111 +1,104 @@
-// Headless smoke for RAVE Lab — drives the app's own globals (the lib/ modules
-// share one scope) through the full encode → edit → decode loop.
-// Run (GPU) against the app dir, pointing at a converted RAVE model:
-//   RAVE_DIR=/tmp/rave/out_z8  bro-headless ../broworkshop/demos/rave-lab _smoke.js
-// (from the bro repo root; paths differ per platform — see CLAUDE.md)
+// RAVE Lab: boot autoloads a converted RAVE model; a tone encodes into one
+// curve per latent dim and decodes; a curve op and a real mouse drag on a
+// curve change the morph; reset restores the encode; the noise / stereo
+// toggles decode through the UI (seeded, so reproducible; width 0 collapses
+// stereo). Skips when no RAVE model is on this machine.
 //
-// (ESM: the app's lib/ modules export their symbols — import the ones this
-// smoke reads/drives. Absolute /app/ mount → the SAME instances the app loaded.)
-import { $ } from "/app/lib/state.js";
-import { loadModel, rave } from "/app/lib/model.js";
-import { publishClip } from "/app/lib/audio.js";
-import { enc, work, busy, runDecode, lastOut } from "/app/lib/render.js";
-import {
-  resetAll, paintAt, onPaintUp, curveCells, dimRanges, redrawDim, opNudge, setActivePaint,
-} from "/app/lib/curves.js";
+//   scripts/validate.sh --ml demos/rave-lab
 
-function pumpUntil(pred, budgetMs) {
-  const start = Date.now();
-  while (!pred() && (Date.now() - start) < budgetMs) { sleep(20); }
-  return pred();
-}
+import { check, test, done, waitFor, q, text, clickOn, setValue, shot, needWeights } from "/lib/kit/test.js";
+import { saveWav } from "/lib/kit/audio.js";
+import { lab, RAVE } from "/app/lab.js";
 
-// A trained RAVE export (z8). Defaults to a local train output; override with
-// RAVE_DIR, or point BRO_WEIGHTS at the projects root to use a packaged model.
-const _env = (typeof process !== 'undefined' && process.env) ? process.env : {};
-const RAVE_DIR = _env.RAVE_DIR
-  || (_env.BRO_WEIGHTS ? _env.BRO_WEIGHTS + '/brosoundml-data/rave/birds_dawnchorus_z8' : '/tmp/rave/out_z8');
+needWeights('RAVE model', RAVE, { probe: 'config.json' });
 
-// ── 1. load the model ────────────────────────────────────────────────────────
-$('#model-dir').value = RAVE_DIR;
-loadModel(RAVE_DIR);
-assert(pumpUntil(() => rave || $('#backend').classList.contains('err'), 120000), 'model load finished');
-assert(!$('#backend').classList.contains('err'), 'model loaded without error: ' + $('#backend').textContent);
-assert(rave && rave.loaded, 'rave handle is loaded');
-console.log(`model: sr=${rave.sampleRate} nLatent=${rave.nLatent} nBand=${rave.nBand} ratio=${rave.totalRatio}`);
+const sum = (a, b) => { let d = 0; for (let i = 0; i < a.length; i++) d += Math.abs(a[i] - b[i]); return d; };
+const lr = (s) => { let d = 0; for (let i = 0; i < s.length; i += 2) d += Math.abs(s[i] - s[i + 1]); return d; };
+function waitDecode(n, msg) { waitFor(() => lab.decodes > n || lab.error, msg, 30000); check(!lab.error, lab.error); }
 
-// ── 2. make a tone → encode → decode ─────────────────────────────────────────
-$('#tone-freq').value = '220';
-$('#tone-secs').value = '1.0';
-$('#tone-kind').value = 'harm';
-$('#autoplay').checked = false;
-$('#btn-tone').click();   // app's makeTone handler (genTone → encode → decode)
-assert(pumpUntil(() => enc && lastOut, 30000), 'encode + initial decode finished');
-assert(enc.nLatent === rave.nLatent, 'enc nLatent matches handle');
-assert(enc.frames > 0, 'encode produced frames: ' + enc.frames);
-assert(work.length === enc.nLatent * enc.frames, 'work latent grid size');
-assert(curveCells.length === enc.nLatent, 'a curve cell per latent dim');
-assert(lastOut.length === enc.frames * rave.totalRatio, 'decode length matches frames*ratio');
-let peak0 = 0; for (let i = 0; i < lastOut.length; i++) { const a = Math.abs(lastOut[i]); if (a > peak0) peak0 = a; }
-assert(peak0 > 0, 'initial decode is non-silent: peak=' + peak0);
-console.log(`encode: ${enc.nLatent} x ${enc.frames}  decode peak=${peak0.toFixed(4)}`);
+// 1. model
+waitFor(() => lab.rave || lab.error, 'model load', 120000);
+check(!lab.error, 'model loaded: ' + lab.error);
+const r = lab.rave;
+test('model meta shown', () => check(/latents/.test(lab.ui.row.metaEl.textContent)));
+test('preset list lists the loaded model', () => check(q('#preset').options.length >= 1 && !q('#preset').disabled));
+test('source buttons enabled', () => check(!q('#btn-tone').disabled && !q('#btn-loadfile').disabled));
 
-// ── 3. edit dim 0 (loudness) and re-decode — output must change ──────────────
-const before = Float32Array.from(lastOut);
-opNudge(0, 1.5);              // boost the whole loudness curve
-redrawDim(0);
-runDecode(false);
-assert(pumpUntil(() => !busy, 30000), 'edit decode finished');
-let diff = 0; for (let i = 0; i < lastOut.length; i++) diff += Math.abs(lastOut[i] - before[i]);
-assert(diff > 0, 'editing a latent curve changed the output (Δ=' + diff.toFixed(2) + ')');
-console.log(`morph: total abs delta=${diff.toFixed(2)}`);
+// 2. tone → encode → decode, through the toolbar
+q('#autoplay').checked = false;
+setValue('#tone-secs', '1.0');
+let n = lab.decodes;
+clickOn('#btn-tone');
+waitDecode(n, 'tone decode');
+const enc = lab.enc;
+test('encode grid', () => check(enc.nLatent === r.nLatent && enc.frames > 0 && lab.work.length === enc.nLatent * enc.frames));
+test('one curve cell per latent dim', () => check(document.querySelectorAll('#curves .curve-cell').length === enc.nLatent));
+test('decode length = frames × ratio', () => check(lab.out.samples.length === enc.frames * r.totalRatio));
+test('curves header shown, hint hidden', () => check(!q('#curves-head').hidden && q('#hint').hidden));
+test('morph controls enabled', () => check(!q('#btn-play-out').disabled && !q('#btn-save').disabled && !q('#btn-reset').disabled));
+test('src meta', () => check(/Hz/.test(text('#src-meta'))));
+shot('encoded');
 
-// ── 4. freehand-paint dim 1 via the drag path ────────────────────────────────
-const cell = curveCells[1];
-const r = cell.cv.getBoundingClientRect();
-setActivePaint({ cv: cell.cv, c: 1, mn: dimRanges[1][0], mx: dimRanges[1][1],
-                W: cell.cv.width, H: cell.cv.height, pad: 6, lastI: -1, lastV: 0 });
-paintAt({ clientX: r.left + r.width * 0.1, clientY: r.top + r.height * 0.2 });
-paintAt({ clientX: r.left + r.width * 0.9, clientY: r.top + r.height * 0.8 });
-onPaintUp();
-assert(pumpUntil(() => !busy, 30000), 'paint decode finished');
-console.log('paint dim 1: ok');
+// 3. a per-row op (nudge dim 0 up) re-decodes to a different morph
+let before = Float32Array.from(lab.out.samples);
+n = lab.decodes;
+clickOn('.curve-cell[data-dim="0"] .curve-tools button:nth-child(5)');
+waitDecode(n, 'nudge decode');
+test('nudge edited dim 0', () => check(sum(lab.work.subarray(0, enc.frames), enc.latent.subarray(0, enc.frames)) > 0));
+test('nudge changed the morph', () => check(sum(lab.out.samples, before) > 0));
 
-// ── 5. reset all restores the encoded latent ─────────────────────────────────
-resetAll();
-let resErr = 0; for (let i = 0; i < work.length; i++) resErr += Math.abs(work[i] - enc.latent[i]);
-assert(resErr === 0, 'reset all restored the encoded latent exactly');
-console.log('reset: ok');
+// 4. a real drag across dim 1 through the input pipeline
+const cv = q('.curve-cell[data-dim="1"] canvas').getBoundingClientRect();
+const row1 = () => lab.work.subarray(enc.frames, 2 * enc.frames);
+const row1Before = Float32Array.from(row1());
+n = lab.decodes;
+mouseMove(cv.left + cv.width * 0.1, cv.top + cv.height * 0.2);
+mouseDown(cv.left + cv.width * 0.1, cv.top + cv.height * 0.2, 0);
+for (let k = 1; k <= 8; k++) mouseMove(cv.left + cv.width * (0.1 + 0.1 * k), cv.top + cv.height * (0.2 + 0.07 * k));
+mouseUp(cv.left + cv.width * 0.9, cv.top + cv.height * 0.76, 0);
+flush();
+waitDecode(n, 'drag decode');
+test('drag repainted dim 1', () => check(sum(row1(), row1Before) > 0));
+test('drag stats show a delta', () => check(/Δ/.test(q('.curve-cell[data-dim="1"] .curve-stats').textContent)));
+shot('edited');
 
-// ── 6. noise branch: addNoise changes the output; seed makes it reproducible ──
-const det = rave.decode(enc.latent, enc.frames);
-const n1  = rave.decode(enc.latent, enc.frames, { addNoise: true, seed: 7 });
-const n2  = rave.decode(enc.latent, enc.frames, { addNoise: true, seed: 7 });
-let dNoise = 0, dSeed = 0;
-for (let i = 0; i < det.samples.length; i++) {
-  dNoise += Math.abs(n1.samples[i] - det.samples[i]);
-  dSeed  += Math.abs(n1.samples[i] - n2.samples[i]);
-}
-assert(dNoise > 0, 'addNoise changes the output vs deterministic');
-assert(dSeed === 0, 'same seed reproduces the same noisy output');
-console.log(`noise: Δvs-det=${dNoise.toFixed(2)}  seed-repro=${dSeed === 0}`);
+// 5. reset all restores the encode exactly
+n = lab.decodes;
+clickOn('#btn-reset');
+waitDecode(n, 'reset decode');
+test('reset restored the latent', () => check(sum(lab.work, enc.latent) === 0));
+const det = Float32Array.from(lab.out.samples);
 
-// ── 7. stereo: 2 interleaved channels, decorrelated, seed-reproducible ────────
-const st = rave.decode(enc.latent, enc.frames, { channels: 2, stereoWidth: 1.0, seed: 3 });
-assert(st.channels === 2, 'stereo decode reports 2 channels');
-assert(st.samples.length === det.samples.length * 2, 'stereo length = 2x mono');
-let lr = 0; for (let i = 0; i < st.samples.length; i += 2) lr += Math.abs(st.samples[i] - st.samples[i + 1]);
-assert(lr > 0, 'stereo channels are decorrelated (L != R), Σ|L-R|=' + lr.toFixed(2));
-const st2 = rave.decode(enc.latent, enc.frames, { channels: 2, stereoWidth: 1.0, seed: 3 });
-let dStereoSeed = 0; for (let i = 0; i < st.samples.length; i++) dStereoSeed += Math.abs(st.samples[i] - st2.samples[i]);
-assert(dStereoSeed === 0, 'same seed reproduces the same stereo decode');
-// width 0 collapses to identical channels (no decorrelation)
-const stNarrow = rave.decode(enc.latent, enc.frames, { channels: 2, stereoWidth: 0, seed: 3 });
-let lr0 = 0; for (let i = 0; i < stNarrow.samples.length; i += 2) lr0 += Math.abs(stNarrow.samples[i] - stNarrow.samples[i + 1]);
-assert(lr0 === 0, 'width 0 collapses stereo to identical channels');
-// publish + play the stereo morph through the 2-channel clip path
-const sid = publishClip(-1, st.samples, 2);
-assert(sid >= 0, 'stereo clip publishes to a 2-channel broaudio clip');
-console.log(`stereo: Σ|L-R|=${lr.toFixed(2)}  seed-repro=${dStereoSeed === 0}  width0-mono=${lr0 === 0}`);
+// 6. noise: changes the morph; the fixed seed reproduces it
+n = lab.decodes;
+setValue('#noise', true);
+waitDecode(n, 'noise decode');
+const noisy = Float32Array.from(lab.out.samples);
+test('noise changes the morph', () => check(sum(noisy, det) > 0));
+n = lab.decodes;
+clickOn('#btn-decode');
+waitDecode(n, 're-decode');
+test('same seed reproduces the noisy morph', () => check(sum(lab.out.samples, noisy) === 0));
+setValue('#noise', false);
 
-console.log('rave-lab smoke: PASS');
+// 7. stereo: 2 interleaved decorrelated channels; width 0 collapses
+n = lab.decodes;
+setValue('#stereo', true);
+waitDecode(n, 'stereo decode');
+test('stereo decode is 2 channels', () => check(lab.out.channels === 2 && lab.out.samples.length === det.length * 2));
+test('stereo channels decorrelated', () => check(lr(lab.out.samples) > 0));
+test('run meta says stereo', () => check(/stereo/.test(text('#run-meta'))));
+n = lab.decodes;
+setValue('#width', '0');
+waitDecode(n, 'width 0 decode');
+test('width 0 collapses to identical channels', () => check(lr(lab.out.samples) === 0));
+setValue('#stereo', false);
+
+// 8. playback + save through the UI (save to a path: the dialog would block)
+clickOn('#btn-play-out');
+test('morph plays', () => check(!lab.error));
+const out = 'tests/out/rave-lab-morph.wav';
+const saved = saveWav(lab.out.samples, r.sampleRate, { path: out });
+test('morph saves as wav', () => check(saved && require('fs').existsSync(saved)));
+
+done('rave-lab');

@@ -1,93 +1,75 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <title>Vision-Language Lab — brolm</title>
-    <link rel="stylesheet" href="style.css">
+<meta charset="utf-8">
+<title>VLM Lab</title>
+<link rel="stylesheet" href="/lib/kit/kit.css">
+<link rel="stylesheet" href="/lib/kit/chat.css">
+<link rel="stylesheet" href="/app/style.css">
 </head>
-<body>
-    <header class="app-header">
-        <div class="header-left">
-            <h1 class="logo">bro.lm <span>Vision-Language Lab</span></h1>
-            <div class="model-selector">
-                <label for="modelSelect">VLM Architecture:</label>
-                <select id="modelSelect">
-                    <option value="qwen3-vl">Qwen3-VL (Dense M-RoPE + ViT)</option>
-                    <option value="qwen35">Qwen3.5 (Hybrid Linear-Attention)</option>
-                    <option value="clip">CLIP Cross-Modal Scorer</option>
-                </select>
-            </div>
+<body class="k-app">
+  <header class="k-header">
+    <h1>VLM Lab</h1>
+    <span class="k-sub">bro.lm vision-language models: chat about an image, ground objects with boxes, or rank captions with CLIP</span>
+    <span class="k-spacer"></span>
+    <span class="k-badge" id="badge-rate" title="decode speed of the last reply">— tok/s</span>
+    <span class="k-badge" id="badge-latency" title="time to the first token of the last reply">— ms</span>
+    <span id="device"></span>
+  </header>
+  <div class="k-toolbar" id="model-bar">
+    <label class="k-field" title="Model family"><span>family</span>
+      <select id="family">
+        <option value="qwen3vl">Qwen3-VL (dense M-RoPE decoder + ViT, grounding)</option>
+        <option value="qwen35">Qwen3.5 (hybrid linear-attention VLM)</option>
+        <option value="clip">CLIP ViT-L/14 (caption scorer)</option>
+      </select></label>
+  </div>
+  <div class="k-body">
+    <main class="k-main">
+      <div class="k-toolbar">
+        <label class="k-field"><span>image</span>
+          <select id="sample">
+            <option value="scenery">sample: mountain scene</option>
+            <option value="room">sample: interior studio</option>
+            <option value="objects">sample: workshop desk</option>
+          </select></label>
+        <button id="btn-open" title="Open an image file (or drop one on the stage)">Open…</button>
+        <button id="btn-clear-boxes" title="Hide the grounding boxes">Clear boxes</button>
+        <span class="dim" id="image-meta"></span>
+      </div>
+      <div class="k-main pad" id="stage-wrap">
+        <div id="stage">
+          <canvas id="image"></canvas>
+          <canvas id="overlay"></canvas>
+          <div id="drop-hint" class="dim" hidden>drop to load</div>
         </div>
-        <div class="header-right">
-            <div class="badge-group">
-                <span id="badgeBackend" class="badge ok">brolm: Native</span>
-                <span id="badgeTokens" class="badge">0 tok/s</span>
-                <span id="badgeLatency" class="badge">0 ms</span>
-            </div>
-        </div>
-    </header>
-
-    <main class="workspace">
-        <section class="image-pane">
-            <div class="pane-header">
-                <h2>Visual Input &amp; Grounding Canvas</h2>
-                <div class="image-actions">
-                    <select id="sampleImageSelect">
-                        <option value="scenery">Sample: Mountain Scene</option>
-                        <option value="room">Sample: Interior Studio</option>
-                        <option value="objects">Sample: Workshop Desk</option>
-                    </select>
-                    <button id="uploadBtn" class="btn small">Upload File...</button>
-                    <input type="file" id="fileInput" accept="image/*" style="display: none;">
-                </div>
-            </div>
-
-            <div class="canvas-viewport" id="dropZone">
-                <canvas id="imageCanvas" width="640" height="480"></canvas>
-                <canvas id="overlayCanvas" width="640" height="480"></canvas>
-                <div class="drop-hint" id="dropHint">
-                    <span>Drop image here or select a sample above</span>
-                </div>
-            </div>
-
-            <div class="grounding-footer">
-                <span class="grounding-title">Grounded Objects:</span>
-                <div class="tags-row" id="groundedTags">
-                    <span class="tag-pill">Awaiting analysis</span>
-                </div>
-            </div>
-        </section>
-
-        <section class="chat-pane">
-            <div class="pane-header">
-                <h2>Conversational Multimodal Reasoning</h2>
-                <div class="chat-actions">
-                    <button id="clearChatBtn" class="btn small">Clear Chat</button>
-                </div>
-            </div>
-
-            <div class="chat-history" id="chatHistory">
-                <div class="chat-msg assistant">
-                    <div class="msg-avatar">🤖</div>
-                    <div class="msg-body">
-                        <p>Welcome to the <strong>Vision-Language Lab</strong>. I can visually reason about the image on the left, locate objects with coordinates, transcribe text, or answer questions.</p>
-                    </div>
-                </div>
-            </div>
-
-            <div class="quick-prompts">
-                <button class="quick-btn" data-prompt="Describe this image in rich detail.">Describe Scene</button>
-                <button class="quick-btn" data-prompt="Locate and list all distinct objects with bounding boxes.">Detect Objects</button>
-                <button class="quick-btn" data-prompt="What are the key colors and lighting conditions in this image?">Lighting & Colors</button>
-            </div>
-
-            <div class="prompt-input-bar">
-                <textarea id="promptInput" placeholder="Ask a question about the image... (Enter to send, Shift+Enter for newline)" rows="2"></textarea>
-                <button id="sendBtn" class="btn primary send-btn">Send</button>
-            </div>
-        </section>
+        <div class="k-caption">grounded objects <span class="dim">boxes parsed from the reply (0..1000 grid)</span></div>
+        <div id="tags" class="k-row"><span class="dim">none yet: ask the model to locate objects</span></div>
+      </div>
     </main>
-
-    <script type="module" src="app.js"></script>
+    <aside class="k-side right" id="chat-side">
+      <div class="k-toolbar bare">
+        <label class="k-field" title="Sampling temperature (0 = greedy)"><span>temp</span>
+          <input id="temperature" type="number" value="0.2" min="0" max="2" step="0.1"></label>
+        <label class="k-field" title="Reply length cap"><span>max tokens</span>
+          <input id="max-tokens" type="number" value="384" min="16" max="2048" step="16"></label>
+        <span class="k-spacer"></span>
+        <button id="btn-clear" class="small" title="Start a new conversation">Clear chat</button>
+      </div>
+      <div id="chat"><div class="chat-hint">Load a model, pick an image, then ask about it. With CLIP, list captions separated by | and each is scored against the image.</div></div>
+      <div class="k-row" id="quick">
+        <button class="small" data-prompt="Describe this image in detail.">Describe</button>
+        <button class="small" data-prompt="Locate every distinct object in the image. Output a JSON list where each item is {&quot;bbox_2d&quot;: [x1, y1, x2, y2], &quot;label&quot;: &quot;name&quot;}.">Detect objects</button>
+        <button class="small" data-prompt="What are the key colors and lighting conditions in this image?">Colors &amp; lighting</button>
+        <button class="small" data-prompt="a mountain landscape | an interior room with a window | a laptop on a desk | a bowl of fruit" data-clip="1">CLIP captions</button>
+      </div>
+      <div class="chat-input">
+        <textarea id="prompt" rows="2" placeholder="Ask about the image… (Enter sends, Shift+Enter newline)"></textarea>
+        <div class="k-col"><button id="btn-send" class="primary" disabled>Send</button><button id="btn-stop" disabled>Stop</button></div>
+      </div>
+    </aside>
+  </div>
+  <footer class="k-statusbar"><span id="status">loading…</span></footer>
+  <script type="module" src="/app/main.js"></script>
 </body>
 </html>

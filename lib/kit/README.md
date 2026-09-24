@@ -326,8 +326,9 @@ carry `_rid`, replies echo it, `{ type: 'error', message }` rejects),
 `abandon()` rejects every pending request with `err.abandoned`. In the
 worker, `serveWorker({ type: async (msg) => reply })` dispatches by `type`,
 replies with the handler's return value (`reply.transfer` = transfer list),
-turns a throw into an error reply, and posts `'ready'`; `emit(type, fields)`
-sends an event.
+turns a throw into an error reply, and posts `'ready'`; `emit(type, fields,
+transfer?)` sends an event (templates/worker-sim streams transferred frame
+buffers this way).
 
 **prefs.js** — `prefStore('my-lab.v1', defaults)` -> `{ data, set(patch),
 save(), snapshot(), restore(raw) }`. Storage failures are silent. Tests

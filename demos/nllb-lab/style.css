@@ -1,0 +1,12 @@
+/* NLLB-200 Lab — the two text panes side by side. */
+#src-lang, #tgt-lang { min-width: 220px; }
+#beams { width: 64px; }
+
+.panes { flex-direction: row; }
+.pane { flex: 1; display: flex; flex-direction: column; gap: 6px; min-width: 0; min-height: 0; }
+#input, #output {
+    flex: 1; min-height: 0; padding: 14px; overflow-y: auto; resize: none;
+    font-family: var(--k-font-ui); font-size: 15px; line-height: 1.6; white-space: pre-wrap;
+}
+#output.empty { color: var(--k-dim); font-size: var(--k-size); }
+#output.partial { color: var(--k-muted); }

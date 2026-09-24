@@ -1,58 +1,37 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="utf-8">
-  <title>Cluster Diarization Lab</title>
-  <link rel="stylesheet" href="style.css">
+<meta charset="utf-8">
+<title>Cluster Diarization Lab</title>
+<link rel="stylesheet" href="/lib/kit/kit.css">
+<link rel="stylesheet" href="/lib/kit/speech.css">
 </head>
-<body>
-  <div id="app">
-    <header id="toolbar">
-      <span id="brand">◇ Cluster&nbsp;Diarization&nbsp;Lab</span>
-      <span class="tagline">telling apart similar voices · Sortformer VAD + ECAPA x-vectors + cosine clustering</span>
-      <span class="grow"></span>
-      <span id="backend" class="badge">loading…</span>
-    </header>
-
-    <!-- two model dirs: the Sortformer checkpoint (used as VAD) and the
-         standalone speaker-encoder artifact (ECAPA x-vectors + xvector_mean.f32) -->
-    <section id="controls">
-      <label class="cfg">sortformer
-        <input id="sort-dir" type="text" placeholder="Sortformer model dir (VAD)">
-      </label>
-      <label class="cfg">encoder
-        <input id="enc-dir" type="text" placeholder="speaker-encoder dir">
-      </label>
-      <button id="btn-load" title="Load the clustering diarizer">↻ Load</button>
-      <span id="model-meta" class="meta"></span>
-    </section>
-
-    <!-- source audio: the microphone, the whole-system output, or one app -->
-    <section id="srcbar">
-      <span class="grouplbl">source</span>
-      <select id="src-sel" title="Pick an audio source"></select>
-      <button id="btn-listen" disabled title="Open the source and start diarizing">▶ listen</button>
-      <button id="btn-stop" disabled title="Stop and close the source">■ stop</button>
-      <button id="btn-clear" title="Clear the timeline">⟲ clear</button>
-      <div id="level" title="Live input level"><div id="level-fill"></div></div>
-      <span class="grow"></span>
-      <label class="cfg cos" title="Centered-cosine merge threshold — the 'how different is different' knob Sortformer lacks. LOWER = more speakers (splits readily), HIGHER = fewer (merges). ~0.40 is the default.">cosine
-        <input id="cos" type="range" min="0.05" max="0.80" step="0.025" value="0.40">
-        <span id="cos-val">0.40</span>
-      </label>
-    </section>
-
-    <main id="stages">
-      <div class="section-title">speakers — <span class="dim-hint">discovered by clustering; count is not fixed (unlike Sortformer's 4 slots)</span></div>
-      <div id="speakers"></div>
-
-      <div class="section-title">timeline — <span class="dim-hint">whole capture re-diarized · each column an 80 ms frame · lanes are discovered speakers</span></div>
-      <canvas id="timeline" width="1180" height="220"></canvas>
-
-      <div id="stats" class="stats"><span class="placeholder">Load the models, pick a source, then press listen. Talk for a few seconds — it re-diarizes the whole capture as it grows.</span></div>
-    </main>
+<body class="k-app">
+  <header class="k-header">
+    <h1>Cluster Diarization Lab</h1>
+    <span class="k-sub">bro.diar.loadClusterDiarizer: telling similar voices apart. Sortformer VAD + ECAPA x-vectors + cosine clustering</span>
+    <span class="k-spacer"></span>
+    <span id="device"></span>
+  </header>
+  <!-- two dirs: the Sortformer checkpoint (used as VAD) and the standalone
+       speaker-encoder artifact (ECAPA x-vectors + xvector_mean.f32) -->
+  <div class="k-toolbar" id="model-bar"></div>
+  <div class="k-toolbar" id="input-bar"></div>
+  <div class="k-toolbar" id="live-bar">
+    <label class="k-field" title="Centered-cosine merge threshold: the 'how different is different' knob Sortformer lacks. Lower = more speakers (splits readily), higher = fewer (merges). ~0.40 is the default.">
+      <span>cosine</span>
+      <input id="cos" type="range" min="0.05" max="0.80" step="0.025" value="0.40"><span class="k-val" id="cos-val"></span></label>
+    <button id="btn-diarize" disabled title="Diarize the source clip">Diarize clip</button>
+    <button id="btn-clear" title="Clear the timeline">Clear</button>
   </div>
-
-  <script type="module" src="/app/app.js"></script>
+  <main class="k-main pad">
+    <div class="k-caption">speakers <span class="dim">discovered by clustering: the count is not fixed (unlike Sortformer's 4 slots)</span></div>
+    <div id="speakers" class="k-speakers"></div>
+    <div class="k-caption">timeline <span class="dim">the whole capture, re-diarized as it grows · one column per 80 ms frame · lanes are discovered speakers</span></div>
+    <canvas id="lanes" class="k-lanes"></canvas>
+    <div id="stats" class="k-stats"></div>
+  </main>
+  <footer class="k-statusbar"><span id="status">loading…</span></footer>
+  <script type="module" src="/app/main.js"></script>
 </body>
 </html>

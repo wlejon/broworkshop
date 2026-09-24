@@ -1,1 +1,6 @@
-{ "app": ".", "title": "Cluster Diarization Lab", "width": 1280, "height": 860, "lib": "../../lib" }
+{
+    "title": "Cluster Diarization Lab",
+    "width": 1280,
+    "height": 860,
+    "lib": "../../lib"
+}
