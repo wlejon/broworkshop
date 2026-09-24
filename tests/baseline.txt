@@ -26,7 +26,7 @@ PASS test ai/voice-pipeline/tests/test_setup.js
 PASS test ai/voice-pipeline/tests/test_stream.js 
 PASS test ai/voice-pipeline/tests/test_turn.js 
 PASS smoke demos/ai-arena 
-FAIL test demos/ai-arena/tests/test_agents.js rc=1: evalScriptFileJit: uncaught Error: 1 failed: headless: layered_planner plays red vs scripted
+FAIL test demos/ai-arena/tests/test_agents.js rc=1: evalScriptFileJit: uncaught Error: 1 failed: live: layered_planner drives the red capsules
 PASS test demos/ai-arena/tests/test_replay.js 
 FAIL test demos/ai-arena/tests/test_ui.js rc=1: evalScriptFileJit: uncaught Error: 1 failed: combat reaches the log, roster, reward and observation panels
 PASS smoke demos/anim-lab 
@@ -52,7 +52,7 @@ PASS test demos/diffusion-lab/tests/test_word_axis.js
 PASS smoke demos/dom-lab 
 PASS test demos/dom-lab/tests/test_main.js 
 PASS smoke demos/flora-lab 
-FAIL test demos/flora-lab/tests/test_main.js rc=1: evalScriptFileJit: uncaught Error: 2 failed: + Seedling adds a plant, Reset returns to four, overlays: plant origins and the shadow grid draw wireframes
+PASS test demos/flora-lab/tests/test_main.js 
 PASS smoke demos/image-kernels 
 PASS test demos/image-kernels/tests/test_kernels.js 
 PASS test demos/image-kernels/tests/test_main.js 
@@ -63,7 +63,7 @@ PASS test demos/instanced-crowd/tests/test_crowd.js
 PASS smoke demos/kokoro-lab 
 FAIL test demos/kokoro-lab/tests/test_align_cells.js rc=1: evalScriptFileJit: uncaught TypeError: Cannot read properties of null (reading 'stages')
 FAIL test demos/kokoro-lab/tests/test_align_commit.js rc=1: ASSERTION FAILED: app finished loading its Kokoro model + voice
-FAIL test demos/kokoro-lab/tests/test_designer.js rc=1: evalScriptFileJit: uncaught Error: synthesizeTraced: brotensor: dispatch: operand 1 is on CPU but the op resolved to CUDA
+FAIL test demos/kokoro-lab/tests/test_designer.js rc=1: evalScriptFileJit: uncaught Error: synthesizeTraced: brotensor: dispatch: operand 2 is on CUDA but the op resolved to CPU
 FAIL test demos/kokoro-lab/tests/test_edit.js rc=1: evalScriptFileJit: uncaught TypeError: Cannot read properties of null (reading 'createVoice')
 FAIL test demos/kokoro-lab/tests/test_emotion.js rc=1: evalScriptFileJit: uncaught TypeError: Cannot read properties of null (reading 'createVoice')
 FAIL test demos/kokoro-lab/tests/test_inplace.js rc=1: evalScriptFileJit: uncaught TypeError: Cannot read properties of null (reading 'createVoice')
@@ -209,9 +209,9 @@ PASS test demos/vision-lab/tests/test_smoke.js
 PASS smoke demos/vlm-lab 
 PASS test demos/vlm-lab/tests/test_smoke.js 
 PASS smoke demos/waapi-lab 
-PASS test demos/waapi-lab/tests/test_smoke.js
+PASS test demos/waapi-lab/tests/test_smoke.js 
 PASS smoke demos/window-lab 
-PASS test demos/window-lab/tests/test_smoke.js
+PASS test demos/window-lab/tests/test_smoke.js 
 PASS smoke games/2048 
 PASS test games/2048/tests/test_main.js 
 PASS smoke games/arcade-template 
@@ -242,7 +242,7 @@ PASS test games/farm/tests/test_inspect.js
 PASS test games/farm/tests/test_sim.js 
 PASS test games/farm/tests/test_smoke.js 
 PASS smoke games/fintank 
-PASS test games/fintank/tests/test_main.js
+PASS test games/fintank/tests/test_main.js 
 PASS smoke games/fluffshuffle 
 PASS test games/fluffshuffle/tests/test_main.js 
 PASS smoke games/fps 
@@ -298,10 +298,10 @@ PASS smoke launcher
 PASS test launcher/tests/test_launcher.js 
 PASS smoke lib-tests 
 PASS test lib-tests/test_history.js 
-PASS test lib-tests/test_physics.js
+PASS test lib-tests/test_physics.js 
 PASS test lib-tests/test_polygon.js 
 PASS test lib-tests/test_project.js 
-PASS test lib-tests/test_scene_anim.js
+PASS test lib-tests/test_scene_anim.js 
 PASS test lib-tests/test_tot_reasoning.js 
 PASS smoke templates/kit-app 
 PASS test templates/kit-app/tests/test_main.js 
