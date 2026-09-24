@@ -43,7 +43,10 @@ tools/laya-triage       ml
 tools/node-forge/tests/test_kokoro_node.js  ml
 tools/node-forge/tests/test_qwen_node.js    ml
 tools/node-forge/tests/test_rave_node.js    ml
+tools/algo-viz/tests/test_terrain.js        ml
 games/hearthfolk/tests/test_live.js         ml
+tools/reader/tests/test_tts.js              ml
+tools/inpainting-studio/tests/test_generate.js ml
 ai/maker-agent/tests/test_openrouter_loop.js net
 ai/maker-agent/tests/test_maker_loop.js     net
 ai/pi-agent/tests/test_loop.js              ml

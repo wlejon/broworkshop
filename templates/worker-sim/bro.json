@@ -1,7 +1,6 @@
 {
-    "app": ".",
-    "title": "Worker Simulation Template",
+    "title": "Worker Sim",
     "width": 1280,
-    "height": 720,
+    "height": 760,
     "lib": "../../lib"
 }

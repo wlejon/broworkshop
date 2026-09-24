@@ -712,6 +712,56 @@ or a click on the `<summary>` (both of which do open it). Repro:
 prints false. node-forge's old tests set `.open = true` and passed only
 because they queried the hidden content; its tests now click the summary.
 
+### `<textarea>` / `<input>` have no `setRangeText` (2026-09-24)
+`HTMLTextAreaElement.prototype.setRangeText` is missing, so
+`ta.setRangeText(text, start, end, 'select')` throws "undefined is not a
+function". tools/desktop-notebook's ribbon (bold, headings, lists) was dead
+because of it; the editor now splices `value` and calls `setSelectionRange`
+(lib/editor.js `splice`), which loses native undo grouping.
+Repro: `bro-headless tools/desktop-notebook -e "console.log(typeof document.createElement('textarea').setRangeText)"`.
+
+### bronze: `String.prototype.lastIndexOf` ignores `fromIndex` (2026-09-24)
+`'ab\ncd\nef'.lastIndexOf('\n', 3)` is 5 (want 2), and `'abc'.lastIndexOf('c', 1)`
+is 2 (want -1): the search always starts from the end. Line-start lookups
+(`value.lastIndexOf('\n', pos - 1) + 1`, the standard textarea idiom) land
+on the last line. tools/desktop-notebook's indent / heading / block insert
+use it; its test skips the Tab-indent check while
+`'a\nb\nc'.lastIndexOf('\n', 2) !== 1`.
+Repro: `bro-headless tools/desktop-notebook -e "console.log('ab\ncd\nef'.lastIndexOf('\n', 3))"`.
+
+### `querySelector` splits at a comma inside a quoted attribute value (2026-09-24)
+`document.querySelector('[data-x="1,2"]')` returns `<html>` and
+`querySelectorAll` of it returns every element: the selector list is split
+at the comma inside the quotes. `el.matches('[data-x="1,2"]')` is right.
+tools/inpainting-studio's outpaint buttons (`data-expand="64,0"`) now use
+side names. Repro: `bro-headless tools/inpainting-studio -e "document.body.innerHTML='<p data-x=\"1,2\"></p>'; console.log(document.querySelector('[data-x=\"1,2\"]').tagName)"` prints HTML.
+
+### `table-layout: fixed` is ignored; a nowrap cell widens a `width:100%` table (2026-09-24)
+A `width: 100%` table with `table-layout: fixed` and `<col>` widths sizes
+its columns from content, and a `white-space: nowrap` cell with a long
+command line pushes the table past its container (horizontal overflow).
+`text-overflow: ellipsis` on that cell never triggers. tools/procwatch's
+process list switched to grid rows (`grid-template-columns`) for this.
+
+### Inline-wrap sighting: tools/reader sentence spans (2026-09-24)
+Same as "A long text run after an inline element wraps whole to the next
+line" above: in tools/reader each sentence is a `<span class="sn">` inside a
+`<p>`; a long sentence after a short one starts at x=0 on the next line,
+leaving a ragged first line. Repro: two spans in a 300px `<p>`, the second
+too long for the rest of line 1; its first Range rect has left = the p's left.
+
+### Worker `new URL(...)` sighting: templates/worker-sim no longer repros (2026-09-24)
+Re the `new Worker(new URL(...))` entry above: templates/worker-sim now uses
+the string form (`workerClient('sim/worker.js', { type: 'module' })`), so its
+repro line boots cleanly. The engine gap is unchanged; any page using
+`new URL('./w.js', import.meta.url)` still throws.
+
+### brovisionml `to()` before `load()` sighting: tools/inpainting-studio depth guide (2026-09-24)
+The Depth-map ControlNet guide calls `bro.vision.loadDepth` in its worker and
+hits the CUDA `to() called before load()` error above; the page shows it and
+falls back to a black map. tools/inpainting-studio/tests/test_generate.js
+logs it as KNOWN and requires a real depth map once the loader is fixed.
+
 ## Notes (not bugs)
 
 - WAAPI gaps are documented in docs/web-animations-api.js and demos/waapi-lab

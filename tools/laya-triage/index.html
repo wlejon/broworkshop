@@ -1,88 +1,69 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <title>Laya Decision Triage</title>
-    <link rel="stylesheet" href="style.css">
+<meta charset="utf-8">
+<title>Laya Decision Triage</title>
+<link rel="stylesheet" href="/lib/kit/kit.css">
+<link rel="stylesheet" href="/app/style.css">
 </head>
-<body>
-<header id="top">
-    <div class="brand">
-        <span class="brand-title">Laya triage</span>
-        <span class="brand-sub" id="brand-sub">decision model · bro.lm.loadLaya</span>
-    </div>
-    <div class="ckpt">
-        <label for="ckpt-select">Checkpoint</label>
-        <select id="ckpt-select" title="Members of the Laya family found beside the checkpoint folder"></select>
-        <input id="model-dir" type="text" spellcheck="false" placeholder="folder holding model.safetensors">
-        <button id="btn-browse">Browse…</button>
-        <button id="btn-load" class="primary">Load</button>
-    </div>
-    <span id="status" class="status">not loaded</span>
-</header>
+<body class="k-app">
+  <header class="k-header">
+    <h1>Laya triage</h1>
+    <span class="k-sub" id="brand-sub">decision model · bro.lm.loadLaya</span>
+  </header>
+  <div class="k-toolbar">
+    <label class="k-field">checkpoint
+      <select id="ckpt-select" title="Members of the Laya family found beside the checkpoint folder"></select>
+    </label>
+    <input id="model-dir" type="text" class="k-grow" spellcheck="false" placeholder="folder holding model.safetensors">
+    <button id="btn-browse">Browse…</button>
+    <button id="btn-load" class="primary">Load</button>
+  </div>
+  <p id="unavailable" class="k-note warn" hidden></p>
 
-<div id="unavailable" class="unavailable hidden"></div>
-
-<main id="main">
-    <!-- Single request -->
-    <section class="panel" id="single">
-        <div class="panel-head">
-            <span class="panel-title">One request</span>
-            <span class="panel-note">sent at priority 10, so it cuts ahead of the background traffic</span>
-        </div>
-        <div id="presets" class="presets"></div>
-        <div id="presets-note" class="presets-note"></div>
+  <div class="k-body">
+    <main class="k-main pad lt-cols">
+      <section class="k-panel" id="single">
+        <h2>One request <span class="dim">sent at priority 10, so it cuts ahead of the background traffic</span></h2>
+        <div id="presets" class="k-row presets"></div>
+        <p id="presets-note" class="k-note"></p>
         <textarea id="state" spellcheck="false"></textarea>
-        <div class="row">
-            <button id="btn-run" class="primary" disabled>Decide</button>
-            <label class="thresh">Act when routing confidence ≥ <input id="threshold" type="range" min="0.05" max="0.95" step="0.05" value="0.45">
-                <b id="threshold-val">45%</b></label>
+        <div class="k-row">
+          <button id="btn-run" class="primary" disabled>Decide</button>
+          <label class="k-field">act when routing confidence ≥
+            <input id="threshold" type="range" min="0.05" max="0.95" step="0.05" value="0.45"><span class="k-val" id="threshold-val"></span></label>
         </div>
-        <div id="decision" class="decision idle">
-            <div id="decision-head" class="decision-head">No decision yet</div>
-            <div id="decision-sub" class="decision-sub">Escalation comes from the calibrated confidence of the routing answer.
-                Five-way routing with short option descriptions is harder for Laya than the benchmarks it is strong on, so expect escalations.
-                The checkpoint's act/escalate head is saturated (about 1.0 for every input), so it is shown but never used.</div>
+        <div id="decision" class="decision">
+          <div id="decision-head" class="decision-head">No decision yet</div>
+          <div id="decision-sub" class="decision-sub">Escalation comes from the calibrated confidence of the routing answer.
+            Five-way routing with short option descriptions is harder for Laya than the benchmarks it is strong on, so expect escalations.
+            The checkpoint's act/escalate head is saturated (about 1.0 for every input), so it is shown but never used.</div>
         </div>
-        <div id="answers" class="answers"></div>
+        <div id="answers" class="k-col"></div>
         <div id="single-timing" class="timing"></div>
-    </section>
+      </section>
 
-    <!-- Concurrency -->
-    <section class="panel" id="live">
-        <div class="panel-head">
-            <span class="panel-title">Many requests at once</span>
-            <span class="panel-note" id="replicas"></span>
+      <section class="k-panel" id="live">
+        <h2>Many requests at once <span class="dim" id="replicas"></span></h2>
+        <div class="k-row">
+          <button id="btn-traffic" disabled>Start traffic</button>
+          <label class="k-field">arrival rate <input id="rate" type="range" min="10" max="600" step="10" value="100"><span class="k-val" id="rate-val"></span></label>
+          <button id="btn-burst" disabled>Burst 64</button>
+          <button id="btn-reset" disabled>Reset stats</button>
         </div>
-        <div class="row controls">
-            <button id="btn-traffic" disabled>Start traffic</button>
-            <label>Arrival rate <input id="rate" type="range" min="10" max="600" step="10" value="100">
-                <b id="rate-val">100 req/s</b></label>
-            <button id="btn-burst" disabled>Burst 64</button>
-            <button id="btn-reset" disabled>Reset stats</button>
-        </div>
-        <div class="metrics">
-            <div class="metric"><span class="m-label">in flight</span><span id="m-inflight" class="m-val">0</span></div>
-            <div class="metric"><span class="m-label">queued</span><span id="m-queued" class="m-val">0</span></div>
-            <div class="metric"><span class="m-label">done / s</span><span id="m-rps" class="m-val">0</span></div>
-            <div class="metric"><span class="m-label">p50 ms</span><span id="m-p50" class="m-val">--</span></div>
-            <div class="metric"><span class="m-label">p99 ms</span><span id="m-p99" class="m-val">--</span></div>
-            <div class="metric"><span class="m-label">over deadline</span><span id="m-missed" class="m-val">--</span></div>
-            <div class="metric"><span class="m-label">requests / forward</span><span id="m-batch" class="m-val">--</span></div>
-            <div class="metric"><span class="m-label">occupancy</span><span id="m-occ" class="m-val">--</span></div>
-            <div class="metric"><span class="m-label">frame delivery</span><span id="m-seen" class="m-val">--</span></div>
-        </div>
-        <div class="chart-title">Per-request latency (submit → answer ready, 5 questions each; colour = GPU, red = missed the deadline)</div>
+        <div class="metrics" id="metrics"></div>
+        <div class="k-caption">Per-request latency <span class="dim">submit → answer ready, 5 questions each; colour = GPU, red = missed the deadline</span></div>
         <canvas id="latency" class="chart"></canvas>
-        <div class="chart-title">Forwards</div>
+        <div class="k-caption">Forwards</div>
         <canvas id="batches" class="chart short"></canvas>
-        <div id="devices" class="devices"></div>
+        <div id="devices" class="k-col"></div>
         <div id="cost-model" class="timing"></div>
-        <div class="footnote">p50 / p99 / done per second cover the last 3 s. Latency is measured in the engine; "frame delivery"
-            is the extra wait until the page's next frame received the answer.</div>
-    </section>
-</main>
-
-<script type="module" src="app.js"></script>
+        <p class="k-note">p50 / p99 / done per second cover the last 3 s. Latency is measured in the engine; "frame delivery"
+          is the extra wait until the page's next frame received the answer.</p>
+      </section>
+    </main>
+  </div>
+  <footer class="k-statusbar"><span id="status">starting…</span></footer>
+  <script type="module" src="/app/main.js"></script>
 </body>
 </html>

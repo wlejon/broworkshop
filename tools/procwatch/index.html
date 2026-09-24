@@ -1,69 +1,66 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Proc Watch</title>
-    <link rel="stylesheet" href="style.css">
+<meta charset="utf-8">
+<title>Proc Watch</title>
+<link rel="stylesheet" href="/lib/kit/kit.css">
+<link rel="stylesheet" href="/app/style.css">
 </head>
-<body>
-    <header id="header">
-        <div id="brand">procwatch</div>
-        <div id="filters">
-            <label class="chip"><input type="checkbox" id="f-unix" checked> unix tools</label>
-            <label class="chip"><input type="checkbox" id="f-ddrive" checked> from D:</label>
-            <label class="chip"><input type="checkbox" id="f-other"> everything else</label>
-            <label class="chip"><input type="checkbox" id="f-orphans"> orphans only</label>
-            <input type="text" id="q" placeholder="search name / cmdline&hellip;">
-        </div>
-        <div id="actions">
-            <button id="kill-shown">kill shown</button>
-        </div>
-    </header>
+<body class="k-app">
+  <header class="k-header">
+    <h1>procwatch</h1>
+    <span class="k-sub">leftover processes, system load, and an auto-reaper for the tools agents leave running</span>
+  </header>
+  <div class="k-toolbar">
+    <label class="k-chip"><input type="checkbox" id="f-unix"> unix tools</label>
+    <label class="k-chip"><input type="checkbox" id="f-ddrive"> from D:</label>
+    <label class="k-chip"><input type="checkbox" id="f-other"> everything else</label>
+    <label class="k-chip"><input type="checkbox" id="f-orphans"> orphans only</label>
+    <input type="text" id="q" placeholder="search pid / name / command line…">
+    <div class="k-spacer"></div>
+    <button id="kill-shown" class="danger">kill shown</button>
+  </div>
 
-    <section id="gauges">
-        <div class="gauge" id="g-cpu">
-            <div class="g-head"><span class="g-label">cpu</span><span class="g-val" id="cpu-val">&ndash;</span></div>
-            <canvas id="cpu-spark" width="240" height="34"></canvas>
-            <canvas id="cpu-cores" width="240" height="22"></canvas>
-        </div>
-        <div class="gauge" id="g-ram">
-            <div class="g-head"><span class="g-label">ram</span><span class="g-val" id="ram-val">&ndash;</span></div>
-            <div class="bar"><div class="fill" id="ram-fill"></div></div>
-            <div class="g-sub" id="ram-sub"></div>
-        </div>
-        <div id="gpus"></div>
-    </section>
+  <section id="gauges" class="k-toolbar">
+    <div class="gauge">
+      <div class="g-head"><span class="g-label">cpu</span><span class="g-val" id="cpu-val">–</span></div>
+      <canvas id="cpu-spark"></canvas>
+      <canvas id="cpu-cores"></canvas>
+    </div>
+    <div class="gauge">
+      <div class="g-head"><span class="g-label">ram</span><span class="g-val" id="ram-val">–</span></div>
+      <span class="k-meter block" id="ram-bar"></span>
+      <div class="g-sub" id="ram-sub"></div>
+    </div>
+    <div id="gpus" class="k-row"></div>
+  </section>
 
-    <section id="reaper">
-        <label class="chip hot"><input type="checkbox" id="reap-on"> auto-kill</label>
-        <label class="chip"><input type="checkbox" id="reap-orphans" checked> orphans only</label>
-        <span class="r-label">older than</span>
-        <input type="number" id="reap-secs" min="5" step="5" value="30"> s
-        <span class="r-label">names</span>
-        <input type="text" id="reap-names">
-        <span id="reap-log"></span>
-    </section>
+  <div id="reaper" class="k-toolbar">
+    <label class="k-chip hot"><input type="checkbox" id="reap-on"> auto-kill</label>
+    <label class="k-chip"><input type="checkbox" id="reap-orphans"> orphans only</label>
+    <label class="k-field">older than <input type="number" id="reap-secs" min="5" step="5"> s</label>
+    <label class="k-field k-grow">names <input type="text" id="reap-names" class="k-grow"></label>
+    <span id="reap-log" class="warn"></span>
+  </div>
 
-    <main id="main">
-        <table id="tbl">
-            <thead>
-                <tr>
-                    <th class="c-name" data-sort="name">process</th>
-                    <th class="c-pid">pid</th>
-                    <th class="c-cpu sorted" data-sort="cpu">cpu</th>
-                    <th class="c-mem" data-sort="mem">mem</th>
-                    <th class="c-age" data-sort="age">age</th>
-                    <th class="c-cmd">command</th>
-                    <th class="c-kill"></th>
-                </tr>
-            </thead>
-            <tbody id="tbody"></tbody>
-        </table>
-        <div id="empty" class="hidden">nothing matches &mdash; agents are behaving, for once</div>
-        <div id="hint">click a row for details &amp; actions &mdash; kill, kill tree, open folder, copy command</div>
-    </main>
+  <main class="k-main" id="main">
+    <div class="row head" id="thead">
+      <span class="c-name" data-sort="name">process</span>
+      <span class="c-pid">pid</span>
+      <span class="c-cpu sorted" data-sort="cpu">cpu</span>
+      <span class="c-mem" data-sort="mem">mem</span>
+      <span class="c-age" data-sort="age">age</span>
+      <span class="c-cmd">command</span>
+      <span class="c-kill"></span>
+    </div>
+    <div id="rows">
+      <div id="tbody"></div>
+      <div id="empty" class="dim" hidden>nothing matches: agents are behaving, for once</div>
+      <p class="k-note" id="hint">click a row for details and actions: kill, kill tree, open folder, copy command, auto-kill by name</p>
+    </div>
+  </main>
 
-    <footer id="status">scanning&hellip;</footer>
-
-    <script type="module" src="/app/app.js"></script>
+  <footer class="k-statusbar"><span id="status">scanning…</span></footer>
+  <script type="module" src="/app/main.js"></script>
 </body>
 </html>
