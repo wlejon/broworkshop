@@ -86,7 +86,8 @@ FAIL test demos/omnivoice-lab/tests/test_interaction.js rc=1: evalScriptFileJit:
 FAIL test demos/omnivoice-lab/tests/test_smoke.js rc=1: [bronze:unhandledrejection] Uncaught (in promise) Error: timeout waiting for model load
 PASS smoke demos/parakeet-lab 
 FAIL test demos/parakeet-lab/tests/test_smoke.js rc=1: ASSERTION FAILED: model load finished
-PASS smoke demos/physics-playground 
+PASS smoke demos/physics-playground
+FAIL test demos/physics-playground/tests/test_physics_node.js rc=1: engine bug (ENGINE-ISSUES.md: createPhysicsNode body tag ignored)
 PASS smoke demos/pixart-lab 
 PASS test demos/pixart-lab/tests/test_generate.js 
 PASS smoke demos/plant-recipes 
