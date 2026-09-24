@@ -68,11 +68,14 @@ serveWorker({
             sim.setCount(clampCount(msg.count));
             freshPool();                 // old-size buffers are dropped when they come back
         }
+        return { type: 'configured', count: sim.count, mode: sim.mode };
     },
     resize(msg) { sim.resize(msg.width, msg.height); },
     mouse(msg) { Object.assign(sim.mouse, { x: msg.x, y: msg.y, active: msg.active, force: msg.force }); },
-    pause() { running = false; },
-    resume() { running = true; },
+    // Replies carry the tick the worker stopped / restarted at. Frames posted
+    // before a reply reach the page before it (one ordered channel).
+    pause() { running = false; return { type: 'paused', tick }; },
+    resume() { running = true; return { type: 'resumed', tick }; },
     reset() { sim.seed(); if (!running) sendFrame(); },
     step() {
         advance();

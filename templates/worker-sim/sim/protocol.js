@@ -2,10 +2,13 @@
 //
 // Messages go through lib/kit/worker-rpc.js:
 //   page -> worker requests (awaited):  init {width, height, count, mode} -> ready {count}
-//                                       step (one tick while paused)       -> stepped {stepMs}
-//   page -> worker posts (no reply):    config {mode?, count?, speed?}, resize {width, height},
-//                                       mouse {x, y, active, force}, pause, resume, reset,
+//                                       config {mode?, count?, speed?}     -> configured {count, mode}
+//                                       pause / resume                     -> paused / resumed {tick}
+//                                       step (one tick while paused)       -> stepped {tick, stepMs}
+//   page -> worker posts (no reply):    resize {width, height}, mouse {x, y, active, force}, reset,
 //                                       recycle {buffer} (hands a frame buffer back)
+// Await a command when the page shows or depends on its effect (a paused
+// worker, the count it re-seeded at); post the high-rate ones.
 //   worker -> page events:              frame {buffer, count, tick, tps, stepMs}
 //
 // A frame is a Float32Array of STRIDE floats per entity, transferred (not

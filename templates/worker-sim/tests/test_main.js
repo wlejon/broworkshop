@@ -82,31 +82,51 @@ test('mode buttons switch the worker', () => {
     clickOn('#mode [data-value=particles]');
     check(q('#mode [data-value=particles]').classList.contains('active'), 'particles active');
     const n = drawn();
-    waitFor(() => drawn() > n + 3, 'frames keep coming', 10000);
+    waitFor(() => drawn() > n + 3, 'frames keep coming', 20000);
     clickOn('#mode [data-value=boids]');
 });
 
+// Waits key on the worker's replies (shown in the status line), never on a
+// frame count: under load its messages lag, and Step's frame is skipped
+// whenever the page still holds every pooled buffer.
+const statusTick = (re) => { const m = re.exec(text('#status')); return m ? +m[1] : null; };
+const resumeIfPaused = () => {
+    if (text('#pause') !== 'Resume') return;
+    clickOn('#pause');
+    waitFor(() => /^running/.test(text('#status')), 'resume acknowledged', 15000);
+};
+
 test('pause stops the stream; Step advances exactly one tick', () => {
-    clickOn('#pause');
-    eq(text('#pause'), 'Resume');
-    check(!q('#step').disabled, 'step enabled while paused');
-    idle(300);                                   // a frame already in flight lands
-    const t0 = tick();
-    idle(400);
-    eq(tick(), t0, 'no ticks while paused');
-    clickOn('#step');
-    waitFor(() => tick() === t0 + 1, 'one step', 5000);
-    check(/tick \d+ took/.test(text('#status')), 'step reply shown: ' + text('#status'));
-    clickOn('#pause');
-    check(q('#step').disabled, 'step disabled again');
+    try {
+        clickOn('#pause');
+        eq(text('#pause'), 'Resume');
+        check(!q('#step').disabled, 'step enabled while paused');
+        waitFor(() => statusTick(/^paused at tick (\d+)/) != null, 'pause acknowledged', 15000);
+        const at = statusTick(/^paused at tick (\d+)/);
+        // Every frame the worker sent before stopping arrived ahead of the reply.
+        const shown = tick();
+        check(shown <= at, 'readout tick ' + shown + ' <= paused tick ' + at);
+        idle(500);
+        eq(tick(), shown, 'no frames while paused');
+        clickOn('#step');
+        waitFor(() => statusTick(/tick (\d+) took/) != null, 'step reply', 15000);
+        eq(statusTick(/tick (\d+) took/), at + 1, 'the step is the only tick since the pause');
+        resumeIfPaused();
+        check(q('#step').disabled, 'step disabled again');
+        const t = tick();
+        waitFor(() => tick() > t, 'frames flow again', 15000);
+    } finally {
+        resumeIfPaused();
+    }
 });
 
 test('the entity count reaches the worker', () => {
+    resumeIfPaused();
     setValue('#count', 2000);
     eq(text('#countVal'), '2k');
-    waitFor(() => row('entities') === '2,000', 'count applied', 10000);
+    waitFor(() => row('entities') === '2,000', 'count applied', 20000);
     setValue('#count', 4000);
-    waitFor(() => row('entities') === '4,000', 'count restored', 10000);
+    waitFor(() => row('entities') === '4,000', 'count restored', 20000);
 });
 
 test('the speed slider shows its value', () => {

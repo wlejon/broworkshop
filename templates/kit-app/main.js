@@ -1,4 +1,6 @@
 // Kit App — the lib/kit skeleton. Copy the folder, rename, replace the demo.
+// For work that belongs off the page thread (a simulation, a model), start
+// from templates/worker-sim instead: same layout, plus a worker-rpc worker.
 import { boot, ids, logView, stats, fpsMeter, progressBar, tabs, toggleButton, frameLoop,
          params, bindControl } from "/lib/kit/index.js";
 

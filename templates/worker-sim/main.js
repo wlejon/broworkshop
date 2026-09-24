@@ -78,20 +78,25 @@ frameLoop(() => {
 
 // ---- controls ----------------------------------------------------------------
 
+/** Send a config change; errors land in the status line. */
+const configure = (fields) => rpc.request(Object.assign({ type: 'config' }, fields)).catch((e) => app.status.error(e));
+
 segmented('#mode', MODES, { value: state.mode, onChange: (m) => {
     state.mode = m;
-    rpc.post({ type: 'config', mode: m });
+    configure({ mode: m });
 } });
 // The readout follows the drag; the worker re-seeds once, on release.
 const count = bindControl(el.count, { out: '#countVal', fmt: (v) => v / 1000 + 'k' });
-el.count.addEventListener('change', () => rpc.post({ type: 'config', count: count.value }));
+el.count.addEventListener('change', () => configure({ count: count.value }));
 bindControl(el.speed, { out: '#speedVal', fmt: (v) => v.toFixed(1) + '×', reset: 1,
-    onChange: (v) => rpc.post({ type: 'config', speed: v }) });
+    onChange: (v) => rpc.post({ type: 'config', speed: v }) });       // high rate while dragging: no reply
 
+// The status changes on the worker's reply, so "paused" means it has stopped.
 toggleButton(el.pause, { labels: ['Pause', 'Resume'], onChange: (paused) => {
-    rpc.post({ type: paused ? 'pause' : 'resume' });
     el.step.disabled = !paused;
-    app.status.set(paused ? 'paused · Step advances one tick' : 'running');
+    rpc.request({ type: paused ? 'pause' : 'resume' })
+        .then((r) => app.status.set(paused ? 'paused at tick ' + r.tick + ' · Step advances one tick' : 'running'))
+        .catch((e) => app.status.error(e));
 } });
 el.step.addEventListener('click', () => {
     rpc.request({ type: 'step' })
