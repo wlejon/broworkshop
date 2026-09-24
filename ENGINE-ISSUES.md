@@ -60,6 +60,7 @@ timeout stays cheap.
 `CSS.supports(...)` / `CSS.escape(...)` throw ReferenceError.
 
 ### `createPhysicsNode({ body: tag })` does not bind the body (2026-09-24)
+**FIXED** in bro 7c134014 (the factory maps the tag through `bodyIdForTag`).
 The native factory (`native_scene_factories.cpp`) reads only `bodyId`, as a
 raw Jolt `BodyID`, and ignores the `body: tag` option every app passes
 (the documented shape, and what `Physics.createBody` returns). The node
@@ -149,6 +150,44 @@ move the player avatar to (22, 14) (its spawn) and `click()` on the Foreman
 at (22, 12): no mousedown on #view. farm's `tests/test_inspect.js` moves the
 avatar aside before clicking. Want: hit-test HtmlNode content, honour
 `pointer-events: none`, or an option to make a node non-interactive.
+
+### `min-width` is ignored on `display: inline-block` (2026-09-24)
+`<span style="display:inline-block; min-width:96px">lobby id</span>X` lays
+the span out at its text width (55px), so the next inline sits right
+against it; `width: 96px` on the same span works (96px). Chromium gives
+96px for both. Seen in demos/steam-lab's `.kv` key/value rows
+("lobby id—", "frames0"). Repro: a page with the span above,
+`getBoundingClientRect().width` of the span.
+
+### `grid-column: 1 / -1` does not span; negative grid lines ignored (2026-09-24)
+In `grid-template-columns: 1fr 1fr` (400px wide), a child with
+`grid-column: 1 / -1` is 200px (one column); `1 / 3` and `span 2` are
+400px. demos/steam-lab's Events panel (meant full width under the 2x2
+grid) sits in the left column only; it did before the kit port too.
+
+### A long text run after an inline element wraps whole to the next line (2026-09-24)
+`<div style="width:300px"><span>voice</span> <span>recording did not
+start because the Steam library was not found anywhere</span></div>`
+(12px monospace): line 1 holds only "voice"; the message starts at x=0 on
+line 2 (Range rects), although "recording did not start because" fits
+after "voice". Same with `white-space: normal` and `pre-wrap`, and with the
+text as a bare text node after the span. Chromium breaks inside the text.
+Seen in demos/steam-lab's event log: a long message leaves its kind tag
+alone on the first row.
+
+### bro-server runs the app's page scripts, and a page error kills the server (2026-09-24)
+`bro-server games/fps games/fps/server.js` loads the app manifest and
+evaluates index.html's `<script>`s (the log shows "AppLoader: loaded
+manifest ... 1 scripts", and page stacks "in games\fps\index.html") before
+the server script, in a process with no renderer. If a page script throws
+(fps's did: `getContext("scene")` is null there), the server script runs to
+completion — it even binds its port — and then bro-server reports
+`failed to evaluate script 'games/fps/server.js'` and exits. Wrapping the
+server in a probe that imports it inside try/catch shows the import itself
+succeeds. Expected: bro-server does not run the page at all (or at least
+does not charge a page error to the server script). games/fps now tolerates
+a missing scene context at boot so its server runs; any app with a server
+and a page that assumes a renderer at load is exposed.
 
 ## Notes (not bugs)
 

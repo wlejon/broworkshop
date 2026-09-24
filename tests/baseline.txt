@@ -23,7 +23,7 @@ PASS test ai/voice-pipeline/tests/test_stream.js
 PASS smoke demos/ai-arena 
 PASS smoke demos/anim-lab 
 PASS smoke demos/character-lab 
-FAIL test demos/character-lab/tests/test_physics_node.js rc=1: engine bug (ENGINE-ISSUES.md: createPhysicsNode body tag ignored)
+PASS test demos/character-lab/tests/test_physics_node.js
 PASS smoke demos/clipmap-terrain 
 PASS test demos/clipmap-terrain/tests/test_main.js 
 PASS smoke demos/cluster-diar-lab 
@@ -87,7 +87,7 @@ FAIL test demos/omnivoice-lab/tests/test_smoke.js rc=1: [bronze:unhandledrejecti
 PASS smoke demos/parakeet-lab 
 FAIL test demos/parakeet-lab/tests/test_smoke.js rc=1: ASSERTION FAILED: model load finished
 PASS smoke demos/physics-playground
-FAIL test demos/physics-playground/tests/test_physics_node.js rc=1: engine bug (ENGINE-ISSUES.md: createPhysicsNode body tag ignored)
+PASS test demos/physics-playground/tests/test_physics_node.js
 PASS smoke demos/pixart-lab 
 PASS test demos/pixart-lab/tests/test_generate.js 
 PASS smoke demos/plant-recipes 
