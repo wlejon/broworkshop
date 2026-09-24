@@ -1,12 +1,9 @@
 // Grass tuft archetype — radial blades, optional pampas plume at flowering.
 
 import { FloraCore } from "/app/recipes/core.js";
-import { Lifecycle } from "/app/recipes/lifecycle.js";
-import { FloraSpecies } from "/app/recipes/species.js";
-import { Recipes } from "/app/recipes/index.js";
+import { defineArchetype } from "/app/recipes/lifecycle.js";
 
 const F = FloraCore;
-const L = Lifecycle;
 const TAU = F.TAU;
 
 function buildGrassSeed(opts) {
@@ -118,13 +115,4 @@ const BUILDERS = {
     flowering: buildGrassFlowering, senescent: buildGrassSenescent,
 };
 
-function grassTuft(opts) {
-    opts = Object.assign({}, opts);
-    if (opts.species) opts = FloraSpecies.applySpecies('grassTuft', opts.species, opts);
-    const stages = opts.stagesOverride || STAGES;
-    const r = L.resolveStage(stages, opts.age01 ?? 1);
-    const b = BUILDERS[r.stage] || BUILDERS.mature;
-    return b(opts, r.stageT);
-}
-
-Recipes.grassTuft = grassTuft;
+export const grassTuft = defineArchetype('grassTuft', BUILDERS, () => STAGES);

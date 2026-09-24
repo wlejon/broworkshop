@@ -10,15 +10,12 @@
 //   senescent  mature with autumn-tinted canopy + thinned blobs.
 
 import { FloraCore } from "/app/recipes/core.js";
-import { Lifecycle } from "/app/recipes/lifecycle.js";
-import { FloraSpecies } from "/app/recipes/species.js";
-import { Recipes } from "/app/recipes/index.js";
+import { defineArchetype } from "/app/recipes/lifecycle.js";
 
 const F = FloraCore;
-const L = Lifecycle;
 const TAU = F.TAU;
 
-const CANOPY_SHAPES = ['round', 'oval', 'columnar', 'umbrella', 'weeping', 'vase', 'spreading', 'irregular'];
+export const CANOPY_SHAPES = ['round', 'oval', 'columnar', 'umbrella', 'weeping', 'vase', 'spreading', 'irregular'];
 
 // ─── Canopy shape catalogue (returns blob descriptors + anchors) ─────────
 //
@@ -555,18 +552,6 @@ const TREE_STAGE_BUILDERS = {
 const DEFAULT_TREE_STAGES = ['seed', 'sprout', 'seedling', 'juvenile', 'mature', 'senescent'];
 const FLOWERING_TREE_STAGES = ['seed', 'sprout', 'seedling', 'juvenile', 'mature', 'flowering', 'fruiting', 'senescent'];
 
-function tree(opts) {
-    opts = Object.assign({}, opts);
-    if (opts.species) {
-        opts = FloraSpecies.applySpecies('tree', opts.species, opts);
-    }
-    const hasFlowering = !!opts.bloomColor;
-    const stages = opts.stagesOverride || (hasFlowering ? FLOWERING_TREE_STAGES : DEFAULT_TREE_STAGES);
-    const r = L.resolveStage(stages, opts.age01 ?? 1);
-    const builder = TREE_STAGE_BUILDERS[r.stage] || TREE_STAGE_BUILDERS.mature;
-    return builder(opts, r.stageT);
-}
-
-Recipes.tree = tree;
-Recipes.CANOPY_SHAPES = CANOPY_SHAPES;
-Recipes._TreeStages = { DEFAULT_TREE_STAGES, FLOWERING_TREE_STAGES };
+// Only a tree that blooms has flowering + fruiting stages.
+export const tree = defineArchetype('tree', TREE_STAGE_BUILDERS,
+    (o) => (o.bloomColor ? FLOWERING_TREE_STAGES : DEFAULT_TREE_STAGES));

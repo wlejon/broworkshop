@@ -1,12 +1,8 @@
 // Species presets per archetype. A species is a partial parameter object
 // merged on top of archetype defaults at recipe entry. The UI exposes a
-// "species" dropdown populated from the keys of `Species[archetype]`.
-//
-// Keep these decorative-only — geometry shapes live in the recipes.
-
-import { FloraCore } from "/app/recipes/core.js";
-
-const C = FloraCore.PALETTE;
+// "species" dropdown populated from the keys of `Species[archetype]`; picking
+// one loads its values into the panel. A null colour (bloomColor: null)
+// means the species has no such stage.
 
 export const Species = {
     tree: {
@@ -142,18 +138,15 @@ export const Species = {
     },
 };
 
-function applySpecies(archetype, species, opts) {
-    const table = Species[archetype];
-    if (!table) return opts;
-    const preset = table[species];
+/** The species preset under `opts`: every key opts defines (not undefined) wins. */
+export function applySpecies(archetype, species, opts) {
+    const preset = (Species[archetype] || {})[species];
     if (!preset) return opts;
-    const merged = Object.assign({}, preset, opts);
-    // Preserve user overrides — opts wins if it explicitly set the key.
+    const merged = Object.assign({}, preset);
+    for (const k in opts) if (opts[k] !== undefined) merged[k] = opts[k];
     return merged;
 }
 
-function speciesList(archetype) {
+export function speciesList(archetype) {
     return Object.keys(Species[archetype] || {});
 }
-
-export const FloraSpecies = { applySpecies, speciesList };

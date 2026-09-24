@@ -16,12 +16,9 @@
 // scatter along the sampled segments.
 
 import { FloraCore } from "/app/recipes/core.js";
-import { Lifecycle } from "/app/recipes/lifecycle.js";
-import { FloraSpecies } from "/app/recipes/species.js";
-import { Recipes } from "/app/recipes/index.js";
+import { defineArchetype } from "/app/recipes/lifecycle.js";
 
 const F = FloraCore;
-const L = Lifecycle;
 const TAU = F.TAU;
 
 // ─── Bezier helpers ───────────────────────────────────────────────────────
@@ -550,13 +547,4 @@ const BUILDERS = {
     senescent: buildRosebushSenescent,
 };
 
-function rosebush(opts) {
-    opts = Object.assign({}, opts);
-    if (opts.species) opts = FloraSpecies.applySpecies('rosebush', opts.species, opts);
-    const stages = opts.stagesOverride || STAGES;
-    const r = L.resolveStage(stages, opts.age01 ?? 1);
-    const b = BUILDERS[r.stage] || BUILDERS.mature;
-    return b(opts, r.stageT);
-}
-
-Recipes.rosebush = rosebush;
+export const rosebush = defineArchetype('rosebush', BUILDERS, () => STAGES);

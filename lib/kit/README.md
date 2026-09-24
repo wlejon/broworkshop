@@ -20,6 +20,8 @@ Ported examples: `demos/kws-lab` and `demos/lm-playground` (ML labs),
 | `params.js` | controls bound to values / objects |
 | `weights.js` | model weight resolution (BRO_WEIGHTS, sibling repos, cache) |
 | `viewport3d.js` | `bro.scene` canvas + orbit camera + standard mouse controls, pick rays |
+| `flycam.js` | free-fly camera (WASD / Space / C / Shift, drag- or pointer-lock look, optional roll, ground clearance) for terrain-scale scenes |
+| `sky.js` | HDRI sky (`skyEnvironment`), sun direction + sun sliders (`sunControls`), a time-of-day rig (`daylight`: studio / dawn / noon / golden / night) |
 | `nav3d.js` | `bro.ai.game` navmesh labs: slab/ramp level geometry, walkable-surface overlay sampling, route ribbons, markers, pooled pips, capsule agents, `startRoute`/`followRoute` waypoint walking, off-mesh link beads, surface picking (nav-lab, nav-carving) |
 | `editor.js` | document editors: tool switcher, undo/redo/save/open commands |
 | `skeletal.js` | clip authoring for skinned meshes: bone frames, keyframe compile, bone overlay |
@@ -111,7 +113,8 @@ Returns `{ status }`.
 - `params(container, state, spec, { onChange(key, value, state) })` builds
   labelled rows for `state`'s fields. Spec entries: `{ min, max, step }` →
   slider, `{ options }` (array, `[value, label]` pairs, or object) → select,
-  boolean value → checkbox, `{ type: 'number' | 'text' }`, plus `label`,
+  boolean value → checkbox, `{ type: 'number' | 'text' | 'color' }` (color
+  rows show the hex beside the swatch), plus `label`,
   `fmt`, `hint`. Returns `{ set(key, v, silent), refresh(), rows }`.
 
 **weights.js** — never hardcode `D:/projects`. Candidates are paths relative
@@ -146,6 +149,25 @@ leaves a press to the app. Picking math, on the `scene.setCamera` options
 `screenRay(view, w, h, px, py)` → `{ origin, dir }` and
 `worldToScreen(world, view, w, h)` → `{ x, y, depth, behind }`. Camera math
 is `lib/camera.js` (`Camera.*`).
+
+**flycam.js** — `flyCamera(canvas, { pos, yaw, pitch, speed, boost, lookSpeed,
+look: 'drag' | 'lock', lookButton = 2, roll, worldUp, ground(x, z), clearance,
+fov, near, far })` → `{ cam, keys, update(dt), pose({ pos, yaw, pitch }),
+forward(), locked, altitude, groundHeight, opts, dispose() }`. Call
+`scene.setCamera(fly.update(dt))` each frame; `opts` is live (bind speed / fov
+sliders to it). Yaw 0 looks down -Z. `look: 'drag'` holds the right button to
+look and leaves the left to the app; `'lock'` captures the pointer on click.
+Used by demos/terrain and demos/clipmap-terrain.
+
+**sky.js** — `skyEnvironment(scene, { hdri, intensity, rotation })` loads one
+of `HDRIS` (falls back to flat ambient); `sunDirection(elevationDeg,
+headingDeg)`; `sunControls(container, sunLight, { elevation, heading,
+intensity })` builds the three sliders. `daylight(scene, { order, cascades,
+atlas, pcf, fireflies, onChange })` owns sun + fill + fog + HDRI per preset
+(`DAYLIGHT`) → `{ apply(key), update(dt), setScale(s), current, presets,
+order, emissiveGain, sun }`; call `update(dt)` each frame (night fireflies)
+and `setScale` with the scene's size so fog and shadows fit. Used by
+demos/plant-recipes and demos/flora-lab.
 
 **physics3d.js** — for 3D Jolt demos (global `Physics` + a `bro.scene`):
 - `addBody(scene, body, look)` → `{ tag, node }` (a PhysicsNode + a mesh built

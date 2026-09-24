@@ -1,5 +1,6 @@
 {
-    "app": ".",
-    "title": "Flora — procedural plant viewer",
+    "title": "Plant Recipes",
+    "width": 1400,
+    "height": 900,
     "lib": "../../lib"
 }

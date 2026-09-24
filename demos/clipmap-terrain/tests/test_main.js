@@ -1,139 +1,90 @@
-// demos/clipmap-terrain/tests/test_main.js
+// Clipmap Terrain: the rings follow the fly camera, the camera keeps its
+// ground clearance, and the panel drives views, surface and sun.
+// Run: scripts/validate.sh demos/clipmap-terrain
+import { check, eq, near, test, done, frames, q, text, clickOn, setValue, press, shot } from "/lib/kit/test.js";
+import { clipmap, fly, sun, surface, LAYER, VIEWS } from "/app/lab.js";
 
-let passed = 0;
-let failed = 0;
+frames(20);
 
-function check(desc, cond) {
-    if (cond) {
-        console.log("  ok  " + desc);
-        passed++;
-    } else {
-        console.log("  FAIL: " + desc);
-        failed++;
-    }
-}
+test('the clipmap is built and populated', () => {
+    eq(clipmap.levels, 6);
+    eq(clipmap.resolution, 128);
+    eq(clipmap.cellSize, 2);
+    check(clipmap.layerCount >= 1, 'height layer set');
+    check(clipmap.triangleCount > 0 && clipmap.vertexCount > 0, 'ring geometry');
+    check(clipmap.farDistance > 0, 'far distance ' + clipmap.farDistance);
+    // detailRelief is a slope fraction (engine default 0.35); metre-sized values spike the surface km high.
+    check(surface.detailRelief > 0 && surface.detailRelief <= 1.5, 'detail relief is a slope: ' + surface.detailRelief);
+    check(/tris\s*[\d.]+k/.test(text('#stats')), 'HUD: ' + text('#stats'));
+    check(/128 × 128/.test(text('#info')), 'info: ' + text('#info'));
+});
 
-console.log("\n=== Clipmap Terrain Integration Tests ===\n");
+test('the height layer is centred on the origin', () => {
+    // Texel 0 sits at originX; a layer centred on 0 samples mountains on both
+    // sides, and the elevation there is what the generator produced.
+    const e0 = clipmap.elevationAt(0, 0);
+    const e1 = clipmap.elevationAt(-3000, -3000), e2 = clipmap.elevationAt(3000, 3000);
+    check([e0, e1, e2].every(Number.isFinite), 'finite elevations');
+    check(e1 !== e2, 'the field varies across the layer');
+    eq(LAYER.originX, -LAYER.width * LAYER.metresPerCell / 2);
+});
 
-// [1] Scene & Clipmap Initialization
-console.log("[1] Scene & Context Verification");
-const canvas = document.getElementById('c');
-check("canvas element exists in DOM", !!canvas);
+test('views jump the camera, and it keeps 15 m above the ground', () => {
+    clickOn('#views button[data-value="orbit"]');
+    near(fly.cam.pos[1], VIEWS.orbit.pos[1], 1);
+    check(q('#views button[data-value="orbit"]').classList.contains('active'), 'orbit active');
+    clickOn('#views button[data-value="valley"]');
+    frames(8);
+    const ground = clipmap.elevationAt(fly.cam.pos[0], fly.cam.pos[2]);
+    check(fly.cam.pos[1] >= ground + 15 - 0.01, 'clearance: y ' + fly.cam.pos[1].toFixed(1) + ' ground ' + ground.toFixed(1));
+    check(/altitude\s*-?\d+ m AGL/.test(text('#stats')), 'altitude shown: ' + text('#stats'));
+});
 
-const scene = canvas ? canvas.getContext('scene') : null;
-check("scene 3D context exists", !!scene);
-check("scene.createClipmapTerrain is a function", scene && typeof scene.createClipmapTerrain === 'function');
+test('W flies forward at the flight speed', () => {
+    clickOn('#views button[data-value="home"]');
+    setValue('#flight input', 500);
+    eq(fly.opts.speed, 500);
+    const p0 = fly.cam.pos.slice();
+    keyDown(119);
+    frames(30);
+    keyUp(119);
+    const f = fly.forward();
+    const moved = (fly.cam.pos[0] - p0[0]) * f[0] + (fly.cam.pos[1] - p0[1]) * f[1] + (fly.cam.pos[2] - p0[2]) * f[2];
+    check(moved > 20, 'moved ' + moved.toFixed(1) + ' m forward');
+    clickOn('#views button[data-value="home"]');
+    eq(fly.cam.pos, VIEWS.home.pos, 'back home');
+});
 
-// [2] Clipmap Terrain Creation & Property Verification
-console.log("\n[2] Clipmap Terrain Creation & Property Verification");
-let clipmap = null;
-try {
-    clipmap = scene.createClipmapTerrain({
-        levels: 6,
-        resolution: 128,
-        cellSize: 2.0,
-        heightScale: 1.0,
-        seaLevel: 0.0,
-        snowLine: 1200.0,
-        planetRadius: 0.0,
-        detailRelief: 15.0,
-        detailWavelength: 20.0,
-        materials: {
-            rock: { albedo: [0.4, 0.4, 0.4], roughness: 0.8 },
-            snow: { albedo: [0.9, 0.9, 0.9], roughness: 0.3 },
-            sand: { albedo: [0.7, 0.6, 0.4], roughness: 0.9 },
-            grass: { albedo: [0.2, 0.4, 0.1], roughness: 0.8 }
-        },
-        forest: {
-            albedo: [0.1, 0.3, 0.1],
-            strength: 0.5
-        }
-    });
-    check("scene.createClipmapTerrain succeeded", !!clipmap);
-} catch (e) {
-    check("scene.createClipmapTerrain failed: " + e.message, false);
-}
+test('surface sliders drive the clipmap', () => {
+    const row = (re) => [...document.querySelectorAll('#surface .k-field')].find((r) => re.test(r.textContent));
+    setValue(row(/snow line/).querySelector('input'), 2000);
+    eq(surface.snowLine, 2000);
+    setValue(row(/detail relief/).querySelector('input'), 0.8);
+    near(surface.detailRelief, 0.8, 1e-6);
+    setValue(row(/forest/).querySelector('input'), 0.2);
+    near(surface.forestStrength, 0.2, 1e-6);
+    check(/2000 m/.test(text('#surface')), 'readout follows');
+    frames(5);
+});
 
-if (clipmap) {
-    check("clipmap.levels equals 6", clipmap.levels === 6);
-    check("clipmap.resolution equals 128", clipmap.resolution === 128);
-    check("clipmap.cellSize equals 2.0", clipmap.cellSize === 2.0);
-    check("clipmap.triangleCount is positive", typeof clipmap.triangleCount === 'number' && clipmap.triangleCount > 0);
-    check("clipmap.vertexCount is positive", typeof clipmap.vertexCount === 'number' && clipmap.vertexCount > 0);
-    check("clipmap.farDistance is positive", typeof clipmap.farDistance === 'number' && clipmap.farDistance > 0);
-    check("clipmap.node is a SceneNode", clipmap.node !== null && typeof clipmap.node === 'object');
-}
+test('sun sliders aim the light', () => {
+    const el = [...document.querySelectorAll('#sun .k-field')].find((r) => /elevation/.test(r.textContent));
+    setValue(el.querySelector('input'), 60);
+    near(sun.direction[1], -Math.sin(60 * Math.PI / 180), 1e-3);
+});
 
-// [3] Height Layer Population
-console.log("\n[3] Height Layer Population & Updating");
-if (clipmap) {
-    const W = 64, H = 64;
-    const heightData = new Float32Array(W * H);
-    for (let z = 0; z < H; z++) {
-        for (let x = 0; x < W; x++) {
-            heightData[z * W + x] = Math.sin(x * 0.2) * Math.cos(z * 0.2) * 500.0 + 300.0;
-        }
-    }
+test('the Controls button and Tab hide and show the panel', () => {
+    clickOn('#togglePanel');
+    check(q('#panel').hidden, 'hidden by button');
+    press('Tab');
+    check(!q('#panel').hidden, 'shown by Tab');
+    check(!q('#tip').hidden, 'tip shows while the mouse is free');
+});
 
-    try {
-        clipmap.setHeightLayer(0, {
-            data: heightData,
-            width: W,
-            height: H,
-            originX: 0,
-            originZ: 0,
-            metresPerCell: 10.0,
-            wrapX: false,
-            bandLimited: false
-        });
-        check("setHeightLayer(0, desc) succeeded", true);
-        check("clipmap.layerCount is at least 1", clipmap.layerCount >= 1);
-    } catch (e) {
-        check("setHeightLayer failed: " + e.message, false);
-    }
-
-    // Material and detail updates
-    try {
-        clipmap.setSnowLine(1500.0);
-        check("setSnowLine(1500) succeeded", true);
-
-        clipmap.setDetail({ wavelength: 30.0, relief: 20.0, gain: 0.5, octaves: 4 });
-        check("setDetail succeeded", true);
-
-        clipmap.setForest({ albedo: [0.1, 0.25, 0.1], strength: 0.8 });
-        check("setForest succeeded", true);
-    } catch (e) {
-        check("setDetail/setSnowLine/setForest failed: " + e.message, false);
-    }
-
-    // Update camera position
-    try {
-        clipmap.update(100.0, 500.0, 200.0);
-        check("clipmap.update(100, 500, 200) succeeded", true);
-    } catch (e) {
-        check("clipmap.update failed: " + e.message, false);
-    }
-
-    // Elevation queries
-    const elev = clipmap.elevationAt(0, 0);
-    check("elevationAt(0, 0) returned valid number", typeof elev === 'number' && Number.isFinite(elev));
-
-    const rendElev = clipmap.renderedElevationAt(0, 0);
-    check("renderedElevationAt(0, 0) returned valid number", typeof rendElev === 'number' && Number.isFinite(rendElev));
-}
-
-// [4] Screenshot
-console.log("\n[4] Capturing Verification Screenshot");
-if (typeof advanceTime === 'function') {
-    advanceTime(50);
-}
-if (typeof screenshot === 'function') {
-    screenshot("clipmap_terrain_test.png");
-    console.log("  screenshot: clipmap_terrain_test.png");
-}
-
-console.log(`\n=== ${passed} passed, ${failed} failed ===\n`);
-
-if (failed > 0) {
-    throw new Error(`${failed} tests failed in clipmap-terrain integration test suite`);
-}
+clickOn('#views button[data-value="home"]');
+frames(20);
+shot('main');
+clickOn('#views button[data-value="peak"]');
+frames(20);
+shot('peak');
+done('clipmap-terrain');

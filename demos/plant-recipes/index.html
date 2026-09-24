@@ -1,115 +1,51 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Flora — procedural plant viewer</title>
+    <meta charset="utf-8">
+    <title>Plant Recipes</title>
+    <link rel="stylesheet" href="/lib/kit/kit.css">
     <style>
-        html, body { margin: 0; padding: 0; height: 100%; background: #0b0d10; overflow: hidden; }
-        canvas#stage { display: block; width: 100vw; height: 100vh; }
-
-        #panel {
-            position: absolute;
-            left: 12px; top: 12px; bottom: 12px;
-            width: 320px;
-            background: rgba(0,0,0,0.78);
-            color: #d8e0e8;
-            font: 12px system-ui, sans-serif;
-            padding: 10px 14px;
-            border-radius: 6px;
-            display: flex;
-            flex-direction: column;
-            box-sizing: border-box;
-        }
-        #panel h1 { margin: 0 0 6px 0; font-size: 14px; color: #fff; }
-        #panel h2 { margin: 10px 0 4px 0; font-size: 11px; color: #8aa0b0; text-transform: uppercase; letter-spacing: 0.06em; }
-
-        .tabs { display: flex; gap: 4px; margin-bottom: 6px; }
-        .tab {
-            flex: 1; padding: 4px 8px; text-align: center;
-            background: #1c2229; color: #9aa6b3;
-            border: 1px solid #2a323c; border-radius: 4px;
-            cursor: pointer; font-size: 11px;
-        }
-        .tab.active { background: #2a3d52; color: #d8e0e8; border-color: #4a6480; }
-
-        #params { flex: 1 1 auto; overflow-y: auto; padding-right: 4px; }
-        #params::-webkit-scrollbar { width: 6px; }
-        #params::-webkit-scrollbar-thumb { background: #2a323c; border-radius: 3px; }
-
-        details.group { border-top: 1px solid #232a33; margin-top: 6px; padding-top: 4px; }
-        details.group > summary {
-            cursor: pointer; color: #8aa0b0; font-size: 11px;
-            text-transform: uppercase; letter-spacing: 0.05em;
-            list-style: none; padding: 2px 0;
-        }
-        details.group > summary::before {
-            content: "▸ "; color: #5a6878; font-size: 9px;
-        }
-        details.group[open] > summary::before { content: "▾ "; }
-
-        .row { display: flex; align-items: center; gap: 6px; margin: 3px 0; }
-        .row label { flex: 0 0 100px; color: #b8c4d0; font-size: 11px; }
-        .row input[type=range] { flex: 1; min-width: 50px; }
-        .row input[type=number],
-        .row select {
-            background: #111; color: #d8e0e8; border: 1px solid #333;
-            padding: 1px 4px; font: 11px system-ui, sans-serif;
-        }
-        .row input[type=number] { width: 60px; }
-        .row select { flex: 1; min-width: 50px; }
-        .row .v { flex: 0 0 42px; color: #7bed9f; font-size: 10px; text-align: right; font-variant-numeric: tabular-nums; }
-        .row input[type=color] { width: 28px; height: 18px; border: 1px solid #333; padding: 0; background: #111; }
-
-        .actions { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
-        .actions button {
-            background: #1c2229; color: #d8e0e8; border: 1px solid #3a4452;
-            padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 11px;
-        }
-        .actions button:hover { background: #28303a; }
-        .actions button.primary { background: #2a4d6e; border-color: #4a7099; }
-        .actions button.primary:hover { background: #355c80; }
-        .actions button.toggle.on { background: #4a3d2a; border-color: #806a44; }
-
-        #stage-bar {
-            display: flex; gap: 2px; margin: 4px 0 2px 0;
-            background: #0e1218; border-radius: 4px; padding: 3px;
-        }
-        .stagepill {
-            flex: 1 1 0; min-width: 0;
-            text-align: center; font-size: 9px;
-            padding: 3px 2px; color: #5a6878;
-            background: #181d24; border-radius: 3px;
-            cursor: pointer; user-select: none;
-            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-        }
-        .stagepill.active { background: #355c80; color: #fff; font-weight: 600; }
-        .stagepill.supported { color: #99adb8; }
-        .stagepill.disabled { opacity: 0.35; cursor: default; }
-
-        #stats { color: #7d8794; font-size: 10px; margin-top: 6px; min-height: 14px; }
-        #help { color: #5d6774; font-size: 10px; margin-top: 4px; }
+        #mode > button { flex: 1; }
+        #stage-bar { display: flex; flex-wrap: wrap; gap: 3px; }
+        #stage-bar > button { flex: 1 1 60px; padding: 2px 4px; }
+        #tod { display: flex; flex-wrap: wrap; gap: 3px; }
+        .k-side .k-row { gap: 6px; }
+        .help { color: var(--k-dim); font-size: 11px; }
     </style>
 </head>
-<body>
-    <canvas id="stage"></canvas>
-    <div id="panel">
-        <h1>Flora</h1>
-        <div class="tabs">
-            <div class="tab active" data-mode="single">Single</div>
-            <div class="tab" data-mode="forest">Forest</div>
-        </div>
-        <div id="stage-bar"></div>
-        <div id="params"></div>
-        <div class="actions">
-            <button id="regen" class="primary">Regenerate</button>
-            <button id="fit">Fit</button>
-            <button id="reseed">New seed</button>
-            <button id="reset">Reset</button>
-            <button id="anim" class="toggle">▶ Cycle</button>
-        </div>
-        <div id="stats">—</div>
-        <div id="help">drag = orbit · shift+drag = pan · wheel = zoom</div>
+<body class="k-app">
+    <header class="k-header">
+        <h1>Plant Recipes</h1>
+        <span class="k-sub">eleven procedural plant archetypes built from bro.mesh primitives, through eight life-cycle stages, alone or as a packed forest</span>
+    </header>
+    <div class="k-body">
+        <aside class="k-side">
+            <div class="k-row" id="mode"></div>
+            <div class="k-panel">
+                <h2>Life cycle</h2>
+                <div id="stage-bar"></div>
+            </div>
+            <div class="k-col" id="params"></div>
+            <div class="k-panel">
+                <h2>Light</h2>
+                <div id="tod"></div>
+            </div>
+            <div class="k-row">
+                <button id="regen" class="primary">Regenerate</button>
+                <button id="fit">Fit</button>
+                <button id="reseed">New seed</button>
+                <button id="reset">Reset</button>
+                <button id="anim">Cycle</button>
+            </div>
+            <div class="help">Drag orbits · right-drag pans · wheel zooms. Cycle sweeps the age through every stage.</div>
+        </aside>
+        <main class="k-main">
+            <div class="k-viewport"><canvas id="stage"></canvas></div>
+        </main>
     </div>
-
-    <script type="module" src="/app/app.js"></script>
+    <footer class="k-statusbar">
+        <span id="status">starting…</span>
+    </footer>
+    <script type="module" src="/app/main.js"></script>
 </body>
 </html>
