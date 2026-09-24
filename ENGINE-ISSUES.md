@@ -22,24 +22,21 @@ except where an entry says "not re-run".
 
 ## Open
 
-### Layout and CSS
+### CSS animations and transitions
 
-#### `elementFromPoint`'s fallback search misses fixed elements (2026-09-24)
-When the regular hit test returns nothing useful, the fallback search does
-not consider a `position: fixed` element at the point. Not narrowed down;
-bro's `tests/layout/test_fixed_position_scroll.js` keeps content under its
-fixed bar to avoid it.
-
-### DOM APIs, events, CSS animations
-
-#### Discrete properties transition; `transition-behavior` is ignored (2026-09-24)
-A transition starts for a property that cannot be interpolated and snaps at
-50%; per spec it should not transition unless `transition-behavior:
-allow-discrete`, which bro ignores. Listed in docs/web-animations-api.js's
+#### No `@starting-style` (2026-09-24)
+Nothing transitions into view: an element leaving `display: none` or just
+inserted takes its end style at once. Listed in docs/web-animations-api.js's
 simplifications.
 
-### Windows, workers, messaging
+#### Transform lists of different shapes flip at 50% (2026-09-24)
+`transform` from `rotate(0)` to `translateX(10px) scale(2)` does not
+interpolate through matrices as the spec says; it flips halfway.
 
+#### Multi-value strings interpolate only their first number (2026-09-24)
+The number interpolator blends values like `box-shadow` by reading the first
+number and copying the rest, so offsets, blur and colour after the first
+number jump instead of blending.
 
 ### bronze JS runtime and module loading
 
@@ -140,6 +137,7 @@ from the commit before the kit rebuild.
 - `new Worker(new URL(...), { type: 'module' })` works — bro 06899506; verified 2026-09-24. worker-sim and stompworld use it.
 - Scene, verified 2026-09-24 (bro `tests/scene/` 58/58): `unprojectLocal(x, y)` → `{ origin, dir }` works with `setCamera` and camera nodes, plus the inverse `projectLocal(x, y, z)` (a7347b39; kit `sceneViewport.ray/toScreen`, arcade `rayAt/toScreen` and `pickRay` wrap them); TileWorld `addObject({ color })` tint and the dropped `addObjectKind` style keys (1ada0970); `atlasPixels` takes any byte view (a1136e4d); `setFog(null)` (c3b9f275); sprite `isPlaying` / `currentAnimation` (f5a7b7bb); 2D particle options and `liveCount` (d1bfc7f9); one wrapper per scene node, so `===` works (daec207d); a scene HtmlNode takes clicks only where it shows content and honours `pointer-events: none` (1b4e093b; farm's name tags are `pointer-events: none`).
 - CSS animations and WAAPI are one model, verified 2026-09-24 (bro `tests/style/test_css_animation_objects.js`, `test_waapi_timing_and_lifecycle.js`): script `el.click()` no longer focuses, a label's click focuses its control properly (d32ff816); CSS animations are `CSSAnimation` objects in `el.getAnimations()` / `document.getAnimations()`, every layer of a comma list runs, `steps()` / `linear()` easings, `updatePlaybackRate`, `commitStyles`, `persist`, `effect.updateTiming`, and filled animations are auto-removed (e983ea14). An invalid easing string now throws a TypeError. waapi-lab asserts all of it. Then (f9788f50): running transitions are `CSSTransition` objects with the spec's reversal and cancel rules, `display: none` cancels CSS animations and transitions, and `document.getAnimations()` is in spec order.
+- `elementFromPoint` / `elementsFromPoint` return exactly what a click hits (the separate fallback search that ignored stacking, clipping and `pointer-events` is gone) — bro e14dcc33; `transition-behavior: allow-discrete`, discrete changes apply at once otherwise, `display` exit transitions, `visibility` / `none`-transform interpolation — htmlayout 270a374, bro 8fb54148. Verified 2026-09-24; bro full suite 565/565.
 - `position: fixed` stays put when the viewport scrolls (paint, hit testing, rects) and the root scroll range covers overflowing content (htmlayout cc8f802, bro 8b841d6a); a stretched grid/flex item lays its contents out against the stretch, so a `flex: 1` fill grows with its card (htmlayout b07ecf3, bro 2a80997b; reader's progress bar is `flex: none`, its buttons sit at the card bottom); Worker `postMessage` and `bro.net.sendClone` keep object identity and clone cycles (0295ee67). Verified 2026-09-24.
 - Follow-ups, verified 2026-09-24: `pre-wrap` / `break-word` / mixed block-and-inline blocks wrap inside text after an inline element, and inline padding mirrors on RTL text (htmlayout 72777c7, bro e6a66434); element rects subtract the root scroll, `window.scrollTo` / `scrollY` / `scrollIntoView` move the viewport (af6c4219); `setRangeText` records one undo step and `execCommand('undo'/'redo')` works in inputs and textareas (aed8325b; desktop-notebook drops its JS undo history); `deleteContents` / `surroundContents` free what they remove unless script holds it (ef5aa488); Worker `postMessage` keeps buffer identity (235dad45).
 - Paint and DOM APIs, verified 2026-09-24 (bro `tests/style/`, `tests/dom/`, `tests/shadow_dom/`, `tests/events/`): `linear-gradient()` with `rgb()` stops (625516ac); tabs in `<pre>` advance to 8-column stops (d8f1039b); scrollbars follow the colour scheme and `scrollbar-color` (ea32f7e5); `CSS`, `Option`, `details.open` (bro 4450b38e, htmlayout 5483b87); selector lists split only at top-level commas (htmlayout 2e05b3d); DOMParser parses XML/SVG as XML with `parsererror` (4ca1d817); MutationObserver records for `innerHTML =` / `textContent =` (95402d6a); shadow `<style>` scoped per root, slotted children inherit from the slot (108b7bcb); keydown runs before a control's default action (ead08d78); `animation` shorthand with `cubic-bezier()` and computed longhands (htmlayout 7b0ddbc, bro 38f6d4e3), per-keyframe-interval easing (8c4e7849), removing `animation-name` cancels (35cfe935), animation/transition event fields (70f41130); a paused animation stays held when `currentTime` is written (8abda133); MediaQueryList change `currentTarget` (4033b5e9); each page module script runs as its own module under its own URL (96fb8f99). waapi-lab's CSS keyframes lane passes; the dom-lab, platform-lab, range-selection-lab, character-lab and node-forge tests assert the fixed behaviour. Note: text/comment nodes a script or MutationRecord holds now survive `innerHTML` replacement detached instead of being freed.
