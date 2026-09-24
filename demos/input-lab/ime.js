@@ -32,6 +32,8 @@
 // bro-headless; in a window the buttons disable themselves and the field is
 // wired to whatever real IME the OS provides.
 
+import { h, readout } from "/lib/kit/index.js";
+
 export const imeState = {
     composing: false,
     preedit: '',
@@ -46,7 +48,7 @@ export const imeState = {
     headless: false,
 };
 
-let input, logRows = [];
+let input, ro, logRows = [];
 const LOG_ROWS = 12;
 
 // Whether the injection seams exist. They are headless globals, so this is also
@@ -59,18 +61,9 @@ export function initImePanel() {
     input = document.getElementById('imeInput');
     imeState.headless = hasSeams();
 
-    const rows = document.getElementById('imeReadout');
-    rows.innerHTML = READOUT.map((k, i) =>
-        `<div class="row"><span>${k}</span><b id="ival${i}">—</b></div>`).join('');
-
+    ro = readout('#imeReadout', READOUT);
     const logEl = document.getElementById('imeLog');
-    logEl.innerHTML = '';
-    for (let i = 0; i < LOG_ROWS; i++) {
-        const row = document.createElement('div');
-        row.className = 'lrow';
-        logEl.appendChild(row);
-        logRows.push(row);
-    }
+    for (let i = 0; i < LOG_ROWS; i++) logRows.push(logEl.appendChild(h('div.lrow')));
 
     input.addEventListener('compositionstart', (e) => {
         imeState.composing = true;
@@ -114,13 +107,7 @@ export function initImePanel() {
     document.getElementById('imeCJK').addEventListener('click', () => driveCJK());
     document.getElementById('imeAccent').addEventListener('click', () => driveAccent());
     document.getElementById('imeAbort').addEventListener('click', () => driveCancel());
-    document.getElementById('imeClear').addEventListener('click', () => {
-        input.value = '';
-        imeState.events.length = 0;
-        imeState.updates = 0;
-        renderLog();
-        update();
-    });
+    document.getElementById('imeClear').addEventListener('click', resetIme);
 
     if (!imeState.headless) {
         for (const id of ['imeCJK', 'imeAccent', 'imeAbort']) {
@@ -177,18 +164,11 @@ function update() {
         String(s.compositions),
         String(s.cancelled),
     ];
-    for (let i = 0; i < vals.length; i++) {
-        const el = document.getElementById('ival' + i);
-        if (el && el.textContent !== vals[i]) el.textContent = vals[i];
-    }
+    vals.forEach((v, i) => ro.set(i, v));
+    ro.row(0).classList.toggle('on', s.composing);
     const banner = document.getElementById('imeBanner');
-    if (banner) {
-        const t = s.composing ? `composing "${s.preedit}"  →  range [${s.rangeStart}, ${s.rangeEnd})`
-                              : 'not composing';
-        if (banner.textContent !== t) banner.textContent = t;
-        const cls = 'capture' + (s.composing ? ' on' : '');
-        if (banner.className !== cls) banner.className = cls;
-    }
+    banner.textContent = s.composing ? `composing "${s.preedit}"  →  range [${s.rangeStart}, ${s.rangeEnd})` : 'not composing';
+    banner.classList.toggle('on', s.composing);
 }
 
 // ── the injection drivers ───────────────────────────────────────────────────

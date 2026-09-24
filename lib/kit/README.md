@@ -16,7 +16,7 @@ Ported examples: `demos/kws-lab` and `demos/lm-playground` (ML labs),
 | `index.js` | re-exports app, dom, ui, params, weights (one import line) |
 | `app.js` | `boot()`: menu bar, status line, error display |
 | `dom.js` | `$`, `$$`, `h` element builder, `ids`, formatters |
-| `ui.js` | status line, progress, log, stats, fps, toggle, tabs, frame loop, `fixedStep(h)` accumulator, `foldPanels()` (click a `.k-panel` caption to fold; ticking a caption checkbox unfolds) |
+| `ui.js` | status line, progress, log, stats, `readout` rows, fps, toggle, tabs, frame loop, `fixedStep(h)` accumulator, `foldPanels()` (click a `.k-panel` caption to fold; ticking a caption checkbox unfolds) |
 | `params.js` | controls bound to values / objects |
 | `weights.js` | model weight resolution (BRO_WEIGHTS, sibling repos, cache) |
 | `viewport3d.js` | `bro.scene` canvas + orbit camera + standard mouse controls, pick rays |
@@ -71,7 +71,11 @@ For a full-window 3D canvas use `<canvas>` + a floating `.k-hud` panel
   is its caption), `k-sep` (vertical divider), `k-grow`.
 - **Components:** `k-field` (label + control + `k-val` readout), `k-chip`
   (`.on`), `k-progress`, `k-log`, `k-stats`, `k-tabs`, `k-box` (bordered
-  output area).
+  output area), `k-kv` (label/value rows built by `readout()`; a row's `.on`
+  turns it green), `k-note` (explanatory prose; `.warn` for a caveat).
+- **Dashboards:** `k-deck` inside a `k-main.pad` wraps fixed-width
+  `k-panel`s (`--k-card-w`, default 560px; `.wide` spans two); `h3` inside a
+  panel is a section heading (window-lab, input-lab).
 - **Text:** `.ok .warn .err .dim`. `[hidden]` always hides.
 
 ## Modules
@@ -99,6 +103,10 @@ Returns `{ status }`.
 - `logView(el, { max, newestFirst, time })` → `add(textOrNode, kind)`, `clear()`
 - `stats(el, { key: 'label' })` → `set(key, v)` / `set({...})`; without labels
   it writes to existing `[data-stat=key]` or `#key` elements
+- `readout(el, labels)` — `.k-kv` label/value rows built once (labels: an
+  object, or an array keyed by index) → `set(key, v, on?)` / `set({...})`
+  (writes only changed text; `on` toggles the row's `.on`), `get(key)`,
+  `row(key)`, `keys`
 - `fpsMeter()` → `tick()` once a frame returns fps
 - `toggleButton(el, { on, labels: [off, on], onChange })` → `on`, `toggle()`
 - `tabs(bar, { onChange })` — `[data-tab=x]` buttons show `[data-pane=x]`

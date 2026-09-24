@@ -476,7 +476,53 @@ limitMax: 3.2 }` and it stops 0.9 m UP. For the rack jitter, build
 demos/mechanical-sandbox's gearbox with world-anchored hinges/slider and
 sample the crate's y every 5 frames.
 
+### A secondary window's `bro.window` drives the MAIN window (2026-09-24)
+`getWindow()` in `src/bronze_host/native_window.cpp` always returns
+`eng->window()`, so every `bro.window.*` call made from the realm of a window
+opened with `window.open(dir)` reads and writes the host window instead of
+its own. Repro: `bro-headless templates/kit-app -e "bro.window.setMinSize(777, 555); open('../../demos/window-lab/pinned')"`
+and the pinned child reports minWidth 777 / minHeight 555 (the host's) and
+`borderless: false` although its bro.json asks for `true`. The manifest
+defaults are applied at creation (`applyChildManifestDefaults`) but no child
+can read them back, and a child's `setMinSize` / `setBorderless` /
+`setAlwaysOnTop` / `maximize` land on the host. demos/window-lab's per-child
+controls and pinned card show it; its tests "per-child limits leave the host
+window alone" and "the pinned card's manifest flags and limits reached its
+window" assert the correct behaviour and fail until this is fixed (they were
+the baseline failure).
+
+### `postMessage({ v: view }, [view.buffer])` throws DataCloneError (2026-09-24)
+Transferring a buffer while a TypedArray view of it sits in the payload is
+valid on the web (the view arrives backed by the transferred buffer). bro
+detaches first and then fails to clone the view: `DataCloneError: Cannot
+clone TypedArray with detached buffer`. A buffer in the transfer list with
+no view in the payload transfers correctly (and is detached on the sender).
+Repro, in any page with a child window `w`:
+`const a = new Uint8Array(1024); w.postMessage({ v: a }, [a.buffer])`.
+demos/window-lab test "transfer: a view whose buffer is in the transfer list
+arrives intact" asserts the correct behaviour.
+
+### `animation:` shorthand containing `cubic-bezier()` is dropped (2026-09-24)
+`.a { animation: kk 2s cubic-bezier(0.4, 0, 0.2, 1) infinite; }` never
+animates (computed `transform` stays `none`), with or without spaces inside
+the parentheses. The same rule with `linear` / `ease-in-out` works, and the
+longhands (`animation-timing-function: cubic-bezier(...)` etc.) work.
+Separately, `getComputedStyle(el).animationName` / `animationTimingFunction`
+report the defaults (`none` / `ease`) for any animation set through the
+shorthand, including the ones that do run. Repro: a `<style>` with the rule
+above plus `@keyframes kk { 0% { transform: rotate(0deg) } 100% { transform: rotate(360deg) } }`,
+a div with class `a`, `advanceTime(500)`, read `getComputedStyle(div).transform`.
+demos/waapi-lab's arena lane 2 stands still because of it; its test "arena:
+the CSS @keyframes lane moves with the other two" fails until it is fixed.
+
 ## Notes (not bugs)
+
+- WAAPI gaps are documented in docs/web-animations-api.js and demos/waapi-lab
+  probes them live: `steps()` falls back to `ease` (and
+  `getTiming().easing` then reports `"ease"`, not the string given);
+  `updatePlaybackRate`, `commitStyles`, `persist`, `effect.updateTiming`
+  are absent. Also `document.getAnimations()` lists only script animations,
+  not running CSS animations (the spec includes CSSAnimation objects).
 
 - `terrain.setVoxel(x, y, z, v)` on a height-field terrain moves the grid
   node at `floor(x), floor(z)`, not the nearest one. A sculpt that samples

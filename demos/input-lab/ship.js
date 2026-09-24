@@ -9,7 +9,8 @@
 // strength over the last few seconds, where a keyboard draws square waves and
 // a stick draws curves.
 
-import { strength } from '/app/actions.js';
+import { readout } from "/lib/kit/index.js";
+import { strength } from "/app/actions.js";
 
 const W = 560, H = 300;
 const CHART_H = 54;            // strip chart occupies the bottom band
@@ -26,23 +27,14 @@ export const ship = {
     lastInputs: { thrust: 0, brake: 0, turn: 0, boost: 0, fire: 0 },
 };
 
-let canvas, ctx, readoutEl, fireLatch = false;
-
-// The readout rows are built once and only their values are rewritten. A
-// per-frame innerHTML rebuild lays the whole block out again every frame and
-// leaves the compositor painting a torn mix of the old and new text.
-const READOUT_ROWS = ['thrust', 'turn (R − L)', 'brake', 'boost', 'speed px/s', 'shots fired'];
-const readoutVals = [];
+let canvas, ctx, ro = null, fireLatch = false;
 
 export function initShip() {
     canvas = document.getElementById('shipCanvas');
     ctx = canvas.getContext('2d');
-    readoutEl = document.getElementById('shipReadout');
-    readoutEl.innerHTML = READOUT_ROWS.map((k, i) =>
-        `<div class="row"><span>${k}</span><b id="sval${i}">0.000</b></div>`).join('');
-    for (let i = 0; i < READOUT_ROWS.length; i++) {
-        readoutVals.push(document.getElementById('sval' + i));
-    }
+    // Built once; readout() only rewrites values that changed.
+    ro = readout('#shipReadout', { thrust: 'thrust', turn: 'turn (R − L)', brake: 'brake',
+                                   boost: 'boost', speed: 'speed px/s', shots: 'shots fired' });
 }
 
 /**
@@ -69,7 +61,7 @@ export function tickShip(dt) {
     ship.vy += Math.sin(ship.angle) * accel * dt;
 
     // Brake is analog too: a trigger gives partial braking.
-    const drag = Math.pow(1 - (0.35 + brake * 2.4) * dt, 1);
+    const drag = 1 - (0.35 + brake * 2.4) * dt;
     ship.vx *= Math.max(0, drag);
     ship.vy *= Math.max(0, drag);
 
@@ -172,18 +164,14 @@ function drawChart() {
 }
 
 export function updateShipReadout() {
-    if (!readoutVals.length) return;
+    if (!ro) return;
     const i = ship.lastInputs;
-    const speed = Math.sqrt(ship.vx * ship.vx + ship.vy * ship.vy);
-    const vals = [
-        i.thrust.toFixed(3),
-        (i.turn >= 0 ? '+' : '') + i.turn.toFixed(3),
-        i.brake.toFixed(3),
-        i.boost.toFixed(3),
-        speed.toFixed(1),
-        String(ship.firedCount),
-    ];
-    for (let n = 0; n < vals.length; n++) {
-        if (readoutVals[n].textContent !== vals[n]) readoutVals[n].textContent = vals[n];
-    }
+    ro.set({
+        thrust: i.thrust.toFixed(3),
+        turn: (i.turn >= 0 ? '+' : '') + i.turn.toFixed(3),
+        brake: i.brake.toFixed(3),
+        boost: i.boost.toFixed(3),
+        speed: Math.hypot(ship.vx, ship.vy).toFixed(1),
+        shots: ship.firedCount,
+    });
 }

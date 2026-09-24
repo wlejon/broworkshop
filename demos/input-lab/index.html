@@ -1,230 +1,159 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Input Lab</title>
-    <link rel="stylesheet" href="/app/style.css">
+<meta charset="utf-8">
+<title>Input Lab</title>
+<link rel="stylesheet" href="/lib/kit/kit.css">
+<link rel="stylesheet" href="/app/style.css">
 </head>
-<body>
-    <header id="topbar">
-        <h1>Input Lab</h1>
-        <div class="sub">gamepad · action bindings · analog strength · pointers &amp; multi-touch · gestures · IME<span id="padSummary" class="tag">no pad</span></div>
-    </header>
+<body class="k-app">
+  <header class="k-header">
+    <h1>Input Lab</h1>
+    <span class="k-sub">gamepad · action bindings · analog strength · pointers &amp; multi-touch · gestures · IME</span>
+    <span id="padSummary" class="k-chip">no pad</span>
+  </header>
 
-    <div id="grid">
+  <main class="k-main pad">
+    <div class="k-deck">
 
-        <!-- ── Gamepad ──────────────────────────────────────────────────── -->
-        <section class="panel" id="panelGamepad">
-            <h2>Gamepad <span class="hint">W3C Gamepad API — SDL3 standard mapping</span></h2>
-
-            <!-- Slot chips. One per slot navigator.getGamepads() has ever
-                 reported; a disconnected slot stays listed but greys out, which
-                 is exactly what the API's null-hole behaviour looks like. -->
-            <div id="padList" class="chips"></div>
-
-            <div id="padEmpty" class="empty">
-                <b>No controller connected.</b>
-                <p>Plug in any SDL-recognised pad — it arrives as a
-                <code>gamepadconnected</code> event and shows up here with the
-                standard 17-button / 4-axis mapping.</p>
-                <p>No hardware? This whole panel is driven by the headless
-                injection seams, so <code>bro-headless</code> can exercise it:</p>
-                <pre>gamepadConnect("Test Pad");
+      <!-- Gamepad -->
+      <section class="k-panel" id="panelGamepad">
+        <h2>Gamepad <span class="dim">W3C Gamepad API, SDL3 standard mapping</span></h2>
+        <!-- One chip per slot getGamepads() has reported; a disconnected slot stays, greyed. -->
+        <div id="padList" class="k-row chips"></div>
+        <div id="padEmpty" class="empty">
+          <b>No controller connected.</b>
+          <p class="k-note">Plug in any SDL-recognised pad: it arrives as a <code>gamepadconnected</code> event and
+            shows up here with the standard 17-button / 4-axis mapping. No hardware? The panel is driven by the
+            headless injection seams too:</p>
+          <pre>gamepadConnect("Test Pad");
 gamepadButton(0, "south", true);
 gamepadAxis(0, "leftx", 0.5);</pre>
+        </div>
+        <div id="padBody" class="k-col" hidden>
+          <canvas id="padCanvas" width="560" height="320"></canvas>
+          <div class="k-row top">
+            <div class="k-col k-grow"><h3>Buttons</h3><div id="btnReadout"></div></div>
+            <div class="k-col k-grow">
+              <h3>Axes</h3><div id="axisReadout"></div>
+              <h3>Snapshot</h3><div id="metaReadout"></div>
             </div>
+          </div>
+          <h3>Rumble <span class="dim">vibrationActuator.playEffect()</span></h3>
+          <label class="k-field"><span>strong</span><input type="range" id="rumStrong" min="0" max="1" step="0.05" value="0.8"><span class="k-val" id="rumStrongV"></span></label>
+          <label class="k-field"><span>weak</span><input type="range" id="rumWeak" min="0" max="1" step="0.05" value="0.4"><span class="k-val" id="rumWeakV"></span></label>
+          <label class="k-field"><span>ms</span><input type="range" id="rumDur" min="20" max="1500" step="20" value="200"><span class="k-val" id="rumDurV"></span></label>
+          <div class="k-row">
+            <button class="small" id="rumPlay">play</button>
+            <button class="small" id="rumTick">light tick</button>
+            <button class="small" id="rumThud">heavy thud</button>
+            <button class="small" id="rumRamp">ramp</button>
+            <button class="small danger" id="rumStop">reset()</button>
+          </div>
+          <div id="rumStatus" class="dim">idle</div>
+        </div>
+      </section>
 
-            <div id="padBody">
-                <canvas id="padCanvas" width="560" height="320"></canvas>
-                <div class="readouts">
-                    <div class="ro-col">
-                        <h3>Buttons</h3>
-                        <div id="btnReadout" class="ro"></div>
-                    </div>
-                    <div class="ro-col">
-                        <h3>Axes</h3>
-                        <div id="axisReadout" class="ro"></div>
-                        <h3>Snapshot</h3>
-                        <div id="metaReadout" class="ro"></div>
-                    </div>
-                </div>
+      <!-- Actions -->
+      <section class="k-panel" id="panelActions">
+        <h2>Action bindings <span class="dim">bro.settings.defineAction / rebindAction</span></h2>
+        <p class="k-note">Click a binding chip to rebind it, then press a key, a mouse button, a gamepad button, or
+          push a stick past 60%. <kbd>Esc</kbd> cancels. All binding kinds (<code>"a"</code>,
+          <code>"mouse:left"</code>, <code>"gamepad:righttrigger"</code>, <code>"gamepad:leftx+"</code>) live in
+          the same list.</p>
+        <div id="capture" class="banner on" hidden>Press an input to bind <b id="captureFor"></b> …</div>
+        <div id="actionRows"></div>
+        <div class="k-row"><button class="small" id="resetBinds">restore default bindings</button></div>
+        <p class="k-note warn"><b>Known gap:</b> <code>lib/input.js</code> (which most arcade games build on)
+          hand-rolls its mouse handling with <code>"Mouse0"</code>/<code>"Mouse2"</code> strings instead of the
+          engine's native <code>"mouse:left"</code> / <code>"mouse:right"</code> bindings shown here.</p>
+      </section>
 
-                <!-- ── Rumble ──────────────────────────────────────────── -->
-                <div class="sub-panel">
-                    <h3>Rumble <span class="hint">vibrationActuator.playEffect()</span></h3>
-                    <label>strong <input type="range" id="rumStrong" min="0" max="1" step="0.05" value="0.8">
-                        <span class="v" id="rumStrongV">0.80</span></label>
-                    <label>weak <input type="range" id="rumWeak" min="0" max="1" step="0.05" value="0.4">
-                        <span class="v" id="rumWeakV">0.40</span></label>
-                    <label>ms <input type="range" id="rumDur" min="20" max="1500" step="20" value="200">
-                        <span class="v" id="rumDurV">200</span></label>
-                    <div class="btnrow">
-                        <button id="rumPlay">play</button>
-                        <button id="rumTick">light tick</button>
-                        <button id="rumThud">heavy thud</button>
-                        <button id="rumRamp">ramp</button>
-                        <button id="rumStop" class="danger">reset()</button>
-                    </div>
-                    <div id="rumStatus" class="hint">idle</div>
-                </div>
-            </div>
-        </section>
+      <!-- Playable target -->
+      <section class="k-panel" id="panelShip">
+        <h2>Analog proof <span class="dim">the same actions, driving something</span></h2>
+        <p class="k-note">Thrust and turn are read with <code>getActionStrength()</code>, not
+          <code>isActionPressed()</code>. On a keyboard they are 0 or 1 and the ship snaps; on a stick or trigger
+          they are continuous and it eases. Same action, same code path.</p>
+        <canvas id="shipCanvas" width="560" height="300"></canvas>
+        <div id="shipReadout"></div>
+      </section>
 
-        <!-- ── Actions ──────────────────────────────────────────────────── -->
-        <section class="panel" id="panelActions">
-            <h2>Action bindings <span class="hint">bro.settings.defineAction / rebindAction</span></h2>
+      <!-- Pointer / touch -->
+      <section class="k-panel" id="panelPointer">
+        <h2>Pointers &amp; touch <span class="dim">W3C Pointer Events + Touch Events</span></h2>
+        <p class="k-note">Every contact is tracked independently by <code>pointerId</code>: touch ids are minted
+          from 2 and never reused, the mouse permanently owns 1. Two fingers draw two trails. The heavier ring is
+          <code>isPrimary</code>.</p>
+        <div class="k-row"><span class="dim k-grow">multi-touch visualiser</span><span id="ptrSummary" class="k-chip">0 live</span></div>
+        <canvas id="ptrCanvas" width="560" height="300"></canvas>
+        <div id="ptrTable"></div>
 
-            <p class="note">Click any binding chip to rebind it, then press a
-            key, a mouse button, a gamepad button, or push a stick past 60%.
-            <kbd>Esc</kbd> cancels. All three binding kinds —
-            <code>"a"</code>, <code>"mouse:left"</code>,
-            <code>"gamepad:righttrigger"</code>,
-            <code>"gamepad:leftx+"</code> — live in the same list.</p>
+        <h3>Pointer capture <span class="dim">setPointerCapture(pointerId)</span></h3>
+        <p class="k-note">Drag the square. With capture on, moves keep arriving at the square after the pointer
+          leaves it: the <b>outside-bounds move count</b> is that, measured. Turn capture off and the drag dies at
+          the border.</p>
+        <label class="k-field"><input type="checkbox" id="capEnable" checked> call setPointerCapture on pointerdown</label>
+        <div id="capTrack"><div id="capBox">drag</div></div>
+        <div id="capPhase" class="dim">idle</div>
+        <div id="capReadout"></div>
 
-            <div id="capture" class="capture">Press an input to bind <b id="captureFor"></b> …</div>
+        <h3>Event stream <span class="dim">raw pointer/touch vs compat mouse</span></h3>
+        <p class="k-note">A clean TAP of the primary finger synthesizes the classic sequence <b>after</b> touchend:
+          <code>pointerdown → touchstart → pointerup → touchend → mousedown → mouseup → click</code>. A drag past the
+          ~10 px slop synthesizes nothing. Amber rows are the synthesized ones.</p>
+        <div id="ptrLog" class="evlog"></div>
+        <div class="k-row"><button class="small" id="ptrClear">clear log</button></div>
+      </section>
 
-            <div id="actionRows"></div>
+      <!-- Gestures -->
+      <section class="k-panel" id="panelGesture">
+        <h2>Gestures <span class="dim">gesturestart / gesturechange / gestureend</span></h2>
+        <p class="k-note">Pinch to zoom, two-finger drag to pan, two-finger twist to rotate. SDL3 has no gesture
+          subsystem, so bro recognises these engine-side from the two oldest live contacts and dispatches
+          WebKit-style gesture events beside the untouched pointer stream. <code>e.scale</code> and
+          <code>e.rotation</code> are relative to <code>gesturestart</code>, so the viewer multiplies onto a base
+          captured there.</p>
+        <canvas id="gestCanvas" width="560" height="320"></canvas>
+        <div id="gestPhase" class="dim">idle</div>
+        <div id="gestReadout"></div>
+        <div class="k-row"><button class="small" id="gestReset">reset view</button></div>
+        <p class="k-note">No touchscreen? Drag to pan, wheel to zoom, <kbd>Shift</kbd>+drag to rotate: a separate
+          mouse path, not synthesized gestures.</p>
+        <p class="k-note warn"><b>Document-wide recognition:</b> the founding pair is the two oldest live contacts
+          anywhere in the document, and the events go to the hit target of their centroid. Leave two fingers
+          resting on the visualiser and this map goes inert. There is no per-element gesture arena.</p>
+      </section>
 
-            <div class="btnrow">
-                <button id="resetBinds">restore default bindings</button>
-            </div>
-
-            <p class="note warn"><b>Known gap:</b> <code>lib/input.js</code>
-            (which most of the arcade games build on) hand-rolls its own mouse
-            handling with <code>"Mouse0"</code>/<code>"Mouse2"</code> strings
-            instead of the engine's native <code>"mouse:left"</code> /
-            <code>"mouse:right"</code> bindings shown here. Porting it is a
-            follow-up.</p>
-        </section>
-
-        <!-- ── Playable target ──────────────────────────────────────────── -->
-        <section class="panel" id="panelShip">
-            <h2>Analog proof <span class="hint">the same actions, driving something</span></h2>
-            <p class="note">Thrust and turn are read with
-            <code>getActionStrength()</code>, not
-            <code>isActionPressed()</code>. On a keyboard they are 0 or 1 and
-            the ship snaps; on a stick or trigger they are continuous and it
-            eases. Same action, same code path.</p>
-            <canvas id="shipCanvas" width="560" height="300"></canvas>
-            <div id="shipReadout" class="ro"></div>
-        </section>
-
-        <!-- ── Pointer / touch ──────────────────────────────────────────── -->
-        <section class="panel" id="panelPointer">
-            <h2>Pointers &amp; touch <span class="hint">W3C Pointer Events + Touch Events</span></h2>
-
-            <p class="note">Every contact is tracked independently by
-            <code>pointerId</code> — touch ids are minted from 2 and never
-            reused, the mouse permanently owns 1. Two fingers draw two trails.
-            The heavier ring is <code>isPrimary</code>.</p>
-
-            <div class="subhead">
-                <span class="hint">multi-touch visualiser</span>
-                <span id="ptrSummary" class="tag">0 live</span>
-            </div>
-            <canvas id="ptrCanvas" width="560" height="300"></canvas>
-            <div id="ptrTable" class="ro"></div>
-
-            <!-- ── Capture ─────────────────────────────────────────────── -->
-            <div class="sub-panel">
-                <h3>Pointer capture <span class="hint">setPointerCapture(pointerId)</span></h3>
-                <p class="note">Drag the square. With capture on, the moves keep
-                arriving at the square after the pointer leaves it — the
-                <b>outside-bounds move count</b> below is that, measured. Turn
-                capture off and the drag dies at the border.</p>
-                <label class="check">
-                    <input type="checkbox" id="capEnable" checked>
-                    call setPointerCapture on pointerdown
-                </label>
-                <div id="capTrack"><div id="capBox">drag</div></div>
-                <div id="capPhase" class="hint">idle</div>
-                <div class="ro">
-                    <div class="row"><span>capture held</span><b id="capHeld">no</b></div>
-                    <div class="row"><span>captured pointer</span><b id="capId">—</b></div>
-                    <div class="row"><span>moves delivered</span><b id="capMoves">0</b></div>
-                    <div class="row"><span>…of those, outside bounds</span><b id="capOutside">0</b></div>
-                    <div class="row"><span>pointer is</span><b id="capWhere">inside</b></div>
-                </div>
-            </div>
-
-            <!-- ── Event stream ────────────────────────────────────────── -->
-            <div class="sub-panel">
-                <h3>Event stream <span class="hint">raw pointer/touch vs. compat mouse</span></h3>
-                <p class="note">A clean TAP of the primary finger synthesizes the
-                classic sequence <i>after</i> touchend:
-                <code>pointerdown → touchstart → pointerup → touchend →
-                mousedown → mouseup → click</code>. A <b>drag</b> past the ~10 px
-                slop synthesizes nothing — the amber rows below are the
-                synthesized ones.</p>
-                <div id="ptrLog" class="evlog"></div>
-                <div class="btnrow"><button id="ptrClear">clear log</button></div>
-            </div>
-        </section>
-
-        <!-- ── Gestures ─────────────────────────────────────────────────── -->
-        <section class="panel" id="panelGesture">
-            <h2>Gestures <span class="hint">gesturestart / gesturechange / gestureend</span></h2>
-
-            <p class="note">Pinch to zoom, two-finger drag to pan, two-finger
-            twist to rotate. SDL3 has no gesture subsystem, so bro recognises
-            these engine-side from the two oldest live contacts and dispatches
-            WebKit-style gesture events alongside the untouched pointer stream.
-            <code>e.scale</code> and <code>e.rotation</code> are relative to
-            <code>gesturestart</code>, so the viewer multiplies onto a base
-            captured there.</p>
-
-            <canvas id="gestCanvas" width="560" height="320"></canvas>
-            <div id="gestPhase" class="hint">idle</div>
-            <div id="gestReadout" class="ro"></div>
-            <div class="btnrow"><button id="gestReset">reset view</button></div>
-            <p class="note">No touchscreen? Drag to pan, wheel to zoom,
-            <kbd>Shift</kbd>+drag to rotate — a separate mouse path, not
-            synthesized gestures.</p>
-
-            <p class="note warn"><b>Document-wide recognition:</b> the founding
-            pair is the two oldest live contacts <i>anywhere in the document</i>,
-            and the events go to the hit target of their centroid. Leave two
-            fingers resting on the visualiser panel and this map goes inert —
-            those contacts founded the gesture, so it was delivered there. There
-            is no per-element gesture arena.</p>
-        </section>
-
-        <!-- ── IME ──────────────────────────────────────────────────────── -->
-        <section class="panel" id="panelIme">
-            <h2>IME composition <span class="hint">compositionstart / update / end</span></h2>
-
-            <p class="note">An IME composes rather than types. The
-            <b>preedit</b> is provisional text that is already in
-            <code>.value</code> but is not real input yet — only
-            <code>compositionend</code> is. Note bro dispatches composition
-            events <i>after</i> the mutation, so the value shown by
-            <code>compositionstart</code> already carries the first chunk.</p>
-
-            <input type="text" id="imeInput" placeholder="compose here…">
-            <div id="imeBanner" class="capture">not composing</div>
-
-            <div class="btnrow">
-                <button id="imeCJK">compose 你好 (pinyin)</button>
-                <button id="imeAccent">compose é (dead key)</button>
-                <button id="imeAbort" class="danger">compose then cancel</button>
-                <button id="imeClear">clear</button>
-            </div>
-            <div id="imeSeamNote" class="hint">Buttons drive the
-            <code>imeCompose</code> / <code>imeCommit</code> /
-            <code>imeCancel</code> headless seams.</div>
-
-            <div id="imeReadout" class="ro"></div>
-
-            <h3>Event log</h3>
-            <div id="imeLog" class="evlog"></div>
-
-            <p class="note warn">A cancel is <b>not</b> a commit of <code>""</code>:
-            it restores the value and selection from before
-            <code>compositionstart</code> and leaves no undo entry. A field that
-            already held text keeps it.</p>
-        </section>
+      <!-- IME -->
+      <section class="k-panel" id="panelIme">
+        <h2>IME composition <span class="dim">compositionstart / update / end</span></h2>
+        <p class="k-note">An IME composes rather than types. The <b>preedit</b> is provisional text already in
+          <code>.value</code> but not real input yet: only <code>compositionend</code> is. bro dispatches
+          composition events <b>after</b> the mutation, so the value seen by <code>compositionstart</code> already
+          carries the first chunk.</p>
+        <input type="text" id="imeInput" placeholder="compose here…">
+        <div id="imeBanner" class="banner">not composing</div>
+        <div class="k-row">
+          <button class="small" id="imeCJK">compose 你好 (pinyin)</button>
+          <button class="small" id="imeAccent">compose é (dead key)</button>
+          <button class="small danger" id="imeAbort">compose then cancel</button>
+          <button class="small" id="imeClear">clear</button>
+        </div>
+        <div id="imeSeamNote" class="dim">Buttons drive the <code>imeCompose</code> / <code>imeCommit</code> /
+          <code>imeCancel</code> headless seams.</div>
+        <div id="imeReadout"></div>
+        <h3>Event log</h3>
+        <div id="imeLog" class="evlog"></div>
+        <p class="k-note warn">A cancel is <b>not</b> a commit of <code>""</code>: it restores the value and
+          selection from before <code>compositionstart</code> and leaves no undo entry. A field that already held
+          text keeps it.</p>
+      </section>
 
     </div>
+  </main>
 
-    <script type="module" src="/app/app.js"></script>
+  <footer class="k-statusbar"><span id="status">starting…</span></footer>
+  <script type="module" src="/app/main.js"></script>
 </body>
 </html>

@@ -154,7 +154,8 @@ PASS smoke demos/vision-lab
 PASS test demos/vision-lab/tests/test_smoke.js 
 PASS smoke demos/vlm-lab 
 PASS test demos/vlm-lab/tests/test_main.js 
-PASS smoke demos/waapi-lab 
+PASS smoke demos/waapi-lab
+FAIL test demos/waapi-lab/tests/test_smoke.js rc=1: engine bug (ENGINE-ISSUES.md: animation shorthand with cubic-bezier dropped)
 PASS smoke demos/window-lab 
 FAIL test demos/window-lab/tests/test_smoke.js rc=1: ASSERTION FAILED: bro.json "borderless": true reached the real window
 PASS smoke games/2048 

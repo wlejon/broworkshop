@@ -31,6 +31,8 @@
 // so the panel is not dead on a desktop without a touchscreen. It is a separate
 // code path and is labelled as such; it does not fake gesture events.
 
+import { readout } from "/lib/kit/index.js";
+
 const W = 560, H = 320;
 
 export const gestureState = {
@@ -47,16 +49,14 @@ export const gestureState = {
 
 // Captured at gesturestart; every gesturechange is applied relative to these.
 let base = null;
-let canvas, ctx, phaseEl;
+let canvas, ctx, phaseEl, ro;
 
 export function initGesturePanel() {
     canvas = document.getElementById('gestCanvas');
     ctx = canvas.getContext('2d');
     phaseEl = document.getElementById('gestPhase');
 
-    const rows = document.getElementById('gestReadout');
-    rows.innerHTML = READOUT.map((k, i) =>
-        `<div class="row"><span>${k}</span><b id="gval${i}">—</b></div>`).join('');
+    ro = readout('#gestReadout', READOUT);
 
     canvas.addEventListener('gesturestart', (e) => {
         base = {
@@ -243,8 +243,5 @@ function updateReadout() {
         String(g.changes),
         String(g.gestures),
     ];
-    for (let i = 0; i < vals.length; i++) {
-        const el = document.getElementById('gval' + i);
-        if (el && el.textContent !== vals[i]) el.textContent = vals[i];
-    }
+    vals.forEach((v, i) => ro.set(i, v));
 }

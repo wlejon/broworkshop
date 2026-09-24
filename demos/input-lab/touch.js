@@ -23,6 +23,8 @@
 //     really pointerdown → touchstart → pointerup → touchend → mousedown →
 //     mouseup → click, and that a DRAG produces no mouse events at all.
 
+import { h, readout } from "/lib/kit/index.js";
+
 const W = 560, H = 300;
 
 // One colour per concurrent contact. Indexed by arrival order rather than by
@@ -51,7 +53,7 @@ export const captureState = {
 };
 
 let canvas, ctx, ptrRows = [], logRows = [], summaryEl;
-let capTrack, capBox, capEnableEl;
+let capTrack, capBox, capEnableEl, capRo;
 let lastTouchEndAt = -1e9;
 let nextColor = 0;
 
@@ -63,27 +65,16 @@ export function initPointerPanel() {
     ctx = canvas.getContext('2d');
     summaryEl = document.getElementById('ptrSummary');
 
-    // Fixed row pools. Rebuilding either of these per frame would relayout the
-    // panel at 60 Hz and render torn — chunk 1 established that the hard way.
+    // Fixed row pools: rebuilding either per frame would relayout the panel at
+    // 60 Hz. Rows are rewritten in place, only when their text changes.
     const table = document.getElementById('ptrTable');
-    table.innerHTML = '';
     for (let i = 0; i < PTR_ROWS; i++) {
-        const row = document.createElement('div');
-        row.className = 'prow';
-        row.innerHTML = '<span class="swatch"></span><b class="c"></b>';
-        table.appendChild(row);
-        ptrRows.push({ row, swatch: row.querySelector('.swatch'), text: row.querySelector('.c') });
+        const swatch = h('span.swatch'), text = h('b');
+        table.appendChild(h('div.prow', null, swatch, text));
+        ptrRows.push({ swatch, text });
     }
-
     const logEl = document.getElementById('ptrLog');
-    logEl.innerHTML = '';
-    for (let i = 0; i < LOG_ROWS; i++) {
-        const row = document.createElement('div');
-        row.className = 'lrow';
-        row.textContent = '';
-        logEl.appendChild(row);
-        logRows.push(row);
-    }
+    for (let i = 0; i < LOG_ROWS; i++) logRows.push(logEl.appendChild(h('div.lrow')));
 
     // ── the visualiser ──────────────────────────────────────────────────────
     canvas.addEventListener('pointerdown', onDown);
@@ -317,6 +308,8 @@ let dragOffX = 0, dragOffY = 0;
 function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
 
 function initCaptureDemo() {
+    capRo = readout('#capReadout', { held: 'capture held', id: 'captured pointer', moves: 'moves delivered',
+                                     outside: '…of those, outside bounds', where: 'pointer is' });
     capTrack = document.getElementById('capTrack');
     capBox = document.getElementById('capBox');
     capEnableEl = document.getElementById('capEnable');
@@ -384,20 +377,16 @@ function initCaptureDemo() {
 
 function setCapPhase(s) {
     captureState.lastPhase = s;
-    const el = document.getElementById('capPhase');
-    if (el && el.textContent !== s) el.textContent = s;
+    document.getElementById('capPhase').textContent = s;
     updateCapReadout(false);
 }
 
 function updateCapReadout(outside) {
-    setVal('capHeld', captureState.captured ? 'yes' : 'no');
-    setVal('capId', captureState.pointerId === null ? '—' : '#' + captureState.pointerId);
-    setVal('capMoves', String(captureState.movesTotal));
-    setVal('capOutside', String(captureState.movesOutsideBounds));
-    setVal('capWhere', outside ? 'OUTSIDE the element' : 'inside');
-}
-
-function setVal(id, s) {
-    const el = document.getElementById(id);
-    if (el && el.textContent !== s) el.textContent = s;
+    capRo.set('held', captureState.captured ? 'yes' : 'no', captureState.captured);
+    capRo.set({
+        id:captureState.pointerId === null ? '—' : '#' + captureState.pointerId,
+        moves: captureState.movesTotal,
+        outside: captureState.movesOutsideBounds,
+    });
+    capRo.set('where', outside ? 'OUTSIDE the element' : 'inside', outside);
 }

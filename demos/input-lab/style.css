@@ -1,272 +1,71 @@
-/* Input Lab — diagnostic dashboard styling.
-   Dark, dense, monospace-for-numbers. Everything that moves at frame rate
-   (readouts, bars) is a fixed-width element so live updates never reflow the
-   page around them. */
+/* Input Lab: only what is specific to this app; lib/kit/kit.css does the rest.
+   Everything updated at frame rate is fixed-size, so live values never reflow. */
 
-* { box-sizing: border-box; }
+.k-deck { --k-card-w: 600px; }
+.k-row.top { align-items: flex-start; }
+/* Intrinsic size, never stretched by the panel's flex column: pointer maths
+   maps client coordinates 1:1 onto the drawing buffer. */
+canvas { display: block; align-self: flex-start; flex: none; background: #080a0f; border-radius: 5px; }
+kbd { background: var(--k-btn); border: 1px solid var(--k-border-hi); border-radius: 3px; padding: 0 4px; font-family: var(--k-font); }
+.k-chip.on { color: var(--k-on-text); }
 
-body {
-    margin: 0;
-    background: #0d1016;
-    color: #d6dae3;
-    font: 13px/1.45 system-ui, sans-serif;
-}
-
-#topbar {
-    padding: 14px 20px 12px;
-    border-bottom: 1px solid #1e2531;
-    background: #11151d;
-}
-#topbar h1 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: .3px; }
-#topbar .sub { color: #6d7688; font-size: 12px; margin-top: 3px; }
-
-.tag {
-    display: inline-block;
-    margin-left: 10px;
-    padding: 1px 8px;
-    border-radius: 9px;
-    background: #1b2230;
-    color: #8d97ab;
-    font: 11px ui-monospace, Consolas, monospace;
-}
-.tag.live { background: #14361f; color: #6ee79a; }
-
-#grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 14px;
-    padding: 14px 20px 40px;
-    align-items: flex-start;
-}
-
-.panel {
-    background: #11151d;
-    border: 1px solid #1e2531;
-    border-radius: 7px;
-    padding: 14px 16px 16px;
-    width: 600px;
-}
-.panel h2 {
-    margin: 0 0 10px;
-    font-size: 14px;
-    font-weight: 600;
-    color: #cfd6e4;
-}
-.panel h3 {
-    margin: 10px 0 5px;
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: .8px;
-    color: #6d7688;
-}
-.hint {
-    text-transform: none;
-    font-weight: 400;
-    font-size: 11px;
-    color: #5c6577;
-    margin-left: 8px;
-}
-
-.note { color: #8b93a5; font-size: 12px; margin: 0 0 10px; }
-.note.warn {
-    margin-top: 12px;
-    padding: 8px 10px;
-    border-left: 3px solid #b7791f;
-    background: #1a1710;
-    color: #b6a37c;
-}
-code, kbd, pre { font-family: ui-monospace, Consolas, monospace; }
-code { color: #8fd0ff; font-size: 11.5px; }
-kbd {
-    background: #1c2331; border: 1px solid #2b3444; border-radius: 3px;
-    padding: 0 4px; font-size: 11px;
-}
-
-canvas { display: block; background: #080a0f; border-radius: 5px; }
-
-/* ── gamepad ─────────────────────────────────────────────────────────────── */
-
-.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
-.padchip {
-    padding: 3px 9px; border-radius: 4px;
-    background: #1a2130; border: 1px solid #262f40;
-    font: 11px ui-monospace, Consolas, monospace; color: #9aa4b8;
-    cursor: pointer;
-}
-.padchip.sel { border-color: #3d7dd6; color: #cfe4ff; background: #16263c; }
+/* gamepad */
+.padchip { cursor: pointer; font-size: 11px; }
 .padchip.gone { opacity: .4; text-decoration: line-through; cursor: default; }
+.empty { padding: 12px; border: 1px dashed var(--k-border-hi); border-radius: 6px; display: flex; flex-direction: column; gap: 8px; }
+.empty pre { margin: 0; padding: 8px 10px; background: var(--k-bg); border-radius: 4px; color: var(--k-ok); }
 
-.empty {
-    padding: 16px; border: 1px dashed #2a3345; border-radius: 6px;
-    color: #7b8498; font-size: 12px;
-}
-.empty b { color: #b9c2d4; }
-.empty p { margin: 8px 0 0; }
-.empty pre {
-    margin: 8px 0 0; padding: 8px 10px; background: #0b0e14;
-    border-radius: 4px; color: #7fc4a0; font-size: 11px; white-space: pre;
-}
+/* banners (capture armed, IME composing) */
+.banner { padding: 7px 10px; border-radius: 5px; background: var(--k-input); border: 1px solid var(--k-border-hi); color: var(--k-dim); }
+.banner.on { background: #16263c; border-color: var(--k-accent); color: var(--k-value); }
 
-.readouts { display: flex; gap: 18px; margin-top: 10px; }
-.ro-col { flex: 1; min-width: 0; }
-.ro { font: 11px/1.55 ui-monospace, Consolas, monospace; color: #808a9d; }
-.ro .row { display: flex; justify-content: space-between; gap: 8px; }
-.ro .row.on { color: #7ee0a0; }
-.ro .row b { font-weight: 500; color: inherit; }
-
-.sub-panel {
-    margin-top: 12px; padding-top: 10px; border-top: 1px solid #1e2531;
-}
-.sub-panel label {
-    display: flex; align-items: center; gap: 8px; margin: 4px 0;
-    font-size: 12px; color: #8b93a5;
-}
-.sub-panel label input[type=range] { flex: 1; }
-.v { width: 42px; text-align: right; font: 11px ui-monospace, Consolas, monospace; color: #9fb0c8; }
-
-.btnrow { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-button {
-    background: #1b2331; color: #b9c2d4; border: 1px solid #2b3444;
-    border-radius: 4px; padding: 4px 11px; font: 12px system-ui, sans-serif;
-    cursor: pointer;
-}
-button:hover { background: #232d3f; }
-button.danger { border-color: #5a2b2b; color: #e0a0a0; }
-
-/* ── action rows ─────────────────────────────────────────────────────────── */
-
-.capture {
-    display: none;
-    margin: 0 0 10px; padding: 8px 10px; border-radius: 5px;
-    background: #16263c; border: 1px solid #3d7dd6; color: #cfe4ff;
-    font-size: 12px;
-}
-.capture.on { display: block; }
-.capture b { font-family: ui-monospace, Consolas, monospace; }
-
-.arow {
-    display: flex; align-items: center; gap: 10px;
-    padding: 5px 0; border-top: 1px solid #171d28;
-}
-.arow .name {
-    width: 76px; flex: none;
-    font: 12px ui-monospace, Consolas, monospace; color: #b9c2d4;
-}
-.arow .binds { flex: 1; display: flex; flex-wrap: wrap; gap: 4px; }
+/* action rows: digital dot vs analog bar side by side, the point of the panel */
+.arow, .ahead { display: flex; align-items: center; gap: 10px; padding: 4px 0; }
+.arow { border-top: 1px solid var(--k-border); }
+.ahead { color: var(--k-dim); font-size: 10px; text-transform: uppercase; letter-spacing: .6px; }
+.arow .name, .ahead .name { width: 70px; flex: none; }
+.arow .binds, .ahead .binds { flex: 1; display: flex; flex-wrap: wrap; gap: 4px; }
 .bind {
-    padding: 1px 7px; border-radius: 3px;
-    background: #1a2130; border: 1px solid #262f40;
-    font: 11px ui-monospace, Consolas, monospace; color: #9aa4b8;
-    cursor: pointer;
+    padding: 1px 7px; border-radius: 3px; cursor: pointer; font-size: 11px;
+    background: var(--k-input); border: 1px solid var(--k-border-hi); color: var(--k-muted);
 }
-.bind:hover { border-color: #3d7dd6; color: #cfe4ff; }
-.bind.kb   { border-left: 3px solid #6f8fd6; }
-.bind.mouse{ border-left: 3px solid #d69a6f; }
-.bind.pad  { border-left: 3px solid #6fd6a4; }
-.bind.add  { color: #5c6577; border-style: dashed; }
+.bind:hover { border-color: var(--k-accent); color: var(--k-value); }
+.bind.kb    { border-left: 3px solid #6f8fd6; }
+.bind.mouse { border-left: 3px solid #d69a6f; }
+.bind.pad   { border-left: 3px solid #6fd6a4; }
+.bind.add   { color: var(--k-dim); border-style: dashed; }
 .bind.arming { border-color: #ffd479; color: #ffd479; }
+.dot, .dot-h { width: 9px; height: 9px; flex: none; border-radius: 5px; }
+.dot { background: #232b3a; border: 1px solid #303a4c; }
+.dot.on { background: var(--k-ok); border-color: var(--k-ok); }
+.bar, .bar-h { width: 110px; flex: none; }
+.bar { height: 9px; border-radius: 2px; background: var(--k-input); overflow: hidden; }
+.bar > i { display: block; height: 100%; width: 0; background: var(--k-accent); }
+.num { width: 34px; flex: none; text-align: right; color: var(--k-muted); }
 
-/* digital dot vs analog bar, side by side — the whole point of the panel */
-.arow .dot {
-    width: 9px; height: 9px; flex: none; border-radius: 50%;
-    background: #232b3a; border: 1px solid #303a4c;
-}
-.arow .dot.on { background: #6ee79a; border-color: #6ee79a; }
-.arow .bar {
-    width: 110px; height: 9px; flex: none; border-radius: 2px;
-    background: #171d28; overflow: hidden;
-}
-.arow .bar i { display: block; height: 100%; width: 0; background: #4d9de0; }
-.arow .num {
-    width: 34px; flex: none; text-align: right;
-    font: 11px ui-monospace, Consolas, monospace; color: #7f8a9e;
-}
-.ahead {
-    display: flex; gap: 10px; padding-bottom: 4px;
-    font: 10px system-ui; text-transform: uppercase; letter-spacing: .7px;
-    color: #4e5666;
-}
-.ahead .name { width: 76px; flex: none; }
-.ahead .binds { flex: 1; }
-.ahead .s1 { width: 9px; flex: none; }
-.ahead .s2 { width: 110px; flex: none; }
-.ahead .s3 { width: 34px; flex: none; text-align: right; }
-
-#shipReadout { margin-top: 8px; }
-
-/* ── pointer / touch ─────────────────────────────────────────────────────── */
-
-.subhead {
-    display: flex; align-items: center; justify-content: space-between;
-    margin-bottom: 6px;
-}
-.subhead .tag { margin-left: 0; }
-
-#ptrTable { margin-top: 8px; min-height: 96px; }
+/* pointer table + fixed-row event logs */
+#ptrTable { min-height: 96px; }
 .prow { display: flex; align-items: center; gap: 8px; height: 16px; }
-.prow .swatch {
-    width: 9px; height: 9px; flex: none; border-radius: 2px; background: transparent;
-}
-.prow b { font-weight: 500; color: #9fb0c8; }
-
-/* The event stream. Fixed row count and fixed row height so appending never
-   reflows the panel — the log is a window, not a growing list. */
+.prow .swatch { width: 9px; height: 9px; flex: none; border-radius: 2px; }
+.prow b { font-weight: normal; color: var(--k-value); }
 .evlog {
-    margin-top: 6px; padding: 7px 9px;
-    background: #0b0e14; border: 1px solid #1a2130; border-radius: 4px;
-    font: 10.5px/1.5 ui-monospace, Consolas, monospace;
-    white-space: pre;
-    overflow: hidden;
+    padding: 6px 9px; background: var(--k-bg); border: 1px solid var(--k-border); border-radius: 4px;
+    font-size: 10.5px; white-space: pre; overflow: hidden;
 }
-.lrow { height: 16px; color: #5d6678; }
+.lrow { height: 16px; color: var(--k-dim); }
 .lrow.ptr    { color: #7fb3ff; }
-.lrow.touch  { color: #6ee79a; }
-.lrow.compat { color: #ffd479; }   /* synthesized from touch */
-.lrow.mouse  { color: #9aa4b8; }
-.lrow.cancel { color: #e08a8a; }
+.lrow.touch  { color: var(--k-ok); }
+.lrow.compat { color: #ffd479; }
+.lrow.mouse  { color: var(--k-muted); }
+.lrow.cancel { color: var(--k-err); }
 
-.check {
-    display: flex; align-items: center; gap: 7px;
-    font-size: 12px; color: #8b93a5; margin: 6px 0 8px;
-}
-
-#capTrack {
-    position: relative;
-    height: 96px;
-    background: #0b0e14;
-    border: 1px dashed #2a3345;
-    border-radius: 5px;
-    overflow: visible;      /* the box must be draggable past the border */
-}
+#capTrack { position: relative; height: 96px; background: var(--k-bg); border: 1px dashed var(--k-border-hi); border-radius: 5px; }
 #capBox {
-    position: absolute; left: 14px; top: 26px;
-    width: 46px; height: 46px;
+    position: absolute; left: 14px; top: 26px; width: 46px; height: 46px;
     display: flex; align-items: center; justify-content: center;
-    background: #1b3350; border: 1px solid #3d7dd6; border-radius: 5px;
-    color: #cfe4ff; font: 11px ui-monospace, Consolas, monospace;
+    background: #1b3350; border: 1px solid var(--k-accent); border-radius: 5px; color: var(--k-value);
     cursor: grab; touch-action: none; user-select: none;
 }
-
-/* ── gestures ────────────────────────────────────────────────────────────── */
-
 #gestCanvas { touch-action: none; }
-#gestPhase { display: block; margin: 6px 0; }
-#gestReadout { margin-top: 4px; }
 
-/* ── IME ─────────────────────────────────────────────────────────────────── */
-
-#imeInput {
-    width: 100%;
-    padding: 7px 9px;
-    background: #0b0e14; color: #d6dae3;
-    border: 1px solid #2b3444; border-radius: 4px;
-    font: 15px ui-monospace, Consolas, monospace;
-}
-#imeInput:focus { outline: none; border-color: #3d7dd6; }
-#imeBanner { margin-top: 8px; display: block; }
-#imeBanner.capture { display: block; background: #12161f; border-color: #262f40; color: #6d7688; }
-#imeBanner.capture.on { background: #16263c; border-color: #3d7dd6; color: #cfe4ff; }
-#imeReadout { margin-top: 10px; }
-#imeSeamNote { display: block; margin-top: 6px; }
-button:disabled { opacity: .4; cursor: default; }
+#imeInput { font-size: 15px; }
