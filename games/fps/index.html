@@ -10,24 +10,20 @@
     <canvas id="view"></canvas>
 
     <div id="hud" hidden>
+        <div id="damage-flash" hidden></div>
         <div id="health-bar">
             <div id="health-fill"></div>
             <span id="health-text">100</span>
         </div>
-
-        <div id="score-display">
-            <span id="kills-count">0</span> kills
-        </div>
-
+        <div id="score-display"><span id="kills-count">0</span> kills</div>
         <div id="kill-feed"></div>
         <div id="net-info"></div>
-
-        <div id="death-screen" class="hidden">
+        <div id="death-screen" hidden>
             <div class="death-text">YOU DIED</div>
             <div class="death-sub">Respawning...</div>
         </div>
-
-        <div id="click-prompt" class="hidden">Click to play</div>
+        <div id="connecting" class="center-prompt">Connecting…</div>
+        <div id="click-prompt" class="center-prompt" hidden>Click to play</div>
     </div>
 
     <div id="overlay">
@@ -43,14 +39,14 @@
                     <label for="address-input">Server</label>
                     <input id="address-input" type="text" placeholder="127.0.0.1:27015" value="127.0.0.1:27015">
                 </div>
-                <div id="error-msg"></div>
+                <div id="error-msg" class="connect-error"></div>
             </div>
             <div class="menu-items">
                 <div class="menu-item selected" data-action="play">Connect</div>
                 <div class="menu-item" data-action="howto">How to Play</div>
                 <div class="menu-item" data-action="quit">Quit</div>
             </div>
-            <p class="overlay-hint">Up/Down navigate · Enter select · Run server first</p>
+            <p class="overlay-hint">Up / Down navigate · Enter select · run the server first</p>
         </section>
 
         <section id="screen-howto" class="screen" hidden>
@@ -60,11 +56,11 @@
                 Fight other players and AI bots in a small arena.</p>
                 <pre>WASD / Arrows   Move
 Mouse           Look
-Click / Fire    Shoot
+Click           Shoot
 Esc / P         Pause (releases mouse)
-Click canvas    Capture mouse</pre>
-                <p>Start the server with:</p>
-                <pre>bro-server games/fps server.js --tickrate 60</pre>
+Click view      Capture mouse</pre>
+                <p>The launcher starts the server for you. Standalone:</p>
+                <pre>bro-server games/fps games/fps/server.js</pre>
                 <p>Default address: <strong>127.0.0.1:27015</strong></p>
             </div>
             <div class="menu-items">
@@ -74,7 +70,7 @@ Click canvas    Capture mouse</pre>
 
         <section id="screen-pause" class="screen" hidden>
             <h1 class="overlay-title">Paused</h1>
-            <p class="overlay-sub tagline">Mouse released. Resume or disconnect.</p>
+            <p class="overlay-sub tagline">Mouse released. The match goes on without you.</p>
             <div class="menu-items">
                 <div class="menu-item selected" data-action="resume">Resume</div>
                 <div class="menu-item" data-action="howto">How to Play</div>
@@ -87,7 +83,7 @@ Click canvas    Capture mouse</pre>
             <div id="gameover-stats" class="stats-block"></div>
             <div class="menu-items">
                 <div class="menu-item selected" data-action="restart">Reconnect</div>
-                <div class="menu-item" data-action="title">Main Menu</div>
+                <div class="menu-item" data-action="title">Title Menu</div>
             </div>
         </section>
     </div>

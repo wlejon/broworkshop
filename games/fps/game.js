@@ -1,454 +1,146 @@
-// FPS Arena — multiplayer client on the arcade foundation.
-// Server: server.js (authoritative). Wire format: protocol.js.
-// This file: shell plugin + scene + local predict + remotes + combat HUD.
-// Layout: arena → session → plugin → scene → remotes → input → net → HUD.
+// FPS Arena — multiplayer first-person client on the arcade shell.
+//
+// The shell owns screens, pause and the loop; this plugin owns one run = one
+// connection. Around it:
+//   net.js    bro.net connection, packet handling, local prediction (session)
+//   world.js  arena scene, interpolated remote players, cameras
+//   hud.js    combat HUD + crosshair
+//   arena.js / protocol.js   shared with server.js (movement, collision, wire)
+// Mouse look is pointer-locked on the scene canvas; Esc (the shell's pause)
+// releases it.
 
-import { crosshair } from "/lib/crosshair.js";
-import { EVT, IN, encodeInput, encodeSetName, decodeMessage } from "/app/protocol.js";
+import { connectForm } from "/lib/arcade/netplay.js";
+import { IN } from "/app/arena.js";
+import { session, connect, disconnect, sendInput, predict, nameOf } from "/app/net.js";
+import { ensureWorld, viewCanvas, updateRemotes, clearRemotes, firstPerson, overview } from "/app/world.js";
+import { drawHud, reticle, setCrosshair, killFeed, resetHud, flashDamage } from "/app/hud.js";
 
-// ── Arena (must match server.js) ─────────────────────────────────────────
+const DEFAULT_ADDRESS = "127.0.0.1:27015";
+const INPUT_INTERVAL = 1000 / 60;   // ms between input packets
+const LOOK_SPEED = 0.002;           // radians per pixel of mouse travel
+const PITCH_LIMIT = Math.PI / 2 * 0.95;
 
-const ARENA_HALF = 20;
-const WALL_H = 3;
-const WALL_THICK = 0.5;
-const PLAYER_RADIUS = 0.4;
-const EYE_HEIGHT = 1.6;
-const MOVE_SPEED = 6.0;
-
-const OBSTACLES = [
-    { x: -8, z: -8, hw: 1.5, hd: 1.5, hh: 1.5 },
-    { x: 8, z: 8, hw: 1.5, hd: 1.5, hh: 1.5 },
-    { x: -8, z: 8, hw: 1.0, hd: 3.0, hh: 1.0 },
-    { x: 8, z: -8, hw: 3.0, hd: 1.0, hh: 1.0 },
-    { x: 0, z: 0, hw: 1.0, hd: 1.0, hh: 2.5 },
-    { x: -15, z: 0, hw: 0.5, hd: 4.0, hh: 1.5 },
-    { x: 15, z: 0, hw: 0.5, hd: 4.0, hh: 1.5 },
-    { x: 0, z: 15, hw: 4.0, hd: 0.5, hh: 1.5 },
-    { x: 0, z: -15, hw: 4.0, hd: 0.5, hh: 1.5 },
-];
-const WALLS = [
-    { x: 0, z: -ARENA_HALF, hw: ARENA_HALF, hd: WALL_THICK, hh: WALL_H },
-    { x: 0, z: ARENA_HALF, hw: ARENA_HALF, hd: WALL_THICK, hh: WALL_H },
-    { x: -ARENA_HALF, z: 0, hw: WALL_THICK, hd: ARENA_HALF, hh: WALL_H },
-    { x: ARENA_HALF, z: 0, hw: WALL_THICK, hd: ARENA_HALF, hh: WALL_H },
-];
-const ALL_SOLIDS = OBSTACLES.concat(WALLS);
-
-const PLAYER_COLORS = [
-    "#e74c3c", "#3498db", "#2ecc71", "#f39c12",
-    "#9b59b6", "#1abc9c", "#e67e22", "#e91e63",
-];
-
-const INTERP_DELAY = 100;
-const INPUT_SEND_INTERVAL = 1000 / 60; // ms (shell dt is ms)
-
-// ── Session / module state ───────────────────────────────────────────────
-
-const session = {
-    name: "Player",
-    address: "127.0.0.1:27015",
-};
-
-let canvas = null;
-let scene = null;
-let sceneBuilt = false;
-let netWired = false;
-let inputWired = false;
-let apiRef = null;
-
-let myId = null;
-let connected = false;
-let serverConn = null;
-let clientTick = 0;
-let lastServerTick = 0;
-let pointerLocked = false;
-
-let localX = 0, localZ = 0;
-let localYaw = 0, localPitch = 0;
-let localHealth = 100;
-let localAlive = true;
-let localKills = 0;
-
-let serverX = 0, serverZ = 0;
-let hasServerPos = false;
-
-const playerNames = new Map();
-const remotePlayers = new Map();
-let nextRemoteColor = 0;
-
-let inputSendAccum = 0;
-let frameCount = 0, fpsAccum = 0, fps = 0;
-let damageFlashTimer = 0;
-let pendingDisconnect = false;
-let connectError = "";
-
-/** @type {object|null} Latest run (wiring + HUD). */
-let activeRun = null;
+let form = null;
+let shell = null;
+const look = { locked: false, wired: false };
+const meter = { frames: 0, time: 0, fps: 0 };
 
 export const game = {
     id: "fps",
     clearColor: "#000000",
+    defaults: { name: "Player", address: DEFAULT_ADDRESS },
+    actions: [{ name: "primary", label: "Shoot", defaults: ["Mouse0"] }],
 
-    actions: [
-        { name: "primary", label: "Shoot", defaults: ["Mouse0"] },
-    ],
-
-    create(ctx) {
-        apiRef = ctx;
-        ensureScene();
-        ensureInputWiring();
-        ensureNetWiring();
-
-        // Read connect form
-        const nameEl = document.getElementById("name-input");
-        const addrEl = document.getElementById("address-input");
-        const errEl = document.getElementById("error-msg");
-        session.name = (nameEl && nameEl.value.trim()) || "Player";
-        session.address = (addrEl && addrEl.value.trim()) || "127.0.0.1:27015";
-        connectError = "";
-        if (errEl) errEl.textContent = "";
-
-        resetLocalState();
-        pendingDisconnect = false;
-
-        const run = {
-            score: 0,
-            play: ctx.play,
-            highScore: ctx.highScore,
-            save: ctx.save,
-            connecting: true,
-            connected: false,
-        };
-        activeRun = run;
-
-        try {
-            bro.net.init();
-            bro.net.connect(session.address);
-        } catch (e) {
-            connectError = "Connect failed: " + (e && e.message ? e.message : e);
-            if (errEl) errEl.textContent = connectError;
-            run.connecting = false;
-            pendingDisconnect = true;
-        }
-
+    create(api) {
+        shell = api;
+        ensureWorld();
+        wireLook();
+        const join = form.read(api.save);
+        form.clearError();
+        resetHud();
+        clearRemotes();
+        const run = { score: 0, name: join.name, address: join.address, sendAccum: 0 };
+        connect(join.address, join.name, {
+            onConnect: () => form.clearError(),
+            onLost: () => releaseLook(),
+            onKill: (killer, victim) => {
+                killFeed(nameOf(killer), nameOf(victim));
+                if (killer === session.myId && killer !== victim) api.play("kill");
+            },
+            onHit: (_shooter, victim) => {
+                if (victim !== session.myId) return;
+                flashDamage();
+                api.play("hit");
+            },
+        });
         return run;
     },
 
     update(run, dt, input) {
-        activeRun = run;
-
-        if (pendingDisconnect) {
-            pendingDisconnect = false;
-            teardownConnection();
-            return {
-                status: "gameover",
-                result: { score: run.score, reason: connectError || "disconnected" },
-            };
+        if (session.lost) {
+            return { status: "gameover", result: { score: run.score, reason: session.error } };
         }
+        if (!session.connected || session.myId == null) return;
+        const dts = Math.min(dt / 1000, 0.05);
 
-        if (!connected || myId == null) return;
-
-        // Shell dt is ms
-        const dtSec = Math.min(dt / 1000, 0.05);
-
-        frameCount++;
-        fpsAccum += dtSec;
-        if (fpsAccum >= 0.5) {
-            fps = Math.round(frameCount / fpsAccum);
-            frameCount = 0;
-            fpsAccum = 0;
+        run.sendAccum += dt;
+        if (run.sendAccum >= INPUT_INTERVAL) {
+            run.sendAccum = Math.min(run.sendAccum - INPUT_INTERVAL, INPUT_INTERVAL);
+            sendInput(inputBits(input));
         }
+        const bits = inputBits(input);
+        predict(bits, dts);
+        reticle((bits & (IN.FWD | IN.BACK | IN.LEFT | IN.RIGHT)) !== 0,
+                (bits & IN.SHOOT) !== 0 && session.me.alive, dts);
+        updateRemotes(session.remotes, session.myId, Date.now());
+        run.score = session.me.kills;
 
-        inputSendAccum += dt;
-        if (inputSendAccum >= INPUT_SEND_INTERVAL) {
-            inputSendAccum -= INPUT_SEND_INTERVAL;
-            clientTick++;
-            sendInput(input);
+        meter.frames++;
+        meter.time += dts;
+        if (meter.time >= 0.5) {
+            meter.fps = Math.round(meter.frames / meter.time);
+            meter.frames = 0;
+            meter.time = 0;
         }
-
-        if (localAlive) moveLocal(dtSec, input);
-
-        const bits = getInputBits(input);
-        const isMoving = (bits & (IN.FWD | IN.BACK | IN.LEFT | IN.RIGHT)) !== 0;
-        try {
-            crosshair.setMoving(isMoving);
-            if ((bits & IN.SHOOT) && localAlive) crosshair.addBloom(dtSec * 40);
-        } catch (e) { /* crosshair optional */ }
-
-        if (hasServerPos) {
-            const errX = serverX - localX;
-            const errZ = serverZ - localZ;
-            const err2 = errX * errX + errZ * errZ;
-            if (err2 > 9.0) {
-                localX = serverX;
-                localZ = serverZ;
-            } else if (err2 > 0.0001) {
-                const blend = Math.min(1.0, 5.0 * dtSec);
-                localX += errX * blend;
-                localZ += errZ * blend;
-            }
-        }
-
-        interpolateRemotes();
-        if (damageFlashTimer > 0) damageFlashTimer -= dtSec;
-
-        run.score = localKills;
-        run.connected = true;
-        run.connecting = false;
-        updateCombatHUD();
+        drawHud(session, { fps: meter.fps, pointerLocked: look.locked });
     },
 
     draw() {
-        if (!scene || !canvas || !connected || myId == null) return;
-
-        const fwdX = Math.sin(localYaw) * Math.cos(localPitch);
-        const fwdY = Math.sin(localPitch);
-        const fwdZ = -Math.cos(localYaw) * Math.cos(localPitch);
-
-        const w = canvas.clientWidth || 1;
-        const h = canvas.clientHeight || 1;
-
-        scene.setCamera({
-            fov: 90,
-            aspect: w / h,
-            near: 0.1,
-            far: 200,
-            position: [localX, EYE_HEIGHT, localZ],
-            target: [localX + fwdX, EYE_HEIGHT + fwdY, localZ + fwdZ],
-        });
+        if (session.connected && session.myId != null) firstPerson(session.me);
+        else overview(Date.now());
     },
 
-    hud(run) {
-        return {
-            // combat HUD is custom DOM; keep shell happy
-        };
+    drawTitle() {
+        overview(Date.now());
+    },
+
+    hud() {
+        return {};    // the combat HUD is drawn by hud.js
     },
 
     gameOverText(run, result) {
-        const score = run ? run.score : 0;
         const reason = (result && result.reason) || "Disconnected";
-        return reason + "\nKills: " + score;
+        return reason + "\nKills: " + (run ? run.score : 0) + (run && run._newBest ? "  ·  NEW BEST" : "");
     },
 
-    onEnterScreen(name) {
-        if (name === "pause" || name === "title" || name === "howto" || name === "gameover") {
-            releasePointer();
-            try { crosshair.hide(); } catch (e) { /* ignore */ }
-        }
-        if (name === "title" || name === "gameover") {
-            // Leaving a match — drop the net connection if still open.
-            if (connected || serverConn != null) teardownConnection();
+    onEnterScreen(name, run, api) {
+        shell = api;
+        if (!form) {
+            form = connectForm({
+                name: "#name-input", address: "#address-input", error: "#error-msg",
+                defaults: { address: DEFAULT_ADDRESS },
+            });
+            ensureWorld(true);
         }
         if (name === "playing") {
-            updateCombatHUD();
-            if (connected) {
-                try {
-                    crosshair.configure({
-                        style: "crossdot", size: 12, thickness: 2, gap: 3, dotSize: 1,
-                        color: "#ffffff", opacity: 0.8, outline: true,
-                        outlineThickness: 1, outlineColor: "#000000",
-                        moveSpread: 8, fireBloom: 6, adsSpread: 1,
-                        bloomDecay: 30, lerpSpeed: 10,
-                    });
-                    crosshair.show();
-                } catch (e) { /* ignore */ }
-            }
+            setCrosshair(session.connected);
+            if (run) drawHud(session, { fps: meter.fps, pointerLocked: look.locked });
+            return;
         }
-        if (name === "title") {
-            const errEl = document.getElementById("error-msg");
-            if (errEl && connectError) errEl.textContent = connectError;
+        releaseLook();
+        setCrosshair(false);
+        // Paused mid-match: the server keeps simulating, so stop walking and firing.
+        if (name === "pause") sendInput(0);
+        if (name === "title" || name === "gameover") {
+            if (session.error) form.error(session.error);
+            disconnect();
+            clearRemotes();
         }
+        if (name === "title") form.fill(api.save);
     },
 
     cue(name, audio) {
         if (name === "hit") audio.tone(200, 0.08, "sawtooth", 0.45);
-        else if (name === "kill") {
-            audio.sequence([
-                [520, 0.06, "square", 0.4],
-                [780, 0.1, "square", 0.5],
-            ]);
-        }
+        else if (name === "kill") audio.sequence([[520, 0.06, "square", 0.4], [780, 0.1, "square", 0.5]]);
     },
 };
 
-// ── Scene ────────────────────────────────────────────────────────────────
+// ── Input ────────────────────────────────────────────────────────────────
 
-function ensureScene() {
-    if (scene) return;
-    canvas = document.getElementById("view") || document.querySelector("canvas");
-    if (!canvas) throw new Error("fps: #view canvas missing");
-    scene = canvas.getContext("scene");
-    if (!scene) throw new Error("fps: scene context unavailable");
-
-    function resizeCanvas() {
-        const dpr = window.devicePixelRatio || 1;
-        const w = Math.floor(window.innerWidth * dpr);
-        const h = Math.floor(window.innerHeight * dpr);
-        if (canvas.width !== w) canvas.width = w;
-        if (canvas.height !== h) canvas.height = h;
-    }
-    window.addEventListener("resize", resizeCanvas);
-    resizeCanvas();
-}
-
-function buildScene() {
-    if (sceneBuilt || !scene) return;
-    sceneBuilt = true;
-
-    scene.createMesh({
-        mesh: "plane", halfW: ARENA_HALF, halfD: ARENA_HALF,
-        x: 0, y: 0, z: 0, color: "#2a2a3e",
-    });
-
-    const wallDefs = [
-        { x: 0, y: WALL_H / 2, z: -ARENA_HALF, sx: ARENA_HALF * 2, sy: WALL_H, sz: WALL_THICK * 2 },
-        { x: 0, y: WALL_H / 2, z: ARENA_HALF, sx: ARENA_HALF * 2, sy: WALL_H, sz: WALL_THICK * 2 },
-        { x: -ARENA_HALF, y: WALL_H / 2, z: 0, sx: WALL_THICK * 2, sy: WALL_H, sz: ARENA_HALF * 2 },
-        { x: ARENA_HALF, y: WALL_H / 2, z: 0, sx: WALL_THICK * 2, sy: WALL_H, sz: ARENA_HALF * 2 },
-    ];
-    for (const w of wallDefs) {
-        scene.createMesh({
-            mesh: "box", halfW: w.sx / 2, halfH: w.sy / 2, halfD: w.sz / 2,
-            x: w.x, y: w.y, z: w.z, color: "#3a4a6e",
-        });
-    }
-
-    for (const ob of OBSTACLES) {
-        scene.createMesh({
-            mesh: "box", halfW: ob.hw, halfH: ob.hh, halfD: ob.hd,
-            x: ob.x, y: ob.hh, z: ob.z, color: "#4a5a80",
-        });
-    }
-
-    for (let i = -ARENA_HALF; i <= ARENA_HALF; i += 5) {
-        scene.createMesh({
-            mesh: "box", halfW: ARENA_HALF, halfH: 0.005, halfD: 0.02,
-            x: 0, y: 0.01, z: i, color: "#3a3a5e",
-        });
-        scene.createMesh({
-            mesh: "box", halfW: 0.02, halfH: 0.005, halfD: ARENA_HALF,
-            x: i, y: 0.01, z: 0, color: "#3a3a5e",
-        });
-    }
-}
-
-function clearRemotes() {
-    for (const [id] of remotePlayers) removeRemote(id);
-    nextRemoteColor = 0;
-}
-
-// Note: scene graph nodes for arena geometry are not destroyed between
-// sessions (engine has no cheap full reset). buildScene is once-per-process.
-
-// ── Collision ────────────────────────────────────────────────────────────
-
-function pushCircleOutOfAABB(px, pz, r, box) {
-    const bx0 = box.x - box.hw, bx1 = box.x + box.hw;
-    const bz0 = box.z - box.hd, bz1 = box.z + box.hd;
-    const cx = Math.max(bx0, Math.min(px, bx1));
-    const cz = Math.max(bz0, Math.min(pz, bz1));
-    const dx = px - cx, dz = pz - cz;
-    const dist2 = dx * dx + dz * dz;
-    if (dist2 < r * r && dist2 > 0.0001) {
-        const dist = Math.sqrt(dist2);
-        const pen = r - dist;
-        return { x: px + (dx / dist) * pen, z: pz + (dz / dist) * pen };
-    }
-    if (dist2 < 0.0001) {
-        const dl = px - bx0, dr = bx1 - px, dt = pz - bz0, db = bz1 - pz;
-        const min = Math.min(dl, dr, dt, db);
-        if (min === dl) return { x: bx0 - r, z: pz };
-        if (min === dr) return { x: bx1 + r, z: pz };
-        if (min === dt) return { x: px, z: bz0 - r };
-        return { x: px, z: bz1 + r };
-    }
-    return null;
-}
-
-// ── Remotes ──────────────────────────────────────────────────────────────
-
-function getOrCreateRemote(id) {
-    let r = remotePlayers.get(id);
-    if (r) return r;
-
-    const colorIdx = nextRemoteColor++ % PLAYER_COLORS.length;
-    const bodyNode = scene.createMesh({
-        mesh: "capsule", radius: PLAYER_RADIUS, halfHeight: 0.5,
-        x: 0, y: 0.9, z: 0,
-        color: PLAYER_COLORS[colorIdx],
-    });
-
-    r = { bodyNode, colorIdx, states: [] };
-    remotePlayers.set(id, r);
-    return r;
-}
-
-function removeRemote(id) {
-    const r = remotePlayers.get(id);
-    if (!r) return;
-    try { scene.destroyNode(r.bodyNode); } catch (e) { /* ignore */ }
-    remotePlayers.delete(id);
-}
-
-function interpolateRemotes() {
-    const renderTime = Date.now() - INTERP_DELAY;
-
-    for (const [id, r] of remotePlayers) {
-        if (id === myId) {
-            r.bodyNode.visible = false;
-            continue;
-        }
-
-        const states = r.states;
-        if (states.length === 0) {
-            r.bodyNode.visible = false;
-            continue;
-        }
-
-        r.bodyNode.visible = true;
-
-        let s0 = null, s1 = null;
-        for (let i = 0; i < states.length - 1; i++) {
-            if (states[i].t <= renderTime && states[i + 1].t >= renderTime) {
-                s0 = states[i];
-                s1 = states[i + 1];
-                break;
-            }
-        }
-
-        if (s0 && s1) {
-            const alpha = (renderTime - s0.t) / (s1.t - s0.t);
-            r.bodyNode.x = s0.x + (s1.x - s0.x) * alpha;
-            r.bodyNode.y = 0.9;
-            r.bodyNode.z = s0.z + (s1.z - s0.z) * alpha;
-            r.bodyNode.rotationY = -lerpAngle(s0.yaw, s1.yaw, alpha);
-        } else if (states.length > 0) {
-            const latest = states[states.length - 1];
-            r.bodyNode.x = latest.x;
-            r.bodyNode.y = latest.alive ? 0.9 : 0.2;
-            r.bodyNode.z = latest.z;
-            r.bodyNode.rotationY = -latest.yaw;
-        }
-
-        while (states.length > 2 && states[0].t < renderTime - 500) {
-            states.shift();
-        }
-    }
-}
-
-function lerpAngle(a, b, t) {
-    let diff = b - a;
-    while (diff > Math.PI) diff -= 2 * Math.PI;
-    while (diff < -Math.PI) diff += 2 * Math.PI;
-    return a + diff * t;
-}
-
-// ── Input / movement ─────────────────────────────────────────────────────
-
-function getInputBits(input) {
+/** Movement + fire bits; nothing until the mouse is captured. */
+function inputBits(input) {
+    if (!look.locked || !input) return 0;
     let bits = 0;
-    if (!pointerLocked) return bits;
-    if (!input) return bits;
     if (input.down("up")) bits |= IN.FWD;
     if (input.down("down")) bits |= IN.BACK;
     if (input.down("left")) bits |= IN.LEFT;
@@ -457,298 +149,33 @@ function getInputBits(input) {
     return bits;
 }
 
-function sendInput(input) {
-    if (serverConn == null) return;
-    bro.net.send(serverConn, encodeInput(clientTick, getInputBits(input), localYaw, localPitch), false);
-}
-
-function sendName(name) {
-    if (serverConn == null) return;
-    bro.net.send(serverConn, encodeSetName(name));
-}
-
-function moveLocal(dtSec, input) {
-    const bits = getInputBits(input);
-    const fwdX = Math.sin(localYaw), fwdZ = -Math.cos(localYaw);
-    const rightX = Math.cos(localYaw), rightZ = Math.sin(localYaw);
-
-    let mx = 0, mz = 0;
-    if (bits & IN.FWD) { mx += fwdX; mz += fwdZ; }
-    if (bits & IN.BACK) { mx -= fwdX; mz -= fwdZ; }
-    if (bits & IN.LEFT) { mx -= rightX; mz -= rightZ; }
-    if (bits & IN.RIGHT) { mx += rightX; mz += rightZ; }
-
-    const len = Math.sqrt(mx * mx + mz * mz);
-    if (len > 0.001) {
-        mx = (mx / len) * MOVE_SPEED * dtSec;
-        mz = (mz / len) * MOVE_SPEED * dtSec;
-    }
-
-    localX += mx;
-    localZ += mz;
-
-    for (const box of ALL_SOLIDS) {
-        const result = pushCircleOutOfAABB(localX, localZ, PLAYER_RADIUS, box);
-        if (result) {
-            localX = result.x;
-            localZ = result.z;
-        }
-    }
-
-    const lim = ARENA_HALF - PLAYER_RADIUS - WALL_THICK;
-    localX = Math.max(-lim, Math.min(lim, localX));
-    localZ = Math.max(-lim, Math.min(lim, localZ));
-}
-
-function ensureInputWiring() {
-    if (inputWired) return;
-    inputWired = true;
-    ensureScene();
-
-    wireTitleFormKeys();
-
+/** Click the scene to capture the mouse; mouse travel turns and pitches the view. */
+function wireLook() {
+    if (look.wired) return;
+    look.wired = true;
+    const canvas = viewCanvas();
     canvas.addEventListener("mousedown", () => {
-        if (!connected) return;
-        if (apiRef && apiRef.getScreen() !== "playing") return;
-        if (!pointerLocked) {
-            try {
-                canvas.requestPointerLock();
-                pointerLocked = true;
-                updateCombatHUD();
-            } catch (e) { /* ignore */ }
-        }
+        if (!session.connected || !shell || shell.getScreen() !== "playing" || look.locked) return;
+        canvas.requestPointerLock();
+        look.locked = true;
     });
-
     document.addEventListener("pointerlockchange", () => {
-        pointerLocked = document.pointerLockElement === canvas;
-        updateCombatHUD();
+        look.locked = document.pointerLockElement === canvas;
     });
-
     document.addEventListener("mousemove", (e) => {
-        if (!pointerLocked) return;
-        localYaw += e.movementX * 0.002;
-        localPitch -= e.movementY * 0.002;
-        localPitch = Math.max(-Math.PI / 2 * 0.95, Math.min(Math.PI / 2 * 0.95, localPitch));
+        if (!look.locked) return;
+        const me = session.me;
+        me.yaw += e.movementX * LOOK_SPEED;
+        me.pitch = Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, me.pitch - e.movementY * LOOK_SPEED));
     });
 }
 
-function releasePointer() {
-    pointerLocked = false;
-    try {
-        if (document.pointerLockElement) document.exitPointerLock();
-    } catch (e) { /* ignore */ }
+function releaseLook() {
+    look.locked = false;
+    if (document.pointerLockElement) document.exitPointerLock();
 }
 
-// ── Network ──────────────────────────────────────────────────────────────
-
-function ensureNetWiring() {
-    if (netWired) return;
-    netWired = true;
-
-    bro.net.onconnect = (connId) => {
-        serverConn = connId;
-        connected = true;
-        connectError = "";
-        const errEl = document.getElementById("error-msg");
-        if (errEl) errEl.textContent = "";
-
-        buildScene();
-        sendName(session.name);
-
-        if (activeRun) {
-            activeRun.connected = true;
-            activeRun.connecting = false;
-        }
-
-        try {
-            crosshair.configure({
-                style: "crossdot", size: 12, thickness: 2, gap: 3, dotSize: 1,
-                color: "#ffffff", opacity: 0.8, outline: true,
-                outlineThickness: 1, outlineColor: "#000000",
-                moveSpread: 8, fireBloom: 6, adsSpread: 1,
-                bloomDecay: 30, lerpSpeed: 10,
-            });
-            if (apiRef && apiRef.getScreen() === "playing") crosshair.show();
-        } catch (e) { /* ignore */ }
-
-        updateCombatHUD();
-    };
-
-    bro.net.ondisconnect = () => {
-        connectError = connectError || "Lost connection to server";
-        if (activeRun) activeRun.connecting = false;
-        // Defer teardown to update so we can return gameover status cleanly.
-        pendingDisconnect = true;
-        releasePointer();
-        try { crosshair.hide(); } catch (e) { /* ignore */ }
-    };
-
-    bro.net.onmessage = (_connId, data) => {
-        handleBinaryMessage(data);
-    };
+/** Test hook: the pointer-lock state the input gate reads. */
+export function lookState() {
+    return look;
 }
-
-function resetLocalState() {
-    myId = null;
-    connected = false;
-    serverConn = null;
-    clientTick = 0;
-    lastServerTick = 0;
-    localX = 0;
-    localZ = 0;
-    localYaw = 0;
-    localPitch = 0;
-    localHealth = 100;
-    localAlive = true;
-    localKills = 0;
-    serverX = 0;
-    serverZ = 0;
-    hasServerPos = false;
-    inputSendAccum = 0;
-    damageFlashTimer = 0;
-    playerNames.clear();
-    clearRemotes();
-    releasePointer();
-}
-
-function teardownConnection() {
-    const wasConn = serverConn;
-    resetLocalState();
-    if (wasConn != null) {
-        try {
-            if (typeof bro.net.disconnect === "function") bro.net.disconnect(wasConn);
-        } catch (e) { /* ignore */ }
-    }
-    try { crosshair.hide(); } catch (e) { /* ignore */ }
-}
-
-function handleBinaryMessage(data) {
-    const msg = decodeMessage(data);
-    if (!msg) return;
-
-    switch (msg.type) {
-        case "welcome": {
-            myId = msg.id;
-            lastServerTick = msg.serverTick;
-            console.log("Welcome! id=" + myId + " serverTick=" + lastServerTick);
-            break;
-        }
-
-        case "state": {
-            lastServerTick = msg.serverTick;
-            const now = Date.now();
-            const idsInState = new Set();
-
-            for (const p of msg.players) {
-                idsInState.add(p.id);
-                if (p.id === myId) {
-                    serverX = p.x;
-                    serverZ = p.z;
-                    hasServerPos = true;
-                    localHealth = p.health;
-                    localAlive = p.alive;
-                    localKills = p.kills;
-                    if (activeRun) activeRun.score = p.kills;
-                } else {
-                    const r = getOrCreateRemote(p.id);
-                    r.states.push({
-                        t: now, x: p.x, y: p.y, z: p.z, yaw: p.yaw,
-                        health: p.health, alive: p.alive, kills: p.kills,
-                    });
-                }
-            }
-
-            for (const id of remotePlayers.keys()) {
-                if (!idsInState.has(id) && id !== myId) removeRemote(id);
-            }
-            break;
-        }
-
-        case "names": {
-            playerNames.clear();
-            for (const e of msg.entries) playerNames.set(e.id, e.name);
-            break;
-        }
-
-        case "event": {
-            if (msg.evt === EVT.KILL) {
-                addKillFeed(msg.killerId, msg.victimId);
-                if (activeRun && activeRun.play && msg.killerId === myId) activeRun.play("kill");
-            } else if (msg.evt === EVT.HIT) {
-                if (msg.victimId === myId) {
-                    flashDamage();
-                    if (activeRun && activeRun.play) activeRun.play("hit");
-                }
-            } else if (msg.evt === EVT.SPAWN) {
-                localX = msg.x;
-                localZ = msg.z;
-                serverX = msg.x;
-                serverZ = msg.z;
-                hasServerPos = true;
-                localAlive = true;
-                localHealth = 100;
-            }
-            break;
-        }
-    }
-}
-
-// ── Combat HUD ───────────────────────────────────────────────────────────
-
-function updateCombatHUD() {
-    const healthFill = document.getElementById("health-fill");
-    const healthText = document.getElementById("health-text");
-    const killsCount = document.getElementById("kills-count");
-    const deathScreen = document.getElementById("death-screen");
-    const clickPrompt = document.getElementById("click-prompt");
-    const netInfo = document.getElementById("net-info");
-
-    if (healthFill) {
-        healthFill.style.width = localHealth + "%";
-        healthFill.style.background = localHealth > 60 ? "#2ecc71" :
-            localHealth > 30 ? "#f39c12" : "#e74c3c";
-    }
-    if (healthText) healthText.textContent = String(localHealth);
-    if (killsCount) killsCount.textContent = String(localKills);
-    if (deathScreen) deathScreen.classList.toggle("hidden", localAlive);
-    if (clickPrompt) {
-        clickPrompt.classList.toggle("hidden", pointerLocked || !connected);
-    }
-    if (netInfo) {
-        netInfo.textContent =
-            "fps " + fps + " | tick " + clientTick + " | server " + lastServerTick +
-            (connected ? "" : " | connecting…");
-    }
-}
-
-function addKillFeed(killerId, victimId) {
-    const killFeed = document.getElementById("kill-feed");
-    if (!killFeed) return;
-    const entry = document.createElement("div");
-    entry.className = "kill-entry";
-    const kName = killerId === myId ? "You" : (playerNames.get(killerId) || "Player " + killerId);
-    const vName = victimId === myId ? "You" : (playerNames.get(victimId) || "Player " + victimId);
-    entry.textContent = kName + " killed " + vName;
-    killFeed.appendChild(entry);
-    setTimeout(() => {
-        if (entry.parentNode) entry.parentNode.removeChild(entry);
-    }, 3500);
-}
-
-function flashDamage() {
-    damageFlashTimer = 0.2;
-}
-
-// Isolate title form keystrokes from the arcade menu before the first run.
-let formKeysWired = false;
-function wireTitleFormKeys() {
-    if (formKeysWired) return;
-    formKeysWired = true;
-    for (const id of ["name-input", "address-input"]) {
-        const el = document.getElementById(id);
-        if (!el) continue;
-        el.addEventListener("keydown", (e) => e.stopPropagation());
-        el.addEventListener("keyup", (e) => e.stopPropagation());
-    }
-}
-wireTitleFormKeys();
