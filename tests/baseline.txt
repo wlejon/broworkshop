@@ -87,7 +87,6 @@ FAIL test demos/omnivoice-lab/tests/test_smoke.js rc=1: [bronze:unhandledrejecti
 PASS smoke demos/parakeet-lab 
 FAIL test demos/parakeet-lab/tests/test_smoke.js rc=1: ASSERTION FAILED: model load finished
 PASS smoke demos/physics-playground 
-FAIL test demos/physics-playground/tests/test_smoke.js rc=1: [bronze:unhandledrejection] Uncaught (in promise) TypeError: Cannot read properties of undefined (reading 'normal')
 PASS smoke demos/pixart-lab 
 PASS test demos/pixart-lab/tests/test_generate.js 
 PASS smoke demos/plant-recipes 

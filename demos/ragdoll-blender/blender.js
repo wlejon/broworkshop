@@ -1,194 +1,191 @@
-// blender.js — Dynamic Skeletal Animation to Ragdoll Blend Controller, Impact Handler, and Get-Up Recovery.
+// blender.js — the animation <-> ragdoll blend controller.
+//
+// One Jolt ragdoll the whole time; what changes is who drives it:
+//
+//   ANIMATED    the clip, kinematically: driveToPoseKinematic every frame, so
+//               the parts are real bodies moving at the clip's velocities (a
+//               running figure that gets hit keeps its momentum for free)
+//   IMPACT      motors: driveToPose toward the clip at `stiffness * (1 - w)`
+//               Hz while the blend weight w ramps 0 -> 1 in ~0.1 s, so the
+//               joints resist the hit briefly and then give up
+//   RAGDOLL     nothing: limp, until the kinetic energy stays low
+//   SETTLING    at rest on the ground, prone or supine
+//   GETTING_UP  kinematic again, toward lerpPose(snapshot, getup clip, 1 - w)
+//               with w falling 1 -> 0: the heap on the floor blends into the
+//               get-up clip, which ends standing, which hands back to idle
 
-import { vlerp, qslerp, qrot, BONES } from "./character.js";
+import { q } from "/lib/kit/physics3d.js";
+import { spawnRagdoll, buildPose, lerpPose, PELVIS_BIND_Y } from "/lib/kit/ragdoll.js";
+import { CLIPS, GETUP_TIME } from "./anim.js";
 
-export const BLEND_STATE = {
-    ANIMATED: 'ANIMATED',
-    IMPACT: 'IMPACT',
-    RAGDOLL: 'RAGDOLL',
-    SETTLING: 'SETTLING',
-    GETTING_UP: 'GETTING_UP'
-};
+export const STATES = ['ANIMATED', 'IMPACT', 'RAGDOLL', 'SETTLING', 'GETTING_UP'];
+
+const IMPACT_RATE = 10;      // blend weight per second into the ragdoll
+const GETUP_RATE = 0.7;      // ... and back out of it while standing up
+const SETTLE_KE = 1.2;       // J: below this for SETTLE_TIME = at rest
+const SETTLE_TIME = 0.4;
 
 export class RagdollBlender {
-    constructor(character, ragdoll) {
-        this.character = character;
-        this.ragdoll = ragdoll;
-
-        this.state = BLEND_STATE.ANIMATED;
-        this.blendWeight = 0.0; // 0.0 = 100% animation, 1.0 = 100% ragdoll
-        this.transitionSpeed = 4.0; // 1/s
-
-        // Ground rest detection
+    constructor(scene, opts = {}) {
+        this.stiffness = opts.stiffness ?? 12;     // Hz, the impact motors
+        this.state = 'ANIMATED';
+        this.weight = 0;                          // 0 = all animation, 1 = all physics
+        this.clip = 'idle';
+        this.time = 0;
+        this.root = { x: 0, z: 0, yaw: 0 };
+        this.prone = true;
         this.settleTimer = 0;
-        this.isResting = false;
-        this.isProne = true; // true = stomach down, false = back down
-
-        // Blended transforms output
-        this.blendedTransforms = [];
-        this.initTransforms();
+        this.snapshot = null;
+        this.onState = opts.onState || null;
+        this.rig = spawnRagdoll(scene, {
+            position: { x: 0, y: 0, z: 0 }, layer: 'player',
+            colors: { skin: '#e0a97d', cloth: '#3a68aa', boots: '#1f2430' },
+            motor: { frequency: this.stiffness, damping: 1 },
+        });
+        this.rd = this.rig.rd;
+        this.rd.setPose(this.animPose());
     }
 
-    initTransforms() {
-        const animTransforms = this.character.computeBoneTransforms();
-        this.blendedTransforms = animTransforms.map(t => ({
-            name: t.name,
-            shape: t.shape,
-            radius: t.radius,
-            halfHeight: t.halfHeight,
-            position: { ...t.position },
-            rotation: { ...t.rotation }
-        }));
+    /** The current clip's world pose at the current root. */
+    animPose(clip = this.clip, t = this.time) {
+        return buildPose(CLIPS[clip](t), { x: this.root.x, y: PELVIS_BIND_Y, z: this.root.z },
+            q.axis(0, 1, 0, this.root.yaw));
     }
 
-    triggerRagdoll(hitLimbIndex = 0, impulse = { x: 0, y: 0, z: 0 }) {
-        if (this.state === BLEND_STATE.RAGDOLL) {
-            // Already in ragdoll; just apply extra impulse
-            this.ragdoll.applyImpulse(hitLimbIndex, impulse);
-            return;
+    setState(s) {
+        if (this.state === s) return;
+        this.state = s;
+        if (this.onState) this.onState(s);
+    }
+
+    /** Pick a looping clip. Anything but ANIMATED stands back up first. */
+    setAnimation(name) {
+        if (!CLIPS[name]) return false;
+        if (this.state !== 'ANIMATED') return this.resetToStand(name);
+        if (this.clip !== name) { this.clip = name; this.time = 0; }
+        return true;
+    }
+
+    /** Hit part `index`: blend into the ragdoll, or add to one already limp. */
+    triggerRagdoll(index = 2, impulse = null) {
+        const tag = this.rd.partBody(index);
+        this.rd.activate();
+        if (impulse) Physics.addImpulse(tag, impulse.x, impulse.y, impulse.z);
+        if (this.state === 'RAGDOLL' || this.state === 'SETTLING' || this.state === 'IMPACT') {
+            if (this.state === 'SETTLING') { this.settleTimer = 0; this.setState('RAGDOLL'); }
+            return true;
         }
-
-        this.state = BLEND_STATE.IMPACT;
-        this.blendWeight = 0.0;
+        this.weight = 0;
         this.settleTimer = 0;
-        this.isResting = false;
-
-        // Copy current blended transforms to ragdoll limbs so physics starts seamlessly from current pose
-        const animTransforms = this.character.computeBoneTransforms();
-        for (let i = 0; i < this.ragdoll.limbs.length; i++) {
-            const t = animTransforms[i];
-            const limb = this.ragdoll.limbs[i];
-            limb.position = { ...t.position };
-            limb.rotation = { ...t.rotation };
-            // Transfer procedural gait velocity
-            limb.vx = (this.character.currentAnim === 'walk' || this.character.currentAnim === 'run') ? 1.2 : 0;
-            limb.vy = 0;
-            limb.vz = 0;
-        }
-
-        // Apply impact impulse to hit limb
-        this.ragdoll.applyImpulse(hitLimbIndex, impulse);
+        this.setState('IMPACT');
+        return true;
     }
 
+    /** From the ground: pick the clip by which way the chest faces. */
     triggerGetUp() {
-        if (this.state !== BLEND_STATE.SETTLING && this.state !== BLEND_STATE.RAGDOLL) return;
-
-        // Detect orientation: prone (face down) vs supine (face up)
-        const chest = this.ragdoll.limbs[2]; // chest limb
-        const forwardVec = qrot(chest.rotation, { x: 0, y: 0, z: 1 });
-        this.isProne = forwardVec.y < 0; // chest facing downwards into ground
-
-        // Reposition character root to where ragdoll pelvis landed
-        const pelvis = this.ragdoll.limbs[0];
-        this.character.worldPos = { x: pelvis.position.x, y: 0, z: pelvis.position.z };
-
-        // Align character yaw with ragdoll torso heading
-        const heading = Math.atan2(forwardVec.x, forwardVec.z);
-        this.character.worldYaw = heading;
-
-        // Switch character animation to appropriate getup clip
-        this.character.setAnimation(this.isProne ? 'getup_prone' : 'getup_supine', 1.0);
-        this.state = BLEND_STATE.GETTING_UP;
+        if (this.state !== 'SETTLING' && this.state !== 'RAGDOLL') return false;
+        const chest = Physics.getTransform(this.rd.partBody(2));
+        const fwd = q.rot(chest.rotation, { x: 0, y: 0, z: 1 });
+        const up = q.rot(chest.rotation, { x: 0, y: 1, z: 0 });   // pelvis -> head
+        this.prone = fwd.y < 0;
+        // Stand up facing along the body: head-ward from the stomach, feet-ward
+        // from the back (a sit-up ends facing the feet).
+        const s = this.prone ? 1 : -1;
+        const pelvis = Physics.getTransform(this.rd.partBody(0)).position;
+        this.root = { x: pelvis.x, z: pelvis.z, yaw: Math.atan2(up.x * s, up.z * s) };
+        this.snapshot = this.rd.pose();
+        this.clip = this.prone ? 'getup_prone' : 'getup_supine';
+        this.time = 0;
+        this.weight = 1;
+        this.setState('GETTING_UP');
+        return true;
     }
 
-    resetToStand(pos = { x: 0, y: 0, z: 0 }, anim = 'idle') {
-        this.character.worldPos = { ...pos };
-        this.character.worldYaw = 0;
-        this.character.setAnimation(anim);
-        this.state = BLEND_STATE.ANIMATED;
-        this.blendWeight = 0.0;
+    /** Teleport upright at `pos` playing `clip`, velocities zeroed. */
+    resetToStand(clip = this.clip.startsWith('getup') ? 'idle' : this.clip, pos = { x: 0, z: 0 }) {
+        this.rd.stopDrive();
+        this.clip = clip;
+        this.time = 0;
+        this.root = { x: pos.x, z: pos.z, yaw: 0 };
+        this.rd.setPose(this.animPose());
+        for (const tag of this.rig.tags) {
+            Physics.setLinearVelocity(tag, 0, 0, 0);
+            Physics.setAngularVelocity(tag, 0, 0, 0);
+        }
+        this.weight = 0;
         this.settleTimer = 0;
-        this.isResting = false;
+        this.setState('ANIMATED');
+        return true;
+    }
 
-        const animTransforms = this.character.computeBoneTransforms();
-        for (let i = 0; i < this.ragdoll.limbs.length; i++) {
-            const t = animTransforms[i];
-            const limb = this.ragdoll.limbs[i];
-            limb.position = { ...t.position };
-            limb.rotation = { ...t.rotation };
-            limb.vx = 0; limb.vy = 0; limb.vz = 0;
-            limb.wx = 0; limb.wy = 0; limb.wz = 0;
+    setStiffness(hz) { this.stiffness = hz; }
+
+    /** Sum of 1/2 m v^2 over the parts (linear), joules. */
+    kineticEnergy() {
+        let ke = 0;
+        for (const tag of this.rig.tags) {
+            const v = Physics.getVelocity(tag).linear;
+            ke += 0.5 * Physics.getBodyProperties(tag).mass * (v.x * v.x + v.y * v.y + v.z * v.z);
+        }
+        return ke;
+    }
+
+    pelvisHeight() { return Physics.getTransform(this.rd.partBody(0)).position.y; }
+
+    /** Resting-state label for the telemetry. */
+    restLabel() {
+        switch (this.state) {
+            case 'ANIMATED': return 'Active';
+            case 'SETTLING': return this.prone ? 'Prone (Stomach)' : 'Supine (Back)';
+            case 'GETTING_UP': return 'Recovering';
+            default: return 'Tumbling';
         }
     }
 
     update(dt) {
-        // 1. Advance Skeletal Animation
-        this.character.update(dt);
-        const animTransforms = this.character.computeBoneTransforms();
-
-        // 2. Step Physics Simulation
-        const isDynamic = this.state !== BLEND_STATE.ANIMATED;
-        if (isDynamic) {
-            this.ragdoll.stepPhysics(dt, null, this.blendWeight < 0.5);
-        }
-
-        // 3. State Machine Transitions
+        if (dt <= 0) return;
+        this.time += dt;
         switch (this.state) {
-            case BLEND_STATE.ANIMATED: {
-                this.blendWeight = 0.0;
+            case 'ANIMATED':
+                this.rd.driveToPoseKinematic(this.animPose(), dt);
                 break;
-            }
-            case BLEND_STATE.IMPACT: {
-                this.blendWeight = Math.min(1.0, this.blendWeight + dt * this.transitionSpeed * 2.5);
-                if (this.blendWeight >= 1.0) {
-                    this.state = BLEND_STATE.RAGDOLL;
+            case 'IMPACT': {
+                this.weight = Math.min(1, this.weight + dt * IMPACT_RATE);
+                const hz = this.stiffness * (1 - this.weight);
+                if (this.weight >= 1 || hz < 0.5) {
+                    this.rd.stopDrive();
+                    this.weight = 1;
+                    this.setState('RAGDOLL');
+                } else {
+                    this.rd.driveToPose(this.animPose(), { frequency: hz, damping: 1 });
                 }
                 break;
             }
-            case BLEND_STATE.RAGDOLL: {
-                this.blendWeight = 1.0;
-                // Monitor kinetic energy for settling detection
-                const ke = this.ragdoll.getKineticEnergy();
-                if (ke < 1.2) {
+            case 'RAGDOLL':
+                if (this.kineticEnergy() < SETTLE_KE) {
                     this.settleTimer += dt;
-                    if (this.settleTimer > 0.4) {
-                        this.state = BLEND_STATE.SETTLING;
-                        this.isResting = true;
+                    if (this.settleTimer > SETTLE_TIME) {
+                        const fwd = q.rot(Physics.getTransform(this.rd.partBody(2)).rotation, { x: 0, y: 0, z: 1 });
+                        this.prone = fwd.y < 0;
+                        this.setState('SETTLING');
                     }
                 } else {
                     this.settleTimer = 0;
                 }
                 break;
-            }
-            case BLEND_STATE.SETTLING: {
-                this.blendWeight = 1.0;
-                this.isResting = true;
+            case 'SETTLING':
                 break;
-            }
-            case BLEND_STATE.GETTING_UP: {
-                // Blend weight transitions from 1.0 down to 0.0 as character stands up
-                this.blendWeight = Math.max(0.0, this.blendWeight - dt * 0.7);
-                if (this.character.time >= 1.8 && this.blendWeight <= 0.05) {
-                    this.state = BLEND_STATE.ANIMATED;
-                    this.blendWeight = 0.0;
-                    this.character.setAnimation('idle');
+            case 'GETTING_UP': {
+                this.weight = Math.max(0, this.weight - dt * GETUP_RATE);
+                this.rd.driveToPoseKinematic(lerpPose(this.snapshot, this.animPose(), 1 - this.weight), dt);
+                if (this.time >= GETUP_TIME && this.weight <= 0.05) {
+                    this.weight = 0;
+                    this.clip = 'idle';
+                    this.time = 0;
+                    this.setState('ANIMATED');
                 }
                 break;
             }
         }
-
-        // 4. Blend Transforms (Kinematic Pose <-> Ragdoll Physical Pose)
-        const w = this.blendWeight;
-        const count = BONES.length;
-
-        for (let i = 0; i < count; i++) {
-            const at = animTransforms[i];
-            const rt = this.ragdoll.limbs[i];
-            const bt = this.blendedTransforms[i];
-
-            if (w <= 0.001) {
-                bt.position = { ...at.position };
-                bt.rotation = { ...at.rotation };
-            } else if (w >= 0.999) {
-                bt.position = { ...rt.position };
-                bt.rotation = { ...rt.rotation };
-            } else {
-                bt.position = vlerp(at.position, rt.position, w);
-                bt.rotation = qslerp(at.rotation, rt.rotation, w);
-            }
-        }
-
-        // 5. Update Visuals
-        this.ragdoll.syncVisualMeshes(this.blendedTransforms);
     }
 }

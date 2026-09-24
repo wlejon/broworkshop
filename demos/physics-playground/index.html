@@ -2,429 +2,297 @@
 <html>
 <head>
     <title>Physics Playground</title>
+    <link rel="stylesheet" href="/lib/kit/kit.css">
     <link rel="stylesheet" href="/app/style.css">
 </head>
-<body>
-    <canvas id="stage"></canvas>
+<body class="k-app">
+    <header class="k-header">
+        <h1>Physics Playground</h1>
+        <span class="k-sub">Jolt in bro: materials, fields, layers, ragdolls, soft bodies, SixDOF machines, breakable joints, contacts</span>
+        <span class="k-spacer"></span>
+        <!-- Three bays 36 m apart: hunting for the crane with the orbit camera is nobody's idea of a demo. -->
+        <span class="dim">view</span><span class="k-row" id="views"></span>
+    </header>
 
-    <div id="hud">
-        <h1>Physics Playground <span id="fps" class="fps">—</span></h1>
-
-        <div class="stats">
-            <div><span>bodies</span><b id="stBodies">0</b></div>
-            <div><span>step</span><b id="stStep">—</b></div>
-            <div><span>interp</span><b id="stInterp">off</b></div>
-        </div>
-
-        <!-- The world is three bays 36 m apart; hunting for the crane with a
-             mouse orbit is nobody's idea of a demo. -->
-        <div class="btnrow" id="viewRow">
-            <button data-view="sandbox" class="sel">sandbox</button>
-            <button data-view="machines">machines</button>
-            <button data-view="bench">bench</button>
-            <button data-view="bridge">bridge</button>
-        </div>
-
-        <!-- Step rate + interpolation. These two belong together: the slider
-             exists so the checkbox has something to prove. -->
-        <section>
-            <h2 data-collapsible>Simulation</h2>
-            <label class="row">
-                <span>step rate</span>
-                <input id="stepHz" type="range" min="15" max="120" step="1" value="60">
-                <b id="stepHzVal">60 Hz</b>
-            </label>
-            <label class="check">
-                <input id="interp" type="checkbox">
-                <span>render interpolation</span>
-            </label>
-            <p class="hint">
-                Physics steps at a fixed rate; rendering does not. Drag the step
-                rate down to <b>15–20 Hz</b> and watch a falling object: with
-                interpolation <b>off</b> it teleports once per step. Turn it
-                <b>on</b> and the same simulation glides, because the render
-                side blends the previous and current step poses by the frame's
-                accumulator fraction. The simulation is identical either way —
-                only what you SEE changes.
-            </p>
-        </section>
-
-        <!-- Spawning -->
-        <section>
-            <h2 data-collapsible>Spawn</h2>
-            <div class="btnrow" id="shapeRow">
-                <button data-shape="box" class="sel">box</button>
-                <button data-shape="sphere">sphere</button>
-                <button data-shape="capsule">capsule</button>
-                <button data-shape="compound">compound</button>
-                <button data-shape="torus">torus (mesh)</button>
-            </div>
-            <div class="btnrow" id="layerRow"></div>
-            <label class="row">
-                <span>friction</span>
-                <input id="spawnFriction" type="range" min="0" max="2" step="0.01" value="0.5">
-                <b id="spawnFrictionVal">0.50</b>
-            </label>
-            <label class="row">
-                <span>restitution</span>
-                <input id="spawnRestitution" type="range" min="0" max="1" step="0.01" value="0.35">
-                <b id="spawnRestitutionVal">0.35</b>
-            </label>
-            <div class="btnrow">
-                <button id="btnDrop">drop one</button>
-                <button id="btnRace">material race</button>
-            </div>
-            <div class="btnrow">
-                <button id="btnRain">rain 40</button>
-                <button id="btnRain200">rain 200</button>
-                <button id="btnClear" class="danger">clear all</button>
-            </div>
-            <p class="hint">Left-click the floor to spawn there; left-click a body to select it.</p>
-        </section>
-
-        <!-- Ragdolls: articulated bodies, per-part impulses, pose drives -->
-        <section>
-            <h2 data-collapsible data-start="closed">Ragdolls</h2>
-            <div class="stats">
-                <div><span>ragdolls</span><b id="stRagdolls">0</b></div>
-                <div><span>parts</span><b id="stParts">0</b></div>
-            </div>
-            <div class="btnrow">
-                <button id="btnRagdoll">drop ragdoll</button>
-                <button id="btnRagdollRain">ragdoll rain</button>
-            </div>
-            <div class="sel-info" id="partInfo">no part selected — click a limb</div>
-            <div class="btnrow">
-                <button id="btnPunch">punch part</button>
-                <button id="btnUppercut">uppercut</button>
-                <button id="btnClearRagdolls" class="danger">clear</button>
+    <div class="k-body">
+        <aside class="k-side">
+            <div class="k-tabs" id="tabs">
+                <button data-tab="sandbox" class="active">Sandbox</button>
+                <button data-tab="bodies">Ragdoll/Soft</button>
+                <button data-tab="machines">Machines</button>
+                <button data-tab="bridge">Bridge</button>
+                <button data-tab="contacts">Contacts</button>
             </div>
 
-            <h3>Pose drive</h3>
-            <div class="btnrow" id="poseRow">
-                <button data-pose="stand" class="sel">stand</button>
-                <button data-pose="reach">reach</button>
-                <button data-pose="tuck">tuck</button>
-            </div>
-            <label class="check">
-                <input id="driveKinematic" type="checkbox">
-                <span>kinematic drive (hard tracking)</span>
-            </label>
-            <label class="row">
-                <span>motor Hz</span>
-                <input id="motorFreq" type="range" min="1" max="40" step="0.5" value="12">
-                <b id="motorFreqVal">12.0</b>
-            </label>
-            <div class="btnrow">
-                <button id="btnDrive">drive to pose</button>
-                <button id="btnLimp">go limp</button>
-            </div>
-            <div class="sel-info" id="driveInfo">not driving</div>
-            <p class="hint">
-                <b>driveToPose</b> puts position motors on every swing-twist
-                joint and lets gravity keep working — the ragdoll develops
-                muscle tone but still falls, sags and gets pushed around. Set it
-                once; the motors persist until <em>go limp</em>.
-                <b>Kinematic drive</b> instead sets part velocities so each part
-                reaches its target transform every step: it stands the figure up
-                and shoves whatever is in the way. Drop a ragdoll, punch it
-                over, then drive it with the checkbox off and on.
-            </p>
-        </section>
+            <!-- ============================== Sandbox ============================== -->
+            <div data-pane="sandbox" class="k-col">
+                <div class="k-panel">
+                    <h2>Simulation</h2>
+                    <div id="simParams"></div>
+                    <p class="hint">
+                        Physics steps at a fixed rate; rendering does not. Drag the step rate down to
+                        <b>15–20 Hz</b> and watch a falling object: with interpolation <b>off</b> it
+                        teleports once per step. Turn it <b>on</b> (or press <b>Space</b>) and the same
+                        simulation glides, because the render side blends the previous and current step
+                        poses by the frame's accumulator fraction. Only what you SEE changes.
+                    </p>
+                </div>
 
-        <!-- Soft bodies: cloth + a pressurized volume -->
-        <section>
-            <h2 data-collapsible data-start="closed">Soft bodies</h2>
-            <div class="btnrow" id="pinRow">
-                <button data-pin="corners" class="sel">corners</button>
-                <button data-pin="edge">one edge</button>
-                <button data-pin="none">unpinned</button>
-            </div>
-            <div class="btnrow">
-                <button id="btnClothDrop">drop onto cloth</button>
-                <button id="btnGust">gust (setVertexVelocity)</button>
-            </div>
-            <p class="hint" id="pinHint">
-                Pinned vertices carry invMass 0 — they do not move at all while
-                the sheet between them sags. Drop boxes into the hammock, then
-                switch to <b>one edge</b> and watch the same sheet drape.
-            </p>
+                <div class="k-panel">
+                    <h2>Spawn</h2>
+                    <div class="k-row seg" id="shapeRow"></div>
+                    <div class="k-row seg" id="layerRow"></div>
+                    <div id="spawnParams"></div>
+                    <div class="k-row btns">
+                        <button id="btnDrop">drop one</button>
+                        <button id="btnRace">material race</button>
+                        <button id="btnRain">rain 40</button>
+                        <button id="btnRain200">rain 200</button>
+                        <button id="btnClear" class="danger">clear all</button>
+                    </div>
+                    <p class="hint">Left-click the floor to spawn there; left-click a body to select it and drag it. <b>Enter</b> drops one, <b>Esc</b> deselects.</p>
+                </div>
 
-            <h3>Pressurized ball</h3>
-            <label class="row">
-                <span>pressure</span>
-                <input id="ballPressure" type="range" min="0" max="7000" step="50" value="2500">
-                <b id="ballPressureVal">2500</b>
-            </label>
-            <div class="btnrow">
-                <button id="btnBallDrop">drop ball</button>
-                <button id="btnPoke">poke (setVertex)</button>
-                <button id="btnSoftClear" class="danger">clear soft</button>
-            </div>
-            <p class="hint">
-                The gas coefficient of a closed mesh. At <b>300</b> the ball is
-                a wet bag that slaps the lane and stays there; at <b>6000</b> it
-                is a drum and rebounds most of the way back. There is no runtime
-                setter, so moving the slider rebuilds and re-drops the ball —
-                which is what you want for an A/B anyway.
-            </p>
-        </section>
+                <div class="k-panel">
+                    <h2>Selected body</h2>
+                    <div class="sel-info" id="selInfo">nothing selected — click a body</div>
+                    <div id="selControls" class="k-col">
+                        <div id="selParams"></div>
+                        <span class="dim">friction combine</span><div class="k-row seg" id="fricCombineRow"></div>
+                        <span class="dim">restitution combine</span><div class="k-row seg" id="restCombineRow"></div>
+                        <div class="k-row btns">
+                            <button id="btnPokeBody">poke (impulse)</button>
+                            <button id="btnDelete" class="danger">delete</button>
+                        </div>
+                    </div>
+                    <p class="hint">
+                        Two touching bodies each carry a friction and a restitution, but a contact needs ONE
+                        of each: the combine mode decides. Drop a bouncy ball on the <b>rubber</b> lane (0.92)
+                        and on the <b>ice</b> lane (0.05), then switch between <b>min</b> and <b>max</b>: under
+                        max it bounces on both, under min it dies on the ice. <em>default</em> is Jolt's rule,
+                        sqrt(f1·f2) for friction and max(r1, r2) for restitution.
+                    </p>
+                </div>
 
-        <!-- Area field overrides -->
-        <section>
-            <h2 data-collapsible data-start="closed">Area fields</h2>
-            <div id="areaList"></div>
-        </section>
+                <div class="k-panel">
+                    <h2>Area fields</h2>
+                    <div id="areaList" class="k-col"></div>
+                </div>
 
-        <!-- Live material tuning on the selected body -->
-        <section>
-            <h2 data-collapsible data-start="closed">Selected body</h2>
-            <div class="sel-info" id="selInfo">nothing selected — click a body</div>
-            <div id="selControls" class="disabled">
-                <label class="row"><span>mass</span>
-                    <input id="pMass" type="range" min="0.2" max="400" step="0.1" value="1"><b id="pMassVal">—</b></label>
-                <label class="row"><span>friction</span>
-                    <input id="pFriction" type="range" min="0" max="2" step="0.01" value="0.5"><b id="pFrictionVal">—</b></label>
-                <label class="row"><span>restitution</span>
-                    <input id="pRestitution" type="range" min="0" max="1" step="0.01" value="0.3"><b id="pRestitutionVal">—</b></label>
-                <label class="row"><span>lin damp</span>
-                    <input id="pLinDamp" type="range" min="0" max="10" step="0.05" value="0.05"><b id="pLinDampVal">—</b></label>
-                <label class="row"><span>ang damp</span>
-                    <input id="pAngDamp" type="range" min="0" max="10" step="0.05" value="0.05"><b id="pAngDampVal">—</b></label>
-                <label class="row"><span>gravity x</span>
-                    <input id="pGravFactor" type="range" min="-2" max="3" step="0.05" value="1"><b id="pGravFactorVal">—</b></label>
+                <div class="k-panel">
+                    <h2>Collision layers</h2>
+                    <p class="hint">
+                        Row/column = layer. A cleared box rejects that pair in the broadphase: the two never
+                        touch. Changes apply to bodies that already exist, so untick <b>projectile / scenery</b>
+                        and watch pink objects fall straight through the ramps and walls.
+                    </p>
+                    <div id="layerMatrix"></div>
+                    <div class="k-row btns"><button id="btnResetLayers">reset matrix</button></div>
+                </div>
 
-                <h3>Combine modes</h3>
-                <div class="btnrow small" id="fricCombineRow"></div>
-                <div class="btnrow small" id="restCombineRow"></div>
-                <p class="hint">
-                    Two touching bodies each carry their own friction and
-                    restitution, but a contact needs ONE of each. The combine
-                    mode decides. Drop a high-restitution ball on the
-                    <b>rubber</b> lane (0.92) and on the <b>ice</b> lane (0.05),
-                    then switch between <b>min</b> and <b>max</b>: under max the
-                    ball bounces on both, under min it dies on the ice.
-                    <em>default</em> is Jolt's own rule — sqrt(f1·f2) for
-                    friction, max(r1,r2) for restitution.
-                </p>
-                <div class="btnrow">
-                    <button id="btnPokeBody">poke (impulse)</button>
-                    <button id="btnDelete" class="danger">delete</button>
+                <div class="k-panel">
+                    <h2>Lanes</h2>
+                    <div id="laneLegend" class="k-col"></div>
                 </div>
             </div>
-        </section>
 
-        <!-- Collision layer matrix -->
-        <section>
-            <h2 data-collapsible data-start="closed">Collision layers</h2>
-            <p class="hint">
-                Row/column = layer. A cleared box means that pair is rejected in
-                the broadphase — the two never touch. Changes apply to bodies
-                that already exist, so untick <b>projectile / scenery</b> and
-                watch pink objects fall straight through the ramps and walls.
-            </p>
-            <div id="layerMatrix"></div>
-            <div class="btnrow"><button id="btnResetLayers">reset matrix</button></div>
-        </section>
+            <!-- ============================ Ragdoll / Soft ============================ -->
+            <div data-pane="bodies" class="k-col" hidden>
+                <div class="k-panel">
+                    <h2>Ragdolls</h2>
+                    <div class="k-row btns">
+                        <button id="btnRagdoll">drop ragdoll</button>
+                        <button id="btnRagdollRain">ragdoll rain</button>
+                        <button id="btnClearRagdolls" class="danger">clear</button>
+                    </div>
+                    <div class="sel-info" id="partInfo">no part selected — click a limb</div>
+                    <div class="k-row btns">
+                        <button id="btnPunch">punch part</button>
+                        <button id="btnUppercut">uppercut</button>
+                    </div>
+                    <h3>Pose drive</h3>
+                    <div class="k-row seg" id="poseRow"></div>
+                    <div id="driveParams"></div>
+                    <div class="k-row btns">
+                        <button id="btnDrive" class="primary">drive to pose</button>
+                        <button id="btnLimp">go limp</button>
+                    </div>
+                    <div class="sel-info" id="driveInfo">not driving</div>
+                    <p class="hint">
+                        <b>driveToPose</b> puts position motors on every swing-twist joint and lets gravity keep
+                        working: the ragdoll develops muscle tone but still falls, sags and gets pushed around.
+                        Set it once; the motors persist until <em>go limp</em>. <b>Kinematic drive</b> instead
+                        sets part velocities so each part reaches its target transform every step: it stands
+                        the figure up and shoves whatever is in the way. Drop a ragdoll, punch it over, then
+                        drive it with the checkbox off and on.
+                    </p>
+                </div>
 
-        <!-- ================= CHUNK 3 ================= -->
+                <div class="k-panel">
+                    <h2>Cloth</h2>
+                    <div class="k-row seg" id="pinRow"></div>
+                    <div class="k-row btns">
+                        <button id="btnClothDrop">drop onto cloth</button>
+                        <button id="btnGust">gust (setVertexVelocity)</button>
+                    </div>
+                    <p class="hint" id="pinHint"></p>
+                </div>
 
-        <!-- SixDOF machines: motors + per-axis lock/limit/free -->
-        <section>
-            <h2 data-collapsible>Machines (SixDOF)</h2>
-            <div class="stats">
-                <div><span>slew</span><b id="mCrane">—</b></div>
-                <div><span>winch</span><b id="mWinch">—</b></div>
-                <div><span>piston</span><b id="mPiston">—</b></div>
+                <div class="k-panel">
+                    <h2>Pressurized ball</h2>
+                    <div id="ballParams"></div>
+                    <div class="k-row btns">
+                        <button id="btnBallDrop">drop ball</button>
+                        <button id="btnPoke">poke (setVertex)</button>
+                        <button id="btnSoftClear" class="danger">clear soft</button>
+                    </div>
+                    <p class="hint">
+                        The gas coefficient of a closed mesh. At <b>300</b> the ball is a wet bag that slaps the
+                        lane and stays there; at <b>6000</b> it is a drum and rebounds most of the way back.
+                        There is no runtime setter, so moving the slider rebuilds and re-drops the ball,
+                        which is what you want for an A/B anyway.
+                    </p>
+                </div>
             </div>
-            <p class="hint">
-                A SixDOF constraint is six independent switches — three
-                translations, three rotations — each <b>locked</b>, <b>limited</b>
-                to a range, or <b>free</b>, and each able to carry a motor. That
-                is not a joint, that is a machine tool.
-            </p>
 
-            <h3>Motors</h3>
-            <label class="row">
-                <span>crane slew</span>
-                <input id="craneSlew" type="range" min="-1.5" max="1.5" step="0.05" value="0">
-                <b id="craneSlewVal">0.00 rad/s</b>
-            </label>
-            <label class="row">
-                <span>winch</span>
-                <input id="winchTarget" type="range" min="-4" max="0" step="0.05" value="-2">
-                <b id="winchTargetVal">-2.00 m</b>
-            </label>
-            <label class="row">
-                <span>piston</span>
-                <input id="pistonTarget" type="range" min="0" max="4.5" step="0.05" value="0">
-                <b id="pistonTargetVal">0.00 m</b>
-            </label>
-            <p class="hint">
-                Slew is a <b>velocity</b> motor: set a rate and the crane turns
-                forever. Winch and piston are <b>position</b> motors: set a place
-                and the machine goes there and <em>holds</em> it — load the
-                platform and it still holds it.
-            </p>
-            <div class="btnrow">
-                <button id="btnCraneLoad">hook a pallet</button>
-                <button id="btnPistonLoad">load piston</button>
+            <!-- ============================== Machines ============================== -->
+            <div data-pane="machines" class="k-col" hidden>
+                <div class="k-panel">
+                    <h2>SixDOF machines</h2>
+                    <div class="k-stats readouts">
+                        <span>slew <b id="mCrane">—</b></span>
+                        <span>winch <b id="mWinch">—</b></span>
+                        <span>piston <b id="mPiston">—</b></span>
+                    </div>
+                    <p class="hint">
+                        A SixDOF constraint is six independent switches (three translations, three rotations),
+                        each <b>locked</b>, <b>limited</b> to a range, or <b>free</b>, and each able to carry a
+                        motor. That is not a joint, that is a machine tool.
+                    </p>
+                    <div id="motorParams"></div>
+                    <p class="hint">
+                        Slew is a <b>velocity</b> motor: set a rate and the crane turns forever. Winch and piston
+                        are <b>position</b> motors: set a place and the machine goes there and <em>holds</em> it,
+                        loaded or not.
+                    </p>
+                    <div class="k-row btns">
+                        <button id="btnCraneLoad">hook a pallet</button>
+                        <button id="btnPistonLoad">load piston</button>
+                    </div>
+                    <h3>Turret</h3>
+                    <div class="k-stats readouts"><span>aim yaw / pitch <b id="mTurret">—</b></span></div>
+                    <div id="turretParams"></div>
+                    <div class="k-row btns"><button id="btnFireTurret">fire</button></div>
+                    <h3>Axis configuration</h3>
+                    <p class="hint">
+                        Bars beside each pivot, X <b class="axX">red</b> / Y <b class="axY">green</b> /
+                        Z <b class="axZ">blue</b>: a short dark stub is <b>locked</b>, a medium bar
+                        <b>limited</b>, a long glowing bar <b>free</b>. Rotation axes wear a collar of pips.
+                        Flip the piston's <em>tX</em> to <b>free</b> and the platform slides off its own lift.
+                    </p>
+                    <div id="axisGrid" class="k-col"></div>
+                    <div class="k-row btns">
+                        <button id="btnResetMachines">reset machines</button>
+                        <button id="btnClearMachines" class="danger">clear debris</button>
+                    </div>
+                </div>
+
+                <div class="k-panel">
+                    <h2>collideConnected</h2>
+                    <div class="k-stats readouts"><span>centre separation <b id="ccSep">—</b></span></div>
+                    <div id="ccParams"></div>
+                    <p class="hint" id="ccHint"></p>
+                    <p class="hint">
+                        Two 0.5 m spheres on a rope capped at <b>0.4 m</b>, shorter than the sum of their radii,
+                        so the flag decides which wins. Off (the default) the pair is excluded from collision
+                        for the constraint's lifetime and the spheres merge; on, contact survives the joint and
+                        pushes them apart past the rope's own limit.
+                    </p>
+                </div>
+
+                <div class="k-panel">
+                    <h2>Mechanism bench</h2>
+                    <p class="hint">
+                        <b>gear</b>, <b>rackAndPinion</b> and <b>pulley</b>. Note the shape of the first two:
+                        they couple two <em>existing constraint handles</em> rather than building their own joints.
+                    </p>
+                    <div id="benchParams"></div>
+                    <div class="k-stats readouts"><span>rack travel <b id="mRack">—</b></span></div>
+                    <div class="k-row btns">
+                        <button id="btnResetRack">reset rack</button>
+                        <button id="btnResetPulley">reset pulley</button>
+                    </div>
+                    <p class="hint">
+                        The pulley needs no motor at all: 120 kg on one end, 25 kg on the other, one rope of
+                        fixed total length over two pivots.
+                    </p>
+                </div>
             </div>
 
-            <h3>Turret</h3>
-            <div class="stats"><div><span>aim yaw / pitch</span><b id="mTurret">—</b></div></div>
-            <label class="check">
-                <input id="turretTrack" type="checkbox" checked>
-                <span>track the drone (re-aims both motors every frame)</span>
-            </label>
-            <div class="btnrow"><button id="btnFireTurret">fire</button></div>
-
-            <h3>Axis configuration</h3>
-            <label class="check">
-                <input id="showAxes" type="checkbox" checked>
-                <span>draw axis indicators at each pivot</span>
-            </label>
-            <p class="hint">
-                Bars at the pivot, X <b style="color:#ff5a5a">red</b> /
-                Y <b style="color:#7bed9f">green</b> / Z <b style="color:#5aa9ff">blue</b>:
-                a short dark stub is <b>locked</b>, a medium bar is <b>limited</b>,
-                a long glowing bar is <b>free</b>. Rotation axes wear a collar of
-                pips. Flip <em>tY</em> on the piston to <b>free</b> and the
-                platform falls off its own lift.
-            </p>
-            <div id="axisGrid"></div>
-            <div class="btnrow">
-                <button id="btnResetMachines">reset machines</button>
-                <button id="btnClearMachines" class="danger">clear debris</button>
+            <!-- =============================== Bridge =============================== -->
+            <div data-pane="bridge" class="k-col" hidden>
+                <div class="k-panel">
+                    <h2>Breakable joints</h2>
+                    <div class="k-stats readouts"><span>broken / total <b id="stBroken">—</b></span></div>
+                    <div id="breakParams"></div>
+                    <p class="hint" id="breakHint"></p>
+                    <div class="k-row btns">
+                        <button id="btnSmash">drop wrecking ball</button>
+                        <button id="btnShoot">fire a shell</button>
+                        <button id="btnRebuild">rebuild bridge</button>
+                        <button id="btnClearRubble" class="danger">clear rubble</button>
+                    </div>
+                    <div id="breakLog" class="loglist"></div>
+                    <p class="hint">
+                        Every joint in the bridge carries a <b>breakingImpulse</b> in N·s. When the impulse the
+                        solver needed to hold that joint closed exceeds it in one step, Jolt disables the
+                        constraint and <b>getBrokenConstraints()</b> reports its handle: a whole destruction
+                        system for one number per joint. The hangers go first, their load transfers to their
+                        neighbours, and the deck unzips.
+                    </p>
+                </div>
             </div>
-        </section>
 
-        <!-- collideConnected -->
-        <section>
-            <h2 data-collapsible>collideConnected</h2>
-            <div class="stats"><div><span>centre separation</span><b id="ccSep">—</b></div></div>
-            <label class="check">
-                <input id="collideConnected" type="checkbox">
-                <span>jointed pair collides with itself</span>
-            </label>
-            <p class="hint" id="ccHint">—</p>
-            <p class="hint">
-                Two 0.5 m spheres on a rope capped at <b>0.4 m</b> — shorter than
-                the sum of their radii, so the flag decides which wins. Off (the
-                default) the pair is excluded from collision for the constraint's
-                lifetime and the spheres merge; on, contact survives the joint and
-                pushes them apart past the rope's own limit.
-            </p>
-        </section>
-
-        <!-- The mechanism bench: gear / rackAndPinion / pulley -->
-        <section>
-            <h2 data-collapsible>Mechanism bench</h2>
-            <p class="hint">
-                <b>gear</b>, <b>rackAndPinion</b> and <b>pulley</b> all shipped in
-                bro's binding layer and nothing had ever called them. Note the
-                shape of the first two: they couple two <em>existing constraint
-                handles</em> rather than building their own joints.
-            </p>
-            <label class="row">
-                <span>gear drive</span>
-                <input id="gearSpeed" type="range" min="-5" max="5" step="0.1" value="2.5">
-                <b id="gearSpeedVal">2.5 rad/s</b>
-            </label>
-            <label class="row">
-                <span>gear ratio</span>
-                <input id="gearRatio" type="range" min="0.5" max="4" step="0.1" value="2">
-                <b id="gearRatioVal">2.0:1</b>
-            </label>
-            <label class="row">
-                <span>rack drive</span>
-                <input id="rackSpeed" type="range" min="-4" max="4" step="0.1" value="1.6">
-                <b id="rackSpeedVal">1.6 rad/s</b>
-            </label>
-            <div class="stats"><div><span>rack travel</span><b id="mRack">—</b></div></div>
-            <div class="btnrow"><button id="btnResetRack">reset rack</button><button id="btnResetPulley">reset pulley</button></div>
-            <p class="hint">
-                The pulley needs no motor at all: 120 kg on one end, 25 kg on the
-                other, one rope of fixed total length over two pivots.
-            </p>
-        </section>
-
-        <!-- Breakable constraints -->
-        <section>
-            <h2 data-collapsible>Breakable joints</h2>
-            <div class="stats">
-                <div><span>broken / total</span><b id="stBroken">—</b></div>
+            <!-- ============================== Contacts ============================== -->
+            <div data-pane="contacts" class="k-col" hidden>
+                <div class="k-panel">
+                    <h2>Contacts &amp; impacts</h2>
+                    <div class="k-stats readouts"><span>events/frame <b id="stContacts">0</b></span>
+                        <span>impact <b id="impactVal">0 N·s</b></span></div>
+                    <div class="k-progress" id="impactBar"></div>
+                    <div id="contactParams"></div>
+                    <div id="contactList" class="loglist"></div>
+                    <div class="k-row btns"><button id="btnContactClear">clear log</button></div>
+                    <p class="hint">
+                        An <b>added</b> event carries the solver's own manifold: up to four world-space points,
+                        the contact normal, penetration depth, and an <b>impulse</b> estimate in kg·m/s. A
+                        <em>negative</em> penetration is a speculative contact (Jolt predicted a touch it has
+                        not solved yet) and the list labels those <i>spec</i>. The impulse scales with mass and
+                        closing speed, so it is the natural input for impact sounds, damage and particles; here
+                        it drives sparks, a flash, camera shake and the meter. Turn the drawing off and the
+                        sparks still fire; turn the effects off and the data is still drawn.
+                    </p>
+                </div>
             </div>
-            <label class="row">
-                <span>breaking</span>
-                <input id="breakThresh" type="range" min="60" max="30000" step="20" value="900">
-                <b id="breakThreshVal">900</b>
-            </label>
-            <p class="hint" id="breakHint">—</p>
-            <div class="btnrow">
-                <button id="btnSmash">drop wrecking ball</button>
-                <button id="btnShoot">fire a shell</button>
-            </div>
-            <div class="btnrow">
-                <button id="btnRebuild">rebuild bridge</button>
-                <button id="btnClearRubble" class="danger">clear rubble</button>
-            </div>
-            <div id="breakLog" class="loglist"></div>
-            <p class="hint">
-                Every joint in the bridge carries a <b>breakingImpulse</b> in N·s.
-                When the impulse the solver needed to hold that joint closed
-                exceeds it in one step, Jolt disables the constraint and
-                <b>getBrokenConstraints()</b> reports its handle — a whole
-                destruction system for one number per joint. The hangers go first,
-                their load transfers to their neighbours, and the deck unzips.
-            </p>
-        </section>
+        </aside>
 
-        <!-- Contact manifolds -->
-        <section>
-            <h2 data-collapsible>Contacts &amp; impacts</h2>
-            <div class="stats">
-                <div><span>events/frame</span><b id="stContacts">0</b></div>
-            </div>
-            <div class="meter"><div id="impactBar"></div></div>
-            <div class="meterval">impact force <b id="impactVal">0 N·s</b></div>
-
-            <label class="check"><input id="cEnabled" type="checkbox" checked>
-                <span>process the contact stream</span></label>
-            <label class="check"><input id="cDraw" type="checkbox" checked>
-                <span>draw manifold points + normals</span></label>
-            <label class="check"><input id="cDrawAll" type="checkbox">
-                <span>all bodies (else: the selected one)</span></label>
-            <label class="check"><input id="cEffects" type="checkbox" checked>
-                <span>sparks, flash and camera shake</span></label>
-            <label class="row">
-                <span>fx above</span>
-                <input id="cMinImp" type="range" min="0" max="120" step="1" value="6">
-                <b id="cMinImpVal">6.0</b>
-            </label>
-            <div id="contactList" class="loglist"></div>
-            <div class="btnrow"><button id="btnContactClear">clear log</button></div>
-            <p class="hint">
-                An <b>added</b> event carries the solver's own manifold: up to
-                four world-space points, the contact normal, penetration depth,
-                and an <b>impulse</b> estimate in kg·m/s. A <em>negative</em>
-                penetration is a speculative contact — Jolt predicted a touch it
-                has not solved yet — and the list labels those <i>spec</i>.
-                The impulse is the interesting one: it scales with mass and
-                closing speed, so it is the natural input for impact sounds,
-                damage and particles. Here it drives all three effects above.
-                Turn the drawing off and the sparks still fire; turn the effects
-                off and the data is still drawn. Same stream, read two ways.
-            </p>
-        </section>
-
-        <!-- Material legend -->
-        <section>
-            <h2 data-collapsible data-start="closed">Lanes</h2>
-            <div id="laneLegend"></div>
-        </section>
+        <main class="k-main">
+            <div class="k-viewport"><canvas id="stage"></canvas></div>
+        </main>
     </div>
 
-    <script type="module" src="/app/app.js"></script>
+    <footer class="k-statusbar">
+        <span id="status"></span>
+        <span class="k-stats">
+            <span>fps <b id="stFps">—</b></span>
+            <span>bodies <b id="stBodies">0</b></span>
+            <span>step <b id="stStep">—</b></span>
+            <span>interp <b id="stInterp">off</b></span>
+            <span>ragdolls <b id="stRagdolls">0</b></span>
+            <span>parts <b id="stParts">0</b></span>
+        </span>
+    </footer>
+
+    <script type="module" src="/app/main.js"></script>
 </body>
 </html>

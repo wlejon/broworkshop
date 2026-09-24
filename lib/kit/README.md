@@ -23,6 +23,8 @@ Ported examples: `demos/kws-lab` and `demos/lm-playground` (ML labs),
 | `editor.js` | document editors: tool switcher, undo/redo/save/open commands |
 | `skeletal.js` | clip authoring for skinned meshes: bone frames, keyframe compile, bone overlay |
 | `humanoid.js` | a shared humanoid clip library (idle/walk/run/crouch/...) + the autoRig bone map |
+| `physics3d.js` | Jolt + scene plumbing: body+visual pairs, body groups, rods, the event drain, pick rays, a mouse grabber |
+| `ragdoll.js` | a 12-part humanoid `Physics.createRagdoll` rig: poses as per-joint deltas, FK, blend, error metrics |
 | `test.js` | headless test helpers (assert, wait, click, type, screenshot) |
 
 ## Page skeleton
@@ -94,6 +96,10 @@ Returns `{ status }`.
 - `fpsMeter()` → `tick()` once a frame returns fps
 - `toggleButton(el, { on, labels: [off, on], onChange })` → `on`, `toggle()`
 - `tabs(bar, { onChange })` — `[data-tab=x]` buttons show `[data-pane=x]`
+- `segmented(el, options, { value, onChange, small = true, title })` — a row
+  of exclusive buttons (options: values, `[value, label]` pairs or
+  `{ value: label }`); the chosen one is `.active`, each has `data-value`.
+  Handle: `value` (get/set; setting does not fire onChange), `buttons`
 - `frameLoop(fn(dt, t))` → `pause() resume() step() stop() running`
 
 **params.js**
@@ -126,8 +132,10 @@ and test scripts.
 
 **viewport3d.js** —
 `sceneViewport(canvas, { orbit: { target, dist, fov, near, far }, controls })`
-returns `{ scene, cam, controls, onFrame(fn), reframe(pivot, dist) }` and
-pushes the camera every frame. `orbitControls(canvas, cam, { minDist, maxDist,
+returns `{ canvas, scene, cam, controls, onFrame(fn), onView(fn),
+reframe(pivot, dist, { yaw, pitch }?) }` and pushes the camera every frame;
+`onView(fn)` may adjust the `setCamera` options before each push (camera
+shake). `orbitRotation(yaw, pitch)` builds an `orbit.rot`. `orbitControls(canvas, cam, { minDist, maxDist,
 zoomRate, orbitButton = 2, panButton = 1, pointerLock, onChange, accept })` alone
 wires the standard input: right-drag orbit, middle-drag pan (pointer-locked),
 wheel zoom; left button stays free for picking; `accept(e)` returning false
@@ -136,6 +144,36 @@ leaves a press to the app. Picking math, on the `scene.setCamera` options
 `screenRay(view, w, h, px, py)` → `{ origin, dir }` and
 `worldToScreen(world, view, w, h)` → `{ x, y, depth, behind }`. Camera math
 is `lib/camera.js` (`Camera.*`).
+
+**physics3d.js** — for 3D Jolt demos (global `Physics` + a `bro.scene`):
+- `addBody(scene, body, look)` → `{ tag, node }` (a PhysicsNode + a mesh built
+  from the same shape: box / sphere / capsule / cylinder / compound, or
+  `look.mesh(scene)`; `look.velocity` launches it); `addStatic` → `{ tag, mesh }`;
+  `removeBody(e)`; `shapeMesh(scene, shape, look)`.
+- `new BodyGroup(scene | () => scene)`: `add(body, look, extra)`, `get`,
+  `has`, `size`, `values()`, `remove(tag)`, `clear()` — the registry behind
+  select / clear-all.
+- `rod(scene, color, opts)` → `{ set(a, b), visible, destroy() }`: a
+  cylinder spanning two points (cables, ropes, normals).
+- `physicsEvents()` → `{ onContacts(fn), onBroken(fn), off(fn), pump() }`:
+  the ONE drain of `getContacts` / `getBrokenConstraints` (both drain on
+  read); call `pump()` once a frame and subscribe everything else.
+- `pickRay(vp, lx, ly)` (a sceneViewport + canvas-local pixel) →
+  `{ o, d }`; `raycast(ray, maxDist)` → the closest hit plus the ray;
+  `localPoint(canvas, ev)`.
+- `grabber(vp, { stiffness, damping, rodColor, onRelease })` →
+  `{ begin(hit), end(), setRay(ray), update(dt), grabbed }`: mouse-drag a
+  body with a mass-scaled spring; the app decides what to grab.
+- `q` / `v3` ({x,y,z(,w)} math), `QI`, `quatYTo(dx, dy, dz)`, `toArr`.
+
+**ragdoll.js** — `PARTS` / `PART_NAMES` / `partIndex(name)`; a pose is
+`{ partName: localDelta }` (`{}` = standing). `buildPose(deltas, rootPos,
+rootRot)` → the flat 7-floats-per-part array the ragdoll drives take;
+`lerpPose(a, b, t)`, `posePart`; `poseError(rd, deltas)` (mean joint-angle
+error, radians), `jointResidual(rd)` (worst pivot separation, m).
+`spawnRagdoll(scene, { position, rotation, layer, motor, colors, pose })` →
+`{ rd, nodes, meshes, tags, destroy() }`. Used by demos/physics-playground
+and demos/ragdoll-blender.
 
 **skeletal.js** — authoring clips for `createSkinnedMesh` / the animation
 player (`docs/animation-api.js`, `docs/rigging-api.js`) without per-rig code:
@@ -176,7 +214,9 @@ Used by demos/anim-lab and demos/character-lab (`avatar.js`).
 Test scripts are ES modules compiled in-process by bro-headless, so they
 `import` from `/lib` exactly like app code (the engine mounts `/lib` and
 `/app` as module roots for the driver script too, and shares the page's
-module instances). Top-level `await` works. Put them in `<app>/tests/test_*.js`;
+module instances — except the page's entry module: importing the
+`<script src>` file itself boots the app a second time, see ENGINE-ISSUES.md;
+keep `main.js` a thin boot and import the modules under it). Top-level `await` works. Put them in `<app>/tests/test_*.js`;
 `scripts/validate.sh <app>` runs them with CWD = repo root.
 
 ```js
