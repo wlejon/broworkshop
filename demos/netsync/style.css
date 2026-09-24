@@ -1,0 +1,26 @@
+/* Net Sync Arena — only what the kit does not cover. */
+body { background: #000; overflow: hidden; }
+canvas#stage { display: block; width: 100vw; height: 100vh; }
+
+/* Lobby: a centred card over the arena. */
+#lobby {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: radial-gradient(ellipse at center, #1c2230 0%, #0b0e14 75%);
+}
+#lobby .k-panel { width: 340px; padding: 28px 36px; text-align: center; font-family: var(--k-font-ui); }
+#lobby h1 { margin: 0 0 4px; font-size: 22px; color: #fff; }
+#lobby .k-sub { margin: 0 0 20px; }
+#hostBtn { width: 100%; padding: 10px 0; font-size: 14px; margin-bottom: 16px; }
+#lobby .or { font-size: 11px; margin-bottom: 12px; }
+.joinrow { gap: 8px; flex-wrap: nowrap; }
+#address { flex: 1; min-width: 0; padding: 8px 10px; }
+#joinBtn { padding: 8px 20px; }
+#lobbyStatus { margin-top: 14px; min-height: 16px; }
+
+/* In-game HUD. */
+#hud { min-width: 200px; font-family: var(--k-font-ui); }
+#scores .row { display: flex; align-items: center; gap: 7px; margin: 3px 0; }
+#scores .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+#scores .pts { margin-left: auto; color: #ffd54f; font-weight: 600; }
+#controls { position: absolute; bottom: 12px; left: 12px; font: 11px var(--k-font-ui); }

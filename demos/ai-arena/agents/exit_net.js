@@ -16,7 +16,7 @@
 // iteration-0 special case (an untrained net produces noise, so the first
 // generation pass uses the same classical MCTS every other agent in this
 // app already exercises, for cleaner bootstrap data).
-import { AI } from "/app/ai.js";
+import { AI } from "/app/sim/ai.js";
 import { ActionExec } from "/app/agents/action_exec.js";
 import { Agents } from "/app/agents/registry.js";
 

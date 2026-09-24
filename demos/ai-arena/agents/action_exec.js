@@ -1,7 +1,7 @@
 // agents/action_exec.js — Applies a raw CombatAction {moveDir, attackSlot,
 // abilitySlot} (what DecoupledMcts / TeamMcts / LayeredPlanner / InfoSetMcts
 // all return) to a live agent via the self capability
-// proxy (move_to / cast_ability — see main.js's CAPS list).
+// proxy (move_to / cast_ability — see lab.js's CAPS list).
 //
 // Mirrors brogameagent's own CombatAction::apply() (brogameagent/src/mcts.cpp)
 // so "run the action the search chose" means the same thing here as it does
@@ -42,7 +42,7 @@
 // blocking the others. Calling world.resolveAttack directly sidesteps the
 // capability system entirely so this stays consistent with what the search
 // scored the action against.
-import { AI } from "/app/ai.js";
+import { AI } from "/app/sim/ai.js";
 
 export const ActionExec = (function () {
     "use strict";

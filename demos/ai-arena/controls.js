@@ -1,111 +1,141 @@
-// controls.js — Button handlers + event-driven selector state. Controls
-// read App.state each time a handler fires (not at bind time), so state
-// object swaps from App.rebuild() propagate without rebinding.
-import { App } from "/app/main.js";
-import { Agents } from "/app/agents/registry.js";
-import { Replay } from "/app/replay.js";
-import { Fog } from "/app/fog.js";
+// controls.js — toolbar, system menu and status line over `lab`. Every
+// control and its menu twin call the same lab function, and one sync()
+// repaints both from lab state after any change, so they cannot drift.
+import { boot, $, h, toggleButton } from "/lib/kit/index.js";
+import { Scenarios } from "/app/sim/scenarios.js";
+import { Agents, ExitNet } from "/app/agents/index.js";
+import { Config } from "/app/config.js";
+import { lab } from "/app/lab.js";
 
-export var Controls = {};
-(function () {
-    "use strict";
+const fs = require("fs");
 
-    // Populate the Red/Blue AI selectors from the Agents registry.
-    // Called once at startup; selector options persist across rebuilds.
-    Controls.populateSelectors = function (defaultRed, defaultBlue) {
-        var selRed  = document.getElementById("sel-red-ai");
-        var selBlue = document.getElementById("sel-blue-ai");
-        var defs = Agents.all();
-        [selRed, selBlue].forEach(function (sel) {
-            while (sel.firstChild) sel.removeChild(sel.firstChild);
-            for (var i = 0; i < defs.length; i++) {
-                var opt = document.createElement("option");
-                opt.value = defs[i].id;
-                opt.textContent = defs[i].label;
-                sel.appendChild(opt);
-            }
-        });
-        if (defaultRed)  selRed.value  = defaultRed;
-        if (defaultBlue) selBlue.value = defaultBlue;
+export function startControls() {
+    const { status } = boot({ menu: menu() });
+    const el = {
+        scenario: $("#sel-scenario"), red: $("#sel-red-ai"), blue: $("#sel-blue-ai"),
+        focus: $("#sel-focus"), fogTeam: $("#sel-fog-team"),
+        record: $("#btn-record"), play: $("#btn-play"),
     };
 
-    // Shared by the Reset button and the system menu's New Match item, so
-    // the two can never drift out of sync (each just calls this instead of
-    // duplicating the close-recorder/rebuild/button-reset sequence).
-    Controls.resetMatch = function (onReset) {
-        var s = App.state;
-        if (s && s.recording && s.recorder) s.recorder.close();
-        onReset();
-        var btnPause  = document.getElementById("btn-pause");
-        var btnPlay   = document.getElementById("btn-play");
-        var btnRecord = document.getElementById("btn-record");
-        if (btnPause)  btnPause.textContent = "Pause";
-        if (btnPlay)   { btnPlay.textContent = "Play"; btnPlay.classList.remove("active"); }
-        if (btnRecord) { btnRecord.textContent = "Record"; btnRecord.classList.remove("active"); }
-    };
+    for (const s of Scenarios.ALL) el.scenario.appendChild(h("option", { value: s.id }, s.name));
+    for (const sel of [el.red, el.blue]) {
+        for (const d of Agents.all()) sel.appendChild(h("option", { value: d.id }, d.label));
+    }
 
-    // Shared by the Pause button and the system menu's View > Pause checkbox
-    // — keeps bro.menu's checked state and the button text/class in sync
-    // regardless of which one the user clicked.
-    Controls.togglePause = function () {
-        var s = App.state;
-        s.paused = !s.paused;
-        var btn = document.getElementById("btn-pause");
-        if (btn) btn.textContent = s.paused ? "Resume" : "Pause";
+    const pause = toggleButton("#btn-pause", { labels: ["Pause", "Resume"], onChange: (on) => lab.setPaused(on) });
+    const fogBtn = toggleButton("#btn-fog", { labels: ["Fog off", "Fog on"], onChange: (on) => lab.setFog(on) });
+
+    el.scenario.addEventListener("change", () => lab.setScenario(el.scenario.value));
+    el.red.addEventListener("change", () => lab.setAi(0, el.red.value));
+    el.blue.addEventListener("change", () => lab.setAi(1, el.blue.value));
+    el.focus.addEventListener("change", () => lab.setFocus(+el.focus.value));
+    el.fogTeam.addEventListener("change", () => lab.setFogTeam(+el.fogTeam.value));
+    $("#btn-rewind").addEventListener("click", () => lab.rewind());
+    $("#btn-reset").addEventListener("click", () => lab.reset());
+    el.record.addEventListener("click", () => guard(() => lab.toggleRecord()));
+    el.play.addEventListener("click", () => guard(() => lab.togglePlay()));
+
+    function guard(fn) {
+        try { fn(); } catch (e) { lab.hud.log(e.message || String(e), "err"); }
+    }
+
+    function sync() {
+        const s = lab.state;
+        el.scenario.value = s.scenario.id;
+        el.red.value = s.redAi;
+        el.blue.value = s.blueAi;
+        pause.on = lab.paused;
+        fogBtn.on = lab.fog.enabled;
+        el.fogTeam.value = String(lab.fog.team);
+        el.record.textContent = lab.isRecording() ? "Stop rec" : "Record";
+        el.record.classList.toggle("active", lab.isRecording());
+        el.play.textContent = lab.isPlaying() ? "Stop play" : "Play";
+        el.play.classList.toggle("active", lab.isPlaying());
         if (typeof bro !== "undefined" && bro.menu) {
-            bro.menu.updateItem("view.pause", { checked: s.paused });
+            bro.menu.updateItem("view.pause", { checked: lab.paused });
+            bro.menu.updateItem("view.fog", { checked: lab.fog.enabled });
         }
+        showStatus();
+    }
+    lab.onChange(sync);
+
+    function showStatus() {
+        const s = lab.state;
+        if (lab.isPlaying()) {
+            const p = lab.playback;
+            status.set(p ? "replay " + (p.index + 1) + "/" + p.count + "  t=" + p.frame.elapsed.toFixed(2) + "s" : "replay");
+        } else if (lab.paused) status.warn("paused");
+        else if (lab.isRecording()) status.set("recording  " + s.rec.recorder.frameCount + " frames");
+        else status.set("running  t=" + s.elapsed.toFixed(1) + "s  steps=" + s.simSteps);
+    }
+    let acc = 0;
+    return {
+        sync,
+        /** Per frame (after lab.start): refresh the status line at its cadence. */
+        frame(dt) {
+            acc += dt;
+            if (acc < Config.STATUS_EVERY) return;
+            acc = 0;
+            showStatus();
+        },
     };
+}
 
-    // Shared by the Fog button and the system menu's View > Fog of War
-    // checkbox, same reasoning as togglePause above.
-    Controls.toggleFog = function () {
-        Fog.setEnabled(!Fog.isEnabled());
-        var btn = document.getElementById("btn-fog");
-        if (btn) {
-            btn.textContent = Fog.isEnabled() ? "Fog On" : "Fog Off";
-            btn.classList.toggle("active", Fog.isEnabled());
-        }
-        if (typeof bro !== "undefined" && bro.menu) {
-            bro.menu.updateItem("view.fog", { checked: Fog.isEnabled() });
-        }
+// File / View menus. Handlers call the same lab functions as the toolbar.
+function menu() {
+    const scenarioItems = Scenarios.ALL.map((s) => ({ id: "view.scenario." + s.id, label: s.name }));
+    const handlers = {
+        "file.newMatch": () => lab.reset(),
+        "file.saveReplay": saveReplay,
+        "file.loadReplay": loadReplay,
+        "file.openCheckpoint": openCheckpoint,
+        "view.fog": () => lab.setFog(!lab.fog.enabled),
+        "view.pause": () => lab.togglePause(),
+        "view.resetCamera": () => lab.resetCamera(),
     };
-
-    Controls.bind = function (onReset) {
-        var btnPause  = document.getElementById("btn-pause");
-        var btnRewind = document.getElementById("btn-rewind");
-        var btnRecord = document.getElementById("btn-record");
-        var btnPlay   = document.getElementById("btn-play");
-        var btnReset  = document.getElementById("btn-reset");
-        var selRed    = document.getElementById("sel-red-ai");
-        var selBlue   = document.getElementById("sel-blue-ai");
-        var selFocus  = document.getElementById("sel-focus");
-        var btnFog    = document.getElementById("btn-fog");
-        var selFogTeam = document.getElementById("sel-fog-team");
-
-        btnPause.addEventListener("click", Controls.togglePause);
-        btnRewind.addEventListener("click", function () { Replay.rewind(App.state); });
-        btnRecord.addEventListener("click", function () { Replay.toggleRecord(App.state, btnRecord); });
-        btnPlay.addEventListener("click",   function () { Replay.togglePlay(App.state, btnPlay); });
-        btnReset.addEventListener("click",  function () { Controls.resetMatch(onReset); });
-
-        selRed.addEventListener("change",  function () { App.state.redAi  = selRed.value;  });
-        selBlue.addEventListener("change", function () { App.state.blueAi = selBlue.value; });
-        selFocus.addEventListener("change", function () { App.state.focusId = +selFocus.value; });
-
-        Fog.setTeam(+selFogTeam.value);
-        btnFog.addEventListener("click", Controls.toggleFog);
-        selFogTeam.addEventListener("change", function () { Fog.setTeam(+selFogTeam.value); });
+    for (const s of Scenarios.ALL) handlers["view.scenario." + s.id] = () => lab.setScenario(s);
+    return {
+        file: [
+            { id: "file.newMatch", label: "New Match", accel: "Ctrl+N" },
+            { separator: true },
+            { id: "file.saveReplay", label: "Save Replay As..." },
+            { id: "file.loadReplay", label: "Load Replay..." },
+            { separator: true },
+            { id: "file.openCheckpoint", label: "Open Checkpoint..." },
+        ],
+        view: [
+            { id: "view.scenario", label: "Scenario", items: scenarioItems },
+            { id: "view.fog", label: "Fog of War", checked: false },
+            { id: "view.pause", label: "Pause", checked: false },
+            { separator: true },
+            { id: "view.resetCamera", label: "Reset Camera" },
+        ],
+        handlers,
     };
+}
 
-    // Seed state from the current selector values. Called after rebuild
-    // since the focus dropdown was just regenerated for the new roster.
-    Controls.syncFromDom = function (state) {
-        var r = document.getElementById("sel-red-ai");
-        var b = document.getElementById("sel-blue-ai");
-        var f = document.getElementById("sel-focus");
-        if (r && r.value) state.redAi  = r.value;
-        if (b && b.value) state.blueAi = b.value;
-        if (f && f.value) state.focusId = +f.value;
-    };
-})();
+function saveReplay() {
+    if (lab.isRecording()) lab.toggleRecord();
+    const src = lab.recordingPath();
+    if (!src) { lab.hud.log("no replay to save - record one first"); return; }
+    const dest = showSaveFileDialog("Replay Files|bgar", "arena-replay.bgar");
+    if (!dest) return;
+    fs.copyFileSync(src, dest);
+    lab.hud.log("replay saved -> " + dest, "kill");
+}
+
+function loadReplay() {
+    const files = showOpenFileDialog("Replay Files|bgar");
+    if (!files.length) return;
+    try {
+        if (lab.isPlaying()) lab.togglePlay();
+        lab.togglePlay(files[0]);
+    } catch (e) { lab.hud.log(e.message || String(e), "err"); }
+}
+
+function openCheckpoint() {
+    const files = showOpenFileDialog("Checkpoint Files|bgnn");
+    if (!files.length) return;
+    ExitNet.loadCheckpoint(new Uint8Array(fs.readFileSync(files[0])));
+    lab.hud.log("checkpoint loaded -> " + files[0], "kill");
+}

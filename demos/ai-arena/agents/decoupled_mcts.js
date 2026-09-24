@@ -10,7 +10,7 @@
 // small per-hero OptionMcts searches options_commander uses), and a
 // budgetMs cap bounds each individual search call so a slow frame can't
 // turn into a multi-second stall. Cached joint action applies in between.
-import { AI } from "/app/ai.js";
+import { AI } from "/app/sim/ai.js";
 import { ActionExec } from "/app/agents/action_exec.js";
 import { Agents } from "/app/agents/registry.js";
 

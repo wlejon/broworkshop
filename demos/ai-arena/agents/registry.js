@@ -1,90 +1,73 @@
 // agents/registry.js — Registry of AI algorithms selectable per team.
 //
 // Each entry:
-//   id         short id used in state.redAi / state.blueAi and the selector
-//   label      UI label
-//   think      (self, world) => void — per-agent think called by AgentBinding
-//              at thinkHz. Receives the bound `self` which wraps the agent
-//              plus its capability set.
-//   teamTick?  (state, teamId, dt) => void — optional team-level planner
-//              called each rAF frame before per-agent think. Write plan
-//              state into per-agent memory; think reads it. Use this for
-//              algorithms that need global search (portfolio, influence
-//              maps, etc.) rather than purely reactive per-unit logic.
-//   stats?     (state, teamId) => { label, ... } — optional stats block
-//              for the AGENT STATS panel. Returned keys render verbatim.
+//   id             short id used in state.redAi / state.blueAi and the selectors
+//   label          UI label
+//   think          (self, world) => void — per-agent think called by the
+//                  AgentBinding at thinkHz (or by sim/headless.js). `self` is
+//                  the bound capability proxy around the agent.
+//   teamTick?      (state, teamId, dt) => void — optional team-level planner
+//                  run once per frame before per-agent think. Write plan state
+//                  into per-agent memory; think reads it.
+//   stats?         (state, teamId) => { label, ... } — optional block for the
+//                  AGENT STATS panel; keys render verbatim.
+//   reset?         () => void — drop closure-held state between matches.
+//   homeScenarios? scenario ids the agent is designed for (the evaluators
+//                  pick from these instead of rotating through every scenario).
 //
-// Register at script-load time; main.js / controls.js / loop.js look up
-// by id each frame so hot-swapping via the UI selector works without
-// re-attaching bindings.
-export var Agents = {};
-(function () {
-    "use strict";
+// Register at module-load time. Dispatch looks the id up on every call, so
+// hot-swapping via the Red/Blue selectors needs no re-attaching.
+import { AI } from "/app/sim/ai.js";
 
-    var byId = {};
-    var ordered = [];
+const byId = {};
+const ordered = [];
 
-    Agents.register = function (def) {
-        if (!def || !def.id || typeof def.think !== "function") {
-            console.warn("Agents.register: invalid definition", def);
-            return;
-        }
-        if (byId[def.id]) {
-            console.warn("Agents.register: duplicate id " + def.id);
-            return;
-        }
+function activeFor(state, teamId) {
+    const id = state ? (teamId === 0 ? state.redAi : state.blueAi) : null;
+    return byId[id] || null;
+}
+
+export const Agents = {
+    register(def) {
+        if (!def || !def.id || typeof def.think !== "function") throw new Error("Agents.register: invalid definition");
+        if (byId[def.id]) throw new Error("Agents.register: duplicate id " + def.id);
         byId[def.id] = def;
         ordered.push(def);
-    };
+    },
 
-    Agents.get = function (id) { return byId[id] || null; };
-    Agents.all = function () { return ordered.slice(); };
+    get: (id) => byId[id] || null,
+    all: () => ordered.slice(),
 
-    // Dispatch per team. The AgentBinding calls think via `self`; we route
-    // to the registered agent for the unit's team based on state.redAi /
-    // state.blueAi. Missing/unknown ids fall back to the first registered
-    // agent (scripted baseline) so UI and state are never out of sync.
-    Agents.thinkFor = function (self, world) {
-        var teamId = self.agent.unit.teamId;
-        var state = typeof getState === "function" ? getState() : (typeof window !== "undefined" && window.State ? window.State.current : null);
-        var id = state ? (teamId === 0 ? state.redAi : state.blueAi) : null;
-        var def = byId[id] || ordered[0];
+    /**
+     * The per-agent think the bindings call. Routes to the agent selected for
+     * the unit's team in the current match (AI.shared.state); an unknown id
+     * falls back to the first registered agent (scripted).
+     */
+    thinkFor(self, world) {
+        const def = activeFor(AI.shared.state, self.agent.unit.teamId) || ordered[0];
         if (def) def.think(self, world);
-    };
+    },
 
-    // Called once per rAF frame by main.js. Each team's active agent may
-    // optionally run a team-level planner before per-agent thinks fire.
-    Agents.tickTeams = function (state, dt) {
-        for (var teamId = 0; teamId < 2; teamId++) {
-            var id = teamId === 0 ? state.redAi : state.blueAi;
-            var def = byId[id];
+    /** Team-level planners, once per frame before per-agent think. */
+    tickTeams(state, dt) {
+        for (let teamId = 0; teamId < 2; teamId++) {
+            const def = activeFor(state, teamId);
             if (def && def.teamTick) def.teamTick(state, teamId, dt);
         }
-    };
+    },
 
-    // Reset any closure-held state across all agents. Called between
-    // matches in fast_eval so stale per-agent memories (influence dest
-    // caches, portfolio planner commits, etc.) don't leak into the next
-    // match's early ticks.
-    Agents.resetAll = function () {
-        for (var i = 0; i < ordered.length; i++) {
-            if (ordered[i].reset) ordered[i].reset();
-        }
-    };
+    /** Drop every agent's closure-held state (called on each new match). */
+    resetAll() {
+        for (const def of ordered) if (def.reset) def.reset();
+    },
 
-    // Collect stats from whichever team's agent opts in. Blue takes
-    // priority (since most planners will be blue during A/B); red falls
-    // through if blue's agent doesn't expose stats.
-    Agents.collectStats = function (state) {
-        var teams = [1, 0];
-        for (var i = 0; i < teams.length; i++) {
-            var id = teams[i] === 0 ? state.redAi : state.blueAi;
-            var def = byId[id];
-            if (def && def.stats) {
-                var s = def.stats(state, teams[i]);
-                if (s) return s;
-            }
+    /** Stats from whichever team's agent publishes them; blue first. */
+    collectStats(state) {
+        for (const teamId of [1, 0]) {
+            const def = activeFor(state, teamId);
+            const s = def && def.stats ? def.stats(state, teamId) : null;
+            if (s) return s;
         }
         return null;
-    };
-})();
+    },
+};

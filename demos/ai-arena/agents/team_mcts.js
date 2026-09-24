@@ -6,7 +6,7 @@
 // bounds each individual search call. Best on a small roster
 // (Scenarios.SQUAD_3V3 / SQUAD_4V4) — searching all 8 heroes of the
 // default scenario would still be slow even with these caps.
-import { AI } from "/app/ai.js";
+import { AI } from "/app/sim/ai.js";
 import { ActionExec } from "/app/agents/action_exec.js";
 import { Agents } from "/app/agents/registry.js";
 

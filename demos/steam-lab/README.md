@@ -18,8 +18,9 @@ macOS, Linux).
 # windowed
 ./build/Release/bro.exe ../broworkshop/demos/steam-lab
 
-# headless acceptance test (surface + inert paths; live checks if Steam is up)
-./build/Release/bro-headless.exe ../broworkshop/demos/steam-lab tests/test_smoke.js
+# headless tests, from broworkshop: tests/test_smoke.js (binding surface +
+# inert paths; live checks if Steam is up) and tests/test_ui.js (the lab's UI)
+scripts/validate.sh demos/steam-lab
 ```
 
 ## Dev setup (to get `available === true`)

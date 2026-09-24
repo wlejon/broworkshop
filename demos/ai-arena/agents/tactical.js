@@ -34,8 +34,8 @@
 //     cell is simply "a cell where LOS to target is blocked", which is
 //     only true when an obstacle sits between them.
 //   - A* pathfinding (via agent.setTarget) handles the cover→fire hop.
-import { AI } from "/app/ai.js";
-import { Arena } from "/app/arena.js";
+import { AI } from "/app/sim/ai.js";
+import { Arena } from "/app/sim/arena.js";
 import { Agents } from "/app/agents/registry.js";
 
 (function () {
@@ -67,12 +67,9 @@ import { Agents } from "/app/agents/registry.js";
     var CLAIM_RADIUS      = 4.0;
     var CLAIM_WEIGHT      = 3;
 
-    var PSPEED            = 18;           // basic projectile speed (matches ai.js)
-
     // ──── Shared helpers ───────────────────────────────────────────────
     function d2(ax, az, bx, bz) { var dx=ax-bx, dz=az-bz; return dx*dx + dz*dz; }
     function dist(ax, az, bx, bz) { return Math.sqrt(d2(ax, az, bx, bz)); }
-    function clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
     function hasLOS(ax, az, bx, bz) {
         return bro.ai.game.hasLineOfSight(ax, az, bx, bz, AI.shared.obstacles);
     }
@@ -196,8 +193,8 @@ import { Agents } from "/app/agents/registry.js";
         var bestFire = null, bestFireScore = -Infinity;
         for (var dx = -SEARCH_RADIUS; dx <= SEARCH_RADIUS + 1e-6; dx += SEARCH_STEP) {
             for (var dz = -SEARCH_RADIUS; dz <= SEARCH_RADIUS + 1e-6; dz += SEARCH_STEP) {
-                var fx = clamp(cx0 + dx, -19, 19);
-                var fz = clamp(cz0 + dz, -19, 19);
+                var fx = Arena.clampX(cx0 + dx);
+                var fz = Arena.clampZ(cz0 + dz);
                 if (!nav.isWalkable(fx, fz)) continue;
                 var ddT = d2(fx, fz, tx, tz);
                 if (ddT < minR2 || ddT > maxR2) continue;
@@ -233,8 +230,8 @@ import { Agents } from "/app/agents/registry.js";
         for (var r = COVER_MIN_R; r <= COVER_MAX_R + 1e-6; r += 0.5) {
             for (var a = 0; a < COVER_ANGLES; a++) {
                 var theta = a * (Math.PI * 2) / COVER_ANGLES;
-                var cx2 = clamp(bestFire.x + Math.cos(theta) * r, -19, 19);
-                var cz2 = clamp(bestFire.z + Math.sin(theta) * r, -19, 19);
+                var cx2 = Arena.clampX(bestFire.x + Math.cos(theta) * r);
+                var cz2 = Arena.clampZ(bestFire.z + Math.sin(theta) * r);
                 if (!nav.isWalkable(cx2, cz2)) continue;
                 if (hasLOS(cx2, cz2, tx, tz)) continue;
                 var exp = 0;
@@ -323,15 +320,7 @@ import { Agents } from "/app/agents/registry.js";
         if (!BotAim.canFireAt(m.aim, agent.x, 0, agent.z, target.x, 0, target.z)) return false;
 
         var f = BotAim.forward(m.aim);
-        world.spawnProjectile({
-            ownerId: u.id, teamId: u.teamId,
-            x: agent.x + f.x * (u.radius + 0.4),
-            z: agent.z + f.z * (u.radius + 0.4),
-            vx: f.x * PSPEED, vz: f.z * PSPEED,
-            speed: PSPEED, radius: 0.22,
-            damage: 9, remainingLife: 1.2,
-            kind: "physical", mode: "single",
-        });
+        Arena.spawnBasicShot(world, agent, f.x, f.z);
         m.shootCd = 1.0 / Math.max(0.1, u.attacksPerSec);
         return true;
     }
@@ -435,9 +424,7 @@ import { Agents } from "/app/agents/registry.js";
 
         var m = getTMem(u.id);
         var simT = AI.shared.simT;
-        var prevT = m.lastThinkT < 0 ? simT : m.lastThinkT;
-        var dt = Math.max(0.001, Math.min(0.2, simT - prevT));
-        m.lastThinkT = simT;
+        var dt = AI.thinkDt(m);
         if (m.shootCd > 0) m.shootCd -= dt;
         for (var cd = 0; cd < m.abCd.length; cd++) {
             if (m.abCd[cd] > 0) m.abCd[cd] -= dt;

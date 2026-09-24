@@ -26,7 +26,7 @@
 // start() runs synchronously within the same AgentBinding::step call before
 // any other agent's think() executes, so it's always still correct when
 // read.
-import { AI } from "/app/ai.js";
+import { AI } from "/app/sim/ai.js";
 import { Agents } from "/app/agents/registry.js";
 
 var BATTLE_CRY_COOLDOWN = 8;

@@ -52,8 +52,8 @@
 //
 // Return value: nothing. The robot calls self.moveTo / self.hold directly.
 
-import { AI } from "/app/ai.js";
-import { Arena } from "/app/arena.js";
+import { AI } from "/app/sim/ai.js";
+import { Arena } from "/app/sim/arena.js";
 
 export const Bot = (function () {
     "use strict";
@@ -62,7 +62,6 @@ export const Bot = (function () {
         var dx = x1 - x2, dz = z1 - z2;
         return dx * dx + dz * dz;
     }
-    function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
 
     // ── Target selection ──────────────────────────────────────────────────
     //
@@ -167,16 +166,7 @@ export const Bot = (function () {
             target.x, 0, target.z)) return;
 
         var f = BotAim.forward(mem.aim);
-        var PSPEED = 18;
-        ctx.world.spawnProjectile({
-            ownerId: u.id, teamId: u.teamId,
-            x: agent.x + f.x * (u.radius + 0.4),
-            z: agent.z + f.z * (u.radius + 0.4),
-            vx: f.x * PSPEED, vz: f.z * PSPEED,
-            speed: PSPEED, radius: 0.22,
-            damage: 9, remainingLife: 1.2,
-            kind: "physical", mode: "single",
-        });
+        Arena.spawnBasicShot(ctx.world, agent, f.x, f.z);
         mem.shootCd = 1.0 / Math.max(0.1, u.attacksPerSec || 1.4);
     }
 
@@ -349,7 +339,7 @@ export const Bot = (function () {
             var fw = AI.findWalkableNear(ctx.nav, fx, fz, 3);
             if (fw) { fx = fw.x; fz = fw.z; }
         }
-        fx = clamp(fx, -19, 19); fz = clamp(fz, -19, 19);
+        fx = Arena.clampX(fx); fz = Arena.clampZ(fz);
         self.moveTo(fx, fz);
     }
 
@@ -576,14 +566,10 @@ export const Bot = (function () {
             enemies: AI.shared.teams[1 - myTeam] || [],
             teammates: AI.shared.teams[myTeam] || [],
             teamFocus: AI.shared.teamFocus[myTeam] || null,
-            abilityCooldowns: (Arena.scenario && Arena.scenario.abilities)
-                ? Arena.scenario.abilities.reduce(function (acc, ab) {
-                    acc[ab.slot] = ab.cooldown; return acc;
-                  }, {})
-                : {},
+            abilityCooldowns: Arena.cooldownBySlot,
         };
 
-        // Decay ability cooldown mirror same way ai.js does.
+        // Decay the ability cooldown mirror.
         if (mem.abCd) {
             for (var k = 0; k < mem.abCd.length; k++) {
                 if (mem.abCd[k] > 0) mem.abCd[k] -= dt;

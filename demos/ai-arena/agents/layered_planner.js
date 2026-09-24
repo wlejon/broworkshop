@@ -7,7 +7,7 @@
 // calling it every render frame, same reasoning as team_mcts.js. budgetMs
 // caps bound both the tactic and fine searches individually. Best on a
 // small roster (Scenarios.SQUAD_3V3 / SQUAD_4V4).
-import { AI } from "/app/ai.js";
+import { AI } from "/app/sim/ai.js";
 import { ActionExec } from "/app/agents/action_exec.js";
 import { Agents } from "/app/agents/registry.js";
 

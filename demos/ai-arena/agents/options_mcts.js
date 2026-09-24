@@ -20,9 +20,9 @@
 // To tune: adjust iterations / budgetMs in the cfg below, or swap the
 // evaluator to "teamAdvantage" via Commander (see options_commander.js).
 
-import { TacticalOptions } from "/app/options/tactical_options.js";
-import { AI } from "/app/ai.js";
-import { Bot } from "/app/bot.js";
+import { TacticalOptions } from "/app/agents/tactical_options.js";
+import { AI } from "/app/sim/ai.js";
+import { Bot } from "/app/sim/bot.js";
 import { OptionsShared } from "/app/agents/options_shared.js";
 import { Agents } from "/app/agents/registry.js";
 
@@ -94,10 +94,7 @@ import { Agents } from "/app/agents/registry.js";
         var mcts = mctsFor(u.id);
 
         // dt for Bot.tick (BotAim / cd decay / queue bookkeeping).
-        var simT = AI.shared.simT;
-        var prevT = mem.lastThinkT < 0 ? simT : mem.lastThinkT;
-        var dt = Math.max(0.001, Math.min(0.2, simT - prevT));
-        mem.lastThinkT = simT;
+        var dt = AI.thinkDt(mem);
 
         // Preempt: if the currently-committed option's should_terminate
         // now fires (HP dropped, target lost, drifted out of the kite
@@ -142,11 +139,6 @@ import { Agents } from "/app/agents/registry.js";
 
         Bot.tick(self, dt);
     }
-
-    // Book-keeping hook: when a match resets, stats still want per-hero
-    // commitment counts. We derive from Bot.current(self) now, but the
-    // registered stats() runs at team level — easier to keep a mem field.
-    // (Left as a TODO; stats still reads memByHero below.)
 
     Agents.register({
         id: "options_mcts",

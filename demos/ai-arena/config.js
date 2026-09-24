@@ -1,45 +1,20 @@
-// config.js — sim + presentation constants (hz, cadences, dims).
-// Central knob file so tuning a cadence doesn't require hunting through the
-// sim loop or render module.
-export const Config = {};
-(function () {
-    "use strict";
+// config.js — presentation and bookkeeping constants for the live app.
+// (The fixed sim step lives in sim/match.js as SIM_DT.)
+export const Config = {
+    MAX_STEPS_PER_FRAME: 8,   // attachAIWorld catch-up cap
 
-    // Arena canvas size in pixels. Render maps Arena.BOUNDS → this rect.
-    Config.ARENA_W = 700;
-    Config.ARENA_H = 700;
+    // HUD panel cadences, seconds between updates. DOM mutations are the
+    // expensive part; each panel is throttled independently of the sim.
+    ROSTER_EVERY: 0.2,
+    OBS_EVERY:    0.1,
+    REWARD_EVERY: 0.25,
+    STATUS_EVERY: 0.25,
 
-    // Fixed-step sim.
-    Config.SIM_STEP = 1 / 60;         // 60 Hz sim
-    Config.MAX_STEPS_PER_FRAME = 8;   // catch-up cap
-    Config.MAX_SIM_ACCUM = 0.25;      // clamp accumulated lag
+    // Snapshot ring for the Rewind button.
+    SNAPSHOT_INTERVAL: 1.0,
+    SNAPSHOT_KEEP: 5,
+    REWIND_SECONDS: 1.5,
 
-    // HUD panel update cadences (seconds). DOM mutations are expensive;
-    // each panel is throttled independently from the sim tick.
-    Config.ROSTER_HZ = 0.2;
-    Config.OBS_HZ    = 0.1;
-    Config.REWARD_HZ = 0.25;
-    Config.STATUS_HZ = 0.25;
-
-    // Snapshot ring buffer (for rewind button).
-    Config.SNAPSHOT_INTERVAL = 1.0;
-    Config.SNAPSHOT_KEEP = 5;
-    Config.REWIND_SECONDS = 1.5;
-
-    // DAMAGE LOG cap (lines).
-    Config.LOG_LINES = 60;
-
-    // Reward chart history length (samples).
-    Config.REWARD_HISTORY = 200;
-
-    // Recording output directory. Recorder.open() does a raw native fopen —
-    // resolved against the process's actual OS working directory, which per
-    // the documented bro/bro-headless invocation (run from the bro repo,
-    // app path passed as an argument) is NOT this app's own directory. Build
-    // an absolute path from BRO_APP_DIR (set by the engine to this app's
-    // real directory, src/main.cpp:328) so recording works regardless of
-    // where the process was launched from. Previously a bare relative
-    // "apps/ai-arena/replays/" (stale pre-reorg path, and CWD-relative even
-    // if corrected) made every recording silently fail to open.
-    Config.REPLAY_DIR = (process.env.BRO_APP_DIR || ".") + "/replays/";
-})();
+    LOG_LINES: 60,            // damage log cap
+    REWARD_HISTORY: 200,      // reward chart samples
+};

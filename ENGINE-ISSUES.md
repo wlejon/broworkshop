@@ -189,6 +189,21 @@ does not charge a page error to the server script). games/fps now tolerates
 a missing scene context at boot so its server runs; any app with a server
 and a page that assumes a renderer at load is exposed.
 
+### Double-clicking a canvas selects nearby `pointer-events: none` text (2026-09-24)
+A double-click on a `<canvas>` selects a word from some other element's
+text: `Engine::handleMouseDown` (`src/engine/input_mouse.cpp`) runs
+`layout::hitTestText(docX, docY)` whatever the press target is, and that
+text hit test finds text that is not under the pointer and that has
+`pointer-events: none`. In games/wordspire, double-clicking a tile (which
+submits the word) selects the toast `#action-text` ("CAT  +15", a
+`pointer-events: none` overlay 100px lower), and the toast then shows the
+blue selection box. Repro: in a wordspire classic run, `click(x, y)` twice
+on a tile, then `String(getSelection())` is the toast text; Chromium gives
+"". Expected: a press whose target is a replaced element (canvas, img,
+video) starts no text selection, and text hit testing skips
+`pointer-events: none` boxes. Any canvas game with a DOM overlay/toast is
+exposed; `user-select: none` on the canvas would hide it.
+
 ## Notes (not bugs)
 
 - `<select>.value` round-trips correctly now (set programmatically, and

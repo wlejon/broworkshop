@@ -10,10 +10,10 @@
 // and threat tracking), AI.shared populated once per frame by
 // AI.updateShared, and pure utility functions the planners reuse.
 //
-// AI.recordDamage is called from loop.js / fast_eval.js when a DamageEvent
+// AI.recordDamage is called from lab.js / sim/headless.js when a DamageEvent
 // fires so a target's mem.threat / mem.threatSourceId / mem.lastHitT latch
 // correctly — scripted's "seek cover under fire" branch reads those.
-import { Arena } from "/app/arena.js";
+import { Arena } from "/app/sim/arena.js";
 
 export const AI = {};
 (function () {
@@ -140,8 +140,8 @@ export const AI = {};
         for (var ri = 0; ri < rings.length; ri++) {
             var r = rings[ri];
             for (var ang = 0; ang < Math.PI * 2; ang += Math.PI / 6) {
-                var cx = clamp(cx0 + Math.cos(ang) * r, -19, 19);
-                var cz = clamp(cz0 + Math.sin(ang) * r, -19, 19);
+                var cx = Arena.clampX(cx0 + Math.cos(ang) * r);
+                var cz = Arena.clampZ(cz0 + Math.sin(ang) * r);
                 if (!nav.isWalkable(cx, cz)) continue;
                 if (claimed) {
                     var tooClose = false;
@@ -186,13 +186,24 @@ export const AI = {};
                 z += (ddz / dd) * push;
             }
         }
-        return { x: clamp(x, -19, 19), z: clamp(z, -19, 19) };
+        return { x: Arena.clampX(x), z: Arena.clampZ(z) };
+    };
+
+    // Seconds since this memory's previous think (clamped to 1 ms..200 ms);
+    // the first call answers 1 ms. `mem.lastThinkT` holds the bookkeeping.
+    AI.thinkDt = function (mem) {
+        var simT = AI.shared.simT;
+        var prev = (mem.lastThinkT === undefined || mem.lastThinkT < 0) ? simT : mem.lastThinkT;
+        mem.lastThinkT = simT;
+        return clamp(simT - prev, 0.001, 0.2);
     };
 
     // ── Shared per-frame state ───────────────────────────────────────────
 
+    // state: the match being simulated (Agents.thinkFor reads its
+    // redAi / blueAi to route each think).
     AI.shared = {
-        world: null, nav: null, obstacles: null,
+        state: null, world: null, nav: null, obstacles: null,
         teams: [[], []], teamFocus: [null, null], simT: 0, byId: null,
     };
 
@@ -213,8 +224,17 @@ export const AI = {};
         return AI.tuningByTeam[teamId] || AI.DEFAULT_TUNING;
     };
 
+    // Forget everything about the previous match (memory, BotAim, threat
+    // latches, cover claims, tunings).
+    AI.reset = function () {
+        AI.memory = {};
+        AI.claimedCover.length = 0;
+        AI.tuningByTeam = [null, null];
+    };
+
     AI.updateShared = function (state) {
         AI.resetClaimedCover();
+        AI.shared.state = state;
         AI.shared.world = state.world;
         AI.shared.nav = state.nav;
         AI.shared.obstacles = Arena.OBSTACLES;

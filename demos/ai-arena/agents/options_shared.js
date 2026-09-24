@@ -15,7 +15,8 @@
 //      projectile spawn runs every tick regardless of option), fixing the
 //      15× basic-fire deficit that options had vs scripted.
 
-import { AI } from "/app/ai.js";
+import { AI } from "/app/sim/ai.js";
+import { Bot } from "/app/sim/bot.js";
 
 export const OptionsShared = (function () {
     "use strict";
@@ -153,27 +154,16 @@ export const OptionsShared = (function () {
         },
     };
 
+    // Unknown option (e.g. search returned null because no option could
+    // initiate): the robot's default engage command.
     function robotCommandFor(optionName) {
         var builder = COMMAND_BUILDERS[optionName];
-        if (!builder) return defaultCommand();
-        return builder();
-    }
-
-    // Fallback when no option matches (e.g. search returns null because no
-    // option can_initiate). Matches scripted's default engage behavior:
-    // pick nearest with LOS, fire, strafe in range, advance if out.
-    function defaultCommand() {
-        return {
-            target: { policy: "nearest", requireLOS: true },
-            fireBasic: true,
-            move: { mode: "advance", kiteBand: [0.45, 0.85], space: true },
-        };
+        return builder ? builder() : Bot.defaultCommand();
     }
 
     return {
         viewAgent: viewAgent,
         viewWorld: viewWorld,
         robotCommandFor: robotCommandFor,
-        defaultCommand: defaultCommand,
     };
 })();

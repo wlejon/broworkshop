@@ -18,9 +18,9 @@
 // One OptionMcts per hero (per-role option set). Commander triggers
 // re-search only when a hero's committed option terminates.
 
-import { TacticalOptions } from "/app/options/tactical_options.js";
-import { AI } from "/app/ai.js";
-import { Bot } from "/app/bot.js";
+import { TacticalOptions } from "/app/agents/tactical_options.js";
+import { AI } from "/app/sim/ai.js";
+import { Bot } from "/app/sim/bot.js";
 import { OptionsShared } from "/app/agents/options_shared.js";
 import { Agents } from "/app/agents/registry.js";
 
@@ -179,7 +179,7 @@ import { Agents } from "/app/agents/registry.js";
         var teamState = state && state[u.teamId];
         var name = teamState ? committedOptionName(teamState, u.id) : null;
 
-        var hm = heroMem[u.id] || (heroMem[u.id] = { lastT: -1, lastOption: null });
+        var hm = heroMem[u.id] || (heroMem[u.id] = { lastThinkT: -1, lastOption: null });
 
         // Queue maintenance: when Commander swings to a new option (or
         // assigns one after a re-plan), drop whatever the robot was doing
@@ -197,12 +197,7 @@ import { Agents } from "/app/agents/registry.js";
             hm.lastOption = null;
         }
 
-        var simT = AI.shared.simT;
-        var prevT = hm.lastT < 0 ? simT : hm.lastT;
-        var dt = Math.max(0.001, Math.min(0.2, simT - prevT));
-        hm.lastT = simT;
-
-        Bot.tick(self, dt);
+        Bot.tick(self, AI.thinkDt(hm));
     }
 
     // Look up the Commander's currently-committed option name for a given
@@ -221,16 +216,6 @@ import { Agents } from "/app/agents/registry.js";
             }
         }
         return null;
-    }
-
-    function heroTeam(heroId) {
-        var teams = AI.shared.teams || [[], []];
-        for (var t = 0; t < teams.length; t++) {
-            for (var i = 0; i < teams[t].length; i++) {
-                if (teams[t][i].unit.id === heroId) return t;
-            }
-        }
-        return 0;
     }
 
     Agents.register({

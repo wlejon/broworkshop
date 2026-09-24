@@ -15,8 +15,9 @@
 // every few seconds — clearly random to the eye, and clearly NOT bundled
 // (you'll see the bot aim east while walking north while firing south).
 
-import { Bot } from "/app/bot.js";
-import { AI } from "/app/ai.js";
+import { Bot } from "/app/sim/bot.js";
+import { AI } from "/app/sim/ai.js";
+import { Arena } from "/app/sim/arena.js";
 import { Agents } from "/app/agents/registry.js";
 
 (function () {
@@ -35,9 +36,9 @@ import { Agents } from "/app/agents/registry.js";
         var mode = pick(MOVE_MODES);
         var p = { mode: mode, space: true, kiteBand: [0.45, 0.85] };
         if (mode === "moveTo") {
-            // Arena half-extent ≈ 19 (matches Bot.handleMove's clamp).
-            p.x = -18 + Math.random() * 36;
-            p.z = -18 + Math.random() * 36;
+            var B = Arena.BOUNDS;
+            p.x = B.minX + 2 + Math.random() * (B.maxX - B.minX - 4);
+            p.z = B.minZ + 2 + Math.random() * (B.maxZ - B.minZ - 4);
         }
         return p;
     }
@@ -80,11 +81,7 @@ import { Agents } from "/app/agents/registry.js";
         think: function (self /*, world*/) {
             var u = self.agent.unit;
             if (!u.alive) { self.hold(0.5); return; }
-            var mem = AI.getMem(u.id);
-            var simT = AI.shared.simT;
-            var prevT = mem.lastThinkT < 0 ? simT : mem.lastThinkT;
-            var dt = Math.max(0.001, Math.min(0.2, simT - prevT));
-            mem.lastThinkT = simT;
+            var dt = AI.thinkDt(AI.getMem(u.id));
 
             topUpChannel(self, "move", randomMove);
             topUpChannel(self, "aim",  randomAim);

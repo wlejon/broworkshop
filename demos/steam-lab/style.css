@@ -1,0 +1,55 @@
+/* Steam Lab — only what the kit does not cover. */
+.mono { color: #8be0ae; }
+.hint { color: var(--k-dim); font-size: 11px; }
+.k-panel > h2 .tag { color: var(--k-dim); font-weight: 400; text-transform: none; letter-spacing: 0; margin-left: 8px; }
+.k-panel { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+.k-panel input[type=text] { width: 150px; }
+.k-panel input[type=number] { width: 64px; }
+
+/* Four panels in a 2x2 grid, the event log across the bottom. */
+.grid {
+    flex: 1; min-height: 0; display: grid; gap: 10px;
+    grid-template-columns: 1fr 1fr; grid-template-rows: auto auto minmax(120px, 1fr);
+}
+.grid > .events { grid-column: 1 / -1; }
+.events > .k-log { padding: 0; font-size: 11px; }
+.events > .k-log > div { display: flex; }
+.events > .k-log > div > .t { flex: none; }
+.k-log .k { color: #6fb3ff; margin-right: 6px; }
+.k-log .warn .k { color: var(--k-warn); }
+.k-log .err .k { color: var(--k-err); }
+
+/* Availability pill + pump heartbeat. */
+.pill {
+    display: inline-flex; align-items: center; gap: 7px;
+    border-radius: 12px; padding: 3px 11px; font-weight: 600;
+    border: 1px solid var(--k-border-hi); background: var(--k-input);
+}
+.pill .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--k-dim); }
+.pill.up   { border-color: var(--k-on-border); color: #8be0ae; }
+.pill.up   .dot { background: #54d68a; box-shadow: 0 0 6px #54d68a; }
+.pill.down { border-color: #7a3a3a; color: #ff9a9a; }
+.pill.down .dot { background: #ff6b6b; }
+.heart { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--k-border-hi); }
+.heart.beat { background: #54d68a; box-shadow: 0 0 6px #54d68a; }
+#overlay.open { color: #8be0ae; }
+
+/* Friends. */
+.friend { display: flex; align-items: center; gap: 9px; padding: 4px 6px; border-radius: 6px; cursor: pointer; }
+.friend:hover { background: var(--k-input); }
+.friend canvas { width: 28px; height: 28px; border-radius: 5px; background: var(--k-btn); }
+.friend .nm { flex: 1; }
+.sdot { width: 8px; height: 8px; border-radius: 50%; background: var(--k-dim); }
+.sdot.online { background: #54d68a; }
+.sdot.busy   { background: #d6a154; }
+.sdot.away   { background: #d6a154; opacity: .6; }
+.sdot.play   { background: #6fb3ff; }
+
+/* Lobby. */
+.member { display: flex; gap: 8px; align-items: center; padding: 2px 0; }
+.member .own { color: #d6a154; font-size: 10px; }
+.kv { line-height: 1.7; }
+.kv .k { color: var(--k-dim); display: inline-block; min-width: 96px; }
+
+#voiceMeter { flex: none; }
+#voiceMeter > div { background: linear-gradient(90deg, #3c8c63, #54d68a); transition: width .06s linear; }

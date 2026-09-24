@@ -16,12 +16,12 @@
 // planner quality, not execution quality.
 //
 // The AI.* helpers (pickTargetFor, findCover, spaceFromTeammates,
-// chooseTeamFocus) remain in ai.js and are reused here. AI.updateShared
-// is still called each frame from loop.js so the shared view of the world
-// is populated before any agent thinks.
+// chooseTeamFocus) remain in sim/ai.js and are reused here. AI.updateShared
+// is called each frame (lab.js) so the shared view of the world is populated
+// before any agent thinks.
 
-import { AI } from "/app/ai.js";
-import { Bot } from "/app/bot.js";
+import { AI } from "/app/sim/ai.js";
+import { Bot } from "/app/sim/bot.js";
 import { Agents } from "/app/agents/registry.js";
 
 (function () {
@@ -221,11 +221,7 @@ import { Agents } from "/app/agents/registry.js";
         think: function (self /*, world*/) {
             var u = self.agent.unit;
             if (!u.alive) { self.hold(0.5); return; }
-            var mem = AI.getMem(u.id);
-            var simT = AI.shared.simT;
-            var prevT = mem.lastThinkT < 0 ? simT : mem.lastThinkT;
-            var dt = Math.max(0.001, Math.min(0.2, simT - prevT));
-            mem.lastThinkT = simT;
+            var dt = AI.thinkDt(AI.getMem(u.id));
 
             // Scripted is fully reactive: replace the queue every tick
             // with the command for the current state. Short duration (a

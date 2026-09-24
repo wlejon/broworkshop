@@ -1,100 +1,104 @@
-// replay.js — Record + playback state machine. Owned by the Record/Play
-// buttons in controls.js; main.js consults state.replayPlaying each frame
-// and delegates to Replay.drawFrame when true.
-import { UI } from "/app/ui.js";
+// replay.js — rewind snapshots, .bgar recording and playback.
+//
+// Recording writes one frame per rendered frame (bro.ai.game.createRecorder)
+// into <app>/replays/. Playback reads a finished file with
+// createReplayReader and walks it by each frame's recorded `elapsed`, so it
+// plays at the speed it was recorded whatever the frame rate. All state
+// lives on the match state (state.rec) so a new match starts clean.
 import { Config } from "/app/config.js";
-import { Scene3D } from "/app/scene_setup.js";
+import { SIM_DT } from "/app/sim/match.js";
 
-export const Replay = {};
-(function () {
-    "use strict";
+function rec(state) {
+    return state.rec || (state.rec = {
+        recorder: null, recording: false, path: null,
+        reader: null, playing: false, t: 0, frame: 0,
+        snapshots: [], snapshotAccum: 0,
+    });
+}
 
-    // Shared by the manual Stop-Play click and the auto-stop-at-end-of-file
-    // path in drawFrame — both need to reset the same button/state.
-    Replay.stopPlaying = function (state, msg) {
-        state.replayPlaying = false;
-        state.replayReader = null;
-        var btn = document.getElementById("btn-play");
-        if (btn) { btn.textContent = "Play"; btn.classList.remove("active"); }
-        UI.log(msg || "replay stopped");
-    };
+export function isRecording(state) { return !!(state && state.rec && state.rec.recording); }
+export function isPlaying(state) { return !!(state && state.rec && state.rec.playing); }
+export function recordingPath(state) { return state && state.rec ? state.rec.path : null; }
 
-    // Advances playback by dt (real wall-clock frame time — playback runs at
-    // the recording's fixed step rate regardless of how the match itself was
-    // paced) and pushes the resulting frame onto the scene via
-    // Scene3D.renderReplayFrame. state.byId still describes the current
-    // roster (teamId/maxHp don't change across a session), so it's reused
-    // as the static-data lookup the replay frame itself doesn't carry.
-    Replay.drawFrame = function (state, canvas, dt) {
-        var rr = state.replayReader;
-        state.replayElapsed += dt;
-        var idx = Math.floor(state.replayElapsed / Config.SIM_STEP);
-        if (idx >= rr.frameCount) {
-            idx = rr.frameCount - 1;
-            state.replayFrame = idx;
-            var f0 = rr.frame(idx);
-            if (f0) Scene3D.renderReplayFrame(f0, state.byId);
-            Replay.stopPlaying(state, "replay finished (" + rr.frameCount + " frames)");
-            return;
-        }
-        state.replayFrame = idx;
-        var f = rr.frame(idx);
-        if (!f) { Replay.stopPlaying(state, "replay read failed at frame " + idx); return; }
-        Scene3D.renderReplayFrame(f, state.byId);
-        UI.setStatus("replay " + (idx + 1) + "/" + rr.frameCount +
-                      "  t=" + f.elapsed.toFixed(2) + "s");
-    };
+/** Per live frame: keep the rewind ring. */
+export function snapshotTick(state, dt) {
+    const r = rec(state);
+    r.snapshotAccum += dt;
+    if (r.snapshotAccum < Config.SNAPSHOT_INTERVAL) return;
+    r.snapshotAccum = 0;
+    r.snapshots.push({ t: state.elapsed, snap: state.world.snapshot() });
+    while (r.snapshots.length > Config.SNAPSHOT_KEEP) r.snapshots.shift();
+}
 
-    Replay.toggleRecord = function (state, btn) {
-        if (!state.recording) {
-            state.recorder = bro.ai.game.createRecorder();
-            var path = Config.REPLAY_DIR + "arena-" + Date.now() + ".bgar";
-            var ok = state.recorder.open(path, 1, Date.now(), Config.SIM_STEP);
-            if (!ok) { UI.log("recorder open failed: " + path); return; }
-            state.recorder.writeRoster(state.world);
-            state.recording = true;
-            btn.textContent = "Stop Rec";
-            btn.classList.add("active");
-            state._recordingPath = path;
-            UI.log("recording -> " + path, "log-kill");
-        } else {
-            state.recorder.close();
-            state.recording = false;
-            btn.textContent = "Record";
-            btn.classList.remove("active");
-            UI.log("recording stopped (" + state.recorder.frameCount + " frames)", "log-kill");
-        }
-    };
+/**
+ * Restore the newest snapshot at least REWIND_SECONDS old (else the oldest).
+ * Returns the snapshot time, or null when there is none yet.
+ */
+export function rewind(state) {
+    const snaps = rec(state).snapshots;
+    if (!snaps.length) return null;
+    let target = snaps[0];
+    for (const s of snaps) if (state.elapsed - s.t >= Config.REWIND_SECONDS) target = s;
+    state.world.restore(target.snap);
+    return target.t;
+}
 
-    Replay.togglePlay = function (state, btn) {
-        if (state.replayPlaying) {
-            Replay.stopPlaying(state, "replay stopped");
-            return;
-        }
-        var path = state._recordingPath;
-        if (!path) { UI.log("no replay to play - record one first"); return; }
-        var rr = bro.ai.game.createReplayReader();
-        var ok = rr.open(path);
-        if (!ok) { UI.log("replay open failed: " + rr.errorMessage); return; }
-        state.replayReader = rr;
-        state.replayFrame = 0;
-        state.replayElapsed = 0;
-        state.replayPlaying = true;
-        btn.textContent = "Stop Play";
-        btn.classList.add("active");
-        UI.log("playing replay - " + rr.frameCount + " frames", "log-kill");
-    };
+/** Open a new recording in <app>/replays/; returns its path. Throws on failure. */
+export function startRecording(state) {
+    const r = rec(state);
+    const path = bro.resolvePath("replays/arena-" + Date.now() + ".bgar");
+    const recorder = bro.ai.game.createRecorder();
+    if (!recorder.open(path, 1, Date.now(), SIM_DT)) throw new Error("recorder open failed: " + path);
+    recorder.writeRoster(state.world);
+    Object.assign(r, { recorder, recording: true, path });
+    return path;
+}
 
-    Replay.rewind = function (state) {
-        if (!state.snapshots.length) { UI.log("rewind: no snapshot yet"); return; }
-        // Pick a snapshot that is at least REWIND_SECONDS old; else oldest.
-        var target = state.snapshots[0];
-        for (var i = 0; i < state.snapshots.length; i++) {
-            if (state.elapsed - state.snapshots[i].t >= Config.REWIND_SECONDS) {
-                target = state.snapshots[i];
-            }
-        }
-        state.world.restore(target.snap);
-        UI.log("rewound to t=" + target.t.toFixed(1) + "s", "log-kill");
-    };
-})();
+/** Close the recording; returns its frame count. */
+export function stopRecording(state) {
+    const r = rec(state);
+    if (!r.recording) return 0;
+    r.recorder.close();
+    r.recording = false;
+    return r.recorder.frameCount;
+}
+
+/**
+ * Capture this frame. Must run before the frame's world.events are cleared:
+ * the recorder takes the events that arrived since its previous frame.
+ */
+export function recordTick(state) {
+    const r = state.rec;
+    if (r && r.recording) r.recorder.recordFrame(state.simSteps, state.elapsed, state.world);
+}
+
+/** Start playing `path` (default: the last recording). Returns the frame count. Throws on failure. */
+export function startPlayback(state, path) {
+    const r = rec(state);
+    const file = path || r.path;
+    if (!file) throw new Error("no replay to play - record one first");
+    const reader = bro.ai.game.createReplayReader();
+    if (!reader.open(file)) throw new Error("replay open failed: " + reader.errorMessage);
+    if (!reader.frameCount) throw new Error("replay is empty: " + file);
+    Object.assign(r, { reader, playing: true, t: 0, frame: 0, path: file, t0: reader.frame(0).elapsed });
+    return reader.frameCount;
+}
+
+export function stopPlayback(state) {
+    const r = rec(state);
+    r.playing = false;
+    r.reader = null;
+}
+
+/**
+ * Advance playback by dt seconds. Returns { frame, index, count, done }
+ * (frame: the ReplayReader frame to draw; done: the last frame was reached).
+ */
+export function playbackTick(state, dt) {
+    const r = rec(state), rr = r.reader;
+    r.t += dt;
+    let i = r.frame;
+    while (i + 1 < rr.frameCount && rr.frame(i + 1).elapsed - r.t0 <= r.t) i++;
+    r.frame = i;
+    return { frame: rr.frame(i), index: i, count: rr.frameCount, done: i + 1 >= rr.frameCount };
+}
