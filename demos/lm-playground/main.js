@@ -12,53 +12,46 @@
 //   qwen35    loadQwen35(dir)               → one handle; the driver owns the
 //             tokenizer, prompt is a ChatML STRING, stops on <|im_end|>.
 //
-// Headless note: test.js drives the same UI with the small Qwen3.5 checkpoint.
+// Headless note: tests/test_main.js drives the same UI with the small Qwen3.5
+// checkpoint.
 
-import { installSystemMenu } from "/lib/system-menu.js";
+import { boot } from "/lib/kit/app.js";
+import { $ } from "/lib/kit/dom.js";
+import { bindControl } from "/lib/kit/params.js";
+import { findWeights, weightPath } from "/lib/kit/weights.js";
 
-const fs = require('fs');
-const $ = (s) => document.querySelector(s);
-
-// Default checkpoint per family — first existing candidate wins.
+// Default checkpoint per family (paths under the weights root) — first
+// existing candidate wins.
 const FAMILIES = {
     qwen35: {
-        candidates: ['D:/projects/brolm/weights/Qwen3.5-0.8B'],
-        probe: (p) => fs.existsSync(p + '/config.json'),
+        candidates: ['brolm/weights/Qwen3.5-0.8B'],
+        probe: 'config.json',
     },
     qwen3: {
-        candidates: ['D:/projects/brolm/weights/Qwen3-8B-GGUF/Qwen3-8B-Q8_0.gguf',
-                     'D:/projects/brolm/weights/Qwen3-0.6B-GGUF/Qwen3-0.6B-BF16.gguf'],
-        probe: (p) => fs.existsSync(p),
+        candidates: ['brolm/weights/Qwen3-8B-GGUF/Qwen3-8B-Q8_0.gguf',
+                     'brolm/weights/Qwen3-0.6B-GGUF/Qwen3-0.6B-BF16.gguf'],
     },
     mistral3: {
-        candidates: ['D:/projects/brolm/weights/Mistral-Small-3.1-24B-Instruct-2503-GGUF/' +
+        candidates: ['brolm/weights/Mistral-Small-3.1-24B-Instruct-2503-GGUF/' +
                      'mistralai_Mistral-Small-3.1-24B-Instruct-2503-Q4_K_M.gguf'],
-        probe: (p) => fs.existsSync(p),
-        tekken: 'D:/projects/brolm/weights/Mistral-Small-3.1-24B-Instruct-2503/tekken.json',
+        tekken: 'brolm/weights/Mistral-Small-3.1-24B-Instruct-2503/tekken.json',
     },
 };
 
-// htmlayout's <select> does not reliably round-trip .value, so the chosen
-// family lives here and the change handler keeps it in sync.
-let currentFamily = 'qwen35';
+const { status } = boot();
+const setStatus = (text, isErr) => (isErr ? status.error(text) : status.set(text));
 
 let loaded = null;     // { family, model, tokenizer? }
 let runHandle = null;
 let generating = false;
 
-function setStatus(text, isErr) {
-    $('#status').textContent = text;
-    $('#status').className = isErr ? 'err' : '';
-}
-
 function defaultPath(family) {
     const f = FAMILIES[family];
-    for (const c of f.candidates) { try { if (f.probe(c)) return c; } catch (e) {} }
-    return f.candidates[0];
+    return findWeights(f.candidates, { probe: f.probe }) || weightPath(f.candidates[0]);
 }
 
 function loadModel() {
-    const family = currentFamily;
+    const family = FAMILIES[familySel.value] ? familySel.value : 'qwen35';
     const path = $('#model-path').value.trim();
     $('#btn-load').disabled = true;
     $('#btn-generate').disabled = true;
@@ -88,7 +81,7 @@ function loadModel() {
             bro.lm.loadQwen(path, { onReady: onReadyPair, onError });
         } else {
             bro.lm.loadMistral(path, {
-                tokenizerPath: FAMILIES.mistral3.tekken,
+                tokenizerPath: weightPath(FAMILIES.mistral3.tekken),
                 onReady: onReadyPair, onError,
             });
         }
@@ -131,7 +124,7 @@ function generate() {
     $('#btn-generate').disabled = true;
     $('#btn-stop').disabled = false;
     $('#reply').textContent = '';
-    $('#reply').className = 'streaming';
+    $('#reply').classList.add('streaming');
     $('#rate').textContent = '';
     setStatus('generating…');
     const t0 = Date.now();
@@ -151,7 +144,7 @@ function generate() {
             runHandle = null;
             $('#btn-generate').disabled = false;
             $('#btn-stop').disabled = true;
-            $('#reply').className = '';
+            $('#reply').classList.remove('streaming');
             if (info.error) { setStatus('error: ' + info.error, true); return; }
             $('#reply').textContent = run.decode(ids);
             const secs = (Date.now() - t0) / 1000;
@@ -163,16 +156,11 @@ function generate() {
     runHandle = bro.lm.generate(loaded.model, run.prompt, opts);
 }
 
-$('#family').addEventListener('change', (e) => {
-    const v = (e.target && e.target.value) || $('#family').value;
-    if (v && FAMILIES[v]) currentFamily = v;
-    $('#model-path').value = defaultPath(currentFamily);
+const familySel = bindControl('#family', {
+    onChange: (v) => { $('#model-path').value = defaultPath(FAMILIES[v] ? v : 'qwen35'); },
 });
 $('#btn-load').addEventListener('click', loadModel);
 $('#btn-generate').addEventListener('click', generate);
 $('#btn-stop').addEventListener('click', () => { if (runHandle) runHandle.cancel(); });
 
-(function boot() {
-    installSystemMenu();
-    $('#model-path').value = defaultPath(currentFamily);
-})();
+$('#model-path').value = defaultPath(familySel.value);

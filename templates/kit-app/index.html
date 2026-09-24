@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Kit App</title>
+<link rel="stylesheet" href="/lib/kit/kit.css">
+<style>
+  /* app-specific CSS only; the kit supplies theme, controls and layout */
+  #log { flex: none; height: 120px; border-top: 1px solid var(--k-border); }
+</style>
+</head>
+<body class="k-app">
+  <header class="k-header">
+    <h1>Kit App</h1>
+    <span class="k-sub">copy this folder to start a tool / demo / lab on lib/kit</span>
+  </header>
+  <div class="k-toolbar">
+    <button id="run" class="primary">Run</button>
+    <button id="pause">Pause</button>
+    <label class="k-field">speed <input type="range" id="speed" min="0" max="4" step="0.1" value="1"><span class="k-val" id="speedVal"></span></label>
+    <label class="k-field">shape
+      <select id="shape"><option value="circle">circle</option><option value="square">square</option></select>
+    </label>
+    <div class="k-spacer"></div>
+    <div class="k-progress" id="progress"></div>
+  </div>
+  <div class="k-body">
+    <aside class="k-side">
+      <div class="k-tabs" id="tabs">
+        <button data-tab="params" class="active">Params</button>
+        <button data-tab="about">About</button>
+      </div>
+      <div class="k-panel" data-pane="params"><h2>Scene</h2><div class="k-col" id="params"></div></div>
+      <div class="k-panel" data-pane="about">
+        <h2>About</h2>
+        <span class="dim">Side panel, tabs, params bound to an object, a canvas viewport, a log and a status bar.</span>
+      </div>
+    </aside>
+    <main class="k-main">
+      <div class="k-viewport"><canvas id="view"></canvas></div>
+      <div class="k-log" id="log"></div>
+    </main>
+  </div>
+  <footer class="k-statusbar">
+    <span id="status">starting…</span>
+    <span class="k-stats" id="stats"></span>
+  </footer>
+  <script type="module" src="/app/main.js"></script>
+</body>
+</html>

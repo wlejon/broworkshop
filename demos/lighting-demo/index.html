@@ -2,45 +2,30 @@
 <html>
 <head>
     <title>Lighting Demo</title>
+    <link rel="stylesheet" href="/lib/kit/kit.css">
     <style>
-        html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+        body { background: #000; overflow: hidden; }
         canvas#stage { display: block; width: 100vw; height: 100vh; }
-
-        #hud {
-            position: absolute;
-            top: 10px; left: 10px;
-            background: rgba(0,0,0,0.6);
-            color: #cfe;
-            font: 12px system-ui, sans-serif;
-            padding: 10px 14px;
-            border-radius: 6px;
-            min-width: 220px;
-        }
-        #hud h1 { margin: 0 0 6px 0; font-size: 13px; color: #fff; }
-        #hud label { display: block; margin: 3px 0; }
-        #hud input[type=range] { width: 140px; vertical-align: middle; }
-        #hud span.v { color: #7bed9f; display: inline-block; min-width: 36px; text-align: right; }
-        #hud select { background: #111; color: #cfe; border: 1px solid #333; padding: 1px 3px; }
+        .k-hud { width: 330px; }
+        #selInfo { color: #fd9; min-height: 16px; }
+        .help { color: #888; font-size: 11px; line-height: 1.5; }
     </style>
 </head>
 <body>
     <canvas id="stage"></canvas>
-    <div id="hud">
-        <h1>PBR Lighting Demo</h1>
-        <label>Tonemap:
+    <div class="k-hud">
+        <h2>PBR Lighting Demo</h2>
+        <label class="k-field"><span>Tonemap</span>
             <select id="mode">
                 <option value="aces" selected>ACES</option>
                 <option value="reinhard">Reinhard</option>
                 <option value="linear">Linear</option>
             </select>
         </label>
-        <label>Exposure: <input id="exposure" type="range" min="0.2" max="3.0" step="0.05" value="1.0">
-            <span class="v" id="exposureVal">1.00</span></label>
-        <label>Sun intensity: <input id="sun" type="range" min="0" max="8" step="0.1" value="3.0">
-            <span class="v" id="sunVal">3.0</span></label>
-        <label>Ambient: <input id="ambient" type="range" min="0" max="0.2" step="0.005" value="0.03">
-            <span class="v" id="ambientVal">0.03</span></label>
-        <label>Environment: <span id="envStatus" style="font-size:10px"></span>
+        <label class="k-field"><span>Exposure</span><input id="exposure" type="range" min="0.2" max="3.0" step="0.05" value="1.0"><span class="k-val" id="exposureVal"></span></label>
+        <label class="k-field"><span>Sun intensity</span><input id="sun" type="range" min="0" max="8" step="0.1" value="3.0"><span class="k-val" id="sunVal"></span></label>
+        <label class="k-field"><span>Ambient</span><input id="ambient" type="range" min="0" max="0.2" step="0.005" value="0.03"><span class="k-val" id="ambientVal"></span></label>
+        <label class="k-field"><span>Environment</span>
             <select id="hdri">
                 <option value="">— none (flat ambient) —</option>
                 <option value="venice_sunset">Venice sunset</option>
@@ -57,17 +42,14 @@
                 <option value="spiaggia_di_mondello">Mondello beach</option>
             </select>
         </label>
-        <label>IBL intensity: <input id="iblIntensity" type="range" min="0" max="3" step="0.05" value="1.0">
-            <span class="v" id="iblIntensityVal">1.00</span></label>
-        <label>IBL rotation: <input id="iblRotation" type="range" min="0" max="6.283" step="0.05" value="0">
-            <span class="v" id="iblRotationVal">0.00</span></label>
-        <label><input type="checkbox" id="showIcons" checked> Show light icons</label>
-        <label><input type="checkbox" id="animate" checked> Animate lights</label>
-        <label><input type="checkbox" id="shadows"> Sun shadow</label>
-        <div id="selInfo" style="margin-top:6px; color:#fd9; font-size:11px; min-height:16px;">
-            Click a light icon to select.
-        </div>
-        <div style="margin-top:8px; color:#888; font-size:11px;">
+        <span id="envStatus" class="dim"></span>
+        <label class="k-field"><span>IBL intensity</span><input id="iblIntensity" type="range" min="0" max="3" step="0.05" value="1.0"><span class="k-val" id="iblIntensityVal"></span></label>
+        <label class="k-field"><span>IBL rotation</span><input id="iblRotation" type="range" min="0" max="6.283" step="0.05" value="0"><span class="k-val" id="iblRotationVal"></span></label>
+        <label class="k-field"><input type="checkbox" id="showIcons" checked> Show light icons</label>
+        <label class="k-field"><input type="checkbox" id="animate" checked> Animate lights</label>
+        <label class="k-field"><input type="checkbox" id="shadows"> Sun shadow</label>
+        <div id="selInfo">Click a light icon to select.</div>
+        <div class="help">
             Front row: dielectric, roughness sweep.<br>
             Back row: metal, roughness sweep.<br>
             Left-click light icons to select + gizmo.<br>

@@ -4,45 +4,40 @@
 // for Qwen3/Mistral lives in bro's tests/_lm_models_smoke.js and
 // _async_lm_smoke.js; this verifies the app wiring.)
 //
-//   bro-headless ../broworkshop/demos/lm-playground ../broworkshop/demos/lm-playground/test.js
+//   scripts/validate.sh --ml demos/lm-playground
 
-function assert(cond, msg) { if (!cond) throw new Error('assert: ' + msg); }
-function pumpUntil(pred, budgetMs) {
-    const start = Date.now();
-    while (!pred() && (Date.now() - start) < budgetMs) { sleep(20); }
-    return pred();
-}
-const q = (s) => document.querySelector(s);
+import { check, waitFor, clickOn, setValue, q, text } from "/lib/kit/test.js";
+import { weightsRoot } from "/lib/kit/weights.js";
 
-assert(/Qwen3\.5/.test(q('#model-path').value), 'default qwen35 path resolved');
+check(/Qwen3\.5/.test(q('#model-path').value), 'default qwen35 path resolved');
+check(q('#model-path').value.startsWith(weightsRoot()), 'default path is under the weights root');
 
-// Portable weights root: redirect the app's default Windows path to $BRO_WEIGHTS.
-const WROOT = (typeof process !== 'undefined' && process.env.BRO_WEIGHTS) || 'D:/projects';
-q('#model-path').value = q('#model-path').value.replace(/^D:\/projects/, WROOT);
+// Switching family updates the default path, and back.
+setValue('#family', 'qwen3');
+check(/Qwen3-/.test(q('#model-path').value), 'qwen3 path after family change');
+setValue('#family', 'qwen35');
+check(/Qwen3\.5/.test(q('#model-path').value), 'qwen35 path restored');
 
-q('#btn-load').click();
-assert(pumpUntil(() => /ready/.test(q('#status').textContent), 600000),
-       'model loaded (status: ' + q('#status').textContent + ')');
+clickOn('#btn-load');
+waitFor(() => /ready/.test(text('#status')), 'model loaded (status: ' + text('#status') + ')', 600000);
 
 q('#prompt').value = 'One-word answer only: what is the capital of France?';
 q('#temperature').value = '0';
 q('#max-tokens').value = '24';
-q('#btn-generate').click();
-assert(pumpUntil(() => /done/.test(q('#status').textContent), 300000),
-       'generation finished (status: ' + q('#status').textContent + ')');
-const reply = q('#reply').textContent;
-console.log('[lm-playground] reply: "' + reply.trim() + '"');
-assert(/paris/i.test(reply), 'reply names Paris');
-assert(/tok\/s/.test(q('#rate').textContent), 'rate reported');
+clickOn('#btn-generate');
+waitFor(() => /done/.test(text('#status')), 'generation finished', 300000);
+const reply = text('#reply');
+console.log('[lm-playground] reply: "' + reply + '"');
+check(/paris/i.test(reply), 'reply names Paris');
+check(/tok\/s/.test(text('#rate')), 'rate reported');
 
 // Stop mid-generation.
 q('#prompt').value = 'Write a very long story about the sea.';
 q('#temperature').value = '0.7';
 q('#max-tokens').value = '512';
-q('#btn-generate').click();
-assert(pumpUntil(() => q('#reply').textContent.length > 0, 120000), 'streaming started');
-q('#btn-stop').click();
-assert(pumpUntil(() => /stopped/.test(q('#status').textContent), 120000),
-       'stop reported (status: ' + q('#status').textContent + ')');
+clickOn('#btn-generate');
+waitFor(() => q('#reply').textContent.length > 0, 'streaming started', 120000);
+clickOn('#btn-stop');
+waitFor(() => /stopped/.test(text('#status')), 'stop reported', 120000);
 
 console.log('[lm-playground] PASS');

@@ -3,101 +3,71 @@
 <head>
     <meta charset="UTF-8">
     <title>Shader Lab — WebGL2 GLSL 3.0 ES</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="/lib/kit/kit.css">
+    <style>
+        .k-side { flex: 1; width: auto; min-width: 0; padding: 0; gap: 0; }   /* editor | viewport, 1:1 */
+        .pane-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--k-border); }
+        .pane-head h2 { margin: 0; flex: 1; font-size: 11px; font-weight: 600; letter-spacing: .6px; text-transform: uppercase; color: var(--k-dim); }
+        #shaderCode {
+            flex: 1; min-height: 0; margin: 0; border: none; border-radius: 0; resize: none;
+            background: #0a0c10; font-size: 13px; line-height: 1.5; white-space: pre; tab-size: 4;
+        }
+        #logOutput { margin: 0; padding: 8px 10px; height: 110px; overflow: auto; background: #080a0d; white-space: pre-wrap; }
+        #uniforms { border-radius: 0; border-width: 1px 0 0 0; }
+        #uniforms .k-field > span:first-child { width: 240px; }
+        #glCanvas { cursor: crosshair; }
+    </style>
 </head>
-<body>
-    <header class="app-header">
-        <div class="header-left">
-            <h1 class="logo">WebGL2 <span>Shader Lab</span></h1>
-            <div class="preset-selector">
-                <label for="presetSelect">Preset:</label>
-                <select id="presetSelect">
-                    <option value="raymarch">SDF Raymarching Shapes</option>
-                    <option value="fractal">Mandelbrot Fractal Orbit</option>
-                    <option value="voronoi">Voronoi Cellular Noise</option>
-                    <option value="plasma">Interference Plasma Waves</option>
-                    <option value="fire">Volumetric Flame & Smoke</option>
-                </select>
-                <button id="compileBtn" class="btn primary">▶ Compile (Ctrl+S)</button>
-            </div>
-        </div>
-        <div class="header-right">
-            <div class="badge-group">
-                <span id="badgeGl" class="badge ok">WebGL 2.0 (GLSL 3.0)</span>
-                <span id="badgeFps" class="badge">60 FPS</span>
-                <span id="badgeRes" class="badge">1280 × 800</span>
-            </div>
-        </div>
+<body class="k-app">
+    <header class="k-header">
+        <h1>WebGL2 Shader Lab</h1>
+        <label class="k-field">Preset
+            <select id="presetSelect">
+                <option value="raymarch">SDF Raymarching Shapes</option>
+                <option value="fractal">Mandelbrot Fractal Orbit</option>
+                <option value="voronoi">Voronoi Cellular Noise</option>
+                <option value="plasma">Interference Plasma Waves</option>
+                <option value="fire">Volumetric Flame & Smoke</option>
+            </select>
+        </label>
+        <button id="compileBtn" class="primary">▶ Compile (Ctrl+S)</button>
+        <div class="k-spacer"></div>
+        <span class="k-stats">
+            <span id="badgeGl" class="ok">WebGL 2.0 (GLSL 3.0)</span>
+            <span><b id="badgeFps">60 FPS</b></span>
+            <span><b id="badgeRes">1280 × 800</b></span>
+        </span>
     </header>
 
-    <main class="workspace">
-        <section class="editor-pane">
-            <div class="pane-header">
+    <div class="k-body">
+        <aside class="k-side">
+            <div class="pane-head">
                 <h2>Fragment Shader (GLSL 300 es)</h2>
-                <div class="editor-actions">
-                    <button id="formatBtn" class="btn small">Reset to Preset</button>
-                    <button id="copyBtn" class="btn small">Copy Code</button>
-                </div>
+                <button id="formatBtn" class="small">Reset to Preset</button>
+                <button id="copyBtn" class="small">Copy Code</button>
             </div>
-            <div class="editor-container">
-                <textarea id="shaderCode" spellcheck="false" autocomplete="off"></textarea>
+            <textarea id="shaderCode" spellcheck="false" autocomplete="off"></textarea>
+            <div class="pane-head">
+                <h2>Compilation Log</h2>
+                <span id="logStatus" class="ok">No errors</span>
             </div>
-            <div class="console-drawer" id="consoleDrawer">
-                <div class="console-header">
-                    <span>Compilation Log</span>
-                    <span id="logStatus" class="status-ok">No errors</span>
-                </div>
-                <pre id="logOutput" class="console-output"></pre>
-            </div>
-        </section>
+            <pre id="logOutput"></pre>
+        </aside>
 
-        <section class="viewport-pane">
-            <div class="pane-header">
-                <h2>Render Viewport</h2>
-                <div class="viewport-controls">
-                    <button id="playBtn" class="btn control active">⏸ Pause</button>
-                    <button id="resetTimeBtn" class="btn control">⏮ Reset Time</button>
-                    <select id="scaleSelect" class="small">
-                        <option value="1">1.0x Scale</option>
-                        <option value="0.5">0.5x Fast</option>
-                        <option value="2">2.0x HiDPI</option>
-                    </select>
-                </div>
+        <main class="k-main">
+            <div class="k-toolbar">
+                <button id="playBtn" class="active">⏸ Pause</button>
+                <button id="resetTimeBtn">⏮ Reset Time</button>
+                <select id="scaleSelect">
+                    <option value="1">1.0x Scale</option>
+                    <option value="0.5">0.5x Fast</option>
+                    <option value="2">2.0x HiDPI</option>
+                </select>
             </div>
-
-            <div class="canvas-wrap" id="canvasWrap">
-                <canvas id="glCanvas"></canvas>
-            </div>
-
-            <div class="uniforms-panel">
-                <div class="panel-header sub">
-                    <h3>Dynamic Uniform Controls</h3>
-                </div>
-                <div class="uniform-grid">
-                    <div class="slider-row">
-                        <label>u_param1 (Speed / Scale)</label>
-                        <input type="range" id="param1" min="0" max="5" step="0.05" value="1.0">
-                        <span id="param1Val" class="val">1.00</span>
-                    </div>
-                    <div class="slider-row">
-                        <label>u_param2 (Detail / Iterations)</label>
-                        <input type="range" id="param2" min="0" max="10" step="0.1" value="3.0">
-                        <span id="param2Val" class="val">3.00</span>
-                    </div>
-                    <div class="slider-row">
-                        <label>u_param3 (Color Morph / Palette)</label>
-                        <input type="range" id="param3" min="0" max="1" step="0.01" value="0.5">
-                        <span id="param3Val" class="val">0.50</span>
-                    </div>
-                    <div class="slider-row">
-                        <label>u_param4 (Lighting / Roughness)</label>
-                        <input type="range" id="param4" min="0" max="2" step="0.05" value="1.0">
-                        <span id="param4Val" class="val">1.00</span>
-                    </div>
-                </div>
-            </div>
-        </section>
-    </main>
+            <div class="k-viewport"><canvas id="glCanvas"></canvas></div>
+            <div class="k-panel" id="uniforms"><h2>Dynamic Uniform Controls</h2></div>
+        </main>
+    </div>
 
     <script type="module" src="app.js"></script>
 </body>

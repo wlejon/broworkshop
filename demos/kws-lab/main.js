@@ -11,56 +11,32 @@
 // they are rejected while listening; this app stops, mutates, and re-listens
 // so the UI stays free-form.
 //
-// Headless note: with no audio device the live mic can't capture; test.js
-// drives the same spotter via bro.kws.feed() with Kokoro-synthesized speech.
+// Headless note: with no audio device the live mic can't capture;
+// tests/test_main.js drives the same spotter via bro.kws.feed() with
+// Kokoro-synthesized speech.
 
-import { installSystemMenu } from "/lib/system-menu.js";
+import { boot } from "/lib/kit/app.js";
+import { h, ids } from "/lib/kit/dom.js";
+import { logView, progressBar } from "/lib/kit/ui.js";
+import { findWeights, missingWeights } from "/lib/kit/weights.js";
 
-const fs = require('fs');
+const PHONEME_NET = ['brosoundml/weights/phoneme/english.bpm', 'brosoundml/build-cuda/english.bpm'];
 
-const WROOT = (typeof process !== 'undefined' && process.env && process.env.BRO_WEIGHTS) || 'D:/projects';
-const WEIGHT_CANDIDATES = [
-    '../../../brosoundml/weights/phoneme/english.bpm',
-    '../../../brosoundml/build-cuda/english.bpm',
-    WROOT + '/brosoundml/weights/phoneme/english.bpm',
-    WROOT + '/brosoundml/build-cuda/english.bpm',
-];
-
-const $phrase    = document.querySelector('#phrase');
-const $enroll    = document.querySelector('#enroll');
-const $threshold = document.querySelector('#threshold');
-const $listen    = document.querySelector('#listen');
-const $templates = document.querySelector('#templates');
-const $none      = document.querySelector('#noTemplates');
-const $fill      = document.querySelector('#progressFill');
-const $pct       = document.querySelector('#progressPct');
-const $log       = document.querySelector('#log');
-const $status    = document.querySelector('#status');
-const $spotCount = document.querySelector('#spotCount');
+const { status } = boot();
+const el = ids('phrase', 'enroll', 'threshold', 'listen', 'templates', 'noTemplates',
+               'progressPct', 'spotCount');
+const log = logView('#log', { newestFirst: true });
+const progress = progressBar('#progress');
 
 let listening = false;
 let spots = 0;
 const chips = {};   // name -> chip element
 
-function status(text, isErr) {
-    $status.textContent = text;
-    $status.className = isErr ? 'err' : '';
-}
-
 function logSpot(name, confidence) {
     spots++;
-    $spotCount.textContent = String(spots);
-    const row = document.createElement('div');
-    row.className = 'row';
-    const t = new Date();
-    const hh = String(t.getHours()).padStart(2, '0');
-    const mm = String(t.getMinutes()).padStart(2, '0');
-    const ss = String(t.getSeconds()).padStart(2, '0');
-    row.innerHTML = '<span class="t">' + hh + ':' + mm + ':' + ss + '</span>' +
-        '<span class="name"></span><span class="conf"></span>';
-    row.querySelector('.name').textContent = name;
-    row.querySelector('.conf').textContent = 'confidence ' + confidence.toFixed(3);
-    $log.insertBefore(row, $log.firstChild);
+    el.spotCount.textContent = String(spots);
+    log.add(h('span', null, h('span.name', null, name),
+                            h('span.conf', null, 'confidence ' + confidence.toFixed(3))));
     flashChip(name);
 }
 
@@ -74,23 +50,15 @@ function flashChip(name) {
 function renderTemplates() {
     Object.keys(chips).forEach((k) => { chips[k].remove(); delete chips[k]; });
     const names = bro.kws.templates();
-    $none.style.display = names.length ? 'none' : '';
+    el.noTemplates.hidden = names.length > 0;
     for (const name of names) {
-        const chip = document.createElement('span');
-        chip.className = 'chip';
-        const label = document.createElement('span');
-        label.textContent = name;
-        const rm = document.createElement('button');
-        rm.textContent = '×';
-        rm.addEventListener('click', () => withMutableSpotter(() => {
-            bro.kws.remove(name);
-        }));
-        chip.appendChild(label);
-        chip.appendChild(rm);
-        $templates.appendChild(chip);
+        const chip = h('span.k-chip', null,
+            h('span', null, name),
+            h('button', { onclick: () => withMutableSpotter(() => bro.kws.remove(name)) }, '×'));
+        el.templates.appendChild(chip);
         chips[name] = chip;
     }
-    $listen.disabled = names.length === 0;
+    el.listen.disabled = names.length === 0;
 }
 
 // Run a template mutation, bouncing the live session around it (mutators share
@@ -99,84 +67,70 @@ function withMutableSpotter(fn) {
     const wasListening = listening;
     if (wasListening) stopListening();
     try { fn(); }
-    catch (e) { status(String(e.message || e), true); }
+    catch (e) { status.error(e); }
     renderTemplates();
     if (wasListening && bro.kws.templates().length) startListening();
 }
 
 function enrollPhrase() {
-    const text = $phrase.value.trim();
+    const text = el.phrase.value.trim();
     if (!text) return;
     withMutableSpotter(() => {
-        const ids = bro.tts.phonemize(text);
-        const len = bro.kws.enroll(text, ids, { threshold: +$threshold.value });
-        status('enrolled "' + text + '" (' + len + ' phoneme classes)');
-        $phrase.value = '';
+        const phonemes = bro.tts.phonemize(text);
+        const len = bro.kws.enroll(text, phonemes, { threshold: +el.threshold.value });
+        status.set('enrolled "' + text + '" (' + len + ' phoneme classes)');
+        el.phrase.value = '';
     });
 }
 
 function startListening() {
     bro.kws.listen({ onSpot: logSpot });
     listening = true;
-    $listen.textContent = 'Stop';
-    $listen.classList.add('active');
-    status('listening — say an enrolled phrase');
+    el.listen.textContent = 'Stop';
+    el.listen.classList.add('active');
+    status.set('listening — say an enrolled phrase');
 }
 
 function stopListening() {
     bro.kws.stop();
     listening = false;
-    $listen.textContent = 'Listen';
-    $listen.classList.remove('active');
-    status('stopped');
+    el.listen.textContent = 'Listen';
+    el.listen.classList.remove('active');
+    status.set('stopped');
 }
 
-$enroll.addEventListener('click', enrollPhrase);
-$phrase.addEventListener('keydown', (e) => { if (e.key === 'Enter') enrollPhrase(); });
-$listen.addEventListener('click', () => (listening ? stopListening() : startListening()));
+el.enroll.addEventListener('click', enrollPhrase);
+el.phrase.addEventListener('keydown', (e) => { if (e.key === 'Enter') enrollPhrase(); });
+el.listen.addEventListener('click', () => (listening ? stopListening() : startListening()));
 
 // Prefix-progress meter — a lock-free read, safe while the inference thread
 // feeds, so polling it per frame is free.
 function tick() {
     const p = listening ? bro.kws.prefixProgress() : 0;
-    $fill.style.width = (p * 100).toFixed(0) + '%';
-    $pct.textContent = 'prefix ' + (p * 100).toFixed(0) + '%';
+    progress.set(p);
+    el.progressPct.textContent = 'prefix ' + (p * 100).toFixed(0) + '%';
     requestAnimationFrame(tick);
 }
 requestAnimationFrame(tick);
 
-installSystemMenu();
-
 // ── boot ─────────────────────────────────────────────────────────────────────
-(function boot() {
-    // require('fs') resolves relative paths against the app dir, but the C++
-    // loader resolves against the process CWD — hand it an absolute path.
-    let weights = null;
-    for (const p of WEIGHT_CANDIDATES) {
-        try { if (fs.existsSync(p)) { weights = fs.realpathSync(p); break; } }
-        catch (e) { /* next candidate */ }
-    }
-    if (!weights) {
-        status('no PhonemeNet checkpoint found (' + WEIGHT_CANDIDATES.join(', ') + ')', true);
-        return;
-    }
+(function start() {
+    const weights = findWeights(PHONEME_NET);
+    if (!weights) { status.error(missingWeights('PhonemeNet checkpoint', PHONEME_NET)); return; }
     try {
-        bro.kws.load({ weights, threshold: +$threshold.value });
-        status('spotter loaded (' + bro.kws.sampleRate() + ' Hz) — enroll a phrase');
+        bro.kws.load({ weights, threshold: +el.threshold.value });
+        status.set('spotter loaded (' + bro.kws.sampleRate() + ' Hz) — enroll a phrase');
     } catch (e) {
-        status('load failed: ' + (e.message || e), true);
+        status.error('load failed: ' + (e.message || e));
         return;
     }
-    // Point the phonemizer at the brosoundml sibling (portable: BRO_WEIGHTS
-    // overrides the default ../brosoundml search) so phonemize() resolves its
-    // g2p assets regardless of where the weights live.
-    try {
-        const sib = WROOT + '/brosoundml';
-        if (fs.existsSync(sib + '/weights/kokoro/config.json')) bro.tts.setAssetRoot(sib);
-    } catch (e) { /* fall back to the default sibling search */ }
+    // Point the phonemizer at the brosoundml sibling so phonemize() resolves
+    // its g2p assets wherever the weights live.
+    const sib = findWeights(['brosoundml'], { probe: 'weights/kokoro/config.json' });
+    if (sib) bro.tts.setAssetRoot(sib);
     // Seed one template so Listen works out of the box.
     withMutableSpotter(() => {
         bro.kws.enroll('hello there', bro.tts.phonemize('hello there'),
-                       { threshold: +$threshold.value });
+                       { threshold: +el.threshold.value });
     });
 })();

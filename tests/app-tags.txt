@@ -1,0 +1,53 @@
+# Tags for scripts/validate.sh.
+#
+#   <glob> <tag> [tag ...]
+#
+# <glob> matches an app directory (demos/kws-lab) or a test script path
+# (tools/node-forge/tests/test_kokoro_node.js); a script inherits its app's
+# tags and adds its own. Later lines win for timeout=.
+#
+# Tags:
+#   ml         needs model weights and a GPU, and is slow. Skipped unless
+#              validate.sh is given --ml (or --only-ml).
+#   net        needs the network or an API key. Skipped unless --net.
+#   skip       never run (interactive, destructive, or not a test at all).
+#   timeout=N  per-run timeout in seconds (default 60 smoke / 300 test; ml 900).
+
+# --- ML labs: every one loads weights --------------------------------------
+demos/cluster-diar-lab  ml
+demos/diffusion-lab     ml
+demos/kokoro-lab        ml
+demos/krea2-lab         ml
+demos/kws-lab           ml
+demos/listen-lab        ml
+demos/lm-playground     ml
+demos/nllb-lab          ml
+demos/omnivoice-lab     ml
+demos/parakeet-lab      ml
+demos/pixart-lab        ml
+demos/qwen-asr-lab      ml
+demos/qwen-image-lab    ml
+demos/qwen-tts-lab      ml
+demos/rave-lab          ml
+demos/sana-lab          ml
+demos/sortformer-lab    ml
+demos/stylegan3-lab     ml
+demos/supertonic-lab    ml
+demos/triposplat        ml
+demos/vision-lab        ml
+demos/vlm-lab           ml
+ai/ardy-motion          ml
+ai/voice-pipeline       ml
+tools/laya-triage       ml
+
+# --- bronze has not finished compiling the 40k-line vendored bundles in 300 s
+# (see ENGINE-ISSUES.md); keep the known timeout cheap -------------------------
+ai/pi-agent             timeout=90
+ai/maker-agent          timeout=90
+
+# --- ML only in some tests ---------------------------------------------------
+tools/node-forge/tests/test_kokoro_node.js  ml
+tools/node-forge/tests/test_qwen_node.js    ml
+tools/node-forge/tests/test_rave_node.js    ml
+games/hearthfolk/test-live.js               ml
+ai/maker-agent/tests/test_openrouter_loop.js net

@@ -1,21 +1,17 @@
-import "/lib/camera.js";
-import { installSystemMenu } from "/lib/system-menu.js";
+import { boot } from "/lib/kit/app.js";
+import { bindControl } from "/lib/kit/params.js";
+import { sceneViewport } from "/lib/kit/viewport3d.js";
 
-installSystemMenu();
-
-const canvas = document.getElementById('stage');
-const scene = canvas.getContext('scene');
+boot();
 
 // Orbit camera around the sphere row at world-Y=1. Right-drag orbits,
 // middle-drag pans, wheel zooms. Left-click stays free for the
 // light-icon picker below.
-const cam = Camera.createOrbit({
-    target: [0, 1, 0],
-    dist:   10,
-    fov:    50,
-    near:   0.1,
-    far:    200,
+const vp = sceneViewport('#stage', {
+    orbit:    { target: [0, 1, 0], dist: 10, fov: 50, near: 0.1, far: 200 },
+    controls: { minDist: 0.5 },
 });
+const { canvas, scene } = vp;
 
 scene.setAmbient([0.03, 0.03, 0.035]);
 scene.setToneMap({ mode: 'aces', exposure: 1.0 });
@@ -205,73 +201,28 @@ canvas.addEventListener('mousedown', (ev) => {
     attachGizmoFor(node, node.kind);
 });
 
-// --- Camera input (right=orbit, middle=pan, wheel=zoom) ---------------------
-let rightDown = false, middleDown = false;
-function updatePointerLock() {
-    const want = rightDown || middleDown;
-    const locked = document.pointerLockElement === canvas;
-    if (want && !locked) canvas.requestPointerLock();
-    else if (!want && locked) document.exitPointerLock();
-}
-canvas.addEventListener('mousedown', (e) => {
-    if (e.button === 2)      { rightDown  = true; e.preventDefault(); updatePointerLock(); }
-    else if (e.button === 1) { middleDown = true; e.preventDefault(); updatePointerLock(); }
-});
-document.addEventListener('mouseup', (e) => {
-    if (e.button === 2) rightDown  = false;
-    if (e.button === 1) middleDown = false;
-    updatePointerLock();
-});
-document.addEventListener('mousemove', (e) => {
-    if (rightDown)  Camera.orbitLook(cam, e.movementX, e.movementY);
-    if (middleDown) Camera.orbitPan (cam, e.movementX, e.movementY);
-});
-canvas.addEventListener('contextmenu', (e) => e.preventDefault());
-canvas.addEventListener('auxclick', (e) => { if (e.button === 1) e.preventDefault(); });
-canvas.addEventListener('wheel', (e) => {
-    cam.dist = Math.max(0.5, cam.dist * Math.exp(e.deltaY * 0.001));
-    e.preventDefault();
-});
-
 document.addEventListener('keydown', (ev) => {
     if (ev.key === 'Escape') attachGizmoFor(null);
 });
 
 // --- HUD wiring ------------------------------------------------------------
-const modeSel = document.getElementById('mode');
-const exposureIn = document.getElementById('exposure');
-const exposureVal = document.getElementById('exposureVal');
-const sunIn = document.getElementById('sun');
-const sunVal = document.getElementById('sunVal');
-const ambientIn = document.getElementById('ambient');
-const ambientVal = document.getElementById('ambientVal');
-
-function applyToneMap() {
-    scene.setToneMap({
-        mode: modeSel.value,
-        exposure: parseFloat(exposureIn.value),
-        gamma: 2.2,
-    });
-    exposureVal.textContent = parseFloat(exposureIn.value).toFixed(2);
-}
-function applySun() {
-    sun.intensity = parseFloat(sunIn.value);
-    sunVal.textContent = sun.intensity.toFixed(1);
-}
-function applyAmbient() {
-    const a = parseFloat(ambientIn.value);
-    scene.setAmbient([a, a, a]);
-    ambientVal.textContent = a.toFixed(3);
-}
-const showIconsIn = document.getElementById('showIcons');
-const animateIn = document.getElementById('animate');
-const shadowsIn = document.getElementById('shadows');
-const hdriSel = document.getElementById('hdri');
+const applyToneMap = () => scene.setToneMap({ mode: mode.value, exposure: exposure.value, gamma: 2.2 });
+const mode     = bindControl('#mode', { onChange: applyToneMap });
+const exposure = bindControl('#exposure', { out: '#exposureVal', onChange: applyToneMap });
+bindControl('#sun', { out: '#sunVal', fmt: (v) => v.toFixed(1), onChange: (v) => { sun.intensity = v; } });
+bindControl('#ambient', { out: '#ambientVal', fmt: (v) => v.toFixed(3), onChange: (a) => scene.setAmbient([a, a, a]) });
+const hdri = bindControl('#hdri', { onChange: () => applyEnvironment() });
+const iblIntensity = bindControl('#iblIntensity', { out: '#iblIntensityVal',
+    onChange: (v) => { if (hdri.value) scene.setEnvironment({ intensity: v }); } });
+const iblRotation = bindControl('#iblRotation', { out: '#iblRotationVal',
+    onChange: (v) => { if (hdri.value) scene.setEnvironment({ rotation: v }); } });
+bindControl('#showIcons', { onChange: (on) => {
+    scene.showLightIcons = on;
+    if (!on) attachGizmoFor(null);
+} });
+bindControl('#shadows', { onChange: (on) => { sun.castsShadow = on; } });
+const animateLights = bindControl('#animate');
 const envStatus = document.getElementById('envStatus');
-const iblIntensityIn = document.getElementById('iblIntensity');
-const iblIntensityVal = document.getElementById('iblIntensityVal');
-const iblRotationIn = document.getElementById('iblRotation');
-const iblRotationVal = document.getElementById('iblRotationVal');
 
 // Try the script's default first, then fall back through the other tiers
 // the user might have on disk. If nothing loads, prompt them to run the
@@ -279,61 +230,32 @@ const iblRotationVal = document.getElementById('iblRotationVal');
 // won't have them yet.
 const HDRI_RES_ORDER = ['2k', '4k', '1k', '8k'];
 function applyEnvironment() {
-    const slug = hdriSel.value;
+    const slug = hdri.value;
     if (!slug) {
         scene.setEnvironment(null);
         envStatus.textContent = '';
         return;
     }
-    const opts = {
-        intensity: parseFloat(iblIntensityIn.value),
-        rotation:  parseFloat(iblRotationIn.value),
-    };
+    const opts = { intensity: iblIntensity.value, rotation: iblRotation.value };
     for (const res of HDRI_RES_ORDER) {
         const path = `hdri/${slug}_${res}.hdr`;
         if (scene.setEnvironment({ ...opts, hdr: path })) {
             envStatus.textContent = `loaded ${res}`;
-            envStatus.style.color = '#7bed9f';
+            envStatus.className = 'ok';
             return;
         }
     }
     envStatus.textContent = 'HDRI missing — run demos/lighting-demo/hdri/download.sh';
-    envStatus.style.color = '#fd9';
-}
-function applyIBLIntensity() {
-    const v = parseFloat(iblIntensityIn.value);
-    iblIntensityVal.textContent = v.toFixed(2);
-    if (hdriSel.value) scene.setEnvironment({ intensity: v });
-}
-function applyIBLRotation() {
-    const v = parseFloat(iblRotationIn.value);
-    iblRotationVal.textContent = v.toFixed(2);
-    if (hdriSel.value) scene.setEnvironment({ rotation: v });
+    envStatus.className = 'warn';
 }
 
-modeSel.addEventListener('change', applyToneMap);
-exposureIn.addEventListener('input', applyToneMap);
-sunIn.addEventListener('input', applySun);
-ambientIn.addEventListener('input', applyAmbient);
-hdriSel.addEventListener('change', applyEnvironment);
-iblIntensityIn.addEventListener('input', applyIBLIntensity);
-iblRotationIn.addEventListener('input', applyIBLRotation);
-showIconsIn.addEventListener('change', () => {
-    scene.showLightIcons = showIconsIn.checked;
-    if (!showIconsIn.checked) attachGizmoFor(null);
-});
-shadowsIn.addEventListener('change', () => {
-    sun.castsShadow = shadowsIn.checked;
-});
-
-// --- Animation loop --------------------------------------------------------
+// --- Animation --------------------------------------------------------------
 // Animation pauses whenever a light is selected so the gizmo can
-// actually drag it somewhere; resumes when deselected.
+// actually drag it somewhere; resumes when deselected. (The viewport pushes
+// the camera after each frame callback.)
 let t0 = performance.now();
-function frame() {
-    scene.setCamera(Camera.orbitViewOpts(cam, canvas));
-
-    const animate = animateIn.checked && !selected;
+vp.onFrame(() => {
+    const animate = animateLights.value && !selected;
     if (animate) {
         const t = (performance.now() - t0) / 1000.0;
         const r = 2.5;
@@ -347,7 +269,4 @@ function frame() {
         spot.x = sx;
         spot.direction = [-sx * 0.15, -1, 0];
     }
-
-    requestAnimationFrame(frame);
-}
-requestAnimationFrame(frame);
+});

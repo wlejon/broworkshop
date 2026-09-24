@@ -3,55 +3,21 @@
 <head>
 <meta charset="utf-8">
 <title>LM Playground</title>
+<link rel="stylesheet" href="/lib/kit/kit.css">
 <style>
-  :root { color-scheme: dark; }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; height: 100vh; display: flex; flex-direction: column;
-    background: #0c0e12; color: #d7dde6;
-    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  }
-  header {
-    padding: 14px 18px; border-bottom: 1px solid #1d2330;
-    display: flex; align-items: baseline; gap: 14px;
-  }
-  header h1 { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: .3px; }
-  header .sub { color: #6b7686; font-size: 12px; }
-  .row { padding: 10px 18px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-  .row label { font-size: 12px; color: #97a1b2; display: flex; gap: 6px; align-items: center; }
-  select, input[type="text"], input[type="number"], textarea {
-    background: #131720; color: #d7dde6; border: 1px solid #2c3c57;
-    border-radius: 6px; padding: 7px 10px; font: inherit; font-size: 12px;
-  }
   #family { width: 200px; }
   #model-path { width: 480px; }
-  input[type="number"] { width: 80px; }
-  button {
-    background: #1b2638; color: #cfe0ff; border: 1px solid #2c3c57;
-    border-radius: 6px; padding: 7px 14px; font: inherit; font-size: 12px; cursor: pointer;
-  }
-  button:hover { background: #233248; }
-  button:disabled { opacity: .45; cursor: default; }
-  #prompt { margin: 0 18px; height: 70px; resize: vertical; font-size: 13px; }
-  #reply {
-    flex: 1; margin: 10px 18px 12px; padding: 14px; overflow-y: auto;
-    background: #10141c; border: 1px solid #1d2330; border-radius: 8px;
-    font-size: 14px; line-height: 1.6; white-space: pre-wrap;
-  }
+  #prompt { margin: 0 var(--k-pad); height: 70px; font-size: 13px; }
+  #reply { flex: 1; margin: 10px var(--k-pad) 12px; font-size: 14px; }
   #reply.streaming { color: #b9c4d4; }
-  .statusbar {
-    padding: 8px 18px; border-top: 1px solid #1d2330; font-size: 12px;
-    color: #8a94a6; display: flex; gap: 24px;
-  }
-  .statusbar .err { color: #ff8585; }
 </style>
 </head>
-<body>
-  <header>
+<body class="k-app">
+  <header class="k-header">
     <h1>LM Playground</h1>
-    <span class="sub">bro.lm — Qwen3, Qwen3.5, Mistral 3.1 behind one streaming generate</span>
+    <span class="k-sub">bro.lm — Qwen3, Qwen3.5, Mistral 3.1 behind one streaming generate</span>
   </header>
-  <div class="row">
+  <div class="k-toolbar bare">
     <select id="family">
       <option value="qwen35">Qwen3.5 (safetensors dir)</option>
       <option value="qwen3">Qwen3 (GGUF)</option>
@@ -60,18 +26,18 @@
     <input type="text" id="model-path">
     <button id="btn-load">Load</button>
   </div>
-  <div class="row">
-    <label>max tokens <input type="number" id="max-tokens" min="8" max="2048" step="8" value="256"></label>
-    <label>temperature <input type="number" id="temperature" min="0" max="2" step="0.1" value="0.7"></label>
+  <div class="k-toolbar bare">
+    <label class="k-field">max tokens <input type="number" id="max-tokens" min="8" max="2048" step="8" value="256"></label>
+    <label class="k-field">temperature <input type="number" id="temperature" min="0" max="2" step="0.1" value="0.7"></label>
     <button id="btn-generate" disabled>Generate</button>
     <button id="btn-stop" disabled>Stop</button>
   </div>
   <textarea id="prompt" placeholder="ask anything…">Give me one fun fact about octopuses, in one sentence.</textarea>
-  <div id="reply"></div>
-  <div class="statusbar">
+  <div id="reply" class="k-box"></div>
+  <footer class="k-statusbar">
     <span id="status">pick a model family and Load</span>
     <span id="rate"></span>
-  </div>
+  </footer>
   <script type="module" src="/app/main.js"></script>
 </body>
 </html>

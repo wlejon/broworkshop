@@ -27,4 +27,8 @@ node_modules/
 /bin/
 bro.log
 *.png
-*.logdemos/world/planet-coarse.bin
+*.log
+demos/world/planet-coarse.bin
+
+# scripts/validate.sh output (logs, screenshots, summary)
+/tests/out/

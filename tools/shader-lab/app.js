@@ -1,162 +1,84 @@
-// tools/shader-lab/app.js
+// tools/shader-lab/app.js — live GLSL editor over a fullscreen-quad WebGL2 runtime.
 import { GLRuntime } from './gl-runtime.js';
 import { ShaderEditor } from './editor.js';
+import { boot } from "/lib/kit/app.js";
+import { ids } from "/lib/kit/dom.js";
+import { fpsMeter, toggleButton } from "/lib/kit/ui.js";
+import { params, bindControl } from "/lib/kit/params.js";
 
-class ShaderLabApp {
-    constructor() {
-        this.dom = {
-            glCanvas: document.getElementById('glCanvas'),
-            presetSelect: document.getElementById('presetSelect'),
-            compileBtn: document.getElementById('compileBtn'),
-            formatBtn: document.getElementById('formatBtn'),
-            copyBtn: document.getElementById('copyBtn'),
-            shaderCode: document.getElementById('shaderCode'),
-            logStatus: document.getElementById('logStatus'),
-            logOutput: document.getElementById('logOutput'),
-            playBtn: document.getElementById('playBtn'),
-            resetTimeBtn: document.getElementById('resetTimeBtn'),
-            scaleSelect: document.getElementById('scaleSelect'),
-            badgeFps: document.getElementById('badgeFps'),
-            badgeRes: document.getElementById('badgeRes'),
-            param1: document.getElementById('param1'),
-            param1Val: document.getElementById('param1Val'),
-            param2: document.getElementById('param2'),
-            param2Val: document.getElementById('param2Val'),
-            param3: document.getElementById('param3'),
-            param3Val: document.getElementById('param3Val'),
-            param4: document.getElementById('param4'),
-            param4Val: document.getElementById('param4Val'),
-        };
+boot();
 
-        this.isPlaying = true;
-        this.elapsedTime = 0;
-        this.lastFrameTime = performance.now();
-        this.fpsFrames = 0;
-        this.fpsLastCalc = performance.now();
+const dom = ids('glCanvas', 'presetSelect', 'compileBtn', 'formatBtn', 'copyBtn', 'shaderCode',
+                'logStatus', 'logOutput', 'playBtn', 'resetTimeBtn', 'badgeFps', 'badgeRes');
 
-        this.mouse = [0, 0, 0, 0]; // [currX, currY, clickX, clickY]
-        this.isMouseDown = false;
-        this.resolutionScale = 1.0;
+// Shader uniforms u_param1..4, edited in the panel under the viewport.
+const uniforms = { param1: 1.0, param2: 3.0, param3: 0.5, param4: 1.0 };
+params('#uniforms', uniforms, {
+    param1: { min: 0, max: 5,  step: 0.05, label: 'u_param1 (Speed / Scale)' },
+    param2: { min: 0, max: 10, step: 0.1,  label: 'u_param2 (Detail / Iterations)', fmt: (v) => v.toFixed(2) },
+    param3: { min: 0, max: 1,  step: 0.01, label: 'u_param3 (Color Morph / Palette)' },
+    param4: { min: 0, max: 2,  step: 0.05, label: 'u_param4 (Lighting / Roughness)' },
+});
 
-        try {
-            this.glRuntime = new GLRuntime(this.dom.glCanvas);
-        } catch (err) {
-            console.error('Failed to initialize WebGL2:', err);
-            return;
-        }
+let elapsedTime = 0;
+let lastFrameTime = performance.now();
+let resolutionScale = 1.0;
+const mouse = [0, 0, 0, 0];   // [currX, currY, clickX, clickY]
+let mouseDown = false;
+const fps = fpsMeter();
 
-        this.editor = new ShaderEditor(this.dom, (code) => {
-            return this.glRuntime.setFragmentShader(code);
-        });
-
-        this.initEvents();
-        this.resize();
-
-        this.loop = this.loop.bind(this);
-        requestAnimationFrame(this.loop);
-    }
-
-    initEvents() {
-        this.dom.playBtn.addEventListener('click', () => {
-            this.isPlaying = !this.isPlaying;
-            this.dom.playBtn.textContent = this.isPlaying ? '⏸ Pause' : '▶ Resume';
-            this.dom.playBtn.classList.toggle('active', this.isPlaying);
-        });
-
-        this.dom.resetTimeBtn.addEventListener('click', () => {
-            this.elapsedTime = 0;
-        });
-
-        this.dom.scaleSelect.addEventListener('change', (e) => {
-            this.resolutionScale = parseFloat(e.target.value) || 1.0;
-            this.resize();
-        });
-
-        // Mouse tracking for u_mouse
-        const canvas = this.dom.glCanvas;
-        canvas.addEventListener('mousedown', (e) => {
-            this.isMouseDown = true;
-            const rect = canvas.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const y = rect.height - (e.clientY - rect.top);
-            this.mouse[0] = x;
-            this.mouse[1] = y;
-            this.mouse[2] = x;
-            this.mouse[3] = y;
-        });
-
-        window.addEventListener('mousemove', (e) => {
-            if (!this.isMouseDown) return;
-            const rect = canvas.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const y = rect.height - (e.clientY - rect.top);
-            this.mouse[0] = x;
-            this.mouse[1] = y;
-        });
-
-        window.addEventListener('mouseup', () => {
-            this.isMouseDown = false;
-            this.mouse[2] = 0;
-            this.mouse[3] = 0;
-        });
-
-        // Sliders
-        const setupSlider = (slider, label) => {
-            slider.addEventListener('input', (e) => {
-                label.textContent = parseFloat(e.target.value).toFixed(2);
-            });
-        };
-        setupSlider(this.dom.param1, this.dom.param1Val);
-        setupSlider(this.dom.param2, this.dom.param2Val);
-        setupSlider(this.dom.param3, this.dom.param3Val);
-        setupSlider(this.dom.param4, this.dom.param4Val);
-
-        window.addEventListener('resize', () => this.resize());
-    }
-
-    resize() {
-        const dpr = window.devicePixelRatio || 1;
-        const rect = this.dom.glCanvas.getBoundingClientRect();
-        if (rect.width > 0 && rect.height > 0) {
-            const w = Math.round(rect.width * dpr * this.resolutionScale);
-            const h = Math.round(rect.height * dpr * this.resolutionScale);
-            this.dom.glCanvas.width = w;
-            this.dom.glCanvas.height = h;
-            this.dom.badgeRes.textContent = `${w} × ${h}`;
-        }
-    }
-
-    loop(now) {
-        const dt = Math.min(0.1, (now - this.lastFrameTime) * 0.001);
-        this.lastFrameTime = now;
-
-        if (this.isPlaying) {
-            this.elapsedTime += dt;
-        }
-
-        // FPS calculation
-        this.fpsFrames++;
-        if (now - this.fpsLastCalc > 500) {
-            const fps = Math.round((this.fpsFrames * 1000) / (now - this.fpsLastCalc));
-            this.dom.badgeFps.textContent = `${fps} FPS`;
-            this.fpsFrames = 0;
-            this.fpsLastCalc = now;
-        }
-
-        const uniforms = {
-            time: this.elapsedTime,
-            mouse: this.mouse,
-            param1: parseFloat(this.dom.param1.value),
-            param2: parseFloat(this.dom.param2.value),
-            param3: parseFloat(this.dom.param3.value),
-            param4: parseFloat(this.dom.param4.value),
-        };
-
-        this.glRuntime.render(uniforms);
-        requestAnimationFrame(this.loop);
-    }
+let glRuntime;
+try {
+    glRuntime = new GLRuntime(dom.glCanvas);
+} catch (err) {
+    console.error('Failed to initialize WebGL2:', err);
 }
 
-window.addEventListener('DOMContentLoaded', () => {
-    new ShaderLabApp();
-});
+if (glRuntime) {
+    new ShaderEditor(dom, (code) => glRuntime.setFragmentShader(code));
+
+    const playing = toggleButton(dom.playBtn, { on: true, labels: ['▶ Resume', '⏸ Pause'] });
+    dom.resetTimeBtn.addEventListener('click', () => { elapsedTime = 0; });
+    bindControl('#scaleSelect', { onChange: (v) => { resolutionScale = parseFloat(v) || 1.0; resize(); } });
+
+    // Mouse tracking for u_mouse (GL convention: origin bottom-left).
+    const toCanvas = (e) => {
+        const rect = dom.glCanvas.getBoundingClientRect();
+        return [e.clientX - rect.left, rect.height - (e.clientY - rect.top)];
+    };
+    dom.glCanvas.addEventListener('mousedown', (e) => {
+        mouseDown = true;
+        const [x, y] = toCanvas(e);
+        mouse[0] = mouse[2] = x;
+        mouse[1] = mouse[3] = y;
+    });
+    window.addEventListener('mousemove', (e) => {
+        if (!mouseDown) return;
+        [mouse[0], mouse[1]] = toCanvas(e);
+    });
+    window.addEventListener('mouseup', () => { mouseDown = false; mouse[2] = mouse[3] = 0; });
+    window.addEventListener('resize', resize);
+    resize();
+
+    const loop = (now) => {
+        const dt = Math.min(0.1, (now - lastFrameTime) * 0.001);
+        lastFrameTime = now;
+        if (playing.on) elapsedTime += dt;
+        dom.badgeFps.textContent = Math.round(fps.tick()) + ' FPS';
+        glRuntime.render({ time: elapsedTime, mouse, ...uniforms });
+        requestAnimationFrame(loop);
+    };
+    requestAnimationFrame(loop);
+}
+
+function resize() {
+    const dpr = window.devicePixelRatio || 1;
+    const rect = dom.glCanvas.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) {
+        const w = Math.round(rect.width * dpr * resolutionScale);
+        const h = Math.round(rect.height * dpr * resolutionScale);
+        dom.glCanvas.width = w;
+        dom.glCanvas.height = h;
+        dom.badgeRes.textContent = `${w} × ${h}`;
+    }
+}

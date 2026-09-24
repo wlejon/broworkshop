@@ -1,0 +1,203 @@
+/* lib/kit/kit.css — theme + base controls + standard app layout.
+ *
+ *   <link rel="stylesheet" href="/lib/kit/kit.css">
+ *
+ * Retheme by overriding the tokens on :root in the app's own CSS. Layout and
+ * component classes are `k-` prefixed; bare elements (button, input, select,
+ * textarea) get the dark control look so apps need no control CSS at all.
+ * See lib/kit/README.md for the page skeleton.
+ */
+
+:root {
+    color-scheme: dark;
+
+    /* surfaces */
+    --k-bg:          #0c0e12;   /* page */
+    --k-surface:     #10141c;   /* panels, readouts */
+    --k-input:       #131720;   /* fields, tracks */
+    --k-border:      #1d2330;   /* dividers */
+    --k-border-hi:   #2c3c57;   /* control outlines */
+
+    /* text */
+    --k-text:        #d7dde6;
+    --k-muted:       #97a1b2;   /* labels */
+    --k-dim:         #6b7686;   /* captions, hints */
+    --k-value:       #cfe0ff;   /* live readouts, button text */
+
+    /* controls */
+    --k-btn:         #1b2638;
+    --k-btn-hover:   #233248;
+    --k-on:          #2f6f4f;   /* toggled-on / primary */
+    --k-on-border:   #3c8c63;
+    --k-on-text:     #eafff2;
+    --k-accent:      #5c9dff;
+
+    /* status */
+    --k-ok:          #7fe6a8;
+    --k-warn:        #e6c07f;
+    --k-err:         #ff8585;
+
+    /* type + metrics */
+    --k-font:        ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --k-font-ui:     system-ui, "Segoe UI", sans-serif;
+    --k-size:        12px;
+    --k-radius:      6px;
+    --k-gap:         12px;
+    --k-pad:         18px;      /* horizontal page gutter */
+    --k-side-w:      300px;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+
+html, body { margin: 0; height: 100%; }
+body {
+    background: var(--k-bg);
+    color: var(--k-text);
+    font-family: var(--k-font);
+    font-size: var(--k-size);
+}
+
+/* ---- standard app layout --------------------------------------------------
+ *  body.k-app            column flex filling the window
+ *    header.k-header     title row
+ *    div.k-toolbar       one wrapping row of controls
+ *    div.k-body          fills the rest: side panels + main
+ *      aside.k-side      scrolling panel column (add .right for a right one)
+ *      main.k-main       flex column; put a .k-viewport or content here
+ *    footer.k-statusbar  status + readouts
+ */
+body.k-app { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+.k-header {
+    display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; flex: none;
+    padding: 14px var(--k-pad); border-bottom: 1px solid var(--k-border);
+}
+.k-header h1 { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: .3px; }
+.k-sub { color: var(--k-dim); font-size: var(--k-size); }
+.k-spacer { flex: 1; }
+
+.k-toolbar {
+    display: flex; align-items: center; gap: var(--k-gap); flex-wrap: wrap; flex: none;
+    padding: 10px var(--k-pad); border-bottom: 1px solid var(--k-border);
+}
+.k-toolbar.bare { border-bottom: none; }
+
+.k-body { flex: 1; display: flex; min-height: 0; }
+.k-main { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.k-main.pad { padding: 10px var(--k-pad); gap: 10px; overflow-y: auto; }
+.k-side {
+    width: var(--k-side-w); flex: none; overflow-y: auto;
+    display: flex; flex-direction: column; gap: 8px; padding: 10px;
+    border-right: 1px solid var(--k-border);
+}
+.k-side.right { border-right: none; border-left: 1px solid var(--k-border); }
+
+.k-statusbar {
+    display: flex; align-items: center; gap: 24px; flex-wrap: wrap; flex: none;
+    padding: 8px var(--k-pad); border-top: 1px solid var(--k-border);
+    color: #8a94a6; font-size: var(--k-size);
+}
+.k-statusbar b, .k-stats b { color: var(--k-text); font-weight: 600; }
+
+/* A canvas stage: fills its box; every canvas inside covers it. */
+.k-viewport { flex: 1; position: relative; min-height: 0; min-width: 0; overflow: hidden; }
+.k-viewport > canvas { position: absolute; left: 0; top: 0; width: 100%; height: 100%; display: block; }
+
+/* Floating panel over a full-window canvas (3D demos). */
+.k-hud {
+    position: absolute; top: 10px; left: 10px; z-index: 10;
+    min-width: 240px; max-height: calc(100% - 20px); overflow-y: auto;
+    background: rgba(12, 14, 18, 0.86); border: 1px solid var(--k-border);
+    border-radius: 8px; padding: 10px 12px;
+    display: flex; flex-direction: column; gap: 6px;
+}
+.k-hud.right { left: auto; right: 10px; }
+
+/* ---- grouping -------------------------------------------------------------- */
+.k-row { display: flex; align-items: center; gap: var(--k-gap); flex-wrap: wrap; }
+.k-col { display: flex; flex-direction: column; gap: 6px; }
+
+.k-panel {
+    background: var(--k-surface); border: 1px solid var(--k-border);
+    border-radius: 8px; padding: 8px 10px;
+    display: flex; flex-direction: column; gap: 6px;
+}
+.k-panel > h2, .k-hud > h2, .k-side > h2 {
+    margin: 0 0 2px; font-size: 11px; font-weight: 600; letter-spacing: .6px;
+    text-transform: uppercase; color: var(--k-dim);
+}
+.k-sep { width: 1px; align-self: stretch; background: var(--k-border); }
+
+/* A labelled control: <label class="k-field"><span>name</span><input><output> */
+.k-field { display: flex; align-items: center; gap: 8px; color: var(--k-muted); }
+.k-field > span:first-child { flex: none; }
+.k-panel .k-field > span:first-child, .k-hud .k-field > span:first-child,
+.k-side .k-field > span:first-child { width: 96px; overflow: hidden; }
+.k-panel .k-field > input[type=range], .k-hud .k-field > input[type=range],
+.k-side .k-field > input[type=range] { flex: 1; min-width: 0; width: auto; }
+.k-panel .k-field > select, .k-side .k-field > select, .k-hud .k-field > select { flex: 1; min-width: 0; }
+.k-val { color: var(--k-value); min-width: 44px; text-align: right; flex: none; }
+.k-toolbar .k-val { min-width: 36px; text-align: left; }
+
+/* ---- controls -------------------------------------------------------------- */
+button {
+    background: var(--k-btn); color: var(--k-value);
+    border: 1px solid var(--k-border-hi); border-radius: var(--k-radius);
+    padding: 7px 14px; font-family: inherit; font-size: var(--k-size); cursor: pointer;
+}
+button:hover { background: var(--k-btn-hover); }
+button.active, button.primary { background: var(--k-on); border-color: var(--k-on-border); color: var(--k-on-text); }
+button.danger { border-color: #7a3440; color: #ffb3b3; }
+button.small { padding: 2px 8px; font-size: 11px; }
+button:disabled { opacity: .45; cursor: default; }
+
+input[type=text], input[type=number], input[type=search], input:not([type]), select, textarea {
+    background: var(--k-input); color: var(--k-text);
+    border: 1px solid var(--k-border-hi); border-radius: var(--k-radius);
+    padding: 6px 9px; font-family: inherit; font-size: var(--k-size);
+}
+input[type=number] { width: 80px; }
+input[type=range] { width: 120px; }
+input:focus, select:focus, textarea:focus { border-color: var(--k-accent); outline: none; }
+textarea { resize: vertical; }
+.k-grow { flex: 1; min-width: 0; }
+
+/* ---- components ------------------------------------------------------------ */
+.k-chip {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: #16203a; border: 1px solid var(--k-border-hi); border-radius: 14px;
+    padding: 3px 10px;
+}
+.k-chip.on { background: var(--k-on); border-color: var(--k-on-border); }
+
+.k-progress {
+    flex: 1; min-width: 80px; height: 10px; overflow: hidden;
+    background: var(--k-input); border: 1px solid var(--k-border); border-radius: 5px;
+}
+.k-progress > div { height: 100%; width: 0%; background: var(--k-on-border); }
+
+.k-log { flex: 1; overflow-y: auto; min-height: 0; padding: 6px var(--k-pad); }
+.k-log > div { padding: 3px 0; border-bottom: 1px solid var(--k-input); white-space: pre-wrap; }
+.k-log .t { color: var(--k-dim); margin-right: 10px; }
+
+.k-stats { display: flex; gap: 20px; flex-wrap: wrap; color: #8a94a6; }
+
+.k-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--k-border); flex: none; }
+.k-tabs > button {
+    border: none; border-radius: 0; background: transparent; color: var(--k-muted);
+    padding: 8px 14px; border-bottom: 2px solid transparent;
+}
+.k-tabs > button:hover { background: var(--k-surface); }
+.k-tabs > button.active { color: var(--k-text); border-bottom-color: var(--k-accent); background: transparent; }
+
+.k-box {                       /* a bordered output area (reply, transcript) */
+    background: var(--k-surface); border: 1px solid var(--k-border); border-radius: 8px;
+    padding: 12px 14px; overflow-y: auto; line-height: 1.6; white-space: pre-wrap;
+}
+
+/* ---- text ------------------------------------------------------------------ */
+.ok   { color: var(--k-ok); }
+.warn { color: var(--k-warn); }
+.err  { color: var(--k-err); }
+.dim  { color: var(--k-dim); }

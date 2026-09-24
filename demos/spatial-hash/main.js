@@ -23,11 +23,11 @@
 //   nearest(...)           — probe line from cursor to closest agent center
 //   .size / .cellSize / .maxRadius — surfaced live in the HUD
 
-import { installSystemMenu } from "/lib/system-menu.js";
+import { boot } from "/lib/kit/app.js";
+import { stats, toggleButton, fpsMeter } from "/lib/kit/ui.js";
+import { bindControl } from "/lib/kit/params.js";
 
-// Tiny self-contained math helpers (the shared /lib/math.js MathX only mounts
-// when launched through the workshop project root; this demo stands alone, so
-// we inline just the few helpers it uses).
+// The few math helpers this demo uses.
 const MathX = {
   TAU: Math.PI * 2,
   clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); },
@@ -35,36 +35,14 @@ const MathX = {
   randRange(lo, hi) { return lo + Math.random() * (hi - lo); },
 };
 
-installSystemMenu();
+boot();
 
 const canvas = document.querySelector('#view');
 const ctx = canvas.getContext('2d');
 
-// ----- controls --------------------------------------------------------------
-const elPause   = document.querySelector('#pause');
-const elStep    = document.querySelector('#step');
-const elBrute   = document.querySelector('#brute');
-const elCount   = document.querySelector('#count');
-const elCell    = document.querySelector('#cell');
-const elRadius  = document.querySelector('#radius');
-const elCountV  = document.querySelector('#countVal');
-const elCellV   = document.querySelector('#cellVal');
-const elRadiusV = document.querySelector('#radiusVal');
-
-// ----- HUD -------------------------------------------------------------------
-const hud = {
-  fps:    document.querySelector('#fps'),
-  agents: document.querySelector('#agents'),
-  hsize:  document.querySelector('#hsize'),
-  hcell:  document.querySelector('#hcell'),
-  hmax:   document.querySelector('#hmax'),
-  qpf:    document.querySelector('#qpf'),
-  tbuild: document.querySelector('#tbuild'),
-  thash:  document.querySelector('#thash'),
-  tbrute: document.querySelector('#tbrute'),
-  speed:  document.querySelector('#speed'),
-  cand:   document.querySelector('#cand'),
-};
+// ----- HUD (the status bar's <b id=...> readouts) ----------------------------
+const hud = stats('.k-statusbar');
+const fps = fpsMeter();
 
 // ----- world -----------------------------------------------------------------
 // World units; the visible XZ region maps to the canvas. Y is the thin slab.
@@ -72,9 +50,10 @@ const WORLD_W = 1600;   // X extent
 const WORLD_D = 1000;   // Z extent
 const SLAB    = 70;     // Y in [-SLAB, +SLAB]
 
-let count    = +elCount.value;
-let cellSize = +elCell.value;
-let queryR   = +elRadius.value;
+const valueOf = (id) => +document.getElementById(id).value;
+let count    = valueOf('count');
+let cellSize = valueOf('cell');
+let queryR   = valueOf('radius');
 let bruteOn  = true;
 let paused   = false;
 let stepOnce = false;
@@ -179,27 +158,16 @@ window.addEventListener('mouseup', () => {
 });
 
 // ----- controls wiring -------------------------------------------------------
-elPause.addEventListener('click', () => {
-  paused = !paused;
-  elPause.textContent = paused ? 'Resume' : 'Pause';
-  elPause.classList.toggle('active', paused);
-});
-elStep.addEventListener('click', () => { stepOnce = true; });
-elBrute.addEventListener('click', () => {
-  bruteOn = !bruteOn;
-  elBrute.textContent = 'Brute compare: ' + (bruteOn ? 'on' : 'off');
-  elBrute.classList.toggle('active', !bruteOn);
-});
-elCount.addEventListener('input', () => {
-  count = +elCount.value; elCountV.textContent = count; resizeFlock(count);
-});
-elCell.addEventListener('input', () => {
-  cellSize = +elCell.value; elCellV.textContent = cellSize;
+toggleButton('#pause', { labels: ['Pause', 'Resume'], onChange: (on) => { paused = on; } });
+document.getElementById('step').addEventListener('click', () => { stepOnce = true; });
+toggleButton('#brute', { on: true, labels: ['Brute compare: off', 'Brute compare: on'],
+                         onChange: (on) => { bruteOn = on; } });
+bindControl('#count', { out: '#countVal', onChange: (v) => { count = v; resizeFlock(count); } });
+bindControl('#cell', { out: '#cellVal', onChange: (v) => {
+  cellSize = v;
   hash.reset(cellSize);   // exercise reset(): new cell size + clear
-});
-elRadius.addEventListener('input', () => {
-  queryR = +elRadius.value; elRadiusV.textContent = queryR;
-});
+} });
+bindControl('#radius', { out: '#radiusVal', onChange: (v) => { queryR = v; } });
 
 // ----- simulation step -------------------------------------------------------
 // Per-boid separation steering using radiusQuery. Returns total candidate
@@ -311,7 +279,6 @@ function runTools() {
 }
 
 // ----- timing ----------------------------------------------------------------
-let lastFps = 0, fpsAccum = 0, fpsCount = 0, fpsT = 0;
 let tBuild = 0, tHash = 0, tBrute = 0, avgCand = 0;
 
 function simulate(dt) {
@@ -490,20 +457,19 @@ function frame() {
 
   draw();
 
-  // FPS (1s window) + HUD.
-  fpsAccum += dt; fpsCount++; fpsT += dt;
-  if (fpsT >= 0.5) { lastFps = fpsCount / fpsAccum; fpsAccum = 0; fpsCount = 0; fpsT = 0; }
-  hud.fps.textContent    = lastFps.toFixed(0);
-  hud.agents.textContent = count;
-  hud.hsize.textContent  = hash.size;
-  hud.hcell.textContent  = hash.cellSize;
-  hud.hmax.textContent   = sphereHash.maxRadius.toFixed(0);
-  hud.qpf.textContent    = qPerFrame;
-  hud.tbuild.textContent = tBuild.toFixed(2);
-  hud.thash.textContent  = tHash.toFixed(2);
-  hud.tbrute.textContent = bruteOn ? tBrute.toFixed(2) : 'off';
-  hud.speed.textContent  = (bruteOn && tHash > 0) ? (tBrute / tHash).toFixed(1) + '×' : '—';
-  hud.cand.textContent   = avgCand.toFixed(1);
+  hud.set({
+    fps:    fps.tick().toFixed(0),
+    agents: count,
+    hsize:  hash.size,
+    hcell:  hash.cellSize,
+    hmax:   sphereHash.maxRadius.toFixed(0),
+    qpf:    qPerFrame,
+    tbuild: tBuild.toFixed(2),
+    thash:  tHash.toFixed(2),
+    tbrute: bruteOn ? tBrute.toFixed(2) : 'off',
+    speed:  (bruteOn && tHash > 0) ? (tBrute / tHash).toFixed(1) + '×' : '—',
+    cand:   avgCand.toFixed(1),
+  });
 
   requestAnimationFrame(frame);
 }
@@ -518,9 +484,6 @@ window.addEventListener('resize', resize);
 // layout; the load event fires after, so the backing store matches the box).
 function init() {
   resize();
-  elCountV.textContent = count;
-  elCellV.textContent = cellSize;
-  elRadiusV.textContent = queryR;
   spawnSpheres();
   resizeFlock(count);
   requestAnimationFrame(frame);

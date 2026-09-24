@@ -58,11 +58,11 @@ export class ShaderEditor {
     updateLog(result) {
         if (result.success) {
             this.dom.logStatus.textContent = 'Compiled cleanly';
-            this.dom.logStatus.className = 'status-ok';
+            this.dom.logStatus.className = 'ok';
             this.dom.logOutput.textContent = result.log || 'OK';
         } else {
             this.dom.logStatus.textContent = 'Compilation Error';
-            this.dom.logStatus.className = 'status-err';
+            this.dom.logStatus.className = 'err';
             this.dom.logOutput.textContent = result.error || 'Unknown error';
         }
     }
