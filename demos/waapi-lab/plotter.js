@@ -4,9 +4,8 @@
 // The line is what the preset asked for (parsed here from the easing string).
 // The dots are (directed iteration fraction, getComputedTiming().progress)
 // pairs sampled every frame: what the engine actually applied. When the two
-// agree the dots sit on the line. When they don't, the gap is the finding —
-// steps() is the live example: bro does not parse it and falls back to
-// `ease`, so the requested staircase gets a smooth S of dots instead.
+// agree the dots sit on the line. When they don't, the gap is the finding:
+// an easing the engine did not honour shows up as dots off the curve.
 
 /** Parse a CSS easing into { kind: 'bezier', p } | { kind: 'steps', n, start }. */
 export function parseEasing(str) {
@@ -30,7 +29,7 @@ const bez = (t, a, b) => 3 * a * t * (1 - t) * (1 - t) + 3 * b * t * t * (1 - t)
 /** The eased value of `x` in [0,1] under a parsed easing. */
 export function ease(e, x) {
     if (e.kind === 'steps') {
-        const k = e.start ? Math.ceil(x * e.n) : Math.floor(x * e.n);
+        const k = Math.floor(x * e.n) + (e.start ? 1 : 0);
         return Math.min(1, k / e.n);
     }
     const [x1, y1, x2, y2] = e.p;
@@ -49,8 +48,18 @@ export function ease(e, x) {
  */
 export function deviation(e, trail) {
     let d = 0;
-    for (const s of trail) d = Math.max(d, Math.abs(s.y - ease(e, s.x)));
+    for (const s of trail) d = Math.max(d, offCurve(e, s));
     return d;
+}
+
+// Distance of a sample from the curve. A step function jumps, and a sample
+// taken exactly at a jump may land on either side of it depending on the
+// last bit of the float that measured x — both sides count as on the curve.
+function offCurve(e, s) {
+    const d = Math.abs(s.y - ease(e, s.x));
+    if (e.kind !== 'steps') return d;
+    const eps = 1e-6;
+    return Math.min(d, Math.abs(s.y - ease(e, s.x - eps)), Math.abs(s.y - ease(e, s.x + eps)));
 }
 
 const W = 300, H = 200, PX = 26, PY = 26;
@@ -86,7 +95,7 @@ export function drawPlot(canvas, easingStr, trail, cur) {
 
     // Measured samples: green on the curve, amber off it.
     for (const s of trail) {
-        const off = Math.abs(s.y - ease(e, s.x)) > 0.02;
+        const off = offCurve(e, s) > 0.02;
         ctx.fillStyle = off ? '#e6c07f' : '#7fe6a8';
         ctx.fillRect(sx(s.x) - 1.5, sy(s.y) - 1.5, 3, 3);
     }

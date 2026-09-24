@@ -1,6 +1,6 @@
 // support.js — what this engine's Web Animations implementation actually does,
 // probed at startup on a throwaway element rather than asserted from memory.
-// Each row is a live measurement; the lab's notes explain the "no" rows.
+// Each row is a live measurement.
 
 export function probeSupport(host) {
     const el = document.createElement('div');
@@ -36,6 +36,16 @@ export function probeSupport(host) {
     out.keyframeEasing = op < 0.45 ? 'yes' : `no (opacity ${op} at 50%)`;
     k.cancel();
 
+    // A CSS animation is a CSSAnimation in getAnimations(), and every layer of
+    // a comma list runs (@keyframes waapiCompare lives in style.css).
+    el.style.animation = 'waapiCompare 1s linear infinite, waapiCompare 2s linear infinite';
+    const css = el.getAnimations();
+    out.cssAnimations = css.length > 0 && css[0] instanceof CSSAnimation &&
+        css[0].animationName === 'waapiCompare' && document.getAnimations().includes(css[0])
+        ? 'yes' : `no (${css.length} listed)`;
+    out.cssLayers = css.length === 2 ? 'yes' : `no (${css.length} of 2 layers)`;
+    el.style.animation = '';
+
     el.remove();
     return out;
 }
@@ -51,4 +61,12 @@ export const SUPPORT_LABELS = {
     commitStyles: 'commitStyles()',
     persist: 'persist()',
     updateTiming: 'effect.updateTiming()',
+    cssAnimations: 'CSS animations in getAnimations()',
+    cssLayers: 'comma-list CSS animations',
 };
+
+/** A probe value that reads as supported. */
+export function supported(key, v) {
+    return v === true || v === 'yes' || v === 'InvalidStateError' ||
+        (key === 'stepsReportedAs' && /^steps\(/.test(String(v)));
+}

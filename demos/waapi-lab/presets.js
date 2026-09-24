@@ -154,9 +154,7 @@ export const ANIMATION_PRESETS = [
         id: 'glitch-shake',
         name: 'Cyberpunk Glitch & Slices',
         description: 'High-frequency polygon clip-path slicing with RGB channel jitter.',
-        // steps() is kept on purpose: bro does not parse it and falls back to
-        // `ease`, and the plotter shows the measured gap against the staircase.
-        note: 'steps() is not supported by bro: the engine runs this preset on `ease`. The plot shows the requested staircase and the measured S-curve.',
+        // steps(): the plotter's measured dots land on the staircase.
         targetType: 'glitchBanner',
         timing: {
             duration: 900,

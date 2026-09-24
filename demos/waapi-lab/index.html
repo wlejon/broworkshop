@@ -112,10 +112,10 @@
       <section class="k-panel">
         <h2>Engine support <span class="dim">probed at startup</span></h2>
         <div id="support"></div>
-        <p class="k-note">Documented gaps: <code>steps()</code> falls back to <code>ease</code>;
-          <code>updatePlaybackRate</code>, <code>commitStyles</code>, <code>persist</code> and
-          <code>updateTiming</code> are absent; <code>pending</code> is always false, so setting
-          <code>playbackRate</code> directly is seamless anyway.</p>
+        <p class="k-note">CSS <code>@keyframes</code> animations are the same objects as
+          <code>element.animate()</code> ones: the arena's CSS lane is a <code>CSSAnimation</code> in
+          <code>getAnimations()</code>. <code>pending</code> is always false (play and pause apply at once),
+          so <code>updatePlaybackRate()</code> and setting <code>playbackRate</code> behave alike.</p>
       </section>
 
       <section class="k-panel">

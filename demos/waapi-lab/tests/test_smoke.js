@@ -10,6 +10,7 @@ import { test, check, eq, near, frames, clickOn, shot, done } from '/lib/kit/tes
 import { lab, loadPreset, applyTiming, refresh } from '/app/lab.js';
 import { ctl, seek } from '/app/waapi.js';
 import { parseEasing, ease } from '/app/plotter.js';
+import { rotationOf } from '/app/compare.js';
 
 const $ = (id) => document.getElementById(id);
 const row = (id, i) => $(id).children[i];
@@ -34,12 +35,24 @@ test('engine support is probed, not asserted', () => {
     eq(s.animate, true, 'animate');
     eq(s.keyframeEasing, 'yes', 'per-keyframe easing');
     eq(s.finishInfinite, 'InvalidStateError', 'finish() on infinite throws per spec');
-    // Documented gaps. If one flips, the lab should drop the matching note.
-    check(/^no/.test(s.steps), 'steps() falls back: ' + s.steps);
-    eq(s.updatePlaybackRate, false, 'updatePlaybackRate');
-    eq(s.commitStyles, false, 'commitStyles');
-    eq($('support').children.length, 10, 'support rows');
-    check(row('support', 0).classList.contains('on'), 'animate row lit');
+    eq(s.steps, 'yes', 'steps() is a staircase');
+    eq(s.stepsReportedAs, 'steps(4)', 'getTiming().easing reads it back');
+    eq(s.updatePlaybackRate, true, 'updatePlaybackRate');
+    eq(s.commitStyles, true, 'commitStyles');
+    eq(s.persist, true, 'persist');
+    eq(s.updateTiming, true, 'effect.updateTiming');
+    eq(s.cssAnimations, 'yes', 'CSS animations are CSSAnimations in getAnimations()');
+    eq(s.cssLayers, 'yes', 'every layer of a comma list runs');
+    eq($('support').children.length, 12, 'support rows');
+    // Every row lit but `pending`, which is always false by design.
+    const keys = Object.keys(s);
+    for (let i = 0; i < $('support').children.length; i++) {
+        const lit = row('support', i).classList.contains('on');
+        const label = row('support', i).firstChild.textContent;
+        if (label === 'anim.pending') check(!lit, 'pending row unlit');
+        else check(lit, 'row lit: ' + label + ' = ' + val('support', i));
+    }
+    check(keys.length === 12, 'twelve probes');
 });
 
 test('telemetry is the engine progress, and it sits on the requested curve', () => {
@@ -53,16 +66,18 @@ test('telemetry is the engine progress, and it sits on the requested curve', () 
     check(row('plotReadout', 2).classList.contains('on'), 'deviation row green');
 });
 
-test('steps(): the measured curve is visibly not the staircase', () => {
+test('steps(): the measured curve is the staircase', () => {
     choose('presetSelect', 'glitch-shake');
     check(!$('target-glitchBanner').hidden, 'glitch on stage');
-    check(!$('presetNote').hidden && /steps\(\)/.test($('presetNote').textContent), 'the gap is explained on screen');
+    check($('presetNote').hidden, 'no gap to explain');
     lab.trail = [];
     for (let i = 0; i < 50; i++) { advanceTime(16); refresh(); }
     const dev = parseFloat(val('plotReadout', 2));
-    check(dev > 0.05, 'measured progress departs from steps(6): ' + dev);
-    eq(val('plotReadout', 1), 'ease', 'engine reports the ease fallback');
-    check(!row('plotReadout', 2).classList.contains('on'), 'deviation row not green');
+    check(dev <= 0.02, 'measured progress sits on steps(6): ' + dev);
+    eq(val('plotReadout', 1), 'steps(6)', 'engine reports steps(6)');
+    check(row('plotReadout', 2).classList.contains('on'), 'deviation row green');
+    // Only whole steps: every sampled progress is a multiple of 1/6.
+    for (const s of lab.trail) near(s.y * 6, Math.round(s.y * 6), 1e-4, 'progress on a step: ' + s.y);
     shot('steps');
 });
 
@@ -185,6 +200,31 @@ test('arena: the CSS @keyframes lane moves with the other two', () => {
     choose('presetSelect', 'comparison-arena');
     const gap = laneGap(0, 1);
     check(gap < 3, 'WAAPI vs CSS largest gap under 3°: ' + gap);
+});
+
+// The CSS lane is a Web Animation too: getAnimations() hands back its
+// CSSAnimation, whose clock matches the WAAPI lane's and which script can
+// seek like any other animation.
+test('arena: the CSS lane is a CSSAnimation script can drive', () => {
+    choose('presetSelect', 'comparison-arena');
+    frames(3);
+    const css = $('laneCss').getAnimations();
+    eq(css.length, 1, 'one animation on the CSS lane');
+    check(css[0] instanceof CSSAnimation, 'a CSSAnimation');
+    eq(css[0].animationName, 'waapiCompare', 'animationName');
+    check(document.getAnimations().includes(css[0]), 'listed by document.getAnimations()');
+    near(css[0].currentTime, ctl.primary.currentTime, 20, 'same clock as the WAAPI lane');
+    eq(css[0].effect.getKeyframes().length, 3, 'keyframes from the @keyframes rule');
+    css[0].pause();
+    css[0].currentTime = 500;   // a quarter of 2 s: half way to the 180° keyframe
+    flush();
+    const r = rotationOf($('laneCss'));
+    // Half of the first interval under the per-interval cubic-bezier: ~139°.
+    near(r, 180 * ease(parseEasing('cubic-bezier(0.4, 0, 0.2, 1)'), 0.5), 3,
+         'seeking the CSS animation moves the lane');
+    css[0].play();
+    // Re-picking the preset restarts the lanes together again.
+    choose('presetSelect', 'comparison-arena');
 });
 
 loadPreset('elastic-pop');

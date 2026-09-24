@@ -7,7 +7,7 @@ import { ANIMATION_PRESETS, getPresetById } from "/app/presets.js";
 import { ctl, run, playPause, reverse, cancel, finish, setRate, seek, telemetry } from "/app/waapi.js";
 import { drawPlot, parseEasing, deviation } from "/app/plotter.js";
 import { COMPARE, initCompare, startCompare, stopCompare, measureCompare } from "/app/compare.js";
-import { probeSupport, SUPPORT_LABELS } from "/app/support.js";
+import { probeSupport, SUPPORT_LABELS, supported } from "/app/support.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -47,8 +47,7 @@ export function start(bootedApp) {
     const sup = readout('#support', SUPPORT_LABELS);
     for (const k of Object.keys(SUPPORT_LABELS)) {
         const v = lab.support[k];
-        sup.set(k, v === true ? 'yes' : v === false ? 'no' : String(v),
-                v === true || v === 'yes' || v === 'InvalidStateError');
+        sup.set(k, v === true ? 'yes' : v === false ? 'no' : String(v), supported(k, v));
     }
 
     rates = segmented('#rates', [[0.25, '0.25x'], [0.5, '0.5x'], [1, '1x'], [2, '2x'], [-1, '-1x']], {

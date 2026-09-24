@@ -39,19 +39,17 @@ original height when the card grows taller. Predates the inline rewrite.
 
 ### DOM APIs, events, CSS animations
 
-#### Script `el.click()` focuses the element without the engine's focus handoff (2026-09-24)
-`clickElement` (`element_activation.cpp`) makes the element
-`document.activeElement` but skips the engine's focus path, so a checkbox
-clicked from script reads as focused yet ignores Space. Browsers do not focus
-on `click()` at all.
+#### CSS transitions are not `CSSTransition` objects (2026-09-24)
+CSS animations now appear in `getAnimations()` as `CSSAnimation`s (bro
+e983ea14); running transitions do not appear at all.
 
-#### `el.getAnimations()` omits CSS animations (2026-09-24)
-Only WAAPI animations are listed; a running CSS animation on the element is
-not (the same gap as `document.getAnimations()` in the notes below).
+#### A CSS animation under `display: none` keeps its clock running (2026-09-24)
+It stops driving frames and events but is not cancelled; the spec cancels it
+(and restarts it when the element is displayed again).
 
-#### CSS animations run only the first layer of a comma list (2026-09-24)
-`animation: a 1s, b 2s` animates only `a`; the computed longhands report
-both layers.
+#### `document.getAnimations()` orders CSS animations by creation, not tree order (2026-09-24)
+CSS animations come first, in creation order, then script animations; the
+spec orders CSS animations by tree order of their targets.
 
 ### Windows, workers, messaging
 
@@ -140,11 +138,6 @@ from the commit before the kit rebuild.
 
 ## Notes (not bugs; doc gaps worth a line)
 
-- WAAPI gaps are documented in docs/web-animations-api.js and demos/waapi-lab
-  probes them live: `steps()` falls back to `ease` (and `getTiming().easing`
-  then reports `"ease"`); `updatePlaybackRate`, `commitStyles`, `persist`,
-  `effect.updateTiming` are absent; `document.getAnimations()` lists only
-  script animations, not running CSS animations.
 - `<select>.value` round-trips correctly now; older app comments claiming
   otherwise are stale.
 - `performance.now()` in headless advances only with virtual time, so fps/ms
@@ -163,6 +156,7 @@ from the commit before the kit rebuild.
 - `postMessage({ v: view }, [view.buffer])` clones then detaches — brokit efcb977, bro 04729bdd; verified 2026-09-24. window-lab sends the view transferred.
 - `new Worker(new URL(...), { type: 'module' })` works — bro 06899506; verified 2026-09-24. worker-sim and stompworld use it.
 - Scene, verified 2026-09-24 (bro `tests/scene/` 58/58): `unprojectLocal(x, y)` → `{ origin, dir }` works with `setCamera` and camera nodes, plus the inverse `projectLocal(x, y, z)` (a7347b39; kit `sceneViewport.ray/toScreen`, arcade `rayAt/toScreen` and `pickRay` wrap them); TileWorld `addObject({ color })` tint and the dropped `addObjectKind` style keys (1ada0970); `atlasPixels` takes any byte view (a1136e4d); `setFog(null)` (c3b9f275); sprite `isPlaying` / `currentAnimation` (f5a7b7bb); 2D particle options and `liveCount` (d1bfc7f9); one wrapper per scene node, so `===` works (daec207d); a scene HtmlNode takes clicks only where it shows content and honours `pointer-events: none` (1b4e093b; farm's name tags are `pointer-events: none`).
+- CSS animations and WAAPI are one model, verified 2026-09-24 (bro `tests/style/test_css_animation_objects.js`, `test_waapi_timing_and_lifecycle.js`): script `el.click()` no longer focuses, a label's click focuses its control properly (d32ff816); CSS animations are `CSSAnimation` objects in `el.getAnimations()` / `document.getAnimations()`, every layer of a comma list runs, `steps()` / `linear()` easings, `updatePlaybackRate`, `commitStyles`, `persist`, `effect.updateTiming`, and filled animations are auto-removed (e983ea14). An invalid easing string now throws a TypeError. waapi-lab asserts all of it.
 - Follow-ups, verified 2026-09-24: `pre-wrap` / `break-word` / mixed block-and-inline blocks wrap inside text after an inline element, and inline padding mirrors on RTL text (htmlayout 72777c7, bro e6a66434); element rects subtract the root scroll, `window.scrollTo` / `scrollY` / `scrollIntoView` move the viewport (af6c4219); `setRangeText` records one undo step and `execCommand('undo'/'redo')` works in inputs and textareas (aed8325b; desktop-notebook drops its JS undo history); `deleteContents` / `surroundContents` free what they remove unless script holds it (ef5aa488); Worker `postMessage` keeps buffer identity (235dad45).
 - Paint and DOM APIs, verified 2026-09-24 (bro `tests/style/`, `tests/dom/`, `tests/shadow_dom/`, `tests/events/`): `linear-gradient()` with `rgb()` stops (625516ac); tabs in `<pre>` advance to 8-column stops (d8f1039b); scrollbars follow the colour scheme and `scrollbar-color` (ea32f7e5); `CSS`, `Option`, `details.open` (bro 4450b38e, htmlayout 5483b87); selector lists split only at top-level commas (htmlayout 2e05b3d); DOMParser parses XML/SVG as XML with `parsererror` (4ca1d817); MutationObserver records for `innerHTML =` / `textContent =` (95402d6a); shadow `<style>` scoped per root, slotted children inherit from the slot (108b7bcb); keydown runs before a control's default action (ead08d78); `animation` shorthand with `cubic-bezier()` and computed longhands (htmlayout 7b0ddbc, bro 38f6d4e3), per-keyframe-interval easing (8c4e7849), removing `animation-name` cancels (35cfe935), animation/transition event fields (70f41130); a paused animation stays held when `currentTime` is written (8abda133); MediaQueryList change `currentTarget` (4033b5e9); each page module script runs as its own module under its own URL (96fb8f99). waapi-lab's CSS keyframes lane passes; the dom-lab, platform-lab, range-selection-lab, character-lab and node-forge tests assert the fixed behaviour. Note: text/comment nodes a script or MutationRecord holds now survive `innerHTML` replacement detached instead of being freed.
 - Animation, media, ML, game AI, verified 2026-09-24 (ML targets run with `--ml` on the GPU): `applySkinning` takes `computeSkinningMatrices` output (bromesh f573ade, bro 5828be0a; mesh-viewer uses joint matrices); `Pose.data` is a copy by design, docs show edit-then-assign (5828be0a); `blendState().pos` absent without a blend space (ba917f37); `bro.image.gpu.colormap` — a webgl2 context now takes its drawing-buffer size from the canvas's width/height attributes at creation (a2881563); `bro.media.thumbnails().data` is a Uint8ClampedArray (f9b54b1c); `<video>` `load()` resets, fires `emptied`, and an unplayable source sets `error` code 4 (1d5fd6b9; media-inspector drops its timeout); brovisionml loaders load before moving to the GPU, docs say they are synchronous (brovisionml d56f93c, bro 3f93a71b); TripoSplat clouds come back upright facing +Z (brodiffusion 90aa215, bro 52e72df2); docs/diar-api.js `loadClusterDiarizer` arguments (923243c9); native `NavGrid.field` flow field, and `setCellCost` now prices A* (brogameagent 6477939, bro 91b1e46d; tactical-flowfield drops its JS wave); terrain `setVoxel`, clipmap `detailRelief` and FastNoise Feature Scale documented (5272b828).
