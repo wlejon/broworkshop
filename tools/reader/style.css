@@ -27,8 +27,10 @@ button.danger { color: var(--k-err); }
 }
 .card-title { font-size: 15px; font-weight: 600; font-family: var(--k-font-ui); }
 .card-meta { color: var(--k-dim); }
+.card .k-progress { flex: none; }
 .card .k-progress > div { background: var(--rd-word); }
-.card-row { display: flex; gap: 8px; margin-top: 4px; }
+/* A card stretched to a taller neighbour keeps its buttons at the bottom. */
+.card-row { display: flex; gap: 8px; margin-top: auto; padding-top: 4px; }
 .card-row .open { flex: 1; }
 
 /* ── reader ── */

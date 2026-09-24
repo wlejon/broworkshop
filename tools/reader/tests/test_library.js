@@ -65,6 +65,32 @@ try {
         fs.unlinkSync(p);
     });
 
+    test('cards in a row share its height, buttons at the bottom', () => {
+        // A long title makes one card taller; its neighbour stretches with the
+        // row, and its contents follow the stretch (a thin bar, the buttons
+        // pinned to the bottom edge).
+        const title = library[0].title;
+        library[0].title = 'A title long enough to wrap over several lines of its card, ' +
+            'so that this card is plainly the taller of the two in the row';
+        renderLibrary();
+        frames(2);
+        const cards = [...document.querySelectorAll('.card')];
+        const r = cards.map(c => c.getBoundingClientRect());
+        check(Math.abs(r[0].top - r[1].top) < 1 && Math.abs(r[0].height - r[1].height) < 1,
+              'one row, one height: ' + r.map(x => x.top + '/' + x.height).join(' '));
+        for (const c of cards) {
+            const bar = c.querySelector('.k-progress').getBoundingClientRect();
+            check(bar.height < 16, 'the bar stays thin: ' + bar.height);
+            const row = c.querySelector('.card-row').getBoundingClientRect();
+            const cr = c.getBoundingClientRect();
+            check(Math.abs(cr.bottom - row.bottom - 15) < 1,
+                  'the buttons sit at the bottom: row ' + row.bottom + ', card ' + cr.bottom);
+        }
+        library[0].title = title;
+        renderLibrary();
+        frames(2);
+    });
+
     test('unsupported files are reported, not imported', () => {
         const p = tmp + '/_nope.pdf';
         fs.writeFileSync(p, 'x');
