@@ -14,7 +14,8 @@ const card = () => F.view.card(node).root;
 // A dialog section by summary text, opened the way a user does (a summary click).
 function section(name) {
     const d = [...q('.ng-dialog-body').querySelectorAll('details')].find((x) => x.querySelector('summary').textContent.includes(name));
-    if (!d.hasAttribute('open')) { d.querySelector('summary').click(); frames(1); }
+    if (!d.open) { d.querySelector('summary').click(); frames(1); }
+    check(d.open, `section ${name} opened`);
     return d;
 }
 const changed = (prev) => () => node._out && node._out[0].samples !== prev;

@@ -76,9 +76,8 @@ export function treeOf(node) {
 
 /**
  * parseFromString + analysis. The root is <body> for text/html and the
- * documentElement for XML types. An XML type whose document came back as an
- * HTML document (<html><head><body>) is flagged `parsedAsHtml`: an XML
- * parser never adds those.
+ * documentElement for XML types, where a document that is not well-formed
+ * comes back holding a <parsererror>.
  */
 export function parse(markup, mime) {
     const t0 = Date.now();
@@ -96,7 +95,6 @@ export function parse(markup, mime) {
     try { serialized = new XMLSerializer().serializeToString(doc); } catch (e) { serialized = `(serialization error: ${e.message})`; }
     return {
         ok: true, mime, ms: Date.now() - t0, doc,
-        parsedAsHtml: !html && !!doc.documentElement && doc.documentElement.nodeName.toLowerCase() === 'html' && !!doc.body,
         metrics: measureTree(root), tree: treeOf(root), serialized,
     };
 }
@@ -120,14 +118,8 @@ export function loadPreset(key) {
 
 export function runParser() {
     const res = parserState.last = parse($('#parserInput').value, $('#parserMime').value);
-    const stats = $('#parserStats'), tree = $('#parserTree'), note = $('#parserNote');
+    const stats = $('#parserStats'), tree = $('#parserTree');
     clear(tree);
-    note.hidden = !(res.ok && res.parsedAsHtml);
-    if (res.ok && res.parsedAsHtml) {
-        note.textContent = `${res.mime} came back as an HTML document (<html><head><body>, names lowercased, ` +
-            'no well-formedness checks): bro\'s DOMParser runs the HTML parser for XML types. ' +
-            'See ENGINE-ISSUES.md.';
-    }
     if (!res.ok) {
         stats.textContent = `parse error (${res.ms} ms)`;
         stats.className = 'k-chip err';

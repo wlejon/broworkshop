@@ -178,9 +178,9 @@ test('arena: WAAPI and rAF lanes agree when measured from computed style', () =>
     clickOn('#btnPlay');
 });
 
-// Known engine failure (ENGINE-ISSUES.md 2026-09-24, "animation shorthand with
-// cubic-bezier() is dropped"): the CSS lane's `animation:` shorthand never
-// applies, so lane 2 stands still. Asserts the correct behaviour.
+// The CSS lane's `animation:` shorthand carries a cubic-bezier() easing that
+// applies per keyframe interval, and re-picking the preset restarts it with
+// the other two lanes.
 test('arena: the CSS @keyframes lane moves with the other two', () => {
     choose('presetSelect', 'comparison-arena');
     const gap = laneGap(0, 1);

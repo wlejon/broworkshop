@@ -76,9 +76,7 @@ test('mutation observer: childList, attributes, characterData records', () => {
     frames(1);
     eq(q('#observed-list').children.length, 0);
     // Per spec innerHTML = '' queues one childList record removing every child.
-    // bro queues none (ENGINE-ISSUES.md, "MutationObserver: `innerHTML = ''` /
-    // `textContent = ''` queue no childList record"); flip this to a check once fixed.
-    if (!/added 0, removed/.test(logText('#mutation-log'))) console.log('  (known engine issue: innerHTML = "" queued no childList record)');
+    check(/added 0, removed/.test(logText('#mutation-log')), 'innerHTML = "" queued a childList record removing the children');
     check(mutationState.records >= n0 + 3, 'records counted');
     clickOn('#clear-mutation-log');
     eq(q('#mutation-log').childElementCount, 0);

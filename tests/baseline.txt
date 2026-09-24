@@ -209,7 +209,7 @@ PASS test demos/vision-lab/tests/test_smoke.js
 PASS smoke demos/vlm-lab 
 PASS test demos/vlm-lab/tests/test_smoke.js 
 PASS smoke demos/waapi-lab 
-FAIL test demos/waapi-lab/tests/test_smoke.js rc=1: evalScriptFileJit: uncaught Error: 1 failed: arena: the CSS @keyframes lane moves with the other two
+PASS test demos/waapi-lab/tests/test_smoke.js
 PASS smoke demos/window-lab 
 PASS test demos/window-lab/tests/test_smoke.js
 PASS smoke games/2048 

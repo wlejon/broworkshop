@@ -20,12 +20,6 @@ function settle() {
     frames(1);
 }
 
-function known(ok, isKnownWrong, issue, msg) {
-    if (ok) return;
-    if (isKnownWrong) { console.log(`  KNOWN ENGINE ISSUE (${issue}): ${msg}`); return; }
-    check(false, msg);
-}
-
 // =============================================================================
 // MutationObserver
 // =============================================================================
@@ -129,7 +123,6 @@ test('parser: the HTML preset parses into a tree', () => {
     eq(res.metrics.attributes, 7, 'class, id, class, class, 3 × data-status');
     check(/9 elements, 7 attrs, depth \d/.test(text('#parserStats')), 'stats chip: ' + text('#parserStats'));
     eq(document.querySelectorAll('#parserTree .node').length > 9, true, 'tree drawn');
-    check(q('#parserNote').hidden, 'no note for text/html');
 });
 
 test('parser: presets set the MIME type', () => {
@@ -145,18 +138,23 @@ test('parser: XML types build an XML document', () => {
         setValue('#parserPreset', key);
         const res = parserState.last;
         const root = key === 'svg' ? 'svg' : 'application';
-        const ok = res.ok && !res.parsedAsHtml && res.tree.tag === root;
-        known(ok, res.ok && res.parsedAsHtml, 'DOMParser parses XML with the HTML parser',
-            `${SAMPLES[key].mime} roots at <${root}>, got <${res.ok && res.tree.tag}>`);
-        if (res.parsedAsHtml) check(!q('#parserNote').hidden && /HTML document/.test(text('#parserNote')), 'and the tab says so');
+        check(res.ok, `${SAMPLES[key].mime} parses`);
+        eq(res.tree.tag, root, `${SAMPLES[key].mime} roots at <${root}>`);
+        eq(res.doc.body == null, true, 'an XML document has no <body>');
     }
+    // Names keep their case in an XML document.
+    setValue('#parserPreset', 'svg');
+    const lg = parserState.last.doc.getElementsByTagName('linearGradient')[0] ||
+               parserState.last.doc.documentElement.firstElementChild.firstElementChild;
+    eq(lg && lg.nodeName, 'linearGradient', 'SVG camelCase name kept');
 });
 
 test('parser: malformed XML reports a parse error', () => {
     setValue('#parserPreset', 'error');
     const res = parserState.last;
-    known(!res.ok && /error/i.test(text('#parserStats')), res.ok && res.parsedAsHtml,
-        'DOMParser parses XML with the HTML parser', 'malformed XML → <parsererror>, got ok=' + res.ok);
+    check(!res.ok, 'malformed XML → <parsererror>');
+    check(/error/i.test(text('#parserStats')), 'stats chip says parse error: ' + text('#parserStats'));
+    check(/XML Parsing Error/.test(res.error), 'the parsererror text is shown: ' + res.error);
 });
 
 test('parser: an unsupported type is reported, not thrown', () => {

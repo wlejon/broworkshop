@@ -61,14 +61,9 @@ const anim = animState.transport;
 assert(anim, 'transport animation was created by element.animate()');
 assert(anim.id === 'pl-transport', 'options.id round-tripped to anim.id, got ' + anim.id);
 assert(anim.playState === 'paused', 'app boots the transport paused, got ' + anim.playState);
-// The app parks it with pause() then currentTime = 0. bro keeps the clock
-// running after a currentTime write on a paused animation (playState still
-// says paused): ENGINE-ISSUES.md "Writing `Animation.currentTime` un-holds a
-// paused animation". Tighten to an assert once fixed.
-if (anim.currentTime !== 0) {
-    console.log('  (known engine issue: paused transport drifted to currentTime ' +
-                Math.round(anim.currentTime) + ', want 0)');
-}
+// The app parks it with pause() then currentTime = 0: a seek on a paused
+// animation holds it there.
+assert(anim.currentTime === 0, 'the paused transport holds currentTime 0, got ' + anim.currentTime);
 assert(anim.playbackRate === 1, 'default playbackRate is 1, got ' + anim.playbackRate);
 assert(anim.pending === false, 'pending is always false — control ops apply immediately');
 
@@ -434,12 +429,7 @@ assert(mqState.onchangeFires === 1, 'onchange fired once, got ' + mqState.onchan
     assert(ev.matches === false, 'event.matches carries the flip value, got ' + ev.matches);
     assert(ev.media === LISTENER_QUERY, 'event.media is the query, got ' + ev.media);
     assert(ev.targetIsMql === true, 'event.target is the MediaQueryList');
-    // Should be the MediaQueryList (docs/matchmedia-api.js lists currentTarget);
-    // bro delivers undefined. ENGINE-ISSUES.md "MediaQueryList change event
-    // has no currentTarget". Tighten to an assert once fixed.
-    if (ev.currentTargetIsMql !== true) {
-        console.log('  (known engine issue: MediaQueryList change event.currentTarget is not the list)');
-    }
+    assert(ev.currentTargetIsMql === true, 'event.currentTarget is the MediaQueryList');
 }
 
 // A resize that does NOT cross the boundary must fire nothing.

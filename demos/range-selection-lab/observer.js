@@ -56,11 +56,8 @@ export function toEntry(record) {
         summary = `attr "${name}": "${record.oldValue ?? 'null'}" → "${now ?? 'null'}" on ${describe(record.target)}`;
         details = { attributeName: name, oldValue: record.oldValue, newValue: now };
     } else if (record.type === 'characterData') {
-        // A record's target is never null by spec; bro's Range.deleteContents
-        // produces one (ENGINE-ISSUES.md), so it is shown rather than thrown on.
-        const now = record.target ? record.target.data : null;
-        summary = `text: "${(record.oldValue || '').slice(0, 25)}" → ` +
-            (record.target ? `"${(now || '').slice(0, 25)}"` : '(record.target is null)');
+        const now = record.target.data;
+        summary = `text: "${(record.oldValue || '').slice(0, 25)}" → "${(now || '').slice(0, 25)}"`;
         details = { oldText: record.oldValue, newText: now };
     }
     return {

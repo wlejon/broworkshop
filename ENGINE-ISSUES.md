@@ -38,25 +38,6 @@ A span holding RTL text inside an RTL paragraph gets its start padding on the
 left and end padding on the right; they should mirror. LTR spans inside RTL
 paragraphs are right.
 
-### Paint and text rendering
-
-#### `linear-gradient()` with `rgb()` stops paints solid black (2026-09-24)
-`background: linear-gradient(90deg, rgb(20, 40, 90), rgb(220, 180, 80))` (and
-the `background-image` longhand) paints the box black; the same gradient with
-hex stops paints. `getComputedStyle` reports the gradient correctly, so it is
-the paint side (probably splitting the stop list on the commas in `rgb(...)`).
-Affects: tools/algo-viz's pathfinding legend (now hex).
-
-#### A tab inside `<pre>` renders as a missing-glyph box (2026-09-24)
-U+0009 in preformatted text paints as a tofu box instead of advancing to the
-next tab stop. Repro: `<pre>a\tb\t\tc</pre>`, screenshot.
-Affects: demos/vlm-lab (tab-indented JSON in Markdown code blocks via lib/markdown.js).
-
-#### Scrollbars ignore the dark theme: a bright white strip (2026-09-24)
-An overflowing `overflow-y: scroll` box on a dark background draws its
-vertical scrollbar as a flat white bar. Cosmetic.
-Affects: the kit `.k-side` column (demos/nav-lab and others).
-
 ### Selection, Range and editing
 
 #### Element rects ignore the root scroller's scroll; `window.scrollTo` targets `<html>` (2026-09-24)
@@ -77,76 +58,19 @@ engine paths keep them until the document is torn down.
 
 ### DOM APIs, events, CSS animations
 
-#### Missing globals and properties: `CSS`, `Option`, `HTMLDetailsElement.open` (2026-09-24)
-- `typeof CSS` is `'undefined'`: `CSS.supports` / `CSS.escape` throw.
-- `typeof Option` is `'undefined'` (`Image` exists). Apps use
-  `document.createElement('option')`.
-- `<details>` has no `open` property: `d.open = true` sets an expando (no
-  attribute, stays closed); `d.open` is `undefined` after
-  `setAttribute('open', '')`. tools/node-forge's tests click the `<summary>`.
+#### Script `el.click()` focuses the element without the engine's focus handoff (2026-09-24)
+`clickElement` (`element_activation.cpp`) makes the element
+`document.activeElement` but skips the engine's focus path, so a checkbox
+clicked from script reads as focused yet ignores Space. Browsers do not focus
+on `click()` at all.
 
-#### `querySelector` splits at a comma inside a quoted attribute value (2026-09-24)
-`document.querySelector('[data-x="1,2"]')` returns `<html>`;
-`querySelectorAll` matches every element. `el.matches(...)` is right.
-Affects: tools/inpainting-studio's outpaint buttons use side names instead.
+#### `el.getAnimations()` omits CSS animations (2026-09-24)
+Only WAAPI animations are listed; a running CSS animation on the element is
+not (the same gap as `document.getAnimations()` in the notes below).
 
-#### DOMParser parses XML and SVG types with the HTML parser (2026-09-24)
-`parseFromString(src, 'application/xml' | 'text/xml' | 'image/svg+xml')` gives
-an HTML document (`documentElement` is `HTML`, names lowercased, `<b/>`
-becomes `<b></b>`, no `<parsererror>` for malformed XML); `contentType` does
-report the requested type.
-Affects: demos/range-selection-lab's DOMParser tab (notes it; its "malformed
-XML" preset cannot show a parse error).
-
-#### MutationObserver: missing and malformed records (2026-09-24)
-- `innerHTML = ''` and `textContent = ''` queue no record;
-  `innerHTML = '<b>x</b>'` reports 1 added / 0 removed.
-  `replaceChildren()` / `removeChild` are right. demos/dom-lab logs the gap.
-- `Range.deleteContents()` over `<p>`'s first text node (0..6), observed with
-  `{ childList, characterData, subtree, characterDataOldValue }`, gives a
-  `characterData` record with `target: null` (oldValue right), then a
-  `childList` record with 1 added node and an empty `childList` record
-  (0 added, 0 removed). demos/range-selection-lab shows "(record.target is null)".
-
-#### Shadow DOM: `<style>` not scoped per shadow root; slotted children inherit from the host (2026-09-24)
-- Two shadow roots with `<style>.x{color:red}</style><b class=x>` and
-  `<style>.x{color:blue}</style><b class=x>`: both `<b>` compute blue (last
-  sheet wins). demos/dom-lab's "ocean" `<card-box>` paints the sunset gradient.
-- A light-DOM child in a `<slot>` inside a shadow `<h3 style="color:red;font-weight:700">`
-  computes the host's colour and weight 400 instead of the h3's.
-  demos/dom-lab's slotted card title.
-
-#### Space on a focused checkbox toggles it even when keydown is cancelled (2026-09-24)
-Click a checkbox (it takes focus), press Space with a document `keydown`
-listener calling `preventDefault()`: the checkbox still toggles. In a browser,
-cancelling keydown suppresses the activation.
-Repro: `<input type=checkbox id=cb>`, that listener, `click()` on `#cb`,
-`keyDown(0x20)`: `checked` goes true → false.
-Affects: demos/character-lab (Space = jump flips the last clicked checkbox;
-its UI test clicks the viewport first).
-
-#### `animation:` shorthand containing `cubic-bezier()` is dropped; shorthand not reflected in computed style (2026-09-24)
-`.a { animation: kk 2s cubic-bezier(0.4, 0, 0.2, 1) infinite }` never animates
-(computed `transform` stays `none`); with `linear` it runs, and the longhands
-work. Separately, `getComputedStyle(el).animationName` /
-`animationTimingFunction` report `none` / `ease` for any animation set through
-the shorthand, including running ones.
-Repro: that rule plus `@keyframes kk { 0% { transform: rotate(0deg) } 100% { transform: rotate(360deg) } }`,
-`advanceTime(500)`: cubic → `none`, linear → `rotate(90deg)`.
-Affects: demos/waapi-lab arena lane 2 (its test "the CSS @keyframes lane
-moves with the other two" fails until fixed).
-
-#### Writing `Animation.currentTime` un-holds a paused animation (2026-09-24)
-`const a = el.animate([{left:'0px'},{left:'600px'}], {duration: 4000}); a.pause(); a.currentTime = 0; advanceTime(500)`
-→ `playState` `paused` but `currentTime` 500. `pause()` alone holds.
-Affects: demos/platform-lab parks its transport this way at boot (its smoke
-test logs the drift).
-
-#### MediaQueryList change event has no `currentTarget` (2026-09-24)
-docs/matchmedia-api.js lists `currentTarget` on the change event; `target` is
-the list, `currentTarget` is not.
-Repro: `const m = matchMedia('(min-width: 900px)'); m.onchange = e => console.log(e.currentTarget === m); resize(700, 900)` → false.
-Affects: demos/platform-lab's smoke test logs it.
+#### CSS animations run only the first layer of a comma list (2026-09-24)
+`animation: a 1s, b 2s` animates only `a`; the computed longhands report
+both layers.
 
 ### Windows, workers, messaging
 
@@ -156,13 +80,6 @@ buffers (a write through one is not seen by the other). The window path
 (`structuredClone`) keeps identity, as the web does.
 Repro: `const b = new ArrayBuffer(8); w.postMessage({ a: new Uint8Array(b), c: new Uint8Array(b) })`;
 in the worker `e.data.a.buffer === e.data.c.buffer` is false.
-
-#### Page module scripts are compiled as `index.html` (2026-09-24)
-bro joins a page's scripts into one program compiled under `index.html`'s
-name (`engine_init.cpp` `initAppRealm`), so `<script type="module"
-src="sub/main.js">` gets `import.meta.url` = index.html and its relative
-imports resolve from the app root (`import "./lib.js"` fails). An entry at the
-app root hides it; modules imported from the entry get their own URL.
 
 ### bronze JS runtime and module loading
 
@@ -267,6 +184,7 @@ from the commit before the kit rebuild.
 - `postMessage({ v: view }, [view.buffer])` clones then detaches — brokit efcb977, bro 04729bdd; verified 2026-09-24. window-lab sends the view transferred.
 - `new Worker(new URL(...), { type: 'module' })` works — bro 06899506; verified 2026-09-24. worker-sim and stompworld use it.
 - Scene, verified 2026-09-24 (bro `tests/scene/` 58/58): `unprojectLocal(x, y)` → `{ origin, dir }` works with `setCamera` and camera nodes, plus the inverse `projectLocal(x, y, z)` (a7347b39; kit `sceneViewport.ray/toScreen`, arcade `rayAt/toScreen` and `pickRay` wrap them); TileWorld `addObject({ color })` tint and the dropped `addObjectKind` style keys (1ada0970); `atlasPixels` takes any byte view (a1136e4d); `setFog(null)` (c3b9f275); sprite `isPlaying` / `currentAnimation` (f5a7b7bb); 2D particle options and `liveCount` (d1bfc7f9); one wrapper per scene node, so `===` works (daec207d); a scene HtmlNode takes clicks only where it shows content and honours `pointer-events: none` (1b4e093b; farm's name tags are `pointer-events: none`).
+- Paint and DOM APIs, verified 2026-09-24 (bro `tests/style/`, `tests/dom/`, `tests/shadow_dom/`, `tests/events/`): `linear-gradient()` with `rgb()` stops (625516ac); tabs in `<pre>` advance to 8-column stops (d8f1039b); scrollbars follow the colour scheme and `scrollbar-color` (ea32f7e5); `CSS`, `Option`, `details.open` (bro 4450b38e, htmlayout 5483b87); selector lists split only at top-level commas (htmlayout 2e05b3d); DOMParser parses XML/SVG as XML with `parsererror` (4ca1d817); MutationObserver records for `innerHTML =` / `textContent =` (95402d6a); shadow `<style>` scoped per root, slotted children inherit from the slot (108b7bcb); keydown runs before a control's default action (ead08d78); `animation` shorthand with `cubic-bezier()` and computed longhands (htmlayout 7b0ddbc, bro 38f6d4e3), per-keyframe-interval easing (8c4e7849), removing `animation-name` cancels (35cfe935), animation/transition event fields (70f41130); a paused animation stays held when `currentTime` is written (8abda133); MediaQueryList change `currentTarget` (4033b5e9); each page module script runs as its own module under its own URL (96fb8f99). waapi-lab's CSS keyframes lane passes; the dom-lab, platform-lab, range-selection-lab, character-lab and node-forge tests assert the fixed behaviour. Note: text/comment nodes a script or MutationRecord holds now survive `innerHTML` replacement detached instead of being freed.
 - Animation, media, ML, game AI, verified 2026-09-24 (ML targets run with `--ml` on the GPU): `applySkinning` takes `computeSkinningMatrices` output (bromesh f573ade, bro 5828be0a; mesh-viewer uses joint matrices); `Pose.data` is a copy by design, docs show edit-then-assign (5828be0a); `blendState().pos` absent without a blend space (ba917f37); `bro.image.gpu.colormap` — a webgl2 context now takes its drawing-buffer size from the canvas's width/height attributes at creation (a2881563); `bro.media.thumbnails().data` is a Uint8ClampedArray (f9b54b1c); `<video>` `load()` resets, fires `emptied`, and an unplayable source sets `error` code 4 (1d5fd6b9; media-inspector drops its timeout); brovisionml loaders load before moving to the GPU, docs say they are synchronous (brovisionml d56f93c, bro 3f93a71b); TripoSplat clouds come back upright facing +Z (brodiffusion 90aa215, bro 52e72df2); docs/diar-api.js `loadClusterDiarizer` arguments (923243c9); native `NavGrid.field` flow field, and `setCellCost` now prices A* (brogameagent 6477939, bro 91b1e46d; tactical-flowfield drops its JS wave); terrain `setVoxel`, clipmap `detailRelief` and FastNoise Feature Scale documented (5272b828).
 - Selection, Range and editing, verified 2026-09-24 (bro `tests/dom/`, `tests/events/test_selection_press.js`): Range rects in scrolled-out text and under the menu bar, and per-line rects for wrapped inline elements (htmlayout 73996c8, bro 66aa265e, 8a83b3be); spec clone/extract/delete for partially-contained nodes, `surroundContents` throws InvalidStateError instead of hanging, `insertNode` per spec, `selectionchange` from script, `getRangeAt` returns the live range (8a83b3be); selection paint skips `display:none` and stops at element offsets (73996c8, 66aa265e); a press moves the selection only where a caret can go: a text-less block takes the caret itself, a button's child, a canvas, `pointer-events:none` text and a prevented mousedown start no selection (89a886dd); `setRangeText` (30ee3208). range-selection-lab tests assert the right results, text-lab drops `reveal()` and its ENGINE BUG panel, synth drops `user-select:none` on its viewport, desktop-notebook's `splice` uses `setRangeText`.
 - Layout (htmlayout; bro tests in `tests/layout/`), verified 2026-09-24: column flex with a percentage width (978de23); `min-width` on inline-block and shrink-to-fit max-width (0f195e7, 4be8a38); `grid-column: 1 / -1` (1d72e7f); a text run after an inline element breaks inside the text (a8d25ed; inline elements join their block's lines); flex intrinsics with `letter-spacing` (8b3d5b2) and top-level inline-flex/inline-grid shrink to fit (4be8a38); flex-wrap rows that exactly fit (68c76b6); `table-layout: fixed` (404fe87); `text-overflow: ellipsis` (d6da139); rects of descendants of a newly hidden element (2ec6c57). procwatch styles its tags as chips again, shader-lab's panes are 50/50, nav-lab's test checks the button's own rect.

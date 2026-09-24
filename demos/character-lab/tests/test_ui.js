@@ -20,13 +20,6 @@ const tab = (name) => {
     check(!q(`[data-pane="${name}"]`).hidden, `pane ${name} shown`);
 };
 
-// A click on empty sky in the viewport (top centre): takes focus off the panel.
-const toViewport = () => {
-    const r = canvas.getBoundingClientRect();
-    click(r.left + r.width / 2, r.top + 12, 0);
-    flush();
-    check(document.activeElement == null || document.activeElement.tagName !== 'INPUT', 'panel lost focus');
-};
 
 test('layout: viewport beside the panel, readouts live', () => {
     const vp = q('.k-viewport').getBoundingClientRect();
@@ -74,10 +67,9 @@ test('keyboard: W walks the character; the avatar animates it', () => {
     const av = characterAvatar();
     check(av && av.node.visible, 'avatar shown');
     check(tune.riggedAvatar, 'tune follows');
-    // Back to the game the way a player does it: click the viewport, so the
-    // ticked checkbox no longer has focus. (Space on a focused checkbox
-    // toggles it even when keydown is cancelled; ENGINE-ISSUES.md.)
-    toViewport();
+    // The ticked checkbox keeps focus: the game keys still reach the app,
+    // and the Space it cancels for the jump does not toggle the box.
+    check(document.activeElement === q('#cRigged'), 'the clicked checkbox has focus');
     const z0 = charState.position.z;
     keyDown('w'.charCodeAt(0), 0, 0);
     frames(40);
@@ -90,6 +82,7 @@ test('keyboard: W walks the character; the avatar animates it', () => {
     press(' ');
     frames(8);
     eq(av.state, 'air', 'a jump travels to the air state');
+    check(q('#cRigged').checked && tune.riggedAvatar, 'the cancelled Space left the focused checkbox ticked');
     frames(80);
     eq(av.state, 'ground', 'and lands');
     frames(8);

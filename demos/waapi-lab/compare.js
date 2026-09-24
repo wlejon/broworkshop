@@ -44,6 +44,12 @@ export function startCompare() {
     stopCompare();
     running = true;
     t0 = document.timeline.currentTime;
+    // stopCompare() just removed the class. Taking it off and putting it back
+    // in one turn is no change to the computed animation-name, so the CSS
+    // animation would carry on from its old start while lanes 1 and 3
+    // restart. Reading layout in between commits the removal: the re-add is a
+    // new animation, started now with the others.
+    void lanes.css.offsetWidth;
     lanes.css.classList.add('animating');
     const tick = () => {
         if (!running) return;
