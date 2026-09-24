@@ -1,5 +1,12 @@
-// sim.js — tilehaven domain (createGame + constants).
-// No shell / HUD / scene wiring — that lives in game.js.
+// sim.js — TileHaven domain: terrain, roads, buildings, carts, economy,
+// save/load (createGame + constants). No shell / HUD / camera wiring; that
+// lives in game.js. The TileWorld is the map: its tiles, flags, components,
+// floodFill and findPath are the rules' data structures.
+
+import { seededRandom } from "/lib/arcade/grid.js";
+import { bytesToBase64, base64ToBytes } from "/lib/arcade/save.js";
+import { makeAtlas, ACELL, ACOLS, AROWS, TILE_ATLAS } from "/app/atlas.js";
+import { registerKinds } from "/app/kinds.js";
 
 export const MAP_W = 28, MAP_H = 20;
 export const CELL = 1.0;       // cellSize
@@ -13,13 +20,13 @@ export const L_GROUND = 0, L_ROADS = 1, L_DECALS = 2;
 // ids), so reusing an id on two layers would animate both.
 export const TILE = { GRASS: 1, WATER: 2, FOREST: 3, ORE: 4, ROAD: 5, BRIDGE: 6, CROP: 7 };
 
-// One flag bit per concern (single-bit hasFlag/blockMask tests only ΓÇö the
-// engine's isWalkable multi-bit mask is ALL-bits, known paper-cut).
+// One flag bit per concern (single-bit hasFlag/blockMask tests only; the
+// engine's isWalkable multi-bit mask is ALL-bits, a known paper-cut).
 // OFFROAD is set on every non-road cell so cart pathfinding
 // (findPath blockMask: OFFROAD) is confined to the road network.
 export const FLAG = { OFFROAD: 1, ROAD: 2, BLD: 4 };
 
-// --- Economy constants ---------------------------------------------------------
+// ── Economy constants ────────────────────────────────────────────────────
 
 export const COSTS = {
     road:   { coins: 2,  wood: 0 },
@@ -31,11 +38,12 @@ export const COSTS = {
     market: { coins: 80, wood: 20 },
 };
 export const BUILD_INFO = {
+    depot:  { name: 'Depot',       desc: 'The heart of your city.' },
     house:  { name: 'House',       desc: 'Holds 6 people. Needs food + road to a market.' },
     farm:   { name: 'Farm',        desc: 'Grows food on adjacent grass. 2 workers.' },
     lumber: { name: 'Lumber Camp', desc: 'Cuts wood. Must sit beside a forest. 2 workers.' },
     mine:   { name: 'Mine',        desc: 'Digs ore (sold for coins). Build ON an ore hill. 2 workers.' },
-    market: { name: 'Market',      desc: 'Extra delivery hub ΓÇö shortens cart hauls.' },
+    market: { name: 'Market',      desc: 'Extra delivery hub — shortens cart hauls.' },
 };
 export const HOUSE_CAP = 6;
 export const WORKERS_PER_INDUSTRY = 2;
@@ -53,144 +61,20 @@ export const PROD = {
     mine:   { every: 3.5, gain: 1, res: 'ore' },
 };
 const STOCK_CAP = CART_LOAD * 2;
+const INDUSTRY = new Set(['farm', 'lumber', 'mine']);
 
-const GROWTH_EVERY = 6;    // s ΓÇö each fed, connected house gains 1 pop
-const FOOD_EVERY = 5;      // s ΓÇö city eats ceil(pop/10) food
-const TAX_EVERY = 10;      // s ΓÇö coins += floor(pop/2)
+const GROWTH_EVERY = 6;    // s: each fed, connected house gains 1 pop
+const FOOD_EVERY = 5;      // s: the city eats ceil(pop/10) food
+const TAX_EVERY = 10;      // s: coins += floor(pop/2)
 
 export const START = { coins: 300, food: 25, wood: 40, ore: 0 };
 
-// --- Seeded RNG ----------------------------------------------------------------
+const SAVE_KEY = 'tilehaven-save';
+const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+const inB = (x, y) => x >= 0 && y >= 0 && x < MAP_W && y < MAP_H;
+const key = (x, y) => x + ',' + y;
 
-export function mulberry32(seed) {
-    return function () {
-        seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
-        let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
-}
-
-// --- Procedural tileset atlas ------------------------------------------------
-// 16x4 grid of 16px cells (256x64 RGBA).
-//   Row 0 (cells  0..15): road edge-autotile variants, mask bit0=E bit1=N
-//                         bit2=W bit3=S (atlas cell top edge renders on the
-//                         grid-north / y-1 side). Transparent off-road.
-//   Row 1 (cells 16..31): bridge variants, same mask order (wood planks).
-//   Row 2 (cells 32..47): terrain: 32 grass, 33 forest floor, 34 ore rock,
-//                         35..37 water frames, 38 cliff, 40..42 crop frames.
-
-const APX = 16, ACOLS = 16, AROWS = 4;
-export const ACELL = {
-    ROAD0: 0, BRIDGE0: 16,
-    GRASS: 32, FOREST: 33, ORE: 34, WATER0: 35, WATER1: 36, WATER2: 37,
-    CLIFF: 38, CROP0: 40, CROP1: 41, CROP2: 42,
-};
-// tile id -> atlas cell (autotile rules override roads/bridges per-neighbour)
-export const TILE_ATLAS = [
-    0, ACELL.GRASS, ACELL.WATER0, ACELL.FOREST, ACELL.ORE,
-    ACELL.ROAD0, ACELL.BRIDGE0, ACELL.CROP0,
-];
-
-// Which pixels of a 16px cell belong to the road shape for edge mask m.
-function inRoadShape(x, y, m) {
-    if (x >= 5 && x <= 10 && y >= 5 && y <= 10) return true;             // core
-    if ((m & 1) && x > 10 && y >= 5 && y <= 10) return true;             // E arm
-    if ((m & 2) && y < 5 && x >= 5 && x <= 10) return true;              // N arm
-    if ((m & 4) && x < 5 && y >= 5 && y <= 10) return true;              // W arm
-    if ((m & 8) && y > 10 && x >= 5 && x <= 10) return true;             // S arm
-    return false;
-}
-
-export function makeAtlas() {
-    const w = ACOLS * APX, h = AROWS * APX;
-    const buf = new Uint8Array(w * h * 4);
-    const rng = mulberry32(0x7A11E);
-    const clamp = (v) => Math.max(0, Math.min(255, v | 0));
-    function paint(cell, fn) {
-        const cx = (cell % ACOLS) * APX, cy = Math.floor(cell / ACOLS) * APX;
-        for (let py = 0; py < APX; py++) {
-            for (let px = 0; px < APX; px++) {
-                const c = fn(px, py);
-                const i = ((cy + py) * w + cx + px) * 4;
-                buf[i] = clamp(c[0]); buf[i + 1] = clamp(c[1]); buf[i + 2] = clamp(c[2]);
-                buf[i + 3] = c.length > 3 ? clamp(c[3]) : 255;
-            }
-        }
-    }
-    const noise = (amt) => (rng() - 0.5) * 2 * amt;
-
-    // Road variants 0..15 ΓÇö grey cobbles, darker rim where the shape ends.
-    for (let m = 0; m < 16; m++) {
-        paint(m, (x, y) => {
-            if (!inRoadShape(x, y, m)) return [0, 0, 0, 0];
-            const n = noise(7);
-            const cob = ((x % 4 === 3) || (y % 4 === 3)) ? -16 : 0;
-            const rim = !inRoadShape(x - 1, y, m) || !inRoadShape(x + 1, y, m) ||
-                        !inRoadShape(x, y - 1, m) || !inRoadShape(x, y + 1, m);
-            const mul = rim ? 0.62 : 1;
-            return [(122 + n + cob) * mul, (117 + n + cob) * mul, (108 + n + cob) * mul, 255];
-        });
-    }
-    // Bridge variants 16..31 ΓÇö wooden planks with dark rails.
-    for (let m = 0; m < 16; m++) {
-        paint(16 + m, (x, y) => {
-            if (!inRoadShape(x, y, m)) return [0, 0, 0, 0];
-            const n = noise(8);
-            const horiz = (m & 5) !== 0 && (m & 10) === 0;   // pure E/W run
-            const seam = (horiz ? (x % 3 === 2) : (y % 3 === 2)) ? -34 : 0;
-            const rim = !inRoadShape(x - 1, y, m) || !inRoadShape(x + 1, y, m) ||
-                        !inRoadShape(x, y - 1, m) || !inRoadShape(x, y + 1, m);
-            if (rim) return [72 + n, 50 + n, 26 + n, 255];
-            return [158 + n + seam, 116 + n + seam, 66 + n + seam, 255];
-        });
-    }
-    // 32 grass
-    paint(ACELL.GRASS, () => {
-        const n = noise(9), tuft = rng() < 0.06 ? -16 : 0;
-        return [92 + n + tuft, 148 + n * 1.3 + tuft, 66 + n + tuft];
-    });
-    // 33 forest floor ΓÇö darker, mulchy
-    paint(ACELL.FOREST, () => {
-        const n = noise(8), leaf = rng() < 0.10 ? 14 : 0;
-        return [52 + n, 96 + n + leaf, 46 + n];
-    });
-    // 34 ore rock ΓÇö grey with copper flecks
-    paint(ACELL.ORE, () => {
-        const n = noise(8);
-        if (rng() < 0.07) return [196 + n, 138 + n, 58 + n];
-        return [112 + n, 110 + n, 112 + n];
-    });
-    // 35..37 water frames ΓÇö drifting shimmer band
-    for (let f = 0; f < 3; f++) {
-        paint(ACELL.WATER0 + f, (x, y) => {
-            const wv = Math.sin((x + f * 5) * 0.55 + y * 0.85);
-            const n = noise(5);
-            if (wv > 1.0 - f * 0.04 && wv > 0.86) return [116 + n, 182 + n, 226 + n];
-            return [30 + n + wv * 4, 88 + n + wv * 6, 150 + n + wv * 7];
-        });
-    }
-    // 38 cliff strata
-    paint(ACELL.CLIFF, (x, y) => {
-        const strata = (y % 5 === 0) ? -24 : 0;
-        const n = noise(7);
-        return [104 + n + strata, 88 + n + strata, 62 + n + strata];
-    });
-    // 40..42 crop frames ΓÇö soil rows, sprout tips shimmer across frames
-    for (let f = 0; f < 3; f++) {
-        paint(ACELL.CROP0 + f, (x, y) => {
-            const n = noise(6);
-            if (y % 4 === 1 || y % 4 === 2) {
-                const tip = ((x + f) % 4 === 0) ? 34 : 0;
-                return [64 + n + tip * 0.4, 138 + n + tip, 50 + n];
-            }
-            return [92 + n, 70 + n, 44 + n];
-        });
-    }
-    return { pixels: buf, width: w, height: h };
-}
-
-// --- Game factory --------------------------------------------------------------
+// ── Game factory ─────────────────────────────────────────────────────────
 
 export function createGame(scene, seed) {
     const atlas = makeAtlas();
@@ -205,15 +89,15 @@ export function createGame(scene, seed) {
         cliffCell: ACELL.CLIFF,
         atlasInset: 0.5,
         autotiles: [
-            // THE marquee feature: roads/bridges edge-autotile on the overlay
+            // The marquee feature: roads/bridges edge-autotile on the overlay
             // layer, family nonEmpty so they join each other across ids.
             { id: TILE.ROAD, layer: L_ROADS, mode: 'edge', family: 'nonEmpty',
-              cells: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] },
+              cells: Array.from({ length: 16 }, (_, i) => ACELL.ROAD0 + i) },
             { id: TILE.BRIDGE, layer: L_ROADS, mode: 'edge', family: 'nonEmpty',
-              cells: [16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31] },
+              cells: Array.from({ length: 16 }, (_, i) => ACELL.BRIDGE0 + i) },
         ],
         overlays: [
-            {},                        // ground ΓÇö ignored
+            {},                        // ground: ignored
             { alphaCutoff: 0.5 },      // roads: cut the road shape from alpha
             { alphaCutoff: 0.5 },      // decals (crops)
         ],
@@ -222,112 +106,7 @@ export function createGame(scene, seed) {
             { id: TILE.CROP, fps: 2, frames: [ACELL.CROP0, ACELL.CROP1, ACELL.CROP2] },
         ],
     });
-
-    // ---- object kinds -----------------------------------------------------------
-    // TileWorld::loadGrid() in bro preserves objectKinds_.
-    // registerKinds() is called once here at startup.
-
-    const kinds = {};
-    function registerKinds() {
-        const M = Mesh;
-        kinds.tree = world.addObjectKind(
-            M.merge([
-                M.cylinder(0.045, 0.16, 6).translate(0, 0.08, 0),
-                M.cone(0.20, 0.30, 7, 1, true).translate(0, 0.32, 0),
-                M.cone(0.16, 0.26, 7, 1, true).translate(0, 0.50, 0),
-                M.cone(0.11, 0.20, 7, 1, true).translate(0, 0.66, 0),
-            ]), { color: [0.18, 0.42, 0.20, 1], roughness: 0.95 });
-        kinds.rock = world.addObjectKind(
-            M.rock(0.20, 9, 2).translate(0, 0.11, 0),
-            { color: [0.48, 0.47, 0.50, 1], roughness: 1.0 });
-        kinds.oreChunk = world.addObjectKind(
-            M.rock(0.10, 7, 1).translate(0, 0.06, 0),
-            { color: [0.85, 0.58, 0.25, 1], roughness: 0.5, metallic: 0.5 });
-
-        kinds.depot = world.addObjectKind(
-            M.merge([
-                M.box(0.42, 0.05, 0.42).translate(0, 0.05, 0),               // pad
-                M.box(0.28, 0.18, 0.21).translate(0, 0.28, 0),               // hall
-                M.cone(0.40, 0.26, 4, 1, true).rotate(0, 1, 0, Math.PI / 4)
-                    .translate(0, 0.45, 0),                                   // roof
-                M.cylinder(0.015, 0.24, 5).translate(0.33, 0.34, 0.33),       // flag pole
-                M.box(0.08, 0.045, 0.005).translate(0.42, 0.52, 0.33),        // flag
-            ]), { color: [0.92, 0.76, 0.38, 1], roughness: 0.6 });
-        kinds.house = world.addObjectKind(
-            M.box(0.16, 0.13, 0.14).translate(0, 0.13, 0),
-            { color: [0.85, 0.72, 0.55, 1], roughness: 0.8 });
-        kinds.houseRoof = world.addObjectKind(
-            M.cone(0.25, 0.20, 4, 1, true).rotate(0, 1, 0, Math.PI / 4)
-                .translate(0, 0.255, 0),
-            { color: [0.72, 0.30, 0.24, 1], roughness: 0.85 });
-        kinds.farm = world.addObjectKind(
-            M.merge([
-                M.box(0.15, 0.12, 0.12).translate(0, 0.12, 0),               // barn
-                M.cone(0.22, 0.16, 4, 1, true).rotate(0, 1, 0, Math.PI / 4)
-                    .translate(0, 0.235, 0),
-                M.cylinder(0.05, 0.15, 8).translate(0.16, 0.15, 0.07),       // silo
-                M.cone(0.062, 0.08, 8, 1, true).translate(0.16, 0.30, 0.07), // silo cap
-            ]), { color: [0.78, 0.34, 0.26, 1], roughness: 0.85 });
-        kinds.lumber = world.addObjectKind(
-            M.merge([
-                M.box(0.16, 0.11, 0.13).translate(0, 0.11, 0),               // cabin
-                M.cone(0.22, 0.14, 4, 1, true).rotate(0, 1, 0, Math.PI / 4)
-                    .translate(0, 0.215, 0),
-                M.cylinder(0.035, 0.14, 6).rotate(0, 0, 1, Math.PI / 2)
-                    .translate(0.02, 0.035, 0.24),                            // logs
-                M.cylinder(0.035, 0.12, 6).rotate(0, 0, 1, Math.PI / 2)
-                    .translate(-0.02, 0.10, 0.24),
-            ]), { color: [0.55, 0.40, 0.24, 1], roughness: 0.9 });
-        kinds.mine = world.addObjectKind(
-            M.merge([
-                M.box(0.16, 0.05, 0.16).translate(0, 0.05, 0),               // base
-                M.box(0.025, 0.20, 0.025).translate(-0.10, 0.20, -0.10),     // headframe legs
-                M.box(0.025, 0.20, 0.025).translate(0.10, 0.20, -0.10),
-                M.box(0.025, 0.20, 0.025).translate(-0.10, 0.20, 0.10),
-                M.box(0.025, 0.20, 0.025).translate(0.10, 0.20, 0.10),
-                M.box(0.13, 0.025, 0.13).translate(0, 0.42, 0),              // top deck
-                M.torus(0.07, 0.02, 10, 6).rotate(0, 0, 1, Math.PI / 2)
-                    .translate(0, 0.52, 0),                                   // winding wheel
-            ]), { color: [0.45, 0.42, 0.40, 1], roughness: 0.7, metallic: 0.2 });
-        kinds.market = world.addObjectKind(
-            M.merge([
-                M.box(0.20, 0.03, 0.16).translate(0, 0.03, 0),               // counter
-                M.cylinder(0.02, 0.16, 5).translate(-0.16, 0.16, -0.12),     // poles
-                M.cylinder(0.02, 0.16, 5).translate(0.16, 0.16, -0.12),
-                M.cylinder(0.02, 0.16, 5).translate(-0.16, 0.16, 0.12),
-                M.cylinder(0.02, 0.16, 5).translate(0.16, 0.16, 0.12),
-                M.cone(0.30, 0.15, 4, 1, true).rotate(0, 1, 0, Math.PI / 4)
-                    .translate(0, 0.315, 0),                                  // awning
-                M.box(0.05, 0.05, 0.05).translate(0.06, 0.11, 0.02),         // crates
-                M.box(0.04, 0.04, 0.04).translate(-0.07, 0.10, -0.02),
-            ]), { color: [0.30, 0.55, 0.80, 1], roughness: 0.7 });
-
-        kinds.cart = world.addObjectKind(
-            M.merge([
-                M.box(0.11, 0.045, 0.15).translate(0, 0.115, 0),             // bed
-                M.cylinder(0.045, 0.03, 8).rotate(0, 0, 1, Math.PI / 2)
-                    .translate(-0.115, 0.055, 0.09),                          // wheels
-                M.cylinder(0.045, 0.03, 8).rotate(0, 0, 1, Math.PI / 2)
-                    .translate(0.115, 0.055, 0.09),
-                M.cylinder(0.045, 0.03, 8).rotate(0, 0, 1, Math.PI / 2)
-                    .translate(-0.115, 0.055, -0.09),
-                M.cylinder(0.045, 0.03, 8).rotate(0, 0, 1, Math.PI / 2)
-                    .translate(0.115, 0.055, -0.09),
-                M.sphere(0.05, 8, 6).translate(0, 0.10, 0.20),               // pony
-                M.box(0.035, 0.055, 0.055).translate(0, 0.055, 0.20),
-            ]), { color: [0.52, 0.36, 0.20, 1], roughness: 0.9 });
-        kinds.cargo = world.addObjectKind(
-            M.box(0.075, 0.075, 0.075),
-            { color: [1, 1, 1, 1], roughness: 0.7 });
-        kinds.warn = world.addObjectKind(
-            M.merge([
-                M.box(0.030, 0.10, 0.030).translate(0, 0.10, 0),
-                M.box(0.038, 0.038, 0.038).translate(0, -0.06, 0),
-            ]), { color: [1.0, 0.22, 0.16, 1], roughness: 0.4 });
-    }
-    registerKinds();
-
-    // ---- state ---------------------------------------------------------------
+    const kinds = registerKinds(world);
 
     const game = {
         world, kinds,
@@ -345,30 +124,45 @@ export function createGame(scene, seed) {
         lastRefusal: null,           // { x, y, tool, reason }
         totalHauls: 0, totalOreSold: 0,
         stats: { recomputes: 0, cartsDispatched: 0, cartsRerouted: 0, cartsStranded: 0 },
-        // callbacks the shell wires up
-        onRefused: null, onVictory: null, onToast: null, onRoadsChanged: null,
+        // callbacks game.js wires up
+        onRefused: null, onVictory: null,
     };
 
     let nextId = 1;
     let growthT = 0, foodT = 0, taxT = 0;
 
-    const inB = (x, y) => x >= 0 && y >= 0 && x < MAP_W && y < MAP_H;
-    const key = (x, y) => x + ',' + y;
-    const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
-
     game.roadAt = (x, y) => inB(x, y) && world.getTile(x, y, L_ROADS) !== 0;
     game.buildingAt = (x, y) => game.buildings.find(b => b.x === x && b.y === y) || null;
 
-    // Edge-autotile mask a road cell should render with (E=1,N=2,W=4,S=8) ΓÇö
+    // Edge-autotile mask a road cell should render with (E=1,N=2,W=4,S=8);
     // mirrors the engine's edgeMask for tests/inspection.
     game.edgeMaskAt = (x, y) =>
         (game.roadAt(x + 1, y) ? 1 : 0) | (game.roadAt(x, y - 1) ? 2 : 0) |
         (game.roadAt(x - 1, y) ? 4 : 0) | (game.roadAt(x, y + 1) ? 8 : 0);
 
-    // ---- terrain generation ---------------------------------------------------
+    function refuse(x, y, tool, reason) {
+        game.lastRefusal = { x, y, tool, reason };
+        if (game.onRefused) game.onRefused(game.lastRefusal);
+    }
+
+    // Road cells carry FLAG.ROAD; everything else FLAG.OFFROAD.
+    function setRoadFlags(x, y, on) {
+        world.setFlag(x, y, FLAG.ROAD, on);
+        world.setFlag(x, y, FLAG.OFFROAD, !on);
+    }
+
+    // Paving or building over a crop strip retires it from its farm.
+    function retireCrop(x, y) {
+        if (world.getTile(x, y, L_DECALS) !== TILE.CROP) return;
+        world.setTile(x, y, 0, L_DECALS);
+        for (const b of game.buildings)
+            b.cropCells = b.cropCells.filter(c => c.x !== x || c.y !== y);
+    }
+
+    // ── Terrain generation ───────────────────────────────────────────────
 
     function genTerrain() {
-        const rng = mulberry32(game.seed);
+        const rng = seededRandom(game.seed);
         for (let y = 0; y < MAP_H; y++) {
             for (let x = 0; x < MAP_W; x++) {
                 world.setTile(x, y, TILE.GRASS, L_GROUND);
@@ -381,7 +175,7 @@ export function createGame(scene, seed) {
         }
 
         // River: north->south meander around x=16, width 1..3. Two guaranteed
-        // one-cell narrows ΓÇö the cheap places to bridge.
+        // one-cell narrows are the cheap places to bridge.
         const phase = rng() * Math.PI * 2;
         const narrowRows = [3 + (rng() * 4 | 0), 12 + (rng() * 5 | 0)];
         game.riverCells = []; game.narrows = [];
@@ -451,20 +245,15 @@ export function createGame(scene, seed) {
             hills++;
         }
 
-        // Depot: a clear grass cell on the west plain, its own cell carries a
+        // Depot: a clear grass cell on the west plain; its own cell carries a
         // road tile (the network seed the flood fill grows from).
         let depotCell = null;
-        outer:
         for (let ring = 0; ring < 12 && !depotCell; ring++) {
-            for (const c of ring === 0 ? [{ x: 7, y: MAP_H >> 1 }]
-                : world.cellRing(7, MAP_H >> 1, ring)) {
-                if (!inB(c.x, c.y) || c.x > 12) continue;
-                let ok = world.getTile(c.x, c.y, L_GROUND) === TILE.GRASS;
-                for (const [dx, dy] of DIRS)
-                    ok = ok && inB(c.x + dx, c.y + dy) &&
-                        world.getTile(c.x + dx, c.y + dy, L_GROUND) === TILE.GRASS;
-                if (ok) { depotCell = c; break outer; }
-            }
+            const ringCells = ring === 0 ? [{ x: 7, y: MAP_H >> 1 }] : world.cellRing(7, MAP_H >> 1, ring);
+            depotCell = ringCells.find((c) => inB(c.x, c.y) && c.x <= 12 &&
+                world.getTile(c.x, c.y, L_GROUND) === TILE.GRASS &&
+                DIRS.every(([dx, dy]) => inB(c.x + dx, c.y + dy) &&
+                    world.getTile(c.x + dx, c.y + dy, L_GROUND) === TILE.GRASS)) || null;
         }
         game.depot = {
             id: nextId++, type: 'depot', x: depotCell.x, y: depotCell.y, yaw: Math.PI / 2,
@@ -473,8 +262,7 @@ export function createGame(scene, seed) {
         };
         game.buildings.push(game.depot);
         world.setTile(depotCell.x, depotCell.y, TILE.ROAD, L_ROADS);
-        world.setFlag(depotCell.x, depotCell.y, FLAG.ROAD, true);
-        world.setFlag(depotCell.x, depotCell.y, FLAG.OFFROAD, false);
+        setRoadFlags(depotCell.x, depotCell.y, true);
         world.setFlag(depotCell.x, depotCell.y, FLAG.BLD, true);
     }
 
@@ -484,7 +272,8 @@ export function createGame(scene, seed) {
         world.clearObjects(kinds.tree);
         world.clearObjects(kinds.rock);
         world.clearObjects(kinds.oreChunk);
-        const rng = mulberry32(game.seed ^ 0xDEC0);
+        const rng = seededRandom(game.seed ^ 0xDEC0);
+        const jitter = (amt) => (rng() - 0.5) * amt;
         for (let y = 0; y < MAP_H; y++) {
             for (let x = 0; x < MAP_W; x++) {
                 const t = world.getTile(x, y, L_GROUND);
@@ -493,26 +282,24 @@ export function createGame(scene, seed) {
                     for (let i = 0; i < n; i++)
                         world.addObject(kinds.tree, x, y, {
                             yaw: rng() * 6.28, scale: 0.8 + rng() * 0.55,
-                            offsetX: (rng() - 0.5) * 0.6, offsetZ: (rng() - 0.5) * 0.6,
+                            offsetX: jitter(0.6), offsetZ: jitter(0.6),
                         });
                 } else if (t === TILE.ORE) {
                     world.addObject(kinds.rock, x, y, {
                         yaw: rng() * 6.28, scale: 0.7 + rng() * 0.6,
-                        offsetX: (rng() - 0.5) * 0.5, offsetZ: (rng() - 0.5) * 0.5,
+                        offsetX: jitter(0.5), offsetZ: jitter(0.5),
                     });
                     if (rng() < 0.6)
                         world.addObject(kinds.oreChunk, x, y, {
-                            yaw: rng() * 6.28,
-                            offsetX: (rng() - 0.5) * 0.6, offsetZ: (rng() - 0.5) * 0.6,
+                            yaw: rng() * 6.28, offsetX: jitter(0.6), offsetZ: jitter(0.6),
                         });
                 }
             }
         }
     }
-    game.registerKinds = registerKinds;
     game.scatterDecor = scatterDecor;
 
-    // ---- road network / connectivity -------------------------------------------
+    // ── Road network / connectivity ──────────────────────────────────────
     // Recomputed on EVERY road edit: components() over the road flag gives the
     // network count, floodFill from the depot gives the connected set.
 
@@ -522,16 +309,11 @@ export function createGame(scene, seed) {
         const fill = world.floodFill(game.depot.x, game.depot.y, { flag: FLAG.ROAD });
         game.connectedRoads = new Set(fill.map(c => key(c.x, c.y)));
         for (const b of game.buildings) {
-            if (b.type === 'depot') { b.connected = true; continue; }
-            if (b.type === 'market') {
-                b.connected = game.connectedRoads.has(key(b.x, b.y));
-                continue;
-            }
-            b.connected = DIRS.some(([dx, dy]) =>
-                game.connectedRoads.has(key(b.x + dx, b.y + dy)));
+            if (b.type === 'depot') b.connected = true;
+            else if (b.type === 'market') b.connected = game.connectedRoads.has(key(b.x, b.y));
+            else b.connected = DIRS.some(([dx, dy]) => game.connectedRoads.has(key(b.x + dx, b.y + dy)));
         }
         for (const c of game.carts) c.repath = true;
-        if (game.onRoadsChanged) game.onRoadsChanged();
     };
 
     // First road cell adjacent to a building that is depot-connected.
@@ -544,11 +326,10 @@ export function createGame(scene, seed) {
         return null;
     };
 
-    // ---- roads: paint / cost / bulldoze -----------------------------------------
+    // ── Roads: paint / cost ──────────────────────────────────────────────
 
-    game.roadCostAt = function (x, y) {
-        return world.getTile(x, y, L_GROUND) === TILE.WATER ? COSTS.bridge : COSTS.road;
-    };
+    game.roadCostAt = (x, y) =>
+        world.getTile(x, y, L_GROUND) === TILE.WATER ? COSTS.bridge : COSTS.road;
 
     game.canPaintRoad = function (x, y) {
         if (!inB(x, y)) return { ok: false, reason: 'bounds' };
@@ -563,26 +344,16 @@ export function createGame(scene, seed) {
 
     game.paintRoad = function (x, y) {
         const chk = game.canPaintRoad(x, y);
-        if (!chk.ok) {
-            game.lastRefusal = { x, y, tool: 'road', reason: chk.reason };
-            if (game.onRefused) game.onRefused(game.lastRefusal);
-            return false;
-        }
+        if (!chk.ok) { refuse(x, y, 'road', chk.reason); return false; }
         game.coins -= chk.cost.coins;
         world.setTile(x, y, chk.bridge ? TILE.BRIDGE : TILE.ROAD, L_ROADS);
-        world.setFlag(x, y, FLAG.ROAD, true);
-        world.setFlag(x, y, FLAG.OFFROAD, false);
-        // Paving over a crop strip retires it from its farm.
-        if (world.getTile(x, y, L_DECALS) === TILE.CROP) {
-            world.setTile(x, y, 0, L_DECALS);
-            for (const b of game.buildings)
-                b.cropCells = b.cropCells.filter(c => c.x !== x || c.y !== y);
-        }
+        setRoadFlags(x, y, true);
+        retireCrop(x, y);
         game.recomputeRoads();
         return true;
     };
 
-    // ---- buildings ---------------------------------------------------------------
+    // ── Buildings ────────────────────────────────────────────────────────
 
     const nearForest = (x, y) =>
         world.cellsInRange(x, y, 1, 'vertex')
@@ -607,15 +378,11 @@ export function createGame(scene, seed) {
 
     game.placeBuilding = function (type, x, y) {
         const chk = game.canPlace(type, x, y);
-        if (!chk.ok) {
-            game.lastRefusal = { x, y, tool: type, reason: chk.reason };
-            if (game.onRefused) game.onRefused(game.lastRefusal);
-            return null;
-        }
+        if (!chk.ok) { refuse(x, y, type, chk.reason); return null; }
         const cost = COSTS[type];
         game.coins -= cost.coins;
         game.wood -= cost.wood;
-        const rng = mulberry32((game.seed ^ (x * 73856093) ^ (y * 19349663)) >>> 0);
+        const rng = seededRandom((game.seed ^ (x * 73856093) ^ (y * 19349663)) >>> 0);
         const b = {
             id: nextId++, type, x, y,
             yaw: [0, Math.PI / 2, Math.PI, -Math.PI / 2][(rng() * 4) | 0],
@@ -623,17 +390,11 @@ export function createGame(scene, seed) {
             connected: false, staffed: false, pop: 0, cropCells: [],
         };
         world.setFlag(x, y, FLAG.BLD, true);
-        // Building over a crop strip retires it from its farm.
-        if (world.getTile(x, y, L_DECALS) === TILE.CROP) {
-            world.setTile(x, y, 0, L_DECALS);
-            for (const other of game.buildings)
-                other.cropCells = other.cropCells.filter(c => c.x !== x || c.y !== y);
-        }
+        retireCrop(x, y);
         if (type === 'market') {
             // Markets are hubs: their cell carries road so carts can dock.
             world.setTile(x, y, TILE.ROAD, L_ROADS);
-            world.setFlag(x, y, FLAG.ROAD, true);
-            world.setFlag(x, y, FLAG.OFFROAD, false);
+            setRoadFlags(x, y, true);
         }
         if (type === 'farm') {
             for (const [dx, dy] of DIRS) {
@@ -651,6 +412,7 @@ export function createGame(scene, seed) {
         return b;
     };
 
+    // Remove the building or road at (x, y): { ok, what, refund } or { ok: false, reason }.
     game.bulldoze = function (x, y) {
         if (!inB(x, y)) return { ok: false, reason: 'bounds' };
         const b = game.buildingAt(x, y);
@@ -663,8 +425,7 @@ export function createGame(scene, seed) {
             world.setFlag(x, y, FLAG.BLD, false);
             if (b.type === 'market') {
                 world.setTile(x, y, 0, L_ROADS);
-                world.setFlag(x, y, FLAG.ROAD, false);
-                world.setFlag(x, y, FLAG.OFFROAD, true);
+                setRoadFlags(x, y, false);
             }
             // Carts bound for / from this building despawn (goods lost with it).
             game.carts = game.carts.filter(c => c.fromId !== b.id && c.targetId !== b.id);
@@ -674,15 +435,14 @@ export function createGame(scene, seed) {
         }
         if (world.getTile(x, y, L_ROADS) !== 0) {
             world.setTile(x, y, 0, L_ROADS);
-            world.setFlag(x, y, FLAG.ROAD, false);
-            world.setFlag(x, y, FLAG.OFFROAD, true);
+            setRoadFlags(x, y, false);
             game.recomputeRoads();
             return { ok: true, what: 'road', refund: 0 };
         }
         return { ok: false, reason: 'nothing' };
     };
 
-    // ---- carts ---------------------------------------------------------------------
+    // ── Carts ────────────────────────────────────────────────────────────
 
     // Route over ROAD CELLS ONLY: every non-road cell carries FLAG.OFFROAD, so
     // blockMask OFFROAD confines A* to the painted network.
@@ -707,12 +467,11 @@ export function createGame(scene, seed) {
         if (!anchor) return;
         const t = bestTarget(anchor);
         if (!t) return;
-        const res = PROD[b.type].res;
         game.carts.push({
             id: nextId++, fromId: b.id, targetId: t.hub.id,
             path: [{ x: b.x, y: b.y }, ...t.path],     // roll out of the building
             seg: 0, t: 0, phase: 'out',
-            goods: { res, n: CART_LOAD }, repath: false,
+            goods: { res: PROD[b.type].res, n: CART_LOAD }, repath: false,
         });
         b.stock -= CART_LOAD;
         b.cartOut = true;
@@ -732,8 +491,10 @@ export function createGame(scene, seed) {
         cart.goods = null;
     }
 
+    const homeOf = (cart) => game.buildings.find(b => b.id === cart.fromId);
+
     function endCart(cart) {
-        const home = game.buildings.find(b => b.id === cart.fromId);
+        const home = homeOf(cart);
         if (home) home.cartOut = false;
         // A stranded outbound cart hands its goods back to the producer.
         if (cart.goods && home) home.stock = Math.min(STOCK_CAP, home.stock + cart.goods.n);
@@ -749,7 +510,7 @@ export function createGame(scene, seed) {
         c.repath = false;
         const pos = game.cartPos(c);
         const cx = Math.round(pos.x), cy = Math.round(pos.y);
-        const home = game.buildings.find(b => b.id === c.fromId);
+        const home = homeOf(c);
         // The cell under the cart lost its road (and isn't the home building
         // cell) -> stranded.
         const onRoad = game.roadAt(cx, cy) || (home && home.x === cx && home.y === cy);
@@ -757,16 +518,13 @@ export function createGame(scene, seed) {
         if (c.phase === 'out') {
             const hub = game.buildings.find(b => b.id === c.targetId);
             if (hub && hub.connected) goal = { x: hub.x, y: hub.y };
-            // Hub gone or cut off? try any other hub.
+            // Hub gone or cut off? Try any other hub.
             if (!goal) {
                 const t = onRoad ? bestTarget({ x: cx, y: cy }) : null;
                 if (t) { c.targetId = t.hub.id; goal = { x: t.hub.x, y: t.hub.y }; }
             }
-        } else {
-            if (home) {
-                const anchor = game.anchorRoad(home);
-                if (anchor) goal = anchor;
-            }
+        } else if (home) {
+            goal = game.anchorRoad(home);
         }
         const p = (onRoad && goal) ? roadPath(cx, cy, goal.x, goal.y) : [];
         if (!p.length) { game.stats.cartsStranded++; endCart(c); return; }
@@ -780,22 +538,19 @@ export function createGame(scene, seed) {
             let remaining = CART_SPEED * dt;
             while (remaining > 0) {
                 if (c.seg >= c.path.length - 1) {
-                    if (c.phase === 'out') {
-                        deliver(c);
-                        // Head home: retrace to the producer's road anchor.
-                        const home = game.buildings.find(b => b.id === c.fromId);
-                        if (!home) { endCart(c); break; }
-                        const end = c.path[c.path.length - 1];
-                        const anchor = game.anchorRoad(home);
-                        const p = anchor ? roadPath(end.x, end.y, anchor.x, anchor.y) : [];
-                        if (!p.length) { endCart(c); break; }
-                        c.phase = 'back';
-                        c.path = [...p, { x: home.x, y: home.y }];
-                        c.seg = 0; c.t = 0;
-                        continue;
-                    }
-                    endCart(c);
-                    break;
+                    if (c.phase !== 'out') { endCart(c); break; }
+                    deliver(c);
+                    // Head home: retrace to the producer's road anchor.
+                    const home = homeOf(c);
+                    if (!home) { endCart(c); break; }
+                    const end = c.path[c.path.length - 1];
+                    const anchor = game.anchorRoad(home);
+                    const p = anchor ? roadPath(end.x, end.y, anchor.x, anchor.y) : [];
+                    if (!p.length) { endCart(c); break; }
+                    c.phase = 'back';
+                    c.path = [...p, { x: home.x, y: home.y }];
+                    c.seg = 0; c.t = 0;
+                    continue;
                 }
                 const step = Math.min(remaining, 1 - c.t);
                 c.t += step;
@@ -805,9 +560,7 @@ export function createGame(scene, seed) {
         }
     }
 
-    // ---- economy tick ------------------------------------------------------------
-
-    const INDUSTRY = new Set(['farm', 'lumber', 'mine']);
+    // ── Economy tick ─────────────────────────────────────────────────────
 
     function updateStaffing() {
         let workers = game.pop;
@@ -838,8 +591,7 @@ export function createGame(scene, seed) {
             } else {
                 b.prodT = Math.min(b.prodT, 0);
             }
-            if (b.stock >= CART_LOAD && !b.cartOut && b.connected &&
-                game.carts.length < MAX_CARTS)
+            if (b.stock >= CART_LOAD && !b.cartOut && b.connected && game.carts.length < MAX_CARTS)
                 dispatchCart(b);
         }
 
@@ -891,20 +643,7 @@ export function createGame(scene, seed) {
         return t ? t.path : [];
     };
 
-    // ---- save / load ----------------------------------------------------------------
-
-    const SAVE_KEY = 'tilehaven-save';
-    const bytesToB64 = (bytes) => {
-        let bin = '';
-        for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
-        return btoa(bin);
-    };
-    const b64ToBytes = (b64) => {
-        const bin = atob(b64);
-        const out = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-        return out;
-    };
+    // ── Save / load ──────────────────────────────────────────────────────
 
     game.saveCity = function () {
         const data = {
@@ -930,7 +669,7 @@ export function createGame(scene, seed) {
             }),
             river: game.riverCells, narrows: game.narrows,
             forest: game.forestCells, oreHills: game.oreCells,
-            grid: bytesToB64(world.save()),
+            grid: bytesToBase64(world.save()),
         };
         localStorage.setItem(SAVE_KEY, JSON.stringify(data));
         return true;
@@ -942,8 +681,9 @@ export function createGame(scene, seed) {
         let data;
         try { data = JSON.parse(raw); } catch { return false; }
         if (!data || data.version !== 1) return false;
-        if (!world.load(b64ToBytes(data.grid))) return false;
-        // TileWorld::loadGrid() preserves objectKinds_. Per-frame sync re-places buildings/carts.
+        if (!world.load(base64ToBytes(data.grid))) return false;
+        // world.load() keeps the object kinds; game.js re-places buildings
+        // and carts every frame, decor is re-scattered here.
         game.seed = data.seed; game.time = data.time;
         game.coins = data.coins; game.food = data.food;
         game.wood = data.wood; game.ore = data.ore;
@@ -961,13 +701,14 @@ export function createGame(scene, seed) {
         scatterDecor();
         game.recomputeRoads();
         // Carts resume from their saved cell; repath rebuilds their routes.
-        game.carts = data.carts.map(c => ({
-            id: c.id, fromId: c.fromId, targetId: c.targetId,
-            phase: c.phase, goods: c.goods ? { ...c.goods } : null,
-            path: [{ x: Math.round(c.px), y: Math.round(c.py) },
-                   { x: Math.round(c.px), y: Math.round(c.py) }],
-            seg: 0, t: 0, repath: true,
-        }));
+        game.carts = data.carts.map(c => {
+            const at = { x: Math.round(c.px), y: Math.round(c.py) };
+            return {
+                id: c.id, fromId: c.fromId, targetId: c.targetId,
+                phase: c.phase, goods: c.goods ? { ...c.goods } : null,
+                path: [at, { ...at }], seg: 0, t: 0, repath: true,
+            };
+        });
         growthT = foodT = taxT = 0;
         world.rebuildObjects();
         return true;
@@ -975,13 +716,12 @@ export function createGame(scene, seed) {
 
     game.hasSave = () => localStorage.getItem(SAVE_KEY) !== null;
 
-    // ---- boot ----------------------------------------------------------------------
+    // ── Boot ─────────────────────────────────────────────────────────────
 
     genTerrain();
     scatterDecor();
     game.recomputeRoads();
     world.rebuildAll();
     world.rebuildObjects();
-
     return game;
 }

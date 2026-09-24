@@ -1,11 +1,11 @@
-// test.js — scripted DeepDelve session for bro-headless.
-// Run: bro-headless games/deepdelve test.js
+// Scripted DeepDelve session. Run: scripts/validate.sh games/deepdelve
 // Covers: procedural generation + connectivity (components()==1), blob47
 // autotile config, multi-elevation ramps, fog-of-war transitions with real
 // LOS blocking, exact bump combat, all four monster archetypes, traps
 // (hidden + searched), doors (passability + LOS + autotile restyle), items /
-// inventory, stairs descent across all floors, save->load round trip,
-// death and victory.
+// inventory, held-key movement, the follow camera, stairs descent across all
+// floors, save->load round trip, death and victory.
+import { check as assert, text, shot as screenshot } from "/lib/kit/test.js";
 
 advanceTime(200);
 const G = window.DELVE;
@@ -16,6 +16,7 @@ const idx = (x, y) => y * W + x;
 const dbg = G.debug;
 
 // Arcade shell starts on title; enter a run so keyboard hits update().
+G.shell.api.save.set('highScore', 0);      // .storage.json persists across runs
 if (G.shell && !G.shell.getRun()) G.shell.startRun();
 advanceTime(200);
 
@@ -77,7 +78,19 @@ assert(game && world, 'core ready after newRun');
             if (world.hasFlag(x, y, F.WALL) && world.getElevation(x, y) >= 4) wallSeen = true;
     assert(wallSeen, 'walls are elevated');
     assert(d0 && world.hasFlag(d0.x, d0.y, F.DOOR), 'door flag set on generated door');
-    screenshot('test-1-spawn.png');
+    screenshot('1-spawn');
+
+    // The camera centres on the player (a little below mid-screen: it looks
+    // down from behind), and the HUD shows the fresh delver.
+    advanceTime(1500);
+    const g = world.cellCenterWorldXZ(game.player.x, game.player.y);
+    const ps = G.stage.toScreen(g.x, world.getElevation(game.player.x, game.player.y) * 0.35, g.z);
+    assert(ps && Math.abs(ps.x - innerWidth / 2) < 40 && Math.abs(ps.y - innerHeight / 2) < 120,
+        'camera frames the player (' + JSON.stringify(ps) + ')');
+    assert(text('#hud-hp') === '26 / 26' && text('#hud-floor') === '1 / 3', 'HUD: ' + text('#hud-hp'));
+    assert(text('#hud-weapon') === 'Rusty Dagger' && text('#hud-potions') === '1', 'HUD pack');
+    assert(document.getElementById('log').children.length >= 1 &&
+        /Deep Delve/.test(text('#log')), 'intro line in the log');
 }
 
 // --- 2. Fog of war: unseen -> visible -> remembered, LOS blocked by walls -----
@@ -139,7 +152,7 @@ assert(game && world, 'core ready after newRun');
         if (game.fog[i] === 1) demoted++;
     }
     assert(game.turn === 1, 'move consumed a turn');
-    screenshot('test-2-fog.png');
+    screenshot('2-fog');
 }
 
 // --- 3. Multi-elevation beauty shot -------------------------------------------
@@ -149,7 +162,7 @@ assert(game && world, 'core ready after newRun');
     for (const r of game.rooms) if (r.elev > best.elev) best = r;
     dbg.teleport(best.cx, best.cy);
     advanceTime(600);          // camera glide + torch settle
-    screenshot('test-3-elevation.png');
+    screenshot('3-elevation');
 }
 
 // --- 4. Combat: exact bump damage both ways ------------------------------------
@@ -350,7 +363,11 @@ assert(game && world, 'core ready after newRun');
     for (let i = 0; i < game.fog.length; i++) if (game.fog[i] === 0) unseen++;
     assert(unseen > 900, 'fog reset on the new floor (' + unseen + ' unseen)');
     advanceTime(600);
-    screenshot('test-4-floor2.png');
+    const ann = document.getElementById('announce');
+    assert(!ann.hidden && text('#announce') === 'FLOOR 2', 'floor banner: ' + text('#announce'));
+    advanceTime(2400);
+    assert(ann.hidden, 'floor banner fades out');
+    screenshot('4-floor2');
 }
 
 // --- 10. Save -> load round trip ---------------------------------------------------
@@ -411,9 +428,9 @@ assert(game && world, 'core ready after newRun');
     assert(world.getTile(wallCell.x, wallCell.y, 0) === snap.mutTile &&
         !world.hasFlag(wallCell.x, wallCell.y, F.WALL),
         'grid mutation round-tripped through world.save()/load()');
-    // The load() kind-destruction workaround: objects render again post-load.
+    // world.load() wipes instances; the next frame re-places them.
     assert(world.objectCount(game.kinds.player) === 1, 'player instance re-placed after load()');
-    screenshot('test-5-loaded.png');
+    screenshot('5-loaded');
 }
 
 // --- 11. All three floors connect; the last holds boss + amulet --------------------
@@ -467,7 +484,12 @@ assert(game && world, 'core ready after newRun');
     advanceTime(200);
     const stats = document.getElementById('gameover-stats');
     assert(stats && stats.textContent.includes('AMULET'), 'victory gameover text names the amulet');
-    screenshot('test-6-victory.png');
+    assert(G.screen === 'gameover', 'shell on the game-over screen');
+    // The shell records the score once: the first win is a new best.
+    assert(/Slain {5}\d+ {2}· {2}Gold {2}\d+/.test(stats.textContent), 'stats line: ' + stats.textContent);
+    assert(/NEW BEST/.test(stats.textContent), 'first win is a new best');
+    assert(G.shell.api.highScore() > 1000, 'high score saved (' + G.shell.api.highScore() + ')');
+    screenshot('6-victory');
 }
 
 // --- 13. Death: permadeath run-over + restart ---------------------------------------
@@ -492,7 +514,8 @@ assert(game && world, 'core ready after newRun');
     const stats = document.getElementById('gameover-stats');
     assert(stats && stats.textContent.includes('DIED'), 'death gameover text shown');
     assert(/turns/i.test(stats.textContent), 'death stats include turns');
-    screenshot('test-7-death.png');
+    assert(!/NEW BEST/.test(stats.textContent), 'a quick death is not a new best');
+    screenshot('7-death');
 
     // No zombie turns (domain rejects acts when over; avoid Space — shell menus treat it as confirm).
     const t0 = game.turn;
@@ -502,6 +525,30 @@ assert(game && world, 'core ready after newRun');
     advanceTime(200);
     assert(!game.over && game.player.hp === G.PLAYER_BASE.hp && game.floor === 1,
         'restart after death works');
+}
+
+// --- 14. Held direction auto-repeats on the game clock --------------------------------
+
+{
+    dbg.clearMonsters();
+    const p = game.player;
+    const y = p.y, x0 = p.x;
+    dbg.carve(x0, y, Math.min(W - 2, x0 + 10), y);
+    game.items.length = 0;
+    const turn0 = game.turn;
+    keyDown(KEY.RIGHT);
+    advanceTime(40);
+    assert(p.x === x0 + 1, 'first step on press');
+    advanceTime(150);
+    assert(p.x === x0 + 1, 'no repeat before the delay');
+    advanceTime(450);          // repeats at 230 ms then every 120 ms
+    keyUp(KEY.RIGHT);
+    advanceTime(40);
+    assert(p.x >= x0 + 4 && p.x <= x0 + 6, 'held key walked ' + (p.x - x0) + ' cells');
+    assert(game.turn - turn0 === p.x - x0, 'one turn per step');
+    const x1 = p.x;
+    advanceTime(400);
+    assert(p.x === x1, 'release stops the walk');
 }
 
 console.log('DEEPDELVE: all assertions passed');

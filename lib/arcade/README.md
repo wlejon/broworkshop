@@ -168,7 +168,7 @@ The stage gives right-drag orbit / middle-drag pan / wheel zoom (kit
 that did not drag, so right-click actions do not fire at the end of an
 orbit. Rebuild a level with `scene.clear()` + `Physics.createWorld()`
 rather than tracking every node and body. Older scene games
-(deepdelve, blastgrid, hexfront, farm, ...) still paste the hidden-canvas
+(blastgrid, hexfront, ...) still paste the hidden-canvas
 block and their own camera; move them over when touched.
 
 ### Large 3D titles — `sim.js` + plugin

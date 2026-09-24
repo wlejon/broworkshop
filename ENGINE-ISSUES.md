@@ -13,8 +13,8 @@ bronze binding is now `unprojectLocal(node, [x, y])` → flat
 null node as world space). Every existing call throws
 `expected a __bro_native.scene.SceneNode handle, got a non-object`.
 Repro: `bro-headless demos/lighting-demo -e "advanceTime(50); document.querySelector('#stage').getContext('scene').unprojectLocal(500, 500)"`.
-Breaks picking in games/gridkeep, hearthfolk, hexfront, tilehaven (their
-tests fail in the baseline) and demos/lighting-demo light selection, plus
+Broke picking in games/gridkeep, hearthfolk, hexfront, tilehaven (their
+tests fail in the baseline; hearthfolk and tilehaven are ported off it) and demos/lighting-demo light selection, plus
 the other callers (`grep -rn "unprojectLocal(" games demos tools ai lib`).
 Either restore the documented app-facing shape or publish the replacement
 and the apps get ported to it.
@@ -27,7 +27,8 @@ at all for setCamera apps. `lib/arcade/scene3d.js` `rayAt()` (games/tumble)
 computes the ray in JS with kit `screenRay` meanwhile; switch it back to
 the engine call once one works. games/farm and games/hearthfolk now pick
 through the same `rayAt()` / `toScreen()` (their orthographic iso cameras
-included; kit `screenRay`/`worldToScreen` handle `mode: 'orthographic'`).
+included; kit `screenRay`/`worldToScreen` handle `mode: 'orthographic'`),
+and so does games/tilehaven.
 
 ### Column flex container with a percentage width stretches children to the wrong width (2026-09-24)
 A `display:flex; flex-direction:column` box whose `width` is a percentage

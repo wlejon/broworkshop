@@ -1,8 +1,10 @@
 // sim.js — DeepDelve domain: map gen, combat, FOV, save/load (createGame).
-// No shell / HUD / scene wiring — that lives in game.js.
+// No shell / HUD / camera wiring; that lives in game.js and view.js.
 
-import { blobVariantMasks, makeAtlas, ACELL, TILE_ATLAS } from './atlas.js';
-import { registerKinds } from './kinds.js';
+import { seededRandom } from '/lib/arcade/grid.js';
+import { bytesToBase64, base64ToBytes } from '/lib/arcade/save.js';
+import { blobVariantMasks, makeAtlas, ACELL, TILE_ATLAS } from '/app/atlas.js';
+import { registerKinds } from '/app/kinds.js';
 
 export { blobVariantMasks };
 
@@ -46,17 +48,6 @@ export const PLAYER_BASE = { hp: 26, atk: 3, def: 0 };
 export const POTION_HEAL = 10;
 export const TRAP_DMG = 4;
 
-// --- Seeded RNG ----------------------------------------------------------------
-
-export function mulberry32(seed) {
-    return function () {
-        seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
-        let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
-}
-
 // --- Game factory ------------------------------------------------------------------
 
 export function createGame(scene, seed) {
@@ -99,8 +90,8 @@ export function createGame(scene, seed) {
         visible: new Set(),
         fogDirty: true,
         msgs: [],
-        lastShot: null,        // { from, to, turn } ΓÇö ranged attack, for tests + fx
-        rng: mulberry32(1),
+        lastShot: null,        // { from, to, turn } — ranged attack, for tests + fx
+        rng: seededRandom(1),
         // callbacks the shell wires up
         onLog: null, onShot: null, onHurt: null, onGameOver: null,
         onDescend: null, onFullRedraw: null,
@@ -166,7 +157,7 @@ export function createGame(scene, seed) {
     function clearCellFlags(x, y) { world.setFlag(x, y, 0xFF, false); }
 
     function genFloor(floorNum) {
-        const rng = mulberry32((game.seed ^ Math.imul(floorNum, 0x9E3779B9)) >>> 0);
+        const rng = seededRandom((game.seed ^ Math.imul(floorNum, 0x9E3779B9)) >>> 0);
         game.rng = rng;
 
         for (let y = 0; y < MAP_H; y++) {
@@ -213,7 +204,7 @@ export function createGame(scene, seed) {
         }
 
         // Corridors: connect each unconnected room to the nearest connected one
-        // (L-shaped, 1 wide) with elevation lerped end to end ΓÇö natural ramps.
+        // (L-shaped, 1 wide) with elevation lerped end to end — natural ramps.
         function carveCorridor(A, Bm) {
             const cells = [];
             let x = A.cx, y = A.cy;
@@ -247,7 +238,7 @@ export function createGame(scene, seed) {
         }
 
         // Elevation relaxation: lower any open cell more than 1 above an open
-        // neighbour until stable, so every walkable step is at most one level ΓÇö
+        // neighbour until stable, so every walkable step is at most one level —
         // rooms keep their height, fringes turn into ramps.
         let changed = true;
         while (changed) {
@@ -266,7 +257,7 @@ export function createGame(scene, seed) {
         }
 
         // Hazards: water pools and (deeper floors) chasms, each applied
-        // tentatively and reverted if it splits the walkable region ΓÇö
+        // tentatively and reverted if it splits the walkable region —
         // components() guarantees one connected dungeon.
         function tryHazard(cells, apply) {
             const prev = cells.map(c => ({
@@ -704,7 +695,7 @@ export function createGame(scene, seed) {
                 }
             } else if (it.kind === 'amulet') {
                 game.over = true; game.won = true;
-                game.log('You clutch the AMULET OF DELVING ΓÇö the dungeon is conquered!', 'gold');
+                game.log('You clutch the AMULET OF DELVING — the dungeon is conquered!', 'gold');
                 if (game.onGameOver) game.onGameOver(true);
             }
             game.items.splice(game.items.indexOf(it), 1);
@@ -783,20 +774,9 @@ export function createGame(scene, seed) {
     // ---- save / load ---------------------------------------------------------------
 
     const SAVE_KEY = 'deepdelve-save';
-    const bytesToB64 = (bytes) => {
-        let bin = '';
-        for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
-        return btoa(bin);
-    };
-    const b64ToBytes = (b64) => {
-        const bin = atob(b64);
-        const out = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-        return out;
-    };
 
     game.saveRun = function () {
-        if (game.over) { game.log('The run is over ΓÇö nothing to save.'); return false; }
+        if (game.over) { game.log('The run is over — nothing to save.'); return false; }
         const data = {
             version: 1,
             seed: game.seed, floor: game.floor, turn: game.turn,
@@ -808,8 +788,8 @@ export function createGame(scene, seed) {
             decor: game.decor.map(d => ({ ...d })),
             spawn: { ...game.spawn },
             stairsDown: game.stairsDown ? { ...game.stairsDown } : null,
-            fog: bytesToB64(game.fog),
-            grid: bytesToB64(world.save()),
+            fog: bytesToBase64(game.fog),
+            grid: bytesToBase64(world.save()),
             msgs: game.msgs.slice(-12),
         };
         localStorage.setItem(SAVE_KEY, JSON.stringify(data));
@@ -823,7 +803,7 @@ export function createGame(scene, seed) {
         let data;
         try { data = JSON.parse(raw); } catch { return false; }
         if (!data || data.version !== 1) return false;
-        if (!world.load(b64ToBytes(data.grid))) return false;
+        if (!world.load(base64ToBytes(data.grid))) return false;
         game.seed = data.seed; game.floor = data.floor; game.turn = data.turn;
         game.kills = data.kills; game.goldTotal = data.goldTotal;
         game.doorsOpened = data.doorsOpened;
@@ -836,7 +816,7 @@ export function createGame(scene, seed) {
         game.stairsDown = data.stairsDown ? { ...data.stairsDown } : null;
         game.msgs = data.msgs.map(m => ({ ...m }));
         game.over = false; game.won = false;
-        game.fog = new Uint8Array(b64ToBytes(data.fog));
+        game.fog = new Uint8Array(base64ToBytes(data.fog));
         // Demote everything lit to remembered, then re-light from the player.
         for (let i = 0; i < game.fog.length; i++) if (game.fog[i] === 2) game.fog[i] = 1;
         game.visible = new Set();

@@ -122,6 +122,7 @@
     text-shadow: 0 2px 14px #000, 0 0 26px rgba(255, 170, 60, 0.35);
     pointer-events: none;
 }
+#announce[hidden] { display: none; }
 #announce.pop { animation: pop 2.2s ease-out; }
 @keyframes pop {
     0% { opacity: 0; transform: translate(-50%, -50%) scale(0.7); }

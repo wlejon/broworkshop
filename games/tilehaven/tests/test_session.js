@@ -1,22 +1,19 @@
-// test.js — scripted TileHaven session for bro-headless.
-// Run: bro-headless games/tilehaven test.js
-// Drives real click/drag road painting with edge-autotile junctions, bridge
-// costs, building placement rules, depot connectivity (floodFill/components on
-// every edit), cart hauling + reroute + stranding, production/consumption,
-// population growth gating, bulldoze refunds, save/load round-trip, victory.
+// Scripted TileHaven session: real click/drag road painting with
+// edge-autotile junctions, bridge costs, building placement rules, depot
+// connectivity (floodFill/components on every edit), cart hauling + reroute
+// + stranding, production/consumption, population growth gating, bulldoze
+// refunds, save/load round-trip, victory. Run: scripts/validate.sh games/tilehaven
+import { check as assert, press, text, shot as screenshot } from "/lib/kit/test.js";
 
 advanceTime(400);
 
-// Arcade shell boots on title — Enter starts a run (Play is selected).
-function pressKey(key) {
-    window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
-    window.dispatchEvent(new KeyboardEvent('keyup', { key, bubbles: true }));
-}
-pressKey('Enter');
+// The shell boots on the title; Enter starts a run (Play is selected).
+press('Enter');
 advanceTime(200);
 
 const H = window.HAVEN;
 assert(H, 'HAVEN debug surface exposed');
+assert(H.screen === 'playing', 'Enter on Play starts the city');
 const { game, world } = H;
 const T = H.TILE, F = H.FLAG, C = H.COSTS;
 const D = game.depot;
@@ -104,7 +101,71 @@ function paintPath(cells) {
     assert(game.netCount === 1, 'one road network at start');
     assert(world.components({ flag: F.ROAD }).length === 1, 'components agrees');
     assert(game.connectedRoads.has(key(D.x, D.y)), 'depot in its own network');
-    screenshot('test-1-terrain.png');
+    screenshot('1-terrain');
+}
+
+// --- 1b. Iso stage: picking, chrome text, pan, zoom ----------------------------
+
+{
+    // Screen <-> cell round trip through the stage's ray (what the mouse uses).
+    for (const c of [{ x: D.x, y: D.y }, { x: 2, y: 3 }, { x: 25, y: 17 }, game.riverCells[5]]) {
+        const p = H.projectCell(c.x, c.y);
+        assert(p, 'cell ' + c.x + ',' + c.y + ' projects on screen');
+        const back = H.cellAt(p.x, p.y);
+        assert(back && back.x === c.x && back.y === c.y,
+            'pick at the projected pixel finds ' + c.x + ',' + c.y + ' (got ' + JSON.stringify(back) + ')');
+    }
+    // The camera frames the board centre, depot on screen.
+    const pc = H.projectCell(14, 10), pdep = H.projectCell(D.x, D.y);
+    assert(Math.abs(pc.x - innerWidth / 2) < 60 && Math.abs(pc.y - innerHeight / 2) < 60, 'board centred');
+    assert(pdep.x > 0 && pdep.x < innerWidth && pdep.y > 0 && pdep.y < innerHeight, 'depot in view');
+    // HUD text is clean UTF-8 (no mojibake from a bad re-encode).
+    const goal = text('#hud-goal');
+    assert(/^GOAL\s+0\/50 pop · \d+\/500 coins$/.test(goal), 'goal chip: ' + goal);
+    assert(text('#btn-house .tb-cost') === C.house.coins + 'c + ' + C.house.wood + 'w', 'palette shows prices');
+
+    // Arrow keys pan the view: Up moves the camera up the screen, so the
+    // depot slides down; Right slides it left. Releasing restores nothing.
+    const ARROW = { up: 0x40000052, down: 0x40000051, left: 0x40000050, right: 0x4000004f };
+    const hold = (code, ms) => { keyDown(code); advanceTime(ms); keyUp(code); advanceTime(32); };
+    const p0 = H.projectCell(D.x, D.y);
+    hold(ARROW.up, 300);
+    const p1 = H.projectCell(D.x, D.y);
+    assert(p1.y > p0.y + 20 && Math.abs(p1.x - p0.x) < 4, 'Up pans the view up (' + JSON.stringify([p0, p1]) + ')');
+    hold(ARROW.right, 300);
+    const p2 = H.projectCell(D.x, D.y);
+    assert(p2.x < p1.x - 20 && Math.abs(p2.y - p1.y) < 4, 'Right pans the view right (' + JSON.stringify([p1, p2]) + ')');
+    hold(ARROW.down, 300);
+    hold(ARROW.left, 300);
+    const p3 = H.projectCell(D.x, D.y);
+    assert(Math.abs(p3.x - p0.x) < 2 && Math.abs(p3.y - p0.y) < 2, 'opposite keys pan back');
+
+    // The wheel zooms (clamped), keeping picking exact.
+    const cv = document.getElementById('view').getBoundingClientRect();
+    const z0 = H.zoom;
+    wheel(cv.width / 2, cv.height / 2, -3);
+    advanceTime(32);
+    assert(H.zoom < z0, 'wheel up zooms in (' + z0 + ' -> ' + H.zoom + ')');
+    const pz = H.projectCell(D.x, D.y), bz = H.cellAt(pz.x, pz.y);
+    assert(bz && bz.x === D.x && bz.y === D.y, 'picking holds when zoomed');
+    for (let i = 0; i < 40; i++) wheel(cv.width / 2, cv.height / 2, 5);
+    advanceTime(32);
+    assert(Math.abs(H.zoom - 1.6) < 1e-9, 'zoom out clamps at 1.6 (' + H.zoom + ')');
+    H.stage.iso.zoom = z0;
+    H.stage.applyCamera();
+    advanceTime(32);
+
+    // Clicking a building with no tool selects it; the panel says what it is.
+    const pd = H.projectCell(D.x, D.y);
+    click(pd.x, pd.y);
+    advanceTime(48);
+    assert(H.selected === D, 'click selects the depot');
+    assert(!document.getElementById('info-panel').hidden, 'info panel shown');
+    assert(text('#ip-name') === 'Depot' && /^Hub · 0 hauls received$/.test(text('#ip-status')),
+        'depot panel: ' + text('#ip-name') + ' / ' + text('#ip-status'));
+    click(pd.x, pd.y);
+    advanceTime(48);
+    assert(H.selected === null && document.getElementById('info-panel').hidden, 'second click deselects');
 }
 
 // --- 2. Road painting via real click + drag; edge-autotile junctions -------------
@@ -172,7 +233,7 @@ function paintPath(cells) {
     const pxT = getPixel(Math.round(pt.x), Math.round(pt.y));
     assert(gray(pxCross), 'crossroad east arm renders road pixels (' + JSON.stringify(pxCross) + ')');
     assert(grassy(pxT), 'T-junction open east edge shows grass (' + JSON.stringify(pxT) + ')');
-    screenshot('test-2-roads.png');
+    screenshot('2-roads');
 }
 
 // --- 3. Bridges over the river --------------------------------------------------
@@ -278,7 +339,7 @@ let house1, farm1, lumber1, mine1;
     assert(!mine1.connected, 'mine not yet connected');
     advanceTime(700);          // let the warning blink tint + marker appear
     assert(world.objectCount(game.kinds.warn) >= 1, 'warning marker shown');
-    screenshot('test-3-warning.png');
+    screenshot('3-warning');
 
     // Wire the mine in: route from the road end to a grass cell beside the mine.
     let gate = null;
@@ -454,8 +515,10 @@ let house1, farm1, lumber1, mine1;
     world.rebuild();
     assert(farm1.connected, 'farm still connected with loop roads');
 
+    // One farm cart at a time: let any cart already out come home first, or
+    // it may be the one standing on the cell about to be cut.
+    pumpUntil('farm carts home', () => !game.carts.some(c => c.fromId === farm1.id), 30000);
     H.debug.fillStock(farm1);
-    farm1.cartOut = false;
     pumpUntil('loop cart dispatched', () => game.carts.some(c => c.fromId === farm1.id), 15000);
     const cart = game.carts.find(c => c.fromId === farm1.id);
     advanceTime(400);   // roll onto the road
@@ -511,26 +574,25 @@ let house1, farm1, lumber1, mine1;
     if (game.coins < H.GOAL.coins) H.debug.addCoins(H.GOAL.coins - game.coins);
     advanceTime(300);
     assert(game.victory, 'victory triggered at 50 pop + 500 coins');
-    // Victory is a shell intermediate screen (not a DOM banner).
-    const victory = document.getElementById('screen-victory');
-    assert(victory, 'victory screen element exists');
-    screenshot('test-5-victory.png');
-    // Sandbox continue via plugin menu action (data-action="continue").
-    if (H.shell && H.shell.api && H.shell.api.onMenuAction) {
-        /* prefer shell path if exposed */
-    }
-    const cont = document.querySelector('[data-action="continue"]');
-    if (cont) {
-        cont.click();
-        advanceTime(80);
-    } else if (game) {
-        game.sandbox = true;
-    }
-    assert(game.sandbox, 'sandbox continue engaged');
-    // The sim keeps running.
+    // Victory is a shell intermediate screen over the paused city.
+    assert(H.screen === 'victory', 'victory screen up (screen ' + H.screen + ')');
+    assert(!document.getElementById('screen-victory').hidden, 'victory screen visible');
+    const summary = text('#victory-stats');
+    assert(/^Population \d+ · \d+ coins · \d+ cart hauls · \d+ ore sold$/.test(summary), 'victory stats: ' + summary);
+    screenshot('5-victory');
     const t0 = game.time;
+    advanceTime(300);
+    assert(game.time === t0, 'the city waits under the victory screen');
+    // Keep Building (selected) continues in sandbox mode.
+    press('Enter');
+    advanceTime(80);
+    assert(H.screen === 'playing', 'Keep Building returns to the city');
+    assert(game.sandbox, 'sandbox continue engaged');
+    assert(text('#hud-goal') === 'GOAL REACHED', 'goal chip reads GOAL REACHED');
+    // The sim keeps running.
+    const t1 = game.time;
     advanceTime(500);
-    assert(game.time > t0, 'sim continues in sandbox');
+    assert(game.time > t1, 'sim continues in sandbox');
 }
 
 // --- 11. A busy city: many carts on the roads (money shot) -------------------------
@@ -582,7 +644,7 @@ let house1, farm1, lumber1, mine1;
     assert(maxCarts >= 3, 'several carts hauling at once (peak ' + maxCarts + ')');
     assert(world.objectCount(game.kinds.cart) === game.carts.length,
         'every cart is an instanced object');
-    screenshot('test-4-city.png');
+    screenshot('4-city');
 }
 
 // --- 12. Save -> load round trip -----------------------------------------------------
@@ -622,8 +684,8 @@ let house1, farm1, lumber1, mine1;
     assert(world.getTile(D.x + 1, D.y, L_ROADS) === T.ROAD, 'road grid round-tripped');
     assert(game.netCount === snap.netCount, 'road networks recomputed after load');
     assert(game.carts.length === snap.carts, 'carts restored');
-    // world.load() drops object kinds (engine bug, worked around by
-    // re-registering) — instances must be back after a frame.
+    // world.load() wipes object instances (kinds survive); decor is
+    // re-scattered on load and buildings/carts re-placed every frame.
     advanceTime(200);
     assert(world.objectCount(game.kinds.house) > 0, 'house instances re-placed after load');
     assert(world.objectCount(game.kinds.tree) > 0, 'forest decor re-scattered after load');

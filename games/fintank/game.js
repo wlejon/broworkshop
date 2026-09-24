@@ -1,44 +1,25 @@
-// Fintank — arcade plugin (screens, HUD, cues, test hooks).
-// Domain: tank.js + fish/intruders/pets/economy. Shell owns menus / pause.
+// Fintank — arcade plugin: save slots, the between-days shop, the day loop's
+// screens, settings and high scores. The aquarium itself is tank.js. The
+// shell owns menus / pause / the best-day high score.
+//
+// Flow: title -> slots -> shop -> (day) -> dayclear -> shop | next day
+//       all fish lost -> gameover -> try again (shop, day 1)
 
-import { Economy } from "/app/economy.js";
-import { Particles } from "/app/particles.js";
-import { Fish } from "/app/fish.js";
-import { Intruders } from "/app/intruders.js";
-import { Pets } from "/app/pets.js";
-import {
-    Game,
-    setPlay,
-    playCue,
-    setShellRef,
-    getShellRef,
-    startGame,
-    enterPlayScreen,
-    attachPointer,
-    tick,
-    drawTank,
-    drawBg,
-    getSlot,
-    getDayTimer,
-    getDayMs,
-    getFish,
-    getNextStatus,
-    dayStats,
-    gameOverStats,
-    rebuildShop,
-    refreshSlotLabels,
-    shopBuyAt,
-    advanceToNextDay,
-    resetSlotForRetry,
-    quickFeed,
-    quickBuy,
-    setViewSize,
-} from "/app/tank.js";
+import { bindPointer } from "/lib/arcade/pointer.js";
+import { createOptions, sfxVolume } from "/lib/arcade/options.js";
+import { recordScore } from "/lib/arcade/scores.js";
+import * as Eco from "/app/economy.js";
+import { createTank, drawTitleWater, DAY_MS } from "/app/tank.js";
 
-// Re-export for any import of Game from game.js.
-export { Game };
+const QUICK_BUY_KEYS = [1, 2, 3, 4, 5];
+const SLOTS = [1, 2, 3];
 
-// ── Plugin ───────────────────────────────────────────────────────────────
+let api = null;
+let tank = null;
+let options = null;
+let titleClock = 0;
+
+const $ = (id) => document.getElementById(id);
 
 export const game = {
     id: "fintank",
@@ -47,364 +28,259 @@ export const game = {
 
     actions: [
         { name: "primary", label: "Quick feed", defaults: [" "] },
+        ...QUICK_BUY_KEYS.map((n) => ({ name: "buy_" + n, label: "Quick buy " + n, defaults: [String(n)] })),
     ],
 
     defaults: {
-        highScore: 0,
+        highScore: 0,          // best day reached
         difficulty: 1,
         sfxVol: 80,
+        activeSlot: 1,
+        hsDays: [],            // top runs: { score: day, day, slot, totalCoins }
     },
 
-    create(ctx) {
-        setPlay(function (name) { ctx.play(name); });
-        if (ctx.save.get("difficulty") != null) {
-            Economy.settings.difficulty = ctx.save.get("difficulty");
-        }
-        if (!getSlot()) startGame(Economy.settings.activeSlot || 1);
-        enterPlayScreen();
-        attachPointer(ctx.view);
-        setViewSize(ctx.view.width(), ctx.view.height());
+    init(shellApi) {
+        api = shellApi;
+        tank = createTank({
+            width: api.view.width(), height: api.view.height(),
+            play: (name) => api.play(name),
+            hungerMult: () => Eco.HUNGER_MULT[options.get("difficulty")] || 1,
+        });
+        options = createOptions(api, [
+            sfxVolume(),
+            { key: "difficulty", action: "cycle-difficulty", values: [1, 2, 0], label: (v) => Eco.DIFFICULTY[v] },
+        ]);
+        options.applyAll();
+        importOldScores();
+        bindPointer(api, { down: (p) => tank.clickAt(p.x, p.y) });
+    },
 
-        var slot = getSlot();
-        return {
-            score: slot.bestDay || slot.day || 1,
-            play: ctx.play,
-            highScore: ctx.highScore,
-            save: ctx.save,
-            view: ctx.view,
-            ended: false,
-            dayEnded: false,
-        };
+    create() {
+        tank.resize(api.view.width(), api.view.height());
+        if (!tank.slot) tank.startSlot(api.save.get("activeSlot") || 1);
+        tank.beginDay();
+        return { score: bestDay(), ended: false, dayEnded: false };
     },
 
     update(run, dt, input) {
-        if (run.view) setViewSize(run.view.width(), run.view.height());
+        tank.resize(api.view.width(), api.view.height());
+        if (input.pressed("primary")) tank.quickFeed();
+        for (const n of QUICK_BUY_KEYS) if (input.pressed("buy_" + n)) tank.quickBuy(n);
+        tank.tick(dt);
+        run.score = bestDay();
 
-        if (input.pressed("primary")) quickFeed();
-        ensureHotkeys();
-
-        tick(dt);
-        var slot = getSlot();
-        run.score = slot ? (slot.bestDay || slot.day || 0) : 0;
-
-        var nextStatus = getNextStatus();
-        if (nextStatus === "dayclear" && !run.dayEnded) {
+        if (tank.status === "dayclear" && !run.dayEnded) {
             run.dayEnded = true;
-            run.play("day_end");
+            api.play("day_end");
             return { status: "screen", name: "dayclear" };
         }
-        if (nextStatus === "gameover" && !run.ended) {
+        if (tank.status === "gameover" && !run.ended) {
             run.ended = true;
-            Economy.addHS({
-                day: slot.bestDay || slot.day,
-                slot: slot.slot,
-                totalCoins: slot.totalCoins || 0,
+            const slot = tank.slot;
+            recordScore(api.save, "hsDays", {
+                score: bestDay(), day: bestDay(), slot: slot.slot, totalCoins: slot.totalCoins || 0,
             });
-            if (run.save) {
-                run.save.maybeHighScore(slot.bestDay || slot.day || 0);
-            }
-            run.play("gameover");
+            api.play("gameover");
             return { status: "gameover" };
         }
     },
 
     draw(run, ctx, view) {
-        var size = view.size();
-        setViewSize(size.w, size.h);
-        var sh = Particles.shakeOffset();
+        tank.resize(view.width(), view.height());
+        const sh = tank.fx.shakeOffset();
         ctx.save();
         ctx.translate(sh.x, sh.y);
-        drawTank(ctx, size.w, size.h);
+        tank.draw(ctx);
         ctx.restore();
     },
 
     drawTitle(ctx, view) {
-        var size = view.size();
-        drawBg(ctx, size.w, size.h);
+        titleClock += 16;
+        drawTitleWater(ctx, view.width(), view.height(), titleClock);
     },
 
-    hud(run) {
-        var slot = getSlot();
-        if (!slot) {
-            return { coins: 0, day: 1, time: 120, fish: "0", pet: "-" };
-        }
-        var dayTimer = getDayTimer();
-        var DAY_MS = getDayMs();
-        var fish = getFish();
-        var secLeft = Math.max(0, Math.ceil((DAY_MS - dayTimer) / 1000));
-        var aliveFish = 0;
-        for (var i = 0; i < fish.length; i++) if (!fish[i].dead) aliveFish++;
-        var shell = getShellRef();
-        var fishDisp = (shell && shell.getScreen() === "shop")
-            ? (slot.fish.length + "/" + Economy.maxFishCap(slot))
-            : (aliveFish + "/" + Economy.maxFishCap(slot));
+    hud() {
+        const slot = tank && tank.slot;
+        if (!slot) return { coins: 0, day: 1, time: DAY_MS / 1000, fish: "0", pet: "-" };
+        const inShop = api.getScreen() === "shop";
+        const cap = Eco.maxFishCap(slot);
         return {
             coins: slot.coins,
             day: slot.day,
-            time: (shell && shell.getScreen() === "shop") ? "—" : secLeft,
-            fish: fishDisp,
+            time: inShop ? "—" : Math.max(0, Math.ceil((DAY_MS - tank.dayTimer) / 1000)),
+            fish: (inShop ? slot.fish.length : tank.aliveFish()) + "/" + cap,
             pet: slot.activePet ? slot.activePet.toUpperCase() : "-",
         };
     },
 
     gameOverText(run) {
-        if (!getSlot()) return "ALL YOUR FISH WERE LOST";
-        var st = gameOverStats();
-        var tag = run && run._newBest ? "  ·  NEW BEST" : "";
-        return (
-            "ALL YOUR FISH WERE LOST\n\n" +
-            "Best Day     " + st.bestDay + tag + "\n" +
-            "Total Coins  " + st.totalCoins + "\n" +
-            "Slot         " + st.slot
-        );
+        if (!tank || !tank.slot) return "ALL YOUR FISH WERE LOST";
+        const tag = run && run._newBest ? "  ·  NEW BEST" : "";
+        return "ALL YOUR FISH WERE LOST\n\n" +
+            "Best Day     " + bestDay() + tag + "\n" +
+            "Total Coins  " + (tank.slot.totalCoins || 0) + "\n" +
+            "Slot         " + tank.slot.slot;
     },
 
-    onEnterScreen(name, run, api) {
-        if (name === "slots") refreshSlotLabels();
-        if (name === "shop") rebuildShop();
-        if (name === "dayclear") {
-            var st = dayStats();
-            var el = document.getElementById("dayclear-stats");
-            if (el) {
-                el.textContent = [
-                    "DAY " + st.day + " SURVIVED",
-                    "FISH REMAINING: " + st.fishCount,
-                    "COINS COLLECTED: " + st.coinsGainedToday,
-                    "INTRUDERS DEFEATED: " + st.intrudersKilled,
-                    "BONUS: +" + st.bonus + "C",
-                    "BALANCE: " + st.coins + "C",
-                ].join("\n");
-            }
-        }
-        if (name === "highscores") renderHS();
-        if (name === "settings") renderSettings(api);
+    onEnterScreen(name) {
+        if (name === "slots") renderSlots();
+        else if (name === "shop") renderShop();
+        else if (name === "dayclear") renderDayClear();
+        else if (name === "highscores") renderScores();
+        else if (name === "settings") options.render();
     },
 
-    onMenuAction(action, run, api) {
-        if (action === "play" || action === "slots") return "slots";
-        if (action === "highscores") return "highscores";
-        if (action === "settings") return "settings";
-        if (action === "credits") return "credits";
+    onMenuAction(action, run) {
+        if (action === "slots" || action === "highscores" || action === "settings" || action === "credits") return action;
+        if (options.handle(action)) return null;
 
-        if (action === "slot-1" || action === "slot-2" || action === "slot-3") {
-            var n = parseInt(action.split("-")[1], 10);
-            startGame(n);
+        const slotN = /^slot-(\d)$/.exec(action);
+        if (slotN) {
+            const n = Number(slotN[1]);
+            api.save.set("activeSlot", n);
+            api.save.save();
+            tank.startSlot(n);
             return "shop";
         }
-        if (action === "erase-1" || action === "erase-2" || action === "erase-3") {
-            Economy.eraseSlot(parseInt(action.split("-")[1], 10));
-            refreshSlotLabels();
+        const erase = /^erase-(\d)$/.exec(action);
+        if (erase) {
+            Eco.eraseSlot(Number(erase[1]));
+            renderSlots();
+            return null;
+        }
+        const shopItem = /^shop-(\d+)$/.exec(action);
+        if (shopItem) {
+            const res = tank.shopBuy(Number(shopItem[1]));
+            api.play(res.ok ? "buy" : "buy_fail");
+            renderShop();
             return null;
         }
 
         if (action === "start-day") {
-            if (run) {
-                run.dayEnded = false;
-                run.ended = false;
-                enterPlayScreen();
-                return "playing";
-            }
-            return { startRun: true };
+            if (!run) return { startRun: true };
+            run.dayEnded = run.ended = false;
+            tank.beginDay();
+            return "playing";
         }
-
-        if (action.indexOf("shop-") === 0) {
-            var idx = parseInt(action.slice(5), 10);
-            var res = shopBuyAt(idx);
-            playCue(res && res.ok ? "buy" : "buy_fail");
-            rebuildShop();
-            return null;
-        }
-
-        if (action === "shop") {
-            advanceToNextDay();
+        if (action === "shop") {                       // day clear -> shop for the next day
+            tank.nextDay();
             if (run) run.dayEnded = false;
             return "shop";
         }
-        if (action === "next") {
-            advanceToNextDay();
-            if (run) {
-                run.dayEnded = false;
-                run.ended = false;
-            }
+        if (action === "next") {                       // day clear -> straight into the next day
+            tank.nextDay();
+            if (run) run.dayEnded = run.ended = false;
             return "playing";
         }
-
-        if (action === "tryagain" || action === "restart") {
-            resetSlotForRetry();
+        if (action === "tryagain") {
+            tank.resetForRetry();
             return "shop";
         }
-
-        if (action === "cycle-difficulty") {
-            var d = Economy.settings.difficulty | 0;
-            d = (d + 1) % 3;
-            Economy.settings.difficulty = d;
-            Economy.saveSettings();
-            if (api && api.save) {
-                api.save.set("difficulty", d);
-                api.save.save();
-            }
-            renderSettings(api);
-            return null;
-        }
-        if (action === "cycle-sfx") {
-            var v = Economy.settings.sfxVol | 0;
-            v = (v + 10) % 110;
-            Economy.settings.sfxVol = v;
-            Economy.saveSettings();
-            if (api && api.audio && api.audio.setSfxVol) api.audio.setSfxVol(v / 100);
-            if (api && api.save) {
-                api.save.set("sfxVol", v);
-                api.save.save();
-            }
-            renderSettings(api);
-            return null;
-        }
-
         return null;
     },
 
-    // Game SFX only — menu move/select are shell-owned.
+    // Game SFX only; menu move/select are shell-owned.
     cue(name, audio) {
-        if (name === "feed") audio.tone(280, 0.06, "triangle", 0.4);
-        else if (name === "splash") audio.tone(180, 0.05, "sine", 0.3);
-        else if (name === "chomp") audio.tone(220, 0.04, "square", 0.35);
-        else if (name === "hit") audio.tone(140, 0.05, "sawtooth", 0.5);
-        else if (name === "fish_die") audio.tone(120, 0.20, "sawtooth", 0.45);
-        else if (name === "buy") audio.tone(520, 0.05, "square", 0.45);
-        else if (name === "buy_fail") audio.tone(180, 0.08, "sawtooth", 0.45);
-        else if (name === "intruder_roar") {
-            audio.sequence([
-                [90, 0.08, "sawtooth", 0.55],
-                [70, 0.10, "sawtooth", 0.55],
-            ]);
-        } else if (name === "intruder_die") {
-            audio.sequence([
-                [220, 0.05, "square", 0.55],
-                [160, 0.05, "square", 0.55],
-                [100, 0.10, "square", 0.45],
-            ]);
-        } else if (name === "hatch") {
-            audio.sequence([
-                [500, 0.05, "square", 0.5],
-                [620, 0.05, "square", 0.5],
-                [780, 0.08, "square", 0.6],
-            ]);
-        } else if (name === "day_end") {
-            audio.sequence([
-                [523, 0.08, "square", 0.6],
-                [659, 0.08, "square", 0.6],
-                [784, 0.08, "square", 0.6],
-                [1047, 0.18, "square", 0.85],
-            ]);
-        } else if (name === "gameover") {
-            audio.sequence([
-                [440, 0.18, "sawtooth", 0.5],
-                [330, 0.18, "sawtooth", 0.5],
-                [220, 0.30, "sawtooth", 0.5],
-            ]);
-        } else if (name.indexOf("coin_drop@") === 0) {
-            var t1 = parseInt(name.slice(10), 10) || 1;
-            audio.tone(440 + t1 * 80, 0.05, "sine", 0.45);
-        } else if (name.indexOf("coin_get@") === 0) {
-            var t2 = parseInt(name.slice(9), 10) || 1;
-            audio.tone(620 + t2 * 120, 0.06, "triangle", 0.5);
+        const tone = TONES[name];
+        if (tone) { audio.tone(...tone); return; }
+        const seq = SEQUENCES[name];
+        if (seq) { audio.sequence(seq); return; }
+        const coin = /^coin_(drop|get)@(\d+)$/.exec(name);
+        if (coin) {
+            const tier = Number(coin[2]) || 1;
+            if (coin[1] === "drop") audio.tone(440 + tier * 80, 0.05, "sine", 0.45);
+            else audio.tone(620 + tier * 120, 0.06, "triangle", 0.5);
         }
     },
 };
 
-// ── Shell chrome helpers ─────────────────────────────────────────────────
+const TONES = {
+    feed: [280, 0.06, "triangle", 0.4],
+    splash: [180, 0.05, "sine", 0.3],
+    chomp: [220, 0.04, "square", 0.35],
+    hit: [140, 0.05, "sawtooth", 0.5],
+    fish_die: [120, 0.20, "sawtooth", 0.45],
+    buy: [520, 0.05, "square", 0.45],
+    buy_fail: [180, 0.08, "sawtooth", 0.45],
+};
+const SEQUENCES = {
+    intruder_roar: [[90, 0.08, "sawtooth", 0.55], [70, 0.10, "sawtooth", 0.55]],
+    intruder_die: [[220, 0.05, "square", 0.55], [160, 0.05, "square", 0.55], [100, 0.10, "square", 0.45]],
+    hatch: [[500, 0.05, "square", 0.5], [620, 0.05, "square", 0.5], [780, 0.08, "square", 0.6]],
+    day_end: [[523, 0.08, "square", 0.6], [659, 0.08, "square", 0.6], [784, 0.08, "square", 0.6], [1047, 0.18, "square", 0.85]],
+    gameover: [[440, 0.18, "sawtooth", 0.5], [330, 0.18, "sawtooth", 0.5], [220, 0.30, "sawtooth", 0.5]],
+};
 
-function renderHS() {
-    var out = document.getElementById("hs-list");
-    if (!out) return;
-    var list = Economy.listHS();
-    if (!list.length) { out.textContent = "NO SCORES YET"; return; }
-    out.textContent = list.map(function (e, i) {
-        var rank = (i + 1) + ".";
-        if (i < 9) rank = " " + rank;
-        return rank + " DAY " + (e.day || 0) + "  COINS " + (e.totalCoins || 0) + "  SLOT " + (e.slot || "?");
-    }).join("\n");
-}
-
-function renderSettings(api) {
-    var s = Economy.settings;
-    var el;
-    el = document.getElementById("opt-sfxVol");
-    if (el) el.textContent = String(s.sfxVol);
-    el = document.getElementById("opt-difficulty");
-    if (el) el.textContent = Economy.difficultyLabel();
-}
-
-var hotkeysWired = false;
-function ensureHotkeys() {
-    if (hotkeysWired) return;
-    hotkeysWired = true;
-    window.addEventListener("keydown", function (e) {
-        var shell = getShellRef();
-        if (!shell || shell.getScreen() !== "playing") return;
-        if (e.repeat) return;
-        if (/^[1-5]$/.test(e.key)) {
-            quickBuy(parseInt(e.key, 10));
+// Scores used to live in their own "fintank:days" key; fold them into the save once.
+function importOldScores() {
+    try {
+        const old = JSON.parse(localStorage.getItem("fintank:days") || "null");
+        if (Array.isArray(old) && !(api.save.get("hsDays") || []).length) {
+            for (const e of old) recordScore(api.save, "hsDays", { score: e.day || 0, day: e.day || 0,
+                slot: e.slot || 1, totalCoins: e.totalCoins || 0 });
         }
-    });
+        localStorage.removeItem("fintank:days");
+    } catch (e) { /* unreadable: drop it */ }
 }
 
-// ── Test hooks ───────────────────────────────────────────────────────────
+function bestDay() {
+    const s = tank.slot;
+    return s ? s.bestDay || s.day || 1 : 0;
+}
 
-export function installTestHooks(shell) {
-    setShellRef(shell);
-    if (shell.api && shell.api.play) {
-        setPlay(function (name) { shell.api.play(name); });
+// ── Screens ──────────────────────────────────────────────────────────────
+
+function renderSlots() {
+    for (const n of SLOTS) {
+        const el = document.querySelector('[data-action="slot-' + n + '"]');
+        if (!Eco.slotExists(n)) { el.textContent = "SLOT " + n + " - NEW"; continue; }
+        const s = Eco.loadSlot(n);
+        el.textContent = "SLOT " + n + " - DAY " + s.day + " - " + s.coins + "C - " + s.fish.length + " FISH";
     }
-
-    var Screens = {
-        switchTo: function (name) {
-            if (name === "playing" || name === "play") {
-                if (!shell.getRun()) {
-                    if (!getSlot()) startGame(1);
-                    shell.startRun();
-                } else {
-                    shell.switchTo("playing");
-                }
-            } else if (name === "gameOver" || name === "gameover") {
-                shell.switchTo("gameover");
-            } else if (name === "howtoplay") {
-                shell.switchTo("howto");
-            } else {
-                shell.switchTo(name);
-            }
-        },
-        manager: function () {
-            return {
-                name: function () { return shell.getScreen(); },
-                current: function () { return null; },
-            };
-        },
-    };
-
-    window.__fintank = {
-        F: {
-            Economy: Economy,
-            Particles: Particles,
-            Fish: Fish,
-            Intruders: Intruders,
-            Pets: Pets,
-            Screens: Screens,
-            Game: Game,
-        },
-        state: function () { return Game._state(); },
-        feed: function (x) { Game._addPellet(x != null ? x : 600, 100); },
-        buy: function (item) { return Game.buy(item); },
-        addCoins: function (n) { Game._addCoins(n); },
-        spawnIntruder: function (type) { Game._spawnIntruder(type || "snatcher"); },
-        killAllIntruders: function () { Game._killAllIntruders(); },
-        collectAllCoins: function () { Game._collectAllCoins(); },
-        feedFish: function (i) { Game._feedFish(i); },
-        endDay: function () { Game._forceEndDay(); },
-        dayProgress: function () { var s = Game._state(); return s.dayTimer; },
-        screens: Screens,
-        game: Game,
-        economy: Economy,
-        shell: shell,
-    };
 }
+
+function renderShop() {
+    const slot = tank.slot;
+    const host = $("shop-items");
+    host.textContent = "";
+    Eco.shopCatalog(slot).forEach((it, i) => {
+        const div = document.createElement("div");
+        div.className = "menu-item" + (i === 0 ? " selected" : "") + (it.disabled ? " disabled" : "");
+        div.setAttribute("data-action", "shop-" + i);
+        div.textContent = it.label + (it.price < 0 ? "" : "  " + it.price + "C");
+        host.appendChild(div);
+    });
+    const start = document.createElement("div");
+    start.className = "menu-item";
+    start.setAttribute("data-action", "start-day");
+    start.textContent = ">> START DAY " + slot.day;
+    host.appendChild(start);
+    $("shop-subtitle").textContent = "DAY " + slot.day + " - " + slot.coins + " COINS";
+}
+
+function renderDayClear() {
+    const slot = tank.slot, today = tank.today;
+    $("dayclear-stats").textContent = [
+        "DAY " + slot.day + " SURVIVED",
+        "FISH REMAINING: " + tank.aliveFish(),
+        "COINS COLLECTED: " + today.coins,
+        "INTRUDERS DEFEATED: " + today.kills,
+        "BONUS: +" + today.bonus + "C",
+        "BALANCE: " + slot.coins + "C",
+    ].join("\n");
+}
+
+function renderScores() {
+    const list = api.save.get("hsDays") || [];
+    $("hs-list").textContent = list.length
+        ? list.map((e, i) => (i < 9 ? " " : "") + (i + 1) + ". DAY " + e.day + "  COINS " + e.totalCoins + "  SLOT " + e.slot).join("\n")
+        : "NO SCORES YET";
+}
+
+// ── Test surface (hooks.js) ──────────────────────────────────────────────
+
+export const internals = {
+    get tank() { return tank; },
+    get options() { return options; },
+    get api() { return api; },
+};

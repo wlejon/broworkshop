@@ -1,151 +1,107 @@
-// particles.js — bubbles, splash drops, hit sparks, floating text.
-// Inline shake (no /lib/fx dependency).
-'use strict';
-import { Text } from "/app/text.js";
+// particles.js — Fintank's juice: rising bubbles, splash drops, hit sparks,
+// floating "+coins" labels and a short screen shake. One instance per tank.
 
-export const Particles = (function () {
-    var items = [];
-    var bubbles = [];
-    var shakeTimer = 0, shakeDur = 1, shakeMag = 0;
+import { centeredText, dot } from "/app/paint.js";
+
+const MAX_BUBBLES = 40;
+
+export function createParticles() {
+    const items = [];            // { kind: spark | drop | text, x, y, vx, vy, life, age, color, text? }
+    const bubbles = [];
+    let shakeMs = 0, shakeDur = 1, shakeMag = 0;
 
     function reset() {
         items.length = 0;
         bubbles.length = 0;
-        shakeTimer = 0;
+        shakeMs = 0;
     }
 
-    function add(p) { items.push(p); }
-
-    function spark(x, y, color, n) {
-        n = n || 8;
-        for (var i = 0; i < n; i++) {
-            var a = Math.random() * Math.PI * 2;
-            var s = 60 + Math.random() * 120;
+    function spark(x, y, color, n = 8) {
+        for (let i = 0; i < n; i++) {
+            const a = Math.random() * Math.PI * 2, s = 60 + Math.random() * 120;
             items.push({
-                kind: 'spark',
-                x: x, y: y,
-                vx: Math.cos(a) * s,
-                vy: Math.sin(a) * s,
-                life: 0.4 + Math.random() * 0.3,
-                age: 0,
-                color: color || '#ffffff'
+                kind: "spark", x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s,
+                life: 0.4 + Math.random() * 0.3, age: 0, color: color || "#ffffff",
             });
         }
     }
 
     function splash(x, y) {
-        for (var i = 0; i < 6; i++) {
-            var a = -Math.PI/2 + (Math.random()-0.5) * 1.2;
-            var s = 100 + Math.random() * 80;
+        for (let i = 0; i < 6; i++) {
+            const a = -Math.PI / 2 + (Math.random() - 0.5) * 1.2, s = 100 + Math.random() * 80;
             items.push({
-                kind: 'drop',
-                x: x, y: y,
-                vx: Math.cos(a) * s,
-                vy: Math.sin(a) * s - 60,
-                life: 0.4,
-                age: 0,
-                color: '#8fd6f0'
+                kind: "drop", x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 60,
+                life: 0.4, age: 0, color: "#8fd6f0",
             });
         }
     }
 
     function floatText(x, y, text, color) {
-        items.push({
-            kind: 'text',
-            x: x, y: y,
-            vy: -30,
-            life: 1.1,
-            age: 0,
-            text: String(text),
-            color: color || '#fff4d8'
-        });
+        items.push({ kind: "text", x, y, vx: 0, vy: -30, life: 1.1, age: 0, text: String(text), color: color || "#fff4d8" });
     }
 
-    function addBubble(Wd, Hd) {
-        bubbles.push({
-            x: 20 + Math.random() * (Wd - 40),
-            y: Hd - 20,
-            r: 2 + Math.random() * 4,
-            vy: -(12 + Math.random() * 30),
-            wobble: Math.random() * Math.PI * 2
-        });
+    function shake(mag) {
+        shakeMs = shakeDur = 180;
+        shakeMag = mag || 6;
     }
 
-    function update(dt, Wd, Hd) {
-        var s = dt / 1000;
-        for (var i = items.length - 1; i >= 0; i--) {
-            var p = items[i];
+    function shakeOffset() {
+        if (shakeMs <= 0) return { x: 0, y: 0 };
+        const k = (shakeMs / shakeDur) * shakeMag;
+        return { x: (Math.random() - 0.5) * k, y: (Math.random() - 0.5) * k };
+    }
+
+    /** Advance by ms; bubbles spawn across a view of width W, height H. */
+    function update(ms, W, H) {
+        const s = ms / 1000;
+        for (let i = items.length - 1; i >= 0; i--) {
+            const p = items[i];
             p.age += s;
             if (p.age >= p.life) { items.splice(i, 1); continue; }
-            if (p.kind === 'spark' || p.kind === 'drop') {
-                p.x += p.vx * s;
-                p.y += p.vy * s;
-                if (p.kind === 'drop') p.vy += 400 * s;
-            } else if (p.kind === 'text') {
-                p.y += p.vy * s;
-            }
+            p.x += p.vx * s;
+            p.y += p.vy * s;
+            if (p.kind === "drop") p.vy += 400 * s;
         }
-        if (Math.random() < dt / 300 && bubbles.length < 40) addBubble(Wd, Hd);
-        for (var j = bubbles.length - 1; j >= 0; j--) {
-            var b = bubbles[j];
+        if (Math.random() < ms / 300 && bubbles.length < MAX_BUBBLES) {
+            bubbles.push({
+                x: 20 + Math.random() * (W - 40), y: H - 20,
+                r: 2 + Math.random() * 4, vy: -(12 + Math.random() * 30),
+                wobble: Math.random() * Math.PI * 2,
+            });
+        }
+        for (let j = bubbles.length - 1; j >= 0; j--) {
+            const b = bubbles[j];
             b.wobble += s * 3;
             b.x += Math.sin(b.wobble) * 6 * s;
             b.y += b.vy * s;
             if (b.y < 20) bubbles.splice(j, 1);
         }
-        if (shakeTimer > 0) shakeTimer -= dt;
+        if (shakeMs > 0) shakeMs -= ms;
     }
 
     function draw(ctx) {
         ctx.save();
-        for (var i = 0; i < bubbles.length; i++) {
-            var b = bubbles[i];
-            ctx.globalAlpha = 0.4;
-            ctx.strokeStyle = '#9fe8ff';
-            ctx.lineWidth = 1;
+        ctx.globalAlpha = 0.4;
+        ctx.strokeStyle = "#9fe8ff";
+        ctx.lineWidth = 1;
+        for (const b of bubbles) {
             ctx.beginPath();
             ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
             ctx.stroke();
         }
-        ctx.globalAlpha = 1;
-        for (var j = 0; j < items.length; j++) {
-            var p = items[j];
-            var t = 1 - (p.age / p.life);
-            ctx.globalAlpha = Math.max(0, t);
-            if (p.kind === 'spark') {
+        for (const p of items) {
+            ctx.globalAlpha = Math.max(0, 1 - p.age / p.life);
+            if (p.kind === "spark") {
                 ctx.fillStyle = p.color;
                 ctx.fillRect(p.x - 2, p.y - 2, 4, 4);
-            } else if (p.kind === 'drop') {
-                ctx.fillStyle = p.color;
-                ctx.beginPath();
-                ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2);
-                ctx.fill();
-            } else if (p.kind === 'text') {
-                Text.drawCentered(ctx, p.text, p.x, p.y, 2, p.color);
+            } else if (p.kind === "drop") {
+                dot(ctx, p.x, p.y, 2.5, p.color);
+            } else {
+                centeredText(ctx, p.text, p.x, p.y, p.color);
             }
         }
-        ctx.globalAlpha = 1;
         ctx.restore();
     }
 
-    function shake(mag) {
-        shakeTimer = 180;
-        shakeDur = 180;
-        shakeMag = mag || 6;
-    }
-    function shakeOffset() {
-        if (shakeTimer <= 0) return { x: 0, y: 0 };
-        var intensity = (shakeTimer / shakeDur) * shakeMag;
-        return {
-            x: (Math.random() - 0.5) * intensity,
-            y: (Math.random() - 0.5) * intensity
-        };
-    }
-
-    return {
-        reset: reset, add: add, update: update, draw: draw,
-        spark: spark, splash: splash, floatText: floatText,
-        shake: shake, shakeOffset: shakeOffset,
-        count: function () { return items.length; }
-    };
-})();
+    return { reset, spark, splash, floatText, shake, shakeOffset, update, draw, count: () => items.length };
+}

@@ -1,5 +1,5 @@
 // atlas.js — Procedural tileset atlas and autotile variant masks for DeepDelve.
-import { mulberry32 } from './sim.js';
+import { seededRandom } from '/lib/arcade/grid.js';
 
 // --- blob47 variant table --------------------------------------------------------
 // Mirrors bro/src/tile/autotile.cpp: 8-neighbour mask bits E=1,NE=2,N=4,NW=8,
@@ -45,7 +45,7 @@ export const TILE_ATLAS = [
 export function makeAtlas() {
     const w = ACOLS * APX, h = AROWS * APX;
     const buf = new Uint8Array(w * h * 4);
-    const rng = mulberry32(0xD0E5A11);
+    const rng = seededRandom(0xD0E5A11);
     const clamp = (v) => Math.max(0, Math.min(255, v | 0));
     function paint(cell, fn) {
         const cx = (cell % ACOLS) * APX, cy = Math.floor(cell / ACOLS) * APX;

@@ -146,6 +146,8 @@
     border-radius: 6px;
 }
 
+#info-panel[hidden], #toast[hidden] { display: none; }
+
 .overlay-title.victory { color: #ffd75e; }
 
 .howto {
