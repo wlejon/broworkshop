@@ -22,6 +22,7 @@ arcade kernel  (loop, view, input, audio, save)
 | `audio.js` | short tones / sequences |
 | `save.js` | namespaced prefs + high score |
 | `shell.js` | boot, screens, menu, session, frame |
+| `scene3d.js` | 3D games: `bootScene`, `createStage` (scene, orbit camera, picking, taps) |
 | `arcade.css` | shared chrome; theme via CSS variables |
 
 ## Quick start
@@ -119,20 +120,34 @@ onEnterScreen(name, run, api) {
 
 ## 3D / scene games
 
-Shell always needs a **2D** view for its clear/loop. Pattern used by tumble,
-deepdelve, blastgrid, hexfront, farm, etc.:
+The shell always needs a **2D** view for its clear/loop, so a scene game
+boots it on a hidden canvas and keeps `#view` for `getContext("scene")`.
+`scene3d.js` does both halves; **`games/tumble`** is the reference:
 
 ```js
 // main.js
-const shellCanvas = document.createElement("canvas");
-shellCanvas.style.display = "none";
-document.body.appendChild(shellCanvas);
-boot(game, { canvas: shellCanvas, width: 1280, height: 800 });
-// #view in HTML holds getContext("scene")
+import { bootScene } from "/lib/arcade/scene3d.js";
+import { game } from "/app/game.js";
+bootScene(game, { width: 1280, height: 800 });
+
+// game.js — build the stage inside create(), never at module load
+stage = stage || createStage({
+    orbit: { target: [0, 3, 0], dist: 12, fov: 50 },
+    controls: { minDist: 4, maxDist: 60 },        // kit orbitControls options
+});
+stage.onTap((p) => place(stage.planeHit(stage.rayAt(p.clientX, p.clientY), 0)));
+stage.onTap((p) => remove(stage.pick(p.clientX, p.clientY)), { button: 2 });
+draw() { stage.applyCamera(); }
 ```
 
-Create the scene **inside `create()`**, not at module load, so headless
-title screens still boot under `--no-gpu`.
+The stage gives right-drag orbit / middle-drag pan / wheel zoom (kit
+`orbitControls`), `reframe(pivot, dist)`, `rayAt` (screen → world ray),
+`planeHit(ray, y)`, `pick` (scene raycast) and `onTap`, a press + release
+that did not drag, so right-click actions do not fire at the end of an
+orbit. Rebuild a level with `scene.clear()` + `Physics.createWorld()`
+rather than tracking every node and body. Older scene games
+(deepdelve, blastgrid, hexfront, farm, ...) still paste the hidden-canvas
+block and their own camera; move them over when touched.
 
 ### Large 3D titles — `sim.js` + plugin
 
@@ -143,7 +158,8 @@ sim.js    createGame(scene, seed) + constants  (pure domain)
 game.js   thin plugin: ensureScene, syncRender, HUD, cue, tests
 ```
 
-Examples: `deepdelve`, `blastgrid`, `tilehaven`, `hearthfolk`.  
+Examples: `tumble` (board / marbles / aids / ui split), `deepdelve`,
+`blastgrid`, `tilehaven`, `hearthfolk`.  
 Do not call `getContext("scene")` or touch the DOM from `sim.js`.
 
 ## Theme tokens

@@ -1,227 +1,169 @@
-// Thorough Tumble gameplay investigation — bro-headless.
-// Run: bro-headless games/tumble games/tumble/tests/test_gameplay.js
+// Tumble gameplay: placement rules, coach, win / fail flow, progression,
+// keyboard controls, and mouse building through the engine's input path.
+import { test, done, check, eq, frames, simUntil, press, q, text, shot } from "/lib/kit/test.js";
 
-function log() {
-    var parts = [];
-    for (var i = 0; i < arguments.length; i++) parts.push(String(arguments[i]));
-    console.log("[tumble] " + parts.join(" "));
+frames(6);
+const T = window.__tumble;
+check(T, "__tumble hooks exposed");
+
+/** Run the current level until it clears or falls back to build. */
+function runToEnd(virtualMs) {
+    T.enterRun();
+    let sawRun = false;
+    simUntil(() => {
+        if (T.snapshot().mode === "run") sawRun = true;
+        return T.screen === "complete" || (sawRun && T.snapshot().mode === "build");
+    }, virtualMs || 15000);
+    return T.screen === "complete" ? "complete" : "fail";
 }
 
-function pressKey(key) {
-    window.dispatchEvent(new KeyboardEvent("keydown", { key: key, bubbles: true }));
-    window.dispatchEvent(new KeyboardEvent("keyup", { key: key, bubbles: true }));
+function start(idx) {
+    T.startLevel(idx);
+    frames(4);
+    check(T.screen === "playing" && T.run.levelIdx === idx, "level " + idx + " playing");
 }
 
-function waitFor(pred, maxMs, step) {
-    step = step || 50;
-    maxMs = maxMs || 8000;
-    var waited = 0;
-    while (waited < maxMs) {
-        if (pred()) return true;
-        advanceTime(step);
-        flush();
-        waited += step;
+test("campaign shape", () => {
+    eq(T.LEVELS.length, 8, "levels");
+    eq(T.LEVELS.map((l) => l.id), ["drop-in", "plank", "bank", "bounce", "chute", "conveyor", "spin", "gauntlet"], "order");
+});
+
+test("Drop-In: placement rules and coach", () => {
+    T.resetProgress();
+    start(0);
+    check(q("#hud-action").classList.contains("coach-mode"), "coach shows on a fresh Drop-In");
+    check(/Tip 1 \/ 3/.test(text("#hud-action-kicker")), "tip 1 of 3");
+    check(T.place("block", 2, 0, 2), "place ok");
+    check(!T.place("block", 2, 0, 2), "duplicate cell rejected");
+    check(!T.place("block", 99, 0, 99), "out of bounds rejected");
+    check(!T.place("block", 0, 5, 0), "spout cell reserved");
+    check(!T.place("booster", -1, 0, -1), "type without budget rejected");
+    frames(1);
+    check(/Tip 2 \/ 3/.test(text("#hud-action-kicker")), "placing advances the coach");
+    eq(text("#hud-budget"), "1 / 5", "budget HUD");
+    check(T.removeAt(2, 0, 2), "remove ok");
+    frames(1);
+    eq(text("#hud-budget"), "0 / 5", "budget refunded");
+    shot("build-empty");
+});
+
+test("Drop-In: free-fall clears and unlocks Plank Walk", () => {
+    eq(runToEnd(8000), "complete", "Drop-In clears with no pieces");
+    const s = T.snapshot();
+    check(s.unlocked >= 2 && s.best["drop-in"] != null && s.coachDone, "best + unlock + coach saved");
+    check(/Plank Walk/.test(text("#complete-next")), "complete names the next level");
+    eq(q("#complete-primary").getAttribute("data-action"), "next", "primary is Next Level");
+    check(!q("#complete-menu-item").hidden, "Main Menu offered");
+    check(!q("#complete-newbest").hidden, "first clear is a new best");
+    shot("complete-dropin");
+});
+
+test("Plank Walk: coach, empty run fails, booster runway wins", () => {
+    start(1);
+    check(/Booster/.test(text("#hud-action-text")), "plank coach teaches boosters: " + text("#hud-action-text"));
+    eq(T.snapshot().selected, "booster", "booster preselected on a path level");
+    eq(T.snapshot().rot, 0, "booster aimed at the cup (+X)");
+    eq(runToEnd(20000), "fail", "empty Plank Walk fails back to build");
+    check(T.snapshot().marblesAlive === 0, "no marbles left after a fail");
+    start(1);
+    const applied = T.applySolution(1);
+    check(applied.placed === 3 && applied.skipped === 0, "solution places 3 boosters");
+    shot("plank-runway");
+    eq(runToEnd(15000), "complete", "booster runway clears Plank Walk");
+    check(T.snapshot().unlocked >= 3, "unlocks Bank Shot");
+});
+
+test("restart after complete is stable", () => {
+    start(0);
+    eq(runToEnd(8000), "complete", "second Drop-In clear");
+    start(0);
+    eq(T.snapshot().placed, 0, "fresh board");
+    eq(T.snapshot().marblesAlive, 0, "no leftover marbles");
+});
+
+test("progression tour and level select", () => {
+    T.resetProgress();
+    for (let i = 0; i < T.LEVELS.length; i++) {
+        start(i);
+        check(T.forceComplete(2000 + i * 150), "force L" + i);
+        frames(2);
+        eq(T.screen, "complete", "complete L" + i);
+        const last = i === T.LEVELS.length - 1;
+        eq(q("#complete-primary").getAttribute("data-action"), last ? "title" : "next", "primary action L" + i);
+        if (last) {
+            check(/Tour complete/.test(text("#complete-next")), "tour copy");
+            check(q("#complete-menu-item").hidden && q("#complete-menu-item").classList.contains("disabled"),
+                "duplicate Main Menu hidden and skipped");
+        } else {
+            check(text("#complete-next").indexOf(T.LEVELS[i + 1].name) >= 0, "names " + T.LEVELS[i + 1].name);
+        }
     }
-    return pred();
-}
+    eq(Object.keys(T.save.get("best")).length, 8, "8 best times");
+    T.shell.switchTo("levels");
+    frames(2);
+    const grid = q("#levels-grid");
+    eq(grid.querySelectorAll(".locked").length, 0, "all unlocked");
+    const golds = T.LEVELS.filter((lv, i) => T.medalFor((2000 + i * 150) / 1000, lv) === "gold").length;
+    eq(grid.querySelectorAll(".medal-gold").length, golds, "gold medal tiles");
+    shot("level-select");
+    T.shell.switchTo("title");
+    frames(2);
+    check(new RegExp("^8 / 8 cleared · " + golds + " gold").test(text("#title-progress")),
+        "title summary: " + text("#title-progress"));
+});
 
-function untilCompleteOrFail(maxMs) {
-    maxMs = maxMs || 12000;
-    var sawRun = false;
-    return waitFor(function () {
-        var s = T.snapshot();
-        if (s.mode === "run") sawRun = true;
-        if (T.screen === "complete") return true;
-        if (sawRun && s.mode === "build") return true;
-        return false;
-    }, maxMs, 50);
-}
+test("keyboard controls", () => {
+    start(3); // Springboard: block, ramp, wall, bumper, booster
+    press(" ");
+    frames(2);
+    eq(T.snapshot().mode, "run", "Space runs");
+    press(" ");
+    frames(2);
+    eq(T.snapshot().mode, "build", "Space rebuilds");
+    press("2");
+    frames(2);
+    eq(T.snapshot().selected, "ramp", "key 2 selects the second piece");
+    check(q("#hud-palette .palette-item.selected").getAttribute("data-piece") === "ramp", "palette follows");
+    const rot = T.snapshot().rot;
+    press("r");
+    frames(2);
+    eq(T.snapshot().rot, (rot + 1) & 3, "R rotates");
+    press("e");
+    frames(2);
+    eq(T.snapshot().layer, 1, "E raises the build layer");
+    press("q");
+    press("q");
+    frames(2);
+    eq(T.snapshot().layer, 0, "Q lowers, clamped at the floor");
+    check(T.place("ramp", -2, 1, 0, 1), "place on an upper layer");
+});
 
-// ── Boot ─────────────────────────────────────────────────────────────────
+test("camera: right-drag orbits without removing pieces, wheel zooms", () => {
+    start(3);
+    check(T.place("block", 3, 0, 2), "a piece to keep");
+    const r = q("#view").getBoundingClientRect();
+    const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    const before = T.cam.pos.slice();
+    mouseDown(cx, cy, 2);
+    for (let i = 1; i <= 6; i++) mouseMove(cx + i * 15, cy);
+    mouseUp(cx + 90, cy, 2);
+    frames(2);
+    eq(T.snapshot().placed, 1, "right-drag does not remove");
+    check(T.cam.pos.some((v, i) => Math.abs(v - before[i]) > 1e-3), "right-drag orbited the camera");
+    const dist = T.cam.dist;
+    wheel(cx, cy, 3);
+    frames(2);
+    check(T.cam.dist !== dist && T.cam.dist >= 4 && T.cam.dist <= 60, "wheel zooms within 4..60");
+});
 
-advanceTime(150);
-flush();
+test("marbles fall under physics", () => {
+    start(0);
+    T.enterRun();
+    check(simUntil(() => {
+        const m = T.snapshot().marbles;
+        return m.length && m[0].y < 4.5;
+    }, 3000), "marble falls");
+    shot("running");
+});
 
-var T = window.__tumble;
-assert(T, "__tumble hooks exposed");
-assert(T.LEVELS && T.LEVELS.length === 8, "8 campaign levels");
-assert(T.LEVELS[0].id === "drop-in", "L1 Drop-In");
-assert(T.LEVELS[1].id === "plank", "L2 Plank Walk");
-assert(T.LEVELS[7].id === "gauntlet", "L8 Grand Tour");
-log("boot ok — campaign:", T.LEVELS.map(function (l) { return l.name; }).join(" → "));
-
-// ── Title ────────────────────────────────────────────────────────────────
-
-T.resetProgress();
-if (T.shell.switchTo) T.shell.switchTo("title");
-advanceTime(50);
-flush();
-assert(T.screen === "title", "title");
-assert(document.getElementById("title-progress").textContent.length > 0, "title progress");
-assert(/Play|Continue/.test(document.getElementById("title-play").textContent), "play label");
-log("title:", document.getElementById("title-play").textContent);
-
-// ── L1 Drop-In: free-fall tutorial win ────────────────────────────────────
-
-log("--- L1 Drop-In free-fall ---");
-T.startLevel(0);
-advanceTime(100);
-flush();
-assert(T.screen === "playing", "playing");
-assert(T.scene, "scene");
-assert(!document.getElementById("hud-coach").hidden, "coach on L1");
-
-// Placement rules
-assert(T.place("block", 2, 0, 2) === true, "place ok");
-assert(T.place("block", 2, 0, 2) === false, "dup reject");
-assert(T.place("block", 99, 0, 99) === false, "oob reject");
-assert(T.removeAt(2, 0, 2) === true, "remove ok");
-
-try { screenshot("games/tumble/tests/out-1-build-empty.png"); } catch (e) { /* optional */ }
-
-T.enterRun();
-assert(untilCompleteOrFail(8000), "Drop-In settles");
-for (var i = 0; i < 15 && T.screen !== "complete"; i++) { advanceTime(40); flush(); }
-assert(T.screen === "complete", "Drop-In free-fall wins");
-assert((T.save.get("unlocked") || 1) >= 2, "unlocks L2");
-assert(T.save.get("best")["drop-in"] != null, "best saved");
-log("L1 win", (T.run.resultMs / 1000).toFixed(2) + "s", document.getElementById("complete-medal").textContent);
-assert(document.getElementById("complete-next").textContent.indexOf("Plank") >= 0, "next is Plank Walk");
-
-try { screenshot("games/tumble/tests/out-2-complete-dropin.png"); } catch (e) { /* optional */ }
-
-// ── L2 Plank Walk: empty fails, booster path wins ────────────────────────
-
-log("--- L2 Plank Walk coach + empty fail ---");
-T.startLevel(1);
-advanceTime(80);
-flush();
-assert(T.run.level.id === "plank", "plank loaded");
-// Fresh L2 after Drop-In shows booster-aim coach on the action strip.
-const action = document.getElementById("hud-action-text").textContent || "";
-assert(action.indexOf("Booster") >= 0 || action.indexOf("place") >= 0, "Plank coach on action strip: " + action);
-assert(document.getElementById("hud-action").classList.contains("coach-mode") || action.length > 10,
-    "action strip teaching build");
-
-T.enterRun();
-var sawRun = false;
-var failed = waitFor(function () {
-    var s = T.snapshot();
-    if (s.mode === "run") sawRun = true;
-    return sawRun && s.mode === "build";
-}, 20000, 100);
-assert(failed && sawRun, "empty Plank fails back to build (no soft-lock)");
-log("L2 empty fail ok");
-
-log("--- L2 Plank Walk booster runway win ---");
-// After empty run, coach is dismissed (plankCoachDone). Re-open clean.
-T.save.set("plankCoachDone", true);
-T.save.save();
-T.startLevel(1);
-advanceTime(80);
-flush();
-var applied = T.applySolution(1);
-assert(applied.placed === 3 && applied.skipped === 0, "solution places 3 boosters");
-assert(T.snapshot().placed >= 3, "runway placed");
-
-try { screenshot("games/tumble/tests/out-5-sideways-build.png"); } catch (e) { /* optional */ }
-
-T.enterRun();
-untilCompleteOrFail(15000);
-for (i = 0; i < 20 && T.screen !== "complete"; i++) { advanceTime(50); flush(); }
-assert(T.screen === "complete", "Plank booster path wins");
-log("L2 win", (T.run.resultMs / 1000).toFixed(2) + "s");
-assert((T.save.get("unlocked") || 1) >= 3, "unlocks L3");
-
-// ── Restart stability after complete ─────────────────────────────────────
-
-log("--- restart after complete ---");
-T.startLevel(0);
-advanceTime(60);
-flush();
-T.enterRun();
-untilCompleteOrFail(8000);
-for (i = 0; i < 15 && T.screen !== "complete"; i++) { advanceTime(40); flush(); }
-assert(T.screen === "complete", "second Drop-In win");
-log("restart stable");
-
-// ── Progression UI ───────────────────────────────────────────────────────
-
-log("--- progression tour UI ---");
-T.resetProgress();
-for (var li = 0; li < T.LEVELS.length; li++) {
-    T.startLevel(li);
-    advanceTime(50);
-    flush();
-    assert(T.forceComplete(2000 + li * 150), "force L" + li);
-    for (i = 0; i < 12 && T.screen !== "complete"; i++) { advanceTime(40); flush(); }
-    assert(T.screen === "complete", "complete L" + li);
-    if (li < T.LEVELS.length - 1) {
-        assert(document.getElementById("complete-primary").getAttribute("data-action") === "next", "next action");
-        assert(document.getElementById("complete-next").textContent.indexOf(T.LEVELS[li + 1].name) >= 0,
-            "names next " + T.LEVELS[li + 1].name);
-    } else {
-        assert(document.getElementById("complete-primary").getAttribute("data-action") === "title", "tour end → title");
-        assert(document.getElementById("complete-next").textContent.indexOf("Tour complete") >= 0, "tour copy");
-    }
-}
-assert(Object.keys(T.save.get("best") || {}).length === 8, "8 bests");
-if (T.shell.switchTo) T.shell.switchTo("levels");
-advanceTime(40);
-flush();
-assert(document.getElementById("levels-grid").children.length === 8, "8 tiles");
-assert(document.getElementById("levels-grid").querySelectorAll(".locked").length === 0, "all unlocked");
-log("level select ok");
-
-try { screenshot("games/tumble/tests/out-6-level-select.png"); } catch (e) { /* optional */ }
-
-// ── Controls ─────────────────────────────────────────────────────────────
-
-log("--- controls ---");
-T.resetProgress();
-T.startLevel(0);
-advanceTime(60);
-flush();
-pressKey(" ");
-advanceTime(60);
-flush();
-assert(T.snapshot().mode === "run", "Space → run");
-pressKey(" ");
-advanceTime(60);
-flush();
-assert(T.snapshot().mode === "build", "Space → build");
-
-T.startLevel(3);
-advanceTime(60);
-flush();
-assert(T.select("bumper"), "select bumper");
-assert(T.select("ramp") && T.rotate(), "rotate ramp");
-assert(T.setLayer(1), "layer");
-assert(T.place("ramp", -2, 1, 0, 1) || T.place("ramp", -3, 1, 0, 1), "place ramp");
-log("controls ok");
-
-// ── Physics motion ───────────────────────────────────────────────────────
-
-T.startLevel(0);
-advanceTime(60);
-flush();
-T.enterRun();
-var moved = waitFor(function () {
-    var s = T.snapshot();
-    return s.marbles && s.marbles[0] && s.marbles[0].y < 4.5;
-}, 3000, 40);
-assert(moved, "marble falls");
-log("physics ok");
-
-try { screenshot("games/tumble/tests/out-7-running.png"); } catch (e) { /* optional */ }
-
-log("========================================");
-log("SMALL FULL GAME CHECK:");
-log("  8-level campaign with tool intro arc");
-log("  L1 Drop-In free-fall tutorial — operational");
-log("  L2 Plank Walk requires path (empty fails, boosters win)");
-log("  Open cup lips allow lateral runway scores");
-log("  Fail soft-lock fixed; restart-after-complete stable");
-log("  Progression / medals / complete UI product-shaped");
-log("========================================");
-console.log("tumble gameplay investigation ok");
+done("tumble gameplay");

@@ -1,57 +1,39 @@
-// Headless smoke for Tumble product chrome (DOM / screens).
-// Scene create needs GPU; this only validates shell screens and title wiring.
-//   bro-headless games/tumble games/tumble/tests/test_smoke.js
+// Tumble chrome: screens exist, the title fills in, and the keyboard menu
+// reaches level select through the engine's real key path.
+import { check, frames, press, q, text, shot } from "/lib/kit/test.js";
 
-assert(!!document.getElementById("view"), "canvas #view present");
-assert(!!document.getElementById("overlay"), "overlay present");
-assert(!!document.getElementById("screen-title"), "title screen present");
-assert(!!document.getElementById("screen-levels"), "levels screen present");
-assert(!!document.getElementById("screen-complete"), "complete screen present");
-assert(!!document.getElementById("screen-howto"), "howto screen present");
-assert(!!document.getElementById("hud-tagline"), "tagline hud present");
-assert(!!document.getElementById("hud-objective"), "objective banner present");
-assert(!!document.getElementById("hud-action"), "action strip present");
-assert(!!document.getElementById("hud-piece-desc"), "piece description present");
-assert(!!document.getElementById("hud-action-text"), "action text present");
-assert(!!document.getElementById("title-progress"), "title progress present");
-assert(!!document.getElementById("complete-newbest"), "new-best badge present");
-assert(!!document.getElementById("complete-next"), "complete next line present");
-
-advanceTime(100);
-flush();
-
-const title = document.getElementById("screen-title");
-assert(title && title.style.display !== "none" && !title.hidden, "title visible after boot");
-
-const play = document.getElementById("title-play");
-assert(play, "title play button");
-assert(play.getAttribute("data-action") === "play", "play action wired");
-assert(play.textContent.length > 0, "play label filled");
-
-const progress = document.getElementById("title-progress");
-assert(progress && progress.textContent.length > 0, "title progress filled by onEnterScreen");
-
-// Navigate to levels via keyboard (second menu item)
-function pressKey(key) {
-    window.dispatchEvent(new KeyboardEvent("keydown", { key: key, bubbles: true }));
-    window.dispatchEvent(new KeyboardEvent("keyup", { key: key, bubbles: true }));
+for (const id of [
+    "view", "overlay", "screen-title", "screen-levels", "screen-howto", "screen-pause",
+    "screen-complete", "screen-gameover", "hud-palette", "hud-action", "hud-action-text",
+    "hud-piece-desc", "hud-tagline", "hud-objective", "title-progress", "complete-newbest",
+    "complete-next", "complete-menu-item",
+]) {
+    check(document.getElementById(id), "#" + id + " present");
 }
 
-pressKey("ArrowDown");
-advanceTime(20);
-flush();
-pressKey("Enter");
-advanceTime(50);
-flush();
+frames(6);
+window.__tumble.resetProgress();
+window.__tumble.shell.switchTo("title");
+frames(2);
 
-const levels = document.getElementById("screen-levels");
-assert(levels && !levels.hidden && levels.style.display !== "none", "levels screen shown");
+check(!q("#screen-title").hidden, "title visible after boot");
+check(q("#title-play").getAttribute("data-action") === "play", "play wired");
+check(/^Play — Drop-In$/.test(text("#title-play")), "fresh save offers Play — Drop-In: " + text("#title-play"));
+check(/8 levels/.test(text("#title-progress")), "title progress: " + text("#title-progress"));
+shot("title");
 
-const grid = document.getElementById("levels-grid");
-assert(grid && grid.children.length >= 1, "level tiles rendered");
+press("ArrowDown");
+press("Enter");
+frames(2);
+check(!q("#screen-levels").hidden, "levels screen shown");
+const tiles = q("#levels-grid").querySelectorAll(".level-tile");
+check(tiles.length === 8, "8 level tiles");
+check(!tiles[0].classList.contains("locked"), "level 1 unlocked");
+check(tiles[1].classList.contains("locked") && tiles[1].classList.contains("disabled"), "level 2 locked on a fresh save");
+check(!tiles[1].getAttribute("data-action"), "locked tile has no action");
 
-const firstTile = grid.querySelector(".level-tile");
-assert(firstTile, "first level tile");
-assert(firstTile.className.indexOf("locked") < 0, "level 1 unlocked by default");
+press("Escape");
+frames(2);
+check(!q("#screen-title").hidden, "Esc returns to the title");
 
 console.log("tumble smoke ok");

@@ -28,12 +28,14 @@
 ## Headless verification
 
 ```bash
-bro-headless games/tumble games/tumble/tests/test_smoke.js
-bro-headless games/tumble games/tumble/tests/test_gameplay.js
-bro-headless games/tumble games/tumble/tests/test_campaign.js
+scripts/validate.sh games/tumble
 ```
 
-Verified solution layouts live in `solutions.js` (also `window.__tumble.applySolution(i)`).
+`tests/test_smoke.js` (screens, keyboard menu), `test_gameplay.js` (rules,
+coach, win/fail, progression, keys, camera), `test_campaign.js` (every level
+clears with its verified layout), `test_mouse.js` (click-to-build through the
+engine input path). They drive the game through `window.__tumble` (`hooks.js`).
+Verified solution layouts live in `solutions.js`.
 
 ## Known design notes
 
