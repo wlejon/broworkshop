@@ -1,293 +1,220 @@
 <!DOCTYPE html>
 <html>
 <head>
+    <meta charset="utf-8">
     <title>Animation Lab</title>
+    <link rel="stylesheet" href="/lib/kit/kit.css">
     <link rel="stylesheet" href="/app/style.css">
 </head>
-<body>
-    <canvas id="stage"></canvas>
+<body class="k-app">
+    <header class="k-header">
+        <h1>Animation Lab</h1>
+        <span class="k-sub">bro's skeletal animation tower on one character: clips, crossfades,
+            blend spaces, masked layers, a state machine, root motion and camera nodes —
+            keyframe data evaluated in C++, nothing posed from JavaScript</span>
+    </header>
 
-    <div id="hud">
-        <h1>Animation Lab <span id="fps" class="fps">—</span></h1>
+    <div class="k-body">
+        <main class="k-main">
+            <div class="k-viewport"><canvas id="stage"></canvas></div>
+        </main>
 
-        <!-- Live player state. Everything here is read back from the engine's
-             skeletal player, not from the HUD's own variables — so it reports
-             what is actually playing, including mid-crossfade and mid-
-             transition. `state` is node.state; `cam` is scene.activeCamera. -->
-        <div class="stats">
-            <div><span>state</span><b id="stState">—</b></div>
-            <div><span>clip</span><b id="stClip">—</b></div>
-            <div><span>cam</span><b id="stCamera">—</b></div>
-        </div>
-        <div class="stats">
-            <div><span>last transition</span><b id="stLast">—</b></div>
-            <div><span>time</span><b id="stTime">—</b></div>
-            <div><span>playing</span><b id="stPlaying">—</b></div>
-        </div>
-
-        <!-- ═══ STATE MACHINE ═══════════════════════════════════════════════ -->
-
-        <div class="group" data-body="gState">State machine</div>
-        <div id="gState">
-
-        <section>
-            <h2>Graph</h2>
-            <div id="stateNodes" class="stateNodes"></div>
-            <div class="hint">The lit node is <code>node.state</code>. Click any
-                state to <code>travel()</code> to it manually — that follows the
-                same authored transition the parameters below fire
-                automatically.</div>
-            <div id="stateEdges" class="edges"></div>
-            <div class="hint">Every transition carries its own fade;
-                <b>sync</b> is <code>syncPhase</code> (the incoming cycle starts
-                at the outgoing one's phase, so a crouch mid-stride keeps its
-                feet), <b>auto</b> is <code>autoAdvance</code> (the engine
-                leaves the state by itself when its one-shot clip ends).</div>
-        </section>
-
-        <section>
-            <h2>Parameters</h2>
-            <label>Speed <input type="range" id="stateSpeed" min="0" max="5" step="0.02" value="0">
-                <span class="v" id="stateSpeedV"></span></label>
-            <label><input type="checkbox" id="crouchOn"> Crouch</label>
-            <div class="row">
-                <button id="btnJump">jump</button>
-                <button id="btnWave">wave</button>
+        <aside class="k-side right">
+            <div class="k-tabs" id="tabs">
+                <button data-tab="machine" class="active">Machine</button>
+                <button data-tab="motion">Motion</button>
+                <button data-tab="clips">Clips</button>
+                <button data-tab="blend">Blend</button>
+                <button data-tab="layers">Layers</button>
+                <button data-tab="rig">Rig</button>
             </div>
-            <div class="hint">These name <b>no state at all</b> — they move a
-                number and a boolean. Push speed past 0.05 and watch
-                <code>idle → move</code> fire; tick crouch and watch
-                <code>move → moveCrouch</code>. bro's machine has no condition
-                language by design: the engine owns the graph, the app owns the
-                decision, and this slider is that decision.</div>
-        </section>
 
-        <section>
-            <h2>Transitions <button id="btnClearLog">clear</button></h2>
-            <div id="stateLog" class="log"></div>
-            <div class="hint"><code>onStateChanged(from, to)</code>, timestamped
-                on the virtual clock. A jump logs two lines — the wildcard in,
-                then the auto-advance back out — which is the machine driving
-                itself with no JS in the loop.</div>
-        </section>
-
-        </div>
-
-        <!-- ═══ ROOT MOTION ═════════════════════════════════════════════════ -->
-
-        <div class="group" data-body="gRoot">Root motion</div>
-        <div id="gRoot">
-
-        <section>
-            <h2>Drive the node from the clip</h2>
-            <label><input type="checkbox" id="rootMotionOn"> Root motion</label>
-            <div class="stats">
-                <div><span>travelled</span><b id="rmDist">0.00 m</b></div>
-                <div><span>passed</span><b id="rmMarkers">0/7 markers</b></div>
-            </div>
-            <div class="hint" id="rmZ">node z 0.00</div>
-            <button id="btnResetPos">back to the start</button>
-            <div class="hint"><b>Switch this on with the speed up.</b> Off, the
-                character treadmills on the pad forever: the gait's displacement
-                stays in the pose and the node never moves. On,
-                <code>setRootMotion</code> pulls that displacement out of the
-                blended pose and <code>consumeRootMotion()</code> hands it to the
-                app, which walks the node down the marker run — 1.5 m per
-                block. Same clips, same speed, same state machine. The
-                animation is the source of truth for distance, so the feet
-                never slide.</div>
-        </section>
-
-        </div>
-
-        <!-- ═══ CAMERAS ═════════════════════════════════════════════════════ -->
-
-        <div class="group" data-body="gCam">Cameras</div>
-        <div id="gCam">
-
-        <section>
-            <h2>Camera nodes <span class="v" id="camPos"></span></h2>
-            <div class="row" id="cameraRow"></div>
-            <label><input type="checkbox" id="cineOn"> Cinematic move</label>
-            <div class="hint"><code>scene.createCamera()</code> makes the camera
-                a NODE: only the projection lives on it, the view IS its world
-                transform. <b>follow</b> is parented to the character and never
-                touched again — switch on root motion and it rides the
-                hierarchy down the run with zero per-frame JS, which is the one
-                thing the imperative <code>setCamera</code> path cannot do.
-                <b>Cinematic</b> flies the wide camera from a
-                <code>createAnimationPlayer</code> clip — the node-property
-                tier animating a camera while the skeletal tier animates the
-                character.</div>
-        </section>
-
-        </div>
-
-        <!-- ═══ CLIPS ═══════════════════════════════════════════════════════ -->
-
-        <div class="group" data-body="gClips" data-start="closed">Clips</div>
-        <div id="gClips">
-
-        <section>
-            <h2>Library <span class="v" id="clipCount"></span></h2>
-            <div class="clipgrid" id="clipGrid"></div>
-            <div class="hint">Each button is <code>play(name)</code> with the
-                current loop flag and speed — a hard cut, no fade. This
-                <b>suspends the state machine</b> (a manual play takes the base
-                track over and <code>node.state</code> goes null); travel to any
-                state above to re-enter. Every clip is generated keyframe data
-                compiled to a bromesh <code>Animation</code>; the engine
-                evaluates it in C++.</div>
-        </section>
-
-        <section>
-            <h2>Transport</h2>
-            <div class="row">
-                <button id="btnPlay">play / resume</button>
-                <button id="btnPause">pause</button>
-                <button id="btnStop">stop</button>
-            </div>
-            <label><input type="checkbox" id="loopOn" checked> Loop</label>
-            <label>Speed <input type="range" id="speed" min="-2" max="3" step="0.05" value="1">
-                <span class="v" id="speedV"></span></label>
-            <label>Scrub <input type="range" id="scrub" min="0" max="1" step="0.001" value="0">
-                <span class="v" id="scrubV"></span></label>
-            <div class="hint"><b>stop</b> fades the player out to bind pose and
-                deactivates it — that is the T-pose you see, not a bug. Speed
-                goes negative: the gait runs backward. Scrubbing writes
-                <code>animationTime</code>, which re-poses immediately even
-                while paused.</div>
-        </section>
-
-        </div>
-
-        <!-- ═══ CROSSFADE ═══════════════════════════════════════════════════ -->
-
-        <div class="group" data-body="gFade" data-start="closed">Crossfade</div>
-        <div id="gFade">
-
-        <section>
-            <h2>Blend into a clip</h2>
-            <label>Fade <input type="range" id="fade" min="0" max="2" step="0.02" value="0.35">
-                <span class="v" id="fadeV"></span></label>
-            <label>Target
-                <select id="fadeTarget"></select>
-            </label>
-            <button id="btnFade">crossfade to clip</button>
-            <div class="hint">The outgoing clip keeps advancing while it fades,
-                so walk → run stays foot-aligned instead of snapping. Set fade
-                to 0 and hit the button to feel the difference a crossfade
-                makes. A state-machine transition is this same machinery, with
-                the fade authored into the graph instead of picked here.</div>
-        </section>
-
-        </div>
-
-        <!-- ═══ BLENDING ════════════════════════════════════════════════════ -->
-
-        <div class="group" data-body="gBlend" data-start="closed">Blending</div>
-        <div id="gBlend">
-
-        <!-- The live mix, read straight out of blendState(). Every control
-             below moves these bars; if a bar does not move, the control did
-             not do what it claims. -->
-        <section>
-            <h2>Base mix <span class="v" id="mixSum"></span></h2>
-            <div id="baseMix" class="mixList"></div>
-            <div class="hint" id="mixPhase"></div>
-        </section>
-
-        <section>
-            <h2>Blend space on the base track</h2>
-            <div class="row" id="spaceRow"></div>
-            <div class="hint">A blend space is a base-track citizen: these are
-                <code>play(spaceName)</code>, the same call the clip grid makes.
-                Clip buttons above take the base back.</div>
-        </section>
-
-        <section>
-            <h2>1D — speed axis</h2>
-            <label>Speed <input type="range" id="speedAxis" min="0" max="5" step="0.02" value="0">
-                <span class="v" id="speedAxisV"></span></label>
-            <div class="hint">One scalar picks the mix of
-                <code>idle@0</code> → <code>walk@1.6</code> →
-                <code>run@5.0</code>. The two neighbouring clips blend by
-                position, and all members share one normalized phase, so the
-                feet stay aligned at any mix rather than sliding.</div>
-        </section>
-
-        <section>
-            <h2>2D — direction <span class="v" id="dirV"></span></h2>
-            <div class="padWrap">
-                <div id="pad" class="pad">
-                    <div class="padAxis padAxisH"></div>
-                    <div class="padAxis padAxisV"></div>
-                    <div id="padDot" class="padDot"></div>
+            <!-- ═══ STATE MACHINE ═══════════════════════════════════════════ -->
+            <div class="k-col" data-pane="machine">
+                <div class="k-panel">
+                    <h2>Graph</h2>
+                    <div id="stateNodes" class="k-row tight"></div>
+                    <p class="hint">The lit node is <code>node.state</code>. Click a state to
+                        <code>travel()</code> to it — the same authored transition the parameters
+                        fire automatically.</p>
+                    <div id="stateEdges" class="edges"></div>
+                    <p class="hint">Each transition carries its own fade; <b>sync</b> is
+                        <code>syncPhase</code> (a crouch mid-stride keeps its feet), <b>auto</b> is
+                        <code>autoAdvance</code> (the engine leaves a one-shot by itself).</p>
                 </div>
-                <div id="padPresets" class="padPresets"></div>
+                <div class="k-panel">
+                    <h2>Parameters</h2>
+                    <label class="k-field"><span>Speed</span>
+                        <input type="range" id="stateSpeed" min="0" max="5" step="0.02" value="0">
+                        <span class="k-val" id="stateSpeedV"></span></label>
+                    <label class="k-field"><input type="checkbox" id="crouchOn"> Crouch</label>
+                    <div class="k-row tight">
+                        <button id="btnJump" class="small">jump</button>
+                        <button id="btnWave" class="small">wave</button>
+                    </div>
+                    <p class="hint">These name <b>no state</b>: they move a number and a boolean.
+                        Push speed past 0.05 and <code>idle → move</code> fires; tick crouch and
+                        <code>move → moveCrouch</code> does. The engine owns the graph, the app owns
+                        the decision.</p>
+                </div>
+                <div class="k-panel">
+                    <h2>Transitions</h2>
+                    <div class="k-row tight"><button id="btnClearLog" class="small">clear</button></div>
+                    <div id="stateLog" class="k-log statelog"></div>
+                    <p class="hint"><code>onStateChanged(from, to)</code> on the virtual clock. A
+                        jump logs two lines — the wildcard in, the auto-advance out.</p>
+                </div>
             </div>
-            <div class="hint"><b>Drag the pad</b> — or hit a preset. X is strafe,
-                Y is forward/back, with <code>idle</code> at the centre. The
-                three nearest sample points blend by inverse-squared distance,
-                so a corner is a genuine three-way mix, not a lerp along an
-                edge.</div>
-        </section>
 
-        </div>
+            <!-- ═══ ROOT MOTION + CAMERAS ═══════════════════════════════════ -->
+            <div class="k-col" data-pane="motion" hidden>
+                <div class="k-panel">
+                    <h2>Root motion</h2>
+                    <label class="k-field"><input type="checkbox" id="rootMotionOn"> Drive the node from the clip</label>
+                    <div class="k-stats">
+                        <span>travelled <b id="rmDist">0.00 m</b></span>
+                        <span>passed <b id="rmMarkers">0/7 markers</b></span>
+                        <span>node z <b id="rmZ">0.00</b></span>
+                    </div>
+                    <div class="k-row tight"><button id="btnResetPos" class="small">back to the start</button></div>
+                    <p class="hint"><b>Switch this on with the machine's speed up.</b> Off, the
+                        character treadmills: the gait's displacement stays in the pose. On,
+                        <code>setRootMotion</code> pulls it out and <code>consumeRootMotion()</code>
+                        hands it to the app, which walks the node down the 1.5 m marker run. The
+                        animation is the source of truth for distance, so the feet never slide.</p>
+                </div>
+                <div class="k-panel">
+                    <h2>Camera nodes</h2>
+                    <div id="cameraRow" class="k-row tight"></div>
+                    <div class="dim">position <span class="k-val" id="camPos"></span></div>
+                    <label class="k-field"><input type="checkbox" id="cineOn"> Cinematic move</label>
+                    <p class="hint"><code>scene.createCamera()</code> makes the camera a NODE; its
+                        world transform is the view. <b>follow</b> is parented to the character and
+                        rides root motion with zero per-frame JS. <b>Cinematic</b> flies the wide
+                        camera from a <code>createAnimationPlayer</code> clip.</p>
+                </div>
+            </div>
 
-        <!-- ═══ LAYERS ══════════════════════════════════════════════════════ -->
+            <!-- ═══ CLIPS, TRANSPORT, CROSSFADE ═════════════════════════════ -->
+            <div class="k-col" data-pane="clips" hidden>
+                <div class="k-panel">
+                    <h2>Library <span class="k-val" id="clipCount"></span></h2>
+                    <div id="clipGrid" class="k-row tight"></div>
+                    <p class="hint">Each button is <code>play(name)</code>: a hard cut that
+                        <b>suspends the state machine</b> (<code>node.state</code> goes null);
+                        travel to any state to re-enter.</p>
+                </div>
+                <div class="k-panel">
+                    <h2>Transport</h2>
+                    <div class="k-row tight">
+                        <button id="btnPlay" class="small">play / resume</button>
+                        <button id="btnPause" class="small">pause</button>
+                        <button id="btnStop" class="small">stop</button>
+                    </div>
+                    <label class="k-field"><input type="checkbox" id="loopOn" checked> Loop</label>
+                    <label class="k-field"><span>Speed</span>
+                        <input type="range" id="speed" min="-2" max="3" step="0.05" value="1">
+                        <span class="k-val" id="speedV"></span></label>
+                    <label class="k-field"><span>Scrub</span>
+                        <input type="range" id="scrub" min="0" max="1" step="0.001" value="0">
+                        <span class="k-val" id="scrubV"></span></label>
+                    <p class="hint"><b>stop</b> fades to bind pose — the T-pose is intended.
+                        Negative speed runs the gait backward. Scrubbing writes
+                        <code>animationTime</code> and re-poses even while paused.</p>
+                </div>
+                <div class="k-panel">
+                    <h2>Crossfade</h2>
+                    <label class="k-field"><span>Fade</span>
+                        <input type="range" id="fade" min="0" max="2" step="0.02" value="0.35">
+                        <span class="k-val" id="fadeV"></span></label>
+                    <label class="k-field"><span>Target</span><select id="fadeTarget"></select></label>
+                    <div class="k-row tight"><button id="btnFade" class="small">crossfade to clip</button></div>
+                    <p class="hint">The outgoing clip keeps advancing while it fades, so walk → run
+                        stays foot-aligned. Set fade to 0 to feel the difference.</p>
+                </div>
+            </div>
 
-        <div class="group" data-body="gLayers" data-start="closed">Layers</div>
-        <div id="gLayers">
+            <!-- ═══ BLENDING ════════════════════════════════════════════════ -->
+            <div class="k-col" data-pane="blend" hidden>
+                <div class="k-panel">
+                    <h2>Base mix <span class="k-val" id="mixSum"></span></h2>
+                    <div id="baseMix" class="mixList"></div>
+                    <div class="dim" id="mixPhase"></div>
+                </div>
+                <div class="k-panel">
+                    <h2>Blend space on the base track</h2>
+                    <div id="spaceRow" class="k-row tight"></div>
+                    <p class="hint">A blend space is <code>play(spaceName)</code> — the same call a
+                        clip button makes.</p>
+                </div>
+                <div class="k-panel">
+                    <h2>1D — speed axis</h2>
+                    <label class="k-field"><span>Speed</span>
+                        <input type="range" id="speedAxis" min="0" max="5" step="0.02" value="0">
+                        <span class="k-val" id="speedAxisV"></span></label>
+                    <p class="hint"><code>idle@0</code> → <code>walk@1.6</code> →
+                        <code>run@5.0</code>. Neighbours blend by position on one shared phase,
+                        so the feet stay aligned at any mix.</p>
+                </div>
+                <div class="k-panel">
+                    <h2>2D — direction <span class="k-val" id="dirV"></span></h2>
+                    <div class="padWrap">
+                        <div id="pad" class="pad">
+                            <div class="padAxis padAxisH"></div>
+                            <div class="padAxis padAxisV"></div>
+                            <div id="padDot" class="padDot"></div>
+                        </div>
+                        <div id="padPresets" class="padPresets"></div>
+                    </div>
+                    <p class="hint">Drag the pad or hit a preset. X is strafe, Y is forward/back.
+                        The three nearest samples blend by inverse-squared distance, so a corner is
+                        a genuine three-way mix.</p>
+                </div>
+            </div>
 
-        <section>
-            <h2>Masked layers <span class="v" id="layerSlots">0/3</span></h2>
-            <div id="layerRows"></div>
-            <div class="hint" id="layerCount"></div>
-            <div class="hint"><b>Walk and wave at once.</b> Put the 2D or 1D
-                space on the base, push the speed up, then switch on slot 1 —
-                the legs keep coming from the blend space while the arms come
-                from the layer. The three rows default to disjoint masks (right
-                arm / left arm / head), so all three can run over the gait
-                simultaneously. Change a <b>mask</b> to <code>full body</code>
-                and the layer swallows the walk entirely: that is the mask
-                doing its job, in reverse. Layers survive a state transition —
-                they never suspend.</div>
-        </section>
+            <!-- ═══ LAYERS ══════════════════════════════════════════════════ -->
+            <div class="k-col" data-pane="layers" hidden>
+                <div class="k-panel">
+                    <h2>Masked layers <span class="k-val" id="layerSlots">0/3</span></h2>
+                    <div id="layerRows" class="k-col"></div>
+                    <div class="dim" id="layerCount"></div>
+                    <p class="hint"><b>Walk and wave at once.</b> Put a blend space on the base, push
+                        the speed up, then switch on slot 1: legs from the space, arm from the layer.
+                        The default masks are disjoint, so all three run together. Set a mask to
+                        <code>full body</code> and the layer swallows the walk.</p>
+                </div>
+            </div>
 
-        </div>
-
-        <!-- ═══ RIG ═════════════════════════════════════════════════════════ -->
-
-        <div class="group" data-body="gRig" data-start="closed">Rig</div>
-        <div id="gRig">
-
-        <section>
-            <h2>Skeleton <span class="v" id="boneCount"></span></h2>
-            <label><input type="checkbox" id="bonesOn"> Show bone overlay</label>
-            <label><input type="checkbox" id="skinOn" checked> Show skinned mesh</label>
-            <div class="hint">The overlay reads
-                <code>getBoneWorldMatrix()</code> per bone per frame and parks a
-                marker there — the same seam a prop socket or a ragdoll would
-                attach through. Those matrices are MODEL space, so the markers
-                are parented to the character node and the engine composes its
-                transform: the overlay stays glued to the rig even while root
-                motion walks it away. Turn the mesh off to watch the rig
-                alone.</div>
-        </section>
-
-        </div>
-
-        <div class="hint foot">
-            <b>Right-drag</b> orbit · <b>Middle-drag</b> pan · <b>Wheel</b> zoom ·
-            <b>Space</b> play/pause · <b>1/2/3</b> camera · <b>J</b> jump ·
-            <b>V</b> wave<br>
-            Fourteen procedurally authored clips, four blend spaces, eight layer
-            slots, a five-state machine and three camera nodes — all of it
-            keyframe data evaluated in C++, none of it posed from JavaScript.
-        </div>
+            <!-- ═══ RIG ═════════════════════════════════════════════════════ -->
+            <div class="k-col" data-pane="rig" hidden>
+                <div class="k-panel">
+                    <h2>Skeleton <span class="k-val" id="boneCount"></span></h2>
+                    <label class="k-field"><input type="checkbox" id="bonesOn"> Show bone overlay</label>
+                    <label class="k-field"><input type="checkbox" id="skinOn" checked> Show skinned mesh</label>
+                    <p class="hint">The overlay reads <code>getBoneWorldMatrix()</code> per bone per
+                        frame. Those are MODEL-space matrices, so the markers are parented to the
+                        character node and stay glued to the rig under root motion.</p>
+                </div>
+            </div>
+        </aside>
     </div>
 
-    <script type="module" src="/app/app.js"></script>
+    <footer class="k-statusbar">
+        <span class="k-stats">
+            <span>state <b id="stState">—</b></span>
+            <span>clip <b id="stClip">—</b></span>
+            <span>time <b id="stTime">—</b></span>
+            <span>playing <b id="stPlaying">—</b></span>
+            <span>last <b id="stLast">—</b></span>
+            <span>cam <b id="stCamera">—</b></span>
+            <span>fps <b id="fps">—</b></span>
+        </span>
+        <span class="k-spacer"></span>
+        <span class="dim">right-drag orbit · middle-drag pan · wheel zoom · Space play/pause ·
+            1/2/3 camera · J jump · V wave</span>
+        <span id="status"></span>
+    </footer>
+
+    <script type="module" src="/app/main.js"></script>
 </body>
 </html>

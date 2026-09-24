@@ -21,6 +21,8 @@ Ported examples: `demos/kws-lab` and `demos/lm-playground` (ML labs),
 | `weights.js` | model weight resolution (BRO_WEIGHTS, sibling repos, cache) |
 | `viewport3d.js` | `bro.scene` canvas + orbit camera + standard mouse controls, pick rays |
 | `editor.js` | document editors: tool switcher, undo/redo/save/open commands |
+| `skeletal.js` | clip authoring for skinned meshes: bone frames, keyframe compile, bone overlay |
+| `humanoid.js` | a shared humanoid clip library (idle/walk/run/crouch/...) + the autoRig bone map |
 | `test.js` | headless test helpers (assert, wait, click, type, screenshot) |
 
 ## Page skeleton
@@ -135,6 +137,27 @@ leaves a press to the app. Picking math, on the `scene.setCamera` options
 `worldToScreen(world, view, w, h)` → `{ x, y, depth, behind }`. Camera math
 is `lib/camera.js` (`Camera.*`).
 
+**skeletal.js** — authoring clips for `createSkinnedMesh` / the animation
+player (`docs/animation-api.js`, `docs/rigging-api.js`) without per-rig code:
+- `boneFrames(skeleton, { map, rest })` resolves logical bone names
+  (`hips`, `upperArmL`, ...) to the skeleton's indices and rest rotations.
+- `compileClip(def, frames, { lenient })` turns a clip def (`{ name,
+  duration, tracks: [{ bone, property: 'rotation'|'translation'|'scale',
+  keys: [{ time, euler | value }] }] }`) into a bromesh Animation, rotations
+  composed onto each bone's rest pose; unknown bones throw unless `lenient`.
+  `sampleTracks(duration, { bone: { rot(p), pos(p) } }, steps)` samples
+  curves of the phase `p` into such tracks. `quatFromEuler`, `quatMul`.
+- `boneOverlay(scene, node, parents)` → `{ setEnabled(on), update(), enabled }`:
+  joint spheres + links that follow the skinned node's live pose;
+  `skeletonParents(skeleton)` gives `parents`.
+
+**humanoid.js** — `humanoidClipDefs()` (14 clips: idle, walk, run,
+walkBack, walkStrafeL/R, crouchIdle, crouchWalk, wave, point, nod, jump,
+root-motion walkRM/runRM), `compileClips(defs, frames,
+{ only })` → `{ name: clip }`, `HUMANOID_BONES` (the logical names), and
+`AUTORIG_HUMANOID` (`{ map, rest }` for the 22-bone `Rig.autoRig` humanoid).
+Used by demos/anim-lab and demos/character-lab (`avatar.js`).
+
 **editor.js** — plumbing for document editors (`tools/scene-editor`):
 - `toolbox({ tools, initial, buttons, onChange })`: named tools, one
   current, synced to `[data-tool]` buttons. A tool is any object; the toolbox
@@ -178,6 +201,13 @@ done();                                            // throws if any test() faile
   physics), e.g. `simUntil(() => T.screen === 'complete', 20000)`.
 - `clickOn` refuses a hidden element or one covered by another; `typeInto`
   clicks then types through the engine; `press('Enter')` sends SDL keys.
+- Import the app's modules, never its entry `main.js` (the engine evaluates
+  an entry module a second time when a test imports it). Keep `main.js` a
+  thin boot over an importable module (`lab.js`, `app.js`, ...).
+- A page module's `let` export is a snapshot in the test: later
+  reassignments are not seen. Read live state through objects or accessor
+  functions (`characterAvatar()`), not a reassigned binding.
+  (Both in ENGINE-ISSUES.md.)
 - The headless globals (`advanceTime`, `click`, `screenshot`, `getPixel`,
   `wheel`, `mouseDown`, ...) are all still there; see bro's `docs/headless.md`.
 

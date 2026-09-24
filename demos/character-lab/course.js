@@ -27,9 +27,12 @@
 //             moves at groundVelocity + its own desired velocity, so it rides
 //             for free — the readout's "platform vel" row is that term.
 //
-// Visual and collision are never authored separately: `solid()` creates the
-// body first and hangs the mesh off a PhysicsNode bound to that body, so the
-// mesh transform IS the body transform. There is no way for them to drift.
+// Visual and collision are never authored separately: every piece goes
+// through lib/kit/physics3d, which builds the mesh from the same shape spec
+// as the body. Statics are a plain mesh at the body's fixed transform;
+// dynamic and kinematic bodies carry theirs on a PhysicsNode.
+
+import { addStatic, addBody } from "/lib/kit/physics3d.js";
 
 const COL = {
     ground:  '#2e343d',
@@ -57,33 +60,15 @@ function quatX(deg) {
     return { x: Math.sin(h), y: 0, z: 0, w: Math.cos(h) };
 }
 
-/**
- * One static box, authored once. Returns { tag, node, mesh }.
- * The mesh is a child of a PhysicsNode bound to the body, so it inherits the
- * body's transform every frame — visual and collision cannot desync.
- *
- * pixelsPerUnit is passed explicitly: the doc claims a default of 100, the
- * engine actually defaults to 1, and a silent 100x would be catastrophic here.
- */
+/** One static box, body and mesh from one spec. Returns { tag, mesh }. */
 function solid(scene, o) {
-    const tag = Physics.createBody({
+    return addStatic(scene, {
         shape: 'box',
         position: { x: o.x, y: o.y, z: o.z },
         rotation: o.rotation || { x: 0, y: 0, z: 0, w: 1 },
         halfExtents: { x: o.hx, y: o.hy, z: o.hz },
-        static: true,
         friction: o.friction != null ? o.friction : 0.8,
-    });
-    const node = scene.createPhysicsNode({ body: tag, pixelsPerUnit: 1 });
-    const mesh = scene.createMesh({
-        mesh: 'box',
-        halfW: o.hx, halfH: o.hy, halfD: o.hz,
-        color: o.color || COL.ground,
-        metallic: 0,
-        roughness: o.roughness != null ? o.roughness : 0.85,
-    });
-    node.add(mesh);
-    return { tag, node, mesh };
+    }, { color: o.color || COL.ground, metallic: 0, roughness: o.roughness != null ? o.roughness : 0.85 });
 }
 
 export function buildCourse(scene) {
@@ -220,29 +205,20 @@ export function buildCourse(scene) {
     // 30 kg crate; the slider's 400 N default shoves it convincingly, and at
     // 0 N the character walks into the crate and stops like it is a wall.
     const crateSpots = [[3.0, 9.5], [4.6, 9.5], [3.8, 8.2], [5.6, 8.4], [2.2, 8.3]];
-    for (const [x, z] of crateSpots) {
-        const tag = Physics.createBody({
-            shape: 'box', halfExtents: { x: 0.35, y: 0.35, z: 0.35 },
-            position: { x, y: 0.36, z }, mass: 12, friction: 0.5, restitution: 0.05,
-            layer: 'moving',
-        });
-        const node = scene.createPhysicsNode({ body: tag, pixelsPerUnit: 1 });
-        node.add(scene.createMesh({ mesh: 'box', halfW: 0.35, halfH: 0.35, halfD: 0.35,
-                                    color: COL.prop, roughness: 0.7 }));
+    const prop = (body, look) => {
+        const { tag, node } = addBody(scene, { ...body, layer: 'moving' }, look);
         course.props.push(tag);
         course.propNodes.push(node);
+    };
+    for (const [x, z] of crateSpots) {
+        prop({ shape: 'box', halfExtents: { x: 0.35, y: 0.35, z: 0.35 },
+               position: { x, y: 0.36, z }, mass: 12, friction: 0.5, restitution: 0.05 },
+             { color: COL.prop, roughness: 0.7 });
     }
     for (const [x, z] of [[6.6, 10.6], [7.6, 9.6]]) {
-        const tag = Physics.createBody({
-            shape: 'cylinder', radius: 0.4, halfHeight: 0.55,
-            position: { x, y: 0.56, z }, mass: 18, friction: 0.4,
-            layer: 'moving',
-        });
-        const node = scene.createPhysicsNode({ body: tag, pixelsPerUnit: 1 });
-        node.add(scene.createMesh({ mesh: 'cylinder', radius: 0.4, halfHeight: 0.55,
-                                    segments: 20, color: COL.barrel, roughness: 0.6 }));
-        course.props.push(tag);
-        course.propNodes.push(node);
+        prop({ shape: 'cylinder', radius: 0.4, halfHeight: 0.55,
+               position: { x, y: 0.56, z }, mass: 18, friction: 0.4 },
+             { color: COL.barrel, roughness: 0.6 });
     }
     label(4.4, 1.5, 11.2, 'PUSH · dynamic bodies', 'zone');
 
@@ -250,14 +226,11 @@ export function buildCourse(scene) {
     // Created dynamic then converted, because a body created static can never
     // gain a motion state. moveKinematic is velocity-driven, which is exactly
     // what makes it show up in the character's groundVelocity.
-    const platTag = Physics.createBody({
+    const { tag: platTag, node: platNode } = addBody(scene, {
         shape: 'box', halfExtents: { x: 2.2, y: 0.25, z: 2.2 },
         position: { x: 0, y: 1.0, z: -14 }, friction: 1.0, layer: 'moving',
-    });
+    }, { color: COL.plat, roughness: 0.5 });
     Physics.setKinematic(platTag);
-    const platNode = scene.createPhysicsNode({ body: platTag, pixelsPerUnit: 1 });
-    platNode.add(scene.createMesh({ mesh: 'box', halfW: 2.2, halfH: 0.25, halfD: 2.2,
-                                    color: COL.plat, roughness: 0.5 }));
     course.platform = { tag: platTag, node: platNode, centerX: 0, amplitude: 6,
                         y: 1.0, z: -14, speed: 0.5, phase: 0 };
     // A boarding step, so reaching the platform is not itself a jump puzzle.
@@ -299,7 +272,7 @@ export function buildCourse(scene) {
     // the ray filter filters.
     //
     // The three zones added last live outside this file but are labelled from
-    // here, because app.js builds the DOM label layer once from course.labels
+    // here, because lab.js builds the DOM label layer once from course.labels
     // and anything appended later would never get an element.
     label(28, 3.4, 10.5, 'CROWD · character vs character', 'zone');
     label(28, 2.6, -6.0, 'BALL LAB · innerBody', 'zone');

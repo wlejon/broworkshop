@@ -22,9 +22,8 @@ PASS test ai/voice-pipeline/tests/test_main.js
 PASS test ai/voice-pipeline/tests/test_stream.js 
 PASS smoke demos/ai-arena 
 PASS smoke demos/anim-lab 
-FAIL test demos/anim-lab/tests/test_smoke.js rc=1: ASSERTION FAILED: 6 check(s) failed
 PASS smoke demos/character-lab 
-FAIL test demos/character-lab/tests/test_smoke.js rc=1: ASSERTION FAILED: PhysicsNode tracks its body without an explicit sync (node 0.00,0.00 vs body 3.08,2.38)
+FAIL test demos/character-lab/tests/test_physics_node.js rc=1: engine bug (ENGINE-ISSUES.md: createPhysicsNode body tag ignored)
 PASS smoke demos/clipmap-terrain 
 PASS test demos/clipmap-terrain/tests/test_main.js 
 PASS smoke demos/cluster-diar-lab 

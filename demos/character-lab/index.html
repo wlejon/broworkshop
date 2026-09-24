@@ -1,239 +1,254 @@
 <!DOCTYPE html>
 <html>
 <head>
+    <meta charset="utf-8">
     <title>Character Lab</title>
+    <link rel="stylesheet" href="/lib/kit/kit.css">
     <link rel="stylesheet" href="/app/style.css">
 </head>
-<body>
-    <canvas id="stage"></canvas>
+<body class="k-app">
+    <header class="k-header">
+        <h1>Character Lab</h1>
+        <span class="k-sub">Physics.createCharacter — Jolt CharacterVirtual: step-up, slopes, stance,
+            pushing, platforms, sensing, character vs character, innerBody, heightfields, and an
+            auto-rigged avatar on the engine's animation player</span>
+    </header>
 
-    <!-- World-space labels are DOM nodes positioned every frame by projecting
-         their anchor through the same camera the scene renders with. The
-         engine has no 3D text node, so this is how the step risers and ramp
-         angles get numbers printed on them. -->
-    <div id="labels"></div>
-
-    <div id="hud">
-        <h1>Character Lab <span id="fps" class="fps">—</span></h1>
-        <div class="sub">Physics.createCharacter — Jolt CharacterVirtual</div>
-
-        <!-- Everything in this block is read straight off character.getState()
-             once per frame. It is the whole reason the app exists: the
-             controller's internal decisions, made legible. -->
-        <section class="readout">
-            <h2>State</h2>
-            <div class="row"><span>position</span><b id="roPos">—</b></div>
-            <div class="row"><span>velocity</span><b id="roVel">—</b></div>
-            <div class="row"><span>speed</span><b id="roSpeed">—</b></div>
-            <div class="row"><span>groundState</span><b id="roGround">—</b></div>
-            <div class="row"><span>isGrounded</span><b id="roGrounded">—</b></div>
-            <div class="row"><span>groundNormal</span><b id="roNormal">—</b></div>
-            <div class="row"><span>slope</span><b id="roSlope">—</b></div>
-            <div class="row"><span>groundBodyId</span><b id="roBody">—</b></div>
-            <div class="row"><span>platform vel</span><b id="roPlatform">—</b></div>
-            <div class="row"><span>stance</span><b id="roStance">—</b></div>
-            <div class="row"><span>move blocked</span><b id="roBlocked">—</b></div>
-            <div class="row"><span>stand blocked</span><b id="roStandBlocked">—</b></div>
-        </section>
-
-        <section class="readout">
-            <h2>Sensors</h2>
-            <div class="row"><span>sweep</span><b id="qoSweep">—</b></div>
-            <div class="row"><span>sweep dist</span><b id="qoSweepD">—</b></div>
-            <div class="row"><span>ledge ahead</span><b id="qoLedge">—</b></div>
-            <div class="row"><span>drop</span><b id="qoDrop">—</b></div>
-            <div class="row"><span>overlapping</span><b id="qoProxN">—</b></div>
-            <div class="prox-list" id="qoProxList"></div>
-            <div class="row"><span>ray (filtered)</span><b id="qoRay">—</b></div>
-            <div class="row"><span>ray dist</span><b id="qoRayD">—</b></div>
-            <div class="row"><span>ray (no filter)</span><b id="qoRayRaw">—</b></div>
-            <div class="row"><span>raw dist</span><b id="qoRayRawD">—</b></div>
-            <div class="row"><span>picked</span><b id="qoPick">—</b></div>
-            <div class="hint">Left-click any body to <code>overlapPoint</code> it.</div>
-        </section>
-
-        <section>
-            <h2>Avatar Representation</h2>
-            <div class="row">
-                <label for="cRigged" style="cursor: pointer;">Auto-rigged skinned mesh</label>
-                <input id="cRigged" type="checkbox">
+    <div class="k-body">
+        <main class="k-main">
+            <div class="k-viewport">
+                <canvas id="stage"></canvas>
+                <!-- DOM labels projected through the scene's own view (lab.js). -->
+                <div id="labels"></div>
             </div>
-            <div class="hint">Rigged via <code>Rig.autoRig</code> (BBW) and GPU-skinned.</div>
-        </section>
+        </main>
 
-        <!-- Jolt's CharacterVirtual takes these at construction and the JS
-             binding exposes no runtime setters, so moving one of these sliders
-             rebuilds the character in place (position + velocity + stance are
-             carried over). That is invisible to the user and lets every knob
-             be felt live. -->
-        <section>
-            <h2>Controller <span class="ghint">rebuilds the character</span></h2>
-            <label>Max slope <input type="range" id="tMaxSlope" min="5" max="85" step="1" value="50">
-                <span class="v" id="tMaxSlopeV"></span></label>
-            <label>Step up <input type="range" id="tStepUp" min="0" max="1.2" step="0.01" value="0.4">
-                <span class="v" id="tStepUpV"></span></label>
-            <label>Stick to floor <input type="range" id="tStick" min="0" max="1.5" step="0.01" value="0.5">
-                <span class="v" id="tStickV"></span></label>
-            <label>Push strength <input type="range" id="tStrength" min="0" max="1200" step="10" value="400">
-                <span class="v" id="tStrengthV"></span></label>
-        </section>
-
-        <section>
-            <h2>Movement</h2>
-            <label>Move speed <input type="range" id="tSpeed" min="0.5" max="14" step="0.1" value="4.5">
-                <span class="v" id="tSpeedV"></span></label>
-            <label>Jump speed <input type="range" id="tJump" min="0" max="14" step="0.1" value="6">
-                <span class="v" id="tJumpV"></span></label>
-            <label>Gravity <input type="range" id="tGravity" min="0" max="30" step="0.1" value="9.81">
-                <span class="v" id="tGravityV"></span></label>
-        </section>
-
-        <!-- Sensing: the queries a game asks BEFORE it moves. Each row is one
-             engine call; the readout below is that call's return value. The
-             filter checkboxes are the point of the section — the two ray rows
-             show the same ray with and without them, so the filter's effect is
-             two numbers side by side rather than an assertion. -->
-        <section>
-            <h2>Sensing <span class="ghint">shape casts · overlaps · rays</span></h2>
-            <label><input type="checkbox" id="qForward" checked> Forward shape cast</label>
-            <label><input type="checkbox" id="qLedge" checked> Ledge probe</label>
-            <label><input type="checkbox" id="qProx" checked> Proximity sensor</label>
-            <label><input type="checkbox" id="qRay" checked> Look ray</label>
-            <label><input type="checkbox" id="qDraw" checked> Draw query volumes</label>
-            <label>Cast dist <input type="range" id="qCastDist" min="0.5" max="10" step="0.1" value="3">
-                <span class="v" id="qCastDistV"></span></label>
-            <label>Sensor radius <input type="range" id="qProxR" min="0.5" max="10" step="0.1" value="3">
-                <span class="v" id="qProxRV"></span></label>
-            <label>Ledge ahead <input type="range" id="qAhead" min="0.2" max="3" step="0.05" value="0.9">
-                <span class="v" id="qAheadV"></span></label>
-            <!-- Offset from the capsule centre. It starts low because the
-                 crates are 0.70 m tall: a ray from the capsule's middle flies
-                 straight over them and the ignoreBodies switch would have
-                 nothing to exclude. -->
-            <label>Ray height <input type="range" id="qRayH" min="-0.85" max="0.7" step="0.05" value="-0.55">
-                <span class="v" id="qRayHV"></span></label>
-        </section>
-
-        <section>
-            <h2>Query filters <span class="ghint">watch the two ray rows</span></h2>
-            <label><input type="checkbox" id="qIgnoreSelf" checked>
-                <code>ignoreBody: innerBody</code></label>
-            <label><input type="checkbox" id="qIgnoreProps">
-                <code>ignoreBodies: props</code></label>
-            <label><input type="checkbox" id="qMovingOnly" checked>
-                <code>layers: ['moving']</code> <span class="ghint2">(sensor)</span></label>
-            <div class="hint">Uncheck the first and the look ray hits your own
-                inner rigid body at zero distance. Check the second and it walks
-                straight through the crates to whatever is behind them.</div>
-        </section>
-
-        <!-- Character-vs-character. Every NPC is a real Physics.createCharacter,
-             not a rigid body and not a sensor volume. Nothing in crowd.js
-             resolves a collision — the jostling is Jolt's world-level
-             character-vs-character checker doing it. -->
-        <section>
-            <h2>Crowd <span class="ghint">character vs character</span></h2>
-            <label>Crowd size <input type="range" id="cCount" min="0" max="32" step="1" value="18">
-                <span class="v" id="cCountV"></span></label>
-            <label>Wander speed <input type="range" id="cSpeed" min="0" max="4" step="0.1" value="1.3">
-                <span class="v" id="cSpeedV"></span></label>
-            <label><input type="checkbox" id="cPhysical" checked>
-                Real character controllers</label>
-            <div class="readout">
-                <div class="row"><span>live NPCs</span><b id="coCount">—</b></div>
-                <div class="row"><span>mean NPC speed</span><b id="coSpeed">—</b></div>
-                <div class="row"><span>within 1.2 m</span><b id="coTouch">—</b></div>
-                <div class="row"><span>player throughput</span><b id="coThrough">—</b></div>
+        <aside class="k-side right">
+            <div class="k-tabs" id="tabs">
+                <button data-tab="controller" class="active">Controller</button>
+                <button data-tab="sensing">Sensing</button>
+                <button data-tab="world">World</button>
+                <button data-tab="course">Course</button>
             </div>
-            <button id="btnGoCrowd">Walk me to the crowd</button>
-            <div class="hint">Hold W into the group. You keep almost all of your
-                speed — the controller just slides you along the capsules you
-                cannot pass, so the progress you make in the direction you
-                asked for collapses. That is the throughput row. Uncheck the box
-                and the NPCs become pure visuals on the same steering: they walk
-                straight through you, and through each other.</div>
-        </section>
 
-        <!-- innerBody: the one option that decides whether the rest of the
-             physics world can see the character at all. -->
-        <section>
-            <h2>Inner rigid body <span class="ghint">rebuilds the character</span></h2>
-            <label><input type="checkbox" id="cInner" checked>
-                <code>innerBody: true</code></label>
-            <label>Ball speed <input type="range" id="bSpeed" min="3" max="24" step="0.5" value="11">
-                <span class="v" id="bSpeedV"></span></label>
-            <div class="readout">
-                <div class="row"><span>innerBody tag</span><b id="boTag">—</b></div>
-                <div class="row"><span>in overlapShape</span><b id="boSeen">—</b></div>
-                <div class="row"><span>ball verdict</span><b id="boVerdict">—</b></div>
-                <div class="row"><span>ball past you</span><b id="boPast">—</b></div>
-                <div class="row"><span>closest approach</span><b id="boMin">—</b></div>
+            <!-- ═══ CONTROLLER ═════════════════════════════════════════════ -->
+            <div class="k-col" data-pane="controller">
+                <!-- Read straight off character.getState() every frame: the
+                     controller's decisions, made legible. -->
+                <div class="k-panel readout">
+                    <h2>State</h2>
+                    <div class="row"><span>position</span><b id="roPos">—</b></div>
+                    <div class="row"><span>velocity</span><b id="roVel">—</b></div>
+                    <div class="row"><span>speed</span><b id="roSpeed">—</b></div>
+                    <div class="row"><span>groundState</span><b id="roGround">—</b></div>
+                    <div class="row"><span>isGrounded</span><b id="roGrounded">—</b></div>
+                    <div class="row"><span>groundNormal</span><b id="roNormal">—</b></div>
+                    <div class="row"><span>slope</span><b id="roSlope">—</b></div>
+                    <div class="row"><span>groundBodyId</span><b id="roBody">—</b></div>
+                    <div class="row"><span>platform vel</span><b id="roPlatform">—</b></div>
+                    <div class="row"><span>stance</span><b id="roStance">—</b></div>
+                    <div class="row"><span>move blocked</span><b id="roBlocked">—</b></div>
+                    <div class="row"><span>stand blocked</span><b id="roStandBlocked">—</b></div>
+                </div>
+                <div class="k-panel">
+                    <h2>Controller <span class="ghint">rebuilds the character</span></h2>
+                    <label class="k-field"><span>Max slope</span>
+                        <input type="range" id="tMaxSlope" min="5" max="85" step="1" value="50">
+                        <span class="k-val" id="tMaxSlopeV"></span></label>
+                    <label class="k-field"><span>Step up</span>
+                        <input type="range" id="tStepUp" min="0" max="1.2" step="0.01" value="0.4">
+                        <span class="k-val" id="tStepUpV"></span></label>
+                    <label class="k-field"><span>Stick to floor</span>
+                        <input type="range" id="tStick" min="0" max="1.5" step="0.01" value="0.5">
+                        <span class="k-val" id="tStickV"></span></label>
+                    <label class="k-field"><span>Push strength</span>
+                        <input type="range" id="tStrength" min="0" max="1200" step="10" value="400">
+                        <span class="k-val" id="tStrengthV"></span></label>
+                    <div class="hint">CharacterVirtual takes these at construction and the binding has no
+                        setters, so each slider rebuilds the character in place, keeping position,
+                        velocity and stance.</div>
+                </div>
+                <div class="k-panel">
+                    <h2>Movement</h2>
+                    <label class="k-field"><span>Move speed</span>
+                        <input type="range" id="tSpeed" min="0.5" max="14" step="0.1" value="4.5">
+                        <span class="k-val" id="tSpeedV"></span></label>
+                    <label class="k-field"><span>Jump speed</span>
+                        <input type="range" id="tJump" min="0" max="14" step="0.1" value="6">
+                        <span class="k-val" id="tJumpV"></span></label>
+                    <label class="k-field"><span>Gravity</span>
+                        <input type="range" id="tGravity" min="0" max="30" step="0.1" value="9.81">
+                        <span class="k-val" id="tGravityV"></span></label>
+                </div>
+                <div class="k-panel readout">
+                    <h2>Avatar</h2>
+                    <label class="k-field"><input type="checkbox" id="cRigged"> Auto-rigged skinned avatar</label>
+                    <label class="k-field"><input type="checkbox" id="cBones"> Show its bones</label>
+                    <div class="row"><span>animation state</span><b id="roAvatar">—</b></div>
+                    <div class="hint">A box humanoid rigged by <code>Rig.autoRig</code> (BBW), GPU-skinned,
+                        and animated by the engine: the shared humanoid clip library, an idle → walk →
+                        run blend space on the measured speed, and a ground / crouch / air state
+                        machine fed from <code>groundState</code> and the stance.</div>
+                </div>
             </div>
-            <button id="btnLaunch">Throw a ball at me (B)</button>
-            <button id="btnGoBall">Walk me to the ball lab</button>
-            <div class="hint">On: an <code>overlapShape</code> standing exactly
-                where you stand returns you. Off: the same query finds nothing,
-                and every ray in the Sensing section stops hitting SELF. The
-                controller still walks the course either way — the world just
-                cannot see it.</div>
-            <div class="hint">The ball is a separate lesson, and a correction to
-                the docs. It is <b>not</b> affected by this checkbox: measured
-                both ways, the trajectory is identical, because
-                CharacterVirtual resolves its own contacts with dynamic bodies
-                whether or not the broadphase can see it. What DOES change the
-                ball is <b>Push strength</b> in the Controller section — drop it
-                to 0&nbsp;N and the same throw sails clean through you.</div>
-        </section>
 
-        <!-- Heightfield: the same slope limit, applied to terrain instead of
-             to a rotated box. Collision body and visual mesh are generated in
-             one pass from one Float32Array. -->
-        <section>
-            <h2>Terrain <span class="ghint">heightfield, z &lt; -20</span></h2>
-            <label>Amplitude <input type="range" id="tAmp" min="0" max="7" step="0.1" value="3.4">
-                <span class="v" id="tAmpV"></span></label>
-            <label>Frequency <input type="range" id="tFreq" min="0.02" max="0.25" step="0.005" value="0.085">
-                <span class="v" id="tFreqV"></span></label>
-            <div class="readout">
-                <div class="row"><span>on terrain</span><b id="toOn">—</b></div>
-                <div class="row"><span>slope (engine)</span><b id="toMeas">—</b></div>
-                <div class="row"><span>slope (analytic)</span><b id="toAna">—</b></div>
-                <div class="row"><span>disagreement</span><b id="toErr">—</b></div>
-                <div class="row"><span>terrain height</span><b id="toY">—</b></div>
+            <!-- ═══ SENSING ════════════════════════════════════════════════ -->
+            <div class="k-col" data-pane="sensing" hidden>
+                <div class="k-panel readout">
+                    <h2>Sensors</h2>
+                    <div class="row"><span>sweep</span><b id="qoSweep">—</b></div>
+                    <div class="row"><span>sweep dist</span><b id="qoSweepD">—</b></div>
+                    <div class="row"><span>ledge ahead</span><b id="qoLedge">—</b></div>
+                    <div class="row"><span>drop</span><b id="qoDrop">—</b></div>
+                    <div class="row"><span>overlapping</span><b id="qoProxN">—</b></div>
+                    <div class="prox-list" id="qoProxList"></div>
+                    <div class="row"><span>ray (filtered)</span><b id="qoRay">—</b></div>
+                    <div class="row"><span>ray dist</span><b id="qoRayD">—</b></div>
+                    <div class="row"><span>ray (no filter)</span><b id="qoRayRaw">—</b></div>
+                    <div class="row"><span>raw dist</span><b id="qoRayRawD">—</b></div>
+                    <div class="row"><span>picked</span><b id="qoPick">—</b></div>
+                    <div class="hint">Left-click any body to <code>overlapPoint</code> it.</div>
+                </div>
+                <div class="k-panel">
+                    <h2>Sensing <span class="ghint">casts · overlaps · rays</span></h2>
+                    <label class="k-field"><input type="checkbox" id="qForward" checked> Forward shape cast</label>
+                    <label class="k-field"><input type="checkbox" id="qLedge" checked> Ledge probe</label>
+                    <label class="k-field"><input type="checkbox" id="qProx" checked> Proximity sensor</label>
+                    <label class="k-field"><input type="checkbox" id="qRay" checked> Look ray</label>
+                    <label class="k-field"><input type="checkbox" id="qDraw" checked> Draw query volumes</label>
+                    <label class="k-field"><span>Cast dist</span>
+                        <input type="range" id="qCastDist" min="0.5" max="10" step="0.1" value="3">
+                        <span class="k-val" id="qCastDistV"></span></label>
+                    <label class="k-field"><span>Sensor radius</span>
+                        <input type="range" id="qProxR" min="0.5" max="10" step="0.1" value="3">
+                        <span class="k-val" id="qProxRV"></span></label>
+                    <label class="k-field"><span>Ledge ahead</span>
+                        <input type="range" id="qAhead" min="0.2" max="3" step="0.05" value="0.9">
+                        <span class="k-val" id="qAheadV"></span></label>
+                    <!-- Starts low: the crates are 0.70 m tall, and a ray from the capsule's
+                         middle would fly over them with nothing for ignoreBodies to exclude. -->
+                    <label class="k-field"><span>Ray height</span>
+                        <input type="range" id="qRayH" min="-0.85" max="0.7" step="0.05" value="-0.55">
+                        <span class="k-val" id="qRayHV"></span></label>
+                </div>
+                <div class="k-panel">
+                    <h2>Query filters <span class="ghint">watch the two ray rows</span></h2>
+                    <label class="k-field"><input type="checkbox" id="qIgnoreSelf" checked>
+                        <code>ignoreBody: innerBody</code></label>
+                    <label class="k-field"><input type="checkbox" id="qIgnoreProps">
+                        <code>ignoreBodies: props</code></label>
+                    <label class="k-field"><input type="checkbox" id="qMovingOnly" checked>
+                        <code>layers: ['moving']</code> <span class="dim">(sensor)</span></label>
+                    <div class="hint">Uncheck the first and the look ray hits your own inner rigid body
+                        at zero distance. Check the second and it walks straight through the crates
+                        to whatever is behind them.</div>
+                </div>
             </div>
-            <button id="btnRegen">Regenerate terrain</button>
-            <button id="btnGoTerrain">Walk me to the hills</button>
-            <div class="hint">The engine's slope comes from
-                <code>groundNormal</code>; the analytic one is the derivative of
-                the function the heightfield was built from. They agree because
-                there is only one height function.</div>
-        </section>
 
-        <section>
-            <h2>View</h2>
-            <label><input type="checkbox" id="optLabels" checked> World labels</label>
-            <label><input type="checkbox" id="optInterp" checked> Physics interpolation</label>
-            <button id="btnReset">Reset to spawn</button>
-        </section>
-
-        <!-- The course legend doubles as the test plan: each row names a
-             capability and the geometry that proves it. -->
-        <section>
-            <h2>Course</h2>
-            <div class="legend">
-                <div><i class="sw c-stair"></i>Stairs — risers 0.15 → 0.65 m (step-up limit)</div>
-                <div><i class="sw c-ramp"></i>Ramps — 15° 30° 42° 52° 65° (slope limit)</div>
-                <div><i class="sw c-tunnel"></i>Tunnel — 1.10 m clearance (crouch only)</div>
-                <div><i class="sw c-gap"></i>Gap + terraces (fall, land, floor-snap)</div>
-                <div><i class="sw c-prop"></i>Crates &amp; barrels (push dynamic bodies)</div>
-                <div><i class="sw c-plat"></i>Kinematic platform (ride ground velocity)</div>
-                <div><i class="sw c-npc"></i>Crowd — 32 character controllers (char vs char)</div>
-                <div><i class="sw c-ball"></i>Ball lab — <code>innerBody</code> on/off</div>
-                <div><i class="sw c-terr"></i>Terrain — heightfield hills (z &lt; -20)</div>
+            <!-- ═══ WORLD: crowd, inner body, terrain ══════════════════════ -->
+            <div class="k-col" data-pane="world" hidden>
+                <div class="k-panel readout">
+                    <h2>Crowd <span class="ghint">character vs character</span></h2>
+                    <label class="k-field"><span>Crowd size</span>
+                        <input type="range" id="cCount" min="0" max="32" step="1" value="18">
+                        <span class="k-val" id="cCountV"></span></label>
+                    <label class="k-field"><span>Wander speed</span>
+                        <input type="range" id="cSpeed" min="0" max="4" step="0.1" value="1.3">
+                        <span class="k-val" id="cSpeedV"></span></label>
+                    <label class="k-field"><input type="checkbox" id="cPhysical" checked> Real character controllers</label>
+                    <div class="row"><span>live NPCs</span><b id="coCount">—</b></div>
+                    <div class="row"><span>mean NPC speed</span><b id="coSpeed">—</b></div>
+                    <div class="row"><span>within 1.2 m</span><b id="coTouch">—</b></div>
+                    <div class="row"><span>player throughput</span><b id="coThrough">—</b></div>
+                    <div class="k-row"><button id="btnGoCrowd" class="small">Walk me to the crowd</button></div>
+                    <div class="hint">Every NPC is a real <code>Physics.createCharacter</code>; nothing in
+                        the app resolves a collision. Hold W into the group: you keep your speed, but
+                        your progress in the direction you asked for collapses — the throughput row.
+                        Uncheck the box and they become ghosts on the same steering.</div>
+                </div>
+                <div class="k-panel readout">
+                    <h2>Inner rigid body <span class="ghint">rebuilds the character</span></h2>
+                    <label class="k-field"><input type="checkbox" id="cInner" checked> <code>innerBody: true</code></label>
+                    <label class="k-field"><span>Ball speed</span>
+                        <input type="range" id="bSpeed" min="3" max="24" step="0.5" value="11">
+                        <span class="k-val" id="bSpeedV"></span></label>
+                    <div class="row"><span>innerBody tag</span><b id="boTag">—</b></div>
+                    <div class="row"><span>in overlapShape</span><b id="boSeen">—</b></div>
+                    <div class="row"><span>ball verdict</span><b id="boVerdict">—</b></div>
+                    <div class="row"><span>ball past you</span><b id="boPast">—</b></div>
+                    <div class="row"><span>closest approach</span><b id="boMin">—</b></div>
+                    <div class="k-row">
+                        <button id="btnLaunch" class="small">Throw a ball at me (B)</button>
+                        <button id="btnGoBall" class="small">Walk me to the ball lab</button>
+                    </div>
+                    <div class="hint">On: an <code>overlapShape</code> standing where you stand returns
+                        you. Off: it finds nothing, and every sensing ray stops hitting SELF. The ball
+                        is <b>not</b> affected by this checkbox — CharacterVirtual resolves its own
+                        contacts either way. <b>Push strength</b> decides it: at 0&nbsp;N the same
+                        throw sails clean through you.</div>
+                </div>
+                <div class="k-panel readout">
+                    <h2>Terrain <span class="ghint">heightfield, z &lt; -20</span></h2>
+                    <label class="k-field"><span>Amplitude</span>
+                        <input type="range" id="tAmp" min="0" max="7" step="0.1" value="3.4">
+                        <span class="k-val" id="tAmpV"></span></label>
+                    <label class="k-field"><span>Frequency</span>
+                        <input type="range" id="tFreq" min="0.02" max="0.25" step="0.005" value="0.085">
+                        <span class="k-val" id="tFreqV"></span></label>
+                    <div class="row"><span>on terrain</span><b id="toOn">—</b></div>
+                    <div class="row"><span>slope (engine)</span><b id="toMeas">—</b></div>
+                    <div class="row"><span>slope (analytic)</span><b id="toAna">—</b></div>
+                    <div class="row"><span>disagreement</span><b id="toErr">—</b></div>
+                    <div class="row"><span>terrain height</span><b id="toY">—</b></div>
+                    <div class="k-row">
+                        <button id="btnRegen" class="small">Regenerate terrain</button>
+                        <button id="btnGoTerrain" class="small">Walk me to the hills</button>
+                    </div>
+                    <div class="hint">The engine's slope is <code>groundNormal</code>; the analytic one is
+                        the derivative of the function the heightfield was built from. One height
+                        function, two consumers.</div>
+                </div>
             </div>
-            <div class="hint">WASD move · Space jump · C / Ctrl crouch ·
-                B throw a ball · right-drag orbit · wheel zoom · R reset</div>
-        </section>
+
+            <!-- ═══ COURSE ═════════════════════════════════════════════════ -->
+            <div class="k-col" data-pane="course" hidden>
+                <div class="k-panel">
+                    <h2>View</h2>
+                    <label class="k-field"><input type="checkbox" id="optLabels" checked> World labels</label>
+                    <label class="k-field"><input type="checkbox" id="optInterp" checked> Physics interpolation</label>
+                    <div class="k-row"><button id="btnReset" class="small">Reset to spawn (R)</button></div>
+                </div>
+                <!-- The legend doubles as the test plan: each row names a
+                     capability and the geometry that proves it. -->
+                <div class="k-panel legend">
+                    <h2>Course</h2>
+                    <div><i class="sw c-stair"></i>Stairs — risers 0.15 → 0.65 m (step-up limit)</div>
+                    <div><i class="sw c-ramp"></i>Ramps — 15° 30° 42° 52° 65° (slope limit)</div>
+                    <div><i class="sw c-tunnel"></i>Tunnel — 1.10 m clearance (crouch only)</div>
+                    <div><i class="sw c-gap"></i>Gap + terraces (fall, land, floor-snap)</div>
+                    <div><i class="sw c-prop"></i>Crates &amp; barrels (push dynamic bodies)</div>
+                    <div><i class="sw c-plat"></i>Kinematic platform (ride ground velocity)</div>
+                    <div><i class="sw c-npc"></i>Crowd — 32 character controllers (char vs char)</div>
+                    <div><i class="sw c-ball"></i>Ball lab — <code>innerBody</code> on/off</div>
+                    <div><i class="sw c-terr"></i>Terrain — heightfield hills (z &lt; -20)</div>
+                </div>
+            </div>
+        </aside>
     </div>
+
+    <footer class="k-statusbar">
+        <span class="k-stats">
+            <span>ground <b id="stGround">—</b></span>
+            <span>speed <b id="stSpeed">—</b></span>
+            <span>stance <b id="stStance">—</b></span>
+            <span>fps <b id="fps">—</b></span>
+        </span>
+        <span class="k-spacer"></span>
+        <span class="dim">WASD move · Space jump · C / Ctrl crouch · B throw a ball · R reset ·
+            right-drag orbit · wheel zoom · left-click pick</span>
+        <span id="status"></span>
+    </footer>
+
+    <script type="module" src="/app/main.js"></script>
 </body>
 </html>

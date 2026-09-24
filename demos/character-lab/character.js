@@ -29,7 +29,7 @@ const RADIUS = 0.3;
 const STAND_HALF = 0.6;    // total standing height = 2*(0.6+0.3) = 1.80 m
 const CROUCH_HALF = 0.1;   // total crouched height = 2*(0.1+0.3) = 0.80 m
 
-import { createAutoRiggedAvatar } from "/app/rigged_avatar.js";
+import { createAvatar } from "/app/avatar.js";
 
 export const SPAWN = { x: 0, y: RADIUS + STAND_HALF, z: 12 };
 
@@ -46,7 +46,8 @@ export const tune = {
      *  the character stops existing as far as every query and every dynamic
      *  body in the world is concerned. */
     innerBody: true,
-    /** Render auto-rigged BBW skinned character instead of primitive capsule. */
+    /** Show the auto-rigged, engine-animated avatar (avatar.js) instead of
+     *  the capsule. Purely visual: the controller is the same capsule. */
     riggedAvatar: false,
     // per-frame (free)
     moveSpeed: 4.5,
@@ -75,7 +76,7 @@ export const charState = {
     rebuilds: 0,
 };
 
-/** Desired horizontal direction in world space, unit-ish. Set by app.js from
+/** Desired horizontal direction in world space, unit-ish. Set by lab.js from
  *  camera-relative WASD, or directly by the smoke test. */
 export const input = { x: 0, z: 0, jump: false, crouch: false };
 
@@ -130,14 +131,10 @@ export function createCharacter(scene, restore) {
         visual.add(standMesh);
         visual.add(crouchMesh);
 
-        try {
-            avatar = createAutoRiggedAvatar(scene);
-            if (avatar && avatar.node) {
-                avatar.node.visible = false;
-                visual.add(avatar.node);
-            }
-        } catch (e) {
-            console.warn('createAutoRiggedAvatar failed:', e.message);
+        avatar = createAvatar(scene);
+        if (avatar) {
+            avatar.node.visible = false;
+            visual.add(avatar.node);
         }
     }
     applyStanceVisual();
@@ -146,12 +143,12 @@ export function createCharacter(scene, restore) {
 
 export function applyStanceVisual() {
     if (!standMesh) return;
-    if (tune.riggedAvatar && avatar && avatar.node) {
+    if (tune.riggedAvatar && avatar) {
         standMesh.visible = false;
         crouchMesh.visible = false;
         avatar.node.visible = true;
     } else {
-        if (avatar && avatar.node) avatar.node.visible = false;
+        if (avatar) avatar.node.visible = false;
         standMesh.visible = !crouched;
         crouchMesh.visible = crouched;
     }
@@ -284,11 +281,12 @@ export function tickCharacter() {
         visual.x = st.position.x;
         visual.y = st.position.y;
         visual.z = st.position.z;
-        if (avatar && avatar.node && avatar.node.visible) {
+        if (avatar && avatar.node.visible) {
+            // Face the way the capsule is actually going (the avatar faces +Z).
             if (charState.horizontalSpeed > 0.2) {
-                visual.rotationY = Math.atan2(vx, vz);
+                visual.rotationY = Math.atan2(st.velocity.x, st.velocity.z);
             }
-            avatar.update(charState, dt);
+            avatar.update(charState);
         }
     }
     return charState;
@@ -296,4 +294,6 @@ export function tickCharacter() {
 
 export function isCrouched() { return crouched; }
 export function characterVisual() { return visual; }
+/** The auto-rigged avatar (avatar.js), or null when this build has no Rig. */
+export function characterAvatar() { return avatar; }
 export { RADIUS, STAND_HALF, CROUCH_HALF };

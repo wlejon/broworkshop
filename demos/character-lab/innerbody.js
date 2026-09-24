@@ -51,6 +51,7 @@
 // invalidating the comment above.
 
 import { charState, character } from "/app/character.js";
+import { addBody } from "/lib/kit/physics3d.js";
 
 /** The marked spot to stand on for the demo: clear ground south of the crowd
  *  plaza, with 14 m of open run behind the character so a ball that passes
@@ -126,7 +127,7 @@ export function launchBall(dir) {
     const ox = p.x - axis.x * ballLab.standoff;
     const oz = p.z - axis.z * ballLab.standoff;
 
-    ball = Physics.createBody({
+    ({ tag: ball, node: ballNode } = addBody(sceneRef, {
         shape: 'sphere', radius: ballLab.radius,
         position: { x: ox, y: anchor.y, z: oz },
         mass: ballLab.mass,
@@ -138,13 +139,9 @@ export function launchBall(dir) {
         gravityFactor: 0,
         linearDamping: 0,
         layer: 'moving',
-    });
-    Physics.setLinearVelocity(ball, axis.x * ballLab.speed, 0, axis.z * ballLab.speed);
-
-    ballNode = sceneRef.createPhysicsNode({ body: ball, pixelsPerUnit: 1 });
-    ballNode.add(sceneRef.createMesh({
-        mesh: 'sphere', radius: ballLab.radius, segments: 16, rings: 12,
-        color: '#f0d27a', emissive: 0.5, emissiveColor: '#f0d27a', roughness: 0.35,
+    }, {
+        color: '#f0d27a', emissive: 0.5, roughness: 0.35, segments: 16,
+        velocity: { x: axis.x * ballLab.speed, y: 0, z: axis.z * ballLab.speed },
     }));
 
     ballState.live = true;

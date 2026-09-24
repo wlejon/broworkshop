@@ -32,6 +32,7 @@
 // at once so the difference is not a claim, it is two numbers.
 
 import { character, charState, RADIUS, STAND_HALF, CROUCH_HALF, isCrouched } from "/app/character.js";
+import { quatYTo } from "/lib/kit/physics3d.js";
 
 // --- tunables ----------------------------------------------------------------
 // Everything here is bound to a HUD control. The `show*` flags gate only the
@@ -81,7 +82,7 @@ export const qState = {
     pick: null,
 };
 
-// The direction the sensors look. app.js keeps this on the last commanded move
+// The direction the sensors look. lab.js keeps this on the last commanded move
 // direction (falling back to camera forward when standing still) so the probes
 // point where the player is about to go, not where the camera happens to be.
 let facing = { x: 0, z: -1 };
@@ -131,20 +132,6 @@ export function bodyName(tag) {
 }
 
 // --- geometry helpers --------------------------------------------------------
-
-/** Quaternion rotating +Y onto the unit vector `d`. Cylinders and capsules are
- *  authored Y-up, so this is what points one along an arbitrary direction. */
-function quatFromY(d) {
-    const dot = d[1];                       // dot([0,1,0], d)
-    if (dot > 0.999999) return [0, 0, 0, 1];
-    if (dot < -0.999999) return [1, 0, 0, 0];   // 180° about X
-    // axis = cross([0,1,0], d) = (d.z, 0, -d.x)
-    const ax = d[2], ay = 0, az = -d[0];
-    const alen = Math.hypot(ax, ay, az) || 1;
-    const angle = Math.acos(Math.max(-1, Math.min(1, dot)));
-    const s = Math.sin(angle / 2);
-    return [ax / alen * s, ay / alen * s, az / alen * s, Math.cos(angle / 2)];
-}
 
 /** Half-height of the capsule the character is currently wearing. */
 const halfNow = () => (isCrouched() ? CROUCH_HALF : STAND_HALF);
@@ -268,7 +255,7 @@ function spanLine(node, ax, ay, az, bx, by, bz) {
     node.x = (ax + bx) / 2;
     node.y = (ay + by) / 2;
     node.z = (az + bz) / 2;
-    node.quaternion = quatFromY([dx / len, dy / len, dz / len]);
+    node.quaternion = quatYTo(dx, dy, dz);     // cylinders are authored Y-up
     node.scaleY = len;
     node.visible = true;
 }
@@ -444,7 +431,7 @@ export function pickAlongRay(ox, oy, oz, dx, dy, dz, maxDist) {
 
 /**
  * Run every enabled sensor and move the debug geometry onto its result.
- * Called once per frame from app.js, after tickCharacter so the queries see
+ * Called once per frame from lab.js, after tickCharacter so the queries see
  * the position the controller just settled on.
  */
 export function tickQueries(world) {
