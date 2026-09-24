@@ -42,7 +42,7 @@ export function runner(opts) {
 
         let client;
         try {
-            client = cp.spawn(BRO, [app.appPath], { cwd: SPAWN_CWD });
+            client = cp.spawn(BRO, [app.appPath], { cwd: SPAWN_CWD, detached: true });
         } catch (e) {
             console.error('client spawn failed:', e);
             say('Failed to launch ' + app.title + ': ' + e.message, 'err');

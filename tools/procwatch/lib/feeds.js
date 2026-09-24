@@ -7,7 +7,8 @@
 //   typeperf        persistent: total + per-core CPU once a second
 //   nvidia-smi      polled every 2.5 s; absent without the NVIDIA driver
 // Persistent children restart two seconds after they exit. Each child's pid
-// is registered in world.childPids so the table and the reaper skip it.
+// is registered in world.childPids so the table and the reaper skip it. All
+// of them end when procwatch does: bro kills an app's children on exit.
 
 import { world } from "./procs.js";
 
@@ -37,8 +38,11 @@ function ndjson(fn) {
     });
 }
 
+// The persistent scripts take our pid and exit once we are gone (bro also ends
+// its children when it exits, but a script must never spin on a dead pipe).
 function powershell(name) {
-    const child = cp.spawn('powershell.exe', [...PS_ARGS, script(name)], { stdio: 'pipe', encoding: 'utf8' });
+    const child = cp.spawn('powershell.exe', [...PS_ARGS, script(name), '-ParentPid', String(process.pid)],
+                           { stdio: 'pipe', encoding: 'utf8' });
     world.childPids.add(child.pid);
     child.on('close', () => world.childPids.delete(child.pid));
     return child;

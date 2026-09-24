@@ -5,15 +5,20 @@
 # delays event onset, never the tick loop. Creation events carry the command
 # line, which is how new processes get summarized before the next enrich pass.
 
+param([int]$ParentPid = 0)   # procwatch's pid: exit once it is gone
 $ErrorActionPreference = 'SilentlyContinue'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $w = [Console]::Out
 
 Register-CimIndicationEvent -Query "SELECT * FROM __InstanceCreationEvent WITHIN 2 WHERE TargetInstance ISA 'Win32_Process'" -SourceIdentifier pwnew | Out-Null
 Register-CimIndicationEvent -Query "SELECT * FROM __InstanceDeletionEvent WITHIN 2 WHERE TargetInstance ISA 'Win32_Process'" -SourceIdentifier pwdel | Out-Null
-$w.WriteLine('{"e":"events-live"}'); $w.Flush()
+try { $w.WriteLine('{"e":"events-live"}'); $w.Flush() } catch { exit }
 
+# Runs until procwatch goes away: its pid is gone, or stdout's reader is (a
+# write into the dead pipe throws). Checked every 5 s wait, so a quiet machine
+# that produces no events still notices.
 while ($true) {
+    if ($ParentPid -and -not (Get-Process -Id $ParentPid -ErrorAction SilentlyContinue)) { exit }
     $ev = Wait-Event -Timeout 5
     while ($ev) {
         Remove-Event -EventIdentifier $ev.EventIdentifier
@@ -28,7 +33,7 @@ while ($true) {
                         mem = [int64]$ti.WorkingSetSize; cpu = [int64]0 }
                 $w.WriteLine((@{ e = 'new'; p = $p } | ConvertTo-Json -Compress -Depth 4))
             }
-            $w.Flush()
+            try { $w.Flush() } catch { exit }
         }
         $ev = Wait-Event -Timeout 0
     }

@@ -7,6 +7,7 @@
 # Create/delete push events live in events.ps1, a separate child, so their
 # registration latency can never stall the tick loop.
 
+param([int]$ParentPid = 0)   # procwatch's pid: exit once it is gone
 $ErrorActionPreference = 'SilentlyContinue'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $w = [Console]::Out
@@ -94,7 +95,11 @@ function Get-Tick {
        mt = [int64]$m.ullTotalPhys; mf = [int64]$m.ullAvailPhys; procs = $procs }
 }
 
+# Runs until procwatch goes away: its pid is gone, or stdout's reader is (a
+# write into the dead pipe throws). bro also ends its children when it exits;
+# this keeps the script from spinning if it ever outlives procwatch.
 while ($true) {
-    $w.WriteLine((Get-Tick | ConvertTo-Json -Compress -Depth 4)); $w.Flush()
+    if ($ParentPid -and -not (Get-Process -Id $ParentPid -ErrorAction SilentlyContinue)) { exit }
+    try { $w.WriteLine((Get-Tick | ConvertTo-Json -Compress -Depth 4)); $w.Flush() } catch { exit }
     Start-Sleep -Milliseconds 800   # tick work itself takes ~1 s; ~2 s effective cadence
 }
