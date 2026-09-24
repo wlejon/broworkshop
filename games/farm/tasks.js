@@ -27,7 +27,7 @@
 //   say    — npc speaks this line on success (announce on completion)
 
 import {
-    REGIONS, PENS, STATIONS, CROP_KINDS, WORKER,
+    REGIONS, PENS, STATIONS, WORKER,
     moveSpeedMul, proficiencyMul, STAT_XP,
 } from './defs.js';
 
@@ -473,28 +473,14 @@ export function buildAssessStation(world, stationId) {
     ]);
 }
 
-// ---- worker-care task builders (Pass D) -------------------------------------
-// All head to the farmhouse; the differing final step recovers stamina/energy.
-export function buildRest(world) {
-    const h = regionCenter('farmhouse');
-    return makeTask('rest', null, [
-        { type: 'move', x: h.x, y: h.y, label: 'farmhouse' },
-        { type: 'rest' },
-    ]);
-}
+// ---- worker-care task builders ----------------------------------------------
+// Both head to the farmhouse. (The executor also understands single-need
+// 'rest' / 'eat' steps; the orchestrator uses the consolidated recover visit.)
 export function buildSleep(world) {
     const h = regionCenter('farmhouse');
     return makeTask('sleep', null, [
         { type: 'move', x: h.x, y: h.y, label: 'farmhouse' },
         { type: 'sleep' },
-    ]);
-}
-export function buildEat(world) {
-    const h = regionCenter('farmhouse');
-    return makeTask('eat', null, [
-        { type: 'move', x: h.x, y: h.y, label: 'farmhouse' },
-        { type: 'wait', ms: 150 },
-        { type: 'eat', ms: 4000 },
     ]);
 }
 // Consolidated care: go HOME and recover every low need in one visit (stamina,
@@ -560,5 +546,3 @@ export function prependBriefing(task, opts) {
     task.steps = [step].concat(task.steps);
     return task;
 }
-
-export { CROP_KINDS };

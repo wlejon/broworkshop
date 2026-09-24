@@ -3,9 +3,9 @@
 // The farm model is pure tile space
 // (x in [0..GRID.cols), y in [0..GRID.rows), continuous floats); this renderer
 // maps that 1:1 onto a `cellSize = 1` TileWorld in the 3D scene — model (x, y)
-// becomes world (X = x, Z = y), with Y up. "Isometric" is just an orthographic
-// camera tilted over that grid, so the same data could render top-down or in
-// free 3D by changing the camera alone.
+// becomes world (X = x, Z = y), with Y up. "Isometric" is just the arcade
+// stage's orthographic camera tilted over that grid (fitBoard frames it), so
+// the same data could render top-down or in free 3D by changing the camera.
 //
 // Static geometry (ground tiles, buildings, trough frames, crop soil beds) is
 // built once. Dynamic actors (crops, troughs' fill level, animals, workers, the
@@ -45,10 +45,38 @@ function mix(a, b, t) { return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) *
 function clamp01(x) { return x < 0 ? 0 : x > 1 ? 1 : x; }
 function lerp(a, b, t) { return a + (b - a) * t; }
 
-// Board centre (in tile/world units) and camera framing.
-const CX = GRID.cols / 2;   // 20
-const CZ = GRID.rows / 2;   // 14
-const CAM = { dist: 24, height: 30, view: 29 };  // iso offset + ortho view height
+// Iso camera: eye offset from its target, and the tallest thing on the board
+// (silo dome + its name tag) so fitBoard keeps it all in view.
+export const CAMERA_OFFSET = [24, 30, 24];
+const BOARD_TOP = 6;
+const FIT_MARGIN = 1.04;
+
+/**
+ * Frame the whole board in the canvas area left of a `rightInset`-px dock:
+ * sets stage.iso.size (view height) and stage.iso.target so the board's
+ * projected box fits and centres there. W, H: canvas size in CSS px.
+ */
+export function fitBoard(stage, W, H, rightInset) {
+    const o = CAMERA_OFFSET;
+    const ol = Math.hypot(o[0], o[1], o[2]);
+    const f = [-o[0] / ol, -o[1] / ol, -o[2] / ol];
+    const rl = Math.hypot(f[2], f[0]);
+    const r = [-f[2] / rl, 0, f[0] / rl];                                    // f × up
+    const u = [r[1] * f[2] - r[2] * f[1], r[2] * f[0] - r[0] * f[2], r[0] * f[1] - r[1] * f[0]];
+    const c = [GRID.cols / 2, 0, GRID.rows / 2];
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    for (const px of [0, GRID.cols]) for (const pz of [0, GRID.rows]) for (const py of [0, BOARD_TOP]) {
+        const d = [px - c[0], py - c[1], pz - c[2]];
+        const xc = d[0] * r[0] + d[1] * r[1] + d[2] * r[2];
+        const yc = d[0] * u[0] + d[1] * u[1] + d[2] * u[2];
+        x0 = Math.min(x0, xc); x1 = Math.max(x1, xc); y0 = Math.min(y0, yc); y1 = Math.max(y1, yc);
+    }
+    const availW = Math.max(1, W - rightInset);
+    const size = FIT_MARGIN * Math.max(y1 - y0, (x1 - x0) * H / availW);
+    const cx = (x0 + x1) / 2 + (rightInset / 2) * size / H;   // shift the view so the box sits left
+    const cy = (y0 + y1) / 2;
+    stage.reframe([c[0] + r[0] * cx + u[0] * cy, c[1] + r[1] * cx + u[1] * cy, c[2] + r[2] * cx + u[2] * cy], size);
+}
 
 export function createRenderer(scene, world) {
     // --- lighting + tonemap ------------------------------------------------
@@ -263,16 +291,6 @@ export function createRenderer(scene, world) {
         });
     }
 
-    // --- per-frame camera ---------------------------------------------------
-    function updateCamera(W, H) {
-        const aspect = (W && H) ? W / H : 1100 / 760;
-        scene.setCamera({
-            mode: 'orthographic', size: CAM.view, aspect, near: 0.1, far: 400,
-            position: [CX + CAM.dist, CAM.height, CZ + CAM.dist],
-            target: [CX, 0, CZ], up: [0, 1, 0],
-        });
-    }
-
     // --- per-frame day/night -----------------------------------------------
     function updateDayNight(world) {
         const hour = world.clock.hour + world.clock.minute / 60;
@@ -311,8 +329,7 @@ export function createRenderer(scene, world) {
     }
 
     // --- the frame ----------------------------------------------------------
-    function frame(world, W, H) {
-        updateCamera(W, H);
+    function frame(world) {
         updateDayNight(world);
 
         for (const c of world.crops) { const p = cropPlant[c.id]; if (p) updateCrop(p, c); }
@@ -348,49 +365,5 @@ export function createRenderer(scene, world) {
             updateLabel(npcLabels[i], world.npcs[i], 'worker', now);
     }
 
-    // --- screen -> tile picking (ground-plane intersect) -------------------
-    // unprojectLocal expects pixels in the canvas element's LAYOUT space (the
-    // scene sizes its viewport from the element's content box, not the canvas's
-    // 300x150 default backing store) — so feed it client coords relative to the
-    // element rect, with no rescale into canvas.width/height.
-    function pickClient(clientX, clientY, canvas, W, H) {
-        const rect = canvas.getBoundingClientRect();
-        const lx = clientX - rect.left;
-        const ly = clientY - rect.top;
-        const r = scene.unprojectLocal(lx, ly);
-        if (!r) return null;
-        const o = r.origin, d = r.dir;
-        if (Math.abs(d[1]) < 1e-6) return null;
-        const t = -o[1] / d[1];
-        if (t < 0) return null;
-        return { x: o[0] + d[0] * t, y: o[2] + d[2] * t };   // (worldX, worldZ) == (tileX, tileY)
-    }
-
-    // --- world -> screen projection ----------------------------------------
-    // Forward of pickClient: project a world point to a client (CSS) pixel via
-    // the live view+projection. Used to pick PEOPLE by where their body actually
-    // appears, which the flat ground-plane pick can't do (a tall figure draws
-    // well above its foot tile). Returns null if behind the camera.
-    function m4v(m, v) {           // column-major 4x4 * vec4
-        return [
-            m[0] * v[0] + m[4] * v[1] + m[8]  * v[2] + m[12] * v[3],
-            m[1] * v[0] + m[5] * v[1] + m[9]  * v[2] + m[13] * v[3],
-            m[2] * v[0] + m[6] * v[1] + m[10] * v[2] + m[14] * v[3],
-            m[3] * v[0] + m[7] * v[1] + m[11] * v[2] + m[15] * v[3],
-        ];
-    }
-    function worldToScreen(wx, wy, wz, canvas) {
-        const view = scene.viewMatrix, proj = scene.projectionMatrix;
-        if (!view || !proj) return null;
-        const c = m4v(proj, m4v(view, [wx, wy, wz, 1]));
-        const w = c[3];
-        if (w < 0) return null;                       // behind a perspective eye
-        const iw = (w === 0) ? 1 : w;                 // ortho: w == 1
-        const ndcx = c[0] / iw, ndcy = c[1] / iw;
-        const rect = canvas.getBoundingClientRect();
-        return [rect.left + (ndcx * 0.5 + 0.5) * rect.width,
-                rect.top + (1 - (ndcy * 0.5 + 0.5)) * rect.height];
-    }
-
-    return { frame, pickClient, worldToScreen, ground };
+    return { frame, ground };
 }

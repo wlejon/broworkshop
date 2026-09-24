@@ -1,11 +1,5 @@
-import { boot } from "/lib/arcade/shell.js";
+import { bootScene } from "/lib/arcade/scene3d.js";
 import { game } from "/app/game.js";
+import { installTestHooks } from "/app/hooks.js";
 
-// Shell requires a 2D view canvas; #view hosts the 3D scene context.
-const shellCanvas = document.createElement("canvas");
-shellCanvas.width = 1100;
-shellCanvas.height = 760;
-shellCanvas.style.display = "none";
-document.body.appendChild(shellCanvas);
-
-boot(game, { canvas: shellCanvas, width: 1100, height: 760 });
+installTestHooks(bootScene(game, { width: 1100, height: 760 }));

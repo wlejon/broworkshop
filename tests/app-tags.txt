@@ -49,5 +49,5 @@ ai/maker-agent          timeout=90
 tools/node-forge/tests/test_kokoro_node.js  ml
 tools/node-forge/tests/test_qwen_node.js    ml
 tools/node-forge/tests/test_rave_node.js    ml
-games/hearthfolk/test-live.js               ml
+games/hearthfolk/tests/test_live.js         ml
 ai/maker-agent/tests/test_openrouter_loop.js net

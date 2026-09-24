@@ -3,8 +3,8 @@
 // Every line that already flows through world.say(speakerId, text) can also be
 // SPOKEN here: each speaker (the Foreman, the four workers, the player, the
 // narrator) gets a distinct Kokoro voice, synthesized on the GPU and played back
-// through bro's clip-based AudioContext (broaudio). This module is self-contained
-// — app.js creates it once and tees world.say into voice.speak().
+// through bro's clip-based AudioContext (broaudio). farm.js creates it once and
+// routes world speech (world._emitSpeech) into voice.speak().
 //
 // Design notes that matter for the next pass:
 //   • SERIALIZED SYNTH. Kokoro allows exactly ONE synthesis in flight per model
@@ -25,12 +25,7 @@
 //     the game keeps running as silent text-only chatter. This is robustness, not
 //     a CPU fallback: Kokoro always loads on the default device.
 
-const _fs = (() => { try { return require('fs'); } catch (e) { return null; } })();
-function exists(p) { try { return !!_fs && !!p && _fs.existsSync(p); } catch (e) { return false; } }
-function envVar(k) {
-    try { const p = globalThis.process; return (p && p.env && p.env[k]) || ''; }
-    catch (e) { return ''; }
-}
+import { loadKokoro, kokoroVoicePath } from '/lib/kit/kokoro.js';
 
 // ── voice assignment ─────────────────────────────────────────────────────────
 // Abstract roster tag (defs.js NPC_SPECS .voice) → concrete Kokoro voice pack.
@@ -47,26 +42,6 @@ const ID_TO_VOICE = {
     Farm:    'af_nicole',  // the narrator — soft, unobtrusive female
 };
 
-// Locate the dev brosoundml sibling that holds weights/kokoro. Probes a few
-// cwd-relative spots plus BRO_WEIGHTS (mirrors voice-pipeline/models.js), so the
-// path resolves regardless of which cwd the bro binary was launched from.
-function resolveKokoroDir() {
-    const wroot = envVar('BRO_WEIGHTS');
-    const home = (() => { try { return require('os').homedir(); } catch (e) { return ''; } })();
-    const cands = [
-        wroot && wroot + '/brosoundml/weights/kokoro',
-        '../brosoundml/weights/kokoro',
-        '../../brosoundml/weights/kokoro',
-        '../../../brosoundml/weights/kokoro',
-        home && home + '/projects/brosoundml/weights/kokoro',
-        'D:/projects/brosoundml/weights/kokoro',
-    ].filter(Boolean);
-    for (const c of cands) if (exists(c + '/config.json')) return c;
-    return null;
-}
-
-// Linear-interp resample (mono) from inRate → outRate. Same helper the kokoro-lab
-// playback path uses; Kokoro is 24 kHz and broaudio runs at the device rate.
 const PLAY_GAIN     = 0.9;   // clip playback gain
 const PLAY_DELAY_FR = 3;     // frames to wait between createClip and playClip (RCU)
 const GAP_MS        = 120;   // small silence between queued utterances
@@ -113,8 +88,9 @@ export function computeSpatial(speaker, listener) {
 //   opts.isActive()           → true only while the sim is actually playing
 //   opts.speakerPos(id)       → { x, y } tile of a speaker, or null (non-spatial)
 //   opts.listenerPos()        → { x, y } tile of the player (the listener), or null
+//   opts.enabled = true       → false keeps the farm silent (no model load)
 export function createVoice(opts = {}) {
-    const getAudioCtx  = opts.getAudioCtx  || (() => (typeof AudioContext === 'function' ? null : null));
+    const getAudioCtx  = opts.getAudioCtx  || (() => null);
     const npcVoiceTag  = opts.npcVoiceTag  || (() => null);
     const isActive     = opts.isActive     || (() => true);
     const speakerPos   = opts.speakerPos   || (() => null);
@@ -162,45 +138,18 @@ export function createVoice(opts = {}) {
 
     // ── model load (async, non-blocking) ─────────────────────────────────────
     function load() {
-        if (typeof bro === 'undefined' || !bro.tts || typeof bro.tts.loadKokoro !== 'function') {
-            disable('bro.tts unavailable — voices off');
-            return;
-        }
-        const dir = resolveKokoroDir();
+        if (opts.enabled === false) { disable('voices disabled'); return; }
+        const dir = loadKokoro({
+            onReady: (k) => {
+                kokoro = k;
+                voice.ready = true;
+                console.log('[farm-voice] Kokoro ready (' + voice.debug.kokoroDir + ')');
+                drain();
+            },
+            onError: (m) => disable(m + ' — voices off'),
+        });
         voice.debug.kokoroDir = dir;
-        if (!dir) { disable('kokoro weights not found — voices off'); return; }
-
-        // Point the phonemizer at this sibling checkout. setAssetRoot derives the
-        // g2p lexicon + POS tagger from <root>/../brosoundml-data and the vocab
-        // from <root>/weights/kokoro/config.json. Fall back to explicit setAssets
-        // if that flat layout is what's on disk.
-        try {
-            const repoRoot = dir.replace(/[\\\/]+weights[\\\/]+kokoro[\\\/]*$/, '');
-            const dataRoot = repoRoot.replace(/[\\\/][^\\\/]*$/, '') + '/brosoundml-data';
-            if (exists(dataRoot + '/g2p/lexicon_en_us.bin')) {
-                bro.tts.setAssets({
-                    lexicon:      dataRoot + '/g2p/lexicon_en_us.bin',
-                    posTagger:    dataRoot + '/pos_tagger/model.bin',
-                    kokoroConfig: dir + '/config.json',
-                });
-            } else {
-                bro.tts.setAssetRoot(repoRoot);
-            }
-        } catch (e) { /* phonemize() will surface any real problem per-line */ }
-
-        try {
-            bro.tts.loadKokoro(dir, {
-                onReady: (k) => {
-                    kokoro = k;
-                    voice.ready = true;
-                    console.log('[farm-voice] Kokoro ready (' + dir + ')');
-                    drain();
-                },
-                onError: (m) => disable('kokoro load failed: ' + m),
-            });
-        } catch (e) {
-            disable('kokoro load threw: ' + (e && e.message || e));
-        }
+        if (!dir) return;
 
         // Per-frame pump for deferred playback (RCU upload→trigger separation).
         if (typeof requestAnimationFrame === 'function') requestAnimationFrame(pump);
@@ -275,7 +224,7 @@ export function createVoice(opts = {}) {
         const name = voiceNameFor(speakerId);
         if (!name || !kokoro) { sessions.set(speakerId, null); return null; }
         try {
-            const path = voice.debug.kokoroDir + '/voices/' + name + '.bin';
+            const path = kokoroVoicePath(voice.debug.kokoroDir, name);
             let v = voiceCache.get(path);
             if (!v) { v = kokoro.loadVoice(path); voiceCache.set(path, v); }
             const s = { session: kokoro.createSession(v), voiceName: name };

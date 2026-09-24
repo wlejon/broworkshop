@@ -1,38 +1,46 @@
-// Hearthfolk — arcade plugin (scene, mind, voices, observatory).
-// Domain rules: sim.js. Shell owns menus / pause / high score.
+// Hearthfolk: an observatory sim of five villagers on the arcade shell.
+// The shell owns menus, pause and the loop; this plugin steps the sim,
+// renders the village through an iso stage and wires the observatory.
+//
+//   sim.js         the village (tier-0 utility AI, clock, work, speech)
+//   mind.js        tier 1: model-written JSON thinks that steer a villager
+//   terrain.js / atlas.js / kinds.js   world generation, tiles, meshes
+//   persist.js     save / load     models.js  Qwen minds + Kokoro voices
+//   render.js      scene sync, lighting, selection tints
+//   observatory.js chronicle, feed, bubbles, mind panel, toast
+//   hooks.js       window.HEARTH for headless tests
 
+import { createStage } from "/lib/arcade/scene3d.js";
+import { clear } from "/lib/kit/dom.js";
+import { PHASE_LABEL } from "/app/defs.js";
+import { createGame } from "/app/sim.js";
+import { setupLighting, syncWorld, createTints } from "/app/render.js";
+import { loadMind, createVoices } from "/app/models.js";
 import {
-    MAP_W, MAP_H, HSTEP, L_GROUND, L_OVER,
-    TILE, FLAG, DAY_LEN, WALK_SPEED,
-    VILLAGER_DEFS, START_RES, createGame,
-} from "/app/sim.js";
+    wireChronicle, addFeed, createBubbles, renderPanels, toast,
+} from "/app/observatory.js";
 
-// ── Scene / mind / voices (lazy scene; optional local models) ────────────
-
-const fs = require("fs");
-
-let canvas = null;
-let scene = null;
-let sun = null;
-let fireLight = null;
-let wired = false;
-/** @type {object|null} */
-/** @type {object|null} Latest run (wiring + HUD). */
-let activeRun = null;
-
-const MODEL_PATH = "D:/projects/brolm/weights/Qwen3-32B-GGUF/Qwen3-32B-Q4_K_M.gguf";
-const MAX_THINK_TOKENS = 200;
-const KOKORO_DIR = "D:/projects/brosoundml/weights/kokoro";
-const PHASE_LABEL = {
-    dawn: "Dawn", morning: "Morning", midday: "Midday",
-    evening: "Evening", night: "Night",
-};
+const PANEL_REFRESH_MS = 200;
+const PAN_LIMIT = { x: 26, z: 20 };     // camera pan range around the map centre
+const START_ZOOM = 0.70;
 const SQ = Math.SQRT1_2;
 
-const NO_MODEL = (() => {
-    try { return globalThis.process.env.HEARTHFOLK_NO_MODEL === "1"; }
-    catch (e) { return false; }
-})();
+let stage = null;       // scene + iso camera, built on the first create()
+let lights = null;
+let voices = null;
+let bubbles = null;
+let current = null;     // live run, for pointer handlers and test hooks
+
+// HEARTHFOLK_NO_MODEL=1 (or hooks noModels()) keeps the minds and voices off.
+export const options = { models: env("HEARTHFOLK_NO_MODEL") !== "1" };
+
+function env(name) {
+    try { return globalThis.process.env[name] || ""; } catch (e) { return ""; }
+}
+
+const PHASE = (sim) => PHASE_LABEL[sim.phaseName()] || sim.phaseName();
+const resText = (r) => "food " + r.food + " · wood " + r.wood + " · stone " + r.stone +
+    " · meals " + r.meals;
 
 export const game = {
     id: "hearthfolk",
@@ -48,671 +56,154 @@ export const game = {
     ],
 
     create(ctx) {
-        ensureScene();
-        ensureWiring();
-
-        const sim = createGame(scene);
-        const hc = sim.world.cellCenterWorldXZ(sim.hearth.x, sim.hearth.y);
-        if (fireLight) fireLight.position = [hc.x, 1.1, hc.z];
-
+        ensureStage();
+        const sim = createGame(stage.scene);
         const run = {
-            score: 0,
-            play: ctx.play,
-            highScore: ctx.highScore,
-            sim,
+            score: 0, play: ctx.play, sim,
             selected: null,
-            tinted: new Set(),
-            lastSelCell: "",
-            camera: { panX: 0, panZ: 0, zoom: 0.70 },
-            baseCX: 0, baseCZ: 0, baseSize: 14,
-            panKeys: { right: false, left: false, up: false, down: false },
-            bubbleDivs: new Map(),
-            toastTimer: null,
-            hudCache: "",
-            lm: null,
-            tts: {
-                kokoro: null, voices: {}, queue: [], busy: false,
-                enabled: false, spoken: 0,
-            },
-            audioCtx: null,
-            engineRate: 44100,
+            tints: createTints(sim),
+            pan: { x: 0, z: 0 }, base: { x: 0, z: 0 },
+            framedFor: "",
+            panelMs: 0, panelDirty: true,
         };
-        activeRun = run;
+        current = run;
+        lights.placeFire(sim);
 
-        // Centre camera on the plaza.
-        const b = sim.world.worldBounds();
-        run.baseCX = (b.minX + b.maxX) / 2;
-        run.baseCZ = (b.minZ + b.maxZ) / 2;
-        const rect = canvas.getBoundingClientRect();
-        const aspect = rect.width > 0 && rect.height > 0 ? rect.width / rect.height : 16 / 10;
-        const spanZ = b.maxZ - b.minZ;
-        const diag = Math.hypot(b.maxX - b.minX, spanZ);
-        run.baseSize = Math.max(spanZ * 0.72 + 2.0, (diag * 0.72 + 1.5) / aspect);
-        run.camera.panX = hc.x - run.baseCX;
-        run.camera.panZ = hc.z - run.baseCZ;
-        applyCamera(run, aspect);
+        // Centre the camera on the hearth.
+        stage.iso.zoom = START_ZOOM;
+        frameCamera(run);
+        const hc = sim.world.cellCenterWorldXZ(sim.hearth.x, sim.hearth.y);
+        panBy(run, hc.x - run.base.x, hc.z - run.base.z);
 
-        sim.mind.stats = { tokens: 0, genMs: 0 };
-        wireChronicle(run);
-        loadMind(run);
-        loadVoices(run);
-
+        bubbles.clear();
+        clear(document.getElementById("feed"));
+        wireChronicle(sim);
+        if (options.models) {
+            loadMind(sim);
+            voices = voices || createVoices();
+        }
         sim.onSay = (v, text) => {
             addFeed(v, text);
-            if (run.tts.enabled && run.tts.queue.length < 2) {
-                run.tts.queue.push({ name: v.name, text });
-                pumpTts(run);
-            }
+            if (voices) voices.say(v.name, text);
         };
-
-        // Force full static rebuild
-        sim.dirty.static = true;
-        sim.dirty.trees = true;
-        sim.dirty.piles = true;
-
-        exposeDebug(run);
         return run;
     },
 
     update(run, dt, input) {
-        activeRun = run;
-        if (!run || !run.sim) return;
-
+        const sim = run.sim;
         const dtSec = Math.min(0.06, Math.max(0, dt / 1000));
-        run.sim.update(dtSec);
-        run.sim.world.advance(dt * (run.sim.speed || 0));
-        updatePan(run, dtSec);
-        updateLighting(run);
+        sim.update(dtSec);
+        sim.world.advance(dt * (sim.speed || 0));
+        pan(run, input, dtSec);
+        lights.update(sim);
 
-        if (input.pressed("pause_sim")) setSpeed(run, run.sim.speed === 0 ? 1 : 0);
+        if (input.pressed("pause_sim")) setSpeed(run, sim.speed === 0 ? 1 : 0);
         if (input.pressed("speed1")) setSpeed(run, 1);
         if (input.pressed("speed4")) setSpeed(run, 4);
-        if (input.pressed("save") && run.sim.saveVillage()) toast(run, "Village saved");
-        if (input.pressed("load")) doLoad(run);
+        if (input.pressed("save")) save(run);
+        if (input.pressed("load")) load(run);
 
-        run.panKeys.right = input.down("right");
-        run.panKeys.left = input.down("left");
-        run.panKeys.up = input.down("up");
-        run.panKeys.down = input.down("down");
+        syncWorld(sim);
+        bubbles.sync(sim);
+        run.tints.follow(run.selected);
 
-        if (run.sim.dirty.static) syncStatic(run);
-        if (run.sim.dirty.trees) syncTrees(run);
-        if (run.sim.dirty.piles) syncPiles(run);
-        syncDynamic(run);
-        syncBubbles(run);
-
-        if (run.selected) {
-            const c = run.sim.cellOf(run.selected);
-            const key = c.x + "," + c.y;
-            if (key !== run.lastSelCell) {
-                run.lastSelCell = key;
-                applyTints(run);
-            }
-        }
+        run.panelMs += dt;
+        if (run.panelDirty || run.panelMs >= PANEL_REFRESH_MS) refreshPanels(run);
     },
 
-    draw() {},
+    draw(run) {
+        if (!stage) return;
+        if (run) frameCamera(run);
+        stage.applyCamera();
+    },
 
     hud(run) {
-        if (!run || !run.sim) {
-            return {
-                day: "Day 1", phase: "Morning", thinks: "Γ£ô 0  Γ£ò 0", res: "",
-            };
-        }
-        updateHUD(run);
-        const sim = run.sim;
+        const sim = run && run.sim;
+        if (!sim) return { day: "Day 1", phase: "Morning", thinks: "✓ 0  ✕ 0", res: "" };
         return {
             day: "Day " + sim.day(),
-            phase: PHASE_LABEL[sim.phaseName()] || sim.phaseName(),
-            thinks: "Γ£ô " + sim.mind.accepted + "  Γ£ò " + sim.mind.discarded,
-            res: "food " + sim.res.food + " ┬╖ wood " + sim.res.wood +
-                " ┬╖ stone " + sim.res.stone + " ┬╖ meals " + sim.res.meals,
+            phase: PHASE(sim),
+            thinks: "✓ " + sim.mind.accepted + "  ✕ " + sim.mind.discarded,
+            res: resText(sim.res),
         };
     },
 
     gameOverText(run) {
         const sim = run && run.sim;
-        if (!sim) return "";
-        return "Day " + sim.day() + " ┬╖ " + (PHASE_LABEL[sim.phaseName()] || "") +
-            "\nfood " + sim.res.food + " ┬╖ wood " + sim.res.wood +
-            " ┬╖ stone " + sim.res.stone + " ┬╖ meals " + sim.res.meals;
+        return sim ? "Day " + sim.day() + " · " + PHASE(sim) + "\n" + resText(sim.res) : "";
     },
 
-    cue(name, audio) {
-    },
+    cue() {},
 };
 
-// ΓöÇΓöÇ Scene ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+// ── Stage + camera ──────────────────────────────────────────────────────────
 
-function ensureScene() {
-    if (scene) return;
-    canvas = document.getElementById("view");
-    if (!canvas) throw new Error("hearthfolk: #view canvas missing");
-    scene = canvas.getContext("scene");
-    if (!scene) throw new Error("hearthfolk: scene context unavailable");
-
-    scene.setToneMap({ mode: "aces", exposure: 0.95, gamma: 2.2 });
-    scene.setAmbient([0.20, 0.21, 0.26]);
-    sun = scene.createLight({
-        type: "directional",
-        direction: [-0.5, -1.0, -0.35],
-        color: [1.0, 0.95, 0.86],
-        intensity: 2.1,
+function ensureStage() {
+    if (stage) return;
+    stage = createStage({
+        iso: { offset: [16, 18, 16], size: 14, zoom: START_ZOOM, far: 220,
+               wheel: { step: 0.06, min: 0.28, max: 1.4 } },
     });
-    fireLight = scene.createLight({
-        type: "point",
-        position: [0, 1.2, 0],
-        color: [1.0, 0.55, 0.22],
-        intensity: 0,
-        range: 7,
+    lights = setupLighting(stage.scene);
+    bubbles = createBubbles((v) => villagerScreen(current, v));
+    stage.onTap((p) => {
+        if (!current) return;
+        const v = villagerAt(current, p.clientX, p.clientY);
+        select(current, v && v !== current.selected ? v : null);
     });
-    window.addEventListener("resize", () => {
-        if (!activeRun) return;
-        const b = activeRun.sim.world.worldBounds();
-        activeRun.baseCX = (b.minX + b.maxX) / 2;
-        activeRun.baseCZ = (b.minZ + b.maxZ) / 2;
-        const rect = canvas.getBoundingClientRect();
-        const aspect = rect.width > 0 && rect.height > 0 ? rect.width / rect.height : 16 / 10;
-        const spanZ = b.maxZ - b.minZ;
-        const diag = Math.hypot(b.maxX - b.minX, spanZ);
-        activeRun.baseSize = Math.max(spanZ * 0.72 + 2.0, (diag * 0.72 + 1.5) / aspect);
-        applyCamera(activeRun, aspect);
-    });
+    const bind = (id, fn) => document.getElementById(id)
+        .addEventListener("click", () => { if (current) fn(current); });
+    bind("btn-pause", (r) => setSpeed(r, 0));
+    bind("btn-1x", (r) => setSpeed(r, 1));
+    bind("btn-4x", (r) => setSpeed(r, 4));
+    bind("btn-save", save);
+    bind("btn-load", load);
 }
 
-function applyCamera(run, aspect) {
-    if (aspect === undefined) {
-        const rect = canvas.getBoundingClientRect();
-        aspect = rect.width > 0 && rect.height > 0 ? rect.width / rect.height : 16 / 10;
-    }
-    const cx = run.baseCX + run.camera.panX, cz = run.baseCZ + run.camera.panZ;
-    scene.setCamera({
-        mode: "orthographic",
-        size: run.baseSize * run.camera.zoom, aspect, near: 0.1, far: 220,
-        position: [cx + 16, 18, cz + 16],
-        target: [cx, 0, cz],
-    });
+// Fit the map's view height to the canvas when the canvas size changes; the
+// pan offset and wheel zoom stay as they are.
+function frameCamera(run) {
+    const r = stage.canvas.getBoundingClientRect();
+    const key = r.width + "x" + r.height;
+    if (key === run.framedFor) return;
+    run.framedFor = key;
+    const b = run.sim.world.worldBounds();
+    run.base = { x: (b.minX + b.maxX) / 2, z: (b.minZ + b.maxZ) / 2 };
+    const aspect = r.width > 0 && r.height > 0 ? r.width / r.height : 16 / 10;
+    const spanZ = b.maxZ - b.minZ;
+    const diag = Math.hypot(b.maxX - b.minX, spanZ);
+    stage.iso.size = Math.max(spanZ * 0.72 + 2.0, (diag * 0.72 + 1.5) / aspect);
+    panBy(run, 0, 0);
 }
 
-function updatePan(run, dt) {
-    const s = 11 * dt * run.camera.zoom;
-    let dx = 0, dz = 0;
-    if (run.panKeys.right) { dx += SQ * s; dz -= SQ * s; }
-    if (run.panKeys.left) { dx -= SQ * s; dz += SQ * s; }
-    if (run.panKeys.up) { dx += SQ * s; dz += SQ * s; }
-    if (run.panKeys.down) { dx -= SQ * s; dz -= SQ * s; }
-    if (dx || dz) {
-        run.camera.panX = Math.max(-26, Math.min(26, run.camera.panX + dx));
-        run.camera.panZ = Math.max(-20, Math.min(20, run.camera.panZ + dz));
-        applyCamera(run);
-    }
+function panBy(run, dx, dz) {
+    run.pan.x = Math.max(-PAN_LIMIT.x, Math.min(PAN_LIMIT.x, run.pan.x + dx));
+    run.pan.z = Math.max(-PAN_LIMIT.z, Math.min(PAN_LIMIT.z, run.pan.z + dz));
+    stage.iso.target = [run.base.x + run.pan.x, 0, run.base.z + run.pan.z];
 }
 
-function lerp(a, b, t) { return a + (b - a) * t; }
-
-function updateLighting(run) {
-    if (!sun || !fireLight) return;
-    const tod = run.sim.tod();
-    let dayF;
-    if (tod < 0.06) dayF = tod / 0.06;
-    else if (tod < 0.55) dayF = 1;
-    else if (tod < 0.72) dayF = 1 - (tod - 0.55) / 0.17;
-    else dayF = 0;
-    sun.intensity = lerp(0.22, 2.1, dayF);
-    sun.color = [lerp(0.55, 1.0, dayF), lerp(0.58, 0.95, dayF), lerp(0.85, 0.86, dayF)];
-    scene.setAmbient([
-        lerp(0.05, 0.20, dayF), lerp(0.06, 0.21, dayF), lerp(0.11, 0.26, dayF),
-    ]);
-    const flicker = 0.9 + 0.1 * Math.sin(run.sim.time * 9.3) * Math.sin(run.sim.time * 5.1);
-    fireLight.intensity = run.sim.fire * lerp(14, 3, dayF) * flicker;
+// Arrows / WASD pan along the screen axes of the iso view.
+function pan(run, input, dt) {
+    const s = 11 * dt * stage.iso.zoom;
+    const right = (input.down("right") ? 1 : 0) - (input.down("left") ? 1 : 0);
+    const up = (input.down("up") ? 1 : 0) - (input.down("down") ? 1 : 0);
+    if (right || up) panBy(run, SQ * s * (right + up), SQ * s * (up - right));
 }
 
-// ΓöÇΓöÇ Tints ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+// ── Picking ─────────────────────────────────────────────────────────────────
 
-function applyTints(run) {
-    const world = run.sim.world;
-    const want = new Map();
-    if (run.selected) {
-        const c = run.sim.cellOf(run.selected);
-        want.set(c.x + "," + c.y, [1.5, 1.35, 0.6]);
-        want.set(run.selected.home.x + "," + run.selected.home.y, [0.7, 1.1, 1.4]);
-    }
-    let dirty = false;
-    for (const k of [...run.tinted]) {
-        if (want.has(k)) continue;
-        const [x, y] = k.split(",").map(Number);
-        world.setTint(x, y, 1, 1, 1, 1);
-        run.tinted.delete(k);
-        dirty = true;
-    }
-    for (const [k, rgb] of want) {
-        const [x, y] = k.split(",").map(Number);
-        const cur = world.getTint(x, y);
-        if (Math.abs(cur.r - rgb[0]) < 0.02 && Math.abs(cur.g - rgb[1]) < 0.02 &&
-            Math.abs(cur.b - rgb[2]) < 0.02) { run.tinted.add(k); continue; }
-        world.setTint(x, y, rgb[0], rgb[1], rgb[2], 1);
-        run.tinted.add(k);
-        dirty = true;
-    }
-    if (dirty) world.rebuild();
-}
-
-// ΓöÇΓöÇ Render sync ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
-
-function syncStatic(run) {
-    const sim = run.sim, world = sim.world, K = sim.kinds;
-    world.clearObjects(K.hut); world.clearObjects(K.hutRoof);
-    world.clearObjects(K.hearth); world.clearObjects(K.bench);
-    world.clearObjects(K.kitchen); world.clearObjects(K.boulder);
-    for (const h of sim.homes) {
-        world.addObject(K.hut, h.x, h.y, { yaw: Math.atan2(23 - h.x, 17 - h.y), scale: 1.25 });
-        world.addObject(K.hutRoof, h.x, h.y, { yaw: Math.atan2(23 - h.x, 17 - h.y), scale: 1.25 });
-    }
-    world.addObject(K.hearth, sim.hearth.x, sim.hearth.y, { scale: 1.3 });
-    world.addObject(K.bench, sim.bench.x, sim.bench.y, { yaw: Math.PI / 3 });
-    world.addObject(K.kitchen, sim.kitchen.x, sim.kitchen.y, { yaw: -Math.PI / 2 });
-    let i = 0;
-    for (const c of sim.rockCells) {
-        if ((i++ % 5) !== 0) continue;
-        world.addObject(K.boulder, c.x, c.y, {
-            yaw: i * 1.7, scale: 0.7 + (i % 3) * 0.25,
-            offsetX: ((i * 7) % 10) / 20 - 0.25, offsetZ: ((i * 13) % 10) / 20 - 0.25,
-        });
-    }
-    sim.dirty.static = false;
-}
-
-function syncTrees(run) {
-    const sim = run.sim, world = sim.world, K = sim.kinds;
-    world.clearObjects(K.tree);
-    world.clearObjects(K.stump);
-    for (const t of sim.trees) {
-        if (t.alive)
-            world.addObject(K.tree, t.x, t.y, {
-                yaw: t.yaw, scale: t.scale, offsetX: t.ox, offsetZ: t.oz,
-            });
-        else
-            world.addObject(K.stump, t.x, t.y, { yaw: t.yaw, offsetX: t.ox, offsetZ: t.oz });
-    }
-    sim.dirty.trees = false;
-}
-
-function syncPiles(run) {
-    const sim = run.sim, world = sim.world, K = sim.kinds;
-    world.clearObjects(K.stone);
-    world.clearObjects(K.meal);
-    world.clearObjects(K.logPile);
-    const q = sim.quarry;
-    const nStone = Math.min(sim.res.stone, 10);
-    for (let i = 0; i < nStone; i++)
-        world.addObject(K.stone, q.x, q.y, {
-            yaw: i * 2.3,
-            offsetX: ((i % 3) - 1) * 0.28, offsetZ: (Math.floor(i / 3) - 1) * 0.24,
-            yOffset: 0.02,
-        });
-    const kc = sim.kitchen;
-    const nMeals = Math.min(sim.res.meals, 8);
-    for (let i = 0; i < nMeals; i++)
-        world.addObject(K.meal, kc.x, kc.y, {
-            offsetX: -0.30 + (i % 4) * 0.17, offsetZ: 0.30 + Math.floor(i / 4) * 0.16,
-        });
-    const nLogs = Math.min(Math.ceil(sim.res.wood / 3), 4);
-    for (let i = 0; i < nLogs; i++)
-        world.addObject(K.logPile, sim.hearth.x - 1, sim.hearth.y + 1, {
-            yaw: 0.3, offsetX: -0.2 + i * 0.16, offsetZ: 0.1,
-        });
-    sim.dirty.piles = false;
-}
-
-function syncDynamic(run) {
-    const sim = run.sim, world = sim.world, K = sim.kinds;
-    for (let i = 0; i < sim.villagers.length; i++) {
-        const v = sim.villagers[i];
-        const kind = K.villagers[i];
-        world.clearObjects(kind);
-        const ri = sim.renderInfo(v);
-        let yaw = v.faceYaw || 0;
-        if (v.path && v.seg < v.path.length - 1) {
-            const a = v.path[v.seg], b = v.path[v.seg + 1];
-            yaw = Math.atan2(b.x - a.x, b.y - a.y);
-            v.faceYaw = yaw;
-        }
-        const asleep = v.activity === "sleeping";
-        world.addObject(kind, ri.anchor.x, ri.anchor.y, {
-            yaw,
-            offsetX: ri.offsetX, offsetZ: ri.offsetZ,
-            yOffset: ri.yOffset + (asleep ? -0.06 : 0),
-            scale: asleep ? 1.1 : 1.35,
-        });
-    }
-    world.clearObjects(K.flame);
-    if (sim.fire > 0.03) {
-        const s = 0.5 + sim.fire * 0.9 + 0.06 * Math.sin(sim.time * 7);
-        world.addObject(K.flame, sim.hearth.x, sim.hearth.y, { scale: s, yOffset: 0.06 });
-    }
-    world.rebuildObjects();
-}
-
-// ΓöÇΓöÇ Mind (Qwen) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
-
-function chatmlTurn(role, content) {
-    return "<|im_start|>" + role + "\n" + content + "<|im_end|>\n";
-}
-
-function installModelGenerate(run) {
-    run.sim.mind.generate = (promptText, parts) => new Promise((resolve, reject) => {
-        const chatml = chatmlTurn("system", parts.system) +
-            chatmlTurn("user", parts.user) +
-            "<|im_start|>assistant\n";
-        const ids = run.lm.tokenizer.encode(chatml);
-        const t0 = Date.now();
-        try {
-            bro.lm.generate(run.lm.model, ids, {
-                maxNewTokens: MAX_THINK_TOKENS,
-                eosId: run.lm.tokenizer.imEndId,
-                sampling: { temperature: 0.7, topK: 40, topP: 0.95 },
-                onDone: (outIds, info) => {
-                    run.sim.mind.stats.tokens += outIds.length;
-                    run.sim.mind.stats.genMs += Date.now() - t0;
-                    if (info && info.error) { reject(new Error(String(info.error))); return; }
-                    resolve(run.lm.tokenizer.decode(Array.from(outIds)));
-                },
-            });
-        } catch (e) { reject(e); }
-    });
-}
-
-function loadMind(run) {
-    let exists = false;
-    try { exists = !NO_MODEL && fs.existsSync(MODEL_PATH); } catch (e) { /* */ }
-    if (!exists) {
-        run.sim.mind.status = "off";
-        run.sim.mind.statusText = "minds: off ΓÇö model not found";
-        return;
-    }
-    run.sim.mind.status = "loading";
-    run.sim.mind.statusText = "minds: loadingΓÇª";
-    try {
-        bro.lm.loadQwen(MODEL_PATH, {
-            onReady: ({ model, tokenizer }) => {
-                run.lm = { model, tokenizer };
-                installModelGenerate(run);
-                run.sim.mind.status = "ready";
-                run.sim.mind.statusText = "minds: on (Qwen3-32B)";
-                run.sim.addEvent("The villagersΓÇÖ minds awaken", "day");
-            },
-            onError: (e) => {
-                run.sim.mind.status = "off";
-                run.sim.mind.statusText = "minds: off ΓÇö load failed";
-                console.error("mind load failed:", e);
-            },
-        });
-    } catch (e) {
-        run.sim.mind.status = "off";
-        run.sim.mind.statusText = "minds: off ΓÇö load failed";
-    }
-}
-
-// ΓöÇΓöÇ Voices (Kokoro) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
-
-function loadVoices(run) {
-    let exists = false;
-    try { exists = !NO_MODEL && fs.existsSync(KOKORO_DIR + "/model.safetensors"); } catch (e) { /* */ }
-    if (!exists) return;
-    try {
-        run.audioCtx = new AudioContext();
-        run.engineRate = run.audioCtx.sampleRate || 44100;
-    } catch (e) { return; }
-    try {
-        bro.tts.loadKokoro(KOKORO_DIR, {
-            onReady: (k) => {
-                run.tts.kokoro = k;
-                try {
-                    for (const def of VILLAGER_DEFS)
-                        run.tts.voices[def.name] = k.loadVoice(
-                            KOKORO_DIR + "/voices/" + def.voice + ".bin");
-                    run.tts.enabled = true;
-                } catch (e) { console.warn("voice load failed:", e.message); }
-            },
-            onError: (m) => console.warn("kokoro load failed:", m),
-        });
-    } catch (e) { /* voices stay off */ }
-}
-
-function pumpTts(run) {
-    const tts = run.tts;
-    if (!tts.enabled || tts.busy || tts.queue.length === 0) return;
-    const item = tts.queue.shift();
-    const voice = tts.voices[item.name];
-    if (!voice) return;
-    let ids;
-    try { ids = bro.tts.phonemize(item.text); } catch (e) { return; }
-    tts.busy = true;
-    try {
-        bro.tts.synthesize(tts.kokoro, ids, voice, {
-            speed: 1.05,
-            onDone: (res) => {
-                tts.busy = false;
-                if (res && res.samples && res.samples.length && run.audioCtx) {
-                    try {
-                        const clip = run.audioCtx.createClip(res.samples, 1, res.sampleRate);
-                        run.audioCtx.playClip(clip, 0.9, false);
-                        tts.spoken++;
-                        setTimeout(() => {
-                            try { run.audioCtx.deleteClip(clip); } catch (e) { /* */ }
-                        }, (res.samples.length / res.sampleRate) * 1000 + 500);
-                    } catch (e) { /* playback best-effort */ }
-                }
-                pumpTts(run);
-            },
-            onError: () => { tts.busy = false; pumpTts(run); },
-        });
-    } catch (e) { tts.busy = false; }
-}
-
-// ΓöÇΓöÇ DOM observatory ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
-
-function $(id) { return document.getElementById(id); }
-
-function projectWorld(wx, wy, wz) {
-    const V = scene.viewMatrix, P = scene.projectionMatrix;
-    const mul = (m, v) => [
-        m[0] * v[0] + m[4] * v[1] + m[8] * v[2] + m[12] * v[3],
-        m[1] * v[0] + m[5] * v[1] + m[9] * v[2] + m[13] * v[3],
-        m[2] * v[0] + m[6] * v[1] + m[10] * v[2] + m[14] * v[3],
-        m[3] * v[0] + m[7] * v[1] + m[11] * v[2] + m[15] * v[3],
-    ];
-    const clip = mul(P, mul(V, [wx, wy, wz, 1]));
-    const rect = canvas.getBoundingClientRect();
-    return {
-        x: rect.left + (clip[0] / clip[3] * 0.5 + 0.5) * rect.width,
-        y: rect.top + (1 - (clip[1] / clip[3] * 0.5 + 0.5)) * rect.height,
-    };
-}
-
-function projectVillager(run, v) {
+/** Client pixel of a villager's head (where the bubble anchors), or null. */
+export function villagerScreen(run, v) {
+    if (!run || !stage) return null;
     const ri = run.sim.renderInfo(v);
     const cc = run.sim.world.cellCenterWorldXZ(ri.anchor.x, ri.anchor.y);
-    return projectWorld(cc.x + ri.offsetX, ri.worldY + 0.55, cc.z + ri.offsetZ);
+    return stage.toScreen(cc.x + ri.offsetX, ri.worldY + 0.55, cc.z + ri.offsetZ);
 }
 
-function wireChronicle(run) {
-    const chronicleEl = $("chronicle-list");
-    if (!chronicleEl) return;
-    chronicleEl.innerHTML = "";
-    run.sim.onChronicle = (e) => {
-        const div = document.createElement("div");
-        div.className = "chron-entry " + e.kind;
-        const stamp = document.createElement("span");
-        stamp.className = "chron-stamp";
-        stamp.textContent = "D" + e.day + " " + (PHASE_LABEL[e.phase] || e.phase);
-        div.appendChild(stamp);
-        div.appendChild(document.createTextNode(" " + e.text));
-        chronicleEl.appendChild(div);
-        while (chronicleEl.children.length > 120) chronicleEl.removeChild(chronicleEl.firstChild);
-        chronicleEl.scrollTop = chronicleEl.scrollHeight;
-    };
-    for (const e of run.sim.chronicle) run.sim.onChronicle(e);
-}
-
-function cssColor(c) {
-    const b = (x) => Math.round(Math.min(1, x * 1.8) * 255);
-    return "rgb(" + b(c[0]) + "," + b(c[1]) + "," + b(c[2]) + ")";
-}
-
-function addFeed(v, text) {
-    const feedEl = $("feed");
-    if (!feedEl) return;
-    const div = document.createElement("div");
-    div.className = "feed-line";
-    const who = document.createElement("b");
-    who.textContent = v.name;
-    who.style.color = cssColor(v.color);
-    div.appendChild(who);
-    div.appendChild(document.createTextNode(": " + text));
-    feedEl.appendChild(div);
-    while (feedEl.children.length > 7) feedEl.removeChild(feedEl.firstChild);
-}
-
-function syncBubbles(run) {
-    const bubblesEl = $("bubbles");
-    if (!bubblesEl) return;
-    for (const v of run.sim.villagers) {
-        let div = run.bubbleDivs.get(v.id);
-        if (v.say) {
-            if (!div) {
-                div = document.createElement("div");
-                div.className = "bubble";
-                bubblesEl.appendChild(div);
-                run.bubbleDivs.set(v.id, div);
-            }
-            if (div.textContent !== v.say.text) div.textContent = v.say.text;
-            const p = projectVillager(run, v);
-            div.style.left = Math.round(p.x) + "px";
-            div.style.top = Math.round(p.y) + "px";
-        } else if (div) {
-            div.remove();
-            run.bubbleDivs.delete(v.id);
-        }
-    }
-}
-
-function setSpeed(run, sp) {
-    run.sim.speed = sp;
-    run.hudCache = "";
-}
-
-function needBar(id, val) {
-    const el = $(id);
-    if (!el) return;
-    el.style.width = Math.round(Math.min(1, Math.max(0, val)) * 100) + "%";
-    el.className = "bar-fill" + (val > 0.66 ? " hot" : val > 0.4 ? " warm" : "");
-}
-
-function updateMindPanel(run) {
-    const panel = $("mind-panel");
-    if (!panel) return;
-    if (!run.selected) { panel.style.display = "none"; return; }
-    panel.style.display = "";
-    const v = run.selected;
-    const set = (id, t) => { const n = $(id); if (n) n.textContent = t; };
-    set("mp-name", v.name);
-    set("mp-sub", v.temperament + " " + v.role + " ┬╖ " + v.activity +
-        (run.tts.enabled ? " ┬╖ voice " + v.voice : ""));
-    set("mp-goal", v.goal || "ΓÇö");
-    needBar("bar-hunger", v.needs.hunger);
-    needBar("bar-energy", v.needs.energy);
-    needBar("bar-social", v.needs.social);
-    needBar("bar-warmth", v.needs.warmth);
-    const think = $("mp-think");
-    if (think) {
-        if (v.lastThink) {
-            think.textContent = v.lastThink.discarded
-                ? "(discarded)\n" + String(v.lastThink.raw).slice(0, 300)
-                : JSON.stringify(v.lastThink.parsed, null, 1);
-        } else think.textContent = "no thoughts yet ΓÇö tier-0 instinct";
-    }
-    const mem = $("mp-memories");
-    if (mem) {
-        const memSig = v.memories.join("\u0001");
-        if (mem.dataset.sig !== memSig) {
-            mem.dataset.sig = memSig;
-            mem.innerHTML = "";
-            if (!v.memories.length) {
-                const li = document.createElement("li");
-                li.className = "empty";
-                li.textContent = "no memories yet";
-                mem.appendChild(li);
-            }
-            for (const m of v.memories) {
-                const li = document.createElement("li");
-                li.textContent = m;
-                mem.appendChild(li);
-            }
-        }
-    }
-}
-
-function updateHUD(run) {
-    const sim = run.sim, m = sim.mind;
-    const sig = [sim.day(), sim.phaseName(), m.statusText, m.accepted, m.discarded,
-        sim.speed, sim.res.food, sim.res.wood, sim.res.stone, sim.res.meals,
-        typeof globalThis.__hearthmindGenerate === "function",
-        run.selected ? run.selected.id : -1].join("|");
-    const needSel = run.selected != null;
-    if (sig === run.hudCache && !needSel) return;
-    run.hudCache = sig;
-
-    const chip = $("mind-chip");
-    if (chip) {
-        chip.textContent = (typeof globalThis.__hearthmindGenerate === "function")
-            ? "minds: test harness" : m.statusText;
-        chip.className = "chip " +
-            (m.status === "ready" ? "on" : m.status === "loading" ? "loading" : "off");
-    }
-    for (const [id, sp] of [["btn-pause", 0], ["btn-1x", 1], ["btn-4x", 4]]) {
-        const n = $(id);
-        if (n) n.classList.toggle("selected", sim.speed === sp);
-    }
-    updateMindPanel(run);
-}
-
-function toast(run, msg) {
-    const t = $("toast");
-    if (!t) return;
-    t.textContent = msg;
-    t.style.display = "";
-    if (run.toastTimer) clearTimeout(run.toastTimer);
-    run.toastTimer = setTimeout(() => { t.style.display = "none"; }, 1900);
-}
-
-function doLoad(run) {
-    if (!run.sim.hasSave()) { toast(run, "No saved village"); return; }
-    if (run.sim.loadVillage()) {
-        run.selected = null;
-        for (const k of [...run.tinted]) {
-            const [x, y] = k.split(",").map(Number);
-            run.sim.world.setTint(x, y, 1, 1, 1, 1);
-        }
-        run.tinted.clear();
-        const chronicleEl = $("chronicle-list");
-        if (chronicleEl) {
-            chronicleEl.innerHTML = "";
-            for (const e of run.sim.chronicle) run.sim.onChronicle(e);
-        }
-        run.sim.world.rebuild();
-        toast(run, "Village loaded");
-        run.hudCache = "";
-    } else toast(run, "Save file is corrupt");
-}
-
-// ΓöÇΓöÇ Input ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
-
-function pickVillager(run, e) {
-    const rect = canvas.getBoundingClientRect();
-    const ray = scene.unprojectLocal(e.clientX - rect.left, e.clientY - rect.top);
-    if (!ray) return null;
-    const hit = run.sim.world.raycastCell(ray.origin, ray.dir, 500);
+/** The villager standing nearest the terrain cell under a client pixel (within 1.6 cells). */
+function villagerAt(run, clientX, clientY) {
+    const ray = stage.rayAt(clientX, clientY);
+    const hit = ray && run.sim.world.raycastCell(ray.origin, ray.dir, 500);
     if (!hit) return null;
     let best = null, bestD = 1.6;
     for (const v of run.sim.villagers) {
@@ -722,65 +213,48 @@ function pickVillager(run, e) {
     return best;
 }
 
-function ensureWiring() {
-    if (wired) return;
-    wired = true;
-    ensureScene();
+// ── Actions ─────────────────────────────────────────────────────────────────
 
-    canvas.addEventListener("mousedown", (e) => {
-        if (e.button !== 0 || !activeRun) return;
-        const v = pickVillager(activeRun, e);
-        activeRun.selected = (v && v !== activeRun.selected) ? v : null;
-        applyTints(activeRun);
-        activeRun.hudCache = "";
-    });
-    canvas.addEventListener("wheel", (e) => {
-        if (!activeRun) return;
-        activeRun.camera.zoom = Math.max(0.28, Math.min(1.4, activeRun.camera.zoom * (1 + e.deltaY * 0.06)));
-        applyCamera(activeRun);
-    });
-
-    const bind = (id, fn) => {
-        const n = $(id);
-        if (n) n.addEventListener("click", () => { if (activeRun) fn(activeRun); });
-    };
-    bind("btn-pause", (r) => setSpeed(r, 0));
-    bind("btn-1x", (r) => setSpeed(r, 1));
-    bind("btn-4x", (r) => setSpeed(r, 4));
-    bind("btn-save", (r) => { if (r.sim.saveVillage()) toast(r, "Village saved"); });
-    bind("btn-load", doLoad);
+export function select(run, v) {
+    run.selected = v || null;
+    run.tints.apply(run.selected);
+    run.panelDirty = true;
 }
 
-// ΓöÇΓöÇ Debug ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
-
-function exposeDebug(run) {
-    window.HEARTH = {
-        game: run.sim,
-        world: run.sim.world,
-        scene,
-        TILE, FLAG, MAP_W, MAP_H, HSTEP, DAY_LEN, L_GROUND, L_OVER,
-        projectWorld,
-        projectVillager: (v) => projectVillager(run, v),
-        setSpeed: (sp) => setSpeed(run, sp),
-        get selected() { return run.selected; },
-        get tts() { return run.tts; },
-        debug: {
-            select(v) {
-                run.selected = v;
-                applyTints(run);
-                run.hudCache = "";
-            },
-            teleport(v, x, y) {
-                v.pos = { x, y };
-                v.path = null; v.target = null; v.plannedAct = null; v.commit = null;
-            },
-            forceGoto(v, x, y) {
-                v.override = { until: run.sim.time + 120, action: "idle", target: { x, y } };
-                v.target = null; v.plannedAct = null; v.commit = null;
-            },
-            setNeeds(v, n) { Object.assign(v.needs, n); },
-            setRes(res) { Object.assign(run.sim.res, res); },
-        },
-    };
+export function setSpeed(run, sp) {
+    run.sim.speed = sp;
+    run.panelDirty = true;
 }
 
+function save(run) {
+    if (run.sim.saveVillage()) toast("Village saved");
+}
+
+function load(run) {
+    const sim = run.sim;
+    if (!sim.hasSave()) { toast("No saved village"); return; }
+    if (!sim.loadVillage()) { toast("Save file is corrupt"); return; }
+    run.selected = null;
+    run.tints.clear();
+    wireChronicle(sim);
+    sim.world.rebuild();
+    toast("Village loaded");
+    run.panelDirty = true;
+}
+
+function refreshPanels(run) {
+    run.panelMs = 0;
+    run.panelDirty = false;
+    renderPanels(run.sim, run.selected, !!(voices && voices.enabled));
+}
+
+/** Plugin state for hooks.js. */
+export const internals = {
+    options,
+    get run() { return current; },
+    get stage() { return stage; },
+    get voices() { return voices; },
+    villagerScreen: (v) => villagerScreen(current, v),
+    select: (v) => select(current, v),
+    setSpeed: (sp) => setSpeed(current, sp),
+};

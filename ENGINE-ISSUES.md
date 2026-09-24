@@ -25,7 +25,9 @@ native body bails when `activeCamera()` is null; and `null` for the node is
 rejected by the binding (`got null`). So there is currently no screen-ray
 at all for setCamera apps. `lib/arcade/scene3d.js` `rayAt()` (games/tumble)
 computes the ray in JS with kit `screenRay` meanwhile; switch it back to
-the engine call once one works.
+the engine call once one works. games/farm and games/hearthfolk now pick
+through the same `rayAt()` / `toScreen()` (their orthographic iso cameras
+included; kit `screenRay`/`worldToScreen` handle `mode: 'orthographic'`).
 
 ### Column flex container with a percentage width stretches children to the wrong width (2026-09-24)
 A `display:flex; flex-direction:column` box whose `width` is a percentage
@@ -134,6 +136,19 @@ node. Compare `.id` instead (demos/anim-lab `cameras.js` does).
 With a single clip (or crossfade) on the base track, the animation player's
 `blendState().pos` is an empty array, not `undefined` as
 `docs/animation-api.js` implies. Test for `pos && pos.length`.
+
+### A scene HtmlNode swallows canvas clicks over its whole surface (2026-09-24)
+A `scene.createHtmlNode({ width, height, ... })` billboard takes pointer
+hits over its full layout rect, transparent areas included, and
+`pointer-events: none` in its html does not let them through: a mousedown
+under the billboard never reaches the canvas (not even a window capture
+listener sees it), although `document.elementFromPoint` there answers the
+canvas. Name tags drawn as mostly-empty 360x150 surfaces above people
+therefore block clicks on whatever stands behind them. Repro: games/farm,
+move the player avatar to (22, 14) (its spawn) and `click()` on the Foreman
+at (22, 12): no mousedown on #view. farm's `tests/test_inspect.js` moves the
+avatar aside before clicking. Want: hit-test HtmlNode content, honour
+`pointer-events: none`, or an option to make a node non-interactive.
 
 ## Notes (not bugs)
 

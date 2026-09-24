@@ -5,9 +5,12 @@
 //   world.observe()     serializable, decision-relevant snapshot + alerts
 //   world.actions       map of primitive verbs that mutate the world
 //
-// observe() and actions are the two seams the AI-agent layer (Pass 2) uses:
-// an orchestrator reads observe() to decide, then calls world.actions.* to
-// act. The player and NPC tasks will both go through the same verbs.
+//   world.say(id, text) speak a line (speech.js channels)
+//
+// observe() and actions are the two seams the agent layer uses: the
+// orchestrator reads observe() (through each agent's beliefs) to decide, then
+// calls world.actions.* to act. The player and NPC tasks go through the same
+// verbs.
 
 import {
     GRID, DAY_LENGTH_MS, RATES, REGIONS, PENS,
@@ -19,7 +22,9 @@ import {
 } from './defs.js';
 import { createEnv, stepEnv, envObserve, envAlerts } from './env.js';
 import { createMarket, stepMarket, marketObserve, marketAlerts } from './market.js';
-import { stepPerception, propagateSpeech, SIGHT_RADIUS } from './knowledge.js';
+import { stepPerception, SIGHT_RADIUS } from './knowledge.js';
+import { createSpeech } from './speech.js';
+import { seededRandom } from '/lib/arcade/grid.js';
 
 // ---- life-cycle tuning ------------------------------------------------------
 const YOUNG_MS = 45000;     // age below which an animal is 'young' (no produce)
@@ -34,44 +39,13 @@ const SEED_COST = 3;        // gold deducted when a seed is sown
 const BARN_LOW  = 220;      // barnFeed below this -> "buy more" alert
 const WELL = { level: 450, cap: 600, regen: 30 };   // renewable water source
 
-// ---- speech tuning ----------------------------------------------------------
-// Speech is serialized PER SPEAKER: different individuals can talk at the same
-// time, but one individual never overlaps their own lines (their lines queue on
-// their own channel). A line is held for its REAL Kokoro length when audio is on
-// (reported back when playback starts) or this text estimate when silent, so a
-// speaker's bubble + any worker gating on it track the actual utterance.
-const SPEECH_GAP_MS   = 220;   // brief silence between one speaker's lines
-const SPEECH_MIN_MS   = 850;   // floor so a one-word line still reads
-const SPEECH_PER_WORD = 300;   // ms/word (~Kokoro pace) for the silent estimate
-const SPEECH_LEAD_MS  = 300;   // lead-in
-const SPEECH_SPEAKER_CAP = 4;  // max backlog per speaker before dropping their oldest non-priority line
-const SPEECH_MAX_MS   = 12000; // hard cap so one line can never wedge a speaker's channel
-const REPORT_CAP      = 6;     // most deeds a worker remembers to recap at day's end
-function estimateMs(text) {
-    const words = String(text || '').trim().split(/\s+/).filter(Boolean).length || 1;
-    return Math.max(SPEECH_MIN_MS, words * SPEECH_PER_WORD + SPEECH_LEAD_MS);
-}
-// Normalise a line for equality, so a repeated action doesn't restack the same
-// words and a deed isn't recorded twice in a worker's day-report.
-function normSeg(s) { return String(s == null ? '' : s).trim().replace(/\s+/g, ' ').toLowerCase(); }
-
 function ageStageOf(ms) {
     return ms < YOUNG_MS ? 'young' : ms >= OLD_MS ? 'old' : 'adult';
 }
 
-// Small deterministic RNG so wander/produce jitter is reproducible.
-function mulberry32(seed) {
-    let a = seed >>> 0;
-    return function () {
-        a |= 0; a = (a + 0x6D2B79F5) | 0;
-        let t = Math.imul(a ^ (a >>> 15), 1 | a);
-        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
-}
-
 export function createWorld(opts = {}) {
-    const rng = mulberry32(opts.seed != null ? opts.seed : 1337);
+    // Deterministic RNG so wander/produce jitter is reproducible.
+    const rng = seededRandom(opts.seed != null ? opts.seed : 1337);
 
     const world = {
         cols: GRID.cols,
@@ -95,12 +69,9 @@ export function createWorld(opts = {}) {
         notices: [],      // transient event alerts: { level, who, msg, until }
         log: [],          // recent action results (most recent first)
         dialog: [],       // recent spoken lines: { t, speaker, text } (most recent first)
-        // Per-speaker speech channels — each individual speaks one line at a time
-        // (their own lines queue, never interrupting), DIFFERENT individuals speak
-        // concurrently. say() enqueues; stepSpeech() advances them all. Per-action
-        // narration is kept OFF these channels: workers accumulate deeds via
-        // report() and deliver one end-of-day recap, so a channel never floods.
-        // _emitSpeech is the audio sink app.js installs (drives Kokoro per line).
+        // Per-speaker speech channels (speech.js): each individual speaks one
+        // line at a time, different individuals concurrently. _emitSpeech is
+        // the audio sink the game installs (voice.js drives Kokoro per line).
         speech: { channels: {}, _seq: 0 },   // channels[speakerId] = { queue, active }
         _emitSpeech: null,
         // Morning-briefing queue: an ordered list of worker ids waiting at the
@@ -213,144 +184,8 @@ export function createWorld(opts = {}) {
         return a;
     }
 
-    // ---- speech: per-speaker serialized channel, the TTS hook -------------
-    // say(speakerId, text, opts?) — ENQUEUE a spoken line on the SPEAKER'S OWN
-    // channel. It does NOT speak immediately: stepSpeech() plays each speaker's
-    // lines one at a time, so an individual never overlaps themselves while
-    // different individuals speak concurrently. We never interrupt a line in
-    // progress — a new line just waits its turn; rapid action chatter is kept off
-    // the channel entirely (workers accumulate deeds via report() and recap once),
-    // so the backlog stays short. A line identical to what's already playing or
-    // queued is NOT restacked — the existing one is left to finish, so a repeated
-    // action doesn't stutter. Returns a HANDLE ({ done }) the briefing steps poll.
-    // opts.priority floats a behaviour-gating line ahead of that speaker's chatter
-    // (e.g. the Foreman's order ahead of his market notes) and exempts it from the
-    // backlog drop.
-    function say(speakerId, text, opts) {
-        opts = opts || {};
-        const t = String(text == null ? '' : text);
-        if (!t.trim()) return null;
-        // The scrolling dialog LOG is history — record every line right away.
-        world.dialog.unshift({ t: world.clock.t, speaker: speakerId, text: t });
-        if (world.dialog.length > 24) world.dialog.pop();
-
-        const ch = world.speech.channels[speakerId] ||
-                   (world.speech.channels[speakerId] = { queue: [], active: null });
-        const nt = normSeg(t);
-        // Already saying it, or already queued to say it? Don't restack — let the
-        // existing line finish so a repeated action doesn't restart mid-word.
-        if (ch.active && normSeg(ch.active.text) === nt) {
-            if (opts.priority) ch.active.priority = 1; return ch.active;
-        }
-        const dup = ch.queue.find((q) => normSeg(q.text) === nt);
-        if (dup) { if (opts.priority) dup.priority = 1; return dup; }
-
-        const item = { id: ++world.speech._seq, speakerId, text: t,
-                       priority: opts.priority ? 1 : 0, est: estimateMs(t),
-                       realMs: null, startedAt: null, done: false };
-        ch.queue.push(item);
-        // Bound THIS speaker's backlog so their words can't lag far behind the
-        // action: drop their oldest non-priority pending line on overflow.
-        while (ch.queue.length > SPEECH_SPEAKER_CAP) {
-            const idx = ch.queue.findIndex((x) => !x.priority);
-            if (idx === -1) break;
-            ch.queue.splice(idx, 1)[0].done = true;
-        }
-        return item;
-    }
-
-    // report(workerId, deed) — a worker REMEMBERS something it did instead of
-    // narrating it the moment it happens. Deeds accumulate (deduped, bounded) on
-    // the worker and are delivered as ONE end-of-day recap (deliverReport), so the
-    // farm isn't a running commentary and no channel piles up with per-action
-    // chatter. No-op for non-workers (e.g. the player, who speaks in the moment).
-    function report(workerId, deed) {
-        const t = String(deed == null ? '' : deed).trim();
-        if (!t) return;
-        const npc = world.npcs.find((n) => n.id === workerId);
-        if (!npc) return;
-        if (!npc.report) npc.report = [];
-        const nt = normSeg(t);
-        if (npc.report.some((s) => normSeg(s) === nt)) return;   // a deed counts once
-        npc.report.push(t);
-        while (npc.report.length > REPORT_CAP) npc.report.shift();
-    }
-
-    // deliverReport(workerId) — speak the worker's accumulated day-recap as a
-    // single line (addressed to the Foreman) and clear it. Returns the spoken
-    // handle, or null if they did nothing worth reporting.
-    function deliverReport(workerId) {
-        const npc = world.npcs.find((n) => n.id === workerId);
-        if (!npc || !npc.report || npc.report.length === 0) return null;
-        const recap = npc.report.join(' ');
-        npc.report = [];
-        return say(workerId, recap);
-    }
-
-    // The Foreman is an entity too (not in world.npcs), so his lines bubble over
-    // the command post. setBubble/clearBubble drive whichever entity is active.
-    function setBubble(speakerId, text, until) {
-        const npc = world.npcs.find((n) => n.id === speakerId);
-        if (npc) npc.speech = { text, until };
-        else if (world.foreman && world.foreman.id === speakerId) {
-            world.foreman.speech = { text, until };
-        }
-    }
-    function clearBubble(speakerId) {
-        const npc = world.npcs.find((n) => n.id === speakerId);
-        if (npc) npc.speech = null;
-        else if (world.foreman && world.foreman.id === speakerId) world.foreman.speech = null;
-    }
-
-    // Advance EVERY speaker channel once per step(): retire each speaker's active
-    // line when its time is up, then start their next queued line (priority first)
-    // and drive its audio. Channels are independent, so several people can be
-    // mid-sentence at once; each line is held for the real utterance length
-    // (learned when audio playback starts) or the text estimate when silent, so a
-    // speaker's bubble + audio + any worker waiting on it all end together.
-    function stepSpeech() {
-        const now = world.clock.t;
-        const chans = world.speech.channels;
-        for (const speakerId of Object.keys(chans)) {
-            const ch = chans[speakerId];
-            if (ch.active) {
-                const a = ch.active;
-                const dur = (a.realMs != null) ? a.realMs : a.est;
-                if (now >= a.startedAt + dur + SPEECH_GAP_MS || now >= a.startedAt + SPEECH_MAX_MS) {
-                    clearBubble(speakerId);
-                    a.done = true;
-                    ch.active = null;
-                } else {
-                    setBubble(speakerId, a.text, now + 1000);   // keep the bubble lit
-                    continue;
-                }
-            }
-            if (!ch.active && ch.queue.length) {
-                let idx = 0;
-                for (let i = 1; i < ch.queue.length; i++) {
-                    if (ch.queue[i].priority > ch.queue[idx].priority) idx = i;
-                }
-                const item = ch.queue.splice(idx, 1)[0];
-                if (item.done) continue;   // dropped while queued
-                item.startedAt = now;
-                ch.active = item;
-                setBubble(speakerId, item.text, now + 1000);
-                // Word of mouth: the moment a line is spoken, every agent within
-                // earshot of the speaker absorbs what the speaker knows. This is
-                // the ONLY channel by which second-hand knowledge travels.
-                propagateSpeech(world, speakerId);
-                // Voice THIS speaker's line. onStart reports its real length the
-                // moment playback begins, so we hold it to match the audio.
-                if (typeof world._emitSpeech === 'function') {
-                    try {
-                        world._emitSpeech(speakerId, item.text, (sec) => {
-                            if (ch.active === item && sec > 0) item.realMs = sec * 1000;
-                        });
-                    } catch (e) {}
-                }
-            }
-        }
-    }
+    const speech = createSpeech(world);
+    const say = speech.say;
 
     // ---- simulation step -------------------------------------------------
     function step(dt) {
@@ -517,7 +352,7 @@ export function createWorld(opts = {}) {
             }
         }
 
-        // NPCs: task executor (app.js) drives any npc with a task; the ones
+        // NPCs: the task executor (tasks.js) drives any npc with a task; the ones
         // without one fall back to a gentle idle wander. Expire speech bubbles
         // and integrate worker stamina/energy from the current state.
         for (const n of world.npcs) {
@@ -535,8 +370,8 @@ export function createWorld(opts = {}) {
         // on and the HUD reflects. Runs AFTER positions settle so sight is current.
         stepPerception(world);
 
-        // Drive the serialized speech channel: one line audible/visible at a time.
-        stepSpeech();
+        // Drive the per-speaker speech channels.
+        speech.step();
     }
 
     // Stamina/energy dynamics keyed off the worker's state (set by the task
@@ -972,8 +807,8 @@ export function createWorld(opts = {}) {
     world.observe = observe;
     world.actions = actions;
     world.say = say;
-    world.report = report;                 // worker remembers a deed (recapped at dusk)
-    world.deliverReport = deliverReport;   // speak + clear a worker's day-recap
+    world.report = speech.report;                 // worker remembers a deed (recapped at dusk)
+    world.deliverReport = speech.deliverReport;   // speak + clear a worker's day-recap
     world.awardWork = awardWork;   // XP seam the task executor (tasks.js) calls
     return world;
 }

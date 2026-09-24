@@ -20,6 +20,7 @@ import {
 import { WORKER, STATIONS } from './defs.js';
 import { stationChores, stationById, assignStations } from './stations.js';
 import { believedObserve, nearStation } from './knowledge.js';
+import { SELLABLE } from './market.js';
 
 const BOSS = 'Foreman';   // orchestrator's speaker label in the dialog feed
 
@@ -57,7 +58,6 @@ const BARN_TARGET  = 600;
 const BARN_LOW     = 250;
 const SELL_PILE    = 6;
 const ANIMAL_BUY_GOLD = 600;
-const SELLABLE = ['eggs', 'milk', 'wool', 'crops'];
 
 function manageEconomy(world, o) {
     const r = world.resources;

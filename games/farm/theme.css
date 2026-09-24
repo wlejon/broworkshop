@@ -237,6 +237,8 @@
     z-index: 6;
     pointer-events: auto;
 }
+.statsheet[hidden] { display: none; }
+.ss-note { width: auto; color: #9bb592; }
 .ss-head { display: flex; align-items: center; gap: 8px; }
 .ss-swatch {
     width: 16px; height: 16px; border-radius: 50%;
