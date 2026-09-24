@@ -210,7 +210,7 @@ export function applySSR(scene, cfg, on) {
 
 /**
  * Build everything reflection-related that is scene geometry rather than
- * render state. Called from app.js after buildScene and BEFORE bindHud, so
+ * render state. Called from lab.js after buildScene and BEFORE bindHud, so
  * the HUD's first applyPost has real nodes to talk to.
  */
 export function buildReflectionRig(scene, handles) {

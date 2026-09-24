@@ -12,7 +12,7 @@
 //          onto a receding avenue of pillars marching to z = -60, plus a near
 //          foreground crate at z = +9, so focus distance has something to
 //          sweep through.
-//   SSR /  reflection probes (chunk 2) need a large flat floor slab and a flat
+//   SSR /  reflection probes need a large flat floor slab and a flat
 //   probes back wall with the metal props in front of them.
 //   LUT /  tonemap need saturated, varied albedo, so the roughness sweep is
 //          tinted rather than gray.
@@ -39,8 +39,8 @@ export function buildScene(scene) {
 
     // --- Ground ---------------------------------------------------------------
     // One big rough plane, plus a polished slab in the middle of the courtyard.
-    // The slab is deliberately smooth and only mildly metallic: it is the
-    // surface chunk 2's SSR pass will mirror the props in.
+    // The slab is smooth and only mildly metallic, so SSR tints it with the
+    // props; reflections.js lays the true mirror strip in front of it.
     scene.createMesh({
         mesh: 'plane',
         halfW: 80, halfD: 80,
@@ -79,8 +79,8 @@ export function buildScene(scene) {
         color: PLASTER, metallic: 0, roughness: 0.85,
     });
 
-    // Side walls. These are the flat vertical surfaces a reflection probe
-    // (chunk 2) will capture, so they stay unbroken.
+    // Side walls: the flat vertical surfaces the reflection probe captures and
+    // the wall decals land on, so they stay unbroken.
     for (const sx of [-1, 1]) {
         box(scene, {
             halfW: 0.4, halfH: WALL_H, halfD: 7,
@@ -224,7 +224,6 @@ export function buildScene(scene) {
     // the whole point of the fog section in the HUD.
     for (let i = 0; i < 8; ++i) {
         const z = -17 - i * 6;
-        const dim = 1 - i * 0.05;
         for (const sx of [-1, 1]) {
             scene.createMesh({
                 mesh: 'cylinder',
@@ -246,7 +245,6 @@ export function buildScene(scene) {
                 color: STONE_DARK, metallic: 0, roughness: 0.8,
             });
         }
-        handles.depthMarkers.push({ z, dim });
     }
 
     // Distance markers straight down the center line: small bright cubes at a
@@ -261,8 +259,7 @@ export function buildScene(scene) {
     }
 
     // --- Lights ---------------------------------------------------------------
-    // Shadow atlas budget is 16 tiles: 4 directional cascades + 1 spot tile
-    // here, leaving plenty of headroom for chunk 2/3 to add more.
+    // Shadow atlas budget is 16 tiles: 4 directional cascades + 1 spot tile.
     const sun = scene.createLight({
         type: 'directional',
         position: [-8, 14, 6],
@@ -316,23 +313,6 @@ export function buildScene(scene) {
     });
     spot.castsShadow = true;
     handles.lights.spot = spot;
-
-    // Subtle sway so foliage-style vertex wind is wired even though nothing in
-    // this scene bends yet — chunk 3 can hang shader work off it.
-    scene.setWind({ direction: [1, 0, 0.2], strength: 0.0, frequency: 1.2 });
-
-    // CHUNK 2: decals (scene.createDecal) belong here — the polished floor slab
-    // `handles.floorSlab` and the plaster side walls are the intended receiver
-    // surfaces, and both are opaque so decals will land on them.
-    // CHUNK 2: reflection probes (scene.createReflectionProbe) — a box roughly
-    // { size: [26, 12, 22], y: 5, z: -4 } covers the courtyard interior and
-    // contains the bounds centers of handles.metals + the smooth end of
-    // handles.spheres.
-    // CHUNK 3: LOD / visibilityRange on the avenue geometry (handles.depthMarkers
-    // and the colonnade above) is the natural demo, since it already spans
-    // z = -17 .. -60. Custom vertex/fragment shaders can attach to
-    // handles.floorSlab, and scene.asTexture() can feed a monitor mesh mounted
-    // on the back wall.
 
     return handles;
 }

@@ -1,193 +1,56 @@
-html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+/* Render Lab — only what the kit does not already style. */
+
+body { background: #000; overflow: hidden; }
 canvas#stage { display: block; width: 100vw; height: 100vh; }
 
-#hud {
-    position: absolute;
-    top: 10px; left: 10px;
-    width: 268px;
-    max-height: calc(100vh - 20px);
-    overflow-y: auto;
-    background: rgba(8, 10, 14, 0.72);
-    color: #cfe;
-    font: 12px system-ui, sans-serif;
-    padding: 10px 12px 12px 12px;
-    border-radius: 7px;
-    border: 1px solid rgba(255,255,255,0.08);
+#hud { width: 330px; gap: 5px; }
+#hud .title h1 { margin: 0; font-size: 14px; font-weight: 600; }
+#hud .readouts { gap: 12px; font-size: 11px; }
+#hud .k-panel { padding: 6px 8px; gap: 4px; }
+#hud .k-panel > h2 label { cursor: pointer; }
+#hud .k-panel > h2 .k-val { min-width: 0; text-transform: none; letter-spacing: 0; font-weight: 400; }
+
+.master {
+    background: rgba(92, 157, 255, 0.10); border: 1px solid rgba(92, 157, 255, 0.30);
+    border-radius: 6px; padding: 5px 7px;
+}
+.master b { color: var(--k-warn); }
+
+.group {
+    margin-top: 6px; padding-bottom: 2px; border-bottom: 1px solid var(--k-border-hi);
+    color: var(--k-warn); font-size: 10px; font-weight: 700; letter-spacing: 1.1px; text-transform: uppercase;
 }
 
-#hud h1 {
-    margin: 0 0 8px 0;
-    font-size: 13px;
-    color: #fff;
-    letter-spacing: 0.4px;
-}
-#hud h1 .fps { float: right; color: #7bed9f; font-weight: normal; font-size: 11px; }
+.hint { color: var(--k-dim); font-size: 11px; line-height: 1.4; font-family: var(--k-font-ui); }
+.hint b { color: var(--k-muted); }
+.hint.foot { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--k-border); }
+code { color: var(--k-value); background: var(--k-input); padding: 0 3px; border-radius: 2px; font-size: 10px; }
 
-#hud section {
-    margin: 8px 0 0 0;
-    padding: 6px 0 2px 0;
-    border-top: 1px solid rgba(255,255,255,0.10);
+/* The SSR-vs-probe explainer: a teaching note, not a control. */
+.note {
+    padding: 5px 7px; border: 1px solid rgba(230, 192, 127, 0.25); border-radius: 5px;
+    background: rgba(230, 192, 127, 0.06); color: var(--k-muted); font-size: 11px; line-height: 1.4;
+    font-family: var(--k-font-ui);
 }
-#hud h2 {
-    margin: 0 0 4px 0;
-    font-size: 12px;
-    color: #9fd6ff;
-    font-weight: 600;
-}
-#hud h2 label { display: inline; margin: 0; }
+.note b { color: var(--k-warn); }
 
-#hud label { display: block; margin: 3px 0; }
-#hud input[type=range] { width: 116px; vertical-align: middle; }
-#hud span.v {
-    color: #7bed9f;
-    display: inline-block;
-    min-width: 42px;
-    text-align: right;
-    font-variant-numeric: tabular-nums;
-}
-#hud select {
-    background: #12161c;
-    color: #cfe;
-    border: 1px solid #2a323c;
-    padding: 1px 3px;
-}
+/* Only the active fog mode's sliders show. */
+.sub { padding-left: 8px; border-left: 2px solid var(--k-border-hi); gap: 4px; }
 
-#hud .master {
-    background: rgba(120, 200, 255, 0.10);
-    border: 1px solid rgba(120, 200, 255, 0.28);
-    border-radius: 5px;
-    padding: 5px 7px;
+/* LOD level cells, one per prop, coloured by the level the renderer drew. */
+.lodgrid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 2px; }
+.lodgrid i {
+    font-style: normal; text-align: center; font-size: 10px; line-height: 15px; border-radius: 2px;
+    background: var(--k-btn); color: #0b0e12; font-weight: 700;
 }
-#hud .master b { color: #ffe08a; }
+.sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; }
+.sw.l0, .lodgrid i.l0 { background: #5ce08a; }
+.sw.l1, .lodgrid i.l1 { background: #f0c14b; }
+.sw.l2, .lodgrid i.l2 { background: #e5573f; }
 
-#hud .sub { padding-left: 8px; border-left: 2px solid rgba(255,255,255,0.10); }
-#hud .sub.off { display: none; }
-
-#hud button {
-    background: #1b222c;
-    color: #cfe;
-    border: 1px solid #34404e;
-    border-radius: 4px;
-    padding: 3px 8px;
-    font: 11px system-ui, sans-serif;
-    margin-top: 4px;
-    cursor: pointer;
+/* The sub-scene renders into this real canvas; asTexture() hands the same
+   output to the monitor mesh in the courtyard. */
+canvas#subscene {
+    display: block; width: 300px; height: 180px;
+    border: 1px solid var(--k-border-hi); border-radius: 4px; background: #05070a;
 }
-#hud button:hover { background: #253040; border-color: #4a5b6e; }
-
-/* The SSR-vs-probe explainer is a teaching note, not a control — it gets its
-   own emphasis so it does not read as another section header. */
-#hud .note {
-    margin: 8px 0 0 0;
-    padding: 6px 7px;
-    background: rgba(255, 224, 138, 0.07);
-    border: 1px solid rgba(255, 224, 138, 0.22);
-    border-radius: 5px;
-    color: #b9c4d1;
-    font-size: 11px;
-    line-height: 1.35;
-}
-#hud .note b { color: #ffe08a; }
-
-/* --- group headings + folding ---------------------------------------------
-   The panel grew past a screenful once chunk 3 landed, so sections fold. The
-   whole body of a section is hidden with one class on the section rather than
-   by wrapping the controls in an extra div — that keeps the markup flat and
-   means a new control is foldable the moment it is added. */
-#hud .group {
-    margin: 12px 0 0 0;
-    padding: 4px 0 3px 0;
-    border-bottom: 1px solid rgba(159, 214, 255, 0.35);
-    color: #ffe08a;
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 1.1px;
-    text-transform: uppercase;
-}
-#hud .group .ghint {
-    float: right;
-    color: #6c7987;
-    font-weight: 400;
-    letter-spacing: 0;
-    text-transform: none;
-}
-
-#hud section > h2 { cursor: pointer; }
-#hud section > h2::before {
-    content: "▾ ";
-    color: #5f7183;
-    font-size: 9px;
-}
-#hud section.folded > h2::before { content: "▸ "; }
-#hud section.folded > *:not(h2) { display: none; }
-
-/* --- live cullStats readout ------------------------------------------------ */
-#hud .stats {
-    display: flex;
-    gap: 6px;
-    margin: 0 0 8px 0;
-    padding: 5px 6px;
-    background: rgba(255,255,255,0.04);
-    border: 1px solid rgba(255,255,255,0.08);
-    border-radius: 5px;
-    font-size: 10px;
-}
-#hud .stats > div { flex: 1; min-width: 0; }
-#hud .stats span { display: block; color: #7d8a99; letter-spacing: 0.3px; }
-#hud .stats b {
-    color: #7bed9f;
-    font-weight: 600;
-    font-variant-numeric: tabular-nums;
-}
-
-/* --- LOD level grid -------------------------------------------------------- */
-#hud .lodgrid {
-    display: grid;
-    grid-template-columns: repeat(6, 1fr);
-    gap: 2px;
-    margin: 5px 0 2px 0;
-}
-#hud .lodgrid i {
-    font-style: normal;
-    text-align: center;
-    font-size: 10px;
-    line-height: 15px;
-    border-radius: 2px;
-    background: #1b222c;
-    color: #0b0e12;
-    font-weight: 700;
-}
-#hud .sw {
-    display: inline-block;
-    width: 8px; height: 8px;
-    border-radius: 2px;
-    vertical-align: baseline;
-}
-#hud .sw.l0, #hud .lodgrid i.l0 { background: #5ce08a; }
-#hud .sw.l1, #hud .lodgrid i.l1 { background: #f0c14b; }
-#hud .sw.l2, #hud .lodgrid i.l2 { background: #e5573f; }
-
-/* --- sub-scene thumbnail ---------------------------------------------------
-   A real canvas with a real layout box, not a preview image: the sub-scene
-   renders into it every frame and asTexture() hands the same output to the
-   monitor mesh in the courtyard. */
-#hud canvas#subscene {
-    display: block;
-    width: 244px;
-    height: 152px;
-    margin: 4px 0 5px 0;
-    border: 1px solid rgba(255,255,255,0.14);
-    border-radius: 4px;
-    background: #05070a;
-}
-
-#hud code {
-    font: 10px ui-monospace, Consolas, monospace;
-    color: #9fd6ff;
-    background: rgba(159,214,255,0.10);
-    padding: 0 3px;
-    border-radius: 2px;
-}
-
-#hud .hint { color: #8b97a6; font-size: 11px; margin-top: 3px; }
-#hud .foot { margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.10); padding-top: 7px; }

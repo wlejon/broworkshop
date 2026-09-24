@@ -15,7 +15,7 @@
 //      `orientFromNormal` below.
 //
 // createDecal takes raw pixel data ({ width, height, data: Uint8Array }), so
-// unlike the colour LUTs in chunk 1 these textures are generated in-process
+// unlike the colour LUTs (a file path) these textures are generated in-process
 // and never touch the filesystem.
 
 // --- procedural textures -----------------------------------------------------
@@ -206,6 +206,7 @@ function orientFromNormal(n, spin) {
 // --- system ------------------------------------------------------------------
 
 let _scene = null;
+let _vp = null;                  // the kit sceneViewport (pick rays)
 const _decals = [];              // { node, kind, size:[x,y,z], tint:[r,g,b] }
 let _cfg = { enabled: true, kind: 'impact', opacity: 1.0, sizeScale: 1.0 };
 let _master = true;              // last master A/B flag pushed by applyDecals
@@ -246,13 +247,16 @@ export function placeAt(point, normal, kind, spin) {
 export function placeFromRay(origin, dir, kind, spin) {
     const hit = _scene.raycast(origin, dir, 240);
     if (!hit) return null;
-    return placeAt(hit.position, hit.normal, kind || _cfg.kind, spin);
+    return placeAt(hit.point, hit.normal, kind || _cfg.kind, spin);
 }
 
-/** Place from canvas-local pixel coordinates (the click path). */
+/**
+ * Place from canvas-local pixel coordinates (the click path). The ray comes
+ * from the kit viewport (JS camera math): SceneGraph.unprojectLocal has no
+ * working form for setCamera scenes (ENGINE-ISSUES.md).
+ */
 export function placeAtPixel(px, py, kind) {
-    const ray = _scene.unprojectLocal(px, py);
-    if (!ray) return null;
+    const ray = _vp.ray(px, py);
     // A pseudo-random roll keeps repeated clicks on the floor from stamping a
     // visibly identical texture every time.
     const spin = (px * 37 + py * 61) % 360;
@@ -290,25 +294,22 @@ export function applyDecals(cfg, on) {
     if (n) n.textContent = `${_decals.length} placed`;
 }
 
-/** Names + labels for the HUD's type selector. */
-export function decalKinds() {
-    return Object.entries(KINDS).map(([id, k]) => [id, k.label]);
-}
-
 /**
  * Build the decal system and stamp a starting set, so the feature is visible
- * before anyone clicks. Receivers are chunk 1's polished floor slab (top at
+ * before anyone clicks. Receivers are the polished floor slab (top at
  * y = 0.10) and the plaster side walls (inner faces at x = ±11.6).
+ * `vp` is the kit sceneViewport.
  */
-export function initDecals(scene, canvas) {
-    _scene = scene;
+export function initDecals(vp) {
+    _vp = vp;
+    _scene = vp.scene;
 
     // Three receiver heights matter here, and contrast decides where a decal
     // actually reads. The courtyard slab is nearly black (#20242a), so dark
     // decals vanish on it; the sunlit outer ground and the tan plaster walls
     // are the surfaces where a dark splat is unmistakable. The pre-placed set
     // is weighted accordingly, with only the contact shadows left on the slab.
-    const SLAB_Y = 0.10;      // polished courtyard slab (chunk 1)
+    const SLAB_Y = 0.10;      // polished courtyard slab
     const GROUND_Y = 0.0;     // the big rough plane outside the slab
     const UP = [0, 1, 0];
 
@@ -349,8 +350,8 @@ export function initDecals(scene, canvas) {
     placeAt([-5.2, 2.9, -11.6], [0, 0, 1], 'impact');
     placeAt([ 6.4, 2.8, -11.6], [0, 0, 1], 'grime');
 
-    // Click-to-place. Left is the only free mouse button in this app — chunk 1
-    // deliberately left it unbound for exactly this.
+    // Click-to-place: the left button is the one the orbit controls leave free.
+    const canvas = vp.canvas;
     canvas.addEventListener('mousedown', (e) => {
         if (e.button !== 0) return;
         e.preventDefault();

@@ -409,6 +409,7 @@ white bar that ignores the dark theme. The pre-kit nav-lab showed it too.
 Cosmetic.
 
 ### A reflection probe's `intensity` cannot be set (2026-09-24)
+**FIXED** in bro 4bb78bc7.
 `ReflectionProbeNode` has `setIntensity`, but the bronze `SceneNode.intensity`
 accessor (`bro_scene_SceneNode_intensity_get/_set` in
 `native_scene_nodes.cpp`) only handles `Type::Light`: on a probe the getter
@@ -437,6 +438,43 @@ off", so null is only a natural guess, but other scene setters accept null
 (`setEnvironment(null)`) and it should too. lib/impostor.js used null and
 broke flora-lab's impostor toggle; it now passes `{}`. Repro:
 `bro-headless demos/flora-lab -e "document.getElementById('stage').getContext('scene').setFog(null)"`.
+
+### bronze: three.js r160 `new THREE.WebGLRenderer()` throws "a number is not a function" (2026-09-24)
+The vendored three.min.js (r160 UMD) that demos/spatial-audio used failed
+its boot smoke in the baseline: constructing the renderer throws
+`TypeError: a number is not a function` at `Wa` (three.min.js 7:369004),
+called from `Ot` / `new to`. The failing call is `$(1)` in
+`...s.setFunc(3),K(!1),$(1),j(t.CULL_FACE),J(0)...` inside the WebGLState
+factory, where `$` is a nested function declaration (`setCullFace`); the
+compiled code resolves that identifier to a number instead of the hoisted
+function, so it looks like a bronze scoping / function-declaration hoisting
+bug with a `$`-named binding in a large minified function. Repro: an app
+folder holding `git show HEAD:demos/spatial-audio/three.min.js` and a
+module script `import "/app/three.min.js"; new THREE.WebGLRenderer({ canvas })`.
+spatial-audio no longer uses three.js (it was rebuilt on bro.scene); no
+other broworkshop app vendors it.
+
+### World-anchored constraints (`body2: -1`) are mirrored: limits, motors, gear/rack drift correction (2026-09-24)
+`PhysicsWorld::createConstraint` (physics_world.cpp) passes the moving body
+as Jolt body1 and the world as body2. Jolt measures a constraint as body2
+relative to body1, so for the `body2: -1` form the API documents
+everything is measured backwards:
+- a slider's `limitMin/limitMax` apply to the NEGATED travel of body1
+  (limits `-2.1..0.1` stop a piston 0.1 m down instead of 2.1 m);
+- a hinge motor's `target` spins body1 the other way;
+- `gear` and `rackAndPinion` read those hinge angles / slider positions
+  (via `constraint1/2`) for their position (drift) correction, so the
+  correction pushes the wrong way. A motor-driven rack jitters by ±0.4 m
+  frame to frame while its velocity reads a steady 0.48 m/s.
+Symmetric limits hide the first two (physics-playground's rack uses ±2.2).
+The fix is probably to hand Jolt `Body::sFixedToWorld` as body1 and the
+body as body2 when `body2` is -1 (Jolt's own samples do this). Workaround
+in demos/mechanical-sandbox (rig.js `hinge`/`slider`): anchor to a static
+frame body as `body1` with the moving part as `body2`. Repro: build a crate
+on `{ type: 'slider', body1: crate, axis: {x:0,y:1,z:0}, limitMin: -0.9,
+limitMax: 3.2 }` and it stops 0.9 m UP. For the rack jitter, build
+demos/mechanical-sandbox's gearbox with world-anchored hinges/slider and
+sample the crate's y every 5 frames.
 
 ## Notes (not bugs)
 

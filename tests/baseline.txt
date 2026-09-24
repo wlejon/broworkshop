@@ -120,7 +120,6 @@ PASS smoke demos/range-selection-lab
 PASS smoke demos/rave-lab 
 FAIL test demos/rave-lab/tests/test_smoke.js rc=1: ASSERTION FAILED: model loaded without error: model error: brosoundml: rave: no config.json under '/tmp/rave/out_z8'
 PASS smoke demos/render-lab 
-FAIL test demos/render-lab/tests/test_smoke.js rc=1: ASSERTION FAILED: probe intensity is live
 PASS smoke demos/sana-lab 
 PASS smoke demos/scene-audio 
 FAIL test demos/scene-audio/tests/test_smoke.js rc=1: ASSERTION FAILED: flyby advances at exactly the chosen speed: 86.39999999999993 vs 43.199999999999996 (tol 0.000001)

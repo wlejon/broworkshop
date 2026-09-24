@@ -1,306 +1,128 @@
-// instances.js — GPU Instanced Mesh and buffer management.
+// instances.js — the crowd: particle arrays, agent meshes and the per-frame
+// instance upload. One InstancedMeshNode draws every agent; setInstances()
+// takes 16 floats each (a row-major 3x4 affine, then an RGBA tint).
 
-import { computeColor } from "./patterns.js";
+import { writeColor } from "./patterns.js";
 
-/**
- * Creates custom 3D geometries for crowd agents using bro Mesh primitives
- */
-export function createAgentMesh(type) {
+export const MESHES = {
+    arrow: 'Arrow jet', fish: 'Boid fish', biped: 'Biped drone',
+    crystal: 'Diamond crystal', capsule: 'Capsule', box: 'Cube',
+};
+
+function hull(positions, indices) {
+    const m = new Mesh({ positions: new Float32Array(positions), indices: new Uint32Array(indices) });
+    m.computeNormals();
+    return m;
+}
+
+/** Agent geometry, nose along +Z (the instance basis points +Z along velocity). */
+export function agentMesh(type) {
     switch (type) {
-        case 'arrow': {
-            // Sleek aerodynamic delta dart
-            const positions = new Float32Array([
-                // Nose
-                0.0, 0.0, 0.9,
-                // Left wing tip
-                -0.65, 0.0, -0.6,
-                // Right wing tip
-                0.65, 0.0, -0.6,
-                // Top keel/cockpit
-                0.0, 0.35, -0.2,
-                // Bottom belly
-                0.0, -0.15, -0.2,
-                // Tail center
-                0.0, 0.0, -0.55
+        case 'arrow':          // delta dart: nose, wing tips, keel, belly, tail
+            return hull([0, 0, 0.9,  -0.65, 0, -0.6,  0.65, 0, -0.6,  0, 0.35, -0.2,  0, -0.15, -0.2,  0, 0, -0.55],
+                [0, 1, 3,  0, 3, 2,  0, 4, 1,  0, 2, 4,  1, 5, 3,  2, 3, 5,  1, 4, 5,  2, 5, 4]);
+        case 'fish':           // head, dorsal, ventral, flanks, tail base + fin
+            return hull([0, 0, 0.8,  0, 0.35, 0.1,  0, -0.25, 0.1,  -0.3, 0, 0,  0.3, 0, 0,  0, 0, -0.5,  0, 0.4, -0.85,  0, -0.3, -0.85],
+                [0, 3, 1,  0, 1, 4,  0, 4, 2,  0, 2, 3,  1, 3, 5,  1, 5, 4,  2, 4, 5,  2, 5, 3,  5, 6, 7]);
+        case 'biped':
+            return Mesh.merge([
+                Mesh.box(0.2, 0.3, 0.15),
+                Mesh.sphere(0.16, 12, 8).translate(0, 0.45, 0),
+                Mesh.cylinder(0.06, 0.25, 8).translate(-0.3, 0.05, 0),
+                Mesh.cylinder(0.06, 0.25, 8).translate(0.3, 0.05, 0),
+                Mesh.cylinder(0.07, 0.3, 8).translate(-0.12, -0.55, 0),
+                Mesh.cylinder(0.07, 0.3, 8).translate(0.12, -0.55, 0),
             ]);
-            const indices = new Uint32Array([
-                // Top surfaces
-                0, 1, 3,
-                0, 3, 2,
-                // Bottom surfaces
-                0, 4, 1,
-                0, 2, 4,
-                // Wing rear
-                1, 5, 3,
-                2, 3, 5,
-                1, 4, 5,
-                2, 5, 4
-            ]);
-            const m = new Mesh({ positions, indices });
-            m.computeNormals();
-            return m;
-        }
-        case 'fish': {
-            // Streamlined boid fish with tail
-            const positions = new Float32Array([
-                // Head
-                0.0, 0.0, 0.8,
-                // Dorsal
-                0.0, 0.35, 0.1,
-                // Ventral
-                0.0, -0.25, 0.1,
-                // Left flank
-                -0.3, 0.0, 0.0,
-                // Right flank
-                0.3, 0.0, 0.0,
-                // Tail base
-                0.0, 0.0, -0.5,
-                // Tail top
-                0.0, 0.4, -0.85,
-                // Tail bottom
-                0.0, -0.3, -0.85
-            ]);
-            const indices = new Uint32Array([
-                0, 3, 1,   0, 1, 4,   0, 4, 2,   0, 2, 3,
-                1, 3, 5,   1, 5, 4,   2, 4, 5,   2, 5, 3,
-                5, 6, 7
-            ]);
-            const m = new Mesh({ positions, indices });
-            m.computeNormals();
-            return m;
-        }
-        case 'biped': {
-            // Stylized robot / biped drone
-            const torso = Mesh.box(0.2, 0.3, 0.15);
-            const head = Mesh.sphere(0.16, 12, 8).translate(0, 0.45, 0);
-            const leftArm = Mesh.cylinder(0.06, 0.25, 8).translate(-0.3, 0.05, 0);
-            const rightArm = Mesh.cylinder(0.06, 0.25, 8).translate(0.3, 0.05, 0);
-            const leftLeg = Mesh.cylinder(0.07, 0.3, 8).translate(-0.12, -0.55, 0);
-            const rightLeg = Mesh.cylinder(0.07, 0.3, 8).translate(0.12, -0.55, 0);
-            return Mesh.merge([torso, head, leftArm, rightArm, leftLeg, rightLeg]);
-        }
-        case 'crystal': {
-            // Tapered diamond crystal
-            return Mesh.octahedron(0.4).scale(1.0, 1.8, 1.0);
-        }
-        case 'capsule': {
-            return Mesh.capsule(0.2, 0.4, 12);
-        }
+        case 'crystal': return Mesh.octahedron(0.4).scale(1.0, 1.8, 1.0);
+        case 'capsule': return Mesh.capsule(0.2, 0.4, 12);
         case 'box':
-        default: {
-            return Mesh.box(0.25, 0.25, 0.35);
-        }
+        default:        return Mesh.box(0.25, 0.25, 0.35);
     }
 }
 
-/**
- * Crowd Manager class for instanced meshes
- */
-export class CrowdManager {
-    constructor(scene, initialCount = 10000, initialMeshType = 'arrow') {
+function particles(count) {
+    const f = () => new Float32Array(count);
+    const P = {
+        count, px: f(), py: f(), pz: f(), vx: f(), vy: f(), vz: f(),
+        phase: f(), baseRadius: f(), baseAngle: f(),
+    };
+    for (let i = 0; i < count; i++) {
+        // Radial spread through a ball of radius 20.
+        const r = Math.sqrt(Math.random()) * 20.0;
+        const th = Math.random() * Math.PI * 2, ph = (Math.random() - 0.5) * Math.PI;
+        P.px[i] = Math.cos(th) * Math.cos(ph) * r;
+        P.py[i] = Math.sin(ph) * r;
+        P.pz[i] = Math.sin(th) * Math.cos(ph) * r;
+        P.vx[i] = (Math.random() - 0.5) * 4.0;
+        P.vy[i] = (Math.random() - 0.5) * 4.0;
+        P.vz[i] = (Math.random() - 0.5) * 4.0;
+        P.phase[i] = Math.random() * Math.PI * 2;
+        P.baseRadius[i] = 0.2 + 0.8 * Math.random();
+        P.baseAngle[i] = Math.random() * Math.PI * 2;
+    }
+    return P;
+}
+
+export class Crowd {
+    constructor(scene, count, meshType) {
         this.scene = scene;
-        this.count = initialCount;
-        this.meshType = initialMeshType;
+        this.meshType = meshType;
         this.node = null;
-
-        // Particle dynamics arrays
-        this.particles = {
-            count: this.count,
-            px: new Float32Array(this.count),
-            py: new Float32Array(this.count),
-            pz: new Float32Array(this.count),
-            vx: new Float32Array(this.count),
-            vy: new Float32Array(this.count),
-            vz: new Float32Array(this.count),
-            phase: new Float32Array(this.count),
-            baseRadius: new Float32Array(this.count),
-            baseAngle: new Float32Array(this.count),
-            origX: new Float32Array(this.count),
-            origZ: new Float32Array(this.count)
-        };
-
-        // 16 floats per instance (4x3 affine rows + RGBA color)
-        this.instanceBuffer = new Float32Array(this.count * 16);
-
-        this.initParticlePositions();
-        this.rebuildNode();
+        this.setCount(count);
     }
 
-    initParticlePositions() {
-        const p = this.particles;
-        for (let i = 0; i < this.count; i++) {
-            // Uniform spherical / radial spread
-            const r = Math.pow(Math.random(), 0.5) * 20.0;
-            const theta = Math.random() * Math.PI * 2;
-            const phi = (Math.random() - 0.5) * Math.PI;
+    get count() { return this.particles.count; }
 
-            p.px[i] = Math.cos(theta) * Math.cos(phi) * r;
-            p.py[i] = Math.sin(phi) * r;
-            p.pz[i] = Math.sin(theta) * Math.cos(phi) * r;
-
-            p.vx[i] = (Math.random() - 0.5) * 4.0;
-            p.vy[i] = (Math.random() - 0.5) * 4.0;
-            p.vz[i] = (Math.random() - 0.5) * 4.0;
-
-            p.phase[i] = Math.random() * Math.PI * 2;
-            p.baseRadius[i] = 0.2 + 0.8 * Math.random();
-            p.baseAngle[i] = Math.random() * Math.PI * 2;
-
-            p.origX[i] = p.px[i];
-            p.origZ[i] = p.pz[i];
-        }
-    }
-
-    rebuildNode() {
-        if (this.node) {
-            this.node.destroy();
-            this.node = null;
-        }
-
-        const mesh = createAgentMesh(this.meshType);
-        this.node = this.scene.createInstancedMesh({
-            mesh,
-            roughness: 0.35,
-            metalness: 0.15
-        });
-
-        this.node.setInstances(this.instanceBuffer);
-    }
-
-    setCount(newCount) {
-        if (newCount === this.count) return;
-
-        this.count = newCount;
-        this.particles = {
-            count: this.count,
-            px: new Float32Array(this.count),
-            py: new Float32Array(this.count),
-            pz: new Float32Array(this.count),
-            vx: new Float32Array(this.count),
-            vy: new Float32Array(this.count),
-            vz: new Float32Array(this.count),
-            phase: new Float32Array(this.count),
-            baseRadius: new Float32Array(this.count),
-            baseAngle: new Float32Array(this.count),
-            origX: new Float32Array(this.count),
-            origZ: new Float32Array(this.count)
-        };
-
-        this.instanceBuffer = new Float32Array(this.count * 16);
-        this.initParticlePositions();
-        this.rebuildNode();
+    /** Re-seed the crowd at a new size (a fresh buffer and particles). */
+    setCount(n) {
+        if (this.particles && n === this.particles.count) return;
+        this.particles = particles(n);
+        this.buffer = new Float32Array(n * 16);
+        this.rebuild();
     }
 
     setMeshType(type) {
-        if (this.meshType === type) return;
+        if (type === this.meshType) return;
         this.meshType = type;
-        this.rebuildNode();
+        this.rebuild();
+    }
+
+    rebuild() {
+        if (this.node) this.node.destroy();
+        this.node = this.scene.createInstancedMesh({ mesh: agentMesh(this.meshType), roughness: 0.35, metallic: 0.15 });
+        this.node.setInstances(this.buffer);
     }
 
     /**
-     * Compute 3x3 rotation matrix pointing forward along velocity vector
+     * Fill the instance buffer from the particles and upload it. `orient`
+     * builds a basis with +Z along the velocity; otherwise agents keep the
+     * identity rotation. No per-instance allocation.
      */
-    computeLookRotation(vx, vy, vz, scale, outMatrix) {
-        const len = Math.hypot(vx, vy, vz);
-        if (len < 1e-4) {
-            // Identity * scale
-            outMatrix[0] = scale; outMatrix[1] = 0;     outMatrix[2] = 0;
-            outMatrix[3] = 0;     outMatrix[4] = scale; outMatrix[5] = 0;
-            outMatrix[6] = 0;     outMatrix[7] = 0;     outMatrix[8] = scale;
-            return;
-        }
-
-        // Forward (+Z)
-        const fX = vx / len;
-        const fY = vy / len;
-        const fZ = vz / len;
-
-        // Up reference (+Y)
-        let upX = 0, upY = 1, upZ = 0;
-        if (Math.abs(fY) > 0.98) {
-            upX = 1; upY = 0; upZ = 0;
-        }
-
-        // Right = Cross(up, forward)
-        let rX = upY * fZ - upZ * fY;
-        let rY = upZ * fX - upX * fZ;
-        let rZ = upX * fY - upY * fX;
-        const rLen = Math.hypot(rX, rY, rZ) || 1;
-        rX /= rLen; rY /= rLen; rZ /= rLen;
-
-        // True Up = Cross(forward, right)
-        const uX = fY * rZ - fZ * rY;
-        const uY = fZ * rX - fX * rZ;
-        const uZ = fX * rY - fY * rX;
-
-        // Row 0 (X): rX, uX, fX
-        outMatrix[0] = rX * scale;
-        outMatrix[1] = uX * scale;
-        outMatrix[2] = fX * scale;
-
-        // Row 1 (Y): rY, uY, fY
-        outMatrix[3] = rY * scale;
-        outMatrix[4] = uY * scale;
-        outMatrix[5] = fY * scale;
-
-        // Row 2 (Z): rZ, uZ, fZ
-        outMatrix[6] = rZ * scale;
-        outMatrix[7] = uZ * scale;
-        outMatrix[8] = fZ * scale;
-    }
-
-    /**
-     * Updates the 16-float buffer per instance and uploads to GPU
-     */
-    updateBuffers(config, colorScheme, orientToVelocity) {
+    upload(scale, scheme, orient) {
         const { count, px, py, pz, vx, vy, vz, phase } = this.particles;
-        const buf = this.instanceBuffer;
-        const scale = config.scale;
-        const rotMat = new Float32Array(9);
-
-        let ptr = 0;
-        for (let i = 0; i < count; i++) {
-            const x = px[i], y = py[i], z = pz[i];
+        const b = this.buffer;
+        for (let i = 0, o = 0; i < count; i++, o += 16) {
             const dx = vx[i], dy = vy[i], dz = vz[i];
             const speed = Math.hypot(dx, dy, dz);
-
-            if (orientToVelocity) {
-                this.computeLookRotation(dx, dy, dz, scale, rotMat);
+            if (orient && speed > 1e-4) {
+                const fx = dx / speed, fy = dy / speed, fz = dz / speed;
+                // right = up x forward (up = +Y, or +X when flying vertically)
+                const flat = Math.abs(fy) <= 0.98;
+                let rx = flat ? fz : 0, ry = flat ? 0 : -fz, rz = flat ? -fx : fy;
+                const rl = Math.hypot(rx, ry, rz) || 1;
+                rx /= rl; ry /= rl; rz /= rl;
+                const ux = fy * rz - fz * ry, uy = fz * rx - fx * rz, uz = fx * ry - fy * rx;
+                b[o] = rx * scale; b[o + 1] = ux * scale; b[o + 2] = fx * scale;
+                b[o + 4] = ry * scale; b[o + 5] = uy * scale; b[o + 6] = fy * scale;
+                b[o + 8] = rz * scale; b[o + 9] = uz * scale; b[o + 10] = fz * scale;
             } else {
-                rotMat[0] = scale; rotMat[1] = 0;     rotMat[2] = 0;
-                rotMat[3] = 0;     rotMat[4] = scale; rotMat[5] = 0;
-                rotMat[6] = 0;     rotMat[7] = 0;     rotMat[8] = scale;
+                b[o] = scale; b[o + 1] = 0; b[o + 2] = 0;
+                b[o + 4] = 0; b[o + 5] = scale; b[o + 6] = 0;
+                b[o + 8] = 0; b[o + 9] = 0; b[o + 10] = scale;
             }
-
-            const [cr, cg, cb, ca] = computeColor(colorScheme, i, count, speed, x, y, z, phase[i]);
-
-            // Row 0: r00, r01, r02, tx
-            buf[ptr++] = rotMat[0];
-            buf[ptr++] = rotMat[1];
-            buf[ptr++] = rotMat[2];
-            buf[ptr++] = x;
-
-            // Row 1: r10, r11, r12, ty
-            buf[ptr++] = rotMat[3];
-            buf[ptr++] = rotMat[4];
-            buf[ptr++] = rotMat[5];
-            buf[ptr++] = y;
-
-            // Row 2: r20, r21, r22, tz
-            buf[ptr++] = rotMat[6];
-            buf[ptr++] = rotMat[7];
-            buf[ptr++] = rotMat[8];
-            buf[ptr++] = z;
-
-            // Color: r, g, b, a
-            buf[ptr++] = cr;
-            buf[ptr++] = cg;
-            buf[ptr++] = cb;
-            buf[ptr++] = ca;
+            b[o + 3] = px[i]; b[o + 7] = py[i]; b[o + 11] = pz[i];
+            writeColor(scheme, i, count, speed, px[i], py[i], pz[i], phase[i], b, o + 12);
         }
-
-        if (this.node) {
-            this.node.setInstances(buf);
-        }
+        this.node.setInstances(b);
     }
 }

@@ -2,85 +2,72 @@
 <html>
 <head>
     <title>Render Lab</title>
+    <link rel="stylesheet" href="/lib/kit/kit.css">
     <link rel="stylesheet" href="/app/style.css">
 </head>
 <body>
     <canvas id="stage"></canvas>
 
-    <div id="hud">
-        <h1>Render Lab <span id="fps" class="fps">—</span></h1>
+    <div class="k-hud" id="hud">
+        <div class="k-row title">
+            <h1>Render Lab</h1><span class="k-spacer"></span><span class="k-val" id="fps">—</span>
+        </div>
 
-        <!-- Live cullStats() readout. Every number here comes from the last
-             RENDERED frame, which is why it is the honest place to watch the
-             frustum-culling and shadow-cache toggles do their work. -->
-        <div class="stats" id="statsRow">
-            <div><span>meshes</span><b id="stMesh">—</b></div>
-            <div><span>decals</span><b id="stDecal">—</b></div>
-            <div><span>shadow tiles</span><b id="stTiles">—</b></div>
+        <!-- cullStats() of the last RENDERED frame: where the culling and
+             shadow-cache switches show their work. -->
+        <div class="k-stats readouts">
+            <span>meshes <b id="stMesh">—</b></span>
+            <span>decals <b id="stDecal">—</b></span>
+            <span>shadow tiles <b id="stTiles">—</b></span>
         </div>
 
         <div class="master">
-            <label><input type="checkbox" id="masterPost" checked>
-                <b>A/B — whole post stack</b></label>
-            <div class="hint" id="masterHint">on: your settings · off: raw forward render</div>
+            <label class="k-field"><input type="checkbox" id="masterPost" checked>
+                <b>A/B: whole post stack</b> <span class="dim">(Space)</span></label>
+            <div class="hint" id="masterHint"></div>
         </div>
 
-        <div class="group">Post-processing<span class="ghint">click a heading to fold</span></div>
+        <div class="group">Post-processing</div>
 
-        <!-- SSAO ------------------------------------------------------------ -->
-        <section>
+        <div class="k-panel fold">
             <h2><label><input type="checkbox" id="ssaoOn" checked> SSAO</label></h2>
-            <label>Radius <input type="range" id="ssaoRadius" min="0.05" max="3" step="0.05" value="0.7">
-                <span class="v" id="ssaoRadiusV"></span></label>
-            <label>Intensity <input type="range" id="ssaoIntensity" min="0" max="3" step="0.05" value="1.3">
-                <span class="v" id="ssaoIntensityV"></span></label>
-            <label>Bias <input type="range" id="ssaoBias" min="0" max="0.2" step="0.002" value="0.025">
-                <span class="v" id="ssaoBiasV"></span></label>
-        </section>
+            <label class="k-field"><span>Radius</span><input type="range" id="ssaoRadius" min="0.05" max="3" step="0.05" value="0.7"><span class="k-val" id="ssaoRadiusV"></span></label>
+            <label class="k-field"><span>Intensity</span><input type="range" id="ssaoIntensity" min="0" max="3" step="0.05" value="1.3"><span class="k-val" id="ssaoIntensityV"></span></label>
+            <label class="k-field"><span>Bias</span><input type="range" id="ssaoBias" min="0" max="0.2" step="0.002" value="0.025"><span class="k-val" id="ssaoBiasV"></span></label>
+        </div>
 
-        <!-- Depth of field -------------------------------------------------- -->
-        <section>
+        <div class="k-panel fold">
             <h2><label><input type="checkbox" id="dofOn"> Depth of field</label></h2>
-            <label>Focus dist <input type="range" id="dofDistance" min="1" max="80" step="0.5" value="14">
-                <span class="v" id="dofDistanceV"></span></label>
-            <label>Focus range <input type="range" id="dofRange" min="0.5" max="30" step="0.5" value="4">
-                <span class="v" id="dofRangeV"></span></label>
-            <label>Max blur <input type="range" id="dofBlur" min="0" max="12" step="0.25" value="5">
-                <span class="v" id="dofBlurV"></span></label>
-        </section>
+            <label class="k-field"><span>Focus dist</span><input type="range" id="dofDistance" min="1" max="80" step="0.5" value="14"><span class="k-val" id="dofDistanceV"></span></label>
+            <label class="k-field"><span>Focus range</span><input type="range" id="dofRange" min="0.5" max="30" step="0.5" value="4"><span class="k-val" id="dofRangeV"></span></label>
+            <label class="k-field"><span>Max blur</span><input type="range" id="dofBlur" min="0" max="12" step="0.25" value="5"><span class="k-val" id="dofBlurV"></span></label>
+        </div>
 
-        <!-- Bloom ----------------------------------------------------------- -->
-        <section>
+        <div class="k-panel fold">
             <h2><label><input type="checkbox" id="bloomOn" checked> Bloom</label></h2>
-            <label>Threshold <input type="range" id="bloomThreshold" min="0.1" max="4" step="0.05" value="1.1">
-                <span class="v" id="bloomThresholdV"></span></label>
-            <label>Intensity <input type="range" id="bloomIntensity" min="0" max="2" step="0.02" value="0.7">
-                <span class="v" id="bloomIntensityV"></span></label>
-            <label>Blur <input type="range" id="bloomStrength" min="0.5" max="6" step="0.1" value="2.0">
-                <span class="v" id="bloomStrengthV"></span></label>
-        </section>
+            <label class="k-field"><span>Threshold</span><input type="range" id="bloomThreshold" min="0.1" max="4" step="0.05" value="1.1"><span class="k-val" id="bloomThresholdV"></span></label>
+            <label class="k-field"><span>Intensity</span><input type="range" id="bloomIntensity" min="0" max="2" step="0.02" value="0.7"><span class="k-val" id="bloomIntensityV"></span></label>
+            <label class="k-field"><span>Blur</span><input type="range" id="bloomStrength" min="0.5" max="6" step="0.1" value="2.0"><span class="k-val" id="bloomStrengthV"></span></label>
+        </div>
 
-        <!-- Color LUT ------------------------------------------------------- -->
-        <section>
-            <h2>Color LUT <span class="v" id="lutStatus"></span></h2>
-            <label>Grade
+        <div class="k-panel fold">
+            <h2>Color LUT <span class="k-val" id="lutStatus"></span></h2>
+            <label class="k-field"><span>Grade</span>
                 <select id="lutName">
-                    <option value="">— off —</option>
+                    <option value="">off</option>
                     <option value="neutral">neutral (identity)</option>
                     <option value="warm">warm / teal-orange</option>
                     <option value="cool">cool moonlight</option>
                     <option value="noir">noir</option>
                 </select>
             </label>
-            <label>Amount <input type="range" id="lutAmount" min="0" max="1" step="0.02" value="1">
-                <span class="v" id="lutAmountV"></span></label>
-        </section>
+            <label class="k-field"><span>Amount</span><input type="range" id="lutAmount" min="0" max="1" step="0.02" value="1"><span class="k-val" id="lutAmountV"></span></label>
+        </div>
 
-        <!-- Antialiasing / resolution --------------------------------------- -->
-        <section>
+        <div class="k-panel fold">
             <h2>Antialiasing &amp; resolution</h2>
-            <label><input type="checkbox" id="fxaaOn" checked> FXAA (LDR, last pass)</label>
-            <label>MSAA
+            <label class="k-field"><input type="checkbox" id="fxaaOn" checked> FXAA (LDR, last pass)</label>
+            <label class="k-field"><span>MSAA</span>
                 <select id="msaa">
                     <option value="0">off</option>
                     <option value="2">2x</option>
@@ -88,39 +75,29 @@
                     <option value="8">8x</option>
                 </select>
             </label>
-            <label>Render scale <input type="range" id="renderScale" min="0.5" max="2" step="0.05" value="1">
-                <span class="v" id="renderScaleV"></span></label>
-        </section>
+            <label class="k-field"><span>Render scale</span><input type="range" id="renderScale" min="0.5" max="2" step="0.05" value="1"><span class="k-val" id="renderScaleV"></span></label>
+        </div>
 
         <div class="group">Reflections &amp; decals</div>
 
-        <!-- Reflections ------------------------------------------------------ -->
-        <section>
-            <h2>Screen-space reflections</h2>
-            <label><input type="checkbox" id="ssrOn" checked> SSR</label>
-            <label>Max distance <input type="range" id="ssrDistance" min="1" max="80" step="1" value="45">
-                <span class="v" id="ssrDistanceV"></span></label>
-            <label>Steps <input type="range" id="ssrSteps" min="4" max="256" step="4" value="64">
-                <span class="v" id="ssrStepsV"></span></label>
-            <label>Thickness <input type="range" id="ssrThickness" min="0.02" max="2" step="0.01" value="0.35">
-                <span class="v" id="ssrThicknessV"></span></label>
-            <label>Intensity <input type="range" id="ssrIntensity" min="0" max="2" step="0.02" value="1">
-                <span class="v" id="ssrIntensityV"></span></label>
-            <label>Edge fade <input type="range" id="ssrEdgeFade" min="0" max="0.5" step="0.01" value="0.10">
-                <span class="v" id="ssrEdgeFadeV"></span></label>
-            <div class="hint">Mirror strip at the front of the courtyard is the
-                test surface. Tilt down until the spheres leave the frame — their
-                reflection dies with them. That is the screen-space limit.</div>
-        </section>
+        <div class="k-panel fold">
+            <h2><label><input type="checkbox" id="ssrOn" checked> Screen-space reflections</label></h2>
+            <label class="k-field"><span>Max distance</span><input type="range" id="ssrDistance" min="1" max="80" step="1" value="45"><span class="k-val" id="ssrDistanceV"></span></label>
+            <label class="k-field"><span>Steps</span><input type="range" id="ssrSteps" min="4" max="256" step="4" value="64"><span class="k-val" id="ssrStepsV"></span></label>
+            <label class="k-field"><span>Thickness</span><input type="range" id="ssrThickness" min="0.02" max="2" step="0.01" value="0.35"><span class="k-val" id="ssrThicknessV"></span></label>
+            <label class="k-field"><span>Intensity</span><input type="range" id="ssrIntensity" min="0" max="2" step="0.02" value="1"><span class="k-val" id="ssrIntensityV"></span></label>
+            <label class="k-field"><span>Edge fade</span><input type="range" id="ssrEdgeFade" min="0" max="0.5" step="0.01" value="0.10"><span class="k-val" id="ssrEdgeFadeV"></span></label>
+            <div class="hint">The mirror strip at the front of the courtyard is the
+                test surface. Tilt down until the spheres leave the frame and their
+                reflection dies with them: that is the screen-space limit.</div>
+        </div>
 
-        <section>
-            <h2>Reflection probe <span class="v" id="probeStatus"></span></h2>
-            <label><input type="checkbox" id="probeOn" checked> Probe (box 26×12×22 @ y 5)</label>
-            <label>Intensity <input type="range" id="probeIntensity" min="0" max="3" step="0.05" value="1">
-                <span class="v" id="probeIntensityV"></span></label>
-            <label>Interior fade <input type="range" id="probeInterior" min="0" max="6" step="0.1" value="1.5">
-                <span class="v" id="probeInteriorV"></span></label>
-            <label>Resolution
+        <div class="k-panel fold">
+            <h2><label><input type="checkbox" id="probeOn" checked> Reflection probe</label> <span class="k-val" id="probeStatus"></span></h2>
+            <span class="dim">box 26×12×22 at y 5</span>
+            <label class="k-field"><span>Intensity</span><input type="range" id="probeIntensity" min="0" max="3" step="0.05" value="1"><span class="k-val" id="probeIntensityV"></span></label>
+            <label class="k-field"><span>Interior fade</span><input type="range" id="probeInterior" min="0" max="6" step="0.1" value="1.5"><span class="k-val" id="probeInteriorV"></span></label>
+            <label class="k-field"><span>Resolution</span>
                 <select id="probeRes">
                     <option value="64">64</option>
                     <option value="128">128</option>
@@ -128,56 +105,49 @@
                     <option value="512">512</option>
                 </select>
             </label>
-            <label><input type="checkbox" id="probeBoxProj" checked> Box projection (parallax)</label>
-            <label><input type="checkbox" id="probeBounds"> Show probe bounds</label>
-            <button id="probeRecapture">Re-capture probe</button>
+            <label class="k-field"><input type="checkbox" id="probeBoxProj" checked> Box projection (parallax)</label>
+            <label class="k-field"><input type="checkbox" id="probeBounds"> Show probe bounds</label>
+            <div class="k-row"><button class="small" id="probeRecapture">Re-capture probe</button></div>
             <div class="hint">The chrome sphere is near-black with the probe off:
-                this courtyard has no IBL environment, so a metal has nothing to
+                the courtyard has no IBL environment, so a metal has nothing to
                 reflect until a probe gives it one.</div>
-        </section>
-
-        <div class="note">
-            <b>SSR vs probe.</b> SSR is accurate but screen-bound — only what is
-            on screen reflects, and hits fade at the borders. The probe is stable
-            and works off-screen, but it is a static box-projected cubemap. SSR
-            wins where its ray hits; the probe is the miss fallback. Toggle each
-            alone to see where one gives up and the other takes over.
+            <div class="note"><b>SSR vs probe.</b> SSR is accurate but screen-bound:
+                only what is on screen reflects, and hits fade at the borders. The
+                probe is stable and works off-screen, but it is a static
+                box-projected cubemap. SSR wins where its ray hits; the probe is the
+                miss fallback. Toggle each alone to see where one gives up and the
+                other takes over.</div>
         </div>
 
-        <!-- Decals ----------------------------------------------------------- -->
-        <section>
-            <h2>Projected decals <span class="v" id="decalCount"></span></h2>
-            <label><input type="checkbox" id="decalsOn" checked> Decals</label>
-            <label>Type
+        <div class="k-panel fold">
+            <h2><label><input type="checkbox" id="decalsOn" checked> Projected decals</label> <span class="k-val" id="decalCount"></span></h2>
+            <label class="k-field"><span>Type</span>
                 <select id="decalKind">
                     <option value="impact" selected>impact splat</option>
                     <option value="grime">grime patch</option>
                     <option value="blob">blob shadow</option>
                 </select>
             </label>
-            <label>Opacity <input type="range" id="decalOpacity" min="0" max="1" step="0.02" value="1">
-                <span class="v" id="decalOpacityV"></span></label>
-            <label>Size <input type="range" id="decalSize" min="0.25" max="3" step="0.05" value="1">
-                <span class="v" id="decalSizeV"></span></label>
-            <button id="decalClear">Clear decals</button>
-            <div class="hint"><b>Left-click</b> the scene to stamp one. It
-                raycasts to the surface and orients the projection to the hit
-                normal — walls take them sideways, floors top-down.</div>
-        </section>
+            <label class="k-field"><span>Opacity</span><input type="range" id="decalOpacity" min="0" max="1" step="0.02" value="1"><span class="k-val" id="decalOpacityV"></span></label>
+            <label class="k-field"><span>Size</span><input type="range" id="decalSize" min="0.25" max="3" step="0.05" value="1"><span class="k-val" id="decalSizeV"></span></label>
+            <div class="k-row"><button class="small" id="decalClear">Clear decals</button></div>
+            <div class="hint"><b>Left-click</b> the scene to stamp one. It raycasts
+                to the surface and orients the projection to the hit normal: walls
+                take them sideways, floors top-down.</div>
+        </div>
 
         <div class="group">Atmosphere &amp; grade</div>
 
-        <!-- Fog -------------------------------------------------------------- -->
-        <section>
+        <div class="k-panel fold">
             <h2>Fog</h2>
-            <label>Mode
+            <label class="k-field"><span>Mode</span>
                 <select id="fogMode">
                     <option value="off" selected>off</option>
                     <option value="linear">linear ramp</option>
                     <option value="exp2">exponential² + height</option>
                 </select>
             </label>
-            <label>Color
+            <label class="k-field"><span>Color</span>
                 <select id="fogColor">
                     <option value="0.55,0.60,0.70">cold haze</option>
                     <option value="0.78,0.72,0.62">warm dust</option>
@@ -185,133 +155,100 @@
                     <option value="0.85,0.88,0.92">white-out</option>
                 </select>
             </label>
-            <div id="fogLinear" class="sub">
-                <label>Start <input type="range" id="fogStart" min="0" max="60" step="0.5" value="8">
-                    <span class="v" id="fogStartV"></span></label>
-                <label>End <input type="range" id="fogEnd" min="1" max="140" step="1" value="60">
-                    <span class="v" id="fogEndV"></span></label>
+            <div class="sub k-col" id="fogLinear">
+                <label class="k-field"><span>Start</span><input type="range" id="fogStart" min="0" max="60" step="0.5" value="8"><span class="k-val" id="fogStartV"></span></label>
+                <label class="k-field"><span>End</span><input type="range" id="fogEnd" min="1" max="140" step="1" value="60"><span class="k-val" id="fogEndV"></span></label>
             </div>
-            <div id="fogExp2" class="sub">
-                <label>Density <input type="range" id="fogDensity" min="0" max="0.12" step="0.001" value="0.028">
-                    <span class="v" id="fogDensityV"></span></label>
-                <label>Height falloff <input type="range" id="fogHeight" min="0" max="1" step="0.01" value="0.22">
-                    <span class="v" id="fogHeightV"></span></label>
-                <label>Clear radius <input type="range" id="fogStartDist" min="0" max="40" step="0.5" value="6">
-                    <span class="v" id="fogStartDistV"></span></label>
+            <div class="sub k-col" id="fogExp2">
+                <label class="k-field"><span>Density</span><input type="range" id="fogDensity" min="0" max="0.12" step="0.001" value="0.028"><span class="k-val" id="fogDensityV"></span></label>
+                <label class="k-field"><span>Height falloff</span><input type="range" id="fogHeight" min="0" max="1" step="0.01" value="0.22"><span class="k-val" id="fogHeightV"></span></label>
+                <label class="k-field"><span>Clear radius</span><input type="range" id="fogStartDist" min="0" max="40" step="0.5" value="6"><span class="k-val" id="fogStartDistV"></span></label>
             </div>
-        </section>
+        </div>
 
-        <!-- Tonemap ---------------------------------------------------------- -->
-        <section>
+        <div class="k-panel fold">
             <h2>Tonemap</h2>
-            <label>Curve
+            <label class="k-field"><span>Curve</span>
                 <select id="tmMode">
                     <option value="aces" selected>ACES</option>
                     <option value="reinhard">Reinhard</option>
                     <option value="linear">Linear</option>
                 </select>
             </label>
-            <label>Exposure <input type="range" id="tmExposure" min="0.1" max="4" step="0.05" value="1">
-                <span class="v" id="tmExposureV"></span></label>
-            <label>Ambient <input type="range" id="ambient" min="0" max="0.25" step="0.005" value="0.035">
-                <span class="v" id="ambientV"></span></label>
-        </section>
+            <label class="k-field"><span>Exposure</span><input type="range" id="tmExposure" min="0.1" max="4" step="0.05" value="1"><span class="k-val" id="tmExposureV"></span></label>
+            <label class="k-field"><span>Ambient</span><input type="range" id="ambient" min="0" max="0.25" step="0.005" value="0.035"><span class="k-val" id="ambientV"></span></label>
+        </div>
 
         <div class="group">Geometry detail</div>
 
-        <!-- LOD chains ------------------------------------------------------- -->
-        <section>
-            <h2>LOD chains <span class="v" id="lodCounts"></span></h2>
-            <label><input type="checkbox" id="lodDebug"> Debug colours
-                (<span class="sw l0"></span>0 <span class="sw l1"></span>1
-                 <span class="sw l2"></span>2)</label>
-            <label>Threshold ×<input type="range" id="lodScale" min="0.15" max="3" step="0.05" value="1">
-                <span class="v" id="lodScaleV"></span></label>
+        <div class="k-panel fold">
+            <h2>LOD chains <span class="k-val" id="lodCounts"></span></h2>
+            <label class="k-field"><input type="checkbox" id="lodDebug"> Debug colours
+                <span class="sw l0"></span>0 <span class="sw l1"></span>1 <span class="sw l2"></span>2</label>
+            <label class="k-field"><span>Threshold ×</span><input type="range" id="lodScale" min="0.15" max="3" step="0.05" value="1"><span class="k-val" id="lodScaleV"></span></label>
             <div class="lodgrid" id="lodGrid"></div>
-            <div class="hint">Twelve props, one chain each: 32×24 sphere →
-                10×7 sphere → box, switching at 30 / 55 units. The multiplier
-                scales both thresholds, so you can force every switch from
-                here instead of flying the camera. Levels come from
-                <code>lodLevel</code>, read back per frame — the renderer
-                decides, this panel only reports.</div>
-        </section>
+            <div class="hint">Twelve props, one chain each: 32×24 sphere, 10×7
+                sphere, box, switching at 30 / 55 units. The multiplier scales both
+                thresholds, so every switch can be forced from here instead of by
+                flying the camera. Levels are read back from <code>lodLevel</code>
+                per frame: the renderer decides, this panel only reports.</div>
+        </div>
 
-        <!-- Visibility range -------------------------------------------------- -->
-        <section>
-            <h2>Visibility range</h2>
-            <label><input type="checkbox" id="popOn" checked> Detail / imposter pairs</label>
-            <label>Cutoff <input type="range" id="popCutoff" min="10" max="90" step="1" value="46">
-                <span class="v" id="popCutoffV"></span></label>
-            <label>Margin <input type="range" id="popMargin" min="0" max="10" step="0.25" value="3">
-                <span class="v" id="popMarginV"></span></label>
-            <div class="hint">Eight obelisks, each paired with a flat imposter
-                at the same spot: detail is gated 0→cutoff, imposter
-                cutoff→∞. Unlike LOD this is a hard on/off — drag the cutoff
-                and watch the swap walk down the avenue. Set margin to 0 and
-                park the camera on a boundary to see the strobe the hysteresis
-                exists to prevent.</div>
-        </section>
+        <div class="k-panel fold">
+            <h2><label><input type="checkbox" id="popOn" checked> Visibility range</label></h2>
+            <label class="k-field"><span>Cutoff</span><input type="range" id="popCutoff" min="10" max="90" step="1" value="46"><span class="k-val" id="popCutoffV"></span></label>
+            <label class="k-field"><span>Margin</span><input type="range" id="popMargin" min="0" max="10" step="0.25" value="3"><span class="k-val" id="popMarginV"></span></label>
+            <div class="hint">Eight obelisks, each paired with a flat imposter at the
+                same spot: detail is gated 0 to cutoff, imposter cutoff to ∞. Unlike
+                LOD this is a hard on/off: drag the cutoff and watch the swap walk
+                down the avenue. Set margin to 0 and park the camera on a boundary
+                to see the strobe the hysteresis exists to prevent.</div>
+        </div>
 
         <div class="group">Custom shaders</div>
 
-        <!-- Dissolve ---------------------------------------------------------- -->
-        <section>
+        <div class="k-panel fold">
             <h2><label><input type="checkbox" id="dissolveOn" checked> Dissolve / burn</label></h2>
-            <label>Amount <input type="range" id="dissolveAmount" min="0" max="1" step="0.01" value="0.35">
-                <span class="v" id="dissolveAmountV"></span></label>
-            <label>Edge <input type="range" id="dissolveEdge" min="0.01" max="0.3" step="0.005" value="0.07">
-                <span class="v" id="dissolveEdgeV"></span></label>
-            <label>Noise <input type="range" id="dissolveScale" min="1" max="24" step="0.5" value="9">
-                <span class="v" id="dissolveScaleV"></span></label>
-            <label><input type="checkbox" id="dissolveSweep"> Auto-sweep the front</label>
-            <div class="hint">Fragment hook: value-noise threshold +
-                <code>discard</code>, with an emissive band riding the front.
-                Its shadow stays solid — the fragment chunk never reaches the
-                shared depth-only shadow program.</div>
-        </section>
+            <label class="k-field"><span>Amount</span><input type="range" id="dissolveAmount" min="0" max="1" step="0.01" value="0.35"><span class="k-val" id="dissolveAmountV"></span></label>
+            <label class="k-field"><span>Edge</span><input type="range" id="dissolveEdge" min="0.01" max="0.3" step="0.005" value="0.07"><span class="k-val" id="dissolveEdgeV"></span></label>
+            <label class="k-field"><span>Noise</span><input type="range" id="dissolveScale" min="1" max="24" step="0.5" value="9"><span class="k-val" id="dissolveScaleV"></span></label>
+            <label class="k-field"><input type="checkbox" id="dissolveSweep"> Auto-sweep the front</label>
+            <div class="hint">Fragment hook: value-noise threshold + <code>discard</code>,
+                with an emissive band riding the front. Its shadow stays solid: the
+                fragment chunk never reaches the shared depth-only shadow program.</div>
+        </div>
 
-        <!-- Wave -------------------------------------------------------------- -->
-        <section>
+        <div class="k-panel fold">
             <h2><label><input type="checkbox" id="waveOn" checked> Vertex wave</label></h2>
-            <label>Amplitude <input type="range" id="waveAmp" min="0" max="1.5" step="0.02" value="0.42">
-                <span class="v" id="waveAmpV"></span></label>
-            <label>Frequency <input type="range" id="waveFreq" min="0.2" max="6" step="0.05" value="2.1">
-                <span class="v" id="waveFreqV"></span></label>
-            <label>Speed <input type="range" id="waveSpeed" min="0" max="4" step="0.05" value="1.4">
-                <span class="v" id="waveSpeedV"></span></label>
-            <div class="hint">Vertex hook on an 88×60 plane hung off the right
-                back wall. Normals are rebuilt from the analytic derivative, so
-                the ripple SHADES; the shadow pass runs the same hook, so the
-                shadow ripples too. <code>cullMargin = 1.6</code> keeps the
-                billow from being culled outside the flat plane's AABB.</div>
-        </section>
+            <label class="k-field"><span>Amplitude</span><input type="range" id="waveAmp" min="0" max="1.5" step="0.02" value="0.42"><span class="k-val" id="waveAmpV"></span></label>
+            <label class="k-field"><span>Frequency</span><input type="range" id="waveFreq" min="0.2" max="6" step="0.05" value="2.1"><span class="k-val" id="waveFreqV"></span></label>
+            <label class="k-field"><span>Speed</span><input type="range" id="waveSpeed" min="0" max="4" step="0.05" value="1.4"><span class="k-val" id="waveSpeedV"></span></label>
+            <div class="hint">Vertex hook on an 88×60 plane hung off the right back
+                wall. Normals are rebuilt from the analytic derivative, so the ripple
+                SHADES; the shadow pass runs the same hook, so the shadow ripples
+                too. <code>cullMargin = 1.6</code> keeps the billow from being culled
+                outside the flat plane's AABB.</div>
+        </div>
 
-        <!-- Rim / scanline ----------------------------------------------------- -->
-        <section>
+        <div class="k-panel fold">
             <h2><label><input type="checkbox" id="rimOn" checked> Fresnel rim + scanlines</label></h2>
-            <label>Rim power <input type="range" id="rimPower" min="0.5" max="8" step="0.1" value="3.2">
-                <span class="v" id="rimPowerV"></span></label>
-            <label>Rim gain <input type="range" id="rimGain" min="0" max="6" step="0.05" value="2.2">
-                <span class="v" id="rimGainV"></span></label>
-            <label>Scan freq <input type="range" id="rimScanFreq" min="0" max="200" step="2" value="64">
-                <span class="v" id="rimScanFreqV"></span></label>
-            <label>Scan gain <input type="range" id="rimScanGain" min="0" max="2" step="0.02" value="0.9">
-                <span class="v" id="rimScanGainV"></span></label>
-            <button id="shaderClear">clearShader() on all three</button>
-            <div class="hint">The button strips every custom program; the three
-                props snap back to plain PBR, unchanged in every other respect.
-                The same chunks compile for skinned and instanced meshes too —
-                see demos/anim-lab for the skinned case.</div>
-        </section>
+            <label class="k-field"><span>Rim power</span><input type="range" id="rimPower" min="0.5" max="8" step="0.1" value="3.2"><span class="k-val" id="rimPowerV"></span></label>
+            <label class="k-field"><span>Rim gain</span><input type="range" id="rimGain" min="0" max="6" step="0.05" value="2.2"><span class="k-val" id="rimGainV"></span></label>
+            <label class="k-field"><span>Scan freq</span><input type="range" id="rimScanFreq" min="0" max="200" step="2" value="64"><span class="k-val" id="rimScanFreqV"></span></label>
+            <label class="k-field"><span>Scan gain</span><input type="range" id="rimScanGain" min="0" max="2" step="0.02" value="0.9"><span class="k-val" id="rimScanGainV"></span></label>
+            <div class="k-row"><button class="small" id="shaderClear">clearShader() on all three</button></div>
+            <div class="hint">The button strips every custom program; the three props
+                snap back to plain PBR, unchanged in every other respect. The same
+                chunks compile for skinned and instanced meshes too (demos/anim-lab
+                has the skinned case).</div>
+        </div>
 
         <div class="group">Scene as texture</div>
 
-        <!-- Monitor ------------------------------------------------------------ -->
-        <section>
-            <h2>Live sub-scene <span class="v" id="monitorStatus"></span></h2>
+        <div class="k-panel fold">
+            <h2><label><input type="checkbox" id="monitorOn" checked> Live sub-scene</label> <span class="k-val" id="monitorStatus"></span></h2>
             <canvas id="subscene"></canvas>
-            <label><input type="checkbox" id="monitorOn" checked> Feed the monitor</label>
-            <label>Sub render scale
+            <label class="k-field"><span>Sub render scale</span>
                 <select id="subScale">
                     <option value="0.25">0.25×</option>
                     <option value="0.5">0.5×</option>
@@ -319,38 +256,35 @@
                     <option value="2">2×</option>
                 </select>
             </label>
-            <div class="hint">That thumbnail is a second scene graph on its own
-                canvas with its own camera, lights and post stack.
-                <code>sub.asTexture()</code> → <code>setBaseColorTexture()</code>
-                puts it on the screen bolted to the back wall, live. Its
-                context is created at module scope so it renders BEFORE the
-                courtyard — otherwise the monitor would show last frame.</div>
-        </section>
+            <div class="hint">That thumbnail is a second scene graph on its own canvas
+                with its own camera, lights and post stack. <code>sub.asTexture()</code>
+                into <code>setBaseColorTexture()</code> puts it on the screen bolted to
+                the back wall, live. Its context is created first so it renders
+                BEFORE the courtyard; otherwise the monitor would show last frame.</div>
+        </div>
 
         <div class="group">Culling &amp; debug</div>
 
-        <!-- Culling ------------------------------------------------------------ -->
-        <section>
+        <div class="k-panel fold">
             <h2>Culling</h2>
-            <label><input type="checkbox" id="frustumOn" checked> Frustum culling</label>
-            <label><input type="checkbox" id="shadowCacheOn" checked> Static shadow-tile cache</label>
-            <div class="hint">Both are strictly conservative — pixels are
-                identical either way, only the counters move. Turn frustum
-                culling off and the drawn count jumps to the whole graph. Hold
-                the camera still and the shadow cache reuses tiles
-                (<i>cached</i> climbs, <i>rendered</i> falls to 0); orbit and
-                the directional cascades go back to re-rendering. These two sit
-                OUTSIDE the A/B toggle: they are performance mechanisms, not
-                looks.</div>
-        </section>
+            <label class="k-field"><input type="checkbox" id="frustumOn" checked> Frustum culling</label>
+            <label class="k-field"><input type="checkbox" id="shadowCacheOn" checked> Static shadow-tile cache</label>
+            <div class="hint">Both are strictly conservative: pixels are identical
+                either way, only the counters move. Turn frustum culling off and the
+                drawn count jumps to the whole graph. Hold the camera still and the
+                shadow cache reuses tiles (<i>c</i> climbs, <i>r</i> falls to 0);
+                orbit and the directional cascades re-render. These two sit OUTSIDE
+                the A/B toggle: they are performance mechanisms, not looks.</div>
+        </div>
 
         <div class="hint foot">
             <b>Left-click</b> place decal · <b>Right-drag</b> orbit ·
-            <b>Middle-drag</b> pan · <b>Wheel</b> zoom<br>
-            The avenue runs to z&nbsp;=&nbsp;-60; the sphere row sweeps roughness 0.03→0.95.
+            <b>Middle-drag</b> pan · <b>Wheel</b> zoom · <b>Space</b> A/B<br>
+            The avenue runs to z&nbsp;=&nbsp;-60; the sphere row sweeps roughness 0.03 to 0.95.
         </div>
+        <span id="status" class="dim"></span>
     </div>
 
-    <script type="module" src="/app/app.js"></script>
+    <script type="module" src="/app/main.js"></script>
 </body>
 </html>

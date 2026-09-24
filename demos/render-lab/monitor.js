@@ -13,7 +13,7 @@
 // samples last frame's output — one frame of latency, with no reordering API
 // to fix it afterwards. That is why the sub-scene context is grabbed at MODULE
 // scope here: ES module bodies evaluate before the importing module's body, so
-// this context exists before app.js ever calls getContext on the stage canvas,
+// this context exists before lab.js ever calls getContext on the stage canvas,
 // and the courtyard samples the sub-scene's CURRENT frame.
 //
 // (A scene may also sample itself. Lit meshes give the classic one-frame video
@@ -199,7 +199,7 @@ export function tickMonitor(timeSec) {
 // --- setup --------------------------------------------------------------------
 
 /**
- * Build both halves and link them. Called from app.js after buildScene, but
+ * Build both halves and link them. Called from lab.js after buildScene, but
  * note that the sub-scene CONTEXT already exists by then (module scope) — only
  * its contents are built here.
  */

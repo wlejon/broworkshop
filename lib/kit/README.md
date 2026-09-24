@@ -138,8 +138,9 @@ and test scripts.
 **viewport3d.js** —
 `sceneViewport(canvas, { orbit: { target, dist, fov, near, far }, controls })`
 returns `{ canvas, scene, cam, controls, onFrame(fn), onView(fn),
-reframe(pivot, dist, { yaw, pitch }?) }` and pushes the camera every frame;
-`onView(fn)` may adjust the `setCamera` options before each push (camera
+reframe(pivot, dist, { yaw, pitch }?), ray(px, py) }` and pushes the camera
+every frame; `ray(px, py)` is `screenRay` through a canvas-local pixel of the
+current view; `onView(fn)` may adjust the `setCamera` options before each push (camera
 shake). `orbitRotation(yaw, pitch)` builds an `orbit.rot`. `orbitControls(canvas, cam, { minDist, maxDist,
 zoomRate, orbitButton = 2, panButton = 1, pointerLock, onChange, accept })` alone
 wires the standard input: right-drag orbit, middle-drag pan (pointer-locked),
