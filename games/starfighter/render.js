@@ -1,250 +1,138 @@
-// render.js — 3D vector projection + line-drawing primitives.
-//
-// Coordinate system:
-//   +X right, +Y up, +Z forward (into the screen).
-// The camera sits at the origin, looking toward +Z. World objects are
-// positioned in camera-relative space (the player craft advances forward
-// by translating world objects backward each frame on a rail).
-export const Render = (function() {
-    "use strict";
+// render.js — draws a Flight through a camera: sector backdrop, enemies
+// back to front, bolts, explosions, cockpit frame, reticle, damage flash.
+// Plus the title-screen star tunnel.
 
-    // Field-of-view is a vertical FOV scaling factor: projected_y_px = H/2 - (y/z) * focal.
-    // focal = (H/2) / tan(vfov/2). We target a ~60° vertical FOV for cinematic readability.
-    var VFOV = 60 * Math.PI / 180;
+import { WAVES } from "/app/waves.js";
+import { drawEnemy } from "/app/enemies.js";
+import { RETICLE_Z, PARALLAX } from "/app/flight.js";
 
-    // Near-plane clip (world units). Behind this we cull entirely.
-    var NEAR_Z = 0.5;
+/** Everything for one frame of play. `stars` is the space backdrop. */
+export function drawFlight(ctx, cam, stars, flight) {
+    const W = cam.width(), H = cam.height();
+    cam.setParallax(flight.ship.x * PARALLAX, flight.ship.y * PARALLAX);
+    WAVES[flight.ws.kind].draw(ctx, cam, flight.ws, stars);
 
-    // Current screen dims / derived focal; recomputed per frame via setViewport().
-    var _W = 1024, _H = 768;
-    var _focal = (_H / 2) / Math.tan(VFOV / 2);
-    var _cx = _W / 2, _cy = _H / 2;
+    ctx.lineWidth = 1.5;
+    const far = flight.enemies.slice().sort((a, b) => b.z - a.z);
+    for (const e of far) drawEnemy(ctx, cam, e);
 
-    // Screen-shake & vector jitter (driven by game.js on damage events).
-    var _shakeAmp = 0;   // px
-    var _shakeDecay = 0; // per ms
-    var _jitter = 0;     // px, line endpoint noise
+    drawEnemyBolts(ctx, cam, flight.enemyBolts);
+    drawPlayerBolts(ctx, cam, flight.playerBolts);
+    drawExplosions(ctx, cam, flight.explosions);
+    drawCockpit(ctx, W, H);
+    drawReticle(ctx, cam, flight);
+    cam.drawFlash(ctx);
+}
 
-    // Parallax camera offset in world units. World points are translated by
-    // (-_camX, -_camY) before projection — the arcade sells "looking around"
-    // by sliding the view slightly opposite the yoke. Reticle/HUD uses
-    // projectHud() to stay pinned to screen space.
-    var _camX = 0, _camY = 0;
-
-    function setCamera(cx, cy) { _camX = cx || 0; _camY = cy || 0; }
-
-    function setViewport(W, H) {
-        _W = W; _H = H;
-        _focal = (H / 2) / Math.tan(VFOV / 2);
-        _cx = W / 2; _cy = H / 2;
+function drawEnemyBolts(ctx, cam, bolts) {
+    const trail = 12;
+    for (const b of bolts) {
+        cam.line(ctx, b.x, b.y, b.z, b.x - b.vx * trail, b.y - b.vy * trail, b.z - b.vz * trail, b.color, 1);
     }
+}
 
-    function focal() { return _focal; }
-    function width()  { return _W; }
-    function height() { return _H; }
-
-    // Project a camera-space point to screen pixels. Returns {x,y,z,visible}.
-    // visible=false when behind the near plane. x/y are screen pixels, z is
-    // world-space depth (kept for sorting and depth-fade).
-    function project(x, y, z) {
-        if (z < NEAR_Z) return { x: 0, y: 0, z: z, visible: false };
-        var inv = _focal / z;
-        var sx = _cx + (x - _camX) * inv + (_shakeAmp ? (Math.random() * 2 - 1) * _shakeAmp : 0);
-        var sy = _cy - (y - _camY) * inv + (_shakeAmp ? (Math.random() * 2 - 1) * _shakeAmp : 0);
-        return { x: sx, y: sy, z: z, visible: true };
+/** A streak whose head outruns its tail along wingtip -> reticle. */
+function drawPlayerBolts(ctx, cam, bolts) {
+    for (const b of bolts) {
+        const u = b.t / b.life;
+        const head = Math.min(1, u * 2.2);
+        const tail = Math.max(0, head - 0.35);
+        const at = (s) => [b.ox + (b.tx - b.ox) * s, b.oy + (b.ty - b.oy) * s, b.oz + (b.tz - b.oz) * s];
+        const [hx, hy, hz] = at(head);
+        const [tx, ty, tz] = at(tail);
+        cam.line(ctx, hx, hy, hz, tx, ty, tz, b.color, 1 - u * 0.4);
     }
+}
 
-    // HUD projection — ignores camera parallax. Use for reticle and any
-    // element that should stay attached to the cockpit, not the world.
-    function projectHud(x, y, z) {
-        if (z < NEAR_Z) return { x: 0, y: 0, z: z, visible: false };
-        var inv = _focal / z;
-        var sx = _cx + x * inv;
-        var sy = _cy - y * inv;
-        return { x: sx, y: sy, z: z, visible: true };
-    }
-
-    // Depth-fade: 1 at near, 0 at far. Used to attenuate stroke alpha so
-    // distant geometry recedes rather than cutting off sharply.
-    function depthFade(z, far) {
-        far = far || 400;
-        if (z < NEAR_Z) return 0;
-        if (z > far) return 0;
-        return 1 - (z / far);
-    }
-
-    // Draw a line between two camera-space points. Handles near-plane clip
-    // by interpolating. Returns true if the segment was drawn.
-    function line(ctx, ax, ay, az, bx, by, bz, color, alpha) {
-        // Near-plane clip: if both behind, skip. If one behind, interpolate.
-        if (az < NEAR_Z && bz < NEAR_Z) return false;
-        if (az < NEAR_Z) {
-            var t = (NEAR_Z - az) / (bz - az);
-            ax = ax + (bx - ax) * t;
-            ay = ay + (by - ay) * t;
-            az = NEAR_Z;
-        } else if (bz < NEAR_Z) {
-            var t2 = (NEAR_Z - bz) / (az - bz);
-            bx = bx + (ax - bx) * t2;
-            by = by + (ay - by) * t2;
-            bz = NEAR_Z;
-        }
-        var pa = project(ax, ay, az);
-        var pb = project(bx, by, bz);
-        if (!pa.visible || !pb.visible) return false;
-        ctx.strokeStyle = color;
-        ctx.globalAlpha = (alpha != null) ? alpha : 1;
-        ctx.beginPath();
-        var jx = _jitter ? (Math.random() * 2 - 1) * _jitter : 0;
-        var jy = _jitter ? (Math.random() * 2 - 1) * _jitter : 0;
-        ctx.moveTo(pa.x + jx, pa.y + jy);
-        jx = _jitter ? (Math.random() * 2 - 1) * _jitter : 0;
-        jy = _jitter ? (Math.random() * 2 - 1) * _jitter : 0;
-        ctx.lineTo(pb.x + jx, pb.y + jy);
-        ctx.stroke();
-        ctx.globalAlpha = 1;
-        return true;
-    }
-
-    // Draw a polyline defined by world points (array of {x,y,z}), optionally
-    // transformed by {ox,oy,oz} offset and {sx,sy,sz} scale.
-    function polyline(ctx, pts, close, color, alpha, transform) {
-        var t = transform || {};
-        var ox = t.ox || 0, oy = t.oy || 0, oz = t.oz || 0;
-        var sx = t.sx != null ? t.sx : 1, sy = t.sy != null ? t.sy : 1, sz = t.sz != null ? t.sz : 1;
-        for (var i = 0; i < pts.length - 1; i++) {
-            var a = pts[i], b = pts[i + 1];
-            line(ctx, a.x * sx + ox, a.y * sy + oy, a.z * sz + oz,
-                      b.x * sx + ox, b.y * sy + oy, b.z * sz + oz, color, alpha);
-        }
-        if (close && pts.length > 1) {
-            var a2 = pts[pts.length - 1], b2 = pts[0];
-            line(ctx, a2.x * sx + ox, a2.y * sy + oy, a2.z * sz + oz,
-                      b2.x * sx + ox, b2.y * sy + oy, b2.z * sz + oz, color, alpha);
+function drawExplosions(ctx, cam, explosions) {
+    for (const e of explosions) {
+        const u = e.t / e.life;
+        const c = u < 0.3 ? "#ff8" : (u < 0.7 ? "#f84" : "#844");
+        for (const s of e.shards) {
+            const ax = e.x + s.vx * e.t, ay = e.y + s.vy * e.t, az = e.z + s.vz * e.t;
+            cam.line(ctx, ax, ay, az, ax - s.vx * 40, ay - s.vy * 40, az - s.vz * 40, c, 1 - u);
         }
     }
+}
 
-    // Draw a list of edges [[i,j], ...] into a mesh of vertices.
-    function edges(ctx, verts, edgeList, color, alpha, transform) {
-        var t = transform || {};
-        var ox = t.ox || 0, oy = t.oy || 0, oz = t.oz || 0;
-        var sx = t.sx != null ? t.sx : 1, sy = t.sy != null ? t.sy : 1, sz = t.sz != null ? t.sz : 1;
-        for (var i = 0; i < edgeList.length; i++) {
-            var e = edgeList[i];
-            var a = verts[e[0]], b = verts[e[1]];
-            line(ctx, a.x * sx + ox, a.y * sy + oy, a.z * sz + oz,
-                      b.x * sx + ox, b.y * sy + oy, b.z * sz + oz, color, alpha);
-        }
+/** Four green corner brackets. */
+function drawCockpit(ctx, W, H) {
+    const inset = 18, len = 90;
+    ctx.strokeStyle = "#3a4";
+    ctx.lineWidth = 2;
+    ctx.globalAlpha = 0.85;
+    ctx.beginPath();
+    for (const [x, y, sx, sy] of [[inset, inset, 1, 1], [W - inset, inset, -1, 1], [inset, H - inset, 1, -1], [W - inset, H - inset, -1, -1]]) {
+        ctx.moveTo(x, y + sy * len);
+        ctx.lineTo(x, y);
+        ctx.lineTo(x + sx * len, y);
     }
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+}
 
-    // --- Starfield ---------------------------------------------------------
-    // A pseudo-3D starfield: stars are 3D points in front of the camera,
-    // advanced by dz each frame. When a star passes the camera, it respawns
-    // far away.
-    var _stars = [];
-    var STAR_COUNT = 140;
-    var STAR_FAR = 400;
+/** Yellow crosshair where the yoke points; blue chevron where the ship is. */
+function drawReticle(ctx, cam, flight) {
+    const pr = cam.projectHud(flight.reticle.x, flight.reticle.y, RETICLE_Z);
+    const ps = cam.projectHud(flight.ship.x, flight.ship.y, RETICLE_Z);
+    ctx.strokeStyle = "#ff4";
+    ctx.lineWidth = 2;
+    const { x, y } = pr;
+    ctx.beginPath();
+    ctx.moveTo(x - 18, y); ctx.lineTo(x - 6, y);
+    ctx.moveTo(x + 6, y); ctx.lineTo(x + 18, y);
+    ctx.moveTo(x, y - 18); ctx.lineTo(x, y - 6);
+    ctx.moveTo(x, y + 6); ctx.lineTo(x, y + 18);
+    ctx.arc(x, y, 2, 0, Math.PI * 2);
+    ctx.stroke();
 
-    function initStars() {
-        _stars.length = 0;
-        for (var i = 0; i < STAR_COUNT; i++) {
-            _stars.push({
-                x: (Math.random() * 2 - 1) * 300,
-                y: (Math.random() * 2 - 1) * 220,
-                z: NEAR_Z + Math.random() * STAR_FAR
-            });
-        }
-    }
+    ctx.strokeStyle = "#6bf";
+    ctx.globalAlpha = 0.7;
+    ctx.beginPath();
+    ctx.moveTo(ps.x, ps.y + 4);
+    ctx.lineTo(ps.x - 5, ps.y + 10);
+    ctx.lineTo(ps.x + 5, ps.y + 10);
+    ctx.closePath();
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+}
 
-    function advanceStars(dz) {
-        for (var i = 0; i < _stars.length; i++) {
-            var s = _stars[i];
-            s.z -= dz;
-            if (s.z < NEAR_Z + 1) {
-                s.x = (Math.random() * 2 - 1) * 300;
-                s.y = (Math.random() * 2 - 1) * 220;
-                s.z = STAR_FAR;
-            }
-        }
-    }
+// ── Title star tunnel ─────────────────────────────────────────────────────
 
-    function drawStars(ctx) {
-        ctx.fillStyle = "#ffffff";
-        for (var i = 0; i < _stars.length; i++) {
-            var s = _stars[i];
-            var p = project(s.x, s.y, s.z);
-            if (!p.visible) continue;
-            var fade = depthFade(s.z, STAR_FAR);
-            if (fade < 0.05) continue;
-            ctx.globalAlpha = fade;
-            var sz = 1 + (1 - s.z / STAR_FAR) * 1.5;
-            ctx.fillRect(p.x | 0, p.y | 0, sz, sz);
-        }
-        ctx.globalAlpha = 1;
-    }
-
-    // --- Screen shake / jitter control ------------------------------------
-
-    function shake(amount, decayMs) {
-        _shakeAmp = Math.max(_shakeAmp, amount);
-        _shakeDecay = (decayMs || 250);
-    }
-
-    function setJitter(px) { _jitter = px; }
-
-    function updateShake(dt) {
-        if (_shakeAmp > 0) {
-            _shakeAmp -= _shakeAmp * Math.min(1, dt / _shakeDecay);
-            if (_shakeAmp < 0.1) _shakeAmp = 0;
-        }
-    }
-
-    // --- Full-screen flash (damage feedback) ------------------------------
-    var _flashColor = null;
-    var _flashT = 0;
-    var _flashDur = 0;
-
-    function flash(color, ms) {
-        _flashColor = color;
-        _flashT = 0;
-        _flashDur = ms;
-    }
-
-    function drawFlash(ctx) {
-        if (!_flashColor || _flashT >= _flashDur) return;
-        var a = 1 - _flashT / _flashDur;
-        ctx.fillStyle = _flashColor;
-        ctx.globalAlpha = a * 0.35;
-        ctx.fillRect(0, 0, _W, _H);
-        ctx.globalAlpha = 1;
-    }
-
-    function updateFlash(dt) {
-        if (_flashColor) {
-            _flashT += dt;
-            if (_flashT >= _flashDur) _flashColor = null;
-        }
-    }
+/** Stars rushing out of the centre; call tick(dt) then draw each frame. */
+export function createTunnel(rand = Math.random) {
+    const stars = [];
+    const reset = (s, z) => {
+        s.x = rand() * 2 - 1;
+        s.y = rand() * 2 - 1;
+        s.z = z;
+        s.s = 0.3 + rand() * 0.9;
+        return s;
+    };
+    for (let i = 0; i < 200; i++) stars.push(reset({}, 0.2 + rand() * 0.8));
 
     return {
-        setViewport: setViewport,
-        width: width, height: height, focal: focal,
-        project: project,
-        projectHud: projectHud,
-        setCamera: setCamera,
-        line: line,
-        polyline: polyline,
-        edges: edges,
-        depthFade: depthFade,
-        initStars: initStars,
-        advanceStars: advanceStars,
-        drawStars: drawStars,
-        shake: shake,
-        setJitter: setJitter,
-        updateShake: updateShake,
-        flash: flash,
-        drawFlash: drawFlash,
-        updateFlash: updateFlash,
-        NEAR_Z: NEAR_Z
+        tick(dt) {
+            const adv = 0.00015 * Math.min(50, dt);
+            for (const s of stars) {
+                s.z -= adv;
+                if (s.z <= 0.05) reset(s, 1.0);
+            }
+        },
+        draw(ctx, W, H) {
+            ctx.fillStyle = "#000";
+            ctx.fillRect(0, 0, W, H);
+            ctx.fillStyle = "#fff";
+            for (const s of stars) {
+                const scale = 1 / s.z;
+                const px = W * 0.5 + s.x * W * 0.5 * scale;
+                const py = H * 0.5 + s.y * H * 0.5 * scale;
+                if (px < 0 || px >= W || py < 0 || py >= H) continue;
+                ctx.globalAlpha = Math.min(1, (1 - s.z) * 1.4);
+                const sz = Math.max(1, (s.s * (2 - s.z)) | 0);
+                ctx.fillRect(px | 0, py | 0, sz, sz);
+            }
+            ctx.globalAlpha = 1;
+        },
     };
-})();
+}

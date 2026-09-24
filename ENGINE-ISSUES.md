@@ -14,7 +14,7 @@ null node as world space). Every existing call throws
 `expected a __bro_native.scene.SceneNode handle, got a non-object`.
 Repro: `bro-headless demos/lighting-demo -e "advanceTime(50); document.querySelector('#stage').getContext('scene').unprojectLocal(500, 500)"`.
 Broke picking in games/gridkeep, hearthfolk, hexfront, tilehaven (their
-tests fail in the baseline; hearthfolk and tilehaven are ported off it) and demos/lighting-demo light selection, plus
+tests fail in the baseline; hearthfolk, tilehaven and gridkeep are ported off it) and demos/lighting-demo light selection, plus
 the other callers (`grep -rn "unprojectLocal(" games demos tools ai lib`).
 Either restore the documented app-facing shape or publish the replacement
 and the apps get ported to it.
@@ -28,7 +28,7 @@ computes the ray in JS with kit `screenRay` meanwhile; switch it back to
 the engine call once one works. games/farm and games/hearthfolk now pick
 through the same `rayAt()` / `toScreen()` (their orthographic iso cameras
 included; kit `screenRay`/`worldToScreen` handle `mode: 'orthographic'`),
-and so does games/tilehaven.
+and so do games/tilehaven and games/gridkeep.
 
 ### Column flex container with a percentage width stretches children to the wrong width (2026-09-24)
 A `display:flex; flex-direction:column` box whose `width` is a percentage
@@ -204,6 +204,73 @@ on a tile, then `String(getSelection())` is the toast text; Chromium gives
 video) starts no text selection, and text hit testing skips
 `pointer-events: none` boxes. Any canvas game with a DOM overlay/toast is
 exposed; `user-select: none` on the canvas would hide it.
+
+### TileWorld `addObject({ color })` per-instance tint is ignored (2026-09-24)
+tile-api.js documents `opts.color` on `addObject` as a per-instance tint
+(alpha honoured on non-atlased kinds), but every instance renders in the
+kind's base colour. Minimal page: a 4x1 palette TileWorld, one
+`addObjectKind(Mesh.box(0.3,0.3,0.3), { color: [1,1,1,1] })`, instances
+with `color: [1,0,0,1]`, `[0,1,0,1]`, `[0,0,1,1]` and none, then
+`rebuild()` + `rebuildObjects()`: all four boxes are white. games/gridkeep
+(tower type/level colours, creep colours, slow/hit flashes) and
+games/blastgrid (bomber colours, bomb fuse redden, fire fade) lose their
+colour coding; both authored white kinds for exactly this. games/tilehaven
+house tints and cargo colours are affected too.
+
+### Physics world `step()` discards contact events nobody has read yet (2026-09-24)
+Each `step()` on a `Physics.createWorldHandle()` world (and `stepInline` /
+`consumeStep` on the default world) does `contactsFront_ = listener_->drain()`
+in `src/physics/physics_world.cpp`, replacing the list `getContacts()`
+returns. Stepping twice before reading loses the first step's events, so a
+contact that begins in one sub-step and ends in the next reports only
+`removed`, never `added`. Repro: a static sphere at (0,0), a ball of the
+same radius dropped onto its shoulder from 30 units above, stepped as
+`h.step(dt/2); h.step(dt/2); h.getContacts()` per frame: the ball visibly
+deflects but the only event is `removed`. Expected: events accumulate
+until `getContacts()` swaps them out (it already `swap`s). games/pegbounce
+sub-steps at 1/120 s and lost glancing peg hits (pegs the ball bounced off
+never lit); it now calls `getContacts()` after every sub-step.
+
+### Flex max-content ignores a child span's own `letter-spacing` (2026-09-24)
+A `display:flex` row sized by content (inside a centred flex column) comes out
+narrower than its items when one item is a `<span style="letter-spacing:2px">`
+that differs from its parent's spacing. The shortfall is then taken from the
+item that can shrink, here an empty `width:11px` dot, which lays out at 5px.
+Repro: `<div style="display:flex;flex-direction:column;align-items:center">
+<div style="display:flex;gap:7px"><span style="width:11px;height:11px;
+display:inline-block;background:red"></span><span>NAME</span><span
+style="letter-spacing:2px">···</span></div></div>`. The dot measures 5 wide
+instead of 11 (6px = 3 glyphs x 2px). Drop the inner letter-spacing and it
+measures 11. Separately, a top-level `display:inline-flex` chip in the same
+page measures the full viewport width (1904) rather than its content.
+games/blastgrid's contender chips show their colour dots as thin bars
+(`.cwins { letter-spacing: 2px }`). The old build showed no dots at all.
+
+### Range rects are zero-width outside a scroller's viewport (2026-09-24)
+`Range.getBoundingClientRect()` over text that is scrolled out of an
+`overflow:auto` container's visible area returns the right `top` but
+`width: 0`. Chromium returns the full rect whether the text is visible or not.
+Text below the *window* fold (no inner scroller) measures correctly, and
+element `getBoundingClientRect()` is fine too. Repro:
+`<div id=box style="height:200px;overflow-y:auto;font:20px Arial"><div id=near>near
+text</div><div style="height:1000px"></div><div id=far>far text</div></div>`.
+A Range over the first 4 chars of `#far` gives width 0 (top 1023). After
+`box.scrollTop = 900` it gives 28.9, and `#near`'s Range drops to 0.
+demos/text-lab measures bidi, selection and caret probes inside its scrolling
+`#main`, so it scrolls each probe into view first (`reveal()` in input.js).
+
+### A click on a text-less block puts the caret in text elsewhere (2026-09-24)
+A click on an empty, non-editable block that hits no text should clear the
+selection (`input_mouse.cpp` has a `removeAllRanges()` branch for this). But
+`layout::hitTestText` snaps to the nearest text node anywhere in the
+document, so the branch never runs, and the caret lands in some other
+paragraph. That paragraph can be a contenteditable one. Repro:
+`<p id=other>some other text</p><div id=plain style="height:40px"></div>
+<p>plain text below</p>`. Collapse the selection at `other`'s text offset 5,
+then `mouseDown/mouseUp` 20px into `#plain`. The selection ends up collapsed
+in `#other`'s text at offset 2 (the x-nearest character). Chromium puts a
+collapsed caret inside the clicked div. demos/text-lab's editing panel
+shows the control row "non-editable empty div" as ENGINE BUG.
 
 ## Notes (not bugs)
 

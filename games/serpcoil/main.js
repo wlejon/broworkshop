@@ -1,5 +1,5 @@
 import { boot } from "/lib/arcade/shell.js";
-import { game, installTestHooks } from "/app/game.js";
+import { game } from "/app/game.js";
+import { installTestHooks } from "/app/hooks.js";
 
-const shell = boot(game, { width: 1280, height: 800 });
-installTestHooks(shell);
+installTestHooks(boot(game, { width: 1280, height: 800 }));

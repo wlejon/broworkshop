@@ -12,13 +12,13 @@
     <div id="hud" hidden>
         <div class="hud-col hud-left">
             <div class="hud-row"><span class="hud-label">SCORE</span><span id="hud-score" class="hud-value">0</span></div>
-            <div class="hud-row"><span class="hud-label">HI</span><span id="hud-hi" class="hud-value">0</span></div>
+            <div class="hud-row"><span class="hud-label">HI</span><span id="hud-high" class="hud-value">0</span></div>
         </div>
         <div class="hud-col hud-right">
             <div class="hud-row"><span class="hud-label">SECTOR</span><span id="hud-wave" class="hud-value">1-1</span></div>
             <div class="hud-row"><span class="hud-label">SHIELDS</span><span id="hud-shields" class="hud-value">- - - - - -</span></div>
         </div>
-        <div id="hud-lock" class="hud-lock"></div>
+        <div id="hud-lock" class="hud-lock">— LOCK —</div>
         <div id="hud-radio" class="hud-radio"></div>
     </div>
 
@@ -31,6 +31,7 @@
             <div class="menu-items">
                 <div class="menu-item selected" data-action="play">ENGAGE</div>
                 <div class="menu-item" data-action="howto">BRIEFING</div>
+                <div class="menu-item" data-action="settings">SETTINGS</div>
                 <div class="menu-item" data-action="quit">QUIT</div>
             </div>
             <p class="overlay-hint">Arrow keys to navigate, Enter to select</p>
@@ -63,6 +64,15 @@ Esc           Pause</pre>
             <div class="menu-items">
                 <div class="menu-item selected" data-action="back">BACK</div>
             </div>
+        </section>
+
+        <section id="screen-settings" class="screen" hidden>
+            <h1 class="overlay-title">SETTINGS</h1>
+            <div class="menu-items">
+                <div class="menu-item selected" data-action="cycle-sfx">SFX VOLUME: <span id="opt-sfxVol">80</span></div>
+                <div class="menu-item" data-action="back">BACK</div>
+            </div>
+            <p class="overlay-hint">Enter to change</p>
         </section>
 
         <section id="screen-pause" class="screen" hidden>

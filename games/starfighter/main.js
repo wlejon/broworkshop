@@ -1,4 +1,5 @@
 import { boot } from "/lib/arcade/shell.js";
 import { game } from "/app/game.js";
+import { installTestHooks } from "/app/hooks.js";
 
-boot(game);
+installTestHooks(boot(game, { width: 1024, height: 768 }));

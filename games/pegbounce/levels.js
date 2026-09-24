@@ -1,17 +1,10 @@
-// levels.js — 20 hand-designed peg layouts for Pegbounce.
+// Pegbounce levels — 20 hand-designed peg layouts.
 //
-// A level is described by a recipe applied to a blank world. Each level
-// chooses background gradient stops, a ball count, a set of peg-placing
-// patterns, and scoring tiers (star thresholds). Peg positions use a
-// 32-wide / 22-tall grid over the 1024x720 playfield (top band reserved
-// for cannon). Grid cell is 32 px.
-//
-// Level recipes return an object:
-//   { id, name, background, balls, stars: [bronze, silver, gold],
-//     build(world, rng) }
-// The build fn adds pegs via Physics.addPeg / addMovingPeg.
+// A level is { id, name, background: [top, bottom], balls,
+// stars: [bronze, silver, gold], build(world) }; build places pegs with
+// Physics.addPeg / addMovingPeg on a 32-px grid (gx / gy) below the cannon
+// band. buildLevel(i, seed) returns a fresh physics world.
 
-'use strict';
 import { Physics } from "/app/physics.js";
 
     const P = Physics;
@@ -23,8 +16,6 @@ import { Physics } from "/app/physics.js";
     function gx(c) { return MARGIN_X + c * CELL; }
     function gy(r) { return TOP + r * CELL; }
 
-    // Bump oranges upward by this many per level late in the set, so
-    // difficulty ramps.
     function place(world, c, r, type) {
         if (c < 0 || c >= GRID_COLS) return;
         const x = gx(c), y = gy(r);
@@ -61,20 +52,6 @@ import { Physics } from "/app/physics.js";
             const row = Math.round(cy + Math.sin(t) * radiusCells);
             place(world, col, row, picker(i, count));
         }
-    }
-
-    function line(world, c0, r0, dc, dr, count, picker) {
-        for (let i = 0; i < count; i++) {
-            place(world, c0 + dc * i, r0 + dr * i, picker(i, count));
-        }
-    }
-
-    // Always-orange: picker helper.
-    const allOrange = () => P.PEG.ORANGE;
-    const allBlue = () => P.PEG.BLUE;
-
-    function everyNth(n, type, other) {
-        return (c, r, ctx) => (((c + r) % n) === 0 ? type : other);
     }
 
     // ---- Level definitions -----------------------------------------------
@@ -402,12 +379,10 @@ import { Physics } from "/app/physics.js";
         },
     ];
 
-    // Build helper: instantiate a world and apply the level's build fn.
+    /** A fresh world with level `levelIdx` built into it (seed drives peg shimmer phases). */
     function buildLevel(levelIdx, seed) {
-        const world = P.createWorld();
-        world.rng = P.rand(seed || (1 + levelIdx * 37));
-        const lv = LEVELS[levelIdx];
-        lv.build(world, world.rng);
+        const world = P.createWorld(seed || (1 + levelIdx * 37));
+        LEVELS[levelIdx].build(world);
         return world;
     }
 

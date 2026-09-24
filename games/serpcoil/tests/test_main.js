@@ -1,148 +1,218 @@
-// test.js — headless harness for Serpcoil.
-'use strict';
+// Serpcoil: path + chain rules, inserts and pops, cascades through the
+// retreating front, power-ups, danger, level clear / unlock, the coil
+// reaching the maw, menus. Run: scripts/validate.sh games/serpcoil
+import { test, done, check, eq, near, frames, simUntil, press, clickOn, q, text, shot } from "/lib/kit/test.js";
 
-// Let the app boot.
-advanceTime(300);
+frames(6);
+const S = window.__serpcoil;
+check(S, "__serpcoil hooks exposed");
+const { scoreForPop, starsFor, clearBonus } = S.rules;
+const D = S.ORB_DIAM;
 
-assert(typeof window.__serpcoil === 'object' && window.__serpcoil, '__serpcoil exposed');
-var H = window.__serpcoil;
+S.save.set("unlocked", 1);
+S.save.set("stars", {});
+S.save.set("bestScore", {});
+S.save.set("highScore", 0);
+S.save.set("sfxVol", 80);
 
-// Title screenshot.
-screenshot('games/serpcoil/screenshot-title.png');
-
-assert(H.currentScreen() === 'title', 'starts on title, got ' + H.currentScreen());
-
-// Navigate to level select via arrow-down then Enter.
-// (title menu index 0 = PLAY; index 1 = LEVEL SELECT)
-// We'll just click "PLAY" to seed level 1.
-keyDown(13); // not ideal — use the JS API directly
-// Just start level 0 directly via seedLevel hook.
-H.seedLevel(0, 12345);
-H.switchTo('play');
-advanceTime(100);
-
-// Prevent chain from reaching goal during the test (slow, but moving).
-H.setChainSpeed(5);
-
-var chain = H.chain();
-var path = H.path();
-assert(path.length() > 0, 'path has length');
-assert(chain, 'chain created');
-
-// Let a few orbs spawn.
-advanceTime(2500);
-var orbCount = chain.count();
-assert(orbCount >= 3, 'at least 3 orbs spawned (got ' + orbCount + ')');
-
-// -------- Pure match detection --------
-// Seed deterministic chain: force colors of orbs and insert a matching one.
-var orbs = chain.orbs();
-var ORB_DIAM = chain.ORB_DIAM;
-// Set first three orbs same color.
-orbs[0].color = 1; orbs[1].color = 1; orbs[2].color = 1;
-// Ensure there are at least 4 orbs so we can detect properly.
-var matches0 = H.detectMatches(0);
-assert(matches0.length === 1, 'detect one match after seeding, got ' + matches0.length);
-assert(matches0[0][1] - matches0[0][0] >= 3, 'match is 3+');
-
-// Reset colors to something that won't match and insert a matching color.
-for (var i = 0; i < orbs.length; i++) orbs[i].color = (i % 2) + 1;
-// Now force positions: orbs at d = 80, 110, 140 same color.
-// First clear chain and build a known state manually.
-orbs.length = 0;
-orbs.push({ color: 1, d: 100, phase: 0 });
-orbs.push({ color: 1, d: 130, phase: 0 });
-orbs.push({ color: 2, d: 160, phase: 0 });
-orbs.push({ color: 3, d: 190, phase: 0 });
-
-var scoreBefore = H.score();
-// Insert a color 1 orb between index 1 and 2 — should make 3 in a row.
-H.insertAt(145, 1);
-advanceTime(50);
-
-var scoreAfter = H.score();
-assert(scoreAfter > scoreBefore, 'score advanced after match (before=' + scoreBefore + ' after=' + scoreAfter + ')');
-// The three color-1 orbs should be popped.
-var c1Left = 0;
-for (var j = 0; j < orbs.length; j++) if (orbs[j].color === 1) c1Left++;
-assert(c1Left === 0, 'all matching orbs popped (left=' + c1Left + ')');
-
-// -------- Combo escalation --------
-// Build a cascading chain: color pattern [A A B A A] with an inserted A
-// that breaks up the B, then cascade. We craft it so inserting color A
-// in the middle triggers two pops.
-orbs.length = 0;
-// After insert: A A A A A? Not great. Use: [A A][X][A A] where removing
-// the X (via a match around a fresh insert) would bring the two A-A pairs
-// together. Using colorshift is cleaner, but we can do it with a direct
-// pattern: [A A A B B B] where inserting A into the AAA triggers a pop,
-// then the BBB are still there unmatched. For cascade, we need removal
-// to bring same-colors together.
-// Pattern: [1 1 2 2 2 1] — insert a 2 into the 222 run? That already
-// matches. Better: [1 1 2 1 1] — insert a 2 into the 2 (makes 22 only).
-// We need: [1 1 X 2 2 2 X 1 1] where X is the hit region. Removing the
-// 222 in the middle joins 1 1 with 1 1 = 1111 → second pop.
-orbs.push({ color: 1, d: 100, phase: 0 });
-orbs.push({ color: 1, d: 130, phase: 0 });
-orbs.push({ color: 2, d: 160, phase: 0 });
-orbs.push({ color: 2, d: 190, phase: 0 });
-orbs.push({ color: 1, d: 220, phase: 0 });
-orbs.push({ color: 1, d: 250, phase: 0 });
-
-H.setScore(0);
-// Insert a color 2 so middle becomes 2 2 2 — pops, then the 1s join.
-var idx = H.insertAt(175, 2);
-advanceTime(50);
-
-var cascScore = H.score();
-assert(cascScore > 0, 'cascade produced score (' + cascScore + ')');
-// After cascade: the 1-1-1-1 should have popped too. Very few orbs left.
-assert(orbs.length <= 1, 'cascade removed most orbs, left=' + orbs.length);
-// Combo tracking recorded depth >= 2 at some point.
-var comboHit = H.combo();
-assert(comboHit >= 2, 'combo escalated to >=2, got ' + comboHit);
-
-// -------- Danger state --------
-// Advance head past the danger threshold.
-orbs.length = 0;
-orbs.push({ color: 3, d: path.length() * 0.9, phase: 0 });
-orbs.push({ color: 3, d: path.length() * 0.85, phase: 0 });
-// Swap so "head" (last) is at 0.9.
-orbs.sort(function (a, b) { return a.d - b.d; });
-advanceTime(50);
-assert(H.danger() === true, 'danger state is active near goal');
-
-// Clear danger by removing those orbs.
-orbs.length = 0;
-advanceTime(50);
-assert(H.danger() === false, 'danger clears when chain empty');
-
-// -------- Level clear transition --------
-// Force all orbs gone AND spawn count maxed.
-H.chain().forceEmpty();
-advanceTime(100);
-assert(H.currentScreen() === 'levelclear', 'screen transitioned to levelclear, got ' + H.currentScreen());
-
-// -------- Play-state screenshot: restart and let it render --------
-H.seedLevel(2, 98765);
-H.switchTo('play');
-advanceTime(600);
-H.setChainSpeed(10);
-advanceTime(1200);
-screenshot('games/serpcoil/screenshot-play.png');
-
-// -------- Powerup activation smoke test --------
-var S = H.shooter();
-// Manually apply a BLASTER to current slot
-S.setCurrent(S.current(), 2); // 2 = PU_BLASTER
-// fire straight at center of chain
-var testOrbs = H.chain().orbs();
-if (testOrbs.length > 0) {
-    var p = H.path().pointAt(testOrbs[0].d);
-    S.aimAt(p.x, p.y);
-    H.fire();
-    advanceTime(400);
-    // Can't assert anything strong here (projectile may miss), but no crash.
+/**
+ * Freeze spawning and lay out orbs of `colors` packed from d0. A lone
+ * colour-6 sentinel further along keeps the chain from emptying (which
+ * would win the level) unless sentinel is false.
+ */
+function layout(colors, d0 = 100, sentinel = true) {
+    const ch = S.coil.chain;
+    ch.queue.length = 0;
+    ch.spawned = ch.totalToSpawn;
+    ch.orbs.length = 0;
+    colors.forEach((c, i) => ch.orbs.push({ color: c, d: d0 + i * D, phase: 0 }));
+    if (sentinel) ch.orbs.push({ color: 6, d: d0 + (colors.length + 8) * D, phase: 0 });
+    return ch;
 }
 
-console.log('Serpcoil tests passed.');
+const colorsOf = (ch) => ch.orbs.map((o) => o.color);
+
+test("rules: path, pop scoring, stars", () => {
+    const p = S.createPath([{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 200, y: 0 }]);
+    near(p.length(), 200, 0.5, "straight path length");
+    near(p.pointAt(50).x, 50, 0.5, "pointAt");
+    near(p.tangentAt(100).x, 1, 1e-3, "tangent");
+    eq(scoreForPop(3, 1), 60, "3 at depth 1");
+    eq(scoreForPop(4, 1), 120, "4+ gets x1.5");
+    eq(scoreForPop(3, 3), 240, "depth multiplies");
+    eq(starsFor(1200, 50), 3, "3 stars at 1.2x perfect");
+    eq(starsFor(800, 50), 2, "2 stars");
+    eq(starsFor(10, 50), 1, "always one star");
+    eq(clearBonus(2), 700, "clear bonus grows by level");
+});
+
+test("chain: matches and inserts", () => {
+    const path = S.createPath([{ x: 0, y: 0 }, { x: 2000, y: 0 }]);
+    const ch = new S.Chain({ path, palette: [1], totalToSpawn: 0 });
+    [1, 1, 2, 2, 2, 3].forEach((c, i) => ch.orbs.push({ color: c, d: i * D, phase: 0 }));
+    eq(ch.detectMatches(null), [[2, 5]], "one 3-run");
+    eq(ch.detectMatches(0), [], "hint in a 2-run");
+    const i = ch.insertAt(D * 1.5, 1);
+    eq(i, 2, "inserted behind the 2s");
+    eq(colorsOf(ch), [1, 1, 1, 2, 2, 2, 3], "order");
+    check(ch.orbs.every((o, k) => k === 0 || o.d - ch.orbs[k - 1].d >= D - 1e-6), "repacked");
+    eq(ch.popAround(i).length, 3, "the 1s pop");
+    eq(ch.colorshift(0, 3), 3, "colorshift repaints the run");
+    eq(colorsOf(ch), [3, 3, 3, 3], "2 2 2 3 -> 3 3 3 3");
+});
+
+test("menus: title, level select locks, how to play", () => {
+    eq(S.screen, "title", "boots to title");
+    shot("title");
+    clickOn('#screen-title [data-action="levelselect"]');
+    eq(S.screen, "levelselect", "level select");
+    check(!q("#level-node-0").classList.contains("disabled"), "level 1 open");
+    check(q("#level-node-1").classList.contains("disabled"), "level 2 locked");
+    shot("levelselect");
+    press("Escape");
+    clickOn('#screen-title [data-action="howto"]');
+    eq(S.screen, "howto", "how to play");
+    clickOn('#screen-howto [data-action="back"]');
+    clickOn('#screen-title [data-action="play"]');
+    frames(2);
+    eq(S.screen, "playing", "Play starts level 1");
+    eq(S.coil.levelIdx, 0, "level 1");
+    check(!q("#hud").hidden, "HUD shown");
+});
+
+test("play: chain spawns and marches, a shot lands in the chain", () => {
+    S.startLevel(0, 12345);
+    frames(2);
+    const c = S.coil;
+    c.chain.baseSpeed = 5;
+    simUntil(() => c.chain.count >= 4, 5000, 16);
+    check(c.chain.count >= 4, "orbs spawned: " + c.chain.count);
+    eq(text("#hud-left"), String(c.left), "HUD left");
+    // Aim at the second orb and fire with Space.
+    const target = c.chain.positionOf(c.chain.orbs[1]);
+    c.aimAt(target.x, target.y);
+    const before = c.chain.count + c.chain.remainingToSpawn;
+    press(" ");
+    frames(1);
+    check(c.shooter.projectiles.length === 1, "Space fires");
+    check(simUntil(() => c.shooter.projectiles.length === 0, 3000, 16), "projectile lands");
+    check(c.chain.count + c.chain.remainingToSpawn >= before, "the orb joined (or popped with) the chain");
+    shot("play");
+});
+
+test("pops: insert completes a run; score + combo", () => {
+    const c = S.coil;
+    const ch = layout([1, 1, 2, 3]);
+    c.score = 0;
+    c.insertAt(100 + D * 1.5, 1);
+    eq(colorsOf(ch), [2, 3, 6], "three 1s popped");
+    eq(c.score, scoreForPop(3, 1), "scored");
+});
+
+test("cascade: the retreating front merges and pops again", () => {
+    const c = S.coil;
+    const ch = layout([1, 1, 2, 2, 1, 1]);
+    c.score = 0;
+    c.combo = 1;
+    c.comboTimer = 0;
+    c.insertAt(100 + D * 2.5, 2);              // 1 1 [2 2 2] 1 1
+    eq(colorsOf(ch), [1, 1, 1, 1, 6], "2s popped, 1s left apart");
+    check(ch.orbs[2].d - ch.orbs[1].d > D + 1, "gap between the halves");
+    check(simUntil(() => ch.count === 1, 2000, 16), "front retreats, merges, 1 1 1 1 pops");
+    eq(c.combo, 2, "cascade depth 2");
+    eq(c.score, scoreForPop(3, 1) + scoreForPop(4, 2), "second pop at depth 2");
+    eq(text("#hud-combo"), "x2", "HUD combo");
+});
+
+test("power-ups: backtrack, blaster, slow-mo, colorshift", () => {
+    const c = S.coil;
+    let ch = layout([1, 2, 3, 1, 2], 400);
+    const fireAt = (orbIdx, pu, color) => {
+        const p = ch.positionOf(ch.orbs[orbIdx]);
+        c.shooter.projectiles.push({ x: p.x, y: p.y, vx: 0, vy: 0, color: color || 1, pu, life: 1000 });
+        frames(1);
+    };
+    const d0 = ch.orbs[0].d;
+    fireAt(2, S.PU.BACKTRACK);
+    check(ch.orbs[0].d < d0 - 100, "backtrack pushes the chain back");
+
+    ch = layout([1, 2, 3, 1, 2], 400);
+    c.score = 0;
+    fireAt(2, S.PU.BLASTER);
+    check(ch.count < 6, "blaster removes orbs: " + ch.count);
+    eq(c.score, (6 - ch.count) * 25, "25 a blasted orb");
+
+    ch = layout([1, 2, 3], 400);
+    fireAt(1, S.PU.SLOWMO);
+    check(ch.slowmo > 5000, "slow-mo on");
+    eq(ch.count, 4, "slow-mo removes nothing");
+
+    ch = layout([1, 1, 2, 1, 1], 400);
+    fireAt(2, S.PU.COLORSHIFT, 1);
+    eq(colorsOf(ch), [6], "colorshift repaints 2 -> 1 and the run of 5 pops");
+});
+
+test("danger: head near the maw", () => {
+    const c = S.coil;
+    const len = c.path.length();
+    const ch = layout([3, 4], 100, false);
+    ch.orbs[0].d = len * 0.84;
+    ch.orbs[1].d = len * 0.84 + D;
+    frames(2);
+    check(c.danger, "danger on");
+    check(q("#hud-danger").style.display !== "none", "DANGER badge shown");
+    layout([3, 4]);
+    frames(2);
+    check(!c.danger, "danger off");
+});
+
+test("clear: empty chain wins, stars persist, next level unlocks", () => {
+    const c = S.coil;
+    c.score = 900;
+    layout([], 100, false);
+    check(simUntil(() => S.screen === "levelclear", 1000, 16), "levelclear screen");
+    eq(c.bonus, clearBonus(0), "clear bonus");
+    eq(c.score, 900 + clearBonus(0), "bonus added");
+    check(/NEW BEST/.test(text("#levelclear-stats")), "NEW BEST on clear");
+    eq(text("#clear-stars").length, 3, "stars shown");
+    eq(S.save.get("unlocked"), 2, "level 2 unlocked");
+    eq(S.save.get("bestScore")[0], c.score, "level best saved");
+    shot("clear");
+    clickOn('#screen-levelclear [data-action="nextlevel"]');
+    frames(2);
+    eq(S.coil.levelIdx, 1, "next level running");
+});
+
+test("lose: coil reaches the maw -> Coil Devoured", () => {
+    const c = S.coil;
+    // One packed segment a hair short of the maw: the march carries it in.
+    const ch = layout([2, 3], c.path.length() - D - 1, false);
+    check(simUntil(() => S.screen === "gameover", 1000, 16), "gameover");
+    check(/Level\s+2/.test(text("#gameover-stats")), "stats name the level");
+    shot("gameover");
+    clickOn('#screen-gameover [data-action="restart"]');
+    frames(2);
+    check(S.screen === "playing" && S.coil.levelIdx === 1, "Try Again replays level 2");
+});
+
+test("level select: an unlocked tile starts that level", () => {
+    S.shell.switchTo("title");
+    frames(1);
+    clickOn('#screen-title [data-action="levelselect"]');
+    check(!q("#level-node-1").classList.contains("disabled"), "level 2 now open");
+    eq(q("#level-node-0 .level-stars").textContent.length > 0, true, "level 1 stars");
+    clickOn("#level-node-1");
+    frames(2);
+    check(S.screen === "playing" && S.coil.levelIdx === 1, "tile starts level 2");
+});
+
+test("pause: Resume does not fire", () => {
+    press("Escape");
+    eq(S.screen, "pause", "paused");
+    press("Enter");
+    frames(2);
+    eq(S.screen, "playing", "resumed");
+    eq(S.coil.shooter.projectiles.length, 0, "the Enter that resumed did not fire");
+});
+
+done("serpcoil");

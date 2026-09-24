@@ -12,23 +12,30 @@
     --arcade-menu-selected: rgba(154, 86, 255, 0.22);
 }
 
+.overlay-title {
+    text-shadow: 0 0 20px rgba(154, 86, 255, 0.5);
+    letter-spacing: 6px;
+}
+
+/* ── HUD: label / value lines, progress bar, danger badge ───────────── */
+
 #hud {
     min-width: 180px;
 }
 
-.hud-row {
+.hud-line {
     display: flex;
     justify-content: space-between;
     margin: 4px 0;
-    font-size: 13px;
 }
 
-.hud-row .hud-label {
+.hud-line .hud-label {
     margin-top: 0;
     font-size: 13px;
 }
 
-.hud-row .hud-value {
+.hud-line .hud-value {
+    margin-top: 0;
     font-size: 15px;
 }
 
@@ -42,7 +49,7 @@
 
 #hud-progress-fill {
     height: 100%;
-    width: 100%;
+    width: 0;
     background: linear-gradient(90deg, #9a56ff, #56d8ff);
     transition: width 0.2s;
 }
@@ -62,16 +69,12 @@
     to   { opacity: 1.0; }
 }
 
-.overlay-title {
-    text-shadow: 0 0 20px rgba(154, 86, 255, 0.5);
-    letter-spacing: 6px;
+/* ── Level select: rune tiles are shell menu items ──────────────────── */
+
+.screen.wide {
+    max-width: 680px;
 }
 
-.overlay-sub strong {
-    color: var(--arcade-accent);
-}
-
-/* Level select grid */
 .level-grid {
     display: grid;
     grid-template-columns: repeat(5, 100px);
@@ -80,31 +83,23 @@
     margin: 20px auto 30px;
 }
 
-.level-node {
+.level-grid .menu-item {
     width: 100px;
     height: 100px;
+    max-width: none;
+    margin: 0;
+    padding: 16px 0 0;
     background: rgba(30, 16, 56, 0.7);
     border: 2px solid #3a2a5c;
     border-radius: 10px;
-    padding-top: 16px;
-    cursor: pointer;
-    box-sizing: border-box;
-    transition: border-color 0.1s, background 0.1s;
+    box-shadow: none;
+    text-align: center;
 }
 
-.level-node:hover {
+.level-grid .menu-item:hover,
+.level-grid .menu-item.selected {
     border-color: #9a56ff;
     background: rgba(50, 26, 90, 0.85);
-}
-
-.level-node.locked {
-    opacity: 0.4;
-    cursor: default;
-}
-
-.level-node.locked:hover {
-    border-color: #3a2a5c;
-    background: rgba(30, 16, 56, 0.7);
 }
 
 .level-num {
@@ -136,20 +131,4 @@
 
 .htp-body {
     max-width: 540px;
-    margin-left: auto;
-    margin-right: auto;
-}
-
-.htp-body pre {
-    font-family: var(--arcade-font);
-    color: #ccc;
-    text-align: left;
-    display: inline-block;
-    margin-top: 4px;
-}
-
-.credits-sub {
-    color: #555;
-    font-size: 12px;
-    margin-top: 18px;
 }
