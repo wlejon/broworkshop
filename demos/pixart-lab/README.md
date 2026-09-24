@@ -17,8 +17,19 @@ into brodiffusion's Sana and SD1.5 prime paths, **not** PixArt's T5 branch — s
 bro ../broworkshop/demos/pixart-lab
 ```
 
-Set the **PixArt directory** to your `weights/pixart-sigma` dir, click **Load
-model**, then **Generate** (Ctrl/Cmd+Enter in the prompt also fires it).
+The **PixArt directory** field starts on `brodiffusion/weights/pixart-sigma`,
+found through `lib/kit/weights.js` (`$BRO_WEIGHTS`, else the directory beside
+this checkout that holds the bro sibling repos). **Browse…** picks another. Click
+**Load model**, then **Generate** (Ctrl/Cmd+Enter in the prompt also fires it).
+**Cancel** stops a run between denoising steps. Finished images collect in the
+gallery under the viewport: click one to view it, **Save PNG…** writes the
+selected one. After a successful load, the next launch reloads the same model
+by itself.
+
+The lab is built on the kit's image-generation pieces (`lib/kit/imagegen.js`,
+worker side `lib/kit/imagegen-worker.js`), shared with `sana-lab` and
+`diffusion-lab`. `lab.js` holds the page and `lab/pixart-worker.js` owns the
+pipeline. Test: `scripts/validate.sh --ml demos/pixart-lab`.
 
 ## Weights
 

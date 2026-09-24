@@ -1,148 +1,67 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="utf-8">
-  <title>Sana Lab</title>
-  <link rel="stylesheet" href="style.css">
+<meta charset="utf-8">
+<title>Sana Lab</title>
+<link rel="stylesheet" href="/lib/kit/kit.css">
+<link rel="stylesheet" href="/app/style.css">
 </head>
-<body>
-  <div id="app">
-    <header id="toolbar">
-      <span id="brand">⬡ Sana&nbsp;Lab</span>
-      <span class="tagline">hold one face while you steer Sana through its own conditioning space</span>
-      <span class="grow"></span>
-      <span id="backend" class="badge">loading…</span>
-    </header>
-
-    <div id="body">
-      <!-- ── left rail: model, prompt, generation settings, controls ──── -->
-      <aside id="rail">
-        <section class="panel">
-          <h2>model</h2>
-          <label class="field">Sana directory
-            <span class="row">
-              <input id="model-dir" type="text"
-                     value="D:/projects/brodiffusion/weights/sana-1.6b">
-              <button id="btn-browse-model" class="iconbtn"
-                      title="Choose a Sana diffusers directory">📁</button>
-            </span>
-          </label>
-          <button id="btn-load" class="primary">Load model</button>
+<body class="k-app">
+  <header class="k-header">
+    <h1>Sana Lab</h1>
+    <span class="k-sub">hold one face while you steer Sana through its own conditioning space</span>
+    <span class="k-spacer"></span>
+    <span id="backend">loading…</span>
+  </header>
+  <div class="k-body">
+    <aside class="k-side">
+      <div class="k-panel">
+        <h2>model</h2>
+        <div id="model"></div>
+      </div>
+      <div class="k-panel">
+        <h2>generate</h2>
+        <div id="gen"></div>
+      </div>
+      <div class="k-panel" id="identity">
+        <h2>identity <span class="dim">hold one face across edits</span></h2>
+        <label class="k-stack"><span class="k-cap">anchor · the face to keep</span>
+          <textarea id="anchor-prompt" rows="3" placeholder="a portrait photo of a person, neutral expression, plain studio background">a portrait photo of a woman, neutral expression, head and shoulders, plain studio background</textarea></label>
+        <button id="capture">Capture anchor</button>
+        <label class="k-field" id="strength-row"><span>strength</span>
+          <input id="identity-weight" type="range" min="0" max="2.5" step="0.1" value="1">
+          <span class="k-val" id="identity-weight-val">1.0</span>
+          <button id="clear-anchor" class="k-link" title="Drop the anchor" disabled>clear</button></label>
+        <p class="k-note" id="identity-hint"></p>
+      </div>
+      <div class="k-panel">
+        <h2>axes <span class="dim">two word sets → a direction</span>
+          <button id="zero-axes" class="k-link" title="Zero every strength slider">reset</button></h2>
+        <div id="axes"></div>
+      </div>
+    </aside>
+    <main class="k-main">
+      <div class="panes">
+        <section class="pane" id="ref-pane" hidden>
+          <div class="pane-head">identity reference <span class="dim">the face being held</span></div>
+          <div class="k-viewport"><canvas id="ref-view"></canvas></div>
         </section>
-
-        <section class="panel">
-          <h2>prompt</h2>
-          <label class="field">
-            <span class="field-head">prompt <span class="counter" id="prompt-count"></span></span>
-            <textarea id="prompt" rows="3" maxlength="1000"
-              placeholder="a photo of a small bird perched on a branch">a photo of a small bird perched on a branch</textarea>
-          </label>
-          <label class="field">
-            <span class="field-head">negative prompt
-              <span class="hint inline">— what to avoid</span>
-              <span class="counter" id="neg-count"></span></span>
-            <textarea id="neg-prompt" rows="2" maxlength="1000"
-              placeholder="blurry, low quality, deformed"></textarea>
-          </label>
-
-          <div class="subhead">settings
-            <button id="btn-reset-settings" class="link"
-                    title="Restore seed / steps / guidance / size to defaults">reset</button>
-          </div>
-          <div class="grid">
-            <label class="field">seed <span class="dim">· def 0</span>
-              <input id="seed" type="number" value="0" step="1"></label>
-            <label class="field">
-              <span class="field-head">steps <span class="dim">· def 20</span>
-                <span id="steps-lock" class="lock-note hidden" title="pinned to the anchor's step count while a face is held">locked</span></span>
-              <input id="steps" type="number" value="20" min="1" max="50"></label>
-            <label class="field">guidance <span class="dim">· def 4.5</span>
-              <input id="guidance" type="number" value="4.5" step="0.5"></label>
-            <label class="field">size <span class="dim">· def 1024²</span>
-              <select id="size">
-                <option value="1024" selected>1024²</option>
-                <option value="768">768²</option>
-                <option value="512">512²</option>
-              </select></label>
-          </div>
-          <div class="row gen-row">
-            <button id="btn-generate" class="primary" disabled>Generate</button>
-            <label class="live-toggle" title="Re-render as you drag the sliders (fast preview)">
-              <input id="live" type="checkbox"> live
-            </label>
+        <section class="pane">
+          <div class="pane-head">generation <span class="dim" id="gen-sub"></span></div>
+          <div class="k-viewport">
+            <canvas id="view"></canvas>
+            <div class="k-hint" id="view-hint">Load a model, then Generate.</div>
           </div>
         </section>
-
-        <!-- ── identity anchor: Sana's training-free reference-attention seam ── -->
-        <section class="panel" id="identity-host">
-          <h2>identity
-            <span class="hint inline">hold one face across edits</span>
-          </h2>
-          <label class="field">anchor &mdash; the face to keep
-            <textarea id="anchor-prompt" rows="3"
-              placeholder="a portrait photo of a person, neutral expression, plain studio background">a portrait photo of a woman, neutral expression, head and shoulders, plain studio background</textarea></label>
-          <button id="btn-capture-anchor">Capture anchor</button>
-          <label class="field" id="strength-field">
-            <span class="field-head">strength
-              <span class="ctl-val" id="identity-weight-val">1.0</span></span>
-            <span class="row">
-              <input id="identity-weight" type="range" min="0" max="2.5" step="0.1" value="1">
-              <button id="btn-clear-anchor" class="link" title="Drop the anchor">clear</button>
-            </span>
-          </label>
-          <p id="identity-hint" class="hint"></p>
-        </section>
-
-        <section class="panel grow-panel">
-          <h2>axes
-            <span class="hint inline">two word sets &rarr; a direction</span>
-            <span class="grow"></span>
-            <button id="btn-reset-ctl" class="link" title="Zero every strength slider">reset</button>
-          </h2>
-
-          <label class="field">name <span class="hint inline">(optional)</span>
-            <input id="axis-name" type="text" placeholder="expression"></label>
-          <label class="field">set A &mdash; the &ldquo;from&rdquo; concept
-            <textarea id="search-neg" rows="2"
-              placeholder="neutral expression, calm face"></textarea></label>
-          <label class="field">set B &mdash; the &ldquo;to&rdquo; concept
-            <textarea id="search-pos" rows="2"
-              placeholder="a big joyful broad smile, beaming"></textarea></label>
-          <button id="btn-build-axis" disabled>Add axis</button>
-
-          <p id="ctl-hint" class="hint">Load a model, then add an axis from two word sets.</p>
-          <div id="axes-host"></div>
-        </section>
-      </aside>
-
-      <!-- ── viewport: identity reference | live generation ───────────── -->
-      <main id="stage">
-        <div id="panes">
-          <section id="ref-pane" class="pane">
-            <div class="pane-head">identity reference
-              <span class="pane-sub">the face being held</span></div>
-            <div class="pane-canvas">
-              <canvas id="ref-view" width="512" height="512"></canvas>
-              <div id="ref-hint" class="pane-hint">Capture an anchor to hold a face across edits.</div>
-            </div>
-          </section>
-          <section id="gen-pane" class="pane">
-            <div class="pane-head">generation
-              <span class="pane-sub" id="gen-sub"></span></div>
-            <div class="pane-canvas">
-              <canvas id="view" width="512" height="512"></canvas>
-              <div id="view-hint" class="pane-hint">Load a model, then Generate.</div>
-            </div>
-          </section>
-        </div>
-        <div id="status-bar">
-          <span id="status-text">idle</span>
-          <span class="grow"></span>
-          <span id="timing" class="meta"></span>
-        </div>
-      </main>
-    </div>
+      </div>
+      <div class="k-toolbar" id="run"></div>
+      <div class="k-toolbar bare" id="gallery"></div>
+    </main>
   </div>
-  <script type="module" src="/app/app.js"></script>
+  <footer class="k-statusbar">
+    <span id="status">idle</span>
+    <span class="dim" id="timing"></span>
+  </footer>
+  <script type="module" src="/app/main.js"></script>
 </body>
 </html>

@@ -1,45 +1,44 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="utf-8">
-  <title>Tensor Lab</title>
-  <link rel="stylesheet" href="style.css">
+<meta charset="utf-8">
+<title>Tensor Lab</title>
+<link rel="stylesheet" href="/lib/kit/kit.css">
+<link rel="stylesheet" href="/app/style.css">
 </head>
-<body>
-  <div id="app">
-    <header id="toolbar">
-      <span id="brand">⬡ Tensor&nbsp;Lab</span>
-      <span class="tagline">a graphing calculator for neural networks</span>
-      <span class="grow"></span>
-      <select id="preset" title="Load a preset architecture">
-        <option value="">Load preset…</option>
-      </select>
-      <button id="btn-open-t5" title="Open a T5 text-encoder safetensors checkpoint">⬇ Open T5…</button>
-      <button id="btn-run" title="Run the whole forward pass">▶ Run</button>
-      <button id="btn-step" title="Execute the next op">⏭ Step</button>
-      <button id="btn-reset" title="Clear computed values">↺ Reset</button>
-      <button id="btn-clear" title="Remove every node">✕ Clear</button>
-      <span id="backend" class="badge">…</span>
-    </header>
-    <main>
-      <aside id="palette"></aside>
-      <section id="stage">
-        <canvas id="graph"></canvas>
-        <div id="toast"></div>
-      </section>
-      <aside id="inspector"></aside>
-    </main>
-    <footer id="status">
-      <span id="stat-nodes">0 nodes</span>
-      <span class="dot">·</span>
-      <span id="stat-params">0 params</span>
-      <span class="dot">·</span>
-      <span id="stat-flops">0 FLOPs</span>
-      <span class="grow"></span>
-      <span id="stat-time">not run</span>
-    </footer>
+<body class="k-app">
+  <header class="k-header">
+    <h1>Tensor Lab</h1>
+    <span class="k-sub">a graphing calculator for neural networks · every op runs live through bro.tensor</span>
+    <span class="k-spacer"></span>
+    <span id="backend">…</span>
+  </header>
+  <div class="k-toolbar">
+    <select id="preset" title="Load a preset architecture">
+      <option value="">Load preset…</option>
+    </select>
+    <button id="btn-open-t5" title="Open a T5 text-encoder safetensors checkpoint">Open T5…</button>
+    <span class="k-spacer"></span>
+    <button id="btn-run" class="primary" title="Run the whole forward pass, one op at a time">▶ Run</button>
+    <button id="btn-step" title="Execute the next op">Step</button>
+    <button id="btn-reset" title="Clear computed values">Reset</button>
+    <button id="btn-clear" title="Remove every node">Clear</button>
   </div>
-
-  <script type="module" src="/app/app.js"></script>
+  <div class="k-body">
+    <aside class="k-side" id="palette"></aside>
+    <main class="k-main">
+      <div class="k-viewport"><canvas id="graph"></canvas></div>
+    </main>
+    <aside class="k-side right" id="inspector"></aside>
+  </div>
+  <footer class="k-statusbar">
+    <span id="status">idle</span>
+    <span class="k-spacer"></span>
+    <span id="stat-nodes">0 nodes</span>
+    <span id="stat-params">0 params</span>
+    <span id="stat-flops">0 FLOPs</span>
+    <span id="stat-time">not run</span>
+  </footer>
+  <script type="module" src="/app/main.js"></script>
 </body>
 </html>

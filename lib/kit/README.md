@@ -31,7 +31,19 @@ Ported examples: `demos/kws-lab` and `demos/lm-playground` (ML labs),
 | `text.js` | `bro.text` from JS: UTF-16 ↔ UTF-8 offsets, caret stops, cluster maps (data + drawn on a canvas) |
 | `audio.js` | PCM plumbing (no DOM): shared `AudioContext`, resample/concat/gain/peak/dB, `clipPlayer`, `saveWav`, `micRecorder`, `signal` test-audio generators |
 | `audio-ui.js` | audio widgets: `levelMeter`, `peakScope`, `historyPlot`, `waveView` (trim), `sourcePicker` (bro.listen sources), `transport`, `mixerStrips`, `fitCanvas` |
+| `worker-rpc.js` | request/response over a module worker: `workerClient(url)` (page) + `serveWorker(handlers)` / `emit` (worker) |
+| `prefs.js` | `prefStore(key, defaults)`: one localStorage JSON record with `set` / `snapshot` / `restore` |
+| `imagegen.js` | `bro.diffusion` lab pieces: model picker, backend badge, prompt + settings panel, run bar, step-wise `runGeneration` with cancel, `imageView`, gallery `imageStrip`, `wordAxes` |
+| `imagegen-worker.js` | worker half of imagegen: `loadFamily`, `stepHandlers` (prime / step / reset / search / remove), `wordAxis` |
+| `agent.js` | tool-calling agent loop (pi-agent-core's event protocol): `createAgent({ stream, tools, systemPrompt, onEvent, approve })`, `textResult` / `errorResult`, `checkArgs` |
+| `agent-tools.js` | agent tools: `codingTools(cwd)` (read/write/edit_file, list_dir, bash, eval_js), `lookTool(fn)` |
+| `agent-llm.js` | agent providers: `brolmStream` (Qwen3 / Qwen3.5 through `bro.lm`, Hermes `<tool_call>` + `<think>` parsing, ChatML) and `openrouterStream` (native tool calls) |
+| `agent-backend.js` | backend picker toolbar row (OpenRouter key + brain/eyes models, or a local model path + Load), persisted in a prefStore; `.stream()` gives the provider |
+| `chat-view.js` + `chat.css` | agent transcript: markdown bubbles, thinking folds, tool cards (args, results, diffs), approval cards, `contextMeter`, `chatSession` (prompt box + Send/Stop) |
 | `test.js` | headless test helpers (assert, wait, click, type, screenshot) |
+
+`../openrouter.js` (outside the kit) is the OpenRouter client: model catalog +
+explorer, and `chatCompletion(cfg, payload, signal)` with rate-limit retries.
 
 ## Page skeleton
 
@@ -76,7 +88,8 @@ For a full-window 3D canvas use `<canvas>` + a floating `.k-hud` panel
 - **Dashboards:** `k-deck` inside a `k-main.pad` wraps fixed-width
   `k-panel`s (`--k-card-w`, default 560px; `.wide` spans two); `h3` inside a
   panel is a section heading (window-lab, input-lab).
-- **Text:** `.ok .warn .err .dim`. `[hidden]` always hides.
+- **Text:** `.ok .warn .err .dim`, `k-caption` (a section caption in a
+  `.k-main.pad` column, with an optional `span.dim` hint). `[hidden]` always hides.
 
 ## Modules
 
@@ -263,6 +276,10 @@ and Range count UTF-16 units. Convert explicitly:
 
 **audio.js** — PCM helpers over one lazily created `AudioContext`
 (`audioContext()`); not imported by `index.js`.
+- `decodeAudioFile(path, rate)` -> `{ pcm, rate, seconds, srcRate, channels }`
+  (mono, resampled to `rate`; null when it cannot decode), `readWav(path, rate)`
+  (same shape, 16-bit PCM read raw off disk: no trip through the context
+  rate), `downmix(pcm, ch)`.
 - `resample(pcm, inRate, outRate)` (linear), `concatPcm(parts)`,
   `gained(pcm, gain, a, b)`, `peakOf(pcm, gain, a, b)`, `toDb(amp)`.
 - `clipPlayer()`: `play(pcm, rate)` replaces the previous clip; `stop()`.
@@ -291,6 +308,34 @@ small handle (see the doc comment on each export for opts):
 - `fitCanvas(canvas)` -> `{ ctx, w, h }` in CSS pixels at devicePixelRatio.
 Used by demos/listen-lab, mic-chunks, scene-audio and spatial-audio.
 
+**worker-rpc.js** — `workerClient(url)` wraps `new Worker(url, { type:
+'module' })`: `request(msg, transfer)` -> Promise of the reply (requests
+carry `_rid`, replies echo it, `{ type: 'error', message }` rejects),
+`post(msg)` fire-and-forget, `on(type, fn)` for events (messages without
+`_rid`), `ready` / `isReady` / `onReady(fn)` (the worker posts `'ready'`),
+`abandon()` rejects every pending request with `err.abandoned`. In the
+worker, `serveWorker({ type: async (msg) => reply })` dispatches by `type`,
+replies with the handler's return value (`reply.transfer` = transfer list),
+turns a throw into an error reply, and posts `'ready'`; `emit(type, fields)`
+sends an event.
+
+**prefs.js** — `prefStore('my-lab.v1', defaults)` -> `{ data, set(patch),
+save(), snapshot(), restore(raw) }`. Storage failures are silent. Tests
+`snapshot()` first and `restore()` in a `finally`, since headless
+localStorage persists to the app's `.storage.json`.
+
+**imagegen.js / imagegen-worker.js** — the shared shell of the
+`bro.diffusion` labs (pixart-lab is the smallest complete example, then
+sana-lab, then diffusion-lab). The page builds `modelPicker`, `genPanel`
+(fields `seed steps guidance size | width height` map onto
+GenerateOptions through `opts()`), `runBar`, `imageView` and `imageStrip`,
+then runs `runGeneration(rpc, { prompt, opts, controls, decode(i), ctrl(i),
+onStep })`, which primes and then asks for one denoising step per request.
+`cancel()` abandons the requests and resets the worker's state. The worker
+serves `stepHandlers(() => pipeline)` plus its own `load`. `wordAxes`
+(page) and `wordAxis` (worker) build conditioning-space axes from two word
+sets. The strip owns the bitmaps added to it; the view only borrows them.
+
 ## Headless tests
 
 Test scripts are ES modules compiled in-process by bro-headless, so they
@@ -314,6 +359,10 @@ shot('after-load');                                // tests/out/shots/<app>-afte
 done();                                            // throws if any test() failed
 ```
 
+- ML tests: `needWeights(what, candidates, { probe })` returns the weights
+  path, or logs `SKIP: <what> not found ...` and exits 0 (a machine without
+  the weights skips instead of failing); `skip(reason)` does the same for
+  any other missing prerequisite.
 - A failing check throws; an uncaught throw makes bro-headless exit 1.
   `test(name, fn)` logs ok/FAIL and continues; `done()` throws at the end.
 - `frames(n)` advances virtual time. `pumpUntil`/`waitFor` budget in wall

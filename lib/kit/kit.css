@@ -241,8 +241,67 @@ textarea { resize: vertical; }
 .k-note code, .k-note b { color: var(--k-value); font-family: var(--k-font); font-weight: normal; }
 .k-note.warn { color: var(--k-warn); border-left: 3px solid #7a5a1f; padding: 4px 8px; background: #17140e; }
 
+/* Section caption in a content column (.k-main.pad): <div class="k-caption">name <span class="dim">hint</span></div> */
+.k-caption { color: var(--k-muted); font-weight: 600; margin-top: 4px; flex: none; }
+.k-caption .dim { font-weight: normal; margin-left: 6px; }
+
 /* ---- text ------------------------------------------------------------------ */
 .ok   { color: var(--k-ok); }
 .warn { color: var(--k-warn); }
 .err  { color: var(--k-err); }
 .dim  { color: var(--k-dim); }
+
+/* ---- forms + image generation (imagegen.js) --------------------------------- */
+.k-nowrap { flex-wrap: nowrap; }
+.k-cap {                        /* small uppercase caption; children push right */
+    display: flex; align-items: baseline; gap: 6px;
+    font-size: 11px; text-transform: uppercase; color: var(--k-dim);
+}
+.k-cap .dim { text-transform: none; }
+.k-stack { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.k-stack > textarea, .k-stack > input, .k-stack > select { width: 100%; }
+.k-stack > .k-row > input { flex: 1; min-width: 0; width: auto; }
+.k-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.k-counter { margin-left: auto; font-size: 10px; letter-spacing: 0; color: var(--k-dim); }
+.k-counter.warn { color: var(--k-warn); }
+.k-lock { margin-left: auto; text-transform: none; letter-spacing: 0; color: var(--k-accent); }
+.k-sub-head { margin-top: 2px; }
+button.k-link {
+    background: none; border: none; padding: 0; margin-left: auto; color: var(--k-accent);
+    font-size: 11px; text-transform: none; letter-spacing: 0;
+}
+button.k-link:hover { background: none; color: var(--k-value); }
+.k-gen { gap: 8px; }
+.k-viewport > .k-hint {          /* centred note over an empty viewport */
+    position: absolute; left: 0; right: 0; top: 50%; text-align: center;
+    color: var(--k-dim); pointer-events: none;
+}
+.k-run { gap: 10px; flex: 1; min-width: 0; }
+.k-steplabel { flex: none; min-width: 110px; }
+
+.k-badge {
+    padding: 2px 8px; border-radius: 4px; font-size: 11px;
+    background: var(--k-btn); color: var(--k-muted); border: 1px solid var(--k-border-hi);
+}
+.k-badge.ok   { color: var(--k-ok);   border-color: #2c5a40; }
+.k-badge.warn { color: var(--k-warn); border-color: #5a4a26; }
+.k-badge.err  { color: var(--k-err);  border-color: #5a2a2e; }
+
+.k-gallery-box { gap: 6px; flex: 1; min-width: 0; }
+.k-gallery { display: flex; gap: 8px; overflow-x: auto; min-height: 0; }
+.k-thumb {
+    flex: none; display: flex; flex-direction: column; gap: 2px; cursor: pointer;
+    padding: 3px; border: 1px solid var(--k-border); border-radius: 4px; background: var(--k-surface);
+}
+.k-thumb > canvas { display: block; }
+.k-thumb > span { font-size: 10px; color: var(--k-dim); }
+.k-thumb:hover { border-color: var(--k-border-hi); }
+.k-thumb.active { border-color: var(--k-accent); }
+
+.k-axes { gap: 6px; }
+.k-axis {
+    border: 1px solid var(--k-border); border-radius: 6px; background: var(--k-input);
+    padding: 6px 8px; display: flex; flex-direction: column; gap: 4px;
+}
+.k-axis input[type=range] { flex: 1; min-width: 0; width: auto; }
+.k-axis-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

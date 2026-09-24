@@ -1,194 +1,113 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="utf-8">
-  <title>Diffusion Lab</title>
-  <link rel="stylesheet" href="style.css">
+<meta charset="utf-8">
+<title>Diffusion Lab</title>
+<link rel="stylesheet" href="/lib/kit/kit.css">
+<link rel="stylesheet" href="/app/style.css">
 </head>
-<body>
-  <div id="app">
+<body class="k-app">
+  <header class="k-header">
+    <h1>Diffusion Lab</h1>
+    <span class="k-sub">watch a diffusion model think</span>
+    <span class="k-spacer"></span>
+    <span id="model-name" class="dim">no model</span>
+    <span id="backend">…</span>
+  </header>
+  <div class="k-body">
+    <!-- left: model + generation controls -->
+    <aside class="k-side">
+      <div class="k-panel">
+        <h2>model</h2>
+        <div id="model"></div>
+        <label class="k-field" title="Sampler — choose before loading weights"><span>sampler</span>
+          <select id="scheduler">
+            <option value="auto">auto</option>
+            <option value="ddim">DDIM</option>
+            <option value="lcm">LCM</option>
+          </select></label>
+        <label class="k-field" title="Quantize U-Net weights to INT8 — smaller and faster, GPU only">
+          <span>INT8 U-Net</span><input type="checkbox" id="int8"></label>
+      </div>
+      <div class="k-panel">
+        <h2>generate</h2>
+        <div id="gen"></div>
+        <label class="k-field" title="Record cross-attention every step for the inspector">
+          <span>trace attn</span><input type="checkbox" id="trace" checked></label>
+      </div>
+      <div class="k-panel fold folded" id="init-section">
+        <h2>init image <span class="dim">img2img / inpaint</span></h2>
+        <div class="k-row k-nowrap"><button id="init-pick" class="small">Image…</button>
+          <span id="init-path" class="k-grow dim name">none</span>
+          <button id="init-clear" class="k-link" title="Clear the init image (and mask)">clear</button></div>
+        <label class="k-field"><span>strength</span>
+          <input id="strength" type="range" min="0" max="1" step="0.05" value="0.8">
+          <span id="strength-val" class="k-val">0.80</span></label>
+        <label class="k-field"><span>sample VAE</span><input id="vae-sample" type="checkbox"></label>
+        <div class="k-row k-nowrap"><button id="mask-pick" class="small" title="White = inpaint">Mask…</button>
+          <span id="mask-path" class="k-grow dim name">none</span>
+          <button id="mask-clear" class="k-link" title="Clear the mask">clear</button></div>
+      </div>
+      <div class="k-panel fold folded" id="cn-section">
+        <h2>controlnets <span id="cn-stale" class="warn" hidden>· stale</span></h2>
+        <div id="cn-list" class="k-col"></div>
+        <button id="cn-add">Add ControlNet…</button>
+      </div>
+      <div class="k-panel">
+        <h2>lora adapters <span class="dim">merged at load</span></h2>
+        <div id="lora-list" class="k-col"></div>
+        <button id="lora-add">Add LoRA…</button>
+      </div>
+    </aside>
 
-    <header id="modelbar">
-      <span id="brand">◆ Diffusion&nbsp;Lab</span>
-      <span class="tagline">watch a diffusion model think</span>
-      <span class="grow"></span>
-      <span id="model-name" class="muted">no model</span>
-      <select id="scheduler" title="Sampler — choose before loading weights">
-        <option value="auto">sampler: auto</option>
-        <option value="ddim">DDIM</option>
-        <option value="lcm">LCM</option>
-      </select>
-      <label class="mb-check"
-             title="Quantize U-Net weights to INT8 — smaller and faster, GPU only">
-        <input type="checkbox" id="int8"> INT8
-      </label>
-      <button id="btn-open" title="Pick a diffusers model directory">Open model…</button>
-      <button id="btn-load" disabled title="Load weights into the pipeline">Load weights</button>
-      <span id="backend" class="badge">…</span>
-    </header>
-
-    <main>
-      <!-- ── left: generation controls ─────────────────────────────── -->
-      <aside id="controls">
-        <label class="hdr">Prompt</label>
-        <textarea id="prompt" rows="3" placeholder="a fox in autumn leaves, oil painting"></textarea>
-
-        <label class="hdr">Negative prompt</label>
-        <textarea id="neg" rows="2" placeholder="blurry, low quality"></textarea>
-
-        <div class="row">
-          <div class="field"><label>Steps</label>
-            <input id="steps" type="number" min="1" max="150" value="25"></div>
-          <div class="field"><label>Guidance</label>
-            <input id="cfg" type="number" min="1" max="30" step="0.5" value="7.5"></div>
-        </div>
-        <div class="row">
-          <div class="field"><label>Width</label>
-            <input id="width" type="number" min="64" max="1024" step="64" value="512"></div>
-          <div class="field"><label>Height</label>
-            <input id="height" type="number" min="64" max="1024" step="64" value="512"></div>
-        </div>
-        <div class="row">
-          <div class="field grow"><label>Seed</label>
-            <input id="seed" type="number" min="0" value="0"></div>
-          <button id="btn-rand" class="icon" title="Random seed">⤮</button>
-        </div>
-
-        <label class="check">
-          <input type="checkbox" id="trace" checked> Capture cross-attention
-        </label>
-
-        <details id="init-section" class="accordion">
-          <summary>Init image (img2img / inpaint)</summary>
-          <div class="field acc-row">
-            <label>Image</label>
-            <div class="pick-row">
-              <button id="init-pick" type="button">Pick…</button>
-              <span id="init-path" class="muted small">none</span>
-              <button id="init-clear" type="button" class="icon"
-                      title="Clear init image">✕</button>
-            </div>
-          </div>
-          <div class="field">
-            <label>Strength <span id="strength-val" class="muted">0.80</span></label>
-            <input id="strength" type="range" min="0" max="1" step="0.05" value="0.8">
-          </div>
-          <label class="check">
-            <input id="vae-sample" type="checkbox"> Sample VAE encoding
-          </label>
-          <div class="field acc-row">
-            <label>Mask (white = inpaint)</label>
-            <div class="pick-row">
-              <button id="mask-pick" type="button">Pick…</button>
-              <span id="mask-path" class="muted small">none</span>
-              <button id="mask-clear" type="button" class="icon"
-                      title="Clear mask">✕</button>
-            </div>
-          </div>
-        </details>
-
-        <details id="cn-section" class="accordion">
-          <summary>ControlNets <span id="cn-stale" class="muted small hidden">· stale</span></summary>
-          <div id="cn-list"></div>
-          <button id="cn-add" type="button">Add ControlNet…</button>
-        </details>
-
-        <label class="hdr">LoRA adapters</label>
-        <div id="lora-list"></div>
-        <button id="btn-lora-add">Add LoRA…</button>
-
-        <div class="actions">
-          <button id="btn-generate" class="primary" disabled>Generate</button>
-          <button id="btn-cancel" disabled>Cancel</button>
-        </div>
-      </aside>
-
-      <!-- ── center: the denoising viewport ────────────────────────── -->
-      <section id="stage">
-        <div id="canvas-wrap">
-          <canvas id="view"></canvas>
-          <div id="view-hint">Open a diffusers model directory to begin.</div>
-        </div>
-        <div id="transport">
-          <div id="progress"><div id="progress-bar"></div></div>
-          <input id="scrub" type="range" min="0" max="0" value="0" disabled
-                 title="Scrub the denoising trajectory">
-          <span id="step-label" class="muted">idle</span>
-        </div>
-      </section>
-
-      <!-- ── right: cross-attention inspector ──────────────────────── -->
-      <aside id="attn">
-        <label class="hdr">Cross-attention</label>
-        <p class="muted small">Click a prompt token to see where it attends —
-           or steer how strongly it pulls.</p>
-        <div id="tokens" class="tokens">
-          <span class="muted small">Load a model to tokenize the prompt.</span>
-        </div>
-
-        <div class="panel-block">
-          <label class="hdr">Steering</label>
-          <p id="steer-empty" class="muted small">Select a token, then bias its
-             attention. Applies on the next Generate.</p>
-          <div id="steer-ctl" class="hidden">
-            <div class="field">
-              <label>Influence on <span id="steer-tok" class="accent">—</span>
-                <span id="steer-val" class="muted">neutral</span></label>
-              <input id="steer-bias" type="range"
-                     min="-4" max="4" step="0.5" value="0">
-            </div>
-            <button id="steer-clear">Clear all steering</button>
-          </div>
-        </div>
-
-        <div class="panel-block">
-          <label class="hdr">Word axes</label>
-          <p class="muted small">Build a control direction from two word sets —
-             diff-of-means in CLIP conditioning space. Drag strength to walk it.</p>
-          <div class="field">
-            <label>A · from</label>
-            <textarea id="wa-neg" rows="2"
-                      placeholder="a red car"></textarea>
-          </div>
-          <div class="field">
-            <label>B · to</label>
-            <textarea id="wa-pos" rows="2"
-                      placeholder="a blue truck"></textarea>
-          </div>
-          <div class="field">
-            <label>Name <span class="muted small">(optional)</span></label>
-            <input id="wa-name" type="text" placeholder="age">
-          </div>
-          <button id="wa-build" disabled>Add axis</button>
-          <p id="wa-hint" class="muted small">Load a model, then build an axis
-             from two word sets.</p>
-          <div id="wa-host" class="axes-host"></div>
-        </div>
-
-        <div class="panel-block">
-          <label class="hdr">Attention overlay</label>
-          <div class="field">
-            <label>Layer</label>
-            <select id="block" disabled></select>
-          </div>
-          <label class="check">
-            <input type="checkbox" id="overlay-on" disabled> Show overlay
-          </label>
-          <div class="field">
-            <label>Opacity <span id="op-val" class="muted">70%</span></label>
-            <input id="opacity" type="range" min="0" max="100" value="70" disabled>
-          </div>
-        </div>
-      </aside>
+    <!-- centre: the denoising viewport -->
+    <main class="k-main">
+      <div class="k-viewport">
+        <canvas id="view"></canvas>
+        <div class="k-hint" id="view-hint">Pick a diffusers SD1.5 directory and load its weights.</div>
+      </div>
+      <div class="k-toolbar" id="run">
+        <input id="scrub" type="range" min="0" max="0" value="0" disabled title="Scrub the denoising trajectory">
+      </div>
+      <div class="k-toolbar bare" id="gallery"></div>
     </main>
 
-    <footer id="status">
-      <span id="status-text">Ready — open a model to start.</span>
-      <span class="grow"></span>
-      <span id="diff-version" class="muted"></span>
-    </footer>
+    <!-- right: cross-attention inspector -->
+    <aside class="k-side right">
+      <div class="k-panel">
+        <h2>cross-attention</h2>
+        <p class="k-note">Click a prompt token to see where it attends, or steer how strongly it pulls.</p>
+        <div id="tokens" class="tokens dim">Load a model to tokenize the prompt.</div>
+      </div>
+      <div class="k-panel">
+        <h2>steering</h2>
+        <p id="steer-empty" class="k-note">Select a token, then bias its attention. Applies on the next Generate.</p>
+        <div id="steer-ctl" class="k-col" hidden>
+          <div>influence on <span id="steer-tok" class="accent">—</span> <span id="steer-val" class="dim">neutral</span></div>
+          <input id="steer-bias" type="range" min="-4" max="4" step="0.5" value="0">
+          <button id="steer-clear">Clear all steering</button>
+        </div>
+      </div>
+      <div class="k-panel">
+        <h2>word axes <span class="dim">CLIP conditioning space</span></h2>
+        <div id="axes"></div>
+      </div>
+      <div class="k-panel">
+        <h2>attention overlay</h2>
+        <label class="k-field"><span>layer</span><select id="block" disabled></select></label>
+        <label class="k-field"><span>show overlay</span><input type="checkbox" id="overlay-on" disabled></label>
+        <label class="k-field"><span>opacity</span>
+          <input id="opacity" type="range" min="0" max="100" value="70" disabled>
+          <span id="op-val" class="k-val">70%</span></label>
+      </div>
+    </aside>
   </div>
-
-  <script type="module" src="/app/app.js"></script>
+  <footer class="k-statusbar">
+    <span id="status">idle</span>
+    <span class="dim" id="timing"></span>
+    <span class="k-spacer"></span>
+    <span class="dim" id="diff-version"></span>
+  </footer>
+  <script type="module" src="/app/main.js"></script>
 </body>
 </html>

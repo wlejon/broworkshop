@@ -1,108 +1,60 @@
-// Diffusion Lab word-axis end-to-end test (loads weights — heavier).
-// Exercises the EXACT pipeline-construction path the worker uses (createPipeline
-// + loadWeights + LCM-LoRA), builds an "age" word-axis via the same diff-of-means
-// recipe as lab/diffusion-worker.js, and asserts the conditioning-control seam
-// steers an SD1.5-LCM generation:
+// Diffusion Lab word-axis seam test (loads weights). Builds the pipeline the
+// way lab/diffusion-worker.js does (createPipeline + loadWeights + the
+// LCM-LoRA), builds an "age" axis with the kit's recipe (imagegen-worker.js
+// wordAxis: CLIP diff of means, no sink dims), and checks the
+// conditioning-control seam through that path:
 //   - encodeConditioning is CLIP-width (768)
-//   - baseline vs steered (same seed) DIFFER   -> seam wired through this path
-//   - alpha 0 == baseline                       -> zero is a true no-op
+//   - a steered render differs from the baseline at the same seed
+//   - strength 0 reproduces the baseline (a true no-op)
+// It measures pixel differences only. It does not judge image quality.
 //
-//   bro-headless demos/diffusion-lab tests/test_word_axis.js
+//   scripts/validate.sh --ml demos/diffusion-lab
+
+import { check, eq, test, done, needWeights, skip } from "/lib/kit/test.js";
+import { findWeights } from "/lib/kit/weights.js";
+import { wordAxis } from "/lib/kit/imagegen-worker.js";
 import { Profiles } from "/app/lab/profiles.js";
 
-(function () {
-  var fails = 0;
-  function ok(name, cond, extra) {
-    console.log((cond ? 'PASS ' : 'FAIL ') + name +
-      (extra != null ? ' (' + extra + ')' : ''));
-    if (!cond) fails++;
-  }
-  function done() {
-    console.log(fails === 0 ? '\nWORD-AXIS E2E PASSED'
-                            : '\n' + fails + ' FAILURE(S)');
-  }
+if (typeof bro === 'undefined' || !bro.diffusion) skip('bro.diffusion unavailable');
+const modelDir = needWeights('SD1.5', ['brodiffusion/weights/sd15'], { probe: 'tokenizer/vocab.json' });
+const lcmLora = findWeights(['brodiffusion/weights/lcm-lora-sdv1-5/pytorch_lora_weights.safetensors']);
 
-  if (typeof bro === 'undefined' || !bro.diffusion) {
-    console.log('SKIP (bro.diffusion unavailable)'); return;
-  }
-  var fs = require('fs');
-  var WROOT = (typeof process !== 'undefined' && process.env &&
-               process.env.BRO_WEIGHTS) || 'D:/projects';
-  var modelDir = WROOT + '/brodiffusion/weights/sd15';
-  var lcmLora = WROOT + '/brodiffusion/weights/lcm-lora-sdv1-5/' +
-                'pytorch_lora_weights.safetensors';
-  if (!fs.existsSync(modelDir + '/tokenizer/vocab.json')) {
-    console.log('SKIP (no sd15 weights at ' + modelDir + ')'); return;
-  }
+bro.diffusion.init();
+const det = Profiles.detect(modelDir);
+const spec = det.profile.buildSpec(det, 'lcm', false);
+const pipe = bro.diffusion.createPipeline(spec.pipeline);
+pipe.loadWeights(spec.weights.text, spec.weights.unet, spec.weights.vae);
+if (lcmLora) pipe.applyLora(lcmLora, 1.0);
+console.log('pipeline ready (' + (pipe.config().modelClass || '?') + ', lcm' + (lcmLora ? ' + LCM-LoRA' : '') + ')');
 
-  bro.diffusion.init();
-  var det = Profiles.detect(modelDir);
-  var spec = det.profile.buildSpec(det, 'lcm', false);
-  var pipe = bro.diffusion.createPipeline(spec.pipeline);
-  pipe.loadWeights(spec.weights.text, spec.weights.unet, spec.weights.vae);
-  if (fs.existsSync(lcmLora)) pipe.applyLora(lcmLora, 1.0);
-  console.log('pipeline ready (' + (pipe.config().modelClass || '?') + ', lcm)');
+test('encodeConditioning is CLIP width', () => eq(pipe.encodeConditioning('a person').cols, 768, 'cols'));
 
-  // diff-of-means age axis — the worker's recipe (skip BOS, no MASSIVE).
-  function meanContent(p) {
-    var e = pipe.encodeConditioning(p);
-    ok('encodeConditioning width 768', e.cols === 768, e.cols);
-    var rows = e.rows, cols = e.cols, d = e.data, out = new Float64Array(cols), n = rows - 1;
-    for (var r = 1; r < rows; r++) { var o = r * cols; for (var c = 0; c < cols; c++) out[c] += d[o + c]; }
-    if (n > 0) for (var k = 0; k < cols; k++) out[k] /= n;
-    return out;
-  }
-  function setMean(ps) {
-    var sum = null, cols = 0;
-    for (var i = 0; i < ps.length; i++) { var m = meanContent(ps[i]); if (!sum) { sum = new Float64Array(m.length); cols = m.length; } for (var c = 0; c < cols; c++) sum[c] += m[c]; }
-    for (var k = 0; k < cols; k++) sum[k] /= ps.length;
-    return sum;
-  }
-  var mA = setMean(['a young person', 'a child', 'a youthful face']);
-  var mB = setMean(['an old person', 'an elderly man', 'a wrinkled aged face']);
-  var cols = mA.length, v = new Float64Array(cols), nrm = 0;
-  for (var c = 0; c < cols; c++) { v[c] = mB[c] - mA[c]; nrm += v[c] * v[c]; }
-  nrm = Math.sqrt(nrm);
-  var unit = new Float32Array(cols);
-  for (var c2 = 0; c2 < cols; c2++) unit[c2] = v[c2] / nrm;
-  console.log('age axis separation = ' + nrm.toFixed(2));
-  pipe.setControlVector('age', unit, 0.0, 1.0);
+const axis = wordAxis(pipe, ['a young person', 'a child', 'a youthful face'],
+                      ['an old person', 'an elderly man', 'a wrinkled aged face']);
+console.log('age axis separation = ' + axis.sep.toFixed(2));
+test('axis has separation', () => check(axis.sep > 0, 'sep ' + axis.sep));
+pipe.setControlVector('age', axis.unit, 0.0, 1.0);
 
-  var prompt = 'a portrait photo of a person';
-  var opts = { width: 512, height: 512, steps: 6, guidanceScale: 1.0, seed: 1234, negativePrompt: '' };
-
-  // Step-wise render to the final frame (the worker's prime + stepOnce loop).
-  function render(controls) {
+const opts = { width: 512, height: 512, steps: 6, guidanceScale: 1.0, seed: 1234, negativePrompt: '' };
+function render(controls) {
     pipe.clearControl();
     if (controls) pipe.setControl(controls);
-    var st = pipe.prime(prompt, opts);
-    var img = null;
-    while (!st.done) { st.stepOnce(); img = st.decode(); }
-    return img;
-  }
-  function meanAbsDiff(a, b) {
-    var n = Math.min(a.length, b.length), s = 0;
-    for (var i = 0; i < n; i++) s += Math.abs(a[i] - b[i]);
+    const st = pipe.prime('a portrait photo of a person', opts);
+    while (!st.done) st.stepOnce();
+    return st.decode();
+}
+function meanAbsDiff(a, b) {
+    const n = Math.min(a.length, b.length);
+    let s = 0;
+    for (let i = 0; i < n; i++) s += Math.abs(a[i] - b[i]);
     return s / n;
-  }
+}
 
-  var base = render(null);
-  var steer = render({ age: 30.0 });
-  var zero = render({ age: 0.0 });
-
-  // Save real bro-rendered frames for visual confirmation (RGBA, 4 channels).
-  if (bro.image && bro.image.encodePngFile) {
-    try {
-      bro.image.encodePngFile('tests/out_age_baseline.png', base.data, base.width, base.height, 4);
-      bro.image.encodePngFile('tests/out_age_steered.png', steer.data, steer.width, steer.height, 4);
-      console.log('saved tests/out_age_{baseline,steered}.png');
-    } catch (e) { console.log('png save skipped: ' + e.message); }
-  }
-  var dSteer = meanAbsDiff(base.data, steer.data);
-  var dZero = meanAbsDiff(base.data, zero.data);
-  console.log('mean|Δpixel| baseline vs steered(+30) = ' + dSteer.toFixed(2));
-  console.log('mean|Δpixel| baseline vs alpha0        = ' + dZero.toFixed(3));
-  ok('control steers the image (lab createPipeline path)', dSteer > 2.0, dSteer.toFixed(2));
-  ok('alpha 0 is a true no-op', dZero < 0.01, dZero.toFixed(3));
-  done();
-})();
+const base = render(null);
+const dSteer = meanAbsDiff(base.data, render({ age: 30.0 }).data);
+const dZero = meanAbsDiff(base.data, render({ age: 0.0 }).data);
+console.log('mean |Δpixel| baseline vs steered(+30) = ' + dSteer.toFixed(2) + ', vs strength 0 = ' + dZero.toFixed(3));
+test('the axis steers the render', () => check(dSteer > 2.0, 'Δ ' + dSteer.toFixed(2)));
+test('strength 0 is a true no-op', () => check(dZero < 0.01, 'Δ ' + dZero.toFixed(3)));
+pipe.dispose();
+done('diffusion-lab word axis');
