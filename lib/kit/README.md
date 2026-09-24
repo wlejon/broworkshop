@@ -25,6 +25,7 @@ Ported examples: `demos/kws-lab` and `demos/lm-playground` (ML labs),
 | `humanoid.js` | a shared humanoid clip library (idle/walk/run/crouch/...) + the autoRig bone map |
 | `physics3d.js` | Jolt + scene plumbing: body+visual pairs, body groups, rods, the event drain, pick rays, a mouse grabber |
 | `ragdoll.js` | a 12-part humanoid `Physics.createRagdoll` rig: poses as per-joint deltas, FK, blend, error metrics |
+| `text.js` | `bro.text` from JS: UTF-16 ↔ UTF-8 offsets, caret stops, cluster maps (data + drawn on a canvas) |
 | `test.js` | headless test helpers (assert, wait, click, type, screenshot) |
 
 ## Page skeleton
@@ -208,6 +209,23 @@ Used by demos/anim-lab and demos/character-lab (`avatar.js`).
   Ctrl+S / Ctrl+Shift+S / Ctrl+O / Ctrl+N (ignored while typing in a field)
   and undo/redo buttons that enable with the history. Returns the commands
   plus `menu` (`{ file, handlers }`) for `boot({ menu })`.
+
+**text.js** — `bro.text` offsets are UTF-8 **bytes**; JS strings, Selection
+and Range count UTF-16 units. Convert explicitly:
+- `u16ToU8(str, i)`, `u8ToU16(str, b)`, `utf8Length`, `sliceByBytes(str, a, b)`,
+  `codePoints(str)` (`{ cp, char, u16, u8, u16Len, u8Len }` each),
+  `forEachCodePoint`, `codePointLabels` (for code-point strips),
+  `isCombining`, `isRtlCodePoint`.
+- `shape(text, opts)`: `bro.text.shape` (default Arial 32), throws on null.
+- `stepForward/stepBackward(text, opts, byte)`, `caretStops(text, opts)`:
+  the byte offsets a caret may occupy (cluster boundaries).
+- `clusterMap(text, opts)`: each cluster in visual order with byte + UTF-16
+  spans, source text, pen `x`, `advance`, `glyphs`, `rtl`, `ligature`,
+  `multiCodePoint`; plus `tiles`, `monotonic`, `reordered`, `advanceSum`.
+- `drawClusterMap(canvas, text, opts, { x, baseline, labels, stops, bg })`:
+  fillText with a box per cluster at its own pen x (ligatures pink,
+  multi-glyph orange, RTL purple), byte-span labels and caret-stop ticks.
+  Returns the map. Used by demos/text-lab and demos/range-selection-lab.
 
 ## Headless tests
 

@@ -31,8 +31,8 @@
 // browser fallbacks (0.8 × ascent, and the descent) rather than table lookups.
 // canvas_scene.cpp says so in a comment. The relationships above still hold.
 
-import { el, n2, buildTable, verdict } from '/app/textutil.js';
 import { shape } from '/app/shaping.js';
+import { n2, table, verdict, result } from '/app/report.js';
 
 // The complete spec surface, in spec order. Used to assert nothing is missing
 // AND that nothing extra has been invented.
@@ -169,27 +169,36 @@ export function consistencyRow(text, font) {
  * Ink ascent must respond to WHICH characters were measured, not merely to the
  * font. This is the check that separates a real ink box from one faked out of
  * the font metrics: 'ace' (x-height only) must have a smaller ascent than
- * 'ABC' (cap height), which must be no larger than 'bdfk' (ascender height);
- * and 'ace' must have no descent while 'gjpqy' has one.
+ * 'ABC' (cap height), which must be no larger than 'bdfk' (ascender height).
+ *
+ * Below the baseline: flat-bottomed 'mnx' have NO ink there at all, round
+ * 'ace' dip by the optical OVERSHOOT only (type designers sink round glyphs
+ * ~1-2% of the em so they look level; Arial at 64px: 0.75px), and 'gjpqy'
+ * descend by a fifth of the em. An ink box that ignored the glyphs would
+ * report the same descent for all three.
  */
 export function inkSensitivityReport(font) {
     const f = font || '64px Arial';
+    const size = parseFloat(f);
     const x = measure('acemn', f);
+    const flat = measure('mnx', f);
     const caps = measure('ABCH', f);
     const asc = measure('bdfkl', f);
     const desc = measure('gjpqy', f);
     return {
-        font: f,
+        font: f, size,
         xAscent: x.actualBoundingBoxAscent,
         capAscent: caps.actualBoundingBoxAscent,
         ascAscent: asc.actualBoundingBoxAscent,
         xDescent: x.actualBoundingBoxDescent,
+        flatDescent: flat.actualBoundingBoxDescent,
         descDescent: desc.actualBoundingBoxDescent,
         xBelowCaps: x.actualBoundingBoxAscent < caps.actualBoundingBoxAscent,
         capsAtMostAscenders: caps.actualBoundingBoxAscent <= asc.actualBoundingBoxAscent + 0.01,
-        // 'acemn' sits entirely on the baseline: no descent at all.
-        xNoDescent: x.actualBoundingBoxDescent <= 0.01,
-        descHasDescent: desc.actualBoundingBoxDescent > 0.5,
+        flatNoDescent: flat.actualBoundingBoxDescent <= 0.01,
+        // x-height letters reach below the baseline by overshoot only.
+        xOnlyOvershoot: x.actualBoundingBoxDescent < size * 0.03,
+        descHasDescent: desc.actualBoundingBoxDescent > size * 0.15,
         // The font box does NOT move — it is the face's, not the string's.
         fontBoxStable: Math.abs(x.fontBoundingBoxAscent - desc.fontBoundingBoxAscent) < 1e-6,
     };
@@ -488,55 +497,37 @@ export function drawMetrics(canvas, text, font) {
 
 // ── Panel ───────────────────────────────────────────────────────────────────
 
-let metricCanvas = null;
-let rowCells = null;
-let surfaceHost = null;
-let inkHost = null;
-let alignHost = null;
-let baseHost = null;
-let scaleHost = null;
-let domHost = null;
-let wordHost = null;
+let ui = null;
 
 export function initMetrics() {
-    metricCanvas = document.getElementById('metricsCanvas');
-    ctx = document.getElementById('metricsProbe').getContext('2d');
-
-    surfaceHost = document.getElementById('metricsSurface');
-    inkHost = document.getElementById('metricsInk');
-    alignHost = document.getElementById('metricsAlign');
-    baseHost = document.getElementById('metricsBaseline');
-    scaleHost = document.getElementById('metricsScaling');
-    domHost = document.getElementById('metricsDom');
-    wordHost = document.getElementById('metricsWords');
-
-    rowCells = buildTable(document.getElementById('metricsTable'),
-        ['sample', 'width', 'ink W', 'ink H', 'ascent', 'descent', 'font asc/desc', 'em asc/desc', 'w == shaped'],
-        METRIC_SAMPLES.length).cells;
-
+    const $ = (id) => document.getElementById(id);
+    // Every measureText() here runs on an off-layout scratch canvas, so the
+    // drawn canvas keeps its own font state.
+    ctx = document.createElement('canvas').getContext('2d');
+    ui = {
+        canvas: $('metricsCanvas'), surface: $('metricsSurface'), ink: $('metricsInk'), align: $('metricsAlign'),
+        baseline: $('metricsBaseline'), scaling: $('metricsScaling'), dom: $('metricsDom'), words: $('metricsWords'),
+        rows: table($('metricsTable'),
+            ['sample', 'width', 'ink W', 'ink H', 'ascent', 'descent', 'font asc/desc', 'em asc/desc', 'w == shaped'],
+            METRIC_SAMPLES.length),
+    };
     refreshMetrics();
 }
 
 export function refreshMetrics(text, font) {
-    drawMetrics(metricCanvas, text, font);
+    drawMetrics(ui.canvas, text, font);
 
-    const surf = surfaceReport();
-    metricsState.surface = surf;
-    surfaceHost.textContent =
+    const surf = metricsState.surface = surfaceReport();
+    result(ui.surface, surf.complete && surf.extra.length === 0 && surf.allNumbers,
         `${surf.present.length} members present. Missing from the spec surface: ` +
         (surf.missing.length ? surf.missing.join(', ') : 'none — the surface is complete') +
         '. Non-spec extras: ' + (surf.extra.length ? surf.extra.join(', ') : 'none') +
-        '. All finite numbers: ' + (surf.allNumbers ? 'yes' : 'NO') + '.';
-    surfaceHost.className = 'result ' +
-        (surf.complete && surf.extra.length === 0 && surf.allNumbers ? 'ok' : 'bad');
+        '. All finite numbers: ' + (surf.allNumbers ? 'yes' : 'NO') + '.');
 
-    metricsState.rows = METRIC_SAMPLES.map((s) => {
-        const family = s.id === 'rtl' || s.id === 'emoji' ? 'Arial' : 'Arial';
-        return Object.assign({ id: s.id, note: s.note },
-            consistencyRow(s.text, `48px ${family}`));
-    });
+    metricsState.rows = METRIC_SAMPLES.map((s) =>
+        Object.assign({ id: s.id, note: s.note }, consistencyRow(s.text, '48px Arial')));
     metricsState.rows.forEach((r, i) => {
-        const c = rowCells[i];
+        const c = ui.rows[i];
         const s = METRIC_SAMPLES[i];
         c[0].textContent = (s.text === '' ? '(empty)' : s.text === ' ' ? '(space)' : s.text)
             + ' — ' + s.note;
@@ -550,78 +541,65 @@ export function refreshMetrics(text, font) {
         verdict(c[8], r.widthMatchesShape, r.widthMatchesShape ? 'exact' : 'Δ' + n2(r.m.width - r.shapedWidth));
     });
 
-    const ink = inkSensitivityReport();
-    metricsState.ink = ink;
-    inkHost.textContent =
+    const ink = metricsState.ink = inkSensitivityReport();
+    const descentOk = ink.flatNoDescent && ink.xOnlyOvershoot && ink.descHasDescent;
+    result(ui.ink, ink.xBelowCaps && ink.capsAtMostAscenders && descentOk && ink.fontBoxStable,
         `ink ascent: "acemn" ${n2(ink.xAscent)} < "ABCH" ${n2(ink.capAscent)} ≤ "bdfkl" ${n2(ink.ascAscent)} — ` +
         `${ink.xBelowCaps && ink.capsAtMostAscenders ? 'ordered correctly' : 'OUT OF ORDER'}. ` +
-        `ink descent: "acemn" ${n2(ink.xDescent)} (none), "gjpqy" ${n2(ink.descDescent)} — ` +
-        `${ink.xNoDescent && ink.descHasDescent ? 'the box follows the glyphs' : 'WRONG'}. ` +
-        `Meanwhile fontBoundingBoxAscent did not move: ${ink.fontBoxStable ? 'correct — it is the face, not the string' : 'IT MOVED — bug'}.`;
-    inkHost.className = 'result ' +
-        (ink.xBelowCaps && ink.xNoDescent && ink.descHasDescent && ink.fontBoxStable ? 'ok' : 'bad');
+        `ink descent: "mnx" ${n2(ink.flatDescent)} (flat bottoms: none), "acemn" ${n2(ink.xDescent)} ` +
+        `(round overshoot only), "gjpqy" ${n2(ink.descDescent)} — ` +
+        `${descentOk ? 'the box follows the glyphs' : 'WRONG'}. Meanwhile fontBoundingBoxAscent did not move: ` +
+        `${ink.fontBoxStable ? 'correct — it is the face, not the string' : 'IT MOVED — bug'}.`);
 
-    const al = alignReport();
-    metricsState.align = al;
-    alignHost.textContent =
+    const al = metricsState.align = alignReport();
+    result(ui.align, al.widthStable && al.centerShift && al.rightShift && al.verticalUntouched,
         `width unchanged across left/center/right: ${al.widthStable ? 'yes' : 'NO'}. ` +
         `left→center moved the ink box by exactly width/2: ${al.centerShift ? 'yes' : 'NO'}. ` +
         `left→right moved it by the full width: ${al.rightShift ? 'yes' : 'NO'}. ` +
         `Ink WIDTH invariant: ${al.inkWidthStable ? 'yes' : 'NO'}. ` +
-        `Vertical metrics untouched by a horizontal change: ${al.verticalUntouched ? 'yes' : 'NO'}.`;
-    alignHost.className = 'result ' +
-        (al.widthStable && al.centerShift && al.rightShift && al.verticalUntouched ? 'ok' : 'bad');
+        `Vertical metrics untouched by a horizontal change: ${al.verticalUntouched ? 'yes' : 'NO'}.`);
 
-    const bl = baselineReport();
-    metricsState.baseline = bl;
-    baseHost.textContent =
+    const bl = metricsState.baseline = baselineReport();
+    result(ui.baseline, bl.alphaIsZero && bl.topEmAscentZero && bl.topShiftIsEmAscent && bl.rigid,
         `alphabeticBaseline is 0 under textBaseline:'alphabetic': ${bl.alphaIsZero ? 'yes' : 'NO'}. ` +
         `Under 'top' the em ascent collapses to 0: ${bl.topEmAscentZero ? 'yes' : 'NO'}, ` +
         `and the baseline moved down by exactly emHeightAscent: ${bl.topShiftIsEmAscent ? 'yes' : 'NO'}. ` +
         `Every vertical metric translated rigidly by that same shift: ${bl.rigid ? 'yes' : 'NO'}. ` +
         `'middle' lands between 'top' and 'bottom': ${bl.middleBetween ? 'yes' : 'NO'}. ` +
-        `Width untouched: ${bl.widthStable ? 'yes' : 'NO'}.`;
-    baseHost.className = 'result ' +
-        (bl.alphaIsZero && bl.topEmAscentZero && bl.topShiftIsEmAscent && bl.rigid ? 'ok' : 'bad');
+        `Width untouched: ${bl.widthStable ? 'yes' : 'NO'}.`);
 
-    const sc = scalingReport();
-    metricsState.scaling = sc;
+    const sc = metricsState.scaling = scalingReport();
     const badScale = sc.checks.filter((c) => !c.ok);
-    scaleHost.textContent =
+    result(ui.scaling, badScale.length === 0,
         `24px → 48px. The 8 scalable members (advance, face and baseline metrics) ` +
         `doubled to within 2%: ${sc.scalableExact ? 'yes' : 'NO'}. The 4 ink members are ` +
-        `integral pixel boxes around a HINTED outline, so they drift by up to ` +
+        `pixel-snapped boxes around a HINTED outline, so they drift by up to ` +
         `${n2(sc.maxInkError)}px — hinting is non-linear by design, and requiring exact ` +
         `doubling there would be asserting it does not exist. ` +
         (badScale.length === 0
             ? 'All twelve within their own tolerance.'
             : 'Outside tolerance: ' + badScale.map((c) =>
-                `${c.key} ${n2(c.small)}→${n2(c.large)} (expected ${n2(c.expected)})`).join(', '));
-    scaleHost.className = 'result ' + (badScale.length === 0 ? 'ok' : 'bad');
+                `${c.key} ${n2(c.small)}→${n2(c.large)} (expected ${n2(c.expected)})`).join(', ')));
 
-    const dom = domAgreementReport();
-    metricsState.domAgreement = dom;
+    const dom = metricsState.domAgreement = domAgreementReport();
     if (dom) {
         const off = dom.filter((d) => !d.agrees);
-        domHost.textContent =
+        result(ui.dom, off.length === 0,
             `${dom.length} inline boxes measured by layout and by canvas: ` +
             (off.length === 0
                 ? 'all agree to within half a pixel — one shaping engine under both.'
-                : off.map((d) => `"${d.text}" DOM ${n2(d.domWidth)} vs canvas ${n2(d.canvasWidth)} (Δ${n2(d.delta)})`).join('; '));
-        domHost.className = 'result ' + (off.length === 0 ? 'ok' : 'bad');
+                : off.map((d) => `"${d.text}" DOM ${n2(d.domWidth)} vs canvas ${n2(d.canvasWidth)} (Δ${n2(d.delta)})`).join('; ')));
     }
 
-    const words = wordSplitProbe();
-    metricsState.wordSplit = words;
-    if (words && wordHost) {
+    const words = metricsState.wordSplit = wordSplitProbe();
+    if (words) {
         const broken = words.filter((w) => !w.matchesWholeShaped);
-        wordHost.textContent = words.map((w) =>
+        result(ui.words, broken.length === 0, words.map((w) =>
             `"${w.text}" (${w.size}px ${w.family}): layout ${n2(w.domWidth)}px vs the whole string ` +
             `shaped once ${n2(w.wholeShaped)}px — ${w.matchesWholeShaped ? 'identical' : `MISMATCH (Δ${n2(w.delta)})`}. ` +
             `Shaping each word alone would give ${n2(w.pieceSum)}px instead, ` +
             `losing ${n2(w.lostKerning)}px of kerning across the ${w.words - 1} space(s)` +
             (w.matchesPieceSum ? ' — which is exactly what layout reports' : '')
-          ).join(' · ');
-        wordHost.className = 'result ' + (broken.length === 0 ? 'ok' : 'bad');
+          ).join(' · '));
     }
 }

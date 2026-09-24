@@ -26,8 +26,10 @@
 // run that shaped. The report says which scripts genuinely rendered rather
 // than skipping the ones that did not — a missing font is a finding.
 
-import { el, n2, buildTable, verdict, utf8Length, codePoints } from '/app/textutil.js';
+import { utf8Length, codePoints } from '/lib/kit/text.js';
+import { h } from '/lib/kit/dom.js';
 import { shape, widthOf } from '/app/shaping.js';
+import { n2, table, verdict, result } from '/app/report.js';
 
 export const SCRIPT_SAMPLES = [
     {
@@ -371,43 +373,24 @@ export function normalizationReport(family) {
 
 // ── Panel ───────────────────────────────────────────────────────────────────
 
-let scriptCells = null;
-let joinCells = null;
-let ligHost = null;
-let devHost = null;
-let thaiHost = null;
-let normHost = null;
+let ui = null;
 
 export function initScripts() {
-    // Live specimens, each in a container with the right `dir` so layout gets
-    // the base direction right as well as the shaper.
-    const spec = document.getElementById('scriptSpecimens');
+    const $ = (id) => document.getElementById(id);
+    // Live specimens, each with the right `dir` so layout gets the base
+    // direction right as well as the shaper.
     for (const s of SCRIPT_SAMPLES) {
-        const box = el('div', 'specimen');
-        const head = el('div', 'spec-head');
-        head.appendChild(el('span', 'spec-name', s.name));
-        head.appendChild(el('span', 'spec-gloss', s.gloss));
-        box.appendChild(head);
-        const line = el('div', 'spec-text');
-        line.setAttribute('dir', s.dir);
-        line.textContent = s.text;
-        box.appendChild(line);
-        spec.appendChild(box);
+        $('scriptSpecimens').appendChild(h('div.specimen', null,
+            h('div.spec-head', null, h('span.spec-name', null, s.name), h('span.spec-gloss', null, s.gloss)),
+            h('div.spec-text', { dir: s.dir }, s.text)));
     }
-
-    scriptCells = buildTable(document.getElementById('scriptCoverage'),
-        ['script', 'code pts', 'utf8 bytes', 'clusters', 'glyphs', 'width', 'distinct adv', 'coverage'],
-        SCRIPT_SAMPLES.length).cells;
-
-    joinCells = buildTable(document.getElementById('scriptJoining'),
-        ['position', 'probe', 'letter advance', 'rtl', 'differs from isolated'],
-        4).cells;
-
-    ligHost = document.getElementById('scriptLamAlef');
-    devHost = document.getElementById('scriptDevanagari');
-    thaiHost = document.getElementById('scriptThai');
-    normHost = document.getElementById('scriptNormalization');
-
+    ui = {
+        coverage: table($('scriptCoverage'),
+            ['script', 'code pts', 'utf8 bytes', 'clusters', 'glyphs', 'width', 'distinct adv', 'coverage'],
+            SCRIPT_SAMPLES.length),
+        joining: table($('scriptJoining'), ['position', 'probe', 'letter advance', 'rtl', 'differs from isolated'], 4),
+        lamAlef: $('scriptLamAlef'), deva: $('scriptDevanagari'), thai: $('scriptThai'), norm: $('scriptNormalization'),
+    };
     refreshScripts();
 }
 
@@ -417,7 +400,7 @@ export function refreshScripts() {
         return Object.assign({ id: s.id, name: s.name }, c);
     });
     scriptState.coverage.forEach((c, i) => {
-        const row = scriptCells[i];
+        const row = ui.coverage[i];
         row[0].textContent = c.name;
         row[1].textContent = c.codePoints;
         row[2].textContent = c.bytes;
@@ -431,56 +414,49 @@ export function refreshScripts() {
     scriptState.joining = joiningReport();
     const j = scriptState.joining;
     j.rows.forEach((r, i) => {
-        const row = joinCells[i];
+        const row = ui.joining[i];
         row[0].textContent = r.form;
         row[1].textContent = r.text;
         row[2].textContent = n2(r.advance);
         row[3].textContent = r.rtl ? 'yes' : 'NO';
         const differs = i === 0 ? '—' : (Math.abs(r.advance - j.advances.isolated) > 0.01 ? 'yes' : 'same');
-        verdict(row[4], i === 0 || differs === 'yes', differs);
-        if (i === 0) row[4].className = 'neutral';
+        verdict(row[4], i === 0 ? null : differs === 'yes', differs);
     });
 
     const lam = lamAlefReport();
     scriptState.ligature = lam;
-    ligHost.textContent =
+    result(ui.lamAlef, lam.oneGlyph && lam.narrower && lam.spansAllBytes,
         `لا (lam+alef) — ${lam.bytes} UTF-8 bytes, ${lam.clusters} cluster, ${lam.glyphs} glyph, ` +
         `width ${n2(lam.width)} vs ${n2(lam.apart)} for the two letters shaped apart. ` +
         `Mandatory ligature formed: ${lam.oneGlyph && lam.narrower ? 'YES' : 'NO'}. ` +
-        `Cluster spans all ${lam.bytes} bytes: ${lam.spansAllBytes ? 'yes' : 'NO'} · rtl flag: ${lam.rtl ? 'yes' : 'NO'}`;
-    ligHost.className = 'result ' + (lam.oneGlyph && lam.narrower && lam.spansAllBytes ? 'ok' : 'bad');
+        `Cluster spans all ${lam.bytes} bytes: ${lam.spansAllBytes ? 'yes' : 'NO'} · rtl flag: ${lam.rtl ? 'yes' : 'NO'}`);
 
     const dev = devanagariReport();
     scriptState.devanagari = dev;
-    devHost.textContent =
+    result(ui.deva, dev.ki.multiGlyphCluster && dev.ksha.oneGlyph && dev.word.fewerClustersThanCodePoints,
         `कि (ka + i-matra): 2 code points / ${dev.ki.bytes} bytes → ${dev.ki.clusters} cluster ` +
         `of ${dev.ki.glyphs} glyphs — the matra reordered, so no caret may sit between them. ` +
         `क्ष (ka+virama+ssa): 3 code points / ${dev.ksha.bytes} bytes → ` +
         `${dev.ksha.clusters} cluster, ${dev.ksha.glyphs} glyph, and narrower than the two ` +
         `consonants apart: ${dev.ksha.narrower ? 'yes' : 'NO'}. ` +
         `हिन्दी: ${dev.word.codePoints} code points → ${dev.word.clusters} clusters ` +
-        `[${dev.word.clusterSpans.join(' ')}] — fewer caret stops than characters.`;
-    devHost.className = 'result ' +
-        (dev.ki.multiGlyphCluster && dev.ksha.oneGlyph && dev.word.fewerClustersThanCodePoints ? 'ok' : 'bad');
+        `[${dev.word.clusterSpans.join(' ')}] — fewer caret stops than characters.`);
 
     const thai = thaiReport();
     scriptState.thai = thai;
-    thaiHost.textContent =
+    result(ui.thai, thai.sameWidth && thai.hasZeroAdvance,
         `ก = ${n2(thai.baseWidth)} · ก้ (with tone mark) = ${n2(thai.markedWidth)} · ` +
         `กั้ (two marks) = ${n2(thai.twoMarksWidth)}. Adding marks changed the width: ` +
         `${thai.sameWidth && thai.stillSameWithTwo ? 'NOT AT ALL, as required' : 'IT DID — bug'}. ` +
         `${thai.zeroAdvanceClusters} zero-advance cluster(s), and the mark did add a glyph: ` +
-        `${thai.extraGlyph ? 'yes' : 'NO'}.`;
-    thaiHost.className = 'result ' + (thai.sameWidth && thai.hasZeroAdvance ? 'ok' : 'bad');
+        `${thai.extraGlyph ? 'yes' : 'NO'}.`);
 
     const norm = normalizationReport();
     scriptState.normalization = norm;
-    normHost.textContent =
+    result(ui.norm, norm.sameWidth && norm.bothOneGlyph && norm.nfdClusterSpansAll,
         `NFC "á" = U+00E1: ${norm.nfcBytes} bytes, ${norm.nfcClusters} cluster, ${norm.nfcGlyphs} glyph, ${n2(norm.nfcWidth)}px. ` +
         `NFD "á" = U+0061 U+0301: ${norm.nfdBytes} bytes, ${norm.nfdClusters} cluster, ${norm.nfdGlyphs} glyph, ${n2(norm.nfdWidth)}px. ` +
         `Different byte lengths, identical rendering: ${norm.sameWidth && norm.bothOneGlyph ? 'yes' : 'NO'}. ` +
         `The decomposed form's cluster covers both code points (no caret inside): ` +
-        `${norm.nfdClusterSpansAll ? 'yes' : 'NO'}.`;
-    normHost.className = 'result ' +
-        (norm.sameWidth && norm.bothOneGlyph && norm.nfdClusterSpansAll ? 'ok' : 'bad');
+        `${norm.nfdClusterSpansAll ? 'yes' : 'NO'}.`);
 }

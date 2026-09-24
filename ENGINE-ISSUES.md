@@ -218,6 +218,7 @@ colour coding; both authored white kinds for exactly this. games/tilehaven
 house tints and cargo colours are affected too.
 
 ### Physics world `step()` discards contact events nobody has read yet (2026-09-24)
+**FIXED** in bro 5e93be7e (events accumulate until drained, capped at the listener capacity).
 Each `step()` on a `Physics.createWorldHandle()` world (and `stepInline` /
 `consumeStep` on the default world) does `contactsFront_ = listener_->drain()`
 in `src/physics/physics_world.cpp`, replacing the list `getContacts()`
@@ -271,6 +272,110 @@ then `mouseDown/mouseUp` 20px into `#plain`. The selection ends up collapsed
 in `#other`'s text at offset 2 (the x-nearest character). Chromium puts a
 collapsed caret inside the clicked div. demos/text-lab's editing panel
 shows the control row "non-editable empty div" as ENGINE BUG.
+
+### Range rects are shifted down by the menu bar height (2026-09-24)
+Once `bro.menu` is shown (every kit app's `boot()` installs one),
+`Range.getBoundingClientRect()` and `getClientRects()` (collapsed carets
+included) come back `contentTop` (28px) too low. Element
+`getBoundingClientRect()` and mouse hit-testing stay right. Repro: a page with
+`<p id=c>Select any segment</p>` gives Range(first 6 chars).top = p.top + 4.
+After `bro.menu.show(); bro.menu.set([{label:'File',items:[{id:'q',label:'Quit'}]}])`,
+`innerHeight` drops 1080→1052 and p.top is unchanged, but range.top becomes
+p.top + 32. So anything that hit-tests at a Range rect (drag-select from a
+word, a caret HUD, a popup anchored at the selection) lands one line low.
+demos/range-selection-lab's caret HUD reads 28px low. Its drag test takes its
+coordinates from element rects.
+
+### Range clone/extract drop partially-contained nodes; extract removes nothing (2026-09-24)
+`Range.cloneContents()` and `extractContents()` are only right when both
+boundaries are in the same text node, or are element offsets. With
+`<p id=q>Select any <em>live telemetry</em> here</p>`:
+- start text@3, end inside `<em>`'s text @4: clone gives `"ect any live"`, but
+  the spec wants `ect any <em>live</em>` (the partially-contained `<em>` is
+  cloned shallow around its part). extract returns `""` and leaves the
+  document untouched.
+- start text@**0**, end em text@4: clone gives `"live"`. A start at offset 0
+  is treated as "fully contained" and then never collected.
+- `<p id=p>The <strong>DOM Range</strong> interface</p>`, text@0 to the end
+  of `<strong>`'s text (@9): clone gives `""`.
+(`src/dom/range.cpp` `cloneContents` has no partially-contained-child step.)
+demos/range-selection-lab's "selected fragment" preview, clone and extract
+buttons show these results. Its tests pin the current wrong outputs as known
+engine issues.
+
+### `surroundContents` hangs on a text-only range and never throws (2026-09-24)
+`r.setStart(t, 0); r.setEnd(t, 2); r.surroundContents(document.createElement('b'))`
+on a paragraph's first text node never returns. bro-headless spins until
+killed. Over a range that partially selects an element (start in text, end
+inside `<em>`), the spec says throw `InvalidStateError`. bro doesn't throw:
+it splits the text and inserts an empty `<mark></mark>` at the start,
+extracting nothing (the extract bug above).
+`Range::surroundContents` is `extractContents` + `insertNode` + re-parent,
+with no partial-containment check. Ranges on element offsets
+(`setStart(p, 1); setEnd(p, 2)`) wrap correctly. demos/range-selection-lab's
+B / I / </> / mark / badge buttons call `surroundContents` (falling back to
+extract + wrap when it throws), so they hang the app on a plain text
+selection. Its tests only click them over element-offset selections.
+
+### Clicking inside a `<button>`'s child moves the selection into it (2026-09-24)
+A press on a `<button>` itself leaves the document selection alone. A press
+on an element inside one (`<button><b>Bold</b></button>`, the usual editor
+toolbar markup) collapses the selection into that child's text:
+`input_mouse.cpp` tests only the hit target's own tag against
+INPUT/TEXTAREA/SELECT/BUTTON/OPTION, not its ancestors. `preventDefault()` on
+`mousedown` does not stop it either, because that path never reads
+`defaultPrevented`. Chromium does neither of these. Repro: select "some" in
+`<p>some plain text</p>`, then `mouseDown/mouseUp` on the centre of the `<b>`
+inside `<button><b>Bold</b></button>`. The selection becomes a caret in the
+`<b>`'s text. demos/range-selection-lab sets `user-select: none` on its
+toolbar (normal for editor chrome), which avoids it there.
+
+### MutationObserver: Range.deleteContents gives a characterData record with a null target (2026-09-24)
+Observe `<p id=q>Select any <em>…</em></p>` with
+`{ childList, characterData, subtree, characterDataOldValue }`. Then
+`r.setStart(text, 0); r.setEnd(text, 6); r.deleteContents()` delivers a
+`characterData` record whose `target` is `null` (oldValue `"Select any "` is
+right). A later `r.insertNode(span)` adds a `childList` record with 0 added
+and 0 removed nodes, next to the real one. demos/range-selection-lab's stream
+shows the null target as "(record.target is null)".
+
+### Script changes to the Selection fire no `selectionchange` (2026-09-24)
+`document.addEventListener('selectionchange', …)` never fires for
+`getSelection().setBaseAndExtent(…)`, `.collapse(…)` or
+`removeAllRanges()` + `addRange(r)`: the count is 0 after each, with
+`advanceTime` + `flush` in between. Chromium queues one event per change,
+script changes included. demos/range-selection-lab's inspector re-reads the
+selection after each of its own operations. A selection made by another
+script is not shown until the next mouse or key event in the editor.
+
+### A selection inside a `display:none` subtree is still painted (2026-09-24)
+Select "some" in `<p id=plain>some plain text here</p>`, then set
+`plain.style.display = 'none'`. The blue selection highlight stays on screen
+at the paragraph's old position, over whatever is laid out there now. In
+demos/range-selection-lab, a selection made on the Range tab paints over the
+text shaper canvas after switching tabs (the Range pane is `hidden`).
+
+### DOMParser parses XML and SVG types with the HTML parser (2026-09-24)
+`new DOMParser().parseFromString(src, 'application/xml' | 'text/xml' |
+'image/svg+xml')` returns an HTML document. `documentElement` is `<HTML>`
+with HEAD/BODY, the markup sits in `<body>`, names are lowercased
+(`<Feature>` → `FEATURE`) and self-closing `<b/>` becomes `<b></b>`.
+Malformed XML (`<xml><unclosed><m>t</m></xml>`) gives no `<parsererror>`.
+`contentType` does report the requested type. `XMLSerializer` then
+serializes `<html><head></head><body>…`. demos/range-selection-lab's
+DOMParser tab shows a note when an XML type comes back as HTML. Its
+"malformed XML" preset cannot demonstrate a parse error.
+
+### A shrink-to-fit `flex-wrap: wrap` row wraps items that exactly fit (2026-09-24)
+An absolutely positioned `display:flex; flex-wrap:wrap; column-gap:20px`
+box (the arcade `#hud.hud-row`) sizes itself to its max-content width, then
+breaks the line anyway. It looks like a float comparison. games/2048: two
+stats measure 43.5177 + 48.9414 + a 20px gap = 112.459, the content box is
+112.459 wide, and the second stat lands on a second line. With other text
+widths the same HUD stays on one row (echo, missile-command). Chromium
+never wraps a shrink-to-fit flex line against its own max-content width.
+Repro: `lib/arcade/arcade.css` `#hud` plus `.hud-row`, with two `.hud-stat`
+children whose labels are "Score"/"Best" in Helvetica and values "0"/"2048".
 
 ## Notes (not bugs)
 

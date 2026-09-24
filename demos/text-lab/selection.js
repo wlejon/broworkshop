@@ -34,12 +34,12 @@
 // never typed as a literal, because a literal would encode this file's own
 // idea of the encoding rather than testing the engine's.
 
-import {
-    el, n2, buildTable, verdict, utf8Length, codePoints, u8ToU16, u16ToU8,
-} from '/app/textutil.js';
+import { utf8Length, codePoints } from '/lib/kit/text.js';
 import { MIXED } from '/app/bidi.js';
+import { pump, reveal } from '/app/input.js';
+import { n2, result, checkRows, glyphCell } from '/app/report.js';
 
-/** The torture string. Built from escapes so this file's own bytes are ASCII. */
+/** The torture string (the ZWJs between the family members are invisible here). */
 export const S =
     'ab' +
     'éü' +          // é ü — 2 bytes each
@@ -64,7 +64,6 @@ export const BOUNDARIES = (() => {
 export const selectionState = {
     roundTrip: null,
     surrogate: null,
-    slices: null,
     containers: null,
     geometry: null,
     api: null,
@@ -79,13 +78,13 @@ function freshText(s) {
     stage.innerHTML = '';
     const t = document.createTextNode(s === undefined ? S : s);
     stage.appendChild(t);
-    if (typeof flush === 'function') flush();
+    pump();
     return t;
 }
 
 function freshHTML(html) {
     stage.innerHTML = html;
-    if (typeof flush === 'function') flush();
+    reveal(stage);
     return stage;
 }
 
@@ -402,10 +401,7 @@ export function selectionApiReport() {
 // ── 5. Range geometry ───────────────────────────────────────────────────────
 //
 // getBoundingClientRect over a Range is where the UTF-16 domain meets the
-// layout domain, and it is the only part of this module that is expected to
-// go red — for the reasons app.js already records under `rtl-range-geometry`.
-//
-// The claims, all of them stated as they SHOULD hold:
+// layout domain. The claims:
 //
 //   1. A range over more characters is at least as wide as a range over
 //      fewer. (Monotone in the character count, within one directional run.)
@@ -413,10 +409,8 @@ export function selectionApiReport() {
 //      right edge is the next one's left edge, within an LTR run.
 //   3. A COLLAPSED range reports a zero-width rect AT THE CARET — not at the
 //      document origin. A rect of {0,0,0,0} is indistinguishable from "no
-//      geometry" and is what the engine currently returns.
+//      geometry".
 //   4. Inside an RTL run, single-character rects tile RIGHT to LEFT.
-//
-// Claim 3 and claim 4 are the known ones. They are still asserted.
 
 export function geometryReport() {
     const rows = [];
@@ -544,11 +538,11 @@ export function editableSelectionReport() {
     stage.innerHTML =
         '<div id="selEd" contenteditable="true" class="edit-host" ' +
         'style="font-family:Arial;font-size:20px"></div>';
-    if (typeof flush === 'function') flush();
+    pump();
     const ed = document.getElementById('selEd');
     const tn = document.createTextNode(S);
     ed.appendChild(tn);
-    if (typeof flush === 'function') flush();
+    pump();
 
     const sel = window.getSelection();
     const emoji = S.indexOf('\u{1F600}');
@@ -559,9 +553,9 @@ export function editableSelectionReport() {
     if (typeof textInput === 'function') {
         sel.removeAllRanges();
         sel.collapse(tn, emoji);
-        if (typeof flush === 'function') flush();
+        pump();
         textInput('Z');
-        if (typeof flush === 'function') flush();
+        pump();
         const want = S.slice(0, emoji) + 'Z' + S.slice(emoji);
         rows.push({
             what: 'typing at a caret seated on an astral boundary inserts exactly there',
@@ -582,7 +576,7 @@ export function editableSelectionReport() {
         '<div id="selEd2" contenteditable="true" class="edit-host" ' +
         'style="font-family:Arial;font-size:20px">' +
         '<b>a\u{1F600}</b><i>中b</i></div>';
-    if (typeof flush === 'function') flush();
+    pump();
     const ed2 = document.getElementById('selEd2');
     const bText = ed2.querySelector('b').firstChild;
     const iText = ed2.querySelector('i').firstChild;
@@ -592,7 +586,7 @@ export function editableSelectionReport() {
         r.setEnd(iText, 1);            // after 中
         sel.removeAllRanges();
         sel.addRange(r);
-        if (typeof flush === 'function') flush();
+        pump();
         rows.push({
             what: 'a cross-element selection reads out as the concatenated text',
             ok: sel.toString() === '\u{1F600}中',
@@ -629,59 +623,28 @@ export function editableSelectionReport() {
 
 // ── Panel ───────────────────────────────────────────────────────────────────
 
-let cpHost = null;
-let rtHost = null;
-let surrHost = null;
-let contHost = null;
-let apiHost = null;
-let geomHost = null;
-let edHost = null;
-
-function renderRows(host, rows) {
-    host.textContent = '';
-    for (const r of rows) {
-        const line = el('div', 'checkline ' + (r.ok ? 'ok' : 'bad'));
-        line.appendChild(el('b', null, (r.ok ? '✓ ' : '✗ ') + r.what));
-        if (!r.ok) {
-            line.appendChild(el('span', 'want', ' want ' + r.want));
-            line.appendChild(el('span', 'got', ' got ' + r.got));
-        } else {
-            line.appendChild(el('span', 'got', '  ' + r.got));
-        }
-        host.appendChild(line);
-    }
-}
+let ui = null;
 
 export function initSelection() {
-    stage = document.getElementById('selStage');
-    cpHost = document.getElementById('selFixture');
-    rtHost = document.getElementById('selRoundTrip');
-    surrHost = document.getElementById('selSurrogate');
-    contHost = document.getElementById('selContainers');
-    apiHost = document.getElementById('selApi');
-    geomHost = document.getElementById('selGeometry');
-    edHost = document.getElementById('selEditable');
-
-    // The fixture, drawn code point by code point. Reused from the cluster
-    // panel's presentation so the two halves of the lab look like one app.
-    cpHost.textContent = '';
+    const $ = (id) => document.getElementById(id);
+    stage = $('selStage');
+    ui = {
+        roundTrip: $('selRoundTrip'), surrogate: $('selSurrogate'), containers: $('selContainers'),
+        api: $('selApi'), geometry: $('selGeometry'), editable: $('selEditable'),
+    };
+    // The fixture code point by code point, with its UTF-16 / UTF-8 offsets,
+    // so every offset is readable before any claim is made about it.
     for (const c of codePoints(S)) {
-        const hex = c.cp.toString(16).toUpperCase().padStart(4, '0');
-        const cell = el('span', 'cp' + (c.cp >= 0x10000 ? ' astral' : ''));
-        cell.appendChild(el('b', null, c.char === '‍' ? '⌁' : c.char));
-        cell.appendChild(el('i', null, `${c.u16}/${c.u8}`));
-        cell.title = `U+${hex} — utf16 offset ${c.u16} (${c.u16Len} unit(s)), ` +
-                     `utf8 offset ${c.u8} (${c.u8Len} byte(s))`;
-        cpHost.appendChild(cell);
+        $('selFixture').appendChild(glyphCell('cp' + (c.cp >= 0x10000 ? ' astral' : ''), c.char, `${c.u16}/${c.u8}`,
+            `U+${c.cp.toString(16).toUpperCase().padStart(4, '0')} — utf16 offset ${c.u16} (${c.u16Len} unit(s)), ` +
+            `utf8 offset ${c.u8} (${c.u8Len} byte(s))`));
     }
-
     refreshSelection();
 }
 
 export function refreshSelection() {
-    const rt = roundTripReport();
-    selectionState.roundTrip = rt;
-    rtHost.textContent =
+    const rt = selectionState.roundTrip = roundTripReport();
+    result(ui.roundTrip, rt.ok,
         `Fixture: ${rt.utf16} UTF-16 units, ${rt.codePoints} code points, ${rt.bytes} UTF-8 bytes ` +
         `→ ${rt.boundaries.length} legal offsets → ${rt.pairs} ordered pairs checked. ` +
         `Each pair asserted for startOffset, endOffset, collapsed and toString() against ` +
@@ -690,37 +653,23 @@ export function refreshSelection() {
             ? 'Every pair agrees — Range offsets are UTF-16 code units end to end.'
             : `${rt.failures.length} failure(s): ` +
               rt.failures.slice(0, 4).map((f) =>
-                  `(${f.i},${f.j}) ${f.what} want ${JSON.stringify(f.want)} got ${JSON.stringify(f.got)}`).join('; '));
-    rtHost.className = 'result ' + (rt.ok ? 'ok' : 'bad');
+                  `(${f.i},${f.j}) ${f.what} want ${JSON.stringify(f.want)} got ${JSON.stringify(f.got)}`).join('; ')));
 
-    const su = surrogateSplitReport();
-    selectionState.surrogate = su;
-    surrHost.textContent =
+    const su = selectionState.surrogate = surrogateSplitReport();
+    result(ui.surrogate, su.ok,
         `${su.rows.length} offset(s) of the fixture fall INSIDE a surrogate pair. ` +
         `The DOM permits them (JS string indices do), so the claim is not that they ` +
         `are rejected but that nothing downstream manufactures a U+FFFD out of one. ` +
         su.rows.map((r) => `${r.offset}→${r.endOffset}${r.replacement ? ' U+FFFD!' : ''}`).join(' ') +
-        (su.ok ? ' — no replacement characters produced.' : ' — REPLACEMENT CHARACTERS PRODUCED.');
-    surrHost.className = 'result ' + (su.ok ? 'ok' : 'bad');
+        (su.ok ? ' — no replacement characters produced.' : ' — REPLACEMENT CHARACTERS PRODUCED.'));
 
-    const cont = containerReport();
-    selectionState.containers = cont;
-    renderRows(contHost, cont.rows);
-
-    const api = selectionApiReport();
-    selectionState.api = api;
-    renderRows(apiHost, api.rows);
-
-    const geom = geometryReport();
-    selectionState.geometry = geom;
-    renderRows(geomHost, geom.rows);
-
-    const ed = editableSelectionReport();
-    selectionState.editable = ed;
-    renderRows(edHost, ed.rows);
+    checkRows(ui.containers, (selectionState.containers = containerReport()).rows);
+    checkRows(ui.api, (selectionState.api = selectionApiReport()).rows);
+    checkRows(ui.geometry, (selectionState.geometry = geometryReport()).rows);
+    checkRows(ui.editable, (selectionState.editable = editableSelectionReport()).rows);
 
     // Leave no stray selection pointing into a node we are about to destroy.
     window.getSelection().removeAllRanges();
     stage.innerHTML = '';
-    if (typeof flush === 'function') flush();
+    pump();
 }
