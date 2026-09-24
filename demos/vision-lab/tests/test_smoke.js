@@ -2,12 +2,8 @@
 // and (when it loads) run through the UI on the sample image; results reach
 // the stage, thumbnail and metadata; SAM's encode / point / box / segment /
 // segment-everything flow runs through real stage clicks; Run all fills the
-// contact sheet with every annotator that loads. Outputs are not graded.
-//
-// Known engine bug (ENGINE-ISSUES.md "brovisionml loaders call to() before
-// load()"): every loader but BiRefNet throws on CUDA. Those loads must fail
-// with that message and show it in the UI; they are logged as KNOWN. Any
-// other load failure fails the test. Skips without the weights.
+// contact sheet with every annotator. Outputs are not graded. Every model
+// must load on the default device. Skips without the weights.
 //
 //   scripts/validate.sh --ml demos/vision-lab
 
@@ -16,7 +12,6 @@ import { lab } from "/app/lab.js";
 import { MODELS, ANNOTATORS, byId, VISION_ROOT } from "/app/lab/models.js";
 
 needWeights('brovisionml weights', VISION_ROOT, { probe: 'triposplat/background_removal/birefnet.safetensors' });
-const KNOWN = /to\(\) called before load\(\)/;
 const saved = lab.ui.prefs.snapshot();
 
 waitFor(() => lab.bitmap, 'input bitmap', 10000);
@@ -26,7 +21,7 @@ test('weights root found; every model present', () => {
 test('input image decoded', () => check(lab.image.width > 1 && /robot-arm/.test(text('#image-meta'))));
 test('model list', () => eq(document.querySelectorAll('#model-list .model-item').length, MODELS.length));
 
-const loaded = [], known = [];
+const loaded = [];
 function loadThroughUi(id) {
     clickOn('#model-list .model-item[data-id="' + id + '"]');
     check(lab.selected === id, 'selected ' + id);
@@ -36,10 +31,7 @@ function loadThroughUi(id) {
     const err = lab.errors[id] || '(none)';
     check(/load failed/.test(text('#status')) && text('#status').includes(err), id + ': the UI shows the load error');
     check(q('#model-list .model-item[data-id="' + id + '"]').classList.contains('failed'), id + ': marked failed in the list');
-    if (!KNOWN.test(err)) throw new Error(id + ' failed to load for a new reason: ' + err);
-    console.log('KNOWN ' + id + ': ' + err);
-    known.push(id);
-    return false;
+    throw new Error(id + ' failed to load: ' + err);
 }
 
 // 1. each annotator: load; run the ones that load
@@ -109,19 +101,18 @@ let n = lab.runs;
 clickOn('#model-list .model-item[data-id="depth"]');
 clickOn('#btn-runall');
 waitFor(() => lab.runs > n, 'run all', 600000);
-test('contact sheet = the annotators that load', () => {
-    const want = ANNOTATORS.filter((m) => !lab.errors[m.id]).map((m) => m.id);
+test('contact sheet = every annotator', () => {
+    const want = ANNOTATORS.map((m) => m.id);
     eq(lab.contact.join(','), want.join(','));
     eq(document.querySelectorAll('#contact-grid .contact-cell').length, want.length);
+    check(!/failed to load/.test(text('#status')), 'no load failures: ' + text('#status'));
 });
-test('run-all status names the failures', () =>
-    check(ANNOTATORS.every((m) => !lab.errors[m.id]) || /failed to load/.test(text('#status'))));
 shot('contact');
 
 // 6. switching images resets the result
 setValue('#image-sel', 'assets/scene.png');
 test('image switch', () => check(/scene/.test(text('#image-meta')) && !lab.result));
 
-console.log('loaded: ' + loaded.join(', ') + ' | KNOWN engine failures: ' + known.join(', '));
+console.log('loaded: ' + loaded.join(', '));
 lab.ui.prefs.restore(saved);
 done('vision-lab');

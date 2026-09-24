@@ -131,10 +131,8 @@ test('gpu.colormap / gpu.fbm2D draw pixels', () => {
     let mono = true;
     for (let x = 1; x < 64; x++) if (at(x) < at(x - 1)) mono = false;
     check(mono && at(63) > at(0), 'ramp colorized in order: ' + at(0) + ' .. ' + at(63));
-    // With lo 0 / hi 1 over a 0..1 ramp the right edge should be white (255).
-    // bro reads back ~6: ENGINE-ISSUES.md, "gpu.colormap samples a sliver of
-    // the field". Tighten to at(63) > 225 once fixed.
-    if (at(63) < 225) console.log('  (known engine issue: gpu.colormap right edge = ' + at(63) + ', want 255)');
+    // With lo 0 / hi 1 over a 0..1 ramp the edges are black and white.
+    check(at(0) < 8 && at(63) > 225, 'full ramp: ' + at(0) + ' .. ' + at(63));
 });
 
 test('histogram-eq LUT: monotonic, stretches a squeezed field to 255', () => {

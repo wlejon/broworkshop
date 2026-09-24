@@ -76,9 +76,7 @@ test('thumbnails: one RGBA strip with forward times', () => {
     check(strip.width > 0 && typeof strip.rotation === 'number', 'tile width + rotation');
     eq(strip.times.length, 8);
     for (let i = 1; i < 8; i++) check(strip.times[i] >= strip.times[i - 1], 'times walk forward');
-    // The docs promise a Uint8ClampedArray; the engine returns a Uint8Array
-    // (ENGINE-ISSUES.md). The app only needs RGBA bytes, so assert that.
-    check(ArrayBuffer.isView(strip.data) && strip.data.BYTES_PER_ELEMENT === 1, 'byte array');
+    check(strip.data instanceof Uint8ClampedArray, 'clamped RGBA bytes, ImageData-ready');
     eq(strip.data.length, strip.width * strip.count * strip.height * 4, 'width*count*height*4 bytes');
     let opaque = 0, energy = 0;
     for (let i = 0; i < strip.data.length; i += 4) {

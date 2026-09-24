@@ -22,32 +22,6 @@ except where an entry says "not re-run".
 
 ## Open
 
-### Animation and rigging
-
-#### `mesh.applySkinning` applies the inverse bind matrices a second time (2026-09-24)
-bromesh `applySkinning` (src/manipulation/skin.cpp) multiplies each matrix
-by the skin's `inverseBindMatrices` itself, but its header, `pose.h`'s
-`computeSkinningMatrices` comment and docs/rigging-api.js say to pass
-`pose.computeSkinningMatrices(skeleton)` (already world x inverseBind).
-Repro: a 2-bone column (y 0..2, bone 1 at y=1) bent 90 degrees at bone 1:
-with `computeSkinningMatrices` the vertices reach max |x| 0.2; with
-`computeWorldMatrices` they reach 1.0 (correct). bro's own tests use both
-(tests/rigging/diag_autorig_locomotion.js vs probe_meshy.js).
-Affects: tools/mesh-viewer uses world matrices and its test pins the bent
-shape, so it flags whichever way this is resolved.
-
-#### `Pose.data` returns a copy; writing into it does nothing (2026-09-24)
-docs/rigging-api.js calls `pose.data` "stride 10 per bone; writable". Writing
-elements of the returned array (`pose.data[13..16] = quat`) leaves the pose
-unchanged; only assigning a whole array back (`const d = pose.data; ...;
-pose.data = d`) takes effect. Either return a live view or document the
-copy-and-assign form.
-
-#### `blendState().pos` is `[]` with no blend space (2026-09-24)
-With a single clip on the base track, `blendState().pos` is an empty array,
-not `undefined` as docs/animation-api.js implies. Test for `pos && pos.length`.
-Repro: demos/anim-lab, `selectClip('idle')`, `player.blendState().pos` → `[]`.
-
 ### Layout and CSS
 
 #### Inline wrapping still whole-node in `pre-wrap`, `break-word`, and mixed block/inline blocks (2026-09-24)
@@ -190,67 +164,6 @@ src="sub/main.js">` gets `import.meta.url` = index.html and its relative
 imports resolve from the app root (`import "./lib.js"` fails). An entry at the
 app root hides it; modules imported from the entry get their own URL.
 
-### Media
-
-#### `bro.image.gpu.colormap` samples a sliver of the field (2026-09-24)
-A 64x64 field holding a 0..1 horizontal ramp, `colormap(cv, f, lut, { lo: 0,
-hi: 1, srcW: 64, srcH: 64 })` into a 64x64 webgl2 canvas, read back with
-`readPixels`: the row reads 0, 0, 2, 4, 6 at x = 0, 16, 32, 48, 63 instead of
-a 0..255 ramp (about 1/40 of the field width). The shader in
-bro/src/bronze_host/js/image_gpu.js reads correctly, so probably the upload or UV setup.
-Affects: demos/image-kernels' GPU view looks magnified against its CPU path
-(its test_kernels.js logs the edge value).
-
-#### `bro.media.thumbnails().data` is a Uint8Array, docs say Uint8ClampedArray (2026-09-24)
-docs/video-api.js promises a `Uint8ClampedArray` (and shows
-`new ImageData(strip.data, ...)`).
-Repro: `bro.media.thumbnails('demos/video_demo/hello.webm', { count: 2 }).data.constructor.name`.
-Affects: tools/media-inspector views the buffer as clamped bytes itself
-(filmstrip.js `stripCanvas`).
-
-#### `<video>` load of a missing or unsupported file: no `error`, stale state (2026-09-24)
-After a good WebM, setting `src` to an Ogg Vorbis file or a missing path and
-calling `load()` fires neither `loadedmetadata` nor `error` (nor `emptied`),
-and the element keeps the previous file's `readyState` 4, `duration` 2.008,
-`videoWidth` 320; `error` stays unset. Per spec `load()` resets to
-HAVE_NOTHING and an unplayable source fires `error` (MEDIA_ERR_SRC_NOT_SUPPORTED).
-Repro: `v.src = 'demos/video_demo/hello.webm'; v.load();` pump, then
-`v.src = 'demos/scene-audio/assets/pad-chime.ogg'; v.load();` pump.
-Affects: tools/media-inspector/player.js waits with a timeout. (Not a bug:
-bro.media and `<video>` read WebM (VP9/VP8 + Opus) only, so the Ogg clips
-AudioContext decodes cannot be inspected.)
-
-### ML bindings (brovisionml, triposplat, diar)
-
-#### brovisionml loaders call `to()` before `load()` on CUDA; callbacks never fire (2026-09-24)
-Every bro.vision loader except `loadBirefnet` throws on the default (CUDA)
-device, e.g. `loadDepth failed: dinov2::Backbone: to() called before load()`;
-likewise loadNormal (dsine::EncoderB5), loadHed, loadLineart, loadMlsd,
-loadOpenpose, loadSegformer, loadSam (sam::ImageEncoder). With
-`{ device: 'cpu' }` they succeed, so the binding (brovisionml
-`src/api/native_vision_models.cpp`) moves the module before loading weights.
-The loaders also ignore `onReady` / `onError` (they load synchronously and
-return the model).
-Repro: `bro-headless demos/nllb-lab -e "bro.vision.loadDepth('<weights>/brovisionml/weights/Depth-Anything-V2-Small', {})"`
-(re-run 2026-09-24 for loadDepth only).
-Affects: demos/vision-lab (loads synchronously, shows the error, its test
-logs each as KNOWN); tools/inpainting-studio's Depth-map ControlNet guide
-falls back to a black map (tests/test_generate.js logs KNOWN and wants a real
-map once fixed).
-
-#### TripoSplat clouds come back upside down (2026-09-24, not re-run)
-docs/triposplat-api.js says `generate()` returns Y-up positions; for
-demos/triposplat's portrait sample (green cap, blue overalls) the green
-splats' mean y is -0.25 and the blue ones' +0.18, and the figure shows
-head-down from the default camera. The Z-up → Y-up rotation probably has the
-wrong sign. demos/triposplat renders the cloud as returned.
-
-#### docs/diar-api.js has `loadClusterDiarizer`'s arguments wrong (2026-09-24)
-The doc says `loadClusterDiarizer(embeddingDir, vadDir, opts)`; the binding
-takes `(sortformerDir, speakerEncoderDir, opts)` (Sortformer activity is the
-VAD, the Qwen-TTS speaker encoder gives the embeddings). demos/cluster-diar-lab
-calls it the binding's way.
-
 ### bronze JS runtime and module loading
 
 #### A NaN typed as a number is truthy in conditions (2026-09-24)
@@ -329,15 +242,6 @@ does not finish a single ~41k-line module. The bundles were build output and
 never tracked; rebuild with `npm i && node build.mjs` in `ai/pi-agent/bundler/`
 from the commit before the kit rebuild.
 
-### Game AI
-
-#### bro.ai.game has no square-grid flow field (2026-09-24)
-`HexNav.field` builds an integration/flow field for hex grids only; a
-`createNavGrid(...)` object has `findPath` and `hasLineOfSight` but no
-`field`. demos/tactical-flowfield runs its own fast-marching wave in JS
-(40–75 ms per rebuild on 128x72, on every terrain edit). Want a native
-`NavGrid.field(goal, { costs, extraCost })`. Feature request.
-
 ## Notes (not bugs; doc gaps worth a line)
 
 - WAAPI gaps are documented in docs/web-animations-api.js and demos/waapi-lab
@@ -345,24 +249,10 @@ from the commit before the kit rebuild.
   then reports `"ease"`); `updatePlaybackRate`, `commitStyles`, `persist`,
   `effect.updateTiming` are absent; `document.getAnimations()` lists only
   script animations, not running CSS animations.
-- `terrain.setVoxel(x, y, z, v)` on a height-field terrain moves the grid node
-  at `floor(x), floor(z)`, not the nearest one, so a sculpt sampling
-  `heightAt` at the raycast hit can see no change (demos/terrain's test samples
-  at the floored node). Worth documenting in terrain-api.js.
-- `ClipmapTerrain` `detailRelief` is a unitless slope (engine default 0.35,
-  per `clipmap_terrain.h`); clipmap-api.js does not say so, and
-  demos/clipmap-terrain once passed 18 "metres" (km-high walls).
 - `<select>.value` round-trips correctly now; older app comments claiming
   otherwise are stale.
 - `performance.now()` in headless advances only with virtual time, so fps/ms
   readouts read 62.5 fps / 0 ms there. Use `Date.now()` for wall-clock budgets.
-- FastNoise2 coherent generators (Simplex, Perlin, Value, Cellular*) default to
-  a "Feature Scale" of ~100 world units per feature, so
-  `genUniformGrid2D(x, y, w, h, frequency, seed)` with a classic frequency
-  (0.01..0.1) is almost flat. `node.set('Feature Scale', 1)` restores
-  "features per unit" (matches `bro.image.gpu.fbm2D`). noise-api.js should
-  say so, and that the offsets are world space. tools/algo-viz was ~100x too
-  smooth because of it.
 
 ## Fixed
 
@@ -377,6 +267,7 @@ from the commit before the kit rebuild.
 - `postMessage({ v: view }, [view.buffer])` clones then detaches — brokit efcb977, bro 04729bdd; verified 2026-09-24. window-lab sends the view transferred.
 - `new Worker(new URL(...), { type: 'module' })` works — bro 06899506; verified 2026-09-24. worker-sim and stompworld use it.
 - Scene, verified 2026-09-24 (bro `tests/scene/` 58/58): `unprojectLocal(x, y)` → `{ origin, dir }` works with `setCamera` and camera nodes, plus the inverse `projectLocal(x, y, z)` (a7347b39; kit `sceneViewport.ray/toScreen`, arcade `rayAt/toScreen` and `pickRay` wrap them); TileWorld `addObject({ color })` tint and the dropped `addObjectKind` style keys (1ada0970); `atlasPixels` takes any byte view (a1136e4d); `setFog(null)` (c3b9f275); sprite `isPlaying` / `currentAnimation` (f5a7b7bb); 2D particle options and `liveCount` (d1bfc7f9); one wrapper per scene node, so `===` works (daec207d); a scene HtmlNode takes clicks only where it shows content and honours `pointer-events: none` (1b4e093b; farm's name tags are `pointer-events: none`).
+- Animation, media, ML, game AI, verified 2026-09-24 (ML targets run with `--ml` on the GPU): `applySkinning` takes `computeSkinningMatrices` output (bromesh f573ade, bro 5828be0a; mesh-viewer uses joint matrices); `Pose.data` is a copy by design, docs show edit-then-assign (5828be0a); `blendState().pos` absent without a blend space (ba917f37); `bro.image.gpu.colormap` — a webgl2 context now takes its drawing-buffer size from the canvas's width/height attributes at creation (a2881563); `bro.media.thumbnails().data` is a Uint8ClampedArray (f9b54b1c); `<video>` `load()` resets, fires `emptied`, and an unplayable source sets `error` code 4 (1d5fd6b9; media-inspector drops its timeout); brovisionml loaders load before moving to the GPU, docs say they are synchronous (brovisionml d56f93c, bro 3f93a71b); TripoSplat clouds come back upright facing +Z (brodiffusion 90aa215, bro 52e72df2); docs/diar-api.js `loadClusterDiarizer` arguments (923243c9); native `NavGrid.field` flow field, and `setCellCost` now prices A* (brogameagent 6477939, bro 91b1e46d; tactical-flowfield drops its JS wave); terrain `setVoxel`, clipmap `detailRelief` and FastNoise Feature Scale documented (5272b828).
 - Selection, Range and editing, verified 2026-09-24 (bro `tests/dom/`, `tests/events/test_selection_press.js`): Range rects in scrolled-out text and under the menu bar, and per-line rects for wrapped inline elements (htmlayout 73996c8, bro 66aa265e, 8a83b3be); spec clone/extract/delete for partially-contained nodes, `surroundContents` throws InvalidStateError instead of hanging, `insertNode` per spec, `selectionchange` from script, `getRangeAt` returns the live range (8a83b3be); selection paint skips `display:none` and stops at element offsets (73996c8, 66aa265e); a press moves the selection only where a caret can go: a text-less block takes the caret itself, a button's child, a canvas, `pointer-events:none` text and a prevented mousedown start no selection (89a886dd); `setRangeText` (30ee3208). range-selection-lab tests assert the right results, text-lab drops `reveal()` and its ENGINE BUG panel, synth drops `user-select:none` on its viewport, desktop-notebook's `splice` uses `setRangeText`.
 - Layout (htmlayout; bro tests in `tests/layout/`), verified 2026-09-24: column flex with a percentage width (978de23); `min-width` on inline-block and shrink-to-fit max-width (0f195e7, 4be8a38); `grid-column: 1 / -1` (1d72e7f); a text run after an inline element breaks inside the text (a8d25ed; inline elements join their block's lines); flex intrinsics with `letter-spacing` (8b3d5b2) and top-level inline-flex/inline-grid shrink to fit (4be8a38); flex-wrap rows that exactly fit (68c76b6); `table-layout: fixed` (404fe87); `text-overflow: ellipsis` (d6da139); rects of descendants of a newly hidden element (2ec6c57). procwatch styles its tags as chips again, shader-lab's panes are 50/50, nav-lab's test checks the button's own rect.
 - bro-server no longer runs the page's scripts (with no script named it runs `server.js`) — bro 80c8ec0f; verified 2026-09-24. games/fps dropped its missing-scene tolerance.

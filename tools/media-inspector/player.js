@@ -23,21 +23,13 @@ export function createPlayer(video, opts) {
         video,
         /**
          * Point the element at `src`; resolves with info() once metadata is
-         * in, rejects on a load error or after `timeoutMs` (default 4000)
-         * without metadata: bro's <video> fires no 'error' for a missing or
-         * unsupported file (ENGINE-ISSUES.md), so waiting forever would hang
-         * the inspector.
+         * in, rejects when the element reports an error (a missing or
+         * unsupported file).
          */
-        load(src, timeoutMs) {
+        load(src) {
             video.pause();
             return new Promise((resolve, reject) => {
-                const timer = setTimeout(() => done(reject, new Error('no metadata (missing or unsupported file)')),
-                    timeoutMs || 4000);
-                let settled = false;
                 const done = (fn, v) => {
-                    if (settled) return;
-                    settled = true;
-                    clearTimeout(timer);
                     video.removeEventListener('loadedmetadata', onMeta);
                     video.removeEventListener('error', onErr);
                     fn(v);
@@ -46,10 +38,7 @@ export function createPlayer(video, opts) {
                 const onErr = () => done(reject, new Error((video.error && video.error.message) || 'cannot open ' + src));
                 video.addEventListener('loadedmetadata', onMeta);
                 video.addEventListener('error', onErr);
-                // Wait for the event: readyState right after load() can still
-                // describe the previous file (ENGINE-ISSUES.md).
-                video.src = src;
-                video.load();
+                video.src = src;   // runs the load algorithm
             });
         },
         play() {

@@ -50,6 +50,17 @@ waitFor(() => lab.runs > n, 'generate', 600000);
 check(lab.last === 'generated', 'generated: ' + (lab.error || lab.last));
 test('cloud well-formed', () => checkCloud(lab.cloud, 32768, 'no-bg'));
 test('viewport holds it', () => eq(lab.ui.view.splatCount(), lab.cloud.count));
+test('the portrait comes back upright: green cap above blue overalls', () => {
+    const c = lab.cloud, stride = c.sh.length / c.count;
+    let gy = 0, gn = 0, by = 0, bn = 0;
+    for (let i = 0; i < c.count; i++) {
+        if (c.opacities[i] < 0.3) continue;
+        const r = c.sh[i * stride], g = c.sh[i * stride + 1], b = c.sh[i * stride + 2], y = c.positions[i * 3 + 1];
+        if (g > r + 0.2 && g > b + 0.2) { gy += y; gn++; } else if (b > r + 0.2 && b > g + 0.2) { by += y; bn++; }
+    }
+    check(gn > 20 && bn > 20, 'both colour masses: ' + gn + ' green, ' + bn + ' blue');
+    check(gy / gn > by / bn, 'green mean y ' + (gy / gn).toFixed(3) + ' > blue mean y ' + (by / bn).toFixed(3));
+});
 test('meta + save armed', () => check(/splats/.test(text('#splat-meta')) && !q('#btn-save').disabled));
 shot('generated');
 

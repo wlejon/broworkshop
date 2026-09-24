@@ -5,20 +5,19 @@
 // NavGrid's z.
 //
 // The terrain lives twice, deliberately. `cost` is the app's typed array
-// (the flow-field wave reads it cell by cell); `grid` is a bro.ai.game NavGrid
-// kept in lockstep (setWalkable / setCellCost), which answers what the engine
-// answers well: one A* route (the leader line) and grid line-of-sight (threat
-// shadows and cover, tactics.js). What the engine does NOT have is a
-// square-grid integration / flow field (HexNav.field is hex-only), so the
-// wave below is JS: one fast-marching sweep out from the goal over every
-// cell, then a direction per cell, and every unit samples it. One search for N units,
-// where A* would be N searches.
+// (units, tactics and the renderer read it cell by cell); `grid` is a
+// bro.ai.game NavGrid kept in lockstep (setWalkable / setCellCost), and the
+// engine does the navigation on it: the flow field (NavGrid.field, one
+// fast-marching wave out from the goal over every cell, then a direction per
+// cell that every unit samples: one search for N units, where A* would be N
+// searches), one A* route (the leader line), and grid line-of-sight (threat
+// shadows and cover, tactics.js).
 
 export const COLS = 128, ROWS = 72;
 export const TERRAIN = { OPEN: 1, ROUGH: 5, WALL: 255 };
 /** Extra entry cost per unit of threat: the wave routes around danger. */
 export const DANGER = 10;
-const INF = 1e9;
+const INF = Infinity;    // the engine's cost-to-goal on walls and unreached cells
 const N = COLS * ROWS;
 
 export const field = {
@@ -93,106 +92,30 @@ export function markDanger() { field.dirty = true; }
 
 // --- the wave ---------------------------------------------------------------------------
 
-// A binary min-heap over (cell, key) in typed arrays: no per-push objects.
-// Each cell is pushed at most once per neighbour it has, so 4N bounds the heap.
-const heapCell = new Int32Array(N * 4 + 8), heapKey = new Float32Array(N * 4 + 8), frozen = new Uint8Array(N);
-let heapLen = 0;
-function push(c, k) {
-    let i = heapLen++;
-    while (i > 0) {
-        const p = (i - 1) >> 1;
-        if (heapKey[p] <= k) break;
-        heapCell[i] = heapCell[p]; heapKey[i] = heapKey[p]; i = p;
-    }
-    heapCell[i] = c; heapKey[i] = k;
-}
-function pop() {
-    const top = heapCell[0], c = heapCell[--heapLen], k = heapKey[heapLen];
-    let i = 0;
-    for (;;) {
-        let m = 2 * i + 1;
-        if (m >= heapLen) break;
-        if (m + 1 < heapLen && heapKey[m + 1] < heapKey[m]) m++;
-        if (heapKey[m] >= k) break;
-        heapCell[i] = heapCell[m]; heapKey[i] = heapKey[m]; i = m;
-    }
-    heapCell[i] = c; heapKey[i] = k;
-    return top;
-}
+// Threat priced into the wave, per cell (DANGER x threat), handed to the
+// engine as NavGrid.field's extraCost.
+const danger = new Float32Array(N);
 
 /**
  * Recompute the integration and flow fields if anything changed. Returns
  * whether it ran.
  *
- * The wave is a fast-marching (eikonal) solve rather than plain 8-way
- * Dijkstra: each cell's cost-to-goal comes from its best horizontal and
- * vertical neighbours together, which approximates true straight-line
- * distance. Octile Dijkstra distances have ridges along the rows and
- * diagonals through the goal, and a swarm descending them funnels into a
- * few thin lanes; the eikonal field descends in straight rays. 4-connected,
- * so it never cuts a wall corner.
- *
- * The loop is written out flat (typed arrays in locals, the heap push
- * inlined): it visits ~9k cells x 4 neighbours, and a helper call per
- * neighbour dominated it.
+ * NavGrid.field is a fast-marching (eikonal) solve, so the cost-to-goal
+ * approximates straight-line distance and a swarm descends it in straight
+ * rays instead of funnelling into octile lanes. Each cell costs its terrain
+ * (mirrored into the grid by setCell) plus DANGER x its threat. Walls and
+ * unreached cells come back as Infinity with no direction.
  */
 export function updateField() {
     if (!field.dirty) return false;
     const t0 = now();
-    const { cost, threat, integration: dist, flowX, flowY } = field;
-    const WALL = TERRAIN.WALL, HC = heapCell, HK = heapKey;
-    dist.fill(INF); flowX.fill(0); flowY.fill(0); frozen.fill(0);
-    heapLen = 0;
-    const [gx, gy] = cellOf(field.goal.x, field.goal.y);
-    let reached = 0;
-    if (inside(gx, gy) && cost[idx(gx, gy)] < WALL) {
-        dist[idx(gx, gy)] = 0;
-        push(idx(gx, gy), 0);
-    }
-    // Update cell n (open, in bounds) from its neighbours' current values.
-    const relax = (n) => {
-        const x = n % COLS, y = (n / COLS) | 0, f = cost[n] + DANGER * threat[n];
-        const a = Math.min(x > 0 ? dist[n - 1] : INF, x < COLS - 1 ? dist[n + 1] : INF);
-        const b = Math.min(y > 0 ? dist[n - COLS] : INF, y < ROWS - 1 ? dist[n + COLS] : INF);
-        const lo = a < b ? a : b, gap = a - b;
-        const nd = gap > -f && gap < f ? (a + b + Math.sqrt(2 * f * f - gap * gap)) / 2 : lo + f;
-        if (nd < dist[n]) {
-            dist[n] = nd;
-            let i = heapLen++;
-            while (i > 0) {
-                const p = (i - 1) >> 1;
-                if (HK[p] <= nd) break;
-                HC[i] = HC[p]; HK[i] = HK[p]; i = p;
-            }
-            HC[i] = n; HK[i] = nd;
-        }
-    };
-    while (heapLen) {
-        const k = HK[0], c = pop();
-        if (frozen[c] || k > dist[c]) continue;   // stale entry
-        frozen[c] = 1;                            // accepted: never updated again
-        reached++;
-        const x = c % COLS, y = (c / COLS) | 0;
-        if (x < COLS - 1 && cost[c + 1] < WALL && !frozen[c + 1]) relax(c + 1);
-        if (x > 0 && cost[c - 1] < WALL && !frozen[c - 1]) relax(c - 1);
-        if (y < ROWS - 1 && cost[c + COLS] < WALL && !frozen[c + COLS]) relax(c + COLS);
-        if (y > 0 && cost[c - COLS] < WALL && !frozen[c - COLS]) relax(c - COLS);
-    }
-    // Direction: minus the upwind gradient, per axis (walls and unreached
-    // cells hold INF and are never upwind).
-    for (let y = 0; y < ROWS; y++) {
-        for (let x = 0; x < COLS; x++) {
-            const c = idx(x, y), d = dist[c];
-            if (cost[c] >= WALL || d >= INF) continue;
-            const l = x > 0 ? dist[c - 1] : INF, r = x < COLS - 1 ? dist[c + 1] : INF;
-            const u = y > 0 ? dist[c - COLS] : INF, dn = y < ROWS - 1 ? dist[c + COLS] : INF;
-            const fx = l < r ? (l < d ? l - d : 0) : (r < d ? d - r : 0);
-            const fy = u < dn ? (u < d ? u - d : 0) : (dn < d ? d - dn : 0);
-            const fl = Math.sqrt(fx * fx + fy * fy);
-            if (fl > 1e-6) { flowX[c] = fx / fl; flowY[c] = fy / fl; }
-        }
-    }
-    field.reached = reached;
+    const threat = field.threat;
+    for (let i = 0; i < N; i++) danger[i] = DANGER * threat[i];
+    const f = field.grid.field(field.goal.x, field.goal.y, { extraCost: danger });
+    field.integration = f.dist;
+    field.flowX = f.flowX;
+    field.flowY = f.flowZ;
+    field.reached = f.reached;
     field.dirty = false;
     field.lastWaveMs = now() - t0;
     return true;

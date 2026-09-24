@@ -57,7 +57,7 @@ function paintLayer(ui) {
         if (c >= TERRAIN.WALL) { r = 44; g = 56; b = 84; }
         else {
             if (c === TERRAIN.ROUGH) { r = 70; g = 50; b = 26; }
-            if (show.integration && D[i] < 1e8) {
+            if (show.integration && D[i] < Infinity) {
                 const n = Math.min(1, D[i] / 260);
                 r = r * 0.45 + n * 150; g = g * 0.45 + (1 - Math.abs(n - 0.5) * 2) * 110; b = b * 0.45 + (1 - n) * 150;
             }

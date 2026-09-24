@@ -45,11 +45,7 @@ export function createRig(scene) {
             if (!rig.paused && !rig.bindPose) rig.time += dt;
             const pose = rig.pose();
             if (!frozen && doc.hasSkin) {
-                // applySkinning multiplies by the skin's inverse binds itself,
-                // so it takes world matrices (not computeSkinningMatrices, as
-                // the docs say: ENGINE-ISSUES.md "applySkinning applies the
-                // inverse bind twice"). The test pins the deformed shape.
-                const mats = pose.computeWorldMatrices(doc.skeleton);
+                const mats = pose.computeSkinningMatrices(doc.skeleton);
                 for (const it of doc.items) {
                     if (it.work.vertexCount !== doc.skin.vertexCount) continue;
                     it.work.positions = new Float32Array(it.basePositions);

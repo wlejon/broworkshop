@@ -16,11 +16,7 @@ export function stripCanvas(strip) {
     const W = strip.width * strip.count;
     const c = document.createElement('canvas');
     c.width = W; c.height = strip.height;
-    // ImageData wants clamped bytes; bro.media hands back a Uint8Array
-    // (ENGINE-ISSUES.md), so view the same buffer either way.
-    const d = strip.data;
-    const bytes = d instanceof Uint8ClampedArray ? d : new Uint8ClampedArray(d.buffer, d.byteOffset, d.length);
-    c.getContext('2d').putImageData(new ImageData(bytes, W, strip.height), 0, 0);
+    c.getContext('2d').putImageData(new ImageData(strip.data, W, strip.height), 0, 0);
     return c;
 }
 

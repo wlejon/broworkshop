@@ -86,16 +86,7 @@ try {
     if (findWeights(DEPTH_ANNOTATOR, { probe: 'config.json' })) {
         setControl('depth');
         waitFor(idle, 'depth map', 300000);
-        // ENGINE-ISSUES "brovisionml loaders call to() before load() on CUDA":
-        // loadDepth throws on the GPU; the page shows the error and a black map.
-        const known = /to\(\) called before load\(\)/.test(text('#status'));
-        if (known) {
-            console.log('    KNOWN (ENGINE-ISSUES): ' + text('#status'));
-            test('depth failure is reported and the guide falls back to black', () => {
-                check(q('#status').classList.contains('err'), 'error status');
-                eq(stage().pixels(stage().control).data[0], 0, 'black control map');
-            });
-        } else test('depth guide estimates a depth map', () => {
+        test('depth guide estimates a depth map', () => {
             check(studio.depth && studio.depth.width > 0, 'depth map (status: ' + text('#status') + ')');
             const d = stage().pixels(stage().control).data;
             let lo = 255, hi = 0;

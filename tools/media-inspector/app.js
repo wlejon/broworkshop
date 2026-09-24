@@ -22,7 +22,7 @@ import { createPlayer } from "./player.js";
 /**
  * Bundled sources: tracked media elsewhere in the workshop, relative to this
  * app. bro.media and <video> read WebM (VP9/VP8 + Opus) only, so the
- * workshop's Ogg Vorbis clips are not offered (ENGINE-ISSUES.md).
+ * workshop's Ogg Vorbis clips are not offered.
  */
 export const SOURCES = [
     ['../../demos/video_demo/hello.webm', 'hello.webm (video + audio)'],
