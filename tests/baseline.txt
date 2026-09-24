@@ -40,7 +40,6 @@ PASS test demos/image-kernels/tests/test_main.js
 PASS smoke demos/input-lab 
 FAIL test demos/input-lab/tests/test_smoke.js rc=1: ASSERTION FAILED: panel counted the connect
 PASS smoke demos/instanced-crowd 
-FAIL smoke demos/isle rc=1: evalScriptJit: uncaught TypeError: Cannot read properties of undefined (reading 'init')
 PASS smoke demos/kokoro-lab 
 FAIL test demos/kokoro-lab/tests/test_align_cells.js rc=1: evalScriptFileJit: uncaught TypeError: Cannot read properties of null (reading 'stages')
 FAIL test demos/kokoro-lab/tests/test_align_commit.js rc=1: ASSERTION FAILED: app finished loading its Kokoro model + voice
@@ -160,8 +159,6 @@ PASS test demos/vlm-lab/tests/test_main.js
 PASS smoke demos/waapi-lab 
 PASS smoke demos/window-lab 
 FAIL test demos/window-lab/tests/test_smoke.js rc=1: ASSERTION FAILED: bro.json "borderless": true reached the real window
-PASS smoke demos/worldgen-lab 
-FAIL test demos/worldgen-lab/tests/test_smoke.js rc=1: ASSERTION FAILED: bro.worldgen available (needs BRO_WITH_DIFFUSION)
 PASS smoke games/2048 
 PASS smoke games/arcade-template 
 PASS test games/arcade-template/tests/test_smoke.js 
