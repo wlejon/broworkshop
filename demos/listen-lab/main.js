@@ -1,3 +1,2 @@
-// Entry point only: the app lives in lab.js, which tests import directly
-// (a test importing this entry module would boot a second copy).
+// Entry point only: the app lives in lab.js, which tests import directly.
 import "/app/lab.js";

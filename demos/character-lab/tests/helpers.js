@@ -1,7 +1,6 @@
 // Shared test helpers. Everything drives the app through its own key map and
 // `tune`, so the paths under test are the paths a keyboard and the HUD take.
-// Tests import lab.js, never main.js (an imported entry module is evaluated a
-// second time — see ENGINE-ISSUES.md).
+// Tests import lab.js, which re-exports every module of the app.
 //
 // Physics interpolation makes the RENDER transform lag a step; getState() is
 // the true stepped state, so assertions read charState (filled from it).

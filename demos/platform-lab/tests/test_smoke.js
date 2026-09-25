@@ -33,7 +33,7 @@ import {
 import {
     mqState, evaluateAll, resetListeners, abortListeners, removePlainListener,
     removeCaptureListenerWrongly, removeCaptureListenerProperly,
-    setScheme, darkQuery, LISTENER_QUERY, currentListenerMql,
+    setScheme, darkQuery, LISTENER_QUERY, listenerMql,
 } from '/app/mediaquery.js';
 import { biState, longhandsFor, refreshLonghands, applyLive, LONGHANDS } from '/app/borderimage.js';
 import {
@@ -396,7 +396,7 @@ assert(matchMedia('complete garbage').media === 'complete garbage',
 // across that boundary N times must fire each one a predictable number of
 // times, and the numbers differ per kind — which is the whole experiment.
 
-const mql = currentListenerMql();
+const mql = listenerMql;
 assert(mql.media === LISTENER_QUERY, 'the listener list watches ' + LISTENER_QUERY);
 
 // Re-arm from a known state at a WIDE viewport, so the first flip below is

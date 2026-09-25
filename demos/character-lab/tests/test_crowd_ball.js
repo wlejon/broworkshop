@@ -3,7 +3,7 @@
 // (the overlap binary, and the 2x2 of innerBody x maxStrength on a ball).
 
 import { check, test, done } from "/lib/kit/test.js";
-import { scene, keys, tune, charState, rebuild, teleport, RADIUS, STAND_HALF,
+import { scene, keys, tune, charState, character, rebuild, teleport, RADIUS, STAND_HALF,
          crowd, crowdState, npcs, setCrowdSize, setCrowdPhysical, resetCrowd, placeNpc, npcPosition, PLAZA,
          ballLab, ballState, launchBall, clearBall, selfOverlap, BALL_LAB } from "/app/lab.js";
 import { clearKeys, hold, run } from "/app/tests/helpers.js";
@@ -90,15 +90,17 @@ crowd.speed = wander;
 test('innerBody: an overlap at the character finds it only when the body exists', () => {
     teleport(BALL_LAB.x, standY, BALL_LAB.z);
     advanceTime(200);
-    // ballState.selfTag is read page-side each frame. The imported `character`
-    // binding is NOT used after a rebuild: a test's view of a page module's
-    // `let` export is a snapshot (ENGINE-ISSUES.md).
+    // `character` is the imported `let` binding: each rebuild() assigns a new
+    // controller to it, and the import follows.
     rebuildWith({ innerBody: true }, 64);
     const on = selfOverlap();
-    check(ballState.selfTag > 0 && on.visible, `innerBody on: tag ${ballState.selfTag}, found`);
+    check(character.innerBody > 0 && on.visible, `innerBody on: tag ${character.innerBody}, found`);
+    check(ballState.selfTag === character.innerBody, 'the HUD reads the same body');
+    const before = character;
     rebuildWith({ innerBody: false }, 64);
     const off = selfOverlap();
-    check(ballState.selfTag === -1 && !off.visible, `innerBody off: no body, nothing found [${off.ids}]`);
+    check(character !== before, 'rebuild made a new controller');
+    check(character.innerBody === -1 && !off.visible, `innerBody off: no body, nothing found [${off.ids}]`);
     const y = charState.position.y;
     hold(500, 'w');
     check(charState.isGrounded && Math.abs(charState.position.y - y) < 0.2, 'still supported by the floor');

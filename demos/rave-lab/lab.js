@@ -21,7 +21,7 @@ import { curveEditor } from "/app/curves.js";
 export const RAVE = ['brosoundml-data/rave/magnets_z8', 'brosoundml-data/rave/birds_dawnchorus_z8'];
 const RAVE_ROOT = 'brosoundml-data/rave';
 
-/** Live app state (tests read it; module `let` exports would be snapshots). */
+/** Live app state (tests read it). */
 export const lab = {
     rave: null,         // bro.rave handle
     src: null,          // source PCM at rave.sampleRate

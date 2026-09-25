@@ -9,9 +9,7 @@
 // same numbers every time; the thresholds in the tests are margins around
 // measured behaviour, not guesses.
 
-// app.js is imported, not main.js: a driver script importing the page's ENTRY
-// module gets a second evaluation of it (ENGINE-ISSUES.md), i.e. a second
-// circuit and garage stacked on the first.
+// app.js holds the page's instance of the game; main.js only imports it.
 import * as app from '/app/app.js';
 export { app };
 export const { car, world, cameras, scene, state, garage, audio, rumble } = app;

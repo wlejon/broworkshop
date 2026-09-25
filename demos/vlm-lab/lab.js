@@ -37,7 +37,7 @@ const FAMILIES = {
     },
 };
 
-/** Live app state (tests read it; module `let` exports would be snapshots). */
+/** Live app state (tests read it). */
 export const lab = {
     family: 'qwen3vl',
     model: null,        // Qwen3VLModel | Qwen35Model | ClipModel

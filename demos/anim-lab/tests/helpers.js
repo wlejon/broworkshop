@@ -1,6 +1,4 @@
-// Shared test helpers. Tests import lab.js / actions.js, never main.js: the
-// page's entry module would be evaluated a second time and build a second
-// character (see ENGINE-ISSUES.md).
+// Shared test helpers. Tests import lab.js / actions.js, where the app lives.
 
 import { character } from "/app/lab.js";
 

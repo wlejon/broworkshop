@@ -25,8 +25,7 @@
 //
 // This module owns the camera, listener binding, transport, source rows and
 // the frame loop, and exports the handles tests/test_smoke.js asserts on.
-// main.js only imports it (a test importing the entry module would boot a
-// second copy of the app).
+// main.js only imports it.
 
 import { boot } from "/lib/kit/app.js";
 import { h, $ } from "/lib/kit/dom.js";

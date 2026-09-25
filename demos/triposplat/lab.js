@@ -33,7 +33,7 @@ const SPEC = {
     shift: { label: 'flow shift', min: 1, max: 6, step: 0.1, fmt: (v) => v.toFixed(1), hint: 'timestep shift of the flow schedule' },
 };
 
-/** Live app state (tests read it; module `let` exports would be snapshots). */
+/** Live app state (tests read it). */
 export const lab = {
     paths: {},          // resolved checkpoint paths (missing ones absent)
     missing: [],        // required checkpoints not found

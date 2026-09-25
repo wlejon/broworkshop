@@ -2,9 +2,7 @@
 //
 // The entry module stays thin on purpose: lab.js builds the scene and the
 // animation tower, actions.js is every operation, hud.js / hud-blend.js are
-// the panel. Tests import lab.js and actions.js directly (never this file:
-// an entry module imported from a test script is evaluated a second time,
-// which would build a second character — see ENGINE-ISSUES.md).
+// the panel. Tests import lab.js and actions.js directly.
 
 import { boot, fpsMeter } from "/lib/kit/index.js";
 import { orbitControls } from "/lib/kit/viewport3d.js";

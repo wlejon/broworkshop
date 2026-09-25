@@ -147,9 +147,8 @@ export function evaluateAll() {
 
 // Deliberately chosen so a resize between the two demo sizes flips it.
 export const LISTENER_QUERY = '(min-width: 900px)';
-let listenerMql = null;
-/** The list the experiment listeners sit on (a function: a `let` export is a snapshot to test drivers). */
-export function currentListenerMql() { return listenerMql; }
+/** The list the experiment listeners sit on (set by installListeners()). */
+export let listenerMql = null;
 
 export function installListeners() {
     listenerMql = window.matchMedia(LISTENER_QUERY);

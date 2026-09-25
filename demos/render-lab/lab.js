@@ -22,8 +22,7 @@
 // frame, so LOD switches, visibility gates and the shadow cache are verifiable
 // in numbers.
 //
-// Tests import this module (main.js is only the page entry: a driver script
-// importing the entry module would evaluate it a second time).
+// Tests import this module (main.js is only the page entry).
 
 // First on purpose: monitor.js grabs its sub-scene context at module scope, and
 // scenes render in getContext order, so the sub-scene must exist before the

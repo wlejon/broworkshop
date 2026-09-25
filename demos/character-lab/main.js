@@ -1,6 +1,5 @@
 // Character Lab entry: the panel, the keyboard and the mouse pick. The scene,
-// the controller and the frame tick live in lab.js (which tests import; an
-// entry module imported by a test is evaluated twice, see ENGINE-ISSUES.md).
+// the controller and the frame tick live in lab.js (which tests import).
 
 import { boot, fpsMeter } from "/lib/kit/index.js";
 import { vp, canvas, keys, input, resetToSpawn, resetCrowd, launchBall, pickAtScreen } from "/app/lab.js";

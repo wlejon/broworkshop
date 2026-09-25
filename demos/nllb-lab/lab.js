@@ -25,7 +25,7 @@ export const LANGS = [
     ['ell_Grek', 'Greek'],
 ];
 
-/** Live app state (tests read it; module `let` exports would be snapshots). */
+/** Live app state (tests read it). */
 export const lab = {
     model: null,        // bro.lm NllbModel
     running: false,

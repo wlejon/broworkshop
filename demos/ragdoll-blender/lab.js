@@ -1,6 +1,6 @@
 // lab.js — the scene: floor, lights, the blended figure, the cannon, mouse
 // grabbing, and the frame loop. main.js only boots it and binds the panel
-// (tests import this module, never the entry; see ENGINE-ISSUES.md).
+// (tests import this module).
 
 import { sceneViewport, orbitRotation, localPoint } from "/lib/kit/viewport3d.js";
 import { addStatic, physicsEvents, pickRay, raycast, grabber } from "/lib/kit/physics3d.js";

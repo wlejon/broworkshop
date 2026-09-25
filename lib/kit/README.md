@@ -422,9 +422,8 @@ sets. The strip owns the bitmaps added to it; the view only borrows them.
 Test scripts are ES modules compiled in-process by bro-headless, so they
 `import` from `/lib` exactly like app code (the engine mounts `/lib` and
 `/app` as module roots for the driver script too, and shares the page's
-module instances — except the page's entry module: importing the
-`<script src>` file itself boots the app a second time, see ENGINE-ISSUES.md;
-keep `main.js` a thin boot and import the modules under it). Top-level `await` works. Put them in `<app>/tests/test_*.js`;
+module instances, the `<script type="module" src>` entry included: importing
+`/app/main.js` binds the running app, it does not boot a second one). Top-level `await` works. Put them in `<app>/tests/test_*.js`;
 `scripts/validate.sh <app>` runs them with CWD = repo root.
 
 ```js
@@ -453,13 +452,10 @@ done();                                            // throws if any test() faile
   physics), e.g. `simUntil(() => T.screen === 'complete', 20000)`.
 - `clickOn` refuses a hidden element or one covered by another; `typeInto`
   clicks then types through the engine; `press('Enter')` sends SDL keys.
-- Import the app's modules, never its entry `main.js` (the engine evaluates
-  an entry module a second time when a test imports it). Keep `main.js` a
-  thin boot over an importable module (`lab.js`, `app.js`, ...).
-- A page module's `let` export is a snapshot in the test: later
-  reassignments are not seen. Read live state through objects or accessor
-  functions (`characterAvatar()`), not a reassigned binding.
-  (Both in ENGINE-ISSUES.md.)
+- A test's imports are the page's instances, entry module included, and
+  they are live bindings: a page module's `let` export that the app later
+  reassigns (a rebuilt controller, a reloaded model) reads its current value
+  in the test, through `import { x }` and `import * as ns` alike.
 - The headless globals (`advanceTime`, `click`, `screenshot`, `getPixel`,
   `wheel`, `mouseDown`, ...) are all still there; see bro's `docs/headless.md`.
 

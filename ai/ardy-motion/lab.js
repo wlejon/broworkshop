@@ -17,7 +17,7 @@ export const ARDY = ['brodiffusion/weights/ardy-g152'];
 export const LLM2VEC = ['brolm/weights/llm2vec-llama3-8b'];
 const BEADS_PER_BONE = 4;
 
-/** Live app state (tests read it; module `let` exports would be snapshots). */
+/** Live app state (tests read it). */
 export const lab = {
     ready: false,       // pipeline loaded in the worker
     device: '',

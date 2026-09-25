@@ -33,7 +33,7 @@ const AMG = {
 };
 const MASK_COLORS = ['#4a6cf0', '#f0c64a', '#4fd06a', '#e0556a', '#a06af0', '#f08a3a', '#3ad0c0'];
 
-/** Live app state (tests read it; module `let` exports would be snapshots). */
+/** Live app state (tests read it). */
 export const lab = {
     root: '',           // weights root
     avail: {},          // id -> weights present

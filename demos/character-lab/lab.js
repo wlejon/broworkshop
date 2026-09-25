@@ -24,7 +24,7 @@
 // (the rigged body), queries.js (sensing), crowd.js, innerbody.js,
 // terrain.js. This module assembles them, owns the camera, input and the
 // frame tick, and exports the handles the HUD and the tests share. Tests
-// import this module, never main.js (see ENGINE-ISSUES.md).
+// import this module.
 
 import { sceneViewport, worldToScreen, Camera } from "/lib/kit/viewport3d.js";
 import { buildCourse, tickCourse } from "/app/course.js";

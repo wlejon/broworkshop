@@ -54,29 +54,16 @@ Repro: an app folder holding `three.min.js` from
 `import "/app/three.min.js"; new THREE.WebGLRenderer({ canvas })`.
 No broworkshop app vendors three.js now (spatial-audio was rebuilt on bro.scene).
 
-#### A driver script importing the page's ENTRY module evaluates it again (2026-09-24)
-The module registry (`eval_jit.cpp`, `opts.moduleRegistry`) shares page
-modules with a headless driver script, except the entry module named in
-`<script type="module" src>`: importing it from a test runs it a second time
-(two boots into one DOM and one physics world). Its dependencies are shared.
-Repro: page `main.js` = `import "/app/m.js"; console.log('main')`; a test
-doing `import "/app/main.js"` logs `main` twice and `m.js` runs once.
-Affects: tests should import non-entry modules (kit apps: keep `main.js` a
-thin boot).
+#### Two `import * as ns` of one module in one unit are different objects (2026-09-24)
+Two files compiled together that both `import * as ns from "./m.js"` get
+distinct namespace objects (`nsA === nsB` is false). Across units (page vs
+driver) the namespace is now one shared object.
 
-#### A driver script sees a page module's `let` exports as a snapshot (2026-09-24)
-A test importing a shared page module gets the values its `let` exports held
-at import time; later reassignments (from a page timer or a page function the
-test calls) never show, in named imports or `import * as ns`. Objects and
-functions are shared; accessor functions return live values.
-Repro: `live.js` = `export let y = 1; export let c = null; export function bump(){ y++ }
-export function rebuild(){ c = { n: (c ? c.n : 0) + 1 } } export function readC(){ return c }`,
-page `main.js` = `import { bump, rebuild } from "/app/live.js"; rebuild(); setTimeout(bump, 50)`;
-the test imports `{ y, c, rebuild, readC }` and `* as ns`, `advanceTime(100)`:
-`y` and `ns.y` are 1; after the test's own `rebuild()`, `c !== readC()`.
-Affects: demos/character-lab (tests read `ballState.selfTag` /
-`characterAvatar()` instead of the stale `character` handle).
-
+#### Module rename may skip member targets in destructuring (2026-09-24, unverified)
+Found by reading bronze's module rename (`rename.cpp`): the object of a member
+target inside a destructuring pattern (`({ a: obj[k] } = src)`) is never
+visited, so an imported `obj` there would keep its unrenamed name. Not yet
+reproduced.
 
 #### Per-call and typed-array overhead dominates tight JS loops (2026-09-24)
 Re-measured 2026-09-24 in a headless driver script (20M iterations,
@@ -110,6 +97,7 @@ from the commit before the kit rebuild.
 
 ## Fixed
 
+- Module registry, verified 2026-09-24 (bro `tests/headless/test_module_entry_shared.js`, `test_module_live_bindings.js`; bronze `eval_module_registry_test.cpp`): a driver importing the page's `<script type="module" src>` entry gets the running instance instead of evaluating it again, and `let` exports (named and `import * as ns`) are live across page and driver — bronze 8c5000c, bro 390e80de. character-lab's crowd-ball test uses the imported `character` binding, platform-lab exports `listenerMql` directly, and the "entry evaluated twice" / "exports are snapshots" comments across the apps and lib/kit/README.md are gone.
 - bronze runtime, verified 2026-09-24 (bronze oracle cases, bro `tests/headless/test_error_stack_module_file.js`): a NaN typed as a number is falsy in `||`/`&&`/`?:`/`!`/`if` (bronze f811611); `String.prototype.lastIndexOf` honours `fromIndex` (022edba); a stack frame names the file its position is in, not the imported module's (6ca2430, bro c1b84a4f; ABI change); functions and classes in imported modules no longer carry the bundler's `modN.` prefix in `.name` and stack frames (5b45e02). tools/synth's tempo is back to the `+d.bpm || 120` idiom; desktop-notebook's Tab-indent test runs.
 - `createPhysicsNode({ body: tag })` binds the body again — bro 1d3b8445; verified 2026-09-24 (physics-playground and character-lab `tests/test_physics_node.js` pass).
 - Physics `step()` no longer discards unread contact events (they accumulate until `getContacts()`) — bro 8abffa5a; verified 2026-09-24 (an `added` and a `removed` from two sub-steps both arrive). games/pegbounce can drop its per-sub-step drain.

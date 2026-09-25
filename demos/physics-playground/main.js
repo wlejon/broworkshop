@@ -23,8 +23,7 @@
 // The headline control is the step-rate slider beside the interpolation box:
 // at 15 Hz with interpolation off every body visibly snaps once per step.
 //
-// Tests import view.js / sim / ui, never this entry module (ENGINE-ISSUES.md:
-// a driver script importing the page's entry module evaluates it again).
+// Tests import view.js / sim / ui, where the app lives.
 
 import { boot } from "/lib/kit/app.js";
 import { tabs, fpsMeter } from "/lib/kit/ui.js";

@@ -1,6 +1,5 @@
 // flora-lab entry: the panel. The scene, worker and layers are lab.js, which
-// tests import (an entry module imported by a test is evaluated twice, see
-// ENGINE-ISSUES.md).
+// tests import.
 import { boot, h, stats, segmented, toggleButton, bindControl } from "/lib/kit/index.js";
 import { sky, view, control, setLayer, triangles, onUpdate } from "/app/lab.js";
 import { LAYERS } from "/app/layers.js";

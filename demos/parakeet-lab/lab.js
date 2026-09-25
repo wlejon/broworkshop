@@ -20,7 +20,7 @@ import { clipInput, transcriptView, timelineView, tokenTable } from "/lib/kit/sp
 
 export const PARAKEET = ['brosoundml/weights/parakeet/0.6b-v3'];
 
-/** Live app state (tests read it; module `let` exports would be snapshots). */
+/** Live app state (tests read it). */
 export const lab = {
     model: null,        // bro.stt Parakeet handle
     tok: null,          // ParakeetTokenizer (SentencePiece)
