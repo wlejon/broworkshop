@@ -40,22 +40,9 @@ number jump instead of blending.
 
 ### bronze JS runtime and module loading
 
-#### A NaN typed as a number is truthy in conditions (2026-09-24)
-When the compiler knows a value is a number (unary `+`, `0/0`, a `NaN`
-literal), `||`, `&&`, `?:` and `!` treat NaN as truthy (the test looks like
-`d != 0`). Values of unknown type and `Boolean(NaN)` are fine.
-Repro: `bro-headless tools/synth -e "const d = {}; const n = NaN; console.log(+d.x || 120, n || 1, !n, n ? 1 : 2, n && 1)"`
-prints `NaN NaN false 1 1`; want `120 1 true 2 NaN`.
-Affects: the `+opts.x || def` idiom everywhere (tools/synth's tempo was NaN;
-it now uses `Number.isFinite`). Find others with
-`grep -rn "(+[a-zA-Z_.]* ||" games demos tools ai lib`.
-
-#### `String.prototype.lastIndexOf` ignores `fromIndex` (2026-09-24)
-`'ab\ncd\nef'.lastIndexOf('\n', 3)` is 5 (want 2), `'abc'.lastIndexOf('c', 1)`
-is 2 (want -1).
-Affects: the textarea line-start idiom `value.lastIndexOf('\n', pos - 1) + 1`;
-tools/desktop-notebook's indent / heading / block insert (its test skips the
-Tab-indent check while `'a\nb\nc'.lastIndexOf('\n', 2) !== 1`).
+#### An anonymous class assigned to a binding gets no name (2026-09-24)
+`var K = class {}; K.name` is `""` (want `"K"`), in single-file programs too.
+The automatic naming that anonymous functions get skips class expressions.
 
 #### three.js r160 `new THREE.WebGLRenderer()` throws "a number is not a function" (2026-09-24)
 In the r160 UMD build, the WebGLState factory's `$(1)` (a nested function
@@ -90,13 +77,6 @@ the test imports `{ y, c, rebuild, readC }` and `* as ns`, `advanceTime(100)`:
 Affects: demos/character-lab (tests read `ballState.selfTag` /
 `characterAvatar()` instead of the stale `character` handle).
 
-#### Error location misattributed across module imports (2026-09-24)
-A ReferenceError at line 8 of a headless test script that imports
-`/app/m.js` is reported `at .../app/m.js (external module bindings):8:1 (in
-.../test.js)`: the imported module's name with the script's line. Failures in
-test scripts that import kit helpers point at the wrong file first.
-Repro: a script `import { m } from "/app/m.js";` + six `console.log` lines +
-`notDefinedAnywhere(m);`.
 
 #### Per-call and typed-array overhead dominates tight JS loops (2026-09-24)
 Re-measured 2026-09-24 in a headless driver script (20M iterations,
@@ -122,9 +102,15 @@ from the commit before the kit rebuild.
   otherwise are stale.
 - `performance.now()` in headless advances only with virtual time, so fps/ms
   readouts read 62.5 fps / 0 ms there. Use `Date.now()` for wall-clock budgets.
+- In headless, a `<video>` with sound follows the audio that `advanceTime`
+  renders, and rAF sees the same `currentTime` a script reads after the step
+  (bro 37f855bc). Where a clip ends after a fixed number of steps can vary by a
+  frame from run to run (hello.webm: 0.500 or 0.533 s), probably because audio
+  waits for the first decoded picture. Assert ranges, not exact end times.
 
 ## Fixed
 
+- bronze runtime, verified 2026-09-24 (bronze oracle cases, bro `tests/headless/test_error_stack_module_file.js`): a NaN typed as a number is falsy in `||`/`&&`/`?:`/`!`/`if` (bronze f811611); `String.prototype.lastIndexOf` honours `fromIndex` (022edba); a stack frame names the file its position is in, not the imported module's (6ca2430, bro c1b84a4f; ABI change); functions and classes in imported modules no longer carry the bundler's `modN.` prefix in `.name` and stack frames (5b45e02). tools/synth's tempo is back to the `+d.bpm || 120` idiom; desktop-notebook's Tab-indent test runs.
 - `createPhysicsNode({ body: tag })` binds the body again — bro 1d3b8445; verified 2026-09-24 (physics-playground and character-lab `tests/test_physics_node.js` pass).
 - Physics `step()` no longer discards unread contact events (they accumulate until `getContacts()`) — bro 8abffa5a; verified 2026-09-24 (an `added` and a `removed` from two sub-steps both arrive). games/pegbounce can drop its per-sub-step drain.
 - `ReflectionProbe.intensity` is readable and settable, including via `createReflectionProbe({ intensity })` — bro 5d3cedf8; verified 2026-09-24. demos/render-lab's probe Intensity slider works.

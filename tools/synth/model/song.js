@@ -315,8 +315,7 @@ export class Song {
     load(data) {
         const d = data || {};
         const want = (Array.isArray(d.layers) && d.layers.length ? d.layers : [{}]).slice(0, MAX_LAYERS);
-        const bpm = Number(d.bpm);
-        this.bpm = Number.isFinite(bpm) && bpm > 0 ? Math.max(30, Math.min(300, Math.round(bpm))) : 120;
+        this.bpm = Math.max(30, Math.min(300, Math.round(+d.bpm || 120)));
         this.lfo = lfoWithDefaults(d.lfo);
         while (this.layers.length > want.length) this._dropLayer(this.layers.pop());
         want.forEach((ld, i) => {

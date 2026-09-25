@@ -103,12 +103,7 @@ try {
         check(q('#previewPane .md-task').classList.contains('done'), 'preview re-rendered done');
     });
 
-    // Line starts come from lastIndexOf('\n', from), whose fromIndex bronze
-    // ignores (ENGINE-ISSUES.md); until that is fixed, indenting a middle line
-    // lands on the last line, so the check only runs where lastIndexOf works.
-    const lastIndexOfWorks = 'a\nb\nc'.lastIndexOf('\n', 2) === 1;
     test('Tab indents the line under the caret', () => {
-        if (!lastIndexOfWorks) return console.log('  (skipped: String.prototype.lastIndexOf ignores fromIndex)');
         const t = ta(), at = t.value.indexOf('- [x] Pending');
         t.focus();
         t.setSelectionRange(at, at + 3);
