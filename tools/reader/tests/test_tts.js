@@ -118,6 +118,9 @@ try {
         check(size > 24000, 'wav size ' + size);
         check(/saved/.test(text('#export-status')), 'status: ' + text('#export-status'));
         fs.unlinkSync(wav);
+        // The dialog closes itself 1.6 s after the export lands; wait for that
+        // here rather than lean on the next test (a Qwen3 load) outlasting it.
+        waitFor(() => q('#export-modal').hidden, 'export dialog closes', 10000);
     });
 
     const qdir = paths().qwen;
