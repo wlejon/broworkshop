@@ -4,10 +4,11 @@
 // SAME sentence neutral + once per emotion at its calibrated default α and at a
 // stronger push, writing 24 kHz WAVs to ./output for A/B.
 //   bro-headless ../broworkshop/demos/kokoro-lab _emotion_clips.js
+import { weightsRoot } from "/lib/kit/weights.js";
 (function () {
 const _path = require('path');
 const _fs = require('fs');
-const _ROOT = 'D:/projects/brosoundml';
+const _ROOT = weightsRoot() + '/brosoundml';
 const _MODEL = _ROOT + '/weights/kokoro';
 const _OUT = _path.join(__dirname, 'output');
 if (!_fs.existsSync(_OUT)) { _fs.mkdirSync(_OUT, { recursive: true }); }

@@ -10,7 +10,7 @@
 // sends planar CHW floats, and a typed path, which sends {path}.
 
 const fs = require('fs');
-const FIXTURE = 'D:/projects/broworkshop/demos/qwen-image-lab/tests/.cond_fixture.png';
+const FIXTURE = String(bro.appDir).replace(/\\/g, '/').replace(/\/+$/, '') + '/tests/.cond_fixture.png';
 
 function $(id) { return document.getElementById(id); }
 function pumpUntil(pred, budgetMs) {

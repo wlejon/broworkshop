@@ -10,10 +10,11 @@
 // Run: bro-headless ../broworkshop/demos/supertonic-lab \
 //        ../broworkshop/demos/supertonic-lab/tests/explore_pca.js
 
+import { weightPath, weightsRoot } from "/lib/kit/weights.js";
 const DATA = (typeof process !== 'undefined' && process.env && process.env.BRO_STDATA)
-  || 'D:/projects/brosoundml-data/supertonic';
+  || weightPath('brosoundml-data/supertonic');
 const OUT = (typeof process !== 'undefined' && process.env && process.env.BRO_STOUT)
-  || 'D:/projects/bro/_explore/pca';
+  || weightsRoot() + '/bro/_explore/pca';
 const TEXT = 'A voice moved along a principal axis of the palette.';
 const TTLN = 50 * 256, DPN = 8 * 16, D = TTLN + DPN;   // 12800 + 128 = 12928
 

@@ -2,9 +2,10 @@
 // must reproduce synthesize's audio exactly (identity), and editing F0 must
 // change the audio while staying finite. Proves the re-injection boundary.
 //   bro-headless ../broworkshop/demos/kokoro-lab _decode_roundtrip.js
+import { weightsRoot } from "/lib/kit/weights.js";
 const fs = require('fs');
-const MODEL = 'D:/projects/brosoundml/weights/kokoro';
-bro.tts.setAssetRoot('D:/projects/brosoundml');
+const MODEL = weightsRoot() + '/brosoundml/weights/kokoro';
+bro.tts.setAssetRoot(weightsRoot() + '/brosoundml');
 const KK = bro.tts.loadKokoro(MODEL);
 const BS = JSON.parse(fs.readFileSync(MODEL + '/voice_basis.json', 'utf8'));
 const ids = bro.tts.phonemize('The quick brown fox jumps over the lazy dog.');

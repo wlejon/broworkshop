@@ -53,6 +53,7 @@ import { initGate } from "/app/ui/gate.js";
 import { initSpatial } from "/app/ui/spatial.js";
 import { initRender } from "/app/ui/render.js";
 import { initModel } from "/app/ui/model.js";
+import { weightPath } from "/lib/kit/weights.js";
 
 function init() {
   const prefs = loadPrefs();
@@ -77,7 +78,8 @@ function init() {
   const PREVIEW_SIZE = 512;
 
   // restore persisted text fields (feature modules restore their own below)
-  if (prefs.modelDir) $('model-dir').value = prefs.modelDir;
+  // the model dir: persisted choice, else the brodiffusion sibling (weights.js)
+  $('model-dir').value = prefs.modelDir || weightPath('brodiffusion/weights/krea-2-turbo');
   if (prefs.textEncoder != null) $('text-encoder').value = prefs.textEncoder;
   if (prefs.prompt)   $('prompt').value = prefs.prompt;
   if (prefs.negPrompt != null) $('neg-prompt').value = prefs.negPrompt;

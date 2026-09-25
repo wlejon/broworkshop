@@ -39,10 +39,11 @@
 // norm of the spectrum's word fields; without this the mouth sliders would
 // run off-manifold long before full deflection).
 
+import { weightPath } from "/lib/kit/weights.js";
 const fs = require('fs');
 
-const MODEL_DIR = 'D:/projects/brodiffusion/weights/krea-2-turbo';
-const OUT = 'D:/projects/broworkshop/demos/krea2-lab/lab/mouth.json';
+const MODEL_DIR = weightPath('brodiffusion/weights/krea-2-turbo');
+const OUT = String(bro.appDir).replace(/\\/g, '/').replace(/\/+$/, '') + '/lab/mouth.json';
 
 const CARRIER = 'with a neutral mouth';
 

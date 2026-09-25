@@ -14,11 +14,13 @@
 //      .storage.json before running (test_lora.js's header shows the full
 //      recipe) — this overwrites it.
 
+import { weightPath } from "/lib/kit/weights.js";
 const fs = require('fs');
 const os = require('os');
 
-const APP_DIR = 'D:/projects/broworkshop/demos/krea2-lab';
-const MODEL_DIR = 'D:/projects/brodiffusion/weights/krea-2-turbo';
+// run from a neutral sibling app dir (demos/example), so krea2-lab is beside it
+const APP_DIR = String(bro.appDir).replace(/\\/g, '/').replace(/\/+$/, '').replace(/\/[^/]+$/, '') + '/krea2-lab';
+const MODEL_DIR = weightPath('brodiffusion/weights/krea-2-turbo');
 const LORA_PATH = (os.tmpdir() + '/krea2_e2e_lora.safetensors').replace(/\\/g, '/');
 
 // ── synthetic LoRA ──────────────────────────────────────────────────────────

@@ -1,5 +1,6 @@
 import { $, basis, emoTimbre, emotionBasis, putBasis, putCoords, putEmoTimbre, putEmotionBasis, putMascFemBasis, putMfAlpha } from "/app/lib/state.js";
 import { setBadge } from "/app/lib/model.js";
+import { weightPath } from "/lib/kit/weights.js";
 
 // ═══ data source ═════════════════════════════════════════════════════════════
 // One folder drives everything the lab needs: the Kokoro model dir (model +
@@ -63,12 +64,11 @@ export function detectSource(root) {
   return null;
 }
 
-// Resolve a sensible starting data source for this machine. The HTML ships a
-// Windows dev default; on first run (or after a move) we probe the usual spots
+// Resolve a sensible starting data source for this machine. On first run (or
+// after a move) we probe the sibling repos beside this checkout (weights.js)
 // and adopt the first that detectSource() recognises — so the app comes up
 // pointed at real data without the user editing a path. A browsed/typed path is
 // remembered in localStorage and wins on the next launch.
-export const _os = require('os');
 export function rememberedRoot() {
   try { return localStorage.getItem('kokoro-lab.dataRoot') || ''; } catch (e) { return ''; }
 }
@@ -76,16 +76,15 @@ export function rememberRoot(root) {
   try { localStorage.setItem('kokoro-lab.dataRoot', root); } catch (e) {}
 }
 export function defaultRoot(htmlDefault) {
-  let home = '';
-  try { home = _os.homedir(); } catch (e) {}
   const candidates = [
     rememberedRoot(),                       // an earlier choice, if any
-    htmlDefault,                            // the value baked into index.html
-    home && home + '/projects/brosoundml-data',
-    home && home + '/projects/brosoundml',
+    htmlDefault,                            // the field's value, if any
+    weightPath('brosoundml'),               // the dev sibling (converted weights)
+    weightPath('brosoundml-data'),          // the published dataset checkout
   ].filter(Boolean);
   for (const c of candidates) if (detectSource(c)) return c;
-  return rememberedRoot() || htmlDefault;   // nothing detected — show best guess
+  // nothing detected — show best guess
+  return rememberedRoot() || htmlDefault || weightPath('brosoundml');
 }
 
 // Adopt `root` as the data source: detect its layout, update the resolved paths

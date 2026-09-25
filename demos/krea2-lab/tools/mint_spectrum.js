@@ -17,10 +17,11 @@
 // Writes lab/spectrum.json: { span, gain, axes: {key: [span floats]}, meta }.
 // The worker applies row += slider * SLIDER_GAIN * gain * axes[key].
 
+import { weightPath } from "/lib/kit/weights.js";
 const fs = require('fs');
 
-const MODEL_DIR = 'D:/projects/brodiffusion/weights/krea-2-turbo';
-const OUT = 'D:/projects/broworkshop/demos/krea2-lab/lab/spectrum.json';
+const MODEL_DIR = weightPath('brodiffusion/weights/krea-2-turbo');
+const OUT = String(bro.appDir).replace(/\\/g, '/').replace(/\/+$/, '') + '/lab/spectrum.json';
 
 // Each mint prompt names its subject phrase so the splice needs no grammar
 // heuristics at bake time (runtime never splices at all).

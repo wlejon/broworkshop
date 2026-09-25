@@ -7,11 +7,12 @@
 // Run: bro-headless ../broworkshop/demos/supertonic-lab \
 //        ../broworkshop/demos/supertonic-lab/tests/test_design.js
 
+import { weightPath } from "/lib/kit/weights.js";
 import { $ } from "/app/lib/state.js";
 import { initDesign, buildDesign, designActive, designedMatrices, resetDesign, selectPreset, basisInfo, setBasis } from "/app/lib/design.js";
 
 const DATA = (typeof process !== 'undefined' && process.env && process.env.BRO_STDATA)
-  || 'D:/projects/brosoundml-data/supertonic';
+  || weightPath('brosoundml-data/supertonic');
 const TEXT = 'A voice authored from the palette.';
 
 const fs = require('fs');

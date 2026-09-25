@@ -1,6 +1,7 @@
 // ═══ model load + voice presets + languages ══════════════════════════════════
 import { $ } from "/app/lib/state.js";
-import { _fs, _os, pExists, recall, remember } from "/app/lib/helpers.js";
+import { _fs, pExists, recall, remember } from "/app/lib/helpers.js";
+import { weightPath } from "/lib/kit/weights.js";
 import { bargeIn, scheduleLive } from "/app/lib/synth.js";
 import { initDesign, designActive, designedMatrices, selectPreset, setGenderBasis } from "/app/lib/design.js";
 
@@ -29,16 +30,13 @@ const LANGS = [
   ['tr', 'Turkish'], ['uk', 'Ukrainian'], ['vi', 'Vietnamese'], ['na', '— none —'],
 ];
 
-// Probe a sensible default model dir for this machine on first run.
+// Probe a sensible default model dir for this machine on first run:
+// remembered > the field's value > the brosoundml-data sibling (weights.js).
 export function defaultModelDir(htmlDefault) {
-  let home = ''; try { home = _os.homedir(); } catch (e) {}
-  const cands = [
-    recall('supertonic-lab.modelDir'),
-    htmlDefault,
-    home && home + '/projects/brosoundml-data/supertonic',
-  ].filter(Boolean);
+  const sibling = weightPath('brosoundml-data/supertonic');
+  const cands = [recall('supertonic-lab.modelDir'), htmlDefault, sibling].filter(Boolean);
   for (const c of cands) if (pExists(c + '/tts.json')) return c;
-  return recall('supertonic-lab.modelDir') || htmlDefault;
+  return recall('supertonic-lab.modelDir') || htmlDefault || sibling;
 }
 
 // Fill the voice <select> by scanning voice_styles/ for *.json presets.

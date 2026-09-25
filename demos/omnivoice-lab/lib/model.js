@@ -3,6 +3,7 @@
 import { $, omni, setOmni, setBusy } from "/app/lib/state.js";
 import { setBadge, pExists, pParent, recall, remember } from "/app/lib/helpers.js";
 import { resolved } from "../../../ai/voice-pipeline/models.js";
+import { weightPath } from "/lib/kit/weights.js";
 import { buildVoicePanel } from "/app/lib/voice.js";
 import { buildTextPanel } from "/app/lib/text.js";
 import { updateEstimate } from "/app/lib/schedule.js";
@@ -14,9 +15,10 @@ function catalogDir(key) {
   try { return resolved()[key] || ''; } catch (e) { return ''; }
 }
 
-// Probe a sensible model dir for this machine: remembered > catalog > the HTML
-// default. The catalog already covers BRO_WEIGHTS, the dev sibling found from
-// the app's own path, and the per-user download cache.
+// Probe a sensible model dir for this machine: remembered > catalog > the
+// field's value. The catalog already covers BRO_WEIGHTS, the dev sibling found
+// from the app's own path, and the per-user download cache. With nothing on
+// disk the field shows where the dev sibling would be.
 export function defaultModelDir(htmlDefault) {
   const cands = [
     recall('omnivoice-lab.modelDir'),
@@ -24,7 +26,7 @@ export function defaultModelDir(htmlDefault) {
     htmlDefault,
   ].filter(Boolean);
   for (const c of cands) if (pExists(c + '/config.json') && pExists(c + '/model.safetensors')) return c;
-  return recall('omnivoice-lab.modelDir') || htmlDefault;
+  return recall('omnivoice-lab.modelDir') || htmlDefault || weightPath('brosoundml/weights/omnivoice');
 }
 
 // Whisper (for transcribing a reference clip) lives beside OmniVoice in the

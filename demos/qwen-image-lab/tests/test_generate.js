@@ -7,7 +7,8 @@
 // 512² / 4 steps, well under the app's own 512²/8 explore default, so the
 // render is a second or two once the ~17 GiB of INT8 weights are resident.
 
-const MODEL_DIR = 'D:/projects/brodiffusion/weights/qwen-image-2.1';
+import { weightPath } from "/lib/kit/weights.js";
+const MODEL_DIR = weightPath('brodiffusion/weights/qwen-image-2.1');
 
 function $(id) { return document.getElementById(id); }
 function pumpUntil(pred, budgetMs) {

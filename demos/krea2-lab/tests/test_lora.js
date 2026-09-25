@@ -3,7 +3,7 @@
 // Krea 2 Turbo checkpoint, with a synthetic (random rank-4) LoRA whose only
 // job is to visibly, deterministically perturb the output.
 //
-// Recipe (from D:/projects/bro):
+// Recipe (from the bro checkout):
 //
 //   cp ../broworkshop/demos/krea2-lab/.storage.json /tmp/krea2_storage.bak   # keep your prefs!
 //   ./build/Release/bro-headless.exe ../broworkshop/demos/example \

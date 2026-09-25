@@ -9,10 +9,11 @@
 // Run: bro-headless ../broworkshop/demos/supertonic-lab \
 //        ../broworkshop/demos/supertonic-lab/tests/explore_guidance.js
 
+import { weightPath, weightsRoot } from "/lib/kit/weights.js";
 const DATA = (typeof process !== 'undefined' && process.env && process.env.BRO_STDATA)
-  || 'D:/projects/brosoundml-data/supertonic';
+  || weightPath('brosoundml-data/supertonic');
 const OUT  = (typeof process !== 'undefined' && process.env && process.env.BRO_STOUT)
-  || 'D:/projects/bro/_explore/guidance';
+  || weightsRoot() + '/bro/_explore/guidance';
 const TEXT = 'The signal grew sharper as the guidance climbed, then softened again.';
 const SEED = 7;
 const GUID = [0, 1, 2, 3, 4, 6, 8, 12];

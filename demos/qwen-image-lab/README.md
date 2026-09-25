@@ -6,10 +6,11 @@ in **Qwen-Image 2.1**, as a bro app: a 7.1B single-stream flow-matching DiT
 RGBA autoencoder, driven through brodiffusion's `qwenImage21*` research hooks.
 
 ```
-CUDA_VISIBLE_DEVICES=0 D:/projects/bro/build/Release/bro.exe demos/qwen-image-lab
+CUDA_VISIBLE_DEVICES=0 ../bro/build/Release/bro.exe demos/qwen-image-lab   # macOS/Linux: ../bro/build-release/bro
 ```
 
-The model directory defaults to `D:/projects/brodiffusion/weights/qwen-image-2.1`
+The model directory defaults to `brodiffusion/weights/qwen-image-2.1` in the sibling
+checkout beside this one (`lib/kit/weights.js`; `BRO_WEIGHTS` overrides the root)
 and loads INT8 (DiT **and** text encoder, ~17 GiB resident — BF16 does not fit
 1024² on 24 GB). Loading takes about 38 s. A 512²/8 render is ~1.5 s, 1024²/40
 about 28 s.
@@ -312,8 +313,8 @@ The **Signals** tab — what the render did, read off the model.
 ## Running the tests
 
 ```
-cd D:/projects/broworkshop/demos/qwen-image-lab
-CUDA_VISIBLE_DEVICES=0 D:/projects/bro/build/Release/bro-headless.exe . tests/<test>.js
+# from the broworkshop root; macOS/Linux: ../bro/build-release/bro-headless
+CUDA_VISIBLE_DEVICES=0 ../bro/build/Release/bro-headless.exe demos/qwen-image-lab demos/qwen-image-lab/tests/<test>.js
 ```
 
 `bro-headless`'s global `assert` **logs and continues**; the process exits

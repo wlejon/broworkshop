@@ -1,6 +1,7 @@
 // ═══ checkpoint load + variant adaptation ════════════════════════════════════
 import { $ } from "/app/lib/state.js";
-import { pParent, pExists, pName, recall, remember, _os } from "/app/lib/helpers.js";
+import { pParent, pExists, pName, recall, remember } from "/app/lib/helpers.js";
+import { weightPath } from "/lib/kit/weights.js";
 import { buildSpeakerPanel, buildInstructPanel } from "/app/lib/voice.js";
 import { loadVoiceBasis, buildDesigner } from "/app/lib/designer.js";
 import { loadEmotionBasis, buildEmotion } from "/app/lib/emotion.js";
@@ -34,16 +35,13 @@ function wireQuickChips(modelDir) {
   }
 }
 
-// Probe a sensible default checkpoint for this machine on first run.
+// Probe a sensible default checkpoint for this machine on first run:
+// remembered > the field's value > the brosoundml sibling (weights.js).
 export function defaultModelDir(htmlDefault) {
-  let home = ''; try { home = _os.homedir(); } catch (e) {}
-  const cands = [
-    recall('qwen-lab.modelDir'),
-    htmlDefault,
-    home && home + '/projects/brosoundml/weights/qwen-tts/0.6B-customvoice',
-  ].filter(Boolean);
+  const sibling = weightPath('brosoundml/weights/qwen-tts/0.6B-customvoice');
+  const cands = [recall('qwen-lab.modelDir'), htmlDefault, sibling].filter(Boolean);
   for (const c of cands) if (pExists(c + '/config.json')) return c;
-  return recall('qwen-lab.modelDir') || htmlDefault;
+  return recall('qwen-lab.modelDir') || htmlDefault || sibling;
 }
 
 // Load a checkpoint asynchronously; adapt the UI to its variant once ready.

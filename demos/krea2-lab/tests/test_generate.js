@@ -9,7 +9,8 @@
 // Kept a lightweight 4-step / 512^2 render (well under the app's own 1024²/8-
 // step defaults) so the actual generation is fast once the model is resident.
 
-const MODEL_DIR = 'D:/projects/brodiffusion/weights/krea-2-turbo';
+import { weightPath } from "/lib/kit/weights.js";
+const MODEL_DIR = weightPath('brodiffusion/weights/krea-2-turbo');
 
 function $(id) { return document.getElementById(id); }
 
@@ -24,7 +25,7 @@ assert($('prompt'), 'prompt field exists');
 assert($('btn-generate'), 'generate button exists');
 assert($('view'), 'render canvas exists');
 
-// index.html's #model-dir already defaults to MODEL_DIR, so the app's own
+// app.js defaults #model-dir to MODEL_DIR, so the app's own
 // client.onReady() -> doLoad() auto-load kicks in with no click needed. Don't
 // click #btn-load ourselves: the worker client accepts only one outstanding
 // request, so a second, redundant load click while the real one is in flight

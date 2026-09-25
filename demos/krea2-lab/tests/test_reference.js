@@ -16,7 +16,8 @@
 //
 //   bro-headless ../broworkshop/demos/krea2-lab tests/test_reference.js
 
-const MODEL_DIR = 'D:/projects/brodiffusion/weights/krea-2-turbo';
+import { weightPath } from "/lib/kit/weights.js";
+const MODEL_DIR = weightPath('brodiffusion/weights/krea-2-turbo');
 const OUT_DIR = require('os').tmpdir().replace(/\\/g, '/') + '/krea2-reference-test';
 const PROMPT = 'a lighthouse on a rocky headland under a bright noon sky, photograph';
 const DECOY = 'a bowl of ramen on a wooden table, overhead shot';

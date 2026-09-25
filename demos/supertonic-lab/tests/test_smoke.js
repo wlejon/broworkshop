@@ -6,11 +6,12 @@
 // Run:  bro-headless ../broworkshop/demos/supertonic-lab tests/test_smoke.js
 //       (set BRO_STDATA to override the converted-model dir)
 
+import { weightPath } from "/lib/kit/weights.js";
 import { renderWave } from "/app/lib/render.js";
 import { $ } from "/app/lib/state.js";
 
 const DATA = (typeof process !== 'undefined' && process.env && process.env.BRO_STDATA)
-  || 'D:/projects/brosoundml-data/supertonic';
+  || weightPath('brosoundml-data/supertonic');
 const TEXT = 'Hello there. This is a test of the Supertonic pipeline.';
 
 function finite(r) {

@@ -4,9 +4,10 @@
 // real traced synthesis, and read the model's own F0/energy/duration contours
 // plus waveform stats. A passing axis moves its metric in the expected direction.
 //   bro-headless ../broworkshop/demos/kokoro-lab _validate_axes.js
+import { weightsRoot } from "/lib/kit/weights.js";
 const fs = require('fs');
-const MODEL = 'D:/projects/brosoundml/weights/kokoro';
-bro.tts.setAssetRoot('D:/projects/brosoundml');
+const MODEL = weightsRoot() + '/brosoundml/weights/kokoro';
+bro.tts.setAssetRoot(weightsRoot() + '/brosoundml');
 const KK = bro.tts.loadKokoro(MODEL);
 const BS = JSON.parse(fs.readFileSync(MODEL + '/voice_basis.json', 'utf8'));
 const ids = bro.tts.phonemize('The quick brown fox jumps over the lazy dog.');

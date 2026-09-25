@@ -10,10 +10,11 @@
 // Run: bro-headless ../broworkshop/demos/supertonic-lab \
 //        ../broworkshop/demos/supertonic-lab/tests/explore_range.js
 
+import { weightPath, weightsRoot } from "/lib/kit/weights.js";
 const DATA = (typeof process !== 'undefined' && process.env && process.env.BRO_STDATA)
-  || 'D:/projects/brosoundml-data/supertonic';
+  || weightPath('brosoundml-data/supertonic');
 const OUT = (typeof process !== 'undefined' && process.env && process.env.BRO_STOUT)
-  || 'D:/projects/bro/_explore/range';
+  || weightsRoot() + '/bro/_explore/range';
 const TEXT = 'How far can this voice be pushed before it breaks?';
 const TTLN = 50 * 256, DPN = 8 * 16, D = TTLN + DPN;
 

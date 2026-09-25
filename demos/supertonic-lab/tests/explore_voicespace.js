@@ -12,13 +12,14 @@
 // Run: bro-headless ../broworkshop/demos/supertonic-lab \
 //        ../broworkshop/demos/supertonic-lab/tests/explore_voicespace.js
 
+import { weightPath, weightsRoot } from "/lib/kit/weights.js";
 const DATA = (typeof process !== 'undefined' && process.env && process.env.BRO_STDATA)
-  || 'D:/projects/brosoundml-data/supertonic';
+  || weightPath('brosoundml-data/supertonic');
 const TEXT = 'The same words, spoken by a voice that slides from one identity to another.';
 const SEED = 7;
 
 const OUT = (typeof process !== 'undefined' && process.env && process.env.BRO_STOUT)
-  || 'D:/projects/bro/_explore/voicespace';
+  || weightsRoot() + '/bro/_explore/voicespace';
 
 const fs = require('fs');
 function ensureDir(d) { try { fs.mkdirSync(d, { recursive: true }); } catch (e) {} }

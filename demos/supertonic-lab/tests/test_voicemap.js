@@ -6,12 +6,13 @@
 // Run: bro-headless ../broworkshop/demos/supertonic-lab \
 //        ../broworkshop/demos/supertonic-lab/tests/test_voicemap.js
 
+import { weightPath, weightsRoot } from "/lib/kit/weights.js";
 import { $ } from "/app/lib/state.js";
 import { initDesign, basisInfo, selectPreset } from "/app/lib/design.js";
 import { buildVoiceMap, draw } from "/app/lib/voicemap.js";
 
 const DATA = (typeof process !== 'undefined' && process.env && process.env.BRO_STDATA)
-  || 'D:/projects/brosoundml-data/supertonic';
+  || weightPath('brosoundml-data/supertonic');
 const fs = require('fs');
 
 const st = bro.tts.loadSupertonic(DATA);
@@ -32,5 +33,5 @@ draw();
 flush();
 const cv = $('#voicemap');
 assert(cv && cv.width === 440 && cv.height === 300, 'voicemap canvas present');
-try { screenshot('D:/projects/bro/_explore/lab_voicemap.png'); } catch (e) { console.log('(screenshot skipped: ' + e.message + ')'); }
+try { screenshot(weightsRoot() + '/bro/_explore/lab_voicemap.png'); } catch (e) { console.log('(screenshot skipped: ' + e.message + ')'); }
 console.log('VOICEMAP RENDER OK');

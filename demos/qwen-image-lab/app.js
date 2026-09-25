@@ -64,6 +64,7 @@ import { initExplore } from "/app/ui/explore.js";
 import { initManifest } from "/app/ui/manifest.js";
 import { initRender } from "/app/ui/render.js";
 import { initModel } from "/app/ui/model.js";
+import { weightPath } from "/lib/kit/weights.js";
 
 function init() {
   const prefs = loadPrefs();
@@ -83,7 +84,8 @@ function init() {
     Math.round((+n || DEFAULTS.width) / SIZE_MULT) * SIZE_MULT));
   const MAXCHARS = 1000;
 
-  if (prefs.modelDir) $('model-dir').value = prefs.modelDir;
+  // the model dir: persisted choice, else the brodiffusion sibling (weights.js)
+  $('model-dir').value = prefs.modelDir || weightPath('brodiffusion/weights/qwen-image-2.1');
   if (prefs.quantize != null) $('quantize').checked = !!prefs.quantize;
   if (prefs.prompt) $('prompt').value = prefs.prompt;
   ['seed', 'steps', 'guidance'].forEach((k) => {

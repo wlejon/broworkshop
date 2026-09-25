@@ -1,5 +1,5 @@
 // Qwen-Image Lab worker — owns the native Qwen-Image 2.1 pipeline and every
-// control surface qwen-image-research (D:/projects/qwen-image-research) mapped,
+// control surface qwen-image-research (the ../qwen-image-research sibling) mapped,
 // routed through brodiffusion's qwenImage21* research hooks (see
 // bro/docs/diffusion-control-api.js section 7).
 //

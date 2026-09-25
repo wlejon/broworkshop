@@ -20,10 +20,11 @@
 //
 //   bro-headless ../broworkshop/demos/krea2-lab tests/test_stack_budget.js
 
-const MODEL_DIR = 'D:/projects/brodiffusion/weights/krea-2-turbo';
-// screenshot() resolves against the CWD (the bro repo), not the app dir — write
-// the frames somewhere unambiguous instead of littering whatever cwd ran this.
-const SHOTS = 'D:/projects/broworkshop/demos/krea2-lab/tests/out/';
+import { weightPath } from "/lib/kit/weights.js";
+const MODEL_DIR = weightPath('brodiffusion/weights/krea-2-turbo');
+// screenshot() resolves against the CWD, not the app dir — write the frames
+// somewhere unambiguous instead of littering whatever cwd ran this.
+const SHOTS = String(bro.appDir).replace(/\\/g, '/').replace(/\/+$/, '') + '/tests/out/';
 const SEED = '1680741884';           // the seed the crowds showed up on
 const DECK = {
   'composition.proximity': 2.16, 'composition.elevation': 1.68,
