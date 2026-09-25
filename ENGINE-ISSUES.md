@@ -76,22 +76,6 @@ does not finish a single ~41k-line module. The bundles were build output and
 never tracked; rebuild with `npm i && node build.mjs` in `ai/pi-agent/bundler/`
 from the commit before the kit rebuild.
 
-### Text metrics
-
-#### Colour-bitmap glyph ink boxes are pixel-rounded and 3px over the image (2026-09-24, macOS)
-`measureText('😀')` at `48px Arial` on macOS (fallback Apple Color Emoji,
-an `sbix` face) reports `actualBoundingBox{Ascent,Descent,Left,Right}` =
-44 / 7 / 1 / 50: whole pixels, and 51×51 for a 48×48 bitmap (the 160ppem
-strike image spans x 0–800, y 0–800 of an 800-unit em; glyf bbox 1,0–801,800).
-At 24px it is 23 / 4 / 1 / 26 and at 64px 58 / 9 / 1 / 66, so a constant +3px
-in both axes: the mask bounds, rounded out and outset, rather than the scaled
-image rect that outline glyphs get (`"Hg"` gives fractional bounds). The
-ascent tops Arial's `fontBoundingBoxAscent` (43.4531); a fallback face may
-legitimately exceed the primary face's box, so text-lab allows 0.1em there,
-but the outset inflates it. Repro:
-`bro-headless demos/text-lab -e "const g=document.createElement('canvas').getContext('2d'); g.font='48px Arial'; const m=g.measureText('😀'); console.log(m.actualBoundingBoxAscent, m.actualBoundingBoxDescent, m.actualBoundingBoxLeft, m.actualBoundingBoxRight, m.fontBoundingBoxAscent)"`
-Affects: demos/text-lab (metrics panel, tolerance in `consistencyRow`).
-
 ## Notes (not bugs; doc gaps worth a line)
 
 - Thai out of `Arial` on macOS falls back to Thonburi, an AAT (morx-only)
@@ -142,3 +126,4 @@ Affects: demos/text-lab (metrics panel, tolerance in `consistencyRow`).
 - Selection, Range and editing, verified 2026-09-24 (bro `tests/dom/`, `tests/events/test_selection_press.js`): Range rects in scrolled-out text and under the menu bar, and per-line rects for wrapped inline elements (htmlayout 73996c8, bro 66aa265e, 8a83b3be); spec clone/extract/delete for partially-contained nodes, `surroundContents` throws InvalidStateError instead of hanging, `insertNode` per spec, `selectionchange` from script, `getRangeAt` returns the live range (8a83b3be); selection paint skips `display:none` and stops at element offsets (73996c8, 66aa265e); a press moves the selection only where a caret can go: a text-less block takes the caret itself, a button's child, a canvas, `pointer-events:none` text and a prevented mousedown start no selection (89a886dd); `setRangeText` (30ee3208). range-selection-lab tests assert the right results, text-lab drops `reveal()` and its ENGINE BUG panel, synth drops `user-select:none` on its viewport, desktop-notebook's `splice` uses `setRangeText`.
 - Layout (htmlayout; bro tests in `tests/layout/`), verified 2026-09-24: column flex with a percentage width (978de23); `min-width` on inline-block and shrink-to-fit max-width (0f195e7, 4be8a38); `grid-column: 1 / -1` (1d72e7f); a text run after an inline element breaks inside the text (a8d25ed; inline elements join their block's lines); flex intrinsics with `letter-spacing` (8b3d5b2) and top-level inline-flex/inline-grid shrink to fit (4be8a38); flex-wrap rows that exactly fit (68c76b6); `table-layout: fixed` (404fe87); `text-overflow: ellipsis` (d6da139); rects of descendants of a newly hidden element (2ec6c57). procwatch styles its tags as chips again, shader-lab's panes are 50/50, nav-lab's test checks the button's own rect.
 - bro-server no longer runs the page's scripts (with no script named it runs `server.js`) — bro 80c8ec0f; verified 2026-09-24. games/fps dropped its missing-scene tolerance.
+- Colour-bitmap glyph ink boxes (`measureText('😀')`) are the drawn image rect, fractional, not CoreText's padded mask box (48px: 42 / 6 / 0 / 48, was 44 / 7 / 1 / 50) — bro 8c591ae5; verified 2026-09-24 on macOS.
