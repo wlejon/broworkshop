@@ -5,9 +5,9 @@
 // which the headless runtime auto-loads into the same global scope first.)
 //   bro-headless ../broworkshop/demos/kokoro-lab ../broworkshop/demos/kokoro-lab/_smoke_designer.js
 const fs = require('fs');
-// Weights root: defaults to the Windows D: layout; override with BRO_WEIGHTS
-// (e.g. /mnt/d/projects under WSL) to run on other hosts.
-const WROOT = (typeof process !== 'undefined' && process.env.BRO_WEIGHTS) || 'D:/projects';
+// Weights root: $BRO_WEIGHTS, else the directory holding the bro* siblings.
+import { weightsRoot } from "/lib/kit/weights.js";
+const WROOT = weightsRoot();
 const MODEL = WROOT + '/brosoundml/weights/kokoro';
 bro.tts.setAssetRoot(WROOT + '/brosoundml');
 const KK = bro.tts.loadKokoro(MODEL);

@@ -48,9 +48,12 @@ requestDuration();
 assert(durPending === true, 'an edit during a decode queues (latest-wins), does not block');
 assert(synthBusy === true, 'still the first decode in flight — the edit did not start a second');
 
-// tick virtual time until the whole chain (first decode, then the queued one) drains
-let _t = 0;
-while ((synthBusy || durPending) && _t++ < 2500) advanceTime(16);
+// tick virtual time until the whole chain (first decode, then the queued one)
+// drains. The decodes run on a real background thread, so the budget is wall
+// time: a tick count alone is ~1 s of wall clock, less than two decodes take
+// on some backends (Apple silicon: ~0.8 s each).
+const _t0 = Date.now();
+while ((synthBusy || durPending) && Date.now() - _t0 < 60000) advanceTime(16);
 assert(!synthBusy && !durPending, 'the async chain drained (both decodes done within budget)');
 
 assert(_audio().length !== _before, 're-timed: audio length changed (' +

@@ -20,7 +20,9 @@ import {
 } from "/app/lib/designer.js";
 import { cvSource, usedPreset, currentVoice } from "/app/lib/voice.js";
 
-const WROOT = (typeof process !== 'undefined' && process.env && process.env.BRO_WEIGHTS) || 'D:/projects';
+// Weights root: $BRO_WEIGHTS, else the directory holding the bro* siblings.
+import { weightsRoot } from "/lib/kit/weights.js";
+const WROOT = weightsRoot();
 const ROOT = WROOT + '/brosoundml/weights/qwen-tts';
 const TEXT = 'Hello there. This is a test of the pipeline.';
 

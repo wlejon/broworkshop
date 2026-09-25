@@ -11,8 +11,9 @@ import { kokoro, putKokoro, basis, putBasis, mascFemBasis, putMascFemBasis,
 import { buildMascFem, setMfAlpha, addMascFem, resetMascFem } from "/app/lib/mascfem.js";
 import { rebuildVoice } from "/app/lib/designer.js";
 const fs = require('fs');
-// Weights root: defaults to the Windows D: layout; override with BRO_WEIGHTS.
-const WROOT = (typeof process !== 'undefined' && process.env.BRO_WEIGHTS) || 'D:/projects';
+// Weights root: $BRO_WEIGHTS, else the directory holding the bro* siblings.
+import { weightsRoot } from "/lib/kit/weights.js";
+const WROOT = weightsRoot();
 const MODEL = WROOT + '/brosoundml/weights/kokoro';
 bro.tts.setAssetRoot(WROOT + '/brosoundml');
 // Let the app's own async Kokoro load settle before we load ours (device race).

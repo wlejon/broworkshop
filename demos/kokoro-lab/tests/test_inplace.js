@@ -8,8 +8,9 @@ import { kokoro, putKokoro, basis, voice, putVoice, lastTrace, putLastTrace,
          stageCards, activePaint, putActivePaint, protectedStage, putProtectedStage, $ } from "/app/lib/state.js";
 import { snapshotPredicted } from "/app/lib/edit.js";
 import { renderStages } from "/app/lib/render.js";
-// Weights root: defaults to the Windows D: layout; override with BRO_WEIGHTS.
-const WROOT = (typeof process !== 'undefined' && process.env.BRO_WEIGHTS) || 'D:/projects';
+// Weights root: $BRO_WEIGHTS, else the directory holding the bro* siblings.
+import { weightsRoot } from "/lib/kit/weights.js";
+const WROOT = weightsRoot();
 const _M = WROOT + '/brosoundml/weights/kokoro';
 bro.tts.setAssetRoot(WROOT + '/brosoundml');
 // Let the app's own async Kokoro load settle before we load ours (device race).

@@ -10,8 +10,9 @@ import { kokoro, putKokoro, basis, voice, putVoice, lastTrace, putLastTrace,
          edited, clipId, clipSamples, curDur, predicted, $ } from "/app/lib/state.js";
 import { snapshotPredicted, commitEdit, resetSignal, commitDuration,
          resampleByDur, resetDurations } from "/app/lib/edit.js";
-// Weights root: defaults to the Windows D: layout; override with BRO_WEIGHTS.
-const WROOT = (typeof process !== 'undefined' && process.env.BRO_WEIGHTS) || 'D:/projects';
+// Weights root: $BRO_WEIGHTS, else the directory holding the bro* siblings.
+import { weightsRoot } from "/lib/kit/weights.js";
+const WROOT = weightsRoot();
 const _M = WROOT + '/brosoundml/weights/kokoro';
 bro.tts.setAssetRoot(WROOT + '/brosoundml');
 // The app's init() kicks off its own async Kokoro load; let it settle before we
