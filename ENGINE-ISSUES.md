@@ -49,10 +49,14 @@ Repro: an app folder holding `three.min.js` from
 `import "/app/three.min.js"; new THREE.WebGLRenderer({ canvas })`.
 No broworkshop app vendors three.js now (spatial-audio was rebuilt on bro.scene).
 
-#### `for await` over a plain iterable does not await its values (2026-09-24)
-`for await (const v of [p])` binds the promise itself; the spec wraps a sync
-iterator (CreateAsyncFromSyncIterator) so each value is awaited. Async
-generators are fine.
+#### Async iteration closing and delegation gaps (2026-09-24)
+Found while fixing `for await` over sync iterables (bronze 39f829a), not fixed:
+- `yield*` in an async generator over a sync iterable probably skips the
+  async-from-sync wrapping (`iterator_delegate.cpp`); untested.
+- An early exit from `for await` over a real async iterator calls `return()`
+  but never awaits its promise, so the loop moves on before the close settles.
+- An early exit over a sync source calls the sync `return()` directly rather
+  than through the async wrapper (microtask timing only).
 
 #### Per-call and typed-array overhead dominates tight JS loops (2026-09-24)
 Re-measured 2026-09-24 in a headless driver script (20M iterations,
@@ -86,6 +90,7 @@ from the commit before the kit rebuild.
 
 ## Fixed
 
+- bronze `for await` over a plain iterable awaits each value, and a rejected value closes the sync iterator and throws in the loop — bronze 39f829a; verified 2026-09-24 (oracle case `for_await_sync_iterable.js`, output matches node).
 - bronze loops, verified 2026-09-24 (oracle cases `for_head_member_target.js`, `module_for_head_member_target/`, `block_shadow_early_exit.js`): for-in/for-of heads that assign to a property or a pattern of properties parse and run, including imported objects, generators and `for await` (4e9b135); `break`/`continue` out of a block that redeclares a loop-carried name no longer leaks the inner value (5fc97d9).
 - Canvas colours and filter lengths, verified 2026-09-24 (bro `tests/canvas/test_canvas_filter.js`, `tests/style/test_shadow_lists_units.js`): canvas `fillStyle`/`strokeStyle`/`shadowColor` accept `currentcolor` (the canvas's `color` at assignment), and a gradient stop's `currentcolor` is opaque black — bro 348c6b39; CSS `blur()` resolves its unit — bro 4b42a3fc; `ctx.filter` `blur()`/`drop-shadow()` accept em/rem/viewport lengths — bro 348c6b39. Multi-line text shadows painting line by line (a later line's shadow over an earlier line's text) was left as is: CSS 2.1 Appendix E paints per line box, which browsers are believed to follow — not re-verified against a browser.
 - Shadows, verified 2026-09-24 (bro `tests/style/test_shadow_lists_units.js`, `tests/canvas/test_canvas_filter.js`): every text-shadow in a list paints, and shadow lengths resolve em/rem/viewport/absolute units and `calc()` — bro a63dbf71; canvas `ctx.filter` `drop-shadow()` uses the canvas's `color` for `currentcolor` — bro 3ceef1a7.
