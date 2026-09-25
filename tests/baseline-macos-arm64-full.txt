@@ -1,0 +1,378 @@
+# broworkshop validation baseline — scripts/validate.sh --write-baseline
+# 2026-09-25  engine: ../bro/build-arm64-full-metal/bro-headless (macos-arm64-full)
+# STATUS KIND TARGET [note]. SKIP rows were not run in this baseline.
+PASS smoke ai/ardy-motion 
+PASS test ai/ardy-motion/tests/test_smoke.js 
+PASS smoke ai/maker-agent 
+PASS test ai/maker-agent/tests/test_iframe_capture.js 
+SKIP test ai/maker-agent/tests/test_maker_loop.js net (use --net)
+SKIP test ai/maker-agent/tests/test_openrouter_loop.js net (use --net)
+PASS test ai/maker-agent/tests/test_ui.js 
+PASS smoke ai/pi-agent 
+PASS test ai/pi-agent/tests/test_agent.js 
+PASS test ai/pi-agent/tests/test_click_targets.js 
+PASS test ai/pi-agent/tests/test_linediff.js 
+FAIL test ai/pi-agent/tests/test_loop.js rc=1: evalScriptFileJit: uncaught Error: check failed: a small Qwen3 GGUF not found (tried /Users/j/projects/brolm/weights/Qwen3-1.7B-GGUF/Qwen3-1.7B-Q8_0.gguf, /Users/j/.local/share/bro
+PASS test ai/pi-agent/tests/test_markdown.js 
+PASS test ai/pi-agent/tests/test_parser.js 
+PASS test ai/pi-agent/tests/test_scroll_chaining.js 
+PASS test ai/pi-agent/tests/test_tools.js 
+PASS test ai/pi-agent/tests/test_ui.js 
+PASS smoke ai/voice-pipeline 
+PASS test ai/voice-pipeline/tests/test_concurrent.js 
+PASS test ai/voice-pipeline/tests/test_e2e.js 
+PASS test ai/voice-pipeline/tests/test_main.js 
+PASS test ai/voice-pipeline/tests/test_setup.js 
+PASS test ai/voice-pipeline/tests/test_stream.js 
+PASS test ai/voice-pipeline/tests/test_turn.js 
+PASS smoke demos/ai-arena 
+PASS test demos/ai-arena/tests/test_agents.js 
+PASS test demos/ai-arena/tests/test_replay.js 
+PASS test demos/ai-arena/tests/test_ui.js 
+PASS smoke demos/anim-lab 
+PASS test demos/anim-lab/tests/test_blend.js 
+PASS test demos/anim-lab/tests/test_clips.js 
+PASS test demos/anim-lab/tests/test_machine.js 
+PASS test demos/anim-lab/tests/test_ui.js 
+PASS smoke demos/character-lab 
+PASS test demos/character-lab/tests/test_controller.js 
+PASS test demos/character-lab/tests/test_crowd_ball.js 
+PASS test demos/character-lab/tests/test_physics_node.js 
+PASS test demos/character-lab/tests/test_sensing.js 
+PASS test demos/character-lab/tests/test_terrain.js 
+PASS test demos/character-lab/tests/test_ui.js 
+PASS smoke demos/clipmap-terrain 
+PASS test demos/clipmap-terrain/tests/test_main.js 
+PASS smoke demos/cluster-diar-lab 
+PASS test demos/cluster-diar-lab/tests/test_smoke.js 
+PASS smoke demos/diffusion-lab 
+PASS test demos/diffusion-lab/tests/test_generate.js 
+PASS test demos/diffusion-lab/tests/test_smoke.js 
+PASS test demos/diffusion-lab/tests/test_word_axis.js 
+PASS smoke demos/dom-lab 
+PASS test demos/dom-lab/tests/test_main.js 
+PASS smoke demos/flora-lab 
+PASS test demos/flora-lab/tests/test_main.js 
+PASS smoke demos/image-kernels 
+PASS test demos/image-kernels/tests/test_kernels.js 
+PASS test demos/image-kernels/tests/test_main.js 
+PASS smoke demos/input-lab 
+PASS test demos/input-lab/tests/test_smoke.js 
+PASS smoke demos/instanced-crowd 
+PASS test demos/instanced-crowd/tests/test_crowd.js 
+PASS smoke demos/kokoro-lab 
+PASS test demos/kokoro-lab/tests/test_align_cells.js 
+PASS test demos/kokoro-lab/tests/test_align_commit.js 
+FAIL test demos/kokoro-lab/tests/test_designer.js rc=1: evalScriptFileJit: uncaught Error: ENOENT: no such file or directory, open '/Users/j/projects/brosoundml/weights/kokoro/voice_basis.json' (in /Users/j/projects/broworkshop/demos/ko
+PASS test demos/kokoro-lab/tests/test_edit.js 
+PASS test demos/kokoro-lab/tests/test_emotion.js 
+PASS test demos/kokoro-lab/tests/test_inplace.js 
+FAIL test demos/kokoro-lab/tests/test_mascfem.js rc=1: evalScriptFileJit: uncaught Error: ENOENT: no such file or directory, open '/Users/j/projects/brosoundml/weights/kokoro/voice_basis.json' (in /Users/j/projects/broworkshop/demos/ko
+PASS test demos/kokoro-lab/tests/test_pin.js 
+PASS smoke demos/krea2-lab 
+PASS test demos/krea2-lab/tests/test_explore.js 
+FAIL test demos/krea2-lab/tests/test_expression.js rc=1: ASSERTION FAILED: model loaded without error: [load] loadModel failed: model dir not found: D:/projects/brodiffusion/weights/krea-2-turbo
+TIMEOUT test demos/krea2-lab/tests/test_gate.js killed after 900s
+FAIL test demos/krea2-lab/tests/test_generate.js rc=1: ASSERTION FAILED: model loaded without error: [load] loadModel failed: model dir not found: D:/projects/brodiffusion/weights/krea-2-turbo
+FAIL test demos/krea2-lab/tests/test_lora.js rc=1: ASSERTION FAILED: model loaded without error: [load] loadModel failed: model dir not found: D:/projects/brodiffusion/weights/krea-2-turbo
+FAIL test demos/krea2-lab/tests/test_mouth.js rc=1: ASSERTION FAILED: model loaded without error: [load] loadModel failed: model dir not found: D:/projects/brodiffusion/weights/krea-2-turbo
+FAIL test demos/krea2-lab/tests/test_reference.js rc=1: ASSERTION FAILED: model loaded without error: [load] loadModel failed: model dir not found: D:/projects/brodiffusion/weights/krea-2-turbo
+PASS test demos/krea2-lab/tests/test_save_all.js 
+TIMEOUT test demos/krea2-lab/tests/test_spatial.js killed after 900s
+FAIL test demos/krea2-lab/tests/test_spectrum.js rc=1: ASSERTION FAILED: model loaded without error: [load] loadModel failed: model dir not found: D:/projects/brodiffusion/weights/krea-2-turbo
+FAIL test demos/krea2-lab/tests/test_stack_budget.js rc=1: ASSERTION FAILED: model loaded without error: [load] loadModel failed: model dir not found: D:/projects/brodiffusion/weights/krea-2-turbo
+PASS test demos/krea2-lab/tests/test_ui.js 
+PASS test demos/krea2-lab/tests/test_walk_face.js 
+PASS test demos/krea2-lab/tests/test_walk_rig.js 
+PASS test demos/krea2-lab/tests/test_walk_run.js 
+PASS test demos/krea2-lab/tests/test_walk.js 
+PASS smoke demos/kws-lab 
+PASS test demos/kws-lab/tests/test_main.js 
+PASS smoke demos/lighting-demo 
+PASS test demos/lighting-demo/tests/test_smoke.js 
+PASS smoke demos/listen-lab 
+PASS test demos/listen-lab/tests/test_main.js 
+PASS smoke demos/lm-playground 
+FAIL test demos/lm-playground/tests/test_main.js rc=1: evalScriptFileJit: uncaught Error: timed out waiting for model loaded (status: loading qwen35…) (600000 ms)
+PASS smoke demos/mechanical-sandbox 
+PASS test demos/mechanical-sandbox/tests/test_controls.js 
+PASS test demos/mechanical-sandbox/tests/test_machines.js 
+PASS smoke demos/mic-chunks 
+PASS test demos/mic-chunks/tests/test_main.js 
+PASS smoke demos/nav-carving 
+PASS test demos/nav-carving/tests/test_agents.js 
+PASS test demos/nav-carving/tests/test_nav.js 
+PASS test demos/nav-carving/tests/test_ui.js 
+PASS smoke demos/nav-lab 
+PASS test demos/nav-lab/tests/test_bake.js 
+PASS test demos/nav-lab/tests/test_crowd.js 
+PASS test demos/nav-lab/tests/test_links.js 
+PASS test demos/nav-lab/tests/test_obstacles.js 
+PASS test demos/nav-lab/tests/test_steering.js 
+PASS test demos/nav-lab/tests/test_ui.js 
+PASS smoke demos/netsync 
+PASS test demos/netsync/tests/test_session.js 
+PASS smoke demos/nllb-lab 
+PASS test demos/nllb-lab/tests/test_smoke.js 
+PASS smoke demos/omnivoice-lab 
+PASS test demos/omnivoice-lab/tests/test_interaction.js 
+PASS test demos/omnivoice-lab/tests/test_smoke.js 
+PASS smoke demos/parakeet-lab 
+PASS test demos/parakeet-lab/tests/test_smoke.js 
+PASS smoke demos/physics-playground 
+PASS test demos/physics-playground/tests/test_bodies.js 
+PASS test demos/physics-playground/tests/test_effects.js 
+PASS test demos/physics-playground/tests/test_machines.js 
+PASS test demos/physics-playground/tests/test_physics_node.js 
+PASS test demos/physics-playground/tests/test_rigid.js 
+PASS smoke demos/pixart-lab 
+FAIL test demos/pixart-lab/tests/test_generate.js rc=1: evalScriptFileJit: uncaught Error: check failed: run started
+PASS smoke demos/plant-recipes 
+PASS test demos/plant-recipes/tests/test_lifecycle.js 
+PASS smoke demos/platform-lab 
+PASS test demos/platform-lab/tests/test_smoke.js 
+PASS smoke demos/qwen-asr-lab 
+PASS test demos/qwen-asr-lab/tests/test_main.js 
+PASS smoke demos/qwen-image-lab 
+FAIL test demos/qwen-image-lab/tests/test_axes.js rc=1: ASSERTION FAILED: model loaded without error: [load] loadModel failed: model dir not found: D:/projects/brodiffusion/weights/qwen-image-2.1
+FAIL test demos/qwen-image-lab/tests/test_capture.js rc=1: ASSERTION FAILED: model loaded without error: [load] loadModel failed: model dir not found: D:/projects/brodiffusion/weights/qwen-image-2.1
+FAIL test demos/qwen-image-lab/tests/test_conditioned.js rc=1: ASSERTION FAILED: model loaded without error: [load] loadModel failed: model dir not found: D:/projects/brodiffusion/weights/qwen-image-2.1
+FAIL test demos/qwen-image-lab/tests/test_edit.js rc=1: ASSERTION FAILED: model loaded without error: [load] loadModel failed: model dir not found: D:/projects/brodiffusion/weights/qwen-image-2.1
+FAIL test demos/qwen-image-lab/tests/test_explore.js rc=1: ASSERTION FAILED: model loaded without error: [load] loadModel failed: model dir not found: D:/projects/brodiffusion/weights/qwen-image-2.1
+FAIL test demos/qwen-image-lab/tests/test_gate.js rc=1: ASSERTION FAILED: model loaded without error: [load] loadModel failed: model dir not found: D:/projects/brodiffusion/weights/qwen-image-2.1
+FAIL test demos/qwen-image-lab/tests/test_generate.js rc=1: ASSERTION FAILED: model loaded without error: [load] loadModel failed: model dir not found: D:/projects/brodiffusion/weights/qwen-image-2.1
+FAIL test demos/qwen-image-lab/tests/test_history.js rc=1: ASSERTION FAILED: model loaded without error: [load] loadModel failed: model dir not found: D:/projects/brodiffusion/weights/qwen-image-2.1
+FAIL test demos/qwen-image-lab/tests/test_mint.js rc=1: ASSERTION FAILED: model loaded without error: [load] loadModel failed: model dir not found: D:/projects/brodiffusion/weights/qwen-image-2.1
+FAIL test demos/qwen-image-lab/tests/test_prefix.js rc=1: ASSERTION FAILED: model loaded without error: [load] loadModel failed: model dir not found: D:/projects/brodiffusion/weights/qwen-image-2.1
+FAIL test demos/qwen-image-lab/tests/test_release_te.js rc=1: ASSERTION FAILED: model loaded without error: [load] loadModel failed: model dir not found: D:/projects/brodiffusion/weights/qwen-image-2.1
+FAIL test demos/qwen-image-lab/tests/test_schedule.js rc=1: ASSERTION FAILED: model loaded without error: [load] loadModel failed: model dir not found: D:/projects/brodiffusion/weights/qwen-image-2.1
+FAIL test demos/qwen-image-lab/tests/test_spatial.js rc=1: ASSERTION FAILED: model loaded without error: [load] loadModel failed: model dir not found: D:/projects/brodiffusion/weights/qwen-image-2.1
+PASS test demos/qwen-image-lab/tests/test_ui.js 
+FAIL test demos/qwen-image-lab/tests/test_x0.js rc=1: ASSERTION FAILED: model loaded without error: [load] loadModel failed: model dir not found: D:/projects/brodiffusion/weights/qwen-image-2.1
+PASS smoke demos/qwen-tts-lab 
+FAIL test demos/qwen-tts-lab/tests/test_live_stream.js rc=1: evalScriptFileJit: uncaught Error: loadQwen: brosoundml: QwenTts::load: no config.json under '/Users/j/projects/brosoundml/weights/qwen-tts/0.6B-customvoice'
+FAIL test demos/qwen-tts-lab/tests/test_smoke.js rc=1: evalScriptFileJit: uncaught Error: loadQwen: brosoundml: QwenTts::load: no config.json under '/Users/j/projects/brosoundml/weights/qwen-tts/0.6B-customvoice'
+PASS smoke demos/ragdoll-blender 
+PASS test demos/ragdoll-blender/tests/test_blend.js 
+PASS smoke demos/range-selection-lab 
+PASS test demos/range-selection-lab/tests/test_range.js 
+PASS test demos/range-selection-lab/tests/test_tools.js 
+PASS smoke demos/rave-lab 
+PASS test demos/rave-lab/tests/test_smoke.js 
+PASS smoke demos/render-lab 
+PASS test demos/render-lab/tests/test_detail.js 
+PASS test demos/render-lab/tests/test_hud.js 
+PASS test demos/render-lab/tests/test_probe_intensity.js 
+PASS test demos/render-lab/tests/test_render.js 
+PASS smoke demos/sana-lab 
+FAIL test demos/sana-lab/tests/test_sana.js rc=1: evalScriptFileJit: uncaught TypeError: Cannot read properties of undefined (reading 'range')
+PASS smoke demos/scene-audio 
+PASS test demos/scene-audio/tests/test_smoke.js 
+PASS smoke demos/sortformer-lab 
+PASS test demos/sortformer-lab/tests/test_smoke.js 
+PASS smoke demos/spatial-audio 
+PASS test demos/spatial-audio/tests/test_main.js 
+PASS smoke demos/spatial-hash 
+PASS test demos/spatial-hash/tests/test_main.js 
+PASS smoke demos/steam-lab 
+PASS test demos/steam-lab/tests/test_smoke.js 
+PASS test demos/steam-lab/tests/test_ui.js 
+PASS smoke demos/stylegan3-lab 
+PASS test demos/stylegan3-lab/tests/test_invert.js 
+PASS test demos/stylegan3-lab/tests/test_smoke.js 
+PASS test demos/stylegan3-lab/tests/test_ui.js 
+PASS smoke demos/supertonic-lab 
+FAIL test demos/supertonic-lab/tests/test_design.js rc=1: evalScriptFileJit: uncaught Error: loadSupertonic: brosoundml: supertonic: missing vocoder.safetensors under D:/projects/brosoundml-data/supertonic
+FAIL test demos/supertonic-lab/tests/test_smoke.js rc=1: evalScriptFileJit: uncaught Error: loadSupertonic: brosoundml: supertonic: missing vocoder.safetensors under D:/projects/brosoundml-data/supertonic
+FAIL test demos/supertonic-lab/tests/test_voicemap.js rc=1: evalScriptFileJit: uncaught Error: loadSupertonic: brosoundml: supertonic: missing vocoder.safetensors under D:/projects/brosoundml-data/supertonic
+PASS smoke demos/tactical-flowfield 
+PASS test demos/tactical-flowfield/tests/test_field.js 
+PASS test demos/tactical-flowfield/tests/test_ui.js 
+PASS test demos/tactical-flowfield/tests/test_units.js 
+PASS smoke demos/tensor-lab 
+PASS test demos/tensor-lab/tests/test_new_ops.js 
+PASS test demos/tensor-lab/tests/test_smoke.js 
+PASS smoke demos/terrain 
+PASS test demos/terrain/tests/test_main.js 
+PASS smoke demos/text-lab 
+PASS test demos/text-lab/tests/test_editing_app.js 
+PASS test demos/text-lab/tests/test_metrics_selection.js 
+PASS test demos/text-lab/tests/test_scripts_clusters.js 
+PASS test demos/text-lab/tests/test_smoke.js 
+PASS smoke demos/triposplat 
+PASS test demos/triposplat/tests/test_smoke.js 
+PASS smoke demos/video_demo 
+PASS test demos/video_demo/tests/test_events.js 
+PASS test demos/video_demo/tests/test_idl.js 
+PASS smoke demos/vision-lab 
+PASS test demos/vision-lab/tests/test_smoke.js 
+PASS smoke demos/vlm-lab 
+PASS test demos/vlm-lab/tests/test_smoke.js 
+PASS smoke demos/waapi-lab 
+PASS test demos/waapi-lab/tests/test_smoke.js 
+PASS smoke demos/window-lab 
+PASS test demos/window-lab/tests/test_smoke.js 
+PASS smoke games/2048 
+PASS test games/2048/tests/test_main.js 
+PASS smoke games/arcade-template 
+PASS test games/arcade-template/tests/test_main.js 
+PASS smoke games/asteroids 
+PASS test games/asteroids/tests/test_main.js 
+PASS smoke games/blastgrid 
+PASS test games/blastgrid/tests/test_session.js 
+PASS smoke games/blockfall 
+PASS test games/blockfall/tests/test_main.js 
+PASS smoke games/blockpop 
+PASS test games/blockpop/tests/test_main.js 
+PASS smoke games/breakout 
+PASS test games/breakout/tests/test_main.js 
+PASS smoke games/chomper 
+PASS test games/chomper/tests/test_main.js 
+PASS smoke games/clap-runner 
+PASS test games/clap-runner/tests/test_runner.js 
+PASS smoke games/crater 
+PASS test games/crater/tests/test_match.js 
+PASS test games/crater/tests/test_netplay.js 
+PASS smoke games/deepdelve 
+PASS test games/deepdelve/tests/test_session.js 
+PASS smoke games/echo 
+PASS test games/echo/tests/test_main.js 
+PASS smoke games/farm 
+PASS test games/farm/tests/test_inspect.js 
+PASS test games/farm/tests/test_sim.js 
+PASS test games/farm/tests/test_smoke.js 
+PASS smoke games/fintank 
+PASS test games/fintank/tests/test_main.js 
+PASS smoke games/fluffshuffle 
+PASS test games/fluffshuffle/tests/test_main.js 
+PASS smoke games/fps 
+PASS test games/fps/tests/test_netplay.js 
+PASS test games/fps/tests/test_protocol.js 
+PASS test games/fps/tests/test_sim.js 
+PASS smoke games/gemswap 
+PASS test games/gemswap/tests/test_main.js 
+PASS smoke games/gridkeep 
+PASS test games/gridkeep/tests/test_session.js 
+PASS smoke games/hearthfolk 
+PASS test games/hearthfolk/tests/test_life.js 
+PASS test games/hearthfolk/tests/test_live.js 
+PASS test games/hearthfolk/tests/test_mind.js 
+PASS test games/hearthfolk/tests/test_save.js 
+PASS test games/hearthfolk/tests/test_world.js 
+PASS smoke games/hexfront 
+PASS test games/hexfront/tests/test_main.js 
+PASS smoke games/hopper 
+PASS test games/hopper/tests/test_main.js 
+PASS smoke games/invaders 
+PASS test games/invaders/tests/test_main.js 
+PASS smoke games/missile-command 
+PASS test games/missile-command/tests/test_main.js 
+PASS smoke games/pegbounce 
+PASS test games/pegbounce/tests/test_main.js 
+PASS smoke games/serpcoil 
+PASS test games/serpcoil/tests/test_main.js 
+PASS smoke games/snake 
+PASS test games/snake/tests/test_main.js 
+PASS smoke games/starfighter 
+PASS test games/starfighter/tests/test_main.js 
+PASS smoke games/stompworld 
+PASS test games/stompworld/tests/test_ai.js 
+PASS test games/stompworld/tests/test_play.js 
+PASS test games/stompworld/tests/test_sim.js 
+PASS smoke games/tilehaven 
+PASS test games/tilehaven/tests/test_session.js 
+PASS smoke games/torque 
+PASS test games/torque/tests/test_car.js 
+PASS test games/torque/tests/test_garage.js 
+PASS test games/torque/tests/test_pad.js 
+PASS smoke games/touchdown 
+PASS test games/touchdown/tests/test_main.js 
+PASS smoke games/tumble 
+PASS test games/tumble/tests/test_campaign.js 
+PASS test games/tumble/tests/test_gameplay.js 
+PASS test games/tumble/tests/test_mouse.js 
+PASS test games/tumble/tests/test_smoke.js 
+PASS smoke games/wordspire 
+PASS test games/wordspire/tests/test_main.js 
+PASS smoke launcher 
+PASS test launcher/tests/test_launcher.js 
+PASS smoke lib-tests 
+PASS test lib-tests/test_history.js 
+PASS test lib-tests/test_physics.js 
+PASS test lib-tests/test_polygon.js 
+PASS test lib-tests/test_project.js 
+PASS test lib-tests/test_scene_anim.js 
+PASS test lib-tests/test_tot_reasoning.js 
+PASS smoke templates/kit-app 
+PASS test templates/kit-app/tests/test_main.js 
+PASS smoke templates/worker-sim 
+PASS test templates/worker-sim/tests/test_main.js 
+PASS smoke tools/algo-viz 
+PASS test tools/algo-viz/tests/test_isosurface.js 
+PASS test tools/algo-viz/tests/test_pathfinding.js 
+PASS test tools/algo-viz/tests/test_smoke.js 
+PASS test tools/algo-viz/tests/test_terrain.js 
+PASS smoke tools/csg-sculptor 
+PASS test tools/csg-sculptor/tests/test_main.js 
+PASS smoke tools/desktop-notebook 
+PASS test tools/desktop-notebook/tests/test_notebook.js 
+PASS smoke tools/inpainting-studio 
+PASS test tools/inpainting-studio/tests/test_generate.js 
+PASS test tools/inpainting-studio/tests/test_studio.js 
+PASS smoke tools/laya-triage 
+FAIL test tools/laya-triage/tests/test_smoke.js rc=1: evalScriptFileJit: uncaught Error: timed out waiting for model load (120000 ms)
+PASS smoke tools/media-inspector 
+PASS test tools/media-inspector/tests/test_main.js 
+PASS smoke tools/mesh-viewer 
+PASS test tools/mesh-viewer/tests/test_main.js 
+PASS smoke tools/neural-playground 
+PASS test tools/neural-playground/tests/test_model.js 
+PASS test tools/neural-playground/tests/test_ui.js 
+PASS smoke tools/node-forge 
+PASS test tools/node-forge/tests/test_editor_dom.js 
+PASS test tools/node-forge/tests/test_kokoro_node.js 
+PASS test tools/node-forge/tests/test_qwen_node.js 
+PASS test tools/node-forge/tests/test_rave_node.js 
+PASS smoke tools/procwatch 
+PASS test tools/procwatch/tests/test_smoke.js 
+PASS smoke tools/reader 
+PASS test tools/reader/tests/test_library.js 
+PASS test tools/reader/tests/test_tts.js 
+PASS smoke tools/scene-editor 
+PASS test tools/scene-editor/tests/test_arc.js 
+PASS test tools/scene-editor/tests/test_bugfix.js 
+PASS test tools/scene-editor/tests/test_circle.js 
+PASS test tools/scene-editor/tests/test_edges.js 
+PASS test tools/scene-editor/tests/test_editmesh_surgery.js 
+PASS test tools/scene-editor/tests/test_editmesh.js 
+PASS test tools/scene-editor/tests/test_erase.js 
+PASS test tools/scene-editor/tests/test_followme.js 
+PASS test tools/scene-editor/tests/test_groups.js 
+PASS test tools/scene-editor/tests/test_history.js 
+PASS test tools/scene-editor/tests/test_inference.js 
+PASS test tools/scene-editor/tests/test_line.js 
+PASS test tools/scene-editor/tests/test_measurebox.js 
+PASS test tools/scene-editor/tests/test_move.js 
+PASS test tools/scene-editor/tests/test_offset.js 
+PASS test tools/scene-editor/tests/test_orphan_edges.js 
+PASS test tools/scene-editor/tests/test_pick.js 
+PASS test tools/scene-editor/tests/test_polymesh.js 
+PASS test tools/scene-editor/tests/test_primitives.js 
+PASS test tools/scene-editor/tests/test_project.js 
+PASS test tools/scene-editor/tests/test_pushpull_circle.js 
+PASS test tools/scene-editor/tests/test_pushpull_flat.js 
+PASS test tools/scene-editor/tests/test_pushpull_sketch.js 
+PASS test tools/scene-editor/tests/test_pushpull_smoke.js 
+PASS test tools/scene-editor/tests/test_pushpull.js 
+PASS test tools/scene-editor/tests/test_rectangle.js 
+PASS test tools/scene-editor/tests/test_sketch.js 
+PASS test tools/scene-editor/tests/test_tape.js 
+PASS test tools/scene-editor/tests/test_ui.js 
+PASS smoke tools/shader-lab 
+PASS test tools/shader-lab/tests/test_main.js 
+PASS smoke tools/synth 
+PASS test tools/synth/tests/test_audio_headless.js 
+PASS test tools/synth/tests/test_clip_editor.js 
+PASS test tools/synth/tests/test_synth_ui.js 
+PASS smoke tools/tile-editor 
+PASS test tools/tile-editor/tests/test_main.js 
