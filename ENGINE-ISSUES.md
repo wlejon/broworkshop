@@ -49,11 +49,10 @@ Repro: an app folder holding `three.min.js` from
 `import "/app/three.min.js"; new THREE.WebGLRenderer({ canvas })`.
 No broworkshop app vendors three.js now (spatial-audio was rebuilt on bro.scene).
 
-#### A `for-in`/`for-of` head cannot assign to a property (2026-09-24)
-`for (o.a of xs)`, `for ([o.b] of xs)` and `for ({ x: o.c } of xs)` fail to
-parse ("expected ';' after for init"): the AST stores only a name or pattern
-for the loop head, so parser, lowering and every walk need a target
-expression there.
+#### `for await` over a plain iterable does not await its values (2026-09-24)
+`for await (const v of [p])` binds the promise itself; the spec wraps a sync
+iterator (CreateAsyncFromSyncIterator) so each value is awaited. Async
+generators are fine.
 
 #### Per-call and typed-array overhead dominates tight JS loops (2026-09-24)
 Re-measured 2026-09-24 in a headless driver script (20M iterations,
@@ -87,6 +86,7 @@ from the commit before the kit rebuild.
 
 ## Fixed
 
+- bronze loops, verified 2026-09-24 (oracle cases `for_head_member_target.js`, `module_for_head_member_target/`, `block_shadow_early_exit.js`): for-in/for-of heads that assign to a property or a pattern of properties parse and run, including imported objects, generators and `for await` (4e9b135); `break`/`continue` out of a block that redeclares a loop-carried name no longer leaks the inner value (5fc97d9).
 - Canvas colours and filter lengths, verified 2026-09-24 (bro `tests/canvas/test_canvas_filter.js`, `tests/style/test_shadow_lists_units.js`): canvas `fillStyle`/`strokeStyle`/`shadowColor` accept `currentcolor` (the canvas's `color` at assignment), and a gradient stop's `currentcolor` is opaque black — bro 348c6b39; CSS `blur()` resolves its unit — bro 4b42a3fc; `ctx.filter` `blur()`/`drop-shadow()` accept em/rem/viewport lengths — bro 348c6b39. Multi-line text shadows painting line by line (a later line's shadow over an earlier line's text) was left as is: CSS 2.1 Appendix E paints per line box, which browsers are believed to follow — not re-verified against a browser.
 - Shadows, verified 2026-09-24 (bro `tests/style/test_shadow_lists_units.js`, `tests/canvas/test_canvas_filter.js`): every text-shadow in a list paints, and shadow lengths resolve em/rem/viewport/absolute units and `calc()` — bro a63dbf71; canvas `ctx.filter` `drop-shadow()` uses the canvas's `color` for `currentcolor` — bro 3ceef1a7.
 - bronze modules and destructuring, verified 2026-09-24 (oracle cases `module_namespace_identity/`, `module_destructuring_member_target/`, `destructuring_member_target_suspend.js`; `eval_module_registry_test.cpp`): one namespace object per module across importers, `export * as`, `import()` and the registry publish (818e132); member targets in destructuring patterns see imported bindings, `import()` inside patterns/parameter defaults/class fields is rewritten (818e132); `yield` and calls inside a member target, and nested patterns with defaults, compile correctly (07da771).
