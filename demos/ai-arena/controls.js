@@ -134,6 +134,7 @@ function loadReplay() {
 }
 
 function openCheckpoint() {
+    if (!ExitNet.available()) { lab.hud.log("exit_net needs bro.ai.game.nn, which this build leaves out", "err"); return; }
     const files = showOpenFileDialog("Checkpoint Files|bgnn");
     if (!files.length) return;
     ExitNet.loadCheckpoint(new Uint8Array(fs.readFileSync(files[0])));

@@ -154,6 +154,14 @@ test('Delete key removes the focused card', () => {
 
 test('run: the wired pair runs, a node with an open input waits', () => {
     const n = F.run();
+    if (!F.runner.ready()) {
+        // No bro.tensor in this build (every model card needs it): Run
+        // refuses up front and the badge says why.
+        eq(n, 0, 'nothing runs without a tensor backend');
+        eq(q('#backend').textContent, 'NO GPU BACKEND', 'badge');
+        check(!src._ran, 'nothing ran');
+        return;
+    }
     eq(n, 2, 'nodes run');
     check(src._out[0].samples.length === 3 && sink._out[0] === 3, 'values flowed');
     check(!wrong._ran, 'open input never runs');

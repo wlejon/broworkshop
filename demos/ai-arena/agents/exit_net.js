@@ -72,6 +72,12 @@ export const ExitNet = (function () {
     }
 
     return {
+        // bro.ai.game.nn / .learn are { available: false } in builds without
+        // the AI tower; then the agent is not registered at all.
+        available: function () {
+            var g = globalThis.bro && bro.ai && bro.ai.game;
+            return !!g && ["nn", "learn"].every(function (k) { return g[k] && g[k].available !== false; });
+        },
         net: function () { return ensureNet(); },
         handle: function () { ensureNet(); return handle; },
 
@@ -131,7 +137,7 @@ export const ExitNet = (function () {
     };
 })();
 
-Agents.register({
+if (ExitNet.available()) Agents.register({
     id: "exit_net",
     label: "ExIt Net (learned)",
     reset: function () { ExitNet.reset(); },

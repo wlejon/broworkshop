@@ -59,3 +59,6 @@ ai/voice-pipeline/tests/test_e2e.js         ml
 ai/voice-pipeline/tests/test_main.js        ml
 ai/voice-pipeline/tests/test_stream.js      ml
 ai/voice-pipeline/tests/test_concurrent.js  ml
+
+# --- needs a namespace that some build profiles compile out -------------------
+games/stompworld/tests/test_ai.js           needs=bro.ai.game.nn needs=bro.ai.game.grid needs=bro.ai.game.learn

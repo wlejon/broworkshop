@@ -26,6 +26,8 @@ import { newMatch, stepHeadless, SIM_DT } from "/app/sim/match.js";
 import { Scenarios } from "/app/sim/scenarios.js";
 import { ExitNet } from "/app/agents/index.js";
 
+if (!ExitNet.available()) throw new Error("train_exit needs bro.ai.game.nn / .learn, which this build leaves out");
+
 const fs = require("fs");
 const env = process.env;
 const ITERS = +(env.TRAIN_ITERS || 3);

@@ -8,6 +8,11 @@ import { heuristicAction, populateWarmup, makeRng } from "/app/ai/heuristic.js";
 import { buildObs, obsDim } from "/app/ai/obs.js";
 
 const RIGHT = 2, JUMP_RIGHT = 5;
+// The replay buffer and the obs window are bro.ai.game.learn / .grid, which
+// builds without the AI tower report as { available: false }.
+const has = (k) => !!(bro.ai.game[k] && bro.ai.game[k].available !== false);
+const aiTest = has("learn") && has("grid") ? test
+    : (name) => console.log("SKIP: " + name + " (bro.ai.game.learn / .grid not in this build)");
 const sim = createLevelSim({ timeLimit: 300 });
 const col = () => Math.floor(sim.player.x / TILE);
 
@@ -72,7 +77,7 @@ test("unarmed, auto-fire stays quiet", () => {
     eq(sim.pixelsDestroyed, 0);
 });
 
-test("behaviour-cloning warmup fills a replay buffer", () => {
+aiTest("behaviour-cloning warmup fills a replay buffer", () => {
     const buffer = bro.ai.game.learn.createGenericReplayBuffer(5000);
     spawnAtCol(sim, 110);
     const r = populateWarmup(buffer, sim, { targetSamples: 2, maxAttempts: 10, seed: 1 });
@@ -81,7 +86,7 @@ test("behaviour-cloning warmup fills a replay buffer", () => {
     check(r.tuplesPushed > 5, "tuples: " + r.tuplesPushed);
 });
 
-test("observations are fixed-size and bounded", () => {
+aiTest("observations are fixed-size and bounded", () => {
     startAt(20);
     const o = buildObs(sim);
     eq(o.length, obsDim());

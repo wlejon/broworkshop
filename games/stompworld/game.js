@@ -18,6 +18,20 @@ import {
 import { createTraining } from "/app/ai/train.js";
 import { createDemo } from "/app/ai/demo.js";
 
+// Train AI and AI Demo need the learning half of bro.ai.game (nn, grid,
+// learn), which builds without the AI tower report as { available: false }.
+const AI_PARTS = ["nn", "grid", "learn"];
+const aiGame = globalThis.bro && bro.ai && bro.ai.game;
+const AI_READY = !!aiGame && AI_PARTS.every((k) => aiGame[k] && aiGame[k].available !== false);
+if (!AI_READY) {
+    for (const action of ["train", "demo"]) {
+        const item = document.querySelector('#screen-title [data-action="' + action + '"]');
+        if (!item) continue;
+        item.classList.add("disabled");
+        item.textContent += " (not in this build)";
+    }
+}
+
 // The shell's create() takes no arguments, so the menu action that starts
 // a run leaves the mode here for it.
 let nextMode = "play";
@@ -130,6 +144,7 @@ export const game = {
 
     onMenuAction(action) {
         if (action === "train" || action === "demo") {
+            if (!AI_READY) return null;
             nextMode = action;
             return { startRun: true };
         }

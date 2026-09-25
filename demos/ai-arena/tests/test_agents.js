@@ -5,12 +5,13 @@
 //   scripts/validate.sh demos/ai-arena
 import { check, test, done, simUntil, frames, q } from "/lib/kit/test.js";
 import { lab } from "/app/lab.js";
-import { Agents } from "/app/agents/index.js";
+import { Agents, ExitNet } from "/app/agents/index.js";
 import { runHeadlessMatch, pickScenario, verdict, teamAlive } from "/app/sim/match.js";
 
 const ids = Agents.all().map((d) => d.id);
 check(ids[0] === 'scripted', 'scripted is the first (fallback) agent');
-check(ids.length === 11, 'registered agents: ' + ids.join(', '));
+// exit_net registers only when bro.ai.game.nn is in the build.
+check(ids.length === (ExitNet.available() ? 11 : 10), 'registered agents: ' + ids.join(', '));
 
 // Red acted: moved a unit off its spawn, or hurt a blue one. (The search
 // agents hold until an enemy is inside their rollout horizon, so "moved"

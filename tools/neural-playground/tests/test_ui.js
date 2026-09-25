@@ -9,11 +9,21 @@ check(pg, 'main.js publishes the playground');
 const text = (sel) => q(sel).textContent.trim();
 const metric = (label) => [...q('#metrics').children].find((r) => r.firstChild.textContent === label).lastChild.textContent;
 
-test('boots on bro.tensor with an honest badge', () => {
-    check(bro.tensor && bro.tensor.available, 'bro.tensor available');
-    eq(pg.state.backend, 'tensor', 'default backend');
-    check(/^bro\.tensor · /.test(text('#backend-badge')), 'badge: ' + text('#backend-badge'));
-    eq(pg.model.backend, 'tensor', 'model backend');
+// Builds without the AI tower report bro.tensor as { available: false }; the
+// page then boots on (and only offers) the JS reference backend.
+const HAS_TENSOR = !!(bro.tensor && bro.tensor.available);
+
+test('boots on bro.tensor (or the JS reference without it) with an honest badge', () => {
+    if (HAS_TENSOR) {
+        eq(pg.state.backend, 'tensor', 'default backend');
+        check(/^bro\.tensor · /.test(text('#backend-badge')), 'badge: ' + text('#backend-badge'));
+        eq(pg.model.backend, 'tensor', 'model backend');
+    } else {
+        eq(pg.state.backend, 'js', 'default backend without bro.tensor');
+        eq(text('#backend-badge'), 'JS', 'badge');
+        const sel = q('#hyper').querySelectorAll('select');
+        eq([...sel[sel.length - 1].options].map((o) => o.value), ['js'], 'only the JS backend is offered');
+    }
     eq(metric('Epoch'), '0', 'epoch 0');
 });
 
@@ -72,8 +82,10 @@ test('JS reference backend switch, and space toggles training', () => {
     check(pg.state.playing, 'space starts training');
     press('Space');
     check(!pg.state.playing, 'space pauses');
-    setValue(sel[sel.length - 1], 'tensor');
-    eq(pg.model.backend, 'tensor', 'back on bro.tensor');
+    if (HAS_TENSOR) {
+        setValue(sel[sel.length - 1], 'tensor');
+        eq(pg.model.backend, 'tensor', 'back on bro.tensor');
+    }
 });
 
 done('neural-playground ui');
