@@ -6,6 +6,21 @@ import { clean, nextSentence, isStopPhrase, computeWords, buildKokoroChunks, spl
 import { buildEarcon, EARCONS } from "/app/playback.js";
 
 frames(2);
+eq(voice.phase, 'idle', 'the app boots to its setup screen');
+
+// The app's own screen reflects whatever weights this machine has (Qwen3-TTS
+// is not auto-downloaded, so its cards are disabled without it). Rebuild the
+// same #setup over a catalog where every model is on disk, so the option
+// panels are testable anywhere; the fake-catalog screen below covers the
+// missing-model paths.
+const allPresent = (key) => ({ key, label: key, present: true, downloadable: true, bytes: 0 });
+const setup = setupScreen('#setup', {
+    models: { groupStatus: allPresent, downloadKeys: async () => {} },
+    onStart: () => {},
+});
+setup.show();
+frames(1);
+
 const cards = () => Array.from(document.querySelectorAll('#setup .voice-card'));
 const card = (b) => cards().find((c) => c.dataset.backend === b);
 
@@ -13,52 +28,52 @@ test('four voice cards, one selected', () => {
     eq(cards().length, 4, 'cards');
     const on = cards().filter((c) => c.classList.contains('on'));
     eq(on.length, 1, 'one selected');
-    eq(on[0].dataset.backend, voice.setup.sel.backend, 'selection matches state');
+    eq(on[0].dataset.backend, setup.sel.backend, 'selection matches state');
     check(card('text').querySelector('.k-badge'), 'every card has a status badge');
     eq(voice.phase, 'idle', 'phase');
     check(q('#convo').hidden, 'conversation hidden until Start');
 });
 
 test('CustomVoice: speakers and languages', () => {
-    voice.setup.choose('qwen');
+    setup.choose('qwen');
     eq(document.querySelectorAll('#voice-opts .spk').length, QWEN_SPEAKERS.length, 'speaker chips');
     eq(document.querySelectorAll('#voice-opts .lang').length, 10, 'language chips');
     q('#voice-opts .spk[data-speaker="ryan"]').click();
-    eq(voice.setup.sel.speaker, 'ryan', 'speaker picked');
+    eq(setup.sel.speaker, 'ryan', 'speaker picked');
     eq(q('#voice-opts .spk[data-speaker="ryan"]').getAttribute('aria-selected'), 'true', 'chip marked');
     eq(q('#voice-opts .spk[data-speaker="serena"]').getAttribute('aria-selected'), 'false', 'old chip cleared');
     q('#voice-opts .lang[data-lang="german"]').click();
-    eq(voice.setup.sel.language, 'german', 'language picked');
+    eq(setup.sel.language, 'german', 'language picked');
     check(/Sichuan/.test(text('#voice-opts .spk[data-speaker="eric"]')), 'dialect shown');
 });
 
 test('VoiceDesign: description and examples', () => {
-    voice.setup.choose('voicedesign');
+    setup.choose('voicedesign');
     check(q('#vd-desc'), 'description box');
     const ex = document.querySelectorAll('#voice-opts .ex');
     check(ex.length >= 4, 'examples');
     ex[2].click();
     eq(q('#vd-desc').value, ex[2].textContent, 'example fills the box');
-    eq(voice.setup.sel.description, ex[2].textContent, 'and the state');
+    eq(setup.sel.description, ex[2].textContent, 'and the state');
     eq(document.querySelectorAll('#voice-opts .lang').length, 10, 'languages here too');
 });
 
 test('Kokoro and text-only explain themselves', () => {
-    voice.setup.choose('kokoro');
+    setup.choose('kokoro');
     check(/af_heart/.test(text('#voice-opts')), 'kokoro note');
-    voice.setup.choose('text');
+    setup.choose('text');
     check(/text only/i.test(text('#voice-opts')), 'text note');
     check(card('text').classList.contains('on'), 'card follows');
 });
 
 test('wake toggle', () => {
     q('#wake-chk').click();
-    eq(voice.setup.sel.wake, false, 'off');
+    eq(setup.sel.wake, false, 'off');
     q('#wake-chk').click();
-    eq(voice.setup.sel.wake, true, 'on again');
+    eq(setup.sel.wake, true, 'on again');
 });
 
-voice.setup.choose('qwen');
+setup.choose('qwen');
 shot('setup');
 
 // A second screen over a fake catalog: download sizes, a blocked backend, the download run.
