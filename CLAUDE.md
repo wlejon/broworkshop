@@ -50,8 +50,10 @@ as `<script type="module" src="/app/main.js">` and import `"/lib/kit/..."`.
 
 ## Running and validating
 
-Engine: `../bro/build/Release/bro-headless.exe` (Windows) or
-`../bro/build-release/bro-headless`; override with `BRO_HEADLESS`. Windowed:
+Engine: the most recently built `../bro/build*/Release/bro-headless.exe`
+(Windows) or `../bro/build*/bro-headless` (macOS/Linux); override with
+`BRO_HEADLESS`. validate.sh runs on macOS's bash 3.2 and without GNU
+`timeout` (perl fallback). Windowed:
 `../bro/build/Release/bro.exe demos/kws-lab`.
 
 ```bash
@@ -68,14 +70,21 @@ scripts/validate.sh --list               # what would run, with tags
   `bro-headless <app> <script>` with CWD = repo root. Test scripts are ES
   modules: import helpers from `/lib/kit/test.js`.
 - `tests/app-tags.txt` tags targets `ml` (skipped without `--ml`), `net`,
-  `skip`, `timeout=N`. Tag new ML apps there.
-- Results are compared to `tests/baseline.txt`: rows are marked `REGRESSED`
+  `skip`, `timeout=N`, `needs=bro.x` (skipped when the build compiles that
+  namespace out). Tag new ML apps there. An app should still boot without an
+  optional namespace: check `.available` and show the feature as unavailable.
+- Baselines are per platform and build profile:
+  `tests/baseline-<os>-<arch>-<profile>.txt` (e.g. `macos-arm64-app`) when
+  it exists, else `tests/baseline.txt` (Windows, full profile, `--ml`).
+- Results are compared to the baseline: rows are marked `REGRESSED`
   (passed in the baseline) or `FIXED`. A failure that is already failing in
   the baseline is pre-existing. Exit status is 1 whenever anything fails;
   with `--regressions`, only when something regressed.
 - After changing an app, run its targets before and after and keep the
-  baseline honest: regenerate it with `--write-baseline tests/baseline.txt`
-  only on a full run (`scripts/validate.sh --ml --write-baseline tests/baseline.txt`).
+  baseline honest: regenerate the one for your platform only on a full run
+  (`scripts/validate.sh --ml --write-baseline tests/baseline.txt` on Windows;
+  `scripts/validate.sh --write-baseline tests/baseline-macos-arm64-app.txt`
+  for the macOS app profile).
 - Headless specifics (virtual time, `advanceTime`, input injection,
   screenshots): `../bro/docs/headless.md`. Verify UI changes visually with
   screenshots; htmlayout is not Chromium.

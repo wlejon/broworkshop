@@ -12,6 +12,11 @@
 #   net        needs the network or an API key. Skipped unless --net.
 #   skip       never run (interactive, destructive, or not a test at all).
 #   timeout=N  per-run timeout in seconds (default 60 smoke / 300 test; ml 900).
+#   needs=NS   needs the engine namespace NS (bro.tensor, bro.ai.game.nn, ...).
+#              Skipped when the engine reports it { available: false }, i.e.
+#              compiled out of this build profile (the app profile has no
+#              AI tower). Prefer an in-test check when only part of a script
+#              needs the feature, so the rest still runs.
 
 # --- ML labs: every one loads weights --------------------------------------
 demos/cluster-diar-lab  ml

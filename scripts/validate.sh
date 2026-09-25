@@ -22,16 +22,21 @@
 #   --frames N       frames the smoke advances (default 60, 16 ms each)
 #   --shots          smoke saves tests/out/shots/<app>.png
 #   --out DIR        output dir for logs + summary (default tests/out)
-#   --compare FILE   mark REGRESSED / FIXED against a baseline
-#                    (default tests/baseline.txt when it exists; --no-compare)
+#   --compare FILE   mark REGRESSED / FIXED against a baseline (default: the
+#                    first of tests/baseline-<os>-<arch>-<profile>.txt and
+#                    tests/baseline.txt that exists; --no-compare)
 #   --write-baseline FILE   write this run's results in baseline form
 #   --regressions    exit 1 only for REGRESSED rows (pre-existing failures pass)
 #   -q               only print failures and the summary
 #
-# Tags live in tests/app-tags.txt. Engine binary: $BRO_HEADLESS, else the
-# first of ../bro/build/Release/bro-headless.exe, ../bro/build-release/bro-headless,
-# ../bro/build/bro-headless. Runs with CWD = repo root (the convention every
-# test script's relative paths assume). Exit 1 when anything failed.
+# Tags live in tests/app-tags.txt; a `needs=bro.x.y` tag skips the target when
+# the engine lacks that namespace (compiled out: `{ available: false }`).
+# Engine binary: $BRO_HEADLESS, else the most recently built of
+# ../bro/build*/Release/bro-headless.exe, ../bro/build*/bro-headless[.exe].
+# <os>-<arch>-<profile> is e.g. windows-x64-full or macos-arm64-app; the
+# profile is probed from the engine (bro.tensor => full, bro.net => app, else
+# minimal). Runs with CWD = repo root (the convention every test script's
+# relative paths assume). Exit 1 when anything failed. Works on bash 3.2.
 
 set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -57,25 +62,59 @@ while [ $# -gt 0 ]; do
         --no-compare) NO_COMPARE=1 ;;
         --write-baseline) WRITE_BASELINE="$2"; shift ;;
         --regressions) ONLY_REG=1 ;;
-        -h|--help) sed -n '2,35p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,39p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         -*) echo "validate.sh: unknown option $1" >&2; exit 2 ;;
         *) GLOBS+=("${1%/}") ;;
     esac
     shift
 done
 [ $DO_SMOKE = 0 ] && [ $DO_TESTS = 0 ] && { DO_SMOKE=1; DO_TESTS=1; }
-[ -z "$COMPARE" ] && [ $NO_COMPARE = 0 ] && [ -f tests/baseline.txt ] && COMPARE=tests/baseline.txt
 
 # --- engine binary ----------------------------------------------------------
+# The newest build wins, so a fresh build-<whatever>/ is picked up without
+# BRO_HEADLESS. A multi-config build's Debug/ is never picked; a single-config
+# debug or sanitizer build dir is, when it is the newest (set BRO_HEADLESS).
 HEADLESS="${BRO_HEADLESS:-}"
 if [ -z "$HEADLESS" ]; then
-    for c in ../bro/build/Release/bro-headless.exe ../bro/build-release/bro-headless ../bro/build/bro-headless; do
-        [ -x "$c" ] && { HEADLESS="$c"; break; }
+    for c in ../bro/build*/Release/bro-headless.exe ../bro/build*/bro-headless.exe ../bro/build*/bro-headless; do
+        { [ -f "$c" ] && [ -x "$c" ]; } || continue
+        if [ -z "$HEADLESS" ] || [ "$c" -nt "$HEADLESS" ]; then HEADLESS="$c"; fi
     done
 fi
 if [ $LIST = 0 ] && { [ -z "$HEADLESS" ] || [ ! -x "$HEADLESS" ]; }; then
     echo "validate.sh: no bro-headless found; set BRO_HEADLESS" >&2; exit 2
 fi
+
+# --- timeout(1) ---------------------------------------------------------------
+# GNU coreutils timeout (Linux, Git Bash), Homebrew's gtimeout, else a perl
+# watchdog with the same contract: `run_timeout SIG SECS cmd...`, exit 124 on
+# TERM / 137 on KILL when the deadline hits, the command's own status otherwise.
+TIMEOUT_BIN=""
+for c in timeout gtimeout; do
+    if command -v "$c" > /dev/null 2>&1 && "$c" --version 2>/dev/null | grep -qi coreutils; then
+        TIMEOUT_BIN="$c"; break
+    fi
+done
+run_timeout() {   # run_timeout <signal> <secs> cmd args...
+    if [ -n "$TIMEOUT_BIN" ]; then "$TIMEOUT_BIN" -s "$1" "$2" "${@:3}"; return; fi
+    perl -e '
+        use POSIX ();
+        my ($sig, $secs, @cmd) = @ARGV;
+        my $pid = fork();
+        die "fork: $!" unless defined $pid;
+        if ($pid == 0) { setpgrp(0, 0); exec { $cmd[0] } @cmd; exit 127; }
+        my $timed = 0;
+        local $SIG{ALRM} = sub { $timed = 1; kill $sig, -$pid; };
+        alarm $secs;
+        while (waitpid($pid, 0) != $pid) {}
+        my $st = $?;
+        alarm 0;
+        exit(128 + 9) if $timed && ($st & 127) == 9;
+        exit 124 if $timed;
+        exit(128 + ($st & 127)) if $st & 127;
+        exit($st >> 8);
+    ' "$1" "$2" "${@:3}"
+}
 
 # --- tags -------------------------------------------------------------------
 TAG_GLOBS=() TAG_VALS=()
@@ -83,6 +122,36 @@ while read -r g rest; do
     case "$g" in ''|'#'*) continue ;; esac
     TAG_GLOBS+=("$g"); TAG_VALS+=("$rest")
 done < tests/app-tags.txt
+
+# --- engine probe: platform, profile, features named by needs= tags ------------
+case "$(uname -s)" in
+    Darwin) OS=macos ;; Linux) OS=linux ;; MINGW*|MSYS*|CYGWIN*|Windows*) OS=windows ;;
+    *) OS="$(uname -s | tr '[:upper:]' '[:lower:]')" ;;
+esac
+case "$(uname -m)" in
+    arm64|aarch64) ARCH=arm64 ;; x86_64|amd64|AMD64) ARCH=x64 ;; *) ARCH="$(uname -m)" ;;
+esac
+NEEDS=""   # " bro.tensor bro.ai.game.nn ..."
+for v in ${TAG_VALS[*]:-}; do
+    case "$v" in needs=*) [[ " $NEEDS " == *" ${v#needs=} "* ]] || NEEDS="$NEEDS ${v#needs=}" ;; esac
+done
+PROFILE="" FEATURES=""   # FEATURES: " bro.tensor=0 bro.ai.game.nn=1 "
+if [ -n "$HEADLESS" ] && [ -x "$HEADLESS" ]; then
+    has() { echo "(o => !!o && o.available !== false)(typeof bro === 'undefined' ? undefined : ${1//./?.})"; }
+    probe="console.log('BROPROBE profile=' + ($(has bro.tensor) ? 'full' : $(has bro.net) ? 'app' : 'minimal'));"
+    for f in $NEEDS; do probe="$probe console.log('BROPROBE $f=' + ($(has "$f") ? 1 : 0));"; done
+    while read -r kv; do
+        case "$kv" in profile=*) PROFILE="${kv#profile=}" ;; *=*) FEATURES="$FEATURES $kv" ;; esac
+    done < <(run_timeout KILL 60 "$HEADLESS" launcher -e "$probe" 2>&1 | tr -d '\r' | sed -n 's/.*BROPROBE //p')
+    FEATURES="$FEATURES "
+fi
+PLATFORM="$OS-$ARCH${PROFILE:+-$PROFILE}"
+
+if [ -z "$COMPARE" ] && [ $NO_COMPARE = 0 ]; then
+    for c in "tests/baseline-$PLATFORM.txt" tests/baseline.txt; do
+        [ -f "$c" ] && { COMPARE="$c"; break; }
+    done
+fi
 
 tags_for() {   # tags_for <app> [script] -> space-separated tags
     local out="" i
@@ -146,12 +215,20 @@ for app in "${APPS[@]}"; do
         done < <(tests_of "$app")
     fi
 done
+# (also keeps bash 3.2, where "${empty[@]}" trips set -u, off the empty arrays below)
+[ ${#TARGETS[@]} = 0 ] && { echo "validate.sh: no targets selected" >&2; exit 2; }
 
 skip_reason() {   # skip_reason <tags> -> reason or empty
     has_tag "$1" skip && { echo "tagged skip"; return; }
     if has_tag "$1" ml; then [ $WANT_ML = 0 ] && { echo "ml (use --ml)"; return; }
     elif [ $ONLY_ML = 1 ]; then echo "not ml"; return; fi
     has_tag "$1" net && [ $WANT_NET = 0 ] && { echo "net (use --net)"; return; }
+    local w
+    for w in $1; do
+        case "$w" in needs=*)
+            [[ "$FEATURES" == *" ${w#needs=}=0 "* ]] && { echo "${w#needs=} not in this build"; return; } ;;
+        esac
+    done
     echo ""
 }
 
@@ -165,16 +242,23 @@ if [ $LIST = 1 ]; then
 fi
 
 # --- baseline ---------------------------------------------------------------
-declare -A BASE=()
+# One "\n<kind> <target>=<STATUS>\n" string rather than an associative array,
+# which bash 3.2 (macOS /bin/bash) does not have.
+NL=$'\n' BASE="$NL"
 if [ -n "$COMPARE" ] && [ -f "$COMPARE" ]; then
     while read -r st kind tgt _; do
-        case "$st" in PASS|FAIL|TIMEOUT) BASE["$kind $tgt"]="$st" ;; esac
+        case "$st" in PASS|FAIL|TIMEOUT) BASE="$BASE$kind $tgt=$st$NL" ;; esac
     done < "$COMPARE"
 fi
+base_of() {   # base_of <kind> <target> -> STATUS or empty
+    local rest="${BASE#*"$NL$1 $2="}"
+    [ "$rest" != "$BASE" ] && echo "${rest%%"$NL"*}"
+}
 
 # --- run --------------------------------------------------------------------
 mkdir -p "$OUT/logs"
 [ $SHOTS = 1 ] && mkdir -p "$OUT/shots"
+[ $QUIET = 0 ] && echo "engine: $HEADLESS ($PLATFORM)  baseline: ${COMPARE:-none}"
 RESULTS=()          # "STATUS kind target note"
 NPASS=0 NFAIL=0 NSKIP=0 NREG=0
 
@@ -209,9 +293,9 @@ for t in "${TARGETS[@]}"; do
     to="$(timeout_for "$tags" "$kind")"
     start=$(date +%s)
     if [ "$kind" = smoke ]; then
-        timeout -s KILL "$to" "$HEADLESS" "$app" -e "$(smoke_expr "$app")" > "$log" 2>&1
+        run_timeout KILL "$to" "$HEADLESS" "$app" -e "$(smoke_expr "$app")" > "$log" 2>&1
     else
-        timeout -s KILL "$to" "$HEADLESS" "$app" "$script" > "$log" 2>&1
+        run_timeout KILL "$to" "$HEADLESS" "$app" "$script" > "$log" 2>&1
     fi
     rc=$?
     secs=$(( $(date +%s) - start ))
@@ -220,7 +304,7 @@ for t in "${TARGETS[@]}"; do
     else st=FAIL; note="rc=$rc: $(reason_of "$log")"
     fi
     mark=""
-    prev="${BASE["$kind $target"]:-}"
+    prev="$(base_of "$kind" "$target")"
     if [ -n "$COMPARE" ]; then
         if [ $st != PASS ] && [ "$prev" = PASS ]; then mark="REGRESSED "; NREG=$((NREG + 1))
         elif [ $st = PASS ] && [ -n "$prev" ] && [ "$prev" != PASS ]; then mark="FIXED "
@@ -236,7 +320,7 @@ done
 
 # --- summary ----------------------------------------------------------------
 {
-    echo "# validate.sh $(date '+%Y-%m-%d %H:%M')  engine: $HEADLESS"
+    echo "# validate.sh $(date '+%Y-%m-%d %H:%M')  engine: $HEADLESS ($PLATFORM)"
     echo "# pass $NPASS  fail $NFAIL  skip $NSKIP${COMPARE:+  regressed $NREG (vs $COMPARE)}"
     printf '%s\n' "${RESULTS[@]}"
 } > "$OUT/summary.txt"
@@ -244,7 +328,7 @@ done
 if [ -n "$WRITE_BASELINE" ]; then
     {
         echo "# broworkshop validation baseline — scripts/validate.sh --write-baseline"
-        echo "# $(date '+%Y-%m-%d')  engine: $HEADLESS"
+        echo "# $(date '+%Y-%m-%d')  engine: $HEADLESS ($PLATFORM)"
         echo "# STATUS KIND TARGET [note]. SKIP rows were not run in this baseline."
         printf '%s\n' "${RESULTS[@]}" | sed -E 's/ (REGRESSED|FIXED|\(baseline [A-Z]+\)) / /' | sort -k3,3 -k2,2
     } > "$WRITE_BASELINE"
