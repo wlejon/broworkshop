@@ -22,27 +22,18 @@ except where an entry says "not re-run".
 
 ## Open
 
-### CSS animations and transitions
+### CSS painting
 
-#### No `@starting-style` (2026-09-24)
-Nothing transitions into view: an element leaving `display: none` or just
-inserted takes its end style at once. Listed in docs/web-animations-api.js's
-simplifications.
+#### A box-shadow with no colour is drawn in fixed translucent black (2026-09-24)
+`draw_traversal.cpp` uses `rgba(0,0,0,80/255)` when a shadow names no colour;
+the spec's default is `currentcolor`.
 
-#### Transform lists of different shapes flip at 50% (2026-09-24)
-`transform` from `rotate(0)` to `translateX(10px) scale(2)` does not
-interpolate through matrices as the spec says; it flips halfway.
-
-#### Multi-value strings interpolate only their first number (2026-09-24)
-The number interpolator blends values like `box-shadow` by reading the first
-number and copying the rest, so offsets, blur and colour after the first
-number jump instead of blending.
+#### `skew(ax, ay)` is composed as two skews (2026-09-24)
+htmlayout `transform.cpp` builds `skew(ax, ay)` as `skewY(ay)·skewX(ax)`
+rather than the single matrix `[1 tan(ax); tan(ay) 1]`, so two-angle skews
+differ from browsers.
 
 ### bronze JS runtime and module loading
-
-#### An anonymous class assigned to a binding gets no name (2026-09-24)
-`var K = class {}; K.name` is `""` (want `"K"`), in single-file programs too.
-The automatic naming that anonymous functions get skips class expressions.
 
 #### three.js r160 `new THREE.WebGLRenderer()` throws "a number is not a function" (2026-09-24)
 In the r160 UMD build, the WebGLState factory's `$(1)` (a nested function
@@ -97,6 +88,7 @@ from the commit before the kit rebuild.
 
 ## Fixed
 
+- CSS transitions, verified 2026-09-24 (bro `tests/style/test_starting_style.js`, `test_transition_value_interpolation.js`; htmlayout `testStartingStyle`): `@starting-style` (top level, nested, inside @media/@layer/@container/@supports) gives new and re-shown elements a starting style to transition from — htmlayout 8289782, bro 39c2d206 (which also relayouts for transitioning layout properties); transform lists of different shapes interpolate per CSS Transforms 2, through matrix decomposition from the first mismatch — bro 4f2193b7; multi-value strings (`box-shadow`, `text-shadow`, `drop-shadow()`, two-value lengths) blend part by part, with colours premultiplied — same commit. Remaining limits, documented in docs/web-animations-api.js: a starting style inherits from the parent's normal style, and percentages inside the matrix part of a transform still flip at 50%. bronze: an anonymous class expression takes the name of its binding (2b7828e).
 - Module registry, verified 2026-09-24 (bro `tests/headless/test_module_entry_shared.js`, `test_module_live_bindings.js`; bronze `eval_module_registry_test.cpp`): a driver importing the page's `<script type="module" src>` entry gets the running instance instead of evaluating it again, and `let` exports (named and `import * as ns`) are live across page and driver — bronze 8c5000c, bro 390e80de. character-lab's crowd-ball test uses the imported `character` binding, platform-lab exports `listenerMql` directly, and the "entry evaluated twice" / "exports are snapshots" comments across the apps and lib/kit/README.md are gone.
 - bronze runtime, verified 2026-09-24 (bronze oracle cases, bro `tests/headless/test_error_stack_module_file.js`): a NaN typed as a number is falsy in `||`/`&&`/`?:`/`!`/`if` (bronze f811611); `String.prototype.lastIndexOf` honours `fromIndex` (022edba); a stack frame names the file its position is in, not the imported module's (6ca2430, bro c1b84a4f; ABI change); functions and classes in imported modules no longer carry the bundler's `modN.` prefix in `.name` and stack frames (5b45e02). tools/synth's tempo is back to the `+d.bpm || 120` idiom; desktop-notebook's Tab-indent test runs.
 - `createPhysicsNode({ body: tag })` binds the body again — bro 1d3b8445; verified 2026-09-24 (physics-playground and character-lab `tests/test_physics_node.js` pass).
