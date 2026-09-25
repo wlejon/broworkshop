@@ -61,14 +61,14 @@ PASS test demos/input-lab/tests/test_smoke.js
 PASS smoke demos/instanced-crowd 
 PASS test demos/instanced-crowd/tests/test_crowd.js 
 PASS smoke demos/kokoro-lab 
-FAIL test demos/kokoro-lab/tests/test_align_cells.js rc=1: evalScriptFileJit: uncaught TypeError: Cannot read properties of null (reading 'stages')
-FAIL test demos/kokoro-lab/tests/test_align_commit.js rc=1: ASSERTION FAILED: app finished loading its Kokoro model + voice
+PASS test demos/kokoro-lab/tests/test_align_cells.js
+PASS test demos/kokoro-lab/tests/test_align_commit.js
 FAIL test demos/kokoro-lab/tests/test_designer.js rc=1: evalScriptFileJit: uncaught Error: synthesizeTraced: brotensor: dispatch: operand 2 is on CUDA but the op resolved to CPU
-FAIL test demos/kokoro-lab/tests/test_edit.js rc=1: evalScriptFileJit: uncaught TypeError: Cannot read properties of null (reading 'createVoice')
-FAIL test demos/kokoro-lab/tests/test_emotion.js rc=1: evalScriptFileJit: uncaught TypeError: Cannot read properties of null (reading 'createVoice')
-FAIL test demos/kokoro-lab/tests/test_inplace.js rc=1: evalScriptFileJit: uncaught TypeError: Cannot read properties of null (reading 'createVoice')
-FAIL test demos/kokoro-lab/tests/test_mascfem.js rc=1: evalScriptFileJit: uncaught TypeError: Cannot read properties of null (reading 'synthesize')
-FAIL test demos/kokoro-lab/tests/test_pin.js rc=1: evalScriptFileJit: uncaught TypeError: Cannot read properties of null (reading 'createVoice')
+PASS test demos/kokoro-lab/tests/test_edit.js
+PASS test demos/kokoro-lab/tests/test_emotion.js
+PASS test demos/kokoro-lab/tests/test_inplace.js
+PASS test demos/kokoro-lab/tests/test_mascfem.js
+PASS test demos/kokoro-lab/tests/test_pin.js
 PASS smoke demos/krea2-lab 
 PASS test demos/krea2-lab/tests/test_explore.js 
 PASS test demos/krea2-lab/tests/test_expression.js 
@@ -78,7 +78,7 @@ FAIL test demos/krea2-lab/tests/test_lora.js rc=1: ASSERTION FAILED: LoRA restor
 PASS test demos/krea2-lab/tests/test_mouth.js 
 PASS test demos/krea2-lab/tests/test_reference.js 
 PASS test demos/krea2-lab/tests/test_save_all.js 
-FAIL test demos/krea2-lab/tests/test_spatial.js rc=1: ASSERTION FAILED: the effect stayed inside the mask (far 152.05 < half of 141.21)
+PASS test demos/krea2-lab/tests/test_spatial.js
 PASS test demos/krea2-lab/tests/test_spectrum.js 
 PASS test demos/krea2-lab/tests/test_stack_budget.js 
 PASS test demos/krea2-lab/tests/test_ui.js 
@@ -115,8 +115,8 @@ PASS test demos/netsync/tests/test_session.js
 PASS smoke demos/nllb-lab 
 PASS test demos/nllb-lab/tests/test_smoke.js 
 PASS smoke demos/omnivoice-lab 
-FAIL test demos/omnivoice-lab/tests/test_interaction.js rc=1: evalScriptFileJit: uncaught Error: timeout waiting for model load
-FAIL test demos/omnivoice-lab/tests/test_smoke.js rc=1: [bronze:unhandledrejection] Uncaught (in promise) Error: timeout waiting for model load
+PASS test demos/omnivoice-lab/tests/test_interaction.js
+PASS test demos/omnivoice-lab/tests/test_smoke.js
 PASS smoke demos/parakeet-lab 
 PASS test demos/parakeet-lab/tests/test_smoke.js 
 PASS smoke demos/physics-playground 
@@ -150,8 +150,8 @@ PASS test demos/qwen-image-lab/tests/test_spatial.js
 PASS test demos/qwen-image-lab/tests/test_ui.js 
 PASS test demos/qwen-image-lab/tests/test_x0.js 
 PASS smoke demos/qwen-tts-lab 
-FAIL test demos/qwen-tts-lab/tests/test_live_stream.js rc=1: evalScriptFileJit: uncaught TypeError: Cannot read properties of null (reading 'variant')
-FAIL test demos/qwen-tts-lab/tests/test_smoke.js rc=1: evalScriptFileJit: uncaught TypeError: Cannot read properties of null (reading 'variant')
+FAIL test demos/qwen-tts-lab/tests/test_live_stream.js rc=1: ASSERTION FAILED: timed out waiting for stream onDone
+PASS test demos/qwen-tts-lab/tests/test_smoke.js
 PASS smoke demos/ragdoll-blender 
 PASS test demos/ragdoll-blender/tests/test_blend.js 
 PASS smoke demos/range-selection-lab 
