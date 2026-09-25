@@ -17,7 +17,10 @@ test('boots the 8v8 match with its roster and focus', () => {
     check(q('#roster').children.length === 16, 'roster rows: ' + q('#roster').children.length);
     check(q('#sel-focus').options.length === 16, 'focus options');
     check(lab.state.byId[lab.state.focusId].unit.teamId === 1, 'default focus is a blue unit');
-    check(q('#sel-red-ai').options.length >= 11, 'every registered agent is selectable');
+    // exit_net registers only when bro.ai.game.nn is in the build.
+    const g = globalThis.bro && bro.ai && bro.ai.game;
+    const hasNet = !!g && ['nn', 'learn'].every((k) => g[k] && g[k].available !== false);
+    check(q('#sel-red-ai').options.length >= (hasNet ? 11 : 10), 'every registered agent is selectable');
 });
 
 test('combat reaches the log, roster, reward and observation panels', () => {
