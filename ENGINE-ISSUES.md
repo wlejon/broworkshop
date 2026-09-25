@@ -45,16 +45,11 @@ Repro: an app folder holding `three.min.js` from
 `import "/app/three.min.js"; new THREE.WebGLRenderer({ canvas })`.
 No broworkshop app vendors three.js now (spatial-audio was rebuilt on bro.scene).
 
-#### Two `import * as ns` of one module in one unit are different objects (2026-09-24)
-Two files compiled together that both `import * as ns from "./m.js"` get
-distinct namespace objects (`nsA === nsB` is false). Across units (page vs
-driver) the namespace is now one shared object.
-
-#### Module rename may skip member targets in destructuring (2026-09-24, unverified)
-Found by reading bronze's module rename (`rename.cpp`): the object of a member
-target inside a destructuring pattern (`({ a: obj[k] } = src)`) is never
-visited, so an imported `obj` there would keep its unrenamed name. Not yet
-reproduced.
+#### A `for-in`/`for-of` head cannot assign to a property (2026-09-24)
+`for (o.a of xs)`, `for ([o.b] of xs)` and `for ({ x: o.c } of xs)` fail to
+parse ("expected ';' after for init"): the AST stores only a name or pattern
+for the loop head, so parser, lowering and every walk need a target
+expression there.
 
 #### Per-call and typed-array overhead dominates tight JS loops (2026-09-24)
 Re-measured 2026-09-24 in a headless driver script (20M iterations,
@@ -88,6 +83,7 @@ from the commit before the kit rebuild.
 
 ## Fixed
 
+- bronze modules and destructuring, verified 2026-09-24 (oracle cases `module_namespace_identity/`, `module_destructuring_member_target/`, `destructuring_member_target_suspend.js`; `eval_module_registry_test.cpp`): one namespace object per module across importers, `export * as`, `import()` and the registry publish (818e132); member targets in destructuring patterns see imported bindings, `import()` inside patterns/parameter defaults/class fields is rewritten (818e132); `yield` and calls inside a member target, and nested patterns with defaults, compile correctly (07da771).
 - CSS painting, verified 2026-09-24: a shadow that names no colour paints in `currentcolor` (box-shadow, text-shadow, `drop-shadow()`), and one shared parser now reads space-syntax colours, colour-first order and `drop-shadow(12px 0 lime)` correctly — bro 88ac32cc (`tests/style/test_shadow_currentcolor.js`); `skew(ax, ay)` is one matrix in the 3D parse that `getBoundingClientRect` and transform interpolation use — htmlayout dceefc6, bro 89afb4a6 (`tests/style/test_skew_two_angles.js`).
 - CSS transitions, verified 2026-09-24 (bro `tests/style/test_starting_style.js`, `test_transition_value_interpolation.js`; htmlayout `testStartingStyle`): `@starting-style` (top level, nested, inside @media/@layer/@container/@supports) gives new and re-shown elements a starting style to transition from — htmlayout 8289782, bro 39c2d206 (which also relayouts for transitioning layout properties); transform lists of different shapes interpolate per CSS Transforms 2, through matrix decomposition from the first mismatch — bro 4f2193b7; multi-value strings (`box-shadow`, `text-shadow`, `drop-shadow()`, two-value lengths) blend part by part, with colours premultiplied — same commit. Remaining limits, documented in docs/web-animations-api.js: a starting style inherits from the parent's normal style, and percentages inside the matrix part of a transform still flip at 50%. bronze: an anonymous class expression takes the name of its binding (2b7828e).
 - Module registry, verified 2026-09-24 (bro `tests/headless/test_module_entry_shared.js`, `test_module_live_bindings.js`; bronze `eval_module_registry_test.cpp`): a driver importing the page's `<script type="module" src>` entry gets the running instance instead of evaluating it again, and `let` exports (named and `import * as ns`) are live across page and driver — bronze 8c5000c, bro 390e80de. character-lab's crowd-ball test uses the imported `character` binding, platform-lab exports `listenerMql` directly, and the "entry evaluated twice" / "exports are snapshots" comments across the apps and lib/kit/README.md are gone.
