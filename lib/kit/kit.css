@@ -219,7 +219,10 @@ button.k-link:hover { background: none; color: var(--k-value); }
 
 .k-stats { display: flex; gap: 20px; flex-wrap: wrap; color: #8a94a6; }
 
-.k-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--k-border); flex: none; }
+/* Wraps rather than running off a narrow panel: the monospace fallback differs
+   per platform (SF Mono / Menlo / Consolas), so a strip that just fits on one
+   can overflow on another. */
+.k-tabs { display: flex; flex-wrap: wrap; gap: 2px; border-bottom: 1px solid var(--k-border); flex: none; }
 .k-tabs > button {
     border: none; border-radius: 0; background: transparent; color: var(--k-muted);
     padding: 8px 14px; border-bottom: 2px solid transparent;

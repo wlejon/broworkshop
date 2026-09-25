@@ -2,6 +2,10 @@
 
 :root { --k-side-w: 330px; }
 
+/* Four tabs on one row in the 330px panel with any of the kit's monospace
+   faces (Menlo runs wider than Consolas). */
+.k-side .k-tabs > button { padding: 8px 11px; }
+
 /* World-space labels: never eat clicks; lab.js places them in pixels. */
 #labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
 #labels .wl {
