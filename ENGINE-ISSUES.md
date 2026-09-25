@@ -76,7 +76,30 @@ does not finish a single ~41k-line module. The bundles were build output and
 never tracked; rebuild with `npm i && node build.mjs` in `ai/pi-agent/bundler/`
 from the commit before the kit rebuild.
 
+### Text metrics
+
+#### Colour-bitmap glyph ink boxes are pixel-rounded and 3px over the image (2026-09-24, macOS)
+`measureText('😀')` at `48px Arial` on macOS (fallback Apple Color Emoji,
+an `sbix` face) reports `actualBoundingBox{Ascent,Descent,Left,Right}` =
+44 / 7 / 1 / 50: whole pixels, and 51×51 for a 48×48 bitmap (the 160ppem
+strike image spans x 0–800, y 0–800 of an 800-unit em; glyf bbox 1,0–801,800).
+At 24px it is 23 / 4 / 1 / 26 and at 64px 58 / 9 / 1 / 66, so a constant +3px
+in both axes: the mask bounds, rounded out and outset, rather than the scaled
+image rect that outline glyphs get (`"Hg"` gives fractional bounds). The
+ascent tops Arial's `fontBoundingBoxAscent` (43.4531); a fallback face may
+legitimately exceed the primary face's box, so text-lab allows 0.1em there,
+but the outset inflates it. Repro:
+`bro-headless demos/text-lab -e "const g=document.createElement('canvas').getContext('2d'); g.font='48px Arial'; const m=g.measureText('😀'); console.log(m.actualBoundingBoxAscent, m.actualBoundingBoxDescent, m.actualBoundingBoxLeft, m.actualBoundingBoxRight, m.fontBoundingBoxAscent)"`
+Affects: demos/text-lab (metrics panel, tolerance in `consistencyRow`).
+
 ## Notes (not bugs; doc gaps worth a line)
+
+- Thai out of `Arial` on macOS falls back to Thonburi, an AAT (morx-only)
+  face that swaps ก+้ for one precomposed glyph (`kokaithai_maithothai`, 1537
+  units against ก's 1536, unitsPerEm 2560): the width grows by 1/2560 em
+  (24.0000 to 24.0156 at 40px, 19.2 to 19.2125 at 32px) and there is no
+  zero-advance mark. That is the font's data, not a shaping or 26.6 rounding
+  bug; text-lab names Tahoma (GPOS marks) for its Thai probe.
 
 - `<select>.value` round-trips correctly now; older app comments claiming
   otherwise are stale.

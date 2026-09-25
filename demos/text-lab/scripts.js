@@ -28,7 +28,7 @@
 
 import { utf8Length, codePoints } from '/lib/kit/text.js';
 import { h } from '/lib/kit/dom.js';
-import { shape, widthOf } from '/app/shaping.js';
+import { shape, widthOf, familyPresent } from '/app/shaping.js';
 import { n2, table, verdict, result } from '/app/report.js';
 
 export const SCRIPT_SAMPLES = [
@@ -307,9 +307,21 @@ export function devanagariReport(family) {
  * its tone mark, at the same x. That is a consequence of stepping by cluster
  * rather than by grapheme, and shaped_run.h's byteOffsetToX comment explains
  * why grapheme stepping is not available in this build (no UAX #29 data).
+ *
+ * The face is named rather than left to fallback out of Arial, because the
+ * claim is about OpenType mark positioning (GPOS), and the platforms' Thai
+ * fallbacks differ in kind. Windows' Thai faces (Leelawadee UI, Tahoma) are
+ * OpenType with GPOS marks. macOS falls back to Thonburi, an AAT (morx-only) face that substitutes the
+ * PAIR with a precomposed ligature glyph: ก้ becomes one glyph,
+ * kokaithai_maithothai, whose hmtx advance is 1537 units against kokaithai's
+ * 1536 (unitsPerEm 2560), so the width grows by 1/2560 em (0.0156px at 40px)
+ * and no zero-advance mark exists at all. That is the font, not the shaper.
+ * Tahoma ships on both and positions its Thai marks with GPOS.
  */
+export const THAI_FAMILY = ['Leelawadee UI', 'Tahoma'].find(familyPresent) || 'Tahoma';
+
 export function thaiReport(family) {
-    const opts = { family: family || 'Arial', size: 40 };
+    const opts = { family: family || THAI_FAMILY, size: 40 };
     const base = 'ก';        // THAI CHARACTER KO KAI
     const tone = '้';        // THAI CHARACTER MAI THO
     const sara = 'ั';        // THAI CHARACTER MAI HAN AKAT (vowel above)

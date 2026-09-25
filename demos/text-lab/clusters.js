@@ -15,14 +15,14 @@
 import { clusterMap, caretStops, stepForward, stepBackward, drawClusterMap as drawMap,
          codePoints, codePointLabels, utf8Length, u8ToU16, u16ToU8 } from '/lib/kit/text.js';
 import { h, clear } from '/lib/kit/dom.js';
-import { shape } from '/app/shaping.js';
+import { shape, LIGATURE_FAMILY } from '/app/shaping.js';
 import { n2, table, verdict, result, glyphCell } from '/app/report.js';
 
 export { clusterMap, caretStops, stepForward, stepBackward };
 
 export const CLUSTER_SAMPLES = [
     { id: 'ascii', label: 'plain ASCII', text: 'Waffle', family: 'Arial', size: 64 },
-    { id: 'liga', label: 'f-ligature (Calibri)', text: 'office', family: 'Calibri', size: 64 },
+    { id: 'liga', label: 'f-ligature (' + LIGATURE_FAMILY + ')', text: 'office', family: LIGATURE_FAMILY, size: 64 },
     { id: 'accent', label: 'combining accent', text: 'café', family: 'Arial', size: 64 },
     { id: 'emoji', label: 'astral emoji', text: 'a😀b🎉c', family: 'Arial', size: 64 },
     { id: 'arabic', label: 'Arabic (RTL)', text: 'العربية', family: 'Arial', size: 64 },

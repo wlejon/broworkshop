@@ -69,7 +69,8 @@ test('shaping: real font faces were found', () => {
         LIGATURE_FAMILY + ' is present — the ligature assertions below need it specifically');
 });
 
-// "ffi" is 3 characters and 3 UTF-8 bytes; in Calibri it must come back as ONE
+// "ffi" is 3 characters and 3 UTF-8 bytes; in the ligature face (Calibri on
+// Windows, Hoefler Text on macOS) it must come back as ONE
 // glyph in ONE cluster spanning all three bytes.
 test('shaping: ligatures are fewer glyphs than characters', () => {
     const r = shape('ffi', { family: LIGATURE_FAMILY, size: 48 });
@@ -100,7 +101,7 @@ test('shaping: ligatures are fewer glyphs than characters', () => {
 });
 
 test('shaping: kerning is strictly less than the sum of the parts', () => {
-    for (const family of ['Arial', 'Calibri', 'Times New Roman']) {
+    for (const family of ['Arial', LIGATURE_FAMILY, 'Times New Roman']) {
         if (!shapeState.families.find((f) => f.family === family && f.present)) continue;
         const av = widthOf('AV', { family, size: 64 });
         const a = widthOf('A', { family, size: 64 });

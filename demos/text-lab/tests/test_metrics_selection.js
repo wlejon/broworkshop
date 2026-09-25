@@ -45,7 +45,10 @@ test('metrics: self-consistency, per sample', () => {
             `"${r.text}": ideographicBaseline (${r.m.ideographicBaseline.toFixed(4)}) is exactly ` +
             `−fontBoundingBoxDescent (${(-r.m.fontBoundingBoxDescent).toFixed(4)})`);
         assert(r.alphabeticZero, `"${r.text}": alphabeticBaseline is 0 under the default 'alphabetic' baseline`);
-        assert(r.fontBoxCoversInk, `"${r.text}": the ink box fits inside the font's line box`);
+        assert(r.fontBoxCoversInk,
+            `"${r.text}": the ink box (${r.m.actualBoundingBoxAscent.toFixed(3)} / ${r.m.actualBoundingBoxDescent.toFixed(3)}) ` +
+            `fits inside the font's line box (${r.m.fontBoundingBoxAscent.toFixed(3)} / ${r.m.fontBoundingBoxDescent.toFixed(3)})` +
+            (r.id === 'emoji' ? ', within 0.1em for a glyph from a fallback face' : ''));
     }
 
     const inked = metricsState.rows.find((r) => r.text === 'Hamburgefonstiv');

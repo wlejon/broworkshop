@@ -53,7 +53,8 @@ export const METRIC_SAMPLES = [
     { id: 'space', text: ' ', note: 'advance but no ink' },
     { id: 'empty', text: '', note: 'no advance, but font metrics still valid' },
     { id: 'rtl', text: 'שלום', note: 'RTL — metrics are direction-agnostic' },
-    { id: 'emoji', text: '😀', note: 'astral, colour glyph' },
+    // Drawn from a FALLBACK face: see consistencyRow's fontBoxCoversInk.
+    { id: 'emoji', text: '😀', note: 'astral, colour glyph', fallback: true },
 ];
 
 export const metricsState = {
@@ -124,11 +125,16 @@ export function surfaceReport() {
  *        and every `actual*` is 0, which is exactly right and is the case a
  *        naive "bounding box == advance box" implementation gets wrong.
  *   `fontBoxCoversInk`  — the font's line box must contain the ink of any
- *        string set in it. If it does not, lines overlap.
+ *        string set in it. If it does not, lines overlap. fontBoundingBox is
+ *        the PRIMARY face's (the spec's "first available font"), so for a
+ *        `fallback` sample, whose glyph comes from another face drawn to its
+ *        own em, the bar is "within a tenth of an em" rather than exact:
+ *        Apple Color Emoji's 😀 inks 44px above the baseline at 48px, over
+ *        Arial's 43.45px ascent (Segoe UI Emoji's fits inside it).
  *   `ascentSensitive`   — actualBoundingBoxAscent depends on WHICH glyphs were
  *        asked for, not just the font. 'ace' and 'ABC' must differ.
  */
-export function consistencyRow(text, font) {
+export function consistencyRow(text, font, fallback) {
     const m = measure(text, font);
     const inked = text.trim().length > 0;
     const size = parseFloat(font);
@@ -149,8 +155,8 @@ export function consistencyRow(text, font) {
         // The font box is a property of the FACE and is non-zero even for "".
         fontBoxNonZero: m.fontBoundingBoxAscent + m.fontBoundingBoxDescent > 0,
         fontBoxCoversInk: !inked ||
-            (m.actualBoundingBoxAscent <= m.fontBoundingBoxAscent + 0.01 &&
-             m.actualBoundingBoxDescent <= m.fontBoundingBoxDescent + 0.01),
+            (m.actualBoundingBoxAscent <= m.fontBoundingBoxAscent + (fallback ? size / 10 : 0.01) &&
+             m.actualBoundingBoxDescent <= m.fontBoundingBoxDescent + (fallback ? size / 10 : 0.01)),
         // Ink never exceeds the advance by more than the side bearings, and for
         // ordinary text is a little narrower.
         inkWithinReason: !inked || (m.actualBoundingBoxLeft + m.actualBoundingBoxRight) <= m.width + size,
@@ -525,7 +531,7 @@ export function refreshMetrics(text, font) {
         '. All finite numbers: ' + (surf.allNumbers ? 'yes' : 'NO') + '.');
 
     metricsState.rows = METRIC_SAMPLES.map((s) =>
-        Object.assign({ id: s.id, note: s.note }, consistencyRow(s.text, '48px Arial')));
+        Object.assign({ id: s.id, note: s.note }, consistencyRow(s.text, '48px Arial', s.fallback)));
     metricsState.rows.forEach((r, i) => {
         const c = ui.rows[i];
         const s = METRIC_SAMPLES[i];

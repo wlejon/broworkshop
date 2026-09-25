@@ -28,15 +28,48 @@ export function widthOf(text, opts) {
     return shape(text, opts).width;
 }
 
-// Families probed. All six ship with Windows; elsewhere the missing ones fall
-// back, which the family row reports rather than hides.
-export const FAMILIES = ['Calibri', 'Arial', 'Cambria', 'Georgia', 'Times New Roman', 'Segoe UI'];
+// Families probed, one per role. The first name in each slot ships with
+// Windows; the second is the face that ships with macOS in the same role. A
+// slot takes the first name that resolves to a real face (else the first
+// name, which the family row then reports as a fallback rather than hiding).
+const FAMILY_SLOTS = [
+    ['Calibri', 'Hoefler Text'],        // the f-ligature face (below)
+    ['Arial'],                          // the no-ligature contrast
+    ['Cambria', 'Palatino'],            // a serif whose italic has its own advances
+    ['Georgia'],
+    ['Times New Roman'],
+    ['Segoe UI', 'Helvetica Neue'],     // the platform UI face
+];
 
-// Measured across the six, Calibri is the ONLY face forming f-ligatures at
-// default settings (shaped_run.h: "Calibri turns 'office fluffy first' into
-// 14 clusters where the others make 19"). A ligature assertion against Arial
+/**
+ * Whether `family` resolved to a real face. There is no font-enumeration API,
+ * so a family that shapes exactly like a certainly-missing name got the
+ * fallback face: it is not installed, or it IS the fallback. Width alone is
+ * not enough: Arial was drawn metric-compatible with Helvetica (macOS's
+ * fallback), so 'Hamburgefonstiv' measures identically in both; their kerns
+ * and ligatures still differ, so the fingerprint takes those in too.
+ */
+let bogusPrint = null;
+function fingerprint(family) {
+    return ['Hamburgefonstiv', 'AV', 'office'].map((t) => {
+        const r = shape(t, { family, size: 32 });
+        return r.width.toFixed(4) + '/' + r.glyphCount;
+    }).join(' ');
+}
+export function familyPresent(family) {
+    if (bogusPrint === null) bogusPrint = fingerprint('NoSuchFamily' + Date.now());
+    return fingerprint(family) !== bogusPrint;
+}
+
+const pick = (names) => names.find(familyPresent) || names[0];
+export const FAMILIES = FAMILY_SLOTS.map(pick);
+
+// Measured across the six on Windows, Calibri is the ONLY face forming
+// f-ligatures at default settings (shaped_run.h: "Calibri turns 'office
+// fluffy first' into 14 clusters where the others make 19"); on macOS Hoefler
+// Text fuses all of ff, fi, fl, ffi, ffl. A ligature assertion against Arial
 // would prove nothing.
-export const LIGATURE_FAMILY = 'Calibri';
+export const LIGATURE_FAMILY = FAMILIES[0];
 export const LIGATURE_SAMPLES = ['ffi', 'ffl', 'fi', 'fl', 'ff', 'office'];
 
 // Pairs that kern NEGATIVELY in essentially every text face.
@@ -44,8 +77,8 @@ export const KERN_PAIRS = ['AV', 'AW', 'To', 'Yo', 'LT', 'P,', 'F.'];
 
 // Arial's and Times New Roman's italics share their roman advances, so an
 // italic assertion against them passes for an engine that ignores the flag.
-// Georgia's and Cambria's differ; those are the ones asserted on.
-export const ITALIC_DIVERGENT = ['Georgia', 'Cambria'];
+// Georgia's and Cambria's (Palatino's) differ; those are the ones asserted on.
+export const ITALIC_DIVERGENT = ['Georgia', FAMILIES[2]];
 
 export const shapeState = {
     families: [],       // [{ family, present, width }]
@@ -225,18 +258,13 @@ export function cacheProbe() {
     };
 }
 
-/**
- * Which families resolved to a real face. There is no font-enumeration API,
- * so a family that measures the same as a certainly-missing name resolved to
- * the fallback face: either it is not installed, or it IS the fallback.
- */
+/** Which families resolved to a real face (familyPresent), with a probe width. */
 export function familyReport() {
-    const probe = 'Hamburgefonstiv';
-    const bogus = widthOf(probe, { family: 'NoSuchFamily' + Date.now(), size: 32 });
-    return FAMILIES.map((family) => {
-        const width = widthOf(probe, { family, size: 32 });
-        return { family, width, present: Math.abs(width - bogus) > 1e-3 };
-    });
+    return FAMILIES.map((family) => ({
+        family,
+        width: widthOf('Hamburgefonstiv', { family, size: 32 }),
+        present: familyPresent(family),
+    }));
 }
 
 // --- panel ---------------------------------------------------------------------
