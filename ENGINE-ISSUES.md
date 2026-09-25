@@ -39,16 +39,6 @@ the app sets a font.
 
 ### bronze JS runtime and module loading
 
-#### three.js r160 `new THREE.WebGLRenderer()` throws "a number is not a function" (2026-09-24)
-In the r160 UMD build, the WebGLState factory's `$(1)` (a nested function
-declaration, `setCullFace`) resolves to a number instead of the hoisted
-function: a scoping / function-declaration hoisting bug with a `$`-named
-binding in a large minified function.
-Repro: an app folder holding `three.min.js` from
-`git archive 9a7c6aa^ demos/spatial-audio/three.min.js` and a module script
-`import "/app/three.min.js"; new THREE.WebGLRenderer({ canvas })`.
-No broworkshop app vendors three.js now (spatial-audio was rebuilt on bro.scene).
-
 #### Async iteration closing and delegation gaps (2026-09-24)
 Found while fixing `for await` over sync iterables (bronze 39f829a), not fixed:
 - `yield*` in an async generator over a sync iterable probably skips the
@@ -67,14 +57,14 @@ cross-module namespace call (175 ns bound to a local const), 14–40 ns
 typed-array read. In demos/tactical-flowfield the per-unit steering loop was
 ~10 µs per unit per tick (1000 units ≈ 10 ms per 60 Hz tick).
 
-#### ai/pi-agent and ai/maker-agent bundles never finished compiling (2026-09-24, not reproducible from the tree)
-bro-headless produced nothing for 300 s on a ~41k-line esbuild bundle
-(`pi.bundle.js` / `maker.bundle.js`, pi's `@mariozechner/pi-agent-core` +
-`pi-ai`); the bundle loaded under QuickJS. Apps no longer need it (their agent
-loop is `lib/kit/agent.js`, both boot in ~1 s). The open question: why bronze
-does not finish a single ~41k-line module. The bundles were build output and
-never tracked; rebuild with `npm i && node build.mjs` in `ai/pi-agent/bundler/`
-from the commit before the kit rebuild.
+#### Optimized-tier compile of large modules is still slow (2026-09-24)
+After the fixes below, pi.bundle.js compiles in 24 s, of which ~11 s is MIR
+passes spread over all functions (heaviest: `gvn_pre`, `loop_cleanup`, `gvn`,
+`bce`; `loop_cleanup` runs even on loop-free functions). brass
+`RangeAnalysis::get_range_at` still walks the dominator chain per query.
+Separately, brass `performance_ratchet` / `benchmarks` ctest cases fail with or
+without these changes (MatMul i64, NaN-box, prime sieve, fast-interpreter
+ratios).
 
 ## Notes (not bugs; doc gaps worth a line)
 
@@ -97,6 +87,7 @@ from the commit before the kit rebuild.
 
 ## Fixed
 
+- three.js r160 and large bundles, verified 2026-09-24: `new THREE.WebGLRenderer()` from three.min.js constructs and renders a frame in bro headless — type inference now lets a hoisted nested declaration shadow the outer name from the top of its scope (bronze e19835f, oracle `hoisted_decl_shadows_outer.js`). The ~41k-line pi bundle, which never finished compiling, builds in 24 s: nested-closure inference no longer grows exponentially (bronze f19de0e), IL blocks lower in reverse post-order (5f924ea, fixes "branch arg operand is null"), and brass's `gvn_pre`, `sccp`/`cfg_simplify`, range analysis, liveness, loop depth, block layout and block lookup are no longer quadratic or recursive (brass 08c1885, 61aff12, 56139a6, dcf8880). Bounded-time test: bronze `tests/cli/large_module_compile_test.cpp` (98f14e7).
 - bronze `for await` over a plain iterable awaits each value, and a rejected value closes the sync iterator and throws in the loop — bronze 39f829a; verified 2026-09-24 (oracle case `for_await_sync_iterable.js`, output matches node).
 - bronze loops, verified 2026-09-24 (oracle cases `for_head_member_target.js`, `module_for_head_member_target/`, `block_shadow_early_exit.js`): for-in/for-of heads that assign to a property or a pattern of properties parse and run, including imported objects, generators and `for await` (4e9b135); `break`/`continue` out of a block that redeclares a loop-carried name no longer leaks the inner value (5fc97d9).
 - Canvas colours and filter lengths, verified 2026-09-24 (bro `tests/canvas/test_canvas_filter.js`, `tests/style/test_shadow_lists_units.js`): canvas `fillStyle`/`strokeStyle`/`shadowColor` accept `currentcolor` (the canvas's `color` at assignment), and a gradient stop's `currentcolor` is opaque black — bro 348c6b39; CSS `blur()` resolves its unit — bro 4b42a3fc; `ctx.filter` `blur()`/`drop-shadow()` accept em/rem/viewport lengths — bro 348c6b39. Multi-line text shadows painting line by line (a later line's shadow over an earlier line's text) was left as is: CSS 2.1 Appendix E paints per line box, which browsers are believed to follow — not re-verified against a browser.
