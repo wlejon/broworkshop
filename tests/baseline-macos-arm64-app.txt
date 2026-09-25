@@ -1,5 +1,5 @@
 # broworkshop validation baseline — scripts/validate.sh --write-baseline
-# 2026-09-24  engine: ../bro/build-arm64-app/bro-headless (macos-arm64-app)
+# 2026-09-25  engine: ../bro/build-arm64-app/bro-headless (macos-arm64-app)
 # STATUS KIND TARGET [note]. SKIP rows were not run in this baseline.
 SKIP smoke ai/ardy-motion ml (use --ml)
 SKIP test ai/ardy-motion/tests/test_smoke.js ml (use --ml)
@@ -26,9 +26,9 @@ PASS test ai/voice-pipeline/tests/test_setup.js
 SKIP test ai/voice-pipeline/tests/test_stream.js ml (use --ml)
 PASS test ai/voice-pipeline/tests/test_turn.js 
 PASS smoke demos/ai-arena 
-FAIL test demos/ai-arena/tests/test_agents.js rc=1: evalScriptFileJit: uncaught Error: 1 failed: live: layered_planner drives the red capsules
+PASS test demos/ai-arena/tests/test_agents.js 
 PASS test demos/ai-arena/tests/test_replay.js 
-FAIL test demos/ai-arena/tests/test_ui.js rc=1: evalScriptFileJit: uncaught Error: 1 failed: boots the 8v8 match with its roster and focus
+PASS test demos/ai-arena/tests/test_ui.js 
 PASS smoke demos/anim-lab 
 PASS test demos/anim-lab/tests/test_blend.js 
 PASS test demos/anim-lab/tests/test_clips.js 
