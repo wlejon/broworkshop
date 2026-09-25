@@ -24,17 +24,18 @@ except where an entry says "not re-run".
 
 ### CSS painting
 
-#### Canvas `fillStyle` / `strokeStyle` / `shadowColor` ignore `currentcolor` (2026-09-24)
-The canvas colour parser does not know `currentcolor`; it should resolve to
-the canvas element's `color`, as `ctx.filter`'s `drop-shadow()` now does.
+#### `backdrop-filter` is never painted (2026-09-24)
+It is parsed only as something that makes a containing block
+(`element_geometry.cpp`).
 
-#### Filter `blur()` lengths are read as px (2026-09-24)
-CSS `filter: blur(1em)` blurs 1px; canvas filter lengths have no em support.
-Shadow lengths already resolve units (bro a63dbf71).
+#### CSS `filter` functions other than blur/drop-shadow read bare numbers (2026-09-24)
+`hue-rotate()` ignores its angle unit (rad/turn/grad), and percentages go
+through a loose reader.
 
-#### Multi-line text shadows paint line by line (2026-09-24)
-A later line's shadow can land on top of an earlier line's text; browsers
-paint all shadows under all text of the element.
+#### Canvas default font is `16px sans-serif` (2026-09-24)
+`state_.fontStr` starts at 16px; the spec default is `10px sans-serif`, so
+`ctx.font` reads back wrong and em in `ctx.filter` resolves against 16px until
+the app sets a font.
 
 ### bronze JS runtime and module loading
 
@@ -86,6 +87,7 @@ from the commit before the kit rebuild.
 
 ## Fixed
 
+- Canvas colours and filter lengths, verified 2026-09-24 (bro `tests/canvas/test_canvas_filter.js`, `tests/style/test_shadow_lists_units.js`): canvas `fillStyle`/`strokeStyle`/`shadowColor` accept `currentcolor` (the canvas's `color` at assignment), and a gradient stop's `currentcolor` is opaque black — bro 348c6b39; CSS `blur()` resolves its unit — bro 4b42a3fc; `ctx.filter` `blur()`/`drop-shadow()` accept em/rem/viewport lengths — bro 348c6b39. Multi-line text shadows painting line by line (a later line's shadow over an earlier line's text) was left as is: CSS 2.1 Appendix E paints per line box, which browsers are believed to follow — not re-verified against a browser.
 - Shadows, verified 2026-09-24 (bro `tests/style/test_shadow_lists_units.js`, `tests/canvas/test_canvas_filter.js`): every text-shadow in a list paints, and shadow lengths resolve em/rem/viewport/absolute units and `calc()` — bro a63dbf71; canvas `ctx.filter` `drop-shadow()` uses the canvas's `color` for `currentcolor` — bro 3ceef1a7.
 - bronze modules and destructuring, verified 2026-09-24 (oracle cases `module_namespace_identity/`, `module_destructuring_member_target/`, `destructuring_member_target_suspend.js`; `eval_module_registry_test.cpp`): one namespace object per module across importers, `export * as`, `import()` and the registry publish (818e132); member targets in destructuring patterns see imported bindings, `import()` inside patterns/parameter defaults/class fields is rewritten (818e132); `yield` and calls inside a member target, and nested patterns with defaults, compile correctly (07da771).
 - CSS painting, verified 2026-09-24: a shadow that names no colour paints in `currentcolor` (box-shadow, text-shadow, `drop-shadow()`), and one shared parser now reads space-syntax colours, colour-first order and `drop-shadow(12px 0 lime)` correctly — bro 88ac32cc (`tests/style/test_shadow_currentcolor.js`); `skew(ax, ay)` is one matrix in the 3D parse that `getBoundingClientRect` and transform interpolation use — htmlayout dceefc6, bro 89afb4a6 (`tests/style/test_skew_two_angles.js`).
