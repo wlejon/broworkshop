@@ -37,7 +37,8 @@ import { picker, makeSource, makeStream, bindActive, addStream, removeStream, sw
 
 boot();
 
-const PHONEME_NET = ['brosoundml/weights/phoneme/english.bpm', 'brosoundml/build-cuda/english.bpm'];
+// The published model (brosoundml-data), else phoneme_train's default output.
+const PHONEME_NET = ['brosoundml-data/phoneme/english.bpm', 'brosoundml/weights/phoneme/english.bpm'];
 
 // Tier-3.5 rides every committed line and every live partial.
 commitHooks.push(assignSpeaker, maybeTranslate);

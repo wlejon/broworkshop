@@ -20,7 +20,8 @@ import { h, ids } from "/lib/kit/dom.js";
 import { logView, progressBar } from "/lib/kit/ui.js";
 import { findWeights, missingWeights } from "/lib/kit/weights.js";
 
-const PHONEME_NET = ['brosoundml/weights/phoneme/english.bpm', 'brosoundml/build-cuda/english.bpm'];
+// The published model (brosoundml-data), else phoneme_train's default output.
+const PHONEME_NET = ['brosoundml-data/phoneme/english.bpm', 'brosoundml/weights/phoneme/english.bpm'];
 
 const { status } = boot();
 const el = ids('phrase', 'enroll', 'threshold', 'listen', 'templates', 'noTemplates',

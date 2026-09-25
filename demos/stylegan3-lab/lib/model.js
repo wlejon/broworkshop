@@ -50,6 +50,24 @@ let loadSeq = 0;                                  // a newer request supersedes 
 // synchronous (docs/vision-api.js: it returns the generator and takes no
 // onReady), so the load runs one tick later, after the status has painted,
 // and only if no newer request arrived in between.
+/** Fill the device selector with the backends registered at run time
+ *  (bro.gpu.devices, e.g. ['cpu', 'metal']), the default device selected. */
+export function populateDevices() {
+  const sel = $('#device');
+  const gpu = (typeof bro !== 'undefined' && bro.gpu) || null;
+  const devs = gpu && gpu.devices && gpu.devices.length ? gpu.devices.slice() : ['cpu'];
+  const def = gpu && gpu.backend ? gpu.backend : 'cpu';
+  devs.sort((a, b) => (a === 'cpu') - (b === 'cpu'));   // GPU backends first
+  sel.textContent = '';
+  for (const d of devs) {
+    const o = document.createElement('option');
+    o.value = d; o.textContent = d;
+    if (d === def) o.selected = true;
+    sel.appendChild(o);
+  }
+  sel.value = def;
+}
+
 export function loadModel(dir) {
   dir = (dir || '').replace(/[\\\/]+$/, '');
   const seq = ++loadSeq;
@@ -62,7 +80,7 @@ export function loadModel(dir) {
   syncConfigFromName(dir);
   const res = parseInt($('#resolution').value, 10) || 256;
   const variant = $('#variant').value || 'r';
-  const device = $('#device').value || 'cuda';
+  const device = $('#device').value || undefined;   // undefined: the loader picks the best device
   $('#model-meta').textContent = '';
   setBadge('loading ' + dir.replace(/^.*[\\\/]/, '') + '…');
   setTimeout(function () {

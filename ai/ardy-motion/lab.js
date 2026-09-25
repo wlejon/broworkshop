@@ -75,7 +75,7 @@ export function start() {
         status.busy('loading text encoder + motion model… (an 8B encoder: the first load is slow)');
         try {
             await rpc.ready;
-            const r = await rpc.request({ type: 'load', checkpoint, textEncoder, device: 'cuda' });
+            const r = await rpc.request({ type: 'load', checkpoint, textEncoder });
             lab.ready = true;
             lab.device = r.device || '';
             if (lab.device) badge.set(lab.device);

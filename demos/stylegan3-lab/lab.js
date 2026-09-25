@@ -3,7 +3,7 @@
 
 import { boot } from "/lib/kit/app.js";
 import { $, S } from "/app/lib/state.js";
-import { curPsi, loadModel, defaultModelDir } from "/app/lib/model.js";
+import { curPsi, loadModel, defaultModelDir, populateDevices } from "/app/lib/model.js";
 import { initSeams, showSeam, refreshSeam, syncCutoffLabel } from "/app/lib/seams.js";
 import { renderSample, sendSampleTo } from "/app/lib/sample.js";
 import { prepareWalk, renderWalkMid, renderWalkStrip } from "/app/lib/walk.js";
@@ -29,6 +29,7 @@ function reseed(which, seam, randomize) {
 
 export function init() {
   S.status = boot().status;
+  populateDevices();
 
   // ── checkpoint bar ──
   on('#btn-browse-model', 'click', function () {

@@ -18,7 +18,7 @@ serveWorker({
         }
         pipeline = null;
         bro.motion.init();
-        pipeline = bro.motion.load({ checkpoint: msg.checkpoint, textEncoder: msg.textEncoder, device: msg.device || 'cuda' });
+        pipeline = bro.motion.load({ checkpoint: msg.checkpoint, textEncoder: msg.textEncoder, device: msg.device });  // unset: CUDA > Metal > CPU
         return { type: 'loaded', device: pipeline.device };
     },
     generate(msg) {

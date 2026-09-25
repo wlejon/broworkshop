@@ -106,7 +106,7 @@ export function start() {
             if (lab.family !== fam) return;               // switched away meanwhile
             lab.model = m; lab.loading = false;
             row.busy(false); row.meta(meta);
-            badge.set(m.device || 'cuda');
+            badge.set(m.device || bro.gpu.backend);
             status.ok(FAMILIES[fam].name + ' ready · ask about the image');
             refresh();
         };
@@ -120,7 +120,7 @@ export function start() {
                 setTimeout(() => {                         // sync load: let the status paint first
                     try {
                         const m = bro.lm.loadClip({ vocabPath: paths[1] + '/vocab.json', mergesPath: paths[1] + '/merges.txt',
-                                                    weightsPath: paths[0] + '/model.safetensors', device: 'cuda' });
+                                                    weightsPath: paths[0] + '/model.safetensors' });
                         ready(m, 'projection ' + m.projectionDim);
                     } catch (e) { fail(e); }
                 }, 30);

@@ -32,7 +32,7 @@ export const $$ = (s) => Array.prototype.slice.call(document.querySelectorAll(s)
 // bindings, so cross-file writers mutate this live object instead.
 export const S = {
   gan: null,                                      // the loaded StyleGAN3 handle
-  META: { resolution: 256, zDim: 512, numWs: 16, wDim: 512, device: 'cuda' },
+  META: { resolution: 256, zDim: 512, numWs: 16, wDim: 512, device: '' },
   seam: 'sample',                                 // active panel
   status: null,                                   // kit statusLine (lab.js)
 

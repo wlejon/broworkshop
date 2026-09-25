@@ -109,7 +109,6 @@ export function start() {
         const fail = (m) => { lab.error = 'model error: ' + m; row.busy(false); status.error(lab.error); };
         try {
             bro.rave.loadRave(dir, {
-                device: 'cuda',
                 onReady: (r) => {
                     lab.rave = r;
                     row.busy(false);

@@ -22,7 +22,7 @@ function ensureRave(node) {
         node._rave = null; node._enc = null;
         if (p.dir) {
             if (!bro.rave) throw new Error('bro.rave unavailable in this build');
-            node._rave = bro.rave.loadRave(p.dir, { device: 'cuda' });
+            node._rave = bro.rave.loadRave(p.dir);
         }
         node._raveDir = p.dir;
     }

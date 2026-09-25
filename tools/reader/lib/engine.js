@@ -78,7 +78,7 @@ export function loadEngine(name, done) {
     const fail = (msg) => { e.status = 'error'; e.error = String(msg); emit(); finish(e.error); };
 
     if (typeof bro === 'undefined' || !bro.tts || bro.tts.available === false) return fail('bro.tts is not in this build');
-    if (!gpuAvailable()) return fail('no GPU backend (' + deviceLabel() + '); TTS inference needs CUDA');
+    if (!gpuAvailable()) return fail('no GPU backend (' + deviceLabel() + '); TTS inference needs a GPU');
     const p = paths();
     const dir = name === 'kokoro' ? p.kokoro : p.qwen;
     if (!exists(dir + '/config.json')) return fail(ENGINE_LABEL[name] + ' weights not found, expected ' + dir);
