@@ -24,14 +24,17 @@ except where an entry says "not re-run".
 
 ### CSS painting
 
-#### `text-shadow` paints only the first shadow of a list (2026-09-24)
+#### Canvas `fillStyle` / `strokeStyle` / `shadowColor` ignore `currentcolor` (2026-09-24)
+The canvas colour parser does not know `currentcolor`; it should resolve to
+the canvas element's `color`, as `ctx.filter`'s `drop-shadow()` now does.
 
-#### Shadow lengths in em/rem are read as px (2026-09-24)
-box-shadow, text-shadow and `drop-shadow()` offsets and blur ignore the unit
-(shared parser: `src/layout/css_shadow.cpp`).
+#### Filter `blur()` lengths are read as px (2026-09-24)
+CSS `filter: blur(1em)` blurs 1px; canvas filter lengths have no em support.
+Shadow lengths already resolve units (bro a63dbf71).
 
-#### Canvas `ctx.filter = "drop-shadow(...)"` turns `currentcolor` into black (2026-09-24)
-`src/canvas/canvas2d.cpp:76`; should be the canvas element's `color`.
+#### Multi-line text shadows paint line by line (2026-09-24)
+A later line's shadow can land on top of an earlier line's text; browsers
+paint all shadows under all text of the element.
 
 ### bronze JS runtime and module loading
 
@@ -83,6 +86,7 @@ from the commit before the kit rebuild.
 
 ## Fixed
 
+- Shadows, verified 2026-09-24 (bro `tests/style/test_shadow_lists_units.js`, `tests/canvas/test_canvas_filter.js`): every text-shadow in a list paints, and shadow lengths resolve em/rem/viewport/absolute units and `calc()` — bro a63dbf71; canvas `ctx.filter` `drop-shadow()` uses the canvas's `color` for `currentcolor` — bro 3ceef1a7.
 - bronze modules and destructuring, verified 2026-09-24 (oracle cases `module_namespace_identity/`, `module_destructuring_member_target/`, `destructuring_member_target_suspend.js`; `eval_module_registry_test.cpp`): one namespace object per module across importers, `export * as`, `import()` and the registry publish (818e132); member targets in destructuring patterns see imported bindings, `import()` inside patterns/parameter defaults/class fields is rewritten (818e132); `yield` and calls inside a member target, and nested patterns with defaults, compile correctly (07da771).
 - CSS painting, verified 2026-09-24: a shadow that names no colour paints in `currentcolor` (box-shadow, text-shadow, `drop-shadow()`), and one shared parser now reads space-syntax colours, colour-first order and `drop-shadow(12px 0 lime)` correctly — bro 88ac32cc (`tests/style/test_shadow_currentcolor.js`); `skew(ax, ay)` is one matrix in the 3D parse that `getBoundingClientRect` and transform interpolation use — htmlayout dceefc6, bro 89afb4a6 (`tests/style/test_skew_two_angles.js`).
 - CSS transitions, verified 2026-09-24 (bro `tests/style/test_starting_style.js`, `test_transition_value_interpolation.js`; htmlayout `testStartingStyle`): `@starting-style` (top level, nested, inside @media/@layer/@container/@supports) gives new and re-shown elements a starting style to transition from — htmlayout 8289782, bro 39c2d206 (which also relayouts for transitioning layout properties); transform lists of different shapes interpolate per CSS Transforms 2, through matrix decomposition from the first mismatch — bro 4f2193b7; multi-value strings (`box-shadow`, `text-shadow`, `drop-shadow()`, two-value lengths) blend part by part, with colours premultiplied — same commit. Remaining limits, documented in docs/web-animations-api.js: a starting style inherits from the parent's normal style, and percentages inside the matrix part of a transform still flip at 50%. bronze: an anonymous class expression takes the name of its binding (2b7828e).
