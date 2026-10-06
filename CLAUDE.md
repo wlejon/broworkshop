@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 Guidance for agents working in broworkshop: the showcase apps for the
-[bro](../bro) runtime (HTML/CSS apps on a GPU-accelerated engine; read
+[bro](https://github.com/wlejon/bro) runtime (HTML/CSS apps on a GPU-accelerated engine; read
 `../bro/CLAUDE.md` for the engine). bro and its sibling repos (`../bronze`,
 `../brolm`, ...) are separate repos; do not edit them from here.
 

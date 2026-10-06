@@ -2,6 +2,14 @@
 
 Showcase apps and starter templates for [bro](https://github.com/wlejon/bro).
 
+broworkshop is the apps layer of the bro ecosystem: bro runs these folders as
+they are, with no build step, and the engine features they exercise live in
+bro and its sibling libraries. Every repo in the family, and
+how they depend on each other, is listed in bro's
+[ecosystem index](https://github.com/wlejon/bro/blob/main/docs/ecosystem.md).
+[broterm](https://github.com/wlejon/broterm), the terminal app, is a separate
+repo because it ships its own executable.
+
 ## Run
 
 ```bash

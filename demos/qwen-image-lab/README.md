@@ -1,6 +1,6 @@
 # Qwen-Image Lab
 
-Every control surface [qwen-image-research](../../../qwen-image-research) found
+Every control surface qwen-image-research (a private research tree) found
 in **Qwen-Image 2.1**, as a bro app: a 7.1B single-stream flow-matching DiT
 (hidden 4096, 32 blocks) conditioned on Qwen3-VL-8B rows and decoded by a 16×
 RGBA autoencoder, driven through brodiffusion's `qwenImage21*` research hooks.
