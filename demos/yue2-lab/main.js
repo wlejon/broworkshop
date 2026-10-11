@@ -14,7 +14,7 @@
 // every run with its settings.
 
 import { boot } from "/lib/kit/app.js";
-import { $, ids } from "/lib/kit/dom.js";
+import { $, h, ids } from "/lib/kit/dom.js";
 import { logView, progressBar, tabs, segmented, readout, frameLoop, stats } from "/lib/kit/ui.js";
 import { deviceBadge, modelRow, pickFolder, pickSaveFile } from "/lib/kit/ml.js";
 import { bindControl } from "/lib/kit/params.js";
@@ -54,6 +54,13 @@ const models = modelRow('#modelbar', {
     onLoad: ([modelDir, vaeDir]) => loadModels(modelDir, vaeDir),
     onMissing: (msg) => status.warn(msg),
 });
+// The AR decode weights are a load-time choice: quantised copies make the
+// score and semantic sampling faster (~1.9 GB more VRAM).
+const arWeights = h('select#ar-weights', { title: 'weights the score + semantic token sampling reads (applies on Load)' },
+    h('option', { value: 'bf16' }, 'AR bf16'),
+    h('option', { value: 'int8' }, 'AR int8 (faster)'),
+    h('option', { value: 'fp8' }, 'AR fp8 (faster)'));
+$('#btn-load').parentNode.insertBefore(arWeights, $('#btn-load'));
 
 function loadModels(modelDir, vaeDir) {
     if (!bro.music || bro.music.available === false) { status.error('bro.music is not in this build (BRO_WITH_SOUNDML)'); return; }
@@ -68,13 +75,13 @@ function loadModels(modelDir, vaeDir) {
         if (--pending) return;
         models.busy(false);
         const ok = yue && vae;
-        models.meta(ok ? 'YuE2 on ' + yue.device + ' · VAE on ' + vae.device + ' · ' + ((performance.now() - t) / 1000).toFixed(1) + ' s' : '');
+        models.meta(ok ? 'YuE2 on ' + yue.device + ' (AR ' + yue.arWeights + ') · VAE on ' + vae.device + ' · ' + ((performance.now() - t) / 1000).toFixed(1) + ' s' : '');
         stat.set({ model: yue ? yue.device : '—', vae: vae ? vae.device : '—' });
         if (ok) badge.set(yue.device); else badge.set('load failed', 'err');
         if (ok) { status.ok('ready'); log.add('models loaded in ' + ((performance.now() - t) / 1000).toFixed(1) + ' s', 'ok'); }
         updateButtons();
     };
-    bro.music.loadYuE2(modelDir, { onReady: (m) => { yue = m; finish(); },
+    bro.music.loadYuE2(modelDir, { arWeights: arWeights.value, onReady: (m) => { yue = m; finish(); },
                                     onError: (e) => { status.error('YuE2: ' + e); log.add('YuE2: ' + e, 'err'); finish(); } });
     bro.music.loadVae(vaeDir, { onReady: (v) => { vae = v; finish(); },
                                 onError: (e) => { status.error('VAE: ' + e); log.add('VAE: ' + e, 'err'); finish(); } });

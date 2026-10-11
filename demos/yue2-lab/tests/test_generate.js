@@ -19,6 +19,7 @@ test('load both models', () => {
     waitFor(() => !q('#btn-generate').disabled || /failed/.test(text('#device')), 'models loaded', 300000, 50);
     check(!q('#btn-generate').disabled, 'generate enabled after load: ' + text('#status'));
     check(!q('#btn-decode').disabled, 'decode enabled');
+    check(/AR bf16/.test(text('#modelbar')), 'model readout names the AR weights: ' + text('#modelbar'));
 });
 
 test('generate streams audio while it decodes', () => {
