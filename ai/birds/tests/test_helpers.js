@@ -1,7 +1,7 @@
-// The species helper's pure parts and the subject box; no model loads.
+// The species helper's pure parts and the subject square; no model loads.
 import { check, eq, test, done, frames } from "/lib/kit/test.js";
 import { speciesPrompt, squareInput } from "/app/species.js";
-import { subjectBox } from "/app/crop.js";
+import { subjectSquare, cropImage } from "/app/detect.js";
 
 frames(2);
 
@@ -15,27 +15,30 @@ test('BioCLIP prompt: full taxonomy, then the common name', () => {
        'a photo of Animalia Chordata Mammalia Rodentia Sciuridae Tamias striatus with common name Eastern Chipmunk.');
 });
 
-test('subject box: a blob in a 200 x 100 matte, grown and squared', () => {
-    const w = 200, h = 100, alpha = new Float32Array(w * h);
-    for (let y = 40; y < 60; y++) for (let x = 120; x < 160; x++) alpha[y * w + x] = 0.9;
-    const b = subjectBox(alpha, w, h, { margin: 0.25 });
+test('subject square: a 40 x 20 box in a 200 x 100 frame, grown and squared', () => {
+    const w = 200, h = 100;
+    const b = subjectSquare([120, 40, 40, 20], w, h, { margin: 0.25 });
     eq([b.w, b.h], [60, 60], 'square of 40 * 1.5');
-    check(b.x <= 120 && b.x + b.w >= 160 && b.y <= 40 && b.y + b.h >= 60, 'covers the blob');
+    check(b.x <= 120 && b.x + b.w >= 160 && b.y <= 40 && b.y + b.h >= 60, 'covers the box');
     check(b.x >= 0 && b.y >= 0 && b.x + b.w <= w && b.y + b.h <= h, 'inside the frame');
+    eq(subjectSquare([120, 40, 40, 20], w, h).w, 52, 'default margin 15%');
 });
 
-test('subject box: specks and an empty matte are no subject', () => {
-    const w = 100, h = 100, alpha = new Float32Array(w * h);
-    eq(subjectBox(alpha, w, h), null, 'empty');
-    alpha[5050] = 1;
-    eq(subjectBox(alpha, w, h), null, 'one pixel');
+test('subject square: an empty box is no subject', () => {
+    eq(subjectSquare([10, 10, 0, 5], 100, 100), null, 'zero width');
 });
 
-test('subject box: a subject at the edge stays inside the frame', () => {
-    const w = 100, h = 80, alpha = new Float32Array(w * h).fill(0);
-    for (let y = 0; y < 70; y++) for (let x = 0; x < 60; x++) alpha[y * w + x] = 1;
-    const b = subjectBox(alpha, w, h);
+test('subject square: a subject at the edge stays inside the frame', () => {
+    const b = subjectSquare([0, 0, 60, 70], 100, 80);
     eq([b.x, b.y, b.h], [0, 0, 80], 'clamped to the frame');
+});
+
+test('crop: an RGB frame cropped to RGBA', () => {
+    const w = 4, h = 2, rgb = new Uint8Array(w * h * 3);
+    for (let i = 0; i < w * h; i++) rgb[i * 3] = i * 10;
+    const c = cropImage({ width: w, height: h, channels: 3, pixels: rgb }, { x: 1, y: 1, w: 2, h: 1 });
+    eq([c.width, c.height], [2, 1]);
+    eq(Array.from(c.data), [50, 0, 0, 255, 60, 0, 0, 255], 'pixels (1,1) and (2,1)');
 });
 
 test('square input: a 300 x 150 RGB frame to the 224 square', () => {

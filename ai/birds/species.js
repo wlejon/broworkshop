@@ -29,7 +29,7 @@
 // centre-cropped to a square and area-resized to the model's input size here,
 // the same framing as open_clip's resize-shortest-side + centre crop, so the
 // encoder's own resize is an identity. Crop to the subject before calling for
-// small subjects (see crop.js).
+// small subjects (see detect.js).
 
 const fs = require('fs');
 
