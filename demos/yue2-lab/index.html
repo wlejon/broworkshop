@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>YuE2 Lab</title>
+<link rel="stylesheet" href="/lib/kit/kit.css">
+<link rel="stylesheet" href="/app/style.css">
+</head>
+<body class="k-app">
+  <header class="k-header">
+    <h1>YuE2 Lab</h1>
+    <span class="k-sub">lyrics + style → ABC score → semantic tokens → flow-matching latents → 48 kHz stereo, every seam exposed</span>
+    <div class="k-spacer"></div>
+    <span id="device" class="k-badge"></span>
+  </header>
+
+  <div class="k-toolbar" id="modelbar"></div>
+
+  <div class="k-toolbar" id="transport">
+    <button id="btn-generate" class="primary" title="Plan → semantic → synthesize → decode, streaming audio as it is decoded">Generate</button>
+    <span class="k-sep"></span>
+    <button id="btn-plan" title="Run the plan stage only (writes the ABC score)">Plan</button>
+    <button id="btn-semantic" title="Semantic tokens from the current score (an edited score is re-planned first)">Semantic</button>
+    <button id="btn-synth" title="Latents + audio from the current semantic tokens">Synthesize</button>
+    <button id="btn-decode" title="Re-decode the current latents through the VAE (streamed)">Decode</button>
+    <span class="k-sep"></span>
+    <button id="btn-stop" class="danger" title="Cancel the running job">Stop</button>
+    <span class="k-sep"></span>
+    <button id="btn-play" title="Play the whole take">▶ Play</button>
+    <button id="btn-halt" title="Stop playback">■</button>
+    <button id="btn-save-wav" title="Save the take as a stereo WAV">Save WAV</button>
+    <button id="btn-save-take" title="Save style, lyrics, score, settings, semantic ids and latents to a folder">Save take</button>
+    <button id="btn-load-take" title="Load a saved take folder">Load take</button>
+    <div class="k-spacer"></div>
+    <div class="k-progress" id="progress"></div>
+  </div>
+
+  <div class="k-body">
+    <aside class="k-side wide-side">
+      <div class="k-tabs" id="tabs">
+        <button data-tab="song" class="active">Song</button>
+        <button data-tab="sampling">Sampling</button>
+        <button data-tab="expression">Expression</button>
+        <button data-tab="takes">Takes</button>
+      </div>
+
+      <!-- SONG: the conditioning -->
+      <div class="k-panel" data-pane="song">
+        <h2>Style</h2>
+        <textarea id="style" rows="3" spellcheck="false"
+          placeholder="genre, mood, instruments, voice, tempo…"></textarea>
+        <div id="style-tags" class="tag-groups"></div>
+        <h2>Lyrics</h2>
+        <div class="k-row" id="section-tags"></div>
+        <textarea id="lyrics" rows="14" spellcheck="false"
+          placeholder="[Verse]&#10;…&#10;&#10;[Chorus]&#10;…"></textarea>
+        <div class="k-row">
+          <button id="btn-example" class="small" title="Load the model's own example song (今晚不眠)">example</button>
+          <span class="dim" id="lyrics-meta"></span>
+        </div>
+        <h2>Plan</h2>
+        <div class="k-row">
+          <span class="k-cap">score</span><span id="cot"></span>
+        </div>
+        <div class="k-row">
+          <label class="k-field">seed <input id="seed" type="number" value="831001" style="width:120px"></label>
+          <button id="btn-dice" class="small" title="New random seed">🎲</button>
+          <label class="k-field" title="Lock the seed across takes"><input id="seed-lock" type="checkbox" checked> lock</label>
+        </div>
+        <div class="k-row">
+          <label class="k-field" title="Semantic CFG scale. Off = the protocol default (1.0, 1.01 for score off)">
+            <input id="cfg-on" type="checkbox"> cfg
+            <input id="cfg" type="range" min="0" max="4" step="0.01" value="1"><span class="k-val" id="cfg-val"></span></label>
+        </div>
+      </div>
+
+      <!-- SAMPLING: every stage knob -->
+      <div class="k-panel" data-pane="sampling">
+        <h2>Score (ABC) sampling</h2>
+        <div class="k-col" id="abc-sampling"></div>
+        <h2>Semantic sampling</h2>
+        <div class="k-col" id="sem-sampling"></div>
+        <h2>Synthesis</h2>
+        <div class="k-col" id="synth-params"></div>
+        <h2>Playback</h2>
+        <div class="k-col" id="play-params"></div>
+        <button id="btn-defaults" class="small" title="Restore every sampling knob to the protocol defaults">protocol defaults</button>
+      </div>
+
+      <!-- EXPRESSION: residual steering + capture -->
+      <div class="k-panel" data-pane="expression">
+        <h2>Capture</h2>
+        <span class="k-note">Record the residual stream after chosen layers during a take. A captured take is
+          the raw material for attribute directions: capture takes that differ in one attribute, then
+          derive a direction from their means.</span>
+        <div class="k-row">
+          <label class="k-field">layers <input id="cap-layers" type="text" value="" placeholder="e.g. 8,14,20" style="width:120px"></label>
+        </div>
+        <div class="k-row">
+          <label class="k-field"><input id="cap-plan" type="checkbox"> plan</label>
+          <label class="k-field"><input id="cap-sem" type="checkbox" checked> semantic</label>
+          <label class="k-field" title="NAR velocity evaluations per chunk to capture (2 per ODE step)">nar evals
+            <input id="cap-nar" type="text" value="" placeholder="e.g. 0,31,63" style="width:90px"></label>
+        </div>
+        <div id="cap-summary" class="k-box dim">no capture yet</div>
+        <div class="k-row">
+          <button id="btn-cap-save" class="small" title="Write the last take's captured states to a folder (.f32 + index.json)">save capture</button>
+          <button id="btn-cap-mark-a" class="small" title="Set the last capture as group A (per-layer mean)">→ A</button>
+          <button id="btn-cap-mark-b" class="small" title="Set the last capture as group B (per-layer mean)">→ B</button>
+          <button id="btn-cap-diff" class="small" title="Add a steer vector: mean(B) − mean(A) at the first captured layer">B − A ⇒ steer</button>
+        </div>
+        <h2>Steer</h2>
+        <span class="k-note">Vectors added to the residual stream after a layer. Each row is 2048 floats
+          from a captured difference or a .f32 file.</span>
+        <div id="steer-list" class="k-col"></div>
+        <div class="k-row">
+          <button id="btn-steer-file" class="small" title="Add a steer vector from a .f32 file (2048 floats)">+ from file</button>
+          <button id="btn-steer-clear" class="small" title="Remove every steer row">clear</button>
+        </div>
+      </div>
+
+      <!-- TAKES: history -->
+      <div class="k-panel" data-pane="takes">
+        <h2>Takes</h2>
+        <span class="k-note">Every finished take stays here with its settings. Play, restore its
+          settings, or save it.</span>
+        <div id="takes" class="k-col"></div>
+      </div>
+    </aside>
+
+    <main class="k-main pad">
+      <div class="k-panel">
+        <h2>Pipeline</h2>
+        <div id="stages" class="stages"></div>
+        <div class="k-kv" id="timing"></div>
+      </div>
+      <div class="k-panel">
+        <h2>Score <span class="dim" id="abc-meta"></span>
+          <button id="btn-abc-revert" class="k-link" title="Back to the score the model wrote">revert</button></h2>
+        <textarea id="abc" rows="12" spellcheck="false"
+          placeholder="the ABC score streams in here; edit it, then press Semantic to sing your version"></textarea>
+      </div>
+      <div class="k-panel">
+        <h2>Semantic tokens <span class="dim" id="sem-meta"></span></h2>
+        <canvas id="sem-view" class="strip"></canvas>
+      </div>
+      <div class="k-panel">
+        <h2>Latents <span class="dim" id="lat-meta"></span></h2>
+        <canvas id="lat-view" class="heat"></canvas>
+      </div>
+      <div class="k-panel">
+        <h2>Audio <span class="dim" id="audio-meta"></span></h2>
+        <canvas id="wave-l"></canvas>
+        <canvas id="wave-r"></canvas>
+        <div class="k-kv" id="stream-stats"></div>
+      </div>
+      <div class="k-log" id="log"></div>
+    </main>
+  </div>
+
+  <footer class="k-statusbar">
+    <span id="status">starting…</span>
+    <span class="k-stats" id="stats"></span>
+  </footer>
+  <script type="module" src="/app/main.js"></script>
+</body>
+</html>

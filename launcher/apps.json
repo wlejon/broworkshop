@@ -104,6 +104,7 @@
         { "dir": "demos/vlm-lab" },
         { "dir": "demos/waapi-lab" },
         { "dir": "demos/window-lab" },
+        { "dir": "demos/yue2-lab" },
 
         { "dir": "ai/ardy-motion" },
         { "dir": "ai/birds" },

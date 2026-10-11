@@ -48,6 +48,7 @@ tools/laya-triage       ml
 tools/node-forge/tests/test_kokoro_node.js  ml
 tools/node-forge/tests/test_qwen_node.js    ml
 tools/node-forge/tests/test_rave_node.js    ml
+demos/yue2-lab/tests/test_generate.js       ml timeout=1500
 tools/algo-viz/tests/test_terrain.js        ml
 games/hearthfolk/tests/test_live.js         ml
 tools/reader/tests/test_tts.js              ml
