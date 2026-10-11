@@ -8,7 +8,8 @@ export const ABC_DEFAULTS = { temperature: 0.7, topP: 0.9, topK: 30, repetitionP
                               penaltyWindow: 100, minTokens: 32, maxTokens: 4096 };
 export const SEM_DEFAULTS = { temperature: 1.0, topP: 0.95, topK: 100, repetitionPenalty: 1.2,
                               penaltyWindow: 50, minTokens: 200, maxTokens: 9000 };
-export const SYNTH_DEFAULTS = { odeSteps: 32, narChunkFrames: 0, reusePrefixKv: true, decodeCoreFrames: 50 };
+export const SYNTH_DEFAULTS = { odeSteps: 32, narChunkFrames: 0, reusePrefixKv: true, decodeCoreFrames: 50,
+                                decodeFirstFrames: 8 };
 export const PLAY_DEFAULTS = { prebufferSec: 1.0, live: true, autoplay: true };
 
 export const abc = Object.assign({}, ABC_DEFAULTS);
@@ -37,8 +38,10 @@ export function buildSettings(onChange) {
             narChunkFrames:   { min: 0, max: 1500, step: 25, label: 'NAR window', hint: '0 = whole song (protocol); >0 = streaming windows of this many frames',
                                 fmt: (v) => v ? v + ' fr (' + (v / 25).toFixed(0) + ' s)' : 'whole song' },
             reusePrefixKv:    { label: 'reuse semantic KV' },
-            decodeCoreFrames: { min: 4, max: 400, step: 1, label: 'VAE tile', hint: 'frames per decoded tile; smaller = sooner audio',
+            decodeCoreFrames: { min: 4, max: 400, step: 1, label: 'VAE tile', hint: 'the largest decoded tile; smaller = more halo recompute',
                                 fmt: (v) => v + ' fr (' + (v / 25).toFixed(2) + ' s)' },
+            decodeFirstFrames: { min: 1, max: 400, step: 1, label: 'first tile', hint: 'tiles grow from this, doubling up to the VAE tile; smaller = sooner audio',
+                                 fmt: (v) => v + ' fr (' + (v / 25).toFixed(2) + ' s)' },
         }, { onChange }), synth, SYNTH_DEFAULTS],
         [params('#play-params', play, {
             prebufferSec: { min: 0, max: 10, step: 0.1, label: 'prebuffer', fmt: (v) => v.toFixed(1) + ' s' },
@@ -77,5 +80,6 @@ export function samplingOptions() {
         narChunkFrames: synth.narChunkFrames,
         reusePrefixKv: synth.reusePrefixKv,
         decodeCoreFrames: synth.decodeCoreFrames,
+        decodeFirstFrames: synth.decodeFirstFrames,
     };
 }

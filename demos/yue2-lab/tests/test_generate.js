@@ -64,6 +64,11 @@ test('decode the latents again in small tiles', () => {
     let d = 0;
     for (let i = 0; i < ref.length; i++) d = Math.max(d, Math.abs(ref[i] - t.audio.samples[i]));
     check(d < 1e-4, 'streamed re-decode matches the generated audio: ' + d);
+    const row = (label) => [...q('#timing').children].find((r) => r.firstChild.textContent === label);
+    check(/^decode/.test(row('last run').lastChild.textContent), 'last run names the decode');
+    check(/s$/.test(row('first semantic token').lastChild.textContent), 'the generate\'s semantic timing is kept');
+    check(!row('first semantic token').classList.contains('on') && row('first audio').classList.contains('on'),
+          'rows the decode measured are highlighted, the kept ones are not');
 });
 
 frames(5);

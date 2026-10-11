@@ -135,7 +135,7 @@ function stageState(s, state, frac, text) {
 function resetStages(which) { for (const s of which) stageState(s, '', 0, ''); }
 
 const timing = readout('#timing', {
-    wall: 'wall', firstAbc: 'first score token', firstSem: 'first semantic token', firstLat: 'first latents',
+    run: 'last run', firstAbc: 'first score token', firstSem: 'first semantic token', firstLat: 'first latents',
     firstAudio: 'first audio', playStart: 'playback start', planTps: 'score tok/s', semTps: 'semantic tok/s',
     nar: 'NAR s / audio s', rtf: 'audio s / wall s',
 });
@@ -235,19 +235,26 @@ function end(info, label) {
     updateButtons();
 }
 
+// A run fills the rows it measured and highlights them; the other rows keep
+// what an earlier run measured (a Generate starts the table afresh).
 function showTiming(r) {
     const wall = (performance.now() - t0) / 1000;
     const ps = player.stats();
-    const ms = (v) => v ? (v / 1000).toFixed(2) + ' s' : '—';
+    const ms = (v) => v ? (v / 1000).toFixed(2) + ' s' : null;
     const tm = (r && r.timing) || {};
-    timing.set({
-        wall: wall.toFixed(1) + ' s', firstAbc: ms(firstAbcMs), firstSem: ms(firstSemMs), firstLat: ms(firstLatMs),
-        firstAudio: ms(ps.firstAudioMs), playStart: ms(ps.playStartMs),
-        planTps: tm.planTps ? tm.planTps.toFixed(0) + ' (ttft ' + tm.planTtft.toFixed(2) + ' s)' : '—',
-        semTps: tm.semanticTps ? tm.semanticTps.toFixed(0) + ' (ttft ' + tm.semanticTtft.toFixed(2) + ' s)' : '—',
-        nar: tm.narSecondsPerAudioSecond ? tm.narSecondsPerAudioSecond.toFixed(3) : '—',
-        rtf: ps.seconds ? (ps.seconds / wall).toFixed(2) + '×' : '—',
-    });
+    const rows = {
+        run: jobKind + ', ' + wall.toFixed(1) + ' s', firstAbc: ms(firstAbcMs), firstSem: ms(firstSemMs),
+        firstLat: ms(firstLatMs), firstAudio: ms(ps.firstAudioMs), playStart: ms(ps.playStartMs),
+        planTps: tm.planTps ? tm.planTps.toFixed(0) + ' (ttft ' + tm.planTtft.toFixed(2) + ' s)' : null,
+        semTps: tm.semanticTps ? tm.semanticTps.toFixed(0) + ' (ttft ' + tm.semanticTtft.toFixed(2) + ' s)' : null,
+        nar: tm.narSecondsPerAudioSecond ? tm.narSecondsPerAudioSecond.toFixed(3) : null,
+        rtf: ps.seconds ? (ps.seconds / wall).toFixed(2) + '×' : null,
+    };
+    if (jobKind === 'generate') for (const k of timing.keys) timing.set(k, '—', false);
+    for (const k of timing.keys) {
+        if (rows[k] != null) timing.set(k, rows[k], true);
+        else if (timing.row(k).classList.contains('on')) timing.row(k).classList.remove('on');
+    }
 }
 
 function keepTake(kind, r, opts) {
@@ -365,11 +372,12 @@ function decodeStage() {
     if (!lat.length) { status.warn('no latents yet'); return; }
     resetAudio();
     begin('decode', ['decode']);
-    const core = samplingOptions().decodeCoreFrames;
+    const so = samplingOptions();
     const frames = lat.length / 64;
     let done = 0;
     job = vae.decode(lat, {
-        coreFrames: core,
+        coreFrames: so.decodeCoreFrames,
+        firstFrames: so.decodeFirstFrames,
         onChunk: (c) => { appendAudio(c); done += c.frames; stageState('decode', 'run', done / vae.outputLength(frames), (done / 48000).toFixed(1) + ' s'); },
         onDone: (r, info) => {
             player.finish();
