@@ -41,9 +41,11 @@ the `models.dirs` setting) must name the directory holding these, e.g.
   releases converted by `brolm/scripts/convert-openclip.py` (model.safetensors,
   config.json, vocab.json, merges.txt), published in the Hugging Face dataset
   [`wlejon/brovisionml-data`](https://huggingface.co/datasets/wlejon/brovisionml-data).
-- `species/upper-midwest.json` (`brovisionml-data/species/...`): the label
-  set. Not in the published dataset (its taxonomy is under the eBird API's
-  terms); it is assembled locally from the sources in its `ATTRIBUTION.md`.
+- `species/upper-midwest.json` and `species/upper-midwest-herps/species.json`
+  (`brovisionml-data/species/...`): the label set, merged. The first is the
+  birds and yard mammals with eBird names (assembled from the sources in its
+  `ATTRIBUTION.md`), the second 78 reptiles and amphibians generated from
+  GBIF by `brovisionml/scripts/gen-species-gbif` (CC BY 4.0).
 - `owlv2` (`brovisionml-data/owlv2`): the Hugging Face release of
   `google/owlv2-base-patch16-ensemble` as-is (model.safetensors, vocab.json,
   merges.txt; Apache-2.0, see its `ATTRIBUTION.md`).
@@ -99,7 +101,8 @@ threshold means no animal: the app says so and does not classify.
   "a bird", a feeder, leaves, 0.11 to 0.22); 0.15 keeps most of the real
   ones and lets a few look-alikes through to the classifier. Raise it for
   fewer false finds.
-- **Queries** are only the animals on the species list: a dog or a cat is
+- **Queries** are only the animals on the species lists (since the herps
+  list: snake, turtle, frog, toad, lizard, salamander too): a dog or a cat is
   "no animal". Pass `queries` to `open` (or the analyzer's `detect`) to ask for others; their text
   embeddings are computed once and cached.
 - **Cost** on a Radeon 8060S: ~75 ms for OWLv2 on the GPU (FP16 at 960 x 960),
@@ -135,6 +138,7 @@ recorded as an error and the run goes on.
 |--------|---------|-|
 | `--model bioclip-2\|bioclip` | `bioclip-2` | species model |
 | `--threshold N` | 0.15 | OWLv2 score threshold (see above) |
+| `--label-threshold N` | 0.85 | the report's labelled / unidentified split (below); the records keep every score |
 | `--gap S` | 1.0 | max seconds between consecutive shots of one burst |
 | `--scene-ncc N` | 0 (off) | also split a burst where consecutive frames correlate below N |
 | `--metric tenengrad\|laplacianVar` | `tenengrad` | keeper sharpness measure |
@@ -191,3 +195,10 @@ is still recorded per burst.
 species with the largest sum is the burst's, `share` its mean probability and
 `agree` the frames naming it first. The report lists species by bursts as
 well as by photos, since a 28-frame burst of one heron is one sighting.
+
+**Labels.** An app names a species only at a score of 0.85 or more
+(`bro.vision.wildlife.label`: a burst's `share`, else a lone photo's top-1);
+under it the animal is shown as found but unidentified. The report counts
+photos and bursts labelled and unidentified at `--label-threshold`
+(`meta.json` `run.labels`), and the species table how many of each
+species' bursts reach it.

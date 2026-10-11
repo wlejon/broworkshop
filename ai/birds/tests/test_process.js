@@ -6,7 +6,7 @@
 // a scene split as the app uses them (bro.vision.wildlife), base64.
 // tests/test_process_ml.js runs the models.
 import { check, eq, near, test, done, throws } from "/lib/kit/test.js";
-import { runBatch, scanPhotos, isInside, sceneNcc } from "/app/batch.js";
+import { runBatch, scanPhotos, isInside, sceneNcc, labelCounts } from "/app/batch.js";
 import { readJsonl, toBase64, fromBase64 } from "/app/store.js";
 import { writeExifJpeg, texture } from "/app/tests/synth.js";
 
@@ -96,6 +96,16 @@ test('grouping: gap, scene split, keeper, consensus', () => {
     eq(split.map((b) => b.count), [2, 1, 2], 'scene split');
     eq(split[1].startedBy, 'scene', 'started by the scene change');
     eq(split[0].minNcc, 0.9, 'ncc kept');
+
+    // Labels: the burst's consensus share 0.7 is unidentified at 0.85, labelled at 0.65;
+    // its three frames (and 'g', alone at 0.9) follow; the no-animal burst counts nowhere.
+    const lone = rec('g', 9000, { animal: true, species: [sp('Wren', 0.9)] });
+    const all = rs.concat([lone]);
+    const gb = groupBursts(all, { gapS: 1 });
+    const at85 = labelCounts(all, gb, 0.85), at65 = labelCounts(all, gb, 0.65);
+    eq(at85, { threshold: 0.85, photos: { animal: 4, labelled: 1, unidentified: 3 },
+               bursts: { animal: 2, labelled: 1, unidentified: 1 } }, 'at 0.85');
+    eq([at65.photos.labelled, at65.bursts.labelled], [4, 2], 'at 0.65 everything is named');
 });
 
 test('scene NCC: a frame and itself shifted vs another scene', () => {

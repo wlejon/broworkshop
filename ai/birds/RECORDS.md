@@ -98,8 +98,17 @@ exactly one burst.
 | `schema` | record schema |
 | `tool` | what wrote it |
 | `input`, `output` | the photo folder and this directory (real paths) |
-| `configHash`, `config` | the processing config the records were made under: `detectSize` (detection/classification image, long side, 1280), `sharpSize` (3000), `thumbSize` (96), `models` (false under `--no-models`), `detector` and `classifier` (`{ name, repo, revision, weightsBytes }`; repo and revision from the weights' ATTRIBUTION.md), `threshold`, `queries` (OWLv2's text queries), `topK`, `margin`, `speciesList` (`{ file, count }`) |
-| `options` | burst options of this run: `gapS`, `sceneNcc`, `metric`; `workers`, `force`, `limit` |
+| `configHash`, `config` | the processing config the records were made under: `detectSize` (detection/classification image, long side, 1280), `sharpSize` (3000), `thumbSize` (96), `models` (false under `--no-models`), `detector` and `classifier` (`{ name, repo, revision, weightsBytes }`; repo and revision from the weights' ATTRIBUTION.md), `threshold`, `queries` (OWLv2's text queries), `topK`, `margin`, `speciesList` (`{ files, count, hash }`: the merged list files by name, e.g. `upper-midwest.json` and `upper-midwest-herps/species.json`, the species count after merging, and an FNV-1a of every prompt; before the lists merged it was `{ file, count }`) |
+| `options` | options of this run that do not touch the records: `gapS`, `sceneNcc`, `metric` (bursts), `labelThreshold` (the report's labels, below); `workers`, `force`, `limit` |
 | `engine` | `exePath` (the bro-headless that ran) and `device` (where OWLv2 ran) |
-| `run` | `startedAt`, `wallMs`, `photos`, `files` (all files seen), `skippedFiles` (count by extension: videos and others), `processed`, `reused`, `errors`, `removed`, `pairs`, `msPerPhoto` (wall time of the processing loop / photos processed), `timing` (this run's photos, per stage: `n`, `meanMs`, `medianMs`, `totalMs`; `wait` = time the page waited for a decode) |
+| `run` | `startedAt`, `wallMs`, `photos`, `files` (all files seen), `skippedFiles` (count by extension: videos and others), `processed`, `reused`, `errors`, `removed`, `pairs`, `msPerPhoto` (wall time of the processing loop / photos processed), `timing` (this run's photos, per stage: `n`, `meanMs`, `medianMs`, `totalMs`; `wait` = time the page waited for a decode), `labels` (below) |
+
+`run.labels` is what an app shows at the label threshold (`--label-threshold`,
+default 0.85, `bro.vision.wildlife.label`): `{ threshold, photos: { animal,
+labelled, unidentified }, bursts: { animal, labelled, unidentified } }`. A
+burst is labelled when its consensus `share` reaches the threshold; a photo
+by its burst's consensus (a photo whose own frame has no animal counts when
+its burst has one, as an app tags it), so `photos.animal` can exceed the
+records with `animal: true`. Unidentified: an animal, no name at the
+threshold. Derived from the records and bursts; nothing in them changes.
 | `history` | the last 50 runs into this directory, oldest first: `{ startedAt, wallMs, processed, reused, errors, msPerPhoto, configHash }` |

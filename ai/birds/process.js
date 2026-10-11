@@ -12,6 +12,7 @@
 // Options:
 //   --model bioclip-2|bioclip   species model (default bioclip-2)
 //   --threshold N               OWLv2 score threshold (default 0.15)
+//   --label-threshold N         species score a label needs in the report (default 0.85)
 //   --gap S                     max seconds between shots of a burst (default 1.0)
 //   --scene-ncc N               also split a burst where the frame changes, NCC < N (default 0: off)
 //   --metric tenengrad|laplacianVar   keeper sharpness measure (default tenengrad)
@@ -26,7 +27,7 @@ import { runBatch, DEFAULTS } from "/app/batch.js";
 const pathMod = require('path');
 
 const USAGE = 'usage: bro-headless ai/birds ai/birds/process.js -- <photo folder> <output dir> ' +
-    '[--model bioclip-2|bioclip] [--threshold N] [--gap S] [--scene-ncc N] [--metric tenengrad|laplacianVar] ' +
+    '[--model bioclip-2|bioclip] [--threshold N] [--label-threshold N] [--gap S] [--scene-ncc N] [--metric tenengrad|laplacianVar] ' +
     '[--workers N] [--no-models] [--force] [--limit N] [--progress S]';
 
 function parse(argv) {
@@ -45,6 +46,7 @@ function parse(argv) {
         if (a === '--') continue;
         else if (a === '--model') o.model = val();
         else if (a === '--threshold') o.threshold = num(a, val());
+        else if (a === '--label-threshold') o.labelThreshold = num(a, val());
         else if (a === '--gap') o.gapS = num(a, val());
         else if (a === '--scene-ncc') o.sceneNcc = num(a, val());
         else if (a === '--metric') o.metric = val();

@@ -33,8 +33,13 @@ export function writeReport(file, { meta, records, bursts }) {
            `${run.reused} unchanged from an earlier run${run.removed ? `, ${run.removed} records dropped (photo gone)` : ''}`);
     if (c.models) {
         L.push(`- Detector: OWLv2 ${modelLine(c.detector)}, threshold ${c.threshold}, ${c.queries.length} animal queries`);
+        // speciesList.files since the lists merged (an older meta has `file`).
+        const lists = c.speciesList.files ? c.speciesList.files.join(' + ') : c.speciesList.file;
         L.push(`- Species: ${modelLine(c.classifier)}, top ${c.topK} over ${c.speciesList.count} species ` +
-               `(${c.speciesList.file}), subject square +${Math.round(c.margin * 100)}%`);
+               `(${lists}), subject square +${Math.round(c.margin * 100)}%`);
+        if (meta.options.labelThreshold != null)
+            L.push(`- Labels: a species is named at a score of ${meta.options.labelThreshold} or more ` +
+                   '(a burst\'s consensus share, else the photo\'s top-1); under it the animal is unidentified');
     } else {
         L.push('- Models: none (--no-models: decode, EXIF, sharpness and bursts only)');
     }
@@ -55,21 +60,40 @@ export function writeReport(file, { meta, records, bursts }) {
         L.push('Detector labels (best box): ' + [...detLabels.entries()].sort((a, b) => b[1] - a[1])
             .map(([k, n]) => `${k.replace(/^an? /, '')} ${n}`).join(', '), '');
 
+    // Labels: what an app shows at the label threshold (bro.vision.wildlife.label).
+    const lb = meta.run.labels;
+    if (c.models && lb) {
+        L.push(`## Labels at ${lb.threshold}`, '');
+        L.push('Photos with an animal (theirs or their burst\'s) and bursts with one, by whether a species is named: ' +
+               'labelled at a score of the threshold or more, else unidentified. A photo takes its burst\'s consensus.', '');
+        L.push('| | with an animal | labelled | unidentified |');
+        L.push('|---|---:|---:|---:|');
+        for (const k of ['photos', 'bursts'])
+            L.push(`| ${k} | ${lb[k].animal} | ${lb[k].labelled} (${pct(lb[k].labelled, lb[k].animal)}) | ${lb[k].unidentified} |`);
+        L.push('');
+    }
+
     // Species: photos by top-1, bursts by consensus.
     const sp = new Map();
     const get = (common, scientific) => {
-        if (!sp.has(scientific)) sp.set(scientific, { common, scientific, photos: 0, bursts: 0, burstPhotos: 0 });
+        if (!sp.has(scientific)) sp.set(scientific, { common, scientific, photos: 0, bursts: 0, burstPhotos: 0, labelled: 0 });
         return sp.get(scientific);
     };
+    const named = (b) => lb && bro.vision.wildlife.label(null, b, { labelThreshold: lb.threshold });
     for (const r of animals) if (r.species[0]) get(r.species[0].common, r.species[0].scientific).photos++;
-    for (const b of bursts) if (b.species) { const s = get(b.species.common, b.species.scientific); s.bursts++; s.burstPhotos += b.count; }
+    for (const b of bursts) if (b.species) {
+        const s = get(b.species.common, b.species.scientific);
+        s.bursts++; s.burstPhotos += b.count;
+        if (named(b)) s.labelled++;
+    }
     if (sp.size) {
         L.push('## Species', '');
-        L.push('Bursts: bursts whose consensus it is (photos in them); photos: photos whose top-1 it is.', '');
-        L.push('| species | scientific | bursts | photos in them | photos (top-1) |');
-        L.push('|---|---|---:|---:|---:|');
+        L.push('Bursts: bursts whose consensus it is (photos in them; labelled: of them, those whose share reaches ' +
+               'the label threshold); photos: photos whose top-1 it is.', '');
+        L.push('| species | scientific | bursts | labelled | photos in them | photos (top-1) |');
+        L.push('|---|---|---:|---:|---:|---:|');
         for (const s of [...sp.values()].sort((a, b) => b.bursts - a.bursts || b.photos - a.photos))
-            L.push(`| ${esc(s.common)} | *${esc(s.scientific)}* | ${s.bursts} | ${s.burstPhotos} | ${s.photos} |`);
+            L.push(`| ${esc(s.common)} | *${esc(s.scientific)}* | ${s.bursts} | ${lb ? s.labelled : '-'} | ${s.burstPhotos} | ${s.photos} |`);
         L.push('');
     }
 

@@ -37,6 +37,7 @@ export const DEFAULTS = {
     thumbSize: 96,               // scene-check thumbnail, long side
     topK: wildlife.DEFAULTS.topK,
     margin: wildlife.DEFAULTS.margin,        // subject square padding
+    labelThreshold: wildlife.DEFAULTS.labelThreshold,   // the report's labelled / unidentified (0.85)
     workers: 3,
     noModels: false,             // decode/EXIF/sharpness/bursts only
     force: false,
@@ -372,6 +373,7 @@ export function runBatch(opts) {
     };
     const bursts = wildlife.groupBursts(current,{ gapS: o.gapS, sameScene, metric: o.metric });
     writeJsonl(output + '/bursts.jsonl', bursts);
+    const labels = labelCounts(current, bursts, o.labelThreshold);
 
     const wallMs = Date.now() - t0;
     const timing = {};
@@ -385,7 +387,8 @@ export function runBatch(opts) {
         tool: 'broworkshop ai/birds/process.js',
         input, output,
         configHash, config,
-        options: { gapS: o.gapS, sceneNcc: o.sceneNcc, metric: o.metric, workers: nWorkers, force: !!o.force, limit: o.limit },
+        options: { gapS: o.gapS, sceneNcc: o.sceneNcc, metric: o.metric, labelThreshold: o.labelThreshold,
+                   workers: nWorkers, force: !!o.force, limit: o.limit },
         engine: { exePath: (bro.app && bro.app.exePath) || null, device: analyzer ? analyzer.device : null },
         run: {
             startedAt: new Date(t0).toISOString(), wallMs,
@@ -394,6 +397,7 @@ export function runBatch(opts) {
             pairs: shots.filter((s) => s.pair).length,
             msPerPhoto: todo.length ? r1(loopMs / todo.length) : 0,
             timing,
+            labels,
         },
         history: [],
     };
@@ -408,7 +412,36 @@ export function runBatch(opts) {
     writeReport(output + '/summary.md', { meta, records: current, bursts });
     log(`birds: ${todo.length} processed, ${reused} unchanged, ${meta.run.errors} errors, ${bursts.length} bursts; ` +
         `${(wallMs / 1000).toFixed(1)} s. ${output}/summary.md`);
+    if (!o.noModels) {
+        log(`birds: at ${labels.threshold}: ${labels.photos.labelled} photos labelled, ${labels.photos.unidentified} unidentified; ` +
+            `${labels.bursts.labelled} bursts labelled, ${labels.bursts.unidentified} unidentified`);
+    }
     return { meta, records: current, bursts };
+}
+
+/**
+ * Photos and bursts with an animal, split by bro.vision.wildlife.label() at
+ * `threshold`: labelled (a name at or over it) or unidentified (an animal
+ * without one). A photo is labelled by its burst's consensus (RECORDS.md).
+ */
+export function labelCounts(records, bursts, threshold) {
+    const byPath = new Map();
+    for (const b of bursts) for (const p of b.photos) byPath.set(p, b);
+    const opts = { labelThreshold: threshold };
+    const out = { threshold, photos: { animal: 0, labelled: 0, unidentified: 0 },
+                  bursts: { animal: 0, labelled: 0, unidentified: 0 } };
+    const count = (k, animal, named) => {
+        if (!animal) return;
+        out[k].animal++;
+        out[k][named ? 'labelled' : 'unidentified']++;
+    };
+    for (const r of records) {
+        if (r.error) continue;
+        const b = byPath.get(r.path) || null;
+        count('photos', r.animal === true || !!(b && b.species), wildlife.label(r, b, opts));
+    }
+    for (const b of bursts) count('bursts', !!b.species, wildlife.label(null, b, opts));
+    return out;
 }
 
 // The EXIF fields a record keeps (all optional, as readExif gives them).

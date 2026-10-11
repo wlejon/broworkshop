@@ -52,6 +52,10 @@ test('default threshold: an empty frame has no animal; records carry the detecto
     const m = r.meta.config;
     eq([m.detector.repo, m.classifier.repo, m.threshold], ['google/owlv2-base-patch16-ensemble', 'imageomics/bioclip-2', 0.15]);
     check(m.classifier.weightsBytes > 0 && m.speciesList.count > 500, 'model and list identity');
+    check(m.speciesList.files.length === 2 && m.queries.includes('a snake'), 'the merged lists and the herp queries');
+    eq(r.meta.options.labelThreshold, 0.85, 'the label threshold');
+    const lb = r.meta.run.labels;
+    check(lb && lb.photos.labelled + lb.photos.unidentified === lb.photos.animal, 'labels split the animal photos');
 });
 
 test('threshold 0: every frame is an animal, with a top 5, a subject and its sharpness', () => {
