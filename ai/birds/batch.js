@@ -46,19 +46,27 @@ export const DEFAULTS = {
 
 const PHOTO_EXT = { '.jpg': 'jpeg', '.jpeg': 'jpeg', '.cr3': 'cr3' };
 
-/** Is `child` the directory `parent` or inside it? (absolute, normalized paths) */
+// Paths are recorded with forward slashes on every OS (Windows takes them too),
+// so records, pairs and keys read the same wherever the card was processed.
+const slash = (p) => String(p).replace(/\\/g, '/');
+
+/** Is `child` the directory `parent` or inside it? (absolute, normalized paths;
+ *  case-insensitive on Windows, whose file system is) */
 export function isInside(child, parent) {
-    const c = child.replace(/\/+$/, '') + '/', p = parent.replace(/\/+$/, '') + '/';
-    return c.startsWith(p);
+    const norm = (s) => {
+        const t = slash(s).replace(/\/+$/, '') + '/';
+        return process.platform === 'win32' ? t.toLowerCase() : t;
+    };
+    return norm(child).startsWith(norm(parent));
 }
 
 // The real path of `p`, or of its nearest existing ancestor plus the rest.
 function realish(p) {
     let head = pathMod.resolve(p), tail = '';
     for (;;) {
-        try { return pathMod.join(fs.realpathSync(head), tail); } catch (_) {}
+        try { return slash(pathMod.join(fs.realpathSync(head), tail)); } catch (_) {}
         const up = pathMod.dirname(head);
-        if (up === head) return pathMod.resolve(p);
+        if (up === head) return slash(pathMod.resolve(p));
         tail = pathMod.join(pathMod.basename(head), tail);
         head = up;
     }
@@ -75,7 +83,7 @@ export function scanPhotos(root) {
         let ents = [];
         try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return; }
         for (const e of ents) {
-            const p = pathMod.join(dir, e.name);
+            const p = slash(pathMod.join(dir, e.name));
             if (e.isDirectory()) { walk(p); continue; }
             files++;
             const ext = pathMod.extname(e.name).toLowerCase();

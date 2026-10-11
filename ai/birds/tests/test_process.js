@@ -13,7 +13,8 @@ import { writeExifJpeg, texture } from "/app/tests/synth.js";
 const fs = require('fs');
 const os = require('os');
 
-const root = os.tmpdir().replace(/\/+$/, '') + '/birds-test-' + Date.now() + '-' + Math.floor(Math.random() * 1e6);
+// The records' form of the temp dir: its real path with forward slashes.
+const root = fs.realpathSync(os.tmpdir()).replace(/\\/g, '/').replace(/\/+$/, '') + '/birds-test-' + Date.now() + '-' + Math.floor(Math.random() * 1e6);
 const input = root + '/card', output = root + '/out';
 fs.mkdirSync(input + '/sub', { recursive: true });
 const quiet = () => {};
