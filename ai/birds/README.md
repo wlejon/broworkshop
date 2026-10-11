@@ -17,9 +17,19 @@ builds on.
 | `detect.js` | `loadAnimalDetector({ weightsDir })` -> `detect(image, { queries, threshold })` -> `[{ box: [x, y, w, h], score, label }]`: OWLv2 with the yard animals as queries; `subjectSquare`, `cropImage`, `ANIMAL_QUERIES`, `DEFAULT_THRESHOLD` |
 | `models.js` | `locate(name)`: the one place weights are looked up |
 | `main.js`, `index.html` | the app |
+| `process.js` | the batch processor's command line (below) |
+| `batch.js` | `runBatch(opts)`: scan, the decode-worker / GPU pipeline, records, bursts, meta; `scanPhotos`, `sceneNcc` |
+| `decode-worker.js` | the CPU half of a photo in a Worker: decode, EXIF, sharpness, thumbnail |
+| `bursts.js` | `groupBursts(records, { gapS, sameScene, metric })`: bursts, consensus species, keeper; `parseExifTime` |
+| `store.js` | the JSONL store: keys, appending, compaction, atomic writes |
+| `report.js` | `summary.md` |
+| `RECORDS.md` | every field of the batch output |
 | `tests/test_helpers.js` | prompts, subject square, crop, square input; no models |
 | `tests/test_species.js` | BioCLIP end to end on a synthetic image (tagged `ml`) |
 | `tests/test_detect.js` | OWLv2 on synthetic frames: nothing in an empty one, sorted in-frame boxes, RGB = RGBA (tagged `ml`) |
+| `tests/test_process.js` | the batch processor without models on synthetic JPEGs with fake EXIF times: records, keys, incremental skip, changes, pairs, corrupt files, bursts, keepers, output-dir refusal |
+| `tests/test_process_ml.js` | the batch processor with OWLv2 + BioCLIP on synthetic frames (tagged `ml`) |
+| `tests/synth.js` | synthetic textures and JPEGs with an EXIF capture time, for the tests |
 
 ## Weights
 
@@ -113,3 +123,89 @@ animal: the app says so and does not classify.
 - **Cost** on a Radeon 8060S: ~75 ms for OWLv2 on the GPU (FP16 at 960 x 960),
   ~98 ms for `detect` with its CPU preprocessing at 1280, and ~87 ms for the
   `decodeScaled(1280)` of a camera JPEG before it.
+
+## Batch processing
+
+```sh
+# from broworkshop/, with BRO_MODELS naming brovisionml-data
+bro-headless ai/birds ai/birds/process.js -- /media/card/DCIM/100CANON ~/birds/card-2026-10 [options]
+```
+
+Every photo under the folder (recursive; `.jpg`/`.jpeg` and Canon `.cr3`;
+videos and other files are counted and skipped) is decoded, its EXIF read,
+OWLv2 asked for animals, BioCLIP 2 asked for the top 5 species on the subject
+square, and its sharpness measured; then the photos are grouped into bursts,
+each with a consensus species and a keeper. A RAW+JPEG pair (same folder,
+same name) is one shot: the JPEG is processed and the CR3 recorded as its
+`pair`. A CR3 on its own is processed through its embedded JPEG.
+
+The output directory gets `records.jsonl` (one line per photo),
+`bursts.jsonl`, `meta.json` (models with their revisions, thresholds,
+options, run statistics), `summary.md` (the report: counts, species by photos
+and bursts, burst sizes, keepers, timing, failures) and `thumbs.jsonl`. Every
+field is in [RECORDS.md](RECORDS.md). Nothing is written beside the photos,
+and an output directory inside the photo folder is refused. Re-running skips
+every photo whose path, size and mtime match its record (and whose record was
+made with the same models and settings); a photo that fails to decode is
+recorded as an error and the run goes on.
+
+| Option | Default | |
+|--------|---------|-|
+| `--model bioclip-2\|bioclip` | `bioclip-2` | species model |
+| `--threshold N` | 0.15 | OWLv2 score threshold (see above) |
+| `--gap S` | 1.0 | max seconds between consecutive shots of one burst |
+| `--scene-ncc N` | 0 (off) | also split a burst where consecutive frames correlate below N |
+| `--metric tenengrad\|laplacianVar` | `tenengrad` | keeper sharpness measure |
+| `--workers N` | 3 | decode workers |
+| `--no-models` | | decode, EXIF, sharpness and bursts only |
+| `--force` | | process every photo again |
+| `--limit N` | | only the first N photos by path |
+| `--progress S` | 10 | seconds between progress lines |
+
+**Pipeline.** `decode-worker.js` workers decode each photo with
+`bro.image.decodeScaled` to 3000 px on the long side, which for a 6000 x 4000
+camera JPEG is libjpeg-turbo's 1/2 DCT scale and costs the same as the 1280 px
+decode the detector needs (~95 ms either way; it is the entropy decoding that
+costs), resize it to 1280 for detection and classification, read EXIF, and
+measure the whole frame's sharpness and a 96 px luma thumbnail; the 3000 px
+image stays in the worker until the page sends back the subject's box, whose
+sharpness is measured on it. The page runs OWLv2 and BioCLIP on the GPU while
+the workers decode the next photos, so a photo costs what the GPU stages cost:
+on a Radeon 8060S ~102 ms detect (OWLv2 with its preprocessing) + ~31 ms
+classify, ~137 ms a photo end to end, about 7.4 photos a second, while decode
+(~100 ms), EXIF (0.2 ms), sharpness (3.6 ms frame, ~1 ms subject) and the
+thumbnail (2.5 ms) run beside it and the page waits on them for under 3% of
+the run. A re-run that finds nothing changed takes ~4 s for 958 photos
+(reading the records and regrouping the bursts; the models are not loaded).
+
+**Sharpness** is `bro.image.sharpness` (broimage): variance of the Laplacian
+and Tenengrad on integer luma, over the whole frame and over the best
+detection box (not the padded square), at 3000 px. The keeper is the frame
+with the highest subject Tenengrad. On a 958-photo card the two measures pick
+the same keeper in 113 of 147 bursts with three or more animal frames, and
+where they differ the frames are within a few percent of each other; ordered
+by Tenengrad, bursts put wing-blurred and missed-focus frames last. Both
+measures also grow with contrast, so they rank frames of one burst, not
+unrelated photos.
+
+**Bursts.** Shots are sorted by EXIF capture time with sub-seconds. On the
+two cards here (2436 shots from a Canon R50) consecutive frames of the
+camera's own bursts are 0.07-0.2 s apart (1349 pairs; 6 more at 0.2-0.35 s);
+from 0.35 to 1 s sit 38 quick
+re-presses on the same subject (34 of the 36 with an animal in both frames
+name the same species), and from 1 s on the gaps grow into new framings and
+new subjects. Any gap from 0.35 to 1 s keeps every camera burst whole; 1.0 s
+also keeps the quick re-presses with them. The scene check (`--scene-ncc`) aligns the 96 px luma
+thumbnails of consecutive frames (`bro.image.alignSimilarity`, translation
+only: with scale and rotation free a thumbnail bends onto an unrelated scene)
+and splits below the threshold. It is off by default because it did not
+help: on both cards every pair under 1 s apart with an NCC below 0.6 (14
+pairs) was the same subject: herons and egrets in flight, a bird leaving the
+frame, a pan following a gull, ripples, reed texture; none was a change of
+scene. `minNcc`
+is still recorded per burst.
+
+**Consensus.** Each animal frame of a burst votes with its top 5 scores; the
+species with the largest sum is the burst's, `share` its mean probability and
+`agree` the frames naming it first. The report lists species by bursts as
+well as by photos, since a 28-frame burst of one heron is one sighting.
