@@ -19,7 +19,7 @@ function modelLine(m) {
 /** Size buckets for the burst-size distribution. */
 const BUCKETS = [[1, 1], [2, 2], [3, 5], [6, 10], [11, 20], [21, 50], [51, Infinity]];
 
-export function writeReport(file, { meta, records, bursts }) {
+export function writeReport(file, { meta, records, bursts, taxa }) {
     const L = [];
     const run = meta.run, c = meta.config, root = meta.input;
     const ok = records.filter((r) => !r.error);
@@ -37,9 +37,15 @@ export function writeReport(file, { meta, records, bursts }) {
         const lists = c.speciesList.files ? c.speciesList.files.join(' + ') : c.speciesList.file;
         L.push(`- Species: ${modelLine(c.classifier)}, top ${c.topK} over ${c.speciesList.count} species ` +
                `(${lists}), subject square +${Math.round(c.margin * 100)}%`);
+        if (c.candidates)
+            L.push(`- Crops: up to ${c.maxClassify} animal boxes a photo, each ranked over ` +
+                   (c.candidates.mode === 'byQuery'
+                       ? `the species of its query's classes (every species when that is under ${c.candidates.fallback} and another class's best clears it)`
+                       : 'every species'));
         if (meta.options.labelThreshold != null)
-            L.push(`- Labels: a species is named at a score of ${meta.options.labelThreshold} or more ` +
-                   '(a burst\'s consensus share, else the photo\'s top-1); under it the animal is unidentified');
+            L.push(`- Labels: each animal is named at the narrowest rank (species, genus, family, order, class) scoring ` +
+                   `${meta.options.labelThreshold} or more; a photo shows its burst's labels when it has any; ` +
+                   'no rank there and the animal is unidentified');
     } else {
         L.push('- Models: none (--no-models: decode, EXIF, sharpness and bursts only)');
     }
@@ -60,40 +66,59 @@ export function writeReport(file, { meta, records, bursts }) {
         L.push('Detector labels (best box): ' + [...detLabels.entries()].sort((a, b) => b[1] - a[1])
             .map(([k, n]) => `${k.replace(/^an? /, '')} ${n}`).join(', '), '');
 
-    // Labels: what an app shows at the label threshold (bro.vision.wildlife.label).
+    // Labels: what an app shows at the label threshold (bro.vision.wildlife.labels).
     const lb = meta.run.labels;
     if (c.models && lb) {
         L.push(`## Labels at ${lb.threshold}`, '');
-        L.push('Photos with an animal (theirs or their burst\'s) and bursts with one, by whether a species is named: ' +
-               'labelled at a score of the threshold or more, else unidentified. A photo takes its burst\'s consensus.', '');
-        L.push('| | with an animal | labelled | unidentified |');
-        L.push('|---|---:|---:|---:|');
+        L.push('Photos with an animal (theirs or their burst\'s) and bursts with one: labelled when at least one ' +
+               'name clears the threshold at some rank, else unidentified; 2+ names: several animals named. ' +
+               'A photo shows its burst\'s labels when the burst has any.', '');
+        L.push('| | with an animal | labelled | unidentified | 2+ names |');
+        L.push('|---|---:|---:|---:|---:|');
         for (const k of ['photos', 'bursts'])
-            L.push(`| ${k} | ${lb[k].animal} | ${lb[k].labelled} (${pct(lb[k].labelled, lb[k].animal)}) | ${lb[k].unidentified} |`);
+            L.push(`| ${k} | ${lb[k].animal} | ${lb[k].labelled} (${pct(lb[k].labelled, lb[k].animal)}) | ` +
+                   `${lb[k].unidentified} | ${lb[k].multi != null ? lb[k].multi : '-'} |`);
         L.push('');
+        if (lb.byRank) {
+            L.push('Photo labels by rank: ' + Object.entries(lb.byRank).map(([r, n]) => `${r} ${n}`).join(', ') +
+                   `. Animal boxes over the detector threshold not classified (over ${c.maxClassify} a photo): ${lb.droppedBoxes}.`, '');
+        }
+        if (lb.groups) {
+            L.push('| photos labelled with | photos |');
+            L.push('|---|---:|');
+            for (const g of lb.groups) L.push(`| ${g.name} | ${g.photos} |`);
+            if (lb.ungrouped) L.push(`| (another class) | ${lb.ungrouped} |`);
+            L.push('');
+        }
+        if (lb.taxa && lb.taxa.length) {
+            L.push('Per name: photos and bursts showing it.', '');
+            L.push('| label | rank | scientific | group | photos | bursts |');
+            L.push('|---|---|---|---|---:|---:|');
+            for (const t of lb.taxa)
+                L.push(`| ${esc(t.label)} | ${t.rank} | *${esc(t.scientific)}* | ${t.group || '-'} | ${t.photos} | ${t.bursts} |`);
+            L.push('');
+        }
     }
 
-    // Species: photos by top-1, bursts by consensus.
+    // Species: photos by top-1 (best box), bursts by consensus.
     const sp = new Map();
     const get = (common, scientific) => {
-        if (!sp.has(scientific)) sp.set(scientific, { common, scientific, photos: 0, bursts: 0, burstPhotos: 0, labelled: 0 });
+        if (!sp.has(scientific)) sp.set(scientific, { common, scientific, photos: 0, bursts: 0, burstPhotos: 0 });
         return sp.get(scientific);
     };
-    const named = (b) => lb && bro.vision.wildlife.label(null, b, { labelThreshold: lb.threshold });
     for (const r of animals) if (r.species[0]) get(r.species[0].common, r.species[0].scientific).photos++;
     for (const b of bursts) if (b.species) {
         const s = get(b.species.common, b.species.scientific);
         s.bursts++; s.burstPhotos += b.count;
-        if (named(b)) s.labelled++;
     }
     if (sp.size) {
-        L.push('## Species', '');
-        L.push('Bursts: bursts whose consensus it is (photos in them; labelled: of them, those whose share reaches ' +
-               'the label threshold); photos: photos whose top-1 it is.', '');
-        L.push('| species | scientific | bursts | labelled | photos in them | photos (top-1) |');
-        L.push('|---|---|---:|---:|---:|---:|');
+        L.push('## Species (top-1)', '');
+        L.push('Whatever the score, before the label threshold. Bursts: bursts whose consensus it is (photos in them); ' +
+               'photos: photos whose best box\'s top-1 it is.', '');
+        L.push('| species | scientific | bursts | photos in them | photos (top-1) |');
+        L.push('|---|---|---:|---:|---:|');
         for (const s of [...sp.values()].sort((a, b) => b.bursts - a.bursts || b.photos - a.photos))
-            L.push(`| ${esc(s.common)} | *${esc(s.scientific)}* | ${s.bursts} | ${lb ? s.labelled : '-'} | ${s.burstPhotos} | ${s.photos} |`);
+            L.push(`| ${esc(s.common)} | *${esc(s.scientific)}* | ${s.bursts} | ${s.burstPhotos} | ${s.photos} |`);
         L.push('');
     }
 
@@ -119,12 +144,16 @@ export function writeReport(file, { meta, records, bursts }) {
 
     // Keepers.
     L.push('## Keepers', '');
-    L.push('The sharpest frame of each burst with an animal (agree: frames whose top-1 is the consensus / frames with an animal).', '');
-    L.push('| # | start | photos | species | share | agree | keeper | sharpness |');
-    L.push('|---:|---|---:|---|---:|---:|---|---:|');
-    for (const b of bursts.filter((x) => x.species))
-        L.push(`| ${b.id} | ${esc(b.start || '-')} | ${b.count} | ${esc(b.species.common)} | ${b.species.share.toFixed(2)} | ` +
-               `${b.species.agree}/${b.animalCount} | ${esc(rel(b.keeper, root))} | ${b.keeperSharpness} |`);
+    L.push('The sharpest frame of each burst with an animal (labels: the burst\'s at the threshold; consensus: the ' +
+           'top-1 vote, its share, agree: frames whose top-1 it is / frames with an animal).', '');
+    L.push('| # | start | photos | labels | consensus | share | agree | keeper | sharpness |');
+    L.push('|---:|---|---:|---|---|---:|---:|---|---:|');
+    const lopts = lb ? { labelThreshold: lb.threshold, taxa: taxa || undefined } : null;
+    for (const b of bursts.filter((x) => x.species)) {
+        const names = lopts ? bro.vision.wildlife.labels(null, b, lopts).map(bro.vision.wildlife.formatLabel).join(', ') : '';
+        L.push(`| ${b.id} | ${esc(b.start || '-')} | ${b.count} | ${esc(names || '-')} | ${esc(b.species.common)} | ` +
+               `${b.species.share.toFixed(2)} | ${b.species.agree}/${b.animalCount} | ${esc(rel(b.keeper, root))} | ${b.keeperSharpness} |`);
+    }
     L.push('');
 
     // Timing: this run's wall time; per-stage cost from every record (a

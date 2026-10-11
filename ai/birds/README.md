@@ -41,11 +41,14 @@ the `models.dirs` setting) must name the directory holding these, e.g.
   releases converted by `brolm/scripts/convert-openclip.py` (model.safetensors,
   config.json, vocab.json, merges.txt), published in the Hugging Face dataset
   [`wlejon/brovisionml-data`](https://huggingface.co/datasets/wlejon/brovisionml-data).
-- `species/upper-midwest.json` and `species/upper-midwest-herps/species.json`
+- `species/upper-midwest.json`, `species/upper-midwest-herps/species.json`,
+  `species/upper-midwest-arthropods/species.json` and `species/pets/species.json`
   (`brovisionml-data/species/...`): the label set, merged. The first is the
   birds and yard mammals with eBird names (assembled from the sources in its
-  `ATTRIBUTION.md`), the second 78 reptiles and amphibians generated from
-  GBIF by `brovisionml/scripts/gen-species-gbif` (CC BY 4.0).
+  `ATTRIBUTION.md`), the second 78 reptiles and amphibians and the third the
+  insects and spiders, generated from GBIF by
+  `brovisionml/scripts/gen-species-gbif` (CC BY 4.0), the last the domestic
+  dog and cat. A list's `taxa` map names genera and up ("Darners").
 - `owlv2` (`brovisionml-data/owlv2`): the Hugging Face release of
   `google/owlv2-base-patch16-ensemble` as-is (model.safetensors, vocab.json,
   merges.txt; Apache-2.0, see its `ATTRIBUTION.md`).
@@ -60,7 +63,10 @@ const an = wildlife.open({ model: 'bioclip-2' });   // OWLv2 + BioCLIP 2 + the l
 const photo = bro.image.decodeScaled(path, { width: 1280, height: 1280 });
 const rec = an.analyze(photo, { source: { width: photo.sourceWidth, height: photo.sourceHeight } });
 // { animal, detections: [{ label, score, box }], subject: { x, y, w, h },
-//   species: [{ common, scientific, family, order, class, score, similarity }, ...] }
+//   species: [{ common, scientific, family, order, class, score, similarity }, ...],
+//   animals: [{ box, label, subject, species, taxa, candidates }, ...], animalsDropped }
+const names = wildlife.labels(rec, burst, { taxa: an.taxa });   // [] = unidentified
+// [{ common: 'Mallard', rank: 'species', score, boxes, ... }, { common: 'Darners', rank: 'family', ... }]
 ```
 
 - **Prompts** follow the BioCLIP paper and model cards: "a photo of <kingdom
@@ -101,10 +107,14 @@ threshold means no animal: the app says so and does not classify.
   "a bird", a feeder, leaves, 0.11 to 0.22); 0.15 keeps most of the real
   ones and lets a few look-alikes through to the classifier. Raise it for
   fewer false finds.
-- **Queries** are only the animals on the species lists (since the herps
-  list: snake, turtle, frog, toad, lizard, salamander too): a dog or a cat is
-  "no animal". Pass `queries` to `open` (or the analyzer's `detect`) to ask for others; their text
+- **Queries** are only the animals on the species lists (28: the birds and
+  yard mammals; snake, turtle, frog, toad, lizard, salamander; dog and cat;
+  insect, dragonfly, butterfly, moth, bee, beetle, spider). Pass `queries`
+  to `open` (or the analyzer's `detect`) to ask for others; their text
   embeddings are computed once and cached.
+- **Every animal**: each box after NMS (up to 8, `--max-classify`) is
+  cropped and classified on its own, so a heron and a duck in one frame
+  are both named. Boxes past that are counted (`animalsDropped`).
 - **Cost** on a Radeon 8060S: ~75 ms for OWLv2 on the GPU (FP16 at 960 x 960),
   ~98 ms for `detect` with its CPU preprocessing at 1280, and ~87 ms for the
   `decodeScaled(1280)` of a camera JPEG before it.
@@ -139,6 +149,8 @@ recorded as an error and the run goes on.
 | `--model bioclip-2\|bioclip` | `bioclip-2` | species model |
 | `--threshold N` | 0.15 | OWLv2 score threshold (see above) |
 | `--label-threshold N` | 0.85 | the report's labelled / unidentified split (below); the records keep every score |
+| `--candidates all\|byQuery` | `all` | a crop's softmax over every species, or over the classes of its box's query (below) |
+| `--max-classify N` | 8 | animal boxes classified a photo, best first |
 | `--gap S` | 1.0 | max seconds between consecutive shots of one burst |
 | `--scene-ncc N` | 0 (off) | also split a burst where consecutive frames correlate below N |
 | `--metric tenengrad\|laplacianVar` | `tenengrad` | keeper sharpness measure |
@@ -196,9 +208,20 @@ species with the largest sum is the burst's, `share` its mean probability and
 `agree` the frames naming it first. The report lists species by bursts as
 well as by photos, since a 28-frame burst of one heron is one sighting.
 
-**Labels.** An app names a species only at a score of 0.85 or more
-(`bro.vision.wildlife.label`: a burst's `share`, else a lone photo's top-1);
-under it the animal is shown as found but unidentified. The report counts
-photos and bursts labelled and unidentified at `--label-threshold`
-(`meta.json` `run.labels`), and the species table how many of each
-species' bursts reach it.
+**Labels.** An app names an animal only at a score of 0.85 or more, at
+the narrowest rank that reaches it (`bro.vision.wildlife.labels`: a
+species, else its genus, family, order or class, a taxon scoring the sum of
+its species), every animal of a photo, and a photo in a burst shows the
+burst's names; with no rank there the animal is shown as found but
+unidentified. The report (`meta.json` `run.labels`, RECORDS.md) counts
+photos and bursts labelled and unidentified at `--label-threshold`, those
+with two or more names, labels by rank, photos labelled with a bird, a
+mammal, a reptile or amphibian, an insect or spider, or a pet, the boxes
+not classified, and per name the photos and bursts showing it.
+
+**Candidates.** With the arthropod list, a bird crop's softmax runs over
+~2,000 species, 1,350 of them insects and spiders, and every one takes a little
+of the probability. `--candidates byQuery` ranks a crop only over the
+classes its box's query fits ("a bird" Aves, "a dragonfly" Insecta, ...),
+falling back to every species when that answer is under the label
+threshold and another class's best clears it.

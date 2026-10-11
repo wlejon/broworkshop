@@ -4,15 +4,17 @@
 //
 // Every photo under the folder (recursive; JPEG and Canon CR3, a RAW+JPEG
 // pair once through its JPEG; videos skipped) gets a record: EXIF, the
-// animals OWLv2 finds, BioCLIP's top 5 species on the subject, sharpness;
-// then bursts with their consensus species and keeper. Everything is written
+// animals OWLv2 finds, BioCLIP's top 5 species and taxa on each of them,
+// sharpness; then bursts with their consensus and keeper, and the labels. Everything is written
 // under the output dir, never beside the photos (RECORDS.md); a re-run skips
 // photos that did not change. See README.md "Batch processing" and batch.js.
 //
 // Options:
 //   --model bioclip-2|bioclip   species model (default bioclip-2)
 //   --threshold N               OWLv2 score threshold (default 0.15)
-//   --label-threshold N         species score a label needs in the report (default 0.85)
+//   --label-threshold N         score a label needs in the report (default 0.85; byQuery's fallback too)
+//   --candidates all|byQuery    a crop's softmax over every species, or its query's classes (default all)
+//   --max-classify N            animal boxes classified a photo, best first (default 8)
 //   --gap S                     max seconds between shots of a burst (default 1.0)
 //   --scene-ncc N               also split a burst where the frame changes, NCC < N (default 0: off)
 //   --metric tenengrad|laplacianVar   keeper sharpness measure (default tenengrad)
@@ -27,7 +29,7 @@ import { runBatch, DEFAULTS } from "/app/batch.js";
 const pathMod = require('path');
 
 const USAGE = 'usage: bro-headless ai/birds ai/birds/process.js -- <photo folder> <output dir> ' +
-    '[--model bioclip-2|bioclip] [--threshold N] [--label-threshold N] [--gap S] [--scene-ncc N] [--metric tenengrad|laplacianVar] ' +
+    '[--model bioclip-2|bioclip] [--threshold N] [--label-threshold N] [--candidates all|byQuery] [--max-classify N] [--gap S] [--scene-ncc N] [--metric tenengrad|laplacianVar] ' +
     '[--workers N] [--no-models] [--force] [--limit N] [--progress S]';
 
 function parse(argv) {
@@ -47,6 +49,8 @@ function parse(argv) {
         else if (a === '--model') o.model = val();
         else if (a === '--threshold') o.threshold = num(a, val());
         else if (a === '--label-threshold') o.labelThreshold = num(a, val());
+        else if (a === '--candidates') o.candidates = val();
+        else if (a === '--max-classify') o.maxClassify = num(a, val());
         else if (a === '--gap') o.gapS = num(a, val());
         else if (a === '--scene-ncc') o.sceneNcc = num(a, val());
         else if (a === '--metric') o.metric = val();
@@ -60,6 +64,8 @@ function parse(argv) {
         else pos.push(a);
     }
     if (o.model && !['bioclip', 'bioclip-2'].includes(o.model)) throw new Error('--model is bioclip-2 or bioclip');
+    if (o.candidates && !['all', 'byQuery'].includes(o.candidates)) throw new Error('--candidates is all or byQuery');
+    if (o.maxClassify != null && !(o.maxClassify >= 1)) throw new Error('--max-classify is 1 or more');
     if (o.metric && !['tenengrad', 'laplacianVar'].includes(o.metric)) throw new Error('--metric is tenengrad or laplacianVar');
     if (pos.length !== 2 && !o.help) throw new Error('need <photo folder> <output dir>');
     const cwd = (bro.app && bro.app.cwd) || process.cwd();

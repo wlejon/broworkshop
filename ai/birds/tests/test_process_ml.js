@@ -1,8 +1,10 @@
 // The batch processor with its models (tagged ml): synthetic JPEGs through
 // OWLv2 and BioCLIP 2 -> records with the detector's answer and, for a frame
-// where it finds something at threshold 0, the species top 5, the subject
-// square and its sharpness; meta names the models; a re-run skips; another
-// species model is another config, so everything is processed again.
+// where it finds something at threshold 0, the species top 5, every crop
+// (animals, with taxa), the subject square and its sharpness; meta names the
+// models, the four lists, candidates and the label counts; byQuery is another
+// config; a re-run skips; another species model is another config, so
+// everything is processed again.
 // Skips without the weights.
 import { check, eq, test, done, skip } from "/lib/kit/test.js";
 import { runBatch } from "/app/batch.js";
@@ -52,10 +54,14 @@ test('default threshold: an empty frame has no animal; records carry the detecto
     const m = r.meta.config;
     eq([m.detector.repo, m.classifier.repo, m.threshold], ['google/owlv2-base-patch16-ensemble', 'imageomics/bioclip-2', 0.15]);
     check(m.classifier.weightsBytes > 0 && m.speciesList.count > 500, 'model and list identity');
-    check(m.speciesList.files.length === 2 && m.queries.includes('a snake'), 'the merged lists and the herp queries');
-    eq(r.meta.options.labelThreshold, 0.85, 'the label threshold');
+    check(m.speciesList.files.length === 4 && m.queries.includes('a snake') && m.queries.includes('a dog') &&
+          m.queries.includes('a dragonfly'), 'the four merged lists and their queries');
+    eq([m.maxClassify, m.candidates], [8, { mode: 'all' }], 'crops classified and their candidates');
+    eq([r.meta.options.labelThreshold, r.meta.options.candidates], [0.85, 'all'], 'the label threshold and candidates');
+    eq([e.animals, e.animalsDropped], [[], 0], 'no crops in an empty frame');
     const lb = r.meta.run.labels;
     check(lb && lb.photos.labelled + lb.photos.unidentified === lb.photos.animal, 'labels split the animal photos');
+    check(lb.groups.length === 5 && lb.byRank && typeof lb.droppedBoxes === 'number' && Array.isArray(lb.taxa), 'label counts');
 });
 
 test('threshold 0: every frame is an animal, with a top 5, a subject and its sharpness', () => {
@@ -64,12 +70,28 @@ test('threshold 0: every frame is an animal, with a top 5, a subject and its sha
     const b = by('blob1.jpg');
     check(b.animal && b.detections.length >= 1, 'boxes');
     eq(b.species.length, 5, 'top 5');
+    check(b.animals.length + b.animalsDropped <= b.detections.length, 'a crop or a dropped count per box at most');
+    check(b.animals.length >= 1 && b.animals.length <= 8, 'up to maxClassify crops');
+    const a0 = b.animals[0];
+    eq([a0.box, a0.species[0].scientific, a0.candidates], [b.detections[0].box, b.species[0].scientific, 'all'],
+       'the first crop is the best box, its species the record\'s');
+    check(['genus', 'family', 'order', 'class'].every((k) => Array.isArray(a0.taxa[k]) && a0.taxa[k].length >= 1), 'taxa per rank');
     check(b.species[0].score >= b.species[4].score && b.species.every((s) => s.common && s.scientific), 'sorted, named');
     const sq = b.subject;
     check(sq && sq.w === sq.h && sq.x >= 0 && sq.y >= 0 && sq.x + sq.w <= 640 && sq.y + sq.h <= 400, 'subject square in the frame');
     check(b.sharpness.subject && b.sharpness.subject.pixels > 0, 'subject sharpness');
     const burst = r.bursts.find((x) => x.photos.length === 2);
     check(burst && burst.species && burst.species.agree >= 1, 'blob1 + blob2 are one burst with a consensus');
+});
+
+test('byQuery is another config; each crop ranks over its query\'s classes or falls back', () => {
+    const r = runBatch({ input, output: output + '-q', threshold: 0, candidates: 'byQuery', log: quiet });
+    eq(r.meta.config.candidates, { mode: 'byQuery', fallback: 0.85 }, 'config');
+    eq(r.meta.options.candidates, 'byQuery', 'run option');
+    const crops = [...readJsonl(output + '-q/records.jsonl').values()].flatMap((x) => x.animals || []);
+    check(crops.length >= 1 && crops.every((c) => c.candidates === 'query' || c.candidates === 'fallback' ||
+                                                (c.candidates === 'all' && !bro.vision.wildlife.queryClasses(c.label))),
+          'candidates per crop');
 });
 
 test('re-run skips; another species model reprocesses', () => {

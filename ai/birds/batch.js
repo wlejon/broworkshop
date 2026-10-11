@@ -2,8 +2,8 @@
 //
 // For every photo (recursive; JPEG and Canon CR3, a RAW+JPEG pair processed
 // once through its JPEG): decode, EXIF, the per-photo analysis of
-// bro.vision.wildlife (OWLv2 animal detection, BioCLIP species top 5 on the
-// subject square), sharpness of the subject and of the whole frame, and a
+// bro.vision.wildlife (OWLv2 animal detection, BioCLIP species top 5 and taxa
+// on every animal box's square), sharpness of the subject and of the whole frame, and a
 // small luma thumbnail; then the photos are grouped into bursts
 // (wildlife.groupBursts). Records, bursts, meta and a report go to the output
 // directory (store.js, RECORDS.md); a photo whose path, size and mtime (and
@@ -38,6 +38,8 @@ export const DEFAULTS = {
     topK: wildlife.DEFAULTS.topK,
     margin: wildlife.DEFAULTS.margin,        // subject square padding
     labelThreshold: wildlife.DEFAULTS.labelThreshold,   // the report's labelled / unidentified (0.85)
+    candidates: wildlife.DEFAULTS.candidates,           // 'all' or 'byQuery': what a crop's softmax is over
+    maxClassify: wildlife.DEFAULTS.maxClassify,         // boxes classified a photo, best first (8)
     workers: 3,
     noModels: false,             // decode/EXIF/sharpness/bursts only
     force: false,
@@ -114,13 +116,16 @@ function fnv1a(str) {
 }
 
 // The analyzer's options: the models through bro.models, the run's settings.
+// labelThreshold is byQuery's fallback threshold (in config only under byQuery).
 function wildlifeOpts(o) {
-    return { model: o.model, threshold: o.threshold, topK: o.topK, margin: o.margin };
+    return { model: o.model, threshold: o.threshold, topK: o.topK, margin: o.margin,
+             maxClassify: o.maxClassify, candidates: o.candidates, labelThreshold: o.labelThreshold };
 }
 
 // The settings a record depends on. A record made under a different config
 // is processed again. With models: wildlife.config (models and revisions,
-// threshold, queries, topK, margin, the species list), read without loading.
+// threshold, queries, topK, margin, maxClassify, candidates, the species
+// lists), read without loading.
 function processingConfig(o) {
     const c = {
         schema: SCHEMA, detectSize: o.detectSize, sharpSize: o.sharpSize, thumbSize: o.thumbSize,
@@ -163,13 +168,18 @@ export function runBatch(opts) {
     fs.mkdirSync(output, { recursive: true });
 
     // Models and their config.
-    let analyzer = null;
+    let analyzer = null, naming = null;
     if (!o.noModels) {
         const loc = wildlife.locate(wildlifeOpts(o));
         if (loc.missing.length) {
             throw new Error('missing ' + loc.missing.map((k) => k + ' (' + (loc[k] || 'not found by bro.models') + ')').join(', ') +
                             '; or pass --no-models');
         }
+        // What the labels need: the lists' taxa names, and every name's class.
+        const files = typeof loc.species === 'string' ? [loc.species] : loc.species;
+        naming = { taxa: wildlife.readTaxa(files),
+                   index: taxonIndex(wildlife.readSpecies(files),
+                                     wildlife.readSpecies(files.filter((f) => /(^|\/)pets\/species\.json$/.test(f)))) };
     }
     const config = processingConfig(o);
     const configHash = fnv1a(JSON.stringify(config));
@@ -339,7 +349,7 @@ export function runBatch(opts) {
             width: m.source.width, height: m.source.height, decodePath: m.decodePath,
             exif: pickExif(exif),
             time: time != null ? time : shot.mtimeMs, timeSource: time != null ? 'exif' : 'mtime',
-            animal: null, detections: [], subject: null, species: [],
+            animal: null, detections: [], subject: null, species: [], animals: [], animalsDropped: 0,
             sharpness: { scale: Math.max(m.sharp.width, m.sharp.height), frame: m.frame, subject: null },
             timing: Object.assign({}, m.ms),
         };
@@ -350,6 +360,8 @@ export function runBatch(opts) {
         rec.detections = a.detections;
         rec.subject = a.subject;
         rec.species = a.species;
+        rec.animals = a.animals;
+        rec.animalsDropped = a.animalsDropped;
         rec.timing.detect = a.timing.detect;
         if (a.animal) rec.timing.classify = a.timing.classify;
         return rec;
@@ -373,7 +385,7 @@ export function runBatch(opts) {
     };
     const bursts = wildlife.groupBursts(current,{ gapS: o.gapS, sameScene, metric: o.metric });
     writeJsonl(output + '/bursts.jsonl', bursts);
-    const labels = labelCounts(current, bursts, o.labelThreshold);
+    const labels = labelCounts(current, bursts, Object.assign({ labelThreshold: o.labelThreshold }, naming));
 
     const wallMs = Date.now() - t0;
     const timing = {};
@@ -388,7 +400,7 @@ export function runBatch(opts) {
         input, output,
         configHash, config,
         options: { gapS: o.gapS, sceneNcc: o.sceneNcc, metric: o.metric, labelThreshold: o.labelThreshold,
-                   workers: nWorkers, force: !!o.force, limit: o.limit },
+                   candidates: o.candidates, maxClassify: o.maxClassify, workers: nWorkers, force: !!o.force, limit: o.limit },
         engine: { exePath: (bro.app && bro.app.exePath) || null, device: analyzer ? analyzer.device : null },
         run: {
             startedAt: new Date(t0).toISOString(), wallMs,
@@ -409,38 +421,114 @@ export function runBatch(opts) {
     meta.history.push({ startedAt: meta.run.startedAt, wallMs, processed: todo.length, reused, errors: meta.run.errors,
                         msPerPhoto: meta.run.msPerPhoto, configHash });
     writeAtomic(output + '/meta.json', JSON.stringify(meta, null, 2) + '\n');
-    writeReport(output + '/summary.md', { meta, records: current, bursts });
+    writeReport(output + '/summary.md', { meta, records: current, bursts, taxa: naming && naming.taxa });
     log(`birds: ${todo.length} processed, ${reused} unchanged, ${meta.run.errors} errors, ${bursts.length} bursts; ` +
         `${(wallMs / 1000).toFixed(1)} s. ${output}/summary.md`);
     if (!o.noModels) {
-        log(`birds: at ${labels.threshold}: ${labels.photos.labelled} photos labelled, ${labels.photos.unidentified} unidentified; ` +
-            `${labels.bursts.labelled} bursts labelled, ${labels.bursts.unidentified} unidentified`);
+        log(`birds: at ${labels.threshold}: ${labels.photos.labelled} photos labelled (${labels.photos.multi} with 2+), ` +
+            `${labels.photos.unidentified} unidentified; ${labels.bursts.labelled} bursts labelled, ` +
+            `${labels.bursts.unidentified} unidentified; ${labels.droppedBoxes} boxes not classified`);
     }
     return { meta, records: current, bursts };
 }
 
+/** The groups the report counts labelled photos by (a label's class; pets by species). */
+export const GROUPS = [
+    { key: 'birds', name: 'Birds', classes: ['Aves'] },
+    { key: 'mammals', name: 'Mammals (not pets)', classes: ['Mammalia'] },
+    { key: 'herps', name: 'Reptiles and amphibians', classes: ['Reptilia', 'Squamata', 'Testudines', 'Crocodylia', 'Amphibia'] },
+    { key: 'arthropods', name: 'Insects and spiders', classes: ['Insecta', 'Arachnida'], phylum: 'Arthropoda' },
+    { key: 'pets', name: 'Pets', classes: [] },
+];
+
+const lc = (s) => String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
+
 /**
- * Photos and bursts with an animal, split by bro.vision.wildlife.label() at
- * `threshold`: labelled (a name at or over it) or unidentified (an animal
- * without one). A photo is labelled by its burst's consensus (RECORDS.md).
+ * Every name a label can carry (species, genus, family, order, class of the
+ * rows) -> its class and phylum; `pets` the scientific names of `petRows`
+ * (species/pets: a label naming one is a pet, not a mammal).
  */
-export function labelCounts(records, bursts, threshold) {
+export function taxonIndex(rows, petRows) {
+    const classOf = new Map();
+    for (const row of rows) {
+        if (!row.class) continue;
+        const info = { class: row.class, phylum: row.phylum || null };
+        const lin = wildlife.lineage(row);
+        for (const n of [row.scientific, lin.genus, lin.family, lin.order, row.class])
+            if (n && !classOf.has(lc(n))) classOf.set(lc(n), info);
+    }
+    return { classOf, pets: new Set((petRows || []).map((r) => lc(r.scientific))) };
+}
+
+/** The GROUPS key of a label (by its scientific name), or null. */
+export function groupOf(label, index) {
+    if (!index) return null;
+    const k = lc(label.scientific);
+    if (index.pets.has(k)) return 'pets';
+    const info = index.classOf.get(k);
+    if (!info) return null;
+    for (const g of GROUPS)
+        if (g.classes.includes(info.class) || (g.phylum && info.phylum === g.phylum)) return g.key;
+    return null;
+}
+
+/**
+ * What an app shows (bro.vision.wildlife.labels at opts.labelThreshold, with
+ * opts.taxa naming genera and up): photos and bursts with an animal, labelled
+ * (one name or more) or unidentified, and with 2+ names (`multi`); photo
+ * labels by rank; photos labelled with each GROUPS group (opts.index,
+ * taxonIndex); boxes over the threshold not classified (`droppedBoxes`); and
+ * per taxon the photos and bursts labelled with it. A photo shows its burst's
+ * labels when the burst has any (RECORDS.md).
+ */
+export function labelCounts(records, bursts, opts) {
+    const o = typeof opts === 'number' ? { labelThreshold: opts } : (opts || {});
+    const threshold = o.labelThreshold != null ? o.labelThreshold : wildlife.DEFAULTS.labelThreshold;
+    const lopts = { labelThreshold: threshold, taxa: o.taxa || undefined };
     const byPath = new Map();
     for (const b of bursts) for (const p of b.photos) byPath.set(p, b);
-    const opts = { labelThreshold: threshold };
-    const out = { threshold, photos: { animal: 0, labelled: 0, unidentified: 0 },
-                  bursts: { animal: 0, labelled: 0, unidentified: 0 } };
-    const count = (k, animal, named) => {
-        if (!animal) return;
+    const blank = () => ({ animal: 0, labelled: 0, unidentified: 0, multi: 0 });
+    const out = { threshold, photos: blank(), bursts: blank(),
+                  byRank: { species: 0, genus: 0, family: 0, order: 0, class: 0 },
+                  groups: GROUPS.map((g) => ({ key: g.key, name: g.name, photos: 0 })), ungrouped: 0,
+                  droppedBoxes: 0, taxa: [] };
+    const taxa = new Map();
+    const taxon = (l) => {
+        const k = l.rank + '|' + l.scientific;
+        if (!taxa.has(k)) taxa.set(k, { label: wildlife.formatLabel(l), scientific: l.scientific, rank: l.rank,
+                                        group: groupOf(l, o.index), photos: 0, bursts: 0 });
+        return taxa.get(k);
+    };
+    const count = (k, animal, names) => {
+        if (!animal) return false;
         out[k].animal++;
-        out[k][named ? 'labelled' : 'unidentified']++;
+        out[k][names.length ? 'labelled' : 'unidentified']++;
+        if (names.length >= 2) out[k].multi++;
+        return true;
     };
     for (const r of records) {
         if (r.error) continue;
+        out.droppedBoxes += r.animalsDropped || 0;
         const b = byPath.get(r.path) || null;
-        count('photos', r.animal === true || !!(b && b.species), wildlife.label(r, b, opts));
+        const names = wildlife.labels(r, b, lopts);
+        if (!count('photos', r.animal === true || !!(b && b.species), names)) continue;
+        const groups = new Set();
+        for (const l of names) {
+            out.byRank[l.rank]++;
+            taxon(l).photos++;
+            groups.add(groupOf(l, o.index));
+        }
+        for (const g of groups) {
+            const e = g && out.groups.find((x) => x.key === g);
+            if (e) e.photos++; else out.ungrouped++;
+        }
     }
-    for (const b of bursts) count('bursts', !!b.species, wildlife.label(null, b, opts));
+    for (const b of bursts) {
+        const names = wildlife.labels(null, b, lopts);
+        if (count('bursts', !!b.species, names)) for (const l of names) taxon(l).bursts++;
+    }
+    out.taxa = [...taxa.values()].sort((a, b) => b.photos - a.photos || b.bursts - a.bursts ||
+                                                 (a.label < b.label ? -1 : 1));
     return out;
 }
 

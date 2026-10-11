@@ -37,7 +37,7 @@ not retried while its key is unchanged; `--force` retries it.
 
 One JSON object per line, sorted by capture time after compaction. Fields
 absent from a photo are `null`, `[]` or missing as noted. `animal`,
-`detections`, `subject` and `species` are `bro.vision.wildlife`'s
+`detections`, `subject`, `species`, `animals` and `animalsDropped` are `bro.vision.wildlife`'s
 `analyze()` result as it returns it, `sharpness` its `sharpness()`, and
 `bursts.jsonl` its `groupBursts()` (bro's docs/vision-api.js, "Wildlife").
 
@@ -60,11 +60,13 @@ absent from a photo are `null`, `[]` or missing as noted. `animal`,
 | `animal` | boolean \| null | OWLv2 found at least one box at or above the threshold; `null` under `--no-models` |
 | `detections` | array | every box over the threshold after NMS, best first: `{ label, score, box: [x, y, w, h] }`, `label` the query (`"a bird"`, `"a deer"`), `score` 0-1, `box` in upright source pixels |
 | `subject` | object \| null | `{ x, y, w, h }`, source pixels: the best box padded 15% and made square, clamped to the frame; the classifier's input |
-| `species` | array | the top 5 on the subject (empty without an animal): `{ common, scientific, family, order, class, score, similarity }`; `score` is the softmax over the whole species list at the model's temperature (how far the answer stands out, not whether the photo shows a listed species), `similarity` the cosine similarity |
+| `species` | array | the top 5 on the subject, the best box's crop (empty without an animal): `{ common, scientific, family, order, class, score, similarity }`; `score` is the softmax over the crop's candidates at the model's temperature (how far the answer stands out, not whether the photo shows a listed species), `similarity` the cosine similarity; the same as `animals[0].species` |
+| `animals` | array | every non-empty detection, best first, up to `maxClassify` (8), each cropped and classified: `{ box, score, label, subject, species, taxa, candidates }`. `box`, `score`, `label` the detection's; `subject` its padded square; `species` its top 5 (as above); `taxa` `{ genus, family, order, class }`, each the top 3 `{ scientific, score, family?, order?, class? }` (a taxon's score the sum of its species' scores, with its lineage above it); `candidates` what the softmax was over: `"all"` (every species), `"query"` (`--candidates byQuery`: the classes of the box's query, e.g. Aves for `"a bird"`), `"fallback"` (byQuery, but the query's best was under the label threshold and the best over every species cleared it in another class). Records from before `animals` (no field) count as one crop of `species`; `[]` without an animal |
+| `animalsDropped` | number | boxes over the threshold not classified (past `maxClassify`); 0 when none |
 | `sharpness.scale` | number | long side, in pixels, of the image sharpness was measured on (3000, or the photo's own size if smaller) |
 | `sharpness.frame` | object | whole frame: `{ laplacianVar, tenengrad, lumaMean, lumaStd, pixels }` from `bro.image.sharpness` (variance of the Laplacian, mean squared Sobel gradient, luma mean / std in 0-255, pixels counted) |
 | `sharpness.subject` | object \| null | the same over the best detection box (not the padded square), when there is an animal |
-| `timing` | object | ms per stage for this photo: `decode` (decode + resize to the detection image, worker), `exif`, `sharpness` (whole frame), `thumb`, `detect` (OWLv2 incl. its preprocessing), `classify` (crop + BioCLIP + ranking), `subject` (subject sharpness) |
+| `timing` | object | ms per stage for this photo: `decode` (decode + resize to the detection image, worker), `exif`, `sharpness` (whole frame), `thumb`, `detect` (OWLv2 incl. its preprocessing), `classify` (every crop + BioCLIP + ranking; crops are encoded one by one), `subject` (subject sharpness) |
 
 Sharpness values compare frames of one subject (a burst) at one scale; they
 also grow with contrast, so they are not a quality score across unrelated
@@ -83,7 +85,8 @@ exactly one burst.
 | `durationS` | number | last capture time minus first, seconds |
 | `count` | number | photos in the burst |
 | `animalCount` | number | of them with an animal |
-| `species` | object \| null | the consensus, null without an animal: `{ common, scientific, share, agree }`. Every animal frame votes with its top 5 scores; the species with the largest sum wins. `share` = that sum / `animalCount` (the mean probability given to it), `agree` = frames whose top-1 it is |
+| `species` | object \| null | the consensus, null without an animal: `{ common, scientific, share, agree }`. Every animal frame votes with its top 5 scores (of its best box); the species with the largest sum wins. `share` = that sum / `animalCount` (the mean probability given to it), `agree` = frames whose top-1 it is |
+| `taxa` | array | every species and higher taxon any animal frame scored (its crops' top 5 species and top 3 a rank): `{ rank, scientific, common?, genus?, family?, order?, class?, share, scores }`, `scores` each frame's score for it (the best of its crops; best first, frames without it left out), `share` their sum / `animalCount`. The labels (below) apply the threshold to these, so it can change without regrouping |
 | `keeper` | string | the sharpest photo: the highest subject `tenengrad` (`--metric`) among frames with an animal, else the highest whole-frame value |
 | `keeperSharpness` | number | that value |
 | `startedBy` | string | `"gap"` (the time gap, or the first photo), or `"scene"` (split by the scene check) |
@@ -98,17 +101,34 @@ exactly one burst.
 | `schema` | record schema |
 | `tool` | what wrote it |
 | `input`, `output` | the photo folder and this directory (real paths) |
-| `configHash`, `config` | the processing config the records were made under: `detectSize` (detection/classification image, long side, 1280), `sharpSize` (3000), `thumbSize` (96), `models` (false under `--no-models`), `detector` and `classifier` (`{ name, repo, revision, weightsBytes }`; repo and revision from the weights' ATTRIBUTION.md), `threshold`, `queries` (OWLv2's text queries), `topK`, `margin`, `speciesList` (`{ files, count, hash }`: the merged list files by name, e.g. `upper-midwest.json` and `upper-midwest-herps/species.json`, the species count after merging, and an FNV-1a of every prompt; before the lists merged it was `{ file, count }`) |
-| `options` | options of this run that do not touch the records: `gapS`, `sceneNcc`, `metric` (bursts), `labelThreshold` (the report's labels, below); `workers`, `force`, `limit` |
+| `configHash`, `config` | the processing config the records were made under: `detectSize` (detection/classification image, long side, 1280), `sharpSize` (3000), `thumbSize` (96), `models` (false under `--no-models`), `detector` and `classifier` (`{ name, repo, revision, weightsBytes }`; repo and revision from the weights' ATTRIBUTION.md), `threshold`, `queries` (OWLv2's text queries), `topK`, `margin`, `maxClassify` (boxes classified a photo), `candidates` (`{ mode: 'all' }` or `{ mode: 'byQuery', fallback }`, the fallback being the label threshold), `speciesList` (`{ files, count, hash }`: the merged list files by name, `upper-midwest.json`, `upper-midwest-herps/species.json`, `upper-midwest-arthropods/species.json`, `pets/species.json`, the species count after merging, and an FNV-1a of every prompt; before the lists merged it was `{ file, count }`). The lists' `taxa` maps (common names of genera and up) are not in it: they name labels, records hold scientific names |
+| `options` | options of this run: `gapS`, `sceneNcc`, `metric` (bursts), `labelThreshold` (the report's labels, below), `candidates`, `maxClassify` (also in `config`, so they touch the records); `workers`, `force`, `limit` |
 | `engine` | `exePath` (the bro-headless that ran) and `device` (where OWLv2 ran) |
 | `run` | `startedAt`, `wallMs`, `photos`, `files` (all files seen), `skippedFiles` (count by extension: videos and others), `processed`, `reused`, `errors`, `removed`, `pairs`, `msPerPhoto` (wall time of the processing loop / photos processed), `timing` (this run's photos, per stage: `n`, `meanMs`, `medianMs`, `totalMs`; `wait` = time the page waited for a decode), `labels` (below) |
 
-`run.labels` is what an app shows at the label threshold (`--label-threshold`,
-default 0.85, `bro.vision.wildlife.label`): `{ threshold, photos: { animal,
-labelled, unidentified }, bursts: { animal, labelled, unidentified } }`. A
-burst is labelled when its consensus `share` reaches the threshold; a photo
-by its burst's consensus (a photo whose own frame has no animal counts when
-its burst has one, as an app tags it), so `photos.animal` can exceed the
-records with `animal: true`. Unidentified: an animal, no name at the
-threshold. Derived from the records and bursts; nothing in them changes.
 | `history` | the last 50 runs into this directory, oldest first: `{ startedAt, wallMs, processed, reused, errors, msPerPhoto, configHash }` |
+
+`run.labels` is what an app shows at the label threshold (`--label-threshold`,
+default 0.85): `bro.vision.wildlife.labels(record, burst, { labelThreshold,
+taxa })` with the lists' taxa names. Each crop is named at the narrowest
+rank (species, genus, family, order, class) whose best score reaches the
+threshold, or not at all; a photo in a burst with labels shows the burst's
+(every taxon one frame, or the consensus share, reaches the threshold
+with), else its own. A photo whose own frame has no animal counts when its
+burst has one, as an app tags it, so `photos.animal` can exceed the records
+with `animal: true`.
+
+| Field | Meaning |
+|-------|---------|
+| `threshold` | the label threshold |
+| `photos`, `bursts` | `{ animal, labelled, unidentified, multi }`: with an animal; with one name or more; with none; with two or more (several animals named) |
+| `byRank` | `{ species, genus, family, order, class }`: photo labels at each rank (a photo with two names counts twice) |
+| `groups` | `[{ key, name, photos }]`: photos with a label in each group (`birds` Aves, `mammals` Mammalia but pets, `herps` Squamata / Testudines / Reptilia / Crocodylia / Amphibia, `arthropods` Insecta / Arachnida / phylum Arthropoda, `pets` the species of `species/pets`), by the label's class in the lists |
+| `ungrouped` | photos with a label in none of them |
+| `droppedBoxes` | the records' `animalsDropped`, summed |
+| `taxa` | per name shown: `{ label (formatLabel: "Mallard", "Darners (Aeshnidae)"), scientific, rank, group, photos, bursts }`, most photos first |
+
+Derived from the records and bursts; nothing in them changes. Before the
+per-crop labels (bro c815c9e8), `photos` and `bursts` were `{ animal,
+labelled, unidentified }` by the burst's consensus species, else the photo's
+top-1, and the other fields were absent.

@@ -3,10 +3,11 @@
 // incremental skip, a changed and a removed photo, RAW+JPEG pairs, a corrupt
 // file, burst grouping and keepers, and the refusal of an output dir inside
 // the photo folder. Plus the pure parts: EXIF time parsing and grouping with
-// a scene split as the app uses them (bro.vision.wildlife), base64.
+// a scene split as the app uses them (bro.vision.wildlife), the label counts
+// (ranks, several animals a photo, groups), base64.
 // tests/test_process_ml.js runs the models.
 import { check, eq, near, test, done, throws } from "/lib/kit/test.js";
-import { runBatch, scanPhotos, isInside, sceneNcc, labelCounts } from "/app/batch.js";
+import { runBatch, scanPhotos, isInside, sceneNcc, labelCounts, taxonIndex, groupOf } from "/app/batch.js";
 import { readJsonl, toBase64, fromBase64 } from "/app/store.js";
 import { writeExifJpeg, texture } from "/app/tests/synth.js";
 
@@ -97,15 +98,65 @@ test('grouping: gap, scene split, keeper, consensus', () => {
     eq(split[1].startedBy, 'scene', 'started by the scene change');
     eq(split[0].minNcc, 0.9, 'ncc kept');
 
-    // Labels: the burst's consensus share 0.7 is unidentified at 0.85, labelled at 0.65;
-    // its three frames (and 'g', alone at 0.9) follow; the no-animal burst counts nowhere.
-    const lone = rec('g', 9000, { animal: true, species: [sp('Wren', 0.9)] });
-    const all = rs.concat([lone]);
-    const gb = groupBursts(all, { gapS: 1 });
-    const at85 = labelCounts(all, gb, 0.85), at65 = labelCounts(all, gb, 0.65);
-    eq(at85, { threshold: 0.85, photos: { animal: 4, labelled: 1, unidentified: 3 },
-               bursts: { animal: 2, labelled: 1, unidentified: 1 } }, 'at 0.85');
-    eq([at65.photos.labelled, at65.bursts.labelled], [4, 2], 'at 0.65 everything is named');
+});
+
+test('labels: ranks, several animals, groups, dropped boxes, per taxon', () => {
+    const wl = bro.vision.wildlife;
+    const row = (common, scientific, cls, order, family, phylum) =>
+        ({ common, scientific, phylum: phylum || 'Chordata', class: cls, order, family });
+    const rows = [
+        row('American Robin', 'Turdus migratorius', 'Aves', 'Passeriformes', 'Turdidae'),
+        row('Blue Jay', 'Cyanocitta cristata', 'Aves', 'Passeriformes', 'Corvidae'),
+        row('House Wren', 'Troglodytes aedon', 'Aves', 'Passeriformes', 'Troglodytidae'),
+        row('Common Green Darner', 'Anax junius', 'Insecta', 'Odonata', 'Aeshnidae', 'Arthropoda'),
+        row('Canada Darner', 'Aeshna canadensis', 'Insecta', 'Odonata', 'Aeshnidae', 'Arthropoda'),
+        row('Domestic Dog', 'Canis lupus familiaris', 'Mammalia', 'Carnivora', 'Canidae'),
+    ];
+    const pets = [rows[5]];
+    const S = (i, score) => Object.assign({}, rows[i], { score });
+    const crop = (box, species) => ({ box, score: 0.5, label: 'an animal', species,
+        taxa: wl.taxaScores(species, species.map((s) => s.score)), candidates: 'all' });
+    const rec = (path, t, opts) => Object.assign({ path, time: t, animal: false, species: [], animalsDropped: 0,
+        sharpness: { frame: { tenengrad: 1 }, subject: null } }, opts || {});
+    // A burst of three robin / jay frames (records from before `animals`:
+    // one crop of their top K), a frame with a wren and a dog, two darners
+    // splitting a frame (only the family is sure), an animal named at no rank
+    // with two boxes left unclassified, and a burst with no animal.
+    const rs = [
+        rec('a', 0, { animal: true, species: [S(0, 0.9), S(1, 0.1)] }),
+        rec('b', 300, { animal: true, species: [S(1, 0.6), S(0, 0.4)] }),
+        rec('c', 600, { animal: true, species: [S(0, 0.8), S(1, 0.2)] }),
+        rec('d', 5000), rec('e', 5200, { error: 'decode failed' }), rec('f', 5400),
+        rec('g', 9000, { animal: true, species: [S(2, 0.9)],
+                         animals: [crop([0, 0, 10, 10], [S(5, 0.95)]), crop([20, 0, 10, 10], [S(2, 0.9), S(0, 0.1)])] }),
+        rec('h', 12000, { animal: true, species: [S(3, 0.5), S(4, 0.45)] }),
+        rec('i', 15000, { animal: true, animalsDropped: 2, species: [S(0, 0.3), S(3, 0.3), S(5, 0.3)] }),
+    ];
+    const gb = groupBursts(rs, { gapS: 1 });
+    const taxa = { Aeshnidae: { rank: 'family', common: 'Darners' } };
+    const index = taxonIndex(rows, pets);
+    eq([groupOf({ scientific: 'Canis lupus familiaris' }, index), groupOf({ scientific: 'Canis' }, index),
+        groupOf({ scientific: 'Aeshnidae' }, index), groupOf({ scientific: 'Turdus' }, index),
+        groupOf({ scientific: 'Nowhere' }, index)], ['pets', 'mammals', 'arthropods', 'birds', null], 'groups');
+
+    // At 0.85: the robin burst (frame a scores it 0.9) names its frames,
+    // b too; g has two names; h only its family; i none.
+    const at85 = labelCounts(rs, gb, { labelThreshold: 0.85, taxa, index });
+    eq([at85.photos, at85.bursts], [{ animal: 6, labelled: 5, unidentified: 1, multi: 1 },
+                                    { animal: 4, labelled: 3, unidentified: 1, multi: 1 }], 'photos and bursts at 0.85');
+    eq(at85.byRank, { species: 5, genus: 0, family: 1, order: 0, class: 0 }, 'by rank');
+    eq(at85.groups.map((g) => g.key + ' ' + g.photos), ['birds 4', 'mammals 0', 'herps 0', 'arthropods 1', 'pets 1'], 'by group');
+    eq(at85.droppedBoxes, 2, 'dropped boxes');
+    eq(at85.taxa.map((t) => `${t.label}/${t.rank}/${t.photos}/${t.bursts}`),
+       ['American Robin/species/3/1', 'Darners (Aeshnidae)/family/1/1', 'Domestic Dog/species/1/1', 'House Wren/species/1/1'],
+       'per taxon');
+    // At 0.95 the robin frames fall back to their order (robin + jay), and
+    // so does g's wren crop (wren + robin), beside the dog.
+    const at95 = labelCounts(rs, gb, { labelThreshold: 0.95, taxa, index });
+    eq([at95.photos.labelled, at95.photos.multi], [5, 1], 'photos at 0.95');
+    eq(at95.byRank, { species: 1, genus: 0, family: 1, order: 4, class: 0 }, 'by rank at 0.95');
+    // A bare number is the threshold; without taxa a family is its scientific name.
+    eq(labelCounts(rs, gb, 0.85).taxa[1].label, 'Aeshnidae', 'no taxa map');
 });
 
 test('scene NCC: a frame and itself shifted vs another scene', () => {
