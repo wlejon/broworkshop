@@ -106,6 +106,7 @@
         { "dir": "demos/window-lab" },
 
         { "dir": "ai/ardy-motion" },
+        { "dir": "ai/birds" },
         { "dir": "ai/maker-agent" },
         { "dir": "ai/pi-agent" },
         { "dir": "ai/voice-pipeline" },
