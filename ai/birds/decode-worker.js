@@ -1,6 +1,7 @@
 // decode-worker.js — the batch processor's CPU half, one photo at a time,
 // off the page thread so decoding the next photos overlaps the GPU work on
-// this one (process-batch.js keeps a few of these busy).
+// this one (batch.js keeps a few of these busy). Sharpness is
+// bro.vision.wildlife.sharpness (bro.image.sharpness, rounded).
 //
 //   { cmd: 'decode', id, path, detectSize, sharpSize, thumbSize }
 //     -> { id, ok, exif, image: { width, height, channels, pixels } (the
@@ -16,15 +17,7 @@
 // A photo that fails to decode answers { id, ok: false, error }.
 
 const kept = new Map();   // id -> the sharpness image
-
-function measure(img, rect) {
-    const r = bro.image.sharpness(img.pixels, { width: img.width, height: img.height,
-                                                channels: img.channels, rect });
-    return { laplacianVar: round(r.laplacianVar), tenengrad: round(r.tenengrad),
-             lumaMean: round(r.lumaMean), lumaStd: round(r.lumaStd), pixels: r.pixels };
-}
-
-function round(x) { return Math.round(x * 100) / 100; }
+const wildlife = bro.vision.wildlife;
 
 // Long side `size`, aspect kept, area filter.
 function resized(img, size) {
@@ -61,7 +54,7 @@ function decode(m) {
     try { exif = bro.image.readExif(m.path); } catch (e) { exif = null; }
     ms.exif = Date.now() - t;
     t = Date.now();
-    const frame = measure(big);
+    const frame = wildlife.sharpness(big);
     ms.sharpness = Date.now() - t;
     t = Date.now();
     const thumb = lumaThumb(image, m.thumbSize);
@@ -80,11 +73,8 @@ function subject(m) {
     kept.delete(m.id);
     if (!big) return { id: m.id, ok: false, error: 'no image kept for ' + m.id };
     const t = Date.now();
-    const sx = big.width / m.sourceWidth, sy = big.height / m.sourceHeight;
-    const [x, y, w, h] = m.box;
-    const rect = { x: Math.max(0, Math.round(x * sx)), y: Math.max(0, Math.round(y * sy)),
-                   w: Math.round(w * sx), h: Math.round(h * sy) };
-    return { id: m.id, ok: true, subject: measure(big, rect), ms: Date.now() - t };
+    const subject = wildlife.sharpness(big, { box: m.box, source: { width: m.sourceWidth, height: m.sourceHeight } });
+    return { id: m.id, ok: true, subject, ms: Date.now() - t };
 }
 
 self.onmessage = (e) => {

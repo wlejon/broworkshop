@@ -6,38 +6,36 @@ Zero-shot species identification for wildlife photos with
 Upper-Midwest species list (birds of the MN, WI, IA, ND, SD, MB and ON
 checklists plus common yard mammals). The app opens a photo, finds the animal
 with [OWLv2](https://huggingface.co/google/owlv2-base-patch16-ensemble), crops
-to it and shows the top five; the modules are what a folder-processing script
-builds on.
+to it and shows the top five; `process.js` runs a whole card.
+
+The per-photo analysis (find the animal, name the species, sharpness) and
+the burst grouping are the engine's: `bro.vision.wildlife`, documented in
+bro's `docs/vision-api.js` ("Wildlife"), so other apps use the same pipeline.
+This app is its batch front end and the reference its records pin.
 
 ## Files
 
 | File | What |
 |------|------|
-| `species.js` | `loadSpeciesModel({ modelDir, speciesPath, cacheDir })` -> `classify(image, { topK })`, `embedImage`, `classifyEmbedding`; `speciesPrompt`, `readSpeciesList`, `squareInput` |
-| `detect.js` | `loadAnimalDetector({ weightsDir })` -> `detect(image, { queries, threshold })` -> `[{ box: [x, y, w, h], score, label }]`: OWLv2 with the yard animals as queries; `subjectSquare`, `cropImage`, `ANIMAL_QUERIES`, `DEFAULT_THRESHOLD` |
-| `models.js` | `locate(name)`: the one place weights are looked up |
 | `main.js`, `index.html` | the app |
 | `process.js` | the batch processor's command line (below) |
-| `batch.js` | `runBatch(opts)`: scan, the decode-worker / GPU pipeline, records, bursts, meta; `scanPhotos`, `sceneNcc` |
+| `batch.js` | `runBatch(opts)`: scan, the decode-worker / GPU pipeline (`bro.vision.wildlife` analyze), records, bursts, meta; `scanPhotos`, `sceneNcc` |
 | `decode-worker.js` | the CPU half of a photo in a Worker: decode, EXIF, sharpness, thumbnail |
-| `bursts.js` | `groupBursts(records, { gapS, sameScene, metric })`: bursts, consensus species, keeper; `parseExifTime` |
 | `store.js` | the JSONL store: keys, appending, compaction, atomic writes |
 | `report.js` | `summary.md` |
 | `RECORDS.md` | every field of the batch output |
-| `tests/test_helpers.js` | prompts, subject square, crop, square input; no models |
-| `tests/test_species.js` | BioCLIP end to end on a synthetic image (tagged `ml`) |
-| `tests/test_detect.js` | OWLv2 on synthetic frames: nothing in an empty one, sorted in-frame boxes, RGB = RGBA (tagged `ml`) |
 | `tests/test_process.js` | the batch processor without models on synthetic JPEGs with fake EXIF times: records, keys, incremental skip, changes, pairs, corrupt files, bursts, keepers, output-dir refusal |
 | `tests/test_process_ml.js` | the batch processor with OWLv2 + BioCLIP on synthetic frames (tagged `ml`) |
 | `tests/synth.js` | synthetic textures and JPEGs with an EXIF capture time, for the tests |
 
+The models themselves are tested in bro: `tests/vision/test_vision_wildlife.js`
+(no weights) and `test_vision_wildlife_models.js`.
+
 ## Weights
 
-`species.js` and `detect.js` take explicit paths. The app and its tests find
-them in one place, `models.js` `locate(name)`: `bro.models.find(name)` when
-the engine has it, else (until then) the kit's sibling-repo search
-(`lib/kit/weights.js`, `BRO_WEIGHTS` names the directory holding the
-siblings). Names and their sibling paths:
+`bro.vision.wildlife` finds them through `bro.models`, so `BRO_MODELS` (or
+the `models.dirs` setting) must name the directory holding these, e.g.
+`BRO_MODELS=/path/to/brovisionml-data`:
 
 - `bioclip`, `bioclip-2` (`brovisionml-data/bioclip{,-2}`): the open_clip
   releases converted by `brolm/scripts/convert-openclip.py` (model.safetensors,
@@ -48,35 +46,19 @@ siblings). Names and their sibling paths:
   terms); it is assembled locally from the sources in its `ATTRIBUTION.md`.
 - `owlv2` (`brovisionml-data/owlv2`): the Hugging Face release of
   `google/owlv2-base-patch16-ensemble` as-is (model.safetensors, vocab.json,
-  merges.txt; Apache-2.0, see its `ATTRIBUTION.md`). Optional: without it the
-  app classifies the whole frame and cannot say "no animal".
+  merges.txt; Apache-2.0, see its `ATTRIBUTION.md`).
 
-With bro.models in the engine, `BRO_MODELS` (or the `models.dirs` setting)
-must name the directory holding these, e.g.
-`BRO_MODELS=/path/to/brovisionml-data`; the sibling-repo search is only the
-fallback for an engine without it.
-
-## Using species.js
+## Using bro.vision.wildlife
 
 ```js
-import { loadSpeciesModel } from "/app/species.js";
-import { loadAnimalDetector, subjectSquare, cropImage } from "/app/detect.js";
-
-const model = loadSpeciesModel({
-    modelDir: '/path/to/brovisionml-data/bioclip-2',
-    speciesPath: '/path/to/brovisionml-data/species/upper-midwest.json',
-    cacheDir: outDir + '/.species-cache',   // text embeddings, keyed by model + list
-    accidental: false,                       // optional: drop accidental/vagrant rows
-});
-const detector = loadAnimalDetector({ weightsDir: '/path/to/brovisionml-data/owlv2' });
+const wildlife = bro.vision.wildlife;
+if (!wildlife.available()) return;            // weights not there: hide the feature
+const an = wildlife.open({ model: 'bioclip-2' });   // OWLv2 + BioCLIP 2 + the list
 
 const photo = bro.image.decodeScaled(path, { width: 1280, height: 1280 });
-const hits = detector.detect(photo);          // best first; [] = no animal
-if (hits.length) {
-    const sq = subjectSquare(hits[0].box, photo.width, photo.height);   // +15%, square
-    const top = model.classify(cropImage(photo, sq), { topK: 5 });
-    // [{ common, scientific, class, order, family, score, similarity }, ...]
-}
+const rec = an.analyze(photo, { source: { width: photo.sourceWidth, height: photo.sourceHeight } });
+// { animal, detections: [{ label, score, box }], subject: { x, y, w, h },
+//   species: [{ common, scientific, family, order, class, score, similarity }, ...] }
 ```
 
 - **Prompts** follow the BioCLIP paper and model cards: "a photo of <kingdom
@@ -104,12 +86,12 @@ similar to finding the subject (below). Both run through the same code. (The
 
 ## Finding the animal
 
-`detect.js` asks OWLv2 for each animal on the list ("a bird", "a squirrel",
-"a deer", ... `ANIMAL_QUERIES`) and takes the best box, padded 15% and made
-square, as the classifier's input. No box at or above the threshold means no
-animal: the app says so and does not classify.
+`bro.vision.wildlife` asks OWLv2 for each animal on the list ("a bird", "a
+squirrel", "a deer", ... `wildlife.QUERIES`) and takes the best box, padded
+15% and made square, as the classifier's input. No box at or above the
+threshold means no animal: the app says so and does not classify.
 
-- **Threshold** (`DEFAULT_THRESHOLD`, 0.15): on a 958-photo card, frames with
+- **Threshold** (`wildlife.DEFAULTS.threshold`, 0.15): on a 958-photo card, frames with
   nothing listed in them (people, mushrooms, empty feeders, bare branches,
   water) mostly scored under 0.1, and clear animals 0.3 and up. Between them
   sit both real animals (a warbler deep in leaves, distant geese, a sparrow in
@@ -118,7 +100,7 @@ animal: the app says so and does not classify.
   ones and lets a few look-alikes through to the classifier. Raise it for
   fewer false finds.
 - **Queries** are only the animals on the species list: a dog or a cat is
-  "no animal". Pass `queries` to `detect` to ask for others; their text
+  "no animal". Pass `queries` to `open` (or the analyzer's `detect`) to ask for others; their text
   embeddings are computed once and cached.
 - **Cost** on a Radeon 8060S: ~75 ms for OWLv2 on the GPU (FP16 at 960 x 960),
   ~98 ms for `detect` with its CPU preprocessing at 1280, and ~87 ms for the

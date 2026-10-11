@@ -36,7 +36,10 @@ not retried while its key is unchanged; `--force` retries it.
 ## records.jsonl
 
 One JSON object per line, sorted by capture time after compaction. Fields
-absent from a photo are `null`, `[]` or missing as noted.
+absent from a photo are `null`, `[]` or missing as noted. `animal`,
+`detections`, `subject` and `species` are `bro.vision.wildlife`'s
+`analyze()` result as it returns it, `sharpness` its `sharpness()`, and
+`bursts.jsonl` its `groupBursts()` (bro's docs/vision-api.js, "Wildlife").
 
 | Field | Type | Meaning |
 |-------|------|---------|

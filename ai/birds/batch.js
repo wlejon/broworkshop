@@ -1,12 +1,13 @@
 // batch.js — process a folder of photos into records (process.js is the CLI).
 //
 // For every photo (recursive; JPEG and Canon CR3, a RAW+JPEG pair processed
-// once through its JPEG): decode, EXIF, OWLv2 animal detection, BioCLIP
-// species top 5 on the subject square, sharpness of the subject and of the
-// whole frame, and a small luma thumbnail; then the photos are grouped into
-// bursts. Records, bursts, meta and a report go to the output directory
-// (store.js, RECORDS.md); a photo whose path, size and mtime (and processing
-// config) match its record is not processed again.
+// once through its JPEG): decode, EXIF, the per-photo analysis of
+// bro.vision.wildlife (OWLv2 animal detection, BioCLIP species top 5 on the
+// subject square), sharpness of the subject and of the whole frame, and a
+// small luma thumbnail; then the photos are grouped into bursts
+// (wildlife.groupBursts). Records, bursts, meta and a report go to the output
+// directory (store.js, RECORDS.md); a photo whose path, size and mtime (and
+// processing config) match its record is not processed again.
 //
 // The CPU half (decode, EXIF, sharpness, thumbnail) runs in decode-worker.js
 // workers, so the next photos decode while this thread runs the models on
@@ -15,30 +16,27 @@
 //   import { runBatch } from "/app/batch.js";
 //   const result = runBatch({ input, output, model: 'bioclip-2' });
 
-import { loadSpeciesModel } from "/app/species.js";
-import { loadAnimalDetector, subjectSquare, cropImage, ANIMAL_QUERIES, DEFAULT_THRESHOLD } from "/app/detect.js";
-import { locate, searched } from "/app/models.js";
-import { groupBursts, parseExifTime, DEFAULT_GAP_S } from "/app/bursts.js";
 import { fileKey, readJsonl, writeJsonl, writeAtomic, appender, toBase64, fromBase64 } from "/app/store.js";
 import { writeReport } from "/app/report.js";
 
 const fs = require('fs');
 const pathMod = require('path');
+const wildlife = bro.vision.wildlife;
 
 export const SCHEMA = 1;
 
 /** Defaults; every one is a process.js option (README "Batch processing"). */
 export const DEFAULTS = {
-    model: 'bioclip-2',          // or 'bioclip'
-    threshold: DEFAULT_THRESHOLD,
-    gapS: DEFAULT_GAP_S,
+    model: wildlife.DEFAULTS.model,          // 'bioclip-2', or 'bioclip'
+    threshold: wildlife.DEFAULTS.threshold,
+    gapS: wildlife.DEFAULTS.gapS,
     sceneNcc: 0,                 // 0: no scene split (README "Bursts")
     metric: 'tenengrad',         // the keeper's sharpness measure
     detectSize: 1280,            // detection/classification image, long side
     sharpSize: 3000,             // sharpness image, long side
     thumbSize: 96,               // scene-check thumbnail, long side
-    topK: 5,
-    margin: 0.15,                // subject square padding
+    topK: wildlife.DEFAULTS.topK,
+    margin: wildlife.DEFAULTS.margin,        // subject square padding
     workers: 3,
     noModels: false,             // decode/EXIF/sharpness/bursts only
     force: false,
@@ -47,8 +45,6 @@ export const DEFAULTS = {
 };
 
 const PHOTO_EXT = { '.jpg': 'jpeg', '.jpeg': 'jpeg', '.cr3': 'cr3' };
-const MODEL_REPO = { 'bioclip': 'imageomics/bioclip', 'bioclip-2': 'imageomics/bioclip-2',
-                     'owlv2': 'google/owlv2-base-patch16-ensemble' };
 
 /** Is `child` the directory `parent` or inside it? (absolute, normalized paths) */
 export function isInside(child, parent) {
@@ -108,36 +104,20 @@ function fnv1a(str) {
     return h.toString(16).padStart(8, '0');
 }
 
-// What a model directory is: upstream repo + revision (its ATTRIBUTION.md)
-// and the weights file's size.
-function modelInfo(name, dir) {
-    const info = { name, repo: MODEL_REPO[name] || null, revision: null, weightsBytes: null };
-    if (!dir) return info;
-    try { info.weightsBytes = fs.statSync(dir + '/model.safetensors').size; } catch (_) {}
-    try {
-        const att = String(fs.readFileSync(dir + '/ATTRIBUTION.md', 'utf-8'));
-        const rev = /revision\s+`([0-9a-f]{7,40})`/i.exec(att);
-        if (rev) info.revision = rev[1];
-    } catch (_) {}
-    return info;
+// The analyzer's options: the models through bro.models, the run's settings.
+function wildlifeOpts(o) {
+    return { model: o.model, threshold: o.threshold, topK: o.topK, margin: o.margin };
 }
 
 // The settings a record depends on. A record made under a different config
-// is processed again.
-function processingConfig(o, speciesPath, speciesCount) {
+// is processed again. With models: wildlife.config (models and revisions,
+// threshold, queries, topK, margin, the species list), read without loading.
+function processingConfig(o) {
     const c = {
         schema: SCHEMA, detectSize: o.detectSize, sharpSize: o.sharpSize, thumbSize: o.thumbSize,
         models: !o.noModels,
     };
-    if (!o.noModels) {
-        c.detector = modelInfo('owlv2', locate('owlv2'));
-        c.classifier = modelInfo(o.model, locate(o.model));
-        c.threshold = o.threshold;
-        c.queries = ANIMAL_QUERIES;
-        c.topK = o.topK;
-        c.margin = o.margin;
-        c.speciesList = { file: speciesPath ? pathMod.basename(speciesPath) : null, count: speciesCount };
-    }
+    if (!o.noModels) Object.assign(c, wildlife.config(wildlifeOpts(o)));
     return c;
 }
 
@@ -174,14 +154,15 @@ export function runBatch(opts) {
     fs.mkdirSync(output, { recursive: true });
 
     // Models and their config.
-    let speciesPath = null, model = null, detector = null;
+    let analyzer = null;
     if (!o.noModels) {
-        for (const name of ['owlv2', o.model, 'species/upper-midwest.json'])
-            if (!locate(name)) throw new Error('missing ' + name + ' (looked in ' + searched(name) + '); or pass --no-models');
-        speciesPath = locate('species/upper-midwest.json');
+        const loc = wildlife.locate(wildlifeOpts(o));
+        if (loc.missing.length) {
+            throw new Error('missing ' + loc.missing.map((k) => k + ' (' + (loc[k] || 'not found by bro.models') + ')').join(', ') +
+                            '; or pass --no-models');
+        }
     }
-    const speciesCount = speciesPath ? (JSON.parse(String(fs.readFileSync(speciesPath, 'utf-8'))).species || []).length : 0;
-    const config = processingConfig(o, speciesPath, speciesCount);
+    const config = processingConfig(o);
     const configHash = fnv1a(JSON.stringify(config));
 
     // What is there, and what needs doing.
@@ -215,10 +196,10 @@ export function runBatch(opts) {
 
     if (todo.length && !o.noModels) {
         const tl = Date.now();
-        detector = loadAnimalDetector({ weightsDir: locate('owlv2') });
-        model = loadSpeciesModel({ modelDir: locate(o.model), speciesPath,
-                                   cacheDir: bro.app && bro.app.cacheDir ? bro.app.cacheDir + '/species' : undefined });
-        log(`birds: models loaded in ${Date.now() - tl} ms (OWLv2 on ${detector.device}, ${model.name})`);
+        analyzer = wildlife.open(Object.assign(wildlifeOpts(o),
+            { cacheDir: bro.app && bro.app.cacheDir ? bro.app.cacheDir + '/species' : false }));
+        log(`birds: models loaded in ${Date.now() - tl} ms (OWLv2 on ${analyzer.device}, ` +
+            `${pathMod.basename(analyzer.paths.classifier)})`);
     }
 
     // ── the pipeline ─────────────────────────────────────────────────────
@@ -340,9 +321,9 @@ export function runBatch(opts) {
 
     // The GPU half of one photo: detect, classify, the record.
     function analyze(p, m) {
-        const shot = p.shot, img = m.image;
+        const shot = p.shot;
         const exif = m.exif || null;
-        const time = exif && exif.dateTaken ? parseExifTime(exif.dateTaken) : null;
+        const time = exif && exif.dateTaken ? wildlife.parseExifTime(exif.dateTaken) : null;
         const rec = {
             v: SCHEMA, path: shot.path, size: shot.size, mtimeMs: shot.mtimeMs, key: shot.key, config: configHash,
             format: shot.format, pair: shot.pair, processedAt: new Date().toISOString(),
@@ -354,22 +335,14 @@ export function runBatch(opts) {
             timing: Object.assign({}, m.ms),
         };
         if (o.noModels) return rec;
-        const sx = rec.width / img.width, sy = rec.height / img.height;
-        let t = Date.now();
-        const hits = detector.detect(img, { threshold: o.threshold });
-        rec.timing.detect = Date.now() - t;
-        rec.animal = hits.length > 0;
-        rec.detections = hits.map((h) => ({ label: h.label, score: Math.round(h.score * 1e4) / 1e4,
-                                             box: [r1(h.box[0] * sx), r1(h.box[1] * sy), r1(h.box[2] * sx), r1(h.box[3] * sy)] }));
-        if (rec.animal) {
-            t = Date.now();
-            const sq = subjectSquare(hits[0].box, img.width, img.height, { margin: o.margin });
-            rec.subject = { x: Math.round(sq.x * sx), y: Math.round(sq.y * sy), w: Math.round(sq.w * sx), h: Math.round(sq.h * sy) };
-            rec.species = model.classify(cropImage(img, sq), { topK: o.topK }).map((s) => ({
-                common: s.common, scientific: s.scientific, family: s.family, order: s.order, class: s.class,
-                score: Math.round(s.score * 1e4) / 1e4, similarity: Math.round(s.similarity * 1e4) / 1e4 }));
-            rec.timing.classify = Date.now() - t;
-        }
+        // Detections and subject in the photo's pixels (RECORDS.md).
+        const a = analyzer.analyze(m.image, { source: m.source });
+        rec.animal = a.animal;
+        rec.detections = a.detections;
+        rec.subject = a.subject;
+        rec.species = a.species;
+        rec.timing.detect = a.timing.detect;
+        if (a.animal) rec.timing.classify = a.timing.classify;
         return rec;
     }
 
@@ -389,7 +362,7 @@ export function runBatch(opts) {
         const ncc = sceneCache.get(k);
         return { ncc, split: o.sceneNcc > 0 && ncc < o.sceneNcc };
     };
-    const bursts = groupBursts(current, { gapS: o.gapS, sameScene, metric: o.metric });
+    const bursts = wildlife.groupBursts(current,{ gapS: o.gapS, sameScene, metric: o.metric });
     writeJsonl(output + '/bursts.jsonl', bursts);
 
     const wallMs = Date.now() - t0;
@@ -405,7 +378,7 @@ export function runBatch(opts) {
         input, output,
         configHash, config,
         options: { gapS: o.gapS, sceneNcc: o.sceneNcc, metric: o.metric, workers: nWorkers, force: !!o.force, limit: o.limit },
-        engine: { exePath: (bro.app && bro.app.exePath) || null, device: detector ? detector.device : null },
+        engine: { exePath: (bro.app && bro.app.exePath) || null, device: analyzer ? analyzer.device : null },
         run: {
             startedAt: new Date(t0).toISOString(), wallMs,
             photos: shots.length, files: scan.files, skippedFiles: scan.skipped,

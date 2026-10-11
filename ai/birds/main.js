@@ -1,41 +1,42 @@
-// Birds: open a photo, find the animal, name the species with BioCLIP.
-// The models load on the first photo, not at boot, so the app opens instantly
-// and boots on a machine without the weights (the status line then says why).
+// Birds: open a photo, find the animal, name the species with BioCLIP
+// (bro.vision.wildlife). The models load on the first photo, not at boot, so
+// the app opens instantly and boots on a machine without the weights (the
+// status line then says why).
 import { boot, ids, h, clear } from "/lib/kit/index.js";
-import { loadSpeciesModel } from "/app/species.js";
-import { loadAnimalDetector, subjectSquare, cropImage } from "/app/detect.js";
-import { locate, searched } from "/app/models.js";
 
 const { status } = boot({});
 const el = ids('open', 'model', 'crop', 'photo', 'hits');
+const wildlife = bro.vision && bro.vision.wildlife;
 
-const models = {};
-let detector = null;
+let analyzer = null;
 
 function ready() {
-    if (!globalThis.bro || !bro.lm || bro.lm.available === false || !bro.image) {
-        status.warn('this build has no bro.lm / bro.image');
+    if (!wildlife) {
+        status.warn('this build has no bro.vision.wildlife');
         return false;
     }
-    for (const name of ['bioclip-2', 'bioclip', 'species/upper-midwest.json']) {
-        if (!locate(name)) {
-            status.warn('missing ' + name + ' (looked in ' + searched(name) + '; see README.md)');
+    for (const model of ['bioclip-2', 'bioclip']) {
+        const loc = wildlife.locate({ model });
+        if (loc.missing.length) {
+            status.warn('missing ' + loc.missing.map((k) => k + ' (' + (loc[k] || 'not found by bro.models') + ')')
+                .join(', ') + '; see README.md');
             return false;
         }
     }
-    return true;
+    return wildlife.available();
 }
 
-function model(name) {
-    if (!models[name]) {
-        status.busy('loading ' + name + ' and embedding the species list…');
-        models[name] = loadSpeciesModel({
-            modelDir: locate(name),
-            speciesPath: locate('species/upper-midwest.json'),
-            cacheDir: bro.app && bro.app.cacheDir ? bro.app.cacheDir + '/species' : undefined,
-        });
-    }
-    return models[name];
+// One analyzer at a time: another model replaces it.
+function open(model) {
+    if (analyzer && analyzer.config.classifier.name === model) return analyzer;
+    if (analyzer) analyzer.dispose();
+    analyzer = null;
+    status.busy('loading OWLv2 and ' + model + ', embedding the species list…');
+    analyzer = wildlife.open({
+        model,
+        cacheDir: bro.app && bro.app.cacheDir ? bro.app.cacheDir + '/species' : false,
+    });
+    return analyzer;
 }
 
 function show(hits) {
@@ -47,40 +48,27 @@ function show(hits) {
     }
 }
 
-// The animal finder: OWLv2 when its weights are there and bro.vision has it.
-function animalDetector() {
-    if (detector) return detector;
-    const dir = locate('owlv2');
-    if (!dir || !bro.vision || typeof bro.vision.loadOwlv2 !== 'function') return null;
-    status.busy('loading OWLv2…');
-    detector = loadAnimalDetector({ weightsDir: dir });
-    return detector;
-}
-
 function classify(path) {
     const img = bro.image.decodeScaled(path, { width: 1280, height: 1280 });
     if (!img.width) { status.error('could not decode ' + path + ': ' + img.error); return; }
     el.photo.src = path;
-    let input = img, how = 'whole frame';
+    const an = open(el.model.value);
+    const name = an.config.classifier.name;
     const t = Date.now();
-    if (el.crop.checked) {
-        const det = animalDetector();
-        if (det) {
-            const hits = det.detect(img);
-            if (!hits.length) {
-                clear(el.hits);
-                status.ok(`no animal found (OWLv2, ${Date.now() - t} ms)`);
-                return;
-            }
-            input = cropImage(img, subjectSquare(hits[0].box, img.width, img.height));
-            how = `${hits[0].label.replace(/^an? /, '')} ${(hits[0].score * 100).toFixed(0)}%`;
-        } else {
-            how = 'whole frame (no OWLv2: ' + searched('owlv2') + ')';
-        }
+    if (!el.crop.checked) {
+        show(an.classify(img, { topK: 5 }));
+        status.ok(`${name}, whole frame, ${Date.now() - t} ms`);
+        return;
     }
-    const m = model(el.model.value);
-    show(m.classify(input, { topK: 5 }));
-    status.ok(`${m.name}, ${how}, ${Date.now() - t} ms`);
+    const rec = an.analyze(img);
+    if (!rec.animal) {
+        clear(el.hits);
+        status.ok(`no animal found (OWLv2, ${Date.now() - t} ms)`);
+        return;
+    }
+    show(rec.species);
+    const best = rec.detections[0];
+    status.ok(`${name}, ${best.label.replace(/^an? /, '')} ${(best.score * 100).toFixed(0)}%, ${Date.now() - t} ms`);
 }
 
 if (ready()) {

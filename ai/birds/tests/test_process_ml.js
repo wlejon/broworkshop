@@ -7,15 +7,15 @@
 import { check, eq, test, done, skip } from "/lib/kit/test.js";
 import { runBatch } from "/app/batch.js";
 import { readJsonl } from "/app/store.js";
-import { locate, searched } from "/app/models.js";
 import { writeExifJpeg, texture } from "/app/tests/synth.js";
 
 const fs = require('fs');
 const os = require('os');
 
-if (!globalThis.bro || !bro.vision || typeof bro.vision.loadOwlv2 !== 'function') skip('no bro.vision.loadOwlv2');
-for (const name of ['owlv2', 'bioclip-2', 'bioclip', 'species/upper-midwest.json'])
-    if (!locate(name)) skip(name + ' not found (' + searched(name) + ')');
+if (!globalThis.bro || !bro.vision || !bro.vision.wildlife) skip('no bro.vision.wildlife');
+for (const model of ['bioclip-2', 'bioclip'])
+    if (!bro.vision.wildlife.available({ model }))
+        skip('models not found (missing ' + bro.vision.wildlife.locate({ model }).missing.join(', ') + ')');
 
 const root = os.tmpdir().replace(/\/+$/, '') + '/birds-ml-test-' + Date.now() + '-' + Math.floor(Math.random() * 1e6);
 const input = root + '/card', output = root + '/out';

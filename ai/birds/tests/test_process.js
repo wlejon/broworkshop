@@ -2,11 +2,11 @@
 // fake EXIF capture times in a scratch folder -> records, keys, the
 // incremental skip, a changed and a removed photo, RAW+JPEG pairs, a corrupt
 // file, burst grouping and keepers, and the refusal of an output dir inside
-// the photo folder. Plus the pure parts: EXIF time parsing, grouping with a
-// scene split, base64. tests/test_process_ml.js runs the models.
+// the photo folder. Plus the pure parts: EXIF time parsing and grouping with
+// a scene split as the app uses them (bro.vision.wildlife), base64.
+// tests/test_process_ml.js runs the models.
 import { check, eq, near, test, done, throws } from "/lib/kit/test.js";
 import { runBatch, scanPhotos, isInside, sceneNcc } from "/app/batch.js";
-import { groupBursts, parseExifTime } from "/app/bursts.js";
 import { readJsonl, toBase64, fromBase64 } from "/app/store.js";
 import { writeExifJpeg, texture } from "/app/tests/synth.js";
 
@@ -17,6 +17,7 @@ const root = os.tmpdir().replace(/\/+$/, '') + '/birds-test-' + Date.now() + '-'
 const input = root + '/card', output = root + '/out';
 fs.mkdirSync(input + '/sub', { recursive: true });
 const quiet = () => {};
+const { groupBursts, parseExifTime } = bro.vision.wildlife;
 
 // The card: burst A (3 frames, 0.2 / 0.25 s apart, the middle one sharp),
 // a single shot B, burst C (2 frames 0.4 s apart) in a subfolder, a RAW+JPEG
