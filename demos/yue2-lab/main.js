@@ -252,7 +252,8 @@ function showTiming(r) {
     const rows = {
         run: jobKind + ', ' + wall.toFixed(1) + ' s', firstAbc: ms(firstAbcMs), firstSem: ms(firstSemMs),
         firstLat: ms(firstLatMs), firstAudio: ms(ps.firstAudioMs), playStart: ms(ps.playStartMs),
-        planTps: tm.planTps ? tm.planTps.toFixed(0) + ' (ttft ' + tm.planTtft.toFixed(2) + ' s)' : null,
+        planTps: tm.planTps ? tm.planTps.toFixed(0) + ' (ttft ' + tm.planTtft.toFixed(2) + ' s' +
+            (tm.planForwards && tm.planForwards < tm.planTokens ? ', ' + (tm.planTokens / tm.planForwards).toFixed(2) + ' tok/forward' : '') + ')' : null,
         semTps: tm.semanticTps ? tm.semanticTps.toFixed(0) + ' (ttft ' + tm.semanticTtft.toFixed(2) + ' s)' : null,
         nar: tm.narSecondsPerAudioSecond ? tm.narSecondsPerAudioSecond.toFixed(3) : null,
         rtf: ps.seconds ? (ps.seconds / wall).toFixed(2) + '×' : null,

@@ -40,7 +40,7 @@ test('section buttons insert tags on a fresh line', () => {
 
 test('sampling panels carry every knob, defaults restore', () => {
     clickOn('[data-tab=sampling]');
-    eq(document.querySelectorAll('#abc-sampling .k-field').length, 7, 'score sampling rows');
+    eq(document.querySelectorAll('#abc-sampling .k-field').length, 8, 'score sampling rows (7 + draft tokens)');
     eq(document.querySelectorAll('#sem-sampling .k-field').length, 7, 'semantic sampling rows');
     check(document.querySelectorAll('#synth-params .k-field').length >= 4, 'synthesis rows');
     const temp = q('#abc-sampling input[type=range]');

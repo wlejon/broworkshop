@@ -34,6 +34,9 @@ test('generate streams audio while it decodes', () => {
     const t = currentTake();
     check(t, 'a take: ' + text('#status'));
     check(t.abc.length > 0, 'a score was planned');
+    check(t.timing.planForwards > 0 && t.timing.planForwards < t.timing.planTokens,
+          'speculative planning (draft 5) accepts more than one token per forward: ' +
+          t.timing.planTokens + ' tokens in ' + t.timing.planForwards + ' forwards');
     check(t.semantic.length >= 60 && t.semantic.length <= 75, 'semantic tokens within bounds: ' + t.semantic.length);
     check(t.frames > 0 && t.latents.length === t.frames * 64, 'latents ' + t.frames + ' frames');
     check(t.audio && t.audio.channels === 2 && t.audio.sampleRate === 48000, 'stereo 48 kHz audio');

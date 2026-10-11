@@ -4,8 +4,10 @@
 import { params } from "/lib/kit/params.js";
 
 // protocol.py's GenerationConfig defaults.
+// draftTokens is not sampling: speculative planning (abcDraftTokens), exact in
+// distribution, so on by default here.
 export const ABC_DEFAULTS = { temperature: 0.7, topP: 0.9, topK: 30, repetitionPenalty: 1.005,
-                              penaltyWindow: 100, minTokens: 32, maxTokens: 4096 };
+                              penaltyWindow: 100, minTokens: 32, maxTokens: 4096, draftTokens: 5 };
 export const SEM_DEFAULTS = { temperature: 1.0, topP: 0.95, topK: 100, repetitionPenalty: 1.2,
                               penaltyWindow: 50, minTokens: 200, maxTokens: 9000 };
 export const SYNTH_DEFAULTS = { odeSteps: 32, narChunkFrames: 0, reusePrefixKv: true, decodeCoreFrames: 50,
@@ -31,7 +33,10 @@ let panels = [];
 
 export function buildSettings(onChange) {
     panels = [
-        [params('#abc-sampling', abc, samplingSpec(8192), { onChange }), abc, ABC_DEFAULTS],
+        [params('#abc-sampling', abc, Object.assign(samplingSpec(8192), {
+            draftTokens: { min: 0, max: 7, step: 1, label: 'draft tokens',
+                           hint: 'speculative planning: tokens drafted per forward from the score so far; same distribution, faster (0 = off)' },
+        }), { onChange }), abc, ABC_DEFAULTS],
         [params('#sem-sampling', sem, samplingSpec(24000), { onChange }), sem, SEM_DEFAULTS],
         [params('#synth-params', synth, {
             odeSteps:         { min: 1, max: 64, step: 1, label: 'ODE steps', hint: 'midpoint steps per chunk (2 velocity evals each)' },
@@ -73,8 +78,10 @@ export function applySettings(s) {
 
 /** The sampling / synthesis part of a bro.music options object. */
 export function samplingOptions() {
+    const { draftTokens, ...abcSampling } = abc;
     return {
-        abcSampling: Object.assign({}, abc),
+        abcSampling,
+        abcDraftTokens: draftTokens,
         semanticSampling: Object.assign({}, sem),
         odeSteps: synth.odeSteps,
         narChunkFrames: synth.narChunkFrames,
