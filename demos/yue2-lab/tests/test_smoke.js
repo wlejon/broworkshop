@@ -11,7 +11,7 @@ test('layout: toolbar, side panel, pipeline, views', () => {
     eq(document.querySelectorAll('#stages .stage').length, 4, 'four pipeline stages');
     check(q('#model-dir').value.length > 0 && q('#vae-dir').value.length > 0, 'model paths prefilled');
     eq([...q('#ar-weights').options].map((o) => o.value).join(), 'bf16,int8,fp8', 'AR weight choices');
-    eq(q('#ar-weights').value, 'bf16', 'bf16 by default');
+    eq(q('#ar-weights').value, 'int8', 'int8 by default');
 });
 
 test('nothing runs before load', () => {

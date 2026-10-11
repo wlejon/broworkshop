@@ -57,9 +57,10 @@ const models = modelRow('#modelbar', {
 // The AR decode weights are a load-time choice: quantised copies make the
 // score and semantic sampling faster (~1.9 GB more VRAM).
 const arWeights = h('select#ar-weights', { title: 'weights the score + semantic token sampling reads (applies on Load)' },
-    h('option', { value: 'bf16' }, 'AR bf16'),
-    h('option', { value: 'int8' }, 'AR int8 (faster)'),
-    h('option', { value: 'fp8' }, 'AR fp8 (faster)'));
+    h('option', { value: 'bf16' }, 'AR bf16 (reference)'),
+    h('option', { value: 'int8' }, 'AR int8'),
+    h('option', { value: 'fp8' }, 'AR fp8'));
+arWeights.value = 'int8';
 $('#btn-load').parentNode.insertBefore(arWeights, $('#btn-load'));
 
 function loadModels(modelDir, vaeDir) {
