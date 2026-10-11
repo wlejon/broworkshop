@@ -86,7 +86,7 @@ exactly one burst.
 | `count` | number | photos in the burst |
 | `animalCount` | number | of them with an animal |
 | `species` | object \| null | the consensus, null without an animal: `{ common, scientific, share, agree }`. Every animal frame votes with its top 5 scores (of its best box); the species with the largest sum wins. `share` = that sum / `animalCount` (the mean probability given to it), `agree` = frames whose top-1 it is |
-| `taxa` | array | every species and higher taxon any animal frame scored (its crops' top 5 species and top 3 a rank): `{ rank, scientific, common?, genus?, family?, order?, class?, share, scores }`, `scores` each frame's score for it (the best of its crops; best first, frames without it left out), `share` their sum / `animalCount`. The labels (below) apply the threshold to these, so it can change without regrouping |
+| `taxa` | array | every species and higher taxon any animal frame scored (its crops' top 5 species and top 3 a rank): `{ rank, scientific, common?, genus?, family?, order?, class?, share, scores, evidence }`, `scores` each frame's score for it (the best of its crops; best first, frames without it left out), `share` their sum / `animalCount`, `evidence` one entry a frame showing it (frame order): its crops as flat `[score, boxScore, flags]` triples (flags 1: the photo's best box, 2: the box's query fits the taxon; a crop another beats on all three left out). The labels (below) apply the threshold and the box rule to these, so both can change without regrouping; bursts from before `evidence` are weighed by `scores` alone |
 | `keeper` | string | the sharpest photo: the highest subject `tenengrad` (`--metric`) among frames with an animal, else the highest whole-frame value |
 | `keeperSharpness` | number | that value |
 | `startedBy` | string | `"gap"` (the time gap, or the first photo), or `"scene"` (split by the scene check) |
@@ -110,9 +110,12 @@ exactly one burst.
 
 `run.labels` is what an app shows at the label threshold (`--label-threshold`,
 default 0.85): `bro.vision.wildlife.labels(record, burst, { labelThreshold,
-taxa })` with the lists' taxa names. Each crop is named at the narrowest
-rank (species, genus, family, order, class) whose best score reaches the
-threshold, or not at all; a photo in a burst with labels shows the burst's
+taxa })` with the lists' taxa names and its default box rule. Each crop is
+named at the narrowest rank (species, genus, family, order, class) whose
+best score reaches the threshold and that its box may name (a box other
+than the photo's best at a detector score of 0.3, a family and up at 0.3,
+an order or class in its query's classes; a burst name one frame reaches
+on a box at 0.4), or not at all; a photo in a burst with labels shows the burst's
 (every taxon one frame, or the consensus share, reaches the threshold
 with), else its own. A photo whose own frame has no animal counts when its
 burst has one, as an app tags it, so `photos.animal` can exceed the records

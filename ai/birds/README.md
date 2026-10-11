@@ -65,7 +65,7 @@ const rec = an.analyze(photo, { source: { width: photo.sourceWidth, height: phot
 // { animal, detections: [{ label, score, box }], subject: { x, y, w, h },
 //   species: [{ common, scientific, family, order, class, score, similarity }, ...],
 //   animals: [{ box, label, subject, species, taxa, candidates }, ...], animalsDropped }
-const names = wildlife.labels(rec, burst, { taxa: an.taxa });   // [] = unidentified
+const names = wildlife.labels(rec, burst, an.labelOptions());   // [] = unidentified
 // [{ common: 'Mallard', rank: 'species', score, boxes, ... }, { common: 'Darners', rank: 'family', ... }]
 ```
 
@@ -213,7 +213,13 @@ the narrowest rank that reaches it (`bro.vision.wildlife.labels`: a
 species, else its genus, family, order or class, a taxon scoring the sum of
 its species), every animal of a photo, and a photo in a burst shows the
 burst's names; with no rank there the animal is shown as found but
-unidentified. The report (`meta.json` `run.labels`, RECORDS.md) counts
+unidentified. What a weak OWLv2 box names is mostly wrong (a rock a turtle,
+a "bird" box a mammal order), so labels' box rule leaves it out: a box other
+than the photo's best names nothing under a detector score of 0.3, a family,
+order or class needs a box at 0.3, a burst name only one frame reaches needs
+that frame's box at 0.4, and an order or class outside the box's query's
+classes is not named; two frames or more agreeing on weaker boxes still name
+the burst (docs/vision-api.js in bro, labels()). The report (`meta.json` `run.labels`, RECORDS.md) counts
 photos and bursts labelled and unidentified at `--label-threshold`, those
 with two or more names, labels by rank, photos labelled with a bird, a
 mammal, a reptile or amphibian, an insect or spider, or a pet, the boxes
