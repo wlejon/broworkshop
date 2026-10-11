@@ -7,7 +7,7 @@ they are, with no build step, and the engine features they exercise live in
 bro and its sibling libraries. Every repo in the family, and
 how they depend on each other, is listed in bro's
 [ecosystem index](https://github.com/wlejon/bro/blob/main/docs/ecosystem.md).
-The helm desktop's core apps, the terminal helmterm among them, live in
+The helm desktop's core apps, the terminal among them, live in
 [helmapps](https://github.com/wlejon/helmapps).
 
 ## Run
