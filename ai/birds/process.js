@@ -15,6 +15,9 @@
 //   --label-threshold N         score a label needs in the report (default 0.85; byQuery's fallback too)
 //   --candidates all|byQuery    a crop's softmax over every species, or its query's classes (default all)
 //   --max-classify N            animal boxes classified a photo, best first (default 8)
+//   --nms N                     drop a box over IoU N with a better one and half inside it (default 0.3)
+//   --nms-apart N|off           drop one over IoU N with a better one whatever (default 0.5; off: plain NMS at --nms)
+//   --nms-hold N|off            drop a bigger box holding N of a better one (default 0.85)
 //   --gap S                     max seconds between shots of a burst (default 1.0)
 //   --scene-ncc N               also split a burst where the frame changes, NCC < N (default 0: off)
 //   --metric tenengrad|laplacianVar   keeper sharpness measure (default tenengrad)
@@ -29,7 +32,7 @@ import { runBatch, DEFAULTS } from "/app/batch.js";
 const pathMod = require('path');
 
 const USAGE = 'usage: bro-headless ai/birds ai/birds/process.js -- <photo folder> <output dir> ' +
-    '[--model bioclip-2|bioclip-2.5|bioclip][--threshold N] [--label-threshold N] [--candidates all|byQuery] [--max-classify N] [--gap S] [--scene-ncc N] [--metric tenengrad|laplacianVar] ' +
+    '[--model bioclip-2|bioclip-2.5|bioclip] [--threshold N] [--label-threshold N] [--candidates all|byQuery] [--max-classify N] [--nms N] [--nms-apart N|off] [--nms-hold N|off] [--gap S] [--scene-ncc N] [--metric tenengrad|laplacianVar] ' +
     '[--workers N] [--no-models] [--force] [--limit N] [--progress S]';
 
 function parse(argv) {
@@ -51,6 +54,9 @@ function parse(argv) {
         else if (a === '--label-threshold') o.labelThreshold = num(a, val());
         else if (a === '--candidates') o.candidates = val();
         else if (a === '--max-classify') o.maxClassify = num(a, val());
+        else if (a === '--nms') o.nms = num(a, val());
+        else if (a === '--nms-apart') { const v = val(); o.nmsApart = v === 'off' ? false : num(a, v); }
+        else if (a === '--nms-hold') { const v = val(); o.nmsHold = v === 'off' ? false : num(a, v); }
         else if (a === '--gap') o.gapS = num(a, val());
         else if (a === '--scene-ncc') o.sceneNcc = num(a, val());
         else if (a === '--metric') o.metric = val();

@@ -40,6 +40,9 @@ export const DEFAULTS = {
     labelThreshold: wildlife.DEFAULTS.labelThreshold,   // the report's labelled / unidentified (0.85)
     candidates: wildlife.DEFAULTS.candidates,           // 'all' or 'byQuery': what a crop's softmax is over
     maxClassify: wildlife.DEFAULTS.maxClassify,         // boxes classified a photo, best first (8)
+    nms: wildlife.DEFAULTS.nms,                         // the boxes kept (bro.vision.wildlife suppress): IoU over 0.3 and half inside a better box,
+    nmsApart: wildlife.DEFAULTS.nmsApart,               // IoU over 0.5 (false: plain NMS at nms),
+    nmsHold: wildlife.DEFAULTS.nmsHold,                 // a bigger box holding 0.85 of a better one (false: off)
     workers: 3,
     noModels: false,             // decode/EXIF/sharpness/bursts only
     force: false,
@@ -119,7 +122,8 @@ function fnv1a(str) {
 // labelThreshold is byQuery's fallback threshold (in config only under byQuery).
 function wildlifeOpts(o) {
     return { model: o.model, threshold: o.threshold, topK: o.topK, margin: o.margin,
-             maxClassify: o.maxClassify, candidates: o.candidates, labelThreshold: o.labelThreshold };
+             maxClassify: o.maxClassify, candidates: o.candidates, labelThreshold: o.labelThreshold,
+             nms: o.nms, nmsApart: o.nmsApart, nmsHold: o.nmsHold };
 }
 
 // The settings a record depends on. A record made under a different config

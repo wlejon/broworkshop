@@ -112,7 +112,12 @@ threshold means no animal: the app says so and does not classify.
   insect, dragonfly, butterfly, moth, bee, beetle, spider). Pass `queries`
   to `open` (or the analyzer's `detect`) to ask for others; their text
   embeddings are computed once and cached.
-- **Every animal**: each box after NMS (up to 8, `--max-classify`) is
+- **Boxes kept** (`bro.vision.wildlife.suppress`, `--nms`, `--nms-apart`,
+  `--nms-hold`): a box goes against a better one when their IoU is over
+  0.5, over 0.3 with half of it or more inside the better one, or when it
+  is the bigger and holds 85% of it; two animals overlapping (a duck half
+  behind another) keep their boxes, which plain NMS at 0.3 merged.
+- **Every animal**: each box kept (up to 8, `--max-classify`) is
   cropped and classified on its own, so a heron and a duck in one frame
   are both named. Boxes past that are counted (`animalsDropped`).
 - **Cost** on a Radeon 8060S: ~75 ms for OWLv2 on the GPU (FP16 at 960 x 960),
@@ -151,6 +156,9 @@ recorded as an error and the run goes on.
 | `--label-threshold N` | 0.85 | the report's labelled / unidentified split (below); the records keep every score |
 | `--candidates all\|byQuery` | `all` | a crop's softmax over every species, or over the classes of its box's query (below) |
 | `--max-classify N` | 8 | animal boxes classified a photo, best first |
+| `--nms N` | 0.3 | a box over this IoU with a better one and half inside it goes |
+| `--nms-apart N\|off` | 0.5 | a box over this IoU with a better one goes (off, with `--nms-hold off`: plain NMS at `--nms`) |
+| `--nms-hold N\|off` | 0.85 | a bigger box holding this much of a better one goes |
 | `--gap S` | 1.0 | max seconds between consecutive shots of one burst |
 | `--scene-ncc N` | 0 (off) | also split a burst where consecutive frames correlate below N |
 | `--metric tenengrad\|laplacianVar` | `tenengrad` | keeper sharpness measure |
