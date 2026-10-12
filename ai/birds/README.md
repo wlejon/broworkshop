@@ -37,7 +37,7 @@ The models themselves are tested in bro: `tests/vision/test_vision_wildlife.js`
 the `models.dirs` setting) must name the directory holding these, e.g.
 `BRO_MODELS=/path/to/brovisionml-data`:
 
-- `bioclip`, `bioclip-2` (`brovisionml-data/bioclip{,-2}`): the open_clip
+- `bioclip`, `bioclip-2`, `bioclip-2.5` (`brovisionml-data/bioclip{,-2,-2.5}`): the open_clip
   releases converted by `brolm/scripts/convert-openclip.py` (model.safetensors,
   config.json, vocab.json, merges.txt), published in the Hugging Face dataset
   [`wlejon/brovisionml-data`](https://huggingface.co/datasets/wlejon/brovisionml-data).
@@ -146,7 +146,7 @@ recorded as an error and the run goes on.
 
 | Option | Default | |
 |--------|---------|-|
-| `--model bioclip-2\|bioclip` | `bioclip-2` | species model |
+| `--model bioclip-2\|bioclip-2.5\|bioclip` | `bioclip-2` | species model |
 | `--threshold N` | 0.15 | OWLv2 score threshold (see above) |
 | `--label-threshold N` | 0.85 | the report's labelled / unidentified split (below); the records keep every score |
 | `--candidates all\|byQuery` | `all` | a crop's softmax over every species, or over the classes of its box's query (below) |

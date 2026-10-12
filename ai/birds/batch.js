@@ -27,7 +27,7 @@ export const SCHEMA = 1;
 
 /** Defaults; every one is a process.js option (README "Batch processing"). */
 export const DEFAULTS = {
-    model: wildlife.DEFAULTS.model,          // 'bioclip-2', or 'bioclip'
+    model: wildlife.DEFAULTS.model,          // 'bioclip-2', 'bioclip-2.5' or 'bioclip'
     threshold: wildlife.DEFAULTS.threshold,
     gapS: wildlife.DEFAULTS.gapS,
     sceneNcc: 0,                 // 0: no scene split (README "Bursts")

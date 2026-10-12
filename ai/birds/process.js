@@ -10,7 +10,7 @@
 // photos that did not change. See README.md "Batch processing" and batch.js.
 //
 // Options:
-//   --model bioclip-2|bioclip   species model (default bioclip-2)
+//   --model bioclip-2|bioclip-2.5|bioclip   species model (default bioclip-2)
 //   --threshold N               OWLv2 score threshold (default 0.15)
 //   --label-threshold N         score a label needs in the report (default 0.85; byQuery's fallback too)
 //   --candidates all|byQuery    a crop's softmax over every species, or its query's classes (default all)
@@ -29,7 +29,7 @@ import { runBatch, DEFAULTS } from "/app/batch.js";
 const pathMod = require('path');
 
 const USAGE = 'usage: bro-headless ai/birds ai/birds/process.js -- <photo folder> <output dir> ' +
-    '[--model bioclip-2|bioclip] [--threshold N] [--label-threshold N] [--candidates all|byQuery] [--max-classify N] [--gap S] [--scene-ncc N] [--metric tenengrad|laplacianVar] ' +
+    '[--model bioclip-2|bioclip-2.5|bioclip][--threshold N] [--label-threshold N] [--candidates all|byQuery] [--max-classify N] [--gap S] [--scene-ncc N] [--metric tenengrad|laplacianVar] ' +
     '[--workers N] [--no-models] [--force] [--limit N] [--progress S]';
 
 function parse(argv) {
@@ -63,7 +63,7 @@ function parse(argv) {
         else if (a.startsWith('--')) throw new Error('unknown option ' + a);
         else pos.push(a);
     }
-    if (o.model && !['bioclip', 'bioclip-2'].includes(o.model)) throw new Error('--model is bioclip-2 or bioclip');
+    if (o.model && !['bioclip', 'bioclip-2', 'bioclip-2.5'].includes(o.model)) throw new Error('--model is bioclip-2, bioclip-2.5 or bioclip');
     if (o.candidates && !['all', 'byQuery'].includes(o.candidates)) throw new Error('--candidates is all or byQuery');
     if (o.maxClassify != null && !(o.maxClassify >= 1)) throw new Error('--max-classify is 1 or more');
     if (o.metric && !['tenengrad', 'laplacianVar'].includes(o.metric)) throw new Error('--metric is tenengrad or laplacianVar');
