@@ -11,7 +11,9 @@
 // other ODE settings can be tried without starting over. Sampling exposes
 // every knob of both AR stages and the NAR solver. Expression captures
 // residual states and steers with vectors derived from them. Takes keeps
-// every run with its settings.
+// every run with its settings. Radio (lib/radio.js) streams songs as they are
+// built through yue.stream: a queue, crossfades, live knobs, interrupts and
+// the next song's editable score.
 
 import { boot } from "/lib/kit/app.js";
 import { $, h, ids } from "/lib/kit/dom.js";
@@ -25,13 +27,15 @@ import { buildSettings, resetSettings, samplingOptions, snapshotSettings, applyS
 import { buildExpression, captureOptions, steerOptions, steerSummary, setCapture } from "/app/lib/expression.js";
 import { addTake, saveTake, loadTake, setTakeHandlers } from "/app/lib/takes.js";
 import { audioContext } from "/lib/kit/audio.js";
+import { buildRadio, radioRunning, syncRadio, reveal as revealRadio } from "/app/lib/radio.js";
 
 const { status } = boot();
 const el = ids('style', 'lyrics', 'seed', 'abc', 'cfg', 'progress');
 const log = logView('#log', { newestFirst: true, time: true });
 const progress = progressBar('#progress');
 const badge = deviceBadge('#device');
-tabs('#tabs');
+let radioBuilt = false, radioTab = false;
+tabs('#tabs', { onChange: (name) => { radioTab = name === 'radio'; if (radioBuilt) revealRadio(radioTab); } });
 const stat = stats('#stats', { model: 'model', vae: 'vae', job: 'job' });
 
 // ── state ────────────────────────────────────────────────────────────────────
@@ -65,7 +69,7 @@ $('#btn-load').parentNode.insertBefore(arWeights, $('#btn-load'));
 
 function loadModels(modelDir, vaeDir) {
     if (!bro.music || bro.music.available === false) { status.error('bro.music is not in this build (BRO_WITH_SOUNDML)'); return; }
-    if (job) { status.warn('stop the running job first'); return; }
+    if (job || radioRunning()) { status.warn('stop the running job (or the radio) first'); return; }
     yue = null; vae = null;
     models.busy(true);
     badge.set('loading…', 'warn');
@@ -376,7 +380,7 @@ function synthStage() {
 
 function decodeStage() {
     if (!vae) { status.warn('load the VAE first'); return; }
-    if (job) { status.warn('a job is running'); return; }
+    if (job || radioRunning()) { status.warn('a job (or the radio) is running'); return; }
     const lat = latView.latents();
     if (!lat.length) { status.warn('no latents yet'); return; }
     resetAudio();
@@ -402,15 +406,49 @@ function decodeStage() {
 function ready() {
     if (!yue || !vae) { status.warn('load the models first'); return false; }
     if (job) { status.warn('a job is running: Stop it first'); return false; }
+    if (radioRunning()) { status.warn('the radio holds the model: Stop radio first'); return false; }
     return true;
 }
 
 function updateButtons() {
-    const busy = !!job, loaded = !!(yue && vae);
+    const radio = radioRunning();
+    const busy = !!job || radio, loaded = !!(yue && vae);
     for (const id of ['btn-generate', 'btn-plan', 'btn-semantic', 'btn-synth']) $('#' + id).disabled = busy || !loaded;
     $('#btn-decode').disabled = busy || !vae;
-    $('#btn-stop').disabled = !busy;
+    $('#btn-stop').disabled = !job;
+    // Loading would replace the models a stream holds (modelRow owns the button otherwise).
+    const load = $('#btn-load');
+    if (radio) { load.disabled = true; load.dataset.radio = '1'; }
+    else if (load.dataset.radio) { load.disabled = false; delete load.dataset.radio; }
+    syncRadio(loaded, !!job);
 }
+
+// ── radio ────────────────────────────────────────────────────────────────────
+// A queued song is the Song panel's request with the Sampling panel's AR
+// sampling (the stream's knobs replace steering, so steer / capture stay out).
+function songRequest() {
+    const so = samplingOptions();
+    const o = {
+        style: el.style.value.trim(), lyrics: el.lyrics.value, cot: cot.value, seed: seed(),
+        abcSampling: so.abcSampling, abcDraftTokens: so.abcDraftTokens, semanticSampling: so.semanticSampling,
+    };
+    if ($('#cfg-on').checked) o.cfgScale = Number(el.cfg.value);
+    return o;
+}
+
+buildRadio({
+    models: () => ({ yue, vae }),
+    request: songRequest,
+    canStart: () => !job,
+    onRunning: (on) => {
+        if (on) player.stop();
+        stat.set('job', radioRunning() ? 'radio' : '—');
+        updateButtons();
+    },
+    log, status,
+});
+radioBuilt = true;
+revealRadio(radioTab);
 
 $('#btn-generate').addEventListener('click', generate);
 $('#btn-plan').addEventListener('click', planStage);

@@ -64,5 +64,42 @@ test('expression panel builds', () => {
     clickOn('[data-tab=song]');
 });
 
+test('radio surface: controls, knob ranges, nothing runs before load', () => {
+    check(q('#radio-view').hidden, 'radio panels hidden off the Radio tab');
+    q('#tabs').scrollIntoView();
+    frames(2);
+    clickOn('[data-tab=radio]');
+    frames(2);
+    check(q('[data-tab=radio]').classList.contains('active'), 'Radio tab selected');
+    check(!q('#radio-view').hidden && !q('#radio-plan-panel').hidden, 'radio panels shown on the Radio tab');
+    for (const sel of ['#radio-start', '#radio-enqueue', '#radio-skip', '#radio-stop', '#radio-continue', '#radio-tag',
+                       '#radio-energetic', '#radio-calm', '#radio-plan', '#radio-plan-apply', '#radio-songs',
+                       '#radio-norm', '#radio-break', '#radio-int1', '#radio-int2', '#radio-firstAudio', '#radio-lead',
+                       '#radio-playhead'])
+        check(q(sel), sel + ' present');
+    // docs/music-api.js YuE2Knobs.
+    const want = { energy: [-2, 1], texture: [-2, 2], percussion: [-6, 6], arrangement: [-2, 1] };
+    for (const [k, [lo, hi]] of Object.entries(want)) {
+        const s = q('#knob-' + k);
+        eq([Number(s.min), Number(s.max), Number(s.value)], [lo, hi, 0], k + ' slider range and value');
+        eq(text('#knob-' + k + '-val'), '0.00', k + ' shows 0');
+    }
+    setValue('#knob-texture', 1.5);
+    eq(text('#knob-texture-val'), '1.50', 'a knob moved before a stream shows its requested value');
+    setValue('#knob-texture', 0);
+    check(q('#radio-continue').checked, 'radio continue on by default');
+    eq(document.querySelectorAll('#radio-start-params .k-field').length, 6, 'stream start options');
+    eq(document.querySelectorAll('#radio-song-params .k-field').length, 1, 'per-song options (ODE steps)');
+    eq(q('#radio-start-params input[type=text]').value, '250, 500', 'NAR windows default');
+    for (const id of ['radio-start', 'radio-enqueue', 'radio-skip', 'radio-stop', 'radio-energetic', 'radio-calm', 'radio-plan-apply'])
+        check(q('#' + id).disabled, id + ' disabled before load');
+    check(/nothing queued/.test(text('#radio-songs')), 'empty queue');
+    eq(text('#radio-int1'), '—', 'no interrupt yet');
+    eq(text('#radio-break'), 'no break warning', 'no break warning');
+    clickOn('[data-tab=song]');
+    frames(1);
+    check(q('#radio-view').hidden, 'radio panels hide again');
+});
+
 shot('yue2-lab');
 done('yue2-lab smoke');

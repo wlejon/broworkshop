@@ -37,6 +37,18 @@ through a loose reader.
 `ctx.font` reads back wrong and em in `ctx.filter` resolves against 16px until
 the app sets a font.
 
+### Layout
+
+#### Content-sized grid tracks beside an `fr` track split the width evenly (2026-10-12)
+`grid-template-columns: auto 1fr` (and `max-content 1fr`) on a 600 px grid
+gives both tracks 300 px; the web sizes the `auto` / `max-content` track to
+its items' max-content width and gives the rest to the `fr` track. A fixed
+track (`100px 1fr`) is right (100 / 500). Repro: a page with
+`<div style="display:grid; grid-template-columns:auto 1fr; width:600px"><span id=a>sem</span><div id=b>bar</div></div>`,
+then `bro-headless <page> -e "flush(); console.log(a.getBoundingClientRect().width)"`:
+300, want about 25. Affects: yue2-lab (its radio's per-song bars are flex
+rows instead), and any `1fr auto` row, e.g. yue2-lab's `.steer-row`.
+
 ### bronze JS runtime and module loading
 
 #### Async iteration closing and delegation gaps (2026-09-24)

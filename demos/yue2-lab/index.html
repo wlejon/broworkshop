@@ -42,6 +42,7 @@
         <button data-tab="sampling">Sampling</button>
         <button data-tab="expression">Expression</button>
         <button data-tab="takes">Takes</button>
+        <button data-tab="radio">Radio</button>
       </div>
 
       <!-- SONG: the conditioning -->
@@ -126,9 +127,57 @@
           settings, or save it.</span>
         <div id="takes" class="k-col"></div>
       </div>
+
+      <!-- RADIO: yue.stream, songs played as they are built, steered live -->
+      <div class="k-panel" data-pane="radio">
+        <h2>Radio</h2>
+        <span class="k-note">Songs from the Song panel (style, lyrics, score mode, seed, sampling) played as
+          they are built, crossfaded, and steered live. The radio holds the model and the VAE: the other
+          jobs wait until it stops.</span>
+        <div class="k-row">
+          <button id="radio-start" class="primary" title="Start a stream with the Song panel's current song">Start radio</button>
+          <button id="radio-enqueue" title="Add the Song panel's current song to the queue">+ Queue song</button>
+          <button id="radio-skip" title="To the next song (built, or as soon as it is), over a short fade">Skip ⏭</button>
+          <button id="radio-stop" class="danger" title="End the stream">Stop radio</button>
+        </div>
+        <div class="k-row">
+          <label class="k-field" title="An empty queue continues with the last song's request and the next seed (set at start)">
+            <input id="radio-continue" type="checkbox" checked> radio continue</label>
+          <label class="k-field" title="Your label for the songs you queue (empty: from the style)">tag
+            <input id="radio-tag" type="text" placeholder="auto" style="width:130px"></label>
+        </div>
+        <h2>Interrupt</h2>
+        <div class="k-row">
+          <button id="radio-energetic" title="Stage 1: a latent offset, ~0.75 s; stage 2: an arrangement-steered continuation, ~2.5 s">⚡ Energetic now</button>
+          <button id="radio-calm" title="The same two stages, the other way">Calm now</button>
+        </div>
+        <div id="radio-interrupt"></div>
+        <h2>Knobs <span class="dim">live; right-click a slider for 0; carried into the next song</span></h2>
+        <div class="k-col" id="radio-knobs"></div>
+        <div class="dim" id="radio-knobs-heard"></div>
+        <h2>Stream <span class="dim">applies at the next Start</span>
+          <button id="radio-start-defaults" class="k-link" title="The stream's defaults">defaults</button></h2>
+        <div class="k-col" id="radio-start-params"></div>
+        <h2>Song <span class="dim">applies to each song queued from now</span></h2>
+        <div class="k-col" id="radio-song-params"></div>
+      </div>
     </aside>
 
     <main class="k-main pad">
+      <div class="k-panel radio-main" id="radio-view">
+        <h2>Radio <span class="dim" id="radio-meta"></span></h2>
+        <div class="radio-top">
+          <div id="radio-program"></div>
+          <div class="k-row" id="radio-norm-row"></div>
+        </div>
+        <div id="radio-songs" class="k-col"></div>
+      </div>
+      <div class="k-panel radio-main" id="radio-plan-panel">
+        <h2>Next song's score <span class="dim" id="radio-plan-meta"></span>
+          <button id="radio-plan-apply" class="k-link" title="Rebuild the next song from this score (setNextPlan)">apply</button></h2>
+        <textarea id="radio-plan" rows="8" spellcheck="false"
+          placeholder="the next song's ABC score shows here when it is planned; edit it and press apply"></textarea>
+      </div>
       <div class="k-panel">
         <h2>Pipeline</h2>
         <div id="stages" class="stages"></div>

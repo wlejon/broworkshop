@@ -25,3 +25,21 @@ canvas.heat { width: 100%; height: 96px; display: block; image-rendering: pixela
 .take { border: 1px solid var(--k-border); border-radius: var(--k-radius); padding: 6px; }
 .take.current { border-color: var(--k-accent); }
 .take .k-row { gap: 4px; }
+/* Radio */
+#radio-plan { font-size: 12px; line-height: 1.35; }
+.radio-top { display: grid; grid-template-columns: 1fr; gap: 6px; margin-bottom: 8px; }
+#radio-norm-row .k-meter.norm { width: 220px; height: 10px; }
+#radio-norm-row .k-meter.norm.out > .fill { background: var(--k-warn); }
+#radio-break.on { background: #3a1c20; }
+.radio-song { border: 1px solid var(--k-border); border-radius: var(--k-radius); padding: 6px 8px; }
+.radio-song.on-air { border-color: var(--k-accent); }
+.radio-song.played, .radio-song.dropped { opacity: 0.55; }
+.radio-song .song-state { color: var(--k-value); }
+.radio-song.on-air .song-state { color: var(--k-ok); }
+.song-bars { display: flex; flex-direction: column; gap: 3px; margin-top: 4px; }
+.song-bar { display: flex; align-items: center; gap: 8px; }
+.song-bar > .k-cap { flex: none; width: 28px; }
+.song-bars .k-meter { flex: 1; min-width: 0; height: 6px; }
+.song-bars .k-meter.lat > .fill { background: #8f6fd8; }
+.song-bars .k-meter.dec > .fill { background: var(--k-ok); }
+.song-bars .k-meter > .mark.head { background: var(--k-warn); width: 2px; }

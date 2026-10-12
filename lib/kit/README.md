@@ -450,6 +450,9 @@ done();                                            // throws if any test() faile
   virtual time so callbacks deliver. `simUntil(pred, virtualMs)` budgets in
   virtual time instead: deterministic for in-engine simulation (game loops,
   physics), e.g. `simUntil(() => T.screen === 'complete', 20000)`.
+  `waitRealtime(pred, msg, timeoutMs)` steps virtual time at the wall-clock
+  rate, so audio plays in real time: for latencies a stream measures in wall
+  time against its playhead (yue2-lab's radio interrupt).
 - `clickOn` refuses a hidden element or one covered by another; `typeInto`
   clicks then types through the engine; `press('Enter')` sends SDL keys.
 - A test's imports are the page's instances, entry module included, and
