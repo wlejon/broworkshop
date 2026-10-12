@@ -37,18 +37,6 @@ through a loose reader.
 `ctx.font` reads back wrong and em in `ctx.filter` resolves against 16px until
 the app sets a font.
 
-### Layout
-
-#### Content-sized grid tracks beside an `fr` track split the width evenly (2026-10-12)
-`grid-template-columns: auto 1fr` (and `max-content 1fr`) on a 600 px grid
-gives both tracks 300 px; the web sizes the `auto` / `max-content` track to
-its items' max-content width and gives the rest to the `fr` track. A fixed
-track (`100px 1fr`) is right (100 / 500). Repro: a page with
-`<div style="display:grid; grid-template-columns:auto 1fr; width:600px"><span id=a>sem</span><div id=b>bar</div></div>`,
-then `bro-headless <page> -e "flush(); console.log(a.getBoundingClientRect().width)"`:
-300, want about 25. Affects: yue2-lab (its radio's per-song bars are flex
-rows instead), and any `1fr auto` row, e.g. yue2-lab's `.steer-row`.
-
 ### bronze JS runtime and module loading
 
 #### Async iteration closing and delegation gaps (2026-09-24)
@@ -99,6 +87,7 @@ ratios).
 
 ## Fixed
 
+- Content-sized grid tracks beside an `fr` track, verified 2026-10-12 (bro `tests/layout/test_grid_content_tracks.js`): `auto 1fr`, `max-content 1fr`, `min-content 1fr`, `1fr auto` and `fit-content(L) 1fr` give the content track its content (the repro's `sem`: 30 of 600 here, was 300) and the `fr` track the rest, per the grid track sizing algorithm; `fit-content()` is parsed (it was a 0 px track) and `auto auto` columns stretch as Chromium's do — htmlayout 47dffc0, bro 55725ab9. yue2-lab's `.steer-row` (`1fr auto`) now sizes its buttons to content; its per-song bars stay flex rows (fixed 28 px captions, no workaround to undo).
 - three.js r160 and large bundles, verified 2026-09-24: `new THREE.WebGLRenderer()` from three.min.js constructs and renders a frame in bro headless — type inference now lets a hoisted nested declaration shadow the outer name from the top of its scope (bronze e19835f, oracle `hoisted_decl_shadows_outer.js`). The ~41k-line pi bundle, which never finished compiling, builds in 24 s: nested-closure inference no longer grows exponentially (bronze f19de0e), IL blocks lower in reverse post-order (5f924ea, fixes "branch arg operand is null"), and brass's `gvn_pre`, `sccp`/`cfg_simplify`, range analysis, liveness, loop depth, block layout and block lookup are no longer quadratic or recursive (brass 08c1885, 61aff12, 56139a6, dcf8880). Bounded-time test: bronze `tests/cli/large_module_compile_test.cpp` (98f14e7).
 - bronze `for await` over a plain iterable awaits each value, and a rejected value closes the sync iterator and throws in the loop — bronze 39f829a; verified 2026-09-24 (oracle case `for_await_sync_iterable.js`, output matches node).
 - bronze loops, verified 2026-09-24 (oracle cases `for_head_member_target.js`, `module_for_head_member_target/`, `block_shadow_early_exit.js`): for-in/for-of heads that assign to a property or a pattern of properties parse and run, including imported objects, generators and `for await` (4e9b135); `break`/`continue` out of a block that redeclares a loop-carried name no longer leaks the inner value (5fc97d9).
