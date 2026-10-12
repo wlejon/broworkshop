@@ -56,7 +56,7 @@ test('default threshold: an empty frame has no animal; records carry the detecto
     check(m.classifier.weightsBytes > 0 && m.speciesList.count > 500, 'model and list identity');
     check(m.speciesList.files.length === 4 && m.queries.includes('a snake') && m.queries.includes('a dog') &&
           m.queries.includes('a dragonfly'), 'the four merged lists and their queries');
-    eq([m.maxClassify, m.candidates], [8, { mode: 'all' }], 'crops classified and their candidates');
+    eq([m.maxClassify, m.candidates], [8, { mode: 'all', petMinBoxScore: 0.3 }], 'crops classified and their candidates');
     eq([r.meta.options.labelThreshold, r.meta.options.candidates], [0.85, 'all'], 'the label threshold and candidates');
     eq([e.animals, e.animalsDropped], [[], 0], 'no crops in an empty frame');
     const lb = r.meta.run.labels;
@@ -73,7 +73,8 @@ test('threshold 0: every frame is an animal, with a top 5, a subject and its sha
     check(b.animals.length + b.animalsDropped <= b.detections.length, 'a crop or a dropped count per box at most');
     check(b.animals.length >= 1 && b.animals.length <= 8, 'up to maxClassify crops');
     const a0 = b.animals[0];
-    eq([a0.box, a0.species[0].scientific, a0.candidates], [b.detections[0].box, b.species[0].scientific, 'all'],
+    eq([a0.box, a0.species[0].scientific, a0.candidates],
+       [b.detections[0].box, b.species[0].scientific, bro.vision.wildlife.candidatesFor(a0.label, a0.score)],
        'the first crop is the best box, its species the record\'s');
     check(['genus', 'family', 'order', 'class'].every((k) => Array.isArray(a0.taxa[k]) && a0.taxa[k].length >= 1), 'taxa per rank');
     check(b.species[0].score >= b.species[4].score && b.species.every((s) => s.common && s.scientific), 'sorted, named');
@@ -86,7 +87,7 @@ test('threshold 0: every frame is an animal, with a top 5, a subject and its sha
 
 test('byQuery is another config; each crop ranks over its query\'s classes or falls back', () => {
     const r = runBatch({ input, output: output + '-q', threshold: 0, candidates: 'byQuery', log: quiet });
-    eq(r.meta.config.candidates, { mode: 'byQuery', fallback: 0.85 }, 'config');
+    eq(r.meta.config.candidates, { mode: 'byQuery', fallback: 0.85, petMinBoxScore: 0.3 }, 'config');
     eq(r.meta.options.candidates, 'byQuery', 'run option');
     const crops = [...readJsonl(output + '-q/records.jsonl').values()].flatMap((x) => x.animals || []);
     check(crops.length >= 1 && crops.every((c) => c.candidates === 'query' || c.candidates === 'fallback' ||

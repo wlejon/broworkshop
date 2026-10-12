@@ -230,4 +230,6 @@ not classified, and per name the photos and bursts showing it.
 of the probability. `--candidates byQuery` ranks a crop only over the
 classes its box's query fits ("a bird" Aves, "a dragonfly" Insecta, ...),
 falling back to every species when that answer is under the label
-threshold and another class's best clears it.
+threshold and another class's best clears it. In either mode a box of
+"a dog" or "a cat" the detector scores 0.3 or more is ranked over the
+mammals alone (`petMinBoxScore`), so a dog is not named an insect.
