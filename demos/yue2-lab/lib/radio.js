@@ -19,7 +19,7 @@ import { params } from "/lib/kit/params.js";
 import { frameLoop } from "/lib/kit/ui.js";
 import { programPlayer } from "./radio_player.js";
 import { knobSliders, normMeter, programReadout, interruptReadout, songMeters, songState,
-         DOC_KNOB_RANGES, PROGRAM_RATE } from "./radio_view.js";
+         knobRanges, PROGRAM_RATE } from "./radio_view.js";
 
 // Start options (read once, by yue.stream) and per-song options (read by
 // each enqueue). The defaults are the stream's own (docs/music-api.js).
@@ -339,5 +339,5 @@ export function buildRadio(d) {
     meters.reset();
     frameLoop(tick);
     reveal();
-    return { get running() { return !!st; }, ranges: DOC_KNOB_RANGES };
+    return { get running() { return !!st; }, get ranges() { return knobRanges(); } };
 }

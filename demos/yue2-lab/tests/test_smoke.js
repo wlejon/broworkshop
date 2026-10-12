@@ -77,16 +77,23 @@ test('radio surface: controls, knob ranges, nothing runs before load', () => {
                        '#radio-norm', '#radio-break', '#radio-int1', '#radio-int2', '#radio-firstAudio', '#radio-lead',
                        '#radio-playhead'])
         check(q(sel), sel + ' present');
-    // docs/music-api.js YuE2Knobs.
+    // bro.music.knobRanges, before any stream: the documented clamps
+    // (docs/music-api.js YuE2Knobs), and the sliders take them.
     const want = { energy: [-2, 1], texture: [-2, 2], percussion: [-6, 6], arrangement: [-2, 1] };
-    for (const [k, [lo, hi]] of Object.entries(want)) {
+    const engine = bro.music ? bro.music.knobRanges : null;
+    if (engine) eq(Object.fromEntries(Object.entries(engine).map(([k, r]) => [k, [r.min, r.max]])), want,
+                   'bro.music.knobRanges is the documented clamps');
+    else console.log('no bro.music in this build: no knob sliders');
+    for (const [k, [lo, hi]] of engine ? Object.entries(want) : []) {
         const s = q('#knob-' + k);
         eq([Number(s.min), Number(s.max), Number(s.value)], [lo, hi, 0], k + ' slider range and value');
         eq(text('#knob-' + k + '-val'), '0.00', k + ' shows 0');
     }
-    setValue('#knob-texture', 1.5);
-    eq(text('#knob-texture-val'), '1.50', 'a knob moved before a stream shows its requested value');
-    setValue('#knob-texture', 0);
+    if (engine) {
+        setValue('#knob-texture', 1.5);
+        eq(text('#knob-texture-val'), '1.50', 'a knob moved before a stream shows its requested value');
+        setValue('#knob-texture', 0);
+    }
     check(q('#radio-continue').checked, 'radio continue on by default');
     eq(document.querySelectorAll('#radio-start-params .k-field').length, 6, 'stream start options');
     eq(document.querySelectorAll('#radio-song-params .k-field').length, 1, 'per-song options (ODE steps)');

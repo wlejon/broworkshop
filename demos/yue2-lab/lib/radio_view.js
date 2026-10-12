@@ -9,14 +9,12 @@ import { readout } from "/lib/kit/ui.js";
 export const PROGRAM_RATE = 48000;
 export const FRAME_SAMPLES = 1920;            // one latent frame of program audio
 
-// docs/music-api.js YuE2Knobs: the clamps a stream reports as knobRanges,
-// shown before a stream exists (a running stream's own knobRanges replace them).
-export const DOC_KNOB_RANGES = {
-    energy:      { min: -2, max: 1 },
-    texture:     { min: -2, max: 2 },
-    percussion:  { min: -6, max: 6 },
-    arrangement: { min: -2, max: 1 },
-};
+// The knob clamps, before any stream exists: bro.music.knobRanges is the
+// one a stream reports as its knobRanges (docs/music-api.js), from the same
+// constants the stream clamps with. Empty without bro.music.
+export function knobRanges() {
+    return (typeof bro !== 'undefined' && bro.music && bro.music.knobRanges) || {};
+}
 export const KNOB_HINTS = {
     energy: 'latent offset along the energy direction: louder, brighter; heard within the emit lead (~0.75 s)',
     texture: 'NAR steer after layer 21; re-solved from ~1.5 s ahead',
@@ -40,7 +38,7 @@ const clamp01 = (x) => Math.max(0, Math.min(1, x));
 export function knobSliders(host, onInput) {
     const node = $(host);
     const sliders = {}, applied = {};
-    for (const [name, r] of Object.entries(DOC_KNOB_RANGES)) {
+    for (const [name, r] of Object.entries(knobRanges())) {
         const input = h('input#knob-' + name, { type: 'range', min: r.min, max: r.max, step: name === 'percussion' ? 0.1 : 0.05, value: 0 });
         applied[name] = h('span.k-val#knob-' + name + '-val', { title: 'the value the stream applied (clamped)' }, '0.00');
         node.appendChild(h('label.k-field', { title: KNOB_HINTS[name] }, h('span', null, name), input, applied[name]));

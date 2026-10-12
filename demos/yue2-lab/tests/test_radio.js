@@ -36,6 +36,7 @@ test('the radio starts and its audio plays', () => {
     clickOn('#radio-start');
     const st = radioStream();
     check(st && st.running, 'a stream runs: ' + text('#status'));
+    eq(st.knobRanges, bro.music.knobRanges, 'the stream clamps its knobs to bro.music.knobRanges');
     for (const id of LAB_JOBS) check(q('#' + id).disabled, id + ' disabled while the radio runs');
     check(q('#btn-load').disabled, 'Load disabled while the radio runs');
     check(q('#radio-start').disabled && q('#radio-continue').disabled, 'start options locked while running');
