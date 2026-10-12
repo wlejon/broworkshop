@@ -233,3 +233,10 @@ falling back to every species when that answer is under the label
 threshold and another class's best clears it. In either mode a box of
 "a dog" or "a cat" the detector scores 0.3 or more is ranked over the
 mammals alone (`petMinBoxScore`), so a dog is not named an insect.
+The restriction gives way when the classifier is sure the box is something
+else (OWLv2 calls a bird a dog now and then): when every species gives
+another class 0.85 or more, that answer stands (`"fallback"`); else the crop
+keeps it as `unrestricted`, and its labels use it when the crop is not sure
+of a mammal species and the rest of the burst (or photo) is sure of the
+class it leans to, so a dog box on a waxwing in a burst of waxwings adds no
+"Mammals".
