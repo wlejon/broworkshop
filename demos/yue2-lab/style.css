@@ -25,6 +25,42 @@ canvas.heat { width: 100%; height: 96px; display: block; image-rendering: pixela
 .take { border: 1px solid var(--k-border); border-radius: var(--k-radius); padding: 6px; }
 .take.current { border-color: var(--k-accent); }
 .take .k-row { gap: 4px; }
+/* Editor: on the Edit tab the main area is the editor (and the log) alone */
+body:not(.editing) .edit-main { display: none !important; }
+body.editing .k-main > :not(.edit-main):not(.k-log) { display: none !important; }
+.off { display: none !important; }
+.ed-head { display: flex; align-items: center; gap: 10px; min-height: 26px; }
+.ed-head h2 { margin: 0; }
+.ed-title { font-weight: 600; }
+.ed-job { display: flex; align-items: center; gap: 8px; border: 1px solid var(--k-border-hi); border-radius: var(--k-radius);
+          padding: 2px 4px 2px 8px; background: var(--k-surface); }
+.ed-spin { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--k-border); border-top-color: var(--k-accent);
+           animation: ed-spin 0.9s linear infinite; }
+@keyframes ed-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+.ed-job-bar { width: 140px; height: 6px; border-radius: 3px; background: var(--k-border); overflow: hidden; }
+#edit-job-fill { height: 100%; width: 0%; background: var(--k-accent); }
+canvas.ed-overview { width: 100%; height: 30px; display: block; margin-top: 8px; cursor: pointer;
+                     border-radius: var(--k-radius) var(--k-radius) 0 0; }
+canvas.ed-wave { width: 100%; height: 190px; display: block; cursor: text; border-radius: 0 0 var(--k-radius) var(--k-radius); }
+.ed-transport, .ed-selbar, .ed-history { display: flex; align-items: center; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+.ed-play { width: 44px; font-size: 14px; }
+.ed-time { font-variant-numeric: tabular-nums; min-width: 130px; padding: 0 6px; }
+.ed-sel { min-width: 260px; }
+.ed-moves { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.ed-move { display: flex; align-items: center; gap: 10px; border: 1px solid var(--k-border); border-radius: var(--k-radius); padding: 6px 8px; }
+.ed-move > button { min-width: 150px; }
+.ed-note { flex: 1; color: var(--k-dim); font-size: 11px; }
+.ed-cands { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; border: 1px solid var(--k-border-hi);
+            border-radius: var(--k-radius); padding: 8px; }
+.ed-cand-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.ed-cand { display: flex; align-items: center; gap: 6px; border: 1px solid var(--k-border); border-radius: var(--k-radius); padding: 4px 6px; }
+.ed-cand.chosen { border-color: var(--k-accent); }
+.ed-cand b { min-width: 14px; }
+.ed-label { color: var(--k-dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
+.ed-versions { display: flex; flex-wrap: wrap; gap: 4px; }
+.ed-keys { margin-top: 10px; color: var(--k-muted); font-size: 11px; }
+.take { cursor: pointer; }
+.take:hover { border-color: var(--k-border-hi); }
 /* Radio */
 #radio-plan { font-size: 12px; line-height: 1.35; }
 .radio-top { display: grid; grid-template-columns: 1fr; gap: 6px; margin-bottom: 8px; }
@@ -43,3 +79,73 @@ canvas.heat { width: 100%; height: 96px; display: block; image-rendering: pixela
 .song-bars .k-meter.lat > .fill { background: #8f6fd8; }
 .song-bars .k-meter.dec > .fill { background: var(--k-ok); }
 .song-bars .k-meter > .mark.head { background: var(--k-warn); width: 2px; }
+.radio-song.built .song-state, .radio-song.ready .song-state { color: var(--k-ok); }
+#radio-style .tag-group { margin: 2px 0 6px; }
+.radio-concept { border: 1px solid var(--k-border); border-radius: var(--k-radius); padding: 6px 8px; }
+.radio-concept .k-row { align-items: center; }
+.radio-concept-tags, .radio-concept-lyrics { display: block; font-size: 12px; margin-top: 2px;
+                                             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.radio-concept-lyrics { font-style: italic; }
+.radio-concept-editor { display: flex; flex-direction: column; gap: 4px; padding: 6px 8px;
+                        border: 1px dashed var(--k-border); border-radius: var(--k-radius); }
+.radio-edit-lyrics { font-size: 12px; line-height: 1.35; }
+
+/* Radio: the side panel */
+/* The Radio and Edit tabs carry their own transport; the lab pipeline's hides. */
+body.on-radio #transport, body.editing #transport { display: none !important; }
+/* The side tabs on one row. */
+#tabs { flex-wrap: nowrap; }
+#tabs > button { padding-left: 9px; padding-right: 9px; }
+.radio-adv { margin-top: 10px; border-top: 1px solid var(--k-border); padding-top: 8px; }
+.radio-adv > summary, .radio-tech > summary {
+    cursor: pointer; font-size: 10px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase;
+    color: var(--k-dim); margin-bottom: 6px; }
+.radio-adv > summary:hover, .radio-tech > summary:hover { color: var(--k-muted); }
+.radio-adv:not([open]) > *:not(summary), .radio-tech:not([open]) > *:not(summary) { display: none !important; }
+
+/* Radio: now playing */
+.radio-now { padding: 16px 18px; }
+.radio-now-head { display: flex; align-items: center; gap: 8px; }
+.radio-now-title { font-family: var(--k-font-ui); font-size: 28px; font-weight: 700; color: var(--k-text);
+                   margin: 6px 0 4px; }
+.radio-now-tags { font-family: var(--k-font-ui); font-size: 13px; color: var(--k-muted); min-height: 16px; }
+.radio-vis { display: block; width: 100%; height: 160px; margin-top: 12px; border-radius: var(--k-radius);
+             background: var(--k-surface); }
+.radio-vis[hidden] { display: none; }
+.radio-vis-ctl { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.radio-vis-styles { display: flex; gap: 2px; }
+.radio-vis-styles[hidden] { display: none; }
+.radio-vis-style { height: 22px; padding: 0 8px; font-size: 11px; background: transparent; border-color: transparent;
+                   color: var(--k-dim); }
+.radio-vis-style:hover { color: var(--k-muted); }
+.radio-vis-style.on { background: var(--k-btn); border-color: var(--k-border-hi); color: var(--k-value); }
+.radio-vis-switch { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--k-muted); cursor: pointer; }
+.radio-progress { position: relative; height: 6px; margin: 14px 0 6px; border-radius: 3px;
+                  background: var(--k-input); overflow: hidden; }
+.radio-progress > div { position: absolute; left: 0; top: 0; bottom: 0; width: 0; border-radius: 3px; }
+.radio-progress > .gen { background: var(--k-border-hi); }
+.radio-progress > .play { background: var(--k-accent); }
+.radio-now-times { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; color: var(--k-muted); }
+.radio-now-actions { display: flex; align-items: center; gap: 8px; margin: 12px 0 4px; }
+.radio-now-actions > #radio-start, .radio-now-actions > #radio-stop { min-width: 120px; }
+.radio-actions-sep { width: 1px; height: 22px; background: var(--k-border); margin: 0 4px; }
+.radio-keep { font-size: 12px; }
+.radio-now-actions > button { height: 32px; padding: 0 16px; font-size: 13px; }
+.radio-save-dir { font-size: 11px; margin: 0 0 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.radio-skip { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.radio-skip svg { width: 14px; height: 14px; fill: currentColor; }
+.radio-now-lyrics { white-space: pre-wrap; font-family: var(--k-font-ui); font-size: 13px; line-height: 1.5;
+                    color: var(--k-muted); max-height: 220px; overflow: auto; margin-top: 10px; }
+
+/* Radio: up next and played */
+.radio-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; }
+.radio-concept { background: var(--k-surface); }
+.radio-concept-title { font-family: var(--k-font-ui); font-size: 14px; min-width: 0;
+                       overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.radio-concept > .k-row { flex-wrap: nowrap; }
+.radio-concept > .k-row > :not(.radio-concept-title) { flex: none; }
+.radio-history { display: flex; flex-direction: column; gap: 2px; max-height: 200px; overflow: auto; }
+.radio-played { display: flex; gap: 10px; align-items: baseline; font-size: 12px; }
+.radio-played > b { font-family: var(--k-font-ui); font-weight: 600; flex: none; }
+.radio-played > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
+.radio-played > .radio-played-save { flex: none; }

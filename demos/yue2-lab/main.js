@@ -12,13 +12,13 @@
 // every knob of both AR stages and the NAR solver. Expression captures
 // residual states and steers with vectors derived from them. Takes keeps
 // every run with its settings. Radio (lib/radio.js) streams songs as they are
-// built through yue.stream: a queue, crossfades, live knobs, interrupts and
-// the next song's editable score.
+// built through yue.stream: a queue, crossfades, knobs for the songs to come
+// and the next song's editable score.
 
 import { boot } from "/lib/kit/app.js";
 import { $, h, ids } from "/lib/kit/dom.js";
 import { logView, progressBar, tabs, segmented, readout, frameLoop, stats } from "/lib/kit/ui.js";
-import { deviceBadge, modelRow, pickFolder, pickSaveFile } from "/lib/kit/ml.js";
+import { deviceBadge, modelRow, pickFolderAsync, pickSaveFileAsync } from "/lib/kit/ml.js";
 import { bindControl } from "/lib/kit/params.js";
 import { streamPlayer, interleave } from "/app/lib/player.js";
 import { semanticView, latentView, waveView } from "/app/lib/views.js";
@@ -28,6 +28,7 @@ import { buildExpression, captureOptions, steerOptions, steerSummary, setCapture
 import { addTake, saveTake, loadTake, setTakeHandlers } from "/app/lib/takes.js";
 import { audioContext } from "/lib/kit/audio.js";
 import { buildRadio, radioRunning, syncRadio, reveal as revealRadio } from "/app/lib/radio.js";
+import { buildEditor, revealEditor, tickEditor, editorBusy } from "/app/lib/editor.js";
 
 const { status } = boot();
 const el = ids('style', 'lyrics', 'seed', 'abc', 'cfg', 'progress');
@@ -35,7 +36,10 @@ const log = logView('#log', { newestFirst: true, time: true });
 const progress = progressBar('#progress');
 const badge = deviceBadge('#device');
 let radioBuilt = false, radioTab = false;
-tabs('#tabs', { onChange: (name) => { radioTab = name === 'radio'; if (radioBuilt) revealRadio(radioTab); } });
+tabs('#tabs', { onChange: (name) => {
+    radioTab = name === 'radio';
+    if (radioBuilt) { revealRadio(radioTab); revealEditor(name === 'edit'); }
+} });
 const stat = stats('#stats', { model: 'model', vae: 'vae', job: 'job' });
 
 // ── state ────────────────────────────────────────────────────────────────────
@@ -407,6 +411,7 @@ function ready() {
     if (!yue || !vae) { status.warn('load the models first'); return false; }
     if (job) { status.warn('a job is running: Stop it first'); return false; }
     if (radioRunning()) { status.warn('the radio holds the model: Stop radio first'); return false; }
+    if (editorBusy()) { status.warn('the editor is working: wait or Stop it'); return false; }
     return true;
 }
 
@@ -439,7 +444,12 @@ function songRequest() {
 buildRadio({
     models: () => ({ yue, vae }),
     request: songRequest,
-    canStart: () => !job,
+    // The radio's own concepts take the Sampling panel's AR sampling too.
+    sampling: () => {
+        const so = samplingOptions();
+        return { abcSampling: so.abcSampling, abcDraftTokens: so.abcDraftTokens, semanticSampling: so.semanticSampling };
+    },
+    canStart: () => !job && !editorBusy(),
     onRunning: (on) => {
         if (on) player.stop();
         stat.set('job', radioRunning() ? 'radio' : '—');
@@ -450,6 +460,15 @@ buildRadio({
 radioBuilt = true;
 revealRadio(radioTab);
 
+// ── editor ───────────────────────────────────────────────────────────────────
+buildEditor({
+    models: () => ({ yue, vae }),
+    sampling: () => ({ semanticSampling: samplingOptions().semanticSampling, odeSteps: samplingOptions().odeSteps }),
+    canRun: () => !job && !radioRunning(),
+    progress: (f) => progress.set(f),
+    log, status,
+});
+
 $('#btn-generate').addEventListener('click', generate);
 $('#btn-plan').addEventListener('click', planStage);
 $('#btn-semantic').addEventListener('click', semanticStage);
@@ -458,22 +477,24 @@ $('#btn-decode').addEventListener('click', decodeStage);
 $('#btn-stop').addEventListener('click', () => { if (job) { job.cancel(); log.add('cancel requested'); } player.stop(); });
 $('#btn-play').addEventListener('click', () => { const s = player.replay(); if (!s) status.warn('nothing to play'); });
 $('#btn-halt').addEventListener('click', () => player.stop());
-$('#btn-save-wav').addEventListener('click', () => {
+// The dialogs don't block: the radio (fed from the frame loop) plays on behind them.
+$('#btn-save-wav').addEventListener('click', async () => {
     const a = player.audio();
     if (!a) { status.warn('nothing to save'); return; }
-    let p = pickSaveFile('WAV audio|wav', 'yue2-take.wav');
+    let p = await pickSaveFileAsync('WAV audio|wav', 'yue2-take.wav');
     if (!p) return;
     if (!/\.wav$/i.test(p)) p += '.wav';
     audioContext().saveWav(p, interleave(a.samples.subarray(0, a.frames), a.samples.subarray(a.frames)), 2, a.sampleRate);
     log.add('saved ' + p, 'ok');
 });
-$('#btn-save-take').addEventListener('click', () => {
+$('#btn-save-take').addEventListener('click', async () => {
     if (!cur.take) { status.warn('no take yet'); return; }
-    const d = pickFolder();
-    if (d) { saveTake(d, cur.take); log.add('take saved to ' + d, 'ok'); }
+    const take = cur.take;
+    const d = await pickFolderAsync();
+    if (d) { saveTake(d, take); log.add('take saved to ' + d, 'ok'); }
 });
-$('#btn-load-take').addEventListener('click', () => {
-    const d = pickFolder();
+$('#btn-load-take').addEventListener('click', async () => {
+    const d = await pickFolderAsync();
     if (!d) return;
     try { openTake(loadTake(d)); log.add('loaded take from ' + d + ' (press Decode for audio)', 'ok'); }
     catch (e) { status.error('load take: ' + e.message); }
@@ -509,12 +530,13 @@ setTakeHandlers({
     select: openTake,
     play: (t) => { openTake(t); player.replay(); },
     restore: restoreSettings,
-    save: (t) => { const d = pickFolder(); if (d) { saveTake(d, t); log.add('take #' + t.id + ' saved to ' + d, 'ok'); } },
+    save: async (t) => { const d = await pickFolderAsync(); if (d) { saveTake(d, t); log.add('take #' + t.id + ' saved to ' + d, 'ok'); } },
 });
 
 // ── frame loop ───────────────────────────────────────────────────────────────
 frameLoop(() => {
     player.tick();
+    tickEditor();
     semView.draw();
     latView.draw();
     const ps = player.stats();

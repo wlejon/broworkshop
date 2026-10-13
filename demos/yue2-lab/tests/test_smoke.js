@@ -71,15 +71,18 @@ test('radio surface: controls, knob ranges, nothing runs before load', () => {
     clickOn('[data-tab=radio]');
     frames(2);
     check(q('[data-tab=radio]').classList.contains('active'), 'Radio tab selected');
-    check(!q('#radio-view').hidden && !q('#radio-plan-panel').hidden, 'radio panels shown on the Radio tab');
-    for (const sel of ['#radio-start', '#radio-enqueue', '#radio-skip', '#radio-stop', '#radio-continue', '#radio-tag',
-                       '#radio-energetic', '#radio-calm', '#radio-plan', '#radio-plan-apply', '#radio-songs',
-                       '#radio-norm', '#radio-break', '#radio-int1', '#radio-int2', '#radio-firstAudio', '#radio-lead',
-                       '#radio-playhead'])
+    for (const sel of ['#radio-now', '#radio-concepts-panel', '#radio-history-panel', '#radio-view'])
+        check(!q(sel).hidden, sel + ' shown on the Radio tab');
+    for (const sel of ['#radio-start', '#radio-enqueue', '#radio-skip-now', '#radio-full', '#radio-save', '#radio-keep',
+                       '#radio-autofull', '#radio-stop', '#radio-continue', '#radio-tag',
+                       '#radio-plan', '#radio-plan-apply', '#radio-songs', '#radio-history',
+                       '#radio-norm', '#radio-break', '#radio-firstAudio', '#radio-lead',
+                       '#radio-playhead', '#radio-ahead'])
         check(q(sel), sel + ' present');
     // bro.music.knobRanges, before any stream: the documented clamps
     // (docs/music-api.js YuE2Knobs), and the sliders take them.
-    const want = { energy: [-2, 1], texture: [-2, 2], percussion: [-6, 6], arrangement: [-2, 1] };
+    const want = { energy: [-2, 1], texture: [-2, 2], percussion: [-6, 6], arrangement: [-2, 1],
+                   density: [-1.5, 1], timbre: [-1.5, 1] };
     const engine = bro.music ? bro.music.knobRanges : null;
     if (engine) eq(Object.fromEntries(Object.entries(engine).map(([k, r]) => [k, [r.min, r.max]])), want,
                    'bro.music.knobRanges is the documented clamps');
@@ -95,13 +98,23 @@ test('radio surface: controls, knob ranges, nothing runs before load', () => {
         setValue('#knob-texture', 0);
     }
     check(q('#radio-continue').checked, 'radio continue on by default');
-    eq(document.querySelectorAll('#radio-start-params .k-field').length, 6, 'stream start options');
+    eq(document.querySelectorAll('#radio-start-params .k-field').length, 8, 'stream start options (songs ahead first)');
+    eq(q('#radio-start-params input[type=range]').value, '3', 'three songs kept built ahead by default');
+    eq(document.querySelectorAll('#radio-start-params input[type=range]')[1].value, '30', '30 s previews by default');
+    check(!q('#radio-autofull').checked, 'auto full off by default (scan mode)');
+    check(q('#radio-full').disabled, 'Make full song disabled before a stream');
+    check(q('#radio-fullSong'), 'the on-air song readout present');
+    eq(q('#radio-source').value, 'concepts', 'the radio plays its own concepts by default');
+    check(q('#radio-keep').checked, 'keep playing songs I don\'t skip: on by default');
+    for (const sel of ['#radio-style', '#radio-mood', '#radio-vocal', '#radio-language', '#radio-bpm-on', '#radio-concepts'])
+        check(q(sel), sel + ' present');
+    check(document.querySelectorAll('#radio-style .k-chip').length > 10, 'genre and instrument chips');
     eq(document.querySelectorAll('#radio-song-params .k-field').length, 1, 'per-song options (ODE steps)');
     eq(q('#radio-start-params input[type=text]').value, '250, 500', 'NAR windows default');
-    for (const id of ['radio-start', 'radio-enqueue', 'radio-skip', 'radio-stop', 'radio-energetic', 'radio-calm', 'radio-plan-apply'])
+    eq(text('#radio-now-title'), 'Press Start radio', 'the now-playing card before a stream');
+    for (const id of ['radio-start', 'radio-enqueue', 'radio-skip-now', 'radio-stop', 'radio-plan-apply'])
         check(q('#' + id).disabled, id + ' disabled before load');
     check(/nothing queued/.test(text('#radio-songs')), 'empty queue');
-    eq(text('#radio-int1'), '—', 'no interrupt yet');
     eq(text('#radio-break'), 'no break warning', 'no break warning');
     clickOn('[data-tab=song]');
     frames(1);

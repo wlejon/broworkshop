@@ -1,7 +1,8 @@
 // Takes: every finished run, with what made it. A take folder on disk holds
 // take.json (conditioning, settings, score, plan, timing), semantic.i32,
-// latents.f32 and take.wav, so a take can be reloaded and re-decoded or
-// re-synthesized.
+// latents.f32, energy.f32 (when the energy knob moved), lyrics.txt and
+// take.wav (a radio song's take points at its saved WAV instead), so a take
+// can be reloaded and re-decoded or re-synthesized.
 
 import { $, h, clear } from "/lib/kit/dom.js";
 import { audioContext } from "/lib/kit/audio.js";
@@ -59,11 +60,15 @@ export function saveTake(dir, t) {
         plan: t.plan ? { abc: t.plan.abc, abcIds: Array.from(t.plan.abcIds || []), prefix: Array.from(t.plan.prefix || []),
                           truncated: !!t.plan.truncated } : null,
         when: t.when.toISOString(),
+        title: t.title, tags: t.tags, wav: t.wav,   // a radio song: its name and the WAV saved beside the take
     };
     fs.writeFileSync(dir + '/take.json', JSON.stringify(meta, null, 2));
     const bytes = (a) => new Uint8Array(a.buffer, a.byteOffset, a.byteLength);
     if (t.semantic && t.semantic.length) fs.writeFileSync(dir + '/semantic.i32', bytes(t.semantic));
     if (t.latents && t.latents.length) fs.writeFileSync(dir + '/latents.f32', bytes(t.latents));
+    // The energy knob's per-frame offset, when it was ever moved (decode adds it).
+    if (t.energy && t.energy.some((v) => v !== 0)) fs.writeFileSync(dir + '/energy.f32', bytes(t.energy));
+    if (t.lyrics) fs.writeFileSync(dir + '/lyrics.txt', (t.title ? t.title + '\n' + (t.tags || '') + '\n\n' : '') + t.lyrics.trim() + '\n');
     if (t.audio && t.audio.frames) {
         const a = t.audio;
         audioContext().saveWav(dir + '/take.wav', interleave(a.samples.subarray(0, a.frames), a.samples.subarray(a.frames)),
@@ -87,6 +92,7 @@ export function loadTake(dir) {
     t.kind = 'loaded';
     t.semantic = read('semantic.i32', Int32Array);
     t.latents = read('latents.f32', Float32Array);
+    t.energy = read('energy.f32', Float32Array);
     t.frames = Math.floor(t.latents.length / 64);
     if (meta.plan) t.plan = { abc: meta.plan.abc, abcIds: Int32Array.from(meta.plan.abcIds),
                               prefix: Int32Array.from(meta.plan.prefix), truncated: meta.plan.truncated };

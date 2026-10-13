@@ -15,12 +15,24 @@ export const FRAME_SAMPLES = 1920;            // one latent frame of program aud
 export function knobRanges() {
     return (typeof bro !== 'undefined' && bro.music && bro.music.knobRanges) || {};
 }
+// A knob steers the songs queued after it moves; the songs that exist keep
+// theirs (skip to hear it sooner).
 export const KNOB_HINTS = {
-    energy: 'latent offset along the energy direction: louder, brighter; heard within the emit lead (~0.75 s)',
-    texture: 'NAR steer after layer 21; re-solved from ~1.5 s ahead',
-    percussion: 'NAR steer after layer 9: onsets; re-solved from ~1.5 s ahead',
-    arrangement: 'semantic steer after layer 21: a real arrangement change; the song continues under it from ~2.5 s ahead',
+    energy: 'latent offset along the energy direction: louder, brighter',
+    texture: 'NAR steer after layer 21',
+    percussion: 'NAR steer after layer 9: onsets',
+    arrangement: 'semantic steer after layer 21: a real arrangement change',
+    density: 'semantic style steer: full band (+) ↔ sparse (−)',
+    timbre: 'semantic style steer: bright, aggressive (+) ↔ warm, mellow (−)',
 };
+const knobHint = (name) => (KNOB_HINTS[name] || 'semantic style steer') + '; for the songs to come';
+// The Sound sliders' labels and order (the stream's knob names underneath).
+const KNOB_LABELS = { energy: 'energy', density: 'sparse ↔ full', timbre: 'warm ↔ bright', arrangement: 'arrangement',
+                      texture: 'texture', percussion: 'percussion' };
+const knobOrder = (names) => names.sort((a, b) => {
+    const k = Object.keys(KNOB_LABELS), ia = k.indexOf(a), ib = k.indexOf(b);
+    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+});
 
 // The corpus range of a window's mean latent norm (breakWarning outside it),
 // and the span the meter draws.
@@ -38,10 +50,12 @@ const clamp01 = (x) => Math.max(0, Math.min(1, x));
 export function knobSliders(host, onInput) {
     const node = $(host);
     const sliders = {}, applied = {};
-    for (const [name, r] of Object.entries(knobRanges())) {
+    const ranges = knobRanges();
+    for (const name of knobOrder(Object.keys(ranges))) {
+        const r = ranges[name];
         const input = h('input#knob-' + name, { type: 'range', min: r.min, max: r.max, step: name === 'percussion' ? 0.1 : 0.05, value: 0 });
         applied[name] = h('span.k-val#knob-' + name + '-val', { title: 'the value the stream applied (clamped)' }, '0.00');
-        node.appendChild(h('label.k-field', { title: KNOB_HINTS[name] }, h('span', null, name), input, applied[name]));
+        node.appendChild(h('label.k-field', { title: knobHint(name) }, h('span', null, KNOB_LABELS[name] || name), input, applied[name]));
         sliders[name] = input;
         bindControl(input, { reset: 0, onChange: (v) => onInput(name, v) });
     }
@@ -114,16 +128,102 @@ export function normMeter(host) {
 export function programReadout(host) {
     const r = readout(host, {
         onair: 'on air', playhead: 'playhead', emitted: 'handed out', lead: 'buffered lead (handed out − playhead)',
-        firstAudio: 'first audio (request → handed out)', ring: 'player ring', underrun: 'player underrun',
+        firstAudio: 'first audio (request → handed out)', ahead: 'built ahead (skip is instant to a ready one)',
+        fullSong: 'the song on air',
+        ring: 'player ring', underrun: 'player underrun',
     });
     for (const k of r.keys) r.row(k).lastChild.id = 'radio-' + k;
     return r;
 }
 
-export function interruptReadout(host) {
-    const r = readout(host, { int1: 'stage 1 · latent offset', int2: 'stage 2 · arrangement' });
-    for (const k of r.keys) r.row(k).lastChild.id = 'radio-' + k;
-    return r;
+const clock = (s) => { s = Math.max(0, Math.floor(s)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+
+/**
+ * The now-playing card (#radio-now's children by id). render(song, row,
+ * playhead, kept): song is { title, tags, lyrics } or null; row the song's
+ * stream stats; the bar shows what is played and what is generated over the
+ * song's length (its preview's until it is kept, then the plan's estimate).
+ */
+export function nowPlaying() {
+    const el = {
+        state: $('#radio-now-state'), title: $('#radio-now-title'), tags: $('#radio-now-tags'),
+        gen: $('#radio-progress-gen'), play: $('#radio-progress-play'),
+        time: $('#radio-now-time'), note: $('#radio-now-note'), len: $('#radio-now-len'),
+        lyrics: $('#radio-now-lyrics'), keep: $('#radio-full'), save: $('#radio-save'),
+    };
+    const SAVE_LABEL = { waiting: 'Saving when it is done…', saved: 'Saved ✓', failed: 'Save failed: again?' };
+    const set = (n, t) => { if (n.textContent !== t) n.textContent = t; };
+    let lyricsFor = -1;
+    return {
+        render(song, row, playhead, kept, save) {
+            set(el.save, save ? SAVE_LABEL[save.state] : 'Save');
+            el.save.disabled = !row || (!!save && save.state === 'waiting');
+            el.save.title = save && save.text ? save.text : 'Save this song as a WAV (and its lyrics): a preview is kept and saved whole once it is done';
+            if (!song || !row) {
+                set(el.state, 'off'); el.state.className = 'k-badge';
+                set(el.title, row === null && song === null ? 'Press Start radio' : 'Tuning in…');
+                set(el.tags, ''); set(el.time, '0:00'); set(el.len, '—'); set(el.note, '');
+                el.gen.style.width = '0%'; el.play.style.width = '0%';
+                if (lyricsFor !== -1) { lyricsFor = -1; el.lyrics.textContent = ''; }
+                return;
+            }
+            const whole = !row.preview;
+            const lenFrames = whole ? (row.semanticDone ? row.semanticFrames : Math.max(row.estimateFrames || 0, row.latentFrames))
+                                    : row.previewFrames;
+            const len = Math.max(1, lenFrames) / 25;
+            const t = Math.max(0, (playhead - row.start) / PROGRAM_RATE);
+            const gen = Math.max(row.decodedFrames, row.latentFrames) / 25;
+            set(el.title, song.title);
+            set(el.tags, song.tags);
+            el.play.style.width = clamp01(t / len) * 100 + '%';
+            el.gen.style.width = clamp01(gen / len) * 100 + '%';
+            set(el.time, clock(t));
+            set(el.len, (whole && !row.semanticDone ? '~' : '') + clock(len));
+            // Generated once its latents are complete (the audio is decoded
+            // a few seconds ahead of the playhead as it plays).
+            const done = row.built || (row.semanticDone && row.latentFrames >= row.semanticFrames);
+            const st = whole ? (done ? 'whole song' : 'whole song · generating') : kept ? 'keeping…' : 'preview';
+            set(el.state, st); el.state.className = 'k-badge ' + (whole ? 'ok' : '');
+            set(el.note, whole ? (done ? '' : 'generating ' + Math.round(clamp01(gen / len) * 100) + '%')
+                               : kept ? 'continuing into the whole song' : 'a 30 s preview: Keep, or it moves on');
+            el.keep.hidden = whole || kept;
+            if (lyricsFor !== song.index) {
+                lyricsFor = song.index;
+                el.lyrics.textContent = song.lyrics || '';
+            }
+        },
+    };
+}
+
+/**
+ * The played list, newest first: add({ index, title, tags }), mark(index,
+ * text) on a save, reset(). The newest `savable` (the stream's keepPlayed)
+ * carry a save link: older ones' audio is gone.
+ */
+export function playedList(host, onSave, savable) {
+    const node = $(host);
+    const links = new Map();   // song index -> its save link
+    let n = 0;
+    return {
+        add(song) {
+            if (!n) clear(node);
+            n++;
+            const link = h('button.k-link.radio-played-save', { title: 'Save it as a WAV (as it played) and its lyrics',
+                                                               onclick: () => onSave(song.index) }, 'save');
+            links.set(song.index, link);
+            node.insertBefore(h('div.radio-played', null, h('b', null, song.title), h('span.dim', null, song.tags), link),
+                              node.firstChild);
+            const order = [...links.keys()];
+            for (const i of order.slice(0, Math.max(0, order.length - savable))) {
+                const l = links.get(i);
+                if (l.textContent === 'save') l.remove();
+                links.delete(i);
+            }
+            while (node.children.length > 30) node.removeChild(node.lastChild);
+        },
+        mark(index, text) { const l = links.get(index); if (l) { l.textContent = text; l.disabled = true; } },
+        reset() { n = 0; links.clear(); clear(node); node.appendChild(h('span.dim', null, 'nothing yet')); },
+    };
 }
 
 /** What a song is doing, from its stats row and the playhead. */
@@ -131,6 +231,8 @@ export function songState(s, playhead) {
     if (s.dropped) return 'dropped';
     if (s.end >= 0 && playhead >= s.end) return 'played';
     if (s.start >= 0 && playhead >= s.start) return 'on air';
+    if (s.built) return 'built';
+    if (s.ready) return 'ready';
     if (s.decodedFrames > 0) return 'decoding';
     if (s.latentFrames > 0) return 'synthesizing';
     if (s.semanticDone) return 'semantic done';
@@ -192,7 +294,8 @@ export function songMeters(host) {
                 if (r.state.textContent !== st) { r.state.textContent = st; r.el.className = 'radio-song ' + st.replace(/\s+/g, '-'); }
                 const nums = 'sem ' + s.semanticFrames + ' · lat ' + s.latentFrames + ' · dec ' + s.decodedFrames +
                     ' · play ' + Math.min(Math.round(playFrames), s.semanticFrames || Infinity) + len +
-                    (s.start >= 0 ? ' · from ' + sec(s.start) : '');
+                    (s.start >= 0 ? ' · from ' + sec(s.start) : '') +
+                    (s.preview ? ' · preview ' + (s.previewFrames / 25).toFixed(0) + ' s' : '');
                 if (r.nums.textContent !== nums) r.nums.textContent = nums;
                 const mark = clamp01(playFrames / total) * 100 + '%';
                 for (const [k, n] of [['sem', s.semanticFrames], ['lat', s.latentFrames], ['dec', s.decodedFrames]]) {

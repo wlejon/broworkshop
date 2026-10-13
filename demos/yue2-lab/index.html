@@ -42,6 +42,7 @@
         <button data-tab="sampling">Sampling</button>
         <button data-tab="expression">Expression</button>
         <button data-tab="takes">Takes</button>
+        <button data-tab="edit">Edit</button>
         <button data-tab="radio">Radio</button>
       </div>
 
@@ -128,56 +129,168 @@
         <div id="takes" class="k-col"></div>
       </div>
 
-      <!-- RADIO: yue.stream, songs played as they are built, steered live -->
+      <!-- EDIT: a saved song's take cut, regenerated and grown -->
+      <div class="k-panel" data-pane="edit">
+        <h2>Saved songs <button id="edit-refresh" class="k-link" title="Read the save folder again">refresh</button></h2>
+        <span class="k-note">The radio's saves (and the editor's). Open one, select a stretch of it,
+          and regenerate, cut, or grow a new song from it; each step is a version.</span>
+        <div id="edit-takes" class="k-col"></div>
+      </div>
+
+      <!-- RADIO: yue.stream, songs played as they are built, steered from the next song on -->
       <div class="k-panel" data-pane="radio">
-        <h2>Radio</h2>
-        <span class="k-note">Songs from the Song panel (style, lyrics, score mode, seed, sampling) played as
-          they are built, crossfaded, and steered live. The radio holds the model and the VAE: the other
-          jobs wait until it stops.</span>
-        <div class="k-row">
-          <button id="radio-start" class="primary" title="Start a stream with the Song panel's current song">Start radio</button>
-          <button id="radio-enqueue" title="Add the Song panel's current song to the queue">+ Queue song</button>
-          <button id="radio-skip" title="To the next song (built, or as soon as it is), over a short fade">Skip ⏭</button>
-          <button id="radio-stop" class="danger" title="End the stream">Stop radio</button>
-        </div>
-        <div class="k-row">
-          <label class="k-field" title="An empty queue continues with the last song's request and the next seed (set at start)">
-            <input id="radio-continue" type="checkbox" checked> radio continue</label>
-          <label class="k-field" title="Your label for the songs you queue (empty: from the style)">tag
-            <input id="radio-tag" type="text" placeholder="auto" style="width:130px"></label>
-        </div>
-        <h2>Interrupt</h2>
-        <div class="k-row">
-          <button id="radio-energetic" title="Stage 1: a latent offset, ~0.75 s; stage 2: an arrangement-steered continuation, ~2.5 s">⚡ Energetic now</button>
-          <button id="radio-calm" title="The same two stages, the other way">Calm now</button>
-        </div>
-        <div id="radio-interrupt"></div>
-        <h2>Knobs <span class="dim">live; right-click a slider for 0; carried into the next song</span></h2>
+        <h2>What plays <span class="dim">pin, or leave random</span></h2>
+        <div class="k-col" id="radio-style"></div>
+
+        <h2>Sound <span class="dim">for the songs to come; right-click resets</span></h2>
         <div class="k-col" id="radio-knobs"></div>
-        <div class="dim" id="radio-knobs-heard"></div>
-        <h2>Stream <span class="dim">applies at the next Start</span>
-          <button id="radio-start-defaults" class="k-link" title="The stream's defaults">defaults</button></h2>
-        <div class="k-col" id="radio-start-params"></div>
-        <h2>Song <span class="dim">applies to each song queued from now</span></h2>
-        <div class="k-col" id="radio-song-params"></div>
+
+        <details class="radio-adv">
+          <summary>Advanced</summary>
+          <div class="k-row">
+            <label class="k-field" title="Where the songs come from (set at start)">songs
+              <select id="radio-source">
+                <option value="concepts" selected>random</option>
+                <option value="song">the Song panel's song</option>
+              </select></label>
+            <label class="k-field" title="Song panel source: an empty queue continues with the last song's request and the next seed (set at start)">
+              <input id="radio-continue" type="checkbox" checked> continue</label>
+          </div>
+          <div class="k-row">
+            <button id="radio-enqueue" title="Add the Song panel's current song to the queue">+ Song panel song</button>
+            <label class="k-field" title="Your label for the songs you queue (empty: from the style)">tag
+              <input id="radio-tag" type="text" placeholder="auto" style="width:110px"></label>
+          </div>
+          <label class="k-field" title="Every song is built whole from the start, no previews (the classic radio)">
+            <input id="radio-autofull" type="checkbox"> whole songs from the start</label>
+          <div class="k-col" id="radio-concept-params"></div>
+          <h2>Stream <span class="dim">applies at the next Start</span>
+            <button id="radio-start-defaults" class="k-link" title="The stream's defaults">defaults</button></h2>
+          <div class="k-col" id="radio-start-params"></div>
+          <h2>Song <span class="dim">each song queued from now</span></h2>
+          <div class="k-col" id="radio-song-params"></div>
+        </details>
       </div>
     </aside>
 
     <main class="k-main pad">
-      <div class="k-panel radio-main" id="radio-view">
-        <h2>Radio <span class="dim" id="radio-meta"></span></h2>
+      <div class="k-panel edit-main" id="edit-panel">
+        <div class="ed-head">
+          <h2>Editor</h2>
+          <span id="edit-meta" class="ed-title"></span>
+          <div class="k-spacer"></div>
+          <div id="edit-job" class="ed-job off">
+            <span class="ed-spin"></span>
+            <span id="edit-job-text"></span>
+            <div class="ed-job-bar"><div id="edit-job-fill"></div></div>
+            <button id="edit-stop" class="danger small" title="Cancel the running step">Stop</button>
+          </div>
+        </div>
+        <canvas id="edit-overview" class="ed-overview" title="the whole song: click or drag to move the view"></canvas>
+        <canvas id="edit-wave" class="ed-wave" title="click: move the playhead · drag: select · drag an edge: adjust it · wheel: zoom · shift+wheel: scroll"></canvas>
+        <div class="ed-transport">
+          <button id="edit-home" class="small" title="To the start (Home)">⏮</button>
+          <button id="edit-back" class="small" title="Back 1 s (←; Shift: 0.1 s)">◀ 1 s</button>
+          <button id="edit-play" class="ed-play" title="Play / pause from the playhead (Space)">▶</button>
+          <button id="edit-fwd" class="small" title="Forward 1 s (→; Shift: 0.1 s)">1 s ▶</button>
+          <span id="edit-time" class="ed-time"></span>
+          <label class="k-field" title="Play the selection over and over (L)"><input id="edit-loop" type="checkbox"> loop selection</label>
+          <div class="k-spacer"></div>
+          <span class="dim">zoom</span>
+          <button id="edit-zoom-out" class="small" title="Zoom out (−)">−</button>
+          <button id="edit-zoom-fit" class="small" title="The whole song (0)">fit</button>
+          <button id="edit-zoom-sel" class="small" title="Zoom to the selection (Z)">selection</button>
+          <button id="edit-zoom-in" class="small" title="Zoom in (+)">+</button>
+        </div>
+        <div class="ed-selbar">
+          <span id="edit-sel" class="ed-sel"></span>
+          <button id="edit-mark-in" class="small" title="Selection starts at the playhead ([)">[ in</button>
+          <button id="edit-mark-out" class="small" title="Selection ends at the playhead (])">out ]</button>
+          <button id="edit-play-sel" class="small sel-act" title="Play the selection (P)">▶ selection</button>
+          <button id="edit-play-from" class="small sel-act" title="Play from 4 s before the selection: hear how it comes in (Shift+P)">▶ into it</button>
+          <button id="edit-clear-sel" class="small sel-act" title="Clear the selection (Esc)">clear</button>
+        </div>
+        <div class="ed-moves">
+          <div class="ed-move">
+            <button id="edit-regen" class="edit-act sel-act" title="New music for the selection, the same length, the rest kept">Regenerate</button>
+            <span class="ed-note">new music for the selection, the same length; every candidate rendered to compare</span>
+            <label class="k-field" title="candidates drawn, each scored by how well what follows fits">candidates <input id="edit-cands-n" type="number" min="1" max="8" value="3" style="width:48px"></label>
+          </div>
+          <div class="ed-move">
+            <button id="edit-cut" class="edit-act sel-act" title="Remove the selection: the gap closed, or bridged with new music">Cut</button>
+            <span class="ed-note">take the selection out; the two sides joined, or bridged by new seconds</span>
+            <label class="k-field" title="seconds of new music between the two sides (0 = joined directly)">bridge <input id="edit-bridge" type="number" min="0" max="30" step="0.5" value="0" style="width:56px"> s</label>
+          </div>
+          <div class="ed-move">
+            <button id="edit-grow" class="edit-act sel-act" title="A new song built around the selection, which stays where it sits in the score">New song from it</button>
+            <span class="ed-note">new music before and after, the selection where it sits in the song's score</span>
+            <label class="k-field" title="where the new song is steered to end (empty: as long as the song open now); the score alone can run long, a score that repeats itself much longer">about <input id="edit-grow-len" type="number" min="10" max="360" step="5" style="width:56px"> s</label>
+            <label class="k-field" title="off: the selection is regenerated too once the song around it is built, so all of it is new"><input id="edit-keep-clip" type="checkbox" checked> keep the clip</label>
+          </div>
+        </div>
+        <div id="edit-candidates" class="ed-cands off"></div>
+        <div class="ed-history">
+          <span class="ed-label">History</span>
+          <div id="edit-versions" class="ed-versions"></div>
+          <div class="k-spacer"></div>
+          <button id="edit-save" class="edit-act primary" title="Save this version's WAV (and its take) into the radio's save folder">Save version</button>
+        </div>
+        <div class="ed-keys">Space play/pause · ←/→ 1 s (Shift 0.1 s) · Home/End · [ ] selection in/out at the playhead · P play selection · L loop · Z zoom to it · Esc clear · Ctrl+Z / Ctrl+Y history</div>
+      </div>
+      <div class="k-panel radio-main radio-now" id="radio-now">
+        <div class="radio-now-head">
+          <span class="k-cap">Now playing</span>
+          <span class="k-badge" id="radio-now-state">off</span>
+          <span class="radio-vis-ctl" id="radio-vis-ctl"></span>
+        </div>
+        <div class="radio-now-title" id="radio-now-title">Press Start radio</div>
+        <div class="radio-now-tags" id="radio-now-tags"></div>
+        <canvas class="radio-vis" id="radio-vis"></canvas>
+        <div class="radio-progress" id="radio-progress" title="played · generated · the song's length">
+          <div class="gen" id="radio-progress-gen"></div>
+          <div class="play" id="radio-progress-play"></div>
+        </div>
+        <div class="radio-now-times">
+          <span id="radio-now-time">0:00</span>
+          <span class="dim" id="radio-now-note"></span>
+          <span id="radio-now-len">—</span>
+        </div>
+        <div class="radio-now-actions">
+          <button id="radio-start" class="primary" title="Start the radio">▶ Start radio</button>
+          <button id="radio-stop" class="radio-power-off" title="Stop the radio" hidden>■ Stop</button>
+          <span class="radio-actions-sep"></span>
+          <button id="radio-full" title="Keep this song: it continues past its preview into the whole song">Keep this song</button>
+          <button id="radio-save">Save</button>
+          <button id="radio-skip-now" class="radio-skip" title="To the next song: instant once it is built">Skip
+            <svg viewBox="0 0 16 16"><path d="M2 3l6 5-6 5zM8 3l6 5-6 5z"/><rect x="14" y="3" width="1.6" height="10"/></svg></button>
+          <div class="k-spacer"></div>
+          <label class="k-field radio-keep" title="A song you do not skip keeps playing to its end once the next one is ready to skip to; off: each plays its 30 s preview and moves on">
+            <input id="radio-keep" type="checkbox" checked> keep playing songs I don't skip</label>
+        </div>
+        <div class="radio-save-dir dim">saves to <span id="radio-save-dir"></span>
+          <button class="k-link" id="radio-save-dir-change" title="Choose the folder Save writes into">change</button></div>
+        <div class="radio-now-lyrics" id="radio-now-lyrics"></div>
+      </div>
+      <div class="k-panel radio-main" id="radio-concepts-panel">
+        <h2>Up next <span class="dim" id="radio-next-meta"></span></h2>
+        <div id="radio-concepts" class="radio-cards"></div>
+      </div>
+      <div class="k-panel radio-main" id="radio-history-panel">
+        <h2>Played</h2>
+        <div id="radio-history" class="radio-history"><span class="dim">nothing yet</span></div>
+      </div>
+      <details class="k-panel radio-main radio-tech" id="radio-view">
+        <summary>Stream details <span class="dim" id="radio-meta"></span></summary>
         <div class="radio-top">
           <div id="radio-program"></div>
           <div class="k-row" id="radio-norm-row"></div>
         </div>
         <div id="radio-songs" class="k-col"></div>
-      </div>
-      <div class="k-panel radio-main" id="radio-plan-panel">
         <h2>Next song's score <span class="dim" id="radio-plan-meta"></span>
           <button id="radio-plan-apply" class="k-link" title="Rebuild the next song from this score (setNextPlan)">apply</button></h2>
         <textarea id="radio-plan" rows="8" spellcheck="false"
           placeholder="the next song's ABC score shows here when it is planned; edit it and press apply"></textarea>
-      </div>
+      </details>
       <div class="k-panel">
         <h2>Pipeline</h2>
         <div id="stages" class="stages"></div>
