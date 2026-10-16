@@ -8,7 +8,7 @@
 //   bro-headless --width 1280 --height 720 demos/grove demos/grove/capture.js -- \
 //       still <shot[,shot...]> [label] [path=gpu] [wind=breeze]
 //   bro-headless --width 1280 --height 720 demos/grove demos/grove/capture.js -- \
-//       perf <shot[,shot...]>          (GPU ms per frame with and without the grass)
+//       perf <shot[,shot...]> [wind=breeze]   (GPU ms per frame, and the grass's, leaves' and bark's shares)
 //
 // Strips go to demos/grove/captures/<label>_<shot>_strip[_crop].png, videos to
 // demos/grove/captures/<label>.webm. `legacy` draws the mesh path with the
@@ -146,25 +146,32 @@ function stills() {
 }
 
 // GPU ms per frame at each shot (perf.gpuFrameMs, the scene's timestamp
-// queries), with the grass and without it: the grass's frame cost.
+// queries): the whole frame, then without the grass, without the grass and
+// the leaves, and without the grass and the plants, so each part's cost is
+// the difference.
 function perfShots() {
-    setup('gpu', 'breeze', false);
+    setup('gpu', a3 || 'breeze', false);
     const n = 60;
+    const [bark, leaves] = grove.nodes;
+    const show = (g, l, b) => { grove.grass.visible = g; leaves.visible = l; bark.visible = b; };
+    const cases = { all: [true, true, true], noGrass: [false, true, true], noLeaves: [false, false, true], bare: [false, false, false] };
     for (const s of shotsA.split(',')) {
         setShot(s);
         step(1);
         const ms = {};
-        for (const on of [true, false]) {
-            grove.grass.visible = on;
+        for (const [k, c] of Object.entries(cases)) {
+            show(...c);
             for (let i = 0; i < 5; i++) { advanceTime(1000 / fps); flush(); }
             perf.gpuFrameMs();
             let sum = 0;
             for (let i = 0; i < n; i++) { advanceTime(1000 / fps); flush(); sum += perf.gpuFrameMs(); }
-            ms[on ? 'with' : 'without'] = sum / n;
+            ms[k] = sum / n;
         }
-        grove.grass.visible = true;
+        show(true, true, true);
         const st = grove.grass.grassStats();
-        console.log(`${s}: ${ms.with.toFixed(2)} ms with grass, ${ms.without.toFixed(2)} without, grass ${(ms.with - ms.without).toFixed(2)} ms; instances ${st.instances.join(' / ')}`);
+        console.log(`${s}: ${ms.all.toFixed(2)} ms, ${ms.noGrass.toFixed(2)} without grass (grass ${(ms.all - ms.noGrass).toFixed(2)}, ` +
+                    `leaves ${(ms.noGrass - ms.noLeaves).toFixed(2)}, bark ${(ms.noLeaves - ms.bare).toFixed(2)}, rest ${ms.bare.toFixed(2)}); ` +
+                    `grass instances ${st.instances.join(' / ')}`);
     }
 }
 

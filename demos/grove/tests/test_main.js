@@ -1,7 +1,7 @@
 // grove: grown trees and shrubs swaying in bro.scene's wind field with no wind
 // code in the app. Run: scripts/validate.sh demos/grove
 import { check, eq, test, done, frames, clickOn } from "/lib/kit/test.js";
-import { grove, scene, PLANTS, WINDS, FOLIAGE, GROUND, groundHeight, roller, dryness, ground } from "/app/grove.js";
+import { grove, scene, PLANTS, WINDS, FOLIAGE, GROUND, PLANT_SCALE, groundHeight, roller, dryness, ground } from "/app/grove.js";
 
 frames(2);
 
@@ -23,9 +23,25 @@ test('the grove grows every plant and draws it on the GPU path', () => {
 
 test('the emitters carry the vegetation records the scene sways', () => {
     const t = grove.world.emitBranchTubes();
-    eq(t.vegetation.length, t.segCount * 12, 'tube records');
+    eq(t.vegetation.length, t.segCount * 16, 'tube records');
     const bark = grove.world.emitMesh(5);
     eq(bark.vegetation.length, bark.vertexCount * 16, 'bark records');
+});
+
+test('the trees are cantilevers: a slow trunk, quick sprays', () => {
+    // The packed words (broflora/sway.h): trunk f in the top 12 bits of
+    // word 15, a spray's f in bits 12-17 of word 13, log over 0.05-50 Hz.
+    const t = grove.world.emitBranchTubes();
+    const v = t.vegetation;
+    const hz = (code, bits) => code === 0 ? 0 : 0.05 * Math.exp((code - 1) / ((1 << bits) - 2) * Math.log(1000));
+    let trunkMax = 0, sprayMin = Infinity;
+    for (let i = 0; i < t.segCount; i++) {
+        trunkMax = Math.max(trunkMax, hz(Math.round(v[i * 16 + 15]) >> 12, 12) / PLANT_SCALE);
+        const s = hz((Math.round(v[i * 16 + 13]) >> 12) & 63, 6) / PLANT_SCALE;
+        if (s > 0) sprayMin = Math.min(sprayMin, s);
+    }
+    check(trunkMax > 0.2 && trunkMax < 2, 'trunks sway at a tree\'s period, drawn: ' + trunkMax.toFixed(2) + ' Hz at most');
+    check(sprayMin > 2 * trunkMax, 'sprays are quicker: ' + sprayMin.toFixed(2) + ' Hz at least');
 });
 
 test('leaves hang in crown clumps and the ground rolls', () => {

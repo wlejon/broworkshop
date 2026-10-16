@@ -29,6 +29,9 @@ export const vp = sceneViewport('#stage', {
 export const { scene } = vp;
 export const sky = daylight(scene, { order: ['golden', 'noon', 'dawn'], cascades: 3, atlas: 4096, pcf: 3 });
 sky.setScale(1.7);   // the haze sits past the grove, on the hills
+// Leaves are cut-out silhouettes in geometry, not alpha-tested textures, so
+// multisampling is what smooths their edges (and the twigs').
+scene.setMSAA(4);
 vp.onFrame((dt) => sky.update(dt));
 
 // --- the ground -------------------------------------------------------------------
@@ -202,7 +205,7 @@ export const MESH_FOLIAGE = { seed: 0x1eaf, perArea: 28 };
 export function leafCard(big) {
     const k = big ? 1.7 : 1;
     const m = Mesh.leafCard('oval', {
-        width: 0.07 * k, length: 0.12 * k, bend: 0.4, fullUV: true, shapedSilhouette: true, cup: 0.3,
+        width: 0.07 * k, length: 0.12 * k, bend: 0.4, fullUV: true, shapedSilhouette: true, cup: 0.55,
         widthSegments: big ? 2 : 3, lengthSegments: big ? 3 : 5,
     });
     m.colors = new Float32Array(0);
@@ -252,7 +255,7 @@ function add(node) {
 }
 
 function drawGpu(world) {
-    const tubes = world.emitBranchTubes({ sides: 7 });
+    const tubes = world.emitBranchTubes({ sides: 10 });
     const scatter = world.emitScatterSegments(FOLIAGE);
     add(scene.createInstancedMesh(Object.assign({ tube: tubes, castsShadow: true, receivesShadow: true }, BARK)));
     add(scene.createInstancedMesh(Object.assign({
@@ -311,6 +314,7 @@ export const SHOTS = {
     grove:   { label: 'Grove', target: [0, 4, 0], dist: 32, yaw: 0.0, pitch: -0.1 },
     tree:    { label: 'One tree', target: [6.5, 4.5, 9.5], dist: 18, yaw: 0, pitch: -0.05 },
     close:   { label: 'Under the crown', target: [6.5, 4.0, 11.0], dist: 7, yaw: 0.35, pitch: 0.12 },
+    limb:    { label: 'A limb', target: [5.2, 5.4, 12.6], dist: 2.4, yaw: 0.5, pitch: 0.12 },
     backlit: { label: 'Into the sun', target: [2, 5, 0], dist: 36, yaw: Math.PI * 0.5, pitch: -0.06 },
     meadow:  { label: 'Meadow', target: [-1, 1.4, 9], lift: true, dist: 26, yaw: -0.3, pitch: -0.11 },
     ground:  { label: 'In the grass', target: [-1, 0.3, 13.5], lift: true, dist: 3.6, yaw: -0.25, pitch: -0.16 },
