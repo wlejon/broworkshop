@@ -7,6 +7,8 @@
 //       video <shot[,shot...]> [label] [seconds=6] [fps=30] [path=gpu] [wind=breeze] [legacy]
 //   bro-headless --width 1280 --height 720 demos/grove demos/grove/capture.js -- \
 //       still <shot[,shot...]> [label] [path=gpu] [wind=breeze]
+//   bro-headless --width 1280 --height 720 demos/grove demos/grove/capture.js -- \
+//       perf <shot[,shot...]>          (GPU ms per frame with and without the grass)
 //
 // Strips go to demos/grove/captures/<label>_<shot>_strip[_crop].png, videos to
 // demos/grove/captures/<label>.webm. `legacy` draws the mesh path with the
