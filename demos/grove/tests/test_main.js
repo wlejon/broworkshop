@@ -1,7 +1,7 @@
 // grove: grown trees and shrubs swaying in bro.scene's wind field with no wind
 // code in the app. Run: scripts/validate.sh demos/grove
 import { check, eq, test, done, frames, clickOn } from "/lib/kit/test.js";
-import { grove, scene, PLANTS, WINDS, FOLIAGE, GROUND, groundHeight } from "/app/grove.js";
+import { grove, scene, PLANTS, WINDS, FOLIAGE, GROUND, groundHeight, roller, dryness, ground } from "/app/grove.js";
 
 frames(2);
 
@@ -38,7 +38,26 @@ test('leaves hang in crown clumps and the ground rolls', () => {
     check(groundHeight(GROUND * 0.9, 0) > groundHeight(0, 0) + 4, 'the meadow rises to hills');
 });
 
+test('grass covers the meadow, lush to sun-dried, and the roller parts it', () => {
+    const st = grove.grass.grassStats();
+    check(st && st.instances[0] > 10000, 'the near ring draws blades: ' + (st && st.instances.join('/')));
+    eq(st.movers, 1, 'the roller is a mover');
+    check(Math.abs(grove.grass.grassHeightAt(3, 4) - groundHeight(3, 4)) < 0.05, 'the grass stands on the ground');
+    let lo = 1, hi = 0;
+    for (let x = -30; x <= 30; x += 3) for (let z = -30; z <= 30; z += 3) { const d = dryness(x, z); lo = Math.min(lo, d); hi = Math.max(hi, d); }
+    check(lo < 0.15 && hi > 0.6, `lush and dry patches: dryness ${lo.toFixed(2)}..${hi.toFixed(2)}`);
+    const p0 = roller.node.position;
+    frames(10);
+    const p1 = roller.node.position;
+    check(Math.hypot(p1[0] - p0[0], p1[2] - p0[2]) > 0.05, 'the roller rolls');
+});
+
 test('the wind buttons set the field; a calm is still and a breeze moves', () => {
+    // The roller stops and lets go of the grass, which has risen again first.
+    roller.running = false;
+    grove.grass.removeMover(roller.node);
+    frames(2);
+    advanceTime(25000);
     clickOn('#winds button[data-value="still"]');
     eq(grove.wind, 'still');
     eq(scene.wind().speed, 0, 'still: no steady wind');
@@ -55,6 +74,8 @@ test('the wind buttons set the field; a calm is still and a breeze moves', () =>
     b = scene.captureFrame();
     check(changed(a, b) > 200, 'gusty: the plants move (' + changed(a, b) + ' px)');
     clickOn('#winds button[data-value="breeze"]');
+    roller.running = true;
+    grove.grass.addMover(roller.node, { radius: 0.7, strength: 1.2, trample: 1 });
 });
 
 test('the mesh path draws the same plants as swaying meshes', () => {

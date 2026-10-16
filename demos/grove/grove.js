@@ -10,8 +10,11 @@
 //          (leaf cards) and emitBloomMesh
 //
 // Neither path does anything about wind: the emitters write the per-vertex
-// plant data and bro.scene sways it. main.js mounts the panel; tests and the
-// capture tool import this module (never main.js).
+// plant data and bro.scene sways it. The meadow is bro.scene's grass, baked
+// once from the ground mesh with lush to sun-dried patches, bending in the
+// same gusts; a ball rolls a loop through it as a grass mover, parting and
+// flattening it. main.js mounts the panel; tests and the capture tool import
+// this module (never main.js).
 
 import { sceneViewport, orbitRotation } from "/lib/kit/viewport3d.js";
 import { daylight } from "/lib/kit/sky.js";
@@ -48,21 +51,31 @@ export function groundHeight(x, z) {
     return 0.7 * n + hills * hills * (18 + 8 * swell.genSingle2D(x * 0.012, z * 0.012, 0x41)) - 0.2;
 }
 
+/** How sun-dried the meadow is at x, z: 0 lush .. 1 straw. Patches, drier up the hills. */
+export function dryness(x, z) {
+    const patch = smooth(-0.35, 0.45, swell.genSingle2D(x * 0.17, z * 0.17, 0x77));
+    const broad = smooth(-0.2, 0.5, swell.genSingle2D(x * 0.04, z * 0.04, 0x3d));
+    const up = smooth(25, 60, Math.hypot(x, z));
+    return Math.min(1, 0.75 * patch * broad + 0.1 * broad + 0.3 * up);
+}
+
+// The ground is the soil under the grass: dark, the turf's own shade, so
+// the gaps between blades read as depth rather than as a painted floor.
 function groundMesh() {
     const N = 141, cell = (2 * GROUND) / (N - 1);
     const h = new Float32Array(N * N);
     for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) h[j * N + i] = groundHeight(-GROUND + i * cell, -GROUND + j * cell);
     const m = Mesh.heightmapGrid(h, N, N, cell);
     const pos = m.positions, nrm = m.normals, c = new Float32Array(m.vertexCount * 4);
-    const lush = [0.11, 0.21, 0.055], dry = [0.27, 0.27, 0.12], earth = [0.2, 0.17, 0.1];
+    const lush = [0.075, 0.1, 0.022], dry = [0.24, 0.18, 0.055], earth = [0.16, 0.13, 0.08];
     for (let v = 0; v < m.vertexCount; v++) {
         const x = pos[v * 3], z = pos[v * 3 + 2];
-        const patch = 0.65 * smooth(-0.35, 0.45, swell.genSingle2D(x * 0.17, z * 0.17, 0x77));
+        const patch = dryness(x, z);
         const fleck = 0.88 + 0.24 * swell.genSingle2D(x * 0.9, z * 0.9, 0x5);
         const hollow = 0.75 + 0.25 * smooth(-0.6, 0.4, groundHeight(x, z) - 0.25 * (groundHeight(x + 3, z) + groundHeight(x - 3, z) + groundHeight(x, z + 3) + groundHeight(x, z - 3)) + 0.2);
         const steep = smooth(0.85, 0.6, nrm[v * 3 + 1]);
         for (let k = 0; k < 3; k++) {
-            const g = lush[k] + (dry[k] - lush[k]) * patch * 0.8;
+            const g = lush[k] + (dry[k] - lush[k]) * patch;
             c[v * 4 + k] = (g + (earth[k] - g) * steep) * fleck * hollow;
         }
         c[v * 4 + 3] = 1;
@@ -71,10 +84,74 @@ function groundMesh() {
     return m;
 }
 
-scene.createMesh({
+export const ground = scene.createMesh({
     data: groundMesh(),
     color: [1, 1, 1], metallic: 0, roughness: 1.0, receivesShadow: true,
 });
+
+// --- the grass ----------------------------------------------------------------------
+
+// Blades over the whole ground, from bro.scene: the field is baked once from
+// the ground mesh, with where it grows (thin at the trunks), how dry it is
+// (the same patches the soil is coloured by) and how tall (lush hollows grow
+// tall, dry rises short).
+function growGrass() {
+    return scene.createGrass({
+        ground,
+        cell: 0.5,
+        dry: dryness,
+        density: (x, z) => {
+            let d = 1;
+            for (const p of PLANTS) d = Math.min(d, smooth(0.6, 2.2, Math.hypot(x - p.x, z - p.z)) * 0.7 + 0.3);
+            return d;
+        },
+        tall: (x, z) => 1.15 - 0.45 * dryness(x, z),
+        castsShadow: true,
+    });
+}
+
+// --- the roller ---------------------------------------------------------------------
+
+// A ball rolling a loop through the meadow: a grass mover, so the blades part
+// round it and lie flat in its wake, rising again over the next seconds.
+function ballMesh() {
+    const m = Mesh.sphere(ROLLER.radius, 24, 16);
+    const pos = m.positions, c = new Float32Array(m.vertexCount * 4);
+    for (let v = 0; v < m.vertexCount; v++) {
+        const band = Math.abs(pos[v * 3 + 1]) < ROLLER.radius * 0.25 || Math.abs(pos[v * 3]) < ROLLER.radius * 0.18;
+        c.set(band ? [0.85, 0.8, 0.7, 1] : [0.55, 0.1, 0.07, 1], v * 4);
+    }
+    m.colors = c;
+    return m;
+}
+export const ROLLER = { radius: 0.32, speed: 1.6, centre: [-2, 15.5], rx: 6, rz: 2.2 };
+// It starts just short of the 'ground' shot's spot, so a capture there sees it pass.
+export const roller = { node: null, s: 3.85, running: true, q: [0, 0, 0, 1] };
+/** The roller's path at arc parameter a (radians): a loop through the open meadow in front of the grove. */
+export function rollerAt(a) {
+    return [ROLLER.centre[0] + ROLLER.rx * Math.cos(a), ROLLER.centre[1] + ROLLER.rz * Math.sin(a) + 1.2 * Math.sin(2 * a)];
+}
+function placeRoller(dt) {
+    if (!roller.node) return;
+    const [x0, z0] = rollerAt(roller.s);
+    if (roller.running) roller.s += dt * ROLLER.speed / Math.hypot(ROLLER.rx, ROLLER.rz) * 1.4;
+    const [x, z] = rollerAt(roller.s);
+    const dx = x - x0, dz = z - z0, d = Math.hypot(dx, dz);
+    if (d > 1e-6) {
+        // Roll: turn about the horizontal axis across the motion by d / r.
+        const ax = dz / d, az = -dx / d, h = 0.5 * d / ROLLER.radius;
+        const s = Math.sin(h), r = [ax * s, 0, az * s, Math.cos(h)], q = roller.q;
+        roller.q = [
+            r[3] * q[0] + r[0] * q[3] + r[1] * q[2] - r[2] * q[1],
+            r[3] * q[1] - r[0] * q[2] + r[1] * q[3] + r[2] * q[0],
+            r[3] * q[2] + r[0] * q[1] - r[1] * q[0] + r[2] * q[3],
+            r[3] * q[3] - r[0] * q[0] - r[1] * q[1] - r[2] * q[2],
+        ];
+        roller.node.rotation = roller.q;
+    }
+    roller.node.position = [x, groundHeight(x, z) + ROLLER.radius, z];
+}
+vp.onFrame((dt) => placeRoller(Math.min(dt, 0.1)));
 
 // --- the plants -------------------------------------------------------------------
 
@@ -239,12 +316,23 @@ export const SHOTS = {
     tree:    { label: 'One tree', target: [6.5, 4.5, 9.5], dist: 18, yaw: 0, pitch: -0.05 },
     close:   { label: 'Under the crown', target: [6.5, 4.0, 11.0], dist: 7, yaw: 0.35, pitch: 0.12 },
     backlit: { label: 'Into the sun', target: [2, 5, 0], dist: 36, yaw: Math.PI * 0.5, pitch: -0.06 },
+    meadow:  { label: 'Meadow', target: [-1, 1.4, 9], lift: true, dist: 26, yaw: -0.3, pitch: -0.11 },
+    ground:  { label: 'In the grass', target: [-1, 0.3, 13.5], lift: true, dist: 3.6, yaw: -0.25, pitch: -0.16 },
+    parting: { label: 'Parting', target: [-1.5, 0, 13.3], lift: true, dist: 6, yaw: 0.1, pitch: -0.55 },
+    roller:  { label: 'The roller', follow: true, dist: 4.5, yaw: 0.9, pitch: -0.28 },
 };
 export function setShot(key) {
     const s = SHOTS[key];
     grove.shot = key;
-    vp.reframe(s.target, s.dist, { yaw: s.yaw, pitch: s.pitch });
+    // `lift`: the target's height is above the ground there, not absolute.
+    const t = s.follow ? followTarget() : s.lift ? [s.target[0], groundHeight(s.target[0], s.target[2]) + s.target[1], s.target[2]] : s.target;
+    vp.reframe(t, s.dist, { yaw: s.yaw, pitch: s.pitch });
 }
+function followTarget() {
+    const p = roller.node ? roller.node.position : [0, 0, 0];
+    return [p[0], p[1] + 0.2, p[2]];
+}
+vp.onFrame(() => { if (SHOTS[grove.shot] && SHOTS[grove.shot].follow) vp.reframe(followTarget(), SHOTS[grove.shot].dist); });
 
 // --- boot ---------------------------------------------------------------------------
 
@@ -255,3 +343,7 @@ const t0 = performance.now();
 grove.world = growWorld();
 grove.growMs = performance.now() - t0;
 draw('gpu');
+grove.grass = growGrass();
+roller.node = scene.createMesh({ data: ballMesh(), color: [1, 1, 1], roughness: 0.55, castsShadow: true, receivesShadow: true });
+grove.grass.addMover(roller.node, { radius: 0.7, strength: 1.2, trample: 1 });
+placeRoller(0);

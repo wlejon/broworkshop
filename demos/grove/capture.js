@@ -143,4 +143,27 @@ function stills() {
     }
 }
 
-if (mode === 'video') video(); else if (mode === 'still') stills(); else strip();
+// GPU ms per frame at each shot (perf.gpuFrameMs, the scene's timestamp
+// queries), with the grass and without it: the grass's frame cost.
+function perfShots() {
+    setup('gpu', 'breeze', false);
+    const n = 60;
+    for (const s of shotsA.split(',')) {
+        setShot(s);
+        step(1);
+        const ms = {};
+        for (const on of [true, false]) {
+            grove.grass.visible = on;
+            for (let i = 0; i < 5; i++) { advanceTime(1000 / fps); flush(); }
+            perf.gpuFrameMs();
+            let sum = 0;
+            for (let i = 0; i < n; i++) { advanceTime(1000 / fps); flush(); sum += perf.gpuFrameMs(); }
+            ms[on ? 'with' : 'without'] = sum / n;
+        }
+        grove.grass.visible = true;
+        const st = grove.grass.grassStats();
+        console.log(`${s}: ${ms.with.toFixed(2)} ms with grass, ${ms.without.toFixed(2)} without, grass ${(ms.with - ms.without).toFixed(2)} ms; instances ${st.instances.join(' / ')}`);
+    }
+}
+
+if (mode === 'video') video(); else if (mode === 'still') stills(); else if (mode === 'perf') perfShots(); else strip();
