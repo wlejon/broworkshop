@@ -95,16 +95,12 @@ export const ground = scene.createMesh({
 // the ground mesh, with where it grows (thin at the trunks), how dry it is
 // (the same patches the soil is coloured by) and how tall (lush hollows grow
 // tall, dry rises short).
-function growGrass() {
+function growGrass(world) {
     return scene.createGrass({
         ground,
         cell: 0.5,
         dry: dryness,
-        density: (x, z) => {
-            let d = 1;
-            for (const p of PLANTS) d = Math.min(d, smooth(0.6, 2.2, Math.hypot(x - p.x, z - p.z)) * 0.7 + 0.3);
-            return d;
-        },
+        density: world.groundCover({ scale: PLANT_SCALE }),   // thin in the crowns' shade, clear at the trunks
         tall: (x, z) => 1.15 - 0.45 * dryness(x, z),
         castsShadow: true,
     });
@@ -343,7 +339,7 @@ const t0 = performance.now();
 grove.world = growWorld();
 grove.growMs = performance.now() - t0;
 draw('gpu');
-grove.grass = growGrass();
+grove.grass = growGrass(grove.world);
 roller.node = scene.createMesh({ data: ballMesh(), color: [1, 1, 1], roughness: 0.55, castsShadow: true, receivesShadow: true });
 grove.grass.addMover(roller.node, { radius: 0.7, strength: 1.2, trample: 1 });
 placeRoller(0);
