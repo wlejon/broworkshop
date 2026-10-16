@@ -62,15 +62,16 @@ export function dryness(x, z) {
     return Math.min(1, 0.75 * patch * broad + 0.1 * broad + 0.3 * up);
 }
 
-// The ground is the soil under the grass: dark, the turf's own shade, so
-// the gaps between blades read as depth rather than as a painted floor.
+// The ground is the soil under the grass: dark and cooler than the blades
+// (the shade at the foot of a sward, not a lit floor), so the gaps between
+// blades read as depth.
 function groundMesh() {
     const N = 141, cell = (2 * GROUND) / (N - 1);
     const h = new Float32Array(N * N);
     for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) h[j * N + i] = groundHeight(-GROUND + i * cell, -GROUND + j * cell);
     const m = Mesh.heightmapGrid(h, N, N, cell);
     const pos = m.positions, nrm = m.normals, c = new Float32Array(m.vertexCount * 4);
-    const lush = [0.075, 0.1, 0.022], dry = [0.24, 0.18, 0.055], earth = [0.16, 0.13, 0.08];
+    const lush = [0.028, 0.038, 0.022], dry = [0.085, 0.066, 0.036], earth = [0.16, 0.13, 0.08];
     for (let v = 0; v < m.vertexCount; v++) {
         const x = pos[v * 3], z = pos[v * 3 + 2];
         const patch = dryness(x, z);

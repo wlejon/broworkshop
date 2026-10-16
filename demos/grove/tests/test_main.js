@@ -1,7 +1,7 @@
 // grove: grown trees and shrubs swaying in bro.scene's wind field with no wind
 // code in the app. Run: scripts/validate.sh demos/grove
 import { check, eq, test, done, frames, clickOn } from "/lib/kit/test.js";
-import { grove, scene, PLANTS, WINDS, FOLIAGE, GROUND, PLANT_SCALE, groundHeight, roller, dryness, ground } from "/app/grove.js";
+import { grove, scene, PLANTS, WINDS, FOLIAGE, GROUND, PLANT_SCALE, groundHeight, roller, dryness, ground, setShot } from "/app/grove.js";
 
 frames(2);
 
@@ -55,8 +55,16 @@ test('leaves hang in crown clumps and the ground rolls', () => {
 });
 
 test('grass covers the meadow, lush to sun-dried, and the roller parts it', () => {
+    // From the grove shot the near ring is out of view and issues nothing;
+    // in the grass, it draws the tufts at the camera's feet.
     const st = grove.grass.grassStats();
-    check(st && st.instances[0] > 10000, 'the near ring draws blades: ' + (st && st.instances.join('/')));
+    check(st && st.instances.reduce((s, n) => s + n, 0) > 10000, 'the rings draw blades: ' + (st && st.instances.join('/')));
+    setShot('ground');
+    frames(1);
+    const near = grove.grass.grassStats().instances;
+    check(near[0] > 1000, 'in the grass, the near ring draws tufts: ' + near.join('/'));
+    setShot('grove');
+    frames(1);
     eq(st.movers, 1, 'the roller is a mover');
     check(Math.abs(grove.grass.grassHeightAt(3, 4) - groundHeight(3, 4)) < 0.05, 'the grass stands on the ground');
     let lo = 1, hi = 0;
