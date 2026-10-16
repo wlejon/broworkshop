@@ -63,12 +63,13 @@ function emitFrame() {
     if (layers.branches) {
         const t = world.emitBranchTubes({ sides: TUBE.sides });
         packet.branches = t;
-        transfer.push(t.segments.buffer);
+        // `vegetation` (the wind-sway records) rides along: the tube node sways it.
+        transfer.push(t.segments.buffer, t.vegetation.buffer);
     }
     if (layers.foliage) {
         const f = world.emitScatterSegments(FOLIAGE);
         packet.foliage = f;
-        transfer.push(f.segments.buffer, f.instSeg.buffer);
+        transfer.push(f.segments.buffer, f.instSeg.buffer, f.vegetation.buffer);
     }
     if (layers.blooms) {
         if (!blooms) blooms = bloomBases();

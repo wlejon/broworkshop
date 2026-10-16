@@ -58,6 +58,7 @@
         { "dir": "demos/diffusion-lab" },
         { "dir": "demos/dom-lab" },
         { "dir": "demos/flora-lab" },
+        { "dir": "demos/grove" },
         { "dir": "demos/image-kernels" },
         { "dir": "demos/input-lab" },
         { "dir": "demos/instanced-crowd" },

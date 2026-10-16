@@ -1,0 +1,129 @@
+// Motion captures of the grove, made in headless bro: a strip (a time series
+// tiled into one image, so motion can be judged from a still) and a webm.
+//
+//   bro-headless --width 1280 --height 720 demos/grove demos/grove/capture.js -- \
+//       strip <shot> [label] [span=3] [frames=12] [crop=cx,cy,w|-] [path=gpu] [wind=breeze] [legacy]
+//   bro-headless --width 1280 --height 720 demos/grove demos/grove/capture.js -- \
+//       video <shot[,shot...]> [label] [seconds=6] [fps=30] [path=gpu] [wind=breeze] [legacy]
+//
+// Strips go to demos/grove/captures/<label>_<shot>_strip[_crop].png, videos to
+// demos/grove/captures/<label>.webm. `legacy` draws the mesh path with the
+// single-sine wind apps had before the vegetation path (the "before"). The
+// clock is virtual: every frame is 1/fps s, so a capture is the same on any
+// machine.
+
+import { grove, draw, setWind, setShot, sky } from "/app/grove.js";
+
+const argv = (bro.app && bro.app.argv) || [];
+const [mode = 'strip', shotsA = 'grove', label = 'grove', a3, a4, a5, a6, a7, a8] = argv;
+const OUT = bro.resolvePath('/app/captures').replace(/\\/g, '/');
+
+document.body.classList.add('clean');
+flush();
+
+const fps = 30;
+function step(seconds) {
+    const n = Math.max(1, Math.round(seconds * fps));
+    for (let i = 0; i < n; i++) advanceTime(1000 / fps);
+}
+
+function setup(path, wind, legacy) {
+    grove.legacyWind = legacy;
+    draw(path);
+    setWind(wind);
+    sky.apply('golden');
+}
+
+// Box-downsample frame `g` ({width, height, data}, top row first), optionally a
+// crop (centre cx, cy in 0..1, width cw as a fraction), into tw x th RGBA.
+function shrink(g, tw, th, crop) {
+    const [cx, cy, cw] = crop || [0.5, 0.5, 1];
+    // The frame carries the window's title bar above the page: skip it.
+    const top = Math.max(0, g.height - innerHeight), H = g.height - top;
+    const sw = g.width * cw, sh = sw * th / tw;
+    const x0 = cx * g.width - sw / 2, y0 = top + cy * H - sh / 2;
+    const out = new Uint8ClampedArray(tw * th * 4);
+    const k = Math.max(1, Math.min(4, Math.floor(sw / tw)));
+    for (let y = 0; y < th; y++) for (let x = 0; x < tw; x++) {
+        let r = 0, gg = 0, b = 0, n = 0;
+        for (let j = 0; j < k; j++) for (let i = 0; i < k; i++) {
+            const sx = Math.floor(x0 + (x + (i + 0.5) / k) * sw / tw), sy = Math.floor(y0 + (y + (j + 0.5) / k) * sh / th);
+            if (sx < 0 || sy < 0 || sx >= g.width || sy >= g.height) continue;
+            const o = (sy * g.width + sx) * 4;
+            r += g.data[o]; gg += g.data[o + 1]; b += g.data[o + 2]; n++;
+        }
+        const o = (y * tw + x) * 4;
+        out[o] = r / (n || 1); out[o + 1] = gg / (n || 1); out[o + 2] = b / (n || 1); out[o + 3] = 255;
+    }
+    return out;
+}
+
+function strip() {
+    const span = +(a3 || 3), frames = +(a4 || 12);
+    const crop = a5 && a5 !== '-' ? a5.split(',').map(Number) : null;
+    const path = a6 || 'gpu', wind = a7 || 'breeze', legacy = a8 === 'legacy';
+    setup(path, wind, legacy);
+    setShot(shotsA);
+    step(2);   // warm: shadows settle, the gusts are under way
+    const W = innerWidth, H = innerHeight;
+    const cols = 4, rows = Math.ceil(frames / cols), gap = 4;
+    const tw = Math.floor((W - gap * (cols + 1)) / cols);
+    const th = Math.floor(Math.min(tw * 9 / 16, (H - gap * (rows + 1)) / rows));
+    const grabs = [];
+    const dt = span / Math.max(1, frames - 1);
+    let t = 0;
+    for (let i = 0; i < frames; i++) {
+        if (i) { step(dt); t += dt; }
+        flush();
+        grabs.push({ t, px: shrink(frameImage(), tw, th, crop) });
+    }
+    const cv = document.createElement('canvas');
+    cv.width = W; cv.height = H;
+    cv.style.cssText = `position:absolute;left:0;top:0;width:${W}px;height:${H}px;z-index:10`;
+    document.body.append(cv);
+    const g = cv.getContext('2d');
+    g.fillStyle = '#111';
+    g.fillRect(0, 0, W, H);
+    g.font = '600 14px system-ui';
+    grabs.forEach((s, i) => {
+        const x = gap + (i % cols) * (tw + gap), y = gap + Math.floor(i / cols) * (th + gap);
+        const im = g.createImageData(tw, th);
+        im.data.set(s.px);
+        g.putImageData(im, x, y);
+        const txt = `${label} ${shotsA}  t=${s.t.toFixed(2)}s`;
+        g.fillStyle = '#000'; g.fillText(txt, x + 6, y + 17);
+        g.fillStyle = '#fff'; g.fillText(txt, x + 5, y + 16);
+    });
+    advanceTime(30);
+    flush();
+    const file = `${OUT}/${label}_${shotsA}_strip${crop ? '_crop' : ''}.png`;
+    screenshot(file);
+    console.log(`${file}: ${frames} frames over ${span}s`);
+}
+
+function video() {
+    const seconds = +(a3 || 6), vfps = +(a4 || 30);
+    const path = a5 || 'gpu', wind = a6 || 'breeze', legacy = a7 === 'legacy';
+    setup(path, wind, legacy);
+    const shots = shotsA.split(',');
+    setShot(shots[0]);
+    step(2);
+    const file = `${OUT}/${label}.webm`;
+    // The encoder takes the whole viewport (the window's title bar included).
+    const vp0 = frameImage();
+    const enc = new VideoEncoder({ path: file, width: vp0.width, height: vp0.height, fps: vfps, quality: 'good' });
+    let n = 0;
+    const t0 = perf.now();
+    for (const s of shots) {
+        setShot(s);
+        for (let i = 0; i < Math.round(seconds * vfps); i++, n++) {
+            advanceTime(1000 / vfps);
+            flush();
+            enc.addViewportFrame();
+        }
+    }
+    enc.finish();
+    console.log(`${file}: ${n} frames in ${((perf.now() - t0) / 1000).toFixed(1)} s ${enc.lastError || ''}`);
+}
+
+if (mode === 'video') video(); else strip();

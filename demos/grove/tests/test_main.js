@@ -1,0 +1,62 @@
+// grove: grown trees and shrubs swaying in bro.scene's wind field with no wind
+// code in the app. Run: scripts/validate.sh demos/grove
+import { check, eq, test, done, frames, clickOn } from "/lib/kit/test.js";
+import { grove, scene, PLANTS, WINDS } from "/app/grove.js";
+
+frames(2);
+
+function changed(a, b) {
+    let n = 0;
+    for (let i = 0; i < a.data.length; i += 4) {
+        if (Math.abs(a.data[i] - b.data[i]) + Math.abs(a.data[i + 1] - b.data[i + 1]) +
+            Math.abs(a.data[i + 2] - b.data[i + 2]) > 6) n++;
+    }
+    return n;
+}
+
+test('the grove grows every plant and draws it on the GPU path', () => {
+    eq(grove.world.plantCount, PLANTS.length, 'plants');
+    eq(grove.path, 'gpu');
+    eq(grove.nodes.length, 2, 'a tube node and a scatter node');
+    check(grove.stats.segments > 0 && grove.stats.leaves > 0, 'segments and leaves: ' + JSON.stringify(grove.stats));
+});
+
+test('the emitters carry the vegetation records the scene sways', () => {
+    const t = grove.world.emitBranchTubes();
+    eq(t.vegetation.length, t.segCount * 12, 'tube records');
+    const bark = grove.world.emitMesh(5);
+    eq(bark.vegetation.length, bark.vertexCount * 16, 'bark records');
+});
+
+test('the wind buttons set the field; a calm is still and a breeze moves', () => {
+    clickOn('#winds button[data-value="still"]');
+    eq(grove.wind, 'still');
+    eq(scene.wind().speed, 0, 'still: no steady wind');
+    frames(2);
+    let a = scene.captureFrame();
+    frames(20);
+    let b = scene.captureFrame();
+    eq(changed(a, b), 0, 'still: nothing moves');
+
+    clickOn('#winds button[data-value="gusty"]');
+    eq(scene.wind().speed, WINDS.gusty.wind.speed, 'gusty speed');
+    a = scene.captureFrame();
+    frames(20);
+    b = scene.captureFrame();
+    check(changed(a, b) > 200, 'gusty: the plants move (' + changed(a, b) + ' px)');
+    clickOn('#winds button[data-value="breeze"]');
+});
+
+test('the mesh path draws the same plants as swaying meshes', () => {
+    clickOn('#paths button[data-value="mesh"]');
+    eq(grove.path, 'mesh');
+    eq(grove.nodes.length, 2, 'bark and leaf meshes');
+    const a = scene.captureFrame();
+    frames(20);
+    const b = scene.captureFrame();
+    check(changed(a, b) > 200, 'meshes sway too (' + changed(a, b) + ' px)');
+    clickOn('#paths button[data-value="gpu"]');
+    eq(grove.path, 'gpu');
+});
+
+done('grove');

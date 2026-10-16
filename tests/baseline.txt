@@ -52,7 +52,9 @@ PASS test demos/diffusion-lab/tests/test_word_axis.js
 PASS smoke demos/dom-lab 
 PASS test demos/dom-lab/tests/test_main.js 
 PASS smoke demos/flora-lab 
-PASS test demos/flora-lab/tests/test_main.js 
+PASS test demos/flora-lab/tests/test_main.js
+PASS smoke demos/grove
+PASS test demos/grove/tests/test_main.js
 PASS smoke demos/image-kernels 
 PASS test demos/image-kernels/tests/test_kernels.js 
 PASS test demos/image-kernels/tests/test_main.js 

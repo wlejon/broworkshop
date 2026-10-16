@@ -35,8 +35,9 @@ scene.createMesh({
     mesh: 'plane', halfW: WORLD_SIZE * 0.5, halfD: WORLD_SIZE * 0.5, y: 0,
     color: '#36421f', metallic: 0, roughness: 1.0, receivesShadow: true,   // mossy meadow floor
 });
-// A gentle breeze for the foliage (scene wind sways vertices by their wind weight).
-scene.setWind({ direction: [1, 0, 0.35], strength: 0.06, frequency: 1.1 });
+// A gentle breeze: the plants carry bro.flora's vegetation records, so
+// bro.scene's wind field sways trunk, limbs and leaves with travelling gusts.
+scene.setWind({ direction: [1, 0, 0.35], speed: 2.5, gust: 1 });
 
 // --- the sim worker -------------------------------------------------------------
 
