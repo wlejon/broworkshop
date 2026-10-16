@@ -16,7 +16,7 @@
 import { sceneViewport, orbitRotation } from "/lib/kit/viewport3d.js";
 import { daylight } from "/lib/kit/sky.js";
 
-export const GROUND = 30;          // half-size of the meadow, metres
+export const GROUND = 70;          // half-size of the ground, metres
 export const PLANT_SCALE = 1.5;    // node scale: broflora grows ~5 m trees, drawn ~7.5 m
 
 export const vp = sceneViewport('#stage', {
@@ -25,11 +25,55 @@ export const vp = sceneViewport('#stage', {
 });
 export const { scene } = vp;
 export const sky = daylight(scene, { order: ['golden', 'noon', 'dawn'], cascades: 3, atlas: 4096, pcf: 3 });
+sky.setScale(1.7);   // the haze sits past the grove, on the hills
 vp.onFrame((dt) => sky.update(dt));
 
+// --- the ground -------------------------------------------------------------------
+
+// A meadow in a shallow bowl: gentle swells where the plants stand, rising to
+// low hills all round so the view ends on land rather than an edge. Coloured
+// from lush to sun-dried by a second noise, darker in the hollows.
+const simplex = FastNoise.create('Simplex');
+simplex.set('Feature Scale', 1);
+const swell = FastNoise.create('FractalFBm');
+swell.set('Source', simplex);
+swell.set('Octaves', 4);
+const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+
+/** Ground height (metres) at world x, z. */
+export function groundHeight(x, z) {
+    const n = swell.genSingle2D(x * 0.035, z * 0.035, 0x9a0d);
+    const r = Math.hypot(x, z);
+    const hills = smooth(20, 62, r);
+    return 0.7 * n + hills * hills * (18 + 8 * swell.genSingle2D(x * 0.012, z * 0.012, 0x41)) - 0.2;
+}
+
+function groundMesh() {
+    const N = 141, cell = (2 * GROUND) / (N - 1);
+    const h = new Float32Array(N * N);
+    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) h[j * N + i] = groundHeight(-GROUND + i * cell, -GROUND + j * cell);
+    const m = Mesh.heightmapGrid(h, N, N, cell);
+    const pos = m.positions, nrm = m.normals, c = new Float32Array(m.vertexCount * 4);
+    const lush = [0.11, 0.21, 0.055], dry = [0.27, 0.27, 0.12], earth = [0.2, 0.17, 0.1];
+    for (let v = 0; v < m.vertexCount; v++) {
+        const x = pos[v * 3], z = pos[v * 3 + 2];
+        const patch = 0.65 * smooth(-0.35, 0.45, swell.genSingle2D(x * 0.17, z * 0.17, 0x77));
+        const fleck = 0.88 + 0.24 * swell.genSingle2D(x * 0.9, z * 0.9, 0x5);
+        const hollow = 0.75 + 0.25 * smooth(-0.6, 0.4, groundHeight(x, z) - 0.25 * (groundHeight(x + 3, z) + groundHeight(x - 3, z) + groundHeight(x, z + 3) + groundHeight(x, z - 3)) + 0.2);
+        const steep = smooth(0.85, 0.6, nrm[v * 3 + 1]);
+        for (let k = 0; k < 3; k++) {
+            const g = lush[k] + (dry[k] - lush[k]) * patch * 0.8;
+            c[v * 4 + k] = (g + (earth[k] - g) * steep) * fleck * hollow;
+        }
+        c[v * 4 + 3] = 1;
+    }
+    m.colors = c;
+    return m;
+}
+
 scene.createMesh({
-    mesh: 'plane', halfW: GROUND, halfD: GROUND, y: 0,
-    color: '#33421a', metallic: 0, roughness: 1.0, receivesShadow: true,
+    data: groundMesh(),
+    color: [1, 1, 1], metallic: 0, roughness: 1.0, receivesShadow: true,
 });
 
 // --- the plants -------------------------------------------------------------------
@@ -37,6 +81,7 @@ scene.createMesh({
 // A spreading broadleaf (round crown on a short clear trunk), a vase-shaped
 // one, and a dome shrub with no trunk at all.
 const COMMON = {
+    pipeExp: 2.0, leafDiameter: 0.028,
     shadeTolerance: 0.35, moduleMatureAge: 0.6, rootVigorMax: 4.0, apicalControl: 0.35,
     apicalControlMature: 0.3, individualVariation: 0.2, maxAge: 400, seedingRadius: 0.0,
 };
@@ -59,10 +104,10 @@ export const PLANTS = [
     { x: -5.5, z: -11.0, kind: 'shrub' },
 ];
 
-// The root module of a tree: a clear stem 1.6 units tall, slightly kinked,
+// The root module of a tree: a clear stem 2 units tall, slightly kinked,
 // with three scaffold limbs at its top where the crown's modules attach.
 function trunkPrototype() {
-    const H = 1.6, n = 6, nodes = [], edges = [];
+    const H = 2.0, n = 6, nodes = [], edges = [];
     for (let i = 0; i <= n; i++) {
         nodes.push({ position: [0.03 * Math.sin(i * 1.7), H * i / n, 0.03 * Math.cos(i * 2.3)],
                      ageAtBirth: 0.03 * i, lengthMax: 1, thickening: 1 });
@@ -76,16 +121,16 @@ function trunkPrototype() {
     return { name: 'trunk', nodes, edges, rootNode: 0, terminalNodes: [n, n + 1, n + 2, n + 3] };
 }
 
-// Leaves along the twigs (emitScatterSegments / emitFoliageMesh) and the card.
-export const FOLIAGE = {
-    maxRadius: 0.035, minDepth: 2, perUnitLength: 160,
-    upBias: 0.6, tiltJitter: 0.6, rollJitter: 0.9,
-    baseScale: 1.0, scaleJitter: 0.3, scaleByRadius: 0.25, seed: 0x1eaf,
-};
-export function leafCard() {
+// Leaves in crown clumps (emitScatterSegments / emitFoliageMesh defaults) and the card.
+// The mesh path bakes every leaf into one mesh, so it carries fewer, larger,
+// plainer cards (~100k leaves rather than the GPU path's ~400k).
+export const FOLIAGE = { seed: 0x1eaf, perArea: 90 };
+export const MESH_FOLIAGE = { seed: 0x1eaf, perArea: 28 };
+export function leafCard(big) {
+    const k = big ? 1.7 : 1;
     const m = Mesh.leafCard('oval', {
-        width: 0.1, length: 0.17, bend: 0.4, fullUV: true, shapedSilhouette: true, cup: 0.3,
-        widthSegments: 3, lengthSegments: 5,
+        width: 0.07 * k, length: 0.12 * k, bend: 0.4, fullUV: true, shapedSilhouette: true, cup: 0.3,
+        widthSegments: big ? 2 : 3, lengthSegments: big ? 3 : 5,
     });
     m.colors = new Float32Array(0);
     return m;
@@ -99,13 +144,15 @@ export function growWorld() {
     const world = bro.flora.createWorld({
         rngSeed: 0x6a07e,
         climate: { annualTempBase: 15, annualPrecip: 1000 },
-        shadow: { origin: [-S / 2, 0, -S / 2], cellSize: 1, width: S, height: 24, depth: S, fill: 1 },
+        shadow: { origin: [-S / 2, -2, -S / 2], cellSize: 1, width: S, height: 26, depth: S, fill: 1 },
     });
     const mono = world.addPrototype(bro.flora.prototypes.monopodial(3, 0.7));
     const trunk = world.addPrototype(trunkPrototype());
     world.addVoronoiSite(mono, 0.5, 0.3);
     for (const p of PLANTS) {
-        world.addPlant({ origin: [p.x / PLANT_SCALE, 0, p.z / PLANT_SCALE], species: SPECIES[p.kind],
+        // Sunk a little, so the root flare meets the slope on its low side.
+        const y = groundHeight(p.x, p.z) - 0.08;
+        world.addPlant({ origin: [p.x / PLANT_SCALE, y / PLANT_SCALE, p.z / PLANT_SCALE], species: SPECIES[p.kind],
                          prototypeIndex: p.kind === 'shrub' ? mono : trunk });
     }
     const n = Math.round(SIM_SECONDS / SIM_STEP);
@@ -115,8 +162,8 @@ export function growWorld() {
 
 // --- drawing ----------------------------------------------------------------------
 
-const BARK = { color: [0.30, 0.24, 0.18], metallic: 0, roughness: 0.9 };
-const LEAF = { color: [0.36, 0.52, 0.18], metallic: 0, roughness: 0.75 };
+const BARK = { color: [0.2, 0.17, 0.14], metallic: 0, roughness: 0.9 };
+const LEAF = { color: [0.2, 0.36, 0.11], metallic: 0, roughness: 0.7 };
 
 export const grove = { world: null, nodes: [], path: 'gpu', legacyWind: false, stats: {} };
 
@@ -136,7 +183,7 @@ function drawGpu(world) {
     const scatter = world.emitScatterSegments(FOLIAGE);
     add(scene.createInstancedMesh(Object.assign({ tube: tubes, castsShadow: true, receivesShadow: true }, BARK)));
     add(scene.createInstancedMesh(Object.assign({
-        mesh: leafCard(), scatter: Object.assign({}, FOLIAGE, scatter),
+        mesh: leafCard(), scatter,
         doubleSided: true, subsurface: 0.5, vertexColorTint: false, castsShadow: true, receivesShadow: true,
     }, LEAF)));
     grove.stats = { segments: tubes.segCount, leaves: scatter.instanceCount };
@@ -147,7 +194,7 @@ function drawMeshes(world) {
     // mesh bent by vertex colour R (the "before" captures).
     const wind = grove.legacyWind ? { wind: true } : {};
     const bark = world.emitMesh(7);
-    const leaves = world.emitFoliageMesh(leafCard(), FOLIAGE);
+    const leaves = world.emitFoliageMesh(leafCard(true), MESH_FOLIAGE);
     add(scene.createMesh(Object.assign({ data: bark, vertexColorTint: false, castsShadow: true, receivesShadow: true }, BARK, wind)));
     if (grove.legacyWind) {
         // Leaf cards bake their own bend in R; the scatter wrote it per leaf.
@@ -189,8 +236,9 @@ export function setWind(key) {
 // through the crowns.
 export const SHOTS = {
     grove:   { label: 'Grove', target: [0, 4, 0], dist: 32, yaw: 0.0, pitch: -0.1 },
-    tree:    { label: 'One tree', target: [1, 4.5, -6.5], dist: 15, yaw: Math.PI, pitch: -0.05 },
-    backlit: { label: 'Into the sun', target: [0, 5, 0], dist: 24, yaw: Math.PI * 0.5, pitch: -0.04 },
+    tree:    { label: 'One tree', target: [6.5, 4.5, 9.5], dist: 18, yaw: 0, pitch: -0.05 },
+    close:   { label: 'Under the crown', target: [6.5, 4.0, 11.0], dist: 7, yaw: 0.35, pitch: 0.12 },
+    backlit: { label: 'Into the sun', target: [2, 5, 0], dist: 36, yaw: Math.PI * 0.5, pitch: -0.06 },
 };
 export function setShot(key) {
     const s = SHOTS[key];

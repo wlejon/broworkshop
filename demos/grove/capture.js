@@ -5,6 +5,8 @@
 //       strip <shot> [label] [span=3] [frames=12] [crop=cx,cy,w|-] [path=gpu] [wind=breeze] [legacy]
 //   bro-headless --width 1280 --height 720 demos/grove demos/grove/capture.js -- \
 //       video <shot[,shot...]> [label] [seconds=6] [fps=30] [path=gpu] [wind=breeze] [legacy]
+//   bro-headless --width 1280 --height 720 demos/grove demos/grove/capture.js -- \
+//       still <shot[,shot...]> [label] [path=gpu] [wind=breeze]
 //
 // Strips go to demos/grove/captures/<label>_<shot>_strip[_crop].png, videos to
 // demos/grove/captures/<label>.webm. `legacy` draws the mesh path with the
@@ -126,4 +128,19 @@ function video() {
     console.log(`${file}: ${n} frames in ${((perf.now() - t0) / 1000).toFixed(1)} s ${enc.lastError || ''}`);
 }
 
-if (mode === 'video') video(); else strip();
+// One full-size frame of each shot: <label>_<shot>.png.
+function stills() {
+    const path = a3 || 'gpu', wind = a4 || 'breeze';
+    setup(path, wind, false);
+    console.log(`${path}: ${JSON.stringify(grove.stats)}`);
+    for (const s of shotsA.split(',')) {
+        setShot(s);
+        step(2);
+        flush();
+        const file = `${OUT}/${label}_${s}.png`;
+        screenshot(file);
+        console.log(file);
+    }
+}
+
+if (mode === 'video') video(); else if (mode === 'still') stills(); else strip();

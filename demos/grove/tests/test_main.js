@@ -1,7 +1,7 @@
 // grove: grown trees and shrubs swaying in bro.scene's wind field with no wind
 // code in the app. Run: scripts/validate.sh demos/grove
 import { check, eq, test, done, frames, clickOn } from "/lib/kit/test.js";
-import { grove, scene, PLANTS, WINDS } from "/app/grove.js";
+import { grove, scene, PLANTS, WINDS, FOLIAGE, GROUND, groundHeight } from "/app/grove.js";
 
 frames(2);
 
@@ -26,6 +26,16 @@ test('the emitters carry the vegetation records the scene sways', () => {
     eq(t.vegetation.length, t.segCount * 12, 'tube records');
     const bark = grove.world.emitMesh(5);
     eq(bark.vegetation.length, bark.vertexCount * 16, 'bark records');
+});
+
+test('leaves hang in crown clumps and the ground rolls', () => {
+    const s = grove.world.emitScatterSegments(FOLIAGE);
+    check(s.clumps === true && s.segCount > 0, 'scatter clumps by default: ' + s.segCount);
+    const t = grove.world.emitBranchTubes();
+    eq(t.tangents.length, t.segCount * 6, 'mitred joints');
+    const hs = PLANTS.map((p) => groundHeight(p.x, p.z));
+    check(Math.max(...hs) - Math.min(...hs) > 0.1, 'the plants stand at different heights: ' + hs.map((h) => h.toFixed(2)));
+    check(groundHeight(GROUND * 0.9, 0) > groundHeight(0, 0) + 4, 'the meadow rises to hills');
 });
 
 test('the wind buttons set the field; a calm is still and a breeze moves', () => {
