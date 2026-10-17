@@ -18,11 +18,26 @@
 //       <label>_<shot>_<sky>_compare.png
 //
 // Everything goes to demos/forest/captures/.
+//
+// Several commands in one boot: join them with `+`, e.g.
+//   capture.js -- still above,glade + handover clumps + compare trunks
+// Each starts from the page as the boot left it (overlays gone, the level of
+// detail and tier restored); the virtual clock runs on between them.
+//
+// The iteration loop (a boot is ~5 s, most of it the grass bake):
+//   - the nursery is grown once and cached (world.grow's cache under
+//     bro.app.cacheDir, keyed by the nursery and broflora's step source), so
+//     only a change to the growth pays the ~5 s grow again;
+//   - BRO_SCENE_SHADER_SOURCE=1 compiles bro's scene shaders from its source
+//     tree at start-up, so a .glsl edit needs no rebuild
+//     (bro/docs/hot-reload.md);
+//   - chain the views you are judging into one run with `+`.
 
 import { forest, setWind, setShot, sky, flight, flightAt, FLIGHT_SECONDS, vp } from "/app/forest.js";
 
 const argv = (bro.app && bro.app.argv) || [];
-const [mode = 'still', a1, a2, a3, a4] = argv;
+// The command now running: its mode and arguments (see run() at the end).
+let args = [], mode = 'still', a1, a2, a3, a4;
 const OUT = bro.resolvePath('/app/captures').replace(/\\/g, '/');
 
 document.body.classList.add('clean');
@@ -42,7 +57,7 @@ function setup(wind, tier, time) {
 
 function stills() {
     const label = a2 || 'forest';
-    setup(a3, a4, argv[5]);
+    setup(a3, a4, args[5]);
     for (const s of (a1 || 'above').split(',')) {
         setShot(s);
         step(1.5);
@@ -304,4 +319,21 @@ function parts() {
     }
 }
 
-if (mode === 'compare') compare(); else if (mode === 'parts') parts(); else if (mode === 'trace') trace(); else if (mode === 'video') video(); else if (mode === 'handover') handover(); else stills();
+// Several commands joined by `+` run one after another in this one boot.
+// Between them the page is put back as the boot left it: any overlay a
+// command drew is removed and the forest's level of detail restored (the
+// clock runs on, so wind and the flight's motion continue from there).
+const MODES = { still: stills, trace, video, handover, compare, parts };
+const lod0 = forest.node.forestLod();
+const commands = [[]];
+for (const a of argv) a === '+' ? commands.push([]) : commands[commands.length - 1].push(a);
+for (const cmd of commands) {
+    args = cmd;
+    [mode = 'still', a1, a2, a3, a4] = cmd;
+    const before = new Set(document.body.children);
+    (MODES[mode] || stills)();
+    for (const el of [...document.body.children]) if (!before.has(el)) el.remove();
+    forest.node.setForestLod(lod0);
+    forest.node.setForestTier('auto');
+    flush();
+}

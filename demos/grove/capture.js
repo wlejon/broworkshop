@@ -10,6 +10,12 @@
 //   bro-headless --width 1280 --height 720 demos/grove demos/grove/capture.js -- \
 //       perf <shot[,shot...]> [wind=breeze]   (GPU ms per frame, and the grass's, leaves' and bark's shares)
 //
+// Several commands in one boot: join them with `+`, e.g.
+//   capture.js -- still grove,tree,meadow + strip close + perf grove
+// The grown grove is cached (world.grow under bro.app.cacheDir), so a boot
+// is about a second once grown; BRO_SCENE_SHADER_SOURCE=1 takes bro's scene
+// shaders from its source tree, so a .glsl edit needs no rebuild.
+//
 // Strips go to demos/grove/captures/<label>_<shot>_strip[_crop].png, videos to
 // demos/grove/captures/<label>.webm. `legacy` draws the mesh path with the
 // single-sine wind apps had before the vegetation path (the "before"). The
@@ -19,7 +25,8 @@
 import { grove, draw, setWind, setShot, sky } from "/app/grove.js";
 
 const argv = (bro.app && bro.app.argv) || [];
-const [mode = 'strip', shotsA = 'grove', label = 'grove', a3, a4, a5, a6, a7, a8] = argv;
+// The command now running (see the end: several join with `+`).
+let mode, shotsA, label, a3, a4, a5, a6, a7, a8;
 const OUT = bro.resolvePath('/app/captures').replace(/\\/g, '/');
 
 document.body.classList.add('clean');
@@ -175,4 +182,16 @@ function perfShots() {
     }
 }
 
-if (mode === 'video') video(); else if (mode === 'still') stills(); else if (mode === 'perf') perfShots(); else strip();
+// Several commands joined by `+` run one after another in this one boot,
+// each from the page as the boot left it (any overlay removed; each sets
+// its own path and wind); the virtual clock runs on between them.
+const MODES = { strip, video, still: stills, perf: perfShots };
+const commands = [[]];
+for (const a of argv) a === '+' ? commands.push([]) : commands[commands.length - 1].push(a);
+for (const cmd of commands) {
+    [mode = 'strip', shotsA = 'grove', label = 'grove', a3, a4, a5, a6, a7, a8] = cmd;
+    const before = new Set(document.body.children);
+    (MODES[mode] || strip)();
+    for (const el of [...document.body.children]) if (!before.has(el)) el.remove();
+    flush();
+}
