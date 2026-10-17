@@ -215,7 +215,7 @@ function forestLeaf() {
 }
 
 const BARK = { color: [0.2, 0.17, 0.14], roughness: 0.9 };
-const LEAF = { color: [0.2, 0.36, 0.11], roughness: 0.7 };
+const LEAF = { color: [0.07, 0.13, 0.04], roughness: 0.7 };
 
 // The forest is a node per kind of plant, each drawing its leaves in its
 // form: the broadleaves, the needle conifers, the scale-leaf ones, the

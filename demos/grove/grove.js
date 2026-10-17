@@ -321,7 +321,7 @@ function drawPresets(worlds) {
 // --- drawing ----------------------------------------------------------------------
 
 const BARK = { color: [0.2, 0.17, 0.14], metallic: 0, roughness: 0.9 };
-const LEAF = { color: [0.2, 0.36, 0.11], metallic: 0, roughness: 0.7 };
+const LEAF = { color: [0.07, 0.13, 0.04], metallic: 0, roughness: 0.7 };
 
 export const grove = { world: null, nodes: [], presets: [], path: 'gpu', legacyWind: false, stats: {} };
 
