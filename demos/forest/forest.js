@@ -46,7 +46,9 @@ const PRESETS = {
                                                   fog: { start: 60, end: 1100, color: [0.86, 0.62, 0.46] } }),
     noon: Object.assign({}, DAYLIGHT.noon, { fog: { start: 80, end: 1500, color: [0.66, 0.74, 0.82] } }),
 };
-export const sky = daylight(scene, { presets: PRESETS, order: ['golden', 'noon'], cascades: 3, atlas: 4096, pcf: 3 });
+// The meadow's and the forest floor's albedo lights the shade from below.
+export const sky = daylight(scene, { presets: PRESETS, order: ['golden', 'noon'], cascades: 3, atlas: 4096, pcf: 3,
+    ground: [0.09, 0.12, 0.05] });
 scene.setMSAA(4);
 vp.onFrame((dt) => sky.update(dt));
 

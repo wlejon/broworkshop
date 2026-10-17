@@ -27,7 +27,9 @@ export const vp = sceneViewport('#stage', {
     controls: { orbitButton: 0, panButton: 2, minDist: 2, maxDist: 150 },
 });
 export const { scene } = vp;
-export const sky = daylight(scene, { order: ['golden', 'noon', 'dawn'], cascades: 3, atlas: 4096, pcf: 3 });
+// The meadow's albedo lights the shade from below (a trunk under its crown).
+export const sky = daylight(scene, { order: ['golden', 'noon', 'dawn'], cascades: 3, atlas: 4096, pcf: 3,
+    ground: [0.11, 0.15, 0.06] });
 sky.setScale(1.7);   // the haze sits past the grove, on the hills
 // Leaves are cut-out silhouettes in geometry, not alpha-tested textures, so
 // multisampling is what smooths their edges (and the twigs').

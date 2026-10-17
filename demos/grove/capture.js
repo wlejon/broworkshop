@@ -11,7 +11,7 @@
 //       perf <shot[,shot...]> [wind=breeze]   (GPU ms per frame, and the grass's, leaves' and bark's shares)
 //   bro-headless --width 1280 --height 720 demos/grove demos/grove/capture.js -- \
 //       species <name[,name...]|all> [label=species] [skies=noon,golden] [tier=auto]
-//       (each conifer and shrub preset close, mid and far: <label>_<name>_<sky>.png)
+//       (each conifer and shrub preset close, mid and far: <label>_<name>_<sky>.jpg)
 //   bro-headless --width 960 --height 540 demos/grove demos/grove/capture.js -- \
 //       swayprofile <name[,name...]> [label=sway] [dist=20] [seconds=6] [wind=gusty]
 //       (how far each eighth of a plant's height moves in the wind, side on)
@@ -73,6 +73,19 @@ function shrink(g, tw, th, crop) {
         out[o] = r / (n || 1); out[o + 1] = gg / (n || 1); out[o + 2] = b / (n || 1); out[o + 3] = 255;
     }
     return out;
+}
+
+// A composite to look at, as a JPEG at quality 95 (the page only, no title
+// bar). Four full panes of grass are 4 to 5 MB as a PNG, past what an image
+// viewer such as a model's image input takes whole: it re-encodes them, and
+// the re-encode posterises every smooth sky and haze into contoured bands
+// that are not in the frame. At quality 95 the same frame is about 1.4 MB
+// and reaches the viewer as it is.
+function saveView(file) {
+    const g = frameImage();
+    const top = Math.max(0, g.height - innerHeight);
+    const px = new Uint8Array(g.data.buffer, g.data.byteOffset + top * g.width * 4, (g.height - top) * g.width * 4);
+    bro.image.encodeJpegFile(file, px, g.width, g.height - top, 4, 95);
 }
 
 function strip() {
@@ -159,12 +172,12 @@ function stills() {
 }
 
 // Each preset (PRESET_PLANTS) at four distances, seen from the meadow with
-// every other plant hidden: <label>_<name>_<sky>.png, four panes, the middle
+// every other plant hidden: <label>_<name>_<sky>.jpg (saveView), four panes, the middle
 // quarter of each view. A tree is seen from 5, 20, 60 and 150 m, a shrub
 // from 2.5, 6, 20 and 60 m. The eye stays within 60 m (over the grove's
 // ground); further views narrow the field of view to the size the plant
 // would have, so it draws the tier that distance gives it (the haze is the
-// 60 m eye's). `sil` adds <label>_<name>_sil.png: the same four views with
+// 60 m eye's). `sil` adds <label>_<name>_sil.jpg: the same four views with
 // the ground, grass and sky gone and the plant flat black on white, to
 // judge its form apart from its shading. `tier` forces a forest tier
 // (auto, leaves, ...).
@@ -201,7 +214,7 @@ function species() {
         for (let k = 1; k < 4; k++) g.fillRect(k * pane - 1, 0, 2, H);
         advanceTime(30);
         flush();
-        screenshot(file);
+        saveView(file);
         cv.remove();
         console.log(file);
     };
@@ -255,8 +268,8 @@ function species() {
                 visible.clear();
             }
             vp.cam.fov = FOV;
-            compose(shaded, captions, `${OUT}/${label}_${name}_${time}${tier === 'auto' ? '' : '_' + tier}.png`);
-            if (flat.length) compose(flat, captions.map((c) => c.replace(` ${time} `, ' silhouette ')), `${OUT}/${label}_${name}_sil.png`);
+            compose(shaded, captions, `${OUT}/${label}_${name}_${time}${tier === 'auto' ? '' : '_' + tier}.jpg`);
+            if (flat.length) compose(flat, captions.map((c) => c.replace(` ${time} `, ' silhouette ')), `${OUT}/${label}_${name}_sil.jpg`);
             part.node.setTrees(new Float32Array(part.rows.flatMap((r) => r.row)));
             for (const n of grove.nodes) n.visible = true;
             for (const q of grove.presets) q.node.visible = true;
