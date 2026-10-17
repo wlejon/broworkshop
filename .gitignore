@@ -33,3 +33,6 @@ demos/world/planet-coarse.bin
 # scripts/validate.sh output (logs, screenshots, summary), and apps' own test output
 /tests/out/
 */*/tests/out/
+
+# Demos' capture.js output (stills, strips, webms, traces)
+*/*/captures/
