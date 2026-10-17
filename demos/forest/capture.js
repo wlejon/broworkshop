@@ -3,19 +3,27 @@
 //
 //   bro-headless --width 1280 --height 720 demos/forest demos/forest/capture.js -- \
 //       still <shot[,shot...]> [label=forest] [wind=breeze] [tier=auto] [sky=golden]
-//   bro-headless ... capture.js -- trace [label=forest] [wind=breeze] [far=impostors|sprites] [budget]
+//   bro-headless ... capture.js -- trace [label=forest] [wind=breeze] [budget]
 //       GPU ms per frame along the whole flight: max, p95 and mean, a line a
-//       second with the trees at each tier, and <label>_trace.json; `far`
-//       picks the far tier (sprites: the clumps and crowns before impostors),
-//       `budget` overrides the leaves' vertex budget (millions)
+//       second with the trees at each tier, and <label>_trace.json; `budget`
+//       overrides the leaves' vertex budget (millions)
 //   bro-headless ... capture.js -- video [label=forest] [wind=breeze] [fps=30]
 //       the flight as <label>.webm
-//   bro-headless ... capture.js -- handover <leaves|cards|clumps|crowns|impostors> [label=forest] [frames=12]
+//   bro-headless ... capture.js -- handover <leaves|cards|clumps|crowns> [label=forest] [frames=12]
 //       a dolly out from a tree through the distances where it hands over
 //       from one tier to the next: <label>_handover_<which>_strip.png
 //   bro-headless ... capture.js -- compare <shot[,shot...]> [label=forest] [wind=gusty] [sky=noon]
 //       the forced Leaves tier beside By size, the middle half of each view:
 //       <label>_<shot>_<sky>_compare.png
+//   bro-headless ... capture.js -- metrics [shots=canopy,skim,glade,trunks] [label=forest] [skies=noon,golden] [wind=breeze]
+//       Leaves against By size from the same views, per band of distance to
+//       the crowns (10-20, 20-40, 40-80, 80-160 m): luminance, colour, local
+//       contrast at three scales, hard edges, flat patches, blockiness; a
+//       table per shot and <label>_metrics.json (see metrics() below)
+//
+// Any command also takes `lod={...}` (setForestLod's fields, JSON) to try a
+// level of detail without a rebuild, and compare takes `crop=cx,cy,w`
+// (fractions of the view; w 0.25 is a quarter blown up twice).
 //
 // Everything goes to demos/forest/captures/.
 //
@@ -33,7 +41,7 @@
 //     (bro/docs/hot-reload.md);
 //   - chain the views you are judging into one run with `+`.
 
-import { forest, setWind, setShot, sky, flight, flightAt, FLIGHT_SECONDS, vp } from "/app/forest.js";
+import { forest, setWind, setShot, sky, flight, flightAt, FLIGHT_SECONDS, vp, groundHeight } from "/app/forest.js";
 
 const argv = (bro.app && bro.app.argv) || [];
 // The command now running: its mode and arguments (see run() at the end).
@@ -49,10 +57,17 @@ function step(seconds) {
     for (let i = 0; i < n; i++) advanceTime(1000 / fps);
 }
 
+// The command's `key=value` argument, if any.
+const opt = (key) => {
+    const a = args.find((s) => typeof s === 'string' && s.startsWith(key + '='));
+    return a ? a.slice(key.length + 1) : undefined;
+};
+
 function setup(wind, tier, time) {
     setWind(wind || 'breeze');
     sky.apply(time || 'golden');
     forest.node.setForestTier(tier || 'auto');
+    if (opt('lod')) forest.node.setForestLod(JSON.parse(opt('lod')));
 }
 
 function stills() {
@@ -73,9 +88,7 @@ const pct = (sorted, p) => sorted[Math.min(sorted.length - 1, Math.floor(p * sor
 function trace() {
     const label = a1 || 'forest';
     setup(a2);
-    // The far tier: impostors (the default), or the older clump and crown sprites.
-    forest.node.setForestLod({ impostors: a3 === 'sprites' ? 0 : 1 });
-    if (a4) forest.node.setForestLod({ budget: +a4 });
+    if (a3) forest.node.setForestLod({ budget: +a3 });
     // Warm: one pass over the flight at a frame a second, so pipelines and
     // the shadow atlas exist before anything is timed.
     flight.on = true;
@@ -94,7 +107,7 @@ function trace() {
         const ms = perf.gpuFrameMs();
         const s = forest.node.forestStats();
         frames.push({ t: +(i / fps).toFixed(3), ms, eye: flightAt(i / fps).eye.map((v) => +v.toFixed(1)),
-                      trees: [s.trees.leaves, s.trees.clumps, s.trees.crowns, s.trees.impostors], culled: s.culled,
+                      trees: [s.trees.leaves, s.trees.clumps, s.trees.crowns], culled: s.culled,
                       vertices: s.vertices, shadowVertices: s.shadowVertices, draws: s.draws });
     }
     const ms = frames.map((f) => f.ms).sort((a, b) => a - b);
@@ -104,7 +117,7 @@ function trace() {
         if (!fr.length) continue;
         const worst = fr.reduce((a, b) => (b.ms > a.ms ? b : a));
         console.log(`t=${String(sec).padStart(2)}s  eye y ${worst.eye[1].toFixed(0).padStart(4)}  ` +
-                    `max ${worst.ms.toFixed(2)} ms  trees L/C/R/I ${worst.trees.join('/')}  ` +
+                    `max ${worst.ms.toFixed(2)} ms  trees L/C/R ${worst.trees.join('/')}  ` +
                     `${(worst.vertices / 1e6).toFixed(1)} M verts, ${(worst.shadowVertices / 1e6).toFixed(1)} M shadow, ${worst.draws} draws`);
     }
     const summary = { frames: frames.length, max: ms[ms.length - 1], p95: pct(ms, 0.95), p50: pct(ms, 0.5), mean,
@@ -195,7 +208,6 @@ const HANDOVERS = {
     cards: (l) => l.card,                  // the leaves turn to cards
     clumps: (l) => l.leaves < 0.5,         // half way to clumps (the clumps' own share falls again past the crowns)
     crowns: (l) => l.crowns > 0.5,         // half way to crowns
-    impostors: (l) => l.impostors > 0.5,   // half way to impostors
 };
 
 function handover() {
@@ -236,7 +248,7 @@ function handover() {
         im.data.set(s.px);
         g.putImageData(im, x, y);
         const txt = `${which} ${s.d.toFixed(0)} m  w ${s.l.widening.toFixed(1)}${s.l.card ? ' card' : ''}  ` +
-                    `L ${s.l.leaves.toFixed(2)} C ${s.l.clumps.toFixed(2)} R ${s.l.crowns.toFixed(2)} I ${s.l.impostors.toFixed(2)}`;
+                    `L ${s.l.leaves.toFixed(2)} C ${s.l.clumps.toFixed(2)} R ${s.l.crowns.toFixed(2)}`;
         g.fillStyle = '#000'; g.fillText(txt, x + 6, y + 17);
         g.fillStyle = '#fff'; g.fillText(txt, x + 5, y + 16);
     });
@@ -270,7 +282,7 @@ function compare() {
         for (const tier of ['leaves', 'auto']) {
             forest.node.setForestTier(tier);
             for (let k = 0; k < 2; k++) { advanceTime(1000 / fps); flush(); }
-            panes.push(shrink(frameImage(), half, H, [0.5, 0.5, half / W]));
+            panes.push(shrink(frameImage(), half, H, opt('crop') ? opt('crop').split(',').map(Number) : [0.5, 0.5, half / W]));
         }
         forest.node.setForestTier('auto');
         cv.style.display = 'block';
@@ -319,17 +331,249 @@ function parts() {
     }
 }
 
+// --- metrics: Leaves against By size, by distance --------------------------------
+//
+// Each shot is drawn twice from the same view, the forced Leaves tier and By
+// size, and every pixel a crown covers is given the distance along its ray to
+// the nearest crown (each tree's crown as the upright ellipsoid round its
+// clumps, ray-cast on the CPU; the same mask for both frames). Per band of
+// distance, each frame's:
+//   Y         mean luminance (Rec. 709 weights on the sRGB values, 0..255),
+//             and the mean r g b (drgb: the distance between the frames')
+//   d1 d3 d9  local contrast at three scales: the rms of luminance less its
+//             1 px box blur, of the 1 px blur less the 3 px, and of the 3 px
+//             less the 9 px, so leaf sparkle, leaf clusters and crown masses
+//             are told apart
+//   hard      % of pixels with a luminance step over 40 to a neighbour
+//   flat      % of pixels whose 3 x 3 neighbourhood spans under 4 levels:
+//             posterised, painted patches
+//   block     the luminance's second difference at a 2 px lag over that at
+//             1 px (about 1 for fine noise; it rises as the picture is made of
+//             magnified texels or big flat pieces)
+// `bands` among the arguments also writes <label>_<shot>_<sky>_bands.png, the
+// By size frame tinted by band (10-20 red, 20-40 yellow, 40-80 green, 80-160
+// blue), to check the mask.
+
+const BANDS = [[10, 20], [20, 40], [40, 80], [80, 160]];
+
+function crownDepth(W, H) {
+    const inst = forest.trees, em = forest.emit, spec = em.specimens, clumps = em.clumps;
+    const { eye, look } = flightAt(flight.t);
+    const crowns = [];
+    for (let s = 0; s < em.specimenCount; s++) {
+        const c0 = spec[s * 16 + 2], cn = spec[s * 16 + 3];
+        const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+        for (let c = c0; c < c0 + cn; c++) for (let k = 0; k < 3; k++) {
+            lo[k] = Math.min(lo[k], clumps[c * 8 + k] - clumps[c * 8 + 3]);
+            hi[k] = Math.max(hi[k], clumps[c * 8 + k] + clumps[c * 8 + 3]);
+        }
+        crowns.push(cn ? { c: lo.map((v, k) => (v + hi[k]) / 2), a: Math.max(hi[0] - lo[0], hi[2] - lo[2]) / 2,
+                           b: (hi[1] - lo[1]) / 2 } : null);
+    }
+    const norm = (v) => { const l = Math.hypot(v[0], v[1], v[2]); return [v[0] / l, v[1] / l, v[2] / l]; };
+    const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+    const fw = norm([look[0] - eye[0], look[1] - eye[1], look[2] - eye[2]]);
+    const rt = norm(cross(fw, [0, 1, 0])), up = cross(rt, fw);
+    const ty = Math.tan(vp.cam.fov * Math.PI / 360), tx = ty * W / H;
+    const ppm = (H / 2) / ty;
+    const depth = new Float32Array(W * H);
+    for (let i = 0; i < inst.length / 8; i++) {
+        const o = i * 8, cr = crowns[inst[o + 5] | 0];
+        if (!cr) continue;
+        const sc = inst[o + 3], yaw = inst[o + 4], co = Math.cos(yaw), sn = Math.sin(yaw);
+        const C = [inst[o] + sc * (cr.c[0] * co + cr.c[2] * sn), inst[o + 1] + sc * cr.c[1],
+                   inst[o + 2] + sc * (-cr.c[0] * sn + cr.c[2] * co)];
+        const a = cr.a * sc, b = cr.b * sc, R = Math.max(a, b);
+        const rel = [C[0] - eye[0], C[1] - eye[1], C[2] - eye[2]];
+        const z = rel[0] * fw[0] + rel[1] * fw[1] + rel[2] * fw[2];
+        if (z < -R) continue;
+        let x0 = 0, x1 = W - 1, y0 = 0, y1 = H - 1;
+        if (z > 2 * R) {
+            const sx = (rel[0] * rt[0] + rel[1] * rt[1] + rel[2] * rt[2]) / z, sy = (rel[0] * up[0] + rel[1] * up[1] + rel[2] * up[2]) / z;
+            const px = W / 2 + sx * ppm, py = H / 2 - sy * ppm, pr = R * ppm / (z - R) + 2;
+            x0 = Math.max(0, Math.floor(px - pr)); x1 = Math.min(W - 1, Math.ceil(px + pr));
+            y0 = Math.max(0, Math.floor(py - pr)); y1 = Math.min(H - 1, Math.ceil(py + pr));
+            if (x0 > x1 || y0 > y1) continue;
+        }
+        // In the ellipsoid's unit-sphere space.
+        const ox = -rel[0] / a, oy = -rel[1] / b, oz = -rel[2] / a;
+        const cc = ox * ox + oy * oy + oz * oz - 1;
+        for (let y = y0; y <= y1; y++) {
+            const v = (1 - 2 * (y + 0.5) / H) * ty;
+            for (let x = x0; x <= x1; x++) {
+                const u = (2 * (x + 0.5) / W - 1) * tx;
+                let dx = fw[0] + rt[0] * u + up[0] * v, dy = fw[1] + rt[1] * u + up[1] * v, dz = fw[2] + rt[2] * u + up[2] * v;
+                const l = Math.hypot(dx, dy, dz);
+                dx /= l; dy /= l; dz /= l;
+                const qx = dx / a, qy = dy / b, qz = dz / a;
+                const A = qx * qx + qy * qy + qz * qz, B = ox * qx + oy * qy + oz * qz;
+                const disc = B * B - A * cc;
+                if (disc < 0) continue;
+                const t = (-B - Math.sqrt(disc)) / A;
+                if (t < 0.5) continue;   // inside a crown: not a view of it
+                const k = y * W + x;
+                if (depth[k] !== 0 && t >= depth[k]) continue;
+                if (eye[1] + dy * t < groundHeight(eye[0] + dx * t, eye[2] + dz * t) - 0.5) continue;
+                depth[k] = t;
+            }
+        }
+    }
+    return depth;
+}
+
+// Luminance and colour of frame `g` (the view's rows, past any band above).
+function lumaOf(g, W, H) {
+    const top = Math.max(0, g.height - H);
+    const Y = new Float32Array(W * H), rgb = new Float32Array(W * H * 3);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+        const o = ((y + top) * g.width + x) * 4, k = y * W + x;
+        const r = g.data[o], gg = g.data[o + 1], b = g.data[o + 2];
+        Y[k] = 0.2126 * r + 0.7152 * gg + 0.0722 * b;
+        rgb[k * 3] = r; rgb[k * 3 + 1] = gg; rgb[k * 3 + 2] = b;
+    }
+    return { Y, rgb };
+}
+
+// A separable box blur of radius r.
+function boxBlur(src, W, H, r) {
+    const tmp = new Float32Array(W * H), out = new Float32Array(W * H);
+    for (let y = 0; y < H; y++) {
+        let acc = 0, n = 0;
+        for (let x = -r; x < W + r; x++) {
+            if (x + r < W && x + r >= 0) { acc += src[y * W + x + r]; n++; }
+            if (x - r - 1 >= 0 && x - r - 1 < W) { acc -= src[y * W + x - r - 1]; n--; }
+            if (x >= 0 && x < W) tmp[y * W + x] = acc / n;
+        }
+    }
+    for (let x = 0; x < W; x++) {
+        let acc = 0, n = 0;
+        for (let y = -r; y < H + r; y++) {
+            if (y + r < H && y + r >= 0) { acc += tmp[(y + r) * W + x]; n++; }
+            if (y - r - 1 >= 0 && y - r - 1 < H) { acc -= tmp[(y - r - 1) * W + x]; n--; }
+            if (y >= 0 && y < H) out[y * W + x] = acc / n;
+        }
+    }
+    return out;
+}
+
+function bandStats(img, depth, W, H) {
+    const { Y, rgb } = img;
+    const b1 = boxBlur(Y, W, H, 1), b3 = boxBlur(Y, W, H, 3), b9 = boxBlur(Y, W, H, 9);
+    // One pass, each pixel into its band's sums.
+    const acc = BANDS.map(() => new Float64Array(13));
+    for (let y = 2; y < H - 2; y++) for (let x = 2; x < W - 2; x++) {
+        const k = y * W + x, d = depth[k];
+        if (!(d >= BANDS[0][0] && d < BANDS[BANDS.length - 1][1])) continue;
+        let bi = 0;
+        while (d >= BANDS[bi][1]) bi++;
+        const A = acc[bi];
+        A[0]++;
+        A[1] += Y[k]; A[2] += rgb[k * 3]; A[3] += rgb[k * 3 + 1]; A[4] += rgb[k * 3 + 2];
+        const e1 = Y[k] - b1[k], e3 = b1[k] - b3[k], e9 = b3[k] - b9[k];
+        A[5] += e1 * e1; A[6] += e3 * e3; A[7] += e9 * e9;
+        if (Math.max(Math.abs(Y[k + 1] - Y[k]), Math.abs(Y[k + W] - Y[k])) > 40) A[8]++;
+        let mn = 255, mx = 0;
+        for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) {
+            const v = Y[k + j * W + i];
+            if (v < mn) mn = v;
+            if (v > mx) mx = v;
+        }
+        if (mx - mn < 4) A[9]++;
+        const a1 = Y[k + 1] - 2 * Y[k] + Y[k - 1], c1 = Y[k + W] - 2 * Y[k] + Y[k - W];
+        const a2 = Y[k + 2] - 2 * Y[k] + Y[k - 2], c2 = Y[k + 2 * W] - 2 * Y[k] + Y[k - 2 * W];
+        A[10] += a1 * a1 + c1 * c1;
+        A[11] += a2 * a2 + c2 * c2;
+    }
+    return BANDS.map(([lo, hi], bi) => {
+        const [n, sY, sr, sg, sb, s1, s3, s9, hard, flat, l1, l2] = acc[bi];
+        if (n < 200) return null;
+        const f = (v) => +v.toFixed(2);
+        return { band: `${lo}-${hi}`, px: n, Y: f(sY / n), rgb: [f(sr / n), f(sg / n), f(sb / n)],
+                 d1: f(Math.sqrt(s1 / n)), d3: f(Math.sqrt(s3 / n)), d9: f(Math.sqrt(s9 / n)),
+                 hard: f(100 * hard / n), flat: f(100 * flat / n), block: f(Math.sqrt(l2 / Math.max(l1, 1e-6))) };
+    });
+}
+
+function bandsImage(g, depth, W, H, file) {
+    const tints = [[255, 60, 60], [255, 220, 40], [60, 220, 90], [70, 120, 255]];
+    const top = Math.max(0, g.height - H);
+    const cv = document.createElement('canvas');
+    cv.width = W; cv.height = H;
+    cv.style.cssText = `position:absolute;left:0;top:0;width:${W}px;height:${H}px;z-index:10`;
+    document.body.append(cv);
+    const c = cv.getContext('2d');
+    const im = c.createImageData(W, H);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+        const k = y * W + x, o = ((y + top) * g.width + x) * 4, d = depth[k];
+        const b = BANDS.findIndex(([lo, hi]) => d >= lo && d < hi);
+        for (let j = 0; j < 3; j++) im.data[k * 4 + j] = b < 0 ? g.data[o + j] * 0.5 : 0.55 * g.data[o + j] + 0.45 * tints[b][j];
+        im.data[k * 4 + 3] = 255;
+    }
+    c.putImageData(im, 0, 0);
+    advanceTime(30);
+    flush();
+    screenshot(file);
+    cv.remove();
+}
+
+function metrics() {
+    const shots = (a1 || 'canopy,skim,glade,trunks').split(','), label = a2 || 'forest';
+    const skies = (a3 || 'noon,golden').split(',');
+    const W = innerWidth, H = innerHeight;
+    const out = [];
+    const keys = ['Y', 'd1', 'd3', 'd9', 'hard', 'flat', 'block'];
+    console.log(`metrics ${label}: Leaves/By size per band${keys.map((k) => k.padStart(13)).join('')}`);
+    for (const time of skies) {
+        setup(a4 || 'breeze', 'auto', time);
+        for (const s of shots) {
+            setShot(s);
+            forest.node.setForestTier('auto');
+            step(1.5);
+            flush();
+            // The mask at half resolution (a quarter of the rays), each value
+            // standing for its 2 x 2 pixels.
+            const half = crownDepth(W >> 1, H >> 1), depth = new Float32Array(W * H);
+            for (let y = 0; y < H; y++) for (let x = 0; x < W; x++)
+                depth[y * W + x] = half[Math.min(y >> 1, (H >> 1) - 1) * (W >> 1) + Math.min(x >> 1, (W >> 1) - 1)];
+            const frames = {};
+            let last = null;
+            for (const tier of ['leaves', 'auto']) {
+                forest.node.setForestTier(tier);
+                for (let k = 0; k < 2; k++) { advanceTime(1000 / fps); flush(); }
+                last = frameImage();
+                frames[tier] = bandStats(lumaOf(last, W, H), depth, W, H);
+            }
+            const st = forest.node.forestStats();
+            if (args.includes('bands')) bandsImage(last, depth, W, H, `${OUT}/${label}_${s}_${time}_bands.png`);
+            forest.node.setForestTier('auto');
+            console.log(`${s} ${time}: detail ${st.detail.toFixed(2)}, trees L/C/R ${st.trees.leaves}/${st.trees.clumps}/${st.trees.crowns}`);
+            BANDS.forEach((b, i) => {
+                const L = frames.leaves[i], A = frames.auto[i];
+                if (!L || !A) return;
+                const cells = keys.map((k) => `${L[k].toFixed(1)}/${A[k].toFixed(1)}`.padStart(13)).join('');
+                const dc = Math.hypot(A.rgb[0] - L.rgb[0], A.rgb[1] - L.rgb[1], A.rgb[2] - L.rgb[2]);
+                console.log(`  ${(L.band + ' m').padEnd(9)} ${String(L.px).padStart(7)} px ${cells}   drgb ${dc.toFixed(1)}`);
+                out.push({ shot: s, sky: time, band: L.band, leaves: L, bySize: A, drgb: +dc.toFixed(2) });
+            });
+        }
+    }
+    const file = `${OUT}/${label}_metrics.json`;
+    require('fs').writeFileSync(file, JSON.stringify(out, null, 1));
+    console.log(file);
+}
+
 // Several commands joined by `+` run one after another in this one boot.
 // Between them the page is put back as the boot left it: any overlay a
 // command drew is removed and the forest's level of detail restored (the
 // clock runs on, so wind and the flight's motion continue from there).
-const MODES = { still: stills, trace, video, handover, compare, parts };
+const MODES = { still: stills, trace, video, handover, compare, parts, metrics };
 const lod0 = forest.node.forestLod();
 const commands = [[]];
 for (const a of argv) a === '+' ? commands.push([]) : commands[commands.length - 1].push(a);
 for (const cmd of commands) {
     args = cmd;
-    [mode = 'still', a1, a2, a3, a4] = cmd;
+    // The positional arguments; `key=value` options (opt()) may sit anywhere.
+    [mode = 'still', a1, a2, a3, a4] = cmd.filter((a) => !/^(lod|crop)=/.test(a));
     const before = new Set(document.body.children);
     (MODES[mode] || stills)();
     for (const el of [...document.body.children]) if (!before.has(el)) el.remove();

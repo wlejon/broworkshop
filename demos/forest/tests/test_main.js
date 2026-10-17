@@ -44,23 +44,21 @@ test('trees stand on the ground, round a glade, off the trail', () => {
     }
 });
 
-test('from above the trees are impostors; among the trunks the near ones are leaves', () => {
+test('from above the trees are clumps and crowns; among the trunks the near ones are leaves', () => {
     setShot('above');
     frames(2);
     let s = forest.node.forestStats();
-    // At this window's 1920 x 1052 the trees right under the eye are a
-    // little larger than their baked pictures, so they keep their leaves
-    // (at 1280 x 720 none do); everything else is an impostor.
     check(s.trees.leaves < 60, 'from 150 m up only the trees under the eye keep leaves: ' + s.trees.leaves);
-    check(s.trees.impostors > 1000, 'every other tree an impostor: ' + s.trees.impostors);
-    eq(s.trees.clumps + s.trees.crowns, 0, 'no sprites while impostors are on');
+    check(s.trees.clumps + s.trees.crowns > 1000, 'every other tree clumps or a crown: ' + s.trees.clumps + ' / ' +
+          s.trees.crowns);
     const g = forest.grass.grassStats().instances;
     check(g[0] === 0 && g[1] === 0, 'from above the near grass rings issue nothing: ' + g.join(' / '));
     setShot('trunks');
     frames(2);
     s = forest.node.forestStats();
     check(s.trees.leaves > 5 && s.leaves > 50000, `the near trees draw their leaves: ${s.trees.leaves} trees, ${s.leaves} leaves`);
-    check(s.trees.impostors > 100, 'the far ones are impostors: ' + s.trees.impostors);
+    check(s.trees.clumps + s.trees.crowns > 100, 'the far ones are clumps and crowns: ' + s.trees.clumps + ' / ' +
+          s.trees.crowns);
     check(s.vertices < 30e6, 'the budget holds the view: ' + (s.vertices / 1e6).toFixed(1) + ' M vertices');
     check(forest.grass.grassStats().instances[0] > 0, 'on the trail, the near grass draws');
 });
@@ -70,19 +68,19 @@ test('the tier buttons draw every tree at one tier', () => {
     clickOn('#tiers button[data-value="crowns"]');
     frames(1);
     let s = forest.node.forestStats();
-    eq(s.trees.leaves + s.trees.clumps + s.trees.impostors, 0, 'crowns only');
-    clickOn('#tiers button[data-value="impostors"]');
+    check(s.trees.crowns > 0 && s.trees.leaves + s.trees.clumps === 0, 'crowns only');
+    clickOn('#tiers button[data-value="clumps"]');
     frames(1);
     s = forest.node.forestStats();
-    check(s.trees.impostors > 0 && s.trees.leaves + s.trees.clumps + s.trees.crowns === 0, 'impostors only');
+    check(s.trees.clumps > 0 && s.trees.leaves + s.trees.crowns === 0, 'clumps only');
     clickOn('#tiers button[data-value="leaves"]');
     frames(1);
     s = forest.node.forestStats();
-    eq(s.trees.clumps + s.trees.crowns + s.trees.impostors, 0, 'leaves only');
+    eq(s.trees.clumps + s.trees.crowns, 0, 'leaves only');
     clickOn('#tiers button[data-value="auto"]');
     frames(1);
     s = forest.node.forestStats();
-    check(s.trees.leaves > 0 && s.trees.impostors > 0, 'by size again');
+    check(s.trees.leaves > 0 && s.trees.clumps + s.trees.crowns > 0, 'by size again');
 });
 
 test('a calm is still at every distance and a breeze moves the forest', () => {

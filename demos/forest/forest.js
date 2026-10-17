@@ -10,11 +10,14 @@
 // draws every tree at the detail its size on screen asks for:
 //
 //   leaves   up close, every leaf, fluttering on its own
-//   thinned  a little further, fewer and larger leaves, then 6-vertex cards
-//   impostors  further, one card a tree showing its specimen's own leaves,
-//              baked from 64 directions and lit as the leaves are
-//   (clumps and crowns, the crown's lobes and then one disc a tree, are the
-//   far tiers with impostors off: the Clumps and Crowns buttons)
+//   thinned  a little further, fewer leaves, then clusters: each kept leaf
+//            a small card of the leaves round it
+//   clumps   the crown's lobes, a card each on which the shader places the
+//            lobe's own leaves
+//   crowns   one such card a tree, far off
+//
+// Nothing is baked: every tier is drawn from the tree's own clumps and
+// leaves, so a world of unique trees streams in at no extra cost.
 //
 // every tier posed by the same sway, so a tree does not swim as it hands
 // over. Grass grows in the glade and the open, thin under the crowns, from
