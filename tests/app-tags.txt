@@ -63,6 +63,9 @@ ai/voice-pipeline/tests/test_stream.js      ml
 ai/voice-pipeline/tests/test_concurrent.js  ml
 ai/birds/tests/test_process_ml.js           ml
 
+# --- slow to boot ---------------------------------------------------------------
+demos/forest                                timeout=240
+
 # --- needs a namespace that some build profiles compile out -------------------
 games/stompworld/tests/test_ai.js           needs=bro.ai.game.nn needs=bro.ai.game.grid needs=bro.ai.game.learn
 ai/birds/tests/test_process.js              needs=bro.vision

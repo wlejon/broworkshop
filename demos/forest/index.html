@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>forest</title>
+    <link rel="stylesheet" href="/lib/kit/kit.css">
+    <style>
+        #shots, #tod, #winds, #tiers { display: flex; flex-wrap: wrap; gap: 3px; }
+        .help { color: var(--k-dim); font-size: 11px; }
+        body.clean .k-header, body.clean .k-side, body.clean .k-statusbar { display: none; }
+    </style>
+</head>
+<body class="k-app">
+    <header class="k-header">
+        <h1>forest</h1>
+        <span class="k-sub">a few thousand broflora trees on rolling hills, each drawn at the detail its size on screen asks for, from above the canopy down among the trunks</span>
+    </header>
+    <div class="k-body">
+        <aside class="k-side">
+            <div class="k-panel">
+                <h2>Flight</h2>
+                <button id="fly">Fly in</button>
+            </div>
+            <div class="k-panel">
+                <h2>View</h2>
+                <div id="shots"></div>
+            </div>
+            <div class="k-panel">
+                <h2>Wind</h2>
+                <div id="winds"></div>
+            </div>
+            <div class="k-panel">
+                <h2>Time of day</h2>
+                <div id="tod"></div>
+            </div>
+            <div class="k-panel">
+                <h2>Trees drawn as</h2>
+                <div id="tiers"></div>
+            </div>
+            <div class="help">Drag orbits · right-drag pans · wheel zooms (stops the flight).</div>
+        </aside>
+        <main class="k-main">
+            <div class="k-viewport"><canvas id="stage"></canvas></div>
+        </main>
+    </div>
+    <footer class="k-statusbar">
+        <span id="status">growing…</span>
+        <span class="k-stats" id="stats"></span>
+    </footer>
+    <script type="module" src="/app/main.js"></script>
+</body>
+</html>
