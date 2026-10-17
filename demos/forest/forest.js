@@ -31,6 +31,7 @@ export const GROUND = 240;         // half-size of the near ground (fine mesh, g
 export const FAR = 900;            // half-size of the far ground
 export const FOREST = 400;         // half-size of the planted area
 export const PLANT_SCALE = 1.5;    // node scale: broflora grows ~5 m trees, drawn ~7.5 m
+export const GRASS_RANGE = 150;    // how far blades are drawn (their rings end at 7, 20, 55, 150 m of it at 150)
 export const GLADE = { x: 12, z: 18, r: 26 };
 
 export const vp = sceneViewport('#stage', {
@@ -98,27 +99,23 @@ export function treeDensity(x, z) {
            (0.85 + 0.15 * fbm.genSingle2D(x * 0.02, z * 0.02, 0x8));
 }
 
-// Leaf litter and soil: brown under the trees, the grass's own green in the
-// glade, so the ground under a far ring of grass reads as grass. `half` the
-// mesh's half-size, N its vertices a side, `drop` how far it sits below the
-// height function (the far ground, under the near one).
+// The ground: turf under the grass (scene_ground.glsl shades it as the sward,
+// the litter under the trees and the soil), its vertex colour the ground's
+// data where the grass field does not reach: (grass density, dryness, how
+// closed the canopy is). `half` the mesh's half-size, N its vertices a side,
+// `drop` how far it sits below the height function (the far ground, under
+// the near one).
 function groundMesh(cover, half, N, drop) {
     const cell = (2 * half) / (N - 1);
     const h = new Float32Array(N * N);
     for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) h[j * N + i] = groundHeight(-half + i * cell, -half + j * cell) - drop;
     const m = Mesh.heightmapGrid(h, N, N, cell);
     const pos = m.positions, c = new Float32Array(m.vertexCount * 4);
-    const litter = [0.06, 0.045, 0.03], lush = [0.035, 0.05, 0.016], dry = [0.1, 0.08, 0.04];
     for (let v = 0; v < m.vertexCount; v++) {
         const x = pos[v * 3], z = pos[v * 3 + 2];
-        const g = cover(x, z), d = dryness(x, z);
-        // Mottled: drifts of leaves, bare patches, moss.
-        const fleck = (0.85 + 0.3 * fbm.genSingle2D(x * 0.7, z * 0.7, 0x5)) *
-                      (0.75 + 0.5 * smooth(-0.5, 0.5, fbm.genSingle2D(x * 0.09, z * 0.09, 0x6)));
-        for (let k = 0; k < 3; k++) {
-            const grass = lush[k] + (dry[k] - lush[k]) * d;
-            c[v * 4 + k] = (litter[k] + (grass - litter[k]) * Math.min(1, g * 1.3)) * fleck;
-        }
+        c[v * 4] = cover(x, z);
+        c[v * 4 + 1] = dryness(x, z);
+        c[v * 4 + 2] = cover.canopy(x, z);
         c[v * 4 + 3] = 1;
     }
     m.colors = c;
@@ -250,10 +247,12 @@ function build() {
         cell: 0.6,
         dry: dryness,
         density: cover,
+        floor: cover.canopy,
         tall: (x, z) => 1.1 - 0.4 * dryness(x, z),
-        // Past 100 m the trunks hide most of it: the ground, coloured as
-        // the grass, stands in.
-        range: 100,
+        // Blades to 150 m (the glade's far side from its middle); past
+        // them the turf, shaded as the grass, stands in.
+        range: GRASS_RANGE,
+        turf: [forest.ground, forest.far],
         castsShadow: true,
     });
     lap('grass');

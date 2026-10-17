@@ -45,7 +45,7 @@
 //     (bro/docs/hot-reload.md);
 //   - chain the views you are judging into one run with `+`.
 
-import { forest, setWind, setShot, sky, flight, flightAt, FLIGHT_SECONDS, vp, groundHeight } from "/app/forest.js";
+import { forest, setWind, setShot, sky, flight, flightAt, FLIGHT_SECONDS, vp, groundHeight, GRASS_RANGE } from "/app/forest.js";
 
 const argv = (bro.app && bro.app.argv) || [];
 // The command now running: its mode and arguments (see run() at the end).
@@ -79,10 +79,24 @@ function stills() {
     const label = a2 || 'forest';
     setup(a3, a4, args[5]);
     for (const s of (a1 || 'above').split(',')) {
-        setShot(s);
+        let name = s;
+        if (s[0] === '@') {
+            // A view of its own: @x/h/z/lookx/lookh/lookz (h over the ground).
+            const [ex, eh, ez, lx, lh, lz] = s.slice(1).split('/').map(Number);
+            flight.on = false;
+            vp.onView((view) => {
+                if (flight.on) return;
+                view.position = [ex, groundHeight(ex, ez) + eh, ez];
+                view.target = [lx, groundHeight(lx, lz) + lh, lz];
+                view.up = [0, 1, 0];
+            });
+            name = 'at' + s.slice(1).replace(/\//g, '_');
+        } else {
+            setShot(s);
+        }
         step(1.5);
         flush();
-        const file = `${OUT}/${label}_${s}.png`;
+        const file = `${OUT}/${label}_${name}.png`;
         screenshot(file);
         console.log(`${file}: ${JSON.stringify(forest.node.forestStats())}`);
     }
@@ -349,6 +363,30 @@ function parts() {
     }
 }
 
+// GPU ms held at flight times (comma separated, s; default the canopy dive's
+// worst, 11 and 12): after the trace's ten-second warm, the mean over 60
+// frames at each, for a quick A/B of one view's cost (with
+// BRO_SCENE_GPU_PASSES set, its passes too).
+function hold() {
+    setup(a2);
+    flight.on = true;
+    flight.speed = 0;
+    const times = (a1 || '11,12').split(',').map(Number);
+    const warmFrom = perf.now();
+    flight.t = times[0];
+    while (perf.now() - warmFrom < 10000) { advanceTime(1000 / fps); flush(); }
+    for (const t of times) {
+        flight.t = t;
+        for (let i = 0; i < 10; i++) { advanceTime(1000 / fps); flush(); }
+        perf.gpuFrameMs();
+        const ms = [];
+        for (let i = 0; i < 60; i++) { advanceTime(1000 / fps); flush(); ms.push(perf.gpuFrameMs()); }
+        ms.sort((a, b) => a - b);
+        console.log(`hold t=${t}: mean ${(ms.reduce((a, b) => a + b, 0) / ms.length).toFixed(2)} ms, ` +
+                    `median ${ms[30].toFixed(2)}, max ${ms[59].toFixed(2)}`);
+    }
+}
+
 // --- metrics: Leaves against By size, by distance --------------------------------
 //
 // Each shot is drawn twice from the same view, the forced Leaves tier and By
@@ -368,6 +406,7 @@ function parts() {
 //   block     the luminance's second difference at a 2 px lag over that at
 //             1 px (about 1 for fine noise; it rises as the picture is made of
 //             magnified texels or big flat pieces)
+// Each shot also measures its ground (groundStats, below).
 // `bands` among the arguments also writes <label>_<shot>_<sky>_bands.png, the
 // By size frame tinted by band (10-20 red, 20-40 yellow, 40-80 green, 80-160
 // blue), to check the mask.
@@ -474,16 +513,16 @@ function boxBlur(src, W, H, r) {
     return out;
 }
 
-function bandStats(img, depth, W, H) {
+function bandStats(img, depth, W, H, bands = BANDS) {
     const { Y, rgb } = img;
     const b1 = boxBlur(Y, W, H, 1), b3 = boxBlur(Y, W, H, 3), b9 = boxBlur(Y, W, H, 9);
     // One pass, each pixel into its band's sums.
-    const acc = BANDS.map(() => new Float64Array(13));
+    const acc = bands.map(() => new Float64Array(13));
     for (let y = 2; y < H - 2; y++) for (let x = 2; x < W - 2; x++) {
         const k = y * W + x, d = depth[k];
-        if (!(d >= BANDS[0][0] && d < BANDS[BANDS.length - 1][1])) continue;
+        if (!(d >= bands[0][0] && d < bands[bands.length - 1][1])) continue;
         let bi = 0;
-        while (d >= BANDS[bi][1]) bi++;
+        while (d >= bands[bi][1]) bi++;
         const A = acc[bi];
         A[0]++;
         A[1] += Y[k]; A[2] += rgb[k * 3]; A[3] += rgb[k * 3 + 1]; A[4] += rgb[k * 3 + 2];
@@ -502,7 +541,7 @@ function bandStats(img, depth, W, H) {
         A[10] += a1 * a1 + c1 * c1;
         A[11] += a2 * a2 + c2 * c2;
     }
-    return BANDS.map(([lo, hi], bi) => {
+    return bands.map(([lo, hi], bi) => {
         const [n, sY, sr, sg, sb, s1, s3, s9, hard, flat, l1, l2] = acc[bi];
         if (n < 200) return null;
         const f = (v) => +v.toFixed(2);
@@ -510,6 +549,83 @@ function bandStats(img, depth, W, H) {
                  d1: f(Math.sqrt(s1 / n)), d3: f(Math.sqrt(s3 / n)), d9: f(Math.sqrt(s9 / n)),
                  hard: f(100 * hard / n), flat: f(100 * flat / n), block: f(Math.sqrt(l2 / Math.max(l1, 1e-6))) };
     });
+}
+
+// The ground, measured the same way in the By size frame: its pixels (the
+// terrain's ray hits, ray-marched on the CPU through groundHeight, less any
+// the crown mask covers) in bands that are the grass's rings (7, 20, 55 and
+// 150 m at a range of 150, scaled with it; past the last only the turf), each
+// band's Y, rgb and d1 d3 d9 (whether the turf keeps texture with distance),
+// and at each ring's edge the step in mean colour from the 15% inside it to
+// the 15% outside, beside the same step 1.3 times nearer and further (a band
+// at the boundary shows as a step well over those: seam dY / drgb (around)).
+const RING_EDGES = [7, 20, 55, 150];
+
+function groundDepth(W, H, crowns) {
+    const { eye, look } = flightAt(flight.t);
+    const norm = (v) => { const l = Math.hypot(v[0], v[1], v[2]); return [v[0] / l, v[1] / l, v[2] / l]; };
+    const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+    const fw = norm([look[0] - eye[0], look[1] - eye[1], look[2] - eye[2]]);
+    const rt = norm(cross(fw, [0, 1, 0])), up = cross(rt, fw);
+    const ty = Math.tan(vp.cam.fov * Math.PI / 360), tx = ty * W / H;
+    const depth = new Float32Array(W * H);
+    // groundHeight stays inside +-12 m: march only that slab, in steps of 3%
+    // of the distance, then bisect the crossing.
+    const SLAB = 12, FAR_T = 400;
+    for (let y = 0; y < H; y++) {
+        const v = (1 - 2 * (y + 0.5) / H) * ty;
+        for (let x = 0; x < W; x++) {
+            if (crowns[y * W + x] > 0) continue;
+            const u = (2 * (x + 0.5) / W - 1) * tx;
+            const d = norm([fw[0] + rt[0] * u + up[0] * v, fw[1] + rt[1] * u + up[1] * v, fw[2] + rt[2] * u + up[2] * v]);
+            let t = 0.05;
+            if (eye[1] > SLAB) { if (d[1] >= 0) continue; t = (eye[1] - SLAB) / -d[1]; }
+            const above = (s) => eye[1] + d[1] * s - groundHeight(eye[0] + d[0] * s, eye[2] + d[2] * s);
+            if (above(t) < 0) continue;
+            while (t < FAR_T) {
+                if (eye[1] + d[1] * t < -SLAB) break;
+                const t2 = t + Math.max(0.03 * t, 0.05);
+                if (above(t2) < 0) {
+                    let a = t, b = t2;
+                    for (let i = 0; i < 6; i++) { const m = (a + b) / 2; if (above(m) < 0) b = m; else a = m; }
+                    depth[y * W + x] = (a + b) / 2;
+                    break;
+                }
+                t = t2;
+            }
+        }
+    }
+    return depth;
+}
+
+function groundStats(img, depth, W, H) {
+    const k = GRASS_RANGE / 150, edges = RING_EDGES.map((e) => e * k);
+    const bands = [[2, edges[0]], ...edges.slice(1).map((e, i) => [edges[i], e]), [edges[3], 400]];
+    const stats = bandStats(img, depth, W, H, bands);
+    const { Y, rgb } = img;
+    // The step across distance x, from the 15% inside it to the 15% outside.
+    const step = (x) => {
+        const s = [new Float64Array(5), new Float64Array(5)];
+        for (let i = 0; i < W * H; i++) {
+            const d = depth[i];
+            if (!(d > x * 0.85 && d < x * 1.15)) continue;
+            const A = s[d < x ? 0 : 1];
+            A[0]++; A[1] += Y[i]; A[2] += rgb[i * 3]; A[3] += rgb[i * 3 + 1]; A[4] += rgb[i * 3 + 2];
+        }
+        if (s[0][0] < 100 || s[1][0] < 100) return null;
+        const m = s.map((A) => [A[1] / A[0], A[2] / A[0], A[3] / A[0], A[4] / A[0]]);
+        return { dY: m[1][0] - m[0][0], drgb: Math.hypot(m[1][1] - m[0][1], m[1][2] - m[0][2], m[1][3] - m[0][3]) };
+    };
+    // Each edge's step against the same step a little inside and outside it
+    // (the view's own changes with distance: a glade's edge, shade): a seam
+    // is an edge whose drgb stands well over its controls'.
+    const seams = edges.map((e) => {
+        const at = step(e), ctl = [step(e / 1.3), step(e * 1.3)].filter(Boolean);
+        if (!at || !ctl.length) return null;
+        return { edge: +e.toFixed(1), dY: +at.dY.toFixed(2), drgb: +at.drgb.toFixed(2),
+                 control: +(ctl.reduce((a, c) => a + c.drgb, 0) / ctl.length).toFixed(2) };
+    });
+    return { bands: stats, seams };
 }
 
 function bandsImage(g, depth, W, H, file) {
@@ -554,13 +670,18 @@ function metrics() {
             for (let y = 0; y < H; y++) for (let x = 0; x < W; x++)
                 depth[y * W + x] = half[Math.min(y >> 1, (H >> 1) - 1) * (W >> 1) + Math.min(x >> 1, (W >> 1) - 1)];
             const frames = {};
-            let last = null;
+            let last = null, lastLuma = null;
             for (const tier of ['leaves', 'auto']) {
                 forest.node.setForestTier(tier);
                 for (let k = 0; k < 2; k++) { advanceTime(1000 / fps); flush(); }
                 last = frameImage();
-                frames[tier] = bandStats(lumaOf(last, W, H), depth, W, H);
+                lastLuma = lumaOf(last, W, H);
+                frames[tier] = bandStats(lastLuma, depth, W, H);
             }
+            const gHalf = groundDepth(W >> 1, H >> 1, half), gDepth = new Float32Array(W * H);
+            for (let y = 0; y < H; y++) for (let x = 0; x < W; x++)
+                gDepth[y * W + x] = gHalf[Math.min(y >> 1, (H >> 1) - 1) * (W >> 1) + Math.min(x >> 1, (W >> 1) - 1)];
+            const ground = groundStats(lastLuma, gDepth, W, H);
             const st = forest.node.forestStats();
             if (args.includes('bands')) bandsImage(last, depth, W, H, `${OUT}/${label}_${s}_${time}_bands.png`);
             forest.node.setForestTier('auto');
@@ -573,6 +694,15 @@ function metrics() {
                 console.log(`  ${(L.band + ' m').padEnd(9)} ${String(L.px).padStart(7)} px ${cells}   drgb ${dc.toFixed(1)}`);
                 out.push({ shot: s, sky: time, band: L.band, leaves: L, bySize: A, drgb: +dc.toFixed(2) });
             });
+            for (const G of ground.bands) {
+                if (!G) continue;
+                console.log(`  ground ${(G.band + ' m').padEnd(11)} ${String(G.px).padStart(7)} px  Y ${G.Y.toFixed(1)}  ` +
+                            `rgb ${G.rgb.map((c) => c.toFixed(0)).join(' ')}  d1/d3/d9 ${G.d1.toFixed(1)}/${G.d3.toFixed(1)}/${G.d9.toFixed(1)}`);
+            }
+            const seams = ground.seams.filter(Boolean);
+            if (seams.length)
+                console.log(`  ground seams: ${seams.map((m) => `${m.edge} m dY ${m.dY.toFixed(1)} drgb ${m.drgb.toFixed(1)} (around ${m.control.toFixed(1)})`).join(', ')}`);
+            out.push({ shot: s, sky: time, ground });
         }
     }
     const file = `${OUT}/${label}_metrics.json`;
@@ -584,7 +714,7 @@ function metrics() {
 // Between them the page is put back as the boot left it: any overlay a
 // command drew is removed and the forest's level of detail restored (the
 // clock runs on, so wind and the flight's motion continue from there).
-const MODES = { still: stills, trace, video, handover, compare, parts, metrics };
+const MODES = { still: stills, trace, video, handover, compare, parts, hold, metrics };
 const lod0 = forest.node.forestLod();
 const commands = [[]];
 for (const a of argv) a === '+' ? commands.push([]) : commands[commands.length - 1].push(a);

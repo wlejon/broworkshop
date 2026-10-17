@@ -317,6 +317,8 @@ export const SHOTS = {
     tree:    { label: 'One tree', target: [6.5, 4.5, 9.5], dist: 18, yaw: 0, pitch: -0.05 },
     close:   { label: 'Under the crown', target: [6.5, 4.0, 11.0], dist: 7, yaw: 0.35, pitch: 0.12 },
     limb:    { label: 'A limb', target: [5.2, 5.4, 12.6], dist: 2.4, yaw: 0.5, pitch: 0.12 },
+    trunk:   { label: 'A trunk', target: [6.5, 1.4, 9.5], lift: true, dist: 3.4, yaw: 0.35, pitch: -0.08 },
+    bark:    { label: 'Its bark', target: [6.5, 0.7, 9.5], lift: true, dist: 1.3, yaw: 2.8, pitch: -0.12 },
     backlit: { label: 'Into the sun', target: [2, 5, 0], dist: 36, yaw: Math.PI * 0.5, pitch: -0.06 },
     meadow:  { label: 'Meadow', target: [-1, 1.4, 9], lift: true, dist: 26, yaw: -0.3, pitch: -0.11 },
     ground:  { label: 'In the grass', target: [-1, 0.3, 13.5], lift: true, dist: 3.6, yaw: -0.25, pitch: -0.16 },
