@@ -220,11 +220,10 @@ function species() {
             const views = VIEWS[shrub ? 'shrub' : 'tree'];
             const target = [p.x, groundHeight(p.x, p.z) + h * 0.5, p.z];
             const yaw = Math.atan2(-p.x, -p.z);
-            // A shrub stands in the meadow's grass, which would hide it: the
-            // grass goes, and the view looks down on it from nearer (the
-            // grove's ground ends some 40 m out).
+            // A shrub stands in the meadow's grass (cleared round it by its
+            // own ground cover, grove.js growGrass): the view looks down on
+            // it from nearer (the grove's ground ends some 40 m out).
             const grassWas = grove.grass ? grove.grass.visible : false;
-            if (shrub && grove.grass) grove.grass.visible = false;
             // Only this plant: its own node, holding only its own tree.
             for (const n of grove.nodes) n.visible = false;
             for (const q of grove.presets) q.node.visible = q === part;

@@ -99,12 +99,26 @@ export const ground = scene.createMesh({
 // the ground mesh, with where it grows (thin at the trunks), how dry it is
 // (the same patches the soil is coloured by) and how tall (lush hollows grow
 // tall, dry rises short).
-function growGrass(world) {
+function growGrass(world, presetWorlds) {
+    // Thin in the crowns' shade, clear at the trunks: the grove's own
+    // plants and each preset where it stands (its nursery world grew it at
+    // the origin), so a shrub stands in the meadow rather than under it.
+    const own = world.groundCover({ scale: PLANT_SCALE });
+    const presets = (presetWorlds || []).map((w, k) => {
+        const p = PRESET_PLANTS[k], y0 = groundHeight(p.x, p.z) - 0.06;
+        const cover = w.groundCover();
+        return (x, z, y) => cover(x - p.x, z - p.z, (y === undefined ? groundHeight(x, z) : y) - y0);
+    });
+    const density = (x, z, y) => {
+        let d = own(x, z, y);
+        for (const c of presets) d *= c(x, z, y);
+        return d;
+    };
     return scene.createGrass({
         ground,
         cell: 0.5,
         dry: dryness,
-        density: world.groundCover({ scale: PLANT_SCALE }),   // thin in the crowns' shade, clear at the trunks
+        density,
         tall: (x, z) => 1.15 - 0.45 * dryness(x, z),
         castsShadow: true,
     });
@@ -416,7 +430,7 @@ grove.growMs = grove.grow.ms;  // wall time: headless's performance.now rides th
 draw('gpu');
 grove.presetWorld = growPresets();
 drawPresets(grove.presetWorld);
-grove.grass = growGrass(grove.world);
+grove.grass = growGrass(grove.world, grove.presetWorld);
 roller.node = scene.createMesh({ data: ballMesh(), color: [1, 1, 1], roughness: 0.55, castsShadow: true, receivesShadow: true });
 grove.grass.addMover(roller.node, { radius: 0.7, strength: 1.2, trample: 1 });
 placeRoller(0);
