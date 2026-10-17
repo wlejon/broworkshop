@@ -22,8 +22,12 @@
 //       table per shot and <label>_metrics.json (see metrics() below)
 //
 // Any command also takes `lod={...}` (setForestLod's fields, JSON) to try a
-// level of detail without a rebuild, and compare takes `crop=cx,cy,w`
-// (fractions of the view; w 0.25 is a quarter blown up twice).
+// level of detail without a rebuild and `hide=grass,...` (forest.* nodes to
+// hide, to take one part's cost out of a trace); compare takes
+// `crop=cx,cy,w` (fractions of the view; w 0.25 is a quarter blown up
+// twice), trace `warm=<frames a second of the flight>` and `hold=<frames>`.
+// With BRO_SCENE_GPU_PASSES=<ms> a trace logs each frame over <ms> pass by
+// pass (bro/docs/headless.md).
 //
 // Everything goes to demos/forest/captures/.
 //
@@ -68,6 +72,7 @@ function setup(wind, tier, time) {
     sky.apply(time || 'golden');
     forest.node.setForestTier(tier || 'auto');
     if (opt('lod')) forest.node.setForestLod(JSON.parse(opt('lod')));
+    for (const k of (opt('hide') || '').split(',').filter(Boolean)) forest[k].visible = false;
 }
 
 function stills() {
@@ -89,24 +94,37 @@ function trace() {
     const label = a1 || 'forest';
     setup(a2);
     if (a3) forest.node.setForestLod({ budget: +a3 });
-    // Warm: one pass over the flight at a frame a second, so pipelines and
-    // the shadow atlas exist before anything is timed.
+    // Warm: one pass over the flight at a frame a second (warm= frames a
+    // visit), so pipelines and the shadow atlas exist before anything is
+    // timed; then the first view, rendered until ten seconds of wall time
+    // have passed since the trace began (hold= frames at the least). On this
+    // Windows/NVIDIA box the fragment-heavy forest draws run 3 to 10 times
+    // slower in a staircase starting about 8 s after the device comes up,
+    // whatever is drawn (the same in the build before this one, and gone
+    // when the GPU has been busy past it): driver or OS side, not the
+    // frame's, so the timed flight starts after it.
+    const warmFrom = perf.now();
     flight.on = true;
     flight.speed = 0;
-    for (let t = 0; t <= FLIGHT_SECONDS; t += 1) { flight.t = t; advanceTime(1000 / fps); flush(); }
+    for (let t = 0; t <= FLIGHT_SECONDS; t += 1) {
+        flight.t = t;
+        for (let k = 0; k < (+opt('warm') || 1); k++) { advanceTime(1000 / fps); flush(); }
+    }
     flight.t = 0;
-    for (let i = 0; i < 10; i++) { advanceTime(1000 / fps); flush(); }
+    for (let i = 0; i < (+opt('hold') || 10) || perf.now() - warmFrom < 10000; i++) { advanceTime(1000 / fps); flush(); }
     perf.gpuFrameMs();
     flight.speed = 1;
     const frames = [];
     const n = Math.round(FLIGHT_SECONDS * fps);
     for (let i = 0; i <= n; i++) {
         flight.t = i / fps;
+        const c0 = perf.now();
         advanceTime(1000 / fps);
         flush();
+        const cpu = perf.now() - c0;
         const ms = perf.gpuFrameMs();
         const s = forest.node.forestStats();
-        frames.push({ t: +(i / fps).toFixed(3), ms, eye: flightAt(i / fps).eye.map((v) => +v.toFixed(1)),
+        frames.push({ t: +(i / fps).toFixed(3), ms, cpu: +cpu.toFixed(2), eye: flightAt(i / fps).eye.map((v) => +v.toFixed(1)),
                       trees: [s.trees.leaves, s.trees.clumps, s.trees.crowns], culled: s.culled,
                       vertices: s.vertices, shadowVertices: s.shadowVertices, draws: s.draws });
     }
@@ -573,7 +591,7 @@ for (const a of argv) a === '+' ? commands.push([]) : commands[commands.length -
 for (const cmd of commands) {
     args = cmd;
     // The positional arguments; `key=value` options (opt()) may sit anywhere.
-    [mode = 'still', a1, a2, a3, a4] = cmd.filter((a) => !/^(lod|crop)=/.test(a));
+    [mode = 'still', a1, a2, a3, a4] = cmd.filter((a) => !/^[a-z]+=/.test(a));
     const before = new Set(document.body.children);
     (MODES[mode] || stills)();
     for (const el of [...document.body.children]) if (!before.has(el)) el.remove();
