@@ -12,6 +12,10 @@
 //   bro-headless --width 1280 --height 720 demos/grove demos/grove/capture.js -- \
 //       species <name[,name...]|all> [label=species] [skies=noon,golden] [tier=auto]
 //       (each conifer and shrub preset close, mid and far: <label>_<name>_<sky>.jpg)
+//   bro-headless --width 1280 --height 720 demos/grove demos/grove/capture.js -- \
+//       herbs <name[,name...]|all> [label=herb] [skies=noon,golden] [sil]
+//       (each herb preset alone in the meadow at 1, 3, 10 and 30 m: <label>_<name>_<sky>.jpg;
+//       `meadow` for the meadow's own mix, views=0.5,3,30,150 from knee height out)
 //   bro-headless --width 960 --height 540 demos/grove demos/grove/capture.js -- \
 //       swayprofile <name[,name...]> [label=sway] [dist=20] [seconds=6] [wind=gusty]
 //       (how far each eighth of a plant's height moves in the wind, side on)
@@ -28,11 +32,12 @@
 // clock is virtual: every frame is 1/fps s, so a capture is the same on any
 // machine.
 
-import { grove, draw, setWind, setShot, sky, vp, groundHeight, ground, PRESET_PLANTS, WINDS } from "/app/grove.js";
+import { grove, draw, setWind, setShot, sky, vp, groundHeight, ground, PRESET_PLANTS, WINDS, MEADOW_HERBS } from "/app/grove.js";
 
 const argv = (bro.app && bro.app.argv) || [];
 // The command now running (see the end: several join with `+`).
 let mode, shotsA, label, a3, a4, a5, a6, a7, a8;
+let cmdArgs = [];   // the command's arguments as given (its key=value ones)
 const OUT = bro.resolvePath('/app/captures').replace(/\\/g, '/');
 
 document.body.classList.add('clean');
@@ -279,6 +284,101 @@ function species() {
     }
 }
 
+// Each herb preset (broflora's: ferns, wildflowers, forbs) alone in the
+// meadow at 1, 3, 10 and 30 m, at each sky: the meadow's grass node draws
+// only that species, everywhere it can (its light and colonies set aside),
+// at full density. `sil` adds a silhouette row (the herbs against the same
+// frame without them). <label>_<name>_<sky>.jpg, <label>_<name>_sil.jpg.
+//   herbs <name[,name...]|all> [label=herb] [skies=noon,golden] [sil]
+function herbs() {
+    // `meadow`: the meadow's own mix of herbs (MEADOW_HERBS, each where its
+    // light and colonies put it), not one species alone.
+    const names = !shotsA || shotsA === 'all' ? bro.flora.herbPresets() : shotsA.split(',');
+    const speciesOf = (name) => name === 'meadow' ? MEADOW_HERBS
+        : [{ preset: name, shade: 0, shadeRange: 1, patchCover: 1, abundance: 1 }];
+    const sil = cmdArgs.includes('sil');
+    const skyList = a3 && a3 !== 'sil' && !a3.includes('=') ? a3.split(',') : ['noon', 'golden'];
+    const W = innerWidth, H = innerHeight, pane = Math.floor(W / 4);
+    const grab = () => shrink(frameImage(), pane, H, [0.5, 0.5, pane / W]);
+    // Distance and pitch: the far view looks down over the shrubs.
+    const PITCH = { 0.5: -0.25, 1: -0.5, 3: -0.32, 10: -0.16, 30: -0.2, 60: -0.16, 150: -0.12 };
+    const dists = (cmdArgs.find((s) => s.startsWith('views=')) || 'views=1,3,10,30').slice(6).split(',').map(Number);
+    const VIEWS = dists.map((d) => [d, PITCH[d] !== undefined ? PITCH[d] : -0.2]);
+    const at = [-1, 13.5];
+    const g = grove.grass;
+    const compose = (panes, captions, file) => {
+        const cv = document.createElement('canvas');
+        cv.width = W; cv.height = H;
+        cv.style.cssText = `position:absolute;left:0;top:0;width:${W}px;height:${H}px;z-index:10`;
+        document.body.append(cv);
+        const c = cv.getContext('2d');
+        c.font = '600 14px system-ui';
+        panes.forEach((px, k) => {
+            const im = c.createImageData(pane, H);
+            im.data.set(px);
+            c.putImageData(im, k * pane, 0);
+            c.fillStyle = '#000'; c.fillText(captions[k], k * pane + 9, 21);
+            c.fillStyle = '#fff'; c.fillText(captions[k], k * pane + 8, 20);
+        });
+        c.fillStyle = '#888';
+        for (let k = 1; k < 4; k++) c.fillRect(k * pane - 1, 0, 2, H);
+        advanceTime(30);
+        flush();
+        saveView(file);
+        cv.remove();
+        console.log(file);
+    };
+    const wind = (cmdArgs.find((s) => s.startsWith('wind=')) || 'wind=breeze').slice(5);
+    // The plants alone in a short sward (a grazed meadow's): no trees or
+    // shrubs in the way of the far views, the grass not over the herbs.
+    const grassHeight = g.grassParams().height;
+    g.setGrass({ height: 0.16 });
+    const trees = () => [...grove.nodes, ...grove.presets.map((q) => q.node)];
+    for (const time of skyList) {
+        setup('gpu', wind, false);
+        sky.apply(time);
+        for (const n of trees()) n.visible = false;
+        for (const name of names) {
+            const p = name === 'meadow' ? { height: 0.5 } : bro.flora.herbPreset(name);
+            if (!p) { console.log(`herbs: no ${name}`); continue; }
+            // This species alone, wherever the meadow's herbs grow.
+            g.setHerbs({ species: speciesOf(name) });
+            const shaded = [], flat = [], captions = [];
+            for (const [d, pitch] of VIEWS) {
+                const target = [at[0], groundHeight(at[0], at[1]) + Math.min(p.height * 0.5, 0.4), at[1]];
+                // From the bowl's middle out toward the hills (the eye stays
+                // over the meadow).
+                vp.reframe(target, d, { yaw: Math.PI - 0.3, pitch });
+                step(1);
+                flush();
+                shaded.push(grab());
+                captions.push(`${name} ${time} ${d} m (h ${p.height.toFixed(2)} m)`);
+                if (!sil || time !== skyList[0]) continue;
+                ground.visible = false;
+                flush();
+                const a = grab();
+                g.setHerbs({ species: [] });
+                flush();
+                const b = grab();
+                g.setHerbs({ species: speciesOf(name) });
+                ground.visible = true;
+                for (let i = 0; i < a.length; i += 4) {
+                    const diff = Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2]);
+                    const v = diff > 6 ? 0 : 255;
+                    a[i] = a[i + 1] = a[i + 2] = v;
+                }
+                flat.push(a);
+            }
+            compose(shaded, captions, `${OUT}/${label}_${name}_${time}.jpg`);
+            if (flat.length) compose(flat, captions.map((c) => c.replace(` ${time} `, ' silhouette ')), `${OUT}/${label}_${name}_sil.jpg`);
+        }
+        g.setHerbs({ species: MEADOW_HERBS });
+    }
+    g.setGrass({ height: grassHeight });
+    draw('gpu');
+    for (const q of grove.presets) q.node.visible = true;
+}
+
 // How far each part of a plant moves in the wind, by height: the plant
 // alone, seen side on across the wind from `dist` m (default 20), for
 // `seconds` (default 6) of `wind` (default gusty). Each frame's silhouette
@@ -394,11 +494,12 @@ function perfShots() {
 // Several commands joined by `+` run one after another in this one boot,
 // each from the page as the boot left it (any overlay removed; each sets
 // its own path and wind); the virtual clock runs on between them.
-const MODES = { strip, video, still: stills, perf: perfShots, species, swayprofile: swayProfile };
+const MODES = { strip, video, still: stills, perf: perfShots, species, herbs, swayprofile: swayProfile };
 const commands = [[]];
 for (const a of argv) a === '+' ? commands.push([]) : commands[commands.length - 1].push(a);
 for (const cmd of commands) {
     [mode = 'strip', shotsA = 'grove', label = 'grove', a3, a4, a5, a6, a7, a8] = cmd;
+    cmdArgs = cmd;
     const before = new Set(document.body.children);
     (MODES[mode] || strip)();
     for (const el of [...document.body.children]) if (!before.has(el)) el.remove();

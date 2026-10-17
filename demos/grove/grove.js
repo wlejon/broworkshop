@@ -122,9 +122,13 @@ function growGrass(world, presetWorlds) {
         dry: dryness,
         density,
         tall: (x, z) => 1.15 - 0.45 * dryness(x, z),
+        // Wildflowers and forbs through the meadow (broflora's herb
+        // presets), thinner where it is dry and under the crowns.
+        herbs: { species: MEADOW_HERBS, density: (x, z, y) => 0.55 * (1 - 0.5 * dryness(x, z)) * density(x, z, y) },
         castsShadow: true,
     });
 }
+export const MEADOW_HERBS = ['daisy', 'poppy', 'yarrow', 'clover', 'plantain', 'foxglove'];
 
 // --- the roller ---------------------------------------------------------------------
 

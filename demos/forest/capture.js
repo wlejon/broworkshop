@@ -19,7 +19,7 @@
 //       and silhouette check across the tiers; shadow=0: it casts none)
 //   bro-headless ... capture.js -- compare <shot[,shot...]> [label=forest] [wind=gusty] [sky=noon]
 //       the forced Leaves tier beside By size, the middle half of each view:
-//       <label>_<shot>_<sky>_compare.png
+//       <label>_<shot>_<sky>_compare.jpg
 //   bro-headless ... capture.js -- metrics [shots=canopy,skim,glade,trunks] [label=forest] [skies=noon,golden] [wind=breeze]
 //       Leaves against By size from the same views, per band of distance to
 //       the crowns (10-20, 20-40, 40-80, 80-160 m): luminance, colour, local
@@ -28,7 +28,8 @@
 //
 // Any command also takes `lod={...}` (setForestLod's fields, JSON) to try a
 // level of detail without a rebuild and `hide=grass,...` (forest.* nodes to
-// hide, to take one part's cost out of a trace); compare takes
+// hide, to take one part's cost out of a trace; `herbs` the grass's low
+// plants); compare takes
 // `crop=cx,cy,w` (fractions of the view; w 0.25 is a quarter blown up
 // twice), trace `warm=<frames a second of the flight>` and `hold=<frames>`.
 // With BRO_SCENE_GPU_PASSES=<ms> a trace logs each frame over <ms> pass by
@@ -51,7 +52,7 @@
 //   - chain the views you are judging into one run with `+`.
 
 import { forest, setWind, setShot, sky, flight, flightAt, FLIGHT_SECONDS, vp, groundHeight, GRASS_RANGE,
-         setTier, setLod, forestStats } from "/app/forest.js";
+         setTier, setLod, forestStats, HERBS, HERB_RANGE } from "/app/forest.js";
 
 const argv = (bro.app && bro.app.argv) || [];
 // The command now running: its mode and arguments (see run() at the end).
@@ -80,6 +81,8 @@ function setup(wind, tier, time) {
     if (opt('lod')) setLod(JSON.parse(opt('lod')));
     // A forest.* node, or a part of the forest by name (needle, shrub, ...).
     for (const k of (opt('hide') || '').split(',').filter(Boolean)) {
+        // `herbs`: the grass's low plants (and the blades and turf that stand in for them).
+        if (k === 'herbs') { forest.grass.setHerbs({ species: [] }); continue; }
         const part = forest.parts.find((p) => p.name === k);
         (part ? part.node : forest[k]).visible = false;
     }
@@ -402,7 +405,7 @@ function tiers() {
 
 // Side by side at each shot: the forced "Leaves" tier on the left, "By size"
 // on the right, the middle half of each view at full resolution, a frame
-// apart. <label>_<shot>_<sky>_compare.png.
+// apart. <label>_<shot>_<sky>_compare.jpg.
 function compare() {
     const label = a2 || 'forest', time = a4 || 'noon';
     setup(a3 || 'gusty', 'auto', time);
@@ -439,8 +442,13 @@ function compare() {
         g.fillRect(half - 1, 0, 2, H);
         advanceTime(30);
         flush();
-        const file = `${OUT}/${label}_${s}_${time}_compare.png`;
-        screenshot(file);
+        // JPEG at quality 95 (about 1.4 MB): a PNG of this (about 6 MB) is
+        // over the image viewer's limit, and its re-encode bands the sky.
+        const file = `${OUT}/${label}_${s}_${time}_compare.jpg`;
+        const g2 = frameImage();
+        const top = Math.max(0, g2.height - innerHeight);
+        const px = new Uint8Array(g2.data.buffer, g2.data.byteOffset + top * g2.width * 4, (g2.height - top) * g2.width * 4);
+        bro.image.encodeJpegFile(file, px, g2.width, g2.height - top, 4, 95);
         console.log(file);
     }
 }
@@ -824,11 +832,60 @@ function metrics() {
     console.log(file);
 }
 
+// The herbs' hand-over to the grass, measured: the same view with the herb
+// plants drawn all the way out (range 200) and as the forest draws them
+// (handing over to the blades and the turf), per band of ground distance:
+// luminance, mean colour, local contrast at 1, 3 and 9 px, and the colour
+// step between them (drgb). Writes <label>_herbmetrics.json.
+//   herbs [shots=glade,trunks] [label=forest] [skies=noon,golden] [wind=breeze]
+const HERB_BANDS = [[2, 12], [12, 24], [24, 40], [40, 80], [80, 150]];
+function herbMetrics() {
+    const shots = (a1 || 'glade,trunks').split(','), label = a2 || 'forest';
+    const skies = (a3 || 'noon,golden').split(',');
+    const W = innerWidth, H = innerHeight;
+    const g = forest.grass, range0 = HERB_RANGE;
+    const out = [];
+    console.log(`herbs ${label}: plants to 200 m / handed over, per band    Y      rgb      d1/d3/d9   drgb`);
+    for (const time of skies) {
+        setup(a4 || 'breeze', 'auto', time);
+        for (const s of shots) {
+            setShot(s);
+            step(1.5);
+            flush();
+            const half = crownDepth(W >> 1, H >> 1);
+            const gHalf = groundDepth(W >> 1, H >> 1, half), depth = new Float32Array(W * H);
+            for (let y = 0; y < H; y++) for (let x = 0; x < W; x++)
+                depth[y * W + x] = gHalf[Math.min(y >> 1, (H >> 1) - 1) * (W >> 1) + Math.min(x >> 1, (W >> 1) - 1)];
+            const st = {};
+            for (const [key, range] of [['full', 200], ['handover', range0]]) {
+                g.setHerbs({ species: HERBS, range });
+                for (let k = 0; k < 2; k++) { advanceTime(1000 / fps); flush(); }
+                st[key] = bandStats(lumaOf(frameImage(), W, H), depth, W, H, HERB_BANDS);
+            }
+            g.setHerbs({ species: HERBS, range: range0 });
+            console.log(`${s} ${time}:`);
+            HERB_BANDS.forEach((b, i) => {
+                const F = st.full[i], A = st.handover[i];
+                if (!F || !A) return;
+                const dc = Math.hypot(A.rgb[0] - F.rgb[0], A.rgb[1] - F.rgb[1], A.rgb[2] - F.rgb[2]);
+                const rgb = (q) => q.rgb.map((c) => c.toFixed(0)).join(',');
+                console.log(`  ${(F.band + ' m').padEnd(9)} ${String(F.px).padStart(7)} px  Y ${F.Y.toFixed(1)}/${A.Y.toFixed(1)}  ` +
+                            `${rgb(F)} / ${rgb(A)}  ${F.d1.toFixed(1)}/${F.d3.toFixed(1)}/${F.d9.toFixed(1)} vs ` +
+                            `${A.d1.toFixed(1)}/${A.d3.toFixed(1)}/${A.d9.toFixed(1)}  drgb ${dc.toFixed(1)}`);
+                out.push({ shot: s, sky: time, band: F.band, full: F, handover: A, drgb: +dc.toFixed(2) });
+            });
+        }
+    }
+    const file = `${OUT}/${label}_herbmetrics.json`;
+    require('fs').writeFileSync(file, JSON.stringify(out, null, 1));
+    console.log(file);
+}
+
 // Several commands joined by `+` run one after another in this one boot.
 // Between them the page is put back as the boot left it: any overlay a
 // command drew is removed and the forest's level of detail restored (the
 // clock runs on, so wind and the flight's motion continue from there).
-const MODES = { still: stills, trace, video, handover, compare, parts, hold, metrics, tiers };
+const MODES = { still: stills, trace, video, handover, compare, parts, hold, metrics, tiers, herbs: herbMetrics };
 const lod0 = forest.parts.map((p) => p.node.forestLod());
 const commands = [[]];
 for (const a of argv) a === '+' ? commands.push([]) : commands[commands.length - 1].push(a);

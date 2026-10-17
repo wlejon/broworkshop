@@ -101,6 +101,19 @@ export function treeDensity(x, z) {
            (0.85 + 0.15 * fbm.genSingle2D(x * 0.02, z * 0.02, 0x8));
 }
 
+// The low plants (broflora's herb presets): bro.scene's grass node picks one
+// a cell of its own grid by the light under the canopy and each species'
+// colonies, and builds it where it stands.
+export const HERB_RANGE = 24;
+export const HERBS = ['bracken', 'ladyfern', 'woodsorrel', 'bluebell', 'foxglove', 'nettle',
+                      'daisy', 'poppy', 'yarrow', 'clover', 'plantain'];
+
+/** How thickly herbs grow: 0 .. 1, thin on the trail and dry ground, `canopy` the cover overhead. */
+export function herbDensity(x, z, y, canopy) {
+    const patchy = 0.75 + 0.25 * fbm.genSingle2D(x * 0.04, z * 0.04, 0x4e7b);
+    return 0.8 * patchy * smooth(1.0, 2.5, trailDistance(x, z)) * (1 - 0.5 * dryness(x, z)) * (1 - 0.3 * canopy * canopy);
+}
+
 // The ground: turf under the grass (scene_ground.glsl shades it as the sward,
 // the litter under the trees and the soil), its vertex colour the ground's
 // data where the grass field does not reach: (grass density, dryness, how
@@ -118,7 +131,7 @@ function groundMesh(cover, half, N, drop) {
         c[v * 4] = cover(x, z);
         c[v * 4 + 1] = dryness(x, z);
         c[v * 4 + 2] = cover.canopy(x, z);
-        c[v * 4 + 3] = 1;
+        c[v * 4 + 3] = herbDensity(x, z, 0, c[v * 4 + 2]);
     }
     m.colors = c;
     return m;
@@ -316,6 +329,13 @@ function build() {
         dry: dryness,
         density: cover,
         floor: cover.canopy,
+        // The understory and the glade's flowers: each species finds its
+        // own light (ferns and wood sorrel under the crowns, the meadow
+        // flowers in the glade, foxgloves and nettles at its edges), thinner
+        // on the trail and where the ground is dry.
+        // The plants to 24 m (past that the blades and turf stand in): a
+        // tenth of a millisecond under 30 m's at the trace's low views.
+        herbs: { species: HERBS, density: herbDensity, range: HERB_RANGE },
         tall: (x, z) => 1.1 - 0.4 * dryness(x, z),
         // Blades to 150 m (the glade's far side from its middle); past
         // them the turf, shaded as the grass, stands in.
