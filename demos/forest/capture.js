@@ -45,7 +45,8 @@
 //     (bro/docs/hot-reload.md);
 //   - chain the views you are judging into one run with `+`.
 
-import { forest, setWind, setShot, sky, flight, flightAt, FLIGHT_SECONDS, vp, groundHeight, GRASS_RANGE } from "/app/forest.js";
+import { forest, setWind, setShot, sky, flight, flightAt, FLIGHT_SECONDS, vp, groundHeight, GRASS_RANGE,
+         setTier, setLod, forestStats } from "/app/forest.js";
 
 const argv = (bro.app && bro.app.argv) || [];
 // The command now running: its mode and arguments (see run() at the end).
@@ -70,8 +71,8 @@ const opt = (key) => {
 function setup(wind, tier, time) {
     setWind(wind || 'breeze');
     sky.apply(time || 'golden');
-    forest.node.setForestTier(tier || 'auto');
-    if (opt('lod')) forest.node.setForestLod(JSON.parse(opt('lod')));
+    setTier(tier || 'auto');
+    if (opt('lod')) setLod(JSON.parse(opt('lod')));
     for (const k of (opt('hide') || '').split(',').filter(Boolean)) forest[k].visible = false;
 }
 
@@ -98,7 +99,7 @@ function stills() {
         flush();
         const file = `${OUT}/${label}_${name}.png`;
         screenshot(file);
-        console.log(`${file}: ${JSON.stringify(forest.node.forestStats())}`);
+        console.log(`${file}: ${JSON.stringify(forestStats())}`);
     }
 }
 
@@ -107,7 +108,7 @@ const pct = (sorted, p) => sorted[Math.min(sorted.length - 1, Math.floor(p * sor
 function trace() {
     const label = a1 || 'forest';
     setup(a2);
-    if (a3) forest.node.setForestLod({ budget: +a3 });
+    if (a3) setLod({ budget: +a3 });
     // Warm: one pass over the flight at a frame a second (warm= frames a
     // visit), so pipelines and the shadow atlas exist before anything is
     // timed; then the first view, rendered until ten seconds of wall time
@@ -137,7 +138,7 @@ function trace() {
         flush();
         const cpu = perf.now() - c0;
         const ms = perf.gpuFrameMs();
-        const s = forest.node.forestStats();
+        const s = forestStats();
         frames.push({ t: +(i / fps).toFixed(3), ms, cpu: +cpu.toFixed(2), eye: flightAt(i / fps).eye.map((v) => +v.toFixed(1)),
                       trees: [s.trees.leaves, s.trees.clumps, s.trees.crowns], culled: s.culled,
                       vertices: s.vertices, shadowVertices: s.shadowVertices, draws: s.draws });
@@ -153,7 +154,7 @@ function trace() {
                     `${(worst.vertices / 1e6).toFixed(1)} M verts, ${(worst.shadowVertices / 1e6).toFixed(1)} M shadow, ${worst.draws} draws`);
     }
     const summary = { frames: frames.length, max: ms[ms.length - 1], p95: pct(ms, 0.95), p50: pct(ms, 0.5), mean,
-                      width: innerWidth, height: innerHeight, trees: forest.node.forestStats().treeCount };
+                      width: innerWidth, height: innerHeight, trees: forestStats().treeCount };
     console.log(`flight GPU ms: max ${summary.max.toFixed(2)}, p95 ${summary.p95.toFixed(2)}, ` +
                 `median ${summary.p50.toFixed(2)}, mean ${mean.toFixed(2)} over ${frames.length} frames`);
     const file = `${OUT}/${label}_trace.json`;
@@ -208,9 +209,11 @@ function shrink(g, tw, th, crop) {
 }
 
 // The tree the handover strips dolly from: the one nearest the glade's
-// far edge, seen across the glade.
+// far edge, seen across the glade (of forest.parts' `part=<name>`, the
+// broadleaves by default).
 function subject() {
-    const inst = forest.trees, spec = forest.emit.specimens;
+    const part = forest.parts.find((p) => p.name === opt('part')) || forest.parts[0];
+    const inst = part.trees, spec = part.emit.specimens;
     let best = 0, bd = Infinity;
     for (let i = 0; i < inst.length / 8; i++) {
         const d = Math.hypot(inst[i * 8] - 40, inst[i * 8 + 2] - 30);
@@ -218,7 +221,7 @@ function subject() {
     }
     const s = inst[best * 8 + 5] | 0, sc = inst[best * 8 + 3];
     const h = spec[s * 16 + 6] * sc;
-    return { index: best, specimen: s, scale: sc,
+    return { index: best, specimen: s, scale: sc, node: part.node, part: part.name,
              top: [inst[best * 8], inst[best * 8 + 1] + h * 0.6, inst[best * 8 + 2]] };
 }
 
@@ -230,7 +233,7 @@ function distanceWhere(sub, f) {
     let lo = 1, hi = 3000;
     for (let i = 0; i < 40; i++) {
         const mid = Math.sqrt(lo * hi);
-        if (f(forest.node.forestTreeLod(sub.specimen, pxPerMetre(mid) * sub.scale))) hi = mid; else lo = mid;
+        if (f(sub.node.forestTreeLod(sub.specimen, pxPerMetre(mid) * sub.scale))) hi = mid; else lo = mid;
     }
     return hi;
 }
@@ -261,7 +264,7 @@ function handover() {
         const d = d0 * Math.pow(d1 / d0, i / Math.max(1, frames - 1));
         vp.reframe(sub.top, d, { yaw, pitch });
         for (let k = 0; k < 3; k++) { advanceTime(1000 / fps); flush(); }
-        const l = forest.node.forestTreeLod(sub.specimen, pxPerMetre(d) * sub.scale);
+        const l = sub.node.forestTreeLod(sub.specimen, pxPerMetre(d) * sub.scale);
         // A crop that holds about the tree's crown at the middle distance.
         const cw = Math.min(1, Math.max(0.12, 14 * pxPerMetre(dMid) * sub.scale / W));
         grabs.push({ d, l, px: shrink(frameImage(), tw, th, [0.5, 0.5, cw]) });
@@ -286,7 +289,7 @@ function handover() {
     });
     advanceTime(30);
     flush();
-    const file = `${OUT}/${label}_handover_${which}_strip.png`;
+    const file = `${OUT}/${label}_handover_${which}${sub.part === 'broadleaf' ? '' : '_' + sub.part}_strip.png`;
     screenshot(file);
     console.log(file);
 }
@@ -307,16 +310,16 @@ function compare() {
     for (const s of (a1 || 'above').split(',')) {
         setShot(s);
         cv.style.display = 'none';
-        forest.node.setForestTier('auto');
+        setTier('auto');
         step(1.5);
         flush();
         const panes = [];
         for (const tier of ['leaves', 'auto']) {
-            forest.node.setForestTier(tier);
+            setTier(tier);
             for (let k = 0; k < 2; k++) { advanceTime(1000 / fps); flush(); }
             panes.push(shrink(frameImage(), half, H, opt('crop') ? opt('crop').split(',').map(Number) : [0.5, 0.5, half / W]));
         }
-        forest.node.setForestTier('auto');
+        setTier('auto');
         cv.style.display = 'block';
         panes.forEach((px, i) => {
             const im = g.createImageData(half, H);
@@ -343,7 +346,7 @@ function parts() {
     setup(a2);
     flight.on = true;
     flight.speed = 0;
-    const show = (g, t) => { forest.grass.visible = g; forest.node.visible = t; };
+    const show = (g, t) => { forest.grass.visible = g; for (const p of forest.parts) p.node.visible = t; };
     const cases = { all: [true, true], noGrass: [false, true], noTrees: [true, false], bare: [false, false] };
     for (const t of (a1 || '0,7.5,15,22,30').split(',').map(Number)) {
         flight.t = t;
@@ -413,8 +416,15 @@ function hold() {
 
 const BANDS = [[10, 20], [20, 40], [40, 80], [80, 160]];
 
+// Every part's crowns (broadleaves, conifers, shrubs) into one mask.
 function crownDepth(W, H) {
-    const inst = forest.trees, em = forest.emit, spec = em.specimens, clumps = em.clumps;
+    const depth = new Float32Array(W * H);
+    for (const p of forest.parts) partDepth(W, H, p.trees, p.emit, depth);
+    return depth;
+}
+
+function partDepth(W, H, inst, em, depth) {
+    const spec = em.specimens, clumps = em.clumps;
     const { eye, look } = flightAt(flight.t);
     const crowns = [];
     for (let s = 0; s < em.specimenCount; s++) {
@@ -433,7 +443,6 @@ function crownDepth(W, H) {
     const rt = norm(cross(fw, [0, 1, 0])), up = cross(rt, fw);
     const ty = Math.tan(vp.cam.fov * Math.PI / 360), tx = ty * W / H;
     const ppm = (H / 2) / ty;
-    const depth = new Float32Array(W * H);
     for (let i = 0; i < inst.length / 8; i++) {
         const o = i * 8, cr = crowns[inst[o + 5] | 0];
         if (!cr) continue;
@@ -475,7 +484,6 @@ function crownDepth(W, H) {
             }
         }
     }
-    return depth;
 }
 
 // Luminance and colour of frame `g` (the view's rows, past any band above).
@@ -661,7 +669,7 @@ function metrics() {
         setup(a4 || 'breeze', 'auto', time);
         for (const s of shots) {
             setShot(s);
-            forest.node.setForestTier('auto');
+            setTier('auto');
             step(1.5);
             flush();
             // The mask at half resolution (a quarter of the rays), each value
@@ -672,7 +680,7 @@ function metrics() {
             const frames = {};
             let last = null, lastLuma = null;
             for (const tier of ['leaves', 'auto']) {
-                forest.node.setForestTier(tier);
+                setTier(tier);
                 for (let k = 0; k < 2; k++) { advanceTime(1000 / fps); flush(); }
                 last = frameImage();
                 lastLuma = lumaOf(last, W, H);
@@ -682,9 +690,9 @@ function metrics() {
             for (let y = 0; y < H; y++) for (let x = 0; x < W; x++)
                 gDepth[y * W + x] = gHalf[Math.min(y >> 1, (H >> 1) - 1) * (W >> 1) + Math.min(x >> 1, (W >> 1) - 1)];
             const ground = groundStats(lastLuma, gDepth, W, H);
-            const st = forest.node.forestStats();
+            const st = forestStats();
             if (args.includes('bands')) bandsImage(last, depth, W, H, `${OUT}/${label}_${s}_${time}_bands.png`);
-            forest.node.setForestTier('auto');
+            setTier('auto');
             console.log(`${s} ${time}: detail ${st.detail.toFixed(2)}, trees L/C/R ${st.trees.leaves}/${st.trees.clumps}/${st.trees.crowns}`);
             BANDS.forEach((b, i) => {
                 const L = frames.leaves[i], A = frames.auto[i];
@@ -715,7 +723,7 @@ function metrics() {
 // command drew is removed and the forest's level of detail restored (the
 // clock runs on, so wind and the flight's motion continue from there).
 const MODES = { still: stills, trace, video, handover, compare, parts, hold, metrics };
-const lod0 = forest.node.forestLod();
+const lod0 = forest.parts.map((p) => p.node.forestLod());
 const commands = [[]];
 for (const a of argv) a === '+' ? commands.push([]) : commands[commands.length - 1].push(a);
 for (const cmd of commands) {
@@ -725,7 +733,7 @@ for (const cmd of commands) {
     const before = new Set(document.body.children);
     (MODES[mode] || stills)();
     for (const el of [...document.body.children]) if (!before.has(el)) el.remove();
-    forest.node.setForestLod(lod0);
-    forest.node.setForestTier('auto');
+    forest.parts.forEach((p, k) => p.node.setForestLod(lod0[k]));
+    setTier('auto');
     flush();
 }

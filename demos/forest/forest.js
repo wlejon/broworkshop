@@ -135,7 +135,12 @@ export const SPECIES = {
     tall: Object.assign({}, COMMON, { growthScale: 2.2, orthotropy: 0.8, tropismG2: 0.02, apicalControl: 0.5 }),
 };
 const HABITS = ['spreading', 'vase', 'tall'];
-export const NURSERY = { cols: 6, rows: 4, spacing: 9 };   // 24 specimens, far enough apart to grow their own crowns
+export const NURSERY = { cols: 6, rows: 4, spacing: 9 };   // 24 broadleaf specimens, far enough apart to grow their own crowns
+// bro.flora's species presets, grown in rows of their own past the
+// broadleaves: conifers (needle and scale-leaf sprays) and shrubs.
+export const CONIFERS = ['fir', 'spruce', 'pine', 'fir', 'spruce', 'cypress', 'fir', 'spruce', 'pine', 'cypress'];
+export const SHRUBS = ['boxwood', 'holly', 'hydrangea', 'boxwood', 'holly', 'hydrangea'];
+export const SPECIMENS = NURSERY.cols * NURSERY.rows + CONIFERS.length + SHRUBS.length;
 
 function trunkPrototype() {
     const H = 2.0, n = 6, nodes = [], edges = [];
@@ -167,7 +172,8 @@ const SIM_STEP = 0.02, SIM_SECONDS = 50;
 /** Grow the nursery: one broflora world, a grid of specimens on flat ground. */
 export function growNursery() {
     const { cols, rows, spacing } = NURSERY;
-    const W = cols * spacing + 10, D = rows * spacing + 10;
+    const presetRows = Math.ceil(CONIFERS.length / cols) + Math.ceil(SHRUBS.length / cols);
+    const W = cols * spacing + 10, D = (rows + presetRows) * spacing + 10;
     const world = bro.flora.createWorld({
         rngSeed: 0xf0e57,
         climate: { annualTempBase: 15, annualPrecip: 1100 },
@@ -176,12 +182,19 @@ export function growNursery() {
     const mono = world.addPrototype(bro.flora.prototypes.monopodial(3, 0.7));
     const trunk = world.addPrototype(trunkPrototype());
     world.addVoronoiSite(mono, 0.5, 0.3);
+    const at = (i, j) => [(i - (cols - 1) / 2) * spacing + 1.3 * Math.sin(i * 2.1 + j), 0,
+                          (j - (rows + presetRows - 1) / 2) * spacing + 1.3 * Math.cos(i * 1.3 + 2 * j)];
     for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
         const kind = HABITS[(i + 2 * j) % HABITS.length];
-        const x = (i - (cols - 1) / 2) * spacing + 1.3 * Math.sin(i * 2.1 + j);
-        const z = (j - (rows - 1) / 2) * spacing + 1.3 * Math.cos(i * 1.3 + 2 * j);
-        world.addPlant({ origin: [x, 0, z], species: SPECIES[kind], prototypeIndex: trunk });
+        world.addPlant({ origin: at(i, j), species: SPECIES[kind], prototypeIndex: trunk });
     }
+    // The presets in order after the broadleaves (plant index = specimen).
+    [...CONIFERS, ...SHRUBS].forEach((name, k) => {
+        const row = k < CONIFERS.length ? rows + Math.floor(k / cols)
+                                        : rows + Math.ceil(CONIFERS.length / cols) + Math.floor((k - CONIFERS.length) / cols);
+        const col = k < CONIFERS.length ? k % cols : (k - CONIFERS.length) % cols;
+        world.plantSpecies(name, { origin: at(col, row) });
+    });
     // Grown once per change to the nursery or to broflora's step: the grown
     // world is cached under the app's cache dir, keyed by all of that.
     forest.grow = world.grow(Math.round(SIM_SECONDS / SIM_STEP), SIM_STEP, { cache: bro.app.cacheDir });
@@ -204,13 +217,63 @@ function forestLeaf() {
 const BARK = { color: [0.2, 0.17, 0.14], roughness: 0.9 };
 const LEAF = { color: [0.2, 0.36, 0.11], roughness: 0.7 };
 
-export const forest = { world: null, emit: null, trees: null, node: null, grass: null, ground: null, stats: {} };
+// The forest is a node per kind of plant, each drawing its leaves in its
+// form: the broadleaves, the needle conifers, the scale-leaf ones, the
+// shrubs. forest.parts holds each {name, emit, trees, node}; forest.node,
+// .emit and .trees are the broadleaves'.
+export const forest = { world: null, emit: null, trees: null, node: null, parts: [], grass: null, ground: null, stats: {} };
 
-function plant(emit) {
-    return bro.flora.plantForest(emit, {
-        area: [-FOREST, -FOREST, FOREST, FOREST], spacing: 6.5, jitter: 0.42, seed: 0x7ee5,
-        ground: groundHeight, density: treeDensity, scale: [PLANT_SCALE * 0.85, PLANT_SCALE * 1.2], sink: 0.12,
+const range = (a, n) => [...Array(n).keys()].map((i) => a + i);
+const BROADLEAF = range(0, NURSERY.cols * NURSERY.rows);
+const SHRUB_PLANTS = range(NURSERY.cols * NURSERY.rows + CONIFERS.length, SHRUBS.length);
+
+// Conifers take the high ground and patches of their own: the share of
+// the trees at a point that are conifers, and of those the scale-leaved.
+export function coniferShare(x, z, y) {
+    const patch = fbm.genSingle2D(x * 0.008, z * 0.008, 0xc0f);
+    return Math.min(0.95, Math.max(0, 0.12 + 0.6 * smooth(-1, 5, y) + 0.9 * patch));
+}
+
+// Shrubs at the forest's edges (the glade's ragged rim), scattered in the
+// glade, in patches of understorey under the trees; never on the trail.
+export function shrubDensity(x, z) {
+    const d = Math.hypot(x - GLADE.x, z - GLADE.z) + 8 * fbm.genSingle2D(x * 0.05, z * 0.05, 0x3);
+    const ring = smooth(GLADE.r * 0.7, GLADE.r * 1.3, d);
+    const edge = 4 * ring * (1 - ring);
+    const under = ring * (0.015 + 0.15 * smooth(0.2, 0.55, fbm.genSingle2D(x * 0.03, z * 0.03, 0x5b)));
+    return Math.min(1, 0.55 * edge + 0.05 * (1 - ring) + under) * smooth(3, 5, trailDistance(x, z));
+}
+
+function plant(trees, shrubs) {
+    const area = [-FOREST, -FOREST, FOREST, FOREST];
+    const t = bro.flora.plantForest(trees, {
+        area, spacing: 6.5, jitter: 0.42, seed: 0x7ee5,
+        ground: groundHeight, density: treeDensity, sink: 0.12,
+        // The presets grow to their own heights (a fir ~12 m, a pine ~20):
+        // drawn near them, the broadleaves at the nursery's 1.5.
+        scale: [[PLANT_SCALE * 0.85, PLANT_SCALE * 1.2], [0.7, 0.95], [0.75, 1.0]],
+        mix: (x, z, y) => { const c = coniferShare(x, z, y); return [1 - c, 0.82 * c, 0.18 * c]; },
     });
+    const s = bro.flora.plantForest(shrubs, {
+        area, spacing: 3.5, jitter: 0.45, seed: 0x5b0b,
+        ground: groundHeight, density: shrubDensity, scale: [0.9, 1.3], sink: 0.05,
+    });
+    return [...t, s];
+}
+
+/** Every forest node: set the tier, the level of detail; the stats summed. */
+export function setTier(t) { for (const p of forest.parts) p.node.setForestTier(t); }
+export function setLod(lod) { for (const p of forest.parts) p.node.setForestLod(lod); }
+export function forestStats() {
+    let sum = null;
+    for (const p of forest.parts) {
+        const s = p.node.forestStats();
+        if (!sum) { sum = JSON.parse(JSON.stringify(s)); continue; }
+        for (const k of ['leaves', 'clumps', 'crowns']) sum.trees[k] += s.trees[k];
+        for (const k of ['culled', 'leaves', 'vertices', 'shadowVertices', 'entries', 'draws', 'treeCount', 'specimenCount'])
+            sum[k] += s[k];
+    }
+    return sum;
 }
 
 // Wall-clock ms: headless's performance.now rides the virtual clock.
@@ -220,21 +283,35 @@ function build() {
     const ms = forest.bootMs;
     let t = wallNow();
     const lap = (k) => { const n = wallNow(); ms[k] = n - t; t = n; };
-    const emit = forest.world.emitForest(FOLIAGE);
+    const w = forest.world;
+    // One emit a node: the broadleaves and shrubs by plant, the conifers by
+    // leaf form (each takes its form's spray defaults).
+    const emits = [w.emitForest(Object.assign({ plants: BROADLEAF }, FOLIAGE)),
+                   w.emitForest({ seed: FOLIAGE.seed, leafForm: 'needle' }),
+                   w.emitForest({ seed: FOLIAGE.seed, leafForm: 'scale' }),
+                   w.emitForest(Object.assign({ plants: SHRUB_PLANTS }, FOLIAGE))];
     lap('emit');
-    const trees = plant(emit);
+    const trees = plant(emits.slice(0, 3), emits[3]);
     lap('plant');
-    forest.emit = emit;
-    forest.trees = trees;
-    forest.node = scene.createForest(Object.assign({
-        forest: emit, instances: trees, leaf: forestLeaf(),
-        doubleSided: true, subsurface: 0.5, vertexColorTint: false, castsShadow: true, receivesShadow: true,
-        barkColor: BARK.color, barkRoughness: BARK.roughness,
-    }, LEAF));
+    const names = ['broadleaf', 'needle', 'scale', 'shrub'];
+    forest.parts = emits.map((emit, k) => ({
+        name: names[k], emit, trees: trees[k],
+        node: scene.createForest(Object.assign({
+            forest: emit, instances: trees[k],
+            // The broadleaves' leaf; the conifers' sprays and the shrubs' small
+            // leaves are their form's own card at their species' leaf size.
+            leaf: k === 0 ? forestLeaf() : undefined,
+            doubleSided: true, subsurface: k === 0 || k === 3 ? 0.5 : 0.3, vertexColorTint: false,
+            castsShadow: true, receivesShadow: true, barkColor: BARK.color, barkRoughness: BARK.roughness,
+        }, LEAF)),
+    }));
+    forest.emit = emits[0];
+    forest.trees = trees[0];
+    forest.node = forest.parts[0].node;
     lap('node');
     // Thin grass goes on under the crowns (the canopy is closed only where
     // several overlap), clear at the trunks.
-    const cover = bro.flora.forestCover(emit, { instances: trees, floor: 0.25, closed: 4 });
+    const cover = bro.flora.forestCover(emits, { instances: trees, floor: 0.25, closed: 4 });
     forest.cover = cover;
     lap('cover');
     const groundOpts = { color: [1, 1, 1], metallic: 0, roughness: 1.0, receivesShadow: true };
@@ -256,7 +333,9 @@ function build() {
         castsShadow: true,
     });
     lap('grass');
-    forest.stats = { specimens: emit.specimenCount, trees: trees.length / 8, leaves: emit.leafCount };
+    forest.stats = { specimens: emits.reduce((a, e) => a + e.specimenCount, 0),
+                     trees: trees.reduce((a, t) => a + t.length / 8, 0),
+                     leaves: emits.reduce((a, e) => a + e.leafCount, 0) };
 }
 
 // --- wind ---------------------------------------------------------------------------
