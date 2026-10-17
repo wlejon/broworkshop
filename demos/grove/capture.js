@@ -25,7 +25,7 @@
 // clock is virtual: every frame is 1/fps s, so a capture is the same on any
 // machine.
 
-import { grove, draw, setWind, setShot, sky, vp, groundHeight, PRESET_PLANTS } from "/app/grove.js";
+import { grove, draw, setWind, setShot, sky, vp, groundHeight, ground, PRESET_PLANTS } from "/app/grove.js";
 
 const argv = (bro.app && bro.app.argv) || [];
 // The command now running (see the end: several join with `+`).
@@ -155,17 +155,54 @@ function stills() {
     }
 }
 
-// Each preset (PRESET_PLANTS) close, mid and far, seen from the meadow:
-// <label>_<name>_<sky>.png, three panes, the middle third of each view.
-// Distances are in the plant's heights (close 1, mid 3.5, far 8, kept over
-// the ground), the grove's own plants hidden. `tier` forces a forest tier (auto, leaves, ...).
-//   species <name,...|all> [label=species] [skies=noon,golden] [tier=auto]
+// Each preset (PRESET_PLANTS) at four distances, seen from the meadow with
+// every other plant hidden: <label>_<name>_<sky>.png, four panes, the middle
+// quarter of each view. A tree is seen from 5, 20, 60 and 150 m, a shrub
+// from 2.5, 6, 20 and 60 m. The eye stays within 60 m (over the grove's
+// ground); further views narrow the field of view to the size the plant
+// would have, so it draws the tier that distance gives it (the haze is the
+// 60 m eye's). `sil` adds <label>_<name>_sil.png: the same four views with
+// the ground, grass and sky gone and the plant flat black on white, to
+// judge its form apart from its shading. `tier` forces a forest tier
+// (auto, leaves, ...).
+//   species <name,...|all> [label=species] [skies=noon,golden] [tier=auto] [sil]
 function species() {
     const names = !shotsA || shotsA === 'all' ? PRESET_PLANTS.map((p) => p.name) : shotsA.split(',');
     const skies = (a3 || 'noon,golden').split(',');
     const tier = a4 || 'auto';
-    const W = innerWidth, H = innerHeight, pane = Math.floor(W / 3);
-    const DIST = [['close', 1, -0.05], ['mid', 3.5, -0.1], ['far', 8, -0.15]];
+    const sil = a5 === 'sil';
+    const W = innerWidth, H = innerHeight, pane = Math.floor(W / 4);
+    const FAR_EYE = 60, FOV = vp.cam.fov || 45;
+    const tanHalf = Math.tan(FOV * Math.PI / 360);
+    // Point of view: [name, distance] per habit.
+    const VIEWS = { tree: [5, 20, 60, 150], shrub: [2.5, 6, 20, 60] };
+    // Hidden for a silhouette (the roller stays: a scene with nothing in it
+    // to draw is not rendered at all, and the ball is the same in both frames).
+    const others = () => [...grove.nodes, ...grove.presets.map((q) => q.node), grove.grass, ground];
+    const grab = () => shrink(frameImage(), pane, H, [0.5, 0.5, pane / W]);
+    const compose = (panes, captions, file) => {
+        const cv = document.createElement('canvas');
+        cv.width = W; cv.height = H;
+        cv.style.cssText = `position:absolute;left:0;top:0;width:${W}px;height:${H}px;z-index:10`;
+        document.body.append(cv);
+        const g = cv.getContext('2d');
+        g.font = '600 14px system-ui';
+        panes.forEach((px, k) => {
+            const im = g.createImageData(pane, H);
+            im.data.set(px);
+            g.putImageData(im, k * pane, 0);
+            g.fillStyle = '#000'; g.fillText(captions[k], k * pane + 9, 21);
+            g.fillStyle = '#fff'; g.fillText(captions[k], k * pane + 8, 20);
+        });
+        g.fillStyle = '#888';
+        for (let k = 1; k < 4; k++) g.fillRect(k * pane - 1, 0, 2, H);
+        advanceTime(30);
+        flush();
+        screenshot(file);
+        cv.remove();
+        console.log(file);
+    };
+    const visible = new Map();
     for (const time of skies) {
         setup('gpu', 'breeze', false);
         sky.apply(time);
@@ -173,50 +210,48 @@ function species() {
         for (const name of names) {
             const p = PRESET_PLANTS.find((q) => q.name === name);
             if (!p) { console.log(`species: no ${name}`); continue; }
-            const part = grove.presets.find((q) => {
-                const e = q.emit;
-                for (let s = 0; s < e.specimenCount; s++) if (PRESET_PLANTS[e.specimens[s * 16 + 11] | 0] === p) return true;
-                return false;
-            });
-            let h = 1;
-            for (let s = 0; s < part.emit.specimenCount; s++)
-                if (PRESET_PLANTS[part.emit.specimens[s * 16 + 11] | 0] === p) h = part.emit.specimens[s * 16 + 6];
+            const part = grove.presets.find((q) => q.rows.some((r) => r.plant === p));
+            const row = part.rows.find((r) => r.plant === p);
+            const h = row.height;
+            const views = VIEWS[p.habit || (h < 3 ? 'shrub' : 'tree')];
             const target = [p.x, groundHeight(p.x, p.z) + h * 0.5, p.z];
-            // From the meadow's side, the grove's own plants out of the way.
             const yaw = Math.atan2(-p.x, -p.z);
+            // Only this plant: its own node, holding only its own tree.
             for (const n of grove.nodes) n.visible = false;
-            const grabs = [];
-            // The eye stays over the ground (it ends 55 m past the meadow's middle).
-            const dist = (k) => Math.min(Math.max(2.5, h * k), Math.hypot(p.x, p.z) + 55);
-            for (const [, k, pitch] of DIST) {
-                vp.reframe(target, dist(k), { yaw, pitch });
+            for (const q of grove.presets) q.node.visible = q === part;
+            part.node.setTrees(new Float32Array(row.row));
+            const shaded = [], flat = [], captions = [];
+            for (const d of views) {
+                const eye = Math.min(d, FAR_EYE);
+                vp.cam.fov = 2 * Math.atan(tanHalf * d / eye) * 180 / Math.PI;
+                // A slight look up from close by (the crown against the sky), down from far.
+                vp.reframe(target, eye, { yaw, pitch: d <= 5 ? 0.08 : -0.06 - 0.0004 * d });
                 step(1);
                 flush();
-                grabs.push(shrink(frameImage(), pane, H, [0.5, 0.5, pane / W]));
+                shaded.push(grab());
+                captions.push(`${name} ${time} ${d} m (h ${h.toFixed(1)} m)`);
+                if (!sil || time !== skies[0]) continue;
+                for (const n of others()) { visible.set(n, n.visible); if (n !== part.node) n.visible = false; }
+                flush();
+                const a = grab();
+                part.node.visible = false;
+                flush();
+                const b = grab();
+                for (let i = 0; i < a.length; i += 4) {
+                    const diff = Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2]);
+                    const v = diff > 6 ? 0 : 255;
+                    a[i] = a[i + 1] = a[i + 2] = v;
+                }
+                flat.push(a);
+                for (const [n, v] of visible) n.visible = v;
+                visible.clear();
             }
-            const cv = document.createElement('canvas');
-            cv.width = W; cv.height = H;
-            cv.style.cssText = `position:absolute;left:0;top:0;width:${W}px;height:${H}px;z-index:10`;
-            document.body.append(cv);
-            const g = cv.getContext('2d');
-            g.font = '600 14px system-ui';
-            grabs.forEach((px, k) => {
-                const im = g.createImageData(pane, H);
-                im.data.set(px);
-                g.putImageData(im, k * pane, 0);
-                const txt = `${name} ${time} ${DIST[k][0]} ${dist(DIST[k][1]).toFixed(0)} m (h ${h.toFixed(1)} m)`;
-                g.fillStyle = '#000'; g.fillText(txt, k * pane + 9, 21);
-                g.fillStyle = '#fff'; g.fillText(txt, k * pane + 8, 20);
-            });
-            g.fillStyle = '#111';
-            for (let k = 1; k < 3; k++) g.fillRect(k * pane - 1, 0, 2, H);
-            advanceTime(30);
-            flush();
-            const file = `${OUT}/${label}_${name}_${time}${tier === 'auto' ? '' : '_' + tier}.png`;
-            screenshot(file);
-            cv.remove();
+            vp.cam.fov = FOV;
+            compose(shaded, captions, `${OUT}/${label}_${name}_${time}${tier === 'auto' ? '' : '_' + tier}.png`);
+            if (flat.length) compose(flat, captions.map((c) => c.replace(` ${time} `, ' silhouette ')), `${OUT}/${label}_${name}_sil.png`);
+            part.node.setTrees(new Float32Array(part.rows.flatMap((r) => r.row)));
             for (const n of grove.nodes) n.visible = true;
-            console.log(file);
+            for (const q of grove.presets) q.node.visible = true;
         }
         for (const p of grove.presets) p.node.setForestTier('auto');
     }

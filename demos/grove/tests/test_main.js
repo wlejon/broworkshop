@@ -21,21 +21,19 @@ test('the grove grows every plant and draws it on the GPU path', () => {
     check(grove.stats.segments > 0 && grove.stats.leaves > 0, 'segments and leaves: ' + JSON.stringify(grove.stats));
 });
 
-test('the conifers and shrubs stand where the grove puts them, a node per leaf form', () => {
-    eq(grove.presets.map((p) => p.name).join(), 'needle,scale,shrub', 'preset nodes');
-    let total = 0;
+test('the conifers and shrubs stand where the grove puts them, a node per preset', () => {
+    eq(grove.presets.map((p) => p.name).join(), PRESET_PLANTS.map((p) => p.name).join(), 'preset nodes');
     for (const { name, emit, node } of grove.presets) {
-        check(emit.specimenCount > 0, name + ' specimens');
-        total += emit.specimenCount;
+        eq(emit.specimenCount, 1, name + ' specimens');
         const s = node.forestStats();
-        check(s && s.treeCount === emit.specimenCount, name + ' trees: ' + JSON.stringify(s && s.treeCount));
+        check(s && s.treeCount === 1, name + ' trees: ' + JSON.stringify(s && s.treeCount));
     }
-    eq(total, PRESET_PLANTS.length, 'every preset drawn once');
-    const needle = grove.presets[0].emit, shrub = grove.presets[2].emit;
+    const by = (n) => grove.presets.find((p) => p.name === n).emit;
+    const fir = by('fir'), cypress = by('cypress'), boxwood = by('boxwood');
     // A conifer stands taller than a shrub, and a shrub's leaves are its own size.
-    check(needle.specimens[6] > 2 * shrub.specimens[6], 'conifer ' + needle.specimens[6].toFixed(2) + ' m vs shrub ' +
-          shrub.specimens[6].toFixed(2) + ' m');
-    check(needle.specimenLooks[3] === 1 && shrub.specimenLooks[3] === 0, 'leaf forms');
+    check(fir.specimens[6] > 2 * boxwood.specimens[6], 'conifer ' + fir.specimens[6].toFixed(2) + ' m vs shrub ' +
+          boxwood.specimens[6].toFixed(2) + ' m');
+    check(fir.specimenLooks[3] === 1 && cypress.specimenLooks[3] === 2 && boxwood.specimenLooks[3] === 0, 'leaf forms');
 });
 
 test('the emitters carry the vegetation records the scene sways', () => {

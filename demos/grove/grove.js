@@ -241,58 +241,65 @@ export function growWorld() {
 // --- conifers and shrubs ----------------------------------------------------------
 
 // bro.flora's species presets, at full size (no PLANT_SCALE): conifers on
-// the rising ground round the meadow, shrubs among the broadleaves. They
-// grow in a nursery world of their own, each with room to grow its whole
-// crown, and stand where PRESET_PLANTS puts them through forest nodes, a
-// node per leaf form (a conifer's needle or scale-leaf sprays are cut out
-// on the GPU, which only the forest node draws). `yaw` is the side the
-// capture tool's species views see each from (the orbit's yaw: 0 from +z).
+// the rising ground round the meadow, shrubs among the broadleaves. Each
+// grows alone in a nursery world of its own (so a change to one preset
+// regrows only it: each world is cached by what it holds) and stands where
+// PRESET_PLANTS puts it through a forest node of its own, drawn with its
+// form's leaf (a conifer's needle or scale-leaf sprays are cut out on the
+// GPU, which only the forest node draws). The capture tool's species views
+// see each from the meadow's middle.
 export const PRESET_PLANTS = [
-    { name: 'fir', x: -25, z: -9, yaw: -1.9 },
-    { name: 'spruce', x: -27, z: 3, yaw: -1.45 },
-    { name: 'pine', x: -23, z: 16, yaw: -1.0 },
-    { name: 'cypress', x: 25, z: -7, yaw: 1.85 },
-    { name: 'juniper', x: 23, z: 7, yaw: 1.25 },
-    { name: 'boxwood', x: -4.5, z: 3, yaw: 0 },
-    { name: 'holly', x: 4.5, z: 4.5, yaw: 0.2 },
-    { name: 'hydrangea', x: -10.5, z: 3, yaw: -0.2 },
+    { name: 'fir', x: -25, z: -9 },
+    { name: 'spruce', x: -27, z: 3 },
+    { name: 'pine', x: -23, z: 16 },
+    { name: 'cedar', x: -12, z: -27 },
+    { name: 'redwood', x: 11, z: -26 },
+    { name: 'cypress', x: 25, z: -7 },
+    { name: 'juniper', x: 23, z: 7 },
+    { name: 'boxwood', x: -4.5, z: 3 },
+    { name: 'holly', x: 4.5, z: 4.5 },
+    { name: 'hydrangea', x: -10.5, z: 3 },
+    { name: 'hibiscus', x: 12, z: 12 },
+    { name: 'lavender', x: -16, z: 12.5 },
 ];
-const PRESET_SPACING = 16;
 
-/** Grow the presets in their own nursery: a row, far enough apart to grow alone. */
+/** Grow each preset alone in its own nursery world. */
 export function growPresets() {
-    const n = PRESET_PLANTS.length, W = n * PRESET_SPACING + 10;
-    const world = bro.flora.createWorld({
-        rngSeed: 0xc0f1,
-        climate: { annualTempBase: 12, annualPrecip: 1000 },
-        shadow: { origin: [-W / 2, -2, -12], cellSize: 1, width: W, height: 28, depth: 24, fill: 1 },
+    grove.presetGrow = [];
+    return PRESET_PLANTS.map((p) => {
+        const S = 30;
+        const world = bro.flora.createWorld({
+            rngSeed: 0xc0f1,
+            climate: { annualTempBase: 12, annualPrecip: 1000 },
+            shadow: { origin: [-S / 2, -2, -S / 2], cellSize: 1, width: S, height: 34, depth: S, fill: 1 },
+        });
+        world.plantSpecies(p.name, { origin: [0, 0, 0] });
+        grove.presetGrow.push(world.grow(Math.round(SIM_SECONDS / SIM_STEP), SIM_STEP, { cache: bro.app.cacheDir }));
+        return world;
     });
-    PRESET_PLANTS.forEach((p, k) => world.plantSpecies(p.name, { origin: [(k - (n - 1) / 2) * PRESET_SPACING, 0, 0] }));
-    grove.presetGrow = world.grow(Math.round(SIM_SECONDS / SIM_STEP), SIM_STEP, { cache: bro.app.cacheDir });
-    return world;
 }
 
-// A node per kind: the needle conifers, the scale-leaved, the shrubs; each
-// emit's specimens stood at their PRESET_PLANTS place.
-function drawPresets(world) {
-    const kinds = [{ name: 'needle', opts: { leafForm: 'needle' } },
-                   { name: 'scale', opts: { leafForm: 'scale' } },
-                   { name: 'shrub', opts: Object.assign({ plants: [5, 6, 7] }, FOLIAGE) }];
-    grove.presets = kinds.map(({ name, opts }) => {
-        const emit = world.emitForest(Object.assign({ seed: FOLIAGE.seed }, opts));
-        const rows = [];
-        for (let s = 0; s < emit.specimenCount; s++) {
-            const p = PRESET_PLANTS[emit.specimens[s * 16 + 11] | 0];
-            rows.push(p.x, groundHeight(p.x, p.z) - 0.06, p.z, 1, (p.x * 1.7 + p.z) % 6.283, s, 0, 0);
-        }
+// A node a preset, its one specimen stood at its PRESET_PLANTS place.
+// `rows`: the trees the node draws ({ plant, row, height }), so the capture
+// tool can stand any of them alone.
+function drawPresets(worlds) {
+    grove.presets = PRESET_PLANTS.map((p, k) => {
+        const world = worlds[k];
+        // The plant's leaf form (its look's fourth float), then its emit with
+        // that form's defaults (a broadleaf's: the grove's own foliage).
+        const leafForm = ['broad', 'needle', 'scale'][world.emitForest({ seed: FOLIAGE.seed }).specimenLooks[3] | 0];
+        const emit = world.emitForest(Object.assign({ seed: FOLIAGE.seed, leafForm },
+            leafForm === 'broad' ? FOLIAGE : {}));
+        const height = emit.specimens[6];
+        const row = [p.x, groundHeight(p.x, p.z) - 0.06, p.z, 1, (p.x * 1.7 + p.z) % 6.283, 0, 0, 0];
         const node = scene.createForest(Object.assign({
             // No leaf: each node draws its form's own card at its species'
             // leaf size (a conifer's spray, a boxwood's small leaf).
-            forest: emit, instances: new Float32Array(rows),
-            doubleSided: true, subsurface: name === 'shrub' ? 0.5 : 0.3, vertexColorTint: false,
+            forest: emit, instances: new Float32Array(row),
+            doubleSided: true, subsurface: leafForm === 'broad' ? 0.5 : 0.3, vertexColorTint: false,
             castsShadow: true, receivesShadow: true, barkColor: BARK.color, barkRoughness: BARK.roughness,
         }, { color: LEAF.color, roughness: LEAF.roughness }));
-        return { name, emit, node };
+        return { name: p.name, emit, node, rows: [{ plant: p, row, height }] };
     });
 }
 
