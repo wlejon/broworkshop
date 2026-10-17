@@ -73,7 +73,11 @@ function setup(wind, tier, time) {
     sky.apply(time || 'golden');
     setTier(tier || 'auto');
     if (opt('lod')) setLod(JSON.parse(opt('lod')));
-    for (const k of (opt('hide') || '').split(',').filter(Boolean)) forest[k].visible = false;
+    // A forest.* node, or a part of the forest by name (needle, shrub, ...).
+    for (const k of (opt('hide') || '').split(',').filter(Boolean)) {
+        const part = forest.parts.find((p) => p.name === k);
+        (part ? part.node : forest[k]).visible = false;
+    }
 }
 
 function stills() {
