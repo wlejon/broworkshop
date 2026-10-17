@@ -11,8 +11,10 @@
 //
 //   leaves   up close, every leaf, fluttering on its own
 //   thinned  a little further, fewer and larger leaves, then 6-vertex cards
-//   clumps   the crown's clumps as leafy lobes
-//   crowns   past that, one disc a tree: the canopy surface
+//   impostors  further, one card a tree showing its specimen's own leaves,
+//              baked from 64 directions and lit as the leaves are
+//   (clumps and crowns, the crown's lobes and then one disc a tree, are the
+//   far tiers with impostors off: the Clumps and Crowns buttons)
 //
 // every tier posed by the same sway, so a tree does not swim as it hands
 // over. Grass grows in the glade and the open, thin under the crowns, from

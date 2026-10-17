@@ -10,20 +10,20 @@ segmented('#winds', labels(WINDS), { value: forest.wind, onChange: setWind });
 segmented('#shots', labels(SHOTS), { value: forest.shot, onChange: setShot });
 segmented('#tod', Object.fromEntries(sky.order.map((k) => [k, sky.presets[k].label])),
     { value: sky.current, onChange: (k) => sky.apply(k) });
-segmented('#tiers', { auto: 'By size', leaves: 'Leaves', clumps: 'Clumps', crowns: 'Crowns' },
+segmented('#tiers', { auto: 'By size', leaves: 'Leaves', impostors: 'Impostors', clumps: 'Clumps', crowns: 'Crowns' },
     { value: 'auto', onChange: (t) => forest.node.setForestTier(t) });
 document.querySelector('#fly').addEventListener('click', () => fly(0));
 
 // Any drag or wheel on the view takes it over from the flight.
 for (const ev of ['pointerdown', 'wheel']) vp.canvas.addEventListener(ev, () => land(), { capture: true });
 
-const readouts = stats('#stats', { trees: 'trees', tiers: 'leaves / clumps / crowns', verts: 'vertices' });
+const readouts = stats('#stats', { trees: 'trees', tiers: 'leaves / impostors / clumps / crowns', verts: 'vertices' });
 vp.onFrame(() => {
     const s = forest.node.forestStats();
     if (!s) return;
     readouts.set({
         trees: s.treeCount.toLocaleString() + ' of ' + s.specimenCount + ' specimens',
-        tiers: `${s.trees.leaves} / ${s.trees.clumps} / ${s.trees.crowns}`,
+        tiers: `${s.trees.leaves} / ${s.trees.impostors} / ${s.trees.clumps} / ${s.trees.crowns}`,
         verts: (s.vertices / 1e6).toFixed(1) + ' M',
     });
 });
