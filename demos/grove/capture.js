@@ -9,6 +9,9 @@
 //       still <shot[,shot...]> [label] [path=gpu] [wind=breeze]
 //   bro-headless --width 1280 --height 720 demos/grove demos/grove/capture.js -- \
 //       perf <shot[,shot...]> [wind=breeze]   (GPU ms per frame, and the grass's, leaves' and bark's shares)
+//   bro-headless --width 1280 --height 720 demos/grove demos/grove/capture.js -- \
+//       species <name[,name...]|all> [label=species] [skies=noon,golden] [tier=auto]
+//       (each conifer and shrub preset close, mid and far: <label>_<name>_<sky>.png)
 //
 // Several commands in one boot: join them with `+`, e.g.
 //   capture.js -- still grove,tree,meadow + strip close + perf grove
@@ -22,7 +25,7 @@
 // clock is virtual: every frame is 1/fps s, so a capture is the same on any
 // machine.
 
-import { grove, draw, setWind, setShot, sky } from "/app/grove.js";
+import { grove, draw, setWind, setShot, sky, vp, groundHeight, PRESET_PLANTS } from "/app/grove.js";
 
 const argv = (bro.app && bro.app.argv) || [];
 // The command now running (see the end: several join with `+`).
@@ -152,6 +155,73 @@ function stills() {
     }
 }
 
+// Each preset (PRESET_PLANTS) close, mid and far, seen from the meadow:
+// <label>_<name>_<sky>.png, three panes, the middle third of each view.
+// Distances are in the plant's heights (close 1, mid 3.5, far 8, kept over
+// the ground), the grove's own plants hidden. `tier` forces a forest tier (auto, leaves, ...).
+//   species <name,...|all> [label=species] [skies=noon,golden] [tier=auto]
+function species() {
+    const names = !shotsA || shotsA === 'all' ? PRESET_PLANTS.map((p) => p.name) : shotsA.split(',');
+    const skies = (a3 || 'noon,golden').split(',');
+    const tier = a4 || 'auto';
+    const W = innerWidth, H = innerHeight, pane = Math.floor(W / 3);
+    const DIST = [['close', 1, -0.05], ['mid', 3.5, -0.1], ['far', 8, -0.15]];
+    for (const time of skies) {
+        setup('gpu', 'breeze', false);
+        sky.apply(time);
+        for (const p of grove.presets) p.node.setForestTier(tier);
+        for (const name of names) {
+            const p = PRESET_PLANTS.find((q) => q.name === name);
+            if (!p) { console.log(`species: no ${name}`); continue; }
+            const part = grove.presets.find((q) => {
+                const e = q.emit;
+                for (let s = 0; s < e.specimenCount; s++) if (PRESET_PLANTS[e.specimens[s * 16 + 11] | 0] === p) return true;
+                return false;
+            });
+            let h = 1;
+            for (let s = 0; s < part.emit.specimenCount; s++)
+                if (PRESET_PLANTS[part.emit.specimens[s * 16 + 11] | 0] === p) h = part.emit.specimens[s * 16 + 6];
+            const target = [p.x, groundHeight(p.x, p.z) + h * 0.5, p.z];
+            // From the meadow's side, the grove's own plants out of the way.
+            const yaw = Math.atan2(-p.x, -p.z);
+            for (const n of grove.nodes) n.visible = false;
+            const grabs = [];
+            // The eye stays over the ground (it ends 55 m past the meadow's middle).
+            const dist = (k) => Math.min(Math.max(2.5, h * k), Math.hypot(p.x, p.z) + 55);
+            for (const [, k, pitch] of DIST) {
+                vp.reframe(target, dist(k), { yaw, pitch });
+                step(1);
+                flush();
+                grabs.push(shrink(frameImage(), pane, H, [0.5, 0.5, pane / W]));
+            }
+            const cv = document.createElement('canvas');
+            cv.width = W; cv.height = H;
+            cv.style.cssText = `position:absolute;left:0;top:0;width:${W}px;height:${H}px;z-index:10`;
+            document.body.append(cv);
+            const g = cv.getContext('2d');
+            g.font = '600 14px system-ui';
+            grabs.forEach((px, k) => {
+                const im = g.createImageData(pane, H);
+                im.data.set(px);
+                g.putImageData(im, k * pane, 0);
+                const txt = `${name} ${time} ${DIST[k][0]} ${dist(DIST[k][1]).toFixed(0)} m (h ${h.toFixed(1)} m)`;
+                g.fillStyle = '#000'; g.fillText(txt, k * pane + 9, 21);
+                g.fillStyle = '#fff'; g.fillText(txt, k * pane + 8, 20);
+            });
+            g.fillStyle = '#111';
+            for (let k = 1; k < 3; k++) g.fillRect(k * pane - 1, 0, 2, H);
+            advanceTime(30);
+            flush();
+            const file = `${OUT}/${label}_${name}_${time}${tier === 'auto' ? '' : '_' + tier}.png`;
+            screenshot(file);
+            cv.remove();
+            for (const n of grove.nodes) n.visible = true;
+            console.log(file);
+        }
+        for (const p of grove.presets) p.node.setForestTier('auto');
+    }
+}
+
 // GPU ms per frame at each shot (perf.gpuFrameMs, the scene's timestamp
 // queries): the whole frame, then without the grass, without the grass and
 // the leaves, and without the grass and the plants, so each part's cost is
@@ -185,7 +255,7 @@ function perfShots() {
 // Several commands joined by `+` run one after another in this one boot,
 // each from the page as the boot left it (any overlay removed; each sets
 // its own path and wind); the virtual clock runs on between them.
-const MODES = { strip, video, still: stills, perf: perfShots };
+const MODES = { strip, video, still: stills, perf: perfShots, species };
 const commands = [[]];
 for (const a of argv) a === '+' ? commands.push([]) : commands[commands.length - 1].push(a);
 for (const cmd of commands) {

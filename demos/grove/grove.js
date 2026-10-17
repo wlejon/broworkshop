@@ -238,12 +238,70 @@ export function growWorld() {
     return world;
 }
 
+// --- conifers and shrubs ----------------------------------------------------------
+
+// bro.flora's species presets, at full size (no PLANT_SCALE): conifers on
+// the rising ground round the meadow, shrubs among the broadleaves. They
+// grow in a nursery world of their own, each with room to grow its whole
+// crown, and stand where PRESET_PLANTS puts them through forest nodes, a
+// node per leaf form (a conifer's needle or scale-leaf sprays are cut out
+// on the GPU, which only the forest node draws). `yaw` is the side the
+// capture tool's species views see each from (the orbit's yaw: 0 from +z).
+export const PRESET_PLANTS = [
+    { name: 'fir', x: -25, z: -9, yaw: -1.9 },
+    { name: 'spruce', x: -27, z: 3, yaw: -1.45 },
+    { name: 'pine', x: -23, z: 16, yaw: -1.0 },
+    { name: 'cypress', x: 25, z: -7, yaw: 1.85 },
+    { name: 'juniper', x: 23, z: 7, yaw: 1.25 },
+    { name: 'boxwood', x: -4.5, z: 3, yaw: 0 },
+    { name: 'holly', x: 4.5, z: 4.5, yaw: 0.2 },
+    { name: 'hydrangea', x: -10.5, z: 3, yaw: -0.2 },
+];
+const PRESET_SPACING = 16;
+
+/** Grow the presets in their own nursery: a row, far enough apart to grow alone. */
+export function growPresets() {
+    const n = PRESET_PLANTS.length, W = n * PRESET_SPACING + 10;
+    const world = bro.flora.createWorld({
+        rngSeed: 0xc0f1,
+        climate: { annualTempBase: 12, annualPrecip: 1000 },
+        shadow: { origin: [-W / 2, -2, -12], cellSize: 1, width: W, height: 28, depth: 24, fill: 1 },
+    });
+    PRESET_PLANTS.forEach((p, k) => world.plantSpecies(p.name, { origin: [(k - (n - 1) / 2) * PRESET_SPACING, 0, 0] }));
+    grove.presetGrow = world.grow(Math.round(SIM_SECONDS / SIM_STEP), SIM_STEP, { cache: bro.app.cacheDir });
+    return world;
+}
+
+// A node per kind: the needle conifers, the scale-leaved, the shrubs; each
+// emit's specimens stood at their PRESET_PLANTS place.
+function drawPresets(world) {
+    const kinds = [{ name: 'needle', opts: { leafForm: 'needle' } },
+                   { name: 'scale', opts: { leafForm: 'scale' } },
+                   { name: 'shrub', opts: Object.assign({ plants: [5, 6, 7] }, FOLIAGE) }];
+    grove.presets = kinds.map(({ name, opts }) => {
+        const emit = world.emitForest(Object.assign({ seed: FOLIAGE.seed }, opts));
+        const rows = [];
+        for (let s = 0; s < emit.specimenCount; s++) {
+            const p = PRESET_PLANTS[emit.specimens[s * 16 + 11] | 0];
+            rows.push(p.x, groundHeight(p.x, p.z) - 0.06, p.z, 1, (p.x * 1.7 + p.z) % 6.283, s, 0, 0);
+        }
+        const node = scene.createForest(Object.assign({
+            // No leaf: each node draws its form's own card at its species'
+            // leaf size (a conifer's spray, a boxwood's small leaf).
+            forest: emit, instances: new Float32Array(rows),
+            doubleSided: true, subsurface: name === 'shrub' ? 0.5 : 0.3, vertexColorTint: false,
+            castsShadow: true, receivesShadow: true, barkColor: BARK.color, barkRoughness: BARK.roughness,
+        }, { color: LEAF.color, roughness: LEAF.roughness }));
+        return { name, emit, node };
+    });
+}
+
 // --- drawing ----------------------------------------------------------------------
 
 const BARK = { color: [0.2, 0.17, 0.14], metallic: 0, roughness: 0.9 };
 const LEAF = { color: [0.2, 0.36, 0.11], metallic: 0, roughness: 0.7 };
 
-export const grove = { world: null, nodes: [], path: 'gpu', legacyWind: false, stats: {} };
+export const grove = { world: null, nodes: [], presets: [], path: 'gpu', legacyWind: false, stats: {} };
 
 function clearNodes() {
     for (const n of grove.nodes) n.destroy();
@@ -324,6 +382,8 @@ export const SHOTS = {
     ground:  { label: 'In the grass', target: [-1, 0.3, 13.5], lift: true, dist: 3.6, yaw: -0.25, pitch: -0.16 },
     parting: { label: 'Parting', target: [-1.5, 0, 13.3], lift: true, dist: 6, yaw: 0.1, pitch: -0.55 },
     roller:  { label: 'The roller', follow: true, dist: 4.5, yaw: 0.9, pitch: -0.28 },
+    conifers: { label: 'Conifers', target: [-25, 6, 3], lift: true, dist: 30, yaw: 1.0, pitch: 0.0 },
+    shrubs:  { label: 'Shrubs', target: [-7.5, 0.8, 3], lift: true, dist: 10, yaw: 0.46, pitch: -0.14 },
 };
 export function setShot(key) {
     const s = SHOTS[key];
@@ -346,6 +406,8 @@ setShot('grove');
 grove.world = growWorld();
 grove.growMs = grove.grow.ms;  // wall time: headless's performance.now rides the virtual clock
 draw('gpu');
+grove.presetWorld = growPresets();
+drawPresets(grove.presetWorld);
 grove.grass = growGrass(grove.world);
 roller.node = scene.createMesh({ data: ballMesh(), color: [1, 1, 1], roughness: 0.55, castsShadow: true, receivesShadow: true });
 grove.grass.addMover(roller.node, { radius: 0.7, strength: 1.2, trample: 1 });

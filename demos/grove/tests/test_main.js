@@ -1,7 +1,7 @@
 // grove: grown trees and shrubs swaying in bro.scene's wind field with no wind
 // code in the app. Run: scripts/validate.sh demos/grove
 import { check, eq, test, done, frames, clickOn } from "/lib/kit/test.js";
-import { grove, scene, PLANTS, WINDS, FOLIAGE, GROUND, PLANT_SCALE, groundHeight, roller, dryness, ground, setShot } from "/app/grove.js";
+import { grove, scene, PLANTS, WINDS, FOLIAGE, GROUND, PLANT_SCALE, groundHeight, roller, dryness, ground, setShot, PRESET_PLANTS } from "/app/grove.js";
 
 frames(2);
 
@@ -19,6 +19,23 @@ test('the grove grows every plant and draws it on the GPU path', () => {
     eq(grove.path, 'gpu');
     eq(grove.nodes.length, 2, 'a tube node and a scatter node');
     check(grove.stats.segments > 0 && grove.stats.leaves > 0, 'segments and leaves: ' + JSON.stringify(grove.stats));
+});
+
+test('the conifers and shrubs stand where the grove puts them, a node per leaf form', () => {
+    eq(grove.presets.map((p) => p.name).join(), 'needle,scale,shrub', 'preset nodes');
+    let total = 0;
+    for (const { name, emit, node } of grove.presets) {
+        check(emit.specimenCount > 0, name + ' specimens');
+        total += emit.specimenCount;
+        const s = node.forestStats();
+        check(s && s.treeCount === emit.specimenCount, name + ' trees: ' + JSON.stringify(s && s.treeCount));
+    }
+    eq(total, PRESET_PLANTS.length, 'every preset drawn once');
+    const needle = grove.presets[0].emit, shrub = grove.presets[2].emit;
+    // A conifer stands taller than a shrub, and a shrub's leaves are its own size.
+    check(needle.specimens[6] > 2 * shrub.specimens[6], 'conifer ' + needle.specimens[6].toFixed(2) + ' m vs shrub ' +
+          shrub.specimens[6].toFixed(2) + ' m');
+    check(needle.specimenLooks[3] === 1 && shrub.specimenLooks[3] === 0, 'leaf forms');
 });
 
 test('the emitters carry the vegetation records the scene sways', () => {
