@@ -32,7 +32,7 @@
 // clock is virtual: every frame is 1/fps s, so a capture is the same on any
 // machine.
 
-import { grove, draw, setWind, setShot, sky, vp, groundHeight, ground, PRESET_PLANTS, WINDS, MEADOW_HERBS } from "/app/grove.js";
+import { grove, draw, setWind, setShot, sky, vp, groundHeight, ground, roller, PRESET_PLANTS, WINDS, MEADOW_HERBS } from "/app/grove.js";
 
 const argv = (bro.app && bro.app.argv) || [];
 // The command now running (see the end: several join with `+`).
@@ -301,7 +301,7 @@ function herbs() {
     const W = innerWidth, H = innerHeight, pane = Math.floor(W / 4);
     const grab = () => shrink(frameImage(), pane, H, [0.5, 0.5, pane / W]);
     // Distance and pitch: the far view looks down over the shrubs.
-    const PITCH = { 0.5: -0.25, 1: -0.5, 3: -0.32, 10: -0.16, 30: -0.2, 60: -0.16, 150: -0.12 };
+    const PITCH = { 0.5: -0.25, 1: -0.5, 3: -0.32, 10: -0.16, 30: -0.2, 60: -0.22, 150: -0.12 };
     const dists = (cmdArgs.find((s) => s.startsWith('views=')) || 'views=1,3,10,30').slice(6).split(',').map(Number);
     const VIEWS = dists.map((d) => [d, PITCH[d] !== undefined ? PITCH[d] : -0.2]);
     const at = [-1, 13.5];
@@ -333,6 +333,12 @@ function herbs() {
     // shrubs in the way of the far views, the grass not over the herbs.
     const grassHeight = g.grassParams().height;
     g.setGrass({ height: 0.16 });
+    // `range=`: where the plants hand over (the meadow's own when not given).
+    const rangeArg = cmdArgs.find((s) => s.startsWith('range='));
+    const range = rangeArg ? +rangeArg.slice(6) : undefined;
+    // The roller (the meadow's grass mover) is not a herb: out of these views.
+    const rollerWas = roller.node.visible;
+    roller.node.visible = false;
     const trees = () => [...grove.nodes, ...grove.presets.map((q) => q.node)];
     for (const time of skyList) {
         setup('gpu', wind, false);
@@ -342,10 +348,21 @@ function herbs() {
             const p = name === 'meadow' ? { height: 0.5 } : bro.flora.herbPreset(name);
             if (!p) { console.log(`herbs: no ${name}`); continue; }
             // This species alone, wherever the meadow's herbs grow.
-            g.setHerbs({ species: speciesOf(name) });
+            g.setHerbs({ species: speciesOf(name), range });
             const shaded = [], flat = [], captions = [];
+            // The near views frame a plant: the one nearest the meadow's
+            // middle (for the meadow, its nearest flowering one, a different
+            // species each run of views).
+            step(1);
+            const plants = g.herbPlants(at[0], at[1], 12);
+            const flowering = name === 'meadow'
+                ? plants.filter((q) => q.species !== MEADOW_HERBS.indexOf('clover')) : plants;
+            const plant = flowering[0] || plants[0];
             for (const [d, pitch] of VIEWS) {
-                const target = [at[0], groundHeight(at[0], at[1]) + Math.min(p.height * 0.5, 0.4), at[1]];
+                const near = plant && d < 2;
+                const ph = near && name === 'meadow' ? bro.flora.herbPreset(MEADOW_HERBS[plant.species]).height : p.height;
+                const target = near ? [plant.x, plant.y + Math.min(ph * 0.5, 0.45), plant.z]
+                    : [at[0], groundHeight(at[0], at[1]) + Math.min(p.height * 0.5, 0.4), at[1]];
                 // From the bowl's middle out toward the hills (the eye stays
                 // over the meadow).
                 vp.reframe(target, d, { yaw: Math.PI - 0.3, pitch });
@@ -353,6 +370,23 @@ function herbs() {
                 flush();
                 shaded.push(grab());
                 captions.push(`${name} ${time} ${d} m (h ${p.height.toFixed(2)} m)`);
+                if (cmdArgs.includes('perf')) {
+                    // GPU ms of the view, and without the herbs: their cost.
+                    const ms = () => {
+                        for (let i = 0; i < 4; i++) { advanceTime(1000 / fps); flush(); }
+                        perf.gpuFrameMs();
+                        let s = 0;
+                        for (let i = 0; i < 30; i++) { advanceTime(1000 / fps); flush(); s += perf.gpuFrameMs(); }
+                        return s / 30;
+                    };
+                    const all = ms();
+                    const st = g.grassStats();
+                    g.setHerbs({ species: [] });
+                    const none = ms();
+                    g.setHerbs({ species: speciesOf(name), range });
+                    console.log(`perf ${name} ${time} ${d} m: ${all.toFixed(3)} ms, herbs ${(all - none).toFixed(3)} ms ` +
+                                `(herb instances ${st.herbInstances.join(' / ')})`);
+                }
                 if (!sil || time !== skyList[0]) continue;
                 ground.visible = false;
                 flush();
@@ -374,6 +408,7 @@ function herbs() {
         }
         g.setHerbs({ species: MEADOW_HERBS });
     }
+    roller.node.visible = rollerWas;
     g.setGrass({ height: grassHeight });
     draw('gpu');
     for (const q of grove.presets) q.node.visible = true;
