@@ -213,19 +213,25 @@ function species() {
             const part = grove.presets.find((q) => q.rows.some((r) => r.plant === p));
             const row = part.rows.find((r) => r.plant === p);
             const h = row.height;
-            const views = VIEWS[p.habit || (h < 3 ? 'shrub' : 'tree')];
+            const shrub = (p.habit || (h < 3 ? 'shrub' : 'tree')) === 'shrub';
+            const views = VIEWS[shrub ? 'shrub' : 'tree'];
             const target = [p.x, groundHeight(p.x, p.z) + h * 0.5, p.z];
             const yaw = Math.atan2(-p.x, -p.z);
+            // A shrub stands in the meadow's grass, which would hide it: the
+            // grass goes, and the view looks down on it from nearer (the
+            // grove's ground ends some 40 m out).
+            const grassWas = grove.grass ? grove.grass.visible : false;
+            if (shrub && grove.grass) grove.grass.visible = false;
             // Only this plant: its own node, holding only its own tree.
             for (const n of grove.nodes) n.visible = false;
             for (const q of grove.presets) q.node.visible = q === part;
             part.node.setTrees(new Float32Array(row.row));
             const shaded = [], flat = [], captions = [];
             for (const d of views) {
-                const eye = Math.min(d, FAR_EYE);
+                const eye = Math.min(d, shrub ? 15 : FAR_EYE);
                 vp.cam.fov = 2 * Math.atan(tanHalf * d / eye) * 180 / Math.PI;
                 // A slight look up from close by (the crown against the sky), down from far.
-                vp.reframe(target, eye, { yaw, pitch: d <= 5 ? 0.08 : -0.06 - 0.0004 * d });
+                vp.reframe(target, eye, { yaw, pitch: shrub ? -0.3 : d <= 5 ? 0.08 : -0.06 - 0.0004 * d });
                 step(1);
                 flush();
                 shaded.push(grab());
@@ -252,6 +258,7 @@ function species() {
             part.node.setTrees(new Float32Array(part.rows.flatMap((r) => r.row)));
             for (const n of grove.nodes) n.visible = true;
             for (const q of grove.presets) q.node.visible = true;
+            if (grove.grass) grove.grass.visible = grassWas;
         }
         for (const p of grove.presets) p.node.setForestTier('auto');
     }

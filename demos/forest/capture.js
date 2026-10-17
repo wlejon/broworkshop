@@ -12,6 +12,11 @@
 //   bro-headless ... capture.js -- handover <leaves|cards|clumps|crowns> [label=forest] [frames=12]
 //       a dolly out from a tree through the distances where it hands over
 //       from one tier to the next: <label>_handover_<which>_strip.png
+//   bro-headless ... capture.js -- tiers <m[,m...]> [label=forest] [wind=still] [sky=golden] [part=...] [shadow=0]
+//       the handover's subject alone at each distance, forced Leaves, By
+//       size, forced Clumps and forced Crowns side by side, each with the
+//       tree's mean luminance and cover: <label>_tiers_<part>.png (a value
+//       and silhouette check across the tiers; shadow=0: it casts none)
 //   bro-headless ... capture.js -- compare <shot[,shot...]> [label=forest] [wind=gusty] [sky=noon]
 //       the forced Leaves tier beside By size, the middle half of each view:
 //       <label>_<shot>_<sky>_compare.png
@@ -212,20 +217,35 @@ function shrink(g, tw, th, crop) {
     return out;
 }
 
-// The tree the handover strips dolly from: the one nearest the glade's
-// far edge, seen across the glade (of forest.parts' `part=<name>`, the
-// broadleaves by default).
+// The tree the handover strips dolly from, seen across the glade (of
+// forest.parts' `part=<name>`, the broadleaves by default): of the part's
+// 40 trees nearest the glade's far edge, the one standing clearest of the
+// others of every part (a needle tree among broadleaves was hidden behind
+// them).
 function subject() {
     const part = forest.parts.find((p) => p.name === opt('part')) || forest.parts[0];
     const inst = part.trees, spec = part.emit.specimens;
-    let best = 0, bd = Infinity;
-    for (let i = 0; i < inst.length / 8; i++) {
-        const d = Math.hypot(inst[i * 8] - 40, inst[i * 8 + 2] - 30);
-        if (d < bd) { bd = d; best = i; }
+    const near = [];
+    for (let i = 0; i < inst.length / 8; i++) near.push([Math.hypot(inst[i * 8] - 40, inst[i * 8 + 2] - 30), i]);
+    near.sort((a, b) => a[0] - b[0]);
+    let best = near[0][1], bestClear = -1;
+    for (const [d, i] of near.slice(0, 40)) {
+        let clear = Infinity;
+        for (const p of forest.parts) {
+            const t = p.trees;
+            for (let j = 0; j < t.length / 8; j++) {
+                if (p === part && j === i) continue;
+                const c = Math.hypot(t[j * 8] - inst[i * 8], t[j * 8 + 2] - inst[i * 8 + 2]);
+                if (c < clear) clear = c;
+            }
+        }
+        // Clear, and not far from the spot.
+        const score = Math.min(clear, 12) - 0.05 * d;
+        if (score > bestClear) { bestClear = score; best = i; }
     }
     const s = inst[best * 8 + 5] | 0, sc = inst[best * 8 + 3];
     const h = spec[s * 16 + 6] * sc;
-    return { index: best, specimen: s, scale: sc, node: part.node, part: part.name,
+    return { index: best, specimen: s, scale: sc, node: part.node, part: part.name, height: h,
              top: [inst[best * 8], inst[best * 8 + 1] + h * 0.6, inst[best * 8 + 2]] };
 }
 
@@ -254,6 +274,10 @@ function handover() {
     setup('breeze');
     flight.on = false;
     const sub = subject();
+    // Another part's subject is judged alone: the parts in front of it
+    // (broadleaves before a conifer) are hidden for the strip.
+    const hidden = opt('part') ? forest.parts.filter((p) => p.name !== sub.part && p.node.visible) : [];
+    for (const p of hidden) p.node.visible = false;
     const dMid = distanceWhere(sub, HANDOVERS[which]);
     const d0 = dMid / 1.35, d1 = dMid * 1.35;
     console.log(`handover ${which}: tree ${sub.index} (specimen ${sub.specimen}, scale ${sub.scale.toFixed(2)}) at ${dMid.toFixed(1)} m; ` +
@@ -296,6 +320,84 @@ function handover() {
     const file = `${OUT}/${label}_handover_${which}${sub.part === 'broadleaf' ? '' : '_' + sub.part}_strip.png`;
     screenshot(file);
     console.log(file);
+    for (const p of hidden) p.node.visible = true;
+}
+
+// One tree of a part (`part=`, as the handover's subject, its part alone)
+// at each distance (m, comma separated), a row a distance: forced Leaves,
+// By size, forced Clumps, forced Crowns. Each pane is labelled with the
+// tree's mean luminance and its cover (the pixels it changes against the
+// view with its part hidden): <label>_tiers_<part>.png, the values for a
+// silhouette and value check across the tiers.
+function tiers() {
+    const ds = (a1 || '15,30,60,120').split(',').map(Number), label = a2 || 'forest';
+    setup(a3 || 'still', 'auto', a4 || 'golden');
+    flight.on = false;
+    const sub = subject();
+    const hidden = forest.parts.filter((p) => p.name !== sub.part && p.node.visible);
+    for (const p of hidden) p.node.visible = false;
+    // The subject alone in its node, so the cover is its own.
+    const part = forest.parts.find((p) => p.name === sub.part);
+    sub.node.setTrees(part.trees.slice(sub.index * 8, sub.index * 8 + 8));
+    if (opt('shadow') === '0') sub.node.castsShadow = false;
+    const yaw = Math.atan2(40 - 12, 30 - 18) + Math.PI, pitch = -0.12;
+    const W = innerWidth, H = innerHeight;
+    const names = ['leaves', 'auto', 'clumps', 'crowns'];
+    const cols = names.length, rows = ds.length, gap = 4;
+    const tw = Math.floor((W - gap * (cols + 1)) / cols);
+    const th = Math.floor(Math.min(tw * 9 / 16, (H - gap * (rows + 1)) / rows));
+    const grab = () => { for (let k = 0; k < 3; k++) { advanceTime(1000 / fps); flush(); } return frameImage(); };
+    const panes = [];
+    for (const d of ds) {
+        vp.reframe(sub.top, d, { yaw, pitch });
+        sub.node.visible = false;
+        const bg = grab();
+        sub.node.visible = true;
+        const cw = Math.min(1, Math.max(0.1, 1.6 * sub.height * pxPerMetre(d) / W));
+        const bgPx = shrink(bg, tw, th, [0.5, 0.5, cw]);
+        for (const n of names) {
+            sub.node.setForestTier(n);
+            const px = shrink(grab(), tw, th, [0.5, 0.5, cw]);
+            let sum = 0, cover = 0;
+            for (let i = 0; i < tw * th; i++) {
+                const o = i * 4;
+                const dl = Math.abs(px[o] - bgPx[o]) + Math.abs(px[o + 1] - bgPx[o + 1]) + Math.abs(px[o + 2] - bgPx[o + 2]);
+                if (dl < 12) continue;
+                cover++;
+                sum += 0.2126 * px[o] + 0.7152 * px[o + 1] + 0.0722 * px[o + 2];
+            }
+            const Y = cover ? sum / cover : 0;
+            panes.push({ px, txt: `${n} ${d} m  Y ${Y.toFixed(1)}  cover ${(100 * cover / (tw * th)).toFixed(1)}%` });
+            const st = sub.node.forestStats();
+            console.log(`tiers ${sub.part} ${d} m ${n}: Y ${Y.toFixed(1)} cover ${(100 * cover / (tw * th)).toFixed(1)}% ` +
+                        `(leaves ${st.leaves}, entries ${st.entries}, shadowV ${st.shadowVertices}, detail ${st.detail.toFixed(2)}) ` +
+                        JSON.stringify(sub.node.forestTreeLod(sub.specimen, pxPerMetre(d) * sub.scale)));
+        }
+        sub.node.setForestTier('auto');
+    }
+    const cv = document.createElement('canvas');
+    cv.width = W; cv.height = H;
+    cv.style.cssText = `position:absolute;left:0;top:0;width:${W}px;height:${H}px;z-index:10`;
+    document.body.append(cv);
+    const g = cv.getContext('2d');
+    g.fillStyle = '#111';
+    g.fillRect(0, 0, W, H);
+    g.font = '600 13px system-ui';
+    panes.forEach((s, i) => {
+        const x = gap + (i % cols) * (tw + gap), y = gap + Math.floor(i / cols) * (th + gap);
+        const im = g.createImageData(tw, th);
+        im.data.set(s.px);
+        g.putImageData(im, x, y);
+        g.fillStyle = '#000'; g.fillText(s.txt, x + 6, y + 17);
+        g.fillStyle = '#fff'; g.fillText(s.txt, x + 5, y + 16);
+    });
+    advanceTime(30);
+    flush();
+    const file = `${OUT}/${label}_tiers_${sub.part}.png`;
+    screenshot(file);
+    console.log(file);
+    for (const p of hidden) p.node.visible = true;
+    sub.node.setTrees(part.trees);
 }
 
 // Side by side at each shot: the forced "Leaves" tier on the left, "By size"
@@ -726,7 +828,7 @@ function metrics() {
 // Between them the page is put back as the boot left it: any overlay a
 // command drew is removed and the forest's level of detail restored (the
 // clock runs on, so wind and the flight's motion continue from there).
-const MODES = { still: stills, trace, video, handover, compare, parts, hold, metrics };
+const MODES = { still: stills, trace, video, handover, compare, parts, hold, metrics, tiers };
 const lod0 = forest.parts.map((p) => p.node.forestLod());
 const commands = [[]];
 for (const a of argv) a === '+' ? commands.push([]) : commands[commands.length - 1].push(a);
