@@ -203,17 +203,6 @@ export function growNursery() {
 
 // --- the forest -------------------------------------------------------------------
 
-// The grove's leaf with half the vertices (2 x 3 segments, 12): a forest
-// shows many more leaves up close than a grove, and keeps the bend and cup.
-function forestLeaf() {
-    const m = Mesh.leafCard('oval', {
-        width: 0.07, length: 0.12, bend: 0.4, fullUV: true, shapedSilhouette: true, cup: 0.55,
-        widthSegments: 2, lengthSegments: 3,
-    });
-    m.colors = new Float32Array(0);
-    return m;
-}
-
 const BARK = { color: [0.2, 0.17, 0.14], roughness: 0.9 };
 const LEAF = { color: [0.07, 0.13, 0.04], roughness: 0.7 };
 
@@ -298,9 +287,9 @@ function build() {
         name: names[k], emit, trees: trees[k],
         node: scene.createForest(Object.assign({
             forest: emit, instances: trees[k],
-            // The broadleaves' leaf; the conifers' sprays and the shrubs' small
-            // leaves are their form's own card at their species' leaf size.
-            leaf: k === 0 ? forestLeaf() : undefined,
+            // No leaf: each node draws its form's own card at its species'
+            // leaf size (a broadleaf's leaf, a conifer's spray, a shrub's
+            // small leaf).
             doubleSided: true, subsurface: k === 0 || k === 3 ? 0.5 : 0.3, vertexColorTint: false,
             castsShadow: true, receivesShadow: true, barkColor: BARK.color, barkRoughness: BARK.roughness,
         }, LEAF)),
