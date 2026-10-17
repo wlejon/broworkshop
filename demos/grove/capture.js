@@ -12,6 +12,9 @@
 //   bro-headless --width 1280 --height 720 demos/grove demos/grove/capture.js -- \
 //       species <name[,name...]|all> [label=species] [skies=noon,golden] [tier=auto]
 //       (each conifer and shrub preset close, mid and far: <label>_<name>_<sky>.png)
+//   bro-headless --width 960 --height 540 demos/grove demos/grove/capture.js -- \
+//       swayprofile <name[,name...]> [label=sway] [dist=20] [seconds=6] [wind=gusty]
+//       (how far each eighth of a plant's height moves in the wind, side on)
 //
 // Several commands in one boot: join them with `+`, e.g.
 //   capture.js -- still grove,tree,meadow + strip close + perf grove
@@ -25,7 +28,7 @@
 // clock is virtual: every frame is 1/fps s, so a capture is the same on any
 // machine.
 
-import { grove, draw, setWind, setShot, sky, vp, groundHeight, ground, PRESET_PLANTS } from "/app/grove.js";
+import { grove, draw, setWind, setShot, sky, vp, groundHeight, ground, PRESET_PLANTS, WINDS } from "/app/grove.js";
 
 const argv = (bro.app && bro.app.argv) || [];
 // The command now running (see the end: several join with `+`).
@@ -264,6 +267,88 @@ function species() {
     }
 }
 
+// How far each part of a plant moves in the wind, by height: the plant
+// alone, seen side on across the wind from `dist` m (default 20), for
+// `seconds` (default 6) of `wind` (default gusty). Each frame's silhouette
+// (a frame with it against one without) gives, per row, its left and right
+// edges; a band's amplitude is the RMS over time of those edges about their
+// mean (metres, through the view's scale), the band's eighth of the plant's
+// height from the ground up. Prints one line per plant and writes
+// <label>_swayprofile.json.
+//   swayprofile <name,...> [label=sway] [dist=20] [seconds=6] [wind=gusty]
+function swayProfile() {
+    const names = (shotsA || 'fir,spruce,cedar').split(',');
+    const dist = +(a3 || 20), seconds = +(a4 || 6), wind = a5 || 'gusty';
+    setup('gpu', wind, false);
+    sky.apply('noon');
+    const W = innerWidth, H = innerHeight, FOV = vp.cam.fov || 45;
+    const others = [...grove.nodes, ...grove.presets.map((q) => q.node), grove.grass, ground];
+    const out = {};
+    for (const name of names) {
+        const p = PRESET_PLANTS.find((q) => q.name === name);
+        if (!p) { console.log(`swayprofile: no ${name}`); continue; }
+        const part = grove.presets.find((q) => q.rows.some((r) => r.plant === p));
+        const row = part.rows.find((r) => r.plant === p);
+        const h = row.height, base = groundHeight(p.x, p.z);
+        const wd = WINDS[wind].wind.direction || WINDS.gusty.wind.direction;
+        // Across the wind: the camera looks along the wind's perpendicular.
+        const yaw = Math.atan2(wd[0], wd[2]) + Math.PI * 0.5;
+        const was = new Map(others.map((n) => [n, n.visible]));
+        for (const n of others) n.visible = n === part.node;
+        part.node.setTrees(new Float32Array(row.row));
+        // The whole plant in frame: back off until its height fills 80% of the view.
+        const eye = Math.max(dist, h / 0.8 / (2 * Math.tan(FOV * Math.PI / 360)));
+        vp.cam.fov = FOV;
+        vp.reframe([p.x, base + h * 0.5, p.z], eye, { yaw, pitch: 0 });
+        step(2);
+        const mPerPx = 2 * eye * Math.tan(FOV * Math.PI / 360) / H;
+        const frames = Math.round(seconds * fps);
+        const L = [], R = [];
+        for (let f = 0; f < frames; f++) {
+            advanceTime(1000 / fps);
+            part.node.visible = true; flush();
+            const a = frameImage();
+            part.node.visible = false; flush();
+            const b = frameImage();
+            const top = a.height - H;
+            const l = new Float32Array(H).fill(NaN), r = new Float32Array(H).fill(NaN);
+            for (let y = 0; y < H; y++) {
+                const o0 = (y + top) * a.width * 4;
+                for (let x = 0; x < W; x++) {
+                    const o = o0 + x * 4;
+                    if (Math.abs(a.data[o] - b.data[o]) + Math.abs(a.data[o + 1] - b.data[o + 1]) + Math.abs(a.data[o + 2] - b.data[o + 2]) > 6) {
+                        if (isNaN(l[y])) l[y] = x;
+                        r[y] = x;
+                    }
+                }
+            }
+            L.push(l); R.push(r);
+        }
+        // Rows to heights: the plant's base and top in the view, from the frames' mean extents.
+        const rowsHit = [];
+        for (let y = 0; y < H; y++) if (L.every((l) => !isNaN(l[y]))) rowsHit.push(y);
+        const yTop = rowsHit[0], yBot = rowsHit[rowsHit.length - 1];
+        const bands = new Array(8).fill(0).map(() => ({ s: 0, n: 0 }));
+        for (const y of rowsHit) {
+            const band = Math.min(7, Math.floor((yBot - y) / Math.max(1, yBot - yTop) * 8));
+            for (const E of [L, R]) {
+                let m = 0;
+                for (const e of E) m += e[y];
+                m /= E.length;
+                for (const e of E) { bands[band].s += (e[y] - m) * (e[y] - m); bands[band].n++; }
+            }
+        }
+        const amp = bands.map((b) => b.n ? Math.sqrt(b.s / b.n) * mPerPx : 0);
+        out[name] = { height: h, eye, wind, amp };
+        console.log(`${name} (h ${h.toFixed(1)} m, ${eye.toFixed(0)} m off, ${wind}): RMS edge motion by height band, low to high (cm): ` +
+                    amp.map((v) => (100 * v).toFixed(1)).join(' '));
+        part.node.setTrees(new Float32Array(part.rows.flatMap((r) => r.row)));
+        for (const [n, v] of was) n.visible = v;
+    }
+    vp.cam.fov = FOV;
+    require('fs').writeFileSync(`${OUT}/${label}_swayprofile.json`, JSON.stringify(out, null, 1));
+}
+
 // GPU ms per frame at each shot (perf.gpuFrameMs, the scene's timestamp
 // queries): the whole frame, then without the grass, without the grass and
 // the leaves, and without the grass and the plants, so each part's cost is
@@ -297,7 +382,7 @@ function perfShots() {
 // Several commands joined by `+` run one after another in this one boot,
 // each from the page as the boot left it (any overlay removed; each sets
 // its own path and wind); the virtual clock runs on between them.
-const MODES = { strip, video, still: stills, perf: perfShots, species };
+const MODES = { strip, video, still: stills, perf: perfShots, species, swayprofile: swayProfile };
 const commands = [[]];
 for (const a of argv) a === '+' ? commands.push([]) : commands[commands.length - 1].push(a);
 for (const cmd of commands) {
