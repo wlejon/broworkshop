@@ -232,8 +232,9 @@ export function growWorld() {
         world.addPlant({ origin: [p.x / PLANT_SCALE, y / PLANT_SCALE, p.z / PLANT_SCALE], species: SPECIES[p.kind],
                          prototypeIndex: p.kind === 'shrub' ? mono : trunk });
     }
-    const n = Math.round(SIM_SECONDS / SIM_STEP);
-    for (let i = 0; i < n; i++) world.step(SIM_STEP);
+    // Grown once per change to the grove or to broflora's step: the grown
+    // world is cached under the app's cache dir, keyed by all of that.
+    grove.grow = world.grow(Math.round(SIM_SECONDS / SIM_STEP), SIM_STEP, { cache: bro.app.cacheDir });
     return world;
 }
 
@@ -340,9 +341,8 @@ vp.onFrame(() => { if (SHOTS[grove.shot] && SHOTS[grove.shot].follow) vp.reframe
 sky.apply('golden');
 setWind('breeze');
 setShot('grove');
-const t0 = performance.now();
 grove.world = growWorld();
-grove.growMs = performance.now() - t0;
+grove.growMs = grove.grow.ms;  // wall time: headless's performance.now rides the virtual clock
 draw('gpu');
 grove.grass = growGrass(grove.world);
 roller.node = scene.createMesh({ data: ballMesh(), color: [1, 1, 1], roughness: 0.55, castsShadow: true, receivesShadow: true });

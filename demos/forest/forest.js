@@ -182,8 +182,9 @@ export function growNursery() {
         const z = (j - (rows - 1) / 2) * spacing + 1.3 * Math.cos(i * 1.3 + 2 * j);
         world.addPlant({ origin: [x, 0, z], species: SPECIES[kind], prototypeIndex: trunk });
     }
-    const n = Math.round(SIM_SECONDS / SIM_STEP);
-    for (let i = 0; i < n; i++) world.step(SIM_STEP);
+    // Grown once per change to the nursery or to broflora's step: the grown
+    // world is cached under the app's cache dir, keyed by all of that.
+    forest.grow = world.grow(Math.round(SIM_SECONDS / SIM_STEP), SIM_STEP, { cache: bro.app.cacheDir });
     return world;
 }
 
@@ -212,9 +213,17 @@ function plant(emit) {
     });
 }
 
+// Wall-clock ms: headless's performance.now rides the virtual clock.
+export const wallNow = () => (globalThis.perf && perf.now ? perf.now() : performance.now());
+
 function build() {
+    const ms = forest.bootMs;
+    let t = wallNow();
+    const lap = (k) => { const n = wallNow(); ms[k] = n - t; t = n; };
     const emit = forest.world.emitForest(FOLIAGE);
+    lap('emit');
     const trees = plant(emit);
+    lap('plant');
     forest.emit = emit;
     forest.trees = trees;
     forest.node = scene.createForest(Object.assign({
@@ -222,13 +231,16 @@ function build() {
         doubleSided: true, subsurface: 0.5, vertexColorTint: false, castsShadow: true, receivesShadow: true,
         barkColor: BARK.color, barkRoughness: BARK.roughness,
     }, LEAF));
+    lap('node');
     // Thin grass goes on under the crowns (the canopy is closed only where
     // several overlap), clear at the trunks.
     const cover = bro.flora.forestCover(emit, { instances: trees, floor: 0.25, closed: 4 });
     forest.cover = cover;
+    lap('cover');
     const groundOpts = { color: [1, 1, 1], metallic: 0, roughness: 1.0, receivesShadow: true };
     forest.ground = scene.createMesh(Object.assign({ data: groundMesh(cover, GROUND, 241, 0) }, groundOpts));
     forest.far = scene.createMesh(Object.assign({ data: groundMesh(cover, FAR, 181, 0.8) }, groundOpts));
+    lap('ground');
     forest.grass = scene.createGrass({
         ground: forest.ground,
         area: [-GROUND, -GROUND, GROUND, GROUND],
@@ -241,6 +253,7 @@ function build() {
         range: 100,
         castsShadow: true,
     });
+    lap('grass');
     forest.stats = { specimens: emit.specimenCount, trees: trees.length / 8, leaves: emit.leafCount };
 }
 
@@ -345,7 +358,10 @@ export function setShot(key) {
 sky.apply('golden');
 setWind('breeze');
 setShot('above');
-const t0 = performance.now();
+forest.bootMs = {};
+const t0 = wallNow();
 forest.world = growNursery();
-forest.growMs = performance.now() - t0;
+forest.growMs = forest.bootMs.grow = wallNow() - t0;
 build();
+forest.bootMs.total = wallNow() - t0;
+console.log('forest boot ms: ' + Object.entries(forest.bootMs).map(([k, v]) => `${k} ${v.toFixed(0)}`).join(', '));

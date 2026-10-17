@@ -27,4 +27,4 @@ vp.onFrame(() => {
         verts: (s.vertices / 1e6).toFixed(1) + ' M',
     });
 });
-app.status.ok('grown in ' + (forest.growMs / 1000).toFixed(1) + ' s');
+app.status.ok((forest.grow.cached ? 'read grown in ' : 'grown in ') + (forest.growMs / 1000).toFixed(1) + ' s');

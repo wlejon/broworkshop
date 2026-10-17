@@ -21,4 +21,4 @@ function show() {
     });
 }
 show();
-app.status.ok('grown in ' + (grove.growMs / 1000).toFixed(1) + ' s');
+app.status.ok((grove.grow.cached ? 'read grown in ' : 'grown in ') + (grove.growMs / 1000).toFixed(1) + ' s');
