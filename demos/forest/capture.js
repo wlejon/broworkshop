@@ -414,7 +414,8 @@ function tiers() {
     const part = forest.parts.find((p) => p.name === sub.part);
     sub.node.setTrees(part.trees.slice(sub.index * 8, sub.index * 8 + 8));
     if (opt('shadow') === '0') sub.node.castsShadow = false;
-    const yaw = Math.atan2(40 - 12, 30 - 18) + Math.PI, pitch = -0.12;
+    // `pitch=` (radians, default -0.12): a low plant seen from above, clear of the grass.
+    const yaw = Math.atan2(40 - 12, 30 - 18) + Math.PI, pitch = opt('pitch') !== undefined ? +opt('pitch') : -0.12;
     const W = innerWidth, H = innerHeight;
     const names = ['leaves', 'auto', 'clumps', 'crowns'];
     const cols = names.length, rows = ds.length, gap = 4;
