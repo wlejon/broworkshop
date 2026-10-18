@@ -298,6 +298,7 @@ export const PRESET_PLANTS = [
     { name: 'cypress', x: 25, z: -7 },
     { name: 'juniper', x: 23, z: 7 },
     { name: 'birch', x: -21, z: -19 },
+    { name: 'willow', x: 18, z: -17 },
     { name: 'boxwood', x: -4.5, z: 3 },
     { name: 'holly', x: 4.5, z: 4.5 },
     { name: 'hydrangea', x: -10.5, z: 3 },
