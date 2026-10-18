@@ -189,12 +189,16 @@ export function meadowCommands(ctx) {
                     const dx = dir[0] * c - dir[1] * s, dz = dir[0] * s + dir[1] * c;
                     // Looking a little down: the horizon high in the frame.
                     const look = [eye[0] + dx * 50, eye[1] - 50 * Math.tan(0.09), eye[2] + dz * 50];
-                    views.push({ eye, look });
+                    views.push({ eye, look, way: [dx, dz] });
                 }
         const out = { herbs, skies: {} };
         for (const time of skies) {
             setup('still', 'auto', time);
             const A = new Array(MAXD).fill(0).map(zero), B = new Array(MAXD).fill(0).map(zero);
+            // The same split by the way the eye looks: the sun behind it or
+            // ahead (the views look either way across the meadow).
+            const half = { behind: new Array(MAXD).fill(0).map(zero), ahead: new Array(MAXD).fill(0).map(zero) };
+            const sunDir = sky.sun.direction;   // from the sun
             views.forEach((v, i) => {
                 holdView(v.eye, v.look);
                 forest.grass.setGrass({ range: range0 });
@@ -202,8 +206,11 @@ export function meadowCommands(ctx) {
                 step(0.4);
                 flush();
                 const map = bandMap(W, H);
-                add(A, measure(map, W, H));
-                if (i === 0) ctx.saveJpeg(`${OUT}/${lab}_${time}_view0.jpg`);
+                const bins = measure(map, W, H);
+                add(A, bins);
+                add(v.way[0] * sunDir[0] + v.way[1] * sunDir[2] > 0 ? half.behind : half.ahead, bins);
+                // The first view each way (the sun behind the eye, then ahead).
+                if (i === 0 || i === 2) ctx.saveJpeg(`${OUT}/${lab}_${time}_view${i}.jpg`);
                 forest.grass.setGrass({ range: range0 * S });
                 herbsAt(S, herbs);
                 step(0.4);
@@ -221,9 +228,21 @@ export function meadowCommands(ctx) {
                             rgb: ['r', 'g', 'b'].map((k) => q[k] / q.n), contrast: q.c / q.n,
                             lumaPct: 100 * (lumaOf(q) / lumaOf(near) - 1), satPct: 100 * (satOf(q) / satOf(near) - 1),
                             hueShift: hueOf(q) - hueOf(near) };
+                // Each half against its own 2-4 m.
+                for (const k of ['behind', 'ahead']) {
+                    const h = sum(half[k], a, b), h0 = sum(half[k], 2, 4);
+                    if (h.n < 100 || h0.n < 100) continue;
+                    r[k] = { lumaPct: 100 * (lumaOf(h) / lumaOf(h0) - 1), satPct: 100 * (satOf(h) / satOf(h0) - 1), luma: lumaOf(h) };
+                }
                 res.octaves.push(r);
+                const sp = (x) => `${x >= 0 ? '+' : ''}${x.toFixed(1)}%`;
+                const halves = ['behind', 'ahead'].filter((k) => r[k]).map((k) => `sun ${k} ${sp(r[k].lumaPct)}/${sp(r[k].satPct)}`).join(', ');
                 console.log(`  ${a}-${b} m: luma ${r.lumaPct >= 0 ? '+' : ''}${r.lumaPct.toFixed(1)}%, sat ` +
-                            `${r.satPct >= 0 ? '+' : ''}${r.satPct.toFixed(1)}%, hue ${r.hueShift >= 0 ? '+' : ''}${r.hueShift.toFixed(1)} deg   (${fmt(q)})`);
+                            `${r.satPct >= 0 ? '+' : ''}${r.satPct.toFixed(1)}%, hue ${r.hueShift >= 0 ? '+' : ''}${r.hueShift.toFixed(1)} deg; ${halves}   (${fmt(q)})`);
+            }
+            for (const k of ['behind', 'ahead']) {
+                const h0 = sum(half[k], 2, 4);
+                if (h0.n >= 100) console.log(`  sun ${k}: 2-4 m ${fmt(h0)}`);
             }
             for (const e of edges) {
                 const a = sum(A, e, S * e), b = sum(B, e, S * e);
