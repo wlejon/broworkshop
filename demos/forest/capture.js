@@ -56,7 +56,7 @@
 //   - chain the views you are judging into one run with `+`.
 
 import { forest, setWind, setShot, sky, flight, flightAt, FLIGHT_SECONDS, vp, groundHeight, GRASS_RANGE,
-         setTier, setLod, forestStats, HERBS, HERB_RANGE, meadowAt, MEADOW_LOOK, holdView } from "/app/forest.js";
+         setTier, setLod, forestStats, HERBS, HERB_RANGE, meadowAt, MEADOW_LOOK, holdView, still } from "/app/forest.js";
 
 const argv = (bro.app && bro.app.argv) || [];
 // The command now running: its mode and arguments (see run() at the end).
@@ -535,6 +535,9 @@ function hold() {
 const BANDS = [[10, 20], [20, 40], [40, 80], [80, 160]];
 
 // Every part's crowns (broadleaves, conifers, shrubs) into one mask.
+// The view's eye and look-at point: the flight's, or a held view's.
+const viewNow = () => (still.view && !flight.on ? still.view : flightAt(flight.t));
+
 function crownDepth(W, H) {
     const depth = new Float32Array(W * H);
     for (const p of forest.parts) partDepth(W, H, p.trees, p.emit, depth);
@@ -543,7 +546,7 @@ function crownDepth(W, H) {
 
 function partDepth(W, H, inst, em, depth) {
     const spec = em.specimens, clumps = em.clumps;
-    const { eye, look } = flightAt(flight.t);
+    const { eye, look } = viewNow();
     const crowns = [];
     for (let s = 0; s < em.specimenCount; s++) {
         const c0 = spec[s * 16 + 2], cn = spec[s * 16 + 3];
@@ -688,7 +691,7 @@ function bandStats(img, depth, W, H, bands = BANDS) {
 const RING_EDGES = [7, 20, 55, 150];
 
 function groundDepth(W, H, crowns) {
-    const { eye, look } = flightAt(flight.t);
+    const { eye, look } = viewNow();
     const norm = (v) => { const l = Math.hypot(v[0], v[1], v[2]); return [v[0] / l, v[1] / l, v[2] / l]; };
     const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
     const fw = norm([look[0] - eye[0], look[1] - eye[1], look[2] - eye[2]]);
@@ -853,7 +856,13 @@ function herbMetrics() {
     for (const time of skies) {
         setup(a4 || 'breeze', 'auto', time);
         for (const s of shots) {
-            setShot(s);
+            if (s[0] === '@') {
+                // A view of its own: @x/h/z/lookx/lookh/lookz (h over the ground).
+                const [ex, eh, ez, lx, lh, lz] = s.slice(1).split('/').map(Number);
+                holdView([ex, groundHeight(ex, ez) + eh, ez], [lx, groundHeight(lx, lz) + lh, lz]);
+            } else {
+                setShot(s);
+            }
             step(1.5);
             flush();
             const half = crownDepth(W >> 1, H >> 1);
