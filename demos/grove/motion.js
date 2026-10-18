@@ -28,9 +28,14 @@
 //                       motion of the same tips (bark only, tracked in the
 //                       image), and the stand's coherence
 //
+// `floor=contrast` on any command draws the ground one flat pale sand
+// (grove.js contrastFloor: a capture option, not the look), so the blocks
+// and slit-scans of a grass or herb run see blades rather than turf; its
+// reports carry `_contrast`.
+//
 // Everything goes to demos/grove/captures/motion/.
 
-import { grove, draw, setWind, setShot, sky, vp, scene, groundHeight, ground, roller, PRESET_PLANTS, MEADOW_HERBS, PLANT_SCALE } from "/app/grove.js";
+import { grove, draw, setWind, setShot, sky, vp, scene, groundHeight, ground, roller, PRESET_PLANTS, MEADOW_HERBS, PLANT_SCALE, contrastFloor } from "/app/grove.js";
 import { MotionRun, sheet, THRESHOLDS } from "/lib/kit/motion.js";
 import * as sway from "/lib/kit/sway.js";
 
@@ -40,6 +45,7 @@ require('fs').mkdirSync(OUT, { recursive: true });
 const fps = 30;
 let args = [];
 const opt = (k, d) => { const a = args.find((s) => s.startsWith(k + '=')); return a ? a.slice(k.length + 1) : d; };
+const floorTag = () => (opt('floor') === 'contrast' ? '_contrast' : '');
 
 document.body.classList.add('clean');
 flush();
@@ -222,7 +228,7 @@ function plant(name) {
     scene.setDither(false);
     const FOV = vp.cam.fov || 45, tanHalf = Math.tan(FOV * Math.PI / 360);
     jumpClock();
-    const label = `plant_${name}${opt('dist') ? '_' + opt('dist') + 'm' : ''}_${wind}${opt('clock') ? '_t' + opt('clock') : ''}`;
+    const label = `plant_${name}${opt('dist') ? '_' + opt('dist') + 'm' : ''}_${wind}${opt('clock') ? '_t' + opt('clock') : ''}${floorTag()}`;
     const notes = [`${name} alone, seen across the wind (${wind}), ${seconds} s; wind clock from ${(scene.wind().time + 2).toFixed(1)} s`];
     let restore, regions;
     const preset = grove.presets.find((q) => q.name === name);
@@ -344,7 +350,7 @@ function moverRun(through) {
         return u1 > u0 ? [u0 - 0.025, v0 - 0.03, u1 + 0.025, v1 + 0.02] : null;
     };
     const regions = shrubBox ? [{ name: 'shrub', rect: shrubBox }, { name: 'ground', rect: [0, 0, 1, 1] }] : [{ name: 'ground', rect: [0, 0, 1, 1] }];
-    const label = `mover_${through}_${wind}${hidden ? '' : '_body'}`;
+    const label = `mover_${through}_${wind}${hidden ? '' : '_body'}${floorTag()}`;
     const run = new MotionRun({ name: label, out: OUT, fps, keepFrames: true, frames: F, regions,
                                 mask: (k) => (masks[k] ? [masks[k]] : []),
                                 notes: [`a walker (capsule r ${R} m, ${2 * (HALF + R)} m tall, grass mover radius ${PUSH.radius} strength ${PUSH.strength} trample ${PUSH.trample}) ` +
@@ -547,7 +553,7 @@ function groveTrees() {
 
 // A tree's telling parts: the trunk's top, a limb's middle, twig tips low,
 // mid and high in the crown, a twig beside the high one, and a leaf on it.
-function telling(tree) {
+function telling(tree, dir) {
     const P = tree.parts.map((p, i) => ({ p, i, tipW: tree.recs[i][9] }));
     const pick = [];
     const trunk = P.filter((q) => q.tipW <= 1e-3).sort((a, b) => b.p.rest[1] - a.p.rest[1])[0];
@@ -565,6 +571,15 @@ function telling(tree) {
             Math.hypot(...[0, 1, 2].map((k) => a.p.rest[k] - hi.p.rest[k])) - Math.hypot(...[0, 1, 2].map((k) => b.p.rest[k] - hi.p.rest[k])))[0];
         if (nb) pick.push({ name: 'twig beside high (other limb)', p: nb.p });
         pick.push({ name: 'leaf on twig high', p: hi.p, leaf: { len: 0.12 * PLANT_SCALE } });
+        // Twigs on the crown's upwind and downwind sides, in its upper half:
+        // a gust should reach one before the other.
+        if (dir) {
+            const s = (q) => (q.p.rest[0] - tree.root[0]) * dir[0] + (q.p.rest[2] - tree.root[2]) * dir[2];
+            const upper = twigs.filter((q) => q.p.rest[1] - tree.root[1] > 0.5 * tree.height).sort((a, b) => s(a) - s(b));
+            if (upper.length > 4) {
+                pick.push({ name: 'twig upwind', p: upper[0].p }, { name: 'twig downwind', p: upper[upper.length - 1].p });
+            }
+        }
     }
     return pick;
 }
@@ -583,7 +598,7 @@ function truth() {
     lines.push(`wind port vs scene.windAt: largest gust difference ${werr.toExponential(1)}`);
     const trees = groveTrees();
     const main = trees.sort((a, b) => Math.hypot(a.root[0] - 6.5, a.root[2] - 9.5) - Math.hypot(b.root[0] - 6.5, b.root[2] - 9.5))[0];
-    const parts = telling(main);
+    const parts = telling(main, params.now.direction);
     const t0 = +opt('clock', scene.wind().time);
     const dir3 = (ws) => [ws.dir[0], 0, ws.dir[1]];
     const trackAll = (t0_, n) => parts.map((q) => {
@@ -610,23 +625,33 @@ function truth() {
     const along = (tr) => tr.xs.map((p) => p[0] * params.now.direction[0] + p[2] * params.now.direction[2]);
     sway.debug.ring = 0;
     const meanOnly = trackAll(t0, N);
+    // The same bend under the drag at the root alone (as if every limb felt
+    // the trunk's wind): the share of the motion all the tree's parts share.
+    sway.debug.local = 0;
+    const rootOnly = trackAll(t0, N);
     sway.debug.ring = 1;
+    sway.debug.local = 1;
     const vr = (s) => { const m = s.reduce((a, b) => a + b, 0) / s.length; return s.reduce((a, b) => a + (b - m) ** 2, 0) / s.length; };
-    lines.push('share of each part\'s along-wind variance that is the mean bend under the drag (ring off), and its correlation with the whole:');
+    lines.push('share of each part\'s along-wind variance that is the mean bend under the drag where it is (ring off), its correlation with the whole;');
+    lines.push('and that under the drag at the root (the one bend every part shares):');
+    const shares = [];
     tracks.forEach((tr, i) => {
-        const a = along(tr), m = along(meanOnly[i]);
-        lines.push(`  ${tr.q.name.padEnd(28)} ${(100 * vr(m) / vr(a)).toFixed(0).padStart(4)}%  corr ${sway.correlate(a, m, 0).corr.toFixed(2)}`);
+        const a = along(tr), m = along(meanOnly[i]), r = along(rootOnly[i]);
+        shares.push(vr(r) / vr(a));
+        lines.push(`  ${tr.q.name.padEnd(28)} ${(100 * vr(m) / vr(a)).toFixed(0).padStart(4)}%  corr ${sway.correlate(a, m, 0).corr.toFixed(2)}` +
+                   `   root drag ${(100 * vr(r) / vr(a)).toFixed(0).padStart(4)}%  corr ${sway.correlate(a, r, 0).corr.toFixed(2)}`);
     });
-    // Jerk spikes: what happens in the drag then. The gust is max(g - 0.45, 0):
-    // a band's edge starts or stops it with a kink; the ringing's kick is
-    // |p0 - p1|, with a kink where they cross.
+    // Jerk spikes: what happens in the drag then. A gust band's edge (the
+    // gust leaving 0, now or at the reads' lags) and the ringing's kick
+    // (the trunk drag against its past crossing).
     const ev = [];
+    const tf = parts[0].p.trunk.freq, lagT = sway.lagOf(tf), spanT = Math.min(0.5 / Math.max(tf, 0.05), 1.5);
     for (let k = 1; k < N; k++) {
         const s0 = sway.windStateAt(params, t0 + (k - 1) / fps), s1 = sway.windStateAt(params, t0 + k / fps);
-        const w0 = sway.vegWind(s0, main.root), w1 = sway.vegWind(s1, main.root);
-        const g = (s, dt, fine) => sway.gustAt(s, main.root[0], main.root[2], s.t - dt, fine) > 0;
-        if (g(s0, 0, true) !== g(s1, 0, true) || g(s0, 0.4, false) !== g(s1, 0.4, false) || g(s0, 1.3, false) !== g(s1, 1.3, false)) ev.push([k, 'a gust band edge']);
-        if (Math.sign(w0.p0 - w0.p1) !== Math.sign(w1.p0 - w1.p1) || Math.sign(w0.p1 - w0.p2) !== Math.sign(w1.p1 - w1.p2)) ev.push([k, 'p0/p1/p2 cross (kick kink)']);
+        const g = (s, dt) => sway.gustAt(s, main.root[0], main.root[2], s.t - dt, true) > 0.5 * sway.GUST_SOFT * 2.4 * s.gust;
+        if ([0, 0.4, lagT, lagT + spanT].some((dt) => g(s0, dt) !== g(s1, dt))) ev.push([k, 'a gust band edge']);
+        const dk = (s) => sway.dragAt(s, main.root[0], main.root[2], s.t - lagT) - sway.dragAt(s, main.root[0], main.root[2], s.t - lagT - spanT);
+        if (Math.sign(dk(s0)) !== Math.sign(dk(s1))) ev.push([k, 'drag vs its past cross (kick)']);
     }
     for (const tr of tracks) {
         if (!tr.a.spikes.length) continue;
@@ -643,6 +668,23 @@ function truth() {
         const c = sway.correlate(along(a), along(b), fps);
         return `${c.corr.toFixed(2)}@${c.lag}`.padStart(12);
     }).join(''));
+    // Lockstep in one line: over every pair of parts on different twigs (a
+    // leaf and its own twig left out), the correlation at lag 0 and the peak's lag.
+    {
+        const z0 = [], lags = [];
+        for (let i = 0; i < tracks.length; i++) for (let j = i + 1; j < tracks.length; j++) {
+            const a = tracks[i].q, b = tracks[j].q;
+            if (a.p === b.p) continue;
+            const c = sway.correlate(along(tracks[i]), along(tracks[j]), fps);
+            z0.push(c.zero); lags.push(Math.abs(c.lag));
+        }
+        const med = (s) => [...s].sort((p, q) => p - q)[s.length >> 1];
+        const up = tracks.find((t) => t.q.name === 'twig upwind'), dn = tracks.find((t) => t.q.name === 'twig downwind');
+        const ud = up && dn ? sway.correlate(along(up), along(dn), fps) : null;
+        lines.push(`lockstep: ${z0.length} part pairs, correlation at lag 0 median ${med(z0).toFixed(2)} (max ${Math.max(...z0).toFixed(2)}), ` +
+                   `|peak lag| median ${med(lags)} frames; root-drag share median ${(100 * med(shares)).toFixed(0)}%` +
+                   (ud ? `; upwind -> downwind twig: corr ${ud.corr.toFixed(2)} at lag ${ud.lag} frames` : ''));
+    }
     // The leaf's flutter over a long clock: its phase's instantaneous frequency.
     const leaf = parts.find((q) => q.leaf);
     if (leaf) {
@@ -692,7 +734,7 @@ function truth() {
     sway.plotSpaceTime(S, tops.map((t) => det(t.x)), 0, 440, 640, 250, 'the stand: trunk tops (columns, upwind left), time down; red downwind',
                        tops.map((t) => t.s.toFixed(0)).join(' '));
     // Drag at each root (the gust field), same layout: the cause beside the effect.
-    sway.plotSpaceTime(S, tops.map((t) => { const out = []; for (let k = 0; k < N; k++) out.push(sway.vegWind(sway.windStateAt(params, t0 + k / fps), t.top.root).p0); return det(out); }),
+    sway.plotSpaceTime(S, tops.map((t) => { const out = []; for (let k = 0; k < N; k++) out.push(sway.dragAt(sway.windStateAt(params, t0 + k / fps), t.top.root[0], t.top.root[2], t0 + k / fps)); return det(out); }),
                        660, 440, 620, 250, 'drag p0 at each root (the gusts)', '');
     const fileT = S.save(`${OUT}/truth_${wind}_tracks.jpg`);
     lines.push(fileT);
@@ -781,7 +823,9 @@ for (const cmd of commands) {
     const mode = cmd[0] || 'calibrate';
     const before = new Set(document.body.children);
     const t0 = perf.now();
+    contrastFloor(opt('floor') === 'contrast');
     (MODES[mode] || calibrate)(...cmd.slice(1).filter((a) => !a.includes('=')));
+    contrastFloor(false);
     console.log(`${mode}: ${((perf.now() - t0) / 1000).toFixed(1)} s wall`);
     for (const el of [...document.body.children]) if (!before.has(el)) el.remove();
     flush();

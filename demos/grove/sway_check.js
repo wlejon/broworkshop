@@ -6,20 +6,24 @@
 //
 // The terms are the grove's own, decoded from its branch tubes' vegetation
 // records (broflora/sway.h), medians over the grove, at the drawn scale. The
-// drag is (U / 10 m/s)^1.3 at a tree, U the scene's wind there (windAt) over
-// 60 s of virtual time. The oscillator's drag also carries the turbulence
-// the gust field does not resolve (15% above 0.1 Hz, a -5/3 spectrum), which
-// the shader stands in for by ringing at each level's frequency. The
-// shader's response is scene_vegetation.glsl's vegLevel, ported line for
-// line (keep the two in step). Prints the terms, then per level the mean,
-// RMS and speed of the tip's deflection along the wind (cm, cm/s) of each,
-// and fails a level whose RMS or speed is off by more than 25%.
+// drag is (U / 10 m/s)^1.3 at a tree, U the wind field there (sway.js's
+// dragAt, the shader's vegDragAt) over 60 s of wind clock. The oscillator's
+// drag also carries the turbulence the gust field does not resolve (a -5/3
+// spectrum above 0.1 Hz: 15% at the trunk, 40% through the crown, where the
+// shader's VEG_CROWN_TURBULENCE doubles VEG_TURBULENCE), which the shader
+// stands in for by ringing near each level's frequency. The shader's
+// response is lib/kit/sway.js's levelDrive (scene_vegetation.glsl's, line
+// for line), each level fed as vegPose feeds it: the trunk the drag at the
+// root a quarter period back, a limb or twig its own. Prints the terms,
+// then per level the mean, RMS and speed of the tip's deflection along the
+// wind (cm, cm/s) of each, and fails a level whose RMS or speed is off by
+// more than 25%.
 import { grove, scene, setWind, PLANT_SCALE } from "/app/grove.js";
+import * as sway from "/lib/kit/sway.js";
 
 const wind = (bro.app && bro.app.argv && bro.app.argv[0]) || 'gusty';
-const SIGMA = 0.15;              // unresolved turbulence, as in the shader's VEG_TURBULENCE
-const TURBULENCE = 0.051;        // VEG_TURBULENCE
-const GUST_KICK = 0.4;           // VEG_GUST_KICK
+const SIGMA = { trunk: 0.15, limb: 0.40, twig: 0.40 };
+const TURB = { trunk: sway.TURBULENCE, limb: sway.CROWN_TURBULENCE, twig: sway.CROWN_TURBULENCE };
 const DAMPING = { trunk: 0.15, limb: 0.08, twig: 0.05 };
 
 // --- the terms --------------------------------------------------------------------
@@ -38,25 +42,22 @@ const levels = {};
 for (const [name, m] of Object.entries(words)) {
     const r = [...m.values()].filter(x => x[1] > 0).sort((p, q) => p[0] - q[0]);
     if (!r.length) continue;
-    const [f, sway, len] = r[Math.floor((r.length - 1) / 2)];
+    const [f, sw, len] = r[Math.floor((r.length - 1) / 2)];
     // Drawn PLANT_SCALE larger: lengths grow, frequencies fall (f ~ d / L^2).
-    levels[name] = { f: f / PLANT_SCALE, sway, L: len * PLANT_SCALE, zeta: DAMPING[name] };
+    levels[name] = { freq: f / PLANT_SCALE, sway: sw, len: len * PLANT_SCALE };
     console.log(`${name}: ${r.length} distinct, median f ${(f / PLANT_SCALE).toFixed(2)} Hz, ` +
-                `sway ${sway.toPrecision(3)} of ${(len * PLANT_SCALE).toFixed(2)} m at 10 m/s`);
+                `sway ${sw.toPrecision(3)} of ${(len * PLANT_SCALE).toFixed(2)} m at 10 m/s`);
 }
 
 // --- the drag -----------------------------------------------------------------------
 
 setWind(wind);
+const params = scene.wind();
 const root = [6.5, 0, 9.5];
-const fps = 120, seconds = 60, n = fps * seconds, t0 = 5;
-const press = u => Math.pow(Math.max(u, 0) / 10, 1.3);
+const fps = 120, seconds = 60, n = fps * seconds, t0 = 5, T0 = params.time;
+const ws = (i) => sway.windStateAt(params, T0 + i / fps);
 const p = [];
-for (let i = 0; i < n; i++) {
-    advanceTime(1000 / fps);
-    p.push(press(scene.wind().now.speed + 4 * scene.windAt(root[0], root[2]).gust));
-}
-const at = time => p[Math.max(0, Math.min(n - 1, Math.round(time * fps)))];
+for (let i = 0; i < n; i++) { const s = ws(i); p.push(sway.dragAt(s, root[0], root[2], s.t)); }
 
 // Unresolved turbulence: random-phase sinusoids, log-spaced 0.1-20 Hz, power ~ f^(-5/3).
 let seed = 12345;
@@ -73,7 +74,6 @@ for (let i = 0; i < n; i++) {
     turb[i] = s;
 }
 const tr = Math.sqrt(turb.reduce((a, b) => a + b * b, 0) / n);
-for (let i = 0; i < n; i++) turb[i] *= SIGMA / tr;
 
 // --- the responses ------------------------------------------------------------------
 
@@ -87,28 +87,24 @@ const stats = s => {
 const fmt = s => `mean ${s.mean.toFixed(2)} rms ${s.rms.toFixed(2)} speed ${s.speed.toFixed(1)}`;
 let failed = 0;
 for (const [name, c] of Object.entries(levels)) {
+    const zeta = DAMPING[name];
     const shader = [];
     for (let i = t0 * fps; i < n; i++) {
-        const time = i / fps;
-        const p0 = at(time), p1 = at(time - 0.4), p2 = at(time - 1.3);
-        const period = 1 / c.f;
-        const lag = Math.min(0.25 * period, 1.3);
-        const mean = lag < 0.4 ? p0 + (p1 - p0) * lag * 2.5 : p1 + (p2 - p1) * (lag - 0.4) / 0.9;
-        const slow = Math.min(1, Math.max(0, (0.5 * period - 0.4) / 0.9));
-        const kick = Math.abs(p0 - p1) + Math.abs(p1 - p2) * slow;
-        const tu = TURBULENCE * mean * Math.pow(Math.max(c.f, 0.1), -1 / 3) / Math.sqrt(c.zeta);
-        const gu = GUST_KICK * kick * Math.min(1, 1.25 * period);
-        const ring = Math.SQRT2 * Math.sqrt(tu * tu + gu * gu);
-        shader.push((mean + ring * Math.sin(2 * Math.PI * (c.f * time + 0.3))) * c.sway * c.L);
+        const s = ws(i);
+        // The plant's wind (the trunk's lag and kick span), then this level's drag.
+        const w = sway.vegWind(s, root, levels.trunk ? levels.trunk.freq : c.freq);
+        const mean = name === 'trunk' ? w.trunk : sway.dragAt(s, root[0], root[2], s.t - sway.lagOf(c.freq), true);
+        const x = sway.levelDrive(c, zeta, TURB[name], 0.3, mean, w.kick, w, 0);
+        shader.push(x[0] * w.dir[0] + x[2] * w.dir[2]);
     }
     // x'' + 2 zeta w x' + w^2 x = w^2 (sway L drag), the drag with its turbulence.
-    const w0 = 2 * Math.PI * c.f, sub = 40, dt = 1 / fps / sub;
+    const w0 = 2 * Math.PI * c.freq, sub = 40, dt = 1 / fps / sub;
     let x = 0, vel = 0;
     const ode = [];
     for (let i = 0; i < n; i++) {
-        const target = c.sway * c.L * p[i] * (1 + turb[i]);
+        const target = c.sway * c.len * p[i] * (1 + SIGMA[name] * turb[i] / tr);
         for (let k = 0; k < sub; k++) {
-            vel += (w0 * w0 * (target - x) - 2 * c.zeta * w0 * vel) * dt;
+            vel += (w0 * w0 * (target - x) - 2 * zeta * w0 * vel) * dt;
             x += vel * dt;
         }
         if (i >= t0 * fps) ode.push(x);

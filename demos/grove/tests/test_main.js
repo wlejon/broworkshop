@@ -49,14 +49,19 @@ test('the trees are cantilevers: a slow trunk, quick sprays', () => {
     const t = grove.world.emitBranchTubes();
     const v = t.vegetation;
     const hz = (code, bits) => code === 0 ? 0 : 0.05 * Math.exp((code - 1) / ((1 << bits) - 2) * Math.log(1000));
-    let trunkMax = 0, sprayMin = Infinity;
+    // (Each spray against its own tree's trunk: a small tree's trunk can be
+    // quicker than a big tree's sprays. Half again its trunk's frequency
+    // keeps a spray's ring clear of the trunk's band; a sapling's stiff
+    // trunk comes within twice its sprays'.)
+    let trunkMax = 0, ratioMin = Infinity;
     for (let i = 0; i < t.segCount; i++) {
-        trunkMax = Math.max(trunkMax, hz(Math.round(v[i * 16 + 15]) >> 12, 12) / PLANT_SCALE);
+        const tr = hz(Math.round(v[i * 16 + 15]) >> 12, 12) / PLANT_SCALE;
+        trunkMax = Math.max(trunkMax, tr);
         const s = hz((Math.round(v[i * 16 + 13]) >> 12) & 63, 6) / PLANT_SCALE;
-        if (s > 0) sprayMin = Math.min(sprayMin, s);
+        if (s > 0 && tr > 0) ratioMin = Math.min(ratioMin, s / tr);
     }
     check(trunkMax > 0.2 && trunkMax < 2, 'trunks sway at a tree\'s period, drawn: ' + trunkMax.toFixed(2) + ' Hz at most');
-    check(sprayMin > 2 * trunkMax, 'sprays are quicker: ' + sprayMin.toFixed(2) + ' Hz at least');
+    check(ratioMin > 1.5,'sprays are quicker than their trunk: ' + ratioMin.toFixed(2) + ' times at least');
 });
 
 test('leaves hang in crown clumps and the ground rolls', () => {

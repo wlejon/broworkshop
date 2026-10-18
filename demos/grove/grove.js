@@ -90,6 +90,25 @@ export const ground = scene.createMesh({
     color: [1, 1, 1], metallic: 0, roughness: 1.0, receivesShadow: true,
 });
 
+// A contrast floor (captures only, not the look): the ground's shape drawn
+// one flat pale sand, no turf shading, no soil or litter, so the blades and
+// herbs standing on it read one by one. contrastFloor(true) swaps it in
+// for `ground`; the grass, baked from `ground`, is unchanged.
+let flatGround = null;
+export function contrastFloor(on) {
+    if (on && !flatGround) {
+        const N = 141, cell = (2 * GROUND) / (N - 1);
+        const h = new Float32Array(N * N);
+        for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) h[j * N + i] = groundHeight(-GROUND + i * cell, -GROUND + j * cell);
+        flatGround = scene.createMesh({
+            data: Mesh.heightmapGrid(h, N, N, cell),
+            color: [0.5, 0.46, 0.38], metallic: 0, roughness: 1.0, receivesShadow: true,
+        });
+    }
+    if (flatGround) flatGround.visible = !!on;
+    ground.visible = !on;
+}
+
 // --- the grass ----------------------------------------------------------------------
 
 // Blades over the whole ground, from bro.scene: the field is baked once from

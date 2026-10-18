@@ -16,6 +16,9 @@
 //       herbs <name[,name...]|all> [label=herb] [skies=noon,golden] [sil] [views=d,d,...] [aim=top]
 //       (each herb preset alone in the meadow at 1, 3, 10 and 30 m: <label>_<name>_<sky>.jpg;
 //       `meadow` for the meadow's own mix, views=0.5,3,30,150 from knee height out)
+//   bro-headless --width 1280 --height 720 demos/grove demos/grove/capture.js -- \
+//       grassfloor [label] [noon,golden] [0.3,1,3,8,20]
+//       (the grass on the contrast floor, side and 45 degrees down: <label>_<sky>_<view>_<d>m.png)
 //   bro-headless --width 960 --height 540 demos/grove demos/grove/capture.js -- \
 //       swayprofile <name[,name...]> [label=sway] [dist=20] [seconds=6] [wind=gusty]
 //       (how far each eighth of a plant's height moves in the wind, side on)
@@ -32,7 +35,7 @@
 // clock is virtual: every frame is 1/fps s, so a capture is the same on any
 // machine.
 
-import { grove, draw, setWind, setShot, sky, vp, groundHeight, ground, roller, PRESET_PLANTS, WINDS, MEADOW_HERBS } from "/app/grove.js";
+import { grove, draw, setWind, setShot, sky, vp, groundHeight, ground, roller, PRESET_PLANTS, WINDS, MEADOW_HERBS, contrastFloor } from "/app/grove.js";
 
 const argv = (bro.app && bro.app.argv) || [];
 // The command now running (see the end: several join with `+`).
@@ -498,6 +501,47 @@ function swayProfile() {
     require('fs').writeFileSync(`${OUT}/${label}_swayprofile.json`, JSON.stringify(out, null, 1));
 }
 
+// The grass on the contrast floor (grove.js contrastFloor: the ground one
+// flat pale sand, a capture option, not the look), so the blades read one
+// by one: from each distance (m), at each sky, seen from the side (eye a
+// little over the blades) and looking down about 45 degrees. One full
+// frame each: <label>_<sky>_<side|down>_<d>m.png.
+//   grassfloor [label=grassfloor] [skies=noon,golden] [dists=0.3,1,3,8,20]
+function grassFloor() {
+    const arg = (i, d) => (cmdArgs[i] && !cmdArgs[i].includes('=') ? cmdArgs[i] : d);
+    const lab = arg(1, 'grassfloor');
+    const skies = arg(2, 'noon,golden').split(',');
+    const dists = arg(3, '0.3,1,3,8,20').split(',').map(Number);
+    const at = [-1, 13.5], base = groundHeight(at[0], at[1]);
+    const grassH = grove.grass.grassParams().height;
+    const wasRolling = roller.running;
+    roller.running = false;
+    if (roller.node) roller.node.visible = false;
+    contrastFloor(true);
+    for (const time of skies) {
+        setup('gpu', 'breeze', false);
+        sky.apply(time);
+        for (const d of dists) {
+            for (const view of ['side', 'down']) {
+                // Side: the eye just over the blade tops (lower near), looking
+                // across; down: 45 degrees onto the ground.
+                const side = view === 'side';
+                const pitch = side ? -Math.min(0.35, Math.atan2(Math.min(grassH * 0.8, 0.25 * d), d) + 0.04) : -Math.PI / 4;
+                const target = [at[0], base + (side ? grassH * 0.35 : 0), at[1]];
+                vp.reframe(target, d, { yaw: 0.6, pitch });
+                step(1);
+                flush();
+                const file = `${OUT}/${lab}_${time}_${view}_${d}m.png`;
+                screenshot(file);
+                console.log(file);
+            }
+        }
+    }
+    contrastFloor(false);
+    if (roller.node) roller.node.visible = true;
+    roller.running = wasRolling;
+}
+
 // GPU ms per frame at each shot (perf.gpuFrameMs, the scene's timestamp
 // queries): the whole frame, then without the grass, without the grass and
 // the leaves, and without the grass and the plants, so each part's cost is
@@ -531,7 +575,7 @@ function perfShots() {
 // Several commands joined by `+` run one after another in this one boot,
 // each from the page as the boot left it (any overlay removed; each sets
 // its own path and wind); the virtual clock runs on between them.
-const MODES = { strip, video, still: stills, perf: perfShots, species, herbs, swayprofile: swayProfile };
+const MODES = { strip, video, still: stills, perf: perfShots, species, herbs, swayprofile: swayProfile, grassfloor: grassFloor };
 const commands = [[]];
 for (const a of argv) a === '+' ? commands.push([]) : commands[commands.length - 1].push(a);
 for (const cmd of commands) {
