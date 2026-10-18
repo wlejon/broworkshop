@@ -209,10 +209,12 @@ function dolly() {
         frame();
         const fs = sub.node.forestStats();
         details.push([fs.detail, fs.shadowDetail]);
-        run.grab({ t: scene.wind().time, d, lod: lodText(l) });
+        // One capture for the oracle and the box's series (a second was a
+        // second render of the frame).
+        const f = frameImage(), top = Math.max(0, f.height - innerHeight), r = rects[k];
+        run.grab({ t: scene.wind().time, d, lod: lodText(l) }, f);
         // `shots=k0-k1`: those frames as forest_dolly_<k>.png (to see a pop).
         if (shotFrom <= k && k <= shotTo) screenshot(`${OUT}/forest_dolly_${k}.png`);
-        const f = frameImage(), top = Math.max(0, f.height - innerHeight), r = rects[k];
         if (!r) { series.push(null); continue; }
         // The box's pixels resampled to a fixed 64 x 64 grid, so frames at
         // different scales compare like with like: each cell the mean of the
