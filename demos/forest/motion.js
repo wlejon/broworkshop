@@ -16,7 +16,7 @@
 //                       the flight, streaming: the camera moves, so motion
 //                       is the view's own; pops, flashes and flicker are
 //                       what count, with fixed slit-scans across the view
-//   dolly [wind=still] [d0=12] [d1=420] [seconds=30] [part=broadleaf]
+//   dolly [wind=still] [d0=12] [d1=420] [seconds=30] [part=broadleaf] [shots=k0-k1]
 //                       the subject seen from a steady log dolly out through
 //                       every handover (leaves, cards, clumps, crowns): per
 //                       frame its tiers and a pop score (its picture's change
@@ -176,6 +176,7 @@ function flightRun() {
 function dolly() {
     const wind = opt('wind', 'still'), seconds = +opt('seconds', 30), F = Math.round(seconds * fps);
     const d0 = +opt('d0', 12), d1 = +opt('d1', 420);
+    const shotM = /^(\d+)-(\d+)$/.exec(opt('shots', '')), shotFrom = shotM ? +shotM[1] : 1, shotTo = shotM ? +shotM[2] : 0;
     setup(wind);
     flight.on = false;
     const sub = subject();
@@ -205,6 +206,8 @@ function dolly() {
         rects.push(subjectRect(sub, 0.004));
         frame();
         run.grab({ t: scene.wind().time, d, lod: lodText(l) });
+        // `shots=k0-k1`: those frames as forest_dolly_<k>.png (to see a pop).
+        if (shotFrom <= k && k <= shotTo) screenshot(`${OUT}/forest_dolly_${k}.png`);
         const f = frameImage(), top = Math.max(0, f.height - innerHeight), r = rects[k];
         if (!r) { series.push(null); continue; }
         // The box's pixels resampled to a fixed 64 x 64 grid, so frames at
