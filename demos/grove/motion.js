@@ -878,9 +878,10 @@ function twigs() {
         for (let j = 0; j < c.n; j += Math.max(1, Math.floor(c.n / 6))) {
             const L = sway.shootLeaf(c, j), at = L.at;
             const ix = j % c.S;
-            const third = Math.min(2, Math.floor(3 * at.x / Math.max(at.shoot.len, 1e-6)));
-            const p0 = sway.twigEnd(c, sway.shootPiece(c, ix) + third, 0), p1 = sway.twigEnd(c, sway.shootPiece(c, ix) + third, 1);
-            const f = (3 * at.x / at.shoot.len) - third;
+            const K = sway.PIECES.shoot, u = K * at.x / Math.max(at.shoot.len, 1e-6);
+            const piece = Math.min(K - 1, Math.floor(u));
+            const p0 = sway.twigEnd(c, sway.shootPiece(c, ix) + piece, 0), p1 = sway.twigEnd(c, sway.shootPiece(c, ix) + piece, 1);
+            const f = u - piece;
             const pet = petiole * opts.Lf * L.size * PLANT_SCALE;
             let gmax = 0, rmax = 0, rel0 = null, relMax = 0;
             for (let k = 0; k < N; k++) {
