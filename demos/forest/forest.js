@@ -80,6 +80,52 @@ export function groundHeight(x, z) {
     return broad + swell * (1 - 0.7 * g);
 }
 
+// groundHeight's noise, a batch at a time (genPositionArray2D, the same bits as
+// genSingle2D's): scratch grown to the largest batch.
+let ghScratch = null;
+/** groundHeight at n points at once (xs, zs, any arrays), into out: the same
+ *  values, for a caller that samples the ground hundreds of thousands of times. */
+export function groundHeights(xs, zs, out, n = xs.length) {
+    if (!ghScratch || ghScratch.n < n) {
+        const m = Math.max(n, 1024);
+        ghScratch = { n: m, ax: new Float32Array(m), az: new Float32Array(m), bx: new Float32Array(m), bz: new Float32Array(m),
+                      broad: new Float32Array(m), swell: new Float32Array(m) };
+    }
+    const S = ghScratch;
+    for (let i = 0; i < n; i++) {
+        S.ax[i] = xs[i] * 0.006; S.az[i] = zs[i] * 0.006;
+        S.bx[i] = xs[i] * 0.03; S.bz[i] = zs[i] * 0.03;
+    }
+    fbm.genPositionArray2D(S.broad.subarray(0, n), S.ax.subarray(0, n), S.az.subarray(0, n), 0, 0, 0x51);
+    fbm.genPositionArray2D(S.swell.subarray(0, n), S.bx.subarray(0, n), S.bz.subarray(0, n), 0, 0, 0x9a0d);
+    // groundHeight's arithmetic, its constants read once.
+    const gx = GLADE.x, gz = GLADE.z, g0 = GLADE.r * 2.2, g1 = GLADE.r * 0.5;
+    const mx = MEADOW.x, mz = MEADOW.z, m0 = MEADOW.r * 1.7, m1 = MEADOW.r * 0.6, n0 = GROUND, n1 = GROUND - 40;
+    const B = S.broad, W = S.swell;
+    // smooth() written out (a call, Math.min and Math.max cost bronze ~100 ns
+    // a point each); the same arithmetic, every input finite.
+    for (let i = 0; i < n; i++) {
+        const x = xs[i], z = zs[i];
+        const r = Math.hypot(x - gx, z - gz);
+        let t = (Math.hypot(x - mx, z - mz) - m0) / (m1 - m0);
+        t = t < 0 ? 0 : t > 1 ? 1 : t;
+        const m = t * t * (3 - 2 * t);
+        t = (r - 140) / (50 - 140);
+        t = t < 0 ? 0 : t > 1 ? 1 : t;
+        const broad = 9 * B[i] * (1 - 0.6 * (t * t * (3 - 2 * t))) * (1 - 0.8 * m);
+        const ax = x < 0 ? -x : x, az = z < 0 ? -z : z;
+        t = ((ax > az ? ax : az) - n0) / (n1 - n0);
+        t = t < 0 ? 0 : t > 1 ? 1 : t;
+        const swell = 1.4 * W[i] * (t * t * (3 - 2 * t));
+        t = (r - g0) / (g1 - g0);
+        t = t < 0 ? 0 : t > 1 ? 1 : t;
+        const gs = t * t * (3 - 2 * t), m6 = 0.6 * m;
+        const g = gs > m6 ? gs : m6;
+        out[i] = broad + swell * (1 - 0.7 * g);
+    }
+    return out;
+}
+
 /** How sun-dried the grass is at x, z: patches, drier on the rises. */
 export function dryness(x, z) {
     const patch = smooth(-0.3, 0.5, fbm.genSingle2D(x * 0.12, z * 0.12, 0x77));

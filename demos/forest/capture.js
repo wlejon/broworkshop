@@ -63,7 +63,7 @@
 //     (bro/docs/hot-reload.md);
 //   - chain the views you are judging into one run with `+`.
 
-import { forest, setWind, setShot, sky, flight, flightAt, FLIGHT_SECONDS, vp, groundHeight, GRASS_RANGE,
+import { forest, setWind, setShot, sky, flight, flightAt, FLIGHT_SECONDS, vp, groundHeight, groundHeights, GRASS_RANGE,
          setTier, setLod, forestStats, HERBS, HERB_RANGE, meadowAt, MEADOW_LOOK, holdView, still } from "/app/forest.js";
 import { meadowCommands } from "/app/meadow.js";
 
@@ -632,11 +632,35 @@ const viewNow = () => (still.view && !flight.on ? still.view : flightAt(flight.t
 
 function crownDepth(W, H) {
     const depth = new Float32Array(W * H);
-    for (const p of forest.parts) partDepth(W, H, p.trees, p.emit, depth);
+    const rays = viewRays(W, H);
+    for (const p of forest.parts) partDepth(W, H, p.trees, p.emit, depth, rays);
     return depth;
 }
 
-function partDepth(W, H, inst, em, depth) {
+// Each pixel's unit ray, computed once (W x H x 3): the same arithmetic
+// partDepth did per tree for every pixel of the tree's box.
+function viewRays(W, H) {
+    const { eye, look } = viewNow();
+    const norm = (v) => { const l = Math.hypot(v[0], v[1], v[2]); return [v[0] / l, v[1] / l, v[2] / l]; };
+    const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+    const fw = norm([look[0] - eye[0], look[1] - eye[1], look[2] - eye[2]]);
+    const rt = norm(cross(fw, [0, 1, 0])), up = cross(rt, fw);
+    const ty = Math.tan(vp.cam.fov * Math.PI / 360), tx = ty * W / H;
+    const rays = new Float64Array(W * H * 3);
+    for (let y = 0; y < H; y++) {
+        const v = (1 - 2 * (y + 0.5) / H) * ty;
+        for (let x = 0; x < W; x++) {
+            const u = (2 * (x + 0.5) / W - 1) * tx;
+            let dx = fw[0] + rt[0] * u + up[0] * v, dy = fw[1] + rt[1] * u + up[1] * v, dz = fw[2] + rt[2] * u + up[2] * v;
+            const l = Math.hypot(dx, dy, dz);
+            const k = 3 * (y * W + x);
+            rays[k] = dx / l; rays[k + 1] = dy / l; rays[k + 2] = dz / l;
+        }
+    }
+    return rays;
+}
+
+function partDepth(W, H, inst, em, depth, rays) {
     const spec = em.specimens, clumps = em.clumps;
     const { eye, look } = viewNow();
     const crowns = [];
@@ -678,12 +702,8 @@ function partDepth(W, H, inst, em, depth) {
         const ox = -rel[0] / a, oy = -rel[1] / b, oz = -rel[2] / a;
         const cc = ox * ox + oy * oy + oz * oz - 1;
         for (let y = y0; y <= y1; y++) {
-            const v = (1 - 2 * (y + 0.5) / H) * ty;
             for (let x = x0; x <= x1; x++) {
-                const u = (2 * (x + 0.5) / W - 1) * tx;
-                let dx = fw[0] + rt[0] * u + up[0] * v, dy = fw[1] + rt[1] * u + up[1] * v, dz = fw[2] + rt[2] * u + up[2] * v;
-                const l = Math.hypot(dx, dy, dz);
-                dx /= l; dy /= l; dz /= l;
+                const r3 = 3 * (y * W + x), dx = rays[r3], dy = rays[r3 + 1], dz = rays[r3 + 2];
                 const qx = dx / a, qy = dy / b, qz = dz / a;
                 const A = qx * qx + qy * qy + qz * qz, B = ox * qx + oy * qy + oz * qz;
                 const disc = B * B - A * cc;
@@ -791,8 +811,21 @@ function groundDepth(W, H, crowns) {
     const ty = Math.tan(vp.cam.fov * Math.PI / 360), tx = ty * W / H;
     const depth = new Float32Array(W * H);
     // groundHeight stays inside +-12 m: march only that slab, in steps of 3%
-    // of the distance, then bisect the crossing.
+    // of the distance, then bisect the crossing. Every ray takes its steps
+    // together with the others, so the ground is sampled a batch at a time
+    // (groundHeights; ray by ray the march was 27 s of a glade's metrics).
     const SLAB = 12, FAR_T = 400;
+    const N = W * H;
+    const P = new Int32Array(N), DX = new Float64Array(N), DY = new Float64Array(N), DZ = new Float64Array(N);
+    const T = new Float64Array(N), T2 = new Float64Array(N);
+    const qx = new Float64Array(N), qz = new Float64Array(N), gh = new Float64Array(N);
+    // above(s) of rays 0..n-1 at their own S[i]: the ray's height over the ground.
+    const above = (n, S, out) => {
+        for (let i = 0; i < n; i++) { qx[i] = eye[0] + DX[i] * S[i]; qz[i] = eye[2] + DZ[i] * S[i]; }
+        groundHeights(qx, qz, gh, n);
+        for (let i = 0; i < n; i++) out[i] = eye[1] + DY[i] * S[i] - gh[i];
+    };
+    let n = 0;
     for (let y = 0; y < H; y++) {
         const v = (1 - 2 * (y + 0.5) / H) * ty;
         for (let x = 0; x < W; x++) {
@@ -801,21 +834,47 @@ function groundDepth(W, H, crowns) {
             const d = norm([fw[0] + rt[0] * u + up[0] * v, fw[1] + rt[1] * u + up[1] * v, fw[2] + rt[2] * u + up[2] * v]);
             let t = 0.05;
             if (eye[1] > SLAB) { if (d[1] >= 0) continue; t = (eye[1] - SLAB) / -d[1]; }
-            const above = (s) => eye[1] + d[1] * s - groundHeight(eye[0] + d[0] * s, eye[2] + d[2] * s);
-            if (above(t) < 0) continue;
-            while (t < FAR_T) {
-                if (eye[1] + d[1] * t < -SLAB) break;
-                const t2 = t + Math.max(0.03 * t, 0.05);
-                if (above(t2) < 0) {
-                    let a = t, b = t2;
-                    for (let i = 0; i < 6; i++) { const m = (a + b) / 2; if (above(m) < 0) b = m; else a = m; }
-                    depth[y * W + x] = (a + b) / 2;
-                    break;
-                }
-                t = t2;
-            }
+            P[n] = y * W + x; DX[n] = d[0]; DY[n] = d[1]; DZ[n] = d[2]; T[n] = t; n++;
         }
     }
+    const h0 = new Float64Array(N);
+    const keep = (k, i) => { P[k] = P[i]; DX[k] = DX[i]; DY[k] = DY[i]; DZ[k] = DZ[i]; T[k] = T[i]; };
+    above(n, T, h0);
+    let m = 0;
+    for (let i = 0; i < n; i++) if (!(h0[i] < 0)) keep(m++, i);
+    n = m;
+    // Rays whose step crossed the ground: bracketed by [A, B].
+    const hit = [];
+    while (n > 0) {
+        m = 0;
+        for (let i = 0; i < n; i++) {
+            const t = T[i];
+            if (!(t < FAR_T)) continue;
+            const h = eye[1] + DY[i] * t;
+            if (h < -SLAB || (h > SLAB && DY[i] >= 0)) continue;
+            keep(m, i); T2[m] = t + Math.max(0.03 * t, 0.05); m++;
+        }
+        n = m;
+        above(n, T2, h0);
+        m = 0;
+        for (let i = 0; i < n; i++) {
+            if (h0[i] < 0) hit.push(P[i], DX[i], DY[i], DZ[i], T[i], T2[i]);
+            else { keep(m, i); T[m] = T2[i]; m++; }
+        }
+        n = m;
+    }
+    n = hit.length / 6;
+    const A = new Float64Array(n), Bk = new Float64Array(n), M = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+        P[i] = hit[6 * i]; DX[i] = hit[6 * i + 1]; DY[i] = hit[6 * i + 2]; DZ[i] = hit[6 * i + 3];
+        A[i] = hit[6 * i + 4]; Bk[i] = hit[6 * i + 5];
+    }
+    for (let r = 0; r < 6; r++) {
+        for (let i = 0; i < n; i++) M[i] = (A[i] + Bk[i]) / 2;
+        above(n, M, h0);
+        for (let i = 0; i < n; i++) { if (h0[i] < 0) Bk[i] = M[i]; else A[i] = M[i]; }
+    }
+    for (let i = 0; i < n; i++) depth[P[i]] = (A[i] + Bk[i]) / 2;
     return depth;
 }
 
