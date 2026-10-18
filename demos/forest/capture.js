@@ -30,8 +30,14 @@
 //       the crowns (10-20, 20-40, 40-80, 80-160 m): luminance, colour, local
 //       contrast at three scales, hard edges, flat patches, blockiness; a
 //       table per shot and <label>_metrics.json (see metrics() below)
+//   bro-headless ... capture.js -- shadowbands [shots=canopy,meadow] [label=forest] [skies=noon,golden] [bin=8] [far=400]
+//       what the sun's shadows darken, by distance, the crowns and the ground
+//       apart, and its step from bin to bin: a cascade's end shows as a step
+//       (<label>_shadowbands.json; a shot may be @ex/eh/ez/lx/lh/lz)
 //
-// Any command also takes `lod={...}` (setForestLod's fields, JSON) to try a
+// Any command also takes `sun=<degrees>` (the preset's sun at that
+// elevation), `lambda=` (the sun's cascade split), `sunshadow=0` (no sun
+// shadow), `lod={...}` (setForestLod's fields, JSON) to try a
 // level of detail without a rebuild and `hide=grass,...` (forest.* nodes to
 // hide, to take one part's cost out of a trace; `herbs` the grass's low
 // plants); compare takes
@@ -85,6 +91,15 @@ function setup(wind, tier, time) {
     sky.apply(time || 'golden');
     setTier(tier || 'auto');
     if (opt('lod')) setLod(JSON.parse(opt('lod')));
+    // `sun=<degrees>`: the preset's sun at that elevation, on its own heading.
+    if (opt('sun')) {
+        const d = sky.preset.sun.direction, el = +opt('sun') * Math.PI / 180, h = Math.hypot(d[0], d[2]) || 1;
+        sky.sun.direction = [d[0] / h * Math.cos(el), -Math.sin(el), d[2] / h * Math.cos(el)];
+    }
+    // `lambda=`: the sun's cascade split (log against uniform), moving where each cascade ends.
+    if (opt('lambda')) sky.sun.cascadeSplitLambda = +opt('lambda');
+    // `sunshadow=0`: the sun casts no shadow (against a run with it: what the shadows add, by distance).
+    if (opt('sunshadow') === '0') sky.sun.castsShadow = false;
     // A forest.* node, or a part of the forest by name (needle, shrub, ...).
     for (const k of (opt('hide') || '').split(',').filter(Boolean)) {
         // `herbs`: the grass's low plants (and the blades and turf that stand in for them).
@@ -891,6 +906,86 @@ function metrics() {
     console.log(file);
 }
 
+// What the sun's shadows add, by distance: each view drawn with the sun's
+// shadow and without (still air, so nothing else moves between the two),
+// the darkening (without - with) of the crowns' and the ground's pixels in
+// bins of distance from the eye. Where the shadow map's cover ends, or a
+// cascade's choice of casters changes, the darkening steps: a line across
+// the forest or the meadow. Each bin's step is against the mean of the two
+// bins either side of it. Writes <label>_shadowbands.json.
+//   shadowbands [shots=canopy,meadow] [label=forest] [skies=noon,golden] [sun=<deg>] [bin=8]
+function shadowBands() {
+    const shots = (a1 || 'canopy,meadow').split(','), label = a2 || 'forest';
+    const skies = (a3 || 'noon,golden').split(','), bin = +(opt('bin') || 8);
+    const W = innerWidth, H = innerHeight, NB = Math.ceil(+(opt('far') || 400) / bin);
+    const out = [];
+    for (const time of skies) {
+        setup('still', 'auto', time);
+        for (const s of shots) {
+            if (s[0] === '@') {
+                const [ex, eh, ez, lx, lh, lz] = s.slice(1).split('/').map(Number);
+                holdView([ex, groundHeight(ex, ez) + eh, ez], [lx, groundHeight(lx, lz) + lh, lz]);
+            } else setShot(s);
+            step(1.5);
+            flush();
+            const half = crownDepth(W >> 1, H >> 1), gHalf = groundDepth(W >> 1, H >> 1, half);
+            const grab = (on) => {
+                sky.sun.castsShadow = on;
+                for (let k = 0; k < 3; k++) { advanceTime(1000 / fps); flush(); }
+                return lumaOf(frameImage(), W, H).Y;
+            };
+            const on = grab(true), off = grab(false);
+            sky.sun.castsShadow = sky.preset.shadow !== false;
+            // `img=1`: the darkening as an image, 4 levels of grey a level of
+            // luma (a cascade's end shows as a line or a change of grain).
+            if (opt('img')) {
+                const px = new Uint8Array(W * H * 4);
+                for (let i = 0; i < W * H; i++) {
+                    const v = Math.max(0, Math.min(255, Math.round((off[i] - on[i]) * 4)));
+                    px[i * 4] = px[i * 4 + 1] = px[i * 4 + 2] = v; px[i * 4 + 3] = 255;
+                }
+                const f = `${OUT}/${label}_${s[0] === '@' ? 'view' : s}_${time}${opt('sun') ? '_sun' + opt('sun') : ''}_shadow.jpg`;
+                bro.image.encodeJpegFile(f, px, W, H, 4, 95);
+                console.log(f);
+            }
+            const acc = { crown: [], ground: [] };
+            for (const k of Object.keys(acc)) for (let b = 0; b < NB; b++) acc[k].push([0, 0, 0]);
+            for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+                const hk = Math.min(y >> 1, (H >> 1) - 1) * (W >> 1) + Math.min(x >> 1, (W >> 1) - 1);
+                const kind = half[hk] > 0 ? 'crown' : gHalf[hk] > 0 ? 'ground' : null;
+                if (!kind) continue;
+                const b = Math.floor((kind === 'crown' ? half[hk] : gHalf[hk]) / bin);
+                if (b < 0 || b >= NB) continue;
+                const i = y * W + x, A = acc[kind][b];
+                A[0]++; A[1] += on[i]; A[2] += off[i];
+            }
+            const rows = {};
+            for (const kind of Object.keys(acc)) {
+                const prof = acc[kind].map(([n, a, c], b) => (n >= 400 ? { d: (b + 0.5) * bin, n, on: a / n, dark: (c - a) / n } : null));
+                rows[kind] = prof;
+                const lines = [];
+                prof.forEach((p, b) => {
+                    if (!p) return;
+                    const nb = [prof[b - 2], prof[b - 1], prof[b + 1], prof[b + 2]].filter(Boolean);
+                    const lo = [prof[b - 2], prof[b - 1]].filter(Boolean), hi = [prof[b + 1], prof[b + 2]].filter(Boolean);
+                    const mean = (l, k) => l.reduce((t, q) => t + q[k], 0) / l.length;
+                    // The step across this bin's far edge: the two bins on against the two before.
+                    p.step = lo.length && hi.length ? +(mean(hi, 'on') - mean(lo, 'on')).toFixed(2) : null;
+                    p.darkStep = lo.length && hi.length ? +(mean(hi, 'dark') - mean(lo, 'dark')).toFixed(2) : null;
+                    lines.push(`    ${String(p.d).padStart(5)} m ${String(p.n).padStart(7)} px  Y ${p.on.toFixed(1).padStart(6)}  ` +
+                               `shadow ${p.dark.toFixed(2).padStart(6)}${p.darkStep !== null ? `  step ${p.darkStep.toFixed(2).padStart(6)}` : ''}`);
+                });
+                console.log(`shadowbands ${s} ${time}${opt('sun') ? ' sun ' + opt('sun') : ''}, ${kind}: Y with shadow, the shadow's darkening (without - with), its step over 2 bins`);
+                console.log(lines.join('\n'));
+            }
+            out.push({ shot: s, sky: time, sun: opt('sun') || null, bin, crown: rows.crown, ground: rows.ground });
+        }
+    }
+    const file = `${OUT}/${label}_shadowbands.json`;
+    require('fs').writeFileSync(file, JSON.stringify(out, null, 1));
+    console.log(file);
+}
+
 // The herbs' hand-over to the grass, measured: the same view with the herb
 // plants drawn all the way out (range 200) and as the forest draws them
 // (handing over to the blades and the turf), per band of ground distance:
@@ -963,7 +1058,7 @@ const MEADOW_MODES = meadowCommands({ setup, step, saveJpeg, OUT, opt, pos: (i) 
 // Between them the page is put back as the boot left it: any overlay a
 // command drew is removed and the forest's level of detail restored (the
 // clock runs on, so wind and the flight's motion continue from there).
-const MODES = Object.assign({ still: stills, trace, video, handover, compare, parts, hold, metrics, tiers, herbs: herbMetrics,
+const MODES = Object.assign({ still: stills, trace, video, handover, compare, parts, hold, metrics, tiers, herbs: herbMetrics, shadowbands: shadowBands,
                               foliage }, MEADOW_MODES);
 const lod0 = forest.parts.map((p) => p.node.forestLod());
 const commands = [[]];
