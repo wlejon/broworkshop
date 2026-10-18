@@ -574,9 +574,11 @@ function swayProfile() {
 // by one: from each distance (m), at each sky, seen from the side (eye a
 // little over the blades) and looking down about 45 degrees. One full
 // frame each: <label>_<sky>_<side|down>_<d>m.png.
-//   grassfloor [label=grassfloor] [skies=noon,golden] [dists=0.3,1,3,8,20]
+//   grassfloor [label=grassfloor] [skies=noon,golden] [dists=0.3,1,3,8,20] [floor=normal]
+// (`floor=normal`: the same shots over the grove's own ground.)
 function grassFloor() {
     const arg = (i, d) => (cmdArgs[i] && !cmdArgs[i].includes('=') ? cmdArgs[i] : d);
+    const contrast = !cmdArgs.includes('floor=normal');
     const lab = arg(1, 'grassfloor');
     const skies = arg(2, 'noon,golden').split(',');
     const dists = arg(3, '0.3,1,3,8,20').split(',').map(Number);
@@ -585,7 +587,7 @@ function grassFloor() {
     const wasRolling = roller.running;
     roller.running = false;
     if (roller.node) roller.node.visible = false;
-    contrastFloor(true);
+    if (contrast) contrastFloor(true);
     for (const time of skies) {
         setup('gpu', 'breeze', false);
         sky.apply(time);
@@ -605,9 +607,124 @@ function grassFloor() {
             }
         }
     }
-    contrastFloor(false);
+    if (contrast) contrastFloor(false);
     if (roller.node) roller.node.visible = true;
     roller.running = wasRolling;
+}
+
+// The grass's look by distance, to find steps where its rings hand over
+// (7, 20 and 55 m at the default range): from knee and eye height across the
+// meadow four ways (the plants and herbs hidden, still air), each pixel's
+// ground distance from its ray, and per 1 m band the mean colour (8-bit
+// sRGB) and local contrast (mean |difference| to the right-hand neighbour).
+// Each view is drawn at the node's range and at 1.3 times it, which moves
+// the rings' edges out: over the ground between an edge and 1.3 times it the
+// two draws differ only in the ring drawing it, so the terrain's own
+// patches drop out. Printed per edge (with a control band inside it, where
+// both draw the same ring): <label>_grassbands.json.
+//   grassbands [label=grassbands] [skies=noon,golden]
+function grassBands() {
+    const arg = (i, d) => (cmdArgs[i] && !cmdArgs[i].includes('=') ? cmdArgs[i] : d);
+    const lab = arg(1, 'grassbands');
+    const skies = arg(2, 'noon,golden').split(',');
+    const trees = () => [...grove.nodes, ...grove.presets.map((q) => q.node)];
+    grove.grass.setHerbs({ species: [] });
+    const wasRolling = roller.running;
+    roller.running = false;
+    if (roller.node) roller.node.visible = false;
+    const W = innerWidth, H = innerHeight, MAXD = 70, S = 1.3;
+    const range0 = grove.grass.grassParams().range;
+    const edges = [7, 20, 55].map((e) => e * range0 / 150);
+    const at = [-2, 15.5];   // the open meadow in front of the grove (the roller's loop)
+    const views = [];
+    for (const yaw of [0, 1.57, 3.14, 4.71]) {
+        views.push({ name: `knee${yaw.toFixed(1)}`, h: 0.5, yaw, pitch: -0.07 });
+        views.push({ name: `eye${yaw.toFixed(1)}`, h: 1.7, yaw, pitch: -0.12 });
+    }
+    // Per 1 m band of ground distance: summed colour and contrast.
+    const measure = () => {
+        flush();
+        const img = frameImage();
+        const top = img.height - H;
+        const bins = new Array(MAXD).fill(0).map(() => ({ n: 0, r: 0, g: 0, b: 0, c: 0 }));
+        const l = (q) => 0.2126 * img.data[q] + 0.7152 * img.data[q + 1] + 0.0722 * img.data[q + 2];
+        for (let y = 0; y < H; y += 2) {
+            for (let x = 0; x < W - 1; x += 2) {
+                const ray = vp.ray(x + 0.5, y + 0.5);
+                if (!ray || ray.dir[1] >= -1e-3) continue;
+                // March to the ground: fixed-point on its height.
+                let t = (ray.origin[1] - groundHeight(ray.origin[0], ray.origin[2])) / -ray.dir[1];
+                for (let k = 0; k < 4; k++) {
+                    const gx = ray.origin[0] + ray.dir[0] * t, gz = ray.origin[2] + ray.dir[2] * t;
+                    t = (ray.origin[1] - groundHeight(gx, gz)) / -ray.dir[1];
+                }
+                const d = t * Math.hypot(ray.dir[0], ray.dir[2]);
+                if (!(d >= 0) || d >= MAXD) continue;
+                const o = ((y + top) * img.width + x) * 4;
+                const bn = bins[Math.floor(d)];
+                bn.n++; bn.r += img.data[o]; bn.g += img.data[o + 1]; bn.b += img.data[o + 2];
+                bn.c += Math.abs(l(o) - l(o + 4));
+            }
+        }
+        return bins;
+    };
+    const out = {};
+    for (const time of skies) {
+        setup('gpu', 'still', false);
+        sky.apply(time);
+        for (const n of trees()) n.visible = false;
+        // Every view twice: at the node's range and at S times it (the rings'
+        // edges moved out), summed over the views.
+        const A = new Array(MAXD).fill(0).map(() => ({ n: 0, r: 0, g: 0, b: 0, c: 0 }));
+        const B = new Array(MAXD).fill(0).map(() => ({ n: 0, r: 0, g: 0, b: 0, c: 0 }));
+        const add = (to, from) => from.forEach((q, i) => { for (const k of ['n', 'r', 'g', 'b', 'c']) to[i][k] += q[k]; });
+        for (const v of views) {
+            // The eye `h` over the ground at `at` (an orbit of 0.01 m about it).
+            vp.reframe([at[0], groundHeight(at[0], at[1]) + v.h, at[1]], 0.01, { yaw: v.yaw, pitch: v.pitch });
+            grove.grass.setGrass({ range: range0 });
+            step(0.5);
+            add(A, measure());
+            if (v.yaw === 0) screenshot(`${OUT}/${lab}_${time}_${v.name}.png`);
+            grove.grass.setGrass({ range: range0 * S });
+            step(0.5);
+            add(B, measure());
+        }
+        grove.grass.setGrass({ range: range0 });
+        const luma = (q) => (0.2126 * q.r + 0.7152 * q.g + 0.0722 * q.b) / q.n;
+        const sum = (bins, a, b) => {
+            const m = { n: 0, r: 0, g: 0, b: 0, c: 0 };
+            for (let i = Math.max(0, Math.floor(a)); i < Math.min(MAXD, Math.ceil(b)); i++) for (const k in m) m[k] += bins[i][k];
+            return m;
+        };
+        // In [e, S e) the node at its range draws the outer ring, at S its
+        // range the inner: the difference there is the rings' difference.
+        // Below e both draw the inner ring (the control: noise between two
+        // renders).
+        const res = [];
+        console.log(`${time}: per 1 m band, luma at range / at ${S} x range (contrast)`);
+        console.log('  ' + A.map((q, i) => (q.n < 200 ? null : `${i}:${luma(q).toFixed(0)}/${luma(B[i]).toFixed(0)} (${(q.c / q.n).toFixed(1)}/${(B[i].c / B[i].n).toFixed(1)})`)).filter(Boolean).join(' '));
+        for (const e of edges) {
+            const a = sum(A, e, S * e), b = sum(B, e, S * e);
+            const ca = sum(A, 0.6 * e, e), cb = sum(B, 0.6 * e, e);
+            if (a.n < 200 || ca.n < 200) continue;
+            const r = {
+                edge: e, outerLuma: luma(a), innerLuma: luma(b), lumaPct: 100 * (luma(a) - luma(b)) / luma(b),
+                rgb: ['r', 'g', 'b'].map((k) => a[k] / a.n - b[k] / b.n),
+                contrastPct: 100 * (a.c / a.n - b.c / b.n) / (b.c / b.n),
+                controlLumaPct: 100 * (luma(ca) - luma(cb)) / luma(cb),
+            };
+            res.push(r);
+            console.log(`  ring edge ${e.toFixed(0)} m: outer ring vs inner over the same ground: luma ${r.lumaPct >= 0 ? '+' : ''}${r.lumaPct.toFixed(1)}%, ` +
+                        `rgb ${r.rgb.map((x) => x.toFixed(1)).join(',')}, contrast ${r.contrastPct >= 0 ? '+' : ''}${r.contrastPct.toFixed(1)}% ` +
+                        `(control ${r.controlLumaPct >= 0 ? '+' : ''}${r.controlLumaPct.toFixed(1)}%)`);
+        }
+        out[time] = res;
+    }
+    grove.grass.setHerbs({ species: MEADOW_HERBS });
+    for (const n of trees()) n.visible = true;
+    if (roller.node) roller.node.visible = true;
+    roller.running = wasRolling;
+    require('fs').writeFileSync(`${OUT}/${lab}_grassbands.json`, JSON.stringify(out));
 }
 
 // GPU ms per frame at each shot (perf.gpuFrameMs, the scene's timestamp
@@ -643,7 +760,8 @@ function perfShots() {
 // Several commands joined by `+` run one after another in this one boot,
 // each from the page as the boot left it (any overlay removed; each sets
 // its own path and wind); the virtual clock runs on between them.
-const MODES = { strip, video, still: stills, perf: perfShots, species, herbs, swayprofile: swayProfile, grassfloor: grassFloor, foliage };
+const MODES = { strip, video, still: stills, perf: perfShots, species, herbs, swayprofile: swayProfile, grassfloor: grassFloor,
+                grassbands: grassBands, foliage };
 const commands = [[]];
 for (const a of argv) a === '+' ? commands.push([]) : commands[commands.length - 1].push(a);
 for (const cmd of commands) {

@@ -144,6 +144,8 @@ function growGrass(world, presetWorlds) {
         // Wildflowers and forbs through the meadow (broflora's herb
         // presets), thinner where it is dry and under the crowns.
         herbs: { species: MEADOW_HERBS, density: (x, z, y) => 0.55 * (1 - 0.5 * dryness(x, z)) * density(x, z, y) },
+        // An unmown meadow: grasses in flower.
+        flowering: 0.25,
         castsShadow: true,
     });
 }
