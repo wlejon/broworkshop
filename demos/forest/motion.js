@@ -187,7 +187,9 @@ function dolly() {
     const pitchAt = (d) => -Math.atan2(Math.min(25, 0.4 * d), d);
     viewSubject(sub, d0, yaw, pitchAt(d0));
     for (let i = 0; i < 45; i++) frame();
-    const lods = [], rects = [];
+    // Per frame the node's settled detail factors (camera, shadow): a pop
+    // where they step is the whole forest re-thinning at once.
+    const lods = [], rects = [], details = [];
     const run = new MotionRun({ name: `forest_dolly_${sub.part}_${wind}`, out: OUT, fps, keepFrames: false, frames: F, cameraMoving: true,
                                 regionAt: (k) => (rects[Math.min(k, rects.length - 1)] ? [{ name: 'subject', rect: rects[Math.min(k, rects.length - 1)] }] : []),
                                 notes: [`a ${sub.part} tree (${sub.height.toFixed(1)} m) from ${d0} m out to ${d1} m in ${seconds} s (a steady log dolly), ${wind}`,
@@ -205,20 +207,31 @@ function dolly() {
         lods.push(l);
         rects.push(subjectRect(sub, 0.004));
         frame();
+        const fs = sub.node.forestStats();
+        details.push([fs.detail, fs.shadowDetail]);
         run.grab({ t: scene.wind().time, d, lod: lodText(l) });
         // `shots=k0-k1`: those frames as forest_dolly_<k>.png (to see a pop).
         if (shotFrom <= k && k <= shotTo) screenshot(`${OUT}/forest_dolly_${k}.png`);
         const f = frameImage(), top = Math.max(0, f.height - innerHeight), r = rects[k];
         if (!r) { series.push(null); continue; }
         // The box's pixels resampled to a fixed 64 x 64 grid, so frames at
-        // different scales compare like with like.
+        // different scales compare like with like: each cell the mean of the
+        // pixels it covers (a pixel per cell, nearest, aliased: as the box
+        // grew past a multiple of the grid many cells changed pixel at once,
+        // a "pop" of 15 levels with nothing changed in the picture).
         const G = 64, cur = new Float32Array(G * G);
+        const edge = (a, b, n) => Array.from({ length: G + 1 }, (_, i) => Math.min(n, Math.round((a + (b - a) * i / G) * n)));
+        const xs = edge(r[0], r[2], innerWidth), ys = edge(r[1], r[3], innerHeight);
         let sum = 0;
         for (let j = 0; j < G; j++) for (let i = 0; i < G; i++) {
-            const x = Math.min(innerWidth - 1, Math.floor((r[0] + (r[2] - r[0]) * (i + 0.5) / G) * innerWidth));
-            const y = Math.min(innerHeight - 1, Math.floor((r[1] + (r[3] - r[1]) * (j + 0.5) / G) * innerHeight));
-            const o = ((y + top) * f.width + x) * 4;
-            const v = 0.2126 * f.data[o] + 0.7152 * f.data[o + 1] + 0.0722 * f.data[o + 2];
+            const x0 = Math.min(xs[i], innerWidth - 1), x1 = Math.max(xs[i + 1], x0 + 1);
+            const y0 = Math.min(ys[j], innerHeight - 1), y1 = Math.max(ys[j + 1], y0 + 1);
+            let v = 0;
+            for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+                const o = ((y + top) * f.width + x) * 4;
+                v += 0.2126 * f.data[o] + 0.7152 * f.data[o + 1] + 0.0722 * f.data[o + 2];
+            }
+            v /= (x1 - x0) * (y1 - y0);
             cur[j * G + i] = v; sum += v;
         }
         let ch = 0;
@@ -255,8 +268,9 @@ function dolly() {
     lines.push(`pops in the subject's picture (change against the frame before > 6 sigma over the dolly's own), ${pops.length}:`);
     for (const p of pops.sort((a, b) => b.z - a.z).slice(0, 20)) {
         const near = cross.filter((c) => Math.abs(c.k - p.k) <= 3).map((c) => c.name);
+        const dt = (k) => (details[k] ? `${details[k][0].toFixed(3)}/${details[k][1].toFixed(3)}` : '-');
         lines.push(`  frame ${p.k} (${(p.k / fps).toFixed(2)} s), ${p.d.toFixed(1)} m: change ${p.change.toFixed(2)} levels, z ${p.z.toFixed(1)}, mean ${p.mean.toFixed(1)}; ` +
-                   `${lodText(p.l)}${near.length ? '; AT A HANDOVER: ' + near.join(', ') : ''}`);
+                   `${lodText(p.l)}; detail/shadow ${dt(p.k - 1)} -> ${dt(p.k)}; box ${rects[p.k] ? rects[p.k].map((v) => v.toFixed(3)).join(',') : '-'}${near.length ? '; AT A HANDOVER: ' + near.join(', ') : ''}`);
     }
     // Per handover: the largest step in the subject's mean luma within 5
     // frames of it, against the steps around it (a value pop).
@@ -279,8 +293,9 @@ function dolly() {
         { label: 'mean luma (levels)', xs: series.map((e) => (e ? e.mean : 0)), marks, note: 'red = handovers' },
         { label: 'tiers: leaves (green), clumps (blue)', xs: lods.map((l) => l.leaves), ys: lods.map((l) => l.clumps), marks },
         { label: 'tiers: crowns (green), widening/4 (blue)', xs: lods.map((l) => l.crowns), ys: lods.map((l) => l.widening / 4), marks },
-    ], 0, 0, 1280, 600, fps, `${s.name || 'dolly'}: ${d0} .. ${d1} m over ${seconds} s (time across; seconds marked)`, '');
-    S.text(`distance at each second: ${Array.from({ length: Math.floor(seconds / 5) + 1 }, (_, i) => `${i * 5}s ${dAt(Math.min(F - 1, i * 5 * fps)).toFixed(0)}m`).join('  ')}`, 6, 620, '#ccc', 12);
+        { label: 'detail (green), shadow detail (blue)', xs: details.map((v) => v[0]), ys: details.map((v) => v[1]), marks },
+    ], 0, 0, 1280, 680, fps, `${s.name || 'dolly'}: ${d0} .. ${d1} m over ${seconds} s (time across; seconds marked)`, '');
+    S.text(`distance at each second: ${Array.from({ length: Math.floor(seconds / 5) + 1 }, (_, i) => `${i * 5}s ${dAt(Math.min(F - 1, i * 5 * fps)).toFixed(0)}m`).join('  ')}`, 6, 704, '#ccc', 12);
     const file = S.save(`${OUT}/forest_dolly_${sub.part}_${wind}_pops.jpg`);
     lines.push(file);
     require('fs').writeFileSync(`${OUT}/forest_dolly_${sub.part}_${wind}_pops.txt`, lines.join('\n') + '\n');
