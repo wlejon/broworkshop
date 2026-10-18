@@ -27,6 +27,11 @@
 //                       GPU does (sway.js), checked against the rendered
 //                       motion of the same tips (bark only, tracked in the
 //                       image), and the stand's coherence
+//   twigs [wind=gusty] [seconds=10]
+//                       the grove broadleaf's leaves on their twigs: each
+//                       leaf's node against its shoot's drawn twig at rest
+//                       and in the wind (the gap, and its ratio to the
+//                       petiole), and how far the tips move about their nodes
 //
 // `floor=contrast` on any command draws the ground one flat pale sand
 // (grove.js contrastFloor: a capture option, not the look), so the blocks
@@ -586,6 +591,8 @@ function telling(tree, dir) {
 
 function truth() {
     const wind = opt('wind', 'gusty'), seconds = +opt('seconds', 20), N = Math.round(seconds * fps);
+    // The GPU path: its first node is the wood alone, the render check below.
+    draw('gpu');
     setWind(wind);
     scene.setDither(false);
     sky.apply('noon');
@@ -815,7 +822,101 @@ function truth() {
     console.log(lines.join('\n'));
 }
 
-const MODES = { calibrate, plant, mover, truth };
+// Leaves on their twigs (the forest path: bro.scene's scene_forest_shoot.glsl,
+// ported in sway.js): for leaves across the grove broadleaf's crown, where
+// each leaf's node is and where its shoot's twig is drawn at that point
+// (the ribbon is straight between its pieces' posed ends) over `seconds` of
+// wind, and how far the leaf's tip moves about its node. A leaf that stays
+// on its twig has a gap far under its petiole.
+function twigs() {
+    const wind = opt('wind', 'gusty'), seconds = +opt('seconds', 10), N = Math.round(seconds * fps);
+    draw('forest');
+    setWind(wind);
+    frame();
+    const params = scene.wind();
+    const e = grove.forest.emit;
+    const opts = { seed: e.seed, upBias: e.upBias, tiltJitter: e.tiltJitter, shell: e.shell, baseScale: e.baseScale,
+                   scaleJitter: e.scaleJitter };
+    // The node's leaf: the default card (0.12) times its specimens' mean leaf size.
+    let ls = 0, ln = 0;
+    for (let i = 7; i < e.specimenLooks.length; i += 8) if (e.specimenLooks[i] > 0) { ls += e.specimenLooks[i]; ln++; }
+    opts.Lf = 0.12 * Math.min(3, Math.max(0.2, ln ? ls / ln : 1)) * e.baseScale;
+    // The specimen nearest the grove's tree.
+    const sp = e.specimens, nSpec = sp.length / 16;
+    let best = 0, bd = Infinity;
+    for (let s = 0; s < nSpec; s++) {
+        const d = Math.hypot(sp[s * 16 + 12] * PLANT_SCALE - 6.5, sp[s * 16 + 14] * PLANT_SCALE - 9.5);
+        if (d < bd) { bd = d; best = s; }
+    }
+    // (emitForest's specimens: ..., origin xyz at 12, clumpFlat at 15.)
+    const o = [sp[best * 16 + 12], sp[best * 16 + 13], sp[best * 16 + 14]];
+    const M = sway.model(o.map((v) => v * PLANT_SCALE), 0, PLANT_SCALE);
+    const c0 = sp[best * 16 + 2], cn = sp[best * 16 + 3];
+    const flat = sp[best * 16 + 15] > 0 ? sp[best * 16 + 15] : 1;
+    const petiole = e.specimenLeaves[best * 8 + 6], phyllo = Math.round(e.specimenLeaves[best * 8 + 7]);
+    const keyBase = new Map();
+    for (let i = 0; i < e.leaves.length; i += 2) {
+        const c = e.leaves[i], k = e.leaves[i + 1];
+        if (!keyBase.has(c) || keyBase.get(c) > k) keyBase.set(c, k);
+    }
+    const toWorld = (pt, w, p, sh, sprayOf, kind, along, t) => {
+        const rest = M.apply(p);
+        const ps = sway.pose(pt, w, rest, pt.weight);
+        const b = sway.shootBend(sprayOf, sh, kind, along, ps.drag, 1, t);
+        return { p: [rest[0] + ps.offset[0] + b.offset[0] * M.scale, rest[1] + ps.offset[1] + b.offset[1] * M.scale,
+                     rest[2] + ps.offset[2] + b.offset[2] * M.scale], ps, b };
+    };
+    const lines = [`leaves on their twigs: specimen ${best} (${cn} clumps), petiole ${petiole.toFixed(2)} of the blade, phyllotaxis ${phyllo}; ` +
+                   `${wind}, ${seconds} s, leaf length ${(opts.Lf * PLANT_SCALE * 100).toFixed(1)} cm`];
+    const gaps = [], rests = [], relTips = [];
+    for (let ci = c0; ci < c0 + cn; ci += Math.max(1, Math.floor(cn / 8))) {
+        const rec = Array.from(e.clumps.subarray(ci * 8, ci * 8 + 8));
+        if (rec[7] < 1) continue;
+        const c = sway.clumpShoots(rec, ci, Object.assign({ flat }, opts), phyllo);
+        const veg = Array.from(e.clumpVegetation.subarray(ci * 16, ci * 16 + 16));
+        const pt = sway.part([...veg.slice(0, 8), ...rec.slice(0, 3), veg[9], ...veg.slice(12, 16)], M, 'base', [0.6, 0.8]);
+        for (let j = 0; j < c.n; j += Math.max(1, Math.floor(c.n / 6))) {
+            const L = sway.shootLeaf(c, j), at = L.at;
+            const ix = j % c.S;
+            const third = Math.min(2, Math.floor(3 * at.x / Math.max(at.shoot.len, 1e-6)));
+            const p0 = sway.twigEnd(c, sway.shootPiece(c, ix) + third, 0), p1 = sway.twigEnd(c, sway.shootPiece(c, ix) + third, 1);
+            const f = (3 * at.x / at.shoot.len) - third;
+            const pet = petiole * opts.Lf * L.size * PLANT_SCALE;
+            let gmax = 0, rmax = 0, rel0 = null, relMax = 0;
+            for (let k = 0; k < N; k++) {
+                const ws = sway.windStateAt(params, params.time + k / fps);
+                const w = sway.vegWind(ws, pt.root, pt.trunk.freq);
+                const leaf = toWorld(pt, w, L.P, at.shoot, at.spray, 2, at.x, ws.t);
+                const a = toWorld(pt, w, p0.p, at.shoot, at.spray, 2, p0.along, ws.t).p;
+                const b = toWorld(pt, w, p1.p, at.shoot, at.spray, 2, p1.along, ws.t).p;
+                const tw = [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f];
+                gmax = Math.max(gmax, Math.hypot(leaf.p[0] - tw[0], leaf.p[1] - tw[1], leaf.p[2] - tw[2]));
+                if (k === 0) {
+                    const ra = M.apply(p0.p), rb = M.apply(p1.p), rp = M.apply(L.P);
+                    const rt = [ra[0] + (rb[0] - ra[0]) * f, ra[1] + (rb[1] - ra[1]) * f, ra[2] + (rb[2] - ra[2]) * f];
+                    rmax = Math.hypot(rp[0] - rt[0], rp[1] - rt[1], rp[2] - rt[2]);
+                }
+                // The leaf's tip about its node (the wood's and shoot's turn, its own flutter).
+                const Fw = sway.rotate(sway.leafTurn({ ...leaf.ps, omega: [leaf.ps.omega[0] + leaf.b.omega[0], leaf.ps.omega[1] + leaf.b.omega[1], leaf.ps.omega[2] + leaf.b.omega[2]] },
+                                                     w, L.F, L.N, (j * 0.618) % 1).omega, L.F);
+                const tip = Fw.map((v) => v * opts.Lf * L.size * PLANT_SCALE * (1 + petiole));
+                if (!rel0) rel0 = tip;
+                relMax = Math.max(relMax, Math.hypot(tip[0] - rel0[0], tip[1] - rel0[1], tip[2] - rel0[2]));
+            }
+            gaps.push({ g: gmax, pet }); rests.push(rmax); relTips.push(relMax);
+        }
+    }
+    const q = (a, f) => { const s = [...a].sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.floor(f * s.length))]; };
+    const g = gaps.map((x) => x.g), ratio = gaps.map((x) => x.g / Math.max(x.pet, 1e-6));
+    lines.push(`  ${gaps.length} leaves: node to drawn twig, at rest median ${(q(rests, 0.5) * 1000).toFixed(2)} mm, max ${(Math.max(...rests) * 1000).toFixed(2)} mm;`);
+    lines.push(`  in the wind max over time: median ${(q(g, 0.5) * 1000).toFixed(2)} mm, p95 ${(q(g, 0.95) * 1000).toFixed(2)} mm, max ${(Math.max(...g) * 1000).toFixed(2)} mm;` +
+               ` over its petiole: p95 ${q(ratio, 0.95).toFixed(3)}, max ${Math.max(...ratio).toFixed(3)} (petiole median ${(q(gaps.map((x) => x.pet), 0.5) * 1000).toFixed(1)} mm)`);
+    lines.push(`  the tip about its node (turn + flutter), largest excursion: median ${(q(relTips, 0.5) * 100).toFixed(1)} cm, max ${(Math.max(...relTips) * 100).toFixed(1)} cm`);
+    require('fs').writeFileSync(`${OUT}/twigs_${wind}.txt`, lines.join('\n') + '\n');
+    console.log(lines.join('\n'));
+}
+
+const MODES = { calibrate, plant, mover, truth, twigs };
 const commands = [[]];
 for (const a of argv) a === '+' ? commands.push([]) : commands[commands.length - 1].push(a);
 for (const cmd of commands) {

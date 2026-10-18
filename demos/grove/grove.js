@@ -2,10 +2,14 @@
 // hour, swaying in bro.scene's wind: the showcase for bro.flora's motion.
 //
 // broflora grows the plants once at boot (a few seconds of sim time on a
-// fixed step), then they are drawn two ways:
+// fixed step), then they are drawn one of three ways:
 //
-//   gpu    the default: a branch-tube node and a leaf-scatter node, the
-//          geometry built in the vertex shaders from per-segment records
+//   forest the default: a forest node (emitForest, scene.createForest):
+//          bark, every leaf on its shoot and the twigs that carry them,
+//          as the forest demo draws its trees
+//   gpu    a branch-tube node and a leaf-scatter node, the geometry built
+//          in the vertex shaders from per-segment records (the leaves
+//          scattered through their clumps, not on shoots)
 //   mesh   the same plants as meshes: emitMesh (bark), emitFoliageMesh
 //          (leaf cards) and emitBloomMesh
 //
@@ -344,7 +348,7 @@ function drawPresets(worlds) {
 const BARK = { color: [0.2, 0.17, 0.14], metallic: 0, roughness: 0.9 };
 const LEAF = { color: [0.07, 0.13, 0.04], metallic: 0, roughness: 0.7 };
 
-export const grove = { world: null, nodes: [], presets: [], path: 'gpu', legacyWind: false, stats: {} };
+export const grove = { world: null, nodes: [], presets: [], path: 'forest', legacyWind: false, stats: {} };
 
 function clearNodes() {
     for (const n of grove.nodes) n.destroy();
@@ -368,6 +372,18 @@ function drawGpu(world) {
     grove.stats = { segments: tubes.segCount, leaves: scatter.instanceCount };
 }
 
+// The forest node's draw: one node, bark, leaves on their shoots and the
+// twigs, at the node's own leaf card (cut per pixel, with its petiole).
+function drawForest(world) {
+    const emit = world.emitForest(Object.assign({ leafForm: 'broad' }, FOLIAGE));
+    const node = add(scene.createForest(Object.assign({
+        forest: emit, doubleSided: true, subsurface: 0.5, vertexColorTint: false,
+        castsShadow: true, receivesShadow: true, barkColor: BARK.color, barkRoughness: BARK.roughness,
+    }, { color: LEAF.color, roughness: LEAF.roughness })));
+    grove.forest = { emit, node };
+    grove.stats = { segments: emit.segments.length / 8, leaves: emit.leafCount };
+}
+
 function drawMeshes(world) {
     // `legacyWind` is the sway apps had before the vegetation path: the whole
     // mesh bent by vertex colour R (the "before" captures).
@@ -388,11 +404,14 @@ function drawMeshes(world) {
     grove.stats = { bark: bark.triangleCount, leaves: leaves.triangleCount };
 }
 
-/** (Re)draw the grown world as `path` ('gpu' | 'mesh'). */
+/** (Re)draw the grown world as `path` ('forest' | 'gpu' | 'mesh'). */
 export function draw(path) {
     grove.path = path || grove.path;
     clearNodes();
-    if (grove.path === 'mesh') drawMeshes(grove.world); else drawGpu(grove.world);
+    grove.forest = null;
+    if (grove.path === 'mesh') drawMeshes(grove.world);
+    else if (grove.path === 'forest') drawForest(grove.world);
+    else drawGpu(grove.world);
 }
 
 // --- wind ---------------------------------------------------------------------------
@@ -448,7 +467,7 @@ setWind('breeze');
 setShot('grove');
 grove.world = growWorld();
 grove.growMs = grove.grow.ms;  // wall time: headless's performance.now rides the virtual clock
-draw('gpu');
+draw('forest');
 grove.presetWorld = growPresets();
 drawPresets(grove.presetWorld);
 grove.grass = growGrass(grove.world, grove.presetWorld);

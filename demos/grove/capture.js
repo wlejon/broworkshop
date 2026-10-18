@@ -19,6 +19,10 @@
 //   bro-headless --width 1280 --height 720 demos/grove demos/grove/capture.js -- \
 //       grassfloor [label] [noon,golden] [0.3,1,3,8,20]
 //       (the grass on the contrast floor, side and 45 degrees down: <label>_<sky>_<view>_<d>m.png)
+//   bro-headless --width 1280 --height 720 demos/grove demos/grove/capture.js -- \
+//       foliage <name[,name...]> [label=foliage] [skies=noon,golden] [views=inside,1,3,8] [wind=breeze]
+//       (a crown up close, full frame, from inside it and 1, 3 and 8 m off its edge:
+//       <label>_<name>_<sky>_<view>.png; `broadleaf` the grove's own tree, else a preset)
 //   bro-headless --width 960 --height 540 demos/grove demos/grove/capture.js -- \
 //       swayprofile <name[,name...]> [label=sway] [dist=20] [seconds=6] [wind=gusty]
 //       (how far each eighth of a plant's height moves in the wind, side on)
@@ -35,7 +39,8 @@
 // clock is virtual: every frame is 1/fps s, so a capture is the same on any
 // machine.
 
-import { grove, draw, setWind, setShot, sky, vp, groundHeight, ground, roller, PRESET_PLANTS, WINDS, MEADOW_HERBS, contrastFloor } from "/app/grove.js";
+import { grove, draw, setWind, setShot, sky, vp, groundHeight, ground, roller, PRESET_PLANTS, WINDS, MEADOW_HERBS, contrastFloor,
+         SHOTS, PLANT_SCALE } from "/app/grove.js";
 
 const argv = (bro.app && bro.app.argv) || [];
 // The command now running (see the end: several join with `+`).
@@ -284,6 +289,69 @@ function species() {
             if (grove.grass) grove.grass.visible = grassWas;
         }
         for (const p of grove.presets) p.node.setForestTier('auto');
+    }
+}
+
+// A plant's foliage up close, full frame: from just outside its crown at
+// 1, 3 and 8 m from the crown's edge, and from inside it looking out and
+// up (a broadleaf or a shrub, the forest node's leaves on their shoots and
+// twigs): <label>_<name>_<sky>_<d>m.png and <label>_<name>_<sky>_inside.png.
+// `broadleaf` is the grove's own tree nearest the 'tree' shot, drawn
+// through the forest path; the others are presets (birch, holly,
+// hydrangea, ...).
+//   foliage <name[,name...]> [label=foliage] [skies=noon,golden] [views=inside,1,3,8] [wind=breeze]
+function foliage() {
+    const names = (shotsA || 'broadleaf,birch,hydrangea,holly').split(',');
+    const skies = (a3 || 'noon,golden').split(',');
+    const views = (a4 || 'inside,1,3,8').split(',');
+    const wind = a5 || 'breeze';
+    // The crown in world space of a forest node's tree: its centre and radius.
+    const crownOf = (node, emit, row) => {
+        const s = row[5] | 0, sp = emit.specimens, k = node.scale ? node.scale[0] : 1;
+        const cx = sp[s * 16 + 8], cy = sp[s * 16 + 9], cz = sp[s * 16 + 10];
+        const c = Math.cos(row[4]), sn = Math.sin(row[4]), sc = row[3];
+        return { centre: [k * (row[0] + sc * (cx * c + cz * sn)), k * (row[1] + sc * cy), k * (row[2] + sc * (-cx * sn + cz * c))],
+                 radius: k * sc * sp[s * 16 + 7], height: k * sc * sp[s * 16 + 6] };
+    };
+    for (const time of skies) {
+        setup('forest', wind, false);
+        sky.apply(time);
+        for (const name of names) {
+            let crown, yaw;
+            if (name === 'broadleaf') {
+                const { emit, node } = grove.forest;
+                const t = SHOTS.tree.target, k = PLANT_SCALE;
+                let best = 0, bd = Infinity;
+                for (let i = 0; i < emit.instances.length / 8; i++) {
+                    const d = Math.hypot(emit.instances[i * 8] * k - t[0], emit.instances[i * 8 + 2] * k - t[2]);
+                    if (d < bd) { bd = d; best = i; }
+                }
+                crown = crownOf(node, emit, emit.instances.slice(best * 8, best * 8 + 8));
+                yaw = SHOTS.tree.yaw;
+            } else {
+                const p = PRESET_PLANTS.find((q) => q.name === name);
+                if (!p) { console.log(`foliage: no ${name}`); continue; }
+                const part = grove.presets.find((q) => q.rows.some((r) => r.plant === p));
+                crown = crownOf(part.node, part.emit, part.rows.find((r) => r.plant === p).row);
+                yaw = Math.atan2(-p.x, -p.z);
+            }
+            const dir = [Math.sin(yaw), 0, Math.cos(yaw)], R = crown.radius, C = crown.centre;
+            for (const v of views) {
+                if (v === 'inside') {
+                    // From a third of the way out of the crown's middle, looking out and up.
+                    vp.reframe([C[0] + dir[0] * R, C[1] + 0.25 * R, C[2] + dir[2] * R], 0.7 * R, { yaw: yaw + Math.PI, pitch: 0.3 });
+                } else {
+                    // Its edge nearest the eye, d m off, level with the crown's middle.
+                    const d = +v;
+                    vp.reframe([C[0] + dir[0] * 0.8 * R, C[1], C[2] + dir[2] * 0.8 * R], d + 0.2 * R, { yaw, pitch: 0.04 });
+                }
+                step(1);
+                flush();
+                const file = `${OUT}/${label}_${name}_${time}_${v === 'inside' ? 'inside' : v + 'm'}.png`;
+                screenshot(file);
+                console.log(`${file}: crown r ${R.toFixed(2)} m, h ${crown.height.toFixed(1)} m`);
+            }
+        }
     }
 }
 
@@ -575,7 +643,7 @@ function perfShots() {
 // Several commands joined by `+` run one after another in this one boot,
 // each from the page as the boot left it (any overlay removed; each sets
 // its own path and wind); the virtual clock runs on between them.
-const MODES = { strip, video, still: stills, perf: perfShots, species, herbs, swayprofile: swayProfile, grassfloor: grassFloor };
+const MODES = { strip, video, still: stills, perf: perfShots, species, herbs, swayprofile: swayProfile, grassfloor: grassFloor, foliage };
 const commands = [[]];
 for (const a of argv) a === '+' ? commands.push([]) : commands[commands.length - 1].push(a);
 for (const cmd of commands) {

@@ -10,7 +10,7 @@ segmented('#winds', labels(WINDS), { value: grove.wind, onChange: setWind });
 segmented('#shots', labels(SHOTS), { value: grove.shot, onChange: setShot });
 segmented('#tod', Object.fromEntries(sky.order.map((k) => [k, sky.presets[k].label])),
     { value: sky.current, onChange: (k) => sky.apply(k) });
-segmented('#paths', { gpu: 'GPU nodes', mesh: 'Meshes' }, { value: grove.path, onChange: (p) => { draw(p); show(); } });
+segmented('#paths', { forest: 'Forest node', gpu: 'GPU nodes', mesh: 'Meshes' }, { value: grove.path, onChange: (p) => { draw(p); show(); } });
 
 const readouts = stats('#stats', { plants: 'plants', parts: 'drawn' });
 function show() {

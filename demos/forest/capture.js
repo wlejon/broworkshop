@@ -24,6 +24,9 @@
 //       the meadow from its edge at 0.5, 3, 30, 60 and 150 m, and a view
 //       under the trees: full-frame JPEGs <label>_meadow_<sky>_<d>m.jpg,
 //       <label>_understory_<sky>.jpg
+//   bro-headless ... capture.js -- foliage [parts=broadleaf,shrub] [label=foliage] [skies=noon,golden] [views=inside,1,3,8]
+//       a crown at the glade's edge up close, full frame: from inside it
+//       and 1, 3 and 8 m off its edge (<label>_<part>_<sky>_<view>.png)
 //   bro-headless ... capture.js -- metrics [shots=canopy,skim,glade,trunks] [label=forest] [skies=noon,golden] [wind=breeze]
 //       Leaves against By size from the same views, per band of distance to
 //       the crowns (10-20, 20-40, 40-80, 80-160 m): luminance, colour, local
@@ -328,6 +331,56 @@ function handover() {
     screenshot(file);
     console.log(file);
     for (const p of hidden) p.node.visible = true;
+}
+
+// A crown at the glade's edge up close, full frame: the handover's subject
+// of each part named (broadleaf, shrub), from inside its crown looking out
+// and up, and from the glade side 1, 3 and 8 m off its edge, level with its
+// crown's middle: <label>_<part>_<sky>_<view>.png.
+//   foliage [parts=broadleaf,shrub] [label=foliage] [skies=noon,golden] [views=inside,1,3,8] [wind=breeze]
+function foliage() {
+    const names = (a1 || 'broadleaf,shrub').split(','), label = a2 || 'foliage';
+    const skies = (a3 || 'noon,golden').split(','), views = (a4 || 'inside,1,3,8').split(',');
+    const wind = opt('wind') || 'breeze', given = args;
+    for (const time of skies) {
+        for (const name of names) {
+            // (subject() reads its part from the arguments.)
+            args = given.filter((a) => !String(a).startsWith('part=')).concat(['part=' + name]);
+            setup(wind, 'auto', time);
+            flight.on = false;
+            const sub = subject();
+            const part = forest.parts.find((p) => p.name === sub.part);
+            const row = part.trees.slice(sub.index * 8, sub.index * 8 + 8), sp = part.emit.specimens, s = sub.specimen;
+            const cx = sp[s * 16 + 8], cy = sp[s * 16 + 9], cz = sp[s * 16 + 10];
+            const c = Math.cos(row[4]), sn = Math.sin(row[4]), sc = row[3];
+            const C = [row[0] + sc * (cx * c + cz * sn), row[1] + sc * cy, row[2] + sc * (-cx * sn + cz * c)];
+            const R = sc * sp[s * 16 + 7];
+            // Toward the glade's middle.
+            const yaw = Math.atan2(12 - C[0], 18 - C[2]), dir = [Math.sin(yaw), 0, Math.cos(yaw)];
+            for (const v of views) {
+                vp.onView((view) => {
+                    if (flight.on) return;
+                    let eye, at;
+                    if (v === 'inside') {
+                        eye = [C[0] + dir[0] * 0.3 * R, C[1], C[2] + dir[2] * 0.3 * R];
+                        at = [C[0] + dir[0] * 1.5 * R, C[1] + 0.6 * R, C[2] + dir[2] * 1.5 * R];
+                    } else {
+                        const d = +v + 0.8 * R;
+                        eye = [C[0] + dir[0] * d, C[1] + 0.04 * d, C[2] + dir[2] * d];
+                        at = [C[0] + dir[0] * 0.8 * R, C[1], C[2] + dir[2] * 0.8 * R];
+                    }
+                    view.position = eye;
+                    view.target = at;
+                    view.up = [0, 1, 0];
+                });
+                step(1.5);
+                flush();
+                const file = `${OUT}/${label}_${name}_${time}_${v === 'inside' ? 'inside' : v + 'm'}.png`;
+                screenshot(file);
+                console.log(`${file}: tree ${sub.index}, crown r ${R.toFixed(2)} m; ${JSON.stringify(forestStats())}`);
+            }
+        }
+    }
 }
 
 // One tree of a part (`part=`, as the handover's subject, its part alone)
@@ -960,7 +1013,7 @@ function meadowShots() {
 // command drew is removed and the forest's level of detail restored (the
 // clock runs on, so wind and the flight's motion continue from there).
 const MODES = { still: stills, trace, video, handover, compare, parts, hold, metrics, tiers, herbs: herbMetrics,
-                meadow: meadowShots };
+                meadow: meadowShots, foliage };
 const lod0 = forest.parts.map((p) => p.node.forestLod());
 const commands = [[]];
 for (const a of argv) a === '+' ? commands.push([]) : commands[commands.length - 1].push(a);

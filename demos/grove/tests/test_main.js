@@ -14,11 +14,25 @@ function changed(a, b) {
     return n;
 }
 
-test('the grove grows every plant and draws it on the GPU path', () => {
+test('the grove grows every plant and draws it through a forest node', () => {
     eq(grove.world.plantCount, PLANTS.length, 'plants');
+    eq(grove.path, 'forest');
+    eq(grove.nodes.length, 1, 'one forest node');
+    check(grove.stats.segments > 0 && grove.stats.leaves > 0, 'segments and leaves: ' + JSON.stringify(grove.stats));
+    // The broadleaves' leaves hang on shoots, which the node draws as twigs.
+    const s = grove.forest.node.forestStats();
+    check(s && s.treeCount > 0, 'trees: ' + JSON.stringify(s && s.treeCount));
+    const L = grove.forest.emit.specimenLeaves;
+    check(L && L.length >= 8 && L[6] > 0, 'a petiole per specimen: ' + (L && L[6]));
+});
+
+test('the GPU path draws the same plants as a tube node and a scatter node', () => {
+    clickOn('#paths button[data-value="gpu"]');
     eq(grove.path, 'gpu');
     eq(grove.nodes.length, 2, 'a tube node and a scatter node');
     check(grove.stats.segments > 0 && grove.stats.leaves > 0, 'segments and leaves: ' + JSON.stringify(grove.stats));
+    clickOn('#paths button[data-value="forest"]');
+    eq(grove.path, 'forest');
 });
 
 test('the conifers and shrubs stand where the grove puts them, a node per preset', () => {
@@ -130,8 +144,8 @@ test('the mesh path draws the same plants as swaying meshes', () => {
     frames(20);
     const b = scene.captureFrame();
     check(changed(a, b) > 200, 'meshes sway too (' + changed(a, b) + ' px)');
-    clickOn('#paths button[data-value="gpu"]');
-    eq(grove.path, 'gpu');
+    clickOn('#paths button[data-value="forest"]');
+    eq(grove.path, 'forest');
 });
 
 done('grove');
