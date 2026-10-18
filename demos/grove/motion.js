@@ -45,7 +45,10 @@ import { MotionRun, sheet, THRESHOLDS } from "/lib/kit/motion.js";
 import * as sway from "/lib/kit/sway.js";
 
 const argv = (bro.app && bro.app.argv) || [];
-const OUT = bro.resolvePath('/app/captures').replace(/\\/g, '/') + '/motion';
+// `dir=<name>` on a command writes its captures under motion/<name> (a
+// before run kept beside the after).
+const OUT_BASE = bro.resolvePath('/app/captures').replace(/\\/g, '/') + '/motion';
+let OUT = OUT_BASE;
 // The rows a near clump's twig piece is drawn in (bro's kTwigFineRows).
 const FINE_ROWS = 3;
 require('fs').mkdirSync(OUT, { recursive: true });
@@ -654,7 +657,8 @@ function truth() {
     // gust leaving 0, now or at the reads' lags) and the ringing's kick
     // (the trunk drag against its past crossing).
     const ev = [];
-    const tf = parts[0].p.trunk.freq, lagT = sway.lagOf(tf), spanT = Math.min(0.5 / Math.max(tf, 0.05), 1.5);
+    // vegWind's two reads: a tenth and four tenths of the trunk's period back.
+    const tf = Math.max(parts[0].p.trunk.freq, 0.05), lagT = Math.min(0.1 / tf, 0.5), spanT = Math.min(0.4 / tf, 2.1) - lagT;
     for (let k = 1; k < N; k++) {
         const s0 = sway.windStateAt(params, t0 + (k - 1) / fps), s1 = sway.windStateAt(params, t0 + k / fps);
         const g = (s, dt) => sway.gustAt(s, main.root[0], main.root[2], s.t - dt, true) > 0.5 * sway.GUST_SOFT * 2.4 * s.gust;
@@ -935,6 +939,8 @@ const commands = [[]];
 for (const a of argv) a === '+' ? commands.push([]) : commands[commands.length - 1].push(a);
 for (const cmd of commands) {
     args = cmd;
+    OUT = opt('dir') ? `${OUT_BASE}/${opt('dir')}` : OUT_BASE;
+    require('fs').mkdirSync(OUT, { recursive: true });
     const mode = cmd[0] || 'calibrate';
     const before = new Set(document.body.children);
     const t0 = perf.now();

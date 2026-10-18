@@ -26,6 +26,9 @@
 //   bro-headless --width 960 --height 540 demos/grove demos/grove/capture.js -- \
 //       swayprofile <name[,name...]> [label=sway] [dist=20] [seconds=6] [wind=gusty]
 //       (how far each eighth of a plant's height moves in the wind, side on)
+//   bro-headless --width 1280 --height 720 demos/grove demos/grove/capture.js -- \
+//       leanstrip <name> [label] [seconds=6] [frames=12] [wind=strong]
+//       (a preset side on, still air then a wind set and held, tiled: the held lean)
 //
 // Several commands in one boot: join them with `+`, e.g.
 //   capture.js -- still grove,tree,meadow + strip close + perf grove
@@ -757,11 +760,78 @@ function perfShots() {
     }
 }
 
+// A preset alone, side on to the wind, at golden hour: still air, then the
+// wind set at t = 0 and held (`strong`: a steady 12 m/s with small gusts),
+// tiled over `seconds`. The cyan line is the plant's axis at rest, so the
+// held lean, how the top bends over the stem and any bounce read from the
+// tiles. <label>_<name>_leanstrip.png.
+//   leanstrip <name> [label] [seconds=6] [frames=12] [wind=strong]
+function leanStrip() {
+    const name = shotsA, seconds = +(a3 || 6), frames = +(a4 || 12), wind = a5 || 'strong';
+    const p = PRESET_PLANTS.find((q) => q.name === name);
+    if (!p) { console.log(`leanstrip: no ${name}`); return; }
+    setup('gpu', 'still', false);
+    const W = innerWidth, H = innerHeight, FOV = vp.cam.fov || 45;
+    const part = grove.presets.find((q) => q.rows.some((r) => r.plant === p));
+    const row = part.rows.find((r) => r.plant === p);
+    const h = row.height, base = groundHeight(p.x, p.z);
+    const others = [...grove.nodes, ...grove.presets.map((q) => q.node), grove.grass];
+    const was = new Map(others.map((n) => [n, n.visible]));
+    for (const n of others) n.visible = n === part.node;
+    part.node.setTrees(new Float32Array(row.row));
+    const wd = WINDS[wind].wind.direction;
+    const yaw = Math.atan2(wd[0], wd[2]) + Math.PI * 0.5;
+    // The plant fills 80% of the view's height, its root at the centre.
+    const eye = h / 0.8 / (2 * Math.tan(FOV * Math.PI / 360));
+    vp.reframe([p.x, base + h * 0.5, p.z], eye, { yaw, pitch: 0 });
+    step(2);
+    const cols = Math.min(frames + 1, 7), rows = Math.ceil((frames + 1) / cols), gap = 4;
+    const tw = Math.floor((W - gap * (cols + 1)) / cols);
+    const th = Math.floor((H - gap * (rows + 1)) / rows);
+    const crop = [0.5, 0.5, (H * 0.92 * tw / th) / W];
+    const grabs = [];
+    flush();
+    grabs.push({ t: null, px: shrink(frameImage(), tw, th, crop) });
+    setWind(wind);
+    const dt = seconds / frames;
+    for (let i = 1; i <= frames; i++) {
+        step(dt);
+        flush();
+        grabs.push({ t: i * dt, px: shrink(frameImage(), tw, th, crop) });
+    }
+    const cv = document.createElement('canvas');
+    cv.width = W; cv.height = H;
+    cv.style.cssText = `position:absolute;left:0;top:0;width:${W}px;height:${H}px;z-index:10`;
+    document.body.append(cv);
+    const g = cv.getContext('2d');
+    g.fillStyle = '#111';
+    g.fillRect(0, 0, W, H);
+    g.font = '600 12px system-ui';
+    grabs.forEach((s, i) => {
+        const x = gap + (i % cols) * (tw + gap), y = gap + Math.floor(i / cols) * (th + gap);
+        const im = g.createImageData(tw, th);
+        im.data.set(s.px);
+        g.putImageData(im, x, y);
+        g.fillStyle = 'rgba(0,255,255,0.7)';
+        g.fillRect(x + Math.floor(tw / 2), y + 20, 1, th - 20);
+        const txt = s.t === null ? `${name} still` : `${name} ${wind} t=${s.t.toFixed(1)}s`;
+        g.fillStyle = '#000'; g.fillText(txt, x + 5, y + 15);
+        g.fillStyle = '#fff'; g.fillText(txt, x + 4, y + 14);
+    });
+    advanceTime(30);
+    flush();
+    const file = `${OUT}/${label}_${name}_leanstrip.png`;
+    screenshot(file);
+    console.log(`${file}: ${name} (h ${h.toFixed(1)} m), still then ${wind}, ${frames} frames over ${seconds} s`);
+    part.node.setTrees(new Float32Array(part.rows.flatMap((r) => r.row)));
+    for (const [n, v] of was) n.visible = v;
+}
+
 // Several commands joined by `+` run one after another in this one boot,
 // each from the page as the boot left it (any overlay removed; each sets
 // its own path and wind); the virtual clock runs on between them.
 const MODES = { strip, video, still: stills, perf: perfShots, species, herbs, swayprofile: swayProfile, grassfloor: grassFloor,
-                grassbands: grassBands, foliage };
+                grassbands: grassBands, foliage, leanstrip: leanStrip };
 const commands = [[]];
 for (const a of argv) a === '+' ? commands.push([]) : commands[commands.length - 1].push(a);
 for (const cmd of commands) {

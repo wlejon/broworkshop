@@ -9,22 +9,25 @@
 // drag is (U / 10 m/s)^1.3 at a tree, U the wind field there (sway.js's
 // dragAt, the shader's vegDragAt) over 60 s of wind clock. The oscillator's
 // drag also carries the turbulence the gust field does not resolve (a -5/3
-// spectrum above 0.1 Hz: 15% at the trunk, 40% through the crown, where the
-// shader's VEG_CROWN_TURBULENCE doubles VEG_TURBULENCE), which the shader
-// stands in for by ringing near each level's frequency. The shader's
-// response is lib/kit/sway.js's levelDrive (scene_vegetation.glsl's, line
-// for line), each level fed as vegPose feeds it: the trunk the drag at the
-// root a quarter period back, a limb or twig its own. Prints the terms,
-// then per level the mean, RMS and speed of the tip's deflection along the
-// wind (cm, cm/s) of each, and fails a level whose RMS or speed is off by
-// more than 25%.
+// spectrum above 0.1 Hz: 15% at the trunk, 40% through the crown), which
+// the shader stands in for by buffeting a limb or a spray about its lean
+// and ringing a lightly damped level near its frequency. The shader's
+// response is lib/kit/sway.js's treeLevel (scene_vegetation.glsl's
+// vegTreeLevel, line for line), each level fed as vegPose feeds it: the
+// trunk the drag at the root (vegWind's two reads), a limb or twig its own,
+// each damped as the shader damps it at the run's mean drag (vegDamping,
+// vegTrunkDamping), which the oscillator takes too. Prints the terms, then
+// per level the mean, RMS and speed of the tip's deflection along the wind
+// (cm, cm/s) of each, and fails a level whose RMS or speed is off by more
+// than 25%.
 import { grove, scene, setWind, PLANT_SCALE } from "/app/grove.js";
 import * as sway from "/lib/kit/sway.js";
 
 const wind = (bro.app && bro.app.argv && bro.app.argv[0]) || 'gusty';
 const SIGMA = { trunk: 0.15, limb: 0.40, twig: 0.40 };
-const TURB = { trunk: sway.TURBULENCE, limb: sway.CROWN_TURBULENCE, twig: sway.CROWN_TURBULENCE };
-const DAMPING = { trunk: 0.15, limb: 0.08, twig: 0.05 };
+const RING = { trunk: sway.TREE_TURBULENCE, limb: sway.CROWN_RING, twig: sway.CROWN_RING };
+const BUFFET = { trunk: 0, limb: 1, twig: 1 };
+const ZETA0 = { limb: sway.BOUGH_DAMPING, twig: sway.SPRAY_DAMPING };
 
 // --- the terms --------------------------------------------------------------------
 
@@ -34,7 +37,7 @@ const lv = (code, bits, r) => code === 0 ? 0 : r[0] * Math.exp((code - 1) / ((1 
 const words = { trunk: new Map(), limb: new Map(), twig: new Map() };
 for (let i = 0; i < t.segCount; i++) {
     const a = Math.round(v[i * 16 + 13]), b = Math.round(v[i * 16 + 14]), w = Math.round(v[i * 16 + 15]);
-    if (w) words.trunk.set(w, [lv(w >> 12, 12, F), lv(w & 4095, 12, S), v[i * 16 + 3]]);
+    if (w) words.trunk.set(w, [lv(w >> 15, 9, F), lv((w >> 6) & 511, 9, S), v[i * 16 + 3]]);
     if (b) words.limb.set(b, [lv(b >> 16, 8, F), lv((b >> 8) & 255, 8, S), lv(b & 255, 8, L)]);
     if (a & 0x3ffff) words.twig.set(a & 0x3ffff, [lv((a >> 12) & 63, 6, F), lv((a >> 6) & 63, 6, S), lv(a & 63, 6, L)]);
 }
@@ -86,17 +89,29 @@ const stats = s => {
 };
 const fmt = s => `mean ${s.mean.toFixed(2)} rms ${s.rms.toFixed(2)} speed ${s.speed.toFixed(1)}`;
 let failed = 0;
+const meanDrag = p.reduce((a, b) => a + b, 0) / n;
 for (const [name, c] of Object.entries(levels)) {
-    const zeta = DAMPING[name];
-    const shader = [];
-    for (let i = t0 * fps; i < n; i++) {
-        const s = ws(i);
-        // The plant's wind (the trunk's lag and kick span), then this level's drag.
-        const w = sway.vegWind(s, root, levels.trunk ? levels.trunk.freq : c.freq);
-        const mean = name === 'trunk' ? w.trunk : sway.dragAt(s, root[0], root[2], s.t - sway.lagOf(c.freq), true);
-        const x = sway.levelDrive(c, zeta, TURB[name], 0.3, mean, w.kick, w, 0);
-        shader.push(x[0] * w.dir[0] + x[2] * w.dir[2]);
-    }
+    const dampAt = (d) => (name === 'trunk' ? sway.trunkDamping(d) : sway.damping(c, ZETA0[name], d));
+    const zeta = dampAt(meanDrag);
+    const response = (ring, eddies) => {
+        const out = [];
+        sway.debug.ring = ring; sway.debug.eddies = eddies;
+        for (let i = t0 * fps; i < n; i++) {
+            const s = ws(i);
+            // The plant's wind (the trunk's two reads and kick), then this level's drag.
+            const w = sway.vegWind(s, root, levels.trunk ? levels.trunk.freq : c.freq);
+            const mean = name === 'trunk' ? w.trunk : sway.dragAt(s, root[0], root[2], s.t - sway.lagOf(c.freq), true);
+            const x = sway.treeLevel(c, dampAt(mean), RING[name], 0.3, mean, w.kick, w, 0, BUFFET[name]);
+            out.push(x[0] * w.dir[0] + x[2] * w.dir[2]);
+        }
+        sway.debug.ring = 1; sway.debug.eddies = 1;
+        return out;
+    };
+    const shader = response(1, 1);
+    // Its terms: the lean under the drag alone, then with the gusts' ring (no eddies).
+    const lean = stats(response(0, 0)), gusts = stats(response(1, 0));
+    console.log(`${name}: damping ${zeta.toFixed(2)} at the mean drag ${meanDrag.toFixed(3)}; the lean alone ` +
+                `rms ${lean.rms.toFixed(2)} speed ${lean.speed.toFixed(1)}, with the gusts' ring rms ${gusts.rms.toFixed(2)} speed ${gusts.speed.toFixed(1)}`);
     // x'' + 2 zeta w x' + w^2 x = w^2 (sway L drag), the drag with its turbulence.
     const w0 = 2 * Math.PI * c.freq, sub = 40, dt = 1 / fps / sub;
     let x = 0, vel = 0;

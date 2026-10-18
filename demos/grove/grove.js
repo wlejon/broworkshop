@@ -423,6 +423,8 @@ export const WINDS = {
     still: { label: 'Still', wind: { strength: 0, speed: 0, gust: 0 } },
     breeze: { label: 'Breeze', wind: { direction: [1, 0, 0.3], strength: 0.05, frequency: 1.1, speed: 2.5, gust: 1 } },
     gusty: { label: 'Gusty', wind: { direction: [1, 0, 0.3], strength: 0.12, frequency: 1.4, speed: 4.5, gust: 1.6 } },
+    // A steady strong wind, small gusts: what a tree's held lean looks like.
+    strong: { label: 'Strong', wind: { direction: [1, 0, 0.3], strength: 0.2, frequency: 1.4, speed: 12, gust: 0.4 } },
 };
 export function setWind(key) {
     grove.wind = key;
