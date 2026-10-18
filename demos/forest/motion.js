@@ -23,10 +23,15 @@
 //                       against the frame before, beyond the dolly's own
 //                       smooth change); still air, so any jump is the level
 //                       of detail
+//   meadow [wind=gusty] [seconds=8] [h=8]
+//                       the meadow far off, across it and the wind, the
+//                       trees hidden: regions by ground distance, slit-scans
+//                       at 30-150 m (does a gust travel across it?)
 //
 // Everything goes to demos/forest/captures/motion/.
 
-import { forest, setWind, sky, flight, flightAt, FLIGHT_SECONDS, vp, groundHeight, setTier, holdView, viewPoints, SHOTS, scene } from "/app/forest.js";
+import { forest, setWind, sky, flight, flightAt, FLIGHT_SECONDS, vp, groundHeight, setTier, holdView, viewPoints, SHOTS, scene,
+         MEADOW } from "/app/forest.js";
 import { MotionRun, sheet } from "/lib/kit/motion.js";
 import * as sway from "/lib/kit/sway.js";
 
@@ -279,7 +284,87 @@ function dolly() {
     console.log(lines.join('\n'));
 }
 
-const MODES = { static: staticViews, interior, flight: flightRun, dolly };
+// The meadow far off: the eye `h` m up at its edge looking across it and
+// across the wind (so a gust travels sideways on screen), the trees and
+// shrubs hidden. Regions are bands of ground distance; the slit-scans run
+// across the view at 30, 60, 100 and 150 m, where a travelling gust is a
+// slant and a standing one a vertical stripe.
+function meadowRun() {
+    const wind = opt('wind', 'gusty'), seconds = +opt('seconds', 8), F = Math.round(seconds * fps), h = +opt('h', 8);
+    setup(wind);
+    flight.on = false;
+    const was = forest.parts.map((p) => p.node.visible);
+    forest.parts.forEach((p) => { p.node.visible = false; });
+    const w = scene.wind().direction || [1, 0, 0.3], wl = Math.hypot(w[0], w[2]);
+    const across = [-w[2] / wl, w[0] / wl];
+    const c = [MEADOW.x, MEADOW.z];
+    const eye = [c[0] - across[0] * 75, 0, c[1] - across[1] * 75];
+    eye[1] = groundHeight(eye[0], eye[2]) + h;
+    const at = (d) => { const x = eye[0] + across[0] * d, z = eye[2] + across[1] * d; return [x, groundHeight(x, z), z]; };
+    holdView(eye, at(45));
+    for (let i = 0; i < 45; i++) frame();
+    const yAt = (d) => { const s = vp.toScreen(at(d)); return s && !s.behind ? Math.min(1, Math.max(0, s.y / innerHeight)) : null; };
+    // (The meadow runs to about 150 m from its edge: past that the forest floor.)
+    const ys = [15, 30, 60, 100, 150].map(yAt);
+    const band = (a, b, name) => (ys[a] !== null && ys[b] !== null && ys[a] > ys[b] + 0.02 ? [{ name, rect: [0, ys[b], 1, ys[a]] }] : []);
+    const regions = [...band(0, 1, 'near 15-30 m'), ...band(1, 2, 'mid 30-60 m'), ...band(2, 3, 'far 60-100 m'), ...band(3, 4, 'farthest 100-150 m')];
+    const slits = [30, 60, 100, 150].map((d) => ({ label: `${d} m`, y: yAt(d), x0: 0, x1: 1 })).filter((s) => s.y !== null);
+    const run = new MotionRun({ name: `forest_meadow_${wind}`, out: OUT, fps, keepFrames: false, frames: F, regions, slits,
+                                notes: [`the meadow from its edge ${h} m up, across it and the wind (${wind}), the trees hidden, ${seconds} s; ` +
+                                        `regions by ground distance; slits across the view at 30, 60, 100, 150 m (a travelling gust is a slant)`],
+                                eventMeta: (m) => (m.t !== undefined ? `wind clock ${m.t.toFixed(2)} s` : '') });
+    record(run, F);
+    forest.parts.forEach((p, k) => { p.node.visible = was[k]; });
+    // Does the picture travel? Per slit: its luma smoothed over 40 px (the
+    // blades' grain and sway out), less each pixel's mean over the run; the
+    // shift (along the row, `lag` frames on) where it best matches itself is
+    // its travel. A gust wave moves at the gusts' speed downwind; a picture that
+    // only brightens and darkens in place peaks at no shift.
+    const lag = 15, B = 8, lines = [`travel per slit (shift of best match ${lag} frames on; wind ${(scene.wind().speed || 0).toFixed(1)} m/s across the view):`];
+    slits.forEach((s, i) => {
+        const rows = run.slitRows[i];
+        if (!rows || rows.length <= lag) return;
+        const N = Math.floor(rows[0].length / 4 / B), T = rows.length;
+        const A = rows.map((r) => {
+            const out = new Float32Array(N);
+            for (let x = 0; x < N; x++) {
+                let sum = 0;
+                for (let k = 0; k < B; k++) { const o = (x * B + k) * 4; sum += 0.2126 * r[o] + 0.7152 * r[o + 1] + 0.0722 * r[o + 2]; }
+                out[x] = sum / B;
+            }
+            const sm = new Float32Array(N);
+            for (let x = 0; x < N; x++) { let a = 0, n = 0; for (let k = -2; k <= 2; k++) if (x + k >= 0 && x + k < N) { a += out[x + k]; n++; } sm[x] = a / n; }
+            return sm;
+        });
+        const mean = new Float32Array(N);
+        for (const a of A) for (let x = 0; x < N; x++) mean[x] += a[x] / T;
+        let vsum = 0;
+        for (const a of A) for (let x = 0; x < N; x++) { a[x] -= mean[x]; vsum += a[x] * a[x]; }
+        const std = Math.sqrt(vsum / (T * N));
+        const M = 40;
+        let best = -2, bestS = 0;
+        const corr = [];
+        for (let sh = -M; sh <= M; sh++) {
+            let c = 0, na = 0, nb = 0;
+            for (let t = 0; t + lag < T; t++) {
+                const a = A[t], b = A[t + lag];
+                for (let x = Math.max(0, -sh); x < Math.min(N, N - sh); x++) { c += a[x] * b[x + sh]; na += a[x] * a[x]; nb += b[x + sh] * b[x + sh]; }
+            }
+            const r = c / Math.sqrt(Math.max(na * nb, 1e-9));
+            corr.push(r);
+            if (r > best) { best = r; bestS = sh; }
+        }
+        const r0 = corr[M];
+        const D = [30, 60, 100, 150][i];
+        const mps = (bestS * B / pxPerMetre(D)) / (lag / fps);
+        lines.push(`  ${s.label}: change in time ${std.toFixed(2)} levels rms; best match ${best.toFixed(2)} at ${bestS * B} px ` +
+                   `(${mps.toFixed(1)} m/s along x), in place ${r0.toFixed(2)}`);
+    });
+    console.log(lines.join('\n'));
+    require('fs').appendFileSync(`${OUT}/forest_meadow_${wind}_motion.txt`, lines.join('\n') + '\n');
+}
+
+const MODES = { static: staticViews, interior, flight: flightRun, dolly, meadow: meadowRun };
 const commands = [[]];
 for (const a of argv) a === '+' ? commands.push([]) : commands[commands.length - 1].push(a);
 for (const cmd of commands) {

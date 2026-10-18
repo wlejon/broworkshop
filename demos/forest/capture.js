@@ -20,10 +20,8 @@
 //   bro-headless ... capture.js -- compare <shot[,shot...]> [label=forest] [wind=gusty] [sky=noon]
 //       the forced Leaves tier beside By size, the middle half of each view:
 //       <label>_<shot>_<sky>_compare.jpg
-//   bro-headless ... capture.js -- meadow [label=meadow] [skies=noon,golden] [wind=breeze]
-//       the meadow from its edge at 0.5, 3, 30, 60 and 150 m, and a view
-//       under the trees: full-frame JPEGs <label>_meadow_<sky>_<d>m.jpg,
-//       <label>_understory_<sky>.jpg
+//   bro-headless ... capture.js -- meadow | meadowbands | meadowtone ...
+//       the meadow's stills and its look by distance (see meadow.js)
 //   bro-headless ... capture.js -- foliage [parts=broadleaf,shrub] [label=foliage] [skies=noon,golden] [views=inside,1,3,8]
 //       a crown at the glade's edge up close, full frame: from inside it
 //       and 1, 3 and 8 m off its edge (<label>_<part>_<sky>_<view>.png)
@@ -60,6 +58,7 @@
 
 import { forest, setWind, setShot, sky, flight, flightAt, FLIGHT_SECONDS, vp, groundHeight, GRASS_RANGE,
          setTier, setLod, forestStats, HERBS, HERB_RANGE, meadowAt, MEADOW_LOOK, holdView, still } from "/app/forest.js";
+import { meadowCommands } from "/app/meadow.js";
 
 const argv = (bro.app && bro.app.argv) || [];
 // The command now running: its mode and arguments (see run() at the end).
@@ -957,63 +956,15 @@ function saveJpeg(file) {
     console.log(file);
 }
 
-// The meadow at true scale, from its edge across it: a flowering plant at
-// 0.5 and 3 m, the meadow's ground at 30 and 60 m, the trees on its far
-// side at 150 m; and a view under the trees. Full frames at each sky:
-// <label>_meadow_<sky>_<d>m.jpg, <label>_understory_<sky>.jpg.
-//   meadow [label=meadow] [skies=noon,golden] [wind=breeze]
-const FLOWERS = ['daisy', 'poppy', 'yarrow', 'foxglove', 'bluebell', 'plantain'];
-function meadowShots() {
-    const label = a1 || 'meadow';
-    for (const time of (a2 || 'noon,golden').split(',')) {
-        setup(a3 || 'breeze', 'auto', time);
-        setShot('meadow');
-        step(1.5);
-        // The flowering plant nearest a point a few metres in.
-        const [px, pz] = meadowAt(5);
-        const plants = forest.grass.herbPlants(px, pz, 5);
-        const plant = plants.find((q) => FLOWERS.includes(HERBS[q.species])) || plants[0];
-        for (const d of [0.5, 3, 30, 60, 150]) {
-            let eye, look, what;
-            if (d < 10 && plant) {
-                const name = HERBS[plant.species];
-                const h = bro.flora.herbPreset(name).height;
-                look = [plant.x, plant.y + Math.min(0.6 * h, 0.5), plant.z];
-                // From the meadow's edge, looking a little down at it.
-                const pitch = d < 1 ? 0.45 : 0.5;
-                eye = [look[0] - MEADOW_LOOK[0] * d * Math.cos(pitch), look[1] + d * Math.sin(pitch),
-                       look[2] - MEADOW_LOOK[1] * d * Math.cos(pitch)];
-                what = name;
-            } else {
-                // From d m off, a little above the meadow (as the grove's
-                // herb views): its ground at 30 and 60, the far edge at 150.
-                const pitch = d >= 150 ? 0.12 : d >= 60 ? 0.22 : 0.2;
-                const t = meadowAt(d);
-                look = [t[0], groundHeight(t[0], t[1]) + (d >= 150 ? 2.5 : 0.3), t[1]];
-                eye = [look[0] - MEADOW_LOOK[0] * d * Math.cos(pitch), look[1] + d * Math.sin(pitch),
-                       look[2] - MEADOW_LOOK[1] * d * Math.cos(pitch)];
-                eye[1] = Math.max(eye[1], groundHeight(eye[0], eye[2]) + 1.7);
-                what = d >= 150 ? 'the far edge' : 'the ground';
-            }
-            holdView(eye, look);
-            step(1);
-            flush();
-            console.log(`meadow ${time} ${d} m: ${what}`);
-            saveJpeg(`${OUT}/${label}_meadow_${time}_${d}m.jpg`);
-        }
-        setShot('understory');
-        step(1.5);
-        flush();
-        saveJpeg(`${OUT}/${label}_understory_${time}.jpg`);
-    }
-}
+// The meadow's stills and measures (meadow.js).
+const MEADOW_MODES = meadowCommands({ setup, step, saveJpeg, OUT, opt, pos: (i) => [mode, a1, a2, a3, a4][i] });
 
 // Several commands joined by `+` run one after another in this one boot.
 // Between them the page is put back as the boot left it: any overlay a
 // command drew is removed and the forest's level of detail restored (the
 // clock runs on, so wind and the flight's motion continue from there).
-const MODES = { still: stills, trace, video, handover, compare, parts, hold, metrics, tiers, herbs: herbMetrics,
-                meadow: meadowShots, foliage };
+const MODES = Object.assign({ still: stills, trace, video, handover, compare, parts, hold, metrics, tiers, herbs: herbMetrics,
+                              foliage }, MEADOW_MODES);
 const lod0 = forest.parts.map((p) => p.node.forestLod());
 const commands = [[]];
 for (const a of argv) a === '+' ? commands.push([]) : commands[commands.length - 1].push(a);
