@@ -477,9 +477,16 @@ function tiers() {
 // Side by side at each shot: the forced "Leaves" tier on the left, "By size"
 // on the right, the middle half of each view at full resolution, a frame
 // apart. <label>_<shot>_<sky>_compare.jpg.
+// The Leaves tier that compare and metrics force holds out to this (m;
+// `forcerange=`, 0 the whole forest): the furthest band ends at 160 m, and
+// the whole forest at Leaves is 2 billion vertices, a frame past the GPU's
+// watchdog (amdgpu resets the ring after 10 s).
+const forceRange = () => +(opt('forcerange') ?? 200);
+
 function compare() {
     const label = a2 || 'forest', time = a4 || 'noon';
     setup(a3 || 'gusty', 'auto', time);
+    setLod({ forceRange: forceRange() });
     const W = innerWidth, H = innerHeight, half = Math.floor(W / 2);
     const cv = document.createElement('canvas');
     cv.width = W; cv.height = H;
@@ -855,6 +862,7 @@ function metrics() {
     console.log(`metrics ${label}: Leaves/By size per band${keys.map((k) => k.padStart(13)).join('')}`);
     for (const time of skies) {
         setup(a4 || 'breeze', 'auto', time);
+        setLod({ forceRange: forceRange() });
         for (const s of shots) {
             setShot(s);
             setTier('auto');
