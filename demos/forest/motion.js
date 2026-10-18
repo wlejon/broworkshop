@@ -45,7 +45,7 @@ const opt = (k, d) => { const a = args.find((s) => s.startsWith(k + '=')); retur
 document.body.classList.add('clean');
 flush();
 
-const frame = () => { advanceTime(1000 / fps); flush(); };
+const frame = () => { advanceTime(1000 / fps); };
 const pxPerMetre = (d) => (innerHeight / 2) / Math.tan(vp.cam.fov * Math.PI / 360) / d;
 
 function setup(wind) {

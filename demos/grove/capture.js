@@ -449,10 +449,10 @@ function herbs() {
                 if (cmdArgs.includes('perf')) {
                     // GPU ms of the view, and without the herbs: their cost.
                     const ms = () => {
-                        for (let i = 0; i < 4; i++) { advanceTime(1000 / fps); flush(); }
+                        for (let i = 0; i < 4; i++) { advanceTime(1000 / fps); }
                         perf.gpuFrameMs();
                         let s = 0;
-                        for (let i = 0; i < 30; i++) { advanceTime(1000 / fps); flush(); s += perf.gpuFrameMs(); }
+                        for (let i = 0; i < 30; i++) { advanceTime(1000 / fps); s += perf.gpuFrameMs(); }
                         return s / 30;
                     };
                     const all = ms();
@@ -746,10 +746,10 @@ function perfShots() {
         const ms = {};
         for (const [k, c] of Object.entries(cases)) {
             show(...c);
-            for (let i = 0; i < 5; i++) { advanceTime(1000 / fps); flush(); }
+            for (let i = 0; i < 5; i++) { advanceTime(1000 / fps); }
             perf.gpuFrameMs();
             let sum = 0;
-            for (let i = 0; i < n; i++) { advanceTime(1000 / fps); flush(); sum += perf.gpuFrameMs(); }
+            for (let i = 0; i < n; i++) { advanceTime(1000 / fps); sum += perf.gpuFrameMs(); }
             ms[k] = sum / n;
         }
         show(true, true, true);

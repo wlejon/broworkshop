@@ -60,7 +60,7 @@ const floorTag = () => (opt('floor') === 'contrast' ? '_contrast' : '');
 document.body.classList.add('clean');
 flush();
 
-const frame = () => { advanceTime(1000 / fps); flush(); };
+const frame = () => { advanceTime(1000 / fps); };
 const allNodes = () => [...grove.nodes, ...grove.presets.map((p) => p.node), grove.grass, roller.node];
 
 // Hide everything but `keep`; returns a restore function.

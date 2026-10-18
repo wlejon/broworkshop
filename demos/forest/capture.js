@@ -42,7 +42,8 @@
 // hide, to take one part's cost out of a trace; `herbs` the grass's low
 // plants); compare takes
 // `crop=cx,cy,w` (fractions of the view; w 0.25 is a quarter blown up
-// twice), trace `warm=<frames a second of the flight>` and `hold=<frames>`.
+// twice), trace `warm=<frames a second of the flight>`, `hold=<frames>` and
+// `rest=<the GPU's idle after a timed frame, a share of its time>` (2; 0 none).
 // With BRO_SCENE_GPU_PASSES=<ms> a trace logs each frame over <ms> pass by
 // pass (bro/docs/headless.md).
 //
@@ -138,6 +139,18 @@ function stills() {
 
 const pct = (sorted, p) => sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))];
 
+// A frame's GPU ms (perf.gpuFrameMs), the GPU then resting twice as long
+// (rest=, a share of the frame's time; 0 none): a GPU kept busy frame after
+// frame runs slower after a minute or so (halo's APU: the same flight frames
+// 2 to 4 times as long, p95 18 -> 42 ms), so the CPU's own pace stays out of
+// what a frame costs.
+const gpuMs = () => {
+    const ms = perf.gpuFrameMs();
+    const rest = +(opt('rest') ?? 2);
+    if (rest > 0 && ms > 0) wallSleep(ms * rest);
+    return ms;
+};
+
 function trace() {
     const label = a1 || 'forest';
     setup(a2);
@@ -156,10 +169,10 @@ function trace() {
     flight.speed = 0;
     for (let t = 0; t <= FLIGHT_SECONDS; t += 1) {
         flight.t = t;
-        for (let k = 0; k < (+opt('warm') || 1); k++) { advanceTime(1000 / fps); flush(); }
+        for (let k = 0; k < (+opt('warm') || 1); k++) { advanceTime(1000 / fps); }
     }
     flight.t = 0;
-    for (let i = 0; i < (+opt('hold') || 10) || perf.now() - warmFrom < 10000; i++) { advanceTime(1000 / fps); flush(); }
+    for (let i = 0; i < (+opt('hold') || 10) || perf.now() - warmFrom < 10000; i++) { advanceTime(1000 / fps); }
     perf.gpuFrameMs();
     flight.speed = 1;
     const frames = [];
@@ -170,7 +183,7 @@ function trace() {
         advanceTime(1000 / fps);
         flush();
         const cpu = perf.now() - c0;
-        const ms = perf.gpuFrameMs();
+        const ms = gpuMs();
         const s = forestStats();
         frames.push({ t: +(i / fps).toFixed(3), ms, cpu: +cpu.toFixed(2), eye: flightAt(i / fps).eye.map((v) => +v.toFixed(1)),
                       trees: [s.trees.leaves, s.trees.clumps, s.trees.crowns], culled: s.culled,
@@ -315,7 +328,7 @@ function handover() {
     for (let i = 0; i < frames; i++) {
         const d = d0 * Math.pow(d1 / d0, i / Math.max(1, frames - 1));
         vp.reframe(sub.top, d, { yaw, pitch });
-        for (let k = 0; k < 3; k++) { advanceTime(1000 / fps); flush(); }
+        for (let k = 0; k < 3; k++) { advanceTime(1000 / fps); }
         const l = sub.node.forestTreeLod(sub.specimen, pxPerMetre(d) * sub.scale);
         // A crop that holds about the tree's crown at the middle distance.
         const cw = Math.min(1, Math.max(0.12, 14 * pxPerMetre(dMid) * sub.scale / W));
@@ -421,7 +434,7 @@ function tiers() {
     const cols = names.length, rows = ds.length, gap = 4;
     const tw = Math.floor((W - gap * (cols + 1)) / cols);
     const th = Math.floor(Math.min(tw * 9 / 16, (H - gap * (rows + 1)) / rows));
-    const grab = () => { for (let k = 0; k < 3; k++) { advanceTime(1000 / fps); flush(); } return frameImage(); };
+    const grab = () => { for (let k = 0; k < 3; k++) { advanceTime(1000 / fps); } return frameImage(); };
     const panes = [];
     for (const d of ds) {
         vp.reframe(sub.top, d, { yaw, pitch });
@@ -508,7 +521,7 @@ function compare() {
         const panes = [];
         for (const tier of ['leaves', 'auto']) {
             setTier(tier);
-            for (let k = 0; k < 2; k++) { advanceTime(1000 / fps); flush(); }
+            for (let k = 0; k < 2; k++) { advanceTime(1000 / fps); }
             panes.push(shrink(frameImage(), half, H, opt('crop') ? opt('crop').split(',').map(Number) : [0.5, 0.5, half / W]));
         }
         setTier('auto');
@@ -550,10 +563,10 @@ function parts() {
         const ms = {};
         for (const [k, c] of Object.entries(cases)) {
             show(...c);
-            for (let i = 0; i < 8; i++) { advanceTime(1000 / fps); flush(); }
+            for (let i = 0; i < 8; i++) { advanceTime(1000 / fps); }
             perf.gpuFrameMs();
             let sum = 0;
-            for (let i = 0; i < 30; i++) { advanceTime(1000 / fps); flush(); sum += perf.gpuFrameMs(); }
+            for (let i = 0; i < 30; i++) { advanceTime(1000 / fps); sum += gpuMs(); }
             ms[k] = sum / 30;
         }
         show(true, true);
@@ -574,13 +587,13 @@ function hold() {
     const times = (a1 || '11,12').split(',').map(Number);
     const warmFrom = perf.now();
     flight.t = times[0];
-    while (perf.now() - warmFrom < 10000) { advanceTime(1000 / fps); flush(); }
+    while (perf.now() - warmFrom < 10000) { advanceTime(1000 / fps); }
     for (const t of times) {
         flight.t = t;
-        for (let i = 0; i < 10; i++) { advanceTime(1000 / fps); flush(); }
+        for (let i = 0; i < 10; i++) { advanceTime(1000 / fps); }
         perf.gpuFrameMs();
         const ms = [];
-        for (let i = 0; i < 60; i++) { advanceTime(1000 / fps); flush(); ms.push(perf.gpuFrameMs()); }
+        for (let i = 0; i < 60; i++) { advanceTime(1000 / fps); ms.push(gpuMs()); }
         ms.sort((a, b) => a - b);
         console.log(`hold t=${t}: mean ${(ms.reduce((a, b) => a + b, 0) / ms.length).toFixed(2)} ms, ` +
                     `median ${ms[30].toFixed(2)}, max ${ms[59].toFixed(2)}`);
@@ -882,7 +895,7 @@ function metrics() {
             let last = null, lastLuma = null;
             for (const tier of ['leaves', 'auto']) {
                 setTier(tier);
-                for (let k = 0; k < 2; k++) { advanceTime(1000 / fps); flush(); }
+                for (let k = 0; k < 2; k++) { advanceTime(1000 / fps); }
                 last = frameImage();
                 lastLuma = lumaOf(last, W, H);
                 frames[tier] = bandStats(lastLuma, depth, W, H);
@@ -944,7 +957,7 @@ function shadowBands() {
             const half = crownDepth(W >> 1, H >> 1), gHalf = groundDepth(W >> 1, H >> 1, half);
             const grab = (on) => {
                 sky.sun.castsShadow = on;
-                for (let k = 0; k < 3; k++) { advanceTime(1000 / fps); flush(); }
+                for (let k = 0; k < 3; k++) { advanceTime(1000 / fps); }
                 return lumaOf(frameImage(), W, H).Y;
             };
             const on = grab(true), off = grab(false);
@@ -1032,7 +1045,7 @@ function herbMetrics() {
             const st = {};
             for (const [key, range] of [['full', 200], ['handover', range0]]) {
                 g.setHerbs({ species: HERBS, range });
-                for (let k = 0; k < 2; k++) { advanceTime(1000 / fps); flush(); }
+                for (let k = 0; k < 2; k++) { advanceTime(1000 / fps); }
                 st[key] = bandStats(lumaOf(frameImage(), W, H), depth, W, H, HERB_BANDS);
             }
             g.setHerbs({ species: HERBS, range: range0 });
