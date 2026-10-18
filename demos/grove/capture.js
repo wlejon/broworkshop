@@ -13,7 +13,7 @@
 //       species <name[,name...]|all> [label=species] [skies=noon,golden] [tier=auto]
 //       (each conifer and shrub preset close, mid and far: <label>_<name>_<sky>.jpg)
 //   bro-headless --width 1280 --height 720 demos/grove demos/grove/capture.js -- \
-//       herbs <name[,name...]|all> [label=herb] [skies=noon,golden] [sil]
+//       herbs <name[,name...]|all> [label=herb] [skies=noon,golden] [sil] [views=d,d,...] [aim=top]
 //       (each herb preset alone in the meadow at 1, 3, 10 and 30 m: <label>_<name>_<sky>.jpg;
 //       `meadow` for the meadow's own mix, views=0.5,3,30,150 from knee height out)
 //   bro-headless --width 960 --height 540 demos/grove demos/grove/capture.js -- \
@@ -361,7 +361,9 @@ function herbs() {
             for (const [d, pitch] of VIEWS) {
                 const near = plant && d < 2;
                 const ph = near && name === 'meadow' ? bro.flora.herbPreset(MEADOW_HERBS[plant.species]).height : p.height;
-                const target = near ? [plant.x, plant.y + Math.min(ph * 0.5, 0.45), plant.z]
+                // `aim=top`: the near views on the plant's top (its blooms).
+                const aimY = cmdArgs.includes('aim=top') ? ph * 0.9 : Math.min(ph * 0.5, 0.45);
+                const target = near ? [plant.x, plant.y + aimY, plant.z]
                     : [at[0], groundHeight(at[0], at[1]) + Math.min(p.height * 0.5, 0.4), at[1]];
                 // From the bowl's middle out toward the hills (the eye stays
                 // over the meadow).

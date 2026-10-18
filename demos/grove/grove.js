@@ -64,26 +64,21 @@ export function dryness(x, z) {
     return Math.min(1, 0.75 * patch * broad + 0.1 * broad + 0.3 * up);
 }
 
-// The ground is the soil under the grass: dark and cooler than the blades
-// (the shade at the foot of a sward, not a lit floor), so the gaps between
-// blades read as depth.
+// The ground: turf under the grass (scene_ground.glsl shades it as the sward:
+// its roots and thatch between the near blades, the blades' tops further
+// off, soil where nothing grows), its vertex colour the ground's data where
+// the grass field does not reach: (grass density, dryness, no canopy).
 function groundMesh() {
     const N = 141, cell = (2 * GROUND) / (N - 1);
     const h = new Float32Array(N * N);
     for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) h[j * N + i] = groundHeight(-GROUND + i * cell, -GROUND + j * cell);
     const m = Mesh.heightmapGrid(h, N, N, cell);
-    const pos = m.positions, nrm = m.normals, c = new Float32Array(m.vertexCount * 4);
-    const lush = [0.028, 0.038, 0.022], dry = [0.085, 0.066, 0.036], earth = [0.16, 0.13, 0.08];
+    const pos = m.positions, c = new Float32Array(m.vertexCount * 4);
     for (let v = 0; v < m.vertexCount; v++) {
         const x = pos[v * 3], z = pos[v * 3 + 2];
-        const patch = dryness(x, z);
-        const fleck = 0.88 + 0.24 * swell.genSingle2D(x * 0.9, z * 0.9, 0x5);
-        const hollow = 0.75 + 0.25 * smooth(-0.6, 0.4, groundHeight(x, z) - 0.25 * (groundHeight(x + 3, z) + groundHeight(x - 3, z) + groundHeight(x, z + 3) + groundHeight(x, z - 3)) + 0.2);
-        const steep = smooth(0.85, 0.6, nrm[v * 3 + 1]);
-        for (let k = 0; k < 3; k++) {
-            const g = lush[k] + (dry[k] - lush[k]) * patch;
-            c[v * 4 + k] = (g + (earth[k] - g) * steep) * fleck * hollow;
-        }
+        c[v * 4] = 0.8;
+        c[v * 4 + 1] = dryness(x, z);
+        c[v * 4 + 2] = 0;
         c[v * 4 + 3] = 1;
     }
     m.colors = c;
@@ -118,6 +113,7 @@ function growGrass(world, presetWorlds) {
     };
     return scene.createGrass({
         ground,
+        turf: true,
         cell: 0.5,
         dry: dryness,
         density,
