@@ -33,6 +33,10 @@ export const FOREST = 400;         // half-size of the planted area
 export const PLANT_SCALE = 1.5;    // node scale: broflora grows ~5 m trees, drawn ~7.5 m
 export const GRASS_RANGE = 150;    // how far blades are drawn (their rings end at 7, 20, 55, 150 m of it at 150)
 export const GLADE = { x: 12, z: 18, r: 26 };
+// A flower meadow at true scale, south-west of the glade: about 170 m
+// across inside its ragged forest edge, so a view across it reaches 150 m
+// of meadow to the trees on its far side.
+export const MEADOW = { x: -120, z: -100, r: 85 };
 
 export const vp = sceneViewport('#stage', {
     orbit: { target: [0, 4, 0], dist: 60, fov: 50, near: 0.1, far: 2000, rot: orbitRotation(Math.PI * 0.75, -0.3) },
@@ -65,19 +69,22 @@ const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a
 export function groundHeight(x, z) {
     // Broad hills, gentler round the glade where the flight comes down.
     const r = Math.hypot(x - GLADE.x, z - GLADE.z);
-    const broad = 9 * fbm.genSingle2D(x * 0.006, z * 0.006, 0x51) * (1 - 0.6 * smooth(140, 50, r));
+    // The meadow lies in a broad, shallow hollow.
+    const m = smooth(MEADOW.r * 1.7, MEADOW.r * 0.6, Math.hypot(x - MEADOW.x, z - MEADOW.z));
+    const broad = 9 * fbm.genSingle2D(x * 0.006, z * 0.006, 0x51) * (1 - 0.6 * smooth(140, 50, r)) * (1 - 0.8 * m);
     // The swells die away toward the near ground's edge, so the far
     // ground's coarse mesh is true to the same function.
     const near = smooth(GROUND, GROUND - 40, Math.max(Math.abs(x), Math.abs(z)));
     const swell = 1.4 * fbm.genSingle2D(x * 0.03, z * 0.03, 0x9a0d) * near;
-    const g = smooth(GLADE.r * 2.2, GLADE.r * 0.5, r);
+    const g = Math.max(smooth(GLADE.r * 2.2, GLADE.r * 0.5, r), 0.6 * m);
     return broad + swell * (1 - 0.7 * g);
 }
 
 /** How sun-dried the grass is at x, z: patches, drier on the rises. */
 export function dryness(x, z) {
     const patch = smooth(-0.3, 0.5, fbm.genSingle2D(x * 0.12, z * 0.12, 0x77));
-    return Math.min(1, 0.6 * patch + 0.25 * smooth(2, 9, groundHeight(x, z)));
+    // The meadow's hollow holds its water: greener than the glade's rises.
+    return Math.min(1, 0.6 * patch + 0.25 * smooth(2, 9, groundHeight(x, z))) * (1 - 0.45 * meadowShare(x, z));
 }
 
 // A deer path from the glade west into the trees, which the flight walks:
@@ -94,10 +101,16 @@ function trailDistance(x, z) {
     return best;
 }
 
-/** Where trees stand: 0 .. 1, nothing in the glade, a ragged edge round it, none on the trail. */
+/** How far x, z lies inside the meadow's ragged edge: 1 deep in it, 0 in the trees. */
+export function meadowShare(x, z) {
+    const d = Math.hypot(x - MEADOW.x, z - MEADOW.z) + 16 * fbm.genSingle2D(x * 0.025, z * 0.025, 0x3e);
+    return smooth(MEADOW.r * 1.12, MEADOW.r * 0.85, d);
+}
+
+/** Where trees stand: 0 .. 1, nothing in the glade or the meadow, ragged edges round them, none on the trail. */
 export function treeDensity(x, z) {
     const d = Math.hypot(x - GLADE.x, z - GLADE.z) + 8 * fbm.genSingle2D(x * 0.05, z * 0.05, 0x3);
-    return smooth(GLADE.r * 0.8, GLADE.r * 1.25, d) * smooth(2.5, 4.5, trailDistance(x, z)) *
+    return smooth(GLADE.r * 0.8, GLADE.r * 1.25, d) * smooth(2.5, 4.5, trailDistance(x, z)) * (1 - meadowShare(x, z)) *
            (0.85 + 0.15 * fbm.genSingle2D(x * 0.02, z * 0.02, 0x8));
 }
 
@@ -245,7 +258,10 @@ export function shrubDensity(x, z) {
     const ring = smooth(GLADE.r * 0.7, GLADE.r * 1.3, d);
     const edge = 4 * ring * (1 - ring);
     const under = ring * (0.015 + 0.15 * smooth(0.2, 0.55, fbm.genSingle2D(x * 0.03, z * 0.03, 0x5b)));
-    return Math.min(1, 0.55 * edge + 0.05 * (1 - ring) + under) * smooth(3, 5, trailDistance(x, z));
+    // The meadow's edge: shrubs along it, a few out in the grass.
+    const m = meadowShare(x, z), medge = 4 * m * (1 - m);
+    return Math.min(1, 0.55 * edge + 0.05 * (1 - ring) + under * (1 - m) + 0.5 * medge + 0.01 * m) *
+           smooth(3, 5, trailDistance(x, z));
 }
 
 function plant(trees, shrubs) {
@@ -403,26 +419,36 @@ export function flightAt(t) {
 }
 
 export const flight = { on: false, t: 0, speed: 1 };
+// A view held off the flight (a shot with its own eye and look-at point):
+// { eye, look }, world.
+export const still = { view: null };
 /** Fly from time t (s); land() hands the view to the orbit camera. */
 export function fly(t) {
     flight.on = true;
     flight.t = t || 0;
     flight.speed = 1;
+    still.view = null;
     forest.shot = null;
 }
-/** Stop the flight where it is, the orbit camera taking over its view. */
-export function land() {
-    if (!flight.on) return;
+/** Hold the view at eye, looking at look (world), off the flight. */
+export function holdView(eye, look) {
     flight.on = false;
-    const { eye, look } = flightAt(flight.t);
+    still.view = { eye, look };
+}
+/** Stop the flight (or a held view) where it is, the orbit camera taking over its view. */
+export function land() {
+    if (!flight.on && !still.view) return;
+    const { eye, look } = flight.on ? flightAt(flight.t) : still.view;
+    flight.on = false;
+    still.view = null;
     const d = [look[0] - eye[0], look[1] - eye[1], look[2] - eye[2]];
     const dist = Math.hypot(d[0], d[1], d[2]);
     vp.reframe(look, dist, { yaw: Math.atan2(-d[0], -d[2]), pitch: Math.asin(d[1] / dist) });
 }
 vp.onFrame((dt) => { if (flight.on) flight.t = Math.min(FLIGHT_SECONDS, flight.t + dt * flight.speed); });
 vp.onView((view) => {
-    if (!flight.on) return;
-    const f = flightAt(flight.t);
+    const f = flight.on ? flightAt(flight.t) : still.view;
+    if (!f) return;
     view.position = f.eye;
     view.target = f.look;
     view.up = [0, 1, 0];
@@ -430,16 +456,42 @@ vp.onView((view) => {
 
 // --- views --------------------------------------------------------------------------
 
+// The meadow seen from its edge nearest the glade, across it to the trees
+// on its far side: meadowAt(d) is the point d m out from that edge (world
+// x, z), MEADOW_LOOK the way across.
+export const MEADOW_LOOK = (() => {
+    const dx = GLADE.x - MEADOW.x, dz = GLADE.z - MEADOW.z, l = Math.hypot(dx, dz);
+    return [-dx / l, -dz / l];
+})();
+const MEADOW_EDGE = [MEADOW.x - MEADOW_LOOK[0] * MEADOW.r * 0.8, MEADOW.z - MEADOW_LOOK[1] * MEADOW.r * 0.8];
+export function meadowAt(d) {
+    return [MEADOW_EDGE[0] + MEADOW_LOOK[0] * d, MEADOW_EDGE[1] + MEADOW_LOOK[1] * d];
+}
+
+// The flight's views (t, s), and two of their own (`view`: eye x, height
+// over the ground, z, look x, height, z).
 export const SHOTS = {
     above:   { label: 'Above', t: 0 },
     canopy:  { label: 'Over the canopy', t: 13 },
     skim:    { label: 'Skimming', t: 18 },
     glade:   { label: 'The glade', t: 23 },
     trunks:  { label: 'Among the trunks', t: 34 },
+    meadow:  { label: 'The meadow', view: [meadowAt(0)[0], 1.7, meadowAt(0)[1], meadowAt(150)[0], 2.5, meadowAt(150)[1]] },
+    understory: { label: 'Under the trees', view: [60, 1.7, -40, 80, 2.2, -60] },
 };
+/** The world eye and look-at point of a view [x, h, z, lx, lh, lz] (heights over the ground). */
+export function viewPoints(v) {
+    return { eye: [v[0], groundHeight(v[0], v[2]) + v[1], v[2]], look: [v[3], groundHeight(v[3], v[5]) + v[4], v[5]] };
+}
 export function setShot(key) {
     const s = SHOTS[key];
     forest.shot = key;
+    if (s.view) {
+        const { eye, look } = viewPoints(s.view);
+        holdView(eye, look);
+        return;
+    }
+    still.view = null;
     flight.on = true;
     flight.t = s.t;
     flight.speed = 0;
