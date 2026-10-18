@@ -46,6 +46,8 @@ import * as sway from "/lib/kit/sway.js";
 
 const argv = (bro.app && bro.app.argv) || [];
 const OUT = bro.resolvePath('/app/captures').replace(/\\/g, '/') + '/motion';
+// The rows a near clump's twig piece is drawn in (bro's kTwigFineRows).
+const FINE_ROWS = 3;
 require('fs').mkdirSync(OUT, { recursive: true });
 const fps = 30;
 let args = [];
@@ -880,21 +882,32 @@ function twigs() {
             const ix = j % c.S;
             const K = sway.PIECES.shoot, u = K * at.x / Math.max(at.shoot.len, 1e-6);
             const piece = Math.min(K - 1, Math.floor(u));
-            const p0 = sway.twigEnd(c, sway.shootPiece(c, ix) + piece, 0), p1 = sway.twigEnd(c, sway.shootPiece(c, ix) + piece, 1);
-            const f = u - piece;
+            // The twig as a near clump draws it (TwigsFine, FINE_ROWS a piece):
+            // its rows on the curve through its piece's ends, posed there,
+            // straight between them (a base piece's first row at its collar,
+            // 3 radii on).
+            const pc = sway.shootPiece(c, ix) + piece, fu = u - piece;
+            const e0 = sway.twigEnd(c, pc, 0), e1 = sway.twigEnd(c, pc, 1);
+            let f1 = 1 / FINE_ROWS;
+            if (e0.base) f1 = Math.min(Math.max(3 * e0.radius / Math.max(Math.hypot(...e1.p.map((v, i) => v - e0.p[i])), 1e-6), 0.02), f1);
+            const rowF = [0, f1];
+            for (let r = 2; r <= FINE_ROWS; r++) rowF.push(f1 + (1 - f1) * (r - 1) / (FINE_ROWS - 1));
+            let ri = 0;
+            while (ri < FINE_ROWS - 1 && rowF[ri + 1] < fu) ri++;
+            const fr = (fu - rowF[ri]) / Math.max(rowF[ri + 1] - rowF[ri], 1e-6);
+            const rowA = sway.twigAt(c, pc, rowF[ri]), rowB = sway.twigAt(c, pc, rowF[ri + 1]);
+            const between = (a, b) => a.map((v, i) => v + (b[i] - v) * fr);
             const pet = petiole * opts.Lf * L.size * PLANT_SCALE;
             let gmax = 0, rmax = 0, rel0 = null, relMax = 0;
             for (let k = 0; k < N; k++) {
                 const ws = sway.windStateAt(params, params.time + k / fps);
                 const w = sway.vegWind(ws, pt.root, pt.trunk.freq);
                 const leaf = toWorld(pt, w, L.P, at.shoot, at.spray, 2, at.x, ws.t);
-                const a = toWorld(pt, w, p0.p, at.shoot, at.spray, 2, p0.along, ws.t).p;
-                const b = toWorld(pt, w, p1.p, at.shoot, at.spray, 2, p1.along, ws.t).p;
-                const tw = [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f];
+                const tw = between(toWorld(pt, w, rowA.p, at.shoot, at.spray, 2, rowA.along, ws.t).p,
+                                   toWorld(pt, w, rowB.p, at.shoot, at.spray, 2, rowB.along, ws.t).p);
                 gmax = Math.max(gmax, Math.hypot(leaf.p[0] - tw[0], leaf.p[1] - tw[1], leaf.p[2] - tw[2]));
                 if (k === 0) {
-                    const ra = M.apply(p0.p), rb = M.apply(p1.p), rp = M.apply(L.P);
-                    const rt = [ra[0] + (rb[0] - ra[0]) * f, ra[1] + (rb[1] - ra[1]) * f, ra[2] + (rb[2] - ra[2]) * f];
+                    const rt = between(M.apply(rowA.p), M.apply(rowB.p)), rp = M.apply(L.P);
                     rmax = Math.hypot(rp[0] - rt[0], rp[1] - rt[1], rp[2] - rt[2]);
                 }
                 // The leaf's tip about its node (the wood's and shoot's turn, its own flutter).
