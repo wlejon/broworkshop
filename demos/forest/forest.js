@@ -26,6 +26,7 @@
 
 import { sceneViewport, orbitRotation } from "/lib/kit/viewport3d.js";
 import { daylight, DAYLIGHT } from "/lib/kit/sky.js";
+import * as nursery from "/lib/flora/nursery.js";
 
 export const GROUND = 240;         // half-size of the near ground (fine mesh, grass), metres
 export const FAR = 900;            // half-size of the far ground
@@ -198,97 +199,23 @@ function groundMesh(cover, half, N, drop) {
 
 // --- the nursery ------------------------------------------------------------------
 
-const COMMON = {
-    pipeExp: 2.0, leafDiameter: 0.028,
-    shadeTolerance: 0.35, moduleMatureAge: 0.6, rootVigorMax: 4.0, apicalControl: 0.35,
-    apicalControlMature: 0.3, individualVariation: 0.25, maxAge: 400, seedingRadius: 0.0,
-};
-export const SPECIES = {
-    spreading: Object.assign({}, COMMON, { growthScale: 2.5, orthotropy: 0.55, tropismG2: 0.05 }),
-    vase: Object.assign({}, COMMON, { growthScale: 2.0, orthotropy: 0.7, tropismG2: 0.03 }),
-    tall: Object.assign({}, COMMON, { growthScale: 2.2, orthotropy: 0.8, tropismG2: 0.02, apicalControl: 0.5 }),
-};
-const HABITS = ['spreading', 'vase', 'tall'];
-export const NURSERY = { cols: 6, rows: 4, spacing: 9 };   // 24 broadleaf specimens, far enough apart to grow their own crowns
-// bro.flora's species presets, grown in rows of their own past the
-// broadleaves: conifers (needle and scale-leaf sprays) and shrubs.
-export const CONIFERS = ['fir', 'spruce', 'pine', 'fir', 'spruce', 'cypress', 'fir', 'spruce', 'pine', 'cypress'];
-export const SHRUBS = ['boxwood', 'holly', 'hydrangea', 'boxwood', 'holly', 'hydrangea'];
-export const SPECIMENS = NURSERY.cols * NURSERY.rows + CONIFERS.length + SHRUBS.length;
-
-function trunkPrototype() {
-    const H = 2.0, n = 6, nodes = [], edges = [];
-    for (let i = 0; i <= n; i++) {
-        nodes.push({ position: [0.03 * Math.sin(i * 1.7), H * i / n, 0.03 * Math.cos(i * 2.3)],
-                     ageAtBirth: 0.03 * i, lengthMax: 1, thickening: 1 });
-        if (i) edges.push([i - 1, i]);
-    }
-    for (let k = 0; k < 3; k++) {
-        const a = k * 2.094 + 0.4;
-        nodes.push({ position: [Math.cos(a) * 0.25, H + 0.15, Math.sin(a) * 0.25], ageAtBirth: 0.2, lengthMax: 0.8, thickening: 1 });
-        edges.push([n, nodes.length - 1]);
-    }
-    return { name: 'trunk', nodes, edges, rootNode: 0, terminalNodes: [n, n + 1, n + 2, n + 3] };
-}
-
-export const FOLIAGE = { seed: 0x1eaf, perArea: 90 };
-export function leafCard() {
-    const m = Mesh.leafCard('oval', {
-        width: 0.07, length: 0.12, bend: 0.4, fullUV: true, shapedSilhouette: true, cup: 0.55,
-        widthSegments: 3, lengthSegments: 5,
-    });
-    m.colors = new Float32Array(0);
-    return m;
-}
-
-const SIM_STEP = 0.02, SIM_SECONDS = 50;
+// The specimens (lib/flora/nursery.js, shared with demos/wilds).
+export { SPECIES, NURSERY, CONIFERS, SHRUBS, SPECIMENS, FOLIAGE, leafCard } from "/lib/flora/nursery.js";
 
 /** Grow the nursery: one broflora world, a grid of specimens on flat ground. */
 export function growNursery() {
-    const { cols, rows, spacing } = NURSERY;
-    const presetRows = Math.ceil(CONIFERS.length / cols) + Math.ceil(SHRUBS.length / cols);
-    const W = cols * spacing + 10, D = (rows + presetRows) * spacing + 10;
-    const world = bro.flora.createWorld({
-        rngSeed: 0xf0e57,
-        climate: { annualTempBase: 15, annualPrecip: 1100 },
-        shadow: { origin: [-W / 2, -2, -D / 2], cellSize: 1, width: W, height: 26, depth: D, fill: 1 },
-    });
-    const mono = world.addPrototype(bro.flora.prototypes.monopodial(3, 0.7));
-    const trunk = world.addPrototype(trunkPrototype());
-    world.addVoronoiSite(mono, 0.5, 0.3);
-    const at = (i, j) => [(i - (cols - 1) / 2) * spacing + 1.3 * Math.sin(i * 2.1 + j), 0,
-                          (j - (rows + presetRows - 1) / 2) * spacing + 1.3 * Math.cos(i * 1.3 + 2 * j)];
-    for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
-        const kind = HABITS[(i + 2 * j) % HABITS.length];
-        world.addPlant({ origin: at(i, j), species: SPECIES[kind], prototypeIndex: trunk });
-    }
-    // The presets in order after the broadleaves (plant index = specimen).
-    [...CONIFERS, ...SHRUBS].forEach((name, k) => {
-        const row = k < CONIFERS.length ? rows + Math.floor(k / cols)
-                                        : rows + Math.ceil(CONIFERS.length / cols) + Math.floor((k - CONIFERS.length) / cols);
-        const col = k < CONIFERS.length ? k % cols : (k - CONIFERS.length) % cols;
-        world.plantSpecies(name, { origin: at(col, row) });
-    });
-    // Grown once per change to the nursery or to broflora's step: the grown
-    // world is cached under the app's cache dir, keyed by all of that.
-    forest.grow = world.grow(Math.round(SIM_SECONDS / SIM_STEP), SIM_STEP, { cache: bro.app.cacheDir });
+    const { world, grow } = nursery.growNursery();
+    forest.grow = grow;
     return world;
 }
 
 // --- the forest -------------------------------------------------------------------
-
-const BARK = { color: [0.2, 0.17, 0.14], roughness: 0.9 };
-const LEAF = { color: [0.07, 0.13, 0.04], roughness: 0.7 };
 
 // The forest is a node per kind of plant, each drawing its leaves in its
 // form: the broadleaves, the needle conifers, the scale-leaf ones, the
 // shrubs. forest.parts holds each {name, emit, trees, node}; forest.node,
 // .emit and .trees are the broadleaves'.
 export const forest = { world: null, emit: null, trees: null, node: null, parts: [], grass: null, ground: null, stats: {} };
-
-const range = (a, n) => [...Array(n).keys()].map((i) => a + i);
-const BROADLEAF = range(0, NURSERY.cols * NURSERY.rows);
-const SHRUB_PLANTS = range(NURSERY.cols * NURSERY.rows + CONIFERS.length, SHRUBS.length);
 
 // Conifers take the high ground and patches of their own: the share of
 // the trees at a point that are conifers, and of those the scale-leaved.
@@ -350,27 +277,13 @@ function build() {
     const ms = forest.bootMs;
     let t = wallNow();
     const lap = (k) => { const n = wallNow(); ms[k] = n - t; t = n; };
-    const w = forest.world;
-    // One emit a node: the broadleaves and shrubs by plant, the conifers by
-    // leaf form (each takes its form's spray defaults).
-    const emits = [w.emitForest(Object.assign({ plants: BROADLEAF }, FOLIAGE)),
-                   w.emitForest({ seed: FOLIAGE.seed, leafForm: 'needle' }),
-                   w.emitForest({ seed: FOLIAGE.seed, leafForm: 'scale' }),
-                   w.emitForest(Object.assign({ plants: SHRUB_PLANTS }, FOLIAGE))];
+    const emits = nursery.emitParts(forest.world);
     lap('emit');
     const trees = plant(emits.slice(0, 3), emits[3]);
     lap('plant');
-    const names = ['broadleaf', 'needle', 'scale', 'shrub'];
     forest.parts = emits.map((emit, k) => ({
-        name: names[k], emit, trees: trees[k],
-        node: scene.createForest(Object.assign({
-            forest: emit, instances: trees[k],
-            // No leaf: each node draws its form's own card at its species'
-            // leaf size (a broadleaf's leaf, a conifer's spray, a shrub's
-            // small leaf).
-            doubleSided: true, subsurface: k === 0 || k === 3 ? 0.5 : 0.3, vertexColorTint: false,
-            castsShadow: true, receivesShadow: true, barkColor: BARK.color, barkRoughness: BARK.roughness,
-        }, LEAF)),
+        name: nursery.PARTS[k], emit, trees: trees[k],
+        node: scene.createForest(nursery.forestNodeOptions(k, emit, trees[k])),
     }));
     forest.emit = emits[0];
     forest.trees = trees[0];
