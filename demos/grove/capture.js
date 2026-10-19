@@ -271,14 +271,29 @@ function species() {
                 for (const n of others()) { visible.set(n, n.visible); if (n !== part.node) n.visible = false; }
                 flush();
                 const a = grab();
+                // The leaves tier's silhouette too, for the shape's overlap.
+                part.node.setForestTier('leaves');
+                flush();
+                const ref = grab();
+                part.node.setForestTier(tier);
                 part.node.visible = false;
                 flush();
                 const b = grab();
+                const sh = shaded[shaded.length - 1];
+                let n = 0, nRef = 0, both = 0, Y = 0;
                 for (let i = 0; i < a.length; i += 4) {
                     const diff = Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2]);
+                    const dRef = Math.abs(ref[i] - b[i]) + Math.abs(ref[i + 1] - b[i + 1]) + Math.abs(ref[i + 2] - b[i + 2]);
                     const v = diff > 6 ? 0 : 255;
+                    if (v === 0) { n++; Y += 0.2126 * sh[i] + 0.7152 * sh[i + 1] + 0.0722 * sh[i + 2]; }
+                    if (dRef > 6) { nRef++; if (v === 0) both++; }
                     a[i] = a[i + 1] = a[i + 2] = v;
                 }
+                // Its cover against the leaves tier's, the silhouettes'
+                // overlap (intersection over union) and its value inside its
+                // own silhouette (in this sky).
+                console.log(`species ${name} ${d} m ${tier}: cover ${n} px (leaves ${nRef}) iou ` +
+                            `${(both / Math.max(n + nRef - both, 1)).toFixed(3)} Y ${(n ? Y / n : 0).toFixed(1)}`);
                 flat.push(a);
                 for (const [n, v] of visible) n.visible = v;
                 visible.clear();
