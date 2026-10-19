@@ -10,8 +10,9 @@
 //   bro-headless --width 1280 --height 720 demos/grove demos/grove/capture.js -- \
 //       perf <shot[,shot...]> [wind=breeze]   (GPU ms per frame, and the grass's, leaves' and bark's shares)
 //   bro-headless --width 1280 --height 720 demos/grove demos/grove/capture.js -- \
-//       species <name[,name...]|all> [label=species] [skies=noon,golden] [tier=auto]
-//       (each conifer and shrub preset close, mid and far: <label>_<name>_<sky>.jpg)
+//       species <name[,name...]|all> [label=species] [skies=noon,golden] [tier=auto] [sil] [perf]
+//       (each conifer and shrub preset close, mid and far: <label>_<name>_<sky>.jpg;
+//       `perf` each view's GPU ms with and without the plant)
 //   bro-headless --width 1280 --height 720 demos/grove demos/grove/capture.js -- \
 //       herbs <name[,name...]|all> [label=herb] [skies=noon,golden] [sil] [views=d,d,...] [aim=top]
 //       (each herb preset alone in the meadow at 1, 3, 10 and 30 m: <label>_<name>_<sky>.jpg;
@@ -196,13 +197,15 @@ function stills() {
 // 60 m eye's). `sil` adds <label>_<name>_sil.jpg: the same four views with
 // the ground, grass and sky gone and the plant flat black on white, to
 // judge its form apart from its shading. `tier` forces a forest tier
-// (auto, leaves, ...).
-//   species <name,...|all> [label=species] [skies=noon,golden] [tier=auto] [sil]
+// (auto, leaves, ...). `perf` prints each view's GPU ms with the plant and
+// without it (its cost).
+//   species <name,...|all> [label=species] [skies=noon,golden] [tier=auto] [sil] [perf]
 function species() {
     const names = !shotsA || shotsA === 'all' ? PRESET_PLANTS.map((p) => p.name) : shotsA.split(',');
     const skies = (a3 || 'noon,golden').split(',');
     const tier = a4 || 'auto';
     const sil = a5 === 'sil';
+    const timing = cmdArgs.includes('perf');
     const W = innerWidth, H = innerHeight, pane = Math.floor(W / 4);
     const FAR_EYE = 60, FOV = vp.cam.fov || 45;
     const tanHalf = Math.tan(FOV * Math.PI / 360);
@@ -267,6 +270,22 @@ function species() {
                 flush();
                 shaded.push(grab());
                 captions.push(`${name} ${time} ${d} m (h ${h.toFixed(1)} m)`);
+                if (timing) {
+                    // GPU ms a frame over 90 frames with the plant and with it
+                    // hidden, the rest of the view the same: the plant's cost.
+                    const gpu = () => {
+                        for (let i = 0; i < 5; i++) advanceTime(1000 / fps);
+                        perf.gpuFrameMs();
+                        let sum = 0;
+                        for (let i = 0; i < 90; i++) { advanceTime(1000 / fps); sum += perf.gpuFrameMs(); }
+                        return sum / 90;
+                    };
+                    const all = gpu();
+                    part.node.visible = false;
+                    const none = gpu();
+                    part.node.visible = true;
+                    console.log(`perf species ${name} ${time} ${d} m ${tier}: ${all.toFixed(3)} ms, ${none.toFixed(3)} without it (${name} ${(all - none).toFixed(3)} ms)`);
+                }
                 if (!sil || time !== skies[0]) continue;
                 for (const n of others()) { visible.set(n, n.visible); if (n !== part.node) n.visible = false; }
                 flush();
