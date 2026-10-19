@@ -66,6 +66,9 @@ function setup(path, wind, legacy) {
     draw(path);
     setWind(wind);
     sky.apply('golden');
+    // `atlas=<px>`: the shadow atlas at that size (the demo's 4096 by default).
+    const atlas = cmdArgs.find((a) => String(a).startsWith('atlas='));
+    if (atlas) vp.scene.setShadowQuality(+atlas.slice(6), 3);
 }
 
 // Box-downsample frame `g` ({width, height, data}, top row first), optionally a

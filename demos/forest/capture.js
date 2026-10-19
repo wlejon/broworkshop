@@ -43,7 +43,8 @@
 //
 // Any command also takes `sun=<degrees>` (the preset's sun at that
 // elevation), `lambda=` (the sun's cascade split), `sunshadow=0` (no sun
-// shadow), `lod={...}` (setForestLod's fields, JSON) to try a
+// shadow), `atlas=<px>` (the shadow atlas's size, the demo's 4096 by
+// default), `lod={...}` (setForestLod's fields, JSON) to try a
 // level of detail without a rebuild and `hide=grass,...` (forest.* nodes to
 // hide, to take one part's cost out of a trace; `herbs` the grass's low
 // plants); compare takes
@@ -107,6 +108,9 @@ function setup(wind, tier, time) {
     if (opt('lambda')) sky.sun.cascadeSplitLambda = +opt('lambda');
     // `sunshadow=0`: the sun casts no shadow (against a run with it: what the shadows add, by distance).
     if (opt('sunshadow') === '0') sky.sun.castsShadow = false;
+    // `atlas=<px>`: the shadow atlas at that size (how the shade a tree's
+    // leaves take of each other moves with the shadow's texels).
+    if (opt('atlas')) vp.scene.setShadowQuality(+opt('atlas'), 3);
     // A forest.* node, or a part of the forest by name (needle, shrub, ...).
     for (const k of (opt('hide') || '').split(',').filter(Boolean)) {
         // `herbs`: the grass's low plants (and the blades and turf that stand in for them).
