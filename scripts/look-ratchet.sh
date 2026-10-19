@@ -15,7 +15,7 @@
 #                                [--bin PATH] [--host NAME] [--work DIR]
 #   --update     write this run's numbers as the goldens (groups the run
 #                skipped keep theirs)
-#   --only LIST  comma-separated subset of: broadleaf,needle,shrub,grove
+#   --only LIST  comma-separated subset of: broadleaf,needle,shrub,scale,grove
 #   --gaps       print every view's auto-vs-leaves gaps, not only the moved
 #   --bin PATH   bro-headless (default: $BRO_HEADLESS, else the most recently
 #                built ../bro/build*/Release/bro-headless.exe or
@@ -32,7 +32,7 @@ set -u
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 UPDATE=0
 GAPS=0
-ONLY="broadleaf,needle,shrub,grove"
+ONLY="broadleaf,needle,shrub,scale,grove"
 BIN="${BRO_HEADLESS:-}"
 HOST=""
 WORK=""
@@ -87,6 +87,7 @@ forest_cmds() {
     broadleaf) sets=(45,75,120 200,264); variants=("noon" "golden") ;;
     needle) sets=(45,75); variants=("noon" "golden" "noon shadow=0") ;;
     shrub) sets=(10,20); variants=("noon" "golden") ;;
+    scale) sets=(45,75,120); variants=("noon" "golden") ;;
   esac
   for v in "${variants[@]}"; do
     sky=${v%% *}
@@ -167,7 +168,7 @@ echo "logs: $WORK"
 
 START=$(date +%s)
 RAN=""
-for part in broadleaf needle shrub; do
+for part in broadleaf needle shrub scale; do
   wants $part || continue
   # shellcheck disable=SC2046
   run_boot "forest-$part" demos/forest demos/forest/capture.js $(forest_cmds $part)
