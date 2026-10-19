@@ -449,11 +449,18 @@ function tiers() {
             // `diff`: the mean change from the bare ground over the pane (rgb
             // levels summed), which a crown fading to a veil loses and a crown
             // whose cover is only spread finer keeps.
-            let sum = 0, cover = 0, diff = 0;
+            // `dY`: the mean signed change in luminance over the pane, the
+            // tree's lightness as the eye averages it at range. Y (over the
+            // covered pixels alone) takes in the ground through a fine
+            // crown's part-covered pixels, more where its cover is finer,
+            // so tiers of different grain differ in Y by the ground's
+            // light, not their own.
+            let sum = 0, cover = 0, diff = 0, dY = 0;
             for (let i = 0; i < tw * th; i++) {
                 const o = i * 4;
                 const dl = Math.abs(px[o] - bgPx[o]) + Math.abs(px[o + 1] - bgPx[o + 1]) + Math.abs(px[o + 2] - bgPx[o + 2]);
                 diff += dl;
+                dY += 0.2126 * (px[o] - bgPx[o]) + 0.7152 * (px[o + 1] - bgPx[o + 1]) + 0.0722 * (px[o + 2] - bgPx[o + 2]);
                 if (dl < 12) continue;
                 cover++;
                 sum += 0.2126 * px[o] + 0.7152 * px[o + 1] + 0.0722 * px[o + 2];
@@ -462,7 +469,7 @@ function tiers() {
             panes.push({ px, txt: `${n} ${d} m  Y ${Y.toFixed(1)}  cover ${(100 * cover / (tw * th)).toFixed(1)}%` });
             const st = sub.node.forestStats();
             console.log(`tiers ${sub.part} ${d} m ${n}: Y ${Y.toFixed(1)} cover ${(100 * cover / (tw * th)).toFixed(1)}% ` +
-                        `diff ${(diff / (tw * th)).toFixed(1)} (leaves ${st.leaves}, entries ${st.entries}, shadowV ${st.shadowVertices}, detail ${st.detail.toFixed(2)}) ` +
+                        `diff ${(diff / (tw * th)).toFixed(1)} dY ${(dY / (tw * th)).toFixed(2)} (leaves ${st.leaves}, entries ${st.entries}, shadowV ${st.shadowVertices}, detail ${st.detail.toFixed(2)}) ` +
                         JSON.stringify(sub.node.forestTreeLod(sub.specimen, pxPerMetre(d) * sub.scale)));
         }
         sub.node.setForestTier('auto');
