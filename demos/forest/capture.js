@@ -7,6 +7,10 @@
 //       GPU ms per frame along the whole flight: max, p95 and mean, a line a
 //       second with the trees at each tier, and <label>_trace.json; `budget`
 //       overrides the leaves' vertex budget (millions)
+//   bro-headless ... capture.js -- cost [shot,...] [wind=breeze]
+//       GPU ms held at each shot (mean / median / max of 60 frames after a
+//       ten-second warm), CPU ms a frame and the forest's vertices; with
+//       BRO_SCENE_GPU_PASSES=0 every frame's passes too
 //   bro-headless ... capture.js -- video [label=forest] [wind=breeze] [fps=30]
 //       the flight as <label>.webm
 //   bro-headless ... capture.js -- handover <leaves|cards|clumps|crowns> [label=forest] [frames=12]
@@ -769,6 +773,36 @@ function hold() {
     }
 }
 
+// GPU ms held at shots (comma separated, SHOTS keys; default the views the
+// interactive forest is slowest at): after ten seconds of wall time, so the
+// GPU's start-up staircase (trace) is past, the mean, median and max over 60
+// frames at each, with the CPU's ms a frame (advanceTime and flush) and the
+// forest's vertices. With BRO_SCENE_GPU_PASSES set, each frame's passes too.
+function cost() {
+    setup(a2);
+    const shots = (a1 || 'canopy,skim,glade,meadow,understory,trunks').split(',');
+    const warmFrom = perf.now();
+    for (const s of shots) {
+        setShot(s);
+        for (let i = 0; i < 10 || perf.now() - warmFrom < 10000; i++) { advanceTime(1000 / fps); }
+        perf.gpuFrameMs();
+        const ms = [];
+        let cpu = 0;
+        for (let i = 0; i < 60; i++) {
+            const c0 = perf.now();
+            advanceTime(1000 / fps);
+            flush();
+            cpu += perf.now() - c0;
+            ms.push(gpuMs());
+        }
+        ms.sort((a, b) => a - b);
+        const st = forestStats();
+        console.log(`cost ${s}: GPU mean ${(ms.reduce((a, b) => a + b, 0) / ms.length).toFixed(2)} ms, ` +
+                    `median ${ms[30].toFixed(2)}, max ${ms[59].toFixed(2)}; CPU ${(cpu / 60).toFixed(2)} ms; ` +
+                    `${(st.vertices / 1e6).toFixed(2)} M verts, ${(st.shadowVertices / 1e6).toFixed(2)} M shadow, ${st.draws} draws`);
+    }
+}
+
 // --- metrics: Leaves against By size, by distance --------------------------------
 //
 // Each shot is drawn twice from the same view, the forced Leaves tier and By
@@ -1312,7 +1346,7 @@ const MEADOW_MODES = meadowCommands({ setup, step, saveJpeg, OUT, opt, pos: (i) 
 // Between them the page is put back as the boot left it: any overlay a
 // command drew is removed and the forest's level of detail restored (the
 // clock runs on, so wind and the flight's motion continue from there).
-const MODES = Object.assign({ still: stills, trace, video, handover, compare, parts, hold, metrics, tiers, dolly, herbs: herbMetrics, shadowbands: shadowBands,
+const MODES = Object.assign({ still: stills, trace, video, handover, compare, parts, hold, cost, metrics, tiers, dolly, herbs: herbMetrics, shadowbands: shadowBands,
                               foliage }, MEADOW_MODES);
 const lod0 = forest.parts.map((p) => p.node.forestLod());
 const commands = [[]];
