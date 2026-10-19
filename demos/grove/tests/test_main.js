@@ -37,10 +37,12 @@ test('the GPU path draws the same plants as a tube node and a scatter node', () 
 
 test('the conifers and shrubs stand where the grove puts them, a node per preset', () => {
     eq(grove.presets.map((p) => p.name).join(), PRESET_PLANTS.map((p) => p.name).join(), 'preset nodes');
+    // A climber stands with its host: two specimens, two trees, in one place.
     for (const { name, emit, node } of grove.presets) {
-        eq(emit.specimenCount, 1, name + ' specimens');
+        const want = PRESET_PLANTS.find((p) => p.name === name).host ? 2 : 1;
+        eq(emit.specimenCount, want, name + ' specimens');
         const s = node.forestStats();
-        check(s && s.treeCount === 1, name + ' trees: ' + JSON.stringify(s && s.treeCount));
+        check(s && s.treeCount === want, name + ' trees: ' + JSON.stringify(s && s.treeCount));
     }
     const by = (n) => grove.presets.find((p) => p.name === n).emit;
     const fir = by('fir'), cypress = by('cypress'), boxwood = by('boxwood');

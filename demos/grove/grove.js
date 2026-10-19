@@ -303,6 +303,8 @@ export const PRESET_PLANTS = [
     { name: 'cactus', x: -6, z: -14 },
     { name: 'succulent', x: 7, z: -8 },
     { name: 'vine', x: -1, z: 10 },
+    // A climber up the oak it is planted with (the two stand as one).
+    { name: 'ivy', host: 'oak', x: -16, z: -6 },
     { name: 'boxwood', x: -4.5, z: 3 },
     { name: 'holly', x: 4.5, z: 4.5 },
     { name: 'hydrangea', x: -10.5, z: 3 },
@@ -320,6 +322,7 @@ export function growPresets() {
             climate: { annualTempBase: 12, annualPrecip: 1000 },
             shadow: { origin: [-S / 2, -2, -S / 2], cellSize: 1, width: S, height: 34, depth: S, fill: 1 },
         });
+        if (p.host) world.plantSpecies(p.host, { origin: [0, 0, 0] });
         world.plantSpecies(p.name, { origin: [0, 0, 0] });
         grove.presetGrow.push(world.grow(Math.round(SIM_SECONDS / SIM_STEP), SIM_STEP, { cache: bro.app.cacheDir }));
         return world;
@@ -337,8 +340,15 @@ function drawPresets(worlds) {
         const leafForm = ['broad', 'needle', 'scale'][world.emitForest({ seed: FOLIAGE.seed }).specimenLooks[3] | 0];
         const emit = world.emitForest(Object.assign({ seed: FOLIAGE.seed, leafForm },
             leafForm === 'broad' ? FOLIAGE : {}));
-        const height = emit.specimens[6];
-        const row = [p.x, groundHeight(p.x, p.z) - 0.06, p.z, 1, (p.x * 1.7 + p.z) % 6.283, 0, 0, 0];
+        // Every specimen of its world (a climber's host and itself) stood
+        // in one place.
+        const n = emit.specimens.length / 16;
+        let height = 0;
+        const row = [];
+        for (let s = 0; s < n; s++) {
+            height = Math.max(height, emit.specimens[s * 16 + 6]);
+            row.push(p.x, groundHeight(p.x, p.z) - 0.06, p.z, 1, (p.x * 1.7 + p.z) % 6.283, s, 0, 0);
+        }
         const node = scene.createForest(Object.assign({
             // No leaf: each node draws its form's own card at its species'
             // leaf size (a conifer's spray, a boxwood's small leaf).
