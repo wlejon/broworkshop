@@ -108,11 +108,20 @@ test('the tier buttons draw every tree at one tier', () => {
     clickOn('#tiers button[data-value="leaves"]');
     frames(1);
     s = forestStats();
-    eq(s.trees.clumps + s.trees.crowns, 0, 'leaves only');
+    // Forced leaves on the whole glade view is over 2 G vertices, past the
+    // GPU's watchdog: the nearest trees hold leaves up to 16 budgets of
+    // vertices (200 M), the rest go by size (unforced).
+    check(s.trees.leaves > 100 && s.unforced > 0, `the nearest trees forced to leaves: ${s.trees.leaves}, ` +
+          `${s.unforced} past the ceiling`);
+    const inView = s.treeCount - s.culled;
+    check(s.trees.leaves >= inView - s.unforced, `every tree short of the ceiling draws leaves: ${s.trees.leaves} of ` +
+          `${inView - s.unforced}`);
+    check(s.vertices < 220e6, 'the frame within the ceiling: ' + (s.vertices / 1e6).toFixed(1) + ' M vertices');
     clickOn('#tiers button[data-value="auto"]');
     frames(1);
     s = forestStats();
     check(s.trees.leaves > 0 && s.trees.clumps + s.trees.crowns > 0, 'by size again');
+    eq(s.unforced, 0, 'nothing past a ceiling by size');
 });
 
 test('a calm is still at every distance and a breeze moves the forest', () => {

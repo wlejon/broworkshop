@@ -336,7 +336,8 @@ export function forestStats() {
         const s = p.node.forestStats();
         if (!sum) { sum = JSON.parse(JSON.stringify(s)); continue; }
         for (const k of ['leaves', 'clumps', 'crowns']) sum.trees[k] += s.trees[k];
-        for (const k of ['culled', 'leaves', 'vertices', 'shadowVertices', 'entries', 'draws', 'treeCount', 'specimenCount'])
+        for (const k of ['culled', 'leaves', 'vertices', 'shadowVertices', 'entries', 'draws', 'treeCount', 'specimenCount',
+                         'unforced', 'shadowUnforced'])
             sum[k] += s[k];
     }
     return sum;
