@@ -68,7 +68,8 @@ function run() {
             const st = forestStats();
             const { eye } = routeAt(key, flight.t);
             frames.push({ t: +flight.t.toFixed(2), gpu, cpu, eye: eye.map((v) => +v.toFixed(0)),
-                          tiers: [st.trees.leaves, st.trees.clumps, st.trees.crowns], verts: st.vertices });
+                          tiers: [st.trees.leaves, st.trees.clumps, st.trees.crowns], verts: st.vertices,
+                          shadowVerts: st.shadowVertices, entries: st.entries, detail: [st.detail, st.shadowDetail] });
         }
         const report = prof ? bro.profiler.stop({ report: true, top: +opt('top', 30) }).report : null;
         const gpu = summary(frames.map((f) => f.gpu)), cpu = summary(frames.map((f) => f.cpu));
