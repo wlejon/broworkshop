@@ -56,7 +56,7 @@ function run() {
         for (let i = 0; i < warm * FPS; i++) advanceTime(DT);
         perf.gpuFrameMs();
         const frames = [];
-        // `prof=main|all`: bro.profiler over the run, its report after the line.
+        // `prof=main|all`: bro.profiler over the run, its report (`top=` lines, 30) after the line.
         const prof = opt('prof');
         if (prof) bro.profiler.start({ hz: 2000, threads: prof });
         for (let i = 0; i < seconds * FPS; i++) {
@@ -70,7 +70,7 @@ function run() {
             frames.push({ t: +flight.t.toFixed(2), gpu, cpu, eye: eye.map((v) => +v.toFixed(0)),
                           tiers: [st.trees.leaves, st.trees.clumps, st.trees.crowns], verts: st.vertices });
         }
-        const report = prof ? bro.profiler.stop({ report: true, top: 30 }).report : null;
+        const report = prof ? bro.profiler.stop({ report: true, top: +opt('top', 30) }).report : null;
         const gpu = summary(frames.map((f) => f.gpu)), cpu = summary(frames.map((f) => f.cpu));
         const frame = summary(frames.map((f) => Math.max(f.gpu, f.cpu)));
         const tiers = [0, 1, 2].map((k) => Math.round(frames.reduce((a, f) => a + f.tiers[k], 0) / frames.length));
