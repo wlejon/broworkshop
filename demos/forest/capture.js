@@ -12,11 +12,12 @@
 //   bro-headless ... capture.js -- handover <leaves|cards|clumps|crowns> [label=forest] [frames=12]
 //       a dolly out from a tree through the distances where it hands over
 //       from one tier to the next: <label>_handover_<which>_strip.png
-//   bro-headless ... capture.js -- tiers <m[,m...]> [label=forest] [wind=still] [sky=golden] [part=...] [shadow=0]
+//   bro-headless ... capture.js -- tiers <m[,m...]> [label=forest] [wind=still] [sky=golden] [part=...] [shadow=0] [seed=N]
 //       the handover's subject alone at each distance, forced Leaves, By
 //       size, forced Clumps and forced Crowns side by side, each with the
 //       tree's mean luminance and cover: <label>_tiers_<part>.png (a value
-//       and silhouette check across the tiers; shadow=0: it casts none)
+//       and silhouette check across the tiers; shadow=0: it casts none;
+//       seed=N: the subject reseeded, its bare clumps another draw)
 //   bro-headless ... capture.js -- dolly <part> [label=forest] [sky=golden] [from=10] [to=300] [frames=600] [shadow=0] [pitch=-0.12] [minpx=1500]
 //       a pop oracle: the tiers' subject dollied out through its handovers,
 //       auto tiers, its Y, cover, dY and lod each frame, then the 10 largest
@@ -577,7 +578,12 @@ function tiers() {
     for (const p of hidden) p.node.visible = false;
     // The subject alone in its node, so the cover is its own.
     const part = forest.parts.find((p) => p.name === sub.part);
-    sub.node.setTrees(part.trees.slice(sub.index * 8, sub.index * 8 + 8));
+    // `seed=N`: the subject a millimetre per N along x, which reseeds it (a
+    // tree's seed is a hash of where it stands: which clumps it leaves bare,
+    // which differ from seed to seed; compare tiers within one seed).
+    const row = part.trees.slice(sub.index * 8, sub.index * 8 + 8);
+    if (opt('seed') !== undefined) row[0] += 0.001 * +opt('seed');
+    sub.node.setTrees(row);
     if (opt('shadow') === '0') sub.node.castsShadow = false;
     // `pitch=` (radians, default -0.12): a low plant seen from above, clear of the grass.
     const yaw = Math.atan2(40 - 12, 30 - 18) + Math.PI, pitch = opt('pitch') !== undefined ? +opt('pitch') : -0.12;
