@@ -329,7 +329,9 @@ function handover() {
         const d = d0 * Math.pow(d1 / d0, i / Math.max(1, frames - 1));
         vp.reframe(sub.top, d, { yaw, pitch });
         for (let k = 0; k < 3; k++) { advanceTime(1000 / fps); }
-        const l = sub.node.forestTreeLod(sub.specimen, pxPerMetre(d) * sub.scale);
+        // What the drawer drew the subject at (its leaves measured to the
+        // crown, the budget's detail), not forestTreeLod at the distance.
+        const l = sub.node.forestSeenLod(sub.index) || sub.node.forestTreeLod(sub.specimen, pxPerMetre(d) * sub.scale);
         // A crop that holds about the tree's crown at the middle distance.
         const cw = Math.min(1, Math.max(0.12, 14 * pxPerMetre(dMid) * sub.scale / W));
         grabs.push({ d, l, px: shrink(frameImage(), tw, th, [0.5, 0.5, cw]) });
@@ -470,7 +472,7 @@ function tiers() {
             const st = sub.node.forestStats();
             console.log(`tiers ${sub.part} ${d} m ${n}: Y ${Y.toFixed(1)} cover ${(100 * cover / (tw * th)).toFixed(1)}% ` +
                         `diff ${(diff / (tw * th)).toFixed(1)} dY ${(dY / (tw * th)).toFixed(2)} (leaves ${st.leaves}, entries ${st.entries}, shadowV ${st.shadowVertices}, detail ${st.detail.toFixed(2)}) ` +
-                        JSON.stringify(sub.node.forestTreeLod(sub.specimen, pxPerMetre(d) * sub.scale)));
+                        JSON.stringify(sub.node.forestSeenLod(0)));
         }
         sub.node.setForestTier('auto');
     }
