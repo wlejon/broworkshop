@@ -85,7 +85,7 @@ forest_cmds() {
   local -a sets variants
   case "$part" in
     broadleaf) sets=(45,75,120 200,264); variants=("noon" "golden") ;;
-    needle) sets=(45,75); variants=("noon" "golden" "noon shadow=0") ;;
+    needle) sets=(45,75,120); variants=("noon" "golden" "noon shadow=0") ;;
     shrub) sets=(10,20); variants=("noon" "golden") ;;
     scale) sets=(45,75,120); variants=("noon" "golden") ;;
   esac
