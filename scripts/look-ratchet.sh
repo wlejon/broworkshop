@@ -2,8 +2,8 @@
 # look-ratchet.sh — the flora look's ratchet: the capture numbers the look is
 # tuned against, held to goldens.
 #
-# Runs a fixed suite of headless captures (demos/forest capture.js `tiers`,
-# demos/grove capture.js `species ... sil`), parses the numbers they print,
+# Runs a fixed suite of headless captures (demos/forest capture.js `tiers`
+# and `dolly`, demos/grove capture.js `species ... sil`), parses the numbers they print,
 # and compares each with its golden in scripts/look-goldens/<host>.json. A
 # number fails when it moves from its golden, either way, by more than its
 # metric's margin. Prints the metrics that moved, the auto-vs-leaves gaps of
@@ -15,7 +15,11 @@
 #                                [--bin PATH] [--host NAME] [--work DIR]
 #   --update     write this run's numbers as the goldens (groups the run
 #                skipped keep theirs)
-#   --only LIST  comma-separated subset of: broadleaf,needle,shrub,scale,grove
+#   --only LIST  comma-separated subset of: broadleaf,needle,shrub,scale,grove,dolly
+#                (dolly: each forest part dollied 10-300 m through its
+#                handovers, its largest lasting step in Y, cover and dY in
+#                each phase of its lod, keyed dolly.<part>.<sky>.<phase>;
+#                about 5 of the run's 7 minutes)
 #   --gaps       print every view's auto-vs-leaves gaps, not only the moved
 #   --bin PATH   bro-headless (default: $BRO_HEADLESS, else the most recently
 #                built ../bro/build*/Release/bro-headless.exe or
@@ -32,7 +36,7 @@ set -u
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 UPDATE=0
 GAPS=0
-ONLY="broadleaf,needle,shrub,scale,grove"
+ONLY="broadleaf,needle,shrub,scale,grove,dolly"
 BIN="${BRO_HEADLESS:-}"
 HOST=""
 WORK=""
@@ -152,6 +156,20 @@ parse_grove() {
   ' "$1"
 }
 
+# Forest `dolly` phase lines: the largest lasting step of each metric in
+# each phase of the subject's lod as it recedes (capture.js dolly):
+#   phase needle golden clumps-crowns: Y +8.756 cover +0.618 dY +1.177
+parse_dolly() {
+  awk '
+    match($0, /phase [a-z]+ [a-z]+ [a-z-]+: Y [-+0-9.]+ cover [-+0-9.]+ dY [-+0-9.]+/) {
+      split(substr($0, RSTART, RLENGTH), f, " ")
+      sub(/:$/, "", f[4])
+      k = "dolly." f[2] "." f[3] "." f[4]
+      printf "%s.Y %s\n%s.cover %s\n%s.dY %s\n", k, f[6] + 0, k, f[8] + 0, k, f[10] + 0
+    }
+  ' "$1"
+}
+
 echo "flora look ratchet: host $HOST, groups $ONLY"
 echo "binary: $BIN ($(date -r "$BIN" '+%Y-%m-%d %H:%M' 2>/dev/null))"
 for r in bro broflora broworkshop; do
@@ -179,6 +197,16 @@ if wants grove; then
   run_boot grove demos/grove demos/grove/capture.js species "$GROVE_SPECIES" rt noon auto sil
   parse_grove "$WORK/grove.log" >> "$RUN"
   RAN="$RAN grove."
+fi
+if wants dolly; then
+  for part in broadleaf needle scale shrub; do
+    # A ridge hides the shrub's line at 22-32 m from the tiers' pitch.
+    x=""; [ "$part" = shrub ] && x="pitch=-0.3"
+    # shellcheck disable=SC2086
+    run_boot "dolly-$part" demos/forest demos/forest/capture.js dolly $part rt noon $x + dolly $part rt golden $x
+    parse_dolly "$WORK/dolly-$part.log" >> "$RUN"
+  done
+  RAN="$RAN dolly."
 fi
 echo "captures took $(( $(date +%s) - START )) s, $(wc -l < "$RUN") numbers"
 

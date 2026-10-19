@@ -17,6 +17,11 @@
 //       size, forced Clumps and forced Crowns side by side, each with the
 //       tree's mean luminance and cover: <label>_tiers_<part>.png (a value
 //       and silhouette check across the tiers; shadow=0: it casts none)
+//   bro-headless ... capture.js -- dolly <part> [label=forest] [sky=golden] [from=10] [to=300] [frames=600] [shadow=0] [pitch=-0.12] [minpx=1500]
+//       a pop oracle: the tiers' subject dollied out through its handovers,
+//       auto tiers, its Y, cover, dY and lod each frame, then the 10 largest
+//       frame-to-frame jumps and lasting steps of each, the smooth trend
+//       taken out (a shrub needs pitch=-0.3: a ridge hides it at 22-32 m)
 //   bro-headless ... capture.js -- compare <shot[,shot...]> [label=forest] [wind=gusty] [sky=noon]
 //       the forced Leaves tier beside By size, the middle half of each view:
 //       <label>_<shot>_<sky>_compare.jpg
@@ -411,6 +416,151 @@ function foliage() {
         }
     }
 }
+
+// A pop oracle: the tiers' subject (its part alone) dollied out on one line
+// from `from` to `to` m (geometric steps, `frames` of them), auto tiers.
+// Each frame, as tiers measures a pane but on the view's own pixels (no
+// resampling, whose box size steps with the crop): the window the tree is
+// framed in (1.6 of its height wide, 16:9), its Y over the covered pixels,
+// its cover (% of the window) and dY (the window's mean signed luminance
+// change against the same view without the tree), and the tree's lod.
+// Then the 10 largest jumps of each: a frame's step less the running
+// median (15 frames) of the steps about it, so the smooth change with
+// distance does not count, and the 10 largest lasting steps (below), each
+// with the lod on both sides and the nearest handover (HANDOVERS'
+// distances); frames whose window is under `minpx` pixels are not ranked.
+// `pitch=` as tiers (radians, default -0.12); `tier=` forces a tier (the
+// lod printed is still auto's, the phases its phases).
+//   dolly <part> [label=forest] [sky=golden] [from=10] [to=300] [frames=600] [shadow=0] [pitch=-0.12] [minpx=1500] [tier=auto]
+function dolly() {
+    const label = a2 || 'forest', time = a3 || 'golden';
+    const from = +(opt('from') || 10), to = +(opt('to') || 300), frames = +(opt('frames') || 600);
+    args = args.concat(a1 ? [`part=${a1}`] : []);
+    setup('still', 'auto', time);
+    // `tier=` forces one tier on the subject (as tiers' panes), against which
+    // auto's steps can be told from the measure's own.
+    const tier = opt('tier') || 'auto';
+    flight.on = false;
+    const sub = subject();
+    const hidden = forest.parts.filter((p) => p.name !== sub.part && p.node.visible);
+    for (const p of hidden) p.node.visible = false;
+    const part = forest.parts.find((p) => p.name === sub.part);
+    sub.node.setTrees(part.trees.slice(sub.index * 8, sub.index * 8 + 8));
+    sub.node.setForestTier(tier);
+    const casts = sub.node.castsShadow;
+    if (opt('shadow') === '0') sub.node.castsShadow = false;
+    const yaw = Math.atan2(40 - 12, 30 - 18) + Math.PI, pitch = opt('pitch') !== undefined ? +opt('pitch') : -0.12;
+    const lodAt = (d) => sub.node.forestTreeLod(sub.specimen, pxPerMetre(d) * sub.scale);
+    const handovers = Object.entries(HANDOVERS).map(([k, f]) => [k, distanceWhere(sub, f)]);
+    console.log(`dolly ${sub.part} ${time}: tree ${sub.index} (specimen ${sub.specimen}, h ${sub.height.toFixed(1)} m), ${from} .. ${to} m in ${frames} frames; ` +
+                `handovers ${handovers.map(([k, d]) => `${k} ${d.toFixed(1)} m`).join(', ')}`);
+    const grab = () => { for (let k = 0; k < 3; k++) advanceTime(1000 / fps); return frameImage(); };
+    const series = [];
+    for (let i = 0; i < frames; i++) {
+        const d = from * Math.pow(to / from, i / Math.max(1, frames - 1));
+        vp.reframe(sub.top, d, { yaw, pitch });
+        sub.node.visible = false;
+        const bg = grab();
+        sub.node.visible = true;
+        const fg = grab();
+        const top = Math.max(0, fg.height - innerHeight), H = fg.height - top, W = fg.width;
+        const ww = Math.min(W, 1.6 * sub.height * pxPerMetre(d)), wh = Math.min(H, ww * 9 / 16);
+        const x0 = Math.max(0, Math.round(W / 2 - ww / 2)), x1 = Math.min(W, Math.round(W / 2 + ww / 2));
+        const y0 = top + Math.max(0, Math.round(H / 2 - wh / 2)), y1 = top + Math.min(H, Math.round(H / 2 + wh / 2));
+        let sum = 0, cover = 0, dY = 0;
+        for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+            const o = (y * W + x) * 4, p = fg.data, q = bg.data;
+            const dl = Math.abs(p[o] - q[o]) + Math.abs(p[o + 1] - q[o + 1]) + Math.abs(p[o + 2] - q[o + 2]);
+            dY += 0.2126 * (p[o] - q[o]) + 0.7152 * (p[o + 1] - q[o + 1]) + 0.0722 * (p[o + 2] - q[o + 2]);
+            if (dl < 12) continue;
+            cover++;
+            sum += 0.2126 * p[o] + 0.7152 * p[o + 1] + 0.0722 * p[o + 2];
+        }
+        const n = Math.max(1, (x1 - x0) * (y1 - y0)), l = lodAt(d);
+        const s = { d, Y: cover ? sum / cover : 0, cover: 100 * cover / n, dY: dY / n, l, px: n };
+        series.push(s);
+        console.log(`dolly ${sub.part} ${time} ${d.toFixed(2)} m: Y ${s.Y.toFixed(2)} cover ${s.cover.toFixed(2)}% dY ${s.dY.toFixed(3)} ` +
+                    `(${lodText(l)})`);
+    }
+    const median = (a) => { const b = a.slice().sort((x, y) => x - y); return b.length % 2 ? b[(b.length - 1) / 2] : (b[b.length / 2 - 1] + b[b.length / 2]) / 2; };
+    const nearest = (d) => handovers.reduce((m, h) => (Math.abs(Math.log(h[1] / d)) < Math.abs(Math.log(m[1] / d)) ? h : m));
+    // `sides(i)`: the values either side of the jump at frame i.
+    const show = (kind, key, list, sides) => {
+        for (const { i, j } of list.slice(0, 10)) {
+            const a = series[i - 1], b = series[i], h = nearest(b.d), [u, v] = sides(i);
+            console.log(`  ${kind} ${sub.part} ${time} ${key} ${j >= 0 ? '+' : ''}${j.toFixed(3)} at ${a.d.toFixed(2)} -> ${b.d.toFixed(2)} m ` +
+                        `(${u.toFixed(3)} -> ${v.toFixed(3)}); near ${h[0]} ${h[1].toFixed(1)} m; ${lodText(a.l)} -> ${lodText(b.l)}`);
+        }
+    };
+    // Where the window is under `minpx` pixels a step is a pixel or two of
+    // the tree's outline turning over, not the lod: those frames are not ranked.
+    const K = 8, minpx = +(opt('minpx') || 1500), worst = new Map();
+    const ranked = (i) => series[i].px >= minpx && series[i - 1].px >= minpx;
+    const last = series.findIndex((s) => s.px < minpx);
+    console.log(`dolly ${sub.part} ${time}: jumps ranked to ${(last < 0 ? series[series.length - 1] : series[Math.max(0, last - 1)]).d.toFixed(1)} m ` +
+                `(the window under ${minpx} px past it)`);
+    for (const key of ['Y', 'cover', 'dY']) {
+        const m = series.map((s) => s[key]);
+        const steps = m.map((v, i) => (i ? v - m[i - 1] : 0));
+        const jumps = [];
+        for (let i = 1; i < m.length; i++) {
+            if (!ranked(i)) continue;
+            const around = steps.slice(Math.max(1, i - 7), Math.min(steps.length, i + 8));
+            jumps.push({ i, j: steps[i] - median(around) });
+        }
+        jumps.sort((a, b) => Math.abs(b.j) - Math.abs(a.j));
+        console.log(`dolly ${sub.part} ${time} jumps ${key}: the 10 largest, a frame's step less the running median of the steps`);
+        show('jump', key, jumps, (i) => [m[i - 1], m[i]]);
+        // A frame's step alone is mostly the pixels' jitter where the tree
+        // is small (alternate frames up and down). A pop or a shade shift
+        // stays: the level after a frame (the median of the next K) less
+        // the level before it (the previous K), less the running median of
+        // that over 3K either side (the trend), the strongest in each 2K.
+        const level = [];
+        for (let i = K; i <= m.length - K; i++) level[i] = median(m.slice(i, i + K)) - median(m.slice(i - K, i));
+        const cand = [];
+        for (let i = K; i <= m.length - K; i++) {
+            if (!ranked(i) || series[i + K - 1].px < minpx) continue;
+            const around = level.slice(Math.max(K, i - 3 * K), Math.min(m.length - K, i + 3 * K) + 1);
+            cand.push({ i, j: level[i] - median(around) });
+        }
+        cand.sort((a, b) => Math.abs(b.j) - Math.abs(a.j));
+        for (const c of cand) {
+            const ph = lodPhase(series[c.i].l), had = worst.get(ph) || { all: {} };
+            if (had[key] === undefined || Math.abs(c.j) > Math.abs(had[key])) had[key] = c.j;
+            (had.all[key] = had.all[key] || []).push(Math.abs(c.j));
+            worst.set(ph, had);
+        }
+        const kept = [];
+        for (const c of cand) if (kept.every((k) => Math.abs(k.i - c.i) >= 2 * K)) kept.push(c);
+        console.log(`dolly ${sub.part} ${time} steps ${key}: the 10 largest lasting steps (median of ${K} frames after less ${K} before, less its trend)`);
+        show('step', key, kept, (i) => [median(m.slice(i - K, i)), median(m.slice(i, i + K))]);
+    }
+    // The largest lasting step of each in each phase of the lod (the
+    // frame after it): what a pop oracle holds a change to. `z`: that step
+    // over the phase's own spread of steps (1.4826 times their median
+    // absolute size): the sampling's own steps (a tier where nothing
+    // switches) stand near 3, a pop well clear of it.
+    const fmt = (v) => (v === undefined ? '-' : `${v >= 0 ? '+' : ''}${v.toFixed(3)}`);
+    const z = (w, key) => (w.all[key] ? Math.abs(w[key]) / Math.max(1.4826 * median(w.all[key]), 1e-6) : 0);
+    for (const [ph, w] of worst) {
+        console.log(`  phase ${sub.part} ${time} ${ph}: Y ${fmt(w.Y)} cover ${fmt(w.cover)} dY ${fmt(w.dY)} ` +
+                    `z ${z(w, 'Y').toFixed(1)} / ${z(w, 'cover').toFixed(1)} / ${z(w, 'dY').toFixed(1)} (${(w.all.Y || []).length} frames)`);
+    }
+    for (const p of hidden) p.node.visible = true;
+    sub.node.castsShadow = casts;
+    sub.node.setForestTier('auto');
+    sub.node.setTrees(part.trees);
+}
+// The phase of a tree's lod: one tier alone or a blend of two.
+function lodPhase(l) {
+    if (l.leaves >= 1) return l.card ? 'cards' : l.widening > 1.001 ? 'widening' : 'leaves';
+    if (l.leaves > 0) return l.clumps > 0 ? 'leaves-clumps' : 'leaves-crowns';
+    if (l.clumps >= 1) return 'clumps';
+    if (l.clumps > 0) return 'clumps-crowns';
+    return 'crowns';
+}
+const lodText = (l) => `L ${l.leaves.toFixed(3)} C ${l.clumps.toFixed(3)} R ${l.crowns.toFixed(3)} w ${l.widening.toFixed(3)}${l.card ? ' card' : ''}`;
 
 // One tree of a part (`part=`, as the handover's subject, its part alone)
 // at each distance (m, comma separated), a row a distance: forced Leaves,
@@ -1152,7 +1302,7 @@ const MEADOW_MODES = meadowCommands({ setup, step, saveJpeg, OUT, opt, pos: (i) 
 // Between them the page is put back as the boot left it: any overlay a
 // command drew is removed and the forest's level of detail restored (the
 // clock runs on, so wind and the flight's motion continue from there).
-const MODES = Object.assign({ still: stills, trace, video, handover, compare, parts, hold, metrics, tiers, herbs: herbMetrics, shadowbands: shadowBands,
+const MODES = Object.assign({ still: stills, trace, video, handover, compare, parts, hold, metrics, tiers, dolly, herbs: herbMetrics, shadowbands: shadowBands,
                               foliage }, MEADOW_MODES);
 const lod0 = forest.parts.map((p) => p.node.forestLod());
 const commands = [[]];
