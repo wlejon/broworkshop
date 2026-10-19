@@ -2,7 +2,8 @@
 // frame is 1/30 s, so a capture is the same on any machine).
 //
 //   bro-headless --width 1280 --height 720 demos/forest demos/forest/capture.js -- \
-//       still <shot[,shot...]> [label=forest] [wind=breeze] [tier=auto] [sky=golden]
+//       still <shot[,shot...]> [label=forest] [wind=breeze] [tier=auto] [sky=golden] [perf=N]
+//       (perf=N: each view's GPU ms over N frames and its vertices)
 //   bro-headless ... capture.js -- trace [label=forest] [wind=breeze] [budget]
 //       GPU ms per frame along the whole flight: max, p95 and mean, a line a
 //       second with the trees at each tier, and <label>_trace.json; `budget`
@@ -22,7 +23,7 @@
 //       tree's mean luminance and cover: <label>_tiers_<part>.png (a value
 //       and silhouette check across the tiers; shadow=0: it casts none;
 //       seed=N: the subject reseeded, its bare clumps another draw)
-//   bro-headless ... capture.js -- dolly <part> [label=forest] [sky=golden] [from=10] [to=300] [frames=600] [shadow=0] [pitch=-0.12] [minpx=1500]
+//   bro-headless ... capture.js -- dolly <part> [label=forest] [sky=golden] [from=10] [to=300] [frames=600] [shadow=0] [pitch=-0.12] [minpx=1500] [slit] [video] [shots] [stats]
 //       a pop oracle: the tiers' subject dollied out through its handovers,
 //       auto tiers, its Y, cover, dY and lod each frame, then the 10 largest
 //       frame-to-frame jumps and lasting steps of each, the smooth trend
@@ -145,6 +146,20 @@ function stills() {
         }
         step(1.5);
         flush();
+        // `perf=N`: the view's GPU ms, the mean and median of N frames after
+        // a ten-second warm (as hold's), and its trees' vertices.
+        if (opt('perf')) {
+            const warmFrom = perf.now();
+            while (perf.now() - warmFrom < 10000) { advanceTime(1000 / fps); }
+            perf.gpuFrameMs();
+            const ms = [];
+            for (let i = 0; i < +opt('perf'); i++) { advanceTime(1000 / fps); ms.push(gpuMs()); }
+            ms.sort((a, b) => a - b);
+            const st = forestStats();
+            console.log(`perf ${name}: mean ${(ms.reduce((a, b) => a + b, 0) / ms.length).toFixed(2)} ms, ` +
+                        `median ${ms[ms.length >> 1].toFixed(2)}; vertices ${(st.vertices / 1e6).toFixed(2)} M, ` +
+                        `shadow ${(st.shadowVertices / 1e6).toFixed(2)} M, trees ${st.trees.leaves}/${st.trees.clumps}/${st.trees.crowns}`);
+        }
         const file = `${OUT}/${label}_${name}.png`;
         screenshot(file);
         console.log(`${file}: ${JSON.stringify(forestStats())}`);
@@ -464,6 +479,12 @@ function dolly() {
     console.log(`dolly ${sub.part} ${time}: tree ${sub.index} (specimen ${sub.specimen}, h ${sub.height.toFixed(1)} m), ${from} .. ${to} m in ${frames} frames; ` +
                 `handovers ${handovers.map(([k, d]) => `${k} ${d.toFixed(1)} m`).join(', ')}`);
     const grab = () => { for (let k = 0; k < 3; k++) advanceTime(1000 / fps); return frameImage(); };
+    // `slit`: the middle column of every frame side by side
+    // (<label>_dolly_<part>_<sky>_slit.jpg, near on the left), a handover
+    // one vertical seam or none; `video`: the frames as <label>_dolly_<part>_<sky>.webm;
+    // `shots`: each frame as <label>_dolly_<part>_<sky>_<i>.jpg; `stats`: forestStats() each frame.
+    const slit = args.includes('slit'), enc0 = args.includes('video');
+    let slitPx = null, slitH = 0, enc = null;
     const series = [];
     for (let i = 0; i < frames; i++) {
         const d = from * Math.pow(to / from, i / Math.max(1, frames - 1));
@@ -473,6 +494,19 @@ function dolly() {
         sub.node.visible = true;
         const fg = grab();
         const top = Math.max(0, fg.height - innerHeight), H = fg.height - top, W = fg.width;
+        if (slit) {
+            if (!slitPx) { slitH = H; slitPx = new Uint8Array(frames * H * 4); }
+            for (let y = 0; y < H; y++) {
+                const o = ((top + y) * W + (W >> 1)) * 4, q = (y * frames + i) * 4;
+                for (let c = 0; c < 4; c++) slitPx[q + c] = fg.data[o + c];
+            }
+        }
+        if (args.includes('stats')) console.log(`stats ${d.toFixed(2)}: ${JSON.stringify(forestStats())}`);
+        if (args.includes('shots')) bro.image.encodeJpegFile(`${OUT}/${label}_dolly_${sub.part}_${time}_${i}.jpg`, fg.data, W, fg.height, 4, 92);
+        if (enc0) {
+            if (!enc) enc = new VideoEncoder({ path: `${OUT}/${label}_dolly_${sub.part}_${time}.webm`, width: fg.width, height: fg.height, fps: 30, quality: 'good' });
+            enc.addViewportFrame();
+        }
         const ww = Math.min(W, 1.6 * sub.height * pxPerMetre(d)), wh = Math.min(H, ww * 9 / 16);
         const x0 = Math.max(0, Math.round(W / 2 - ww / 2)), x1 = Math.min(W, Math.round(W / 2 + ww / 2));
         const y0 = top + Math.max(0, Math.round(H / 2 - wh / 2)), y1 = top + Math.min(H, Math.round(H / 2 + wh / 2));
@@ -485,12 +519,20 @@ function dolly() {
             cover++;
             sum += 0.2126 * p[o] + 0.7152 * p[o + 1] + 0.0722 * p[o + 2];
         }
-        const n = Math.max(1, (x1 - x0) * (y1 - y0)), l = lodAt(d);
+        // The drawer's own lod for it (its distance included: the near
+        // sphere), else by size.
+        const n = Math.max(1, (x1 - x0) * (y1 - y0)), l = sub.node.forestSeenLod(0) || lodAt(d);
         const s = { d, Y: cover ? sum / cover : 0, cover: 100 * cover / n, dY: dY / n, l, px: n };
         series.push(s);
         console.log(`dolly ${sub.part} ${time} ${d.toFixed(2)} m: Y ${s.Y.toFixed(2)} cover ${s.cover.toFixed(2)}% dY ${s.dY.toFixed(3)} ` +
                     `(${lodText(l)})`);
     }
+    if (slitPx) {
+        const f = `${OUT}/${label}_dolly_${sub.part}_${time}_slit.jpg`;
+        bro.image.encodeJpegFile(f, slitPx, frames, slitH, 4, 95);
+        console.log(f);
+    }
+    if (enc) { enc.finish(); console.log(`${OUT}/${label}_dolly_${sub.part}_${time}.webm ${enc.lastError || ''}`); }
     const median = (a) => { const b = a.slice().sort((x, y) => x - y); return b.length % 2 ? b[(b.length - 1) / 2] : (b[b.length / 2 - 1] + b[b.length / 2]) / 2; };
     const nearest = (d) => handovers.reduce((m, h) => (Math.abs(Math.log(h[1] / d)) < Math.abs(Math.log(m[1] / d)) ? h : m));
     // `sides(i)`: the values either side of the jump at frame i.
@@ -563,6 +605,8 @@ function dolly() {
 }
 // The phase of a tree's lod: one tier alone or a blend of two.
 function lodPhase(l) {
+    // Leaves and clumps both whole: the near sphere's band crosses the crown.
+    if (l.leaves >= 1 && l.clumps >= 1) return 'reveal';
     if (l.leaves >= 1) return l.card ? 'cards' : l.widening > 1.001 ? 'widening' : 'leaves';
     if (l.leaves > 0) return l.clumps > 0 ? 'leaves-clumps' : 'leaves-crowns';
     if (l.clumps >= 1) return 'clumps';
