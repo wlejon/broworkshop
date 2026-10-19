@@ -35,18 +35,19 @@ test('pause stops the sim, Step advances it once', () => {
 });
 
 test('+ Seedling adds a plant, Reset returns to four', () => {
+    // (A packet the worker sent before it saw the click can arrive after
+    // it: wait for the count, not for a number of packets.)
     clickOn('#seed');
-    packets(2);
-    eq(view.stats.plantCount, 5);
+    waitFor(() => view.stats.plantCount === 5, 'five plants', 30000);
     clickOn('#reset');
-    packets(1);
+    waitFor(() => view.stats.plantCount === 4, 'four plants', 30000);
     eq(view.stats.plantCount, 4);
 });
 
 test('overlays: plant origins and the shadow grid draw wireframes', () => {
     clickOn('#layers input[data-layer="plantOrigins"]');
     clickOn('#layers input[data-layer="shadowGrid"]');
-    packets(3);
+    waitFor(() => view.shadow && view.shadow.length === 16 * 16 * 16, 'shadow snapshot', 30000);
     check(diagnostics.wires.plantOrigins && diagnostics.wires.plantOrigins.visible, 'origins drawn');
     check(view.shadow && view.shadow.length === 16 * 16 * 16, 'shadow snapshot');
     clickOn('#layers input[data-layer="plantOrigins"]');
