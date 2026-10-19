@@ -198,14 +198,16 @@ function stills() {
 // the ground, grass and sky gone and the plant flat black on white, to
 // judge its form apart from its shading. `tier` forces a forest tier
 // (auto, leaves, ...). `perf` prints each view's GPU ms with the plant and
-// without it (its cost).
-//   species <name,...|all> [label=species] [skies=noon,golden] [tier=auto] [sil] [perf]
+// without it (its cost). `shadow=0`: the plant casts no shadow, so its
+// shading is its own (the tiers' self-shade apart from their casters).
+//   species <name,...|all> [label=species] [skies=noon,golden] [tier=auto] [sil] [perf] [shadow=0]
 function species() {
     const names = !shotsA || shotsA === 'all' ? PRESET_PLANTS.map((p) => p.name) : shotsA.split(',');
     const skies = (a3 || 'noon,golden').split(',');
     const tier = a4 || 'auto';
     const sil = a5 === 'sil';
     const timing = cmdArgs.includes('perf');
+    const noCast = cmdArgs.includes('shadow=0');
     const W = innerWidth, H = innerHeight, pane = Math.floor(W / 4);
     const FAR_EYE = 60, FOV = vp.cam.fov || 45;
     const tanHalf = Math.tan(FOV * Math.PI / 360);
@@ -260,6 +262,8 @@ function species() {
             for (const n of grove.nodes) n.visible = false;
             for (const q of grove.presets) q.node.visible = q === part;
             part.node.setTrees(new Float32Array(row.row));
+            const castWas = part.node.castsShadow;
+            if (noCast) part.node.castsShadow = false;
             const shaded = [], flat = [], captions = [];
             for (const d of views) {
                 const eye = Math.min(d, shrub ? 15 : FAR_EYE);
@@ -321,6 +325,7 @@ function species() {
             compose(shaded, captions, `${OUT}/${label}_${name}_${time}${tier === 'auto' ? '' : '_' + tier}.jpg`);
             if (flat.length) compose(flat, captions.map((c) => c.replace(` ${time} `, ' silhouette ')), `${OUT}/${label}_${name}_sil.jpg`);
             part.node.setTrees(new Float32Array(part.rows.flatMap((r) => r.row)));
+            part.node.castsShadow = castWas;
             for (const n of grove.nodes) n.visible = true;
             for (const q of grove.presets) q.node.visible = true;
             if (grove.grass) grove.grass.visible = grassWas;
