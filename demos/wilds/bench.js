@@ -8,7 +8,8 @@
 //       each route at each speed: a warm, then `seconds` of frames, each
 //       frame's GPU ms (perf.gpuFrameMs: the scene's render on the GPU), the
 //       main thread's CPU ms (perf.threadCpuMs over the frame's update and
-//       render recording, its waits left out) and the trees at each tier;
+//       render recording, its waits left out), the frame's wall ms (its waits
+//       in: the GPU's and the worker pool's) and the trees at each tier;
 //       a line per route and speed (mean / p50 / p95 / p99 / worst, the
 //       frame as the slower of the two, so the fps it bounds), the three
 //       worst frames with where the eye was, and <label>_bench.json
@@ -60,31 +61,34 @@ function run() {
         const prof = opt('prof');
         if (prof) bro.profiler.start({ hz: 2000, threads: prof });
         for (let i = 0; i < seconds * FPS; i++) {
-            const c0 = perf.threadCpuMs();
+            // (perf.now: the real clock; performance.now is the virtual one.)
+            const c0 = perf.threadCpuMs(), w0 = perf.now();
             advanceTime(DT);
             flush();
-            const cpu = perf.threadCpuMs() - c0;
+            const cpu = perf.threadCpuMs() - c0, wall = perf.now() - w0;
             const gpu = perf.gpuFrameMs();
             const st = forestStats();
             const { eye } = routeAt(key, flight.t);
-            frames.push({ t: +flight.t.toFixed(2), gpu, cpu, eye: eye.map((v) => +v.toFixed(0)),
+            frames.push({ t: +flight.t.toFixed(2), gpu, cpu, wall, eye: eye.map((v) => +v.toFixed(0)),
                           tiers: [st.trees.leaves, st.trees.clumps, st.trees.crowns], verts: st.vertices,
                           shadowVerts: st.shadowVertices, entries: st.entries, detail: [st.detail, st.shadowDetail] });
         }
         const report = prof ? bro.profiler.stop({ report: true, top: +opt('top', 30) }).report : null;
         const gpu = summary(frames.map((f) => f.gpu)), cpu = summary(frames.map((f) => f.cpu));
+        const wall = summary(frames.map((f) => f.wall));
         const frame = summary(frames.map((f) => Math.max(f.gpu, f.cpu)));
         const tiers = [0, 1, 2].map((k) => Math.round(frames.reduce((a, f) => a + f.tiers[k], 0) / frames.length));
         const verts = frames.reduce((a, f) => a + f.verts, 0) / frames.length;
         console.log(`${key.padEnd(8)} x${speed}: GPU ${f2(gpu.mean)} mean, ${f2(gpu.p50)} p50, ${f2(gpu.p95)} p95, ` +
                     `${f2(gpu.p99)} p99, ${f2(gpu.max)} max | CPU ${f2(cpu.mean)} mean, ${f2(cpu.p95)} p95, ${f2(cpu.max)} max | ` +
+                    `wall ${f2(wall.mean)} mean, ${f2(wall.p50)} p50 | ` +
                     `${(1000 / frame.p50).toFixed(0)} fps p50, ${(1000 / frame.p99).toFixed(0)} at p99 | ` +
                     `trees ${tiers.join(' / ')}, ${(verts / 1e6).toFixed(1)} M verts`);
         const worst = frames.slice().sort((a, b) => Math.max(b.gpu, b.cpu) - Math.max(a.gpu, a.cpu)).slice(0, 3);
         for (const w of worst)
             console.log(`    worst t ${w.t} s at [${w.eye}]: GPU ${f2(w.gpu)}, CPU ${f2(w.cpu)}, trees ${w.tiers.join(' / ')}`);
         if (report) console.log(report);
-        out.runs.push({ route: key, speed, gpu, cpu, frame, tiers, verts, frames });
+        out.runs.push({ route: key, speed, gpu, cpu, wall, frame, tiers, verts, frames });
     }
     const file = `${OUT}/${label}_bench.json`;
     require('fs').writeFileSync(file, JSON.stringify(out));
