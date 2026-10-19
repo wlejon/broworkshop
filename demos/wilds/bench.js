@@ -65,8 +65,13 @@ function run() {
             const c0 = perf.threadCpuMs(), w0 = perf.now();
             advanceTime(DT);
             flush();
+            // The render finished last, a frame or so behind, not this one:
+            // the next frame's work overlaps this one's on the GPU, as a
+            // window's frames do. (Waiting for this one, 8 ms of a walk
+            // frame, was the GPU's whole frame on top of the CPU's each
+            // frame, outside the wall it measured.)
+            const gpu = perf.gpuFrameMs({ wait: false });
             const cpu = perf.threadCpuMs() - c0, wall = perf.now() - w0;
-            const gpu = perf.gpuFrameMs();
             const st = forestStats();
             const { eye } = routeAt(key, flight.t);
             frames.push({ t: +flight.t.toFixed(2), gpu, cpu, wall, eye: eye.map((v) => +v.toFixed(0)),
