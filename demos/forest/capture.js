@@ -788,6 +788,9 @@ function cost() {
         perf.gpuFrameMs();
         const ms = [];
         let cpu = 0;
+        // `prof=main|all`: bro.profiler over the 60 frames, its report after the line.
+        const prof = opt('prof');
+        if (prof) bro.profiler.start({ hz: 2000, threads: prof });
         for (let i = 0; i < 60; i++) {
             const c0 = perf.now();
             advanceTime(1000 / fps);
@@ -800,6 +803,7 @@ function cost() {
         console.log(`cost ${s}: GPU mean ${(ms.reduce((a, b) => a + b, 0) / ms.length).toFixed(2)} ms, ` +
                     `median ${ms[30].toFixed(2)}, max ${ms[59].toFixed(2)}; CPU ${(cpu / 60).toFixed(2)} ms; ` +
                     `${(st.vertices / 1e6).toFixed(2)} M verts, ${(st.shadowVertices / 1e6).toFixed(2)} M shadow, ${st.draws} draws`);
+        if (prof) console.log(bro.profiler.stop({ report: true, top: 30 }).report);
     }
 }
 
