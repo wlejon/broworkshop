@@ -31,7 +31,7 @@ const mode = argv[0] || 'still';
 if (mode === 'still') {
     for (const shot of shotsOf(argv[1])) {
         setShot(shot);
-        step(1.0);
+        step(+(opt('warm') || 1.0));
         const file = `${OUT}/biomes_${shot}.png`;
         screenshot(file);
         const s = plants.plantStats();
