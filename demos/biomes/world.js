@@ -113,6 +113,17 @@ export const SPECIES = [
       elements: 1600, trunk: 0.04, spread: 0.6, droop: 0.1,
       light: [0.27, 0.40, 0.08], dark: [0.04, 0.08, 0.025], hueVariety: 0.35, glow: 0.8, glowColor: [1.0, 0.9, 0.35],
       bark: [0.12, 0.09, 0.07], density: 0.7 },
+    // 4 an oak-like tree: broad and low, its crown a few big dark lobes,
+    // bluer than the broadleaf.
+    { height: 13, base: 0.22, radius: 6.2, shape: 0.0, lobes: 12, lobeSize: 0.6, leafLength: 0.3, leafWidth: 0.6,
+      elements: 8000, trunk: 0.42, spread: 1.0, droop: 0.1,
+      light: [0.13, 0.25, 0.08], dark: [0.015, 0.04, 0.025], hueVariety: 0.3, glow: 0.7, glowColor: [0.9, 0.95, 0.4],
+      bark: [0.10, 0.09, 0.08], density: 1.0 },
+    // 5 a lime-like tree: tall and rounded, a fresh yellow green.
+    { height: 17, base: 0.25, radius: 4.6, shape: 0.1, lobes: 15, lobeSize: 0.5, leafLength: 0.32, leafWidth: 0.7,
+      elements: 7000, trunk: 0.3, spread: 0.8, droop: 0.25,
+      light: [0.30, 0.40, 0.07], dark: [0.04, 0.08, 0.02], hueVariety: 0.3, glow: 1.0, glowColor: [1.0, 0.95, 0.4],
+      bark: [0.14, 0.12, 0.10], density: 0.8 },
 ];
 
 function plantAll() {
@@ -128,23 +139,32 @@ function plantAll() {
             const pine = fbm(jx * 0.004 - 5.0, jz * 0.004 + 2.0, 2);
             const birch = fbm(jx * 0.011 + 9.0, jz * 0.011 - 4.0, 2);
             const r = hash(jx * 3, jz * 11);
-            const species = r < (pine - 0.35) * 2.2 ? 2 : (birch > 0.62 && r < 0.6 ? 1 : 0);
+            // The broadleaves in stands of a kind, mixed at their margins:
+            // oak in one, lime in the next, the common broadleaf between.
+            const kind = fbm(jx * 0.008 + 2.7, jz * 0.008 - 6.4, 2) + (hash(jx * 19, jz * 23) - 0.5) * 0.12;
+            const broad = kind < 0.42 ? 4 : (kind > 0.58 ? 5 : 0);
+            const species = r < (pine - 0.35) * 2.2 ? 2 : (birch > 0.62 && r < 0.6 ? 1 : broad);
             // Stands of an age (noise) with every tree its own: old giants,
             // young ones in their gaps, the edge's lower than the core's.
             const age = fbm(jx * 0.02 + 1.3, jz * 0.02 + 6.1, 2);
             const own = hash(jx * 7, jz * 3);
             const scale = (0.5 + 0.75 * age + 0.45 * own * own) * (0.75 + 0.25 * cover);
+            // A stand's tone (its soil, its age) shared, each tree a little its own.
+            const stand = (fbm(jx * 0.015 - 8.2, jz * 0.015 + 3.3, 2) - 0.5) * 1.6;
             plants.push({ x: jx, y: groundHeight(jx, jz) - 0.1, z: jz, yaw: hash(jx, jz) * 6.283,
-                          scale, species, seed: seed++, tint: (hash(jx * 2, jz * 9) - 0.5) * 0.8 });
+                          scale, species, seed: seed++, tint: stand + (hash(jx * 2, jz * 9) - 0.5) * 0.4 });
         }
     }
-    // Shrubs at the forest's edges and in the glades.
-    for (let z = -HALF + 2; z < HALF - 2; z += 3.2) {
-        for (let x = -HALF + 2; x < HALF - 2; x += 3.2) {
-            const jx = x + (hash(x * 3, z * 19) - 0.5) * 3, jz = z + (hash(x * 23, z * 5) - 0.5) * 3;
+    // Shrubs in thickets along the forest's edges and a few in its
+    // understorey; out in the open only where a thicket has crept out.
+    for (let z = -HALF + 2; z < HALF - 2; z += 2.4) {
+        for (let x = -HALF + 2; x < HALF - 2; x += 2.4) {
+            const jx = x + (hash(x * 3, z * 19) - 0.5) * 2.4, jz = z + (hash(x * 23, z * 5) - 0.5) * 2.4;
             const cover = forestCover(jx, jz);
             const edge = cover * (1 - cover) * 4;
-            if (hash(jx * 17, jz * 13) > 0.06 + 0.4 * edge) continue;
+            const thicket = Math.max(0, (fbm(jx * 0.05 + 1.9, jz * 0.05 - 7.7, 2) - 0.45) * 3.5);
+            const p = thicket * (0.05 + 0.75 * edge + 0.15 * cover);
+            if (hash(jx * 17, jz * 13) > p) continue;
             plants.push({ x: jx, y: groundHeight(jx, jz) - 0.05, z: jz, yaw: hash(jz, jx) * 6.283,
                           scale: 0.6 + 0.8 * hash(jx, jz * 2), species: 3, seed: seed++, tint: (hash(jx, jz * 5) - 0.5) });
         }
