@@ -24,9 +24,7 @@ const defs = Object.assign({}, LAYERS, OVERLAYS);
 for (const key of Object.keys(defs)) {
     const d = defs[key];
     boxes[key] = h('input', { type: 'checkbox', checked: d.on, dataset: { layer: key } });
-    boxes[key].addEventListener('change', () => {
-        for (const k of setLayer(key, boxes[key].checked)) boxes[k].checked = defs[k].on;
-    });
+    boxes[key].addEventListener('change', () => setLayer(key, boxes[key].checked));
     document.getElementById('layers').appendChild(h('label.k-field', null,
         boxes[key], h('span.swatch', { style: { background: css(d.color) } }), h('span', null, d.label)));
 }

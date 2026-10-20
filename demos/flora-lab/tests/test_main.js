@@ -1,9 +1,7 @@
 // flora-lab: the worker grows the meadow and the page draws it; controls,
 // layers, overlays and the time of day. Run: scripts/validate.sh demos/flora-lab
-import { check, eq, test, done, frames, waitFor, q, text, clickOn, setValue, shot } from "/lib/kit/test.js";
+import { check, eq, test, done, frames, waitFor, text, clickOn, setValue, shot } from "/lib/kit/test.js";
 import { view, layers, diagnostics, sky, triangles } from "/app/lab.js";
-import { LAYERS } from "/app/layers.js";
-import { OVERLAYS } from "/app/diagnostics.js";
 
 const packets = (n) => { const want = view.packets + n; waitFor(() => view.packets >= want, n + ' packets', 30000); };
 
@@ -53,20 +51,6 @@ test('overlays: plant origins and the shadow grid draw wireframes', () => {
     clickOn('#layers input[data-layer="plantOrigins"]');
     clickOn('#layers input[data-layer="shadowGrid"]');
     check(!diagnostics.wires.plantOrigins.visible, 'origins hidden');
-});
-
-test('impostors replace the full plant, and back', () => {
-    clickOn('#layers input[data-layer="impostors"]');
-    packets(1);
-    eq([LAYERS.branches.on, LAYERS.foliage.on, LAYERS.blooms.on], [false, false, false], 'hot layers off');
-    eq(q('#layers input[data-layer="branches"]').checked, false, 'panel follows');
-    check(diagnostics.impostorQuads === 4, 'one quad per plant: ' + diagnostics.impostorQuads);
-    clickOn('#layers input[data-layer="branches"]');
-    eq(OVERLAYS.impostors.on, false, 'impostors off');
-    clickOn('#layers input[data-layer="foliage"]');
-    clickOn('#layers input[data-layer="blooms"]');
-    packets(1);
-    check(layers.nodes.branches.visible && layers.nodes.foliage.visible, 'plant back');
 });
 
 test('time of day', () => {

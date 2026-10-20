@@ -4,8 +4,8 @@
 // leaf cards scatter along its twigs and a flower is stamped at every bloom
 // anchor (layers.js). The whole sim and its mesh emit run on a worker
 // (sim-worker.js); this thread only pumps it and uploads what comes back.
-// Diagnostic overlays (diagnostics.js) show the shadow grid, plant origins
-// and an octahedral-impostor fast path. The meadow is lit by the kit's
+// Diagnostic overlays (diagnostics.js) show the shadow grid and plant
+// origins. The meadow is lit by the kit's
 // time-of-day rig: HDR sky + CSM sun, and at night drifting firefly point
 // lights, a moonbeam spot and glowing bloom eyes.
 //
@@ -77,28 +77,14 @@ sim.onmessage = (e) => {
 
 /** Triangles drawn this frame across the visible layers. */
 export function triangles() {
-    return layers.triangles + (OVERLAYS.impostors.on ? diagnostics.impostorQuads * 2 : 0);
+    return layers.triangles;
 }
 
-// Impostors are the fast path standing in for the full plant, so the two are exclusive.
-const HOT = ['branches', 'foliage', 'blooms'];
-
-/**
- * Turn a layer or overlay on/off. Returns the keys whose state it also
- * changed (impostors vs the full plant) so the panel can follow.
- */
+/** Turn a layer or overlay on/off. */
 export function setLayer(key, on) {
-    const changed = [];
-    if (key === 'impostors' && on) {
-        for (const k of HOT) if (LAYERS[k].on) { layers.set(k, false); changed.push(k); }
-    } else if (HOT.includes(key) && on && OVERLAYS.impostors.on) {
-        OVERLAYS.impostors.on = false;
-        changed.push('impostors');
-    }
     if (LAYERS[key]) layers.set(key, on); else OVERLAYS[key].on = on;
     sim.postMessage({ type: 'layers', flags: layers.flags() });
     refreshDiagnostics();
-    return changed;
 }
 
 export const control = {
