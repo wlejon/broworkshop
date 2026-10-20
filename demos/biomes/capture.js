@@ -7,7 +7,11 @@
 //       five-second warm), the plants drawn, and the passes (perf.gpuPasses)
 //   ... capture.js -- strip <shot> [frames=90]      a second of motion, every
 //       third frame side by side: captures/biomes_<shot>_strip.png
-import { sky, SHOTS, setShot, holdView, plants, SPECIES, MEADOW, groundHeight } from "/app/world.js";
+//   ... capture.js -- jump <from> <to> [hold=3] [frames=90]
+//       holds <from>, cuts the camera to <to>, and logs every frame after the
+//       cut: GPU ms, the world service's budget, spent and worst error, and
+//       the turf's fills and missing tiles (scene.cullStats)
+import { sky, SHOTS, setShot, holdView, plants, SPECIES, MEADOW, groundHeight, scene } from "/app/world.js";
 
 const argv = (bro.app && bro.app.argv) || [];
 const OUT = bro.resolvePath('/app/captures').replace(/\\/g, '/');
@@ -83,6 +87,34 @@ if (mode === 'still') {
         screenshot(file);
         console.log(`specimens ${k}: ${file}`);
     }
+} else if (mode === 'jump') {
+    const from = SHOTS[argv[1]] ? argv[1] : 'glade', to = SHOTS[argv[2]] ? argv[2] : 'flyover';
+    const frames = +(opt('frames') || 90);
+    setShot(from);
+    step(+(opt('hold') || 3));
+    perf.gpuFrameMs();
+    const f = (v, d = 2) => (typeof v === 'number' ? v.toFixed(d) : '-').padStart(6);
+    const row = (i, ms) => {
+        const c = scene.cullStats() || {};
+        console.log(`${String(i).padStart(4)} ${f(ms)} ms  budget ${f(c.worldBudgetMs)}  spent ${f(c.worldSpentMs)}  ` +
+                    `jobs ${String(c.worldJobs ?? '-').padStart(4)}  queued ${String(c.worldQueued ?? '-').padStart(5)}  ` +
+                    `worst ${f(c.worldWorstError)} px  fills ${String(c.groundLayerFills).padStart(4)}  ` +
+                    `missing ${String(c.groundLayerMissing).padStart(5)}`);
+        return c;
+    };
+    advanceTime(1000 / fps);
+    console.log(`jump: ${from} held, then ${to}; frame 0 is the last held`);
+    row(0, perf.gpuFrameMs());
+    setShot(to);
+    let over = 0, settled = -1;
+    for (let i = 1; i <= frames; i++) {
+        advanceTime(1000 / fps);
+        const ms = perf.gpuFrameMs();
+        const c = row(i, ms);
+        if (ms > 2.78) over++;
+        if (settled < 0 && c.groundLayerMissing === 0) settled = i;
+    }
+    console.log(`jump: ${over} of ${frames} frames over 2.78 ms; the turf settled at frame ${settled}`);
 } else if (mode === 'strip') {
     const shot = shotsOf(argv[1])[0];
     setShot(shot);
