@@ -1,14 +1,14 @@
-// biomes entry: the view and the sky. The world is built here as the
-// engine's plant mechanisms land in bro.
-import { boot } from "/lib/kit/index.js";
-import { sceneViewport, orbitRotation } from "/lib/kit/viewport3d.js";
-import { daylight } from "/lib/kit/sky.js";
+// biomes entry: the panel over the world (world.js, which the capture
+// script imports too).
+import { boot, segmented } from "/lib/kit/index.js";
+import { vp, sky, SHOTS, setShot, land } from "/app/world.js";
 
 boot();
 
-export const vp = sceneViewport('#stage', {
-    orbit: { target: [0, 4, 0], dist: 60, fov: 50, near: 0.1, far: 4000, rot: orbitRotation(Math.PI * 0.75, -0.3) },
-    controls: { orbitButton: 0, panButton: 2, minDist: 1, maxDist: 2000 },
-});
-export const { scene } = vp;
-export const sky = daylight(scene, { cascades: 3, atlas: 4096, pcf: 3 });
+const labels = (o) => Object.fromEntries(Object.keys(o).map((k) => [k, o[k].label]));
+segmented('#shots', labels(SHOTS), { value: 'glade', onChange: setShot });
+segmented('#tod', Object.fromEntries(sky.order.map((k) => [k, sky.presets[k].label])),
+    { value: sky.current, onChange: (k) => sky.apply(k) });
+
+// Any drag or wheel on the view takes it over from the held shot.
+for (const ev of ['pointerdown', 'wheel']) vp.canvas.addEventListener(ev, () => land(), { capture: true });
