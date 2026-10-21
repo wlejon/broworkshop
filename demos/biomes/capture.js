@@ -15,7 +15,7 @@
 //   ... capture.js -- exposure [from=canopy] [to=flyover] [hold=5]
 //       cuts from one shot to another and back, logging every frame's
 //       metered EV, the EV applied and the exposure scale
-//   ... capture.js -- motion walk|fly|pan|sun [frames=150]
+//   ... capture.js -- motion walk|fly|pan|sun|advance [frames=150] [base=<shot>] [far=1]
 //       walk: the glade at 1.4 m/s; fly: the flyover at 40 m/s; every frame's
 //       GPU ms and shadow pages (drawn, overlays, left wanted), and how many
 //       frames went over 2.78 ms. pan (the glade sidestepping at 0.5 m/s) and
@@ -24,8 +24,10 @@
 //       points frame over frame: how much it changes (a still scene's ground
 //       should not), the frames' change spikes, and two slit-scans
 //       (captures/biomes_motion_<kind>.png: a row a frame of a line of ground
-//       across the view at 6 m and 20 m); passes=<n> logs each frame's n
-//       dearest passes too
+//       across the view at 6 m and 20 m); advance walks on at 3 m/s and
+//       reads the ground the same. base= starts from another shot; far=1
+//       reads the ground 60-300 m out, the slit-scans at 80 m and 200 m (the
+//       cover's far tier); passes=<n> logs each frame's n dearest passes too
 import { sky, SHOTS, setShot, holdView, plants, SPECIES, MEADOW, groundHeight, scene, vp } from "/app/world.js";
 
 const argv = (bro.app && bro.app.argv) || [];
@@ -100,6 +102,83 @@ if (mode === 'still') {
         console.log(`  pages: needed ${c.shadowPagesNeeded} resident ${c.shadowPagesResident} drawn ${c.shadowPagesDrawn} ` +
                     `dynamic ${c.shadowPagesDynamic} wanted ${c.shadowPagesWanted} views ${c.shadowViews}`);
     }
+} else if (mode === 'cover') {
+    // The ground by its distance: each shot's pixels binned by how far off
+    // the ground under them is (the eye's ray marched over the height
+    // field, so a plant in front counts as the ground behind it), each band's
+    // mean colour, its grain (how far a pixel stands from its 3 x 3 mean's
+    // luminance) and its mottle (the 3 x 3 mean from the 15 x 15's): a
+    // handover is a step in a band's colour, a blurred ground a grain
+    // falling to nothing.
+    const canvas = document.querySelector('canvas');
+    const bands = [3, 6, 10, 15, 22, 32, 45, 65, 90, 130, 180, 250, 350, 500, 700, 1000, 1500, 2500];
+    const groundAt = (o, d) => {
+        let t = 0.5, prev = 0;
+        for (; t < 4000; prev = t, t += Math.max(0.1, t * 0.01)) {
+            const y = o[1] + d[1] * t;
+            if (y < groundHeight(o[0] + d[0] * t, o[2] + d[2] * t)) {
+                let a = prev, b = t;
+                for (let i = 0; i < 20; i++) {
+                    const m = 0.5 * (a + b);
+                    if (o[1] + d[1] * m < groundHeight(o[0] + d[0] * m, o[2] + d[2] * m)) b = m; else a = m;
+                }
+                return Math.hypot(d[0] * a, d[2] * a);
+            }
+        }
+        return -1;
+    };
+    for (const shot of shotsOf(argv[1])) {
+        setShot(shot);
+        step(+(opt('warm') || 1.0));
+        const img = frameImage();
+        screenshot(`${OUT}/biomes_${shot}.png`);
+        const W = img.width, H = img.height, px = img.data;
+        const r = canvas.getBoundingClientRect(), dpr = W / window.innerWidth;
+        // Luminance and its summed table, for the box means.
+        const L = new Float64Array(W * H), S = new Float64Array((W + 1) * (H + 1));
+        for (let y = 0; y < H; y++)
+            for (let x = 0; x < W; x++) {
+                const i = (y * W + x) * 4;
+                L[y * W + x] = 0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2];
+            }
+        for (let y = 0; y < H; y++)
+            for (let x = 0, row = 0; x < W; x++) {
+                row += L[y * W + x];
+                S[(y + 1) * (W + 1) + x + 1] = S[y * (W + 1) + x + 1] + row;
+            }
+        const box = (x, y, k) => {
+            const x0 = Math.max(0, x - k), x1 = Math.min(W, x + k + 1), y0 = Math.max(0, y - k), y1 = Math.min(H, y + k + 1);
+            return (S[y1 * (W + 1) + x1] - S[y0 * (W + 1) + x1] - S[y1 * (W + 1) + x0] + S[y0 * (W + 1) + x0]) /
+                   ((x1 - x0) * (y1 - y0));
+        };
+        // The distance under every 8th pixel, each pixel taking its block's.
+        const G = 8, gw = Math.ceil(W / G), gh = Math.ceil(H / G), dist = new Float32Array(gw * gh);
+        for (let gy = 0; gy < gh; gy++)
+            for (let gx = 0; gx < gw; gx++) {
+                const ray = scene.unprojectLocal((gx * G + G / 2) / dpr - r.left, (gy * G + G / 2) / dpr - r.top);
+                dist[gy * gw + gx] = ray ? groundAt(ray.origin, ray.dir) : -1;
+            }
+        const acc = bands.map(() => ({ n: 0, r: 0, g: 0, b: 0, grain: 0, mottle: 0 }));
+        for (let y = 8; y < H - 8; y++)
+            for (let x = 8; x < W - 8; x++) {
+                const d = dist[Math.floor(y / G) * gw + Math.floor(x / G)];
+                if (d < 0) continue;
+                const k = bands.findIndex((e) => d < e);
+                if (k < 0) continue;
+                const a = acc[k], i = (y * W + x) * 4, m3 = box(x, y, 1);
+                a.n++; a.r += px[i]; a.g += px[i + 1]; a.b += px[i + 2];
+                a.grain += Math.abs(L[y * W + x] - m3);
+                a.mottle += Math.abs(m3 - box(x, y, 7));
+            }
+        console.log(`cover ${shot}: band (m) pixels  r g b  grain mottle`);
+        for (let k = 0; k < bands.length; k++) {
+            const a = acc[k];
+            if (a.n < 200) continue;
+            const f = (v) => (v / a.n).toFixed(1).padStart(6);
+            console.log(`  ${String(k ? bands[k - 1] : 0).padStart(5)}-${String(bands[k]).padEnd(5)} ${String(a.n).padStart(8)} ` +
+                        `${f(a.r)}${f(a.g)}${f(a.b)}  ${f(a.grain)}${f(a.mottle)}`);
+        }
+    }
 } else if (mode === 'specimens') {
     // One of each species alone in the meadow, side-lit, then from above.
     const x0 = MEADOW.x, z0 = MEADOW.z;
@@ -166,15 +245,18 @@ if (mode === 'still') {
                     `scale ${c.exposureScale.toExponential(4)}`);
     }
 } else if (mode === 'motion') {
-    const kind = ['walk', 'fly', 'pan', 'sun'].includes(argv[1]) ? argv[1] : 'walk';
+    const kind = ['walk', 'fly', 'pan', 'sun', 'advance'].includes(argv[1]) ? argv[1] : 'walk';
     const frames = +(opt('frames') || 150);
-    const base = kind === 'fly' ? 'flyover' : 'glade';
+    const base = SHOTS[opt('base')] ? opt('base') : kind === 'fly' ? 'flyover' : 'glade';
     const E = SHOTS[base].eye(), L = SHOTS[base].look();
     const flat = Math.hypot(L[0] - E[0], L[2] - E[2]);
     const fwd = [(L[0] - E[0]) / flat, 0, (L[2] - E[2]) / flat], side = [-fwd[2], 0, fwd[0]];
-    const speed = { walk: 1.4, fly: 40, pan: 0.5, sun: 0 }[kind] / fps;
+    const speed = { walk: 1.4, fly: 40, pan: 0.5, sun: 0, advance: 3 }[kind] / fps;
     const dir = kind === 'pan' ? side : fwd;
-    const temporal = kind === 'pan' || kind === 'sun';
+    const temporal = kind === 'pan' || kind === 'sun' || kind === 'advance';
+    // far=1: the ground read 60-300 m out (the cover's far tier), the
+    // slit-scans at 80 m and 200 m.
+    const far = !!opt('far');
     if (temporal) scene.setWind({ speed: 0, gust: 0 });
     holdView(E, L);
     step(3);
@@ -189,8 +271,10 @@ if (mode === 'still') {
         return [x, groundHeight(x, z), z];
     };
     const points = [];
-    for (let a = 3; a <= 30; a += 0.75) for (let s = -8; s <= 8; s += 0.5) points.push(ground(a, s));
-    const SLIT = 512, lines = [6, 20].map((a) => Array.from({ length: SLIT }, (_, k) => ground(a, -6 + 12 * k / (SLIT - 1))));
+    if (far) for (let a = 60; a <= 300; a += 6) for (let s = -0.3 * a; s <= 0.3 * a; s += 0.015 * a) points.push(ground(a, s));
+    else for (let a = 3; a <= 30; a += 0.75) for (let s = -8; s <= 8; s += 0.5) points.push(ground(a, s));
+    const SLIT = 512, lines = (far ? [80, 200] : [6, 20]).map((a) => Array.from({ length: SLIT },
+        (_, k) => ground(a, (far ? 0.3 * a : 6) * (-1 + 2 * k / (SLIT - 1)))));
     const rect = vp.canvas.getBoundingClientRect();
     const lum = (img, p) => {
         const q = scene.projectLocal(p[0], p[1], p[2]);
