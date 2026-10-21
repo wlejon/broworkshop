@@ -19,57 +19,62 @@ const PRESETS = { afternoon: SKY.afternoon, golden: SKY.golden };
 export const sky = daylight(scene, { presets: PRESETS, order: ['afternoon', 'golden'], pcf: 3, ground: [0.10, 0.13, 0.05] });
 
 // --- the land ------------------------------------------------------------------------
+//
+// Every field is a FastNoise node tree: the engine places the plants from
+// the same trees on its own threads (the plants node's rules), and the
+// script reads them for the ground, the grass and the views.
 
-function hash(x, z) {
-    let h = Math.imul(x | 0, 374761393) ^ Math.imul(z | 0, 668265263);
-    h = Math.imul(h ^ (h >>> 13), 1274126177);
-    return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
-}
-function vnoise(x, z) {
-    const xi = Math.floor(x), zi = Math.floor(z), fx = x - xi, fz = z - zi;
-    const u = fx * fx * (3 - 2 * fx), v = fz * fz * (3 - 2 * fz);
-    const a = hash(xi, zi), b = hash(xi + 1, zi), c = hash(xi, zi + 1), d = hash(xi + 1, zi + 1);
-    return (a + (b - a) * u) + ((c + (d - c) * u) - (a + (b - a) * u)) * v;
-}
-function fbm(x, z, oct) {
-    let s = 0, amp = 0.5, f = 1;
-    for (let i = 0; i < oct; i++) { s += amp * vnoise(x * f, z * f); f *= 2.03; amp *= 0.5; }
-    return s;
-}
+const SEED = 1337;
+const N = (type, props = {}) => {
+    const n = FastNoise.create(type);
+    for (const k in props) n.set(k, props[k]);
+    return n;
+};
+const add = (a, b) => N('Add', { LHS: a, RHS: b });
+const sub = (a, b) => N('Subtract', { LHS: a, RHS: b });   // (either side a node or a number)
+const mul = (a, b) => N('Multiply', { LHS: a, RHS: b });
+const clamp01 = (a) => N('Min', { LHS: N('Max', { LHS: a, RHS: 0 }), RHS: 1 });
+// a * k + c
+const affine = (a, k, c) => add(mul(a, k), c);
+// Value-noise fbm of `octaves` with a feature every `size` metres, 0 ..
+// (1 - 0.5^octaves) as the octaves' amplitudes sum.
+const fbm = (size, octaves, seed) => {
+    const n = N('FractalFBm', { Source: N('Value', { 'Feature Scale': size, 'Seed Offset': seed }), Octaves: octaves,
+                               Lacunarity: 2.03, Gain: 0.5 });
+    const top = 1 - Math.pow(0.5, octaves);
+    return affine(n, top / 2, top / 2);
+};
+// A disc's distance from its centre in radii.
+const radii = (c) => mul(N('DistanceToPoint', { 'Distance Function': 'Euclidean', 'Point X': c.x, 'Point Y': c.z }), 1 / c.r);
+const sampled = (field) => (x, z) => field.genSingle2D(x, z, SEED);
 
 // The glade the walk starts in, and a meadow down the slope from it.
 export const GLADE = { x: 20, z: 30, r: 28 };
 export const MEADOW = { x: -160, z: -120, r: 110 };
 
-export function groundHeight(x, z) {
-    const hills = (fbm(x * 0.0024, z * 0.0024, 4) - 0.5) * 90;
-    const ridges = (fbm(x * 0.009 + 7.3, z * 0.009 - 2.1, 3) - 0.5) * 14;
-    return hills + ridges;
-}
+const HEIGHT = add(affine(fbm(1 / 0.0024, 4, 0), 90, -45), affine(fbm(1 / 0.009, 3, 1), 14, -7));
+export const groundHeight = sampled(HEIGHT);
 
 // 0 open .. 1 forest: groves with clearings, the glade and meadow kept open.
-export function forestCover(x, z) {
-    let c = fbm(x * 0.006 + 3.1, z * 0.006 + 8.7, 3);
-    c = Math.min(1, Math.max(0, (c - 0.36) * 3.2));
-    const gd = Math.hypot(x - GLADE.x, z - GLADE.z) / GLADE.r;
-    const md = Math.hypot(x - MEADOW.x, z - MEADOW.z) / MEADOW.r;
-    c *= Math.min(1, Math.max(0, (gd - 0.85) * 2.5));
-    c *= Math.min(1, Math.max(0, (md - 0.8) * 1.6));
-    return c;
-}
+const COVER = mul(mul(clamp01(affine(fbm(1 / 0.006, 3, 2), 3.2, -0.36 * 3.2)),
+                      clamp01(affine(radii(GLADE), 2.5, -0.85 * 2.5))),
+                  clamp01(affine(radii(MEADOW), 1.6, -0.8 * 1.6)));
+export const forestCover = sampled(COVER);
+const DRY = fbm(1 / 0.02, 2, 3);
+const dryness = sampled(DRY);
+const herbPatches = sampled(affine(N('Value', { 'Feature Scale': 20, 'Seed Offset': 10 }), 0.5, 0.5));
 
 function buildGround() {
     const n = Math.round((2 * HALF) / CELL) + 1;
-    const h = new Float32Array(n * n);
-    for (let j = 0; j < n; j++)
-        for (let i = 0; i < n; i++) h[j * n + i] = groundHeight(-HALF + i * CELL, -HALF + j * CELL);
+    // (Row by row: x along a row, z down the rows, as heightmapGrid reads it.)
+    const h = HEIGHT.genUniformGrid2D(-HALF, -HALF, n, n, CELL, SEED);
     const mesh = Mesh.heightmapGrid(h, n, n, CELL);
     const pos = mesh.positions;
     const colors = new Float32Array((pos.length / 3) * 4);
     for (let v = 0; v < pos.length / 3; v++) {
         const x = pos[v * 3], z = pos[v * 3 + 2];   // (the grid is centred on the origin)
         const cover = forestCover(x, z);
-        const dry = fbm(x * 0.02 + 4.4, z * 0.02 - 1.7, 2);
+        const dry = dryness(x, z);
         // Meadow green to golden, forest floor to dark loam under the trees.
         const r = 0.10 + 0.10 * dry, g = 0.15 + 0.06 * dry, b = 0.035;
         colors[v * 4] = r * (1 - 0.55 * cover) + 0.05 * cover;
@@ -119,54 +124,55 @@ export const SPECIES = [
       bark: [0.14, 0.12, 0.10], density: 0.8 },
 ];
 
-function plantAll() {
-    const plants = [];
-    const step = 5.5;
-    let seed = 1;
-    for (let z = -HALF + 4; z < HALF - 4; z += step) {
-        for (let x = -HALF + 4; x < HALF - 4; x += step) {
-            const jx = x + (hash(x * 13, z * 7) - 0.5) * step * 0.9;
-            const jz = z + (hash(x * 5, z * 17) - 0.5) * step * 0.9;
-            const cover = forestCover(jx, jz);
-            if (hash(jx * 31, jz * 29) > cover * 0.95) continue;
-            const pine = fbm(jx * 0.004 - 5.0, jz * 0.004 + 2.0, 2);
-            const birch = fbm(jx * 0.011 + 9.0, jz * 0.011 - 4.0, 2);
-            const r = hash(jx * 3, jz * 11);
-            // The broadleaves in stands of a kind, mixed at their margins:
-            // oak in one, lime in the next, the common broadleaf between.
-            const kind = fbm(jx * 0.008 + 2.7, jz * 0.008 - 6.4, 2) + (hash(jx * 19, jz * 23) - 0.5) * 0.12;
-            const broad = kind < 0.42 ? 4 : (kind > 0.58 ? 5 : 0);
-            const species = r < (pine - 0.35) * 2.2 ? 2 : (birch > 0.62 && r < 0.6 ? 1 : broad);
-            // Stands of an age (noise) with every tree its own: old giants,
-            // young ones in their gaps, the edge's lower than the core's.
-            const age = fbm(jx * 0.02 + 1.3, jz * 0.02 + 6.1, 2);
-            const own = hash(jx * 7, jz * 3);
-            const scale = (0.5 + 0.75 * age + 0.45 * own * own) * (0.75 + 0.25 * cover);
-            // A stand's tone (its soil, its age) shared, each tree a little its own.
-            const stand = (fbm(jx * 0.015 - 8.2, jz * 0.015 + 3.3, 2) - 0.5) * 1.6;
-            plants.push({ x: jx, y: groundHeight(jx, jz) - 0.1, z: jz, yaw: hash(jx, jz) * 6.283,
-                          scale, species, seed: seed++, tint: stand + (hash(jx * 2, jz * 9) - 0.5) * 0.4 });
-        }
-    }
+// What grows where: two layers of candidates over the whole world, each
+// kept by the fields where it stands (scene.createPlants' rules). The
+// world ends with its ground, a few metres in from its edge.
+const INSIDE = clamp01(affine(N('DistanceToPoint', { 'Distance Function': 'Max Axis' }), -1, HALF - 4));
+const SHRUB_INSIDE = clamp01(affine(N('DistanceToPoint', { 'Distance Function': 'Max Axis' }), -1, HALF - 2));
+const step01 = (a, at, width) => clamp01(affine(a, 1 / width, 0.5 - at / width));   // 0 below at, 1 above, over width
+
+function rules() {
+    // The canopy: conifers where the pine noise is up, birches in their
+    // patches, and the broadleaves in stands of a kind, mixed at their
+    // margins: oak in one, lime in the next, the common broadleaf between.
+    const conifer = clamp01(affine(fbm(1 / 0.004, 2, 4), 2.2, -0.35 * 2.2));
+    const rest = sub(1, conifer);
+    const birch = mul(rest, mul(step01(fbm(1 / 0.011, 2, 5), 0.62, 0.04), 0.6));
+    const broad = mul(rest, sub(1, mul(step01(fbm(1 / 0.011, 2, 5), 0.62, 0.04), 0.6)));
+    const kind = fbm(1 / 0.008, 2, 6);
+    const oak = step01(mul(kind, -1), -0.42, 0.12), lime = step01(kind, 0.58, 0.12);
+    // Stands of an age with every tree its own: old giants, young ones in
+    // their gaps, the edge's lower than the core's; a stand's tone (its
+    // soil, its age) shared, each tree a little its own.
+    const age = fbm(1 / 0.02, 2, 7);
+    const trees = {
+        spacing: 5.5, jitter: 0.9, sink: 0.1, seed: 11,
+        chance: mul(mul(COVER, 0.95), INSIDE),
+        species: [
+            { species: 2, weight: conifer },
+            { species: 1, weight: birch },
+            { species: 4, weight: mul(broad, oak) },
+            { species: 5, weight: mul(broad, lime) },
+            { species: 0, weight: mul(broad, sub(1, add(oak, lime))) },
+        ],
+        scale: mul(affine(age, 0.75, 0.65), affine(COVER, 0.25, 0.75)), scaleVariety: 0.22,
+        tint: affine(fbm(1 / 0.015, 2, 8), 1.6, -0.8), tintVariety: 0.4,
+    };
     // Shrubs in thickets along the forest's edges and a few in its
-    // understorey; out in the open only where a thicket has crept out.
-    for (let z = -HALF + 2; z < HALF - 2; z += 2.4) {
-        for (let x = -HALF + 2; x < HALF - 2; x += 2.4) {
-            const jx = x + (hash(x * 3, z * 19) - 0.5) * 2.4, jz = z + (hash(x * 23, z * 5) - 0.5) * 2.4;
-            const cover = forestCover(jx, jz);
-            const edge = cover * (1 - cover) * 4;
-            const thicket = Math.max(0, (fbm(jx * 0.05 + 1.9, jz * 0.05 - 7.7, 2) - 0.45) * 3.5);
-            const p = thicket * (0.05 + 0.75 * edge + 0.15 * cover);
-            if (hash(jx * 17, jz * 13) > p) continue;
-            plants.push({ x: jx, y: groundHeight(jx, jz) - 0.05, z: jz, yaw: hash(jz, jx) * 6.283,
-                          scale: 0.6 + 0.8 * hash(jx, jz * 2), species: 3, seed: seed++, tint: (hash(jx, jz * 5) - 0.5) });
-        }
-    }
-    return plants;
+    // understorey; out in the open only where a thicket has crept out,
+    // and never in the glade's heart, where the walk starts.
+    const edge = mul(mul(COVER, sub(1, COVER)), 4);
+    const thicket = N('Max', { LHS: affine(fbm(1 / 0.05, 2, 9), 3.5, -0.45 * 3.5), RHS: 0 });
+    const clearing = clamp01(affine(radii(GLADE), 4, -0.4 * 4));
+    const shrubs = {
+        spacing: 2.4, jitter: 1.0, sink: 0.05, seed: 12,
+        chance: mul(mul(mul(thicket, add(add(mul(edge, 0.75), mul(COVER, 0.15)), 0.05)), SHRUB_INSIDE), clearing),
+        species: [3], scale: 1.0, scaleVariety: 0.4, tintVariety: 1.0,
+    };
+    return { ground: HEIGHT, seed: SEED, range: 2000, layers: [trees, shrubs] };
 }
 
 export const ground = buildGround();
-const dryness = (x, z) => fbm(x * 0.02 + 4.4, z * 0.02 - 1.7, 2);
 export const grass = scene.createGrass({
     ground, turf: true, cell: 2,
     density: (x, z) => 1 - 0.75 * forestCover(x, z),
@@ -175,14 +181,11 @@ export const grass = scene.createGrass({
     floor: (x, z) => forestCover(x, z),
     herbs: {
         species: ['bracken', 'woodsorrel', { preset: 'daisy', abundance: 1.5 }, 'poppy'],
-        density: (x, z, y, canopy) => 0.25 + 0.6 * vnoise(x * 0.05, z * 0.05),
+        density: (x, z, y, canopy) => 0.25 + 0.6 * herbPatches(x, z),
     },
 });
-const t0 = performance.now();
-export const plantList = plantAll();
-export const plants = scene.createPlants({ species: SPECIES, plants: plantList, receivesShadow: true });
+export const plants = scene.createPlants({ species: SPECIES, rules: rules(), receivesShadow: true });
 plants.castsShadow = true;
-console.log(`biomes: ${plantList.length} plants placed in ${(performance.now() - t0).toFixed(0)} ms`);
 
 // --- views --------------------------------------------------------------------------
 

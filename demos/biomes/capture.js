@@ -47,6 +47,16 @@ if (opt('probes') !== undefined) scene.setProbeGrid(opt('probes') !== '0');
 document.body.classList.add('clean');
 flush();
 sky.apply(opt('sky') || 'afternoon');
+// The plants are placed about the eye on the engine's threads: the first
+// shot waits for the world in reach.
+{
+    let frames = 0;
+    const t0 = performance.now();
+    for (; frames < 600 && (frames === 0 || plants.plantPlacement().pending > 0); frames++) advanceTime(1000 / fps);
+    const p = plants.plantPlacement();
+    console.log(`placed: ${p.cells} cells, ${plants.plantStats().plants} plants in ${frames} frames, ` +
+                `${Math.round(performance.now() - t0)} ms`);
+}
 
 const mode = argv[0] || 'still';
 if (mode === 'still') {
@@ -97,7 +107,7 @@ if (mode === 'still') {
         const x = x0 + (i - (SPECIES.length - 1) / 2) * 16;
         return { x, y: groundHeight(x, z0) - 0.1, z: z0, yaw: i, scale: 1, species: i, seed: 101 + i, tint: 0 };
     });
-    plants.setPlants(row);
+    plants.setPlants({ rules: null, plants: row });
     const views = {
         side: [[x0, groundHeight(x0, z0 + 52) + 6, z0 + 52], [x0, groundHeight(x0, z0) + 7, z0]],
         high: [[x0 + 30, groundHeight(x0, z0) + 50, z0 + 40], [x0, groundHeight(x0, z0) + 4, z0]],
