@@ -14,7 +14,17 @@
 //   ... capture.js -- exposure [from=canopy] [to=flyover] [hold=5]
 //       cuts from one shot to another and back, logging every frame's
 //       metered EV, the EV applied and the exposure scale
-import { sky, SHOTS, setShot, holdView, plants, SPECIES, MEADOW, groundHeight, scene } from "/app/world.js";
+//   ... capture.js -- motion walk|fly|pan|sun [frames=150]
+//       walk: the glade at 1.4 m/s; fly: the flyover at 40 m/s; every frame's
+//       GPU ms and shadow pages (drawn, overlays, left wanted), and how many
+//       frames went over 2.78 ms. pan (the glade sidestepping at 0.5 m/s) and
+//       sun (the glade held, the sun turning 0.02 degrees a frame) run in a
+//       calm with the exposure pinned and read the ground at fixed world
+//       points frame over frame: how much it changes (a still scene's ground
+//       should not), the frames' change spikes, and two slit-scans
+//       (captures/biomes_motion_<kind>.png: a row a frame of a line of ground
+//       across the view at 6 m and 20 m)
+import { sky, SHOTS, setShot, holdView, plants, SPECIES, MEADOW, groundHeight, scene, vp } from "/app/world.js";
 
 const argv = (bro.app && bro.app.argv) || [];
 const OUT = bro.resolvePath('/app/captures').replace(/\\/g, '/');
@@ -69,7 +79,12 @@ if (mode === 'still') {
         if (passes) {
             const top = Object.entries(sums).sort((a, b) => b[1] - a[1]).slice(0, 12);
             console.log('  ' + top.map(([k, v]) => `${k} ${(v / 60).toFixed(2)}`).join('  '));
+            const shadow = Object.entries(sums).filter(([k]) => k.startsWith('shadow')).sort((a, b) => b[1] - a[1]);
+            console.log('  shadow: ' + shadow.map(([k, v]) => `${k} ${(v / 60).toFixed(3)}`).join('  '));
         }
+        const c = scene.cullStats() || {};
+        console.log(`  pages: needed ${c.shadowPagesNeeded} resident ${c.shadowPagesResident} drawn ${c.shadowPagesDrawn} ` +
+                    `dynamic ${c.shadowPagesDynamic} wanted ${c.shadowPagesWanted} views ${c.shadowViews}`);
     }
 } else if (mode === 'specimens') {
     // One of each species alone in the meadow, side-lit, then from above.
@@ -135,6 +150,105 @@ if (mode === 'still') {
         const c = scene.cullStats() || {};
         console.log(`${String(i).padStart(4)} metered ${c.meteredEv.toFixed(3)}  applied ${c.exposureEv.toFixed(3)}  ` +
                     `scale ${c.exposureScale.toExponential(4)}`);
+    }
+} else if (mode === 'motion') {
+    const kind = ['walk', 'fly', 'pan', 'sun'].includes(argv[1]) ? argv[1] : 'walk';
+    const frames = +(opt('frames') || 150);
+    const base = kind === 'fly' ? 'flyover' : 'glade';
+    const E = SHOTS[base].eye(), L = SHOTS[base].look();
+    const flat = Math.hypot(L[0] - E[0], L[2] - E[2]);
+    const fwd = [(L[0] - E[0]) / flat, 0, (L[2] - E[2]) / flat], side = [-fwd[2], 0, fwd[0]];
+    const speed = { walk: 1.4, fly: 40, pan: 0.5, sun: 0 }[kind] / fps;
+    const dir = kind === 'pan' ? side : fwd;
+    const temporal = kind === 'pan' || kind === 'sun';
+    if (temporal) scene.setWind({ speed: 0, gust: 0 });
+    holdView(E, L);
+    step(3);
+    if (temporal) {
+        scene.setExposure({ mode: 'fixed', ev: scene.cullStats().exposureEv });
+        step(0.5);
+    }
+    // Ground points fixed in the world ahead of the eye, and the two lines
+    // of the slit-scans across the view.
+    const ground = (a, s) => {
+        const x = E[0] + fwd[0] * a + side[0] * s, z = E[2] + fwd[2] * a + side[2] * s;
+        return [x, groundHeight(x, z), z];
+    };
+    const points = [];
+    for (let a = 3; a <= 30; a += 0.75) for (let s = -8; s <= 8; s += 0.5) points.push(ground(a, s));
+    const SLIT = 512, lines = [6, 20].map((a) => Array.from({ length: SLIT }, (_, k) => ground(a, -6 + 12 * k / (SLIT - 1))));
+    const rect = vp.canvas.getBoundingClientRect();
+    const lum = (img, p) => {
+        const q = scene.projectLocal(p[0], p[1], p[2]);
+        if (!q || q.behind) return -1;
+        const x = q.x + rect.left - 0.5, y = q.y + rect.top - 0.5, x0 = Math.floor(x), y0 = Math.floor(y);
+        if (x0 < 0 || y0 < 0 || x0 + 1 >= img.width || y0 + 1 >= img.height) return -1;
+        const fx = x - x0, fy = y - y0, d = img.data;
+        const at = (xx, yy) => { const i = (yy * img.width + xx) * 4; return 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2]; };
+        return (at(x0, y0) * (1 - fx) + at(x0 + 1, y0) * fx) * (1 - fy) + (at(x0, y0 + 1) * (1 - fx) + at(x0 + 1, y0 + 1) * fx) * fy;
+    };
+    const sun0 = sky.sun.direction.slice();
+    const turn = (deg) => {
+        const r = deg * Math.PI / 180, c = Math.cos(r), s = Math.sin(r);
+        sky.sun.direction = [sun0[0] * c + sun0[2] * s, sun0[1], -sun0[0] * s + sun0[2] * c];
+    };
+    perf.gpuFrameMs();
+    const ms = [], drawn = [], prev = new Float32Array(points.length).fill(-1);
+    const energy = [], deltas = [];
+    const scans = lines.map(() => new ImageData(SLIT, frames));
+    let over = 0;
+    console.log(`motion ${kind}: ${frames} frames from ${base}`);
+    for (let i = 0; i < frames; i++) {
+        const t = (i + 1) * speed;
+        holdView([E[0] + dir[0] * t, E[1], E[2] + dir[2] * t], [L[0] + dir[0] * t, L[1], L[2] + dir[2] * t]);
+        if (kind === 'sun') turn(0.02 * (i + 1));
+        advanceTime(1000 / fps);
+        const img = temporal ? frameImage() : null;
+        const g = perf.gpuFrameMs();
+        const c = scene.cullStats() || {};
+        ms.push(g);
+        drawn.push(c.shadowPagesDrawn);
+        if (g > 2.78) over++;
+        if (temporal) {
+            let e = 0, n = 0;
+            for (let k = 0; k < points.length; k++) {
+                const v = lum(img, points[k]);
+                if (v >= 0 && prev[k] >= 0) { const d = Math.abs(v - prev[k]); deltas.push(d); e += d; n++; }
+                prev[k] = v;
+            }
+            if (i > 0) energy.push(n ? e / n : 0);
+            lines.forEach((line, li) => {
+                for (let k = 0; k < SLIT; k++) {
+                    const v = Math.max(0, lum(img, line[k])), o = (i * SLIT + k) * 4, sd = scans[li].data;
+                    sd[o] = sd[o + 1] = sd[o + 2] = Math.min(255, v); sd[o + 3] = 255;
+                }
+            });
+        }
+        console.log(`${String(i).padStart(4)} ${g.toFixed(2).padStart(6)} ms  pages drawn ${String(c.shadowPagesDrawn).padStart(4)}  ` +
+                    `overlays ${String(c.shadowPagesDynamic).padStart(3)}  wanted ${String(c.shadowPagesWanted).padStart(4)}  ` +
+                    `views ${String(c.shadowViews).padStart(3)}` + (temporal && i > 0 ? `  change ${energy[i - 1].toFixed(3)}` : ''));
+    }
+    const sorted = ms.filter((v) => v >= 0).sort((a, b) => a - b);
+    const mean = sorted.reduce((a, b) => a + b, 0) / Math.max(sorted.length, 1);
+    const dmean = drawn.reduce((a, b) => a + b, 0) / drawn.length;
+    console.log(`motion ${kind}: GPU mean ${mean.toFixed(2)} median ${sorted[sorted.length >> 1].toFixed(2)} ` +
+                `max ${sorted[sorted.length - 1].toFixed(2)} ms, ${over} of ${frames} frames over 2.78 ms; ` +
+                `pages drawn a frame mean ${dmean.toFixed(1)} max ${Math.max(...drawn)}`);
+    if (temporal) {
+        deltas.sort((a, b) => a - b);
+        const q = (p) => deltas[Math.min(deltas.length - 1, Math.floor(p * deltas.length))];
+        const em = energy.reduce((a, b) => a + b, 0) / energy.length, emax = Math.max(...energy);
+        const pops = deltas.filter((d) => d > 16).length;
+        console.log(`motion ${kind}: ground change a point a frame mean ${em.toFixed(3)} (spike ${emax.toFixed(3)}, ` +
+                    `${(emax / em).toFixed(2)}x), p50 ${q(0.5).toFixed(2)} p99 ${q(0.99).toFixed(2)} p99.9 ${q(0.999).toFixed(2)} ` +
+                    `max ${deltas[deltas.length - 1].toFixed(1)}, ${pops} of ${deltas.length} over 16`);
+        const canvas = document.createElement('canvas');
+        canvas.width = SLIT * 2 + 8; canvas.height = frames;
+        const ctx = canvas.getContext('2d');
+        scans.forEach((s, li) => ctx.putImageData(s, li * (SLIT + 8), 0));
+        const file = `${OUT}/biomes_motion_${kind}${opt('tag') ? '_' + opt('tag') : ''}.png`;
+        screenshot(file, canvas);
+        console.log(`motion ${kind}: ${file}`);
     }
 } else if (mode === 'strip') {
     const shot = shotsOf(argv[1])[0];
