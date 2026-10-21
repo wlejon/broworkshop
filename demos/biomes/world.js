@@ -219,5 +219,8 @@ vp.onView((view) => {
 
 scene.setWind({ direction: [0.8, 0, 0.6], speed: 3, gust: 1.2 });
 scene.setDither(true);
+// The ambient through the probe grid: the sky under the crowns, the light
+// the ground and the leaves send back.
+scene.setProbeGrid(true);
 sky.apply('afternoon');
 setShot('glade');

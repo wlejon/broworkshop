@@ -2,6 +2,7 @@
 //
 //   bro-headless --width 2560 --height 1364 demos/biomes demos/biomes/capture.js -- \
 //       still <shot[,shot...]> [sky=afternoon]      captures/biomes_<shot>.png
+//   (every mode takes probes=0 to light the ambient by the open sky)
 //   ... capture.js -- cost <shot[,shot...]> [sky=afternoon]
 //       GPU ms held at each shot (mean / median / max of 60 frames after a
 //       five-second warm), the plants drawn, and the passes (perf.gpuPasses)
@@ -40,6 +41,8 @@ const shotsOf = (s) => (s || Object.keys(SHOTS).join(',')).split(',').filter((k)
 // The plants node's detail, for A/Bs: pixels=, shadowPixels=, shadowRange=, ...
 for (const k of ['pixels', 'minElements', 'woodRange', 'range', 'shadowTexels', 'shadowRange'])
     if (opt(k) !== undefined) plants.setPlants({ [k]: +opt(k) });
+// The probe grid, for A/Bs: probes=0 lights the ambient by the open sky.
+if (opt('probes') !== undefined) scene.setProbeGrid(opt('probes') !== '0');
 
 document.body.classList.add('clean');
 flush();
