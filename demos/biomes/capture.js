@@ -23,7 +23,8 @@
 //       points frame over frame: how much it changes (a still scene's ground
 //       should not), the frames' change spikes, and two slit-scans
 //       (captures/biomes_motion_<kind>.png: a row a frame of a line of ground
-//       across the view at 6 m and 20 m)
+//       across the view at 6 m and 20 m); passes=<n> logs each frame's n
+//       dearest passes too
 import { sky, SHOTS, setShot, holdView, plants, SPECIES, MEADOW, groundHeight, scene, vp } from "/app/world.js";
 
 const argv = (bro.app && bro.app.argv) || [];
@@ -227,6 +228,11 @@ if (mode === 'still') {
         console.log(`${String(i).padStart(4)} ${g.toFixed(2).padStart(6)} ms  pages drawn ${String(c.shadowPagesDrawn).padStart(4)}  ` +
                     `overlays ${String(c.shadowPagesDynamic).padStart(3)}  wanted ${String(c.shadowPagesWanted).padStart(4)}  ` +
                     `views ${String(c.shadowViews).padStart(3)}` + (temporal && i > 0 ? `  change ${energy[i - 1].toFixed(3)}` : ''));
+        if (opt('passes') && typeof perf.gpuPasses === 'function') {
+            const top = Object.entries(perf.gpuPasses() || {}).filter(([, v]) => typeof v === 'number')
+                .sort((a, b) => b[1] - a[1]).slice(0, +opt('passes') || 8);
+            console.log('       ' + top.map(([k, v]) => `${k} ${v.toFixed(2)}`).join('  '));
+        }
     }
     const sorted = ms.filter((v) => v >= 0).sort((a, b) => a - b);
     const mean = sorted.reduce((a, b) => a + b, 0) / Math.max(sorted.length, 1);
