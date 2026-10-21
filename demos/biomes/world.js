@@ -16,8 +16,7 @@ export const { scene } = vp;
 // The atmosphere's sky, the real sun and a metered exposure: one model from
 // the glade to the flyover.
 const PRESETS = { afternoon: SKY.afternoon, golden: SKY.golden };
-export const sky = daylight(scene, { presets: PRESETS, order: ['afternoon', 'golden'], cascades: 3, atlas: 4096,
-    pcf: 3, ground: [0.10, 0.13, 0.05] });
+export const sky = daylight(scene, { presets: PRESETS, order: ['afternoon', 'golden'], pcf: 3, ground: [0.10, 0.13, 0.05] });
 
 // --- the land ------------------------------------------------------------------------
 

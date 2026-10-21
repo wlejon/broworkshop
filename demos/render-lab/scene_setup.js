@@ -259,7 +259,6 @@ export function buildScene(scene) {
     }
 
     // --- Lights ---------------------------------------------------------------
-    // Shadow atlas budget is 16 tiles: 4 directional cascades + 1 spot tile.
     const sun = scene.createLight({
         type: 'directional',
         position: [-8, 14, 6],
@@ -269,8 +268,6 @@ export function buildScene(scene) {
         name: 'sun',
     });
     sun.castsShadow = true;
-    sun.cascadeCount = 4;
-    sun.cascadeSplitLambda = 0.75;   // outdoor-ish: log splits reach the avenue
     handles.lights.sun = sun;
 
     // Warm practicals matching the lamp orbs.

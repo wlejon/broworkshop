@@ -24,7 +24,7 @@ export const { scene } = vp;
 
 // Studio plus the time-of-day presets; setScale() keeps fog and the night
 // fireflies proportional to a forest.
-export const sky = daylight(scene, { order: ['studio', 'dawn', 'noon', 'golden', 'night'], cascades: 4, atlas: 4096, pcf: 3 });
+export const sky = daylight(scene, { order: ['studio', 'dawn', 'noon', 'golden', 'night'], pcf: 3 });
 sky.apply('studio');
 vp.onFrame((dt) => sky.update(dt));
 

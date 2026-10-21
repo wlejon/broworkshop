@@ -139,17 +139,16 @@ test('frustum culling and the shadow cache move only the counters', () => {
     check(off.meshDrawn === on.meshDrawn + on.meshCulled, `the culled meshes come back (${on.meshDrawn}+${on.meshCulled} vs ${off.meshDrawn})`);
     step(() => { state.debug.frustumCulling = true; });
 
-    step(() => { state.debug.shadowCache = true; });
-    for (let i = 0; i < 6; ++i) { advanceTime(32); flush(); }
-    const cached = scene.cullStats();
-    check(scene.shadowCache === true && cached.shadowTilesTotal > 0, `shadow tiles allocated (${cached.shadowTilesTotal})`);
-    check(cached.shadowTilesCached > 0, `a still camera reuses tiles (${cached.shadowTilesCached}/${cached.shadowTilesTotal})`);
-    step(() => { state.debug.shadowCache = false; });
-    for (let i = 0; i < 6; ++i) { advanceTime(32); flush(); }
-    const fresh = scene.cullStats();
-    check(fresh.shadowTilesCached === 0 && fresh.shadowTilesRendered === fresh.shadowTilesTotal,
-        `with the cache off every tile re-renders (${fresh.shadowTilesRendered}/${fresh.shadowTilesTotal})`);
-    step(() => { state.debug.shadowCache = true; });
+    // Shadows are cached pages: a still camera, once the pages it needs are
+    // in, draws none.
+    let cached = null;
+    for (let i = 0; i < 20; ++i) {
+        advanceTime(32); flush();
+        cached = scene.cullStats();
+        if (i >= 3 && cached.shadowPagesDrawn === 0 && cached.shadowPagesWanted === 0) break;
+    }
+    check(cached.shadowPagesResident > 0, `shadow pages resident (${cached.shadowPagesResident} of ${cached.shadowPagesNeeded})`);
+    check(cached.shadowPagesDrawn === 0, `a still camera draws no shadow pages (${cached.shadowPagesDrawn})`);
     restore();
 });
 

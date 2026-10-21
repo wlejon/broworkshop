@@ -125,8 +125,7 @@ test('the A/B master toggle bypasses looks and leaves performance switches alone
     check(!sn.dissolve.hasShader && !sn.wave.hasShader && !sn.rim.hasShader, 'A/B off strips the custom shaders');
     check(!monitorLinked(), 'A/B off pulls the monitor feed');
     check(props.every((n, i) => n.lodCount === lodBefore[i]), 'A/B off leaves LOD chains alone');
-    check(scene.frustumCulling === state.debug.frustumCulling && scene.shadowCache === state.debug.shadowCache,
-        'A/B off leaves culling and the shadow cache alone');
+    check(scene.frustumCulling === state.debug.frustumCulling, 'A/B off leaves culling alone');
     step(() => { state.masterPost = true; });
     check(probeActive() && monitorLinked(), 'A/B on restores probe and monitor');
     check(sn.dissolve.hasShader && sn.wave.hasShader && sn.rim.hasShader, 'A/B on reinstalls the shaders');

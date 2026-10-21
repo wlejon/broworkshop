@@ -83,7 +83,7 @@ const canvas = document.getElementById('stage');
 const scene = canvas.getContext('scene');
 
 // --- Environment -------------------------------------------------------------
-// A single hard sun with cascaded shadows: the circuit is a long ribbon, so
+// A single hard sun casting shadows: the circuit is a long ribbon, so
 // the elevation changes only read if something casts a shadow down them. Fog
 // starts well past the far barrier so the track fades into the horizon rather
 // than ending in a hard edge, which also hides the world boundary.
@@ -112,8 +112,6 @@ const sun = scene.createLight({
     intensity: 1.7,
 });
 sun.castsShadow = true;
-sun.cascadeCount = 4;
-sun.cascadeSplitLambda = 0.85;      // outdoor: log splits, most detail up close
 
 // A dim cool fill from the opposite side. Kept low because the IBL already
 // carries most of the shadow-side light; at 0.75 it washed the tarmac out to

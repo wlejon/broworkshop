@@ -47,8 +47,6 @@ export function buildStage(scene) {
         color: [1.0, 0.96, 0.90], intensity: 3.6, name: 'sun',
     });
     sun.castsShadow = true;
-    sun.cascadeCount = 3;
-    sun.cascadeSplitLambda = 0.55;      // tight range: the subject is 2 m tall
     handles.lights.sun = sun;
 
     // Cool fill from behind-left keeps the unlit side's silhouette.

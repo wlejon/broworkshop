@@ -18,10 +18,8 @@ scene.setExposure({ compensation: -0.23 });
 skyEnvironment(scene, { hdri: 'kloofendal_43d_clear_puresky', intensity: 1.0 });
 
 export const sun = scene.createLight({ type: 'directional', color: [1.0, 0.96, 0.88], intensity: 3.5, castsShadow: true });
-sun.cascadeCount = 4;
-sun.cascadeSplitLambda = 0.85;
 sun.shadowNormalBias = 0.05;
-scene.setShadowQuality(4096, 3);
+scene.setShadowQuality({ pcfTaps: 3 });
 
 /** The live parameters (config.js shape); edit, then reconfigure(). */
 export const config = defaultConfig();

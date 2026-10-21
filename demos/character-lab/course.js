@@ -256,8 +256,6 @@ export function buildCourse(scene) {
         name: 'sun',
     });
     sun.castsShadow = true;
-    sun.cascadeCount = 4;
-    sun.cascadeSplitLambda = 0.7;
     course.sun = sun;
 
     course.fill = scene.createLight({

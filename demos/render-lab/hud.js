@@ -78,7 +78,7 @@ export const state = {
     },
     monitor: { enabled: true, renderScale: 1.0 },
 
-    debug: { frustumCulling: true, shadowCache: true },
+    debug: { frustumCulling: true },
 };
 
 // control id -> [state path, parse]. Ranges and checkboxes arrive typed from
@@ -114,7 +114,7 @@ const BINDINGS = {
     rimOn: ['shaders.rim.enabled'], rimPower: ['shaders.rim.power'], rimGain: ['shaders.rim.gain'],
     rimScanFreq: ['shaders.rim.scanFreq'], rimScanGain: ['shaders.rim.scanGain'],
     monitorOn: ['monitor.enabled'], subScale: ['monitor.renderScale', float],
-    frustumOn: ['debug.frustumCulling'], shadowCacheOn: ['debug.shadowCache'],
+    frustumOn: ['debug.frustumCulling'],
 };
 
 function setPath(path, value) {
@@ -188,7 +188,6 @@ export function applyPost(scene) {
     setVisibilityCutoff(s.pop.cutoff, s.pop.margin);
 
     scene.setFrustumCulling(s.debug.frustumCulling);
-    scene.setShadowCache({ enabled: s.debug.shadowCache });
 }
 
 // --- DOM binding -------------------------------------------------------------
@@ -298,14 +297,14 @@ export function setLodReadout(levels, counts) {
 
 /**
  * The cullStats() row, all from the last RENDERED frame: frustum culling off
- * makes `drawn` jump to the full graph; a still camera makes the shadow
- * cache's cached-tile count climb while `rendered` falls away.
+ * makes `drawn` jump to the full graph; a still camera draws no shadow
+ * pages once the ones it needs are resident.
  */
 export function setCullReadout(s) {
     if (!s) return;
     $('#stMesh').textContent = `${s.meshDrawn} / ${s.meshDrawn + s.meshCulled}`;
     $('#stDecal').textContent = `${s.decalsDrawn} / ${s.decalsDrawn + s.decalsCulled}`;
-    $('#stTiles').textContent = `${s.shadowTilesRendered}r ${s.shadowTilesCached}c / ${s.shadowTilesTotal}`;
+    $('#stPages').textContent = `${s.shadowPagesDrawn}d ${s.shadowPagesResident}r / ${s.shadowPagesNeeded}`;
 }
 
 export function setFps(v) {

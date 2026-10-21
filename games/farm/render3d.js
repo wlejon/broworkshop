@@ -87,9 +87,8 @@ export function createRenderer(scene, world) {
         color: [1.0, 0.97, 0.9], intensity: 3.2, name: 'sun',
     });
     sun.castsShadow = true;
-    sun.cascadeCount = 4;
     if ('shadowNormalBias' in sun) sun.shadowNormalBias = 0.05;
-    if (scene.setShadowQuality) scene.setShadowQuality(4096, 3);
+    if (scene.setShadowQuality) scene.setShadowQuality({ pcfTaps: 3 });
 
     // --- ground: one TileWorld tinted by region ----------------------------
     // Palette indices: 1 grass, 2 grass-dark (checker), 3 field soil,

@@ -18,7 +18,7 @@
         <div class="k-stats readouts">
             <span>meshes <b id="stMesh">—</b></span>
             <span>decals <b id="stDecal">—</b></span>
-            <span>shadow tiles <b id="stTiles">—</b></span>
+            <span>shadow pages <b id="stPages">—</b></span>
         </div>
 
         <div class="master">
@@ -268,13 +268,13 @@
         <div class="k-panel fold">
             <h2>Culling</h2>
             <label class="k-field"><input type="checkbox" id="frustumOn" checked> Frustum culling</label>
-            <label class="k-field"><input type="checkbox" id="shadowCacheOn" checked> Static shadow-tile cache</label>
-            <div class="hint">Both are strictly conservative: pixels are identical
-                either way, only the counters move. Turn frustum culling off and the
-                drawn count jumps to the whole graph. Hold the camera still and the
-                shadow cache reuses tiles (<i>c</i> climbs, <i>r</i> falls to 0);
-                orbit and the directional cascades re-render. These two sit OUTSIDE
-                the A/B toggle: they are performance mechanisms, not looks.</div>
+            <div class="hint">Strictly conservative: pixels are identical either
+                way, only the counters move. Turn it off and the drawn count jumps
+                to the whole graph. Shadows are cached pages: hold the camera still
+                and no page is drawn (<i>d</i> falls to 0, <i>r</i> of the needed
+                stay resident); orbit and only the pages coming into view are drawn.
+                Culling sits OUTSIDE the A/B toggle: it is a performance mechanism,
+                not a look.</div>
         </div>
 
         <div class="hint foot">
