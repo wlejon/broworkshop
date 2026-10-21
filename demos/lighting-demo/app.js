@@ -14,7 +14,7 @@ const vp = sceneViewport('#stage', {
 const { canvas, scene } = vp;
 
 scene.setAmbient([0.03, 0.03, 0.035]);
-scene.setToneMap({ mode: 'aces', exposure: 1.0 });
+scene.setToneMap({ mode: 'aces' });
 scene.showLightIcons = true;
 
 // Ground plane — rough dielectric, neutral gray.
@@ -206,9 +206,11 @@ document.addEventListener('keydown', (ev) => {
 });
 
 // --- HUD wiring ------------------------------------------------------------
-const applyToneMap = () => scene.setToneMap({ mode: mode.value, exposure: exposure.value, gamma: 2.2 });
-const mode     = bindControl('#mode', { onChange: applyToneMap });
-const exposure = bindControl('#exposure', { out: '#exposureVal', onChange: applyToneMap });
+const applyToneMap = () => scene.setToneMap({ mode: mode.value, gamma: 2.2 });
+const mode = bindControl('#mode', { onChange: applyToneMap });
+// Exposure compensation in stops over the fixed exposure (scene.setExposure).
+bindControl('#exposure', { out: '#exposureVal', fmt: (v) => (v >= 0 ? '+' : '') + v.toFixed(1) + ' EV',
+    onChange: (v) => scene.setExposure({ compensation: v }) });
 bindControl('#sun', { out: '#sunVal', fmt: (v) => v.toFixed(1), onChange: (v) => { sun.intensity = v; } });
 bindControl('#ambient', { out: '#ambientVal', fmt: (v) => v.toFixed(3), onChange: (a) => scene.setAmbient([a, a, a]) });
 const hdri = bindControl('#hdri', { onChange: () => applyEnvironment() });

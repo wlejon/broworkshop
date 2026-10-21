@@ -23,7 +23,8 @@ export const vp = sceneViewport('#stage', {
 export const { scene, cam, canvas } = vp;
 
 scene.setAmbient([0.06, 0.08, 0.12]);
-scene.setToneMap({ mode: 'aces', exposure: 1.15 });
+scene.setToneMap({ mode: 'aces' });
+scene.setExposure({ compensation: 0.2 });
 scene.createLight({ type: 'directional', direction: [-0.4, -1.0, -0.3], color: [1.0, 0.98, 0.92],
     intensity: 2.5, castsShadow: true, name: 'sun' });
 scene.createLight({ type: 'directional', direction: [0.5, 0.6, 0.6], color: [0.35, 0.65, 0.95],

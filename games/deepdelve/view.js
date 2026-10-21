@@ -45,7 +45,8 @@ export function createDelveView() {
         controls: false,
     });
     const scene = stage.scene;
-    scene.setToneMap({ mode: "aces", exposure: 1.06, gamma: 2.2 });
+    scene.setToneMap({ mode: "aces", gamma: 2.2 });
+    scene.setExposure({ compensation: 0.08 });
     scene.setAmbient([0.14, 0.15, 0.20]);
     scene.createLight({
         type: "directional",

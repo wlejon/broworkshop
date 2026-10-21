@@ -15,7 +15,7 @@
 //   setFXAA(bool) · setMSAA(samples: 0/1 off, 2/4/8) · setRenderScale(0.25..2)
 //   setFog({start, end, color, density, heightFalloff, startDistance})
 //       every call resets BOTH modes; setFog({}) = off
-//   setToneMap({mode, exposure, gamma}) · setAmbient([r, g, b])
+//   setToneMap({mode, gamma}) · setExposure({compensation}) · setAmbient([r, g, b])
 //   setSSR({enabled, maxDistance, steps, thickness, intensity, edgeFade})
 //
 // Probes, decals, LOD, shaders and the monitor are scene NODES, so they live in
@@ -52,7 +52,7 @@ export const state = {
         density: 0.028, heightFalloff: 0.22, startDistance: 6, // exp2 + height
     },
 
-    tonemap: { mode: 'aces', exposure: 1.0 },
+    tonemap: { mode: 'aces', ev: 0 },   // ev: exposure compensation, stops
     ambient: 0.035,
 
     // A longer maxDistance than the documented default: the courtyard is ~24
@@ -97,7 +97,7 @@ const BINDINGS = {
     fxaaOn: ['fxaa'], msaa: ['msaa', int], renderScale: ['renderScale'],
     fogMode: ['fog.mode'], fogColor: ['fog.color', rgb], fogStart: ['fog.start'], fogEnd: ['fog.end'],
     fogDensity: ['fog.density'], fogHeight: ['fog.heightFalloff'], fogStartDist: ['fog.startDistance'],
-    tmMode: ['tonemap.mode'], tmExposure: ['tonemap.exposure'], ambient: ['ambient'],
+    tmMode: ['tonemap.mode'], tmExposure: ['tonemap.ev'], ambient: ['ambient'],
     ssrOn: ['ssr.enabled'], ssrDistance: ['ssr.maxDistance'], ssrSteps: ['ssr.steps'],
     ssrThickness: ['ssr.thickness'], ssrIntensity: ['ssr.intensity'], ssrEdgeFade: ['ssr.edgeFade'],
     probeOn: ['probes.enabled'], probeIntensity: ['probes.intensity'], probeInterior: ['probes.interior'],
@@ -165,7 +165,8 @@ export function applyPost(scene) {
     else if (f.mode === 'linear') scene.setFog({ start: f.start, end: f.end, color: f.color });
     else scene.setFog({ color: f.color, density: f.density, heightFalloff: f.heightFalloff, startDistance: f.startDistance });
 
-    scene.setToneMap({ mode: s.tonemap.mode, exposure: s.tonemap.exposure, gamma: 2.2 });
+    scene.setToneMap({ mode: s.tonemap.mode, gamma: 2.2 });
+    scene.setExposure({ compensation: s.tonemap.ev });
     scene.setAmbient([s.ambient, s.ambient, s.ambient * 1.08]);
 
     // Reflections and decals join the A/B. The probe is its most dramatic

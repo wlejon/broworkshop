@@ -99,7 +99,8 @@ function buildSubScene() {
     // second tonemap, so a sub-scene graded for a full screen blows out to a
     // white smear by the time it reaches the courtyard wall.
     sub.setAmbient([0.06, 0.07, 0.10]);
-    sub.setToneMap({ mode: 'aces', exposure: 0.9, gamma: 2.2 });
+    sub.setToneMap({ mode: 'aces', gamma: 2.2 });
+    sub.setExposure({ compensation: -0.15 });
     sub.setBloom({ enabled: true, threshold: 1.2, intensity: 0.45, strength: 2.0 });
 }
 

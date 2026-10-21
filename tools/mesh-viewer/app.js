@@ -31,7 +31,7 @@ const vp = sceneViewport('#stage', {
     controls: { minDist: 0.01, maxDist: 5000 },
 });
 const scene = vp.scene;
-scene.setToneMap({ mode: 'aces', exposure: 1.0, gamma: 2.2 });
+scene.setToneMap({ mode: 'aces', gamma: 2.2 });
 scene.setAmbient([0.08, 0.08, 0.10]);
 const keyLight = scene.createLight({ type: 'directional', direction: [-0.4, -1.0, -0.3],
     color: [1.0, 0.96, 0.88], intensity: 3.5, castsShadow: true });

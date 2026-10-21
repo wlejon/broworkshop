@@ -43,7 +43,8 @@ export function buildWorld(scene) {
     };
 
     scene.setAmbient([0.12, 0.12, 0.2]);
-    scene.setToneMap({ mode: 'aces', exposure: 1.1 });
+    scene.setToneMap({ mode: 'aces' });
+    scene.setExposure({ compensation: 0.14 });
     scene.setFog({ color: '#1a1a2e', start: 20, end: 60 });
     scene.setClearColor && scene.setClearColor('#1a1a2e');
     const sun = scene.createLight({ type: 'directional', name: 'sun', direction: [-0.4, -0.8, -0.4], color: '#ffeedd', intensity: 2.0 });

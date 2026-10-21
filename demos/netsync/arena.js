@@ -18,7 +18,8 @@ export function buildArena(canvas) {
     });
     const scene = vp.scene;
     scene.setAmbient([0.10, 0.11, 0.13]);
-    scene.setToneMap({ mode: 'aces', exposure: 1.1 });
+    scene.setToneMap({ mode: 'aces' });
+    scene.setExposure({ compensation: 0.14 });
     scene.createLight({
         type: 'directional', direction: [-0.45, -1.0, -0.35],
         color: [1.0, 0.97, 0.9], intensity: 2.6,

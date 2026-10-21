@@ -2,7 +2,7 @@
 // views the capture script and the panel share. The plants are bro.scene's
 // plants node: species described here, every plant built on the GPU.
 import { sceneViewport, orbitRotation } from "/lib/kit/viewport3d.js";
-import { daylight, DAYLIGHT } from "/lib/kit/sky.js";
+import { daylight, SKY } from "/lib/kit/sky.js";
 
 export const HALF = 700;          // half-size of the world (m)
 const CELL = 4;                   // ground cell (m)
@@ -13,15 +13,9 @@ export const vp = sceneViewport('#stage', {
 });
 export const { scene } = vp;
 
-const PRESETS = {
-    afternoon: Object.assign({}, DAYLIGHT.noon, {
-        label: 'Afternoon', hdri: 'kloofendal_43d_clear_puresky', envIntensity: 0.4, envRotation: 2.3,
-        sun: { direction: [-0.62, -0.52, -0.58], color: [1.0, 0.86, 0.68], intensity: 5.5 },
-        tonemap: { mode: 'aces', exposure: 1.0 },
-        fog: { start: 150, end: 2600, color: [0.70, 0.77, 0.86] },
-    }),
-    golden: Object.assign({}, DAYLIGHT.golden, { fog: { start: 120, end: 2000, color: [0.86, 0.62, 0.46] } }),
-};
+// The atmosphere's sky, the real sun and a metered exposure: one model from
+// the glade to the flyover.
+const PRESETS = { afternoon: SKY.afternoon, golden: SKY.golden };
 export const sky = daylight(scene, { presets: PRESETS, order: ['afternoon', 'golden'], cascades: 3, atlas: 4096,
     pcf: 3, ground: [0.10, 0.13, 0.05] });
 

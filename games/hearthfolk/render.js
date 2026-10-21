@@ -6,7 +6,8 @@ const lerp = (a, b, t) => a + (b - a) * t;
 
 /** Sun + hearth light. Returns { placeFire(sim), update(sim) }. */
 export function setupLighting(scene) {
-    scene.setToneMap({ mode: "aces", exposure: 0.95, gamma: 2.2 });
+    scene.setToneMap({ mode: "aces", gamma: 2.2 });
+    scene.setExposure({ compensation: -0.07 });
     scene.setAmbient([0.20, 0.21, 0.26]);
     const sun = scene.createLight({
         type: "directional", direction: [-0.5, -1.0, -0.35],

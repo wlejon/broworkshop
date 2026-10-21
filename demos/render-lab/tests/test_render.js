@@ -52,7 +52,7 @@ test('AA, render scale, fog and tonemap apply', () => {
     step(() => { state.fog.mode = 'linear'; state.fog.start = 4; state.fog.end = 45; });
     step(() => { state.fog.mode = 'exp2'; state.fog.density = 0.06; state.fog.heightFalloff = 0.5; state.fog.startDistance = 3; });
     step(() => { state.fog.mode = 'off'; });
-    for (const m of ['reinhard', 'linear', 'aces']) step(() => { state.tonemap.mode = m; state.tonemap.exposure = 1.4; });
+    for (const m of ['reinhard', 'linear', 'aces']) step(() => { state.tonemap.mode = m; state.tonemap.ev = 0.5; });
     step(() => { state.ambient = 0.2; });
 });
 
@@ -139,7 +139,7 @@ step(() => {
     Object.assign(state.ssao, { enabled: true, radius: 0.7, intensity: 1.3, bias: 0.025 });
     Object.assign(state.bloom, { threshold: 1.1, intensity: 0.7, strength: 2.0 });
     Object.assign(state.fog, { mode: 'linear', start: 12, end: 90 });
-    state.tonemap.exposure = 1.0; state.ambient = 0.035;
+    state.tonemap.ev = 0; state.ambient = 0.035;
 });
 advanceTime(64);
 shot('render');

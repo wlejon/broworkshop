@@ -31,7 +31,8 @@ export const vp = sceneViewport('#stage', {
 export const scene = vp.scene;
 
 scene.setAmbient([0.08, 0.10, 0.14]);
-scene.setToneMap({ mode: 'aces', exposure: 1.1 });
+scene.setToneMap({ mode: 'aces' });
+scene.setExposure({ compensation: 0.14 });
 scene.createLight({ type: 'directional', direction: [-0.5, -1.0, -0.4], color: [1.0, 0.96, 0.90], intensity: 2.8, castsShadow: true, name: 'sun' });
 scene.createLight({ type: 'directional', direction: [0.6, -0.5, 0.5], color: [0.4, 0.65, 0.95], intensity: 1.2, name: 'fill' });
 scene.createLight({ type: 'directional', direction: [0.0, -0.8, -0.8], color: [0.95, 0.65, 0.4], intensity: 0.8, name: 'rim' });

@@ -18,7 +18,8 @@ export const scene = vp.scene;
 export function resetCamera() { vp.reframe(HOME.pivot, HOME.dist, { yaw: HOME.yaw, pitch: HOME.pitch }); }
 
 scene.setAmbient([0.08, 0.10, 0.14]);
-scene.setToneMap({ mode: 'aces', exposure: 1.1 });
+scene.setToneMap({ mode: 'aces' });
+scene.setExposure({ compensation: 0.14 });
 scene.createLight({ type: 'directional', position: [4, 8, 5], direction: [-0.5, -1.0, -0.4],
     color: [1.0, 0.96, 0.90], intensity: 2.2, castsShadow: true, name: 'sun' });
 scene.createLight({ type: 'directional', direction: [0.6, -0.4, 0.5], color: [0.3, 0.6, 0.95], intensity: 1.1, name: 'rim' });

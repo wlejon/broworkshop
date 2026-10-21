@@ -72,7 +72,8 @@ function staticBox(half, pos, friction, restitution) {
 
 function buildEnvironment(scene, level) {
     scene.setAmbient([0.05, 0.055, 0.065]);
-    scene.setToneMap({ mode: "aces", exposure: 1.1 });
+    scene.setToneMap({ mode: "aces" });
+    scene.setExposure({ compensation: 0.14 });
     scene.setFog({ start: 25, end: 60, color: [0.04, 0.05, 0.09] });
     scene.createLight({ type: "directional", direction: [-0.45, -1.0, -0.35], color: [1.0, 0.97, 0.9], intensity: 2.6, name: "sun" });
     scene.createLight({ type: "point", position: [0, 5, 8], color: [1.0, 0.75, 0.55], intensity: 14, range: 18, name: "warm-fill" });

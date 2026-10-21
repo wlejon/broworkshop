@@ -45,7 +45,8 @@ export function start() {
     scene.setAmbient([0.24, 0.25, 0.30]);
     scene.createLight({ type: 'directional', direction: [-0.4, -1.0, -0.55], intensity: 2.4, color: [1.0, 0.98, 0.94] });
     scene.createLight({ type: 'directional', direction: [0.6, -0.35, 0.5], intensity: 0.7, color: [0.68, 0.78, 1.0] });
-    scene.setToneMap({ mode: 'aces', exposure: 1.1 });
+    scene.setToneMap({ mode: 'aces' });
+    scene.setExposure({ compensation: 0.14 });
     scene.createMesh({ mesh: 'plane', halfW: 8, halfD: 8, y: 0, color: [0.14, 0.15, 0.19], roughness: 0.96, metallic: 0 });
 
     const off = { x: 0, y: 0, z: 0 };

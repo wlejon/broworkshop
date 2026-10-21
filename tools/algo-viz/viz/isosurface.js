@@ -68,7 +68,7 @@ register({
         // --- scene --------------------------------------------------------------------
         void canvas.offsetWidth;
         const scene = canvas.getContext('scene');
-        scene.setToneMap({ mode: 'aces', exposure: 1.0 });
+        scene.setToneMap({ mode: 'aces' });
         scene.setAmbient({ color: [0.10, 0.11, 0.13] });
         scene.createLight({ type: 'directional', direction: [-0.4, -1.0, -0.3], color: [1.0, 0.96, 0.88], intensity: 3.2, castsShadow: true });
         scene.createLight({ type: 'directional', direction: [0.6, -0.4, 0.5], color: [0.7, 0.82, 1.0], intensity: 1.0 });

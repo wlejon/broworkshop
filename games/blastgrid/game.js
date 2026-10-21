@@ -154,7 +154,7 @@ function ensureStage() {
         controls: false,
     });
     const scene = stage.scene;
-    scene.setToneMap({ mode: "aces", exposure: 1.0, gamma: 2.2 });
+    scene.setToneMap({ mode: "aces", gamma: 2.2 });
     scene.setAmbient([0.22, 0.23, 0.27]);
     scene.createLight({
         type: "directional",

@@ -13,7 +13,8 @@ import { defaultConfig, terrainOptions } from "/app/config.js";
 export const canvas = document.getElementById('stage');
 export const scene = canvas.getContext('scene');
 
-scene.setToneMap({ mode: 'aces', exposure: 0.85, gamma: 2.2 });
+scene.setToneMap({ mode: 'aces', gamma: 2.2 });
+scene.setExposure({ compensation: -0.23 });
 skyEnvironment(scene, { hdri: 'kloofendal_43d_clear_puresky', intensity: 1.0 });
 
 export const sun = scene.createLight({ type: 'directional', color: [1.0, 0.96, 0.88], intensity: 3.5, castsShadow: true });

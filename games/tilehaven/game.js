@@ -163,7 +163,8 @@ function ensureStage() {
         iso: { offset: CAMERA_OFFSET, size: 12, near: 0.1, far: 200, wheel: ZOOM },
     });
     const scene = stage.scene;
-    scene.setToneMap({ mode: "aces", exposure: 0.98, gamma: 2.2 });
+    scene.setToneMap({ mode: "aces", gamma: 2.2 });
+    scene.setExposure({ compensation: -0.03 });
     scene.setAmbient([0.21, 0.22, 0.26]);
     scene.createLight({
         type: "directional",

@@ -29,7 +29,8 @@ const vp = sceneViewport('#stage', {
     controls: { minDist: 4, maxDist: 120 },
 });
 const scene = vp.scene;
-scene.setToneMap({ mode: 'aces', exposure: 0.9, gamma: 2.2 });
+scene.setToneMap({ mode: 'aces', gamma: 2.2 });
+scene.setExposure({ compensation: -0.15 });
 scene.setAmbient([0.08, 0.09, 0.11]);
 scene.createLight({ type: 'directional', direction: [-0.4, -1.0, -0.3], color: [1.0, 0.96, 0.9],
     intensity: 2.0, castsShadow: true });

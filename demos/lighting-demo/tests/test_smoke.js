@@ -15,15 +15,15 @@ function fingerprint() {
 }
 
 test('readouts formatted at boot', () => {
-    eq(text('#exposureVal'), '1.00');
+    eq(text('#exposureVal'), '+0.0 EV');
     eq(text('#sunVal'), '3.0');
     eq(text('#ambientVal'), '0.030');
 });
 
 test('sliders update their readouts', () => {
-    setValue('#exposure', 2.5);
-    eq(text('#exposureVal'), '2.50');
-    setValue('#exposure', 1);
+    setValue('#exposure', 1.5);
+    eq(text('#exposureVal'), '+1.5 EV');
+    setValue('#exposure', 0);
     setValue('#sun', 6);
     eq(text('#sunVal'), '6.0');
 });

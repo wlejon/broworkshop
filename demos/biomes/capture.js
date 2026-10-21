@@ -11,6 +11,9 @@
 //       holds <from>, cuts the camera to <to>, and logs every frame after the
 //       cut: GPU ms, the world service's budget, spent and worst error, and
 //       the turf's fills and missing tiles (scene.cullStats)
+//   ... capture.js -- exposure [from=canopy] [to=flyover] [hold=5]
+//       cuts from one shot to another and back, logging every frame's
+//       metered EV, the EV applied and the exposure scale
 import { sky, SHOTS, setShot, holdView, plants, SPECIES, MEADOW, groundHeight, scene } from "/app/world.js";
 
 const argv = (bro.app && bro.app.argv) || [];
@@ -115,6 +118,24 @@ if (mode === 'still') {
         if (settled < 0 && c.groundLayerMissing === 0) settled = i;
     }
     console.log(`jump: ${over} of ${frames} frames over 2.78 ms; the turf settled at frame ${settled}`);
+} else if (mode === 'exposure') {
+    // The eye adapting: holds <from>, cuts to <to>, holds, cuts back, every
+    // frame's metered EV, the EV applied and the scale (scene.cullStats,
+    // read back from the GPU a few frames late).
+    const from = SHOTS[argv[1]] ? argv[1] : 'canopy', to = SHOTS[argv[2]] ? argv[2] : 'flyover';
+    const hold = Math.round(+(opt('hold') || 5) * fps);
+    setShot(from);
+    step(3);
+    console.log(`exposure: ${from} held, cut to ${to} at frame 0, back to ${from} at frame ${hold}`);
+    for (let i = 0; i < 2 * hold; i++) {
+        if (i === 0) setShot(to);
+        if (i === hold) setShot(from);
+        advanceTime(1000 / fps);
+        flush();
+        const c = scene.cullStats() || {};
+        console.log(`${String(i).padStart(4)} metered ${c.meteredEv.toFixed(3)}  applied ${c.exposureEv.toFixed(3)}  ` +
+                    `scale ${c.exposureScale.toExponential(4)}`);
+    }
 } else if (mode === 'strip') {
     const shot = shotsOf(argv[1])[0];
     setShot(shot);

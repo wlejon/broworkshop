@@ -21,7 +21,8 @@ const vp = sceneViewport('#stage', {
 });
 const scene = vp.scene;
 scene.setAmbient([0.1, 0.12, 0.16]);
-scene.setToneMap({ mode: 'aces', exposure: 1.15 });
+scene.setToneMap({ mode: 'aces' });
+scene.setExposure({ compensation: 0.2 });
 scene.createLight({ type: 'directional', direction: [-0.4, -0.9, -0.4], color: [1.0, 0.98, 0.94],
     intensity: 2.8, castsShadow: true, name: 'key' });
 scene.createLight({ type: 'directional', direction: [0.6, -0.4, 0.6], color: [0.4, 0.65, 0.95],

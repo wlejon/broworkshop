@@ -32,7 +32,8 @@ export const scene = vp.scene;
 // shadow-casting sun makes a bouncing ball's height legible. Exposure sits
 // below 1 because a hot key light washes saturated lanes toward white.
 scene.setAmbient([0.055, 0.06, 0.075]);
-scene.setToneMap({ mode: 'aces', exposure: 0.85 });
+scene.setToneMap({ mode: 'aces' });
+scene.setExposure({ compensation: -0.23 });
 scene.createLight({ type: 'directional', position: [-12, 18, 10], direction: [-0.35, -1.0, -0.28],
     color: [1.0, 0.97, 0.90], intensity: 2.4, castsShadow: true, name: 'sun' });
 scene.createLight({ type: 'directional', direction: [0.5, -0.6, 0.5],    // cool fill for the shadow side

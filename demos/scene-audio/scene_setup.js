@@ -23,7 +23,8 @@ const TAU = Math.PI * 2;
 /** Ground, pillars, sun, listener marker. Returns the props worth keeping. */
 export function buildEnvironment(scene) {
     scene.setAmbient([0.035, 0.045, 0.06]);
-    scene.setToneMap({ mode: 'aces', exposure: 1.15 });
+    scene.setToneMap({ mode: 'aces' });
+    scene.setExposure({ compensation: 0.2 });
     scene.setFog({ color: '#0a1017', start: 40, end: 130 });
 
     scene.createMesh({

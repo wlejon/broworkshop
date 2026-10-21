@@ -133,7 +133,8 @@ function ensureStage() {
     if (stage) return;
     stage = createStage({ iso: { target: [0, 0, 0], offset: [6, 26, 20], size: 12, far: 200 } });
     const scene = stage.scene;
-    scene.setToneMap({ mode: "aces", exposure: 1.05, gamma: 2.2 });
+    scene.setToneMap({ mode: "aces", gamma: 2.2 });
+    scene.setExposure({ compensation: 0.07 });
     scene.setAmbient([0.16, 0.17, 0.20]);
     scene.createLight({ type: "directional", direction: [-0.45, -1.0, -0.35], color: [1.0, 0.96, 0.88], intensity: 2.6 });
     window.addEventListener("resize", frameCamera);

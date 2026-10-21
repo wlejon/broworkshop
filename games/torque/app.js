@@ -100,7 +100,8 @@ const HDRI = '../../demos/lighting-demo/hdri/kloofendal_43d_clear_puresky_2k.hdr
 const haveSky = scene.setEnvironment({ hdr: HDRI, intensity: 0.5 });
 if (!haveSky) scene.setAmbient([0.10, 0.12, 0.15]);
 
-scene.setToneMap({ mode: 'aces', exposure: 0.85 });
+scene.setToneMap({ mode: 'aces' });
+scene.setExposure({ compensation: -0.23 });
 scene.setFog({ start: 420, end: 1100, color: [0.60, 0.68, 0.78] });
 
 const sun = scene.createLight({

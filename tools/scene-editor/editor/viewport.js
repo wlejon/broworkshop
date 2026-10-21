@@ -25,7 +25,7 @@ export function createViewport(canvas, opts) {
     // Editor look: evenly lit from every side, no shadows. High ambient gives
     // each face a readable base colour; a soft key + fill add just enough
     // shading to read shape. Linear tonemap keeps authored colours faithful.
-    scene.setToneMap({ mode: 'linear', exposure: 1.0, gamma: 2.2 });
+    scene.setToneMap({ mode: 'linear', gamma: 2.2 });
     scene.setAmbient([0.55, 0.56, 0.58]);
     scene.createLight({ type: 'directional', direction: [-0.4, -1.0, -0.3],
         color: [1.0, 0.98, 0.94], intensity: 0.7, name: 'editor-key' });

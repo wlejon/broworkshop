@@ -80,7 +80,7 @@ export function fitBoard(stage, W, H, rightInset) {
 
 export function createRenderer(scene, world) {
     // --- lighting + tonemap ------------------------------------------------
-    scene.setToneMap({ mode: 'aces', exposure: 1.0, gamma: 2.2 });
+    scene.setToneMap({ mode: 'aces', gamma: 2.2 });
     scene.setAmbient([0.30, 0.33, 0.40]);
     const sun = scene.createLight({
         type: 'directional', direction: [-0.5, -1.0, -0.45],
