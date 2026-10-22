@@ -7,7 +7,7 @@ import { herbModule } from "/lib/herbs/index.js";
 import { swardModule } from "/lib/sward/index.js";
 import { treeModule, treeSpecies } from "/lib/trees/index.js";
 
-export const HALF = 700;          // half-size of the world (m)
+export const HALF = 8000;         // half-size of the world (m)
 
 export const vp = sceneViewport('#stage', {
     orbit: { target: [0, 4, 0], dist: 60, fov: 50, near: 0.1, far: 6000, rot: orbitRotation(Math.PI * 0.75, -0.3) },
@@ -165,7 +165,7 @@ function rules() {
         chance: mul(mul(mul(thicket, add(add(mul(edge, 0.75), mul(COVER, 0.15)), 0.05)), SHRUB_INSIDE), clearing),
         species: [3], scale: 1.0, scaleVariety: 0.4, tintVariety: 1.0,
     };
-    return { ground: HEIGHT, seed: SEED, range: 2000, layers: [trees, shrubs] };
+    return { ground: HEIGHT, seed: SEED, range: 6000, layers: [trees, shrubs] };
 }
 
 export const ground = buildGround();

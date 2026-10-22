@@ -96,7 +96,7 @@ if (mode === 'still') {
                     `max ${sorted[sorted.length - 1].toFixed(2)} ms; plants ${s.visible}, elements ${s.elements}, ` +
                     `limbs ${s.limbs}, cast ${s.shadowElements}`);
         if (passes) {
-            const top = Object.entries(sums).sort((a, b) => b[1] - a[1]).slice(0, 12);
+            const top = Object.entries(sums).sort((a, b) => b[1] - a[1]).slice(0, +(opt('top') || 12));
             console.log('  ' + top.map(([k, v]) => `${k} ${(v / 60).toFixed(2)}`).join('  '));
             const shadow = Object.entries(sums).filter(([k]) => k.startsWith('shadow')).sort((a, b) => b[1] - a[1]);
             console.log('  shadow: ' + shadow.map(([k, v]) => `${k} ${(v / 60).toFixed(3)}`).join('  '));
