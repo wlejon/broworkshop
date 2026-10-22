@@ -49,65 +49,6 @@
 //        <- referenceSet  {tokens}           (valid vision-token count)
 //   main -> clearReference {}
 //        <- referenceCleared {}
-//
-// `expression` is {adj, alpha} — the contextual per-token field (ported from
-// sana-research/dictionary.py, validated on Krea 2 in the emotion-axes probes):
-// splice `adj` into the live prompt, splice a MASK-ALIGNED neutral adjective
-// into the same slot, diff the raw per-token taps, and prime from
-// neutral_taps + alpha * field. alpha 1 == what saying the word does; higher
-// extrapolates along the encoder's own displacement (identity drifts at the
-// extremes). One field per generation — the splice fixes the tokenization —
-// so the main thread sends at most one.
-//
-// `spectrum` is {valence, arousal, hostility, surprise} — the MODEL-NOMINATED
-// affect axes, loaded PRE-BAKED from lab/spectrum.json (tools/mint_spectrum.js
-// farms ~100 expression-word fields per mint prompt, eigendecomposes, binds
-// each axis by anchor-word contrast, pools over the token dimension, and
-// averages across three diverse portraits). Each axis is a (12 x 2560)
-// per-layer concept direction applied uniformly to EVERY valid token row of
-// whatever taps this generation uses — no words, no grammar, no language
-// dependence at runtime (round-7 probes: transfers to unseen subjects and a
-// Chinese prompt), and it stacks unconditionally with the expression word
-// field, the band dial, and the reference picture. Calibration: slider 3 ≈ probe
-// alpha 5 (full expression); off-manifold drift starts past ~6.
-//
-// `reference` is {share} — the reference picture. A picture picked in the UI is
-// encoded ONCE through Krea 2's own Qwen3-VL vision tower (setReference) under
-// the identical fixed "describe the image" template a text prompt gets, tapped
-// at the identical 12 decoder layers. `share` of its tokens are then copied
-// into the free (mask-0) token slots of whatever carrier this generation uses —
-// plain prompt or expression carrier — and the mask is extended, so the DiT
-// cross-attends to prompt AND picture at once. They join the carrier BEFORE the
-// baked banks and band dial, so those treat them as ordinary conditioning rows.
-//
-// WHAT THIS ACTUALLY TRANSFERS — measured, not assumed. Captioning three
-// references with the same Qwen3-VL family under Krea 2's own instruction and
-// rendering from the caption instead reproduces the ATTRIBUTES (wardrobe,
-// palette, subject type) just as well. What only the picture carries is the
-// ARRANGEMENT: layout correlation with the reference came out 0.69 from the
-// picture vs 0.57 from a 164-token description and 0.25 from a one-line caption
-// (the description drops the cane, the winding path, the rock, the pose). So
-// this is a composition control. It is NOT an identity control: a face does not
-// survive the encode at any share, because a description of a face is not a
-// face. The gap is widest on scenes with a specific layout and nearly closed on
-// a plain portrait, which is exactly where words do the job on their own.
-//
-// `share` is a fraction of the reference's own token count, not a gain. Scaling
-// the copied taps does almost nothing: every fusion block is rmsnorm-first with
-// a residual and Krea2TextProjection normalizes each row again before the DiT
-// sees it, so a 2x multiply survives as cos 0.89 on the fused rows. Attention
-// mass is the only real dial — how many of the reference's ~260-490 tokens ride
-// against the prompt's ~15-30. At share 1.0 with an empty prompt the picture is
-// the entire conditioning, which is "render this picture" with no separate mode
-// to implement or explain.
-
-// `mouth` is {open, round, teeth} — the same baked-bank mechanism over
-// lab/mouth.json (tools/mint_mouth.js farms ~36 mouth-state phrase fields per
-// mint prompt across human AND animal subjects, contrasts anchor-pole means,
-// pools, averages, orthogonalizes). open = jaw drop, round = pursed<->spread
-// lip corners, teeth = bared<->covered; open x round spans the viseme plane.
-// mouth.json's gain is calibrated so equal sliders push as hard as the
-// spectrum's, and both banks stack on the same carrier.
 //   main -> spatialRender {base: <a full generate-shaped message — the
 //                           captured render's msg, controls and all>,
 //                           axisName, alpha, maskW, maskH, maskData}
@@ -129,19 +70,21 @@
 //                          used for remove-one and restore-after-load; bad
 //                          files are skipped and reported, the rest apply)
 //   errors come back as   <- error {stage, message}
-//
-// Per-LoRA strengths ride each generate message as opts-level `loraScales`
-// (index-aligned with the applied groups) and are synced via setLoraScale at
-// the top of every generation — no extra round-trip for a slider drag.
-//
-// axisMinted's `components` explain WHAT the minted direction is made of: its
-// cosine against each of the NAMED bank axes (the dictionaries listed in the
-// load message's `namedDicts` — sorted by magnitude), plus `residual`, the
-// fraction of the direction lying outside the span of all of them (i.e.
-// genuinely its own). `atoms` is separate: the three nearest UNNAMED discovered
-// atoms by cosine, which say "this mint may have rediscovered atom N" without
-// being counted as things we have a word for. All three are null when the engine
-// build predates pipeline.controlVector().
+
+import {
+  DIAL_BLOCKS,
+  BAKED_BANKS,
+  clearEncoderCaches,
+  setReferenceRef,
+  applyAxisControls,
+  loadBankDict,
+  buildTaps,
+} from '/app/lab/worker-taps.js';
+import {
+  mintTextAxis,
+  mintImageAxis,
+  registerAxis,
+} from '/app/lab/worker-mint.js';
 
 var pipeline = null;   // native Pipeline handle
 var hiddenSize = 0;
@@ -154,28 +97,6 @@ var dictAxes = [];     // the NAMED bank's axis names — the basis minted axes 
                        // it is new" stopped meaning anything) and cost a 400x400
                        // Gram at 6144-d per mint. Those live in discoveredAxes.
 var discoveredAxes = []; // the unnamed SAE atoms — cosines only, never the solve
-var referenceRef = null; // the cached reference picture: {taps: {embeds, mask},
-                        // tokens} from setReference's vision-tower encode
-                        // (~125 MB — one at a time). Cleared on model load.
-
-// The 6 fixed scenes krea-research's mint_text_axis() averages a text-pair
-// diff over (axis_factory.py's SCENES[:6]) — robustifies the direction
-// against any one scene's incidental content, and yields a consistency score
-// (mean pairwise cosine similarity of the per-scene diffs).
-var SCENES = [
-  'a red fox sitting in a snowy forest clearing',
-  'a portrait of an elderly fisherman with a weathered face',
-  'a busy tokyo street with neon signs',
-  'a cozy scandinavian living room interior',
-  'a still life of pears and a copper kettle on a wooden table',
-  'rolling green hills with a lone oak tree',
-];
-
-// Deep-tap band dial: krea-research's literal<->stylized control scales these
-// 4 (of 12) tapped decoder layers before fusion (ui.py's BAND).
-var BAND_LAYERS = [7, 8, 9, 10];
-// AdaLN dial block range (ui.py's DIAL_BLOCKS) — the last 9 of 28 body blocks.
-var DIAL_BLOCKS = [19, 28];
 
 function fail(stage, err) {
   self.postMessage({
@@ -205,8 +126,7 @@ function handleLoad(msg) {
     }
     // Encoder-output caches belong to the old pipeline — a different model
     // would silently serve its predecessor's taps.
-    fieldCache = {}; fieldCacheCount = 0;
-    referenceRef = null;
+    clearEncoderCaches();
     // Krea 2's FP16 total (DiT ~25GB + Qwen3-VL-4B text/vision ~8.3GB) doesn't
     // fit a single 24GB card. INT8 quantizes BOTH components (loadModel's
     // opts.quantizeWeights, see brodiffusion::Pipeline::ModelDirOptions) down
@@ -306,8 +226,7 @@ function handleReloadTextEncoder(msg) {
     var quantize = msg.quantizeWeights !== false;
     pipeline.reloadTextEncoder(msg.modelDir, msg.textEncoderPath || '',
                                { quantizeWeights: quantize });
-    fieldCache = {}; fieldCacheCount = 0;
-    referenceRef = null;
+    clearEncoderCaches();
     var tensor = (typeof bro !== 'undefined' && bro.tensor) ? bro.tensor : null;
     self.postMessage({
       type: 'textEncoderReloaded',
@@ -317,310 +236,6 @@ function handleReloadTextEncoder(msg) {
   } catch (e) {
     fail('reloadTextEncoder', e);
   }
-}
-
-// ── shared helpers ───────────────────────────────────────────────────────
-
-// The stack budget, in alpha units — how much TOTAL axis injection the scene
-// can absorb before the injection, rather than the prompt, is what gets drawn.
-// Every axis is added to every token row, so what reaches the denoiser is the
-// SUM of the stack: ten sliders at +2 push twice as hard as one at +10, and the
-// deck happily lets you do it. Probe strips (a person-free sunset-cliff prompt,
-// ten axes stacked, the sum renormalized and swept) put the cliff at roughly
-//   |v| ~ 13*band - 1     alpha units
-// — past it any scene turns into dramatic crowds. The band dial belongs in the
-// rule because it scales the PROMPT's own deep taps: at band 0.5 the cliff is
-// ~5.5, at 1.0 it is ~12. Above 1.0 the headroom stops growing, so the factor
-// is capped. Hold the stack at 90% of the measured cliff.
-function controlBudget(band) {
-  var b = Math.min(+band || 1.0, 1.0);
-  return 0.9 * Math.max(2.0, 13 * b - 1);
-}
-
-// Apply the {axisName: alpha} control map from scratch (mirrors sana-lab):
-// clear, then set the nonzero axes, so a slider at 0/absent is a true no-op.
-// Baked into the state's fused conditioning at prime() time (task C's wiring)
-// — safe to clear again right after priming. The engine holds the stack to the
-// budget by scaling every active axis by one common factor, so the dialled-in
-// mix survives; we return what it cost so the deck can show a meter.
-function applyAxisControls(map, band) {
-  pipeline.clearControl();
-  pipeline.setControlBudget(controlBudget(band));
-  var any = false, active = {};
-  for (var name in map) {
-    if (!map.hasOwnProperty(name)) continue;
-    var a = +map[name];
-    if (a) { active[name] = a; any = true; }
-  }
-  if (any) pipeline.setControl(active);
-  return pipeline.controlNorm();   // {norm, budget, clamped, scale}
-}
-
-// Scale the 4 deep-tap band layers across every token slot of a raw-taps
-// buffer, in place. Filler (invalid) token rows get scaled too — harmless,
-// encode_text() drops them by mask before fusion.
-function scaleBand(embeds, band) {
-  if (band === 1.0) return;
-  var cols = embeds.cols, data = embeds.data;
-  var slots = embeds.rows / 12;
-  for (var t = 0; t < slots; t++) {
-    for (var bi = 0; bi < BAND_LAYERS.length; bi++) {
-      var off = (t * 12 + BAND_LAYERS[bi]) * cols;
-      for (var c = 0; c < cols; c++) data[off + c] *= band;
-    }
-  }
-}
-
-// ── contextual per-token expression field ────────────────────────────────
-// Splice an adjective as a modifier before the SUBJECT noun (sana
-// dictionary.py's validated "a … {adj} woman" form). The subject is the
-// article phrase after the last "of" in the first clause ("a studio portrait
-// of a woman with…" → the woman, not the portrait — and never a later
-// article like "…looking at the camera"), else the first article phrase
-// ("the chef in a kitchen" → the chef). Falls back to a leading modifier.
-function spliceAdjective(prompt, adj) {
-  var head = prompt.split(',')[0];
-  var re = /\b(?:of\s+)?(a|an|the)\s+/gi;
-  var m, first = null, lastOf = null;
-  while ((m = re.exec(head)) !== null) {
-    if (!first) first = m;
-    if (/^of\s/i.test(m[0])) lastOf = m;
-  }
-  var pick = lastOf || first;
-  if (!pick) return adj + ' ' + prompt;
-  var at = pick.index + pick[0].length;
-  return prompt.slice(0, at) + adj + ' ' + prompt.slice(at);
-}
-
-// Neutral candidates tried in order until one tokenizes to the same mask as
-// the expression splice (the row-alignment requirement). Multi-word entries
-// at the end catch longer adjectives.
-var NEUTRAL_POOL = ['calm', 'neutral', 'serious', 'relaxed', 'placid',
-                    'composed', 'expressionless', 'unsmiling', 'stoic',
-                    'blank', 'plain', 'quiet', 'still', 'very calm',
-                    'quite calm', 'calm and still', 'perfectly calm and still'];
-
-function masksEqual(a, b) {
-  if (a.rows !== b.rows || a.cols !== b.cols || a.data.length !== b.data.length) return false;
-  for (var i = 0; i < a.data.length; i++) if (a.data[i] !== b.data[i]) return false;
-  return true;
-}
-
-// Cache of built fields keyed by prompt+adj — a field costs 2+ encodes
-// (~0.2-1 s), a slider drag re-uses it for free. Cleared wholesale when it
-// grows past a handful of entries (each is ~125 MB of taps at 512 slots).
-var fieldCache = {};
-var fieldCacheCount = 0;
-function expressionField(prompt, adj) {
-  var key = prompt + '\u0000' + adj;
-  if (fieldCache[key]) return fieldCache[key];
-  var te = pipeline.krea2EncodePromptTaps(spliceAdjective(prompt, adj));
-  var tn = null, neutral = null;
-  for (var i = 0; i < NEUTRAL_POOL.length; i++) {
-    var cand = pipeline.krea2EncodePromptTaps(spliceAdjective(prompt, NEUTRAL_POOL[i]));
-    if (masksEqual(cand.mask, te.mask)) { tn = cand; neutral = NEUTRAL_POOL[i]; break; }
-  }
-  if (!tn) {
-    throw new Error('expression "' + adj + '": no token-aligned neutral found — ' +
-                    'try a different word for it');
-  }
-  var base = tn.embeds.data;
-  var field = new Float32Array(base.length);
-  var ed = te.embeds.data;
-  for (var c = 0; c < base.length; c++) field[c] = ed[c] - base[c];
-  if (fieldCacheCount >= 4) { fieldCache = {}; fieldCacheCount = 0; }
-  fieldCacheCount++;
-  fieldCache[key] = {
-    rows: tn.embeds.rows, cols: tn.embeds.cols,
-    base: base, field: field, mask: tn.mask, neutral: neutral,
-  };
-  return fieldCache[key];
-}
-
-// The neutral-carrier taps with the field applied at `alpha`. Fresh buffer
-// every call — scaleBand mutates its input in place and must not corrupt the
-// cached base.
-function expressionTaps(prompt, adj, alpha) {
-  var f = expressionField(prompt, adj);
-  var edited = new Float32Array(f.base.length);
-  for (var c = 0; c < f.base.length; c++) edited[c] = f.base[c] + alpha * f.field[c];
-  return {
-    embeds: { rows: f.rows, cols: f.cols, data: edited },
-    mask: f.mask,
-    neutral: f.neutral,
-  };
-}
-
-// ── model-nominated baked axis banks (affect spectrum + mouth) ────────────
-// dst += w * src at C++ speed (bro.image kernel).
-function axpy(dst, src, w) {
-  bro.image.combine(dst, dst, src, { op: 'wsum', wa: 1, wb: w });
-}
-
-// Each bank's JSON (lab/spectrum.json from tools/mint_spectrum.js,
-// lab/mouth.json from tools/mint_mouth.js) is { span, gain, axes: {key:
-// [span floats]} }. Each axis is a unit per-layer direction pooled from a
-// farmed word/phrase field cloud and averaged across diverse mint prompts;
-// `gain` is the calibrated per-row push (mean field norm / sqrt(token count)
-// of the mint prompts). A generate message carries one {key: slider} object
-// per bank, under the bank's name.
-var BAKED_BANKS = {
-  spectrum: { keys: ['valence', 'arousal', 'hostility', 'surprise'], dict: null },
-  mouth:    { keys: ['open', 'round', 'teeth'], dict: null },
-};
-// Slider→alpha calibration: full deflection (3) lands at the probe-verified
-// full-expression point (pooled alpha ~5); off-manifold drift starts past ~6.
-var BAKED_SLIDER_GAIN = 5 / 3;
-
-function loadBankDict(name, path) {
-  var bank = BAKED_BANKS[name];
-  bank.dict = null;
-  if (!path) return;
-  var raw = JSON.parse(require('fs').readFileSync(path, 'utf8'));
-  var axes = {};
-  for (var i = 0; i < bank.keys.length; i++) {
-    var k = bank.keys[i];
-    if (!raw.axes[k] || raw.axes[k].length !== raw.span) {
-      throw new Error(name + ' dict: bad axis "' + k + '"');
-    }
-    axes[k] = new Float32Array(raw.axes[k]);
-  }
-  bank.dict = { span: raw.span, gain: raw.gain, axes: axes };
-}
-
-// Add one bank's active axes to every valid token row of `taps`, in place,
-// and return the timing-bar note. The pooled directions are per-row uniform,
-// so this works on ANY token grid — prompt taps, an expression-field carrier,
-// or a reference picture's taps — with no words or language involved.
-function applyBank(taps, name, values) {
-  var dict = BAKED_BANKS[name].dict;
-  var span = dict.span;
-  var slots = taps.mask.rows;
-  var parts = [];
-  var bankKeys = BAKED_BANKS[name].keys;
-  for (var i = 0; i < bankKeys.length; i++) {
-    var key = bankKeys[i];
-    if (!values.hasOwnProperty(key)) continue;
-    var s = values[key] * BAKED_SLIDER_GAIN * dict.gain;
-    var vec = dict.axes[key];
-    for (var t = 0; t < slots; t++) {
-      if (taps.mask.data[t] === 0) continue;
-      axpy(taps.embeds.data.subarray(t * span, (t + 1) * span), vec, s);
-    }
-    parts.push(key + (values[key] > 0 ? ' +' : ' ') + values[key].toFixed(2));
-  }
-  return name + ' ' + parts.join(', ');
-}
-
-// The active {bankName: {axisKey: alpha}} subset of a generate message's
-// baked-bank fields (msg.spectrum / msg.mouth), or null when every axis of
-// every bank is zero/absent.
-function activeBaked(msg) {
-  var out = null;
-  for (var name in BAKED_BANKS) {
-    if (!BAKED_BANKS.hasOwnProperty(name) || !msg[name]) continue;
-    var bank = BAKED_BANKS[name];
-    var act = null;
-    for (var i = 0; i < bank.keys.length; i++) {
-      var k = bank.keys[i];
-      var a = +msg[name][k] || 0;
-      if (a) { if (!act) act = {}; act[k] = a; }
-    }
-    if (!act) continue;
-    if (!bank.dict) {
-      throw new Error(name + ' axes need lab/' + name + '.json — run tools/mint_' + name + '.js');
-    }
-    if (!out) out = {};
-    out[name] = act;
-  }
-  return out;
-}
-
-// ── the reference picture ──────────────────────────────────────
-// Copy an evenly-spread subsample of the cached reference's vision-token tap
-// blocks (each token is a contiguous 12-layer span of the embeds buffer) into
-// the carrier's free (mask-0) slots, and mark those slots valid. `share` is the
-// fraction of the reference's own tokens that ride: 0.35 means the model is
-// told about roughly a third of the picture, 1.0 means all of it, and with an
-// empty prompt 1.0 IS "render this picture" — there is no separate mode.
-//
-// Even spread, not the first N: a partial share should be a lower-resolution
-// look at the whole picture, not its top strip.
-//
-// The carrier's mask is replaced with a copy first — expressionTaps hands out
-// its CACHED field mask by reference, and extending that in place would poison
-// every later use of the cached field.
-function mergeReference(taps, share) {
-  if (!referenceRef) {
-    throw new Error('no reference picture set — pick one in the reference panel first');
-  }
-  var slots = taps.mask.rows;
-  var span = (taps.embeds.rows / slots) * taps.embeds.cols;   // floats per token
-  var ref = referenceRef.taps;
-  var refSpan = (ref.embeds.rows / ref.mask.rows) * ref.embeds.cols;
-  if (refSpan !== span) {
-    throw new Error('reference tap shape mismatch — re-pick the picture');
-  }
-  taps.mask = { rows: taps.mask.rows, cols: taps.mask.cols, data: taps.mask.data.slice() };
-  var free = [], src = [];
-  for (var t = 0; t < slots; t++) if (taps.mask.data[t] === 0) free.push(t);
-  for (var t = 0; t < ref.mask.rows; t++) if (ref.mask.data[t] !== 0) src.push(t);
-  if (!src.length) throw new Error('the reference encoded to zero valid tokens');
-  if (!free.length) {
-    throw new Error('the prompt fills all ' + slots + ' token slots — no room for the reference');
-  }
-  var take = Math.min(Math.max(1, Math.round(share * src.length)),
-                      src.length, free.length);
-  var dstData = taps.embeds.data, refData = ref.embeds.data;
-  for (var i = 0; i < take; i++) {
-    var s = src[Math.floor(i * src.length / take)];
-    var d = free[i];
-    var dstTok = dstData.subarray(d * span, (d + 1) * span);
-    // dstTok = 0*dstTok + 1*refTok — a copy at C++ speed; the filler rows
-    // being overwritten hold garbage, so wa must be 0, not 1.
-    bro.image.combine(dstTok, dstTok, refData.subarray(s * span, (s + 1) * span),
-                      { op: 'wsum', wa: 0, wb: 1 });
-    taps.mask.data[d] = 1;
-  }
-  return { take: take, of: src.length };
-}
-
-// Raw taps for this generation, or null to let prime(prompt) do the encode
-// (+ auto cond_control) internally. Image-as-prompt, the expression field,
-// the baked banks, the band dial, and the reference picture all need the
-// raw-taps path; the plain axis bank alone does not.
-function buildTaps(msg) {
-  var band = (msg.band == null) ? 1.0 : +msg.band;
-  var expr = (msg.expression && msg.expression.adj && +msg.expression.alpha)
-    ? msg.expression : null;
-  var baked = activeBaked(msg);
-  var refPic = (msg.reference && +msg.reference.share) ? msg.reference : null;
-  var taps;
-  if (expr) {
-    taps = expressionTaps(msg.prompt, String(expr.adj), +expr.alpha);
-  } else if (baked || band !== 1.0 || refPic) {
-    taps = pipeline.krea2EncodePromptTaps(msg.prompt);
-  } else {
-    return null;
-  }
-  // The reference's tokens join the carrier first, so the banks and band below
-  // treat them as part of the conditioning like any other token.
-  if (refPic) {
-    var took = mergeReference(taps, +refPic.share);
-    taps.referenceNote = 'reference · ' + took.take + ' of ' + took.of + ' tokens';
-  }
-  // Baked axes are per-row uniform: they stack on whatever taps this
-  // generation uses — plain prompt or expression carrier —
-  // and every active bank stacks on the same carrier.
-  if (baked) {
-    var notes = [];
-    for (var name in baked) {
-      if (baked.hasOwnProperty(name)) notes.push(applyBank(taps, name, baked[name]));
-    }
-    taps.note = notes.join(' · ');
-  }
-  scaleBand(taps.embeds, band);
-  return taps;
 }
 
 // { data: Float32Array(text_seq+img_len) } | null -> the {rows,cols,data}
@@ -663,8 +278,8 @@ function syncLoraScales(scales) {
 // ON the state (PipelineState.prepared), states primed here can be stepped
 // interleaved — each denoises under its own conditioning.
 function primeState(msg) {
-  var stack = applyAxisControls(msg.axisControls || {}, msg.band);
-  var taps = buildTaps(msg);
+  var stack = applyAxisControls(pipeline, msg.axisControls || {}, msg.band);
+  var taps = buildTaps(pipeline, msg);
   // NB: krea2PrimeFromTaps(embeds, mask, opts, uncondEmbeds?, uncondMask?) —
   // opts is the 3rd arg. Passing it 5th (as uncondMask) silently drops width/
   // height and the render falls back to the 512² default (the size field is
@@ -765,17 +380,6 @@ function handleGenerate(msg) {
 // each conditioning, re-synchronizing every step exactly as the shared-`x`
 // reference loop does.
 //
-// Full-fidelity: `msg.base` is the tab's captured render message — prompt,
-// seed, LoRAs, dials, gates, band, expression/spectrum/mouth, axis controls,
-// everything Generate sends — so the base state re-renders exactly the image
-// painted on. The alt state is the same message with `axisName` pushed by
-// `alpha` ON TOP of whatever that axis's slider already contributes; the
-// composite is therefore "your render, with one axis moved only where
-// painted". Model-global step state (gate scale/mask, per-step dial delta)
-// applies to both states identically — which is correct, since both run the
-// same step schedule. Per-state conditioning is sound because brodiffusion
-// carries the prepared conditioning on each PipelineState (state.prepared).
-//
 // `maskData` must already be resized to the state's own (latentHeight,
 // latentWidth) grid — the main thread owns that resize.
 function handleSpatialRender(msg) {
@@ -835,261 +439,16 @@ function handleSpatialRender(msg) {
 }
 
 // ── axis minting ─────────────────────────────────────────────────────────
-
-function fusedFor(prompt) {
-  var taps = pipeline.krea2EncodePromptTaps(prompt);
-  return pipeline.krea2EncodeText(taps.embeds, taps.mask);
-}
-
-// Mean over EVERY row — Krea 2's fused conditioning has no BOS row to skip
-// (unlike Gemma/CLIP, where row 0 is protected; see cond_control.h).
-function meanRows(fused) {
-  var rows = fused.rows, cols = fused.cols, d = fused.data;
-  var out = new Float64Array(cols);
-  for (var r = 0; r < rows; r++) {
-    var off = r * cols;
-    for (var c = 0; c < cols; c++) out[c] += d[off + c];
-  }
-  for (var c = 0; c < cols; c++) out[c] /= rows;
-  return out;
-}
-
-function unitNormalize(v) {
-  var n = 0;
-  for (var c = 0; c < v.length; c++) n += v[c] * v[c];
-  n = Math.sqrt(n) || 1e-9;
-  var out = new Float32Array(v.length);
-  for (var c = 0; c < v.length; c++) out[c] = v[c] / n;
-  return out;
-}
-
-// Interim progress for the long minting encodes (the UI shows a bar).
-function mintProgress(label, done, total) {
-  self.postMessage({ type: 'mintProgress', label: label, done: done, total: total });
-}
-
-// Minted axes must inject at the SAME calibrated magnitude as the bank.
-// The dictionary bakes scale = 0.15 x mean fused token norm (~46 for Krea 2
-// Turbo) so "slider 1.0 means the same relative push everywhere", and
-// krea-research's ui.py applies USER axes with that same AXIS_SCALE
-// (apply_axes, line 131). Registering minted axes with scale 1.0 made every
-// mint ~46x weaker than a bank axis — a flat sweep, an invisible slider.
-// Read the calibration off any dictionary axis at runtime; 1.0 only if
-// there's no dictionary or the engine predates controlVector().
-function bankScale() {
-  var any = dictAxes.length ? dictAxes : discoveredAxes;
-  if (!any.length || !pipeline.controlVector) return 1.0;
-  return pipeline.controlVector(any[0]).scale;
-}
-
-// Explain a freshly minted unit direction against the dictionary's NAMED
-// bank: per-axis cosine (the bank directions are unit vectors by the BCD1
-// format), plus how much of the direction lies OUTSIDE the bank's span.
-// The axes aren't orthogonal, so summing squared cosines would overcount —
-// project onto the span properly (solve the Gram system) and report
-// residual = |axis - proj| as the honest "genuinely its own" fraction.
-//
-// The span is the ~26 axes a person put a label on, deliberately. The unnamed
-// discovered atoms are reported alongside as plain cosines (the three nearest),
-// never folded into the span: 400+ near-dependent directions span so much of a
-// 6144-d neighbourhood that every mint came back ~0% new, which is not an
-// answer, and the Gram they need is O(n^2 * 6144) — half a billion multiply-adds
-// per mint, paid again for every saved axis at load. Cosines are O(n * 6144).
-//
-// Returns null when the engine build lacks pipeline.controlVector().
-function explainAxis(axis) {
-  if (!pipeline.controlVector || !dictAxes.length) return null;
-  var n = dictAxes.length, dim = axis.length;
-  var units = [], keptNames = [];
-  for (var i = 0; i < n; i++) {
-    var dir = pipeline.controlVector(dictAxes[i]).dir;
-    if (dir.length !== dim) continue;   // stale dict vs runtime dim mismatch
-    units.push(unitNormalize(dir));
-    keptNames.push(dictAxes[i]);
-  }
-  n = units.length;
-  if (!n) return null;
-
-  var b = new Float64Array(n);          // b_i = <u_i, axis>  (= cosine)
-  for (var i = 0; i < n; i++) {
-    var dot = 0;
-    for (var c = 0; c < dim; c++) dot += units[i][c] * axis[c];
-    b[i] = dot;
-  }
-  // Gram matrix (symmetric — fill the lower triangle, mirror the upper) +
-  // Gaussian elimination with partial pivoting. n is the named bank (~26), which
-  // is what keeps this trivial — see the note above on why the discovered atoms
-  // are not in here.
-  var M = [];
-  for (var i = 0; i < n; i++) M.push(new Float64Array(n));
-  for (var i = 0; i < n; i++) {
-    for (var j = 0; j <= i; j++) {
-      var dot = 0;
-      for (var c = 0; c < dim; c++) dot += units[i][c] * units[j][c];
-      M[i][j] = dot; M[j][i] = dot;
-    }
-  }
-  var coef = new Float64Array(b);
-  for (var col = 0; col < n; col++) {
-    var piv = col;
-    for (var r = col + 1; r < n; r++) if (Math.abs(M[r][col]) > Math.abs(M[piv][col])) piv = r;
-    if (Math.abs(M[piv][col]) < 1e-12) { coef[col] = 0; continue; }
-    if (piv !== col) {
-      var tr = M[piv]; M[piv] = M[col]; M[col] = tr;
-      var tb = coef[piv]; coef[piv] = coef[col]; coef[col] = tb;
-    }
-    for (var r = col + 1; r < n; r++) {
-      var f = M[r][col] / M[col][col];
-      if (!f) continue;
-      for (var c2 = col; c2 < n; c2++) M[r][c2] -= f * M[col][c2];
-      coef[r] -= f * coef[col];
-    }
-  }
-  for (var col = n - 1; col >= 0; col--) {
-    if (Math.abs(M[col][col]) < 1e-12) continue;
-    var s = coef[col];
-    for (var c2 = col + 1; c2 < n; c2++) s -= M[col][c2] * coef[c2];
-    coef[col] = s / M[col][col];
-  }
-  // |proj|^2 = b . coef (axis is unit), clamp for float noise.
-  var explained = 0;
-  for (var i = 0; i < n; i++) explained += b[i] * coef[i];
-  explained = Math.max(0, Math.min(1, explained));
-
-  var components = [];
-  for (var i = 0; i < n; i++) components.push({ name: keptNames[i], cos: b[i] });
-  components.sort(function (x, y) { return Math.abs(y.cos) - Math.abs(x.cos); });
-
-  // The unnamed atoms: cosine only, no solve, no contribution to the residual.
-  // "Your axis is 0.61 of the way to sae.4037" is a real thing to know — the mint
-  // may have rediscovered an atom — but it is a separate statement from "N% of
-  // this is outside everything we have a word for".
-  var atoms = [];
-  for (var i = 0; i < discoveredAxes.length; i++) {
-    var adir = pipeline.controlVector(discoveredAxes[i]).dir;
-    if (adir.length !== dim) continue;
-    var au = unitNormalize(adir), adot = 0;
-    for (var c = 0; c < dim; c++) adot += au[c] * axis[c];
-    atoms.push({ name: discoveredAxes[i], cos: adot });
-  }
-  atoms.sort(function (x, y) { return Math.abs(y.cos) - Math.abs(x.cos); });
-  if (atoms.length > 3) atoms.length = 3;
-
-  return { components: components, residual: Math.sqrt(1 - explained), atoms: atoms };
-}
-
-// Mint a user axis from a text pair, averaged over SCENES for robustness
-// (mirrors krea-research's mint_text_axis). Registers live via
-// setControlVector — coexists with the loaded dictionary's 18 core axes.
 function handleMintTextAxis(msg) {
-  try {
-    if (!pipeline) throw new Error('no model loaded');
-    var name = (msg.name || '').trim(), pos = (msg.pos || '').trim(), neg = (msg.neg || '').trim();
-    if (!name || !pos || !neg) throw new Error('need a name and both descriptions');
-
-    var diffs = [], cols = 0;
-    var total = SCENES.length * 2;
-    for (var i = 0; i < SCENES.length; i++) {
-      mintProgress('scene ' + (i + 1) + '/' + SCENES.length + ' · toward', i * 2, total);
-      var mp = meanRows(fusedFor(SCENES[i] + ', ' + pos));
-      mintProgress('scene ' + (i + 1) + '/' + SCENES.length + ' · away', i * 2 + 1, total);
-      var mn = meanRows(fusedFor(SCENES[i] + ', ' + neg));
-      cols = mp.length;
-      var diff = new Float64Array(cols);
-      for (var c = 0; c < cols; c++) diff[c] = mp[c] - mn[c];
-      diffs.push(diff);
-    }
-
-    // consistency: mean pairwise cosine similarity of the per-scene unit
-    // directions (low => the two descriptions may not name one clean axis).
-    var units = diffs.map(unitNormalize);
-    var simSum = 0, simN = 0;
-    for (var i = 0; i < units.length; i++) {
-      for (var j = i + 1; j < units.length; j++) {
-        var dot = 0;
-        for (var c = 0; c < cols; c++) dot += units[i][c] * units[j][c];
-        simSum += dot; simN++;
-      }
-    }
-    var consistency = simN ? simSum / simN : 1;
-
-    var mean = new Float64Array(cols);
-    for (var i = 0; i < diffs.length; i++) {
-      for (var c = 0; c < cols; c++) mean[c] += diffs[i][c];
-    }
-    for (var c = 0; c < cols; c++) mean[c] /= diffs.length;
-    var axis = unitNormalize(mean);
-
-    pipeline.setControlVector(name, axis, 0.0, bankScale());
-    var explain = explainAxis(axis);
-    self.postMessage({
-      type: 'axisMinted', name: name, consistency: consistency, axis: axis,
-      components: explain ? explain.components : null,
-      residual: explain ? explain.residual : null,
-      atoms: explain ? explain.atoms : null,
-    });
-  } catch (e) {
-    fail('mintTextAxis', e);
-  }
+  mintTextAxis(pipeline, dictAxes, discoveredAxes, msg, fail);
 }
 
-// Mint a user axis from an image pair (toward minus away), through the same
-// vision-tower tap path the reference picture uses (mirrors make_image_axis).
 function handleMintImageAxis(msg) {
-  try {
-    if (!pipeline) throw new Error('no model loaded');
-    var name = (msg.name || '').trim();
-    if (!name || !msg.a || !msg.b) throw new Error('need a name and both images');
-
-    mintProgress('encoding "toward" image (vision tower)', 0, 4);
-    var ta = pipeline.krea2EncodeImagePrompt(msg.a.pixels, msg.a.H, msg.a.W);
-    mintProgress('encoding "away" image (vision tower)', 1, 4);
-    var tb = pipeline.krea2EncodeImagePrompt(msg.b.pixels, msg.b.H, msg.b.W);
-    mintProgress('fusing "toward" conditioning', 2, 4);
-    var ma = meanRows(pipeline.krea2EncodeText(ta.embeds, ta.mask));
-    mintProgress('fusing "away" conditioning', 3, 4);
-    var mb = meanRows(pipeline.krea2EncodeText(tb.embeds, tb.mask));
-    var cols = ma.length;
-    var diff = new Float64Array(cols);
-    for (var c = 0; c < cols; c++) diff[c] = ma[c] - mb[c];
-    var axis = unitNormalize(diff);
-
-    pipeline.setControlVector(name, axis, 0.0, bankScale());
-    var explain = explainAxis(axis);
-    self.postMessage({
-      type: 'axisMinted', name: name, axis: axis,
-      components: explain ? explain.components : null,
-      residual: explain ? explain.residual : null,
-      atoms: explain ? explain.atoms : null,
-    });
-  } catch (e) {
-    fail('mintImageAxis', e);
-  }
+  mintImageAxis(pipeline, dictAxes, discoveredAxes, msg, fail);
 }
 
-// Re-register a previously minted axis from its saved unit direction — a
-// plain setControlVector at bank scale, zero encodes. This is what load-time
-// restore uses: the saved vector IS the axis, so re-deriving it every launch
-// (12 encodes per text axis, impossible for history-sourced image pairs) was
-// pure waste. explainAxis reruns here so the inspector's decomposition always
-// reflects the currently loaded dictionary.
 function handleRegisterAxis(msg) {
-  try {
-    if (!pipeline) throw new Error('no model loaded');
-    var name = (msg.name || '').trim();
-    if (!name || !msg.axis || !msg.axis.length) throw new Error('need a name and a direction');
-    var axis = (msg.axis instanceof Float32Array) ? msg.axis : new Float32Array(msg.axis);
-    pipeline.setControlVector(name, axis, 0.0, bankScale());
-    var explain = explainAxis(axis);
-    self.postMessage({
-      type: 'axisRegistered', name: name,
-      components: explain ? explain.components : null,
-      residual: explain ? explain.residual : null,
-      atoms: explain ? explain.atoms : null,
-    });
-  } catch (e) {
-    fail('registerAxis', e);
-  }
+  registerAxis(pipeline, dictAxes, discoveredAxes, msg, fail);
 }
 
 // ── the reference picture ────────────────────────────────────────────────
@@ -1105,16 +464,16 @@ function handleSetReference(msg) {
     var taps = pipeline.krea2EncodeImagePrompt(msg.pixels, msg.H, msg.W);
     var tokens = 0;
     for (var t = 0; t < taps.mask.rows; t++) if (taps.mask.data[t] !== 0) tokens++;
-    referenceRef = { taps: taps, tokens: tokens };
+    setReferenceRef({ taps: taps, tokens: tokens });
     self.postMessage({ type: 'referenceSet', tokens: tokens });
   } catch (e) {
-    referenceRef = null;
+    setReferenceRef(null);
     fail('setReference', e);
   }
 }
 
 function handleClearReference() {
-  referenceRef = null;
+  setReferenceRef(null);
   self.postMessage({ type: 'referenceCleared' });
 }
 
