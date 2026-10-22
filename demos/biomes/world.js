@@ -165,7 +165,18 @@ function rules() {
         chance: mul(mul(mul(thicket, add(add(mul(edge, 0.75), mul(COVER, 0.15)), 0.05)), SHRUB_INSIDE), clearing),
         species: [3], scale: 1.0, scaleVariety: 0.4, tintVariety: 1.0,
     };
-    return { ground: HEIGHT, seed: SEED, range: 6000, layers: [trees, shrubs] };
+    // Out in the open: shrubs in loose groups and the odd lone tree, as
+    // grazed ground has, so a meadow seen from a hillside or the air is
+    // dotted, not a bare lawn; never in the glade's or the meadow's heart.
+    const groups = clamp01(affine(fbm(1 / 0.025, 2, 13), 4.0, -0.45 * 4.0));
+    const meadowHeart = clamp01(affine(radii(MEADOW), 3, -0.55 * 3));
+    const open = {
+        spacing: 7, jitter: 1.0, sink: 0.05, seed: 13,
+        chance: mul(mul(mul(mul(sub(1, COVER), add(mul(groups, 0.5), 0.015)), SHRUB_INSIDE), clearing), meadowHeart),
+        species: [{ species: 3, weight: 0.8 }, { species: 0, weight: 0.12 }, { species: 2, weight: 0.08 }],
+        scale: 1.0, scaleVariety: 0.35, tintVariety: 1.0,
+    };
+    return { ground: HEIGHT, seed: SEED, range: 6000, layers: [trees, shrubs, open] };
 }
 
 export const ground = buildGround();
