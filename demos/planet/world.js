@@ -140,9 +140,9 @@ void procInit(inout vec4 v[PROC_CHANNELS]) {
     float range = clamp(rise / 2600.0, 0.0, 1.0);
 
     // The tree's detail rides on the land: little on the plains, the most on
-    // a range, none under the sea past the shelf (the sea is flat at 0).
-    v[0].x = max(ground, -40.0);
-    v[0].y = ground > -40.0 ? 0.25 + 0.35 * clamp(land, 0.0, 1.0) + 2.4 * range : 0.0;
+    // a range, fading out down the shelf (the abyss is smooth under the sea).
+    v[0].x = ground;
+    v[0].y = (0.25 + 0.35 * clamp(land, 0.0, 1.0) + 2.4 * range) * smoothstep(-400.0, -40.0, ground);
     // How far inland: the continental field over the coast's level.
     v[1] = vec4(ground, range, clamp(land / 0.6, 0.0, 1.0), 0.0);}
 `,
@@ -158,9 +158,8 @@ LandSurface landSurface(LandPoint q) {
     float lat = asin(clamp(q.up.y, -1.0, 1.0));
     float h = q.height;
     if (h < 0.0) {
-        // The sea: the shelf's shallows paler than the deep.
-        float depth = clamp(-g.x / 3000.0, 0.0, 1.0);
-        return landSurfaceOf(mix(vec3(0.020, 0.060, 0.075), vec3(0.006, 0.016, 0.040), depth));
+        // The seabed (the land's sea over it): the shelf's sand, the deep's mud.
+        return landSurfaceOf(mix(vec3(0.32, 0.29, 0.21), vec3(0.09, 0.09, 0.08), smoothstep(5.0, 120.0, -h)));
     }
     float sl = sin(lat);
     float temp = 28.0 - 44.0 * sl * sl - 6.5 * h / 1000.0;
@@ -197,7 +196,7 @@ export const START = (() => {
 })();
 scene.setBody({ radius: R, at: START });
 
-export const land = scene.createLand({ height: TREE, seed: SEED, surface: SURFACE, processes: PROCESSES });
+export const land = scene.createLand({ height: TREE, seed: SEED, surface: SURFACE, processes: PROCESSES, sea: { level: 0 } });
 
 // The sun: a direction in the body's frame (the light's, from the sun),
 // turned into the place frame whenever the place moves.
