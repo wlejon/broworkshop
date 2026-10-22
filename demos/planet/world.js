@@ -159,7 +159,7 @@ LandSurface landSurface(LandPoint q) {
     float h = q.height;
     if (h < 0.0) {
         // The seabed (the land's sea over it): the shelf's sand, the deep's mud.
-        return landSurfaceOf(mix(vec3(0.32, 0.29, 0.21), vec3(0.09, 0.09, 0.08), smoothstep(5.0, 120.0, -h)));
+        return landSurfaceOf(mix(vec3(0.16, 0.14, 0.10), vec3(0.05, 0.05, 0.045), smoothstep(5.0, 120.0, -h)));
     }
     float sl = sin(lat);
     float temp = 28.0 - 44.0 * sl * sl - 6.5 * h / 1000.0;
@@ -196,7 +196,7 @@ export const START = (() => {
 })();
 scene.setBody({ radius: R, at: START });
 
-export const land = scene.createLand({ height: TREE, seed: SEED, surface: SURFACE, processes: PROCESSES, sea: { level: 0 } });
+export const land = scene.createLand({ height: TREE, seed: SEED, surface: SURFACE, processes: PROCESSES, sea: { level: 0, absorb: [0.6, 0.18, 0.12] } });
 
 // The sun: a direction in the body's frame (the light's, from the sun),
 // turned into the place frame whenever the place moves.
