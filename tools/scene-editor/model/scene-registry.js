@@ -234,11 +234,115 @@ SceneRegistry.prototype.snapshotPrimitive = function (prim) {
     };
 };
 
+SceneRegistry.prototype.snapshotNode = function (node) {
+    if (!node) return null;
+    if (node.kind === 'primitive') return this.snapshotPrimitive(node);
+    if (node.kind === 'edge-primitive') return this.snapshotEdgePrimitive(node);
+    if (node.kind === 'component-instance') {
+        return {
+            kind:         'component-instance',
+            id:           node.id,
+            name:         node.name,
+            visible:      node.visible,
+            parentId:     node.parent && node.parent !== this.root ? node.parent.id : null,
+            index:        node.parent ? node.parent.children.indexOf(node) : -1,
+            translation:  node.translation.slice(),
+            rotation:     node.rotation.slice(),
+            scale:        node.scale.slice(),
+            definition:   node.definition,
+            definitionId: node.definition ? node.definition.id : null,
+        };
+    }
+    if (node.kind === 'group') {
+        return {
+            kind:        'group',
+            id:          node.id,
+            name:        node.name,
+            visible:     node.visible,
+            parentId:    node.parent && node.parent !== this.root ? node.parent.id : null,
+            index:       node.parent ? node.parent.children.indexOf(node) : -1,
+            translation: node.translation.slice(),
+            rotation:    node.rotation.slice(),
+            scale:       node.scale.slice(),
+            children:    node.children.map(c => this.snapshotNode(c)),
+        };
+    }
+    return null;
+};
+
+SceneRegistry.prototype.restoreNodeFromSnapshot = function (snap, explicitParent) {
+    if (!snap) return null;
+    if (snap.kind === 'primitive') {
+        return this.restoreFromSnapshot(snap);
+    }
+    if (snap.kind === 'edge-primitive') {
+        return this.restoreEdgePrimitiveFromSnapshot(snap);
+    }
+    const parent = explicitParent
+        || (snap.parentId != null ? this._findById(snap.parentId) : null)
+        || this.root;
+    let node = null;
+    if (snap.kind === 'component-instance') {
+        const def = snap.definition
+            || this.components.find(d => d.id === snap.definitionId)
+            || null;
+        node = new ComponentInstance({
+            id:          snap.id,
+            name:        snap.name,
+            visible:     snap.visible !== false,
+            scene:       this.scene,
+            definition:  def,
+            translation: snap.translation,
+            rotation:    snap.rotation,
+            scale:       snap.scale,
+        });
+    } else if (snap.kind === 'group') {
+        node = new Group({
+            id:          snap.id,
+            name:        snap.name,
+            visible:     snap.visible !== false,
+            translation: snap.translation,
+            rotation:    snap.rotation,
+            scale:       snap.scale,
+        });
+    }
+    if (!node) return null;
+    const idx = snap.index != null && snap.index >= 0
+        ? Math.max(0, Math.min(snap.index, parent.children.length))
+        : parent.children.length;
+    parent.children.splice(idx, 0, node);
+    node.parent = parent;
+    if (snap.id >= this._nextId) this._nextId = snap.id + 1;
+    if (!this.active) this.active = node;
+    if (snap.kind === 'group' && Array.isArray(snap.children)) {
+        for (const childSnap of snap.children) {
+            this.restoreNodeFromSnapshot(childSnap, node);
+        }
+    }
+    node._invalidateWorld();
+    this._emit();
+    return node;
+};
+
 SceneRegistry.prototype.remove = function (id) {
     const obj = this._findById(id);
     if (!obj) return false;
+    let ctx = this.editContext;
+    while (ctx && ctx !== this.root) {
+        if (ctx === obj) {
+            this.editContext = obj.parent || this.root;
+            break;
+        }
+        ctx = ctx.parent;
+    }
+    let activeInside = false;
+    let act = this.active;
+    while (act) {
+        if (act === obj) { activeInside = true; break; }
+        act = act.parent;
+    }
     if (obj.destroy) obj.destroy();
-    if (this.active === obj) {
+    if (activeInside) {
         const rest = this.primitives;
         this.active = rest[0] || null;
     }
@@ -344,8 +448,10 @@ SceneRegistry.prototype.collectInferenceGeos = function (opts) {
 SceneRegistry.prototype.createGroup = function (members, opts) {
     if (!members || members.length === 0) return null;
     const parent = members[0].parent || this.editContext || this.root;
+    const id = (opts && opts.id != null) ? opts.id : this.nextId();
+    if (id >= this._nextId) this._nextId = id + 1;
     const group = new Group({
-        id:   this.nextId(),
+        id,
         name: (opts && opts.name) || 'Group',
     });
     parent.addChild(group);

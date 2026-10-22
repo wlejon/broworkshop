@@ -138,5 +138,62 @@ const aWorldAfter = restoredA.worldCentroid();
 assert(dist(aWorldBefore, aWorldAfter) < 1e-5,
     `A world centroid preserved across serialize round-trip`);
 
+// --- cmd.group undo/redo preserves group ID, sibling index, and reg.active -
+
+reg.clear();
+reg._nextId = 1;
+E.history.clear();
+const s1 = reg.create({ type: 'box', name: 'S1', position: [0, 0, 0], params: { sx: 1, sy: 1, sz: 1 } });
+const s2 = reg.create({ type: 'box', name: 'S2', position: [2, 0, 0], params: { sx: 1, sy: 1, sz: 1 } });
+const s3 = reg.create({ type: 'box', name: 'S3', position: [4, 0, 0], params: { sx: 1, sy: 1, sz: 1 } });
+assert(reg.root.children.indexOf(s2) === 1, 'S2 starts at sibling index 1');
+
+reg.active = s2;
+const createdGrp = E.ed.cmd.group('MidGroup');
+const grpId = createdGrp.id;
+assert(createdGrp && createdGrp.kind === 'group', 'cmd.group created a group');
+assert(reg.active === createdGrp, 'cmd.group sets reg.active to the group');
+E.ed.cmd.rename(createdGrp, 'RenamedGroup');
+assert(createdGrp.name === 'RenamedGroup', 'group renamed');
+
+// Undo rename then undo group
+E.history.undo();
+assert(createdGrp.name === 'MidGroup', 'undo rename restored MidGroup');
+E.history.undo();
+assert(!reg.getById(grpId), 'undo group removed the group');
+assert(reg.root.children.indexOf(s2) === 1, 'undo group restored S2 at original sibling index 1');
+assert(reg.active === s2, 'undo group restored reg.active to S2');
+
+// Redo group then redo rename: group ID must match grpId so rename succeeds
+E.history.redo();
+const redoneGrp = reg.getById(grpId);
+assert(redoneGrp && redoneGrp.kind === 'group', 'redo group recreated group with the same ID');
+assert(reg.active === redoneGrp, 'redo group sets reg.active to recreated group');
+E.history.redo();
+assert(redoneGrp.name === 'RenamedGroup', 'redo rename succeeded on recreated group with stable ID');
+
+// --- cmd.deleteObject on Group is undoable and resets editContext ----------
+
+reg.enterContext(redoneGrp);
+assert(reg.editContext === redoneGrp, 'entered group editContext');
+
+const grpSiblingIdx = reg.root.children.indexOf(redoneGrp);
+E.ed.cmd.deleteObject(redoneGrp);
+assert(!reg.getById(grpId), 'group deleted');
+assert(!reg.getById(s2.id), 'child primitive inside group deleted');
+assert(reg.editContext === reg.root, 'deleting open group reset reg.editContext to reg.root');
+
+// Undo group deletion restores group and its child at original sibling index
+E.history.undo();
+const restoredGrp = reg.getById(grpId);
+assert(restoredGrp && restoredGrp.kind === 'group', 'undo deleteObject restored the group');
+assert(reg.root.children.indexOf(restoredGrp) === grpSiblingIdx, 'restored group at original sibling index');
+assert(restoredGrp.children.length === 1 && restoredGrp.children[0].id === s2.id, 'restored group child S2');
+assert(reg.active === restoredGrp, 'undo deleteObject set reg.active to restored group');
+
+// Redo group deletion removes it again
+E.history.redo();
+assert(!reg.getById(grpId), 'redo deleteObject removed group again');
+
 console.log('OK — groups: create/explode preserve world, context-aware pick, ' +
-            'component instances share definition, serialize round-trip');
+            'component instances share definition, serialize round-trip, undoable group & delete');

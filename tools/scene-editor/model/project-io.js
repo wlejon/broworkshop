@@ -13,6 +13,7 @@
 
 import { SceneRegistry } from "./scene-registry.js";
 import { Primitive } from "./primitive.js";
+import { EdgePrimitive } from "./edge-primitive.js";
 import { Group, ComponentDefinition, ComponentInstance } from "./scene-object.js";
 
 export const PROJECT_SCHEMA = 2;
@@ -32,6 +33,10 @@ function nodeToJSON(n) {
         base.positions = Array.from(n.positions);
         base.indices   = Array.from(n.indices);
         base.normals   = n.normals ? Array.from(n.normals) : null;
+    } else if (n.kind === 'edge-primitive') {
+        base.color     = n.color;
+        base.positions = Array.from(n.positions || []);
+        base.edges     = (n.edges || []).map(e => ({ a: e.a, b: e.b }));
     } else if (n.kind === 'component-instance') {
         base.definitionId = n.definition ? n.definition.id : null;
     } else {
@@ -75,6 +80,20 @@ function nodeFromJSON(registry, parent, data, componentsById) {
             new Float32Array(data.positions),
             new Uint32Array(data.indices),
             data.normals ? new Float32Array(data.normals) : null);
+        node.setVisible(data.visible !== false);
+    } else if (data.kind === 'edge-primitive') {
+        node = new EdgePrimitive({
+            id: data.id,
+            name: data.name || 'Edges',
+            color: data.color,
+            scene: registry.scene,
+            positions: new Float32Array(data.positions || []),
+            edges: (data.edges || []).map(e => ({ a: e.a, b: e.b })),
+            translation: data.translation,
+            rotation: data.rotation,
+            scale: data.scale,
+            visible: data.visible !== false,
+        });
         node.setVisible(data.visible !== false);
     } else if (data.kind === 'component-instance') {
         const def = componentsById.get(data.definitionId);

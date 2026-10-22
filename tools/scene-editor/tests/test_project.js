@@ -234,6 +234,40 @@ t('dirty indicator: history.record triggers P.change', () => {
     } finally { unsub(); }
 });
 
+t('EdgePrimitive round-trips through saveTo / openPath preserving positions, edges, color, and TRS', () => {
+    const dir = freshPath();
+    try {
+        resetState();
+        const edgePrim = reg.createEdgePrimitive({
+            name: 'SketchLine',
+            color: '#ff3366',
+            translation: [2, 3, -4],
+            rotation: [0, 0, 0, 1],
+            scale: [1.5, 1.5, 1.5],
+        }, {
+            positions: new Float32Array([0, 0, 0, 1, 2, 0, 3, 2, 1]),
+            edges: [{ a: 0, b: 1 }, { a: 1, b: 2 }],
+        });
+        edgePrim.setVisible(false);
+        const edgeId = edgePrim.id;
+
+        truthy(P.saveTo(dir), 'saveTo with EdgePrimitive succeeds');
+        resetState();
+        truthy(P.openPath(dir), 'openPath with EdgePrimitive succeeds');
+
+        const restored = reg.getById(edgeId);
+        truthy(restored, 'EdgePrimitive restored by id');
+        eq(restored.kind, 'edge-primitive', 'restored kind is edge-primitive (not group)');
+        eq(restored.name, 'SketchLine', 'restored name');
+        eq(restored.color, '#ff3366', 'restored color');
+        eq(restored.visible, false, 'restored visibility');
+        eq(Array.from(restored.positions), [0, 0, 0, 1, 2, 0, 3, 2, 1], 'restored positions');
+        eq(restored.edges.map(e => ({ a: e.a, b: e.b })), [{ a: 0, b: 1 }, { a: 1, b: 2 }], 'restored edges');
+        eq(Array.from(restored.translation), [2, 3, -4], 'restored translation');
+        eq(Array.from(restored.scale), [1.5, 1.5, 1.5], 'restored scale');
+    } finally { rmrf(dir); }
+});
+
 // -------------------------------------------------------------------------
 // End
 // -------------------------------------------------------------------------

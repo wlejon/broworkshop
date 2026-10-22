@@ -86,9 +86,7 @@ export function createCommands(ed) {
         },
 
         /**
-         * Delete a primitive or edge primitive (undoable). Groups and
-         * component instances are destroyed without an undo entry: restoring
-         * a whole subtree needs snapshot support the registry lacks.
+         * Delete a primitive, edge primitive, group, or component instance (undoable).
          */
         deleteObject(obj) {
             if (!obj) return;
@@ -97,16 +95,19 @@ export function createCommands(ed) {
                 const snap = reg.snapshotEdgePrimitive(obj);
                 ed.history.do('Delete ' + obj.name,
                     () => reg.remove(snap.id),
-                    () => reg.restoreEdgePrimitiveFromSnapshot(snap));
+                    () => { reg.active = reg.restoreEdgePrimitiveFromSnapshot(snap); reg._emit(); });
             } else if (obj.kind === 'primitive') {
                 const snap = reg.snapshotPrimitive(obj);
                 ed.history.do('Delete ' + obj.name,
                     () => reg.remove(snap.id),
-                    () => reg.restoreFromSnapshot(snap));
+                    () => { reg.active = reg.restoreFromSnapshot(snap); reg._emit(); });
+            } else if (obj.kind === 'group' || obj.kind === 'component-instance') {
+                const snap = reg.snapshotNode(obj);
+                ed.history.do('Delete ' + obj.name,
+                    () => reg.remove(snap.id),
+                    () => { reg.active = reg.restoreNodeFromSnapshot(snap); reg._emit(); });
             } else {
-                if (obj.destroy) obj.destroy();
-                if (reg.active === obj) reg.active = reg.primitives[0] || null;
-                reg._emit();
+                reg.remove(obj.id);
             }
         },
 
@@ -134,21 +135,35 @@ export function createCommands(ed) {
         },
 
         /** Wrap the selection in a new Group (Ctrl+G). */
-        group() {
+        group(name = 'Group') {
             const obj = reg.active;
-            if (!obj) { ed.status('group: nothing selected'); return; }
+            if (!obj) { ed.status('group: nothing selected'); return null; }
+            const groupId = reg.nextId();
             // Undo restores parent, index and local TRS: createGroup reparents
             // preserving world transform, which rewrites the local one.
-            const prev = { parent: obj.parent, trs: trsOf(obj) };
+            const prev = {
+                parent: obj.parent || reg.root,
+                index: obj.parent ? obj.parent.children.indexOf(obj) : -1,
+                trs: trsOf(obj),
+            };
             let created = null;
             ed.history.do('Group',
-                () => { created = reg.createGroup([obj], { name: 'Group' }); },
+                () => { created = reg.createGroup([obj], { id: groupId, name }); },
                 () => {
                     if (created) reg.explodeGroup(created);
-                    if (obj.parent !== prev.parent) prev.parent.addChild(obj);
+                    const curIdx = prev.parent.children.indexOf(obj);
+                    if (curIdx >= 0) prev.parent.children.splice(curIdx, 1);
+                    const targetIdx = prev.index >= 0
+                        ? Math.min(prev.index, prev.parent.children.length)
+                        : prev.parent.children.length;
+                    prev.parent.children.splice(targetIdx, 0, obj);
+                    obj.parent = prev.parent;
                     obj.setTRS(prev.trs.t, prev.trs.r, prev.trs.s);
+                    reg.active = obj;
                     created = null;
+                    reg._emit();
                 });
+            return created;
         },
 
         /** Dissolve the selected Group into its parent (Ctrl+Shift+G). */
