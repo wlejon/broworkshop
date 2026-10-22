@@ -5,6 +5,7 @@ import { sceneViewport, orbitRotation } from "/lib/kit/viewport3d.js";
 import { daylight, SKY } from "/lib/kit/sky.js";
 import { herbModule } from "/lib/herbs/index.js";
 import { swardModule } from "/lib/sward/index.js";
+import { treeModule, treeSpecies } from "/lib/trees/index.js";
 
 export const HALF = 700;          // half-size of the world (m)
 const CELL = 4;                   // ground cell (m)
@@ -187,7 +188,9 @@ export const grass = scene.createGrass({
         density: (x, z, y, canopy) => 0.25 + 0.6 * herbPatches(x, z),
     },
 });
-export const plants = scene.createPlants({ species: SPECIES, rules: rules(), receivesShadow: true });
+export const plants = scene.createPlants({
+    module: treeModule(), species: SPECIES.map(treeSpecies), rules: rules(), receivesShadow: true,
+});
 plants.castsShadow = true;
 
 // --- views --------------------------------------------------------------------------
