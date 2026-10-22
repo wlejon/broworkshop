@@ -186,9 +186,11 @@ export const SHOTS = {
     glade:  { label: 'Glade', eye: () => at(GLADE.x - 6, GLADE.z - 8, 1.7), look: () => at(GLADE.x + 30, GLADE.z + 40, 6) },
     edge:   { label: 'Forest edge', eye: () => at(MEADOW.x + 40, MEADOW.z + 30, 1.7), look: () => at(MEADOW.x + 120, MEADOW.z + 110, 8) },
     meadow: { label: 'Meadow', eye: () => at(MEADOW.x - 30, MEADOW.z - 40, 2.0), look: () => at(MEADOW.x + 80, MEADOW.z + 60, 4) },
+    mount:  { label: 'Mounted', eye: () => at(MEADOW.x - 70, MEADOW.z + 10, 4.5), look: () => at(MEADOW.x + 10, MEADOW.z + 70, 1) },
     canopy: { label: 'Canopy', eye: () => at(GLADE.x, GLADE.z, 34), look: () => at(GLADE.x + 120, GLADE.z + 140, 0) },
     above:  { label: 'Above', eye: () => at(0, 0, 160), look: () => at(220, 260, 0) },
     flyover: { label: 'Flyover', eye: () => at(-300, -300, 420), look: () => at(150, 150, 0) },
+    high:   { label: 'High', eye: () => at(-900, -900, 1500), look: () => at(700, 700, 0) },
 };
 
 export const still = { view: null };
