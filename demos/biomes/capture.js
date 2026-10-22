@@ -42,7 +42,8 @@ const opt = (key) => {
     const a = argv.find((s) => typeof s === 'string' && s.startsWith(key + '='));
     return a ? a.slice(key.length + 1) : undefined;
 };
-const shotsOf = (s) => (s || Object.keys(SHOTS).join(',')).split(',').filter((k) => SHOTS[k]);
+// (An option where the shots go, as in `cost sky=golden`, means every shot.)
+const shotsOf = (s) => (s && !s.includes('=') ? s : Object.keys(SHOTS).join(',')).split(',').filter((k) => SHOTS[k]);
 
 // The plants node's detail, for A/Bs: pixels=, shadowPixels=, shadowRange=, ...
 for (const k of ['pixels', 'minElements', 'woodRange', 'range', 'shadowTexels', 'shadowRange'])
