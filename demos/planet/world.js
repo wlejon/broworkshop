@@ -179,7 +179,8 @@ LandSurface landSurface(LandPoint q) {
     c = mix(c, tundra, smoothstep(2.0, -6.0, temp));
     c = mix(c, rock, smoothstep(0.25, 0.5, steep));
     c = mix(c, snow, smoothstep(-6.0, -12.0, temp) * (1.0 - smoothstep(0.5, 0.8, steep)));
-    LandSurface s = landSurfaceOf(c);    float grows = smoothstep(0.15, 0.45, wet) * smoothstep(-4.0, 4.0, temp) * (1.0 - smoothstep(0.3, 0.55, steep));
+    LandSurface s = landSurfaceOf(c);
+    float grows = smoothstep(0.15, 0.45, wet) * smoothstep(-4.0, 4.0, temp) * (1.0 - smoothstep(0.3, 0.55, steep));
     s.cover = vec4(grows, 1.0 - smoothstep(0.3, 0.7, wet), 0.6 + 0.6 * wet, smoothstep(0.55, 0.8, wet) * grows);
     s.herbs = 0.3 * grows;
     return s;
