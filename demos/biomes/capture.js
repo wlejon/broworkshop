@@ -345,7 +345,7 @@ if (mode === 'still') {
         }
         console.log(`${String(i).padStart(4)} ${g.toFixed(2).padStart(6)} ms  pages drawn ${String(c.shadowPagesDrawn).padStart(4)}  ` +
                     `overlays ${String(c.shadowPagesDynamic).padStart(3)}  wanted ${String(c.shadowPagesWanted).padStart(4)}  ` +
-                    `views ${String(c.shadowViews).padStart(3)}` + (temporal && i > 0 ? `  change ${energy[i - 1].toFixed(3)}` : ''));
+                    `views ${String(c.shadowViews).padStart(3)}  world ${(c.worldSpentMs || 0).toFixed(2)}/${(c.worldBudgetMs || 0).toFixed(2)} ms` + (temporal && i > 0 ? `  change ${energy[i - 1].toFixed(3)}` : ''));
         if (opt('passes') && typeof perf.gpuPasses === 'function') {
             const top = Object.entries(perf.gpuPasses() || {}).filter(([, v]) => typeof v === 'number')
                 .sort((a, b) => b[1] - a[1]).slice(0, +opt('passes') || 8);
