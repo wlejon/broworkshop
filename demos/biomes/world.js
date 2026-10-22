@@ -61,7 +61,8 @@ export const groundHeight = sampled(HEIGHT);
 const COVER = mul(mul(clamp01(affine(fbm(1 / 0.006, 3, 2), 3.2, -0.36 * 3.2)),
                       clamp01(affine(radii(GLADE), 2.5, -0.85 * 2.5))),
                   clamp01(affine(radii(MEADOW), 1.6, -0.8 * 1.6)));
-const DRY = fbm(1 / 0.02, 2, 3);
+const DRY = fbm(1 / 0.016, 4, 3);
+const BROAD_DRY = fbm(1 / 0.0025, 2, 17);
 const HERB_PATCHES = affine(N('Value', { 'Feature Scale': 20, 'Seed Offset': 10 }), 0.5, 0.5);
 
 // The land: the height tree, and a surface from the same cover, dryness and
@@ -69,14 +70,18 @@ const HERB_PATCHES = affine(N('Value', { 'Feature Scale': 20, 'Seed Offset': 10 
 // under the trees; the sward thinning under them, drying and shortening
 // where the ground is dry; the herbs in patches everywhere.
 function buildGround() {
-    const surface = COVER.glsl({ name: 'coverField' }) + DRY.glsl({ name: 'dryField' }) +
+    const surface = COVER.glsl({ name: 'coverField' }) + DRY.glsl({ name: 'dryField' }) + BROAD_DRY.glsl({ name: 'broadDryField' }) +
         HERB_PATCHES.glsl({ name: 'herbField' }) + `
 LandSurface landSurface(LandPoint q) {
     float cover = coverField(q.p, LAND_SEED), dry = dryField(q.p, LAND_SEED);
+    // The sward dries on the rises and the slopes and stays lush in the
+    // hollows, and over whole hillsides by the broad field: what still
+    // shows from high up, where the patches are a texel.
+    float dried = dry + 0.004 * q.height + 0.8 * (1.0 - q.normal.y) + 0.35 * (broadDryField(q.p, LAND_SEED) - 0.5);
     vec3 open = vec3(0.10 + 0.10 * dry, 0.15 + 0.06 * dry, 0.035);
     LandSurface s = landSurfaceOf(open * vec3(1.0 - 0.55 * cover, 1.0 - 0.55 * cover, 1.0 - 0.3 * cover) +
                                   vec3(0.05, 0.05, 0.025) * cover);
-    s.cover = vec4(1.0 - 0.75 * cover, max(0.0, dry - 0.35) * 1.4, 0.8 + 0.6 * (1.0 - dry), cover);
+    s.cover = vec4(1.0 - 0.75 * cover, clamp((dried - 0.3) * 1.4, 0.0, 0.75), 0.8 + 0.6 * (1.0 - dry), cover);
     s.herbs = 0.25 + 0.6 * herbField(q.p, LAND_SEED);
     return s;
 }
@@ -182,7 +187,7 @@ function rules() {
 export const ground = buildGround();
 export const grass = scene.createGrass({
     ground, turf: true,
-    sward: swardModule(),
+    sward: swardModule({ lush: [0.08, 0.15, 0.035] }),
     herbs: herbModule({ species: ['bracken', 'woodsorrel', { preset: 'daisy', abundance: 1.5 }, 'poppy'] }),
 });
 export const plants = scene.createPlants({
