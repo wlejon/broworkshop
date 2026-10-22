@@ -176,7 +176,10 @@ export const grass = scene.createGrass({
 });
 export const plants = scene.createPlants({
     module: treeModule(), species: SPECIES.map(treeSpecies), rules: rules(), receivesShadow: true,
-    land: ground,
+    // The plants drawn to 12 km, past the world's edge from anywhere in it
+    // (far off they cost next to nothing: 0.01-0.02 ms against 6 km on the
+    // high views); the land's canopy past that.
+    range: 12000, land: ground,
 });
 plants.castsShadow = true;
 
