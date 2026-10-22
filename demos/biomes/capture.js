@@ -49,6 +49,7 @@ for (const k of ['pixels', 'minElements', 'woodRange', 'range', 'shadowTexels', 
 if (opt('probes') !== undefined) scene.setProbeGrid(opt('probes') !== '0');
 
 document.body.classList.add('clean');
+bro.menu.hide();
 flush();
 sky.apply(opt('sky') || 'afternoon');
 if (opt('msaa')) scene.setMSAA(+opt('msaa'));
