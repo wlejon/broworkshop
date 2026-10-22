@@ -4,6 +4,7 @@
 import { sceneViewport, orbitRotation } from "/lib/kit/viewport3d.js";
 import { daylight, SKY } from "/lib/kit/sky.js";
 import { herbModule } from "/lib/herbs/index.js";
+import { swardModule } from "/lib/sward/index.js";
 
 export const HALF = 700;          // half-size of the world (m)
 const CELL = 4;                   // ground cell (m)
@@ -176,6 +177,7 @@ function rules() {
 export const ground = buildGround();
 export const grass = scene.createGrass({
     ground, turf: true, cell: 2,
+    sward: swardModule(),
     density: (x, z) => 1 - 0.75 * forestCover(x, z),
     dry: (x, z) => Math.max(0, dryness(x, z) - 0.35) * 1.4,
     tall: (x, z) => 0.8 + 0.6 * (1 - dryness(x, z)),
