@@ -61,21 +61,23 @@ export const groundHeight = sampled(HEIGHT);
 const COVER = mul(mul(clamp01(affine(fbm(1 / 0.006, 3, 2), 3.2, -0.36 * 3.2)),
                       clamp01(affine(radii(GLADE), 2.5, -0.85 * 2.5))),
                   clamp01(affine(radii(MEADOW), 1.6, -0.8 * 1.6)));
-export const forestCover = sampled(COVER);
 const DRY = fbm(1 / 0.02, 2, 3);
-const dryness = sampled(DRY);
-const herbPatches = sampled(affine(N('Value', { 'Feature Scale': 20, 'Seed Offset': 10 }), 0.5, 0.5));
+const HERB_PATCHES = affine(N('Value', { 'Feature Scale': 20, 'Seed Offset': 10 }), 0.5, 0.5);
 
-// The land: the height tree, and a surface from the same cover and dryness
-// trees as GLSL: meadow green to golden, forest floor to dark loam under
-// the trees.
+// The land: the height tree, and a surface from the same cover, dryness and
+// herb trees as GLSL: meadow green to golden, forest floor to dark loam
+// under the trees; the sward thinning under them, drying and shortening
+// where the ground is dry; the herbs in patches everywhere.
 function buildGround() {
-    const surface = COVER.glsl({ name: 'coverField' }) + DRY.glsl({ name: 'dryField' }) + `
+    const surface = COVER.glsl({ name: 'coverField' }) + DRY.glsl({ name: 'dryField' }) +
+        HERB_PATCHES.glsl({ name: 'herbField' }) + `
 LandSurface landSurface(LandPoint q) {
     float cover = coverField(q.p, LAND_SEED), dry = dryField(q.p, LAND_SEED);
     vec3 open = vec3(0.10 + 0.10 * dry, 0.15 + 0.06 * dry, 0.035);
-    LandSurface s;
-    s.albedo = open * vec3(1.0 - 0.55 * cover, 1.0 - 0.55 * cover, 1.0 - 0.3 * cover) + vec3(0.05, 0.05, 0.025) * cover;
+    LandSurface s = landSurfaceOf(open * vec3(1.0 - 0.55 * cover, 1.0 - 0.55 * cover, 1.0 - 0.3 * cover) +
+                                  vec3(0.05, 0.05, 0.025) * cover);
+    s.cover = vec4(1.0 - 0.75 * cover, max(0.0, dry - 0.35) * 1.4, 0.8 + 0.6 * (1.0 - dry), cover);
+    s.herbs = 0.25 + 0.6 * herbField(q.p, LAND_SEED);
     return s;
 }
 `;
@@ -168,16 +170,9 @@ function rules() {
 
 export const ground = buildGround();
 export const grass = scene.createGrass({
-    ground, turf: true, cell: 2,
+    ground, turf: true,
     sward: swardModule(),
-    density: (x, z) => 1 - 0.75 * forestCover(x, z),
-    dry: (x, z) => Math.max(0, dryness(x, z) - 0.35) * 1.4,
-    tall: (x, z) => 0.8 + 0.6 * (1 - dryness(x, z)),
-    floor: (x, z) => forestCover(x, z),
-    herbs: {
-        ...herbModule({ species: ['bracken', 'woodsorrel', { preset: 'daisy', abundance: 1.5 }, 'poppy'] }),
-        density: (x, z, y, canopy) => 0.25 + 0.6 * herbPatches(x, z),
-    },
+    herbs: herbModule({ species: ['bracken', 'woodsorrel', { preset: 'daisy', abundance: 1.5 }, 'poppy'] }),
 });
 export const plants = scene.createPlants({
     module: treeModule(), species: SPECIES.map(treeSpecies), rules: rules(), receivesShadow: true,
