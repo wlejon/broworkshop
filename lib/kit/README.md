@@ -234,7 +234,7 @@ forward(), locked, altitude, groundHeight, opts, dispose() }`. Call
 `scene.setCamera(fly.update(dt))` each frame; `opts` is live (bind speed / fov
 sliders to it). Yaw 0 looks down -Z. `look: 'drag'` holds the right button to
 look and leaves the left to the app; `'lock'` captures the pointer on click.
-Used by demos/terrain and demos/clipmap-terrain.
+Used by demos/terrain.
 
 **sky.js** — `skyEnvironment(scene, { hdri, intensity, rotation })` loads one
 of `HDRIS` (falls back to flat ambient); `sunDirection(elevationDeg,

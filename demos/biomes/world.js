@@ -8,7 +8,6 @@ import { swardModule } from "/lib/sward/index.js";
 import { treeModule, treeSpecies } from "/lib/trees/index.js";
 
 export const HALF = 700;          // half-size of the world (m)
-const CELL = 4;                   // ground cell (m)
 
 export const vp = sceneViewport('#stage', {
     orbit: { target: [0, 4, 0], dist: 60, fov: 50, near: 0.1, far: 6000, rot: orbitRotation(Math.PI * 0.75, -0.3) },
@@ -67,28 +66,20 @@ const DRY = fbm(1 / 0.02, 2, 3);
 const dryness = sampled(DRY);
 const herbPatches = sampled(affine(N('Value', { 'Feature Scale': 20, 'Seed Offset': 10 }), 0.5, 0.5));
 
+// The land: the height tree, and a surface from the same cover and dryness
+// trees as GLSL: meadow green to golden, forest floor to dark loam under
+// the trees.
 function buildGround() {
-    const n = Math.round((2 * HALF) / CELL) + 1;
-    // (Row by row: x along a row, z down the rows, as heightmapGrid reads it.)
-    const h = HEIGHT.genUniformGrid2D(-HALF, -HALF, n, n, CELL, SEED);
-    const mesh = Mesh.heightmapGrid(h, n, n, CELL);
-    const pos = mesh.positions;
-    const colors = new Float32Array((pos.length / 3) * 4);
-    for (let v = 0; v < pos.length / 3; v++) {
-        const x = pos[v * 3], z = pos[v * 3 + 2];   // (the grid is centred on the origin)
-        const cover = forestCover(x, z);
-        const dry = dryness(x, z);
-        // Meadow green to golden, forest floor to dark loam under the trees.
-        const r = 0.10 + 0.10 * dry, g = 0.15 + 0.06 * dry, b = 0.035;
-        colors[v * 4] = r * (1 - 0.55 * cover) + 0.05 * cover;
-        colors[v * 4 + 1] = g * (1 - 0.55 * cover) + 0.05 * cover;
-        colors[v * 4 + 2] = b * (1 - 0.3 * cover) + 0.025 * cover;
-        colors[v * 4 + 3] = 1;
-    }
-    mesh.colors = colors;
-    const node = scene.createMesh({ data: mesh, roughness: 0.95 });
-    node.receivesShadow = true;
-    return node;
+    const surface = COVER.glsl({ name: 'coverField' }) + DRY.glsl({ name: 'dryField' }) + `
+LandSurface landSurface(LandPoint q) {
+    float cover = coverField(q.p, LAND_SEED), dry = dryField(q.p, LAND_SEED);
+    vec3 open = vec3(0.10 + 0.10 * dry, 0.15 + 0.06 * dry, 0.035);
+    LandSurface s;
+    s.albedo = open * vec3(1.0 - 0.55 * cover, 1.0 - 0.55 * cover, 1.0 - 0.3 * cover) + vec3(0.05, 0.05, 0.025) * cover;
+    return s;
+}
+`;
+    return scene.createLand({ height: HEIGHT, seed: SEED, extent: HALF, surface });
 }
 
 // --- the plants ---------------------------------------------------------------------
