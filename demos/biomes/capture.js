@@ -15,7 +15,7 @@
 //   ... capture.js -- exposure [from=canopy] [to=flyover] [hold=5]
 //       cuts from one shot to another and back, logging every frame's
 //       metered EV, the EV applied and the exposure scale
-//   ... capture.js -- motion walk|fly|pan|sun|advance [frames=150] [base=<shot>] [far=1]
+//   ... capture.js -- motion walk|fly|pan|sun|advance|hold [frames=150] [base=<shot>] [far=1]
 //       walk: the glade at 1.4 m/s; fly: the flyover at 40 m/s; every frame's
 //       GPU ms and shadow pages (drawn, overlays, left wanted), and how many
 //       frames went over 2.78 ms. pan (the glade sidestepping at 0.5 m/s) and
@@ -25,7 +25,8 @@
 //       should not), the frames' change spikes, and two slit-scans
 //       (captures/biomes_motion_<kind>.png: a row a frame of a line of ground
 //       across the view at 6 m and 20 m); advance walks on at 3 m/s and
-//       reads the ground the same. base= starts from another shot; far=1
+//       reads the ground the same, and hold reads it with nothing moving at
+//       all (what changes then is noise). base= starts from another shot; far=1
 //       reads the ground 60-300 m out, the slit-scans at 80 m and 200 m (the
 //       cover's far tier); passes=<n> logs each frame's n dearest passes too
 import { sky, SHOTS, setShot, holdView, plants, SPECIES, MEADOW, groundHeight, scene, vp } from "/app/world.js";
@@ -245,15 +246,15 @@ if (mode === 'still') {
                     `scale ${c.exposureScale.toExponential(4)}`);
     }
 } else if (mode === 'motion') {
-    const kind = ['walk', 'fly', 'pan', 'sun', 'advance'].includes(argv[1]) ? argv[1] : 'walk';
+    const kind = ['walk', 'fly', 'pan', 'sun', 'advance', 'hold'].includes(argv[1]) ? argv[1] : 'walk';
     const frames = +(opt('frames') || 150);
     const base = SHOTS[opt('base')] ? opt('base') : kind === 'fly' ? 'flyover' : 'glade';
     const E = SHOTS[base].eye(), L = SHOTS[base].look();
     const flat = Math.hypot(L[0] - E[0], L[2] - E[2]);
     const fwd = [(L[0] - E[0]) / flat, 0, (L[2] - E[2]) / flat], side = [-fwd[2], 0, fwd[0]];
-    const speed = { walk: 1.4, fly: 40, pan: 0.5, sun: 0, advance: 3 }[kind] / fps;
+    const speed = { walk: 1.4, fly: 40, pan: 0.5, sun: 0, advance: 3, hold: 0 }[kind] / fps;
     const dir = kind === 'pan' ? side : fwd;
-    const temporal = kind === 'pan' || kind === 'sun' || kind === 'advance';
+    const temporal = kind === 'pan' || kind === 'sun' || kind === 'advance' || kind === 'hold';
     // far=1: the ground read 60-300 m out (the cover's far tier), the
     // slit-scans at 80 m and 200 m.
     const far = !!opt('far');
@@ -270,9 +271,13 @@ if (mode === 'still') {
         const x = E[0] + fwd[0] * a + side[0] * s, z = E[2] + fwd[2] * a + side[2] * s;
         return [x, groundHeight(x, z), z];
     };
-    const points = [];
-    if (far) for (let a = 60; a <= 300; a += 6) for (let s = -0.3 * a; s <= 0.3 * a; s += 0.015 * a) points.push(ground(a, s));
-    else for (let a = 3; a <= 30; a += 0.75) for (let s = -8; s <= 8; s += 0.5) points.push(ground(a, s));
+    const points = [], at = [];
+    if (far) for (let a = 60; a <= 300; a += 6) for (let s = -0.3 * a; s <= 0.3 * a; s += 0.015 * a) { points.push(ground(a, s)); at.push(a); }
+    else for (let a = 3; a <= 30; a += 0.75) for (let s = -8; s <= 8; s += 0.5) { points.push(ground(a, s)); at.push(a); }
+    // The change by distance ahead: where a hand-over's pops are.
+    const edges = far ? [60, 100, 160, 301] : [3, 10, 20, 31];
+    const bands = edges.slice(1).map((to, b) => ({ from: edges[b], to, sum: 0, n: 0, pops: 0 }));
+    const bandOf = at.map((a) => bands.findIndex((b) => a < b.to));
     const SLIT = 512, lines = (far ? [80, 200] : [6, 20]).map((a) => Array.from({ length: SLIT },
         (_, k) => ground(a, (far ? 0.3 * a : 6) * (-1 + 2 * k / (SLIT - 1)))));
     const rect = vp.canvas.getBoundingClientRect();
@@ -311,7 +316,11 @@ if (mode === 'still') {
             let e = 0, n = 0;
             for (let k = 0; k < points.length; k++) {
                 const v = lum(img, points[k]);
-                if (v >= 0 && prev[k] >= 0) { const d = Math.abs(v - prev[k]); deltas.push(d); e += d; n++; }
+                if (v >= 0 && prev[k] >= 0) {
+                    const d = Math.abs(v - prev[k]), b = bands[bandOf[k]];
+                    deltas.push(d); e += d; n++;
+                    b.sum += d; b.n++; if (d > 16) b.pops++;
+                }
                 prev[k] = v;
             }
             if (i > 0) energy.push(n ? e / n : 0);
@@ -345,12 +354,16 @@ if (mode === 'still') {
         console.log(`motion ${kind}: ground change a point a frame mean ${em.toFixed(3)} (spike ${emax.toFixed(3)}, ` +
                     `${(emax / em).toFixed(2)}x), p50 ${q(0.5).toFixed(2)} p99 ${q(0.99).toFixed(2)} p99.9 ${q(0.999).toFixed(2)} ` +
                     `max ${deltas[deltas.length - 1].toFixed(1)}, ${pops} of ${deltas.length} over 16`);
-        const canvas = document.createElement('canvas');
-        canvas.width = SLIT * 2 + 8; canvas.height = frames;
-        const ctx = canvas.getContext('2d');
-        scans.forEach((s, li) => ctx.putImageData(s, li * (SLIT + 8), 0));
+        console.log(`motion ${kind}: by distance ` + bands.map((b) =>
+            `${b.from}-${Math.floor(b.to)} m ${(b.sum / Math.max(b.n, 1)).toFixed(3)} (${(1000 * b.pops / Math.max(b.n, 1)).toFixed(1)}/1000 over 16)`).join(', '));
+        // The slit-scans side by side, a row a frame.
+        const W = SLIT * 2 + 8, out = new Uint8Array(W * frames * 4);
+        for (let i = 3; i < out.length; i += 4) out[i] = 255;
+        scans.forEach((s, li) => {
+            for (let y = 0; y < frames; y++) out.set(s.data.subarray(y * SLIT * 4, (y + 1) * SLIT * 4), (y * W + li * (SLIT + 8)) * 4);
+        });
         const file = `${OUT}/biomes_motion_${kind}${opt('tag') ? '_' + opt('tag') : ''}.png`;
-        screenshot(file, canvas);
+        bro.image.encodePngFile(file, out, W, frames, 4);
         console.log(`motion ${kind}: ${file}`);
     }
 } else if (mode === 'strip') {
