@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>planet</title>
+    <link rel="stylesheet" href="/lib/kit/kit.css">
+    <style>
+        #shots { display: flex; flex-wrap: wrap; gap: 3px; }
+        .help { color: var(--k-dim); font-size: 11px; }
+        body.clean .k-header, body.clean .k-side, body.clean .k-statusbar { display: none; }
+    </style>
+</head>
+<body class="k-app">
+    <header class="k-header">
+        <h1>planet</h1>
+        <span class="k-sub">an Earth-sized world, from orbit to the ground as one place</span>
+    </header>
+    <div class="k-body">
+        <aside class="k-side">
+            <div class="k-panel">
+                <h2>View</h2>
+                <div id="shots"></div>
+            </div>
+            <div class="help">Drag orbits · right-drag pans · wheel zooms.</div>
+        </aside>
+        <main class="k-main">
+            <div class="k-viewport"><canvas id="stage"></canvas></div>
+        </main>
+    </div>
+    <footer class="k-statusbar">
+        <span id="status"></span>
+    </footer>
+    <script type="module" src="/app/main.js"></script>
+</body>
+</html>

@@ -77,6 +77,7 @@
         { "dir": "demos/parakeet-lab" },
         { "dir": "demos/physics-playground" },
         { "dir": "demos/pixart-lab" },
+        { "dir": "demos/planet" },
         { "dir": "demos/plant-recipes" },
         { "dir": "demos/platform-lab" },
         { "dir": "demos/qwen-asr-lab" },
