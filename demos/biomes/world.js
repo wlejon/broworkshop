@@ -176,6 +176,7 @@ export const grass = scene.createGrass({
 });
 export const plants = scene.createPlants({
     module: treeModule(), species: SPECIES.map(treeSpecies), rules: rules(), receivesShadow: true,
+    land: ground,
 });
 plants.castsShadow = true;
 
