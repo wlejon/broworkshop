@@ -29,7 +29,9 @@
 //       all (what changes then is noise). base= starts from another shot; far=1
 //       reads the ground 60-300 m out, the slit-scans at 80 m and 200 m (the
 //       cover's far tier); passes=<n> logs each frame's n dearest passes too
-//   msaa=<n> (any mode) multisamples the scene
+//   msaa=<n> (any mode) multisamples the scene; target=<ms> (any mode) is the
+//   frame's GPU target, 2.78 by default (16.7 for a 60 fps machine), that
+//   the world service budgets under and the overs are counted against
 import { sky, SHOTS, setShot, holdView, plants, SPECIES, MEADOW, groundHeight, scene, vp } from "/app/world.js";
 
 const argv = (bro.app && bro.app.argv) || [];
@@ -47,6 +49,9 @@ for (const k of ['pixels', 'minElements', 'woodRange', 'range', 'shadowTexels', 
     if (opt(k) !== undefined) plants.setPlants({ [k]: +opt(k) });
 // The probe grid, for A/Bs: probes=0 lights the ambient by the open sky.
 if (opt('probes') !== undefined) scene.setProbeGrid(opt('probes') !== '0');
+// The frame's GPU target (ms): 16.7 measures a 60 fps machine.
+const TARGET = +(opt('target') || 2.78);
+scene.setFrameTarget(TARGET);
 
 document.body.classList.add('clean');
 bro.menu.hide();
@@ -226,10 +231,10 @@ if (mode === 'still') {
         advanceTime(1000 / fps);
         const ms = perf.gpuFrameMs();
         const c = row(i, ms);
-        if (ms > 2.78) over++;
+        if (ms > TARGET) over++;
         if (settled < 0 && c.groundLayerMissing === 0) settled = i;
     }
-    console.log(`jump: ${over} of ${frames} frames over 2.78 ms; the turf settled at frame ${settled}`);
+    console.log(`jump: ${over} of ${frames} frames over ${TARGET} ms; the turf settled at frame ${settled}`);
 } else if (mode === 'exposure') {
     // The eye adapting: holds <from>, cuts to <to>, holds, cuts back, every
     // frame's metered EV, the EV applied and the scale (scene.cullStats,
@@ -314,7 +319,7 @@ if (mode === 'still') {
         const c = scene.cullStats() || {};
         ms.push(g);
         drawn.push(c.shadowPagesDrawn);
-        if (g > 2.78) over++;
+        if (g > TARGET) over++;
         if (temporal) {
             let e = 0, n = 0;
             for (let k = 0; k < points.length; k++) {
@@ -347,7 +352,7 @@ if (mode === 'still') {
     const mean = sorted.reduce((a, b) => a + b, 0) / Math.max(sorted.length, 1);
     const dmean = drawn.reduce((a, b) => a + b, 0) / drawn.length;
     console.log(`motion ${kind}: GPU mean ${mean.toFixed(2)} median ${sorted[sorted.length >> 1].toFixed(2)} ` +
-                `max ${sorted[sorted.length - 1].toFixed(2)} ms, ${over} of ${frames} frames over 2.78 ms; ` +
+                `max ${sorted[sorted.length - 1].toFixed(2)} ms, ${over} of ${frames} frames over ${TARGET} ms; ` +
                 `pages drawn a frame mean ${dmean.toFixed(1)} max ${Math.max(...drawn)}`);
     if (temporal) {
         deltas.sort((a, b) => a - b);
