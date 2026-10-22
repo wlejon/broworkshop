@@ -105,7 +105,7 @@ export const SPECIES = [
     // 3 a shrub.
     { height: 1.8, base: 0.05, radius: 1.3, shape: 0.0, lobes: 7, lobeSize: 0.55, leafLength: 0.18, leafWidth: 0.55,
       elements: 1600, trunk: 0.04, spread: 0.6, droop: 0.1,
-      light: [0.27, 0.40, 0.08], dark: [0.04, 0.08, 0.025], hueVariety: 0.35, glow: 0.8, glowColor: [1.0, 0.9, 0.35],
+      light: [0.17, 0.30, 0.10], dark: [0.03, 0.07, 0.03], hueVariety: 0.35, glow: 0.8, glowColor: [0.9, 0.95, 0.4],
       bark: [0.12, 0.09, 0.07], density: 0.7 },
     // 4 an oak-like tree: broad and low, its crown a few big dark lobes,
     // bluer than the broadleaf.
