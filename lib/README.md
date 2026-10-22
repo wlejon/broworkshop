@@ -27,6 +27,7 @@ its usage in the file's header comment.
 | `crosshair.js` | screen-centre reticle overlay (bloom, ADS) | games/fps, demos/terrain |
 | `system-menu.js` | `bro.menu` bar: File, View, Debug (inspector, perf HUD) | kit/app.js `boot()`, games/torque, the hands-off speech/image labs |
 | `sweep-runner.js` | content-addressed parameter sweeps rendered to disk | demos/krea2-lab |
+| `herbs/` | a grass node's herb module (GLSL the engine compiles into its cover shaders): broflora's herb species grown, swayed and cut per pixel | demos/biomes |
 
 `system-menu.js` and `sweep-runner.js` would belong in the kit, but the
 hands-off labs import them by these paths; they move when those labs do.

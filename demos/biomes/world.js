@@ -3,6 +3,7 @@
 // plants node: species described here, every plant built on the GPU.
 import { sceneViewport, orbitRotation } from "/lib/kit/viewport3d.js";
 import { daylight, SKY } from "/lib/kit/sky.js";
+import { herbModule } from "/lib/herbs/index.js";
 
 export const HALF = 700;          // half-size of the world (m)
 const CELL = 4;                   // ground cell (m)
@@ -180,7 +181,7 @@ export const grass = scene.createGrass({
     tall: (x, z) => 0.8 + 0.6 * (1 - dryness(x, z)),
     floor: (x, z) => forestCover(x, z),
     herbs: {
-        species: ['bracken', 'woodsorrel', { preset: 'daisy', abundance: 1.5 }, 'poppy'],
+        ...herbModule({ species: ['bracken', 'woodsorrel', { preset: 'daisy', abundance: 1.5 }, 'poppy'] }),
         density: (x, z, y, canopy) => 0.25 + 0.6 * herbPatches(x, z),
     },
 });
