@@ -29,6 +29,7 @@
 //       all (what changes then is noise). base= starts from another shot; far=1
 //       reads the ground 60-300 m out, the slit-scans at 80 m and 200 m (the
 //       cover's far tier); passes=<n> logs each frame's n dearest passes too
+//   msaa=<n> (any mode) multisamples the scene
 import { sky, SHOTS, setShot, holdView, plants, SPECIES, MEADOW, groundHeight, scene, vp } from "/app/world.js";
 
 const argv = (bro.app && bro.app.argv) || [];
@@ -50,6 +51,7 @@ if (opt('probes') !== undefined) scene.setProbeGrid(opt('probes') !== '0');
 document.body.classList.add('clean');
 flush();
 sky.apply(opt('sky') || 'afternoon');
+if (opt('msaa')) scene.setMSAA(+opt('msaa'));
 // The plants are placed about the eye on the engine's threads: the first
 // shot waits for the world in reach.
 {
