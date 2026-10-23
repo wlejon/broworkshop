@@ -1,15 +1,17 @@
 // The planet world: an Earth-sized body whose land is made by its processes
-// (plates and their belts, the continents on them, how far each place is
-// from the sea) over a FastNoise tree of the fine relief, and whose surface
-// is what that climate grows. The views and the capture script share it.
+// (terrain.js: plates and their belts, the continents on them, the rivers
+// that drain and carve them, the climate) over a FastNoise tree of the fine
+// relief, and whose surface is what that climate grows. The views and the
+// capture script share it.
 import { sceneViewport, orbitRotation, Camera } from "/lib/kit/viewport3d.js";
 import { SUN_LUX, AIR } from "/lib/kit/sky.js";
 import { herbModule } from "/lib/herbs/index.js";
 import { swardModule } from "/lib/sward/index.js";
 import { treeModule, treeSpecies } from "/lib/trees/index.js";
 import { TEMPERATE, BROADLEAF, BIRCH, CONIFER, SHRUB, OAK, LIME } from "/lib/trees/temperate.js";
+import { R, SEED, N, add, mul, fbm, TREE, PROCESSES, ARGV } from "/app/terrain.js";
 
-export const R = 6371000;
+export { R };
 
 export const vp = sceneViewport('#stage', {
     // (Yaw about the view's own up: the globe turns under a drag from any side.)
@@ -18,162 +20,6 @@ export const vp = sceneViewport('#stage', {
     controls: { orbitButton: 0, panButton: 2, minDist: 2, maxDist: 6e7, zoomRate: 0 },
 });
 export const { scene } = vp;
-
-// --- noise ---------------------------------------------------------------------------
-
-const SEED = 2024;
-const N = (type, props = {}) => {
-    const n = FastNoise.create(type);
-    for (const k in props) n.set(k, props[k]);
-    return n;
-};
-const add = (a, b) => N('Add', { LHS: a, RHS: b });
-const mul = (a, b) => N('Multiply', { LHS: a, RHS: b });
-const fbm = (scale, octaves, seed, gain = 0.5) =>
-    N('FractalFBm', { Source: N('Simplex', { 'Feature Scale': scale, 'Seed Offset': seed }), Octaves: octaves,
-                      Lacunarity: 2.03, Gain: gain });
-const ridged = (scale, octaves, seed) =>
-    N('FractalRidged', { Source: N('Simplex', { 'Feature Scale': scale, 'Seed Offset': seed }), Octaves: octaves,
-                         Lacunarity: 2.07, Gain: 0.5 });
-
-// The fine relief, scaled by the processes (channel 0's y): rolling hills
-// and the ridges a range carries, about a metre an amplitude unit. The
-// ridges are only the coarse octaves' (down to 2 km): a ridged octave's
-// every crest is a crease, and fine ones lay a hillside in crests tens of
-// metres apart, its light in contour lines; below them the relief is fbm's.
-const TREE = add(add(mul(fbm(60000, 9, 0), 420), mul(ridged(18000, 4, 1), 520)),
-                 add(mul(fbm(1500, 5, 2), 25), mul(fbm(200, 4, 3), 2.5)));
-
-// --- the plates ------------------------------------------------------------------------
-
-const PLATES = 24;
-function plates(seed) {
-    let s = seed >>> 0;
-    const rnd = () => {   // mulberry32
-        s = (s + 0x6D2B79F5) >>> 0;
-        let t = s;
-        t = Math.imul(t ^ (t >>> 15), t | 1);
-        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
-    const unit = () => {
-        for (;;) {
-            const v = [rnd() * 2 - 1, rnd() * 2 - 1, rnd() * 2 - 1];
-            const l = Math.hypot(v[0], v[1], v[2]);
-            if (l > 0.1 && l <= 1) return v.map((x) => x / l);
-        }
-    };
-    const data = [];
-    // Centres, w: 1 a continental plate, 0 an oceanic one (about a third
-    // continental, as Earth's land is).
-    for (let i = 0; i < PLATES; i++) data.push(...unit(), rnd() < 0.36 ? 1 : 0);
-    // Each plate's turn about its pole (radians a unit time).
-    for (let i = 0; i < PLATES; i++) {
-        const a = unit(), w = 0.4 + rnd();
-        data.push(a[0] * w, a[1] * w, a[2] * w, 0);
-    }
-    return data;
-}
-
-const WARP = fbm(2.2e6, 4, 7);
-const CONTINENT = fbm(3.0e6, 6, 9, 0.55);
-
-const PROCESSES = {
-    resolution: 512, channels: 2, data: plates(SEED),
-    source: WARP.glsl({ name: 'warpNoise', dims: [3] }) + CONTINENT.glsl({ name: 'continentNoise', dims: [3] }) + `
-const int PLATES = ${PLATES};
-const float R = ${R}.0;
-
-// Channel 0: the land's height over its tree (x added, y the tree's scale).
-// Channel 1: x the ground's own height (under the sea too), y how near a
-// range it is (0 .. 1), z how far inland (0 the coast .. 1 a continent's
-// heart), w how wet (0 desert .. 1 rainforest).
-
-vec3 warped(vec3 d) {
-    vec3 p = d * R;
-    vec3 w = vec3(warpNoise(p, 11), warpNoise(p + vec3(5.2e6, 1.3e6, 0.0), 12), warpNoise(p - vec3(2.1e6, 0.0, 4.4e6), 13));
-    return normalize(d + 0.16 * w);
-}
-
-void procInit(inout vec4 v[PROC_CHANNELS]) {
-    vec3 d = procUp();
-    vec3 q = warped(d);
-    // The nearest plate and the next: the boundary between them is where
-    // their centres are equally near.
-    int a = 0, b = 1;
-    float da = -2.0, db = -2.0;
-    for (int i = 0; i < PLATES; ++i) {
-        float t = dot(q, procData(i).xyz);
-        if (t > da) { db = da; b = a; da = t; a = i; }
-        else if (t > db) { db = t; b = i; }
-    }
-    float toEdge = 0.5 * (acos(clamp(db, -1.0, 1.0)) - acos(clamp(da, -1.0, 1.0))) * R;   // metres
-    vec3 ca = procData(a).xyz, cb = procData(b).xyz;
-    // The plates' motion where they meet: closing (> 0) or opening.
-    vec3 across = normalize((cb - ca) - q * dot(cb - ca, q));
-    vec3 va = cross(procData(PLATES + a).xyz, q), vb = cross(procData(PLATES + b).xyz, q);
-    float closing = dot(va - vb, across);
-    float ka = procData(a).w, kb = procData(b).w;
-
-    // The continents: a continental plate's ground, an oceanic plate's
-    // abyss with islands where the noise is strongest, the two blended over
-    // a wide band about their boundary (a boundary is a great circle: a
-    // coast along it would run ruler-straight), the margins the continental
-    // noise's.
-    float n = continentNoise(d * R, 21);
-    float kind = mix(0.5 * (ka + kb), ka, smoothstep(0.0, 900000.0, toEdge));
-    float land = mix(n * 1.3 - 0.55, n * 1.1 + 0.32, kind);
-
-    // The belts, a Gaussian about the boundary, as the plates meet.
-    float belt = exp(-pow(toEdge / 220000.0, 2.0));
-    float near = exp(-pow(toEdge / 480000.0, 2.0));
-    float rise = 0.0;
-    if (closing > 0.0) {
-        float c = clamp(closing, 0.0, 1.0);
-        if (ka > 0.5 && kb > 0.5) rise = 3000.0 * c * belt + 500.0 * c * near;   // a collision: range and plateau
-        else if (ka > 0.5) rise = 2600.0 * c * exp(-pow((toEdge - 180000.0) / 180000.0, 2.0));   // a cordillera inland of a trench
-        else if (kb > 0.5) rise = -3000.0 * c * belt;                                           // the trench
-        else rise = 1200.0 * c * belt;                                                          // an island arc
-    } else {
-        float o = clamp(-closing, 0.0, 1.0);
-        rise = ka > 0.5 && kb > 0.5 ? -600.0 * o * belt : 1600.0 * o * belt;                    // a rift, a mid-ocean ridge
-    }
-
-    // Hypsometry: lowlands most of the land, the abyss most of the sea, the
-    // shelf between.
-    float ground = land > 0.0 ? 40.0 + 900.0 * pow(land, 1.8) : -140.0 - 4300.0 * smoothstep(0.0, 0.35, -land);
-    ground += rise * (land > -0.15 ? 1.0 : 0.6);
-    float range = clamp(rise / 2600.0, 0.0, 1.0);
-
-    // The tree's detail rides on the land: little on the plains, the most on
-    // a range, fading out down the shelf (the abyss is smooth under the sea).
-    v[0].x = ground;
-    v[0].y = (0.25 + 0.35 * clamp(land, 0.0, 1.0) + 2.4 * range) * smoothstep(-400.0, -40.0, ground);
-    // How far inland: the continental field over the coast's level.
-    v[1] = vec4(ground, range, clamp(land / 0.6, 0.0, 1.0), 0.0);
-
-    // The climate the plants stand by (channel 0's z and w: their rules
-    // read them), as the surface reckons it: warm or cold by latitude and
-    // height, wet or dry by the air's belts and the sea's reach. z the
-    // woods' share (thick where the surface is forest, scattered over wet
-    // grassland, none in the sea), w how cold it is (the conifers' share).
-    float lat = asin(clamp(d.y, -1.0, 1.0)), sl = sin(lat);
-    float temp = 28.0 - 44.0 * sl * sl - 6.5 * max(ground, 0.0) / 1000.0;
-    // Wet at the equator and the westerlies' latitudes, dry under the
-    // subtropical highs and at the poles, wetter near the sea; and along a
-    // belt its weather's own wandering (a monsoon coast, a rain shadow), the
-    // warp's noise a continent across. Channel 1's w: the surface reads it.
-    float belts = 0.68 + 0.36 * cos(lat * 6.0) - 0.25 * smoothstep(0.75, 1.2, abs(lat));
-    float wander = 0.3 * warpNoise(d * R + vec3(3.3e6, -2.7e6, 1.9e6), 14);
-    float wet = clamp((belts + wander) * (1.15 - 0.6 * v[1].z), 0.0, 1.0);
-    v[1].w = wet;
-    float warm = smoothstep(-2.0, 6.0, temp);
-    float woods = max(smoothstep(0.5, 0.75, wet), 0.2 * smoothstep(0.3, 0.5, wet)) * warm * (1.0 - 0.7 * range);
-    v[0].z = ground > 0.0 ? woods : 0.0;
-    v[0].w = smoothstep(13.0, 4.0, temp);
-}
-`,
-};
 
 // --- the surface ----------------------------------------------------------------------
 
@@ -203,7 +49,7 @@ LandSurface landSurface(LandPoint q) {
     // at their mean in its height), as each line's spread over it: a far
     // range's crests are a share of snow, not snow or rock texel by texel.
     float fp = q.footprint;
-    float hidden = landGrid(0, q.at).y * (420.0 * min(fp / 60000.0, 1.0) + 520.0 * min(fp / 18000.0, 1.0) +
+    float hidden = landGrid(0, q.at).y * (160.0 * min(fp / 15000.0, 1.0) +520.0 * min(fp / 18000.0, 1.0) +
                                           25.0 * min(fp / 1500.0, 1.0));
     float spread = 6.5 * share * hidden / 1000.0;
     #define COLD(warm, cold) smoothstep((warm) + spread, (cold) - spread, temp)
@@ -227,6 +73,10 @@ LandSurface landSurface(LandPoint q) {
     // bare only on the near-sheer faces (a crest's every crease flecked
     // dark where it gave way at the rock's own slope).
     c = mix(c, snow, COLD(-8.0, -14.0) * (1.0 - smoothstep(0.65, 0.9, steep)));
+#ifdef DRAINAGE
+    // (The rivers' catchments: blue from 1000 km² to a million.)
+    c = mix(vec3(0.3, 0.28, 0.25), vec3(0.0, 0.05, 0.5), smoothstep(3.0, 6.0, log(max(landGrid(3, q.at).w, 1.0)) / log(10.0)));
+#endif
     LandSurface s = landSurfaceOf(c);
     float grows = smoothstep(0.15, 0.45, wet) * WARM(-4.0, 4.0) * (1.0 - smoothstep(0.3, 0.55, steep));
     s.cover = vec4(grows, 1.0 - smoothstep(0.15, 0.5, wet), 0.6 + 0.6 * wet, smoothstep(0.55, 0.8, wet) * grows);
@@ -245,7 +95,7 @@ export const START = (() => {
 })();
 scene.setBody({ radius: R, at: START });
 
-export const land = scene.createLand({ height: TREE, seed: SEED, surface: SURFACE, processes: PROCESSES, sea: { level: 0, absorb: [0.6, 0.18, 0.12] } });
+export const land = scene.createLand({ height: TREE, seed: SEED, surface: (ARGV.includes('drainage') ? '#define DRAINAGE\n' : '') + SURFACE, processes: PROCESSES, sea: { level: 0, absorb: [0.6, 0.18, 0.12] } });
 
 // --- the plants -------------------------------------------------------------------------
 
