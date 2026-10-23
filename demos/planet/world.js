@@ -448,7 +448,7 @@ vec4 cloudCover(vec3 up) {
     // Fair weather's cumulus over temperate land that is not dry: the
     // summer afternoon's fields of them, the sky between.
     float fair = (1.0 - sea) * smoothstep(0.25, 0.6, g.w) * smoothstep(0.3, 0.5, al) * (1.0 - smoothstep(0.95, 1.15, al));
-    cover = max(cover, 0.45 * fair * (0.7 + 0.8 * (f - 0.5)));
+    cover = max(cover, 0.52 * fair * (0.7 + 0.8 * (f - 0.5)));
     // Heaped where the air is convective (warm, the rain belt, the trades,
     // fair weather), in slabs in the fronts, the lows' hearts and the decks.
     float convect = clamp(1.2 * (1.0 - smoothstep(0.35, 0.7, al)) + fair - 1.2 * heart - 1.5 * front - 1.5 * sc + 0.3 * (f - 0.5), 0.0, 1.0);
