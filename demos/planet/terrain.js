@@ -77,6 +77,8 @@ const RELIEF = fbm(60000, 2, 0);
 const ROUTE = 640, ERODE = 1408;
 const DBGI = ARGV.find((s) => s.startsWith('rit='));
 const REGION_ROUTE = DBGI ? +DBGI.slice(4).split(',')[0] : 320, REGION_ERODE = DBGI ? +DBGI.slice(4).split(',')[1] : 384;
+// (The regions' lift: iterations of its spread, regionLift.)
+const REGION_LIFT = 128;
 
 export const PROCESSES = {
     resolution: 512, channels: 4, data: plates(SEED),
@@ -87,7 +89,7 @@ export const PROCESSES = {
     regions: ARGV.includes('noregions') ? undefined : {
         init: 'regionInit', cells: 512, apron: 32, cell: 64, ratio: 4, levels: 4, reach: 1, keep: 2,
         passes: [{ fn: 'regionRoute', iterations: REGION_ROUTE }, { fn: 'regionErode', iterations: REGION_ERODE },
-                 { fn: 'regionSettle' }],
+                 { fn: 'regionLift', iterations: REGION_LIFT }, { fn: 'regionSettle' }],
     },
     source: WARP.glsl({ name: 'warpNoise', dims: [3] }) + CONTINENT.glsl({ name: 'continentNoise', dims: [3] }) +
             RELIEF.glsl({ name: 'reliefNoise', dims: [3] }) +
@@ -368,18 +370,37 @@ void regionInit(inout vec4 v[PROC_CHANNELS]) {
 void regionRoute(inout vec4 v[PROC_CHANNELS]) { flow(v, false, v[3].x, 0.0, -1e9); }
 void regionErode(inout vec4 v[PROC_CHANNELS]) { flow(v, true, v[3].x, KS_PLAIN + KS_RANGE * v[1].y, v[3].y); }
 
+// The ground the carving took, lifted back as the crust under it rises
+// (isostasy): what each cell lost (channel 1's x, the band's ground, until
+// now) spread over the cells about it, LIFT iterations of the mean of a cell
+// and its four neighbours (some ten cells, a few of the coarser field's),
+// and added back in regionSettle. So a level's valleys are cut and its
+// ridges stand higher, but its ground keeps the coarser field's mean: the
+// lines the surface draws by height (the snow, the tree line) are where the
+// coarser field draws them, in the regions as past them. (Carved and left,
+// a range's ground lay some 150 to 250 m under the global grid's, its snow
+// a patchwork of the regions' squares from the limb.)
+void regionLift(inout vec4 v[PROC_CHANNELS]) {
+    if (procIteration() == 0) {
+        v[1].x = v[2].x > 0.0 && procBorder() > 0 ? max(v[1].x - v[2].x, 0.0) : 0.0;
+        return;
+    }
+    v[1].x = (v[1].x + procRead(1, ivec2(-1, 0)).x + procRead(1, ivec2(1, 0)).x + procRead(1, ivec2(0, -1)).x +
+              procRead(1, ivec2(0, 1)).x) / 5.0;
+}
+
 void regionSettle(inout vec4 v[PROC_CHANNELS]) {
     // (The carved ground, not the water's level: a band's hollows the
     // region's iterations did not drain stay hollows; as lake plains they
     // were flat sheets cut square along the cells, kilometres across.)
-    float ground = v[2].x;
-    ground = max(ground, v[3].z);   // (the creep may have taken it under its floor)
+    float carved = max(v[2].x, v[3].z);   // (the creep may have taken it under its floor)
+    float ground = carved > 0.0 ? carved + v[1].x : carved;
     float cell = procCellSize();
     // (Its own drainage: the coarser field's, its seed, is that field's cells
     // smeared over a few of this one's each, a river kilometres wide
     // drawn as wet ground square along a region's edges. And none on a
     // hollow's floor, which is its pool's water spread, the whole pool's.)
-    float area = (v[3].w - ground > 1.0 ? 1.0 : v[2].y) * cell * cell * 1e-6;
+    float area = (v[3].w - carved > 1.0 ? 1.0 : v[2].y) * cell * cell * 1e-6;
     v[0].x = ground;
     v[1].x = ground;
     v[1].z = area;

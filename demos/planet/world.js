@@ -45,15 +45,20 @@ LandSurface landSurface(LandPoint q) {
     // and tundra blob by blob from orbit.
     float share = smoothstep(0.3, 0.7, g.y);
     float temp = 28.0 - 44.0 * sl * sl - 6.5 * mix(max(g.x, 0.0), h, share) / 1000.0;
-    // The relief a texel this wide hides (the tree's grain and the regions'
-    // bands finer than it, at their mean in its height: terrain.js), as each
-    // line's spread over it: a far range's crests are a share of snow, not
-    // snow or rock texel by texel.
+    // The relief the height here lacks, as each line's spread over it: the
+    // tree's grain a texel this wide holds at its mean, and each regional
+    // level's band (terrain.js) as far as the level is not in here (past
+    // the regions about the eye, or read by a texel wider than its cells),
+    // so a far range's crests are a share of snow, not snow or rock texel
+    // by texel, and the land past the regions is the same share as the land
+    // in them seen from as far.
     float fp = q.footprint;
-    #define HIDES(cell, amp) ((amp) * smoothstep(1.0, 2.0, fp / (cell)))
-    float hidden = landGrid(0, q.at).y * (3.0 * min(fp / 120.0, 1.0) + HIDES(64.0, 30.0) + HIDES(256.0, 120.0) +
-                                          HIDES(1024.0, 330.0) + HIDES(4096.0, 520.0));
-    float spread = 6.5 * share * hidden / 1000.0;
+    #define LACKS(level, amp) ((amp) * (1.0 - landGridCover(level, q.at)))
+    // (The tree's grain only where the temperature reads h, a range; the
+    // bands wherever: the regions' ground, g.x, carries them too.)
+    float hidden = landGrid(0, q.at).y * (3.0 * share * min(fp / 120.0, 1.0) + LACKS(0, 30.0) + LACKS(1, 120.0) +
+                                          LACKS(2, 330.0) + LACKS(3, 520.0));
+    float spread = 6.5 * hidden / 1000.0;
     #define COLD(warm, cold) smoothstep((warm) + spread, (cold) - spread, temp)
     #define WARM(cold, warm) smoothstep((cold) - spread, (warm) + spread, temp)
     // The processes' (the plants' woods read the same), and wetter down the
