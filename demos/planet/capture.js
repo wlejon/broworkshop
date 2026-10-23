@@ -41,7 +41,8 @@ if (mode === 'still') {
         for (let i = 0; i < 600 && plants.plantPlacement()?.pending > 0; i++) advanceTime(1000 / fps);
         step(0.5);
         screenshot(`${OUT}/planet_${shot}.png`);
-        console.log(`${shot}: captures/planet_${shot}.png ${JSON.stringify(land.landStats())}`);
+        const cs = scene.cullStats();
+        console.log(`${shot}: captures/planet_${shot}.png ev ${cs.exposureEv?.toFixed(2)} (metered ${cs.meteredEv?.toFixed(2)})${JSON.stringify(land.landStats())}`);
     }
 } else if (mode === 'cost') {
     for (const shot of shotsOf(argv[1])) {

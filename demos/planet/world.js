@@ -183,7 +183,22 @@ LandSurface landSurface(LandPoint q) {
         return landSurfaceOf(mix(vec3(0.16, 0.14, 0.10), vec3(0.05, 0.05, 0.045), smoothstep(5.0, 120.0, -h)));
     }
     float sl = sin(lat);
-    float temp = 28.0 - 44.0 * sl * sl - 6.5 * h / 1000.0;
+    // The air's temperature cools with the height of the broad ground, the
+    // processes': the relief's few hundred metres over it moved every line
+    // drawn from it (tree line, tundra, snow) degrees either way, blob by
+    // blob, a far land mottled from edge to edge. A range keeps its own
+    // heights: snow on its crests and a tree line up its flanks.
+    float share = mix(0.3, 1.0, smoothstep(0.1, 0.5, g.y));
+    float temp = 28.0 - 44.0 * sl * sl - 6.5 * mix(max(g.x, 0.0), h, share) / 1000.0;
+    // The relief a texel this wide hides (the tree's octaves finer than it,
+    // at their mean in its height), as each line's spread over it: a far
+    // range's crests are a share of snow, not snow or rock texel by texel.
+    float fp = q.footprint;
+    float hidden = landGrid(0, q.at).y * (420.0 * min(fp / 60000.0, 1.0) + 520.0 * min(fp / 18000.0, 1.0) +
+                                          25.0 * min(fp / 1500.0, 1.0));
+    float spread = 6.5 * share * hidden / 1000.0;
+    #define COLD(warm, cold) smoothstep((warm) + spread, (cold) - spread, temp)
+    #define WARM(cold, warm) smoothstep((cold) - spread, (warm) + spread, temp)
     // Wet at the equator and the westerlies' latitudes, dry under the
     // subtropical highs and at the poles; wetter near the sea.
     float belts = 0.6 + 0.4 * cos(lat * 6.0) - 0.25 * smoothstep(0.75, 1.2, abs(lat));
@@ -195,12 +210,15 @@ LandSurface landSurface(LandPoint q) {
     vec3 snow = vec3(0.80, 0.82, 0.86);
     vec3 c = mix(desert, steppe, smoothstep(0.12, 0.3, wet));
     c = mix(c, grass, smoothstep(0.3, 0.5, wet));
-    c = mix(c, forest, smoothstep(0.5, 0.75, wet) * smoothstep(-2.0, 6.0, temp));
-    c = mix(c, tundra, smoothstep(2.0, -6.0, temp));
+    c = mix(c, forest, smoothstep(0.5, 0.75, wet) * WARM(-2.0, 6.0));
+    c = mix(c, tundra, COLD(2.0, -6.0));
     c = mix(c, rock, smoothstep(0.25, 0.5, steep));
-    c = mix(c, snow, smoothstep(-6.0, -12.0, temp) * (1.0 - smoothstep(0.5, 0.8, steep)));
+    // Snow where the year is cold through: an ice sheet buries its relief,
+    // bare only on the near-sheer faces (a crest's every crease flecked
+    // dark where it gave way at the rock's own slope).
+    c = mix(c, snow, COLD(-8.0, -14.0) * (1.0 - smoothstep(0.65, 0.9, steep)));
     LandSurface s = landSurfaceOf(c);
-    float grows = smoothstep(0.15, 0.45, wet) * smoothstep(-4.0, 4.0, temp) * (1.0 - smoothstep(0.3, 0.55, steep));
+    float grows = smoothstep(0.15, 0.45, wet) * WARM(-4.0, 4.0) * (1.0 - smoothstep(0.3, 0.55, steep));
     s.cover = vec4(grows, 1.0 - smoothstep(0.15, 0.5, wet), 0.6 + 0.6 * wet, smoothstep(0.55, 0.8, wet) * grows);
     s.herbs = 0.3 * grows;
     return s;
@@ -268,7 +286,9 @@ function placeSun() {
 placeSun();
 scene.addEventListener('reanchor', placeSun);
 scene.setAtmosphere(Object.assign({ enabled: true }, AIR));
-scene.setExposure({ mode: 'auto' });
+// (Metered on the sun's light: a planet of dark sea and forest stays dark
+// and its snow white, from orbit to the grass.)
+scene.setExposure({ mode: 'auto', meter: 'incident' });
 
 // --- views ---------------------------------------------------------------------------
 
