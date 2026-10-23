@@ -1,0 +1,9 @@
+{
+    "title": "Superoptimizer & Verified Rewriter Studio",
+    "width": 1360,
+    "height": 860,
+    "minWidth": 1024,
+    "minHeight": 680,
+    "resizable": true,
+    "lib": "../lib"
+}

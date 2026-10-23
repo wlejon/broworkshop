@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Superoptimizer & Verified Rewriter Studio</title>
+    <link rel="stylesheet" href="/lib/kit/kit.css">
+    <style>
+        .k-side { width: 46%; min-width: 0; padding: 0; gap: 0; }
+        .pane-head {
+            display: flex; align-items: center; gap: 8px;
+            padding: 8px 12px; border-bottom: 1px solid var(--k-border);
+            background: #0e121a;
+        }
+        .pane-head h2 {
+            margin: 0; flex: 1; font-size: 11px; font-weight: 600;
+            letter-spacing: .6px; text-transform: uppercase; color: var(--k-muted);
+        }
+        #origCode, #rewrittenCode {
+            flex: 1; min-height: 180px; margin: 0; border: none; border-radius: 0; resize: none;
+            background: #090c11; color: #e2eaff; font-size: 13px; line-height: 1.55;
+            padding: 12px; white-space: pre; tab-size: 2; font-family: var(--k-font);
+        }
+        #rewrittenCode { color: #9effc4; background: #070b0f; }
+        #passList {
+            height: 165px; overflow-y: auto; padding: 10px 12px;
+            background: #0b0e14; border-top: 1px solid var(--k-border);
+            display: flex; flex-direction: column; gap: 6px;
+        }
+        .pass-card {
+            padding: 6px 10px; border-radius: 5px;
+            background: #121824; border-left: 3px solid #5c9dff;
+            font-size: 11px; line-height: 1.4;
+        }
+        .pass-card.hazard { border-left-color: #ff6b6b; background: #221216; }
+        .pass-card b { color: #cfe0ff; }
+        .metrics-grid {
+            display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
+            padding: 10px 12px; border-bottom: 1px solid var(--k-border);
+            background: #0d1118;
+        }
+        .metric-box {
+            background: #131924; border: 1px solid var(--k-border);
+            border-radius: 6px; padding: 8px 10px;
+        }
+        .metric-label { font-size: 10px; text-transform: uppercase; color: var(--k-dim); letter-spacing: .5px; }
+        .metric-val { font-size: 15px; font-weight: 700; color: var(--k-value); margin-top: 3px; }
+        .metric-sub { font-size: 11px; color: var(--k-ok); margin-top: 2px; }
+        .metric-sub.err { color: var(--k-err); }
+        #diffOutput {
+            margin: 0; padding: 10px 12px; height: 145px; overflow: auto;
+            background: #080a0f; color: #b5c4dc; font-size: 11.5px; line-height: 1.45;
+            border-top: 1px solid var(--k-border); white-space: pre-wrap;
+        }
+        #chartBox {
+            height: 150px; border-top: 1px solid var(--k-border);
+            background: #0a0d14; position: relative;
+        }
+        #perfCanvas { width: 100%; height: 100%; display: block; }
+        .badge-pill {
+            padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;
+        }
+        .badge-pill.ok { background: #163828; color: #7fe6a8; border: 1px solid #2b6a4b; }
+        .badge-pill.err { background: #3b181d; color: #ff9494; border: 1px solid #752a35; }
+    </style>
+</head>
+<body class="k-app">
+    <header class="k-header">
+        <h1>Prover-Backed JS Superoptimizer & Rewriter Studio</h1>
+        <label class="k-field">Wild Preset
+            <select id="presetSelect">
+                <option value="branchy_abs">1. Branchy Bit-Twiddling & Abs (CEGIS Superopt)</option>
+                <option value="poly_soup">2. Defensive Guard & Polymorphic Math Soup (SMT + Horner)</option>
+                <option value="deforest">3. Allocation-Heavy .map().filter().reduce() (Deforestation)</option>
+                <option value="auto_kernel">4. Sequential Float32Array Loop -> Parallel @kernel + SPIR-V</option>
+                <option value="hazard_trap">5. Loop-Carried Hazard Trap: Prefix Sum (SMT Refuted)</option>
+            </select>
+        </label>
+        <button id="rewriteBtn" class="primary">⚡ Rewrite & Prove (SMT + CEGIS)</button>
+        <button id="benchBtn">⏱ Run 100k Benchmark</button>
+        <div class="k-spacer"></div>
+        <span class="k-stats">
+            <span id="proofBadge" class="badge-pill ok">PROVEN EQUIVALENT (2^32 inputs)</span>
+            <span>Cert: <b id="certHash">0x0000000000000000</b></span>
+        </span>
+    </header>
+
+    <div class="k-body">
+        <aside class="k-side">
+            <div class="pane-head">
+                <h2>Original Wild JavaScript Input</h2>
+                <button id="resetBtn" class="small">Reset Preset</button>
+            </div>
+            <textarea id="origCode" spellcheck="false" autocomplete="off"></textarea>
+            <div class="pane-head">
+                <h2>Applied Prover Rewrite Passes & CEGIS Telemetry</h2>
+                <span id="passCountBadge" class="ok">0 passes</span>
+            </div>
+            <div id="passList"></div>
+        </aside>
+
+        <main class="k-main">
+            <div class="metrics-grid">
+                <div class="metric-box">
+                    <div class="metric-label">Formal SMT Proof</div>
+                    <div class="metric-val" id="metricProof">VERIFIED</div>
+                    <div class="metric-sub" id="metricCegis">0 concretely pruned</div>
+                </div>
+                <div class="metric-box">
+                    <div class="metric-label">Code Size (Bytes)</div>
+                    <div class="metric-val" id="metricBytes">0 → 0 B</div>
+                    <div class="metric-sub" id="metricBytesDelta">0% reduction</div>
+                </div>
+                <div class="metric-box">
+                    <div class="metric-label">IR / Latency Cost</div>
+                    <div class="metric-val" id="metricOps">0 → 0 ops</div>
+                    <div class="metric-sub" id="metricOpsDelta">Branchless DAG</div>
+                </div>
+                <div class="metric-box">
+                    <div class="metric-label">100k Live Benchmark</div>
+                    <div class="metric-val" id="metricSpeedup">1.00×</div>
+                    <div class="metric-sub" id="metricThroughput">-- Mops/sec</div>
+                </div>
+            </div>
+
+            <div class="pane-head">
+                <h2>Verified Rewritten JS / Synthesized @kernel Output</h2>
+                <span id="targetModeLabel" class="ok">SMT Proof-Gated</span>
+            </div>
+            <textarea id="rewrittenCode" readonly spellcheck="false"></textarea>
+
+            <div class="pane-head">
+                <h2>Unified Diff & SPIR-V / Dependency Proof Inspector</h2>
+            </div>
+            <pre id="diffOutput"></pre>
+
+            <div id="chartBox">
+                <canvas id="perfCanvas"></canvas>
+            </div>
+        </main>
+    </div>
+
+    <script type="module" src="app.js"></script>
+</body>
+</html>
