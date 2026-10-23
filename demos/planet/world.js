@@ -319,9 +319,44 @@ const LOWS = (() => {
         const hemi = lat >= 0 ? 1 : -1;
         data.push(c * Math.cos(lon), Math.sin(lat), c * Math.sin(lon), hemi * turn, size, heart, eye, 0);
     };
-    for (let i = 0; i < 22; i++) {
-        const lat = (rnd() < 0.5 ? -1 : 1) * (0.62 + 0.42 * rnd());
-        low(lat, rnd() * Math.PI * 2, 1.0 + 1.0 * rnd(), 0.12 + 0.08 * rnd(), 0.3 + 0.3 * rnd(), 0);
+    // Where the place lies in the frame lowCommas reads a low at `lat`,
+    // `lon` of `size` in (x east, y poleward, in its sizes): Infinity on
+    // the far side.
+    const placeDir = START.map((x) => x / R);
+    const reach = (lat, lon, size) => {
+        const c = [Math.cos(lat) * Math.cos(lon), Math.sin(lat), Math.cos(lat) * Math.sin(lon)];
+        const cd = c[0] * placeDir[0] + c[1] * placeDir[1] + c[2] * placeDir[2];
+        if (cd < 0.4) return Infinity;
+        const nl = Math.hypot(-c[0] * c[1], 1 - c[1] * c[1], -c[2] * c[1]);
+        const north = [-c[0] * c[1] / nl, (1 - c[1] * c[1]) / nl, -c[2] * c[1] / nl];
+        const v = placeDir.map((x, k) => (x - c[k] * cd) / cd);
+        const east = [c[1] * north[2] - c[2] * north[1], c[2] * north[0] - c[0] * north[2], c[0] * north[1] - c[1] * north[0]];
+        const qx = (v[0] * east[0] + v[1] * east[1] + v[2] * east[2]) / size;
+        const qy = (v[0] * north[0] + v[1] * north[1] + v[2] * north[2]) * Math.sign(lat) / size;
+        return [qx, qy];
+    };
+    // Whether a low's cloud (lowCommas': its head and bands, its cold
+    // front, its warm front's shield) reaches the place, with a margin.
+    const reaches = (lat, lon, size) => {
+        const q = reach(lat, lon, size);
+        if (q === Infinity) return false;
+        const [x, y] = q;
+        if (Math.hypot(x, y) < 2.7) return true;
+        const s = Math.min(Math.max(-y - 0.3, 0), 3.6);
+        if (-y - 0.3 > -0.5 && -y - 0.3 < 4.0 && Math.abs(x - (0.45 - 0.1 * s - 0.2 * s * s)) < 0.9) return true;
+        const yr = y - (-0.3 - 0.3 * (x - 0.45));
+        return x > 0.0 && x < 2.3 && yr > -0.4 && yr < 1.4;
+    };
+    // (Each hemisphere's storm track holds eight, their longitudes spread
+    // about the world with a little wander, as the westerlies' lows are;
+    // none whose weather reaches the place, whose sky is a fair day's, so
+    // one that would is moved on east.)
+    for (let i = 0; i < 16; i++) {
+        const lat = (i % 2 ? -1 : 1) * (0.68 + 0.32 * rnd());
+        let lon = ((i >> 1) + (i % 2) * 0.5 + 0.5 * (rnd() - 0.5)) / 8 * Math.PI * 2;
+        const size = 0.17 + 0.08 * rnd();
+        for (let k = 0; k < 8 && reaches(lat, lon, size); k++) lon += Math.PI / 16;
+        low(lat, lon, 1.0 + 1.0 * rnd(), size, 0.3 + 0.3 * rnd(), 0);
     }
     for (let i = 0; i < 3; i++) {
         const lat = (rnd() < 0.5 ? -1 : 1) * (0.2 + 0.2 * rnd());
@@ -338,10 +373,15 @@ const WEATHER = fbm(1.4e6, 5, 41, 0.55), SHOWERS = fbm(2.6e5, 4, 42);
 // the equator, clusters of towers and anvils; the subtropics' highs clear,
 // but for the trades' cumulus over the sea and sheets of stratocumulus in
 // cells off the western coasts (land to the east); the westerlies' storm
-// tracks, each low a comma, its head wound about its centre, its cold
-// front trailing a long curved band equatorward and west some thousands of
-// kilometres and its warm front's shield to the east, the cold air's open
-// cells behind; fair weather's cumulus over moist land; thin cloud over the
+// tracks, eight lows a hemisphere, each a broad swirling system 1500 to
+// 3000 km across: its head a shield wound into spiral bands of varying
+// width and brightness with gaps between and a dry slot wrapping in, its
+// cold front a broken band 200 to 400 km wide trailing equatorward some
+// thousands of kilometres and fraying toward its tail, its warm front's
+// shield to the east, and behind it over the sea the cold air's open cells
+// (a honeycomb veil from afar), as over the storm tracks' seas between
+// them; the tropical cyclones' dense discs, clear eyes and spiral bands;
+// fair weather's cumulus over moist land; thin cloud over the
 // poles' ice. Every shape read through a bent direction (cloudBent), so no
 // edge is ruled, and every share a mean over the footprint, so from orbit
 // a field of heaps is a veil at its cover.
@@ -379,9 +419,20 @@ vec3 swirled(vec3 d, out float heart) {
         vec4 a = cloudData(2 * i), b = cloudData(2 * i + 1);
         float s = acos(clamp(dot(d, a.xyz), -1.0, 1.0)) / b.x;
         d = turnAbout(d, a.xyz, a.w * exp(-s * s));
-        // (A tropical cyclone's eye is clear, a few tens of kilometres.)
-        // (A westerly low's heart is its comma's: lowCommas.)
-        heart = max(heart, b.y * exp(-0.5 * s * s) * mix(0.4, smoothstep(0.06, 0.16, s), b.z));
+        // (A westerly low's heart is its comma's: lowCommas. A tropical
+        // cyclone's is a dense disc, its eye clear and a few tens of
+        // kilometres across, and spiral bands winding in to it from some
+        // three of its sizes out, gaps between them.)
+        float h = 0.4 * exp(-0.5 * s * s);
+        if (b.z > 0.0) {
+            vec3 t1 = normalize(cross(a.xyz, abs(a.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
+            float ang = atan(dot(d, cross(a.xyz, t1)), dot(d, t1));
+            float psi = ang + sign(a.w) * 4.5 * log(max(s, 0.1));
+            float arms = smoothstep(0.35, 0.85, cos(3.0 * psi)) * smoothstep(3.4, 0.8, s);
+            float disc = smoothstep(0.9, 0.45, s);
+            h = mix(h, max(disc, 0.6 * arms) * smoothstep(0.06, 0.16, s), b.z);
+        }
+        heart = max(heart, b.y * h);
     }
     return d;
 }
@@ -389,20 +440,28 @@ vec3 swirled(vec3 d, out float heart) {
 // A soft band: 1 within half of \`w\` of its line, 0 from \`w\` on.
 float bandOf(float d, float w) { return smoothstep(w, 0.25 * w, d); }
 
-// The westerlies' lows (the extratropical ones, no eye), each a comma, in
-// its frame (x east, y poleward, in its sizes; so the south's mirror the
-// north's and turn the other way): the cold front a band trailing
-// equatorward and west some three and a half sizes (a few thousand
-// kilometres), narrowing away from the low; the warm conveyor up it to the
-// triple point and on, wound about the low's centre once the way the air
-// turns into the comma's head, narrowing as it winds in, its heart
-// overcast; the warm front's shield poleward of its line, east of the
-// triple point; the dry slot the clear wedge between the head's tail and
-// the cold front. Behind the cold front the cold air's open cells. x the
-// overcast (slabs: a front's nimbostratus), y the open cells' share
-// (heaps), z how much of either is a low's.
-vec3 lowCommas(vec3 d) {
+// The westerlies' lows (the extratropical ones, no eye), each a broad
+// swirling system, in its frame (x east, y poleward, in its sizes, some
+// 1000 to 1600 km; so the south's mirror the north's and turn the other
+// way). The head a shield some two and a half sizes across about the
+// centre, poleward and west of it, in spiral bands of the air winding in
+// (logarithmic, three arms, their width and brightness varied by the
+// texture \`t\`), thinner between them, the bands going on thinner past the
+// shield; the dry slot a clear arm wrapping in from the south-west to the
+// centre. The cold front from the triple point (east and a little
+// equatorward of the centre) a band trailing equatorward and west some
+// three and a half sizes, a few thousand kilometres, 200 to 400 km wide
+// and widening, broken by the texture and fraying toward its tail; the
+// warm front's shield poleward of its line, east of the triple point.
+// Behind the cold front and under the head the cold air's open cells. x
+// the overcast (slabs), y the open cells' share (heaps), z how much of
+// either is a low's. \`p\` the point the texture is read at (m), \`f\` the
+// showers' noise there (0 .. 1, its mean a half), what breaks the front.
+vec3 lowCommas(vec3 d, vec3 p, float f) {
     vec3 best = vec3(0.0);
+    float t = cloudNoise(p / 7.0e5, 1.0 / 64.0).x;                       // (some 90 km)
+    float t2 = cloudNoise(vec3(p.z, p.y, p.x) / 2.6e5, 1.0 / 64.0).x;    // (some 30 km)
+    float tex = 0.65 * t + 0.35 * t2;
     for (int i = 0; i < LOWS; ++i) {
         vec4 a = cloudData(2 * i), b = cloudData(2 * i + 1);
         if (b.z > 0.5) continue;
@@ -416,31 +475,41 @@ vec3 lowCommas(vec3 d) {
         vec2 q = vec2(dot(v, east), dot(v, north) * hemi) / b.x;
         float r = length(q);
         if (r > 4.5) continue;
-        // The cold front: x(s) = 0.35 - 0.1 s - 0.2 s^2 at y = -0.25 - s.
-        float s = clamp(-q.y - 0.25, 0.0, 3.4);
-        float slope = -0.1 - 0.4 * s;
-        float dist = abs(q.x - (0.35 - 0.1 * s - 0.2 * s * s)) / sqrt(1.0 + slope * slope);
-        float cold = bandOf(dist, mix(0.3, 0.13, s / 3.4)) * smoothstep(3.4, 2.6, s) * smoothstep(0.15, -0.05, q.y + 0.25);
-        // The comma's head: from the triple point (east and a little
-        // equatorward of the centre) about the north and west, once, its
-        // radius falling from 0.8 to 0.15 sizes and its width with it.
         float ang = atan(q.y, q.x);
-        float u = fract((ang + 0.45) / 6.2832);
-        float rh = 0.8 * exp(-1.7 * u);
-        float head = bandOf(abs(r - rh), mix(0.5, 0.14, u)) * smoothstep(1.0, 0.8, u);
-        float core = smoothstep(0.32, 0.12, r);
+        // The spiral's phase: constant along an arm winding in the way the
+        // air turns, its radius falling by e in some 0.6 of a turn.
+        float psi = ang + 2.4 * log(max(r, 0.22)) + 5.0 * (t - 0.5);
+        float arms = cos(2.0 * psi + 2.5 * (t2 - 0.5));
+        float shieldAt = length(q - vec2(-0.15, 0.15));
+        float shield = smoothstep(1.45, 0.75, shieldAt);
+        float head = shield * mix(0.55, 1.0, smoothstep(-0.4, 0.5, arms)) * mix(0.8, 1.05, tex);
+        head = max(head, 0.75 * smoothstep(2.4, 1.2, r) * smoothstep(0.35, 0.85, arms) * smoothstep(0.3, 0.6, tex));
+        // The dry slot: the arm through the south-west a size out.
+        float dpsi = mod(psi - (-2.1) + 3.1416, 6.2832) - 3.1416;
+        float dry = smoothstep(0.75, 0.25, abs(dpsi)) * smoothstep(1.6, 1.0, r) * smoothstep(0.08, 0.25, r);
+        head *= 1.0 - 0.95 * dry;
+        // The cold front: x(s) = 0.45 - 0.1 s - 0.2 s^2 at y = -0.3 - s.
+        float s = clamp(-q.y - 0.3, 0.0, 3.6);
+        float slope = -0.1 - 0.4 * s;
+        float xf = 0.45 - 0.1 * s - 0.2 * s * s;
+        float dist = abs(q.x - xf) / sqrt(1.0 + slope * slope);
+        float fray = s / 3.6;
+        float w = mix(2.0e5, 4.0e5, fray) / (b.x * R);
+        float cold = bandOf(dist, w) * smoothstep(3.6, 2.6, s) * smoothstep(0.2, -0.05, q.y + 0.3);
+        // (Broken: cells of cloud a few tens of kilometres across with
+        // gaps between, more of them gaps toward the tail and its edges.)
+        float brk = 0.55 + 2.2 * (f - 0.5) + 0.35 * (1.0 - dist / w) - 0.45 * fray;
+        cold *= mix(0.3, 1.0, smoothstep(0.25, 0.75, brk));
         // The warm front's shield: poleward of its line from the triple
-        // point east and a little equatorward, some 0.9 sizes deep.
-        float yl = -0.25 - 0.3 * (q.x - 0.35);
+        // point east and a little equatorward, some size deep.
+        float yl = -0.3 - 0.3 * (q.x - 0.45);
         float yr = q.y - yl;
-        float shield = smoothstep(-0.1, 0.08, yr) * smoothstep(0.95, 0.45, yr) * smoothstep(0.1, 0.4, q.x) *
-                       smoothstep(1.9, 1.2, q.x);
-        float over = max(max(cold, 0.95 * head), max(0.85 * shield, b.y * 1.6 * core));
-        // The cold air behind the front and under the head's tail: its
-        // open cells, a veil of cumulus.
-        float behind = smoothstep(0.1, 0.5, (0.35 - 0.1 * s - 0.2 * s * s) - q.x) * smoothstep(-0.2, 0.4, -q.y) *
-                       smoothstep(4.2, 2.8, r);
-        best = max(best, vec3(over, 0.55 * behind, smoothstep(4.5, 3.0, r)));
+        float warm = smoothstep(-0.1, 0.08, yr) * smoothstep(1.1, 0.5, yr) * smoothstep(0.2, 0.5, q.x) *
+                     smoothstep(2.0, 1.3, q.x) * mix(0.7, 1.0, tex);
+        float over = max(max(cold, head), 0.85 * warm);
+        // The cold air behind the front and under the head's tail.
+        float behind = smoothstep(0.05, 0.5, xf - q.x) * smoothstep(-0.4, 0.3, -q.y) * smoothstep(4.4, 3.0, r);
+        best = max(best, vec3(over, 0.6 * max(behind, 0.6 * dry), smoothstep(4.5, 3.0, r)));
     }
     return best;
 }
@@ -515,20 +584,27 @@ vec4 cloudCover(vec3 up) {
                smoothstep(0.3, 0.55, m2.x + 0.3 * (n - 0.5));
     // The storm tracks: the lows' commas, and between them broken weather
     // where the noise lifts it.
-    vec3 lows = lowCommas(bent);
+    vec3 lows = lowCommas(bent, p, f);
     float track = storm * (1.0 - 0.7 * lows.z);
-    float broken = track * smoothstep(0.5, 1.0, n + 0.3 * (m1.x - 0.5)) * 0.9;
+    float broken = track * smoothstep(0.5 - 0.12 * sea, 1.0, n + 0.3 * (m1.x - 0.5)) * 0.9;
     float polar = smoothstep(1.2, 1.38, al) * smoothstep(0.35, 0.65, n) * 0.8;
     // The tropical cyclones' and the lows' hearts.
     float hearts = smoothstep(0.25, 0.7, heart);
     // (Each thinned and parted here and there, a few hundred kilometres
-    // and less: an overcast's texture from afar, its breaks near.)
+    // and less: an overcast's texture from afar, its breaks near. The lows
+    // carry their own.)
     float grain = clamp(0.82 + 0.6 * (f - 0.5) + 0.3 * (m1.x - 0.5), 0.0, 1.0);
-    float over = max(max(lows.x, broken), max(polar, hearts)) * grain;
+    float over = max(lows.x, max(broken, max(polar, hearts)) * grain);
+    // The cold air over the storm tracks' seas, about and behind the lows:
+    // open cells, cumulus on the rims of cells some 50 km across with clear
+    // air in their middles, a honeycomb veil from afar.
+    float honey = smoothstep(0.3, 0.75, 1.0 - cloudNoise(p / 2.2e5, 1.0 / 128.0).y);
+    float coldAir = max(lows.y * sea, storm * sea * (0.55 + 0.3 * (m1.x - 0.5)));
+    coldAir = min(coldAir * mix(0.45, 1.35, honey), 0.85);
     // Fair weather's cumulus over temperate land that is not dry: the
     // summer afternoon's fields of them, the sky between.
     float fair = (1.0 - sea) * smoothstep(0.25, 0.6, g.w) * smoothstep(0.3, 0.5, al) * (1.0 - smoothstep(0.95, 1.15, al));
-    float heaps = max(max(trades, lows.y), max(0.52 * fair * (0.7 + 0.8 * (f - 0.5)), 0.6 * rain));
+    float heaps = max(max(trades, coldAir), max(0.52 * fair * (0.7 + 0.8 * (f - 0.5)), 0.6 * rain));
     // The slabs: the fronts, the hearts, the broken weather, the decks and
     // the rain belt's anvils; the heaps in the sky they leave.
     float slabs = max(max(over, 0.9 * sc), rain * clusters * 0.95);
@@ -680,11 +756,14 @@ float cloudDensity(CloudPoint q) {
     float far = max(heapsShare(z, zb, zt, c) * wHeap, slabFar * (1.0 - wHeap));
     float fn = smoothstep(0.15 * HEAP_CELL, 0.6 * HEAP_CELL, q.footprint);
     if (fn >= 1.0) return far;
-    // Near: the shapes. The slab's top heaves a few hundred metres over
-    // some kilometres, its base less; where the cover is broken it parts
-    // (the decks' cells, the fronts' edges).
-    vec4 relief = cloudNoise(p / 9000.0, q.footprint / 9000.0);
-    float st = zt - 700.0 * relief.x - 250.0 * relief.z;
+    // Near: the shapes. The slab's top heaves in lumps a few kilometres
+    // across and over a kilometre high (the engine's noise sixteen edges a
+    // tile, 0.8 edges high: so the engine lights an overcast's top seen
+    // from afar as it is shaped, clouds.frag's clTopShade), its base less;
+    // where the cover is broken it parts (the decks' cells, the fronts'
+    // edges).
+    vec4 relief = cloudNoise(p / (16.0 * CLOUD_EDGE), q.footprint / (16.0 * CLOUD_EDGE));
+    float st = zt - 0.8 * CLOUD_EDGE * relief.x - 250.0 * relief.z;
     float sb = zb + 150.0 * relief.y;
     float slab = min(min((z - sb) * BASE_SHARP, st - z), (c - 0.5) * 6000.0);
     float heap = wHeap > 0.0 ? heaps(normalize(p), z, zb, zt, c) : -1e5;
