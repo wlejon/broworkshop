@@ -331,16 +331,26 @@ const LOWS = (() => {
 })();
 const WEATHER = fbm(1.4e6, 5, 41, 0.55), SHOWERS = fbm(2.6e5, 4, 42);
 
-// The deck from 1.8 km to 10 km. Its cover by the climate the land's
-// processes reckon (channel 1's w, how wet; x the ground under the sea
-// too): the rain belt over the equator, the subtropics' highs clear over
-// the deserts with trade cumulus over the sea, the westerlies' fronts drawn
-// out east and west and wound into their lows, the poles' grey stratus.
-// Its clouds at a point: Perlin-Worley billows a few kilometres across,
-// their cells' edges eroded by finer cells, heaped where the air is
-// convective and laid in slabs where it is not; seen from afar, the share
-// of the sky they cover.
-export const CLOUD_BOTTOM = 1800, CLOUD_TOP = 10000;
+// The deck from 2.5 km to 10.5 km (its bases over the hills and the low
+// view's eye). Its cover by the general circulation and
+// the climate the land's processes reckon (channel 1's w, how wet; x the
+// ground, under the sea too): the rain belt over the equator, its towers
+// and anvils; the subtropics' highs clear over the deserts, with sheets of
+// stratocumulus in cells over the sea; the westerlies' storm tracks, each
+// low wound into a comma with its cold front trailing a long band
+// equatorward and west and its warm front's shield to the east; fair
+// weather's cumulus over moist land; thin cloud over the poles' ice.
+// Its clouds at a point (Schneider's Nubis): Perlin-Worley billows a few
+// kilometres across, cut by the cover, heaped where the air is convective
+// and laid in slabs where it is not, their edges eroded into cauliflower
+// by finer cells (wisps at their bases); seen from afar, the share of the
+// sky they cover.
+//
+//   cover  x the share of the sky the clouds cover, y how convective they
+//          are (0 a front's or a deck's slab .. 1 heaped cumulus), z how
+//          high their tops reach (of the deck), w how much they lie in
+//          closed cells (marine stratocumulus)
+export const CLOUD_BOTTOM = 2500, CLOUD_TOP = 10500;
 const CLOUDS = WEATHER.glsl({ name: 'cloudWeather', dims: [3] }) + SHOWERS.glsl({ name: 'cloudShowers', dims: [3] }) + `
 const int LOWS = ${LOWS.length / 8};
 const float R = ${R}.0;
@@ -365,84 +375,159 @@ vec3 swirled(vec3 d, out float heart) {
     return d;
 }
 
+// The fronts of the westerlies' lows (the extratropical ones, no eye): in
+// each low's frame (x east, y poleward, in its sizes), the cold front a
+// band trailing equatorward and bending west some two and a half sizes,
+// narrowing away from the low, and the warm front's broad shield east of
+// it, poleward of its line. Their cover, the strongest of any low's.
+float lowFronts(vec3 d) {
+    float best = 0.0;
+    for (int i = 0; i < LOWS; ++i) {
+        vec4 a = cloudData(2 * i), b = cloudData(2 * i + 1);
+        if (b.z > 0.5) continue;
+        vec3 c = a.xyz;
+        float cd = dot(d, c);
+        if (cd < 0.5) continue;
+        float hemi = sign(a.w);
+        vec3 north = normalize(vec3(0.0, 1.0, 0.0) - c * c.y);
+        vec3 east = cross(north, c);
+        vec3 v = (d - c * cd) / cd;   // (on the plane tangent at the low)
+        float x = dot(v, east) / b.x, y = dot(v, north) * hemi / b.x;
+        // The cold front: x(s) = -0.15 s - 0.22 s^2 at y = -s.
+        float s = clamp(-y, 0.0, 2.6);
+        float slope = -0.15 - 0.44 * s;
+        float dist = abs(x - (-0.15 * s - 0.22 * s * s)) / sqrt(1.0 + slope * slope);
+        float width = mix(0.3, 0.12, s / 2.6);
+        float cold = smoothstep(width, 0.3 * width, dist) * smoothstep(2.6, 1.8, -y) * smoothstep(0.15, -0.05, y);
+        // The warm front: its line east and a little equatorward, its
+        // shield the cloud poleward of the line (some 300 km of it).
+        float yl = -0.35 * x;
+        float warm = smoothstep(-0.1, 0.05, x) * smoothstep(1.4, 0.8, x) * smoothstep(-0.12, 0.05, y - yl) *
+                     smoothstep(0.55, 0.3, y - yl);
+        best = max(best, max(cold, 0.9 * warm));
+    }
+    return best;
+}
+
 vec4 cloudCover(vec3 up) {
     vec4 g = cloudLandGrid(1, up);
     float lat = asin(clamp(up.y, -1.0, 1.0)), al = abs(lat);
     float heart;
     vec3 w = swirled(up, heart);
-    // The westerlies draw the weather out east and west.
-    float westerly = smoothstep(0.5, 0.75, al) * (1.0 - smoothstep(1.1, 1.3, al));
     vec3 p = w * R;
-    float n = cloudWeather(p * vec3(1.0, 1.0 + 0.6 * westerly, 1.0), 31) * 0.5 + 0.5;
+    // The westerlies draw the weather out east and west.
+    float storm = smoothstep(0.62, 0.8, al) * (1.0 - smoothstep(1.05, 1.22, al));
+    float n = cloudWeather(p * vec3(1.0, 1.0 + 0.8 * storm, 1.0), 31) * 0.5 + 0.5;
     float f = cloudShowers(p, 32) * 0.5 + 0.5;
-    // The fronts: long bands where the noise crosses zero, drawn out east
-    // and west (squeezed along the axis) and wound into the lows.
-    float fr = cloudWeather(p * vec3(0.8, 1.6, 0.8) + vec3(3.1e6, 0.0, -1.7e6), 33);
-    float front = westerly * smoothstep(0.16, 0.02, abs(fr)) * (0.6 + 0.8 * (f - 0.5));
-    // The climate's cloudiness by latitude, wetter over a wet land and the sea.
-    float itcz = exp(-pow(lat / 0.12, 2.0));
-    float climate = 0.6 * itcz + 0.25 * westerly + 0.25 * smoothstep(1.15, 1.35, al);
     float sea = smoothstep(10.0, -40.0, g.x);
-    float wet = max(g.w, 0.5 * sea);
-    climate *= mix(0.3, 1.2, wet);
-    // Fair weather's cumulus over a temperate land that is not dry: the
-    // summer afternoon's fields of them, with the sky between.
-    float fair = (1.0 - sea) * smoothstep(0.25, 0.6, g.w) * smoothstep(0.35, 0.55, al) * (1.0 - smoothstep(0.95, 1.15, al));
-    float cover = clamp(climate - 0.2 + (n - 0.5) * 1.2 + (f - 0.5) * 0.4 + 0.5 * heart + 0.7 * front, 0.0, 1.0);
-    cover = max(cover, 0.3 * fair * (0.8 + 0.6 * (f - 0.5)));
-    // Heaped where the air is convective (warm, the rain belt, the trades),
-    // in slabs in the fronts and the cold.
-    float convect = clamp((1.0 - smoothstep(0.4, 0.75, al)) + fair + 0.4 * (f - 0.5) - 0.8 * heart - front, 0.0, 1.0);
-    // How high the tops reach: the rain belt's towers, the trades' low
-    // cumulus, a front's thick deck.
-    float tops = mix(0.4 + 0.3 * heart, mix(0.2, 0.95, clamp(itcz * wet * 1.3 + 0.3 * (f - 0.5), 0.0, 1.0)), convect);
-    return vec4(cover, convect, tops, 0.0);
+    float wet = max(g.w, 0.6 * sea);
+    // The general circulation by latitude: the rain belt (wandering a few
+    // degrees with the noise), the subtropics' highs, the storm tracks,
+    // the poles.
+    float itcz = exp(-pow((lat - 0.06 * (n - 0.5)) / 0.11, 2.0));
+    float subtrop = exp(-pow((al - 0.47) / 0.15, 2.0));
+    float polar = smoothstep(1.2, 1.38, al);
+    float cloudy = 0.02 + 0.55 * itcz + 0.3 * storm - 0.5 * subtrop - 0.35 * polar;
+    cloudy *= mix(0.35, 1.1, wet);
+    // The broken weather: where the noise lifts it, and every low's heart;
+    // most of the world either clear or overcast, broken between (a
+    // region's cover half and half is a grey veil from afar).
+    float cover = smoothstep(0.3, 0.75, cloudy + (n - 0.5) * 1.3 + (f - 0.5) * 0.35 + 0.65 * heart);
+    // The fronts: overcast bands, a thousand kilometres and more.
+    float front = lowFronts(up) * (0.85 + 0.3 * (f - 0.5));
+    cover = max(cover, front);
+    // The subtropics' marine stratocumulus: a low deck in closed cells over
+    // the cool sea under the highs.
+    float sc = sea * subtrop * (1.0 - smoothstep(0.7, 0.95, al)) * smoothstep(0.42, 0.62, f);
+    cover = max(cover, 0.9 * sc);
+    // Fair weather's cumulus over temperate land that is not dry: the
+    // summer afternoon's fields of them, the sky between.
+    float fair = (1.0 - sea) * smoothstep(0.25, 0.6, g.w) * smoothstep(0.3, 0.5, al) * (1.0 - smoothstep(0.95, 1.15, al));
+    cover = max(cover, 0.45 * fair * (0.7 + 0.8 * (f - 0.5)));
+    // Heaped where the air is convective (warm, the rain belt, the trades,
+    // fair weather), in slabs in the fronts, the lows' hearts and the decks.
+    float convect = clamp(1.2 * (1.0 - smoothstep(0.35, 0.7, al)) + fair - 1.2 * heart - 1.5 * front - 1.5 * sc + 0.3 * (f - 0.5), 0.0, 1.0);
+    // How high the tops reach: the rain belt's towers, the trades' and
+    // fair weather's low cumulus, a front's thick nimbostratus, the
+    // stratocumulus' thin deck.
+    float towers = clamp(itcz * wet * 1.4 + 0.4 * (f - 0.5), 0.0, 1.0);
+    float tops = mix(0.35 + 0.3 * max(heart, front), mix(0.18, 0.95, towers), convect);
+    tops = mix(tops, 0.12, sc * (1.0 - front));
+    return vec4(cover, convect, tops, sc * (1.0 - front));
 }
 
 float cloudDensity(CloudPoint q) {
     float c = q.cover.x;
     if (c < 0.01) return 0.0;
-    float convect = q.cover.y, top = max(q.cover.z, 0.12), h = q.height;
-    if (h >= top) return 0.0;
-    float hr = h / top;
-    // A flat base; a cumulus rounds toward its top, a slab is cut square.
-    float grad = smoothstep(0.0, 0.08, hr) * (1.0 - smoothstep(mix(0.75, 0.25, convect), 1.0, hr));
+    float convect = q.cover.y, cells = q.cover.w, h = q.height;
     // The clouds drift east (and a little north) at some 10 m/s.
-    vec3 drift = vec3(-9.0, 0.0, 3.0) * q.time;
-    const float T1 = 17000.0, T2 = 2300.0;
-    float f1 = q.footprint / T1;
-    vec4 n = cloudNoise((q.p + drift) / T1, f1);
-    float lowFbm = n.y * 0.7 + n.z * 0.3;
-    float lo = (lowFbm - 1.0) * 0.4;
-    // The billows: where the noise stands over the threshold the cover and
-    // the height's profile set (a cloud's shape, Perlin-Worley lifted by
-    // its cells), as the share of the footprint that does: one cloud's
-    // edge close to, a field's cover from afar.
+    vec3 p = q.p + vec3(-9.0, 0.0, 3.0) * q.time;
+    // The mesoscale, 160 km a tile: the decks' closed cells (40 km, their
+    // rims clear) and the bases' slow rise and fall from place to place.
+    const float TM = 160000.0;
+    vec4 meso = cloudNoise(p / TM, q.footprint / TM);
+    // The base: a few hundred metres over the deck's bottom, higher or
+    // lower region by region (so a far field's bases are no ruled line).
+    float base = 0.01 + 0.08 * meso.z;
+    float top = base + max(q.cover.z, 0.06) * (1.0 - base);
+    if (h <= base || h >= top) return 0.0;
+    // The billows, 12 km a tile (their cells 3 km).
+    const float T1 = 12000.0, T2 = 1600.0;
+    vec4 n = cloudNoise(p / T1, q.footprint / T1);
+    // Each cloud's own base, lowest under its middle (its cell's), so a
+    // slab's underside is lumpy and a field's bases are no one plane.
+    base += 0.035 * (1.0 - n.y) * (top - base);
+    if (h <= base) return 0.0;
+    float hr = (h - base) / (top - base);
+    // A flat base; a cumulus rounds toward its top, a slab is cut square.
+    float grad = smoothstep(0.0, mix(0.12, 0.05, convect), hr) * (1.0 - smoothstep(mix(0.7, 0.35, convect), 1.0, hr));
+    // The decks' closed cells; the fields' clusters (where the noise's
+    // cells crowd them, the sky clear between).
+    c *= mix(1.0, smoothstep(0.25, 0.55, meso.y), cells);
+    c *= mix(1.0, 0.75 + 0.5 * meso.x, convect * (1.0 - cells));
+    c = min(c, 1.0);
+    // The billows: where Perlin-Worley, lifted by its cells' fbm, stands
+    // over the threshold the cover and the profile set, the share of the
+    // footprint that does (one cloud's edge close to, a field's cover from
+    // afar).
+    float lowFbm = n.y * 0.65 + n.z * 0.35;
+    float lo = (lowFbm - 1.0) * 0.5;
     float thr = lo + (1.0 - lo) * (1.0 - c) / max(grad, 1e-3);
-    if (thr >= 1.0) return 0.0;
-    float share = cloudNoiseAbove(n, thr);
-    if (share <= 0.0) return 0.0;
-    // The edges eroded by finer cells, wisps at the base and billows
-    // above, while they are finer than the footprint.
-    float far = smoothstep(0.03, 0.1, q.footprint / T2);
-    if (far < 1.0) {
-        vec4 e = cloudNoise((q.p + drift * 1.4) / T2, q.footprint / T2);
-        float fine = e.y * 0.7 + e.z * 0.3;
-        fine = mix(1.0 - fine, fine, clamp(hr * 6.0, 0.0, 1.0));
-        float edge = clamp((n.x - thr) / (1.0 - thr), 0.0, 1.0);
-        share *= mix(clamp(cloudRemap(edge, fine * 0.3, 1.0, 0.0, 1.0) * 4.0, 0.0, 1.0), 1.0, far);
+    float share = thr >= 1.0 ? 0.0 : cloudNoiseAbove(n, thr);
+    const float SIGMA = 0.06;   // a cloud's heart, per metre
+    // Close to (what a pixel sees finer than a cloud's billows): its body
+    // denser inward from its edge, the edge eroded by finer cells into
+    // cauliflower above and wisps at its base, sharp where they are wider
+    // than the footprint.
+    float near = 1.0 - smoothstep(T1 / 80.0, T1 / 10.0, q.footprint);
+    if (near >= 1.0 && share <= 0.0) return 0.0;
+    float sigma = 0.0;
+    if (near > 0.0 && share > 0.0) {
+        float body = clamp((n.x - thr) / max(1.0 - thr, 1e-3), 0.0, 1.0);
+        vec4 e = cloudNoise(p * vec3(1.0, 1.3, 1.0) / T2 + vec3(0.0, 0.0, q.time * 0.002), q.footprint / T2);
+        float fine = e.y * 0.6 + e.z * 0.4;
+        fine = mix(1.0 - fine, fine, smoothstep(0.0, 0.2, hr));
+        float d = clamp(cloudRemap(body, fine * 0.45, 1.0, 0.0, 1.0), 0.0, 1.0);
+        sigma = SIGMA * smoothstep(0.0, 0.25, d) * grad;
     }
-    // The light a footprint lets through over a path L in the deck: what
-    // its clouds leave (opaque at heart) where they are, all of it between
-    // them; as an extinction, so a cumulus field from orbit, and its
-    // shadow, lets through the sky between its clouds.
-    const float SIGMA = 0.05;   // a cloud's heart, per metre
-    float L = clamp(q.footprint, 20.0, DECK * top * 0.6);
+    if (near >= 1.0) return sigma;
+    // From afar: the light a footprint lets through over a path L in the
+    // deck, what its clouds leave (opaque at heart) where they are and all
+    // of it between them; as an extinction, so a cumulus field from orbit,
+    // and its shadow, lets through the sky between its clouds. (Its share
+    // the field's at the deck's middle, faded by the profile: a cloud's top,
+    // where the threshold climbs steeply, is finer than a far view's steps,
+    // and cut by them it would show their heights as contours.)
+    float thrMid = lo + (1.0 - lo) * (1.0 - c);
+    float farShare = thrMid >= 1.0 ? 0.0 : cloudNoiseAbove(n, thrMid) * grad;
+    share = mix(farShare, share, near);
+    float L = clamp(q.footprint, 20.0, DECK * (top - base) * 0.6);
     float through = 1.0 - share * (1.0 - exp(-SIGMA * L));
-    return -log(max(through, 1e-4)) / L;
+    return mix(-log(max(through, 1e-4)) / L, sigma, near);
 }
 `;
-scene.setClouds({ module: CLOUDS, bottom: CLOUD_BOTTOM, top: CLOUD_TOP, data: LOWS, land });
+scene.setClouds({ module: CLOUDS, bottom: CLOUD_BOTTOM, top: CLOUD_TOP, data: LOWS, land,
+                  enabled: !((bro.app && bro.app.argv) || []).includes('noclouds') });
 
 // --- views ---------------------------------------------------------------------------
 

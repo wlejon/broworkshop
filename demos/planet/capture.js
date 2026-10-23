@@ -54,17 +54,23 @@ if (mode === 'still') {
         step(1.0);
         perf.gpuFrameMs();
         const ms = [];
-        const sums = {};
+        const sums = {}, mins = {};
         for (let i = 0; i < 60; i++) {
             advanceTime(1000 / fps);
             ms.push(perf.gpuFrameMs());
             const p = (perf.gpuPasses && perf.gpuPasses()) || {};
-            for (const k in p) if (typeof p[k] === 'number') sums[k] = (sums[k] || 0) + p[k];
+            for (const k in p) {
+                if (typeof p[k] !== 'number') continue;
+                sums[k] = (sums[k] || 0) + p[k];
+                mins[k] = Math.min(mins[k] ?? Infinity, p[k]);
+            }
         }
         const top = Object.entries(sums).sort((a, b) => b[1] - a[1]).slice(0, 8)
             .map(([k, v]) => `${k} ${(v / 60).toFixed(2)}`).join(', ');
         console.log(`${shot} passes: ${top}`);
-        const clouds = ['clouds', 'clouds-prepare'].map((k) => `${k} ${((sums[k] || 0) / 60).toFixed(3)}`).join(', ');
+        // (Each pass's mean, and its least: a frame the GPU's clock held up.)
+        const clouds = ['clouds', 'clouds-prepare']
+            .map((k) => `${k} ${((sums[k] || 0) / 60).toFixed(3)} (least ${(mins[k] ?? 0).toFixed(3)})`).join(', ');
         console.log(`${shot} clouds: ${clouds}`);
         ms.sort((a, b) => a - b);
         const mean = ms.reduce((a, b) => a + b, 0) / Math.max(ms.length, 1);
