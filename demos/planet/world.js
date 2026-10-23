@@ -353,6 +353,10 @@ const WEATHER = fbm(1.4e6, 5, 41, 0.55), SHOWERS = fbm(2.6e5, 4, 42);
 //          high their tops reach (of the deck), w how much they lie in
 //          closed cells (marine stratocumulus)
 export const CLOUD_BOTTOM = 2500, CLOUD_TOP = 10500;
+// (How many metres the clouds' base takes to rise across their surfaces:
+// the engine's billows and detail move the surface by a fifth of it, some
+// 150 m each way.)
+const CLOUD_EDGE = 1500;
 const CLOUDS = WEATHER.glsl({ name: 'cloudWeather', dims: [3] }) + SHOWERS.glsl({ name: 'cloudShowers', dims: [3] }) + `
 const int LOWS = ${LOWS.length / 8};
 const float R = ${R}.0;
@@ -457,10 +461,97 @@ vec4 cloudCover(vec3 up) {
     return vec4(cover, convect, tops, sc * (1.0 - front));
 }
 
+vec3 heapHash(vec3 p) {
+    p = fract(p * vec3(0.1031, 0.1030, 0.0973));
+    p += dot(p, p.yxz + 33.33);
+    return fract((p.xxy + p.yxx) * p.zyx);
+}
+
+// How far (m) a point v (m, from the ellipsoid's centre: horizontal x,
+// vertical y) is inside an ellipsoid of half-axes r across and hgt up,
+// at most (negative: outside); it changes no faster than the distance does.
+float ellipsoidIn(vec2 v, float r, float hgt) {
+    return (1.0 - length(v / max(vec2(r, hgt), 1.0))) * max(min(r, hgt), 1.0);
+}
+
+// The heaps: a cumulus about each point of a lattice HEAP_CELL metres a
+// side that lies near the deck's bottom (so every view of a place sees
+// the same ones), and a second one about it where the cover is fuller,
+// each where the cover says there is one: half an ellipsoid on a flat base
+// with two towers on it, as wide as the cover is full and as tall as the
+// tops reach (each its own; towers only where the tops are high), the heap
+// shrinking to nothing as the cover thins (none cut off). How far (m) a
+// point at direction \`dir\` and \`z\` metres up the deck is inside the
+// nearest, at most (negative: outside), its base BASE_SHARP times as
+// steep (the bases flat: the engine's skin moves them little).
+const float CLOUD_EDGE = ${CLOUD_EDGE}.0;
+const float HEAP_CELL = 2500.0;
+const float HEAP_SHELL = 0.35;   // the lattice's points within this many cells of the deck's bottom
+const float BASE_SHARP = 3.0;
+float heaps(vec3 dir, float z, float base, float tops, float cover) {
+    const float rb = R + ${CLOUD_BOTTOM}.0, rc = rb / HEAP_CELL;
+    vec3 g = dir * rc;
+    vec3 c0 = floor(g);
+    float zr = z - base;
+    float tall = smoothstep(0.25, 0.9, tops / ${CLOUD_TOP - CLOUD_BOTTOM}.0);
+    // (A heap about a point beyond the cells searched is a cell off at
+    // least, less its reach; and none reaches over its towers' tops.)
+    float best = -max(0.35 * HEAP_CELL, zr - 1.2 * min(tops - base, 0.55 * HEAP_CELL * mix(0.8, 2.6, tall)));
+    for (int i = 0; i < 54; ++i) {
+        int j = i % 27, second = i / 27;
+        vec3 cell = c0 + vec3(j % 3, (j / 3) % 3, j / 9) - 1.0;
+        vec3 a = heapHash(cell + 31.7 * float(second));
+        float present = second == 0 ? smoothstep(0.0, 0.6, cover) : smoothstep(0.4, 0.9, cover);
+        float grow = smoothstep(a.x, a.x + 0.15, present);
+        if (grow <= 0.0) continue;
+        vec3 b = heapHash(cell + 17.31 + 31.7 * float(second));
+        vec3 at = cell + 0.15 + 0.7 * b;
+        float la = length(at);
+        if (abs(la - rc) > HEAP_SHELL) continue;
+        vec3 au = at / la;
+        // (The point from the heap's foot, on the plane tangent there.)
+        vec3 v = (dir - au) * rb;
+        vec3 east = normalize(cross(vec3(0.0, 1.0, 0.0), au) + 1e-5);
+        vec3 north = cross(au, east);
+        vec2 hz = vec2(dot(v, east), dot(v, north));
+        float r = HEAP_CELL * mix(0.42, 0.55, cover) * mix(0.8, 1.0, a.y) * grow;
+        float hgt = min((tops - base) * mix(0.5, 1.0, a.z), r * mix(0.8, 2.6, tall));
+        float d = ellipsoidIn(vec2(length(hz), zr), r, hgt);
+        // The towers: over the body, a little off its middle each way.
+        float ang = 6.2832 * b.z;
+        vec2 o = vec2(cos(ang), sin(ang)) * 0.4 * r;
+        d = max(d, ellipsoidIn(vec2(length(hz - o), zr - 0.45 * hgt), 0.55 * r, 0.75 * hgt));
+        d = max(d, ellipsoidIn(vec2(length(hz + 0.8 * o.yx * vec2(-1.0, 1.0)), zr - 0.3 * hgt), 0.45 * r, 0.6 * hgt));
+        best = max(best, d);
+    }
+    return min(best, zr * BASE_SHARP);
+}
+
+// The share of the air the heaps fill at \`z\` metres up the deck, on the
+// mean (what the far deck reads: as heaps() makes them), rising over the
+// first 300 m from their bases; under 0 below and above them, by how far.
+float heapsShare(float z, float base, float tops, float cover) {
+    float tall = smoothstep(0.25, 0.9, tops / ${CLOUD_TOP - CLOUD_BOTTOM}.0);
+    float r = HEAP_CELL * mix(0.42, 0.55, cover) * 0.9;
+    float hgt = max(min((tops - base) * 0.75, r * mix(0.8, 2.6, tall)) * 1.1, 300.0);
+    float n = 2.0 * HEAP_SHELL * (smoothstep(0.0, 0.6, cover) + smoothstep(0.4, 0.9, cover));
+    float area = 3.1416 * r * r / (HEAP_CELL * HEAP_CELL) * 1.15;
+    float s0 = 1.0 - exp(-n * area);
+    float zr = z - base, hr = zr / hgt;
+    if (zr < 0.0) return zr * BASE_SHARP / CLOUD_EDGE;
+    if (hr > 1.0) return (hgt - zr) / CLOUD_EDGE;
+    return min(s0 * zr / 300.0, s0 * (1.0 - hr * hr));
+}
+
+// The base: where the footprint is finer than the clouds, their shapes
+// (the heaps, or a front's or a deck's slab with its own relief), rising
+// from none to all over CLOUD_EDGE metres across their surfaces; where it
+// is wider, the share of the air they fill there.
 float cloudDensity(CloudPoint q) {
     float c = q.cover.x;
     if (c < 0.01) return 0.0;
     float convect = q.cover.y, cells = q.cover.w, h = q.height;
+    const float DECK = ${CLOUD_TOP - CLOUD_BOTTOM}.0;
     // (Carried by the wind, as the engine's forms are.)
     vec3 p = cloudDrift(q.p);
     // The mesoscale, 160 km a tile: the decks' closed cells (40 km, their
@@ -471,24 +562,39 @@ float cloudDensity(CloudPoint q) {
     // lower region by region (so a far field's bases are no ruled line).
     float base = 0.01 + 0.08 * meso.z;
     float top = base + max(q.cover.z, 0.06) * (1.0 - base);
-    if (h <= base || h >= top) return 0.0;
-    float hr = (h - base) / (top - base);
-    // A flat base; a cumulus rounds toward its top, a slab is cut square.
-    float grad = smoothstep(0.0, mix(0.12, 0.05, convect), hr) * (1.0 - smoothstep(mix(0.7, 0.35, convect), 1.0, hr));
     // The decks' closed cells; the fields' clusters (where the noise's
     // cells crowd them, the sky clear between).
     c *= mix(1.0, smoothstep(0.25, 0.55, meso.y), cells);
     c *= mix(1.0, 0.75 + 0.5 * meso.x, convect * (1.0 - cells));
     c = min(c, 1.0);
-    // What the billows fill: the cover where the profile is whole, less
-    // toward its ends (so the billows' threshold climbs to the tops and
-    // they round off there).
-    return max(1.0 - (1.0 - c) / max(grad, 1e-3), 0.0);
+    // Heaped where the air is convective; in slabs (a front's, a low's
+    // heart, a deck) where it is not.
+    float wHeap = smoothstep(0.1, 0.35, convect);
+    float z = h * DECK, zb = base * DECK, zt = top * DECK;
+    // From afar: the share of the air the clouds fill (a slab cut nearly
+    // square, its top a little ragged on the mean), under 0 below and over
+    // them, by how far.
+    float slabFar = smoothstep(0.42, 0.58, c) * min(min((z - zb) / 500.0, (zt - z) / 600.0), 1.0);
+    float far = max(heapsShare(z, zb, zt, c) * wHeap, slabFar * (1.0 - wHeap));
+    float fn = smoothstep(0.15 * HEAP_CELL, 0.6 * HEAP_CELL, q.footprint);
+    if (fn >= 1.0) return far;
+    // Near: the shapes. The slab's top heaves a few hundred metres over
+    // some kilometres, its base less; where the cover is broken it parts
+    // (the decks' cells, the fronts' edges).
+    vec4 relief = cloudNoise(p / 9000.0, q.footprint / 9000.0);
+    float st = zt - 700.0 * relief.x - 250.0 * relief.z;
+    float sb = zb + 150.0 * relief.y;
+    float slab = min(min((z - sb) * BASE_SHARP, st - z), (c - 0.5) * 6000.0);
+    float heap = wHeap > 0.0 ? heaps(normalize(p), z, zb, zt, c) : -1e5;
+    float sd = max(heap - 3000.0 * (1.0 - wHeap), slab - 3000.0 * wHeap);
+    // (Under 0 in the clear air, by how far the nearest cloud is, which the
+    // engine's march steps by.)
+    return mix(min(0.5 + sd / CLOUD_EDGE, 1.0), far, fn);
 }
 `;
 // (The clouds drift east, and a little north, at some 10 m/s.)
 scene.setClouds({ module: CLOUDS, bottom: CLOUD_BOTTOM, top: CLOUD_TOP, data: LOWS, land,
-                  forms: { extinction: 0.06, billowScale: 12000, detailScale: 1600, detail: 0.45 },
+                  forms: { extinction: 0.06, billowScale: 2400, detailScale: 1200, edge: CLOUD_EDGE },
                   wind: [9, 0, -3],
                   enabled: !((bro.app && bro.app.argv) || []).includes('noclouds') });
 
