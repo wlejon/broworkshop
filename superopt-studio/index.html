@@ -61,12 +61,25 @@
         }
         .badge-pill.ok { background: #163828; color: #7fe6a8; border: 1px solid #2b6a4b; }
         .badge-pill.err { background: #3b181d; color: #ff9494; border: 1px solid #752a35; }
+        .preset-pills { display: flex; gap: 4px; align-items: center; }
+        .preset-pill {
+            padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;
+            background: #131924; color: #97a1b2; border: 1px solid var(--k-border); cursor: pointer;
+        }
+        .preset-pill.active { background: #1d3557; color: #e2eaff; border-color: #5c9dff; }
     </style>
 </head>
 <body class="k-app">
     <header class="k-header">
-        <h1>Prover-Backed JS Superoptimizer & Rewriter Studio</h1>
-        <label class="k-field">Wild Preset
+        <h1>BRONZE // VERIFIED SUPEROPTIMIZER &amp; SOURCE REWRITER STUDIO</h1>
+        <div class="preset-pills" id="presetPills">
+            <button class="preset-pill active" data-preset="branchy_abs">1: Bit-Hacks</button>
+            <button class="preset-pill" data-preset="poly_soup">2: Guard Soup</button>
+            <button class="preset-pill" data-preset="deforest">3: Deforest</button>
+            <button class="preset-pill" data-preset="auto_kernel">4: @kernel</button>
+            <button class="preset-pill" data-preset="hazard_trap">5: Hazard Trap</button>
+        </div>
+        <label class="k-field">Preset
             <select id="presetSelect">
                 <option value="branchy_abs">1. Branchy Bit-Twiddling & Abs (CEGIS Superopt)</option>
                 <option value="poly_soup">2. Defensive Guard & Polymorphic Math Soup (SMT + Horner)</option>
