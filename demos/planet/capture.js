@@ -5,7 +5,13 @@
 //   ... capture.js -- cost [shot[,shot...]]
 //       GPU ms held at each shot (mean / median / max of 60 frames after an
 //       eight-second warm and the plants placed), and its costliest passes
-import { SHOTS, setShot, land, plants, scene } from "/app/world.js";
+//   ... capture.js -- climb [steps=4]
+//       captures/planet_climb<i>.png: the eye from region's (90 km) to
+//       orbit's (18000 km) in `steps` views between, its height growing
+//       by the same ratio each and its view turning down from region's
+//       slant to orbit's nadir as evenly: whether anything pops or changes
+//       character on the way up
+import { SHOTS, setShot, holdView, land, plants, scene } from "/app/world.js";
 
 const argv = (bro.app && bro.app.argv) || [];
 const OUT = bro.resolvePath('/app/captures').replace(/\\/g, '/');
@@ -43,6 +49,21 @@ if (mode === 'still') {
         screenshot(`${OUT}/planet_${shot}.png`);
         const cs = scene.cullStats();
         console.log(`${shot}: captures/planet_${shot}.png ev ${cs.exposureEv?.toFixed(2)} (metered ${cs.meteredEv?.toFixed(2)})${JSON.stringify(land.landStats())}`);
+    }
+} else if (mode === 'climb') {
+    const steps = +(opt('steps') || 4);
+    const pitch0 = Math.atan2(9e4, 2.4e5);
+    for (let i = 1; i <= steps; i++) {
+        const t = i / (steps + 1);
+        const h = 9e4 * Math.pow(1.8e7 / 9e4, t);
+        const p = pitch0 + (Math.PI / 2 - pitch0) * t;
+        const dir = [0, -Math.sin(p), -Math.cos(p)];
+        setShot('region');
+        holdView([0, h, 0], [dir[0] * h, h + dir[1] * h, dir[2] * h], Math.max(50, h * 1e-3), 6e7,
+                 [0, Math.cos(p), -Math.sin(p)]);
+        step(+(opt('warm') || 4.0));
+        screenshot(`${OUT}/planet_climb${i}.png`);
+        console.log(`climb ${i}: ${Math.round(h / 1000)} km, ${(p * 180 / Math.PI).toFixed(0)} deg down`);
     }
 } else if (mode === 'cost') {
     for (const shot of shotsOf(argv[1])) {

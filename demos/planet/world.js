@@ -334,12 +334,17 @@ const WEATHER = fbm(1.4e6, 5, 41, 0.55), SHOWERS = fbm(2.6e5, 4, 42);
 // The deck from 2.5 km to 10.5 km (its bases over the hills and the low
 // view's eye). Its cover by the general circulation and
 // the climate the land's processes reckon (channel 1's w, how wet; x the
-// ground, under the sea too): the rain belt over the equator, its towers
-// and anvils; the subtropics' highs clear over the deserts, with sheets of
-// stratocumulus in cells over the sea; the westerlies' storm tracks, each
-// low wound into a comma with its cold front trailing a long band
-// equatorward and west and its warm front's shield to the east; fair
-// weather's cumulus over moist land; thin cloud over the poles' ice.
+// ground, under the sea too): the rain belt a narrow broken line north of
+// the equator, clusters of towers and anvils; the subtropics' highs clear,
+// but for the trades' cumulus over the sea and sheets of stratocumulus in
+// cells off the western coasts (land to the east); the westerlies' storm
+// tracks, each low a comma, its head wound about its centre, its cold
+// front trailing a long curved band equatorward and west some thousands of
+// kilometres and its warm front's shield to the east, the cold air's open
+// cells behind; fair weather's cumulus over moist land; thin cloud over the
+// poles' ice. Every shape read through a bent direction (cloudBent), so no
+// edge is ruled, and every share a mean over the footprint, so from orbit
+// a field of heaps is a veil at its cover.
 // Its base at a point: the cover, gathered into the decks' closed cells
 // and the fields' clusters (a mesoscale noise 160 km a tile), from a base
 // a few hundred metres over the deck's bottom to tops as high as the cover
@@ -375,50 +380,111 @@ vec3 swirled(vec3 d, out float heart) {
         float s = acos(clamp(dot(d, a.xyz), -1.0, 1.0)) / b.x;
         d = turnAbout(d, a.xyz, a.w * exp(-s * s));
         // (A tropical cyclone's eye is clear, a few tens of kilometres.)
-        heart = max(heart, b.y * exp(-0.5 * s * s) * mix(1.0, smoothstep(0.06, 0.16, s), b.z));
+        // (A westerly low's heart is its comma's: lowCommas.)
+        heart = max(heart, b.y * exp(-0.5 * s * s) * mix(0.4, smoothstep(0.06, 0.16, s), b.z));
     }
     return d;
 }
 
-// The fronts of the westerlies' lows (the extratropical ones, no eye): in
-// each low's frame (x east, y poleward, in its sizes), the cold front a
-// band trailing equatorward and bending west some two and a half sizes,
-// narrowing away from the low, and the warm front's broad shield east of
-// it, poleward of its line. Their cover, the strongest of any low's.
-float lowFronts(vec3 d) {
-    float best = 0.0;
+// A soft band: 1 within half of \`w\` of its line, 0 from \`w\` on.
+float bandOf(float d, float w) { return smoothstep(w, 0.25 * w, d); }
+
+// The westerlies' lows (the extratropical ones, no eye), each a comma, in
+// its frame (x east, y poleward, in its sizes; so the south's mirror the
+// north's and turn the other way): the cold front a band trailing
+// equatorward and west some three and a half sizes (a few thousand
+// kilometres), narrowing away from the low; the warm conveyor up it to the
+// triple point and on, wound about the low's centre once the way the air
+// turns into the comma's head, narrowing as it winds in, its heart
+// overcast; the warm front's shield poleward of its line, east of the
+// triple point; the dry slot the clear wedge between the head's tail and
+// the cold front. Behind the cold front the cold air's open cells. x the
+// overcast (slabs: a front's nimbostratus), y the open cells' share
+// (heaps), z how much of either is a low's.
+vec3 lowCommas(vec3 d) {
+    vec3 best = vec3(0.0);
     for (int i = 0; i < LOWS; ++i) {
         vec4 a = cloudData(2 * i), b = cloudData(2 * i + 1);
         if (b.z > 0.5) continue;
         vec3 c = a.xyz;
         float cd = dot(d, c);
-        if (cd < 0.5) continue;
+        if (cd < 0.4) continue;
         float hemi = sign(a.w);
         vec3 north = normalize(vec3(0.0, 1.0, 0.0) - c * c.y);
-        vec3 east = cross(north, c);
+        vec3 east = cross(c, north);
         vec3 v = (d - c * cd) / cd;   // (on the plane tangent at the low)
-        float x = dot(v, east) / b.x, y = dot(v, north) * hemi / b.x;
-        // The cold front: x(s) = -0.15 s - 0.22 s^2 at y = -s.
-        float s = clamp(-y, 0.0, 2.6);
-        float slope = -0.15 - 0.44 * s;
-        float dist = abs(x - (-0.15 * s - 0.22 * s * s)) / sqrt(1.0 + slope * slope);
-        float width = mix(0.3, 0.12, s / 2.6);
-        float cold = smoothstep(width, 0.3 * width, dist) * smoothstep(2.6, 1.8, -y) * smoothstep(0.15, -0.05, y);
-        // The warm front: its line east and a little equatorward, its
-        // shield the cloud poleward of the line (some 300 km of it).
-        float yl = -0.35 * x;
-        float warm = smoothstep(-0.1, 0.05, x) * smoothstep(1.4, 0.8, x) * smoothstep(-0.12, 0.05, y - yl) *
-                     smoothstep(0.55, 0.3, y - yl);
-        best = max(best, max(cold, 0.9 * warm));
+        vec2 q = vec2(dot(v, east), dot(v, north) * hemi) / b.x;
+        float r = length(q);
+        if (r > 4.5) continue;
+        // The cold front: x(s) = 0.35 - 0.1 s - 0.2 s^2 at y = -0.25 - s.
+        float s = clamp(-q.y - 0.25, 0.0, 3.4);
+        float slope = -0.1 - 0.4 * s;
+        float dist = abs(q.x - (0.35 - 0.1 * s - 0.2 * s * s)) / sqrt(1.0 + slope * slope);
+        float cold = bandOf(dist, mix(0.3, 0.13, s / 3.4)) * smoothstep(3.4, 2.6, s) * smoothstep(0.15, -0.05, q.y + 0.25);
+        // The comma's head: from the triple point (east and a little
+        // equatorward of the centre) about the north and west, once, its
+        // radius falling from 0.8 to 0.15 sizes and its width with it.
+        float ang = atan(q.y, q.x);
+        float u = fract((ang + 0.45) / 6.2832);
+        float rh = 0.8 * exp(-1.7 * u);
+        float head = bandOf(abs(r - rh), mix(0.5, 0.14, u)) * smoothstep(1.0, 0.8, u);
+        float core = smoothstep(0.32, 0.12, r);
+        // The warm front's shield: poleward of its line from the triple
+        // point east and a little equatorward, some 0.9 sizes deep.
+        float yl = -0.25 - 0.3 * (q.x - 0.35);
+        float yr = q.y - yl;
+        float shield = smoothstep(-0.1, 0.08, yr) * smoothstep(0.95, 0.45, yr) * smoothstep(0.1, 0.4, q.x) *
+                       smoothstep(1.9, 1.2, q.x);
+        float over = max(max(cold, 0.95 * head), max(0.85 * shield, b.y * 1.6 * core));
+        // The cold air behind the front and under the head's tail: its
+        // open cells, a veil of cumulus.
+        float behind = smoothstep(0.1, 0.5, (0.35 - 0.1 * s - 0.2 * s * s) - q.x) * smoothstep(-0.2, 0.4, -q.y) *
+                       smoothstep(4.2, 2.8, r);
+        best = max(best, vec3(over, 0.55 * behind, smoothstep(4.5, 3.0, r)));
     }
     return best;
+}
+
+// The direction the weather's shapes are read at: bent by the engine's
+// noise (two turned tiles, some 1500 and 400 km) a few hundred kilometres
+// and less, so no front or deck has a ruled edge.
+vec3 cloudBent(vec3 d) {
+    vec3 p = d * R;
+    vec4 a = cloudNoise(p / 1.5e6, 1.0 / 16.0);
+    vec4 b = cloudNoise(vec3(p.z, p.x, p.y) / 4.1e5, 1.0 / 16.0);
+    vec3 e = normalize(cross(vec3(0.0, 1.0, 0.0), d) + 1e-5);
+    vec3 n = cross(d, e);
+    vec2 m = 0.035 * (a.yz - 0.5) + 0.012 * (b.yz - 0.5);
+    return normalize(d + e * m.x + n * m.y);
+}
+
+// How much land lies east of \`up\` within some 25 degrees, the nearer
+// weighing the more, and a little north and south of the line east: where
+// a subtropical ocean's cold eastern side lies. Smooth (a mean, not the
+// nearest coast's line), so a deck fades out westward.
+float landEast(vec3 up) {
+    vec3 e = normalize(cross(up, vec3(0.0, 1.0, 0.0)) + 1e-5);
+    vec3 nn = cross(e, up);
+    float sum = 0.0, wsum = 0.0;
+    for (int k = 1; k <= 16; ++k) {
+        float t = 0.027 * float(k), wk = 1.0 - 0.045 * float(k);
+        for (int j = -1; j <= 1; ++j) {
+            vec3 dk = normalize(up * cos(t) + e * sin(t) + nn * (0.04 * float(j)));
+            // (Land and the shelf sloping off it: the sea's depth is smooth
+            // where the coast's line is the grid's texels.)
+            sum += wk * smoothstep(-3000.0, 0.0, cloudLandGrid(1, dk).x);
+            wsum += wk;
+        }
+    }
+    return smoothstep(0.03, 0.5, sum / wsum);
 }
 
 vec4 cloudCover(vec3 up) {
     vec4 g = cloudLandGrid(1, up);
     float lat = asin(clamp(up.y, -1.0, 1.0)), al = abs(lat);
     float heart;
-    vec3 w = swirled(up, heart);
+    vec3 bent = cloudBent(up);
+    vec3 w = swirled(bent, heart);
     vec3 p = w * R;
     // The westerlies draw the weather out east and west.
     float storm = smoothstep(0.62, 0.8, al) * (1.0 - smoothstep(1.05, 1.22, al));
@@ -426,39 +492,60 @@ vec4 cloudCover(vec3 up) {
     float f = cloudShowers(p, 32) * 0.5 + 0.5;
     float sea = smoothstep(10.0, -40.0, g.x);
     float wet = max(g.w, 0.6 * sea);
-    // The general circulation by latitude: the rain belt (wandering a few
-    // degrees with the noise), the subtropics' highs, the storm tracks,
-    // the poles.
-    float itcz = exp(-pow((lat - 0.06 * (n - 0.5)) / 0.11, 2.0));
-    float subtrop = exp(-pow((al - 0.47) / 0.15, 2.0));
-    float polar = smoothstep(1.2, 1.38, al);
-    float cloudy = 0.02 + 0.55 * itcz + 0.3 * storm - 0.5 * subtrop - 0.35 * polar;
-    cloudy *= mix(0.35, 1.1, wet);
-    // The broken weather: where the noise lifts it, and every low's heart;
-    // most of the world either clear or overcast, broken between (a
-    // region's cover half and half is a grey veil from afar).
-    float cover = smoothstep(0.3, 0.75, cloudy + (n - 0.5) * 1.3 + (f - 0.5) * 0.35 + 0.65 * heart);
-    // The fronts: overcast bands, a thousand kilometres and more.
-    float front = lowFronts(up) * (0.85 + 0.3 * (f - 0.5));
-    cover = max(cover, front);
-    // The subtropics' marine stratocumulus: a low deck in closed cells over
-    // the cool sea under the highs.
-    float sc = sea * subtrop * (1.0 - smoothstep(0.7, 0.95, al)) * smoothstep(0.42, 0.62, f);
-    cover = max(cover, 0.9 * sc);
+    // Where the weather's systems are broken up (the rain belt's clusters,
+    // the decks' extent): the engine's soft billows, some 1200 and 2400 km
+    // a tile, so what they pick out is hundreds of kilometres across with
+    // soft edges, never the showers' finer octaves' speckle.
+    vec4 m1 = cloudNoise(p / 1.2e6, 1.0 / 16.0);
+    vec4 m2 = cloudNoise(vec3(p.y, p.z, p.x) / 2.4e6, 1.0 / 16.0);
+    // The rain belt: a narrow line a few degrees north of the equator,
+    // wandering, broken into clusters of towers and their anvils.
+    float itczLat = 0.08 + 0.07 * (n - 0.5);
+    float itcz = exp(-pow((lat - itczLat) / 0.05, 2.0));
+    vec4 mc = cloudNoise(p / 1.1e6, 1.0 / 64.0);   // (its cells some 280 km)
+    float clusters = smoothstep(0.3, 0.75, mc.y + 0.25 * (m1.x - 0.5));
+    float rain = itcz * mix(0.25, 1.0, clusters) * mix(0.6, 1.0, wet);
+    // The subtropics' highs: clear, but for the trades' cumulus over the
+    // sea and the decks of stratocumulus on the oceans' cold eastern sides
+    // (land to the east), thinning westward into the trades.
+    float subtrop = exp(-pow((al - 0.47) / 0.17, 2.0));
+    float tropics = 1.0 - smoothstep(0.45, 0.62, al);
+    float trades = sea * tropics * (0.24 + 0.16 * (m1.x - 0.5) + 0.05 * (f - 0.5)) * (1.0 - 0.6 * itcz);
+    float sc = sea * smoothstep(0.17, 0.3, al) * (1.0 - smoothstep(0.62, 0.78, al)) * landEast(up) *
+               smoothstep(0.3, 0.55, m2.x + 0.3 * (n - 0.5));
+    // The storm tracks: the lows' commas, and between them broken weather
+    // where the noise lifts it.
+    vec3 lows = lowCommas(bent);
+    float track = storm * (1.0 - 0.7 * lows.z);
+    float broken = track * smoothstep(0.5, 1.0, n + 0.3 * (m1.x - 0.5)) * 0.9;
+    float polar = smoothstep(1.2, 1.38, al) * smoothstep(0.35, 0.65, n) * 0.8;
+    // The tropical cyclones' and the lows' hearts.
+    float hearts = smoothstep(0.25, 0.7, heart);
+    // (Each thinned and parted here and there, a few hundred kilometres
+    // and less: an overcast's texture from afar, its breaks near.)
+    float grain = clamp(0.82 + 0.6 * (f - 0.5) + 0.3 * (m1.x - 0.5), 0.0, 1.0);
+    float over = max(max(lows.x, broken), max(polar, hearts)) * grain;
     // Fair weather's cumulus over temperate land that is not dry: the
     // summer afternoon's fields of them, the sky between.
     float fair = (1.0 - sea) * smoothstep(0.25, 0.6, g.w) * smoothstep(0.3, 0.5, al) * (1.0 - smoothstep(0.95, 1.15, al));
-    cover = max(cover, 0.52 * fair * (0.7 + 0.8 * (f - 0.5)));
-    // Heaped where the air is convective (warm, the rain belt, the trades,
-    // fair weather), in slabs in the fronts, the lows' hearts and the decks.
-    float convect = clamp(1.2 * (1.0 - smoothstep(0.35, 0.7, al)) + fair - 1.2 * heart - 1.5 * front - 1.5 * sc + 0.3 * (f - 0.5), 0.0, 1.0);
+    float heaps = max(max(trades, lows.y), max(0.52 * fair * (0.7 + 0.8 * (f - 0.5)), 0.6 * rain));
+    // The slabs: the fronts, the hearts, the broken weather, the decks and
+    // the rain belt's anvils; the heaps in the sky they leave.
+    float slabs = max(max(over, 0.9 * sc), rain * clusters * 0.95);
+    float cover = slabs + heaps * (1.0 - slabs);
+    // Heaped where the air is convective (the rain belt, the trades, fair
+    // weather, the cold air's cells): the share of the cover the heaps are
+    // (so a deck's edge into the trades blends, never switches), and the
+    // rain belt's towers.
+    float convect = clamp(heaps * (1.0 - slabs) / max(cover, 1e-3) + rain * 0.4, 0.0, 1.0);
     // How high the tops reach: the rain belt's towers, the trades' and
     // fair weather's low cumulus, a front's thick nimbostratus, the
     // stratocumulus' thin deck.
-    float towers = clamp(itcz * wet * 1.4 + 0.4 * (f - 0.5), 0.0, 1.0);
-    float tops = mix(0.35 + 0.3 * max(heart, front), mix(0.18, 0.95, towers), convect);
-    tops = mix(tops, 0.12, sc * (1.0 - front));
-    return vec4(cover, convect, tops, sc * (1.0 - front));
+    float towers = clamp(rain * 1.3 + 0.2 * (f - 0.5), 0.0, 1.0);
+    float tops = mix(0.4 + 0.3 * max(hearts, lows.x), mix(0.2, 0.95, towers), convect);
+    float cells = sc * (1.0 - over);
+    tops = mix(tops, 0.12, cells);
+    return vec4(cover, convect, tops, cells);
 }
 
 vec3 heapHash(vec3 p) {
@@ -574,7 +661,10 @@ float cloudDensity(CloudPoint q) {
     float top = base + max(q.cover.z, 0.06) * (1.0 - base);
     // The decks' closed cells; the fields' clusters (where the noise's
     // cells crowd them, the sky clear between).
-    c *= mix(1.0, smoothstep(0.25, 0.55, meso.y), cells);
+    // (Over a footprint as wide as the cells, their mean: a sheet as grey
+    // as they cover, never cut square by the mip's mean of them.)
+    float wide = smoothstep(2000.0, 12000.0, q.footprint);
+    c *= mix(1.0, mix(smoothstep(0.25, 0.55, meso.y), 0.7, wide), cells);
     c *= mix(1.0, 0.75 + 0.5 * meso.x, convect * (1.0 - cells));
     c = min(c, 1.0);
     // Heaped where the air is convective; in slabs (a front's, a low's
@@ -583,8 +673,10 @@ float cloudDensity(CloudPoint q) {
     float z = h * DECK, zb = base * DECK, zt = top * DECK;
     // From afar: the share of the air the clouds fill (a slab cut nearly
     // square, its top a little ragged on the mean), under 0 below and over
-    // them, by how far.
-    float slabFar = smoothstep(0.42, 0.58, c) * min(min((z - zb) / 500.0, (zt - z) / 600.0), 1.0);
+    // them, by how far; its edge softening as the footprint widens to tens
+    // of kilometres (the share of it the slab covers, never a hard cut).
+    float sw = mix(0.08, 0.3, wide);
+    float slabFar = smoothstep(0.5 - sw, 0.5 + sw, c) * min(min((z - zb) / 500.0, (zt - z) / 600.0), 1.0);
     float far = max(heapsShare(z, zb, zt, c) * wHeap, slabFar * (1.0 - wHeap));
     float fn = smoothstep(0.15 * HEAP_CELL, 0.6 * HEAP_CELL, q.footprint);
     if (fn >= 1.0) return far;
