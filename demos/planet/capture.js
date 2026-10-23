@@ -3,8 +3,8 @@
 //   bro-headless --width 1280 --height 720 demos/planet demos/planet/capture.js -- \
 //       still [shot[,shot...]]      captures/planet_<shot>.png
 //   ... capture.js -- cost [shot[,shot...]]
-//       GPU ms held at each shot (mean / median / max of 60 frames after a
-//       two-second warm)
+//       GPU ms held at each shot (mean / median / max of 60 frames after an
+//       eight-second warm and the plants placed), and its costliest passes
 import { SHOTS, setShot, land, plants, scene } from "/app/world.js";
 
 const argv = (bro.app && bro.app.argv) || [];
@@ -46,15 +46,23 @@ if (mode === 'still') {
 } else if (mode === 'cost') {
     for (const shot of shotsOf(argv[1])) {
         setShot(shot);
-        step(2.0);
+        step(8.0);
         setShot(shot);
         step(1.0);
+        for (let i = 0; i < 600 && plants.plantPlacement()?.pending > 0; i++) advanceTime(1000 / fps);
+        step(1.0);
+        perf.gpuFrameMs();
         const ms = [];
+        const sums = {};
         for (let i = 0; i < 60; i++) {
             advanceTime(1000 / fps);
-            const p = scene.perf && scene.perf();
-            if (p && p.gpuMs !== undefined) ms.push(p.gpuMs);
+            ms.push(perf.gpuFrameMs());
+            const p = (perf.gpuPasses && perf.gpuPasses()) || {};
+            for (const k in p) if (typeof p[k] === 'number') sums[k] = (sums[k] || 0) + p[k];
         }
+        const top = Object.entries(sums).sort((a, b) => b[1] - a[1]).slice(0, 8)
+            .map(([k, v]) => `${k} ${(v / 60).toFixed(2)}`).join(', ');
+        console.log(`${shot} passes: ${top}`);
         ms.sort((a, b) => a - b);
         const mean = ms.reduce((a, b) => a + b, 0) / Math.max(ms.length, 1);
         console.log(`${shot}: ${mean.toFixed(2)} / ${(ms[ms.length >> 1] || 0).toFixed(2)} / ${(ms[ms.length - 1] || 0).toFixed(2)} ms`);
