@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Bro Unified Compiler + Prover + Differentiable Engine Lab</title>
+    <link rel="stylesheet" href="/lib/kit/kit.css">
+    <style>
+        .k-side { width: 45%; min-width: 0; padding: 0; gap: 0; }
+        .pane-head {
+            display: flex; align-items: center; gap: 8px;
+            padding: 8px 12px; border-bottom: 1px solid var(--k-border);
+            background: #0e121a;
+        }
+        .pane-head h2 {
+            margin: 0; flex: 1; font-size: 11px; font-weight: 600;
+            letter-spacing: .6px; text-transform: uppercase; color: var(--k-muted);
+        }
+        #origCode, #rewrittenCode {
+            flex: 1; min-height: 175px; margin: 0; border: none; border-radius: 0; resize: none;
+            background: #090c11; color: #e2eaff; font-size: 12.5px; line-height: 1.5;
+            padding: 12px; white-space: pre; tab-size: 2; font-family: var(--k-font);
+        }
+        #rewrittenCode { color: #9effc4; background: #070b0f; }
+        #passList {
+            height: 170px; overflow-y: auto; padding: 10px 12px;
+            background: #0b0e14; border-top: 1px solid var(--k-border);
+            display: flex; flex-direction: column; gap: 6px;
+        }
+        .pass-card {
+            padding: 6px 10px; border-radius: 5px;
+            background: #121824; border-left: 3px solid #5c9dff;
+            font-size: 11px; line-height: 1.4;
+        }
+        .pass-card.hazard { border-left-color: #ff6b6b; background: #221216; }
+        .pass-card b { color: #cfe0ff; }
+        .metrics-grid {
+            display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
+            padding: 10px 12px; border-bottom: 1px solid var(--k-border);
+            background: #0d1118;
+        }
+        .metric-box {
+            background: #131924; border: 1px solid var(--k-border);
+            border-radius: 6px; padding: 8px 10px;
+        }
+        .metric-label { font-size: 10px; text-transform: uppercase; color: var(--k-dim); letter-spacing: .5px; }
+        .metric-val { font-size: 15px; font-weight: 700; color: var(--k-value); margin-top: 3px; }
+        .metric-sub { font-size: 11px; color: var(--k-ok); margin-top: 2px; }
+        .metric-sub.err { color: var(--k-err); }
+        #diffOutput {
+            margin: 0; padding: 10px 12px; height: 135px; overflow: auto;
+            background: #080a0f; color: #b5c4dc; font-size: 11.5px; line-height: 1.45;
+            border-top: 1px solid var(--k-border); white-space: pre-wrap;
+        }
+        #chartBox {
+            height: 205px; border-top: 1px solid var(--k-border);
+            background: #080b11; position: relative;
+        }
+        #vizCanvas { width: 100%; height: 100%; display: block; }
+        .badge-pill {
+            padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;
+        }
+        .badge-pill.ok { background: #163828; color: #7fe6a8; border: 1px solid #2b6a4b; }
+        .badge-pill.err { background: #3b181d; color: #ff9494; border: 1px solid #752a35; }
+        .tab-pills { display: flex; gap: 4px; align-items: center; }
+        .tab-pill {
+            padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;
+            background: #131924; color: #97a1b2; border: 1px solid var(--k-border); cursor: pointer;
+        }
+        .tab-pill.active { background: #1d3557; color: #e2eaff; border-color: #5c9dff; }
+    </style>
+</head>
+<body class="k-app">
+    <header class="k-header">
+        <h1>BRO // UNIFIED COMPILER + PROVER + DIFFERENTIABLE ENGINE LAB</h1>
+        <div class="tab-pills" id="tabPills">
+            <button class="tab-pill active" data-tab="inverse_world">1: Inverse World</button>
+            <button class="tab-pill" data-tab="diff_physics">2: Diff Physics</button>
+            <button class="tab-pill" data-tab="self_healing">3: Self-Healing</button>
+            <button class="tab-pill" data-tab="auto_evolve">4: Auto-Evolve</button>
+            <button class="tab-pill" data-tab="neuro_cegis">5: Neuro-CEGIS</button>
+            <button class="tab-pill" data-tab="p2p_capsule">6: P2P Capsule</button>
+        </div>
+        <label class="k-field">Capability
+            <select id="tabSelect">
+                <option value="inverse_world">1. Inverse Procedural World &amp; SDF Solver</option>
+                <option value="diff_physics">2. Differentiable Physics &amp; Trajectory Solver</option>
+                <option value="self_healing">3. Self-Healing Proof-Gated Live Coding</option>
+                <option value="auto_evolve">4. Autonomous Telemetry-Driven Kernel Evolution</option>
+                <option value="neuro_cegis">5. Neuro-Symbolic CEGIS Function Synthesis</option>
+                <option value="p2p_capsule">6. Trustless Proof-Carrying P2P Code Capsules</option>
+            </select>
+        </label>
+        <button id="solveBtn" class="primary">⚡ Synthesize &amp; Prove</button>
+        <div class="k-spacer"></div>
+        <span class="k-stats">
+            <span id="proofBadge" class="badge-pill ok">INVERSE WORLD CONVERGED</span>
+            <span>Cert: <b id="certHash">0x0000000000000000</b></span>
+        </span>
+    </header>
+
+    <div class="k-body">
+        <aside class="k-side">
+            <div class="pane-head">
+                <h2 id="inputHeaderLabel">Declarative Level Design Goals + Parametric Generator</h2>
+                <button id="resetBtn" class="small">Reset Spec</button>
+            </div>
+            <textarea id="origCode" spellcheck="false" autocomplete="off"></textarea>
+            <div class="pane-head">
+                <h2>Formal SMT / Auto-Diff / CEGIS Proof Steps</h2>
+                <span id="passCountBadge" class="ok">3 steps</span>
+            </div>
+            <div id="passList"></div>
+        </aside>
+
+        <main class="k-main">
+            <div class="metrics-grid">
+                <div class="metric-box">
+                    <div class="metric-label" id="mLabel0">SMT + AD Status</div>
+                    <div class="metric-val" id="mVal0">CONVERGED</div>
+                    <div class="metric-sub" id="mSub0">4/4 spatial goals met</div>
+                </div>
+                <div class="metric-box">
+                    <div class="metric-label" id="mLabel1">Residual Loss</div>
+                    <div class="metric-val" id="mVal1">184.2 → 4e-5</div>
+                    <div class="metric-sub" id="mSub1">12 Gauss-Newton steps</div>
+                </div>
+                <div class="metric-box">
+                    <div class="metric-label" id="mLabel2">Constraint Error</div>
+                    <div class="metric-val" id="mVal2">0.0018 rad</div>
+                    <div class="metric-sub" id="mSub2">&lt; 0.015 rad limit</div>
+                </div>
+                <div class="metric-box">
+                    <div class="metric-label" id="mLabel3">Solve Latency</div>
+                    <div class="metric-val" id="mVal3">1.84 ms</div>
+                    <div class="metric-sub" id="mSub3">Analytical Jacobian</div>
+                </div>
+            </div>
+
+            <div class="pane-head">
+                <h2 id="outputHeaderLabel">Solved Parameters &amp; Verified Output</h2>
+                <span id="targetModeLabel" class="ok">SMT Discrete + Auto-Diff L-BFGS</span>
+            </div>
+            <textarea id="rewrittenCode" readonly spellcheck="false"></textarea>
+
+            <div class="pane-head">
+                <h2>Symbolic Derivatives, Counterexample Witnesses &amp; Proof Trace</h2>
+            </div>
+            <pre id="diffOutput"></pre>
+
+            <div id="chartBox">
+                <canvas id="vizCanvas"></canvas>
+            </div>
+        </main>
+    </div>
+
+    <script type="module" src="app.js"></script>
+</body>
+</html>
