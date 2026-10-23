@@ -87,7 +87,7 @@ const float R = ${R}.0;
 // Channel 0: the land's height over its tree (x added, y the tree's scale).
 // Channel 1: x the ground's own height (under the sea too), y how near a
 // range it is (0 .. 1), z how far inland (0 the coast .. 1 a continent's
-// heart), w unused.
+// heart), w how wet (0 desert .. 1 rainforest).
 
 vec3 warped(vec3 d) {
     vec3 p = d * R;
@@ -159,8 +159,14 @@ void procInit(inout vec4 v[PROC_CHANNELS]) {
     // grassland, none in the sea), w how cold it is (the conifers' share).
     float lat = asin(clamp(d.y, -1.0, 1.0)), sl = sin(lat);
     float temp = 28.0 - 44.0 * sl * sl - 6.5 * max(ground, 0.0) / 1000.0;
-    float belts = 0.6 + 0.4 * cos(lat * 6.0) - 0.25 * smoothstep(0.75, 1.2, abs(lat));
-    float wet = clamp(belts * (1.2 - 0.75 * v[1].z), 0.0, 1.0);
+    // Wet at the equator and the westerlies' latitudes, dry under the
+    // subtropical highs and at the poles, wetter near the sea; and along a
+    // belt its weather's own wandering (a monsoon coast, a rain shadow), the
+    // warp's noise a continent across. Channel 1's w: the surface reads it.
+    float belts = 0.68 + 0.36 * cos(lat * 6.0) - 0.25 * smoothstep(0.75, 1.2, abs(lat));
+    float wander = 0.3 * warpNoise(d * R + vec3(3.3e6, -2.7e6, 1.9e6), 14);
+    float wet = clamp((belts + wander) * (1.15 - 0.6 * v[1].z), 0.0, 1.0);
+    v[1].w = wet;
     float warm = smoothstep(-2.0, 6.0, temp);
     float woods = max(smoothstep(0.5, 0.75, wet), 0.2 * smoothstep(0.3, 0.5, wet)) * warm * (1.0 - 0.7 * range);
     v[0].z = ground > 0.0 ? woods : 0.0;
@@ -199,10 +205,7 @@ LandSurface landSurface(LandPoint q) {
     float spread = 6.5 * share * hidden / 1000.0;
     #define COLD(warm, cold) smoothstep((warm) + spread, (cold) - spread, temp)
     #define WARM(cold, warm) smoothstep((cold) - spread, (warm) + spread, temp)
-    // Wet at the equator and the westerlies' latitudes, dry under the
-    // subtropical highs and at the poles; wetter near the sea.
-    float belts = 0.6 + 0.4 * cos(lat * 6.0) - 0.25 * smoothstep(0.75, 1.2, abs(lat));
-    float wet = clamp(belts * (1.2 - 0.75 * g.z), 0.0, 1.0);
+    float wet = g.w;   // the processes' (the plants' woods read the same)
     float steep = 1.0 - q.normal.y;
 
     vec3 desert = vec3(0.34, 0.23, 0.12), steppe = vec3(0.22, 0.19, 0.09), grass = vec3(0.10, 0.14, 0.04);
@@ -212,7 +215,11 @@ LandSurface landSurface(LandPoint q) {
     c = mix(c, grass, smoothstep(0.3, 0.5, wet));
     c = mix(c, forest, smoothstep(0.5, 0.75, wet) * WARM(-2.0, 6.0));
     c = mix(c, tundra, COLD(2.0, -6.0));
-    c = mix(c, rock, smoothstep(0.25, 0.5, steep));
+    // Bare rock where it is steep and high (a range, or above the trees):
+    // a lowland's steep hillsides are wooded or grassed over, not a net of
+    // grey crests across every hill.
+    float alpine = max(smoothstep(0.15, 0.5, g.y), COLD(4.0, -2.0));
+    c = mix(c, rock, smoothstep(0.3, 0.55, steep) * alpine);
     // Snow where the year is cold through: an ice sheet buries its relief,
     // bare only on the near-sheer faces (a crest's every crease flecked
     // dark where it gave way at the rock's own slope).
