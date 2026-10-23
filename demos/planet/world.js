@@ -4,6 +4,8 @@
 // is what that climate grows. The views and the capture script share it.
 import { sceneViewport, orbitRotation } from "/lib/kit/viewport3d.js";
 import { SUN_LUX, AIR } from "/lib/kit/sky.js";
+import { herbModule } from "/lib/herbs/index.js";
+import { swardModule } from "/lib/sward/index.js";
 import { treeModule, treeSpecies } from "/lib/trees/index.js";
 import { TEMPERATE, BROADLEAF, BIRCH, CONIFER, SHRUB, OAK, LIME } from "/lib/trees/temperate.js";
 
@@ -197,7 +199,7 @@ LandSurface landSurface(LandPoint q) {
     c = mix(c, snow, smoothstep(-6.0, -12.0, temp) * (1.0 - smoothstep(0.5, 0.8, steep)));
     LandSurface s = landSurfaceOf(c);
     float grows = smoothstep(0.15, 0.45, wet) * smoothstep(-4.0, 4.0, temp) * (1.0 - smoothstep(0.3, 0.55, steep));
-    s.cover = vec4(grows, 1.0 - smoothstep(0.3, 0.7, wet), 0.6 + 0.6 * wet, smoothstep(0.55, 0.8, wet) * grows);
+    s.cover = vec4(grows, 1.0 - smoothstep(0.15, 0.5, wet), 0.6 + 0.6 * wet, smoothstep(0.55, 0.8, wet) * grows);
     s.herbs = 0.3 * grows;
     return s;
 }
@@ -244,6 +246,14 @@ export const plants = scene.createPlants({
     },
 });
 plants.castsShadow = true;
+
+// The grass and herbs where the surface's cover grows them (its turf the
+// land's look out past the blades).
+export const grass = scene.createGrass({
+    ground: land, turf: true,
+    sward: swardModule({ lush: [0.08, 0.15, 0.035], dry: [0.26, 0.21, 0.08] }),
+    herbs: herbModule({ species: ['bracken', 'woodsorrel', { preset: 'daisy', abundance: 1.5 }, 'poppy'] }),
+});
 
 // The sun: a direction in the body's frame (the light's, from the sun),
 // turned into the place frame whenever the place moves.
