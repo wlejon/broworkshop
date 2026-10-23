@@ -45,16 +45,20 @@ LandSurface landSurface(LandPoint q) {
     // and tundra blob by blob from orbit.
     float share = smoothstep(0.3, 0.7, g.y);
     float temp = 28.0 - 44.0 * sl * sl - 6.5 * mix(max(g.x, 0.0), h, share) / 1000.0;
-    // The relief a texel this wide hides (the tree's octaves finer than it,
-    // at their mean in its height), as each line's spread over it: a far
-    // range's crests are a share of snow, not snow or rock texel by texel.
+    // The relief a texel this wide hides (the tree's grain and the regions'
+    // bands finer than it, at their mean in its height: terrain.js), as each
+    // line's spread over it: a far range's crests are a share of snow, not
+    // snow or rock texel by texel.
     float fp = q.footprint;
-    float hidden = landGrid(0, q.at).y * (160.0 * min(fp / 15000.0, 1.0) +520.0 * min(fp / 18000.0, 1.0) +
-                                          25.0 * min(fp / 1500.0, 1.0));
+    #define HIDES(cell, amp) ((amp) * smoothstep(1.0, 2.0, fp / (cell)))
+    float hidden = landGrid(0, q.at).y * (3.0 * min(fp / 120.0, 1.0) + HIDES(64.0, 30.0) + HIDES(256.0, 120.0) +
+                                          HIDES(1024.0, 330.0) + HIDES(4096.0, 520.0));
     float spread = 6.5 * share * hidden / 1000.0;
     #define COLD(warm, cold) smoothstep((warm) + spread, (cold) - spread, temp)
     #define WARM(cold, warm) smoothstep((cold) - spread, (warm) + spread, temp)
-    float wet = g.w;   // the processes' (the plants' woods read the same)
+    // The processes' (the plants' woods read the same), and wetter down the
+    // valleys where the drainage gathers (from a few km² of catchment).
+    float wet = clamp(g.w + 0.25 * smoothstep(0.5, 3.0, log(max(g.z, 1e-3)) / log(10.0)), 0.0, 1.0);
     float steep = 1.0 - q.normal.y;
 
     vec3 desert = vec3(0.34, 0.23, 0.12), steppe = vec3(0.22, 0.19, 0.09), grass = vec3(0.10, 0.14, 0.04);
@@ -74,8 +78,8 @@ LandSurface landSurface(LandPoint q) {
     // dark where it gave way at the rock's own slope).
     c = mix(c, snow, COLD(-8.0, -14.0) * (1.0 - smoothstep(0.65, 0.9, steep)));
 #ifdef DRAINAGE
-    // (The rivers' catchments: blue from 1000 km² to a million.)
-    c = mix(vec3(0.3, 0.28, 0.25), vec3(0.0, 0.05, 0.5), smoothstep(3.0, 6.0, log(max(landGrid(3, q.at).w, 1.0)) / log(10.0)));
+    // (The rivers' catchments: blue from 10 km² to a million.)
+    c = mix(vec3(0.3, 0.28, 0.25), vec3(0.0, 0.05, 0.5), smoothstep(1.0, 6.0, log(max(g.z, 1.0)) / log(10.0)));
 #endif
     LandSurface s = landSurfaceOf(c);
     float grows = smoothstep(0.15, 0.45, wet) * WARM(-4.0, 4.0) * (1.0 - smoothstep(0.3, 0.55, steep));

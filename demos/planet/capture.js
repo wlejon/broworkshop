@@ -11,6 +11,11 @@
 //       by the same ratio each and its view turning down from region's
 //       slant to orbit's nadir as evenly: whether anything pops or changes
 //       character on the way up
+//   ... capture.js -- fly [seconds=20]
+//       the eye from region's height (90 km) down to 1500 m over the first
+//       half, flying on at 6 km/s throughout, the land's regions made
+//       under it as it goes: each frame's GPU ms and wall ms, the worst
+//       frames, and captures/planet_fly.png at the end
 import { SHOTS, setShot, holdView, land, plants, scene } from "/app/world.js";
 
 const argv = (bro.app && bro.app.argv) || [];
@@ -45,7 +50,12 @@ if (mode === 'still') {
         step(1.0);
         // The plants about the view placed.
         for (let i = 0; i < 600 && plants.plantPlacement()?.pending > 0; i++) advanceTime(1000 / fps);
-        step(0.5);
+        // The land's regions about the view in, and its tiles made over them.
+        for (let i = 0; i < 4000 && land.landStats()?.regionsPending > 0; i++) advanceTime(1000 / fps);
+        let waited = 0;
+        for (; waited < 4000 && land.landStats()?.missing > 0; waited++) advanceTime(1000 / fps);
+        console.log(`${shot}: the land's tiles in after ${waited} frames`);
+        step(1.0);
         screenshot(`${OUT}/planet_${shot}.png`);
         const cs = scene.cullStats();
         console.log(`${shot}: captures/planet_${shot}.png ev ${cs.exposureEv?.toFixed(2)} (metered ${cs.meteredEv?.toFixed(2)})${JSON.stringify(land.landStats())}`);
@@ -65,6 +75,40 @@ if (mode === 'still') {
         screenshot(`${OUT}/planet_climb${i}.png`);
         console.log(`climb ${i}: ${Math.round(h / 1000)} km, ${(p * 180 / Math.PI).toFixed(0)} deg down`);
     }
+} else if (mode === 'fly') {
+    const seconds = +(opt('seconds') || 20), frames = Math.round(seconds * fps);
+    const ground = (x, z, up) => [x, land.landHeight(x, z) + up, z];
+    const at = (i) => {
+        const t = i / frames, h = 9e4 * Math.pow(1500 / 9e4, Math.min(t * 2, 1)), z = -6000 * t * seconds;
+        const eye = ground(0, z, h), look = ground(0, z - 3 * h, 0);
+        return { eye: eye.map((v) => (Number.isFinite(v) ? v : h)), look: look.map((v, k) => (Number.isFinite(v) ? v : eye[k] - (k === 2 ? 3 * h : k === 1 ? h : 0))), h };
+    };
+    setShot('region');
+    let v = at(0);
+    holdView(v.eye, v.look, 50, 4e6);
+    step(8.0);
+    for (let i = 0; i < 4000 && land.landStats()?.regionsPending > 0; i++) advanceTime(1000 / fps);
+    perf.gpuFrameMs();
+    const gpu = [], wall = [];
+    for (let i = 0; i <= frames; i++) {
+        v = at(i);
+        holdView(v.eye, v.look, Math.max(1, v.h * 5e-4), 4e6);
+        const t0 = performance.now();
+        advanceTime(1000 / fps);
+        wall.push({ ms: performance.now() - t0, i });
+        const p = (perf.gpuPasses && perf.gpuPasses()) || {};
+        const top = Object.entries(p).filter(([, x]) => typeof x === 'number').sort((a, b) => b[1] - a[1]).slice(0, 3)
+            .map(([k, x]) => `${k} ${x.toFixed(2)}`).join(', ');
+        gpu.push({ ms: perf.gpuFrameMs(), i, h: v.h, regions: land.landStats()?.regions, pending: land.landStats()?.regionsPending, top });
+    }
+    screenshot(`${OUT}/planet_fly.png`);
+    const worst = (a) => a.slice().sort((x, y) => y.ms - x.ms);
+    const mean = (a) => a.reduce((s, x) => s + x.ms, 0) / Math.max(a.length, 1);
+    const g = worst(gpu), w = worst(wall);
+    console.log(`fly: ${frames} frames; GPU mean ${mean(gpu).toFixed(2)} ms, p99 ${g[Math.floor(g.length / 100)].ms.toFixed(2)}, worst ${g.slice(0, 5).map((x) => `${x.ms.toFixed(2)}@${x.i} (${Math.round(x.h)} m, ${x.regions} in, ${x.pending} pending)`).join(', ')}`);
+    console.log(`fly: the worst frame's dearest passes: ${g[0].top}`);
+    console.log(`fly: wall mean ${mean(wall).toFixed(2)} ms, worst ${w.slice(0, 5).map((x) => `${x.ms.toFixed(1)}@${x.i}`).join(', ')}`);
+    console.log(`fly: end ${JSON.stringify(land.landStats())}`);
 } else if (mode === 'cost') {
     for (const shot of shotsOf(argv[1])) {
         setShot(shot);
@@ -93,6 +137,9 @@ if (mode === 'still') {
         const clouds = ['clouds', 'clouds-prepare']
             .map((k) => `${k} ${((sums[k] || 0) / 60).toFixed(3)} (least ${(mins[k] ?? 0).toFixed(3)})`).join(', ');
         console.log(`${shot} clouds: ${clouds}`);
+        const ground = Object.keys(sums).filter((k) => /land|world|terrain|ground/i.test(k))
+            .map((k) => `${k} ${(sums[k] / 60).toFixed(3)}`).join(', ');
+        console.log(`${shot} land: ${ground}`);
         ms.sort((a, b) => a - b);
         const mean = ms.reduce((a, b) => a + b, 0) / Math.max(ms.length, 1);
         console.log(`${shot}: ${mean.toFixed(2)} / ${(ms[ms.length >> 1] || 0).toFixed(2)} / ${(ms[ms.length - 1] || 0).toFixed(2)} ms`);
