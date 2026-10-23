@@ -340,11 +340,13 @@ const WEATHER = fbm(1.4e6, 5, 41, 0.55), SHOWERS = fbm(2.6e5, 4, 42);
 // low wound into a comma with its cold front trailing a long band
 // equatorward and west and its warm front's shield to the east; fair
 // weather's cumulus over moist land; thin cloud over the poles' ice.
-// Its clouds at a point (Schneider's Nubis): Perlin-Worley billows a few
-// kilometres across, cut by the cover, heaped where the air is convective
-// and laid in slabs where it is not, their edges eroded into cauliflower
-// by finer cells (wisps at their bases); seen from afar, the share of the
-// sky they cover.
+// Its base at a point: the cover, gathered into the decks' closed cells
+// and the fields' clusters (a mesoscale noise 160 km a tile), from a base
+// a few hundred metres over the deck's bottom to tops as high as the cover
+// says, rounding toward them where the air is convective and cut square
+// where it is not. The engine cuts it into billows (its Perlin-Worley,
+// 12 km a tile) and erodes their edges (cauliflower above, wisps at the
+// bases); from afar, the share of the sky they cover.
 //
 //   cover  x the share of the sky the clouds cover, y how convective they
 //          are (0 a front's or a deck's slab .. 1 heaped cumulus), z how
@@ -354,7 +356,6 @@ export const CLOUD_BOTTOM = 2500, CLOUD_TOP = 10500;
 const CLOUDS = WEATHER.glsl({ name: 'cloudWeather', dims: [3] }) + SHOWERS.glsl({ name: 'cloudShowers', dims: [3] }) + `
 const int LOWS = ${LOWS.length / 8};
 const float R = ${R}.0;
-const float DECK = ${CLOUD_TOP - CLOUD_BOTTOM}.0;
 
 vec3 turnAbout(vec3 d, vec3 c, float k) {
     float ck = cos(k), sk = sin(k);
@@ -460,8 +461,8 @@ float cloudDensity(CloudPoint q) {
     float c = q.cover.x;
     if (c < 0.01) return 0.0;
     float convect = q.cover.y, cells = q.cover.w, h = q.height;
-    // The clouds drift east (and a little north) at some 10 m/s.
-    vec3 p = q.p + vec3(-9.0, 0.0, 3.0) * q.time;
+    // (Carried by the wind, as the engine's forms are.)
+    vec3 p = cloudDrift(q.p);
     // The mesoscale, 160 km a tile: the decks' closed cells (40 km, their
     // rims clear) and the bases' slow rise and fall from place to place.
     const float TM = 160000.0;
@@ -471,13 +472,6 @@ float cloudDensity(CloudPoint q) {
     float base = 0.01 + 0.08 * meso.z;
     float top = base + max(q.cover.z, 0.06) * (1.0 - base);
     if (h <= base || h >= top) return 0.0;
-    // The billows, 12 km a tile (their cells 3 km).
-    const float T1 = 12000.0, T2 = 1600.0;
-    vec4 n = cloudNoise(p / T1, q.footprint / T1);
-    // Each cloud's own base, lowest under its middle (its cell's), so a
-    // slab's underside is lumpy and a field's bases are no one plane.
-    base += 0.035 * (1.0 - n.y) * (top - base);
-    if (h <= base) return 0.0;
     float hr = (h - base) / (top - base);
     // A flat base; a cumulus rounds toward its top, a slab is cut square.
     float grad = smoothstep(0.0, mix(0.12, 0.05, convect), hr) * (1.0 - smoothstep(mix(0.7, 0.35, convect), 1.0, hr));
@@ -486,47 +480,16 @@ float cloudDensity(CloudPoint q) {
     c *= mix(1.0, smoothstep(0.25, 0.55, meso.y), cells);
     c *= mix(1.0, 0.75 + 0.5 * meso.x, convect * (1.0 - cells));
     c = min(c, 1.0);
-    // The billows: where Perlin-Worley, lifted by its cells' fbm, stands
-    // over the threshold the cover and the profile set, the share of the
-    // footprint that does (one cloud's edge close to, a field's cover from
-    // afar).
-    float lowFbm = n.y * 0.65 + n.z * 0.35;
-    float lo = (lowFbm - 1.0) * 0.5;
-    float thr = lo + (1.0 - lo) * (1.0 - c) / max(grad, 1e-3);
-    float share = thr >= 1.0 ? 0.0 : cloudNoiseAbove(n, thr);
-    const float SIGMA = 0.06;   // a cloud's heart, per metre
-    // Close to (what a pixel sees finer than a cloud's billows): its body
-    // denser inward from its edge, the edge eroded by finer cells into
-    // cauliflower above and wisps at its base, sharp where they are wider
-    // than the footprint.
-    float near = 1.0 - smoothstep(T1 / 80.0, T1 / 10.0, q.footprint);
-    if (near >= 1.0 && share <= 0.0) return 0.0;
-    float sigma = 0.0;
-    if (near > 0.0 && share > 0.0) {
-        float body = clamp((n.x - thr) / max(1.0 - thr, 1e-3), 0.0, 1.0);
-        vec4 e = cloudNoise(p * vec3(1.0, 1.3, 1.0) / T2 + vec3(0.0, 0.0, q.time * 0.002), q.footprint / T2);
-        float fine = e.y * 0.6 + e.z * 0.4;
-        fine = mix(1.0 - fine, fine, smoothstep(0.0, 0.2, hr));
-        float d = clamp(cloudRemap(body, fine * 0.45, 1.0, 0.0, 1.0), 0.0, 1.0);
-        sigma = SIGMA * smoothstep(0.0, 0.25, d) * grad;
-    }
-    if (near >= 1.0) return sigma;
-    // From afar: the light a footprint lets through over a path L in the
-    // deck, what its clouds leave (opaque at heart) where they are and all
-    // of it between them; as an extinction, so a cumulus field from orbit,
-    // and its shadow, lets through the sky between its clouds. (Its share
-    // the field's at the deck's middle, faded by the profile: a cloud's top,
-    // where the threshold climbs steeply, is finer than a far view's steps,
-    // and cut by them it would show their heights as contours.)
-    float thrMid = lo + (1.0 - lo) * (1.0 - c);
-    float farShare = thrMid >= 1.0 ? 0.0 : cloudNoiseAbove(n, thrMid) * grad;
-    share = mix(farShare, share, near);
-    float L = clamp(q.footprint, 20.0, DECK * (top - base) * 0.6);
-    float through = 1.0 - share * (1.0 - exp(-SIGMA * L));
-    return mix(-log(max(through, 1e-4)) / L, sigma, near);
+    // What the billows fill: the cover where the profile is whole, less
+    // toward its ends (so the billows' threshold climbs to the tops and
+    // they round off there).
+    return max(1.0 - (1.0 - c) / max(grad, 1e-3), 0.0);
 }
 `;
+// (The clouds drift east, and a little north, at some 10 m/s.)
 scene.setClouds({ module: CLOUDS, bottom: CLOUD_BOTTOM, top: CLOUD_TOP, data: LOWS, land,
+                  forms: { extinction: 0.06, billowScale: 12000, detailScale: 1600, detail: 0.45 },
+                  wind: [9, 0, -3],
                   enabled: !((bro.app && bro.app.argv) || []).includes('noclouds') });
 
 // --- views ---------------------------------------------------------------------------
