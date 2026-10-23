@@ -297,6 +297,153 @@ scene.setAtmosphere(Object.assign({ enabled: true }, AIR));
 // and its snow white, from orbit to the grass.)
 scene.setExposure({ mode: 'auto', meter: 'incident' });
 
+// --- the clouds ---------------------------------------------------------------------
+
+// The weather's lows: where the air turns about a low, its clouds wind
+// into it (the westerlies' cyclones, a continent wide, and a few tropical
+// ones, tighter and faster), counter-clockwise in the north and clockwise
+// in the south. Two vec4s a low: its centre and turn (radians at its
+// heart), then its size (radians) and how overcast its heart is.
+const LOWS = (() => {
+    let s = (SEED * 7919) >>> 0;
+    const rnd = () => {
+        s = (s + 0x6D2B79F5) >>> 0;
+        let t = s;
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    const data = [];
+    const low = (lat, lon, turn, size, heart, eye) => {
+        const c = Math.cos(lat);
+        const hemi = lat >= 0 ? 1 : -1;
+        data.push(c * Math.cos(lon), Math.sin(lat), c * Math.sin(lon), hemi * turn, size, heart, eye, 0);
+    };
+    for (let i = 0; i < 22; i++) {
+        const lat = (rnd() < 0.5 ? -1 : 1) * (0.62 + 0.42 * rnd());
+        low(lat, rnd() * Math.PI * 2, 1.0 + 1.0 * rnd(), 0.12 + 0.08 * rnd(), 0.3 + 0.3 * rnd(), 0);
+    }
+    for (let i = 0; i < 3; i++) {
+        const lat = (rnd() < 0.5 ? -1 : 1) * (0.2 + 0.2 * rnd());
+        low(lat, rnd() * Math.PI * 2, 3.5 + 1.5 * rnd(), 0.04 + 0.015 * rnd(), 0.9, 1);
+    }
+    return data;
+})();
+const WEATHER = fbm(1.4e6, 5, 41, 0.55), SHOWERS = fbm(2.6e5, 4, 42);
+
+// The deck from 1.8 km to 10 km. Its cover by the climate the land's
+// processes reckon (channel 1's w, how wet; x the ground under the sea
+// too): the rain belt over the equator, the subtropics' highs clear over
+// the deserts with trade cumulus over the sea, the westerlies' fronts drawn
+// out east and west and wound into their lows, the poles' grey stratus.
+// Its clouds at a point: Perlin-Worley billows a few kilometres across,
+// their cells' edges eroded by finer cells, heaped where the air is
+// convective and laid in slabs where it is not; seen from afar, the share
+// of the sky they cover.
+export const CLOUD_BOTTOM = 1800, CLOUD_TOP = 10000;
+const CLOUDS = WEATHER.glsl({ name: 'cloudWeather', dims: [3] }) + SHOWERS.glsl({ name: 'cloudShowers', dims: [3] }) + `
+const int LOWS = ${LOWS.length / 8};
+const float R = ${R}.0;
+const float DECK = ${CLOUD_TOP - CLOUD_BOTTOM}.0;
+
+vec3 turnAbout(vec3 d, vec3 c, float k) {
+    float ck = cos(k), sk = sin(k);
+    return d * ck + cross(c, d) * sk + c * dot(c, d) * (1.0 - ck);
+}
+
+// The direction the weather's noise is read at: each low turns the air
+// about it, most at its heart, so what crosses it winds into a spiral.
+vec3 swirled(vec3 d, out float heart) {
+    heart = 0.0;
+    for (int i = 0; i < LOWS; ++i) {
+        vec4 a = cloudData(2 * i), b = cloudData(2 * i + 1);
+        float s = acos(clamp(dot(d, a.xyz), -1.0, 1.0)) / b.x;
+        d = turnAbout(d, a.xyz, a.w * exp(-s * s));
+        // (A tropical cyclone's eye is clear, a few tens of kilometres.)
+        heart = max(heart, b.y * exp(-0.5 * s * s) * mix(1.0, smoothstep(0.06, 0.16, s), b.z));
+    }
+    return d;
+}
+
+vec4 cloudCover(vec3 up) {
+    vec4 g = cloudLandGrid(1, up);
+    float lat = asin(clamp(up.y, -1.0, 1.0)), al = abs(lat);
+    float heart;
+    vec3 w = swirled(up, heart);
+    // The westerlies draw the weather out east and west.
+    float westerly = smoothstep(0.5, 0.75, al) * (1.0 - smoothstep(1.1, 1.3, al));
+    vec3 p = w * R;
+    float n = cloudWeather(p * vec3(1.0, 1.0 + 0.6 * westerly, 1.0), 31) * 0.5 + 0.5;
+    float f = cloudShowers(p, 32) * 0.5 + 0.5;
+    // The fronts: long bands where the noise crosses zero, drawn out east
+    // and west (squeezed along the axis) and wound into the lows.
+    float fr = cloudWeather(p * vec3(0.8, 1.6, 0.8) + vec3(3.1e6, 0.0, -1.7e6), 33);
+    float front = westerly * smoothstep(0.16, 0.02, abs(fr)) * (0.6 + 0.8 * (f - 0.5));
+    // The climate's cloudiness by latitude, wetter over a wet land and the sea.
+    float itcz = exp(-pow(lat / 0.12, 2.0));
+    float climate = 0.6 * itcz + 0.25 * westerly + 0.25 * smoothstep(1.15, 1.35, al);
+    float sea = smoothstep(10.0, -40.0, g.x);
+    float wet = max(g.w, 0.5 * sea);
+    climate *= mix(0.3, 1.2, wet);
+    // Fair weather's cumulus over a temperate land that is not dry: the
+    // summer afternoon's fields of them, with the sky between.
+    float fair = (1.0 - sea) * smoothstep(0.25, 0.6, g.w) * smoothstep(0.35, 0.55, al) * (1.0 - smoothstep(0.95, 1.15, al));
+    float cover = clamp(climate - 0.2 + (n - 0.5) * 1.2 + (f - 0.5) * 0.4 + 0.5 * heart + 0.7 * front, 0.0, 1.0);
+    cover = max(cover, 0.3 * fair * (0.8 + 0.6 * (f - 0.5)));
+    // Heaped where the air is convective (warm, the rain belt, the trades),
+    // in slabs in the fronts and the cold.
+    float convect = clamp((1.0 - smoothstep(0.4, 0.75, al)) + fair + 0.4 * (f - 0.5) - 0.8 * heart - front, 0.0, 1.0);
+    // How high the tops reach: the rain belt's towers, the trades' low
+    // cumulus, a front's thick deck.
+    float tops = mix(0.4 + 0.3 * heart, mix(0.2, 0.95, clamp(itcz * wet * 1.3 + 0.3 * (f - 0.5), 0.0, 1.0)), convect);
+    return vec4(cover, convect, tops, 0.0);
+}
+
+float cloudDensity(CloudPoint q) {
+    float c = q.cover.x;
+    if (c < 0.01) return 0.0;
+    float convect = q.cover.y, top = max(q.cover.z, 0.12), h = q.height;
+    if (h >= top) return 0.0;
+    float hr = h / top;
+    // A flat base; a cumulus rounds toward its top, a slab is cut square.
+    float grad = smoothstep(0.0, 0.08, hr) * (1.0 - smoothstep(mix(0.75, 0.25, convect), 1.0, hr));
+    // The clouds drift east (and a little north) at some 10 m/s.
+    vec3 drift = vec3(-9.0, 0.0, 3.0) * q.time;
+    const float T1 = 17000.0, T2 = 2300.0;
+    float f1 = q.footprint / T1;
+    vec4 n = cloudNoise((q.p + drift) / T1, f1);
+    float lowFbm = n.y * 0.7 + n.z * 0.3;
+    float lo = (lowFbm - 1.0) * 0.4;
+    // The billows: where the noise stands over the threshold the cover and
+    // the height's profile set (a cloud's shape, Perlin-Worley lifted by
+    // its cells), as the share of the footprint that does: one cloud's
+    // edge close to, a field's cover from afar.
+    float thr = lo + (1.0 - lo) * (1.0 - c) / max(grad, 1e-3);
+    if (thr >= 1.0) return 0.0;
+    float share = cloudNoiseAbove(n, thr);
+    if (share <= 0.0) return 0.0;
+    // The edges eroded by finer cells, wisps at the base and billows
+    // above, while they are finer than the footprint.
+    float far = smoothstep(0.03, 0.1, q.footprint / T2);
+    if (far < 1.0) {
+        vec4 e = cloudNoise((q.p + drift * 1.4) / T2, q.footprint / T2);
+        float fine = e.y * 0.7 + e.z * 0.3;
+        fine = mix(1.0 - fine, fine, clamp(hr * 6.0, 0.0, 1.0));
+        float edge = clamp((n.x - thr) / (1.0 - thr), 0.0, 1.0);
+        share *= mix(clamp(cloudRemap(edge, fine * 0.3, 1.0, 0.0, 1.0) * 4.0, 0.0, 1.0), 1.0, far);
+    }
+    // The light a footprint lets through over a path L in the deck: what
+    // its clouds leave (opaque at heart) where they are, all of it between
+    // them; as an extinction, so a cumulus field from orbit, and its
+    // shadow, lets through the sky between its clouds.
+    const float SIGMA = 0.05;   // a cloud's heart, per metre
+    float L = clamp(q.footprint, 20.0, DECK * top * 0.6);
+    float through = 1.0 - share * (1.0 - exp(-SIGMA * L));
+    return -log(max(through, 1e-4)) / L;
+}
+`;
+scene.setClouds({ module: CLOUDS, bottom: CLOUD_BOTTOM, top: CLOUD_TOP, data: LOWS, land });
+
 // --- views ---------------------------------------------------------------------------
 
 // A place point `up` over the ground at place (x, z).
@@ -324,6 +471,7 @@ export const SHOTS = {
     region: { label: 'Region', near: 50, far: 4e6, eye: () => [0, 9e4, 0], look: () => [0, 0, -2.4e5] },
     low:    { label: 'Low', near: 1, far: 1e6, eye: () => over(0, 0, 1500), look: () => along(towardRange(), 30000, 0) },
     ground: { label: 'Ground', near: 0.1, far: 4e5, eye: () => over(0, 0, 1.8), look: () => along(towardRange(), 2000, 60) },
+    sky:    { label: 'Sky', near: 0.1, far: 4e5, eye: () => over(0, 0, 1.8), look: () => along(towardRange(), 2000, 900) },
 };
 
 export const still = { view: null };

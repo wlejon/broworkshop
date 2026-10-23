@@ -64,6 +64,8 @@ if (mode === 'still') {
         const top = Object.entries(sums).sort((a, b) => b[1] - a[1]).slice(0, 8)
             .map(([k, v]) => `${k} ${(v / 60).toFixed(2)}`).join(', ');
         console.log(`${shot} passes: ${top}`);
+        const clouds = ['clouds', 'clouds-prepare'].map((k) => `${k} ${((sums[k] || 0) / 60).toFixed(3)}`).join(', ');
+        console.log(`${shot} clouds: ${clouds}`);
         ms.sort((a, b) => a - b);
         const mean = ms.reduce((a, b) => a + b, 0) / Math.max(ms.length, 1);
         console.log(`${shot}: ${mean.toFixed(2)} / ${(ms[ms.length >> 1] || 0).toFixed(2)} / ${(ms[ms.length - 1] || 0).toFixed(2)} ms`);
