@@ -4,6 +4,8 @@
 // is what that climate grows. The views and the capture script share it.
 import { sceneViewport, orbitRotation } from "/lib/kit/viewport3d.js";
 import { SUN_LUX, AIR } from "/lib/kit/sky.js";
+import { treeModule, treeSpecies } from "/lib/trees/index.js";
+import { TEMPERATE, BROADLEAF, BIRCH, CONIFER, SHRUB, OAK, LIME } from "/lib/trees/temperate.js";
 
 export const R = 6371000;
 
@@ -144,7 +146,22 @@ void procInit(inout vec4 v[PROC_CHANNELS]) {
     v[0].x = ground;
     v[0].y = (0.25 + 0.35 * clamp(land, 0.0, 1.0) + 2.4 * range) * smoothstep(-400.0, -40.0, ground);
     // How far inland: the continental field over the coast's level.
-    v[1] = vec4(ground, range, clamp(land / 0.6, 0.0, 1.0), 0.0);}
+    v[1] = vec4(ground, range, clamp(land / 0.6, 0.0, 1.0), 0.0);
+
+    // The climate the plants stand by (channel 0's z and w: their rules
+    // read them), as the surface reckons it: warm or cold by latitude and
+    // height, wet or dry by the air's belts and the sea's reach. z the
+    // woods' share (thick where the surface is forest, scattered over wet
+    // grassland, none in the sea), w how cold it is (the conifers' share).
+    float lat = asin(clamp(d.y, -1.0, 1.0)), sl = sin(lat);
+    float temp = 28.0 - 44.0 * sl * sl - 6.5 * max(ground, 0.0) / 1000.0;
+    float belts = 0.6 + 0.4 * cos(lat * 6.0) - 0.25 * smoothstep(0.75, 1.2, abs(lat));
+    float wet = clamp(belts * (1.2 - 0.75 * v[1].z), 0.0, 1.0);
+    float warm = smoothstep(-2.0, 6.0, temp);
+    float woods = max(smoothstep(0.5, 0.75, wet), 0.2 * smoothstep(0.3, 0.5, wet)) * warm * (1.0 - 0.7 * range);
+    v[0].z = ground > 0.0 ? woods : 0.0;
+    v[0].w = smoothstep(13.0, 4.0, temp);
+}
 `,
 };
 
@@ -197,6 +214,36 @@ export const START = (() => {
 scene.setBody({ radius: R, at: START });
 
 export const land = scene.createLand({ height: TREE, seed: SEED, surface: SURFACE, processes: PROCESSES, sea: { level: 0, absorb: [0.6, 0.18, 0.12] } });
+
+// --- the plants -------------------------------------------------------------------------
+
+// The temperate wood's trees where the climate says (the processes' z),
+// in stands and clearings a few hundred metres across; conifers as it
+// grows cold (w), the broadleaves' kinds where it is warm. Shrubs in the
+// woods' thickets and their edges. The plants stand on the land's own
+// height (its tree, the processes' base under it).
+const clamp01 = (a) => N('Min', { LHS: N('Max', { LHS: a, RHS: 0 }), RHS: 1 });
+const affine = (a, s, o) => add(mul(a, s), o);
+const warmShare = (k) => ({ own: 'w', scale: -k, offset: k });
+const stands = clamp01(affine(fbm(700, 3, 21), 2.4, 0.62));
+const thicket = clamp01(affine(fbm(120, 2, 22), 3.0, -0.2));
+export const plants = scene.createPlants({
+    module: treeModule(), species: TEMPERATE.map(treeSpecies), receivesShadow: true, range: 12000, land,
+    rules: {
+        ground: TREE, seed: SEED, range: 6000,
+        layers: [
+            { spacing: 6, jitter: 0.9, sink: 0.1, seed: 11, chance: { own: 'z', times: stands },
+              species: [{ species: CONIFER, weight: { own: 'w' } }, { species: BROADLEAF, weight: warmShare(0.45) },
+                        { species: OAK, weight: warmShare(0.25) }, { species: BIRCH, weight: warmShare(0.2) },
+                        { species: LIME, weight: warmShare(0.1) }],
+              scale: affine(fbm(400, 2, 23), 0.2, 0.95), scaleVariety: 0.25,
+              tint: affine(fbm(300, 2, 24), 1.4, 0), tintVariety: 0.4 },
+            { spacing: 3, jitter: 1.0, sink: 0.05, seed: 12, chance: { own: 'z', scale: 0.35, offset: 0.02, times: thicket },
+              species: [SHRUB], scaleVariety: 0.4, tintVariety: 1.0 },
+        ],
+    },
+});
+plants.castsShadow = true;
 
 // The sun: a direction in the body's frame (the light's, from the sun),
 // turned into the place frame whenever the place moves.

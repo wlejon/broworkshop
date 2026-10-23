@@ -5,7 +5,7 @@
 //   ... capture.js -- cost [shot[,shot...]]
 //       GPU ms held at each shot (mean / median / max of 60 frames after a
 //       two-second warm)
-import { SHOTS, setShot, land, scene } from "/app/world.js";
+import { SHOTS, setShot, land, plants, scene } from "/app/world.js";
 
 const argv = (bro.app && bro.app.argv) || [];
 const OUT = bro.resolvePath('/app/captures').replace(/\\/g, '/');
@@ -32,9 +32,14 @@ const mode = argv[0] || 'still';
 if (mode === 'still') {
     for (const shot of shotsOf(argv[1])) {
         setShot(shot);
-        step(+(opt('warm') || 2.0));
+        // (Long enough for the plants' canopy to come in and the land's
+        // tiles made again with it.)
+        step(+(opt('warm') || 8.0));
         setShot(shot);   // (the ground under a view is read once the land is in)
         step(1.0);
+        // The plants about the view placed.
+        for (let i = 0; i < 600 && plants.plantPlacement()?.pending > 0; i++) advanceTime(1000 / fps);
+        step(0.5);
         screenshot(`${OUT}/planet_${shot}.png`);
         console.log(`${shot}: captures/planet_${shot}.png ${JSON.stringify(land.landStats())}`);
     }
