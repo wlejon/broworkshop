@@ -488,6 +488,7 @@ const float CLOUD_EDGE = ${CLOUD_EDGE}.0;
 const float HEAP_CELL = 2500.0;
 const float HEAP_SHELL = 0.35;   // the lattice's points within this many cells of the deck's bottom
 const float BASE_SHARP = 3.0;
+const float BASE_SPREAD = 80.0;  // how much the heaps' bases differ (m), about the field's
 float heaps(vec3 dir, float z, float base, float tops, float cover) {
     const float rb = R + ${CLOUD_BOTTOM}.0, rc = rb / HEAP_CELL;
     vec3 g = dir * rc;
@@ -514,17 +515,26 @@ float heaps(vec3 dir, float z, float base, float tops, float cover) {
         vec3 east = normalize(cross(vec3(0.0, 1.0, 0.0), au) + 1e-5);
         vec3 north = cross(au, east);
         vec2 hz = vec2(dot(v, east), dot(v, north));
-        float r = HEAP_CELL * mix(0.42, 0.55, cover) * mix(0.8, 1.0, a.y) * grow;
+        // (No wider than twice its height and a little: a low heap a small
+        // dome, never a pancake whose rim thins to a sliver.)
+        float r = HEAP_CELL * mix(0.42, 0.55, cover) * mix(0.8, 1.0, a.y);
         float hgt = min((tops - base) * mix(0.5, 1.0, a.z), r * mix(0.8, 2.6, tall));
-        float d = ellipsoidIn(vec2(length(hz), zr), r, hgt);
+        r = min(r, 2.0 * hgt + 200.0) * grow;
+        hgt *= grow;
+        // Its base: the field's condensation level, a few tens of metres
+        // off it, cut flat; the dome's middle under it, so its walls rise
+        // steep from the base's rim and the whole heap stands over every
+        // point of the base (no thin rim the sun lights through).
+        float zh = zr - BASE_SPREAD * (heapHash(cell + 5.13 + 31.7 * float(second)).x - 0.5);
+        float d = ellipsoidIn(vec2(length(hz), zh + 0.4 * hgt), r, 1.4 * hgt);
         // The towers: over the body, a little off its middle each way.
         float ang = 6.2832 * b.z;
         vec2 o = vec2(cos(ang), sin(ang)) * 0.4 * r;
-        d = max(d, ellipsoidIn(vec2(length(hz - o), zr - 0.45 * hgt), 0.55 * r, 0.75 * hgt));
-        d = max(d, ellipsoidIn(vec2(length(hz + 0.8 * o.yx * vec2(-1.0, 1.0)), zr - 0.3 * hgt), 0.45 * r, 0.6 * hgt));
-        best = max(best, d);
+        d = max(d, ellipsoidIn(vec2(length(hz - o), zh - 0.45 * hgt), 0.55 * r, 0.75 * hgt));
+        d = max(d, ellipsoidIn(vec2(length(hz + 0.8 * o.yx * vec2(-1.0, 1.0)), zh - 0.3 * hgt), 0.45 * r, 0.6 * hgt));
+        best = max(best, min(d, zh * BASE_SHARP));
     }
-    return min(best, zr * BASE_SHARP);
+    return min(best, (zr + 0.5 * BASE_SPREAD) * BASE_SHARP);
 }
 
 // The share of the air the heaps fill at \`z\` metres up the deck, on the
