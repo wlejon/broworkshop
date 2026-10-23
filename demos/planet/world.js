@@ -193,8 +193,11 @@ LandSurface landSurface(LandPoint q) {
     // processes': the relief's few hundred metres over it moved every line
     // drawn from it (tree line, tundra, snow) degrees either way, blob by
     // blob, a far land mottled from edge to edge. A range keeps its own
-    // heights: snow on its crests and a tree line up its flanks.
-    float share = mix(0.3, 1.0, smoothstep(0.1, 0.5, g.y));
+    // heights: snow on its crests and a tree line up its flanks. A plain's
+    // hills keep none: a few hundred metres there are a degree or two, yet
+    // where the year sits near a line they flecked a polar plain with snow
+    // and tundra blob by blob from orbit.
+    float share = smoothstep(0.3, 0.7, g.y);
     float temp = 28.0 - 44.0 * sl * sl - 6.5 * mix(max(g.x, 0.0), h, share) / 1000.0;
     // The relief a texel this wide hides (the tree's octaves finer than it,
     // at their mean in its height), as each line's spread over it: a far
