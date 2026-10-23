@@ -112,8 +112,8 @@ export function refreshPath() {
     pips.show(pts);
     // A clamped route gets a mark of its own: its last waypoint is NOT the
     // goal, and drawing it in pip yellow is how a demo lies about what it found.
-    clampMarker.visible = !!(state.path && state.path.partial && pts.length);
-    if (clampMarker.visible) place(clampMarker, pts[pts.length - 1], 0.7);
+    clampMarker.visible = !!(state.path && state.path.partial && pts && pts.length);
+    if (clampMarker.visible && pts) place(clampMarker, pts[pts.length - 1], 0.7);
     // The grid's answer is computed even when unreachable: "the grid could not
     // do this" is the interesting result.
     state.gridPath = state.showGrid ? findGridPath(state.start, state.goal) : null;
