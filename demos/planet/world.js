@@ -2,7 +2,7 @@
 // (plates and their belts, the continents on them, how far each place is
 // from the sea) over a FastNoise tree of the fine relief, and whose surface
 // is what that climate grows. The views and the capture script share it.
-import { sceneViewport, orbitRotation } from "/lib/kit/viewport3d.js";
+import { sceneViewport, orbitRotation, Camera } from "/lib/kit/viewport3d.js";
 import { SUN_LUX, AIR } from "/lib/kit/sky.js";
 import { herbModule } from "/lib/herbs/index.js";
 import { swardModule } from "/lib/sward/index.js";
@@ -12,8 +12,10 @@ import { TEMPERATE, BROADLEAF, BIRCH, CONIFER, SHRUB, OAK, LIME } from "/lib/tre
 export const R = 6371000;
 
 export const vp = sceneViewport('#stage', {
-    orbit: { target: [0, 0, 0], dist: 3e7, fov: 40, near: 1e4, far: 1e8, rot: orbitRotation(0, -1.2) },
-    controls: { orbitButton: 0, panButton: 2, minDist: 2, maxDist: 6e7 },
+    // (Yaw about the view's own up: the globe turns under a drag from any side.)
+    orbit: { target: [0, 0, 0], dist: 3e7, fov: 40, near: 1e4, far: 1e8, rot: orbitRotation(0, -1.2), yawAxis: 'view' },
+    // (The wheel is the planet's own, below.)
+    controls: { orbitButton: 0, panButton: 2, minDist: 2, maxDist: 6e7, zoomRate: 0 },
 });
 export const { scene } = vp;
 
@@ -299,13 +301,57 @@ export const SHOTS = {
 
 export const still = { view: null };
 export function holdView(eye, look, near, far, up = [0, 1, 0]) { still.view = { eye, look, near, far, up }; }
+// A shot is the place at START's: back there first, wherever a drag took
+// the place since.
 export function setShot(name) {
     const s = SHOTS[name];
-    if (s) holdView(s.eye(), s.look(), s.near, s.far, s.up);
+    if (!s) return;
+    scene.reanchorAt(START);
+    holdView(s.eye(), s.look(), s.near, s.far, s.up);
 }
-export function letGo() { still.view = null; }
+// Let go of a held shot: the orbit camera takes over where it is, turning
+// about what it looked at.
+export function letGo() {
+    const v = still.view;
+    if (!v) return;
+    still.view = null;
+    Camera.orbitFromView(vp.cam, { position: v.eye, target: v.look, up: v.up, near: v.near, far: v.far });
+}
+// The orbit camera moves with the place when it re-anchors.
+scene.addEventListener('reanchor', (e) => Camera.orbitMove(vp.cam, e));
+// The eye's height over the ground (or the sea) under it.
+function eyeHeight(pos) {
+    const ground = Math.max(land.landHeight(pos[0], pos[2]) + (pos[0] ** 2 + pos[2] ** 2) / (2 * R), 0);
+    const b = scene.toBody(pos);
+    return Math.hypot(b[0], b[1], b[2]) - R - ground;
+}
+// The wheel zooms by the eye's height, a notch a quarter of it: from orbit
+// to the grass at one pace, in some 60 notches.
+vp.canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    if (still.view) letGo();
+    const cam = vp.cam, h = Math.max(eyeHeight(cam.pos), 2);
+    cam.dist = Math.min(Math.max(cam.dist - h * (1 - Math.exp(e.deltaY * 0.006)), 2), 6e7);
+});
 vp.onView((view) => {
-    if (!still.view) return;
+    if (!still.view) {
+        // Free: never under the ground, and the near and far planes from the
+        // eye's height (a planet from 20,000 km and a meadow from 2 m).
+        const cam = vp.cam;
+        const alt = eyeHeight(cam.pos);
+        if (alt < 2) {
+            const up = scene.upAt(cam.pos);
+            for (let i = 0; i < 3; i++) {
+                cam.pos[i] += up[i] * (2 - alt);
+                view.target[i] += up[i] * (2 - alt);
+            }
+            view.position = cam.pos.slice();
+        }
+        const h = Math.max(alt, 2);
+        view.near = Math.min(Math.max(0.05 * h, 0.1), 1e5);
+        view.far = Math.max(4e5, 3 * h + 2 * Math.sqrt(2 * R * h));
+        return;
+    }
     view.position = still.view.eye;
     view.target = still.view.look;
     view.up = still.view.up;

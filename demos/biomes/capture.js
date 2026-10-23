@@ -91,12 +91,15 @@ if (mode === 'still') {
         perf.gpuFrameMs();
         const ms = [];
         const sums = {};
+        let worst = { ms: -1 };
         for (let i = 0; i < 60; i++) {
             advanceTime(1000 / fps);
-            ms.push(perf.gpuFrameMs());
+            const m = perf.gpuFrameMs();
+            ms.push(m);
             if (passes) {
                 const p = perf.gpuPasses() || {};
                 for (const k in p) if (typeof p[k] === 'number') sums[k] = (sums[k] || 0) + p[k];
+                if (m > worst.ms) worst = { ms: m, frame: i, p };
             }
         }
         const sorted = ms.filter((v) => v >= 0).sort((a, b) => a - b);
@@ -110,6 +113,11 @@ if (mode === 'still') {
             console.log('  ' + top.map(([k, v]) => `${k} ${(v / 60).toFixed(2)}`).join('  '));
             const shadow = Object.entries(sums).filter(([k]) => k.startsWith('shadow')).sort((a, b) => b[1] - a[1]);
             console.log('  shadow: ' + shadow.map(([k, v]) => `${k} ${(v / 60).toFixed(3)}`).join('  '));
+            // The costliest frame's own passes, where they stand over the mean.
+            const over = Object.entries(worst.p || {}).filter(([, v]) => typeof v === 'number')
+                .map(([k, v]) => [k, v - (sums[k] || 0) / 60]).sort((a, b) => b[1] - a[1]).slice(0, 6);
+            console.log(`  max frame ${worst.frame}: ` + over.map(([k, v]) => `${k} +${v.toFixed(2)}`).join('  '));
+            if (opt('dump')) console.log('  ' + JSON.stringify(worst.p));
         }
         const c = scene.cullStats() || {};
         console.log(`  pages: needed ${c.shadowPagesNeeded} resident ${c.shadowPagesResident} drawn ${c.shadowPagesDrawn} ` +
