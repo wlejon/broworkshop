@@ -79,7 +79,6 @@ const DBGI = ARGV.find((s) => s.startsWith('rit='));
 const REGION_ROUTE = DBGI ? +DBGI.slice(4).split(',')[0] : 320, REGION_ERODE = DBGI ? +DBGI.slice(4).split(',')[1] : 384;
 // (The regions' lift: iterations of its spread, regionLift.)
 const REGION_LIFT = 128;
-
 export const PROCESSES = {
     resolution: 512, channels: 4, data: plates(SEED),
     passes: [{ fn: 'route', iterations: ROUTE }, { fn: 'erode', iterations: ERODE }, { fn: 'settle' }],
@@ -225,6 +224,8 @@ const float SILT = 0.01;      // how fast a lake's floor fills, an iteration
 // band may carve, so a level shapes its own band and leaves the coarser
 // field's valleys where they are.)
 const float THETA = 0.45;
+float flowK = K;          // stream power's rate this pass (a region's is REGION_K times K)
+float flowSlide = 1e30;   // the threshold slope past which ground slides (a region's REGION_SLIDE)
 void flow(inout vec4 v[PROC_CHANNELS], bool carve, float seedA, float ks, float bed) {
     float h = v[2].x, W = v[3].w;
     float L = procCellSize();
@@ -251,10 +252,12 @@ void flow(inout vec4 v[PROC_CHANNELS], bool carve, float seedA, float ks, float 
                 if (s > drop) { drop = s; down = k; }
             }
             float a = max(A, seedA);
-            float e = K * pow(a, M);
+            float e = flowK * pow(a, M);
             float hc = h - drop * e / (1.0 + e);
             if (ks > 0.0 && drop > 0.0) hc = max(hc, min(h, Wn[down] + ND[down] * L * ks * pow(a * L * L, -THETA)));
             hc = max(hc, min(h, bed)) + CREEP * (mean4 - h);
+            // (Past the threshold slope the ground slides down to it.)
+            for (int k = 0; k < 8; ++k) hc = min(hc, max(Wn[k], 1.0) + flowSlide * ND[k] * L);
             h = max(hc, min(h, 1.0));
         } else {
             h += SILT * (W - h);
@@ -334,6 +337,15 @@ float band(int L, vec3 p) {
 const float KS_PLAIN = 60.0, KS_RANGE = 200.0;
 const float DIG = 1.0;   // how deep a level may cut under the coarser field, in its band's amplitudes
 const float LAND_FLOOR = 15.0;   // the least height a region leaves the coarser field's land (m; over the tree's grain)
+// A region's stream power, times the global grid's: its iterations are a
+// few hundred over its cells where the global grid's are 1408, and at K the
+// streams barely cut the band, which stood as the noise's domes; at 24 times
+// they dissect it, the valleys cut either side of a spur meeting at a crest.
+// The ground slides where it is steeper than REGION_SLIDE (some 39 degrees)
+// over its neighbours' water, so faces stand at the threshold and nothing
+// stands as a spike or a plateau over its surroundings (at 0.4 the slides
+// rounded the land again, cutting the crests the streams had left).
+const float REGION_K = 24.0, REGION_SLIDE = 0.8;
 const float BAND_AMP[4] =float[4](${BANDS.map(([, a]) => a.toFixed(1)).join(', ')});
 
 void regionInit(inout vec4 v[PROC_CHANNELS]) {
@@ -368,7 +380,11 @@ void regionInit(inout vec4 v[PROC_CHANNELS]) {
 
 // (A range's channels steeper: it rises faster.)
 void regionRoute(inout vec4 v[PROC_CHANNELS]) { flow(v, false, v[3].x, 0.0, -1e9); }
-void regionErode(inout vec4 v[PROC_CHANNELS]) { flow(v, true, v[3].x, KS_PLAIN + KS_RANGE * v[1].y, v[3].y); }
+void regionErode(inout vec4 v[PROC_CHANNELS]) {
+    flowK = K * REGION_K;
+    flowSlide = REGION_SLIDE;
+    flow(v, true, v[3].x, KS_PLAIN + KS_RANGE * v[1].y, v[3].y);
+}
 
 // The ground the carving took, lifted back as the crust under it rises
 // (isostasy): what each cell lost (channel 1's x, the band's ground, until
