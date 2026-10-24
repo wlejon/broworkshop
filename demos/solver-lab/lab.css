@@ -1,0 +1,39 @@
+/* Solver Lab: editors, the layout tab's solved boxes and the lockstep listing.
+   The answer / checks / stage classes are kit.css's evidence section. */
+:root { --k-side-w: 430px; }
+
+textarea.code {
+    width: 100%; font-family: var(--k-font); font-size: 12px; line-height: 1.5;
+    tab-size: 2; white-space: pre; overflow-x: auto;
+}
+.val { color: var(--k-value); font-weight: normal; }
+.scrub { padding: 8px var(--k-pad); border-top: 1px solid var(--k-border); flex: none; flex-wrap: nowrap; }
+.scrub input[type=range] { width: auto; }
+
+/* Layout: the solved boxes as real elements. */
+.layout-viewport { background: var(--k-bg); }
+.lframe { position: absolute; border: 1px dashed var(--k-border-hi); border-radius: 6px; }
+.lframe > .dim { position: absolute; top: -18px; left: 0; font-size: 11px; white-space: nowrap; }
+.lbox {
+    position: absolute; overflow: hidden; border-radius: 5px; padding: 6px 8px;
+    border: 1px solid var(--k-border-hi); background: var(--k-surface);
+    display: flex; flex-direction: column; gap: 2px;
+}
+.lbox > b { color: var(--k-text); font-weight: 600; font-family: var(--k-font-ui); font-size: 12px; }
+.lbox > span { color: var(--k-dim); font-size: 11px; }
+.lbox.bad { border-color: var(--k-err); }
+.lmsg {
+    position: absolute; left: 0; right: 0; top: 42%; text-align: center;
+    color: var(--k-err); font-family: var(--k-font-ui); font-size: 14px; line-height: 1.6;
+}
+.lmsg > small { display: block; color: var(--k-dim); font-size: 12px; }
+
+/* Lockstep: the tick source with the lint's findings under their lines. */
+.listing {
+    position: absolute; left: 0; top: 0; right: 0; bottom: 0; margin: 0;
+    padding: 16px var(--k-pad); overflow: auto; line-height: 1.65; white-space: pre;
+}
+.listing .ln { color: var(--k-dim); display: inline-block; width: 3.5em; }
+.listing .hz { display: block; background: #2a161b; border-left: 3px solid var(--k-err); }
+.listing .note { display: block; padding: 2px 0 6px 3.5em; color: var(--k-err); font-family: var(--k-font-ui); white-space: normal; }
+.listing .note > small { display: block; color: var(--k-muted); }

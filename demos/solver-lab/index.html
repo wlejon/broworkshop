@@ -4,110 +4,173 @@
 <meta charset="utf-8">
 <title>Solver Lab</title>
 <link rel="stylesheet" href="/lib/kit/kit.css">
-<style>
-  :root { --k-side-w: 440px; }
-  textarea.code { font-family: var(--k-font); font-size: 11px; line-height: 1.45; tab-size: 2; }
-  pre.code-out { margin: 0; max-height: 175px; font-size: 11px; line-height: 1.4; }
-</style>
+<link rel="stylesheet" href="/app/lab.css">
 </head>
 <body class="k-app">
   <header class="k-header">
     <h1>Solver Lab</h1>
-    <span class="k-sub">Constraint Solving, Symbolic Auto-Diff &amp; Deterministic Lockstep Lab</span>
+    <span class="k-sub">bro's solvers answer; the page checks every answer on its own</span>
   </header>
 
   <div class="k-toolbar">
     <div class="k-tabs" id="tabs">
-      <button data-tab="constraints" id="tab-constraints" class="active">1. Bitvector &amp; Layout Solver</button>
-      <button data-tab="trajectory" id="tab-trajectory">2. Symbolic Auto-Diff &amp; Trajectory</button>
-      <button data-tab="rollback" id="tab-rollback">3. Deterministic Rollback &amp; Capsule Gate</button>
+      <button data-tab="solve" id="tab-solve" class="active">Solve</button>
+      <button data-tab="layout" id="tab-layout">Layout</button>
+      <button data-tab="trajectory" id="tab-trajectory">Trajectory</button>
+      <button data-tab="lockstep" id="tab-lockstep">Lockstep</button>
     </div>
     <span class="k-spacer"></span>
-    <button id="btn-run" class="primary">Solve Active Tab</button>
+    <span class="k-sub" id="tab-question"></span>
   </div>
 
   <div class="k-body">
     <aside class="k-side">
-      <div data-pane="constraints" class="k-col">
+
+      <!-- Solve ------------------------------------------------------------>
+      <div data-pane="solve" class="k-col">
         <div class="k-panel">
-          <h2>Presets</h2>
-          <div class="k-row" id="constraint-presets"></div>
+          <h2>Example</h2>
+          <div class="k-presets" id="solve-presets"></div>
+          <p class="k-note" id="solve-note"></p>
         </div>
         <div class="k-panel">
-          <h2>32-Bit Bitvector Predicate (bro.solveWithCert)</h2>
-          <div class="k-stack">
-            <textarea id="bv-src" class="code" rows="5" spellcheck="false"></textarea>
-          </div>
-          <h2>Declarative Box Layout JSON (bro.layout.solve)</h2>
-          <div class="k-stack">
-            <textarea id="layout-src" class="code" rows="6" spellcheck="false"></textarea>
-          </div>
+          <h2>Predicate <span class="dim">int32 arguments; truthy return = solution</span></h2>
+          <textarea id="solve-src" class="code" rows="7" spellcheck="false"></textarea>
           <div class="k-row">
-            <button id="btn-solve-constraints" class="primary">Solve Bitvector &amp; Layout</button>
+            <div id="solve-mode"></div>
+            <label class="k-field" id="solve-limit-field"><span>up to</span><input type="number" id="solve-limit" value="1024" min="1" max="4096"></label>
+            <span class="k-spacer"></span>
+            <button id="solve-run" class="primary">Solve</button>
           </div>
         </div>
         <div class="k-panel">
-          <h2>SMT &amp; Layout Readout</h2>
-          <div id="constraint-kv"></div>
-          <pre class="k-box code-out" id="constraint-out"></pre>
+          <h2>Answer <span class="dim">bro.solveWithCert / bro.solveAll</span></h2>
+          <div class="k-verdict" id="solve-verdict"></div>
+          <div id="solve-kv"></div>
+        </div>
+        <div class="k-panel">
+          <h2>Checked by the page</h2>
+          <div class="k-checks" id="solve-checks"></div>
         </div>
       </div>
 
+      <!-- Layout ----------------------------------------------------------->
+      <div data-pane="layout" class="k-col" hidden>
+        <div class="k-panel">
+          <h2>Example</h2>
+          <div class="k-presets" id="layout-presets"></div>
+          <p class="k-note" id="layout-note"></p>
+        </div>
+        <div class="k-panel">
+          <h2>Container</h2>
+          <label class="k-field"><span>width</span><input type="range" id="layout-cw" min="360" max="1280" step="8"><output class="k-val" id="layout-cw-val"></output></label>
+          <label class="k-field"><span>height</span><input type="range" id="layout-ch" min="240" max="800" step="8"><output class="k-val" id="layout-ch-val"></output></label>
+          <p class="k-note">Drag a slider: the layout is re-solved from the same constraints on every change.</p>
+        </div>
+        <div class="k-panel">
+          <h2>Boxes <span class="dim">id plus fixed or min/max sizes</span></h2>
+          <textarea id="layout-boxes" class="code" rows="6" spellcheck="false"></textarea>
+          <h2>Constraints <span class="dim">one per line; box.x y w h right bottom, container.w h</span></h2>
+          <textarea id="layout-cons" class="code" rows="9" spellcheck="false"></textarea>
+          <div class="k-row">
+            <label class="k-field"><input type="checkbox" id="layout-nonoverlap" checked><span>no overlaps</span></label>
+            <label class="k-field"><span>gap</span><input type="number" id="layout-gap" value="12" min="0" max="64"></label>
+            <span class="k-spacer"></span>
+            <button id="layout-run" class="primary">Solve</button>
+          </div>
+        </div>
+        <div class="k-panel">
+          <h2>Answer <span class="dim">bro.layout.solve</span></h2>
+          <div class="k-verdict" id="layout-verdict"></div>
+        </div>
+        <div class="k-panel">
+          <h2>Checked by the page</h2>
+          <div class="k-checks" id="layout-checks"></div>
+        </div>
+      </div>
+
+      <!-- Trajectory ------------------------------------------------------->
       <div data-pane="trajectory" class="k-col" hidden>
         <div class="k-panel">
-          <h2>Presets</h2>
-          <div class="k-row" id="traj-presets"></div>
+          <h2>Example</h2>
+          <div class="k-presets" id="traj-presets"></div>
+          <p class="k-note" id="traj-note"></p>
         </div>
         <div class="k-panel">
-          <h2>Potential Field U(x, y, z) (bro.gpu.differentiate)</h2>
-          <div class="k-stack">
-            <textarea id="traj-src" class="code" rows="6" spellcheck="false"></textarea>
-          </div>
+          <h2>Potential U(x, y, z) <span class="dim">force = −∇U, plus gravity</span></h2>
+          <textarea id="traj-src" class="code" rows="5" spellcheck="false"></textarea>
+          <label class="k-field"><span>flight time</span><input type="range" id="traj-time" min="0.6" max="3" step="0.05"><output class="k-val" id="traj-time-val"></output></label>
           <div class="k-row">
-            <label class="k-field"><span>targetX</span><input type="number" id="traj-tx" value="8" step="0.5" style="width:72px"></label>
-            <label class="k-field"><span>targetY</span><input type="number" id="traj-ty" value="3" step="0.5" style="width:72px"></label>
-            <label class="k-field"><span>time(s)</span><input type="number" id="traj-time" value="1.5" step="0.1" style="width:72px"></label>
-          </div>
-          <div class="k-row">
-            <button id="btn-solve-traj" class="primary">Differentiate &amp; Solve Trajectory</button>
+            <span class="dim">target</span><b class="val" id="traj-target"></b>
+            <span class="dim">click the field to move it</span>
+            <span class="k-spacer"></span>
+            <button id="traj-run" class="primary">Solve</button>
           </div>
         </div>
         <div class="k-panel">
-          <h2>Auto-Diff &amp; Symplectic Shooting Readout</h2>
+          <h2>Answer <span class="dim">bro.gpu.differentiate + bro.physics.solveTrajectory</span></h2>
+          <div class="k-verdict" id="traj-verdict"></div>
           <div id="traj-kv"></div>
-          <pre class="k-box code-out" id="traj-out"></pre>
+        </div>
+        <div class="k-panel">
+          <h2>Checked by the page</h2>
+          <div class="k-checks" id="traj-checks"></div>
         </div>
       </div>
 
-      <div data-pane="rollback" class="k-col" hidden>
+      <!-- Lockstep --------------------------------------------------------->
+      <div data-pane="lockstep" class="k-col" hidden>
         <div class="k-panel">
-          <h2>Presets</h2>
-          <div class="k-row" id="rollback-presets"></div>
+          <h2>Example</h2>
+          <div class="k-presets" id="lock-presets"></div>
+          <p class="k-note" id="lock-note"></p>
         </div>
         <div class="k-panel">
-          <h2>Capsule Tick Function Source</h2>
-          <div class="k-stack">
-            <textarea id="rollback-src" class="code" rows="7" spellcheck="false"></textarea>
-          </div>
+          <h2>Tick function <span class="dim">tick(state: Int32Array, inputs)</span></h2>
+          <textarea id="lock-src" class="code" rows="10" spellcheck="false"></textarea>
+          <label class="k-field"><span>input delay</span><input type="range" id="lock-delay" min="1" max="10" step="1"><output class="k-val" id="lock-delay-val"></output></label>
+          <label class="k-field"><span>frames</span><input type="range" id="lock-frames" min="30" max="240" step="10"><output class="k-val" id="lock-frames-val"></output></label>
           <div class="k-row">
-            <label class="k-field"><span>frames</span><input type="number" id="rollback-frames" value="32" min="8" max="64" style="width:72px"></label>
-            <label class="k-field"><span>netDelay</span><input type="number" id="rollback-delay" value="3" min="1" max="8" style="width:72px"></label>
-            <button id="btn-run-rollback" class="primary">Verify Capsule &amp; Run 2-Peer Sim</button>
+            <label class="k-field"><input type="checkbox" id="lock-tamper"><span>tamper with the capsule in transit</span></label>
+            <span class="k-spacer"></span>
+            <button id="lock-run" class="primary">Run</button>
           </div>
         </div>
         <div class="k-panel">
-          <h2>Capsule Gate &amp; Lockstep Readout</h2>
-          <div id="rollback-kv"></div>
-          <pre class="k-box code-out" id="rollback-out"></pre>
+          <h2>Answer <span class="dim">bro.net capsule gate + 2 rollback sessions</span></h2>
+          <div class="k-verdict" id="lock-verdict"></div>
+          <div id="lock-kv"></div>
+        </div>
+        <div class="k-panel">
+          <h2>Checked by the page</h2>
+          <div class="k-checks" id="lock-checks"></div>
         </div>
       </div>
     </aside>
 
     <main class="k-main">
-      <div class="k-viewport">
-        <canvas id="view"></canvas>
+      <div data-pane="solve" class="k-stage">
+        <div class="k-stage-head"><h2 id="solve-title"></h2><span class="k-spacer"></span><div class="k-legend" id="solve-legend"></div></div>
+        <div class="k-viewport"><canvas id="solve-view"></canvas><div class="k-hint" id="solve-hint" hidden></div></div>
       </div>
-      <div class="k-log" id="log" style="max-height:140px;flex:none;border-top:1px solid var(--k-border)"></div>
+      <div data-pane="layout" class="k-stage" hidden>
+        <div class="k-stage-head"><h2 id="layout-title"></h2><span class="k-spacer"></span><div class="k-legend" id="layout-legend"></div></div>
+        <div class="k-viewport layout-viewport" id="layout-view"></div>
+      </div>
+      <div data-pane="trajectory" class="k-stage" hidden>
+        <div class="k-stage-head"><h2 id="traj-title"></h2><span class="k-spacer"></span><span class="dim" id="traj-hover"></span></div>
+        <div class="k-viewport"><canvas id="traj-view"></canvas></div>
+        <div class="k-legend foot" id="traj-legend"></div>
+      </div>
+      <div data-pane="lockstep" class="k-stage" hidden>
+        <div class="k-stage-head"><h2 id="lock-title"></h2><span class="k-spacer"></span><div class="k-legend" id="lock-legend"></div></div>
+        <div class="k-viewport" id="lock-stage"><canvas id="lock-view"></canvas><pre class="listing" id="lock-listing" hidden></pre></div>
+        <div class="k-row scrub" id="lock-scrub">
+          <button class="small" id="lock-play">Pause</button>
+          <input type="range" id="lock-frame" min="0" max="1" value="0" class="k-grow">
+          <span class="k-val" id="lock-frame-val"></span>
+        </div>
+      </div>
     </main>
   </div>
 
