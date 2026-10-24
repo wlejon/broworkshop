@@ -26,6 +26,15 @@ export const { scene } = vp;
 // What grows where, by the climate: warm or cold by latitude and height,
 // wet or dry by the belts of the air's circulation and the sea's reach.
 const SURFACE = `
+// How far past the ice line the broad climate is at a point (degrees: the
+// line a land this wet holds to, less the year's mean of its broad ground);
+// landSurface's ice reads its gradient for how wide its edge is.
+float iceClimate(vec3 at, vec3 up) {
+    float sl = up.y;
+    float temp = 28.0 - 44.0 * sl * sl - 6.5 * max(landGrid(0, at).x, 0.0) / 1000.0;
+    return mix(-22.0, -7.0, smoothstep(0.15, 0.65, landGrid(1, at).w)) - temp;
+}
+
 LandSurface landSurface(LandPoint q) {
     vec4 g = landGrid(1, q.at);
     float ground = landGrid(0, q.at).x;   // (the processes' ground; g.x is the catchment's log)
@@ -104,10 +113,43 @@ LandSurface landSurface(LandPoint q) {
     // Above the trees the ground thins to scree and rock whatever its
     // slope, so the rock hands over to the snow, not tundra to snow.
     c = mix(c, rock, 0.5 * COLD(-3.0, -8.0) * alpine);
-    // Snow where the year is cold through: an ice sheet buries its relief,
-    // bare only on the near-sheer faces (a crest's every crease flecked
-    // dark where it gave way at the rock's own slope).
-    c = mix(c, snow, COLD(-8.0, -14.0) * (1.0 - smoothstep(0.65, 0.9, steep)));
+    // Ice where the year is cold and the snow falls deep enough to outlast
+    // the summers: the wetter the air, the warmer the line it holds to
+    // (a maritime icefield's mean near -7 here, a dry land's none above
+    // -22: a cold desert is tundra and bare rock, not ice). (This climate's
+    // means run some 5 degrees under Earth's at 45 to 65 degrees, so its
+    // lines sit as far under Earth's.) The margin follows the ground: the
+    // ice flows down the valleys that gather it (outlet glaciers), the
+    // low coasts melt it back (dark strips), and the relief that stands
+    // over its neighbours (ridges, nunataks) stands clear of it near its
+    // edge; deep inside the sheet all of it is buried.
+    float relief = h - ground;
+    float valley = smoothstep(0.5, 3.5, g.x);
+    float iceLine = mix(-22.0, -7.0, smoothstep(0.15, 0.65, g.w));
+    float m = iceLine - temp + 3.0 * valley - 4.0 * (1.0 - smoothstep(0.0, 500.0, ground)) * (1.0 - valley)
+            - 6.0 * relief / 1000.0;
+    // The edge as sharp as the view: the broad climate's change over two
+    // texels (or 1.5 km, so the grid's bilinear cells do not draw their
+    // kinks), and on a range the relief a texel hides. (A margin drawn
+    // with a fixed width of degrees lay a hundred km soft over a plateau,
+    // whose climate changes a degree in as far: a bank of fog.)
+    vec3 t1 = normalize(cross(q.up, abs(q.up.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
+    vec3 t2 = cross(q.up, t1);
+    const float D = 2000.0;
+    vec2 grad = vec2(iceClimate(q.at + t1 * D, normalize(q.up + t1 * (D / ${R}.0))) - iceClimate(q.at - t1 * D, normalize(q.up - t1 * (D / ${R}.0))),
+                     iceClimate(q.at + t2 * D, normalize(q.up + t2 * (D / ${R}.0))) - iceClimate(q.at - t2 * D, normalize(q.up - t2 * (D / ${R}.0)))) / (2.0 * D);
+    float w = max(length(grad) * max(2.0 * fp, 1500.0), 0.02) + 0.5 * spread * share;
+    float ice = smoothstep(-w, w, m) * (1.0 - smoothstep(0.45, 0.75, steep));
+    // (Its accumulation zone a snow's white; down toward the margin the
+    // bare ice of its ablation zone, greyer and bluer.)
+    // (By the broad climate alone: the ground's grain would mottle it.)
+    vec3 iceC = mix(vec3(0.45, 0.53, 0.62), vec3(0.76, 0.80, 0.86), smoothstep(0.0, 5.0, iceLine - temp + 3.0 * valley));
+    // The year's late snow past the ice: patches on the ridges and high
+    // ground where it is cold enough, the valleys and steep faces clear.
+    float lie = (iceLine + 4.0) - temp + 8.0 * relief / 1000.0 - 3.0 * valley;
+    float patches = 0.8 * smoothstep(-w, w, lie) * (1.0 - smoothstep(0.35, 0.6, steep));
+    c = mix(c, snow, patches * (1.0 - ice));
+    c = mix(c, iceC, ice);
 #ifdef DRAINAGE
     // (The rivers' catchments: blue from 10 km² to a million.)
     c = mix(vec3(0.3, 0.28, 0.25), vec3(0.0, 0.05, 0.5), smoothstep(1.0, 6.0, g.x));
@@ -115,6 +157,19 @@ LandSurface landSurface(LandPoint q) {
 #ifdef WETNESS
     // (How wet: red dry, through yellow, to blue wet.)
     c = mix(mix(vec3(0.5, 0.05, 0.02), vec3(0.45, 0.4, 0.05), smoothstep(0.0, 0.5, g.w)), vec3(0.02, 0.08, 0.5), smoothstep(0.5, 1.0, g.w));
+#endif
+#ifdef TEMPERATURE
+    // (The year's mean: blue under -20 C, white at -10, green at 0, red
+    // over 20; a dark band every 5 degrees of it, a line every 10 degrees
+    // of latitude.)
+    c = temp < -10.0 ? mix(vec3(0.02, 0.05, 0.5), vec3(0.6), smoothstep(-20.0, -10.0, temp))
+      : temp < 0.0 ? mix(vec3(0.6), vec3(0.05, 0.4, 0.05), smoothstep(-10.0, 0.0, temp))
+      : mix(vec3(0.05, 0.4, 0.05), vec3(0.6, 0.05, 0.02), smoothstep(0.0, 20.0, temp));
+    c *= mix(0.4, 1.0, smoothstep(0.0, 0.08, abs(fract(temp / 5.0 + 0.5) - 0.5)));
+    // (30 degrees black, 40 red, 50 yellow, 60 cyan, 70 magenta.)
+    float tens = floor(abs(degrees(lat)) / 10.0 + 0.5);
+    vec3 lineC = tens < 3.5 ? vec3(0.0) : tens < 4.5 ? vec3(1.0, 0.0, 0.0) : tens < 5.5 ? vec3(1.0, 1.0, 0.0) : tens < 6.5 ? vec3(0.0, 1.0, 1.0) : vec3(1.0, 0.0, 1.0);
+    c = mix(c, lineC, 1.0 - smoothstep(0.0, 0.008, abs(fract(degrees(lat) / 10.0 + 0.5) - 0.5)));
 #endif
     LandSurface s = landSurfaceOf(c);
     float grows = smoothstep(0.15, 0.45, wet) * WARM(-4.0, 4.0) * (1.0 - smoothstep(0.3, 0.55, steep));
@@ -134,7 +189,7 @@ export const START = (() => {
 })();
 scene.setBody({ radius: R, at: START });
 
-export const land = scene.createLand({ height: TREE, seed: SEED, surface: (ARGV.includes('drainage') ? '#define DRAINAGE\n' : '') + (ARGV.includes('wetness') ? '#define WETNESS\n' : '') + SURFACE, processes: PROCESSES, sea: { level: 0, absorb: [0.6, 0.18, 0.12] } });
+export const land = scene.createLand({ height: TREE, seed: SEED, surface: (ARGV.includes('drainage') ? '#define DRAINAGE\n' : '') + (ARGV.includes('wetness') ? '#define WETNESS\n' : '') + (ARGV.includes('temperature') ? '#define TEMPERATURE\n' : '') + SURFACE, processes: PROCESSES, sea: { level: 0, absorb: [0.6, 0.18, 0.12] } });
 
 // --- the plants -------------------------------------------------------------------------
 
