@@ -27,6 +27,18 @@ const opt = (key) => {
     return a ? a.slice(key.length + 1) : undefined;
 };
 const shotsOf = (s) => (s && !s.includes('=') ? s : Object.keys(SHOTS).join(',')).split(',').filter((k) => SHOTS[k]);
+// Frames until `busy()` is false (at most `max`), run on a held clock: the
+// land's and plants' work goes on frame by frame, but the scene's clock (the
+// wind the clouds drift on, the plants' sway, exposure) does not move, so a
+// still shows the same moment however long the wait took.
+const waitHeld = (busy, max) => {
+    const scale = bro.time.scale;
+    bro.time.scale = 0;
+    let n = 0;
+    for (; n < max && busy(); n++) advanceTime(1000 / fps);
+    bro.time.scale = scale;
+    return n;
+};
 
 document.body.classList.add('clean');
 bro.menu.hide();
@@ -34,8 +46,7 @@ flush();
 // The land is made by its processes first.
 {
     const t0 = performance.now();
-    let frames = 0;
-    for (; frames < 300 && !land.landStats()?.ready; frames++) advanceTime(1000 / fps);
+    const frames = waitHeld(() => !land.landStats()?.ready, 300);
     console.log(`land ready: ${land.landStats()?.ready} after ${frames} frames, ${Math.round(performance.now() - t0)} ms`);
 }
 
@@ -49,11 +60,10 @@ if (mode === 'still') {
         setShot(shot);   // (the ground under a view is read once the land is in)
         step(1.0);
         // The plants about the view placed.
-        for (let i = 0; i < 600 && plants.plantPlacement()?.pending > 0; i++) advanceTime(1000 / fps);
+        waitHeld(() => plants.plantPlacement()?.pending > 0, 600);
         // The land's regions about the view in, and its tiles made over them.
-        for (let i = 0; i < 4000 && land.landStats()?.regionsPending > 0; i++) advanceTime(1000 / fps);
-        let waited = 0;
-        for (; waited < 4000 && land.landStats()?.missing > 0; waited++) advanceTime(1000 / fps);
+        waitHeld(() => land.landStats()?.regionsPending > 0, 4000);
+        const waited = waitHeld(() => land.landStats()?.missing > 0, 4000);
         console.log(`${shot}: the land's tiles in after ${waited} frames`);
         step(1.0);
         screenshot(`${OUT}/planet_${shot}.png`);
@@ -121,7 +131,7 @@ if (mode === 'still') {
         step(8.0);
         setShot(shot);
         step(1.0);
-        for (let i = 0; i < 600 && plants.plantPlacement()?.pending > 0; i++) advanceTime(1000 / fps);
+        waitHeld(() => plants.plantPlacement()?.pending > 0, 600);
         step(1.0);
         perf.gpuFrameMs();
         const ms = [];

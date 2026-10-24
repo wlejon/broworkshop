@@ -586,9 +586,10 @@ float ellipsoidIn(vec2 v, float r, float hgt) {
 
 // The heaps: a cumulus about each point of a lattice HEAP_CELL metres a
 // side that lies near the deck's bottom (so every view of a place sees
-// the same ones), and a second one about it where the cover is fuller,
-// each where the cover says there is one: half an ellipsoid on a flat base
-// with two towers on it, as wide as the cover is full and as tall as the
+// the same ones), and a fragment beside it where the cover is fuller,
+// each where the cover says there is one (and the heaps clump): half an
+// ellipsoid on a flat base with two towers on it, as wide as the cover is
+// full (and its own size, most small and a few large) and as tall as the
 // tops reach (each its own; towers only where the tops are high), the heap
 // shrinking to nothing as the cover thins (none cut off). How far (m) a
 // point at direction \`dir\` and \`z\` metres up the deck is inside the
@@ -599,23 +600,32 @@ const float HEAP_CELL = 2500.0;
 const float HEAP_SHELL = 0.35;   // the lattice's points within this many cells of the deck's bottom
 const float BASE_SHARP = 3.0;
 const float BASE_SPREAD = 80.0;  // how much the heaps' bases differ (m), about the field's
+const float HEAP_SMALL = 0.4, HEAP_BIG = 1.3, HEAP_SKEW = 1.3;   // a heap's size (of the cover's), u^HEAP_SKEW between
+const float HEAP_SIZE2 = 0.70;   // the mean of its square
+const float HEAP_CLUMP_MOST = 1.7;   // how much more of the heaps a clump holds at most
+const float HEAP_REACH = 0.8;   // the furthest (cells) a heap reaches from its foot: a tower, 1.1 r of the largest, or a fragment
 float heaps(vec3 dir, float z, float base, float tops, float cover) {
     const float rb = R + ${CLOUD_BOTTOM}.0, rc = rb / HEAP_CELL;
     vec3 g = dir * rc;
     vec3 c0 = floor(g);
     float zr = z - base;
     float tall = smoothstep(0.25, 0.9, tops / ${CLOUD_TOP - CLOUD_BOTTOM}.0);
-    // (A heap about a point beyond the cells searched is a cell off at
-    // least, less its reach; and none reaches over its towers' tops.)
-    float best = -max(0.35 * HEAP_CELL, zr - 1.2 * min(tops - base, 0.55 * HEAP_CELL * mix(0.8, 2.6, tall)));
-    for (int i = 0; i < 54; ++i) {
-        int j = i % 27, second = i / 27;
-        vec3 cell = c0 + vec3(j % 3, (j / 3) % 3, j / 9) - 1.0;
-        vec3 a = heapHash(cell + 31.7 * float(second));
-        float present = second == 0 ? smoothstep(0.0, 0.6, cover) : smoothstep(0.4, 0.9, cover);
-        float grow = smoothstep(a.x, a.x + 0.15, present);
-        if (grow <= 0.0) continue;
-        vec3 b = heapHash(cell + 17.31 + 31.7 * float(second));
+    // (A heap about a point beyond the cells searched is as far off as the
+    // searched block's nearest wall, a cell and more, less its reach:
+    // HEAP_REACH, a large heap's tower or a fragment off its side; and none
+    // reaches over its towers' tops. The wall's own distance, not the
+    // least of it: in clear air between heaps that is the step a view takes.)
+    vec3 fr = g - c0;
+    vec3 wall = 1.0 + min(fr, 1.0 - fr);
+    float off = (min(min(wall.x, wall.y), wall.z) - HEAP_REACH) * HEAP_CELL;
+    float best = -max(off, zr - 1.2 * min(tops - base, 0.55 * HEAP_CELL * HEAP_BIG * mix(0.8, 2.6, tall)));
+    float present = smoothstep(0.0, 0.6, cover);
+    float fragments = smoothstep(0.15, 0.7, cover), fragBig = smoothstep(0.4, 0.9, cover);
+    for (int i = 0; i < 27; ++i) {
+        vec3 cell = c0 + vec3(i % 3, (i / 3) % 3, i / 9) - 1.0;
+        vec3 a = heapHash(cell);
+        if (a.x > present * HEAP_CLUMP_MOST) continue;
+        vec3 b = heapHash(cell + 17.31);
         // (Anywhere in its cell: the shell takes the points a thin slab of
         // the lattice holds, so with feet kept off the cells' walls whole
         // rows of cells along a lattice axis lying nearly level are in or
@@ -627,29 +637,61 @@ float heaps(vec3 dir, float z, float base, float tops, float cover) {
         float la = length(at);
         if (abs(la - rc) > HEAP_SHELL) continue;
         vec3 au = at / la;
+        // The heaps clump: a noise some 14 km a tile (its lumps a few
+        // kilometres) raises and lowers how many stand, so they gather in
+        // groups with wide gaps of clear sky between, not a lattice's even
+        // spread. (Its mean leaves the share as the cover says.)
+        float clump = clamp(1.0 + 2.2 * (cloudNoise(au * (rb / 14000.0), 1.0 / 64.0).x - 0.62), 0.25, HEAP_CLUMP_MOST);
+        float grow = smoothstep(a.x, a.x + 0.15, present * clump);
+        if (grow <= 0.0) continue;
         // (The point from the heap's foot, on the plane tangent there.)
         vec3 v = (dir - au) * rb;
         vec3 east = normalize(cross(vec3(0.0, 1.0, 0.0), au) + 1e-5);
         vec3 north = cross(au, east);
         vec2 hz = vec2(dot(v, east), dot(v, north));
+        // Its size: most heaps small, a few large (HEAP_SMALL .. HEAP_BIG of
+        // the cover's, skewed to the small); the small ones flat (humilis),
+        // the large taller than wide where the tops reach (mediocris).
+        float sz = mix(HEAP_SMALL, HEAP_BIG, pow(a.y, HEAP_SKEW));
+        float szn = clamp(sz / HEAP_BIG, 0.0, 1.0);
+        float r = HEAP_CELL * mix(0.42, 0.55, cover) * sz;
         // (No wider than twice its height and a little: a low heap a small
         // dome, never a pancake whose rim thins to a sliver.)
-        float r = HEAP_CELL * mix(0.42, 0.55, cover) * mix(0.8, 1.0, a.y);
-        float hgt = min((tops - base) * mix(0.5, 1.0, a.z), r * mix(0.8, 2.6, tall));
-        r = min(r, 2.0 * hgt + 200.0) * grow;
+        float hgt = min((tops - base) * mix(0.5, 1.0, a.z) * mix(0.45, 1.0, szn), r * mix(0.8, 2.6, tall) * mix(0.6, 1.0, szn));
+        r = min(r, 2.0 * hgt + 120.0) * grow;
         hgt *= grow;
         // Its base: the field's condensation level, a few tens of metres
         // off it, cut flat; the dome's middle under it, so its walls rise
         // steep from the base's rim and the whole heap stands over every
         // point of the base (no thin rim the sun lights through).
-        float zh = zr - BASE_SPREAD * (heapHash(cell + 5.13 + 31.7 * float(second)).x - 0.5);
+        vec3 f = heapHash(cell + 5.13);
+        float zh = zr - BASE_SPREAD * (f.x - 0.5);
         float d = ellipsoidIn(vec2(length(hz), zh + 0.4 * hgt), r, 1.4 * hgt);
-        // The towers: over the body, a little off its middle each way.
-        float ang = 6.2832 * b.z;
-        vec2 o = vec2(cos(ang), sin(ang)) * 0.4 * r;
-        d = max(d, ellipsoidIn(vec2(length(hz - o), zh - 0.45 * hgt), 0.55 * r, 0.75 * hgt));
-        d = max(d, ellipsoidIn(vec2(length(hz + 0.8 * o.yx * vec2(-1.0, 1.0)), zh - 0.3 * hgt), 0.45 * r, 0.6 * hgt));
+        // The towers: two over the body, each its own way off its middle,
+        // its own size and height, so no two heaps share a silhouette (the
+        // engine's turrets crown them).
+        for (int k = 0; k < 2; ++k) {
+            vec3 t = fract(b.zxy * vec3(7.13, 3.71, 5.37) * float(k + 1) + a.zxy);
+            float ang = 6.2832 * t.x;
+            vec2 o = vec2(cos(ang), sin(ang)) * mix(0.1, 0.5, t.y) * r;
+            d = max(d, ellipsoidIn(vec2(length(hz - o), zh - mix(0.2, 0.55, t.z) * hgt), mix(0.35, 0.6, t.z) * r,
+                                   mix(0.5, 0.8, t.y) * hgt));
+        }
         best = max(best, min(d, zh * BASE_SHARP));
+        // A fragment beside it where the cover is fuller (as the heaps
+        // clump): a small flat heap off its side, close or a little apart,
+        // as large as a second heap where the cover is full; on its own
+        // base, a few tens of metres off the heap's. (Within the heap's
+        // reach of its foot, so the cells searched find it.)
+        float fg = smoothstep(f.y, f.y + 0.15, fragments * clump);
+        if (fg > 0.0) {
+            float rs = HEAP_CELL * mix(0.42, 0.55, cover) * mix(0.3, 0.6, f.z) * mix(1.0, 1.9, fragBig) * fg;
+            float hs = min(rs * mix(0.6, 1.2, tall), (tops - base) * 0.6) * fg;
+            float ang = 6.2832 * fract(13.7 * f.z + b.z);
+            vec2 o = vec2(cos(ang), sin(ang)) * min(r + rs * mix(0.2, 1.4, fract(7.3 * f.y)), 1800.0 - rs);
+            float zs = zr - BASE_SPREAD * (fract(5.1 * f.x) - 0.5);
+            best = max(best, min(ellipsoidIn(vec2(length(hz - o), zs + 0.4 * hs), rs, 1.4 * hs), zs * BASE_SHARP));
+        }
     }
     return min(best, (zr + 0.5 * BASE_SPREAD) * BASE_SHARP);
 }
@@ -659,10 +701,13 @@ float heaps(vec3 dir, float z, float base, float tops, float cover) {
 // first 300 m from their bases; under 0 below and above them, by how far.
 float heapsShare(float z, float base, float tops, float cover) {
     float tall = smoothstep(0.25, 0.9, tops / ${CLOUD_TOP - CLOUD_BOTTOM}.0);
-    float r = HEAP_CELL * mix(0.42, 0.55, cover) * 0.9;
-    float hgt = max(min((tops - base) * 0.75, r * mix(0.8, 2.6, tall)) * 1.1, 300.0);
-    float n = 2.0 * HEAP_SHELL * (smoothstep(0.0, 0.6, cover) + smoothstep(0.4, 0.9, cover));
-    float area = 3.1416 * r * r / (HEAP_CELL * HEAP_CELL) * 1.15;
+    float r = HEAP_CELL * mix(0.42, 0.55, cover) * sqrt(HEAP_SIZE2);
+    float hgt = max(min((tops - base) * 0.75 * 0.8, r * mix(0.8, 2.6, tall) * 0.85) * 1.1, 300.0);
+    float n = 2.0 * HEAP_SHELL * smoothstep(0.0, 0.6, cover);
+    // (A fragment's mean square, of the cover's size, 0.21 and up to 1.9^2
+    // as much where the cover is full: as a share of a heap's.)
+    float frag = 0.21 * pow(mix(1.0, 1.9, smoothstep(0.4, 0.9, cover)), 2.0) * smoothstep(0.15, 0.7, cover) / HEAP_SIZE2;
+    float area = 3.1416 * r * r / (HEAP_CELL * HEAP_CELL) * 1.15 * (1.0 + frag);
     float s0 = 1.0 - exp(-n * area);
     float zr = z - base, hr = zr / hgt;
     if (zr < 0.0) return zr * BASE_SHARP / CLOUD_EDGE;
