@@ -1,0 +1,37 @@
+/* Superopt Lab: editors and the Superoptimize tab's before / after stage.
+   The answer / checks / stage classes are kit.css's evidence section. */
+:root { --k-side-w: 430px; }
+
+textarea.code {
+    width: 100%; font-family: var(--k-font); font-size: 12px; line-height: 1.5;
+    tab-size: 2; white-space: pre; overflow-x: auto;
+}
+
+/* Superoptimize: the two programs side by side, then what changed and why. */
+.so-stage { overflow: auto; padding: 18px var(--k-pad); display: flex; flex-direction: column; gap: 18px; }
+.so-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.so-code { border: 1px solid var(--k-border); border-radius: 6px; background: var(--k-surface); overflow: hidden; }
+.so-code > header {
+    display: flex; align-items: baseline; gap: 10px; padding: 8px 12px;
+    border-bottom: 1px solid var(--k-border); font-family: var(--k-font-ui); font-size: 12px; color: var(--k-muted);
+}
+.so-code > header b { color: var(--k-text); font-weight: 600; }
+.so-code > pre { margin: 0; padding: 10px 0; line-height: 1.6; white-space: pre; overflow-x: auto; }
+.so-code .ln { display: block; padding: 0 12px; }
+.so-code .ln.del { background: rgba(255, 133, 133, 0.10); box-shadow: inset 3px 0 0 var(--k-err); }
+.so-code .ln.add { background: rgba(127, 230, 168, 0.10); box-shadow: inset 3px 0 0 var(--k-ok); }
+.so-section { font-family: var(--k-font-ui); font-size: 11px; letter-spacing: .8px; text-transform: uppercase; color: var(--k-dim); }
+.so-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.so-card { border: 1px solid var(--k-border); border-radius: 6px; padding: 10px 12px; background: var(--k-surface); display: flex; flex-direction: column; gap: 6px; }
+.so-card > b { font-family: var(--k-font-ui); font-size: 12px; color: var(--k-text); font-weight: 600; }
+.so-card > small { color: var(--k-muted); font-family: var(--k-font-ui); }
+.so-card code { display: block; white-space: pre-wrap; }
+.so-card code.from { color: var(--k-err); }
+.so-card code.to { color: var(--k-ok); }
+.so-bars { display: flex; flex-direction: column; gap: 8px; }
+.so-bar { display: grid; grid-template-columns: 170px 1fr 120px; align-items: center; gap: 10px; font-family: var(--k-font-ui); font-size: 12px; color: var(--k-muted); }
+.so-bar > i { display: block; height: 14px; border-radius: 3px; background: var(--k-accent); min-width: 2px; }
+.so-bar > i.after { background: var(--k-ok); }
+.so-bar > i.dim { background: var(--k-border-hi); }
+.so-bar > span:last-child { color: var(--k-value); text-align: right; font-family: var(--k-font); }
+.so-none { color: var(--k-muted); font-family: var(--k-font-ui); font-size: 14px; line-height: 1.6; }

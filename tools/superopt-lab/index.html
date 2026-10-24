@@ -4,109 +4,154 @@
 <meta charset="utf-8">
 <title>Superopt Lab</title>
 <link rel="stylesheet" href="/lib/kit/kit.css">
-<style>
-  :root { --k-side-w: 440px; }
-  textarea.code { font-family: var(--k-font); font-size: 11px; line-height: 1.45; tab-size: 2; }
-  pre.code-out { margin: 0; max-height: 170px; font-size: 11px; line-height: 1.4; }
-</style>
+<link rel="stylesheet" href="/app/lab.css">
 </head>
 <body class="k-app">
   <header class="k-header">
     <h1>Superopt Lab</h1>
-    <span class="k-sub">Compiler, Equivalence Prover &amp; Auto-Kernel Workbench</span>
+    <span class="k-sub">bro proves things about code; the page runs the code to check</span>
   </header>
 
   <div class="k-toolbar">
     <div class="k-tabs" id="tabs">
-      <button data-tab="prove" id="tab-prove" class="active">1. Equivalence &amp; Fuzz Prover</button>
-      <button data-tab="superopt" id="tab-superopt">2. Superoptimizer &amp; Rewriter</button>
-      <button data-tab="autokernel" id="tab-autokernel">3. Auto-Kernel Parallelizer</button>
+      <button data-tab="prove" id="tab-prove" class="active">Prove</button>
+      <button data-tab="fuzz" id="tab-fuzz">Fuzz</button>
+      <button data-tab="superopt" id="tab-superopt">Superoptimize</button>
+      <button data-tab="parallel" id="tab-parallel">Parallelize</button>
     </div>
     <span class="k-spacer"></span>
-    <button id="btn-run" class="primary">Run Active Pass</button>
+    <span class="k-sub" id="tab-question"></span>
   </div>
 
   <div class="k-body">
     <aside class="k-side">
+
+      <!-- Prove ------------------------------------------------------------>
       <div data-pane="prove" class="k-col">
         <div class="k-panel">
-          <h2>Presets</h2>
-          <div class="k-row" id="prove-presets"></div>
+          <h2>Example</h2>
+          <div class="k-presets" id="prove-presets"></div>
+          <p class="k-note" id="prove-note"></p>
         </div>
         <div class="k-panel">
-          <h2>Reference Specification (spec)</h2>
-          <div class="k-stack">
-            <textarea id="prove-spec" class="code" rows="5" spellcheck="false"></textarea>
-          </div>
-          <h2>Candidate Implementation</h2>
-          <div class="k-stack">
-            <textarea id="prove-cand" class="code" rows="5" spellcheck="false"></textarea>
-          </div>
+          <h2 id="prove-spec-title">Specification</h2>
+          <textarea id="prove-spec" class="code" rows="5" spellcheck="false"></textarea>
+          <h2>Candidate</h2>
+          <textarea id="prove-cand" class="code" rows="5" spellcheck="false"></textarea>
           <div class="k-row">
-            <label class="k-field"><span>domainMin</span><input type="number" id="prove-min" value="-2147483648" style="width:120px"></label>
-            <label class="k-field"><span>domainMax</span><input type="number" id="prove-max" value="2147483647" style="width:120px"></label>
-          </div>
-          <div class="k-row">
-            <button id="btn-prove" class="primary">Prove Equivalence &amp; Fuzz</button>
+            <div id="prove-mode"></div>
+            <span class="k-spacer"></span>
+            <button id="prove-run" class="primary">Prove</button>
           </div>
         </div>
         <div class="k-panel">
-          <h2>Proof &amp; Symbolic Fuzz Readout</h2>
+          <h2>Answer <span class="dim">bro.prove</span></h2>
+          <div class="k-verdict" id="prove-verdict"></div>
           <div id="prove-kv"></div>
-          <pre class="k-box code-out" id="prove-out"></pre>
+        </div>
+        <div class="k-panel">
+          <h2>Checked by the page</h2>
+          <div class="k-checks" id="prove-checks"></div>
         </div>
       </div>
 
+      <!-- Fuzz ------------------------------------------------------------->
+      <div data-pane="fuzz" class="k-col" hidden>
+        <div class="k-panel">
+          <h2>Example</h2>
+          <div class="k-presets" id="fuzz-presets"></div>
+          <p class="k-note" id="fuzz-note"></p>
+        </div>
+        <div class="k-panel">
+          <h2>Function <span class="dim">int32 arguments</span></h2>
+          <textarea id="fuzz-src" class="code" rows="10" spellcheck="false"></textarea>
+          <div class="k-row">
+            <span class="k-spacer"></span>
+            <button id="fuzz-run" class="primary">Fuzz</button>
+          </div>
+        </div>
+        <div class="k-panel">
+          <h2>Answer <span class="dim">bro.fuzz</span></h2>
+          <div class="k-verdict" id="fuzz-verdict"></div>
+          <div id="fuzz-kv"></div>
+        </div>
+        <div class="k-panel">
+          <h2>Checked by the page</h2>
+          <div class="k-checks" id="fuzz-checks"></div>
+        </div>
+      </div>
+
+      <!-- Superoptimize ---------------------------------------------------->
       <div data-pane="superopt" class="k-col" hidden>
         <div class="k-panel">
-          <h2>Presets</h2>
-          <div class="k-row" id="superopt-presets"></div>
+          <h2>Example</h2>
+          <div class="k-presets" id="so-presets"></div>
+          <p class="k-note" id="so-note"></p>
         </div>
         <div class="k-panel">
-          <h2>Input JavaScript Function</h2>
-          <div class="k-stack">
-            <textarea id="superopt-src" class="code" rows="7" spellcheck="false"></textarea>
-          </div>
+          <h2>Function <span class="dim">int32 in, int32 out</span></h2>
+          <textarea id="so-src" class="code" rows="9" spellcheck="false"></textarea>
           <div class="k-row">
-            <button id="btn-superopt" class="primary">Superoptimize &amp; Rewrite</button>
+            <span class="k-spacer"></span>
+            <button id="so-run" class="primary">Optimize</button>
           </div>
         </div>
         <div class="k-panel">
-          <h2>Synthesis &amp; Microbenchmark Readout</h2>
-          <div id="superopt-kv"></div>
-          <h2>Rewritten Source &amp; Verified Diff</h2>
-          <pre class="k-box code-out" id="superopt-out"></pre>
+          <h2>Answer <span class="dim">bro.superoptimize + bro.rewriteSource</span></h2>
+          <div class="k-verdict" id="so-verdict"></div>
+          <div id="so-kv"></div>
+        </div>
+        <div class="k-panel">
+          <h2>Checked by the page</h2>
+          <div class="k-checks" id="so-checks"></div>
         </div>
       </div>
 
-      <div data-pane="autokernel" class="k-col" hidden>
+      <!-- Parallelize ------------------------------------------------------>
+      <div data-pane="parallel" class="k-col" hidden>
         <div class="k-panel">
-          <h2>Presets</h2>
-          <div class="k-row" id="kernel-presets"></div>
+          <h2>Example</h2>
+          <div class="k-presets" id="par-presets"></div>
+          <p class="k-note" id="par-note"></p>
         </div>
         <div class="k-panel">
-          <h2>Loop Function Source</h2>
-          <div class="k-stack">
-            <textarea id="kernel-src" class="code" rows="7" spellcheck="false"></textarea>
-          </div>
+          <h2>Loop <span class="dim">for (let i = 0; i &lt; n; i++) over typed arrays</span></h2>
+          <textarea id="par-src" class="code" rows="7" spellcheck="false"></textarea>
+          <label class="k-field"><span>GPU run size</span><input type="range" id="par-size" min="14" max="22" step="1"><output class="k-val" id="par-size-val"></output></label>
           <div class="k-row">
-            <button id="btn-kernel" class="primary">Analyze &amp; Parallelize Loop</button>
+            <span class="k-spacer"></span>
+            <button id="par-run" class="primary">Analyze &amp; run</button>
           </div>
         </div>
         <div class="k-panel">
-          <h2>Dependence &amp; Certificate Readout</h2>
-          <div id="kernel-kv"></div>
-          <h2>Generated WGSL / Hazard Report</h2>
-          <pre class="k-box code-out" id="kernel-out"></pre>
+          <h2>Answer <span class="dim">bro.autoKernel</span></h2>
+          <div class="k-verdict" id="par-verdict"></div>
+          <div id="par-kv"></div>
+        </div>
+        <div class="k-panel">
+          <h2>Checked by the page</h2>
+          <div class="k-checks" id="par-checks"></div>
         </div>
       </div>
     </aside>
 
     <main class="k-main">
-      <div class="k-viewport">
-        <canvas id="view"></canvas>
+      <div data-pane="prove" class="k-stage">
+        <div class="k-stage-head"><h2 id="prove-title"></h2><span class="k-spacer"></span><div class="k-legend" id="prove-legend"></div></div>
+        <div class="k-viewport"><canvas id="prove-view"></canvas></div>
       </div>
-      <div class="k-log" id="log" style="max-height:140px;flex:none;border-top:1px solid var(--k-border)"></div>
+      <div data-pane="fuzz" class="k-stage" hidden>
+        <div class="k-stage-head"><h2 id="fuzz-title"></h2><span class="k-spacer"></span><div class="k-legend" id="fuzz-legend"></div></div>
+        <div class="k-viewport"><canvas id="fuzz-view"></canvas></div>
+      </div>
+      <div data-pane="superopt" class="k-stage" hidden>
+        <div class="k-stage-head"><h2 id="so-title"></h2><span class="k-spacer"></span><div class="k-legend" id="so-legend"></div></div>
+        <div class="k-viewport so-stage" id="so-view"></div>
+      </div>
+      <div data-pane="parallel" class="k-stage" hidden>
+        <div class="k-stage-head"><h2 id="par-title"></h2><span class="k-spacer"></span><div class="k-legend" id="par-legend"></div></div>
+        <div class="k-viewport"><canvas id="par-view"></canvas></div>
+      </div>
     </main>
   </div>
 
