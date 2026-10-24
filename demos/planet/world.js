@@ -393,6 +393,17 @@ scene.setAtmosphere(Object.assign({ enabled: true }, AIR));
 // (Metered on the sun's light: a planet of dark sea and forest stays dark
 // and its snow white, from orbit to the grass.)
 scene.setExposure({ mode: 'auto', meter: 'incident' });
+// Near the ground the view is exposed for the woods it stands in, as a
+// photographer would: about 1.2 stops over the sun's reading at the grass,
+// none from a few km up, where the land is seen whole.
+let exposedFor = 0;
+function exposeFor(pos) {
+    const h = Math.max(eyeHeight(pos), 1);
+    const comp = 1.2 * Math.min(Math.max(1 - Math.log10(h / 20) / 2, 0), 1);
+    if (Math.abs(comp - exposedFor) < 0.05) return;
+    exposedFor = comp;
+    scene.setExposure({ mode: 'auto', meter: 'incident', compensation: comp });
+}
 
 // --- the clouds ---------------------------------------------------------------------
 
@@ -1095,8 +1106,10 @@ vp.onView((view) => {
         const h = Math.max(alt, 2);
         view.near = Math.min(Math.max(0.05 * h, 0.1), 1e5);
         view.far = Math.max(4e5, 3 * h + 2 * Math.sqrt(2 * R * h));
+        exposeFor(cam.pos);
         return;
     }
+    exposeFor(still.view.eye);
     view.position = still.view.eye;
     view.target = still.view.look;
     view.up = still.view.up;
