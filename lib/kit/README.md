@@ -16,7 +16,7 @@ Ported examples: `demos/kws-lab` and `demos/lm-playground` (ML labs),
 Widgets take "a selector or an element already in the page" (resolved with
 `$`, which throws on a miss) and return a small handle; none owns layout.
 
-**Core** (re-exported by `index.js`, except `gauges.js`, `worker-rpc.js` and `test.js`)
+**Core** (re-exported by `index.js`, except `gauges.js`, `evidence.js`, `worker-rpc.js` and `test.js`)
 
 | File | What |
 |------|------|
@@ -26,6 +26,7 @@ Widgets take "a selector or an element already in the page" (resolved with
 | `dom.js` | `$` (selector or element), `$$`, `h` element builder, `ids`, `clear`, `trackDrag(onMove, onUp)`; formatters `fmtBytes`, `fmtMs`, `fmtClock` (m:ss.s), `clock` (hh:mm:ss) |
 | `ui.js` | status line, progress, log, stats, `readout` rows, fps, toggle, segmented, tabs, frame loop, `fixedStep(h)` accumulator, `foldPanels()` |
 | `gauges.js` | live values: `levelMeter` (`.k-meter` bar), `historyPlot` (scrolling line plot), `fitCanvas` (HiDPI canvas sizing every canvas widget uses) |
+| `evidence.js` | an engine's answer beside what the page checked itself (solver-lab, superopt-lab): `verdict` (`.k-verdict`), `checks` (`.k-checks` ✓/✗/• list, `set` returns the pass tally), `legend`, `presetPicker` (chips), `kitColors()` (the tokens for canvas drawing), `alpha(hex, a)` |
 | `params.js` | controls bound to values / objects (`bindControl`, `params`, `logMap`) |
 | `prefs.js` | `prefStore(key, defaults)`: one localStorage JSON record with `set` / `snapshot` / `restore` |
 | `weights.js` | model weight resolution (BRO_WEIGHTS, sibling repos, model cache); no DOM, works in workers |
@@ -128,6 +129,9 @@ For a full-window 3D canvas use `<canvas>` + a floating `.k-hud` panel
   note over an empty `.k-viewport`), `k-gallery` of `k-thumb`s (clickable
   thumbnails; `.active`). Component sheets: `chat.css`, `speech.css`,
   `nodegraph.css`; the imagegen panel classes sit at the end of `kit.css`.
+- **Evidence** (`evidence.js`): `k-verdict` (badge + the answer's one
+  line), `k-checks` (the page's own checks: ✓ / ✗ / • rows with a dim
+  detail line), `k-legend` (a stage caption's swatches; `i.line`, `i.ring`).
 - **Dashboards:** `k-deck` inside a `k-main.pad` wraps fixed-width
   `k-panel`s (`--k-card-w`, default 560px; `.wide` spans two); `h3` inside a
   panel is a section heading (window-lab, input-lab).

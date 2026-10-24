@@ -277,6 +277,36 @@ button.k-link:hover { background: none; color: var(--k-value); }
 .k-caption { color: var(--k-muted); font-weight: 600; margin-top: 4px; flex: none; }
 .k-caption .dim { font-weight: normal; margin-left: 6px; }
 
+/* ---- evidence (evidence.js) ------------------------------------------------
+ * An engine's answer beside what the page checked on its own. */
+.k-verdict { display: flex; align-items: baseline; gap: 10px; min-height: 26px; flex-wrap: wrap; }
+.k-verdict .k-badge { font-size: 12px; padding: 3px 10px; font-weight: 600; letter-spacing: .5px; }
+.k-verdict b { color: var(--k-value); font-weight: normal; }
+.k-checks { display: flex; flex-direction: column; gap: 7px; }
+.k-check { display: flex; gap: 8px; align-items: baseline; }
+.k-check > i { flex: none; width: 14px; font-style: normal; text-align: center; font-weight: 600; }
+.k-check > div { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.k-check > div > span { color: var(--k-text); font-family: var(--k-font-ui); line-height: 1.4; }
+.k-check > div > small { color: var(--k-dim); font-size: 11px; line-height: 1.4; }
+.k-check.ok > i { color: var(--k-ok); }
+.k-check.fail > i, .k-check.fail > div > span { color: var(--k-err); }
+.k-check.info > i { color: var(--k-warn); }
+.k-presets { display: flex; flex-wrap: wrap; gap: 4px; }
+.k-legend { display: flex; gap: 16px; flex-wrap: wrap; color: var(--k-muted); font-size: 11px; align-items: center; }
+.k-legend > span { display: flex; align-items: center; gap: 6px; }
+.k-legend > span > i { display: inline-block; width: 12px; height: 10px; border-radius: 2px; }
+.k-legend > span > i.line { height: 3px; border-radius: 0; }
+.k-legend > span > i.ring { background: none; border: 2px solid; border-radius: 6px; width: 10px; height: 10px; }
+.k-legend.foot { padding: 7px var(--k-pad); border-top: 1px solid var(--k-border); flex: none; }
+
+/* A stage: an HTML caption (title, legend) over a .k-viewport, in a .k-main. */
+.k-stage { flex: 1; display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.k-stage-head {
+    display: flex; align-items: baseline; gap: 14px; flex: none; flex-wrap: wrap;
+    padding: 10px var(--k-pad) 9px; border-bottom: 1px solid var(--k-border);
+}
+.k-stage-head h2 { margin: 0; font-size: 13px; font-weight: 600; color: var(--k-text); font-family: var(--k-font-ui); }
+
 /* ---- text ------------------------------------------------------------------ */
 .ok   { color: var(--k-ok); }
 .warn { color: var(--k-warn); }
