@@ -79,6 +79,9 @@ const DBGI = ARGV.find((s) => s.startsWith('rit='));
 const REGION_ROUTE = DBGI ? +DBGI.slice(4).split(',')[0] : 320, REGION_ERODE = DBGI ? +DBGI.slice(4).split(',')[1] : 384;
 // (The regions' lift: iterations of its spread, regionLift.)
 const REGION_LIFT = 128;
+// (The spread of a pool's outflow over its cells, regionPool: a cell an
+// iteration, up a long pool of a river's valley.)
+const REGION_POOL = 192;
 export const PROCESSES = {
     resolution: 512, channels: 4, data: plates(SEED),
     passes: [{ fn: 'route', iterations: ROUTE }, { fn: 'erode', iterations: ERODE }, { fn: 'settle' }],
@@ -88,7 +91,8 @@ export const PROCESSES = {
     regions: ARGV.includes('noregions') ? undefined : {
         init: 'regionInit', cells: 512, apron: 32, cell: 64, ratio: 4, levels: 4, reach: 1, keep: 2,
         passes: [{ fn: 'regionRoute', iterations: REGION_ROUTE }, { fn: 'regionErode', iterations: REGION_ERODE },
-                 { fn: 'regionLift', iterations: REGION_LIFT }, { fn: 'regionSettle' }],
+                 { fn: 'regionLift', iterations: REGION_LIFT }, { fn: 'regionSettle' },
+                 { fn: 'regionPool', iterations: REGION_POOL }],
     },
     source: WARP.glsl({ name: 'warpNoise', dims: [3] }) + CONTINENT.glsl({ name: 'continentNoise', dims: [3] }) +
             RELIEF.glsl({ name: 'reliefNoise', dims: [3] }) +
@@ -229,15 +233,29 @@ float flowSlide = 1e30;   // the threshold slope past which ground slides (a reg
 void flow(inout vec4 v[PROC_CHANNELS], bool carve, float seedA, float ks, float bed) {
     float h = v[2].x, W = v[3].w;
     float L = procCellSize();
-    bool sea = h < 0.0 || procBorder() == 0;
+    bool edge = procBorder() == 0;
+    bool sea = h < 0.0 || edge;
+    // (A region's land edge cell is an outlet, and where the coarser field's
+    // river crosses it, a source too: it hands that river's drainage, its
+    // share of the river's width (seedA spread over the coarser field's
+    // cell, in this field's cells), to the neighbours whose water lies under
+    // it, so the river runs on along the region's own valleys. Where the
+    // region's water lies over the edge, as at the river's way out, it hands
+    // nothing.)
+    float inflow = edge && h >= 0.0 ? seedA * L / procCoarseCellSize() : 0.0;
     float A = 1.0, rest = 1e30, mean4 = 0.0;
     float Wn[8];
     for (int k = 0; k < 8; ++k) {
         vec4 n = procRead(2, NB[k]);
         Wn[k] = procRead(3, NB[k]).w;
         float dist = ND[k] * L;
-        // What it hands this cell, if its water lies above this one's.
-        if (Wn[k] > W && n.w > 0.0) A += n.z * pow((Wn[k] - W) / dist / n.w, FLOW_P);
+        // What it hands this cell, if its water lies above this one's: no
+        // more than its steepest way's share. (Its slope down was reckoned
+        // over this cell's last level; where the level fell since, as down a
+        // filled pool lowering to its cut outlet, the slope over its share's
+        // scale grew without bound, the drainage handed on many times over
+        // each iteration, to inf and NaN down a river's whole pool.)
+        if (Wn[k] > W && n.w > 0.0) A += n.z * pow(min((Wn[k] - W) / dist / n.w, 1.0), FLOW_P);
         rest = min(rest, Wn[k] + FILL * dist);
         if (ND[k] == 1.0) mean4 += 0.25 * n.x;
     }
@@ -264,15 +282,17 @@ void flow(inout vec4 v[PROC_CHANNELS], bool carve, float seedA, float ks, float 
         }
     }
     W = sea ? h : max(h, rest);
+    bool hands = !sea || inflow > 0.0;
+    if (sea && inflow > 0.0) A = 1.0 + inflow;
     // This cell's shares down, for its neighbours' next iteration.
     float smax = 0.0, S = 0.0;
     for (int k = 0; k < 8; ++k) smax = max(smax, (W - Wn[k]) / (ND[k] * L));
-    if (!sea && smax > 0.0)
+    if (hands && smax > 0.0)
         for (int k = 0; k < 8; ++k) {
             float down = (W - Wn[k]) / (ND[k] * L);
             if (down > 0.0) S += pow(down / smax, FLOW_P);
         }
-    v[2] = vec4(h, A, S > 0.0 ? A / S : 0.0, sea ? 0.0 : smax);
+    v[2] = vec4(h, A, S > 0.0 ? A / S : 0.0, hands ? smax : 0.0);
     v[3].w = W;
 }
 
@@ -412,15 +432,32 @@ void regionSettle(inout vec4 v[PROC_CHANNELS]) {
     float carved = max(v[2].x, v[3].z);   // (the creep may have taken it under its floor)
     float ground = carved > 0.0 ? carved + v[1].x : carved;
     float cell = procCellSize();
-    // (Its own drainage: the coarser field's, its seed, is that field's cells
-    // smeared over a few of this one's each, a river kilometres wide
-    // drawn as wet ground square along a region's edges. And none on a
-    // hollow's floor, which is its pool's water spread, the whole pool's.)
-    float area = (v[3].w - carved > 1.0 ? 1.0 : v[2].y) * cell * cell * 1e-6;
+    // (Its own drainage, routed over its water's level with the coarser
+    // field's rivers fed in where they cross its edges: not the seed, which
+    // is that field's cells smeared over a few of this one's each, a river
+    // kilometres wide drawn as wet ground square along a region's edges. A
+    // pool's cells take its outflow, spread by regionPool.)
+    float area = v[2].y * cell * cell * 1e-6;
     v[0].x = ground;
     v[1].x = ground;
     v[1].z = area;
     climate(v, procUp(), ground, v[1].y, v[1].w);
+}
+
+// A pool (the region's water over its carved floor) drains as one: each of
+// its cells takes the most of its own and its pool neighbours' drainage, so
+// over the iterations the whole pool reads its outflow's catchment, a river
+// carved flat to its bed and filled reading as the river, not as the one
+// cell's hollow it would be cell by cell (tan strips with wet dots where a
+// floor cell happened to drain).
+const float POOL_DEPTH = 0.25;   // m of water over the floor that makes a cell a pool's
+bool inPool(ivec2 o) { return procRead(3, o).w - max(procRead(2, o).x, procRead(3, o).z) > POOL_DEPTH; }
+void regionPool(inout vec4 v[PROC_CHANNELS]) {
+    if (procBorder() == 0 || !inPool(ivec2(0))) return;
+    float a = v[1].z;
+    for (int k = 0; k < 8; ++k)
+        if (inPool(NB[k])) a = max(a, procRead(1, NB[k]).z);
+    v[1].z = a;
 }
 `,
 };
