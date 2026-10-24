@@ -99,6 +99,7 @@ export const PROCESSES = {
             BAND_NOISE.map((n, i) => n.glsl({ name: 'bandNoise' + i, dims: [3] })).join('') + `
 const int PLATES = ${PLATES};
 const float R = ${R}.0;
+const float COAST = 0.1;   // the band of the continental field the coast's heights come in over
 // (Channel 1's x: a drainage area, km², as its log10.)
 float logArea(float km2) { return log2(max(km2, 1e-3)) * 0.30103; }
 
@@ -177,9 +178,16 @@ void procInit(inout vec4 v[PROC_CHANNELS]) {
     }
 
     // Hypsometry: lowlands most of the land, the abyss most of the sea, the
-    // shelf between.
-    float ground = land > 0.0 ? 40.0 + 900.0 * pow(land, 1.8) : -140.0 - 4300.0 * smoothstep(0.0, 0.35, -land);
-    ground += rise * (land > -0.15 ? 1.0 : 0.6);
+    // shelf between. The coast's 40 m of lowland and 140 m of shelf come in
+    // over a band of the continental field either side of it, so the ground
+    // passes through the sea's level as smoothly as the field does: stepped
+    // from +40 to -140 m at the coast, the shore was the bilinear contour of
+    // a jump inside one cell, and followed the cells' edges, a staircase of
+    // 12 km steps from the limb that every region inherited.
+    float shore = smoothstep(0.0, COAST, abs(land));
+    float ground = land > 0.0 ? 40.0 * shore + 900.0 * pow(land, 1.8)
+                              : -140.0 * shore - 4300.0 * smoothstep(0.0, 0.35, -land);
+    ground += rise * mix(0.6, 1.0, smoothstep(-0.2, -0.1, land));
     float range = clamp(rise / 2600.0, 0.0, 1.0);
 
     // The tree's detail rides on the land: little on the plains, the most on
