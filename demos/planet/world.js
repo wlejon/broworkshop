@@ -373,13 +373,20 @@ vec3 swirled(vec3 d, out float heart) {
         // kilometres across, and spiral bands winding in to it from some
         // three of its sizes out, gaps between them.)
         float h = 0.4 * exp(-0.5 * s * s);
-        if (b.z > 0.0) {
+        if (b.z > 0.0 && s < 4.0) {
             vec3 t1 = normalize(cross(a.xyz, abs(a.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
             float ang = atan(dot(d, cross(a.xyz, t1)), dot(d, t1));
-            float psi = ang + sign(a.w) * 4.5 * log(max(s, 0.1));
-            float arms = smoothstep(0.35, 0.85, cos(3.0 * psi)) * smoothstep(3.4, 0.8, s);
-            float disc = smoothstep(0.9, 0.45, s);
-            h = mix(h, max(disc, 0.6 * arms) * smoothstep(0.06, 0.16, s), b.z);
+            // (The bands' phase, width and breaks and the disc's rim moved
+            // by the engine's noise, some 60 and 25 km, so the storm is
+            // ragged cloud, not a clean drawn spiral.)
+            vec4 nt = cloudNoise(d * (R / 4.5e5), 1.0 / 64.0);
+            vec4 nf = cloudNoise(d.zxy * (R / 1.8e5), 1.0 / 64.0);
+            float psi = ang + sign(a.w) * 4.5 * log(max(s, 0.1)) + 1.6 * (nt.x - 0.5);
+            float arms = smoothstep(0.2, 0.45, cos(3.0 * psi) + 0.6 * (nf.x - 0.5) + 0.4 * (nt.y - 0.5)) *
+                         smoothstep(3.6, 1.6, s + 0.8 * (nf.y - 0.5));
+            arms *= smoothstep(0.3, 0.45, nf.y + 0.3 * (nt.x - 0.5) + 0.15 * smoothstep(2.0, 0.5, s));
+            float disc = smoothstep(1.05, 0.85, s + 0.5 * (nt.y - 0.5) + 0.25 * (nf.x - 0.5));
+            h = mix(h, max(disc, 0.8 * arms) * smoothstep(0.06, 0.16, s), b.z);
         }
         heart = max(heart, b.y * h);
     }
@@ -451,10 +458,16 @@ vec3 lowCommas(vec3 d, vec3 p, float f) {
         cold *= mix(0.3, 1.0, smoothstep(0.25, 0.75, brk));
         // The warm front's shield: poleward of its line from the triple
         // point east and a little equatorward, some size deep.
-        float yl = -0.3 - 0.3 * (q.x - 0.45);
+        // (Its line bowed poleward, its far edges an oval about the shield's
+        // middle, every edge moved by the texture some tenths of a size, so
+        // none is a straight line in the low's frame: a great circle on the
+        // globe.)
+        float yl = -0.3 - 0.3 * (q.x - 0.45) + 0.12 * (q.x - 0.45) * (q.x - 0.45) + 0.3 * (t - 0.5);
         float yr = q.y - yl;
-        float warm = smoothstep(-0.1, 0.08, yr) * smoothstep(1.1, 0.5, yr) * smoothstep(0.2, 0.5, q.x) *
-                     smoothstep(2.0, 1.3, q.x) * mix(0.7, 1.0, tex);
+        vec2 wo = (q - vec2(1.05, yl + 0.45)) / vec2(0.95, 0.75);
+        float warm = smoothstep(-0.1, 0.08, yr) * smoothstep(1.05, 0.55, length(wo) + 0.4 * (tex - 0.5)) *
+                     smoothstep(0.2, 0.5, q.x + 0.4 * (t2 - 0.5)) * mix(0.7, 1.0, tex);
+        warm *= mix(0.45, 1.0, smoothstep(0.3, 0.7, f + 0.3 * (t - 0.5)));
         float over = max(max(cold, head), 0.85 * warm);
         // The cold air behind the front and under the head's tail.
         float behind = smoothstep(0.05, 0.5, xf - q.x) * smoothstep(-0.4, 0.3, -q.y) * smoothstep(4.4, 3.0, r);
@@ -485,7 +498,7 @@ float landEast(vec3 up) {
     vec3 nn = cross(e, up);
     float sum = 0.0, wsum = 0.0;
     for (int k = 1; k <= 16; ++k) {
-        float t = 0.027 * float(k), wk = 1.0 - 0.045 * float(k);
+        float t = 0.027 * float(k), wk = exp(-0.18 * float(k));
         for (int j = -1; j <= 1; ++j) {
             vec3 dk = normalize(up * cos(t) + e * sin(t) + nn * (0.04 * float(j)));
             // (Land and the shelf sloping off it: the sea's depth is smooth
@@ -504,6 +517,11 @@ vec4 cloudCover(vec3 up) {
     vec3 bent = cloudBent(up);
     vec3 w = swirled(bent, heart);
     vec3 p = w * R;
+    // The belts' latitudes wander, by some 5 degrees each way over a few
+    // thousand kilometres, so no belt's edge is a parallel.
+    vec4 mw = cloudNoise(bent * (R / 1.7e6), 1.0 / 16.0);
+    float wander = 0.16 * (mw.x - 0.5) + 0.08 * (mw.y - 0.5);
+    al = al + wander * smoothstep(0.05, 0.25, al);
     // The westerlies draw the weather out east and west.
     float storm = smoothstep(0.62, 0.8, al) * (1.0 - smoothstep(1.05, 1.22, al));
     float n = cloudWeather(p * vec3(1.0, 1.0 + 0.8 * storm, 1.0), 31) * 0.5 + 0.5;
@@ -518,19 +536,24 @@ vec4 cloudCover(vec3 up) {
     vec4 m2 = cloudNoise(vec3(p.y, p.z, p.x) / 2.4e6, 1.0 / 16.0);
     // The rain belt: a narrow line a few degrees north of the equator,
     // wandering, broken into clusters of towers and their anvils.
-    float itczLat = 0.08 + 0.07 * (n - 0.5);
-    float itcz = exp(-pow((lat - itczLat) / 0.05, 2.0));
+    // (Its line wanders some 4 degrees each way and its width with it; clear
+    // sky between the clusters, so it is no ruled band along a parallel.)
+    float itczLat = 0.08 + 0.07 * (n - 0.5) + 0.14 * (m2.y - 0.5);
+    float itcz = exp(-pow((lat - itczLat) / (0.05 * mix(0.7, 1.4, m1.y)), 2.0));
     vec4 mc = cloudNoise(p / 1.1e6, 1.0 / 64.0);   // (its cells some 280 km)
     float clusters = smoothstep(0.3, 0.75, mc.y + 0.25 * (m1.x - 0.5));
-    float rain = itcz * mix(0.25, 1.0, clusters) * mix(0.6, 1.0, wet);
+    float rain = itcz * mix(0.05, 1.0, clusters) * mix(0.6, 1.0, wet);
     // The subtropics' highs: clear, but for the trades' cumulus over the
     // sea and the decks of stratocumulus on the oceans' cold eastern sides
     // (land to the east), thinning westward into the trades.
     float subtrop = exp(-pow((al - 0.47) / 0.17, 2.0));
     float tropics = 1.0 - smoothstep(0.45, 0.62, al);
     float trades = sea * tropics * (0.24 + 0.16 * (m1.x - 0.5) + 0.05 * (f - 0.5)) * (1.0 - 0.6 * itcz);
-    float sc = sea * smoothstep(0.17, 0.3, al) * (1.0 - smoothstep(0.62, 0.78, al)) * landEast(up) *
-               smoothstep(0.3, 0.55, m2.x + 0.3 * (n - 0.5));
+    // (The decks lie close off the coasts with much land to their east, in
+    // patches a thousand kilometres and more across, not as a sheet over
+    // the whole subtropical sea.)
+    float sc = sea * smoothstep(0.17, 0.3, al) * (1.0 - smoothstep(0.55, 0.7, al)) * smoothstep(0.6, 0.95, landEast(up)) *
+               smoothstep(0.55, 0.8, m2.x + 0.3 * (n - 0.5));
     // The storm tracks: the lows' commas, and between them broken weather
     // where the noise lifts it.
     vec3 lows = lowCommas(bent, p, f);
