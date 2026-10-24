@@ -77,12 +77,17 @@ LandSurface landSurface(LandPoint q) {
     // (A big river runs green through dry country: its banks watered from
     // upstream however dry the air over them.)
     float wet = clamp(g.w + 0.25 * smoothstep(0.5, 3.0, g.x) + 0.35 * (1.0 - g.w) * smoothstep(3.7, 5.2, g.x), 0.0, 1.0);
+    // What the land's colour reads: the ground's water the same over the
+    // slopes and the valleys that gather it, a little more down the bigger
+    // valleys and along a big river through dry country. (The cover's wet
+    // above gathers from a few km² of catchment: the catchment's log is a
+    // smooth field kilometres wide, so a colour by it drew every valley of
+    // the network as a dark band of forest between pale uplands, the
+    // drainage as a map from 90 km up, not as relief. Its mean over a
+    // land, which a far texel's catchment reads, is kept: from orbit the
+    // land is as green as it was.)
+    float wetC = clamp(g.w + 0.19 + 0.06 * smoothstep(2.0, 4.5, g.x) + 0.2 * (1.0 - g.w) * smoothstep(3.7, 5.2, g.x), 0.0, 1.0);
     float steep = 1.0 - q.normal.y;
-    // How open the country reads from far up: the interfluves (the least
-    // catchment, the log's smooth field) drier and paler than the valleys
-    // that gather the water, so the drainage reads as dark threads in
-    // lighter ground and the relief as value, not as one green.
-    float open = 1.0 - smoothstep(-1.0, 2.5, g.x);
 
     // Bare ground by how dry (ochre sand to tan steppe), what grows over it
     // by how wet and how warm: a warm wet lowland's deep broadleaf green, a
@@ -96,19 +101,21 @@ LandSurface landSurface(LandPoint q) {
     vec3 snow = vec3(0.82, 0.84, 0.87);
     float warmth = WARM(4.0, 20.0);
     vec3 grass = mix(grassCool, grassWarm, warmth), forest = mix(forestCold, forestWarm, warmth);
-    vec3 c = mix(desert, steppe, smoothstep(0.08, 0.24, wet));
-    c = mix(c, grass, smoothstep(0.24, 0.38, wet));
-    c = mix(c, forest, smoothstep(0.36, 0.54, wet) * WARM(-2.0, 6.0));
-    // (The open uplands between the valleys a shade drier: grass and
-    // steppe showing through the woods there.)
-    c = mix(c, mix(steppe, grass, smoothstep(0.2, 0.4, wet)), 0.2 * open * (1.0 - smoothstep(0.25, 0.45, wet)));
-    c = mix(c, tundra, COLD(2.0, -6.0));
+    // (The woods' lines as Earth's continental tree lines: forest wherever
+    // the year's mean is over some 0 degrees and it is wet enough,
+    // thinning to the tree line near -3; tundra past it. Lines set some 5
+    // degrees warmer had the cooler hills of a temperate land in tundra and
+    // rock, pale blotches over every ridge from far up.)
+    vec3 c = mix(desert, steppe, smoothstep(0.08, 0.24, wetC));
+    c = mix(c, grass, smoothstep(0.24, 0.38, wetC));
+    c = mix(c, forest, smoothstep(0.36, 0.54, wetC) * WARM(-5.0, 0.0));
+    c = mix(c, tundra, COLD(-3.0, -8.0));
     // Bare rock where it is steep and high (a range, or above the trees):
     // a lowland's steep hillsides are wooded or grassed over, not a net of
     // grey crests across every hill.
     // (A range's flanks wooded where the air is still mild up them, bare
     // as it cools toward the tree line.)
-    float alpine = max(smoothstep(0.15, 0.5, g.y) * mix(0.4, 1.0, COLD(9.0, 3.0)), COLD(4.0, -2.0));
+    float alpine = max(smoothstep(0.15, 0.5, g.y) * mix(0.4, 1.0, COLD(4.0, -2.0)), COLD(-2.0, -6.0));
     c = mix(c, rock, smoothstep(0.3, 0.55, steep) * alpine);
     // Above the trees the ground thins to scree and rock whatever its
     // slope, so the rock hands over to the snow, not tundra to snow.
