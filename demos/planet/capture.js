@@ -63,8 +63,11 @@ if (mode === 'still') {
         waitHeld(() => plants.plantPlacement()?.pending > 0, 600);
         // The land's regions about the view in, and its tiles made over them.
         waitHeld(() => land.landStats()?.regionsPending > 0, 4000);
+        // (The plants are placed once the ground under them is in: placed
+        // again over the regions' ground.)
+        const placed = waitHeld(() => plants.plantPlacement()?.pending > 0, 4000);
         const waited = waitHeld(() => land.landStats()?.missing > 0, 4000);
-        console.log(`${shot}: the land's tiles in after ${waited} frames`);
+        console.log(`${shot}: the plants placed after ${placed} frames, the land's tiles in after ${waited} frames`);
         step(1.0);
         screenshot(`${OUT}/planet_${shot}.png`);
         const cs = scene.cullStats();
@@ -131,7 +134,10 @@ if (mode === 'still') {
         step(8.0);
         setShot(shot);
         step(1.0);
-        waitHeld(() => plants.plantPlacement()?.pending > 0, 600);
+        // (The plants are placed once the land's regions are in under them.)
+        waitHeld(() => land.landStats()?.regionsPending > 0, 4000);
+        waitHeld(() => plants.plantPlacement()?.pending > 0, 4000);
+        waitHeld(() => land.landStats()?.missing > 0, 4000);
         step(1.0);
         perf.gpuFrameMs();
         const ms = [];
