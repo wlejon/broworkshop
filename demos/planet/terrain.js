@@ -99,13 +99,22 @@ export const PROCESSES = {
             BAND_NOISE.map((n, i) => n.glsl({ name: 'bandNoise' + i, dims: [3] })).join('') + `
 const int PLATES = ${PLATES};
 const float R = ${R}.0;
+// (Channel 1's x: a drainage area, km², as its log10.)
+float logArea(float km2) { return log2(max(km2, 1e-3)) * 0.30103; }
 
 // Channel 0: the land's height over its tree (x added, y the tree's scale,
 //            z the woods' share, w how cold).
-// Channel 1: x the ground's own height (under the sea too), y how near a
-//            range it is (0 .. 1), z the drainage area (km²): a river's
-//            catchment, read by the surface, w how wet (0 desert .. 1
-//            rainforest).
+// Channel 1: x the drainage area's log10 (km², at least 1e-3), read by the
+//            surface, y how near a range it is (0 .. 1), z the drainage
+//            area (km²): a river's catchment, the finer regions' seed, w
+//            how wet (0 desert .. 1 rainforest). (The surface reads the
+//            log, so the grid's bilinear read blends the orders of
+//            magnitude between a river or a pool and its banks: read in
+//            km², the catchment stayed a river's for most of a cell and
+//            fell off only at the banks' cells, so a pool's or a wide
+//            floor's edge drew the cells' staircase. The regions seed from
+//            the km², blended as the area it is. The ground's height is
+//            channel 0's x; during the regions' passes x is regionLift's.)
 // Channel 2: the erosion's state: x the ground, y the cells draining
 //            through the cell (itself included), z its outflow a unit of
 //            weight (the drainage it hands on, over the sum of its weights),
@@ -335,7 +344,7 @@ void settle(inout vec4 v[PROC_CHANNELS]) {
     float belts = 0.68 + 0.36 * cos(lat * 6.0) - 0.25 * smoothstep(0.75, 1.2, abs(lat));
     float wander = 0.3 * warpNoise(d * R + vec3(3.3e6, -2.7e6, 1.9e6), 14);
     float wet = clamp((belts + wander) * (1.15 - 0.6 * inland), 0.0, 1.0);
-    v[1] = vec4(ground, range, area, wet);
+    v[1] = vec4(logArea(area), range, area, wet);
     climate(v, d, ground, range, wet);
 }
 
@@ -439,7 +448,7 @@ void regionSettle(inout vec4 v[PROC_CHANNELS]) {
     // pool's cells take its outflow, spread by regionPool.)
     float area = v[2].y * cell * cell * 1e-6;
     v[0].x = ground;
-    v[1].x = ground;
+    v[1].x = logArea(area);
     v[1].z = area;
     climate(v, procUp(), ground, v[1].y, v[1].w);
 }
@@ -453,11 +462,31 @@ void regionSettle(inout vec4 v[PROC_CHANNELS]) {
 const float POOL_DEPTH = 0.25;   // m of water over the floor that makes a cell a pool's
 bool inPool(ivec2 o) { return procRead(3, o).w - max(procRead(2, o).x, procRead(3, o).z) > POOL_DEPTH; }
 void regionPool(inout vec4 v[PROC_CHANNELS]) {
-    if (procBorder() == 0 || !inPool(ivec2(0))) return;
+    // (A region's edge cells are its outlets, each gathering what drains out
+    // across it: the surface reads them as dry as the driest cell beside
+    // them, or the log's blend drew the regions' edges as dotted lines of
+    // wet ground. The km² the finer regions seed from stay as routed.)
+    if (procBorder() == 0) {
+        float x = logArea(v[1].z);
+        for (int k = 0; k < 8; ++k) x = min(x, logArea(procRead(1, NB[k]).z));
+        v[1].x = x;
+        return;
+    }
     float a = v[1].z;
-    for (int k = 0; k < 8; ++k)
-        if (inPool(NB[k])) a = max(a, procRead(1, NB[k]).z);
-    v[1].z = a;
+    if (inPool(ivec2(0)))
+        for (int k = 0; k < 8; ++k)
+            if (inPool(NB[k])) a = max(a, procRead(1, NB[k]).z);
+    // (A stream running diagonally steps from cell to cell across their
+    // corners, where the two cells beside both are dry: the log's blend drew
+    // it as a string of beads. The cell at a step's inner corner, its two
+    // neighbours either side of the corner wetter, takes half their log, so
+    // the stream reads on across the corner, and a pool's stepped margin
+    // rounds.)
+    float x = logArea(a);
+    float n = logArea(procRead(1, ivec2(0, 1)).z), e = logArea(procRead(1, ivec2(1, 0)).z);
+    float s = logArea(procRead(1, ivec2(0, -1)).z), w = logArea(procRead(1, ivec2(-1, 0)).z);
+    float corner = max(max(min(n, e), min(e, s)), max(min(s, w), min(w, n)));
+    v[1].xz = vec2(max(x, 0.5 * (x + corner)), a);
 }
 `,
 };

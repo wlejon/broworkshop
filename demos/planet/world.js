@@ -28,6 +28,7 @@ export const { scene } = vp;
 const SURFACE = `
 LandSurface landSurface(LandPoint q) {
     vec4 g = landGrid(1, q.at);
+    float ground = landGrid(0, q.at).x;   // (the processes' ground; g.x is the catchment's log)
     float lat = asin(clamp(q.up.y, -1.0, 1.0));
     float h = q.height;
     if (h < 0.0) {
@@ -44,7 +45,7 @@ LandSurface landSurface(LandPoint q) {
     // where the year sits near a line they flecked a polar plain with snow
     // and tundra blob by blob from orbit.
     float share = smoothstep(0.3, 0.7, g.y);
-    float temp = 28.0 - 44.0 * sl * sl - 6.5 * mix(max(g.x, 0.0), h, share) / 1000.0;
+    float temp = 28.0 - 44.0 * sl * sl - 6.5 * mix(max(ground, 0.0), h, share) / 1000.0;
     // The relief the height here lacks, as each line's spread over it: the
     // tree's grain a texel this wide holds at its mean, and each regional
     // level's band (terrain.js) as far as the level is not in here (past
@@ -55,15 +56,16 @@ LandSurface landSurface(LandPoint q) {
     float fp = q.footprint;
     #define LACKS(level, amp) ((amp) * (1.0 - landGridCover(level, q.at)))
     // (The tree's grain only where the temperature reads h, a range; the
-    // bands wherever: the regions' ground, g.x, carries them too.)
+    // bands wherever: the regions' ground carries them too.)
     float hidden = landGrid(0, q.at).y * (3.0 * share * min(fp / 120.0, 1.0) + LACKS(0, 30.0) + LACKS(1, 120.0) +
                                           LACKS(2, 330.0) + LACKS(3, 520.0));
     float spread = 6.5 * hidden / 1000.0;
     #define COLD(warm, cold) smoothstep((warm) + spread, (cold) - spread, temp)
     #define WARM(cold, warm) smoothstep((cold) - spread, (warm) + spread, temp)
     // The processes' (the plants' woods read the same), and wetter down the
-    // valleys where the drainage gathers (from a few km² of catchment).
-    float wet = clamp(g.w + 0.25 * smoothstep(0.5, 3.0, log(max(g.z, 1e-3)) / log(10.0)), 0.0, 1.0);
+    // valleys where the drainage gathers (from a few km² of catchment; g.x
+    // is its log10).
+    float wet = clamp(g.w + 0.25 * smoothstep(0.5, 3.0, g.x), 0.0, 1.0);
     float steep = 1.0 - q.normal.y;
 
     vec3 desert = vec3(0.34, 0.23, 0.12), steppe = vec3(0.22, 0.19, 0.09), grass = vec3(0.10, 0.14, 0.04);
@@ -84,7 +86,7 @@ LandSurface landSurface(LandPoint q) {
     c = mix(c, snow, COLD(-8.0, -14.0) * (1.0 - smoothstep(0.65, 0.9, steep)));
 #ifdef DRAINAGE
     // (The rivers' catchments: blue from 10 km² to a million.)
-    c = mix(vec3(0.3, 0.28, 0.25), vec3(0.0, 0.05, 0.5), smoothstep(1.0, 6.0, log(max(g.z, 1.0)) / log(10.0)));
+    c = mix(vec3(0.3, 0.28, 0.25), vec3(0.0, 0.05, 0.5), smoothstep(1.0, 6.0, g.x));
 #endif
     LandSurface s = landSurfaceOf(c);
     float grows = smoothstep(0.15, 0.45, wet) * WARM(-4.0, 4.0) * (1.0 - smoothstep(0.3, 0.55, steep));
@@ -230,8 +232,8 @@ const WEATHER = fbm(1.4e6, 5, 41, 0.55), SHOWERS = fbm(2.6e5, 4, 42);
 
 // The deck from 2.5 km to 10.5 km (its bases over the hills and the low
 // view's eye). Its cover by the general circulation and
-// the climate the land's processes reckon (channel 1's w, how wet; x the
-// ground, under the sea too): the rain belt a narrow broken line north of
+// the climate the land's processes reckon (channel 1's w, how wet; channel
+// 0's x the ground, under the sea too): the rain belt a narrow broken line north of
 // the equator, clusters of towers and anvils; the subtropics' highs clear,
 // but for the trades' cumulus over the sea and sheets of stratocumulus in
 // cells off the western coasts (land to the east); the westerlies' storm
@@ -421,7 +423,7 @@ vec4 cloudCover(vec3 up) {
     float storm = smoothstep(0.62, 0.8, al) * (1.0 - smoothstep(1.05, 1.22, al));
     float n = cloudWeather(p * vec3(1.0, 1.0 + 0.8 * storm, 1.0), 31) * 0.5 + 0.5;
     float f = cloudShowers(p, 32) * 0.5 + 0.5;
-    float sea = smoothstep(10.0, -40.0, g.x);
+    float sea = smoothstep(10.0, -40.0, cloudLandGrid(0, up).x);
     float wet = max(g.w, 0.6 * sea);
     // Where the weather's systems are broken up (the rain belt's clusters,
     // the decks' extent): the engine's soft billows, some 1200 and 2400 km
