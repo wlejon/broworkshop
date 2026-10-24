@@ -27,12 +27,32 @@ export const { scene } = vp;
 // wet or dry by the belts of the air's circulation and the sea's reach.
 const SURFACE = `
 // How far past the ice line the broad climate is at a point (degrees: the
-// line a land this wet holds to, less the year's mean of its broad ground);
-// landSurface's ice reads its gradient for how wide its edge is.
-float iceClimate(vec3 at, vec3 up) {
+// line \`line\`, less the year's mean of its broad ground); landSurface's ice
+// reads its gradient for how wide its edge is.
+float iceClimate(vec3 at, vec3 up, float line) {
     float sl = up.y;
-    float temp = 28.0 - 44.0 * sl * sl - 6.5 * max(landGrid(0, at).x, 0.0) / 1000.0;
-    return mix(-22.0, -7.0, smoothstep(0.15, 0.65, landGrid(1, at).w)) - temp;
+    return line - (28.0 - 44.0 * sl * sl - 6.5 * max(landGrid(0, at).x, 0.0) / 1000.0);
+}
+// How wet the air is that feeds the snow at a point: the processes' (channel
+// 1's w) as its mean over the land some 600 km about it, a centre and two
+// turned rings of six at 250 and 550 km, each weighed by how much it is land.
+// (The ice line read the point's own: the air dries a few hundred km in from
+// a coast, so on a cold land the ice and the late snow lay as a rim tracing
+// every coast, a dry bare interior inside it; a mean with the sea's in it
+// kept the rim, wider.) Its land's mean, the same along a coast as inland.
+float snowWet(vec3 at, vec3 t1, vec3 t2, float here) {
+    // (The point's own only a little, for a small island whose rings are
+    // all sea: at a coast, where half the rings are sea, more of it kept
+    // the coast's wet air's rim.)
+    float s = 0.25 * here, n = 0.25;
+    for (int k = 0; k < 12; ++k) {
+        float a = 0.5236 * float(k);
+        vec3 x = at + (t1 * cos(a) + t2 * sin(a)) * ((k & 1) == 0 ? 2.5e5 : 5.5e5);
+        float l = smoothstep(-200.0, 0.0, landGrid(0, x).x);
+        s += l * landGrid(1, x).w;
+        n += l;
+    }
+    return s / n;
 }
 
 // Value noise (-1 .. 1, mean 0) of the body's point p in cells of 1: the
@@ -134,9 +154,12 @@ LandSurface landSurface(LandPoint q) {
     // finest cells in, the height h the tree's grain over it.
     vec3 t1 = normalize(cross(q.up, abs(q.up.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
     vec3 t2 = cross(q.up, t1);
+    // (The sea's ground as its level: a coast's samples on the sea floor,
+    // thousands of metres down, stood every coast up as a crest, a band
+    // some 10 degrees colder and bare rock tracing every coast all round.)
     float Dc = max(2.5 * fp, 250.0);
-    float around = 0.25 * (landGrid(0, q.at + t1 * Dc).x + landGrid(0, q.at - t1 * Dc).x +
-                           landGrid(0, q.at + t2 * Dc).x + landGrid(0, q.at - t2 * Dc).x);
+    float around = 0.25 * (max(landGrid(0, q.at + t1 * Dc).x, 0.0) + max(landGrid(0, q.at - t1 * Dc).x, 0.0) +
+                           max(landGrid(0, q.at + t2 * Dc).x, 0.0) + max(landGrid(0, q.at - t2 * Dc).x, 0.0));
     float crest = clamp(ground - around + (h - ground), -400.0, 400.0);
     // The terrain's attributes at the texel, what the cover follows: the
     // land's heights (the tree's grain on the regions' carved ground) a
@@ -192,6 +215,14 @@ LandSurface landSurface(LandPoint q) {
     // degrees a hundred metres, as Earth's tree lines run down the ridges
     // and up the gullies.
     temp -= 0.025 * crest;
+    // (Where a texel is kilometres wide the landform's terms (the crest,
+    // the slope's aspect, the hollow, the valley, the relief over the
+    // ground) are the grid's cells', not the ground's: a line cut by them
+    // texel by texel drew the snow, the tundra and the rock from orbit as
+    // blocks of the texels' staircase. There every line reads the broad
+    // climate.)
+    float formK = 1.0 - smoothstep(2000.0, 8000.0, fp);
+    temp = mix(28.0 - 44.0 * sl * sl - 6.5 * max(ground, 0.0) / 1000.0, temp, formK);
     // The patchwork noise, only to break the zones' edges and vary the
     // density inside them: the zones themselves are the landform's.
     float present, presentC;
@@ -214,7 +245,7 @@ LandSurface landSurface(LandPoint q) {
     float cutK = 0.06 + 1.1 * unres + 0.7 * nearSoft;
     // (The crests' own share again, so the lines run along the ridges more
     // than the grain's blobs do.)
-    float lineN = 0.1 * tone - 0.9 * (moist - moist0) + 0.25 * streak + 0.5 * grain + 0.006 * clamp(crest, -150.0, 150.0);
+    float lineN = 0.1 * tone + (0.006 * clamp(crest, -150.0, 150.0) - 0.9 * (moist - moist0)) * formK + 0.25 * streak + 0.5 * grain;
     #define COLD(warm, cold) smoothstep(-1.0, 1.0, ((0.5 * ((warm) + (cold)) - temp) / (0.5 * ((warm) - (cold))) + lineN) / (cutK + 2.0 * spread / ((warm) - (cold))))
     #define WARM(cold, warm) smoothstep(-1.0, 1.0, ((temp - 0.5 * ((warm) + (cold))) / (0.5 * ((warm) - (cold))) - lineN) / (cutK + 2.0 * spread / ((warm) - (cold))))
     // The processes' (the plants' woods read the same), and wetter down the
@@ -339,17 +370,20 @@ LandSurface landSurface(LandPoint q) {
     c = mix(c, rock, rockH);
     // Ice where the year is cold and the snow falls deep enough to outlast
     // the summers: the wetter the air, the warmer the line it holds to
-    // (a maritime icefield's mean near -7 here, a dry land's none above
-    // -22: a cold desert is tundra and bare rock, not ice). (This climate's
+    // (a maritime icefield's mean near -13 here, a dry land's none above
+    // -22: a cold desert is tundra and bare rock, not ice; from -7, a swing
+    // of 15 degrees drew a cold land's snow by its wetness more than its
+    // cold, along its wetter coasts round a bare interior). (This climate's
     // means run some 5 degrees under Earth's at 45 to 65 degrees, so its
     // lines sit as far under Earth's.) The margin follows the ground: the
     // ice flows down the valleys that gather it (outlet glaciers), the
     // low coasts melt it back (dark strips), and the relief that stands
     // over its neighbours (ridges, nunataks) stands clear of it near its
     // edge; deep inside the sheet all of it is buried.
-    float relief = h - ground;
-    float valley = smoothstep(0.5, 3.5, g.x);
-    float iceLine = mix(-22.0, -7.0, smoothstep(0.15, 0.65, g.w));
+    // (The landform's terms faded out at wide texels, as the temperature's.)
+    float relief = (h - ground) * formK;
+    float valley = smoothstep(0.5, 3.5, g.x) * formK;
+    float iceLine = mix(-22.0, -13.0, smoothstep(0.15, 0.65, snowWet(q.at, t1, t2, g.w)));
     float m = iceLine - temp + 3.0 * valley - 4.0 * (1.0 - smoothstep(0.0, 500.0, ground)) * (1.0 - valley)
             - 6.0 * relief / 1000.0;
     // The edge as sharp as the view: the broad climate's change over two
@@ -358,10 +392,15 @@ LandSurface landSurface(LandPoint q) {
     // with a fixed width of degrees lay a hundred km soft over a plateau,
     // whose climate changes a degree in as far: a bank of fog.)
     const float D = 2000.0;
-    vec2 grad = vec2(iceClimate(q.at + t1 * D, normalize(q.up + t1 * (D / ${R}.0))) - iceClimate(q.at - t1 * D, normalize(q.up - t1 * (D / ${R}.0))),
-                     iceClimate(q.at + t2 * D, normalize(q.up + t2 * (D / ${R}.0))) - iceClimate(q.at - t2 * D, normalize(q.up - t2 * (D / ${R}.0)))) / (2.0 * D);
+    vec2 grad = vec2(iceClimate(q.at + t1 * D, normalize(q.up + t1 * (D / ${R}.0)), iceLine) - iceClimate(q.at - t1 * D, normalize(q.up - t1 * (D / ${R}.0)), iceLine),
+                     iceClimate(q.at + t2 * D, normalize(q.up + t2 * (D / ${R}.0)), iceLine) - iceClimate(q.at - t2 * D, normalize(q.up - t2 * (D / ${R}.0)), iceLine)) / (2.0 * D);
     float w = max(length(grad) * max(2.0 * fp, 1500.0), 0.02) + 0.5 * spread * share;
-    float ice = smoothstep(-w, w, m) * (1.0 - smoothstep(0.45, 0.75, steep));
+    // (Of the landform's spread only a little: the broad climate's lines are
+    // smooth, so cut by them alone a far texel's edge is crisp with no
+    // staircase; widened by the landform's degrees, the edge lay hundreds of
+    // km soft, a bank of fog. The storms' noise below breaks the snow up.)
+    float wI = w + 0.3 * (1.0 - formK), wP = w + 0.8 * (1.0 - formK);
+    float ice = smoothstep(-wI, wI, m) * (1.0 - smoothstep(0.45, 0.75, steep));
     // (Its accumulation zone a snow's white; down toward the margin the
     // bare ice of its ablation zone, greyer and bluer.)
     // (By the broad climate alone: the ground's grain would mottle it.)
@@ -371,8 +410,20 @@ LandSurface landSurface(LandPoint q) {
     // (Longest on the high ground, in the hollows and gullies that drift
     // full, and on the slopes facing the pole; the noise's grain of the
     // relief, round blobs, a little.)
-    float lie = (iceLine + 4.0) - temp + 3.0 * relief / 1000.0 - 3.0 * valley + 0.015 * clamp(hollow, -60.0, 100.0) + 1.5 * poleward;
-    float patches = 0.8 * smoothstep(-w, w, lie) * (1.0 - smoothstep(0.35, 0.6, steep));
+    // (And unevenly from region to region, as the winters' storms left it,
+    // some 3 degrees each way over 250 and 80 km, so a cold land's snow
+    // from afar is fields and gaps, not one sheet following its lines.)
+    // (Its line 2.5 degrees warmer than the ice's, not 4: a cold
+    // continent's north lay under one soft white mass of it, a bank of
+    // cloud from orbit.)
+    // (Each octave faded as the texel passes a quarter of it to a half, and
+    // the edge as wide as what is left changes over two texels: cut sharper,
+    // a far texel's snow stepped texel by texel along the noise.)
+    float k80 = 1.0 - smoothstep(2.0e4, 4.0e4, fp);
+    float storms = 2.2 * patchNoise(Pq / 2.5e5 + 61.3) + 1.2 * k80 * patchNoise(Pq / 8.0e4 + 7.9);
+    wP += 2.0 * fp * (2.2 / 2.5e5 + 1.2 * k80 / 8.0e4);
+    float lie = (iceLine + 2.5) - temp + 3.0 * relief / 1000.0 - 3.0 * valley + (0.015 * clamp(hollow, -60.0, 100.0) + 1.5 * poleward) * formK + storms;
+    float patches = 0.8 * smoothstep(-wP, wP, lie) * (1.0 - smoothstep(0.35, 0.6, steep));
     c = mix(c, snow, patches * (1.0 - ice));
     c = mix(c, iceC, ice);
 #ifdef DRAINAGE
@@ -605,33 +656,83 @@ vec3 turnAbout(vec3 d, vec3 c, float k) {
     return d * ck + cross(c, d) * sk + c * dot(c, d) * (1.0 - ck);
 }
 
+// The cover's texture (\`fine\` the finer one) drawn out along the wind:
+// five reads along \`way\`, over \`len\` metres each way, so what it picks out
+// is streaks along the wind some \`len\` long, frayed at their ends, not round
+// lumps. (Simplex fbm, not the engine's tiling noise: that one's
+// Perlin-Worley is cellular and mostly high, so a share cut from it is
+// polygons, the cells' walls, from orbit.) 0 .. 1, its mean a half.
+float streaked(vec3 p, vec3 way, float len, int seed, bool fine) {
+    float s = 0.0;
+    for (int k = -2; k <= 2; ++k) {
+        vec3 q = p + way * (0.5 * float(k) * len);
+        s += (fine ? cloudFine(q, seed) : cloudTex(q, seed)) * (k == 0 ? 0.28 : (abs(k) == 1 ? 0.22 : 0.14));
+    }
+    return clamp(0.5 + 0.8 * s, 0.0, 1.0);
+}
+
 // The direction the weather's noise is read at: each low turns the air
 // about it, most at its heart, so what crosses it winds into a spiral.
-vec3 swirled(vec3 d, out float heart) {
+// \`spin\`: xyz the way along a tropical cyclone's bands, w how much the
+// streaks follow it rather than the wind (1 within its bands).
+vec3 swirled(vec3 d, out float heart, out vec4 spin) {
     heart = 0.0;
+    spin = vec4(0.0);
     for (int i = 0; i < LOWS; ++i) {
         vec4 a = cloudData(2 * i), b = cloudData(2 * i + 1);
         float s = acos(clamp(dot(d, a.xyz), -1.0, 1.0)) / b.x;
-        d = turnAbout(d, a.xyz, a.w * exp(-s * s));
+        // (A tropical cyclone's the other way: what is read at the turned
+        // direction shows turned back, so its texture wound out the way
+        // the air turns, against its bands; turned back, it winds with them.)
+        float turn = a.w * exp(-s * s) * (b.z > 0.5 ? -0.5 : 1.0);
+        d = turnAbout(d, a.xyz, turn);
         // (A westerly low's heart is its comma's: lowCommas. A tropical
-        // cyclone's is a dense disc, its eye clear and a few tens of
-        // kilometres across, and spiral bands winding in to it from some
-        // three of its sizes out, gaps between them.)
+        // cyclone's is its central dense overcast, a bright disc some 0.7
+        // of its size across about a small clear eye, and the rain bands
+        // leaving it: logarithmic spirals pitched some 20 degrees (so they
+        // wind out, not round in rings), two main ones and a fainter third,
+        // narrowing, greying and breaking into streaks along themselves
+        // as they go out to some 3.5 sizes.)
         float h = 0.4 * exp(-0.5 * s * s);
         if (b.z > 0.0 && s < 4.0) {
             vec3 t1 = normalize(cross(a.xyz, abs(a.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
-            float ang = atan(dot(d, cross(a.xyz, t1)), dot(d, t1));
-            // (The bands' phase, width and breaks and the disc's rim moved
-            // by the engine's noise, some 60 and 25 km, so the storm is
-            // ragged cloud, not a clean drawn spiral.)
+            vec3 t2 = cross(a.xyz, t1);
+            float ang = atan(dot(d, t2), dot(d, t1));
+            // (The bands' phase and the disc's rim moved by the engine's
+            // noise, some 60 and 25 km, so the storm is ragged cloud, not a
+            // clean drawn spiral.)
             vec4 nt = cloudNoise(d * (R / 4.5e5), 1.0 / 64.0);
             vec4 nf = cloudNoise(d.zxy * (R / 1.8e5), 1.0 / 64.0);
-            float psi = ang + sign(a.w) * 4.5 * log(max(s, 0.1)) + 1.6 * (nt.x - 0.5);
-            float arms = smoothstep(0.2, 0.45, cos(3.0 * psi) + 0.6 * (nf.x - 0.5) + 0.4 * (nt.y - 0.5)) *
-                         smoothstep(3.6, 1.6, s + 0.8 * (nf.y - 0.5));
-            arms *= smoothstep(0.3, 0.45, nf.y + 0.3 * (nt.x - 0.5) + 0.15 * smoothstep(2.0, 0.5, s));
-            float disc = smoothstep(1.05, 0.85, s + 0.5 * (nt.y - 0.5) + 0.25 * (nf.x - 0.5));
-            h = mix(h, max(disc, 0.8 * arms) * smoothstep(0.06, 0.16, s), b.z);
+            const float K = 1.7;   // 1 / tan of the bands' pitch, past the turn's
+            float hs = sign(a.w);
+            float psi = ang + hs * K * log(max(s, 0.05)) + 0.9 * (nt.x - 0.5);
+            // (The way along a band at d: psi constant, so out by 1 and
+            // round by -K, and by the turn's fall with s, 2 s^2 of it.)
+            vec3 er = normalize(d - a.xyz * dot(d, a.xyz) + 1e-6 * t1);
+            vec3 armWay = normalize(er - hs * (K + 2.0 * s * s * abs(turn)) * cross(a.xyz, er));
+            // (The streaks along the bands: the engine's noise read in the
+            // spiral's own frame, the phase across a band (8 tiles a turn,
+            // so it tiles round) and the log of the distance along it, some
+            // 30 km across and hundreds of km along. Five reads along the
+            // band's way, streaked(), over a noise finer than their spacing
+            // comb out stripes across it, not along.)
+            vec4 sn = cloudNoise(vec3(psi * (8.0 / 6.2832), 0.7 * log(max(s, 0.05)), 0.37 + 0.11 * float(i)), 1.0 / 32.0);
+            float streak = clamp(1.6 * (0.6 * sn.x + 0.4 * sn.y) - 0.45, 0.0, 1.0);
+            float ph = 0.5 + 0.5 * cos(2.0 * psi + 0.8 * (nf.x - 0.5));
+            float ph3 = 0.5 + 0.5 * cos(3.0 * psi + 1.7);
+            float phase = max(ph, 0.65 * ph3);
+            float outer = smoothstep(4.0, 1.8, s + 0.6 * (nf.y - 0.5));
+            float width = mix(0.5, 0.8, smoothstep(0.8, 3.2, s));
+            float bands = smoothstep(width, width + 0.2, phase + 0.25 * (streak - 0.5)) * outer;
+            bands *= smoothstep(0.2, 0.5, streak + 0.35 * (1.0 - smoothstep(1.0, 3.0, s)));
+            float bright = mix(0.5, 0.82, streak) * mix(1.0, 0.75, smoothstep(1.5, 3.5, s));
+            // (The overcast's rim pushed out where a band leaves it.)
+            float rim = 0.75 + 0.35 * ph + 0.2 * (nt.y - 0.5);
+            float cdo = smoothstep(rim, rim - 0.25, s);
+            float eye = smoothstep(0.07, 0.14, s + 0.04 * (nf.x - 0.5));
+            h = mix(h, max(cdo, bands * bright) * eye, b.z);
+            float sw = b.z * smoothstep(4.0, 2.8, s);
+            if (sw > spin.w) spin = vec4(armWay, sw);
         }
         heart = max(heart, b.y * h);
     }
@@ -765,27 +866,13 @@ vec3 windWay(vec3 up) {
     return normalize(east + north * 0.3 * sign(up.y));
 }
 
-// The cover's texture (\`fine\` the finer one) drawn out along the wind:
-// five reads along \`way\`, over \`len\` metres each way, so what it picks out
-// is streaks along the wind some \`len\` long, frayed at their ends, not round
-// lumps. (Simplex fbm, not the engine's tiling noise: that one's
-// Perlin-Worley is cellular and mostly high, so a share cut from it is
-// polygons, the cells' walls, from orbit.) 0 .. 1, its mean a half.
-float streaked(vec3 p, vec3 way, float len, int seed, bool fine) {
-    float s = 0.0;
-    for (int k = -2; k <= 2; ++k) {
-        vec3 q = p + way * (0.5 * float(k) * len);
-        s += (fine ? cloudFine(q, seed) : cloudTex(q, seed)) * (k == 0 ? 0.28 : (abs(k) == 1 ? 0.22 : 0.14));
-    }
-    return clamp(0.5 + 0.8 * s, 0.0, 1.0);
-}
-
 vec4 cloudCover(vec3 up) {
     vec4 g = cloudLandGrid(1, up);
     float lat = asin(clamp(up.y, -1.0, 1.0)), al = abs(lat);
     float heart;
+    vec4 spin;
     vec3 bent = cloudBent(up);
-    vec3 w = swirled(bent, heart);
+    vec3 w = swirled(bent, heart, spin);
     vec3 p = w * R;
     // The belts' latitudes wander, by some 5 degrees each way over a few
     // thousand kilometres, so no belt's edge is a parallel.
@@ -815,7 +902,11 @@ vec4 cloudCover(vec3 up) {
     // cloud is, some 350 km down to 25 km, so a system is bright cores grading
     // through thin grey cloud to clear, never one white level; \`edge\` the
     // streaks a system's margin frays into.
+    // (In a tropical cyclone, along its bands: a storm's texture streaked
+    // east and west combed its bands across.)
+    // (A streak has no sense: the band's way turned to the wind's side.)
     vec3 way = windWay(up);
+    way = normalize(mix(way, spin.xyz * (dot(spin.xyz, way) < 0.0 ? -1.0 : 1.0), spin.w) + 1e-5 * up);
     float thick = streaked(p, way, 2.5e5, 51, false);
     float edge = streaked(p, way, 1.2e5, 52, false);
     // (Its clusters some 150 to 300 km, round towers' anvils spread a
@@ -874,7 +965,24 @@ vec4 cloudCover(vec3 up) {
     coldAir = min(coldAir * mix(0.3, 1.25, honey) * mix(0.45, 1.25, edge), 0.65);
     // Fair weather's cumulus over temperate land that is not dry: the
     // summer afternoon's fields of them, the sky between.
-    float fair = (1.0 - sea) * smoothstep(0.25, 0.6, g.w) * smoothstep(0.3, 0.5, al) * (1.0 - smoothstep(0.95, 1.15, al));
+    // (By the land's wetness over some 400 km, not the point's, and thinning
+    // toward the coast over some 150 km: by the point's, which is wet only
+    // near a coast, the fields lay as a band tracing every coast, cut at
+    // its line.)
+    vec3 e1 = normalize(cross(up, abs(up.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
+    vec3 e2 = cross(up, e1);
+    float lw = 0.25 * g.w * (1.0 - sea), ln = 0.25 * (1.0 - sea), near = 0.0;
+    for (int k = 0; k < 12; ++k) {
+        float a = 0.5236 * float(k);
+        bool inner = (k & 1) == 0;
+        vec3 x = normalize(up + (e1 * cos(a) + e2 * sin(a)) * ((inner ? 1.5e5 : 4.0e5) / R));
+        float l = smoothstep(-40.0, 10.0, cloudLandGrid(0, x).x);
+        lw += l * cloudLandGrid(1, x).w;
+        ln += l;
+        if (inner) near += l / 6.0;
+    }
+    float fair = (1.0 - sea) * mix(0.35, 1.0, near) * smoothstep(0.25, 0.6, lw / max(ln, 1e-3)) *
+                 smoothstep(0.3, 0.5, al) * (1.0 - smoothstep(0.95, 1.15, al));
     float heaps = max(max(trades, coldAir), max(0.52 * fair * (0.7 + 0.8 * (f - 0.5)), 0.6 * rain));
     // The slabs: the fronts, the hearts, the broken weather, the decks and
     // the rain belt's anvils; the heaps in the sky they leave.
