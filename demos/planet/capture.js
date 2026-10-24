@@ -10,7 +10,8 @@
 //       orbit's (18000 km) in `steps` views between, its height growing
 //       by the same ratio each and its view turning down from region's
 //       slant to orbit's nadir as evenly: whether anything pops or changes
-//       character on the way up
+//       character on the way up; with cost=1, the clouds' passes and the
+//       frame's GPU ms at each view (mean of 60 frames held there)
 //   ... capture.js -- fly [seconds=20]
 //       the eye from region's height (90 km) down to 1500 m over the first
 //       half, flying on at 6 km/s throughout, the land's regions made
@@ -87,6 +88,19 @@ if (mode === 'still') {
         step(+(opt('warm') || 4.0));
         screenshot(`${OUT}/planet_climb${i}.png`);
         console.log(`climb ${i}: ${Math.round(h / 1000)} km, ${(p * 180 / Math.PI).toFixed(0)} deg down`);
+        if (opt('cost')) {
+            // (The clouds' passes and the frame, mean of 60 frames held here.)
+            perf.gpuFrameMs();
+            const sums = {};
+            let frame = 0;
+            for (let f = 0; f < 60; f++) {
+                advanceTime(1000 / fps);
+                frame += perf.gpuFrameMs();
+                const ps = (perf.gpuPasses && perf.gpuPasses()) || {};
+                for (const k of ['clouds', 'clouds-prepare']) sums[k] = (sums[k] || 0) + (ps[k] || 0);
+            }
+            console.log(`climb ${i} cost: clouds ${(sums.clouds / 60).toFixed(3)}, clouds-prepare ${(sums['clouds-prepare'] / 60).toFixed(3)}, frame ${(frame / 60).toFixed(2)} ms`);
+        }
     }
 } else if (mode === 'fly') {
     const seconds = +(opt('seconds') || 20), frames = Math.round(seconds * fps);
