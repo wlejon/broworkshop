@@ -533,7 +533,14 @@ float heaps(vec3 dir, float z, float base, float tops, float cover) {
         float grow = smoothstep(a.x, a.x + 0.15, present);
         if (grow <= 0.0) continue;
         vec3 b = heapHash(cell + 17.31 + 31.7 * float(second));
-        vec3 at = cell + 0.15 + 0.7 * b;
+        // (Anywhere in its cell: the shell takes the points a thin slab of
+        // the lattice holds, so with feet kept off the cells' walls whole
+        // rows of cells along a lattice axis lying nearly level are in or
+        // out together, rows of heaps and of gaps. A foot anywhere in its
+        // cell is in the shell by the share of the cell the shell holds,
+        // the same everywhere, and the heaps lie as irregularly as their
+        // feet: some close, some far apart.)
+        vec3 at = cell + b;
         float la = length(at);
         if (abs(la - rc) > HEAP_SHELL) continue;
         vec3 au = at / la;
