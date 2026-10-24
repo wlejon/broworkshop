@@ -314,6 +314,9 @@ const LOWS = (() => {
     return data;
 })();
 const WEATHER = fbm(1.4e6, 5, 41, 0.55), SHOWERS = fbm(2.6e5, 4, 42);
+// The cover's texture: how thick the cloud is and where a system's margin
+// frays, some 350 km down to 25 km; and finer, the trades' streets.
+const CLOUD_TEX = fbm(3.5e5, 5, 43, 0.6), CLOUD_FINE = fbm(5.0e4, 2, 44, 0.5);
 
 // The deck from 2.5 km to 10.5 km (its bases over the hills and the low
 // view's eye). Its cover by the general circulation and
@@ -351,7 +354,8 @@ export const CLOUD_BOTTOM = 2500, CLOUD_TOP = 10500;
 // the engine's billows and detail move the surface by a fifth of it, some
 // 150 m each way.)
 const CLOUD_EDGE = 1500;
-const CLOUDS = WEATHER.glsl({ name: 'cloudWeather', dims: [3] }) + SHOWERS.glsl({ name: 'cloudShowers', dims: [3] }) + `
+const CLOUDS = WEATHER.glsl({ name: 'cloudWeather', dims: [3] }) + SHOWERS.glsl({ name: 'cloudShowers', dims: [3] }) +
+               CLOUD_TEX.glsl({ name: 'cloudTex', dims: [3] }) + CLOUD_FINE.glsl({ name: 'cloudFine', dims: [3] }) + `
 const int LOWS = ${LOWS.length / 8};
 const float R = ${R}.0;
 
@@ -510,6 +514,31 @@ float landEast(vec3 up) {
     return smoothstep(0.03, 0.5, sum / wsum);
 }
 
+// The way the low air blows at \`up\` (unit, on the plane tangent there): a
+// line from the south-west to the north-east in the north (the trades
+// blowing down it toward the equator, the westerlies up it toward the
+// pole), its mirror in the south; east as the lows' frames have it.
+vec3 windWay(vec3 up) {
+    vec3 north = normalize(vec3(0.0, 1.0, 0.0) - up * up.y + vec3(1e-5, 0.0, 0.0));
+    vec3 east = cross(up, north);
+    return normalize(east + north * 0.3 * sign(up.y));
+}
+
+// The cover's texture (\`fine\` the finer one) drawn out along the wind:
+// five reads along \`way\`, over \`len\` metres each way, so what it picks out
+// is streaks along the wind some \`len\` long, frayed at their ends, not round
+// lumps. (Simplex fbm, not the engine's tiling noise: that one's
+// Perlin-Worley is cellular and mostly high, so a share cut from it is
+// polygons, the cells' walls, from orbit.) 0 .. 1, its mean a half.
+float streaked(vec3 p, vec3 way, float len, int seed, bool fine) {
+    float s = 0.0;
+    for (int k = -2; k <= 2; ++k) {
+        vec3 q = p + way * (0.5 * float(k) * len);
+        s += (fine ? cloudFine(q, seed) : cloudTex(q, seed)) * (k == 0 ? 0.28 : (abs(k) == 1 ? 0.22 : 0.14));
+    }
+    return clamp(0.5 + 0.8 * s, 0.0, 1.0);
+}
+
 vec4 cloudCover(vec3 up) {
     vec4 g = cloudLandGrid(1, up);
     float lat = asin(clamp(up.y, -1.0, 1.0)), al = abs(lat);
@@ -540,26 +569,44 @@ vec4 cloudCover(vec3 up) {
     // sky between the clusters, so it is no ruled band along a parallel.)
     float itczLat = 0.08 + 0.07 * (n - 0.5) + 0.14 * (m2.y - 0.5);
     float itcz = exp(-pow((lat - itczLat) / (0.05 * mix(0.7, 1.4, m1.y)), 2.0));
-    vec4 mc = cloudNoise(p / 1.1e6, 1.0 / 64.0);   // (its cells some 280 km)
-    float clusters = smoothstep(0.3, 0.75, mc.y + 0.25 * (m1.x - 0.5));
+    // The texture every system is read through, along the wind (and wound
+    // into a low's spiral, read at its swirled direction): how thick the
+    // cloud is, some 350 km down to 25 km, so a system is bright cores grading
+    // through thin grey cloud to clear, never one white level; \`edge\` the
+    // streaks a system's margin frays into.
+    vec3 way = windWay(up);
+    float thick = streaked(p, way, 2.5e5, 51, false);
+    float edge = streaked(p, way, 1.2e5, 52, false);
+    // (Its clusters some 150 to 300 km, round towers' anvils spread a
+    // little along the wind, clear sky between.)
+    float clusters = smoothstep(0.5, 0.85, 0.6 * (0.5 + 0.5 * cloudTex(p, 53)) + 0.4 * thick);
     float rain = itcz * mix(0.05, 1.0, clusters) * mix(0.6, 1.0, wet);
     // The subtropics' highs: clear, but for the trades' cumulus over the
     // sea and the decks of stratocumulus on the oceans' cold eastern sides
     // (land to the east), thinning westward into the trades.
     float subtrop = exp(-pow((al - 0.47) / 0.17, 2.0));
     float tropics = 1.0 - smoothstep(0.45, 0.62, al);
-    float trades = sea * tropics * (0.24 + 0.16 * (m1.x - 0.5) + 0.05 * (f - 0.5)) * (1.0 - 0.6 * itcz);
+    // (The trades' cumulus in streets along the wind, some tens of
+    // kilometres apart, thinner toward the highs' clear middles.)
+    float streets = streaked(p, way, 1.5e5, 54, true);
+    float trades = sea * tropics * (0.16 + 0.14 * (m1.x - 0.5) + 0.05 * (f - 0.5)) * (1.0 - 0.6 * itcz) *
+                   mix(0.2, 1.8, streets * streets) * mix(0.5, 1.0, smoothstep(0.55, 0.3, subtrop));
     // (The decks lie close off the coasts with much land to their east, in
     // patches a thousand kilometres and more across, not as a sheet over
-    // the whole subtropical sea.)
+    // the whole subtropical sea; downwind, toward the equator, they break
+    // into streaks and then the trades' streets.)
     float sc = sea * smoothstep(0.17, 0.3, al) * (1.0 - smoothstep(0.55, 0.7, al)) * smoothstep(0.6, 0.95, landEast(up)) *
-               smoothstep(0.55, 0.8, m2.x + 0.3 * (n - 0.5));
+               smoothstep(-0.05, 0.45, cloudWeather(p, 55) + 0.4 * (edge - 0.5));
+    // (Its closed cells some 40 km, dense polygons that from orbit are the
+    // deck's texture.)
+    float closed = smoothstep(0.2, 0.6, cloudNoise(p / 1.6e5, 1.0 / 16.0).y);
+    sc *= mix(0.3, 1.0, thick) * mix(0.6, 1.0, closed) * smoothstep(0.0, 0.5, sc + 0.5 * (edge - 0.5));
     // The storm tracks: the lows' commas, and between them broken weather
     // where the noise lifts it.
     vec3 lows = lowCommas(bent, p, f);
     float track = storm * (1.0 - 0.7 * lows.z);
-    float broken = track * smoothstep(0.5 - 0.12 * sea, 1.0, n + 0.3 * (m1.x - 0.5)) * 0.9;
-    float polar = smoothstep(1.2, 1.38, al) * smoothstep(0.35, 0.65, n) * 0.8;
+    float broken = track * smoothstep(0.55 - 0.12 * sea, 1.05, n + 0.3 * (m1.x - 0.5)) * 0.75;
+    float polar = smoothstep(1.2, 1.38, al) * smoothstep(0.35, 0.65, n) * 0.65;
     // The tropical cyclones' and the lows' hearts.
     float hearts = smoothstep(0.25, 0.7, heart);
     // (Each thinned and parted here and there, a few hundred kilometres
@@ -567,19 +614,30 @@ vec4 cloudCover(vec3 up) {
     // carry their own.)
     float grain = clamp(0.82 + 0.6 * (f - 0.5) + 0.3 * (m1.x - 0.5), 0.0, 1.0);
     float over = max(lows.x, max(broken, max(polar, hearts)) * grain);
+    // How thick it is: where a system is thickest (a front's core, a low's
+    // head, an eyewall) bright, its margins and its broken weather as thin
+    // as the texture says, from white through grey to clear; the margins
+    // frayed into streaks along the wind, never a smooth or cell-cut edge.
+    float core = smoothstep(0.6, 0.95, over);
+    over *= mix(mix(0.3, 1.1, thick), 1.0, 0.55 * core);
+    over *= smoothstep(0.0, 0.45, over + 0.6 * (edge - 0.5));
     // The cold air over the storm tracks' seas, about and behind the lows:
     // open cells, cumulus on the rims of cells some 50 km across with clear
-    // air in their middles, a honeycomb veil from afar.
+    // air in their middles, a honeycomb veil from afar; streaked along the
+    // wind as the cold air pours out over the sea.
     float honey = smoothstep(0.3, 0.75, 1.0 - cloudNoise(p / 2.2e5, 1.0 / 128.0).y);
-    float coldAir = max(lows.y * sea, storm * sea * (0.55 + 0.3 * (m1.x - 0.5)));
-    coldAir = min(coldAir * mix(0.45, 1.35, honey), 0.85);
+    // (Between the lows only where the noise brings an outbreak of it,
+    // patches some thousand kilometres, clear sea between.)
+    float outbreak = smoothstep(-0.05, 0.3, cloudWeather(p, 56) + 0.3 * (edge - 0.5));
+    float coldAir = max(lows.y * sea, storm * sea * 0.45 * outbreak);
+    coldAir = min(coldAir * mix(0.3, 1.25, honey) * mix(0.45, 1.25, edge), 0.65);
     // Fair weather's cumulus over temperate land that is not dry: the
     // summer afternoon's fields of them, the sky between.
     float fair = (1.0 - sea) * smoothstep(0.25, 0.6, g.w) * smoothstep(0.3, 0.5, al) * (1.0 - smoothstep(0.95, 1.15, al));
     float heaps = max(max(trades, coldAir), max(0.52 * fair * (0.7 + 0.8 * (f - 0.5)), 0.6 * rain));
     // The slabs: the fronts, the hearts, the broken weather, the decks and
     // the rain belt's anvils; the heaps in the sky they leave.
-    float slabs = max(max(over, 0.9 * sc), rain * clusters * 0.95);
+    float slabs = max(max(over, 0.9 * sc), rain * clusters * mix(0.6, 1.05, thick));
     float cover = slabs + heaps * (1.0 - slabs);
     // Heaped where the air is convective (the rain belt, the trades, fair
     // weather, the cold air's cells): the share of the cover the heaps are
