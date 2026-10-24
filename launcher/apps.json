@@ -49,6 +49,7 @@
         { "dir": "tools/desktop-notebook" },
         { "dir": "tools/neural-playground" },
         { "dir": "tools/laya-triage" },
+        { "dir": "tools/superopt-lab" },
 
         { "dir": "demos/ai-arena" },
         { "dir": "demos/anim-lab" },
@@ -89,6 +90,7 @@
         { "dir": "demos/render-lab" },
         { "dir": "demos/sana-lab" },
         { "dir": "demos/scene-audio" },
+        { "dir": "demos/solver-lab" },
         { "dir": "demos/sortformer-lab" },
         { "dir": "demos/spatial-audio" },
         { "dir": "demos/spatial-hash" },

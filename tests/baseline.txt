@@ -170,6 +170,8 @@ PASS smoke demos/sana-lab
 PASS test demos/sana-lab/tests/test_sana.js 
 PASS smoke demos/scene-audio 
 PASS test demos/scene-audio/tests/test_smoke.js 
+PASS smoke demos/solver-lab 
+PASS test demos/solver-lab/tests/test_solver_lab.js 
 PASS smoke demos/sortformer-lab 
 PASS test demos/sortformer-lab/tests/test_smoke.js 
 PASS smoke demos/spatial-audio 
@@ -372,6 +374,8 @@ PASS test tools/scene-editor/tests/test_tape.js
 PASS test tools/scene-editor/tests/test_ui.js 
 PASS smoke tools/shader-lab 
 PASS test tools/shader-lab/tests/test_main.js 
+PASS smoke tools/superopt-lab 
+PASS test tools/superopt-lab/tests/test_superopt_lab.js 
 PASS smoke tools/synth 
 PASS test tools/synth/tests/test_audio_headless.js 
 PASS test tools/synth/tests/test_clip_editor.js 

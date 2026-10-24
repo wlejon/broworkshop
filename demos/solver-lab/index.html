@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Solver Lab</title>
+<link rel="stylesheet" href="/lib/kit/kit.css">
+<style>
+  :root { --k-side-w: 440px; }
+  textarea.code { font-family: var(--k-font); font-size: 11px; line-height: 1.45; tab-size: 2; }
+  pre.code-out { margin: 0; max-height: 175px; font-size: 11px; line-height: 1.4; }
+</style>
+</head>
+<body class="k-app">
+  <header class="k-header">
+    <h1>Solver Lab</h1>
+    <span class="k-sub">Constraint Solving, Symbolic Auto-Diff &amp; Deterministic Lockstep Lab</span>
+  </header>
+
+  <div class="k-toolbar">
+    <div class="k-tabs" id="tabs">
+      <button data-tab="constraints" id="tab-constraints" class="active">1. Bitvector &amp; Layout Solver</button>
+      <button data-tab="trajectory" id="tab-trajectory">2. Symbolic Auto-Diff &amp; Trajectory</button>
+      <button data-tab="rollback" id="tab-rollback">3. Deterministic Rollback &amp; Capsule Gate</button>
+    </div>
+    <span class="k-spacer"></span>
+    <button id="btn-run" class="primary">Solve Active Tab</button>
+  </div>
+
+  <div class="k-body">
+    <aside class="k-side">
+      <div data-pane="constraints" class="k-col">
+        <div class="k-panel">
+          <h2>Presets</h2>
+          <div class="k-row" id="constraint-presets"></div>
+        </div>
+        <div class="k-panel">
+          <h2>32-Bit Bitvector Predicate (bro.solveWithCert)</h2>
+          <div class="k-stack">
+            <textarea id="bv-src" class="code" rows="5" spellcheck="false"></textarea>
+          </div>
+          <h2>Declarative Box Layout JSON (bro.layout.solve)</h2>
+          <div class="k-stack">
+            <textarea id="layout-src" class="code" rows="6" spellcheck="false"></textarea>
+          </div>
+          <div class="k-row">
+            <button id="btn-solve-constraints" class="primary">Solve Bitvector &amp; Layout</button>
+          </div>
+        </div>
+        <div class="k-panel">
+          <h2>SMT &amp; Layout Readout</h2>
+          <div id="constraint-kv"></div>
+          <pre class="k-box code-out" id="constraint-out"></pre>
+        </div>
+      </div>
+
+      <div data-pane="trajectory" class="k-col" hidden>
+        <div class="k-panel">
+          <h2>Presets</h2>
+          <div class="k-row" id="traj-presets"></div>
+        </div>
+        <div class="k-panel">
+          <h2>Potential Field U(x, y, z) (bro.gpu.differentiate)</h2>
+          <div class="k-stack">
+            <textarea id="traj-src" class="code" rows="6" spellcheck="false"></textarea>
+          </div>
+          <div class="k-row">
+            <label class="k-field"><span>targetX</span><input type="number" id="traj-tx" value="8" step="0.5" style="width:72px"></label>
+            <label class="k-field"><span>targetY</span><input type="number" id="traj-ty" value="3" step="0.5" style="width:72px"></label>
+            <label class="k-field"><span>time(s)</span><input type="number" id="traj-time" value="1.5" step="0.1" style="width:72px"></label>
+          </div>
+          <div class="k-row">
+            <button id="btn-solve-traj" class="primary">Differentiate &amp; Solve Trajectory</button>
+          </div>
+        </div>
+        <div class="k-panel">
+          <h2>Auto-Diff &amp; Symplectic Shooting Readout</h2>
+          <div id="traj-kv"></div>
+          <pre class="k-box code-out" id="traj-out"></pre>
+        </div>
+      </div>
+
+      <div data-pane="rollback" class="k-col" hidden>
+        <div class="k-panel">
+          <h2>Presets</h2>
+          <div class="k-row" id="rollback-presets"></div>
+        </div>
+        <div class="k-panel">
+          <h2>Capsule Tick Function Source</h2>
+          <div class="k-stack">
+            <textarea id="rollback-src" class="code" rows="7" spellcheck="false"></textarea>
+          </div>
+          <div class="k-row">
+            <label class="k-field"><span>frames</span><input type="number" id="rollback-frames" value="32" min="8" max="64" style="width:72px"></label>
+            <label class="k-field"><span>netDelay</span><input type="number" id="rollback-delay" value="3" min="1" max="8" style="width:72px"></label>
+            <button id="btn-run-rollback" class="primary">Verify Capsule &amp; Run 2-Peer Sim</button>
+          </div>
+        </div>
+        <div class="k-panel">
+          <h2>Capsule Gate &amp; Lockstep Readout</h2>
+          <div id="rollback-kv"></div>
+          <pre class="k-box code-out" id="rollback-out"></pre>
+        </div>
+      </div>
+    </aside>
+
+    <main class="k-main">
+      <div class="k-viewport">
+        <canvas id="view"></canvas>
+      </div>
+      <div class="k-log" id="log" style="max-height:140px;flex:none;border-top:1px solid var(--k-border)"></div>
+    </main>
+  </div>
+
+  <footer class="k-statusbar">
+    <span id="status"></span>
+    <span class="k-spacer"></span>
+    <span class="k-stats" id="stats"></span>
+  </footer>
+
+  <script type="module" src="/app/main.js"></script>
+</body>
+</html>

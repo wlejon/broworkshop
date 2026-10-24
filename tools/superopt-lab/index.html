@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Superopt Lab</title>
+<link rel="stylesheet" href="/lib/kit/kit.css">
+<style>
+  :root { --k-side-w: 440px; }
+  textarea.code { font-family: var(--k-font); font-size: 11px; line-height: 1.45; tab-size: 2; }
+  pre.code-out { margin: 0; max-height: 170px; font-size: 11px; line-height: 1.4; }
+</style>
+</head>
+<body class="k-app">
+  <header class="k-header">
+    <h1>Superopt Lab</h1>
+    <span class="k-sub">Compiler, Equivalence Prover &amp; Auto-Kernel Workbench</span>
+  </header>
+
+  <div class="k-toolbar">
+    <div class="k-tabs" id="tabs">
+      <button data-tab="prove" id="tab-prove" class="active">1. Equivalence &amp; Fuzz Prover</button>
+      <button data-tab="superopt" id="tab-superopt">2. Superoptimizer &amp; Rewriter</button>
+      <button data-tab="autokernel" id="tab-autokernel">3. Auto-Kernel Parallelizer</button>
+    </div>
+    <span class="k-spacer"></span>
+    <button id="btn-run" class="primary">Run Active Pass</button>
+  </div>
+
+  <div class="k-body">
+    <aside class="k-side">
+      <div data-pane="prove" class="k-col">
+        <div class="k-panel">
+          <h2>Presets</h2>
+          <div class="k-row" id="prove-presets"></div>
+        </div>
+        <div class="k-panel">
+          <h2>Reference Specification (spec)</h2>
+          <div class="k-stack">
+            <textarea id="prove-spec" class="code" rows="5" spellcheck="false"></textarea>
+          </div>
+          <h2>Candidate Implementation</h2>
+          <div class="k-stack">
+            <textarea id="prove-cand" class="code" rows="5" spellcheck="false"></textarea>
+          </div>
+          <div class="k-row">
+            <label class="k-field"><span>domainMin</span><input type="number" id="prove-min" value="-2147483648" style="width:120px"></label>
+            <label class="k-field"><span>domainMax</span><input type="number" id="prove-max" value="2147483647" style="width:120px"></label>
+          </div>
+          <div class="k-row">
+            <button id="btn-prove" class="primary">Prove Equivalence &amp; Fuzz</button>
+          </div>
+        </div>
+        <div class="k-panel">
+          <h2>Proof &amp; Symbolic Fuzz Readout</h2>
+          <div id="prove-kv"></div>
+          <pre class="k-box code-out" id="prove-out"></pre>
+        </div>
+      </div>
+
+      <div data-pane="superopt" class="k-col" hidden>
+        <div class="k-panel">
+          <h2>Presets</h2>
+          <div class="k-row" id="superopt-presets"></div>
+        </div>
+        <div class="k-panel">
+          <h2>Input JavaScript Function</h2>
+          <div class="k-stack">
+            <textarea id="superopt-src" class="code" rows="7" spellcheck="false"></textarea>
+          </div>
+          <div class="k-row">
+            <button id="btn-superopt" class="primary">Superoptimize &amp; Rewrite</button>
+          </div>
+        </div>
+        <div class="k-panel">
+          <h2>Synthesis &amp; Microbenchmark Readout</h2>
+          <div id="superopt-kv"></div>
+          <h2>Rewritten Source &amp; Verified Diff</h2>
+          <pre class="k-box code-out" id="superopt-out"></pre>
+        </div>
+      </div>
+
+      <div data-pane="autokernel" class="k-col" hidden>
+        <div class="k-panel">
+          <h2>Presets</h2>
+          <div class="k-row" id="kernel-presets"></div>
+        </div>
+        <div class="k-panel">
+          <h2>Loop Function Source</h2>
+          <div class="k-stack">
+            <textarea id="kernel-src" class="code" rows="7" spellcheck="false"></textarea>
+          </div>
+          <div class="k-row">
+            <button id="btn-kernel" class="primary">Analyze &amp; Parallelize Loop</button>
+          </div>
+        </div>
+        <div class="k-panel">
+          <h2>Dependence &amp; Certificate Readout</h2>
+          <div id="kernel-kv"></div>
+          <h2>Generated WGSL / Hazard Report</h2>
+          <pre class="k-box code-out" id="kernel-out"></pre>
+        </div>
+      </div>
+    </aside>
+
+    <main class="k-main">
+      <div class="k-viewport">
+        <canvas id="view"></canvas>
+      </div>
+      <div class="k-log" id="log" style="max-height:140px;flex:none;border-top:1px solid var(--k-border)"></div>
+    </main>
+  </div>
+
+  <footer class="k-statusbar">
+    <span id="status"></span>
+    <span class="k-spacer"></span>
+    <span class="k-stats" id="stats"></span>
+  </footer>
+
+  <script type="module" src="/app/main.js"></script>
+</body>
+</html>
