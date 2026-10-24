@@ -65,21 +65,45 @@ LandSurface landSurface(LandPoint q) {
     // The processes' (the plants' woods read the same), and wetter down the
     // valleys where the drainage gathers (from a few km² of catchment; g.x
     // is its log10).
-    float wet = clamp(g.w + 0.25 * smoothstep(0.5, 3.0, g.x), 0.0, 1.0);
+    // (A big river runs green through dry country: its banks watered from
+    // upstream however dry the air over them.)
+    float wet = clamp(g.w + 0.25 * smoothstep(0.5, 3.0, g.x) + 0.35 * (1.0 - g.w) * smoothstep(3.7, 5.2, g.x), 0.0, 1.0);
     float steep = 1.0 - q.normal.y;
+    // How open the country reads from far up: the interfluves (the least
+    // catchment, the log's smooth field) drier and paler than the valleys
+    // that gather the water, so the drainage reads as dark threads in
+    // lighter ground and the relief as value, not as one green.
+    float open = 1.0 - smoothstep(-1.0, 2.5, g.x);
 
-    vec3 desert = vec3(0.34, 0.23, 0.12), steppe = vec3(0.22, 0.19, 0.09), grass = vec3(0.10, 0.14, 0.04);
-    vec3 forest = vec3(0.03, 0.06, 0.025), tundra = vec3(0.12, 0.11, 0.08), rock = vec3(0.14, 0.13, 0.12);
-    vec3 snow = vec3(0.80, 0.82, 0.86);
-    vec3 c = mix(desert, steppe, smoothstep(0.12, 0.3, wet));
-    c = mix(c, grass, smoothstep(0.3, 0.5, wet));
-    c = mix(c, forest, smoothstep(0.5, 0.75, wet) * WARM(-2.0, 6.0));
+    // Bare ground by how dry (ochre sand to tan steppe), what grows over it
+    // by how wet and how warm: a warm wet lowland's deep broadleaf green, a
+    // cold one's darker conifer, a dry or cool one's lighter yellow-green.
+    // (Linear albedos as Earth's from orbit: a forest's 0.04 to 0.06, its
+    // conifers darkest; grassland's some 0.11; steppe's 0.2; sand's 0.35.)
+    vec3 desert = vec3(0.50, 0.35, 0.19), steppe = vec3(0.27, 0.21, 0.11);
+    vec3 grassWarm = vec3(0.085, 0.13, 0.035), grassCool = vec3(0.09, 0.115, 0.05);
+    vec3 forestWarm = vec3(0.024, 0.058, 0.016), forestCold = vec3(0.022, 0.042, 0.022);
+    vec3 tundra = vec3(0.13, 0.13, 0.07), rock = vec3(0.20, 0.18, 0.15);
+    vec3 snow = vec3(0.82, 0.84, 0.87);
+    float warmth = WARM(4.0, 20.0);
+    vec3 grass = mix(grassCool, grassWarm, warmth), forest = mix(forestCold, forestWarm, warmth);
+    vec3 c = mix(desert, steppe, smoothstep(0.08, 0.24, wet));
+    c = mix(c, grass, smoothstep(0.24, 0.38, wet));
+    c = mix(c, forest, smoothstep(0.36, 0.54, wet) * WARM(-2.0, 6.0));
+    // (The open uplands between the valleys a shade drier: grass and
+    // steppe showing through the woods there.)
+    c = mix(c, mix(steppe, grass, smoothstep(0.2, 0.4, wet)), 0.2 * open * (1.0 - smoothstep(0.25, 0.45, wet)));
     c = mix(c, tundra, COLD(2.0, -6.0));
     // Bare rock where it is steep and high (a range, or above the trees):
     // a lowland's steep hillsides are wooded or grassed over, not a net of
     // grey crests across every hill.
-    float alpine = max(smoothstep(0.15, 0.5, g.y), COLD(4.0, -2.0));
+    // (A range's flanks wooded where the air is still mild up them, bare
+    // as it cools toward the tree line.)
+    float alpine = max(smoothstep(0.15, 0.5, g.y) * mix(0.4, 1.0, COLD(9.0, 3.0)), COLD(4.0, -2.0));
     c = mix(c, rock, smoothstep(0.3, 0.55, steep) * alpine);
+    // Above the trees the ground thins to scree and rock whatever its
+    // slope, so the rock hands over to the snow, not tundra to snow.
+    c = mix(c, rock, 0.5 * COLD(-3.0, -8.0) * alpine);
     // Snow where the year is cold through: an ice sheet buries its relief,
     // bare only on the near-sheer faces (a crest's every crease flecked
     // dark where it gave way at the rock's own slope).
@@ -87,6 +111,10 @@ LandSurface landSurface(LandPoint q) {
 #ifdef DRAINAGE
     // (The rivers' catchments: blue from 10 km² to a million.)
     c = mix(vec3(0.3, 0.28, 0.25), vec3(0.0, 0.05, 0.5), smoothstep(1.0, 6.0, g.x));
+#endif
+#ifdef WETNESS
+    // (How wet: red dry, through yellow, to blue wet.)
+    c = mix(mix(vec3(0.5, 0.05, 0.02), vec3(0.45, 0.4, 0.05), smoothstep(0.0, 0.5, g.w)), vec3(0.02, 0.08, 0.5), smoothstep(0.5, 1.0, g.w));
 #endif
     LandSurface s = landSurfaceOf(c);
     float grows = smoothstep(0.15, 0.45, wet) * WARM(-4.0, 4.0) * (1.0 - smoothstep(0.3, 0.55, steep));
@@ -106,7 +134,7 @@ export const START = (() => {
 })();
 scene.setBody({ radius: R, at: START });
 
-export const land = scene.createLand({ height: TREE, seed: SEED, surface: (ARGV.includes('drainage') ? '#define DRAINAGE\n' : '') + SURFACE, processes: PROCESSES, sea: { level: 0, absorb: [0.6, 0.18, 0.12] } });
+export const land = scene.createLand({ height: TREE, seed: SEED, surface: (ARGV.includes('drainage') ? '#define DRAINAGE\n' : '') + (ARGV.includes('wetness') ? '#define WETNESS\n' : '') + SURFACE, processes: PROCESSES, sea: { level: 0, absorb: [0.6, 0.18, 0.12] } });
 
 // --- the plants -------------------------------------------------------------------------
 

@@ -29,7 +29,7 @@ export const fbm = (scale, octaves, seed, gain = 0.5) =>
 // under 128 m, scaled by the processes (channel 0's y), about a metre an
 // amplitude unit. (Ablations from the command line: `notree` draws the
 // grids alone, `noregions` the global grid alone, `drainage` tints the
-// surface by the rivers' catchments.)
+// surface by the rivers' catchments, `wetness` by how wet the climate is.)
 export const ARGV = (globalThis.bro && bro.app && bro.app.argv) || [];
 export const TREE = ARGV.includes('notree') ? mul(fbm(200, 1, 3), 0) : mul(fbm(120, 3, 3), 3);
 // The regional levels' bands: feature scale and amplitude (times the tree's scale).
@@ -75,6 +75,8 @@ const RELIEF = fbm(60000, 2, 0);
 // the uncarved ground), then routing and carving together; on the global
 // grid, and on each region (whose drainage runs a region across at most).
 const ROUTE = 640, ERODE = 1408;
+// (The air's iterations: a cell further inland each, some 6000 km.)
+const AIR = 512;
 const DBGI = ARGV.find((s) => s.startsWith('rit='));
 const REGION_ROUTE = DBGI ? +DBGI.slice(4).split(',')[0] : 320, REGION_ERODE = DBGI ? +DBGI.slice(4).split(',')[1] : 384;
 // (The regions' lift: iterations of its spread, regionLift.)
@@ -84,7 +86,8 @@ const REGION_LIFT = 128;
 const REGION_POOL = 192;
 export const PROCESSES = {
     resolution: 512, channels: 4, data: plates(SEED),
-    passes: [{ fn: 'route', iterations: ROUTE }, { fn: 'erode', iterations: ERODE }, { fn: 'settle' }],
+    passes: [{ fn: 'route', iterations: ROUTE }, { fn: 'erode', iterations: ERODE }, { fn: 'settle' },
+             { fn: 'air', iterations: AIR }, { fn: 'rain' }],
     // The regional grids under the eye: 512 cells a side, level 0's 64 m,
     // each level's four times the last's (to level 3's 4 km), the regions
     // within one of the eye's each way, channels 0 and 1 kept.
@@ -119,7 +122,8 @@ float logArea(float km2) { return log2(max(km2, 1e-3)) * 0.30103; }
 // Channel 2: the erosion's state: x the ground, y the cells draining
 //            through the cell (itself included), z its outflow a unit of
 //            weight (the drainage it hands on, over the sum of its weights),
-//            w its steepest slope down (the weights' scale).
+//            w its steepest slope down (the weights' scale). Once settled,
+//            the air's (air, below).
 // Channel 3: on the global grid x the continental field, y how near a
 //            range, z the tree's scale, w the water's level while the
 //            passes run, the drainage area (km²) once settled; on a region
@@ -326,7 +330,7 @@ void climate(inout vec4 v[PROC_CHANNELS], vec3 d, float ground, float range, flo
     float lat = asin(clamp(d.y, -1.0, 1.0)), sl = sin(lat);
     float temp = 28.0 - 44.0 * sl * sl - 6.5 * max(ground, 0.0) / 1000.0;
     float warm = smoothstep(-2.0, 6.0, temp);
-    float woods = max(smoothstep(0.5, 0.75, wet), 0.2 * smoothstep(0.3, 0.5, wet)) * warm * (1.0 - 0.7 * range);
+    float woods = max(smoothstep(0.36, 0.54, wet), 0.2 * smoothstep(0.24, 0.38, wet)) * warm * (1.0 - 0.7 * range);
     v[0].z = ground > 0.0 ? woods : 0.0;
     v[0].w = smoothstep(13.0, 4.0, temp);
 }
@@ -341,19 +345,91 @@ void settle(inout vec4 v[PROC_CHANNELS]) {
     v[3].w = area;
     v[0].x = ground;
     v[0].y = scale;
-    // Wet at the equator and the westerlies' latitudes, dry under the
-    // subtropical highs and at the poles, wetter near the sea (the
-    // continental field over the coast's level is how far inland); and
-    // along a belt its weather's own wandering (a monsoon coast, a rain
-    // shadow), the warp's noise a continent across. Channel 1's w: the
-    // surface reads it.
+    // (How wet, channel 1's w, is the air's: air and rain, below.)
+    v[1] = vec4(logArea(area), range, area, 0.0);
+}
+
+// --- the air's moisture ---------------------------------------------------------------
+//
+// The prevailing winds by latitude (the trades from the east toward the
+// equator, the westerlies from the west toward the poles, the polar
+// easterlies) carry the sea's moisture inland, each iteration a cell
+// further: a cell's air is what its upwind neighbours' was (with a little of
+// all its neighbours', the weather's eddies), losing a share with every km
+// it crosses over land (a continent's interior dries some 2500 km in) and
+// more where it is lifted (rained out up a range's windward side, so the
+// land behind the range lies in its rain shadow). Channel 2 (the erosion's,
+// done with) carries it: x the air's moisture (1 over the sea), y how hard
+// the air is lifted here (the windward slope, carried a little downwind as
+// the rain spills over a crest), z the height the air was last lifted to.
+const float AIR_KM = 2500.0;    // the e-fold of the air's moisture over level land, km
+const float AIR_LIFT = 1700.0;  // the rise that rains out all but 1/e of it, m
+const float AIR_SINK = 2e-3;    // how fast the air's lifted level sinks back, m a metre (1 km in 500)
+const float EDDY = 0.15;       // the share of the air mixed from every side, not the wind's
+
+vec3 windAt(vec3 d) {
     float lat = asin(clamp(d.y, -1.0, 1.0));
-    float inland = clamp(land / 0.6, 0.0, 1.0);
-    float belts = 0.68 + 0.36 * cos(lat * 6.0) - 0.25 * smoothstep(0.75, 1.2, abs(lat));
-    float wander = 0.3 * warpNoise(d * R + vec3(3.3e6, -2.7e6, 1.9e6), 14);
-    float wet = clamp((belts + wander) * (1.15 - 0.6 * inland), 0.0, 1.0);
-    v[1] = vec4(logArea(area), range, area, wet);
-    climate(v, d, ground, range, wet);
+    vec3 east = cross(vec3(0.0, 1.0, 0.0), d);
+    float le = length(east);
+    if (le < 1e-4) return vec3(0.0);
+    east /= le;
+    vec3 north = cross(d, east);
+    // (From the east at the equator and past 60 degrees, from the west
+    // between; toward the equator in the trades, poleward in the westerlies.)
+    return -cos(3.0 * lat) * east - 0.4 * sin(6.0 * lat) * north;
+}
+
+void air(inout vec4 v[PROC_CHANNELS]) {
+    float h = v[0].x;
+    if (procIteration() == 0 || h < 0.0) {
+        v[2] = vec4(h < 0.0 ? 1.0 : 0.0, 0.0, 0.0, 0.0);
+        return;
+    }
+    vec3 p = procPoint();
+    vec3 wind = windAt(procUp());
+    float speed = length(wind);
+    vec3 from = speed > 1e-4 ? -wind / speed : vec3(0.0);
+    // (The calm latitudes' air is the eddies' alone.)
+    float eddy = mix(1.0, EDDY, smoothstep(0.05, 0.4, speed));
+    float ws = 0.0, q = 0.0, y = 0.0, z = 0.0, dist = 0.0;
+    for (int k = 0; k < 8; ++k) {
+        vec3 to = procPointAt(NB[k]) - p;
+        float l = length(to);
+        float w = eddy + (1.0 - eddy) * 8.0 * pow(max(dot(to / l, from), 0.0), 4.0);
+        vec4 n = procRead(2, NB[k]);
+        ws += w;
+        q += w * n.x;
+        y += w * n.y;
+        z += w * n.z;
+        dist += w * l;
+    }
+    q /= ws; y /= ws; z /= ws; dist /= ws;
+    // (The air rains out only where it is lifted higher than it was: z is
+    // the height it was last raised to, sinking back as it goes on, so the
+    // hills of a plain under a range's lee do not wring it out hill by hill.)
+    float level = max(z - AIR_SINK * dist, 0.0);
+    float rise = max(h - level, 0.0);
+    float lift = rise / max(dist, 1.0);
+    v[2] = vec4(q * exp(-dist / (AIR_KM * 1000.0) - rise / AIR_LIFT), mix(y, lift, 0.35), max(level, h), 0.0);
+}
+
+// How wet the land is: the air's moisture times how much of it the
+// circulation's belts let fall (the rising air of the equator and the
+// westerlies' storm tracks wet, the subtropical highs and the poles dry),
+// more up a windward slope, and along a belt its weather's own wandering (a
+// monsoon coast), the warp's noise a continent across. Channel 1's w: the
+// surface reads it, the regions inherit it.
+void rain(inout vec4 v[PROC_CHANNELS]) {
+    vec3 d = procUp();
+    float lat = degrees(asin(clamp(d.y, -1.0, 1.0))), al = abs(lat);
+    float belts = 0.22 + 0.85 * exp(-pow(lat / 12.0, 2.0)) + 0.7 * exp(-pow((al - 48.0) / 14.0, 2.0))
+                - 0.15 * smoothstep(60.0, 80.0, al);
+    float wander = 0.2 * warpNoise(d * R + vec3(3.3e6, -2.7e6, 1.9e6), 14);
+    float q = v[2].x;
+    float windward = smoothstep(0.0, 0.01, v[2].y);
+    float wet = clamp((belts + wander) * (0.3 + 0.9 * q) + 0.45 * q * windward, 0.0, 1.0);
+    v[1].w = wet;
+    climate(v, d, v[0].x, v[1].y, wet);
 }
 
 // --- the regions ----------------------------------------------------------------------
