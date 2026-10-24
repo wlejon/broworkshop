@@ -203,8 +203,10 @@ const affine = (a, s, o) => add(mul(a, s), o);
 const warmShare = (k) => ({ own: 'w', scale: -k, offset: k });
 const stands = clamp01(affine(fbm(700, 3, 21), 2.4, 0.62));
 const thicket = clamp01(affine(fbm(120, 2, 22), 3.0, -0.2));
+// (Drawn as far as they are placed: the land is their canopy from the
+// node's range on, so a range past the rules' left a band with neither.)
 export const plants = scene.createPlants({
-    module: treeModule(), species: TEMPERATE.map(treeSpecies), receivesShadow: true, range: 12000, land,
+    module: treeModule(), species: TEMPERATE.map(treeSpecies), receivesShadow: true, range: 6000, land,
     rules: {
         ground: TREE, seed: SEED, range: 6000,
         layers: [
