@@ -77,13 +77,19 @@ if (mode === 'still') {
     }
 } else if (mode === 'fly') {
     const seconds = +(opt('seconds') || 20), frames = Math.round(seconds * fps);
-    const ground = (x, z, up) => [x, land.landHeight(x, z) + up, z];
+    // The path is laid out in the shot's place frame and held on the body,
+    // brought into the place frame each frame: a re-anchor does not move it.
+    setShot('region');
+    const O0 = scene.place.origin.slice(), B0 = scene.place.basis.slice();
+    const ground = (x, z, up) => {
+        const q = scene.toPlace([0, 1, 2].map((i) => O0[i] + B0[i * 3] * x + B0[i * 3 + 2] * z));
+        return [q[0], land.landHeight(q[0], q[2]) + up, q[2]];
+    };
     const at = (i) => {
         const t = i / frames, h = 9e4 * Math.pow(1500 / 9e4, Math.min(t * 2, 1)), z = -6000 * t * seconds;
         const eye = ground(0, z, h), look = ground(0, z - 3 * h, 0);
         return { eye: eye.map((v) => (Number.isFinite(v) ? v : h)), look: look.map((v, k) => (Number.isFinite(v) ? v : eye[k] - (k === 2 ? 3 * h : k === 1 ? h : 0))), h };
     };
-    setShot('region');
     let v = at(0);
     holdView(v.eye, v.look, 50, 4e6);
     step(8.0);

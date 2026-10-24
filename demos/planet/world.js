@@ -691,8 +691,13 @@ export function letGo() {
     still.view = null;
     Camera.orbitFromView(vp.cam, { position: v.eye, target: v.look, up: v.up, near: v.near, far: v.far });
 }
-// The orbit camera moves with the place when it re-anchors.
-scene.addEventListener('reanchor', (e) => Camera.orbitMove(vp.cam, e));
+// The orbit camera and a held view move with the place when it re-anchors
+// (the view is pushed again every frame, a re-anchor's frame included).
+scene.addEventListener('reanchor', (e) => {
+    Camera.orbitMove(vp.cam, e);
+    const v = still.view;
+    if (v) v.eye = e.apply(v.eye), v.look = e.apply(v.look), v.up = e.turn(v.up);
+});
 // The eye's height over the ground (or the sea) under it.
 function eyeHeight(pos) {
     const ground = Math.max(land.landHeight(pos[0], pos[2]) + (pos[0] ** 2 + pos[2] ** 2) / (2 * R), 0);
