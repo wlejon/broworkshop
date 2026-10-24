@@ -84,6 +84,7 @@ export function createParallelTab(app) {
     war: 'write after read',
     waw: 'write after write',
     bounds: 'indices in bounds',
+    alias: 'if arrays alias',
     kernel: 'kernel',
     cert: 'certificate',
   });
@@ -127,9 +128,12 @@ export function createParallelTab(app) {
     kv.set('war', flag(r.provenNoWar), !!r.provenNoWar);
     kv.set('waw', flag(r.provenNoWaw), !!r.provenNoWaw);
     kv.set('bounds', r.provenInBounds ? 'proven' : 'not proven', !!r.provenInBounds);
+    const distinct = r.requiresDistinct || [];
+    if (!r.parallelizable) kv.set('alias', '—');
+    else kv.set('alias', distinct.length ? 'needs ' + distinct.map(([a, b]) => `${a} ≠ ${b}`).join(', ') : 'still independent', !distinct.length);
     kv.set('kernel', r.kernel ? `${r.kernel.kernelName}, ${r.kernel.spirvWords ? num(r.kernel.spirvWords.length) : '?'} SPIR-V words (${wall} ms)` : '—', !!r.kernel);
     kv.set('cert', r.certificateHash || '—');
-    if (r.parallelizable) answer.set('ok', 'PARALLEL', `every iteration independent; rewritten as @kernel ${r.kernel ? r.kernel.kernelName : ''}`);
+    if (r.parallelizable) answer.set('ok', 'PARALLEL', `every iteration independent${distinct.length ? ' when ' + distinct.map(([a, b]) => `${a} and ${b} are different arrays`).join(' and ') : ''}; rewritten as @kernel ${r.kernel ? r.kernel.kernelName : ''}`);
     else answer.set('err', 'SEQUENTIAL', r.hazards && r.hazards.length ? `${r.hazards[0].hazardKind} on ${r.hazards[0].arrayName}` : (r.summary || 'not provably independent'));
 
     const list = [];
