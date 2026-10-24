@@ -29,7 +29,8 @@ export const fbm = (scale, octaves, seed, gain = 0.5) =>
 // under 128 m, scaled by the processes (channel 0's y), about a metre an
 // amplitude unit. (Ablations from the command line: `notree` draws the
 // grids alone, `noregions` the global grid alone, `drainage` tints the
-// surface by the rivers' catchments, `wetness` by how wet the climate is.)
+// surface by the rivers' catchments, `wetness` by how wet the climate is,
+// `attrs` by the terrain's attributes the cover follows.)
 export const ARGV = (globalThis.bro && bro.app && bro.app.argv) || [];
 export const TREE = ARGV.includes('notree') ? mul(fbm(200, 1, 3), 0) : mul(fbm(120, 3, 3), 3);
 // The regional levels' bands: feature scale and amplitude (times the tree's scale).

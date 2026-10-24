@@ -117,24 +117,74 @@ LandSurface landSurface(LandPoint q) {
     float around = 0.25 * (landGrid(0, q.at + t1 * Dc).x + landGrid(0, q.at - t1 * Dc).x +
                            landGrid(0, q.at + t2 * Dc).x + landGrid(0, q.at - t2 * Dc).x);
     float crest = clamp(ground - around + (h - ground), -400.0, 400.0);
+    // The terrain's attributes at the texel, what the cover follows: the
+    // land's heights (the tree's grain on the regions' carved ground) a
+    // texel and a half about it give the slope's direction (t1 east, t2
+    // toward the equator's side of the north) and the hollow's depth; the
+    // ground's a few texels about it the broader valley's.
+    float Df = max(1.5 * fp, 90.0);
+    float hE = landHeight(q.at + t1 * Df), hW = landHeight(q.at - t1 * Df);
+    float hS = landHeight(q.at + t2 * Df), hN = landHeight(q.at - t2 * Df);
+    vec2 slope2 = vec2(hE - hW, hS - hN) / (2.0 * Df);      // the rise along t1, t2
+    float hollow = 0.25 * (hE + hW + hS + hN) - h;           // >0 concave (a hollow), <0 convex (a spur)
+    float valleyC = around - ground;                          // the same of the carved ground, wider
+    // Facing the pole (the rise toward the equator): cooler, moister,
+    // its woods denser; facing the sun the drier and paler. (-1 .. 1)
+    float poleward = clamp(slope2.y * sign(q.up.y) / max(length(slope2), 0.02), -1.0, 1.0) * smoothstep(0.02, 0.15, length(slope2));
+    // The water the ground gathers, as a wetness index: the catchment
+    // (log10 km², the finest regional level's here, its branches some
+    // cells wide) over the slope it drains down, plus the hollows.
+    // (The catchment is the finest level's cells' bilinear read: across a
+    // D8 network that draws each branch as the cells' staircase, so it is
+    // read as its mean over a cell about the texel.)
+    float cell = mix(mix(mix(4096.0, 1024.0, landGridCover(2, q.at)), 256.0, landGridCover(1, q.at)), 64.0, landGridCover(0, q.at));
+    float rc = 0.5 * max(cell, fp);
+    float gx = 0.2 * (g.x + landGrid(1, q.at + (t1 + t2) * rc).x + landGrid(1, q.at + (t1 - t2) * rc).x +
+                      landGrid(1, q.at - (t1 + t2) * rc).x + landGrid(1, q.at - (t1 - t2) * rc).x);
+    float tanS = max(length(slope2), 0.005);
+    float twi = gx - 0.6 * log(tanS) / log(10.0) + 0.006 * clamp(hollow, -100.0, 100.0) + 0.004 * clamp(valleyC, -150.0, 150.0);
+    // The slope facing the pole the cooler (a degree), the sun's the warmer.
+    temp -= 1.0 * poleward;
+    // How moist the ground is by its place in the landform (0 the dry
+    // spurs and sunny shoulders .. 1 the hollows and valley floors the
+    // water gathers in): the zones of wood, meadow and bare ground follow it.
+    float moist = smoothstep(0.3, 2.6, twi + 0.4 * poleward);
+    // (Its mean over the hill country, about which the zones are set, so
+    // the land's mean colour holds.)
+    const float moist0 = 0.35;
+    // The fall line (downhill, in the body's frame) and streaks down it: a
+    // fine noise averaged along the fall line, so it runs in gullies and
+    // scree chutes a few times longer than wide, where the texel holds them.
+    vec3 fall = -(slope2.x * t1 + slope2.y * t2) / tanS;
+    float Ls = max(2.0 * fp, 120.0);
+    vec3 Pq = vec3(landOx.x, landOy.x, landOz.x) + q.at;
+    float streak = 0.0;
+    for (int k = -2; k <= 2; ++k) streak += patchNoise((Pq + fall * (float(k) * 1.3 * Ls)) / Ls + 7.1);
+    streak *= 0.9 * (1.0 - smoothstep(500.0, 1000.0, fp)) * smoothstep(0.03, 0.12, tanS);
+    // Bands along the contours (terraces, the outcrops a layer makes): a
+    // noise of the height itself, fast across the contours, slow along
+    // them; faded where the texel spans a band.
+    float bandW = 30.0 / tanS;
+    float band = patchNoise(Pq / 1800.0 + h / 30.0 + 3.3) * (1.0 - smoothstep(0.25 * bandW, 0.5 * bandW, fp)) * smoothstep(0.03, 0.1, tanS);
     // An exposed crest is the colder (wind, thin soil: the trees and the
     // late snow keep off it), a sheltered hollow the milder: some 2.5
     // degrees a hundred metres, as Earth's tree lines run down the ridges
     // and up the gullies.
     temp -= 0.025 * crest;
-    // The patchwork: stands of darker and lighter wood, meadows and
-    // clearings, hundreds of metres to kilometres across.
-    vec3 P = vec3(landOx.x, landOy.x, landOz.x) + q.at;
+    // The patchwork noise, only to break the zones' edges and vary the
+    // density inside them: the zones themselves are the landform's.
     float present, presentC;
-    float tone = patchwork(P, fp, 0.0, present), clearing = patchwork(P, fp, 41.7, presentC);
+    float tone = patchwork(Pq, fp, 0.0, present), clearing = patchwork(Pq, fp, 41.7, presentC);
     float shown = 1.0 - smoothstep(600.0, 1200.0, fp);   // (the clearings' coarsest octave gone, none)
-    // Each climate line cut sharp by the patchwork where the texel holds it
-    // (the tree line, the tundra's, the rock's: their ragged edges in and
-    // out of the ground's own shape), and the line's own ramp where it does
-    // not, so a far texel's share is what the ramp's was.
+    // Each climate line cut sharp where the texel holds the ground's shape
+    // (the tree line, the tundra's, the rock's: up the moist gullies, down
+    // the dry spurs and the slopes facing the pole, ragged by the noise),
+    // and the line's own ramp where it does not, so a far texel's share is
+    // what the ramp's was.
     float cutK = mix(1.0, 0.3, present);
-    #define COLD(warm, cold) smoothstep(-1.0, 1.0, ((0.5 * ((warm) + (cold)) - temp) / (0.5 * ((warm) - (cold))) + 0.6 * tone) / (cutK + 2.0 * spread / ((warm) - (cold))))
-    #define WARM(cold, warm) smoothstep(-1.0, 1.0, ((temp - 0.5 * ((warm) + (cold))) / (0.5 * ((warm) - (cold))) - 0.6 * tone) / (cutK + 2.0 * spread / ((warm) - (cold))))
+    float lineN = 0.25 * tone - 0.9 * (moist - moist0) + 0.25 * streak;
+    #define COLD(warm, cold) smoothstep(-1.0, 1.0, ((0.5 * ((warm) + (cold)) - temp) / (0.5 * ((warm) - (cold))) + lineN) / (cutK + 2.0 * spread / ((warm) - (cold))))
+    #define WARM(cold, warm) smoothstep(-1.0, 1.0, ((temp - 0.5 * ((warm) + (cold))) / (0.5 * ((warm) - (cold))) - lineN) / (cutK + 2.0 * spread / ((warm) - (cold))))
     // The processes' (the plants' woods read the same), and wetter down the
     // valleys where the drainage gathers (from a few km² of catchment; g.x
     // is its log10).
@@ -173,16 +223,24 @@ LandSurface landSurface(LandPoint q) {
     // (Darker and lighter stands, mean 1; the meadows' and the steppe's
     // grain the same, fainter. The wet hollows the darker, the crests the
     // lighter: their mean over a land is about none.)
-    forest *= clamp(1.0 + 0.2 * tone - 0.0012 * clamp(-crest, 0.0, 150.0) + 0.0006 * clamp(crest, 0.0, 150.0), 0.4, 1.8);
-    grass *= clamp(1.0 + 0.12 * tone, 0.5, 1.5);
-    steppe *= clamp(1.0 + 0.1 * tone, 0.6, 1.4);
+    // (The woods darkest down the moist hollows and on the slopes facing the
+    // pole, lightest on the dry spurs; banded along the contours; the
+    // noise a little. The meadows' and the steppe's the same, fainter.)
+    forest *= clamp(1.0 + 0.07 * tone - 0.45 * (moist - moist0) - 0.12 * poleward + 0.1 * band, 0.4, 1.8);
+    grass *= clamp(1.0 + 0.05 * tone - 0.3 * (moist - moist0) - 0.08 * poleward + 0.12 * band, 0.5, 1.5);
+    steppe *= clamp(1.0 + 0.04 * tone - 0.2 * (moist - moist0) + 0.1 * band, 0.6, 1.4);
     vec3 c = mix(desert, steppe, smoothstep(0.08, 0.24, wetC));
     c = mix(c, grass, smoothstep(0.24, 0.38, wetC));
     // The woods broken by meadows and clearings (more on the drier, the
     // steeper and the colder ground), their share less where the clearings'
     // octaves are under the texel, so a far texel's woods are as dark.
     float woods = smoothstep(0.36, 0.54, wetC) * WARM(-5.0, 0.0);
-    woods *= 1.0 - 0.75 * shown * smoothstep(0.9, 1.5, clearing + 1.2 * (0.6 - wetC) + 2.5 * steep);
+    // (Open where the ground is dry by its place: the spurs and shoulders,
+    // the sunny slopes, the steep faces, broken down the fall line; the
+    // noise only frays the edges.)
+    float openG = 2.2 * (moist0 - moist) + 1.2 * (0.6 - wetC) + 2.5 * steep - 0.3 * poleward + 0.5 * streak * smoothstep(0.1, 0.3, steep) + 0.3 * clearing;
+    // (A wide ramp: the woods thin over the shoulders before they open.)
+    woods *= 1.0 - 0.75 * shown * smoothstep(0.75, 1.6, openG);
     c = mix(c, forest, woods);
     c = mix(c, tundra, COLD(-3.0, -8.0));
     // Bare rock where it is steep and high (a range, or above the trees):
@@ -192,7 +250,8 @@ LandSurface landSurface(LandPoint q) {
     // as it cools toward the tree line.)
     float alpine = max(smoothstep(0.15, 0.5, g.y) * mix(0.4, 1.0, COLD(4.0, -2.0)), COLD(-2.0, -6.0));
     // (The crests bare first, the gullies last.)
-    c = mix(c, rock, smoothstep(0.3, 0.55, steep + 0.0015 * crest) * alpine);
+    // (Scree in streaks down the fall line under the steep crests.)
+    c = mix(c, rock, smoothstep(0.3, 0.55, steep + 0.0015 * crest - 0.002 * clamp(hollow, -100.0, 100.0) + 0.1 * streak) * alpine);
     // Above the trees the ground thins to scree and rock whatever its
     // slope, so the rock hands over to the snow, not tundra to snow.
     c = mix(c, rock, 0.5 * COLD(-3.0, -8.0) * alpine);
@@ -227,13 +286,21 @@ LandSurface landSurface(LandPoint q) {
     vec3 iceC = mix(vec3(0.45, 0.53, 0.62), vec3(0.76, 0.80, 0.86), smoothstep(0.0, 5.0, iceLine - temp + 3.0 * valley));
     // The year's late snow past the ice: patches on the ridges and high
     // ground where it is cold enough, the valleys and steep faces clear.
-    float lie = (iceLine + 4.0) - temp + 8.0 * relief / 1000.0 - 3.0 * valley;
+    // (Longest on the high ground, in the hollows and gullies that drift
+    // full, and on the slopes facing the pole; the noise's grain of the
+    // relief, round blobs, a little.)
+    float lie = (iceLine + 4.0) - temp + 3.0 * relief / 1000.0 - 3.0 * valley + 0.015 * clamp(hollow, -60.0, 100.0) + 1.5 * poleward;
     float patches = 0.8 * smoothstep(-w, w, lie) * (1.0 - smoothstep(0.35, 0.6, steep));
     c = mix(c, snow, patches * (1.0 - ice));
     c = mix(c, iceC, ice);
 #ifdef DRAINAGE
     // (The rivers' catchments: blue from 10 km² to a million.)
     c = mix(vec3(0.3, 0.28, 0.25), vec3(0.0, 0.05, 0.5), smoothstep(1.0, 6.0, g.x));
+#endif
+#ifdef ATTRS
+    // (The terrain's attributes: red the wetness index, green the hollows
+    // (bright) and spurs (dark), blue the pole-facing slopes.)
+    c = vec3(smoothstep(0.0, 3.0, twi), 0.5 + 0.01 * clamp(hollow + valleyC, -50.0, 50.0), 0.5 + 0.5 * poleward) * 0.5;
 #endif
 #ifdef WETNESS
     // (How wet: red dry, through yellow, to blue wet.)
@@ -270,7 +337,7 @@ export const START = (() => {
 })();
 scene.setBody({ radius: R, at: START });
 
-export const land = scene.createLand({ height: TREE, seed: SEED, surface: (ARGV.includes('drainage') ? '#define DRAINAGE\n' : '') + (ARGV.includes('wetness') ? '#define WETNESS\n' : '') + (ARGV.includes('temperature') ? '#define TEMPERATURE\n' : '') + SURFACE, processes: PROCESSES, sea: { level: 0, absorb: [0.6, 0.18, 0.12] } });
+export const land = scene.createLand({ height: TREE, seed: SEED, surface: (ARGV.includes('attrs') ? '#define ATTRS\n' : '') + (ARGV.includes('drainage') ? '#define DRAINAGE\n' : '') + (ARGV.includes('wetness') ? '#define WETNESS\n' : '') + (ARGV.includes('temperature') ? '#define TEMPERATURE\n' : '') + SURFACE, processes: PROCESSES, sea: { level: 0, absorb: [0.6, 0.18, 0.12] } });
 
 // --- the plants -------------------------------------------------------------------------
 
