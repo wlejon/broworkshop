@@ -203,6 +203,8 @@ void procInit(inout vec4 v[PROC_CHANNELS]) {
     v[2] = vec4(ground, 1.0, 0.0, 0.0);
     // (The water's level starts high over the land: it drains from the coasts.)
     v[3] = vec4(land, range, scale, ground < 0.0 ? ground : 1e5);
+    // (The uncarved ground, for settle's coast: the passes leave channel 0 be.)
+    v[0].x = ground;
 }
 
 // --- the rivers --------------------------------------------------------------------
@@ -335,10 +337,30 @@ void climate(inout vec4 v[PROC_CHANNELS], vec3 d, float ground, float range, flo
     v[0].w = smoothstep(13.0, 4.0, temp);
 }
 
+// The coast. The carving leaves a land cell no lower than a metre and the
+// sea's cells as they were, so along a coast the land's cells stand a flat
+// metre or more over the sea's: the shore, the bilinear zero contour between
+// them, ran half way between the cells' centres whatever the ground did
+// there, a staircase of the cells (19.5 km on the global grid, every level's
+// on the regions) from orbit. So a cell with a neighbour across the coast
+// (channel 0's x, a smooth field s that is land where it is positive, the
+// sign the cell's ground has) takes k s: between such cells the shore is
+// s's own contour, a curve however coarse the cells; inland and offshore
+// the ground is as carved.
+bool atCoast(float s) {
+    for (int k = 0; k < 8; ++k)
+        if ((procRead(0, NB[k]).x > 0.0) != (s > 0.0)) return true;
+    return false;
+}
+
 void settle(inout vec4 v[PROC_CHANNELS]) {
     vec3 d = procUp();
     // (A basin's lake is its sediment's plain, level with its outlet.)
     float ground = v[3].w;
+    // (Channel 0's x is still procInit's uncarved ground, whose sign the
+    // carved ground keeps; k a tenth: the shore's first cells either side a
+    // lowland's or a shelf's tens of metres.)
+    if (atCoast(v[0].x)) ground = 0.1 * v[0].x;
     float land = v[3].x, range = v[3].y, scale = v[3].z;
     float L = procCellSize();
     float area = v[2].y * L * L * 1e-6;
@@ -472,9 +494,12 @@ void regionInit(inout vec4 v[PROC_CHANNELS]) {
     // valleys cut to the sea's level inland left ponds of sea there, the
     // tree's grain dipping their floors under it.)
     float least = c0.x > -1.0 ? clamp(c0.x, 2.0, LAND_FLOOR) : -1e9;
+    // (x until regionSettle: the coast's field, positive where the cell is
+    // land, the band's islands included, as smooth as the coarser field.)
+    float shore = max(c0.x + 1.0, ground);
     ground = max(ground, least);
     float cell = procCellSize();
-    v[0] = vec4(ground, scale, c0.zw);
+    v[0] = vec4(shore, scale, c0.zw);
     v[1] = vec4(ground, c1.yzw);
     v[2] = vec4(ground, 1.0, 0.0, 0.0);
     // (The water's level starts over the ground by more than any pit the band
@@ -524,6 +549,10 @@ void regionSettle(inout vec4 v[PROC_CHANNELS]) {
     // were flat sheets cut square along the cells, kilometres across.)
     float carved = max(v[2].x, v[3].z);   // (the creep may have taken it under its floor)
     float ground = carved > 0.0 ? carved + v[1].x : carved;
+    // (The coast as settle's, from regionInit's field, k 1: its land a metre
+    // or so over the sea as the coarser field's is, not a tenth of it again
+    // at every level. The edges stay as made.)
+    if (procBorder() > 0 && atCoast(v[0].x)) ground = v[0].x;
     float cell = procCellSize();
     // (Its own drainage, routed over its water's level with the coarser
     // field's rivers fed in where they cross its edges: not the seed, which
