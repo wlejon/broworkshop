@@ -4,6 +4,7 @@
 // relief, and whose surface is what that climate grows. The views and the
 // capture script share it.
 import { sceneViewport, orbitRotation, Camera } from "/lib/kit/viewport3d.js";
+import { planetController } from "/lib/kit/planetcam.js";
 import { SUN_LUX, AIR } from "/lib/kit/sky.js";
 import { herbModule } from "/lib/herbs/index.js";
 import { swardModule } from "/lib/sward/index.js";
@@ -16,8 +17,8 @@ export { R };
 export const vp = sceneViewport('#stage', {
     // (Yaw about the view's own up: the globe turns under a drag from any side.)
     orbit: { target: [0, 0, 0], dist: 3e7, fov: 40, near: 1e4, far: 1e8, rot: orbitRotation(0, -1.2), yawAxis: 'view' },
-    // (The wheel is the planet's own, below.)
-    controls: { orbitButton: 0, panButton: 2, minDist: 2, maxDist: 6e7, zoomRate: 0 },
+    // (The wheel is the planet's own, below; walking and flying take the mouse.)
+    controls: { orbitButton: 0, panButton: 2, minDist: 2, maxDist: 6e7, zoomRate: 0, accept: () => ctl.mode === 'orbit' },
 });
 export const { scene } = vp;
 
@@ -1155,6 +1156,7 @@ export function holdView(eye, look, near, far, up = [0, 1, 0]) { still.view = { 
 export function setShot(name) {
     const s = SHOTS[name];
     if (!s) return;
+    ctl.setMode('orbit');
     scene.reanchorAt(START);
     holdView(s.eye(), s.look(), s.near, s.far, s.up);
 }
@@ -1173,21 +1175,59 @@ scene.addEventListener('reanchor', (e) => {
     const v = still.view;
     if (v) v.eye = e.apply(v.eye), v.look = e.apply(v.look), v.up = e.turn(v.up);
 });
+// The ground's height over the datum under a place point (under 0: the sea).
+const groundUnder = (pos) => land.landHeight(pos[0], pos[2]) + (pos[0] ** 2 + pos[2] ** 2) / (2 * R);
 // The eye's height over the ground (or the sea) under it.
 function eyeHeight(pos) {
-    const ground = Math.max(land.landHeight(pos[0], pos[2]) + (pos[0] ** 2 + pos[2] ** 2) / (2 * R), 0);
+    const ground = Math.max(groundUnder(pos), 0);
     const b = scene.toBody(pos);
     return Math.hypot(b[0], b[1], b[2]) - R - ground;
 }
+
+// Walking and flying (lib/kit/planetcam.js), beside the orbit camera: F
+// cycles walk, fly and orbit; a view button holds its shot in orbit again.
+export const ctl = planetController(vp.canvas, scene, {
+    altitude: eyeHeight,
+    water: (pos) => groundUnder(pos) < 0,
+    // (Leaving orbit: from the held shot, or where the orbit camera is.)
+    fromOrbit: () => {
+        const v = still.view;
+        still.view = null;
+        return v ? { position: v.eye, target: v.look } : Camera.orbitViewOpts(vp.cam);
+    },
+    toOrbit: (view) => Camera.orbitFromView(vp.cam, view),
+    onMode: (mode) => { for (const fn of modeHooks) fn(mode); },
+});
+const modeHooks = [];
+/** fn(mode) after each change of mode ('walk', 'fly', 'orbit'). */
+export const onMode = (fn) => modeHooks.push(fn);
+export const setMode = (mode) => ctl.setMode(mode);
+export const MODE_HELP = {
+    orbit: 'Drag orbits · right-drag pans · wheel zooms · F walks.',
+    walk: 'Click to look (Esc frees the mouse) · WASD walk · Shift runs · Space jumps · F flies.',
+    fly: 'Click to look · WASD fly · Space / C rise and sink · Shift boosts · wheel sets the speed · land to walk · F orbits.',
+};
+vp.onFrame((dt) => ctl.update(dt));
+
 // The wheel zooms by the eye's height, a notch a quarter of it: from orbit
 // to the grass at one pace, in some 60 notches.
 vp.canvas.addEventListener('wheel', (e) => {
+    if (ctl.mode !== 'orbit') return;
     e.preventDefault();
     if (still.view) letGo();
     const cam = vp.cam, h = Math.max(eyeHeight(cam.pos), 2);
     cam.dist = Math.min(Math.max(cam.dist - h * (1 - Math.exp(e.deltaY * 0.006)), 2), 6e7);
 });
 vp.onView((view) => {
+    if (ctl.mode !== 'orbit') {
+        // Walking or flying: the controller's view, the planes from its height.
+        Object.assign(view, ctl.view());
+        const h = Math.max(eyeHeight(view.position), 2);
+        view.near = Math.min(Math.max(0.05 * h, 0.1), 1e5);
+        view.far = Math.max(4e5, 3 * h + 2 * Math.sqrt(2 * R * h));
+        exposeFor(view.position);
+        return;
+    }
     if (!still.view) {
         // Free: never under the ground, and the near and far planes from the
         // eye's height (a planet from 20,000 km and a meadow from 2 m).

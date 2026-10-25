@@ -5,7 +5,7 @@
     <title>planet</title>
     <link rel="stylesheet" href="/lib/kit/kit.css">
     <style>
-        #shots { display: flex; flex-wrap: wrap; gap: 3px; }
+        #shots, #mode { display: flex; flex-wrap: wrap; gap: 3px; }
         .help { color: var(--k-dim); font-size: 11px; }
         body.clean .k-header, body.clean .k-side, body.clean .k-statusbar { display: none; }
     </style>
@@ -21,7 +21,11 @@
                 <h2>View</h2>
                 <div id="shots"></div>
             </div>
-            <div class="help">Drag orbits · right-drag pans · wheel zooms.</div>
+            <div class="k-panel">
+                <h2>Move</h2>
+                <div id="mode"></div>
+            </div>
+            <div class="help" id="help">Drag orbits · right-drag pans · wheel zooms · F walks.</div>
         </aside>
         <main class="k-main">
             <div class="k-viewport"><canvas id="stage"></canvas></div>
