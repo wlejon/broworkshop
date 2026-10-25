@@ -32,7 +32,7 @@
 // Every view waits for the scene to settle (perf.settle: the land's regions
 // and tiles, the plants placed, the clouds' bakes, the exposure) on a held
 // clock, so a still shows the same moment however long the wait took.
-import { SHOTS, setShot, holdView, land, scene } from "/app/world.js";
+import { SHOTS, setShot, holdView, still, land, scene } from "/app/world.js";
 
 const argv = (bro.app && bro.app.argv) || [];
 const OUT = bro.resolvePath('/app/captures').replace(/\\/g, '/');
@@ -79,7 +79,8 @@ if (mode === 'still') {
         screenshot(`${OUT}/planet_${shot}${tag}.png`);
         crops.forEach((c, i) => screenshot(`${OUT}/planet_${shot}${tag}_crop${i}.png`, c[0], c[1], c[2], c[3]));
         const cs = scene.cullStats();
-        console.log(`${shot}: captures/planet_${shot}${tag}.png ev ${cs.exposureEv?.toFixed(2)} (metered ${cs.meteredEv?.toFixed(2)})${JSON.stringify(land.landStats())}`);
+        const eye = still.view ? still.view.eye : [NaN, NaN, NaN];
+        console.log(`${shot}: captures/planet_${shot}${tag}.png eye ${eye.map((v) => v.toFixed(3)).join(', ')} (ground ${land.landHeight(eye[0], eye[2]).toFixed(3)}) ev ${cs.exposureEv?.toFixed(2)} (metered ${cs.meteredEv?.toFixed(2)})${JSON.stringify(land.landStats())}`);
         console.log(`${shot}: clouds ${JSON.stringify(scene.cloudStats())}`);
     }
 } else if (mode === 'climb') {

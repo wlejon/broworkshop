@@ -1149,8 +1149,13 @@ export const SHOTS = {
     sky:    { label: 'Sky', near: 0.1, far: 4e5, eye: () => over(0, 0, 1.8), look: () => along(towardRange(), 2000, 900) },
 };
 
-export const still = { view: null };
-export function holdView(eye, look, near, far, up = [0, 1, 0]) { still.view = { eye, look, near, far, up }; }
+// (`shot`: the shot the held view is, while it is one; `ground`: whether
+// the ground under the eye was in when it was placed.)
+export const still = { view: null, shot: null, ground: false };
+export function holdView(eye, look, near, far, up = [0, 1, 0]) {
+    still.view = { eye, look, near, far, up };
+    still.shot = null;
+}
 // A shot is the place at START's: back there first, wherever a drag took
 // the place since.
 export function setShot(name) {
@@ -1159,7 +1164,20 @@ export function setShot(name) {
     ctl.setMode('orbit');
     scene.reanchorAt(START);
     holdView(s.eye(), s.look(), s.near, s.far, s.up);
+    still.shot = name;
+    still.ground = !!land.landStats()?.groundReady;
 }
+// A shot stands on the ground's heights as they were when it was placed,
+// and the land's regional levels blend into them as they come in about the
+// eye (landHeight's answer moves): a held shot is placed again each time
+// the ground under the eye comes in, so it settles standing on the ground
+// as drawn, however early it was asked for.
+vp.onFrame(() => {
+    if (!still.view || !still.shot) return;
+    const ready = !!land.landStats()?.groundReady;
+    if (ready && !still.ground) setShot(still.shot);
+    else still.ground = ready;
+});
 // Let go of a held shot: the orbit camera takes over where it is, turning
 // about what it looked at.
 export function letGo() {
