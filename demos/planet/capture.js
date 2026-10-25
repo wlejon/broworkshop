@@ -4,7 +4,8 @@
 //       still [shot[,shot...]]      captures/planet_<shot>.png
 //   ... capture.js -- cost [shot[,shot...]]
 //       GPU ms held at each shot (mean / median / max of 60 frames after an
-//       eight-second warm and the scene settled), and its costliest passes
+//       eight-second warm and the scene settled), its costliest passes, and
+//       each world-service job's GPU ms a unit (`land`: a land tile made)
 //   ... capture.js -- climb [steps=4]
 //       captures/planet_climb<i>.png: the eye from region's (90 km) to
 //       orbit's (18000 km) in `steps` views between, its height growing
@@ -167,6 +168,10 @@ if (mode === 'still') {
         const ground = Object.keys(sums).filter((k) => /land|world|terrain|ground/i.test(k))
             .map((k) => `${k} ${(sums[k] / 60).toFixed(3)}`).join(', ');
         console.log(`${shot} land: ${ground}`);
+        // (A unit of each world-service kind's work, GPU ms as measured: a
+        // land tile's making, its surface run over every texel, is `land`.)
+        const kinds = scene.cullStats().worldKindMs || {};
+        console.log(`${shot} world jobs (ms a unit): ${Object.entries(kinds).map(([k, v]) => `${k} ${v.toFixed(4)}`).join(', ')}`);
         ms.sort((a, b) => a - b);
         const mean = ms.reduce((a, b) => a + b, 0) / Math.max(ms.length, 1);
         console.log(`${shot}: ${mean.toFixed(2)} / ${(ms[ms.length >> 1] || 0).toFixed(2)} / ${(ms[ms.length - 1] || 0).toFixed(2)} ms`);

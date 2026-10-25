@@ -55,62 +55,11 @@ float snowWet(vec3 at, vec3 t1, vec3 t2, float here) {
     return s / n;
 }
 
-// Value noise (-1 .. 1, mean 0) of the body's point p in cells of 1: the
-// land's patchwork, stands of wood and meadow hundreds of metres across.
-float patchHash(ivec3 i) {
-    uint h = uint(i.x) * 0x8da6b343u ^ uint(i.y) * 0xd8163841u ^ uint(i.z) * 0xcb1ab31fu;
-    h ^= h >> 13u; h *= 0x5bd1e995u; h ^= h >> 15u;
-    return float(h) * (2.0 / 4294967295.0) - 1.0;
-}
-float patchNoise(vec3 p) {
-    ivec3 i = ivec3(floor(p));
-    vec3 f = fract(p);
-    f = f * f * (3.0 - 2.0 * f);
-    return mix(mix(mix(patchHash(i), patchHash(i + ivec3(1, 0, 0)), f.x),
-                   mix(patchHash(i + ivec3(0, 1, 0)), patchHash(i + ivec3(1, 1, 0)), f.x), f.y),
-               mix(mix(patchHash(i + ivec3(0, 0, 1)), patchHash(i + ivec3(1, 0, 1)), f.x),
-                   mix(patchHash(i + ivec3(0, 1, 1)), patchHash(i + ivec3(1, 1, 1)), f.x), f.y), f.z);
-}
-// Octaves from 2.4 km down to 190 m, each faded out as the texel (fp)
-// passes a quarter of its wavelength to a half: what a texel cannot hold is
-// its mean, 0, so nothing aliases and a far texel's colour is the mean's.
-// Scaled to a spread of about 1 with every octave in; present is how much
-// of that spread the texel holds (0 .. 1).
-float patchwork(vec3 P, float fp, float seed, out float present) {
-    float s = 0.0, l = 2400.0, a = 1.0, v = 0.0, vt = 0.0;
-    for (int k = 0; k < 4; ++k) {
-        float w = 1.0 - smoothstep(0.25 * l, 0.5 * l, fp);
-        s += a * w * patchNoise(P / l + seed + float(k) * 17.3);
-        v += a * a * w * w;
-        vt += a * a;
-        l *= 0.43;
-        a *= 0.8;
-    }
-    present = sqrt(v / vt);
-    return s * 3.0 / sqrt(vt);
-}
-// The grain that breaks a line between two covers: octaves from 1.6 km
-// down to 8 m, each a little over half the last and 0.68 as strong (a
-// rough, fractal edge), faded out as the texel passes 0.3 of its
-// wavelength to 0.6 (an octave of two texels a wave the finest the
-// texel holds, so an edge is a texel or so sharp, not four). Scaled to
-// a spread of about 1 with every octave in; unres is the share of that spread the texel does not hold (0 .. 1), which a
-// line cut by the grain takes as its own ramp, so the share of a cover a
-// far texel shows is what the texel's ground would.
-float fineGrain(vec3 P, float fp, float seed, out float unres) {
-    float s = 0.0, l = 1600.0, a = 1.0, vr = 0.0, vt = 0.0;
-    for (int k = 0; k < 8; ++k) {
-        float w = 1.0 - smoothstep(0.3 * l, 0.6 * l, fp);
-        if (w > 0.0) s += a * w * patchNoise(P / l + seed + float(k) * 23.9);
-        vr += a * a * (1.0 - w * w);
-        vt += a * a;
-        l *= 0.47;
-        a *= 0.68;
-    }
-    unres = sqrt(vr / vt);
-    return s * 3.0 / sqrt(vt);
-}
-
+// The surface below reads its inputs through the engine's footprint-aware
+// reads (docs/land-api.js, "FILTERED READS"): every value with its mean
+// over the texel and the spread that mean hides, each line the share of the
+// texel past it, so it draws the same at every footprint with no case for
+// a coarse or a fine texel.
 LandSurface landSurface(LandPoint q) {
     vec4 g = landGrid(1, q.at);
     float ground = landGrid(0, q.at).x;   // (the processes' ground; g.x is the catchment's log)
@@ -131,61 +80,43 @@ LandSurface landSurface(LandPoint q) {
     // and tundra blob by blob from orbit.
     float share = smoothstep(0.3, 0.7, g.y);
     float temp = 28.0 - 44.0 * sl * sl - 6.5 * mix(max(ground, 0.0), h, share) / 1000.0;
-    // The relief the height here lacks, as each line's spread over it: the
-    // tree's grain a texel this wide holds at its mean, and each regional
-    // level's band (terrain.js) as far as the level is not in here (past
-    // the regions about the eye, or read by a texel wider than its cells),
-    // so a far range's crests are a share of snow, not snow or rock texel
-    // by texel, and the land past the regions is the same share as the land
-    // in them seen from as far.
-    float fp = q.footprint;
-    #define LACKS(level, amp) ((amp) * (1.0 - landGridCover(level, q.at)))
-    // (The tree's grain only where the temperature reads h, a range; the
-    // bands wherever: the regions' ground carries them too.)
-    float hidden = landGrid(0, q.at).y * (3.0 * share * min(fp / 120.0, 1.0) + LACKS(0, 30.0) + LACKS(1, 120.0) +
-                                          LACKS(2, 330.0) + LACKS(3, 520.0));
-    // (A third of it: the lines are cut by the ground's own shape at the
-    // texel below, so what is left of the hidden relief only softens them
-    // by its share; at full spread they lay over the ridges as smears.)
-    float spread = 0.33 * 6.5 * hidden / 1000.0;
-    // The ground's shape at the texel: how far it stands over (a ridge, a
-    // spur) or lies under (a gully, a hollow) its ground a few texels about
-    // it, metres; the processes' ground carries the regions' bands to their
-    // finest cells in, the height h the tree's grain over it.
-    vec3 t1 = normalize(cross(q.up, abs(q.up.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
-    vec3 t2 = cross(q.up, t1);
-    // (The sea's ground as its level: a coast's samples on the sea floor,
-    // thousands of metres down, stood every coast up as a crest, a band
-    // some 10 degrees colder and bare rock tracing every coast all round.)
-    float Dc = max(2.5 * fp, 250.0);
-    float around = 0.25 * (max(landGrid(0, q.at + t1 * Dc).x, 0.0) + max(landGrid(0, q.at - t1 * Dc).x, 0.0) +
-                           max(landGrid(0, q.at + t2 * Dc).x, 0.0) + max(landGrid(0, q.at - t2 * Dc).x, 0.0));
-    float crest = clamp(ground - around + (h - ground), -400.0, 400.0);
-    // The terrain's attributes at the texel, what the cover follows: the
-    // land's heights (the tree's grain on the regions' carved ground) a
-    // texel and a half about it give the slope's direction (t1 east, t2
-    // toward the equator's side of the north) and the hollow's depth; the
-    // ground's a few texels about it the broader valley's.
-    float Df = max(1.5 * fp, 90.0);
-    float hE = landHeight(q.at + t1 * Df), hW = landHeight(q.at - t1 * Df);
-    float hS = landHeight(q.at + t2 * Df), hN = landHeight(q.at - t2 * Df);
-    vec2 slope2 = vec2(hE - hW, hS - hN) / (2.0 * Df);      // the rise along t1, t2
-    float hollow = 0.25 * (hE + hW + hS + hN) - h;           // >0 concave (a hollow), <0 convex (a spur)
-    float valleyC = around - ground;                          // the same of the carved ground, wider
+    // The landform (landTerrain): the slope, its aspect and the hollow at
+    // 90 m, the crest (its relief over its surroundings) and the broader
+    // valley at 600 m, each read at 1.5 texels where that is wider (the
+    // heights there the ground as that scale sees it) and a hollow then its
+    // mean over the texel: from orbit the few metres a broad form makes,
+    // not the grid's cells, which drew the snow, tundra and rock as blocks
+    // of the cells' staircase. (The sea's ground as its level: a coast's
+    // ring on the sea floor stood every coast up as a crest, a band some
+    // 10 degrees colder and bare rock tracing every coast all round.)
+    LandTerrain T = landTerrain(q, 90.0, 0.0), W = landTerrain(q, 600.0, 0.0);
+    float crest = clamp(-W.hollow, -400.0, 400.0);
+    float hollow = T.hollow;      // >0 concave (a hollow), <0 convex (a spur)
+    float valleyC = W.hollow;     // the same, wider
+    float tanS = max(T.grade, 0.005);
     // Facing the pole (the rise toward the equator): cooler, moister,
     // its woods denser; facing the sun the drier and paler. (-1 .. 1)
-    float poleward = clamp(slope2.y * sign(q.up.y) / max(length(slope2), 0.02), -1.0, 1.0) * smoothstep(0.02, 0.15, length(slope2));
+    float poleward = clamp(-T.slope.y * sign(q.up.y) / max(T.grade, 0.02), -1.0, 1.0) * smoothstep(0.02, 0.15, T.grade);
+    // The relief the height here lacks, as each line's spread over it: the
+    // heights' spread at the texel's scale where the temperature reads h (a
+    // range), and each regional level's band (terrain.js) as far as the
+    // level is not in here (past the regions about the eye, or read by a
+    // texel wider than its cells), so a far range's crests are a share of
+    // snow, not snow or rock texel by texel, and the land past the regions
+    // is the same share as the land in them seen from as far.
+    #define LACKS(level, amp) ((amp) * (1.0 - landGridCover(level, q.at)))
+    float hidden = share * T.height.spread + g.y * (LACKS(0, 30.0) + LACKS(1, 120.0) + LACKS(2, 330.0) + LACKS(3, 520.0));
+    // (A third of it: the lines are cut by the ground's own shape, so what
+    // is left of the hidden relief only softens them by its share; at full
+    // spread they lay over the ridges as smears.)
+    float spread = 0.33 * 6.5 * hidden / 1000.0;
     // The water the ground gathers, as a wetness index: the catchment
     // (log10 km², the finest regional level's here, its branches some
-    // cells wide) over the slope it drains down, plus the hollows.
-    // (The catchment is the finest level's cells' bilinear read: across a
-    // D8 network that draws each branch as the cells' staircase, so it is
-    // read as its mean over a cell about the texel.)
-    float cell = mix(mix(mix(4096.0, 1024.0, landGridCover(2, q.at)), 256.0, landGridCover(1, q.at)), 64.0, landGridCover(0, q.at));
-    float rc = 0.5 * max(cell, fp);
-    float gx = 0.2 * (g.x + landGrid(1, q.at + (t1 + t2) * rc).x + landGrid(1, q.at + (t1 - t2) * rc).x +
-                      landGrid(1, q.at - (t1 + t2) * rc).x + landGrid(1, q.at - (t1 - t2) * rc).x);
-    float tanS = max(length(slope2), 0.005);
+    // cells wide) over the slope it drains down, plus the hollows. (The
+    // catchment as its mean over a cell of the finest grid read here: a D8
+    // network draws each branch as the cells' staircase.)
+    vec4 gSpread;
+    float gx = landGridMean(1, q.at, landGridCell(q.at), gSpread).x;
     float twi = gx - 0.6 * log(tanS) / log(10.0) + 0.006 * clamp(hollow, -100.0, 100.0) + 0.004 * clamp(valleyC, -150.0, 150.0);
     // The slope facing the pole the cooler (a degree), the sun's the warmer.
     temp -= 1.0 * poleward;
@@ -198,56 +129,47 @@ LandSurface landSurface(LandPoint q) {
     const float moist0 = 0.35;
     // The fall line (downhill, in the body's frame) and streaks down it: a
     // fine noise averaged along the fall line, so it runs in gullies and
-    // scree chutes a few times longer than wide, where the texel holds them.
-    vec3 fall = -(slope2.x * t1 + slope2.y * t2) / tanS;
-    float Ls = max(2.0 * fp, 120.0);
-    vec3 Pq = vec3(landOx.x, landOy.x, landOz.x) + q.at;
+    // scree chutes a few times longer than wide (a few texels at least).
+    vec3 fall = -(T.slope.x * T.east + T.slope.y * T.north) / tanS;
+    float Ls = max(2.0 * q.footprint, 120.0);
+    vec3 Pq = landBodyPoint(q.at);
     float streak = 0.0;
-    for (int k = -2; k <= 2; ++k) streak += patchNoise((Pq + fall * (float(k) * 1.3 * Ls)) / Ls + 7.1);
-    streak *= 0.9 * (1.0 - smoothstep(500.0, 1000.0, fp)) * smoothstep(0.03, 0.12, tanS);
+    for (int k = -2; k <= 2; ++k) streak += landValueNoise((Pq + fall * (float(k) * 1.3 * Ls)) / Ls + 7.1);
+    streak *= 0.9 * smoothstep(0.03, 0.12, tanS);
     // Bands along the contours (terraces, the outcrops a layer makes): a
     // noise of the height itself, fast across the contours, slow along
     // them; faded where the texel spans a band.
     float bandW = 30.0 / tanS;
-    float band = patchNoise(Pq / 1800.0 + h / 30.0 + 3.3) * (1.0 - smoothstep(0.25 * bandW, 0.5 * bandW, fp)) * smoothstep(0.03, 0.1, tanS);
+    float band = landValueNoise(Pq / 1800.0 + h / 30.0 + 3.3) * (1.0 - smoothstep(0.25 * bandW, 0.5 * bandW, q.footprint)) * smoothstep(0.03, 0.1, tanS);
     // An exposed crest is the colder (wind, thin soil: the trees and the
     // late snow keep off it), a sheltered hollow the milder: some 2.5
     // degrees a hundred metres, as Earth's tree lines run down the ridges
     // and up the gullies.
     temp -= 0.025 * crest;
-    // (Where a texel is kilometres wide the landform's terms (the crest,
-    // the slope's aspect, the hollow, the valley, the relief over the
-    // ground) are the grid's cells', not the ground's: a line cut by them
-    // texel by texel drew the snow, the tundra and the rock from orbit as
-    // blocks of the texels' staircase. There every line reads the broad
-    // climate.)
-    float formK = 1.0 - smoothstep(2000.0, 8000.0, fp);
-    temp = mix(28.0 - 44.0 * sl * sl - 6.5 * max(ground, 0.0) / 1000.0, temp, formK);
-    // The patchwork noise, only to break the zones' edges and vary the
+    // The patchwork (stands of wood and meadow hundreds of metres across,
+    // octaves 2.4 km to 190 m), only to break the zones' edges and vary the
     // density inside them: the zones themselves are the landform's.
-    float present, presentC;
-    float tone = patchwork(Pq, fp, 0.0, present), clearing = patchwork(Pq, fp, 41.7, presentC);
-    float shown = 1.0 - smoothstep(600.0, 1200.0, fp);   // (the clearings' coarsest octave gone, none)
-    // Each climate line cut sharp where the texel holds the ground's shape
-    // (the tree line, the tundra's, the rock's: up the moist gullies, down
-    // the dry spurs and the slopes facing the pole, ragged by the noise),
-    // and the line's own ramp where it does not, so a far texel's share is
-    // what the ramp's was.
-    // (Ragged by the fine grain down to the texel, the line's ramp only the
-    // grain's spread the texel does not hold: a crisp, broken edge where
-    // the view resolves it, the share of each side where it does not.)
-    float unres;
-    float grain = fineGrain(Pq, fp, 5.3, unres);
-    // (Near the ground, texels of a few tens of metres, an edge is the
-    // stands' own, the plants placed along it: the colour under them eases
-    // over some tens of metres rather than cut flat patches out of it.)
-    float nearSoft = 1.0 - smoothstep(40.0, 160.0, fp);
-    float cutK = 0.06 + 1.1 * unres + 0.7 * nearSoft;
-    // (The crests' own share again, so the lines run along the ridges more
-    // than the grain's blobs do.)
-    float lineN = 0.1 * tone + (0.006 * clamp(crest, -150.0, 150.0) - 0.9 * (moist - moist0)) * formK + 0.25 * streak + 0.5 * grain;
-    #define COLD(warm, cold) smoothstep(-1.0, 1.0, ((0.5 * ((warm) + (cold)) - temp) / (0.5 * ((warm) - (cold))) + lineN) / (cutK + 2.0 * spread / ((warm) - (cold))))
-    #define WARM(cold, warm) smoothstep(-1.0, 1.0, ((temp - 0.5 * ((warm) + (cold))) / (0.5 * ((warm) - (cold))) - lineN) / (cutK + 2.0 * spread / ((warm) - (cold))))
+    LandStat toneG = landGrain(Pq, 0.0, 2400.0, 4, 0.43, 0.8, 0.0), clearingG = landGrain(Pq, 41.7, 2400.0, 4, 0.43, 0.8, 0.0);
+    float tone = toneG.mean, clearing = clearingG.mean;
+    // The grain that breaks a line between two covers: octaves from 1.6 km
+    // down to 8 m (a rough, fractal edge), read at the texel or 60 m: an
+    // edge is a texel or so sharp where the view resolves the grain and the
+    // share of each side where it does not; near the ground, where the
+    // plants stand along it, it eases over the tens of metres of the
+    // stands' own edges, the octaves under 60 m its ramp.
+    LandStat grainG = landGrain(Pq, 5.3, 1600.0, 8, 0.47, 0.68, 60.0);
+    float grain = grainG.mean, unres = grainG.spread;
+    // Each climate line the share of the texel past it (landShare): its
+    // value the temperature's distance past the line's middle in half
+    // widths of the line, moved by the landform (up the moist gullies, down
+    // the dry spurs and the crests) and ragged by the grain, spread by what
+    // the grain and the relief do not hold. (The crests' own share again,
+    // so the lines run along the ridges more than the grain's blobs do.)
+    float lineN = 0.1 * tone + 0.006 * clamp(crest, -150.0, 150.0) - 0.9 * (moist - moist0) + 0.25 * streak + 0.5 * grain;
+    float lineS = 0.5 * (0.06 + 1.1 * unres);
+    #define LINE(x, half) landShare(LandStat((x) / (half) + lineN, length(vec2(lineS, 0.5 * spread / (half)))), 0.0)
+    #define COLD(warm, cold) LINE(0.5 * ((warm) + (cold)) - temp, 0.5 * ((warm) - (cold)))
+    #define WARM(cold, warm) (1.0 - COLD(warm, cold))
     // The processes' (the plants' woods read the same), and wetter down the
     // valleys where the drainage gathers (from a few km² of catchment; g.x
     // is its log10).
@@ -265,6 +187,9 @@ LandSurface landSurface(LandPoint q) {
     // land is as green as it was.)
     float wetC = clamp(g.w + 0.19 + 0.06 * smoothstep(2.0, 4.5, g.x) + 0.2 * (1.0 - g.w) * smoothstep(3.7, 5.2, g.x), 0.0, 1.0);
     float steep = 1.0 - q.normal.y;
+    // (How much of the slope the texel's normal does not hold: the relief's
+    // spread over the scale it was read at.)
+    float steepS = T.height.spread / T.scale;
 
     // Bare ground by how dry (ochre sand to tan steppe), what grows over it
     // by how wet and how warm: a warm wet lowland's deep broadleaf green, a
@@ -305,42 +230,34 @@ LandSurface landSurface(LandPoint q) {
     // The drainage: gullies and stream lines as fine dark threads down the
     // slopes, the woods densest and wettest along them: the zero lines of
     // a noise averaged along the fall line (so they run down it), at two
-    // spacings, 1.8 km and 800 m; off the crests. (The ground's own hollows
-    // at the texel are no guide: the regions' carved ground runs in its
-    // cells' staircase, so its hollows are dashes along the grid.) Each
-    // spacing's threads are their mean share where the texel cannot hold
-    // their width.
-    float concav = hollow / Df;
+    // spacings, 1.8 km and 800 m; off the crests. Each spacing's threads
+    // are their mean share where the texel cannot hold their width.
     float thread = 0.0;
     for (int j = 0; j < 2; ++j) {
         float L = j == 0 ? 1800.0 : 800.0;
         float n = 0.0;
-        for (int k = -2; k <= 2; ++k) n += patchNoise((Pq + fall * (float(k) * 0.7 * L)) / L + 13.7 + float(j) * 5.1);
+        for (int k = -2; k <= 2; ++k) n += landValueNoise((Pq + fall * (float(k) * 0.7 * L)) / L + 13.7 + float(j) * 5.1);
         float sharp = 1.0 - smoothstep(0.08, 0.2, abs(n));
-        float held = 1.0 - smoothstep(0.08 * L, 0.16 * L, fp);
+        float held = 1.0 - smoothstep(0.08 * L, 0.16 * L, q.footprint);
         thread = max(thread, mix(0.2, sharp, held) * (j == 0 ? 1.0 : 0.7));
     }
-    thread *= smoothstep(0.03, 0.1, tanS) * (1.0 - smoothstep(40.0, 140.0, crest)) * (1.0 - smoothstep(1500.0, 3000.0, fp));
+    thread *= smoothstep(0.03, 0.1, tanS) * (1.0 - smoothstep(40.0, 140.0, crest));
     forest *= 1.0 - 0.4 * thread;
     grass *= 1.0 - 0.2 * thread;
     vec3 c = mix(desert, steppe, smoothstep(0.08, 0.24, wetC));
     c = mix(c, grass, smoothstep(0.24, 0.38, wetC));
     // The woods broken by meadows and clearings (more on the drier, the
-    // steeper and the colder ground), their share less where the clearings'
-    // octaves are under the texel, so a far texel's woods are as dark.
+    // steeper and the colder ground): open where the ground is dry by its
+    // place (the spurs and shoulders, the sunny slopes, the steep faces,
+    // broken down the fall line), the share of the texel past the line, so
+    // a far texel's woods are as open as its ground's. (Only the driest and
+    // steepest open: a forested range's dry crests and spurs are a thinner,
+    // lighter canopy, not meadow; opened from openG over 0.75 they were
+    // bald patches over every hilltop, the region view a camouflage of pale
+    // blotches on dark woods.)
     float woods = smoothstep(0.36, 0.54, wetC) * WARM(-7.5, -2.5);
-    // (Open where the ground is dry by its place: the spurs and shoulders,
-    // the sunny slopes, the steep faces, broken down the fall line; cut
-    // crisp by the grain where the texel holds it.)
-    float openG = 2.2 * (moist0 - moist) + 1.2 * (0.6 - wetC) + 2.5 * steep - 0.3 * poleward + 0.5 * streak * smoothstep(0.1, 0.3, steep) + 0.3 * clearing + 0.4 * grain * (1.0 - nearSoft);
-    float kO = 0.05 + 0.6 * unres;
-    // (Only the driest and steepest open: a forested range's dry crests
-    // and spurs are a thinner, lighter canopy, not meadow; opened from
-    // openG over 0.75 they were bald patches over every hilltop, the
-    // region view a camouflage of pale blotches on dark woods.)
-    // (Near the ground, where the plants stand over it, the woods thin over
-    // the shoulders in a wide ramp before they open, as the stands do.)
-    woods *= 1.0 - 0.75 * shown * mix(smoothstep(1.9 - kO, 1.9 + kO, openG), smoothstep(0.75, 1.6, openG), nearSoft);
+    float openG = 2.2 * (moist0 - moist) + 1.2 * (0.6 - wetC) + 2.5 * steep - 0.3 * poleward + 0.5 * streak * smoothstep(0.1, 0.3, steep) + 0.3 * clearing + 0.4 * grain;
+    woods *= 1.0 - 0.75 * landShare(openG, length(vec2(0.025 + 0.3 * unres, 0.3 * clearingG.spread)), 1.9);
     c = mix(c, forest, woods);
     tundra *= 1.0 - 0.25 * thread;
     c = mix(c, tundra, COLD(-5.5, -10.5));
@@ -351,22 +268,19 @@ LandSurface landSurface(LandPoint q) {
     // as it cools toward the tree line.)
     float alpine = max(smoothstep(0.15, 0.5, g.y) * mix(0.4, 1.0, COLD(4.0, -2.0)), COLD(-2.0, -6.0));
     // (The crests bare first, the gullies last; scree in streaks down the
-    // fall line under the steep crests; cut crisp by the grain.)
-    // (A crest's rock is a narrow line: a texel wider than some 100 m
-    // holds it as a share, its turf and scrub beside it, not as a blob of
-    // bare ground the texel wide.)
-    float kR = 0.025 + 0.1 * unres + 0.05 * nearSoft;
-    float lineShare = mix(1.0, 0.55, smoothstep(100.0, 600.0, fp));
-    float rockS = smoothstep(0.5 - kR, 0.5 + kR, steep + 0.0015 * crest - 0.002 * clamp(hollow, -100.0, 100.0) + 0.1 * streak + 0.05 * grain) * alpine * lineShare;
+    // fall line under the steep crests; cut crisp by the grain. A crest's
+    // rock is a narrow line: a texel whose normal does not hold the slope's
+    // relief holds it as a share, its turf and scrub beside it.)
+    float rockV = steep + 0.0015 * crest - 0.002 * clamp(hollow, -100.0, 100.0) + 0.1 * streak + 0.05 * grain;
+    float rockS = landShare(rockV, length(vec2(0.0125 + 0.05 * unres, steepS)), 0.5) * alpine;
     c = mix(c, rock, rockS);
     // Above the trees the ground thins to scree and rock, on the crests,
     // spurs and steep faces first and the more of it the colder, so the
     // rock hands over to the snow, not tundra to snow: just past the tree
     // line only narrow crisp lines along the crests and streaks down the
     // falls, the turf between, and the more of it the higher.
-    float kH = 0.06 + 0.6 * unres + 0.3 * nearSoft;
-    float bare = 0.005 * crest - 2.0 * clamp(concav, -0.15, 0.15) + 3.0 * steep + 0.5 * streak + 0.3 * grain - 0.75 + 0.9 * COLD(-8.0, -14.0);
-    float rockH = COLD(-5.5, -10.5) * alpine * smoothstep(-kH, kH, bare) * mix(lineShare, 1.0, COLD(-8.0, -14.0));
+    float bare = 0.005 * crest - 2.0 * clamp(hollow / T.scale, -0.15, 0.15) + 3.0 * steep + 0.5 * streak + 0.3 * grain - 0.75 + 0.9 * COLD(-8.0, -14.0);
+    float rockH = COLD(-5.5, -10.5) * alpine * landShare(bare, length(vec2(0.03 + 0.3 * unres, 3.0 * steepS)), 0.0);
     c = mix(c, rock, rockH);
     // Ice where the year is cold and the snow falls deep enough to outlast
     // the summers: the wetter the air, the warmer the line it holds to
@@ -380,27 +294,25 @@ LandSurface landSurface(LandPoint q) {
     // low coasts melt it back (dark strips), and the relief that stands
     // over its neighbours (ridges, nunataks) stands clear of it near its
     // edge; deep inside the sheet all of it is buried.
-    // (The landform's terms faded out at wide texels, as the temperature's.)
-    float relief = (h - ground) * formK;
-    float valley = smoothstep(0.5, 3.5, g.x) * formK;
+    float relief = h - ground;
+    float valley = smoothstep(0.5, 3.5, g.x);
+    vec3 t1 = T.east, t2 = -T.north;
     float iceLine = mix(-22.0, -13.0, smoothstep(0.15, 0.65, snowWet(q.at, t1, t2, g.w)));
     float m = iceLine - temp + 3.0 * valley - 4.0 * (1.0 - smoothstep(0.0, 500.0, ground)) * (1.0 - valley)
             - 6.0 * relief / 1000.0;
     // The edge as sharp as the view: the broad climate's change over two
-    // texels (or 1.5 km, so the grid's bilinear cells do not draw their
-    // kinks), and on a range the relief a texel hides. (A margin drawn
+    // texels, and on a range the relief a texel hides. (A margin drawn
     // with a fixed width of degrees lay a hundred km soft over a plateau,
     // whose climate changes a degree in as far: a bank of fog.)
     const float D = 2000.0;
     vec2 grad = vec2(iceClimate(q.at + t1 * D, normalize(q.up + t1 * (D / ${R}.0)), iceLine) - iceClimate(q.at - t1 * D, normalize(q.up - t1 * (D / ${R}.0)), iceLine),
                      iceClimate(q.at + t2 * D, normalize(q.up + t2 * (D / ${R}.0)), iceLine) - iceClimate(q.at - t2 * D, normalize(q.up - t2 * (D / ${R}.0)), iceLine)) / (2.0 * D);
-    float w = max(length(grad) * max(2.0 * fp, 1500.0), 0.02) + 0.5 * spread * share;
+    float w = max(length(grad) * 2.0 * q.footprint, 0.02) + 0.5 * spread * share;
     // (Of the landform's spread only a little: the broad climate's lines are
     // smooth, so cut by them alone a far texel's edge is crisp with no
     // staircase; widened by the landform's degrees, the edge lay hundreds of
     // km soft, a bank of fog. The storms' noise below breaks the snow up.)
-    float wI = w + 0.3 * (1.0 - formK), wP = w + 0.8 * (1.0 - formK);
-    float ice = smoothstep(-wI, wI, m) * (1.0 - smoothstep(0.45, 0.75, steep));
+    float ice = landShare(m, 0.5 * w, 0.0) * (1.0 - smoothstep(0.45, 0.75, steep));
     // (Its accumulation zone a snow's white; down toward the margin the
     // bare ice of its ablation zone, greyer and bluer.)
     // (By the broad climate alone: the ground's grain would mottle it.)
@@ -412,18 +324,14 @@ LandSurface landSurface(LandPoint q) {
     // relief, round blobs, a little.)
     // (And unevenly from region to region, as the winters' storms left it,
     // some 3 degrees each way over 250 and 80 km, so a cold land's snow
-    // from afar is fields and gaps, not one sheet following its lines.)
+    // from afar is fields and gaps, not one sheet following its lines: its
+    // octaves under the texel at their mean, their spread the edge's.)
     // (Its line 2.5 degrees warmer than the ice's, not 4: a cold
     // continent's north lay under one soft white mass of it, a bank of
     // cloud from orbit.)
-    // (Each octave faded as the texel passes a quarter of it to a half, and
-    // the edge as wide as what is left changes over two texels: cut sharper,
-    // a far texel's snow stepped texel by texel along the noise.)
-    float k80 = 1.0 - smoothstep(2.0e4, 4.0e4, fp);
-    float storms = 2.2 * patchNoise(Pq / 2.5e5 + 61.3) + 1.2 * k80 * patchNoise(Pq / 8.0e4 + 7.9);
-    wP += 2.0 * fp * (2.2 / 2.5e5 + 1.2 * k80 / 8.0e4);
-    float lie = (iceLine + 2.5) - temp + 3.0 * relief / 1000.0 - 3.0 * valley + (0.015 * clamp(hollow, -60.0, 100.0) + 1.5 * poleward) * formK + storms;
-    float patches = 0.8 * smoothstep(-wP, wP, lie) * (1.0 - smoothstep(0.35, 0.6, steep));
+    LandStat storms = landStatScale(landGrain(Pq, 61.3, 2.5e5, 2, 0.32, 0.55, 0.0), 0.8);
+    float lie = (iceLine + 2.5) - temp + 3.0 * relief / 1000.0 - 3.0 * valley + 0.015 * clamp(hollow, -60.0, 100.0) + 1.5 * poleward + storms.mean;
+    float patches = 0.8 * landShare(lie, length(vec2(0.5 * w, storms.spread)), 0.0) * (1.0 - smoothstep(0.35, 0.6, steep));
     c = mix(c, snow, patches * (1.0 - ice));
     c = mix(c, iceC, ice);
 #ifdef DRAINAGE
