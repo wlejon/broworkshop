@@ -4,7 +4,7 @@
 //       still [shot[,shot...]]      captures/planet_<shot>.png
 //   ... capture.js -- cost [shot[,shot...]]
 //       GPU ms held at each shot (mean / median / max of 60 frames after an
-//       eight-second warm and the plants placed), and its costliest passes
+//       eight-second warm and the scene settled), and its costliest passes
 //   ... capture.js -- climb [steps=4]
 //       captures/planet_climb<i>.png: the eye from region's (90 km) to
 //       orbit's (18000 km) in `steps` views between, its height growing
@@ -17,7 +17,19 @@
 //       half, flying on at 6 km/s throughout, the land's regions made
 //       under it as it goes: each frame's GPU ms and wall ms, the worst
 //       frames, and captures/planet_fly.png at the end
-import { SHOTS, setShot, holdView, land, plants, scene } from "/app/world.js";
+//   ... capture.js -- compare [shot[,shot...]] dir=<shader tree> [frames=60]
+//       the scene's shaders from <dir> (a copy of bro's
+//       src/scene/vulkan/shaders, edited) against the running ones, on the
+//       same held view in one process, a frame each in turn
+//       (perf.compareShaders): each set's frame and pass GPU ms (mean and
+//       least) and B's difference from A per pass, with its standard error;
+//       captures/planet_<shot>_a.png and _b.png,
+//       the two sets at the same moment
+//
+// Every view waits for the scene to settle (perf.settle: the land's regions
+// and tiles, the plants placed, the clouds' bakes, the exposure) on a held
+// clock, so a still shows the same moment however long the wait took.
+import { SHOTS, setShot, holdView, land, scene } from "/app/world.js";
 
 const argv = (bro.app && bro.app.argv) || [];
 const OUT = bro.resolvePath('/app/captures').replace(/\\/g, '/');
@@ -28,48 +40,35 @@ const opt = (key) => {
     return a ? a.slice(key.length + 1) : undefined;
 };
 const shotsOf = (s) => (s && !s.includes('=') ? s : Object.keys(SHOTS).join(',')).split(',').filter((k) => SHOTS[k]);
-// Frames until `busy()` is false (at most `max`), run on a held clock: the
-// land's and plants' work goes on frame by frame, but the scene's clock (the
-// wind the clouds drift on, the plants' sway, exposure) does not move, so a
-// still shows the same moment however long the wait took.
-const waitHeld = (busy, max) => {
-    const scale = bro.time.scale;
-    bro.time.scale = 0;
-    let n = 0;
-    for (; n < max && busy(); n++) advanceTime(1000 / fps);
-    bro.time.scale = scale;
-    return n;
+// The scene settled for the view on a held clock (at most `max` frames;
+// `kinds` only those kinds of work).
+const settle = (what, max = 8000, kinds) => {
+    const s = perf.settle({ maxFrames: max, kinds });
+    console.log(`${what}: settled ${s.settled} after ${s.frames} frames ${JSON.stringify(s.waited)}${s.settled ? '' : ` (${s.pending.join('; ')})`}`);
+    return s;
+};
+// A shot set and settled: long enough a warm for the plants' canopy to come
+// in and the land's tiles made again with it, the shot set again (the
+// ground under a view is read once the land is in), then settled.
+const settleShot = (shot) => {
+    setShot(shot);
+    step(+(opt('warm') || 8.0));
+    setShot(shot);
+    step(1.0);
+    settle(shot);
+    step(1.0);
 };
 
 document.body.classList.add('clean');
 bro.menu.hide();
 flush();
-// The land is made by its processes first.
-{
-    const t0 = performance.now();
-    const frames = waitHeld(() => !land.landStats()?.ready, 300);
-    console.log(`land ready: ${land.landStats()?.ready} after ${frames} frames, ${Math.round(performance.now() - t0)} ms`);
-}
+// The land is made by its processes first (the shots stand on it).
+settle('start', 300, ['land processes']);
 
 const mode = argv[0] || 'still';
 if (mode === 'still') {
     for (const shot of shotsOf(argv[1])) {
-        setShot(shot);
-        // (Long enough for the plants' canopy to come in and the land's
-        // tiles made again with it.)
-        step(+(opt('warm') || 8.0));
-        setShot(shot);   // (the ground under a view is read once the land is in)
-        step(1.0);
-        // The plants about the view placed.
-        waitHeld(() => plants.plantPlacement()?.pending > 0, 600);
-        // The land's regions about the view in, and its tiles made over them.
-        waitHeld(() => land.landStats()?.regionsPending > 0, 4000);
-        // (The plants are placed once the ground under them is in: placed
-        // again over the regions' ground.)
-        const placed = waitHeld(() => plants.plantPlacement()?.pending > 0, 4000);
-        const waited = waitHeld(() => land.landStats()?.missing > 0, 4000);
-        console.log(`${shot}: the plants placed after ${placed} frames, the land's tiles in after ${waited} frames`);
-        step(1.0);
+        settleShot(shot);
         screenshot(`${OUT}/planet_${shot}.png`);
         const cs = scene.cullStats();
         console.log(`${shot}: captures/planet_${shot}.png ev ${cs.exposureEv?.toFixed(2)} (metered ${cs.meteredEv?.toFixed(2)})${JSON.stringify(land.landStats())}`);
@@ -120,7 +119,7 @@ if (mode === 'still') {
     let v = at(0);
     holdView(v.eye, v.look, 50, 4e6);
     step(8.0);
-    for (let i = 0; i < 4000 && land.landStats()?.regionsPending > 0; i++) advanceTime(1000 / fps);
+    settle('fly start', 4000);
     perf.gpuFrameMs();
     const gpu = [], wall = [];
     for (let i = 0; i <= frames; i++) {
@@ -144,15 +143,7 @@ if (mode === 'still') {
     console.log(`fly: end ${JSON.stringify(land.landStats())}`);
 } else if (mode === 'cost') {
     for (const shot of shotsOf(argv[1])) {
-        setShot(shot);
-        step(8.0);
-        setShot(shot);
-        step(1.0);
-        // (The plants are placed once the land's regions are in under them.)
-        waitHeld(() => land.landStats()?.regionsPending > 0, 4000);
-        waitHeld(() => plants.plantPlacement()?.pending > 0, 4000);
-        waitHeld(() => land.landStats()?.missing > 0, 4000);
-        step(1.0);
+        settleShot(shot);
         perf.gpuFrameMs();
         const ms = [];
         const sums = {}, mins = {};
@@ -179,5 +170,34 @@ if (mode === 'still') {
         ms.sort((a, b) => a - b);
         const mean = ms.reduce((a, b) => a + b, 0) / Math.max(ms.length, 1);
         console.log(`${shot}: ${mean.toFixed(2)} / ${(ms[ms.length >> 1] || 0).toFixed(2)} / ${(ms[ms.length - 1] || 0).toFixed(2)} ms`);
+    }
+} else if (mode === 'compare') {
+    const dir = opt('dir');
+    if (!dir) throw new Error('compare: dir=<shader tree> is required');
+    const set = perf.loadShaderSet(dir);
+    console.log(`set B ${set.dir}${set.failed.length ? `; did not compile (A's kept): ${set.failed.join(', ')}` : ''}`);
+    const frames = +(opt('frames') || 60);
+    const f3 = (x) => x.toFixed(3).padStart(8);
+    for (const shot of shotsOf(argv[1])) {
+        settleShot(shot);
+        const r = perf.compareShaders({ frames });
+        const row = (name, a, b, d) =>
+            `  ${name.padEnd(28)}${f3(a.mean)}${f3(b.mean)}${f3(a.min)}${f3(b.min)}${f3(d.ms)} ±${d.se.toFixed(3).padEnd(6)}${(d.pct >= 0 ? '+' : '') + d.pct.toFixed(1)}%`;
+        console.log(`${shot}: ${frames} frames a set, in pairs of A and B; ${r.set.differing} of ${r.set.shaders} shaders differ, ${r.set.twinned} of ${r.set.pipelines} pipelines twinned`);
+        console.log(`  ${'pass'.padEnd(28)}${'A mean'.padStart(8)}${'B mean'.padStart(8)}${'A least'.padStart(8)}${'B least'.padStart(8)}${'B-A'.padStart(8)}`);
+        console.log(row('frame', r.a.frame, r.b.frame, r.diff.frame));
+        // (The passes over 0.02 ms in either set, dearest first.)
+        Object.keys(r.diff.passes)
+            .filter((k) => Math.max(r.a.passes[k].mean, r.b.passes[k].mean) > 0.02)
+            .sort((x, y) => r.a.passes[y].mean - r.a.passes[x].mean)
+            .forEach((k) => console.log(row(k, r.a.passes[k], r.b.passes[k], r.diff.passes[k])));
+        // The two sets' pictures at the same moment, each set's bakes made by it.
+        for (const s of ['a', 'b']) {
+            perf.useShaderSet(s, { rebake: true });
+            settle(`${shot} ${s}`, 600);
+            screenshot(`${OUT}/planet_${shot}_${s}.png`);
+        }
+        perf.useShaderSet('a', { rebake: true });
+        console.log(`${shot}: captures/planet_${shot}_a.png, captures/planet_${shot}_b.png`);
     }
 }
