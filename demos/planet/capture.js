@@ -2,6 +2,8 @@
 //
 //   bro-headless --width 1280 --height 720 demos/planet demos/planet/capture.js -- \
 //       still [shot[,shot...]]      captures/planet_<shot>.png
+//       [tag=<t>]                   ... named planet_<shot>_<t>.png instead
+//       [crop=x,y,w,h[;...]]        and those rects of it, _crop<i>.png
 //   ... capture.js -- cost [shot[,shot...]]
 //       GPU ms held at each shot (mean / median / max of 60 frames after an
 //       eight-second warm and the scene settled), its costliest passes, and
@@ -68,11 +70,17 @@ settle('start', 300, ['land processes']);
 
 const mode = argv[0] || 'still';
 if (mode === 'still') {
+    // (tag=<t>: captures/planet_<shot>_<t>.png; crop=x,y,w,h[;x,y,w,h...]:
+    // also those rects of it, _crop<i>.png.)
+    const tag = opt('tag') ? `_${opt('tag')}` : '';
+    const crops = (opt('crop') || '').split(';').filter(Boolean).map((c) => c.split(',').map(Number));
     for (const shot of shotsOf(argv[1])) {
         settleShot(shot);
-        screenshot(`${OUT}/planet_${shot}.png`);
+        screenshot(`${OUT}/planet_${shot}${tag}.png`);
+        crops.forEach((c, i) => screenshot(`${OUT}/planet_${shot}${tag}_crop${i}.png`, c[0], c[1], c[2], c[3]));
         const cs = scene.cullStats();
-        console.log(`${shot}: captures/planet_${shot}.png ev ${cs.exposureEv?.toFixed(2)} (metered ${cs.meteredEv?.toFixed(2)})${JSON.stringify(land.landStats())}`);
+        console.log(`${shot}: captures/planet_${shot}${tag}.png ev ${cs.exposureEv?.toFixed(2)} (metered ${cs.meteredEv?.toFixed(2)})${JSON.stringify(land.landStats())}`);
+        console.log(`${shot}: clouds ${JSON.stringify(scene.cloudStats())}`);
     }
 } else if (mode === 'climb') {
     const steps = +(opt('steps') || 4);
@@ -97,9 +105,9 @@ if (mode === 'still') {
                 advanceTime(1000 / fps);
                 frame += perf.gpuFrameMs();
                 const ps = (perf.gpuPasses && perf.gpuPasses()) || {};
-                for (const k of ['clouds', 'clouds-prepare']) sums[k] = (sums[k] || 0) + (ps[k] || 0);
+                for (const k of ['clouds', 'clouds-prepare', 'clouds-volume']) sums[k] = (sums[k] || 0) + (ps[k] || 0);
             }
-            console.log(`climb ${i} cost: clouds ${(sums.clouds / 60).toFixed(3)}, clouds-prepare ${(sums['clouds-prepare'] / 60).toFixed(3)}, frame ${(frame / 60).toFixed(2)} ms`);
+            console.log(`climb ${i} cost: clouds ${(sums.clouds / 60).toFixed(3)}, clouds-prepare ${(sums['clouds-prepare'] / 60).toFixed(3)}, clouds-volume ${(sums['clouds-volume'] / 60).toFixed(3)}, frame ${(frame / 60).toFixed(2)} ms`);
         }
     }
 } else if (mode === 'fly') {
@@ -162,7 +170,7 @@ if (mode === 'still') {
             .map(([k, v]) => `${k} ${(v / 60).toFixed(2)}`).join(', ');
         console.log(`${shot} passes: ${top}`);
         // (Each pass's mean, and its least: a frame the GPU's clock held up.)
-        const clouds = ['clouds', 'clouds-prepare']
+        const clouds = ['clouds', 'clouds-prepare', 'clouds-volume']
             .map((k) => `${k} ${((sums[k] || 0) / 60).toFixed(3)} (least ${(mins[k] ?? 0).toFixed(3)})`).join(', ');
         console.log(`${shot} clouds: ${clouds}`);
         const ground = Object.keys(sums).filter((k) => /land|world|terrain|ground/i.test(k))
