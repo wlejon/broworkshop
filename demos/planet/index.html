@@ -7,6 +7,7 @@
     <style>
         #shots, #mode { display: flex; flex-wrap: wrap; gap: 3px; }
         .help { color: var(--k-dim); font-size: 11px; }
+        #preparing { position: absolute; left: 8px; top: 8px; pointer-events: none; }
         body.clean .k-header, body.clean .k-side, body.clean .k-statusbar { display: none; }
     </style>
 </head>
@@ -28,7 +29,7 @@
             <div class="help" id="help">Drag orbits · right-drag pans · wheel zooms · F walks.</div>
         </aside>
         <main class="k-main">
-            <div class="k-viewport"><canvas id="stage"></canvas></div>
+            <div class="k-viewport"><canvas id="stage"></canvas><span class="k-badge warn" id="preparing" hidden></span></div>
         </main>
     </div>
     <footer class="k-statusbar">
