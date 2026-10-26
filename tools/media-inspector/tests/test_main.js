@@ -14,8 +14,7 @@ const fs = require('fs');
 const path = require('path');
 const VIDEO = appPath(SOURCES[0][0]);
 
-// A sound-only WebM (one Opus track, no video) for the audio-only path: the
-// workshop's tracked audio is Ogg Vorbis, which bro.media cannot read.
+// A sound-only WebM (one Opus track, no video) for the audio-only path.
 const OUT = path.resolve('tests/out/media-inspector').replace(/\\/g, '/');
 fs.mkdirSync(OUT, { recursive: true });
 const TONE = OUT + '/tone.webm';
@@ -231,10 +230,14 @@ test('a missing custom path reports an error', () => {
     check(/cannot read exist\.webm: file not found/.test(text('#status')), 'status: ' + text('#status'));
 });
 
-test('an unreadable file (Ogg Vorbis) reports instead of hanging', () => {
-    const ok = settle(inspector.openCustom('../../demos/scene-audio/assets/pad-chime.ogg'), 'ogg file');
+// bro.media reads Ogg Vorbis since bro e1f17e1b, so the unreadable file is
+// one made unreadable: bytes that are no container at all.
+test('an unreadable file reports instead of hanging', () => {
+    const junk = OUT + '/not-media.ogg';
+    fs.writeFileSync(junk, 'this is not an Ogg stream, nor any other\n'.repeat(64));
+    const ok = settle(inspector.openCustom(junk), 'junk file');
     check(!ok, 'inspect fails');
-    check(/cannot read pad-chime\.ogg/.test(text('#status')), 'status: ' + text('#status'));
+    check(/cannot read not-media\.ogg/.test(text('#status')), 'status: ' + text('#status'));
 });
 
 setValue('#source', SOURCES[0][0]);
