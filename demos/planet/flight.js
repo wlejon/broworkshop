@@ -219,8 +219,12 @@ function step() {
 }
 const rows = ['frame,t,height_m,ground_mps,climb_mps,wall_ms,render_gpu_ms,pending'];
 const log = [];
-// (The first view settled: the flight starts with the pad's scene in.)
+// (The first view settled: the flight starts with the pad's scene in. A
+// flight from a later frame first runs the world's clock to it, a second
+// at a time: the clouds drift with the wind, so a stretch of the flight
+// shows the skies the whole flight would.)
 show(frameAt(I0));
+for (let s = I0 / fps; s > 0; s -= 1) advanceTime(1000 * Math.min(s, 1));
 perf.settle({ maxFrames: 8000 });
 perf.gpuFrameMs();
 const t00 = perf.now();
