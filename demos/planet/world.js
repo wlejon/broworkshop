@@ -395,21 +395,22 @@ const stands = clamp01(affine(fbm(700, 3, 21), 2.4, 0.62));
 const thicket = clamp01(affine(fbm(120, 2, 22), 3.0, -0.2));
 // (Drawn as far as they are placed: the land is their canopy from the
 // node's range on, so a range past the rules' left a band with neither.)
+export const PLANT_RULES = {
+    ground: TREE, seed: SEED, range: 6000,
+    layers: [
+        { spacing: 6, jitter: 0.9, sink: 0.1, seed: 11, chance: { own: 'z', times: stands },
+          species: [{ species: CONIFER, weight: { own: 'w' } }, { species: BROADLEAF, weight: warmShare(0.45) },
+                    { species: OAK, weight: warmShare(0.25) }, { species: BIRCH, weight: warmShare(0.2) },
+                    { species: LIME, weight: warmShare(0.1) }],
+          scale: affine(fbm(400, 2, 23), 0.2, 0.95), scaleVariety: 0.25,
+          tint: affine(fbm(300, 2, 24), 1.4, 0), tintVariety: 0.4 },
+        { spacing: 3, jitter: 1.0, sink: 0.05, seed: 12, chance: { own: 'z', scale: 0.35, offset: 0.02, times: thicket },
+          species: [SHRUB], scaleVariety: 0.4, tintVariety: 1.0 },
+    ],
+};
 export const plants = scene.createPlants({
     module: treeModule(), species: TEMPERATE.map(treeSpecies), receivesShadow: true, range: 6000, land,
-    rules: {
-        ground: TREE, seed: SEED, range: 6000,
-        layers: [
-            { spacing: 6, jitter: 0.9, sink: 0.1, seed: 11, chance: { own: 'z', times: stands },
-              species: [{ species: CONIFER, weight: { own: 'w' } }, { species: BROADLEAF, weight: warmShare(0.45) },
-                        { species: OAK, weight: warmShare(0.25) }, { species: BIRCH, weight: warmShare(0.2) },
-                        { species: LIME, weight: warmShare(0.1) }],
-              scale: affine(fbm(400, 2, 23), 0.2, 0.95), scaleVariety: 0.25,
-              tint: affine(fbm(300, 2, 24), 1.4, 0), tintVariety: 0.4 },
-            { spacing: 3, jitter: 1.0, sink: 0.05, seed: 12, chance: { own: 'z', scale: 0.35, offset: 0.02, times: thicket },
-              species: [SHRUB], scaleVariety: 0.4, tintVariety: 1.0 },
-        ],
-    },
+    rules: PLANT_RULES,
 });
 plants.castsShadow = true;
 
