@@ -8,7 +8,7 @@
 // whether that holds when nothing waits, the work still pending a frame
 // and its GPU time.
 //
-// bro-headless --grant files --width 1280 --height 720 demos/planet demos/planet/flight.js -- [tag=x] [fast=1] [hmax=250000] [from=s] [to=s]
+// bro-headless --grant files --width 1280 --height 720 demos/planet demos/planet/flight.js -- [tag=x] [fast=1] [hmax=250000] [from=s] [to=s] [sub=12]
 //
 // Out: captures/planet_flight<_tag>.webm; captures/planet_flight<_tag>.csv
 // a row a frame: frame, time s, height m, ground speed m/s, climb m/s, wall
@@ -28,7 +28,7 @@ const opt = (key, d) => {
 const OUT = bro.resolvePath('/app/captures').replace(/\\/g, '/');
 const tag = opt('tag') ? `_${opt('tag')}` : '';
 const fps = 30, dt = 1 / fps;
-const fast = +opt('fast', 1), HMAX = +opt('hmax', 2.5e5);
+const fast = +opt('fast', 1), HMAX = +opt('hmax', 2.5e5), SUB = Math.max(1, Math.round(+opt('sub', 1)));
 
 const add = (a, b) => a.map((v, i) => v + b[i]);
 const sub = (a, b) => a.map((v, i) => v - b[i]);
@@ -86,8 +86,16 @@ const up = climb();
 // The flight: the climb, then the same climb backwards down to the landing.
 const N = 2 * (up.hs.length - 1) + 1;
 const S = 2 * up.ss[up.ss.length - 1];
-const flightAt = (i) => (i < up.hs.length ? { h: up.hs[i], s: up.ss[i] }
-                                          : { h: up.hs[N - 1 - i], s: S - up.ss[N - 1 - i] });
+const flightAt0 = (i) => (i < up.hs.length ? { h: up.hs[i], s: up.ss[i] }
+                                           : { h: up.hs[N - 1 - i], s: S - up.ss[N - 1 - i] });
+// (Between frames too, for the engine frames a video frame is made of.)
+const flightAt = (x) => {
+    const i = Math.floor(x), f = x - i;
+    const a = flightAt0(i);
+    if (f === 0) return a;
+    const b = flightAt0(Math.min(i + 1, N - 1));
+    return { h: a.h + f * (b.h - a.h), s: a.s + f * (b.s - a.s) };
+};
 console.log(`flight: ${N} frames (${(N / fps / 60).toFixed(1)} min) to ${(HMAX / 1000).toFixed(0)} km, ${(S / 1000).toFixed(0)} km downrange`);
 
 // The lift-off: the ground shot's spot and its way, on the body.
@@ -197,10 +205,19 @@ perf.gpuFrameMs();
 const t00 = perf.now();
 for (let i = I0; i <= I1; i++) {
     const t0 = perf.now();
+    // Each video frame `sub` engine frames, so the world's services get the
+    // frames a player at fps * sub would give them (12: 360 fps); the
+    // render's GPU time the worst of them.
+    let gpu = 0;
+    for (let k = 1; k < SUB; k++) {
+        show(frameAt(i - 1 + k / SUB));
+        advanceTime(1000 / fps / SUB);
+        gpu = Math.max(gpu, perf.gpuFrameMs());
+    }
     const v = frameAt(i);
     show(v);
-    advanceTime(1000 / fps);
-    const gpu = perf.gpuFrameMs();
+    advanceTime(1000 / fps / SUB);
+    gpu = Math.max(gpu, perf.gpuFrameMs());
     enc.addViewportFrame();
     const pending = perf.pendingWork();
     const wall = perf.now() - t0;
