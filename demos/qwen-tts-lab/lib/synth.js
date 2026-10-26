@@ -26,6 +26,7 @@ import { currentSampling } from "/app/lib/delivery.js";
 import { steerOpts } from "/app/lib/steer.js";
 import { emotionActive, emotionBasis, applyEmotion } from "/app/lib/emotion.js";
 import { mascFemActive, mascFemBasis, applyMascFem } from "/app/lib/mascfem.js";
+import { accentVector } from "/app/lib/accent.js";
 import { setClip, streamReset, streamPush, streamStop } from "/app/lib/audio.js";
 import { renderStages, renderStreamMeter } from "/app/lib/render.js";
 
@@ -103,6 +104,9 @@ function gatherOpts() {
   });
   const lb = steerOpts();
   if (lb) opts.logitBias = lb;
+  // the accent map's point replaces the language row (null = the selected language)
+  const lv = accentVector();
+  if (lv) opts.languageVector = lv;
   // CustomVoice: the emotion / masc-fem axes can't fold into a base x-vector (there
   // isn't one), so pass them as an additive prefill-slot steer that nudges the
   // preset speaker's codec-embedding row. Base already folds them into the x-vector.

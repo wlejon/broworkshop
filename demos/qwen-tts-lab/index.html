@@ -120,6 +120,32 @@
       <div id="axes-meta" class="meta"></div>
     </section>
 
+    <!-- ACCENT — the language rows as a map of accents. With English text another
+         language's row is that language's accent; drag between them, click one to
+         snap to it, push past it with amount. Every variant has the row, so this
+         shows for all three (hidden when the runtime has no languageEmbedding). -->
+    <section id="accent" style="display:none">
+      <div class="drow">
+        <span class="vlabel">accent</span>
+        <label class="cfg amount" title="Scale the offset from English: 1 = the point as placed, more pushes the accent further">amount
+          <input id="accent-amount" type="range" min="0" max="2" step="0.05" value="1">
+          <span id="accent-amount-val" class="meta">1.00×</span>
+        </label>
+        <button id="btn-accent-reset" class="iconbtn" title="Back to plain English">○ english</button>
+        <span id="accent-meta" class="meta"></span>
+      </div>
+      <div class="designer-body">
+        <canvas id="accent-map" class="voice-map" width="620" height="240"
+                title="Drag between languages · click one to snap to its accent"></canvas>
+        <div class="designer-side">
+          <details class="fine-tune">
+            <summary>fine-tune axes</summary>
+            <div id="accent-sliders" class="sliders" title="Every axis of the language rows — the map is axes 1–2"></div>
+          </details>
+        </div>
+      </div>
+    </section>
+
     <!-- DELIVERY — the sampling seam: how varied / how safe the take is -->
     <section id="delivery">
       <span class="vlabel">delivery</span>

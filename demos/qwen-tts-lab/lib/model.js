@@ -6,6 +6,7 @@ import { buildSpeakerPanel, buildInstructPanel } from "/app/lib/voice.js";
 import { loadVoiceBasis, buildDesigner } from "/app/lib/designer.js";
 import { loadEmotionBasis, buildEmotion } from "/app/lib/emotion.js";
 import { loadMascFemBasis, buildMascFem } from "/app/lib/mascfem.js";
+import { loadAccentBasis, buildAccent } from "/app/lib/accent.js";
 import { bargeIn, scheduleLive, setLastResult } from "/app/lib/synth.js";
 
 // owned shared state (read by voice / designer / synth / app)
@@ -106,6 +107,9 @@ export function adaptToVariant() {
     loadEmotionBasis(dir); buildEmotion();
     loadMascFemBasis(dir); buildMascFem();
   }
+  // the accent map: every variant has a language row, and the map is built from
+  // the model's own rows, so it shows for all three.
+  loadAccentBasis(); buildAccent();
 }
 
 // Fill a language <select> from the model (shared by all three panels).

@@ -67,7 +67,8 @@ select {
 .tag-glabel { min-width: 70px; color: #6b7585; font-size: 11px; text-transform: uppercase; letter-spacing: .4px; }
 .tagchip { background: #141a24; }
 /* ── voice designer: the 2-D voice map + (collapsed) fine-tune sliders ── */
-#designer { flex-direction: column; align-items: stretch; gap: 8px; }
+#designer, #accent { flex-direction: column; align-items: stretch; gap: 8px; }
+#accent .amount input[type=range] { width: 120px; }
 .designer-body { display: flex; gap: 16px; align-items: flex-start; margin-left: 74px; }
 .voice-map {
   border: 1px solid #1a2230; border-radius: 6px; background: #0b0e14;
