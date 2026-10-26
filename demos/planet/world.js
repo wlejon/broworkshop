@@ -35,25 +35,19 @@ float iceClimate(vec3 at, vec3 up, float line) {
     return line - (28.0 - 44.0 * sl * sl - 6.5 * max(landGrid(0, at).x, 0.0) / 1000.0);
 }
 // How wet the air is that feeds the snow at a point: the processes' (channel
-// 1's w) as its mean over the land some 600 km about it, a centre and two
-// turned rings of six at 250 and 550 km, each weighed by how much it is land.
-// (The ice line read the point's own: the air dries a few hundred km in from
-// a coast, so on a cold land the ice and the late snow lay as a rim tracing
-// every coast, a dry bare interior inside it; a mean with the sea's in it
-// kept the rim, wider.) Its land's mean, the same along a coast as inland.
-float snowWet(vec3 at, vec3 t1, vec3 t2, float here) {
-    // (The point's own only a little, for a small island whose rings are
-    // all sea: at a coast, where half the rings are sea, more of it kept
-    // the coast's wet air's rim.)
-    float s = 0.25 * here, n = 0.25;
-    for (int k = 0; k < 12; ++k) {
-        float a = 0.5236 * float(k);
-        vec3 x = at + (t1 * cos(a) + t2 * sin(a)) * ((k & 1) == 0 ? 2.5e5 : 5.5e5);
-        float l = smoothstep(-200.0, 0.0, landGrid(0, x).x);
-        s += l * landGrid(1, x).w;
-        n += l;
-    }
-    return s / n;
+// 1's w) as its mean over the land some 600 km about it, weighed by how much
+// it is land (terrain.js's snowAir, channel 2's x and y: the means of the
+// land's wetness and of the land). (The ice line read the point's own: the
+// air dries a few hundred km in from a coast, so on a cold land the ice and
+// the late snow lay as a rim tracing every coast, a dry bare interior inside
+// it; a mean with the sea's in it kept the rim, wider.) Its land's mean, the
+// same along a coast as inland.
+float snowWet(vec3 at, float here) {
+    // (The point's own only a little, as a twelfth of the reach's land, for
+    // a small island whose reach is all sea: at a coast, where half of it is
+    // sea, more of it kept the coast's wet air's rim.)
+    vec2 m = landGrid(2, at).xy;
+    return (0.25 * here + 12.0 * m.x) / (0.25 + 12.0 * m.y);
 }
 
 // The surface below reads its inputs through the engine's footprint-aware
@@ -298,7 +292,7 @@ LandSurface landSurface(LandPoint q) {
     float relief = h - ground;
     float valley = smoothstep(0.5, 3.5, g.x);
     vec3 t1 = T.east, t2 = -T.north;
-    float iceLine = mix(-22.0, -13.0, smoothstep(0.15, 0.65, snowWet(q.at, t1, t2, g.w)));
+    float iceLine = mix(-22.0, -13.0, smoothstep(0.15, 0.65, snowWet(q.at, g.w)));
     float m = iceLine - temp + 3.0 * valley - 4.0 * (1.0 - smoothstep(0.0, 500.0, ground)) * (1.0 - valley)
             - 6.0 * relief / 1000.0;
     // The edge as sharp as the view: the broad climate's change over two

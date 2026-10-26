@@ -78,6 +78,9 @@ const RELIEF = fbm(60000, 2, 0);
 const ROUTE = 640, ERODE = 1408;
 // (The air's iterations: a cell further inland each, some 6000 km.)
 const AIR = 512;
+// (The snow's air's iterations, snowAir: a 3 x 3 mean each, some 300 km of
+// spread at the global grid's 19.5 km cells.)
+const SNOW_AIR = 360;
 const DBGI = ARGV.find((s) => s.startsWith('rit='));
 const REGION_ROUTE = DBGI ? +DBGI.slice(4).split(',')[0] : 320, REGION_ERODE = DBGI ? +DBGI.slice(4).split(',')[1] : 384;
 // (The regions' lift: iterations of its spread, regionLift.)
@@ -88,7 +91,7 @@ const REGION_POOL = 192;
 export const PROCESSES = {
     resolution: 512, channels: 4, data: plates(SEED),
     passes: [{ fn: 'route', iterations: ROUTE }, { fn: 'erode', iterations: ERODE }, { fn: 'settle' },
-             { fn: 'air', iterations: AIR }, { fn: 'rain' }],
+             { fn: 'air', iterations: AIR }, { fn: 'rain' }, { fn: 'snowAir', iterations: SNOW_AIR }],
     // The regional grids under the eye: 512 cells a side, level 0's 64 m,
     // each level's four times the last's (to level 3's 4 km), the regions
     // within one of the eye's each way, channels 0 and 1 kept.
@@ -124,7 +127,8 @@ float logArea(float km2) { return log2(max(km2, 1e-3)) * 0.30103; }
 //            through the cell (itself included), z its outflow a unit of
 //            weight (the drainage it hands on, over the sum of its weights),
 //            w its steepest slope down (the weights' scale). Once settled,
-//            the air's (air, below).
+//            the air's (air, below); once rained, the snow's air's (snowAir:
+//            x the land's wetness, y its share, both a 600 km mean).
 // Channel 3: on the global grid x the continental field, y how near a
 //            range, z the tree's scale, w the water's level while the
 //            passes run, the drainage area (km²) once settled; on a region
@@ -453,6 +457,27 @@ void rain(inout vec4 v[PROC_CHANNELS]) {
     float wet = clamp((belts + wander) * (0.3 + 0.9 * q) + 0.45 * q * windward, 0.0, 1.0);
     v[1].w = wet;
     climate(v, d, v[0].x, v[1].y, wet);
+}
+
+// How wet the air is that feeds the snow, some 600 km about a cell (the
+// surface's ice line reads it): the land's wetness and how much it is land,
+// each a mean over that reach, x and y of channel 2 (the air's, done with),
+// their ratio the land's mean, the same along a coast as inland. (The air
+// dries a few hundred km in from a coast, so the ice line by a point's own
+// wetness lay as a rim tracing every coast, a dry bare interior inside it.)
+// A mean of the 3 x 3 cells each iteration, a Gaussian's spread after them;
+// made once here, where the surface had read 13 points of the grid at every
+// texel of every tile, three quarters of a tile's cost.
+void snowAir(inout vec4 v[PROC_CHANNELS]) {
+    if (procIteration() == 0) {
+        float l = smoothstep(-200.0, 0.0, v[0].x);
+        v[2] = vec4(l * v[1].w, l, 0.0, 0.0);
+        return;
+    }
+    vec2 s = vec2(0.0);
+    for (int j = -1; j <= 1; ++j)
+        for (int i = -1; i <= 1; ++i) s += procRead(2, ivec2(i, j)).xy;
+    v[2].xy = s / 9.0;
 }
 
 // --- the regions ----------------------------------------------------------------------
