@@ -1,7 +1,7 @@
 // The walk and fly controls (lib/kit/planetcam.js) driven by injected input
 // in headless bro, with numbers asserted and stills along each path.
 //
-//   bro-headless --width 1280 --height 720 demos/planet demos/planet/controls.js -- [out=<dir>]
+//   bro-headless --grant files --width 1280 --height 720 demos/planet demos/planet/controls.js -- [out=<dir>]
 //
 // walk  20 s from the ground shot toward the range, walking and running,
 //       turning with the mouse, a jump, and a re-anchor forced mid-walk:

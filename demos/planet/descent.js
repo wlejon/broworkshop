@@ -2,7 +2,7 @@
 // detail its view wants, to a WebM, and how long each frame's detail took
 // to come in.
 //
-//   bro-headless --width 1920 --height 1080 demos/planet demos/planet/descent.js -- \
+//   bro-headless --grant files --width 1920 --height 1080 demos/planet demos/planet/descent.js -- \
 //       [seconds=40] [k=0.08] [walk=1.4] [quality=good] [tag=<t>]
 //
 // The eye comes down from orbit's height (18000 km) to 1.8 m over the

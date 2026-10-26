@@ -8,7 +8,7 @@
 // whether that holds when nothing waits, the work still pending a frame
 // and its GPU time.
 //
-// bro-headless --width 1280 --height 720 demos/planet demos/planet/flight.js -- [tag=x] [fast=1] [hmax=250000] [from=s] [to=s]
+// bro-headless --grant files --width 1280 --height 720 demos/planet demos/planet/flight.js -- [tag=x] [fast=1] [hmax=250000] [from=s] [to=s]
 //
 // Out: captures/planet_flight<_tag>.webm; captures/planet_flight<_tag>.csv
 // a row a frame: frame, time s, height m, ground speed m/s, climb m/s, wall

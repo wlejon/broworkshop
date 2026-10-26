@@ -1,6 +1,6 @@
 // Captures of the planet world in headless bro (virtual clock, 30 fps).
 //
-//   bro-headless --width 1280 --height 720 demos/planet demos/planet/capture.js -- \
+//   bro-headless --grant files --width 1280 --height 720 demos/planet demos/planet/capture.js -- \
 //       still [shot[,shot...]]      captures/planet_<shot>.png
 //       [tag=<t>]                   ... named planet_<shot>_<t>.png instead
 //       [crop=x,y,w,h[;...]]        and those rects of it, _crop<i>.png
