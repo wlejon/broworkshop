@@ -84,7 +84,11 @@ LandSurface landSurface(LandPoint q) {
     // of the cells' staircase. (The sea's ground as its level: a coast's
     // ring on the sea floor stood every coast up as a crest, a band some
     // 10 degrees colder and bare rock tracing every coast all round.)
-    LandTerrain T = landTerrain(q, 90.0, 0.0), W = landTerrain(q, 600.0, 0.0);
+    LandTerrain T = landTerrain(q, 90.0, 0.0), W = T;
+    // (Where both read at 1.5 texels, the same heights: the wider's hollow
+    // is the narrower's, scaled to its scale; read again only where not.)
+    if (1.5 * q.footprint < 600.0) W = landTerrain(q, 600.0, 0.0);
+    else W.hollow *= (600.0 * 600.0) / (90.0 * 90.0);
     float crest = clamp(-W.hollow, -400.0, 400.0);
     float hollow = T.hollow;      // >0 concave (a hollow), <0 convex (a spur)
     float valleyC = W.hollow;     // the same, wider
