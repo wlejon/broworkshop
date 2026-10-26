@@ -3,5 +3,6 @@
     "title": "Laya Decision Triage",
     "width": 1400,
     "height": 840,
-    "lib": "../../lib"
+    "lib": "../../lib",
+    "permissions": ["files"]
 }

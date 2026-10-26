@@ -3,5 +3,6 @@
     "title": "Farm",
     "width": 1100,
     "height": 760,
-    "lib": "../../lib"
+    "lib": "../../lib",
+    "permissions": ["files"]
 }

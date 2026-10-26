@@ -2,5 +2,6 @@
     "app": ".",
     "title": "Hearthfolk",
     "width": 1280,
-    "height": 800
+    "height": 800,
+    "permissions": ["files"]
 }

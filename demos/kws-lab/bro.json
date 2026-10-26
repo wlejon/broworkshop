@@ -2,5 +2,6 @@
     "title": "KWS Lab",
     "width": 960,
     "height": 640,
-    "lib": "../../lib"
+    "lib": "../../lib",
+    "permissions": ["files", "mic"]
 }

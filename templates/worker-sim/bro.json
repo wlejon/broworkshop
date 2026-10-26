@@ -2,5 +2,6 @@
     "title": "Worker Sim",
     "width": 1280,
     "height": 760,
-    "lib": "../../lib"
+    "lib": "../../lib",
+    "permissions": []
 }

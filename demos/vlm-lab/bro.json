@@ -2,5 +2,6 @@
     "title": "VLM Lab",
     "width": 1280,
     "height": 840,
-    "lib": "../../lib"
+    "lib": "../../lib",
+    "permissions": ["files"]
 }

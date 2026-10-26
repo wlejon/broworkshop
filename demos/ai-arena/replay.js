@@ -1,7 +1,7 @@
 // replay.js — rewind snapshots, .bgar recording and playback.
 //
 // Recording writes one frame per rendered frame (bro.ai.game.createRecorder)
-// into <app>/replays/. Playback reads a finished file with
+// into replays/ under the app's data directory (bro.app.dataDir). Playback reads a finished file with
 // createReplayReader and walks it by each frame's recorded `elapsed`, so it
 // plays at the speed it was recorded whatever the frame rate. All state
 // lives on the match state (state.rec) so a new match starts clean.
@@ -43,10 +43,12 @@ export function rewind(state) {
     return target.t;
 }
 
-/** Open a new recording in <app>/replays/; returns its path. Throws on failure. */
+/** Open a new recording in <dataDir>/replays/; returns its path. Throws on failure. */
 export function startRecording(state) {
     const r = rec(state);
-    const path = bro.resolvePath("replays/arena-" + Date.now() + ".bgar");
+    const dir = String(bro.app.dataDir).replace(/\\/g, "/") + "/replays";
+    require("fs").mkdirSync(dir, { recursive: true });
+    const path = dir + "/arena-" + Date.now() + ".bgar";
     const recorder = bro.ai.game.createRecorder();
     if (!recorder.open(path, 1, Date.now(), SIM_DT)) throw new Error("recorder open failed: " + path);
     recorder.writeRoster(state.world);

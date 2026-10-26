@@ -2,5 +2,6 @@
     "title": "LM Playground",
     "width": 1000,
     "height": 680,
-    "lib": "../../lib"
+    "lib": "../../lib",
+    "permissions": ["files"]
 }

@@ -36,7 +36,10 @@
 # <os>-<arch>-<profile> is e.g. windows-x64-full or macos-arm64-app; the
 # profile is probed from the engine (bro.tensor => full, bro.net => app, else
 # minimal). Runs with CWD = repo root (the convention every test script's
-# relative paths assume). Exit 1 when anything failed. Works on bash 3.2.
+# relative paths assume). Every run passes `--grant declared`: the app gets
+# the capabilities its bro.json "permissions" declares, as if the user had
+# allowed each prompt; a `grant=cap[,cap]` tag adds ones only the test harness
+# needs (writing tests/out). Exit 1 when anything failed. Works on bash 3.2.
 
 set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -62,7 +65,7 @@ while [ $# -gt 0 ]; do
         --no-compare) NO_COMPARE=1 ;;
         --write-baseline) WRITE_BASELINE="$2"; shift ;;
         --regressions) ONLY_REG=1 ;;
-        -h|--help) sed -n '2,39p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,42p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         -*) echo "validate.sh: unknown option $1" >&2; exit 2 ;;
         *) GLOBS+=("${1%/}") ;;
     esac
@@ -170,6 +173,18 @@ timeout_for() {   # timeout_for <tags> <kind>
     for w in $1; do case "$w" in timeout=*) t="${w#timeout=}" ;; esac; done
     [ -n "${t:-}" ] && { echo "$t"; return; }
     if has_tag "$1" ml; then echo 900; elif [ "$2" = smoke ]; then echo 60; else echo 300; fi
+}
+# The run's --grant list. bro grants an app only what it is given: headless
+# asks no one, so a capability its bro.json declares but the run does not
+# grant is refused. `declared` grants the declared ones, as a user who allowed
+# each prompt would, so a test exercises the app as it runs and anything the
+# app did not declare stays refused, as it would for the user. A test that
+# itself writes outside the app (tests/out under the repo root) adds that
+# with a `grant=` tag instead of the app declaring it.
+grants_for() {   # grants_for <tags> -> declared[,cap...]
+    local g=declared w
+    for w in $1; do case "$w" in grant=*) g="$g,${w#grant=}" ;; esac; done
+    echo "$g"
 }
 
 # --- discovery --------------------------------------------------------------
@@ -292,10 +307,11 @@ for t in "${TARGETS[@]}"; do
     log="$OUT/logs/$kind-$(safe_name "$target").log"
     to="$(timeout_for "$tags" "$kind")"
     start=$(date +%s)
+    grant="$(grants_for "$tags")"
     if [ "$kind" = smoke ]; then
-        run_timeout KILL "$to" "$HEADLESS" "$app" -e "$(smoke_expr "$app")" > "$log" 2>&1
+        run_timeout KILL "$to" "$HEADLESS" --grant "$grant" "$app" -e "$(smoke_expr "$app")" > "$log" 2>&1
     else
-        run_timeout KILL "$to" "$HEADLESS" "$app" "$script" > "$log" 2>&1
+        run_timeout KILL "$to" "$HEADLESS" --grant "$grant" "$app" "$script" > "$log" 2>&1
     fi
     rc=$?
     secs=$(( $(date +%s) - start ))

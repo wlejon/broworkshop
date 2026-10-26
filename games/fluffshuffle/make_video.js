@@ -9,8 +9,9 @@
 //      seed, a real mouse drag) and capture the composited viewport (canvas +
 //      HUD) plus the audio output into one WebM.
 //
-// Run from the broworkshop root:
-//   ../bro/build/Release/bro-headless.exe --width 900 --height 800 \
+// Run from the broworkshop root (--grant files: it writes tests/out, outside
+// the app, which the game itself never does, so its bro.json declares nothing):
+//   ../bro/build/Release/bro-headless.exe --grant files --width 900 --height 800 \
 //       games/fluffshuffle games/fluffshuffle/make_video.js
 // Output: tests/out/fluffshuffle.webm (cache: tests/out/fluffshuffle-highlights.json)
 

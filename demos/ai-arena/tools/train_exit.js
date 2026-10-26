@@ -17,7 +17,10 @@
 // Episodes run through the same match machinery and registered agents as
 // the live arena, stepped headlessly (sim/match.js) instead of by the scene.
 //
-//   bro-headless demos/ai-arena demos/ai-arena/tools/train_exit.js
+//   bro-headless --grant files demos/ai-arena demos/ai-arena/tools/train_exit.js
+//
+// (--grant files: the checkpoints go into the app's own folder, which an app
+// writes only with `files`; the arena itself declares nothing.)
 //
 // Environment: TRAIN_ITERS (3), TRAIN_EPISODES (6), TRAIN_MAX_SECONDS (20),
 // TRAIN_STEPS (300), TRAIN_EVAL_EPISODES (4), TRAIN_OUT (checkpoint

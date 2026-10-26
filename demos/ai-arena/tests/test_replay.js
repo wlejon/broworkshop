@@ -16,7 +16,7 @@ test('record writes a replay with frames and events', () => {
     clickOn('#btn-record');
     check(lab.isRecording() && q('#btn-record').textContent === 'Stop rec', 'recording');
     path = lab.recordingPath();
-    check(/replays[\\/]arena-\d+\.bgar$/.test(path), 'recording into the app replays dir: ' + path);
+    check(/replays[\\/]arena-\d+\.bgar$/.test(path), 'recording into the app data dir\'s replays/: ' + path);
     simUntil(() => lab.state.elapsed > 6, 12000);
     check(/recording\s+\d+ frames/.test(text('#status')) || lab.isRecording(), 'status while recording');
     clickOn('#btn-record');

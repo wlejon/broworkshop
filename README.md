@@ -43,7 +43,10 @@ Kit references: `demos/kws-lab`, `demos/lm-playground`, `demos/spatial-hash`,
 ## Adding an app
 
 1. Copy a template.
-2. Set `bro.json` (`{ "title": "...", "width": ..., "height": ..., "lib": "../../lib" }`).
+2. Set `bro.json` (`{ "title": "...", "width": ..., "height": ..., "lib": "../../lib", "permissions": [] }`).
+   `permissions` lists the capabilities the app asks the user for (`files`, `net`, `spawn`, `mic`, ...;
+   see bro's [docs/apps.md](../bro/docs/apps.md#permissions)): without `files` it writes only its
+   `bro.app.dataDir` / `cacheDir` / `configDir`, the temp directory and files the user picked.
 3. Write `index.html` and your modules; put headless tests in `tests/test_*.js`.
 4. List it in `launcher/apps.json`; tag it `ml` in `tests/app-tags.txt` if it needs model weights.
 

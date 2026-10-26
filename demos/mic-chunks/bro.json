@@ -2,5 +2,6 @@
     "title": "Mic Chunks",
     "width": 960,
     "height": 600,
-    "lib": "../../lib"
+    "lib": "../../lib",
+    "permissions": ["mic"]
 }

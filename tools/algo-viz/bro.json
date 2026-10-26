@@ -3,5 +3,6 @@
     "title": "Algorithm Visualizer",
     "width": 1280,
     "height": 800,
-    "lib": "../../lib"
+    "lib": "../../lib",
+    "permissions": ["files"]
 }

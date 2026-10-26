@@ -3,5 +3,6 @@
     "title": "OmniVoice Lab",
     "width": 1720,
     "height": 1000,
-    "lib": "../../lib"
+    "lib": "../../lib",
+    "permissions": ["files"]
 }

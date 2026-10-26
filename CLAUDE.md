@@ -30,6 +30,32 @@ the keys in bro's `config_loader.cpp`, unknown keys are ignored). The engine
 mounts `/app` (the app folder) and `/lib` (this repo's `lib/`); scripts load
 as `<script type="module" src="/app/main.js">` and import `"/lib/kit/..."`.
 
+**Permissions.** An app reaches outside itself only through the capabilities
+its bro.json lists in `"permissions"` and the user allows (asked at first
+use; an undeclared one is refused without asking; an unknown name fails the
+launch). The full rules are `../bro/docs/apps.md` "Permissions"; what matters
+here:
+
+- `files`: without it an app writes only `bro.app.configDir` / `dataDir` /
+  `cacheDir`, the OS temp directory and paths the user picked in a dialog or
+  dropped, so **not its own folder**. Under the home directory it reads only
+  those, its own folder, `/lib` and the model directories. On Linux the
+  checkouts sit under the home (`~/projects`), so anything that looks up
+  weights in the sibling repos (`lib/kit/weights.js`: `findWeights`,
+  `modelRow`, `kokoro.js`, `imagegen.js`) needs `files`. Put scratch and
+  output in `bro.app.dataDir` / `cacheDir` or the temp directory rather than
+  the app folder.
+- `net`: remote `fetch` / XHR / WebSocket / `net` / `http`, model downloads.
+  A relative or `/app` fetch is a file read and needs nothing.
+- `spawn`: `child_process`, `bro.app.spawn` / `open`, `<terminal>`.
+- `mic`: `getUserMedia`, `bro.mic`, `bro.listen`, `bro.kws.listen`, loopback.
+- Native loaders that take a path (mesh, image, model, recorder, encoder,
+  `screenshot()`) are not gated yet; do not lean on that.
+
+Declare the narrowest set the code needs. A headless dev script that writes
+the app folder or `tests/out` runs with `--grant files` on its command line
+instead of the app declaring it.
+
 ## Building apps
 
 - **Tools, demos, labs, ai apps:** build on `lib/kit/`. Read
@@ -76,6 +102,10 @@ scripts/validate.sh --list               # what would run, with tags
 - Baselines are per platform and build profile:
   `tests/baseline-<os>-<arch>-<profile>.txt` (e.g. `macos-arm64-app`) when
   it exists, else `tests/baseline.txt` (Windows, full profile, `--ml`).
+- Every run passes `--grant declared` (the app's declared capabilities,
+  granted as if the user allowed them; headless asks no one, so anything
+  else is refused). A test that itself writes outside the app (`tests/out`)
+  gets a `grant=files` tag in `tests/app-tags.txt`.
 - Results are compared to the baseline: rows are marked `REGRESSED`
   (passed in the baseline) or `FIXED`. A failure that is already failing in
   the baseline is pre-existing. Exit status is 1 whenever anything fails;

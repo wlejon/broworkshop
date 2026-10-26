@@ -3,8 +3,11 @@
 // Run once (the PNGs are committed; this exists so the fixtures are
 // reproducible rather than mystery binaries):
 //
-//   ./build/Release/bro-headless.exe ../broworkshop/demos/platform-lab \
+//   ./build/Release/bro-headless.exe --grant files ../broworkshop/demos/platform-lab \
 //       ../broworkshop/demos/platform-lab/tools/make_frames.js
+//
+// (--grant files: it writes the app's own assets/, which an app writes only
+// with `files`; the lab itself declares nothing.)
 //
 // This is a pure-JS PNG encoder, and it is one deliberately: PNG's IDAT
 // payload is a zlib stream, which is exactly what CompressionStream('deflate')

@@ -2,5 +2,6 @@
     "title": "Inpainting Studio",
     "width": 1360,
     "height": 880,
-    "lib": "../../lib"
+    "lib": "../../lib",
+    "permissions": ["files"]
 }

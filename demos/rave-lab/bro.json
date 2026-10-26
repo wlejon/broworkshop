@@ -2,5 +2,6 @@
     "title": "RAVE Lab",
     "width": 1240,
     "height": 880,
-    "lib": "../../lib"
+    "lib": "../../lib",
+    "permissions": ["files"]
 }

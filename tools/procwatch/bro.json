@@ -3,5 +3,6 @@
     "title": "Proc Watch",
     "width": 1180,
     "height": 760,
-    "lib": "../../lib"
+    "lib": "../../lib",
+    "permissions": ["spawn"]
 }

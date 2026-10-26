@@ -3,5 +3,6 @@
     "title": "Sana Lab",
     "width": 1340,
     "height": 920,
-    "lib": "../../lib"
+    "lib": "../../lib",
+    "permissions": ["files"]
 }

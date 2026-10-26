@@ -3,5 +3,6 @@
     "title": "Voice Pipeline",
     "width": 900,
     "height": 700,
-    "lib": "../../lib"
+    "lib": "../../lib",
+    "permissions": ["files", "net", "mic"]
 }

@@ -13,7 +13,10 @@
 //
 // Run once, from the app directory:
 //   cd demos/render-lab
-//   ../../../bro/build/Release/bro-headless.exe . tools/gen_luts.js
+//   ../../../bro/build/Release/bro-headless.exe --grant files . tools/gen_luts.js
+//
+// (--grant files: it writes the app's own luts/, which an app writes only
+// with `files`; the lab itself declares nothing.)
 //
 // Output: luts/neutral.bmp, luts/warm.bmp, luts/cool.bmp, luts/noir.bmp
 

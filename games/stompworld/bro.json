@@ -3,5 +3,6 @@
     "title": "Stompworld",
     "width": 800,
     "height": 576,
-    "lib": "../../lib"
+    "lib": "../../lib",
+    "permissions": ["files"]
 }

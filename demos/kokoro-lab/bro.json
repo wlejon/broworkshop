@@ -3,5 +3,6 @@
     "title": "Kokoro Lab",
     "width": 1280,
     "height": 900,
-    "lib": "../../lib"
+    "lib": "../../lib",
+    "permissions": ["files"]
 }

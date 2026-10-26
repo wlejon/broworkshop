@@ -2,5 +2,6 @@
     "title": "Cluster Diarization Lab",
     "width": 1280,
     "height": 860,
-    "lib": "../../lib"
+    "lib": "../../lib",
+    "permissions": ["files", "mic"]
 }

@@ -17,6 +17,11 @@
 #              compiled out of this build profile (the app profile has no
 #              AI tower). Prefer an in-test check when only part of a script
 #              needs the feature, so the rest still runs.
+#   grant=CAPS capabilities (comma-separated) granted to the run beyond what
+#              the app's bro.json declares (every run gets --grant declared):
+#              for a test that itself reaches outside the app, e.g. writes
+#              tests/out under the repo root. Not a stand-in for declaring
+#              what the app needs at run time.
 
 # --- ML labs: every one loads weights --------------------------------------
 demos/cluster-diar-lab  ml
@@ -69,3 +74,12 @@ demos/forest                                timeout=240
 # --- needs a namespace that some build profiles compile out -------------------
 games/stompworld/tests/test_ai.js           needs=bro.ai.game.nn needs=bro.ai.game.grid needs=bro.ai.game.learn
 ai/birds/tests/test_process.js              needs=bro.vision
+
+# --- the test writes tests/out (outside the app), which the app never does ----
+tools/csg-sculptor/tests/test_main.js       grant=files
+tools/media-inspector/tests/test_main.js    grant=files
+tools/mesh-viewer/tests/test_main.js        grant=files
+tools/procwatch/tests/test_smoke.js         grant=files
+tools/synth/tests/test_synth_ui.js          grant=files
+# reads back the <a download> file bro saved in ~/Downloads
+demos/range-selection-lab/tests/test_tools.js grant=files
