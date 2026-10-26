@@ -49,12 +49,16 @@ here:
   A relative or `/app` fetch is a file read and needs nothing.
 - `spawn`: `child_process`, `bro.app.spawn` / `open`, `<terminal>`.
 - `mic`: `getUserMedia`, `bro.mic`, `bro.listen`, `bro.kws.listen`, loopback.
-- Native loaders that take a path (mesh, image, model, recorder, encoder,
-  `screenshot()`) are not gated yet; do not lean on that.
+- Native loaders and savers that take a path (mesh, image, model, recorder,
+  encoder) ask the same `files` rule as `fs`.
 
-Declare the narrowest set the code needs. A headless dev script that writes
-the app folder or `tests/out` runs with `--grant files` on its command line
-instead of the app declaring it.
+Declare the narrowest set the code needs. The headless driver's own
+functions (`screenshot()`, `writeFile()`, `controlCommand`) are the test
+harness, not the app, and write anywhere under bro-headless, so a test's
+`shot()` into `tests/out/shots` needs nothing. A test or dev script that
+writes the app folder or `tests/out` with `require('fs')` is the app's code
+as far as bro can tell: it runs with `--grant files` on its command line (a
+`grant=files` tag for validate.sh) instead of the app declaring it.
 
 ## Building apps
 
@@ -105,7 +109,8 @@ scripts/validate.sh --list               # what would run, with tags
 - Every run passes `--grant declared` (the app's declared capabilities,
   granted as if the user allowed them; headless asks no one, so anything
   else is refused). A test that itself writes outside the app (`tests/out`)
-  gets a `grant=files` tag in `tests/app-tags.txt`.
+  through `fs` gets a `grant=files` tag in `tests/app-tags.txt`; screenshots
+  need none (the harness's own writes).
 - Results are compared to the baseline: rows are marked `REGRESSED`
   (passed in the baseline) or `FIXED`. A failure that is already failing in
   the baseline is pre-existing. Exit status is 1 whenever anything fails;
