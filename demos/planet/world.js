@@ -1066,10 +1066,28 @@ float heapsShare(float z, float base, float tops, float cover) {
     return min(s0 * zr / 300.0, s0 * (1.0 - hr * hr));
 }
 
+// The heaps' share of the air at a point, over its footprint (the engine
+// reads it where they are finer than that): as heapsShare has it, and
+// some, however little, wherever a heap may stand (up from a little under
+// the bases to the towers' most, 1.4 times the tops' reach), so the
+// engine's bounds never pass one by.
+float cloudHeapsShare(CloudPoint q) {
+    if (q.cover.x < 0.01) return 0.0;
+    const float DECK = ${CLOUD_TOP - CLOUD_BOTTOM}.0;
+    float c, wHeap, zb, zt;
+    deckAt(cloudDrift(q.p), q.cover, q.footprint, c, wHeap, zb, zt);
+    if (wHeap <= 0.0) return 0.0;
+    float z = q.height * DECK;
+    float s = heapsShare(z, zb, zt, c) * wHeap;
+    bool may = z > zb - BASE_SPREAD && z < zb + 1.4 * (zt - zb) + 200.0;
+    return may ? max(s, 1e-3) : min(s, -1e-3);
+}
+
 // The base: where the footprint is finer than the clouds, a front's or a
-// deck's slab with its own relief (the heaps are the engine's, from
-// cloudHeap), rising from none to all over CLOUD_EDGE metres across its
-// surface; where it is wider, the share of the air the clouds fill there.
+// deck's slab with its own relief, rising from none to all over CLOUD_EDGE
+// metres across its surface; where it is wider, the share of the air the
+// slabs fill there. (The heaps are the engine's lattice's: cloudHeap,
+// cloudHeapsShare.)
 float cloudDensity(CloudPoint q) {
     if (q.cover.x < 0.01) return 0.0;
     const float DECK = ${CLOUD_TOP - CLOUD_BOTTOM}.0;
@@ -1085,7 +1103,7 @@ float cloudDensity(CloudPoint q) {
     // of kilometres (the share of it the slab covers, never a hard cut).
     float sw = mix(0.08, 0.3, wide);
     float slabFar = smoothstep(0.5 - sw, 0.5 + sw, c) * min(min((z - zb) / 500.0, (zt - z) / 600.0), 1.0);
-    float far = max(heapsShare(z, zb, zt, c) * wHeap, slabFar * (1.0 - wHeap));
+    float far = slabFar * (1.0 - wHeap);
     float fn = smoothstep(0.15 * HEAP_CELL, 0.6 * HEAP_CELL, q.footprint);
     if (fn >= 1.0) return far;
     // Near: the shapes. The slab's top heaves in lumps a few kilometres
