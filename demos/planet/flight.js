@@ -256,6 +256,9 @@ for (let i = I0; i <= I1; i++) {
         if (PASSES) {
             const p = perf.gpuPasses();
             console.log('  passes ' + Object.entries(p).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([n, ms]) => `${n} ${ms.toFixed(2)}`).join(', '));
+            const cs = scene.cullStats();
+            console.log(`  world budget ${cs.worldBudgetMs.toFixed(2)} ms, spent ${cs.worldSpentMs.toFixed(2)}, ${cs.worldJobs} jobs, ${cs.worldQueued} queued, land fills ${cs.landFills}; ` +
+                Object.entries(cs.worldKindMs || {}).map(([n, ms]) => `${n} ${ms.toFixed(3)}`).join(', '));
         }
     }
 }
