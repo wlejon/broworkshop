@@ -8,7 +8,7 @@
 // whether that holds when nothing waits, the work still pending a frame
 // and its GPU time.
 //
-// bro-headless --grant files --width 1280 --height 720 demos/planet demos/planet/flight.js -- [tag=x] [fast=1] [hmax=250000] [from=s] [to=s] [sub=12]
+// bro-headless --grant files --width 1280 --height 720 demos/planet demos/planet/flight.js -- [tag=x] [fast=1] [hmax=250000] [from=s] [to=s] [sub=12] [capture=0] [passes=1]
 //
 // Out: captures/planet_flight<_tag>.webm; captures/planet_flight<_tag>.csv
 // a row a frame: frame, time s, height m, ground speed m/s, climb m/s, wall
@@ -17,6 +17,8 @@
 // kind, and the GPU time.
 //
 // from=<s> to=<s>: only that part of the flight (its first view settled).
+// capture=0: no video, its GPU times a player's (see CAPTURE); passes=1:
+// the dearest passes on each second's line.
 import { setShot, holdView, still, land, scene, R } from "/app/world.js";
 
 const fs = require("fs");
@@ -29,6 +31,7 @@ const OUT = bro.resolvePath('/app/captures').replace(/\\/g, '/');
 const tag = opt('tag') ? `_${opt('tag')}` : '';
 const fps = 30, dt = 1 / fps;
 const fast = +opt('fast', 1), HMAX = +opt('hmax', 2.5e5), SUB = Math.max(1, Math.round(+opt('sub', 1)));
+const PASSES = opt('passes', '0') !== '0';
 
 const add = (a, b) => a.map((v, i) => v + b[i]);
 const sub = (a, b) => a.map((v, i) => v - b[i]);
@@ -90,6 +93,8 @@ const flightAt0 = (i) => (i < up.hs.length ? { h: up.hs[i], s: up.ss[i] }
                                            : { h: up.hs[N - 1 - i], s: S - up.ss[N - 1 - i] });
 // (Between frames too, for the engine frames a video frame is made of.)
 const flightAt = (x) => {
+    // (Within the flight: the first frame's engine frames before it are its own.)
+    x = Math.max(0, Math.min(x, N - 1));
     const i = Math.floor(x), f = x - i;
     const a = flightAt0(i);
     if (f === 0) return a;
@@ -195,7 +200,23 @@ function show(v) {
 
 const I0 = Math.max(0, Math.round(+opt('from', 0) * fps)), I1 = Math.min(N - 1, Math.round(+opt('to', N / fps) * fps));
 const W = window.innerWidth, H = window.innerHeight;
-const enc = new VideoEncoder({ path: `${OUT}/planet_flight${tag}.webm`, width: W, height: H, fps, quality: opt('quality', 'good') });
+// (capture=0: no video, every engine frame paced to the wall's clock as a
+// player's at fps * sub. Encoding a frame takes the CPU a few hundred ms
+// while the GPU waits, and the GPU drops to its idle clocks between frames
+// (P8, 210 MHz on the 4090), so a captured run's GPU times are its clocks'
+// as much as its work's, up to ten times a player's; only an uncaptured
+// run's are a player's.)
+const CAPTURE = opt('capture', '1') !== '0';
+const enc = CAPTURE ? new VideoEncoder({ path: `${OUT}/planet_flight${tag}.webm`, width: W, height: H, fps, quality: opt('quality', 'good') }) : null;
+const SLOT = 1000 / fps / SUB;
+let due = 0;
+function step() {
+    advanceTime(SLOT);
+    if (CAPTURE) return;
+    const now = perf.now();
+    due = Math.max(due + SLOT, now);
+    if (due > now) wallSleep(due - now);
+}
 const rows = ['frame,t,height_m,ground_mps,climb_mps,wall_ms,render_gpu_ms,pending'];
 const log = [];
 // (The first view settled: the flight starts with the pad's scene in.)
@@ -203,6 +224,7 @@ show(frameAt(I0));
 perf.settle({ maxFrames: 8000 });
 perf.gpuFrameMs();
 const t00 = perf.now();
+due = t00;
 for (let i = I0; i <= I1; i++) {
     const t0 = perf.now();
     // Each video frame `sub` engine frames, so the world's services get the
@@ -211,24 +233,32 @@ for (let i = I0; i <= I1; i++) {
     let gpu = 0;
     for (let k = 1; k < SUB; k++) {
         show(frameAt(i - 1 + k / SUB));
-        advanceTime(1000 / fps / SUB);
+        step();
         gpu = Math.max(gpu, perf.gpuFrameMs());
     }
     const v = frameAt(i);
     show(v);
-    advanceTime(1000 / fps / SUB);
+    step();
     gpu = Math.max(gpu, perf.gpuFrameMs());
-    enc.addViewportFrame();
+    if (CAPTURE) enc.addViewportFrame();
     const pending = perf.pendingWork();
     const wall = perf.now() - t0;
     // (Paced to the wall's clock: the scene's workers get a frame's time.)
-    if (wall < 1000 / fps) wallSleep(1000 / fps - wall);
+    if (CAPTURE && wall < 1000 / fps) wallSleep(1000 / fps - wall);
     rows.push([i, (i / fps).toFixed(3), v.h.toFixed(1), v.ground.toFixed(2), v.climb.toFixed(2), wall.toFixed(1), gpu.toFixed(2), `"${pending.join('; ')}"`].join(','));
     log.push({ i, h: v.h, gpu, pending, wall });
-    if (i % fps === 0) console.log(`flight ${i}/${N}: ${Math.round(v.h)} m, ${v.ground.toFixed(0)} m/s across, ${v.climb.toFixed(0)} m/s up, render ${gpu.toFixed(2)} ms GPU${pending.length ? `, pending ${pending.join('; ')}` : ''}, ${((perf.now() - t00) / 1000).toFixed(0)} s in`);
+    if (i % fps === 0) {
+        console.log(`flight ${i}/${N}: ${Math.round(v.h)} m, ${v.ground.toFixed(0)} m/s across, ${v.climb.toFixed(0)} m/s up, render ${gpu.toFixed(2)} ms GPU${pending.length ? `, pending ${pending.join('; ')}` : ''}, ${((perf.now() - t00) / 1000).toFixed(0)} s in`);
+        if (PASSES) {
+            const p = perf.gpuPasses();
+            console.log('  passes ' + Object.entries(p).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([n, ms]) => `${n} ${ms.toFixed(2)}`).join(', '));
+        }
+    }
 }
-enc.finish();
-screenshot(`${OUT}/planet_flight${tag}_end.png`);
+if (CAPTURE) {
+    enc.finish();
+    screenshot(`${OUT}/planet_flight${tag}_end.png`);
+}
 fs.writeFileSync(`${OUT}/planet_flight${tag}.csv`, rows.join('\n') + '\n');
 
 // By height band: how many frames were shown with work pending, by kind,
@@ -238,7 +268,8 @@ const fmt = (m) => (m >= 1000 ? `${(m / 1000).toFixed(m >= 1e5 ? 0 : 1)} km` : `
 // (A frame's wall time is what the scene's loaders had for it: more than
 // 1/fps here, with the encoding, says how much the run flatters a player.)
 const walls = log.map((x) => x.wall).sort((a, b) => a - b);
-console.log(`flight: ${log.length} frames in ${((perf.now() - t00) / 1000).toFixed(0)} s (a frame's wall median ${walls[walls.length >> 1].toFixed(0)} ms, ${(1000 / fps).toFixed(0)} ms in real time); captures/planet_flight${tag}.webm, .csv`);
+console.log(`flight: ${log.length} frames in ${((perf.now() - t00) / 1000).toFixed(0)} s (a frame's wall median ${walls[walls.length >> 1].toFixed(0)} ms, ${(1000 / fps).toFixed(0)} ms in real time); captures/planet_flight${tag}${CAPTURE ? '.webm, ' : '.'}csv` +
+    (CAPTURE ? ' (GPU times at the clocks capture leaves the GPU: capture=0 for a player\'s)' : ''));
 for (const [lo, hi] of BANDS) {
     const fs_ = log.filter((x) => x.h >= lo && x.h < hi);
     if (!fs_.length) continue;
