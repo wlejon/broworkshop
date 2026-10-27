@@ -52,7 +52,7 @@ const OUT = bro.resolvePath('/app/captures').replace(/\\/g, '/');
 const tag = opt('tag') ? `_${opt('tag')}` : '';
 const fps = 30, dt = 1 / fps;
 const DUR = +opt('dur', 0);
-const fast = +opt('fast', 1), HMAX = +opt('hmax', DUR > 0 ? 2e7 : 2.5e5), SUB = Math.max(1, Math.round(+opt('sub', 1)));
+const fast = +opt('fast', 1), HMAX = +opt('hmax', DUR > 0 ? 2e7 : 2.5e5), SUB = Math.max(1, Math.round(+opt('sub', 12)));
 const PASSES = opt('passes', '0') !== '0';
 // (The run's wall time by stage, on the log: what a flight costs before its
 // first frame.)
