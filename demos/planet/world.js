@@ -956,8 +956,10 @@ const float HEAP_CELL = ${HEAP_CELL}.0;
 const float HEAP_SHELL = 0.35;   // (twice it) the share of cells that may hold a heap, as many as the old 3D lattice's shell held
 const float BASE_SHARP = 3.0;
 const float BASE_SPREAD = 80.0;  // how much the heaps' bases differ (m), about the field's
-const float HEAP_SMALL = 0.4, HEAP_BIG = 1.3, HEAP_SKEW = 1.3;   // a heap's size (of the cover's), u^HEAP_SKEW between
-const float HEAP_SIZE2 = 0.70;   // the mean of its square
+// (Many small and a few large, as a field's sizes run: from afar the small
+// ones a faint grain between the large, not one size of white dots.)
+const float HEAP_SMALL = 0.25, HEAP_BIG = 1.4, HEAP_SKEW = 2.5;   // a heap's size (of the cover's), u^HEAP_SKEW between
+const float HEAP_SIZE2 = 0.42;   // the mean of its square, as drawn (the largest cut to the cell's reach)
 const float HEAP_CLUMP_MOST = 1.7;   // how much more of the heaps a clump holds at most
 const float HEAP_SEEN = 0.25;   // the share of its outline's ellipse a heap covers as drawn (its rim the billows', its towers within)
 const float BROKEN_TILE = 16000.0;   // the slabs' rafts: the billow noise's tile (m)
