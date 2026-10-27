@@ -1,4 +1,5 @@
-// The flight: the eye lifts off at the ground shot's spot, climbs out of the
+// The flight: the eye lifts off at the ground shot's spot (the most open one
+// within 180 m of it: lift=0 the shot's own), climbs out of the
 // air to `hmax=` (250 km) and comes down again to land downrange, a ship's
 // path seen from its cockpit (no ship is drawn), flown as a player would
 // see it: a frame every 1/30 s of the flight's clock, paced
@@ -118,10 +119,10 @@ function climbTimed() {
         ss.push(s);
     }
     // land=<km>: the landing that far downrange, the way beyond the climb's
-    // own covered high up (over some 100 km, all of it over 1000 km), so
-    // the ground near either end is flown as before.
+    // own (or short of it) covered high up (over some 100 km, all of it over
+    // 1000 km), so the ground near either end is flown as before.
     const LAND = landAt() * 1000;
-    if (LAND > 2 * s) {
+    if (LAND > 0) {
         const w = hs.map((h) => smooth((Math.log(Math.max(h, 1)) - Math.log(1e5)) / (Math.log(1e6) - Math.log(1e5))));
         const total = w.reduce((a, x) => a + x, 0) - w[0];
         const extra = (LAND / 2 - s) / total;
@@ -216,18 +217,31 @@ if (opt('track', '') === 'auto') {
 // at eye level along the shot's way, the further the view goes the better.
 // Of the spots open overhead (a crown's leaves would fill the view the last
 // second down), the one that sees furthest; none open, the most open.
-if (opt('spot', '') === 'auto' && LAND_KM > 0) {
-    const th = LAND_KM * 1000 / R;
-    const E = add(mul(up0, Math.cos(th)), mul(way, Math.sin(th)));
-    const fe = unit(sub(shotWay, mul(E, dot(shotWay, E)))), fn = cross3(E, fe);
+// The lift-off the same (by default: lift=0 keeps the shot's spot), so the
+// climb goes up through open air, not through a crown leaning over the
+// shot; a flight that lands where it lifted off lands there too.
+// (`look`: the way the flight looks there, along the ground.)
+function openSpotNear(E, look) {
+    const fe = unit(sub(look, mul(E, dot(look, E)))), fn = cross3(E, fe);
     scene.setInspect(true);
-    const probe = (d, eyeH, look, upB) => {
+    const probe = (d, eyeH, look, upB, key) => {
         const eyeB = mul(d, R + groundAt(d) + eyeH);
         show({ eye: scene.toPlace(eyeB), look: scene.toPlace(add(eyeB, mul(look, 100))), near: 0.1, far: 4e5,
                up: sub(scene.toPlace(add(eyeB, upB)), scene.toPlace(eyeB)) });
-        for (let k = 0; k < 20; k++) advanceTime(16);
+        // (Until the ground and the plants about it are in: 20 frames after
+        // the eye moved, the wood was not there yet, every spot open; a few
+        // stragglers of the plants' placements are not the wood.)
+        for (let k = 0; k < 1200; k++) {
+            advanceTime(16);
+            if (k < 20) continue;
+            const left = perf.pendingWork().filter((p) => {
+                const m = /^plants: (\d+) placements/.exec(p);
+                return m ? +m[1] >= 50 : /^(land|plants|world service)/.test(p);
+            });
+            if (!left.length) break;
+        }
         const ins = scene.inspectFrame({});
-        return ins ? +ins.medianDist : 0;
+        return ins ? +ins[key] : 0;
     };
     let best = null;
     for (let y = -180; y <= 180; y += 60) {
@@ -235,20 +249,59 @@ if (opt('spot', '') === 'auto' && LAND_KM > 0) {
             const d = unit(add(E, mul(add(mul(fe, x), mul(fn, y)), 1 / R)));
             if (aboveSea(d) < 1) continue;
             const f = unit(sub(fe, mul(d, dot(fe, d))));
-            const down = probe(d, 40, mul(d, -1), f);
-            const p = -Math.PI / 180;   // (pitch(1.8)'s: a degree up)
-            const ahead = probe(d, 1.8, add(mul(f, Math.cos(p)), mul(d, -Math.sin(p))), d);
+            // (Straight down from 40 m, the tenth nearest: a crown in a tenth
+            // of the view is one the climb goes up beside.)
+            const down = probe(d, 40, mul(d, -1), f, 'nearDist');
+            // (Ahead: how near a tenth of the view is, a trunk or a bush's
+            // leaves before the eye, the view tilted 20 degrees up so the
+            // ground at its foot is not that tenth. The median let a trunk a
+            // few metres off fill a third of the landing's last view.)
+            const p = -20 * Math.PI / 180;
+            const fu = add(mul(f, Math.cos(p)), mul(d, -Math.sin(p)));
+            const near = probe(d, 1.8, fu, sub(d, mul(fu, dot(d, fu))), 'nearDist');
+            const ahead = near > 0 ? Math.min(near, 1e3) : 1e3;
             const open = Math.min(down / 38, 1);
             const score = open >= 1 ? 1e6 + ahead : open;
             if (!best || score > best.score) best = { d, x, y, down, ahead, score };
         }
     }
     scene.setInspect(false);
+    return best;
+}
+// (A dur= flight's landing, wherever its climb's way takes it, the same by
+// default: spot=0 lands where the way ends.)
+if (DUR > 0 && LAND_KM === 0 && !LAND_SHOT && opt('spot', 'auto') === 'auto') {
+    const own = climbTimed().ss;
+    LAND_KM = 2 * own[own.length - 1] / 1000;
+}
+// (The landing's spot found first and the lift-off's last: the probes
+// leave the plants placed about the last spot probed, and the first view's
+// settle does not wait for placements, so probed last the landing's were
+// the ones in and the lift-off's wood came in 0.6 s into the flight.)
+let landB = null;
+if (LAND_KM > 0) {
+    const th = LAND_KM * 1000 / R;
+    landB = add(mul(up0, Math.cos(th)), mul(way, Math.sin(th)));
+}
+if (opt('spot', DUR > 0 ? 'auto' : '') === 'auto' && landB) {
+    // (Its look the way on from the lift-off, as the descent comes in.)
+    const best = openSpotNear(landB, sub(mul(landB, dot(up0, landB)), up0));
     if (best) {
-        way = unit(sub(best.d, mul(up0, dot(best.d, up0))));
-        LAND_KM = Math.acos(Math.min(1, dot(up0, best.d))) * R / 1000;
+        landB = best.d;
         console.log(`flight: spot=auto: landing ${best.x} m along, ${best.y} m across the shot's way: ${best.down.toFixed(0)} m clear under 40 m, ${best.ahead.toFixed(0)} m seen ahead`);
     }
+}
+if (opt('lift', '1') !== '0' && !LAND_SHOT) {
+    const best = openSpotNear(up0, way);
+    if (best) {
+        up0 = best.d;
+        way = unit(sub(way, mul(up0, dot(way, up0))));
+        console.log(`flight: lift-off ${best.x} m along, ${best.y} m across the shot's way: ${best.down.toFixed(0)} m clear under 40 m, ${best.ahead.toFixed(0)} m seen ahead`);
+    }
+}
+if (landB) {
+    way = unit(sub(landB, mul(up0, dot(landB, up0))));
+    LAND_KM = Math.acos(Math.min(1, dot(up0, landB))) * R / 1000;
 }
 function landAt() { return LAND_KM; }
 const up = DUR > 0 ? climbTimed() : climb();
