@@ -992,9 +992,15 @@ void deckAt(vec3 p, vec4 cover, float footprint, out float c, out float wHeap, o
 // most small and a few large) and as tall as the tops reach (each its own;
 // towers only where the tops are high), shrinking to nothing as the cover
 // thins (none cut off); and a fragment beside it where the cover is fuller.
-float heapClump(vec3 up) {
+float heapClump(vec3 up, float footprint) {
     const float rb = R + ${CLOUD_BOTTOM}.0;
-    return clamp(1.0 + 2.2 * (cloudNoise(up * (rb / 14000.0), 1.0 / 64.0).x - 0.62), 0.25, HEAP_CLUMP_MOST);
+    // (Over the footprint, never finer than a 64th of its tile: read finer
+    // by a far view's share, its lumps were a salt-and-pepper grain. And a
+    // coarser noise of another channel over it, 41 km a tile: one noise's
+    // gaps, as even as its lattice, were a net of holes over a far field.)
+    float n = 0.6 * cloudNoise(up * (rb / 14000.0), max(footprint / 14000.0, 1.0 / 64.0)).x +
+              0.4 * cloudNoise(up * (rb / 41000.0), max(footprint / 41000.0, 1.0 / 64.0)).y;
+    return clamp(1.0 + 2.2 * (n - 0.62), 0.25, HEAP_CLUMP_MOST);
 }
 bool cloudHeap(CloudHeapCell cl, out CloudHeap h) {
     const float rb = R + ${CLOUD_BOTTOM}.0;
@@ -1007,7 +1013,7 @@ bool cloudHeap(CloudHeapCell cl, out CloudHeap h) {
     // groups with wide gaps of clear sky between, not a lattice's even
     // spread. (Its mean leaves the share as the cover says; HEAP_SHELL the
     // share of cells that may hold one, as the old lattice's shell kept.)
-    float clump = heapClump(cl.up);
+    float clump = heapClump(cl.up, 0.0);
     float grow = smoothstep(a.x, a.x + 0.15, present * clump * 2.0 * HEAP_SHELL) * wHeap;
     if (grow <= 0.0) return false;
     vec3 b = heapHash(vec3(cl.id) + 17.31), f = heapHash(vec3(cl.id) + 5.13);
@@ -1117,7 +1123,7 @@ float cloudHeapsShare(CloudPoint q) {
     deckAt(pd, q.cover, q.footprint, c, wHeap, zb, zt);
     if (wHeap <= 0.0) return 0.0;
     float z = q.height * DECK;
-    float s = heapsShare(z, zb, zt, c, heapClump(normalize(pd))) * wHeap;
+    float s = heapsShare(z, zb, zt, c, heapClump(normalize(pd), q.footprint)) * wHeap;
     bool may = z > zb - BASE_SPREAD && z < zb + 1.4 * (zt - zb) + 200.0;
     return may ? max(s, 1e-3) : min(s, -1e-3);
 }
