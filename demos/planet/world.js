@@ -444,7 +444,9 @@ function placeSun() {
 }
 placeSun();
 scene.addEventListener('reanchor', placeSun);
-scene.setAtmosphere(Object.assign({ enabled: true }, AIR, ARGV.find((s) => s.startsWith('turbidity=')) ? { turbidity: +ARGV.find((s) => s.startsWith('turbidity=')).slice(10) } : {}));
+// (noair: none, so a probe of the land's own look from far and near has no
+// air between: ladder.js's control.)
+scene.setAtmosphere(Object.assign({ enabled: !ARGV.includes('noair') }, AIR, ARGV.find((s) => s.startsWith('turbidity=')) ? { turbidity: +ARGV.find((s) => s.startsWith('turbidity=')).slice(10) } : {}));
 // (Metered on the sun's light: a planet of dark sea and forest stays dark
 // and its snow white, from orbit to the grass.)
 scene.setExposure({ mode: 'auto', meter: 'incident' });
