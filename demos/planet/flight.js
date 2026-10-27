@@ -37,7 +37,8 @@
 // is expected from the first frame (scene.expect); expect=0 leaves it to
 // the eye's own wants. gap=auto (a dur= flight's default; gap=0 none): the
 // flight waits at the pad until its climb and its descent cross the heaps'
-// heights in clear air, not through a heap's grey inside.
+// heights in clear air, not through a heap's grey inside; gap=<s> waits
+// that long (a gap=auto flight's wait, its log says, for a part of it).
 import { setShot, holdView, still, land, scene, R, WIND } from "/app/world.js";
 
 const fs = require("fs");
@@ -526,8 +527,12 @@ function heapGap() {
                 (best.least < GAP_BLANK ? `, at ${(best.at / fps).toFixed(1)} s: no clear wait within ${GAP_MOST} s)` : ')'));
     return best.off;
 }
-if (opt('gap', DUR > 0 ? 'auto' : '0') === 'auto')
-    for (let s = heapGap(); s > 0; s -= 1) advanceTime(1000 * Math.min(s, 1));
+{
+    // (gap=<s>: that wait, as a gap=auto flight found it, to see its clouds
+    // again in a part of it.)
+    const gap = opt('gap', DUR > 0 ? 'auto' : '0');
+    for (let s = gap === 'auto' ? heapGap() : +gap; s > 0; s -= 1) advanceTime(1000 * Math.min(s, 1));
+}
 perf.gpuFrameMs();
 if (+opt('map', 0) > 0) weatherMap(+opt('map', 0));
 if (INSPECT) scene.setInspect(true);
