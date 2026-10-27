@@ -9,7 +9,10 @@
 // whether that holds when nothing waits, the work still pending a frame
 // and its GPU time.
 //
-// bro-headless --grant files --width 1280 --height 720 demos/planet demos/planet/flight.js -- [tag=x] [fast=1] [hmax=250000] [from=s] [to=s] [sub=12] [capture=0] [passes=1]
+// dur=<s> flies it in that many seconds instead, whatever the bands allow,
+// out to hmax= 20,000 km by default (the whole planet in view) and back.
+//
+// bro-headless --grant files --width 1280 --height 720 demos/planet demos/planet/flight.js -- [tag=x] [dur=30] [fast=1] [hmax=250000] [from=s] [to=s] [sub=12] [capture=0] [passes=1]
 //
 // Out: captures/planet_flight<_tag>.webm; captures/planet_flight<_tag>.csv
 // a row a frame: frame, time s, height m, ground speed m/s, climb m/s, wall
@@ -31,7 +34,8 @@ const opt = (key, d) => {
 const OUT = bro.resolvePath('/app/captures').replace(/\\/g, '/');
 const tag = opt('tag') ? `_${opt('tag')}` : '';
 const fps = 30, dt = 1 / fps;
-const fast = +opt('fast', 1), HMAX = +opt('hmax', 2.5e5), SUB = Math.max(1, Math.round(+opt('sub', 1)));
+const DUR = +opt('dur', 0);
+const fast = +opt('fast', 1), HMAX = +opt('hmax', DUR > 0 ? 2e7 : 2.5e5), SUB = Math.max(1, Math.round(+opt('sub', 1)));
 const PASSES = opt('passes', '0') !== '0';
 
 const add = (a, b) => a.map((v, i) => v + b[i]);
@@ -85,7 +89,25 @@ function climb() {
     }
     return { hs, ss };
 }
-const up = climb();
+// dur=<s>: the climb takes half of it whatever the bands allow, its eye's
+// height (over 1.8 m) rising by the same ratio each moment, eased at the
+// ground and at the top; forward at 0.3 of its height a second (none under
+// 150 m, all by 600 m, at most 20 km/s).
+function climbTimed() {
+    const n = Math.max(2, Math.round(DUR / 2 * fps));
+    const hs = [0], ss = [0];
+    const l0 = Math.log(1.8), l1 = Math.log(HMAX + 1.8);
+    let s = 0;
+    for (let i = 1; i <= n; i++) {
+        const u = i / n, e = u * u * u * (u * (6 * u - 15) + 10);
+        const h = Math.exp(l0 + (l1 - l0) * e) - 1.8;
+        s += Math.min(0.3 * h, 2e4) * smooth((h - 150) / 450) * dt;
+        hs.push(h);
+        ss.push(s);
+    }
+    return { hs, ss };
+}
+const up = DUR > 0 ? climbTimed() : climb();
 // The flight: the climb, then the same climb backwards down to the landing.
 const N = 2 * (up.hs.length - 1) + 1;
 const S = 2 * up.ss[up.ss.length - 1];
@@ -176,6 +198,9 @@ function step() {
     if (due > now) wallSleep(due - now);
 }
 const rows = ['frame,t,height_m,ground_mps,climb_mps,wall_ms,render_gpu_ms,pending'];
+// A frame's wall time by part: the engine frame, reading its GPU time,
+// handing it to the encoder, asking what is pending.
+const parts = [];
 const log = [];
 // (The first view settled: the flight starts with the pad's scene in. A
 // flight from a later frame first runs the world's clock to it, a second
@@ -200,10 +225,16 @@ for (let i = I0; i <= I1; i++) {
     }
     const v = frameAt(i);
     show(v);
+    const ta = perf.now();
     step();
-    gpu = Math.max(gpu, perf.gpuFrameMs());
+    const tb = perf.now();
+    // (The capture draws the frame; its GPU time is then that render's.)
     if (CAPTURE) enc.addViewportFrame();
+    const tc = perf.now();
+    gpu = Math.max(gpu, perf.gpuFrameMs());
+    const td = perf.now();
     const pending = perf.pendingWork();
+    parts.push([tb - ta, td - tc, tc - tb, perf.now() - td]);
     const wall = perf.now() - t0;
     // (Paced to the wall's clock: the scene's workers get a frame's time.)
     if (CAPTURE && wall < 1000 / fps) wallSleep(1000 / fps - wall);
@@ -235,6 +266,12 @@ const fmt = (m) => (m >= 1000 ? `${(m / 1000).toFixed(m >= 1e5 ? 0 : 1)} km` : `
 const walls = log.map((x) => x.wall).sort((a, b) => a - b);
 console.log(`flight: ${log.length} frames in ${((perf.now() - t00) / 1000).toFixed(0)} s (a frame's wall median ${walls[walls.length >> 1].toFixed(0)} ms, ${(1000 / fps).toFixed(0)} ms in real time); captures/planet_flight${tag}${CAPTURE ? '.webm, ' : '.'}csv` +
     (CAPTURE ? ' (GPU times at the clocks capture leaves the GPU: capture=0 for a player\'s)' : ''));
+{
+    const med = (k) => { const a = parts.map((p) => p[k]).sort((x, y) => x - y); return a[a.length >> 1].toFixed(1); };
+    const mean = (k) => (parts.reduce((s, p) => s + p[k], 0) / parts.length).toFixed(1);
+    console.log(`  a frame's wall by part, median / mean ms: engine frame ${med(0)} / ${mean(0)}, GPU time read ${med(1)} / ${mean(1)}, ` +
+        `to the encoder ${med(2)} / ${mean(2)}, pending asked ${med(3)} / ${mean(3)}`);
+}
 for (const [lo, hi] of BANDS) {
     const fs_ = log.filter((x) => x.h >= lo && x.h < hi);
     if (!fs_.length) continue;
