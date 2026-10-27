@@ -1008,7 +1008,11 @@ bool cloudHeap(CloudHeapCell cl, out CloudHeap h) {
     // the large taller than wide where the tops reach (mediocris).
     float sz = mix(HEAP_SMALL, HEAP_BIG, pow(a.y, HEAP_SKEW));
     float szn = clamp(sz / HEAP_BIG, 0.0, 1.0);
-    float r = HEAP_CELL * mix(0.42, 0.55, cover) * sz;
+    // (By the cell's own width: the engine's cells are equal-angle, down to
+    // 0.71 of HEAP_CELL near a face's edge, and nothing of a heap may lie
+    // more than that from its middle.)
+    const float cell = cl.side;
+    float r = cell * mix(0.42, 0.55, cover) * sz;
     // (No wider than twice its height and a little: a low heap a small
     // dome, never a pancake whose rim thins to a sliver.)
     float hgt = min((tops - base) * mix(0.5, 1.0, a.z) * mix(0.45, 1.0, szn), r * mix(0.8, 2.6, tall) * mix(0.6, 1.0, szn));
@@ -1018,10 +1022,10 @@ bool cloudHeap(CloudHeapCell cl, out CloudHeap h) {
     // field is no lattice of evenly spaced domes: a heap off its middle is
     // the smaller for it), and nothing of it more than a cell from there
     // (the engine searches the cells about a point that far).
-    vec2 foot = (b.xy - 0.5) * 0.7 * HEAP_CELL;
+    vec2 foot = (b.xy - 0.5) * 0.7 * cell;
     // (Its towers reach 1.1 of its radius from its foot: half of it off,
     // 0.6 of it wide.)
-    float reach = HEAP_CELL - length(foot);
+    float reach = cell - length(foot);
     r = min(r, reach / 1.15);
     // Its base: the field's condensation level, a few tens of metres off
     // it, cut flat; the dome's middle under it, so its walls rise steep
@@ -1049,13 +1053,13 @@ bool cloudHeap(CloudHeapCell cl, out CloudHeap h) {
     h.lobe[3] = vec4(0.0);
     h.middle.w = 0.0;
     if (fg > 0.0) {
-        float rs = HEAP_CELL * mix(0.42, 0.55, cover) * mix(0.3, 0.6, f.z) * mix(1.0, 1.9, smoothstep(0.4, 0.9, cover)) * fg;
+        float rs = cell * mix(0.42, 0.55, cover) * mix(0.3, 0.6, f.z) * mix(1.0, 1.9, smoothstep(0.4, 0.9, cover)) * fg;
         float hs = min(rs * mix(0.6, 1.2, tall), (tops - base) * 0.6) * fg;
         float ang = 6.2832 * fract(13.7 * f.z + b.z);
         vec2 o = foot + vec2(cos(ang), sin(ang)) * (r + rs * mix(0.2, 1.4, fract(7.3 * f.y)));
         // (Kept within the cell's reach.)
         float lo = length(o);
-        if (lo + rs > HEAP_CELL) o *= max(HEAP_CELL - rs, 0.0) / lo;
+        if (lo + rs > cell) o *= max(cell - rs, 0.0) / lo;
         h.lobe[3] = vec4(o, rs, 1.4 * hs);
         h.middle.w = -0.4 * hs;
         h.base.w = base + BASE_SPREAD * (fract(5.1 * f.x) - 0.5);
