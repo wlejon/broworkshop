@@ -167,7 +167,11 @@ function frameAt(i) {
     const look = add(mul(f, Math.cos(p)), mul(r, -Math.sin(p)));
     const eye = scene.toPlace(eyeB);
     const at = scene.toPlace(add(eyeB, mul(look, 100)));
-    const upP = sub(scene.toPlace(add(eyeB, r)), scene.toPlace(eyeB));
+    // The view's own up, square to the look at every pitch: the body's up
+    // was the look's own line straight down at the top, and the view's roll
+    // there undefined, spinning the planet about the screen's middle.
+    const upB = add(mul(f, Math.sin(p)), mul(r, Math.cos(p)));
+    const upP = sub(scene.toPlace(add(eyeB, upB)), scene.toPlace(eyeB));
     const horizon = Math.sqrt(2 * R * a.h + a.h ** 2);
     return {
         h: a.h, ground: (b.s - z.s) * fps / 2, climb: (b.h - z.h) * fps / 2,
