@@ -994,7 +994,11 @@ void deckAt(vec3 p, vec4 cover, float footprint, out float c, out float wHeap, o
 // thins (none cut off); and a fragment beside it where the cover is fuller.
 float heapClump(vec3 up) {
     const float rb = R + ${CLOUD_BOTTOM}.0;
-    return clamp(1.0 + 2.2 * (cloudNoise(up * (rb / 14000.0), 1.0 / 64.0).x - 0.62), 0.25, HEAP_CLUMP_MOST);
+    // (And a coarser noise of another channel over it, 41 km a tile: one
+    // noise's cells, as even as its lattice, were a net of holes over the
+    // whole field from a few hundred kilometres up.)
+    float n = 0.6 * cloudNoise(up * (rb / 14000.0), 1.0 / 64.0).x + 0.4 * cloudNoise(up * (rb / 41000.0), 1.0 / 64.0).y;
+    return clamp(1.0 + 2.2 * (n - 0.6), 0.25, HEAP_CLUMP_MOST);
 }
 bool cloudHeap(CloudHeapCell cl, out CloudHeap h) {
     const float rb = R + ${CLOUD_BOTTOM}.0;
