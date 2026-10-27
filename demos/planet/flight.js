@@ -421,8 +421,10 @@ const AIR_T0 = scene.wind().time;
 // shows the skies the whole flight would.)
 show(frameAt(I0));
 for (let s = I0 / fps; s > 0; s -= 1) advanceTime(1000 * Math.min(s, 1));
-perf.settle({ maxFrames: 8000 });
-stage('the first view settled');
+{
+    const st = perf.settle({ maxFrames: 8000 });
+    stage(`the first view settled (${st.frames} frames; waited on ${JSON.stringify(st.waited)})`);
+}
 // (How far the air kept clear is from where the flight will find it: the
 // wind's drift over the clock the settle ran past I0's time.)
 console.log(`flight: the clear air ${(Math.hypot(...WIND) * (scene.wind().time - AIR_T0 - I0 / fps)).toFixed(0)} m off its path by the settle`);
