@@ -337,6 +337,11 @@ LandSurface landSurface(LandPoint q) {
     float patches = 0.8 * landShare(lie, length(vec2(0.5 * w, storms.spread)), 0.0) * (1.0 - smoothstep(0.35, 0.6, steep));
     c = mix(c, snow, patches * (1.0 - ice));
     c = mix(c, iceC, ice);
+#ifdef PROBE
+    // (Where the woods stand and why: red the woods' share, green the finest
+    // regional level's cover, blue the catchment, log10 km² over 6.)
+    c = vec3(woods, landGridCover(0, q.at), gx / 6.0) * 0.5;
+#endif
 #ifdef DRAINAGE
     // (The rivers' catchments: blue from 10 km² to a million.)
     c = mix(vec3(0.3, 0.28, 0.25), vec3(0.0, 0.05, 0.5), smoothstep(1.0, 6.0, g.x));
@@ -381,7 +386,7 @@ export const START = (() => {
 })();
 scene.setBody({ radius: R, at: START });
 
-export const land = scene.createLand({ height: TREE, seed: SEED, surface: (ARGV.includes('attrs') ? '#define ATTRS\n' : '') + (ARGV.includes('drainage') ? '#define DRAINAGE\n' : '') + (ARGV.includes('wetness') ? '#define WETNESS\n' : '') + (ARGV.includes('temperature') ? '#define TEMPERATURE\n' : '') + SURFACE, processes: PROCESSES, sea: { level: 0, absorb: [0.6, 0.18, 0.12] } });
+export const land = scene.createLand({ height: TREE, seed: SEED, surface: (ARGV.includes('attrs') ? '#define ATTRS\n' : '') + (ARGV.includes('probe') ? '#define PROBE\n' : '') + (ARGV.includes('drainage') ? '#define DRAINAGE\n' : '') + (ARGV.includes('wetness') ? '#define WETNESS\n' : '') + (ARGV.includes('temperature') ? '#define TEMPERATURE\n' : '') + SURFACE, processes: PROCESSES, sea: { level: 0, absorb: [0.6, 0.18, 0.12] } });
 
 // --- the plants -------------------------------------------------------------------------
 
