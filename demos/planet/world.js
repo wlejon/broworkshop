@@ -893,7 +893,18 @@ vec4 cloudCover(vec3 up) {
     }
     float fair = (1.0 - sea) * mix(0.35, 1.0, near) * smoothstep(0.25, 0.6, lw / max(ln, 1e-3)) *
                  smoothstep(0.3, 0.5, al) * (1.0 - smoothstep(0.95, 1.15, al));
-    float heaps = max(max(trades, coldAir), max(0.52 * fair * (0.7 + 0.8 * (f - 0.5)), 0.6 * rain));
+    // The heaps' fields organised at the mesoscale: in streets along the
+    // wind some 15 to 30 km apart (the noise averaged along the wind over
+    // some 200 km) and in patches some 50 to 150 km across, crowded in some
+    // and thin to clear in others, so a field seen from tens of kilometres
+    // up is lanes and clusters with clear ground between, never an even
+    // carpet to the horizon. (Its mean about 1: the field's share as before.)
+    float lanes = 0.0;
+    for (int k = -2; k <= 2; ++k)
+        lanes += cloudNoise((p + way * (5.0e4 * float(k))) / 1.2e5, 1.0 / 64.0).y * (k == 0 ? 0.28 : (abs(k) == 1 ? 0.22 : 0.14));
+    float patches = cloudNoise(vec3(p.z, p.x, p.y) / 3.5e5, 1.0 / 64.0).x;
+    float meso = clamp(smoothstep(0.3, 0.75, lanes) * 1.1 + 0.25, 0.0, 1.35) * mix(0.35, 1.5, smoothstep(0.35, 0.7, patches));
+    float heaps = max(max(trades, coldAir) * mix(0.6, 1.0, meso / 1.4), max(0.52 * fair * (0.7 + 0.8 * (f - 0.5)) * meso, 0.6 * rain));
     // The slabs: the fronts, the hearts, the broken weather, the decks and
     // the rain belt's anvils; the heaps in the sky they leave.
     float slabs = max(max(over, 0.9 * sc), rain * clusters * mix(0.6, 1.05, thick));
@@ -939,6 +950,9 @@ const float BASE_SPREAD = 80.0;  // how much the heaps' bases differ (m), about 
 const float HEAP_SMALL = 0.4, HEAP_BIG = 1.3, HEAP_SKEW = 1.3;   // a heap's size (of the cover's), u^HEAP_SKEW between
 const float HEAP_SIZE2 = 0.70;   // the mean of its square
 const float HEAP_CLUMP_MOST = 1.7;   // how much more of the heaps a clump holds at most
+const float BROKEN_TILE = 16000.0;   // the slabs' rafts: the billow noise's tile (m)
+const float BROKEN_RISE = 800.0;     // and metres of the slab's edge a unit of the noise
+const float BROKEN_LEAST = 600.0;    // the finest of the noise's detail the rafts are cut by (m)
 #define CLOUD_HEAPS
 // The deck about a body point (drifted), over a footprint: the cover as
 // the fields have it there (the decks' closed cells, the fields' clusters),
@@ -1000,12 +1014,15 @@ bool cloudHeap(CloudHeapCell cl, out CloudHeap h) {
     float hgt = min((tops - base) * mix(0.5, 1.0, a.z) * mix(0.45, 1.0, szn), r * mix(0.8, 2.6, tall) * mix(0.6, 1.0, szn));
     r = min(r, 2.0 * hgt + 120.0) * grow;
     hgt *= grow;
-    // Its foot within a fifth of a cell of the cell's middle, and nothing
-    // of it more than a cell from there (the engine searches the cells
-    // about a point that far).
-    vec2 foot = (b.xy - 0.5) * 0.4 * HEAP_CELL;
+    // Its foot anywhere within 0.35 of a cell of the cell's middle (so the
+    // field is no lattice of evenly spaced domes: a heap off its middle is
+    // the smaller for it), and nothing of it more than a cell from there
+    // (the engine searches the cells about a point that far).
+    vec2 foot = (b.xy - 0.5) * 0.7 * HEAP_CELL;
+    // (Its towers reach 1.1 of its radius from its foot: half of it off,
+    // 0.6 of it wide.)
     float reach = HEAP_CELL - length(foot);
-    r = min(r, reach / 1.05);
+    r = min(r, reach / 1.15);
     // Its base: the field's condensation level, a few tens of metres off
     // it, cut flat; the dome's middle under it, so its walls rise steep
     // from the base's rim and the whole heap stands over every point of
@@ -1094,14 +1111,30 @@ float cloudDensity(CloudPoint q) {
     vec3 p = cloudDrift(q.p);
     float c, wHeap, zb, zt;
     deckAt(p, q.cover, q.footprint, c, wHeap, zb, zt);
-    float wide = smoothstep(2000.0, 12000.0, q.footprint);
     float z = q.height * DECK;
-    // From afar: the share of the air the clouds fill (a slab cut nearly
+    // The slabs are broken where a system thins (a front's margins, a
+    // deck's edge): rafts of cloud some 2 to 5 km across where the engine's
+    // billow noise (x, BROKEN_TILE a tile) is over a threshold, set so that
+    // over the tile they cover the system's share exactly (\`share\`: the
+    // contrast from orbit, solid in a system's core and none at its fringe).
+    // Over any footprint the share of rafts is read from the noise's mean
+    // and spread there (its mip's x and w), so the deck seen from afar is
+    // the rafts' mean at every distance: one cloud field, never a near one
+    // that is clear where the far one is grey. (Logistic for the normal's
+    // CDF, both ways, so the tile's share is the system's to the bit.)
+    float share = smoothstep(0.2, 0.8, c);
+    vec3 pb = p / BROKEN_TILE;
+    vec4 n0 = cloudNoise(pb, 1.0);
+    float s0 = sqrt(max(n0.w - n0.x * n0.x, 1e-6));
+    float sc = clamp(share, 1e-3, 1.0 - 1e-3);
+    float t = n0.x - s0 * log(sc / (1.0 - sc)) / 1.702;
+    vec4 nf = cloudNoise(pb, q.footprint / BROKEN_TILE);
+    float sf = sqrt(max(nf.w - nf.x * nf.x, 0.0) + 1e-4);
+    float rafts = share <= 1e-3 ? 0.0 : (share >= 1.0 - 1e-3 ? 1.0 : 1.0 / (1.0 + exp(-1.702 * (nf.x - t) / sf)));
+    // From afar: the share of the air the rafts fill (a slab cut nearly
     // square, its top a little ragged on the mean), under 0 below and over
-    // them, by how far; its edge softening as the footprint widens to tens
-    // of kilometres (the share of it the slab covers, never a hard cut).
-    float sw = mix(0.08, 0.3, wide);
-    float slabFar = smoothstep(0.5 - sw, 0.5 + sw, c) * min(min((z - zb) / 500.0, (zt - z) / 600.0), 1.0);
+    // them, by how far.
+    float slabFar = rafts * min(min((z - zb) / 500.0, (zt - z) / 600.0), 1.0);
     float far = slabFar * (1.0 - wHeap);
     float fn = smoothstep(0.15 * HEAP_CELL, 0.6 * HEAP_CELL, q.footprint);
     if (fn >= 1.0) return far;
@@ -1109,12 +1142,18 @@ float cloudDensity(CloudPoint q) {
     // across and over a kilometre high (the engine's noise sixteen edges a
     // tile, 0.8 edges high: so the engine lights an overcast's top seen
     // from afar as it is shaped, clouds.frag's clTopShade), its base less;
-    // where the cover is broken it parts (the decks' cells, the fronts'
-    // edges).
+    // where the system is broken it parts into its rafts (the noise over
+    // the threshold, by BROKEN_RISE metres a unit of it: no faster than the
+    // contract's fifth across).
     vec4 relief = cloudNoise(p / (16.0 * CLOUD_EDGE), q.footprint / (16.0 * CLOUD_EDGE));
     float st = zt - 0.8 * CLOUD_EDGE * relief.x - 250.0 * relief.z;
     float sb = zb + 150.0 * relief.y;
-    float slab = min(min((z - sb) * BASE_SHARP, st - z), (c - 0.5) * 6000.0);
+    // (The rafts' shape without the noise's octaves finer than BROKEN_LEAST:
+    // the engine's billows and detail are a raft's finer shape, and the
+    // edge rises slowly enough for the march to step by.)
+    float nx = cloudNoise(pb, max(q.footprint, BROKEN_LEAST) / BROKEN_TILE).x;
+    float across = share >= 1.0 - 1e-3 ? 3000.0 : (share <= 1e-3 ? -3000.0 : (nx - t) * BROKEN_RISE);
+    float slab = min(min((z - sb) * BASE_SHARP, st - z), across);
     float sd = slab - 3000.0 * wHeap;
     // (Under 0 in the clear air, by how far the nearest cloud is, which the
     // engine's march steps by.)
