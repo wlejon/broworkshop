@@ -449,12 +449,16 @@ scene.addEventListener('reanchor', placeSun);
 scene.setAtmosphere(Object.assign({ enabled: !ARGV.includes('noair') }, AIR, ARGV.find((s) => s.startsWith('turbidity=')) ? { turbidity: +ARGV.find((s) => s.startsWith('turbidity=')).slice(10) } : {}));
 // (Metered on the sun's light: a planet of dark sea and forest stays dark
 // and its snow white, from orbit to the grass.)
-scene.setExposure({ mode: 'auto', meter: 'incident' });
+// (ev=<EV100>: fixed there instead, so a probe's frames are exposed alike
+// whatever came before: ladder.js's.)
+const FIXED_EV = ARGV.find((s) => s.startsWith('ev='));
+scene.setExposure(FIXED_EV ? { mode: 'fixed', ev: +FIXED_EV.slice(3) } : { mode: 'auto', meter: 'incident' });
 // Near the ground the view is exposed for the woods it stands in, as a
 // photographer would: about 1.2 stops over the sun's reading at the grass,
 // none from a few km up, where the land is seen whole.
 let exposedFor = 0;
 function exposeFor(pos) {
+    if (FIXED_EV) return;
     const h = Math.max(eyeHeight(pos), 1);
     const comp = 1.2 * Math.min(Math.max(1 - Math.log10(h / 20) / 2, 0), 1);
     if (Math.abs(comp - exposedFor) < 0.05) return;

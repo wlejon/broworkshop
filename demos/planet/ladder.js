@@ -11,7 +11,10 @@
 // look; the exposure then meters the frame, so read the stops, not the
 // sheet's brightness), noshadow, plantsrange=<m> (the land's canopy nearer),
 // rgb (each square's channels over the exposure on the log too). A few
-// heights and squares run in seconds.
+// heights and squares run in seconds. Give it ev=15 (the planet's metered
+// EV by day; world.js then fixes the exposure there): an adapting meter is
+// still moving when a rung is shot, and its reading lags, so a rung's light
+// depended on the rung before.
 //
 // Out: captures/ladder<_tag>.png, a contact sheet: a row a square, a
 // column a height, each square resampled into a tile at one exposure (the
@@ -35,6 +38,8 @@ const HEIGHTS = opt('h', '500,1000,2000,4000,8000,16000,32000,64000,128000,25600
 const SIZES = opt('sizes', '250,1000,4000,16000,64000').split(',').map(Number);
 const TILE = 128;
 const t0 = perf.now();
+if (!argv.some((s) => typeof s === 'string' && s.startsWith('ev=')))
+    console.log('ladder: no ev= given: the exposure adapts, and a rung\'s light depends on the rungs before it');
 
 // (noshadow: the sun casts none, the control for a shift that is the
 // shadows' reach.)
@@ -74,9 +79,13 @@ for (const h of HEIGHTS) {
     // (A few frames at the new view first: its wants are the newest
     // render's, the last view's until it is drawn.)
     for (let k = 0; k < 4; k++) advanceTime(16);
-    const st = perf.settle({ maxFrames: 3000, within: 1000 });
+    // (Settled as far as the squares it reads: the plants placed out to
+    // them, not only about the eye.)
+    const st = perf.settle({ maxFrames: 3000, within: Math.max(1000, 1.2 * h + 0.75 * SIZES[SIZES.length - 1]) });
     holdView(eye, look, Math.max(0.1, 0.01 * h), Math.max(4e5, 4 * Math.sqrt(2 * R * h) + 4e5), upP);
-    advanceTime(16);
+    // (hold=<frames> more: work the settle is not offered, which comes in
+    // over frames, the trees' among it.)
+    for (let k = +opt('hold', 30); k >= 0; k--) advanceTime(16);
     const im = scene.toImageData();
     const view = viewProjection(scene, im.width, im.height);
     const cs = scene.cullStats();
