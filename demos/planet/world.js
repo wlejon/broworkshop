@@ -415,8 +415,10 @@ export const PLANT_RULES = {
           species: [SHRUB], scaleVariety: 0.4, tintVariety: 1.0 },
     ],
 };
+// (plantsrange=<m>: drawn only so far, the land's canopy past it, so the same
+// land can be seen drawn both ways.)
 export const plants = scene.createPlants({
-    module: treeModule(), species: TEMPERATE.map(treeSpecies), receivesShadow: true, range: 6000, land,
+    module: treeModule(), species: TEMPERATE.map(treeSpecies), receivesShadow: true, range: +(ARGV.find((s) => s.startsWith('plantsrange=')) || 'plantsrange=6000').slice(12), land,
     rules: PLANT_RULES,
 });
 plants.castsShadow = true;
