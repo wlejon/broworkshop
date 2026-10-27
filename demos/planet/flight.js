@@ -1,6 +1,7 @@
-// The flight: a ship lifts off at the ground shot's spot, climbs out of the
-// air to `hmax=` (250 km) and comes down again to land downrange, flown as
-// a player would see it: a frame every 1/30 s of the flight's clock, paced
+// The flight: the eye lifts off at the ground shot's spot, climbs out of the
+// air to `hmax=` (250 km) and comes down again to land downrange, a ship's
+// path seen from its cockpit (no ship is drawn), flown as a player would
+// see it: a frame every 1/30 s of the flight's clock, paced
 // to the wall's, each shown as it is with whatever has come in (no frame
 // waits for the scene to load). Its speeds are the ones descent.js measured
 // the planet can be flown at with every frame's detail in, by height band
@@ -37,7 +38,6 @@ const add = (a, b) => a.map((v, i) => v + b[i]);
 const sub = (a, b) => a.map((v, i) => v - b[i]);
 const mul = (a, s) => a.map((v) => v * s);
 const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
 const unit = (a) => mul(a, 1 / Math.hypot(a[0], a[1], a[2]));
 const smooth = (e) => { e = Math.max(0, Math.min(1, e)); return e * e * (3 - 2 * e); };
 
@@ -66,7 +66,7 @@ function capAt(h) {
 }
 
 // A climb out of `HMAX`'s air from the ground, by frame: the height and the
-// ground covered. The ship rises straight up (none across under 150 m, all
+// ground covered. The eye rises straight up (none across under 150 m, all
 // of the band's by 600 m), as fast as the band allows, slowing near the
 // ground and near the top (0.4 of the height a second there, and no more
 // than ACCEL's change a second).
@@ -121,33 +121,8 @@ function groundAt(radial) {
     return Number.isFinite(g) ? Math.max(g, 0) : 0;
 }
 
-// The ship: a hull standing on its tail, wings, a fin, legs and the
-// engine's glow (its brightness the thrust), its nose its local +y.
-const ship = scene.createNode();
-const part = (o) => { const n = scene.createMesh(Object.assign({ castsShadow: true, receivesShadow: true }, o)); ship.addChild(n); return n; };
-const HULL = { color: [0.82, 0.83, 0.86], metallic: 0.7, roughness: 0.32 };
-part(Object.assign({ mesh: 'capsule', radius: 1.7, height: 13, position: [0, 6.5, 0] }, HULL));
-part(Object.assign({ mesh: 'box', halfW: 5.2, halfH: 1.6, halfD: 0.18, position: [0, 3.0, 0] }, HULL));
-part(Object.assign({ mesh: 'box', halfW: 0.18, halfH: 1.8, halfD: 2.6, position: [0, 2.6, -1.2] }, HULL, { color: [0.7, 0.18, 0.12] }));
-part({ mesh: 'box', halfW: 1.0, halfH: 0.9, halfD: 0.05, position: [0, 10.4, 1.62], color: [0.08, 0.1, 0.14], metallic: 0.2, roughness: 0.08 });
-for (let k = 0; k < 3; k++) {
-    const a = k * 2.0944;
-    part(Object.assign({ mesh: 'cylinder', radius: 0.14, height: 3.2, position: [2.0 * Math.cos(a), 0.9, 2.0 * Math.sin(a)], rotation: [0.35 * Math.sin(a), 0, -0.35 * Math.cos(a)] }, HULL));
-}
-const glow = part({ mesh: 'sphere', radius: 1.1, position: [0, -0.6, 0], color: [1.0, 0.55, 0.2], emissive: 0, emissiveColor: [1.0, 0.5, 0.15], castsShadow: false });
-
-// A rotation's quaternion from its frame's axes (columns x, y, z).
-function quat(x, y, z) {
-    const t = x[0] + y[1] + z[2];
-    if (t > 0) { const s = 0.5 / Math.sqrt(t + 1); return [(y[2] - z[1]) * s, (z[0] - x[2]) * s, (x[1] - y[0]) * s, 0.25 / s]; }
-    if (x[0] > y[1] && x[0] > z[2]) { const s = 2 * Math.sqrt(1 + x[0] - y[1] - z[2]); return [0.25 * s, (y[0] + x[1]) / s, (z[0] + x[2]) / s, (y[2] - z[1]) / s]; }
-    if (y[1] > z[2]) { const s = 2 * Math.sqrt(1 + y[1] - x[0] - z[2]); return [(y[0] + x[1]) / s, 0.25 * s, (z[1] + y[2]) / s, (z[0] - x[2]) / s]; }
-    const s = 2 * Math.sqrt(1 + z[2] - x[0] - y[1]);
-    return [(z[0] + x[2]) / s, (z[1] + y[2]) / s, 0.25 * s, (x[1] - y[0]) / s];
-}
-
 // The view's pitch below level by height, as descent.js's: level near the
-// ground, looking down more as the ship climbs.
+// ground, looking down more as the eye climbs.
 const PITCH = [[1.8e7, 90], [1.2e6, 62], [9e4, 21], [1500, 3], [1.8, -1]];
 function pitch(h) {
     const l = Math.log(Math.max(h, 1.8));
@@ -158,43 +133,26 @@ function pitch(h) {
     return PITCH[PITCH.length - 1][1] * Math.PI / 180;
 }
 
-// Frame i: the ship placed and turned along its way, the chase camera
-// behind it looking on down its way, held in the place frame as it is now.
+// Frame i: the eye on the path, looking on down its way, held in the place
+// frame as it is now.
 function frameAt(i) {
     const a = flightAt(i), b = flightAt(Math.min(i + 1, N - 1)), z = flightAt(Math.max(i - 1, 0));
     const th = a.s / R;
     const r = add(mul(up0, Math.cos(th)), mul(way, Math.sin(th)));
     const f = unit(sub(way, mul(r, dot(way, r))));
-    const ground = groundAt(r);
-    const posB = mul(r, R + ground + a.h + 0.9);
-    // Its nose along its velocity, upright when it hovers.
-    const vh = (b.s - z.s) * fps / 2, vv = (b.h - z.h) * fps / 2;
-    const tilt = Math.atan2(vh, Math.max(Math.abs(vv), 0.5 * vh + 1e-3));
-    const nose = unit(add(mul(r, Math.cos(tilt)), mul(f, Math.sin(tilt))));
-    const right = unit(cross(f, r));
-    const back = cross(right, nose);
-    // The chase camera: behind and over it, looking down its way.
-    const D = Math.min(45 + 0.004 * a.h, 600);
-    const p = pitch(a.h + 40);
+    const eyeB = mul(r, R + groundAt(r) + a.h + 1.8);
+    const p = pitch(a.h + 1.8);
     const look = add(mul(f, Math.cos(p)), mul(r, -Math.sin(p)));
-    const eyeB = add(sub(posB, mul(look, D)), mul(r, 0.18 * D));
-    const eyeH = Math.hypot(...eyeB) - R - groundAt(unit(eyeB));
-    const eyeLift = eyeH < 2 ? mul(r, 2 - eyeH) : [0, 0, 0];
-    const eye = scene.toPlace(add(eyeB, eyeLift));
-    const at = scene.toPlace(add(posB, mul(look, D)));
+    const eye = scene.toPlace(eyeB);
+    const at = scene.toPlace(add(eyeB, mul(look, 100)));
     const upP = sub(scene.toPlace(add(eyeB, r)), scene.toPlace(eyeB));
-    const P = (d) => unit(sub(scene.toPlace(add(posB, d)), scene.toPlace(posB)));
-    const horizon = Math.sqrt(2 * R * (a.h + D) + (a.h + D) ** 2);
+    const horizon = Math.sqrt(2 * R * a.h + a.h ** 2);
     return {
-        h: a.h, ground: (b.s - z.s) * fps / 2, climb: vv, thrust: Math.min(1, Math.abs(vv) / 50 + 0.25 * (a.h < HMAX * 0.99)),
-        pos: scene.toPlace(posB), q: quat(P(right), P(nose), P(back)),
-        eye, look: at, up: upP, near: Math.max(0.1, Math.min(1e4, D * 0.02)), far: Math.max(4e5, 4 * horizon + 4e5),
+        h: a.h, ground: (b.s - z.s) * fps / 2, climb: (b.h - z.h) * fps / 2,
+        eye, look: at, up: upP, near: Math.max(0.1, Math.min(1e4, 0.01 * a.h)), far: Math.max(4e5, 4 * horizon + 4e5),
     };
 }
 function show(v) {
-    ship.position = v.pos;
-    ship.quaternion = v.q;
-    glow.emissive = 6 * v.thrust;
     holdView(v.eye, v.look, v.near, v.far, v.up);
 }
 
