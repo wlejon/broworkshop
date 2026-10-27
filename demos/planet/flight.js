@@ -22,7 +22,12 @@
 //
 // from=<s> to=<s>: only that part of the flight (its first view settled).
 // capture=0: no video, its GPU times a player's (see CAPTURE); passes=1:
-// the dearest passes on each second's line.
+// the dearest passes on each second's line. inspect=change|normals|stats:
+// each frame compared with the one before on the world (scene.inspectFrame:
+// what rose, sank, appeared or vanished, surfaces whose shape or look
+// changed in place, the camera's turn and roll), its numbers on the rows,
+// the worst frames in the summary, and the change map or the normals as
+// captures/planet_flight<_tag>_<kind>.webm.
 import { setShot, holdView, still, land, scene, R } from "/app/world.js";
 
 const fs = require("fs");
@@ -192,6 +197,11 @@ const W = window.innerWidth, H = window.innerHeight;
 // run's are a player's.)
 const CAPTURE = opt('capture', '1') !== '0';
 const enc = CAPTURE ? new VideoEncoder({ path: `${OUT}/planet_flight${tag}.webm`, width: W, height: H, fps, quality: opt('quality', 'good') }) : null;
+// (inspect=: see the head.)
+const INSPECT = opt('inspect', '');
+const INSPECT_IMAGE = INSPECT === 'change' || INSPECT === 'normals' ? INSPECT : null;
+const encI = INSPECT_IMAGE ? new VideoEncoder({ path: `${OUT}/planet_flight${tag}_${INSPECT_IMAGE}.webm`, width: W, height: H, fps, quality: opt('quality', 'good') }) : null;
+const INSPECT_COLS = ['same', 'rose', 'sank', 'appeared', 'vanished', 'newView', 'normalMoved', 'lumaMoved', 'skyLuma', 'turnDeg', 'rollDeg', 'travel', 'medianDist'];
 const SLOT = 1000 / fps / SUB;
 let due = 0;
 function step() {
@@ -201,7 +211,7 @@ function step() {
     due = Math.max(due + SLOT, now);
     if (due > now) wallSleep(due - now);
 }
-const rows = ['frame,t,height_m,ground_mps,climb_mps,wall_ms,render_gpu_ms,pending'];
+const rows = ['frame,t,height_m,ground_mps,climb_mps,wall_ms,render_gpu_ms,pending' + (INSPECT ? ',' + INSPECT_COLS.join(',') : '')];
 // A frame's wall time by part: the engine frame, reading its GPU time,
 // handing it to the encoder, asking what is pending.
 const parts = [];
@@ -214,6 +224,7 @@ show(frameAt(I0));
 for (let s = I0 / fps; s > 0; s -= 1) advanceTime(1000 * Math.min(s, 1));
 perf.settle({ maxFrames: 8000 });
 perf.gpuFrameMs();
+if (INSPECT) scene.setInspect(true);
 const t00 = perf.now();
 due = t00;
 for (let i = I0; i <= I1; i++) {
@@ -239,11 +250,20 @@ for (let i = I0; i <= I1; i++) {
     const td = perf.now();
     const pending = perf.pendingWork();
     parts.push([tb - ta, td - tc, tc - tb, perf.now() - td]);
+    // (After the frame's own timing: the comparison is the CPU's, seconds of
+    // it at 1080p, and not the player's.)
+    const ins = INSPECT ? scene.inspectFrame({ image: INSPECT_IMAGE }) : null;
+    if (encI) {
+        if (ins && ins.image) encI.addFrameRGBA(ins.image);
+        else encI.addViewportFrame();
+    }
     const wall = perf.now() - t0;
     // (Paced to the wall's clock: the scene's workers get a frame's time.)
     if (CAPTURE && wall < 1000 / fps) wallSleep(1000 / fps - wall);
-    rows.push([i, (i / fps).toFixed(3), v.h.toFixed(1), v.ground.toFixed(2), v.climb.toFixed(2), wall.toFixed(1), gpu.toFixed(2), `"${pending.join('; ')}"`].join(','));
-    log.push({ i, h: v.h, gpu, pending, wall });
+    const row = [i, (i / fps).toFixed(3), v.h.toFixed(1), v.ground.toFixed(2), v.climb.toFixed(2), wall.toFixed(1), gpu.toFixed(2), `"${pending.join('; ')}"`];
+    if (INSPECT) for (const k of INSPECT_COLS) row.push(ins && ins.compared ? (+ins[k]).toPrecision(4) : '');
+    rows.push(row.join(','));
+    log.push({ i, h: v.h, gpu, pending, wall, ins: ins && ins.compared ? ins : null });
     if (i % fps === 0) {
         console.log(`flight ${i}/${N}: ${Math.round(v.h)} m, ${v.ground.toFixed(0)} m/s across, ${v.climb.toFixed(0)} m/s up, render ${gpu.toFixed(2)} ms GPU${pending.length ? `, pending ${pending.join('; ')}` : ''}, ${((perf.now() - t00) / 1000).toFixed(0)} s in`);
         if (PASSES) {
@@ -259,6 +279,7 @@ if (CAPTURE) {
     enc.finish();
     screenshot(`${OUT}/planet_flight${tag}_end.png`);
 }
+if (encI) encI.finish();
 fs.writeFileSync(`${OUT}/planet_flight${tag}.csv`, rows.join('\n') + '\n');
 
 // By height band: how many frames were shown with work pending, by kind,
@@ -275,6 +296,23 @@ console.log(`flight: ${log.length} frames in ${((perf.now() - t00) / 1000).toFix
     const mean = (k) => (parts.reduce((s, p) => s + p[k], 0) / parts.length).toFixed(1);
     console.log(`  a frame's wall by part, median / mean ms: engine frame ${med(0)} / ${mean(0)}, GPU time read ${med(1)} / ${mean(1)}, ` +
         `to the encoder ${med(2)} / ${mean(2)}, pending asked ${med(3)} / ${mean(3)}`);
+}
+if (INSPECT) {
+    // The frames where the most of the world changed between two frames
+    // that should not have: what moved (rose, sank, appeared, vanished),
+    // surfaces whose shape or look changed in place, and the camera's own
+    // turn and roll (a spin shows there, not in the world).
+    const pct = (f) => `${(100 * f).toFixed(1)}%`;
+    const worst = (key, label, n = 8) => {
+        const xs = log.filter((x) => x.ins).sort((a, b) => key(b.ins) - key(a.ins)).slice(0, n);
+        console.log(`  inspect, ${label}: ` + xs.map((x) => `${(x.i / fps).toFixed(2)} s (${fmt(x.h)}) ${pct(key(x.ins))}`).join(', '));
+    };
+    worst((s) => s.rose + s.sank + s.appeared + s.vanished, 'moved');
+    worst((s) => s.same * s.normalMoved, 'shape changed in place');
+    worst((s) => s.same * s.lumaMoved, 'look changed in place');
+    worst((s) => s.sky * s.skyLuma, 'sky luma change');
+    const turns = log.filter((x) => x.ins).sort((a, b) => Math.abs(b.ins.rollDeg) - Math.abs(a.ins.rollDeg)).slice(0, 5);
+    console.log('  inspect, roll: ' + turns.map((x) => `${(x.i / fps).toFixed(2)} s ${x.ins.rollDeg.toFixed(2)} deg (turn ${x.ins.turnDeg.toFixed(2)})`).join(', '));
 }
 for (const [lo, hi] of BANDS) {
     const fs_ = log.filter((x) => x.h >= lo && x.h < hi);
