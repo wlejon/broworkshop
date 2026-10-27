@@ -24,11 +24,15 @@
 // from=<s> to=<s>: only that part of the flight (its first view settled).
 // capture=0: no video, its GPU times a player's (see CAPTURE); passes=1:
 // the dearest passes on each second's line. inspect=change|normals|stats:
-// each frame compared with the one before on the world (scene.inspectFrame:
+// each frame kept as the flight goes (its depth, luma and camera, to
+// captures/planet_flight<_tag>.inspect) and compared with the one before
+// on the world once it is done (scene.recordInspect, inspectRecording:
 // what rose, sank, appeared or vanished, surfaces whose shape or look
 // changed in place, the camera's turn and roll), its numbers on the rows,
 // the worst frames in the summary, and the change map or the normals as
-// captures/planet_flight<_tag>_<kind>.webm. hold=1: the eye held at from='s
+// captures/planet_flight<_tag>_<kind>.webm (at the recording's size,
+// inspectscale= times smaller). The recording stays: scene.inspectRecording
+// asks it anything again without flying. hold=1: the eye held at from='s
 // view while the world's clock runs on to to=, the control for inspect=:
 // whatever changes then is the world's own (wind, flicker, loading).
 // track=auto: lift off under a weather system's margin and land at the
@@ -443,7 +447,12 @@ const enc = CAPTURE ? new VideoEncoder({ path: `${OUT}/planet_flight${tag}.webm`
 const HOLD = opt('hold', '0') !== '0';
 const INSPECT = opt('inspect', '');
 const INSPECT_IMAGE = INSPECT === 'change' || INSPECT === 'normals' ? INSPECT : null;
-const encI = INSPECT_IMAGE ? new VideoEncoder({ path: `${OUT}/planet_flight${tag}_${INSPECT_IMAGE}.webm`, width: W, height: H, fps, quality: opt('quality', 'good') }) : null;
+// (Inspection is recorded as the flight goes, each frame's depth, luma and
+// camera, and compared after it, so the flight runs at its own pace:
+// compared a frame at a time, a 1080p frame took 200 ms of the CPU.
+// inspectscale=<n>: the frames kept cut n times each way, 2 by default.)
+const INSPECT_REC = `${OUT}/planet_flight${tag}.inspect`;
+const INSPECT_SCALE = +opt('inspectscale', 2);
 const INSPECT_COLS = ['same', 'rose', 'sank', 'appeared', 'vanished', 'newView', 'normalMoved', 'lumaMoved', 'skyLuma', 'turnDeg', 'rollDeg', 'travel', 'medianDist', 'lumaSpread'];
 const SLOT = 1000 / fps / SUB;
 let due = 0;
@@ -535,7 +544,7 @@ function heapGap() {
 }
 perf.gpuFrameMs();
 if (+opt('map', 0) > 0) weatherMap(+opt('map', 0));
-if (INSPECT) scene.setInspect(true);
+if (INSPECT) scene.recordInspect(INSPECT_REC, { scale: INSPECT_SCALE });
 // The landing expected from the first frame (scene.expect): its ground made
 // while the eye is high and wants little, as a ship's autopilot knows where
 // it is going. expect=0: the eye's own wants alone.
@@ -567,20 +576,14 @@ for (let i = I0; i <= I1; i++) {
     const td = perf.now();
     const pending = perf.pendingWork();
     parts.push([tb - ta, td - tc, tc - tb, perf.now() - td]);
-    // (After the frame's own timing: the comparison is the CPU's, seconds of
-    // it at 1080p, and not the player's.)
-    const ins = INSPECT ? scene.inspectFrame({ image: INSPECT_IMAGE }) : null;
-    if (encI) {
-        if (ins && ins.image) encI.addFrameRGBA(ins.image);
-        else encI.addViewportFrame();
-    }
+    // (After the frame's own timing: kept for the comparison after the
+    // flight, a few ms.)
+    if (INSPECT) scene.keepInspect();
     const wall = perf.now() - t0;
     // (Paced to the wall's clock: the scene's workers get a frame's time.)
     if (CAPTURE && wall < 1000 / fps) wallSleep(1000 / fps - wall);
     const row = [i, (i / fps).toFixed(3), v.h.toFixed(1), v.ground.toFixed(2), v.climb.toFixed(2), wall.toFixed(1), gpu.toFixed(2), `"${pending.join('; ')}"`];
-    if (INSPECT) for (const k of INSPECT_COLS) row.push(ins && ins.compared ? (+ins[k]).toPrecision(4) : '');
-    rows.push(row.join(','));
-    log.push({ i, h: v.h, gpu, pending, wall, ins: ins && ins.compared ? ins : null });
+    log.push({ i, h: v.h, gpu, pending, wall, row, ins: null });
     if (landing && landingReady < 0 && landing.ready) {
         landingReady = i;
         console.log(`flight: the landing's regions all made by ${(i / fps).toFixed(1)} s, the eye ${Math.round(v.h)} m up`);
@@ -600,7 +603,31 @@ if (CAPTURE) {
     enc.finish();
     screenshot(`${OUT}/planet_flight${tag}_end.png`);
 }
-if (encI) encI.finish();
+if (INSPECT) {
+    // The recording compared, frame after frame, now the flight is done:
+    // its numbers onto the rows, its change map or normals a video.
+    const kept = scene.stopInspectRecording();
+    const t1 = perf.now();
+    const rec = scene.inspectRecording(INSPECT_REC);
+    rec.frames.forEach((s, k) => { if (k < log.length && s.compared) log[k].ins = s; });
+    console.log(`flight: ${kept} frames kept for inspection, compared in ${((perf.now() - t1) / 1000).toFixed(1)} s`);
+    if (INSPECT_IMAGE && rec.frames.length) {
+        const w0 = rec.frames[0].width, h0 = rec.frames[0].height;
+        const encI = new VideoEncoder({ path: `${OUT}/planet_flight${tag}_${INSPECT_IMAGE}.webm`, width: w0, height: h0, fps, quality: opt('quality', 'good') });
+        // (In batches: the pictures of a whole flight are gigabytes.)
+        for (let k = 0; k < rec.frames.length; k += 120) {
+            const frames = [];
+            for (let j = k; j < Math.min(k + 120, rec.frames.length); j++) frames.push(j);
+            for (const im of scene.inspectRecording(INSPECT_REC, { image: INSPECT_IMAGE, frames }).images)
+                if (im) encI.addFrameRGBA(im);
+        }
+        encI.finish();
+    }
+}
+for (const x of log) {
+    if (INSPECT) for (const k of INSPECT_COLS) x.row.push(x.ins ? (+x.ins[k]).toPrecision(4) : '');
+    rows.push(x.row.join(','));
+}
 fs.writeFileSync(`${OUT}/planet_flight${tag}.csv`, rows.join('\n') + '\n');
 
 // By height band: how many frames were shown with work pending, by kind,
