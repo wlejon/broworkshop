@@ -35,8 +35,10 @@
 // ground shot, turning to its view on the way down. spot=auto: the landing
 // moved to the most open spot near it, as the render sees it. The landing
 // is expected from the first frame (scene.expect); expect=0 leaves it to
-// the eye's own wants.
-import { setShot, holdView, still, land, scene, R } from "/app/world.js";
+// the eye's own wants. gap=auto (a dur= flight's default; gap=0 none): the
+// flight waits at the pad until its climb and its descent cross the heaps'
+// heights in clear air, not through a heap's grey inside.
+import { setShot, holdView, still, land, scene, R, WIND } from "/app/world.js";
 
 const fs = require("fs");
 const argv = (bro.app && bro.app.argv) || [];
@@ -441,7 +443,7 @@ const HOLD = opt('hold', '0') !== '0';
 const INSPECT = opt('inspect', '');
 const INSPECT_IMAGE = INSPECT === 'change' || INSPECT === 'normals' ? INSPECT : null;
 const encI = INSPECT_IMAGE ? new VideoEncoder({ path: `${OUT}/planet_flight${tag}_${INSPECT_IMAGE}.webm`, width: W, height: H, fps, quality: opt('quality', 'good') }) : null;
-const INSPECT_COLS = ['same', 'rose', 'sank', 'appeared', 'vanished', 'newView', 'normalMoved', 'lumaMoved', 'skyLuma', 'turnDeg', 'rollDeg', 'travel', 'medianDist'];
+const INSPECT_COLS = ['same', 'rose', 'sank', 'appeared', 'vanished', 'newView', 'normalMoved', 'lumaMoved', 'skyLuma', 'turnDeg', 'rollDeg', 'travel', 'medianDist', 'lumaSpread'];
 const SLOT = 1000 / fps / SUB;
 let due = 0;
 function step() {
@@ -463,6 +465,69 @@ const log = [];
 show(frameAt(I0));
 for (let s = I0 / fps; s > 0; s -= 1) advanceTime(1000 * Math.min(s, 1));
 perf.settle({ maxFrames: 8000 });
+// gap=auto: the wait at the pad (s) after which the flight crosses the
+// heaps' heights in clear air. The heaps drift with the wind (the world's
+// WIND, the body's frame), the same air everywhere, so frame i of a flight
+// that starts `off` seconds later sees what a view moved back against the
+// wind by off + i / fps sees now: those views are probed, the world's
+// clock held (bro.time.scale 0: paused, no frame is drawn) so the probing
+// moves no cloud, for each wait every GAP_STEP s up to GAP_MOST: the wait
+// whose blankest view is least blank (scene.inspectFrame's lumaSpread:
+// inside a heap the view is one grey, 0.003, where open air's is 0.2), so
+// the climb passes the heaps with the most room, not the first wait that
+// clears them: one that grazed a heap still showed a frame of its inside
+// in motion. Each view also GAP_ROOM metres to either side, so the climb
+// has that much room: a wait whose line only just missed a heap went
+// through its skin in the flight. (A wait is given up at its first view
+// under GAP_BLANK.) Then the first view back in, still held, and the wait run.
+const GAP_STEP = 20, GAP_MOST = 300, GAP_BLANK = 0.12, GAP_ROOM = 150;
+function heapGap() {
+    const band = [];
+    for (let i = I0; i <= I1; i += 2) {
+        const h = flightAt(i).h;
+        if (h > 900 && h < 6000) band.push(i);
+    }
+    if (!band.length) return 0;
+    bro.time.scale = 0;
+    scene.setInspect(true);
+    const spread = (i, off, side) => {
+        const v = frameAt(i);
+        // (`side` metres to the view's right: the room the climb has.)
+        const eB = scene.toBody(v.eye), lB = scene.toBody(v.look);
+        const right = unit(cross3(sub(lB, eB), eB));
+        const back = add(mul(WIND, -(off + (i - I0) / fps)), mul(right, side));
+        const eye = scene.toPlace(add(eB, back)), look = scene.toPlace(add(lB, back));
+        show({ eye, look, near: v.near, far: v.far, up: v.up });
+        for (let k = 0; k < 300; k++) {
+            advanceTime(16);
+            if (k >= 4 && !perf.pendingWork().some((p) => /^clouds/.test(p))) break;
+        }
+        const ins = scene.inspectFrame({});
+        return ins ? +ins.lumaSpread : 1;
+    };
+    let best = null;
+    for (let off = 0; off <= GAP_MOST; off += GAP_STEP) {
+        let least = 1, at = -1;
+        for (const i of band) {
+            for (const side of [0, GAP_ROOM, -GAP_ROOM]) {
+                const s = spread(i, off, side);
+                if (s < least) { least = s; at = i; }
+                if (least < GAP_BLANK) break;
+            }
+            if (least < GAP_BLANK) break;
+        }
+        if (!best || least > best.least) best = { off, least, at };
+    }
+    scene.setInspect(false);
+    show(frameAt(I0));
+    perf.settle({ maxFrames: 8000 });
+    bro.time.scale = 1;
+    console.log(`flight: gap=auto: wait ${best.off} s at the pad (its blankest view ${best.least.toFixed(3)}` +
+                (best.least < GAP_BLANK ? `, at ${(best.at / fps).toFixed(1)} s: no clear wait within ${GAP_MOST} s)` : ')'));
+    return best.off;
+}
+if (opt('gap', DUR > 0 ? 'auto' : '0') === 'auto')
+    for (let s = heapGap(); s > 0; s -= 1) advanceTime(1000 * Math.min(s, 1));
 perf.gpuFrameMs();
 if (+opt('map', 0) > 0) weatherMap(+opt('map', 0));
 if (INSPECT) scene.setInspect(true);

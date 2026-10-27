@@ -1190,10 +1190,11 @@ float cloudDensity(CloudPoint q) {
 }
 `;
 // (The clouds drift east, and a little north, at some 10 m/s.)
+export const WIND = [9, 0, -3];
 scene.setClouds({ module: CLOUDS, bottom: CLOUD_BOTTOM, top: CLOUD_TOP, data: LOWS, land,
                   forms: { extinction: 0.06, billowScale: 2400, detailScale: 1200, edge: CLOUD_EDGE },
                   heaps: { cell: HEAP_CELL },
-                  wind: [9, 0, -3],
+                  wind: WIND,
                   enabled: !((bro.app && bro.app.argv) || []).includes('noclouds') });
 
 // --- views ---------------------------------------------------------------------------
