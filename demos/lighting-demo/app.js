@@ -1,6 +1,7 @@
 import { boot } from "/lib/kit/app.js";
 import { bindControl } from "/lib/kit/params.js";
 import { sceneViewport } from "/lib/kit/viewport3d.js";
+import { hdriPath } from "/lib/kit/sky.js";
 
 boot();
 
@@ -226,10 +227,8 @@ bindControl('#shadows', { onChange: (on) => { sun.castsShadow = on; } });
 const animateLights = bindControl('#animate');
 const envStatus = document.getElementById('envStatus');
 
-// Try the script's default first, then fall back through the other tiers
-// the user might have on disk. If nothing loads, prompt them to run the
-// download script — the .hdr files are .gitignored so a fresh checkout
-// won't have them yet.
+// The committed 2k panoramas first (lib/kit/hdri), then the other
+// resolutions the download script may have fetched beside them.
 const HDRI_RES_ORDER = ['2k', '4k', '1k', '8k'];
 function applyEnvironment() {
     const slug = hdri.value;
@@ -240,14 +239,14 @@ function applyEnvironment() {
     }
     const opts = { intensity: iblIntensity.value, rotation: iblRotation.value };
     for (const res of HDRI_RES_ORDER) {
-        const path = `hdri/${slug}_${res}.hdr`;
+        const path = hdriPath(slug, res);
         if (scene.setEnvironment({ ...opts, hdr: path })) {
             envStatus.textContent = `loaded ${res}`;
             envStatus.className = 'ok';
             return;
         }
     }
-    envStatus.textContent = 'HDRI missing — run demos/lighting-demo/hdri/download.sh';
+    envStatus.textContent = 'HDRI missing — run lib/kit/hdri/download.sh';
     envStatus.className = 'warn';
 }
 

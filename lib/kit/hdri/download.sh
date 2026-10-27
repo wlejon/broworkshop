@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Fetch the demo's HDR environment maps from Poly Haven (CC0 / public domain).
-# All 12 are free to redistribute, so this script is the install path —
-# the .hdr files are .gitignored to keep the repo small.
+# Fetch the shared HDR environment maps (lib/kit/sky.js) from Poly Haven
+# (CC0 / public domain). The 2k set is committed; this fetches it again or
+# another resolution beside it.
 #
 #   ./download.sh            # default: 2k (~6 MB each, ~70 MB total)
 #   RES=4k ./download.sh     # crisper skybox  (~23 MB each, ~270 MB total)

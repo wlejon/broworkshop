@@ -65,6 +65,7 @@
 // logic, and exports the handles the test drives.
 
 import { installSystemMenu } from "/lib/system-menu.js";
+import { hdriPath } from "/lib/kit/sky.js";
 import { buildTrack } from "/app/track.js";
 import { createGarage } from "/app/garage.js";
 import { createCameras } from "/app/cameras.js";
@@ -93,7 +94,7 @@ const scene = canvas.getContext('scene');
 // armco pick up sky colour instead of a flat grey fill. setEnvironment reports
 // whether the load succeeded — fall back to the flat ambient if it did not,
 // rather than rendering a black void.
-const HDRI = '../../demos/lighting-demo/hdri/kloofendal_43d_clear_puresky_2k.hdr';
+const HDRI = hdriPath('kloofendal_43d_clear_puresky');
 // Intensity well under 1: a clear-sky HDR is very bright, and at 1.0 the
 // ambient term alone lifted #33373d asphalt to the same value as the white
 // kerbs. Half the sky plus a hard sun is what makes tarmac read as tarmac.
