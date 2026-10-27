@@ -27,7 +27,9 @@
 // what rose, sank, appeared or vanished, surfaces whose shape or look
 // changed in place, the camera's turn and roll), its numbers on the rows,
 // the worst frames in the summary, and the change map or the normals as
-// captures/planet_flight<_tag>_<kind>.webm.
+// captures/planet_flight<_tag>_<kind>.webm. hold=1: the eye held at from='s
+// view while the world's clock runs on to to=, the control for inspect=:
+// whatever changes then is the world's own (wind, flicker, loading).
 import { setShot, holdView, still, land, scene, R } from "/app/world.js";
 
 const fs = require("fs");
@@ -110,8 +112,99 @@ function climbTimed() {
         hs.push(h);
         ss.push(s);
     }
+    // land=<km>: the landing that far downrange, the way beyond the climb's
+    // own covered high up (over some 100 km, all of it over 1000 km), so
+    // the ground near either end is flown as before.
+    const LAND = landAt() * 1000;
+    if (LAND > 2 * s) {
+        const w = hs.map((h) => smooth((Math.log(Math.max(h, 1)) - Math.log(1e5)) / (Math.log(1e6) - Math.log(1e5))));
+        const total = w.reduce((a, x) => a + x, 0) - w[0];
+        const extra = (LAND / 2 - s) / total;
+        let add_ = 0;
+        for (let i = 1; i < ss.length; i++) {
+            add_ += extra * w[i];
+            ss[i] += add_;
+        }
+    }
     return { hs, ss };
 }
+// The ground shot's spot and its way, on the body: the lift-off, or with
+// track=auto the landing.
+setShot('ground');
+const shot = unit(scene.toBody(still.view.eye));
+const shotWay = (() => {
+    const d = sub(scene.toBody(still.view.look), scene.toBody(still.view.eye));
+    return unit(sub(d, mul(shot, dot(d, shot))));
+})();
+
+// The land's height over the datum under body direction `d` (the place
+// frame's land, its curve included: anywhere on the body), under 0 at sea.
+function aboveSea(d) {
+    const p = scene.toPlace(mul([d[0], d[1], d[2]], R));
+    const g = land.landHeight(p[0], p[2]);
+    return Number.isFinite(g) ? g - p[1] : -1;
+}
+
+// A weather system's broken margin along a great circle from `from` set
+// off along `dir`: the first point (1000 to 4000 km) where its slabs (the
+// cover's share as world.js's deck reads it, smoothstep(0.2, 0.8, cover))
+// are between 0.35 and 0.9 and little heaped (convect under 0.15), over
+// land, over 10 km of track; [km, cover, convect], or null.
+function marginAlong(from, dir) {
+    // (The cover is baked a face a frame once the deck's shaders are in.)
+    for (let k = 0; k < 2000 && !(scene.cloudStats() || {}).covered; k++) advanceTime(16);
+    const ks = [];
+    for (let km = 1000; km <= 4000; km += 5) ks.push(km);
+    const dirs = new Float64Array(ks.length * 3);
+    ks.forEach((km, i) => {
+        const th = km * 1000 / R;
+        dirs.set(add(mul(from, Math.cos(th)), mul(dir, Math.sin(th))), i * 3);
+    });
+    const c = scene.cloudCoverAt(dirs);
+    if (!c) return null;
+    const ok = ks.map((_, i) => {
+        const share = smooth((c[i * 4] - 0.2) / 0.6);
+        return share >= 0.35 && share <= 0.9 && c[i * 4 + 1] < 0.15 && aboveSea(dirs.subarray(i * 3, i * 3 + 3)) > 20;
+    });
+    for (let i = 0; i + 2 < ks.length; i++)
+        if (ok.slice(i, i + 3).every(Boolean)) return [ks[i + 1], c[(i + 1) * 4], c[(i + 1) * 4 + 1]];
+    return null;
+}
+
+// track=auto: the flight lifts off under a weather system's broken margin
+// and lands at the ground shot, looking its way: of the bearings from the
+// shot (every 5 degrees) whose great circle meets a margin, the one
+// nearest straight behind it, so the landing's view is the shot's or near.
+// land=auto: the ground shot's lift-off, landing at the first margin
+// straight downrange.
+let up0 = shot, way = shotWay, LAND_KM = +opt('land', 0) || 0;
+if (opt('track', '') === 'auto') {
+    const side = cross3(shot, shotWay);
+    let best = null;
+    for (let b = 0; b < 360; b += 5) {
+        const a = b * Math.PI / 180;
+        const t = add(mul(shotWay, Math.cos(a)), mul(side, Math.sin(a)));
+        const m = marginAlong(shot, t);
+        const off = ((b - 180) % 360 + 360) % 360;
+        const away = Math.min(off, 360 - off);
+        if (m && (!best || away < best.away)) best = { b, t, m, away };
+    }
+    if (best) {
+        const th = best.m[0] * 1000 / R;
+        up0 = add(mul(shot, Math.cos(th)), mul(best.t, Math.sin(th)));
+        way = unit(sub(shot, mul(up0, dot(shot, up0))));
+        LAND_KM = best.m[0];
+        console.log(`flight: track=auto: lift-off ${best.m[0]} km from the ground shot at bearing ${best.b} (${best.away} off straight behind; cover ${best.m[1].toFixed(2)}, convect ${best.m[2].toFixed(2)}), landing at the shot`);
+    } else {
+        console.log('flight: track=auto: no broken margin within 4000 km of the shot');
+    }
+} else if (opt('land', '') === 'auto') {
+    const m = marginAlong(shot, shotWay);
+    LAND_KM = m ? m[0] : 0;
+    console.log(m ? `flight: land=auto: ${m[0]} km downrange (cover ${m[1].toFixed(2)}, convect ${m[2].toFixed(2)})`
+                  : 'flight: land=auto: no broken margin within 4000 km');
+}
+function landAt() { return LAND_KM; }
 const up = DUR > 0 ? climbTimed() : climb();
 // The flight: the climb, then the same climb backwards down to the landing.
 const N = 2 * (up.hs.length - 1) + 1;
@@ -130,14 +223,52 @@ const flightAt = (x) => {
 };
 console.log(`flight: ${N} frames (${(N / fps / 60).toFixed(1)} min) to ${(HMAX / 1000).toFixed(0)} km, ${(S / 1000).toFixed(0)} km downrange`);
 
-// The lift-off: the ground shot's spot and its way, on the body.
-setShot('ground');
-const start = scene.toBody(still.view.eye);
-const up0 = unit(start);
-const way = (() => {
-    const d = sub(scene.toBody(still.view.look), start);
-    return unit(sub(d, mul(up0, dot(d, up0))));
-})();
+// map=<km>: the weather's map about the flight (the clouds' cover as baked,
+// scene.cloudCoverAt), azimuthal about the lift-off out to that many
+// kilometres, downrange to the right: white and blue-grey the slabs (the
+// fronts, the lows, the decks), yellow the heaps, brighter as their tops
+// reach higher; the ground track red from the lift-off (green) to the
+// landing (magenta), rings every 500 km. captures/planet_flight<_tag>_map.png.
+function weatherMap(km) {
+    const side = cross3(up0, way);
+    const M = 800, Rm = km * 1000;
+    const dirs = new Float64Array(M * M * 3);
+    for (let y = 0; y < M; y++) {
+        for (let x = 0; x < M; x++) {
+            const mx = ((x + 0.5) / M * 2 - 1) * Rm, mz = (1 - (y + 0.5) / M * 2) * Rm;
+            const d = Math.hypot(mx, mz), th = d / R;
+            const t = d > 0 ? add(mul(way, mx / d), mul(side, mz / d)) : way;
+            const v = add(mul(up0, Math.cos(th)), mul(t, Math.sin(th)));
+            dirs.set(v, (y * M + x) * 3);
+        }
+    }
+    const c = scene.cloudCoverAt(dirs);
+    if (!c) { console.log('flight: map: the clouds\' cover is not baked'); return; }
+    const px = new Uint8Array(M * M * 4);
+    for (let i = 0; i < M * M; i++) {
+        const cover = c[i * 4], conv = c[i * 4 + 1], tops = c[i * 4 + 2];
+        const k = cover * (0.55 + 0.45 * tops);
+        const col = [0.75 + 0.25 * conv, 0.82 + 0.03 * conv, 1.0 - 0.6 * conv];
+        for (let j = 0; j < 3; j++) px[i * 4 + j] = Math.round(255 * Math.min(1, [0.05, 0.07, 0.14][j] * (1 - k) + col[j] * k));
+        px[i * 4 + 3] = 255;
+        const x = i % M, y = (i / M) | 0;
+        const r = Math.hypot((x + 0.5) / M * 2 - 1, (y + 0.5) / M * 2 - 1) * km;
+        if (Math.abs(r / 500 - Math.round(r / 500)) * 500 < km / M) for (let j = 0; j < 3; j++) px[i * 4 + j] = Math.min(255, px[i * 4 + j] + 40);
+    }
+    const dot_ = (mx, rgb, size) => {
+        const x0 = Math.round((mx / Rm * 0.5 + 0.5) * M), y0 = M / 2;
+        for (let dy = -size; dy <= size; dy++) for (let dx = -size; dx <= size; dx++) {
+            const x = x0 + dx, y = y0 + dy;
+            if (x >= 0 && x < M && y >= 0 && y < M) px.set(rgb, (y * M + x) * 4);
+        }
+    };
+    for (let s = 0; s <= S; s += Math.max(S / 400, 1)) dot_(s, [255, 40, 40], 0);
+    dot_(0, [40, 255, 60], 3);
+    dot_(S, [255, 60, 255], 3);
+    bro.image.encodePngFile(`${OUT}/planet_flight${tag}_map.png`, px, M, M, 4);
+    console.log(`flight: map ${km} km about the lift-off, captures/planet_flight${tag}_map.png`);
+}
+function cross3(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
 
 // The ground (or the sea) under a body direction, over the datum (0 where
 // the place's grid does not reach: high up, where it does not show).
@@ -197,7 +328,8 @@ const W = window.innerWidth, H = window.innerHeight;
 // run's are a player's.)
 const CAPTURE = opt('capture', '1') !== '0';
 const enc = CAPTURE ? new VideoEncoder({ path: `${OUT}/planet_flight${tag}.webm`, width: W, height: H, fps, quality: opt('quality', 'good') }) : null;
-// (inspect=: see the head.)
+// (inspect=, hold=: see the head.)
+const HOLD = opt('hold', '0') !== '0';
 const INSPECT = opt('inspect', '');
 const INSPECT_IMAGE = INSPECT === 'change' || INSPECT === 'normals' ? INSPECT : null;
 const encI = INSPECT_IMAGE ? new VideoEncoder({ path: `${OUT}/planet_flight${tag}_${INSPECT_IMAGE}.webm`, width: W, height: H, fps, quality: opt('quality', 'good') }) : null;
@@ -224,6 +356,7 @@ show(frameAt(I0));
 for (let s = I0 / fps; s > 0; s -= 1) advanceTime(1000 * Math.min(s, 1));
 perf.settle({ maxFrames: 8000 });
 perf.gpuFrameMs();
+if (+opt('map', 0) > 0) weatherMap(+opt('map', 0));
 if (INSPECT) scene.setInspect(true);
 const t00 = perf.now();
 due = t00;
@@ -234,11 +367,11 @@ for (let i = I0; i <= I1; i++) {
     // render's GPU time the worst of them.
     let gpu = 0;
     for (let k = 1; k < SUB; k++) {
-        show(frameAt(i - 1 + k / SUB));
+        show(frameAt(HOLD ? I0 : i - 1 + k / SUB));
         step();
         gpu = Math.max(gpu, perf.gpuFrameMs());
     }
-    const v = frameAt(i);
+    const v = frameAt(HOLD ? I0 : i);
     show(v);
     const ta = perf.now();
     step();
