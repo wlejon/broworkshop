@@ -1043,25 +1043,31 @@ bool cloudHeap(CloudHeapCell cl, out CloudHeap h) {
     // the smaller for it), and nothing of it more than a cell from there
     // (the engine searches the cells about a point that far).
     vec2 foot = (b.xy - 0.5) * 0.7 * cell;
-    // (Its towers reach 1.1 of its radius from its foot: half of it off,
-    // 0.6 of it wide.)
+    // (Its towers reach 1.25 of its radius from its foot: 0.7 of it off,
+    // 0.55 of it wide.)
     float reach = cell - length(foot);
-    r = min(r, reach / 1.15);
+    r = min(r, reach / 1.3);
     // Its base: the field's condensation level, a few tens of metres off
     // it, cut flat; the dome's middle under it, so its walls rise steep
     // from the base's rim and the whole heap stands over every point of
     // the base (no thin rim the sun lights through).
     float zh = base + BASE_SPREAD * (f.x - 0.5);
-    h.lobe[0] = vec4(foot, r, 1.4 * hgt);
+    // The body a little smaller than the heap, and the towers out over its
+    // rim, so seen from above its outline is lobed, a cauliflower's, not
+    // the body's circle with bumps on it. (Towers within the body's rim
+    // drew every heap from above as a disc; out to 0.7 of the radius their
+    // part past the rim makes up the body's: the heap covers as much.)
+    h.lobe[0] = vec4(foot, 0.82 * r, 1.4 * hgt);
     h.middle.x = -0.4 * hgt;
-    // The towers: two over the body, each its own way off its middle, its
-    // own size and height, so no two heaps share a silhouette (the
-    // engine's turrets crown them).
+    // The towers: two over the body, on opposite sides more or less, each
+    // its own way off its middle, its own size and height, so no two heaps
+    // share a silhouette (the engine's turrets crown them).
+    float ang0 = 6.2832 * b.z;
     for (int k = 0; k < 2; ++k) {
         vec3 t = fract(b.zxy * vec3(7.13, 3.71, 5.37) * float(k + 1) + a.zxy);
-        float ang = 6.2832 * t.x;
-        vec2 o = vec2(cos(ang), sin(ang)) * mix(0.1, 0.5, t.y) * r;
-        h.lobe[1 + k] = vec4(foot + o, mix(0.35, 0.6, t.z) * r, mix(0.5, 0.8, t.y) * hgt);
+        float ang = ang0 + 3.1416 * float(k) + 1.6 * (t.x - 0.5);
+        vec2 o = vec2(cos(ang), sin(ang)) * mix(0.45, 0.7, t.y) * r;
+        h.lobe[1 + k] = vec4(foot + o, mix(0.4, 0.55, t.z) * r, mix(0.5, 0.8, t.y) * hgt);
         h.middle[1 + k] = mix(0.2, 0.55, t.z) * hgt;
     }
     h.base = vec4(zh);
@@ -1100,7 +1106,9 @@ float heapsShare(float z, float base, float tops, float cover, float clump) {
     // (A fragment's mean square, of the cover's size, 0.21 and up to 1.9^2
     // as much where the cover is full: as a share of a heap's.)
     float frag = 0.21 * pow(mix(1.0, 1.9, smoothstep(0.4, 0.9, cover)), 2.0) * smoothstep(0.15, 0.7, cover) / HEAP_SIZE2;
-    float area = 3.1416 * r * r / (HEAP_CELL * HEAP_CELL) * 1.15 * (1.0 + frag);
+    // (A heap's outline from above about its radius's circle: the body at
+    // 0.82 of it, the towers' parts past the body's rim making up the rest.)
+    float area = 3.1416 * r * r / (HEAP_CELL * HEAP_CELL) * (1.0 + frag);
     // (What they cover seen from above or below, s0, as the engine draws a
     // share: opaque heaps a view crosses in 600 m (its
     // cloudHeapsShareSigma), here stacked over the profile's height, whose
