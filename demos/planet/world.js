@@ -954,6 +954,7 @@ const float BASE_SPREAD = 80.0;  // how much the heaps' bases differ (m), about 
 const float HEAP_SMALL = 0.4, HEAP_BIG = 1.3, HEAP_SKEW = 1.3;   // a heap's size (of the cover's), u^HEAP_SKEW between
 const float HEAP_SIZE2 = 0.70;   // the mean of its square
 const float HEAP_CLUMP_MOST = 1.7;   // how much more of the heaps a clump holds at most
+const float HEAP_SEEN = 0.25;   // the share of its outline's ellipse a heap covers as drawn (its rim the billows', its towers within)
 const float BROKEN_TILE = 16000.0;   // the slabs' rafts: the billow noise's tile (m)
 const float BROKEN_RISE = 800.0;     // and metres of the slab's edge a unit of the noise
 const float BROKEN_LEAST = 600.0;    // the finest of the noise's detail the rafts are cut by (m)
@@ -991,6 +992,10 @@ void deckAt(vec3 p, vec4 cover, float footprint, out float c, out float wHeap, o
 // most small and a few large) and as tall as the tops reach (each its own;
 // towers only where the tops are high), shrinking to nothing as the cover
 // thins (none cut off); and a fragment beside it where the cover is fuller.
+float heapClump(vec3 up) {
+    const float rb = R + ${CLOUD_BOTTOM}.0;
+    return clamp(1.0 + 2.2 * (cloudNoise(up * (rb / 14000.0), 1.0 / 64.0).x - 0.62), 0.25, HEAP_CLUMP_MOST);
+}
 bool cloudHeap(CloudHeapCell cl, out CloudHeap h) {
     const float rb = R + ${CLOUD_BOTTOM}.0;
     float cover, wHeap, base, tops;
@@ -1002,7 +1007,7 @@ bool cloudHeap(CloudHeapCell cl, out CloudHeap h) {
     // groups with wide gaps of clear sky between, not a lattice's even
     // spread. (Its mean leaves the share as the cover says; HEAP_SHELL the
     // share of cells that may hold one, as the old lattice's shell kept.)
-    float clump = clamp(1.0 + 2.2 * (cloudNoise(cl.up * (rb / 14000.0), 1.0 / 64.0).x - 0.62), 0.25, HEAP_CLUMP_MOST);
+    float clump = heapClump(cl.up);
     float grow = smoothstep(a.x, a.x + 0.15, present * clump * 2.0 * HEAP_SHELL) * wHeap;
     if (grow <= 0.0) return false;
     vec3 b = heapHash(vec3(cl.id) + 17.31), f = heapHash(vec3(cl.id) + 5.13);
@@ -1074,20 +1079,29 @@ bool cloudHeap(CloudHeapCell cl, out CloudHeap h) {
 // The share of the air the heaps fill at \`z\` metres up the deck, on the
 // mean (what the far deck reads: as cloudHeap makes them), rising over the
 // first 300 m from their bases; under 0 below and above them, by how far.
-float heapsShare(float z, float base, float tops, float cover) {
+float heapsShare(float z, float base, float tops, float cover, float clump) {
     float tall = smoothstep(0.25, 0.9, tops / ${CLOUD_TOP - CLOUD_BOTTOM}.0);
     float r = HEAP_CELL * mix(0.42, 0.55, cover) * sqrt(HEAP_SIZE2);
     float hgt = max(min((tops - base) * 0.75 * 0.8, r * mix(0.8, 2.6, tall) * 0.85) * 1.1, 300.0);
-    float n = 2.0 * HEAP_SHELL * smoothstep(0.0, 0.6, cover);
+    // (The share of cells holding one, as cloudHeap grows them: the clump's
+    // too, so a far field keeps the groups and the gaps its heaps make.)
+    float n = min(2.0 * HEAP_SHELL * smoothstep(0.0, 0.6, cover) * clump, 1.0);
     // (A fragment's mean square, of the cover's size, 0.21 and up to 1.9^2
     // as much where the cover is full: as a share of a heap's.)
     float frag = 0.21 * pow(mix(1.0, 1.9, smoothstep(0.4, 0.9, cover)), 2.0) * smoothstep(0.15, 0.7, cover) / HEAP_SIZE2;
     float area = 3.1416 * r * r / (HEAP_CELL * HEAP_CELL) * 1.15 * (1.0 + frag);
-    float s0 = 1.0 - exp(-n * area);
+    // (What they cover seen from above or below, s0, as the engine draws a
+    // share: opaque heaps a view crosses in 600 m (its
+    // cloudHeapsShareSigma), here stacked over the profile's height, whose
+    // mean is about 0.6 of hgt: a column of shares s covers 1 - (1 - s)^(0.6
+    // hgt / 600) of what is under it, so s at the profile's most is the one
+    // that makes that s0.)
+    float s0 = 1.0 - exp(-n * area * HEAP_SEEN);
+    float s = 1.0 - pow(1.0 - s0, max(1000.0 / hgt, 1.0));
     float zr = z - base, hr = zr / hgt;
     if (zr < 0.0) return zr * BASE_SHARP / CLOUD_EDGE;
     if (hr > 1.0) return (hgt - zr) / CLOUD_EDGE;
-    return min(s0 * zr / 300.0, s0 * (1.0 - hr * hr));
+    return min(s * zr / 300.0, s * (1.0 - hr * hr));
 }
 
 // The heaps' share of the air at a point, over its footprint (the engine
@@ -1099,10 +1113,11 @@ float cloudHeapsShare(CloudPoint q) {
     if (q.cover.x < 0.01) return 0.0;
     const float DECK = ${CLOUD_TOP - CLOUD_BOTTOM}.0;
     float c, wHeap, zb, zt;
-    deckAt(cloudDrift(q.p), q.cover, q.footprint, c, wHeap, zb, zt);
+    vec3 pd = cloudDrift(q.p);
+    deckAt(pd, q.cover, q.footprint, c, wHeap, zb, zt);
     if (wHeap <= 0.0) return 0.0;
     float z = q.height * DECK;
-    float s = heapsShare(z, zb, zt, c) * wHeap;
+    float s = heapsShare(z, zb, zt, c, heapClump(normalize(pd))) * wHeap;
     bool may = z > zb - BASE_SPREAD && z < zb + 1.4 * (zt - zb) + 200.0;
     return may ? max(s, 1e-3) : min(s, -1e-3);
 }
