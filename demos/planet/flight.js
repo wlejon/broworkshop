@@ -422,7 +422,10 @@ const AIR_T0 = scene.wind().time;
 show(frameAt(I0));
 for (let s = I0 / fps; s > 0; s -= 1) advanceTime(1000 * Math.min(s, 1));
 {
-    const st = perf.settle({ maxFrames: 8000 });
+    // (As a player's loading screen: the world whole only about the pad,
+    // start= metres (1000), the rest streaming in as the flight goes, its
+    // rows saying what is still pending frame by frame.)
+    const st = perf.settle({ maxFrames: 8000, within: +opt('start', 1000) });
     stage(`the first view settled (${st.frames} frames; waited on ${JSON.stringify(st.waited)})`);
 }
 // (How far the air kept clear is from where the flight will find it: the
@@ -475,7 +478,7 @@ for (let i = I0; i <= I1; i++) {
         console.log(`flight: the landing's regions all made by ${(i / fps).toFixed(1)} s, the eye ${Math.round(v.h)} m up`);
     }
     if (i % fps === 0) {
-        console.log(`flight ${i}/${N}: ${Math.round(v.h)} m, ${v.ground.toFixed(0)} m/s across, ${v.climb.toFixed(0)} m/s up, render ${gpu.toFixed(2)} ms GPU${pending.length ? `, pending ${pending.join('; ')}` : ''}, ${((perf.now() - t00) / 1000).toFixed(0)} s in`);
+        console.log(`flight ${i}/${N}: ${Math.round(v.h)} m, ${v.ground.toFixed(0)} m/s across, ${v.climb.toFixed(0)} m/s up, render ${gpu.toFixed(2)} ms GPU${landing ? `, the landing's regions ${landing.pending} to make` : ''}${pending.length ? `, pending ${pending.join('; ')}` : ''}, ${((perf.now() - t00) / 1000).toFixed(0)} s in`);
         if (PASSES) {
             const p = perf.gpuPasses();
             console.log('  passes ' + Object.entries(p).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([n, ms]) => `${n} ${ms.toFixed(2)}`).join(', '));
