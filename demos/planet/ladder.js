@@ -24,7 +24,7 @@
 // the land drawn as one thing from every height changes little and
 // smoothly; a hand-over to something else steps.
 
-import { holdView, land, scene, R, setShot, still, sun } from "/app/world.js";
+import { holdView, land, plants, scene, R, setShot, still, sun } from "/app/world.js";
 import { sub, add, mul, unit, cross, dot, viewProjection, groundSquare, readSquare, squareTile, toSrgb } from "/app/view_ground.js";
 
 const argv = (bro.app && bro.app.argv) || [];
@@ -44,6 +44,8 @@ if (!argv.some((s) => typeof s === 'string' && s.startsWith('ev=')))
 // (noshadow: the sun casts none, the control for a shift that is the
 // shadows' reach.)
 if (argv.includes('noshadow')) sun.castsShadow = false;
+// (noplantshadow: the plants cast none, the land's sun still shading.)
+if (argv.includes('noplantshadow')) plants.castsShadow = false;
 document.body.classList.add('clean');
 bro.menu.hide();
 flush();
