@@ -32,7 +32,9 @@
 // whatever changes then is the world's own (wind, flicker, loading).
 // track=auto: lift off under a weather system's margin and land at the
 // ground shot, turning to its view on the way down. spot=auto: the landing
-// moved to the most open spot near it, as the render sees it.
+// moved to the most open spot near it, as the render sees it. The landing
+// is expected from the first frame (scene.expect); expect=0 leaves it to
+// the eye's own wants.
 import { setShot, holdView, still, land, scene, R } from "/app/world.js";
 
 const fs = require("fs");
@@ -411,6 +413,12 @@ perf.settle({ maxFrames: 8000 });
 perf.gpuFrameMs();
 if (+opt('map', 0) > 0) weatherMap(+opt('map', 0));
 if (INSPECT) scene.setInspect(true);
+// The landing expected from the first frame (scene.expect): its ground made
+// while the eye is high and wants little, as a ship's autopilot knows where
+// it is going. expect=0: the eye's own wants alone.
+const landing = opt('expect', '1') !== '0' && scene.expect
+    ? scene.expect(scene.toBody(frameAt(N - 1).eye), { within: (N - 1 - I0) / fps }) : null;
+let landingReady = -1;
 const t00 = perf.now();
 due = t00;
 for (let i = I0; i <= I1; i++) {
@@ -450,6 +458,10 @@ for (let i = I0; i <= I1; i++) {
     if (INSPECT) for (const k of INSPECT_COLS) row.push(ins && ins.compared ? (+ins[k]).toPrecision(4) : '');
     rows.push(row.join(','));
     log.push({ i, h: v.h, gpu, pending, wall, ins: ins && ins.compared ? ins : null });
+    if (landing && landingReady < 0 && landing.ready) {
+        landingReady = i;
+        console.log(`flight: the landing's regions all made by ${(i / fps).toFixed(1)} s, the eye ${Math.round(v.h)} m up`);
+    }
     if (i % fps === 0) {
         console.log(`flight ${i}/${N}: ${Math.round(v.h)} m, ${v.ground.toFixed(0)} m/s across, ${v.climb.toFixed(0)} m/s up, render ${gpu.toFixed(2)} ms GPU${pending.length ? `, pending ${pending.join('; ')}` : ''}, ${((perf.now() - t00) / 1000).toFixed(0)} s in`);
         if (PASSES) {
