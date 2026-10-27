@@ -30,6 +30,9 @@
 // captures/planet_flight<_tag>_<kind>.webm. hold=1: the eye held at from='s
 // view while the world's clock runs on to to=, the control for inspect=:
 // whatever changes then is the world's own (wind, flicker, loading).
+// track=auto: lift off under a weather system's margin and land at the
+// ground shot, turning to its view on the way down. spot=auto: the landing
+// moved to the most open spot near it, as the render sees it.
 import { setShot, holdView, still, land, scene, R } from "/app/world.js";
 
 const fs = require("fs");
@@ -177,7 +180,7 @@ function marginAlong(from, dir) {
 // nearest straight behind it, so the landing's view is the shot's or near.
 // land=auto: the ground shot's lift-off, landing at the first margin
 // straight downrange.
-let up0 = shot, way = shotWay, LAND_KM = +opt('land', 0) || 0;
+let up0 = shot, way = shotWay, LAND_KM = +opt('land', 0) || 0, LAND_SHOT = false;
 if (opt('track', '') === 'auto') {
     const side = cross3(shot, shotWay);
     let best = null;
@@ -194,6 +197,7 @@ if (opt('track', '') === 'auto') {
         up0 = add(mul(shot, Math.cos(th)), mul(best.t, Math.sin(th)));
         way = unit(sub(shot, mul(up0, dot(shot, up0))));
         LAND_KM = best.m[0];
+        LAND_SHOT = true;
         console.log(`flight: track=auto: lift-off ${best.m[0]} km from the ground shot at bearing ${best.b} (${best.away} off straight behind; cover ${best.m[1].toFixed(2)}, convect ${best.m[2].toFixed(2)}), landing at the shot`);
     } else {
         console.log('flight: track=auto: no broken margin within 4000 km of the shot');
@@ -203,6 +207,46 @@ if (opt('track', '') === 'auto') {
     LAND_KM = m ? m[0] : 0;
     console.log(m ? `flight: land=auto: ${m[0]} km downrange (cover ${m[1].toFixed(2)}, convect ${m[2].toFixed(2)})`
                   : 'flight: land=auto: no broken margin within 4000 km');
+}
+// spot=auto: the landing moved to the most open spot within 180 m of it,
+// as the render sees it (scene.inspectFrame's median distance): straight
+// down from 40 m, open ground reads 40 m and a wood's crowns 15 to 20, and
+// at eye level along the shot's way, the further the view goes the better.
+// Of the spots open overhead (a crown's leaves would fill the view the last
+// second down), the one that sees furthest; none open, the most open.
+if (opt('spot', '') === 'auto' && LAND_KM > 0) {
+    const th = LAND_KM * 1000 / R;
+    const E = add(mul(up0, Math.cos(th)), mul(way, Math.sin(th)));
+    const fe = unit(sub(shotWay, mul(E, dot(shotWay, E)))), fn = cross3(E, fe);
+    scene.setInspect(true);
+    const probe = (d, eyeH, look, upB) => {
+        const eyeB = mul(d, R + groundAt(d) + eyeH);
+        show({ eye: scene.toPlace(eyeB), look: scene.toPlace(add(eyeB, mul(look, 100))), near: 0.1, far: 4e5,
+               up: sub(scene.toPlace(add(eyeB, upB)), scene.toPlace(eyeB)) });
+        for (let k = 0; k < 20; k++) advanceTime(16);
+        const ins = scene.inspectFrame({});
+        return ins ? +ins.medianDist : 0;
+    };
+    let best = null;
+    for (let y = -180; y <= 180; y += 60) {
+        for (let x = -180; x <= 180; x += 60) {
+            const d = unit(add(E, mul(add(mul(fe, x), mul(fn, y)), 1 / R)));
+            if (aboveSea(d) < 1) continue;
+            const f = unit(sub(fe, mul(d, dot(fe, d))));
+            const down = probe(d, 40, mul(d, -1), f);
+            const p = -Math.PI / 180;   // (pitch(1.8)'s: a degree up)
+            const ahead = probe(d, 1.8, add(mul(f, Math.cos(p)), mul(d, -Math.sin(p))), d);
+            const open = Math.min(down / 38, 1);
+            const score = open >= 1 ? 1e6 + ahead : open;
+            if (!best || score > best.score) best = { d, x, y, down, ahead, score };
+        }
+    }
+    scene.setInspect(false);
+    if (best) {
+        way = unit(sub(best.d, mul(up0, dot(best.d, up0))));
+        LAND_KM = Math.acos(Math.min(1, dot(up0, best.d))) * R / 1000;
+        console.log(`flight: spot=auto: landing ${best.x} m along, ${best.y} m across the shot's way: ${best.down.toFixed(0)} m clear under 40 m, ${best.ahead.toFixed(0)} m seen ahead`);
+    }
 }
 function landAt() { return LAND_KM; }
 const up = DUR > 0 ? climbTimed() : climb();
@@ -297,7 +341,16 @@ function frameAt(i) {
     const a = flightAt(i), b = flightAt(Math.min(i + 1, N - 1)), z = flightAt(Math.max(i - 1, 0));
     const th = a.s / R;
     const r = add(mul(up0, Math.cos(th)), mul(way, Math.sin(th)));
-    const f = unit(sub(way, mul(r, dot(way, r))));
+    let f = unit(sub(way, mul(r, dot(way, r))));
+    // Landing at the shot, the view turns from the way to the shot's own
+    // (about the eye's up, by the height's log from 3 km to 30 m), so the
+    // flight ends in the view the ground shot is.
+    if (LAND_SHOT && i > N / 2) {
+        const fs = unit(sub(shotWay, mul(r, dot(shotWay, r))));
+        const turn = Math.atan2(dot(cross3(f, fs), r), dot(f, fs));
+        const k = smooth((Math.log(3000) - Math.log(Math.max(a.h, 1))) / (Math.log(3000) - Math.log(30)));
+        f = add(mul(f, Math.cos(k * turn)), mul(cross3(r, f), Math.sin(k * turn)));
+    }
     const eyeB = mul(r, R + groundAt(r) + a.h + 1.8);
     const p = pitch(a.h + 1.8);
     const look = add(mul(f, Math.cos(p)), mul(r, -Math.sin(p)));
