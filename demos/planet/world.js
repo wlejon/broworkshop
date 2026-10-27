@@ -303,7 +303,11 @@ LandSurface landSurface(LandPoint q) {
     // texels, and on a range the relief a texel hides. (A margin drawn
     // with a fixed width of degrees lay a hundred km soft over a plateau,
     // whose climate changes a degree in as far: a bank of fog.)
-    const float D = 2000.0;
+    // (Taken across the texel: over a fixed 2 km it held the ground's slope,
+    // 6.5 degrees a km of rise, and times a far texel's footprint that was
+    // a margin tens of degrees soft, half ice over a whole cold land from
+    // orbit where the nearer tiles had a few fields, square tile by tile.)
+    float D = max(2000.0, q.footprint);
     vec2 grad = vec2(iceClimate(q.at + t1 * D, normalize(q.up + t1 * (D / ${R}.0)), iceLine) - iceClimate(q.at - t1 * D, normalize(q.up - t1 * (D / ${R}.0)), iceLine),
                      iceClimate(q.at + t2 * D, normalize(q.up + t2 * (D / ${R}.0)), iceLine) - iceClimate(q.at - t2 * D, normalize(q.up - t2 * (D / ${R}.0)), iceLine)) / (2.0 * D);
     float w = max(length(grad) * 2.0 * q.footprint, 0.02) + 0.5 * spread * share;
