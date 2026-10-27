@@ -1,5 +1,4 @@
-// The flight: the eye lifts off at the ground shot's spot (the most open one
-// within 180 m of it: lift=0 the shot's own), climbs out of the
+// The flight: the eye lifts off at the ground shot's spot, climbs out of the
 // air to `hmax=` (250 km) and comes down again to land downrange, a ship's
 // path seen from its cockpit (no ship is drawn), flown as a player would
 // see it: a frame every 1/30 s of the flight's clock, paced
@@ -36,14 +35,12 @@
 // view while the world's clock runs on to to=, the control for inspect=:
 // whatever changes then is the world's own (wind, flicker, loading).
 // track=auto: lift off under a weather system's margin and land at the
-// ground shot, turning to its view on the way down. spot=auto: the landing
-// moved to the most open spot near it, as the render sees it. The landing
-// is expected from the first frame (scene.expect); expect=0 leaves it to
-// the eye's own wants. gap=auto (a dur= flight's default; gap=0 none): the
-// flight waits at the pad until its climb and its descent cross the heaps'
-// heights in clear air, not through a heap's grey inside; gap=<s> waits
-// that long (a gap=auto flight's wait, its log says, for a part of it).
-import { setShot, holdView, still, land, scene, R, WIND } from "/app/world.js";
+// ground shot, turning to its view on the way down. The landing is
+// expected from the first frame (scene.expect); expect=0 leaves it to the
+// eye's own wants. The scene is made for the flight, not searched for
+// (world.js keepClear): its lift-off and landing open ground, and the air
+// it climbs and comes down through clear of heaps.
+import { setShot, holdView, still, land, scene, R, WIND, keepClear, AIR_MOST, CLOUD_BOTTOM, CLOUD_TOP } from "/app/world.js";
 
 const fs = require("fs");
 const argv = (bro.app && bro.app.argv) || [];
@@ -57,6 +54,15 @@ const fps = 30, dt = 1 / fps;
 const DUR = +opt('dur', 0);
 const fast = +opt('fast', 1), HMAX = +opt('hmax', DUR > 0 ? 2e7 : 2.5e5), SUB = Math.max(1, Math.round(+opt('sub', 1)));
 const PASSES = opt('passes', '0') !== '0';
+// (The run's wall time by stage, on the log: what a flight costs before its
+// first frame.)
+const T_START = perf.now();
+let tStage = T_START;
+const stage = (what) => {
+    const now = perf.now();
+    console.log(`flight: ${what} ${((now - tStage) / 1000).toFixed(1)} s (${((now - T_START) / 1000).toFixed(1)} s in)`);
+    tStage = now;
+};
 
 const add = (a, b) => a.map((v, i) => v + b[i]);
 const sub = (a, b) => a.map((v, i) => v - b[i]);
@@ -68,7 +74,9 @@ const smooth = (e) => { e = Math.max(0, Math.min(1, e)); return e * e * (3 - 2 *
 document.body.classList.add('clean');
 bro.menu.hide();
 flush();
+console.log(`flight: the world made, ${(T_START / 1000).toFixed(1)} s from the engine's start`);
 perf.settle({ maxFrames: 300, kinds: ['land processes'] });
+stage('the land\'s processes');
 
 // The speeds the descent measured (demos/planet/descent.js, its "max
 // speed" by band, 2026-10-26): [height m, ground m/s, climb or descent m/s]
@@ -218,97 +226,10 @@ if (opt('track', '') === 'auto') {
     console.log(m ? `flight: land=auto: ${m[0]} km downrange (cover ${m[1].toFixed(2)}, convect ${m[2].toFixed(2)})`
                   : 'flight: land=auto: no broken margin within 4000 km');
 }
-// spot=auto: the landing moved to the most open spot within 180 m of it,
-// as the render sees it (scene.inspectFrame's median distance): straight
-// down from 40 m, open ground reads 40 m and a wood's crowns 15 to 20, and
-// at eye level along the shot's way, the further the view goes the better.
-// Of the spots open overhead (a crown's leaves would fill the view the last
-// second down), the one that sees furthest; none open, the most open.
-// The lift-off the same (by default: lift=0 keeps the shot's spot), so the
-// climb goes up through open air, not through a crown leaning over the
-// shot; a flight that lands where it lifted off lands there too.
-// (`look`: the way the flight looks there, along the ground.)
-function openSpotNear(E, look) {
-    const fe = unit(sub(look, mul(E, dot(look, E)))), fn = cross3(E, fe);
-    scene.setInspect(true);
-    const probe = (d, eyeH, look, upB, key) => {
-        const eyeB = mul(d, R + groundAt(d) + eyeH);
-        show({ eye: scene.toPlace(eyeB), look: scene.toPlace(add(eyeB, mul(look, 100))), near: 0.1, far: 4e5,
-               up: sub(scene.toPlace(add(eyeB, upB)), scene.toPlace(eyeB)) });
-        // (Until the ground and the plants about it are in: 20 frames after
-        // the eye moved, the wood was not there yet, every spot open; a few
-        // stragglers of the plants' placements are not the wood.)
-        for (let k = 0; k < 1200; k++) {
-            advanceTime(16);
-            if (k < 20) continue;
-            const left = perf.pendingWork().filter((p) => {
-                const m = /^plants: (\d+) placements/.exec(p);
-                return m ? +m[1] >= 50 : /^(land|plants|world service)/.test(p);
-            });
-            if (!left.length) break;
-        }
-        const ins = scene.inspectFrame({});
-        return ins ? +ins[key] : 0;
-    };
-    let best = null;
-    for (let y = -180; y <= 180; y += 60) {
-        for (let x = -180; x <= 180; x += 60) {
-            const d = unit(add(E, mul(add(mul(fe, x), mul(fn, y)), 1 / R)));
-            if (aboveSea(d) < 1) continue;
-            const f = unit(sub(fe, mul(d, dot(fe, d))));
-            // (Straight down from 40 m, the tenth nearest: a crown in a tenth
-            // of the view is one the climb goes up beside.)
-            const down = probe(d, 40, mul(d, -1), f, 'nearDist');
-            // (Ahead: how near a tenth of the view is, a trunk or a bush's
-            // leaves before the eye, the view tilted 20 degrees up so the
-            // ground at its foot is not that tenth. The median let a trunk a
-            // few metres off fill a third of the landing's last view.)
-            const p = -20 * Math.PI / 180;
-            const fu = add(mul(f, Math.cos(p)), mul(d, -Math.sin(p)));
-            const near = probe(d, 1.8, fu, sub(d, mul(fu, dot(d, fu))), 'nearDist');
-            const ahead = near > 0 ? Math.min(near, 1e3) : 1e3;
-            const open = Math.min(down / 38, 1);
-            const score = open >= 1 ? 1e6 + ahead : open;
-            if (!best || score > best.score) best = { d, x, y, down, ahead, score };
-        }
-    }
-    scene.setInspect(false);
-    return best;
-}
-// (A dur= flight's landing, wherever its climb's way takes it, the same by
-// default: spot=0 lands where the way ends.)
-if (DUR > 0 && LAND_KM === 0 && !LAND_SHOT && opt('spot', 'auto') === 'auto') {
+// (A dur= flight lands wherever its climb's way takes it.)
+if (DUR > 0 && LAND_KM === 0 && !LAND_SHOT) {
     const own = climbTimed().ss;
     LAND_KM = 2 * own[own.length - 1] / 1000;
-}
-// (The landing's spot found first and the lift-off's last: the probes
-// leave the plants placed about the last spot probed, and the first view's
-// settle does not wait for placements, so probed last the landing's were
-// the ones in and the lift-off's wood came in 0.6 s into the flight.)
-let landB = null;
-if (LAND_KM > 0) {
-    const th = LAND_KM * 1000 / R;
-    landB = add(mul(up0, Math.cos(th)), mul(way, Math.sin(th)));
-}
-if (opt('spot', DUR > 0 ? 'auto' : '') === 'auto' && landB) {
-    // (Its look the way on from the lift-off, as the descent comes in.)
-    const best = openSpotNear(landB, sub(mul(landB, dot(up0, landB)), up0));
-    if (best) {
-        landB = best.d;
-        console.log(`flight: spot=auto: landing ${best.x} m along, ${best.y} m across the shot's way: ${best.down.toFixed(0)} m clear under 40 m, ${best.ahead.toFixed(0)} m seen ahead`);
-    }
-}
-if (opt('lift', '1') !== '0' && !LAND_SHOT) {
-    const best = openSpotNear(up0, way);
-    if (best) {
-        up0 = best.d;
-        way = unit(sub(way, mul(up0, dot(way, up0))));
-        console.log(`flight: lift-off ${best.x} m along, ${best.y} m across the shot's way: ${best.down.toFixed(0)} m clear under 40 m, ${best.ahead.toFixed(0)} m seen ahead`);
-    }
-}
-if (landB) {
-    way = unit(sub(landB, mul(up0, dot(landB, up0))));
-    LAND_KM = Math.acos(Math.min(1, dot(up0, landB))) * R / 1000;
 }
 function landAt() { return LAND_KM; }
 const up = DUR > 0 ? climbTimed() : climb();
@@ -468,6 +389,32 @@ const rows = ['frame,t,height_m,ground_mps,climb_mps,wall_ms,render_gpu_ms,pendi
 // handing it to the encoder, asking what is pending.
 const parts = [];
 const log = [];
+// The scene the flight needs, made so (world.js keepClear): open ground at
+// the lift-off and the landing, and no heap about the path where it
+// crosses the deck (from under its bottom to over its top), each point of
+// it at the wind clock's time the flight passes it, a point every
+// AIR_STEP m or more (as many as the deck's data holds).
+const AIR_T0 = scene.wind().time;
+{
+    const T0 = AIR_T0;
+    const band = [];
+    for (let i = 0; i < N; i++) {
+        const h = flightAt(i).h;
+        if (h > CLOUD_BOTTOM - 500 && h < CLOUD_TOP + 1000) band.push([...scene.toBody(frameAt(i).eye), T0 + i / fps]);
+    }
+    let step = 1000, air;
+    do {
+        air = [];
+        for (const p of band) {
+            const q = air[air.length - 1];
+            if (!q || Math.hypot(p[0] - q[0] - WIND[0] * (p[3] - q[3]), p[1] - q[1] - WIND[1] * (p[3] - q[3]), p[2] - q[2] - WIND[2] * (p[3] - q[3])) >= step) air.push(p);
+        }
+        step *= 1.5;
+    } while (air.length > AIR_MOST);
+    const padAt = (i) => unit(scene.toBody(frameAt(i).eye));
+    keepClear({ pads: [padAt(0), padAt(N - 1)], air });
+    console.log(`flight: the pads cleared, the deck kept clear at ${air.length} points of the path`);
+}
 // (The first view settled: the flight starts with the pad's scene in. A
 // flight from a later frame first runs the world's clock to it, a second
 // at a time: the clouds drift with the wind, so a stretch of the flight
@@ -475,73 +422,10 @@ const log = [];
 show(frameAt(I0));
 for (let s = I0 / fps; s > 0; s -= 1) advanceTime(1000 * Math.min(s, 1));
 perf.settle({ maxFrames: 8000 });
-// gap=auto: the wait at the pad (s) after which the flight crosses the
-// heaps' heights in clear air. The heaps drift with the wind (the world's
-// WIND, the body's frame), the same air everywhere, so frame i of a flight
-// that starts `off` seconds later sees what a view moved back against the
-// wind by off + i / fps sees now: those views are probed, the world's
-// clock held (bro.time.scale 0: paused, no frame is drawn) so the probing
-// moves no cloud, for each wait every GAP_STEP s up to GAP_MOST: the wait
-// whose blankest view is least blank (scene.inspectFrame's lumaSpread:
-// inside a heap the view is one grey, 0.003, where open air's is 0.2), so
-// the climb passes the heaps with the most room, not the first wait that
-// clears them: one that grazed a heap still showed a frame of its inside
-// in motion. Each view also GAP_ROOM metres to either side, so the climb
-// has that much room: a wait whose line only just missed a heap went
-// through its skin in the flight. (A wait is given up at its first view
-// under GAP_BLANK.) Then the first view back in, still held, and the wait run.
-const GAP_STEP = 20, GAP_MOST = 300, GAP_BLANK = 0.12, GAP_ROOM = 150;
-function heapGap() {
-    const band = [];
-    for (let i = I0; i <= I1; i += 2) {
-        const h = flightAt(i).h;
-        if (h > 900 && h < 6000) band.push(i);
-    }
-    if (!band.length) return 0;
-    bro.time.scale = 0;
-    scene.setInspect(true);
-    const spread = (i, off, side) => {
-        const v = frameAt(i);
-        // (`side` metres to the view's right: the room the climb has.)
-        const eB = scene.toBody(v.eye), lB = scene.toBody(v.look);
-        const right = unit(cross3(sub(lB, eB), eB));
-        const back = add(mul(WIND, -(off + (i - I0) / fps)), mul(right, side));
-        const eye = scene.toPlace(add(eB, back)), look = scene.toPlace(add(lB, back));
-        show({ eye, look, near: v.near, far: v.far, up: v.up });
-        for (let k = 0; k < 300; k++) {
-            advanceTime(16);
-            if (k >= 4 && !perf.pendingWork().some((p) => /^clouds/.test(p))) break;
-        }
-        const ins = scene.inspectFrame({});
-        return ins ? +ins.lumaSpread : 1;
-    };
-    let best = null;
-    for (let off = 0; off <= GAP_MOST; off += GAP_STEP) {
-        let least = 1, at = -1;
-        for (const i of band) {
-            for (const side of [0, GAP_ROOM, -GAP_ROOM]) {
-                const s = spread(i, off, side);
-                if (s < least) { least = s; at = i; }
-                if (least < GAP_BLANK) break;
-            }
-            if (least < GAP_BLANK) break;
-        }
-        if (!best || least > best.least) best = { off, least, at };
-    }
-    scene.setInspect(false);
-    show(frameAt(I0));
-    perf.settle({ maxFrames: 8000 });
-    bro.time.scale = 1;
-    console.log(`flight: gap=auto: wait ${best.off} s at the pad (its blankest view ${best.least.toFixed(3)}` +
-                (best.least < GAP_BLANK ? `, at ${(best.at / fps).toFixed(1)} s: no clear wait within ${GAP_MOST} s)` : ')'));
-    return best.off;
-}
-{
-    // (gap=<s>: that wait, as a gap=auto flight found it, to see its clouds
-    // again in a part of it.)
-    const gap = opt('gap', DUR > 0 ? 'auto' : '0');
-    for (let s = gap === 'auto' ? heapGap() : +gap; s > 0; s -= 1) advanceTime(1000 * Math.min(s, 1));
-}
+stage('the first view settled');
+// (How far the air kept clear is from where the flight will find it: the
+// wind's drift over the clock the settle ran past I0's time.)
+console.log(`flight: the clear air ${(Math.hypot(...WIND) * (scene.wind().time - AIR_T0 - I0 / fps)).toFixed(0)} m off its path by the settle`);
 perf.gpuFrameMs();
 if (+opt('map', 0) > 0) weatherMap(+opt('map', 0));
 if (INSPECT) scene.recordInspect(INSPECT_REC, { scale: INSPECT_SCALE });
@@ -599,10 +483,12 @@ for (let i = I0; i <= I1; i++) {
         }
     }
 }
+stage('the flight');
 if (CAPTURE) {
     enc.finish();
     screenshot(`${OUT}/planet_flight${tag}_end.png`);
 }
+stage('the video finished');
 if (INSPECT) {
     // The recording compared, frame after frame, now the flight is done:
     // its numbers onto the rows, its change map or normals a video.

@@ -402,19 +402,22 @@ const stands = clamp01(affine(fbm(700, 3, 21), 2.4, 0.62));
 const thicket = clamp01(affine(fbm(120, 2, 22), 3.0, -0.2));
 // (Drawn as far as they are placed: the land is their canopy from the
 // node's range on, so a range past the rules' left a band with neither.)
-export const PLANT_RULES = {
+// (`open`: a field 0 .. 1 the plants' chance is times, 0 where none stand:
+// keepClear's pads.)
+const plantRules = (open) => ({
     ground: TREE, seed: SEED, range: 6000,
     layers: [
-        { spacing: 6, jitter: 0.9, sink: 0.1, seed: 11, chance: { own: 'z', times: stands },
+        { spacing: 6, jitter: 0.9, sink: 0.1, seed: 11, chance: { own: 'z', times: open ? mul(stands, open) : stands },
           species: [{ species: CONIFER, weight: { own: 'w' } }, { species: BROADLEAF, weight: warmShare(0.45) },
                     { species: OAK, weight: warmShare(0.25) }, { species: BIRCH, weight: warmShare(0.2) },
                     { species: LIME, weight: warmShare(0.1) }],
           scale: affine(fbm(400, 2, 23), 0.2, 0.95), scaleVariety: 0.25,
           tint: affine(fbm(300, 2, 24), 1.4, 0), tintVariety: 0.4 },
-        { spacing: 3, jitter: 1.0, sink: 0.05, seed: 12, chance: { own: 'z', scale: 0.35, offset: 0.02, times: thicket },
+        { spacing: 3, jitter: 1.0, sink: 0.05, seed: 12, chance: { own: 'z', scale: 0.35, offset: 0.02, times: open ? mul(thicket, open) : thicket },
           species: [SHRUB], scaleVariety: 0.4, tintVariety: 1.0 },
     ],
-};
+});
+export const PLANT_RULES = plantRules(null);
 // (plantsrange=<m>: drawn only so far, the land's canopy past it, so the same
 // land can be seen drawn both ways.)
 export const plants = scene.createPlants({
@@ -567,10 +570,26 @@ export const CLOUD_BOTTOM = 2500, CLOUD_TOP = 10500;
 const CLOUD_EDGE = 1500;
 // (The engine's lattice of heaps: a cell a heap at most.)
 const HEAP_CELL = 2500;
-const CLOUDS = WEATHER.glsl({ name: 'cloudWeather', dims: [3] }) + SHOWERS.glsl({ name: 'cloudShowers', dims: [3] }) +
+// (keepClear's air: after the lows in the deck's data, a count and then the
+// points, directions in the drifted frame, at most AIR_MOST.)
+const AIR_AT = LOWS.length / 4;
+export const AIR_MOST = 64 - AIR_AT - 1;
+const AIR_CLEAR = 2500;
+const CLOUDS =WEATHER.glsl({ name: 'cloudWeather', dims: [3] }) + SHOWERS.glsl({ name: 'cloudShowers', dims: [3] }) +
                CLOUD_TEX.glsl({ name: 'cloudTex', dims: [3] }) + CLOUD_FINE.glsl({ name: 'cloudFine', dims: [3] }) + `
 const int LOWS = ${LOWS.length / 8};
 const float R = ${R}.0;
+
+// How far a heap may grow at a cell's middle, up (the drifted frame), for
+// the air keepClear keeps: none within AIR_CLEAR of a point, growing to its
+// own a heap's cell further out (so it shrinks to nothing, never cut off).
+float clearAir(vec3 up) {
+    float k = 1.0;
+    int n = int(cloudData(${AIR_AT}).x);
+    for (int i = 0; i < n; ++i)
+        k = min(k, smoothstep(${AIR_CLEAR}.0, ${AIR_CLEAR + HEAP_CELL}.0, R * length(up - cloudData(${AIR_AT} + 1 + i).xyz)));
+    return k;
+}
 
 vec3 turnAbout(vec3 d, vec3 c, float k) {
     float ck = cos(k), sk = sin(k);
@@ -1016,7 +1035,8 @@ bool cloudHeap(CloudHeapCell cl, out CloudHeap h) {
     float cover, wHeap, base, tops;
     deckAt(cl.up * rb, cl.cover, 0.0, cover, wHeap, base, tops);
     vec3 a = cl.hash;
-    float present = smoothstep(0.0, 0.6, cover);
+    float clear = clearAir(cl.up);
+    float present = smoothstep(0.0, 0.6, cover) * clear;
     // The heaps clump: a noise some 14 km a tile (its lumps a few
     // kilometres) raises and lowers how many stand, so they gather in
     // groups with wide gaps of clear sky between, not a lattice's even
@@ -1079,7 +1099,7 @@ bool cloudHeap(CloudHeapCell cl, out CloudHeap h) {
     // a small flat heap off its side, close or a little apart, as large as
     // a second heap where the cover is full; on its own base, a few tens of
     // metres off the heap's.
-    float fg = smoothstep(f.y, f.y + 0.15, smoothstep(0.15, 0.7, cover) * clump) * wHeap;
+    float fg = smoothstep(f.y, f.y + 0.15, smoothstep(0.15, 0.7, cover) * clump * clear) * wHeap;
     h.lobe[3] = vec4(0.0);
     h.middle.w = 0.0;
     if (fg > 0.0) {
@@ -1208,11 +1228,38 @@ float cloudDensity(CloudPoint q) {
 `;
 // (The clouds drift east, and a little north, at some 10 m/s.)
 export const WIND = [9, 0, -3];
-scene.setClouds({ module: CLOUDS, bottom: CLOUD_BOTTOM, top: CLOUD_TOP, data: LOWS, land,
-                  forms: { extinction: 0.06, billowScale: 2400, detailScale: 1200, edge: CLOUD_EDGE },
-                  heaps: { cell: HEAP_CELL },
-                  wind: WIND,
-                  enabled: !((bro.app && bro.app.argv) || []).includes('noclouds') });
+const setDeck = (air) => scene.setClouds({
+    module: CLOUDS, bottom: CLOUD_BOTTOM, top: CLOUD_TOP, data: LOWS.concat([air.length, 0, 0, 0], ...air.map((d) => [d[0], d[1], d[2], 0])), land,
+    forms: { extinction: 0.06, billowScale: 2400, detailScale: 1200, edge: CLOUD_EDGE },
+    heaps: { cell: HEAP_CELL },
+    wind: WIND,
+    enabled: !((bro.app && bro.app.argv) || []).includes('noclouds') });
+setDeck([]);
+
+// A scene that needs room: no plants within PAD_OPEN m of each of `pads`
+// (body directions), thinning back in by PAD_OPEN + PAD_EDGE; no heap
+// within AIR_CLEAR of each of `air` (body points, each with the wind
+// clock's time `t` it is to be clear at: [x, y, z, t]), at most AIR_MOST
+// of them. The flight's lift-off and landing, and the air it climbs and
+// comes down through, made so rather than searched for.
+const PAD_OPEN = 120, PAD_EDGE = 120;
+export function keepClear({ pads = [], air = [] }) {
+    let open = null;
+    for (const d of pads) {
+        // (The plants' fields are read at their point on the datum.)
+        const dist = N('DistanceToPoint', { 'Distance Function': 'Euclidean', 'Point X': d[0] * R, 'Point Y': d[1] * R, 'Point Z': d[2] * R });
+        const k = clamp01(affine(dist, 1 / PAD_EDGE, -PAD_OPEN / PAD_EDGE));
+        open = open ? N('Min', { LHS: open, RHS: k }) : k;
+    }
+    plants.setPlants({ rules: plantRules(open) });
+    if (air.length > AIR_MOST) throw new RangeError(`keepClear: ${air.length} points of air, at most ${AIR_MOST}`);
+    // (Each where its air will have drifted from by its time: the heaps'
+    // cells are the drifted frame's.)
+    setDeck(air.map(([x, y, z, t]) => {
+        const p = [x - WIND[0] * t, y - WIND[1] * t, z - WIND[2] * t], l = Math.hypot(p[0], p[1], p[2]);
+        return p.map((v) => v / l);
+    }));
+}
 
 // --- views ---------------------------------------------------------------------------
 
