@@ -1256,10 +1256,14 @@ float cloudDensity(CloudPoint q) {
 `;
 // (The clouds drift east, and a little north, at some 10 m/s.)
 export const WIND = [9, 0, -3];
+// (shells=<m>: where the heaps begin to be drawn as shells past the march,
+// the engine's own unless asked; 0 the march to the horizon.)
+const SHELLS_ARG = ARGV.find((s) => s.startsWith('shells='));
+const SHELLS = SHELLS_ARG ? +SHELLS_ARG.slice(7) : undefined;
 const setDeck = (air) => scene.setClouds({
     module: CLOUDS, bottom: CLOUD_BOTTOM, top: CLOUD_TOP, data: LOWS.concat([air.length, 0, 0, 0], ...air.map((d) => [d[0], d[1], d[2], 0])), land,
     forms: { extinction: 0.06, billowScale: 2400, detailScale: 1200, edge: CLOUD_EDGE },
-    heaps: { cell: HEAP_CELL },
+    heaps: { cell: HEAP_CELL, shells: SHELLS },
     wind: WIND,
     enabled: !((bro.app && bro.app.argv) || []).includes('noclouds') });
 setDeck([]);
