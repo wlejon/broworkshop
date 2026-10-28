@@ -23,7 +23,8 @@
 // plants,grass, frames (each rung's render, its normals and its exactly
 // black pixels), twin (each rung again with the land's canopy for the
 // plants, the two set against each other; twinpaint: with their painted
-// crowns, real=5, crowns=<m> how far). A few heights and squares run
+// crowns, real=5, crowns=<m> how far), tilt=<deg> (each rung's eye that
+// far from overhead, the squares at a slant as a flight sees them). A few heights and squares run
 // in seconds: 2 to 4 rungs of 1 or 2 squares at 640x360 in 5 to 10 s, the
 // whole default ladder some 25 s. Give it ev=15 (the planet's metered
 // EV by day; world.js then fixes the exposure there): an adapting meter is
@@ -136,8 +137,12 @@ squares.forEach((sq) => {
 const W = window.innerWidth, H = window.innerHeight;
 const rungs = [];
 // (The rung under the deck, 0: the eye 2 m over the ground, looking up.)
+// (tilt=<deg>: each rung's eye that far from overhead, back along the way,
+// still looking at the squares: the land at a slant, as a flight sees it;
+// its height h, its distance h / cos(tilt).)
+const TILT = +opt('tilt', 0) * Math.PI / 180;
 for (const h of UP ? [...HEIGHTS, 0] : HEIGHTS) {
-    const eyeB = mul(dir, R + g0 + (h > 0 ? h : 2));
+    const eyeB = sub(mul(dir, R + g0 + (h > 0 ? h : 2)), mul(way, h > 0 ? h * Math.tan(TILT) : 0));
     const eye = scene.toPlace(eyeB), look = scene.toPlace(h > 0 ? centre : mul(dir, R + g0 + 1e4));
     const upP = sub(scene.toPlace(add(eyeB, way)), eye);
     holdView(eye, look, Math.max(0.1, 0.01 * h), Math.max(4e5, 4 * Math.sqrt(2 * R * h) + 4e5), upP);
