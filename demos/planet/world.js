@@ -1205,23 +1205,27 @@ float cloudDensity(CloudPoint q) {
     vec4 nf = cloudNoise(pb, q.footprint / BROKEN_TILE);
     float sf = sqrt(max(nf.w - nf.x * nf.x, 0.0) + 1e-4);
     float rafts = share <= 1e-3 ? 0.0 : (share >= 1.0 - 1e-3 ? 1.0 : 1.0 / (1.0 + exp(-1.702 * (nf.x - t) / sf)));
-    // From afar: the share of the air the rafts fill (a slab cut nearly
-    // square, its top a little ragged on the mean), under 0 below and over
-    // them, by how far.
-    float slabFar = rafts * min(min((z - zb) / 500.0, (zt - z) / 600.0), 1.0);
-    float far = slabFar * (1.0 - wHeap);
-    float fn = smoothstep(0.15 * HEAP_CELL, 0.6 * HEAP_CELL, q.footprint);
-    if (fn >= 1.0) return far;
-    // Near: the shapes. The slab's top heaves in lumps a few kilometres
-    // across and over a kilometre high (the engine's noise sixteen edges a
-    // tile, 0.8 edges high: so the engine lights an overcast's top seen
-    // from afar as it is shaped, clouds.frag's clTopShade), its base less;
-    // where the system is broken it parts into its rafts (the noise over
-    // the threshold, by BROKEN_RISE metres a unit of it: no faster than the
-    // contract's fifth across).
+    // The slab's top heaves in lumps a few kilometres across and over a
+    // kilometre high (the engine's noise sixteen edges a tile, 0.8 edges
+    // high: so the engine lights an overcast's top seen from afar as it is
+    // shaped, clouds.frag's clTopShade), its base less. Over a footprint the
+    // noise is its mean there, so the top and base afar are the near ones'
+    // mean. (The far slab's own top at zt, 340 m over the near top's mean,
+    // was cloud over every top the near forms drew: their sun came through
+    // it, an overcast seen from 400 km lit in blocks of the cache's cells.)
     vec4 relief = cloudNoise(p / (16.0 * CLOUD_EDGE), q.footprint / (16.0 * CLOUD_EDGE));
     float st = zt - 0.8 * CLOUD_EDGE * relief.x - 250.0 * relief.z;
     float sb = zb + 150.0 * relief.y;
+    // From afar: the share of the air the rafts fill (a slab cut nearly
+    // square, its top a little ragged on the mean), under 0 below and over
+    // them, by how far.
+    float slabFar = rafts * min(min((z - sb) / 500.0, (st - z) / 600.0), 1.0);
+    float far = slabFar * (1.0 - wHeap);
+    float fn = smoothstep(0.15 * HEAP_CELL, 0.6 * HEAP_CELL, q.footprint);
+    if (fn >= 1.0) return far;
+    // Near: the shapes. Where the system is broken the slab parts into its
+    // rafts (the noise over the threshold, by BROKEN_RISE metres a unit of
+    // it: no faster than the contract's fifth across).
     // (The rafts' shape without the noise's octaves finer than BROKEN_LEAST:
     // the engine's billows and detail are a raft's finer shape, and the
     // edge rises slowly enough for the march to step by.)
