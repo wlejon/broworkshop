@@ -10,8 +10,12 @@
 // Controls, to find what a step is: noair (no atmosphere: the land's own
 // look; the exposure then meters the frame, so read the stops, not the
 // sheet's brightness), noshadow, plantsrange=<m> (the land's canopy nearer),
-// rgb (each square's channels over the exposure on the log too). A few
-// heights and squares run in seconds. Give it ev=15 (the planet's metered
+// rgb (each square's channels over the exposure on the log too), hide=
+// plants,grass, frames (each rung's render, its normals and its exactly
+// black pixels), twin (each rung again with the land's canopy for the
+// plants, the two set against each other). A few heights and squares run
+// in seconds: 2 to 4 rungs of 1 or 2 squares at 640x360 in 5 to 10 s, the
+// whole default ladder some 25 s. Give it ev=15 (the planet's metered
 // EV by day; world.js then fixes the exposure there): an adapting meter is
 // still moving when a rung is shot, and its reading lags, so a rung's light
 // depended on the rung before.
@@ -37,6 +41,7 @@ const tag = opt('tag') ? `_${opt('tag')}` : '';
 const HEIGHTS = opt('h', '500,1000,2000,4000,8000,16000,32000,64000,128000,256000,512000').split(',').map(Number);
 const SIZES = opt('sizes', '250,1000,4000,16000,64000').split(',').map(Number);
 const TILE = 128;
+const PLANTS_RANGE = +opt('plantsrange', 6000);   // (world.js's)
 const t0 = perf.now();
 if (!argv.some((s) => typeof s === 'string' && s.startsWith('ev=')))
     console.log('ladder: no ev= given: the exposure adapts, and a rung\'s light depends on the rungs before it');
@@ -123,13 +128,26 @@ for (const h of HEIGHTS) {
         if (ins && ins.image) bro.image.encodePngFile(`${OUT}/ladder${tag}_${h}_normals.png`, ins.image, ins.width, ins.height, 4);
     }
     const view = viewProjection(scene, im.width, im.height);
+    // (twin: the same view again with the land's canopy for the plants, read
+    // into `twin` and set against them below: the plants' hand-over seen
+    // in place.)
+    let twin = null;
+    if (argv.includes('twin')) {
+        plants.setPlants({ range: 1 });
+        perf.settle({ maxFrames: 600, kinds: ['plants', 'land'] });
+        for (let k = 0; k < 4; k++) advanceTime(16);
+        const ti = scene.toImageData();
+        twin = squares.map((sq) => { const m = readSquare(ti, view, sq, 48); return m && m.span >= 24 ? { ...m, tile: squareTile(ti, view, sq, TILE) } : null; });
+        if (argv.includes('frames')) bro.image.encodePngFile(`${OUT}/ladder${tag}_${h}_canopy.png`, ti.data, ti.width, ti.height, 4);
+        plants.setPlants({ range: PLANTS_RANGE });
+    }
     const cs = scene.cullStats();
     const exposure = cs && cs.exposureScale > 0 ? cs.exposureScale : 1;
     const reads = squares.map((sq) => {
         const m = readSquare(im, view, sq, 48);
         return m && m.span >= 24 ? { ...m, L: Math.log2((0.2126 * m.r + 0.7152 * m.g + 0.0722 * m.b) / exposure), tile: squareTile(im, view, sq, TILE) } : null;
     });
-    rungs.push({ h, exposure, reads, frames: st.frames });
+    rungs.push({ h, exposure, reads, twin, frames: st.frames });
 }
 
 // The log: a square a line, its light at each height and the step from the
@@ -176,6 +194,18 @@ SIZES.forEach((s, k) => {
     }
     console.log(`ladder: ${fmtH(s)} square, each height on the one before: ${steps.join(', ') || 'none resolved'}`);
     if (drift.length) console.log(`ladder: ${fmtH(s)} square, on ${fmtH(held[0].h)}: ${drift.join(', ')}`);
+});
+// (twin: each height's plants against the canopy drawn for them in the
+// same view, their light (stops) and their pattern.)
+if (argv.includes('twin')) SIZES.forEach((s, k) => {
+    const parts = rungs.map((r) => {
+        const a = r.reads[k], b = r.twin && r.twin[k];
+        if (!a || !b) return null;
+        const Lb = Math.log2((0.2126 * b.r + 0.7152 * b.g + 0.0722 * b.b) / r.exposure);
+        const c = cmp(b, a);
+        return `${fmtH(r.h)} ${a.L.toFixed(2)} canopy ${Lb.toFixed(2)}${c ? ` ${fmtC(c)}` : ''}`;
+    }).filter(Boolean);
+    if (parts.length) console.log(`ladder: ${fmtH(s)} square, plants against their canopy: ${parts.join(', ')}`);
 });
 
 // The sheet, at the ladder's median exposure.
