@@ -224,8 +224,14 @@ const cmp = (a, b) => {
     if (!n) return null;
     const grid = UP ? tileCloud : tileGrid;
     const c = compareGrids(grid(b.tile, TILE, n), grid(a.tile, TILE, n));
+    // (The coarser bands' r too: a pattern kept at 32 m but not at 8 m is a
+    // change of the trees' look, not of where the woods are.)
+    const coarser = BANDS.filter((m) => m < n).map((m) => {
+        const cm = compareGrids(grid(b.tile, TILE, m), grid(a.tile, TILE, m));
+        return cm ? `n${m} ${cm.r.toFixed(2)}` : null;
+    }).filter(Boolean).join(' ');
     // (The finer of the two the one with the wider span.)
-    return c && { n, ...c, ceil: a.span <= b.span ? ceiling(a, b, n) : ceiling(b, a, n) };
+    return c && { n, ...c, coarser, ceil: a.span <= b.span ? ceiling(a, b, n) : ceiling(b, a, n) };
 };
 // The ceiling: what a perfect refinement would score. The finer view's tile
 // drawn as the coarser view would draw that same ground, each of its pixels
@@ -266,7 +272,7 @@ const ceiling = (coarse, fine, n) => {
     const c = compareGrids(tileGrid(ideal(fine.tile, coarse.span), TILE, n), tileGrid(fine.tile, TILE, n));
     return c && c.r;
 };
-const fmtC = (c) => `n${c.n} r ${c.r.toFixed(2)}${c.ceil != null ? ` (ceiling ${c.ceil.toFixed(2)})` : ''} d ${c.d.toFixed(2)} spread ${c.sa.toFixed(2)}->${c.sb.toFixed(2)}`;
+const fmtC = (c) => `n${c.n} r ${c.r.toFixed(2)}${c.ceil != null ? ` (ceiling ${c.ceil.toFixed(2)})` : ''} d ${c.d.toFixed(2)} spread ${c.sa.toFixed(2)}->${c.sb.toFixed(2)}${c.coarser ? ` [${c.coarser}]` : ''}`;
 SIZES.forEach((s, k) => {
     const held = rungs.map((r) => ({ h: r.h, m: r.reads[k] })).filter((x) => x.m);
     if (held.length < 2) return;
