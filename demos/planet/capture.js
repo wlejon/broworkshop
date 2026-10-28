@@ -28,6 +28,10 @@
 //       least) and B's difference from A per pass, with its standard error;
 //       captures/planet_<shot>_a.png and _b.png,
 //       the two sets at the same moment
+//   ... capture.js -- compare [shot,...] dir=<tree> ko=SUN,FORMS [frames=30]
+//       set B the tree compiled with KO_SUN, then KO_FORMS (its parts
+//       guarded `#ifndef KO_<part>`), each against A: a line a part, the
+//       frame's difference and the passes that moved
 //
 // Every view waits for the scene to settle (perf.settle: the land's regions
 // and tiles, the plants placed, the clouds' bakes, the exposure) on a held
@@ -190,6 +194,28 @@ if (mode === 'still') {
         ms.sort((a, b) => a - b);
         const mean = ms.reduce((a, b) => a + b, 0) / Math.max(ms.length, 1);
         console.log(`${shot}: ${mean.toFixed(2)} / ${(ms[ms.length >> 1] || 0).toFixed(2)} / ${(ms[ms.length - 1] || 0).toFixed(2)} ms`);
+    }
+} else if (mode === 'compare' && opt('ko')) {
+    // (ko=A,B: set B the tree compiled with KO_A, then with KO_B, each
+    // against A on the same settled view: a part's cost, guarded
+    // `#ifndef KO_<part>` in the tree.)
+    const dir = opt('dir');
+    if (!dir) throw new Error('compare: dir=<shader tree> is required');
+    const frames = +(opt('frames') || 30);
+    for (const shot of shotsOf(argv[1])) {
+        settleShot(shot);
+        for (const name of opt('ko').split(',')) {
+            const set = perf.loadShaderSet(dir, { defines: `KO_${name}` });
+            const r = perf.compareShaders({ frames });
+            const moved = Object.keys(r.diff.passes)
+                .filter((k) => Math.abs(r.diff.passes[k].ms) > Math.max(0.02, 2 * r.diff.passes[k].se))
+                .sort((x, y) => r.diff.passes[x].ms - r.diff.passes[y].ms)
+                .map((k) => `${k} ${r.a.passes[k].mean.toFixed(3)} ${r.diff.passes[k].ms >= 0 ? '+' : ''}${r.diff.passes[k].ms.toFixed(3)} (${r.diff.passes[k].pct.toFixed(0)}%)`).join(', ');
+            // (The GPU's clock moves between knock-outs, so A's own ms with
+            // each: a part's share of its pass is what compares across them.)
+            const d = r.diff.frame;
+            console.log(`${shot} KO_${name}: ${set.differing} shaders; frame A ${r.a.frame.mean.toFixed(2)} ${d.ms >= 0 ? '+' : ''}${d.ms.toFixed(3)} ±${d.se.toFixed(3)} ms${moved ? `; ${moved}` : ''}${set.failed.length ? `; failed: ${set.failed.join(', ')}` : ''}`);
+        }
     }
 } else if (mode === 'compare') {
     const dir = opt('dir');
