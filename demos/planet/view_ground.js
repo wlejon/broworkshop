@@ -98,6 +98,28 @@ export function readSquare(im, view, sq, n, whole = 0.9) {
     return { r: r / k, g: g / k, b: b / k, span: Math.max(maxX - minX, maxY - minY) * n / Math.max(n - 1, 1) };
 }
 
+// The square resampled into a t x t tile of one value a texel, `f(data, o)`
+// at each of s x s pixels over it (o the pixel's byte offset), their mean;
+// texels off the screen NaN.
+export function squareValues(im, view, sq, t, f, s = 2) {
+    const px = im.data, iw = im.width, ih = im.height;
+    const out = new Float64Array(t * t);
+    for (let y = 0; y < t; y++)
+        for (let x = 0; x < t; x++) {
+            let v = 0, k = 0;
+            for (let j = 0; j < s; j++)
+                for (let i = 0; i < s; i++) {
+                    const q = view.project(pointOf(sq, (x + (i + 0.5) / s) / t, 1 - (y + (j + 0.5) / s) / t));
+                    if (!q) continue;
+                    const X = Math.floor(q[0]), Y = Math.floor(q[1]);
+                    if (X < 0 || Y < 0 || X >= iw || Y >= ih) continue;
+                    v += f(px, (Y * iw + X) * 4); k++;
+                }
+            out[y * t + x] = k ? v / k : NaN;
+        }
+    return out;
+}
+
 // A tile (squareTile's, t x t) as an n x n grid of its blocks' light: the
 // mean linear luma of each t/n square block, in stops (NaN where a block
 // has no texel on the screen). What a coarser view would draw there, read
