@@ -10,6 +10,8 @@
 // Controls, to find what a step is: noair (no atmosphere: the land's own
 // look; the exposure then meters the frame, so read the stops, not the
 // sheet's brightness), noshadow, plantsrange=<m> (the land's canopy nearer),
+// plantshadow=<m> (the plants cast so far: 6000, the truth for the ground's
+// shade among them past their cast range),
 // rgb (each square's channels over the exposure on the log too), hide=
 // plants,grass, frames (each rung's render, its normals and its exactly
 // black pixels), twin (each rung again with the land's canopy for the
