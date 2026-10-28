@@ -224,9 +224,49 @@ const cmp = (a, b) => {
     if (!n) return null;
     const grid = UP ? tileCloud : tileGrid;
     const c = compareGrids(grid(b.tile, TILE, n), grid(a.tile, TILE, n));
-    return c && { n, ...c };
+    // (The finer of the two the one with the wider span.)
+    return c && { n, ...c, ceil: a.span <= b.span ? ceiling(a, b, n) : ceiling(b, a, n) };
 };
-const fmtC = (c) => `n${c.n} r ${c.r.toFixed(2)} d ${c.d.toFixed(2)} spread ${c.sa.toFixed(2)}->${c.sb.toFixed(2)}`;
+// The ceiling: what a perfect refinement would score. The finer view's tile
+// drawn as the coarser view would draw that same ground, each of its pixels
+// the mean of what it covers, and read back as squareTile reads (2 x 2
+// points a texel, each a pixel's): its r against the finer tile at the
+// same band is the most the pair can show, the sampling's own loss. A step
+// near its ceiling has refined; one well under it has changed.
+const ideal = (fine, span) => {
+    const P = Math.max(1, Math.round(span)), q = TILE / P, out = new Float64Array(TILE * TILE * 3);
+    const pix = new Float64Array(P * P * 3);
+    for (let j = 0; j < P; j++)
+        for (let i = 0; i < P; i++) {
+            const s = [0, 0, 0];
+            let k = 0;
+            for (let y = Math.floor(j * q); y < Math.min(TILE, Math.ceil((j + 1) * q)); y++)
+                for (let x = Math.floor(i * q); x < Math.min(TILE, Math.ceil((i + 1) * q)); x++) {
+                    const o = (y * TILE + x) * 3;
+                    if (Number.isNaN(fine[o])) continue;
+                    s[0] += fine[o]; s[1] += fine[o + 1]; s[2] += fine[o + 2]; k++;
+                }
+            for (let c = 0; c < 3; c++) pix[(j * P + i) * 3 + c] = k ? s[c] / k : NaN;
+        }
+    for (let y = 0; y < TILE; y++)
+        for (let x = 0; x < TILE; x++)
+            for (let c = 0; c < 3; c++) {
+                let s = 0;
+                for (let b = 0; b < 2; b++)
+                    for (let a = 0; a < 2; a++) {
+                        const I = Math.min(P - 1, Math.floor((x + (a + 0.5) / 2) / q)), J = Math.min(P - 1, Math.floor((y + (b + 0.5) / 2) / q));
+                        s += pix[(J * P + I) * 3 + c];
+                    }
+                out[(y * TILE + x) * 3 + c] = s / 4;
+            }
+    return out;
+};
+const ceiling = (coarse, fine, n) => {
+    if (UP) return null;
+    const c = compareGrids(tileGrid(ideal(fine.tile, coarse.span), TILE, n), tileGrid(fine.tile, TILE, n));
+    return c && c.r;
+};
+const fmtC = (c) => `n${c.n} r ${c.r.toFixed(2)}${c.ceil != null ? ` (ceiling ${c.ceil.toFixed(2)})` : ''} d ${c.d.toFixed(2)} spread ${c.sa.toFixed(2)}->${c.sb.toFixed(2)}`;
 SIZES.forEach((s, k) => {
     const held = rungs.map((r) => ({ h: r.h, m: r.reads[k] })).filter((x) => x.m);
     if (held.length < 2) return;
