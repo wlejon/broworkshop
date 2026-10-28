@@ -1216,10 +1216,14 @@ float cloudDensity(CloudPoint q) {
     vec4 relief = cloudNoise(p / (16.0 * CLOUD_EDGE), q.footprint / (16.0 * CLOUD_EDGE));
     float st = zt - 0.8 * CLOUD_EDGE * relief.x - 250.0 * relief.z;
     float sb = zb + 150.0 * relief.y;
-    // From afar: the share of the air the rafts fill (a slab cut nearly
-    // square, its top a little ragged on the mean), under 0 below and over
-    // them, by how far.
-    float slabFar = rafts * min(min((z - sb) / 500.0, (st - z) / 600.0), 1.0);
+    // From afar: the near slab's field over the rafts' share of the air,
+    // under 0 below and over them, by how far. (Its own law, a half 300 m
+    // under the near top and rising over 600 m, was another deck to the
+    // forms: the cache's levels that took the near slab (cells under
+    // 0.15 HEAP_CELL) and those that took this one disagreed over the top,
+    // an overcast's sun depth stepping at a level's square about the eye
+    // and its walls lit in contours, from 128 km.)
+    float slabFar = rafts * min(0.5 + min((z - sb) * BASE_SHARP, st - z) / CLOUD_EDGE, 1.0);
     float far = slabFar * (1.0 - wHeap);
     float fn = smoothstep(0.15 * HEAP_CELL, 0.6 * HEAP_CELL, q.footprint);
     if (fn >= 1.0) return far;
