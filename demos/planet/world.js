@@ -424,6 +424,7 @@ export const PLANT_RULES = plantRules(null);
 export const plants = scene.createPlants({
     module: treeModule(), species: TEMPERATE.map(treeSpecies), receivesShadow: true, range: +(ARGV.find((s) => s.startsWith('plantsrange=')) || 'plantsrange=6000').slice(12), land,
     ...(ARGV.find((s) => s.startsWith('plantshadow=')) ? { shadowRange: +ARGV.find((s) => s.startsWith('plantshadow=')).slice(12) } : {}),
+    ...(ARGV.find((s) => s.startsWith('plantpixels=')) ? { pixels: +ARGV.find((s) => s.startsWith('plantpixels=')).slice(12) } : {}),
     rules: PLANT_RULES,
 });
 plants.castsShadow = true;

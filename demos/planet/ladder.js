@@ -11,7 +11,8 @@
 // look; the exposure then meters the frame, so read the stops, not the
 // sheet's brightness), noshadow, plantsrange=<m> (the land's canopy nearer),
 // plantshadow=<m> (the plants cast so far: 6000, the truth for the ground's
-// shade among them past their cast range), low=<i> (the squares under the
+// shade among them past their cast range), plantpixels=<px> (the size an
+// element is kept to past full detail: smaller, crowns of more elements), low=<i> (the squares under the
 // weather's low i, the place moved there: the same column of cloud from
 // every height, with the air on; the log lists each low's sun, 12 and 14
 // under a high one, 17 a tropical cyclone's), up (the clouds' ladder: the
