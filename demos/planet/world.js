@@ -475,7 +475,7 @@ function exposeFor(pos) {
 // ones, tighter and faster), counter-clockwise in the north and clockwise
 // in the south. Two vec4s a low: its centre and turn (radians at its
 // heart), then its size (radians) and how overcast its heart is.
-const LOWS = (() => {
+export const LOWS = (() => {
     let s = (SEED * 7919) >>> 0;
     const rnd = () => {
         s = (s + 0x6D2B79F5) >>> 0;

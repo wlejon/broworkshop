@@ -11,7 +11,10 @@
 // look; the exposure then meters the frame, so read the stops, not the
 // sheet's brightness), noshadow, plantsrange=<m> (the land's canopy nearer),
 // plantshadow=<m> (the plants cast so far: 6000, the truth for the ground's
-// shade among them past their cast range),
+// shade among them past their cast range), low=<i> (the squares under the
+// weather's low i, the place moved there: the same column of cloud from
+// every height, with the air on; the log lists each low's sun, 12 and 14
+// under a high one, 17 a tropical cyclone's),
 // rgb (each square's channels over the exposure on the log too), hide=
 // plants,grass, frames (each rung's render, its normals and its exactly
 // black pixels), twin (each rung again with the land's canopy for the
@@ -30,7 +33,7 @@
 // the land drawn as one thing from every height changes little and
 // smoothly; a hand-over to something else steps.
 
-import { holdView, land, plants, grass, scene, R, setShot, still, sun } from "/app/world.js";
+import { holdView, land, plants, grass, scene, R, setShot, still, sun, sunBody, LOWS } from "/app/world.js";
 import { sub, add, mul, unit, cross, dot, viewProjection, groundSquare, readSquare, squareTile, tileGrid, compareGrids, toSrgb } from "/app/view_ground.js";
 
 const argv = (bro.app && bro.app.argv) || [];
@@ -70,7 +73,25 @@ const way = (() => {
     return unit(sub(d, mul(shot, dot(d, shot))));
 })();
 const [ax, az] = opt('at', '0,0').split(',').map((s) => +s * 1000);
-const dir = unit(add(mul(shot, R), add(mul(way, ax), mul(cross(shot, way), az))));
+// (low=<i>: the spot under the weather's low i instead, its heart: the
+// same column of cloud from every height. world.js's LOWS, 16 westerly
+// lows then 3 tropical cyclones.)
+const LOW = opt('low');
+// (Each low's sun, how high it stands over its heart, and its size, on the
+// log: a low under the night is no rung's.)
+for (let i = 0; LOW !== undefined && 8 * i < LOWS.length; i++) {
+    const c = unit(LOWS.slice(8 * i, 8 * i + 3));
+    const up = Math.asin(Math.max(-1, Math.min(1, -dot(c, sunBody)))) * 180 / Math.PI;
+    console.log(`ladder: low ${i}: the sun ${up.toFixed(0)} degrees up, ${(LOWS[8 * i + 4] * R / 1000).toFixed(0)} km`);
+}
+const dir = LOW !== undefined ? unit(LOWS.slice(8 * +LOW, 8 * +LOW + 3))
+                              : unit(add(mul(shot, R), add(mul(way, ax), mul(cross(shot, way), az))));
+// (A low lies thousands of km off: the place moved under it first, so the
+// land's heights and every place point below are its.)
+if (LOW !== undefined) {
+    scene.reanchorAt(mul(dir, R));
+    perf.settle({ maxFrames: 300, kinds: ['land processes'] });
+}
 // (The ground under it: the land's height in the place frame, its curve
 // taken out.)
 const groundAt = (d) => {
