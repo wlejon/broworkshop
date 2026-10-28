@@ -27,7 +27,8 @@
 //       (perf.compareShaders): each set's frame and pass GPU ms (mean and
 //       least) and B's difference from A per pass, with its standard error;
 //       captures/planet_<shot>_a.png and _b.png,
-//       the two sets at the same moment
+//       the two sets at the same moment; with crop=x,y,w,h, B's light on
+//       A's over that rect in 32 px blocks (looksDiff)
 //   ... capture.js -- compare [shot,...] dir=<tree> ko=SUN,FORMS [frames=30]
 //       set B the tree compiled with KO_SUN, then KO_FORMS (its parts
 //       guarded `#ifndef KO_<part>`), each against A: a line a part, the
@@ -49,6 +50,44 @@ const opt = (key) => {
 // the rate the frames come, so `cost fps=360` is the 360 fps frame.)
 const fps = +(opt('fps') ?? 30);
 const step = (seconds) => { for (let i = 0, n = Math.max(1, Math.round(seconds * fps)); i < n; i++) advanceTime(1000 / fps); };
+// B's light on A's over rect `c` (x, y, w, h), both toImageData pictures:
+// each 32 px block's mean linear luma, its log2; the blocks' mean
+// difference in stops and mean |difference|, by thirds of the rect top to
+// bottom too (far to near over ground), and r of the two sets of blocks.
+const looksDiff = (a, b, c) => {
+    const lin = (v) => { v /= 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+    const luma = (im, x, y) => { const i = (im.channels || 4) * (y * im.width + x); return 0.2126 * lin(im.data[i]) + 0.7152 * lin(im.data[i + 1]) + 0.0722 * lin(im.data[i + 2]); };
+    const B = 32, rows = [];
+    for (let y = c[1]; y + B <= c[1] + c[3]; y += B) {
+        const row = [];
+        for (let x = c[0]; x + B <= c[0] + c[2]; x += B) {
+            let sa = 0, sb = 0;
+            for (let j = 0; j < B; j += 2) for (let i = 0; i < B; i += 2) { sa += luma(a, x + i, y + j); sb += luma(b, x + i, y + j); }
+            row.push([Math.log2(Math.max(sa, 1e-6)), Math.log2(Math.max(sb, 1e-6))]);
+        }
+        rows.push(row);
+    }
+    const stat = (blocks) => {
+        const n = blocks.length || 1;
+        const d = blocks.reduce((s, [p, q]) => s + q - p, 0) / n;
+        const ad = blocks.reduce((s, [p, q]) => s + Math.abs(q - p), 0) / n;
+        return [d, ad];
+    };
+    const all = rows.flat();
+    const ma = all.reduce((s, v) => s + v[0], 0) / all.length, mb = all.reduce((s, v) => s + v[1], 0) / all.length;
+    let sab = 0, saa = 0, sbb = 0;
+    for (const [p, q] of all) { sab += (p - ma) * (q - mb); saa += (p - ma) ** 2; sbb += (q - mb) ** 2; }
+    const third = Math.ceil(rows.length / 3);
+    const parts = [0, 1, 2].map((k) => stat(rows.slice(k * third, (k + 1) * third).flat()))
+        .map(([d, ad]) => `${d >= 0 ? '+' : ''}${d.toFixed(2)}/${ad.toFixed(2)}`).join(' ');
+    const [d, ad] = stat(all);
+    return `${all.length} blocks: d ${d >= 0 ? '+' : ''}${d.toFixed(2)} |d| ${ad.toFixed(2)} stop, r ${(sab / Math.sqrt(saa * sbb || 1)).toFixed(2)}; thirds top to bottom (d/|d|) ${parts}`;
+};
+// The composited frame, what screenshot() writes, as its own copy.
+const frameCopy = () => {
+    const f = frameImage();
+    return { width: f.width, height: f.height, channels: 4, data: new Uint8Array(f.data) };
+};
 const shotsOf = (s) => (s && !s.includes('=') ? s : Object.keys(SHOTS).join(',')).split(',').filter((k) => SHOTS[k]);
 // The scene settled for the view on a held clock (at most `max` frames;
 // `kinds` only those kinds of work).
@@ -215,6 +254,20 @@ if (mode === 'still') {
             // each: a part's share of its pass is what compares across them.)
             const d = r.diff.frame;
             console.log(`${shot} KO_${name}: ${set.differing} shaders; frame A ${r.a.frame.mean.toFixed(2)} ${d.ms >= 0 ? '+' : ''}${d.ms.toFixed(3)} ±${d.se.toFixed(3)} ms${moved ? `; ${moved}` : ''}${set.failed.length ? `; failed: ${set.failed.join(', ')}` : ''}`);
+            // (crop=x,y,w,h: and its picture's light on A's there.)
+            const crop = (opt('crop') || '').split(';').filter(Boolean).map((c) => c.split(',').map(Number))[0];
+            if (crop) {
+                const ims = {};
+                for (const s of ['a', 'b']) {
+                    perf.useShaderSet(s, { rebake: true });
+                    settle(`${shot} ${s}`, 600);
+                    const path = `${OUT}/planet_${shot}_ko_${s === 'b' ? name : 'A'}.png`;
+                    screenshot(path);
+                    ims[s] = frameCopy();
+                }
+                perf.useShaderSet('a', { rebake: true });
+                console.log(`${shot} KO_${name} looks: ${looksDiff(ims.a, ims.b, crop)}`);
+            }
         }
     }
 } else if (mode === 'compare') {
@@ -238,12 +291,17 @@ if (mode === 'still') {
             .sort((x, y) => r.a.passes[y].mean - r.a.passes[x].mean)
             .forEach((k) => console.log(row(k, r.a.passes[k], r.b.passes[k], r.diff.passes[k])));
         // The two sets' pictures at the same moment, each set's bakes made by it.
+        const ims = {};
         for (const s of ['a', 'b']) {
             perf.useShaderSet(s, { rebake: true });
             settle(`${shot} ${s}`, 600);
             screenshot(`${OUT}/planet_${shot}_${s}.png`);
+            ims[s] = frameCopy();
         }
         perf.useShaderSet('a', { rebake: true });
         console.log(`${shot}: captures/planet_${shot}_a.png, captures/planet_${shot}_b.png`);
+        // (crop=x,y,w,h: B's light on A's over that rect, in blocks.)
+        const crop = (opt('crop') || '').split(';').filter(Boolean).map((c) => c.split(',').map(Number))[0];
+        if (crop) console.log(`${shot} looks: ${looksDiff(ims.a, ims.b, crop)}`);
     }
 }
