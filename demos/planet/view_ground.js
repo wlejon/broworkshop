@@ -98,6 +98,46 @@ export function readSquare(im, view, sq, n, whole = 0.9) {
     return { r: r / k, g: g / k, b: b / k, span: Math.max(maxX - minX, maxY - minY) * n / Math.max(n - 1, 1) };
 }
 
+// A tile (squareTile's, t x t) as an n x n grid of its blocks' light: the
+// mean linear luma of each t/n square block, in stops (NaN where a block
+// has no texel on the screen). What a coarser view would draw there, read
+// off a finer one.
+export function tileGrid(tile, t, n) {
+    const b = t / n, out = new Float64Array(n * n);
+    for (let y = 0; y < n; y++)
+        for (let x = 0; x < n; x++) {
+            let s = 0, k = 0;
+            for (let j = y * b; j < (y + 1) * b; j++)
+                for (let i = x * b; i < (x + 1) * b; i++) {
+                    const o = (j * t + i) * 3;
+                    if (Number.isNaN(tile[o])) continue;
+                    s += 0.2126 * tile[o] + 0.7152 * tile[o + 1] + 0.0722 * tile[o + 2];
+                    k++;
+                }
+            out[y * n + x] = k ? Math.log2(Math.max(s / k, 1e-9)) : NaN;
+        }
+    return out;
+}
+
+// Two grids of the same ground (tileGrid's) compared, each with its mean
+// taken out: what is left is the ground's pattern at that band. `r` their
+// correlation (1 the same pattern, 0 none of it kept), `sa` and `sb` each
+// one's spread (stops: a pattern washed out has a smaller one), `d` the rms
+// of their difference (stops). null with under half the blocks in both.
+export function compareGrids(a, b) {
+    let n = 0, ma = 0, mb = 0;
+    for (let k = 0; k < a.length; k++) if (!Number.isNaN(a[k]) && !Number.isNaN(b[k])) { ma += a[k]; mb += b[k]; n++; }
+    if (n < a.length / 2) return null;
+    ma /= n; mb /= n;
+    let saa = 0, sbb = 0, sab = 0, dd = 0;
+    for (let k = 0; k < a.length; k++) {
+        if (Number.isNaN(a[k]) || Number.isNaN(b[k])) continue;
+        const x = a[k] - ma, y = b[k] - mb;
+        saa += x * x; sbb += y * y; sab += x * y; dd += (x - y) ** 2;
+    }
+    return { r: sab / Math.sqrt(Math.max(saa * sbb, 1e-12)), sa: Math.sqrt(saa / n), sb: Math.sqrt(sbb / n), d: Math.sqrt(dd / n) };
+}
+
 // The square resampled into a t x t tile (linear RGB, three floats a texel,
 // each the mean of s x s points over it); texels off the screen NaN.
 export function squareTile(im, view, sq, t, s = 2) {

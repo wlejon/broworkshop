@@ -25,7 +25,7 @@
 // smoothly; a hand-over to something else steps.
 
 import { holdView, land, plants, scene, R, setShot, still, sun } from "/app/world.js";
-import { sub, add, mul, unit, cross, dot, viewProjection, groundSquare, readSquare, squareTile, toSrgb } from "/app/view_ground.js";
+import { sub, add, mul, unit, cross, dot, viewProjection, groundSquare, readSquare, squareTile, tileGrid, compareGrids, toSrgb } from "/app/view_ground.js";
 
 const argv = (bro.app && bro.app.argv) || [];
 const opt = (key, d) => {
@@ -84,6 +84,7 @@ for (const h of HEIGHTS) {
     // (Settled as far as the squares it reads: the plants placed out to
     // them, not only about the eye.)
     const st = perf.settle({ maxFrames: 3000, within: Math.max(1000, 1.2 * h + 0.75 * SIZES[SIZES.length - 1]) });
+    if (st.stalled || !st.settled) console.log(`ladder: ${h} m unsettled after ${st.frames} frames: ${st.pending.join('; ')}`);
     holdView(eye, look, Math.max(0.1, 0.01 * h), Math.max(4e5, 4 * Math.sqrt(2 * R * h) + 4e5), upP);
     // (hold=<frames> more: work the settle is not offered, which comes in
     // over frames, the trees' among it.)
@@ -115,6 +116,34 @@ SIZES.forEach((s, k) => {
         return `${fmtH(r.h)} ${m.L.toFixed(2)}${step}${rgb}`;
     }).filter(Boolean);
     console.log(`ladder: ${fmtH(s)} square: ${parts.join(', ')}`);
+});
+
+// The structure: each square's pattern (its blocks' light, the mean taken
+// out) at each height against the height before and against the lowest
+// that holds it, at the finest band both views resolve (n x n blocks, a
+// block 3 px or more in each). Refining keeps it: r near 1 and the spreads
+// alike; a hand-over to something else drops r, or the spread (washed
+// out) or raises it (a pattern of its own).
+const BANDS = [32, 16, 8, 4];
+const bandFor = (a, b) => BANDS.find((n) => n * 3 <= Math.min(a.span, b.span));
+const cmp = (a, b) => {
+    const n = bandFor(a, b);
+    if (!n) return null;
+    const c = compareGrids(tileGrid(b.tile, TILE, n), tileGrid(a.tile, TILE, n));
+    return c && { n, ...c };
+};
+const fmtC = (c) => `n${c.n} r ${c.r.toFixed(2)} d ${c.d.toFixed(2)} spread ${c.sa.toFixed(2)}->${c.sb.toFixed(2)}`;
+SIZES.forEach((s, k) => {
+    const held = rungs.map((r) => ({ h: r.h, m: r.reads[k] })).filter((x) => x.m);
+    if (held.length < 2) return;
+    const steps = [], drift = [];
+    for (let j = 1; j < held.length; j++) {
+        const c = cmp(held[j].m, held[j - 1].m), f = cmp(held[j].m, held[0].m);
+        if (c) steps.push(`${fmtH(held[j].h)} ${fmtC(c)}`);
+        if (f && j > 1) drift.push(`${fmtH(held[j].h)} r ${f.r.toFixed(2)} (n${f.n})`);
+    }
+    console.log(`ladder: ${fmtH(s)} square, each height on the one before: ${steps.join(', ') || 'none resolved'}`);
+    if (drift.length) console.log(`ladder: ${fmtH(s)} square, on ${fmtH(held[0].h)}: ${drift.join(', ')}`);
 });
 
 // The sheet, at the ladder's median exposure.
