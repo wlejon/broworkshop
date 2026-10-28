@@ -1225,7 +1225,11 @@ float cloudDensity(CloudPoint q) {
     // an overcast's sun depth stepping at a level's square about the eye
     // and its walls lit in contours, from 128 km.)
     float slabFar = rafts * min(0.5 + min((z - sb) * BASE_SHARP, st - z) / CLOUD_EDGE, 1.0);
-    float far = slabFar * (1.0 - wHeap);
+    // (Where the air is all heaped, an edge clear of any slab, as the near
+    // law has it: as 0, a cloud's margin, the march crossed a far field of
+    // heaps a pixel's rise at a time, the deck 8 km deep in 80 steps from
+    // 90 km.)
+    float far = slabFar * (1.0 - wHeap) - smoothstep(0.8, 1.0, wHeap);
     float fn = smoothstep(0.15 * HEAP_CELL, 0.6 * HEAP_CELL, q.footprint);
     if (fn >= 1.0) return far;
     // Near: the shapes. Where the system is broken the slab parts into its
