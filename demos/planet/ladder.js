@@ -9,7 +9,7 @@
 //
 // Controls, to find what a step is: noair (no atmosphere: the land's own
 // look; the exposure then meters the frame, so read the stops, not the
-// sheet's brightness), noshadow, plantsrange=<m> (the land's canopy nearer),
+// sheet's brightness), noshadow, real=<m> (the scene's real band: the land's canopy past it),
 // plantshadow=<m> (the plants cast so far: 6000, the truth for the ground's
 // shade among them past their cast range), plantpixels=<px> (the size an
 // element is kept to past full detail: smaller, crowns of more elements), low=<i> (the squares under the
@@ -37,7 +37,7 @@
 // the land drawn as one thing from every height changes little and
 // smoothly; a hand-over to something else steps.
 
-import { holdView, land, plants, grass, scene, R, setShot, still, sun, sunBody, LOWS, CLOUD_BOTTOM } from "/app/world.js";
+import { holdView, land, plants, grass, scene, R, REAL, setShot, still, sun, sunBody, LOWS, CLOUD_BOTTOM } from "/app/world.js";
 import { sub, add, mul, unit, cross, dot, viewProjection, groundSquare, readSquare, squareTile, tileGrid, tileCloud, compareGrids, toSrgb } from "/app/view_ground.js";
 
 const argv = (bro.app && bro.app.argv) || [];
@@ -50,7 +50,6 @@ const tag = opt('tag') ? `_${opt('tag')}` : '';
 const HEIGHTS = opt('h', '500,1000,2000,4000,8000,16000,32000,64000,128000,256000,512000').split(',').map(Number);
 const SIZES = opt('sizes', '250,1000,4000,16000,64000').split(',').map(Number);
 const TILE = 128;
-const PLANTS_RANGE = +opt('plantsrange', 6000);   // (world.js's)
 const t0 = perf.now();
 if (!argv.some((s) => typeof s === 'string' && s.startsWith('ev=')))
     console.log('ladder: no ev= given: the exposure adapts, and a rung\'s light depends on the rungs before it');
@@ -172,13 +171,13 @@ for (const h of UP ? [...HEIGHTS, 0] : HEIGHTS) {
     // in place.)
     let twin = null;
     if (argv.includes('twin')) {
-        plants.setPlants({ range: 1 });
+        scene.setBands({ real: 5 });
         perf.settle({ maxFrames: 600, kinds: ['plants', 'land'] });
         for (let k = 0; k < 4; k++) advanceTime(16);
         const ti = scene.toImageData();
         twin = squares.map((sq) => { const m = readSquare(ti, view, sq, 48); return m && m.span >= 24 ? { ...m, tile: squareTile(ti, view, sq, TILE) } : null; });
         if (argv.includes('frames')) bro.image.encodePngFile(`${OUT}/ladder${tag}_${h}_canopy.png`, ti.data, ti.width, ti.height, 4);
-        plants.setPlants({ range: PLANTS_RANGE });
+        scene.setBands({ real: REAL });
     }
     const cs = scene.cullStats();
     const exposure = cs && cs.exposureScale > 0 ? cs.exposureScale : 1;

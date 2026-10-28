@@ -418,11 +418,15 @@ const plantRules = (open) => ({
     ],
 });
 export const PLANT_RULES = plantRules(null);
-// (plantsrange=<m>: drawn only so far, the land's canopy past it, so the same
-// land can be seen drawn both ways; plantshadow=<m>: cast so far, so the
-// canopy's shade past the cast range can be held to the plants' own.)
+// (real=<m>: the scene's real band, the plants, grass and herbs drawn as
+// themselves so far and the land's canopy and cover past it; the engine's
+// close default, the 360 fps frame, unless asked; plantshadow=<m>: cast so
+// far, so the canopy's shade past the cast range can be held to the
+// plants' own.)
+export const REAL = ARGV.find((s) => s.startsWith('real=')) ? +ARGV.find((s) => s.startsWith('real=')).slice(5) : scene.bands().real;
+scene.setBands({ real: REAL });
 export const plants = scene.createPlants({
-    module: treeModule(), species: TEMPERATE.map(treeSpecies), receivesShadow: true, range: +(ARGV.find((s) => s.startsWith('plantsrange=')) || 'plantsrange=6000').slice(12), land,
+    module: treeModule(), species: TEMPERATE.map(treeSpecies), receivesShadow: true, land,
     ...(ARGV.find((s) => s.startsWith('plantshadow=')) ? { shadowRange: +ARGV.find((s) => s.startsWith('plantshadow=')).slice(12) } : {}),
     ...(ARGV.find((s) => s.startsWith('plantpixels=')) ? { pixels: +ARGV.find((s) => s.startsWith('plantpixels=')).slice(12) } : {}),
     rules: PLANT_RULES,

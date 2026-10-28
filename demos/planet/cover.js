@@ -26,7 +26,7 @@
 // where the canopy is neither bare nor closed), and the leaves' and the
 // ground's light (stops at EV 15) each way.
 
-import { holdView, land, plants, grass, scene, R, setShot, still } from "/app/world.js";
+import { holdView, land, plants, grass, scene, R, REAL, setShot, still } from "/app/world.js";
 import { sub, add, mul, unit, cross, dot, viewProjection, groundSquare } from "/app/view_ground.js";
 
 const argv = (bro.app && bro.app.argv) || [];
@@ -36,7 +36,6 @@ const opt = (key, d) => {
 };
 const HEIGHTS = opt('h', '2000,4000').split(',').map(Number);
 const SIZE = +opt('size', 1000), NB = +opt('n', 16), S = 96;   // blocks a side; sample points a side
-const RANGE = +opt('plantsrange', 6000);   // (world.js's)
 const SET = opt('set');
 if (!SET) throw new Error('cover.js: set=<shader set dir> (its mesh.frag writing the canopy\'s cover)');
 const OUT = bro.resolvePath('/app/captures').replace(/\\/g, '/');
@@ -116,7 +115,7 @@ for (const h of HEIGHTS) {
     }
 
     // 3. The canopy's cover (set B, exposure 1); 4. the canopy lit.
-    plants.setPlants({ range: 1 });
+    scene.setBands({ real: 5 });
     perf.settle({ maxFrames: 600, kinds: ['plants', 'land'] });
     frames(4);
     perf.useShaderSet('b');
@@ -127,7 +126,7 @@ for (const h of HEIGHTS) {
     scene.setExposure(LIT);
     frames(3);
     const qim = scene.toImageData();
-    plants.setPlants({ range: RANGE });
+    scene.setBands({ real: REAL });
     // (The curve: green 0.25 came out as g, so a value v comes out as
     // v^e, e = ln g / ln 0.25.)
     let gs = 0, gn = 0;

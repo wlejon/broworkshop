@@ -47,8 +47,10 @@ const opt = (key) => {
 const shotsOf = (s) => (s && !s.includes('=') ? s : Object.keys(SHOTS).join(',')).split(',').filter((k) => SHOTS[k]);
 
 // The plants node's detail, for A/Bs: pixels=, shadowPixels=, shadowRange=, ...
-for (const k of ['pixels', 'minElements', 'woodRange', 'range', 'shadowTexels', 'shadowRange'])
+for (const k of ['pixels', 'minElements', 'woodRange', 'shadowTexels', 'shadowRange'])
     if (opt(k) !== undefined) plants.setPlants({ [k]: +opt(k) });
+// The scene's real band, for A/Bs: real=<m>.
+if (opt('real') !== undefined) scene.setBands({ real: +opt('real') });
 // The land's canopy, for A/Bs: canopy=0 leaves the land bare past the plants.
 if (opt('canopy') === '0') plants.setPlants({ land: null });
 // The probe grid, for A/Bs: probes=0 lights the ambient by the open sky.
