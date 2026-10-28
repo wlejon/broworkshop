@@ -85,6 +85,7 @@ if (mode === 'still') {
         const eye = still.view ? still.view.eye : [NaN, NaN, NaN];
         console.log(`${shot}: captures/planet_${shot}${tag}.png eye ${eye.map((v) => v.toFixed(3)).join(', ')} (ground ${land.landHeight(eye[0], eye[2]).toFixed(3)}) ev ${cs.exposureEv?.toFixed(2)} (metered ${cs.meteredEv?.toFixed(2)})${JSON.stringify(land.landStats())}`);
         console.log(`${shot}: clouds ${JSON.stringify(scene.cloudStats())}`);
+        console.log(`${shot}: turf tiles needed ${cs.groundLayerNeeded} missing ${cs.groundLayerMissing} fills ${cs.groundLayerFills} shortfall ${cs.groundLayerShortfall?.toFixed(2)} px`);
     }
 } else if (mode === 'climb') {
     const steps = +(opt('steps') || 4);
