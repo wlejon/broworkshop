@@ -422,11 +422,13 @@ export const PLANT_RULES = plantRules(null);
 // themselves so far and the land's canopy and cover past it; the engine's
 // close default, the 360 fps frame, unless asked; plantshadow=<m>: cast so
 // far, so the canopy's shade past the cast range can be held to the
-// plants' own.)
+// plants' own; crowns=<m>: past the real band the plants are painted, a
+// crown each, so far, the canopy past it.)
 export const REAL = ARGV.find((s) => s.startsWith('real=')) ? +ARGV.find((s) => s.startsWith('real=')).slice(5) : scene.bands().real;
 scene.setBands({ real: REAL });
+export const CROWNS = ARGV.find((s) => s.startsWith('crowns=')) ? +ARGV.find((s) => s.startsWith('crowns=')).slice(7) : 400;
 export const plants = scene.createPlants({
-    module: treeModule(), species: TEMPERATE.map(treeSpecies), receivesShadow: true, land,
+    module: treeModule(), species: TEMPERATE.map(treeSpecies), receivesShadow: true, land, crowns: CROWNS,
     ...(ARGV.find((s) => s.startsWith('plantshadow=')) ? { shadowRange: +ARGV.find((s) => s.startsWith('plantshadow=')).slice(12) } : {}),
     ...(ARGV.find((s) => s.startsWith('plantpixels=')) ? { pixels: +ARGV.find((s) => s.startsWith('plantpixels=')).slice(12) } : {}),
     rules: PLANT_RULES,

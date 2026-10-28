@@ -22,7 +22,8 @@
 // rgb (each square's channels over the exposure on the log too), hide=
 // plants,grass, frames (each rung's render, its normals and its exactly
 // black pixels), twin (each rung again with the land's canopy for the
-// plants, the two set against each other). A few heights and squares run
+// plants, the two set against each other; twinpaint: with their painted
+// crowns, real=5, crowns=<m> how far). A few heights and squares run
 // in seconds: 2 to 4 rungs of 1 or 2 squares at 640x360 in 5 to 10 s, the
 // whole default ladder some 25 s. Give it ev=15 (the planet's metered
 // EV by day; world.js then fixes the exposure there): an adapting meter is
@@ -37,7 +38,7 @@
 // the land drawn as one thing from every height changes little and
 // smoothly; a hand-over to something else steps.
 
-import { holdView, land, plants, grass, scene, R, REAL, setShot, still, sun, sunBody, LOWS, CLOUD_BOTTOM } from "/app/world.js";
+import { holdView, land, plants, grass, scene, R, REAL, CROWNS, setShot, still, sun, sunBody, LOWS, CLOUD_BOTTOM } from "/app/world.js";
 import { sub, add, mul, unit, cross, dot, viewProjection, groundSquare, readSquare, squareTile, tileGrid, tileCloud, compareGrids, toSrgb } from "/app/view_ground.js";
 
 const argv = (bro.app && bro.app.argv) || [];
@@ -158,7 +159,8 @@ for (const h of UP ? [...HEIGHTS, 0] : HEIGHTS) {
         bro.image.encodePngFile(`${OUT}/ladder${tag}_${h}.png`, im.data, im.width, im.height, 4);
         let black = 0;
         for (let i = 0; i < im.data.length; i += 4) if (im.data[i] + im.data[i + 1] + im.data[i + 2] === 0) black++;
-        console.log(`ladder: ${h} m frame, ${black} pixels exactly black`);
+        const ps = plants.plantStats() || {}, pp = plants.plantPlacement() || {};
+        console.log(`ladder: ${h} m frame, ${black} pixels exactly black; plants ${ps.visible} drawn to ${pp.drawn?.toFixed(0)} m, ${ps.painted} painted to ${pp.painted?.toFixed(0)} m`);
         scene.setInspect(true);
         advanceTime(16);
         const ins = scene.inspectFrame({ image: 'normals' });
@@ -170,14 +172,16 @@ for (const h of UP ? [...HEIGHTS, 0] : HEIGHTS) {
     // into `twin` and set against them below: the plants' hand-over seen
     // in place.)
     let twin = null;
-    if (argv.includes('twin')) {
+    if (argv.includes('twin') || argv.includes('twinpaint')) {
         scene.setBands({ real: 5 });
+        if (!argv.includes('twinpaint')) plants.setPlants({ crowns: 0 });
         perf.settle({ maxFrames: 600, kinds: ['plants', 'land'] });
         for (let k = 0; k < 4; k++) advanceTime(16);
         const ti = scene.toImageData();
         twin = squares.map((sq) => { const m = readSquare(ti, view, sq, 48); return m && m.span >= 24 ? { ...m, tile: squareTile(ti, view, sq, TILE) } : null; });
         if (argv.includes('frames')) bro.image.encodePngFile(`${OUT}/ladder${tag}_${h}_canopy.png`, ti.data, ti.width, ti.height, 4);
         scene.setBands({ real: REAL });
+        plants.setPlants({ crowns: CROWNS });
     }
     const cs = scene.cullStats();
     const exposure = cs && cs.exposureScale > 0 ? cs.exposureScale : 1;
@@ -286,7 +290,7 @@ SIZES.forEach((s, k) => {
 });
 // (twin: each height's plants against the canopy drawn for them in the
 // same view, their light (stops) and their pattern.)
-if (argv.includes('twin')) SIZES.forEach((s, k) => {
+if (argv.includes('twin') || argv.includes('twinpaint')) SIZES.forEach((s, k) => {
     const parts = rungs.map((r) => {
         const a = r.reads[k], b = r.twin && r.twin[k];
         if (!a || !b) return null;

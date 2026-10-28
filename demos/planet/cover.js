@@ -26,7 +26,7 @@
 // where the canopy is neither bare nor closed), and the leaves' and the
 // ground's light (stops at EV 15) each way.
 
-import { holdView, land, plants, grass, scene, R, REAL, setShot, still } from "/app/world.js";
+import { holdView, land, plants, grass, scene, R, REAL, CROWNS, setShot, still } from "/app/world.js";
 import { sub, add, mul, unit, cross, dot, viewProjection, groundSquare } from "/app/view_ground.js";
 
 const argv = (bro.app && bro.app.argv) || [];
@@ -116,6 +116,7 @@ for (const h of HEIGHTS) {
 
     // 3. The canopy's cover (set B, exposure 1); 4. the canopy lit.
     scene.setBands({ real: 5 });
+    plants.setPlants({ crowns: 0 });
     perf.settle({ maxFrames: 600, kinds: ['plants', 'land'] });
     frames(4);
     perf.useShaderSet('b');
@@ -127,6 +128,7 @@ for (const h of HEIGHTS) {
     frames(3);
     const qim = scene.toImageData();
     scene.setBands({ real: REAL });
+    plants.setPlants({ crowns: CROWNS });
     // (The curve: green 0.25 came out as g, so a value v comes out as
     // v^e, e = ln g / ln 0.25.)
     let gs = 0, gn = 0;
