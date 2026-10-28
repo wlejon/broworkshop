@@ -24,7 +24,7 @@
 // the land drawn as one thing from every height changes little and
 // smoothly; a hand-over to something else steps.
 
-import { holdView, land, plants, scene, R, setShot, still, sun } from "/app/world.js";
+import { holdView, land, plants, grass, scene, R, setShot, still, sun } from "/app/world.js";
 import { sub, add, mul, unit, cross, dot, viewProjection, groundSquare, readSquare, squareTile, tileGrid, compareGrids, toSrgb } from "/app/view_ground.js";
 
 const argv = (bro.app && bro.app.argv) || [];
@@ -46,6 +46,10 @@ if (!argv.some((s) => typeof s === 'string' && s.startsWith('ev=')))
 if (argv.includes('noshadow')) sun.castsShadow = false;
 // (noplantshadow: the plants cast none, the land's sun still shading.)
 if (argv.includes('noplantshadow')) plants.castsShadow = false;
+// (hide=plants,grass: those nodes not drawn, to find what a square's
+// pattern is made of.)
+const NODES = { plants, grass };
+for (const k of opt('hide', '').split(',').filter(Boolean)) NODES[k].visible = false;
 document.body.classList.add('clean');
 bro.menu.hide();
 flush();
@@ -70,6 +74,21 @@ const groundAt = (d) => {
 const g0 = groundAt(dir);
 const centre = mul(dir, R + g0);
 const squares = SIZES.map((s) => groundSquare(centre, s));
+// (The ground under each square, the land's own heights (its curve taken
+// out): a square near the sea's level may show the sea through a coarse
+// level's mesh.)
+squares.forEach((sq) => {
+    let lo = Infinity, hi = -Infinity, sum = 0, n = 0;
+    for (let a = 0; a < 16; a++)
+        for (let c = 0; c < 16; c++) {
+            const u = (a + 0.5) / 16 - 0.5, v = (c + 0.5) / 16 - 0.5;
+            const p = scene.toPlace(add(sq.at, add(mul(sq.e1, u * sq.size), mul(sq.e2, v * sq.size))));
+            const g = land.landHeight(p[0], p[2]);
+            if (!Number.isFinite(g)) continue;
+            lo = Math.min(lo, g); hi = Math.max(hi, g); sum += g; n++;
+        }
+    console.log(`ladder: ${sq.size} m square's ground ${lo.toFixed(0)} .. ${hi.toFixed(0)} m, mean ${(sum / n).toFixed(0)}`);
+});
 
 const W = window.innerWidth, H = window.innerHeight;
 const rungs = [];
@@ -90,6 +109,19 @@ for (const h of HEIGHTS) {
     // over frames, the trees' among it.)
     for (let k = +opt('hold', 30); k >= 0; k--) advanceTime(16);
     const im = scene.toImageData();
+    // (frames: each rung's whole render too, to see what a square holds.)
+    // (And its normals, the sky black: a hole in the ground is sky.)
+    if (argv.includes('frames')) {
+        bro.image.encodePngFile(`${OUT}/ladder${tag}_${h}.png`, im.data, im.width, im.height, 4);
+        let black = 0;
+        for (let i = 0; i < im.data.length; i += 4) if (im.data[i] + im.data[i + 1] + im.data[i + 2] === 0) black++;
+        console.log(`ladder: ${h} m frame, ${black} pixels exactly black`);
+        scene.setInspect(true);
+        advanceTime(16);
+        const ins = scene.inspectFrame({ image: 'normals' });
+        scene.setInspect(false);
+        if (ins && ins.image) bro.image.encodePngFile(`${OUT}/ladder${tag}_${h}_normals.png`, ins.image, ins.width, ins.height, 4);
+    }
     const view = viewProjection(scene, im.width, im.height);
     const cs = scene.cullStats();
     const exposure = cs && cs.exposureScale > 0 ? cs.exposureScale : 1;

@@ -429,7 +429,7 @@ plants.castsShadow = true;
 // The grass and herbs where the surface's cover grows them (its turf the
 // land's look out past the blades).
 export const grass = scene.createGrass({
-    ground: land, turf: true,
+    ground: land, turf: !ARGV.includes('noturf'),
     sward: swardModule({ lush: [0.08, 0.15, 0.035], dry: [0.26, 0.21, 0.08] }),
     herbs: herbModule({ species: ['bracken', 'woodsorrel', { preset: 'daisy', abundance: 1.5 }, 'poppy'] }),
 });
