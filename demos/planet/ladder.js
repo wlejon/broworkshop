@@ -14,7 +14,10 @@
 // shade among them past their cast range), low=<i> (the squares under the
 // weather's low i, the place moved there: the same column of cloud from
 // every height, with the air on; the log lists each low's sun, 12 and 14
-// under a high one, 17 a tropical cyclone's),
+// under a high one, 17 a tropical cyclone's), up (the clouds' ladder: the
+// squares at the deck's base, deck=<m>, a last rung 'under' from the
+// ground looking straight up, and the patterns each block's cloud, its
+// whiteness, which tops and bases share; each square's mean cloud logged),
 // rgb (each square's channels over the exposure on the log too), hide=
 // plants,grass, frames (each rung's render, its normals and its exactly
 // black pixels), twin (each rung again with the land's canopy for the
@@ -33,8 +36,8 @@
 // the land drawn as one thing from every height changes little and
 // smoothly; a hand-over to something else steps.
 
-import { holdView, land, plants, grass, scene, R, setShot, still, sun, sunBody, LOWS } from "/app/world.js";
-import { sub, add, mul, unit, cross, dot, viewProjection, groundSquare, readSquare, squareTile, tileGrid, compareGrids, toSrgb } from "/app/view_ground.js";
+import { holdView, land, plants, grass, scene, R, setShot, still, sun, sunBody, LOWS, CLOUD_BOTTOM } from "/app/world.js";
+import { sub, add, mul, unit, cross, dot, viewProjection, groundSquare, readSquare, squareTile, tileGrid, tileCloud, compareGrids, toSrgb } from "/app/view_ground.js";
 
 const argv = (bro.app && bro.app.argv) || [];
 const opt = (key, d) => {
@@ -84,8 +87,11 @@ for (let i = 0; LOW !== undefined && 8 * i < LOWS.length; i++) {
     const up = Math.asin(Math.max(-1, Math.min(1, -dot(c, sunBody)))) * 180 / Math.PI;
     console.log(`ladder: low ${i}: the sun ${up.toFixed(0)} degrees up, ${(LOWS[8 * i + 4] * R / 1000).toFixed(0)} km`);
 }
-const dir = LOW !== undefined ? unit(LOWS.slice(8 * +LOW, 8 * +LOW + 3))
-                              : unit(add(mul(shot, R), add(mul(way, ax), mul(cross(shot, way), az))));
+// (at= moves the spot off the low's heart too, along and across its own
+// frame.)
+const base = LOW !== undefined ? unit(LOWS.slice(8 * +LOW, 8 * +LOW + 3)) : shot;
+const bWay = LOW !== undefined ? groundSquare(base, 1).e1 : way;
+const dir = unit(add(mul(base, R), add(mul(bWay, ax), mul(cross(base, bWay), az))));
 // (A low lies thousands of km off: the place moved under it first, so the
 // land's heights and every place point below are its.)
 if (LOW !== undefined) {
@@ -100,7 +106,15 @@ const groundAt = (d) => {
     return Number.isFinite(g) ? Math.max(g, 0) : 0;
 };
 const g0 = groundAt(dir);
-const centre = mul(dir, R + g0);
+// (up: the clouds' ladder. The squares at the deck's base (`deck=<m>` over
+// the sea, CLOUD_BOTTOM + 500 by default) rather than on the ground, so the
+// views over the deck and the one under it read the same column of air;
+// a last rung from 2 m over the ground looking straight up; and the
+// patterns compared are each block's cloud (view_ground.js's tileCloud),
+// which tops and bases show alike, not its light.)
+const UP = argv.includes('up');
+const DECK = UP ? +opt('deck', CLOUD_BOTTOM + 500) : null;
+const centre = mul(dir, R + (UP ? Math.max(DECK, g0 + 100) : g0));
 const squares = SIZES.map((s) => groundSquare(centre, s));
 // (The ground under each square, the land's own heights (its curve taken
 // out): a square near the sea's level may show the sea through a coarse
@@ -120,9 +134,10 @@ squares.forEach((sq) => {
 
 const W = window.innerWidth, H = window.innerHeight;
 const rungs = [];
-for (const h of HEIGHTS) {
-    const eyeB = mul(dir, R + g0 + h);
-    const eye = scene.toPlace(eyeB), look = scene.toPlace(centre);
+// (The rung under the deck, 0: the eye 2 m over the ground, looking up.)
+for (const h of UP ? [...HEIGHTS, 0] : HEIGHTS) {
+    const eyeB = mul(dir, R + g0 + (h > 0 ? h : 2));
+    const eye = scene.toPlace(eyeB), look = scene.toPlace(h > 0 ? centre : mul(dir, R + g0 + 1e4));
     const upP = sub(scene.toPlace(add(eyeB, way)), eye);
     holdView(eye, look, Math.max(0.1, 0.01 * h), Math.max(4e5, 4 * Math.sqrt(2 * R * h) + 4e5), upP);
     // (A few frames at the new view first: its wants are the newest
@@ -130,7 +145,7 @@ for (const h of HEIGHTS) {
     for (let k = 0; k < 4; k++) advanceTime(16);
     // (Settled as far as the squares it reads: the plants placed out to
     // them, not only about the eye.)
-    const st = perf.settle({ maxFrames: 3000, within: Math.max(1000, 1.2 * h + 0.75 * SIZES[SIZES.length - 1]) });
+    const st = perf.settle({ maxFrames: 3000, within: Math.max(1000, 1.2 * Math.max(h, DECK || 0) + 0.75 * SIZES[SIZES.length - 1]) });
     if (st.stalled || !st.settled) console.log(`ladder: ${h} m unsettled after ${st.frames} frames: ${st.pending.join('; ')}`);
     holdView(eye, look, Math.max(0.1, 0.01 * h), Math.max(4e5, 4 * Math.sqrt(2 * R * h) + 4e5), upP);
     // (hold=<frames> more: work the settle is not offered, which comes in
@@ -168,14 +183,16 @@ for (const h of HEIGHTS) {
     const exposure = cs && cs.exposureScale > 0 ? cs.exposureScale : 1;
     const reads = squares.map((sq) => {
         const m = readSquare(im, view, sq, 48);
-        return m && m.span >= 24 ? { ...m, L: Math.log2((0.2126 * m.r + 0.7152 * m.g + 0.0722 * m.b) / exposure), tile: squareTile(im, view, sq, TILE) } : null;
+        if (!m || m.span < 24) return null;
+        const tile = squareTile(im, view, sq, TILE);
+        return { ...m, L: Math.log2((0.2126 * m.r + 0.7152 * m.g + 0.0722 * m.b) / exposure), tile, cloud: tileCloud(tile, TILE, 1)[0] };
     });
     rungs.push({ h, exposure, reads, twin, frames: st.frames });
 }
 
 // The log: a square a line, its light at each height and the step from the
 // height before.
-const fmtH = (h) => (h >= 1000 ? `${h / 1000} km` : `${h} m`);
+const fmtH = (h) => (h === 0 ? 'under' : h >= 1000 ? `${h / 1000} km` : `${h} m`);
 console.log(`ladder: ${HEIGHTS.length} heights in ${((perf.now() - t0) / 1000).toFixed(1)} s (settles ${rungs.map((r) => r.frames).join(' ')} frames; exposure ${rungs.map((r) => r.exposure.toPrecision(3)).join(' ')})`);
 SIZES.forEach((s, k) => {
     let last = null;
@@ -186,7 +203,9 @@ SIZES.forEach((s, k) => {
         last = m.L;
         // (rgb: its channels over the exposure too, for a probe's own outputs.)
         const rgb = argv.includes('rgb') ? ` [${[m.r, m.g, m.b].map((c) => (c / r.exposure).toPrecision(3)).join(' ')}]` : '';
-        return `${fmtH(r.h)} ${m.L.toFixed(2)}${step}${rgb}`;
+        // (up: its cloud too, the mean whiteness.)
+        const cl = UP ? ` cloud ${m.cloud.toFixed(2)}` : '';
+        return `${fmtH(r.h)} ${m.L.toFixed(2)}${step}${cl}${rgb}`;
     }).filter(Boolean);
     console.log(`ladder: ${fmtH(s)} square: ${parts.join(', ')}`);
 });
@@ -202,7 +221,8 @@ const bandFor = (a, b) => BANDS.find((n) => n * 3 <= Math.min(a.span, b.span));
 const cmp = (a, b) => {
     const n = bandFor(a, b);
     if (!n) return null;
-    const c = compareGrids(tileGrid(b.tile, TILE, n), tileGrid(a.tile, TILE, n));
+    const grid = UP ? tileCloud : tileGrid;
+    const c = compareGrids(grid(b.tile, TILE, n), grid(a.tile, TILE, n));
     return c && { n, ...c };
 };
 const fmtC = (c) => `n${c.n} r ${c.r.toFixed(2)} d ${c.d.toFixed(2)} spread ${c.sa.toFixed(2)}->${c.sb.toFixed(2)}`;
@@ -248,4 +268,4 @@ rungs.forEach((r, c) => r.reads.forEach((m, k) => {
         }
 }));
 bro.image.encodePngFile(`${OUT}/ladder${tag}.png`, sheet, SW, SH, 4);
-console.log(`ladder: captures/ladder${tag}.png (rows ${SIZES.map(fmtH).join(', ')}; columns ${HEIGHTS.map(fmtH).join(', ')}) in ${((perf.now() - t0) / 1000).toFixed(1)} s`);
+console.log(`ladder: captures/ladder${tag}.png (rows ${SIZES.map(fmtH).join(', ')}; columns ${rungs.map((r) => fmtH(r.h)).join(', ')}) in ${((perf.now() - t0) / 1000).toFixed(1)} s`);

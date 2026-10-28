@@ -120,6 +120,29 @@ export function squareValues(im, view, sq, t, f, s = 2) {
     return out;
 }
 
+// A tile as an n x n grid of how much cloud each block shows: its texels'
+// whiteness (least channel over the most), which cloud has from above and
+// from below alike (white tops, grey bases) and the blue sky, the sea and
+// the land have not. The same column of air seen over the deck and under
+// it, set side by side.
+export function tileCloud(tile, t, n) {
+    const b = t / n, out = new Float64Array(n * n);
+    for (let y = 0; y < n; y++)
+        for (let x = 0; x < n; x++) {
+            let s = 0, k = 0;
+            for (let j = y * b; j < (y + 1) * b; j++)
+                for (let i = x * b; i < (x + 1) * b; i++) {
+                    const o = (j * t + i) * 3;
+                    if (Number.isNaN(tile[o])) continue;
+                    const hi = Math.max(tile[o], tile[o + 1], tile[o + 2]);
+                    s += hi > 0 ? Math.min(tile[o], tile[o + 1], tile[o + 2]) / hi : 0;
+                    k++;
+                }
+            out[y * n + x] = k ? s / k : NaN;
+        }
+    return out;
+}
+
 // A tile (squareTile's, t x t) as an n x n grid of its blocks' light: the
 // mean linear luma of each t/n square block, in stops (NaN where a block
 // has no texel on the screen). What a coarser view would draw there, read
