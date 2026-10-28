@@ -130,6 +130,16 @@ if (mode === 'still') {
         console.log(`${shot}: clouds ${JSON.stringify(scene.cloudStats())}`);
         console.log(`${shot}: turf tiles needed ${cs.groundLayerNeeded} missing ${cs.groundLayerMissing} fills ${cs.groundLayerFills} shortfall ${cs.groundLayerShortfall?.toFixed(2)} px`);
     }
+} else if (mode === 'looks') {
+    // (a=<png> b=<png> [crop=x,y,w,h]: B's light on A's, two stills of
+    // another run each, e.g. a world's args against another's.)
+    const read = (p) => {
+        const im = bro.image.decodeOriented(bro.resolvePath(`/app/captures/${p}`));
+        return { width: im.width, height: im.height, channels: im.channels, data: im.pixels };
+    };
+    const a = read(opt('a')), b = read(opt('b'));
+    const crop = opt('crop') ? opt('crop').split(',').map(Number) : [0, 0, a.width, a.height];
+    console.log(`looks ${opt('b')} on ${opt('a')}: ${looksDiff(a, b, crop)}`);
 } else if (mode === 'climb') {
     const steps = +(opt('steps') || 4);
     const pitch0 = Math.atan2(9e4, 2.4e5);
@@ -261,9 +271,11 @@ if (mode === 'still') {
                 for (const s of ['a', 'b']) {
                     perf.useShaderSet(s, { rebake: true });
                     settle(`${shot} ${s}`, 600);
-                    const path = `${OUT}/planet_${shot}_ko_${s === 'b' ? name : 'A'}.png`;
-                    screenshot(path);
+                    // (The frame's copy written, not screenshot()'s: after a
+                    // set switch that was the same picture for both sets.)
                     ims[s] = frameCopy();
+                    bro.image.encodePngFile(`${OUT}/planet_${shot}_ko_${s === 'b' ? name : 'A'}.png`,
+                                            ims[s].data, ims[s].width, ims[s].height, 4);
                 }
                 perf.useShaderSet('a', { rebake: true });
                 console.log(`${shot} KO_${name} looks: ${looksDiff(ims.a, ims.b, crop)}`);
