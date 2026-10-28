@@ -423,10 +423,11 @@ export const PLANT_RULES = plantRules(null);
 // close default, the 360 fps frame, unless asked; plantshadow=<m>: cast so
 // far, so the canopy's shade past the cast range can be held to the
 // plants' own; crowns=<m>: past the real band the plants are painted, a
-// crown each, so far, the canopy past it.)
+// crown each, so far (all the painted band unless asked), the canopy past
+// it.)
 export const REAL = ARGV.find((s) => s.startsWith('real=')) ? +ARGV.find((s) => s.startsWith('real=')).slice(5) : scene.bands().real;
 scene.setBands({ real: REAL });
-export const CROWNS = ARGV.find((s) => s.startsWith('crowns=')) ? +ARGV.find((s) => s.startsWith('crowns=')).slice(7) : 400;
+export const CROWNS = ARGV.find((s) => s.startsWith('crowns=')) ? +ARGV.find((s) => s.startsWith('crowns=')).slice(7) : 1e9;
 export const plants = scene.createPlants({
     module: treeModule(), species: TEMPERATE.map(treeSpecies), receivesShadow: true, land, crowns: CROWNS,
     ...(ARGV.find((s) => s.startsWith('plantshadow=')) ? { shadowRange: +ARGV.find((s) => s.startsWith('plantshadow=')).slice(12) } : {}),
@@ -1314,6 +1315,9 @@ export const SHOTS = {
     limb:   { label: 'Limb', near: 1e3, far: 2e7, eye: () => [0, 1.2e6, 0], look: () => [0, -2.4e5, -1.6e6] },
     region: { label: 'Region', near: 50, far: 4e6, eye: () => [0, 9e4, 0], look: () => [0, 0, -2.4e5] },
     low:    { label: 'Low', near: 1, far: 1e6, eye: () => over(0, 0, 1500), look: () => along(towardRange(), 30000, 0) },
+    // (flight: low over the woods, looking out across them: the real band,
+    // the painted crowns and the canopy past them in one view.)
+    flight: { label: 'Flight', near: 0.5, far: 6e5, eye: () => over(0, 0, 120), look: () => along(towardRange(), 3000, 0) },
     ground: { label: 'Ground', near: 0.1, far: 4e5, eye: () => over(0, 0, 1.8), look: () => along(towardRange(), 2000, 60) },
     sky:    { label: 'Sky', near: 0.1, far: 4e5, eye: () => over(0, 0, 1.8), look: () => along(towardRange(), 2000, 900) },
 };
