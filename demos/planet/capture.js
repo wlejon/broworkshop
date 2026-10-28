@@ -36,12 +36,15 @@ import { SHOTS, setShot, holdView, still, land, scene } from "/app/world.js";
 
 const argv = (bro.app && bro.app.argv) || [];
 const OUT = bro.resolvePath('/app/captures').replace(/\\/g, '/');
-const fps = 30;
-const step = (seconds) => { for (let i = 0, n = Math.max(1, Math.round(seconds * fps)); i < n; i++) advanceTime(1000 / fps); };
 const opt = (key) => {
     const a = argv.find((s) => typeof s === 'string' && s.startsWith(key + '='));
     return a ? a.slice(key.length + 1) : undefined;
 };
+// (fps=<n>: the frames a second the virtual clock steps by, 30 unless
+// asked; work paced by time rather than frames costs a frame its share at
+// the rate the frames come, so `cost fps=360` is the 360 fps frame.)
+const fps = +(opt('fps') ?? 30);
+const step = (seconds) => { for (let i = 0, n = Math.max(1, Math.round(seconds * fps)); i < n; i++) advanceTime(1000 / fps); };
 const shotsOf = (s) => (s && !s.includes('=') ? s : Object.keys(SHOTS).join(',')).split(',').filter((k) => SHOTS[k]);
 // The scene settled for the view on a held clock (at most `max` frames;
 // `kinds` only those kinds of work).
@@ -167,7 +170,9 @@ if (mode === 'still') {
                 mins[k] = Math.min(mins[k] ?? Infinity, p[k]);
             }
         }
-        const top = Object.entries(sums).sort((a, b) => b[1] - a[1]).slice(0, 8)
+        // (passes=<n>: how many of the dearest to list, 8 unless asked.)
+        const nPasses = +(opt('passes') ?? 8);
+        const top = Object.entries(sums).sort((a, b) => b[1] - a[1]).slice(0, nPasses)
             .map(([k, v]) => `${k} ${(v / 60).toFixed(2)}`).join(', ');
         console.log(`${shot} passes: ${top}`);
         // (Each pass's mean, and its least: a frame the GPU's clock held up.)
