@@ -205,7 +205,7 @@ if (mode === 'still') {
         const p = (perf.gpuPasses && perf.gpuPasses()) || {};
         const top = Object.entries(p).filter(([, x]) => typeof x === 'number').sort((a, b) => b[1] - a[1]).slice(0, 3)
             .map(([k, x]) => `${k} ${x.toFixed(2)}`).join(', ');
-        gpu.push({ ms: perf.gpuFrameMs(), i, h: v.h, regions: land.landStats()?.regions, pending: land.landStats()?.regionsPending, top });
+        gpu.push({ ms: perf.gpuFrameMs(), i, h: v.h, regions: land.landStats()?.regions, pending: land.landStats()?.regionsPending, top, land: p['world:land'] || 0 });
     }
     screenshot(`${OUT}/planet_fly.png`);
     // (settled=1: the end's view again once all is in, what the flight's
@@ -220,6 +220,7 @@ if (mode === 'still') {
     const g = worst(gpu), w = worst(wall);
     console.log(`fly: ${frames} frames; GPU mean ${mean(gpu).toFixed(2)} ms, p99 ${g[Math.floor(g.length / 100)].ms.toFixed(2)}, worst ${g.slice(0, 5).map((x) => `${x.ms.toFixed(2)}@${x.i} (${Math.round(x.h)} m, ${x.regions} in, ${x.pending} pending)`).join(', ')}`);
     console.log(`fly: the worst frame's dearest passes: ${g[0].top}`);
+    console.log(`fly: world:land (the land's tiles made) ${gpu.reduce((s, x) => s + x.land, 0).toFixed(1)} ms over the flight, ${(gpu.reduce((s, x) => s + x.land, 0) / gpu.length).toFixed(3)} a frame`);
     console.log(`fly: wall mean ${mean(wall).toFixed(2)} ms, worst ${w.slice(0, 5).map((x) => `${x.ms.toFixed(1)}@${x.i}`).join(', ')}`);
     console.log(`fly: end ${JSON.stringify(land.landStats())}`);
 } else if (mode === 'cost') {
