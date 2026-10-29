@@ -53,7 +53,6 @@
 
         { "dir": "demos/ai-arena" },
         { "dir": "demos/anim-lab" },
-        { "dir": "demos/biomes" },
         { "dir": "demos/character-lab" },
         { "dir": "demos/cluster-diar-lab" },
         { "dir": "demos/diffusion-lab" },
@@ -78,7 +77,6 @@
         { "dir": "demos/parakeet-lab" },
         { "dir": "demos/physics-playground" },
         { "dir": "demos/pixart-lab" },
-        { "dir": "demos/planet" },
         { "dir": "demos/plant-recipes" },
         { "dir": "demos/platform-lab" },
         { "dir": "demos/qwen-asr-lab" },

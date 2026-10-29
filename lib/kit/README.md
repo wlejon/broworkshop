@@ -41,7 +41,6 @@ Widgets take "a selector or an element already in the page" (resolved with
 | `math3d.js` | quaternion / vector helpers: `q`, `v3`, `QI` ({x,y,z,w} objects, for `Physics`), `quatFromEuler`, `quatMul`, `quatYTo` ([x,y,z,w] arrays, for nodes), `toArr` |
 | `viewport3d.js` | `sceneViewport`: `bro.scene` canvas + orbit camera + standard mouse controls, `ray(px, py)` / `toScreen(world)`; `orbitControls`, `orbitRotation`, `screenRay`, `worldToScreen`, `localPoint`; re-exports `Camera` |
 | `flycam.js` | free-fly camera (WASD / Space / C / Shift, drag- or pointer-lock look, optional roll, ground clearance) for terrain-scale scenes |
-| `planetcam.js` | walk and fly on a round world (`scene.setBody`) beside the app's orbit camera: gravity to the centre, ground following, swimming, height-scaled flight from treetops to orbit, landing, re-anchor carried |
 | `sky.js` | HDRI sky (`skyEnvironment`), sun direction + sliders (`sunControls`), a time-of-day rig (`daylight`) |
 | `physics3d.js` | Jolt + scene plumbing: body + mesh pairs, `BodyGroup`, `rod`, the contact/break event drain, `pickRay` / `raycast`, a mouse `grabber` |
 | `ragdoll.js` | a 12-part humanoid `Physics.createRagdoll` rig: poses as per-joint deltas, FK, blend, error metrics |
@@ -240,14 +239,6 @@ forward(), locked, altitude, groundHeight, opts, dispose() }`. Call
 sliders to it). Yaw 0 looks down -Z. `look: 'drag'` holds the right button to
 look and leaves the left to the app; `'lock'` captures the pointer on click.
 Used by demos/terrain.
-
-**planetcam.js** — `planetController(canvas, scene, { altitude(pos), water(pos),
-fromOrbit(), toOrbit(view), onMode, eye, walkSpeed, runSpeed, flyRate, boost, ... })`
-→ `{ mode, setMode('walk' | 'fly' | 'orbit'), cycle(), update(dt), view(),
-pose({ position, target }), state(), speedScale, dispose() }`. F cycles walk,
-fly and orbit; the view's up is always the local up (`scene.upAt`). Call
-`update(dt)` each frame and, outside orbit, push `view()`. Used by
-demos/planet (its oracle: demos/planet/controls.js).
 
 **sky.js** — `skyEnvironment(scene, { hdri, intensity, rotation })` loads one
 of `HDRIS` (falls back to flat ambient); `sunDirection(elevationDeg,
