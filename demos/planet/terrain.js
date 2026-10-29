@@ -35,7 +35,12 @@ export const ARGV = (globalThis.bro && bro.app && bro.app.argv) || [];
 export const TREE = ARGV.includes('notree') ? mul(fbm(200, 1, 3), 0) : mul(fbm(120, 3, 3), 3);
 // The regional levels' bands: feature scale and amplitude (times the tree's scale).
 const BANDS = [[500, 30], [2000, 120], [8000, 330], [32000, 520]];
-const BAND_NOISE = BANDS.map(([s], i) => fbm(s, 2, 31 + i));
+// They are the land's regional relief (processes.regions.relief): a region
+// lays its level's down and erodes it, and wherever a level's regions are
+// not in (away from the eye, or past what a tile's texel reads) the land's
+// height takes the same band uneroded, so the land seen from orbit has the
+// hills it has underfoot.
+const RELIEF_BANDS = BANDS.map(([s, a], i) => ({ noise: mul(fbm(s, 2, 31 + i), a), seed: 31 + i }));
 
 // --- the plates ------------------------------------------------------------------------
 
@@ -97,13 +102,13 @@ export const PROCESSES = {
     // within one of the eye's each way, channels 0 and 1 kept.
     regions: ARGV.includes('noregions') ? undefined : {
         init: 'regionInit', cells: 512, apron: 32, cell: 64, ratio: 4, levels: 4, reach: 1, keep: 2,
+        relief: RELIEF_BANDS,
         passes: [{ fn: 'regionRoute', iterations: REGION_ROUTE }, { fn: 'regionErode', iterations: REGION_ERODE },
                  { fn: 'regionLift', iterations: REGION_LIFT }, { fn: 'regionSettle' },
                  { fn: 'regionPool', iterations: REGION_POOL }],
     },
     source: WARP.glsl({ name: 'warpNoise', dims: [3] }) + CONTINENT.glsl({ name: 'continentNoise', dims: [3] }) +
-            RELIEF.glsl({ name: 'reliefNoise', dims: [3] }) +
-            BAND_NOISE.map((n, i) => n.glsl({ name: 'bandNoise' + i, dims: [3] })).join('') + `
+            RELIEF.glsl({ name: 'reliefNoise', dims: [3] }) + `
 const int PLATES = ${PLATES};
 const float R = ${R}.0;
 const float COAST = 0.1;   // the band of the continental field the coast's heights come in over
@@ -483,18 +488,13 @@ void snowAir(inout vec4 v[PROC_CHANNELS]) {
 // --- the regions ----------------------------------------------------------------------
 //
 // A region starts from the coarser field (procCoarse: the coarser levels'
-// regions over the global grid) and adds its level's band of the relief,
-// as much as the tree's scale says (a range's most, the plains' little,
-// none down the shelf); then its rivers are routed and cut as the global
-// grid's are, at its cells, a river from outside cutting as the coarser
-// field's drainage says, its edges its outlets.
+// regions over the global grid) and adds its level's band of the relief
+// (landRelief, the engine's from processes.regions.relief), as much as the
+// tree's scale says (a range's most, the plains' little, none down the
+// shelf); then its rivers are routed and cut as the global grid's are, at
+// its cells, a river from outside cutting as the coarser field's drainage
+// says, its edges its outlets.
 
-float band(int L, vec3 p) {
-    if (L == 0) return bandNoise0(p, 31);
-    if (L == 1) return bandNoise1(p, 32);
-    if (L == 2) return bandNoise2(p, 33);
-    return bandNoise3(p, 34);
-}
 const float KS_PLAIN = 60.0, KS_RANGE = 200.0;
 const float DIG = 1.0;   // how deep a level may cut under the coarser field, in its band's amplitudes
 const float LAND_FLOOR = 15.0;   // the least height a region leaves the coarser field's land (m; over the tree's grain)
@@ -513,7 +513,11 @@ void regionInit(inout vec4 v[PROC_CHANNELS]) {
     vec4 c0 = procCoarse(0), c1 = procCoarse(1);
     int L = clamp(procLevel(), 0, 3);
     float scale = c0.y;
-    float ground = c0.x + scale * BAND_AMP[L] * band(L, procPoint());
+    vec3 p = procPoint();
+    // (The coarser levels' bands where their regions are not in, as the
+    // land's height takes them there.)
+    for (int k = L + 1; k < LAND_RELIEF_LEVELS; ++k) c0.x += scale * landReliefRest(k) * landRelief(k, p);
+    float ground = c0.x + scale * landRelief(L, p);
     // (Land stays land, LAND_FLOOR over the sea or the coarser field's
     // height where that is lower: a band dipping a low coast under the sea
     // made it a sea the region's rivers ran into, and a coarse level's
