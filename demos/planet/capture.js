@@ -88,6 +88,13 @@ const frameCopy = () => {
     const f = frameImage();
     return { width: f.width, height: f.height, channels: 4, data: new Uint8Array(f.data) };
 };
+// (eye=x,z,h look=x,z,h: a shot `at` from h over the ground at place (x, z)
+// toward h over it at (x, z), the eye's height setting the near plane.)
+if (opt('eye')) {
+    const [ex, ez, eh] = opt('eye').split(',').map(Number), [lx, lz, lh] = (opt('look') || '0,-1000,0').split(',').map(Number);
+    SHOTS.at = { label: 'At', near: Math.max(0.1, eh / 1000), far: 1e6,
+                 eye: () => [ex, land.landHeight(ex, ez) + eh, ez], look: () => [lx, land.landHeight(lx, lz) + lh, lz] };
+}
 const shotsOf = (s) => (s && !s.includes('=') ? s : Object.keys(SHOTS).join(',')).split(',').filter((k) => SHOTS[k]);
 // The scene settled for the view on a held clock (at most `max` frames;
 // `kinds` only those kinds of work).
@@ -201,6 +208,13 @@ if (mode === 'still') {
         gpu.push({ ms: perf.gpuFrameMs(), i, h: v.h, regions: land.landStats()?.regions, pending: land.landStats()?.regionsPending, top });
     }
     screenshot(`${OUT}/planet_fly.png`);
+    // (settled=1: the end's view again once all is in, what the flight's
+    // frame should have been.)
+    if (opt('settled')) {
+        settle('fly end', 4000);
+        step(1.0);
+        screenshot(`${OUT}/planet_fly_settled.png`);
+    }
     const worst = (a) => a.slice().sort((x, y) => y.ms - x.ms);
     const mean = (a) => a.reduce((s, x) => s + x.ms, 0) / Math.max(a.length, 1);
     const g = worst(gpu), w = worst(wall);

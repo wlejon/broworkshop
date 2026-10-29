@@ -137,7 +137,8 @@ function climbTimed() {
     // own (or short of it) covered high up (over some 100 km, all of it over
     // 1000 km), so the ground near either end is flown as before.
     const LAND = landAt() * 1000;
-    if (LAND > 0) {
+    // (A climb that stays under 100 km has none of it high up: its own way.)
+    if (LAND > 0 && HMAX > 1e5) {
         const w = hs.map((h) => smooth((Math.log(Math.max(h, 1)) - Math.log(1e5)) / (Math.log(1e6) - Math.log(1e5))));
         const total = w.reduce((a, x) => a + x, 0) - w[0];
         const extra = (LAND / 2 - s) / total;
