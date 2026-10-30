@@ -611,7 +611,14 @@ const volumeGlsl = (radius) => cloudGlsl(radius, true) + `
                         cloudColumn(P / rp, w, cloudNeed(s), 0.0, F, v, clear);
                         fd = cloudDetailed(P, w, F, v);
                         occ = max(cloudOccupancy(fd.x, fd.y, s), 0.0031);
-                        dt = min(dt, CLOUD_STEP);
+                        // The step on from the edge is a half to one and a
+                        // half of one, by the pixel's fraction (moved on each
+                        // render), so as many samples cross the cloud: the
+                        // edge is the field's, alike along rows of pixels
+                        // whose rays run alike (a layer seen edge on), and
+                        // the samples stepped alike from it drew the layer's
+                        // base as stripes along the rows.
+                        dt = min(dt, CLOUD_STEP) * (0.5 + jitter);
                     }
                     inCloud = true;
                     vec4 fill = clamp(occ * 4.0 - RANK, 0.0, 1.0);
