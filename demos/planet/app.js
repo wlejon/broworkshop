@@ -275,11 +275,10 @@ function cameraFrame() {
 // ── Per frame ───────────────────────────────────────────────────────────────
 
 const camHi = [0, 0, 0], camLo = [0, 0, 0];
-let lastStats = { drawn: 0, visible: 0, ms: 0 };
+const lastStats = { selected: 0, visible: 0 };
 let lastView = null;
 
 function frame() {
-    const t0 = performance.now();
     const f = cameraFrame();
     // The scene renders at the canvas's layout size (not its width/height
     // attributes), in device pixels: what a tile's cells project onto.
@@ -306,10 +305,13 @@ function frame() {
     ground.setShaderUniform('u_camLo', camLo);
     for (let k = 0; k < 3; k++) atmosphere.planetCenter[k] = -f.pos[k];
     scene.setAtmosphere(atmosphere);
-    lastStats = { selected: cache.wanted, visible: n, ms: performance.now() - t0 };
+    lastStats.selected = cache.wanted;
+    lastStats.visible = n;
     // Text changes cost the page a layout and raster: a few times a second.
-    if (t0 - lastPaint > 250) {
-        lastPaint = t0;
+    // (performance.now() is the frame clock: it moves between frames.)
+    const now = performance.now();
+    if (now - lastPaint > 250) {
+        lastPaint = now;
         paintStats();
     }
 }
@@ -331,8 +333,7 @@ function paintStats() {
     document.querySelector('#stats').textContent =
         `tiles  ${lastStats.visible} drawn / ${lastStats.selected} selected\n` +
         `cache  ${cache.resident} resident, ${cache.pending} pending\n` +
-        `       ${s.produced} produced, ${s.evicted} evicted\n` +
-        `cpu    ${lastStats.ms.toFixed(2)} ms`;
+        `       ${s.produced} produced, ${s.evicted} evicted`;
 }
 
 let drag = null;
