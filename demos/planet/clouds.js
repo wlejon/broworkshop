@@ -36,11 +36,12 @@ const NOISE_SLOPE = 2.5;              // a bound on its gradient, per lattice un
 // over, each level's texels twice the last's, then the whole sphere as six
 // faces of FACE + 2 texels (the faces' edges and a texel beyond). A texel
 // holds the column at a footprint of two texels; the finest are DELTA0 of
-// the plane apart (3 m at a face's centre), the sphere's as the coarsest
+// the plane apart (24 m at a face's centre, a footprint of 48 m: finer is
+// the detail's, CLOUD_COLUMN_MIN), the sphere's as the coarsest
 // level's next. A level follows the eye in steps of SNAP texels and
 // produces only the texels it steps onto, its grid wrapping (k_cloud_level;
 // N a power of two, as the shader wraps by a mask).
-const LEVELS = 14, N = 512, SNAP = 32, FACE = 256;
+const LEVELS = 11, N = 512, SNAP = 32, FACE = 256;
 const DELTA_GLOBE = 2 / (FACE - 1);
 const DELTA0 = DELTA_GLOBE / 2 ** LEVELS;
 const GLOBE_BASE = LEVELS * N * N;     // the first globe texel
@@ -50,6 +51,47 @@ const FACE_TEXELS = (FACE + 2) * (FACE + 2);
 const OCTAVES = [];
 for (let k = 0, w = 2.0e6, a = 0.48; k < 7; k++, w /= 2, a *= 0.6) OCTAVES.push([w, a]);
 for (let k = 0, w = 12800, a = 0.32; k < 10; k++, w /= 2, a *= 0.62) OCTAVES.push([w, a]);
+
+// The detail's noise (cloudNoise): gradient noise (Perlin 2002's gradients)
+// over a lattice tiling every NOISE_PERIOD units, sampled NOISE_CELL texels
+// a unit into NOISE_TEXELS^3 texels, its z slices one after another, scaled
+// to NOISE_VAR's variance.
+const NOISE_PERIOD = 16, NOISE_CELL = 4, NOISE_TEXELS = NOISE_PERIOD * NOISE_CELL;
+function noiseSlices() {
+    const P = NOISE_PERIOD, n = NOISE_TEXELS;
+    const hash = new Uint8Array(P * P * P);
+    for (let i = 0; i < hash.length; i++) {
+        let h = Math.imul(i + 1, 0x9e3779b1);
+        h = Math.imul(h ^ (h >>> 15), 0x85ebca6b);
+        hash[i] = (h ^ (h >>> 13)) & 15;
+    }
+    const grad = (x, y, z, fx, fy, fz) => {
+        const h = hash[((z % P) * P + (y % P)) * P + (x % P)];
+        const a = h < 8 ? fx : fy;
+        const b = h < 4 ? fy : (h === 12 || h === 14 ? fx : fz);
+        return ((h & 1) ? -a : a) + ((h & 2) ? -b : b);
+    };
+    const fade = (t) => t * t * t * (t * (t * 6 - 15) + 10);
+    const mix = (a, b, t) => a + (b - a) * t;
+    const out = new Float32Array(n * n * n);
+    let sum = 0, sum2 = 0;
+    for (let k = 0; k < n; k++) for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+        const x = Math.floor(i / NOISE_CELL), y = Math.floor(j / NOISE_CELL), z = Math.floor(k / NOISE_CELL);
+        const fx = (i % NOISE_CELL) / NOISE_CELL, fy = (j % NOISE_CELL) / NOISE_CELL, fz = (k % NOISE_CELL) / NOISE_CELL;
+        const u = fade(fx), v = fade(fy), w = fade(fz);
+        const x00 = mix(grad(x, y, z, fx, fy, fz), grad(x + 1, y, z, fx - 1, fy, fz), u);
+        const x10 = mix(grad(x, y + 1, z, fx, fy - 1, fz), grad(x + 1, y + 1, z, fx - 1, fy - 1, fz), u);
+        const x01 = mix(grad(x, y, z + 1, fx, fy, fz - 1), grad(x + 1, y, z + 1, fx - 1, fy, fz - 1), u);
+        const x11 = mix(grad(x, y + 1, z + 1, fx, fy - 1, fz - 1), grad(x + 1, y + 1, z + 1, fx - 1, fy - 1, fz - 1), u);
+        const val = mix(mix(x00, x10, v), mix(x01, x11, v), w);
+        out[(k * n + j) * n + i] = val;
+        sum += val;
+        sum2 += val * val;
+    }
+    const mean = sum / out.length, scale = Math.sqrt(NOISE_VAR / (sum2 / out.length - mean * mean));
+    for (let i = 0; i < out.length; i++) out[i] = (out[i] - mean) * scale;
+    return out;
+}
 
 // A bound on the gradient (per m along the layer) of the column resolved at
 // footprint w: what a level's amount can change by within a distance.
@@ -113,6 +155,22 @@ export const cloudGlsl = (radius) => `
 
     vec2 cloudTexel(int i) { return u_cloudMap[i]; }
 
+    // The cloud's own relief, in three dimensions: the column is the same
+    // at every height, so its sides would be its pattern drawn straight up
+    // (walls streaked toward the zenith seen from under them). Octaves of
+    // gradient noise over space are added to the column's amount, billows
+    // of a few hundred metres in its sides, base and tops (the erosion of
+    // Schneider's Nubis), in proportion to the column's amount up to
+    // CLOUD_DETAIL_FULL, so a column barely short of cloud stays clear. A
+    // column read alone (cloudColumn) carries their variance as unresolved,
+    // so the shadows, the light's tops and far pixels see what they average
+    // to; where a sample resolves them (cloudDetailed, for the occupancy)
+    // they are added and their share of the variance taken back out.
+    const vec3 CLOUD_DETAIL[2] = vec3[2](vec3(480.0, 0.07, 0.0), vec3(190.0, 0.04, 17.0));
+    const float CLOUD_DETAIL_VAR = ${NOISE_VAR} * (0.07 * 0.07 + 0.04 * 0.04);
+    const float CLOUD_DETAIL_FULL = 0.15;
+    float cloudDetailScale(float F) { return clamp(F / CLOUD_DETAIL_FULL, 0.0, 1.0); }
+
     // Bilinear over a level's grid of n texels a row from texel base, at
     // texel coordinates t (within [0, n - 1)).
     vec2 cloudBilinear(int base, int n, vec2 t) {
@@ -159,8 +217,12 @@ export const cloudGlsl = (radius) => `
     // False when even 3.4 deviations of what is finer cannot lift it to
     // need, with clear the distance (m) within which the level's own
     // amount cannot either, given that need falls by at most drop a metre
-    // along the way: how far a ray may step and find no cloud.
+    // along the way: how far a ray may step and find no cloud. Never finer
+    // than CLOUD_COLUMN_MIN: below it the cloud is the detail's, in three
+    // dimensions, and the column's own octaves there its variance.
+    const float CLOUD_COLUMN_MIN = 60.0;
     bool cloudColumn(vec3 q, float w, float need, float drop, out float F, out float variance, out float clear) {
+        w = max(w, CLOUD_COLUMN_MIN);
         vec2 c = vec2(0.0);
         int k = CLOUD_LEVELS;
         float z = dot(q, u_cloudA);
@@ -184,7 +246,8 @@ export const cloudGlsl = (radius) => `
         }
         if (k == CLOUD_LEVELS) c = cloudGlobe(q);
         F = c.x;
-        variance = c.y;
+        float g = cloudDetailScale(F);
+        variance = c.y + CLOUD_DETAIL_VAR * g * g;
         float reach = 3.4 * sqrt(variance);
         if (F + reach < need) {
             clear = (need - F - reach) / (u_cloudHead[k].w + drop);
@@ -238,6 +301,34 @@ const volumeGlsl = (radius) => cloudGlsl(radius) + `
     uniform float u_camAlt;     // the eye's altitude over CLOUD_R
     uniform float u_pixel;      // the angle a pixel spans (rad)
 
+    // The detail's noise: gradient noise tiling every NOISE_PERIOD lattice
+    // units, NOISE_CELL texels a unit (noiseSlices), its z slices an array
+    // the hardware filters across x and y; z is mixed by hand.
+    uniform sampler2DArray u_cloudNoise;
+    float cloudNoise(vec3 p) {
+        vec3 t = p * ${NOISE_CELL}.0;
+        float z = floor(t.z), f = t.z - z;
+        vec2 uv = (t.xy + 0.5) / ${NOISE_TEXELS}.0;
+        float l0 = mod(z, ${NOISE_TEXELS}.0), l1 = mod(z + 1.0, ${NOISE_TEXELS}.0);
+        return mix(textureLod(u_cloudNoise, vec3(uv, l0), 0.0).r, textureLod(u_cloudNoise, vec3(uv, l1), 0.0).r, f);
+    }
+    // The column's (F, variance) as cloudColumn read them, with the detail
+    // a footprint of w metres resolves at P (about the centre): the octaves
+    // at full weight from 4 footprints a wavelength, none at 2.
+    vec2 cloudDetailed(vec3 P, float w, float F, float variance) {
+        float g = cloudDetailScale(F);
+        vec2 r = vec2(F, variance);
+        for (int k = 0; k < 2 && g > 0.0; k++) {
+            vec3 o = CLOUD_DETAIL[k];
+            float a = clamp(o.x / w * 0.5 - 1.0, 0.0, 1.0);
+            if (a <= 0.0) break;
+            r.x += a * g * o.y * cloudNoise(P / o.x + o.z);
+            r.y -= a * a * g * g * o.y * o.y * ${NOISE_VAR};
+        }
+        r.y = max(r.y, 0.0);
+        return r;
+    }
+
     // The ray's distances to the sphere at altitude hs: false when it misses.
     // Written from the eye's altitude hc, so nothing squares a radius.
     bool cloudShell(float hc, float hs, float mu, out float tNear, out float tFar) {
@@ -279,7 +370,8 @@ const volumeGlsl = (radius) => cloudGlsl(radius) + `
         if (s < 0.0 || s > 1.0) return -10.0;
         float F, v, clear;
         cloudColumn(P / rp, w, cloudNeed(s), 0.0, F, v, clear);
-        return (F - cloudNeed(s)) / sqrt(v + 1e-5);
+        vec2 fd = cloudDetailed(P, w, F, v);
+        return (fd.x - cloudNeed(s)) / sqrt(fd.y + 1e-5);
     }
     // The excess where the occupancy is 0.003, cloudOccupancy's threshold
     // for cloud: ln(0.003 / 0.997) / 1.7.
@@ -375,7 +467,11 @@ const volumeGlsl = (radius) => cloudGlsl(radius) + `
             float dt = clamp(t * 0.06, 20.0, dtMax);
             if (inCloud) dt = min(dt, inStep);
             else if (t < fineUntil) dt = min(dt, CLOUD_STEP);
-            float w = max(t * u_pixel, dt * 0.5);
+            // The field at the pixel's footprint, not the step's: a step only
+            // places samples (the jitter and the edge search keep it from
+            // drawing contours), and the field read at it blurred every cloud
+            // to tens of metres.
+            float w = max(t * u_pixel, 1.0);
             vec3 P = eye + dir * t;
             float rp = length(P);
             float h = hc + (2.0 * (CLOUD_R + hc) * mu * t + t * t) / (rp + CLOUD_R + hc);
@@ -397,7 +493,8 @@ const volumeGlsl = (radius) => cloudGlsl(radius) + `
                     t += max(dt, clear);
                     continue;
                 }
-                float occ = cloudOccupancy(F, v, s);
+                vec2 fd = cloudDetailed(P, w, F, v);
+                float occ = cloudOccupancy(fd.x, fd.y, s);
                 if (occ > 0.003) {
                     // A step that lands in cloud has passed its edge since
                     // the last point known clear: the gap halved five times
@@ -421,7 +518,8 @@ const volumeGlsl = (radius) => cloudGlsl(radius) + `
                         h = hc + (2.0 * (CLOUD_R + hc) * mu * t + t * t) / (rp + CLOUD_R + hc);
                         s = (h - lo) / CLOUD_DEPTH;
                         cloudColumn(P / rp, w, cloudNeed(s), 0.0, F, v, clear);
-                        occ = max(cloudOccupancy(F, v, s), 0.0031);
+                        fd = cloudDetailed(P, w, F, v);
+                        occ = max(cloudOccupancy(fd.x, fd.y, s), 0.0031);
                         dt = min(dt, CLOUD_STEP);
                     }
                     inCloud = true;
@@ -557,6 +655,7 @@ const volumeGlsl = (radius) => cloudGlsl(radius) + `
 // angle.
 export function createClouds(scene, radius, kernel, readers) {
     const node = scene.createVolume({ fragment: volumeGlsl(radius), name: 'clouds' });
+    node.setShaderTexture('u_cloudNoise', { data: noiseSlices(), width: NOISE_TEXELS, height: NOISE_TEXELS, layers: NOISE_TEXELS, repeat: true });
     const nodes = [node, ...readers];
     const map = bro.kernel.createBuffer((GLOBE_BASE + 6 * FACE_TEXELS) * 8);
     // u_cloudHead: LEVELS + 1 headers, then each level's grid origin in

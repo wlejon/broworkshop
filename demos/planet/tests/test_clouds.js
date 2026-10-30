@@ -48,7 +48,7 @@ test('every level agrees at the eye within what it leaves unresolved', () => {
 
 test('a fine level counts the cover the coarse levels predict', () => {
     const map = readMap(), h = clouds.head;
-    for (const [fine, coarse] of [[4, 10], [6, 12], [8, 13]]) {
+    for (const [fine, coarse] of [[1, 7], [3, 9], [5, 10]]) {
         let cover = 0;
         for (let i = 0; i < n * n; i++) if (map[2 * (fine * n * n + i)] > 0.02) cover++;
         cover /= n * n;
