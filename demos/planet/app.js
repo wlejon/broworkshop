@@ -18,6 +18,7 @@ const CELLS = TILE + 2 * BORDER;
 const CAPACITY = 4096;
 const SEED = 7;
 const BASE_WAVELENGTH = 2400000;   // ground.bk's first octave
+const DETAIL_PERIOD = 64;          // metres; the ground shader's fine detail repeats over it
 
 const readApp = (path) => fs.readFileSync(bro.resolvePath('/app/' + path), 'utf-8');
 const mod = bro.kernel.compile(readApp('planet.bk'), { file: 'planet.bk', modules: { 'planet::ground': readApp('ground.bk') } });
@@ -119,6 +120,7 @@ const vertex = `buffer vec4 u_pos[];
     uniform vec3 u_camLo;
     out vec4 v_col;
     out vec3 v_up;
+    out vec3 v_q;
     void userVertex(inout vec3 pos, inout vec3 normal, inout vec2 uv) {
         ivec4 ids = u_tiles[gl_InstanceIndex * 4];   // slot, parentSlot, root, level
         vec4 hi = intBitsToFloat(u_tiles[gl_InstanceIndex * 4 + 2]);
@@ -147,22 +149,93 @@ const vertex = `buffer vec4 u_pos[];
         pos = rel + c.xyz - up * (pos.y * extent * 0.0625);
         v_col = u_col[k];
         v_up = up;
+        // The ground's fine detail is periodic over ${DETAIL_PERIOD} m: the tile's
+        // center modulo that (exact in f32, the period a power of two) plus
+        // the cell's offset from it is a coordinate good to micrometres near
+        // the camera, and the same modulo the period on every tile.
+        v_q = mod(hi.xyz, ${DETAIL_PERIOD}.0) + mod(lo.xyz, ${DETAIL_PERIOD}.0) + c.xyz;
     }`;
 
 // The colour layer (planet.bk k_color) is the mean of the ground under each
-// cell: albedo, and how much of it is water.
+// cell: albedo, and how much of it is water. Per pixel, the land carries on
+// past the finest tile's cells: octaves of wavelength 1/8 m down to 2 mm, of
+// albedo variation (ground.bk variation, the same contrast per octave) and of
+// relief (the same slope per octave), each faded out as its wavelength nears
+// a pixel. Both are zero-mean, so what a pixel averages to is the cell's.
 const fragment = `in vec4 v_col;
     in vec3 v_up;
+    in vec3 v_q;
+    const float VARY_LUM = 0.11;      // ground.bk VARY_LUM
+    const float PERLIN_VAR = 0.0728;  // ground.bk PERLIN_VAR
+    const float RELIEF = 0.08;        // slope per octave, per unit of the noise's gradient
+
+    // One of the 12 cube-edge gradients at lattice point c, the lattice
+    // periodic over \`cells\` (a power of two).
+    vec3 latticeGradient(ivec3 c, int cells, int seed) {
+        uvec3 p = uvec3(c & (cells - 1));
+        uint h = (p.x * 0x8da6b343u ^ p.y * 0xd8163841u ^ p.z * 0xcb1ab31fu ^ uint(seed)) * 0x27d4eb2du;
+        h ^= h >> 15;
+        uint e = h % 12u;
+        float s1 = (e & 1u) != 0u ? -1.0 : 1.0, s2 = (e & 2u) != 0u ? -1.0 : 1.0;
+        uint axis = e >> 2;
+        return axis == 0u ? vec3(0.0, s1, s2) : (axis == 1u ? vec3(s1, 0.0, s2) : vec3(s1, s2, 0.0));
+    }
+
+    // Perlin noise at x (lattice units) and its gradient: x value, yzw gradient.
+    vec4 perlinGrad(vec3 x, int cells, int seed) {
+        ivec3 i = ivec3(floor(x));
+        vec3 f = fract(x);
+        vec3 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+        vec3 du = 30.0 * f * f * (f * (f - 2.0) + 1.0);
+        vec3 ga = latticeGradient(i, cells, seed), gb = latticeGradient(i + ivec3(1, 0, 0), cells, seed);
+        vec3 gc = latticeGradient(i + ivec3(0, 1, 0), cells, seed), gd = latticeGradient(i + ivec3(1, 1, 0), cells, seed);
+        vec3 ge = latticeGradient(i + ivec3(0, 0, 1), cells, seed), gf = latticeGradient(i + ivec3(1, 0, 1), cells, seed);
+        vec3 gg = latticeGradient(i + ivec3(0, 1, 1), cells, seed), gh = latticeGradient(i + ivec3(1, 1, 1), cells, seed);
+        float va = dot(ga, f), vb = dot(gb, f - vec3(1, 0, 0)), vc = dot(gc, f - vec3(0, 1, 0)), vd = dot(gd, f - vec3(1, 1, 0));
+        float ve = dot(ge, f - vec3(0, 0, 1)), vf = dot(gf, f - vec3(1, 0, 1)), vg = dot(gg, f - vec3(0, 1, 1)), vh = dot(gh, f - vec3(1, 1, 1));
+        float k1 = vb - va, k2 = vc - va, k3 = ve - va, k4 = va - vb - vc + vd;
+        float k5 = va - vc - ve + vg, k6 = va - vb - ve + vf, k7 = -va + vb + vc - vd + ve - vf - vg + vh;
+        float value = va + u.x * k1 + u.y * k2 + u.z * k3 + u.x * u.y * k4 + u.y * u.z * k5 + u.z * u.x * k6 + u.x * u.y * u.z * k7;
+        vec3 grad = ga + u.x * (gb - ga) + u.y * (gc - ga) + u.z * (ge - ga)
+                  + u.x * u.y * (ga - gb - gc + gd) + u.y * u.z * (ga - gc - ge + gg) + u.z * u.x * (ga - gb - ge + gf)
+                  + u.x * u.y * u.z * (-ga + gb + gc - gd + ge - gf - gg + gh)
+                  + du * (vec3(k1, k2, k3) + u.yzx * vec3(k4, k5, k6) + u.zxy * vec3(k6, k4, k5) + u.yzx * u.zxy * k7);
+        return vec4(value, grad);
+    }
+
     void userFragment(inout vec3 baseColor, inout vec3 normal,
                       inout float metallic, inout float roughness,
                       inout vec3 emissive, inout float alpha) {
         float water = clamp(v_col.a, 0.0, 1.0);
-        baseColor = v_col.rgb;
         // A skirt filling a crack is seen from either side, and its back face
         // gets the flipped normal: the ground never faces down, so shade the
         // side facing up.
         vec3 n = normalize(normal);
         if (dot(n, v_up) < 0.0) n = -n;
+
+        // The octaves a pixel resolves: full weight from 4 pixels a
+        // wavelength, none at 2.
+        float footprint = max(length(dFdx(v_q)), length(dFdy(v_q)));
+        float lum = 0.0, lumVar = 0.0, wavelength = 0.125;
+        vec3 slope = vec3(0.0);
+        int cells = int(${DETAIL_PERIOD}.0 / wavelength);
+        for (int k = 0; k < 6; k++) {
+            float w = clamp(wavelength / footprint * 0.5 - 1.0, 0.0, 1.0);
+            if (w <= 0.0) break;
+            vec3 x = v_q / wavelength;
+            // One noise for both: the relief's crests are the lighter ground.
+            vec4 g = perlinGrad(x, cells, 11 + k);
+            float a = VARY_LUM * w;
+            lum += g.x * a;
+            lumVar += a * a * PERLIN_VAR;
+            slope += g.yzw * (RELIEF * w);
+            wavelength *= 0.5;
+            cells *= 2;
+        }
+        float land = 1.0 - water;
+        baseColor = v_col.rgb * mix(1.0, exp(lum - 0.5 * lumVar), land);
+        // The relief's gradient along the surface tilts the normal against it.
+        n = normalize(n - (slope - dot(slope, n) * n) * land);
         normal = normalize(mix(n, normalize(v_up), water));
         roughness = mix(0.9, 0.12, water);
         metallic = 0.0;    }`;
