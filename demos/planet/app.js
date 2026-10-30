@@ -117,6 +117,10 @@ function setHour(hour) {
     sun.direction = [NOON[0] * c + NOON[2] * s, NOON[1], -NOON[0] * s + NOON[2] * c];
 }
 scene.setExposure({ mode: 'auto', meter: 'incident' });
+// Water mirrors its banks: screen-space reflections out to 600 m (the
+// engine weighs them by Fresnel at the angle the water is seen at and skips
+// rough ground).
+scene.setSSR({ enabled: true, maxDistance: 600, steps: 64, thickness: 20 });
 // The planet's center moves with the camera (the scene is camera-relative):
 // frame() sets it. A clear day's haze; the ground's average albedo lights
 // the air from below.
@@ -535,7 +539,9 @@ const fragment = `buffer uint u_det[];
         // than the sea's swell and waves.
         float fresh = smoothstep(0.0, 1.0, v_height);
         vec3 sea = up;
-        if (water > 0.0) {
+        // (Land near sea level carries a trace of water, the chance its
+        // unresolved heights dip under the sea: too little to show.)
+        if (water > 0.001) {
             float calm = mix(1.0, WAVE_FRESH_SCALE, fresh);
             sea = normalize(up - seaSlope(footprint, up, fresh > 0.5 ? WAVE_FRESH : 0, seaVariance) * calm);
             seaVariance *= calm * calm;
