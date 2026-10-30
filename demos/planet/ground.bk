@@ -577,8 +577,8 @@ pub fn surface(h: f32, grad: f32) -> vec4<f32> {
     // The floor between the trees (trees.js draws them over it, and the
     // ground shader the forest's average where they are not drawn).
     let forest = vec3<f32>(0.11, 0.19, 0.06);
-    let alpine = vec3<f32>(0.20, 0.21, 0.11);
-    let rock = vec3<f32>(0.24, 0.22, 0.20);
+    let alpine = vec3<f32>(0.13, 0.17, 0.08);
+    let rock = vec3<f32>(0.20, 0.20, 0.205);
     let snow = vec3<f32>(0.92, 0.94, 0.97);
     var c = mix(sand, grass, smoothstep(1.0, 4.0, h));
     c = mix(c, forest, smoothstep(150.0, 600.0, h) * (1.0 - smoothstep(2300.0, 2900.0, h)));
