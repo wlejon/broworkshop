@@ -17,6 +17,8 @@ const BORDER = 2;           // cells beyond it: the skirts' bottoms, and the det
 const CELLS = TILE + 2 * BORDER;
 const DETAIL = 2;           // detail texels along a cell's edge (planet.bk's detail layer)
 const TEXELS = CELLS * DETAIL;
+const HZ = CELLS / 2;        // horizon points along a tile's edge, every other cell (planet.bk's horizon layer)
+const HZ_GRID = TILE + 2 * 16 - 1;   // the heights a tile's horizons march through, along an edge (planet.bk HZ_MARGIN 16)
 const CAPACITY = 4096;
 const SEED = 7;
 const BASE_WAVELENGTH = 2400000;   // ground.bk's first octave
@@ -29,6 +31,8 @@ const kHeight = mod.kernel('k_height');
 const kRange = mod.kernel('k_range');
 const kDetailHeight = mod.kernel('k_detail_height');
 const kDetail = mod.kernel('k_detail');
+const kHorizonHeights = mod.kernel('k_horizon_heights');
+const kHorizon = mod.kernel('k_horizon');
 
 // The octaves a tile's cells can carry: down to a wavelength of 2.5 cells
 // (the tile kernels take theirs from ground.bk octaves_for, the same).
@@ -45,13 +49,22 @@ const span = bro.kernel.createBuffer(PRODUCE_PER_UPDATE * 2 * 4);
 span.write(new Int32Array(PRODUCE_PER_UPDATE * 2));
 // The batch's texel mean heights, k_detail_height to k_detail.
 const texelHeights = bro.kernel.createBuffer(PRODUCE_PER_UPDATE * TEXELS * TEXELS * 4);
+// The batch's horizon heights, k_horizon_heights to k_horizon.
+const horizonHeights = bro.kernel.createBuffer(PRODUCE_PER_UPDATE * HZ_GRID * HZ_GRID * 4);
 
 const canvas = document.querySelector('#stage');
 const scene = canvas.getContext('scene');
 scene.setToneMap({ mode: 'aces' });
 // The sun above the air, in lux; the atmosphere dims and reddens it, lights
 // the sky and the haze, and the exposure meters the light at the eye.
-scene.createLight({ type: 'directional', direction: [-0.55, -0.35, -0.75], color: [1, 1, 1], intensity: 128000 });
+// The sun turns about the planet's axis (y) with the hour: noon is the
+// direction it starts in.
+const NOON = [-0.55, -0.35, -0.75];
+const sun = scene.createLight({ type: 'directional', direction: NOON, color: [1, 1, 1], intensity: 128000 });
+function setHour(hour) {
+    const a = (hour - 12) / 24 * 2 * Math.PI, c = Math.cos(a), s = Math.sin(a);
+    sun.direction = [NOON[0] * c + NOON[2] * s, NOON[1], -NOON[0] * s + NOON[2] * c];
+}
 scene.setExposure({ mode: 'auto', meter: 'incident' });
 // The planet's center moves with the camera (the scene is camera-relative):
 // frame() sets it. A clear day's haze; the ground's average albedo lights
@@ -69,13 +82,15 @@ function makeCache(pixelsPerTexel) {
         domain: { type: 'cubeSphere', radius: RADIUS, center: [0, 0, 0] },
         tileSize: TILE, border: BORDER, capacity: CAPACITY, maxLevel: MAX_LEVEL,
         minHeight: 0, maxHeight: MAX_HEIGHT, pixelsPerCell, producePerUpdate: PRODUCE_PER_UPDATE,
-        layers: { position: 16, detail: DETAIL * DETAIL * 8 },
+        layers: { position: 16, detail: DETAIL * DETAIL * 8, horizon: 16 },
         ranges: true,
-        // The whole batch in four dispatches: the GPU fills up on the
+        // The whole batch in five dispatches: the GPU fills up on the
         // batch's cells together, where a tile's own were a few warps.
         produce(batch) {
             const grid = [CELLS, CELLS, batch.count], pos = this.layer('position');
             kTile.dispatch(grid, batch.table, pos, span, RADIUS, BORDER, 1 / TILE, TRUTH, SEED);
+            kHorizonHeights.dispatch([HZ_GRID, HZ_GRID, batch.count], batch.table, horizonHeights, RADIUS, 1 / TILE, SEED);
+            kHorizon.dispatch([HZ, HZ, batch.count], batch.table, horizonHeights, this.layer('horizon'), HZ_GRID, RADIUS, BORDER, 1 / TILE);
             const texels = [TEXELS, TEXELS, batch.count];
             kDetailHeight.dispatch(texels, batch.table, texelHeights, RADIUS, BORDER, 1 / TILE, DETAIL, SEED);
             kDetail.dispatch(texels, batch.table, texelHeights, this.layer('detail'), RADIUS, BORDER, 1 / TILE, DETAIL, TRUTH, SEED);
@@ -85,6 +100,7 @@ function makeCache(pixelsPerTexel) {
     if (ground) {
         ground.setShaderBuffer('u_pos', cache.layer('position'));
         ground.setShaderBuffer('u_det', cache.layer('detail'));
+        ground.setShaderBuffer('u_hz', cache.layer('horizon'));
         ground.setShaderBuffer('u_tiles', cache.drawList);
     }
 }
@@ -128,6 +144,9 @@ const vertex = `buffer vec4 u_pos[];
     uniform vec3 u_camLo;
     out vec2 v_tex;
     flat out int v_slot;
+    out vec2 v_hz;
+    out vec3 v_tu;
+    out vec3 v_tv;
     out vec3 v_up;
     out vec3 v_q;
     void userVertex(inout vec3 pos, inout vec3 normal, inout vec2 uv) {
@@ -142,6 +161,11 @@ const vertex = `buffer vec4 u_pos[];
         // centred at cell (t + 0.5) / D - 0.5.
         v_tex = (vec2(i + B, j + B) + 0.5) * ${DETAIL}.0 - 0.5;
         v_slot = ids.x;
+        // And on the horizon layer's grid (a point every other cell), with
+        // the tile grid's axes its directions are measured along.
+        v_hz = vec2(i + B, j + B) * 0.5;
+        v_tu = u_pos[k + 1].xyz - u_pos[k - 1].xyz;
+        v_tv = u_pos[k + C].xyz - u_pos[k - C].xyz;
         // A skirt's bottom sits under the border cell beyond the edge, so the
         // skirts of neighbouring tiles cross beneath their seam instead of
         // sharing a plane: f32 rounding differs tile to tile, and coplanar
@@ -175,10 +199,85 @@ const vertex = `buffer vec4 u_pos[];
 // wavelength nears a pixel. Both are zero-mean, so what a pixel averages to
 // is the texel's.
 const fragment = `buffer uint u_det[];
+    buffer uint u_hz[];
     in vec2 v_tex;
     flat in int v_slot;
+    in vec2 v_hz;
+    in vec3 v_tu;
+    in vec3 v_tv;
     in vec3 v_up;
     in vec3 v_q;
+
+    // Point p of this tile's horizon grid (planet.bk's horizon layer): the
+    // sines of its horizon's elevation, direction k at k * 45 degrees from
+    // the frame's u toward its v.
+    void horizonPoint(ivec2 p, out float h[8]) {
+        const int N = ${HZ};
+        p = clamp(p, ivec2(0), ivec2(N - 1));
+        int k = ((v_slot * N + p.y) * N + p.x) * 16;
+        for (int w = 0; w < 4; w++) {
+            vec2 s = unpackUnorm2x16(u_hz[k + w]) * 2.0 - 1.0;
+            h[2 * w] = s.x;
+            h[2 * w + 1] = s.y;
+        }
+    }
+
+    // The ground's horizons, read bilinearly, as the sun and sky it sees.
+    // The sun: the share of its disc (0.53 degrees) above the horizon toward
+    // it. The sky: GTAO's cosine-weighted visibility (Jimenez et al. 2016)
+    // over four slices through the up axis, each bounded by the horizons on
+    // its two sides and taken about the normal's projection on it, and the
+    // mean direction of the sky seen, along which its light is taken.
+    void userLight(vec3 toSun, inout float sunVisibility, inout float skyVisibility, inout vec3 skyNormal) {
+        vec2 f = v_hz - floor(v_hz);
+        ivec2 p = ivec2(floor(v_hz));
+        float a[8], b[8], c[8], d[8], h[8];
+        horizonPoint(p, a);
+        horizonPoint(p + ivec2(1, 0), b);
+        horizonPoint(p + ivec2(0, 1), c);
+        horizonPoint(p + ivec2(1, 1), d);
+        for (int k = 0; k < 8; k++) h[k] = asin(clamp(mix(mix(a[k], b[k], f.x), mix(c[k], d[k], f.x), f.y), -1.0, 1.0));
+        // The grid's axes on the tangent plane: direction k is
+        // cos * gu + sin * gv. The sun's azimuth is taken in those axes.
+        vec3 up = normalize(v_up);
+        vec3 gu = v_tu - up * dot(v_tu, up);
+        vec3 gv = v_tv - up * dot(v_tv, up);
+        float uu = dot(gu, gu), uv = dot(gu, gv), vv = dot(gv, gv);
+        float su = dot(toSun, gu), sv = dot(toSun, gv);
+        float fk = mod(atan(uu * sv - uv * su, vv * su - uv * sv) / (PI * 0.25), 8.0);
+        int k0 = int(fk) & 7;
+        // Each point's share of the disc, blended: across a ridge's horizon
+        // jump, blended horizons would step from point to point.
+        int k1 = (k0 + 1) & 7;
+        float fa = fk - floor(fk);
+        float sun = asin(clamp(dot(toSun, up), -1.0, 1.0));
+        vec4 corner = asin(clamp(vec4(mix(a[k0], a[k1], fa), mix(b[k0], b[k1], fa),
+                                      mix(c[k0], c[k1], fa), mix(d[k0], d[k1], fa)), -1.0, 1.0));
+        vec4 lit = clamp((sun - corner) / 0.0093 + 0.5, 0.0, 1.0);
+        sunVisibility *= mix(mix(lit.x, lit.y, f.x), mix(lit.z, lit.w, f.x), f.y);
+
+        vec3 n = skyNormal;
+        float visible = 0.0;
+        vec3 bent = vec3(0.0);
+        for (int s = 0; s < 4; s++) {
+            float az = float(s) * PI * 0.25;
+            vec3 t = normalize(gu * cos(az) + gv * sin(az));
+            vec3 across = cross(up, t);
+            vec3 np = n - across * dot(n, across);
+            float len = length(np);
+            float gamma = atan(dot(np, t), dot(np, up));
+            // The horizons as angles from the zenith, toward +t and -t.
+            float h2 = gamma + min(PI * 0.5 - h[s] - gamma, PI * 0.5);
+            float h1 = gamma + max(h[s + 4] - PI * 0.5 - gamma, -PI * 0.5);
+            float slice = 0.25 * (-cos(2.0 * h1 - gamma) + cos(gamma) + 2.0 * h1 * sin(gamma))
+                        + 0.25 * (-cos(2.0 * h2 - gamma) + cos(gamma) + 2.0 * h2 * sin(gamma));
+            visible += len * slice;
+            float mid = 0.5 * (h1 + h2);
+            bent += (up * cos(mid) + t * sin(mid)) * (len * slice);
+        }
+        skyVisibility *= visible * 0.25;
+        if (dot(bent, bent) > 1e-12) skyNormal = normalize(bent);
+    }
 
     // Texel (x, y) of this tile: colour (rgb, water) and the octahedral
     // normal unfolded.
@@ -362,6 +461,7 @@ const altCtl = bindControl('#alt', {
 altCtl.value = cam.alt;
 bindControl('#pitch', { out: '#pitchVal', fmt: (v) => v.toFixed(0) + '°', onChange: (v) => { cam.pitch = v; } });
 bindControl('#detail', { out: '#detailVal', fmt: (v) => v.toFixed(1) + ' px/texel', onChange: (v) => makeCache(v) });
+bindControl('#sun', { out: '#sunVal', fmt: (v) => String(Math.floor(v)).padStart(2, '0') + ':' + String(Math.floor(v % 1 * 60)).padStart(2, '0'), onChange: (v) => setHour(v) });
 
 function paintStats() {
     const s = cache.stats;
@@ -408,4 +508,4 @@ function loop() {
 requestAnimationFrame(loop);
 
 // For tests and tools.
-globalThis.planet = { cam, get cache() { return cache; }, get stats() { return lastStats; }, get lastView() { return lastView; }, frame };
+globalThis.planet = { cam, setHour, get cache() { return cache; }, get stats() { return lastStats; }, get lastView() { return lastView; }, frame };

@@ -1,6 +1,6 @@
 // Kernels for measuring the ground (CPU eval): one cell as the tile kernels
 // compute it, at (0, 0) of a frame (corner c, axes u, v), `cell` wide.
-from planet::ground import cell_height, spread, expected_surface, gradient, variation;
+from planet::ground import cell_height, spread, expected_surface, gradient, variation, terrain, octaves_for;
 
 // The cell's height.
 @kernel
@@ -46,4 +46,27 @@ fn k_cell_color(cx: f64, cy: f64, cz: f64, ux: f64, uy: f64, uz: f64, vx: f64, v
     let e = expected_surface(h as f32, grad, width, sp.x, sp.y, vec3<f32>(1.0, 1.0, 1.0));
     if (ch == 0) { return (e.x * 0.2126 + e.y * 0.7152 + e.z * 0.0722) as f64; }
     return e.w as f64;
+}
+
+// The sine of the horizon's elevation from the ground at `dir`, toward the
+// tangent `t`: the ground marched from a cell out to `reach` metres, steps 5%
+// apart, each at the octaves its spacing resolves and at most `octaves`, seen
+// from the point's own height at `octaves`. The horizon layer's reference.
+@kernel
+fn k_horizon_truth(x: f64, y: f64, z: f64, tx: f64, ty: f64, tz: f64, cell: f64, reach: f64, ratio: f64, filter: f64,
+                   radius: f64, octaves: f64, seed: i32) -> f64 {
+    let dir = normalize(vec3<f64>(x, y, z));
+    let t = normalize(vec3<f64>(tx, ty, tz));
+    let h = max(terrain(dir, radius, octaves, seed), 0.0);
+    var best: f64 = -1.0;
+    var d = cell;
+    while (d < reach) {
+        let ang = d / radius;
+        let q = normalize(dir * cos(ang) + t * sin(ang));
+        let oct = min(octaves_for(d * filter, 1.0), octaves);
+        let hq = max(terrain(q, radius, oct, seed), 0.0);
+        best = max(best, dot(normalize(q * (radius + hq) - dir * (radius + h)), dir));
+        d = d * ratio;
+    }
+    return best;
 }

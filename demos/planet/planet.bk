@@ -137,6 +137,185 @@ fn k_detail(g: grid<3>, table: read_store<f64, 1>, heights: read_store<f32, 1>, 
     out[at + 1] = unorm(ox * 0.5 + 0.5, 16) | (unorm(oy * 0.5 + 0.5, 16) << 16);
 }
 
+// ── The horizon layer ───────────────────────────────────────────────────────
+//
+// How high the ground rises around a point, which the ground shader turns
+// into how much of the sun and of the sky it sees: at every other cell of a
+// tile (an n^2 grid, point (i, j) at cell (2i, 2j)), the sine of the
+// horizon's elevation in HZ_DIRS directions of the tile's grid, the k-th
+// along (cos, sin)(k * 45 degrees) in cells (the frame's u and v, which the
+// shader maps the sun into), each 16 bits, two to a word: four words, then
+// four more holding the far horizon alone.
+//
+// Each tile marches its horizons through one grid of the ground's heights at
+// its cells, HZ_MARGIN cells past the tile on every side, at the octaves the
+// tile shades with (k_horizon_heights): a height a cell holds is shared by
+// every ray that passes it, where sampling the ground per ray cost each tile
+// six times the evaluations. Steps are 2^(1/8) apart from a cell out: the
+// near band to 8 cells, the far band from 8 to 16 cells.
+//
+// The far horizon, over distances from 8 cells out, is what a child
+// inherits: read bilinearly from its parent's grid at the same point (the
+// parent's points are 4 child cells apart, and what lies 16 child cells or
+// more away changes little across that), widened by the child's own far
+// band. As the parent's far band is 16 to 32 child cells, its
+// parent's the next octave out, a point's horizon spans every distance from
+// a cell to its root's. The horizon the ground is shaded by adds the near
+// band, marched from the point itself: interpolated, a near ridge's horizon
+// would spill onto the valley beside it.
+const HZ_DIRS: i32 = 8;
+const HZ_STEPS: i32 = 32;    // a cell to 16 cells, a factor 2^(1/8) apart
+const HZ_NEAR: i32 = 24;     // of them, the near band's
+const HZ_MARGIN: i32 = 16;   // cells of heights past the tile, beyond the farthest step from its points
+const HZ_WORDS: i32 = 16;    // a point's: 4 of full horizons, 8 of far ones, its height, 3 unused
+
+// The tile's direction at cell coordinate (cx, cy) (cell 0 the drawn edge).
+fn cell_dir(table: read_store<f64, 1>, r: i32, cx: f64, cy: f64, inv_size: f64) -> vec3<f64> {
+    return normalize(record_vec(table, r + 8) + record_vec(table, r + 11) * (cx * inv_size)
+                     + record_vec(table, r + 14) * (cy * inv_size));
+}
+
+// The heights the horizons march through: an e^2 grid a tile, point (x, y)
+// at cell (x, y) - HZ_MARGIN, the surface at the tile's octaves plus one.
+@kernel @grid(3)
+fn k_horizon_heights(g: grid<3>, table: read_store<f64, 1>, heights: write_store<f32, 1>,
+                     radius: f64, inv_size: f64, seed: i32) {
+    let r = g.z() * RECORD;
+    let e = g.width();
+    let m = HZ_MARGIN as f64;
+    let dir = cell_dir(table, r, g.x() as f64 - m, g.y() as f64 - m, inv_size);
+    let octaves = octaves_for(table[r + 20], inv_size) + 2.0;
+    heights[(g.z() * e + g.y()) * e + g.x()] = max(terrain(dir, radius, octaves, seed), 0.0) as f32;
+}
+
+// The height grid bilinearly at cell coordinate (cx, cy).
+fn grid_height(heights: read_store<f32, 1>, base: i32, e: i32, cx: f32, cy: f32) -> f32 {
+    let gx = cx + (HZ_MARGIN as f32);
+    let gy = cy + (HZ_MARGIN as f32);
+    let ix = min(floor(gx) as i32, e - 2);
+    let iy = min(floor(gy) as i32, e - 2);
+    let fx = gx - (ix as f32);
+    let fy = gy - (iy as f32);
+    let at = base + iy * e + ix;
+    let top = mix(heights[at], heights[at + 1], fx);
+    let bottom = mix(heights[at + e], heights[at + e + 1], fx);
+    return mix(top, bottom, fy);
+}
+
+// A far horizon's word: its sine (16 bits) and the log2 of its distance in
+// metres (16 bits over 0 to HZ_LOG_RANGE).
+const HZ_LOG_RANGE: f32 = 24.0;
+
+fn hz_pack_far(s: f32, d: f32) -> i32 {
+    return unorm(s * 0.5 + 0.5, 16) | (unorm(clamp(log2(max(d, 1.0)) / HZ_LOG_RANGE, 0.0, 1.0), 16) << 16);
+}
+
+// The sine of direction k's far horizon at point (gx, gy) of tile `slot`,
+// as seen from height `h` instead of the point's own: the occluder stays
+// where it is (its distance kept with it), the eye moves up or down.
+fn hz_read_far(hz: rw_store<i32, 1>, slot: i32, n: i32, gx: i32, gy: i32, k: i32, h: f32) -> f32 {
+    let at = ((slot * n + gy) * n + gx) * HZ_WORDS;
+    let word = hz[at + 4 + k];
+    let s = ((word & 65535) as f32) / 65535.0 * 2.0 - 1.0;
+    if (s <= -1.0) { return -1.0; }
+    let d = exp2((((word >> 16) & 65535) as f32) / 65535.0 * HZ_LOG_RANGE);
+    let rise = d * s + bitcast<f32>(hz[at + 12]) - h;
+    let run = d * sqrt(max(1.0 - s * s, 0.0));
+    return rise / sqrt(rise * rise + run * run);
+}
+
+@kernel @grid(3)
+fn k_horizon(g: grid<3>, table: read_store<f64, 1>, heights: read_store<f32, 1>, hz: rw_store<i32, 1>,
+             e: i32, radius: f64, border: f64, inv_size: f64) {
+    let r = g.z() * RECORD;
+    let slot = table[r] as i32;
+    let parent = table[r + 1] as i32;
+    let n = g.width();
+    let hbase = g.z() * e * e;
+    let x = g.x() * 2;
+    let y = g.y() * 2;
+    let cx = (x as f64) - border;
+    let cy = (y as f64) - border;
+    // The point, and the frame as offsets from it: a sample at cell offset
+    // (dx, dy) lies along normalize(base + au * dx + av * dy) * |base|, base
+    // the frame at the point. au, av are small beside 1, and the march works
+    // in them alone (f32, exact to the metre on the finest tiles).
+    let base = record_vec(table, r + 8) + record_vec(table, r + 11) * (cx * inv_size)
+               + record_vec(table, r + 14) * (cy * inv_size);
+    let len = length(base);
+    let dir = base / len;
+    let n32 = vec3<f32>(dir.x as f32, dir.y as f32, dir.z as f32);
+    let au64 = record_vec(table, r + 11) * (inv_size / len);
+    let av64 = record_vec(table, r + 14) * (inv_size / len);
+    let au = vec3<f32>(au64.x as f32, au64.y as f32, au64.z as f32);
+    let av = vec3<f32>(av64.x as f32, av64.y as f32, av64.z as f32);
+    let rad = radius as f32;
+    let h = grid_height(heights, hbase, e, cx as f32, cy as f32);
+    // This point on the parent's grid: the parent's cells are twice as wide,
+    // and the tile is its quadrant (table 6, 7).
+    let half = 0.5 / inv_size;
+    let gx = (cx * 0.5 + table[r + 6] * half + border) * 0.5;
+    let gy = (cy * 0.5 + table[r + 7] * half + border) * 0.5;
+    let ix = floor(gx) as i32;
+    let iy = floor(gy) as i32;
+    let ix1 = min(ix + 1, n - 1);
+    let iy1 = min(iy + 1, n - 1);
+    let fx = (gx - floor(gx)) as f32;
+    let fy = (gy - floor(gy)) as f32;
+    // The parent point nearest, whose far horizon's distance an inherited
+    // one keeps.
+    var jx = ix;
+    if (fx >= 0.5) { jx = ix1; }
+    var jy = iy;
+    if (fy >= 0.5) { jy = iy1; }
+    let at = ((slot * n + g.y()) * n + g.x()) * HZ_WORDS;
+    var w0: i32 = 0;
+    var w1: i32 = 0;
+    var w2: i32 = 0;
+    var w3: i32 = 0;
+    for (var k: i32 = 0; k < HZ_DIRS; k += 1) {
+        let a = (k as f64) * 0.78539816339744831;
+        let ca = cos(a) as f32;
+        let sa = sin(a) as f32;
+        var far: f32 = -1.0;
+        var far_d: f32 = 1.0;
+        if (parent >= 0) {
+            let top = mix(hz_read_far(hz, parent, n, ix, iy, k, h), hz_read_far(hz, parent, n, ix1, iy, k, h), fx);
+            let bottom = mix(hz_read_far(hz, parent, n, ix, iy1, k, h), hz_read_far(hz, parent, n, ix1, iy1, k, h), fx);
+            far = mix(top, bottom, fy);
+            let word = hz[((parent * n + jy) * n + jx) * HZ_WORDS + 4 + k];
+            far_d = exp2((((word >> 16) & 65535) as f32) / 65535.0 * HZ_LOG_RANGE);
+        }
+        var near: f32 = -1.0;
+        for (var i: i32 = 0; i < HZ_STEPS; i += 1) {
+            let d = exp2((i as f32) * 0.125);
+            let dx = ca * d;
+            let dy = sa * d;
+            let hq = grid_height(heights, hbase, e, (cx as f32) + dx, (cy as f32) + dy);
+            // The sample's direction less the point's, from the offset alone.
+            let off = au * dx + av * dy;
+            let grow = 2.0 * dot(n32, off) + dot(off, off);
+            let l = sqrt(1.0 + grow);
+            let delta = (off - n32 * (grow / (l + 1.0))) / l;
+            let to = delta * (rad + hq) + n32 * (hq - h);
+            let s = dot(to, n32) / length(to);
+            if (i < HZ_NEAR) { near = max(near, s); }
+            else if (s > far) { far = s; far_d = length(to); }
+        }
+        hz[at + 4 + k] = hz_pack_far(far, far_d);
+        let full = unorm(max(near, far) * 0.5 + 0.5, 16) << (16 * (k % 2));
+        let wk = k / 2;
+        if (wk == 0) { w0 = w0 | full; } else if (wk == 1) { w1 = w1 | full; }
+        else if (wk == 2) { w2 = w2 | full; } else { w3 = w3 | full; }
+    }
+    hz[at] = w0;
+    hz[at + 1] = w1;
+    hz[at + 2] = w2;
+    hz[at + 3] = w3;
+    hz[at + 12] = bitcast<i32>(h);
+}
+
+
 // The range the surface of a tile and of every tile below it lies in, into
 // the cache's ranges at 2 * slot: the surface heights k_tile gathered,
 // widened by what finer octaves can still add (ground.bk range_margin), at
