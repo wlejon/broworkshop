@@ -1,14 +1,12 @@
 // Superopt Lab: bro's program provers, one question per tab. Each tab shows
 // the engine's answer beside what the page checked by running the code
 // itself: Prove (equivalence and round trips), Fuzz (path inputs and hazard
-// witnesses), Superoptimize (CEGIS search and proven rewrites) and
-// Parallelize (loop dependence proofs and the GPU kernel they unlock).
+// witnesses) and Superoptimize (CEGIS search and proven rewrites).
 
 import { boot, $, statusLine, stats, tabs } from "/lib/kit/index.js";
 import { createProveTab } from "./prove.js";
 import { createFuzzTab } from "./fuzz.js";
 import { createSuperoptTab } from "./superopt.js";
-import { createParallelTab } from "./parallel.js";
 
 boot();
 
@@ -38,9 +36,8 @@ const app = {
 panes.prove = createProveTab(app);
 panes.fuzz = createFuzzTab(app);
 panes.superopt = createSuperoptTab(app);
-panes.parallel = createParallelTab(app);
 
-const defaults = { prove: 'absBug', fuzz: 'gate', superopt: 'sign', parallel: 'saxpy' };
+const defaults = { prove: 'absBug', fuzz: 'gate', superopt: 'sign' };
 
 export const tabBar = tabs('#tabs', {
   onChange(name) {
@@ -58,7 +55,6 @@ export const state = {
   prove: panes.prove.state,
   fuzz: panes.fuzz.state,
   superopt: panes.superopt.state,
-  parallel: panes.parallel.state,
 };
 
 globalThis.__superoptLab = { state, tabBar, panes };

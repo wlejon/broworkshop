@@ -1,12 +1,11 @@
 // Solver Lab: bro's solvers and the proofs behind them, one question per tab.
 // Each tab shows the engine's answer beside what the page checked on its
-// own: Solve (bitvector SAT), Layout (constraint layout), Trajectory
-// (symbolic autodiff + shooting) and Lockstep (verified capsules + rollback).
+// own: Solve (bitvector SAT), Layout (constraint layout) and Lockstep
+// (verified capsules + rollback).
 
 import { boot, $, statusLine, stats, tabs } from "/lib/kit/index.js";
 import { createSolveTab } from "./solve.js";
 import { createLayoutTab } from "./layout.js";
-import { createTrajectoryTab } from "./trajectory.js";
 import { createLockstepTab } from "./lockstep.js";
 
 boot();
@@ -37,10 +36,9 @@ const app = {
 
 panes.solve = createSolveTab(app);
 panes.layout = createLayoutTab(app);
-panes.trajectory = createTrajectoryTab(app);
 panes.lockstep = createLockstepTab(app);
 
-const defaults = { solve: 'xorSum', layout: 'editor', trajectory: 'ripple', lockstep: 'arena' };
+const defaults = { solve: 'xorSum', layout: 'editor', lockstep: 'arena' };
 
 export const tabBar = tabs('#tabs', {
   onChange(name) {
@@ -57,7 +55,6 @@ export const state = {
   get activeTab() { return active; },
   solve: panes.solve.state,
   layout: panes.layout.state,
-  trajectory: panes.trajectory.state,
   lockstep: panes.lockstep.state,
 };
 

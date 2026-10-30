@@ -58,23 +58,6 @@ test("layout: solved, resized live, infeasible until wide enough", () => {
   check(st.result.sat, "they fit at 704 px");
 });
 
-test("trajectory: lands through the field, gradient checked", () => {
-  clickOn("#tab-trajectory");
-  frames(3);
-  const t = lab.state.trajectory;
-  check(t.ad && t.ad.ok && t.ad.provenSafe, "U differentiated");
-  check(t.traj && t.traj.converged && t.traj.missDistance < 1e-3, `converged (miss ${t.traj && t.traj.missDistance})`);
-  check(t.traj.obstacleFree, "clears the obstacle");
-  check(failedChecks("#traj-checks") === 0, "no page check fails");
-  shot("trajectory");
-
-  lab.panes.trajectory.load("gravity");
-  const v = t.traj.initialVelocity;
-  check(Math.abs(v[0] - 7 / 1.2) < 1e-2 && Math.abs(v[1] - (2 / 1.2 + 0.5 * 9.81 * 1.2)) < 1e-2, `gravity-only launch matches the closed form (${v[0]}, ${v[1]})`);
-  lab.panes.trajectory.setTarget(6, 4);
-  check(t.traj.converged && Math.abs(t.target[0] - 6) < 1e-9, "re-solves for a new target");
-});
-
 test("lockstep: late inputs, rollbacks, same confirmed state; the gate rejects bad capsules", () => {
   clickOn("#tab-lockstep");
   frames(3);

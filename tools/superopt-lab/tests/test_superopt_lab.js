@@ -65,28 +65,4 @@ test("superoptimize: a synthesized one-liner and proven rewrites, both agreeing 
   shot("superopt-rewrite");
 });
 
-test("parallelize: independent loops run on the GPU and match; dependent ones are refused with the reason", () => {
-  clickOn("#tab-parallel");
-  frames(3);
-  const p = lab.state.parallel;
-  check(p.result.parallelizable && p.trace.conflicts.length === 0, "saxpy proven independent; the trace agrees");
-  check(p.gpu && p.gpu.mismatches === 0 && p.gpu.compared >= 1 << 20, `GPU equals CPU on ${p.gpu && p.gpu.compared} elements`);
-  check(failedChecks("#par-checks") === 0, "no page check fails");
-  frames(2);
-  shot("parallel");
-
-  lab.panes.parallel.load("split");
-  check(p.result.parallelizable && p.gpu && p.gpu.mismatches === 0, "interleave runs on the GPU and matches");
-
-  lab.panes.parallel.load("prefix");
-  check(!p.result.parallelizable && p.result.hazards[0].hazardKind === "RAW", "prefix sum refused: RAW");
-  check(p.trace.conflicts.some((c) => c.kind === "RAW"), "the page's trace sees the read-after-write chain");
-  check(failedChecks("#par-checks") === 0, "bro's witness shows in the trace");
-  frames(2);
-  shot("parallel-prefix");
-
-  lab.panes.parallel.load("reverse");
-  check(!p.result.parallelizable && p.trace.conflicts.length > 0, `reverse refused; the trace finds ${p.trace.conflicts.length} shared elements`);
-});
-
 done("superopt-lab");

@@ -16,7 +16,6 @@
     <div class="k-tabs" id="tabs">
       <button data-tab="solve" id="tab-solve" class="active">Solve</button>
       <button data-tab="layout" id="tab-layout">Layout</button>
-      <button data-tab="trajectory" id="tab-trajectory">Trajectory</button>
       <button data-tab="lockstep" id="tab-lockstep">Lockstep</button>
     </div>
     <span class="k-spacer"></span>
@@ -89,35 +88,6 @@
         </div>
       </div>
 
-      <!-- Trajectory ------------------------------------------------------->
-      <div data-pane="trajectory" class="k-col" hidden>
-        <div class="k-panel">
-          <h2>Example</h2>
-          <div class="k-presets" id="traj-presets"></div>
-          <p class="k-note" id="traj-note"></p>
-        </div>
-        <div class="k-panel">
-          <h2>Potential U(x, y, z) <span class="dim">force = −∇U, plus gravity</span></h2>
-          <textarea id="traj-src" class="code" rows="5" spellcheck="false"></textarea>
-          <label class="k-field"><span>flight time</span><input type="range" id="traj-time" min="0.6" max="3" step="0.05"><output class="k-val" id="traj-time-val"></output></label>
-          <div class="k-row">
-            <span class="dim">target</span><b class="val" id="traj-target"></b>
-            <span class="dim">click the field to move it</span>
-            <span class="k-spacer"></span>
-            <button id="traj-run" class="primary">Solve</button>
-          </div>
-        </div>
-        <div class="k-panel">
-          <h2>Answer <span class="dim">bro.gpu.differentiate + bro.physics.solveTrajectory</span></h2>
-          <div class="k-verdict" id="traj-verdict"></div>
-          <div id="traj-kv"></div>
-        </div>
-        <div class="k-panel">
-          <h2>Checked by the page</h2>
-          <div class="k-checks" id="traj-checks"></div>
-        </div>
-      </div>
-
       <!-- Lockstep --------------------------------------------------------->
       <div data-pane="lockstep" class="k-col" hidden>
         <div class="k-panel">
@@ -156,11 +126,6 @@
       <div data-pane="layout" class="k-stage" hidden>
         <div class="k-stage-head"><h2 id="layout-title"></h2><span class="k-spacer"></span><div class="k-legend" id="layout-legend"></div></div>
         <div class="k-viewport layout-viewport" id="layout-view"></div>
-      </div>
-      <div data-pane="trajectory" class="k-stage" hidden>
-        <div class="k-stage-head"><h2 id="traj-title"></h2><span class="k-spacer"></span><span class="dim" id="traj-hover"></span></div>
-        <div class="k-viewport"><canvas id="traj-view"></canvas></div>
-        <div class="k-legend foot" id="traj-legend"></div>
       </div>
       <div data-pane="lockstep" class="k-stage" hidden>
         <div class="k-stage-head"><h2 id="lock-title"></h2><span class="k-spacer"></span><div class="k-legend" id="lock-legend"></div></div>

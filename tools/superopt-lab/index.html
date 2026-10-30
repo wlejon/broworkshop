@@ -17,7 +17,6 @@
       <button data-tab="prove" id="tab-prove" class="active">Prove</button>
       <button data-tab="fuzz" id="tab-fuzz">Fuzz</button>
       <button data-tab="superopt" id="tab-superopt">Superoptimize</button>
-      <button data-tab="parallel" id="tab-parallel">Parallelize</button>
     </div>
     <span class="k-spacer"></span>
     <span class="k-sub" id="tab-question"></span>
@@ -106,33 +105,6 @@
           <div class="k-checks" id="so-checks"></div>
         </div>
       </div>
-
-      <!-- Parallelize ------------------------------------------------------>
-      <div data-pane="parallel" class="k-col" hidden>
-        <div class="k-panel">
-          <h2>Example</h2>
-          <div class="k-presets" id="par-presets"></div>
-          <p class="k-note" id="par-note"></p>
-        </div>
-        <div class="k-panel">
-          <h2>Loop <span class="dim">for (let i = 0; i &lt; n; i++) over typed arrays</span></h2>
-          <textarea id="par-src" class="code" rows="7" spellcheck="false"></textarea>
-          <label class="k-field"><span>GPU run size</span><input type="range" id="par-size" min="14" max="22" step="1"><output class="k-val" id="par-size-val"></output></label>
-          <div class="k-row">
-            <span class="k-spacer"></span>
-            <button id="par-run" class="primary">Analyze &amp; run</button>
-          </div>
-        </div>
-        <div class="k-panel">
-          <h2>Answer <span class="dim">bro.autoKernel</span></h2>
-          <div class="k-verdict" id="par-verdict"></div>
-          <div id="par-kv"></div>
-        </div>
-        <div class="k-panel">
-          <h2>Checked by the page</h2>
-          <div class="k-checks" id="par-checks"></div>
-        </div>
-      </div>
     </aside>
 
     <main class="k-main">
@@ -147,10 +119,6 @@
       <div data-pane="superopt" class="k-stage" hidden>
         <div class="k-stage-head"><h2 id="so-title"></h2><span class="k-spacer"></span><div class="k-legend" id="so-legend"></div></div>
         <div class="k-viewport so-stage" id="so-view"></div>
-      </div>
-      <div data-pane="parallel" class="k-stage" hidden>
-        <div class="k-stage-head"><h2 id="par-title"></h2><span class="k-spacer"></span><div class="k-legend" id="par-legend"></div></div>
-        <div class="k-viewport"><canvas id="par-view"></canvas></div>
       </div>
     </main>
   </div>
