@@ -574,9 +574,9 @@ function frame() {
     ground.setShaderUniform('u_treesFar', trees.far);
     clouds.update(f.pos, f.surface + cam.alt - RADIUS, 2 * Math.tan(FOV * Math.PI / 360) / height);
     const d = sun.direction, dl = Math.hypot(d[0], d[1], d[2]);
-    grass.update(f.pos, cam.alt, [-d[0] / dl, -d[1] / dl, -d[2] / dl], camHi, camLo, performance.now() / 1000 % WAVE_CLOCK);
-    trees.update(f.pos, cam.alt, [-d[0] / dl, -d[1] / dl, -d[2] / dl], camHi, camLo, f.fwd,
-                 Math.atan(Math.tan(FOV * Math.PI / 360) * Math.hypot(1, aspect)), performance.now() / 1000 % WAVE_CLOCK);
+    const cone = Math.atan(Math.tan(FOV * Math.PI / 360) * Math.hypot(1, aspect));
+    grass.update(f.pos, cam.alt, [-d[0] / dl, -d[1] / dl, -d[2] / dl], camHi, camLo, f.fwd, cone, performance.now() / 1000 % WAVE_CLOCK);
+    trees.update(f.pos, cam.alt, [-d[0] / dl, -d[1] / dl, -d[2] / dl], camHi, camLo, f.fwd, cone, performance.now() / 1000 % WAVE_CLOCK);
     for (let k = 0; k < 3; k++) atmosphere.planetCenter[k] = -f.pos[k];
     scene.setAtmosphere(atmosphere);
     lastStats.selected = cache.wanted;

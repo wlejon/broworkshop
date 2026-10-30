@@ -35,7 +35,6 @@ const NEAR = 12;           // metres: the dense cells inside, the sparse ones ou
 const FAR = 40;            // metres: no blade stands past it
 const DENSE = 128;         // blades in a near cell
 const SPARSE = 64;         // and in a far one: what stands of the dense ones at NEAR
-const SHOWN_BELOW = 120;   // metres of altitude above which no grass is drawn
 
 // A blade cell: `blades` strips of three segments, x the blade's index, y
 // its height share (0 root .. 1 tip), z its side (-1, 1; 0 at the tip).
@@ -60,16 +59,28 @@ function bladeCell(blades) {
 // from the eye, as offsets from the centre's cell, two ints each: the eye is
 // up to SNAP / 2 cells off the centre, and a cell is as little as 0.71 m
 // (the spacing is a power of two of the plane's units, within a factor
-// root 2 of SPACING).
+// root 2 of SPACING). Sorted by their angle about the centre (the angles
+// beside them), so the cells toward the view are one run.
 function cellRing(r0, r1) {
     const out = [], near = 0.7071 * SPACING, far = 1.4143 * SPACING;
     const lo = r0 / far - SNAP / 2 - 1, hi = r1 / near + SNAP / 2 + 1, reach = Math.ceil(hi);
     for (let dy = -reach; dy < reach; dy++)
         for (let dx = -reach; dx < reach; dx++) {
             const d = Math.hypot(dx + 0.5, dy + 0.5);
-            if (d >= lo && d < hi) out.push(dx, dy);
+            if (d >= lo && d < hi) out.push([Math.atan2(dy + 0.5, dx + 0.5), dx, dy]);
         }
-    return new Int32Array(out);
+    out.sort((a, b) => a[0] - b[0]);
+    return { cells: new Int32Array(out.flatMap((c) => [c[1], c[2]])), angles: Float64Array.from(out, (c) => c[0]) };
+}
+
+// The first index of sorted `angles` at or past a.
+function lowerBound(angles, a) {
+    let lo = 0, hi = angles.length;
+    while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (angles[mid] < a) lo = mid + 1; else hi = mid;
+    }
+    return lo;
 }
 
 const SUN_STRIDE = 4;      // field points between the sun grid's
@@ -87,6 +98,10 @@ const vertex = `buffer float u_field[];
     uniform float u_time;
     uniform float u_blades;   // this cell's blades
     uniform vec2 u_band;      // the distances this node draws over: blades from r0, none past r1
+    uniform vec3 u_camFwd;
+    uniform float u_cosView;  // the cosine of the view's half diagonal, a little wider
+    uniform float u_first;    // the first cell drawn, of u_cellCount
+    uniform float u_cellCount;
     out vec3 v_col;
     out float v_t;
     out float v_lit;
@@ -111,13 +126,31 @@ const vertex = `buffer float u_field[];
         return mix(mix(u_sun[k], u_sun[k + 1], t.x), mix(u_sun[k + ${SUN_P}], u_sun[k + ${SUN_P + 1}], t.x), t.y);
     }
     void userVertex(inout vec3 pos, inout vec3 normal, inout vec2 uv) {
-        ivec2 cell = ivec2(u_cells[2 * gl_InstanceIndex], u_cells[2 * gl_InstanceIndex + 1]) + ivec2(${N / 2});
+        // The cells are sorted by their angle about the field's centre, and a
+        // node draws the run of them toward the view, from u_first round.
+        int ci = (gl_InstanceIndex + int(u_first)) % int(u_cellCount);
+        ivec2 cell = ivec2(u_cells[2 * ci], u_cells[2 * ci + 1]) + ivec2(${N / 2});
         int b = int(pos.x + 0.5);
         float t = pos.y, side = pos.z;
         ivec2 world = cell + ivec2(u_lattice);
         uint seed = pcg(uint(world.x) * 73856093u ^ uint(world.y) * 19349663u ^ uint(b) * 83492791u);
         vec2 at = vec2(rnd(seed), rnd(seed));
         cell = clamp(cell, ivec2(0), ivec2(${N - 1}));
+        // A blade whose cell (under 1.5 m across) is out of this node's band
+        // or the view, or that stands beyond what the distance keeps, is one
+        // point: its triangles have no area, and it costs one field read.
+        int k0 = (cell.y * ${P} + cell.x) * 7;
+        vec3 rel0 = (u_oHi - u_camHi) + (u_oLo - u_camLo) + vec3(u_field[k0], u_field[k0 + 1], u_field[k0 + 2]);
+        float d0 = length(rel0);
+        if (d0 < u_band.x - 1.5 || d0 > u_band.y + 1.5 || dot(rel0, u_camFwd) + 1.5 < u_cosView * d0
+            || float(b) + 0.5 > min(1.0, ${THIN}.0 / max(d0 - 1.5, 1e-6)) * ${DENSE}.0) {
+            pos = vec3(0.0);
+            normal = vec3(0.0, 0.0, 1.0);
+            v_t = 0.0;
+            v_col = vec3(0.0);
+            v_lit = 0.0;
+            return;
+        }
         vec3 p00, p10, p01, p11, a00, a10, a01, a11;
         float c00, c10, c01, c11;
         fieldPoint(cell.x, cell.y, p00, c00, a00);
@@ -212,25 +245,30 @@ export function createGrass(scene, radius, module, sunModule, octaves, seed) {
     const sunGrid = createSunGrid(sunModule, SUN_P);
     const field = bro.kernel.createBuffer(P * P * 7 * 4);
     const bands = [
-        { blades: DENSE, band: [0, NEAR], cells: cellRing(0, NEAR) },
-        { blades: SPARSE, band: [NEAR, FAR], cells: cellRing(NEAR, FAR) },
+        { blades: DENSE, band: [0, NEAR], ring: cellRing(0, NEAR) },
+        { blades: SPARSE, band: [NEAR, FAR], ring: cellRing(NEAR, FAR) },
     ];
-    const nodes = bands.map(({ blades, band, cells }) => {
+    const nodes = bands.map(({ blades, band, ring }) => {
         const node = scene.createInstancedMesh({ mesh: bladeCell(blades), color: [1, 1, 1],
                                                  castsShadow: false, receivesShadow: false, doubleSided: true });
         node.setShader({ vertex, fragment: fragment(radius) });
         node.cullMargin = 4 * radius;   // the shader places the blades
         node.setShaderBuffer('u_field', field);
         node.setShaderBuffer('u_sun', sunGrid.buffer);
-        node.setShaderBuffer('u_cells', bro.kernel.createBuffer(cells));
+        node.setShaderBuffer('u_cells', bro.kernel.createBuffer(ring.cells));
         node.setShaderUniform('u_blades', blades);
         node.setShaderUniform('u_band', band);
-        node.count = cells.length / 2;
+        node.count = ring.angles.length;
+        node.angles = ring.angles;
+        node.setShaderUniform('u_cellCount', node.count);
+        node.setShaderUniform('u_first', 0);
+        node.reach = band[1];
+        node.shown = false;
         node.setInstanceCount(0);
         return node;
     });
 
-    let face = -1, delta = 0, ui = NaN, vi = NaN, shown = false, sunDue = -1;
+    let face = -1, delta = 0, ui = NaN, vi = NaN, sunDue = -1;
     const sun = [0, 0, 0];
     const hi = [0, 0, 0], lo = [0, 0, 0];
 
@@ -239,6 +277,52 @@ export function createGrass(scene, radius, module, sunModule, octaves, seed) {
         const best = m[0] >= m[1] && m[0] >= m[2] ? 0 : (m[1] >= m[2] ? 1 : 2);
         if (face >= 0 && m[face % 3] * 1.05 >= m[best] && Math.sign(eye[face % 3]) === (face < 3 ? 1 : -1)) return face;
         return best + (eye[best] < 0 ? 3 : 0);
+    }
+
+    // Each node's run of cells toward the view: the azimuths the view's
+    // cone covers on the ground about the eye (all of them when it takes
+    // in the ground straight below or the sky straight above), widened by
+    // how far the eye is off the field's centre as seen from the band's
+    // nearest cells, taken in the lattice's own angles.
+    const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    function aim(eye, forward, cone) {
+        const frame = faceFrame(face);
+        const at = (u, v) => {
+            const p = [0, 1, 2].map((k) => frame.a[k] + frame.e[k] * u + frame.f[k] * v);
+            const l = Math.hypot(p[0], p[1], p[2]);
+            return p.map((x) => x / l);
+        };
+        const z = dot(eye, frame.a), u = dot(eye, frame.e) / z, v = dot(eye, frame.f) / z;
+        const here = at(u, v), tx = at(u + delta, v), ty = at(u, v + delta);
+        const ex = tx.map((x, k) => (x - here[k]) * radius), ey = ty.map((x, k) => (x - here[k]) * radius);
+        const up = here, fu = dot(forward, up);
+        const flat = forward.map((x, k) => x - up[k] * fu);
+        // flat = a ex + b ey, least squares over the two axes.
+        const xx = dot(ex, ex), xy = dot(ex, ey), yy = dot(ey, ey), fx = dot(flat, ex), fy = dot(flat, ey);
+        const det = xx * yy - xy * xy;
+        const a = (fx * yy - fy * xy) / det, b = (fy * xx - fx * xy) / det;
+        const azimuth = Math.atan2(b, a);
+        const elevation = Math.asin(Math.max(-1, Math.min(1, fu)));
+        const cell = Math.sqrt(Math.sqrt(xx * yy));
+        const off = Math.hypot(u / delta - ui, v / delta - vi) * cell;
+        for (const n of nodes) {
+            if (!n.shown) continue;
+            const r0 = n.reach === NEAR ? 0 : NEAR;
+            let half = Math.PI;
+            if (r0 > off && Math.abs(elevation) + cone < 1.4) {
+                // The lattice is skewed off a face's centre: a little more.
+                half = Math.asin(Math.min(1, Math.sin(cone) / Math.cos(elevation))) + Math.asin(off / (r0 - off)) + 0.2;
+            }
+            let first = 0, count = n.count;
+            if (half < Math.PI) {
+                const wrap = (x) => x - 2 * Math.PI * Math.floor((x + Math.PI) / (2 * Math.PI));
+                first = lowerBound(n.angles, wrap(azimuth - half));
+                const end = lowerBound(n.angles, wrap(azimuth + half));
+                count = (end - first + n.count) % n.count;
+            }
+            n.setShaderUniform('u_first', first);
+            if (count !== n.instanceCount) n.setInstanceCount(count);
+        }
     }
 
     function produce(eye, toSun) {
@@ -292,18 +376,28 @@ export function createGrass(scene, radius, module, sunModule, octaves, seed) {
     return {
         nodes,
         field,
-        update(eye, altitude, toSun, camHi, camLo, time) {
-            const show = altitude < SHOWN_BELOW;
-            if (show !== shown) {
-                shown = show;
-                for (const n of nodes) n.setInstanceCount(show ? n.count : 0);
+        // cone: the half-angle of the view's diagonal, radians.
+        update(eye, altitude, toSun, camHi, camLo, forward, cone, time) {
+            // A band whose blades all stand farther than its reach (with a
+            // quarter more for the ground rising about the eye) draws none.
+            let any = false;
+            for (const n of nodes) {
+                const show = altitude < 1.25 * n.reach;
+                if (show !== n.shown) {
+                    n.shown = show;
+                    n.setInstanceCount(show ? n.count : 0);
+                }
+                any = any || show;
             }
-            if (!show) return;
+            if (!any) return;
             produce(eye, toSun);
+            aim(eye, forward, cone);
             for (const n of nodes) {
                 n.setShaderUniform('u_camHi', camHi);
                 n.setShaderUniform('u_camLo', camLo);
                 n.setShaderUniform('u_time', time);
+                n.setShaderUniform('u_camFwd', forward);
+                n.setShaderUniform('u_cosView', Math.cos(Math.min(cone + 0.1, Math.PI)));
             }
         },
     };
