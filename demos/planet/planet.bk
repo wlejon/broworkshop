@@ -60,7 +60,8 @@ fn k_color(g: grid<3>, table: read_store<f64, 1>, cells: read_store<vec4<f32>, 3
     let t = (y as f64 - border) * inv_size;
     let dir = normalize(record_vec(table, r + 8) + record_vec(table, r + 11) * s + record_vec(table, r + 14) * t);
     let sp = spread(dir, radius, octaves, truth, seed);
-    out[x, y, slot] = expected_surface(c.w, gradient(du, dv, up), sp.x, sp.y, variation(dir, radius, octaves, seed));
+    // du and dv span two cells.
+    out[x, y, slot] = expected_surface(c.w, gradient(du, dv, up), length(du) * 0.5, sp.x, sp.y, variation(dir, radius, octaves, seed));
 }
 
 // The range the surface of a tile and of every tile below it lies in, into
