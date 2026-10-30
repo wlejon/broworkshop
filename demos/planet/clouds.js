@@ -437,7 +437,10 @@ const volumeGlsl = (radius) => cloudGlsl(radius, true) + `
         // per-pixel offset, so a step's edge is grain, not bands.
         uint hp = uint(gl_FragCoord.x) * 1973u + uint(gl_FragCoord.y) * 9277u;
         hp = (hp ^ (hp >> 13)) * 0x5bd1e995u;
-        float jitter = float((hp ^ (hp >> 15)) & 1023u) / 1024.0;
+        // Moved on by the golden ratio each render, so a pixel's offsets
+        // cover the step evenly over the renders the engine's
+        // reconstruction averages (camera.frame.x).
+        float jitter = fract(float((hp ^ (hp >> 15)) & 1023u) / 1024.0 + 0.618034 * camera.frame.x);
         // A pixel's ray through cloud its footprint cannot resolve crosses
         // cloudy columns and clear ones, and its light is the average over
         // them, not that of a thinner cloud everywhere: 30% cover passes 70%
