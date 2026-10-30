@@ -126,14 +126,12 @@ fn k_detail(g: grid<3>, table: read_store<f64, 1>, heights: read_store<f32, 1>, 
     var col = expected_surface(h, grad, length(du) * 0.5, sp.x, sp.y, variation(dir, radius, octaves, seed));
     // The rivers and lakes: the share of the texel under their water, a
     // river as deep as its channel runs there (shallow at its banks, its bed
-    // showing through), a lake as deep as its water typically stands: the
-    // lattice's depth is its points' mean over 20 km, and a lake reaches
-    // down to four times it (rivers.bk lake_surface).
+    // showing through), a lake as deep as its water stands over its
+    // valley's bed (rivers.bk lake_surface).
     let wa = water_at(dir, radius, length(du) * 0.5, net, seed);
-    let wn = wa.near;
     let trend = grad * length(du) * 0.5;
     let water = water_share(h, wa, sqrt(sp.x * sp.x + trend * trend / 12.0));
-    col = vec4<f32>(mix(col.xyz, fresh_water(max(max(1.0 + 3.0 * wn.w, wa.channel), 0.3)), water), max(col.w, water));
+    col = vec4<f32>(mix(col.xyz, fresh_water(max(max(wa.near.w, wa.channel), 0.3)), water), max(col.w, water));
     let cover = expected_cover(h, grad, length(du) * 0.5, sp.x, sp.y) * (1.0 - water);
     var n = normalize(cross(du, dv));
     if (dot(n, up) < 0.0) { n = -n; }

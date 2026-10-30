@@ -2,19 +2,18 @@
 // GPU (riverbuild.bk): every lattice point's height; the fill, one step a
 // dispatch, until the level water stands at has settled from the sea to the
 // farthest point inland; each point's downstream neighbour; then the
-// catchments, one step a dispatch, until the longest chain has settled, and
-// the breach the same way, the levels falling along every chain. The
-// ground's kernels read the network's buffer; the CPU's (the camera's
-// height) a copy of it.
+// catchments, one step a dispatch, until the longest chain has settled; then
+// each point's floor (the full ground's lowest along its reach), the water
+// filled over the floors up every chain and breached the same way, the
+// water falling along every chain. The ground's kernels read the network's
+// buffer; the CPU's (the camera's height) a copy of it.
 
 const N = 512;               // rivers.bk RIV_N
 const REC = 8;               // rivers.bk RIV_REC
 const POINTS = 6 * N * N;
-// Steps of the fill and of the catchments: past the longest chain on a
-// continent.
+// Steps of the fills, the catchments and the breach: past the longest chain
+// on a continent.
 const STEPS = 1024;
-// Steps of a lake's fall to its outlet: past the longest chain across a lake.
-const LAKE_STEPS = 256;
 
 export function createRivers(module, radius, seed) {
     const grid = [N, N, 6];
@@ -29,17 +28,17 @@ export function createRivers(module, radius, seed) {
     src.write(new Float32Array(POINTS));
     for (let i = 0; i < STEPS; i++) { step.dispatch(grid, net, src, dst); swap(); }
     const catchment = src;
+    const floor = bro.kernel.createBuffer(POINTS * 4);
+    module.kernel('k_river_floor').dispatch(grid, net, floor, radius, seed);
     let a = dst, b = bro.kernel.createBuffer(POINTS * 4);
-    module.kernel('k_river_breach_start').dispatch(grid, net, a);
+    const rise = module.kernel('k_river_rise');
+    rise.dispatch(grid, net, floor, floor, a);
+    for (let i = 1; i < STEPS; i++) { rise.dispatch(grid, net, floor, a, b); [a, b] = [b, a]; }
+    module.kernel('k_river_breach_start').dispatch(grid, floor, a, b);
+    [a, b] = [b, a];
     const breach = module.kernel('k_river_breach');
     for (let i = 0; i < STEPS; i++) { breach.dispatch(grid, net, a, b); [a, b] = [b, a]; }
-    const lake = module.kernel('k_river_lake');
-    for (let i = 0; i < LAKE_STEPS; i++) { lake.dispatch(grid, net, a, b); [a, b] = [b, a]; }
-    module.kernel('k_river_store').dispatch(grid, net, catchment, a);
-    module.kernel('k_river_floor_start').dispatch(grid, net, a, radius, seed);
-    const floor = module.kernel('k_river_floor');
-    for (let i = 0; i < STEPS; i++) { floor.dispatch(grid, net, a, b); [a, b] = [b, a]; }
-    module.kernel('k_river_floor_store').dispatch(grid, net, a);
+    module.kernel('k_river_store').dispatch(grid, net, catchment, a, floor);
     const cpu = net.read(new Float32Array(POINTS * REC));
     return { net, cpu };
 }
