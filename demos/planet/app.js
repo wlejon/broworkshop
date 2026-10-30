@@ -22,9 +22,24 @@ const BASE_WAVELENGTH = 2400000;   // planet.bk's first octave
 const mod = bro.kernel.compile(fs.readFileSync(bro.resolvePath('/app/planet.bk'), 'utf-8'), { file: 'planet.bk' });
 const kTile = mod.kernel('k_tile');
 const kHeight = mod.kernel('k_height');
+const kRange = mod.kernel('k_range');
 
 // The octaves a tile's cells can carry: down to a wavelength of 2.5 cells.
 const octavesFor = (extent) => Math.min(30, Math.max(1, Math.log2(BASE_WAVELENGTH / (2.5 * extent / TILE))));
+
+// What the octaves finer than a tile's can still add to its surface, in
+// metres, from planet.bk's amplitudes: the detail fbm (octave 4 up, 250 + 900
+// at most), the ridges (octaves 2 to 11, 6500 at most), counted from the last
+// octave the tile resolves (a peak between its cells), with a quarter more
+// for simplex's reach past 1. Below the continents' octaves it is everything.
+const MAX_HEIGHT = 9000;
+function rangeMargin(octaves) {
+    const k = Math.floor(octaves) - 1;
+    if (k < 4) return MAX_HEIGHT;
+    let m = 1150 * 2 * Math.pow(0.5, k - 4);
+    for (let o = Math.max(k, 2); o < 12; o++) m += 6500 * Math.pow(0.5, o - 1);
+    return m * 1.25;
+}
 
 const canvas = document.querySelector('#stage');
 const scene = canvas.getContext('scene');
@@ -39,13 +54,15 @@ function makeCache(pixelsPerCell) {
     cache = bro.tiles.createCache({
         domain: { type: 'cubeSphere', radius: RADIUS, center: [0, 0, 0] },
         tileSize: TILE, border: BORDER, capacity: CAPACITY, maxLevel: 22,
-        maxHeight: 9000, pixelsPerCell, producePerUpdate: 24,
+        minHeight: 0, maxHeight: MAX_HEIGHT, pixelsPerCell, producePerUpdate: 24,
         layers: { position: 16 },
+        ranges: true,
         produce(tile) {
-            const f = tile.frame, c = tile.center;
+            const f = tile.frame, c = tile.center, octaves = octavesFor(tile.extent);
             kTile.dispatch([tile.cells, tile.cells], tile.layers.position,
                 f.corner[0], f.corner[1], f.corner[2], f.u[0], f.u[1], f.u[2], f.v[0], f.v[1], f.v[2],
-                c[0], c[1], c[2], RADIUS, BORDER, 1 / TILE, octavesFor(tile.extent), SEED);
+                c[0], c[1], c[2], RADIUS, BORDER, 1 / TILE, octaves, SEED);
+            kRange.dispatch([1], tile.layers.position, tile.range, tile.cells * tile.cells, rangeMargin(octaves), MAX_HEIGHT);
         },
     });
     if (ground) {

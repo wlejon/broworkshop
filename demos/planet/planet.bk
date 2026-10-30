@@ -131,6 +131,24 @@ fn k_tile(g: grid<2>, out: write_store<vec4<f32>, 2>,
     out[g.x(), g.y()] = vec4<f32>(p.x as f32, p.y as f32, p.z as f32, h as f32);
 }
 
+// The range the surface of a tile and of every tile below it lies in, from
+// the heights k_tile wrote: their surface (sea level clamps it) widened by
+// `margin`, what finer octaves can still add (app.js rangeMargin). One
+// invocation walks the tile; it is a few microseconds a tile.
+@kernel @grid(1)
+fn k_range(g: grid<1>, cells: read_store<vec4<f32>, 1>, out: write_store<f32, 1>,
+           count: i32, margin: f32, top: f32) {
+    var lo: f32 = 3.0e38;
+    var hi: f32 = -3.0e38;
+    for (var i: i32 = 0; i < count; i += 1) {
+        let h = max(cells[i].w, 0.0);
+        lo = min(lo, h);
+        hi = max(hi, h);
+    }
+    out[0] = max(lo - margin, 0.0);
+    out[1] = min(hi + margin, top);
+}
+
 // One cell as k_tile computes it, for measuring (CPU eval).
 @kernel
 fn k_cell(cx: f64, cy: f64, cz: f64, ux: f64, uy: f64, uz: f64, vx: f64, vy: f64, vz: f64,
