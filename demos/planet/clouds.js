@@ -211,8 +211,11 @@ export const cloudGlsl = (radius, filtered = false) => `
     int cloudFace(vec3 q, out vec2 t) {
         vec3 m = abs(q);
         int axis = m.x >= m.y && m.x >= m.z ? 0 : (m.y >= m.z ? 1 : 2);
-        float z = q[axis];
-        vec2 uv = vec2(q[(axis + 1) % 3], q[(axis + 2) % 3]) / abs(z);
+        // q's axes rotated so the face's comes first (a swizzle: a vector
+        // indexed by a variable is kept in local memory, not registers).
+        vec3 r = axis == 0 ? q : (axis == 1 ? q.yzx : q.zxy);
+        float z = r.x;
+        vec2 uv = r.yz / abs(z);
         float delta = u_cloudHead[CLOUD_LEVELS].x;
         t = clamp((uv + 1.0 + delta) / delta, vec2(0.0), vec2(float(CLOUD_FACE) - 1.001));
         return axis + (z < 0.0 ? 3 : 0);
@@ -243,8 +246,16 @@ export const cloudGlsl = (radius, filtered = false) => `
 
     // The layer's lift at the unit direction q (clouds.bk k_cloud_lift): its
     // base stands CLOUD_BASE over it. On the globe level's faces.
-    buffer float u_cloudLift[];
     const float CLOUD_LIFT_SLOPE = ${LIFT_SLOPE};
+${filtered ? `
+    // The faces as the slices of a texture: one filtered fetch.
+    uniform sampler2DArray u_cloudLiftFaces;
+    float cloudLift(vec3 q) {
+        vec2 t;
+        int face = cloudFace(q, t);
+        return textureLod(u_cloudLiftFaces, vec3((t + 0.5) / float(CLOUD_FACE), float(face)), 0.0).r;
+    }` : `
+    buffer float u_cloudLift[];
     float cloudLift(vec3 q) {
         vec2 t;
         int face = cloudFace(q, t);
@@ -252,7 +263,7 @@ export const cloudGlsl = (radius, filtered = false) => `
         int i = face * CLOUD_FACE_TEXELS + int(c.y) * CLOUD_FACE + int(c.x);
         return mix(mix(u_cloudLift[i], u_cloudLift[i + 1], f.x),
                    mix(u_cloudLift[i + CLOUD_FACE], u_cloudLift[i + CLOUD_FACE + 1], f.x), f.y);
-    }
+    }`}
 
     // Level k at the plane point uv, false outside its grid. Its grid wraps:
     // texel p of it (counted from the plane's origin) is in slot p mod n.
@@ -989,6 +1000,7 @@ export function createClouds(scene, radius, module, readers, seed) {
     }
     for (const n of readers) n.setShaderBuffer('u_cloudLight', light);
     node.setShaderTexture('u_cloudLevels', { buffer: map, width: N, height: N, layers: LEVELS, channels: 2, repeat: true });
+    node.setShaderTexture('u_cloudLiftFaces', { data: liftCpu, width: FACE + 2, height: FACE + 2, layers: 6, channels: 1 });
     return {
         node,
         // The clipmap, for tests: its buffer, the level headers (u_cloudHead)
