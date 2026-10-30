@@ -355,6 +355,7 @@ export function createGrass(scene, radius, module, sunModule, octaves, seed, net
         }
     }
 
+    let fieldMade = false;   // this frame produced the field
     function produce(eye, toSun) {
         const fc = faceOf(eye), frame = faceFrame(fc);
         const z = eye[0] * frame.a[0] + eye[1] * frame.a[1] + eye[2] * frame.a[2];
@@ -378,6 +379,7 @@ export function createGrass(scene, radius, module, sunModule, octaves, seed, net
             const origin = c.map((x) => x / len * radius);
             fieldKernel.dispatch([P, P], field, ...plane, (ui - N / 2) * dl, (vi - N / 2) * dl, dl,
                                  ...origin, radius, octaves, seed, net);
+            fieldMade = true;
             for (let k = 0; k < 3; k++) {
                 hi[k] = Math.fround(origin[k]);
                 lo[k] = origin[k] - hi[k];
@@ -416,8 +418,12 @@ export function createGrass(scene, radius, module, sunModule, octaves, seed, net
     return {
         nodes,
         field,
+        // Whether this frame's update produced the field (0.3 ms of GPU
+        // work), which other per-frame production can stand aside for.
+        get fieldMade() { return fieldMade; },
         // cone: the half-angle of the view's diagonal, radians.
         update(eye, altitude, toSun, camHi, camLo, forward, cone, time) {
+            fieldMade = false;
             // A band whose blades all stand farther than its reach (with a
             // quarter more for the ground rising about the eye) draws none.
             let any = false;

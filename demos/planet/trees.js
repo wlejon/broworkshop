@@ -470,7 +470,10 @@ export function createTrees(scene, radius, module, sunModule, octaves, seed, net
         const nu = Math.round(u / (SNAP * dl)) * SNAP, nv = Math.round(v / (SNAP * dl)) * SNAP;
         const plane = [...frame.a, ...frame.e, ...frame.f];
         const jumped = fc !== face || dl !== delta;
-        if (jumped || nu !== ui || nv !== vi) {
+        // A production begun is finished before the next (begun again at
+        // each of the field's steps, a fast eye would leave it never done),
+        // unless the eye left its face or spacing.
+        if ((jumped || nu !== ui || nv !== vi) && (jumped || jobs.length === 0)) {
             face = fc;
             delta = dl;
             ui = nu;
@@ -608,8 +611,9 @@ export function createTrees(scene, radius, module, sunModule, octaves, seed, net
         // How far off the trees are drawn (0: not at all), the last sixth of
         // it shrinking: beyond, the ground draws the forest's average.
         get far() { return shown ? FAR : 0; },
-        // cone: the half-angle of the view's diagonal, radians.
-        update(eye, altitude, toSun, camHi, camLo, forward, cone, time) {
+        // cone: the half-angle of the view's diagonal, radians. `hold`: other
+        // production took this frame, so the field's slice waits a frame.
+        update(eye, altitude, toSun, camHi, camLo, forward, cone, time, hold = false) {
             const show = altitude < SHOWN_BELOW;
             if (show !== shown) {
                 shown = show;
@@ -617,7 +621,7 @@ export function createTrees(scene, radius, module, sunModule, octaves, seed, net
             }
             if (!show) return;
             plan(eye, toSun);
-            if (jobs.length) jobs.shift()();
+            if (jobs.length && !hold) jobs.shift()();
             listBlocks(eye, altitude, forward, cone);
             for (const n of nodes) {
                 n.setShaderUniform('u_camHi', camHi);
