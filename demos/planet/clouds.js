@@ -362,7 +362,7 @@ const volumeGlsl = (radius) => cloudGlsl(radius) + `
         float first = clamp(t0 * 0.06, 20.0, dtMax) * jitter;
         t += first;
         // Inside cloud, steps of an optical depth of at most 4 in its
-        // densest sub-column.
+        // densest sub-column still seen through.
         const float CLOUD_STEP = 4.0 / CLOUD_SIGMA;
         float inStep = CLOUD_STEP;
         float tPrev = t, fineUntil = -1.0;
@@ -426,7 +426,6 @@ const volumeGlsl = (radius) => cloudGlsl(radius) + `
                     }
                     inCloud = true;
                     vec4 fill = clamp(occ * 4.0 - RANK, 0.0, 1.0);
-                    inStep = CLOUD_STEP / max(fill.w, 0.05);
                     // A sub-column out of cloud again folds its mixture.
                     vec4 gone = vec4(equal(fill, vec4(0.0))) * vec4(greaterThan(cover, vec4(0.0)));
                     T *= mix(vec4(1.0), 1.0 - cover + cover * Tc, gone);
@@ -520,6 +519,12 @@ const volumeGlsl = (radius) => cloudGlsl(radius) + `
                     inside = vec4(greaterThan(fill, vec4(0.0)));
                     vec4 seen = T * (1.0 - cover + cover * Tc);
                     if (max(max(seen.x, seen.y), max(seen.z, seen.w)) < 0.004) break;
+                    // The next step by the densest sub-column whose cloud
+                    // is still seen: one gone dark no longer needs it
+                    // sampled finely, and in part cover the clear ones
+                    // would otherwise be crossed at its pace.
+                    vec4 dense = fill * vec4(greaterThan(T * cover * Tc, vec4(0.004)));
+                    inStep = CLOUD_STEP / max(max(max(dense.x, dense.y), max(dense.z, dense.w)), 0.05);
                 } else {
                     inCloud = false;
                     inside = vec4(0.0);
