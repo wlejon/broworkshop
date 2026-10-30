@@ -317,7 +317,7 @@ const vertex = `buffer float u_field[];
         v_seed = rnd(seed);
     }`;
 
-const fragment = (radius) => `in vec3 v_col;
+const fragment = (radius, ragged) => `in vec3 v_col;
     in float v_ao;
     in float v_lit;
     in vec3 v_branch;
@@ -342,6 +342,15 @@ const fragment = (radius) => `in vec3 v_col;
             float width = mix(0.46, 0.27, v_branch.z);
             float fw = fwidth(a);
             float inBranch = 1.0 - smoothstep(width - 0.06 - fw, width + fw, off);
+            // Out toward the rim the gaps between fingers are open, each
+            // finger reaching its own way out and narrowing to its tip, so a
+            // tier's edge is ragged rather than a polygon's; where the
+            // fingers are finer than a pixel, the edge is their average
+            // instead. Only the near trees' fingers are that large, and
+            // only their pass gives up the early depth test a discard costs.
+            ${ragged ? `float reach = 0.6 + 0.3 * fract(sin(floor(a) * 12.9898 + v_seed * 78.233) * 43758.5453);
+            float tip = (width + 0.04) * (1.0 - 0.75 * smoothstep(reach, 1.0, v_branch.z));
+            if (fw < 0.25 && v_branch.z > reach && off > tip) discard;` : ''}
             float cover = mix(2.0 * width, inBranch, smoothstep(0.6, 0.25, fw));
             shade = mix(0.3, 1.0, cover);
             // Each finger is needled twigs: across and along it, a grain
@@ -394,19 +403,19 @@ export function createTrees(scene, radius, module, sunModule, octaves, seed, net
     const fields = [bro.kernel.createBuffer(N * N * 7 * 4), bro.kernel.createBuffer(N * N * 7 * 4)];
     const sunGrid = createSunGrid(sunModule, SUN_P, net, 4);
     const bands = [
-        { tiers: 7, rim: 7, trunk: true, band: [0, NEAR] },
-        { tiers: 3, rim: 5, trunk: false, band: [NEAR, MID] },
-        { tiers: 0, rim: 0, trunk: false, band: [MID, FAR] },
+        { tiers: 7, rim: 7, trunk: true, band: [0, NEAR], ragged: true },
+        { tiers: 3, rim: 5, trunk: false, band: [NEAR, MID], ragged: false },
+        { tiers: 0, rim: 0, trunk: false, band: [MID, FAR], ragged: false },
     ];
     // Each band draws the blocks the CPU finds in its distances and in view,
     // listed afresh each frame (a few thousand blocks, against drawing all of
     // them in every band, most out of it or behind the eye).
     const lists = bands.map(() => ({ blocks: new Int32Array(2 * BLOCKS * BLOCKS), buffer: null, count: 0,
                                     found: new Int32Array(BLOCKS * BLOCKS), dist: new Float64Array(BLOCKS * BLOCKS) }));
-    const nodes = bands.map(({ tiers, rim, trunk, band }, i) => {
+    const nodes = bands.map(({ tiers, rim, trunk, band, ragged }, i) => {
         const node = scene.createInstancedMesh({ mesh: treeBlock(tiers, rim, trunk), color: [1, 1, 1],
                                                  castsShadow: false, receivesShadow: false, doubleSided: true });
-        node.setShader({ vertex, fragment: fragment(radius) });
+        node.setShader({ vertex, fragment: fragment(radius, ragged) });
         node.cullMargin = 4 * radius;   // the shader places the trees
         node.drawOrder = 4;             // before the grass and the ground they hide
         node.setShaderBuffer('u_field', fields[0]);
