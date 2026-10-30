@@ -471,7 +471,7 @@ const volumeGlsl = (radius) => cloudGlsl(radius, true) + `
         // At least a dozen steps across the layer, so its profile is sampled
         // and not hit or missed by the jitter of one step.
         float dtMax = clamp((t1 - t0) / 12.0, 20.0, 4000.0);
-        float first = clamp(t0 * 0.06, 20.0, dtMax) * jitter;
+        float first = clamp(t0 * 0.1, 20.0, dtMax) * jitter;
         t += first;
         // Inside cloud, steps of an optical depth of at most 4 in its
         // densest sub-column still seen through.
@@ -484,7 +484,7 @@ const volumeGlsl = (radius) => cloudGlsl(radius, true) + `
         // The sun tap's tops (below), for the cloud the ray is in.
         vec4 tapTop = vec4(0.0);
         for (int i = 0; i < 96 && t < t1; i++) {
-            float dt = clamp(t * 0.06, 20.0, dtMax);
+            float dt = clamp(t * 0.1, 20.0, dtMax);
             if (inCloud) dt = min(dt, inStep);
             else if (t < fineUntil) dt = min(dt, CLOUD_STEP);
             // The field at the pixel's footprint, not the step's: a step only
