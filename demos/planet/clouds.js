@@ -163,14 +163,17 @@ export const cloudGlsl = (radius, filtered = false) => `
     // gradient noise over space are added to the column's amount, billows
     // of a few hundred metres in its sides, base and tops (the erosion of
     // Schneider's Nubis), in proportion to the column's amount up to
-    // CLOUD_DETAIL_FULL, so a column barely short of cloud stays clear. A
+    // CLOUD_DETAIL_FULL, so a column barely short of cloud stays clear (and
+    // no further: a thin column's cloud near the base, where the need is
+    // flat, spans a tall range of heights, and with the detail weak there
+    // it hung under the bases as curtains of its own pattern). A
     // column read alone (cloudColumn) carries their variance as unresolved,
     // so the shadows, the light's tops and far pixels see what they average
     // to; where a sample resolves them (cloudDetailed, for the occupancy)
     // they are added and their share of the variance taken back out.
     const vec3 CLOUD_DETAIL[2] = vec3[2](vec3(480.0, 0.07, 0.0), vec3(190.0, 0.04, 17.0));
     const float CLOUD_DETAIL_VAR = ${NOISE_VAR} * (0.07 * 0.07 + 0.04 * 0.04);
-    const float CLOUD_DETAIL_FULL = 0.15;
+    const float CLOUD_DETAIL_FULL = 0.04;
     float cloudDetailScale(float F) { return clamp(F / CLOUD_DETAIL_FULL, 0.0, 1.0); }
 
     // Bilinear over a level's grid of n texels a row from texel base, at
