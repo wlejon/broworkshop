@@ -160,10 +160,9 @@ fn valley_rise(x: f32) -> f32 {
 // The water about `dir`, for a cell `cell` metres wide (water_at): near.x
 // the height the rivers' valleys cut the ground down to (the lowest of a bed plus its
 // valley's rise, over every river near; 1e9 where none), y the share of the
-// cell in a river's channel, z the water of the valley that cuts deepest
-// here (its points' water, riverbuild.bk; -1e9 where none) and w how deep
-// it stands over that valley's bed (a lake where over LAKE_DEPTH: the
-// valley filled to its water, lake_surface). A cell wider than a channel spreads its valley's
+// cell in a river's channel, z the level of the lake whose surface stands
+// highest here (its valley's water, riverbuild.bk; -1e9 where none) and w
+// how deep it stands over that valley's bed. A cell wider than a channel spreads its valley's
 // sides over its width (the distance taken as sqrt(d^2 + cell^2 / 6), the
 // root mean square over a cell) and holds its water as the share of it the
 // channel covers.
@@ -180,11 +179,13 @@ fn point_offset(net: read_store<f32, 1>, k: i32, hi: vec3<f32>, lo: vec3<f32>, r
 // of the width's square, a channel 20 to 40 widths across for each of its
 // depths, Leopold and Maddock 1953), in a parabola from its banks.
 // bed: the floor's height under the valley that cuts deepest here (-1e9
-// where none), which near.x rises from.
+// where none), which near.x rises from. lake: the highest lake surface
+// over here of every valley near (lake_top; -1e9 where none).
 pub struct Water {
     near: vec4<f32>,
     channel: f32,
     bed: f32,
+    lake: f32,
 }
 const CHANNEL_DEPTH: f32 = 0.04;   // of the width, at the middle
 // The reach from point k (record offset) to its downstream point, at offset
@@ -262,7 +263,9 @@ pub fn water_at(dir: vec3<f64>, radius: f64, cell: f32, net: read_store<f32, 1>,
     var share: f32 = 0.0;
     var channel: f32 = 0.0;
     var bed: f32 = -1.0e9;
-    var surface: f32 = -1.0e9;
+    var top: f32 = -1.0e9;
+    var level: f32 = -1.0e9;
+    var depth: f32 = 0.0;
     let spread = cell * cell / 6.0;
     for (var dj: i32 = -1; dj <= 1; dj += 1) {
         for (var di: i32 = -1; di <= 1; di += 1) {
@@ -272,7 +275,12 @@ pub fn water_at(dir: vec3<f64>, radius: f64, cell: f32, net: read_store<f32, 1>,
                 if (rc.v.x < cut) {
                     cut = rc.v.x;
                     bed = rc.v.w;
-                    surface = rc.surface;
+                }
+                let lt = lake_top(rc);
+                if (lt > top) {
+                    top = lt;
+                    level = rc.surface;
+                    depth = rc.surface - rc.v.w;
                 }
                 share = max(share, rc.v.y);
                 channel = max(channel, rc.v.z);
@@ -289,7 +297,12 @@ pub fn water_at(dir: vec3<f64>, radius: f64, cell: f32, net: read_store<f32, 1>,
                     if (rc.v.x < cut) {
                         cut = rc.v.x;
                         bed = rc.v.w;
-                        surface = rc.surface;
+                    }
+                    let lt = lake_top(rc);
+                    if (lt > top) {
+                        top = lt;
+                        level = rc.surface;
+                        depth = rc.surface - rc.v.w;
                     }
                     share = max(share, rc.v.y);
                     channel = max(channel, rc.v.z);
@@ -298,24 +311,39 @@ pub fn water_at(dir: vec3<f64>, radius: f64, cell: f32, net: read_store<f32, 1>,
         }
     }
     var w: Water;
-    w.near = vec4<f32>(cut, share, surface, max(surface - bed, 0.0));
+    w.near = vec4<f32>(cut, share, level, depth);
     w.channel = channel;
     w.bed = bed;
+    w.lake = top;
     return w;
 }
 
-// The surface over ground at height h by the lake of `w` (water_at): where
-// its valley's water stands over LAKE_DEPTH above the bed, the valley is
-// filled to it, as wide as the valley is at that depth; ground lower beyond
-// that width lies under water falling BANK times as steeply as the
-// valley's floor rises there, so the lake ends in a short bank rather than
-// a wall. A lake stands only in its river's valley, so never as a ring of
-// water about a hollow's slopes. h itself elsewhere.
+// A reach's lake surface here, under which the ground is under its water:
+// where its water stands over LAKE_DEPTH above its bed, its level, out to
+// where its valley's profile rises SHORE over the level (less where the
+// lake shallows toward its outlet, twice its depth past LAKE_DEPTH, so it
+// narrows to its end rather than ending across the valley in a straight
+// line): the valley's sides
+// carry the ground's relief, so the shore runs in bays and points rather
+// than along the profile's smooth contour, a canal's. Beyond, it falls
+// BANK times as steeply as the profile rises, so the lake ends in a short
+// bank over lower ground rather than a wall. -1e9 without a lake. A lake
+// stands only in its river's valley, so never as a ring of water about a
+// hollow's slopes.
+const SHORE: f32 = 60.0;
 const BANK: f32 = 3.0;
+fn lake_top(rc: Reach) -> f32 {
+    let over = rc.surface - rc.v.w - LAKE_DEPTH;
+    if (over <= 0.0) { return -1.0e9; }
+    return rc.surface - BANK * max(rc.v.x - rc.surface - min(SHORE, 2.0 * over), 0.0);
+}
+
+// The surface over ground at height h by the lakes of `w` (water_at): the
+// highest of their surfaces where the ground lies under it, so where two
+// valleys meet the water holds across the line where one's valley gives
+// way to the other's. h itself elsewhere.
 pub fn lake_surface(h: f32, w: Water) -> f32 {
-    let level = w.near.z;
-    if (w.near.w <= LAKE_DEPTH || h >= level) { return h; }
-    return max(h, level - BANK * max(w.near.x - level, 0.0));
+    return max(h, w.lake);
 }
 
 // The share of a cell whose mean ground or water surface is at h under
