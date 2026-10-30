@@ -86,6 +86,33 @@ function lowerBound(angles, a) {
 const SUN_STRIDE = 4;      // field points between the sun grid's
 const SUN_P = N / SUN_STRIDE + 1;
 
+// The ground under the blades, for a node createGrass is given as a reader:
+// grassFloor(P, d) is what the ground's colour is taken by at P (about the
+// planet's centre, d from the eye) where blades stand: the ground between
+// them, in their shade, GRASS_FLOOR of what the blades average to, as much
+// as the field's cover there grows grass, and fading out as the blades do
+// toward FAR, past which the ground is the blades' average itself.
+export const GRASS_FLOOR = 0.55;
+export const grassFloorGlsl = `
+    buffer float u_grassField[];
+    uniform vec3 u_grassA;    // the face's plane: axis and its two directions
+    uniform vec3 u_grassE;
+    uniform vec3 u_grassF;
+    uniform vec3 u_grassUV;   // the field's point 0 on the plane, and the plane's units a point; 0: no field
+    float grassFloor(vec3 P, float d) {
+        float fade = smoothstep(${FAR}.0, ${FAR * 0.8}, d);
+        if (fade <= 0.0 || u_grassUV.z <= 0.0) return 1.0;
+        vec3 q = normalize(P);
+        vec2 f = (vec2(dot(q, u_grassE), dot(q, u_grassF)) / dot(q, u_grassA) - u_grassUV.xy) / u_grassUV.z;
+        if (any(lessThan(f, vec2(0.0))) || any(greaterThanEqual(f, vec2(${P - 1}.0)))) return 1.0;
+        ivec2 i = ivec2(f);
+        vec2 t = f - vec2(i);
+        int k = (i.y * ${P} + i.x) * 7 + 3;
+        float cover = mix(mix(u_grassField[k], u_grassField[k + 7], t.x),
+                          mix(u_grassField[k + ${P * 7}], u_grassField[k + ${P * 7 + 7}], t.x), t.y);
+        return mix(1.0, ${GRASS_FLOOR}, fade * cover);
+    }`;
+
 const vertex = `buffer float u_field[];
     buffer float u_sun[];
     buffer int u_cells[];
@@ -194,7 +221,7 @@ const vertex = `buffer float u_field[];
         // Along the blade, bent as a cantilever: up, then over.
         vec3 spine = up * height * t + lean * height * t * t;
         vec3 dspine = up * height + lean * height * 2.0 * t;
-        float width = 0.014 * wide * (1.0 - t) * step(1e-4, height);
+        float width = 0.028 * wide * (1.0 - t) * step(1e-4, height);
         pos = rel + spine + across * (side * width * 0.5);
         vec3 n = normalize(cross(across, dspine + up * 1e-5));
         if (dot(n, facing) < 0.0) n = -n;
@@ -238,9 +265,10 @@ const fragment = (radius) => `in vec3 v_col;
 // The grass in `scene`, its field produced by `module` (grass.bk
 // k_grass_field) and its sun grid by `sunModule` (sun.bk) at `octaves` of
 // the ground's. Its nodes read the clouds'
-// field (createClouds' readers). update() each frame with the eye about the
+// field (createClouds' readers); `readers` are nodes whose chunks include
+// grassFloorGlsl, bound to its field. update() each frame with the eye about the
 // planet's centre (f64), its altitude and the unit direction to the sun.
-export function createGrass(scene, radius, module, sunModule, octaves, seed, net) {
+export function createGrass(scene, radius, module, sunModule, octaves, seed, net, readers = []) {
     const fieldKernel = module.kernel('k_grass_field');
     const sunGrid = createSunGrid(sunModule, SUN_P, net);
     const field = bro.kernel.createBuffer(P * P * 7 * 4);
@@ -357,6 +385,13 @@ export function createGrass(scene, radius, module, sunModule, octaves, seed, net
                 n.setShaderUniform('u_oHi', hi);
                 n.setShaderUniform('u_oLo', lo);
                 n.setShaderUniform('u_lattice', [ui - N / 2, vi - N / 2]);
+            }
+            for (const n of readers) {
+                n.setShaderBuffer('u_grassField', field);
+                n.setShaderUniform('u_grassA', frame.a);
+                n.setShaderUniform('u_grassE', frame.e);
+                n.setShaderUniform('u_grassF', frame.f);
+                n.setShaderUniform('u_grassUV', [(ui - N / 2) * dl, (vi - N / 2) * dl, dl]);
             }
             // The sun grid follows a frame later, read about its own lattice
             // meanwhile, so the two dispatches do not land in one frame;

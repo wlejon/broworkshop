@@ -8,7 +8,7 @@
 import { boot } from "/lib/kit/app.js";
 import { bindControl, logMap } from "/lib/kit/params.js";
 import { cloudGlsl, createClouds } from "/app/clouds.js";
-import { createGrass } from "/app/grass.js";
+import { createGrass, grassFloorGlsl } from "/app/grass.js";
 import { createTrees, treeShadowGlsl } from "/app/trees.js";
 import { createRivers } from "/app/rivers.js";
 
@@ -271,6 +271,7 @@ const fragment = `buffer uint u_det[];
     float g_floor = 0.0;
     ${cloudGlsl(RADIUS)}
     ${treeShadowGlsl}
+    ${grassFloorGlsl}
 
     // Point p of this tile's horizon grid (planet.bk's horizon layer): the
     // sines of its horizon's elevation along the grid's 8 directions.
@@ -513,6 +514,8 @@ const fragment = `buffer uint u_det[];
         vec3 eye = -normalize(vWorldPos);
         float drawn = u_treesFar <= 0.0 ? 0.0 : smoothstep(u_treesFar, u_treesFar * ${(5 / 6).toFixed(4)}, length(vWorldPos));
         float crowns = 1.0 - pow(1.0 - TREE_CROWNS * forest, 1.0 / max(dot(eye, normalize(v_up)), 0.05));
+        // Where blades stand, the ground between them, in their shade.
+        baseColor *= grassFloor((u_camHi + u_camLo) + vWorldPos, length(vWorldPos));
         baseColor *= mix(vec3(1.0), TREE_TINT, crowns * (1.0 - drawn * drawn));
         g_floor = TREE_CROWNS * forest * drawn * drawn;
         // The relief's gradient along the surface tilts the normal against it.
@@ -541,7 +544,7 @@ makeCache(4);
 const cloudMod = bro.kernel.compile(readApp('clouds.bk'), { file: 'clouds.bk', modules: MODULES });
 const sunMod = bro.kernel.compile(readApp('sun.bk'), { file: 'sun.bk', modules: MODULES });
 const grassMod = bro.kernel.compile(readApp('grass.bk'), { file: 'grass.bk', modules: MODULES });
-const grass = createGrass(scene, RADIUS, grassMod, sunMod, TRUTH, SEED, rivers.net);
+const grass = createGrass(scene, RADIUS, grassMod, sunMod, TRUTH, SEED, rivers.net, [ground]);
 const treeMod = bro.kernel.compile(readApp('trees.bk'), { file: 'trees.bk', modules: MODULES });
 const trees = createTrees(scene, RADIUS, treeMod, sunMod, TRUTH, SEED, rivers.net, [ground]);
 const clouds = createClouds(scene, RADIUS, cloudMod.kernel('k_cloud_level'), [ground, ...grass.nodes, ...trees.nodes]);
