@@ -371,9 +371,13 @@ const fragment = (radius, ragged) => `in vec3 v_col;
         }
         baseColor = v_col * shade;
         // Both faces of a drooping tier take its outer side's normal; but
-        // the face seen from below it is its underside, inside the crown.
-        if (dot(normal, (u_camHi + u_camLo) + vWorldPos) < 0.0) normal = -normal;
-        g_under = v_branch.z >= 0.0 && dot(normal, vWorldPos) > 0.0 ? 1.0 : 0.0;
+        // the face seen from below it is its underside, inside the crown:
+        // where the face itself, turned to the eye, faces down.
+        vec3 upv = normalize((u_camHi + u_camLo) + vWorldPos);
+        if (dot(normal, upv) < 0.0) normal = -normal;
+        vec3 face = cross(dFdx(vWorldPos), dFdy(vWorldPos));
+        if (dot(face, vWorldPos) > 0.0) face = -face;
+        g_under = v_branch.z >= 0.0 && dot(face, upv) < 0.0 ? 1.0 : 0.0;
         metallic = 0.0;
         roughness = 0.85;
     }
