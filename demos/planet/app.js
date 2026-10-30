@@ -59,7 +59,13 @@ const WAVES = (() => {
     for (const w of list) w.slope = Math.sqrt(2 * (total - residual) * w.shape / sum);
     let tail = 0;
     for (let i = list.length - 1; i >= 0; i--) { tail += list[i].slope ** 2 / 2; list[i].tail = tail; }
-    return { list, residual, swell: list.filter((w) => w.period === SWELL_PERIOD).length };
+    // Rivers and lakes are sheltered: no fetch for waves longer than a few
+    // metres, and a breeze's ripples (Cox and Munk at 2 m/s, a mean square
+    // slope of 0.0132) where the sea has its wind sea. They take the waves
+    // from `fresh` on, 4 m and shorter, scaled with the residual to that.
+    const fresh = list.findIndex((w) => 2 * Math.PI / w.k <= 4);
+    const freshScale = Math.sqrt((0.003 + 0.00512 * 2) / (list[fresh].tail + residual));
+    return { list, residual, swell: list.filter((w) => w.period === SWELL_PERIOD).length, fresh, freshScale };
 })();
 const glslFloat = (x) => (Number.isInteger(x) ? x.toFixed(1) : String(x));
 
@@ -439,8 +445,8 @@ const fragment = `buffer uint u_det[];
     // wavelength; the angular frequency, the mean square slope of the wave and
     // every shorter one, the slope amplitude over |k| and its mean square
     // slope. The first WAVE_SWELL are periodic over v_swell, the rest over v_q.
-    const int WAVE_COUNT = ${WAVES.list.length}, WAVE_SWELL = ${WAVES.swell};
-    const float WAVE_RESIDUAL = ${glslFloat(WAVES.residual)};
+    const int WAVE_COUNT = ${WAVES.list.length}, WAVE_SWELL = ${WAVES.swell}, WAVE_FRESH = ${WAVES.fresh};
+    const float WAVE_RESIDUAL = ${glslFloat(WAVES.residual)}, WAVE_FRESH_SCALE = ${glslFloat(WAVES.freshScale)};
     const vec4 WAVE_K[WAVE_COUNT] = vec4[](${WAVES.list.map((w) =>
         `vec4(${w.n.map((c) => glslFloat(c * 2 * Math.PI / w.period)).join(', ')}, ${glslFloat(Math.PI / 2 / w.k)})`).join(', ')});
     const vec4 WAVE_F[WAVE_COUNT] = vec4[](${WAVES.list.map((w) =>
@@ -451,11 +457,12 @@ const fragment = `buffer uint u_det[];
     // beats against the pixels in moire), and the mean square slope of those
     // it does not: the waves become the sea's roughness as they shrink below
     // a pixel, so far off the sun's glint spreads as the waves it is made of
-    // would spread it (Bruneton, Neyret and Holzschuch 2010).
-    vec3 seaSlope(float footprint, vec3 up, out float variance) {
+    // would spread it (Bruneton, Neyret and Holzschuch 2010). From wave
+    // first on: fresh water's are WAVE_FRESH on.
+    vec3 seaSlope(float footprint, vec3 up, int first, out float variance) {
         vec3 slope = vec3(0.0);
         variance = WAVE_RESIDUAL;
-        for (int i = 0; i < WAVE_COUNT; i++) {
+        for (int i = first; i < WAVE_COUNT; i++) {
             vec4 k = WAVE_K[i], f = WAVE_F[i];
             float w = clamp(k.w / footprint - 1.0, 0.0, 1.0);
             if (w <= 0.0) { variance += f.y; break; }
@@ -523,13 +530,16 @@ const fragment = `buffer uint u_det[];
         float seaVariance = 0.0;
         vec3 up = normalize(v_up);
         // Rivers and lakes stand above the sea: their water is sheltered,
-        // a breeze's ripples on it (Cox and Munk 1954, a mean square slope
-        // of 0.003 + 0.00512 a m/s of wind, at 2 m/s) rather than the sea's
-        // swell and waves.
+        // a breeze's ripples on it (the waves of 4 m and shorter, scaled to
+        // Cox and Munk's mean square slope at 2 m/s: WAVES.fresh) rather
+        // than the sea's swell and waves.
         float fresh = smoothstep(0.0, 1.0, v_height);
         vec3 sea = up;
-        if (water > 0.0 && fresh < 1.0) sea = normalize(up - seaSlope(footprint, up, seaVariance) * (1.0 - fresh));
-        seaVariance = mix(seaVariance, 0.0132, fresh);
+        if (water > 0.0) {
+            float calm = mix(1.0, WAVE_FRESH_SCALE, fresh);
+            sea = normalize(up - seaSlope(footprint, up, fresh > 0.5 ? WAVE_FRESH : 0, seaVariance) * calm);
+            seaVariance *= calm * calm;
+        }
         normal = normalize(mix(n, sea, water));
         // GGX's alpha is the root mean square slope; the engine's roughness
         // its square root.

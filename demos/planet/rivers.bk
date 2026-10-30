@@ -177,7 +177,20 @@ fn valley_rise(x: f32) -> f32 {
 fn point_offset(net: read_store<f32, 1>, k: i32, hi: vec3<f32>, lo: vec3<f32>, r: f32) -> vec3<f32> {
     return ((vec3<f32>(net[k + 4], net[k + 5], net[k + 6]) - hi) - lo) * r;
 }
+// water_near's, and how deep the channels it lies in run under their water
+// there (m; 0 out of every channel): a river's bed sinks to a 25th of its
+// width at its middle (hydraulic geometry: depth grows about as the root
+// of the width's square, a channel 20 to 40 widths across for each of its
+// depths, Leopold and Maddock 1953), in a parabola from its banks.
+pub struct Water {
+    near: vec4<f32>,
+    channel: f32,
+}
+const CHANNEL_DEPTH: f32 = 0.04;   // of the width, at the middle
 pub fn water_near(dir: vec3<f64>, radius: f64, cell: f32, net: read_store<f32, 1>, seed: i32) -> vec4<f32> {
+    return water_at(dir, radius, cell, net, seed).near;
+}
+pub fn water_at(dir: vec3<f64>, radius: f64, cell: f32, net: read_store<f32, 1>, seed: i32) -> Water {
     let c = cell_of(dir);
     let hi = vec3<f32>(dir.x as f32, dir.y as f32, dir.z as f32);
     let rest = dir - vec3<f64>(hi.x as f64, hi.y as f64, hi.z as f64);
@@ -190,6 +203,7 @@ pub fn water_near(dir: vec3<f64>, radius: f64, cell: f32, net: read_store<f32, 1
     var lakeDist: f32 = LAKE_REACH;
     var depthSum: f32 = 0.0;
     var weightSum: f32 = 0.0;
+    var channel: f32 = 0.0;
     let spread = cell * cell / 6.0;
     for (var dj: i32 = -1; dj <= 1; dj += 1) {
         for (var di: i32 = -1; di <= 1; di += 1) {
@@ -228,11 +242,16 @@ pub fn water_near(dir: vec3<f64>, radius: f64, cell: f32, net: read_store<f32, 1
                     let s0 = max(d - 0.5 * cell, -half);
                     let s1 = min(d + 0.5 * cell, half);
                     share = max(share, clamp((s1 - s0) / max(cell, 1e-3), 0.0, 1.0));
+                    let across = d / half;
+                    channel = max(channel, CHANNEL_DEPTH * 2.0 * half * max(1.0 - across * across, 0.0));
                 }
             }
         }
     }
-    return vec4<f32>(cut, share, lake, depthSum / weightSum);
+    var w: Water;
+    w.near = vec4<f32>(cut, share, lake, depthSum / weightSum);
+    w.channel = channel;
+    return w;
 }
 
 // Whether the lake of `w` (water_near) stands over ground at height h.
