@@ -50,8 +50,14 @@ function rangeMargin(octaves) {
 const canvas = document.querySelector('#stage');
 const scene = canvas.getContext('scene');
 scene.setToneMap({ mode: 'aces' });
-scene.setAmbient([0.025, 0.03, 0.04]);
-scene.createLight({ type: 'directional', direction: [-0.55, -0.35, -0.75], color: [1, 0.97, 0.9], intensity: 3.2 });
+// The sun above the air, in lux; the atmosphere dims and reddens it, lights
+// the sky and the haze, and the exposure meters the light at the eye.
+scene.createLight({ type: 'directional', direction: [-0.55, -0.35, -0.75], color: [1, 1, 1], intensity: 128000 });
+scene.setExposure({ mode: 'auto', meter: 'incident' });
+// The planet's center moves with the camera (the scene is camera-relative):
+// frame() sets it. A clear day's haze; the ground's average albedo lights
+// the air from below.
+const atmosphere = { planetRadius: RADIUS, turbidity: 10, groundAlbedo: [0.08, 0.1, 0.1], planetCenter: [0, -RADIUS, 0] };
 
 // ── The tile cache ──────────────────────────────────────────────────────────
 
@@ -305,6 +311,8 @@ function frame() {
     }
     ground.setShaderUniform('u_camHi', camHi);
     ground.setShaderUniform('u_camLo', camLo);
+    for (let k = 0; k < 3; k++) atmosphere.planetCenter[k] = -f.pos[k];
+    scene.setAtmosphere(atmosphere);
     lastStats = { selected: cache.wanted, visible: n, ms: performance.now() - t0 };
     // Text changes cost the page a layout and raster: a few times a second.
     if (t0 - lastPaint > 250) {
