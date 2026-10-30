@@ -37,8 +37,9 @@ const NOISE_SLOPE = 2.5;              // a bound on its gradient, per lattice un
 // faces of FACE + 2 texels (the faces' edges and a texel beyond). A texel
 // holds the column at a footprint of two texels; the finest are DELTA0 of
 // the plane apart (3 m at a face's centre), the sphere's as the coarsest
-// level's next. A level follows the eye in steps of SNAP texels and is
-// produced again when it steps.
+// level's next. A level follows the eye in steps of SNAP texels and
+// produces only the texels it steps onto, its grid wrapping (k_cloud_level;
+// N a power of two, as the shader wraps by a mask).
 const LEVELS = 14, N = 512, SNAP = 32, FACE = 256;
 const DELTA_GLOBE = 2 / (FACE - 1);
 const DELTA0 = DELTA_GLOBE / 2 ** LEVELS;
@@ -98,7 +99,8 @@ export const cloudGlsl = (radius) => `
     // The column field (clouds.bk): two floats a texel, the amount and the
     // variance of the octaves too fine for the texel. u_cloudHead holds,
     // for level k, its plane origin, texel spacing and gradientBound; at
-    // CLOUD_LEVELS, the globe's spacing and bound. u_cloudA/E/F is the
+    // CLOUD_LEVELS, the globe's spacing and bound; after it, each level's
+    // origin in texels (where its wrapped grid starts). u_cloudA/E/F is the
     // eye's face (faceFrame).
     buffer vec2 u_cloudMap[];
     buffer vec4 u_cloudHead[];
@@ -132,12 +134,21 @@ export const cloudGlsl = (radius) => `
         return cloudBilinear(CLOUD_GLOBE + face * CLOUD_FACE_TEXELS, CLOUD_FACE, t);
     }
 
-    // Level k at the plane point uv, false outside its grid.
+    // Level k at the plane point uv, false outside its grid. Its grid wraps:
+    // texel p of it (counted from the plane's origin) is in slot p mod n.
+    vec2 cloudLevelTexel(int base, ivec2 p) {
+        p &= ivec2(CLOUD_N - 1);
+        return cloudTexel(base + p.y * CLOUD_N + p.x);
+    }
     bool cloudLevel(int k, vec2 uv, out vec2 c) {
         vec4 h = u_cloudHead[k];
         vec2 t = (uv - h.xy) / h.z;
         if (any(lessThan(t, vec2(0.0))) || any(greaterThanEqual(t, vec2(float(CLOUD_N) - 1.001)))) return false;
-        c = cloudBilinear(k * CLOUD_N * CLOUD_N, CLOUD_N, t);
+        vec2 fl = floor(t), f = t - fl;
+        ivec2 p = ivec2(fl) + ivec2(u_cloudHead[CLOUD_LEVELS + 1 + k].xy);
+        int base = k * CLOUD_N * CLOUD_N;
+        c = mix(mix(cloudLevelTexel(base, p), cloudLevelTexel(base, p + ivec2(1, 0)), f.x),
+                mix(cloudLevelTexel(base, p + ivec2(0, 1)), cloudLevelTexel(base, p + ivec2(1, 1)), f.x), f.y);
         return true;
     }
 
@@ -508,18 +519,25 @@ export function createClouds(scene, radius, kernel, readers) {
     const node = scene.createVolume({ fragment: volumeGlsl(radius), name: 'clouds' });
     const nodes = [node, ...readers];
     const map = bro.kernel.createBuffer((GLOBE_BASE + 6 * FACE_TEXELS) * 8);
-    const head = new Float32Array(4 * (LEVELS + 1));
+    // u_cloudHead: LEVELS + 1 headers, then each level's grid origin in
+    // texels (where its wrapped grid starts).
+    const head = new Float32Array(4 * (2 * LEVELS + 1));
     const headBuffer = bro.kernel.createBuffer(head.byteLength);
-    const dispatch = (base, n, frame, u0, v0, delta) => kernel.dispatch([n, n], map, base,
-        frame.a[0], frame.a[1], frame.a[2], frame.e[0], frame.e[1], frame.e[2], frame.f[0], frame.f[1], frame.f[2],
-        u0, v0, delta, radius);
+    // Texels [x0, x0 + w) x [y0, y0 + h) of the grid of n a row at texel base.
+    const dispatch = (base, n, x0, y0, w, h, frame, o, delta) => {
+        if (w > 0 && h > 0) kernel.dispatch([w, h], map, base, n, x0, y0,
+            frame.a[0], frame.a[1], frame.a[2], frame.e[0], frame.e[1], frame.e[2], frame.f[0], frame.f[1], frame.f[2],
+            o, delta, radius);
+    };
 
-    for (let i = 0; i < 6; i++) dispatch(GLOBE_BASE + i * FACE_TEXELS, FACE + 2, faceFrame(i), -1 - DELTA_GLOBE, -1 - DELTA_GLOBE, DELTA_GLOBE);
+    for (let i = 0; i < 6; i++) dispatch(GLOBE_BASE + i * FACE_TEXELS, FACE + 2, 0, 0, FACE + 2, FACE + 2, faceFrame(i), -1 - DELTA_GLOBE, DELTA_GLOBE);
     head[4 * LEVELS] = DELTA_GLOBE;
     head[4 * LEVELS + 3] = gradientBound(2 * radius * DELTA_GLOBE * 0.35);
 
     let face = -1;
-    const origins = new Float64Array(2 * LEVELS).fill(NaN);
+    // Each level's grid origin in texels, and whether it holds anything.
+    const origins = new Int32Array(2 * LEVELS);
+    const held = new Uint8Array(LEVELS);
     const hi = [0, 0, 0], lo = [0, 0, 0];
 
     // The eye's face: the axis it is most along, kept until another is 5%
@@ -536,7 +554,7 @@ export function createClouds(scene, radius, kernel, readers) {
         const frame = faceFrame(f);
         if (f !== face) {
             face = f;
-            origins.fill(NaN);
+            held.fill(0);
             for (const n of nodes) {
                 n.setShaderUniform('u_cloudA', frame.a);
                 n.setShaderUniform('u_cloudE', frame.e);
@@ -549,13 +567,26 @@ export function createClouds(scene, radius, kernel, readers) {
         let moved = false;
         for (let k = 0; k < LEVELS; k++) {
             const delta = DELTA0 * 2 ** k, step = SNAP * delta;
-            const u0 = Math.fround(Math.round(u / step) * step - (N / 2) * delta);
-            const v0 = Math.fround(Math.round(v / step) * step - (N / 2) * delta);
-            if (u0 === origins[2 * k] && v0 === origins[2 * k + 1]) continue;
-            origins[2 * k] = u0;
-            origins[2 * k + 1] = v0;
-            dispatch(k * N * N, N, frame, u0, v0, delta);
-            head.set([u0, v0, delta, gradientBound(2 * radius * delta * 0.35)], 4 * k);
+            const ox = Math.round(u / step) * SNAP - N / 2, oy = Math.round(v / step) * SNAP - N / 2;
+            const px = origins[2 * k], py = origins[2 * k + 1];
+            if (held[k] && ox === px && oy === py) continue;
+            const base = k * N * N;
+            if (!held[k] || Math.abs(ox - px) >= N || Math.abs(oy - py) >= N) {
+                dispatch(base, N, ox, oy, N, N, frame, 0, delta);
+            } else {
+                // The columns stepped onto, then the rows over the columns
+                // kept.
+                if (ox > px) dispatch(base, N, px + N, oy, ox - px, N, frame, 0, delta);
+                else dispatch(base, N, ox, oy, px - ox, N, frame, 0, delta);
+                const kx = Math.max(ox, px), kw = Math.min(ox, px) + N - kx;
+                if (oy > py) dispatch(base, N, kx, py + N, kw, oy - py, frame, 0, delta);
+                else dispatch(base, N, kx, oy, kw, py - oy, frame, 0, delta);
+            }
+            origins[2 * k] = ox;
+            origins[2 * k + 1] = oy;
+            held[k] = 1;
+            head.set([Math.fround(ox * delta), Math.fround(oy * delta), delta, gradientBound(2 * radius * delta * 0.35)], 4 * k);
+            head.set([ox, oy], 4 * (LEVELS + 1 + k));
             moved = true;
         }
         if (moved) headBuffer.write(head);

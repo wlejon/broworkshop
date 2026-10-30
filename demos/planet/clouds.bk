@@ -44,21 +44,26 @@ fn column(q: vec3<f64>, w: f64, radius: f64) -> vec2<f32> {
     return vec2<f32>(f, v);
 }
 
-// Texel (x, y) of a level at plane point (u0 + x delta, v0 + y delta), into
-// `out` as two floats at texel `base` + y * width + x. Its footprint is two
-// texels, at the plane's stretch there: the larger of how far the sphere
-// moves for a step in u or in v.
+// Texel (X, Y) = (x0 + x, y0 + y) of a level at plane point (o + X delta,
+// o + Y delta), into `out` as two floats at texel `base` + (Y mod n) * n +
+// (X mod n): a level's grid wraps (Losasso and Hoppe 2004), so when it
+// follows the eye only the texels it steps onto are produced, into the
+// slots of those it stepped off. Its footprint is two texels, at the
+// plane's stretch there: the larger of how far the sphere moves for a step
+// in u or in v.
 @kernel @grid(2)
-fn k_cloud_level(g: grid<2>, out: write_store<f32, 1>, base: i32,
+fn k_cloud_level(g: grid<2>, out: write_store<f32, 1>, base: i32, n: i32, x0: i32, y0: i32,
                  ax: f64, ay: f64, az: f64, ex: f64, ey: f64, ez: f64, fx: f64, fy: f64, fz: f64,
-                 u0: f64, v0: f64, delta: f64, radius: f64) {
-    let u = u0 + (g.x() as f64) * delta;
-    let v = v0 + (g.y() as f64) * delta;
+                 o: f64, delta: f64, radius: f64) {
+    let tx = x0 + g.x();
+    let ty = y0 + g.y();
+    let u = o + (tx as f64) * delta;
+    let v = o + (ty as f64) * delta;
     let p = vec3<f64>(ax, ay, az) + vec3<f64>(ex, ey, ez) * u + vec3<f64>(fx, fy, fz) * v;
     let d = 1.0 + u * u + v * v;
     let stretch = sqrt(1.0 + max(u * u, v * v)) / d;
     let c = column(normalize(p), 2.0 * radius * delta * stretch, radius);
-    let i = 2 * (base + g.y() * g.width() + g.x());
+    let i = 2 * (base + (((ty % n) + n) % n) * n + ((tx % n) + n) % n);
     out[i] = c.x;
     out[i + 1] = c.y;
 }

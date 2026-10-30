@@ -23,7 +23,9 @@ function sample(map, k, u, v) {
     const tx = (u - h[4 * k]) / h[4 * k + 2], ty = (v - h[4 * k + 1]) / h[4 * k + 2];
     if (!(tx >= 0 && ty >= 0 && tx < n - 1 && ty < n - 1)) return null;
     const x = Math.floor(tx), y = Math.floor(ty), fx = tx - x, fy = ty - y;
-    const at = (i, j, c) => map[2 * (k * n * n + j * n + i) + c];
+    // The level's grid wraps from its origin in texels (after the headers).
+    const ox = h[4 * (levels + 1 + k)], oy = h[4 * (levels + 1 + k) + 1];
+    const at = (i, j, c) => map[2 * (k * n * n + ((oy + j) & (n - 1)) * n + ((ox + i) & (n - 1))) + c];
     const lerp = (c) => (at(x, y, c) * (1 - fx) + at(x + 1, y, c) * fx) * (1 - fy) +
                         (at(x, y + 1, c) * (1 - fx) + at(x + 1, y + 1, c) * fx) * fy;
     return [lerp(0), lerp(1)];
