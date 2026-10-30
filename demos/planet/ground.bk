@@ -483,12 +483,20 @@ pub fn spread(dir: vec3<f64>, radius: f64, octaves: f64, truth: f32, seed: i32) 
     return vec2<f32>(sqrt(h2), sqrt(g2));
 }
 
+// Water's colour: the sea bed seen through the water, down and back up
+// (clear ocean water's attenuation, red lost in a few metres and blue
+// carrying tens), over what the water itself sends back where the bed is
+// too deep to see.
+const DEEP_WATER = vec3<f32>(0.004, 0.017, 0.040);
+const SEA_BED = vec3<f32>(0.40, 0.36, 0.27);
+const WATER_ATTENUATION = vec3<f32>(0.40, 0.065, 0.032);   // per metre
+
 // The ground at one height and gradient (tan of the angle from up): its
 // albedo, and w = 1 for water.
 fn surface(h: f32, grad: f32) -> vec4<f32> {
     if (h <= 0.0) {
-        let depth = clamp(-h / 2500.0, 0.0, 1.0);
-        return vec4<f32>(mix(vec3<f32>(0.03, 0.16, 0.22), vec3<f32>(0.005, 0.03, 0.09), depth), 1.0);
+        let through = exp(WATER_ATTENUATION * (2.0 * h));
+        return vec4<f32>(mix(DEEP_WATER, SEA_BED, through), 1.0);
     }
     // Beach at the shore; grassland, forest up to the treeline, alpine
     // meadow above it, bare scree higher still, snow on top; rock wherever
@@ -612,12 +620,12 @@ pub fn variation(dir: vec3<f64>, radius: f64, octaves: f64, seed: i32) -> vec3<f
 // the gradient the cell's own (`grad` along one axis) plus N(0, sg^2) along
 // each. The height's spread is sh, what the cell does not resolve, with the
 // cell's own slope across its width (`cell`, metres): a plane of gradient g
-// over a square L wide varies by g^2 L^2 / 12. The shore is a step, which quadrature over the whole normal places
-// only to its nearest node (a coast 4 m up read a quarter water), so the
-// height splits there: the water takes its share P(h < 0) at its mean depth
-// (its colour is linear in depth), the land its share by quadrature over the
-// land's quantiles (5 nodes), each with 3 x 3 in the gradient. The land's
-// albedo takes the cell's variation factor.
+// over a square L wide varies by g^2 L^2 / 12. The shore is a step, which
+// quadrature over the whole normal places only to its nearest node (a coast
+// 4 m up read a quarter water), so the height splits there: the water takes
+// its share P(h < 0) by quadrature over the water's quantiles (5 nodes), the
+// land its share the same over the land's, each with 3 x 3 in the gradient.
+// The land's albedo takes the cell's variation factor.
 pub fn expected_surface(h: f32, grad: f32, cell: f32, sh: f32, sg: f32, vary: vec3<f32>) -> vec4<f32> {
     var sum = vec4<f32>(0.0, 0.0, 0.0, 0.0);
     let trend = grad * cell;
@@ -625,8 +633,11 @@ pub fn expected_surface(h: f32, grad: f32, cell: f32, sh: f32, sg: f32, vary: ve
     let zs = -h / sd;
     let wet = normal_cdf(zs);
     if (wet > 1e-5) {
-        let depth = h - sd * 0.3989423 * exp(-0.5 * zs * zs) / wet;
-        sum += surface(min(depth, 0.0), 0.0) * wet;
+        for (var i: i32 = 0; i < 5; i += 1) {
+            let nh = gl5(i);
+            let depth = min(h + sd * normal_quantile(wet * nh.x), 0.0);
+            sum += surface(depth, 0.0) * (wet * nh.y);
+        }
     }
     let dry = 1.0 - wet;
     if (dry > 1e-5) {

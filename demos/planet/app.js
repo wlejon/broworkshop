@@ -23,6 +23,41 @@ const CAPACITY = 4096;
 const SEED = 7;
 const BASE_WAVELENGTH = 2400000;   // ground.bk's first octave
 const DETAIL_PERIOD = 64;          // metres; the ground shader's fine detail repeats over it
+const SWELL_PERIOD = 1024;         // metres; and its long waves
+const WAVE_CLOCK = 1024;           // seconds the sea's waves repeat over
+
+// The sea's waves, a wind sea at about 7 m/s: from 256 m to half a metre,
+// six a halving (each somewhere in its sixth: whole ratios between them
+// would tile into a lattice), each a sinusoid of the shader's periodic
+// coordinates (a whole number of waves along each axis of the period) in a
+// random direction, and its frequency the deep-water ω^2 = g k made a whole number
+// over WAVE_CLOCK. Their slopes share Cox and Munk's mean square slope for
+// that wind (0.003 + 0.00512 U), equally a halving above the peak (the
+// saturation range: elevation ~ k^-3) and falling off past it as
+// Pierson-Moskowitz does; what is shorter than the last is WAVE_RESIDUAL.
+const WAVES = (() => {
+    const total = 0.003 + 0.00512 * 7, residual = 0.3 * total, peak = 60;
+    let seed = 4242;
+    const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+    const list = [];
+    for (let i = 0; i < 54; i++) {
+        const lambda = 256 * 2 ** (-(i + rnd()) / 6);
+        const period = lambda > 12 ? SWELL_PERIOD : DETAIL_PERIOD;
+        const z = 2 * rnd() - 1, a = 2 * Math.PI * rnd(), r = Math.sqrt(1 - z * z);
+        const n = [r * Math.cos(a), r * Math.sin(a), z].map((c) => Math.round(c * period / lambda));
+        const k = 2 * Math.PI * Math.hypot(...n) / period;
+        if (k === 0) continue;
+        const omega = Math.round(Math.sqrt(9.81 * k) * WAVE_CLOCK / (2 * Math.PI)) * 2 * Math.PI / WAVE_CLOCK;
+        list.push({ n, period, k, omega, shape: Math.exp(-1.25 * (2 * Math.PI / k / peak) ** 2) });
+    }
+    const sum = list.reduce((s, w) => s + w.shape, 0);
+    // A sinusoid of slope amplitude s has mean square slope s^2 / 2.
+    for (const w of list) w.slope = Math.sqrt(2 * (total - residual) * w.shape / sum);
+    let tail = 0;
+    for (let i = list.length - 1; i >= 0; i--) { tail += list[i].slope ** 2 / 2; list[i].tail = tail; }
+    return { list, residual, swell: list.filter((w) => w.period === SWELL_PERIOD).length };
+})();
+const glslFloat = (x) => (Number.isInteger(x) ? x.toFixed(1) : String(x));
 
 const readApp = (path) => fs.readFileSync(bro.resolvePath('/app/' + path), 'utf-8');
 const mod = bro.kernel.compile(readApp('planet.bk'), { file: 'planet.bk', modules: { 'planet::ground': readApp('ground.bk') } });
@@ -149,6 +184,7 @@ const vertex = `buffer vec4 u_pos[];
     out vec3 v_tv;
     out vec3 v_up;
     out vec3 v_q;
+    out vec3 v_swell;
     void userVertex(inout vec3 pos, inout vec3 normal, inout vec2 uv) {
         ivec4 ids = u_tiles[gl_InstanceIndex * 4];   // slot, parentSlot, root, level
         vec4 hi = intBitsToFloat(u_tiles[gl_InstanceIndex * 4 + 2]);
@@ -188,6 +224,7 @@ const vertex = `buffer vec4 u_pos[];
         // the cell's offset from it is a coordinate good to micrometres near
         // the camera, and the same modulo the period on every tile.
         v_q = mod(hi.xyz, ${DETAIL_PERIOD}.0) + mod(lo.xyz, ${DETAIL_PERIOD}.0) + c.xyz;
+        v_swell = mod(hi.xyz, ${SWELL_PERIOD}.0) + mod(lo.xyz, ${SWELL_PERIOD}.0) + c.xyz;
     }`;
 
 // The detail layer (planet.bk) holds, finer than the vertices, the mean of
@@ -199,7 +236,7 @@ const vertex = `buffer vec4 u_pos[];
 // wavelength nears a pixel. Both are zero-mean, so what a pixel averages to
 // is the texel's.
 const fragment = `buffer uint u_det[];
-    buffer uint u_hz[];
+    buffer uvec4 u_hz[];
     in vec2 v_tex;
     flat in int v_slot;
     in vec2 v_hz;
@@ -207,20 +244,20 @@ const fragment = `buffer uint u_det[];
     in vec3 v_tv;
     in vec3 v_up;
     in vec3 v_q;
+    in vec3 v_swell;
+    uniform float u_time;
 
     // Point p of this tile's horizon grid (planet.bk's horizon layer): the
-    // sines of its horizon's elevation, direction k at k * 45 degrees from
-    // the frame's u toward its v.
-    void horizonPoint(ivec2 p, out float h[8]) {
+    // sines of its horizon's elevation along the grid's 8 directions.
+    // Directions 0-3 in lo, 4-7 in hi: its four words are one 16-byte load.
+    void horizonPoint(ivec2 p, out vec4 lo, out vec4 hi) {
         const int N = ${HZ};
         p = clamp(p, ivec2(0), ivec2(N - 1));
-        int k = ((v_slot * N + p.y) * N + p.x) * 16;
-        for (int w = 0; w < 4; w++) {
-            vec2 s = unpackUnorm2x16(u_hz[k + w]) * 2.0 - 1.0;
-            h[2 * w] = s.x;
-            h[2 * w + 1] = s.y;
-        }
+        uvec4 w = u_hz[((v_slot * N + p.y) * N + p.x) * 4];
+        lo = vec4(unpackUnorm2x16(w.x), unpackUnorm2x16(w.y)) * 2.0 - 1.0;
+        hi = vec4(unpackUnorm2x16(w.z), unpackUnorm2x16(w.w)) * 2.0 - 1.0;
     }
+    float horizonAt(vec4 lo, vec4 hi, int k) { return k < 4 ? lo[k] : hi[k - 4]; }
 
     // The ground's horizons, read bilinearly, as the sun and sky it sees.
     // The sun: the share of its disc (0.53 degrees) above the horizon toward
@@ -231,12 +268,13 @@ const fragment = `buffer uint u_det[];
     void userLight(vec3 toSun, inout float sunVisibility, inout float skyVisibility, inout vec3 skyNormal) {
         vec2 f = v_hz - floor(v_hz);
         ivec2 p = ivec2(floor(v_hz));
-        float a[8], b[8], c[8], d[8], h[8];
-        horizonPoint(p, a);
-        horizonPoint(p + ivec2(1, 0), b);
-        horizonPoint(p + ivec2(0, 1), c);
-        horizonPoint(p + ivec2(1, 1), d);
-        for (int k = 0; k < 8; k++) h[k] = asin(clamp(mix(mix(a[k], b[k], f.x), mix(c[k], d[k], f.x), f.y), -1.0, 1.0));
+        vec4 al, ah, bl, bh, cl, ch, dl, dh;
+        horizonPoint(p, al, ah);
+        horizonPoint(p + ivec2(1, 0), bl, bh);
+        horizonPoint(p + ivec2(0, 1), cl, ch);
+        horizonPoint(p + ivec2(1, 1), dl, dh);
+        vec4 hl = asin(clamp(mix(mix(al, bl, f.x), mix(cl, dl, f.x), f.y), -1.0, 1.0));
+        vec4 hh = asin(clamp(mix(mix(ah, bh, f.x), mix(ch, dh, f.x), f.y), -1.0, 1.0));
         // The grid's axes on the tangent plane: direction k is
         // cos * gu + sin * gv. The sun's azimuth is taken in those axes.
         vec3 up = normalize(v_up);
@@ -251,8 +289,9 @@ const fragment = `buffer uint u_det[];
         int k1 = (k0 + 1) & 7;
         float fa = fk - floor(fk);
         float sun = asin(clamp(dot(toSun, up), -1.0, 1.0));
-        vec4 corner = asin(clamp(vec4(mix(a[k0], a[k1], fa), mix(b[k0], b[k1], fa),
-                                      mix(c[k0], c[k1], fa), mix(d[k0], d[k1], fa)), -1.0, 1.0));
+        vec4 corner = asin(clamp(vec4(
+            mix(horizonAt(al, ah, k0), horizonAt(al, ah, k1), fa), mix(horizonAt(bl, bh, k0), horizonAt(bl, bh, k1), fa),
+            mix(horizonAt(cl, ch, k0), horizonAt(cl, ch, k1), fa), mix(horizonAt(dl, dh, k0), horizonAt(dl, dh, k1), fa)), -1.0, 1.0));
         vec4 lit = clamp((sun - corner) / 0.0093 + 0.5, 0.0, 1.0);
         sunVisibility *= mix(mix(lit.x, lit.y, f.x), mix(lit.z, lit.w, f.x), f.y);
 
@@ -267,8 +306,8 @@ const fragment = `buffer uint u_det[];
             float len = length(np);
             float gamma = atan(dot(np, t), dot(np, up));
             // The horizons as angles from the zenith, toward +t and -t.
-            float h2 = gamma + min(PI * 0.5 - h[s] - gamma, PI * 0.5);
-            float h1 = gamma + max(h[s + 4] - PI * 0.5 - gamma, -PI * 0.5);
+            float h2 = gamma + min(PI * 0.5 - hl[s] - gamma, PI * 0.5);
+            float h1 = gamma + max(hh[s] - PI * 0.5 - gamma, -PI * 0.5);
             float slice = 0.25 * (-cos(2.0 * h1 - gamma) + cos(gamma) + 2.0 * h1 * sin(gamma))
                         + 0.25 * (-cos(2.0 * h2 - gamma) + cos(gamma) + 2.0 * h2 * sin(gamma));
             visible += len * slice;
@@ -329,6 +368,37 @@ const fragment = `buffer uint u_det[];
         return vec4(value, grad);
     }
 
+    // The sea's waves (WAVES): wave vector (rad/m) and a quarter of its
+    // wavelength; the angular frequency, the mean square slope of the wave and
+    // every shorter one, the slope amplitude over |k| and its mean square
+    // slope. The first WAVE_SWELL are periodic over v_swell, the rest over v_q.
+    const int WAVE_COUNT = ${WAVES.list.length}, WAVE_SWELL = ${WAVES.swell};
+    const float WAVE_RESIDUAL = ${glslFloat(WAVES.residual)};
+    const vec4 WAVE_K[WAVE_COUNT] = vec4[](${WAVES.list.map((w) =>
+        `vec4(${w.n.map((c) => glslFloat(c * 2 * Math.PI / w.period)).join(', ')}, ${glslFloat(Math.PI / 2 / w.k)})`).join(', ')});
+    const vec4 WAVE_F[WAVE_COUNT] = vec4[](${WAVES.list.map((w) =>
+        `vec4(${[w.omega, w.tail, w.slope / w.k, w.slope * w.slope / 2].map(glslFloat).join(', ')})`).join(', ')});
+
+    // The sea's slope along the surface from the waves this pixel resolves
+    // (full from 8 pixels a wavelength, none at 4: a sinusoid nearer a pixel
+    // beats against the pixels in moire), and the mean square slope of those
+    // it does not: the waves become the sea's roughness as they shrink below
+    // a pixel, so far off the sun's glint spreads as the waves it is made of
+    // would spread it (Bruneton, Neyret and Holzschuch 2010).
+    vec3 seaSlope(float footprint, vec3 up, out float variance) {
+        vec3 slope = vec3(0.0);
+        variance = WAVE_RESIDUAL;
+        for (int i = 0; i < WAVE_COUNT; i++) {
+            vec4 k = WAVE_K[i], f = WAVE_F[i];
+            float w = clamp(k.w / footprint - 1.0, 0.0, 1.0);
+            if (w <= 0.0) { variance += f.y; break; }
+            vec3 q = i < WAVE_SWELL ? v_swell : v_q;
+            slope += k.xyz * (f.z * w * cos(dot(k.xyz, q) - f.x * u_time));
+            variance += f.w * (1.0 - w);
+        }
+        return slope - up * dot(slope, up);
+    }
+
     void userFragment(inout vec3 baseColor, inout vec3 normal,
                       inout float metallic, inout float roughness,
                       inout vec3 emissive, inout float alpha) {
@@ -369,8 +439,13 @@ const fragment = `buffer uint u_det[];
         baseColor = col.rgb * mix(1.0, exp(lum - 0.5 * lumVar), land);
         // The relief's gradient along the surface tilts the normal against it.
         n = normalize(n - (slope - dot(slope, n) * n) * land);
-        normal = normalize(mix(n, normalize(v_up), water));
-        roughness = mix(0.9, 0.12, water);
+        float seaVariance = 0.0;
+        vec3 up = normalize(v_up);
+        vec3 sea = water > 0.0 ? normalize(up - seaSlope(footprint, up, seaVariance)) : up;
+        normal = normalize(mix(n, sea, water));
+        // GGX's alpha is the root mean square slope; the engine's roughness
+        // its square root.
+        roughness = mix(0.9, sqrt(sqrt(seaVariance)), water);
         metallic = 0.0;    }`;
 
 let ground = null;
@@ -437,6 +512,7 @@ function frame() {
     }
     ground.setShaderUniform('u_camHi', camHi);
     ground.setShaderUniform('u_camLo', camLo);
+    ground.setShaderUniform('u_time', performance.now() / 1000 % WAVE_CLOCK);
     for (let k = 0; k < 3; k++) atmosphere.planetCenter[k] = -f.pos[k];
     scene.setAtmosphere(atmosphere);
     lastStats.selected = cache.wanted;
