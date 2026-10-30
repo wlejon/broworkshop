@@ -9,6 +9,7 @@ import { boot } from "/lib/kit/app.js";
 import { bindControl, logMap } from "/lib/kit/params.js";
 import { cloudGlsl, createClouds } from "/app/clouds.js";
 import { createGrass } from "/app/grass.js";
+import { createTrees } from "/app/trees.js";
 
 boot();
 
@@ -254,6 +255,14 @@ const fragment = `buffer uint u_det[];
     uniform float u_time;
     uniform vec3 u_camHi;
     uniform vec3 u_camLo;
+    uniform float u_treesFar;   // trees.js: how far off the trees are drawn, 0 none
+    // The trees' crowns (trees.js), as the share of a forest's ground they
+    // hide from straight above and their lit colour over the forest floor's.
+    const float TREE_CROWNS = 0.55;
+    const vec3 TREE_TINT = vec3(0.22, 0.24, 0.33);
+    // userFragment to userLight: the crowns' share above the floor where the
+    // trees are drawn (TREE_CROWNS times the cover), whose shade it is in.
+    float g_floor = 0.0;
     ${cloudGlsl(RADIUS)}
 
     // Point p of this tile's horizon grid (planet.bk's horizon layer): the
@@ -335,19 +344,26 @@ const fragment = `buffer uint u_det[];
         float h = length(g) - CLOUD_R;
         float clouds = cloudShadow(g, h, toSun, w);
         sunVisibility *= clouds;
+        // Among drawn trees the floor is in their shade: the sun through the
+        // canopy's gaps along its slant, the sky through about the gaps
+        // overhead (the drawn crowns cast no shadow of their own).
+        sunVisibility *= pow(1.0 - g_floor, 1.0 / max(dot(toSun, up), 0.05));
+        skyVisibility *= 1.0 - 0.8 * g_floor;
         // The slopes around share the clouds' shadow.
         occluderSun *= clouds;
         skyVisibility *= cloudShadow(g, h, up, w);
     }
 
-    // Texel (x, y) of this tile: colour (rgb, water) and the octahedral
-    // normal unfolded.
-    void detailTexel(ivec2 t, out vec4 col, out vec3 nrm) {
+    // Texel (x, y) of this tile: colour (rgb, water), the octahedral normal
+    // unfolded and the forest's cover.
+    void detailTexel(ivec2 t, out vec4 col, out vec3 nrm, out float cover) {
         const int W = ${TEXELS};
         t = clamp(t, ivec2(0), ivec2(W - 1));
         int k = ((v_slot * W + t.y) * W + t.x) * 2;
         col = unpackUnorm4x8(u_det[k]);
-        vec2 o = unpackUnorm2x16(u_det[k + 1]) * 2.0 - 1.0;
+        uint w = u_det[k + 1];
+        vec2 o = vec2(float(w & 4095u), float((w >> 12) & 4095u)) * (2.0 / 4095.0) - 1.0;
+        cover = float(w >> 24) / 255.0;
         vec3 n = vec3(o, 1.0 - abs(o.x) - abs(o.y));
         if (n.z < 0.0) n.xy = (1.0 - abs(n.yx)) * vec2(n.x >= 0.0 ? 1.0 : -1.0, n.y >= 0.0 ? 1.0 : -1.0);
         nrm = normalize(n);
@@ -430,11 +446,13 @@ const fragment = `buffer uint u_det[];
         ivec2 t0 = ivec2(floor(v_tex));
         vec4 c00, c10, c01, c11;
         vec3 n00, n10, n01, n11;
-        detailTexel(t0, c00, n00);
-        detailTexel(t0 + ivec2(1, 0), c10, n10);
-        detailTexel(t0 + ivec2(0, 1), c01, n01);
-        detailTexel(t0 + ivec2(1, 1), c11, n11);
+        vec4 cover;
+        detailTexel(t0, c00, n00, cover.x);
+        detailTexel(t0 + ivec2(1, 0), c10, n10, cover.y);
+        detailTexel(t0 + ivec2(0, 1), c01, n01, cover.z);
+        detailTexel(t0 + ivec2(1, 1), c11, n11, cover.w);
         vec4 col = mix(mix(c00, c10, f.x), mix(c01, c11, f.x), f.y);
+        float forest = mix(mix(cover.x, cover.y, f.x), mix(cover.z, cover.w, f.x), f.y);
         vec3 n = normalize(mix(mix(n00, n10, f.x), mix(n01, n11, f.x), f.y));
         float water = col.a;
 
@@ -459,6 +477,16 @@ const fragment = `buffer uint u_det[];
         }
         float land = 1.0 - water;
         baseColor = col.rgb * mix(1.0, exp(lum - 0.5 * lumVar), land);
+        // Where the trees are not drawn (or only shrunk, over their last
+        // sixth), their crowns over the floor: the share of the view they
+        // hide is the gap probability of a Poisson canopy, 1 - (1 - c)^(1 /
+        // cos) of the share c hidden looking straight down (Nilson 1971),
+        // so a forest seen across is all crowns, as the drawn trees are.
+        vec3 eye = -normalize(vWorldPos);
+        float drawn = u_treesFar <= 0.0 ? 0.0 : smoothstep(u_treesFar, u_treesFar * ${(5 / 6).toFixed(4)}, length(vWorldPos));
+        float crowns = 1.0 - pow(1.0 - TREE_CROWNS * forest, 1.0 / max(dot(eye, normalize(v_up)), 0.05));
+        baseColor *= mix(vec3(1.0), TREE_TINT, crowns * (1.0 - drawn * drawn));
+        g_floor = TREE_CROWNS * forest * drawn * drawn;
         // The relief's gradient along the surface tilts the normal against it.
         n = normalize(n - (slope - dot(slope, n) * n) * land);
         float seaVariance = 0.0;
@@ -479,7 +507,9 @@ const cloudMod = bro.kernel.compile(readApp('clouds.bk'), { file: 'clouds.bk', m
 const sunMod = bro.kernel.compile(readApp('sun.bk'), { file: 'sun.bk', modules: { 'planet::ground': readApp('ground.bk') } });
 const grassMod = bro.kernel.compile(readApp('grass.bk'), { file: 'grass.bk', modules: { 'planet::ground': readApp('ground.bk') } });
 const grass = createGrass(scene, RADIUS, grassMod, sunMod, TRUTH, SEED);
-const clouds = createClouds(scene, RADIUS, cloudMod.kernel('k_cloud_level'), [ground, ...grass.nodes]);
+const treeMod = bro.kernel.compile(readApp('trees.bk'), { file: 'trees.bk', modules: { 'planet::ground': readApp('ground.bk') } });
+const trees = createTrees(scene, RADIUS, treeMod, sunMod, TRUTH, SEED);
+const clouds = createClouds(scene, RADIUS, cloudMod.kernel('k_cloud_level'), [ground, ...grass.nodes, ...trees.nodes]);
 
 // ── Camera: doubles about the planet's center ───────────────────────────────
 
@@ -541,9 +571,12 @@ function frame() {
     ground.setShaderUniform('u_camHi', camHi);
     ground.setShaderUniform('u_camLo', camLo);
     ground.setShaderUniform('u_time', performance.now() / 1000 % WAVE_CLOCK);
+    ground.setShaderUniform('u_treesFar', trees.far);
     clouds.update(f.pos, f.surface + cam.alt - RADIUS, 2 * Math.tan(FOV * Math.PI / 360) / height);
     const d = sun.direction, dl = Math.hypot(d[0], d[1], d[2]);
     grass.update(f.pos, cam.alt, [-d[0] / dl, -d[1] / dl, -d[2] / dl], camHi, camLo, performance.now() / 1000 % WAVE_CLOCK);
+    trees.update(f.pos, cam.alt, [-d[0] / dl, -d[1] / dl, -d[2] / dl], camHi, camLo, f.fwd,
+                 Math.atan(Math.tan(FOV * Math.PI / 360) * Math.hypot(1, aspect)), performance.now() / 1000 % WAVE_CLOCK);
     for (let k = 0; k < 3; k++) atmosphere.planetCenter[k] = -f.pos[k];
     scene.setAtmosphere(atmosphere);
     lastStats.selected = cache.wanted;
@@ -615,4 +648,4 @@ function loop() {
 requestAnimationFrame(loop);
 
 // For tests and tools.
-globalThis.planet = { cam, setHour, get cache() { return cache; }, clouds, grass, get stats() { return lastStats; }, get lastView() { return lastView; }, frame };
+globalThis.planet = { cam, setHour, get cache() { return cache; }, clouds, grass, trees, groundHeight, get stats() { return lastStats; }, get lastView() { return lastView; }, frame };

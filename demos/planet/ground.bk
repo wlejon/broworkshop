@@ -505,7 +505,9 @@ pub fn surface(h: f32, grad: f32) -> vec4<f32> {
     let slope = 1.0 - 1.0 / sqrt(1.0 + grad * grad);
     let sand = vec3<f32>(0.44, 0.39, 0.29);
     let grass = vec3<f32>(0.16, 0.27, 0.08);
-    let forest = vec3<f32>(0.06, 0.13, 0.05);
+    // The floor between the trees (trees.js draws them over it, and the
+    // ground shader the forest's average where they are not drawn).
+    let forest = vec3<f32>(0.11, 0.19, 0.06);
     let alpine = vec3<f32>(0.20, 0.21, 0.11);
     let rock = vec3<f32>(0.24, 0.22, 0.20);
     let snow = vec3<f32>(0.92, 0.94, 0.97);
@@ -563,6 +565,20 @@ pub fn sun_step_angle(h: f32, hk: f32, k: i32, radius: f64) -> f32 {
     let dist = sun_step_dist(k);
     let rise = hk - max(h, 0.0) - (dist * dist / (2.0 * radius)) as f32;
     return atan(rise / (dist as f32));
+}
+
+// The share of the ground at one height and gradient under forest (the
+// trees' density, demos/planet/trees.js): surface's forest band, less the
+// rock and the snow it lays over it. Where the trees are not drawn the
+// ground shader lays their average over surface's floor by this share
+// (expected_cover, over a texel).
+pub fn tree_cover(h: f32, grad: f32) -> f32 {
+    if (h <= 0.0) { return 0.0; }
+    let slope = 1.0 - 1.0 / sqrt(1.0 + grad * grad);
+    var c = smoothstep(150.0, 600.0, h) * (1.0 - smoothstep(2300.0, 2900.0, h));
+    c *= 1.0 - max(smoothstep(0.2, 0.4, slope), smoothstep(3600.0, 4300.0, h));
+    c *= 1.0 - smoothstep(4200.0, 4800.0, h) * (1.0 - smoothstep(0.35, 0.6, slope));
+    return c;
 }
 
 // The z with normal_cdf(z) = u: normal_cdf's tanh inverted, then its cubic
@@ -700,6 +716,32 @@ pub fn expected_surface(h: f32, grad: f32, cell: f32, sh: f32, sg: f32, vary: ve
                     let ey = sg * gy.x;
                     let s = surface(height, sqrt(ex * ex + ey * ey));
                     sum += vec4<f32>(s.xyz * vary, 0.0) * (dry * nh.y * gx.y * gy.y);
+                }
+            }
+        }
+    }
+    return sum;
+}
+
+// tree_cover's mean over a cell, by expected_surface's quadrature over the
+// heights and gradients the cell holds.
+pub fn expected_cover(h: f32, grad: f32, cell: f32, sh: f32, sg: f32) -> f32 {
+    let trend = grad * cell;
+    let sd = max(sqrt(sh * sh + trend * trend / 12.0), 1e-6);
+    let wet = normal_cdf(-h / sd);
+    let dry = 1.0 - wet;
+    var sum: f32 = 0.0;
+    if (dry > 1e-5) {
+        for (var i: i32 = 0; i < 5; i += 1) {
+            let nh = gl5(i);
+            let height = max(h + sd * normal_quantile(wet + dry * nh.x), 1e-3);
+            for (var j: i32 = 0; j < 3; j += 1) {
+                let gx = gh3(j);
+                for (var k: i32 = 0; k < 3; k += 1) {
+                    let gy = gh3(k);
+                    let ex = grad + sg * gx.x;
+                    let ey = sg * gy.x;
+                    sum += tree_cover(height, sqrt(ex * ex + ey * ey)) * (dry * nh.y * gx.y * gy.y);
                 }
             }
         }

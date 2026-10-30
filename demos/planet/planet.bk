@@ -2,7 +2,7 @@
 // tile kernels produce a whole batch in one dispatch (bro.tiles' produce):
 // grid z is the tile's record in the batch table (tiles-api.js), whose slot
 // says where in the pools, viewed as [cells, cells, capacity], it goes.
-from planet::ground import terrain, cell_height, spread, expected_surface, gradient, variation,
+from planet::ground import terrain, cell_height, spread, expected_surface, expected_cover, gradient, variation,
                            octaves_for, range_margin;
 
 // A batch table record's float64s.
@@ -51,8 +51,9 @@ fn k_tile(g: grid<3>, table: read_store<f64, 1>, out: write_store<vec4<f32>, 3>,
 // (tx, ty) centred at cell coordinate ((tx, ty) + 0.5) / d - 0.5 (cell (x, y)
 // is the vertex at (x, y)). Each texel holds two words: the mean colour of
 // the truth under it (rgb, and how much is water; 8 bits each) and the
-// normal of the ground's mean surface over it (octahedral, 16 bits a
-// component), both taken from the texels' mean heights.
+// normal of the ground's mean surface over it (octahedral, 12 bits a
+// component) with the share of it under forest (8 bits), all taken from
+// the texels' mean heights.
 
 // Texel (tx, ty)'s frame coordinates (s, t) and its direction.
 fn texel_dir(table: read_store<f64, 1>, r: i32, tx: i32, ty: i32, border: f64, inv_size: f64, d: f64) -> vec3<f64> {
@@ -120,7 +121,9 @@ fn k_detail(g: grid<3>, table: read_store<f64, 1>, heights: read_store<f32, 1>, 
     let sp = spread(dir, radius, octaves, truth, seed);
     let h = heights[(z * w + ty) * w + tx];
     // du and dv span two texels.
-    let col = expected_surface(h, gradient(du, dv, up), length(du) * 0.5, sp.x, sp.y, variation(dir, radius, octaves, seed));
+    let grad = gradient(du, dv, up);
+    let col = expected_surface(h, grad, length(du) * 0.5, sp.x, sp.y, variation(dir, radius, octaves, seed));
+    let cover = expected_cover(h, grad, length(du) * 0.5, sp.x, sp.y);
     var n = normalize(cross(du, dv));
     if (dot(n, up) < 0.0) { n = -n; }
     // Octahedral: the normal onto the octahedron |x| + |y| + |z| = 1, its
@@ -134,7 +137,8 @@ fn k_detail(g: grid<3>, table: read_store<f64, 1>, heights: read_store<f32, 1>, 
     }
     let at = ((slot * w + ty) * w + tx) * 2;
     out[at] = unorm(col.x, 8) | (unorm(col.y, 8) << 8) | (unorm(col.z, 8) << 16) | (unorm(col.w, 8) << 24);
-    out[at + 1] = unorm(ox * 0.5 + 0.5, 16) | (unorm(oy * 0.5 + 0.5, 16) << 16);
+    // The normal in 12 bits a coordinate, the forest's cover in the top 8.
+    out[at + 1] = unorm(ox * 0.5 + 0.5, 12) | (unorm(oy * 0.5 + 0.5, 12) << 12) | (unorm(cover, 8) << 24);
 }
 
 // ── The horizon layer ───────────────────────────────────────────────────────
