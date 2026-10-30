@@ -9,7 +9,7 @@ import { boot } from "/lib/kit/app.js";
 import { bindControl, logMap } from "/lib/kit/params.js";
 import { cloudGlsl, createClouds } from "/app/clouds.js";
 import { createGrass } from "/app/grass.js";
-import { createTrees } from "/app/trees.js";
+import { createTrees, treeShadowGlsl } from "/app/trees.js";
 import { createRivers } from "/app/rivers.js";
 
 boot();
@@ -270,6 +270,7 @@ const fragment = `buffer uint u_det[];
     // trees are drawn (TREE_CROWNS times the cover), whose shade it is in.
     float g_floor = 0.0;
     ${cloudGlsl(RADIUS)}
+    ${treeShadowGlsl}
 
     // Point p of this tile's horizon grid (planet.bk's horizon layer): the
     // sines of its horizon's elevation along the grid's 8 directions.
@@ -369,10 +370,12 @@ const fragment = `buffer uint u_det[];
         float h = length(g) - CLOUD_R;
         float clouds = cloudShadow(g, h, toSun, w);
         sunVisibility *= clouds;
-        // Among drawn trees the floor is in their shade: the sun through the
-        // canopy's gaps along its slant, the sky through about the gaps
-        // overhead (the drawn crowns cast no shadow of their own).
-        sunVisibility *= pow(1.0 - g_floor, 1.0 / max(dot(toSun, up), 0.05));
+        // Among drawn trees the floor is in their shadows (trees.js
+        // treeShadowGlsl), and the sky through about the gaps overhead.
+        if (u_treesFar > 0.0 && length(vWorldPos) < u_treesFar) {
+            vec3 eye = (u_camHi - u_treeOHi) + (u_camLo - u_treeOLo);
+            sunVisibility *= treeShadow(eye + vWorldPos, eye, up, toSun);
+        }
         skyVisibility *= 1.0 - 0.8 * g_floor;
         // The slopes around share the clouds' shadow.
         occluderSun *= clouds;
@@ -540,7 +543,7 @@ const sunMod = bro.kernel.compile(readApp('sun.bk'), { file: 'sun.bk', modules: 
 const grassMod = bro.kernel.compile(readApp('grass.bk'), { file: 'grass.bk', modules: MODULES });
 const grass = createGrass(scene, RADIUS, grassMod, sunMod, TRUTH, SEED, rivers.net);
 const treeMod = bro.kernel.compile(readApp('trees.bk'), { file: 'trees.bk', modules: MODULES });
-const trees = createTrees(scene, RADIUS, treeMod, sunMod, TRUTH, SEED, rivers.net);
+const trees = createTrees(scene, RADIUS, treeMod, sunMod, TRUTH, SEED, rivers.net, [ground]);
 const clouds = createClouds(scene, RADIUS, cloudMod.kernel('k_cloud_level'), [ground, ...grass.nodes, ...trees.nodes]);
 
 // ── Camera: doubles about the planet's center ───────────────────────────────

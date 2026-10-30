@@ -33,6 +33,9 @@ const FAR = 1900;          // the silhouettes out to it, shrinking over its last
 const SUN_STRIDE = 4;      // sites between the sun grid's points
 const SUN_P = N / SUN_STRIDE + 1;
 const SHOWN_BELOW = 2500;  // metres of altitude above which no tree is drawn
+const MAX_TREE_H = 24;     // metres: the tallest tree (treeCrown at size 1)
+const SHADOW_REACH = 64;   // metres: the farthest a crown's shadow is followed toward the sun
+const SHADOW_STEPS = 14;   // and the most steps along it
 
 // The meshes: per tree in a block (x its index), its parts by (y, z):
 // y >= 0 tier y, z its rim vertex (-1 the tier's top, at the trunk);
@@ -64,6 +67,109 @@ function treeBlock(tiers, rim, trunk) {
     return new Mesh({ positions: new Float32Array(pos), normals, indices: new Uint32Array(idx) });
 }
 
+// A tree's hash and crown, from its site on the world's lattice: the tree
+// shader draws it from them, and the ground (treeShadowGlsl) its shadow.
+const treeCrownGlsl = `
+    uint pcg(uint v) {
+        uint s = v * 747796405u + 2891336453u;
+        uint w = ((s >> ((s >> 28u) + 4u)) ^ s) * 277803737u;
+        return (w >> 22u) ^ w;
+    }
+    float rnd(inout uint s) { s = pcg(s); return float(s) * (1.0 / 4294967296.0); }
+    uint treeSeed(ivec2 world, float face) {
+        return pcg(uint(world.x) * 73856093u ^ uint(world.y) * 19349663u ^ uint(face) * 83492791u);
+    }
+    // Its height, the crown's radius at its foot and the foot's height
+    // (below it, the bare trunk), for a site of the given size.
+    void treeCrown(inout uint seed, float size, out float H, out float R, out float foot) {
+        H = size * mix(11.0, 24.0, rnd(seed));
+        R = H * mix(0.17, 0.25, rnd(seed));
+        foot = 0.08 * H;
+    }`;
+
+// The trees' shadows on the ground, for a node createTrees is given as a
+// reader: treeShadow(p, eye, up, toSun) is the sun the crowns leave at p, the
+// ground point about the field's origin (eye the camera's), each crown the
+// cone the tree draws it as, from R at its foot to nothing at its top. The
+// trees whose crowns the sun's ray from p can cross stand within a crown's
+// reach of its path across the ground, up to the tallest tree's height over
+// the sun's slope: the sites about that path (three across it, a step of 0.7
+// sites along it) are tested. For each, the ray's horizontal distance to the
+// axis and the crown's radius at the ray's height are both linear in the
+// distance along the ray (with the square root), so the nearest the ray comes
+// inside the crown is where their difference is least: at the point of
+// closest approach, moved down the ray by e k / sqrt(1 - k^2) (k the rate the
+// crown widens as the ray descends), within the crown's heights. A crown
+// passes 15% of the sun through its gaps, its edge a penumbra growing with
+// the distance (the sun's disc) and its ragged rim.
+export const treeShadowGlsl = `
+    buffer float u_treeField[];
+    uniform vec3 u_treeOHi;
+    uniform vec3 u_treeOLo;
+    uniform vec3 u_treeLattice;   // the field's site 0 on the world's lattice, and its face
+    uniform vec3 u_treeA;         // the face's plane: axis and its two directions
+    uniform vec3 u_treeE;
+    uniform vec3 u_treeF;
+    uniform vec3 u_treeUV;        // site 0 on the plane, and the plane's units a site; 0: no field
+    ${treeCrownGlsl}
+    float treeShadow(vec3 p, vec3 eye, vec3 up, vec3 toSun) {
+        const int N = ${N};
+        float mu = dot(toSun, up);
+        if (mu <= 0.05 || u_treeUV.z <= 0.0) return 1.0;
+        vec3 lh = toSun - up * mu;
+        float lhl = length(lh);
+        lh /= lhl;
+        float tanE = mu / lhl;
+        // p's site coordinates, and the sun's direction across the ground in
+        // sites a metre (the gnomonic plane's derivative).
+        vec3 P = u_treeOHi + (u_treeOLo + p);
+        float r = length(P);
+        vec3 q = P / r;
+        float z = dot(q, u_treeA);
+        vec2 uv = vec2(dot(q, u_treeE), dot(q, u_treeF)) / z;
+        vec2 s = (uv - u_treeUV.xy) / u_treeUV.z;
+        vec2 ds = (vec2(dot(lh, u_treeE), dot(lh, u_treeF)) - uv * dot(lh, u_treeA)) / (z * r * u_treeUV.z);
+        float perMetre = length(ds);
+        vec2 dn = ds / perMetre;
+        ivec2 across = abs(dn.x) > abs(dn.y) ? ivec2(0, 1) : ivec2(1, 0);
+        int steps = min(int(ceil(min(${MAX_TREE_H.toFixed(1)} / tanE, ${SHADOW_REACH.toFixed(1)}) * perMetre / 0.7)) + 2, ${SHADOW_STEPS});
+        float vis = 1.0;
+        for (int k = -1; k < steps; k++) {
+            ivec2 n = ivec2(floor(s + dn * (0.7 * float(k)) + 0.5));
+            for (int j = -1; j <= 1; j++) {
+                ivec2 site = n + across * j;
+                int edge = min(min(site.x, N - 1 - site.x), min(site.y, N - 1 - site.y));
+                if (edge < 0) continue;
+                int i = (site.y * N + site.x) * 7;
+                vec3 c = vec3(u_treeField[i], u_treeField[i + 1], u_treeField[i + 2]);
+                // Sized as the tree is drawn: shrinking into the ground over
+                // the last sixth of its reach and at the field's edge.
+                float size = u_treeField[i + 3] * smoothstep(0.0, 12.0, float(edge))
+                           * smoothstep(${FAR.toFixed(1)}, ${(FAR * 5 / 6).toFixed(1)}, length(c - eye));
+                if (size <= 0.0) continue;
+                uint seed = treeSeed(site + ivec2(u_treeLattice.xy), u_treeLattice.z);
+                float H, R, foot;
+                treeCrown(seed, size, H, R, foot);
+                vec3 w = c - p;
+                float hb = dot(w, up);            // the tree's foot over p
+                vec3 wh = w - up * hb;
+                float a = dot(wh, lh);            // along the sun's path to the axis
+                float e = length(wh - lh * a);    // and across it
+                float kw = tanE * R / (H - foot);
+                float t = kw < 1.0 ? a - e * kw * inversesqrt(1.0 - kw * kw) : -1.0e9;
+                float tFoot = (foot + hb) / tanE, tTop = (H + hb) / tanE;
+                t = clamp(t, max(tFoot, 0.0), tTop);
+                if (tTop <= 0.0) continue;
+                float height = t * tanE - hb;
+                float rr = R * (H - height) / (H - foot);
+                float dist = length(vec2(e, a - t));
+                float pen = 0.2 * rr + 0.0093 * t + 0.1;
+                vis = min(vis, 1.0 - 0.85 * smoothstep(rr + pen, rr - pen, dist));
+            }
+        }
+        return vis;
+    }`;
+
 const BLOCKS = N / B;           // blocks along an edge
 // How far a tree of a block can stand from the block's centre on the
 // sphere at the eye's ground: half its diagonal (a site is at most 1.41
@@ -88,12 +194,7 @@ const vertex = `buffer float u_field[];
     out float v_lit;
     out vec3 v_branch;   // a tier: the point about the trunk (tree frame xy) and how far out (z, 0 at the trunk); -1 none
     out float v_seed;
-    uint pcg(uint v) {
-        uint s = v * 747796405u + 2891336453u;
-        uint w = ((s >> ((s >> 28u) + 4u)) ^ s) * 277803737u;
-        return (w >> 22u) ^ w;
-    }
-    float rnd(inout uint s) { s = pcg(s); return float(s) * (1.0 / 4294967296.0); }
+    ${treeCrownGlsl}
     float sunAt(vec2 f) {
         vec2 s = clamp(f / ${SUN_STRIDE}.0, vec2(0.0), vec2(${SUN_P - 1}.0 - 1e-3));
         ivec2 i = ivec2(s);
@@ -121,11 +222,9 @@ const vertex = `buffer float u_field[];
         size *= step(u_band.x, d) * step(d, u_band.y) * smoothstep(${FAR.toFixed(1)}, ${(FAR * 5 / 6).toFixed(1)}, d)
               * smoothstep(0.0, 12.0, float(edge)) * step(-40.0, dot(rel, u_camFwd));
 
-        ivec2 world = site + ivec2(u_lattice.xy);
-        uint seed = pcg(uint(world.x) * 73856093u ^ uint(world.y) * 19349663u ^ uint(u_lattice.z) * 83492791u);
-        float H = size * mix(11.0, 24.0, rnd(seed));
-        float R = H * mix(0.17, 0.25, rnd(seed));
-        float foot = 0.08 * H;
+        uint seed = treeSeed(site + ivec2(u_lattice.xy), u_lattice.z);
+        float H, R, foot;
+        treeCrown(seed, size, H, R, foot);
         float phi = 6.2831853 * rnd(seed);
         vec3 tx = normalize(cross(up, abs(up.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
         vec3 ty = cross(up, tx);
@@ -266,10 +365,11 @@ const fragment = (radius) => `in vec3 v_col;
 
 // The trees in `scene`, their field produced by `module` (trees.bk
 // k_tree_field) and their sun grid by `sunModule` (sun.bk) at `octaves` of
-// the ground's. Their nodes read the clouds' field (createClouds' readers).
+// the ground's. Their nodes read the clouds' field (createClouds' readers);
+// `readers` are nodes whose chunks include treeShadowGlsl, bound to theirs.
 // update() each frame with the eye about the planet's centre (f64), its
 // altitude, the unit direction to the sun and the view's forward.
-export function createTrees(scene, radius, module, sunModule, octaves, seed, net) {
+export function createTrees(scene, radius, module, sunModule, octaves, seed, net, readers = []) {
     const fieldKernel = module.kernel('k_tree_field');
     const fields = [bro.kernel.createBuffer(N * N * 7 * 4), bro.kernel.createBuffer(N * N * 7 * 4)];
     const sunGrid = createSunGrid(sunModule, SUN_P, net, 4);
@@ -373,6 +473,16 @@ export function createTrees(scene, radius, module, sunModule, octaves, seed, net
                     n.setShaderUniform('u_oHi', hi);
                     n.setShaderUniform('u_oLo', lo);
                     n.setShaderUniform('u_lattice', [li, lj, fc]);
+                }
+                for (const n of readers) {
+                    n.setShaderBuffer('u_treeField', fields[front]);
+                    n.setShaderUniform('u_treeOHi', hi);
+                    n.setShaderUniform('u_treeOLo', lo);
+                    n.setShaderUniform('u_treeLattice', [li, lj, fc]);
+                    n.setShaderUniform('u_treeA', frame.a);
+                    n.setShaderUniform('u_treeE', frame.e);
+                    n.setShaderUniform('u_treeF', frame.f);
+                    n.setShaderUniform('u_treeUV', [u0, v0, dl]);
                 }
                 ready = true;
             });
