@@ -750,15 +750,18 @@ function frame() {
     scene.setAtmosphere(atmosphere);
     lastStats.selected = cache.wanted;
     lastStats.visible = n;
-    // Text changes cost the page a layout and raster: a few times a second.
-    // (performance.now() is the frame clock: it moves between frames.)
+    // Text changes cost the page a layout and raster: a few times a second,
+    // or every 60 frames where the frame clock barely moves (headless frames
+    // run as fast as they render). (performance.now() is the frame clock: it
+    // moves between frames.)
     const now = performance.now();
-    if (now - lastPaint > 250) {
+    if (now - lastPaint > 250 || ++framesSincePaint >= 60) {
         lastPaint = now;
+        framesSincePaint = 0;
         paintStats();
     }
 }
-let lastPaint = -1e9;
+let lastPaint = -1e9, framesSincePaint = 0;
 
 // ── Controls ────────────────────────────────────────────────────────────────
 
@@ -768,11 +771,15 @@ const altCtl = bindControl('#alt', {
     onChange: (v) => { cam.alt = v; },
 });
 altCtl.value = cam.alt;
-bindControl('#pitch', { out: '#pitchVal', fmt: (v) => v.toFixed(0) + '°', onChange: (v) => { cam.pitch = v; } });
+const pitchCtl = bindControl('#pitch', { out: '#pitchVal', fmt: (v) => v.toFixed(0) + '°', onChange: (v) => { cam.pitch = v; } });
 bindControl('#detail', { out: '#detailVal', fmt: (v) => v.toFixed(1) + ' px/texel', onChange: (v) => makeCache(v) });
 bindControl('#sun', { out: '#sunVal', fmt: (v) => String(Math.floor(v)).padStart(2, '0') + ':' + String(Math.floor(v % 1 * 60)).padStart(2, '0'), onChange: (v) => setHour(v) });
 
+// The stats, and the controls the camera moves without them (the wheel, a
+// right-drag, a script).
 function paintStats() {
+    if (altCtl.value !== cam.alt) altCtl.value = cam.alt;
+    if (pitchCtl.value !== cam.pitch) pitchCtl.value = cam.pitch;
     const s = cache.stats;
     document.querySelector('#stats').textContent =
         `tiles  ${lastStats.visible} drawn / ${lastStats.selected} selected\n` +
