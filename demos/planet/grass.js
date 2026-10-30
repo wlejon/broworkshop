@@ -420,7 +420,7 @@ export function createGrass(scene, radius, module, sunModule, octaves, seed, net
     return {
         nodes,
         field,
-        // Whether this frame's update produced the field (0.3 ms of GPU
+        // Whether this frame's update produced the field (0.14 ms of GPU
         // work), which other per-frame production can stand aside for.
         get fieldMade() { return fieldMade; },
         // cone: the half-angle of the view's diagonal, radians.
