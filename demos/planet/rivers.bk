@@ -21,6 +21,10 @@ import std::noise::*;
 
 pub const RIV_N: i32 = 512;
 pub const RIV_REC: i32 = 8;   // height (m), downstream point (-1 none), catchment (points), water level (m), direction (3), unused
+// The octaves the lattice resolves, which its points' heights are the
+// ground at: about 20 km between points, a wavelength of 2.5 of them
+// (ground.bk octaves_for).
+pub const RIV_OCTAVES: f64 = 5.6;
 // A point drains a river once at least this many points drain through it.
 const MIN_CATCHMENT: f32 = 2.0;
 const PI4: f32 = 0.78539816;
@@ -311,24 +315,50 @@ pub fn water_at(dir: vec3<f64>, radius: f64, cell: f32, net: read_store<f32, 1>,
     return w;
 }
 
-// Whether the lake of `w` (water_near) stands over ground at height h.
-pub fn under_lake(h: f32, w: vec4<f32>) -> bool {
-    return h < w.z && w.z - h < 4.0 * w.w + 0.5;
+// The surface over ground at height h by the lake of `w` (water_near): its
+// level where the ground is under it, down to a depth of four times the
+// lattice's there. Past that the lattice holds no lake, though its level
+// stands over the ground: the ground falls away where the lattice's broad
+// heights have the rim that holds the lake (a lake raster filled at the
+// ground's own resolution would find the rim). There the water thins to
+// none where the ground lies a third more under the level, its surface
+// falling four times as steeply as the ground beyond (BANK), rather than
+// the lake ending in a wall from its level to the ground. h itself
+// elsewhere.
+const BANK: f32 = 3.0;
+fn lake_limit(w: vec4<f32>) -> f32 {
+    return 4.0 * w.w + 0.5;
+}
+fn bank_end(w: vec4<f32>) -> f32 {
+    return lake_limit(w) * (1.0 + 1.0 / BANK);
+}
+pub fn lake_surface(h: f32, w: vec4<f32>) -> f32 {
+    let e = w.z - h;
+    if (w.z < -1.0e8 || e <= 0.0 || e >= bank_end(w)) { return h; }
+    return h + min(e, BANK * (bank_end(w) - e));
 }
 
 // The share of a cell whose mean ground or water surface is at h under
 // water: its river channel's, or a lake's. Where a lake stands the ground
-// under it is its level (ground.bk terrain), so a cell a share p under it
+// under it is its surface (ground.bk terrain), so a cell a share p under it
 // has a mean (1 - p) of the dry ground's excess over the level above it,
 // the dry ground spread about as the cell's heights are (sd: their
 // standard deviation, its unresolved octaves and its slope across it):
 // the share falls from 1 at the level to none a typical excess, 0.8 sd,
 // above it, so a shore crossing a cell takes part of it rather than all or
-// none (a saw of whole cells along it).
+// none (a saw of whole cells along it). Past the lake's limit
+// (lake_surface) a surface x under the level stands over water BANK (end -
+// x) / (1 + BANK) deep, which thins the same way to none.
 pub fn water_share(h: f32, w: vec4<f32>, sd: f32) -> f32 {
     var lake: f32 = 0.0;
-    if (w.z > -1.0e8 && w.z - h < 4.0 * w.w + 0.5) {
-        lake = clamp(1.0 - (h - w.z) / (0.8 * sd + 0.25), 0.0, 1.0);
+    if (w.z > -1.0e8) {
+        let x = w.z - h;
+        let soft = 0.8 * sd + 0.25;
+        if (x <= 0.0) {
+            lake = clamp(1.0 + x / soft, 0.0, 1.0);
+        } else if (x < bank_end(w)) {
+            lake = clamp(BANK * (bank_end(w) - x) / ((1.0 + BANK) * soft), 0.0, 1.0);
+        }
     }
     return max(w.y, lake);
 }

@@ -3,7 +3,7 @@
 // catchments, into the network's records. Each kernel runs over every
 // point, as grid (i, j, face).
 from planet::ground import terrain_base;
-from planet::rivers import RIV_N, RIV_REC, point_index, point_cell, point_dir, cell_next;
+from planet::rivers import RIV_N, RIV_REC, RIV_OCTAVES, point_index, point_cell, point_dir, cell_next;
 
 // The fall from a lake's point to the next toward its outlet (m): a lake's
 // level is all but flat, and still drains one way.
@@ -16,12 +16,12 @@ const LAKE_MAX: f32 = 12.0;
 // fill's start: the sea at its own height, land as high as can be.
 @kernel @grid(3)
 fn k_river_height(g: grid<3>, net: write_store<f32, 1>, level: write_store<f32, 1>,
-                  radius: f64, octaves: f64, seed: i32) {
+                  radius: f64, seed: i32) {
     let c = vec3<i32>(g.z(), g.x(), g.y());
     let p = point_index(c);
     let k = p * RIV_REC;
     let dir = point_dir(c, seed);
-    let h = terrain_base(dir, radius, octaves, seed) as f32;
+    let h = terrain_base(dir, radius, RIV_OCTAVES, seed) as f32;
     net[k] = h;
     net[k + 1] = -1.0;
     net[k + 2] = 1.0;

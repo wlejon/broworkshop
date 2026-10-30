@@ -128,7 +128,7 @@ fn k_detail(g: grid<3>, table: read_store<f64, 1>, heights: read_store<f32, 1>, 
     // river as deep as its channel runs there (shallow at its banks, its bed
     // showing through), a lake as deep as its water typically stands: the
     // lattice's depth is its points' mean over 20 km, and a lake reaches
-    // down to four times it (rivers.bk under_lake).
+    // down to four times it (rivers.bk lake_surface).
     let wa = water_at(dir, radius, length(du) * 0.5, net, seed);
     let wn = wa.near;
     let trend = grad * length(du) * 0.5;

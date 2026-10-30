@@ -10,9 +10,6 @@
 const N = 512;               // rivers.bk RIV_N
 const REC = 8;               // rivers.bk RIV_REC
 const POINTS = 6 * N * N;
-// The octaves the lattice resolves: about 20 km between points, a
-// wavelength of 2.5 of them (ground.bk octaves_for).
-const OCTAVES = 5.6;
 // Steps of the fill and of the catchments: past the longest chain on a
 // continent.
 const STEPS = 1024;
@@ -24,7 +21,7 @@ export function createRivers(module, radius, seed) {
     const net = bro.kernel.createBuffer(POINTS * REC * 4);
     let src = bro.kernel.createBuffer(POINTS * 4), dst = bro.kernel.createBuffer(POINTS * 4);
     const swap = () => { [src, dst] = [dst, src]; };
-    module.kernel('k_river_height').dispatch(grid, net, src, radius, OCTAVES, seed);
+    module.kernel('k_river_height').dispatch(grid, net, src, radius, seed);
     const fill = module.kernel('k_river_fill');
     for (let i = 0; i < STEPS; i++) { fill.dispatch(grid, net, src, dst); swap(); }
     module.kernel('k_river_down').dispatch(grid, net, src, seed);
