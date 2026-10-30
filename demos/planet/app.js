@@ -423,6 +423,13 @@ const fragment = `buffer uint u_det[];
     const float VARY_LUM = 0.11;      // ground.bk VARY_LUM
     const float PERLIN_VAR = 0.0728;  // ground.bk PERLIN_VAR
     const float RELIEF = 0.08;        // slope per octave, per unit of the noise's gradient
+    // Bare rock is rougher and more contrasted than a sward at every scale a
+    // pixel resolves: its faces and cracks, lit and shaded. Rock is the grey
+    // ground (little chroma, short of snow's white), and its octaves take
+    // ROCK_LUM and ROCK_RELIEF times a sward's, still zero-mean, so its
+    // average is the texel's as it is everywhere.
+    const float ROCK_LUM = 1.8;
+    const float ROCK_RELIEF = 3.0;
 
     // One of the 12 cube-edge gradients at lattice point c, the lattice
     // periodic over \`cells\` (a power of two).
@@ -528,6 +535,9 @@ const fragment = `buffer uint u_det[];
         float footprint = max(length(dFdx(v_q)), length(dFdy(v_q)));
         float lum = 0.0, lumVar = 0.0, wavelength = 0.125;
         vec3 slope = vec3(0.0);
+        float hiC = max(col.r, max(col.g, col.b)), loC = min(col.r, min(col.g, col.b));
+        float rock = (1.0 - smoothstep(0.15, 0.45, (hiC - loC) / max(hiC, 1e-3))) * (1.0 - smoothstep(0.35, 0.6, hiC));
+        float lumGain = mix(1.0, ROCK_LUM, rock), reliefGain = mix(1.0, ROCK_RELIEF, rock);
         int cells = int(${DETAIL_PERIOD}.0 / wavelength);
         for (int k = 0; k < 6; k++) {
             float w = clamp(wavelength / footprint * 0.5 - 1.0, 0.0, 1.0);
@@ -535,10 +545,10 @@ const fragment = `buffer uint u_det[];
             vec3 x = v_q / wavelength;
             // One noise for both: the relief's crests are the lighter ground.
             vec4 g = perlinGrad(x, cells, 11 + k);
-            float a = VARY_LUM * w;
+            float a = VARY_LUM * lumGain * w;
             lum += g.x * a;
             lumVar += a * a * PERLIN_VAR;
-            slope += g.yzw * (RELIEF * w);
+            slope += g.yzw * (RELIEF * reliefGain * w);
             wavelength *= 0.5;
             cells *= 2;
         }

@@ -30,7 +30,9 @@ fn k_grass_field(g: grid<2>, out: write_store<f32, 1>,
     if (dot(n, dir) < 0.0) { n = -n; }
     let cosine = clamp(dot(n, dir) as f32, 1e-3, 1.0);
     let grad = sqrt(1.0 / (cosine * cosine) - 1.0);
-    let albedo = surface(h as f32, grad).xyz * variation(dir, radius, octaves, seed);
+    // The blades' colour is the sward's at this height, not the ground's,
+    // which on a slope is part bare rock that no blade is.
+    let albedo = surface(h as f32, 0.0).xyz * variation(dir, radius, octaves, seed);
 
     let i = (g.y() * g.width() + g.x()) * 7;
     let rel = p - vec3<f64>(ox, oy, oz);

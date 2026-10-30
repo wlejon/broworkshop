@@ -7,7 +7,8 @@
 // two of the plane's units, so the lattice holds still), produced again when
 // the eye has moved SNAP points. Each point holds its place, how much of the
 // ground there grows grass (ground.bk grass_cover: grassland past the beach,
-// less rock and snow) and its albedo. How much of the sun's disc the ground
+// less rock and snow) and the sward's albedo (the ground's without its rock,
+// which the ground mixes in where the blades are fewer). How much of the sun's disc the ground
 // sees over the terrain is a grid SUN_STRIDE times coarser (sun.js; a
 // terrain's shadow is soft over a few metres), produced the frame after the
 // field or when the sun has turned, so the two do not land in one frame.
