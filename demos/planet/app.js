@@ -82,8 +82,8 @@ function makeCache(pixelsPerCell) {
 // ── The drawn tiles: one instanced patch ────────────────────────────────────
 
 // A (TILE+1)^2 vertex grid, x/z = the cell it reads, plus a skirt along the
-// four edges (y = 1) that drops below the surface to hide cracks between
-// tiles of different levels.
+// four edges (y = 1) that drops below the surface, out under the neighbour,
+// to hide cracks between tiles.
 function patchMesh() {
     const N = TILE + 1, pos = [], idx = [];
     for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) pos.push(i, 0, j);
@@ -130,6 +130,15 @@ const vertex = `buffer vec4 u_pos[];
         vec3 du = u_pos[k + 1].xyz - u_pos[k - 1].xyz;
         vec3 dv = u_pos[k + C].xyz - u_pos[k - C].xyz;
         normal = normalize(cross(du, dv));
+        // A skirt's bottom sits under the border cell beyond the edge, so the
+        // skirts of neighbouring tiles cross beneath their seam instead of
+        // sharing a plane: f32 rounding differs tile to tile, and coplanar
+        // skirts leave pinholes along the seam and at corners.
+        if (pos.y > 0.5) {
+            int si = i == 0 ? -1 : (i == ${TILE} ? 1 : 0);
+            int sj = j == 0 ? -1 : (j == ${TILE} ? 1 : 0);
+            c.xyz = u_pos[k + sj * C + si].xyz;
+        }
         // Up at this vertex: away from the planet's center at the origin.
         vec3 up = normalize(c.xyz + hi.xyz);
         // Skirts hang a sixteenth of the tile's edge below the surface.
@@ -151,8 +160,7 @@ const fragment = `in vec4 v_col;
         baseColor = v_col.rgb;
         normal = normalize(mix(normalize(normal), normalize(v_up), water));
         roughness = mix(0.9, 0.12, water);
-        metallic = 0.0;
-    }`;
+        metallic = 0.0;    }`;
 
 let ground = null;
 ground = scene.createInstancedMesh({ mesh: patchMesh(), color: [1, 1, 1], castsShadow: false, receivesShadow: false, doubleSided: true });
