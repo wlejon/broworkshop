@@ -253,6 +253,7 @@ export function createGrass(scene, radius, module, sunModule, octaves, seed, net
                                                  castsShadow: false, receivesShadow: false, doubleSided: true });
         node.setShader({ vertex, fragment: fragment(radius) });
         node.cullMargin = 4 * radius;   // the shader places the blades
+        node.drawOrder = 6;             // before the ground it hides
         node.setShaderBuffer('u_field', field);
         node.setShaderBuffer('u_sun', sunGrid.buffer);
         node.setShaderBuffer('u_cells', bro.kernel.createBuffer(ring.cells));

@@ -288,6 +288,7 @@ export function createTrees(scene, radius, module, sunModule, octaves, seed, net
                                                  castsShadow: false, receivesShadow: false, doubleSided: true });
         node.setShader({ vertex, fragment: fragment(radius) });
         node.cullMargin = 4 * radius;   // the shader places the trees
+        node.drawOrder = 4;             // before the grass and the ground they hide
         node.setShaderBuffer('u_field', fields[0]);
         node.setShaderBuffer('u_sun', sunGrid.buffer);
         lists[i].buffer = bro.kernel.createBuffer(lists[i].blocks.byteLength);
