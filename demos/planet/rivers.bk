@@ -316,10 +316,20 @@ pub fn under_lake(h: f32, w: vec4<f32>) -> bool {
     return h < w.z && w.z - h < 4.0 * w.w + 0.5;
 }
 
-// The share of a cell whose ground or water surface is at h under water:
-// its river channel's, or all of it under a lake (whose surface is h).
-pub fn water_share(h: f32, w: vec4<f32>) -> f32 {
-    let onLake = abs(h - w.z) < 0.25 || under_lake(h, w);
-    return max(w.y, onLake ? 1.0 : 0.0);
+// The share of a cell whose mean ground or water surface is at h under
+// water: its river channel's, or a lake's. Where a lake stands the ground
+// under it is its level (ground.bk terrain), so a cell a share p under it
+// has a mean (1 - p) of the dry ground's excess over the level above it,
+// the dry ground spread about as the cell's heights are (sd: their
+// standard deviation, its unresolved octaves and its slope across it):
+// the share falls from 1 at the level to none a typical excess, 0.8 sd,
+// above it, so a shore crossing a cell takes part of it rather than all or
+// none (a saw of whole cells along it).
+pub fn water_share(h: f32, w: vec4<f32>, sd: f32) -> f32 {
+    var lake: f32 = 0.0;
+    if (w.z > -1.0e8 && w.z - h < 4.0 * w.w + 0.5) {
+        lake = clamp(1.0 - (h - w.z) / (0.8 * sd + 0.25), 0.0, 1.0);
+    }
+    return max(w.y, lake);
 }
 

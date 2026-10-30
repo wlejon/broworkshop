@@ -407,6 +407,17 @@ const fragment = `buffer uint u_det[];
         if (n.z < 0.0) n.xy = (1.0 - abs(n.yx)) * vec2(n.x >= 0.0 ? 1.0 : -1.0, n.y >= 0.0 ? 1.0 : -1.0);
         nrm = normalize(n);
     }
+    // Texel t's share of water alone.
+    float detailWater(ivec2 t) {
+        const int W = ${TEXELS};
+        t = clamp(t, ivec2(0), ivec2(W - 1));
+        return float(u_det[((v_slot * W + t.y) * W + t.x) * 2] >> 24) / 255.0;
+    }
+    // A uniform cubic B-spline's four weights at fraction f past the second.
+    vec4 bspline(float f) {
+        float g = 1.0 - f, f2 = f * f, f3 = f2 * f;
+        return vec4(g * g * g, 3.0 * f3 - 6.0 * f2 + 4.0, -3.0 * f3 + 3.0 * f2 + 3.0 * f + 1.0, f3) / 6.0;
+    }
     const float VARY_LUM = 0.11;      // ground.bk VARY_LUM
     const float PERLIN_VAR = 0.0728;  // ground.bk PERLIN_VAR
     const float RELIEF = 0.08;        // slope per octave, per unit of the noise's gradient
@@ -495,6 +506,20 @@ const fragment = `buffer uint u_det[];
         float forest = mix(mix(cover.x, cover.y, f.x), mix(cover.z, cover.w, f.x), f.y);
         vec3 n = normalize(mix(mix(n00, n10, f.x), mix(n01, n11, f.x), f.y));
         float water = col.a;
+        // The water's share, where there is any about, by a cubic B-spline
+        // over the 4 x 4 texels around: the share sets the roughness, whose
+        // reflection is far from linear in it, so the water's edge is one of
+        // the share's contours, and a bilinear share's contours are cut
+        // texel by texel into a saw along every diagonal bank.
+        if (max(max(c00.a, c10.a), max(c01.a, c11.a)) > 0.0) {
+            vec4 bx = bspline(f.x), by = bspline(f.y);
+            water = 0.0;
+            for (int j = 0; j < 4; j++) {
+                float row = 0.0;
+                for (int i = 0; i < 4; i++) row += bx[i] * detailWater(t0 + ivec2(i - 1, j - 1));
+                water += by[j] * row;
+            }
+        }
 
         // The octaves a pixel resolves: full weight from 4 pixels a
         // wavelength, none at 2.
@@ -536,14 +561,17 @@ const fragment = `buffer uint u_det[];
         // Rivers and lakes stand above the sea: their water is sheltered,
         // a breeze's ripples on it (the waves of 4 m and shorter, scaled to
         // Cox and Munk's mean square slope at 2 m/s: WAVES.fresh) rather
-        // than the sea's swell and waves.
+        // than the sea's swell and waves. A ripple tilts the normal only
+        // from 32 pixels a wavelength (the sea's from 8): a few wave trains
+        // over a narrow water read as a woven grid, where the eye takes a
+        // breeze's ripples seen from off as gloss.
         float fresh = smoothstep(0.0, 1.0, v_height);
         vec3 sea = up;
         // (Land near sea level carries a trace of water, the chance its
         // unresolved heights dip under the sea: too little to show.)
         if (water > 0.001) {
             float calm = mix(1.0, WAVE_FRESH_SCALE, fresh);
-            sea = normalize(up - seaSlope(footprint, up, fresh > 0.5 ? WAVE_FRESH : 0, seaVariance) * calm);
+            sea = normalize(up - seaSlope(footprint * mix(1.0, 4.0, fresh), up, fresh > 0.5 ? WAVE_FRESH : 0, seaVariance) * calm);
             seaVariance *= calm * calm;
         }
         normal = normalize(mix(n, sea, water));

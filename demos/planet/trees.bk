@@ -45,7 +45,7 @@ fn k_tree_field(g: grid<2>, out: write_store<f32, 1>,
     let cosine = clamp(dot(n, dir) as f32, 1e-3, 1.0);
     let grad = sqrt(1.0 / (cosine * cosine) - 1.0);
     // None in the rivers and lakes, nor right on their banks.
-    let cover = tree_cover(h as f32, grad) * (1.0 - water_share(h as f32, water_near(dir, radius, 6.0, net, seed)));
+    let cover = tree_cover(h as f32, grad) * (1.0 - water_share(h as f32, water_near(dir, radius, 6.0, net, seed), 0.0));
     // Forests grow in stands and glades: the cover scaled by zero-mean
     // noise across ~70 m and ~20 m, so the forest's average stays the
     // cover the ground's colour takes. A tree stands where the site's pick
