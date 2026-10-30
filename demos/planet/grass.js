@@ -270,9 +270,9 @@ const fragment = (radius) => `in vec3 v_col;
 // grassFloorGlsl, bound to its field. update() each frame with the eye about the
 // planet's centre (f64), its altitude and the unit direction to the sun.
 export function createGrass(scene, radius, module, sunModule, octaves, seed, net, readers = []) {
-    const fieldKernel = module.kernel('k_grass_field');
+    const fieldKernel = module.kernel('k_grass_field'), heightsKernel = module.kernel('k_grass_heights');
     const sunGrid = createSunGrid(sunModule, SUN_P, net, 4);
-    const field = bro.kernel.createBuffer(P * P * 7 * 4);
+    const field = bro.kernel.createBuffer(P * P * 7 * 4), heights = bro.kernel.createBuffer((P + 2) * (P + 2) * 4);
     const bands = [
         { blades: DENSE, band: [0, NEAR], ring: cellRing(0, NEAR) },
         { blades: SPARSE, band: [NEAR, FAR], ring: cellRing(NEAR, FAR) },
@@ -377,7 +377,9 @@ export function createGrass(scene, radius, module, sunModule, octaves, seed, net
             for (let k = 0; k < 3; k++) c[k] = frame.a[k] + frame.e[k] * ui * dl + frame.f[k] * vi * dl;
             const len = Math.hypot(c[0], c[1], c[2]);
             const origin = c.map((x) => x / len * radius);
-            fieldKernel.dispatch([P, P], field, ...plane, (ui - N / 2) * dl, (vi - N / 2) * dl, dl,
+            heightsKernel.dispatch([P + 2, P + 2], heights, ...plane, (ui - N / 2) * dl, (vi - N / 2) * dl, dl,
+                                   radius, octaves, seed, net);
+            fieldKernel.dispatch([P, P], field, heights, ...plane, (ui - N / 2) * dl, (vi - N / 2) * dl, dl,
                                  ...origin, radius, octaves, seed, net);
             fieldMade = true;
             for (let k = 0; k < 3; k++) {
