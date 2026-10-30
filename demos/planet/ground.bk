@@ -567,11 +567,14 @@ pub fn surface(h: f32, grad: f32) -> vec4<f32> {
 // Bedded rock: a cliff's face shows its beds as bands, lighter and warmer
 // ones (sandstone, limestone) between darker ones (shale), each bed level
 // along a surface folded by low-frequency noise, so the bands follow the
-// strata rather than the contours. Three thicknesses, each a cosine of the
-// height along the fold, in log-luminance. Over a texel whose heights spread
-// by sd a cosine of wavelength L averages to itself times
-// exp(-(2 pi sd / L)^2 / 2) (its mean under a normal), so a band fades out
-// where the texel spans it, and the far ground keeps the beds' mean.
+// strata rather than the contours. Three scales of bed, each gradient noise
+// along the height on the fold (a line through the lattice, so the beds'
+// thicknesses and tones are irregular, not a cosine's even stripes), in
+// log-luminance at an amplitude of its deviation. Over a texel whose
+// heights spread by sd, an octave of wavelength L averages to about itself
+// times exp(-(2 pi sd / L)^2 / 2) (a sinusoid's mean under a normal), so a
+// bed fades out where the texel spans it, and the far ground keeps the
+// beds' mean.
 const STRATA_FOLD: f64 = 3500.0;          // the folds' wavelength, metres
 const STRATA_FOLD_HEIGHT: f64 = 1600.0;   // their height, per unit of noise
 const STRATA_L0: f32 = 9.0;
@@ -581,19 +584,18 @@ const STRATA_A0: f32 = 0.10;
 const STRATA_A1: f32 = 0.16;
 const STRATA_A2: f32 = 0.18;
 
-fn strata_band(level: f64, length: f32, phase: f32, sd: f32) -> f32 {
-    let x = level / (length as f64) + (phase as f64);
-    let f = (x - floor(x)) as f32;
+fn strata_band(level: f64, length: f32, track: f64, sd: f32, seed: i32) -> f32 {
+    let n = perlin_split(vec3<f64>(level / (length as f64), track, 0.5 * track), seed);
     let t = 6.2831853 * sd / length;
-    return cos(6.2831853 * f) * exp(-0.5 * t * t);
+    return n / sqrt(PERLIN_VAR) * exp(-0.5 * t * t);
 }
 
 pub fn strata(dir: vec3<f64>, radius: f64, h: f32, sd: f32, seed: i32) -> f32 {
     let fold = perlin_split(dir * (radius / STRATA_FOLD), seed + 307) as f64 * STRATA_FOLD_HEIGHT;
     let level = (h as f64) + fold;
-    return STRATA_A0 * strata_band(level, STRATA_L0, 0.13, sd)
-         + STRATA_A1 * strata_band(level, STRATA_L1, 0.61, sd)
-         + STRATA_A2 * strata_band(level, STRATA_L2, 0.37, sd);
+    return STRATA_A0 * strata_band(level, STRATA_L0, 0.37, sd, seed + 311)
+         + STRATA_A1 * strata_band(level, STRATA_L1, 0.61, sd, seed + 313)
+         + STRATA_A2 * strata_band(level, STRATA_L2, 0.29, sd, seed + 317);
 }
 
 // surface with the rock's beds at `bed` (strata, log-luminance).
