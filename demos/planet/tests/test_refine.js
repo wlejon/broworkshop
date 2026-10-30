@@ -126,4 +126,27 @@ for (const coarse of [3.5, 6.5, 9.5]) {
     });
 }
 
+// The albedo variation refines on its own, anywhere: a cell's factor is the
+// mean of the factors of the cells two octaves finer, and the factor's mean
+// over the planet is 1, so it changes no scale's average colour.
+for (const coarse of [6.5, 12.5, 18.5]) {
+    test(`a ${coarse}-octave cell's albedo variation is the mean of the cells two octaves finer`, () => {
+        seed = 909;
+        const n = 120;
+        let bias = 0, sq = 0, mean = 0;
+        for (let k = 0; k < n; k++) {
+            const p = colorPatch(norm([rnd() * 2 - 1, rnd() * 2 - 1, rnd() * 2 - 1]), coarse, 2, 0);
+            bias += p.fine - p.coarse;
+            sq += (p.fine - p.coarse) ** 2;
+            mean += p.coarse;
+        }
+        const rms = Math.sqrt(sq / n);
+        bias /= n;
+        mean /= n;
+        console.log(`octaves ${coarse} -> ${coarse + 2} variation: bias ${bias.toFixed(4)} rms ${rms.toFixed(4)}, mean factor ${mean.toFixed(4)}`);
+        check(Math.abs(bias) < Math.max(0.004, 2.5 * rms / Math.sqrt(n)), `no systematic shift (${bias.toFixed(4)})`);
+        check(Math.abs(mean - 1) < 0.05, `mean factor near 1 (${mean.toFixed(4)})`);
+    });
+}
+
 done('planet refine');

@@ -233,10 +233,82 @@ fn gh3(i: i32) -> vec2<f32> {
     return vec2<f32>(1.7320508, 0.1666667);
 }
 
+// The land's albedo varies in patches, lighter and darker, more and less ochre,
+// at every scale from octave VARY_FIRST down, with equal contrast in each
+// octave: log-normal factors on the albedo, independent of the height. A
+// cell takes the octaves it resolves (the last weighted by its fraction),
+// exp(S - var(S) / 2), which is the mean of the factor over all the octaves
+// below, so a cell's factor is the average of its children's. The ground
+// shader carries the octaves finer than any tile on per pixel.
+const VARY_FIRST: i32 = 5;
+// Var(perlin_split), measured over 200k samples.
+const PERLIN_VAR: f32 = 0.0728;
+const VARY_LUM: f32 = 0.11;    // log-luminance, per octave
+const VARY_TINT: f32 = 0.05;   // ochre (tint_axis, log per channel), per octave
+fn tint_axis() -> vec3<f32> { return vec3<f32>(1.0, 0.45, -0.5); }
+const TINT_LAST: i32 = 16;
+
+// Perlin noise at q with the f64 work only in finding q's lattice cell: the
+// rest runs in f32 on the offset inside the cell, which needs no more (the
+// GPU runs f64 at a small fraction of f32's rate).
+pub fn perlin_split(q: vec3<f64>, seed: i32) -> f32 {
+    let c = floor(q);
+    let xf0 = (q.x - c.x) as f32;
+    let yf0 = (q.y - c.y) as f32;
+    let zf0 = (q.z - c.z) as f32;
+    let x0: i32 = ((c.x as i64) as i32) * PRIME_X;
+    let y0: i32 = ((c.y as i64) as i32) * PRIME_Y;
+    let z0: i32 = ((c.z as i64) as i32) * PRIME_Z;
+    let x1: i32 = x0 + PRIME_X;
+    let y1: i32 = y0 + PRIME_Y;
+    let z1: i32 = z0 + PRIME_Z;
+    let xf1 = xf0 - 1.0;
+    let yf1 = yf0 - 1.0;
+    let zf1 = zf0 - 1.0;
+    let u = interp_quintic<f32>(xf0);
+    let v = interp_quintic<f32>(yf0);
+    let w = interp_quintic<f32>(zf0);
+    let g0 = mix(mix(grad_dot_common3d<f32>(hash_primes3d(seed, x0, y0, z0), xf0, yf0, zf0),
+                     grad_dot_common3d<f32>(hash_primes3d(seed, x1, y0, z0), xf1, yf0, zf0), u),
+                 mix(grad_dot_common3d<f32>(hash_primes3d(seed, x0, y1, z0), xf0, yf1, zf0),
+                     grad_dot_common3d<f32>(hash_primes3d(seed, x1, y1, z0), xf1, yf1, zf0), u), v);
+    let g1 = mix(mix(grad_dot_common3d<f32>(hash_primes3d(seed, x0, y0, z1), xf0, yf0, zf1),
+                     grad_dot_common3d<f32>(hash_primes3d(seed, x1, y0, z1), xf1, yf0, zf1), u),
+                 mix(grad_dot_common3d<f32>(hash_primes3d(seed, x0, y1, z1), xf0, yf1, zf1),
+                     grad_dot_common3d<f32>(hash_primes3d(seed, x1, y1, z1), xf1, yf1, zf1), u), v);
+    return mix(g0, g1, w);
+}
+
+pub fn variation(dir: vec3<f64>, radius: f64, octaves: f64, seed: i32) -> vec3<f32> {
+    var q: vec3<f64> = dir * (radius / BASE_WAVELENGTH) * pow(2.0, VARY_FIRST as f64);
+    var lum: f32 = 0.0;
+    var tint: f32 = 0.0;
+    var vl: f32 = 0.0;
+    var vt: f32 = 0.0;
+    let n = ceil(octaves) as i32;
+    for (var o: i32 = VARY_FIRST; o < n; o += 1) {
+        let w = clamp(octaves - (o as f64), 0.0, 1.0) as f32;
+        let al = VARY_LUM * w;
+        lum += perlin_split(q, seed + 101 + o) * al;
+        vl += al * al * PERLIN_VAR;
+        if (o < TINT_LAST) {
+            let at = VARY_TINT * w;
+            tint += perlin_split(q, seed + 211 + o) * at;
+            vt += at * at * PERLIN_VAR;
+        }
+        q = q * 2.0;
+    }
+    let axis = tint_axis();
+    let s = vec3<f32>(lum, lum, lum) + axis * tint;
+    let v = vec3<f32>(vl, vl, vl) + axis * axis * vt;
+    return exp(s - v * 0.5);
+}
+
 // The mean of `surface` over the truth under a cell: height N(h, sh^2), and
 // the gradient the cell's own (`grad` along one axis) plus N(0, sg^2) along
-// each, by quadrature (5 nodes in height, 3 x 3 in the gradient).
-pub fn expected_surface(h: f32, grad: f32, sh: f32, sg: f32) -> vec4<f32> {
+// each, by quadrature (5 nodes in height, 3 x 3 in the gradient). The land's
+// albedo takes the cell's variation factor.
+pub fn expected_surface(h: f32, grad: f32, sh: f32, sg: f32, vary: vec3<f32>) -> vec4<f32> {
     var sum = vec4<f32>(0.0, 0.0, 0.0, 0.0);
     for (var i: i32 = 0; i < 5; i += 1) {
         let nh = gh5(i);
@@ -246,7 +318,9 @@ pub fn expected_surface(h: f32, grad: f32, sh: f32, sg: f32) -> vec4<f32> {
                 let gy = gh3(k);
                 let ex = grad + sg * gx.x;
                 let ey = sg * gy.x;
-                sum += surface(h + sh * nh.x, sqrt(ex * ex + ey * ey)) * (nh.y * gx.y * gy.y);
+                let s = surface(h + sh * nh.x, sqrt(ex * ex + ey * ey));
+                let tone = mix(vary, vec3<f32>(1.0, 1.0, 1.0), s.w);
+                sum += vec4<f32>(s.xyz * tone, s.w) * (nh.y * gx.y * gy.y);
             }
         }
     }

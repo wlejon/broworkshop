@@ -1,5 +1,5 @@
 // The planet's kernels: each tile's cells from the ground (ground.bk).
-from planet::ground import terrain, cell_height, spread, expected_surface, gradient;
+from planet::ground import terrain, cell_height, spread, expected_surface, gradient, variation;
 
 // One tile: cell (x, y) at (s, t) = ((x, y) - border) / tileSize across the
 // tile's frame, written as its position relative to the tile's center
@@ -38,7 +38,7 @@ fn k_color(g: grid<2>, cells: read_store<vec4<f32>, 2>, out: write_store<vec4<f3
     let t = (y as f64 - border) * inv_size;
     let dir = normalize(vec3<f64>(cx, cy, cz) + vec3<f64>(ux, uy, uz) * s + vec3<f64>(vx, vy, vz) * t);
     let sp = spread(dir, radius, octaves, truth, seed);
-    out[x, y] = expected_surface(c.w, gradient(du, dv, up), sp.x, sp.y);
+    out[x, y] = expected_surface(c.w, gradient(du, dv, up), sp.x, sp.y, variation(dir, radius, octaves, seed));
 }
 
 // The range the surface of a tile and of every tile below it lies in, from
