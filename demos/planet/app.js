@@ -158,7 +158,12 @@ const fragment = `in vec4 v_col;
                       inout vec3 emissive, inout float alpha) {
         float water = clamp(v_col.a, 0.0, 1.0);
         baseColor = v_col.rgb;
-        normal = normalize(mix(normalize(normal), normalize(v_up), water));
+        // A skirt filling a crack is seen from either side, and its back face
+        // gets the flipped normal: the ground never faces down, so shade the
+        // side facing up.
+        vec3 n = normalize(normal);
+        if (dot(n, v_up) < 0.0) n = -n;
+        normal = normalize(mix(n, normalize(v_up), water));
         roughness = mix(0.9, 0.12, water);
         metallic = 0.0;    }`;
 
