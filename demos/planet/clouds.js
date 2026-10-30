@@ -432,9 +432,10 @@ const volumeGlsl = (radius) => cloudGlsl(radius, true) + `
         float litAt = -1.0e9;
 
         // Steps grow with the distance (a pixel's footprint grows with it,
-        // and the field with it): 4% of the distance ahead, at least 20 m, a
-        // step landing in cloud backing up to find its edge. Started at a
-        // per-pixel offset, so a step's edge is grain, not bands.
+        // and the field with it): 10% of the distance ahead, at least 20 m,
+        // a step landing in cloud backing up to find its edge. Started at a
+        // per-pixel offset, so a step's edge is grain, not bands, and the
+        // grain averages over renders.
         uint hp = uint(gl_FragCoord.x) * 1973u + uint(gl_FragCoord.y) * 9277u;
         hp = (hp ^ (hp >> 13)) * 0x5bd1e995u;
         // Moved on by the golden ratio each render, so a pixel's offsets
