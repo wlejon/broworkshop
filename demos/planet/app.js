@@ -1,6 +1,6 @@
 // Planet: an Earth-radius world drawn from a bro.tiles cube-sphere cache.
 //
-// The ground is one height function (planet.bk) evaluated per tile on the
+// The ground is one height function (ground.bk) evaluated per tile on the
 // GPU in f64. Each tile's cells are written relative to the tile's center,
 // and every tile is drawn camera-relative: the scene's camera sits at the
 // origin and each tile instance is placed at (tile center - camera), both in
@@ -17,18 +17,23 @@ const BORDER = 2;           // cells beyond it, for the vertex shader's normals
 const CELLS = TILE + 2 * BORDER;
 const CAPACITY = 4096;
 const SEED = 7;
-const BASE_WAVELENGTH = 2400000;   // planet.bk's first octave
+const BASE_WAVELENGTH = 2400000;   // ground.bk's first octave
 
-const mod = bro.kernel.compile(fs.readFileSync(bro.resolvePath('/app/planet.bk'), 'utf-8'), { file: 'planet.bk' });
+const readApp = (path) => fs.readFileSync(bro.resolvePath('/app/' + path), 'utf-8');
+const mod = bro.kernel.compile(readApp('planet.bk'), { file: 'planet.bk', modules: { 'planet::ground': readApp('ground.bk') } });
 const kTile = mod.kernel('k_tile');
 const kHeight = mod.kernel('k_height');
 const kRange = mod.kernel('k_range');
+const kColor = mod.kernel('k_color');
 
 // The octaves a tile's cells can carry: down to a wavelength of 2.5 cells.
 const octavesFor = (extent) => Math.min(30, Math.max(1, Math.log2(BASE_WAVELENGTH / (2.5 * extent / TILE))));
+const MAX_LEVEL = 22;
+// The finest octaves anything draws: a colour is the mean over them.
+const TRUTH = octavesFor(RADIUS * Math.PI / 2 / 2 ** MAX_LEVEL);
 
 // What the octaves finer than a tile's can still add to its surface, in
-// metres, from planet.bk's amplitudes: the detail fbm (octave 4 up, 250 + 900
+// metres, from ground.bk's amplitudes: the detail fbm (octave 4 up, 250 + 900
 // at most), the ridges (octaves 2 to 11, 6500 at most), counted from the last
 // octave the tile resolves (a peak between its cells), with a quarter more
 // for simplex's reach past 1. Below the continents' octaves it is everything.
@@ -53,20 +58,23 @@ let cache = null;
 function makeCache(pixelsPerCell) {
     cache = bro.tiles.createCache({
         domain: { type: 'cubeSphere', radius: RADIUS, center: [0, 0, 0] },
-        tileSize: TILE, border: BORDER, capacity: CAPACITY, maxLevel: 22,
+        tileSize: TILE, border: BORDER, capacity: CAPACITY, maxLevel: MAX_LEVEL,
         minHeight: 0, maxHeight: MAX_HEIGHT, pixelsPerCell, producePerUpdate: 24,
-        layers: { position: 16 },
+        layers: { position: 16, color: 16 },
         ranges: true,
         produce(tile) {
             const f = tile.frame, c = tile.center, octaves = octavesFor(tile.extent);
-            kTile.dispatch([tile.cells, tile.cells], tile.layers.position,
-                f.corner[0], f.corner[1], f.corner[2], f.u[0], f.u[1], f.u[2], f.v[0], f.v[1], f.v[2],
-                c[0], c[1], c[2], RADIUS, BORDER, 1 / TILE, octaves, SEED);
+            const frame = [f.corner[0], f.corner[1], f.corner[2], f.u[0], f.u[1], f.u[2], f.v[0], f.v[1], f.v[2],
+                           c[0], c[1], c[2], RADIUS, BORDER, 1 / TILE];
+            kTile.dispatch([tile.cells, tile.cells], tile.layers.position, ...frame, octaves, SEED);
+            kColor.dispatch([tile.cells, tile.cells], tile.layers.position, tile.layers.color, ...frame,
+                            octaves, TRUTH, SEED, tile.cells);
             kRange.dispatch([1], tile.layers.position, tile.range, tile.cells * tile.cells, rangeMargin(octaves), MAX_HEIGHT);
         },
     });
     if (ground) {
         ground.setShaderBuffer('u_pos', cache.layer('position'));
+        ground.setShaderBuffer('u_col', cache.layer('color'));
         ground.setShaderBuffer('u_tiles', cache.drawList);
     }
 }
@@ -105,10 +113,11 @@ function patchMesh() {
 // level, and center as hi + lo floats, from which the camera (split the same
 // way) is subtracted for a camera-relative placement good to f64.
 const vertex = `buffer vec4 u_pos[];
+    buffer vec4 u_col[];
     buffer ivec4 u_tiles[];
     uniform vec3 u_camHi;
     uniform vec3 u_camLo;
-    out float v_h;
+    out vec4 v_col;
     out vec3 v_up;
     void userVertex(inout vec3 pos, inout vec3 normal, inout vec2 uv) {
         ivec4 ids = u_tiles[gl_InstanceIndex * 4];   // slot, parentSlot, root, level
@@ -127,31 +136,21 @@ const vertex = `buffer vec4 u_pos[];
         float extent = ${RADIUS * Math.PI / 2} / float(1 << ids.w);
         vec3 rel = (hi.xyz - u_camHi) + (lo.xyz - u_camLo);
         pos = rel + c.xyz - up * (pos.y * extent * 0.0625);
-        v_h = c.w;
+        v_col = u_col[k];
         v_up = up;
     }`;
 
-const fragment = `in float v_h;
+// The colour layer (planet.bk k_color) is the mean of the ground under each
+// cell: albedo, and how much of it is water.
+const fragment = `in vec4 v_col;
     in vec3 v_up;
     void userFragment(inout vec3 baseColor, inout vec3 normal,
                       inout float metallic, inout float roughness,
                       inout vec3 emissive, inout float alpha) {
-        float slope = 1.0 - clamp(dot(normalize(normal), normalize(v_up)), 0.0, 1.0);
-        if (v_h <= 0.0) {
-            float depth = clamp(-v_h / 2500.0, 0.0, 1.0);
-            baseColor = mix(vec3(0.03, 0.16, 0.22), vec3(0.005, 0.03, 0.09), depth);
-            normal = normalize(v_up);
-            roughness = 0.12;
-        } else {
-            vec3 sand = vec3(0.62, 0.56, 0.42), grass = vec3(0.16, 0.27, 0.08), forest = vec3(0.06, 0.13, 0.05);
-            vec3 rock = vec3(0.30, 0.27, 0.24), snow = vec3(0.92, 0.94, 0.97);
-            vec3 c = mix(sand, grass, smoothstep(5.0, 40.0, v_h));
-            c = mix(c, forest, smoothstep(150.0, 600.0, v_h) * (1.0 - smoothstep(1900.0, 2700.0, v_h)));
-            c = mix(c, rock, max(smoothstep(0.22, 0.45, slope), smoothstep(2600.0, 3400.0, v_h)));
-            c = mix(c, snow, smoothstep(4300.0, 4900.0, v_h) * (1.0 - smoothstep(0.4, 0.65, slope)));
-            baseColor = c;
-            roughness = 0.9;
-        }
+        float water = clamp(v_col.a, 0.0, 1.0);
+        baseColor = v_col.rgb;
+        normal = normalize(mix(normalize(normal), normalize(v_up), water));
+        roughness = mix(0.9, 0.12, water);
         metallic = 0.0;
     }`;
 
@@ -197,8 +196,10 @@ let lastView = null;
 function frame() {
     const t0 = performance.now();
     const f = cameraFrame();
-    const height = canvas.height || 1080;
-    const aspect = (canvas.width || 1920) / height;
+    // The scene renders at the canvas's layout size (not its width/height
+    // attributes), in device pixels: what a tile's cells project onto.
+    const height = (canvas.clientHeight || 1080) * devicePixelRatio;
+    const aspect = (canvas.clientWidth || 1920) * devicePixelRatio / height;
     const near = Math.min(1e5, Math.max(0.2, cam.alt * 0.05));
     const horizon = Math.sqrt(Math.max(0, (f.surface + cam.alt) ** 2 - RADIUS * RADIUS)) + 2e5;
     scene.setCamera({ eye: [0, 0, 0], target: f.fwd, up: f.camUp, fov: FOV, near, far: horizon + 1e5 });
@@ -264,7 +265,7 @@ canvas.addEventListener('pointermove', (e) => {
     }
     // Move the ground point under the cursor with it: metres per pixel at
     // the camera's altitude, turned into an angle across the sphere.
-    const mpp = 2 * cam.alt * Math.tan(FOV * Math.PI / 360) / (canvas.height || 1080);
+    const mpp = 2 * cam.alt * Math.tan(FOV * Math.PI / 360) / (canvas.clientHeight || 1080);
     const hd = cam.heading * Math.PI / 180;
     const north = (dy * Math.cos(hd) + dx * Math.sin(hd)) * mpp, east = (dy * Math.sin(hd) * -1 + dx * Math.cos(hd)) * -mpp;
     cam.lat = Math.max(-1.55, Math.min(1.55, cam.lat + north / RADIUS));

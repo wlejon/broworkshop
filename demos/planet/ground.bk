@@ -1,0 +1,261 @@
+// The planet's ground: one height function of the unit direction, evaluated
+// in f64 so a cell lands exactly at any scale, Earth radius included, and the
+// colour of the truth under a cell. planet.bk's kernels fill tiles with it;
+// the tests measure it.
+module planet::ground;
+
+import std::noise::*;
+
+// Wavelength of the first octave, in metres.
+const BASE_WAVELENGTH: f64 = 2400000.0;
+// E[(1 - |simplex3d|)^2], measured over 200k samples.
+const RIDGE_MEAN: f64 = 0.4648;
+// Var(simplex3d), measured the same way.
+const SIMPLEX_VAR: f32 = 0.1889;
+// Var((1 - |simplex3d|)^2), and the variance of either noise's gradient along
+// one axis per unit of input, measured the same way.
+const RIDGE_VAR: f32 = 0.0809;
+const SIMPLEX_GRAD_VAR: f32 = 3.184;
+const RIDGE_GRAD_VAR: f32 = 6.485;
+
+// The octaves of simplex noise whose wavelength a tile's cells can carry:
+// `octaves` may be fractional, the last octave weighted by its fraction, so a
+// tile holds the average of what its children hold plus zero-mean detail.
+fn fbm_to(p: vec3<f64>, octaves: f64, first: i32, seed: i32) -> f64 {
+    var sum: f64 = 0.0;
+    var amp: f64 = 1.0;
+    var q: vec3<f64> = p * pow(2.0, first as f64);
+    let n = ceil(octaves) as i32;
+    for (var o: i32 = first; o < n; o += 1) {
+        let w = clamp(octaves - (o as f64), 0.0, 1.0);
+        sum += simplex3d<f64>(q, seed + o) * amp * w;
+        amp *= 0.5;
+        q = q * 2.0;
+    }
+    return sum;
+}
+
+// How much of an octave's variance lies inside one of a tile's cells: all
+// of it when the tile does not resolve the octave, the share a cell spans,
+// (cell / wavelength)^2, when it does (a cell is 1 / (2.5 * 2^octaves) of the
+// first wavelength). f32 here and below: the statistics need no more, and
+// Vulkan has no f64 exp.
+fn cell_share(o: f32, octaves: f32) -> f32 {
+    let w = clamp(octaves - o, 0.0, 1.0);
+    let span = min(exp2(o - octaves) / 2.5, 1.0);
+    return (1.0 - w) * (1.0 - w) + w * w * span * span;
+}
+
+// The standard normal CDF.
+fn normal_cdf(z: f32) -> f32 {
+    return 0.5 * (1.0 + tanh(0.7978846 * (z + 0.044715 * z * z * z)));
+}
+
+// E[(X - k)+] for X ~ N(m, s^2): the mean of a ramp over noise a tile
+// cannot resolve.
+fn ramp_mean(m: f32, s: f32, k: f32) -> f32 {
+    if (s < 1e-6) { return max(m - k, 0.0); }
+    let z = (m - k) / s;
+    return (m - k) * normal_cdf(z) + s * 0.3989423 * exp(-0.5 * z * z);
+}
+
+// E[clamp(X, lo, hi)] for X ~ N(m, s^2).
+fn clamp_mean(m: f64, s: f64, lo: f32, hi: f32) -> f64 {
+    let mf = m as f32;
+    let sf = s as f32;
+    return (lo + ramp_mean(mf, sf, lo) - ramp_mean(mf, sf, hi)) as f64;
+}
+
+// The broad masks at p (= dir * radius / BASE_WAVELENGTH): x the continents,
+// y what they vary by inside one of the tile's cells as Gaussian noise (the
+// coastline clamps take their mean over it, so a coarse tile holds what its
+// descendants average to), z where mountain ranges rise, w how much is land.
+fn masks(p: vec3<f64>, octaves: f64, seed: i32) -> vec4<f64> {
+    let continents = fbm_to(p, min(octaves, 4.0), 0, seed);
+    var unresolved: f32 = 0.0;
+    var a: f32 = 1.0;
+    for (var o: i32 = 0; o < 4; o += 1) {
+        unresolved += a * a * SIMPLEX_VAR * cell_share(o as f32, octaves as f32);
+        a *= 0.5;
+    }
+    let sc = sqrt(unresolved) as f64;
+    let onLand = clamp_mean(continents * 6.0 + 0.3, sc * 6.0, 0.0, 1.0);
+    let ranges = clamp(simplex3d<f64>(p * 1.7, seed + 300) * 2.2 - 0.35, 0.0, 1.0);
+    return vec4<f64>(continents, sc, ranges, onLand);
+}
+
+// Metres above the sphere at `dir`: continents from the broad octaves,
+// ranges of ridged mountains where a broad mask allows them on land, and the
+// fine octaves over both, rougher in the ranges.
+pub fn terrain(dir: vec3<f64>, radius: f64, octaves: f64, seed: i32) -> f64 {
+    let p = dir * (radius / BASE_WAVELENGTH);
+    let m = masks(p, octaves, seed);
+    let land = clamp_mean(m.x * 3.0 + 0.15, m.y * 3.0, -1.0, 1.0);
+    let ranges = m.z;
+    let onLand = m.w;
+    // An octave the tile cannot resolve still holds its mean (ridged noise is
+    // not zero-mean), so a range seen from orbit carries the height its
+    // ridges add up close: refine, never replace.
+    var ridges: f64 = 0.0;
+    var amp: f64 = 0.5;
+    var q: vec3<f64> = p * 4.0;
+    for (var o: i32 = 2; o < 12; o += 1) {
+        let w = clamp(octaves - (o as f64), 0.0, 1.0);
+        var r2: f64 = RIDGE_MEAN;
+        if (w > 0.0) {
+            let r = 1.0 - abs(simplex3d<f64>(q, seed + 100 + o));
+            r2 = r * r * w + RIDGE_MEAN * (1.0 - w);
+        }
+        ridges += r2 * amp;
+        amp *= 0.5;
+        q = q * 2.0;
+    }
+    let mountains = ridges * ranges * onLand;
+    let detail = fbm_to(p, octaves, 4, seed + 200);
+    return land * 1100.0 + mountains * 6500.0 + detail * (250.0 + 900.0 * ranges * onLand);
+}
+
+// Below this many octaves a cell is wide enough that the next octaves vary
+// a lot inside it, through the coastline clamps and the ridges: such a cell
+// averages SUB x SUB samples taken with two more octaves instead of reading
+// one, so it is the aggregate of the finer truth, not a guess at it.
+const SUPERSAMPLE_BELOW: f64 = 7.0;
+const SUB: i32 = 4;
+
+// The height a cell holds: at (s, t) of the frame (corner c, axes u, v in
+// base coordinates), `cell` wide in (s, t).
+pub fn cell_height(c: vec3<f64>, u: vec3<f64>, v: vec3<f64>, s: f64, t: f64, cell: f64,
+                   radius: f64, octaves: f64, seed: i32) -> f64 {
+    if (octaves >= SUPERSAMPLE_BELOW) {
+        return terrain(normalize(c + u * s + v * t), radius, octaves, seed);
+    }
+    var sum: f64 = 0.0;
+    for (var j: i32 = 0; j < SUB; j += 1) {
+        for (var i: i32 = 0; i < SUB; i += 1) {
+            let ds = (((i as f64) + 0.5) / (SUB as f64) - 0.5) * cell;
+            let dt = (((j as f64) + 0.5) / (SUB as f64) - 0.5) * cell;
+            sum += terrain(normalize(c + u * (s + ds) + v * (t + dt)), radius, octaves + 2.0, seed);
+        }
+    }
+    return sum / ((SUB * SUB) as f64);
+}
+
+// ── Colour ──────────────────────────────────────────────────────────────────
+//
+// A cell's colour is the mean colour of the truth under it, not the colour
+// of its mean: snow-capped peaks over green valleys read from orbit as the
+// mix they are. The truth under a cell is modelled as its own height and
+// gradient plus Gaussian spreads from the octaves it does not resolve.
+
+// What the truth under a cell varies by about the cell's own values: x the
+// height (m), y the gradient along either axis (m/m). Each octave counts by
+// cell_share, down to `truth`, the finest octaves anything draws. With gain
+// 0.5 and lacunarity 2 every octave adds the same slope, so the fine
+// octaves matter to the gradient as much as the broad ones.
+pub fn spread(dir: vec3<f64>, radius: f64, octaves: f64, truth: f32, seed: i32) -> vec2<f32> {
+    let m = masks(dir * (radius / BASE_WAVELENGTH), octaves, seed);
+    let oct = octaves as f32;
+    // The continents through the coastline clamp, which passes them where
+    // it is linear: 1100 * 3 metres of height per unit of noise.
+    let mc = (m.x * 3.0 + 0.15) as f32;
+    let sc = max((m.y * 3.0) as f32, 1e-6);
+    let land = 3300.0 * (normal_cdf((1.0 - mc) / sc) - normal_cdf((-1.0 - mc) / sc));
+    var ch: f32 = 0.0;
+    var cg: f32 = 0.0;
+    var a: f32 = 1.0;
+    for (var o: i32 = 0; o < 4; o += 1) {
+        let s = cell_share(o as f32, oct);
+        ch += a * a * SIMPLEX_VAR * s;
+        cg += SIMPLEX_GRAD_VAR * s;   // amplitude * frequency = 1
+        a *= 0.5;
+    }
+    // The ridges, octaves 2 to 11 at amplitude 0.5^(o - 1).
+    let mount = 6500.0 * (m.z * m.w) as f32;
+    var rh: f32 = 0.0;
+    var rg: f32 = 0.0;
+    a = 0.5;
+    for (var o: i32 = 2; o < 12; o += 1) {
+        let s = cell_share(o as f32, oct);
+        rh += a * a * RIDGE_VAR * s;
+        rg += 4.0 * RIDGE_GRAD_VAR * s;   // amplitude * frequency = 2
+        a *= 0.5;
+    }
+    // The detail, octave 4 up at amplitude 0.5^(o - 4), to the truth's last.
+    let detail = 250.0 + 900.0 * (m.z * m.w) as f32;
+    var dh: f32 = 0.0;
+    var dg: f32 = 0.0;
+    a = 1.0;
+    let n = ceil(truth) as i32;
+    for (var o: i32 = 4; o < n; o += 1) {
+        let w = clamp(truth - (o as f32), 0.0, 1.0);
+        let s = cell_share(o as f32, oct) * w * w;
+        dh += a * a * SIMPLEX_VAR * s;
+        dg += 256.0 * SIMPLEX_GRAD_VAR * s;   // amplitude * frequency = 16
+        a *= 0.5;
+    }
+    let h2 = land * land * ch + mount * mount * rh + detail * detail * dh;
+    let wl = BASE_WAVELENGTH as f32;
+    let g2 = (land * land * cg + mount * mount * rg + detail * detail * dg) / (wl * wl);
+    return vec2<f32>(sqrt(h2), sqrt(g2));
+}
+
+// The ground at one height and gradient (tan of the angle from up): its
+// albedo, and w = 1 for water.
+fn surface(h: f32, grad: f32) -> vec4<f32> {
+    if (h <= 0.0) {
+        let depth = clamp(-h / 2500.0, 0.0, 1.0);
+        return vec4<f32>(mix(vec3<f32>(0.03, 0.16, 0.22), vec3<f32>(0.005, 0.03, 0.09), depth), 1.0);
+    }
+    let slope = 1.0 - 1.0 / sqrt(1.0 + grad * grad);
+    let sand = vec3<f32>(0.62, 0.56, 0.42);
+    let grass = vec3<f32>(0.16, 0.27, 0.08);
+    let forest = vec3<f32>(0.06, 0.13, 0.05);
+    let rock = vec3<f32>(0.30, 0.27, 0.24);
+    let snow = vec3<f32>(0.92, 0.94, 0.97);
+    var c = mix(sand, grass, smoothstep(5.0, 40.0, h));
+    c = mix(c, forest, smoothstep(150.0, 600.0, h) * (1.0 - smoothstep(1900.0, 2700.0, h)));
+    c = mix(c, rock, max(smoothstep(0.22, 0.45, slope), smoothstep(2600.0, 3400.0, h)));
+    c = mix(c, snow, smoothstep(4300.0, 4900.0, h) * (1.0 - smoothstep(0.4, 0.65, slope)));
+    return vec4<f32>(c, 0.0);
+}
+
+// Gauss-Hermite nodes and weights for N(0, 1): x node, y weight.
+fn gh5(i: i32) -> vec2<f32> {
+    if (i == 0) { return vec2<f32>(-2.8569700, 0.0112574); }
+    if (i == 1) { return vec2<f32>(-1.3556262, 0.2220759); }
+    if (i == 2) { return vec2<f32>(0.0, 0.5333333); }
+    if (i == 3) { return vec2<f32>(1.3556262, 0.2220759); }
+    return vec2<f32>(2.8569700, 0.0112574);
+}
+fn gh3(i: i32) -> vec2<f32> {
+    if (i == 0) { return vec2<f32>(-1.7320508, 0.1666667); }
+    if (i == 1) { return vec2<f32>(0.0, 0.6666667); }
+    return vec2<f32>(1.7320508, 0.1666667);
+}
+
+// The mean of `surface` over the truth under a cell: height N(h, sh^2), and
+// the gradient the cell's own (`grad` along one axis) plus N(0, sg^2) along
+// each, by quadrature (5 nodes in height, 3 x 3 in the gradient).
+pub fn expected_surface(h: f32, grad: f32, sh: f32, sg: f32) -> vec4<f32> {
+    var sum = vec4<f32>(0.0, 0.0, 0.0, 0.0);
+    for (var i: i32 = 0; i < 5; i += 1) {
+        let nh = gh5(i);
+        for (var j: i32 = 0; j < 3; j += 1) {
+            let gx = gh3(j);
+            for (var k: i32 = 0; k < 3; k += 1) {
+                let gy = gh3(k);
+                let ex = grad + sg * gx.x;
+                let ey = sg * gy.x;
+                sum += surface(h + sh * nh.x, sqrt(ex * ex + ey * ey)) * (nh.y * gx.y * gy.y);
+            }
+        }
+    }
+    return sum;
+}
+
+// The gradient (tan of the angle from up) of a surface whose neighbouring
+// points across a cell differ by du and dv, at `up`.
+pub fn gradient(du: vec3<f32>, dv: vec3<f32>, up: vec3<f32>) -> f32 {
+    let cosine = clamp(abs(dot(normalize(cross(du, dv)), up)), 1e-3, 1.0);
+    return sqrt(1.0 / (cosine * cosine) - 1.0);
+}
