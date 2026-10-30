@@ -405,7 +405,7 @@ const fragment = (radius, ragged) => `in vec3 v_col;
 export function createTrees(scene, radius, module, sunModule, octaves, seed, net, readers = []) {
     const fieldKernel = module.kernel('k_tree_field');
     const fields = [bro.kernel.createBuffer(N * N * 7 * 4), bro.kernel.createBuffer(N * N * 7 * 4)];
-    const sunGrid = createSunGrid(sunModule, SUN_P, net, 4);
+    const sunGrid = createSunGrid(sunModule, SUN_P, net, 14);
     const bands = [
         { tiers: 7, rim: 7, trunk: true, band: [0, NEAR], ragged: true },
         { tiers: 3, rim: 5, trunk: false, band: [NEAR, MID], ragged: false },

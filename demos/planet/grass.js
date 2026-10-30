@@ -271,7 +271,7 @@ const fragment = (radius) => `in vec3 v_col;
 // planet's centre (f64), its altitude and the unit direction to the sun.
 export function createGrass(scene, radius, module, sunModule, octaves, seed, net, readers = []) {
     const fieldKernel = module.kernel('k_grass_field');
-    const sunGrid = createSunGrid(sunModule, SUN_P, net);
+    const sunGrid = createSunGrid(sunModule, SUN_P, net, 4);
     const field = bro.kernel.createBuffer(P * P * 7 * 4);
     const bands = [
         { blades: DENSE, band: [0, NEAR], ring: cellRing(0, NEAR) },
@@ -298,7 +298,7 @@ export function createGrass(scene, radius, module, sunModule, octaves, seed, net
         return node;
     });
 
-    let face = -1, delta = 0, ui = NaN, vi = NaN, sunDue = -1;
+    let face = -1, delta = 0, ui = NaN, vi = NaN, sunDue = false, sunJobs = [];
     const sun = [0, 0, 0];
     const hi = [0, 0, 0], lo = [0, 0, 0];
 
@@ -394,20 +394,23 @@ export function createGrass(scene, radius, module, sunModule, octaves, seed, net
                 n.setShaderUniform('u_grassF', frame.f);
                 n.setShaderUniform('u_grassUV', [(ui - N / 2) * dl, (vi - N / 2) * dl, dl]);
             }
-            // The sun grid follows a frame later, read about its own lattice
-            // meanwhile, so the two dispatches do not land in one frame;
-            // unless the field changed face or spacing and the old grid
-            // means nothing.
-            sunDue = jumped ? 0 : 1;
+            // The sun grid follows, a slice a frame from the next frame on,
+            // read about its own lattice meanwhile; all at once if the field
+            // changed face or spacing and the old grid means nothing.
+            sunDue = true;
+            if (jumped) sunJobs = [];
         }
         const turned = sun[0] * toSun[0] + sun[1] * toSun[1] + sun[2] * toSun[2] < 0.999999;
-        if (turned && sunDue < 0) sunDue = 0;
-        if (sunDue > 0) { sunDue--; return; }
-        if (sunDue < 0) return;
-        sunDue = -1;
+        if (sunJobs.length) { sunJobs.shift()(); return; }
+        if (!sunDue && !turned) return;
+        // A grid begun is finished before the next: begun again at each of
+        // the field's steps, a fast eye would leave it never done.
+        sunDue = false;
         sun.splice(0, 3, ...toSun);
-        for (const job of sunGrid.jobs(plane, (ui - N / 2) * dl, (vi - N / 2) * dl, dl * SUN_STRIDE, toSun, radius, octaves, seed)) job();
-        for (const n of nodes) n.setShaderUniform('u_sunLattice', [ui - N / 2, vi - N / 2]);
+        const lattice = [ui - N / 2, vi - N / 2];
+        sunJobs = sunGrid.jobs(plane, lattice[0] * dl, lattice[1] * dl, dl * SUN_STRIDE, toSun, radius, octaves, seed);
+        sunJobs.push(() => { for (const n of nodes) n.setShaderUniform('u_sunLattice', lattice); });
+        if (jumped) while (sunJobs.length) sunJobs.shift()();
     }
 
     return {
