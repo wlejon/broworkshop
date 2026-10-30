@@ -182,14 +182,67 @@ fn point_offset(net: read_store<f32, 1>, k: i32, hi: vec3<f32>, lo: vec3<f32>, r
 // width at its middle (hydraulic geometry: depth grows about as the root
 // of the width's square, a channel 20 to 40 widths across for each of its
 // depths, Leopold and Maddock 1953), in a parabola from its banks.
+// bed: the bed's height under the valley that cuts deepest here (-1e9 where
+// none), which near.x rises from.
 pub struct Water {
     near: vec4<f32>,
     channel: f32,
+    bed: f32,
 }
 const CHANNEL_DEPTH: f32 = 0.04;   // of the width, at the middle
 pub fn water_near(dir: vec3<f64>, radius: f64, cell: f32, net: read_store<f32, 1>, seed: i32) -> vec4<f32> {
     return water_at(dir, radius, cell, net, seed).near;
 }
+// The reach from point k (record offset) to its downstream point, at offset
+// af from here: x the height its valley cuts the ground to, y the share of
+// the cell in its channel, z how deep its channel runs here, w its bed's
+// height.
+fn reach(net: read_store<f32, 1>, k: i32, af: vec3<f32>, hi: vec3<f32>, lo: vec3<f32>, r: f32, up: vec3<f32>,
+         cell: f32, spread: f32, seed: i32) -> vec4<f32> {
+    let level = net[k + 3];
+    let catchment = net[k + 2];
+    let down = net[k + 1] as i32;
+    let bf = point_offset(net, down * RIV_REC, hi, lo, r);
+    let len = max(length(bf - af), 1.0);
+    let along = (bf - af) / len;
+    let side = normalize(cross(along, up));
+    let s = clamp(-dot(af, along), 0.0, len);
+    let t = s / len;
+    let half = 0.5 * river_width(catchment);
+    // From here to the reach's line, and across it to the channel.
+    let q = af + along * s;
+    let d = length(vec2<f32>(dot(q, along), -dot(q, side) - meander(k / RIV_REC, s, len, 2.0 * half, seed)));
+    let bed = mix(level, net[down * RIV_REC + 3], t);
+    // The cell's share inside |d| < half, a strip against a box: their
+    // overlap along the distance.
+    let s0 = max(d - 0.5 * cell, -half);
+    let s1 = min(d + 0.5 * cell, half);
+    let across = d / half;
+    return vec4<f32>(bed + valley_rise(sqrt(d * d + spread) - half),
+                     clamp((s1 - s0) / max(cell, 1e-3), 0.0, 1.0),
+                     CHANNEL_DEPTH * 2.0 * half * max(1.0 - across * across, 0.0), bed);
+}
+
+// Whether point index `p` is one of the 3x3 points about cell c.
+fn in_block(c: vec3<i32>, p: i32) -> bool {
+    let pc = point_cell(p);
+    if (pc.x == c.x) { return abs(pc.y - c.y) <= 1 && abs(pc.z - c.z) <= 1; }
+    // Across a face's edge the neighbours are found as the 3x3 loop finds them.
+    var found = false;
+    for (var dj: i32 = -1; dj <= 1; dj += 1) {
+        for (var di: i32 = -1; di <= 1; di += 1) {
+            if (point_index(cell_next(c, di, dj)) == p) { found = true; }
+        }
+    }
+    return found;
+}
+
+// Every reach whose valley can reach `dir` is searched: the reaches from the
+// 3x3 points about its cell, and the reaches into them from the ring of 16
+// beyond. A reach between two points outside the 3x3 passes at least half a
+// cell (10 km) away, where its valley stands kilometres over any ground; one
+// left out nearer would end its valley along a cell's edge, a straight crease
+// across the land.
 pub fn water_at(dir: vec3<f64>, radius: f64, cell: f32, net: read_store<f32, 1>, seed: i32) -> Water {
     let c = cell_of(dir);
     let hi = vec3<f32>(dir.x as f32, dir.y as f32, dir.z as f32);
@@ -204,6 +257,7 @@ pub fn water_at(dir: vec3<f64>, radius: f64, cell: f32, net: read_store<f32, 1>,
     var depthSum: f32 = 0.0;
     var weightSum: f32 = 0.0;
     var channel: f32 = 0.0;
+    var bed: f32 = -1.0e9;
     let spread = cell * cell / 6.0;
     for (var dj: i32 = -1; dj <= 1; dj += 1) {
         for (var di: i32 = -1; di <= 1; di += 1) {
@@ -221,29 +275,31 @@ pub fn water_at(dir: vec3<f64>, radius: f64, cell: f32, net: read_store<f32, 1>,
                     lakeDist = dp;
                     lake = level;
                 }
-                let catchment = net[k + 2];
-                let down = net[k + 1] as i32;
-                if (catchment >= MIN_CATCHMENT && down >= 0) {
-                    let bf = point_offset(net, down * RIV_REC, hi, lo, r);
-                    let len = max(length(bf - af), 1.0);
-                    let along = (bf - af) / len;
-                    let side = normalize(cross(along, up));
-                    let s = clamp(-dot(af, along), 0.0, len);
-                    let t = s / len;
-                    let half = 0.5 * river_width(catchment);
-                    // From here to the reach's line, and across it to the
-                    // channel.
-                    let q = af + along * s;
-                    let d = length(vec2<f32>(dot(q, along), -dot(q, side) - meander(k / RIV_REC, s, len, 2.0 * half, seed)));
-                    let bed = mix(level, net[down * RIV_REC + 3], t);
-                    cut = min(cut, bed + valley_rise(sqrt(d * d + spread) - half));
-                    // The cell's share inside |d| < half, a strip against a
-                    // box: their overlap along the distance.
-                    let s0 = max(d - 0.5 * cell, -half);
-                    let s1 = min(d + 0.5 * cell, half);
-                    share = max(share, clamp((s1 - s0) / max(cell, 1e-3), 0.0, 1.0));
-                    let across = d / half;
-                    channel = max(channel, CHANNEL_DEPTH * 2.0 * half * max(1.0 - across * across, 0.0));
+                if (net[k + 2] >= MIN_CATCHMENT && net[k + 1] >= 0.0) {
+                    let v = reach(net, k, af, hi, lo, r, up, cell, spread, seed);
+                    if (v.x < cut) {
+                        cut = v.x;
+                        bed = v.w;
+                    }
+                    share = max(share, v.y);
+                    channel = max(channel, v.z);
+                }
+            }
+        }
+    }
+    for (var dj: i32 = -2; dj <= 2; dj += 1) {
+        for (var di: i32 = -2; di <= 2; di += 1) {
+            if (abs(di) == 2 || abs(dj) == 2) {
+                let k = point_index(cell_next(c, di, dj)) * RIV_REC;
+                let down = net[k + 1];
+                if (down >= 0.0 && net[k + 3] > 0.0 && net[k + 2] >= MIN_CATCHMENT && in_block(c, down as i32)) {
+                    let v = reach(net, k, point_offset(net, k, hi, lo, r), hi, lo, r, up, cell, spread, seed);
+                    if (v.x < cut) {
+                        cut = v.x;
+                        bed = v.w;
+                    }
+                    share = max(share, v.y);
+                    channel = max(channel, v.z);
                 }
             }
         }
@@ -251,6 +307,7 @@ pub fn water_at(dir: vec3<f64>, radius: f64, cell: f32, net: read_store<f32, 1>,
     var w: Water;
     w.near = vec4<f32>(cut, share, lake, depthSum / weightSum);
     w.channel = channel;
+    w.bed = bed;
     return w;
 }
 

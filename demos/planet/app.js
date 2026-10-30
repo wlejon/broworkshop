@@ -550,7 +550,8 @@ const fragment = `buffer uint u_det[];
         // GGX's alpha is the root mean square slope; the engine's roughness
         // its square root.
         roughness = mix(0.9, sqrt(sqrt(seaVariance)), water);
-        metallic = 0.0;    }`;
+        metallic = 0.0;
+    }`;
 
 let ground = null;
 ground = scene.createInstancedMesh({ mesh: patchMesh(), color: [1, 1, 1], castsShadow: false, receivesShadow: false, doubleSided: true });

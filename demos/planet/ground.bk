@@ -5,7 +5,7 @@
 module planet::ground;
 
 import std::noise::*;
-from planet::rivers import water_near, under_lake;
+from planet::rivers import water_at, under_lake;
 
 // Wavelength of the first octave, in metres.
 const BASE_WAVELENGTH: f64 = 2400000.0;
@@ -355,9 +355,16 @@ const WARP_DISPLACE: f64 = 0.0013;   // in p units (BASE_WAVELENGTH), per unit o
 // Measured against 16 x 16 box means, it errs 30-40% less than a linear
 // factor on the ridge for cells up to a third of a wavelength, crests
 // included, and the same for wider ones.
+//
+// The spread never falls below CREST: a crest is (1 - |n|)^2 seen through
+// that much noise, rounded over a twentieth of its octave's wavelength,
+// where an exact |n| creases it. A broad octave's crest runs kilometres
+// nearly straight, and creased it was a hard line across the land with
+// planar flanks either side, at every distance.
+const CREST: f32 = 0.08;
 fn ridge_cell_mean(n: f32, f: f32) -> f32 {
     let mu = f * n;
-    let spread2 = max(1.0 - f * f, 0.0) * NOISE_VAR;
+    let spread2 = max(max(1.0 - f * f, 0.0) * NOISE_VAR, CREST * CREST);
     let sd = sqrt(spread2);
     var fold = abs(mu);
     if (sd > 1e-6) {
@@ -369,34 +376,49 @@ fn ridge_cell_mean(n: f32, f: f32) -> f32 {
 
 // The relief at p, metres at full uplift: the ridged octaves, each its mean
 // over one of the tile's cells less the ridge's mean.
-fn relief(p: vec3<f64>, octaves: f64, seed: i32) -> f64 {
+// x the octaves below FINE_FIRST, y those from it on.
+fn relief(p: vec3<f64>, octaves: f64, seed: i32) -> vec2<f64> {
     let n = min(ceil(octaves + RIDGE_PAST) as i32, RIDGE_LAST);
-    if (n <= RIDGE_FIRST) { return 0.0; }
+    if (n <= RIDGE_FIRST) { return vec2<f64>(0.0, 0.0); }
     let wq = p * exp2(WARP_OCTAVE);
     let warp = vec3<f64>(noise(wq, seed + 400), noise(wq, seed + 401), noise(wq, seed + 402));
     var q: vec3<f64> = (p + warp * WARP_DISPLACE) * exp2(RIDGE_FIRST as f64);
-    var sum: f64 = 0.0;
+    var broad: f64 = 0.0;
+    var fine: f64 = 0.0;
     for (var o: i32 = RIDGE_FIRST; o < n; o += 1) {
         let fade = clamp(octaves + RIDGE_PAST - (o as f64), 0.0, 1.0);
         let mean = ridge_cell_mean(noise(q, seed + 100 + o) as f32, noise_mean_factor(o, octaves));
-        sum += ((mean as f64) - RIDGE_MEAN) * (ridge_amp(o) as f64) * fade;
+        let v = ((mean as f64) - RIDGE_MEAN) * (ridge_amp(o) as f64) * fade;
+        if (o < FINE_FIRST) { broad += v; } else { fine += v; }
         q = q * 2.0;
     }
-    return sum;
+    return vec2<f64>(broad, fine);
 }
 
-// The ground before the water cuts it, metres above the sphere at `dir`:
-// continents from the broad octaves, ranges where a broad mask allows them
-// on land (lifted, and carrying the ridged relief), and the fine octaves
-// over both, rougher in the ranges.
-pub fn terrain_base(dir: vec3<f64>, radius: f64, octaves: f64, seed: i32) -> f64 {
+// The octaves from FINE_FIRST on (a 1.2 km wavelength) are the ground's
+// fine relief: spurs, gullies and knolls, which a valley's sides carry on
+// (terrain) instead of being planed away.
+const FINE_FIRST: i32 = 11;
+
+// The ground before the water cuts it, metres above the sphere at `dir`: x
+// its broad shape, y the fine relief over it (FINE_FIRST). Continents from
+// the broad octaves, ranges where a broad mask allows them on land (lifted,
+// and carrying the ridged relief), and the fine octaves over both, rougher
+// in the ranges.
+pub fn terrain_parts(dir: vec3<f64>, radius: f64, octaves: f64, seed: i32) -> vec2<f64> {
     let p = dir * (radius / BASE_WAVELENGTH);
     let m = masks(p, octaves, seed);
     let land = clamp_mean(m.x * 3.0 + 0.15, m.y * 3.0, -1.0, 1.0);
     let uplift = m.z * m.w;
-    let mountains = uplift * (UPLIFT + relief(p, octaves, seed));
-    let detail = fbm_to(p, octaves, 4, 64, seed + 200);
-    return land * 1100.0 + mountains + detail * ((DETAIL_PLAINS + DETAIL_RANGES * (uplift as f32)) as f64);
+    let r = relief(p, octaves, seed);
+    let amp = (DETAIL_PLAINS + DETAIL_RANGES * (uplift as f32)) as f64;
+    let broad = fbm_to(p, octaves, 4, FINE_FIRST, seed + 200);
+    let fine = fbm_to(p, octaves, FINE_FIRST, 64, seed + 200) * exp2((4 - FINE_FIRST) as f64);
+    return vec2<f64>(land * 1100.0 + uplift * (UPLIFT + r.x) + broad * amp, uplift * r.y + fine * amp);
+}
+pub fn terrain_base(dir: vec3<f64>, radius: f64, octaves: f64, seed: i32) -> f64 {
+    let t = terrain_parts(dir, radius, octaves, seed);
+    return t.x + t.y;
 }
 
 // The width of a cell that carries `octaves` (octaves_for, inverted).
@@ -404,17 +426,24 @@ pub fn cell_width(octaves: f64) -> f32 {
     return (BASE_WAVELENGTH as f32) / (2.5 * exp2(octaves as f32));
 }
 
-// The ground at `dir`, metres above the sphere, or the water over it:
-// terrain_base cut down by the rivers' valleys (rivers.bk), a smooth minimum
-// over a few metres so the cut meets the ground without a crease, and a
-// lake's level where it stands over that.
+// The ground at `dir`, metres above the sphere, or the water over it: the
+// ground cut down by the rivers' valleys (rivers.bk), and a lake's level
+// where it stands over that. A valley cuts the broad shape, and its sides
+// carry the fine relief on, faded out over the last VALLEY_FLOOR metres down
+// to its bed: a valley side planed to its profile would be a smooth ramp,
+// straight along its reach, and meet the ground in a crease. A smooth
+// minimum over CUT_BLEND metres joins the cut to the ground.
+const VALLEY_FLOOR: f32 = 150.0;
+const CUT_BLEND: f32 = 40.0;
 pub fn terrain(dir: vec3<f64>, radius: f64, octaves: f64, seed: i32, net: read_store<f32, 1>) -> f64 {
-    let h = terrain_base(dir, radius, octaves, seed);
-    let w = water_near(dir, radius, cell_width(octaves), net, seed);
-    let k: f32 = 20.0;
-    let m = max(k - abs((h as f32) - w.x), 0.0) / k;
-    let cut = min(h, (w.x - m * m * k * 0.25) as f64);
-    if (under_lake(cut as f32, w)) { return w.z as f64; }
+    let t = terrain_parts(dir, radius, octaves, seed);
+    let h = t.x + t.y;
+    let w = water_at(dir, radius, cell_width(octaves), net, seed);
+    let side = smoothstep(0.0, VALLEY_FLOOR, w.near.x - w.bed);
+    let valley = w.near.x + (t.y as f32) * side;
+    let m = max(CUT_BLEND - abs((h as f32) - valley), 0.0) / CUT_BLEND;
+    let cut = min(h, (valley - m * m * CUT_BLEND * 0.25) as f64);
+    if (under_lake(cut as f32, w.near)) { return w.near.z as f64; }
     return cut;
 }
 
