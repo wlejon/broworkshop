@@ -202,6 +202,15 @@ const CHANNEL_DEPTH: f32 = 0.04;   // of the width, at the middle
 // ground's hollows, holding lakes in them, rather than standing at the
 // lattice's broad heights over a hollow with its valley cut as a shelf
 // into the slopes either side.
+const SHARE_SIGMA: f32 = 0.75;
+// erf, to 2e-4 (Winitzki 2008).
+fn erf_approx(x: f32) -> f32 {
+    let x2 = x * x;
+    let ax2 = 0.147 * x2;
+    let e = sqrt(1.0 - exp(-x2 * (1.2732395 + ax2) / (1.0 + ax2)));
+    if (x < 0.0) { return -e; }
+    return e;
+}
 struct Reach {
     v: vec4<f32>,
     surface: f32,
@@ -223,14 +232,19 @@ fn reach(net: read_store<f32, 1>, k: i32, af: vec3<f32>, hi: vec3<f32>, lo: vec3
     let d = length(vec2<f32>(dot(q, along), -dot(q, side) - meander(k / RIV_REC, s, len, 2.0 * half, seed)));
     let downLevel = net[down * RIV_REC + 3];
     let bed = mix(min(net[k + 7], level), min(net[down * RIV_REC + 7], downLevel), t);
-    // The cell's share inside |d| < half, a strip against a box: their
-    // overlap along the distance.
-    let s0 = max(d - 0.5 * cell, -half);
-    let s1 = min(d + 0.5 * cell, half);
+    // The cell's share inside |d| < half: the strip under a Gaussian of
+    // SHARE_SIGMA cells about here. A box a cell wide, or a tent, is not
+    // band-limited: a stream narrower than a cell, running aslant across
+    // them, took a large share of the cells whose centres it passed and
+    // little of those between, and whatever filled in between the cells
+    // strung it out as beads; under the Gaussian a cell's share is a
+    // smooth function of its distance to the stream, which the cells
+    // between carry on.
+    let sg = SHARE_SIGMA * max(cell, 1e-3) * 1.4142136;
     let across = d / half;
     var out: Reach;
     out.v = vec4<f32>(bed + valley_rise(sqrt(d * d + spread) - half),
-                      clamp((s1 - s0) / max(cell, 1e-3), 0.0, 1.0),
+                      clamp(0.5 * (erf_approx((half - d) / sg) - erf_approx((-half - d) / sg)), 0.0, 1.0),
                       CHANNEL_DEPTH * 2.0 * half * max(1.0 - across * across, 0.0), bed);
     out.surface = downLevel;
     return out;
@@ -359,18 +373,20 @@ pub fn lake_surface(h: f32, w: Water) -> f32 {
 // the share falls from 1 at the level to none a typical excess, 0.8 sd,
 // above it, so a shore crossing a cell takes part of it rather than all or
 // none (a saw of whole cells along it); and none from a lake under a
-// metre deep over LAKE_DEPTH, as it vanishes. Under the level, on its
-// bank (lake_surface), the water thins to none over a few metres.
+// metre deep over LAKE_DEPTH, as it vanishes. The excess is over the lake's
+// surface here (w.lake), not its level: past its shore the surface falls
+// away as its bank (lake_top), and the water thins to none as the bank
+// drops a few metres under the level. Measured against the level, ground
+// as high as it anywhere about, out past the lake's end, drew a line of
+// water along that contour, all of a cell where its mean height met it and
+// none between: a dotted stream across the valley's side.
 pub fn water_share(h: f32, w: Water, sd: f32) -> f32 {
     var lake: f32 = 0.0;
     if (w.near.w > LAKE_DEPTH) {
-        let x = w.near.z - h;
         let soft = 0.8 * sd + 0.25;
-        if (x <= 0.0) {
-            lake = clamp(1.0 + x / soft, 0.0, 1.0) * clamp(w.near.w - LAKE_DEPTH, 0.0, 1.0);
-        } else {
-            lake = clamp(1.0 - x / (soft + 2.0), 0.0, 1.0);
-        }
+        lake = clamp(1.0 + min(w.lake - h, 0.0) / soft, 0.0, 1.0)
+             * clamp(1.0 - (w.near.z - w.lake) / (soft + 2.0), 0.0, 1.0)
+             * clamp(w.near.w - LAKE_DEPTH, 0.0, 1.0);
     }
     return max(w.near.y, lake);
 }
