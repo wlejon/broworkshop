@@ -20,11 +20,16 @@ fn k_river_height(g: grid<3>, net: write_store<f32, 1>, level: write_store<f32, 
     let c = vec3<i32>(g.z(), g.x(), g.y());
     let p = point_index(c);
     let k = p * RIV_REC;
-    let h = terrain_base(point_dir(c, seed), radius, octaves, seed) as f32;
+    let dir = point_dir(c, seed);
+    let h = terrain_base(dir, radius, octaves, seed) as f32;
     net[k] = h;
     net[k + 1] = -1.0;
     net[k + 2] = 1.0;
     net[k + 3] = h;
+    net[k + 4] = dir.x as f32;
+    net[k + 5] = dir.y as f32;
+    net[k + 6] = dir.z as f32;
+    net[k + 7] = 0.0;
     level[p] = h <= 0.0 ? h : 1.0e9;
 }
 

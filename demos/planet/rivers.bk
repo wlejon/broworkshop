@@ -20,7 +20,7 @@ module planet::rivers;
 import std::noise::*;
 
 pub const RIV_N: i32 = 512;
-pub const RIV_REC: i32 = 4;   // height (m), downstream point (-1 none), catchment (points), water level (m)
+pub const RIV_REC: i32 = 8;   // height (m), downstream point (-1 none), catchment (points), water level (m), direction (3), unused
 // A point drains a river once at least this many points drain through it.
 const MIN_CATCHMENT: f32 = 2.0;
 const PI4: f32 = 0.78539816;
@@ -135,8 +135,19 @@ fn valley_rise(x: f32) -> f32 {
 // sides over its width (the distance taken as sqrt(d^2 + cell^2 / 6), the
 // root mean square over a cell) and holds its water as the share of it the
 // channel covers.
+//
+// The points' offsets from `dir` are in f32: each point's direction as its
+// record stores it (f32, so the same wherever it is read), less `dir` split
+// into its nearest f32 and the remainder, exact to millimetres.
+fn point_offset(net: read_store<f32, 1>, k: i32, hi: vec3<f32>, lo: vec3<f32>, r: f32) -> vec3<f32> {
+    return ((vec3<f32>(net[k + 4], net[k + 5], net[k + 6]) - hi) - lo) * r;
+}
 pub fn water_near(dir: vec3<f64>, radius: f64, cell: f32, net: read_store<f32, 1>, seed: i32) -> vec4<f32> {
     let c = cell_of(dir);
+    let hi = vec3<f32>(dir.x as f32, dir.y as f32, dir.z as f32);
+    let rest = dir - vec3<f64>(hi.x as f64, hi.y as f64, hi.z as f64);
+    let lo = vec3<f32>(rest.x as f32, rest.y as f32, rest.z as f32);
+    let r = radius as f32;
     var cut: f32 = 1.0e9;
     var share: f32 = 0.0;
     var lake: f32 = -1.0e9;
@@ -149,8 +160,7 @@ pub fn water_near(dir: vec3<f64>, radius: f64, cell: f32, net: read_store<f32, 1
             let pc = cell_next(c, di, dj);
             let k = point_index(pc) * RIV_REC;
             let level = net[k + 3];
-            let a = ((point_dir(pc, seed) - dir) * radius);
-            let af = vec3<f32>(a.x as f32, a.y as f32, a.z as f32);
+            let af = point_offset(net, k, hi, lo, r);
             let dp = length(af);
             let depth = max(level - net[k], 0.0);
             let wgt = 1.0 / (dp * dp + 1.0e6);
@@ -164,8 +174,7 @@ pub fn water_near(dir: vec3<f64>, radius: f64, cell: f32, net: read_store<f32, 1
                 let catchment = net[k + 2];
                 let down = net[k + 1] as i32;
                 if (catchment >= MIN_CATCHMENT && down >= 0) {
-                    let b = ((point_dir(point_cell(down), seed) - dir) * radius);
-                    let bf = vec3<f32>(b.x as f32, b.y as f32, b.z as f32);
+                    let bf = point_offset(net, down * RIV_REC, hi, lo, r);
                     let ab = bf - af;
                     let t = clamp(-dot(af, ab) / max(dot(ab, ab), 1.0), 0.0, 1.0);
                     let d = length(af + ab * t);
@@ -174,9 +183,9 @@ pub fn water_near(dir: vec3<f64>, radius: f64, cell: f32, net: read_store<f32, 1
                     cut = min(cut, bed + valley_rise(sqrt(d * d + spread) - half));
                     // The cell's share inside |d| < half, a strip against a
                     // box: their overlap along the distance.
-                    let lo = max(d - 0.5 * cell, -half);
-                    let hi = min(d + 0.5 * cell, half);
-                    share = max(share, clamp((hi - lo) / max(cell, 1e-3), 0.0, 1.0));
+                    let s0 = max(d - 0.5 * cell, -half);
+                    let s1 = min(d + 0.5 * cell, half);
+                    share = max(share, clamp((s1 - s0) / max(cell, 1e-3), 0.0, 1.0));
                 }
             }
         }

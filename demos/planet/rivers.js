@@ -8,7 +8,7 @@
 // height) a copy of it.
 
 const N = 512;               // rivers.bk RIV_N
-const REC = 4;               // rivers.bk RIV_REC
+const REC = 8;               // rivers.bk RIV_REC
 const POINTS = 6 * N * N;
 // The octaves the lattice resolves: about 20 km between points, a
 // wavelength of 2.5 of them (ground.bk octaves_for).
