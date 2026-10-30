@@ -1,62 +1,84 @@
-// The planet's kernels: each tile's cells from the ground (ground.bk).
-from planet::ground import terrain, cell_height, spread, expected_surface, gradient, variation;
+// The planet's kernels: each tile's cells from the ground (ground.bk). The
+// tile kernels produce a whole batch in one dispatch (bro.tiles' produce):
+// grid z is the tile's record in the batch table (tiles-api.js), whose slot
+// says where in the pools, viewed as [cells, cells, capacity], it goes.
+from planet::ground import terrain, cell_height, spread, expected_surface, gradient, variation,
+                           octaves_for, range_margin;
 
-// One tile: cell (x, y) at (s, t) = ((x, y) - border) / tileSize across the
-// tile's frame, written as its position relative to the tile's center
-// (`ax, ay, az`) and its height (sea level clamps the surface, not the height).
-@kernel @grid(2)
-fn k_tile(g: grid<2>, out: write_store<vec4<f32>, 2>,
-          cx: f64, cy: f64, cz: f64, ux: f64, uy: f64, uz: f64, vx: f64, vy: f64, vz: f64,
-          ax: f64, ay: f64, az: f64, radius: f64, border: f64, inv_size: f64, octaves: f64, seed: i32) {
-    let s = (g.x() as f64 - border) * inv_size;
-    let t = (g.y() as f64 - border) * inv_size;
-    let c = vec3<f64>(cx, cy, cz);
-    let u = vec3<f64>(ux, uy, uz);
-    let v = vec3<f64>(vx, vy, vz);
-    let dir = normalize(c + u * s + v * t);
-    let h = cell_height(c, u, v, s, t, inv_size, radius, octaves, seed);
-    let p = dir * (radius + max(h, 0.0)) - vec3<f64>(ax, ay, az);
-    out[g.x(), g.y()] = vec4<f32>(p.x as f32, p.y as f32, p.z as f32, h as f32);
+// A batch table record's float64s.
+const RECORD: i32 = 24;
+
+fn record_vec(table: read_store<f64, 1>, at: i32) -> vec3<f64> {
+    return vec3<f64>(table[at], table[at + 1], table[at + 2]);
 }
 
-// One tile's colour layer from its position layer (k_tile's output, `n`
+// Cell (x, y) of a tile at (s, t) = ((x, y) - border) / tileSize across the
+// tile's frame, written as its position relative to the tile's center and
+// its height (sea level clamps the surface, not the height). The tile's
+// surface heights gather in `span` for k_range: two int32 per record,
+// INT_MAX less the lowest's float bits and the highest's (a surface never
+// lies below sea level, and non-negative floats order as their bits).
+@kernel @grid(3)
+fn k_tile(g: grid<3>, table: read_store<f64, 1>, out: write_store<vec4<f32>, 3>, span: rw_store<i32, 1>,
+          radius: f64, border: f64, inv_size: f64, seed: i32) {
+    let r = g.z() * RECORD;
+    let slot = table[r] as i32;
+    let c = record_vec(table, r + 8);
+    let u = record_vec(table, r + 11);
+    let v = record_vec(table, r + 14);
+    let center = record_vec(table, r + 17);
+    let octaves = octaves_for(table[r + 20], inv_size);
+    let s = (g.x() as f64 - border) * inv_size;
+    let t = (g.y() as f64 - border) * inv_size;
+    let dir = normalize(c + u * s + v * t);
+    let h = cell_height(c, u, v, s, t, inv_size, radius, octaves, seed);
+    let p = dir * (radius + max(h, 0.0)) - center;
+    out[g.x(), g.y(), slot] = vec4<f32>(p.x as f32, p.y as f32, p.z as f32, h as f32);
+    let bits = bitcast<i32>(max(h as f32, 0.0));
+    span.atomic_max(2 * g.z(), 2147483647 - bits);
+    span.atomic_max(2 * g.z() + 1, bits);
+}
+
+// A tile's colour layer from its position layer (k_tile's output, `n`
 // cells along an edge): each cell's gradient from its neighbours, its
 // spreads from the octaves it does not resolve, and the expected surface
 // over them: the mean colour of the truth under the cell.
-@kernel @grid(2)
-fn k_color(g: grid<2>, cells: read_store<vec4<f32>, 2>, out: write_store<vec4<f32>, 2>,
-           cx: f64, cy: f64, cz: f64, ux: f64, uy: f64, uz: f64, vx: f64, vy: f64, vz: f64,
-           ax: f64, ay: f64, az: f64, radius: f64, border: f64, inv_size: f64,
-           octaves: f64, truth: f32, seed: i32, n: i32) {
+@kernel @grid(3)
+fn k_color(g: grid<3>, table: read_store<f64, 1>, cells: read_store<vec4<f32>, 3>, out: write_store<vec4<f32>, 3>,
+           radius: f64, border: f64, inv_size: f64, truth: f32, seed: i32, n: i32) {
+    let r = g.z() * RECORD;
+    let slot = table[r] as i32;
+    let center = record_vec(table, r + 17);
+    let octaves = octaves_for(table[r + 20], inv_size);
     let x = g.x();
     let y = g.y();
-    let c = cells[x, y];
-    let du = cells[min(x + 1, n - 1), y].xyz - cells[max(x - 1, 0), y].xyz;
-    let dv = cells[x, min(y + 1, n - 1)].xyz - cells[x, max(y - 1, 0)].xyz;
-    let up = normalize(c.xyz + vec3<f32>(ax as f32, ay as f32, az as f32));
+    let c = cells[x, y, slot];
+    let du = cells[min(x + 1, n - 1), y, slot].xyz - cells[max(x - 1, 0), y, slot].xyz;
+    let dv = cells[x, min(y + 1, n - 1), slot].xyz - cells[x, max(y - 1, 0), slot].xyz;
+    let up = normalize(c.xyz + vec3<f32>(center.x as f32, center.y as f32, center.z as f32));
     let s = (x as f64 - border) * inv_size;
     let t = (y as f64 - border) * inv_size;
-    let dir = normalize(vec3<f64>(cx, cy, cz) + vec3<f64>(ux, uy, uz) * s + vec3<f64>(vx, vy, vz) * t);
+    let dir = normalize(record_vec(table, r + 8) + record_vec(table, r + 11) * s + record_vec(table, r + 14) * t);
     let sp = spread(dir, radius, octaves, truth, seed);
-    out[x, y] = expected_surface(c.w, gradient(du, dv, up), sp.x, sp.y, variation(dir, radius, octaves, seed));
+    out[x, y, slot] = expected_surface(c.w, gradient(du, dv, up), sp.x, sp.y, variation(dir, radius, octaves, seed));
 }
 
-// The range the surface of a tile and of every tile below it lies in, from
-// the heights k_tile wrote: their surface (sea level clamps it) widened by
-// `margin`, what finer octaves can still add (app.js rangeMargin). One
-// invocation walks the tile; it is a few microseconds a tile.
+// The range the surface of a tile and of every tile below it lies in, into
+// the cache's ranges at 2 * slot: the surface heights k_tile gathered,
+// widened by what finer octaves can still add (ground.bk range_margin), at
+// most `top`. It clears the tile's `span` for the next batch.
 @kernel @grid(1)
-fn k_range(g: grid<1>, cells: read_store<vec4<f32>, 1>, out: write_store<f32, 1>,
-           count: i32, margin: f32, top: f32) {
-    var lo: f32 = 3.0e38;
-    var hi: f32 = -3.0e38;
-    for (var i: i32 = 0; i < count; i += 1) {
-        let h = max(cells[i].w, 0.0);
-        lo = min(lo, h);
-        hi = max(hi, h);
-    }
-    out[0] = max(lo - margin, 0.0);
-    out[1] = min(hi + margin, top);
+fn k_range(g: grid<1>, table: read_store<f64, 1>, span: rw_store<i32, 1>, ranges: write_store<f32, 1>,
+           inv_size: f64, top: f32) {
+    let r = g.x() * RECORD;
+    let slot = table[r] as i32;
+    let lo = bitcast<f32>(2147483647 - span[2 * g.x()]);
+    let hi = bitcast<f32>(span[2 * g.x() + 1]);
+    span[2 * g.x()] = 0;
+    span[2 * g.x() + 1] = 0;
+    let margin = range_margin(octaves_for(table[r + 20], inv_size), top);
+    ranges[2 * slot] = max(lo - margin, 0.0);
+    ranges[2 * slot + 1] = min(hi + margin, top);
 }
 
 // The ground height under a point, for the camera (CPU eval).

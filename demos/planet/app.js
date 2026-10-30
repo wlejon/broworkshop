@@ -27,25 +27,19 @@ const kHeight = mod.kernel('k_height');
 const kRange = mod.kernel('k_range');
 const kColor = mod.kernel('k_color');
 
-// The octaves a tile's cells can carry: down to a wavelength of 2.5 cells.
+// The octaves a tile's cells can carry: down to a wavelength of 2.5 cells
+// (the tile kernels take theirs from ground.bk octaves_for, the same).
 const octavesFor = (extent) => Math.min(30, Math.max(1, Math.log2(BASE_WAVELENGTH / (2.5 * extent / TILE))));
 const MAX_LEVEL = 22;
 // The finest octaves anything draws: a colour is the mean over them.
 const TRUTH = octavesFor(RADIUS * Math.PI / 2 / 2 ** MAX_LEVEL);
 
-// What the octaves finer than a tile's can still add to its surface, in
-// metres, from ground.bk's amplitudes: the detail fbm (octave 4 up, 250 + 900
-// at most), the ridges (octaves 2 to 11, 6500 at most), counted from the last
-// octave the tile resolves (a peak between its cells), with a quarter more
-// for simplex's reach past 1. Below the continents' octaves it is everything.
 const MAX_HEIGHT = 9000;
-function rangeMargin(octaves) {
-    const k = Math.floor(octaves) - 1;
-    if (k < 4) return MAX_HEIGHT;
-    let m = 1150 * 2 * Math.pow(0.5, k - 4);
-    for (let o = Math.max(k, 2); o < 12; o++) m += 6500 * Math.pow(0.5, o - 1);
-    return m * 1.25;
-}
+const PRODUCE_PER_UPDATE = 24;
+// k_tile's per-tile height gather for k_range (planet.bk), zeroed between
+// batches by k_range itself.
+const span = bro.kernel.createBuffer(PRODUCE_PER_UPDATE * 2 * 4);
+span.write(new Int32Array(PRODUCE_PER_UPDATE * 2));
 
 const canvas = document.querySelector('#stage');
 const scene = canvas.getContext('scene');
@@ -66,17 +60,16 @@ function makeCache(pixelsPerCell) {
     cache = bro.tiles.createCache({
         domain: { type: 'cubeSphere', radius: RADIUS, center: [0, 0, 0] },
         tileSize: TILE, border: BORDER, capacity: CAPACITY, maxLevel: MAX_LEVEL,
-        minHeight: 0, maxHeight: MAX_HEIGHT, pixelsPerCell, producePerUpdate: 24,
+        minHeight: 0, maxHeight: MAX_HEIGHT, pixelsPerCell, producePerUpdate: PRODUCE_PER_UPDATE,
         layers: { position: 16, color: 16 },
         ranges: true,
-        produce(tile) {
-            const f = tile.frame, c = tile.center, octaves = octavesFor(tile.extent);
-            const frame = [f.corner[0], f.corner[1], f.corner[2], f.u[0], f.u[1], f.u[2], f.v[0], f.v[1], f.v[2],
-                           c[0], c[1], c[2], RADIUS, BORDER, 1 / TILE];
-            kTile.dispatch([tile.cells, tile.cells], tile.layers.position, ...frame, octaves, SEED);
-            kColor.dispatch([tile.cells, tile.cells], tile.layers.position, tile.layers.color, ...frame,
-                            octaves, TRUTH, SEED, tile.cells);
-            kRange.dispatch([1], tile.layers.position, tile.range, tile.cells * tile.cells, rangeMargin(octaves), MAX_HEIGHT);
+        // The whole batch in three dispatches: the GPU fills up on the
+        // batch's cells together, where a tile's own were a few warps.
+        produce(batch) {
+            const grid = [CELLS, CELLS, batch.count], pos = this.layer('position');
+            kTile.dispatch(grid, batch.table, pos, span, RADIUS, BORDER, 1 / TILE, SEED);
+            kColor.dispatch(grid, batch.table, pos, this.layer('color'), RADIUS, BORDER, 1 / TILE, TRUTH, SEED, CELLS);
+            kRange.dispatch([batch.count], batch.table, span, this.ranges, 1 / TILE, MAX_HEIGHT);
         },
     });
     if (ground) {

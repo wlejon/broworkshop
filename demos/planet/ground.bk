@@ -35,6 +35,28 @@ fn fbm_to(p: vec3<f64>, octaves: f64, first: i32, seed: i32) -> f64 {
     return sum;
 }
 
+// The octaves a tile `extent` wide with cells of `inv_size` of its edge can
+// carry: down to a wavelength of 2.5 cells (app.js octavesFor, the same).
+pub fn octaves_for(extent: f64, inv_size: f64) -> f64 {
+    let ratio = (BASE_WAVELENGTH / (2.5 * extent * inv_size)) as f32;
+    return clamp(log2(ratio), 1.0, 30.0) as f64;
+}
+
+// What the octaves finer than a tile's can still add to its surface, in
+// metres: the detail fbm (octave 4 up, 250 + 900 at most) and the ridges
+// (octaves 2 to 11, 6500 at most), counted from the last octave the tile
+// resolves (a peak between its cells), with a quarter more for simplex's
+// reach past 1. Below the continents' octaves it is everything (`top`).
+pub fn range_margin(octaves: f64, top: f32) -> f32 {
+    let k = (floor(octaves) as i32) - 1;
+    if (k < 4) { return top; }
+    var m: f32 = 1150.0 * 2.0 * exp2(4.0 - (k as f32));
+    for (var o: i32 = max(k, 2); o < 12; o += 1) {
+        m += 6500.0 * exp2(1.0 - (o as f32));
+    }
+    return m * 1.25;
+}
+
 // How much of an octave's variance lies inside one of a tile's cells: all
 // of it when the tile does not resolve the octave, the share a cell spans,
 // (cell / wavelength)^2, when it does (a cell is 1 / (2.5 * 2^octaves) of the
