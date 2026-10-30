@@ -30,8 +30,8 @@ const SPACING = 1.0;       // metres between field points, about (a power of two
 const THIN = 6;            // metres out to which every blade stands
 const NEAR = 12;           // metres: the dense cells inside, the sparse ones out to FAR
 const FAR = 40;            // metres: no blade stands past it
-const DENSE = 64;          // blades in a near cell
-const SPARSE = 32;         // and in a far one: what stands of the dense ones at NEAR
+const DENSE = 128;         // blades in a near cell
+const SPARSE = 64;         // and in a far one: what stands of the dense ones at NEAR
 const SHOWN_BELOW = 120;   // metres of altitude above which no grass is drawn
 
 // A blade cell: `blades` strips of three segments, x the blade's index, y
