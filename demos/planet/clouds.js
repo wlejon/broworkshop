@@ -266,6 +266,25 @@ const volumeGlsl = (radius) => cloudGlsl(radius) + `
         return mix(sigma * dt, sigma * (1.0 - exp(-rs * dt)) / rs, some);
     }
 
+    // How far the column's amount passes what the height needs, in
+    // deviations of what the footprint leaves unresolved (the occupancy's
+    // logistic argument over 1.7), at distance t along the ray from the eye
+    // (an altitude of hc, mu the cosine to up) at a footprint of w metres;
+    // -10 outside the layer.
+    float cloudExcessAt(vec3 eye, vec3 dir, float t, float hc, float mu, float w) {
+        vec3 P = eye + dir * t;
+        float rp = length(P);
+        float h = hc + (2.0 * (CLOUD_R + hc) * mu * t + t * t) / (rp + CLOUD_R + hc);
+        float s = (h - CLOUD_BASE) / CLOUD_DEPTH;
+        if (s < 0.0 || s > 1.0) return -10.0;
+        float F, v, clear;
+        cloudColumn(P / rp, w, cloudNeed(s), 0.0, F, v, clear);
+        return (F - cloudNeed(s)) / sqrt(v + 1e-5);
+    }
+    // The excess where the occupancy is 0.003, cloudOccupancy's threshold
+    // for cloud: ln(0.003 / 0.997) / 1.7.
+    const float CLOUD_EDGE = -3.415;
+
     float hgPhase(float g, float c) {
         float k = 1.0 + g * g - 2.0 * g * c;
         return (1.0 - g * g) / (12.566 * k * sqrt(k));
@@ -340,7 +359,7 @@ const volumeGlsl = (radius) => cloudGlsl(radius) + `
         // At least a dozen steps across the layer, so its profile is sampled
         // and not hit or missed by the jitter of one step.
         float dtMax = clamp((t1 - t0) / 12.0, 20.0, 4000.0);
-        float first = clamp(t0 * 0.04, 20.0, dtMax) * jitter;
+        float first = clamp(t0 * 0.06, 20.0, dtMax) * jitter;
         t += first;
         // Inside cloud, steps of an optical depth of at most 4 in its
         // densest sub-column.
@@ -353,7 +372,7 @@ const volumeGlsl = (radius) => cloudGlsl(radius) + `
         // The sun tap's tops (below), for the cloud the ray is in.
         vec4 tapTop = vec4(0.0);
         for (int i = 0; i < 96 && t < t1; i++) {
-            float dt = clamp(t * 0.04, 20.0, dtMax);
+            float dt = clamp(t * 0.06, 20.0, dtMax);
             if (inCloud) dt = min(dt, inStep);
             else if (t < fineUntil) dt = min(dt, CLOUD_STEP);
             float w = max(t * u_pixel, dt * 0.5);
@@ -380,14 +399,30 @@ const volumeGlsl = (radius) => cloudGlsl(radius) + `
                 }
                 float occ = cloudOccupancy(F, v, s);
                 if (occ > 0.003) {
-                    // A long step that lands in cloud may have passed its
-                    // edge: back to where it started, and on at most
-                    // CLOUD_STEP until the cloud is crossed, so its edge is
-                    // where the field puts it and not where the step fell.
-                    if (!inCloud && t - tPrev > 1.01 * CLOUD_STEP / max(min(4.0 * occ, 1.0), 0.05) && t > fineUntil) {
+                    // A step that lands in cloud has passed its edge since
+                    // the last point known clear: the gap halved five times
+                    // finds it, and the cloud is taken from there, on at
+                    // most CLOUD_STEP until it is crossed, so its edge is
+                    // where the field puts it and not where the step fell
+                    // (every step's reach drew a contour across the tops).
+                    if (!inCloud && t - tPrev > 1.0) {
+                        float a = tPrev, b = t;
+                        for (int k = 0; k < 5; k++) {
+                            float m = 0.5 * (a + b);
+                            if (cloudExcessAt(eye, dir, m, hc, mu, w) > CLOUD_EDGE) b = m;
+                            else a = m;
+                        }
+                        // The sample is taken there, at the same footprint.
                         fineUntil = t;
-                        t = tPrev + CLOUD_STEP * jitter;
-                        continue;
+                        t = b;
+                        tPrev = b;
+                        P = eye + dir * t;
+                        rp = length(P);
+                        h = hc + (2.0 * (CLOUD_R + hc) * mu * t + t * t) / (rp + CLOUD_R + hc);
+                        s = (h - lo) / CLOUD_DEPTH;
+                        cloudColumn(P / rp, w, cloudNeed(s), 0.0, F, v, clear);
+                        occ = max(cloudOccupancy(F, v, s), 0.0031);
+                        dt = min(dt, CLOUD_STEP);
                     }
                     inCloud = true;
                     vec4 fill = clamp(occ * 4.0 - RANK, 0.0, 1.0);
