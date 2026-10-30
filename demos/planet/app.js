@@ -113,7 +113,9 @@ scene.setToneMap({ mode: 'aces' });
 // direction it starts in.
 const NOON = [-0.55, -0.35, -0.75];
 const sun = scene.createLight({ type: 'directional', direction: NOON, color: [1, 1, 1], intensity: 128000 });
+let sunHour = 12;
 function setHour(hour) {
+    sunHour = hour;
     const a = (hour - 12) / 24 * 2 * Math.PI, c = Math.cos(a), s = Math.sin(a);
     sun.direction = [NOON[0] * c + NOON[2] * s, NOON[1], -NOON[0] * s + NOON[2] * c];
 }
@@ -774,13 +776,14 @@ const altCtl = bindControl('#alt', {
 altCtl.value = cam.alt;
 const pitchCtl = bindControl('#pitch', { out: '#pitchVal', fmt: (v) => v.toFixed(0) + '°', onChange: (v) => { cam.pitch = v; } });
 bindControl('#detail', { out: '#detailVal', fmt: (v) => v.toFixed(1) + ' px/texel', onChange: (v) => makeCache(v) });
-bindControl('#sun', { out: '#sunVal', fmt: (v) => String(Math.floor(v)).padStart(2, '0') + ':' + String(Math.floor(v % 1 * 60)).padStart(2, '0'), onChange: (v) => setHour(v) });
+const sunCtl = bindControl('#sun', { out: '#sunVal', fmt: (v) => String(Math.floor(v)).padStart(2, '0') + ':' + String(Math.floor(v % 1 * 60)).padStart(2, '0'), onChange: (v) => setHour(v) });
 
 // The stats, and the controls the camera moves without them (the wheel, a
 // right-drag, a script).
 function paintStats() {
     if (altCtl.value !== cam.alt) altCtl.value = cam.alt;
     if (pitchCtl.value !== cam.pitch) pitchCtl.value = cam.pitch;
+    if (sunCtl.value !== sunHour) sunCtl.value = sunHour;
     const s = cache.stats;
     document.querySelector('#stats').textContent =
         `tiles  ${lastStats.visible} drawn / ${lastStats.selected} selected\n` +
