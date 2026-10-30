@@ -414,6 +414,24 @@ const volumeGlsl = (radius) => cloudGlsl(radius, true) + `
         return mix(sigma * dt, sigma * (1.0 - exp(-rs * dt)) / rs, some);
     }
 
+    // The sun's light a step of length dt scatters toward the eye, per unit
+    // of the sun's: sigma * the integral over x of exp(-sigma x) times the
+    // sun through the cloud, exp(-(tau0 + rate x)). A ray rising toward a
+    // low sun crosses less cloud toward it as it goes, at a rate that can
+    // pass the extinction, but the sun's depth only falls to nothing, at
+    // x0, and from there the step sees it whole. Written with each
+    // exponent whole, none of them positive: the step's factor and the
+    // sun's depth taken apart, one overflowed to infinity where the other
+    // was nothing, a NaN, and a white blot on every cloud at dusk.
+    vec4 cloudSunStep(vec4 sigma, vec4 tau0, vec4 rate, vec4 dt) {
+        vec4 x0 = mix(dt, min(tau0 / max(-rate, 1e-9), dt), lessThan(rate, vec4(0.0)));
+        vec4 r = sigma + rate;
+        vec4 e0 = exp(-tau0), e1 = exp(-tau0 - r * x0);
+        bvec4 some = greaterThan(abs(r), vec4(1e-7));
+        vec4 lit = mix(sigma * x0 * e0, sigma * (e0 - e1) / mix(vec4(1.0), r, some), some);
+        return lit + exp(-sigma * x0) - exp(-sigma * dt);
+    }
+
     // How far the column's amount passes what the height needs, in
     // deviations of what the footprint leaves unresolved (the occupancy's
     // logistic argument over 1.7), at distance t along the ray from the eye
@@ -672,7 +690,7 @@ const volumeGlsl = (radius) => cloudGlsl(radius, true) + `
                     // the same, through the depth straight up.
                     vec4 stepT = exp(-sigma * len);
                     vec4 fillStep = cloudStep(sigma, vec4(0.0), len);
-                    vec4 bySun = phase * exp(-tauSun) * cloudStep(sigma, rate, len)
+                    vec4 bySun = phase * cloudSunStep(sigma, tauSun, rate, len)
                                + (0.85 * muS / 3.14159) * (0.55 * exp(-0.6 * tauSun) + 0.45 / (1.0 + 0.1125 * tauSun)) * fillStep;
                     vec4 bySky = fillStep / (1.0 + 0.1125 * muS * tauSun);
                     vec4 W = T * cover * Tc;
