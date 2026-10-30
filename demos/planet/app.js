@@ -380,8 +380,9 @@ const vertex = `buffer vec4 u_pos[];
 // carries on past the finest tile's texels: octaves of wavelength 1/8 m down
 // to 2 mm, of albedo variation (ground.bk variation, the same contrast per
 // octave) and of relief (the same slope per octave), each faded out as its
-// wavelength nears a pixel. Both are zero-mean, so what a pixel averages to
-// is the texel's.
+// wavelength nears a pixel; and coarser, where a far texel spans several
+// pixels, the albedo's octaves between the texel and the pixel. All are
+// zero-mean, so what a pixel averages to is the texel's.
 const fragment = `buffer uint u_det[];
     in vec2 v_tex;
     flat in int v_slot;
