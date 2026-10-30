@@ -55,7 +55,7 @@ for (let k = 0, w = 12800, a = 0.32; k < 10; k++, w /= 2, a *= 0.62) OCTAVES.pus
 
 // The detail's noise (cloudNoise): gradient noise (Perlin 2002's gradients)
 // over a lattice tiling every NOISE_PERIOD units, sampled NOISE_CELL texels
-// a unit into NOISE_TEXELS^3 texels, its z slices one after another, scaled
+// a unit into NOISE_TEXELS^3 texels (a 3D texture), its z slices one after another, scaled
 // to NOISE_VAR's variance.
 const NOISE_PERIOD = 16, NOISE_CELL = 4, NOISE_TEXELS = NOISE_PERIOD * NOISE_CELL;
 function noiseSlices() {
@@ -400,15 +400,11 @@ const volumeGlsl = (radius) => cloudGlsl(radius, true) + `
     uniform vec2 u_cloudLiftRange;   // the least and most lift a ray from the eye can meet
 
     // The detail's noise: gradient noise tiling every NOISE_PERIOD lattice
-    // units, NOISE_CELL texels a unit (noiseSlices), its z slices an array
-    // the hardware filters across x and y; z is mixed by hand.
-    uniform sampler2DArray u_cloudNoise;
+    // units, NOISE_CELL texels a unit (noiseSlices), a 3D texture the
+    // hardware filters and wraps: one fetch.
+    uniform sampler3D u_cloudNoise;
     float cloudNoise(vec3 p) {
-        vec3 t = p * ${NOISE_CELL}.0;
-        float z = floor(t.z), f = t.z - z;
-        vec2 uv = (t.xy + 0.5) / ${NOISE_TEXELS}.0;
-        float l0 = mod(z, ${NOISE_TEXELS}.0), l1 = mod(z + 1.0, ${NOISE_TEXELS}.0);
-        return mix(textureLod(u_cloudNoise, vec3(uv, l0), 0.0).r, textureLod(u_cloudNoise, vec3(uv, l1), 0.0).r, f);
+        return textureLod(u_cloudNoise, (p * ${NOISE_CELL}.0 + 0.5) / ${NOISE_TEXELS}.0, 0.0).r;
     }
     // The column's (F, variance) as cloudColumn read them, with the detail
     // a footprint of w metres resolves at P (about the centre): the octaves
@@ -591,6 +587,7 @@ const volumeGlsl = (radius) => cloudGlsl(radius, true) + `
         // The sun tap's tops (below), for the cloud the ray is in.
         vec4 tapTop = vec4(0.0);
         int marched = 0;   // the debug view 'cloudSteps'
+        vec3 kinds = vec3(0.0);   // 'cloudStepKinds': proved empty, sampled clear, in cloud
         for (int i = 0; i < 96 && t < t1; i++) {
             marched = i + 1;
             float dt = clamp(t * STEP_RATIO, STEP_MIN, dtMax);
@@ -614,6 +611,7 @@ const volumeGlsl = (radius) => cloudGlsl(radius, true) + `
                 // falls as it descends, or as the lift rises under it.
                 float drop = cloudNeedSlope(s) * (max(-dot(dir, P / rp), 0.0) + CLOUD_LIFT_SLOPE) / CLOUD_DEPTH;
                 if (!cloudColumn(P / rp, w, cloudNeed(s), drop, F, v, clear)) {
+                    kinds.x += 1.0;
                     tPrev = t + clear;   // proved empty this far
                     inCloud = false;
                     inside = vec4(0.0);
@@ -625,6 +623,8 @@ const volumeGlsl = (radius) => cloudGlsl(radius, true) + `
                 }
                 vec2 fd = cloudDetailed(P, w, F, v);
                 float occ = cloudOccupancy(fd.x, fd.y, s);
+                if (occ > 0.003) kinds.z += 1.0;
+                else kinds.y += 1.0;
                 if (occ > 0.003) {
                     // A step that lands in cloud has passed its edge since
                     // the last point known clear: the gap halved five times
@@ -782,6 +782,22 @@ const volumeGlsl = (radius) => cloudGlsl(radius, true) + `
                 T *= 1.0 - cover + cover * Tc;
                 cover = vec4(0.0);
                 Tc = vec4(1.0);
+                // Outside the layer's heights here: on to where the ray can
+                // first meet them again. The gap to the base below it (or the
+                // top above) closes at most at the ray's fall (rise) less the
+                // lift's slope bound, and the planet's curve bends the ray up
+                // by between nothing and x^2 / 2R: under the base, the first
+                // root of gap + a x - x^2 / 2R; over the top, of gap + a x,
+                // none where it never closes. A third to a half of the steps
+                // landed here, each finding nothing.
+                float climb = dot(dir, P / rp);
+                float gap = s < 0.0 ? -s * CLOUD_DEPTH : (s - 1.0) * CLOUD_DEPTH;
+                float a = (s < 0.0 ? -climb : climb) - CLOUD_LIFT_SLOPE;
+                float x = s < 0.0 ? 2.0 * gap / (sqrt(a * a + 2.0 * gap / CLOUD_R) - a)
+                                  : (a < 0.0 ? gap / -a : 1.0e9);
+                tPrev = t + x;
+                t += max(dt, x);
+                continue;
             }
             tPrev = t;
             t += dt;
@@ -793,6 +809,10 @@ const volumeGlsl = (radius) => cloudGlsl(radius, true) + `
         depth = sumW > 0.0 ? sumT / sumW : 0.0;
         // Debug view: the steps a pixel marched, a 96th of white each.
         if (SCENE_DEBUG(cloudSteps)) sceneDebugOut(vec3(float(marched) / 96.0));
+        // The steps by kind, as shares of them: red proved empty, green
+        // sampled clear, blue in cloud; the rest (dark) outside the layer's
+        // heights there.
+        if (SCENE_DEBUG(cloudStepKinds)) sceneDebugOut(kinds / max(float(marched), 1.0));
     }
 `;
 
@@ -805,7 +825,7 @@ const volumeGlsl = (radius) => cloudGlsl(radius, true) + `
 export function createClouds(scene, radius, module, readers, seed) {
     const kernel = module.kernel('k_cloud_level');
     const node = scene.createVolume({ fragment: volumeGlsl(radius), name: 'clouds' });
-    node.setShaderTexture('u_cloudNoise', { data: NOISE, width: NOISE_TEXELS, height: NOISE_TEXELS, layers: NOISE_TEXELS, repeat: true });
+    node.setShaderTexture('u_cloudNoise', { data: NOISE, width: NOISE_TEXELS, height: NOISE_TEXELS, depth: NOISE_TEXELS, repeat: true });
     const nodes = [node, ...readers];
     const map = bro.kernel.createBuffer((GLOBE_BASE + 6 * FACE_TEXELS) * 8);
     // u_cloudHead: LEVELS + 1 headers, then each level's grid origin in
