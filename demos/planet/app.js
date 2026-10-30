@@ -604,7 +604,7 @@ const grassMod = bro.kernel.compile(readApp('grass.bk'), { file: 'grass.bk', mod
 const grass = createGrass(scene, RADIUS, grassMod, sunMod, TRUTH, SEED, rivers.net, [ground]);
 const treeMod = bro.kernel.compile(readApp('trees.bk'), { file: 'trees.bk', modules: MODULES });
 const trees = createTrees(scene, RADIUS, treeMod, sunMod, TRUTH, SEED, rivers.net, [ground]);
-const clouds = createClouds(scene, RADIUS, cloudMod.kernel('k_cloud_level'), [ground, ...grass.nodes, ...trees.nodes]);
+const clouds = createClouds(scene, RADIUS, cloudMod, [ground, ...grass.nodes, ...trees.nodes], SEED);
 
 // ── Camera: doubles about the planet's center ───────────────────────────────
 

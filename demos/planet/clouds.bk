@@ -3,7 +3,7 @@
 // gnomonic plane of a cube face, the points a + e u + f v projected onto the
 // sphere; each texel holds the column's amount there, filtered to the
 // texel's footprint, and the variance of the octaves too fine for it.
-from planet::ground import perlin_split;
+from planet::ground import perlin_split, terrain_base;
 
 const F0: f32 = -0.12;          // the mean amount: clear more than cloudy
 const NOISE_VAR: f32 = 0.0728;  // perlin_split's variance (ground.bk PERLIN_VAR)
@@ -42,6 +42,24 @@ fn column(q: vec3<f64>, w: f64, radius: f64) -> vec2<f32> {
     }
     v += amp * amp * NOISE_VAR / (1.0 - 0.3844);
     return vec2<f32>(f, v);
+}
+
+// The layer's lift: the broad ground under it, over which its base stands
+// (clouds.js). A cumulus's base is where the air rising off the ground
+// cools to condensing, some way over the ground it rose from, so over a
+// plateau the layer stands as high over it as over the sea; at LIFT_OCTAVES
+// the ground's plateaus and basins of hundreds of kilometres, not its
+// ranges, which rise into the clouds. Texel (x, y) of a face's grid of n a
+// row at plane point (o + x delta, o + y delta), into `out` at base.
+const LIFT_OCTAVES: f64 = 3.0;
+@kernel @grid(2)
+fn k_cloud_lift(g: grid<2>, out: write_store<f32, 1>, base: i32, n: i32,
+                ax: f64, ay: f64, az: f64, ex: f64, ey: f64, ez: f64, fx: f64, fy: f64, fz: f64,
+                o: f64, delta: f64, radius: f64, seed: i32) {
+    let u = o + (g.x() as f64) * delta;
+    let v = o + (g.y() as f64) * delta;
+    let p = vec3<f64>(ax, ay, az) + vec3<f64>(ex, ey, ez) * u + vec3<f64>(fx, fy, fz) * v;
+    out[base + g.y() * n + g.x()] = max(terrain_base(normalize(p), radius, LIFT_OCTAVES, seed), 0.0) as f32;
 }
 
 // Texel (X, Y) = (x0 + x, y0 + y) of a level at plane point (o + X delta,
