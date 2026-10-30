@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Planet</title>
+    <link rel="stylesheet" href="/lib/kit/kit.css">
+    <style>
+        body { background: #000; overflow: hidden; }
+        canvas#stage { display: block; width: 100vw; height: 100vh; }
+        .k-hud { width: 300px; }
+        .help { color: #888; font-size: 11px; line-height: 1.5; }
+        #stats { font-family: monospace; font-size: 11px; color: #9cf; white-space: pre; }
+    </style>
+</head>
+<body>
+    <canvas id="stage"></canvas>
+    <div class="k-hud">
+        <h2>Planet</h2>
+        <label class="k-field"><span>Altitude</span><input id="alt" type="range" min="0" max="1000" step="1" value="980"><span class="k-val" id="altVal"></span></label>
+        <label class="k-field"><span>Pitch</span><input id="pitch" type="range" min="-90" max="0" step="1" value="-90"><span class="k-val" id="pitchVal"></span></label>
+        <label class="k-field"><span>Detail</span><input id="detail" type="range" min="1" max="8" step="0.5" value="2"><span class="k-val" id="detailVal"></span></label>
+        <div id="stats"></div>
+        <div class="help">Drag: move over the ground · wheel: altitude · right-drag: look</div>
+    </div>
+    <script type="module" src="/app/app.js"></script>
+</body>
+</html>

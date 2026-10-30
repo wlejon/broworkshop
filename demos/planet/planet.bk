@@ -1,0 +1,146 @@
+// The planet's ground: one height function of the unit direction, evaluated
+// in f64 so a cell lands exactly at any scale, Earth radius included.
+import std::noise::*;
+
+// Wavelength of the first octave, in metres.
+const BASE_WAVELENGTH: f64 = 2400000.0;
+// E[(1 - |simplex3d|)^2], measured over 200k samples.
+const RIDGE_MEAN: f64 = 0.4648;
+// Var(simplex3d), measured the same way.
+const SIMPLEX_VAR: f64 = 0.1889;
+
+// The octaves of simplex noise whose wavelength a tile's cells can carry:
+// `octaves` may be fractional, the last octave weighted by its fraction, so a
+// tile holds the average of what its children hold plus zero-mean detail.
+fn fbm_to(p: vec3<f64>, octaves: f64, first: i32, seed: i32) -> f64 {
+    var sum: f64 = 0.0;
+    var amp: f64 = 1.0;
+    var q: vec3<f64> = p * pow(2.0, first as f64);
+    let n = ceil(octaves) as i32;
+    for (var o: i32 = first; o < n; o += 1) {
+        let w = clamp(octaves - (o as f64), 0.0, 1.0);
+        sum += simplex3d<f64>(q, seed + o) * amp * w;
+        amp *= 0.5;
+        q = q * 2.0;
+    }
+    return sum;
+}
+
+// E[(X - k)+] for X ~ N(m, s^2): the mean of a ramp over noise a tile
+// cannot resolve (f32: the weights need no more, and Vulkan has no f64 exp).
+fn ramp_mean(m: f32, s: f32, k: f32) -> f32 {
+    if (s < 1e-6) { return max(m - k, 0.0); }
+    let z = (m - k) / s;
+    let cdf = 0.5 * (1.0 + tanh(0.7978846 * (z + 0.044715 * z * z * z)));
+    return (m - k) * cdf + s * 0.3989423 * exp(-0.5 * z * z);
+}
+
+// E[clamp(X, lo, hi)] for X ~ N(m, s^2).
+fn clamp_mean(m: f64, s: f64, lo: f32, hi: f32) -> f64 {
+    let mf = m as f32;
+    let sf = s as f32;
+    return (lo + ramp_mean(mf, sf, lo) - ramp_mean(mf, sf, hi)) as f64;
+}
+
+// Metres above the sphere at `dir`: continents from the broad octaves,
+// ranges of ridged mountains where a broad mask allows them on land, and the
+// fine octaves over both, rougher in the ranges.
+fn terrain(dir: vec3<f64>, radius: f64, octaves: f64, seed: i32) -> f64 {
+    let p = dir * (radius / BASE_WAVELENGTH);
+    let continents = fbm_to(p, min(octaves, 4.0), 0, seed);
+    // What the continents vary by inside one of this tile's cells, as
+    // Gaussian noise: the octaves it cannot resolve, and the share of each
+    // resolved octave's variance a cell spans ((cell / wavelength)^2, the
+    // cell being 1 / (2.5 * 2^octaves) of the first wavelength). The
+    // coastline clamps take their mean over it, so a coarse tile holds what
+    // its descendants average to.
+    var unresolved: f64 = 0.0;
+    var a: f64 = 1.0;
+    for (var o: i32 = 0; o < 4; o += 1) {
+        let w = clamp(octaves - (o as f64), 0.0, 1.0);
+        let span = min(pow(2.0, (o as f64) - octaves) / 2.5, 1.0);
+        unresolved += a * a * SIMPLEX_VAR * ((1.0 - w) * (1.0 - w) + w * w * span * span);
+        a *= 0.5;
+    }
+    let sc = sqrt(unresolved);
+    let land = clamp_mean(continents * 3.0 + 0.15, sc * 3.0, -1.0, 1.0);
+    let onLand = clamp_mean(continents * 6.0 + 0.3, sc * 6.0, 0.0, 1.0);
+    let ranges = clamp(simplex3d<f64>(p * 1.7, seed + 300) * 2.2 - 0.35, 0.0, 1.0);
+    // An octave the tile cannot resolve still holds its mean (ridged noise is
+    // not zero-mean), so a range seen from orbit carries the height its
+    // ridges add up close: refine, never replace.
+    var ridges: f64 = 0.0;
+    var amp: f64 = 0.5;
+    var q: vec3<f64> = p * 4.0;
+    for (var o: i32 = 2; o < 12; o += 1) {
+        let w = clamp(octaves - (o as f64), 0.0, 1.0);
+        var r2: f64 = RIDGE_MEAN;
+        if (w > 0.0) {
+            let r = 1.0 - abs(simplex3d<f64>(q, seed + 100 + o));
+            r2 = r * r * w + RIDGE_MEAN * (1.0 - w);
+        }
+        ridges += r2 * amp;
+        amp *= 0.5;
+        q = q * 2.0;
+    }
+    let mountains = ridges * ranges * onLand;
+    let detail = fbm_to(p, octaves, 4, seed + 200);
+    return land * 1100.0 + mountains * 6500.0 + detail * (250.0 + 900.0 * ranges * onLand);
+}
+
+// Below this many octaves a cell is wide enough that the next octaves vary
+// a lot inside it, through the coastline clamps and the ridges: such a cell
+// averages SUB x SUB samples taken with two more octaves instead of reading
+// one, so it is the aggregate of the finer truth, not a guess at it.
+const SUPERSAMPLE_BELOW: f64 = 7.0;
+const SUB: i32 = 4;
+
+// The height a cell holds: at (s, t) of the frame (corner c, axes u, v in
+// base coordinates), `cell` wide in (s, t).
+fn cell_height(c: vec3<f64>, u: vec3<f64>, v: vec3<f64>, s: f64, t: f64, cell: f64,
+               radius: f64, octaves: f64, seed: i32) -> f64 {
+    if (octaves >= SUPERSAMPLE_BELOW) {
+        return terrain(normalize(c + u * s + v * t), radius, octaves, seed);
+    }
+    var sum: f64 = 0.0;
+    for (var j: i32 = 0; j < SUB; j += 1) {
+        for (var i: i32 = 0; i < SUB; i += 1) {
+            let ds = (((i as f64) + 0.5) / (SUB as f64) - 0.5) * cell;
+            let dt = (((j as f64) + 0.5) / (SUB as f64) - 0.5) * cell;
+            sum += terrain(normalize(c + u * (s + ds) + v * (t + dt)), radius, octaves + 2.0, seed);
+        }
+    }
+    return sum / ((SUB * SUB) as f64);
+}
+
+// One tile: cell (x, y) at (s, t) = ((x, y) - border) / tileSize across the
+// tile's frame, written as its position relative to the tile's center
+// (`ax, ay, az`) and its height (sea level clamps the surface, not the height).
+@kernel @grid(2)
+fn k_tile(g: grid<2>, out: write_store<vec4<f32>, 2>,
+          cx: f64, cy: f64, cz: f64, ux: f64, uy: f64, uz: f64, vx: f64, vy: f64, vz: f64,
+          ax: f64, ay: f64, az: f64, radius: f64, border: f64, inv_size: f64, octaves: f64, seed: i32) {
+    let s = (g.x() as f64 - border) * inv_size;
+    let t = (g.y() as f64 - border) * inv_size;
+    let c = vec3<f64>(cx, cy, cz);
+    let u = vec3<f64>(ux, uy, uz);
+    let v = vec3<f64>(vx, vy, vz);
+    let dir = normalize(c + u * s + v * t);
+    let h = cell_height(c, u, v, s, t, inv_size, radius, octaves, seed);
+    let p = dir * (radius + max(h, 0.0)) - vec3<f64>(ax, ay, az);
+    out[g.x(), g.y()] = vec4<f32>(p.x as f32, p.y as f32, p.z as f32, h as f32);
+}
+
+// One cell as k_tile computes it, for measuring (CPU eval).
+@kernel
+fn k_cell(cx: f64, cy: f64, cz: f64, ux: f64, uy: f64, uz: f64, vx: f64, vy: f64, vz: f64,
+          cell: f64, radius: f64, octaves: f64, seed: i32) -> f64 {
+    return cell_height(vec3<f64>(cx, cy, cz), vec3<f64>(ux, uy, uz), vec3<f64>(vx, vy, vz),
+                       0.0, 0.0, cell, radius, octaves, seed);
+}
+
+// The ground height under a point, for the camera (CPU eval).
+@kernel
+fn k_height(x: f64, y: f64, z: f64, radius: f64, octaves: f64, seed: i32) -> f64 {
+    return max(terrain(normalize(vec3<f64>(x, y, z)), radius, octaves, seed), 0.0);
+}
