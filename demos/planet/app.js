@@ -190,106 +190,39 @@ function patchMesh() {
     return new Mesh({ positions: new Float32Array(pos), normals, indices: new Uint32Array(idx) });
 }
 
-// Instance i draws the cache's draw-list record i (tiles-api.js): its slot,
-// level, and center as hi + lo floats, from which the camera (split the same
-// way) is subtracted for a camera-relative placement good to f64.
-const vertex = `buffer vec4 u_pos[];
-    buffer ivec4 u_tiles[];
-    uniform vec3 u_camHi;
-    uniform vec3 u_camLo;
-    out vec2 v_tex;
-    flat out int v_slot;
-    out vec2 v_hz;
-    out vec3 v_tu;
-    out vec3 v_tv;
-    out vec3 v_up;
-    out vec3 v_q;
-    out vec3 v_swell;
-    out float v_height;   // the ground's, or a lake's level (m)
-    void userVertex(inout vec3 pos, inout vec3 normal, inout vec2 uv) {
-        ivec4 ids = u_tiles[gl_InstanceIndex * 4];   // slot, parentSlot, root, level
-        vec4 hi = intBitsToFloat(u_tiles[gl_InstanceIndex * 4 + 2]);
-        vec4 lo = intBitsToFloat(u_tiles[gl_InstanceIndex * 4 + 3]);
-        const int C = ${CELLS}, B = ${BORDER};
-        int i = int(pos.x + 0.5), j = int(pos.z + 0.5);
-        int k = ids.x * C * C + (j + B) * C + (i + B);
-        vec4 c = u_pos[k];
-        // The vertex in the detail layer's texels (planet.bk): texel t is
-        // centred at cell (t + 0.5) / D - 0.5.
-        v_tex = (vec2(i + B, j + B) + 0.5) * ${DETAIL}.0 - 0.5;
-        v_slot = ids.x;
-        // And on the horizon layer's grid (a point every other cell), with
-        // the tile grid's axes its directions are measured along.
-        v_hz = vec2(i + B, j + B) * 0.5;
-        v_tu = u_pos[k + 1].xyz - u_pos[k - 1].xyz;
-        v_tv = u_pos[k + C].xyz - u_pos[k - C].xyz;
-        // A skirt's bottom sits under the border cell beyond the edge, so the
-        // skirts of neighbouring tiles cross beneath their seam instead of
-        // sharing a plane: f32 rounding differs tile to tile, and coplanar
-        // skirts leave pinholes along the seam and at corners.
-        if (pos.y > 0.5) {
-            int si = i == 0 ? -1 : (i == ${TILE} ? 1 : 0);
-            int sj = j == 0 ? -1 : (j == ${TILE} ? 1 : 0);
-            c.xyz = u_pos[k + sj * C + si].xyz;
-        }
-        // Up at this vertex: away from the planet's center at the origin.
-        vec3 up = normalize(c.xyz + hi.xyz);
-        // Skirts hang a sixteenth of the tile's edge below the surface.
-        float extent = ${RADIUS * Math.PI / 2} / float(1 << ids.w);
-        vec3 rel = (hi.xyz - u_camHi) + (lo.xyz - u_camLo);
-        pos = rel + c.xyz - up * (pos.y * extent * 0.0625);
-        normal = up;   // the fragment shades with the detail layer's normal
-        v_up = up;
-        v_height = c.w;
-        // The ground's fine detail is periodic over ${DETAIL_PERIOD} m: the tile's
-        // center modulo that (exact in f32, the period a power of two) plus
-        // the cell's offset from it is a coordinate good to micrometres near
-        // the camera, and the same modulo the period on every tile.
-        v_q = mod(hi.xyz, ${DETAIL_PERIOD}.0) + mod(lo.xyz, ${DETAIL_PERIOD}.0) + c.xyz;
-        v_swell = mod(hi.xyz, ${SWELL_PERIOD}.0) + mod(lo.xyz, ${SWELL_PERIOD}.0) + c.xyz;
-    }`;
-
-// The detail layer (planet.bk) holds, finer than the vertices, the mean of
-// the ground under each texel: albedo, how much of it is water, and the
-// normal of its mean surface, read here bilinearly. Per pixel, the land
-// carries on past the finest tile's texels: octaves of wavelength 1/8 m down
-// to 2 mm, of albedo variation (ground.bk variation, the same contrast per
-// octave) and of relief (the same slope per octave), each faded out as its
-// wavelength nears a pixel. Both are zero-mean, so what a pixel averages to
-// is the texel's.
-const fragment = `buffer uint u_det[];
-    buffer uvec4 u_hz[];
-    in vec2 v_tex;
-    flat in int v_slot;
-    in vec2 v_hz;
-    in vec3 v_tu;
-    in vec3 v_tv;
-    in vec3 v_up;
-    in vec3 v_q;
-    in vec3 v_swell;
-    in float v_height;
-    uniform float u_time;
-    uniform vec3 u_camHi;
-    uniform vec3 u_camLo;
+// The light the ground sees at a vertex (the ground's vertex shader; the
+// fragment interpolates it): what it sees changes over metres to kilometres
+// and its vertices stand a few pixels apart (a tile's cells, DETAIL px), so
+// at the vertices it costs a sixteenth of what every pixel did, the same to
+// the eye. light: x the sun's share seen (its disc over the horizons, under
+// the clouds and the drawn trees), y the sky's (GTAO over the horizons,
+// under the clouds), z the clouds' shadow, which the slopes around share;
+// bent: how the sky's mean direction turns from the normal n.
+//
+// The horizons, read bilinearly at the horizon grid's point hz of tile
+// `slot` (planet.bk's horizon layer, a point every other cell), with the
+// grid's axes tu, tv. The sun: the share of its disc (0.53 degrees) above
+// the horizon toward it. The sky: GTAO's cosine-weighted visibility
+// (Jimenez et al. 2016) over four slices through the up axis, each bounded
+// by the horizons on its two sides and taken about the normal's projection
+// on it, and the mean direction of the sky seen. The clouds' shadow
+// (clouds.js) at a footprint of w metres, and the sky they hide overhead:
+// under a deck the blue sky is gone and the light is the grey the deck lets
+// through. Among drawn trees, their shadows (trees.js treeShadowGlsl).
+const groundLightGlsl = `buffer uvec4 u_hz[];
+    uniform vec3 u_toSun;
     uniform float u_treesFar;   // trees.js: how far off the trees are drawn, 0 none
-    // The trees' crowns (trees.js), as the share of a forest's ground they
-    // hide from straight above and their lit colour over the forest floor's.
-    const float TREE_CROWNS = 0.55;
-    const vec3 TREE_TINT = vec3(0.22, 0.24, 0.33);
-    // userFragment to userLight: the crowns' share above the floor where the
-    // trees are drawn (TREE_CROWNS times the cover), whose shade it is in.
-    float g_floor = 0.0;
     ${cloudGlsl(RADIUS)}
     ${treeShadowGlsl}
-    ${grassFloorGlsl}
+    const float GROUND_PI = 3.14159265;
 
-    // Point p of this tile's horizon grid (planet.bk's horizon layer): the
-    // sines of its horizon's elevation along the grid's 8 directions.
-    // Directions 0-3 in lo, 4-7 in hi: its four words are one 16-byte load.
-    void horizonPoint(ivec2 p, out vec4 lo, out vec4 hi) {
+    // Point p of tile slot's horizon grid: the sines of its horizon's
+    // elevation along the grid's 8 directions. Directions 0-3 in lo, 4-7 in
+    // hi: its four words are one 16-byte load.
+    void horizonPoint(int slot, ivec2 p, out vec4 lo, out vec4 hi) {
         const int N = ${HZ};
         p = clamp(p, ivec2(0), ivec2(N - 1));
-        uvec4 w = u_hz[((v_slot * N + p.y) * N + p.x) * 4];
+        uvec4 w = u_hz[((slot * N + p.y) * N + p.x) * 4];
         lo = vec4(unpackUnorm2x16(w.x), unpackUnorm2x16(w.y)) * 2.0 - 1.0;
         hi = vec4(unpackUnorm2x16(w.z), unpackUnorm2x16(w.w)) * 2.0 - 1.0;
     }
@@ -299,34 +232,28 @@ const fragment = `buffer uint u_det[];
     float fastAcos(float x) {
         float a = abs(x);
         float r = sqrt(max(1.0 - a, 0.0)) * (1.5707288 + a * (-0.2121144 + a * (0.0742610 - 0.0187293 * a)));
-        return x < 0.0 ? PI - r : r;
+        return x < 0.0 ? GROUND_PI - r : r;
     }
 
-    // The ground's horizons, read bilinearly, as the sun and sky it sees.
-    // The sun: the share of its disc (0.53 degrees) above the horizon toward
-    // it. The sky: GTAO's cosine-weighted visibility (Jimenez et al. 2016)
-    // over four slices through the up axis, each bounded by the horizons on
-    // its two sides and taken about the normal's projection on it, and the
-    // mean direction of the sky seen, along which its light is taken.
-    void userLight(vec3 toSun, inout float sunVisibility, inout float skyVisibility, inout vec3 skyNormal,
-                   inout float occluderSun) {
-        vec2 f = v_hz - floor(v_hz);
-        ivec2 p = ivec2(floor(v_hz));
+    void groundLight(int slot, vec2 hz, vec3 tu, vec3 tv, vec3 up, vec3 n, vec3 rel, float w,
+                     out vec4 light, out vec3 bent) {
+        vec3 toSun = u_toSun;
+        vec2 f = hz - floor(hz);
+        ivec2 p = ivec2(floor(hz));
         vec4 al, ah, bl, bh, cl, ch, dl, dh;
-        horizonPoint(p, al, ah);
-        horizonPoint(p + ivec2(1, 0), bl, bh);
-        horizonPoint(p + ivec2(0, 1), cl, ch);
-        horizonPoint(p + ivec2(1, 1), dl, dh);
+        horizonPoint(slot, p, al, ah);
+        horizonPoint(slot, p + ivec2(1, 0), bl, bh);
+        horizonPoint(slot, p + ivec2(0, 1), cl, ch);
+        horizonPoint(slot, p + ivec2(1, 1), dl, dh);
         vec4 sl = clamp(mix(mix(al, bl, f.x), mix(cl, dl, f.x), f.y), -1.0, 1.0);
         vec4 sh = clamp(mix(mix(ah, bh, f.x), mix(ch, dh, f.x), f.y), -1.0, 1.0);
         // The grid's axes on the tangent plane: direction k is
         // cos * gu + sin * gv. The sun's azimuth is taken in those axes.
-        vec3 up = normalize(v_up);
-        vec3 gu = v_tu - up * dot(v_tu, up);
-        vec3 gv = v_tv - up * dot(v_tv, up);
+        vec3 gu = tu - up * dot(tu, up);
+        vec3 gv = tv - up * dot(tv, up);
         float uu = dot(gu, gu), uv = dot(gu, gv), vv = dot(gv, gv);
         float su = dot(toSun, gu), sv = dot(toSun, gv);
-        float fk = mod(atan(uu * sv - uv * su, vv * su - uv * sv) / (PI * 0.25), 8.0);
+        float fk = mod(atan(uu * sv - uv * su, vv * su - uv * sv) / (GROUND_PI * 0.25), 8.0);
         int k0 = int(fk) & 7;
         // Each point's share of the disc, blended: across a ridge's horizon
         // jump, blended horizons would step from point to point.
@@ -339,11 +266,10 @@ const fragment = `buffer uint u_det[];
             mix(horizonAt(al, ah, k0), horizonAt(al, ah, k1), fa), mix(horizonAt(bl, bh, k0), horizonAt(bl, bh, k1), fa),
             mix(horizonAt(cl, ch, k0), horizonAt(cl, ch, k1), fa), mix(horizonAt(dl, dh, k0), horizonAt(dl, dh, k1), fa));
         vec4 lit = clamp((sun - corner) / (0.0093 * max(sqrt(1.0 - sun * sun), 0.02)) + 0.5, 0.0, 1.0);
-        sunVisibility *= mix(mix(lit.x, lit.y, f.x), mix(lit.z, lit.w, f.x), f.y);
+        float sunSeen = mix(mix(lit.x, lit.y, f.x), mix(lit.z, lit.w, f.x), f.y);
 
-        vec3 n = skyNormal;
         float visible = 0.0;
-        vec3 bent = vec3(0.0);
+        vec3 mean = vec3(0.0);
         // Without trigonometry: the horizons are kept as the cosines of their
         // zenith angles (the sines of their elevations, as stored), clamped
         // to the normal's hemisphere there as a max of cosines, and each
@@ -370,29 +296,124 @@ const fragment = `buffer uint u_det[];
             // of their difference, which holds when they are over 180 apart.
             vec2 b = vec2(c1 - c2, s2 - s1);
             float bl2 = dot(b, b);
-            if (bl2 > 1e-12) bent += (t * b.x + up * b.y) * (len * slice * inversesqrt(bl2));
+            if (bl2 > 1e-12) mean += (t * b.x + up * b.y) * (len * slice * inversesqrt(bl2));
         }
-        skyVisibility *= visible * 0.25;
-        if (dot(bent, bent) > 1e-12) skyNormal = normalize(bent);
+        bent = dot(mean, mean) > 1e-12 ? normalize(mean) - n : vec3(0.0);
 
-        // The clouds' shadow (clouds.js), at this pixel's footprint; and the
-        // sky they hide overhead: under a deck the blue sky is gone and the
-        // light is the grey the deck lets through.
-        vec3 g = (u_camHi + u_camLo) + vWorldPos;
-        float w = max(length(dFdx(vWorldPos)), length(dFdy(vWorldPos)));
+        vec3 g = (u_camHi + u_camLo) + rel;
         float h = length(g) - CLOUD_R;
         float clouds = cloudShadow(g, h, toSun, w);
-        sunVisibility *= clouds;
-        // Among drawn trees the floor is in their shadows (trees.js
-        // treeShadowGlsl), and the sky through about the gaps overhead.
-        if (u_treesFar > 0.0 && length(vWorldPos) < u_treesFar) {
+        sunSeen *= clouds;
+        if (u_treesFar > 0.0 && length(rel) < u_treesFar) {
             vec3 eye = (u_camHi - u_treeOHi) + (u_camLo - u_treeOLo);
-            sunVisibility *= treeShadow(eye + vWorldPos, eye, up, toSun);
+            sunSeen *= treeShadow(eye + rel, eye, up, toSun);
         }
-        skyVisibility *= 1.0 - 0.8 * g_floor;
-        // The slopes around share the clouds' shadow.
-        occluderSun *= clouds;
-        skyVisibility *= cloudShadow(g, h, up, w);
+        light = vec4(sunSeen, visible * 0.25 * cloudShadow(g, h, up, w), clouds, 0.0);
+    }`;
+
+// Instance i draws the cache's draw-list record i (tiles-api.js): its slot,
+// level, and center as hi + lo floats, from which the camera (split the same
+// way) is subtracted for a camera-relative placement good to f64.
+const vertex = `buffer vec4 u_pos[];
+    buffer ivec4 u_tiles[];
+    uniform vec3 u_camHi;
+    uniform vec3 u_camLo;
+    out vec2 v_tex;
+    flat out int v_slot;
+    out vec3 v_up;
+    out vec3 v_q;
+    out vec3 v_swell;
+    out float v_height;   // the ground's, or a lake's level (m)
+    out vec4 v_light;     // groundLight's sun and sky seen, and the occluders' sun
+    out vec3 v_bent;      // and the sky's mean direction
+    ${groundLightGlsl}
+    void userVertex(inout vec3 pos, inout vec3 normal, inout vec2 uv) {
+        ivec4 ids = u_tiles[gl_InstanceIndex * 4];   // slot, parentSlot, root, level
+        vec4 hi = intBitsToFloat(u_tiles[gl_InstanceIndex * 4 + 2]);
+        vec4 lo = intBitsToFloat(u_tiles[gl_InstanceIndex * 4 + 3]);
+        const int C = ${CELLS}, B = ${BORDER};
+        int i = int(pos.x + 0.5), j = int(pos.z + 0.5);
+        int k = ids.x * C * C + (j + B) * C + (i + B);
+        vec4 c = u_pos[k];
+        // The vertex in the detail layer's texels (planet.bk): texel t is
+        // centred at cell (t + 0.5) / D - 0.5.
+        v_tex = (vec2(i + B, j + B) + 0.5) * ${DETAIL}.0 - 0.5;
+        v_slot = ids.x;
+        // The tile grid's axes, which the horizons' directions are measured
+        // along, and the surface's normal across them.
+        vec3 tu = u_pos[k + 1].xyz - u_pos[k - 1].xyz;
+        vec3 tv = u_pos[k + C].xyz - u_pos[k - C].xyz;
+        // A skirt's bottom sits under the border cell beyond the edge, so the
+        // skirts of neighbouring tiles cross beneath their seam instead of
+        // sharing a plane: f32 rounding differs tile to tile, and coplanar
+        // skirts leave pinholes along the seam and at corners.
+        if (pos.y > 0.5) {
+            int si = i == 0 ? -1 : (i == ${TILE} ? 1 : 0);
+            int sj = j == 0 ? -1 : (j == ${TILE} ? 1 : 0);
+            c.xyz = u_pos[k + sj * C + si].xyz;
+        }
+        // Up at this vertex: away from the planet's center at the origin.
+        vec3 up = normalize(c.xyz + hi.xyz);
+        // Skirts hang a sixteenth of the tile's edge below the surface.
+        float extent = ${RADIUS * Math.PI / 2} / float(1 << ids.w);
+        vec3 rel = (hi.xyz - u_camHi) + (lo.xyz - u_camLo);
+        pos = rel + c.xyz - up * (pos.y * extent * 0.0625);
+        normal = up;   // the fragment shades with the detail layer's normal
+        v_up = up;
+        v_height = c.w;
+        // The ground's fine detail is periodic over ${DETAIL_PERIOD} m: the tile's
+        // center modulo that (exact in f32, the period a power of two) plus
+        // the cell's offset from it is a coordinate good to micrometres near
+        // the camera, and the same modulo the period on every tile.
+        v_q = mod(hi.xyz, ${DETAIL_PERIOD}.0) + mod(lo.xyz, ${DETAIL_PERIOD}.0) + c.xyz;
+        v_swell = mod(hi.xyz, ${SWELL_PERIOD}.0) + mod(lo.xyz, ${SWELL_PERIOD}.0) + c.xyz;
+        // The light it sees, on the horizon layer's grid (a point every
+        // other cell), at a cell's footprint.
+        vec3 n = normalize(cross(tu, tv));
+        if (dot(n, up) < 0.0) n = -n;
+        groundLight(ids.x, vec2(i + B, j + B) * 0.5, tu, tv, up, n, pos, 0.5 * length(tu), v_light, v_bent);
+    }`;
+
+// The detail layer (planet.bk) holds, finer than the vertices, the mean of
+// the ground under each texel: albedo, how much of it is water, and the
+// normal of its mean surface, read here bilinearly. Per pixel, the land
+// carries on past the finest tile's texels: octaves of wavelength 1/8 m down
+// to 2 mm, of albedo variation (ground.bk variation, the same contrast per
+// octave) and of relief (the same slope per octave), each faded out as its
+// wavelength nears a pixel. Both are zero-mean, so what a pixel averages to
+// is the texel's.
+const fragment = `buffer uint u_det[];
+    in vec2 v_tex;
+    flat in int v_slot;
+    in vec3 v_up;
+    in vec3 v_q;
+    in vec3 v_swell;
+    in float v_height;
+    in vec4 v_light;
+    in vec3 v_bent;
+    uniform float u_time;
+    uniform vec3 u_camHi;
+    uniform vec3 u_camLo;
+    uniform float u_treesFar;   // trees.js: how far off the trees are drawn, 0 none
+    // The trees' crowns (trees.js), as the share of a forest's ground they
+    // hide from straight above and their lit colour over the forest floor's.
+    const float TREE_CROWNS = 0.55;
+    const vec3 TREE_TINT = vec3(0.22, 0.24, 0.33);
+    // userFragment to userLight: the crowns' share above the floor where the
+    // trees are drawn (TREE_CROWNS times the cover), whose shade it is in.
+    float g_floor = 0.0;
+    ${grassFloorGlsl}
+
+    // The light the ground sees, as its vertices found it (groundLight), and
+    // the sky through the gaps in the crowns overhead among drawn trees. The
+    // sky's direction turns from this pixel's normal as the vertices' turned
+    // from theirs.
+    void userLight(vec3 toSun, inout float sunVisibility, inout float skyVisibility, inout vec3 skyNormal,
+                   inout float occluderSun) {
+        sunVisibility *= v_light.x;
+        skyVisibility *= v_light.y * (1.0 - 0.8 * g_floor);
+        occluderSun *= v_light.z;
+        skyNormal = normalize(skyNormal + v_bent);
     }
 
     // Texel (x, y) of this tile: colour (rgb, water), the octahedral normal
@@ -670,6 +691,7 @@ function frame() {
     clouds.update(f.pos, f.surface + cam.alt - RADIUS, 2 * Math.tan(FOV * Math.PI / 360) / height);
     const d = sun.direction, dl = Math.hypot(d[0], d[1], d[2]);
     const cone = Math.atan(Math.tan(FOV * Math.PI / 360) * Math.hypot(1, aspect));
+    ground.setShaderUniform('u_toSun', [-d[0] / dl, -d[1] / dl, -d[2] / dl]);
     grass.update(f.pos, cam.alt, [-d[0] / dl, -d[1] / dl, -d[2] / dl], camHi, camLo, f.fwd, cone, performance.now() / 1000 % WAVE_CLOCK);
     trees.update(f.pos, cam.alt, [-d[0] / dl, -d[1] / dl, -d[2] / dl], camHi, camLo, f.fwd, cone, performance.now() / 1000 % WAVE_CLOCK);
     for (let k = 0; k < 3; k++) atmosphere.planetCenter[k] = -f.pos[k];
