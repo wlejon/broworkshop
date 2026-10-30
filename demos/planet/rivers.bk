@@ -114,6 +114,41 @@ const LAKE_DEPTH: f32 = 1.0;
 // takes no lake that is not its own.
 const LAKE_REACH: f32 = 16000.0;
 
+// A river's meanders: its channel's offset across its reach (m), `s` metres
+// along a reach `len` long from point `p`, for a channel `width` wide. Gradient
+// noise in octaves from half the reach down to MEANDER_WAVES widths (a
+// meander's wavelength is about 11 of its channel's widths, Leopold and
+// Wolman 1960), each MEANDER_AMP of its wavelength, each tapered to nothing
+// within half its wavelength of the reach's ends so reaches meet at their
+// points and the short meanders run up to them; the valley follows the
+// channel. Slopes stay under one, so the distance across the reach to the
+// offset stays the distance to the channel.
+const MEANDER_WAVES: f32 = 11.0;
+const MEANDER_AMP: f32 = 0.18;
+fn meander_gradient(seed: i32, p: i32, i: i32, octave: i32) -> f32 {
+    let h = hash_primes3d(seed + 7919, p * PRIME_X, i * PRIME_Y, octave * PRIME_Z);
+    return (((h >> 8) & 65535) as f32) / 32767.5 - 1.0;
+}
+pub fn meander(p: i32, s: f32, len: f32, width: f32, seed: i32) -> f32 {
+    let shortest = MEANDER_WAVES * width;
+    var wavelength = 0.5 * len;
+    var m: f32 = 0.0;
+    for (var o: i32 = 0; o < 6; o += 1) {
+        if (wavelength < shortest) { break; }
+        let x = s / wavelength;
+        let c = floor(x);
+        let f = x - c;
+        let i = c as i32;
+        let v = mix(meander_gradient(seed, p, i, o) * f, meander_gradient(seed, p, i + 1, o) * (f - 1.0),
+                    f * f * (3.0 - 2.0 * f));
+        // Each octave tapers within half its wavelength of the ends.
+        let e = clamp(min(s, len - s) * 2.0 / wavelength, 0.0, 1.0);
+        m += v * 2.0 * MEANDER_AMP * wavelength * e * e * (3.0 - 2.0 * e);
+        wavelength *= 0.5;
+    }
+    return m;
+}
+
 // The valley the water cuts, at `x` metres from its edge: its rise over the
 // bed, steepening outward so the cut ends within a few kilometres however
 // deep the ground stands over the bed.
@@ -148,6 +183,7 @@ pub fn water_near(dir: vec3<f64>, radius: f64, cell: f32, net: read_store<f32, 1
     let rest = dir - vec3<f64>(hi.x as f64, hi.y as f64, hi.z as f64);
     let lo = vec3<f32>(rest.x as f32, rest.y as f32, rest.z as f32);
     let r = radius as f32;
+    let up = normalize(hi);
     var cut: f32 = 1.0e9;
     var share: f32 = 0.0;
     var lake: f32 = -1.0e9;
@@ -175,10 +211,16 @@ pub fn water_near(dir: vec3<f64>, radius: f64, cell: f32, net: read_store<f32, 1
                 let down = net[k + 1] as i32;
                 if (catchment >= MIN_CATCHMENT && down >= 0) {
                     let bf = point_offset(net, down * RIV_REC, hi, lo, r);
-                    let ab = bf - af;
-                    let t = clamp(-dot(af, ab) / max(dot(ab, ab), 1.0), 0.0, 1.0);
-                    let d = length(af + ab * t);
+                    let len = max(length(bf - af), 1.0);
+                    let along = (bf - af) / len;
+                    let side = normalize(cross(along, up));
+                    let s = clamp(-dot(af, along), 0.0, len);
+                    let t = s / len;
                     let half = 0.5 * river_width(catchment);
+                    // From here to the reach's line, and across it to the
+                    // channel.
+                    let q = af + along * s;
+                    let d = length(vec2<f32>(dot(q, along), -dot(q, side) - meander(k / RIV_REC, s, len, 2.0 * half, seed)));
                     let bed = mix(level, net[down * RIV_REC + 3], t);
                     cut = min(cut, bed + valley_rise(sqrt(d * d + spread) - half));
                     // The cell's share inside |d| < half, a strip against a

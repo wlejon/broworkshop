@@ -195,6 +195,7 @@ const vertex = `buffer vec4 u_pos[];
     out vec3 v_up;
     out vec3 v_q;
     out vec3 v_swell;
+    out float v_height;   // the ground's, or a lake's level (m)
     void userVertex(inout vec3 pos, inout vec3 normal, inout vec2 uv) {
         ivec4 ids = u_tiles[gl_InstanceIndex * 4];   // slot, parentSlot, root, level
         vec4 hi = intBitsToFloat(u_tiles[gl_InstanceIndex * 4 + 2]);
@@ -229,6 +230,7 @@ const vertex = `buffer vec4 u_pos[];
         pos = rel + c.xyz - up * (pos.y * extent * 0.0625);
         normal = up;   // the fragment shades with the detail layer's normal
         v_up = up;
+        v_height = c.w;
         // The ground's fine detail is periodic over ${DETAIL_PERIOD} m: the tile's
         // center modulo that (exact in f32, the period a power of two) plus
         // the cell's offset from it is a coordinate good to micrometres near
@@ -255,6 +257,7 @@ const fragment = `buffer uint u_det[];
     in vec3 v_up;
     in vec3 v_q;
     in vec3 v_swell;
+    in float v_height;
     uniform float u_time;
     uniform vec3 u_camHi;
     uniform vec3 u_camLo;
@@ -494,7 +497,14 @@ const fragment = `buffer uint u_det[];
         n = normalize(n - (slope - dot(slope, n) * n) * land);
         float seaVariance = 0.0;
         vec3 up = normalize(v_up);
-        vec3 sea = water > 0.0 ? normalize(up - seaSlope(footprint, up, seaVariance)) : up;
+        // Rivers and lakes stand above the sea: their water is sheltered,
+        // a breeze's ripples on it (Cox and Munk 1954, a mean square slope
+        // of 0.003 + 0.00512 a m/s of wind, at 2 m/s) rather than the sea's
+        // swell and waves.
+        float fresh = smoothstep(0.0, 1.0, v_height);
+        vec3 sea = up;
+        if (water > 0.0 && fresh < 1.0) sea = normalize(up - seaSlope(footprint, up, seaVariance) * (1.0 - fresh));
+        seaVariance = mix(seaVariance, 0.0132, fresh);
         normal = normalize(mix(n, sea, water));
         // GGX's alpha is the root mean square slope; the engine's roughness
         // its square root.
