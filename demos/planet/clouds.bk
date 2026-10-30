@@ -27,10 +27,10 @@ fn column(q: vec3<f64>, w: f64, radius: f64) -> vec2<f32> {
         wavelength *= 0.5;
         amp *= 0.6;
     }
-    // The cumuli: from 13 km to 25 m, each octave 0.55 of the last; past
+    // The cumuli: from 13 km to 25 m, each octave 0.62 of the last; past
     // the finest, the variance of yet finer ones.
     wavelength = 12800.0;
-    amp = 0.22;
+    amp = 0.32;
     for (var k: i32 = 0; k < 10; k += 1) {
         let r = clamp(wavelength / w * 0.5 - 1.0, 0.0, 1.0) as f32;
         if (r > 0.0) {
@@ -38,9 +38,9 @@ fn column(q: vec3<f64>, w: f64, radius: f64) -> vec2<f32> {
         }
         v += (1.0 - r * r) * amp * amp * NOISE_VAR;
         wavelength *= 0.5;
-        amp *= 0.55;
+        amp *= 0.62;
     }
-    v += amp * amp * NOISE_VAR / (1.0 - 0.3025);
+    v += amp * amp * NOISE_VAR / (1.0 - 0.3844);
     return vec2<f32>(f, v);
 }
 

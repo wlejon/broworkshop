@@ -48,7 +48,7 @@ const FACE_TEXELS = (FACE + 2) * (FACE + 2);
 // The column's octaves (clouds.bk column): wavelength and amplitude.
 const OCTAVES = [];
 for (let k = 0, w = 2.0e6, a = 0.48; k < 7; k++, w /= 2, a *= 0.6) OCTAVES.push([w, a]);
-for (let k = 0, w = 12800, a = 0.22; k < 10; k++, w /= 2, a *= 0.55) OCTAVES.push([w, a]);
+for (let k = 0, w = 12800, a = 0.32; k < 10; k++, w /= 2, a *= 0.62) OCTAVES.push([w, a]);
 
 // A bound on the gradient (per m along the layer) of the column resolved at
 // footprint w: what a level's amount can change by within a distance.
@@ -80,8 +80,21 @@ export const cloudGlsl = (radius) => `
     const float CLOUD_DEPTH = ${CLOUD_DEPTH.toFixed(1)};
     const float CLOUD_SIGMA = ${CLOUD_SIGMA};
     // The share of the height a column's amount must exceed to hold cloud:
-    // CLOUD_FLOOR at the base, CLOUD_FLOOR + CLOUD_CURVE at the top.
-    const float CLOUD_FLOOR = 0.02, CLOUD_CURVE = 0.55;
+    // What a column must hold to reach the layer's height s (0 base, 1 top):
+    // CLOUD_FLOOR at the base, rising as s^2 (rounded tops) and without bound
+    // toward the top, so the most a column holds only lifts its top nearer
+    // it, and an overcast has the relief of what its columns hold, not a
+    // flat ceiling.
+    const float CLOUD_FLOOR = 0.02, CLOUD_CURVE = 0.7;
+    float cloudNeed(float s) {
+        float s2 = min(s * s, 0.999);
+        return CLOUD_FLOOR + CLOUD_CURVE * s2 / (1.0 - s2);
+    }
+    // Its rate per unit of s.
+    float cloudNeedSlope(float s) {
+        float d = max(1.0 - s * s, 0.001);
+        return 2.0 * CLOUD_CURVE * s / (d * d);
+    }
     // The column field (clouds.bk): two floats a texel, the amount and the
     // variance of the octaves too fine for the texel. u_cloudHead holds,
     // for level k, its plane origin, texel spacing and gradientBound; at
@@ -175,13 +188,15 @@ export const cloudGlsl = (radius) => `
     // the chance of cloud otherwise (a logistic in place of the normal CDF).
     float cloudOccupancy(float F, float v, float s) {
         if (s < 0.0 || s > 1.0) return 0.0;
-        float need = CLOUD_FLOOR + CLOUD_CURVE * s * s;
+        float need = cloudNeed(s);
         return 1.0 / (1.0 + exp(-1.7 * (F - need) / sqrt(v + 1e-5)));
     }
 
-    // The height share the column's cloud reaches (for the light through it).
+    // The height share the column's cloud reaches (for the light through it):
+    // where cloudNeed(s) = F.
     float cloudTop(float F) {
-        return clamp(sqrt(max(F - CLOUD_FLOOR, 0.0) / CLOUD_CURVE), 0.0, 1.0);
+        float x = max(F - CLOUD_FLOOR, 0.0) / CLOUD_CURVE;
+        return sqrt(x / (1.0 + x));
     }
 
     // What the clouds leave of the sun at the ground point g (about the
@@ -197,7 +212,7 @@ export const cloudGlsl = (radius) => `
         vec3 q = normalize(g + toSun * t);
         float sh = clamp((h - CLOUD_BASE) / CLOUD_DEPTH, 0.0, 1.0);
         float F, v, clear;
-        if (!cloudColumn(q, max(w, 30.0), CLOUD_FLOOR + CLOUD_CURVE * sh * sh, 0.0, F, v, clear)) return 1.0;
+        if (!cloudColumn(q, max(w, 30.0), cloudNeed(sh), 0.0, F, v, clear)) return 1.0;
         float thick = CLOUD_BASE + cloudTop(F) * CLOUD_DEPTH - max(h, CLOUD_BASE);
         if (thick <= 0.0) return 1.0;
         float fill = cloudOccupancy(F, v, sh);
@@ -292,9 +307,9 @@ const volumeGlsl = (radius) => cloudGlsl(radius) + `
         // height below the highest it holds; climate models' maximum
         // overlap, Geleyn and Hollingsworth 1979), so the ray is marched as
         // four sub-columns ranked by their amount, the cloudiest first to fill
-        // as the occupancy rises: sub-column j is cloud where the occupancy
-        // passes its rank, in full density, with its own transmittance and
-        // its own depth into the cloud. Their mean is the occupancy, so a
+        // as the occupancy rises: sub-column j is cloud, in full density,
+        // where the occupancy passes its rank,
+        // with its own transmittance and its own depth into the cloud. A
         // resolved field (occupancy 0 or 1) marches as one.
         const vec4 RANK = vec4(3.0, 2.0, 1.0, 0.0);
         // Each sub-column's amount about the column's, at its rank's quantile
@@ -335,8 +350,8 @@ const volumeGlsl = (radius) => cloudGlsl(radius) + `
                 // stays below the ray, rising at most by its gradient
                 // bound along the layer while what the ray's height needs
                 // falls as it descends.
-                float drop = 2.0 * CLOUD_CURVE * s * max(-dot(dir, P / rp), 0.0) / CLOUD_DEPTH;
-                if (!cloudColumn(P / rp, w, CLOUD_FLOOR + CLOUD_CURVE * s * s, drop, F, v, clear)) {
+                float drop = cloudNeedSlope(s) * max(-dot(dir, P / rp), 0.0) / CLOUD_DEPTH;
+                if (!cloudColumn(P / rp, w, cloudNeed(s), drop, F, v, clear)) {
                     tPrev = t + clear;   // proved empty this far
                     inCloud = false;
                     inside = vec4(0.0);
@@ -418,17 +433,19 @@ const volumeGlsl = (radius) => cloudGlsl(radius) + `
                     // sun's depth changing linearly along it): a step the
                     // size of a cloud still lights its top as brightly as its
                     // first metres are lit. Single scattering in the phase;
-                    // the light scattered many times as the diffuse light a
-                    // thick slab carries to that depth: two-stream
-                    // diffusion's 1 / (1 + 0.75 (1 - g) tau) of the sun on
-                    // it (cloudShadow's), so a deck's top glows near white
-                    // (thick cloud reflects some 85%) and its base is a
-                    // lit grey, not black. The sky the same, through the
-                    // depth straight up.
+                    // the light scattered many times as what reaches that
+                    // depth: near a surface it falls fast with the depth the
+                    // sun crossed (the first few scatterings, Wrenninge's
+                    // octaves: a top's far side is in its own shade), deep
+                    // in, as slowly as diffusion through a thick slab carries
+                    // it, 1 / (1 + 0.75 (1 - g) tau) (cloudShadow's), so a
+                    // deck's top glows near white (thick cloud reflects some
+                    // 85%) and its base is a lit grey, not black. The sky
+                    // the same, through the depth straight up.
                     vec4 stepT = exp(-sigma * len);
                     vec4 fillStep = cloudStep(sigma, vec4(0.0), len);
                     vec4 bySun = phase * exp(-tauSun) * cloudStep(sigma, rate, len)
-                               + (0.85 * muS / 3.14159) / (1.0 + 0.1125 * tauSun) * fillStep;
+                               + (0.85 * muS / 3.14159) * (0.55 * exp(-0.6 * tauSun) + 0.45 / (1.0 + 0.1125 * tauSun)) * fillStep;
                     vec4 bySky = fillStep / (1.0 + 0.1125 * muS * tauSun);
                     L += 0.25 * (sun * dot(T, bySun) + sky * dot(T, bySky));
                     float wgt = 0.25 * dot(T, 1.0 - stepT);
