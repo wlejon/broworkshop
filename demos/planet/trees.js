@@ -325,6 +325,10 @@ const fragment = (radius) => `in vec3 v_col;
     uniform vec3 u_camHi;
     uniform vec3 u_camLo;
     ${cloudGlsl(radius)}
+    // userFragment to userLight: 1 on a tier's underside, which the sun reaches
+    // only through the needles above it (15%) and the sky through about the
+    // gaps below the tier (40%).
+    float g_under = 0.0;
     void userFragment(inout vec3 baseColor, inout vec3 normal, inout float metallic,
                       inout float roughness, inout vec3 emissive, inout float alpha) {
         // A tier is branches radiating from the trunk, needled fingers
@@ -357,8 +361,10 @@ const fragment = (radius) => `in vec3 v_col;
             shade *= mix(1.0, 1.0 - 0.35 * across * across, inBranch * smoothstep(0.6, 0.25, fw));
         }
         baseColor = v_col * shade;
-        // Both faces of a drooping tier light as its outer side does.
+        // Both faces of a drooping tier take its outer side's normal; but
+        // the face seen from below it is its underside, inside the crown.
         if (dot(normal, (u_camHi + u_camLo) + vWorldPos) < 0.0) normal = -normal;
+        g_under = v_branch.z >= 0.0 && dot(normal, vWorldPos) > 0.0 ? 1.0 : 0.0;
         metallic = 0.0;
         roughness = 0.85;
     }
@@ -372,8 +378,8 @@ const fragment = (radius) => `in vec3 v_col;
         vec3 up = normalize(g);
         float w = max(length(dFdx(vWorldPos)), length(dFdy(vWorldPos)));
         float clouds = cloudShadow(g, h, toSun, w);
-        sunVisibility *= v_lit * clouds * mix(0.35, 1.0, v_ao);
-        skyVisibility *= v_ao * cloudShadow(g, h, up, w);
+        sunVisibility *= v_lit * clouds * mix(0.35, 1.0, v_ao) * mix(1.0, 0.15, g_under);
+        skyVisibility *= v_ao * cloudShadow(g, h, up, w) * mix(1.0, 0.4, g_under);
         occluderSun *= clouds * 0.5;
     }`;
 
