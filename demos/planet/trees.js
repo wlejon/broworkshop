@@ -230,8 +230,13 @@ const fragment = (radius) => `in vec3 v_col;
             // Each finger is needled twigs: across and along it, a grain
             // that averages out where it is finer than a pixel.
             vec2 g = vec2(a * 7.0, v_branch.z * 38.0);
-            vec2 gc = floor(g);
-            float twig = fract(sin(dot(gc, vec2(12.9898, 78.233)) + v_seed * 31.0) * 43758.5453);
+            vec2 gc = floor(g), gf = g - gc;
+            gf = gf * gf * (3.0 - 2.0 * gf);
+            float s0 = v_seed * 31.0;
+            float twig = mix(mix(fract(sin(dot(gc, vec2(12.9898, 78.233)) + s0) * 43758.5453),
+                                 fract(sin(dot(gc + vec2(1.0, 0.0), vec2(12.9898, 78.233)) + s0) * 43758.5453), gf.x),
+                             mix(fract(sin(dot(gc + vec2(0.0, 1.0), vec2(12.9898, 78.233)) + s0) * 43758.5453),
+                                 fract(sin(dot(gc + vec2(1.0, 1.0), vec2(12.9898, 78.233)) + s0) * 43758.5453), gf.x), gf.y);
             float gw = max(fwidth(g.x), fwidth(g.y));
             shade *= mix(1.0, mix(0.72, 1.12, twig), inBranch * smoothstep(0.5, 0.15, gw));
             // The fingers' edges turn from the sun: rounded, not painted.

@@ -293,9 +293,9 @@ const volumeGlsl = (radius) => cloudGlsl(radius) + `
         float litAt = -1.0e9;
 
         // Steps grow with the distance (a pixel's footprint grows with it,
-        // and the field with it): an eighth of the footprint ahead, at least
-        // 20 m. Started at a per-pixel offset, so a step's edge is grain, not
-        // bands.
+        // and the field with it): 4% of the distance ahead, at least 20 m, a
+        // step landing in cloud backing up to find its edge. Started at a
+        // per-pixel offset, so a step's edge is grain, not bands.
         uint hp = uint(gl_FragCoord.x) * 1973u + uint(gl_FragCoord.y) * 9277u;
         hp = (hp ^ (hp >> 13)) * 0x5bd1e995u;
         float jitter = float((hp ^ (hp >> 15)) & 1023u) / 1024.0;
@@ -329,7 +329,7 @@ const volumeGlsl = (radius) => cloudGlsl(radius) + `
         // At least a dozen steps across the layer, so its profile is sampled
         // and not hit or missed by the jitter of one step.
         float dtMax = clamp((t1 - t0) / 12.0, 20.0, 4000.0);
-        float first = clamp(t0 * 0.02, 20.0, dtMax) * jitter;
+        float first = clamp(t0 * 0.04, 20.0, dtMax) * jitter;
         t += first;
         // Inside cloud, steps of an optical depth of at most 4 in its
         // densest sub-column.
@@ -342,7 +342,7 @@ const volumeGlsl = (radius) => cloudGlsl(radius) + `
         // The sun tap's tops (below), for the cloud the ray is in.
         vec4 tapTop = vec4(0.0);
         for (int i = 0; i < 96 && t < t1; i++) {
-            float dt = clamp(t * 0.02, 20.0, dtMax);
+            float dt = clamp(t * 0.04, 20.0, dtMax);
             if (inCloud) dt = min(dt, inStep);
             else if (t < fineUntil) dt = min(dt, CLOUD_STEP);
             float w = max(t * u_pixel, dt * 0.5);
