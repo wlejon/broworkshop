@@ -78,6 +78,10 @@ const TRUTH = octavesFor(RADIUS * Math.PI / 2 / 2 ** MAX_LEVEL);
 
 const MAX_HEIGHT = 9000;
 const PRODUCE_PER_UPDATE = 24;
+// The GPU ms a frame's production may take: the batch is sized to it,
+// the nearest error first, so motion keeps its frame rate and the ground
+// nearest the eye still sharpens first.
+const PRODUCE_BUDGET_MS = 0.6;
 // k_tile's per-tile height gather for k_range (planet.bk), zeroed between
 // batches by k_range itself.
 const span = bro.kernel.createBuffer(PRODUCE_PER_UPDATE * 2 * 4);
@@ -116,7 +120,7 @@ function makeCache(pixelsPerTexel) {
     cache = bro.tiles.createCache({
         domain: { type: 'cubeSphere', radius: RADIUS, center: [0, 0, 0] },
         tileSize: TILE, border: BORDER, capacity: CAPACITY, maxLevel: MAX_LEVEL,
-        minHeight: 0, maxHeight: MAX_HEIGHT, pixelsPerCell, producePerUpdate: PRODUCE_PER_UPDATE,
+        minHeight: 0, maxHeight: MAX_HEIGHT, pixelsPerCell, producePerUpdate: PRODUCE_PER_UPDATE, produceBudgetMs: PRODUCE_BUDGET_MS,
         layers: { position: 16, detail: DETAIL * DETAIL * 8, horizon: 16 },
         ranges: true,
         // The whole batch in five dispatches: the GPU fills up on the
@@ -452,7 +456,7 @@ let ground = null;
 ground = scene.createInstancedMesh({ mesh: patchMesh(), color: [1, 1, 1], castsShadow: false, receivesShadow: false, doubleSided: true });
 ground.setShader({ vertex, fragment });
 ground.cullMargin = 4 * RADIUS;   // the shader places tiles; the cache culls them
-makeCache(2);
+makeCache(4);
 
 // ── Camera: doubles about the planet's center ───────────────────────────────
 
