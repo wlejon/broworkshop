@@ -90,9 +90,20 @@ function noiseSlices() {
         sum2 += val * val;
     }
     const mean = sum / out.length, scale = Math.sqrt(NOISE_VAR / (sum2 / out.length - mean * mean));
-    for (let i = 0; i < out.length; i++) out[i] = (out[i] - mean) * scale;
+    let abs = 0, abs2 = 0;
+    for (let i = 0; i < out.length; i++) {
+        out[i] = (out[i] - mean) * scale;
+        abs += Math.abs(out[i]);
+        abs2 += out[i] * out[i];
+    }
+    BILLOW_MEAN = abs / out.length;
+    BILLOW_VAR = abs2 / out.length - BILLOW_MEAN * BILLOW_MEAN;
     return out;
 }
+// The billows' noise (cloudDetailed): the noise's magnitude less its mean,
+// and its variance, from the slices.
+let BILLOW_MEAN = 0, BILLOW_VAR = 0;
+const NOISE = noiseSlices();
 
 // A bound on the gradient (per m along the layer) of the column resolved at
 // footprint w: what a level's amount can change by within a distance.
@@ -171,9 +182,15 @@ export const cloudGlsl = (radius, filtered = false) => `
     // column read alone (cloudColumn) carries their variance as unresolved,
     // so the shadows, the light's tops and far pixels see what they average
     // to; where a sample resolves them (cloudDetailed, for the occupancy)
-    // they are added and their share of the variance taken back out.
-    const vec3 CLOUD_DETAIL[2] = vec3[2](vec3(480.0, 0.07, 0.0), vec3(190.0, 0.04, 17.0));
-    const float CLOUD_DETAIL_VAR = ${NOISE_VAR} * (0.07 * 0.07 + 0.04 * 0.04);
+    // they are added and their share of the variance taken back out. The
+    // finer two are billows, the noise's magnitude less its mean: lobes
+    // bounded by creases where it crosses zero, a cumulus's cauliflower
+    // (the billowy erosion of Nubis's detail), still averaging to nothing.
+    // Each octave: wavelength, amplitude, offset, billow.
+    const vec4 CLOUD_DETAIL[4] = vec4[4](vec4(480.0, 0.07, 0.0, 0.0), vec4(190.0, 0.04, 17.0, 0.0),
+                                         vec4(85.0, 0.03, 5.3, 1.0), vec4(38.0, 0.02, 11.7, 1.0));
+    const float CLOUD_BILLOW_MEAN = ${BILLOW_MEAN}, CLOUD_BILLOW_VAR = ${BILLOW_VAR};
+    const float CLOUD_DETAIL_VAR = ${NOISE_VAR} * (0.07 * 0.07 + 0.04 * 0.04) + CLOUD_BILLOW_VAR * (0.03 * 0.03 + 0.02 * 0.02);
     const float CLOUD_DETAIL_FULL = 0.04;
     float cloudDetailScale(float F) { return clamp(F / CLOUD_DETAIL_FULL, 0.0, 1.0); }
 
@@ -356,12 +373,14 @@ const volumeGlsl = (radius) => cloudGlsl(radius, true) + `
     vec2 cloudDetailed(vec3 P, float w, float F, float variance) {
         float g = cloudDetailScale(F);
         vec2 r = vec2(F, variance);
-        for (int k = 0; k < 2 && g > 0.0; k++) {
-            vec3 o = CLOUD_DETAIL[k];
+        for (int k = 0; k < 4 && g > 0.0; k++) {
+            vec4 o = CLOUD_DETAIL[k];
             float a = clamp(o.x / w * 0.5 - 1.0, 0.0, 1.0);
             if (a <= 0.0) break;
-            r.x += a * g * o.y * cloudNoise(P / o.x + o.z);
-            r.y -= a * a * g * g * o.y * o.y * ${NOISE_VAR};
+            float n = cloudNoise(P / o.x + o.z);
+            bool billow = o.w > 0.5;
+            r.x += a * g * o.y * (billow ? abs(n) - CLOUD_BILLOW_MEAN : n);
+            r.y -= a * a * g * g * o.y * o.y * (billow ? CLOUD_BILLOW_VAR : ${NOISE_VAR});
         }
         r.y = max(r.y, 0.0);
         return r;
@@ -585,10 +604,13 @@ const volumeGlsl = (radius) => cloudGlsl(radius, true) + `
                     // above it up to the sub-column's own top (bright tops,
                     // dark bases), at the sun's slant, deepening along the
                     // step as the ray descends and thinning as it rises.
+                    // Of the amount with the detail resolved here: the
+                    // column's alone put the top below cloud the detail
+                    // lifts over it, lit in full in a hard-edged patch.
                     float descent = -dot(dir, upP);
-                    float dev = sqrt(v);
-                    vec4 top = vec4(cloudTop(F + dev * QUANTILE.x), cloudTop(F + dev * QUANTILE.y),
-                                    cloudTop(F + dev * QUANTILE.z), cloudTop(F + dev * QUANTILE.w));
+                    float dev = sqrt(fd.y);
+                    vec4 top = vec4(cloudTop(fd.x + dev * QUANTILE.x), cloudTop(fd.x + dev * QUANTILE.y),
+                                    cloudTop(fd.x + dev * QUANTILE.z), cloudTop(fd.x + dev * QUANTILE.w));
                     vec4 above = max(top - s, 0.0) * CLOUD_DEPTH;
                     // And the cloud the sun's ray meets on its way out, which
                     // shades a top's far side behind the bumps toward the
@@ -701,7 +723,7 @@ const volumeGlsl = (radius) => cloudGlsl(radius, true) + `
 export function createClouds(scene, radius, module, readers, seed) {
     const kernel = module.kernel('k_cloud_level');
     const node = scene.createVolume({ fragment: volumeGlsl(radius), name: 'clouds' });
-    node.setShaderTexture('u_cloudNoise', { data: noiseSlices(), width: NOISE_TEXELS, height: NOISE_TEXELS, layers: NOISE_TEXELS, repeat: true });
+    node.setShaderTexture('u_cloudNoise', { data: NOISE, width: NOISE_TEXELS, height: NOISE_TEXELS, layers: NOISE_TEXELS, repeat: true });
     const nodes = [node, ...readers];
     const map = bro.kernel.createBuffer((GLOBE_BASE + 6 * FACE_TEXELS) * 8);
     // u_cloudHead: LEVELS + 1 headers, then each level's grid origin in
