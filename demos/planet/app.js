@@ -325,10 +325,14 @@ const fragment = `buffer uint u_det[];
         skyVisibility *= visible * 0.25;
         if (dot(bent, bent) > 1e-12) skyNormal = normalize(bent);
 
-        // The clouds' shadow (clouds.js), at this pixel's footprint.
+        // The clouds' shadow (clouds.js), at this pixel's footprint; and the
+        // sky they hide overhead: under a deck the blue sky is gone and the
+        // light is the grey the deck lets through.
         vec3 g = (u_camHi + u_camLo) + vWorldPos;
         float w = max(length(dFdx(vWorldPos)), length(dFdy(vWorldPos)));
-        sunVisibility *= cloudShadow(g, length(g) - CLOUD_R, toSun, w);
+        float h = length(g) - CLOUD_R;
+        sunVisibility *= cloudShadow(g, h, toSun, w);
+        skyVisibility *= cloudShadow(g, h, up, w);
     }
 
     // Texel (x, y) of this tile: colour (rgb, water) and the octahedral
