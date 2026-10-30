@@ -226,9 +226,11 @@ pub fn octaves_for(extent: f64, inv_size: f64) -> f64 {
 // wavelength, the scale a range is composed at: the broader octaves organise
 // the ridges into ranges, the finer fall off by 0.45, a little faster than
 // equal slope (0.5), so the slope settles near 33 degrees instead of growing
-// with every octave down.
+// with every octave down. They go on to a 2.3 m wavelength: spurs, gullies
+// and knolls down to a few metres, where a mountainside stopped at 73 m
+// was smooth as a dune from close by.
 const RIDGE_FIRST: i32 = 4;
-const RIDGE_LAST: i32 = 16;
+const RIDGE_LAST: i32 = 21;
 fn ridge_amp(o: i32) -> f32 {
     if (o < 8) {
         if (o == 4) { return 200.0; }
