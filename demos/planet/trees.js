@@ -19,7 +19,7 @@
 // models). Near, seven tiers of seven; out to MID, three of five; beyond, the
 // cone's silhouette facing the eye; past FAR they shrink into the ground,
 // whose forest colour is what they average to (ground.bk tree_cover).
-import { cloudGlsl, faceFrame } from "/app/clouds.js";
+import { faceFrame } from "/app/clouds.js";
 import { createSunGrid } from "/app/sun.js";
 
 const N = 512;             // sites along an edge
@@ -177,7 +177,7 @@ const BLOCKS = N / B;           // blocks along an edge
 const BLOCK_REACH = 0.7072 * B * 1.4143 * SPACING + 30 + 250;
 
 const vertex = `buffer float u_field[];
-    buffer float u_sun[];
+    buffer uint u_sun[];
     buffer int u_blocks[];
     uniform vec3 u_camHi;
     uniform vec3 u_camLo;
@@ -192,16 +192,21 @@ const vertex = `buffer float u_field[];
     uniform vec2 u_shape;       // tiers, rim vertices
     out vec3 v_col;
     out float v_ao;
-    out float v_lit;
+    // The sun seen past the terrain and the crowns about, then the clouds'
+    // sun straight through, scattered down, and sky (sunAt): one varying.
+    out vec4 v_light;
     out vec3 v_branch;   // a tier: the point about the trunk (tree frame xy) and how far out (z, 0 at the trunk); -1 none
     out float v_seed;
     ${treeCrownGlsl}
-    float sunAt(vec2 f) {
+    // The sun grid between its points, at field point f (sun.js: the
+    // terrain's sun, then the clouds' direct, scattered and sky).
+    vec4 sunAt(vec2 f) {
         vec2 s = clamp(f / ${SUN_STRIDE}.0, vec2(0.0), vec2(${SUN_P - 1}.0 - 1e-3));
         ivec2 i = ivec2(s);
         vec2 t = s - vec2(i);
         int k = i.y * ${SUN_P} + i.x;
-        return mix(mix(u_sun[k], u_sun[k + 1], t.x), mix(u_sun[k + ${SUN_P}], u_sun[k + ${SUN_P + 1}], t.x), t.y);
+        return mix(mix(unpackUnorm4x8(u_sun[k]), unpackUnorm4x8(u_sun[k + 1]), t.x),
+                   mix(unpackUnorm4x8(u_sun[k + ${SUN_P}]), unpackUnorm4x8(u_sun[k + ${SUN_P + 1}]), t.x), t.y);
     }
     void userVertex(inout vec3 pos, inout vec3 normal, inout vec2 uv) {
         int tree = int(pos.x + 0.5);
@@ -299,7 +304,7 @@ const vertex = `buffer float u_field[];
         normal = n;
         v_col = col;
         v_ao = ao;
-        v_lit = sunAt(vec2(site) + vec2(0.5) + (u_lattice.xy - u_sunLattice));
+        v_light = sunAt(vec2(site) + vec2(0.5) + (u_lattice.xy - u_sunLattice));
         // The neighbours' crowns between this point and the sun: the gap
         // probability of a canopy of their cover (the share of the 8 sites
         // about it holding a tree, times the share a crown hides from above,
@@ -312,19 +317,18 @@ const vertex = `buffer float u_field[];
                 around += (i != 0 || j != 0) && u_field[(o.y * ${N} + o.x) * 7 + 3] > 0.0 ? 1.0 : 0.0;
             }
         float canopy = clamp((H - hgt) / max(H - foot, 1e-3), 0.0, 1.0);
-        v_lit *= pow(1.0 - 0.55 * around / 8.0, canopy / max(dot(u_toSun, up), 0.05));
+        v_light.x *= pow(1.0 - 0.55 * around / 8.0, canopy / max(dot(u_toSun, up), 0.05));
         v_branch = branch;
         v_seed = rnd(seed);
     }`;
 
 const fragment = (radius, ragged) => `in vec3 v_col;
     in float v_ao;
-    in float v_lit;
+    in vec4 v_light;
     in vec3 v_branch;
     in float v_seed;
     uniform vec3 u_camHi;
     uniform vec3 u_camLo;
-    ${cloudGlsl(radius)}
     // userFragment to userLight: 1 on a tier's underside, which the sun reaches
     // only through the needles above it (15%) and the sky through about the
     // gaps below the tier (40%).
@@ -381,25 +385,21 @@ const fragment = (radius, ragged) => `in vec3 v_col;
         metallic = 0.0;
         roughness = 0.85;
     }
-    // The terrain's shadow from the sun grid, the clouds' as the ground's,
-    // and the crown's own: inside and below, its branches hide the sun and
-    // the sky.
+    // The terrain's shadow and the clouds' light from the sun grid, which
+    // takes the clouds as the ground's light does (sun.bk), and the crown's
+    // own: inside and below, its branches hide the sun and the sky.
     void userLight(vec3 toSun, inout float sunVisibility, inout float skyVisibility, inout vec3 skyNormal,
-                   inout float occluderSun) {
-        vec3 g = (u_camHi + u_camLo) + vWorldPos;
-        float h = length(g) - CLOUD_R;
-        vec3 up = normalize(g);
-        float w = max(length(dFdx(vWorldPos)), length(dFdy(vWorldPos)));
-        float clouds = cloudShadow(g, h, toSun, w);
-        sunVisibility *= v_lit * clouds * mix(0.35, 1.0, v_ao) * mix(1.0, 0.15, g_under);
-        skyVisibility *= v_ao * cloudShadow(g, h, up, w) * mix(1.0, 0.4, g_under);
-        occluderSun *= clouds * 0.5;
+                   inout float occluderSun, inout float sunDiffuse) {
+        sunVisibility *= v_light.x * v_light.y * mix(0.35, 1.0, v_ao) * mix(1.0, 0.15, g_under);
+        sunDiffuse = v_light.z;
+        skyVisibility *= v_ao * v_light.w * mix(1.0, 0.4, g_under);
+        occluderSun *= v_light.y * 0.5;
     }`;
 
 // The trees in `scene`, their field produced by `module` (trees.bk
-// k_tree_field) and their sun grid by `sunModule` (sun.bk) at `octaves` of
-// the ground's. Their nodes read the clouds' field (createClouds' readers);
-// `readers` are nodes whose chunks include treeShadowGlsl, bound to theirs.
+// k_tree_field) and their sun grid, the terrain's shadow and the clouds'
+// light, by `sunModule` (sun.bk) at `octaves` of the ground's; `readers`
+// are nodes whose chunks include treeShadowGlsl, bound to theirs.
 // update() each frame with the eye about the planet's centre (f64), its
 // altitude, the unit direction to the sun and the view's forward.
 export function createTrees(scene, radius, module, sunModule, octaves, seed, net, readers = []) {

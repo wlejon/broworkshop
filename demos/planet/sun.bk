@@ -1,11 +1,14 @@
-// How much of the sun's disc the ground sees over the terrain, on a grid of
-// points on the gnomonic plane of a cube face (the points a + e u + f v
-// projected onto the sphere, u = u0 + x delta, v = v0 + y delta): the grass's
-// and the trees' terrain shadow (sun.js). Two kernels: the ground's height at
-// every step toward the sun of every point, in parallel (a point's steps in
-// one thread underfill the GPU), into `steps` (z * points + y * width + x),
-// then each point's share from its steps.
+// How much of the sun's disc the ground sees over the terrain, and what the
+// clouds leave of the sun and the sky there, on a grid of points on the
+// gnomonic plane of a cube face (the points a + e u + f v projected onto the
+// sphere, u = u0 + x delta, v = v0 + y delta): the grass's and the trees'
+// light (sun.js). Two kernels: the ground's height at every step toward the
+// sun of every point, in parallel (a point's steps in one thread underfill
+// the GPU), into `steps` (z * points + y * width + x), then each point's
+// share from its steps, and the clouds' (clouds.bk cloud_light) at the
+// grid's spacing.
 from planet::ground import terrain, sun_step_height, sun_step_angle, sun_elevation_seen, SUN_STEPS;
+from planet::clouds import cloud_light;
 
 fn plane_dir(ax: f64, ay: f64, az: f64, ex: f64, ey: f64, ez: f64, fx: f64, fy: f64, fz: f64,
              u: f64, v: f64) -> vec3<f64> {
@@ -25,10 +28,20 @@ fn k_sun_steps(g: grid<3>, steps: write_store<f32, 1>,
         sun_step_height(dir, normalize(vec3<f64>(sx, sy, sz)), k, radius, octaves, seed, net);
 }
 
+// 0 to 1 in 8 bits, rounded.
+fn unorm8(x: f32) -> i32 {
+    return (clamp(x, 0.0, 1.0) * 255.0 + 0.5) as i32;
+}
+
+// Point i into out[i]: the terrain's share of the sun, then the clouds' sun
+// straight through, scattered down, and sky (cloud_light), 8 bits each from
+// the lowest: four shares that change smoothly over the grid, read by every
+// vertex of every blade and needle, so in one word.
 @kernel @grid(2)
-fn k_sun(g: grid<2>, steps: read_store<f32, 1>, out: write_store<f32, 1>,
+fn k_sun(g: grid<2>, steps: read_store<f32, 1>, out: write_store<i32, 1>,
          ax: f64, ay: f64, az: f64, ex: f64, ey: f64, ez: f64, fx: f64, fy: f64, fz: f64,
-         u0: f64, v0: f64, delta: f64, sx: f64, sy: f64, sz: f64, radius: f64, octaves: f64, seed: i32, net: read_store<f32, 1>) {
+         u0: f64, v0: f64, delta: f64, sx: f64, sy: f64, sz: f64, radius: f64, octaves: f64, seed: i32, net: read_store<f32, 1>,
+         detail_var: f32) {
     let dir = plane_dir(ax, ay, az, ex, ey, ez, fx, fy, fz,
                         u0 + (g.x() as f64) * delta, v0 + (g.y() as f64) * delta);
     let h = terrain(dir, radius, octaves, seed, net) as f32;
@@ -38,5 +51,8 @@ fn k_sun(g: grid<2>, steps: read_store<f32, 1>, out: write_store<f32, 1>,
     for (var k: i32 = 0; k < SUN_STEPS; k += 1) {
         highest = max(highest, sun_step_angle(h, steps[k * points + i], k, radius));
     }
-    out[i] = sun_elevation_seen(dir, normalize(vec3<f64>(sx, sy, sz)), highest);
+    let to_sun = normalize(vec3<f64>(sx, sy, sz));
+    let c = cloud_light(dir, max(h, 0.0), to_sun, delta * radius, radius, seed, detail_var);
+    out[i] = unorm8(sun_elevation_seen(dir, to_sun, highest)) | (unorm8(c.x) << 8) | (unorm8(c.y) << 16)
+           | (unorm8(c.z) << 24);
 }

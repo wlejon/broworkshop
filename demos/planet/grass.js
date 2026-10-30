@@ -24,7 +24,7 @@
 // gone and the ground's colour is what is left. A blade is a tapered strip
 // of three segments, bent toward its facing by its own amount and swayed by
 // a gusting breeze.
-import { cloudGlsl, faceFrame } from "/app/clouds.js";
+import { faceFrame } from "/app/clouds.js";
 import { createSunGrid } from "/app/sun.js";
 
 const N = 128;             // field cells along an edge
@@ -115,7 +115,7 @@ export const grassFloorGlsl = `
     }`;
 
 const vertex = `buffer float u_field[];
-    buffer float u_sun[];
+    buffer uint u_sun[];
     buffer int u_cells[];
     uniform vec3 u_camHi;
     uniform vec3 u_camLo;
@@ -132,7 +132,10 @@ const vertex = `buffer float u_field[];
     uniform float u_cellCount;
     out vec3 v_col;
     out float v_t;
-    out float v_lit;
+    // The sun seen past the terrain, then the clouds' sun straight through,
+    // scattered down, and sky (sunAt): one varying, as a blade's triangles
+    // are tiny and each one costs.
+    out vec4 v_light;
     uint pcg(uint v) {
         uint s = v * 747796405u + 2891336453u;
         uint w = ((s >> ((s >> 28u) + 4u)) ^ s) * 277803737u;
@@ -145,13 +148,15 @@ const vertex = `buffer float u_field[];
         cover = u_field[k + 3];
         albedo = vec3(u_field[k + 4], u_field[k + 5], u_field[k + 6]);
     }
-    // The sun grid between its points, at field point f.
-    float sunAt(vec2 f) {
+    // The sun grid between its points, at field point f (sun.js: the
+    // terrain's sun, then the clouds' direct, scattered and sky).
+    vec4 sunAt(vec2 f) {
         vec2 s = clamp(f / ${SUN_STRIDE}.0, vec2(0.0), vec2(${SUN_P - 1}.0 - 1e-3));
         ivec2 i = ivec2(s);
         vec2 t = s - vec2(i);
         int k = i.y * ${SUN_P} + i.x;
-        return mix(mix(u_sun[k], u_sun[k + 1], t.x), mix(u_sun[k + ${SUN_P}], u_sun[k + ${SUN_P + 1}], t.x), t.y);
+        return mix(mix(unpackUnorm4x8(u_sun[k]), unpackUnorm4x8(u_sun[k + 1]), t.x),
+                   mix(unpackUnorm4x8(u_sun[k + ${SUN_P}]), unpackUnorm4x8(u_sun[k + ${SUN_P + 1}]), t.x), t.y);
     }
     void userVertex(inout vec3 pos, inout vec3 normal, inout vec2 uv) {
         // The cells are sorted by their angle about the field's centre, and a
@@ -176,7 +181,7 @@ const vertex = `buffer float u_field[];
             normal = vec3(0.0, 0.0, 1.0);
             v_t = 0.0;
             v_col = vec3(0.0);
-            v_lit = 0.0;
+            v_light = vec4(0.0);
             return;
         }
         vec3 p00, p10, p01, p11, a00, a10, a01, a11;
@@ -188,7 +193,7 @@ const vertex = `buffer float u_field[];
         vec3 base = mix(mix(p00, p10, at.x), mix(p01, p11, at.x), at.y);
         float cover = mix(mix(c00, c10, at.x), mix(c01, c11, at.x), at.y);
         vec3 albedo = mix(mix(a00, a10, at.x), mix(a01, a11, at.x), at.y);
-        v_lit = sunAt(vec2(cell) + at + (u_lattice - u_sunLattice));
+        v_light = sunAt(vec2(cell) + at + (u_lattice - u_sunLattice));
         vec3 rel = (u_oHi - u_camHi) + (u_oLo - u_camLo) + base;
         vec3 up = normalize(u_oHi + (u_oLo + base));
         float d = length(rel);
@@ -235,10 +240,9 @@ const vertex = `buffer float u_field[];
 
 const fragment = (radius) => `in vec3 v_col;
     in float v_t;
-    in float v_lit;
+    in vec4 v_light;
     uniform vec3 u_camHi;
     uniform vec3 u_camLo;
-    ${cloudGlsl(radius)}
     void userFragment(inout vec3 baseColor, inout vec3 normal, inout float metallic,
                       inout float roughness, inout vec3 emissive, inout float alpha) {
         // Darker toward the root, where the blades around shade it.
@@ -249,25 +253,21 @@ const fragment = (radius) => `in vec3 v_col;
         metallic = 0.0;
         roughness = 0.75;
     }
-    // The terrain's shadow from the field; the clouds' as the ground's; and
-    // the sky the blades around hide from a blade's lower part.
+    // The terrain's shadow and the clouds' light from the sun grid, which
+    // takes the clouds as the ground's light does (sun.bk); and the sky the
+    // blades around hide from a blade's lower part.
     void userLight(vec3 toSun, inout float sunVisibility, inout float skyVisibility, inout vec3 skyNormal,
-                   inout float occluderSun) {
-        vec3 g = (u_camHi + u_camLo) + vWorldPos;
-        float h = length(g) - CLOUD_R;
-        vec3 up = normalize(g);
-        float w = max(length(dFdx(vWorldPos)), length(dFdy(vWorldPos)));
-        float clouds = cloudShadow(g, h, toSun, w);
-        sunVisibility *= v_lit * clouds;
-        skyVisibility *= mix(0.45, 1.0, v_t) * cloudShadow(g, h, up, w);
-        occluderSun *= clouds;
+                   inout float occluderSun, inout float sunDiffuse) {
+        sunVisibility *= v_light.x * v_light.y;
+        sunDiffuse = v_light.z;
+        skyVisibility *= mix(0.45, 1.0, v_t) * v_light.w;
+        occluderSun *= v_light.y;
     }`;
 
 // The grass in `scene`, its field produced by `module` (grass.bk
-// k_grass_field) and its sun grid by `sunModule` (sun.bk) at `octaves` of
-// the ground's. Its nodes read the clouds'
-// field (createClouds' readers); `readers` are nodes whose chunks include
-// grassFloorGlsl, bound to its field. update() each frame with the eye about the
+// k_grass_field) and its sun grid, the terrain's shadow and the clouds'
+// light, by `sunModule` (sun.bk) at `octaves` of the ground's; `readers` are
+// nodes whose chunks include grassFloorGlsl, bound to its field. update() each frame with the eye about the
 // planet's centre (f64), its altitude and the unit direction to the sun.
 export function createGrass(scene, radius, module, sunModule, octaves, seed, net, readers = []) {
     const fieldKernel = module.kernel('k_grass_field'), heightsKernel = module.kernel('k_grass_heights');

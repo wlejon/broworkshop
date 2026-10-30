@@ -104,6 +104,9 @@ function noiseSlices() {
 // and its variance, from the slices.
 let BILLOW_MEAN = 0, BILLOW_VAR = 0;
 const NOISE = noiseSlices();
+// The variance the detail adds to a column at full amount (cloudGlsl's
+// CLOUD_DETAIL_VAR, clouds.bk cloud_light's detail_var).
+export const CLOUD_DETAIL_VAR = NOISE_VAR * (0.07 * 0.07 + 0.04 * 0.04) + BILLOW_VAR * (0.03 * 0.03 + 0.02 * 0.02);
 
 // A bound on the gradient (per m along the layer) of the column resolved at
 // footprint w: what a level's amount can change by within a distance.
@@ -190,7 +193,7 @@ export const cloudGlsl = (radius, filtered = false) => `
     const vec4 CLOUD_DETAIL[4] = vec4[4](vec4(480.0, 0.07, 0.0, 0.0), vec4(190.0, 0.04, 17.0, 0.0),
                                          vec4(85.0, 0.03, 5.3, 1.0), vec4(38.0, 0.02, 11.7, 1.0));
     const float CLOUD_BILLOW_MEAN = ${BILLOW_MEAN}, CLOUD_BILLOW_VAR = ${BILLOW_VAR};
-    const float CLOUD_DETAIL_VAR = ${NOISE_VAR} * (0.07 * 0.07 + 0.04 * 0.04) + CLOUD_BILLOW_VAR * (0.03 * 0.03 + 0.02 * 0.02);
+    const float CLOUD_DETAIL_VAR = ${CLOUD_DETAIL_VAR};
     const float CLOUD_DETAIL_FULL = 0.04;
     float cloudDetailScale(float F) { return clamp(F / CLOUD_DETAIL_FULL, 0.0, 1.0); }
 
@@ -203,16 +206,39 @@ export const cloudGlsl = (radius, filtered = false) => `
                    mix(cloudTexel(i + n), cloudTexel(i + n + 1), f.x), f.y);
     }
 
-    // The globe level at the unit direction q: its face, the largest axis.
-    vec2 cloudGlobe(vec3 q) {
+    // The globe level's face at the unit direction q (the largest axis), and
+    // q's texel coordinates t on it.
+    int cloudFace(vec3 q, out vec2 t) {
         vec3 m = abs(q);
         int axis = m.x >= m.y && m.x >= m.z ? 0 : (m.y >= m.z ? 1 : 2);
         float z = q[axis];
-        int face = axis + (z < 0.0 ? 3 : 0);
         vec2 uv = vec2(q[(axis + 1) % 3], q[(axis + 2) % 3]) / abs(z);
         float delta = u_cloudHead[CLOUD_LEVELS].x;
-        vec2 t = clamp((uv + 1.0 + delta) / delta, vec2(0.0), vec2(float(CLOUD_FACE) - 1.001));
+        t = clamp((uv + 1.0 + delta) / delta, vec2(0.0), vec2(float(CLOUD_FACE) - 1.001));
+        return axis + (z < 0.0 ? 3 : 0);
+    }
+
+    // The globe level at the unit direction q.
+    vec2 cloudGlobe(vec3 q) {
+        vec2 t;
+        int face = cloudFace(q, t);
         return cloudBilinear(CLOUD_GLOBE + face * CLOUD_FACE_TEXELS, CLOUD_FACE, t);
+    }
+
+    // The level a footprint of w metres reads at the layer point q (0 the
+    // finest, fractional between two, CLOUD_LEVELS the globe), and q's point
+    // uv on the eye's face plane (the globe off it). Never finer than
+    // CLOUD_COLUMN_MIN: below it the cloud is the detail's, in three
+    // dimensions, and the column's own octaves there its variance.
+    const float CLOUD_COLUMN_MIN = 60.0;
+    float cloudLevelOf(vec3 q, float w, out vec2 uv) {
+        uv = vec2(0.0);
+        float z = dot(q, u_cloudA);
+        if (z <= 0.1) return float(CLOUD_LEVELS);
+        uv = vec2(dot(q, u_cloudE), dot(q, u_cloudF)) / z;
+        float d = 1.0 + dot(uv, uv);
+        float stretch = sqrt(1.0 + max(uv.x * uv.x, uv.y * uv.y)) / d;
+        return clamp(log2(max(w, CLOUD_COLUMN_MIN) / (2.0 * CLOUD_R * CLOUD_DELTA0 * stretch)), 0.0, float(CLOUD_LEVELS));
     }
 
     // The layer's lift at the unit direction q (clouds.bk k_cloud_lift): its
@@ -220,13 +246,8 @@ export const cloudGlsl = (radius, filtered = false) => `
     buffer float u_cloudLift[];
     const float CLOUD_LIFT_SLOPE = ${LIFT_SLOPE};
     float cloudLift(vec3 q) {
-        vec3 m = abs(q);
-        int axis = m.x >= m.y && m.x >= m.z ? 0 : (m.y >= m.z ? 1 : 2);
-        float z = q[axis];
-        int face = axis + (z < 0.0 ? 3 : 0);
-        vec2 uv = vec2(q[(axis + 1) % 3], q[(axis + 2) % 3]) / abs(z);
-        float delta = u_cloudHead[CLOUD_LEVELS].x;
-        vec2 t = clamp((uv + 1.0 + delta) / delta, vec2(0.0), vec2(float(CLOUD_FACE) - 1.001));
+        vec2 t;
+        int face = cloudFace(q, t);
         vec2 c = floor(t), f = t - c;
         int i = face * CLOUD_FACE_TEXELS + int(c.y) * CLOUD_FACE + int(c.x);
         return mix(mix(u_cloudLift[i], u_cloudLift[i + 1], f.x),
@@ -261,6 +282,58 @@ ${filtered ? `
         c = mix(mix(cloudLevelTexel(base, p), cloudLevelTexel(base, p + ivec2(1, 0)), f.x),
                 mix(cloudLevelTexel(base, p + ivec2(0, 1)), cloudLevelTexel(base, p + ivec2(1, 1)), f.x), f.y);
         return true;
+    }
+
+    // What the clouds leave of the ground's light (clouds.bk k_cloud_light),
+    // over the column field's texels: the sun straight through (x),
+    // scattered down (y), and the sky's (z).
+    buffer uint u_cloudLight[];
+    vec3 cloudLightTexel(int base, ivec2 p) {
+        p &= ivec2(CLOUD_N - 1);
+        return unpackUnorm4x8(u_cloudLight[base + p.y * CLOUD_N + p.x]).xyz;
+    }
+    bool cloudLightLevel(int k, vec2 uv, out vec3 c) {
+        vec4 h = u_cloudHead[k];
+        vec2 t = (uv - h.xy) / h.z;
+        if (any(lessThan(t, vec2(0.0))) || any(greaterThanEqual(t, vec2(float(CLOUD_N) - 1.001)))) return false;
+        vec2 fl = floor(t), f = t - fl;
+        ivec2 p = ivec2(fl) + ivec2(u_cloudHead[CLOUD_LEVELS + 1 + k].xy);
+        int base = k * CLOUD_N * CLOUD_N;
+        c = mix(mix(cloudLightTexel(base, p), cloudLightTexel(base, p + ivec2(1, 0)), f.x),
+                mix(cloudLightTexel(base, p + ivec2(0, 1)), cloudLightTexel(base, p + ivec2(1, 1)), f.x), f.y);
+        return true;
+    }
+    vec3 cloudLightGlobe(vec3 q) {
+        vec2 t;
+        int face = cloudFace(q, t);
+        vec2 c = floor(t), f = t - c;
+        int i = CLOUD_GLOBE + face * CLOUD_FACE_TEXELS + int(c.y) * CLOUD_FACE + int(c.x);
+        return mix(mix(unpackUnorm4x8(u_cloudLight[i]).xyz, unpackUnorm4x8(u_cloudLight[i + 1]).xyz, f.x),
+                   mix(unpackUnorm4x8(u_cloudLight[i + CLOUD_FACE]).xyz,
+                       unpackUnorm4x8(u_cloudLight[i + CLOUD_FACE + 1]).xyz, f.x), f.y);
+    }
+    // At the ground point g over a footprint of w metres, between the levels
+    // as cloudColumn reads the field.
+    vec3 cloudLight(vec3 g, float w) {
+        vec3 q = normalize(g);
+        vec2 uv;
+        float l = cloudLevelOf(q, w, uv);
+        int k0 = int(l);
+        float frac = l - float(k0);
+        vec3 c = vec3(1.0, 0.0, 1.0);
+        int k;
+        for (k = k0; k < CLOUD_LEVELS; k++) {
+            if (cloudLightLevel(k, uv, c)) break;
+            frac = 0.0;
+        }
+        if (k == CLOUD_LEVELS) return cloudLightGlobe(q);
+        if (frac > 0.0) {
+            vec3 c1;
+            if (k + 1 == CLOUD_LEVELS) c1 = cloudLightGlobe(q);
+            else if (!cloudLightLevel(k + 1, uv, c1)) c1 = c;
+            c = mix(c, c1, frac);
+        }
+        return c;
     }`}
 
     // The column's amount F at the layer point q (unit direction from the
@@ -270,32 +343,24 @@ ${filtered ? `
     // False when even 3.4 deviations of what is finer cannot lift it to
     // need, with clear the distance (m) within which the level's own
     // amount cannot either, given that need falls by at most drop a metre
-    // along the way: how far a ray may step and find no cloud. Never finer
-    // than CLOUD_COLUMN_MIN: below it the cloud is the detail's, in three
-    // dimensions, and the column's own octaves there its variance.
-    const float CLOUD_COLUMN_MIN = 60.0;
+    // along the way: how far a ray may step and find no cloud (cloudLevelOf:
+    // never finer than CLOUD_COLUMN_MIN).
     bool cloudColumn(vec3 q, float w, float need, float drop, out float F, out float variance, out float clear) {
-        w = max(w, CLOUD_COLUMN_MIN);
+        vec2 uv;
+        float l = cloudLevelOf(q, w, uv);
+        int k0 = int(l);
+        float frac = l - float(k0);
         vec2 c = vec2(0.0);
-        int k = CLOUD_LEVELS;
-        float z = dot(q, u_cloudA);
-        if (z > 0.1) {
-            vec2 uv = vec2(dot(q, u_cloudE), dot(q, u_cloudF)) / z;
-            float d = 1.0 + dot(uv, uv);
-            float stretch = sqrt(1.0 + max(uv.x * uv.x, uv.y * uv.y)) / d;
-            float l = clamp(log2(w / (2.0 * CLOUD_R * CLOUD_DELTA0 * stretch)), 0.0, float(CLOUD_LEVELS));
-            int k0 = int(l);
-            float frac = l - float(k0);
-            for (k = k0; k < CLOUD_LEVELS; k++) {
-                if (cloudLevel(k, uv, c)) break;
-                frac = 0.0;
-            }
-            if (k < CLOUD_LEVELS && frac > 0.0) {
-                vec2 c1;
-                if (k + 1 == CLOUD_LEVELS) c1 = cloudGlobe(q);
-                else if (!cloudLevel(k + 1, uv, c1)) c1 = c;
-                c = mix(c, c1, frac);
-            }
+        int k;
+        for (k = k0; k < CLOUD_LEVELS; k++) {
+            if (cloudLevel(k, uv, c)) break;
+            frac = 0.0;
+        }
+        if (k < CLOUD_LEVELS && frac > 0.0) {
+            vec2 c1;
+            if (k + 1 == CLOUD_LEVELS) c1 = cloudGlobe(q);
+            else if (!cloudLevel(k + 1, uv, c1)) c1 = c;
+            c = mix(c, c1, frac);
         }
         if (k == CLOUD_LEVELS) c = cloudGlobe(q);
         F = c.x;
@@ -326,34 +391,12 @@ ${filtered ? `
         return sqrt(x / (1.0 + x));
     }
 
-    // What the clouds leave of the sun at the ground point g (about the
-    // centre, at altitude h): the sun's ray crosses the layer's lower part
-    // at q; the share of sky the clouds fill there (at the ground's
-    // footprint w) passes what a cloud of the column's depth above g lets
-    // through, the light it scatters forward included: two-stream
-    // diffusion's 1 / (1 + 0.75 (1 - g) tau), g = 0.85.
-    float cloudShadow(vec3 g, float h, vec3 toSun, float w) {
-        float mu = dot(toSun, normalize(g));
-        if (mu <= 0.02) return 1.0;
-        float base = CLOUD_BASE + cloudLift(normalize(g));
-        float t = max(base + 0.2 * CLOUD_DEPTH - h, 0.0) / mu;
-        vec3 q = normalize(g + toSun * t);
-        float sh = clamp((h - base) / CLOUD_DEPTH, 0.0, 1.0);
-        float F, v, clear;
-        if (!cloudColumn(q, max(w, 30.0), cloudNeed(sh), 0.0, F, v, clear)) return 1.0;
-        float thick = base + cloudTop(F) * CLOUD_DEPTH - max(h, base);
-        if (thick <= 0.0) return 1.0;
-        float fill = cloudOccupancy(F, v, sh);
-        float tau = CLOUD_SIGMA * thick / mu;
-        return 1.0 - fill * (1.0 - 1.0 / (1.0 + 0.1125 * tau));
-    }
 `;
 
 const volumeGlsl = (radius) => cloudGlsl(radius, true) + `
     uniform vec3 u_camHi;
     uniform vec3 u_camLo;
     uniform float u_camAlt;     // the eye's altitude over CLOUD_R
-    uniform float u_pixel;      // the angle a pixel spans (rad)
     uniform vec2 u_cloudLiftRange;   // the least and most lift a ray from the eye can meet
 
     // The detail's noise: gradient noise tiling every NOISE_PERIOD lattice
@@ -463,13 +506,6 @@ const volumeGlsl = (radius) => cloudGlsl(radius, true) + `
         vec3 up = normalize(u_camHi + u_camLo);
         float mu = dot(dir, up);
         float hc = u_camAlt;
-        // The meter's sun reads the clouds as the ground lights itself by
-        // them: the share of the sun they leave over a footprint of the
-        // ground the eye looks over, not the one cloud on the ray.
-        if (volumeMeterRay && dot(dir, sceneToSun()) > 0.998) {
-            transmittance = cloudShadow(u_camHi + u_camLo, hc, sceneToSun(), 4.0 * max(hc, 100.0));
-            return;
-        }
         // The layer between its lowest base and highest top about the eye.
         float lo = CLOUD_BASE + u_cloudLiftRange.x, hi = CLOUD_BASE + CLOUD_DEPTH + u_cloudLiftRange.y;
         float bn, bf, tn, tf;
@@ -560,11 +596,12 @@ const volumeGlsl = (radius) => cloudGlsl(radius, true) + `
             float dt = clamp(t * STEP_RATIO, STEP_MIN, dtMax);
             if (inCloud) dt = min(dt, inStep);
             else if (t < fineUntil) dt = min(dt, CLOUD_STEP);
-            // The field at the pixel's footprint, not the step's: a step only
-            // places samples (the jitter and the edge search keep it from
-            // drawing contours), and the field read at it blurred every cloud
-            // to tens of metres.
-            float w = max(t * u_pixel, 1.0);
+            // The field at the ray's footprint (the pixel's; the meter's,
+            // the scene's scale), not the step's: a step only places
+            // samples (the jitter and the edge search keep it from drawing
+            // contours), and the field read at it blurred every cloud to
+            // tens of metres.
+            float w = max(volumeFootprint(t), 1.0);
             vec3 P = eye + dir * t;
             float rp = length(P);
             float h = hc + (2.0 * (CLOUD_R + hc) * mu * t + t * t) / (rp + CLOUD_R + hc);
@@ -708,7 +745,7 @@ const volumeGlsl = (radius) => cloudGlsl(radius, true) + `
                     // sun crossed (the first few scatterings, Wrenninge's
                     // octaves: a top's far side is in its own shade), deep
                     // in, as slowly as diffusion through a thick slab carries
-                    // it, 1 / (1 + 0.75 (1 - g) tau) (cloudShadow's), so a
+                    // it, 1 / (1 + 0.75 (1 - g) tau) (clouds.bk cloud_light's), so a
                     // deck's top glows near white (thick cloud reflects some
                     // 85%) and its base is a lit grey, not black. The sky
                     // the same, through the depth straight up.
@@ -761,9 +798,10 @@ const volumeGlsl = (radius) => cloudGlsl(radius, true) + `
 
 // The clouds' volume in `scene`, its column field produced by `module`'s
 // k_cloud_level (clouds.bk) and its lift by k_cloud_lift once, both bound to
-// it and to each of `readers` (nodes whose chunks include cloudGlsl, for the
-// shadows). update() each frame with the eye about the planet's centre
-// (f64), its altitude and the view's pixel angle.
+// it and to each of `readers` (nodes whose chunks include cloudGlsl, which
+// read the clouds' light on the ground with cloudLight from k_cloud_light's
+// clipmap). update() each frame with the eye about the planet's centre
+// (f64), its altitude and the unit direction to the sun.
 export function createClouds(scene, radius, module, readers, seed) {
     const kernel = module.kernel('k_cloud_level');
     const node = scene.createVolume({ fragment: volumeGlsl(radius), name: 'clouds' });
@@ -774,11 +812,45 @@ export function createClouds(scene, radius, module, readers, seed) {
     // texels (where its wrapped grid starts).
     const head = new Float32Array(4 * (2 * LEVELS + 1));
     const headBuffer = bro.kernel.createBuffer(head.byteLength);
+    // The clouds' light on the ground over the same texels (k_cloud_light,
+    // u_cloudLight), one word each, for the sun toward toSun.
+    const kLight = module.kernel('k_cloud_light');
+    const light = bro.kernel.createBuffer((GLOBE_BASE + 6 * FACE_TEXELS) * 4);
+    const toSun = [0, 0, 0];   // none yet: the first update lights them all
     // Texels [x0, x0 + w) x [y0, y0 + h) of the grid of n a row at texel base.
     const dispatch = (base, n, x0, y0, w, h, frame, o, delta) => {
         if (w > 0 && h > 0) kernel.dispatch([w, h], map, base, n, x0, y0,
             frame.a[0], frame.a[1], frame.a[2], frame.e[0], frame.e[1], frame.e[2], frame.f[0], frame.f[1], frame.f[2],
             o, delta, radius);
+    };
+    const dispatchLight = (base, n, x0, y0, w, h, frame, o, delta) => {
+        if (w > 0 && h > 0) kLight.dispatch([w, h], light, base, n, x0, y0,
+            frame.a[0], frame.a[1], frame.a[2], frame.e[0], frame.e[1], frame.e[2], frame.f[0], frame.f[1], frame.f[2],
+            o, delta, radius, seed, toSun[0], toSun[1], toSun[2], CLOUD_DETAIL_VAR);
+    };
+    // A whole level's light (or a globe face's) marches the field at every
+    // texel, about 4 ms of GPU: produced LIGHT_ROWS rows a frame (0.12 ms),
+    // the finest level first and the globe last, and the queue reported to
+    // the scene (setPendingWork) so a settle waits for it. A level stepping
+    // over the field produces the light of the texels it steps onto with
+    // their columns, at once.
+    const LIGHT_ROWS = 32;
+    let lightQueue = [];   // [level (LEVELS + face for the globe's), first row]
+    const queueLight = (k) => {
+        if (lightQueue.some((j) => j[0] === k)) return;
+        const rows = k < LEVELS ? N : FACE + 2;
+        for (let y = 0; y < rows; y += LIGHT_ROWS) lightQueue.push([k, y]);
+        lightQueue.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    };
+    const runLight = ([k, y]) => {
+        if (k >= LEVELS) {
+            const i = k - LEVELS, rows = Math.min(LIGHT_ROWS, FACE + 2 - y);
+            dispatchLight(GLOBE_BASE + i * FACE_TEXELS, FACE + 2, 0, y, FACE + 2, rows, faceFrame(i), -1 - DELTA_GLOBE, DELTA_GLOBE);
+            return;
+        }
+        if (!held[k]) return;
+        const delta = DELTA0 * 2 ** k, ox = origins[2 * k], oy = origins[2 * k + 1];
+        dispatchLight(k * N * N, N, ox, oy + y, N, Math.min(LIGHT_ROWS, N - y), faceFrame(face), 0, delta);
     };
 
     for (let i = 0; i < 6; i++) dispatch(GLOBE_BASE + i * FACE_TEXELS, FACE + 2, 0, 0, FACE + 2, FACE + 2, faceFrame(i), -1 - DELTA_GLOBE, DELTA_GLOBE);
@@ -865,14 +937,19 @@ export function createClouds(scene, radius, module, readers, seed) {
             const base = k * N * N;
             if (!held[k] || Math.abs(ox - px) >= N || Math.abs(oy - py) >= N) {
                 dispatch(base, N, ox, oy, N, N, frame, 0, delta);
+                queueLight(k);
             } else {
                 // The columns stepped onto, then the rows over the columns
-                // kept.
-                if (ox > px) dispatch(base, N, px + N, oy, ox - px, N, frame, 0, delta);
-                else dispatch(base, N, ox, oy, px - ox, N, frame, 0, delta);
+                // kept; their light with them.
+                const both = (x0, y0, w, h) => {
+                    dispatch(base, N, x0, y0, w, h, frame, 0, delta);
+                    dispatchLight(base, N, x0, y0, w, h, frame, 0, delta);
+                };
+                if (ox > px) both(px + N, oy, ox - px, N);
+                else both(ox, oy, px - ox, N);
                 const kx = Math.max(ox, px), kw = Math.min(ox, px) + N - kx;
-                if (oy > py) dispatch(base, N, kx, py + N, kw, oy - py, frame, 0, delta);
-                else dispatch(base, N, kx, oy, kw, py - oy, frame, 0, delta);
+                if (oy > py) both(kx, py + N, kw, oy - py);
+                else both(kx, oy, kw, py - oy);
             }
             origins[2 * k] = ox;
             origins[2 * k + 1] = oy;
@@ -890,6 +967,7 @@ export function createClouds(scene, radius, module, readers, seed) {
         n.setShaderBuffer('u_cloudHead', headBuffer);
         n.setShaderBuffer('u_cloudLift', lift);
     }
+    for (const n of readers) n.setShaderBuffer('u_cloudLight', light);
     node.setShaderTexture('u_cloudLevels', { buffer: map, width: N, height: N, layers: LEVELS, channels: 2, repeat: true });
     return {
         node,
@@ -897,8 +975,18 @@ export function createClouds(scene, radius, module, readers, seed) {
         // and layout, and the eye's face.
         map, head, layout: { levels: LEVELS, n: N, globe: GLOBE_BASE, faceTexels: FACE_TEXELS },
         get face() { return face; },
-        update(eye, altitude, pixelAngle) {
+        update(eye, altitude, sun) {
+            // A sun moved by a tenth of a degree lights everything anew.
+            if (sun[0] * toSun[0] + sun[1] * toSun[1] + sun[2] * toSun[2] < Math.cos(0.1 * Math.PI / 180)) {
+                toSun[0] = sun[0];
+                toSun[1] = sun[1];
+                toSun[2] = sun[2];
+                lightQueue = [];
+                for (let k = 0; k <= LEVELS + 5; k++) queueLight(k);
+            }
             produce(eye);
+            if (lightQueue.length) runLight(lightQueue.shift());
+            scene.setPendingWork('cloud light', lightQueue.length);
             updateLiftRange(eye);
             for (let k = 0; k < 3; k++) {
                 hi[k] = Math.fround(eye[k]);
@@ -907,7 +995,6 @@ export function createClouds(scene, radius, module, readers, seed) {
             node.setShaderUniform('u_camHi', hi);
             node.setShaderUniform('u_camLo', lo);
             node.setShaderUniform('u_camAlt', altitude);
-            node.setShaderUniform('u_pixel', pixelAngle);
         },
     };
 }

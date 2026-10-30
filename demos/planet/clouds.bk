@@ -3,7 +3,7 @@
 // gnomonic plane of a cube face, the points a + e u + f v projected onto the
 // sphere; each texel holds the column's amount there, filtered to the
 // texel's footprint, and the variance of the octaves too fine for it.
-from planet::ground import perlin_split, terrain_base;
+from planet::ground import perlin_split, terrain_base, octaves_for;
 
 const F0: f32 = -0.12;          // the mean amount: clear more than cloudy
 const NOISE_VAR: f32 = 0.0728;  // perlin_split's variance (ground.bk PERLIN_VAR)
@@ -44,6 +44,105 @@ fn column(q: vec3<f64>, w: f64, radius: f64) -> vec2<f32> {
     return vec2<f32>(f, v);
 }
 
+// The layer's shape (clouds.js cloudGlsl, which the shaders read it by):
+// its base over the lift, its depth, a cloud's extinction, and what a
+// column must hold to reach the layer's height s (cloudNeed); the finest
+// footprint the column resolves, and the amount up to which the detail's
+// variance grows in (CLOUD_COLUMN_MIN, CLOUD_DETAIL_FULL).
+const CLOUD_BASE: f32 = 1500.0;
+const CLOUD_DEPTH: f32 = 2600.0;
+const CLOUD_SIGMA: f32 = 0.03;
+const CLOUD_FLOOR: f32 = 0.02;
+const CLOUD_CURVE: f32 = 0.7;
+const CLOUD_COLUMN_MIN: f64 = 60.0;
+const CLOUD_DETAIL_FULL: f32 = 0.04;
+const CLOUD_SHADOW_STEPS: i32 = 6;
+const LIFT_OCTAVES: f64 = 3.0;   // the lift's (k_cloud_lift)
+fn cloud_need(s: f32) -> f32 {
+    let s2 = min(s * s, 0.999);
+    return CLOUD_FLOOR + CLOUD_CURVE * s2 / (1.0 - s2);
+}
+// The chance of cloud at height s in a column of amount f with unresolved
+// variance v (cloudOccupancy's logistic).
+fn cloud_occupancy(f: f32, v: f32, s: f32) -> f32 {
+    return 1.0 / (1.0 + exp(-1.7 * (f - cloud_need(s)) / sqrt(v + 1.0e-5)));
+}
+// The optical depth a step of length len adds to sub-column `rank` (3 the
+// cloudiest, filled first) at occupancy occ.
+fn cloud_sub(occ: f32, rank: f32, len: f32) -> f32 {
+    return CLOUD_SIGMA * len * clamp(occ * 4.0 - rank, 0.0, 1.0);
+}
+
+// What the clouds leave of the light at the point at unit direction `dir`,
+// h metres up, over a footprint of w metres: the view's march (clouds.js
+// userVolume's sub-columns) taken up the light's ray through the layer in
+// CLOUD_SHADOW_STEPS steps of its height. The column there, resolved to
+// the footprint, is cloud as its occupancy says, filled into four
+// sub-columns ranked by their amount (the cloudiest first; a column cloudy
+// up to its top), each crossed at full density. x: the sun straight
+// through, exp(-tau); y: what the cloud scatters forward and down besides,
+// from a slab of each one's depth, two-stream diffusion's
+// 1 / (1 + 0.75 (1 - g) tau), g = 0.85 (the march's light deep in a
+// cloud), less the light straight through: it comes from all over the
+// cloud's base, so it casts no shadow (the engine's sunDiffuse), and under
+// a deck the ground is lit grey and shadowless, not by a dimmed sun
+// drawing sharp shadows; z: the sky's light through them, straight up,
+// every step in the column over the point. detail_var: the variance of the
+// clouds' three-dimensional detail at full amount (clouds.js
+// CLOUD_DETAIL_VAR). The ground reads it from a clipmap (k_cloud_light),
+// the grass and the trees from their sun grids (sun.bk).
+pub fn cloud_light(dir: vec3<f64>, h: f32, to_sun: vec3<f64>, w: f64, radius: f64, seed: i32,
+                   detail_var: f32) -> vec3<f32> {
+    let fw = max(w, CLOUD_COLUMN_MIN);
+    let base = CLOUD_BASE + max(terrain_base(dir, radius, LIFT_OCTAVES, seed), 0.0) as f32;
+    let s0 = clamp((h - base) / CLOUD_DEPTH, 0.0, 1.0);
+    let ds = (1.0 - s0) / (CLOUD_SHADOW_STEPS as f32);
+    let g = dir * (radius + (h as f64));
+    // The sky's: straight up, every step in the column over the point.
+    let up = column(dir, fw, radius);
+    let gu = clamp(up.x / CLOUD_DETAIL_FULL, 0.0, 1.0);
+    let vu = up.y + detail_var * gu * gu;
+    var k0: f32 = 0.0;
+    var k1: f32 = 0.0;
+    var k2: f32 = 0.0;
+    var k3: f32 = 0.0;
+    for (var i: i32 = 0; i < CLOUD_SHADOW_STEPS; i += 1) {
+        let occ = cloud_occupancy(up.x, vu, s0 + ((i as f32) + 0.5) * ds);
+        let len = ds * CLOUD_DEPTH;
+        k0 += cloud_sub(occ, 3.0, len);
+        k1 += cloud_sub(occ, 2.0, len);
+        k2 += cloud_sub(occ, 1.0, len);
+        k3 += cloud_sub(occ, 0.0, len);
+    }
+    let sky = 0.25 * (1.0 / (1.0 + 0.1125 * k0) + 1.0 / (1.0 + 0.1125 * k1)
+                    + 1.0 / (1.0 + 0.1125 * k2) + 1.0 / (1.0 + 0.1125 * k3));
+    let mu = dot(to_sun, dir) as f32;
+    if (mu <= 0.02) {
+        return vec3<f32>(1.0, 0.0, sky);
+    }
+    // The sun's: up its ray through the layer.
+    var t0: f32 = 0.0;
+    var t1: f32 = 0.0;
+    var t2: f32 = 0.0;
+    var t3: f32 = 0.0;
+    let len = ds * CLOUD_DEPTH / mu;
+    for (var i: i32 = 0; i < CLOUD_SHADOW_STEPS; i += 1) {
+        let s = s0 + ((i as f32) + 0.5) * ds;
+        let q = normalize(g + to_sun * (((base + s * CLOUD_DEPTH - h) / mu) as f64));
+        let c = column(q, fw, radius);
+        let gq = clamp(c.x / CLOUD_DETAIL_FULL, 0.0, 1.0);
+        let occ = cloud_occupancy(c.x, c.y + detail_var * gq * gq, s);
+        t0 += cloud_sub(occ, 3.0, len);
+        t1 += cloud_sub(occ, 2.0, len);
+        t2 += cloud_sub(occ, 1.0, len);
+        t3 += cloud_sub(occ, 0.0, len);
+    }
+    let direct = 0.25 * (exp(-t0) + exp(-t1) + exp(-t2) + exp(-t3));
+    let total = 0.25 * (1.0 / (1.0 + 0.1125 * t0) + 1.0 / (1.0 + 0.1125 * t1)
+                      + 1.0 / (1.0 + 0.1125 * t2) + 1.0 / (1.0 + 0.1125 * t3));
+    return vec3<f32>(direct, total - direct, sky);
+}
+
 // The layer's lift: the broad ground under it, over which its base stands
 // (clouds.js). A cumulus's base is where the air rising off the ground
 // cools to condensing, some way over the ground it rose from, so over a
@@ -51,7 +150,6 @@ fn column(q: vec3<f64>, w: f64, radius: f64) -> vec2<f32> {
 // the ground's plateaus and basins of hundreds of kilometres, not its
 // ranges, which rise into the clouds. Texel (x, y) of a face's grid of n a
 // row at plane point (o + x delta, o + y delta), into `out` at base.
-const LIFT_OCTAVES: f64 = 3.0;
 @kernel @grid(2)
 fn k_cloud_lift(g: grid<2>, out: write_store<f32, 1>, base: i32, n: i32,
                 ax: f64, ay: f64, az: f64, ex: f64, ey: f64, ez: f64, fx: f64, fy: f64, fz: f64,
@@ -84,4 +182,35 @@ fn k_cloud_level(g: grid<2>, out: write_store<f32, 1>, base: i32, n: i32, x0: i3
     let i = 2 * (base + (((ty % n) + n) % n) * n + ((tx % n) + n) % n);
     out[i] = c.x;
     out[i + 1] = c.y;
+}
+
+// 0 to 1 in 8 bits, rounded.
+fn unorm8(x: f32) -> i32 {
+    return (clamp(x, 0.0, 1.0) * 255.0 + 0.5) as i32;
+}
+
+// The clouds' light on the ground (cloud_light) over the column field's
+// texels: texel (X, Y) of a level as k_cloud_level places it, at its
+// footprint and the broad ground's height there (the octaves the footprint
+// carries), the sun toward (sx, sy, sz); into `out` as one word at the
+// texel's slot, the sun straight through, scattered down and the sky's, 8
+// bits each from the lowest (GLSL's unpackUnorm4x8). So the ground reads
+// what the clouds leave of its light where it reads the clouds, at the
+// footprint it is seen at, in a lookup.
+@kernel @grid(2)
+fn k_cloud_light(g: grid<2>, out: write_store<i32, 1>, base: i32, n: i32, x0: i32, y0: i32,
+                 ax: f64, ay: f64, az: f64, ex: f64, ey: f64, ez: f64, fx: f64, fy: f64, fz: f64,
+                 o: f64, delta: f64, radius: f64, seed: i32, sx: f64, sy: f64, sz: f64, detail_var: f32) {
+    let tx = x0 + g.x();
+    let ty = y0 + g.y();
+    let u = o + (tx as f64) * delta;
+    let v = o + (ty as f64) * delta;
+    let p = vec3<f64>(ax, ay, az) + vec3<f64>(ex, ey, ez) * u + vec3<f64>(fx, fy, fz) * v;
+    let d = 1.0 + u * u + v * v;
+    let stretch = sqrt(1.0 + max(u * u, v * v)) / d;
+    let w = 2.0 * radius * delta * stretch;
+    let dir = normalize(p);
+    let h = max(terrain_base(dir, radius, octaves_for(w, 1.0), seed), 0.0) as f32;
+    let c = cloud_light(dir, h, normalize(vec3<f64>(sx, sy, sz)), w, radius, seed, detail_var);
+    out[base + (((ty % n) + n) % n) * n + ((tx % n) + n) % n] = unorm8(c.x) | (unorm8(c.y) << 8) | (unorm8(c.z) << 16);
 }

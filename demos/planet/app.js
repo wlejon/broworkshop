@@ -70,7 +70,8 @@ const WAVES = (() => {
 const glslFloat = (x) => (Number.isInteger(x) ? x.toFixed(1) : String(x));
 
 const readApp = (path) => fs.readFileSync(bro.resolvePath('/app/' + path), 'utf-8');
-const MODULES = { 'planet::ground': readApp('ground.bk'), 'planet::rivers': readApp('rivers.bk') };
+const MODULES = { 'planet::ground': readApp('ground.bk'), 'planet::rivers': readApp('rivers.bk'),
+                  'planet::clouds': readApp('clouds.bk') };
 const mod = bro.kernel.compile(readApp('planet.bk'), { file: 'planet.bk', modules: MODULES });
 const rivers = createRivers(bro.kernel.compile(readApp('riverbuild.bk'), { file: 'riverbuild.bk', modules: MODULES }), RADIUS, SEED);
 const kTile = mod.kernel('k_tile');
@@ -196,7 +197,8 @@ function patchMesh() {
 // at the vertices it costs a sixteenth of what every pixel did, the same to
 // the eye. light: x the sun's share seen (its disc over the horizons, under
 // the clouds and the drawn trees), y the sky's (GTAO over the horizons,
-// under the clouds), z the clouds' shadow, which the slopes around share;
+// under the clouds), z the clouds' shadow, which the slopes around share, w
+// the sun the clouds scatter down shadowless (clouds.js cloudLight's y);
 // bent: how the sky's mean direction turns from the normal n.
 //
 // The horizons, read bilinearly at the horizon grid's point hz of tile
@@ -207,8 +209,8 @@ function patchMesh() {
 // by the horizons on its two sides and taken about the normal's projection
 // on it, and the mean direction of the sky seen. The clouds' shadow
 // (clouds.js) at a footprint of w metres, and the sky they hide overhead:
-// under a deck the blue sky is gone and the light is the grey the deck lets
-// through. Among drawn trees, their shadows (trees.js treeShadowGlsl).
+// under a deck the blue sky is gone and the light is the grey the deck
+// scatters down. Among drawn trees, their shadows (trees.js treeShadowGlsl).
 const groundLightGlsl = `buffer uvec4 u_hz[];
     uniform vec3 u_toSun;
     uniform float u_treesFar;   // trees.js: how far off the trees are drawn, 0 none
@@ -300,15 +302,13 @@ const groundLightGlsl = `buffer uvec4 u_hz[];
         }
         bent = dot(mean, mean) > 1e-12 ? normalize(mean) - n : vec3(0.0);
 
-        vec3 g = (u_camHi + u_camLo) + rel;
-        float h = length(g) - CLOUD_R;
-        float clouds = cloudShadow(g, h, toSun, w);
-        sunSeen *= clouds;
+        vec3 sky = cloudLight((u_camHi + u_camLo) + rel, w);
+        sunSeen *= sky.x;
         if (u_treesFar > 0.0 && length(rel) < u_treesFar) {
             vec3 eye = (u_camHi - u_treeOHi) + (u_camLo - u_treeOLo);
             sunSeen *= treeShadow(eye + rel, eye, up, toSun);
         }
-        light = vec4(sunSeen, visible * 0.25 * cloudShadow(g, h, up, w), clouds, 0.0);
+        light = vec4(sunSeen, visible * 0.25 * sky.z, sky.x, sky.y);
     }`;
 
 // Instance i draws the cache's draw-list record i (tiles-api.js): its slot,
@@ -416,10 +416,11 @@ const fragment = `buffer uint u_det[];
     // sky's direction turns from this pixel's normal as the vertices' turned
     // from theirs.
     void userLight(vec3 toSun, inout float sunVisibility, inout float skyVisibility, inout vec3 skyNormal,
-                   inout float occluderSun) {
+                   inout float occluderSun, inout float sunDiffuse) {
         sunVisibility *= v_light.x;
         skyVisibility *= v_light.y * (1.0 - 0.8 * g_floor);
         occluderSun *= v_light.z;
+        sunDiffuse = v_light.w;
         skyNormal = normalize(skyNormal + v_bent);
     }
 
@@ -676,7 +677,7 @@ const grassMod = bro.kernel.compile(readApp('grass.bk'), { file: 'grass.bk', mod
 const grass = createGrass(scene, RADIUS, grassMod, sunMod, TRUTH, SEED, rivers.net, [ground]);
 const treeMod = bro.kernel.compile(readApp('trees.bk'), { file: 'trees.bk', modules: MODULES });
 const trees = createTrees(scene, RADIUS, treeMod, sunMod, TRUTH, SEED, rivers.net, [ground]);
-const clouds = createClouds(scene, RADIUS, cloudMod, [ground, ...grass.nodes, ...trees.nodes], SEED);
+const clouds = createClouds(scene, RADIUS, cloudMod, [ground], SEED);
 
 // ── Camera: doubles about the planet's center ───────────────────────────────
 
@@ -739,8 +740,8 @@ function frame() {
     ground.setShaderUniform('u_camLo', camLo);
     ground.setShaderUniform('u_time', performance.now() / 1000 % WAVE_CLOCK);
     ground.setShaderUniform('u_treesFar', trees.far);
-    clouds.update(f.pos, f.surface + cam.alt - RADIUS, 2 * Math.tan(FOV * Math.PI / 360) / height);
     const d = sun.direction, dl = Math.hypot(d[0], d[1], d[2]);
+    clouds.update(f.pos, f.surface + cam.alt - RADIUS, [-d[0] / dl, -d[1] / dl, -d[2] / dl]);
     const cone = Math.atan(Math.tan(FOV * Math.PI / 360) * Math.hypot(1, aspect));
     ground.setShaderUniform('u_toSun', [-d[0] / dl, -d[1] / dl, -d[2] / dl]);
     grass.update(f.pos, cam.alt, [-d[0] / dl, -d[1] / dl, -d[2] / dl], camHi, camLo, f.fwd, cone, performance.now() / 1000 % WAVE_CLOCK);
