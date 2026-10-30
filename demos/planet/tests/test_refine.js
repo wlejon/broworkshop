@@ -98,11 +98,16 @@ function places(coarse, n) {
     return out.map((p) => p.dir);
 }
 
+// At 9.5 octaves a coast's unresolved relief is a few metres, so only the
+// few coasts whose relief crosses the shore or the sand's edge differ between
+// the model and the colour of the mean: 120 patches hold enough of them that
+// the comparison is not decided by one or two.
+const PATCHES = 120;
 for (const coarse of [3.5, 6.5, 9.5]) {
     test(`a ${coarse}-octave cell's colour is the mean of the cells two octaves finer`, () => {
         seed = 777;
-        const where = places(coarse, 30);
-        check(where.length === 30, `found coasts and mountains to measure (${where.length})`);
+        const where = places(coarse, PATCHES);
+        check(where.length === PATCHES, `found coasts and mountains to measure (${where.length})`);
         for (const [ch, what] of [[0, 'luminance'], [1, 'water']]) {
             const stats = [0, 1].map((naive) => {
                 let bias = 0, sq = 0;
@@ -117,7 +122,7 @@ for (const coarse of [3.5, 6.5, 9.5]) {
             const [model, naive] = stats;
             console.log(`octaves ${coarse} -> ${coarse + 2} ${what}: bias ${model.bias.toFixed(4)} rms ${model.rms.toFixed(4)}` +
                         ` (colour of the mean: bias ${naive.bias.toFixed(4)} rms ${naive.rms.toFixed(4)})`);
-            // The finer cells add zero-mean detail; over 30 patches the mean
+            // The finer cells add zero-mean detail; over the patches the mean
             // of it is only known to its standard error.
             const bound = Math.max(0.01, 2.5 * model.rms / Math.sqrt(where.length));
             check(Math.abs(model.bias) < bound, `${what}: no systematic shift (${model.bias.toFixed(4)}, bound ${bound.toFixed(4)})`);

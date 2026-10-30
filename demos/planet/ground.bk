@@ -8,17 +8,26 @@ import std::noise::*;
 
 // Wavelength of the first octave, in metres.
 const BASE_WAVELENGTH: f64 = 2400000.0;
-// E[(1 - |simplex3d|)^2], measured over 200k samples.
-const RIDGE_MEAN: f64 = 0.4648;
-// Var(simplex3d), measured the same way.
-const SIMPLEX_VAR: f32 = 0.1889;
-// Var((1 - |simplex3d|)^2), and the variance of either noise's gradient along
-// one axis per unit of input, measured the same way.
-const RIDGE_VAR: f32 = 0.0809;
-const SIMPLEX_GRAD_VAR: f32 = 3.184;
-const RIDGE_GRAD_VAR: f32 = 6.485;
+// E[(1 - |noise|)^2], measured over 200k samples.
+const RIDGE_MEAN: f64 = 0.4999;
+// Var(noise), measured the same way.
+const NOISE_VAR: f32 = 0.1504;
+// Var((1 - |noise|)^2), and the variance of either one's gradient along one
+// axis per unit of input, measured the same way.
+const RIDGE_VAR: f32 = 0.0727;
+const NOISE_GRAD_VAR: f32 = 2.027;
+const RIDGE_GRAD_VAR: f32 = 4.586;
 
-// The octaves of simplex noise whose wavelength a tile's cells can carry:
+// The ground's noise: OpenSimplex2S, which is continuous everywhere. The
+// classic simplex (std simplex3d, FastNoise2's) reaches a little past its
+// simplex and steps where the lattice's simplices meet: on planes like y = z,
+// which every octave shares, so the steps of all of them line up into one
+// (a 4 cm ledge along the cube's +Y/+Z edge, seen as a line to the horizon).
+fn noise(q: vec3<f64>, seed: i32) -> f64 {
+    return supersimplex3d<f64>(q, seed);
+}
+
+// The octaves of noise whose wavelength a tile's cells can carry:
 // `octaves` may be fractional, the last octave weighted by its fraction, so a
 // tile holds the average of what its children hold plus zero-mean detail.
 fn fbm_to(p: vec3<f64>, octaves: f64, first: i32, seed: i32) -> f64 {
@@ -28,7 +37,7 @@ fn fbm_to(p: vec3<f64>, octaves: f64, first: i32, seed: i32) -> f64 {
     let n = ceil(octaves) as i32;
     for (var o: i32 = first; o < n; o += 1) {
         let w = clamp(octaves - (o as f64), 0.0, 1.0);
-        sum += simplex3d<f64>(q, seed + o) * amp * w;
+        sum += noise(q, seed + o) * amp * w;
         amp *= 0.5;
         q = q * 2.0;
     }
@@ -45,8 +54,8 @@ pub fn octaves_for(extent: f64, inv_size: f64) -> f64 {
 // What the octaves finer than a tile's can still add to its surface, in
 // metres: the detail fbm (octave 4 up, 250 + 900 at most) and the ridges
 // (octaves 2 to 11, 6500 at most), counted from the last octave the tile
-// resolves (a peak between its cells), with a quarter more for simplex's
-// reach past 1. Below the continents' octaves it is everything (`top`).
+// resolves (a peak between its cells), with a quarter more for the noise's
+// reach toward 1. Below the continents' octaves it is everything (`top`).
 pub fn range_margin(octaves: f64, top: f32) -> f32 {
     let k = (floor(octaves) as i32) - 1;
     if (k < 4) { return top; }
@@ -97,12 +106,12 @@ fn masks(p: vec3<f64>, octaves: f64, seed: i32) -> vec4<f64> {
     var unresolved: f32 = 0.0;
     var a: f32 = 1.0;
     for (var o: i32 = 0; o < 4; o += 1) {
-        unresolved += a * a * SIMPLEX_VAR * cell_share(o as f32, octaves as f32);
+        unresolved += a * a * NOISE_VAR * cell_share(o as f32, octaves as f32);
         a *= 0.5;
     }
     let sc = sqrt(unresolved) as f64;
     let onLand = clamp_mean(continents * 6.0 + 0.3, sc * 6.0, 0.0, 1.0);
-    let ranges = clamp(simplex3d<f64>(p * 1.7, seed + 300) * 2.2 - 0.35, 0.0, 1.0);
+    let ranges = clamp(noise(p * 1.7, seed + 300) * 2.2 - 0.35, 0.0, 1.0);
     return vec4<f64>(continents, sc, ranges, onLand);
 }
 
@@ -125,7 +134,7 @@ pub fn terrain(dir: vec3<f64>, radius: f64, octaves: f64, seed: i32) -> f64 {
         let w = clamp(octaves - (o as f64), 0.0, 1.0);
         var r2: f64 = RIDGE_MEAN;
         if (w > 0.0) {
-            let r = 1.0 - abs(simplex3d<f64>(q, seed + 100 + o));
+            let r = 1.0 - abs(noise(q, seed + 100 + o));
             r2 = r * r * w + RIDGE_MEAN * (1.0 - w);
         }
         ridges += r2 * amp;
@@ -187,8 +196,8 @@ pub fn spread(dir: vec3<f64>, radius: f64, octaves: f64, truth: f32, seed: i32) 
     var a: f32 = 1.0;
     for (var o: i32 = 0; o < 4; o += 1) {
         let s = cell_share(o as f32, oct);
-        ch += a * a * SIMPLEX_VAR * s;
-        cg += SIMPLEX_GRAD_VAR * s;   // amplitude * frequency = 1
+        ch += a * a * NOISE_VAR * s;
+        cg += NOISE_GRAD_VAR * s;   // amplitude * frequency = 1
         a *= 0.5;
     }
     // The ridges, octaves 2 to 11 at amplitude 0.5^(o - 1).
@@ -211,8 +220,8 @@ pub fn spread(dir: vec3<f64>, radius: f64, octaves: f64, truth: f32, seed: i32) 
     for (var o: i32 = 4; o < n; o += 1) {
         let w = clamp(truth - (o as f32), 0.0, 1.0);
         let s = cell_share(o as f32, oct) * w * w;
-        dh += a * a * SIMPLEX_VAR * s;
-        dg += 256.0 * SIMPLEX_GRAD_VAR * s;   // amplitude * frequency = 16
+        dh += a * a * NOISE_VAR * s;
+        dg += 256.0 * NOISE_GRAD_VAR * s;   // amplitude * frequency = 16
         a *= 0.5;
     }
     let h2 = land * land * ch + mount * mount * rh + detail * detail * dh;
@@ -241,14 +250,28 @@ fn surface(h: f32, grad: f32) -> vec4<f32> {
     return vec4<f32>(c, 0.0);
 }
 
-// Gauss-Hermite nodes and weights for N(0, 1): x node, y weight.
-fn gh5(i: i32) -> vec2<f32> {
-    if (i == 0) { return vec2<f32>(-2.8569700, 0.0112574); }
-    if (i == 1) { return vec2<f32>(-1.3556262, 0.2220759); }
-    if (i == 2) { return vec2<f32>(0.0, 0.5333333); }
-    if (i == 3) { return vec2<f32>(1.3556262, 0.2220759); }
-    return vec2<f32>(2.8569700, 0.0112574);
+// The z with normal_cdf(z) = u: normal_cdf's tanh inverted, then its cubic
+// solved by Newton from the linear guess (it is nearly linear, so three
+// steps reach f32).
+fn normal_quantile(u: f32) -> f32 {
+    let x = clamp(2.0 * u - 1.0, -0.999999, 0.999999);
+    let y = 0.5 * log((1.0 + x) / (1.0 - x)) / 0.7978846;
+    var z = y;
+    for (var i: i32 = 0; i < 3; i += 1) {
+        z -= (z + 0.044715 * z * z * z - y) / (1.0 + 0.134145 * z * z);
+    }
+    return z;
 }
+
+// Gauss-Legendre nodes and weights on [0, 1]: x node, y weight.
+fn gl5(i: i32) -> vec2<f32> {
+    if (i == 0) { return vec2<f32>(0.0469101, 0.1184634); }
+    if (i == 1) { return vec2<f32>(0.2307653, 0.2393143); }
+    if (i == 2) { return vec2<f32>(0.5, 0.2844444); }
+    if (i == 3) { return vec2<f32>(0.7692347, 0.2393143); }
+    return vec2<f32>(0.9530899, 0.1184634);
+}
+// Gauss-Hermite nodes and weights for N(0, 1): x node, y weight.
 fn gh3(i: i32) -> vec2<f32> {
     if (i == 0) { return vec2<f32>(-1.7320508, 0.1666667); }
     if (i == 1) { return vec2<f32>(0.0, 0.6666667); }
@@ -328,21 +351,35 @@ pub fn variation(dir: vec3<f64>, radius: f64, octaves: f64, seed: i32) -> vec3<f
 
 // The mean of `surface` over the truth under a cell: height N(h, sh^2), and
 // the gradient the cell's own (`grad` along one axis) plus N(0, sg^2) along
-// each, by quadrature (5 nodes in height, 3 x 3 in the gradient). The land's
+// each. The shore is a step, which quadrature over the whole normal places
+// only to its nearest node (a coast 4 m up read a quarter water), so the
+// height splits there: the water takes its share P(h < 0) at its mean depth
+// (its colour is linear in depth), the land its share by quadrature over the
+// land's quantiles (5 nodes), each with 3 x 3 in the gradient. The land's
 // albedo takes the cell's variation factor.
 pub fn expected_surface(h: f32, grad: f32, sh: f32, sg: f32, vary: vec3<f32>) -> vec4<f32> {
     var sum = vec4<f32>(0.0, 0.0, 0.0, 0.0);
-    for (var i: i32 = 0; i < 5; i += 1) {
-        let nh = gh5(i);
-        for (var j: i32 = 0; j < 3; j += 1) {
-            let gx = gh3(j);
-            for (var k: i32 = 0; k < 3; k += 1) {
-                let gy = gh3(k);
-                let ex = grad + sg * gx.x;
-                let ey = sg * gy.x;
-                let s = surface(h + sh * nh.x, sqrt(ex * ex + ey * ey));
-                let tone = mix(vary, vec3<f32>(1.0, 1.0, 1.0), s.w);
-                sum += vec4<f32>(s.xyz * tone, s.w) * (nh.y * gx.y * gy.y);
+    let sd = max(sh, 1e-6);
+    let zs = -h / sd;
+    let wet = normal_cdf(zs);
+    if (wet > 1e-5) {
+        let depth = h - sd * 0.3989423 * exp(-0.5 * zs * zs) / wet;
+        sum += surface(min(depth, 0.0), 0.0) * wet;
+    }
+    let dry = 1.0 - wet;
+    if (dry > 1e-5) {
+        for (var i: i32 = 0; i < 5; i += 1) {
+            let nh = gl5(i);
+            let height = max(h + sd * normal_quantile(wet + dry * nh.x), 1e-3);
+            for (var j: i32 = 0; j < 3; j += 1) {
+                let gx = gh3(j);
+                for (var k: i32 = 0; k < 3; k += 1) {
+                    let gy = gh3(k);
+                    let ex = grad + sg * gx.x;
+                    let ey = sg * gy.x;
+                    let s = surface(height, sqrt(ex * ex + ey * ey));
+                    sum += vec4<f32>(s.xyz * vary, 0.0) * (dry * nh.y * gx.y * gy.y);
+                }
             }
         }
     }
