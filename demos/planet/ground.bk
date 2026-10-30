@@ -541,7 +541,9 @@ pub fn surface(h: f32, grad: f32) -> vec4<f32> {
     // where it is not too steep to hold snow.
     let slope = 1.0 - 1.0 / sqrt(1.0 + grad * grad);
     let sand = vec3<f32>(0.44, 0.39, 0.29);
-    let grass = vec3<f32>(0.16, 0.27, 0.08);
+    // A sward's canopy with its thatch and its shade between the blades:
+    // olive, not the lime of a lawn's blades alone.
+    let grass = vec3<f32>(0.13, 0.21, 0.075);
     // The floor between the trees (trees.js draws them over it, and the
     // ground shader the forest's average where they are not drawn).
     let forest = vec3<f32>(0.11, 0.19, 0.06);
@@ -659,8 +661,29 @@ const VARY_FIRST: i32 = 5;
 const PERLIN_VAR: f32 = 0.0728;
 const VARY_LUM: f32 = 0.11;    // log-luminance, per octave
 const VARY_TINT: f32 = 0.05;   // ochre (tint_axis, log per channel), per octave
-fn tint_axis() -> vec3<f32> { return vec3<f32>(1.0, 0.45, -0.5); }
-const TINT_LAST: i32 = 16;
+// Toward ochre and straw one way and deeper green the other; blue kept, as
+// its share of the light does not swing between a dry patch and a lush one.
+fn tint_axis() -> vec3<f32> { return vec3<f32>(1.0, 0.4, 0.0); }
+const TINT_LAST: i32 = 20;
+// Over a few metres to a few hundred (octaves 13 to 19, 290 m to 4.6 m)
+// the patches are stronger: a meadow's clumps of other grasses and herbs,
+// its dry straw beside lush green, where the variance of a grassland's
+// greenness lies (remote sensing of grassland finds most of it at these
+// scales); coarser the land is a region's, finer a sward's blades.
+const PATCH_FIRST: i32 = 13;
+const PATCH_LAST: i32 = 19;
+const PATCH_LUM: f32 = 0.30;
+const PATCH_TINT: f32 = 0.16;
+const PATCH_CORR: f32 = 0.7;
+const PATCH_CORR_REST: f32 = 0.71414;   // sqrt(1 - PATCH_CORR^2)
+fn lum_amp(o: i32) -> f32 {
+    if (o >= PATCH_FIRST && o <= PATCH_LAST) { return PATCH_LUM; }
+    return VARY_LUM;
+}
+fn tint_amp(o: i32) -> f32 {
+    if (o >= PATCH_FIRST && o <= PATCH_LAST) { return PATCH_TINT; }
+    return VARY_TINT;
+}
 
 // Perlin noise at q with the f64 work only in finding q's lattice cell: the
 // rest runs in f32 on the offset inside the cell, which needs no more (the
@@ -702,12 +725,18 @@ pub fn variation(dir: vec3<f64>, radius: f64, octaves: f64, seed: i32) -> vec3<f
     let n = ceil(octaves) as i32;
     for (var o: i32 = VARY_FIRST; o < n; o += 1) {
         let w = clamp(octaves - (o as f64), 0.0, 1.0) as f32;
-        let al = VARY_LUM * w;
-        lum += perlin_split(q, seed + 101 + o) * al;
+        let al = lum_amp(o) * w;
+        let nl = perlin_split(q, seed + 101 + o);
+        lum += nl * al;
         vl += al * al * PERLIN_VAR;
         if (o < TINT_LAST) {
-            let at = VARY_TINT * w;
-            tint += perlin_split(q, seed + 211 + o) * at;
+            let at = tint_amp(o) * w;
+            // A meadow's light patches are its dry ones, straw, and its dark
+            // ones lush: in the patch octaves the tint follows the
+            // luminance at a correlation of PATCH_CORR (its variance kept).
+            var nt = perlin_split(q, seed + 211 + o);
+            if (o >= PATCH_FIRST && o <= PATCH_LAST) { nt = PATCH_CORR * nl + PATCH_CORR_REST * nt; }
+            tint += nt * at;
             vt += at * at * PERLIN_VAR;
         }
         q = q * 2.0;
