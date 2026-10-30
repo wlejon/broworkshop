@@ -463,6 +463,13 @@ const volumeGlsl = (radius) => cloudGlsl(radius, true) + `
         vec3 up = normalize(u_camHi + u_camLo);
         float mu = dot(dir, up);
         float hc = u_camAlt;
+        // The meter's sun reads the clouds as the ground lights itself by
+        // them: the share of the sun they leave over a footprint of the
+        // ground the eye looks over, not the one cloud on the ray.
+        if (volumeMeterRay && dot(dir, sceneToSun()) > 0.998) {
+            transmittance = cloudShadow(u_camHi + u_camLo, hc, sceneToSun(), 4.0 * max(hc, 100.0));
+            return;
+        }
         // The layer between its lowest base and highest top about the eye.
         float lo = CLOUD_BASE + u_cloudLiftRange.x, hi = CLOUD_BASE + CLOUD_DEPTH + u_cloudLiftRange.y;
         float bn, bf, tn, tf;
