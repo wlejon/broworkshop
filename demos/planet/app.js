@@ -332,11 +332,13 @@ const fragment = `buffer uint u_det[];
         // jump, blended horizons would step from point to point.
         int k1 = (k0 + 1) & 7;
         float fa = fk - floor(fk);
-        float sun = asin(clamp(dot(toSun, up), -1.0, 1.0));
-        vec4 corner = asin(clamp(vec4(
+        // In sines, not angles: across the disc an elevation's step is its
+        // sine's over the cosine.
+        float sun = clamp(dot(toSun, up), -1.0, 1.0);
+        vec4 corner = vec4(
             mix(horizonAt(al, ah, k0), horizonAt(al, ah, k1), fa), mix(horizonAt(bl, bh, k0), horizonAt(bl, bh, k1), fa),
-            mix(horizonAt(cl, ch, k0), horizonAt(cl, ch, k1), fa), mix(horizonAt(dl, dh, k0), horizonAt(dl, dh, k1), fa)), -1.0, 1.0));
-        vec4 lit = clamp((sun - corner) / 0.0093 + 0.5, 0.0, 1.0);
+            mix(horizonAt(cl, ch, k0), horizonAt(cl, ch, k1), fa), mix(horizonAt(dl, dh, k0), horizonAt(dl, dh, k1), fa));
+        vec4 lit = clamp((sun - corner) / (0.0093 * max(sqrt(1.0 - sun * sun), 0.02)) + 0.5, 0.0, 1.0);
         sunVisibility *= mix(mix(lit.x, lit.y, f.x), mix(lit.z, lit.w, f.x), f.y);
 
         vec3 n = skyNormal;
